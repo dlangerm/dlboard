@@ -1,0 +1,37 @@
+{
+  "[json]": {
+    "editor.formatOnSave": true
+  },
+  "[python]": {
+    "editor.codeActionsOnSave": {
+      "source.organizeImports.ruff": "explicit"
+    },
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.formatOnSave": true,
+    "editor.formatOnSaveMode": "file"
+  },
+  "[yaml]": {
+    "editor.formatOnSave": false
+  },
+  "cSpell.words": [
+    "tracebackhide",
+    "numpy",
+    "onnx",
+    "pytest",
+    "setuptools",
+    "pydantic",
+    "pyright",
+    "ndarray",
+    "ndims",
+    "multiaxis",
+    "allclose",
+    "popleft"
+  ],
+  "editor.formatOnSave": true,
+  "ruff.interpreter": [
+    "${workspaceFolder}/.venv/bin/python"
+  ],
+  "ruff.path": [
+    "${workspaceFolder}/.venv/bin/ruff"
+  ]
+}

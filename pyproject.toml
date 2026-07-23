@@ -1,0 +1,71 @@
+[dependency-groups]
+dev = ["prek>=0.4.10", "pyrefly>=1.1.1", "pytest>=9.1.1", "ruff>=0.15.22"]
+
+[project]
+dependencies = []
+description = "What if mlflow didn't suck and weights & biases was free?"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+name = "dltrack"
+readme = "README.md"
+requires-python = ">=3.12"
+version = "0.1.0"
+
+[tool.ruff]
+indent-width = 4
+line-length = 110
+target-version = "py314"
+
+[tool.ruff.format]
+docstring-code-format = true
+docstring-code-line-length = "dynamic"
+line-ending = "lf"
+
+[tool.ruff.lint]
+extend-select = [
+  "ANN",
+  "ARG",
+  "B",
+  "BLE",
+  "C4",
+  "C90",
+  "COM",
+  "D",
+  "E",
+  "EM",
+  "ERA",
+  "F",
+  "FA",
+  "FBT",
+  "G",
+  "I",
+  "ICN",
+  "INP",
+  "ISC",
+  "LOG",
+  "N",
+  "NPY",
+  "PERF",
+  "PIE",
+  "PLE",
+  "PLR",
+  "PT",
+  "PTH",
+  "Q",
+  "RET",
+  "RSE",
+  "RUF",
+  "SIM",
+  "SLF",
+  "T20",
+  "TC",
+  "TID",
+  "TRY",
+  "W"
+]
+fixable = ["ALL"]
+ignore = ["COM812", "D203", "D212", "D401", "E501", "PLR6301", "PLR0917"]
+select = ["E4", "E7", "E9", "F"]
+
+[tool.ruff.lint.per-file-ignores]
+"dltype/tests/*" = ["D", "ARG", "FBT", "PLR2004", "T201"]
