@@ -3,18 +3,15 @@
 from __future__ import annotations
 
 import sqlite3
-from typing import TYPE_CHECKING, Final, Iterator
+from typing import TYPE_CHECKING, Iterator
 
-from dltrack import Experiment, ExperimentID, Project
-from dltrack._server.backend.store.common import construct, create_table_sql, get_all, get_by_id, insert
-from dltrack._server.backend.store.store_protocol import DataStore
+from dltrack import DataStore, Experiment, ExperimentID, Project
+from dltrack._server.backend.queries import construct, create_table_sql, get_all, get_by_id, insert
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from dltrack import NewExperiment, NewProject, ProjectID
-
-_ALL_TABLES: Final = [Experiment, Project]
 
 
 class SQLLiteStore(DataStore):
@@ -24,7 +21,7 @@ class SQLLiteStore(DataStore):
         self._location = location
         with sqlite3.connect(location) as conn:
             cur = conn.cursor()
-            for table in _ALL_TABLES:
+            for table in {Experiment, Project}:
                 cur.execute(create_table_sql(table))
 
     @classmethod

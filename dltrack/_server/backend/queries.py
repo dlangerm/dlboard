@@ -7,6 +7,7 @@ import typing
 if typing.TYPE_CHECKING:
     from pydantic import BaseModel
 
+
 ID_KEY: typing.Final = "id"
 
 
@@ -57,8 +58,8 @@ def insert(table: type[BaseModel], model: BaseModel) -> str:
     if ID_KEY in sorted_keys:
         msg = f"Creation object {model.__class__} must not contain an ID key"
         raise AssertionError(msg)
-    raw_values = ",".join([escape_value_sql(getattr(model, k)) for k in sorted_keys])
     joined_keys = ",".join(sorted_keys)
+    raw_values = ",".join([escape_value_sql(getattr(model, k)) for k in sorted_keys])
     return f"""
     INSERT INTO {table.__name__}
     ({joined_keys})
@@ -80,6 +81,10 @@ def get_by_id(model: type[BaseModel], id: int) -> str:
 
 
 def get_all(model: type[BaseModel]) -> str:
+    if ID_KEY not in model.model_fields:
+        msg = f"Get object {model.__name__} must contain an ID key"
+        raise AssertionError(msg)
+
     return f"""
             SELECT *
             FROM {model.__name__};
