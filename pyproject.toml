@@ -2,7 +2,7 @@
 dev = ["prek>=0.4.10", "pyrefly>=1.1.1", "pytest>=9.1.1", "ruff>=0.15.22"]
 
 [project]
-dependencies = []
+dependencies = ["dash>=4.4.1", "pydantic>=2.13.4", "pydantic-settings>=2.14.2"]
 description = "What if mlflow didn't suck and weights & biases was free?"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
@@ -10,6 +10,9 @@ name = "dltrack"
 readme = "README.md"
 requires-python = ">=3.12"
 version = "0.1.0"
+
+[tool.pyrefly]
+project-includes = ["**/*.py*", "**/*.ipynb"]
 
 [tool.ruff]
 indent-width = 4
