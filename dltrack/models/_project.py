@@ -1,10 +1,6 @@
 """A project."""
 
-import typing
-
 from pydantic import BaseModel
-
-type ProjectID = int
 
 
 class NewProject(BaseModel, frozen=True, extra="forbid"):
@@ -20,8 +16,5 @@ class NewProject(BaseModel, frozen=True, extra="forbid"):
 class Project(NewProject, frozen=True, extra="forbid"):
     """A project stored in the database."""
 
-    id: ProjectID | None = None
+    id: int
     """The ID for a project if it exists in the databse, otherwise none."""
-
-    def with_id(self, id: ProjectID) -> typing.Self:
-        return self.model_copy(update={"id": id})

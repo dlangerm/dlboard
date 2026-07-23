@@ -1,9 +1,48 @@
 ##
 
-POST http://localhost:8050/log HTTP/1.1
+POST http://localhost:8050/log-batch HTTP/1.1
 content-type: application/json
 
-{
-    "name": "sample",
-    "time": "Wed, 21 Oct 2015 18:27:50 GMT"
-}
+[
+    {
+        "metrics":
+        {
+            "train/f1": 1.0,
+            "test/f1": 0.5,
+            "train/accuracy": 0.3
+        },
+        "step": 0,
+        "experiment_id": 1
+    }
+]
+
+##
+
+POST http://localhost:8050/log-batch HTTP/1.1
+content-type: application/json
+
+[{
+    "metrics":
+    {
+        "train/f1": 0.9,
+        "test/f1": 0.4,
+        "train/accuracy": 0.4
+    },
+    "step": 1,
+    "experiment_id": 1
+}]
+
+##
+
+POST http://localhost:8050/log-batch HTTP/1.1
+content-type: application/json
+
+[{
+    "metrics":
+    {
+        "train/f1": 0.9,
+        "train/accuracy": 0.9
+    },
+    "step": 2,
+    "experiment_id": 1
+}]
