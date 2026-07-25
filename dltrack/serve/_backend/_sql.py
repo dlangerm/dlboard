@@ -135,10 +135,12 @@ def get_all(model: type[BaseModel]) -> str:
     return raw
 
 
-def get_all_by_field(
+def get_all_by_field(  # noqa: PLR0913
     model: type[BaseModel],
     field_name: str,
     field_value: str | int | bool,  # noqa: FBT001
+    match_field: str | None = None,
+    match_field_values: set[str | bool | int | float] | None = None,
     order_by: list[str] | None = None,
 ) -> str:
     if ID_KEY not in model.model_fields:
@@ -152,11 +154,20 @@ def get_all_by_field(
             msg = f"{order} not present in model"
             raise AssertionError(msg)
     order_clause = ("ORDER BY " + ",".join(order_by)) if order_by else ""
+    if match_field and not match_field_values:
+        msg = "Get all by field match field must have values!"
+        raise AssertionError(msg)
+
+    match_clause = (
+        "1=1"
+        if not match_field or not match_field_values
+        else (f"{match_field} in ({','.join(map(escape_value_sql, list(match_field_values)))})")
+    )
 
     raw = f"""
         SELECT *
         FROM {model.__name__}
-        WHERE {field_name} = {escape_value_sql(field_value)}
+        WHERE {field_name} = {escape_value_sql(field_value)} AND {match_clause}
         {order_clause};
     """
     _log.info(raw)

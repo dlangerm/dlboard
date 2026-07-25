@@ -50,23 +50,33 @@ class LoggedMetrics(BaseModel, frozen=True, extra="forbid"):
     def from_underlying(cls, entries: Iterable[UnderlyingMetricTableEntry]) -> "Iterator[LoggedMetrics]":
         cur_raw_metrics: dict[str, float | None] = {}
         cur_step = None
+        cur_run_id = None
         experiment_id = None
         for entry in entries:
             experiment_id = entry.experiment_id
-            if entry.step != cur_step and cur_step is not None:
+
+            if cur_step is not None and (entry.step != cur_step or entry.run_id != cur_run_id):
+                cur_run_id = cur_run_id or entry.run_id
                 assert experiment_id is not None
                 yield LoggedMetrics(
-                    metrics=cur_raw_metrics, step=cur_step, experiment_id=experiment_id, run_id=entry.run_id
+                    metrics=cur_raw_metrics,
+                    step=cur_step,
+                    experiment_id=experiment_id,
+                    run_id=cur_run_id,
                 )
-                cur_raw_metrics.clear()
+                cur_raw_metrics = {}
+
             if entry.key in cur_raw_metrics:
-                # if anything was logged more than once for a step
                 continue
+
             cur_raw_metrics[entry.key] = entry.value
             cur_step = entry.step
-        if experiment_id is None:
-            yield from []
-        else:
+            cur_run_id = entry.run_id
+
+        if experiment_id is not None and cur_run_id is not None:
             yield LoggedMetrics(
-                metrics=cur_raw_metrics, step=cur_step, experiment_id=experiment_id, run_id=entry.run_id
+                metrics=cur_raw_metrics,
+                step=cur_step,
+                experiment_id=experiment_id,
+                run_id=cur_run_id,
             )

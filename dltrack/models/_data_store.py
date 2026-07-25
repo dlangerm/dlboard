@@ -54,7 +54,7 @@ class DataStore[**P](typing.Protocol):
         self,
         experiment_id: int,
         run_id: int | None = None,
-        metric_name_match: str | None = None,
+        metric_name_match: set[str] | None = None,
         step_range: slice | None = None,
     ) -> typing.Iterator[models.LoggedMetrics]:
         """Fetch metrics for a particular table name, optionally matching a topic string."""

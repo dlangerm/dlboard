@@ -119,12 +119,14 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         self,
         experiment_id: int,
         run_id: int | None = None,
-        metric_name_match: str | None = None,
+        metric_name_match: set[str] | None = None,
         step_range: slice[Any, Any, Any] | None = None,
     ) -> Iterator[models.LoggedMetrics]:
         """create_project."""
-        if metric_name_match is not None or step_range is not None or run_id is not None:
+        if step_range is not None or run_id is not None:
             raise NotImplementedError
+
+        _log.info("Match fields %s", metric_name_match)
 
         yield from models.LoggedMetrics.from_underlying(
             self._execute_sql_query(
@@ -133,7 +135,9 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
                     models.UnderlyingMetricTableEntry,
                     "experiment_id",
                     experiment_id,
-                    order_by=["step"],
+                    match_field="key" if metric_name_match is not None else None,
+                    match_field_values=metric_name_match,
+                    order_by=["run_id", "step"],
                 ),
             )
         )
@@ -141,6 +145,25 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
     def log_hyperparams(self, hyperparams: models.NewHyperParams) -> None:
         """Log hyperparameters to the data store."""
         _log.info("Logging hyperparameters for experiment %s", hyperparams.experiment_id)
+        existing = list(
+            self._execute_sql_query(
+                models.HyperParams,
+                sql.get_all_by_field(
+                    models.HyperParams,
+                    "run_id",
+                    hyperparams.run_id,
+                ),
+            )
+        )
+
+        if existing:
+            _log.info(
+                "Skipping duplicate hyperparameters for experiment %s run %s",
+                hyperparams.experiment_id,
+                hyperparams.run_id,
+            )
+            return
+
         self._consume_row_iterator(
             self._execute_sql_query(
                 models.HyperParams,
@@ -154,6 +177,10 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         yield from (
             self._execute_sql_query(
                 models.HyperParams,
-                sql.get_all_by_field(models.HyperParams, "experiment_id", experiment_id),
+                sql.get_all_by_field(
+                    models.HyperParams,
+                    "experiment_id",
+                    experiment_id,
+                ),
             )
         )

@@ -91,7 +91,9 @@ class DLTrackLogger(Logger):
             params = vars(params)
         self._api.log_hyperparams(
             models.NewHyperParams.from_raw(
-                run_id=self._run_id, experiment_id=self._experiment_id, hparams=params
+                run_id=self._run_id,
+                experiment_id=self._experiment_id,
+                hparams=params,
             )
         )
 

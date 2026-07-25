@@ -17,7 +17,7 @@ LOGDIR = Path("./lightning-logs")
 class MnistMLP(pl.LightningModule):
     """Tiny MLP for MNIST classification with a few easy-to-extend metrics."""
 
-    def __init__(self, hidden_size: int = 64, learning_rate: float = 1e-3) -> None:
+    def __init__(self, hidden_size: int = 128, learning_rate: float = 1e-3) -> None:
         super().__init__()
         self.save_hyperparameters()
         self.model = nn.Sequential(
@@ -143,7 +143,7 @@ def main() -> None:
     logger = DLTrackLogger(project_id=1, experiment_id=1)
     # logger = DummyLogger()
     data = MnistDataModule(data_dir="./.data", batch_size=128)
-    model = MnistMLP(hidden_size=64, learning_rate=1e-3)
+    model = MnistMLP(hidden_size=128, learning_rate=1e-3)
 
     trainer = pl.Trainer(
         max_epochs=5,

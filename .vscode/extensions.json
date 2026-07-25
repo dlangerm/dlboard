@@ -1,6 +1,5 @@
 {
   "recommendations": [
-    "meta.pyrefly",
     "charliermarsh.ruff",
     "emeraldwalk.runonsave"
   ]
