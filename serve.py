@@ -5,7 +5,7 @@ from pathlib import Path
 
 import structlog
 
-from dltrack.plugins import sqlite
+from dltrack.plugins import metric_chart, sqlite
 from dltrack.plugins.pages import (
     simple_admin_page,
     simple_experiment_page,
@@ -28,5 +28,6 @@ if __name__ == "__main__":
             simple_admin_page,
             simple_project_page,
             simple_experiment_page,
+            metric_chart,
         ]
     ).run(debug=True)  # pyright: ignore[reportUnknownMemberType]

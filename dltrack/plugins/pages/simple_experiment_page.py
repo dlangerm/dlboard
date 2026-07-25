@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from dash import Dash, Output, State, dcc
+import dash_mantine_components as dmc  # pyright: ignore[reportMissingTypeStubs]
+from dash import Dash, Output, State
 
 from dltrack.models import constants
-from dltrack.plugins.common import metric_chart
-from dltrack.plugins.utilities import get_data_store
 
 
 def plug(app: Dash) -> None:
@@ -16,8 +15,15 @@ def plug(app: Dash) -> None:
         Output(constants.PAGE_EXPERIMENT_ID, component_property="children"),
         State(constants.STATE_EXPERIMENT_ID, component_property="data"),
     )
-    def render_chart(experiment_id: int) -> list[dcc.Loading]:
-        store = get_data_store()
-        return [
-            dcc.Loading(metric_chart.basic_metric_table(store, experiment_id=experiment_id)),
-        ]
+    def render_chart(experiment_id: int) -> dmc.Container:
+        return dmc.Container(
+            dmc.Stack(
+                [
+                    dmc.Title(f"Experiment {experiment_id}", order=2),
+                    dmc.Text("Metrics and results"),
+                    dmc.Loader(id=constants.METRIC_CONTENT_ID),
+                ],
+                gap="md",
+            ),
+            py="xl",
+        )

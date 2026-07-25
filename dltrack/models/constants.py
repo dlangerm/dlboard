@@ -11,3 +11,5 @@ STATE_PROJECT_ID: Final = "project-id-state"
 STATE_EXPERIMENT_ID: Final = "experiment-id-state"
 
 MANTINE_PROVIDER_ID: Final = "mantine-provider"
+NAVBAR_ID: Final = "navbar"
+METRIC_CONTENT_ID: Final = "metrics-view"

@@ -2,7 +2,8 @@
 
 import typing
 
-from dash import Dash, Input, Output, State, dcc, html
+import dash_mantine_components as dmc  # pyright: ignore[reportMissingTypeStubs]
+from dash import Dash, Input, Output, State, dcc
 
 from dltrack import models
 from dltrack.models import constants
@@ -13,10 +14,24 @@ NEW_PROJECT_BUTTON_ID: typing.Final = "new-project-button"
 NEW_PROJECT_NAME_ID: typing.Final = "new-project-name"
 
 
-def _list_projects(store: models.DataStore[...]) -> list[html.Div]:
+def _list_projects(store: models.DataStore[...]) -> list[dmc.Card]:
     return [
-        html.Div(dcc.Link(project.name, href=f"/project/{project.id}"))
-        for project in list(store.get_projects())
+        dmc.Card(
+            [
+                dmc.CardSection(
+                    [dmc.Text(f"Project: {project.name} | id: {project.id}", fw=500)],
+                    withBorder=True,
+                    inheritPadding=True,
+                    py="xs",
+                ),
+                dcc.Link("Open", href=f"/project/{project.id}"),
+            ],
+            withBorder=True,
+            shadow="sm",
+            radius="md",
+            w=350,
+        )
+        for project in store.get_projects()
     ]
 
 
@@ -24,14 +39,18 @@ def plug(app: Dash) -> None:
     """Render a basic homepage."""
 
     @app.callback(Output(constants.PAGE_HOME_ID, component_property="children"))  # pyright: ignore[reportUnknownMemberType]
-    def layout_homepage() -> html.Div:
-        return html.Div(
-            [
-                html.Div("Simple Homepage"),
-                html.Div(id=PROJECT_LIST_ID),
-                dcc.Input(id=NEW_PROJECT_NAME_ID, type="text", placeholder="New Project Name"),
-                html.Button(id=NEW_PROJECT_BUTTON_ID, n_clicks=0, children="Submit"),
-            ]
+    def layout_homepage() -> dmc.Container:
+        return dmc.Container(
+            children=[
+                dmc.Flex(
+                    [
+                        dmc.TextInput(id=NEW_PROJECT_NAME_ID, placeholder="New Project Name"),
+                        dmc.Button(id=NEW_PROJECT_BUTTON_ID, n_clicks=0, children="Submit"),
+                    ]
+                ),
+                dmc.Divider(),
+                dmc.Flex(id=PROJECT_LIST_ID, justify="space-between", gap="md"),
+            ],
         )
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
@@ -39,7 +58,7 @@ def plug(app: Dash) -> None:
         Input(component_id=NEW_PROJECT_BUTTON_ID, component_property="n_clicks"),
         State(component_id=NEW_PROJECT_NAME_ID, component_property="value"),
     )
-    def create_project(n_clicks: int, new_project_name: str) -> list[html.Div]:
+    def create_project(n_clicks: int, new_project_name: str) -> list[dmc.Card]:
         store = get_data_store()
         if n_clicks > 0:
             if not new_project_name:
