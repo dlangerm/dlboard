@@ -19,17 +19,21 @@ def _list_projects(store: models.DataStore[...]) -> list[dmc.Card]:
         dmc.Card(
             [
                 dmc.CardSection(
-                    [dmc.Text(f"Project: {project.name} | id: {project.id}", fw=500)],
-                    withBorder=True,
+                    [dmc.Title(project.name, fw=500)],
                     inheritPadding=True,
-                    py="xs",
                 ),
-                dcc.Link("Open", href=f"/project/{project.id}"),
+                dmc.CardSection(
+                    [dmc.Text(project.description)],
+                    inheritPadding=True,
+                ),
+                dmc.CardSection(
+                    dcc.Link("Open", href=f"/project/{project.id}"),
+                    inheritPadding=True,
+                ),
             ],
             withBorder=True,
-            shadow="sm",
-            radius="md",
-            w=350,
+            padding="sm",
+            m="sm",
         )
         for project in store.get_projects()
     ]
@@ -49,16 +53,16 @@ def plug(app: Dash) -> None:
                     ]
                 ),
                 dmc.Divider(),
-                dmc.Flex(id=PROJECT_LIST_ID, justify="space-between", gap="md"),
+                dmc.Flex(id=PROJECT_LIST_ID, justify="flex-start"),
             ],
         )
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(component_id=PROJECT_LIST_ID, component_property="children"),
-        Input(component_id=NEW_PROJECT_BUTTON_ID, component_property="n_clicks"),
-        State(component_id=NEW_PROJECT_NAME_ID, component_property="value"),
+        Input(component_id=NEW_PROJECT_BUTTON_ID, component_property="n_clicks", allow_optional=True),
+        State(component_id=NEW_PROJECT_NAME_ID, component_property="value", allow_optional=True),
     )
-    def create_project(n_clicks: int, new_project_name: str) -> list[dmc.Card]:
+    def create_project(n_clicks: int, new_project_name: str | None) -> list[dmc.Card]:
         store = get_data_store()
         if n_clicks > 0:
             if not new_project_name:

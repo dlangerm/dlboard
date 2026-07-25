@@ -18,7 +18,7 @@ class DataStore[**P](typing.Protocol):
         """Initialize a data store."""
         ...
 
-    def create_project(self, project: models.NewProject) -> models.Project | None:
+    def create_project(self, project: models.NewProject) -> models.Project:
         """Create a project."""
         ...
 
@@ -30,7 +30,7 @@ class DataStore[**P](typing.Protocol):
         """Get all projects."""
         ...
 
-    def create_experiment(self, experiment: models.NewExperiment) -> models.Experiment | None:
+    def create_experiment(self, experiment: models.NewExperiment) -> models.Experiment:
         """Create an experiment within a project."""
         ...
 
@@ -42,8 +42,8 @@ class DataStore[**P](typing.Protocol):
         """Get all experiments for a project."""
         ...
 
-    def get_all_experiments(self) -> typing.Iterator[models.Experiment]:
-        """Get all experiments across projects."""
+    def create_run(self, run: models.NewRun) -> models.Run:
+        """Create a new run for an experiment."""
         ...
 
     def log_metrics(self, metric: Iterable[models.LoggedMetrics]) -> None:
@@ -53,8 +53,17 @@ class DataStore[**P](typing.Protocol):
     def fetch_metrics(
         self,
         experiment_id: int,
+        run_id: int | None = None,
         metric_name_match: str | None = None,
         step_range: slice | None = None,
     ) -> typing.Iterator[models.LoggedMetrics]:
         """Fetch metrics for a particular table name, optionally matching a topic string."""
+        ...
+
+    def log_hyperparams(self, hyperparams: models.NewHyperParams) -> None:
+        """Log hyperparameters to the data store."""
+        ...
+
+    def fetch_hyperparams(self, experiment_id: int) -> typing.Iterator[models.HyperParams]:
+        """Fetch hyperparameters for all runs for a particular experiment_id."""
         ...

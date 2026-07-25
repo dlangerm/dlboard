@@ -17,6 +17,8 @@ class UnderlyingMetricTableEntry(BaseModel, frozen=True, extra="forbid"):
     """Value of the metric."""
     experiment_id: int
     """Experiment Id for the metric."""
+    run_id: int
+    """Run Id for the metric."""
     step: int | None
     """Step the metric was taken at."""
 
@@ -30,12 +32,18 @@ class LoggedMetrics(BaseModel, frozen=True, extra="forbid"):
     """The step these metrics were logged at."""
     experiment_id: int
     """The experiment to associate with the metrics."""
+    run_id: int
+    """The run to associate with the metrics."""
 
     def to_underlying(self) -> Iterator[UnderlyingMetricTableEntry]:
         """Convert a bulk metrics set into a table entry."""
         for key, value in self.metrics.items():
             yield UnderlyingMetricTableEntry.model_construct(
-                key=key, value=value, experiment_id=self.experiment_id, step=self.step
+                key=key,
+                value=value,
+                experiment_id=self.experiment_id,
+                run_id=self.run_id,
+                step=self.step,
             )
 
     @classmethod
@@ -47,7 +55,9 @@ class LoggedMetrics(BaseModel, frozen=True, extra="forbid"):
             experiment_id = entry.experiment_id
             if entry.step != cur_step and cur_step is not None:
                 assert experiment_id is not None
-                yield LoggedMetrics(metrics=cur_raw_metrics, step=cur_step, experiment_id=experiment_id)
+                yield LoggedMetrics(
+                    metrics=cur_raw_metrics, step=cur_step, experiment_id=experiment_id, run_id=entry.run_id
+                )
                 cur_raw_metrics.clear()
             if entry.key in cur_raw_metrics:
                 # if anything was logged more than once for a step
@@ -57,4 +67,6 @@ class LoggedMetrics(BaseModel, frozen=True, extra="forbid"):
         if experiment_id is None:
             yield from []
         else:
-            yield LoggedMetrics(metrics=cur_raw_metrics, step=cur_step, experiment_id=experiment_id)
+            yield LoggedMetrics(
+                metrics=cur_raw_metrics, step=cur_step, experiment_id=experiment_id, run_id=entry.run_id
+            )

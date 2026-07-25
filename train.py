@@ -5,7 +5,6 @@ from typing import override
 
 import pytorch_lightning as pl
 import torch
-from pytorch_lightning.loggers.logger import DummyLogger
 from torch import nn
 from torch.utils.data import DataLoader, random_split
 from torchvision import datasets, transforms  # pyright: ignore[reportMissingTypeStubs]
@@ -141,7 +140,7 @@ class MnistDataModule(pl.LightningDataModule):
 def main() -> None:
     """Entrypoint for training."""
     LOGDIR.mkdir(exist_ok=True)
-    logger = DLTrackLogger(project_id=1)
+    logger = DLTrackLogger(project_id=1, experiment_id=1)
     # logger = DummyLogger()
     data = MnistDataModule(data_dir="./.data", batch_size=128)
     model = MnistMLP(hidden_size=64, learning_rate=1e-3)

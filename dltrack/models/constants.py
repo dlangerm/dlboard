@@ -9,7 +9,10 @@ PAGE_EXPERIMENT_ID: Final = "experiment-container"
 
 STATE_PROJECT_ID: Final = "project-id-state"
 STATE_EXPERIMENT_ID: Final = "experiment-id-state"
+STATE_HPARAMS: Final = "hparams-state"
 
 MANTINE_PROVIDER_ID: Final = "mantine-provider"
 NAVBAR_ID: Final = "navbar"
+LOCATION_ID: Final = "location"
 METRIC_CONTENT_ID: Final = "metrics-view"
+PAGE_BREADCRUMB_ID: Final = "page-breadcrumb"

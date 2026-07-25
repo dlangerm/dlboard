@@ -6,6 +6,10 @@ from functools import cache
 from typing import TYPE_CHECKING, Final, cast
 
 from dash import Dash, get_app
+from structlog.stdlib import get_logger
+
+_log = get_logger(__name__)
+
 
 if TYPE_CHECKING:
     from dltrack.models import DataStore
