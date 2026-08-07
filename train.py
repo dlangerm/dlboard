@@ -1,6 +1,7 @@
 """training loop."""
 
 from pathlib import Path
+from random import random
 from typing import override
 
 import pytorch_lightning as pl
@@ -18,6 +19,7 @@ class MnistMLP(pl.LightningModule):
     """Tiny MLP for MNIST classification with a few easy-to-extend metrics."""
 
     def __init__(self, hidden_size: int = 128, learning_rate: float = 1e-3) -> None:
+        """The mlp model."""
         super().__init__()
         self.save_hyperparameters()
         self.model = nn.Sequential(
@@ -141,9 +143,10 @@ def main() -> None:
     """Entrypoint for training."""
     LOGDIR.mkdir(exist_ok=True)
     logger = DLTrackLogger(project_id=1, experiment_id=1)
-    # logger = DummyLogger()
     data = MnistDataModule(data_dir="./.data", batch_size=128)
-    model = MnistMLP(hidden_size=128, learning_rate=1e-3)
+    hidden_size = max(16, int((random() * 2048)))
+    lr = random() * 1e-3
+    model = MnistMLP(hidden_size=hidden_size, learning_rate=lr)
 
     trainer = pl.Trainer(
         max_epochs=5,

@@ -30,8 +30,18 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             models.Run,
             models.UnderlyingMetricTableEntry,
             models.HyperParams,
+            models.Page,
         }:
             list(self._execute_raw_sql(sql.create_table_sql(table)))
+
+        list(
+            self._execute_raw_sql(
+                sql.create_index_sql(
+                    models.UnderlyingMetricTableEntry,
+                    ["experiment_id", "key", "run_id", "step"],
+                )
+            )
+        )
 
     @abstractmethod
     def _execute_raw_sql(self, statement: str) -> Iterator[tuple[Any, ...]]:
@@ -110,7 +120,10 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             self._execute_sql_query_many(
                 models.UnderlyingMetricTableEntry,
                 *sql.insert_many(
-                    models.UnderlyingMetricTableEntry, itertools.chain(*(m.to_underlying() for m in metric))
+                    models.UnderlyingMetricTableEntry,
+                    itertools.chain(
+                        *(m.to_underlying() for m in metric),
+                    ),
                 ),
             )
         )
@@ -135,8 +148,8 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
                     models.UnderlyingMetricTableEntry,
                     "experiment_id",
                     experiment_id,
-                    match_field="key" if metric_name_match is not None else None,
-                    match_field_values=metric_name_match,
+                    match_field="key" if metric_name_match else None,
+                    match_field_values=metric_name_match,  # pyright: ignore[reportArgumentType]
                     order_by=["run_id", "step"],
                 ),
             )
@@ -184,3 +197,56 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
                 ),
             )
         )
+
+    def get_or_create_page[D, P, C](
+        self,
+        page_type: type[models.Page[D, P, C]],
+        *,
+        run_id: int | None = None,
+        experiment_id: int | None = None,
+        project_id: int | None = None,
+        new_page_type: type[models.NewPage[D, C]] | None = None,
+    ) -> models.Page[D, P, C]:
+        args = {
+            "run_id": run_id,
+            "experiment_id": experiment_id,
+            "project_id": project_id,
+        }
+
+        if sum(1 if id_ is not None else 0 for id_ in args.values()) != 1:
+            msg = "Exactly one of run, experiment, or project must be defined."
+            raise ValueError(msg)
+
+        maybe_insert_values = {k: v for k, v in args.items() if v is not None}
+
+        field, value = maybe_insert_values.popitem()
+        for row in self._execute_sql_query(
+            page_type,
+            sql.get_all_by_field(
+                models.Page,
+                field,
+                value,
+            ),
+        ):
+            _log.info("found row")
+            return row
+
+        _log.info("Inserting page model for %s = %s", field, value)
+
+        return self._consume_row_iterator(
+            self._execute_sql_query(
+                page_type,
+                sql.insert(
+                    models.Page,
+                    (new_page_type or models.NewPage[D, C])(**{field: value}),  # pyright: ignore[reportArgumentType]
+                ),
+            )
+        )[0]
+
+    def update_page[D, P, C](self, page: models.Page[D, P, C]) -> models.Page[D, P, C]:
+        return self._consume_row_iterator(
+            self._execute_sql_query(
+                type(page),
+                sql.update(models.Page, page),
+            ),
+        )[0]

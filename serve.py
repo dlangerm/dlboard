@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 
 import structlog
+from pydantic_settings import BaseSettings
 
 from dltrack.plugins import metric_chart, sqlite, themes
 from dltrack.plugins.pages import (
@@ -19,11 +20,19 @@ structlog.configure_once(
 )
 _log = structlog.stdlib.get_logger(__name__)
 
+
+class AppSettings(BaseSettings):
+    """Environment variables."""
+
+    sqlite_location: Path = Path.home() / ".dltrack.sqlite"
+
+
 if __name__ == "__main__":
     _log.info("dltrack server is starting...")
+    settings = AppSettings()
     app(
         [
-            sqlite.get_plugin(Path("/tmp/dltrack/dltrack.sqlite")),
+            sqlite.get_plugin(settings.sqlite_location),
             simple_homepage,
             simple_admin_page,
             simple_project_page,

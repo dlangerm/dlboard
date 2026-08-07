@@ -20,11 +20,12 @@ FLUSH_SIZE = 100
 MAX_WAIT_S = 5
 _log = logging.getLogger(__name__)
 
-_DLTRACK_SERVER_URL = "http://localhost:8050"
-
 
 def process(
-    exp_id: int, run_id: int, api: DltrackAPI, q: "Queue[tuple[dict[str, float], int | None]]"
+    exp_id: int,
+    run_id: int,
+    api: DltrackAPI,
+    q: "Queue[tuple[dict[str, float], int | None]]",
 ) -> None:
     """Logger background process."""
     last_logged = time.perf_counter()
@@ -53,10 +54,15 @@ def process(
 class DLTrackLogger(Logger):
     """The lightning logger for dltrack."""
 
-    def __init__(self, project_id: int, experiment_id: int | None = None) -> None:
+    def __init__(
+        self,
+        project_id: int,
+        experiment_id: int | None = None,
+        server_url: str = "http://localhost:8050",
+    ) -> None:
         """Initialize with an existing experiment id, if none is given one will be created."""
         self._project_id = project_id
-        self._api = DltrackAPI(base_url=_DLTRACK_SERVER_URL)
+        self._api = DltrackAPI(base_url=server_url)
         if experiment_id is None:
             experiment = self._api.create_experiment(models.NewExperiment(project_id=project_id))
             experiment_id = experiment.id
@@ -64,7 +70,6 @@ class DLTrackLogger(Logger):
         self._run_id = self._api.create_run(models.NewRun(experiment_id=self._experiment_id)).id
         ctx = get_context("spawn")
         self._metrics_q: "Queue[tuple[dict[str, float], int | None]]" = ctx.Queue(maxsize=QUEUE_SIZE)
-
         self._proc = ctx.Process(
             target=process,
             args=(self._experiment_id, self._run_id, self._api, self._metrics_q),

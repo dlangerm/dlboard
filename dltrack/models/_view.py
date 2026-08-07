@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import itertools
+import json
 import typing
 from abc import ABC, abstractmethod
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 if typing.TYPE_CHECKING:
     from collections.abc import Iterable
@@ -41,6 +42,15 @@ class ChartType[P: BaseModel, D, C](ABC, BaseModel, frozen=True, extra="forbid")
         ChartTypeRegistry.register(cls, allow_override=allow_override)
 
 
+class ParameterField(BaseModel, frozen=True, extra="forbid"):
+    """A field describing a chart parameter."""
+
+    name: str
+    type: typing.Literal["bool", "int", "float", "str"]
+    required: bool
+    default: bool | int | float | str | None = None
+
+
 class ChartTypeRegistry:
     """Registry of all chart types."""
 
@@ -58,6 +68,48 @@ class ChartTypeRegistry:
             msg = f"Duplicated chart type {chart_type.name=}"
             raise AttributeError(msg)
         cls._all_charts[chart_type.name] = chart_type
+
+    @classmethod
+    def get_chart_type(cls, chart_type_name: str) -> type[ChartType[typing.Any, typing.Any, typing.Any]]:
+        """Fetch a registered chart type by name."""
+        if chart_type_name not in cls._all_charts:
+            msg = f"Unknown chart type {chart_type_name=}"
+            raise KeyError(msg)
+        return cls._all_charts[chart_type_name]
+
+    @classmethod
+    def get_registered_chart_types(cls) -> dict[str, dict[str, ParameterField]]:
+        """Expose chart metadata for simple editors and plugins."""
+        return {
+            name: cls._describe_parameter_fields(cls.get_chart_type(name).parameter_type())
+            for name in sorted(cls._all_charts)
+        }
+
+    @staticmethod
+    def _describe_parameter_fields(parameter_type: type[BaseModel]) -> dict[str, ParameterField]:
+        """Describe parameter fields for generic UI generation."""
+        field_descriptors: dict[str, ParameterField] = {}
+        for field_name, field in parameter_type.model_fields.items():
+            annotation = field.annotation
+            if annotation is bool:
+                field_type = "bool"
+            elif annotation is float:
+                field_type = "float"
+            elif annotation is int:
+                field_type = "int"
+            elif annotation is str:
+                field_type = "str"
+            else:
+                msg = f"{annotation} unsupported"
+                raise TypeError(msg)
+
+            field_descriptors[field_name] = ParameterField(
+                name=field_name,
+                type=field_type,
+                required=field.is_required(),
+                default=field.default if not field.is_required() else None,
+            )
+        return field_descriptors
 
     @classmethod
     def render[T, C](cls, chart: ChartInstance[T, C], dataframe: object) -> C:
@@ -91,11 +143,16 @@ class ChartInstance[D, C](BaseModel, frozen=True, extra="forbid"):
 class PanelInstance[D, C](BaseModel, frozen=True, extra="forbid"):
     """A panel containing one or more charts."""
 
-    id: str
-    """Unique id to identify this panel."""
+    name: str = ""
+    """Human-readable name for the panel."""
 
     charts: list[ChartInstance[D, C]] = []
     """Charts belonging to this panel."""
+
+    @property
+    def display_name(self) -> str:
+        """Return a display-friendly panel name."""
+        return self.name
 
     def render(self, dataframes: D) -> list[C]:
         """Render a panel."""
@@ -115,14 +172,37 @@ class PanelInstance[D, C](BaseModel, frozen=True, extra="forbid"):
         return hints  # pyright: ignore[reportReturnType]
 
 
-class Page[D, P, C](BaseModel, frozen=True, extra="forbid"):
+class NewPage[D, C](BaseModel, frozen=True, extra="forbid"):
     """A page view model."""
+
+    run_id: int | None = None
+    """Run ID for the experiment, could be none."""
+
+    experiment_id: int | None = None
+    """The experiment id associated with this page, could be none."""
+
+    project_id: int | None = None
+    """Project id for this page, could be none."""
 
     panels: list[PanelInstance[D, C]] = []
     """The set of panel instances on a page."""
 
-    page_settings: dict[str, int | float | bool | str | list[str] | None] = {}
+    page_settings: dict[str, int | float | bool | str | list[str] | list[int] | None] = {}
     """Page settings."""
+
+    @field_validator("panels", "page_settings", mode="before")
+    @classmethod
+    def deserialize_json(cls, raw_value: dict[str, object] | str) -> dict[str, object]:
+        if isinstance(raw_value, str):
+            return json.loads(raw_value)
+        return raw_value
+
+
+class Page[D, P, C](NewPage[D, C], frozen=True, extra="forbid"):
+    """A page stored in sql."""
+
+    id: int
+    """Page ID to be rendered."""
 
     @abstractmethod
     def retrieve_dataframes(self, store: DataStore[...], experiment_id: int) -> Iterable[D]:
@@ -132,23 +212,11 @@ class Page[D, P, C](BaseModel, frozen=True, extra="forbid"):
     def render(self, data_store: DataStore[...], experiment_id: int) -> P:
         """Render the page."""
 
-
-class ExperimentView(BaseModel, frozen=True, extra="forbid"):
-    """A view of an experiment."""
-
-    id: int
-    """The ID of the experiment."""
-
-
-class ProjectView(BaseModel, frozen=True, extra="forbid"):
-    """A view of a project."""
-
-    id: int
-    """The ID of the project."""
-
-
-class RunView(BaseModel, frozen=True, extra="forbid"):
-    """A view of a run."""
-
-    id: int
-    """The ID of the run."""
+    @classmethod
+    def sql_schema(cls) -> dict[str, str]:
+        """Return the sql schema for this type."""
+        return {
+            "id": "PRIMARY KEY AUTOINCREMENT",
+            "panels": "TEXT",
+            "page_settings": "TEXT",
+        }

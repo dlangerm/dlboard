@@ -67,3 +67,21 @@ class DataStore[**P](typing.Protocol):
     def fetch_hyperparams(self, experiment_id: int) -> typing.Iterator[models.HyperParams]:
         """Fetch hyperparameters for all runs for a particular experiment_id."""
         ...
+
+    def get_or_create_page[Dataframe, Panel, Chart](
+        self,
+        page_type: type[models.Page[Dataframe, Panel, Chart]],
+        *,
+        run_id: int | None = None,
+        experiment_id: int | None = None,
+        project_id: int | None = None,
+        new_page_type: type[models.NewPage[Dataframe, Chart]] | None = None,
+    ) -> models.Page[Dataframe, Panel, Chart]:
+        """Fetch the pages for a run, experiment, or project."""
+        ...
+
+    def update_page[Dataframe, Panel, Chart](
+        self, page: models.Page[Dataframe, Panel, Chart]
+    ) -> models.Page[Dataframe, Panel, Chart]:
+        """Update a page."""
+        ...
