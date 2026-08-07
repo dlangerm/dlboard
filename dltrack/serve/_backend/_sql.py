@@ -2,26 +2,41 @@
 
 from __future__ import annotations
 
+import json
 import typing
 from types import NoneType, UnionType
 
+from pydantic import BaseModel
 from structlog.stdlib import get_logger
 
 if typing.TYPE_CHECKING:
     from collections.abc import Iterable
 
-    from pydantic import BaseModel
 
 ID_KEY: typing.Final = "id"
 _log = get_logger(__name__)
 
 
-def construct[T: BaseModel](obj_type: type[T], args: tuple[typing.Any, ...]) -> T:
+def construct[T: BaseModel](obj_type: type[T], args: tuple[typing.Any, ...], *, no_verify: bool = True) -> T:
     fields = list(obj_type.model_fields.keys())
-    return obj_type.model_validate({f: args[i] for i, f in enumerate(fields)})
+    if no_verify:
+        obj_type.model_construct(**{f: args[i] for i, f in enumerate(fields)})
+
+    return obj_type(**{f: args[i] for i, f in enumerate(fields)})
 
 
-def escape_value_sql(value: object) -> str:
+def ensure_basemodel(arg: typing.Any) -> typing.TypeGuard[list[BaseModel]]:  # noqa: ANN401
+    return isinstance(arg, list) and all(isinstance(a, BaseModel) for a in arg)  # pyright: ignore[reportUnknownVariableType]
+
+
+def ensure_basemodel_dict(arg: typing.Any) -> typing.TypeGuard[dict[str, BaseModel]]:  # noqa: ANN401
+    return isinstance(arg, dict) and all(
+        isinstance(k, str) and isinstance(v, BaseModel)
+        for k, v in arg.items()  # pyright: ignore[reportUnknownVariableType]
+    )
+
+
+def escape_value_sql(value: object) -> str:  # noqa: PLR0911
     _log.info("Escaping value %s type %s", value, type(value))
     match value:
         case int() | float():
@@ -30,8 +45,32 @@ def escape_value_sql(value: object) -> str:
             return f"'{value.strip("' %;")}'"
         case bool():
             return "true" if value else "false"
+        case dict():
+            if ensure_basemodel_dict(value):
+                return f"'{json.dumps({k: v.model_dump(mode='json') for k, v in value.items()})}'"
+            return f"'{json.dumps(value)}'"
+        case list():
+            if ensure_basemodel(value):
+                return f"'{json.dumps([m.model_dump(mode='json') for m in value])}'"
+            return f"'{json.dumps(value)}'"
+        case NoneType():
+            return "NULL"
         case _:
             raise NotImplementedError(type(value))
+
+
+def create_index_sql(model: type[BaseModel], columns: list[str], *, index_name: str | None = None) -> str:
+    for c in columns:
+        if c not in model.model_fields:
+            msg = f"{c} not present in model"
+            raise AssertionError(msg)
+    name = index_name or f"idx_{model.__name__}_{'_'.join(columns)}"
+    raw = f"""
+    CREATE INDEX IF NOT EXISTS {name}
+    ON {model.__name__} ({",".join(columns)});
+    """
+    _log.info("Create index sql: %s", raw)
+    return raw
 
 
 def annotation_to_sqltype(annotation: type, *, nullable: bool = False) -> str:
@@ -39,7 +78,7 @@ def annotation_to_sqltype(annotation: type, *, nullable: bool = False) -> str:
     args = typing.get_args(annotation)
     if org is UnionType and len(args) > 0 and args[1] is NoneType:
         # optional
-        return annotation_to_sqltype(args[0])
+        return annotation_to_sqltype(args[0], nullable=True)
     suffix = "" if nullable else " NOT NULL"
     match annotation():
         case str():
@@ -48,6 +87,8 @@ def annotation_to_sqltype(annotation: type, *, nullable: bool = False) -> str:
             return f"INTEGER{suffix}"
         case float():
             return f"REAL{suffix}"
+        case dict() | list():
+            return f"TEXT{suffix}"
         case _:
             raise NotImplementedError((annotation, type(annotation)))
 
@@ -72,6 +113,24 @@ def create_table_sql(model: type[BaseModel]) -> str:
     base_str += ");"
     _log.info("Create table sql: %s", base_str)
     return base_str
+
+
+def update(table: type[BaseModel], model: BaseModel) -> str:
+    """Update an existing entry."""
+    sorted_keys = list(model.__class__.model_fields.keys())
+    if ID_KEY not in sorted_keys:
+        msg = f"Update object {model.__class__} must contain an ID key"
+        raise AssertionError(msg)
+    id_match = sorted_keys.pop(sorted_keys.index(ID_KEY))
+    raw_values = ",".join([f"{k} = {escape_value_sql(getattr(model, k))}" for k in sorted_keys])
+    raw = f"""
+        UPDATE {table.__name__}
+        set {raw_values}
+        where id = {id_match}
+        RETURNING *;
+        """
+    _log.info(raw)
+    return raw
 
 
 def insert(table: type[BaseModel], model: BaseModel) -> str:

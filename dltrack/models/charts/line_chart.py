@@ -3,12 +3,34 @@
 from __future__ import annotations
 
 import typing
+from hashlib import md5
 
 import dash_mantine_components as dmc  # pyright: ignore[reportMissingTypeStubs]
 import pandas as pd
 from pydantic import BaseModel
 
 from dltrack.models._view import ChartType
+
+colors = [
+    "gray",
+    "red",
+    "pink",
+    "grape",
+    "violet",
+    "indigo",
+    "blue",
+    "cyan",
+    "teal",
+    "green",
+    "lime",
+    "yellow",
+    "orange",
+]
+
+
+def _hash_color(run_id: int, temperature: int = 5) -> str:
+    v = int(md5(str(run_id).encode(), usedforsecurity=False).hexdigest(), base=16) % len(colors)
+    return colors[v] + f".{temperature % 10}"
 
 
 class LineChartSettings(BaseModel, frozen=True, extra="forbid"):
@@ -50,13 +72,19 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.LineChart], froze
                 {
                     "name": str(col),
                     "label": f"Run {col}",
-                    "color": f"indigo.{int(col) % 6}",
-                    "curveType": "natural",
+                    "color": _hash_color(int(col)),
                 }
                 for col in df.columns
                 if col != parameters.x_axis
             ],  # pyright: ignore[reportArgumentType]
+            xAxisLabel=f"{parameters.x_axis}",
+            yAxisLabel=f"{parameters.column}",
+            withLegend=True,
+            withXAxis=True,
+            withYAxis=True,
             withDots=False,
+            tickLine="xy",
+            lineChartProps={"syncId": parameters.x_axis},
         )
 
     @classmethod

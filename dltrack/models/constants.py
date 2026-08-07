@@ -16,3 +16,5 @@ NAVBAR_ID: Final = "navbar"
 LOCATION_ID: Final = "location"
 METRIC_CONTENT_ID: Final = "metrics-view"
 PAGE_BREADCRUMB_ID: Final = "page-breadcrumb"
+
+EXCLUDED_RUNS_KEY: Final = "excluded_runs"

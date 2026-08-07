@@ -1,6 +1,6 @@
 """The data model for a metric value logged at a step for a particular experiment."""
 
-from collections.abc import Iterable  # noqa: TC003
+from collections.abc import Iterable
 from typing import Iterator
 
 from pydantic import BaseModel
@@ -58,7 +58,7 @@ class LoggedMetrics(BaseModel, frozen=True, extra="forbid"):
             if cur_step is not None and (entry.step != cur_step or entry.run_id != cur_run_id):
                 cur_run_id = cur_run_id or entry.run_id
                 assert experiment_id is not None
-                yield LoggedMetrics(
+                yield LoggedMetrics.model_construct(
                     metrics=cur_raw_metrics,
                     step=cur_step,
                     experiment_id=experiment_id,
@@ -74,7 +74,7 @@ class LoggedMetrics(BaseModel, frozen=True, extra="forbid"):
             cur_run_id = entry.run_id
 
         if experiment_id is not None and cur_run_id is not None:
-            yield LoggedMetrics(
+            yield LoggedMetrics.model_construct(
                 metrics=cur_raw_metrics,
                 step=cur_step,
                 experiment_id=experiment_id,
