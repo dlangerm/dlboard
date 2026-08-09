@@ -3,7 +3,7 @@
 from collections.abc import Iterable
 from typing import Iterator
 
-from pydantic import BaseModel
+from pydantic import BaseModel, PastDatetime
 
 
 class UnderlyingMetricTableEntry(BaseModel, frozen=True, extra="forbid"):
@@ -19,8 +19,10 @@ class UnderlyingMetricTableEntry(BaseModel, frozen=True, extra="forbid"):
     """Experiment Id for the metric."""
     run_id: int
     """Run Id for the metric."""
-    step: int | None
+    step: int
     """Step the metric was taken at."""
+    timestamp_utc: PastDatetime
+    """Time recorded from the client."""
 
 
 class LoggedMetrics(BaseModel, frozen=True, extra="forbid"):
@@ -34,6 +36,8 @@ class LoggedMetrics(BaseModel, frozen=True, extra="forbid"):
     """The experiment to associate with the metrics."""
     run_id: int
     """The run to associate with the metrics."""
+    timestamp_utc: PastDatetime
+    """Timestamp of the metric."""
 
     def to_underlying(self) -> Iterator[UnderlyingMetricTableEntry]:
         """Convert a bulk metrics set into a table entry."""
@@ -44,6 +48,7 @@ class LoggedMetrics(BaseModel, frozen=True, extra="forbid"):
                 experiment_id=self.experiment_id,
                 run_id=self.run_id,
                 step=self.step,
+                timestamp_utc=self.timestamp_utc,
             )
 
     @classmethod
@@ -52,6 +57,7 @@ class LoggedMetrics(BaseModel, frozen=True, extra="forbid"):
         cur_step = None
         cur_run_id = None
         experiment_id = None
+        timestamp = None
         for entry in entries:
             experiment_id = entry.experiment_id
 
@@ -63,6 +69,7 @@ class LoggedMetrics(BaseModel, frozen=True, extra="forbid"):
                     step=cur_step,
                     experiment_id=experiment_id,
                     run_id=cur_run_id,
+                    timestamp_utc=entry.timestamp_utc,
                 )
                 cur_raw_metrics = {}
 
@@ -72,11 +79,13 @@ class LoggedMetrics(BaseModel, frozen=True, extra="forbid"):
             cur_raw_metrics[entry.key] = entry.value
             cur_step = entry.step
             cur_run_id = entry.run_id
+            timestamp = entry.timestamp_utc
 
-        if experiment_id is not None and cur_run_id is not None:
+        if experiment_id is not None and cur_run_id is not None and timestamp is not None:
             yield LoggedMetrics.model_construct(
                 metrics=cur_raw_metrics,
                 step=cur_step,
                 experiment_id=experiment_id,
                 run_id=cur_run_id,
+                timestamp_utc=timestamp,
             )

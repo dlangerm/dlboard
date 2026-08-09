@@ -38,18 +38,24 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             self._execute_raw_sql(
                 sql.create_index_sql(
                     models.UnderlyingMetricTableEntry,
-                    ["experiment_id", "key", "run_id", "step"],
+                    [k for k in models.UnderlyingMetricTableEntry.model_fields if k not in ("id", "value")],
                 )
             )
         )
 
     @abstractmethod
-    def _execute_raw_sql(self, statement: str) -> Iterator[tuple[Any, ...]]:
+    def _execute_raw_sql(
+        self,
+        statement: str,
+        values: dict[str, Any] | None = None,
+    ) -> Iterator[tuple[Any, ...]]:
         """Execute raw sql."""
 
     @abstractmethod
     def _execute_raw_sql_query_many(
-        self, statement: str, values: Iterable[tuple[Any, ...]]
+        self,
+        statement: str,
+        values: Iterable[dict[str, Any]] | None = None,
     ) -> Iterator[tuple[Any, ...]]:
         """Execute raw sql."""
 
@@ -57,17 +63,25 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         self,
         expected_model: type[RowT],
         statement: str,
+        values: dict[str, Any] | None = None,
+        *,
+        no_validate: bool = False,
     ) -> Iterator[RowT]:
         """Execute raw sql."""
-        for row in self._execute_raw_sql(statement):
-            yield sql.construct(expected_model, row)
+        for row in self._execute_raw_sql(statement, values):
+            yield sql.construct(expected_model, row, no_validate=no_validate)
 
     def _execute_sql_query_many[RowT: BaseModel](
-        self, expected_model: type[RowT], statement: str, values: Iterable[tuple[Any, ...]]
+        self,
+        expected_model: type[RowT],
+        statement: str,
+        values: Iterable[dict[str, Any]],
+        *,
+        no_validate: bool = False,
     ) -> Iterator[RowT]:
         """Execute raw sql."""
         for row in self._execute_raw_sql_query_many(statement, values):
-            yield sql.construct(expected_model, row)
+            yield sql.construct(expected_model, row, no_validate=no_validate)
 
     def _consume_row_iterator[RowT: BaseModel](self, row_iterator: Iterator[RowT]) -> list[RowT]:
         """Consume a row iterator and return a list of rows."""
@@ -76,9 +90,8 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
     def create_project(self, project: models.NewProject) -> models.Project:
         """create_project."""
         _log.info("Creating project with name %s", project.name)
-        results = self._consume_row_iterator(
-            self._execute_sql_query(models.Project, sql.insert(models.Project, project))
-        )
+        statement, values = sql.insert(models.Project, project)
+        results = self._consume_row_iterator(self._execute_sql_query(models.Project, statement, values))
         return results[0]
 
     def get_project(self, database_id: int) -> models.Project:
@@ -94,9 +107,8 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
     def create_experiment(self, experiment: models.NewExperiment) -> models.Experiment:
         """Create a new experiment."""
         _log.info("Creating experiment for project %s", experiment.project_id)
-        return self._consume_row_iterator(
-            self._execute_sql_query(models.Experiment, sql.insert(models.Experiment, experiment))
-        )[0]
+        statement, values = sql.insert(models.Experiment, experiment)
+        return self._consume_row_iterator(self._execute_sql_query(models.Experiment, statement, values))[0]
 
     def get_experiment(self, database_id: int) -> models.Experiment:
         """Tfdsafs."""
@@ -111,7 +123,8 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         )
 
     def create_run(self, run: models.NewRun) -> models.Run:
-        return self._consume_row_iterator(self._execute_sql_query(models.Run, sql.insert(models.Run, run)))[0]
+        statement, values = sql.insert(models.Run, run)
+        return self._consume_row_iterator(self._execute_sql_query(models.Run, statement, values))[0]
 
     def log_metrics(self, metric: Iterable[models.LoggedMetrics]) -> None:
         """Tfdsafs."""
@@ -125,6 +138,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
                         *(m.to_underlying() for m in metric),
                     ),
                 ),
+                no_validate=True,
             )
         )
 
@@ -152,6 +166,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
                     match_field_values=metric_name_match,  # pyright: ignore[reportArgumentType]
                     order_by=["run_id", "step"],
                 ),
+                no_validate=True,
             )
         )
 
@@ -176,13 +191,8 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
                 hyperparams.run_id,
             )
             return
-
-        self._consume_row_iterator(
-            self._execute_sql_query(
-                models.HyperParams,
-                sql.insert(models.HyperParams, hyperparams),
-            )
-        )
+        statement, values = sql.insert(models.HyperParams, hyperparams)
+        self._consume_row_iterator(self._execute_sql_query(models.HyperParams, statement, values))
 
     def fetch_hyperparams(self, experiment_id: int) -> Iterator[models.HyperParams]:
         """Fetch hyperparameters for a particular experiment."""
@@ -232,21 +242,25 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             return row
 
         _log.info("Inserting page model for %s = %s", field, value)
+        statement, values = sql.insert(
+            models.Page,
+            (new_page_type or models.NewPage[D, C])(**{field: value}),  # pyright: ignore[reportArgumentType]
+        )
 
         return self._consume_row_iterator(
             self._execute_sql_query(
                 page_type,
-                sql.insert(
-                    models.Page,
-                    (new_page_type or models.NewPage[D, C])(**{field: value}),  # pyright: ignore[reportArgumentType]
-                ),
+                statement,
+                values,
             )
         )[0]
 
     def update_page[D, P, C](self, page: models.Page[D, P, C]) -> models.Page[D, P, C]:
+        statement, values = sql.update(models.Page, page)
         return self._consume_row_iterator(
             self._execute_sql_query(
                 type(page),
-                sql.update(models.Page, page),
+                statement,
+                values,
             ),
         )[0]

@@ -8,12 +8,22 @@ import time
 from argparse import Namespace
 from multiprocessing import Queue, get_context
 from queue import Empty
-from typing import Any, override
+from typing import TYPE_CHECKING, Annotated, Any, override
 
+import dltype
+import pendulum
+from pydantic import BaseModel
 from pytorch_lightning.loggers import Logger
 
 from dltrack import models
 from dltrack.client.api import DltrackAPI
+
+if TYPE_CHECKING:
+    import numpy as np
+    import torch
+
+    type QType = Queue[tuple[dict[str, float], int | None]]
+    type ArtifactQType = Queue[tuple[str, list[Image]]]
 
 QUEUE_SIZE = 500
 FLUSH_SIZE = 100
@@ -21,12 +31,7 @@ MAX_WAIT_S = 5
 _log = logging.getLogger(__name__)
 
 
-def process(
-    exp_id: int,
-    run_id: int,
-    api: DltrackAPI,
-    q: "Queue[tuple[dict[str, float], int | None]]",
-) -> None:
+def process_metrics_async(exp_id: int, run_id: int, api: DltrackAPI, q: QType) -> None:
     """Logger background process."""
     last_logged = time.perf_counter()
     cur_batch: list[models.LoggedMetrics] = []
@@ -37,7 +42,13 @@ def process(
             with contextlib.suppress(Empty):
                 metrics, step = q.get(timeout=1)
             if metrics:
-                obj = models.LoggedMetrics(metrics=metrics, step=step, experiment_id=exp_id, run_id=run_id)  # pyright: ignore[reportArgumentType]
+                obj = models.LoggedMetrics(
+                    metrics=metrics,  # pyright: ignore[reportArgumentType]
+                    step=step,
+                    experiment_id=exp_id,
+                    run_id=run_id,
+                    timestamp_utc=pendulum.now(pendulum.UTC),
+                )
                 cur_batch.append(obj)
             log_diff = time.perf_counter() - last_logged
             if len(cur_batch) > FLUSH_SIZE or log_diff > MAX_WAIT_S:
@@ -49,6 +60,10 @@ def process(
                 last_logged = time.perf_counter()
         except Exception:  # noqa: BLE001
             _log.exception("Failed to ship metrics")
+
+
+def process_artifacts_async(exp_id: int, run_id: int, api: DltrackAPI, q: ArtifactQType) -> None:
+    """Logger background process for artifacts."""
 
 
 class DLTrackLogger(Logger):
@@ -69,14 +84,14 @@ class DLTrackLogger(Logger):
         self._experiment_id = experiment_id
         self._run_id = self._api.create_run(models.NewRun(experiment_id=self._experiment_id)).id
         ctx = get_context("spawn")
-        self._metrics_q: "Queue[tuple[dict[str, float], int | None]]" = ctx.Queue(maxsize=QUEUE_SIZE)
-        self._proc = ctx.Process(
-            target=process,
+        self._metrics_q: QType = ctx.Queue(maxsize=QUEUE_SIZE)
+        self._metric_proc = ctx.Process(
+            target=process_metrics_async,
             args=(self._experiment_id, self._run_id, self._api, self._metrics_q),
             name="logger-proc",
             daemon=True,
         )
-        self._proc.start()
+        self._metric_proc.start()
         super().__init__()
 
     @property
@@ -105,3 +120,19 @@ class DLTrackLogger(Logger):
     @override
     def log_metrics(self, metrics: dict[str, float], step: int | None = None) -> None:
         self._metrics_q.put((metrics, step))
+
+    def log_image(self, key: str, images: list[Image]) -> None:
+        """Log an image."""
+        raise NotImplementedError((key, images))
+        self._image_q.put((key, images))
+
+
+class Image(BaseModel, frozen=True, extra="forbid"):
+    """An image to log to the backend."""
+
+    image: Annotated[torch.Tensor | np.ndarray, dltype.UInt8Tensor["channels height width"]]
+    """An image to log. Expected to be in CHW format."""
+    caption: str | None = None
+    """A caption to give the image."""
+    step: int
+    """The global step of the trainer."""

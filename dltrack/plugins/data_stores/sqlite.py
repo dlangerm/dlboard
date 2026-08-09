@@ -6,11 +6,10 @@ import sqlite3
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterator, override
 
-from pydantic import BaseModel
 from structlog.stdlib import get_logger
 
 from dltrack.plugins.utilities._data_store import set_data_store
-from dltrack.plugins.utilities._sql_store_base import SQLStoreBase
+from dltrack.serve._backend._sql_store_base import SQLStoreBase
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -33,20 +32,27 @@ class SQLLiteStore(SQLStoreBase[Path]):
         super().__init__()
 
     @override
-    def _execute_raw_sql[T: BaseModel](self, statement: str) -> Iterator[tuple[Any, ...]]:
-        """Execute raw sql."""
-        with sqlite3.connect(self._location) as conn:
-            cur = conn.cursor()
-            yield from cur.execute(statement).fetchall()
-
-    @override
-    def _execute_raw_sql_query_many(
-        self, statement: str, values: Iterable[tuple[Any, ...]]
+    def _execute_raw_sql(
+        self,
+        statement: str,
+        values: dict[str, Any] | None = None,
     ) -> Iterator[tuple[Any, ...]]:
         """Execute raw sql."""
         with sqlite3.connect(self._location) as conn:
             cur = conn.cursor()
-            yield from cur.executemany(statement, values).fetchall()
+            _log.info("Execute <%s> with values <%s>", statement, values)
+            yield from cur.execute(statement, values or {}).fetchall()
+
+    @override
+    def _execute_raw_sql_query_many(
+        self,
+        statement: str,
+        values: Iterable[dict[str, Any]] | None = None,
+    ) -> Iterator[tuple[Any, ...]]:
+        """Execute raw sql."""
+        with sqlite3.connect(self._location) as conn:
+            cur = conn.cursor()
+            yield from cur.executemany(statement, values or []).fetchall()
 
     @classmethod
     def get_or_create(cls, loc: Path) -> SQLLiteStore:
