@@ -7,7 +7,7 @@ import typing
 from io import StringIO
 from typing import TYPE_CHECKING, Any, TypedDict, cast
 
-import dash_mantine_components as dmc  # pyright: ignore[reportMissingTypeStubs]
+import dash_mantine_components as dmc
 import pandas as pd
 from dash import ALL, Dash, Input, NoUpdate, Output, State, ctx, html, no_update
 from dash.dcc import Store
@@ -144,7 +144,7 @@ class BasicExperimentPage(Page[pd.DataFrame, dmc.Accordion, html.Div], frozen=Tr
                                     gap="sm",
                                 ),
                                 dmc.Button(
-                                    id=_open_chart_button_id(p.name),  # pyright: ignore[reportArgumentType]
+                                    id=_open_chart_button_id(p.name),
                                     n_clicks=0,
                                     children="+",
                                     disabled=True,  # enabled once edit mode is on
@@ -289,7 +289,7 @@ def _add_chart_modal() -> dmc.Modal:
     )
 
 
-def basic_metric_table(store: DataStore[...], experiment_id: int) -> dmc.Container:
+def accordion_view(store: DataStore[...], experiment_id: int) -> dmc.Container:
     """Render a metric chart using an accordion with organized prefixes."""
     _log.info("rendering chart for experiment %s", experiment_id)
     page = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
@@ -326,7 +326,7 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
     )
     def fun(experiment_id: int) -> dmc.Container:
         store = get_data_store()
-        return basic_metric_table(store, experiment_id=experiment_id)
+        return accordion_view(store, experiment_id=experiment_id)
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(constants.METRIC_CONTENT_ID, component_property="children", allow_duplicate=True),
@@ -351,7 +351,7 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
             store = get_data_store()
             store.update_page(curr_page)
             store = get_data_store()
-            return basic_metric_table(store, experiment_id=experiment_id)
+            return accordion_view(store, experiment_id=experiment_id)
         raise PreventUpdate
 
     # --- edit mode: fetch the full dataframe once, cache it client-side, enable controls ---
@@ -375,7 +375,7 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         add_disabled: list[bool],
         edit_disabled: list[bool],
         delete_disabled: list[bool],
-    ) -> tuple[str | NoUpdate, list[bool], list[bool], list[bool]]:
+    ) -> tuple[str | NoUpdate | None, list[bool], list[bool], list[bool]]:
         if not checked:
             return (
                 no_update,
@@ -418,7 +418,7 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         _edit_clicks: list[int],
         page_json: str,
     ) -> tuple[bool, _ChartTargetData, str | None, dict[str, Any]]:
-        triggered_id = ctx.triggered_id  # pyright: ignore[reportUnknownMemberType]
+        triggered_id = cast("_ChartID", ctx.triggered_id)  # pyright: ignore[reportUnknownMemberType]
         if not triggered_id or not ctx.triggered[0]["value"]:
             raise PreventUpdate
 
@@ -427,7 +427,8 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
 
         curr_page = BasicExperimentPage.model_validate_json(page_json)
         panel = next(p for p in curr_page.panels if p.name == triggered_id["panel"])
-        chart = cast("ChartInstance[pd.DataFrame, html.Div]", panel.charts[triggered_id["index"]])
+        assert triggered_id["index"]
+        chart = panel.charts[triggered_id["index"]]
         return (
             True,
             {"panel": str(triggered_id["panel"]), "index": int(triggered_id["index"])},
@@ -510,7 +511,7 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         parameters = {fid["field"]: val for fid, val in zip(field_ids, merged, strict=True)}
 
         try:
-            chart_instance = ChartInstance(chart_type=chart_type_name, parameters=parameters)
+            chart_instance = ChartInstance[Any, Any](chart_type=chart_type_name, parameters=parameters)
             df = pd.read_json(StringIO(df_json), orient="split")
             return chart_instance.render(df), ""
         except (ValidationError, KeyError, ValueError) as exc:
@@ -537,7 +538,7 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         values: list[Any],
         checked_values: list[Any],
         field_ids: list[dict[str, str]],
-        target: dict[str, Any] | None,
+        target: _ChartTargetData | None,
         experiment_id: int,
         page_json: str,
     ) -> tuple[Any, bool, str]:
@@ -548,7 +549,7 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         parameters = {fid["field"]: val for fid, val in zip(field_ids, merged, strict=True)}
 
         try:
-            new_chart = ChartInstance(chart_type=chart_type_name, parameters=parameters)
+            new_chart = ChartInstance[Any, Any](chart_type=chart_type_name, parameters=parameters)
         except ValidationError as exc:
             return no_update, True, f"Invalid parameters: {exc}"
 
@@ -570,7 +571,7 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         store = get_data_store()
         store.update_page(curr_page)
         store = get_data_store()
-        return basic_metric_table(store, experiment_id=experiment_id), False, ""
+        return accordion_view(store, experiment_id=experiment_id), False, ""
 
     # --- delete a chart from a panel ---
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
@@ -585,7 +586,7 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         page_json: str,
         experiment_id: int,
     ) -> dmc.Container:
-        triggered_id = ctx.triggered_id
+        triggered_id = cast("_ChartTargetData", ctx.triggered_id)  # pyright: ignore[reportUnknownMemberType]
         if not triggered_id or not ctx.triggered[0]["value"]:
             raise PreventUpdate
 
@@ -602,7 +603,7 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
 
         store = get_data_store()
         store.update_page(curr_page)
-        return basic_metric_table(store, experiment_id=experiment_id)
+        return accordion_view(store, experiment_id=experiment_id)
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output("current-page", "data", allow_duplicate=True),

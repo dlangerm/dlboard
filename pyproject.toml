@@ -1,5 +1,6 @@
 [dependency-groups]
 dev = [
+  "pandas-stubs>=3.0.5.260730",
   "prek>=0.4.10",
   "pyright>=1.1.411",
   "pytest>=9.1.1",
@@ -26,11 +27,13 @@ requires-python = ">=3.12"
 version = "0.1.0"
 
 [tool.pyright]
-exclude = []
-ignore = []
 include = ["dltrack"]
+reportMissingTypeStubs = false
 reportUnnecessaryTypeIgnoreComment = "error"
+reportUnusedFunction = false
 typeCheckingMode = "strict"
+venv = ".venv"
+venvPath = "."
 
 [tool.ruff]
 indent-width = 4

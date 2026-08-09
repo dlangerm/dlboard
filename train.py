@@ -8,7 +8,7 @@ import pytorch_lightning as pl
 import torch
 from torch import nn
 from torch.utils.data import DataLoader, random_split
-from torchvision import datasets, transforms  # pyright: ignore[reportMissingTypeStubs]
+from torchvision import datasets, transforms
 
 from dltrack.client import DLTrackLogger
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import typing
 from hashlib import md5
 
-import dash_mantine_components as dmc  # pyright: ignore[reportMissingTypeStubs]
+import dash_mantine_components as dmc
 import pandas as pd
 from pydantic import BaseModel
 
