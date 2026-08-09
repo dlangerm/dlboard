@@ -5,8 +5,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import dash
-import dash_mantine_components as dmc  # pyright: ignore[reportMissingTypeStubs]
-from dash import Dash, Input, Output, callback, dcc
+import dash_mantine_components as dmc
+from dash import Dash, Input, Output, callback, dcc  # pyright: ignore[reportUnknownVariableType]
 
 from dltrack.models import constants
 
@@ -64,7 +64,8 @@ def app(plugins: list[models.PluginProtocol]) -> Dash:
     Input(constants.STATE_PROJECT_ID, component_property="data", allow_optional=True),
     Input(constants.STATE_EXPERIMENT_ID, component_property="data", allow_optional=True),
 )
-def _breadcrumbs(_: str, project_id: int | None, experiment_id: int | None) -> list[dcc.Link | dmc.Text]:
+def breadcrumbs(_: str, project_id: int | None, experiment_id: int | None) -> list[dcc.Link | dmc.Text]:
+    """Breadcrumbs for the project list."""
     if project_id is None and experiment_id is None:
         return [dcc.Link("Projects", href="/", refresh=True)]
     if project_id is not None and experiment_id is None:

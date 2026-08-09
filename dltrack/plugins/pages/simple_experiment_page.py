@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import itertools
-from typing import Any
+from typing import Any, cast
 
-import dash_mantine_components as dmc  # pyright: ignore[reportMissingTypeStubs]
+import dash_mantine_components as dmc
 from dash import ALL, Dash, Input, Output, State, ctx
 from dash.exceptions import PreventUpdate
 
 from dltrack.models import HyperParams, constants
-from dltrack.plugins.common.metric_chart import BasicExperimentPage, basic_metric_table
+from dltrack.plugins.pages.accordion_view import BasicExperimentPage, accordion_view
 from dltrack.plugins.utilities import get_data_store
 
 
@@ -53,7 +53,8 @@ def plug(app: Dash) -> None:
 
         store = get_data_store()
         page = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
-        excluded = set(page.page_settings.get(constants.EXCLUDED_RUNS_KEY) or [])
+        excluded = page.page_settings.get(constants.EXCLUDED_RUNS_KEY, [])
+        assert isinstance(excluded, list)
 
         return dmc.Stack(
             [
@@ -101,16 +102,18 @@ def plug(app: Dash) -> None:
         prevent_initial_call=True,
     )
     def toggle_run_exclusion(_checked_values: list[bool], experiment_id: int) -> dmc.Container:
-        triggered_id = ctx.triggered_id
+        triggered_id = ctx.triggered_id  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]
         if not triggered_id or ctx.triggered[0]["value"] is None:
             raise PreventUpdate
 
-        run_id = triggered_id["run"]
-        included = ctx.triggered[0]["value"]
+        run_id = cast("int", triggered_id["run"])
+        included = cast("bool", ctx.triggered[0]["value"])
 
         store = get_data_store()
         page = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
-        excluded = set(page.page_settings.get(constants.EXCLUDED_RUNS_KEY) or [])
+        excluded = page.page_settings.get(constants.EXCLUDED_RUNS_KEY, [])
+        assert isinstance(excluded, list)
+        excluded = set(excluded)
         if included:
             excluded.discard(run_id)
         else:
@@ -121,4 +124,4 @@ def plug(app: Dash) -> None:
         store.update_page(page)
 
         store = get_data_store()
-        return basic_metric_table(store, experiment_id=experiment_id)
+        return accordion_view(store, experiment_id=experiment_id)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import typing
 
-import dash_mantine_components as dmc  # pyright: ignore[reportMissingTypeStubs]
+import dash_mantine_components as dmc
 from dash import Dash, Input, Output, State
 
 from dltrack.models import NewExperiment, constants
@@ -76,7 +76,7 @@ def plug(app: Dash) -> None:
         Output(constants.PAGE_PROJECT_ID, component_property="children"),
         State(constants.STATE_PROJECT_ID, component_property="data"),
     )
-    def _layout(project_id: int) -> dmc.Container:
+    def layout(project_id: int) -> dmc.Container:
         return dmc.Container(
             [
                 dmc.Stack(
