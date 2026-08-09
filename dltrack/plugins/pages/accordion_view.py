@@ -16,6 +16,7 @@ from pydantic import ValidationError
 from structlog.stdlib import get_logger
 
 from dltrack.models import Page, constants
+from dltrack.models._metric import LoggedMetrics
 from dltrack.models._view import ChartInstance, ChartTypeRegistry, PanelInstance, ParameterField
 from dltrack.plugins.utilities import get_data_store
 
@@ -163,19 +164,14 @@ class BasicExperimentPage(Page[pd.DataFrame, dmc.Accordion, html.Div], frozen=Tr
         )
 
 
-def _build_metrics_dataframe(metrics: typing.Iterable[Any]) -> pd.DataFrame:
+def _build_metrics_dataframe(metrics: typing.Iterable[LoggedMetrics]) -> pd.DataFrame:
     """Build a metrics dataframe from an iterable of LoggedMetrics."""
-    dfs = [
+    dfs = (
         pd.DataFrame.from_dict(
-            d.metrics
-            | {
-                "run_id": [d.run_id],
-                "experiment_id": [d.experiment_id],
-                "step": [d.step],
-            },
+            d.metrics | {f: [getattr(d, f)] for f in LoggedMetrics.model_fields if f != "metrics"}
         )
         for d in metrics
-    ]
+    )
     if dfs:
         return pd.concat(dfs).reset_index()
     return pd.DataFrame()
@@ -427,7 +423,6 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
 
         curr_page = BasicExperimentPage.model_validate_json(page_json)
         panel = next(p for p in curr_page.panels if p.name == triggered_id["panel"])
-        assert triggered_id["index"]
         chart = panel.charts[triggered_id["index"]]
         return (
             True,
@@ -515,6 +510,7 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
             df = pd.read_json(StringIO(df_json), orient="split")
             return chart_instance.render(df), ""
         except (ValidationError, KeyError, ValueError) as exc:
+            _log.exception("error rendering preview")
             return None, f"Fill in required fields to see a preview ({exc})"
 
     # --- add or update the chart and persist ---
@@ -570,7 +566,6 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
 
         store = get_data_store()
         store.update_page(curr_page)
-        store = get_data_store()
         return accordion_view(store, experiment_id=experiment_id), False, ""
 
     # --- delete a chart from a panel ---

@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 import typing
+from datetime import datetime
 from types import NoneType, UnionType
 
-from pydantic import BaseModel
+from pydantic import BaseModel, PastDatetime
 from structlog.stdlib import get_logger
 
 if typing.TYPE_CHECKING:
@@ -17,11 +18,13 @@ ID_KEY: typing.Final = "id"
 _log = get_logger(__name__)
 
 
-def construct[T: BaseModel](obj_type: type[T], args: tuple[typing.Any, ...], *, no_verify: bool = True) -> T:
+def construct[T: BaseModel](
+    obj_type: type[T], args: tuple[typing.Any, ...], *, no_validate: bool = True
+) -> T:
     fields = list(obj_type.model_fields.keys())
-    if no_verify:
-        obj_type.model_construct(**{f: args[i] for i, f in enumerate(fields)})
-
+    if no_validate:
+        return obj_type.model_construct(**{f: args[i] for i, f in enumerate(fields)})
+    _log.info("validating %s with args %s", obj_type, args)
     return obj_type(**{f: args[i] for i, f in enumerate(fields)})
 
 
@@ -36,7 +39,27 @@ def ensure_basemodel_dict(arg: typing.Any) -> typing.TypeGuard[dict[str, BaseMod
     )
 
 
-def escape_value_sql(value: object) -> str:  # noqa: PLR0911
+def serialize_complex_sql(value: object) -> object:
+    """Serialize lists and dictionaries if they appear."""
+    match value:
+        case dict():
+            if ensure_basemodel_dict(value):
+                return f"{json.dumps({k: v.model_dump(mode='json') for k, v in value.items()})}"
+            return f"{json.dumps(value)}"
+        case list():
+            if ensure_basemodel(value):
+                return f"{json.dumps([m.model_dump(mode='json') for m in value])}"
+            return f"{json.dumps(value)}"
+        case _:
+            return value
+
+
+def serialize_base_model(value: BaseModel) -> dict[str, typing.Any]:
+    """Serialize a base model."""
+    return {k: serialize_complex_sql(v) for k, v in value.model_dump(mode="json").items()}
+
+
+def escape_value_sql(value: object) -> str:
     _log.info("Escaping value %s type %s", value, type(value))
     match value:
         case int() | float():
@@ -45,16 +68,10 @@ def escape_value_sql(value: object) -> str:  # noqa: PLR0911
             return f"'{value.strip("' %;")}'"
         case bool():
             return "true" if value else "false"
-        case dict():
-            if ensure_basemodel_dict(value):
-                return f"'{json.dumps({k: v.model_dump(mode='json') for k, v in value.items()})}'"
-            return f"'{json.dumps(value)}'"
-        case list():
-            if ensure_basemodel(value):
-                return f"'{json.dumps([m.model_dump(mode='json') for m in value])}'"
-            return f"'{json.dumps(value)}'"
         case NoneType():
             return "NULL"
+        case datetime():
+            return value.isoformat()
         case _:
             raise NotImplementedError(type(value))
 
@@ -87,8 +104,10 @@ def annotation_to_sqltype(annotation: type, *, nullable: bool = False) -> str:
             return f"INTEGER{suffix}"
         case float():
             return f"REAL{suffix}"
-        case dict() | list():
+        case dict() | list() | datetime() | PastDatetime():  # pyright: ignore[reportGeneralTypeIssues]
             return f"TEXT{suffix}"
+        case bytes():
+            return f"BLOB{suffix}"
         case _:
             raise NotImplementedError((annotation, type(annotation)))
 
@@ -115,55 +134,55 @@ def create_table_sql(model: type[BaseModel]) -> str:
     return base_str
 
 
-def update(table: type[BaseModel], model: BaseModel) -> str:
+def update(table: type[BaseModel], model: BaseModel) -> tuple[str, dict[str, typing.Any]]:
     """Update an existing entry."""
     sorted_keys = list(model.__class__.model_fields.keys())
-    if ID_KEY not in sorted_keys:
-        msg = f"Update object {model.__class__} must contain an ID key"
-        raise AssertionError(msg)
-    id_match = sorted_keys.pop(sorted_keys.index(ID_KEY))
-    raw_values = ",".join([f"{k} = {escape_value_sql(getattr(model, k))}" for k in sorted_keys])
-    raw = f"""
+    sorted_keys.remove(ID_KEY)
+    interpolate_values = ",".join([f"{k} = :{k}" for k in sorted_keys])
+    values = serialize_base_model(model)
+    id_match = values.pop(ID_KEY)
+    return (
+        f"""
         UPDATE {table.__name__}
-        set {raw_values}
+        set {interpolate_values}
         where id = {id_match}
         RETURNING *;
-        """
-    _log.info(raw)
-    return raw
+        """,
+        values,
+    )
 
 
-def insert(table: type[BaseModel], model: BaseModel) -> str:
+def insert(table: type[BaseModel], model: BaseModel) -> tuple[str, dict[str, typing.Any]]:
     sorted_keys = list(model.__class__.model_fields.keys())
     if ID_KEY in sorted_keys:
         msg = f"Creation object {model.__class__} must not contain an ID key"
         raise AssertionError(msg)
-    joined_keys = ",".join(sorted_keys)
-    raw_values = ",".join([escape_value_sql(getattr(model, k)) for k in sorted_keys])
-    raw = f"""
-    INSERT INTO {table.__name__}
-    ({joined_keys})
-    VALUES({raw_values})
-    RETURNING *;
-    """
-    _log.info(raw)
-    return raw
+    raw_values = ",".join([f":{k}" for k in [*sorted_keys, ID_KEY]])
+    values = serialize_base_model(model) | {ID_KEY: None}
+
+    return (
+        f"""
+        INSERT INTO {table.__name__}
+        VALUES({raw_values})
+        RETURNING *;
+        """,
+        values,
+    )
 
 
 def insert_many(
     table: type[BaseModel],
     models: Iterable[BaseModel],
-) -> tuple[str, Iterable[tuple[str, ...]]]:
+) -> tuple[str, Iterable[dict[str, typing.Any]]]:
     sorted_keys = list(table.model_fields.keys())
-    sorted_keys.remove(ID_KEY)
     joined_keys = ",".join(sorted_keys)
     return (
         f"""
         INSERT INTO {table.__name__}
         ({joined_keys})
-        VALUES({",".join(["?"] * len(sorted_keys))});
+        VALUES({",".join([f":{k}" for k in sorted_keys])});
         """,
-        (tuple(getattr(model, k) for k in sorted_keys) for model in models),
+        (serialize_base_model(model) | {ID_KEY: None} for model in models),
     )
 
 
@@ -223,11 +242,9 @@ def get_all_by_field(  # noqa: PLR0913
         else (f"{match_field} in ({','.join(map(escape_value_sql, list(match_field_values)))})")
     )
 
-    raw = f"""
+    return f"""
         SELECT *
         FROM {model.__name__}
         WHERE {field_name} = {escape_value_sql(field_value)} AND {match_clause}
         {order_clause};
     """
-    _log.info(raw)
-    return raw

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import typing
 from hashlib import md5
 
@@ -58,6 +59,12 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.LineChart], froze
         axis_cols = ["run_id", "step"]
         if x_col != "step":
             axis_cols.append(x_col)
+
+        for c in dataframe.columns:
+            if str(dataframe[c].dtype) in ("object", "str"):
+                with contextlib.suppress(ValueError):
+                    dataframe[c] = pd.to_datetime(dataframe[c], utc=True, format="ISO8601")
+
         axis_df = dataframe.loc[dataframe[x_col].notna(), axis_cols]
         value_df = dataframe.loc[dataframe[parameters.column].notna(), ["run_id", "step", parameters.column]]
 

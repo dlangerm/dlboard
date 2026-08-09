@@ -62,6 +62,7 @@ class MnistMLP(pl.LightningModule):
             logger=True,
             batch_size=inputs.size(0),
         )
+        self.log_extra_artifacts(batch, preds, targets)
 
         return loss, acc
 
@@ -83,7 +84,10 @@ class MnistMLP(pl.LightningModule):
         return torch.optim.Adam(self.parameters(), lr=self._learning_rate)
 
     def log_extra_artifacts(
-        self, batch: tuple[torch.Tensor, torch.Tensor], preds: torch.Tensor, targets: torch.Tensor
+        self,
+        batch: tuple[torch.Tensor, torch.Tensor],
+        preds: torch.Tensor,
+        targets: torch.Tensor,
     ) -> None:
         """Hook for future image/table logging without cluttering the main training loop."""
         _ = batch, preds, targets
