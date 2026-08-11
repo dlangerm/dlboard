@@ -7,6 +7,10 @@ import typing
 if typing.TYPE_CHECKING:
     from collections.abc import Iterable
 
+    from flask import Response
+    from pydantic import AnyUrl
+    from werkzeug.datastructures import FileStorage
+
     from dltrack import models
 
 
@@ -84,4 +88,39 @@ class DataStore[**P](typing.Protocol):
         self, page: models.Page[Dataframe, Panel, Chart]
     ) -> models.Page[Dataframe, Panel, Chart]:
         """Update a page."""
+        ...
+
+
+class ArtifactStore[**P](typing.Protocol):
+    """An artifact store for files and arbitrary byte-like data."""
+
+    protocol: typing.ClassVar[str]
+    """The protocol for the artifact store, used to create urls."""
+
+    @classmethod
+    def get_or_create(cls, *args: P.args, **kwargs: P.kwargs) -> typing.Self:
+        """Initialize a data store."""
+        ...
+
+    def log_artifacts(
+        self,
+        artifacts: Iterable[models.NewArtifact],
+        files: typing.Mapping[str, FileStorage],
+    ) -> None:
+        """Log a set of artifacts."""
+        ...
+
+    def get_artifacts(
+        self,
+        keys: set[str] | None = None,
+        run_id: int | None = None,
+        experiment_id: int | None = None,
+        step: int | None = None,
+        fname: str | None = None,
+    ) -> typing.Iterator[models.Artifact]:
+        """Get artifacts for a run or experiment."""
+        ...
+
+    def download_artifact(self, ref: AnyUrl) -> Response:
+        """Download an artifact given a url."""
         ...

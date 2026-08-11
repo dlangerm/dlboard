@@ -1,11 +1,12 @@
 """Routes for doing general api things."""
 
 import dash
-from flask import request
+from flask import Response, request
+from pydantic import AnyUrl
 from structlog.stdlib import get_logger
 
 from dltrack import models
-from dltrack.plugins.utilities import get_data_store
+from dltrack.plugins.utilities import get_artifact_store, get_data_store
 
 _log = get_logger(__name__)
 
@@ -64,3 +65,23 @@ def create_project() -> dict[str, str]:
     except Exception:
         _log.exception("Error creating project")
         raise
+
+
+@dash.hooks.route(f"create/{models.Artifact.__name__}", methods=["POST"])
+def log_artifact() -> dict[str, str]:
+    try:
+        _log.info("log artifact batch")
+        store = get_artifact_store()
+        store.log_artifacts(
+            (models.NewArtifact.model_validate(artifact) for artifact in request.json),
+            request.files,
+        )
+    except Exception:
+        _log.exception("failed to create new artifacts")
+        raise
+    return {}
+
+
+@dash.hooks.route("artifact/<str:artifact_url>", methods=["GET"])  # pyright: ignore[reportArgumentType]
+def download_artifact(artifact_url: str) -> Response:
+    return get_artifact_store().download_artifact(AnyUrl(artifact_url))

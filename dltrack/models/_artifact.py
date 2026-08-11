@@ -1,40 +1,32 @@
 """Generic artifact class."""
 
-from enum import StrEnum, auto
-
-from pydantic import BaseModel
-
-
-class ArtifactStorageClass(StrEnum):
-    """How the artifact is stored."""
-
-    file = auto()
-    blob = auto()
-
-
-class ArtifactType(StrEnum):
-    """A type of artifact for logging."""
-
-    image = auto()
+from pydantic import AnyUrl, BaseModel
 
 
 class NewArtifact(BaseModel, frozen=True, extra="forbid"):
     """An artifact."""
 
-    artifact_type: ArtifactType
-    """Type of artifact."""
+    key: str
+    """Key of this artifact for querying."""
 
-    storage_class: ArtifactStorageClass
-    """How the artifact should be stored."""
+    fname: str
+    """The key of requests.files"""
 
-    ref: str | None
-    """The url if the artifact is a file."""
+    tags: dict[str, str] = {}
+    """Tags for this artifact for use by anything consuming or displaying it."""
 
-    data: bytes | None
-    """The data if the artifact is a blob."""
+    run_id: int
+    """Run ID for this artifact."""
+
+    experiment_id: int
+    """Experiment ID for this artifact."""
+
+    step: int | None
+    """If given, log this artifact for a particular step, useful for visualization."""
 
 
 class Artifact(NewArtifact, frozen=True, extra="forbid"):
     """Underlying table of artifacts."""
 
-    id: int
+    ref: AnyUrl
+    """The underlying storage of the data if it is already uploaded."""
