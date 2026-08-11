@@ -6,7 +6,7 @@ from pathlib import Path
 import structlog
 from pydantic_settings import BaseSettings
 
-from dltrack.plugins import accordion_view, sqlite, themes
+from dltrack.plugins import accordion_view, filesystem, sqlite, themes
 from dltrack.plugins.pages import (
     simple_admin_page,
     simple_experiment_page,
@@ -25,6 +25,7 @@ class AppSettings(BaseSettings):
     """Environment variables."""
 
     sqlite_location: Path = Path.home() / ".dltrack.sqlite"
+    artifact_store_location: Path = Path.home() / ".dltrack_artifacts"
 
 
 if __name__ == "__main__":
@@ -32,6 +33,7 @@ if __name__ == "__main__":
     settings = AppSettings()
     app(
         [
+            filesystem.get_plugin(settings.artifact_store_location),
             sqlite.get_plugin(settings.sqlite_location),
             simple_homepage,
             simple_admin_page,
