@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import itertools
 from abc import ABC, abstractmethod
+from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any, Iterator
 
 from pydantic import BaseModel
@@ -31,6 +32,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             models.UnderlyingMetricTableEntry,
             models.HyperParams,
             models.Page,
+            models.Artifact,
         }:
             list(self._execute_raw_sql(sql.create_table_sql(table)))
 
@@ -264,3 +266,43 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
                 values,
             ),
         )[0]
+
+    def log_artifact_refs(self, artifacts: Iterable[models.Artifact]) -> None:
+        self._consume_row_iterator(
+            self._execute_sql_query_many(
+                models.Artifact,
+                *sql.insert_many(
+                    models.Artifact,
+                    artifacts,
+                ),
+            )
+        )
+
+    def fetch_artifacts(
+        self,
+        keys: set[str] | None = None,
+        run_id: int | None = None,
+        experiment_id: int | None = None,
+        step: int | None = None,
+        fname: str | None = None,
+    ) -> Iterator[models.Artifact]:
+        """Get artifact metadata (not bytes) for a run or experiment."""
+        if experiment_id is None:
+            raise NotImplementedError
+        if fname:
+            raise NotImplementedError
+
+        clauses = [f"experiment_id = {sql.escape_value_sql(experiment_id)}"]
+        if keys:
+            clauses.append(f"key in ({','.join(sql.escape_value_sql(k) for k in keys)})")
+        if run_id is not None:
+            clauses.append(f"run_id = {sql.escape_value_sql(run_id)}")
+        if step is not None:
+            clauses.append(f"step = {sql.escape_value_sql(step)}")
+
+        statement = f"""
+            SELECT * FROM {models.Artifact.__name__}
+            WHERE {" AND ".join(clauses)}
+            ORDER BY run_id, step;
+        """
+        return self._execute_sql_query(models.Artifact, statement, no_validate=True)

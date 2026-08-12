@@ -1,5 +1,9 @@
 """Dltrack API class."""
 
+import itertools
+from pathlib import Path
+from typing import Iterable
+
 import requests
 
 from dltrack import models
@@ -54,3 +58,23 @@ class DltrackAPI:
             json=[m.model_dump(mode="json") for m in metrics],
         )
         res.raise_for_status()
+
+    def log_artifact_batch(self, artifacts: Iterable[models.NewArtifact], files: list[Path]) -> None:
+        """Log a batch of artifacts."""
+        keys = {a.key for a in artifacts}
+        for k in keys:
+            common_artifacts = ((a, files[i]) for i, a in enumerate(artifacts) if a.key == k)
+
+            res = requests.post(
+                f"{self.base_url}/create/{models.Artifact.__name__}",
+                files=itertools.chain(
+                    *(
+                        (
+                            (k, (a.fname, f.open("rb"), "application/octet")),
+                            (k + ".json", (a.fname, a.model_dump_json(), "application/json")),
+                        )
+                        for a, f in common_artifacts
+                    )
+                ),
+            )
+            res.raise_for_status()

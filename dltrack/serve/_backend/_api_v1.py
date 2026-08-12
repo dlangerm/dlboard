@@ -72,8 +72,13 @@ def log_artifact() -> dict[str, str]:
     try:
         _log.info("log artifact batch")
         store = get_artifact_store()
+        jsons = (
+            models.NewArtifact.model_validate_json(f.stream.read().decode())
+            for f in request.files.values()
+            if f.content_type == "application/json"
+        )
         store.log_artifacts(
-            (models.NewArtifact.model_validate(artifact) for artifact in request.json),
+            jsons,
             request.files,
         )
     except Exception:
@@ -82,6 +87,12 @@ def log_artifact() -> dict[str, str]:
     return {}
 
 
-@dash.hooks.route("artifact/<str:artifact_url>", methods=["GET"])  # pyright: ignore[reportArgumentType]
+@dash.hooks.route("artifact/<string:artifact_url>", methods=["GET"])  # pyright: ignore[reportArgumentType]
 def download_artifact(artifact_url: str) -> Response:
-    return get_artifact_store().download_artifact(AnyUrl(artifact_url))
+    try:
+        return get_artifact_store().download_artifact(
+            AnyUrl(artifact_url.replace("=", "/").replace("+", ":"))
+        )
+    except Exception:
+        _log.exception("failed to load artifact")
+        raise

@@ -7,6 +7,7 @@ import structlog
 from pydantic_settings import BaseSettings
 
 from dltrack.plugins import accordion_view, filesystem, sqlite, themes
+from dltrack.plugins.charts import image_series
 from dltrack.plugins.pages import (
     simple_admin_page,
     simple_experiment_page,
@@ -41,5 +42,6 @@ if __name__ == "__main__":
             simple_experiment_page,
             accordion_view,
             themes.DarkTheme,
+            image_series,
         ]
     ).run(debug=True)  # pyright: ignore[reportUnknownMemberType]
