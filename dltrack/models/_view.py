@@ -6,6 +6,7 @@ import itertools
 import json
 import typing
 from abc import ABC, abstractmethod
+from enum import StrEnum
 
 from pydantic import BaseModel, field_validator
 
@@ -13,6 +14,13 @@ if typing.TYPE_CHECKING:
     from collections.abc import Iterable
 
     from dltrack.models._data_store import DataStore
+
+
+class ColumnKind(StrEnum):
+    """Registry of dataframe column kinds a chart parameter field can be populated from."""
+
+    METRIC = "metric"
+    ARTIFACT = "artifact"
 
 
 class ChartType[P: BaseModel, D, C](ABC, BaseModel, frozen=True, extra="forbid"):
@@ -35,11 +43,24 @@ class ChartType[P: BaseModel, D, C](ABC, BaseModel, frozen=True, extra="forbid")
     @abstractmethod
     def hint_required_columns(cls, parameters: P) -> set[str] | None:
         """Hint at the columns required for this chart."""
-        return None
+
+    @classmethod
+    @abstractmethod
+    def hint_required_artifact_keys(cls, parameters: P) -> set[str] | None:
+        """Hint at the columns required for this chart."""
 
     @classmethod
     def register(cls, *, allow_override: bool = False) -> None:
         ChartTypeRegistry.register(cls, allow_override=allow_override)
+
+    @classmethod
+    @abstractmethod
+    def field_column_kinds(cls) -> dict[str, ColumnKind]:
+        """
+        Map string parameter field names to the column kind that populates them.
+
+        Fields left unlisted default to ColumnKind.METRIC.
+        """
 
 
 class ParameterField(BaseModel, frozen=True, extra="forbid"):
@@ -49,6 +70,7 @@ class ParameterField(BaseModel, frozen=True, extra="forbid"):
     type: typing.Literal["bool", "int", "float", "str"]
     required: bool
     default: bool | int | float | str | None = None
+    column_kind: ColumnKind | None = None
 
 
 class ChartTypeRegistry:
@@ -81,13 +103,20 @@ class ChartTypeRegistry:
     def get_registered_chart_types(cls) -> dict[str, dict[str, ParameterField]]:
         """Expose chart metadata for simple editors and plugins."""
         return {
-            name: cls._describe_parameter_fields(cls.get_chart_type(name).parameter_type())
+            name: cls._describe_parameter_fields(
+                cls.get_chart_type(name).parameter_type(),
+                cls.get_chart_type(name).field_column_kinds(),
+            )
             for name in sorted(cls._all_charts)
         }
 
     @staticmethod
-    def _describe_parameter_fields(parameter_type: type[BaseModel]) -> dict[str, ParameterField]:
+    def _describe_parameter_fields(
+        parameter_type: type[BaseModel],
+        field_column_kinds: dict[str, ColumnKind],
+    ) -> dict[str, ParameterField]:
         """Describe parameter fields for generic UI generation."""
+        field_column_kinds = field_column_kinds
         field_descriptors: dict[str, ParameterField] = {}
         for field_name, field in parameter_type.model_fields.items():
             annotation = field.annotation
@@ -108,6 +137,7 @@ class ChartTypeRegistry:
                 type=field_type,
                 required=field.is_required(),
                 default=field.default if not field.is_required() else None,
+                column_kind=field_column_kinds.get(field_name),
             )
         return field_descriptors
 
@@ -120,6 +150,13 @@ class ChartTypeRegistry:
     def hint_required_columns[T, C](cls, chart: ChartInstance[T, C]) -> set[str] | None:
         chart_type = cls._all_charts[chart.chart_type]
         return chart_type.hint_required_columns(chart_type.parameter_type().model_validate(chart.parameters))
+
+    @classmethod
+    def hint_required_artifact_keys[T, C](cls, chart: ChartInstance[T, C]) -> set[str] | None:
+        chart_type = cls._all_charts[chart.chart_type]
+        return chart_type.hint_required_artifact_keys(
+            chart_type.parameter_type().model_validate(chart.parameters)
+        )
 
 
 class ChartInstance[D, C](BaseModel, frozen=True, extra="forbid"):
@@ -138,6 +175,9 @@ class ChartInstance[D, C](BaseModel, frozen=True, extra="forbid"):
     def hint_required_columns(self) -> set[str] | None:
         """Hint the required columns for this chart to render."""
         return ChartTypeRegistry.hint_required_columns(self)
+
+    def hint_required_artifact_keys(self) -> set[str] | None:
+        return ChartTypeRegistry.hint_required_artifact_keys(self)
 
 
 class PanelInstance[D, C](BaseModel, frozen=True, extra="forbid"):
@@ -170,6 +210,9 @@ class PanelInstance[D, C](BaseModel, frozen=True, extra="forbid"):
         if None in hints:
             return None
         return hints  # pyright: ignore[reportReturnType]
+
+    def hint_required_artifact_keys(self) -> set[str | None]:
+        return set(itertools.chain(*[c.hint_required_artifact_keys() or set() for c in self.charts]))
 
 
 class NewPage[D, C](BaseModel, frozen=True, extra="forbid"):

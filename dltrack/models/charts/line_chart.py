@@ -10,7 +10,7 @@ import dash_mantine_components as dmc
 import pandas as pd
 from pydantic import BaseModel
 
-from dltrack.models._view import ChartType
+from dltrack.models._view import ChartType, ColumnKind
 
 colors = [
     "gray",
@@ -101,6 +101,11 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.LineChart], froze
             parameters.column,
             parameters.x_axis,
         }
+
+    @classmethod
+    @typing.override
+    def field_column_kinds(cls) -> dict[str, ColumnKind]:
+        return {"column": ColumnKind.METRIC, "x_axis": ColumnKind.METRIC}
 
 
 LineChart.register()

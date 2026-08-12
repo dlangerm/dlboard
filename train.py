@@ -2,7 +2,7 @@
 
 from pathlib import Path
 from random import random
-from typing import override
+from typing import cast, override
 
 import pytorch_lightning as pl
 import torch
@@ -10,7 +10,7 @@ from torch import nn
 from torch.utils.data import DataLoader, random_split
 from torchvision import datasets, transforms
 
-from dltrack.client import DLTrackLogger
+from dltrack.client import DLTrackLogger, Image
 
 LOGDIR = Path("./lightning-logs")
 
@@ -62,7 +62,7 @@ class MnistMLP(pl.LightningModule):
             logger=True,
             batch_size=inputs.size(0),
         )
-        self.log_extra_artifacts(batch, preds, targets)
+        self.log_extra_artifacts(batch, preds, targets, stage=stage)
 
         return loss, acc
 
@@ -88,9 +88,23 @@ class MnistMLP(pl.LightningModule):
         batch: tuple[torch.Tensor, torch.Tensor],
         preds: torch.Tensor,
         targets: torch.Tensor,
+        stage: str,
     ) -> None:
         """Hook for future image/table logging without cluttering the main training loop."""
-        _ = batch, preds, targets
+        inputs, _ = batch
+        assert self.trainer.logger is not None
+        lg = cast("DLTrackLogger", self.trainer.logger)
+        inputs = inputs.permute(0, 2, 3, 1)  # channels last
+        lg.log_image(
+            f"{stage}/img",
+            [
+                Image(
+                    image=(inputs[0].squeeze(-1) * 256).to(torch.uint8),
+                    tags={"pred": str(preds[0].item()), "target": str(targets[0].item())},
+                    step=self.trainer.global_step,
+                )
+            ],
+        )
 
 
 class MnistDataModule(pl.LightningDataModule):

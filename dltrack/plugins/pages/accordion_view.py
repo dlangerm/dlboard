@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import itertools
 import typing
 from io import StringIO
 from typing import TYPE_CHECKING, Any, TypedDict, cast
@@ -15,9 +14,9 @@ from dash.exceptions import PreventUpdate
 from pydantic import ValidationError
 from structlog.stdlib import get_logger
 
-from dltrack.models import Page, constants
+from dltrack.models import Artifact, Page, constants
 from dltrack.models._metric import LoggedMetrics
-from dltrack.models._view import ChartInstance, ChartTypeRegistry, PanelInstance, ParameterField
+from dltrack.models._view import ChartInstance, ChartTypeRegistry, ColumnKind, PanelInstance, ParameterField
 from dltrack.plugins.utilities import get_data_store
 
 if TYPE_CHECKING:
@@ -35,6 +34,7 @@ OPEN_PANEL_KEY: typing.Final = "open_panel"
 # --- edit mode / full dataframe cache ---
 EDIT_MODE_ID = "edit-mode-switch"
 FULL_DF_STORE_ID = "full-dataframe-store"
+COLUMN_KINDS_STORE_ID = "column-kinds-store"
 
 # --- add/edit-chart modal ---
 ADD_CHART_MODAL_ID = "add-chart-modal"
@@ -82,6 +82,41 @@ def _filter_excluded_runs(df: pd.DataFrame, page_settings: dict[str, Any]) -> pd
     return df[~df["run_id"].isin(excluded)]
 
 
+def _build_artifacts_dataframe(artifacts: typing.Iterable[Artifact]) -> pd.DataFrame:
+    """Pivot artifact refs (and tags) into columns per key, indexed by (run_id, step)."""
+    df = pd.DataFrame([a.model_dump(mode="json") for a in artifacts])
+    if df.empty:
+        return df
+
+    ref_pivot = df.pivot_table(index=["run_id", "step"], columns="key", values="ref", aggfunc="first")
+    tags_pivot = df.pivot_table(index=["run_id", "step"], columns="key", values="tags", aggfunc="first")
+    tags_pivot.columns = [f"{c}__tags" for c in tags_pivot.columns]
+
+    return ref_pivot.join(tags_pivot).reset_index()
+
+
+def _infer_column_kinds(
+    metric_columns: typing.Iterable[str], artifact_keys: typing.Iterable[str]
+) -> dict[str, ColumnKind]:
+    """
+    Tag every known column with its kind.
+
+    run_id is excluded (never a sensible field value);
+    step is kept since it's a common x_axis choice.
+    """
+    kinds = {c: ColumnKind.METRIC for c in metric_columns if c not in ("run_id", "index")}
+    kinds.update(dict.fromkeys(artifact_keys, ColumnKind.ARTIFACT))
+    return kinds
+
+
+def _group_columns_by_kind(column_kinds: dict[str, str]) -> dict[ColumnKind, list[str]]:
+    """Round-trip Store data (plain strings) back into ColumnKind-keyed groups."""
+    grouped: dict[ColumnKind, list[str]] = {}
+    for col, kind in column_kinds.items():
+        grouped.setdefault(ColumnKind(kind), []).append(col)
+    return grouped
+
+
 class BasicExperimentPage(Page[pd.DataFrame, dmc.Accordion, html.Div], frozen=True, extra="forbid"):
     """Basic experiment page."""
 
@@ -91,24 +126,42 @@ class BasicExperimentPage(Page[pd.DataFrame, dmc.Accordion, html.Div], frozen=Tr
         store: DataStore[...],
         experiment_id: int,
     ) -> list[pd.DataFrame]:
-        """Retrieve the dataframes for each panel, one dataframe per panel."""
-        required_columns = set(itertools.chain(*[p.hint_required_columns() or {} for p in self.panels]))
-        if any(hint is None for hint in required_columns):
-            _log.warning("A panel had a missing hint, fetching every metric, this can be expensive")
-            df = _filter_excluded_runs(
-                _build_metrics_dataframe(store.fetch_metrics(experiment_id)),
-                self.page_settings,
-            )
-            return [df] * len(self.panels)
+        """Retrieve one dataframe per panel, fetching only what each panel needs."""
+        dataframes: list[pd.DataFrame] = []
+        for panel in self.panels:
+            metric_cols = panel.hint_required_columns()
+            artifact_keys = panel.hint_required_artifact_keys()
 
-        cols = cast("set[str]", required_columns)
-        df = _filter_excluded_runs(
-            _build_metrics_dataframe(
-                store.fetch_metrics(experiment_id=experiment_id, metric_name_match=cols)
-            ),
-            self.page_settings,
-        )
-        return [df] * len(self.panels)
+            if (metric_cols is None or metric_cols) and artifact_keys:
+                _log.warning(
+                    "Panel %r mixes metric and artifact charts, fetching both is "
+                    "less efficient than a panel of one kind; consider splitting it.",
+                    panel.name,
+                )
+
+            metrics_df = pd.DataFrame()
+            if metric_cols is None:
+                _log.warning("A panel had a missing hint, fetching every metric, this can be expensive")
+                metrics_df = _build_metrics_dataframe(store.fetch_metrics(experiment_id))
+            elif metric_cols:
+                metrics_df = _build_metrics_dataframe(
+                    store.fetch_metrics(experiment_id=experiment_id, metric_name_match=metric_cols)
+                )
+
+            artifacts_df = pd.DataFrame()
+            if artifact_keys:
+                artifacts_df = _build_artifacts_dataframe(
+                    store.fetch_artifacts(experiment_id=experiment_id, keys=artifact_keys)
+                )
+
+            if not metrics_df.empty and not artifacts_df.empty:
+                df = metrics_df.merge(artifacts_df, on=["run_id", "step"], how="outer")
+            else:
+                df = metrics_df if not metrics_df.empty else artifacts_df
+
+            dataframes.append(_filter_excluded_runs(df, self.page_settings))
+
+        return dataframes
 
     @typing.override
     def render(
@@ -220,11 +273,10 @@ def _render_panel_charts(panel: PanelInstance[Any, Any], dataframe: pd.DataFrame
 def _param_field_input(
     field_name: str,
     field: ParameterField,
-    columns: list[str],
+    columns_by_kind: dict[ColumnKind, list[str]],
     *,
     override: bool | int | float | str | None = None,
 ) -> Component:
-    """Build an input component for a single chart parameter field."""
     input_id = _chart_param_id(field_name)
     label = f"{field_name} *" if field.required else field_name
     value = override if override is not None else field.default
@@ -238,16 +290,11 @@ def _param_field_input(
             value=value,
             step=1 if field.type == "int" else 0.1,
         )
-    # str fields: offer a Select of known columns when we have them; otherwise free text.
-    if columns:
-        return dmc.Select(
-            id=input_id,
-            label=label,
-            data=sorted(columns),
-            value=value,  # pyright: ignore[reportArgumentType]
-            searchable=True,
-        )
-    return dmc.TextInput(id=input_id, label=label, value=value or "")  # pyright: ignore[reportArgumentType]
+
+    options = columns_by_kind.get(field.column_kind, []) if field.column_kind is not None else None
+    if options:
+        return dmc.Select(id=input_id, label=label, data=sorted(options), value=value, searchable=True)
+    return dmc.TextInput(id=input_id, label=label, value=value or "")
 
 
 def _add_chart_modal() -> dmc.Modal:
@@ -307,6 +354,7 @@ def accordion_view(store: DataStore[...], experiment_id: int) -> dmc.Container:
             ),
             Store(id="current-page", data=page.model_dump_json()),
             Store(id=FULL_DF_STORE_ID),
+            Store(id=COLUMN_KINDS_STORE_ID),
             _add_chart_modal(),
         ],
     )
@@ -353,6 +401,7 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
     # --- edit mode: fetch the full dataframe once, cache it client-side, enable controls ---
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(FULL_DF_STORE_ID, "data"),
+        Output(COLUMN_KINDS_STORE_ID, "data"),
         Output({"type": "open-add-chart", "panel": ALL}, "disabled"),
         Output({"type": "edit-chart", "panel": ALL, "index": ALL}, "disabled"),
         Output({"type": "delete-chart", "panel": ALL, "index": ALL}, "disabled"),
@@ -371,9 +420,10 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         add_disabled: list[bool],
         edit_disabled: list[bool],
         delete_disabled: list[bool],
-    ) -> tuple[str | NoUpdate | None, list[bool], list[bool], list[bool]]:
+    ) -> tuple[str | NoUpdate | None, dict[str, ColumnKind] | NoUpdate, list[bool], list[bool], list[bool]]:
         if not checked:
             return (
+                no_update,
                 no_update,
                 [True] * len(add_disabled),
                 [True] * len(edit_disabled),
@@ -384,15 +434,27 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
             # already fetched once this session, don't refetch
             return (
                 no_update,
+                no_update,
                 [False] * len(add_disabled),
                 [False] * len(edit_disabled),
                 [False] * len(delete_disabled),
             )
 
         store = get_data_store()
-        df = _build_metrics_dataframe(store.fetch_metrics(experiment_id))
+        metrics_df = _build_metrics_dataframe(store.fetch_metrics(experiment_id))
+        artifacts = list(store.fetch_artifacts(experiment_id=experiment_id))
+        artifacts_df = _build_artifacts_dataframe(artifacts)
+
+        if not metrics_df.empty and not artifacts_df.empty:
+            df = metrics_df.merge(artifacts_df, on=["run_id", "step"], how="outer")
+        else:
+            df = metrics_df if not metrics_df.empty else artifacts_df
+
+        column_kinds = _infer_column_kinds(metrics_df.columns, {a.key for a in artifacts})
+        _log.info("column_kinds: %s", column_kinds)
         return (
             df.to_json(orient="split"),
+            column_kinds,
             [False] * len(add_disabled),
             [False] * len(edit_disabled),
             [False] * len(delete_disabled),
@@ -455,29 +517,26 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         return False
 
     # --- build the parameter form for the chosen chart type, pre-filled when editing ---
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(ADD_CHART_PARAMS_ID, "children"),
         Input(ADD_CHART_TYPE_SELECT_ID, "value"),
-        State(FULL_DF_STORE_ID, "data"),
+        State(COLUMN_KINDS_STORE_ID, "data"),
         State(ADD_CHART_INITIAL_PARAMS_ID, "data"),
         prevent_initial_call=True,
     )
     def build_param_form(
         chart_type_name: str | None,
-        df_json: str | None,
+        column_kinds: dict[str, str] | None,
         initial_params: dict[str, Any] | None,
     ) -> list[Component]:
         if not chart_type_name:
             return []
-        columns: list[str] = []
-        if df_json:
-            df = pd.read_json(StringIO(df_json), orient="split")
-            columns = [c for c in df.columns if c not in ("index",)]
-
+        columns_by_kind = _group_columns_by_kind(column_kinds or {})
         fields = ChartTypeRegistry.get_registered_chart_types()[chart_type_name]
+        _log.info("chart_type=%s columns_by_kind=%s fields=%s", chart_type_name, columns_by_kind, fields)
         initial_params = initial_params or {}
         return [
-            _param_field_input(name, field, columns, override=initial_params.get(name))
+            _param_field_input(name, field, columns_by_kind, override=initial_params.get(name))
             for name, field in fields.items()
         ]
 

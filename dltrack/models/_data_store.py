@@ -90,6 +90,21 @@ class DataStore[**P](typing.Protocol):
         """Update a page."""
         ...
 
+    def log_artifact_refs(self, artifacts: Iterable[models.Artifact]) -> None:
+        """Log a set of artifacts."""
+        ...
+
+    def fetch_artifacts(
+        self,
+        keys: set[str] | None = None,
+        run_id: int | None = None,
+        experiment_id: int | None = None,
+        step: int | None = None,
+        fname: str | None = None,
+    ) -> typing.Iterator[models.Artifact]:
+        """Get artifacts for a run or experiment."""
+        ...
+
 
 class ArtifactStore[**P](typing.Protocol):
     """An artifact store for files and arbitrary byte-like data."""
@@ -108,17 +123,6 @@ class ArtifactStore[**P](typing.Protocol):
         files: typing.Mapping[str, FileStorage],
     ) -> None:
         """Log a set of artifacts."""
-        ...
-
-    def get_artifacts(
-        self,
-        keys: set[str] | None = None,
-        run_id: int | None = None,
-        experiment_id: int | None = None,
-        step: int | None = None,
-        fname: str | None = None,
-    ) -> typing.Iterator[models.Artifact]:
-        """Get artifacts for a run or experiment."""
         ...
 
     def download_artifact(self, ref: AnyUrl) -> Response:
