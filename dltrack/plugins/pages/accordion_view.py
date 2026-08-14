@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, TypedDict, cast
 import dash_mantine_components as dmc
 import pandas as pd
 from dash import ALL, Dash, Input, NoUpdate, Output, State, ctx, html, no_update
-from dash.dcc import Store
+from dash.dcc import Interval, Store  # extend existing `from dash.dcc import Store`
 from dash.exceptions import PreventUpdate
 from pydantic import ValidationError
 from structlog.stdlib import get_logger
@@ -30,6 +30,9 @@ NEW_PANEL_ID = "new-panel-button"
 NEW_PANEL_NAME_ID = "panel-name"
 ACCORDION_ID = "experiment-accordion"
 OPEN_PANEL_KEY: typing.Final = "open_panel"
+
+AUTO_REFRESH_INTERVAL_ID = "auto-refresh-interval"
+AUTO_REFRESH_MS = 5000
 
 # --- edit mode / full dataframe cache ---
 EDIT_MODE_ID = "edit-mode-switch"
@@ -219,15 +222,12 @@ class BasicExperimentPage(Page[pd.DataFrame, dmc.Accordion, html.Div], frozen=Tr
 
 def _build_metrics_dataframe(metrics: typing.Iterable[LoggedMetrics]) -> pd.DataFrame:
     """Build a metrics dataframe from an iterable of LoggedMetrics."""
-    dfs = (
-        pd.DataFrame.from_dict(
-            d.metrics | {f: [getattr(d, f)] for f in LoggedMetrics.model_fields if f != "metrics"}
-        )
-        for d in metrics
-    )
-    if dfs:
-        return pd.concat(dfs).reset_index()
-    return pd.DataFrame()
+    rows = [
+        d.metrics | {f: getattr(d, f) for f in LoggedMetrics.model_fields if f != "metrics"} for d in metrics
+    ]
+    if not rows:
+        return pd.DataFrame()
+    return pd.DataFrame.from_records(rows).reset_index()
 
 
 def _render_panel_charts(panel: PanelInstance[Any, Any], dataframe: pd.DataFrame) -> list[dmc.Stack]:
@@ -355,6 +355,7 @@ def accordion_view(store: DataStore[...], experiment_id: int) -> dmc.Container:
             Store(id="current-page", data=page.model_dump_json()),
             Store(id=FULL_DF_STORE_ID),
             Store(id=COLUMN_KINDS_STORE_ID),
+            Interval(id=AUTO_REFRESH_INTERVAL_ID, interval=AUTO_REFRESH_MS, n_intervals=0),
             _add_chart_modal(),
         ],
     )
@@ -672,3 +673,22 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         store = get_data_store()
         store.update_page(curr_page)
         return curr_page.model_dump_json()
+
+    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+        Output(constants.METRIC_CONTENT_ID, component_property="children", allow_duplicate=True),
+        Input(AUTO_REFRESH_INTERVAL_ID, "n_intervals"),
+        State(constants.STATE_EXPERIMENT_ID, component_property="data"),
+        State(EDIT_MODE_ID, "checked"),
+        prevent_initial_call=True,
+    )
+    def auto_refresh(
+        _n_intervals: int,
+        experiment_id: int,
+        edit_mode: bool,  # noqa: FBT001
+    ) -> dmc.Container:
+        if edit_mode:
+            # Skip while the user is actively editing — a full re-render would wipe
+            # the open modal / in-progress form state.
+            raise PreventUpdate
+        store = get_data_store()
+        return accordion_view(store, experiment_id=experiment_id)
