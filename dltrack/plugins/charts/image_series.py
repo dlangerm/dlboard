@@ -39,14 +39,10 @@ def _instance_id(parameters: ImageChartSettings) -> str:
     return hashlib.shake_256(raw.encode()).hexdigest(8)
 
 
-def _format_caption(raw_tags: object) -> str:
-    if not isinstance(raw_tags, str):
-        return ""
+def _format_caption(raw_tags: str) -> str:
     try:
-        tags = json.loads(raw_tags)
+        tags = typing.cast("dict[str,str]", json.loads(raw_tags))
     except (TypeError, ValueError):
-        return ""
-    if not isinstance(tags, dict) or not tags:
         return ""
     return ", ".join(f"{k}: {v}" for k, v in tags.items())
 

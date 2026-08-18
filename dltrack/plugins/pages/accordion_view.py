@@ -154,7 +154,10 @@ class BasicExperimentPage(Page[pd.DataFrame, dmc.Accordion, html.Div], frozen=Tr
             artifacts_df = pd.DataFrame()
             if artifact_keys:
                 artifacts_df = _build_artifacts_dataframe(
-                    store.fetch_artifacts(experiment_id=experiment_id, keys=artifact_keys)
+                    store.fetch_artifacts(
+                        experiment_id=experiment_id,
+                        keys={k for k in artifact_keys if k is not None},
+                    )
                 )
 
             if not metrics_df.empty and not artifacts_df.empty:
@@ -293,8 +296,8 @@ def _param_field_input(
 
     options = columns_by_kind.get(field.column_kind, []) if field.column_kind is not None else None
     if options:
-        return dmc.Select(id=input_id, label=label, data=sorted(options), value=value, searchable=True)
-    return dmc.TextInput(id=input_id, label=label, value=value or "")
+        return dmc.Select(id=input_id, label=label, data=sorted(options), value=value, searchable=True)  # pyright: ignore[reportArgumentType]
+    return dmc.TextInput(id=input_id, label=label, value=value or "")  # pyright: ignore[reportArgumentType]
 
 
 def _add_chart_modal() -> dmc.Modal:
@@ -486,10 +489,11 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
 
         curr_page = BasicExperimentPage.model_validate_json(page_json)
         panel = next(p for p in curr_page.panels if p.name == triggered_id["panel"])
-        chart = panel.charts[triggered_id["index"]]
+        idx = triggered_id["index"] or -1
+        chart = panel.charts[idx]
         return (
             True,
-            {"panel": str(triggered_id["panel"]), "index": int(triggered_id["index"])},
+            {"panel": str(triggered_id["panel"]), "index": idx},
             chart.chart_type,
             chart.parameters,
         )
@@ -518,7 +522,7 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         return False
 
     # --- build the parameter form for the chosen chart type, pre-filled when editing ---
-    @app.callback(
+    @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(ADD_CHART_PARAMS_ID, "children"),
         Input(ADD_CHART_TYPE_SELECT_ID, "value"),
         State(COLUMN_KINDS_STORE_ID, "data"),

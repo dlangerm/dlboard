@@ -3,7 +3,7 @@
 from collections.abc import Iterable
 from typing import Iterator
 
-from pydantic import BaseModel, PastDatetime
+from pydantic import AwareDatetime, BaseModel
 
 
 class UnderlyingMetricTableEntry(BaseModel, frozen=True, extra="forbid"):
@@ -21,7 +21,7 @@ class UnderlyingMetricTableEntry(BaseModel, frozen=True, extra="forbid"):
     """Run Id for the metric."""
     step: int
     """Step the metric was taken at."""
-    timestamp_utc: PastDatetime
+    timestamp_utc: AwareDatetime
     """Time recorded from the client."""
 
 
@@ -36,7 +36,7 @@ class LoggedMetrics(BaseModel, frozen=True, extra="forbid"):
     """The experiment to associate with the metrics."""
     run_id: int
     """The run to associate with the metrics."""
-    timestamp_utc: PastDatetime
+    timestamp_utc: AwareDatetime
     """Timestamp of the metric."""
 
     def to_underlying(self) -> Iterator[UnderlyingMetricTableEntry]:

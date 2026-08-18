@@ -1,7 +1,6 @@
 """All exported data models."""
 
-from dltrack.models import charts
-from dltrack.models._artifact import Artifact, NewArtifact
+from dltrack.models._artifact import Artifact, LoggedArtifact, NewArtifact
 from dltrack.models._data_store import ArtifactStore, DataStore
 from dltrack.models._experiment import Experiment, NewExperiment
 from dltrack.models._hparams import HyperParams, NewHyperParams
@@ -18,6 +17,7 @@ __all__ = [
     "DataStore",
     "Experiment",
     "HyperParams",
+    "LoggedArtifact",
     "LoggedMetrics",
     "NewArtifact",
     "NewExperiment",
@@ -30,5 +30,4 @@ __all__ = [
     "Project",
     "Run",
     "UnderlyingMetricTableEntry",
-    "charts",
 ]

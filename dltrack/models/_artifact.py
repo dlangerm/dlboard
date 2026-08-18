@@ -1,8 +1,37 @@
 """Generic artifact class."""
 
-import json
+from __future__ import annotations
 
-from pydantic import BaseModel, field_validator
+import typing
+
+from pydantic import BaseModel
+
+if typing.TYPE_CHECKING:
+    from pathlib import Path
+
+
+@typing.runtime_checkable
+class LoggedArtifact(typing.Protocol):
+    """Any logged artifact."""
+
+    @property
+    def key(self) -> str:
+        """Artifact key, unique keys show up as a separate chart."""
+        ...
+
+    @property
+    def tags(self) -> dict[str, str]:
+        """Tags for this artifact."""
+        ...
+
+    @property
+    def step(self) -> int:
+        """Global step where this artifact was logged."""
+        ...
+
+    def to_artifact(self, local_temp: Path, run_id: int, experiment_id: int) -> tuple[NewArtifact, Path]:
+        """Convert this artifact to a new artifact."""
+        ...
 
 
 class NewArtifact(BaseModel, frozen=True, extra="forbid"):
@@ -25,13 +54,6 @@ class NewArtifact(BaseModel, frozen=True, extra="forbid"):
 
     step: int | None
     """If given, log this artifact for a particular step, useful for visualization."""
-
-    @field_validator("tags", mode="before")
-    @classmethod
-    def _str_to_json(cls, tags: str | dict[str, str]) -> dict[str, str]:
-        if isinstance(tags, str):
-            return json.loads(tags)
-        return tags
 
 
 class Artifact(NewArtifact, frozen=True, extra="forbid"):

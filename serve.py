@@ -7,7 +7,7 @@ import structlog
 from pydantic_settings import BaseSettings
 
 from dltrack.plugins import accordion_view, filesystem, sqlite, themes
-from dltrack.plugins.charts import image_series
+from dltrack.plugins.charts import image_series, line_chart
 from dltrack.plugins.pages import (
     simple_admin_page,
     simple_experiment_page,
@@ -16,9 +16,8 @@ from dltrack.plugins.pages import (
 )
 from dltrack.serve import app
 
-structlog.configure_once(
-    wrapper_class=structlog.make_filtering_bound_logger(logging.INFO),
-)
+structlog.configure_once(wrapper_class=structlog.make_filtering_bound_logger(logging.INFO))
+
 _log = structlog.stdlib.get_logger(__name__)
 
 
@@ -43,5 +42,6 @@ if __name__ == "__main__":
             accordion_view,
             themes.DarkTheme,
             image_series,
+            line_chart,
         ]
     ).run(debug=True)  # pyright: ignore[reportUnknownMemberType]

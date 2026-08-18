@@ -1,5 +1,7 @@
 """Routes for doing general api things."""
 
+from time import perf_counter
+
 import dash
 from flask import Response, request
 from pydantic import AnyUrl
@@ -72,15 +74,19 @@ def log_artifact() -> dict[str, str]:
     try:
         _log.info("log artifact batch")
         store = get_artifact_store()
+        t0 = perf_counter()
         jsons = (
             models.NewArtifact.model_validate_json(f.stream.read().decode())
             for f in request.files.values()
             if f.content_type == "application/json"
         )
-        store.log_artifacts(
-            jsons,
-            request.files,
-        )
+        try:
+            store.log_artifacts(
+                jsons,
+                request.files,
+            )
+        finally:
+            _log.info("logging artifacts took %.3f seconds", perf_counter() - t0)
     except Exception:
         _log.exception("failed to create new artifacts")
         raise
