@@ -112,10 +112,15 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         statement, values = sql.insert(models.Experiment, experiment)
         return self._consume_row_iterator(self._execute_sql_query(models.Experiment, statement, values))[0]
 
-    def get_experiment(self, database_id: int) -> models.Experiment:
+    def get_experiment(self, database_id: int) -> models.Experiment | None:
         """Tfdsafs."""
         _log.info("Getting experiment id %s", database_id)
-        return next(self._execute_sql_query(models.Experiment, sql.get_by_id(models.Experiment, database_id)))
+        try:
+            return next(
+                self._execute_sql_query(models.Experiment, sql.get_by_id(models.Experiment, database_id))
+            )
+        except StopIteration:
+            return None
 
     def get_experiments(self, project_id: int) -> Iterator[models.Experiment]:
         """Tfdsafs."""

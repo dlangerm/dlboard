@@ -3,40 +3,49 @@
 from __future__ import annotations
 
 import contextlib
-import json
 import logging
 import tempfile
+import threading
 import time
+import warnings
 from argparse import Namespace
 from multiprocessing import Queue, get_context
 from pathlib import Path
 from queue import Empty
-from typing import TYPE_CHECKING, Annotated, Any, override
+from typing import TYPE_CHECKING, Any, NamedTuple, override
 
-import dltype
-import numpy as np  # noqa: TC002
 import pendulum
-import PIL
-import PIL.Image
-import torch
-from pydantic import BaseModel, field_validator
 from pytorch_lightning.loggers import Logger
 
 from dltrack import models
 from dltrack.client.api import DltrackAPI
 
 if TYPE_CHECKING:
-    type QType = Queue[tuple[dict[str, float], int | None]]
-    type ArtifactQType = Queue[tuple[str, list[Image]]]
+    from collections.abc import Sequence
 
-QUEUE_SIZE = 500
-FLUSH_SIZE = 100
-ARTIFACT_FLUSH_SIZE = 10
-MAX_WAIT_S = 5
+    from dltrack.models._artifact import LoggedArtifact
+
+    type QType = Queue[tuple[dict[str, float], int | None]]
+    type ArtifactQType = Queue[Sequence[models.LoggedArtifact]]
+
+
 _log = logging.getLogger(__name__)
 
 
-def process_metrics_async(exp_id: int, run_id: int, api: DltrackAPI, q: QType) -> None:
+class LogProcParams(NamedTuple):
+    """Process parameters for a logger daemon."""
+
+    flush_size: int
+    wait_sec: float = 1
+
+
+def process_metrics_async(
+    exp_id: int,
+    run_id: int,
+    api: DltrackAPI,
+    q: QType,
+    params: LogProcParams,
+) -> None:
     """Logger background process."""
     last_logged = time.perf_counter()
     cur_batch: list[models.LoggedMetrics] = []
@@ -45,7 +54,8 @@ def process_metrics_async(exp_id: int, run_id: int, api: DltrackAPI, q: QType) -
             step = -1
             metrics = {}
             with contextlib.suppress(Empty):
-                metrics, step = q.get(timeout=1)
+                metrics, step = q.get(timeout=params.wait_sec / 10)
+
             if metrics:
                 obj = models.LoggedMetrics(
                     metrics=metrics,  # pyright: ignore[reportArgumentType]
@@ -56,18 +66,27 @@ def process_metrics_async(exp_id: int, run_id: int, api: DltrackAPI, q: QType) -
                 )
                 cur_batch.append(obj)
             log_diff = time.perf_counter() - last_logged
-            if len(cur_batch) > FLUSH_SIZE or log_diff > MAX_WAIT_S:
+            if len(cur_batch) > params.flush_size or log_diff > params.wait_sec:
                 _log.debug("logging batch of length %s", len(cur_batch))
                 api.log_metric_batch(cur_batch)
+                _log.info("Shipped len %s/%s metrics", len(cur_batch), q.qsize())
                 cur_batch.clear()
-                if log_diff > MAX_WAIT_S:
-                    _log.warning("Logger process was idle")
+                if log_diff > params.wait_sec:
+                    _log.debug("Metrics logger process was idle")
                 last_logged = time.perf_counter()
+        except KeyboardInterrupt:
+            raise
         except Exception:  # noqa: BLE001
             _log.exception("Failed to ship metrics")
 
 
-def process_artifacts_async(exp_id: int, run_id: int, api: DltrackAPI, q: ArtifactQType) -> None:
+def process_artifacts_async(
+    exp_id: int,
+    run_id: int,
+    api: DltrackAPI,
+    q: ArtifactQType,
+    params: LogProcParams,
+) -> None:
     """Logger background process for artifacts."""
     last_logged = time.perf_counter()
     cur_batch: list[models.NewArtifact] = []
@@ -76,50 +95,48 @@ def process_artifacts_async(exp_id: int, run_id: int, api: DltrackAPI, q: Artifa
         tmp = Path(_tmp)
         while True:
             try:
-                key = None
-                img_list: list[Image] = []
+                artifact_list = None
                 with contextlib.suppress(Empty):
-                    key, img_list = q.get(timeout=1)
+                    artifact_list = q.get(timeout=params.wait_sec)
 
-                if key and img_list:
-                    for im in img_list:
-                        im_underlying = im.image.numpy() if isinstance(im.image, torch.Tensor) else im.image
-                        pil_img = PIL.Image.fromarray(im_underlying)
-                        target = (tmp / str(len(files))).with_suffix(".jpg")
-                        pil_img.save(target)
-
-                        obj = models.NewArtifact(
-                            key=key,
-                            fname=target.name,
-                            run_id=run_id,
-                            experiment_id=exp_id,
-                            step=im.step,
-                            tags=im.tags,
-                        )
+                if artifact_list:
+                    _log.debug("popped %s off q len %s", len(artifact_list), q.qsize())
+                    for art in artifact_list:
+                        obj, target = art.to_artifact(tmp, run_id=run_id, experiment_id=exp_id)
                         cur_batch.append(obj)
                         files.append(target)
 
                 log_diff = time.perf_counter() - last_logged
-                if len(cur_batch) > ARTIFACT_FLUSH_SIZE or log_diff > MAX_WAIT_S:
+                if len(cur_batch) > params.flush_size or log_diff > params.wait_sec:
                     _log.debug("logging batch of artifacts length %s", len(cur_batch))
                     api.log_artifact_batch(cur_batch, files)
+                    _log.info("shipped artifact batch of length %s/%s", len(files), q.qsize())
                     cur_batch.clear()
                     files.clear()
-                    if log_diff > MAX_WAIT_S:
-                        _log.warning("Logger process was idle")
+                    if log_diff > params.wait_sec:
+                        _log.warning("Artifact logger process was idle")
                     last_logged = time.perf_counter()
+            except KeyboardInterrupt:
+                _log.info("keyboard interrupt detected")
+                raise
             except Exception:  # noqa: BLE001
                 _log.exception("Failed to ship artifacts")
+                cur_batch.clear()
+                files.clear()
 
 
 class DLTrackLogger(Logger):
     """The lightning logger for dltrack."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         project_id: int,
         experiment_id: int | None = None,
         server_url: str = "http://localhost:8050",
+        metrics_q_size: int = 500,
+        metrics_q_flush_size: int = 100,
+        artifact_q_size: int = 100,
+        artifact_q_flush_size: int = 10,
     ) -> None:
         """Initialize with an existing experiment id, if none is given one will be created."""
         self._project_id = project_id
@@ -130,23 +147,52 @@ class DLTrackLogger(Logger):
         self._experiment_id = experiment_id
         self._run_id = self._api.create_run(models.NewRun(experiment_id=self._experiment_id)).id
         ctx = get_context("spawn")
-        self._metrics_q: QType = ctx.Queue(maxsize=QUEUE_SIZE)
-        self._image_q: ArtifactQType = ctx.Queue(maxsize=QUEUE_SIZE)
+        self._metrics_q: QType = ctx.Queue(maxsize=metrics_q_size)
+        self._art_q: ArtifactQType = ctx.Queue(maxsize=artifact_q_size)
         self._metric_proc = ctx.Process(
             target=process_metrics_async,
-            args=(self._experiment_id, self._run_id, self._api, self._metrics_q),
+            args=(
+                self._experiment_id,
+                self._run_id,
+                self._api,
+                self._metrics_q,
+                LogProcParams(flush_size=metrics_q_flush_size, wait_sec=5),
+            ),
             name="logger-proc",
             daemon=True,
         )
-        self._img_proc = ctx.Process(
+        self._art_proc = ctx.Process(
             target=process_artifacts_async,
-            args=(self._experiment_id, self._run_id, self._api, self._image_q),
+            args=(
+                self._experiment_id,
+                self._run_id,
+                self._api,
+                self._art_q,
+                LogProcParams(flush_size=artifact_q_flush_size, wait_sec=5),
+            ),
             name="artifact-proc",
             daemon=True,
         )
         self._metric_proc.start()
-        self._img_proc.start()
+        self._art_proc.start()
+        threading.Thread(target=self._report_thread, daemon=True).start()
         super().__init__()
+
+    def _report_thread(self) -> None:
+        while True:
+            try:
+                _log.warning(
+                    "Metric Len: %s Artifact Len %s, Metric_proc %s Artifact_proc %s",
+                    self._metrics_q.qsize(),
+                    self._art_q.qsize(),
+                    self._metric_proc.exitcode,
+                    self._art_proc.exitcode,
+                )
+                if (self._metric_proc.exitcode or 0) < 0 and (self._art_proc.exitcode or 0) < 0:
+                    return
+                time.sleep(1)
+            except KeyboardInterrupt:
+                return
 
     @property
     @override
@@ -173,36 +219,19 @@ class DLTrackLogger(Logger):
 
     @override
     def log_metrics(self, metrics: dict[str, float], step: int | None = None) -> None:
+        assert self._metric_proc.is_alive(), "Metric process failed, refusing to back up queue"
+        if self._metrics_q.full():
+            warnings.warn(
+                "Backpressure on metric queue detected, this will impact iteration speed", stacklevel=2
+            )
+
         self._metrics_q.put((metrics, step))
 
-    def log_image(self, key: str, images: list[Image]) -> None:
+    def log_artifact(self, artifacts: Sequence[LoggedArtifact]) -> None:
         """Log an image."""
-        self._image_q.put((key, images))
-
-
-class Image(BaseModel, frozen=True, extra="forbid"):
-    """An image to log to the backend."""
-
-    image: Annotated[torch.Tensor | np.ndarray, dltype.UInt8Tensor("height width *channels")]
-    """An image to log. Expected to be in CHW format."""
-    tags: dict[str, str] = {}
-    """Tags for the image, for use by plugins."""
-    step: int
-    """The global step of the trainer."""
-
-    @field_validator("image", mode="before")
-    @classmethod
-    def _move_image_to_cpu(cls, image: torch.Tensor | np.ndarray) -> torch.Tensor | np.ndarray:
-        if isinstance(image, torch.Tensor):
-            return image.cpu()
-        return image
-
-    @field_validator("tags", mode="before")
-    @classmethod
-    def _str_to_json(cls, tags: str | dict[str, str]) -> dict[str, str]:
-        if isinstance(tags, str):
-            return json.loads(tags)
-        return tags
-
-
-Image.model_rebuild()
+        assert self._metric_proc.is_alive(), "Artifact process failed, refusing to back up queue"
+        if self._art_q.full():
+            warnings.warn(
+                "Backpressure on artifact queue detected, this will impact iteration speed", stacklevel=2
+            )
+        self._art_q.put(artifacts)

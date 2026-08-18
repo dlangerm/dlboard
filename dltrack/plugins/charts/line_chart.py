@@ -12,6 +12,9 @@ from pydantic import BaseModel
 
 from dltrack.models._view import ChartType, ColumnKind
 
+if typing.TYPE_CHECKING:
+    from dash import Dash
+
 colors = [
     "gray",
     "red",
@@ -108,4 +111,6 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.LineChart], froze
         return {"column": ColumnKind.METRIC, "x_axis": ColumnKind.METRIC}
 
 
-LineChart.register()
+def plug(app: Dash) -> None:  # noqa: ARG001
+    """Plugin."""
+    LineChart.register()

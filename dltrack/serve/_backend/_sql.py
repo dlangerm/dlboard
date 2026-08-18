@@ -7,7 +7,7 @@ import typing
 from datetime import datetime
 from types import NoneType, UnionType
 
-from pydantic import BaseModel, PastDatetime
+from pydantic import AwareDatetime, BaseModel
 from structlog.stdlib import get_logger
 
 if typing.TYPE_CHECKING:
@@ -104,7 +104,7 @@ def annotation_to_sqltype(annotation: type, *, nullable: bool = False) -> str:
             return f"INTEGER{suffix}"
         case float():
             return f"REAL{suffix}"
-        case dict() | list() | datetime() | PastDatetime():  # pyright: ignore[reportGeneralTypeIssues]
+        case dict() | list() | datetime() | AwareDatetime():  # pyright: ignore[reportGeneralTypeIssues]
             return f"TEXT{suffix}"
         case bytes():
             return f"BLOB{suffix}"

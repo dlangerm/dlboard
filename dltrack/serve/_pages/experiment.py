@@ -13,7 +13,9 @@ def layout(experiment_id: str) -> list[html.Div | dcc.Store]:
     # retrieve the project id from the experiment id and store it in a dcc.Store component
     store = get_data_store()
     exp = store.get_experiment(int(experiment_id))
-    assert exp
+    if not exp:
+        return [html.Div(f"Experiment {experiment_id} not found")]
+
     hparams = store.fetch_hyperparams(int(experiment_id))
 
     return [

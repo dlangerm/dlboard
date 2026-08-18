@@ -10,7 +10,8 @@ from torch import nn
 from torch.utils.data import DataLoader, random_split
 from torchvision import datasets, transforms
 
-from dltrack.client import DLTrackLogger, Image
+from dltrack.client import DLTrackLogger
+from dltrack.plugins.artifacts import image
 
 LOGDIR = Path("./lightning-logs")
 
@@ -95,15 +96,16 @@ class MnistMLP(pl.LightningModule):
         assert self.trainer.logger is not None
         lg = cast("DLTrackLogger", self.trainer.logger)
         inputs = inputs.permute(0, 2, 3, 1)  # channels last
-        lg.log_image(
-            f"{stage}/img",
+        lg.log_artifact(
             [
-                Image(
-                    image=(inputs[0].squeeze(-1) * 256).to(torch.uint8),
-                    tags={"pred": str(preds[0].item()), "target": str(targets[0].item())},
+                image.Image(
+                    key=f"{stage}/img",
+                    image=(inputs[i].squeeze(-1) * 256).to(torch.uint8),
+                    tags={"pred": str(preds[i].item()), "target": str(targets[i].item())},
                     step=self.trainer.global_step,
                 )
-            ],
+                for i in range(0, len(inputs), len(inputs) // 3)
+            ]
         )
 
 
