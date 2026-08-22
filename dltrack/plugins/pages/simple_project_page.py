@@ -8,7 +8,7 @@ import dash_mantine_components as dmc
 from dash import Dash, Input, Output, State
 
 from dltrack.models import NewExperiment, constants
-from dltrack.plugins.utilities import get_data_store
+from dltrack.serve import get_data_store
 
 PROJECT_ID: typing.Final = "project-id"
 EXP_LIST_ID: typing.Final = "experiment-list-id"

@@ -1,6 +1,5 @@
 {
   "recommendations": [
-    "charliermarsh.ruff",
-    "emeraldwalk.runonsave"
+    "charliermarsh.ruff"
   ]
 }

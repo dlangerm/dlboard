@@ -19,6 +19,7 @@ dependencies = [
   "pydantic>=2.13.4",
   "pydantic-settings>=2.14.2",
   "pytorch-lightning>=2.6.5",
+  "rich>=15.0.0",
   "structlog>=26.1.0"
 ]
 description = "What if mlflow didn't suck and weights & biases was free?"

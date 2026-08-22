@@ -20,7 +20,7 @@ from flask import Response, send_from_directory
 from structlog.stdlib import get_logger
 
 from dltrack import models
-from dltrack.plugins.utilities._data_store import get_data_store, set_artifact_store
+from dltrack.serve import get_data_store, set_artifact_store
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -86,21 +86,6 @@ class FSArtifactStore(models.ArtifactStore[Path, int]):
         self._file_staging_dir = Path(tempfile.gettempdir())
         self._save_artifact_thread.start()
         self._store_artifact_proc.start()
-        Thread(target=self._report_thread, daemon=True).start()
-
-    def _report_thread(self) -> None:
-        while True:
-            try:
-                _log.warning(
-                    "Storeq: %s ArtQ %s, Storeproc %s Saveproc %s",
-                    self._store_q.qsize(),
-                    self._saved_artifact_q.qsize(),
-                    self._store_artifact_proc.exitcode,
-                    self._save_artifact_thread.is_alive(),
-                )
-                time.sleep(1)
-            except KeyboardInterrupt:
-                return
 
     def _get_data_store_or_wait_for_app(self) -> DataStore[...]:
         try:

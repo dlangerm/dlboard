@@ -7,7 +7,7 @@ from dash import Dash, Input, Output, State
 
 from dltrack import models
 from dltrack.models import constants
-from dltrack.plugins.utilities import get_data_store
+from dltrack.serve import get_data_store
 
 PROJECT_LIST_ID: typing.Final = "project-list-id"
 NEW_PROJECT_BUTTON_ID: typing.Final = "new-project-button"

@@ -5,7 +5,7 @@ from dash import dcc, html
 from dash.dcc import Store
 
 from dltrack.models import constants
-from dltrack.plugins.utilities._data_store import get_data_store
+from dltrack.serve import get_data_store
 
 
 def layout(experiment_id: str) -> list[html.Div | dcc.Store]:
