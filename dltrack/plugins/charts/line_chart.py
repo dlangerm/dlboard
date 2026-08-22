@@ -65,7 +65,7 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.LineChart], froze
 
         for c in dataframe.columns:
             if str(dataframe[c].dtype) in ("object", "str"):
-                with contextlib.suppress(ValueError):
+                with contextlib.suppress(ValueError, TypeError):
                     dataframe[c] = pd.to_datetime(dataframe[c], utc=True, format="ISO8601")
 
         axis_df = dataframe.loc[dataframe[x_col].notna(), axis_cols]
