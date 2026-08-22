@@ -5,7 +5,6 @@ from __future__ import annotations
 import contextlib
 import logging
 import tempfile
-import threading
 import time
 import warnings
 from argparse import Namespace
@@ -18,15 +17,15 @@ import pendulum
 from pytorch_lightning.loggers import Logger
 
 from dltrack import models
-from dltrack.client.api import DltrackAPI
+from dltrack.plugins.backend.basic_rest_backend import BasicDltrackAPI
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from dltrack.models._artifact import LoggedArtifact
+    from dltrack.models._artifact import AnyArtifact
 
     type QType = Queue[tuple[dict[str, float], int | None]]
-    type ArtifactQType = Queue[Sequence[models.LoggedArtifact]]
+    type ArtifactQType = Queue[Sequence[models.AnyArtifact]]
 
 
 _log = logging.getLogger(__name__)
@@ -42,7 +41,7 @@ class LogProcParams(NamedTuple):
 def process_metrics_async(
     exp_id: int,
     run_id: int,
-    api: DltrackAPI,
+    api: BasicDltrackAPI,
     q: QType,
     params: LogProcParams,
 ) -> None:
@@ -83,7 +82,7 @@ def process_metrics_async(
 def process_artifacts_async(
     exp_id: int,
     run_id: int,
-    api: DltrackAPI,
+    api: BasicDltrackAPI,
     q: ArtifactQType,
     params: LogProcParams,
 ) -> None:
@@ -97,7 +96,7 @@ def process_artifacts_async(
             try:
                 artifact_list = None
                 with contextlib.suppress(Empty):
-                    artifact_list = q.get(timeout=params.wait_sec)
+                    artifact_list = q.get(timeout=params.wait_sec / 10)
 
                 if artifact_list:
                     _log.debug("popped %s off q len %s", len(artifact_list), q.qsize())
@@ -140,7 +139,7 @@ class DLTrackLogger(Logger):
     ) -> None:
         """Initialize with an existing experiment id, if none is given one will be created."""
         self._project_id = project_id
-        self._api = DltrackAPI(base_url=server_url)
+        self._api = BasicDltrackAPI(base_url=server_url)
         if experiment_id is None:
             experiment = self._api.create_experiment(models.NewExperiment(project_id=project_id))
             experiment_id = experiment.id
@@ -175,24 +174,7 @@ class DLTrackLogger(Logger):
         )
         self._metric_proc.start()
         self._art_proc.start()
-        threading.Thread(target=self._report_thread, daemon=True).start()
         super().__init__()
-
-    def _report_thread(self) -> None:
-        while True:
-            try:
-                _log.warning(
-                    "Metric Len: %s Artifact Len %s, Metric_proc %s Artifact_proc %s",
-                    self._metrics_q.qsize(),
-                    self._art_q.qsize(),
-                    self._metric_proc.exitcode,
-                    self._art_proc.exitcode,
-                )
-                if (self._metric_proc.exitcode or 0) < 0 and (self._art_proc.exitcode or 0) < 0:
-                    return
-                time.sleep(1)
-            except KeyboardInterrupt:
-                return
 
     @property
     @override
@@ -227,7 +209,7 @@ class DLTrackLogger(Logger):
 
         self._metrics_q.put((metrics, step))
 
-    def log_artifact(self, artifacts: Sequence[LoggedArtifact]) -> None:
+    def log_artifact(self, artifacts: Sequence[AnyArtifact]) -> None:
         """Log an image."""
         assert self._metric_proc.is_alive(), "Artifact process failed, refusing to back up queue"
         if self._art_q.full():

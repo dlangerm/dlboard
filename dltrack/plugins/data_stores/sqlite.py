@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, Iterator, override
 
 from structlog.stdlib import get_logger
 
-from dltrack.plugins.utilities._data_store import set_data_store
+from dltrack.serve._backend._data_store import set_data_store
 from dltrack.serve._backend._sql_store_base import SQLStoreBase
 
 if TYPE_CHECKING:

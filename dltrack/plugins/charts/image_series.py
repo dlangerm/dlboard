@@ -13,7 +13,7 @@ from dash import dcc, html
 from pydantic import BaseModel
 from structlog.stdlib import get_logger
 
-from dltrack.models._view import ChartType, ColumnKind
+from dltrack.models import ChartType, ColumnKind
 
 PAGE_SIZE = 6
 GRID_COLS = 3

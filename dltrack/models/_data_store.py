@@ -64,7 +64,7 @@ class DataStore[**P](typing.Protocol):
         """Fetch metrics for a particular table name, optionally matching a topic string."""
         ...
 
-    def log_hyperparams(self, hyperparams: models.NewHyperParams) -> None:
+    def log_hyperparams(self, hyperparams: models.NewHyperParams) -> models.HyperParams:
         """Log hyperparameters to the data store."""
         ...
 

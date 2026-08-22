@@ -11,7 +11,7 @@ if typing.TYPE_CHECKING:
 
 
 @typing.runtime_checkable
-class LoggedArtifact(typing.Protocol):
+class AnyArtifact(typing.Protocol):
     """Any logged artifact."""
 
     @property

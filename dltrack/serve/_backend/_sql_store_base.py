@@ -44,6 +44,13 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
                 )
             )
         )
+        list(
+            self._execute_raw_sql(
+                sql.create_index_sql(
+                    models.Artifact, [k for k in models.Artifact.model_fields if k not in ("id", "tags")]
+                )
+            )
+        )
 
     @abstractmethod
     def _execute_raw_sql(
@@ -177,7 +184,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             )
         )
 
-    def log_hyperparams(self, hyperparams: models.NewHyperParams) -> None:
+    def log_hyperparams(self, hyperparams: models.NewHyperParams) -> models.HyperParams:
         """Log hyperparameters to the data store."""
         _log.info("Logging hyperparameters for experiment %s", hyperparams.experiment_id)
         existing = list(
@@ -197,9 +204,9 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
                 hyperparams.experiment_id,
                 hyperparams.run_id,
             )
-            return
+            return existing[0]
         statement, values = sql.insert(models.HyperParams, hyperparams)
-        self._consume_row_iterator(self._execute_sql_query(models.HyperParams, statement, values))
+        return self._consume_row_iterator(self._execute_sql_query(models.HyperParams, statement, values))[0]
 
     def fetch_hyperparams(self, experiment_id: int) -> Iterator[models.HyperParams]:
         """Fetch hyperparameters for a particular experiment."""

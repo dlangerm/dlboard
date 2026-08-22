@@ -6,14 +6,8 @@ from pathlib import Path
 import structlog
 from pydantic_settings import BaseSettings
 
-from dltrack.plugins import accordion_view, filesystem, sqlite, themes
+from dltrack.plugins import filesystem, pages, sqlite, themes
 from dltrack.plugins.charts import image_series, line_chart
-from dltrack.plugins.pages import (
-    simple_admin_page,
-    simple_experiment_page,
-    simple_homepage,
-    simple_project_page,
-)
 from dltrack.serve import app
 
 structlog.configure_once(wrapper_class=structlog.make_filtering_bound_logger(logging.INFO))
@@ -35,11 +29,10 @@ if __name__ == "__main__":
         [
             filesystem.get_plugin(settings.artifact_store_location),
             sqlite.get_plugin(settings.sqlite_location),
-            simple_homepage,
-            simple_admin_page,
-            simple_project_page,
-            simple_experiment_page,
-            accordion_view,
+            pages.simple_homepage,
+            pages.simple_project_page,
+            pages.simple_experiment_page,
+            pages.experiment_accordion_view,
             themes.DarkTheme,
             image_series,
             line_chart,

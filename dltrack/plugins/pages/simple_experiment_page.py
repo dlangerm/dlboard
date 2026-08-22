@@ -10,8 +10,8 @@ from dash import ALL, Dash, Input, Output, State, ctx
 from dash.exceptions import PreventUpdate
 
 from dltrack.models import HyperParams, constants
-from dltrack.plugins.pages.accordion_view import BasicExperimentPage, accordion_view
-from dltrack.plugins.utilities import get_data_store
+from dltrack.plugins.pages.experiment_accordion_view import BasicExperimentPage, accordion_view
+from dltrack.serve import get_data_store
 
 
 def _run_toggle_id(run_id: int) -> dict[str, Any]:
