@@ -18,14 +18,47 @@ ID_KEY: typing.Final = "id"
 _log = get_logger(__name__)
 
 
+def _unwrap_optional(annotation: type) -> type:
+    org = typing.get_origin(annotation)
+    args = typing.get_args(annotation)
+    if org is UnionType and len(args) > 0 and args[1] is NoneType:
+        return args[0]
+    return annotation
+
+
+def _decode_stored_value(annotation: type, value: object) -> object:
+    """Reverse `serialize_complex_sql`: JSON-decode dict/list columns, parse datetime columns."""
+    if value is None or not isinstance(value, str):
+        return value
+
+    ann = _unwrap_optional(annotation)
+    org = typing.get_origin(ann)
+
+    if org in (dict, list):
+        try:
+            return json.loads(value)
+        except (TypeError, ValueError) as exc:
+            msg = f"Expected JSON-decodable value for annotation {ann!r}, got {value!r}"
+            raise ValueError(msg) from exc
+
+    if ann in (datetime, AwareDatetime):
+        return datetime.fromisoformat(value)
+
+    return value
+
+
 def construct[T: BaseModel](
     obj_type: type[T], args: tuple[typing.Any, ...], *, no_validate: bool = True
 ) -> T:
     fields = list(obj_type.model_fields.keys())
+    decoded = {
+        f: _decode_stored_value(obj_type.model_fields[f].annotation, args[i])  # pyright: ignore[reportArgumentType]
+        for i, f in enumerate(fields)
+    }
     if no_validate:
-        return obj_type.model_construct(**{f: args[i] for i, f in enumerate(fields)})
-    _log.info("validating %s with args %s", obj_type, args)
-    return obj_type(**{f: args[i] for i, f in enumerate(fields)})
+        return obj_type.model_construct(**decoded)  # pyright: ignore[reportArgumentType]
+    _log.debug("validating %s with args %s", obj_type, args)
+    return obj_type(**decoded)
 
 
 def ensure_basemodel(arg: typing.Any) -> typing.TypeGuard[list[BaseModel]]:  # noqa: ANN401
@@ -60,7 +93,7 @@ def serialize_base_model(value: BaseModel) -> dict[str, typing.Any]:
 
 
 def escape_value_sql(value: object) -> str:
-    _log.info("Escaping value %s type %s", value, type(value))
+    _log.debug("Escaping value %s type %s", value, type(value))
     match value:
         case int() | float():
             return f"{value}"
@@ -86,7 +119,7 @@ def create_index_sql(model: type[BaseModel], columns: list[str], *, index_name: 
     CREATE INDEX IF NOT EXISTS {name}
     ON {model.__name__} ({",".join(columns)});
     """
-    _log.info("Create index sql: %s", raw)
+    _log.debug("Create index sql: %s", raw)
     return raw
 
 
@@ -130,7 +163,7 @@ def create_table_sql(model: type[BaseModel]) -> str:
     base_str += "("
     base_str += ",".join(sorted_keys)
     base_str += ");"
-    _log.info("Create table sql: %s", base_str)
+    _log.debug("Create table sql: %s", base_str)
     return base_str
 
 
@@ -191,13 +224,11 @@ def get_by_id(model: type[BaseModel], id: int) -> str:
         msg = f"Get object {model.__name__} must contain an ID key"
         raise AssertionError(msg)
 
-    raw = f"""
+    return f"""
         SELECT *
         FROM {model.__name__}
-        WHERE {ID_KEY} = '{id}';
+        WHERE {ID_KEY} = '{int(id)}';
     """
-    _log.info(raw)
-    return raw
 
 
 def get_all(model: type[BaseModel]) -> str:
@@ -205,12 +236,10 @@ def get_all(model: type[BaseModel]) -> str:
         msg = f"Get object {model.__name__} must contain an ID key"
         raise AssertionError(msg)
 
-    raw = f"""
+    return f"""
         SELECT *
         FROM {model.__name__};
     """
-    _log.info(raw)
-    return raw
 
 
 def get_all_by_field(  # noqa: PLR0913

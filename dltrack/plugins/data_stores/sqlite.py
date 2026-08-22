@@ -40,7 +40,7 @@ class SQLLiteStore(SQLStoreBase[Path]):
         """Execute raw sql."""
         with sqlite3.connect(self._location) as conn:
             cur = conn.cursor()
-            _log.info("Execute <%s> with values <%s>", statement, values)
+            _log.debug("Execute <%s> with values <%s>", statement, values)
             yield from cur.execute(statement, values or {}).fetchall()
 
     @override

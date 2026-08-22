@@ -171,7 +171,7 @@ class FSArtifactStore(models.ArtifactStore[Path, int]):
     @override
     def download_artifact(self, ref: AnyUrl) -> Response:
         assert ref.scheme == self.protocol
-        _log.info("Downloading protocol %s %s in folder %s", ref.scheme, ref.path, self._root_directory)
+        _log.debug("Downloading protocol %s %s in folder %s", ref.scheme, ref.path, self._root_directory)
         return send_from_directory(self._root_directory, str(ref.path).lstrip("/"))
 
 

@@ -98,19 +98,19 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
 
     def create_project(self, project: models.NewProject) -> models.Project:
         """create_project."""
-        _log.info("Creating project with name %s", project.name)
+        _log.debug("Creating project with name %s", project.name)
         statement, values = sql.insert(models.Project, project)
         results = self._consume_row_iterator(self._execute_sql_query(models.Project, statement, values))
         return results[0]
 
     def get_project(self, database_id: int) -> models.Project:
         """Get project."""
-        _log.info("getting project %s", database_id)
+        _log.debug("getting project %s", database_id)
         return next(self._execute_sql_query(models.Project, sql.get_by_id(models.Project, database_id)))
 
     def get_projects(self) -> Iterator[models.Project]:
         """create_project."""
-        _log.info("getting projects")
+        _log.debug("getting projects")
         yield from self._execute_sql_query(models.Project, sql.get_all(models.Project))
 
     def create_experiment(self, experiment: models.NewExperiment) -> models.Experiment:
@@ -121,7 +121,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
 
     def get_experiment(self, database_id: int) -> models.Experiment | None:
         """Tfdsafs."""
-        _log.info("Getting experiment id %s", database_id)
+        _log.debug("Getting experiment id %s", database_id)
         try:
             return next(
                 self._execute_sql_query(models.Experiment, sql.get_by_id(models.Experiment, database_id))
@@ -131,7 +131,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
 
     def get_experiments(self, project_id: int) -> Iterator[models.Experiment]:
         """Tfdsafs."""
-        _log.info("Get experiments for project %s", project_id)
+        _log.debug("Get experiments for project %s", project_id)
         return self._execute_sql_query(
             models.Experiment, sql.get_all_by_field(models.Experiment, "project_id", project_id)
         )
@@ -142,7 +142,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
 
     def log_metrics(self, metric: Iterable[models.LoggedMetrics]) -> None:
         """Tfdsafs."""
-        _log.info("Logging metrics batch")
+        _log.debug("Logging metrics batch")
         self._consume_row_iterator(
             self._execute_sql_query_many(
                 models.UnderlyingMetricTableEntry,
@@ -167,7 +167,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         if step_range is not None or run_id is not None:
             raise NotImplementedError
 
-        _log.info("Match fields %s", metric_name_match)
+        _log.debug("Match fields %s", metric_name_match)
 
         yield from models.LoggedMetrics.from_underlying(
             self._execute_sql_query(
@@ -186,7 +186,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
 
     def log_hyperparams(self, hyperparams: models.NewHyperParams) -> models.HyperParams:
         """Log hyperparameters to the data store."""
-        _log.info("Logging hyperparameters for experiment %s", hyperparams.experiment_id)
+        _log.debug("Logging hyperparameters for experiment %s", hyperparams.experiment_id)
         existing = list(
             self._execute_sql_query(
                 models.HyperParams,
@@ -199,7 +199,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         )
 
         if existing:
-            _log.info(
+            _log.warning(
                 "Skipping duplicate hyperparameters for experiment %s run %s",
                 hyperparams.experiment_id,
                 hyperparams.run_id,
@@ -210,7 +210,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
 
     def fetch_hyperparams(self, experiment_id: int) -> Iterator[models.HyperParams]:
         """Fetch hyperparameters for a particular experiment."""
-        _log.info("Fetching hyperparameters for experiment %s", experiment_id)
+        _log.debug("Fetching hyperparameters for experiment %s", experiment_id)
         yield from (
             self._execute_sql_query(
                 models.HyperParams,
@@ -252,10 +252,9 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
                 value,
             ),
         ):
-            _log.info("found row")
             return row
 
-        _log.info("Inserting page model for %s = %s", field, value)
+        _log.warning("Inserting new page model for %s = %s", field, value)
         statement, values = sql.insert(
             models.Page,
             (new_page_type or models.NewPage[D, C])(**{field: value}),  # pyright: ignore[reportArgumentType]

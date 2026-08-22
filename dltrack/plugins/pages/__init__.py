@@ -1,7 +1,6 @@
 """Builtin page plugins."""
 
 from dltrack.plugins.pages import (
-    experiment_accordion_view,
     simple_admin_page,
     simple_experiment_page,
     simple_homepage,
@@ -9,7 +8,6 @@ from dltrack.plugins.pages import (
 )
 
 __all__ = [
-    "experiment_accordion_view",
     "simple_admin_page",
     "simple_experiment_page",
     "simple_homepage",

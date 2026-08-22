@@ -32,7 +32,6 @@ if __name__ == "__main__":
             pages.simple_homepage,
             pages.simple_project_page,
             pages.simple_experiment_page,
-            pages.experiment_accordion_view,
             themes.DarkTheme,
             image_series,
             line_chart,
