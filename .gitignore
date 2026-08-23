@@ -12,3 +12,4 @@ wheels/
 .data/
 lightning-logs/
 _scratch_test.py
+.coverage

@@ -1,0 +1,116 @@
+# pyright: reportPrivateUsage=false
+"""Tests for the chart/panel view model registry and aggregation logic."""
+
+from __future__ import annotations
+
+import typing
+from typing import ClassVar
+
+import pandas as pd
+import pytest
+from pydantic import BaseModel
+
+from dltrack.models._view import ChartInstance, ChartType, ChartTypeRegistry, ColumnKind, PanelInstance
+
+
+class _FakeParams(BaseModel, frozen=True, extra="forbid"):
+    metric: str
+    flag: bool = False
+
+
+class _FakeChart(ChartType[_FakeParams, pd.DataFrame, dict[str, object]], frozen=True, extra="forbid"):
+    name: ClassVar[str] = "fake"
+
+    @classmethod
+    @typing.override
+    def parameter_type(cls) -> type[_FakeParams]:
+        return _FakeParams
+
+    @classmethod
+    @typing.override
+    def render(cls, parameters: _FakeParams, dataframe: pd.DataFrame) -> dict[str, object]:
+        return {"metric": parameters.metric, "rows": len(dataframe)}
+
+    @classmethod
+    @typing.override
+    def hint_required_columns(cls, parameters: _FakeParams) -> set[str] | None:
+        return None if parameters.metric == "all" else {parameters.metric}
+
+    @classmethod
+    @typing.override
+    def hint_required_artifact_keys(cls, parameters: _FakeParams) -> set[str] | None:
+        return {"img"} if parameters.flag else set()
+
+    @classmethod
+    @typing.override
+    def field_column_kinds(cls) -> dict[str, ColumnKind]:
+        return {"metric": ColumnKind.METRIC}
+
+
+@pytest.fixture(autouse=True)
+def _clean_registry() -> typing.Iterator[None]:
+    original = dict(ChartTypeRegistry._all_charts)
+    yield
+    ChartTypeRegistry._all_charts = original
+
+
+def test_register_duplicate_name_raises() -> None:
+    _FakeChart.register()
+    with pytest.raises(AttributeError):
+        _FakeChart.register()
+    _FakeChart.register(allow_override=True)  # does not raise
+
+
+def test_get_registered_chart_types_describes_fields() -> None:
+    _FakeChart.register()
+    fields = ChartTypeRegistry.get_registered_chart_types()["fake"]
+    assert fields["metric"].type == "str"
+    assert fields["metric"].required is True
+    assert fields["metric"].column_kind == ColumnKind.METRIC
+    assert fields["flag"].type == "bool"
+    assert fields["flag"].required is False
+    assert fields["flag"].default is False
+
+
+def test_chart_instance_delegates_through_registry() -> None:
+    _FakeChart.register()
+    chart = ChartInstance[pd.DataFrame, dict[str, object]](chart_type="fake", parameters={"metric": "loss"})
+    assert chart.render(pd.DataFrame({"loss": [1, 2, 3]})) == {"metric": "loss", "rows": 3}
+    assert chart.hint_required_columns() == {"loss"}
+
+
+@pytest.mark.parametrize(
+    ("metrics", "expected"),
+    [
+        (["loss", "acc"], {"loss", "acc"}),
+        (["loss", "all"], None),
+    ],
+)
+def test_panel_hint_required_columns_aggregates_and_short_circuits(
+    metrics: list[str], expected: set[str] | None
+) -> None:
+    _FakeChart.register()
+    panel = PanelInstance[pd.DataFrame, dict[str, object]](
+        name="p",
+        charts=[
+            ChartInstance[pd.DataFrame, dict[str, object]](chart_type="fake", parameters={"metric": m})
+            for m in metrics
+        ],
+    )
+    assert panel.hint_required_columns() == expected
+
+
+def test_panel_hint_required_artifact_keys_aggregates() -> None:
+    _FakeChart.register()
+    panel = PanelInstance[pd.DataFrame, dict[str, object]](
+        name="p",
+        charts=[
+            ChartInstance[pd.DataFrame, dict[str, object]](
+                chart_type="fake", parameters={"metric": "loss", "flag": True}
+            ),
+            ChartInstance[pd.DataFrame, dict[str, object]](
+                chart_type="fake", parameters={"metric": "acc", "flag": False}
+            ),
+        ],
+    )
+    assert panel.hint_required_artifact_keys() == {"img"}
