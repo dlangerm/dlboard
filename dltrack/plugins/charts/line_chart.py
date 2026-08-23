@@ -48,6 +48,11 @@ class LineChartSettings(BaseModel, frozen=True, extra="forbid"):
     """Downsample each run's series (LTTB) so huge series stay smooth to render."""
     max_points: int = DEFAULT_MAX_POINTS
     """Target point count per run when `sample` is enabled."""
+    x_axis_type: typing.Literal["number", "category"] = "number"
+    """`"number"` spaces points by their actual value (e.g. step 10 sits 10x as far from 0 as step
+    1); `"category"` gives every distinct x value equal spacing regardless of its size. For a
+    numeric x axis like step/epoch, `"category"` is what makes irregularly-logged points look like
+    they're nonlinearly compressing — `"number"` renders it true to scale."""
 
 
 class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.LineChart], frozen=True, extra="forbid"):
@@ -102,6 +107,7 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.LineChart], froze
             ],  # pyright: ignore[reportArgumentType]
             xAxisLabel=f"{parameters.x_axis}",
             yAxisLabel=f"{parameters.column}",
+            xAxisProps={"type": parameters.x_axis_type},
             withLegend=True,
             withXAxis=True,
             withYAxis=True,

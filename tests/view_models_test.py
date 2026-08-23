@@ -72,6 +72,53 @@ def test_get_registered_chart_types_describes_fields() -> None:
     assert fields["flag"].default is False
 
 
+class _FakeParamsWithChoices(BaseModel, frozen=True, extra="forbid"):
+    mode: typing.Literal["prefix", "suffix"] = "prefix"
+
+
+class _FakeChartWithChoices(
+    ChartType[_FakeParamsWithChoices, pd.DataFrame, dict[str, object]], frozen=True, extra="forbid"
+):
+    name: ClassVar[str] = "fake-choices"
+
+    @classmethod
+    @typing.override
+    def parameter_type(cls) -> type[_FakeParamsWithChoices]:
+        return _FakeParamsWithChoices
+
+    @classmethod
+    @typing.override
+    def render(cls, parameters: _FakeParamsWithChoices, dataframe: pd.DataFrame) -> dict[str, object]:
+        return {"mode": parameters.mode}
+
+    @classmethod
+    @typing.override
+    def hint_required_columns(cls, parameters: _FakeParamsWithChoices) -> set[str] | None:
+        return set()
+
+    @classmethod
+    @typing.override
+    def hint_required_artifact_keys(cls, parameters: _FakeParamsWithChoices) -> set[str] | None:
+        return set()
+
+    @classmethod
+    @typing.override
+    def field_column_kinds(cls) -> dict[str, ColumnKind]:
+        return {}
+
+
+def test_get_registered_chart_types_describes_literal_field_as_str_with_choices() -> None:
+    """A `Literal[...]`-typed field (e.g. line chart's `x_axis_type`) must describe as a plain
+    `str` field with its fixed `choices` populated — the UI renders those as a dropdown.
+    """
+    _FakeChartWithChoices.register()
+    fields = ChartTypeRegistry.get_registered_chart_types()["fake-choices"]
+    assert fields["mode"].type == "str"
+    assert fields["mode"].choices == ("prefix", "suffix")
+    assert fields["mode"].required is False
+    assert fields["mode"].default == "prefix"
+
+
 def test_chart_instance_delegates_through_registry() -> None:
     _FakeChart.register()
     chart = ChartInstance[pd.DataFrame, dict[str, object]](chart_type="fake", parameters={"metric": "loss"})

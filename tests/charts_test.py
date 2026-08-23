@@ -97,3 +97,20 @@ def test_line_chart_syncs_by_value_not_index() -> None:
     props = _props(chart)
     assert props["lineChartProps"]["syncMethod"] == "value"
     assert props["lineChartProps"]["syncId"] == "step"
+
+
+def test_line_chart_x_axis_defaults_to_numeric_scale() -> None:
+    """Regression: Recharts' default XAxis type is "category" (equal pixel spacing per distinct
+    x value, regardless of its numeric size), which makes irregularly-spaced steps look like
+    they're nonlinearly compressing. A numeric x column like step/epoch should be spaced by its
+    actual value by default.
+    """
+    df = _metrics_df(20)
+    chart = LineChart.render(LineChartSettings(column="loss", x_axis="step"), df)
+    assert _props(chart)["xAxisProps"] == {"type": "number"}
+
+
+def test_line_chart_x_axis_type_is_configurable() -> None:
+    df = _metrics_df(20)
+    chart = LineChart.render(LineChartSettings(column="loss", x_axis="step", x_axis_type="category"), df)
+    assert _props(chart)["xAxisProps"] == {"type": "category"}
