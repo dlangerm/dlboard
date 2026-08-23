@@ -71,6 +71,8 @@ class ParameterField(BaseModel, frozen=True, extra="forbid"):
     required: bool
     default: bool | int | float | str | None = None
     column_kind: ColumnKind | None = None
+    choices: tuple[str, ...] | None = None
+    """Fixed set of allowed values for a `Literal[...]`-typed field, rendered as a dropdown."""
 
 
 class ChartTypeRegistry:
@@ -120,6 +122,7 @@ class ChartTypeRegistry:
         field_descriptors: dict[str, ParameterField] = {}
         for field_name, field in parameter_type.model_fields.items():
             annotation = field.annotation
+            choices: tuple[str, ...] | None = None
             if annotation is bool:
                 field_type = "bool"
             elif annotation is float:
@@ -128,6 +131,11 @@ class ChartTypeRegistry:
                 field_type = "int"
             elif annotation is str:
                 field_type = "str"
+            elif typing.get_origin(annotation) is typing.Literal:
+                # A fixed set of string choices, e.g. `Literal["number", "category"]` — rendered
+                # as a dropdown rather than a free-text field.
+                field_type = "str"
+                choices = typing.get_args(annotation)
             else:
                 msg = f"{annotation} unsupported"
                 raise TypeError(msg)
@@ -138,6 +146,7 @@ class ChartTypeRegistry:
                 required=field.is_required(),
                 default=field.default if not field.is_required() else None,
                 column_kind=field_column_kinds.get(field_name),
+                choices=choices,
             )
         return field_descriptors
 

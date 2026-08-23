@@ -8,7 +8,13 @@ from typing import Any, cast
 import pandas as pd
 import pytest
 
-from dltrack.plugins.charts.image_series import PAGE_SIZE, ImageChart, ImageChartSettings
+from dltrack.plugins.charts.image_series import (
+    MAX_SLIDER_LABELS,
+    PAGE_SIZE,
+    ImageChart,
+    ImageChartSettings,
+    _slider_marks,
+)
 
 
 def _artifacts_df(n_runs: int, steps_per_run: int = 1) -> pd.DataFrame:
@@ -86,3 +92,51 @@ def test_render_handles_missing_tags_for_some_rows_without_crashing() -> None:
     stack = ImageChart.render(ImageChartSettings(key="img"), df)
 
     assert _captions_store_data(stack) == {"1": {"0": "split: train", "1": ""}}
+
+
+# ---- _slider_marks: every real step is a snap target, but only a sparse subset gets a label ----
+
+
+def test_slider_marks_labels_every_step_when_few() -> None:
+    marks = _slider_marks(list(range(5)))
+    assert [m["value"] for m in marks] == [0, 1, 2, 3, 4]
+    assert all("label" in m for m in marks)
+
+
+def test_slider_marks_has_a_mark_for_every_step_even_when_many() -> None:
+    steps = list(range(200))
+    marks = _slider_marks(steps, max_labels=10)
+
+    assert [m["value"] for m in marks] == steps
+
+    labeled = [m for m in marks if "label" in m]
+    assert len(labeled) <= 12  # ~max_labels, plus the guaranteed-included last step
+    assert marks[-1]["label"] == "199"  # last step is always labeled
+
+
+def _slider_props(stack: object) -> dict[str, Any]:
+    # dcc.Store is child 0; dmc.Slider is child 1.
+    return _props(_props(stack)["children"][1])
+
+
+def test_render_slider_snaps_only_to_real_steps_and_has_bottom_margin() -> None:
+    """Regression: with sparse steps, the slider used to allow continuous dragging between real
+    step values, so moving it didn't always change what was shown. `restrictToMarks` fixes that.
+    Also pins the added bottom margin, needed so many wrapped mark labels don't run into the
+    "Run N" text of the row below.
+    """
+    df = _artifacts_df(n_runs=1, steps_per_run=1)
+    stack = ImageChart.render(ImageChartSettings(key="img"), df)
+
+    slider = _slider_props(stack)
+    assert slider["restrictToMarks"] is True
+    assert slider["mb"] == "xl"
+
+
+def test_render_slider_marks_match_max_slider_labels_constant() -> None:
+    df = pd.DataFrame([{"run_id": 1, "step": s, "img": f"ref://{s}"} for s in range(200)])
+    stack = ImageChart.render(ImageChartSettings(key="img"), df)
+
+    slider = _slider_props(stack)
+    labeled = [m for m in slider["marks"] if "label" in m]
+    assert len(labeled) <= MAX_SLIDER_LABELS + 2

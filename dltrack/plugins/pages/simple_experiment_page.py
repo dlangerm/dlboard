@@ -728,6 +728,12 @@ def _param_field_input(
     if field.type in ("int", "float"):
         return dmc.NumberInput(id=input_id, label=label, value=value, step=1 if field.type == "int" else 0.1)
 
+    if field.choices is not None:
+        select_value = cast("str | None", value)
+        return dmc.Select(
+            id=input_id, label=label, data=list(field.choices), value=select_value, allowDeselect=False
+        )
+
     options = columns_by_kind.get(field.column_kind, []) if field.column_kind is not None else None
     if options:
         return dmc.Select(id=input_id, label=label, data=sorted(options), value=value, searchable=True)  # pyright: ignore[reportArgumentType]

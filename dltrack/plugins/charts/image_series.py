@@ -17,6 +17,7 @@ from dltrack.models import ChartType, ColumnKind
 
 PAGE_SIZE = 6
 GRID_COLS = 3
+MAX_SLIDER_LABELS = 10
 
 _log = get_logger(__name__)
 
@@ -37,6 +38,23 @@ def _instance_id(parameters: ImageChartSettings) -> str:
     """Stable id for pattern-matching Dash IDs. See earlier caveat re: collisions on identical configs."""
     raw = json.dumps(parameters.model_dump(), sort_keys=True)
     return hashlib.shake_256(raw.encode()).hexdigest(8)
+
+
+def _slider_marks(all_steps: list[int], max_labels: int = MAX_SLIDER_LABELS) -> list[dict[str, typing.Any]]:
+    """
+    One mark per real step, but only label a sparse subset.
+
+    Every real step gets a mark (so `restrictToMarks` only lets the slider stop where there's
+    actually data), but only an evenly-spaced subset gets a text label — with many steps, labeling
+    every mark makes them overlap into an unreadable smear.
+    """
+    if len(all_steps) <= max_labels:
+        labeled = set(all_steps)
+    else:
+        stride = max(1, round(len(all_steps) / max_labels))
+        labeled = set(all_steps[::stride])
+        labeled.add(all_steps[-1])
+    return [{"value": s, "label": str(s)} if s in labeled else {"value": s} for s in all_steps]
 
 
 def _format_caption(raw_tags: dict[str, str] | float | None) -> str:
@@ -160,11 +178,12 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
                     min=all_steps[0],
                     max=all_steps[-1],
                     value=all_steps[0],
-                    step=1,
-                    marks=[{"value": s, "label": str(s)} for s in all_steps],
+                    marks=_slider_marks(all_steps),  # pyright: ignore[reportArgumentType]
+                    restrictToMarks=True,
                     persistence=True,
                     persistence_type="session",
                     persisted_props=["value"],
+                    mb="xl",
                 ),
                 *page_grids,
                 pager,

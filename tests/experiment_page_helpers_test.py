@@ -135,3 +135,18 @@ def test_param_field_input_uses_override_over_default() -> None:
     component = _param_field_input(field.name, field, {}, override=False)
     # dash-mantine-components ships no py.typed marker, so pyright can't see this attr.
     assert cast("Any", component).to_plotly_json()["props"]["checked"] is False
+
+
+def test_param_field_input_renders_fixed_choices_as_a_select() -> None:
+    """A `Literal[...]`-typed field (e.g. line chart's `x_axis_type`) gets a dropdown of its fixed
+    choices, taking priority over the column-kind-derived options path.
+    """
+    field = ParameterField(
+        name="x_axis_type", type="str", required=False, default="number", choices=("number", "category")
+    )
+    component = _param_field_input(field.name, field, {}, override="category")
+
+    assert isinstance(component, dmc.Select)
+    props = cast("Any", component).to_plotly_json()["props"]
+    assert props["data"] == ["number", "category"]
+    assert props["value"] == "category"
