@@ -17,7 +17,15 @@ from pydantic import ValidationError
 from structlog.stdlib import get_logger
 
 from dltrack.models import HyperParams, Page, constants
-from dltrack.models._view import ChartInstance, ChartTypeRegistry, ColumnKind, PanelInstance, ParameterField
+from dltrack.models._view import (
+    ChartInstance,
+    ChartTypeRegistry,
+    ColumnKind,
+    PanelInstance,
+    ParameterField,
+    ParameterFieldType,
+)
+from dltrack.plugins.charts._table_style import NUMERIC, infer_column_dtype, themed_datatable_kwargs
 from dltrack.plugins.pages._chart_autogen import (
     Suggestion,
     build_auto_panels,
@@ -26,10 +34,12 @@ from dltrack.plugins.pages._chart_autogen import (
 )
 from dltrack.plugins.pages._dataframe_helpers import (
     build_artifacts_dataframe,
+    build_hyperparams_dataframe,
     build_metrics_dataframe,
     filter_excluded_runs,
     group_columns_by_kind,
     infer_column_kinds,
+    merge_hyperparams,
     merge_metrics_and_artifacts,
 )
 from dltrack.plugins.pages._description_editor import (
@@ -72,6 +82,9 @@ class _ChartTargetData(TypedDict):
 
 class _ChartID(_ChartTargetData):
     type: str
+
+
+_PanelMoveDirection = typing.Literal["up", "down"]
 
 
 ADD_CHART_TARGET_ID = "add-chart-target"
@@ -145,7 +158,7 @@ def _rename_panel_button_id(panel_name: str) -> dict[str, str]:
     return {"type": "rename-panel", "panel": panel_name}
 
 
-def _move_panel_button_id(panel_name: str, direction: str) -> dict[str, str]:
+def _move_panel_button_id(panel_name: str, direction: _PanelMoveDirection) -> dict[str, str]:
     return {"type": "move-panel", "panel": panel_name, "direction": direction}
 
 
@@ -201,7 +214,18 @@ def _fetch_panel_dataframe(
             )
         )
 
+    hparam_keys = panel.hint_required_hparams()
+    hparams_df = pd.DataFrame()
+    if hparam_keys is None:
+        # fetch_hyperparams has no server-side key filter (unlike fetch_metrics), so "fetch
+        # everything" and "fetch a specific set" cost the same query — only the local column
+        # filter in build_hyperparams_dataframe differs.
+        hparams_df = build_hyperparams_dataframe(store.fetch_hyperparams(experiment_id))
+    elif hparam_keys:
+        hparams_df = build_hyperparams_dataframe(store.fetch_hyperparams(experiment_id), keys=hparam_keys)
+
     df = merge_metrics_and_artifacts(metrics_df, artifacts_df)
+    df = merge_hyperparams(df, hparams_df)
     return filter_excluded_runs(df, page_settings)
 
 
@@ -685,9 +709,9 @@ def _add_chart_to_panel_by_name(
 
 
 def _move_panel(
-    panels: list[PanelInstance[Any, Any]], panel_name: str, direction: str
+    panels: list[PanelInstance[Any, Any]], panel_name: str, direction: _PanelMoveDirection
 ) -> list[PanelInstance[Any, Any]]:
-    """Swap the panel named `panel_name` with its neighbor in `direction` ("up" or "down")."""
+    """Swap the panel named `panel_name` with its neighbor in `direction`."""
     idx = next((i for i, p in enumerate(panels) if p.name == panel_name), None)
     if idx is None:
         return panels
@@ -700,11 +724,27 @@ def _move_panel(
 
 
 def _merge_chart_param_values(
-    values: list[Any], checked_values: list[Any], field_ids: list[dict[str, str]]
+    values: list[Any],
+    checked_values: list[Any],
+    field_ids: list[dict[str, str]],
+    fields: dict[str, ParameterField],
 ) -> dict[str, Any]:
-    """NumberInput/TextInput/Select report via `value`; Switch reports via `checked`. Merge them by field id."""
+    """
+    NumberInput/TextInput/Select report via `value`; Switch reports via `checked`. Merge them by field id.
+
+    A cleared NumberInput reports `None`, which isn't a valid `int`/`float` — for a field with its
+    own default (`required=False`), that value is dropped entirely so validation falls back to the
+    field's default instead of failing with "not a valid integer".
+    """
     merged = [v if v is not None else c for v, c in zip(values, checked_values, strict=True)]
-    return {fid["field"]: val for fid, val in zip(field_ids, merged, strict=True)}
+    parameters: dict[str, Any] = {}
+    for fid, val in zip(field_ids, merged, strict=True):
+        field_name = fid["field"]
+        field = fields.get(field_name)
+        if val is None and field is not None and not field.required:
+            continue
+        parameters[field_name] = val
+    return parameters
 
 
 # ============================================================
@@ -717,16 +757,22 @@ def _param_field_input(
     field: ParameterField,
     columns_by_kind: dict[ColumnKind, list[str]],
     *,
-    override: bool | int | float | str | None = None,
+    override: bool | int | float | str | list[str] | None = None,
 ) -> Component:
     input_id = _chart_param_id(field_name)
     label = f"{field_name} *" if field.required else field_name
     value = override if override is not None else field.default
 
-    if field.type == "bool":
+    if field.type == ParameterFieldType.BOOL:
         return dmc.Switch(id=input_id, label=label, checked=bool(value) if value is not None else False)
-    if field.type in ("int", "float"):
-        return dmc.NumberInput(id=input_id, label=label, value=value, step=1 if field.type == "int" else 0.1)
+    if field.type in (ParameterFieldType.INT, ParameterFieldType.FLOAT):
+        number_value = cast("int | float | None", value)
+        return dmc.NumberInput(
+            id=input_id,
+            label=label,
+            value=number_value,
+            step=1 if field.type == ParameterFieldType.INT else 0.1,
+        )
 
     if field.choices is not None:
         select_value = cast("str | None", value)
@@ -735,6 +781,15 @@ def _param_field_input(
         )
 
     options = columns_by_kind.get(field.column_kind, []) if field.column_kind is not None else None
+    if field.type == ParameterFieldType.LIST_STR:
+        multiselect_value = cast("list[str] | None", value)
+        return dmc.MultiSelect(
+            id=input_id,
+            label=label,
+            data=sorted(options) if options else [],
+            value=multiselect_value or [],
+            searchable=True,
+        )
     if options:
         return dmc.Select(id=input_id, label=label, data=sorted(options), value=value, searchable=True)  # pyright: ignore[reportArgumentType]
     return dmc.TextInput(id=input_id, label=label, value=value or "")  # pyright: ignore[reportArgumentType]
@@ -836,21 +891,13 @@ def _load_hparam_view_data(
     return hydrated, hparam_keys, metric_keys, rows
 
 
-def _infer_dtype[T](rows: list[dict[T, Any]], key: T) -> str:
-    for row in rows:
-        val = row.get(key)
-        if val is not None:
-            return "numeric" if isinstance(val, (int, float)) and not isinstance(val, bool) else "text"
-    return "text"
-
-
 def _build_hparam_datatable(
     rows: list[dict[str, Any]], selected: list[str] | list[int], excluded: list[int] | list[str]
 ) -> dash_table.DataTable:
     columns: list[dict[str, Any]] = [{"name": "Run", "id": "run_id", "type": "numeric"}]
     for key in selected:
         col: dict[str, Any] = {"name": key, "id": key}
-        if _infer_dtype(rows, str(key)) == "numeric":
+        if infer_column_dtype(rows, str(key)) == NUMERIC:
             col["type"] = "numeric"
             col["format"] = Format(precision=3, scheme="s")
         columns.append(col)
@@ -867,57 +914,7 @@ def _build_hparam_datatable(
         sort_action="native",
         page_action="native",
         page_size=20,
-        style_table={"overflowX": "auto"},
-        style_header={
-            "backgroundColor": "var(--mantine-color-default-hover)",
-            "color": "var(--mantine-color-text)",
-            "fontFamily": "var(--mantine-font-family)",
-            "fontWeight": 600,
-            "border": "none",
-            "borderBottom": "1px solid var(--mantine-color-default-border)",
-        },
-        style_cell={
-            "backgroundColor": "var(--mantine-color-body)",
-            "color": "var(--mantine-color-text)",
-            "fontFamily": "var(--mantine-font-family)",
-            "border": "none",
-            "borderBottom": "1px solid var(--mantine-color-default-border)",
-            "padding": "6px 10px",
-        },
-        style_data_conditional=[
-            {
-                "if": {"state": "selected"},
-                "backgroundColor": "var(--mantine-primary-color-light)",
-                "border": "1px solid var(--mantine-primary-color-filled)",
-            },
-            {
-                "if": {"row_index": "odd"},
-                "backgroundColor": "var(--mantine-color-default-hover)",
-            },
-        ],
-        css=[
-            {
-                "selector": ".dash-filter input",
-                "rule": (
-                    "background-color: var(--mantine-color-body);"
-                    "color: var(--mantine-color-text);"
-                    "border: 1px solid var(--mantine-color-default-border);"
-                    "border-radius: 4px;"
-                ),
-            },
-            {
-                "selector": ".dash-spreadsheet-pagination",
-                "rule": "color: var(--mantine-color-text);",
-            },
-            {
-                "selector": ".dash-spreadsheet-pagination button",
-                "rule": (
-                    "background-color: var(--mantine-color-default-hover);"
-                    "color: var(--mantine-color-text);"
-                    "border: 1px solid var(--mantine-color-default-border);"
-                ),
-            },
-        ],
+        **themed_datatable_kwargs(),
     )
 
 
@@ -1213,7 +1210,8 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         if not n_clicks or not chart_type_name or not target:
             raise PreventUpdate
 
-        parameters = _merge_chart_param_values(values, checked_values, field_ids)
+        fields = ChartTypeRegistry.get_registered_chart_types().get(chart_type_name, {})
+        parameters = _merge_chart_param_values(values, checked_values, field_ids, fields)
         try:
             new_chart = ChartInstance[Any, Any](chart_type=chart_type_name, parameters=parameters)
         except ValidationError as exc:
@@ -1344,7 +1342,8 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         triggered_id = cast("dict[str, str]", ctx.triggered_id)  # pyright: ignore[reportUnknownMemberType]
         if not triggered_id or not ctx.triggered[0]["value"]:
             raise PreventUpdate
-        panel_name, direction = triggered_id["panel"], triggered_id["direction"]
+        panel_name = triggered_id["panel"]
+        direction = cast("_PanelMoveDirection", triggered_id["direction"])
 
         def reorder(panels: list[PanelInstance[Any, Any]]) -> list[PanelInstance[Any, Any]]:
             return _move_panel(panels, panel_name, direction)
@@ -1668,8 +1667,12 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         metrics_df = build_metrics_dataframe(store.fetch_metrics(experiment_id))
         artifacts = list(store.fetch_artifacts(experiment_id=experiment_id))
         artifacts_df = build_artifacts_dataframe(artifacts)
+        hparams = list(store.fetch_hyperparams(experiment_id))
+        hparams_df = build_hyperparams_dataframe(hparams)
         df = merge_metrics_and_artifacts(metrics_df, artifacts_df)
-        column_kinds = infer_column_kinds(metrics_df.columns, {a.key for a in artifacts})
+        df = merge_hyperparams(df, hparams_df)
+        hparam_keys = {k for h in hparams for k in h.hparams_dict}
+        column_kinds = infer_column_kinds(metrics_df.columns, {a.key for a in artifacts}, hparam_keys)
         return (
             df.to_json(orient="split"),
             column_kinds,
@@ -1775,7 +1778,8 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         if not chart_type_name or df_json is None:
             return None, ""
 
-        parameters = _merge_chart_param_values(values, checked_values, field_ids)
+        fields = ChartTypeRegistry.get_registered_chart_types().get(chart_type_name, {})
+        parameters = _merge_chart_param_values(values, checked_values, field_ids, fields)
         try:
             chart_instance = ChartInstance[Any, Any](chart_type=chart_type_name, parameters=parameters)
             df = pd.read_json(StringIO(df_json), orient="split")

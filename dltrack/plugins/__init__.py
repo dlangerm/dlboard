@@ -13,6 +13,7 @@ BUILTIN_PAGES: list[PluginProtocol] = [
 BUILTIN_CHARTS: list[PluginProtocol] = [
     charts.image_series,
     charts.line_chart,
+    charts.table_chart,
 ]
 
 LOCAL_DEPLOYMENT: list[PluginProtocol] = [

@@ -16,6 +16,7 @@ from dltrack.models._view import ChartInstance, ChartType, ChartTypeRegistry, Co
 class _FakeParams(BaseModel, frozen=True, extra="forbid"):
     metric: str
     flag: bool = False
+    hparam: str = ""
 
 
 class _FakeChart(ChartType[_FakeParams, pd.DataFrame, dict[str, object]], frozen=True, extra="forbid"):
@@ -43,8 +44,13 @@ class _FakeChart(ChartType[_FakeParams, pd.DataFrame, dict[str, object]], frozen
 
     @classmethod
     @typing.override
+    def hint_required_hparams(cls, parameters: _FakeParams) -> set[str] | None:
+        return None if parameters.hparam == "all" else ({parameters.hparam} if parameters.hparam else set())
+
+    @classmethod
+    @typing.override
     def field_column_kinds(cls) -> dict[str, ColumnKind]:
-        return {"metric": ColumnKind.METRIC}
+        return {"metric": ColumnKind.METRIC, "hparam": ColumnKind.HPARAM}
 
 
 @pytest.fixture(autouse=True)
@@ -103,6 +109,11 @@ class _FakeChartWithChoices(
 
     @classmethod
     @typing.override
+    def hint_required_hparams(cls, parameters: _FakeParamsWithChoices) -> set[str] | None:
+        return set()
+
+    @classmethod
+    @typing.override
     def field_column_kinds(cls) -> dict[str, ColumnKind]:
         return {}
 
@@ -117,6 +128,57 @@ def test_get_registered_chart_types_describes_literal_field_as_str_with_choices(
     assert fields["mode"].choices == ("prefix", "suffix")
     assert fields["mode"].required is False
     assert fields["mode"].default == "prefix"
+
+
+class _FakeParamsWithOptionalInt(BaseModel, frozen=True, extra="forbid"):
+    font_size: int | None = None
+
+
+class _FakeChartWithOptionalInt(
+    ChartType[_FakeParamsWithOptionalInt, pd.DataFrame, dict[str, object]], frozen=True, extra="forbid"
+):
+    name: ClassVar[str] = "fake-optional-int"
+
+    @classmethod
+    @typing.override
+    def parameter_type(cls) -> type[_FakeParamsWithOptionalInt]:
+        return _FakeParamsWithOptionalInt
+
+    @classmethod
+    @typing.override
+    def render(cls, parameters: _FakeParamsWithOptionalInt, dataframe: pd.DataFrame) -> dict[str, object]:
+        return {"font_size": parameters.font_size}
+
+    @classmethod
+    @typing.override
+    def hint_required_columns(cls, parameters: _FakeParamsWithOptionalInt) -> set[str] | None:
+        return set()
+
+    @classmethod
+    @typing.override
+    def hint_required_artifact_keys(cls, parameters: _FakeParamsWithOptionalInt) -> set[str] | None:
+        return set()
+
+    @classmethod
+    @typing.override
+    def hint_required_hparams(cls, parameters: _FakeParamsWithOptionalInt) -> set[str] | None:
+        return set()
+
+    @classmethod
+    @typing.override
+    def field_column_kinds(cls) -> dict[str, ColumnKind]:
+        return {}
+
+
+def test_get_registered_chart_types_describes_optional_int_field() -> None:
+    """`int | None`-typed fields (e.g. table chart's `font_size`) must unwrap to plain `int` rather
+    than raising `TypeError` — regression test for a crash when opening the add-chart modal.
+    """
+    _FakeChartWithOptionalInt.register()
+    fields = ChartTypeRegistry.get_registered_chart_types()["fake-optional-int"]
+    assert fields["font_size"].type == "int"
+    assert fields["font_size"].required is False
+    assert fields["font_size"].default is None
 
 
 def test_chart_instance_delegates_through_registry() -> None:
@@ -161,3 +223,27 @@ def test_panel_hint_required_artifact_keys_aggregates() -> None:
         ],
     )
     assert panel.hint_required_artifact_keys() == {"img"}
+
+
+@pytest.mark.parametrize(
+    ("hparams", "expected"),
+    [
+        (["lr", "batch_size"], {"lr", "batch_size"}),
+        (["lr", "all"], None),
+        (["", ""], set[str]()),
+    ],
+)
+def test_panel_hint_required_hparams_aggregates_and_short_circuits(
+    hparams: list[str], expected: set[str] | None
+) -> None:
+    _FakeChart.register()
+    panel = PanelInstance[pd.DataFrame, dict[str, object]](
+        name="p",
+        charts=[
+            ChartInstance[pd.DataFrame, dict[str, object]](
+                chart_type="fake", parameters={"metric": "loss", "hparam": h}
+            )
+            for h in hparams
+        ],
+    )
+    assert panel.hint_required_hparams() == expected

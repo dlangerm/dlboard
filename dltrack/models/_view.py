@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import itertools
 import json
+import types
 import typing
 from abc import ABC, abstractmethod
 from enum import StrEnum
@@ -21,6 +22,17 @@ class ColumnKind(StrEnum):
 
     METRIC = "metric"
     ARTIFACT = "artifact"
+    HPARAM = "hparam"
+
+
+class ParameterFieldType(StrEnum):
+    """Widget type a chart parameter field should be rendered as."""
+
+    BOOL = "bool"
+    INT = "int"
+    FLOAT = "float"
+    STR = "str"
+    LIST_STR = "list[str]"
 
 
 class ChartType[P: BaseModel, D, C](ABC, BaseModel, frozen=True, extra="forbid"):
@@ -50,6 +62,11 @@ class ChartType[P: BaseModel, D, C](ABC, BaseModel, frozen=True, extra="forbid")
         """Hint at the columns required for this chart."""
 
     @classmethod
+    @abstractmethod
+    def hint_required_hparams(cls, parameters: P) -> set[str] | None:
+        """Hint at the hyperparameter keys required for this chart."""
+
+    @classmethod
     def register(cls, *, allow_override: bool = False) -> None:
         ChartTypeRegistry.register(cls, allow_override=allow_override)
 
@@ -67,9 +84,9 @@ class ParameterField(BaseModel, frozen=True, extra="forbid"):
     """A field describing a chart parameter."""
 
     name: str
-    type: typing.Literal["bool", "int", "float", "str"]
+    type: ParameterFieldType
     required: bool
-    default: bool | int | float | str | None = None
+    default: bool | int | float | str | list[str] | None = None
     column_kind: ColumnKind | None = None
     choices: tuple[str, ...] | None = None
     """Fixed set of allowed values for a `Literal[...]`-typed field, rendered as a dropdown."""
@@ -122,19 +139,27 @@ class ChartTypeRegistry:
         field_descriptors: dict[str, ParameterField] = {}
         for field_name, field in parameter_type.model_fields.items():
             annotation = field.annotation
+            if typing.get_origin(annotation) in (typing.Union, types.UnionType):
+                # Unwrap `X | None` (an optional field) down to the underlying `X` — the widget
+                # type is the same either way; only `required` (from `field.is_required()`) differs.
+                non_none_args = [a for a in typing.get_args(annotation) if a is not type(None)]
+                if len(non_none_args) == 1:
+                    annotation = non_none_args[0]
             choices: tuple[str, ...] | None = None
             if annotation is bool:
-                field_type = "bool"
+                field_type = ParameterFieldType.BOOL
             elif annotation is float:
-                field_type = "float"
+                field_type = ParameterFieldType.FLOAT
             elif annotation is int:
-                field_type = "int"
+                field_type = ParameterFieldType.INT
             elif annotation is str:
-                field_type = "str"
+                field_type = ParameterFieldType.STR
+            elif typing.get_origin(annotation) is list and typing.get_args(annotation) == (str,):
+                field_type = ParameterFieldType.LIST_STR
             elif typing.get_origin(annotation) is typing.Literal:
                 # A fixed set of string choices, e.g. `Literal["number", "category"]` — rendered
                 # as a dropdown rather than a free-text field.
-                field_type = "str"
+                field_type = ParameterFieldType.STR
                 choices = typing.get_args(annotation)
             else:
                 msg = f"{annotation} unsupported"
@@ -167,6 +192,11 @@ class ChartTypeRegistry:
             chart_type.parameter_type().model_validate(chart.parameters)
         )
 
+    @classmethod
+    def hint_required_hparams[T, C](cls, chart: ChartInstance[T, C]) -> set[str] | None:
+        chart_type = cls._all_charts[chart.chart_type]
+        return chart_type.hint_required_hparams(chart_type.parameter_type().model_validate(chart.parameters))
+
 
 class ChartInstance[D, C](BaseModel, frozen=True, extra="forbid"):
     """A chart for a set of metrics."""
@@ -187,6 +217,10 @@ class ChartInstance[D, C](BaseModel, frozen=True, extra="forbid"):
 
     def hint_required_artifact_keys(self) -> set[str] | None:
         return ChartTypeRegistry.hint_required_artifact_keys(self)
+
+    def hint_required_hparams(self) -> set[str] | None:
+        """Hint the required hyperparameter keys for this chart to render."""
+        return ChartTypeRegistry.hint_required_hparams(self)
 
 
 class PanelInstance[D, C](BaseModel, frozen=True, extra="forbid"):
@@ -225,6 +259,16 @@ class PanelInstance[D, C](BaseModel, frozen=True, extra="forbid"):
 
     def hint_required_artifact_keys(self) -> set[str | None]:
         return set(itertools.chain(*[c.hint_required_artifact_keys() or set() for c in self.charts]))
+
+    def hint_required_hparams(self) -> set[str] | None:
+        """Hint the required hyperparameter keys for the panel; `None` means "fetch every one"."""
+        hparams: set[str] = set()
+        for chart in self.charts:
+            hint = chart.hint_required_hparams()
+            if hint is None:
+                return None
+            hparams |= hint
+        return hparams
 
 
 class NewPage[D, C](BaseModel, frozen=True, extra="forbid"):
