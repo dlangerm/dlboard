@@ -11,3 +11,4 @@ wheels/
 *.env
 .data/
 lightning-logs/
+_scratch_test.py

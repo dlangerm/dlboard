@@ -462,19 +462,19 @@ def _build_hparam_datatable(
         page_size=20,
         style_table={"overflowX": "auto"},
         style_header={
-            "backgroundColor": "var(--mantine-color-dark-6)",
+            "backgroundColor": "var(--mantine-color-default-hover)",
             "color": "var(--mantine-color-text)",
             "fontFamily": "var(--mantine-font-family)",
             "fontWeight": 600,
             "border": "none",
-            "borderBottom": "1px solid var(--mantine-color-dark-4)",
+            "borderBottom": "1px solid var(--mantine-color-default-border)",
         },
         style_cell={
-            "backgroundColor": "var(--mantine-color-dark-7)",
+            "backgroundColor": "var(--mantine-color-body)",
             "color": "var(--mantine-color-text)",
             "fontFamily": "var(--mantine-font-family)",
             "border": "none",
-            "borderBottom": "1px solid var(--mantine-color-dark-5)",
+            "borderBottom": "1px solid var(--mantine-color-default-border)",
             "padding": "6px 10px",
         },
         style_data_conditional=[
@@ -485,16 +485,16 @@ def _build_hparam_datatable(
             },
             {
                 "if": {"row_index": "odd"},
-                "backgroundColor": "var(--mantine-color-dark-6)",
+                "backgroundColor": "var(--mantine-color-default-hover)",
             },
         ],
         css=[
             {
                 "selector": ".dash-filter input",
                 "rule": (
-                    "background-color: var(--mantine-color-dark-6);"
+                    "background-color: var(--mantine-color-body);"
                     "color: var(--mantine-color-text);"
-                    "border: 1px solid var(--mantine-color-dark-4);"
+                    "border: 1px solid var(--mantine-color-default-border);"
                     "border-radius: 4px;"
                 ),
             },
@@ -505,9 +505,9 @@ def _build_hparam_datatable(
             {
                 "selector": ".dash-spreadsheet-pagination button",
                 "rule": (
-                    "background-color: var(--mantine-color-dark-6);"
+                    "background-color: var(--mantine-color-default-hover);"
                     "color: var(--mantine-color-text);"
-                    "border: 1px solid var(--mantine-color-dark-4);"
+                    "border: 1px solid var(--mantine-color-default-border);"
                 ),
             },
         ],
@@ -843,7 +843,10 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
 
         curr_page = BasicExperimentPage.model_validate_json(page_json)
         panel = next(p for p in curr_page.panels if p.name == triggered_id["panel"])
-        idx = triggered_id["index"] or -1
+        idx = triggered_id["index"]
+        if idx is None:
+            msg = f"Malformed edit-chart id: {triggered_id}"
+            raise ValueError(msg)
         chart = panel.charts[idx]
         return True, {"panel": str(triggered_id["panel"]), "index": idx}, chart.chart_type, chart.parameters
 
