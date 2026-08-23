@@ -113,6 +113,12 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         _log.debug("getting projects")
         yield from self._execute_sql_query(models.Project, sql.get_all(models.Project))
 
+    def update_project(self, project: models.Project) -> models.Project:
+        """Update a project."""
+        _log.debug("updating project %s", project.id)
+        statement, values = sql.update(models.Project, project)
+        return self._consume_row_iterator(self._execute_sql_query(models.Project, statement, values))[0]
+
     def create_experiment(self, experiment: models.NewExperiment) -> models.Experiment:
         """Create a new experiment."""
         _log.info("Creating experiment for project %s", experiment.project_id)
@@ -135,6 +141,12 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         return self._execute_sql_query(
             models.Experiment, sql.get_all_by_field(models.Experiment, "project_id", project_id)
         )
+
+    def update_experiment(self, experiment: models.Experiment) -> models.Experiment:
+        """Update an experiment."""
+        _log.debug("updating experiment %s", experiment.id)
+        statement, values = sql.update(models.Experiment, experiment)
+        return self._consume_row_iterator(self._execute_sql_query(models.Experiment, statement, values))[0]
 
     def create_run(self, run: models.NewRun) -> models.Run:
         statement, values = sql.insert(models.Run, run)

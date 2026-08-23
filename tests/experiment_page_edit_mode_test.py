@@ -57,10 +57,14 @@ def _to_props(component: object) -> dict[str, Any]:
     return cast("Any", component).to_plotly_json()["props"]
 
 
-def _find_props(component: object, target_id: object) -> dict[str, Any] | None:
-    """Depth-first search a dash component tree for the props of a node with `target_id`."""
+def _find_props(component: Any, target_id: object) -> dict[str, Any] | None:  # noqa: ANN401
+    """Depth-first search a dash component tree for the props of a node with `target_id`.
+
+    `component` is typed `Any`: dash-mantine-components ships no py.typed marker, so its
+    component tree (and dash's own `.children`) is Unknown to pyright regardless.
+    """
     if isinstance(component, list):
-        for item in component:
+        for item in cast("list[Any]", component):
             found = _find_props(item, target_id)
             if found is not None:
                 return found
@@ -138,11 +142,11 @@ def test_render_panel_content_add_button_visibility_matches_edit_mode(
 def test_accordion_view_defaults_to_edit_mode_off(store: SQLLiteStore, experiment_id: int) -> None:
     container = accordion_view(store, experiment_id)
 
-    switch = _find_props(container.children, EDIT_MODE_ID)
+    switch = _find_props(cast("Any", container).children, EDIT_MODE_ID)
     assert switch is not None
     assert switch["checked"] is False
 
-    full_df_store = _find_props(container.children, FULL_DF_STORE_ID)
+    full_df_store = _find_props(cast("Any", container).children, FULL_DF_STORE_ID)
     assert full_df_store is not None
     assert full_df_store.get("data") is None
 
@@ -158,19 +162,19 @@ def test_accordion_view_preserves_edit_mode_and_cached_dataframe(
         column_kinds={"loss": ColumnKind.METRIC},
     )
 
-    switch = _find_props(container.children, EDIT_MODE_ID)
+    switch = _find_props(cast("Any", container).children, EDIT_MODE_ID)
     assert switch is not None
     assert switch["checked"] is True
 
-    new_panel_controls = _find_props(container.children, NEW_PANEL_CONTROLS_ID)
+    new_panel_controls = _find_props(cast("Any", container).children, NEW_PANEL_CONTROLS_ID)
     assert new_panel_controls is not None
     assert new_panel_controls["opened"] is True
 
-    full_df_store = _find_props(container.children, FULL_DF_STORE_ID)
+    full_df_store = _find_props(cast("Any", container).children, FULL_DF_STORE_ID)
     assert full_df_store is not None
     assert full_df_store["data"] == '{"cached": true}'
 
-    column_kinds_store = _find_props(container.children, COLUMN_KINDS_STORE_ID)
+    column_kinds_store = _find_props(cast("Any", container).children, COLUMN_KINDS_STORE_ID)
     assert column_kinds_store is not None
     assert column_kinds_store["data"] == {"loss": ColumnKind.METRIC}
 
@@ -192,10 +196,10 @@ def test_persist_settings_and_rerender_does_not_reset_edit_mode(
         column_kinds={"loss": ColumnKind.METRIC},
     )
 
-    switch = _find_props(container.children, EDIT_MODE_ID)
+    switch = _find_props(cast("Any", container).children, EDIT_MODE_ID)
     assert switch is not None
     assert switch["checked"] is True
 
-    full_df_store = _find_props(container.children, FULL_DF_STORE_ID)
+    full_df_store = _find_props(cast("Any", container).children, FULL_DF_STORE_ID)
     assert full_df_store is not None
     assert full_df_store["data"] == '{"cached": true}'

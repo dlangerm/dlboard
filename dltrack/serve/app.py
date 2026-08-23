@@ -61,7 +61,7 @@ def app(plugins: list[models.PluginProtocol]) -> Dash:
             ),
             dmc.AppShellMain(dash.page_container),
             dcc.Location(id=constants.LOCATION_ID, refresh=False),
-            Store(id=constants.NAVBAR_COLLAPSED_STORE_ID, data=False),
+            Store(id=constants.NAVBAR_COLLAPSED_STORE_ID, data=False, storage_type="local"),
         ],
         header={"height": 60},
         padding="md",
@@ -81,40 +81,50 @@ def app(plugins: list[models.PluginProtocol]) -> Dash:
 )
 def breadcrumbs(_: str, project_id: int | None, experiment_id: int | None) -> list[dcc.Link | dmc.Text]:
     """Breadcrumbs for the project list."""
-    if project_id is None and experiment_id is None:
+    if project_id is None:
         return [dcc.Link("Projects", href="/", refresh=True)]
-    if project_id is not None and experiment_id is None:
+
+    store = get_data_store()
+    project_name = store.get_project(project_id).name
+    if experiment_id is None:
         return [
             dcc.Link("Projects", href="/", refresh=True),
-            dcc.Link(f"Project {project_id}", href=f"/project/{project_id}", refresh=False),
+            dcc.Link(project_name, href=f"/project/{project_id}", refresh=False),
         ]
+
+    experiment = store.get_experiment(experiment_id)
+    experiment_name = experiment.name if experiment and experiment.name else f"Experiment {experiment_id}"
     return [
         dcc.Link("Projects", href="/", refresh=True),
-        dcc.Link(f"Project {project_id}", href=f"/project/{project_id}", refresh=False),
-        dmc.Text(f"Experiment {experiment_id}"),
+        dcc.Link(project_name, href=f"/project/{project_id}", refresh=False),
+        dmc.Text(experiment_name),
     ]
 
 
 @callback(
-    Output("appshell", "navbar"),
     Output(constants.NAVBAR_COLLAPSED_STORE_ID, "data"),
     Input(constants.NAVBAR_COLLAPSE_TOGGLE_ID, "n_clicks"),
     State(constants.NAVBAR_COLLAPSED_STORE_ID, "data"),
     prevent_initial_call=True,
 )
-def toggle_navbar(n_clicks: int, collapsed: bool) -> tuple[dict[str, str | int | dict[str, bool]], bool]:  # noqa:  FBT001
-    """Toggle the navbar visibility."""
+def toggle_navbar(n_clicks: int, collapsed: bool) -> bool:  # noqa: FBT001
+    """Toggle the navbar visibility. Persisted client-side, so this survives a refresh."""
     if not n_clicks:
         raise PreventUpdate
-    new_collapsed = not collapsed
-    return (
-        {
-            "width": 300,
-            "breakpoint": "sm",
-            "collapsed": {"mobile": new_collapsed, "desktop": new_collapsed},
-        },
-        new_collapsed,
-    )
+    return not collapsed
+
+
+@callback(
+    Output("appshell", "navbar"),
+    Input(constants.NAVBAR_COLLAPSED_STORE_ID, "data"),
+)
+def sync_navbar_collapsed(collapsed: bool | None) -> dict[str, str | int | dict[str, bool]]:  # noqa: FBT001
+    """Apply the persisted collapsed state, including on first load (from localStorage)."""
+    return {
+        "width": 300,
+        "breakpoint": "sm",
+        "collapsed": {"mobile": bool(collapsed), "desktop": bool(collapsed)},
+    }
 
 
 @callback(
@@ -128,14 +138,15 @@ def render_navbar(project_id: int | None, experiment_id: int | None) -> dmc.Stac
         return dmc.Text("Open a project to see its experiments", c="dimmed", size="sm")
 
     store = get_data_store()
+    project = store.get_project(project_id)
     experiments = store.get_experiments(project_id)
     return dmc.Stack(
         [
-            dmc.Text(f"Project {project_id}", fw=600, size="sm"),
+            dmc.Text(project.name, fw=600, size="sm"),
             dmc.Stack(
                 [
                     dmc.NavLink(
-                        label=f"Experiment {e.id}",
+                        label=e.name or f"Experiment {e.id}",
                         href=f"/experiment/{e.id}",
                         active=e.id == experiment_id,
                     )

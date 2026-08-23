@@ -26,6 +26,11 @@ from dltrack.plugins.pages._dataframe_helpers import (
     infer_column_kinds,
     merge_metrics_and_artifacts,
 )
+from dltrack.plugins.pages._description_editor import (
+    DescriptionEditorIds,
+    register_edit_callbacks,
+    render_header,
+)
 from dltrack.serve import get_data_store
 
 if TYPE_CHECKING:
@@ -33,7 +38,7 @@ if TYPE_CHECKING:
 
     from dash.development.base_component import Component
 
-    from dltrack.models import DataStore
+    from dltrack.models import DataStore, Experiment
 
 _log = get_logger(__name__)
 
@@ -70,7 +75,20 @@ ADD_CHART_ERROR_ID = "add-chart-error"
 ADD_CHART_SUBMIT_ID = "add-chart-submit"
 ADD_CHART_CANCEL_ID = "add-chart-cancel"
 
+EXPERIMENT_DESC_IDS = DescriptionEditorIds(
+    header=constants.EXPERIMENT_HEADER_ID,
+    edit_button="experiment-edit-desc-button",
+    modal="experiment-edit-desc-modal",
+    textarea="experiment-edit-desc-textarea",
+    save="experiment-edit-desc-save",
+    cancel="experiment-edit-desc-cancel",
+)
+
 _METRIC_BOOKKEEPING_COLS = {"run_id", "step", "index", "timestamp_utc"}
+
+
+def _experiment_display_name(experiment: Experiment) -> str:
+    return experiment.name or f"Experiment {experiment.id}"
 
 
 # ============================================================
@@ -591,17 +609,46 @@ def _build_hparam_datatable(
 def plug(app: Dash) -> None:  # noqa: C901, PLR0915
     """Plugin for the basic experiment page: hparam table + chart accordion + editor."""
 
-    # --- initial render: fills METRIC_CONTENT_ID and seeds STATE_PAGE_STORAGE (see experiment.py) ---
+    # --- initial render: fills METRIC_CONTENT_ID/EXPERIMENT_HEADER_ID and seeds STATE_PAGE_STORAGE ---
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(constants.METRIC_CONTENT_ID, "children", allow_duplicate=True),
+        Output(constants.EXPERIMENT_HEADER_ID, "children", allow_duplicate=True),
         Output(constants.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Input(constants.STATE_EXPERIMENT_ID, "data"),
         prevent_initial_call="initial_update",
     )
-    def render_initial(experiment_id: int) -> tuple[html.Div, str]:
+    def render_initial(experiment_id: int) -> tuple[html.Div, Component, str]:
         store = get_data_store()
         page = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
-        return accordion_view(store, experiment_id=experiment_id), page.model_dump_json()
+        exp = store.get_experiment(experiment_id)
+        name, description = (_experiment_display_name(exp), exp.description) if exp else ("", "")
+        header = render_header(EXPERIMENT_DESC_IDS, title=name, description=description)
+        return accordion_view(store, experiment_id=experiment_id), header, page.model_dump_json()
+
+    def _fetch_experiment_header(experiment_id: int) -> tuple[str, str]:
+        store = get_data_store()
+        exp = store.get_experiment(experiment_id)
+        if exp is None:
+            msg = f"Experiment {experiment_id} not found"
+            raise ValueError(msg)
+        return _experiment_display_name(exp), exp.description
+
+    def _save_experiment_description(experiment_id: int, description: str) -> tuple[str, str]:
+        store = get_data_store()
+        exp = store.get_experiment(experiment_id)
+        if exp is None:
+            msg = f"Experiment {experiment_id} not found"
+            raise ValueError(msg)
+        updated = store.update_experiment(exp.model_copy(update={"description": description}))
+        return _experiment_display_name(updated), updated.description
+
+    register_edit_callbacks(
+        app,
+        EXPERIMENT_DESC_IDS,
+        State(constants.STATE_EXPERIMENT_ID, "data"),
+        fetch=_fetch_experiment_header,
+        save=_save_experiment_description,
+    )
 
     # --- hparam table ---
     @app.callback(  # pyright: ignore[reportUnknownMemberType]

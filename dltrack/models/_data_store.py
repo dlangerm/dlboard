@@ -34,6 +34,10 @@ class DataStore[**P](typing.Protocol):
         """Get all projects."""
         ...
 
+    def update_project(self, project: models.Project) -> models.Project:
+        """Update a project."""
+        ...
+
     def create_experiment(self, experiment: models.NewExperiment) -> models.Experiment:
         """Create an experiment within a project."""
         ...
@@ -44,6 +48,10 @@ class DataStore[**P](typing.Protocol):
 
     def get_experiments(self, project_id: int) -> typing.Iterator[models.Experiment]:
         """Get all experiments for a project."""
+        ...
+
+    def update_experiment(self, experiment: models.Experiment) -> models.Experiment:
+        """Update an experiment."""
         ...
 
     def create_run(self, run: models.NewRun) -> models.Run:

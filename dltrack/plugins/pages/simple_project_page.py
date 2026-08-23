@@ -3,22 +3,45 @@
 from __future__ import annotations
 
 import typing
+from typing import TYPE_CHECKING
 
 import dash_mantine_components as dmc
-from dash import Dash, Input, Output, State
+from dash import Dash, Input, Output, State, html
 
 from dltrack.models import NewExperiment, constants
+from dltrack.plugins.pages._description_editor import (
+    DescriptionEditorIds,
+    register_edit_callbacks,
+    render_header,
+)
 from dltrack.serve import get_data_store
 
+if TYPE_CHECKING:
+    from dltrack.models import Experiment
+
 PROJECT_ID: typing.Final = "project-id"
+PROJECT_HEADER_ID: typing.Final = "project-header"
 EXP_LIST_ID: typing.Final = "experiment-list-id"
 NEW_EXP_BUTTON_ID: typing.Final = "new-experiment-button"
 NEW_EXP_NAME_ID: typing.Final = "new-experiment-name"
 
+PROJECT_DESC_IDS = DescriptionEditorIds(
+    header=PROJECT_HEADER_ID,
+    edit_button="project-edit-desc-button",
+    modal="project-edit-desc-modal",
+    textarea="project-edit-desc-textarea",
+    save="project-edit-desc-save",
+    cancel="project-edit-desc-cancel",
+)
+
 _CARD_COLORS = ["indigo", "teal", "grape", "orange", "cyan", "pink"]
 
 
-def _experiment_card(experiment_id: int, color: str) -> dmc.Card:
+def _experiment_display_name(experiment: Experiment) -> str:
+    return experiment.name or f"Experiment {experiment.id}"
+
+
+def _experiment_card(experiment: Experiment, color: str) -> dmc.Card:
     return dmc.Card(
         [
             dmc.CardSection(
@@ -27,14 +50,21 @@ def _experiment_card(experiment_id: int, color: str) -> dmc.Card:
             dmc.Group(
                 [
                     dmc.ThemeIcon("E", size="lg", radius="xl", color=color, variant="light"),
-                    dmc.Title(f"Experiment {experiment_id}", order=4, fw=600),
+                    dmc.Title(_experiment_display_name(experiment), order=4, fw=600),
                 ],
                 gap="sm",
                 mt="md",
             ),
+            dmc.Text(
+                experiment.description or "No description",
+                size="sm",
+                c="dimmed",
+                mt="xs",
+                lineClamp=2,
+            ),
             dmc.Anchor(
                 dmc.Button("Open experiment", variant="light", color=color, fullWidth=True, mt="md"),
-                href=f"/experiment/{experiment_id}",
+                href=f"/experiment/{experiment.id}",
                 underline="never",
                 refresh=False,
             ),
@@ -63,7 +93,7 @@ def _list_experiments(project_id: int) -> dmc.SimpleGrid | dmc.Center:
             mb="xl",
         )
     return dmc.SimpleGrid(
-        [_experiment_card(e.id, _CARD_COLORS[i % len(_CARD_COLORS)]) for i, e in enumerate(experiments)],
+        [_experiment_card(e, _CARD_COLORS[i % len(_CARD_COLORS)]) for i, e in enumerate(experiments)],
         cols=3,
         spacing="md",
     )
@@ -77,16 +107,15 @@ def plug(app: Dash) -> None:
         State(constants.STATE_PROJECT_ID, component_property="data"),
     )
     def layout(project_id: int) -> dmc.Container:
+        store = get_data_store()
+        project = store.get_project(project_id)
         return dmc.Container(
             [
-                dmc.Stack(
-                    [
-                        dmc.Title(f"Project {project_id}", order=2, fw=700),
-                        dmc.Text("Create and review experiments for this project.", c="dimmed", size="sm"),
-                    ],
-                    gap=2,
-                    mt="lg",
-                    mb="md",
+                html.Div(
+                    id=PROJECT_HEADER_ID,
+                    children=render_header(
+                        PROJECT_DESC_IDS, title=project.name, description=project.description
+                    ),
                 ),
                 dmc.Paper(
                     dmc.Group(
@@ -128,5 +157,24 @@ def plug(app: Dash) -> None:
                 msg = "Experiment name cannot be empty"
                 raise ValueError(msg)
             store = get_data_store()
-            store.create_experiment(NewExperiment(project_id=int(project_id)))
+            store.create_experiment(NewExperiment(project_id=int(project_id), name=new_experiment_name))
         return _list_experiments(project_id)
+
+    def _fetch_project_header(project_id: int) -> tuple[str, str]:
+        store = get_data_store()
+        project = store.get_project(project_id)
+        return project.name, project.description
+
+    def _save_project_description(project_id: int, description: str) -> tuple[str, str]:
+        store = get_data_store()
+        project = store.get_project(project_id)
+        updated = store.update_project(project.model_copy(update={"description": description}))
+        return updated.name, updated.description
+
+    register_edit_callbacks(
+        app,
+        PROJECT_DESC_IDS,
+        State(constants.STATE_PROJECT_ID, "data"),
+        fetch=_fetch_project_header,
+        save=_save_project_description,
+    )
