@@ -6,6 +6,7 @@ import sqlite3
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterator, override
 
+from pydantic_settings import BaseSettings
 from structlog.stdlib import get_logger
 
 from dltrack.serve._backend._data_store import set_data_store
@@ -15,8 +16,6 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from dash import Dash
-
-    from dltrack import models
 
 
 _log = get_logger(__name__)
@@ -60,13 +59,13 @@ class SQLLiteStore(SQLStoreBase[Path]):
         return cls(location=loc)
 
 
-def get_plugin(store_location: Path) -> models.PluginProtocol:
-    """Get the underlying plugin."""
+class AppSettings(BaseSettings):
+    """Environment variables."""
 
-    class Plugin:
-        @classmethod
-        def plug(cls, app: Dash) -> None:
-            """Plugin content."""
-            set_data_store(app, SQLLiteStore.get_or_create(store_location))
+    sqlite_location: Path = Path.home() / ".dltrack.sqlite"
 
-    return Plugin
+
+def plug(app: Dash) -> None:
+    """Plugin content."""
+    env = AppSettings()
+    set_data_store(app, SQLLiteStore.get_or_create(env.sqlite_location))

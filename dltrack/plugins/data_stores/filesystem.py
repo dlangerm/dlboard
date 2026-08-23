@@ -17,6 +17,7 @@ from uuid import uuid4
 
 from dash.exceptions import AppNotFoundError
 from flask import Response, send_from_directory
+from pydantic_settings import BaseSettings
 from structlog.stdlib import get_logger
 
 from dltrack import models
@@ -175,13 +176,17 @@ class FSArtifactStore(models.ArtifactStore[Path, int]):
         return send_from_directory(self._root_directory, str(ref.path).lstrip("/"))
 
 
-def get_plugin(artifact_root: Path, store_queue_size: int = 100) -> models.PluginProtocol:
-    """Get the underlying plugin."""
+class AppSettings(BaseSettings):
+    """Environment variables."""
 
-    class Plugin:
-        @classmethod
-        def plug(cls, app: Dash) -> None:
-            """Plugin content."""
-            set_artifact_store(app, FSArtifactStore.get_or_create(artifact_root, store_queue_size))
+    artifact_store_location: Path = Path.home() / ".dltrack_artifacts"
+    filesystem_store_queue_size: int = 100
 
-    return Plugin
+
+def plug(app: Dash) -> None:
+    """Plugin content."""
+    env = AppSettings()
+
+    set_artifact_store(
+        app, FSArtifactStore.get_or_create(env.artifact_store_location, env.filesystem_store_queue_size)
+    )
