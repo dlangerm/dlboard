@@ -206,10 +206,13 @@ class PanelInstance[D, C](BaseModel, frozen=True, extra="forbid"):
         If all charts in a panel hint their required columns:
         A page should only fetch the required columns for the panel.
         """
-        hints = set(itertools.chain(*[c.hint_required_columns() or [None] for c in self.charts]))
-        if None in hints:
-            return None
-        return hints  # pyright: ignore[reportReturnType]
+        columns: set[str] = set()
+        for chart in self.charts:
+            hint = chart.hint_required_columns()
+            if hint is None:
+                return None
+            columns |= hint
+        return columns
 
     def hint_required_artifact_keys(self) -> set[str | None]:
         return set(itertools.chain(*[c.hint_required_artifact_keys() or set() for c in self.charts]))

@@ -18,6 +18,12 @@ from structlog.stdlib import get_logger
 
 from dltrack.models import HyperParams, Page, constants
 from dltrack.models._view import ChartInstance, ChartTypeRegistry, ColumnKind, PanelInstance, ParameterField
+from dltrack.plugins.pages._chart_autogen import (
+    Suggestion,
+    build_auto_panels,
+    build_suggestions,
+    find_uncharted_keys,
+)
 from dltrack.plugins.pages._dataframe_helpers import (
     build_artifacts_dataframe,
     build_metrics_dataframe,
@@ -39,17 +45,19 @@ if TYPE_CHECKING:
     from dash.development.base_component import Component
 
     from dltrack.models import DataStore, Experiment
+    from dltrack.plugins.pages._chart_autogen import SplitMode
 
 _log = get_logger(__name__)
 
 
 NEW_PANEL_ID = "new-panel-button"
-NEW_PANEL_CONTROLS_ID = "new-panel-controls"
 NEW_PANEL_NAME_ID = "panel-name"
 ACCORDION_ID = "experiment-accordion"
 OPEN_PANEL_KEY: typing.Final = "open_panel"
 
 EDIT_MODE_ID = "edit-mode-switch"
+EDIT_DRAWER_ID = "edit-drawer"
+EDIT_DRAWER_TOGGLE_ID = "edit-drawer-toggle"
 FULL_DF_STORE_ID = "full-dataframe-store"
 COLUMN_KINDS_STORE_ID = "column-kinds-store"
 
@@ -75,6 +83,27 @@ ADD_CHART_ERROR_ID = "add-chart-error"
 ADD_CHART_SUBMIT_ID = "add-chart-submit"
 ADD_CHART_CANCEL_ID = "add-chart-cancel"
 
+_SPLIT_MODE_DATA = [{"label": "Prefix", "value": "prefix"}, {"label": "Suffix", "value": "suffix"}]
+_DEFAULT_DELIMITER = "/"
+
+AUTO_POPULATE_DELIMITER_ID = "auto-populate-delimiter"
+AUTO_POPULATE_MODE_ID = "auto-populate-mode"
+AUTO_POPULATE_BUTTON_ID = "auto-populate-button"
+
+SUGGEST_CHARTS_BUTTON_ID = "suggest-charts-button"
+SUGGEST_DRAWER_ID = "suggest-charts-drawer"
+SUGGEST_DELIMITER_ID = "suggest-charts-delimiter"
+SUGGEST_MODE_ID = "suggest-charts-mode"
+SUGGEST_CONTENT_ID = "suggest-charts-content"
+SUGGEST_SUGGESTIONS_STORE_ID = "suggest-charts-store"
+
+RENAME_PANEL_MODAL_ID = "rename-panel-modal"
+RENAME_PANEL_TARGET_ID = "rename-panel-target"
+RENAME_PANEL_NAME_INPUT_ID = "rename-panel-name-input"
+RENAME_PANEL_ERROR_ID = "rename-panel-error"
+RENAME_PANEL_SAVE_ID = "rename-panel-save"
+RENAME_PANEL_CANCEL_ID = "rename-panel-cancel"
+
 EXPERIMENT_DESC_IDS = DescriptionEditorIds(
     header=constants.EXPERIMENT_HEADER_ID,
     edit_button="experiment-edit-desc-button",
@@ -84,7 +113,7 @@ EXPERIMENT_DESC_IDS = DescriptionEditorIds(
     cancel="experiment-edit-desc-cancel",
 )
 
-_METRIC_BOOKKEEPING_COLS = {"run_id", "step", "index", "timestamp_utc"}
+_METRIC_BOOKKEEPING_COLS = {"run_id", "step", "index", "timestamp_utc", "experiment_id"}
 
 
 def _experiment_display_name(experiment: Experiment) -> str:
@@ -108,6 +137,18 @@ def _delete_chart_button_id(panel_name: str, index: int) -> _ChartID:
     return {"type": "delete-chart", "panel": panel_name, "index": index}
 
 
+def _delete_panel_button_id(panel_name: str) -> dict[str, str]:
+    return {"type": "delete-panel", "panel": panel_name}
+
+
+def _rename_panel_button_id(panel_name: str) -> dict[str, str]:
+    return {"type": "rename-panel", "panel": panel_name}
+
+
+def _move_panel_button_id(panel_name: str, direction: str) -> dict[str, str]:
+    return {"type": "move-panel", "panel": panel_name, "direction": direction}
+
+
 def _chart_controls_group_id(panel_name: str, index: int) -> _ChartID:
     return {"type": "chart-controls", "panel": panel_name, "index": index}
 
@@ -123,6 +164,10 @@ def _chart_param_id(field_name: str) -> dict[str, str]:
 
 def _panel_content_id(panel_name: str) -> dict[str, str]:
     return {"type": "panel-content", "panel": panel_name}
+
+
+def _add_suggestion_button_id(kind: str, key: str) -> dict[str, str]:
+    return {"type": "add-suggestion", "kind": kind, "key": key}
 
 
 def _fetch_panel_dataframe(
@@ -186,6 +231,73 @@ def _panel_placeholder() -> dmc.Skeleton:
     return dmc.Skeleton(height=60, radius="sm")
 
 
+def _panel_management_row(panel_name: str, *, index: int, count: int) -> Component:
+    """
+    One row of the "Manage panels" list: name + reorder/rename/delete, all plain sibling buttons.
+
+    Deliberately kept out of the accordion header — `AccordionControl` is a native full-width
+    `<button>`, and any attempt to share that row with other interactive controls (flex sibling,
+    absolute overlay) either gets clipped or ends up layering clickable elements on top of another
+    button, which is the kind of thing screen readers and keyboard nav get confused by. This list
+    is a completely separate, ordinary block of buttons instead.
+    """
+    return dmc.Group(
+        [
+            dmc.Text(panel_name, size="sm"),
+            dmc.ActionIcon(
+                "↑",
+                id=_move_panel_button_id(panel_name, "up"),
+                n_clicks=0,
+                disabled=index == 0,
+                variant="subtle",
+                size="sm",
+            ),
+            dmc.ActionIcon(
+                "↓",
+                id=_move_panel_button_id(panel_name, "down"),
+                n_clicks=0,
+                disabled=index == count - 1,
+                variant="subtle",
+                size="sm",
+            ),
+            dmc.ActionIcon(
+                "✎",
+                id=_rename_panel_button_id(panel_name),
+                n_clicks=0,
+                variant="subtle",
+                size="sm",
+            ),
+            dmc.ActionIcon(
+                "🗑",
+                id=_delete_panel_button_id(panel_name),
+                n_clicks=0,
+                variant="subtle",
+                color="red",
+                size="sm",
+            ),
+        ],
+        justify="flex-end",
+        wrap="nowrap",
+        gap="xs",
+    )
+
+
+def _panel_management_list(panels: list[PanelInstance[Any, Any]]) -> Component:
+    """
+    The edit-mode "Manage panels" list: reorder/rename/delete without opening anything.
+
+    Lives in the toolbar, entirely outside the accordion, so none of this fights the accordion's
+    own click/toggle handling.
+    """
+    if not panels:
+        return html.Div()
+    count = len(panels)
+    return dmc.Stack(
+        [_panel_management_row(p.name, index=idx, count=count) for idx, p in enumerate(panels)],
+        gap="xs",
+    )
+
+
 # ============================================================
 # page model
 # ============================================================
@@ -244,13 +356,29 @@ class BasicExperimentPage(Page[pd.DataFrame, dmc.Accordion, html.Div], frozen=Tr
         )
 
 
+def _render_chart_safely(
+    chart: ChartInstance[Any, Any], dataframe: pd.DataFrame, panel_name: str
+) -> Component:
+    """Render one chart, isolating failures so a broken chart doesn't take the rest of the panel down."""
+    try:
+        return chart.render(dataframe)
+    except Exception as exc:  # noqa: BLE001
+        _log.exception("Failed to render %r chart in panel %r", chart.chart_type, panel_name)
+        return dmc.Alert(
+            f"{type(exc).__name__}: {exc}",
+            title=f"Failed to render {chart.chart_type} chart",
+            color="red",
+            variant="light",
+        )
+
+
 def _render_panel_charts(
     panel: PanelInstance[Any, Any], dataframe: pd.DataFrame, *, edit_mode: bool = False
 ) -> list[dmc.Stack]:
     """Render each chart in a panel with edit/delete controls above it."""
     items: list[dmc.Stack] = []
     for idx, chart in enumerate(panel.charts):
-        rendered = chart.render(dataframe)
+        rendered = _render_chart_safely(chart, dataframe, panel.name)
         items.append(
             dmc.Stack(
                 [
@@ -288,20 +416,151 @@ def _render_panel_charts(
     return items
 
 
-def accordion_view(
+def _split_mode_control(control_id: str) -> dmc.SegmentedControl:
+    return dmc.SegmentedControl(id=control_id, data=_SPLIT_MODE_DATA, value="prefix", size="sm")
+
+
+def _empty_view_helper(panels: list[PanelInstance[Any, Any]]) -> Component:
+    """Auto-populate charts for a brand-new (empty) view; suggest un-charted keys once it isn't."""
+    add_panel = dmc.Group(
+        [
+            dmc.TextInput(id=NEW_PANEL_NAME_ID, placeholder="New Panel Name"),
+            dmc.Button(id=NEW_PANEL_ID, n_clicks=0, children="Create"),
+        ],
+        gap=0,
+    )
+    if not panels:
+        return dmc.Group(
+            [
+                add_panel,
+                dmc.TextInput(
+                    id=AUTO_POPULATE_DELIMITER_ID,
+                    label="Delimiter",
+                    value=_DEFAULT_DELIMITER,
+                    w=90,
+                    size="sm",
+                ),
+                _split_mode_control(AUTO_POPULATE_MODE_ID),
+                dmc.Button(
+                    "Auto-generate charts",
+                    id=AUTO_POPULATE_BUTTON_ID,
+                    n_clicks=0,
+                    variant="light",
+                    size="sm",
+                ),
+            ],
+            align="flex-end",
+            gap="sm",
+        )
+    return dmc.Group(
+        [
+            add_panel,
+            dmc.Button("Suggest charts", id=SUGGEST_CHARTS_BUTTON_ID, n_clicks=0, variant="light", size="sm"),
+        ]
+    )
+
+
+def _render_suggestions(suggestions: list[Suggestion]) -> Component:
+    if not suggestions:
+        return dmc.Text("Every metric and artifact already has a chart.", c="dimmed", size="sm")
+
+    def _row(s: Suggestion) -> Component:
+        return dmc.Group(
+            [
+                dmc.Stack(
+                    [
+                        dmc.Text(s.key, size="sm", ff="monospace"),
+                        dmc.Text(f"→ {s.panel_name}", size="xs", c="dimmed"),
+                    ],
+                    gap=0,
+                ),
+                dmc.ActionIcon(
+                    "+",
+                    id=_add_suggestion_button_id(s.kind.value, s.key),
+                    n_clicks=0,
+                    variant="light",
+                    size="sm",
+                ),
+            ],
+            justify="space-between",
+            wrap="nowrap",
+        )
+
+    metrics = [s for s in suggestions if s.kind == ColumnKind.METRIC]
+    artifacts = [s for s in suggestions if s.kind == ColumnKind.ARTIFACT]
+    sections: list[Component] = []
+    if metrics:
+        sections.append(dmc.Text("Metrics", fw=600, size="sm", mt="sm"))
+        sections.extend(_row(s) for s in metrics)
+    if artifacts:
+        sections.append(dmc.Text("Artifacts", fw=600, size="sm", mt="sm"))
+        sections.extend(_row(s) for s in artifacts)
+    return dmc.Stack(sections, gap="xs")
+
+
+def _suggest_charts_drawer() -> dmc.Drawer:
+    return dmc.Drawer(
+        id=SUGGEST_DRAWER_ID,
+        title="Suggested charts",
+        position="right",
+        size="md",
+        opened=False,
+        children=[
+            Store(id=SUGGEST_SUGGESTIONS_STORE_ID, data=[]),
+            dmc.Group(
+                [
+                    dmc.TextInput(
+                        id=SUGGEST_DELIMITER_ID, label="Delimiter", value=_DEFAULT_DELIMITER, w=90, size="sm"
+                    ),
+                    _split_mode_control(SUGGEST_MODE_ID),
+                ],
+                gap="sm",
+                mb="sm",
+            ),
+            html.Div(id=SUGGEST_CONTENT_ID),
+        ],
+    )
+
+
+def _header_actions() -> Component:
+    """
+    The Runs/Manage-panels/Edit controls shown inline with the experiment name.
+
+    Rendered once by `render_initial` alongside the header, not regenerated on later reruns, so
+    none of this state is ever at risk of being silently reset by a later panel/chart mutation.
+
+    The manage-panels drawer opens independently of the Edit switch — you can add/rename/reorder
+    panels, or come back to the drawer after closing it, without ever needing edit mode to be on.
+    Edit mode itself only controls whether the per-chart edit/delete icons and the panel "+" (add
+    chart) button are shown — see `_edit_controls_style` and its call sites.
+    """
+    return dmc.Group(
+        [
+            dmc.Button("Runs", id=constants.HPARAM_DRAWER_TOGGLE_ID, size="xs", variant="light"),
+            dmc.Button("Manage panels", id=EDIT_DRAWER_TOGGLE_ID, size="xs", variant="light"),
+            dmc.Switch(id=EDIT_MODE_ID, label="Edit", checked=False),
+        ],
+        gap="sm",
+        wrap="nowrap",
+    )
+
+
+def accordion_view(  # noqa: PLR0913
     store: DataStore[...],
     experiment_id: int,
     *,
     edit_mode: bool = False,
+    edit_drawer_opened: bool = False,
     full_df_json: str | None = None,
     column_kinds: dict[str, ColumnKind] | None = None,
 ) -> html.Div:
     """
     Accordion view for experiments.
 
-    `edit_mode`/`full_df_json`/`column_kinds` let callers that re-render the accordion mid-edit
-    (adding a panel/chart, changing run selection, etc.) carry the current edit state and cached
-    dataframe forward instead of silently resetting them.
+    `edit_mode`/`edit_drawer_opened`/`full_df_json`/`column_kinds` let callers that re-render the
+    accordion mid-edit (adding a panel/chart, changing run selection, etc.) carry the current edit
+    state, drawer open/closed state, and cached dataframe forward instead of silently resetting
+    them.
     """
     _log.debug("rendering chart for experiment %s", experiment_id)
     page = cast(
@@ -315,21 +574,19 @@ def accordion_view(
         [
             dmc.Stack(
                 [
-                    dmc.Group(
-                        [
-                            dmc.Switch(id=EDIT_MODE_ID, label="Edit", checked=edit_mode),
-                            dmc.Collapse(
-                                dmc.Group(
-                                    [
-                                        dmc.TextInput(id=NEW_PANEL_NAME_ID, placeholder="New Panel Name"),
-                                        dmc.Button(id=NEW_PANEL_ID, n_clicks=0, children="Create"),
-                                    ]
-                                ),
-                                id=NEW_PANEL_CONTROLS_ID,
-                                opened=edit_mode,
-                            ),
-                        ],
-                        align="flex-end",
+                    dmc.Drawer(
+                        id=EDIT_DRAWER_ID,
+                        title="Manage panels",
+                        position="right",
+                        size="md",
+                        opened=edit_drawer_opened,
+                        children=dmc.Stack(
+                            [
+                                _empty_view_helper(page.panels),
+                                _panel_management_list(page.panels),
+                            ],
+                            gap="xs",
+                        ),
                     ),
                     page.render(store, experiment_id, edit_mode=edit_mode),
                 ],
@@ -339,6 +596,8 @@ def accordion_view(
             Store(id=FULL_DF_STORE_ID, data=full_df_json),
             Store(id=COLUMN_KINDS_STORE_ID, data=column_kinds),
             _add_chart_modal(),
+            _suggest_charts_drawer(),
+            _rename_panel_modal(),
         ],
     )
 
@@ -354,6 +613,7 @@ def _persist_settings_and_rerender(  # noqa: PLR0913
     updates: dict[str, Any],
     *,
     edit_mode: bool = False,
+    edit_drawer_opened: bool = False,
     full_df_json: str | None = None,
     column_kinds: dict[str, ColumnKind] | None = None,
 ) -> tuple[BasicExperimentPage, dmc.Container]:
@@ -366,6 +626,7 @@ def _persist_settings_and_rerender(  # noqa: PLR0913
         store,
         experiment_id=experiment_id,
         edit_mode=edit_mode,
+        edit_drawer_opened=edit_drawer_opened,
         full_df_json=full_df_json,
         column_kinds=column_kinds,
     )
@@ -378,6 +639,7 @@ def _mutate_panels_and_rerender(  # noqa: PLR0913
     mutate: Callable[[list[PanelInstance[Any, Any]]], list[PanelInstance[Any, Any]]],
     *,
     edit_mode: bool = False,
+    edit_drawer_opened: bool = False,
     full_df_json: str | None = None,
     column_kinds: dict[str, ColumnKind] | None = None,
 ) -> tuple[BasicExperimentPage, html.Div]:
@@ -390,6 +652,7 @@ def _mutate_panels_and_rerender(  # noqa: PLR0913
         store,
         experiment_id=experiment_id,
         edit_mode=edit_mode,
+        edit_drawer_opened=edit_drawer_opened,
         full_df_json=full_df_json,
         column_kinds=column_kinds,
     )
@@ -407,6 +670,33 @@ def _upsert_chart(
     new_charts = list(panel.charts)
     new_charts[index] = chart
     return panel.model_copy(update={"charts": new_charts})
+
+
+def _add_chart_to_panel_by_name(
+    panels: list[PanelInstance[Any, Any]], panel_name: str, chart: ChartInstance[Any, Any]
+) -> list[PanelInstance[Any, Any]]:
+    """Append `chart` to the panel named `panel_name`, creating that panel if it doesn't exist yet."""
+    for i, p in enumerate(panels):
+        if p.name == panel_name:
+            new_panels = list(panels)
+            new_panels[i] = p.model_copy(update={"charts": [*p.charts, chart]})
+            return new_panels
+    return [*panels, PanelInstance(name=panel_name, charts=[chart])]
+
+
+def _move_panel(
+    panels: list[PanelInstance[Any, Any]], panel_name: str, direction: str
+) -> list[PanelInstance[Any, Any]]:
+    """Swap the panel named `panel_name` with its neighbor in `direction` ("up" or "down")."""
+    idx = next((i for i, p in enumerate(panels) if p.name == panel_name), None)
+    if idx is None:
+        return panels
+    swap_with = idx - 1 if direction == "up" else idx + 1
+    if swap_with < 0 or swap_with >= len(panels):
+        return panels
+    new_panels = list(panels)
+    new_panels[idx], new_panels[swap_with] = new_panels[swap_with], new_panels[idx]
+    return new_panels
 
 
 def _merge_chart_param_values(
@@ -465,6 +755,30 @@ def _add_chart_modal() -> dmc.Modal:
                         [
                             dmc.Button("Cancel", id=ADD_CHART_CANCEL_ID, variant="default"),
                             dmc.Button("Add chart", id=ADD_CHART_SUBMIT_ID),
+                        ],
+                        justify="flex-end",
+                    ),
+                ],
+            ),
+        ],
+    )
+
+
+def _rename_panel_modal() -> dmc.Modal:
+    return dmc.Modal(
+        id=RENAME_PANEL_MODAL_ID,
+        title="Rename panel",
+        opened=False,
+        children=[
+            Store(id=RENAME_PANEL_TARGET_ID),
+            dmc.Stack(
+                [
+                    dmc.TextInput(id=RENAME_PANEL_NAME_INPUT_ID, label="Panel name"),
+                    dmc.Text(id=RENAME_PANEL_ERROR_ID, c="red", size="sm"),
+                    dmc.Group(
+                        [
+                            dmc.Button("Cancel", id=RENAME_PANEL_CANCEL_ID, variant="default"),
+                            dmc.Button("Save", id=RENAME_PANEL_SAVE_ID),
                         ],
                         justify="flex-end",
                     ),
@@ -610,20 +924,29 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
     """Plugin for the basic experiment page: hparam table + chart accordion + editor."""
 
     # --- initial render: fills METRIC_CONTENT_ID/EXPERIMENT_HEADER_ID and seeds STATE_PAGE_STORAGE ---
+    # Runs into `EXPERIMENT_HEADER_ACTIONS_ID` only once, at page load — that content (the Runs
+    # button and the Edit switch) is never regenerated by later callbacks, so their state (the
+    # switch's checked value in particular) is never at risk of being silently reset on a rerender.
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(constants.METRIC_CONTENT_ID, "children", allow_duplicate=True),
         Output(constants.EXPERIMENT_HEADER_ID, "children", allow_duplicate=True),
+        Output(constants.EXPERIMENT_HEADER_ACTIONS_ID, "children"),
         Output(constants.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Input(constants.STATE_EXPERIMENT_ID, "data"),
         prevent_initial_call="initial_update",
     )
-    def render_initial(experiment_id: int) -> tuple[html.Div, Component, str]:
+    def render_initial(experiment_id: int) -> tuple[html.Div, Component, Component, str]:
         store = get_data_store()
         page = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
         exp = store.get_experiment(experiment_id)
         name, description = (_experiment_display_name(exp), exp.description) if exp else ("", "")
         header = render_header(EXPERIMENT_DESC_IDS, title=name, description=description)
-        return accordion_view(store, experiment_id=experiment_id), header, page.model_dump_json()
+        return (
+            accordion_view(store, experiment_id=experiment_id),
+            header,
+            _header_actions(),
+            page.model_dump_json(),
+        )
 
     def _fetch_experiment_header(experiment_id: int) -> tuple[str, str]:
         store = get_data_store()
@@ -648,6 +971,16 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         State(constants.STATE_EXPERIMENT_ID, "data"),
         fetch=_fetch_experiment_header,
         save=_save_experiment_description,
+    )
+
+    # Opens/closes independently of edit mode — you can manage panels without ever needing to
+    # flip the Edit switch, and closing the drawer doesn't require it either.
+    app.clientside_callback(  # pyright: ignore[reportUnknownMemberType]
+        "function(n, opened) { return n ? !opened : window.dash_clientside.no_update; }",
+        Output(EDIT_DRAWER_ID, "opened"),
+        Input(EDIT_DRAWER_TOGGLE_ID, "n_clicks"),
+        State(EDIT_DRAWER_ID, "opened"),
+        prevent_initial_call=True,
     )
 
     # --- hparam table ---
@@ -675,13 +1008,7 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
 
         return html.Div(
             [
-                dmc.Group(
-                    [
-                        dmc.Group(summary_bits, gap="xs"),
-                        dmc.Button("Runs", id=constants.HPARAM_DRAWER_TOGGLE_ID, size="xs", variant="light"),
-                    ],
-                    justify="space-between",
-                ),
+                dmc.Group(summary_bits, gap="xs"),
                 dmc.Drawer(
                     id=constants.HPARAM_DRAWER_ID,
                     title="Run Metrics and Parameters",
@@ -755,6 +1082,7 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         State(constants.HPARAM_DATATABLE_ID, "data"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
         State(EDIT_MODE_ID, "checked", allow_optional=True),
+        State(EDIT_DRAWER_ID, "opened", allow_optional=True),
         State(FULL_DF_STORE_ID, "data", allow_optional=True),
         State(COLUMN_KINDS_STORE_ID, "data", allow_optional=True),
         prevent_initial_call=True,
@@ -764,6 +1092,7 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         table_data: list[dict[str, Any]] | None,
         experiment_id: int,
         edit_mode: bool | None,  # noqa: FBT001
+        edit_drawer_opened: bool | None,  # noqa: FBT001
         full_df_json: str | None,
         column_kinds: dict[str, ColumnKind] | None,
     ) -> tuple[str, dmc.Container]:
@@ -779,6 +1108,7 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
             experiment_id,
             {constants.EXCLUDED_RUNS_KEY: excluded},
             edit_mode=bool(edit_mode),
+            edit_drawer_opened=bool(edit_drawer_opened),
             full_df_json=full_df_json,
             column_kinds=column_kinds,
         )
@@ -806,6 +1136,7 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         State(NEW_PANEL_NAME_ID, "value"),
         State(constants.STATE_PAGE_STORAGE, "data"),
         State(EDIT_MODE_ID, "checked", allow_optional=True),
+        State(EDIT_DRAWER_ID, "opened", allow_optional=True),
         State(FULL_DF_STORE_ID, "data", allow_optional=True),
         State(COLUMN_KINDS_STORE_ID, "data", allow_optional=True),
         prevent_initial_call=True,
@@ -816,6 +1147,7 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         panel_name: str,
         page_json: str,
         edit_mode: bool | None,  # noqa: FBT001
+        edit_drawer_opened: bool | None,  # noqa: FBT001
         full_df_json: str | None,
         column_kinds: dict[str, ColumnKind] | None,
     ) -> tuple[html.Div, str]:
@@ -833,6 +1165,7 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
             experiment_id,
             add_panel,
             edit_mode=bool(edit_mode),
+            edit_drawer_opened=bool(edit_drawer_opened),
             full_df_json=full_df_json,
             column_kinds=column_kinds,
         )
@@ -852,6 +1185,7 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         State(constants.STATE_EXPERIMENT_ID, "data"),
         State(constants.STATE_PAGE_STORAGE, "data"),
         State(EDIT_MODE_ID, "checked", allow_optional=True),
+        State(EDIT_DRAWER_ID, "opened", allow_optional=True),
         State(FULL_DF_STORE_ID, "data", allow_optional=True),
         State(COLUMN_KINDS_STORE_ID, "data", allow_optional=True),
         prevent_initial_call=True,
@@ -866,6 +1200,7 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         experiment_id: int,
         page_json: str,
         edit_mode: bool | None,  # noqa: FBT001
+        edit_drawer_opened: bool | None,  # noqa: FBT001
         full_df_json: str | None,
         column_kinds: dict[str, ColumnKind] | None,
     ) -> tuple[Any, bool, str, str | NoUpdate]:
@@ -888,6 +1223,7 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
             experiment_id,
             apply_chart,
             edit_mode=bool(edit_mode),
+            edit_drawer_opened=bool(edit_drawer_opened),
             full_df_json=full_df_json,
             column_kinds=column_kinds,
         )
@@ -900,15 +1236,17 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         State(constants.STATE_PAGE_STORAGE, "data"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
         State(EDIT_MODE_ID, "checked", allow_optional=True),
+        State(EDIT_DRAWER_ID, "opened", allow_optional=True),
         State(FULL_DF_STORE_ID, "data", allow_optional=True),
         State(COLUMN_KINDS_STORE_ID, "data", allow_optional=True),
         prevent_initial_call=True,
     )
-    def delete_chart(
+    def delete_chart(  # noqa: PLR0913
         _n_clicks_list: list[int],
         page_json: str,
         experiment_id: int,
         edit_mode: bool | None,  # noqa: FBT001
+        edit_drawer_opened: bool | None,  # noqa: FBT001
         full_df_json: str | None,
         column_kinds: dict[str, ColumnKind] | None,
     ) -> tuple[html.Div, str]:
@@ -930,10 +1268,337 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
             experiment_id,
             remove_chart,
             edit_mode=bool(edit_mode),
+            edit_drawer_opened=bool(edit_drawer_opened),
             full_df_json=full_df_json,
             column_kinds=column_kinds,
         )
         return container, page.model_dump_json()
+
+    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+        Output(constants.METRIC_CONTENT_ID, "children", allow_duplicate=True),
+        Output(constants.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
+        Input({"type": "delete-panel", "panel": ALL}, "n_clicks"),
+        State(constants.STATE_PAGE_STORAGE, "data"),
+        State(constants.STATE_EXPERIMENT_ID, "data"),
+        State(EDIT_MODE_ID, "checked", allow_optional=True),
+        State(EDIT_DRAWER_ID, "opened", allow_optional=True),
+        State(FULL_DF_STORE_ID, "data", allow_optional=True),
+        State(COLUMN_KINDS_STORE_ID, "data", allow_optional=True),
+        prevent_initial_call=True,
+    )
+    def delete_panel(  # noqa: PLR0913
+        _n_clicks_list: list[int],
+        page_json: str,
+        experiment_id: int,
+        edit_mode: bool | None,  # noqa: FBT001
+        edit_drawer_opened: bool | None,  # noqa: FBT001
+        full_df_json: str | None,
+        column_kinds: dict[str, ColumnKind] | None,
+    ) -> tuple[html.Div, str]:
+        triggered_id = cast("dict[str, str]", ctx.triggered_id)  # pyright: ignore[reportUnknownMemberType]
+        if not triggered_id or not ctx.triggered[0]["value"]:
+            raise PreventUpdate
+        panel_name = triggered_id["panel"]
+
+        def remove_panel(panels: list[PanelInstance[Any, Any]]) -> list[PanelInstance[Any, Any]]:
+            return [p for p in panels if p.name != panel_name]
+
+        page, container = _mutate_panels_and_rerender(
+            page_json,
+            experiment_id,
+            remove_panel,
+            edit_mode=bool(edit_mode),
+            edit_drawer_opened=bool(edit_drawer_opened),
+            full_df_json=full_df_json,
+            column_kinds=column_kinds,
+        )
+        return container, page.model_dump_json()
+
+    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+        Output(constants.METRIC_CONTENT_ID, "children", allow_duplicate=True),
+        Output(constants.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
+        Input({"type": "move-panel", "panel": ALL, "direction": ALL}, "n_clicks"),
+        State(constants.STATE_PAGE_STORAGE, "data"),
+        State(constants.STATE_EXPERIMENT_ID, "data"),
+        State(EDIT_MODE_ID, "checked", allow_optional=True),
+        State(EDIT_DRAWER_ID, "opened", allow_optional=True),
+        State(FULL_DF_STORE_ID, "data", allow_optional=True),
+        State(COLUMN_KINDS_STORE_ID, "data", allow_optional=True),
+        prevent_initial_call=True,
+    )
+    def move_panel(  # noqa: PLR0913
+        _n_clicks_list: list[int],
+        page_json: str,
+        experiment_id: int,
+        edit_mode: bool | None,  # noqa: FBT001
+        edit_drawer_opened: bool | None,  # noqa: FBT001
+        full_df_json: str | None,
+        column_kinds: dict[str, ColumnKind] | None,
+    ) -> tuple[html.Div, str]:
+        triggered_id = cast("dict[str, str]", ctx.triggered_id)  # pyright: ignore[reportUnknownMemberType]
+        if not triggered_id or not ctx.triggered[0]["value"]:
+            raise PreventUpdate
+        panel_name, direction = triggered_id["panel"], triggered_id["direction"]
+
+        def reorder(panels: list[PanelInstance[Any, Any]]) -> list[PanelInstance[Any, Any]]:
+            return _move_panel(panels, panel_name, direction)
+
+        page, container = _mutate_panels_and_rerender(
+            page_json,
+            experiment_id,
+            reorder,
+            edit_mode=bool(edit_mode),
+            edit_drawer_opened=bool(edit_drawer_opened),
+            full_df_json=full_df_json,
+            column_kinds=column_kinds,
+        )
+        return container, page.model_dump_json()
+
+    # --- rename panel ---
+    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+        Output(RENAME_PANEL_MODAL_ID, "opened", allow_duplicate=True),
+        Output(RENAME_PANEL_TARGET_ID, "data"),
+        Output(RENAME_PANEL_NAME_INPUT_ID, "value"),
+        Output(RENAME_PANEL_ERROR_ID, "children", allow_duplicate=True),
+        Input({"type": "rename-panel", "panel": ALL}, "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def open_rename_panel_modal(_n_clicks_list: list[int]) -> tuple[bool, str, str, str]:
+        triggered_id = cast("dict[str, str]", ctx.triggered_id)  # pyright: ignore[reportUnknownMemberType]
+        if not triggered_id or not ctx.triggered[0]["value"]:
+            raise PreventUpdate
+        panel_name = triggered_id["panel"]
+        return True, panel_name, panel_name, ""
+
+    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+        Output(constants.METRIC_CONTENT_ID, "children", allow_duplicate=True),
+        Output(constants.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
+        Output(RENAME_PANEL_MODAL_ID, "opened", allow_duplicate=True),
+        Output(RENAME_PANEL_ERROR_ID, "children", allow_duplicate=True),
+        Input(RENAME_PANEL_SAVE_ID, "n_clicks"),
+        State(RENAME_PANEL_TARGET_ID, "data"),
+        State(RENAME_PANEL_NAME_INPUT_ID, "value"),
+        State(constants.STATE_PAGE_STORAGE, "data"),
+        State(constants.STATE_EXPERIMENT_ID, "data"),
+        State(EDIT_MODE_ID, "checked", allow_optional=True),
+        State(EDIT_DRAWER_ID, "opened", allow_optional=True),
+        State(FULL_DF_STORE_ID, "data", allow_optional=True),
+        State(COLUMN_KINDS_STORE_ID, "data", allow_optional=True),
+        prevent_initial_call=True,
+    )
+    def rename_panel(  # noqa: PLR0913
+        n_clicks: int,
+        old_name: str | None,
+        new_name: str | None,
+        page_json: str,
+        experiment_id: int,
+        edit_mode: bool | None,  # noqa: FBT001
+        edit_drawer_opened: bool | None,  # noqa: FBT001
+        full_df_json: str | None,
+        column_kinds: dict[str, ColumnKind] | None,
+    ) -> tuple[Any, str | NoUpdate, bool | NoUpdate, str]:
+        if not n_clicks or not old_name:
+            raise PreventUpdate
+        new_name = (new_name or "").strip()
+        if not new_name:
+            return no_update, no_update, no_update, "Panel name cannot be empty"
+
+        curr_page = BasicExperimentPage.model_validate_json(page_json)
+        if new_name != old_name and any(p.name == new_name for p in curr_page.panels):
+            return no_update, no_update, no_update, f"A panel named {new_name!r} already exists"
+
+        new_panels = [
+            p.model_copy(update={"name": new_name}) if p.name == old_name else p for p in curr_page.panels
+        ]
+        # Carry the rename into OPEN_PANEL_KEY too, so a currently-open panel doesn't appear to
+        # collapse just because its name changed underneath it.
+        open_panel = curr_page.page_settings.get(OPEN_PANEL_KEY)
+        new_settings = dict(curr_page.page_settings)
+        if isinstance(open_panel, list):
+            # Panel names (and so OPEN_PANEL_KEY) are always strings; page_settings' value type is
+            # broader (shared by every settings key), hence the cast.
+            open_panel = cast("list[str]", open_panel)
+            new_settings[OPEN_PANEL_KEY] = [new_name if v == old_name else v for v in open_panel]
+        elif open_panel == old_name:
+            new_settings[OPEN_PANEL_KEY] = new_name
+
+        store = get_data_store()
+        curr_page = store.update_page(
+            curr_page.model_copy(update={"panels": new_panels, "page_settings": new_settings})
+        )
+        container = accordion_view(
+            store,
+            experiment_id=experiment_id,
+            edit_mode=bool(edit_mode),
+            edit_drawer_opened=bool(edit_drawer_opened),
+            full_df_json=full_df_json,
+            column_kinds=column_kinds,
+        )
+        return container, curr_page.model_dump_json(), False, ""
+
+    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+        Output(RENAME_PANEL_MODAL_ID, "opened", allow_duplicate=True),
+        Input(RENAME_PANEL_CANCEL_ID, "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def cancel_rename_panel(n_clicks: int) -> bool:
+        if not n_clicks:
+            raise PreventUpdate
+        return False
+
+    # --- auto-generate charts for an empty view / suggest charts for an already-edited one ---
+    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+        Output(constants.METRIC_CONTENT_ID, "children", allow_duplicate=True),
+        Output(constants.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
+        Input(AUTO_POPULATE_BUTTON_ID, "n_clicks"),
+        State(AUTO_POPULATE_DELIMITER_ID, "value"),
+        State(AUTO_POPULATE_MODE_ID, "value"),
+        State(constants.STATE_PAGE_STORAGE, "data"),
+        State(constants.STATE_EXPERIMENT_ID, "data"),
+        State(COLUMN_KINDS_STORE_ID, "data"),
+        State(FULL_DF_STORE_ID, "data"),
+        prevent_initial_call=True,
+    )
+    def auto_populate_charts(  # noqa: PLR0913
+        n_clicks: int,
+        delimiter: str | None,
+        mode: str | None,
+        page_json: str,
+        experiment_id: int,
+        column_kinds: dict[str, ColumnKind] | None,
+        full_df_json: str | None,
+    ) -> tuple[html.Div, str]:
+        if not n_clicks:
+            raise PreventUpdate
+        if not column_kinds:
+            msg = "No metrics or artifacts logged for this experiment yet"
+            raise ValueError(msg)
+        split_mode: SplitMode = "suffix" if mode == "suffix" else "prefix"
+
+        def replace_with_generated_panels(
+            _panels: list[PanelInstance[Any, Any]],
+        ) -> list[PanelInstance[Any, Any]]:
+            return build_auto_panels(column_kinds, delimiter=delimiter or _DEFAULT_DELIMITER, mode=split_mode)
+
+        page, container = _mutate_panels_and_rerender(
+            page_json,
+            experiment_id,
+            replace_with_generated_panels,
+            edit_mode=True,
+            edit_drawer_opened=True,
+            full_df_json=full_df_json,
+            column_kinds=column_kinds,
+        )
+        return container, page.model_dump_json()
+
+    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+        Output(SUGGEST_DRAWER_ID, "opened", allow_duplicate=True),
+        Output(SUGGEST_CONTENT_ID, "children", allow_duplicate=True),
+        Output(SUGGEST_SUGGESTIONS_STORE_ID, "data", allow_duplicate=True),
+        Input(SUGGEST_CHARTS_BUTTON_ID, "n_clicks"),
+        Input(SUGGEST_DELIMITER_ID, "value"),
+        Input(SUGGEST_MODE_ID, "value"),
+        State(constants.STATE_PAGE_STORAGE, "data"),
+        State(COLUMN_KINDS_STORE_ID, "data"),
+        prevent_initial_call=True,
+    )
+    def refresh_suggestions(
+        _n_clicks: int,
+        delimiter: str | None,
+        mode: str | None,
+        page_json: str,
+        column_kinds: dict[str, ColumnKind] | None,
+    ) -> tuple[bool | NoUpdate, Component, list[dict[str, Any]]]:
+        triggered_id = cast("str | None", ctx.triggered_id)  # pyright: ignore[reportUnknownMemberType]
+        if not triggered_id:
+            raise PreventUpdate
+        if not column_kinds:
+            empty = dmc.Text("No metrics or artifacts logged for this experiment yet", c="dimmed", size="sm")
+            return no_update, empty, []
+
+        curr_page = BasicExperimentPage.model_validate_json(page_json)
+        split_mode: SplitMode = "suffix" if mode == "suffix" else "prefix"
+        uncharted = find_uncharted_keys(curr_page.panels, column_kinds)
+        suggestions = build_suggestions(uncharted, delimiter=delimiter or _DEFAULT_DELIMITER, mode=split_mode)
+
+        opened = True if triggered_id == SUGGEST_CHARTS_BUTTON_ID else no_update
+        return (
+            opened,
+            _render_suggestions(suggestions),
+            [
+                {
+                    "key": s.key,
+                    "kind": s.kind.value,
+                    "panel_name": s.panel_name,
+                    "chart_type": s.chart.chart_type,
+                    "parameters": s.chart.parameters,
+                }
+                for s in suggestions
+            ],
+        )
+
+    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+        Output(constants.METRIC_CONTENT_ID, "children", allow_duplicate=True),
+        Output(constants.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
+        Output(SUGGEST_CONTENT_ID, "children", allow_duplicate=True),
+        Output(SUGGEST_SUGGESTIONS_STORE_ID, "data", allow_duplicate=True),
+        Input({"type": "add-suggestion", "kind": ALL, "key": ALL}, "n_clicks"),
+        State(SUGGEST_SUGGESTIONS_STORE_ID, "data"),
+        State(constants.STATE_PAGE_STORAGE, "data"),
+        State(constants.STATE_EXPERIMENT_ID, "data"),
+        State(EDIT_MODE_ID, "checked", allow_optional=True),
+        State(EDIT_DRAWER_ID, "opened", allow_optional=True),
+        State(FULL_DF_STORE_ID, "data", allow_optional=True),
+        State(COLUMN_KINDS_STORE_ID, "data", allow_optional=True),
+        prevent_initial_call=True,
+    )
+    def add_suggested_chart(  # noqa: PLR0913
+        _n_clicks_list: list[int],
+        stored_suggestions: list[dict[str, Any]] | None,
+        page_json: str,
+        experiment_id: int,
+        edit_mode: bool | None,  # noqa: FBT001
+        edit_drawer_opened: bool | None,  # noqa: FBT001
+        full_df_json: str | None,
+        column_kinds: dict[str, ColumnKind] | None,
+    ) -> tuple[html.Div, str, Component, list[dict[str, Any]]]:
+        triggered_id = cast("dict[str, str]", ctx.triggered_id)  # pyright: ignore[reportUnknownMemberType]
+        if not triggered_id or not ctx.triggered[0]["value"]:
+            raise PreventUpdate
+        kind, key = triggered_id["kind"], triggered_id["key"]
+
+        stored_suggestions = stored_suggestions or []
+        match = next((s for s in stored_suggestions if s["kind"] == kind and s["key"] == key), None)
+        if match is None:
+            raise PreventUpdate
+
+        chart = ChartInstance[Any, Any](chart_type=match["chart_type"], parameters=match["parameters"])
+        panel_name = match["panel_name"]
+
+        def apply_chart(panels: list[PanelInstance[Any, Any]]) -> list[PanelInstance[Any, Any]]:
+            return _add_chart_to_panel_by_name(panels, panel_name, chart)
+
+        page, container = _mutate_panels_and_rerender(
+            page_json,
+            experiment_id,
+            apply_chart,
+            edit_mode=bool(edit_mode),
+            edit_drawer_opened=bool(edit_drawer_opened),
+            full_df_json=full_df_json,
+            column_kinds=column_kinds,
+        )
+
+        remaining = [s for s in stored_suggestions if not (s["kind"] == kind and s["key"] == key)]
+        remaining_suggestions = [
+            Suggestion(
+                key=s["key"],
+                kind=ColumnKind(s["kind"]),
+                panel_name=s["panel_name"],
+                chart=ChartInstance[Any, Any](chart_type=s["chart_type"], parameters=s["parameters"]),
+            )
+            for s in remaining
+        ]
+        return container, page.model_dump_json(), _render_suggestions(remaining_suggestions), remaining
 
     # --- edit mode: fetch the full dataframe once, cache it client-side, enable controls ---
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
@@ -944,7 +1609,6 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         Output({"type": "edit-chart", "panel": ALL, "index": ALL}, "disabled"),
         Output({"type": "delete-chart", "panel": ALL, "index": ALL}, "disabled"),
         Output({"type": "chart-controls", "panel": ALL, "index": ALL}, "style"),
-        Output(NEW_PANEL_CONTROLS_ID, "opened"),
         Input(EDIT_MODE_ID, "checked"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
         State(FULL_DF_STORE_ID, "data"),
@@ -970,7 +1634,6 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         list[bool],
         list[bool],
         list[dict[str, str]],
-        bool,
     ]:
         add_style = [_edit_controls_style(edit_mode=checked)] * len(add_disabled)
         controls_style = [_edit_controls_style(edit_mode=checked)] * len(controls_ids)
@@ -983,7 +1646,6 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
                 [True] * len(edit_disabled),
                 [True] * len(delete_disabled),
                 controls_style,
-                False,
             )
         if existing_df_json is not None:
             return (
@@ -994,7 +1656,6 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
                 [False] * len(edit_disabled),
                 [False] * len(delete_disabled),
                 controls_style,
-                True,
             )
 
         store = get_data_store()
@@ -1011,7 +1672,6 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
             [False] * len(edit_disabled),
             [False] * len(delete_disabled),
             controls_style,
-            True,
         )
 
     # --- open the modal, either to add a new chart or edit an existing one ---

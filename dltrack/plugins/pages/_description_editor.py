@@ -28,7 +28,13 @@ class DescriptionEditorIds(typing.NamedTuple):
 
 
 def render_header(ids: DescriptionEditorIds, *, title: str, description: str) -> Component:
-    """Build the title/description display plus its (initially closed) edit modal."""
+    """
+    Build the title/description display plus its (initially closed) edit modal.
+
+    Carries no margin of its own — callers decide spacing, since some (the experiment page) place
+    this inline in a flex row alongside other controls, where an internal margin would misalign it
+    against its row-siblings, while others (the project page) place it alone on the page.
+    """
     return dmc.Stack(
         [
             dmc.Group(
@@ -59,8 +65,6 @@ def render_header(ids: DescriptionEditorIds, *, title: str, description: str) ->
             ),
         ],
         gap=2,
-        mt="lg",
-        mb="md",
     )
 
 

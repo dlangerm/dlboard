@@ -116,6 +116,10 @@ def plug(app: Dash) -> None:
                     children=render_header(
                         PROJECT_DESC_IDS, title=project.name, description=project.description
                     ),
+                    style={
+                        "marginTop": "var(--mantine-spacing-lg)",
+                        "marginBottom": "var(--mantine-spacing-md)",
+                    },
                 ),
                 dmc.Paper(
                     dmc.Group(
