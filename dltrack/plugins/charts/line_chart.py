@@ -11,6 +11,7 @@ import pandas as pd
 from pydantic import BaseModel
 
 from dltrack.models._view import ChartType, ColumnKind
+from dltrack.plugins.charts._sampling import DEFAULT_MAX_POINTS, downsample_grouped
 
 if typing.TYPE_CHECKING:
     from dash import Dash
@@ -43,6 +44,10 @@ class LineChartSettings(BaseModel, frozen=True, extra="forbid"):
     column: str
     x_axis: str
     height: int = 300
+    sample: bool = True
+    """Downsample each run's series (LTTB) so huge series stay smooth to render."""
+    max_points: int = DEFAULT_MAX_POINTS
+    """Target point count per run when `sample` is enabled."""
 
 
 class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.LineChart], frozen=True, extra="forbid"):
@@ -72,11 +77,19 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.LineChart], froze
         value_df = dataframe.loc[dataframe[parameters.column].notna(), ["run_id", "step", parameters.column]]
 
         df = axis_df.merge(value_df, on=["run_id", "step"], how="inner")
-        df = df.groupby([parameters.x_axis, "run_id"], as_index=False)[parameters.column].mean()
+        df = df.groupby([parameters.x_axis, "run_id"], as_index=False)[[parameters.column]].mean()
+        if parameters.sample:
+            df = downsample_grouped(
+                df,
+                x_col=parameters.x_axis,
+                y_col=parameters.column,
+                group_col="run_id",
+                max_points=parameters.max_points,
+            )
         df = df.pivot(index=parameters.x_axis, columns="run_id", values=parameters.column).reset_index()
         return dmc.LineChart(
             h=parameters.height,
-            data=df.to_dict(orient="records"),
+            data=df.to_dict(orient="records"),  # pyright: ignore[reportArgumentType]
             dataKey=str(parameters.x_axis),
             series=[
                 {
