@@ -10,10 +10,9 @@ import pandas as pd
 import pytest
 
 from dltrack.models import HyperParams, NewHyperParams
-from dltrack.models._view import ChartInstance, ColumnKind, PanelInstance, ParameterField
+from dltrack.models._view import ChartInstance, ColumnKind, PanelInstance, ParameterField, ParameterFieldType
 from dltrack.plugins.pages.simple_experiment_page import (
     _build_hparam_rows,
-    _infer_dtype,
     _merge_chart_param_values,
     _param_field_input,
     _upsert_chart,
@@ -64,21 +63,25 @@ def test_merge_chart_param_values_prefers_value_over_checked() -> None:
     checked = [None, True]
     field_ids = [{"field": "column"}, {"field": "sample"}]
 
-    assert _merge_chart_param_values(values, checked, field_ids) == {"column": "loss", "sample": True}
+    assert _merge_chart_param_values(values, checked, field_ids, {}) == {"column": "loss", "sample": True}
 
 
-@pytest.mark.parametrize(
-    ("rows", "expected"),
-    [
-        ([{"k": 1}, {"k": 2}], "numeric"),
-        ([{"k": "a"}], "text"),
-        ([{"k": None}, {"k": 3}], "numeric"),
-        ([{"k": None}], "text"),
-        ([{"k": True}], "text"),
-    ],
-)
-def test_infer_dtype(rows: list[dict[str, object]], expected: str) -> None:
-    assert _infer_dtype(rows, "k") == expected
+def test_merge_chart_param_values_drops_cleared_optional_fields() -> None:
+    """A cleared NumberInput reports `None`, which isn't a valid `int` — for a field with its own
+    default, that should be dropped so validation falls back to the field's default rather than
+    failing with a "not a valid integer" error (regression: clearing page_size/font_size got stuck).
+    """
+    values = [None, None]
+    checked = [None, None]
+    field_ids = [{"field": "page_size"}, {"field": "column"}]
+    fields = {
+        "page_size": ParameterField(
+            name="page_size", type=ParameterFieldType.INT, required=False, default=20
+        ),
+        "column": ParameterField(name="column", type=ParameterFieldType.STR, required=True),
+    }
+
+    assert _merge_chart_param_values(values, checked, field_ids, fields) == {"column": None}
 
 
 def test_build_hparam_rows_merges_hparams_and_last_step_metrics() -> None:
@@ -109,13 +112,21 @@ def test_build_hparam_rows_merges_hparams_and_last_step_metrics() -> None:
 @pytest.mark.parametrize(
     ("field", "expected_type"),
     [
-        (ParameterField(name="sample", type="bool", required=False, default=True), dmc.Switch),
-        (ParameterField(name="height", type="int", required=False, default=300), dmc.NumberInput),
         (
-            ParameterField(name="column", type="str", required=True, column_kind=ColumnKind.METRIC),
+            ParameterField(name="sample", type=ParameterFieldType.BOOL, required=False, default=True),
+            dmc.Switch,
+        ),
+        (
+            ParameterField(name="height", type=ParameterFieldType.INT, required=False, default=300),
+            dmc.NumberInput,
+        ),
+        (
+            ParameterField(
+                name="column", type=ParameterFieldType.STR, required=True, column_kind=ColumnKind.METRIC
+            ),
             dmc.Select,
         ),
-        (ParameterField(name="name", type="str", required=False), dmc.TextInput),
+        (ParameterField(name="name", type=ParameterFieldType.STR, required=False), dmc.TextInput),
     ],
 )
 def test_param_field_input_picks_widget_by_field_type(field: ParameterField, expected_type: type) -> None:
@@ -125,13 +136,15 @@ def test_param_field_input_picks_widget_by_field_type(field: ParameterField, exp
 
 
 def test_param_field_input_falls_back_to_text_when_no_columns_of_kind() -> None:
-    field = ParameterField(name="column", type="str", required=True, column_kind=ColumnKind.ARTIFACT)
+    field = ParameterField(
+        name="column", type=ParameterFieldType.STR, required=True, column_kind=ColumnKind.ARTIFACT
+    )
     component = _param_field_input(field.name, field, {ColumnKind.METRIC: ["loss"]})
     assert isinstance(component, dmc.TextInput)
 
 
 def test_param_field_input_uses_override_over_default() -> None:
-    field = ParameterField(name="sample", type="bool", required=False, default=True)
+    field = ParameterField(name="sample", type=ParameterFieldType.BOOL, required=False, default=True)
     component = _param_field_input(field.name, field, {}, override=False)
     # dash-mantine-components ships no py.typed marker, so pyright can't see this attr.
     assert cast("Any", component).to_plotly_json()["props"]["checked"] is False
@@ -142,7 +155,11 @@ def test_param_field_input_renders_fixed_choices_as_a_select() -> None:
     choices, taking priority over the column-kind-derived options path.
     """
     field = ParameterField(
-        name="x_axis_type", type="str", required=False, default="number", choices=("number", "category")
+        name="x_axis_type",
+        type=ParameterFieldType.STR,
+        required=False,
+        default="number",
+        choices=("number", "category"),
     )
     component = _param_field_input(field.name, field, {}, override="category")
 

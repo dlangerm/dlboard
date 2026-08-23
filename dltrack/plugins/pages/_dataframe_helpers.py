@@ -7,8 +7,9 @@ from typing import Any
 
 import pandas as pd
 
-from dltrack.models import Artifact, constants
+from dltrack.models import Artifact, HyperParams, constants
 from dltrack.models._view import ColumnKind
+from dltrack.plugins.charts._table_style import HPARAM_COLUMN_PREFIX
 
 
 def filter_excluded_runs(df: pd.DataFrame, page_settings: dict[str, Any]) -> pd.DataFrame:
@@ -43,8 +44,40 @@ def build_metrics_dataframe(metrics: typing.Iterable[Any]) -> pd.DataFrame:
     return pd.DataFrame.from_records(rows).reset_index()
 
 
+def build_hyperparams_dataframe(
+    hparams: typing.Iterable[HyperParams], keys: typing.Iterable[str] | None = None
+) -> pd.DataFrame:
+    """
+    One row per run_id; hparam keys become `hparam__<key>`-prefixed columns.
+
+    `keys`, if given, keeps only those hparam keys (client-side filter — `fetch_hyperparams`
+    doesn't support filtering server-side, unlike metrics).
+    """
+    wanted = set(keys) if keys is not None else None
+    rows: list[dict[str, Any]] = []
+    for h in hparams:
+        values = h.hparams_dict
+        if wanted is not None:
+            values = {k: v for k, v in values.items() if k in wanted}
+        rows.append({"run_id": h.run_id, **{f"{HPARAM_COLUMN_PREFIX}{k}": v for k, v in values.items()}})
+    if not rows:
+        return pd.DataFrame()
+    return pd.DataFrame.from_records(rows)
+
+
+def merge_hyperparams(df: pd.DataFrame, hparams_df: pd.DataFrame) -> pd.DataFrame:
+    """Broadcast each run's (step-less) hparam values onto every row for that run_id."""
+    if hparams_df.empty:
+        return df
+    if df.empty:
+        return hparams_df
+    return df.merge(hparams_df, on="run_id", how="left")
+
+
 def infer_column_kinds(
-    metric_columns: typing.Iterable[str], artifact_keys: typing.Iterable[str]
+    metric_columns: typing.Iterable[str],
+    artifact_keys: typing.Iterable[str],
+    hparam_keys: typing.Iterable[str] = (),
 ) -> dict[str, ColumnKind]:
     """
     Tag every known column with its kind.
@@ -54,6 +87,7 @@ def infer_column_kinds(
     """
     kinds = {c: ColumnKind.METRIC for c in metric_columns if c not in ("run_id", "index")}
     kinds.update(dict.fromkeys(artifact_keys, ColumnKind.ARTIFACT))
+    kinds.update(dict.fromkeys(hparam_keys, ColumnKind.HPARAM))
     return kinds
 
 

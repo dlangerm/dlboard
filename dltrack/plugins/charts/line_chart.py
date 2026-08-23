@@ -130,6 +130,16 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.LineChart], froze
 
     @classmethod
     @typing.override
+    def hint_required_artifact_keys(cls, parameters: LineChartSettings) -> set[str]:
+        return set()
+
+    @classmethod
+    @typing.override
+    def hint_required_hparams(cls, parameters: LineChartSettings) -> set[str]:
+        return set()
+
+    @classmethod
+    @typing.override
     def field_column_kinds(cls) -> dict[str, ColumnKind]:
         return {"column": ColumnKind.METRIC, "x_axis": ColumnKind.METRIC}
 

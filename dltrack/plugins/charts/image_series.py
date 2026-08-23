@@ -203,6 +203,11 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
 
     @classmethod
     @typing.override
+    def hint_required_hparams(cls, parameters: ImageChartSettings) -> set[str]:
+        return set()
+
+    @classmethod
+    @typing.override
     def field_column_kinds(cls) -> dict[str, ColumnKind]:
         return {"key": ColumnKind.ARTIFACT, "x_axis": ColumnKind.METRIC}
 
