@@ -7,6 +7,7 @@ PAGE_ADMIN_ID: Final = "admin-container"
 PAGE_PROJECT_ID: Final = "project-container"
 PAGE_EXPERIMENT_ID: Final = "experiment-container"
 EXPERIMENT_HEADER_ID: Final = "experiment-header"
+EXPERIMENT_HEADER_ACTIONS_ID: Final = "experiment-header-actions"
 
 STATE_PROJECT_ID: Final = "project-id-state"
 STATE_EXPERIMENT_ID: Final = "experiment-id-state"

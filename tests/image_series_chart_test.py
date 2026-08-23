@@ -59,3 +59,30 @@ def test_hint_required_columns(x_axis: str, expected: set[str]) -> None:
 
 def test_hint_required_artifact_keys() -> None:
     assert ImageChart.hint_required_artifact_keys(ImageChartSettings(key="img")) == {"img"}
+
+
+def _captions_store_data(stack: object) -> dict[str, Any]:
+    # dcc.Store is always the first child of the returned Stack.
+    return _props(_props(stack)["children"][0])["data"]["per_run_captions"]
+
+
+def test_render_formats_tags_dict_into_captions() -> None:
+    """`build_artifacts_dataframe` puts `Artifact.tags` dicts straight into the dataframe (not JSON
+    strings) — captions must be built from those dicts directly, not `json.loads`-parsed.
+    """
+    df = _artifacts_df(n_runs=1)  # tags column holds {"run": "1"}, a dict, not a JSON string
+    stack = ImageChart.render(ImageChartSettings(key="img"), df)
+
+    assert _captions_store_data(stack) == {"1": {"0": "run: 1"}}
+
+
+def test_render_handles_missing_tags_for_some_rows_without_crashing() -> None:
+    df = pd.DataFrame(
+        [
+            {"run_id": 1, "step": 0, "img": "ref://1-0", "img__tags": {"split": "train"}},
+            {"run_id": 1, "step": 1, "img": "ref://1-1", "img__tags": None},
+        ]
+    )
+    stack = ImageChart.render(ImageChartSettings(key="img"), df)
+
+    assert _captions_store_data(stack) == {"1": {"0": "split: train", "1": ""}}

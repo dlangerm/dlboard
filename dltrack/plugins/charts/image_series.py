@@ -39,12 +39,17 @@ def _instance_id(parameters: ImageChartSettings) -> str:
     return hashlib.shake_256(raw.encode()).hexdigest(8)
 
 
-def _format_caption(raw_tags: str) -> str:
-    try:
-        tags = typing.cast("dict[str,str]", json.loads(raw_tags))
-    except (TypeError, ValueError):
+def _format_caption(raw_tags: dict[str, str] | float | None) -> str:
+    """
+    Format a `<key>__tags` cell into a caption.
+
+    `Artifact.tags` is a `dict[str, str]`, and `build_artifacts_dataframe` pivots it straight into the
+    dataframe unchanged — so a real row is always a dict. A `float` (NaN) shows up only when pivoting
+    left a gap for a (run, step) with no tags logged; that's the sole non-dict case to handle.
+    """
+    if not isinstance(raw_tags, dict):
         return ""
-    return ", ".join(f"{k}: {v}" for k, v in tags.items())
+    return ", ".join(f"{k}: {v}" for k, v in raw_tags.items())
 
 
 class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=True, extra="forbid"):
