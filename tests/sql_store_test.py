@@ -45,6 +45,54 @@ def test_project_and_experiment_are_persisted(store: SQLLiteStore) -> None:
     assert store.get_experiment(experiment.id + 1000) is None
 
 
+def test_create_experiment_stores_name_and_description(store: SQLLiteStore) -> None:
+    project = store.create_project(models.NewProject(name="p", description="d"))
+    experiment = store.create_experiment(
+        models.NewExperiment(project_id=project.id, name="my-exp", description="does a thing")
+    )
+
+    assert experiment.name == "my-exp"
+    assert experiment.description == "does a thing"
+    assert store.get_experiment(experiment.id) == experiment
+
+
+def test_create_experiment_defaults_name_and_description_to_empty(store: SQLLiteStore) -> None:
+    """The CLI logger creates experiments without a name/description; both must stay optional."""
+    project = store.create_project(models.NewProject(name="p", description="d"))
+    experiment = store.create_experiment(models.NewExperiment(project_id=project.id))
+
+    assert experiment.name == ""
+    assert experiment.description == ""
+
+
+def test_update_project_persists_description_change(store: SQLLiteStore) -> None:
+    project = store.create_project(models.NewProject(name="p", description="old"))
+
+    updated = store.update_project(project.model_copy(update={"description": "new"}))
+
+    assert updated.id == project.id
+    assert updated.description == "new"
+    assert store.get_project(project.id).description == "new"
+
+
+def test_update_experiment_persists_name_and_description_change(
+    store: SQLLiteStore, experiment_id: int
+) -> None:
+    experiment = store.get_experiment(experiment_id)
+    assert experiment is not None
+
+    updated = store.update_experiment(
+        experiment.model_copy(update={"name": "renamed", "description": "new description"})
+    )
+
+    assert updated.id == experiment_id
+    assert updated.name == "renamed"
+    assert updated.description == "new description"
+    refetched = store.get_experiment(experiment_id)
+    assert refetched is not None
+    assert (refetched.name, refetched.description) == ("renamed", "new description")
+
+
 def test_log_hyperparams_skips_duplicate_run(store: SQLLiteStore, experiment_id: int) -> None:
     run = store.create_run(models.NewRun(experiment_id=experiment_id))
     first = store.log_hyperparams(models.NewHyperParams.from_raw(run.id, experiment_id, {"lr": 0.1}))

@@ -22,7 +22,7 @@ def layout(experiment_id: str) -> list[html.Div | dcc.Store]:
             id=constants.PAGE_EXPERIMENT_ID,
             children=dmc.Stack(
                 [
-                    dmc.Title(f"Experiment {experiment_id}", order=3),
+                    dmc.Loader(id=constants.EXPERIMENT_HEADER_ID),
                     dmc.Loader(id=constants.HPARAM_TABLE_ID),
                     dmc.Loader(id=constants.METRIC_CONTENT_ID),
                 ],

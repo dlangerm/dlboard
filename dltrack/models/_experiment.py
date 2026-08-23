@@ -9,6 +9,12 @@ class NewExperiment(BaseModel, frozen=True, extra="forbid"):
     project_id: int
     """The project ID to use for this experiment."""
 
+    name: str = ""
+    """The name of the experiment."""
+
+    description: str = ""
+    """A description of the experiment."""
+
 
 class Experiment(NewExperiment, frozen=True, extra="forbid"):
     """An experiment stored in the database."""
