@@ -95,12 +95,12 @@ def serialize_base_model(value: BaseModel) -> dict[str, typing.Any]:
 def escape_value_sql(value: object) -> str:
     _log.debug("Escaping value %s type %s", value, type(value))
     match value:
+        case bool():
+            return "true" if value else "false"
         case int() | float():
             return f"{value}"
         case str():
             return f"'{value.strip("' %;")}'"
-        case bool():
-            return "true" if value else "false"
         case NoneType():
             return "NULL"
         case datetime():
