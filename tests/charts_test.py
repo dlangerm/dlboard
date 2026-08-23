@@ -83,3 +83,17 @@ def test_line_chart_render_series_and_datakey() -> None:
     props = _props(chart)
     assert props["dataKey"] == "step"
     assert {s["name"] for s in props["series"]} == {"1", "2", "3"}
+
+
+def test_line_chart_syncs_by_value_not_index() -> None:
+    """Charts with the same syncId but different sampling rates must sync by x-value.
+
+    Recharts' default syncMethod ("index") lines up points by row position, so two
+    synced charts with different row counts (e.g. one sampled, one not) show the
+    tooltip/crosshair at mismatched x-values. syncMethod="value" fixes that.
+    """
+    df = _metrics_df(20)
+    chart = LineChart.render(LineChartSettings(column="loss", x_axis="step"), df)
+    props = _props(chart)
+    assert props["lineChartProps"]["syncMethod"] == "value"
+    assert props["lineChartProps"]["syncId"] == "step"

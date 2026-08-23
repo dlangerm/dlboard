@@ -90,6 +90,15 @@ def _delete_chart_button_id(panel_name: str, index: int) -> _ChartID:
     return {"type": "delete-chart", "panel": panel_name, "index": index}
 
 
+def _chart_controls_group_id(panel_name: str, index: int) -> _ChartID:
+    return {"type": "chart-controls", "panel": panel_name, "index": index}
+
+
+def _edit_controls_style(*, edit_mode: bool) -> dict[str, str]:
+    """Hide edit affordances entirely (rather than just disabling them) so they don't waste layout space."""
+    return {} if edit_mode else {"display": "none"}
+
+
 def _chart_param_id(field_name: str) -> dict[str, str]:
     return {"type": "chart-param", "field": field_name}
 
@@ -134,13 +143,24 @@ def _fetch_panel_dataframe(
 
 
 def _render_panel_content(
-    store: DataStore[...], experiment_id: int, panel: PanelInstance[Any, Any], page_settings: dict[str, Any]
+    store: DataStore[...],
+    experiment_id: int,
+    panel: PanelInstance[Any, Any],
+    page_settings: dict[str, Any],
+    *,
+    edit_mode: bool = False,
 ) -> list[Component]:
     """Fetch + render one panel's charts. Only called for panels that are actually open."""
     df = _fetch_panel_dataframe(store, experiment_id, panel, page_settings)
     return [
-        dmc.Flex(_render_panel_charts(panel, df), justify="flex-start", gap="xs"),
-        dmc.Button(id=_open_chart_button_id(panel.name), n_clicks=0, children="+", disabled=True),
+        dmc.Flex(_render_panel_charts(panel, df, edit_mode=edit_mode), justify="flex-start", gap="xs"),
+        dmc.Button(
+            id=_open_chart_button_id(panel.name),
+            n_clicks=0,
+            children="+",
+            disabled=not edit_mode,
+            style=_edit_controls_style(edit_mode=edit_mode),
+        ),
     ]
 
 
@@ -161,7 +181,9 @@ class BasicExperimentPage(Page[pd.DataFrame, dmc.Accordion, html.Div], frozen=Tr
         return [_fetch_panel_dataframe(store, experiment_id, p, self.page_settings) for p in self.panels]
 
     @typing.override
-    def render(self, data_store: DataStore[...], experiment_id: int) -> dmc.Accordion:
+    def render(
+        self, data_store: DataStore[...], experiment_id: int, *, edit_mode: bool = False
+    ) -> dmc.Accordion:
         """Render the accordion. Only open panels get real content; closed ones get a placeholder."""
         open_value = self.page_settings.get(OPEN_PANEL_KEY, [self.panels[0].name] if self.panels else [])
         if isinstance(open_value, str):
@@ -178,13 +200,17 @@ class BasicExperimentPage(Page[pd.DataFrame, dmc.Accordion, html.Div], frozen=Tr
                 dmc.AccordionItem(
                     [
                         dmc.AccordionControl(
-                            dmc.Flex([dmc.Text(p.name, size="sm", fw=600)], justify="space-between"), py="xs"
+                            [dmc.Text(p.name, size="xs", fw=600)],
+                            py="xs",
+                            px="xs",
                         ),
                         dmc.AccordionPanel(
                             html.Div(
                                 id=_panel_content_id(p.name),
                                 children=(
-                                    _render_panel_content(data_store, experiment_id, p, self.page_settings)
+                                    _render_panel_content(
+                                        data_store, experiment_id, p, self.page_settings, edit_mode=edit_mode
+                                    )
                                     if p.name in open_set
                                     else _panel_placeholder()
                                 ),
@@ -200,7 +226,9 @@ class BasicExperimentPage(Page[pd.DataFrame, dmc.Accordion, html.Div], frozen=Tr
         )
 
 
-def _render_panel_charts(panel: PanelInstance[Any, Any], dataframe: pd.DataFrame) -> list[dmc.Stack]:
+def _render_panel_charts(
+    panel: PanelInstance[Any, Any], dataframe: pd.DataFrame, *, edit_mode: bool = False
+) -> list[dmc.Stack]:
     """Render each chart in a panel with edit/delete controls above it."""
     items: list[dmc.Stack] = []
     for idx, chart in enumerate(panel.charts):
@@ -214,7 +242,7 @@ def _render_panel_charts(panel: PanelInstance[Any, Any], dataframe: pd.DataFrame
                                 "✎",
                                 id=_edit_chart_button_id(panel.name, idx),  # pyright: ignore[reportArgumentType]
                                 n_clicks=0,
-                                disabled=True,
+                                disabled=not edit_mode,
                                 variant="subtle",
                                 size="xs",
                             ),
@@ -222,14 +250,16 @@ def _render_panel_charts(panel: PanelInstance[Any, Any], dataframe: pd.DataFrame
                                 "🗑",
                                 id=_delete_chart_button_id(panel.name, idx),  # pyright: ignore[reportArgumentType]
                                 n_clicks=0,
-                                disabled=True,
+                                disabled=not edit_mode,
                                 variant="subtle",
                                 color="red",
                                 size="xs",
                             ),
                         ],
+                        id=_chart_controls_group_id(panel.name, idx),  # pyright: ignore[reportArgumentType]
                         justify="flex-end",
                         gap="xs",
+                        style=_edit_controls_style(edit_mode=edit_mode),
                     ),
                     rendered,
                 ],
@@ -240,10 +270,25 @@ def _render_panel_charts(panel: PanelInstance[Any, Any], dataframe: pd.DataFrame
     return items
 
 
-def accordion_view(store: DataStore[...], experiment_id: int) -> html.Div:
-    """Accordion view for experiments."""
+def accordion_view(
+    store: DataStore[...],
+    experiment_id: int,
+    *,
+    edit_mode: bool = False,
+    full_df_json: str | None = None,
+    column_kinds: dict[str, ColumnKind] | None = None,
+) -> html.Div:
+    """
+    Accordion view for experiments.
+
+    `edit_mode`/`full_df_json`/`column_kinds` let callers that re-render the accordion mid-edit
+    (adding a panel/chart, changing run selection, etc.) carry the current edit state and cached
+    dataframe forward instead of silently resetting them.
+    """
     _log.debug("rendering chart for experiment %s", experiment_id)
-    page = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
+    page = cast(
+        "BasicExperimentPage", store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
+    )
     open_value = page.page_settings.get(OPEN_PANEL_KEY, [page.panels[0].name] if page.panels else [])
     if isinstance(open_value, str):
         open_value = [open_value]
@@ -254,7 +299,7 @@ def accordion_view(store: DataStore[...], experiment_id: int) -> html.Div:
                 [
                     dmc.Group(
                         [
-                            dmc.Switch(id=EDIT_MODE_ID, label="Edit", checked=False),
+                            dmc.Switch(id=EDIT_MODE_ID, label="Edit", checked=edit_mode),
                             dmc.Collapse(
                                 dmc.Group(
                                     [
@@ -263,18 +308,18 @@ def accordion_view(store: DataStore[...], experiment_id: int) -> html.Div:
                                     ]
                                 ),
                                 id=NEW_PANEL_CONTROLS_ID,
-                                opened=False,
+                                opened=edit_mode,
                             ),
                         ],
                         align="flex-end",
                     ),
-                    page.render(store, experiment_id),
+                    page.render(store, experiment_id, edit_mode=edit_mode),
                 ],
                 gap="xs",
             ),
             Store(id=LOADED_PANELS_STORE_ID, data=list(open_value)),  # pyright: ignore[reportArgumentType]
-            Store(id=FULL_DF_STORE_ID),
-            Store(id=COLUMN_KINDS_STORE_ID),
+            Store(id=FULL_DF_STORE_ID, data=full_df_json),
+            Store(id=COLUMN_KINDS_STORE_ID, data=column_kinds),
             _add_chart_modal(),
         ],
     )
@@ -285,28 +330,52 @@ def accordion_view(store: DataStore[...], experiment_id: int) -> html.Div:
 # ============================================================
 
 
-def _persist_settings_and_rerender(
-    store: DataStore[...], experiment_id: int, updates: dict[str, Any]
+def _persist_settings_and_rerender(  # noqa: PLR0913
+    store: DataStore[...],
+    experiment_id: int,
+    updates: dict[str, Any],
+    *,
+    edit_mode: bool = False,
+    full_df_json: str | None = None,
+    column_kinds: dict[str, ColumnKind] | None = None,
 ) -> tuple[BasicExperimentPage, dmc.Container]:
     """Merge `updates` into page_settings (server-authoritative), persist, and re-render the accordion."""
     page = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
     new_settings = {**page.page_settings, **updates}
     page = page.model_copy(update={"page_settings": new_settings})
     page = store.update_page(page)
-    return page, accordion_view(store, experiment_id=experiment_id)  # pyright: ignore[reportReturnType]
+    container = accordion_view(
+        store,
+        experiment_id=experiment_id,
+        edit_mode=edit_mode,
+        full_df_json=full_df_json,
+        column_kinds=column_kinds,
+    )
+    return page, container  # pyright: ignore[reportReturnType]
 
 
-def _mutate_panels_and_rerender(
+def _mutate_panels_and_rerender(  # noqa: PLR0913
     page_json: str,
     experiment_id: int,
     mutate: Callable[[list[PanelInstance[Any, Any]]], list[PanelInstance[Any, Any]]],
+    *,
+    edit_mode: bool = False,
+    full_df_json: str | None = None,
+    column_kinds: dict[str, ColumnKind] | None = None,
 ) -> tuple[BasicExperimentPage, html.Div]:
     """Load page from client-cached state, apply `mutate` to its panels, persist, and re-render."""
     curr_page = BasicExperimentPage.model_validate_json(page_json)
     curr_page = curr_page.model_copy(update={"panels": mutate(curr_page.panels)})
     store = get_data_store()
     curr_page = store.update_page(curr_page)
-    return curr_page, accordion_view(store, experiment_id=experiment_id)  # pyright: ignore[reportReturnType]
+    container = accordion_view(
+        store,
+        experiment_id=experiment_id,
+        edit_mode=edit_mode,
+        full_df_json=full_df_json,
+        column_kinds=column_kinds,
+    )
+    return curr_page, container  # pyright: ignore[reportReturnType]
 
 
 def _upsert_chart(
@@ -638,10 +707,18 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         Input(constants.HPARAM_DATATABLE_ID, "selected_rows"),
         State(constants.HPARAM_DATATABLE_ID, "data"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
+        State(EDIT_MODE_ID, "checked", allow_optional=True),
+        State(FULL_DF_STORE_ID, "data", allow_optional=True),
+        State(COLUMN_KINDS_STORE_ID, "data", allow_optional=True),
         prevent_initial_call=True,
     )
-    def sync_run_selection(
-        selected_rows: list[int] | None, table_data: list[dict[str, Any]] | None, experiment_id: int
+    def sync_run_selection(  # noqa: PLR0913
+        selected_rows: list[int] | None,
+        table_data: list[dict[str, Any]] | None,
+        experiment_id: int,
+        edit_mode: bool | None,  # noqa: FBT001
+        full_df_json: str | None,
+        column_kinds: dict[str, ColumnKind] | None,
     ) -> tuple[str, dmc.Container]:
         if selected_rows is None or table_data is None:
             raise PreventUpdate
@@ -651,7 +728,12 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
 
         store = get_data_store()
         page, container = _persist_settings_and_rerender(
-            store, experiment_id, {constants.EXCLUDED_RUNS_KEY: excluded}
+            store,
+            experiment_id,
+            {constants.EXCLUDED_RUNS_KEY: excluded},
+            edit_mode=bool(edit_mode),
+            full_df_json=full_df_json,
+            column_kinds=column_kinds,
         )
         return page.model_dump_json(), container
 
@@ -676,10 +758,19 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         Input(constants.STATE_EXPERIMENT_ID, "data"),
         State(NEW_PANEL_NAME_ID, "value"),
         State(constants.STATE_PAGE_STORAGE, "data"),
+        State(EDIT_MODE_ID, "checked", allow_optional=True),
+        State(FULL_DF_STORE_ID, "data", allow_optional=True),
+        State(COLUMN_KINDS_STORE_ID, "data", allow_optional=True),
         prevent_initial_call=True,
     )
-    def create_panel(
-        n_clicks: int, experiment_id: int, panel_name: str, page_json: str
+    def create_panel(  # noqa: PLR0913
+        n_clicks: int,
+        experiment_id: int,
+        panel_name: str,
+        page_json: str,
+        edit_mode: bool | None,  # noqa: FBT001
+        full_df_json: str | None,
+        column_kinds: dict[str, ColumnKind] | None,
     ) -> tuple[html.Div, str]:
         if not n_clicks:
             raise PreventUpdate
@@ -690,7 +781,14 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         def add_panel(panels: list[PanelInstance[Any, Any]]) -> list[PanelInstance[Any, Any]]:
             return [*panels, PanelInstance(name=panel_name)]
 
-        page, container = _mutate_panels_and_rerender(page_json, experiment_id, add_panel)
+        page, container = _mutate_panels_and_rerender(
+            page_json,
+            experiment_id,
+            add_panel,
+            edit_mode=bool(edit_mode),
+            full_df_json=full_df_json,
+            column_kinds=column_kinds,
+        )
         return container, page.model_dump_json()
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
@@ -706,6 +804,9 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         State(ADD_CHART_TARGET_ID, "data"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
         State(constants.STATE_PAGE_STORAGE, "data"),
+        State(EDIT_MODE_ID, "checked", allow_optional=True),
+        State(FULL_DF_STORE_ID, "data", allow_optional=True),
+        State(COLUMN_KINDS_STORE_ID, "data", allow_optional=True),
         prevent_initial_call=True,
     )
     def add_chart(  # noqa: PLR0913
@@ -717,6 +818,9 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         target: _ChartTargetData | None,
         experiment_id: int,
         page_json: str,
+        edit_mode: bool | None,  # noqa: FBT001
+        full_df_json: str | None,
+        column_kinds: dict[str, ColumnKind] | None,
     ) -> tuple[Any, bool, str, str | NoUpdate]:
         if not n_clicks or not chart_type_name or not target:
             raise PreventUpdate
@@ -732,7 +836,14 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         def apply_chart(panels: list[PanelInstance[Any, Any]]) -> list[PanelInstance[Any, Any]]:
             return [_upsert_chart(p, panel_name, index, new_chart) for p in panels]
 
-        page, container = _mutate_panels_and_rerender(page_json, experiment_id, apply_chart)
+        page, container = _mutate_panels_and_rerender(
+            page_json,
+            experiment_id,
+            apply_chart,
+            edit_mode=bool(edit_mode),
+            full_df_json=full_df_json,
+            column_kinds=column_kinds,
+        )
         return container, False, "", page.model_dump_json()
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
@@ -741,9 +852,19 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         Input({"type": "delete-chart", "panel": ALL, "index": ALL}, "n_clicks"),
         State(constants.STATE_PAGE_STORAGE, "data"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
+        State(EDIT_MODE_ID, "checked", allow_optional=True),
+        State(FULL_DF_STORE_ID, "data", allow_optional=True),
+        State(COLUMN_KINDS_STORE_ID, "data", allow_optional=True),
         prevent_initial_call=True,
     )
-    def delete_chart(_n_clicks_list: list[int], page_json: str, experiment_id: int) -> tuple[html.Div, str]:
+    def delete_chart(
+        _n_clicks_list: list[int],
+        page_json: str,
+        experiment_id: int,
+        edit_mode: bool | None,  # noqa: FBT001
+        full_df_json: str | None,
+        column_kinds: dict[str, ColumnKind] | None,
+    ) -> tuple[html.Div, str]:
         triggered_id = cast("_ChartTargetData", ctx.triggered_id)  # pyright: ignore[reportUnknownMemberType]
         if not triggered_id or not ctx.triggered[0]["value"]:
             raise PreventUpdate
@@ -757,7 +878,14 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
                 for p in panels
             ]
 
-        page, container = _mutate_panels_and_rerender(page_json, experiment_id, remove_chart)
+        page, container = _mutate_panels_and_rerender(
+            page_json,
+            experiment_id,
+            remove_chart,
+            edit_mode=bool(edit_mode),
+            full_df_json=full_df_json,
+            column_kinds=column_kinds,
+        )
         return container, page.model_dump_json()
 
     # --- edit mode: fetch the full dataframe once, cache it client-side, enable controls ---
@@ -765,8 +893,10 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         Output(FULL_DF_STORE_ID, "data"),
         Output(COLUMN_KINDS_STORE_ID, "data"),
         Output({"type": "open-add-chart", "panel": ALL}, "disabled"),
+        Output({"type": "open-add-chart", "panel": ALL}, "style"),
         Output({"type": "edit-chart", "panel": ALL, "index": ALL}, "disabled"),
         Output({"type": "delete-chart", "panel": ALL, "index": ALL}, "disabled"),
+        Output({"type": "chart-controls", "panel": ALL, "index": ALL}, "style"),
         Output(NEW_PANEL_CONTROLS_ID, "opened"),
         Input(EDIT_MODE_ID, "checked"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
@@ -774,6 +904,7 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         State({"type": "open-add-chart", "panel": ALL}, "disabled"),
         State({"type": "edit-chart", "panel": ALL, "index": ALL}, "disabled"),
         State({"type": "delete-chart", "panel": ALL, "index": ALL}, "disabled"),
+        State({"type": "chart-controls", "panel": ALL, "index": ALL}, "id"),
         prevent_initial_call=True,
     )
     def toggle_edit_mode(  # noqa: PLR0913
@@ -783,16 +914,28 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         add_disabled: list[bool],
         edit_disabled: list[bool],
         delete_disabled: list[bool],
+        controls_ids: list[dict[str, Any]],
     ) -> tuple[
-        str | NoUpdate | None, dict[str, ColumnKind] | NoUpdate, list[bool], list[bool], list[bool], bool
+        str | NoUpdate | None,
+        dict[str, ColumnKind] | NoUpdate,
+        list[bool],
+        list[dict[str, str]],
+        list[bool],
+        list[bool],
+        list[dict[str, str]],
+        bool,
     ]:
+        add_style = [_edit_controls_style(edit_mode=checked)] * len(add_disabled)
+        controls_style = [_edit_controls_style(edit_mode=checked)] * len(controls_ids)
         if not checked:
             return (
                 no_update,
                 no_update,
                 [True] * len(add_disabled),
+                add_style,
                 [True] * len(edit_disabled),
                 [True] * len(delete_disabled),
+                controls_style,
                 False,
             )
         if existing_df_json is not None:
@@ -800,8 +943,10 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
                 no_update,
                 no_update,
                 [False] * len(add_disabled),
+                add_style,
                 [False] * len(edit_disabled),
                 [False] * len(delete_disabled),
+                controls_style,
                 True,
             )
 
@@ -815,8 +960,10 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
             df.to_json(orient="split"),
             column_kinds,
             [False] * len(add_disabled),
+            add_style,
             [False] * len(edit_disabled),
             [False] * len(delete_disabled),
+            controls_style,
             True,
         )
 
@@ -931,6 +1078,7 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         State({"type": "panel-content", "panel": ALL}, "id"),
         State(LOADED_PANELS_STORE_ID, "data"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
+        State(EDIT_MODE_ID, "checked", allow_optional=True),
         prevent_initial_call=True,
     )
     def render_opened_panels(
@@ -938,6 +1086,7 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         panel_ids: list[dict[str, str]],
         loaded: list[str] | None,
         experiment_id: int,
+        edit_mode: bool | None,  # noqa: FBT001
     ) -> tuple[list[Any], list[str]]:
         open_set = set(open_value or [])
         loaded_set = set(loaded or [])
@@ -956,6 +1105,8 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
                 outputs.append(no_update)
                 continue
             outputs.append(
-                _render_panel_content(store, experiment_id, panel_by_name[name], page.page_settings)
+                _render_panel_content(
+                    store, experiment_id, panel_by_name[name], page.page_settings, edit_mode=bool(edit_mode)
+                )
             )
         return outputs, sorted(loaded_set | newly_opened)

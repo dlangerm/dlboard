@@ -107,7 +107,11 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.LineChart], froze
             withYAxis=True,
             withDots=False,
             tickLine="xy",
-            lineChartProps={"syncId": parameters.x_axis},
+            # syncMethod="value" matches synced charts by x-axis value rather than
+            # array index — needed because sampled/unsampled charts (or charts
+            # sampled at different rates) don't share row counts, so index-based
+            # sync (Recharts' default) lines up the wrong points across charts.
+            lineChartProps={"syncId": parameters.x_axis, "syncMethod": "value"},
         )
 
     @classmethod
