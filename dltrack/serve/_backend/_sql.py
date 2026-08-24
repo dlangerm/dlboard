@@ -145,10 +145,14 @@ def annotation_to_sqltype(annotation: type, *, nullable: bool = False) -> str:
             raise NotImplementedError((annotation, type(annotation)))
 
 
-def create_table_sql(model: type[BaseModel]) -> str:
+def create_table_sql(model: type[BaseModel], foreign_keys: dict[str, type[BaseModel]] | None = None) -> str:
     if ID_KEY not in model.model_fields:
         msg = f"Creation object {model.__class__} must contain an ID key"
         raise AssertionError(msg)
+    for field_name in foreign_keys or {}:
+        if field_name not in model.model_fields:
+            msg = f"Foreign key column {field_name} not present in model {model.__name__}"
+            raise AssertionError(msg)
     base_str = f"""
     CREATE TABLE IF NOT EXISTS {model.__name__}
     """
@@ -160,8 +164,12 @@ def create_table_sql(model: type[BaseModel]) -> str:
         sorted_keys[idx] = f"{sorted_keys[idx]} {typed_keys[idx]}"
 
     sorted_keys[id_index] = f"{ID_KEY} INTEGER PRIMARY KEY AUTOINCREMENT"
+    fk_clauses = [
+        f"FOREIGN KEY ({field_name}) REFERENCES {referenced.__name__}({ID_KEY})"
+        for field_name, referenced in (foreign_keys or {}).items()
+    ]
     base_str += "("
-    base_str += ",".join(sorted_keys)
+    base_str += ",".join([*sorted_keys, *fk_clauses])
     base_str += ");"
     _log.debug("Create table sql: %s", base_str)
     return base_str

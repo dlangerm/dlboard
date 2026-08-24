@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Iterator, override
 from pydantic_settings import BaseSettings
 from structlog.stdlib import get_logger
 
+from dltrack.serve._backend import _migrations
 from dltrack.serve._backend._data_store import set_data_store
 from dltrack.serve._backend._sql_store_base import SQLStoreBase
 
@@ -31,6 +32,13 @@ class SQLLiteStore(SQLStoreBase[Path]):
         super().__init__()
 
     @override
+    def _run_migrations(self) -> None:
+        """Run migrations. SQLite requires the pragma to be set per-connection, not once globally."""
+        with sqlite3.connect(self._location) as conn:
+            conn.execute("PRAGMA foreign_keys = ON")
+            _migrations.run_migrations(conn)
+
+    @override
     def _execute_raw_sql(
         self,
         statement: str,
@@ -38,6 +46,7 @@ class SQLLiteStore(SQLStoreBase[Path]):
     ) -> Iterator[tuple[Any, ...]]:
         """Execute raw sql."""
         with sqlite3.connect(self._location) as conn:
+            conn.execute("PRAGMA foreign_keys = ON")
             cur = conn.cursor()
             _log.debug("Execute <%s> with values <%s>", statement, values)
             yield from cur.execute(statement, values or {}).fetchall()
@@ -50,6 +59,7 @@ class SQLLiteStore(SQLStoreBase[Path]):
     ) -> Iterator[tuple[Any, ...]]:
         """Execute raw sql."""
         with sqlite3.connect(self._location) as conn:
+            conn.execute("PRAGMA foreign_keys = ON")
             cur = conn.cursor()
             yield from cur.executemany(statement, values or []).fetchall()
 
