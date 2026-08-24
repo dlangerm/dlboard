@@ -1,6 +1,108 @@
-<!-- rtk-instructions v2 -->
-# RTK (Rust Token Killer) - Token-Optimized Commands
+# CLAUDE.md
 
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Project
+
+DLTrack — an experiment-tracking server ("what if mlflow didn't suck and weights & biases was free?"). It's a
+Dash/Dash-Mantine web app for browsing ML training runs, plus a `pytorch_lightning`-compatible logger client
+that ships metrics/hyperparams/artifacts to it over a REST API.
+
+## Commands
+
+Run everything through `uv` (Python >=3.12, deps pinned in `uv.lock`).
+
+```bash
+uv run --env-file .env serve.py     # start the dltrack server (this is how the user runs the app)
+uv run pytest                       # run the full test suite
+uv run pytest tests/sql_store_test.py  # run a single test file
+uv run pytest tests/sql_store_test.py::test_name  # run a single test
+uv run pytest --cov                 # run with coverage (see pyproject.toml for config)
+uv run ruff check                   # lint
+uv run ruff format                  # format
+uv run pyright                      # type check (strict mode)
+uv run prek run --all-files         # run pre-commit hooks manually
+```
+
+Prefix the one-shot commands above (`pytest`, `ruff`, `pyright`, `prek`) with `rtk` per the RTK instructions
+below for compact output. Do **not** prefix `serve.py` — it's a long-running server, and RTK's filters are
+built for commands that produce output and exit, not for something you need to tail live.
+
+Ruff lint config lives in `pyproject.toml`; `tests/*` and `dltype/tests/*` get relaxed rules (docstrings,
+private-member access, etc). Pyright runs in `strict` mode over `dltrack/` and `tests/`.
+
+## Architecture
+
+
+### Plugin system
+
+The whole app — storage, pages, charts, artifact types, themes — is composed at startup as a flat list of
+plugins passed into `dltrack.serve.app.app(plugins)`. Each plugin is any module implementing
+`PluginProtocol` (`dltrack/models/_plugin.py`): a `plug(cls, app: Dash) -> None` classmethod that registers
+itself with the Dash app (adds routes/pages, sets the data store, registers a chart renderer, etc).
+
+`dltrack/plugins/__init__.py` defines the bundles used for a local deployment:
+- `LOCAL_STORAGE` = `[sqlite, filesystem]` — the metadata DB and artifact blob storage
+- `BUILTIN_PAGES` = homepage, project page, experiment page
+- `BUILTIN_CHARTS` = image_series, line_chart, table_chart
+- `LOCAL_DEPLOYMENT` = all of the above, used by `serve.py`
+
+New functionality (a new chart type, storage backend, page, or artifact kind) is added by writing a new
+plugin module and including it in the list passed to `app()`, not by editing the core app.
+The core app should expose minimal `Store` hooks for plugins to use, but any opinionated design choices should rest with plugins.
+
+### Data flow: client → server
+
+1. `dltrack.client.dltrack_logger.DLTrackLogger` is a `pytorch_lightning.loggers.Logger`. On init it creates
+   an experiment/run via `BasicDltrackAPI` (`dltrack/plugins/backend/basic_rest_backend.py`) and spawns two
+   daemon subprocesses (`process_metrics_async`, `process_artifacts_async`) that batch and flush metrics /
+   artifacts from multiprocessing queues to the REST backend on an interval, so training isn't blocked on
+   network I/O.
+2. `dltrack/serve/_backend/basic_rest_backend` (server side) exposes the REST API that ingests these batches.
+3. Server-side storage is split into a `DataStore` (structured metadata: projects, experiments, runs, metrics,
+   hparams) and an `ArtifactStore` (blob storage), both defined as generic protocols in
+   `dltrack/models/_data_store.py`. `SQLStoreBase` (`dltrack/serve/_backend/_sql_store_base.py`) implements
+   the `DataStore` contract against raw SQL; `plugins/data_stores/sqlite.py` supplies the sqlite
+   `_execute_raw_sql` implementation, `filesystem.py` supplies artifact blob storage on disk.
+
+### Server-side app (Dash)
+
+`dltrack/serve/app.py` builds a Mantine `AppShell` (header, collapsible navbar, page container) and wires
+global callbacks: breadcrumbs, navbar collapse/expand (persisted to `localStorage` via `dcc.Store`), and
+navbar content (lists a project's experiments). Actual routed pages live under `dltrack/serve/_pages/` and
+`dltrack/plugins/pages/` and use Dash's `use_pages` file-based routing.
+
+Callbacks that need storage reach it via `dltrack/serve/_backend/_data_store.py`: `get_data_store()` /
+`get_artifact_store()` are `@cache`d accessors that pull the store off the running `Dash` app instance (set
+once at startup via `set_data_store`/`set_artifact_store`, called by the storage plugins' `plug()`).
+Constants for Dash component IDs live in `dltrack/models/constants.py`.
+Constants should only be added for globally-accessed values, not for per-plugin items that won't be used in other contexts.
+
+### Models
+
+`dltrack/models/` holds the Pydantic data models shared between client and server (`Experiment`, `Run`,
+`Project`, `HyperParams`, `LoggedMetrics`, `Artifact`, chart/view models like `Page`/`ChartType`). Most have a
+`New*` variant (e.g. `NewExperiment`, `NewRun`) for creation payloads versus the persisted/read model.
+
+### Charts
+
+Charts are plugins under `dltrack/plugins/charts/`. Chart rendering plugins register how a `Page`/`ChartType`
+gets turned into a Dash component; `_chart_autogen.py` under `plugins/pages/` auto-generates default charts
+for an experiment's logged metrics.
+
+### Code Style
+
+Always prefer strong-types, enums, literals, classes, protocols, etc. Never use stringly-typed interfaces, they are
+brittle and hard to maintain. Rely on static analysis wherever possible, specifically ensuring codepaths can only execute
+deterministically (use `match` in place of multiple `if/elif` where appropritate, leave off the default case so the static analyzer can catch failures). Prefer end to end tests that assert behavior, not implementation. Don't make man-in-the-middle functions that only exist
+to call other functions, prefer logical breakdowns of functional units that do actual work.
+
+Pytest should always use functional-style tests, never class-based tests. Use parametrized tests instead of multiple test files.
+Keep test files short, orthogonal, and specific, the test should never be harder to maintain than the target module.
+
+## RTK (Rust Token Killer) - Token-Optimized Commands
+
+<!-- rtk-instructions v2 -->
 ## Golden Rule
 
 **Always prefix commands with `rtk`**. If RTK has a dedicated filter, it uses it. If not, it passes through unchanged. This means RTK is always safe to use.
@@ -14,29 +116,21 @@ git add . && git commit -m "msg" && git push
 rtk git add . && rtk git commit -m "msg" && rtk git push
 ```
 
-## RTK Commands by Workflow
-
-### Build & Compile (80-90% savings)
+**Wrapper commands** (`rtk test <cmd>`, `rtk err <cmd>`, `rtk summary <cmd>`, `rtk proxy <cmd>`) take the raw,
+un-prefixed inner command — `rtk` is the wrapper, not a prefix to repeat inside it:
 ```bash
-rtk cargo build         # Cargo build output
-rtk cargo check         # Cargo check output
-rtk cargo clippy        # Clippy warnings grouped by file (80%)
-rtk tsc                 # TypeScript errors grouped by file/code (83%)
-rtk lint                # ESLint/Biome violations grouped (84%)
-rtk prettier --check    # Files needing format only (70%)
-rtk next build          # Next.js build with route metrics (87%)
+# ❌ Wrong — double-wrapped
+rtk err rtk cargo build
+
+# ✅ Correct
+rtk err cargo build
 ```
 
-### Test (60-99% savings)
+## RTK Commands by Workflow
+
+### Test (90% savings)
 ```bash
-rtk cargo test          # Cargo test failures only (90%)
-rtk go test             # Go test failures only (90%)
-rtk jest                # Jest failures only (99.5%)
-rtk vitest              # Vitest failures only (99.5%)
-rtk playwright test     # Playwright failures only (94%)
 rtk pytest              # Python test failures only (90%)
-rtk rake test           # Ruby test failures only (90%)
-rtk rspec               # RSpec test failures only (60%)
 rtk test <cmd>          # Generic test wrapper - failures only
 ```
 
@@ -63,26 +157,16 @@ Note: Git passthrough works for ALL subcommands, even those not explicitly liste
 rtk gh pr view <num>    # Compact PR view (87%)
 rtk gh pr checks        # Compact PR checks (79%)
 rtk gh run list         # Compact workflow runs (82%)
-rtk gh issue list       # Compact issue list (80%)
 rtk gh api              # Compact API responses (26%)
-```
-
-### JavaScript/TypeScript Tooling (70-90% savings)
-```bash
-rtk pnpm list           # Compact dependency tree (70%)
-rtk pnpm outdated       # Compact outdated packages (80%)
-rtk pnpm install        # Compact install output (90%)
-rtk npm run <script>    # Compact npm script output
-rtk npx <cmd>           # Compact npx command output
-rtk prisma              # Prisma without ASCII art (88%)
-rtk uv run <cmd>        # Compact uv project command output
 ```
 
 ### Files & Search (60-75% savings)
 ```bash
 rtk ls <path>           # Tree format, compact (65%)
 rtk read <file>         # Code reading with filtering (60%)
-rtk grep <pattern>      # Search grouped by file (75%). Format flags (-c, -l, -L, -o, -Z) run raw.
+rtk grep <pattern>      # Search grouped by file (75%). With format flags (-c, -l, -L, -o, -Z),
+                         # still fine to type `rtk grep`, but it runs unfiltered — those flags
+                         # already produce compact output, so there's nothing for rtk to strip.
 rtk find <pattern>      # Find grouped by directory (70%)
 ```
 
@@ -126,14 +210,13 @@ rtk init --global       # Add RTK to ~/.claude/CLAUDE.md
 
 | Category | Commands | Typical Savings |
 |----------|----------|-----------------|
-| Tests | vitest, playwright, cargo test | 90-99% |
-| Build | next, tsc, lint, prettier | 70-87% |
+| Tests | pytest | 90% |
 | Git | status, log, diff, add, commit | 59-80% |
-| GitHub | gh pr, gh run, gh issue | 26-87% |
-| Package Managers | pnpm, npm, npx | 70-90% |
+| GitHub | gh pr, gh run, gh api | 26-87% |
 | Files | ls, read, grep, find | 60-75% |
 | Infrastructure | docker, kubectl | 85% |
 | Network | curl, wget | 65-70% |
 
-Overall average: **60-90% token reduction** on common development operations.
+Savings vary by command, roughly 26-99% depending on how compressible the underlying output is; most
+everyday commands (tests, git, file search) land in the 60-90% range.
 <!-- /rtk-instructions -->
