@@ -66,7 +66,7 @@ def test_restore_project_restores_cascaded_children(store: SQLLiteStore, admin: 
     project_id, experiment_id, _run_id, artifact_id = _project_experiment_run_artifact(store)
     store.delete_project(project_id, actor_id=admin.id)
 
-    store.restore_project(project_id)
+    store.restore_project(project_id, actor_id=admin.id)
 
     assert project_id in {p.id for p in store.get_projects()}
     assert experiment_id in {e.id for e in store.get_experiments(project_id)}
@@ -84,7 +84,7 @@ def test_restore_project_does_not_resurrect_an_independently_deleted_experiment(
 
     store.delete_experiment(independently_deleted.id, actor_id=admin.id)
     store.delete_project(project.id, actor_id=admin.id)
-    store.restore_project(project.id)
+    store.restore_project(project.id, actor_id=admin.id)
 
     experiment_ids = {e.id for e in store.get_experiments(project.id)}
     assert kept.id in experiment_ids
@@ -93,11 +93,11 @@ def test_restore_project_does_not_resurrect_an_independently_deleted_experiment(
     )
 
 
-def test_restore_requires_the_entity_to_be_deleted(store: SQLLiteStore) -> None:
+def test_restore_requires_the_entity_to_be_deleted(store: SQLLiteStore, admin: models.User) -> None:
     project = store.create_project(models.NewProject(name="p", description="d"))
 
     with pytest.raises(ValueError, match="not deleted"):
-        store.restore_project(project.id)
+        store.restore_project(project.id, actor_id=admin.id)
 
 
 def test_delete_experiment_cascades_to_runs_and_artifacts(store: SQLLiteStore, admin: models.User) -> None:
@@ -162,7 +162,7 @@ def test_purge_project_permanently_removes_everything_under_it(
     assert run_id not in {r.id for r in store.list_deleted_runs()}
     assert artifact_id not in {a.id for a in store.list_deleted_artifacts()}
     with pytest.raises(ValueError, match="does not exist"):
-        store.restore_project(project_id)
+        store.restore_project(project_id, actor_id=admin.id)
 
 
 def test_create_experiment_rejected_for_a_deleted_project(store: SQLLiteStore, admin: models.User) -> None:

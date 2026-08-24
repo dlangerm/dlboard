@@ -121,7 +121,7 @@ class DataStore[**P](typing.Protocol):
         """Soft-delete a project and cascade to its experiments, runs, and artifacts."""
         ...
 
-    def restore_project(self, project_id: int) -> None:
+    def restore_project(self, project_id: int, actor_id: int) -> None:
         """Restore a soft-deleted project and everything deleted with it."""
         ...
 
@@ -133,7 +133,7 @@ class DataStore[**P](typing.Protocol):
         """Soft-delete an experiment and cascade to its runs and artifacts."""
         ...
 
-    def restore_experiment(self, experiment_id: int) -> None:
+    def restore_experiment(self, experiment_id: int, actor_id: int) -> None:
         """Restore a soft-deleted experiment and everything deleted with it."""
         ...
 
@@ -145,7 +145,7 @@ class DataStore[**P](typing.Protocol):
         """Soft-delete a run and cascade to its artifacts."""
         ...
 
-    def restore_run(self, run_id: int) -> None:
+    def restore_run(self, run_id: int, actor_id: int) -> None:
         """Restore a soft-deleted run and everything deleted with it."""
         ...
 
@@ -157,7 +157,7 @@ class DataStore[**P](typing.Protocol):
         """Soft-delete a single artifact."""
         ...
 
-    def restore_artifact(self, artifact_id: int) -> None:
+    def restore_artifact(self, artifact_id: int, actor_id: int) -> None:
         """Restore a soft-deleted artifact."""
         ...
 
@@ -179,6 +179,10 @@ class DataStore[**P](typing.Protocol):
 
     def list_deleted_artifacts(self) -> typing.Iterator[models.Artifact]:
         """List soft-deleted artifacts, for a trash/admin view."""
+        ...
+
+    def list_audit_log(self, limit: int = 100, offset: int = 0) -> typing.Iterator[models.AuditLogEntry]:
+        """List audit log entries, most recent first, for a trash/admin view."""
         ...
 
 

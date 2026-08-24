@@ -1,6 +1,7 @@
 """All exported data models."""
 
 from dltrack.models._artifact import AnyArtifact, Artifact, NewArtifact
+from dltrack.models._audit_log import AuditAction, AuditLogEntry, EntityType, NewAuditLogEntry
 from dltrack.models._data_store import ArtifactStore, DataStore
 from dltrack.models._experiment import Experiment, NewExperiment
 from dltrack.models._hparams import HyperParams, NewHyperParams
@@ -16,13 +17,17 @@ __all__ = [
     "AnyArtifact",
     "Artifact",
     "ArtifactStore",
+    "AuditAction",
+    "AuditLogEntry",
     "ChartType",
     "ColumnKind",
     "DataStore",
+    "EntityType",
     "Experiment",
     "HyperParams",
     "LoggedMetrics",
     "NewArtifact",
+    "NewAuditLogEntry",
     "NewExperiment",
     "NewHyperParams",
     "NewPage",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import itertools
+import json
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any, Iterator
@@ -14,6 +15,7 @@ from structlog.stdlib import get_logger
 from dltrack import models
 from dltrack.serve import sql
 from dltrack.serve._backend._app_state import APP_STATE_ROW_ID, AppState
+from dltrack.serve._backend._foreign_keys import ForeignKey, ForeignKeyKind
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -21,27 +23,53 @@ if TYPE_CHECKING:
 
 _log = get_logger(__name__)
 
-# Declares which `*_id` columns are real foreign keys, and what they reference. Ordered so that
-# a referenced table is always created before the table that references it (SQLite will accept
-# forward references too, but keeping this in dependency order keeps the migration rebuild in
-# `_migrations.py`, which walks this same map, easy to reason about).
-FOREIGN_KEYS: dict[type[BaseModel], dict[str, type[BaseModel]]] = {
-    models.Project: {"created_by": models.User, "deleted_by": models.User},
+_OWNS = ForeignKeyKind.OWNERSHIP
+
+# Declares every column's foreign key relationship: what it references, and whether it's OWNERSHIP
+# (the parent in the delete/restore/purge hierarchy -- gets a real `ON DELETE CASCADE`, and is what
+# `_cascade_targets` walks) or plain ATTRIBUTION (e.g. `created_by`, never cascades). This is the
+# single source of truth for both SQL schema generation and cascade behavior -- see
+# `_foreign_keys.py` -- so a new owned table only ever needs one entry here, not one hardcoded
+# cascade list per delete/restore/purge entry point.
+#
+# Ordered so that a referenced table is always created before the table that references it (SQLite
+# accepts forward references too, but this keeps the migration rebuild in `_migrations.py`, which
+# walks this same map, easy to reason about).
+FOREIGN_KEYS: dict[type[BaseModel], dict[str, ForeignKey]] = {
+    models.Project: {
+        "created_by": ForeignKey(models.User),
+        "deleted_by": ForeignKey(models.User),
+    },
     models.Experiment: {
-        "project_id": models.Project,
-        "created_by": models.User,
-        "deleted_by": models.User,
+        "project_id": ForeignKey(models.Project, _OWNS),
+        "created_by": ForeignKey(models.User),
+        "deleted_by": ForeignKey(models.User),
     },
-    models.Run: {"experiment_id": models.Experiment, "created_by": models.User, "deleted_by": models.User},
-    models.UnderlyingMetricTableEntry: {"experiment_id": models.Experiment, "run_id": models.Run},
-    models.HyperParams: {"experiment_id": models.Experiment, "run_id": models.Run},
+    models.Run: {
+        "experiment_id": ForeignKey(models.Experiment, _OWNS),
+        "created_by": ForeignKey(models.User),
+        "deleted_by": ForeignKey(models.User),
+    },
+    models.UnderlyingMetricTableEntry: {
+        "experiment_id": ForeignKey(models.Experiment),  # denormalized convenience, not an ownership edge
+        "run_id": ForeignKey(models.Run, _OWNS),
+    },
+    models.HyperParams: {
+        "experiment_id": ForeignKey(models.Experiment),
+        "run_id": ForeignKey(models.Run, _OWNS),
+    },
     models.Artifact: {
-        "experiment_id": models.Experiment,
-        "run_id": models.Run,
-        "created_by": models.User,
-        "deleted_by": models.User,
+        "experiment_id": ForeignKey(models.Experiment),
+        "run_id": ForeignKey(models.Run, _OWNS),
+        "created_by": ForeignKey(models.User),
+        "deleted_by": ForeignKey(models.User),
     },
-    models.Page: {"run_id": models.Run, "experiment_id": models.Experiment, "project_id": models.Project},
+    models.Page: {
+        "run_id": ForeignKey(models.Run, _OWNS),
+        "experiment_id": ForeignKey(models.Experiment, _OWNS),
+        "project_id": ForeignKey(models.Project, _OWNS),
+    },
+    models.AuditLogEntry: {"user_id": ForeignKey(models.User)},
 }
 
 UNIQUE_COLUMNS: dict[type[BaseModel], list[str]] = {
@@ -58,7 +86,59 @@ TABLES: tuple[type[BaseModel], ...] = (
     models.HyperParams,
     models.Artifact,
     models.Page,
+    models.AuditLogEntry,
 )
+
+# The entities a user can soft-delete/restore -- the only tables with `deleted_at`/`deleted_by`.
+# Metrics, hyperparameters, and pages aren't in this set even though they're cascade-owned (see
+# `FOREIGN_KEYS`): they have no `deleted_at` column of their own, so `_cascade_targets` is asked to
+# stop descending into them for soft-delete/restore purposes -- purge (a hard delete) still reaches
+# them, via `ON DELETE CASCADE`, without needing this restriction.
+SOFT_DELETABLE: frozenset[type[BaseModel]] = frozenset(
+    {models.Project, models.Experiment, models.Run, models.Artifact}
+)
+
+
+def _cascade_targets(
+    root: type[BaseModel], *, within: frozenset[type[BaseModel]] | None = None
+) -> list[tuple[type[BaseModel], str]]:
+    """
+    Breadth-first walk of the `OWNERSHIP` foreign-key graph (see `FOREIGN_KEYS`) starting at `root`.
+
+    Returns every descendant table paired with a SQL WHERE clause (referencing `:id`, the root
+    row's id) that selects that table's rows under `root`. `within`, if given, prunes the walk to
+    only tables in that set (e.g. `SOFT_DELETABLE`) -- a table outside it is skipped entirely,
+    neither returned nor recursed into, since it and everything under it are irrelevant to why
+    `within` was passed (e.g. `Page` has no `deleted_at` to filter on, so a soft-delete/restore
+    cascade must never touch it even though it's directly owned by `Project`).
+
+    This is the single place "what belongs to what" is resolved for soft-delete/restore cascades
+    and for purge's audit-log counts: adding a new owned table to `FOREIGN_KEYS` is enough for it to
+    participate correctly everywhere this is used, with no other code to update.
+    """
+    edges = [
+        (child, column, fk.references)
+        for child, columns in FOREIGN_KEYS.items()
+        for column, fk in columns.items()
+        if fk.kind is ForeignKeyKind.OWNERSHIP
+    ]
+    results: list[tuple[type[BaseModel], str]] = []
+    frontier: list[tuple[type[BaseModel], str]] = [(root, "id = :id")]
+    while frontier:
+        parent, parent_where = frontier.pop(0)
+        for child, column, parent_table in edges:
+            if parent_table is not parent:
+                continue
+            if within is not None and child not in within:
+                continue
+            where = (
+                f"{column} = :id"
+                if parent is root
+                else f"{column} IN (SELECT id FROM {parent.__name__} WHERE {parent_where})"
+            )
+            results.append((child, where))
+            frontier.append((child, where))
+    return results
 
 
 def _resolve_page_scope(
@@ -491,22 +571,73 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
     # against their run (see `fetch_metrics`/`fetch_hyperparams`), since a run under a deleted
     # experiment/project is always itself soft-deleted by the same cascade.
 
-    def _soft_delete(
+    def _count_matching(
         self,
         table: type[BaseModel],
+        where_clause: str,
         entity_id: int,
+        extra_clause: str = "",
+        extra_values: dict[str, Any] | None = None,
+    ) -> int:
+        """
+        Count rows in `table` matching `where_clause` (which may reference `:id`), plus `extra_clause`.
+
+        `extra_clause` may itself reference bind parameters (e.g. `:deleted_at`) supplied via
+        `extra_values` -- kept as separate parameters rather than interpolated into the SQL text.
+        """
+        rows = list(
+            self._execute_raw_sql(
+                f"SELECT count(*) FROM {table.__name__} WHERE {where_clause}{extra_clause}",
+                {"id": entity_id, **(extra_values or {})},
+            )
+        )
+        return rows[0][0]
+
+    def _record_audit_log(
+        self,
         actor_id: int,
-        *,
-        cascade: Iterable[tuple[type[BaseModel], str]] = (),
+        action: models.AuditAction,
+        entity_type: models.EntityType,
+        entity_id: int,
+        details: dict[str, int],
+    ) -> tuple[str, dict[str, Any]]:
+        """Build the (statement, values) pair for one audit log row, to fold into a bigger transaction."""
+        return sql.insert(
+            models.AuditLogEntry,
+            models.NewAuditLogEntry(
+                user_id=actor_id,
+                action=action,
+                entity_type=entity_type,
+                entity_id=entity_id,
+                details=json.dumps(details),
+            ),
+        )
+
+    def _soft_delete(
+        self, table: type[BaseModel], entity_id: int, actor_id: int, *, entity_type: models.EntityType
     ) -> None:
         """
-        Soft-delete one row and cascade the same delete to dependent tables.
+        Soft-delete one row and cascade to every table `_cascade_targets` finds owned by it.
 
-        `cascade` is a list of `(child table, WHERE clause)` pairs; the WHERE clause may reference
-        `:id` (the id of the row being deleted). Only rows not already independently deleted are
-        touched, so a child soft-deleted earlier on its own keeps its original `deleted_at`.
+        Cascade is restricted to `SOFT_DELETABLE`, since only those tables have `deleted_at`. Only
+        rows not already independently deleted are touched, so a child soft-deleted earlier on its
+        own keeps its original `deleted_at`.
         """
+        cascade = _cascade_targets(table, within=SOFT_DELETABLE)
+        # Counted *before* the mutation (same WHERE clause, same "not already deleted" guard) so the
+        # audit row -- inserted in the same transaction as the mutation, right below -- can record
+        # cascade counts without needing the UPDATEs' own row counts, which `_execute_in_transaction`
+        # doesn't expose for statements without `RETURNING`.
+        details: dict[str, int] = {}
+        for child, where_clause in cascade:
+            details[child.__name__] = details.get(child.__name__, 0) + self._count_matching(
+                child, where_clause, entity_id, " AND deleted_at IS NULL"
+            )
+
         now = pendulum.now(pendulum.UTC).isoformat()
+        audit_statement, audit_values = self._record_audit_log(
+            actor_id, models.AuditAction.SOFT_DELETE, entity_type, entity_id, details
+        )
         statements = [
             (
                 f"UPDATE {table.__name__} SET deleted_at = :now, deleted_by = :actor "
@@ -521,6 +652,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
                 )
                 for child, where_clause in cascade
             ),
+            (audit_statement, audit_values),
         ]
         results = self._execute_in_transaction(statements)
         if not results[0]:
@@ -528,11 +660,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             raise ValueError(msg)
 
     def _restore(
-        self,
-        table: type[BaseModel],
-        entity_id: int,
-        *,
-        cascade: Iterable[tuple[type[BaseModel], str]] = (),
+        self, table: type[BaseModel], entity_id: int, actor_id: int, *, entity_type: models.EntityType
     ) -> None:
         """
         Restore one soft-deleted row and cascade to dependents deleted at the exact same instant.
@@ -547,6 +675,16 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             msg = f"{table.__name__} {entity_id} is not deleted"
             raise ValueError(msg)
 
+        cascade = _cascade_targets(table, within=SOFT_DELETABLE)
+        details: dict[str, int] = {}
+        for child, where_clause in cascade:
+            details[child.__name__] = details.get(child.__name__, 0) + self._count_matching(
+                child, where_clause, entity_id, " AND deleted_at = :deleted_at", {"deleted_at": deleted_at}
+            )
+
+        audit_statement, audit_values = self._record_audit_log(
+            actor_id, models.AuditAction.RESTORE, entity_type, entity_id, details
+        )
         statements = [
             (
                 f"UPDATE {table.__name__} SET deleted_at = NULL, deleted_by = NULL WHERE id = :id",
@@ -560,24 +698,25 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
                 )
                 for child, where_clause in cascade
             ),
+            (audit_statement, audit_values),
         ]
         self._execute_in_transaction(statements)
 
     def _purge(
-        self,
-        table: type[BaseModel],
-        entity_id: int,
-        actor: models.User,
-        *,
-        cascade: Iterable[str] = (),
+        self, table: type[BaseModel], entity_id: int, actor: models.User, *, entity_type: models.EntityType
     ) -> None:
         """
-        Permanently delete one already-soft-deleted row and everything cascade-dependent on it.
+        Permanently delete one already-soft-deleted row.
 
-        The one irreversible action in this module -- everything else (soft-delete, restore) can
-        be undone -- so it's the one place that actually gates on a scope (`Scope.PURGE`) rather
-        than just recording who did it. `cascade` is a list of full `DELETE ...` statements
-        (dependency order: children before parents) that may reference `:id`.
+        SQLite's `ON DELETE CASCADE` (see `FOREIGN_KEYS`/`ForeignKeyKind.OWNERSHIP`) handles
+        removing every dependent row natively -- no per-table `DELETE` statements to enumerate here.
+        The one irreversible action in this module -- everything else (soft-delete, restore) can be
+        undone -- so it's the one place that actually gates on a scope (`Scope.PURGE`) rather than
+        just recording who did it. Cascade counts for the audit log are computed with
+        `_cascade_targets`'s *full* (unfiltered) graph, since purge reaches metrics/hyperparams/pages
+        too, not just the soft-deletable entities -- and (unlike soft-delete/restore) counts matching
+        rows regardless of their own `deleted_at`, since purging a project removes everything under
+        it either way.
         """
         if not models.has_scope(actor, models.Scope.PURGE):
             msg = f"User {actor.id} lacks the {models.Scope.PURGE} scope"
@@ -587,125 +726,80 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             msg = f"{table.__name__} {entity_id} must be soft-deleted before it can be purged"
             raise ValueError(msg)
 
-        statements = [(statement, {"id": entity_id}) for statement in cascade]
-        statements.append((f"DELETE FROM {table.__name__} WHERE id = :id", {"id": entity_id}))
-        self._execute_in_transaction(statements)
+        details: dict[str, int] = {}
+        for child, where_clause in _cascade_targets(table):
+            details[child.__name__] = details.get(child.__name__, 0) + self._count_matching(
+                child, where_clause, entity_id
+            )
+
+        audit_statement, audit_values = self._record_audit_log(
+            actor.id, models.AuditAction.PURGE, entity_type, entity_id, details
+        )
+        self._execute_in_transaction(
+            [
+                (f"DELETE FROM {table.__name__} WHERE id = :id", {"id": entity_id}),
+                (audit_statement, audit_values),
+            ]
+        )
 
     def delete_project(self, project_id: int, actor_id: int) -> None:
         """Soft-delete a project and cascade to its experiments, runs, and artifacts."""
-        experiments_of_project = f"(SELECT id FROM {models.Experiment.__name__} WHERE project_id = :id)"
-        self._soft_delete(
-            models.Project,
-            project_id,
-            actor_id,
-            cascade=[
-                (models.Experiment, "project_id = :id"),
-                (models.Run, f"experiment_id IN {experiments_of_project}"),
-                (models.Artifact, f"experiment_id IN {experiments_of_project}"),
-            ],
-        )
+        self._soft_delete(models.Project, project_id, actor_id, entity_type=models.EntityType.PROJECT)
 
-    def restore_project(self, project_id: int) -> None:
+    def restore_project(self, project_id: int, actor_id: int) -> None:
         """Restore a soft-deleted project and every experiment/run/artifact deleted with it."""
-        experiments_of_project = f"(SELECT id FROM {models.Experiment.__name__} WHERE project_id = :id)"
-        self._restore(
-            models.Project,
-            project_id,
-            cascade=[
-                (models.Experiment, "project_id = :id"),
-                (models.Run, f"experiment_id IN {experiments_of_project}"),
-                (models.Artifact, f"experiment_id IN {experiments_of_project}"),
-            ],
-        )
+        self._restore(models.Project, project_id, actor_id, entity_type=models.EntityType.PROJECT)
 
     def purge_project(self, project_id: int, actor: models.User) -> None:
         """Permanently delete an already soft-deleted project and everything under it."""
-        experiments_of_project = f"(SELECT id FROM {models.Experiment.__name__} WHERE project_id = :id)"
-        runs_of_project = (
-            f"(SELECT id FROM {models.Run.__name__} WHERE experiment_id IN {experiments_of_project})"
-        )
-        self._purge(
-            models.Project,
-            project_id,
-            actor,
-            cascade=[
-                f"DELETE FROM {models.UnderlyingMetricTableEntry.__name__} "
-                f"WHERE experiment_id IN {experiments_of_project}",
-                f"DELETE FROM {models.HyperParams.__name__} WHERE experiment_id IN {experiments_of_project}",
-                f"DELETE FROM {models.Artifact.__name__} WHERE experiment_id IN {experiments_of_project}",
-                f"DELETE FROM {models.Page.__name__} WHERE project_id = :id "
-                f"OR experiment_id IN {experiments_of_project} OR run_id IN {runs_of_project}",
-                f"DELETE FROM {models.Run.__name__} WHERE experiment_id IN {experiments_of_project}",
-                f"DELETE FROM {models.Experiment.__name__} WHERE project_id = :id",
-            ],
-        )
+        self._purge(models.Project, project_id, actor, entity_type=models.EntityType.PROJECT)
 
     def delete_experiment(self, experiment_id: int, actor_id: int) -> None:
         """Soft-delete an experiment and cascade to its runs and artifacts."""
         self._soft_delete(
-            models.Experiment,
-            experiment_id,
-            actor_id,
-            cascade=[(models.Run, "experiment_id = :id"), (models.Artifact, "experiment_id = :id")],
+            models.Experiment, experiment_id, actor_id, entity_type=models.EntityType.EXPERIMENT
         )
 
-    def restore_experiment(self, experiment_id: int) -> None:
+    def restore_experiment(self, experiment_id: int, actor_id: int) -> None:
         """Restore a soft-deleted experiment and every run/artifact deleted with it."""
-        self._restore(
-            models.Experiment,
-            experiment_id,
-            cascade=[(models.Run, "experiment_id = :id"), (models.Artifact, "experiment_id = :id")],
-        )
+        self._restore(models.Experiment, experiment_id, actor_id, entity_type=models.EntityType.EXPERIMENT)
 
     def purge_experiment(self, experiment_id: int, actor: models.User) -> None:
         """Permanently delete an already soft-deleted experiment and everything under it."""
-        runs_of_experiment = f"(SELECT id FROM {models.Run.__name__} WHERE experiment_id = :id)"
-        self._purge(
-            models.Experiment,
-            experiment_id,
-            actor,
-            cascade=[
-                f"DELETE FROM {models.UnderlyingMetricTableEntry.__name__} WHERE experiment_id = :id",
-                f"DELETE FROM {models.HyperParams.__name__} WHERE experiment_id = :id",
-                f"DELETE FROM {models.Artifact.__name__} WHERE experiment_id = :id",
-                f"DELETE FROM {models.Page.__name__} WHERE experiment_id = :id OR run_id IN {runs_of_experiment}",
-                f"DELETE FROM {models.Run.__name__} WHERE experiment_id = :id",
-            ],
-        )
+        self._purge(models.Experiment, experiment_id, actor, entity_type=models.EntityType.EXPERIMENT)
 
     def delete_run(self, run_id: int, actor_id: int) -> None:
         """Soft-delete a run and cascade to its artifacts."""
-        self._soft_delete(models.Run, run_id, actor_id, cascade=[(models.Artifact, "run_id = :id")])
+        self._soft_delete(models.Run, run_id, actor_id, entity_type=models.EntityType.RUN)
 
-    def restore_run(self, run_id: int) -> None:
+    def restore_run(self, run_id: int, actor_id: int) -> None:
         """Restore a soft-deleted run and every artifact deleted with it."""
-        self._restore(models.Run, run_id, cascade=[(models.Artifact, "run_id = :id")])
+        self._restore(models.Run, run_id, actor_id, entity_type=models.EntityType.RUN)
 
     def purge_run(self, run_id: int, actor: models.User) -> None:
         """Permanently delete an already soft-deleted run and everything under it."""
-        self._purge(
-            models.Run,
-            run_id,
-            actor,
-            cascade=[
-                f"DELETE FROM {models.UnderlyingMetricTableEntry.__name__} WHERE run_id = :id",
-                f"DELETE FROM {models.HyperParams.__name__} WHERE run_id = :id",
-                f"DELETE FROM {models.Artifact.__name__} WHERE run_id = :id",
-                f"DELETE FROM {models.Page.__name__} WHERE run_id = :id",
-            ],
-        )
+        self._purge(models.Run, run_id, actor, entity_type=models.EntityType.RUN)
 
     def delete_artifact(self, artifact_id: int, actor_id: int) -> None:
         """Soft-delete a single artifact (a leaf -- nothing depends on it)."""
-        self._soft_delete(models.Artifact, artifact_id, actor_id)
+        self._soft_delete(models.Artifact, artifact_id, actor_id, entity_type=models.EntityType.ARTIFACT)
 
-    def restore_artifact(self, artifact_id: int) -> None:
+    def restore_artifact(self, artifact_id: int, actor_id: int) -> None:
         """Restore a soft-deleted artifact."""
-        self._restore(models.Artifact, artifact_id)
+        self._restore(models.Artifact, artifact_id, actor_id, entity_type=models.EntityType.ARTIFACT)
 
     def purge_artifact(self, artifact_id: int, actor: models.User) -> None:
         """Permanently delete an already soft-deleted artifact."""
-        self._purge(models.Artifact, artifact_id, actor)
+        self._purge(models.Artifact, artifact_id, actor, entity_type=models.EntityType.ARTIFACT)
+
+    def list_audit_log(self, limit: int = 100, offset: int = 0) -> Iterator[models.AuditLogEntry]:
+        """List audit log entries, most recent first, for a trash/admin view."""
+        statement = f"""
+            SELECT * FROM {models.AuditLogEntry.__name__}
+            ORDER BY timestamp_utc DESC
+            LIMIT {int(limit)} OFFSET {int(offset)};
+        """
+        yield from self._execute_sql_query(models.AuditLogEntry, statement)
 
     def list_deleted_projects(self) -> Iterator[models.Project]:
         """List soft-deleted projects, for a trash/admin view."""
