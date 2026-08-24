@@ -27,6 +27,7 @@ from dltrack.models._view import (
     ParameterFieldType,
 )
 from dltrack.plugins.charts._table_style import NUMERIC, infer_column_dtype, themed_datatable_kwargs
+from dltrack.plugins.pages._actor import current_actor_id
 from dltrack.plugins.pages._chart_autogen import (
     Suggestion,
     build_auto_panels,
@@ -43,6 +44,11 @@ from dltrack.plugins.pages._dataframe_helpers import (
     infer_column_kinds,
     merge_hyperparams,
     merge_metrics_and_artifacts,
+)
+from dltrack.plugins.pages._delete_confirm import (
+    DeleteConfirmIds,
+    register_delete_callbacks,
+    render_delete_control,
 )
 from dltrack.plugins.pages._description_editor import (
     DescriptionEditorIds,
@@ -144,6 +150,20 @@ EXPERIMENT_DESC_IDS = DescriptionEditorIds(
     textarea="experiment-edit-desc-textarea",
     save="experiment-edit-desc-save",
     cancel="experiment-edit-desc-cancel",
+)
+
+EXPERIMENT_DELETE_IDS = DeleteConfirmIds(
+    button=constants.DELETE_EXPERIMENT_BUTTON_ID,
+    modal=constants.DELETE_EXPERIMENT_MODAL_ID,
+    confirm=constants.DELETE_EXPERIMENT_CONFIRM_ID,
+    cancel=constants.DELETE_EXPERIMENT_CANCEL_ID,
+)
+
+RUN_DELETE_IDS = DeleteConfirmIds(
+    button=constants.DELETE_RUN_BUTTON_ID,
+    modal=constants.DELETE_RUN_MODAL_ID,
+    confirm=constants.DELETE_RUN_CONFIRM_ID,
+    cancel=constants.DELETE_RUN_CANCEL_ID,
 )
 
 _METRIC_BOOKKEEPING_COLS = {"run_id", "step", "index", "timestamp_utc", "experiment_id"}
@@ -579,6 +599,9 @@ def _header_actions() -> Component:
             dmc.Button("Runs", id=constants.HPARAM_DRAWER_TOGGLE_ID, size="xs", variant="light"),
             dmc.Button("Manage panels", id=EDIT_DRAWER_TOGGLE_ID, size="xs", variant="light"),
             dmc.Switch(id=EDIT_MODE_ID, label="Edit", checked=False),
+            *render_delete_control(
+                EXPERIMENT_DELETE_IDS, label="Delete experiment", entity_noun="experiment"
+            ),
         ],
         gap="sm",
         wrap="nowrap",
@@ -895,6 +918,25 @@ def _load_hparam_view_data(
     return hydrated, hparam_keys, metric_keys, rows
 
 
+def _delete_run_control(rows: list[dict[str, Any]]) -> Component:
+    """A run picker + delete button, so an individual run can be soft-deleted from the Runs drawer."""
+    return dmc.Group(
+        [
+            dmc.Select(
+                id=constants.DELETE_RUN_SELECT_ID,
+                data=[{"value": str(row["run_id"]), "label": f"Run {row['run_id']}"} for row in rows],
+                placeholder="Select a run to delete",
+                style={"flex": 1},
+                size="xs",
+            ),
+            *render_delete_control(RUN_DELETE_IDS, label="Delete run", entity_noun="run"),
+        ],
+        gap="xs",
+        mt="md",
+        align="flex-end",
+    )
+
+
 def _build_hparam_datatable(
     rows: list[dict[str, Any]], selected: list[str] | list[int], excluded: list[int] | list[str]
 ) -> dash_table.DataTable:
@@ -994,6 +1036,62 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         save=_save_experiment_description,
     )
 
+    def _delete_experiment(experiment_id: int) -> str:
+        store = get_data_store()
+        exp = store.get_experiment(experiment_id)
+        if exp is None:
+            msg = f"Experiment {experiment_id} not found"
+            raise ValueError(msg)
+        project_id = exp.project_id
+        store.delete_experiment(experiment_id, actor_id=current_actor_id(store))
+        return f"/project/{project_id}"
+
+    register_delete_callbacks(
+        app,
+        EXPERIMENT_DELETE_IDS,
+        State(constants.STATE_EXPERIMENT_ID, "data"),
+        on_confirm=_delete_experiment,
+    )
+
+    # --- delete a single run (Runs drawer) -- redirects back to this same page with a hard
+    # refresh (not a soft `use_pages` navigation) since the path doesn't change, and nothing
+    # short of a fresh `layout()` call re-fetches `STATE_HPARAMS`/the metrics accordion.
+    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+        Output(constants.DELETE_RUN_MODAL_ID, "opened", allow_duplicate=True),
+        Input(constants.DELETE_RUN_BUTTON_ID, "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def open_delete_run_modal(n_clicks: int) -> bool:
+        if not n_clicks:
+            raise PreventUpdate
+        return True
+
+    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+        Output(constants.DELETE_RUN_MODAL_ID, "opened", allow_duplicate=True),
+        Input(constants.DELETE_RUN_CANCEL_ID, "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def cancel_delete_run(n_clicks: int) -> bool:
+        if not n_clicks:
+            raise PreventUpdate
+        return False
+
+    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+        Output(constants.LOCATION_ID, "href", allow_duplicate=True),
+        Output(constants.LOCATION_ID, "refresh", allow_duplicate=True),
+        Output(constants.DELETE_RUN_MODAL_ID, "opened", allow_duplicate=True),
+        Input(constants.DELETE_RUN_CONFIRM_ID, "n_clicks"),
+        State(constants.DELETE_RUN_SELECT_ID, "value"),
+        State(constants.STATE_EXPERIMENT_ID, "data"),
+        prevent_initial_call=True,
+    )
+    def confirm_delete_run(n_clicks: int, run_id: str | None, experiment_id: int) -> tuple[str, bool, bool]:
+        if not n_clicks or not run_id:
+            raise PreventUpdate
+        store = get_data_store()
+        store.delete_run(int(run_id), actor_id=current_actor_id(store))
+        return f"/experiment/{experiment_id}", True, False
+
     # Opens/closes independently of edit mode — you can manage panels without ever needing to
     # flip the Edit switch, and closing the drawer doesn't require it either.
     app.clientside_callback(  # pyright: ignore[reportUnknownMemberType]
@@ -1052,6 +1150,7 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
                             id=constants.HPARAM_TABLE_BODY_ID,
                             children=_build_hparam_datatable(rows, selected, excluded),
                         ),
+                        _delete_run_control(rows),
                     ],
                 ),
             ]

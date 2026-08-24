@@ -9,7 +9,13 @@ import dash_mantine_components as dmc
 from dash import Dash, Input, Output, State, html
 
 from dltrack.models import NewExperiment, constants
+from dltrack.plugins.pages._actor import current_actor_id
 from dltrack.plugins.pages._dataframe_helpers import experiment_display_name
+from dltrack.plugins.pages._delete_confirm import (
+    DeleteConfirmIds,
+    register_delete_callbacks,
+    render_delete_control,
+)
 from dltrack.plugins.pages._description_editor import (
     DescriptionEditorIds,
     register_edit_callbacks,
@@ -33,6 +39,13 @@ PROJECT_DESC_IDS = DescriptionEditorIds(
     textarea="project-edit-desc-textarea",
     save="project-edit-desc-save",
     cancel="project-edit-desc-cancel",
+)
+
+PROJECT_DELETE_IDS = DeleteConfirmIds(
+    button=constants.DELETE_PROJECT_BUTTON_ID,
+    modal=constants.DELETE_PROJECT_MODAL_ID,
+    confirm=constants.DELETE_PROJECT_CONFIRM_ID,
+    cancel=constants.DELETE_PROJECT_CANCEL_ID,
 )
 
 _CARD_COLORS = ["indigo", "teal", "grape", "orange", "cyan", "pink"]
@@ -108,11 +121,21 @@ def plug(app: Dash) -> None:
         project = store.get_project(project_id)
         return dmc.Container(
             [
-                html.Div(
-                    id=PROJECT_HEADER_ID,
-                    children=render_header(
-                        PROJECT_DESC_IDS, title=project.name, description=project.description
-                    ),
+                dmc.Group(
+                    [
+                        html.Div(
+                            id=PROJECT_HEADER_ID,
+                            children=render_header(
+                                PROJECT_DESC_IDS, title=project.name, description=project.description
+                            ),
+                            style={"flex": 1},
+                        ),
+                        *render_delete_control(
+                            PROJECT_DELETE_IDS, label="Delete project", entity_noun="project"
+                        ),
+                    ],
+                    justify="space-between",
+                    align="flex-start",
                     style={
                         "marginTop": "var(--mantine-spacing-lg)",
                         "marginBottom": "var(--mantine-spacing-md)",
@@ -158,7 +181,13 @@ def plug(app: Dash) -> None:
                 msg = "Experiment name cannot be empty"
                 raise ValueError(msg)
             store = get_data_store()
-            store.create_experiment(NewExperiment(project_id=int(project_id), name=new_experiment_name))
+            store.create_experiment(
+                NewExperiment(
+                    project_id=int(project_id),
+                    name=new_experiment_name,
+                    created_by=current_actor_id(store),
+                )
+            )
         return _list_experiments(project_id)
 
     def _fetch_project_header(project_id: int) -> tuple[str, str]:
@@ -178,4 +207,16 @@ def plug(app: Dash) -> None:
         State(constants.STATE_PROJECT_ID, "data"),
         fetch=_fetch_project_header,
         save=_save_project_description,
+    )
+
+    def _delete_project(project_id: int) -> str:
+        store = get_data_store()
+        store.delete_project(project_id, actor_id=current_actor_id(store))
+        return "/"
+
+    register_delete_callbacks(
+        app,
+        PROJECT_DELETE_IDS,
+        State(constants.STATE_PROJECT_ID, "data"),
+        on_confirm=_delete_project,
     )

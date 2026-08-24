@@ -40,16 +40,22 @@ def app(plugins: list[models.PluginProtocol]) -> Dash:
             dmc.AppShellHeader(
                 dmc.Group(
                     [
-                        dmc.Burger(id="burger", size="sm", hiddenFrom="sm", opened=False),
-                        dmc.ActionIcon(
-                            "☰",
-                            id=constants.NAVBAR_COLLAPSE_TOGGLE_ID,
-                            variant="subtle",
-                            visibleFrom="sm",
+                        dmc.Group(
+                            [
+                                dmc.Burger(id="burger", size="sm", hiddenFrom="sm", opened=False),
+                                dmc.ActionIcon(
+                                    "☰",
+                                    id=constants.NAVBAR_COLLAPSE_TOGGLE_ID,
+                                    variant="subtle",
+                                    visibleFrom="sm",
+                                ),
+                                dmc.Title("DLTrack"),
+                                dmc.Breadcrumbs(id=constants.PAGE_BREADCRUMB_ID, separator="/", children=[]),
+                            ]
                         ),
-                        dmc.Title("DLTrack"),
-                        dmc.Breadcrumbs(id=constants.PAGE_BREADCRUMB_ID, separator="/", children=[]),
+                        dcc.Link("Admin", href="/admin", refresh=True),
                     ],
+                    justify="space-between",
                     h="100%",
                     px="md",
                 )

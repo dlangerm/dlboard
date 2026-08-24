@@ -801,26 +801,34 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         """
         yield from self._execute_sql_query(models.AuditLogEntry, statement)
 
-    def list_deleted_projects(self) -> Iterator[models.Project]:
-        """List soft-deleted projects, for a trash/admin view."""
-        yield from self._execute_sql_query(
-            models.Project, f"SELECT * FROM {models.Project.__name__} WHERE deleted_at IS NOT NULL"
-        )
+    def _list_deleted[RowT: BaseModel](self, table: type[RowT], *, limit: int, offset: int) -> Iterator[RowT]:
+        """
+        Shared query behind every `list_deleted_*` method: most-recently-deleted first, capped.
 
-    def list_deleted_experiments(self) -> Iterator[models.Experiment]:
-        """List soft-deleted experiments, for a trash/admin view."""
-        yield from self._execute_sql_query(
-            models.Experiment, f"SELECT * FROM {models.Experiment.__name__} WHERE deleted_at IS NOT NULL"
-        )
+        A project's cascade can soft-delete everything under it in one go -- easily thousands of
+        artifact rows for a training-heavy project -- so this is never unbounded: callers always
+        get a page, never "every row," the same discipline `list_audit_log` already follows.
+        """
+        statement = f"""
+            SELECT * FROM {table.__name__}
+            WHERE deleted_at IS NOT NULL
+            ORDER BY deleted_at DESC
+            LIMIT {int(limit)} OFFSET {int(offset)};
+        """
+        yield from self._execute_sql_query(table, statement)
 
-    def list_deleted_runs(self) -> Iterator[models.Run]:
-        """List soft-deleted runs, for a trash/admin view."""
-        yield from self._execute_sql_query(
-            models.Run, f"SELECT * FROM {models.Run.__name__} WHERE deleted_at IS NOT NULL"
-        )
+    def list_deleted_projects(self, limit: int = 100, offset: int = 0) -> Iterator[models.Project]:
+        """List soft-deleted projects, most recently deleted first, for a trash/admin view."""
+        yield from self._list_deleted(models.Project, limit=limit, offset=offset)
 
-    def list_deleted_artifacts(self) -> Iterator[models.Artifact]:
-        """List soft-deleted artifacts, for a trash/admin view."""
-        yield from self._execute_sql_query(
-            models.Artifact, f"SELECT * FROM {models.Artifact.__name__} WHERE deleted_at IS NOT NULL"
-        )
+    def list_deleted_experiments(self, limit: int = 100, offset: int = 0) -> Iterator[models.Experiment]:
+        """List soft-deleted experiments, most recently deleted first, for a trash/admin view."""
+        yield from self._list_deleted(models.Experiment, limit=limit, offset=offset)
+
+    def list_deleted_runs(self, limit: int = 100, offset: int = 0) -> Iterator[models.Run]:
+        """List soft-deleted runs, most recently deleted first, for a trash/admin view."""
+        yield from self._list_deleted(models.Run, limit=limit, offset=offset)
+
+    def list_deleted_artifacts(self, limit: int = 100, offset: int = 0) -> Iterator[models.Artifact]:
+        """List soft-deleted artifacts, most recently deleted first, for a trash/admin view."""
+        yield from self._list_deleted(models.Artifact, limit=limit, offset=offset)

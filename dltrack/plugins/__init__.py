@@ -9,6 +9,7 @@ BUILTIN_PAGES: list[PluginProtocol] = [
     pages.simple_homepage,
     pages.simple_project_page,
     pages.simple_experiment_page,
+    pages.simple_admin_page,
 ]
 BUILTIN_CHARTS: list[PluginProtocol] = [
     charts.image_series,
