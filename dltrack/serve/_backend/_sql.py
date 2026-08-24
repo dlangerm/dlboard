@@ -145,13 +145,36 @@ def annotation_to_sqltype(annotation: type, *, nullable: bool = False) -> str:
             raise NotImplementedError((annotation, type(annotation)))
 
 
-def create_table_sql(model: type[BaseModel], foreign_keys: dict[str, type[BaseModel]] | None = None) -> str:
+def create_table_sql(
+    model: type[BaseModel],
+    foreign_keys: dict[str, type[BaseModel]] | None = None,
+    unique_columns: list[str] | None = None,
+    column_defaults: dict[str, str] | None = None,
+) -> str:
+    """
+    Build a `CREATE TABLE IF NOT EXISTS` statement reflecting `model`'s fields.
+
+    `column_defaults` maps a field name to a raw SQL literal (e.g. `"0"`, `"''"`) emitted as a
+    `DEFAULT` clause on that column. This isn't meant for everyday model fields -- application code
+    always supplies every field explicitly on insert (see `insert`) -- it exists so a schema
+    migration rebuilding a table (`_migrations._rebuild_table_with_foreign_keys`) can satisfy a
+    `NOT NULL` column that the old table doesn't have data for yet, as a placeholder the migration
+    that actually owns that column immediately overwrites.
+    """
     if ID_KEY not in model.model_fields:
         msg = f"Creation object {model.__class__} must contain an ID key"
         raise AssertionError(msg)
     for field_name in foreign_keys or {}:
         if field_name not in model.model_fields:
             msg = f"Foreign key column {field_name} not present in model {model.__name__}"
+            raise AssertionError(msg)
+    for field_name in unique_columns or []:
+        if field_name not in model.model_fields:
+            msg = f"Unique column {field_name} not present in model {model.__name__}"
+            raise AssertionError(msg)
+    for field_name in column_defaults or {}:
+        if field_name not in model.model_fields:
+            msg = f"Default column {field_name} not present in model {model.__name__}"
             raise AssertionError(msg)
     base_str = f"""
     CREATE TABLE IF NOT EXISTS {model.__name__}
@@ -160,16 +183,19 @@ def create_table_sql(model: type[BaseModel], foreign_keys: dict[str, type[BaseMo
     sorted_keys = list(model.model_fields.keys())
     id_index = sorted_keys.index(ID_KEY)
 
-    for idx in range(len((sorted_keys))):
-        sorted_keys[idx] = f"{sorted_keys[idx]} {typed_keys[idx]}"
+    for idx, field_name in enumerate(list(model.model_fields.keys())):
+        default = (column_defaults or {}).get(field_name)
+        suffix = f" DEFAULT {default}" if default is not None else ""
+        sorted_keys[idx] = f"{sorted_keys[idx]} {typed_keys[idx]}{suffix}"
 
     sorted_keys[id_index] = f"{ID_KEY} INTEGER PRIMARY KEY AUTOINCREMENT"
     fk_clauses = [
         f"FOREIGN KEY ({field_name}) REFERENCES {referenced.__name__}({ID_KEY})"
         for field_name, referenced in (foreign_keys or {}).items()
     ]
+    unique_clauses = [f"UNIQUE ({field_name})" for field_name in unique_columns or []]
     base_str += "("
-    base_str += ",".join([*sorted_keys, *fk_clauses])
+    base_str += ",".join([*sorted_keys, *fk_clauses, *unique_clauses])
     base_str += ");"
     _log.debug("Create table sql: %s", base_str)
     return base_str
@@ -209,6 +235,12 @@ def insert(table: type[BaseModel], model: BaseModel) -> tuple[str, dict[str, typ
         """,
         values,
     )
+
+
+def insert_or_ignore(table: type[BaseModel], model: BaseModel) -> tuple[str, dict[str, typing.Any]]:
+    """Like `insert`, but a conflicting row (e.g. a duplicate unique `username`) is silently skipped."""
+    statement, values = insert(table, model)
+    return statement.replace("INSERT INTO", "INSERT OR IGNORE INTO", 1), values
 
 
 def insert_many(

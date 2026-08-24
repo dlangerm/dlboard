@@ -1,21 +1,25 @@
 # pyright: reportPrivateUsage=false
 """Tests for the schema migration runner in `_migrations.py`.
 
-Builds a version-0 schema by hand (today's pre-foreign-key table shapes, via `create_table_sql`
-without a foreign-key map -- exactly what an existing `~/.dltrack.sqlite` looks like before this
-change) and runs the real migration chain against it, so a broken migration fails the test suite
-loudly rather than only failing silently against someone's production database.
+Builds a version-0 schema by hand -- the table shapes as they were before any migration in this
+module existed -- and runs the real migration chain against it, so a broken migration fails the
+test suite loudly rather than only failing silently against someone's production database.
+
+The v0 fixture is deliberately *hardcoded* SQL, not derived from the live `dltrack.models`
+definitions: those models keep gaining fields as new migrations are added to backfill them, so
+reflecting off the live models would silently stop being "version 0" the moment a model changes.
+A frozen fixture is what makes this a real regression test of the migration chain instead of a
+test that only ever exercises whatever the latest schema already looks like.
 """
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from typing import TYPE_CHECKING
 
 import pytest
 
-from dltrack import models
-from dltrack.serve import sql
 from dltrack.serve._backend import _migrations
 
 if TYPE_CHECKING:
@@ -24,23 +28,50 @@ if TYPE_CHECKING:
 
 def _v0_connection(db_path: Path) -> sqlite3.Connection:
     """
-    A connection to a database with the pre-migration schema: no foreign keys declared.
+    A connection to a database with the original schema: no foreign keys on the entity tables.
 
-    Mirrors exactly what `SQLStoreBase.__init__` used to create for every table before this
-    change -- all seven tables, none of them with a `FOREIGN KEY` clause -- since that's the
-    real shape any existing `~/.dltrack.sqlite` has on disk.
+    `User` and `AppState` are included (seeded, unclaimed) even though this represents "before any
+    migration ran": in real usage `SQLStoreBase.__init__` always creates every currently-known
+    table via `CREATE TABLE IF NOT EXISTS` -- including wholly new ones -- *before* running
+    migrations, so by the time a migration function actually executes, brand new tables it depends
+    on are guaranteed to already exist. Migrations only need to handle *changes* to tables that
+    already existed, never the both-at-once case of a missing table it also has to populate.
     """
     conn = sqlite3.connect(db_path)
-    for table in (
-        models.Project,
-        models.Experiment,
-        models.Run,
-        models.UnderlyingMetricTableEntry,
-        models.HyperParams,
-        models.Artifact,
-        models.Page,
-    ):
-        conn.execute(sql.create_table_sql(table))
+    conn.executescript("""
+        CREATE TABLE User (
+            username TEXT NOT NULL, scopes TEXT NOT NULL, created_at TEXT NOT NULL,
+            id INTEGER PRIMARY KEY AUTOINCREMENT, UNIQUE (username)
+        );
+        CREATE TABLE AppState (id INTEGER PRIMARY KEY, bootstrap_admin_assigned INTEGER NOT NULL);
+        INSERT INTO AppState (id, bootstrap_admin_assigned) VALUES (1, 0);
+        CREATE TABLE Project (
+            name TEXT NOT NULL, description TEXT NOT NULL, id INTEGER PRIMARY KEY AUTOINCREMENT
+        );
+        CREATE TABLE Experiment (
+            project_id INTEGER NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL,
+            id INTEGER PRIMARY KEY AUTOINCREMENT
+        );
+        CREATE TABLE Run (experiment_id INTEGER NOT NULL, id INTEGER PRIMARY KEY AUTOINCREMENT);
+        CREATE TABLE UnderlyingMetricTableEntry (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT NOT NULL, value REAL,
+            experiment_id INTEGER NOT NULL, run_id INTEGER NOT NULL, step INTEGER NOT NULL,
+            timestamp_utc TEXT NOT NULL
+        );
+        CREATE TABLE HyperParams (
+            run_id INTEGER NOT NULL, experiment_id INTEGER NOT NULL, raw_hparams TEXT NOT NULL,
+            id INTEGER PRIMARY KEY AUTOINCREMENT
+        );
+        CREATE TABLE Artifact (
+            key TEXT NOT NULL, fname TEXT NOT NULL, tags TEXT NOT NULL, run_id INTEGER NOT NULL,
+            experiment_id INTEGER NOT NULL, step INTEGER, id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ref TEXT NOT NULL
+        );
+        CREATE TABLE Page (
+            run_id INTEGER, experiment_id INTEGER, project_id INTEGER, panels TEXT NOT NULL,
+            page_settings TEXT NOT NULL, id INTEGER PRIMARY KEY AUTOINCREMENT
+        );
+    """)
     conn.commit()
     return conn
 
@@ -77,10 +108,10 @@ def test_migration_from_v0_adds_foreign_keys_and_preserves_data(tmp_path: Path) 
     _migrations.run_migrations(conn)
 
     experiment_fks = {(row[3], row[2]) for row in conn.execute("PRAGMA foreign_key_list(Experiment)")}
-    assert experiment_fks == {("project_id", "Project")}
+    assert experiment_fks == {("project_id", "Project"), ("created_by", "User")}
 
     run_fks = {(row[3], row[2]) for row in conn.execute("PRAGMA foreign_key_list(Run)")}
-    assert run_fks == {("experiment_id", "Experiment")}
+    assert run_fks == {("experiment_id", "Experiment"), ("created_by", "User")}
 
     metric_fks = {
         (row[3], row[2]) for row in conn.execute("PRAGMA foreign_key_list(UnderlyingMetricTableEntry)")
@@ -89,7 +120,38 @@ def test_migration_from_v0_adds_foreign_keys_and_preserves_data(tmp_path: Path) 
 
     assert conn.execute("SELECT name FROM Project WHERE id = ?", (project_id,)).fetchone() == ("keep-me",)
     (version,) = conn.execute("PRAGMA user_version").fetchone()
-    assert version == 1
+    assert version == max(v for v, _ in _migrations.MIGRATIONS)
+
+
+def test_migration_backfills_provenance_columns_to_a_resolved_bootstrap_admin(tmp_path: Path) -> None:
+    conn = _v0_connection(tmp_path / "provenance.sqlite")
+    project_id = _insert_project(conn)
+    experiment_id = _insert_experiment(conn, project_id)
+    _insert_run(conn, experiment_id)
+
+    _migrations.run_migrations(conn)
+
+    users = conn.execute("SELECT id, username, scopes FROM User").fetchall()
+    assert len(users) == 1
+    (bootstrap_id, _username, scopes) = users[0]
+    assert json.loads(scopes) == ["*"], "the sole bootstrap user must be granted the wildcard scope"
+
+    for table, row_id in (("Project", project_id), ("Experiment", experiment_id)):
+        created_by, created_at = conn.execute(
+            f"SELECT created_by, created_at FROM {table} WHERE id = ?",
+            (row_id,),
+        ).fetchone()
+        assert created_by == bootstrap_id
+        assert created_at != _migrations._CREATED_AT_BRIDGE_PLACEHOLDER
+
+
+def test_migration_does_not_backfill_when_nothing_predates_it(tmp_path: Path) -> None:
+    """A database with no legacy rows must not manufacture a bootstrap user out of nowhere."""
+    conn = _v0_connection(tmp_path / "empty.sqlite")
+
+    _migrations.run_migrations(conn)
+
+    assert conn.execute("SELECT count(*) FROM User").fetchone() == (0,)
 
 
 def test_migration_is_a_noop_when_rerun(tmp_path: Path) -> None:
@@ -101,8 +163,9 @@ def test_migration_is_a_noop_when_rerun(tmp_path: Path) -> None:
     _migrations.run_migrations(conn)  # must not raise, must not touch already-migrated tables
 
     (version,) = conn.execute("PRAGMA user_version").fetchone()
-    assert version == 1
+    assert version == max(v for v, _ in _migrations.MIGRATIONS)
     assert conn.execute("SELECT count(*) FROM Experiment").fetchone() == (1,)
+    assert conn.execute("SELECT count(*) FROM User").fetchone() == (1,), "rerun must not add a second admin"
 
 
 def test_migration_hard_fails_on_preexisting_orphaned_rows(tmp_path: Path) -> None:

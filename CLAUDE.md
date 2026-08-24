@@ -108,6 +108,8 @@ possible, fold large blocks or repeated logic into compartmentalized units that 
 
 Whenever you finish an instruction, make sure to at least run ruff `rtk uv run ruff check` and `rtk uv run ruff format` as well as `rtk uv run pyright` to ensure code quality is maintained before review.
 
+Always rely on pydantic validation instead of performing your own, use `pendulum` instead of `datetime` and use `pydantic_settings` for environment variables.
+
 ## RTK (Rust Token Killer) - Token-Optimized Commands
 
 <!-- rtk-instructions v2 -->

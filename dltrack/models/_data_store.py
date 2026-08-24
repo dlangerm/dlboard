@@ -22,6 +22,10 @@ class DataStore[**P](typing.Protocol):
         """Initialize a data store."""
         ...
 
+    def get_or_create_user(self, username: str) -> models.User:
+        """Get or create a user by username. Brand new users are granted no scopes."""
+        ...
+
     def create_project(self, project: models.NewProject) -> models.Project:
         """Create a project."""
         ...

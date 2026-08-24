@@ -1,6 +1,7 @@
 """An experiment within a project."""
 
-from pydantic import BaseModel
+import pendulum
+from pydantic import AwareDatetime, BaseModel, Field
 
 
 class NewExperiment(BaseModel, frozen=True, extra="forbid"):
@@ -14,6 +15,12 @@ class NewExperiment(BaseModel, frozen=True, extra="forbid"):
 
     description: str = ""
     """A description of the experiment."""
+
+    created_by: int | None = None
+    """The user who created this experiment, if known."""
+
+    created_at: AwareDatetime = Field(default_factory=lambda: pendulum.now(pendulum.UTC))
+    """When this experiment was created."""
 
 
 class Experiment(NewExperiment, frozen=True, extra="forbid"):

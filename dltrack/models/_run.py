@@ -1,6 +1,7 @@
 """A run of an experiment."""
 
-from pydantic import BaseModel
+import pendulum
+from pydantic import AwareDatetime, BaseModel, Field
 
 
 class NewRun(BaseModel, frozen=True, extra="forbid"):
@@ -8,6 +9,12 @@ class NewRun(BaseModel, frozen=True, extra="forbid"):
 
     experiment_id: int
     """The experiment ID to use for this run."""
+
+    created_by: int | None = None
+    """The user who created this run, if known."""
+
+    created_at: AwareDatetime = Field(default_factory=lambda: pendulum.now(pendulum.UTC))
+    """When this run was created."""
 
 
 class Run(NewRun, frozen=True, extra="forbid"):
