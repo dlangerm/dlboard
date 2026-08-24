@@ -3,7 +3,7 @@
 import itertools
 from pathlib import Path
 from time import perf_counter
-from typing import Iterable, Literal
+from typing import Any, Iterable, Literal
 
 import dash
 import requests
@@ -12,9 +12,20 @@ from pydantic import AnyUrl, BaseModel
 from structlog.stdlib import get_logger
 
 from dltrack import models
+from dltrack._identity import ANONYMOUS, resolve_username
+from dltrack.models import DataStore
 from dltrack.serve import get_artifact_store, get_data_store
 
 _log = get_logger(__name__)
+
+DLTRACK_USER_HEADER = "X-Dltrack-User"
+"""Carries the client's best-effort identity (see `dltrack._identity.resolve_username`).
+
+Never trusted blindly -- the server resolves its own fallback (`ANONYMOUS`) when this is missing
+or blank, exactly like the client's own identity chain falls back when it can't resolve anything
+better. This is attribution, not authentication: nothing here proves a caller actually is who the
+header claims.
+"""
 
 
 def create_path(
@@ -28,15 +39,21 @@ def create_path(
             return f"{base_url}/create/{model.__name__ if model is not None else ''}".strip("/")
 
 
+def entity_path(model: type[BaseModel], entity_id: str = "<int:entity_id>", base_url: str = "/") -> str:
+    """Make a consistent API path for an action on a single existing entity, e.g. `project/<id>`."""
+    return f"{base_url}/{model.__name__.lower()}/{entity_id}".strip("/")
+
+
 def _create_request[R: BaseModel](
     create_model: BaseModel,
     return_model: type[R],
     base_url: str = "/",
     api_version: Literal[1] = 1,
+    headers: dict[str, str] | None = None,
 ) -> R:
     try:
         url = create_path(return_model, base_url, api_version)
-        res = requests.post(url, json=create_model.model_dump(mode="json"))
+        res = requests.post(url, json=create_model.model_dump(mode="json"), headers=headers)
         res.raise_for_status()
         return return_model.model_validate(res.json())
     except Exception:
@@ -50,28 +67,32 @@ class BasicDltrackAPI:
     def __init__(self, base_url: str = "http://localhost:8050") -> None:
         """Initialize the API class."""
         self.base_url = base_url
+        # Resolved once per process (not per call): who's actually running this is not going to
+        # change mid-run, and every request this client makes should be attributed consistently.
+        self._headers = {DLTRACK_USER_HEADER: resolve_username()}
 
     def create_project(self, new_project: models.NewProject) -> models.Project:
         """Create a new project."""
-        return _create_request(new_project, models.Project, self.base_url)
+        return _create_request(new_project, models.Project, self.base_url, headers=self._headers)
 
     def create_experiment(self, new_experiment: models.NewExperiment) -> models.Experiment:
         """Create a new experiment."""
-        return _create_request(new_experiment, models.Experiment, self.base_url)
+        return _create_request(new_experiment, models.Experiment, self.base_url, headers=self._headers)
 
     def create_run(self, run: models.NewRun) -> models.Run:
         """Initialize a new run."""
-        return _create_request(run, models.Run, self.base_url)
+        return _create_request(run, models.Run, self.base_url, headers=self._headers)
 
     def log_hyperparams(self, hyperparams: models.NewHyperParams) -> models.HyperParams:
         """Log hyperparameters."""
-        return _create_request(hyperparams, models.HyperParams, self.base_url)
+        return _create_request(hyperparams, models.HyperParams, self.base_url, headers=self._headers)
 
     def log_metric_batch(self, metrics: list[models.LoggedMetrics]) -> None:
         """Log a batch of metrics."""
         res = requests.post(
             create_path(models.LoggedMetrics, self.base_url),
             json=[m.model_dump(mode="json") for m in metrics],
+            headers=self._headers,
         )
         res.raise_for_status()
 
@@ -92,8 +113,110 @@ class BasicDltrackAPI:
                         for a, f in common_artifacts
                     )
                 ),
+                headers=self._headers,
             )
             res.raise_for_status()
+
+
+def resolve_actor(store: DataStore[...], header_value: str | None) -> models.User:
+    """
+    Resolve the acting user for a request from the `X-Dltrack-User` header.
+
+    Never trusts the client to have sent one -- a missing/blank header falls back to the same
+    `ANONYMOUS` the client-side identity chain falls back to as its own last resort.
+    """
+    username = (header_value or "").strip() or ANONYMOUS
+    return store.get_or_create_user(username)
+
+
+# -- Route handlers -------------------------------------------------------------------------------
+#
+# Split out from the `@dash.hooks.route`-decorated view functions below so the actual request
+# handling -- resolving the actor, stamping `created_by`, calling the store -- is testable directly
+# against a real store, without needing a live Flask request context.
+
+
+def handle_create_project(
+    store: DataStore[...], body: dict[str, Any], header_value: str | None
+) -> dict[str, Any]:
+    """Create a project, attributed to the resolved actor."""
+    actor = resolve_actor(store, header_value)
+    project = models.NewProject.model_validate(body).model_copy(update={"created_by": actor.id})
+    return store.create_project(project).model_dump(mode="json")
+
+
+def handle_create_experiment(
+    store: DataStore[...], body: dict[str, Any], header_value: str | None
+) -> dict[str, Any]:
+    """Create an experiment, attributed to the resolved actor."""
+    actor = resolve_actor(store, header_value)
+    experiment = models.NewExperiment.model_validate(body).model_copy(update={"created_by": actor.id})
+    return store.create_experiment(experiment).model_dump(mode="json")
+
+
+def handle_create_run(
+    store: DataStore[...], body: dict[str, Any], header_value: str | None
+) -> dict[str, Any]:
+    """Create a run, attributed to the resolved actor."""
+    actor = resolve_actor(store, header_value)
+    run = models.NewRun.model_validate(body).model_copy(update={"created_by": actor.id})
+    return store.create_run(run).model_dump(mode="json")
+
+
+def handle_log_artifacts(
+    store: models.ArtifactStore[...],
+    user_store: DataStore[...],
+    artifacts: Iterable[models.NewArtifact],
+    files: Any,  # noqa: ANN401 -- `werkzeug.datastructures.FileStorage` mapping, matches `ArtifactStore.log_artifacts`
+    header_value: str | None,
+) -> None:
+    """Log a batch of artifacts, each attributed to the resolved actor."""
+    actor = resolve_actor(user_store, header_value)
+    stamped = (a.model_copy(update={"created_by": actor.id}) for a in artifacts)
+    store.log_artifacts(stamped, files)
+
+
+def handle_delete_project(store: DataStore[...], project_id: int, header_value: str | None) -> None:
+    """Soft-delete a project, attributed to the resolved actor."""
+    store.delete_project(project_id, actor_id=resolve_actor(store, header_value).id)
+
+
+def handle_restore_project(store: DataStore[...], project_id: int, header_value: str | None) -> None:
+    """Restore a soft-deleted project, attributed to the resolved actor."""
+    store.restore_project(project_id, actor_id=resolve_actor(store, header_value).id)
+
+
+def handle_delete_experiment(store: DataStore[...], experiment_id: int, header_value: str | None) -> None:
+    """Soft-delete an experiment, attributed to the resolved actor."""
+    store.delete_experiment(experiment_id, actor_id=resolve_actor(store, header_value).id)
+
+
+def handle_restore_experiment(store: DataStore[...], experiment_id: int, header_value: str | None) -> None:
+    """Restore a soft-deleted experiment, attributed to the resolved actor."""
+    store.restore_experiment(experiment_id, actor_id=resolve_actor(store, header_value).id)
+
+
+def handle_delete_run(store: DataStore[...], run_id: int, header_value: str | None) -> None:
+    """Soft-delete a run, attributed to the resolved actor."""
+    store.delete_run(run_id, actor_id=resolve_actor(store, header_value).id)
+
+
+def handle_restore_run(store: DataStore[...], run_id: int, header_value: str | None) -> None:
+    """Restore a soft-deleted run, attributed to the resolved actor."""
+    store.restore_run(run_id, actor_id=resolve_actor(store, header_value).id)
+
+
+def handle_delete_artifact(store: DataStore[...], artifact_id: int, header_value: str | None) -> None:
+    """Soft-delete a single artifact, attributed to the resolved actor."""
+    store.delete_artifact(artifact_id, actor_id=resolve_actor(store, header_value).id)
+
+
+def handle_restore_artifact(store: DataStore[...], artifact_id: int, header_value: str | None) -> None:
+    """Restore a soft-deleted artifact, attributed to the resolved actor."""
+    store.restore_artifact(artifact_id, actor_id=resolve_actor(store, header_value).id)
+
+
+# -- Routes -----------------------------------------------------------------------------------
 
 
 @dash.hooks.route(create_path(models.LoggedMetrics), methods=["POST"])
@@ -123,12 +246,11 @@ def log_hyperparams() -> dict[str, str]:
 
 
 @dash.hooks.route(create_path(models.Experiment), methods=["POST"])
-def create_experiment() -> dict[str, str]:
+def create_experiment() -> dict[str, Any]:
     """Create a new experiment for a project."""
     try:
-        store = get_data_store()
-        return store.create_experiment(models.NewExperiment.model_validate(request.json)).model_dump(
-            mode="json"
+        return handle_create_experiment(
+            get_data_store(), request.json, request.headers.get(DLTRACK_USER_HEADER)
         )
     except Exception:
         _log.exception("Error creating")
@@ -136,23 +258,21 @@ def create_experiment() -> dict[str, str]:
 
 
 @dash.hooks.route(create_path(models.Run), methods=["POST"])
-def create_run() -> dict[str, str]:
+def create_run() -> dict[str, Any]:
     """Create a new run for an experiment."""
     try:
         _log.info("create new run")
-        store = get_data_store()
-        return store.create_run(models.NewRun.model_validate(request.json)).model_dump(mode="json")
+        return handle_create_run(get_data_store(), request.json, request.headers.get(DLTRACK_USER_HEADER))
     except Exception:
         _log.exception("Error creating")
         raise
 
 
 @dash.hooks.route(create_path(models.Project), methods=["POST"])
-def create_project() -> dict[str, str]:
+def create_project() -> dict[str, Any]:
     """Create a new project."""
     try:
-        store = get_data_store()
-        return store.create_project(models.NewProject.model_validate(request.json)).model_dump(mode="json")
+        return handle_create_project(get_data_store(), request.json, request.headers.get(DLTRACK_USER_HEADER))
     except Exception:
         _log.exception("Error creating project")
         raise
@@ -163,7 +283,6 @@ def log_artifact() -> dict[str, str]:
     """Log an artifact with metadata and files."""
     try:
         _log.info("log artifact batch")
-        store = get_artifact_store()
         t0 = perf_counter()
         jsons = (
             models.NewArtifact.model_validate_json(f.stream.read().decode())
@@ -171,9 +290,12 @@ def log_artifact() -> dict[str, str]:
             if f.content_type == "application/json"
         )
         try:
-            store.log_artifacts(
+            handle_log_artifacts(
+                get_artifact_store(),
+                get_data_store(),
                 jsons,
                 request.files,
+                request.headers.get(DLTRACK_USER_HEADER),
             )
         finally:
             _log.info("logging artifacts took %.3f seconds", perf_counter() - t0)
@@ -193,3 +315,91 @@ def download_artifact(artifact_url: str) -> Response:
     except Exception:
         _log.exception("failed to load artifact")
         raise
+
+
+@dash.hooks.route(entity_path(models.Project), methods=["DELETE"])  # pyright: ignore[reportArgumentType]
+def delete_project(entity_id: int) -> dict[str, str]:
+    """Soft-delete a project and cascade to its experiments, runs, and artifacts."""
+    try:
+        handle_delete_project(get_data_store(), entity_id, request.headers.get(DLTRACK_USER_HEADER))
+    except Exception:
+        _log.exception("Error deleting project %s", entity_id)
+        raise
+    return {}
+
+
+@dash.hooks.route(f"{entity_path(models.Project)}/restore", methods=["POST"])  # pyright: ignore[reportArgumentType]
+def restore_project(entity_id: int) -> dict[str, str]:
+    """Restore a soft-deleted project and everything deleted with it."""
+    try:
+        handle_restore_project(get_data_store(), entity_id, request.headers.get(DLTRACK_USER_HEADER))
+    except Exception:
+        _log.exception("Error restoring project %s", entity_id)
+        raise
+    return {}
+
+
+@dash.hooks.route(entity_path(models.Experiment), methods=["DELETE"])  # pyright: ignore[reportArgumentType]
+def delete_experiment(entity_id: int) -> dict[str, str]:
+    """Soft-delete an experiment and cascade to its runs and artifacts."""
+    try:
+        handle_delete_experiment(get_data_store(), entity_id, request.headers.get(DLTRACK_USER_HEADER))
+    except Exception:
+        _log.exception("Error deleting experiment %s", entity_id)
+        raise
+    return {}
+
+
+@dash.hooks.route(f"{entity_path(models.Experiment)}/restore", methods=["POST"])  # pyright: ignore[reportArgumentType]
+def restore_experiment(entity_id: int) -> dict[str, str]:
+    """Restore a soft-deleted experiment and everything deleted with it."""
+    try:
+        handle_restore_experiment(get_data_store(), entity_id, request.headers.get(DLTRACK_USER_HEADER))
+    except Exception:
+        _log.exception("Error restoring experiment %s", entity_id)
+        raise
+    return {}
+
+
+@dash.hooks.route(entity_path(models.Run), methods=["DELETE"])  # pyright: ignore[reportArgumentType]
+def delete_run(entity_id: int) -> dict[str, str]:
+    """Soft-delete a run and cascade to its artifacts."""
+    try:
+        handle_delete_run(get_data_store(), entity_id, request.headers.get(DLTRACK_USER_HEADER))
+    except Exception:
+        _log.exception("Error deleting run %s", entity_id)
+        raise
+    return {}
+
+
+@dash.hooks.route(f"{entity_path(models.Run)}/restore", methods=["POST"])  # pyright: ignore[reportArgumentType]
+def restore_run(entity_id: int) -> dict[str, str]:
+    """Restore a soft-deleted run and everything deleted with it."""
+    try:
+        handle_restore_run(get_data_store(), entity_id, request.headers.get(DLTRACK_USER_HEADER))
+    except Exception:
+        _log.exception("Error restoring run %s", entity_id)
+        raise
+    return {}
+
+
+@dash.hooks.route(entity_path(models.Artifact), methods=["DELETE"])  # pyright: ignore[reportArgumentType]
+def delete_artifact(entity_id: int) -> dict[str, str]:
+    """Soft-delete a single artifact."""
+    try:
+        handle_delete_artifact(get_data_store(), entity_id, request.headers.get(DLTRACK_USER_HEADER))
+    except Exception:
+        _log.exception("Error deleting artifact %s", entity_id)
+        raise
+    return {}
+
+
+@dash.hooks.route(f"{entity_path(models.Artifact)}/restore", methods=["POST"])  # pyright: ignore[reportArgumentType]
+def restore_artifact(entity_id: int) -> dict[str, str]:
+    """Restore a soft-deleted artifact."""
+    try:
+        handle_restore_artifact(get_data_store(), entity_id, request.headers.get(DLTRACK_USER_HEADER))
+    except Exception:
+        _log.exception("Error restoring artifact %s", entity_id)
+        raise
+    return {}
