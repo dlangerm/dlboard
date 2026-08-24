@@ -187,6 +187,24 @@ class DataStore[**P](typing.Protocol):
         """List audit log entries, most recent first, for a trash/admin view."""
         ...
 
+    def list_pending_artifact_purges(
+        self, limit: int = 100, offset: int = 0
+    ) -> typing.Iterator[models.ArtifactPurgeTask]:
+        """List artifact blobs still waiting to be deleted from the `ArtifactStore`, oldest first."""
+        ...
+
+    def count_pending_artifact_purges(self) -> int:
+        """Count artifact blobs still waiting to be deleted. 0 means the last purge fully cleaned up."""
+        ...
+
+    def complete_artifact_purge(self, task_id: int) -> None:
+        """Record that a queued blob deletion succeeded by deleting its task row."""
+        ...
+
+    def fail_artifact_purge(self, task_id: int, error: str) -> None:
+        """Record that a queued blob deletion failed. The task stays pending and is retried later."""
+        ...
+
 
 class ArtifactStore[**P](typing.Protocol):
     """An artifact store for files and arbitrary byte-like data."""
@@ -209,4 +227,8 @@ class ArtifactStore[**P](typing.Protocol):
 
     def download_artifact(self, ref: AnyUrl) -> Response:
         """Download an artifact given a url."""
+        ...
+
+    def delete_artifact(self, ref: AnyUrl) -> None:
+        """Permanently delete one artifact blob. Idempotent -- a blob that's already gone is not an error."""
         ...

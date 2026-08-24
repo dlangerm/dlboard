@@ -70,6 +70,7 @@ FOREIGN_KEYS: dict[type[BaseModel], dict[str, ForeignKey]] = {
         "project_id": ForeignKey(models.Project, _OWNS),
     },
     models.AuditLogEntry: {"user_id": ForeignKey(models.User)},
+    models.ArtifactPurgeTask: {"requested_by": ForeignKey(models.User)},
 }
 
 UNIQUE_COLUMNS: dict[type[BaseModel], list[str]] = {
@@ -87,6 +88,7 @@ TABLES: tuple[type[BaseModel], ...] = (
     models.Artifact,
     models.Page,
     models.AuditLogEntry,
+    models.ArtifactPurgeTask,
 )
 
 # The entities a user can soft-delete/restore -- the only tables with `deleted_at`/`deleted_by`.
@@ -702,6 +704,27 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         ]
         self._execute_in_transaction(statements)
 
+    def _artifact_refs_to_purge(self, table: type[BaseModel], entity_id: int) -> list[tuple[int, str]]:
+        """
+        Find every `Artifact` row about to disappear when `entity_id` (of type `table`) is purged.
+
+        Reuses `_cascade_targets`'s generic graph walk rather than hardcoding "artifacts live under
+        runs" here -- if `table` *is* `Artifact`, it's the one row being purged directly; otherwise
+        look for `Artifact` among its cascade descendants (today that's always via `Run`, but this
+        doesn't assume that). Must run *before* the purge's `DELETE`, since that's the only place
+        an `Artifact` row's `ref` -- the blob location -- is ever readable; SQLite's `ON DELETE
+        CASCADE` removes cascaded rows without any Python code seeing them.
+        """
+        if table is models.Artifact:
+            where_clause = "id = :id"
+        else:
+            matches = [wc for child, wc in _cascade_targets(table) if child is models.Artifact]
+            if not matches:
+                return []
+            where_clause = matches[0]
+        rows = self._execute_raw_sql(f"SELECT id, ref FROM Artifact WHERE {where_clause}", {"id": entity_id})
+        return [(row[0], row[1]) for row in rows]
+
     def _purge(
         self, table: type[BaseModel], entity_id: int, actor: models.User, *, entity_type: models.EntityType
     ) -> None:
@@ -717,6 +740,11 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         too, not just the soft-deletable entities -- and (unlike soft-delete/restore) counts matching
         rows regardless of their own `deleted_at`, since purging a project removes everything under
         it either way.
+
+        Every artifact blob about to be orphaned by the cascade gets one `ArtifactPurgeTask` row, in
+        the same transaction as the delete, so a background worker can clean up the underlying
+        `ArtifactStore` blobs afterward without risking losing track of one if the process dies
+        right after this commits.
         """
         if not models.has_scope(actor, models.Scope.PURGE):
             msg = f"User {actor.id} lacks the {models.Scope.PURGE} scope"
@@ -732,6 +760,8 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
                 child, where_clause, entity_id
             )
 
+        artifact_refs = self._artifact_refs_to_purge(table, entity_id)
+
         audit_statement, audit_values = self._record_audit_log(
             actor.id, models.AuditAction.PURGE, entity_type, entity_id, details
         )
@@ -739,6 +769,13 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             [
                 (f"DELETE FROM {table.__name__} WHERE id = :id", {"id": entity_id}),
                 (audit_statement, audit_values),
+                *(
+                    sql.insert(
+                        models.ArtifactPurgeTask,
+                        models.NewArtifactPurgeTask(artifact_id=artifact_id, ref=ref, requested_by=actor.id),
+                    )
+                    for artifact_id, ref in artifact_refs
+                ),
             ]
         )
 
@@ -832,3 +869,42 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
     def list_deleted_artifacts(self, limit: int = 100, offset: int = 0) -> Iterator[models.Artifact]:
         """List soft-deleted artifacts, most recently deleted first, for a trash/admin view."""
         yield from self._list_deleted(models.Artifact, limit=limit, offset=offset)
+
+    def list_pending_artifact_purges(
+        self, limit: int = 100, offset: int = 0
+    ) -> Iterator[models.ArtifactPurgeTask]:
+        """
+        List artifact blobs still waiting to be deleted from the `ArtifactStore`, oldest first.
+
+        Every row in this table is, by definition, pending work -- a completed task is deleted
+        outright (see `complete_artifact_purge`) rather than marked done, so there's no status
+        column to filter on here.
+        """
+        statement = f"""
+            SELECT * FROM {models.ArtifactPurgeTask.__name__}
+            ORDER BY requested_at ASC
+            LIMIT {int(limit)} OFFSET {int(offset)};
+        """
+        yield from self._execute_sql_query(models.ArtifactPurgeTask, statement)
+
+    def count_pending_artifact_purges(self) -> int:
+        """Count artifact blobs still waiting to be deleted. 0 means the last purge fully cleaned up."""
+        rows = list(self._execute_raw_sql(f"SELECT count(*) FROM {models.ArtifactPurgeTask.__name__}"))
+        return rows[0][0]
+
+    def complete_artifact_purge(self, task_id: int) -> None:
+        """Record that a queued blob deletion succeeded by deleting its task row."""
+        list(
+            self._execute_raw_sql(
+                f"DELETE FROM {models.ArtifactPurgeTask.__name__} WHERE id = :id", {"id": task_id}
+            )
+        )
+
+    def fail_artifact_purge(self, task_id: int, error: str) -> None:
+        """Record that a queued blob deletion failed. The task stays pending and is retried later."""
+        list(
+            self._execute_raw_sql(
+                f"UPDATE {models.ArtifactPurgeTask.__name__} SET last_error = :error WHERE id = :id",
+                {"error": error, "id": task_id},
+            )
+        )

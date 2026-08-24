@@ -165,6 +165,67 @@ def test_purge_project_permanently_removes_everything_under_it(
         store.restore_project(project_id, actor_id=admin.id)
 
 
+def test_purge_project_queues_an_artifact_purge_task_for_each_cascaded_artifact(
+    store: SQLLiteStore, admin: models.User
+) -> None:
+    project_id, _experiment_id, _run_id, artifact_id = _project_experiment_run_artifact(store)
+    store.delete_project(project_id, actor_id=admin.id)
+
+    store.purge_project(project_id, admin)
+
+    (task,) = list(store.list_pending_artifact_purges())
+    assert task.artifact_id == artifact_id
+    assert task.ref == "ref://a"
+    assert task.requested_by == admin.id
+    assert store.count_pending_artifact_purges() == 1
+
+
+def test_purge_artifact_directly_queues_its_own_purge_task(store: SQLLiteStore, admin: models.User) -> None:
+    _project_id, _experiment_id, _run_id, artifact_id = _project_experiment_run_artifact(store)
+    store.delete_artifact(artifact_id, actor_id=admin.id)
+
+    store.purge_artifact(artifact_id, admin)
+
+    (task,) = list(store.list_pending_artifact_purges())
+    assert task.artifact_id == artifact_id
+
+
+def test_purge_with_no_artifacts_queues_nothing(store: SQLLiteStore, admin: models.User) -> None:
+    project = store.create_project(models.NewProject(name="p", description="d"))
+    store.delete_project(project.id, actor_id=admin.id)
+
+    store.purge_project(project.id, admin)
+
+    assert store.count_pending_artifact_purges() == 0
+
+
+def test_complete_artifact_purge_deletes_the_task_row(store: SQLLiteStore, admin: models.User) -> None:
+    project_id, *_rest = _project_experiment_run_artifact(store)
+    store.delete_project(project_id, actor_id=admin.id)
+    store.purge_project(project_id, admin)
+    (task,) = list(store.list_pending_artifact_purges())
+    assert task.id is not None
+
+    store.complete_artifact_purge(task.id)
+
+    assert store.count_pending_artifact_purges() == 0
+
+
+def test_fail_artifact_purge_records_the_error_and_keeps_the_task_pending(
+    store: SQLLiteStore, admin: models.User
+) -> None:
+    project_id, *_rest = _project_experiment_run_artifact(store)
+    store.delete_project(project_id, actor_id=admin.id)
+    store.purge_project(project_id, admin)
+    (task,) = list(store.list_pending_artifact_purges())
+    assert task.id is not None
+
+    store.fail_artifact_purge(task.id, "disk is on fire")
+
+    (retried,) = list(store.list_pending_artifact_purges())
+    assert retried.last_error == "disk is on fire"
+
+
 def test_create_experiment_rejected_for_a_deleted_project(store: SQLLiteStore, admin: models.User) -> None:
     project = store.create_project(models.NewProject(name="p", description="d"))
     store.delete_project(project.id, actor_id=admin.id)

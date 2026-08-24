@@ -11,6 +11,7 @@ from dash.exceptions import PreventUpdate
 from structlog.stdlib import get_logger
 
 from dltrack.models import EntityType, constants
+from dltrack.plugins.backend import artifact_purge_worker
 from dltrack.plugins.pages._actor import current_actor, current_actor_id
 from dltrack.plugins.pages._dash_helpers import require_triggered_id
 from dltrack.serve import get_data_store
@@ -136,8 +137,38 @@ def _render_trash_kind(label: str, entity_type: EntityType, items: list[Any]) ->
     )
 
 
+def _render_pending_purge_banner(store: DataStore[...]) -> Component | None:
+    """
+    An alert when a previous purge's blob cleanup hasn't fully finished.
+
+    `None` (rendered as nothing) when there's no outstanding work -- the common case, since a
+    purge that happens while the server is running is drained automatically.
+    """
+    pending = store.count_pending_artifact_purges()
+    if not pending:
+        return None
+    return dmc.Alert(
+        dmc.Group(
+            [
+                dmc.Text(
+                    f"{pending} artifact blob{'s' if pending != 1 else ''} not yet cleaned up "
+                    "from a previous purge.",
+                    size="sm",
+                ),
+                dmc.Button("Resume cleanup", id=constants.ADMIN_RESUME_PURGE_ID, size="xs", variant="light"),
+            ],
+            justify="space-between",
+        ),
+        color="yellow",
+        variant="light",
+    )
+
+
 def _render_trash(store: DataStore[...]) -> Component:
     sections: list[Component] = []
+    banner = _render_pending_purge_banner(store)
+    if banner is not None:
+        sections.append(banner)
     for label, entity_type in _TRASH_KINDS:
         items = list(getattr(store, _LISTERS[entity_type])(limit=_TRASH_PAGE_SIZE_PER_KIND))
         if items:
@@ -313,7 +344,21 @@ def _register_purge_callbacks(app: Dash) -> None:
             getattr(store, _PURGERS[entity_type])(entity_id, actor)
         except (ValueError, PermissionError):
             _log.exception("Failed to purge %s %s", entity_type, entity_id)
+        else:
+            artifact_purge_worker.wake()
         return False, "/admin", True
+
+    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+        Output(constants.LOCATION_ID, "href", allow_duplicate=True),
+        Output(constants.LOCATION_ID, "refresh", allow_duplicate=True),
+        Input(constants.ADMIN_RESUME_PURGE_ID, "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def resume_purge_cleanup(n_clicks: int) -> tuple[str, bool]:
+        if not n_clicks:
+            raise PreventUpdate
+        artifact_purge_worker.wake()
+        return "/admin", True
 
 
 def plug(app: Dash) -> None:

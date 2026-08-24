@@ -2,9 +2,10 @@
 
 from dltrack.models._plugin import PluginProtocol
 from dltrack.plugins import artifacts, backend, charts, pages, themes
+from dltrack.plugins.backend import artifact_purge_worker
 from dltrack.plugins.data_stores import filesystem, sqlite
 
-LOCAL_STORAGE: list[PluginProtocol] = [sqlite, filesystem]
+LOCAL_STORAGE: list[PluginProtocol] = [sqlite, filesystem, artifact_purge_worker]
 BUILTIN_PAGES: list[PluginProtocol] = [
     pages.simple_homepage,
     pages.simple_project_page,

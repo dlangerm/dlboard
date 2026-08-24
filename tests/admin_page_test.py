@@ -78,6 +78,28 @@ def test_render_trash_caps_each_kind_and_notes_the_overflow(store: SQLLiteStore)
     assert "most recently deleted" in overflow_note.children
 
 
+def test_render_pending_purge_banner_is_none_when_nothing_pending(store: SQLLiteStore) -> None:
+    assert admin._render_pending_purge_banner(store) is None
+
+
+def test_render_pending_purge_banner_shows_the_count_and_a_resume_button(store: SQLLiteStore) -> None:
+    admin_user = store.get_or_create_user("admin")
+    project = store.create_project(models.NewProject(name="p", description="d"))
+    experiment = store.create_experiment(models.NewExperiment(project_id=project.id))
+    run = store.create_run(models.NewRun(experiment_id=experiment.id))
+    store.log_artifact_refs(
+        [models.Artifact(key="a", fname="a.png", run_id=run.id, experiment_id=experiment.id, step=0, ref="r")]
+    )
+    store.delete_project(project.id, actor_id=admin_user.id)
+    store.purge_project(project.id, admin_user)
+
+    banner = cast("Any", admin._render_pending_purge_banner(store))
+
+    assert banner is not None
+    assert find_props(banner, constants.ADMIN_RESUME_PURGE_ID) is not None
+    assert "1 artifact blob" in str(banner)
+
+
 def test_render_trash_omits_a_project_that_is_not_deleted(store: SQLLiteStore) -> None:
     store.create_project(models.NewProject(name="p", description="d"))
 
