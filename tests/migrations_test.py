@@ -109,6 +109,11 @@ def test_migration_from_v0_adds_foreign_keys_and_preserves_data(tmp_path: Path) 
 
     experiment_fks = {(row[3], row[2]) for row in conn.execute("PRAGMA foreign_key_list(Experiment)")}
     assert experiment_fks == {("project_id", "Project"), ("created_by", "User"), ("deleted_by", "User")}
+    # `project_id` is an OWNERSHIP edge and must cascade; `created_by`/`deleted_by` must not.
+    on_delete_by_column = {row[3]: row[6] for row in conn.execute("PRAGMA foreign_key_list(Experiment)")}
+    assert on_delete_by_column["project_id"] == "CASCADE"
+    assert on_delete_by_column["created_by"] == "NO ACTION"
+    assert on_delete_by_column["deleted_by"] == "NO ACTION"
 
     run_fks = {(row[3], row[2]) for row in conn.execute("PRAGMA foreign_key_list(Run)")}
     assert run_fks == {("experiment_id", "Experiment"), ("created_by", "User"), ("deleted_by", "User")}
@@ -213,6 +218,106 @@ def test_run_migrations_propagates_unexpected_errors_and_does_not_advance_versio
 
     (version,) = conn.execute("PRAGMA user_version").fetchone()
     assert version == 0
+
+
+def _v3_connection_without_cascade(db_path: Path) -> sqlite3.Connection:
+    """
+    A database shaped like migrations 1-3 produced *before* ownership FKs gained `ON DELETE
+    CASCADE` -- plain `FOREIGN KEY` constraints, `created_by`/`created_at`/`deleted_at`/`deleted_by`
+    already present, `user_version` at 3.
+
+    Built by hand rather than via `run_migrations(conn, migrations=MIGRATIONS[:3])`, because
+    migration 1 now reads the *live* `FOREIGN_KEYS` registry (which already has cascade) -- so on
+    a genuinely fresh database it applies cascade immediately, and there's no way to reach this
+    "already migrated, but from before cascade existed" state through the current migration code
+    at all. That's exactly the point: this fixture is the one remaining way to exercise migration
+    4 as anything other than a no-op, standing in for a real database migrated by an older build.
+    """
+    conn = sqlite3.connect(db_path)
+    conn.executescript("""
+        CREATE TABLE User (
+            username TEXT NOT NULL, scopes TEXT NOT NULL, created_at TEXT NOT NULL,
+            id INTEGER PRIMARY KEY AUTOINCREMENT, UNIQUE (username)
+        );
+        CREATE TABLE AppState (id INTEGER PRIMARY KEY, bootstrap_admin_assigned INTEGER NOT NULL);
+        INSERT INTO AppState (id, bootstrap_admin_assigned) VALUES (1, 1);
+        INSERT INTO User (username, scopes, created_at) VALUES ('admin', '["*"]', '2026-01-01T00:00:00+00:00');
+        CREATE TABLE Project (
+            name TEXT NOT NULL, description TEXT NOT NULL, created_by INTEGER, created_at TEXT NOT NULL,
+            id INTEGER PRIMARY KEY AUTOINCREMENT, deleted_by INTEGER, deleted_at TEXT,
+            FOREIGN KEY (created_by) REFERENCES User(id), FOREIGN KEY (deleted_by) REFERENCES User(id)
+        );
+        CREATE TABLE Experiment (
+            project_id INTEGER NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL,
+            created_by INTEGER, created_at TEXT NOT NULL, id INTEGER PRIMARY KEY AUTOINCREMENT,
+            deleted_by INTEGER, deleted_at TEXT,
+            FOREIGN KEY (project_id) REFERENCES Project(id),
+            FOREIGN KEY (created_by) REFERENCES User(id), FOREIGN KEY (deleted_by) REFERENCES User(id)
+        );
+    """)
+    conn.execute("PRAGMA user_version = 3")
+    conn.commit()
+    return conn
+
+
+def test_migration_004_retrofits_cascade_onto_a_database_already_at_v3(tmp_path: Path) -> None:
+    """
+    The realistic upgrade path: a database that already ran migrations 1-3 (plain FK, no cascade,
+    from before ownership columns gained `ON DELETE CASCADE`) must get it retrofitted by migration 4.
+    """
+    conn = _v3_connection_without_cascade(tmp_path / "v3.sqlite")
+    cur = conn.execute(
+        "INSERT INTO Project (name, description, created_by, created_at) VALUES ('keep-me', '', 1, '2026-01-01T00:00:00+00:00')"
+    )
+    project_id = cur.lastrowid
+    cur = conn.execute(
+        "INSERT INTO Experiment (project_id, name, description, created_by, created_at) "
+        "VALUES (?, '', '', 1, '2026-01-01T00:00:00+00:00')",
+        (project_id,),
+    )
+    experiment_id = cur.lastrowid
+    conn.commit()
+
+    on_delete_before = {row[3]: row[6] for row in conn.execute("PRAGMA foreign_key_list(Experiment)")}
+    assert on_delete_before["project_id"] == "NO ACTION", "sanity: the hand-built fixture has no cascade yet"
+
+    _migrations.run_migrations(conn)
+
+    on_delete_after = {row[3]: row[6] for row in conn.execute("PRAGMA foreign_key_list(Experiment)")}
+    assert on_delete_after["project_id"] == "CASCADE"
+    assert conn.execute("SELECT name FROM Project WHERE id = ?", (project_id,)).fetchone() == ("keep-me",)
+    assert conn.execute("SELECT id FROM Experiment WHERE id = ?", (experiment_id,)).fetchone() is not None
+    (version,) = conn.execute("PRAGMA user_version").fetchone()
+    assert version == max(v for v, _ in _migrations.MIGRATIONS)
+
+
+def test_full_migration_chain_enables_real_cascading_delete(tmp_path: Path) -> None:
+    """
+    Proves the cascade is wired at the schema level, not just working because application code
+    happens to also delete the right rows: a *raw* `DELETE FROM Project` (no app code involved)
+    must cascade all the way down through Experiment/Run/Artifact once migrated.
+    """
+    conn = _v0_connection(tmp_path / "cascade.sqlite")
+    project_id = _insert_project(conn)
+    experiment_id = _insert_experiment(conn, project_id)
+    run_id = _insert_run(conn, experiment_id)
+    conn.execute(
+        "INSERT INTO Artifact (key, fname, tags, run_id, experiment_id, step, ref) "
+        "VALUES ('k', 'f', '{}', ?, ?, 0, 'ref://a')",
+        (run_id, experiment_id),
+    )
+    conn.commit()
+
+    _migrations.run_migrations(conn)
+    conn.execute("PRAGMA foreign_keys = ON")
+
+    conn.execute("DELETE FROM Project WHERE id = ?", (project_id,))
+    conn.commit()
+
+    assert conn.execute("SELECT 1 FROM Project WHERE id = ?", (project_id,)).fetchone() is None
+    assert conn.execute("SELECT 1 FROM Experiment WHERE id = ?", (experiment_id,)).fetchone() is None
+    assert conn.execute("SELECT 1 FROM Run WHERE id = ?", (run_id,)).fetchone() is None
+    assert conn.execute("SELECT count(*) FROM Artifact").fetchone() == (0,)
 
 
 def test_run_migrations_treats_duplicate_column_as_already_applied(tmp_path: Path) -> None:

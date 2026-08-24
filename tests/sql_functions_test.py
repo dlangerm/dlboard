@@ -14,6 +14,7 @@ import pytest
 from pydantic import AwareDatetime, BaseModel
 
 from dltrack.serve._backend import _sql
+from dltrack.serve._backend._foreign_keys import ForeignKey, ForeignKeyKind
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -105,13 +106,19 @@ class _Child(BaseModel, frozen=True, extra="forbid"):
 
 
 def test_create_table_sql_emits_foreign_key_clause() -> None:
-    statement = _sql.create_table_sql(_Child, {"parent_id": _Parent})
+    statement = _sql.create_table_sql(_Child, {"parent_id": ForeignKey(_Parent)})
     assert "FOREIGN KEY (parent_id) REFERENCES _Parent(id)" in statement
+    assert "ON DELETE CASCADE" not in statement
+
+
+def test_create_table_sql_emits_on_delete_cascade_for_ownership_foreign_keys() -> None:
+    statement = _sql.create_table_sql(_Child, {"parent_id": ForeignKey(_Parent, ForeignKeyKind.OWNERSHIP)})
+    assert "FOREIGN KEY (parent_id) REFERENCES _Parent(id) ON DELETE CASCADE" in statement
 
 
 def test_create_table_sql_foreign_key_unknown_column_raises() -> None:
     with pytest.raises(AssertionError, match="not present in model"):
-        _sql.create_table_sql(_Child, {"nope": _Parent})
+        _sql.create_table_sql(_Child, {"nope": ForeignKey(_Parent)})
 
 
 def test_create_index_sql_unknown_column_raises() -> None:

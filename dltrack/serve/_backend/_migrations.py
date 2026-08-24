@@ -30,10 +30,13 @@ from dltrack import models
 from dltrack._identity import resolve_username
 from dltrack.serve import sql
 from dltrack.serve._backend._app_state import APP_STATE_ROW_ID, AppState
+from dltrack.serve._backend._foreign_keys import ForeignKeyKind
 from dltrack.serve._backend._sql_store_base import FOREIGN_KEYS, TABLES
 
 if typing.TYPE_CHECKING:
     from pydantic import BaseModel
+
+    from dltrack.serve._backend._foreign_keys import ForeignKey
 
 _log = get_logger(__name__)
 
@@ -41,13 +44,20 @@ MigrationFn = typing.Callable[[sqlite3.Connection], None]
 
 
 def _table_has_foreign_keys(
-    conn: sqlite3.Connection, table_name: str, foreign_keys: dict[str, type[BaseModel]]
+    conn: sqlite3.Connection, table_name: str, foreign_keys: dict[str, ForeignKey]
 ) -> bool:
-    """Whether `table_name` already has exactly the expected `FOREIGN KEY` constraints."""
+    """Whether `table_name` already has exactly the expected `FOREIGN KEY` constraints (with `ON DELETE` action)."""
     rows = conn.execute(f"PRAGMA foreign_key_list({table_name})").fetchall()
     # PRAGMA foreign_key_list columns: (id, seq, table, from, to, on_update, on_delete, match)
-    existing = {(row[3], row[2]) for row in rows}
-    expected = {(field_name, referenced.__name__) for field_name, referenced in foreign_keys.items()}
+    existing = {(row[3], row[2], row[6]) for row in rows}
+    expected = {
+        (
+            field_name,
+            fk.references.__name__,
+            "CASCADE" if fk.kind is ForeignKeyKind.OWNERSHIP else "NO ACTION",
+        )
+        for field_name, fk in foreign_keys.items()
+    }
     return existing == expected
 
 
@@ -59,7 +69,7 @@ _PLACEHOLDER_DEFAULTS_BY_SQL_TYPE: dict[str, str] = {"TEXT": "''", "INTEGER": "0
 
 
 def _rebuild_table_with_foreign_keys(
-    conn: sqlite3.Connection, model: type[BaseModel], foreign_keys: dict[str, type[BaseModel]]
+    conn: sqlite3.Connection, model: type[BaseModel], foreign_keys: dict[str, ForeignKey]
 ) -> None:
     """
     Recreate `model`'s table in place with `foreign_keys` declared as real `FOREIGN KEY` clauses.
@@ -102,12 +112,34 @@ def _rebuild_table_with_foreign_keys(
     conn.execute(f"ALTER TABLE {tmp_name} RENAME TO {model.__name__}")
 
 
-def _migration_001_enforce_foreign_keys(conn: sqlite3.Connection) -> None:
-    """Retrofit `FOREIGN KEY` constraints onto every table that has relation columns."""
+def _table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
+    return (
+        conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table_name,)
+        ).fetchone()
+        is not None
+    )
+
+
+def _sync_foreign_keys(conn: sqlite3.Connection) -> None:
+    """
+    Bring every table's `FOREIGN KEY` constraints in line with the live `FOREIGN_KEYS` registry.
+
+    Reads `FOREIGN_KEYS`/`TABLES` fresh each call rather than a frozen snapshot, so it stays correct
+    as those registries grow (new tables, new columns, an `ATTRIBUTION` FK promoted to `OWNERSHIP`
+    with `ON DELETE CASCADE`) without needing a new near-duplicate migration for every change -- a
+    later migration can just call this again and it will retrofit whatever has drifted since the
+    last time it ran, on tables that already existed the last time it ran.
+    """
     conn.execute("PRAGMA foreign_keys = OFF")
     for table in TABLES:
         foreign_keys = FOREIGN_KEYS.get(table)
         if not foreign_keys:
+            continue
+        if not _table_exists(conn, table.__name__):
+            # A table introduced after this call's caller was written (e.g. `AuditLogEntry`) has
+            # nothing to retrofit -- `SQLStoreBase.__init__`'s `CREATE TABLE IF NOT EXISTS` pass
+            # already creates it with the current `FOREIGN_KEYS` baked in from the start.
             continue
         if _table_has_foreign_keys(conn, table.__name__, foreign_keys):
             _log.debug("Table %s already has expected foreign keys, skipping rebuild", table.__name__)
@@ -117,11 +149,17 @@ def _migration_001_enforce_foreign_keys(conn: sqlite3.Connection) -> None:
 
     violations = conn.execute("PRAGMA foreign_key_check").fetchall()
     if violations:
-        # Rows already orphaned before this migration ran (e.g. a project deleted by hand outside
-        # dltrack) would otherwise silently end up under a constraint they don't actually satisfy.
+        # Rows already orphaned before this ran (e.g. a project deleted by hand outside dltrack, or
+        # -- now that ownership FKs cascade -- simply predating that cascade) would otherwise
+        # silently end up under a constraint they don't actually satisfy.
         msg = f"Refusing to apply foreign keys: existing rows violate them: {violations}"
         raise RuntimeError(msg)
     conn.execute("PRAGMA foreign_keys = ON")
+
+
+def _migration_001_enforce_foreign_keys(conn: sqlite3.Connection) -> None:
+    """Retrofit `FOREIGN KEY` constraints onto every table that has relation columns."""
+    _sync_foreign_keys(conn)
 
 
 def _add_column_if_missing(
@@ -221,10 +259,24 @@ def _migration_003_add_soft_delete_columns(conn: sqlite3.Connection) -> None:
         _add_column_if_missing(conn, table.__name__, "deleted_at", "deleted_at TEXT")
 
 
+def _migration_004_cascade_ownership_deletes(conn: sqlite3.Connection) -> None:
+    """
+    Retrofit `ON DELETE CASCADE` onto every `OWNERSHIP` foreign key.
+
+    `FOREIGN_KEYS` originally declared every relation column as a plain (non-cascading) foreign
+    key; ownership columns (`project_id`, `experiment_id`, `run_id`, ...) now carry
+    `ForeignKeyKind.OWNERSHIP`, which `_sync_foreign_keys` reads as "this needs `ON DELETE
+    CASCADE`". Re-running that same sync is exactly what's needed to bring already-migrated
+    databases in line -- see `_sync_foreign_keys`'s docstring.
+    """
+    _sync_foreign_keys(conn)
+
+
 MIGRATIONS: list[tuple[int, MigrationFn]] = [
     (1, _migration_001_enforce_foreign_keys),
     (2, _migration_002_add_provenance_columns),
     (3, _migration_003_add_soft_delete_columns),
+    (4, _migration_004_cascade_ownership_deletes),
 ]
 
 

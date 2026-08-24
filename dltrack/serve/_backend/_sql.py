@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import enum
 import json
 import typing
 from datetime import datetime
@@ -10,8 +11,12 @@ from types import NoneType, UnionType
 from pydantic import AwareDatetime, BaseModel
 from structlog.stdlib import get_logger
 
+from dltrack.serve._backend._foreign_keys import ForeignKeyKind
+
 if typing.TYPE_CHECKING:
     from collections.abc import Iterable
+
+    from dltrack.serve._backend._foreign_keys import ForeignKey
 
 
 ID_KEY: typing.Final = "id"
@@ -123,13 +128,20 @@ def create_index_sql(model: type[BaseModel], columns: list[str], *, index_name: 
     return raw
 
 
-def annotation_to_sqltype(annotation: type, *, nullable: bool = False) -> str:
+def annotation_to_sqltype(annotation: type, *, nullable: bool = False) -> str:  # noqa: PLR0911 -- one return per SQL type is the clearest shape here
     org = typing.get_origin(annotation)
     args = typing.get_args(annotation)
     if org is UnionType and len(args) > 0 and args[1] is NoneType:
         # optional
         return annotation_to_sqltype(args[0], nullable=True)
     suffix = "" if nullable else " NOT NULL"
+    if issubclass(annotation, enum.Enum):
+        # Calling a bare enum class with no args (as the generic `annotation()` probe below does)
+        # raises -- e.g. `Scope()` -- rather than constructing a sentinel instance like `str()`
+        # does, so enums need to be special-cased instead of falling through to `match`. Every enum
+        # in this codebase is a `StrEnum`, so TEXT is always correct; a plain `IntEnum` would need
+        # its own branch if one is ever introduced.
+        return f"TEXT{suffix}"
     match annotation():
         case str():
             return f"TEXT{suffix}"
@@ -142,17 +154,21 @@ def annotation_to_sqltype(annotation: type, *, nullable: bool = False) -> str:
         case bytes():
             return f"BLOB{suffix}"
         case _:
-            raise NotImplementedError((annotation, type(annotation)))
+            raise NotImplementedError((annotation, type(annotation)))  # pyright: ignore[reportUnknownArgumentType]
 
 
 def create_table_sql(
     model: type[BaseModel],
-    foreign_keys: dict[str, type[BaseModel]] | None = None,
+    foreign_keys: dict[str, ForeignKey] | None = None,
     unique_columns: list[str] | None = None,
     column_defaults: dict[str, str] | None = None,
 ) -> str:
     """
     Build a `CREATE TABLE IF NOT EXISTS` statement reflecting `model`'s fields.
+
+    An `OWNERSHIP`-kind foreign key (see `ForeignKeyKind`) gets a real `ON DELETE CASCADE`, so
+    purging a parent row lets SQLite cascade the delete natively instead of the caller having to
+    enumerate every dependent table by hand.
 
     `column_defaults` maps a field name to a raw SQL literal (e.g. `"0"`, `"''"`) emitted as a
     `DEFAULT` clause on that column. This isn't meant for everyday model fields -- application code
@@ -190,8 +206,9 @@ def create_table_sql(
 
     sorted_keys[id_index] = f"{ID_KEY} INTEGER PRIMARY KEY AUTOINCREMENT"
     fk_clauses = [
-        f"FOREIGN KEY ({field_name}) REFERENCES {referenced.__name__}({ID_KEY})"
-        for field_name, referenced in (foreign_keys or {}).items()
+        f"FOREIGN KEY ({field_name}) REFERENCES {fk.references.__name__}({ID_KEY})"
+        + (" ON DELETE CASCADE" if fk.kind is ForeignKeyKind.OWNERSHIP else "")
+        for field_name, fk in (foreign_keys or {}).items()
     ]
     unique_clauses = [f"UNIQUE ({field_name})" for field_name in unique_columns or []]
     base_str += "("
