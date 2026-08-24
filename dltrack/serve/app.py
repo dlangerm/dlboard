@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 from typing import TYPE_CHECKING
 
 import dash
@@ -12,10 +11,14 @@ from dash.dcc import Store
 from dash.exceptions import PreventUpdate
 from structlog.stdlib import get_logger
 
-from dltrack.models import constants
+from dltrack.models import InstalledPlugin, constants
+from dltrack.serve._backend._auth import get_auth_provider, get_current_user
 from dltrack.serve._backend._data_store import get_data_store
+from dltrack.serve._backend._installed_plugins import set_installed_plugins
 
 if TYPE_CHECKING:
+    from dash.development.base_component import Component
+
     from dltrack import models
 
 
@@ -24,10 +27,10 @@ _log = get_logger(__name__)
 
 def app(plugins: list[models.PluginProtocol]) -> Dash:
     """Get the app initialized with a set of plugins."""
+    installed = [InstalledPlugin.describe(p) for p in plugins]
     _log.info("DLTrack creating dash app with plugins:")
-    for p in plugins:
-        mod = inspect.getmodule(p)
-        _log.info(mod.__name__ if mod else repr(p))
+    for p in installed:
+        _log.info(p.name)
     _app = Dash(
         __name__,
         use_pages=True,
@@ -35,6 +38,10 @@ def app(plugins: list[models.PluginProtocol]) -> Dash:
         suppress_callback_exceptions=True,
         plugins=plugins,
     )
+    # Only the immutable `InstalledPlugin` snapshots are retained on the app -- not the plugin
+    # modules/objects themselves, so introspecting this later (the admin page's About tab) can't
+    # reach back into a plugin's own state.
+    set_installed_plugins(_app, installed)
     basic_container_layout = dmc.AppShell(
         [
             dmc.AppShellHeader(
@@ -53,7 +60,13 @@ def app(plugins: list[models.PluginProtocol]) -> Dash:
                                 dmc.Breadcrumbs(id=constants.PAGE_BREADCRUMB_ID, separator="/", children=[]),
                             ]
                         ),
-                        dcc.Link("Admin", href="/admin", refresh=True),
+                        dmc.Group(
+                            [
+                                html.Div(id=constants.HEADER_USER_INDICATOR_ID),
+                                dcc.Link("Admin", href="/admin", refresh=True),
+                            ],
+                            gap="md",
+                        ),
                     ],
                     justify="space-between",
                     h="100%",
@@ -105,6 +118,25 @@ def breadcrumbs(_: str, project_id: int | None, experiment_id: int | None) -> li
         dcc.Link(project_name, href=f"/project/{project_id}", refresh=False),
         dmc.Text(experiment_name),
     ]
+
+
+# show who the app currently resolves the caller to be, and which auth mechanism resolved it
+@callback(
+    Output(constants.HEADER_USER_INDICATOR_ID, component_property="children"),
+    Input(constants.LOCATION_ID, component_property="pathname"),
+)
+def user_indicator(_: str) -> Component:
+    """Render the current auth provider and resolved user in the header, refreshed on navigation."""
+    store = get_data_store()
+    user = get_current_user(store)
+    provider_name = get_auth_provider().__class__.__name__
+    return dmc.Group(
+        [
+            dmc.Badge(provider_name, variant="light", color="gray", size="sm"),
+            dmc.Text(user.username, size="sm", fw=500),
+        ],
+        gap="xs",
+    )
 
 
 @callback(

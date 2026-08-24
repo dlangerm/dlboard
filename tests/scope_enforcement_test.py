@@ -163,6 +163,12 @@ def test_wrapper_still_forwards_unscoped_methods_via_getattr() -> None:
     assert inner.calls == ["get_project"]
 
 
+def test_backend_name_reports_the_wrapped_stores_class_name() -> None:
+    wrapped = _wrap(_UnscopedFakeStore())
+
+    assert wrapped.backend_name == "_UnscopedFakeStore"
+
+
 def test_scope_all_bypasses_every_gate() -> None:
     inner = _UnscopedFakeStore()
     wrapped = _wrap(inner)

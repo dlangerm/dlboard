@@ -36,6 +36,11 @@ class ScopeEnforcingDataStore:
     def __getattr__(self, name: str) -> Any:  # noqa: ANN401
         return getattr(self._inner, name)
 
+    @property
+    def backend_name(self) -> str:
+        """The wrapped store's class name, for display (e.g. the admin page's About tab)."""
+        return self._inner.__class__.__name__
+
     def delete_project(self, project_id: int, actor: User) -> None:
         require_scope(actor, Scope.PROJECT_DELETE)
         self._inner.delete_project(project_id, actor)
