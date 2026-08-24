@@ -3,6 +3,7 @@
 from dltrack.models._artifact import AnyArtifact, Artifact, NewArtifact
 from dltrack.models._artifact_purge_task import ArtifactPurgeTask, NewArtifactPurgeTask
 from dltrack.models._audit_log import AuditAction, AuditLogEntry, EntityType, NewAuditLogEntry
+from dltrack.models._auth import AuthProvider
 from dltrack.models._data_store import ArtifactStore, DataStore
 from dltrack.models._experiment import Experiment, NewExperiment
 from dltrack.models._hparams import HyperParams, NewHyperParams
@@ -21,6 +22,7 @@ __all__ = [
     "ArtifactStore",
     "AuditAction",
     "AuditLogEntry",
+    "AuthProvider",
     "ChartType",
     "ColumnKind",
     "DataStore",

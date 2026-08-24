@@ -26,6 +26,10 @@ class DataStore[**P](typing.Protocol):
         """Get or create a user by username. Brand new users are granted no scopes."""
         ...
 
+    def update_user(self, user: models.User) -> models.User:
+        """Update a user, e.g. to grant/revoke scopes. For admin-driven user management."""
+        ...
+
     def create_project(self, project: models.NewProject) -> models.Project:
         """Create a project."""
         ...

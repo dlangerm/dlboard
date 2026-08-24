@@ -27,7 +27,6 @@ from dltrack.models._view import (
     ParameterFieldType,
 )
 from dltrack.plugins.charts._table_style import NUMERIC, infer_column_dtype, themed_datatable_kwargs
-from dltrack.plugins.pages._actor import current_actor_id
 from dltrack.plugins.pages._chart_autogen import (
     Suggestion,
     build_auto_panels,
@@ -55,7 +54,7 @@ from dltrack.plugins.pages._description_editor import (
     register_edit_callbacks,
     render_header,
 )
-from dltrack.serve import get_data_store
+from dltrack.serve import get_current_user, get_data_store
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -1043,7 +1042,7 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
             msg = f"Experiment {experiment_id} not found"
             raise ValueError(msg)
         project_id = exp.project_id
-        store.delete_experiment(experiment_id, actor_id=current_actor_id(store))
+        store.delete_experiment(experiment_id, actor_id=get_current_user(store).id)
         return f"/project/{project_id}"
 
     register_delete_callbacks(
@@ -1089,7 +1088,7 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         if not n_clicks or not run_id:
             raise PreventUpdate
         store = get_data_store()
-        store.delete_run(int(run_id), actor_id=current_actor_id(store))
+        store.delete_run(int(run_id), actor_id=get_current_user(store).id)
         return f"/experiment/{experiment_id}", True, False
 
     # Opens/closes independently of edit mode — you can manage panels without ever needing to

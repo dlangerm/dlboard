@@ -12,20 +12,12 @@ from pydantic import AnyUrl, BaseModel
 from structlog.stdlib import get_logger
 
 from dltrack import models
-from dltrack._identity import ANONYMOUS, resolve_username
+from dltrack._identity import resolve_username
 from dltrack.models import DataStore
-from dltrack.serve import get_artifact_store, get_data_store
+from dltrack.plugins.auth.anonymous import DLTRACK_USER_HEADER
+from dltrack.serve import get_artifact_store, get_current_user, get_data_store
 
 _log = get_logger(__name__)
-
-DLTRACK_USER_HEADER = "X-Dltrack-User"
-"""Carries the client's best-effort identity (see `dltrack._identity.resolve_username`).
-
-Never trusted blindly -- the server resolves its own fallback (`ANONYMOUS`) when this is missing
-or blank, exactly like the client's own identity chain falls back when it can't resolve anything
-better. This is attribution, not authentication: nothing here proves a caller actually is who the
-header claims.
-"""
 
 
 def create_path(
@@ -118,102 +110,84 @@ class BasicDltrackAPI:
             res.raise_for_status()
 
 
-def resolve_actor(store: DataStore[...], header_value: str | None) -> models.User:
-    """
-    Resolve the acting user for a request from the `X-Dltrack-User` header.
-
-    Never trusts the client to have sent one -- a missing/blank header falls back to the same
-    `ANONYMOUS` the client-side identity chain falls back to as its own last resort.
-    """
-    username = (header_value or "").strip() or ANONYMOUS
-    return store.get_or_create_user(username)
-
-
 # -- Route handlers -------------------------------------------------------------------------------
 #
 # Split out from the `@dash.hooks.route`-decorated view functions below so the actual request
-# handling -- resolving the actor, stamping `created_by`, calling the store -- is testable directly
-# against a real store, without needing a live Flask request context.
+# handling -- stamping `created_by`, calling the store -- is testable directly against a real
+# store, without needing a live Flask request context. Each takes an already-resolved `actor`
+# rather than resolving identity itself, so identity resolution (see `dltrack.serve.get_current_user`)
+# stays entirely the auth provider's concern.
 
 
-def handle_create_project(
-    store: DataStore[...], body: dict[str, Any], header_value: str | None
-) -> dict[str, Any]:
-    """Create a project, attributed to the resolved actor."""
-    actor = resolve_actor(store, header_value)
+def handle_create_project(store: DataStore[...], body: dict[str, Any], actor: models.User) -> dict[str, Any]:
+    """Create a project, attributed to `actor`."""
     project = models.NewProject.model_validate(body).model_copy(update={"created_by": actor.id})
     return store.create_project(project).model_dump(mode="json")
 
 
 def handle_create_experiment(
-    store: DataStore[...], body: dict[str, Any], header_value: str | None
+    store: DataStore[...], body: dict[str, Any], actor: models.User
 ) -> dict[str, Any]:
-    """Create an experiment, attributed to the resolved actor."""
-    actor = resolve_actor(store, header_value)
+    """Create an experiment, attributed to `actor`."""
     experiment = models.NewExperiment.model_validate(body).model_copy(update={"created_by": actor.id})
     return store.create_experiment(experiment).model_dump(mode="json")
 
 
-def handle_create_run(
-    store: DataStore[...], body: dict[str, Any], header_value: str | None
-) -> dict[str, Any]:
-    """Create a run, attributed to the resolved actor."""
-    actor = resolve_actor(store, header_value)
+def handle_create_run(store: DataStore[...], body: dict[str, Any], actor: models.User) -> dict[str, Any]:
+    """Create a run, attributed to `actor`."""
     run = models.NewRun.model_validate(body).model_copy(update={"created_by": actor.id})
     return store.create_run(run).model_dump(mode="json")
 
 
 def handle_log_artifacts(
     store: models.ArtifactStore[...],
-    user_store: DataStore[...],
     artifacts: Iterable[models.NewArtifact],
     files: Any,  # noqa: ANN401 -- `werkzeug.datastructures.FileStorage` mapping, matches `ArtifactStore.log_artifacts`
-    header_value: str | None,
+    actor: models.User,
 ) -> None:
-    """Log a batch of artifacts, each attributed to the resolved actor."""
-    actor = resolve_actor(user_store, header_value)
+    """Log a batch of artifacts, each attributed to `actor`."""
     stamped = (a.model_copy(update={"created_by": actor.id}) for a in artifacts)
     store.log_artifacts(stamped, files)
 
 
-def handle_delete_project(store: DataStore[...], project_id: int, header_value: str | None) -> None:
-    """Soft-delete a project, attributed to the resolved actor."""
-    store.delete_project(project_id, actor_id=resolve_actor(store, header_value).id)
+def handle_delete_project(store: DataStore[...], project_id: int, actor: models.User) -> None:
+    """Soft-delete a project, attributed to `actor`."""
+    store.delete_project(project_id, actor_id=actor.id)
 
 
-def handle_restore_project(store: DataStore[...], project_id: int, header_value: str | None) -> None:
-    """Restore a soft-deleted project, attributed to the resolved actor."""
-    store.restore_project(project_id, actor_id=resolve_actor(store, header_value).id)
+def handle_restore_project(store: DataStore[...], project_id: int, actor: models.User) -> None:
+    """Restore a soft-deleted project, attributed to `actor`."""
+    store.restore_project(project_id, actor_id=actor.id)
 
 
-def handle_delete_experiment(store: DataStore[...], experiment_id: int, header_value: str | None) -> None:
-    """Soft-delete an experiment, attributed to the resolved actor."""
-    store.delete_experiment(experiment_id, actor_id=resolve_actor(store, header_value).id)
+def handle_delete_experiment(store: DataStore[...], experiment_id: int, actor: models.User) -> None:
+    """Soft-delete an experiment, attributed to `actor`."""
+    store.delete_experiment(experiment_id, actor_id=actor.id)
 
 
-def handle_restore_experiment(store: DataStore[...], experiment_id: int, header_value: str | None) -> None:
-    """Restore a soft-deleted experiment, attributed to the resolved actor."""
-    store.restore_experiment(experiment_id, actor_id=resolve_actor(store, header_value).id)
+def handle_restore_experiment(store: DataStore[...], experiment_id: int, actor: models.User) -> None:
+    """Restore a soft-deleted experiment, attributed to `actor`."""
+    store.restore_experiment(experiment_id, actor_id=actor.id)
 
 
-def handle_delete_run(store: DataStore[...], run_id: int, header_value: str | None) -> None:
-    """Soft-delete a run, attributed to the resolved actor."""
-    store.delete_run(run_id, actor_id=resolve_actor(store, header_value).id)
+def handle_delete_run(store: DataStore[...], run_id: int, actor: models.User) -> None:
+    """Soft-delete a run, attributed to `actor`."""
+    store.delete_run(run_id, actor_id=actor.id)
 
 
-def handle_restore_run(store: DataStore[...], run_id: int, header_value: str | None) -> None:
-    """Restore a soft-deleted run, attributed to the resolved actor."""
-    store.restore_run(run_id, actor_id=resolve_actor(store, header_value).id)
+def handle_restore_run(store: DataStore[...], run_id: int, actor: models.User) -> None:
+    """Restore a soft-deleted run, attributed to `actor`."""
+    store.restore_run(run_id, actor_id=actor.id)
 
 
-def handle_delete_artifact(store: DataStore[...], artifact_id: int, header_value: str | None) -> None:
-    """Soft-delete a single artifact, attributed to the resolved actor."""
-    store.delete_artifact(artifact_id, actor_id=resolve_actor(store, header_value).id)
+def handle_delete_artifact(store: DataStore[...], artifact_id: int, actor: models.User) -> None:
+    """Soft-delete a single artifact, attributed to `actor`."""
+    store.delete_artifact(artifact_id, actor_id=actor.id)
 
 
-def handle_restore_artifact(store: DataStore[...], artifact_id: int, header_value: str | None) -> None:
-    """Restore a soft-deleted artifact, attributed to the resolved actor."""
-    store.restore_artifact(artifact_id, actor_id=resolve_actor(store, header_value).id)
+def handle_restore_artifact(store: DataStore[...], artifact_id: int, actor: models.User) -> None:
+    """Restore a soft-deleted artifact, attributed to `actor`."""
+    store.restore_artifact(artifact_id, actor_id=actor.id)
 
 
 # -- Routes -----------------------------------------------------------------------------------
@@ -249,9 +223,8 @@ def log_hyperparams() -> dict[str, str]:
 def create_experiment() -> dict[str, Any]:
     """Create a new experiment for a project."""
     try:
-        return handle_create_experiment(
-            get_data_store(), request.json, request.headers.get(DLTRACK_USER_HEADER)
-        )
+        store = get_data_store()
+        return handle_create_experiment(store, request.json, get_current_user(store))
     except Exception:
         _log.exception("Error creating")
         raise
@@ -262,7 +235,8 @@ def create_run() -> dict[str, Any]:
     """Create a new run for an experiment."""
     try:
         _log.info("create new run")
-        return handle_create_run(get_data_store(), request.json, request.headers.get(DLTRACK_USER_HEADER))
+        store = get_data_store()
+        return handle_create_run(store, request.json, get_current_user(store))
     except Exception:
         _log.exception("Error creating")
         raise
@@ -272,7 +246,8 @@ def create_run() -> dict[str, Any]:
 def create_project() -> dict[str, Any]:
     """Create a new project."""
     try:
-        return handle_create_project(get_data_store(), request.json, request.headers.get(DLTRACK_USER_HEADER))
+        store = get_data_store()
+        return handle_create_project(store, request.json, get_current_user(store))
     except Exception:
         _log.exception("Error creating project")
         raise
@@ -292,10 +267,9 @@ def log_artifact() -> dict[str, str]:
         try:
             handle_log_artifacts(
                 get_artifact_store(),
-                get_data_store(),
                 jsons,
                 request.files,
-                request.headers.get(DLTRACK_USER_HEADER),
+                get_current_user(get_data_store()),
             )
         finally:
             _log.info("logging artifacts took %.3f seconds", perf_counter() - t0)
@@ -321,7 +295,8 @@ def download_artifact(artifact_url: str) -> Response:
 def delete_project(entity_id: int) -> dict[str, str]:
     """Soft-delete a project and cascade to its experiments, runs, and artifacts."""
     try:
-        handle_delete_project(get_data_store(), entity_id, request.headers.get(DLTRACK_USER_HEADER))
+        store = get_data_store()
+        handle_delete_project(store, entity_id, get_current_user(store))
     except Exception:
         _log.exception("Error deleting project %s", entity_id)
         raise
@@ -332,7 +307,8 @@ def delete_project(entity_id: int) -> dict[str, str]:
 def restore_project(entity_id: int) -> dict[str, str]:
     """Restore a soft-deleted project and everything deleted with it."""
     try:
-        handle_restore_project(get_data_store(), entity_id, request.headers.get(DLTRACK_USER_HEADER))
+        store = get_data_store()
+        handle_restore_project(store, entity_id, get_current_user(store))
     except Exception:
         _log.exception("Error restoring project %s", entity_id)
         raise
@@ -343,7 +319,8 @@ def restore_project(entity_id: int) -> dict[str, str]:
 def delete_experiment(entity_id: int) -> dict[str, str]:
     """Soft-delete an experiment and cascade to its runs and artifacts."""
     try:
-        handle_delete_experiment(get_data_store(), entity_id, request.headers.get(DLTRACK_USER_HEADER))
+        store = get_data_store()
+        handle_delete_experiment(store, entity_id, get_current_user(store))
     except Exception:
         _log.exception("Error deleting experiment %s", entity_id)
         raise
@@ -354,7 +331,8 @@ def delete_experiment(entity_id: int) -> dict[str, str]:
 def restore_experiment(entity_id: int) -> dict[str, str]:
     """Restore a soft-deleted experiment and everything deleted with it."""
     try:
-        handle_restore_experiment(get_data_store(), entity_id, request.headers.get(DLTRACK_USER_HEADER))
+        store = get_data_store()
+        handle_restore_experiment(store, entity_id, get_current_user(store))
     except Exception:
         _log.exception("Error restoring experiment %s", entity_id)
         raise
@@ -365,7 +343,8 @@ def restore_experiment(entity_id: int) -> dict[str, str]:
 def delete_run(entity_id: int) -> dict[str, str]:
     """Soft-delete a run and cascade to its artifacts."""
     try:
-        handle_delete_run(get_data_store(), entity_id, request.headers.get(DLTRACK_USER_HEADER))
+        store = get_data_store()
+        handle_delete_run(store, entity_id, get_current_user(store))
     except Exception:
         _log.exception("Error deleting run %s", entity_id)
         raise
@@ -376,7 +355,8 @@ def delete_run(entity_id: int) -> dict[str, str]:
 def restore_run(entity_id: int) -> dict[str, str]:
     """Restore a soft-deleted run and everything deleted with it."""
     try:
-        handle_restore_run(get_data_store(), entity_id, request.headers.get(DLTRACK_USER_HEADER))
+        store = get_data_store()
+        handle_restore_run(store, entity_id, get_current_user(store))
     except Exception:
         _log.exception("Error restoring run %s", entity_id)
         raise
@@ -387,7 +367,8 @@ def restore_run(entity_id: int) -> dict[str, str]:
 def delete_artifact(entity_id: int) -> dict[str, str]:
     """Soft-delete a single artifact."""
     try:
-        handle_delete_artifact(get_data_store(), entity_id, request.headers.get(DLTRACK_USER_HEADER))
+        store = get_data_store()
+        handle_delete_artifact(store, entity_id, get_current_user(store))
     except Exception:
         _log.exception("Error deleting artifact %s", entity_id)
         raise
@@ -398,7 +379,8 @@ def delete_artifact(entity_id: int) -> dict[str, str]:
 def restore_artifact(entity_id: int) -> dict[str, str]:
     """Restore a soft-deleted artifact."""
     try:
-        handle_restore_artifact(get_data_store(), entity_id, request.headers.get(DLTRACK_USER_HEADER))
+        store = get_data_store()
+        handle_restore_artifact(store, entity_id, get_current_user(store))
     except Exception:
         _log.exception("Error restoring artifact %s", entity_id)
         raise

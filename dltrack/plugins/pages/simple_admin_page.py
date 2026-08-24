@@ -12,9 +12,8 @@ from structlog.stdlib import get_logger
 
 from dltrack.models import EntityType, constants
 from dltrack.plugins.backend import artifact_purge_worker
-from dltrack.plugins.pages._actor import current_actor, current_actor_id
 from dltrack.plugins.pages._dash_helpers import require_triggered_id
-from dltrack.serve import get_data_store
+from dltrack.serve import get_current_user, get_data_store
 
 if TYPE_CHECKING:
     from dash.development.base_component import Component
@@ -292,7 +291,7 @@ def _register_restore_callback(app: Dash) -> None:
         entity_id = int(triggered_id["id"])
 
         store = get_data_store()
-        actor_id = current_actor_id(store)
+        actor_id = get_current_user(store).id
         try:
             getattr(store, _RESTORERS[entity_type])(entity_id, actor_id=actor_id)
         except ValueError:
@@ -339,7 +338,7 @@ def _register_purge_callbacks(app: Dash) -> None:
         entity_id = int(pending["id"])
 
         store = get_data_store()
-        actor = current_actor(store)
+        actor = get_current_user(store)
         try:
             getattr(store, _PURGERS[entity_type])(entity_id, actor)
         except (ValueError, PermissionError):

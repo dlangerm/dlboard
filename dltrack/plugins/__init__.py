@@ -1,11 +1,13 @@
 """All built-in dltrack plugins."""
 
 from dltrack.models._plugin import PluginProtocol
-from dltrack.plugins import artifacts, backend, charts, pages, themes
+from dltrack.plugins import artifacts, auth, backend, charts, pages, themes
+from dltrack.plugins.auth import anonymous
 from dltrack.plugins.backend import artifact_purge_worker
 from dltrack.plugins.data_stores import filesystem, sqlite
 
 LOCAL_STORAGE: list[PluginProtocol] = [sqlite, filesystem, artifact_purge_worker]
+LOCAL_AUTH: list[PluginProtocol] = [anonymous]
 BUILTIN_PAGES: list[PluginProtocol] = [
     pages.simple_homepage,
     pages.simple_project_page,
@@ -20,6 +22,7 @@ BUILTIN_CHARTS: list[PluginProtocol] = [
 
 LOCAL_DEPLOYMENT: list[PluginProtocol] = [
     *LOCAL_STORAGE,
+    *LOCAL_AUTH,
     *BUILTIN_PAGES,
     *BUILTIN_CHARTS,
 ]
@@ -27,9 +30,11 @@ LOCAL_DEPLOYMENT: list[PluginProtocol] = [
 __all__ = [
     "BUILTIN_CHARTS",
     "BUILTIN_PAGES",
+    "LOCAL_AUTH",
     "LOCAL_DEPLOYMENT",
     "LOCAL_STORAGE",
     "artifacts",
+    "auth",
     "backend",
     "charts",
     "filesystem",

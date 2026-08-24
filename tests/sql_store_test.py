@@ -176,6 +176,16 @@ def test_get_or_create_user_is_idempotent(store: SQLLiteStore) -> None:
     assert list(store._execute_raw_sql("SELECT count(*) FROM User")) == [(1,)]
 
 
+def test_update_user_persists_scope_changes(store: SQLLiteStore) -> None:
+    user = store.get_or_create_user("alice")
+    assert user.scopes == [models.Scope.ALL]  # first user ever, bootstrap admin
+
+    updated = store.update_user(user.model_copy(update={"scopes": [models.Scope.PURGE]}))
+
+    assert updated.scopes == [models.Scope.PURGE]
+    assert store.get_or_create_user("alice").scopes == [models.Scope.PURGE]
+
+
 def test_get_or_create_page_is_idempotent_and_updatable(store: SQLLiteStore, experiment_id: int) -> None:
     page = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
     again = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
