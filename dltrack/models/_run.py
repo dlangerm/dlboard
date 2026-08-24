@@ -22,3 +22,9 @@ class Run(NewRun, frozen=True, extra="forbid"):
 
     id: int
     """The ID of the run."""
+
+    deleted_by: int | None = None
+    """The user who soft-deleted this run, if it's been deleted."""
+
+    deleted_at: AwareDatetime | None = None
+    """When this run was soft-deleted, if at all. See `Project.deleted_at`."""

@@ -117,6 +117,70 @@ class DataStore[**P](typing.Protocol):
         """Get artifacts for a run or experiment."""
         ...
 
+    def delete_project(self, project_id: int, actor_id: int) -> None:
+        """Soft-delete a project and cascade to its experiments, runs, and artifacts."""
+        ...
+
+    def restore_project(self, project_id: int) -> None:
+        """Restore a soft-deleted project and everything deleted with it."""
+        ...
+
+    def purge_project(self, project_id: int, actor: models.User) -> None:
+        """Permanently delete an already soft-deleted project. Requires `Scope.PURGE`."""
+        ...
+
+    def delete_experiment(self, experiment_id: int, actor_id: int) -> None:
+        """Soft-delete an experiment and cascade to its runs and artifacts."""
+        ...
+
+    def restore_experiment(self, experiment_id: int) -> None:
+        """Restore a soft-deleted experiment and everything deleted with it."""
+        ...
+
+    def purge_experiment(self, experiment_id: int, actor: models.User) -> None:
+        """Permanently delete an already soft-deleted experiment. Requires `Scope.PURGE`."""
+        ...
+
+    def delete_run(self, run_id: int, actor_id: int) -> None:
+        """Soft-delete a run and cascade to its artifacts."""
+        ...
+
+    def restore_run(self, run_id: int) -> None:
+        """Restore a soft-deleted run and everything deleted with it."""
+        ...
+
+    def purge_run(self, run_id: int, actor: models.User) -> None:
+        """Permanently delete an already soft-deleted run. Requires `Scope.PURGE`."""
+        ...
+
+    def delete_artifact(self, artifact_id: int, actor_id: int) -> None:
+        """Soft-delete a single artifact."""
+        ...
+
+    def restore_artifact(self, artifact_id: int) -> None:
+        """Restore a soft-deleted artifact."""
+        ...
+
+    def purge_artifact(self, artifact_id: int, actor: models.User) -> None:
+        """Permanently delete an already soft-deleted artifact. Requires `Scope.PURGE`."""
+        ...
+
+    def list_deleted_projects(self) -> typing.Iterator[models.Project]:
+        """List soft-deleted projects, for a trash/admin view."""
+        ...
+
+    def list_deleted_experiments(self) -> typing.Iterator[models.Experiment]:
+        """List soft-deleted experiments, for a trash/admin view."""
+        ...
+
+    def list_deleted_runs(self) -> typing.Iterator[models.Run]:
+        """List soft-deleted runs, for a trash/admin view."""
+        ...
+
+    def list_deleted_artifacts(self) -> typing.Iterator[models.Artifact]:
+        """List soft-deleted artifacts, for a trash/admin view."""
+        ...
+
 
 class ArtifactStore[**P](typing.Protocol):
     """An artifact store for files and arbitrary byte-like data."""

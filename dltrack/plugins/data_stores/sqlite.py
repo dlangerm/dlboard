@@ -63,6 +63,19 @@ class SQLLiteStore(SQLStoreBase[Path]):
             cur = conn.cursor()
             yield from cur.executemany(statement, values or []).fetchall()
 
+    @override
+    def _execute_in_transaction(
+        self, statements: Iterable[tuple[str, dict[str, Any] | None]]
+    ) -> list[list[tuple[Any, ...]]]:
+        """Execute every statement on one connection, committing only if all of them succeed."""
+        results: list[list[tuple[Any, ...]]] = []
+        with sqlite3.connect(self._location) as conn:
+            conn.execute("PRAGMA foreign_keys = ON")
+            for statement, values in statements:
+                _log.debug("Execute (in transaction) <%s> with values <%s>", statement, values)
+                results.append(conn.execute(statement, values or {}).fetchall())
+        return results
+
     @classmethod
     def get_or_create(cls, loc: Path) -> SQLLiteStore:
         """Create."""

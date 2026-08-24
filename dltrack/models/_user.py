@@ -8,13 +8,10 @@ grow past a single admin/non-admin bit without another migration.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import pendulum
 from pydantic import AwareDatetime, BaseModel, Field
 
-if TYPE_CHECKING:
-    from dltrack.models._scopes import Scope
+from dltrack.models._scopes import Scope  # noqa: TC001 -- a real Pydantic field, needed at runtime
 
 
 class NewUser(BaseModel, frozen=True, extra="forbid"):

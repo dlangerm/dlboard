@@ -28,3 +28,9 @@ class Experiment(NewExperiment, frozen=True, extra="forbid"):
 
     id: int
     """The ID of the experiment."""
+
+    deleted_by: int | None = None
+    """The user who soft-deleted this experiment, if it's been deleted."""
+
+    deleted_at: AwareDatetime | None = None
+    """When this experiment was soft-deleted, if at all. See `Project.deleted_at`."""
