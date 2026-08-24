@@ -10,7 +10,7 @@ from dash.dcc import Store
 from dash.exceptions import PreventUpdate
 from structlog.stdlib import get_logger
 
-from dltrack.models import EntityType, constants
+from dltrack.models import EntityType, Scope, constants, has_scope
 from dltrack.plugins.backend import artifact_purge_worker
 from dltrack.plugins.pages._dash_helpers import require_triggered_id
 from dltrack.serve import get_current_user, get_data_store
@@ -18,7 +18,7 @@ from dltrack.serve import get_current_user, get_data_store
 if TYPE_CHECKING:
     from dash.development.base_component import Component
 
-    from dltrack.models import AuditLogEntry, DataStore
+    from dltrack.models import AuditLogEntry, DataStore, User
 
 _log = get_logger(__name__)
 
@@ -177,8 +177,10 @@ def _render_trash(store: DataStore[...]) -> Component:
     return dmc.Stack(sections, gap="lg")
 
 
-def _render_audit_log(store: DataStore[...]) -> Component:
-    entries: list[AuditLogEntry] = list(store.list_audit_log(limit=200))
+def _render_audit_log(store: DataStore[...], actor: User) -> Component:
+    if not has_scope(actor, Scope.AUDIT_LOG_READ):
+        return dmc.Text("You don't have permission to view the audit log.", c="dimmed")
+    entries: list[AuditLogEntry] = list(store.list_audit_log(actor, limit=200))
     if not entries:
         return dmc.Text("No audit log entries yet.", c="dimmed")
     return html.Table(
@@ -270,7 +272,8 @@ def _register_tab_callbacks(app: Dash) -> None:
     def render_audit_log_tab(tab: str) -> Component:
         if tab != "audit-log":
             raise PreventUpdate
-        return _render_audit_log(get_data_store())
+        store = get_data_store()
+        return _render_audit_log(store, get_current_user(store))
 
 
 def _register_restore_callback(app: Dash) -> None:
@@ -291,10 +294,10 @@ def _register_restore_callback(app: Dash) -> None:
         entity_id = int(triggered_id["id"])
 
         store = get_data_store()
-        actor_id = get_current_user(store).id
+        actor = get_current_user(store)
         try:
-            getattr(store, _RESTORERS[entity_type])(entity_id, actor_id=actor_id)
-        except ValueError:
+            getattr(store, _RESTORERS[entity_type])(entity_id, actor)
+        except (ValueError, PermissionError):
             _log.exception("Failed to restore %s %s", entity_type, entity_id)
         return "/admin", True
 

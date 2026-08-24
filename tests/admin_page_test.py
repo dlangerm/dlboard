@@ -25,7 +25,7 @@ def test_render_trash_lists_a_deleted_project_with_restore_and_purge_buttons(
 ) -> None:
     admin_user = store.get_or_create_user("admin")
     project = store.create_project(models.NewProject(name="p", description="d"))
-    store.delete_project(project.id, actor_id=admin_user.id)
+    store.delete_project(project.id, admin_user)
 
     rendered = admin._render_trash(store)
 
@@ -65,7 +65,7 @@ def test_render_trash_caps_each_kind_and_notes_the_overflow(store: SQLLiteStore)
         )
     for artifact in store.fetch_artifacts(experiment_id=experiment.id):
         assert artifact.id is not None
-        store.delete_artifact(artifact.id, actor_id=admin_user.id)
+        store.delete_artifact(artifact.id, admin_user)
 
     rendered = cast("Any", admin._render_trash(store))
 
@@ -90,7 +90,7 @@ def test_render_pending_purge_banner_shows_the_count_and_a_resume_button(store: 
     store.log_artifact_refs(
         [models.Artifact(key="a", fname="a.png", run_id=run.id, experiment_id=experiment.id, step=0, ref="r")]
     )
-    store.delete_project(project.id, actor_id=admin_user.id)
+    store.delete_project(project.id, admin_user)
     store.purge_project(project.id, admin_user)
 
     banner = cast("Any", admin._render_pending_purge_banner(store))
@@ -109,17 +109,28 @@ def test_render_trash_omits_a_project_that_is_not_deleted(store: SQLLiteStore) -
 
 
 def test_render_audit_log_is_empty_message_with_no_entries(store: SQLLiteStore) -> None:
-    rendered = admin._render_audit_log(store)
+    admin_user = store.get_or_create_user("admin")
+
+    rendered = admin._render_audit_log(store, admin_user)
 
     assert cast("Any", rendered).children == "No audit log entries yet."
+
+
+def test_render_audit_log_shows_a_permission_message_without_the_scope(store: SQLLiteStore) -> None:
+    store.get_or_create_user("admin")  # claim the bootstrap admin grant so the next user gets nothing
+    no_scopes_user = store.get_or_create_user("nobody")
+
+    rendered = admin._render_audit_log(store, no_scopes_user)
+
+    assert cast("Any", rendered).children == "You don't have permission to view the audit log."
 
 
 def test_render_audit_log_lists_a_recorded_action(store: SQLLiteStore) -> None:
     admin_user = store.get_or_create_user("admin")
     project = store.create_project(models.NewProject(name="p", description="d"))
-    store.delete_project(project.id, actor_id=admin_user.id)
+    store.delete_project(project.id, admin_user)
 
-    rendered = cast("Any", admin._render_audit_log(store))
+    rendered = cast("Any", admin._render_audit_log(store, admin_user))
 
     # one row in the table body (`rendered.children` is [Thead, Tbody])
     body_rows = rendered.children[1].children

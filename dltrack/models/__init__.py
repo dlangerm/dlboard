@@ -11,7 +11,7 @@ from dltrack.models._metric import LoggedMetrics, UnderlyingMetricTableEntry
 from dltrack.models._plugin import PluginProtocol
 from dltrack.models._project import NewProject, Project
 from dltrack.models._run import NewRun, Run
-from dltrack.models._scopes import Scope, has_scope
+from dltrack.models._scopes import Scope, has_scope, require_scope
 from dltrack.models._user import NewUser, User
 from dltrack.models._view import ChartType, ColumnKind, NewPage, Page
 
@@ -47,4 +47,5 @@ __all__ = [
     "UnderlyingMetricTableEntry",
     "User",
     "has_scope",
+    "require_scope",
 ]

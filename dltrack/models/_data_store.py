@@ -121,48 +121,48 @@ class DataStore[**P](typing.Protocol):
         """Get artifacts for a run or experiment."""
         ...
 
-    def delete_project(self, project_id: int, actor_id: int) -> None:
-        """Soft-delete a project and cascade to its experiments, runs, and artifacts."""
+    def delete_project(self, project_id: int, actor: models.User) -> None:
+        """Soft-delete a project and cascade to its experiments, runs, and artifacts. Requires `Scope.PROJECT_DELETE`."""
         ...
 
-    def restore_project(self, project_id: int, actor_id: int) -> None:
-        """Restore a soft-deleted project and everything deleted with it."""
+    def restore_project(self, project_id: int, actor: models.User) -> None:
+        """Restore a soft-deleted project and everything deleted with it. Requires `Scope.RESTORE`."""
         ...
 
     def purge_project(self, project_id: int, actor: models.User) -> None:
         """Permanently delete an already soft-deleted project. Requires `Scope.PURGE`."""
         ...
 
-    def delete_experiment(self, experiment_id: int, actor_id: int) -> None:
-        """Soft-delete an experiment and cascade to its runs and artifacts."""
+    def delete_experiment(self, experiment_id: int, actor: models.User) -> None:
+        """Soft-delete an experiment and cascade to its runs and artifacts. Requires `Scope.EXPERIMENT_DELETE`."""
         ...
 
-    def restore_experiment(self, experiment_id: int, actor_id: int) -> None:
-        """Restore a soft-deleted experiment and everything deleted with it."""
+    def restore_experiment(self, experiment_id: int, actor: models.User) -> None:
+        """Restore a soft-deleted experiment and everything deleted with it. Requires `Scope.RESTORE`."""
         ...
 
     def purge_experiment(self, experiment_id: int, actor: models.User) -> None:
         """Permanently delete an already soft-deleted experiment. Requires `Scope.PURGE`."""
         ...
 
-    def delete_run(self, run_id: int, actor_id: int) -> None:
-        """Soft-delete a run and cascade to its artifacts."""
+    def delete_run(self, run_id: int, actor: models.User) -> None:
+        """Soft-delete a run and cascade to its artifacts. Requires `Scope.RUN_DELETE`."""
         ...
 
-    def restore_run(self, run_id: int, actor_id: int) -> None:
-        """Restore a soft-deleted run and everything deleted with it."""
+    def restore_run(self, run_id: int, actor: models.User) -> None:
+        """Restore a soft-deleted run and everything deleted with it. Requires `Scope.RESTORE`."""
         ...
 
     def purge_run(self, run_id: int, actor: models.User) -> None:
         """Permanently delete an already soft-deleted run. Requires `Scope.PURGE`."""
         ...
 
-    def delete_artifact(self, artifact_id: int, actor_id: int) -> None:
-        """Soft-delete a single artifact."""
+    def delete_artifact(self, artifact_id: int, actor: models.User) -> None:
+        """Soft-delete a single artifact. Requires `Scope.ARTIFACT_DELETE`."""
         ...
 
-    def restore_artifact(self, artifact_id: int, actor_id: int) -> None:
-        """Restore a soft-deleted artifact."""
+    def restore_artifact(self, artifact_id: int, actor: models.User) -> None:
+        """Restore a soft-deleted artifact. Requires `Scope.RESTORE`."""
         ...
 
     def purge_artifact(self, artifact_id: int, actor: models.User) -> None:
@@ -187,8 +187,10 @@ class DataStore[**P](typing.Protocol):
         """List soft-deleted artifacts, most recently deleted first, for a trash/admin view."""
         ...
 
-    def list_audit_log(self, limit: int = 100, offset: int = 0) -> typing.Iterator[models.AuditLogEntry]:
-        """List audit log entries, most recent first, for a trash/admin view."""
+    def list_audit_log(
+        self, actor: models.User, limit: int = 100, offset: int = 0
+    ) -> typing.Iterator[models.AuditLogEntry]:
+        """List audit log entries, most recent first, for a trash/admin view. Requires `Scope.AUDIT_LOG_READ`."""
         ...
 
     def list_pending_artifact_purges(

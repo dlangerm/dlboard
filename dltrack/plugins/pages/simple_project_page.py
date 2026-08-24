@@ -210,7 +210,7 @@ def plug(app: Dash) -> None:
 
     def _delete_project(project_id: int) -> str:
         store = get_data_store()
-        store.delete_project(project_id, actor_id=get_current_user(store).id)
+        store.delete_project(project_id, get_current_user(store))
         return "/"
 
     register_delete_callbacks(

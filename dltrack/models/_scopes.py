@@ -32,3 +32,10 @@ class Scope(StrEnum):
 def has_scope(user: User, scope: Scope) -> bool:
     """Whether `user` has been granted `scope`, directly or via the `Scope.ALL` wildcard."""
     return scope in user.scopes or Scope.ALL in user.scopes
+
+
+def require_scope(user: User, scope: Scope) -> None:
+    """Raise `PermissionError` if `user` lacks `scope`. The single enforcement point every `DataStore` uses."""
+    if not has_scope(user, scope):
+        msg = f"User {user.id} lacks the {scope} scope"
+        raise PermissionError(msg)
