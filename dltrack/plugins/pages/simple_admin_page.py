@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Any, cast
 
 import dash_mantine_components as dmc
@@ -10,15 +11,15 @@ from dash.dcc import Store
 from dash.exceptions import PreventUpdate
 from structlog.stdlib import get_logger
 
-from dltrack.models import EntityType, Scope, constants, has_scope
+from dltrack.models import AuditAction, EntityType, Scope, constants, has_scope
 from dltrack.plugins.backend import artifact_purge_worker
 from dltrack.plugins.pages._dash_helpers import require_triggered_id
-from dltrack.serve import get_current_user, get_data_store
+from dltrack.serve import get_auth_provider, get_current_user, get_data_store, get_installed_plugins
 
 if TYPE_CHECKING:
     from dash.development.base_component import Component
 
-    from dltrack.models import AuditLogEntry, DataStore, User
+    from dltrack.models import AuditLogEntry, DataStore, InstalledPlugin, User
 
 _log = get_logger(__name__)
 
@@ -177,35 +178,123 @@ def _render_trash(store: DataStore[...]) -> Component:
     return dmc.Stack(sections, gap="lg")
 
 
+_AUDIT_ACTION_COLORS: dict[AuditAction, str] = {
+    AuditAction.SOFT_DELETE: "orange",
+    AuditAction.RESTORE: "teal",
+    AuditAction.PURGE: "red",
+}
+
+
+def _format_audit_details(details: str) -> str:
+    """Cascade counts as `Experiment: 3, Run: 12` instead of a raw JSON blob."""
+    parsed = cast("dict[str, int]", json.loads(details))
+    if not parsed:
+        return "-"
+    return ", ".join(f"{k}: {v}" for k, v in parsed.items())
+
+
+def _audit_log_row(entry: AuditLogEntry) -> Component:
+    return dmc.TableTr(
+        [
+            dmc.TableTd(
+                f"{entry.timestamp_utc.isoformat(sep=' ', timespec='seconds')} UTC",
+                style={"whiteSpace": "nowrap"},
+            ),
+            dmc.TableTd(f"User #{entry.user_id}"),
+            dmc.TableTd(
+                dmc.Badge(
+                    entry.action.value.replace("_", " "),
+                    color=_AUDIT_ACTION_COLORS[entry.action],
+                    variant="light",
+                    size="sm",
+                )
+            ),
+            dmc.TableTd(f"{entry.entity_type.value.capitalize()} #{entry.entity_id}"),
+            dmc.TableTd(_format_audit_details(entry.details), c="dimmed"),
+        ]
+    )
+
+
 def _render_audit_log(store: DataStore[...], actor: User) -> Component:
     if not has_scope(actor, Scope.AUDIT_LOG_READ):
         return dmc.Text("You don't have permission to view the audit log.", c="dimmed")
     entries: list[AuditLogEntry] = list(store.list_audit_log(actor, limit=200))
     if not entries:
         return dmc.Text("No audit log entries yet.", c="dimmed")
-    return html.Table(
+    return dmc.Table(
         [
-            html.Thead(
-                html.Tr(
-                    [html.Th(h) for h in ("Time", "User", "Action", "Entity", "Details")],
-                )
+            dmc.TableThead(
+                dmc.TableTr([dmc.TableTh(h) for h in ("Time", "User", "Action", "Entity", "Details")])
             ),
-            html.Tbody(
+            dmc.TableTbody([_audit_log_row(entry) for entry in entries]),
+        ],
+        striped=True,
+        highlightOnHover=True,
+        withTableBorder=True,
+        verticalSpacing="xs",
+    )
+
+
+def _plugin_row(plugin: InstalledPlugin) -> Component:
+    return dmc.Paper(
+        dmc.Stack(
+            [
+                dmc.Text(plugin.name, fw=600, size="sm", ff="monospace"),
+                *([dmc.Text(plugin.description, c="dimmed", size="xs")] if plugin.description else []),
+            ],
+            gap=2,
+        ),
+        withBorder=True,
+        radius="md",
+        p="sm",
+    )
+
+
+def _render_about(
+    store: DataStore[...], actor: User, auth_provider_name: str, plugins: list[InstalledPlugin]
+) -> Component:
+    return dmc.Stack(
+        [
+            dmc.Paper(
+                dmc.Stack(
+                    [
+                        dmc.Text("Application", fw=700, size="sm", tt="uppercase", c="dimmed"),
+                        dmc.Group(
+                            [dmc.Text("Signed in as", size="sm"), dmc.Text(actor.username, fw=600, size="sm")]
+                        ),
+                        dmc.Group(
+                            [
+                                dmc.Text("Auth provider", size="sm"),
+                                dmc.Badge(auth_provider_name, variant="light", color="gray", size="sm"),
+                            ]
+                        ),
+                        dmc.Group(
+                            [
+                                dmc.Text("Storage backend", size="sm"),
+                                dmc.Badge(
+                                    getattr(store, "backend_name", store.__class__.__name__),
+                                    variant="light",
+                                    color="gray",
+                                    size="sm",
+                                ),
+                            ]
+                        ),
+                    ],
+                    gap="xs",
+                ),
+                withBorder=True,
+                radius="md",
+                p="md",
+            ),
+            dmc.Stack(
                 [
-                    html.Tr(
-                        [
-                            html.Td(entry.timestamp_utc.isoformat()),
-                            html.Td(str(entry.user_id)),
-                            html.Td(entry.action.value),
-                            html.Td(f"{entry.entity_type.value} {entry.entity_id}"),
-                            html.Td(entry.details, style={"fontFamily": "monospace", "fontSize": "0.85em"}),
-                        ]
-                    )
-                    for entry in entries
-                ]
+                    dmc.Text("Installed plugins", fw=700, size="sm", tt="uppercase", c="dimmed"),
+                    *[_plugin_row(p) for p in plugins],
+                ],
+                gap="xs",
             ),
         ],
-        style={"width": "100%", "borderCollapse": "collapse"},
+        gap="lg",
     )
 
 
@@ -219,12 +308,14 @@ def _admin_layout() -> Component:
                         [
                             dmc.TabsTab("Trash", value="trash"),
                             dmc.TabsTab("Audit Log", value="audit-log"),
+                            dmc.TabsTab("About", value="about"),
                         ]
                     ),
                     dmc.TabsPanel(html.Div(id=constants.ADMIN_TRASH_CONTENT_ID), value="trash", pt="md"),
                     dmc.TabsPanel(
                         html.Div(id=constants.ADMIN_AUDIT_LOG_CONTENT_ID), value="audit-log", pt="md"
                     ),
+                    dmc.TabsPanel(html.Div(id=constants.ADMIN_ABOUT_CONTENT_ID), value="about", pt="md"),
                 ],
                 id=constants.ADMIN_TABS_ID,
                 value="trash",
@@ -274,6 +365,17 @@ def _register_tab_callbacks(app: Dash) -> None:
             raise PreventUpdate
         store = get_data_store()
         return _render_audit_log(store, get_current_user(store))
+
+    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+        Output(constants.ADMIN_ABOUT_CONTENT_ID, "children"),
+        Input(constants.ADMIN_TABS_ID, "value"),
+    )
+    def render_about_tab(tab: str) -> Component:
+        if tab != "about":
+            raise PreventUpdate
+        store = get_data_store()
+        auth_provider_name = get_auth_provider().__class__.__name__
+        return _render_about(store, get_current_user(store), auth_provider_name, get_installed_plugins())
 
 
 def _register_restore_callback(app: Dash) -> None:

@@ -136,7 +136,27 @@ def test_render_audit_log_lists_a_recorded_action(store: SQLLiteStore) -> None:
     body_rows = rendered.children[1].children
     assert len(body_rows) == 1
     action_cell = body_rows[0].children[2]
-    assert action_cell.children == models.AuditAction.SOFT_DELETE.value
+    assert action_cell.children.children == "soft delete"
+
+
+def test_render_about_shows_the_signed_in_user_provider_and_backend(store: SQLLiteStore) -> None:
+    admin_user = store.get_or_create_user("admin")
+
+    rendered = admin._render_about(store, admin_user, "AnonymousAuthProvider", [])
+
+    rendered_str = str(rendered)
+    assert "admin" in rendered_str
+    assert "AnonymousAuthProvider" in rendered_str
+    assert "SQLLiteStore" in rendered_str
+
+
+def test_render_about_lists_installed_plugins(store: SQLLiteStore) -> None:
+    admin_user = store.get_or_create_user("admin")
+    plugin = models.InstalledPlugin.describe(admin)
+
+    rendered = admin._render_about(store, admin_user, "AnonymousAuthProvider", [plugin])
+
+    assert "dltrack.plugins.pages.simple_admin_page" in str(rendered)
 
 
 def test_admin_layout_contains_tabs_and_purge_modal() -> None:
