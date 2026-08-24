@@ -6,7 +6,18 @@ from dltrack.serve._backend._data_store import (
     get_data_store,
     set_artifact_store,
     set_data_store,
+    wait_for_artifact_store,
+    wait_for_data_store,
 )
 from dltrack.serve.app import app
 
-__all__ = ["app", "get_artifact_store", "get_data_store", "set_artifact_store", "set_data_store", "sql"]
+__all__ = [
+    "app",
+    "get_artifact_store",
+    "get_data_store",
+    "set_artifact_store",
+    "set_data_store",
+    "sql",
+    "wait_for_artifact_store",
+    "wait_for_data_store",
+]

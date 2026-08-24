@@ -37,6 +37,9 @@ class _FakeArtifactStore:
     def download_artifact(self, ref: AnyUrl) -> Response:
         raise NotImplementedError
 
+    def delete_artifact(self, ref: AnyUrl) -> None:
+        raise NotImplementedError
+
 
 @pytest.mark.parametrize("header_value", [None, "", "   "])
 def test_resolve_actor_falls_back_to_anonymous_for_missing_or_blank_header(

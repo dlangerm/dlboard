@@ -15,13 +15,12 @@ from threading import Thread
 from typing import TYPE_CHECKING, ClassVar, Mapping, Self, override
 from uuid import uuid4
 
-from dash.exceptions import AppNotFoundError
 from flask import Response, send_from_directory
 from pydantic_settings import BaseSettings
 from structlog.stdlib import get_logger
 
 from dltrack import models
-from dltrack.serve import get_data_store, set_artifact_store
+from dltrack.serve import set_artifact_store, wait_for_data_store
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -31,7 +30,6 @@ if TYPE_CHECKING:
     from werkzeug.datastructures import FileStorage
 
     from dltrack.models._artifact import Artifact, NewArtifact
-    from dltrack.models._data_store import DataStore
 
 
 _log = get_logger(__name__)
@@ -88,18 +86,9 @@ class FSArtifactStore(models.ArtifactStore[Path, int]):
         self._save_artifact_thread.start()
         self._store_artifact_proc.start()
 
-    def _get_data_store_or_wait_for_app(self) -> DataStore[...]:
-        try:
-            return get_data_store()
-        except AppNotFoundError:
-            time.sleep(1)
-            return self._get_data_store_or_wait_for_app()
-        except KeyboardInterrupt:
-            raise
-
     def _ingest_stored_artifacts(self) -> None:
         try:
-            store = self._get_data_store_or_wait_for_app()
+            store = wait_for_data_store()
         except Exception:
             _log.exception("failed to get data store")
             raise
@@ -174,6 +163,13 @@ class FSArtifactStore(models.ArtifactStore[Path, int]):
         assert ref.scheme == self.protocol
         _log.debug("Downloading protocol %s %s in folder %s", ref.scheme, ref.path, self._root_directory)
         return send_from_directory(self._root_directory, str(ref.path).lstrip("/"))
+
+    @override
+    def delete_artifact(self, ref: AnyUrl) -> None:
+        assert ref.scheme == self.protocol
+        path = self._root_directory / str(ref.path).lstrip("/")
+        _log.info("Deleting artifact blob at %s", path)
+        path.unlink(missing_ok=True)
 
 
 class AppSettings(BaseSettings):

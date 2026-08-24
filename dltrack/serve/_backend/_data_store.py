@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import time
 from functools import cache
 from typing import TYPE_CHECKING, Final, cast
 
 from dash import Dash, get_app
+from dash.exceptions import AppNotFoundError
 from structlog.stdlib import get_logger
 
 _log = get_logger(__name__)
@@ -54,3 +56,27 @@ def get_artifact_store() -> ArtifactStore[...]:
         msg = "Data store was not set for the app"
         raise AttributeError(msg)
     return cast("ArtifactStore[...]", getattr(app, _DLTRACK_ARTIFACT_STORE))
+
+
+def wait_for_data_store() -> DataStore[...]:
+    """
+    Like `get_data_store`, but retries once a second until the app exists.
+
+    For a plugin whose own `plug()` runs before another plugin has called `set_data_store` yet, or
+    whose background thread starts before `Dash.__init__` (which runs every plugin's `plug()`) has
+    even finished -- plugin registration order isn't guaranteed.
+    """
+    try:
+        return get_data_store()
+    except AppNotFoundError:
+        time.sleep(1)
+        return wait_for_data_store()
+
+
+def wait_for_artifact_store() -> ArtifactStore[...]:
+    """Like `get_artifact_store`, but retries once a second until the app exists. See `wait_for_data_store`."""
+    try:
+        return get_artifact_store()
+    except AppNotFoundError:
+        time.sleep(1)
+        return wait_for_artifact_store()
