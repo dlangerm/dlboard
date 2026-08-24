@@ -19,6 +19,30 @@ if TYPE_CHECKING:
 
 _log = get_logger(__name__)
 
+# Declares which `*_id` columns are real foreign keys, and what they reference. Ordered so that
+# a referenced table is always created before the table that references it (SQLite will accept
+# forward references too, but keeping this in dependency order keeps the migration rebuild in
+# `_migrations.py`, which walks this same map, easy to reason about).
+FOREIGN_KEYS: dict[type[BaseModel], dict[str, type[BaseModel]]] = {
+    models.Experiment: {"project_id": models.Project},
+    models.Run: {"experiment_id": models.Experiment},
+    models.UnderlyingMetricTableEntry: {"experiment_id": models.Experiment, "run_id": models.Run},
+    models.HyperParams: {"experiment_id": models.Experiment, "run_id": models.Run},
+    models.Artifact: {"experiment_id": models.Experiment, "run_id": models.Run},
+    models.Page: {"run_id": models.Run, "experiment_id": models.Experiment, "project_id": models.Project},
+}
+
+# Dependency order: every table appears after the tables its foreign keys point to.
+TABLES: tuple[type[BaseModel], ...] = (
+    models.Project,
+    models.Experiment,
+    models.Run,
+    models.UnderlyingMetricTableEntry,
+    models.HyperParams,
+    models.Artifact,
+    models.Page,
+)
+
 
 def _resolve_page_scope(
     *, run_id: int | None, experiment_id: int | None, project_id: int | None
@@ -42,16 +66,10 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
 
     def __init__(self) -> None:
         """Initialize the underlying tables."""
-        for table in {
-            models.Project,
-            models.Experiment,
-            models.Run,
-            models.UnderlyingMetricTableEntry,
-            models.HyperParams,
-            models.Page,
-            models.Artifact,
-        }:
-            list(self._execute_raw_sql(sql.create_table_sql(table)))
+        for table in TABLES:
+            list(self._execute_raw_sql(sql.create_table_sql(table, FOREIGN_KEYS.get(table))))
+
+        self._run_migrations()
 
         list(
             self._execute_raw_sql(
@@ -68,6 +86,17 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
                 )
             )
         )
+
+    @abstractmethod
+    def _run_migrations(self) -> None:
+        """
+        Bring the underlying schema up to date.
+
+        Called once at startup, after the initial `CREATE TABLE IF NOT EXISTS` pass, so a brand
+        new database already has every column/constraint and this is a no-op, while an existing
+        database gets migrated forward. Implementations must hard-fail (raise) rather than swallow
+        errors if a migration can't be applied cleanly.
+        """
 
     @abstractmethod
     def _execute_raw_sql(

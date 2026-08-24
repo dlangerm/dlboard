@@ -94,6 +94,26 @@ def test_create_table_sql_success() -> None:
     assert "name TEXT NOT NULL" in statement
 
 
+class _Parent(BaseModel, frozen=True, extra="forbid"):
+    id: int
+    name: str
+
+
+class _Child(BaseModel, frozen=True, extra="forbid"):
+    id: int
+    parent_id: int
+
+
+def test_create_table_sql_emits_foreign_key_clause() -> None:
+    statement = _sql.create_table_sql(_Child, {"parent_id": _Parent})
+    assert "FOREIGN KEY (parent_id) REFERENCES _Parent(id)" in statement
+
+
+def test_create_table_sql_foreign_key_unknown_column_raises() -> None:
+    with pytest.raises(AssertionError, match="not present in model"):
+        _sql.create_table_sql(_Child, {"nope": _Parent})
+
+
 def test_create_index_sql_unknown_column_raises() -> None:
     with pytest.raises(AssertionError, match="not present in model"):
         _sql.create_index_sql(_WithId, ["nope"])
