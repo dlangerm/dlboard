@@ -12,6 +12,7 @@ from structlog.stdlib import get_logger
 
 from dltrack import models
 from dltrack.serve import sql
+from dltrack.serve._backend._app_state import APP_STATE_ROW_ID, AppState
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -24,16 +25,26 @@ _log = get_logger(__name__)
 # forward references too, but keeping this in dependency order keeps the migration rebuild in
 # `_migrations.py`, which walks this same map, easy to reason about).
 FOREIGN_KEYS: dict[type[BaseModel], dict[str, type[BaseModel]]] = {
-    models.Experiment: {"project_id": models.Project},
-    models.Run: {"experiment_id": models.Experiment},
+    models.Project: {"created_by": models.User},
+    models.Experiment: {"project_id": models.Project, "created_by": models.User},
+    models.Run: {"experiment_id": models.Experiment, "created_by": models.User},
     models.UnderlyingMetricTableEntry: {"experiment_id": models.Experiment, "run_id": models.Run},
     models.HyperParams: {"experiment_id": models.Experiment, "run_id": models.Run},
-    models.Artifact: {"experiment_id": models.Experiment, "run_id": models.Run},
+    models.Artifact: {
+        "experiment_id": models.Experiment,
+        "run_id": models.Run,
+        "created_by": models.User,
+    },
     models.Page: {"run_id": models.Run, "experiment_id": models.Experiment, "project_id": models.Project},
+}
+
+UNIQUE_COLUMNS: dict[type[BaseModel], list[str]] = {
+    models.User: ["username"],
 }
 
 # Dependency order: every table appears after the tables its foreign keys point to.
 TABLES: tuple[type[BaseModel], ...] = (
+    models.User,
     models.Project,
     models.Experiment,
     models.Run,
@@ -66,8 +77,20 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
 
     def __init__(self) -> None:
         """Initialize the underlying tables."""
+        list(self._execute_raw_sql(sql.create_table_sql(AppState)))
+        list(
+            self._execute_raw_sql(
+                f"INSERT OR IGNORE INTO {AppState.__name__} (id, bootstrap_admin_assigned) "
+                f"VALUES ({APP_STATE_ROW_ID}, 0);"
+            )
+        )
+
         for table in TABLES:
-            list(self._execute_raw_sql(sql.create_table_sql(table, FOREIGN_KEYS.get(table))))
+            list(
+                self._execute_raw_sql(
+                    sql.create_table_sql(table, FOREIGN_KEYS.get(table), UNIQUE_COLUMNS.get(table))
+                )
+            )
 
         self._run_migrations()
 
@@ -147,6 +170,49 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         leave the generator suspended mid-write and the change uncommitted.
         """
         return list(rows)[0]  # noqa: RUF015 -- must fully drain `rows` to commit; see docstring
+
+    def get_or_create_user(self, username: str) -> models.User:
+        """
+        Get the user for `username`, creating it if this is the first time it's been seen.
+
+        A brand new user is granted no scopes. The exception is the very first user any store
+        instance ever creates: it atomically claims a one-time "bootstrap admin" grant
+        (`Scope.ALL`), via `AppState.bootstrap_admin_assigned`, so a single local user gets full
+        permissions with zero configuration. Every user after that gets nothing, so this never
+        silently generalizes into "everyone who connects is admin" if the same database ends up
+        shared by more than one person.
+        """
+        existing = self._consume_row_iterator(
+            self._execute_sql_query(models.User, sql.get_all_by_field(models.User, "username", username))
+        )
+        if existing:
+            return existing[0]
+
+        insert_statement, insert_values = sql.insert_or_ignore(models.User, models.NewUser(username=username))
+        self._consume_row_iterator(self._execute_sql_query(models.User, insert_statement, insert_values))
+        user = next(
+            self._execute_sql_query(models.User, sql.get_all_by_field(models.User, "username", username))
+        )
+
+        # A single `UPDATE ... WHERE bootstrap_admin_assigned = 0` is atomic under SQLite's
+        # serialized writes: if two processes race this for the first time simultaneously, only one
+        # can ever see (and flip) the flag while it's still 0.
+        claimed = list(
+            self._execute_raw_sql(
+                f"UPDATE {AppState.__name__} SET bootstrap_admin_assigned = 1 "
+                f"WHERE id = {APP_STATE_ROW_ID} AND bootstrap_admin_assigned = 0 RETURNING id;"
+            )
+        )
+        if not claimed:
+            return user
+
+        _log.info("Granting bootstrap admin scopes to user %s (%s)", user.id, username)
+        update_statement, update_values = sql.update(
+            models.User, user.model_copy(update={"scopes": [models.Scope.ALL]})
+        )
+        return self._consume_row_iterator(
+            self._execute_sql_query(models.User, update_statement, update_values)
+        )[0]
 
     def create_project(self, project: models.NewProject) -> models.Project:
         """Create a new project."""

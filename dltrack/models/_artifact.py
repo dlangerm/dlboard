@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import typing
 
-from pydantic import BaseModel
+import pendulum
+from pydantic import AwareDatetime, BaseModel, Field
 
 if typing.TYPE_CHECKING:
     from pathlib import Path
@@ -54,6 +55,12 @@ class NewArtifact(BaseModel, frozen=True, extra="forbid"):
 
     step: int | None
     """If given, log this artifact for a particular step, useful for visualization."""
+
+    created_by: int | None = None
+    """The user who logged this artifact, if known."""
+
+    created_at: AwareDatetime = Field(default_factory=lambda: pendulum.now(pendulum.UTC))
+    """When this artifact was logged."""
 
 
 class Artifact(NewArtifact, frozen=True, extra="forbid"):

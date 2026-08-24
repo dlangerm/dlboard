@@ -1,6 +1,7 @@
 """A project."""
 
-from pydantic import BaseModel
+import pendulum
+from pydantic import AwareDatetime, BaseModel, Field
 
 
 class NewProject(BaseModel, frozen=True, extra="forbid"):
@@ -11,6 +12,12 @@ class NewProject(BaseModel, frozen=True, extra="forbid"):
 
     description: str
     """A description of the project."""
+
+    created_by: int | None = None
+    """The user who created this project, if known."""
+
+    created_at: AwareDatetime = Field(default_factory=lambda: pendulum.now(pendulum.UTC))
+    """When this project was created."""
 
 
 class Project(NewProject, frozen=True, extra="forbid"):

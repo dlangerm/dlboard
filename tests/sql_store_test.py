@@ -160,6 +160,22 @@ def test_get_or_create_page_requires_exactly_one_id(
         )
 
 
+def test_get_or_create_user_grants_bootstrap_scopes_to_the_first_user_only(store: SQLLiteStore) -> None:
+    first = store.get_or_create_user("alice")
+    second = store.get_or_create_user("bob")
+
+    assert first.scopes == [models.Scope.ALL]
+    assert second.scopes == []
+
+
+def test_get_or_create_user_is_idempotent(store: SQLLiteStore) -> None:
+    first = store.get_or_create_user("alice")
+    again = store.get_or_create_user("alice")
+
+    assert again == first
+    assert list(store._execute_raw_sql("SELECT count(*) FROM User")) == [(1,)]
+
+
 def test_get_or_create_page_is_idempotent_and_updatable(store: SQLLiteStore, experiment_id: int) -> None:
     page = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
     again = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
