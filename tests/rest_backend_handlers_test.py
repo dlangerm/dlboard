@@ -95,7 +95,7 @@ def test_handle_delete_and_restore_project_attribute_the_actor(store: SQLLiteSto
     backend.handle_delete_project(store, project.id, actor)
 
     assert project.id not in {p.id for p in store.get_projects()}
-    (entry,) = list(store.list_audit_log())
+    (entry,) = list(store.list_audit_log(actor))
     assert entry.user_id == actor.id
     assert entry.action == models.AuditAction.SOFT_DELETE
 

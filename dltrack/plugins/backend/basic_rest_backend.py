@@ -3,7 +3,7 @@
 import itertools
 from pathlib import Path
 from time import perf_counter
-from typing import Any, Iterable, Literal
+from typing import Any, Callable, Iterable, Literal
 
 import dash
 import requests
@@ -151,49 +151,56 @@ def handle_log_artifacts(
 
 
 def handle_delete_project(store: DataStore[...], project_id: int, actor: models.User) -> None:
-    """Soft-delete a project, attributed to `actor`."""
-    store.delete_project(project_id, actor_id=actor.id)
+    """Soft-delete a project, attributed to `actor`. Raises `PermissionError` without `Scope.PROJECT_DELETE`."""
+    store.delete_project(project_id, actor)
 
 
 def handle_restore_project(store: DataStore[...], project_id: int, actor: models.User) -> None:
-    """Restore a soft-deleted project, attributed to `actor`."""
-    store.restore_project(project_id, actor_id=actor.id)
+    """Restore a soft-deleted project, attributed to `actor`. Raises `PermissionError` without `Scope.RESTORE`."""
+    store.restore_project(project_id, actor)
 
 
 def handle_delete_experiment(store: DataStore[...], experiment_id: int, actor: models.User) -> None:
-    """Soft-delete an experiment, attributed to `actor`."""
-    store.delete_experiment(experiment_id, actor_id=actor.id)
+    """Soft-delete an experiment, attributed to `actor`. Raises `PermissionError` without `Scope.EXPERIMENT_DELETE`."""
+    store.delete_experiment(experiment_id, actor)
 
 
 def handle_restore_experiment(store: DataStore[...], experiment_id: int, actor: models.User) -> None:
-    """Restore a soft-deleted experiment, attributed to `actor`."""
-    store.restore_experiment(experiment_id, actor_id=actor.id)
+    """Restore a soft-deleted experiment, attributed to `actor`. Raises `PermissionError` without `Scope.RESTORE`."""
+    store.restore_experiment(experiment_id, actor)
 
 
 def handle_delete_run(store: DataStore[...], run_id: int, actor: models.User) -> None:
-    """Soft-delete a run, attributed to `actor`."""
-    store.delete_run(run_id, actor_id=actor.id)
+    """Soft-delete a run, attributed to `actor`. Raises `PermissionError` without `Scope.RUN_DELETE`."""
+    store.delete_run(run_id, actor)
 
 
 def handle_restore_run(store: DataStore[...], run_id: int, actor: models.User) -> None:
-    """Restore a soft-deleted run, attributed to `actor`."""
-    store.restore_run(run_id, actor_id=actor.id)
+    """Restore a soft-deleted run, attributed to `actor`. Raises `PermissionError` without `Scope.RESTORE`."""
+    store.restore_run(run_id, actor)
 
 
 def handle_delete_artifact(store: DataStore[...], artifact_id: int, actor: models.User) -> None:
-    """Soft-delete a single artifact, attributed to `actor`."""
-    store.delete_artifact(artifact_id, actor_id=actor.id)
+    """Soft-delete a single artifact, attributed to `actor`. Raises `PermissionError` without `Scope.ARTIFACT_DELETE`."""
+    store.delete_artifact(artifact_id, actor)
 
 
 def handle_restore_artifact(store: DataStore[...], artifact_id: int, actor: models.User) -> None:
-    """Restore a soft-deleted artifact, attributed to `actor`."""
-    store.restore_artifact(artifact_id, actor_id=actor.id)
+    """Restore a soft-deleted artifact, attributed to `actor`. Raises `PermissionError` without `Scope.RESTORE`."""
+    store.restore_artifact(artifact_id, actor)
 
 
 # -- Routes -----------------------------------------------------------------------------------
+#
+# Plain functions, not `@dash.hooks.route`-decorated -- that decorator registers into a
+# process-wide global registry the moment this module is *imported*, regardless of whether it's
+# ever plugged into an app. That would mean anything importing this module for another reason
+# (e.g. the client importing `BasicDltrackAPI`) risks registering these routes globally, and a
+# process building more than one `Dash` app would register them twice. `_ROUTES` + `plug()` below
+# register them onto one specific `app.server` instead, exactly once, only when this plugin is
+# actually used.
 
 
-@dash.hooks.route(create_path(models.LoggedMetrics), methods=["POST"])
 def log_batch() -> dict[str, str]:
     """Log a batch of metrics."""
     try:
@@ -205,7 +212,6 @@ def log_batch() -> dict[str, str]:
     return {}
 
 
-@dash.hooks.route(create_path(models.HyperParams), methods=["POST"])
 def log_hyperparams() -> dict[str, str]:
     """Log the hyperparameters for an experiment."""
     try:
@@ -219,7 +225,6 @@ def log_hyperparams() -> dict[str, str]:
     return {}
 
 
-@dash.hooks.route(create_path(models.Experiment), methods=["POST"])
 def create_experiment() -> dict[str, Any]:
     """Create a new experiment for a project."""
     try:
@@ -230,7 +235,6 @@ def create_experiment() -> dict[str, Any]:
         raise
 
 
-@dash.hooks.route(create_path(models.Run), methods=["POST"])
 def create_run() -> dict[str, Any]:
     """Create a new run for an experiment."""
     try:
@@ -242,7 +246,6 @@ def create_run() -> dict[str, Any]:
         raise
 
 
-@dash.hooks.route(create_path(models.Project), methods=["POST"])
 def create_project() -> dict[str, Any]:
     """Create a new project."""
     try:
@@ -253,7 +256,6 @@ def create_project() -> dict[str, Any]:
         raise
 
 
-@dash.hooks.route(create_path(models.Artifact), methods=["POST"])
 def log_artifact() -> dict[str, str]:
     """Log an artifact with metadata and files."""
     try:
@@ -279,7 +281,6 @@ def log_artifact() -> dict[str, str]:
     return {}
 
 
-@dash.hooks.route("artifact/<string:artifact_url>", methods=["GET"])  # pyright: ignore[reportArgumentType]
 def download_artifact(artifact_url: str) -> Response:
     """Download an artifact at a specified url."""
     try:
@@ -291,7 +292,6 @@ def download_artifact(artifact_url: str) -> Response:
         raise
 
 
-@dash.hooks.route(entity_path(models.Project), methods=["DELETE"])  # pyright: ignore[reportArgumentType]
 def delete_project(entity_id: int) -> dict[str, str]:
     """Soft-delete a project and cascade to its experiments, runs, and artifacts."""
     try:
@@ -303,7 +303,6 @@ def delete_project(entity_id: int) -> dict[str, str]:
     return {}
 
 
-@dash.hooks.route(f"{entity_path(models.Project)}/restore", methods=["POST"])  # pyright: ignore[reportArgumentType]
 def restore_project(entity_id: int) -> dict[str, str]:
     """Restore a soft-deleted project and everything deleted with it."""
     try:
@@ -315,7 +314,6 @@ def restore_project(entity_id: int) -> dict[str, str]:
     return {}
 
 
-@dash.hooks.route(entity_path(models.Experiment), methods=["DELETE"])  # pyright: ignore[reportArgumentType]
 def delete_experiment(entity_id: int) -> dict[str, str]:
     """Soft-delete an experiment and cascade to its runs and artifacts."""
     try:
@@ -327,7 +325,6 @@ def delete_experiment(entity_id: int) -> dict[str, str]:
     return {}
 
 
-@dash.hooks.route(f"{entity_path(models.Experiment)}/restore", methods=["POST"])  # pyright: ignore[reportArgumentType]
 def restore_experiment(entity_id: int) -> dict[str, str]:
     """Restore a soft-deleted experiment and everything deleted with it."""
     try:
@@ -339,7 +336,6 @@ def restore_experiment(entity_id: int) -> dict[str, str]:
     return {}
 
 
-@dash.hooks.route(entity_path(models.Run), methods=["DELETE"])  # pyright: ignore[reportArgumentType]
 def delete_run(entity_id: int) -> dict[str, str]:
     """Soft-delete a run and cascade to its artifacts."""
     try:
@@ -351,7 +347,6 @@ def delete_run(entity_id: int) -> dict[str, str]:
     return {}
 
 
-@dash.hooks.route(f"{entity_path(models.Run)}/restore", methods=["POST"])  # pyright: ignore[reportArgumentType]
 def restore_run(entity_id: int) -> dict[str, str]:
     """Restore a soft-deleted run and everything deleted with it."""
     try:
@@ -363,7 +358,6 @@ def restore_run(entity_id: int) -> dict[str, str]:
     return {}
 
 
-@dash.hooks.route(entity_path(models.Artifact), methods=["DELETE"])  # pyright: ignore[reportArgumentType]
 def delete_artifact(entity_id: int) -> dict[str, str]:
     """Soft-delete a single artifact."""
     try:
@@ -375,7 +369,6 @@ def delete_artifact(entity_id: int) -> dict[str, str]:
     return {}
 
 
-@dash.hooks.route(f"{entity_path(models.Artifact)}/restore", methods=["POST"])  # pyright: ignore[reportArgumentType]
 def restore_artifact(entity_id: int) -> dict[str, str]:
     """Restore a soft-deleted artifact."""
     try:
@@ -385,3 +378,39 @@ def restore_artifact(entity_id: int) -> dict[str, str]:
         _log.exception("Error restoring artifact %s", entity_id)
         raise
     return {}
+
+
+_ROUTES: tuple[tuple[str, list[str], Callable[..., Any]], ...] = (
+    (create_path(models.LoggedMetrics), ["POST"], log_batch),
+    (create_path(models.HyperParams), ["POST"], log_hyperparams),
+    (create_path(models.Experiment), ["POST"], create_experiment),
+    (create_path(models.Run), ["POST"], create_run),
+    (create_path(models.Project), ["POST"], create_project),
+    (create_path(models.Artifact), ["POST"], log_artifact),
+    ("artifact/<string:artifact_url>", ["GET"], download_artifact),
+    (entity_path(models.Project), ["DELETE"], delete_project),
+    (f"{entity_path(models.Project)}/restore", ["POST"], restore_project),
+    (entity_path(models.Experiment), ["DELETE"], delete_experiment),
+    (f"{entity_path(models.Experiment)}/restore", ["POST"], restore_experiment),
+    (entity_path(models.Run), ["DELETE"], delete_run),
+    (f"{entity_path(models.Run)}/restore", ["POST"], restore_run),
+    (entity_path(models.Artifact), ["DELETE"], delete_artifact),
+    (f"{entity_path(models.Artifact)}/restore", ["POST"], restore_artifact),
+)
+
+
+def _handle_permission_error(err: PermissionError) -> tuple[dict[str, str], int]:
+    """Map a missing-scope `PermissionError` to a 403, instead of Flask's default 500."""
+    return {"error": str(err)}, 403
+
+
+def plug(app: dash.Dash) -> None:
+    """Register this module's REST routes and the `PermissionError` -> 403 mapping onto `app`."""
+    for path, methods, view_func in _ROUTES:
+        # `_ROUTES` paths are prefix-relative (no leading slash, see `create_path`/`entity_path`)
+        # -- mirrors how Dash's own `@dash.hooks.route`-registered routes get mounted, so this
+        # still works under a non-default `routes_pathname_prefix`.
+        prefix = str(app.config.routes_pathname_prefix)  # pyright: ignore[reportUnknownArgumentType,reportUnknownMemberType]
+        full_path = prefix + path
+        app.server.add_url_rule(full_path, endpoint=full_path, view_func=view_func, methods=methods)
+    app.server.errorhandler(PermissionError)(_handle_permission_error)

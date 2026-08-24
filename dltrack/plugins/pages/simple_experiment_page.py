@@ -1042,7 +1042,7 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
             msg = f"Experiment {experiment_id} not found"
             raise ValueError(msg)
         project_id = exp.project_id
-        store.delete_experiment(experiment_id, actor_id=get_current_user(store).id)
+        store.delete_experiment(experiment_id, get_current_user(store))
         return f"/project/{project_id}"
 
     register_delete_callbacks(
@@ -1088,7 +1088,7 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         if not n_clicks or not run_id:
             raise PreventUpdate
         store = get_data_store()
-        store.delete_run(int(run_id), actor_id=get_current_user(store).id)
+        store.delete_run(int(run_id), get_current_user(store))
         return f"/experiment/{experiment_id}", True, False
 
     # Opens/closes independently of edit mode — you can manage panels without ever needing to

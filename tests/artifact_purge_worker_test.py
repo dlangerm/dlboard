@@ -71,7 +71,7 @@ def _queue_purge_tasks(store: SQLLiteStore, count: int) -> int:
             for i in range(count)
         ]
     )
-    store.delete_project(project_id, actor_id=admin.id)
+    store.delete_project(project_id, admin)
     store.purge_project(project_id, admin)
     return admin.id
 

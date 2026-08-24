@@ -10,6 +10,8 @@ from dash import Dash, get_app
 from dash.exceptions import AppNotFoundError
 from structlog.stdlib import get_logger
 
+from dltrack.serve._backend._scope_enforcement import ScopeEnforcingDataStore
+
 _log = get_logger(__name__)
 
 
@@ -21,12 +23,17 @@ _DLTRACK_ARTIFACT_STORE: Final = "_dltrack_artifact_store_"
 
 
 def set_data_store(app: Dash, store: DataStore[...]) -> None:
-    """Set the data store for a dash app, use this in plugins."""
+    """
+    Set the data store for a dash app, use this in plugins.
+
+    Always wraps `store` in `ScopeEnforcingDataStore` first -- every `DataStore`, regardless of
+    backend, gets scope enforcement whether its own implementation checks or not.
+    """
     if hasattr(app, _DLTRACK_STORE_ATTRIBUTE):
         msg = "Refusing to overwrite an existing set data store."
         raise AttributeError(msg)
     _log.info("set data store to %s", store.__class__.__name__)
-    setattr(app, _DLTRACK_STORE_ATTRIBUTE, store)
+    setattr(app, _DLTRACK_STORE_ATTRIBUTE, ScopeEnforcingDataStore(store))
 
 
 def set_artifact_store(app: Dash, store: ArtifactStore[...]) -> None:

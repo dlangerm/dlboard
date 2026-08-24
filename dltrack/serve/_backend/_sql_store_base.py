@@ -622,15 +622,23 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         )
 
     def _soft_delete(
-        self, table: type[BaseModel], entity_id: int, actor_id: int, *, entity_type: models.EntityType
+        self,
+        table: type[BaseModel],
+        entity_id: int,
+        actor: models.User,
+        *,
+        entity_type: models.EntityType,
     ) -> None:
         """
         Soft-delete one row and cascade to every table `_cascade_targets` finds owned by it.
 
         Cascade is restricted to `SOFT_DELETABLE`, since only those tables have `deleted_at`. Only
         rows not already independently deleted are touched, so a child soft-deleted earlier on its
-        own keeps its original `deleted_at`.
+        own keeps its original `deleted_at`. Scope enforcement isn't this module's job -- see
+        `ScopeEnforcingDataStore`, which every `DataStore` (this one included) is wrapped in before
+        it's reachable from the running app.
         """
+        actor_id = actor.id
         cascade = _cascade_targets(table, within=SOFT_DELETABLE)
         # Counted *before* the mutation (same WHERE clause, same "not already deleted" guard) so the
         # audit row -- inserted in the same transaction as the mutation, right below -- can record
@@ -668,7 +676,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             raise ValueError(msg)
 
     def _restore(
-        self, table: type[BaseModel], entity_id: int, actor_id: int, *, entity_type: models.EntityType
+        self, table: type[BaseModel], entity_id: int, actor: models.User, *, entity_type: models.EntityType
     ) -> None:
         """
         Restore one soft-deleted row and cascade to dependents deleted at the exact same instant.
@@ -676,8 +684,10 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         Matching on the exact `deleted_at` timestamp (stamped once, atomically, across a whole
         delete cascade in `_soft_delete`) means a child that was independently soft-deleted at a
         different time -- before or after its parent -- keeps its own deletion and isn't
-        accidentally resurrected just because an ancestor is being restored.
+        accidentally resurrected just because an ancestor is being restored. Scope enforcement isn't
+        this module's job -- see `ScopeEnforcingDataStore`.
         """
+        actor_id = actor.id
         deleted_at = self._fetch_deleted_at(table, entity_id)
         if deleted_at is None:
             msg = f"{table.__name__} {entity_id} is not deleted"
@@ -740,22 +750,17 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         SQLite's `ON DELETE CASCADE` (see `FOREIGN_KEYS`/`ForeignKeyKind.OWNERSHIP`) handles
         removing every dependent row natively -- no per-table `DELETE` statements to enumerate here.
         The one irreversible action in this module -- everything else (soft-delete, restore) can be
-        undone -- so it's the one place that actually gates on a scope (`Scope.PURGE`) rather than
-        just recording who did it. Cascade counts for the audit log are computed with
-        `_cascade_targets`'s *full* (unfiltered) graph, since purge reaches metrics/hyperparams/pages
-        too, not just the soft-deletable entities -- and (unlike soft-delete/restore) counts matching
-        rows regardless of their own `deleted_at`, since purging a project removes everything under
-        it either way.
+        undone. Cascade counts for the audit log are computed with `_cascade_targets`'s *full*
+        (unfiltered) graph, since purge reaches metrics/hyperparams/pages too, not just the
+        soft-deletable entities -- and (unlike soft-delete/restore) counts matching rows regardless
+        of their own `deleted_at`, since purging a project removes everything under it either way.
 
         Every artifact blob about to be orphaned by the cascade gets one `ArtifactPurgeTask` row, in
         the same transaction as the delete, so a background worker can clean up the underlying
         `ArtifactStore` blobs afterward without risking losing track of one if the process dies
-        right after this commits.
+        right after this commits. Scope enforcement isn't this module's job -- see
+        `ScopeEnforcingDataStore`.
         """
-        if not models.has_scope(actor, models.Scope.PURGE):
-            msg = f"User {actor.id} lacks the {models.Scope.PURGE} scope"
-            raise PermissionError(msg)
-
         if self._fetch_deleted_at(table, entity_id) is None:
             msg = f"{table.__name__} {entity_id} must be soft-deleted before it can be purged"
             raise ValueError(msg)
@@ -785,58 +790,61 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             ]
         )
 
-    def delete_project(self, project_id: int, actor_id: int) -> None:
-        """Soft-delete a project and cascade to its experiments, runs, and artifacts."""
-        self._soft_delete(models.Project, project_id, actor_id, entity_type=models.EntityType.PROJECT)
+    def delete_project(self, project_id: int, actor: models.User) -> None:
+        """Soft-delete a project and cascade to its experiments, runs, and artifacts. Requires `Scope.PROJECT_DELETE`."""
+        self._soft_delete(models.Project, project_id, actor, entity_type=models.EntityType.PROJECT)
 
-    def restore_project(self, project_id: int, actor_id: int) -> None:
-        """Restore a soft-deleted project and every experiment/run/artifact deleted with it."""
-        self._restore(models.Project, project_id, actor_id, entity_type=models.EntityType.PROJECT)
+    def restore_project(self, project_id: int, actor: models.User) -> None:
+        """Restore a soft-deleted project and every experiment/run/artifact deleted with it. Requires `Scope.RESTORE`."""
+        self._restore(models.Project, project_id, actor, entity_type=models.EntityType.PROJECT)
 
     def purge_project(self, project_id: int, actor: models.User) -> None:
         """Permanently delete an already soft-deleted project and everything under it."""
         self._purge(models.Project, project_id, actor, entity_type=models.EntityType.PROJECT)
 
-    def delete_experiment(self, experiment_id: int, actor_id: int) -> None:
-        """Soft-delete an experiment and cascade to its runs and artifacts."""
-        self._soft_delete(
-            models.Experiment, experiment_id, actor_id, entity_type=models.EntityType.EXPERIMENT
-        )
+    def delete_experiment(self, experiment_id: int, actor: models.User) -> None:
+        """Soft-delete an experiment and cascade to its runs and artifacts. Requires `Scope.EXPERIMENT_DELETE`."""
+        self._soft_delete(models.Experiment, experiment_id, actor, entity_type=models.EntityType.EXPERIMENT)
 
-    def restore_experiment(self, experiment_id: int, actor_id: int) -> None:
-        """Restore a soft-deleted experiment and every run/artifact deleted with it."""
-        self._restore(models.Experiment, experiment_id, actor_id, entity_type=models.EntityType.EXPERIMENT)
+    def restore_experiment(self, experiment_id: int, actor: models.User) -> None:
+        """Restore a soft-deleted experiment and every run/artifact deleted with it. Requires `Scope.RESTORE`."""
+        self._restore(models.Experiment, experiment_id, actor, entity_type=models.EntityType.EXPERIMENT)
 
     def purge_experiment(self, experiment_id: int, actor: models.User) -> None:
         """Permanently delete an already soft-deleted experiment and everything under it."""
         self._purge(models.Experiment, experiment_id, actor, entity_type=models.EntityType.EXPERIMENT)
 
-    def delete_run(self, run_id: int, actor_id: int) -> None:
-        """Soft-delete a run and cascade to its artifacts."""
-        self._soft_delete(models.Run, run_id, actor_id, entity_type=models.EntityType.RUN)
+    def delete_run(self, run_id: int, actor: models.User) -> None:
+        """Soft-delete a run and cascade to its artifacts. Requires `Scope.RUN_DELETE`."""
+        self._soft_delete(models.Run, run_id, actor, entity_type=models.EntityType.RUN)
 
-    def restore_run(self, run_id: int, actor_id: int) -> None:
-        """Restore a soft-deleted run and every artifact deleted with it."""
-        self._restore(models.Run, run_id, actor_id, entity_type=models.EntityType.RUN)
+    def restore_run(self, run_id: int, actor: models.User) -> None:
+        """Restore a soft-deleted run and every artifact deleted with it. Requires `Scope.RESTORE`."""
+        self._restore(models.Run, run_id, actor, entity_type=models.EntityType.RUN)
 
     def purge_run(self, run_id: int, actor: models.User) -> None:
         """Permanently delete an already soft-deleted run and everything under it."""
         self._purge(models.Run, run_id, actor, entity_type=models.EntityType.RUN)
 
-    def delete_artifact(self, artifact_id: int, actor_id: int) -> None:
-        """Soft-delete a single artifact (a leaf -- nothing depends on it)."""
-        self._soft_delete(models.Artifact, artifact_id, actor_id, entity_type=models.EntityType.ARTIFACT)
+    def delete_artifact(self, artifact_id: int, actor: models.User) -> None:
+        """Soft-delete a single artifact (a leaf -- nothing depends on it). Requires `Scope.ARTIFACT_DELETE`."""
+        self._soft_delete(models.Artifact, artifact_id, actor, entity_type=models.EntityType.ARTIFACT)
 
-    def restore_artifact(self, artifact_id: int, actor_id: int) -> None:
-        """Restore a soft-deleted artifact."""
-        self._restore(models.Artifact, artifact_id, actor_id, entity_type=models.EntityType.ARTIFACT)
+    def restore_artifact(self, artifact_id: int, actor: models.User) -> None:
+        """Restore a soft-deleted artifact. Requires `Scope.RESTORE`."""
+        self._restore(models.Artifact, artifact_id, actor, entity_type=models.EntityType.ARTIFACT)
 
     def purge_artifact(self, artifact_id: int, actor: models.User) -> None:
         """Permanently delete an already soft-deleted artifact."""
         self._purge(models.Artifact, artifact_id, actor, entity_type=models.EntityType.ARTIFACT)
 
-    def list_audit_log(self, limit: int = 100, offset: int = 0) -> Iterator[models.AuditLogEntry]:
-        """List audit log entries, most recent first, for a trash/admin view."""
+    def list_audit_log(
+        self,
+        actor: models.User,  # noqa: ARG002 -- part of the `DataStore` contract; enforced by `ScopeEnforcingDataStore`
+        limit: int = 100,
+        offset: int = 0,
+    ) -> Iterator[models.AuditLogEntry]:
+        """List audit log entries, most recent first, for a trash/admin view. Requires `Scope.AUDIT_LOG_READ`."""
         statement = f"""
             SELECT * FROM {models.AuditLogEntry.__name__}
             ORDER BY timestamp_utc DESC
