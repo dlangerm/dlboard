@@ -9,7 +9,6 @@ import dash_mantine_components as dmc
 from dash import Dash, Input, Output, State, html
 
 from dltrack.models import NewExperiment, constants
-from dltrack.plugins.pages._actor import current_actor_id
 from dltrack.plugins.pages._dataframe_helpers import experiment_display_name
 from dltrack.plugins.pages._delete_confirm import (
     DeleteConfirmIds,
@@ -21,7 +20,7 @@ from dltrack.plugins.pages._description_editor import (
     register_edit_callbacks,
     render_header,
 )
-from dltrack.serve import get_data_store
+from dltrack.serve import get_current_user, get_data_store
 
 if TYPE_CHECKING:
     from dltrack.models import Experiment
@@ -185,7 +184,7 @@ def plug(app: Dash) -> None:
                 NewExperiment(
                     project_id=int(project_id),
                     name=new_experiment_name,
-                    created_by=current_actor_id(store),
+                    created_by=get_current_user(store).id,
                 )
             )
         return _list_experiments(project_id)
@@ -211,7 +210,7 @@ def plug(app: Dash) -> None:
 
     def _delete_project(project_id: int) -> str:
         store = get_data_store()
-        store.delete_project(project_id, actor_id=current_actor_id(store))
+        store.delete_project(project_id, actor_id=get_current_user(store).id)
         return "/"
 
     register_delete_callbacks(

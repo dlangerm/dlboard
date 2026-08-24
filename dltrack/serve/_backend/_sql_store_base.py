@@ -331,6 +331,12 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             self._execute_sql_query(models.User, update_statement, update_values)
         )
 
+    def update_user(self, user: models.User) -> models.User:
+        """Update a user, e.g. to grant/revoke scopes."""
+        _log.debug("updating user %s", user.id)
+        statement, values = sql.update(models.User, user)
+        return self._first_committed_row(self._execute_sql_query(models.User, statement, values))
+
     def create_project(self, project: models.NewProject) -> models.Project:
         """Create a new project."""
         _log.debug("Creating project with name %s", project.name)
