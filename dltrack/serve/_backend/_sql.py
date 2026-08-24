@@ -220,16 +220,26 @@ def update(table: type[BaseModel], model: BaseModel) -> tuple[str, dict[str, typ
 
 
 def insert(table: type[BaseModel], model: BaseModel) -> tuple[str, dict[str, typing.Any]]:
+    """
+    Build an `INSERT` for `model` into `table`.
+
+    Uses an explicit column list rather than positional `VALUES(...)` -- `model`'s class (typically
+    a `New*` type) doesn't have to declare every column `table` has (e.g. `deleted_at`/`deleted_by`
+    exist only on the stored `Project`/etc., never on `NewProject`); omitted columns are simply left
+    at their SQL-level default (NULL) instead of requiring positional arity to match exactly.
+    """
     sorted_keys = list(model.__class__.model_fields.keys())
     if ID_KEY in sorted_keys:
         msg = f"Creation object {model.__class__} must not contain an ID key"
         raise AssertionError(msg)
-    raw_values = ",".join([f":{k}" for k in [*sorted_keys, ID_KEY]])
+    columns = [*sorted_keys, ID_KEY]
+    raw_values = ",".join([f":{k}" for k in columns])
     values = serialize_base_model(model) | {ID_KEY: None}
 
     return (
         f"""
         INSERT INTO {table.__name__}
+        ({",".join(columns)})
         VALUES({raw_values})
         RETURNING *;
         """,
@@ -259,26 +269,29 @@ def insert_many(
     )
 
 
-def get_by_id(model: type[BaseModel], id: int) -> str:
+def get_by_id(model: type[BaseModel], id: int, *, exclude_deleted: bool = False) -> str:
     if ID_KEY not in model.model_fields:
         msg = f"Get object {model.__name__} must contain an ID key"
         raise AssertionError(msg)
 
+    deleted_clause = " AND deleted_at IS NULL" if exclude_deleted else ""
     return f"""
         SELECT *
         FROM {model.__name__}
-        WHERE {ID_KEY} = '{int(id)}';
+        WHERE {ID_KEY} = '{int(id)}'{deleted_clause};
     """
 
 
-def get_all(model: type[BaseModel]) -> str:
+def get_all(model: type[BaseModel], *, exclude_deleted: bool = False) -> str:
     if ID_KEY not in model.model_fields:
         msg = f"Get object {model.__name__} must contain an ID key"
         raise AssertionError(msg)
 
+    where_clause = "WHERE deleted_at IS NULL" if exclude_deleted else ""
     return f"""
         SELECT *
-        FROM {model.__name__};
+        FROM {model.__name__}
+        {where_clause};
     """
 
 
@@ -289,6 +302,8 @@ def get_all_by_field(  # noqa: PLR0913
     match_field: str | None = None,
     match_field_values: set[str | bool | int | float] | None = None,
     order_by: list[str] | None = None,
+    *,
+    exclude_deleted: bool = False,
 ) -> str:
     if ID_KEY not in model.model_fields:
         msg = f"Get object {model.__name__} must contain an ID key"
@@ -310,10 +325,11 @@ def get_all_by_field(  # noqa: PLR0913
         if not match_field or not match_field_values
         else (f"{match_field} in ({','.join(map(escape_value_sql, list(match_field_values)))})")
     )
+    deleted_clause = " AND deleted_at IS NULL" if exclude_deleted else ""
 
     return f"""
         SELECT *
         FROM {model.__name__}
-        WHERE {field_name} = {escape_value_sql(field_value)} AND {match_clause}
+        WHERE {field_name} = {escape_value_sql(field_value)} AND {match_clause}{deleted_clause}
         {order_clause};
     """

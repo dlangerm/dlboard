@@ -108,10 +108,10 @@ def test_migration_from_v0_adds_foreign_keys_and_preserves_data(tmp_path: Path) 
     _migrations.run_migrations(conn)
 
     experiment_fks = {(row[3], row[2]) for row in conn.execute("PRAGMA foreign_key_list(Experiment)")}
-    assert experiment_fks == {("project_id", "Project"), ("created_by", "User")}
+    assert experiment_fks == {("project_id", "Project"), ("created_by", "User"), ("deleted_by", "User")}
 
     run_fks = {(row[3], row[2]) for row in conn.execute("PRAGMA foreign_key_list(Run)")}
-    assert run_fks == {("experiment_id", "Experiment"), ("created_by", "User")}
+    assert run_fks == {("experiment_id", "Experiment"), ("created_by", "User"), ("deleted_by", "User")}
 
     metric_fks = {
         (row[3], row[2]) for row in conn.execute("PRAGMA foreign_key_list(UnderlyingMetricTableEntry)")
@@ -152,6 +152,27 @@ def test_migration_does_not_backfill_when_nothing_predates_it(tmp_path: Path) ->
     _migrations.run_migrations(conn)
 
     assert conn.execute("SELECT count(*) FROM User").fetchone() == (0,)
+
+
+def test_migration_adds_soft_delete_columns_without_backfill(tmp_path: Path) -> None:
+    """`deleted_at`/`deleted_by` need no backfill: NULL is already correct for every old row."""
+    conn = _v0_connection(tmp_path / "soft_delete.sqlite")
+    project_id = _insert_project(conn)
+
+    _migrations.run_migrations(conn)
+
+    for table in ("Project", "Experiment", "Run", "Artifact"):
+        columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+        assert {"deleted_at", "deleted_by"} <= columns
+
+    deleted_at, deleted_by = conn.execute(
+        "SELECT deleted_at, deleted_by FROM Project WHERE id = ?", (project_id,)
+    ).fetchone()
+    assert (deleted_at, deleted_by) == (None, None)
+    # the one bootstrap admin here comes from migration 2 backfilling created_by/created_at for
+    # the pre-existing project row -- migration 3 itself never needs to create a user, since NULL
+    # is already the correct value for a nullable column with nothing to backfill.
+    assert conn.execute("SELECT count(*) FROM User").fetchone() == (1,)
 
 
 def test_migration_is_a_noop_when_rerun(tmp_path: Path) -> None:

@@ -206,9 +206,25 @@ def _migration_002_add_provenance_columns(conn: sqlite3.Connection) -> None:
         )
 
 
+def _migration_003_add_soft_delete_columns(conn: sqlite3.Connection) -> None:
+    """
+    Add `deleted_at`/`deleted_by` to the soft-deletable entity tables.
+
+    Unlike `created_by`/`created_at` in migration 2, no backfill is needed: NULL is already the
+    semantically correct value for every pre-existing row ("not deleted"), so a plain nullable
+    `ALTER TABLE ... ADD COLUMN` is sufficient.
+    """
+    for table in (models.Project, models.Experiment, models.Run, models.Artifact):
+        _add_column_if_missing(
+            conn, table.__name__, "deleted_by", f"deleted_by INTEGER REFERENCES {models.User.__name__}(id)"
+        )
+        _add_column_if_missing(conn, table.__name__, "deleted_at", "deleted_at TEXT")
+
+
 MIGRATIONS: list[tuple[int, MigrationFn]] = [
     (1, _migration_001_enforce_foreign_keys),
     (2, _migration_002_add_provenance_columns),
+    (3, _migration_003_add_soft_delete_columns),
 ]
 
 

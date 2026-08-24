@@ -1,0 +1,264 @@
+# pyright: reportPrivateUsage=false
+"""Tests for cascading soft-delete/restore/purge and the read/write guards around them."""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+import pendulum
+import pytest
+
+from dltrack import models
+
+if TYPE_CHECKING:
+    from dltrack.plugins.data_stores.sqlite import SQLLiteStore
+
+
+@pytest.fixture
+def admin(store: SQLLiteStore) -> models.User:
+    """The bootstrap admin -- the first user any fresh store creates gets `Scope.ALL`."""
+    return store.get_or_create_user("admin")
+
+
+def _project_experiment_run_artifact(store: SQLLiteStore) -> tuple[int, int, int, int]:
+    project = store.create_project(models.NewProject(name="p", description="d"))
+    experiment = store.create_experiment(models.NewExperiment(project_id=project.id))
+    run = store.create_run(models.NewRun(experiment_id=experiment.id))
+    store.log_artifact_refs(
+        [
+            models.Artifact(
+                key="img", fname="i.png", run_id=run.id, experiment_id=experiment.id, step=0, ref="ref://a"
+            )
+        ]
+    )
+    (artifact,) = list(store.fetch_artifacts(experiment_id=experiment.id))
+    assert artifact.id is not None
+    return project.id, experiment.id, run.id, artifact.id
+
+
+def test_delete_project_cascades_to_experiments_runs_and_artifacts(
+    store: SQLLiteStore, admin: models.User
+) -> None:
+    project_id, experiment_id, _run_id, _artifact_id = _project_experiment_run_artifact(store)
+
+    store.delete_project(project_id, actor_id=admin.id)
+
+    assert project_id not in {p.id for p in store.get_projects()}
+    assert list(store.get_experiments(project_id)) == []
+    assert list(store.fetch_artifacts(experiment_id=experiment_id)) == []
+    assert experiment_id in {e.id for e in store.list_deleted_experiments()}
+
+
+def test_delete_project_twice_is_a_noop_error(store: SQLLiteStore, admin: models.User) -> None:
+    project = store.create_project(models.NewProject(name="p", description="d"))
+    store.delete_project(project.id, actor_id=admin.id)
+
+    with pytest.raises(ValueError, match="already deleted"):
+        store.delete_project(project.id, actor_id=admin.id)
+
+
+def test_delete_project_on_unknown_id_raises(store: SQLLiteStore, admin: models.User) -> None:
+    with pytest.raises(ValueError, match="does not exist"):
+        store.delete_project(999_999, actor_id=admin.id)
+
+
+def test_restore_project_restores_cascaded_children(store: SQLLiteStore, admin: models.User) -> None:
+    project_id, experiment_id, _run_id, artifact_id = _project_experiment_run_artifact(store)
+    store.delete_project(project_id, actor_id=admin.id)
+
+    store.restore_project(project_id)
+
+    assert project_id in {p.id for p in store.get_projects()}
+    assert experiment_id in {e.id for e in store.get_experiments(project_id)}
+    assert artifact_id in {a.id for a in store.fetch_artifacts(experiment_id=experiment_id)}
+
+
+def test_restore_project_does_not_resurrect_an_independently_deleted_experiment(
+    store: SQLLiteStore, admin: models.User
+) -> None:
+    project = store.create_project(models.NewProject(name="p", description="d"))
+    kept = store.create_experiment(models.NewExperiment(project_id=project.id, name="kept"))
+    independently_deleted = store.create_experiment(
+        models.NewExperiment(project_id=project.id, name="already-gone")
+    )
+
+    store.delete_experiment(independently_deleted.id, actor_id=admin.id)
+    store.delete_project(project.id, actor_id=admin.id)
+    store.restore_project(project.id)
+
+    experiment_ids = {e.id for e in store.get_experiments(project.id)}
+    assert kept.id in experiment_ids
+    assert independently_deleted.id not in experiment_ids, (
+        "an experiment deleted before the project must not be resurrected by restoring the project"
+    )
+
+
+def test_restore_requires_the_entity_to_be_deleted(store: SQLLiteStore) -> None:
+    project = store.create_project(models.NewProject(name="p", description="d"))
+
+    with pytest.raises(ValueError, match="not deleted"):
+        store.restore_project(project.id)
+
+
+def test_delete_experiment_cascades_to_runs_and_artifacts(store: SQLLiteStore, admin: models.User) -> None:
+    project = store.create_project(models.NewProject(name="p", description="d"))
+    experiment = store.create_experiment(models.NewExperiment(project_id=project.id))
+    run = store.create_run(models.NewRun(experiment_id=experiment.id))
+
+    store.delete_experiment(experiment.id, actor_id=admin.id)
+
+    assert store.get_experiment(experiment.id) is None
+    assert run.id in {r.id for r in store.list_deleted_runs()}
+    # the project itself is untouched -- only the experiment and its descendants were deleted
+    assert project.id in {p.id for p in store.get_projects()}
+
+
+def test_delete_run_cascades_to_artifacts_only(store: SQLLiteStore, admin: models.User) -> None:
+    project_id, experiment_id, run_id, artifact_id = _project_experiment_run_artifact(store)
+
+    store.delete_run(run_id, actor_id=admin.id)
+
+    assert artifact_id in {a.id for a in store.list_deleted_artifacts()}
+    # experiment and project survive a run-level delete
+    assert experiment_id in {e.id for e in store.get_experiments(project_id)}
+
+
+def test_delete_artifact_has_no_cascade(store: SQLLiteStore, admin: models.User) -> None:
+    _project_id, experiment_id, run_id, artifact_id = _project_experiment_run_artifact(store)
+
+    store.delete_artifact(artifact_id, actor_id=admin.id)
+
+    assert list(store.fetch_artifacts(experiment_id=experiment_id)) == []
+    # the run it belonged to is untouched
+    assert store._fetch_deleted_at(models.Run, run_id) is None
+
+
+def test_purge_requires_scope(store: SQLLiteStore, admin: models.User) -> None:
+    project = store.create_project(models.NewProject(name="p", description="d"))
+    store.delete_project(project.id, actor_id=admin.id)
+    no_scopes_user = store.get_or_create_user("nobody")
+
+    with pytest.raises(PermissionError, match="lacks"):
+        store.purge_project(project.id, no_scopes_user)
+
+
+def test_purge_requires_prior_soft_delete(store: SQLLiteStore, admin: models.User) -> None:
+    project = store.create_project(models.NewProject(name="p", description="d"))
+
+    with pytest.raises(ValueError, match="must be soft-deleted"):
+        store.purge_project(project.id, admin)
+
+
+def test_purge_project_permanently_removes_everything_under_it(
+    store: SQLLiteStore, admin: models.User
+) -> None:
+    project_id, experiment_id, run_id, artifact_id = _project_experiment_run_artifact(store)
+    store.delete_project(project_id, actor_id=admin.id)
+
+    store.purge_project(project_id, admin)
+
+    assert project_id not in {p.id for p in store.list_deleted_projects()}
+    assert experiment_id not in {e.id for e in store.list_deleted_experiments()}
+    assert run_id not in {r.id for r in store.list_deleted_runs()}
+    assert artifact_id not in {a.id for a in store.list_deleted_artifacts()}
+    with pytest.raises(ValueError, match="does not exist"):
+        store.restore_project(project_id)
+
+
+def test_create_experiment_rejected_for_a_deleted_project(store: SQLLiteStore, admin: models.User) -> None:
+    project = store.create_project(models.NewProject(name="p", description="d"))
+    store.delete_project(project.id, actor_id=admin.id)
+
+    with pytest.raises(ValueError, match="has been deleted"):
+        store.create_experiment(models.NewExperiment(project_id=project.id))
+
+
+def test_create_run_rejected_for_a_deleted_experiment(
+    store: SQLLiteStore, experiment_id: int, admin: models.User
+) -> None:
+    store.delete_experiment(experiment_id, actor_id=admin.id)
+
+    with pytest.raises(ValueError, match="has been deleted"):
+        store.create_run(models.NewRun(experiment_id=experiment_id))
+
+
+def test_log_metrics_rejected_against_a_deleted_run(
+    store: SQLLiteStore, experiment_id: int, admin: models.User
+) -> None:
+    run = store.create_run(models.NewRun(experiment_id=experiment_id))
+    store.delete_run(run.id, actor_id=admin.id)
+
+    with pytest.raises(ValueError, match="has been deleted"):
+        store.log_metrics(
+            [
+                models.LoggedMetrics(
+                    metrics={"loss": 0.1},
+                    step=0,
+                    experiment_id=experiment_id,
+                    run_id=run.id,
+                    timestamp_utc=pendulum.now(pendulum.UTC),
+                )
+            ]
+        )
+
+
+def test_log_hyperparams_rejected_against_a_deleted_run(
+    store: SQLLiteStore, experiment_id: int, admin: models.User
+) -> None:
+    run = store.create_run(models.NewRun(experiment_id=experiment_id))
+    store.delete_run(run.id, actor_id=admin.id)
+
+    with pytest.raises(ValueError, match="has been deleted"):
+        store.log_hyperparams(models.NewHyperParams.from_raw(run.id, experiment_id, {"lr": 0.1}))
+
+
+def test_log_artifact_refs_rejected_against_a_deleted_run(
+    store: SQLLiteStore, experiment_id: int, admin: models.User
+) -> None:
+    run = store.create_run(models.NewRun(experiment_id=experiment_id))
+    store.delete_run(run.id, actor_id=admin.id)
+
+    with pytest.raises(ValueError, match="has been deleted"):
+        store.log_artifact_refs(
+            [
+                models.Artifact(
+                    key="img",
+                    fname="i.png",
+                    run_id=run.id,
+                    experiment_id=experiment_id,
+                    step=0,
+                    ref="ref://a",
+                )
+            ]
+        )
+
+
+def test_fetch_metrics_excludes_metrics_from_a_deleted_run(
+    store: SQLLiteStore, experiment_id: int, admin: models.User
+) -> None:
+    kept_run = store.create_run(models.NewRun(experiment_id=experiment_id))
+    deleted_run = store.create_run(models.NewRun(experiment_id=experiment_id))
+    now = pendulum.now(pendulum.UTC)
+    store.log_metrics(
+        [
+            models.LoggedMetrics(
+                metrics={"loss": 0.1},
+                step=0,
+                experiment_id=experiment_id,
+                run_id=kept_run.id,
+                timestamp_utc=now,
+            ),
+            models.LoggedMetrics(
+                metrics={"loss": 0.2},
+                step=0,
+                experiment_id=experiment_id,
+                run_id=deleted_run.id,
+                timestamp_utc=now,
+            ),
+        ]
+    )
+
+    store.delete_run(deleted_run.id, actor_id=admin.id)
+
+    fetched = list(store.fetch_metrics(experiment_id))
+    assert {m.run_id for m in fetched} == {kept_run.id}

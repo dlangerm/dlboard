@@ -25,3 +25,14 @@ class Project(NewProject, frozen=True, extra="forbid"):
 
     id: int
     """The ID for a project if it exists in the databse, otherwise none."""
+
+    deleted_by: int | None = None
+    """The user who soft-deleted this project, if it's been deleted."""
+
+    deleted_at: AwareDatetime | None = None
+    """
+    When this project was soft-deleted, if at all.
+
+    Deliberately absent from `NewProject`: a project can never be created already-deleted, only
+    transitioned into that state via `DataStore.delete_project`.
+    """
