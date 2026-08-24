@@ -146,24 +146,25 @@ class ChartTypeRegistry:
                 if len(non_none_args) == 1:
                     annotation = non_none_args[0]
             choices: tuple[str, ...] | None = None
-            if annotation is bool:
-                field_type = ParameterFieldType.BOOL
-            elif annotation is float:
-                field_type = ParameterFieldType.FLOAT
-            elif annotation is int:
-                field_type = ParameterFieldType.INT
-            elif annotation is str:
-                field_type = ParameterFieldType.STR
-            elif typing.get_origin(annotation) is list and typing.get_args(annotation) == (str,):
-                field_type = ParameterFieldType.LIST_STR
-            elif typing.get_origin(annotation) is typing.Literal:
-                # A fixed set of string choices, e.g. `Literal["number", "category"]` — rendered
-                # as a dropdown rather than a free-text field.
-                field_type = ParameterFieldType.STR
-                choices = typing.get_args(annotation)
-            else:
-                msg = f"{annotation} unsupported"
-                raise TypeError(msg)
+            match annotation:
+                case _ if annotation is bool:
+                    field_type = ParameterFieldType.BOOL
+                case _ if annotation is float:
+                    field_type = ParameterFieldType.FLOAT
+                case _ if annotation is int:
+                    field_type = ParameterFieldType.INT
+                case _ if annotation is str:
+                    field_type = ParameterFieldType.STR
+                case _ if typing.get_origin(annotation) is list and typing.get_args(annotation) == (str,):
+                    field_type = ParameterFieldType.LIST_STR
+                case _ if typing.get_origin(annotation) is typing.Literal:
+                    # A fixed set of string choices, e.g. `Literal["number", "category"]` — rendered
+                    # as a dropdown rather than a free-text field.
+                    field_type = ParameterFieldType.STR
+                    choices = typing.get_args(annotation)
+                case _:
+                    msg = f"{annotation} unsupported"
+                    raise TypeError(msg)
 
             field_descriptors[field_name] = ParameterField(
                 name=field_name,

@@ -100,7 +100,7 @@ def escape_value_sql(value: object) -> str:
         case int() | float():
             return f"{value}"
         case str():
-            return f"'{value.strip("' %;")}'"
+            return f"'{value.replace("'", "''")}'"
         case NoneType():
             return "NULL"
         case datetime():

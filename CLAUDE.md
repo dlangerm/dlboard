@@ -11,6 +11,8 @@ that ships metrics/hyperparams/artifacts to it over a REST API.
 ## Commands
 
 Run everything through `uv` (Python >=3.12, deps pinned in `uv.lock`).
+Never run raw python commands, if a python command doesn't work through `uv` ask for further instructions.
+Never use python to edit files, just use your normal mechanisms to do so.
 
 ```bash
 uv run --env-file .env serve.py     # start the dltrack server (this is how the user runs the app)
@@ -99,6 +101,12 @@ to call other functions, prefer logical breakdowns of functional units that do a
 
 Pytest should always use functional-style tests, never class-based tests. Use parametrized tests instead of multiple test files.
 Keep test files short, orthogonal, and specific, the test should never be harder to maintain than the target module.
+
+Always keep in mind this code is meant to be read and maintained by humans, lines of code and complexity really matter. Exploded interfaces
+and extra functions that serve only to break up blocks of code but not to separate logic are hard to parse and reason about. Wherever
+possible, fold large blocks or repeated logic into compartmentalized units that can easily be reused.
+
+Whenever you finish an instruction, make sure to at least run ruff `rtk uv run ruff check` and `rtk uv run ruff format` as well as `rtk uv run pyright` to ensure code quality is maintained before review.
 
 ## RTK (Rust Token Killer) - Token-Optimized Commands
 

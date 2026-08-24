@@ -3,14 +3,13 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
-
 import numpy as np
 import pandas as pd
 import pytest
 
 from dltrack.plugins.charts._sampling import downsample_grouped, downsample_series
 from dltrack.plugins.charts.line_chart import LineChart, LineChartSettings
+from tests.conftest import props as _props
 
 
 def _series_df(n: int) -> pd.DataFrame:
@@ -58,11 +57,6 @@ def _metrics_df(points_per_run: int, n_runs: int = 2) -> pd.DataFrame:
         for run_id in range(1, n_runs + 1)
     ]
     return pd.concat(frames, ignore_index=True)
-
-
-def _props(chart: object) -> dict[str, Any]:
-    # dash-mantine-components ships no py.typed marker, so its component attrs are Unknown to pyright.
-    return cast("Any", chart).to_plotly_json()["props"]
 
 
 def test_line_chart_render_sample_bounds_points() -> None:

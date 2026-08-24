@@ -8,11 +8,15 @@ fixes (bad JSON in a stored column must raise, not silently pass through).
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 import pytest
 from pydantic import AwareDatetime, BaseModel
 
 from dltrack.serve._backend import _sql
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 class _NoId(BaseModel, frozen=True, extra="forbid"):
@@ -42,8 +46,8 @@ def test_escape_value_sql(value: object, expected: str) -> None:
     assert _sql.escape_value_sql(value) == expected
 
 
-def test_escape_value_sql_strips_leading_and_trailing_quote_chars() -> None:
-    assert _sql.escape_value_sql("'; drop table x;") == "'drop table x'"
+def test_escape_value_sql_doubles_embedded_single_quotes() -> None:
+    assert _sql.escape_value_sql("O'Brien") == "'O''Brien'"
 
 
 def test_escape_value_sql_unsupported_type_raises() -> None:
@@ -71,9 +75,17 @@ def test_annotation_to_sqltype_unsupported_raises() -> None:
         _sql.annotation_to_sqltype(complex)
 
 
-def test_create_table_sql_requires_id_field() -> None:
+@pytest.mark.parametrize(
+    "call_without_id",
+    [
+        lambda: _sql.create_table_sql(_NoId),
+        lambda: _sql.get_by_id(_NoId, 1),
+        lambda: _sql.get_all(_NoId),
+    ],
+)
+def test_functions_requiring_id_field_raise_without_one(call_without_id: Callable[[], object]) -> None:
     with pytest.raises(AssertionError, match="must contain an ID key"):
-        _sql.create_table_sql(_NoId)
+        call_without_id()
 
 
 def test_create_table_sql_success() -> None:
@@ -92,14 +104,7 @@ def test_insert_rejects_model_with_id_field() -> None:
         _sql.insert(_WithId, _WithId(id=1, name="a"))
 
 
-def test_get_by_id_requires_id_field() -> None:
-    with pytest.raises(AssertionError, match="must contain an ID key"):
-        _sql.get_by_id(_NoId, 1)
-
-
-def test_get_all_requires_id_field_and_builds_select() -> None:
-    with pytest.raises(AssertionError, match="must contain an ID key"):
-        _sql.get_all(_NoId)
+def test_get_all_builds_select() -> None:
     assert "SELECT *" in _sql.get_all(_WithId)
 
 

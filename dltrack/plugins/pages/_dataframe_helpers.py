@@ -7,9 +7,14 @@ from typing import Any
 
 import pandas as pd
 
-from dltrack.models import Artifact, HyperParams, constants
+from dltrack.models import Artifact, Experiment, HyperParams, constants
 from dltrack.models._view import ColumnKind
 from dltrack.plugins.charts._table_style import HPARAM_COLUMN_PREFIX
+
+
+def experiment_display_name(experiment: Experiment) -> str:
+    """Human-readable name for an experiment, falling back to its id when unnamed."""
+    return experiment.name or f"Experiment {experiment.id}"
 
 
 def filter_excluded_runs(df: pd.DataFrame, page_settings: dict[str, Any]) -> pd.DataFrame:

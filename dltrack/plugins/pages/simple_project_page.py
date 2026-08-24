@@ -9,6 +9,7 @@ import dash_mantine_components as dmc
 from dash import Dash, Input, Output, State, html
 
 from dltrack.models import NewExperiment, constants
+from dltrack.plugins.pages._dataframe_helpers import experiment_display_name
 from dltrack.plugins.pages._description_editor import (
     DescriptionEditorIds,
     register_edit_callbacks,
@@ -37,10 +38,6 @@ PROJECT_DESC_IDS = DescriptionEditorIds(
 _CARD_COLORS = ["indigo", "teal", "grape", "orange", "cyan", "pink"]
 
 
-def _experiment_display_name(experiment: Experiment) -> str:
-    return experiment.name or f"Experiment {experiment.id}"
-
-
 def _experiment_card(experiment: Experiment, color: str) -> dmc.Card:
     return dmc.Card(
         [
@@ -50,7 +47,7 @@ def _experiment_card(experiment: Experiment, color: str) -> dmc.Card:
             dmc.Group(
                 [
                     dmc.ThemeIcon("E", size="lg", radius="xl", color=color, variant="light"),
-                    dmc.Title(_experiment_display_name(experiment), order=4, fw=600),
+                    dmc.Title(experiment_display_name(experiment), order=4, fw=600),
                 ],
                 gap="sm",
                 mt="md",

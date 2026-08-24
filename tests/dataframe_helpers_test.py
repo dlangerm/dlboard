@@ -94,7 +94,9 @@ def test_infer_column_kinds(
 
 
 def test_group_columns_by_kind_round_trips_plain_strings() -> None:
-    grouped = group_columns_by_kind({"loss": "metric", "image": "artifact", "acc": "metric"})
+    grouped = group_columns_by_kind(
+        {"loss": ColumnKind.METRIC, "image": ColumnKind.ARTIFACT, "acc": ColumnKind.METRIC}
+    )
     assert grouped == {ColumnKind.METRIC: ["loss", "acc"], ColumnKind.ARTIFACT: ["image"]}
 
 

@@ -20,6 +20,23 @@ if TYPE_CHECKING:
 _log = get_logger(__name__)
 
 
+def _resolve_page_scope(
+    *, run_id: int | None, experiment_id: int | None, project_id: int | None
+) -> tuple[str, int]:
+    """
+    Resolve the single scope (run, experiment, or project) a page belongs to.
+
+    A page is always owned by exactly one of these three ids; this validates that
+    invariant and returns the owning field name paired with its id.
+    """
+    scopes = {"run_id": run_id, "experiment_id": experiment_id, "project_id": project_id}
+    owned = {field: id_ for field, id_ in scopes.items() if id_ is not None}
+    if len(owned) != 1:
+        msg = "Exactly one of run, experiment, or project must be defined."
+        raise ValueError(msg)
+    return next(iter(owned.items()))
+
+
 class SQLStoreBase[T](ABC, models.DataStore[T]):
     """Use any sql-compatible database as the data store."""
 
@@ -92,16 +109,21 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         for row in self._execute_raw_sql_query_many(statement, values):
             yield sql.construct(expected_model, row, no_validate=no_validate)
 
-    def _consume_row_iterator[RowT: BaseModel](self, row_iterator: Iterator[RowT]) -> list[RowT]:
-        """Consume a row iterator and return a list of rows."""
-        return list(row_iterator)
+    def _first_committed_row[RowT: BaseModel](self, rows: Iterator[RowT]) -> RowT:
+        """
+        Return the first row of a write query, forcing the underlying transaction to commit.
+
+        `_execute_raw_sql` implementations (e.g. sqlite's) run inside a `with` block that
+        only commits once its generator is fully drained; taking just `next(rows)` would
+        leave the generator suspended mid-write and the change uncommitted.
+        """
+        return list(rows)[0]  # noqa: RUF015 -- must fully drain `rows` to commit; see docstring
 
     def create_project(self, project: models.NewProject) -> models.Project:
-        """create_project."""
+        """Create a new project."""
         _log.debug("Creating project with name %s", project.name)
         statement, values = sql.insert(models.Project, project)
-        results = self._consume_row_iterator(self._execute_sql_query(models.Project, statement, values))
-        return results[0]
+        return self._first_committed_row(self._execute_sql_query(models.Project, statement, values))
 
     def get_project(self, database_id: int) -> models.Project:
         """Get project."""
@@ -109,7 +131,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         return next(self._execute_sql_query(models.Project, sql.get_by_id(models.Project, database_id)))
 
     def get_projects(self) -> Iterator[models.Project]:
-        """create_project."""
+        """Get all projects."""
         _log.debug("getting projects")
         yield from self._execute_sql_query(models.Project, sql.get_all(models.Project))
 
@@ -117,16 +139,16 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         """Update a project."""
         _log.debug("updating project %s", project.id)
         statement, values = sql.update(models.Project, project)
-        return self._consume_row_iterator(self._execute_sql_query(models.Project, statement, values))[0]
+        return self._first_committed_row(self._execute_sql_query(models.Project, statement, values))
 
     def create_experiment(self, experiment: models.NewExperiment) -> models.Experiment:
         """Create a new experiment."""
         _log.info("Creating experiment for project %s", experiment.project_id)
         statement, values = sql.insert(models.Experiment, experiment)
-        return self._consume_row_iterator(self._execute_sql_query(models.Experiment, statement, values))[0]
+        return self._first_committed_row(self._execute_sql_query(models.Experiment, statement, values))
 
     def get_experiment(self, database_id: int) -> models.Experiment | None:
-        """Tfdsafs."""
+        """Get an experiment by id, or None if it doesn't exist."""
         _log.debug("Getting experiment id %s", database_id)
         try:
             return next(
@@ -136,7 +158,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             return None
 
     def get_experiments(self, project_id: int) -> Iterator[models.Experiment]:
-        """Tfdsafs."""
+        """Get all experiments belonging to a project."""
         _log.debug("Get experiments for project %s", project_id)
         return self._execute_sql_query(
             models.Experiment, sql.get_all_by_field(models.Experiment, "project_id", project_id)
@@ -146,16 +168,16 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         """Update an experiment."""
         _log.debug("updating experiment %s", experiment.id)
         statement, values = sql.update(models.Experiment, experiment)
-        return self._consume_row_iterator(self._execute_sql_query(models.Experiment, statement, values))[0]
+        return self._first_committed_row(self._execute_sql_query(models.Experiment, statement, values))
 
     def create_run(self, run: models.NewRun) -> models.Run:
         statement, values = sql.insert(models.Run, run)
-        return self._consume_row_iterator(self._execute_sql_query(models.Run, statement, values))[0]
+        return self._first_committed_row(self._execute_sql_query(models.Run, statement, values))
 
     def log_metrics(self, metric: Iterable[models.LoggedMetrics]) -> None:
-        """Tfdsafs."""
+        """Log a batch of metrics to the data store."""
         _log.debug("Logging metrics batch")
-        self._consume_row_iterator(
+        list(
             self._execute_sql_query_many(
                 models.UnderlyingMetricTableEntry,
                 *sql.insert_many(
@@ -175,7 +197,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         metric_name_match: set[str] | None = None,
         step_range: slice[Any, Any, Any] | None = None,
     ) -> Iterator[models.LoggedMetrics]:
-        """create_project."""
+        """Fetch logged metrics for an experiment, optionally filtered by metric name."""
         if step_range is not None or run_id is not None:
             raise NotImplementedError
 
@@ -218,7 +240,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             )
             return existing[0]
         statement, values = sql.insert(models.HyperParams, hyperparams)
-        return self._consume_row_iterator(self._execute_sql_query(models.HyperParams, statement, values))[0]
+        return self._first_committed_row(self._execute_sql_query(models.HyperParams, statement, values))
 
     def fetch_hyperparams(self, experiment_id: int) -> Iterator[models.HyperParams]:
         """Fetch hyperparameters for a particular experiment."""
@@ -243,19 +265,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         project_id: int | None = None,
         new_page_type: type[models.NewPage[D, C]] | None = None,
     ) -> models.Page[D, P, C]:
-        args = {
-            "run_id": run_id,
-            "experiment_id": experiment_id,
-            "project_id": project_id,
-        }
-
-        if sum(1 if id_ is not None else 0 for id_ in args.values()) != 1:
-            msg = "Exactly one of run, experiment, or project must be defined."
-            raise ValueError(msg)
-
-        maybe_insert_values = {k: v for k, v in args.items() if v is not None}
-
-        field, value = maybe_insert_values.popitem()
+        field, value = _resolve_page_scope(run_id=run_id, experiment_id=experiment_id, project_id=project_id)
         for row in self._execute_sql_query(
             page_type,
             sql.get_all_by_field(
@@ -272,26 +282,26 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             (new_page_type or models.NewPage[D, C])(**{field: value}),  # pyright: ignore[reportArgumentType]
         )
 
-        return self._consume_row_iterator(
+        return self._first_committed_row(
             self._execute_sql_query(
                 page_type,
                 statement,
                 values,
             )
-        )[0]
+        )
 
     def update_page[D, P, C](self, page: models.Page[D, P, C]) -> models.Page[D, P, C]:
         statement, values = sql.update(models.Page, page)
-        return self._consume_row_iterator(
+        return self._first_committed_row(
             self._execute_sql_query(
                 type(page),
                 statement,
                 values,
             ),
-        )[0]
+        )
 
     def log_artifact_refs(self, artifacts: Iterable[models.Artifact]) -> None:
-        self._consume_row_iterator(
+        list(
             self._execute_sql_query_many(
                 models.Artifact,
                 *sql.insert_many(
