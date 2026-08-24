@@ -165,20 +165,22 @@ class DataStore[**P](typing.Protocol):
         """Permanently delete an already soft-deleted artifact. Requires `Scope.PURGE`."""
         ...
 
-    def list_deleted_projects(self) -> typing.Iterator[models.Project]:
-        """List soft-deleted projects, for a trash/admin view."""
+    def list_deleted_projects(self, limit: int = 100, offset: int = 0) -> typing.Iterator[models.Project]:
+        """List soft-deleted projects, most recently deleted first, for a trash/admin view."""
         ...
 
-    def list_deleted_experiments(self) -> typing.Iterator[models.Experiment]:
-        """List soft-deleted experiments, for a trash/admin view."""
+    def list_deleted_experiments(
+        self, limit: int = 100, offset: int = 0
+    ) -> typing.Iterator[models.Experiment]:
+        """List soft-deleted experiments, most recently deleted first, for a trash/admin view."""
         ...
 
-    def list_deleted_runs(self) -> typing.Iterator[models.Run]:
-        """List soft-deleted runs, for a trash/admin view."""
+    def list_deleted_runs(self, limit: int = 100, offset: int = 0) -> typing.Iterator[models.Run]:
+        """List soft-deleted runs, most recently deleted first, for a trash/admin view."""
         ...
 
-    def list_deleted_artifacts(self) -> typing.Iterator[models.Artifact]:
-        """List soft-deleted artifacts, for a trash/admin view."""
+    def list_deleted_artifacts(self, limit: int = 100, offset: int = 0) -> typing.Iterator[models.Artifact]:
+        """List soft-deleted artifacts, most recently deleted first, for a trash/admin view."""
         ...
 
     def list_audit_log(self, limit: int = 100, offset: int = 0) -> typing.Iterator[models.AuditLogEntry]:
