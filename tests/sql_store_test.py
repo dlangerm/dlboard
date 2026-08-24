@@ -14,25 +14,12 @@ import pytest
 
 from dltrack import models
 from dltrack.models._view import PanelInstance
-from dltrack.plugins.data_stores.sqlite import SQLLiteStore
 from dltrack.plugins.pages.simple_experiment_page import BasicExperimentPage
 
 if TYPE_CHECKING:
-    from pathlib import Path
+    from dltrack.plugins.data_stores.sqlite import SQLLiteStore
 
 _TS = datetime(2026, 1, 1, tzinfo=UTC)
-
-
-@pytest.fixture
-def store(tmp_path: Path) -> SQLLiteStore:
-    return SQLLiteStore(tmp_path / "test.sqlite")
-
-
-@pytest.fixture
-def experiment_id(store: SQLLiteStore) -> int:
-    project = store.create_project(models.NewProject(name="p", description="d"))
-    experiment = store.create_experiment(models.NewExperiment(project_id=project.id))
-    return experiment.id
 
 
 def test_project_and_experiment_are_persisted(store: SQLLiteStore) -> None:

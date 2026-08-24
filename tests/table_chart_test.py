@@ -3,17 +3,14 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any
 
 import pandas as pd
 import pytest
 
 from dltrack.plugins.charts._table_style import DEFAULT_TABLE_FONT_SIZE, HPARAM_COLUMN_PREFIX
 from dltrack.plugins.charts.table_chart import TableChart, TableChartSettings
-
-
-def _props(component: object) -> dict[str, Any]:
-    return cast("Any", component).to_plotly_json()["props"]
+from tests.conftest import props as _props
 
 
 def _rows_by_run(component: object) -> dict[int, dict[str, Any]]:

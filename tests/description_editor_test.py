@@ -6,6 +6,7 @@ from __future__ import annotations
 from typing import Any
 
 from dltrack.plugins.pages._description_editor import DescriptionEditorIds, render_header
+from tests.conftest import find_props as _find_props
 
 _IDS = DescriptionEditorIds(
     header="h",
@@ -15,27 +16,6 @@ _IDS = DescriptionEditorIds(
     save="save",
     cancel="cancel",
 )
-
-
-def _find_props(component: Any, target_id: str) -> dict[str, Any] | None:  # noqa: ANN401
-    """Depth-first search a dash component tree for the props of a node with `target_id`.
-
-    `component` is typed `Any`: dash-mantine-components ships no py.typed marker, so its
-    component tree (and dash's own `.children`) is Unknown to pyright regardless.
-    """
-    if isinstance(component, list):
-        for item in component:  # pyright: ignore[reportUnknownVariableType]
-            found = _find_props(item, target_id)
-            if found is not None:
-                return found
-        return None
-    if not hasattr(component, "to_plotly_json"):
-        return None
-    props = component.to_plotly_json()["props"]
-    if props.get("id") == target_id:
-        return props
-    children = props.get("children")
-    return _find_props(children, target_id) if children is not None else None
 
 
 def _all_text(component: Any) -> list[str]:  # noqa: ANN401

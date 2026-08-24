@@ -87,13 +87,13 @@ def test_panel_name_for_group_artifact_gets_disambiguating_suffix() -> None:
 
 def test_chartable_metric_columns_excludes_bookkeeping_columns() -> None:
     column_kinds = {
-        "train/loss": "metric",
-        "step": "metric",
-        "run_id": "metric",
-        "timestamp_utc": "metric",
-        "index": "metric",
-        "experiment_id": "metric",
-        "img": "artifact",
+        "train/loss": ColumnKind.METRIC,
+        "step": ColumnKind.METRIC,
+        "run_id": ColumnKind.METRIC,
+        "timestamp_utc": ColumnKind.METRIC,
+        "index": ColumnKind.METRIC,
+        "experiment_id": ColumnKind.METRIC,
+        "img": ColumnKind.ARTIFACT,
     }
     assert chartable_metric_columns(column_kinds) == ["train/loss"]
 
@@ -103,10 +103,10 @@ def test_chartable_metric_columns_excludes_bookkeeping_columns() -> None:
 
 def test_build_auto_panels_groups_metrics_by_prefix() -> None:
     column_kinds = {
-        "train/loss": "metric",
-        "train/acc": "metric",
-        "val/loss": "metric",
-        "step": "metric",
+        "train/loss": ColumnKind.METRIC,
+        "train/acc": ColumnKind.METRIC,
+        "val/loss": ColumnKind.METRIC,
+        "step": ColumnKind.METRIC,
     }
     panels = build_auto_panels(column_kinds, delimiter="/", mode="prefix")
 
@@ -117,7 +117,11 @@ def test_build_auto_panels_groups_metrics_by_prefix() -> None:
 
 
 def test_build_auto_panels_groups_metrics_by_suffix() -> None:
-    column_kinds = {"train/loss": "metric", "val/loss": "metric", "val/acc": "metric"}
+    column_kinds = {
+        "train/loss": ColumnKind.METRIC,
+        "val/loss": ColumnKind.METRIC,
+        "val/acc": ColumnKind.METRIC,
+    }
     panels = build_auto_panels(column_kinds, delimiter="/", mode="suffix")
 
     by_name = {p.name: p for p in panels}
@@ -126,7 +130,7 @@ def test_build_auto_panels_groups_metrics_by_suffix() -> None:
 
 
 def test_build_auto_panels_groups_undelimited_metrics_into_one_shared_panel() -> None:
-    column_kinds = {"loss": "metric", "accuracy": "metric", "train/lr": "metric"}
+    column_kinds = {"loss": ColumnKind.METRIC, "accuracy": ColumnKind.METRIC, "train/lr": ColumnKind.METRIC}
     panels = build_auto_panels(column_kinds, delimiter="/", mode="prefix")
 
     by_name = {p.name: p for p in panels}
@@ -138,8 +142,8 @@ def test_build_auto_panels_groups_undelimited_metrics_into_one_shared_panel() ->
 def test_build_auto_panels_keeps_artifacts_in_their_own_panel_even_on_name_collision() -> None:
     """A metric group and an artifact group sharing a name must never merge into one panel."""
     column_kinds = {
-        "train/loss": "metric",
-        "train/sample_image": "artifact",
+        "train/loss": ColumnKind.METRIC,
+        "train/sample_image": ColumnKind.ARTIFACT,
     }
     panels = build_auto_panels(column_kinds, delimiter="/", mode="prefix")
 
@@ -150,7 +154,7 @@ def test_build_auto_panels_keeps_artifacts_in_their_own_panel_even_on_name_colli
 
 
 def test_build_auto_panels_default_chart_params() -> None:
-    column_kinds = {"loss": "metric", "img": "artifact"}
+    column_kinds = {"loss": ColumnKind.METRIC, "img": ColumnKind.ARTIFACT}
     panels = build_auto_panels(column_kinds, delimiter="/", mode="prefix")
 
     metric_chart = next(c for p in panels for c in p.charts if c.chart_type == "line")
@@ -170,10 +174,10 @@ def test_build_auto_panels_empty_column_kinds_produces_no_panels() -> None:
 def test_find_uncharted_keys_excludes_already_charted_metrics_and_artifacts() -> None:
     panels = [_panel("train", _line("train/loss")), _panel("imgs", _image("train/sample"))]
     column_kinds = {
-        "train/loss": "metric",
-        "train/acc": "metric",
-        "train/sample": "artifact",
-        "train/other_img": "artifact",
+        "train/loss": ColumnKind.METRIC,
+        "train/acc": ColumnKind.METRIC,
+        "train/sample": ColumnKind.ARTIFACT,
+        "train/other_img": ColumnKind.ARTIFACT,
     }
 
     uncharted = find_uncharted_keys(panels, column_kinds)
@@ -182,13 +186,13 @@ def test_find_uncharted_keys_excludes_already_charted_metrics_and_artifacts() ->
 
 
 def test_find_uncharted_keys_all_uncharted_when_no_panels() -> None:
-    column_kinds = {"loss": "metric", "img": "artifact"}
+    column_kinds = {"loss": ColumnKind.METRIC, "img": ColumnKind.ARTIFACT}
     assert find_uncharted_keys([], column_kinds) == UnchartedKeys(metrics=["loss"], artifacts=["img"])
 
 
 def test_find_uncharted_keys_nothing_uncharted_when_fully_covered() -> None:
     panels = [_panel("p", _line("loss"), _image("img"))]
-    column_kinds = {"loss": "metric", "img": "artifact"}
+    column_kinds = {"loss": ColumnKind.METRIC, "img": ColumnKind.ARTIFACT}
     assert find_uncharted_keys(panels, column_kinds) == UnchartedKeys(metrics=[], artifacts=[])
 
 

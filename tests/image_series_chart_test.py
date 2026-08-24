@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any
 
 import pandas as pd
 import pytest
@@ -15,6 +15,7 @@ from dltrack.plugins.charts.image_series import (
     ImageChartSettings,
     _slider_marks,
 )
+from tests.conftest import props as _props
 
 
 def _artifacts_df(n_runs: int, steps_per_run: int = 1) -> pd.DataFrame:
@@ -24,11 +25,6 @@ def _artifacts_df(n_runs: int, steps_per_run: int = 1) -> pd.DataFrame:
         for step in range(steps_per_run)
     ]
     return pd.DataFrame(rows)
-
-
-def _props(component: object) -> dict[str, Any]:
-    # dash-mantine-components ships no py.typed marker, so pyright can't see these attrs.
-    return cast("Any", component).to_plotly_json()["props"]
 
 
 def test_render_reports_missing_key() -> None:

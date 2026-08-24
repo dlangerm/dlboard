@@ -78,51 +78,62 @@ def test_get_registered_chart_types_describes_fields() -> None:
     assert fields["flag"].default is False
 
 
+def _make_fake_chart(
+    chart_name: str, params_type: type[BaseModel]
+) -> type[ChartType[typing.Any, pd.DataFrame, dict[str, object]]]:
+    """
+    Build a minimal registrable `ChartType` around `params_type`.
+
+    Only `_describe_parameter_fields`'s field-type inference is under test wherever this is
+    used, so `render`/the `hint_required_*` methods are no-ops — just enough to satisfy
+    `ChartType`'s abstract interface.
+    """
+
+    class _Fake(ChartType[typing.Any, pd.DataFrame, dict[str, object]], frozen=True, extra="forbid"):
+        name: ClassVar[str] = chart_name
+
+        @classmethod
+        @typing.override
+        def parameter_type(cls) -> type[BaseModel]:
+            return params_type
+
+        @classmethod
+        @typing.override
+        def render(cls, parameters: BaseModel, dataframe: pd.DataFrame) -> dict[str, object]:
+            return {}
+
+        @classmethod
+        @typing.override
+        def hint_required_columns(cls, parameters: BaseModel) -> set[str] | None:
+            return set()
+
+        @classmethod
+        @typing.override
+        def hint_required_artifact_keys(cls, parameters: BaseModel) -> set[str] | None:
+            return set()
+
+        @classmethod
+        @typing.override
+        def hint_required_hparams(cls, parameters: BaseModel) -> set[str] | None:
+            return set()
+
+        @classmethod
+        @typing.override
+        def field_column_kinds(cls) -> dict[str, ColumnKind]:
+            return {}
+
+    return _Fake
+
+
 class _FakeParamsWithChoices(BaseModel, frozen=True, extra="forbid"):
     mode: typing.Literal["prefix", "suffix"] = "prefix"
-
-
-class _FakeChartWithChoices(
-    ChartType[_FakeParamsWithChoices, pd.DataFrame, dict[str, object]], frozen=True, extra="forbid"
-):
-    name: ClassVar[str] = "fake-choices"
-
-    @classmethod
-    @typing.override
-    def parameter_type(cls) -> type[_FakeParamsWithChoices]:
-        return _FakeParamsWithChoices
-
-    @classmethod
-    @typing.override
-    def render(cls, parameters: _FakeParamsWithChoices, dataframe: pd.DataFrame) -> dict[str, object]:
-        return {"mode": parameters.mode}
-
-    @classmethod
-    @typing.override
-    def hint_required_columns(cls, parameters: _FakeParamsWithChoices) -> set[str] | None:
-        return set()
-
-    @classmethod
-    @typing.override
-    def hint_required_artifact_keys(cls, parameters: _FakeParamsWithChoices) -> set[str] | None:
-        return set()
-
-    @classmethod
-    @typing.override
-    def hint_required_hparams(cls, parameters: _FakeParamsWithChoices) -> set[str] | None:
-        return set()
-
-    @classmethod
-    @typing.override
-    def field_column_kinds(cls) -> dict[str, ColumnKind]:
-        return {}
 
 
 def test_get_registered_chart_types_describes_literal_field_as_str_with_choices() -> None:
     """A `Literal[...]`-typed field (e.g. line chart's `x_axis_type`) must describe as a plain
     `str` field with its fixed `choices` populated — the UI renders those as a dropdown.
     """
-    _FakeChartWithChoices.register()
+    _make_fake_chart("fake-choices", _FakeParamsWithChoices).register()
     fields = ChartTypeRegistry.get_registered_chart_types()["fake-choices"]
     assert fields["mode"].type == "str"
     assert fields["mode"].choices == ("prefix", "suffix")
@@ -134,47 +145,11 @@ class _FakeParamsWithOptionalInt(BaseModel, frozen=True, extra="forbid"):
     font_size: int | None = None
 
 
-class _FakeChartWithOptionalInt(
-    ChartType[_FakeParamsWithOptionalInt, pd.DataFrame, dict[str, object]], frozen=True, extra="forbid"
-):
-    name: ClassVar[str] = "fake-optional-int"
-
-    @classmethod
-    @typing.override
-    def parameter_type(cls) -> type[_FakeParamsWithOptionalInt]:
-        return _FakeParamsWithOptionalInt
-
-    @classmethod
-    @typing.override
-    def render(cls, parameters: _FakeParamsWithOptionalInt, dataframe: pd.DataFrame) -> dict[str, object]:
-        return {"font_size": parameters.font_size}
-
-    @classmethod
-    @typing.override
-    def hint_required_columns(cls, parameters: _FakeParamsWithOptionalInt) -> set[str] | None:
-        return set()
-
-    @classmethod
-    @typing.override
-    def hint_required_artifact_keys(cls, parameters: _FakeParamsWithOptionalInt) -> set[str] | None:
-        return set()
-
-    @classmethod
-    @typing.override
-    def hint_required_hparams(cls, parameters: _FakeParamsWithOptionalInt) -> set[str] | None:
-        return set()
-
-    @classmethod
-    @typing.override
-    def field_column_kinds(cls) -> dict[str, ColumnKind]:
-        return {}
-
-
 def test_get_registered_chart_types_describes_optional_int_field() -> None:
     """`int | None`-typed fields (e.g. table chart's `font_size`) must unwrap to plain `int` rather
     than raising `TypeError` — regression test for a crash when opening the add-chart modal.
     """
-    _FakeChartWithOptionalInt.register()
+    _make_fake_chart("fake-optional-int", _FakeParamsWithOptionalInt).register()
     fields = ChartTypeRegistry.get_registered_chart_types()["fake-optional-int"]
     assert fields["font_size"].type == "int"
     assert fields["font_size"].required is False

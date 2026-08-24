@@ -8,7 +8,7 @@ blow up the whole panel render — including any other, perfectly fine charts sh
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any
 
 import dash_mantine_components as dmc
 import pandas as pd
@@ -16,12 +16,9 @@ import pandas as pd
 from dltrack.models._view import ChartInstance, PanelInstance
 from dltrack.plugins.charts.line_chart import LineChart
 from dltrack.plugins.pages.simple_experiment_page import _render_panel_charts
+from tests.conftest import props as _props
 
 LineChart.register(allow_override=True)
-
-
-def _props(component: object) -> dict[str, Any]:
-    return cast("Any", component).to_plotly_json()["props"]
 
 
 def test_broken_chart_renders_as_error_alert_without_raising() -> None:

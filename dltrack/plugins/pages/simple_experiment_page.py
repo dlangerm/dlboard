@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import itertools
 import typing
+from dataclasses import dataclass
 from io import StringIO
 from typing import TYPE_CHECKING, Any, TypedDict, cast
 
@@ -36,6 +37,7 @@ from dltrack.plugins.pages._dataframe_helpers import (
     build_artifacts_dataframe,
     build_hyperparams_dataframe,
     build_metrics_dataframe,
+    experiment_display_name,
     filter_excluded_runs,
     group_columns_by_kind,
     infer_column_kinds,
@@ -54,7 +56,7 @@ if TYPE_CHECKING:
 
     from dash.development.base_component import Component
 
-    from dltrack.models import DataStore, Experiment
+    from dltrack.models import DataStore
     from dltrack.plugins.pages._chart_autogen import SplitMode
 
 _log = get_logger(__name__)
@@ -85,6 +87,24 @@ class _ChartID(_ChartTargetData):
 
 
 _PanelMoveDirection = typing.Literal["up", "down"]
+
+
+@dataclass(frozen=True, slots=True)
+class EditViewState:
+    """
+    Client-cached edit-mode state carried across a panel/chart mutation and its re-render.
+
+    Dash reports edit mode, the drawer's open state, and the cached dataframe/column-kind
+    lookup as four separate `dcc.Store`/component properties, so callbacks still receive them
+    as four positional arguments — but every callback bundles them into one `EditViewState`
+    immediately, so `accordion_view` and the mutation helpers below only need to thread one
+    value through instead of four.
+    """
+
+    edit_mode: bool = False
+    edit_drawer_opened: bool = False
+    full_df_json: str | None = None
+    column_kinds: dict[str, str] | None = None
 
 
 ADD_CHART_TARGET_ID = "add-chart-target"
@@ -127,10 +147,6 @@ EXPERIMENT_DESC_IDS = DescriptionEditorIds(
 )
 
 _METRIC_BOOKKEEPING_COLS = {"run_id", "step", "index", "timestamp_utc", "experiment_id"}
-
-
-def _experiment_display_name(experiment: Experiment) -> str:
-    return experiment.name or f"Experiment {experiment.id}"
 
 
 # ============================================================
@@ -569,23 +585,20 @@ def _header_actions() -> Component:
     )
 
 
-def accordion_view(  # noqa: PLR0913
+def accordion_view(
     store: DataStore[...],
     experiment_id: int,
     *,
-    edit_mode: bool = False,
-    edit_drawer_opened: bool = False,
-    full_df_json: str | None = None,
-    column_kinds: dict[str, ColumnKind] | None = None,
+    view_state: EditViewState | None = None,
 ) -> html.Div:
     """
     Accordion view for experiments.
 
-    `edit_mode`/`edit_drawer_opened`/`full_df_json`/`column_kinds` let callers that re-render the
-    accordion mid-edit (adding a panel/chart, changing run selection, etc.) carry the current edit
-    state, drawer open/closed state, and cached dataframe forward instead of silently resetting
-    them.
+    `view_state` lets callers that re-render the accordion mid-edit (adding a panel/chart,
+    changing run selection, etc.) carry the current edit state, drawer open/closed state, and
+    cached dataframe forward instead of silently resetting them.
     """
+    view_state = view_state or EditViewState()
     _log.debug("rendering chart for experiment %s", experiment_id)
     page = cast(
         "BasicExperimentPage", store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
@@ -603,7 +616,7 @@ def accordion_view(  # noqa: PLR0913
                         title="Manage panels",
                         position="right",
                         size="md",
-                        opened=edit_drawer_opened,
+                        opened=view_state.edit_drawer_opened,
                         children=dmc.Stack(
                             [
                                 _empty_view_helper(page.panels),
@@ -612,13 +625,13 @@ def accordion_view(  # noqa: PLR0913
                             gap="xs",
                         ),
                     ),
-                    page.render(store, experiment_id, edit_mode=edit_mode),
+                    page.render(store, experiment_id, edit_mode=view_state.edit_mode),
                 ],
                 gap="xs",
             ),
             Store(id=LOADED_PANELS_STORE_ID, data=list(open_value)),  # pyright: ignore[reportArgumentType]
-            Store(id=FULL_DF_STORE_ID, data=full_df_json),
-            Store(id=COLUMN_KINDS_STORE_ID, data=column_kinds),
+            Store(id=FULL_DF_STORE_ID, data=view_state.full_df_json),
+            Store(id=COLUMN_KINDS_STORE_ID, data=view_state.column_kinds),
             _add_chart_modal(),
             _suggest_charts_drawer(),
             _rename_panel_modal(),
@@ -631,55 +644,35 @@ def accordion_view(  # noqa: PLR0913
 # ============================================================
 
 
-def _persist_settings_and_rerender(  # noqa: PLR0913
+def _persist_settings_and_rerender(
     store: DataStore[...],
     experiment_id: int,
     updates: dict[str, Any],
     *,
-    edit_mode: bool = False,
-    edit_drawer_opened: bool = False,
-    full_df_json: str | None = None,
-    column_kinds: dict[str, ColumnKind] | None = None,
+    view_state: EditViewState | None = None,
 ) -> tuple[BasicExperimentPage, dmc.Container]:
     """Merge `updates` into page_settings (server-authoritative), persist, and re-render the accordion."""
     page = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
     new_settings = {**page.page_settings, **updates}
     page = page.model_copy(update={"page_settings": new_settings})
     page = store.update_page(page)
-    container = accordion_view(
-        store,
-        experiment_id=experiment_id,
-        edit_mode=edit_mode,
-        edit_drawer_opened=edit_drawer_opened,
-        full_df_json=full_df_json,
-        column_kinds=column_kinds,
-    )
+    container = accordion_view(store, experiment_id=experiment_id, view_state=view_state)
     return page, container  # pyright: ignore[reportReturnType]
 
 
-def _mutate_panels_and_rerender(  # noqa: PLR0913
+def _mutate_panels_and_rerender(
     page_json: str,
     experiment_id: int,
     mutate: Callable[[list[PanelInstance[Any, Any]]], list[PanelInstance[Any, Any]]],
     *,
-    edit_mode: bool = False,
-    edit_drawer_opened: bool = False,
-    full_df_json: str | None = None,
-    column_kinds: dict[str, ColumnKind] | None = None,
+    view_state: EditViewState | None = None,
 ) -> tuple[BasicExperimentPage, html.Div]:
     """Load page from client-cached state, apply `mutate` to its panels, persist, and re-render."""
     curr_page = BasicExperimentPage.model_validate_json(page_json)
     curr_page = curr_page.model_copy(update={"panels": mutate(curr_page.panels)})
     store = get_data_store()
     curr_page = store.update_page(curr_page)
-    container = accordion_view(
-        store,
-        experiment_id=experiment_id,
-        edit_mode=edit_mode,
-        edit_drawer_opened=edit_drawer_opened,
-        full_df_json=full_df_json,
-        column_kinds=column_kinds,
-    )
+    container = accordion_view(store, experiment_id=experiment_id, view_state=view_state)
     return curr_page, container  # pyright: ignore[reportReturnType]
 
 
@@ -763,36 +756,47 @@ def _param_field_input(
     label = f"{field_name} *" if field.required else field_name
     value = override if override is not None else field.default
 
-    if field.type == ParameterFieldType.BOOL:
-        return dmc.Switch(id=input_id, label=label, checked=bool(value) if value is not None else False)
-    if field.type in (ParameterFieldType.INT, ParameterFieldType.FLOAT):
-        number_value = cast("int | float | None", value)
-        return dmc.NumberInput(
-            id=input_id,
-            label=label,
-            value=number_value,
-            step=1 if field.type == ParameterFieldType.INT else 0.1,
-        )
+    match field.type:
+        case ParameterFieldType.BOOL:
+            return dmc.Switch(id=input_id, label=label, checked=bool(value) if value is not None else False)
+        case ParameterFieldType.INT | ParameterFieldType.FLOAT:
+            number_value = cast("int | float | None", value)
+            return dmc.NumberInput(
+                id=input_id,
+                label=label,
+                value=number_value,
+                step=1 if field.type == ParameterFieldType.INT else 0.1,
+            )
+        case ParameterFieldType.STR | ParameterFieldType.LIST_STR:
+            if field.choices is not None:
+                select_value = cast("str | None", value)
+                return dmc.Select(
+                    id=input_id,
+                    label=label,
+                    data=list(field.choices),
+                    value=select_value,
+                    allowDeselect=False,
+                )
 
-    if field.choices is not None:
-        select_value = cast("str | None", value)
-        return dmc.Select(
-            id=input_id, label=label, data=list(field.choices), value=select_value, allowDeselect=False
-        )
-
-    options = columns_by_kind.get(field.column_kind, []) if field.column_kind is not None else None
-    if field.type == ParameterFieldType.LIST_STR:
-        multiselect_value = cast("list[str] | None", value)
-        return dmc.MultiSelect(
-            id=input_id,
-            label=label,
-            data=sorted(options) if options else [],
-            value=multiselect_value or [],
-            searchable=True,
-        )
-    if options:
-        return dmc.Select(id=input_id, label=label, data=sorted(options), value=value, searchable=True)  # pyright: ignore[reportArgumentType]
-    return dmc.TextInput(id=input_id, label=label, value=value or "")  # pyright: ignore[reportArgumentType]
+            options = columns_by_kind.get(field.column_kind, []) if field.column_kind is not None else None
+            if field.type == ParameterFieldType.LIST_STR:
+                multiselect_value = cast("list[str] | None", value)
+                return dmc.MultiSelect(
+                    id=input_id,
+                    label=label,
+                    data=sorted(options) if options else [],
+                    value=multiselect_value or [],
+                    searchable=True,
+                )
+            if options:
+                return dmc.Select(
+                    id=input_id,
+                    label=label,
+                    data=sorted(options),
+                    value=value,  # pyright: ignore[reportArgumentType]
+                    searchable=True,
+                )
+            return dmc.TextInput(id=input_id, label=label, value=value or "")  # pyright: ignore[reportArgumentType]
 
 
 def _add_chart_modal() -> dmc.Modal:
@@ -918,6 +922,20 @@ def _build_hparam_datatable(
     )
 
 
+def _require_triggered_id() -> Any:  # noqa: ANN401
+    """
+    Return `ctx.triggered_id`, or raise `PreventUpdate` if nothing meaningfully triggered.
+
+    Dash still fires pattern-matched callbacks when a listened component is created with its
+    property at a falsy default (e.g. a freshly-rendered button's `n_clicks=0`); checking
+    `ctx.triggered[0]["value"]` distinguishes that no-op firing from an actual click/change.
+    Callers `cast(...)` the result to the triggered-id shape they expect.
+    """
+    if not ctx.triggered_id or not ctx.triggered[0]["value"]:  # pyright: ignore[reportUnknownMemberType]
+        raise PreventUpdate
+    return ctx.triggered_id  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+
+
 # ============================================================
 # callbacks
 # ============================================================
@@ -942,7 +960,7 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         store = get_data_store()
         page = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
         exp = store.get_experiment(experiment_id)
-        name, description = (_experiment_display_name(exp), exp.description) if exp else ("", "")
+        name, description = (experiment_display_name(exp), exp.description) if exp else ("", "")
         header = render_header(EXPERIMENT_DESC_IDS, title=name, description=description)
         return (
             accordion_view(store, experiment_id=experiment_id),
@@ -957,7 +975,7 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         if exp is None:
             msg = f"Experiment {experiment_id} not found"
             raise ValueError(msg)
-        return _experiment_display_name(exp), exp.description
+        return experiment_display_name(exp), exp.description
 
     def _save_experiment_description(experiment_id: int, description: str) -> tuple[str, str]:
         store = get_data_store()
@@ -966,7 +984,7 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
             msg = f"Experiment {experiment_id} not found"
             raise ValueError(msg)
         updated = store.update_experiment(exp.model_copy(update={"description": description}))
-        return _experiment_display_name(updated), updated.description
+        return experiment_display_name(updated), updated.description
 
     register_edit_callbacks(
         app,
@@ -1097,7 +1115,7 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         edit_mode: bool | None,  # noqa: FBT001
         edit_drawer_opened: bool | None,  # noqa: FBT001
         full_df_json: str | None,
-        column_kinds: dict[str, ColumnKind] | None,
+        column_kinds: dict[str, str] | None,
     ) -> tuple[str, dmc.Container]:
         if selected_rows is None or table_data is None:
             raise PreventUpdate
@@ -1110,10 +1128,12 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
             store,
             experiment_id,
             {constants.EXCLUDED_RUNS_KEY: excluded},
-            edit_mode=bool(edit_mode),
-            edit_drawer_opened=bool(edit_drawer_opened),
-            full_df_json=full_df_json,
-            column_kinds=column_kinds,
+            view_state=EditViewState(
+                edit_mode=bool(edit_mode),
+                edit_drawer_opened=bool(edit_drawer_opened),
+                full_df_json=full_df_json,
+                column_kinds=column_kinds,
+            ),
         )
         return page.model_dump_json(), container
 
@@ -1152,7 +1172,7 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         edit_mode: bool | None,  # noqa: FBT001
         edit_drawer_opened: bool | None,  # noqa: FBT001
         full_df_json: str | None,
-        column_kinds: dict[str, ColumnKind] | None,
+        column_kinds: dict[str, str] | None,
     ) -> tuple[html.Div, str]:
         if not n_clicks:
             raise PreventUpdate
@@ -1167,10 +1187,12 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
             page_json,
             experiment_id,
             add_panel,
-            edit_mode=bool(edit_mode),
-            edit_drawer_opened=bool(edit_drawer_opened),
-            full_df_json=full_df_json,
-            column_kinds=column_kinds,
+            view_state=EditViewState(
+                edit_mode=bool(edit_mode),
+                edit_drawer_opened=bool(edit_drawer_opened),
+                full_df_json=full_df_json,
+                column_kinds=column_kinds,
+            ),
         )
         return container, page.model_dump_json()
 
@@ -1205,7 +1227,7 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         edit_mode: bool | None,  # noqa: FBT001
         edit_drawer_opened: bool | None,  # noqa: FBT001
         full_df_json: str | None,
-        column_kinds: dict[str, ColumnKind] | None,
+        column_kinds: dict[str, str] | None,
     ) -> tuple[Any, bool, str, str | NoUpdate]:
         if not n_clicks or not chart_type_name or not target:
             raise PreventUpdate
@@ -1226,10 +1248,12 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
             page_json,
             experiment_id,
             apply_chart,
-            edit_mode=bool(edit_mode),
-            edit_drawer_opened=bool(edit_drawer_opened),
-            full_df_json=full_df_json,
-            column_kinds=column_kinds,
+            view_state=EditViewState(
+                edit_mode=bool(edit_mode),
+                edit_drawer_opened=bool(edit_drawer_opened),
+                full_df_json=full_df_json,
+                column_kinds=column_kinds,
+            ),
         )
         return container, False, "", page.model_dump_json()
 
@@ -1252,11 +1276,9 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         edit_mode: bool | None,  # noqa: FBT001
         edit_drawer_opened: bool | None,  # noqa: FBT001
         full_df_json: str | None,
-        column_kinds: dict[str, ColumnKind] | None,
+        column_kinds: dict[str, str] | None,
     ) -> tuple[html.Div, str]:
-        triggered_id = cast("_ChartTargetData", ctx.triggered_id)  # pyright: ignore[reportUnknownMemberType]
-        if not triggered_id or not ctx.triggered[0]["value"]:
-            raise PreventUpdate
+        triggered_id = cast("_ChartTargetData", _require_triggered_id())
         panel_name, index = triggered_id["panel"], triggered_id["index"]
 
         def remove_chart(panels: list[PanelInstance[Any, Any]]) -> list[PanelInstance[Any, Any]]:
@@ -1271,10 +1293,12 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
             page_json,
             experiment_id,
             remove_chart,
-            edit_mode=bool(edit_mode),
-            edit_drawer_opened=bool(edit_drawer_opened),
-            full_df_json=full_df_json,
-            column_kinds=column_kinds,
+            view_state=EditViewState(
+                edit_mode=bool(edit_mode),
+                edit_drawer_opened=bool(edit_drawer_opened),
+                full_df_json=full_df_json,
+                column_kinds=column_kinds,
+            ),
         )
         return container, page.model_dump_json()
 
@@ -1297,11 +1321,9 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         edit_mode: bool | None,  # noqa: FBT001
         edit_drawer_opened: bool | None,  # noqa: FBT001
         full_df_json: str | None,
-        column_kinds: dict[str, ColumnKind] | None,
+        column_kinds: dict[str, str] | None,
     ) -> tuple[html.Div, str]:
-        triggered_id = cast("dict[str, str]", ctx.triggered_id)  # pyright: ignore[reportUnknownMemberType]
-        if not triggered_id or not ctx.triggered[0]["value"]:
-            raise PreventUpdate
+        triggered_id = cast("dict[str, str]", _require_triggered_id())
         panel_name = triggered_id["panel"]
 
         def remove_panel(panels: list[PanelInstance[Any, Any]]) -> list[PanelInstance[Any, Any]]:
@@ -1311,10 +1333,12 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
             page_json,
             experiment_id,
             remove_panel,
-            edit_mode=bool(edit_mode),
-            edit_drawer_opened=bool(edit_drawer_opened),
-            full_df_json=full_df_json,
-            column_kinds=column_kinds,
+            view_state=EditViewState(
+                edit_mode=bool(edit_mode),
+                edit_drawer_opened=bool(edit_drawer_opened),
+                full_df_json=full_df_json,
+                column_kinds=column_kinds,
+            ),
         )
         return container, page.model_dump_json()
 
@@ -1337,11 +1361,9 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         edit_mode: bool | None,  # noqa: FBT001
         edit_drawer_opened: bool | None,  # noqa: FBT001
         full_df_json: str | None,
-        column_kinds: dict[str, ColumnKind] | None,
+        column_kinds: dict[str, str] | None,
     ) -> tuple[html.Div, str]:
-        triggered_id = cast("dict[str, str]", ctx.triggered_id)  # pyright: ignore[reportUnknownMemberType]
-        if not triggered_id or not ctx.triggered[0]["value"]:
-            raise PreventUpdate
+        triggered_id = cast("dict[str, str]", _require_triggered_id())
         panel_name = triggered_id["panel"]
         direction = cast("_PanelMoveDirection", triggered_id["direction"])
 
@@ -1352,10 +1374,12 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
             page_json,
             experiment_id,
             reorder,
-            edit_mode=bool(edit_mode),
-            edit_drawer_opened=bool(edit_drawer_opened),
-            full_df_json=full_df_json,
-            column_kinds=column_kinds,
+            view_state=EditViewState(
+                edit_mode=bool(edit_mode),
+                edit_drawer_opened=bool(edit_drawer_opened),
+                full_df_json=full_df_json,
+                column_kinds=column_kinds,
+            ),
         )
         return container, page.model_dump_json()
 
@@ -1369,9 +1393,7 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         prevent_initial_call=True,
     )
     def open_rename_panel_modal(_n_clicks_list: list[int]) -> tuple[bool, str, str, str]:
-        triggered_id = cast("dict[str, str]", ctx.triggered_id)  # pyright: ignore[reportUnknownMemberType]
-        if not triggered_id or not ctx.triggered[0]["value"]:
-            raise PreventUpdate
+        triggered_id = cast("dict[str, str]", _require_triggered_id())
         panel_name = triggered_id["panel"]
         return True, panel_name, panel_name, ""
 
@@ -1400,7 +1422,7 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         edit_mode: bool | None,  # noqa: FBT001
         edit_drawer_opened: bool | None,  # noqa: FBT001
         full_df_json: str | None,
-        column_kinds: dict[str, ColumnKind] | None,
+        column_kinds: dict[str, str] | None,
     ) -> tuple[Any, str | NoUpdate, bool | NoUpdate, str]:
         if not n_clicks or not old_name:
             raise PreventUpdate
@@ -1434,10 +1456,12 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         container = accordion_view(
             store,
             experiment_id=experiment_id,
-            edit_mode=bool(edit_mode),
-            edit_drawer_opened=bool(edit_drawer_opened),
-            full_df_json=full_df_json,
-            column_kinds=column_kinds,
+            view_state=EditViewState(
+                edit_mode=bool(edit_mode),
+                edit_drawer_opened=bool(edit_drawer_opened),
+                full_df_json=full_df_json,
+                column_kinds=column_kinds,
+            ),
         )
         return container, curr_page.model_dump_json(), False, ""
 
@@ -1470,7 +1494,7 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         mode: str | None,
         page_json: str,
         experiment_id: int,
-        column_kinds: dict[str, ColumnKind] | None,
+        column_kinds: dict[str, str] | None,
         full_df_json: str | None,
     ) -> tuple[html.Div, str]:
         if not n_clicks:
@@ -1489,10 +1513,9 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
             page_json,
             experiment_id,
             replace_with_generated_panels,
-            edit_mode=True,
-            edit_drawer_opened=True,
-            full_df_json=full_df_json,
-            column_kinds=column_kinds,
+            view_state=EditViewState(
+                edit_mode=True, edit_drawer_opened=True, full_df_json=full_df_json, column_kinds=column_kinds
+            ),
         )
         return container, page.model_dump_json()
 
@@ -1512,7 +1535,7 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         delimiter: str | None,
         mode: str | None,
         page_json: str,
-        column_kinds: dict[str, ColumnKind] | None,
+        column_kinds: dict[str, str] | None,
     ) -> tuple[bool | NoUpdate, Component, list[dict[str, Any]]]:
         triggered_id = cast("str | None", ctx.triggered_id)  # pyright: ignore[reportUnknownMemberType]
         if not triggered_id:
@@ -1565,11 +1588,9 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         edit_mode: bool | None,  # noqa: FBT001
         edit_drawer_opened: bool | None,  # noqa: FBT001
         full_df_json: str | None,
-        column_kinds: dict[str, ColumnKind] | None,
+        column_kinds: dict[str, str] | None,
     ) -> tuple[html.Div, str, Component, list[dict[str, Any]]]:
-        triggered_id = cast("dict[str, str]", ctx.triggered_id)  # pyright: ignore[reportUnknownMemberType]
-        if not triggered_id or not ctx.triggered[0]["value"]:
-            raise PreventUpdate
+        triggered_id = cast("dict[str, str]", _require_triggered_id())
         kind, key = triggered_id["kind"], triggered_id["key"]
 
         stored_suggestions = stored_suggestions or []
@@ -1587,10 +1608,12 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
             page_json,
             experiment_id,
             apply_chart,
-            edit_mode=bool(edit_mode),
-            edit_drawer_opened=bool(edit_drawer_opened),
-            full_df_json=full_df_json,
-            column_kinds=column_kinds,
+            view_state=EditViewState(
+                edit_mode=bool(edit_mode),
+                edit_drawer_opened=bool(edit_drawer_opened),
+                full_df_json=full_df_json,
+                column_kinds=column_kinds,
+            ),
         )
 
         remaining = [s for s in stored_suggestions if not (s["kind"] == kind and s["key"] == key)]
@@ -1697,9 +1720,7 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
     def open_chart_modal(
         _add_clicks: list[int], _edit_clicks: list[int], page_json: str
     ) -> tuple[bool, _ChartTargetData, str | None, dict[str, Any]]:
-        triggered_id = cast("_ChartID", ctx.triggered_id)  # pyright: ignore[reportUnknownMemberType]
-        if not triggered_id or not ctx.triggered[0]["value"]:
-            raise PreventUpdate
+        triggered_id = cast("_ChartID", _require_triggered_id())
 
         if triggered_id["type"] == "open-add-chart":
             return True, {"panel": str(triggered_id["panel"]), "index": None}, None, {}
