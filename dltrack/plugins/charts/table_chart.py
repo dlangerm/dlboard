@@ -19,6 +19,7 @@ from dash.dash_table.Format import Format
 from pydantic import BaseModel
 
 from dltrack.models._view import ChartType, ColumnKind
+from dltrack.plugins.charts._grouping import last_row_per_run
 from dltrack.plugins.charts._table_style import (
     HPARAM_COLUMN_PREFIX,
     NUMERIC,
@@ -98,11 +99,7 @@ def _render_by_run(parameters: TableChartSettings, dataframe: pd.DataFrame) -> d
         wanted_metrics = set(parameters.metrics)
         metric_cols = [c for c in metric_cols if c in wanted_metrics]
 
-    last_rows = (
-        dataframe.loc[dataframe.groupby("run_id")["step"].idxmax()]
-        if "step" in dataframe.columns
-        else dataframe.drop_duplicates(subset=["run_id"], keep="last")
-    )
+    last_rows = last_row_per_run(dataframe)
 
     rows: list[dict[str, Any]] = []
     for _, row in last_rows.iterrows():

@@ -97,10 +97,19 @@ def infer_column_kinds(
 
 
 def group_columns_by_kind(column_kinds: dict[str, str]) -> dict[ColumnKind, list[str]]:
-    """Round-trip Store data (plain strings) back into ColumnKind-keyed groups."""
+    """
+    Round-trip Store data (plain strings) back into ColumnKind-keyed groups.
+
+    Also synthesizes a `GROUPING` bucket -- metric and hparam columns plus `run_id` -- for fields
+    (e.g. a bar chart's `x_axis`) that group/split by any of those rather than being restricted to
+    one specific kind.
+    """
     grouped: dict[ColumnKind, list[str]] = {}
     for col, kind in column_kinds.items():
         grouped.setdefault(ColumnKind(kind), []).append(col)
+    grouped[ColumnKind.GROUPING] = sorted(
+        {"run_id", *grouped.get(ColumnKind.METRIC, []), *grouped.get(ColumnKind.HPARAM, [])}
+    )
     return grouped
 
 

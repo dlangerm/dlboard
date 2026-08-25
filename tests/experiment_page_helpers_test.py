@@ -135,6 +135,16 @@ def test_param_field_input_picks_widget_by_field_type(field: ParameterField, exp
     assert isinstance(component, expected_type)
 
 
+def test_param_field_input_offers_grouping_kind_as_a_select() -> None:
+    """A bar chart's x_axis (ColumnKind.GROUPING) must be pickable, not a blind free-text field --
+    otherwise a user has no way to discover a groupable column like `run_id`."""
+    field = ParameterField(
+        name="x_axis", type=ParameterFieldType.STR, required=True, column_kind=ColumnKind.GROUPING
+    )
+    component = _param_field_input(field.name, field, {ColumnKind.GROUPING: ["loss", "lr", "run_id"]})
+    assert isinstance(component, dmc.Select)
+
+
 def test_param_field_input_falls_back_to_text_when_no_columns_of_kind() -> None:
     field = ParameterField(
         name="column", type=ParameterFieldType.STR, required=True, column_kind=ColumnKind.ARTIFACT

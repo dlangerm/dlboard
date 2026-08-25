@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import contextlib
 import typing
-from hashlib import md5
 from pathlib import Path
 
 import dash_mantine_components as dmc
@@ -13,6 +12,7 @@ from flask import Response
 from pydantic import BaseModel
 
 from dltrack.models._view import ChartType, ColumnKind
+from dltrack.plugins.charts._colors import hash_color
 from dltrack.plugins.charts._sampling import DEFAULT_MAX_POINTS, shared_sample_grid
 
 if typing.TYPE_CHECKING:
@@ -22,27 +22,6 @@ _BOOKKEEPING_COLS = frozenset({"run_id", "index", "timestamp_utc", "experiment_i
 
 _TOOLTIP_JS_PATH = Path(__file__).with_name("line_chart_tooltip.js")
 _TOOLTIP_JS_ROUTE = "line-chart-tooltip.js"
-
-colors = [
-    "gray",
-    "red",
-    "pink",
-    "grape",
-    "violet",
-    "indigo",
-    "blue",
-    "cyan",
-    "teal",
-    "green",
-    "lime",
-    "yellow",
-    "orange",
-]
-
-
-def _hash_color(run_id: int, temperature: int = 5) -> str:
-    v = int(md5(str(run_id).encode(), usedforsecurity=False).hexdigest(), base=16) % len(colors)
-    return colors[v] + f".{temperature % 10}"
 
 
 class LineChartSettings(BaseModel, frozen=True, extra="forbid"):
@@ -128,7 +107,7 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.LineChart], froze
                 {
                     "name": str(col),
                     "label": f"Run {col}",
-                    "color": _hash_color(int(col)),
+                    "color": hash_color(int(col)),
                 }
                 for col in df.columns
                 if col != parameters.x_axis

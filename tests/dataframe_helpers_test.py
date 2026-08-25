@@ -97,7 +97,16 @@ def test_group_columns_by_kind_round_trips_plain_strings() -> None:
     grouped = group_columns_by_kind(
         {"loss": ColumnKind.METRIC, "image": ColumnKind.ARTIFACT, "acc": ColumnKind.METRIC}
     )
-    assert grouped == {ColumnKind.METRIC: ["loss", "acc"], ColumnKind.ARTIFACT: ["image"]}
+    assert grouped == {
+        ColumnKind.METRIC: ["loss", "acc"],
+        ColumnKind.ARTIFACT: ["image"],
+        ColumnKind.GROUPING: ["acc", "loss", "run_id"],
+    }
+
+
+def test_group_columns_by_kind_grouping_bucket_includes_hparams_and_run_id() -> None:
+    grouped = group_columns_by_kind({"loss": ColumnKind.METRIC, "lr": ColumnKind.HPARAM})
+    assert grouped[ColumnKind.GROUPING] == ["loss", "lr", "run_id"]
 
 
 @pytest.mark.parametrize(
