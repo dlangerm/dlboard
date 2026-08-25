@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from dltrack.plugins.charts._sampling import downsample_grouped, downsample_series
+from dltrack.plugins.charts._sampling import downsample_grouped, downsample_series, shared_sample_grid
 from dltrack.plugins.charts.line_chart import LineChart, LineChartSettings
 from tests.conftest import props as _props
 
@@ -43,6 +43,33 @@ def test_downsample_grouped_downsamples_each_group_independently() -> None:
 def test_downsample_grouped_empty_df_is_noop() -> None:
     df = pd.DataFrame(columns=["x", "y", "run_id"])
     assert downsample_grouped(df, "x", "y", "run_id", max_points=10).empty
+
+
+def test_shared_sample_grid_gives_every_value_column_the_same_x_values() -> None:
+    """Two metrics with unrelated shapes must still pick the same x-values, so charts plotting
+    either one -- synced by x-value -- always have a point at the same place.
+    """
+    n = 1000
+    x = np.arange(n)
+    df = pd.DataFrame(
+        {
+            "x": x,
+            "run_id": 1,
+            "loss": np.sin(np.linspace(0, 10, n)),
+            "acc": np.cos(np.linspace(0, 30, n)),  # different shape/frequency than "loss"
+        }
+    )
+    grid = shared_sample_grid(df, x_col="x", group_col="run_id", value_cols=["loss", "acc"], max_points=50)
+
+    loss_only = shared_sample_grid(df, x_col="x", group_col="run_id", value_cols=["loss"], max_points=50)
+    acc_only = shared_sample_grid(df, x_col="x", group_col="run_id", value_cols=["acc"], max_points=50)
+    assert set(loss_only["x"]) <= set(grid["x"])
+    assert set(acc_only["x"]) <= set(grid["x"])
+
+
+def test_shared_sample_grid_empty_df_is_noop() -> None:
+    df = pd.DataFrame(columns=["x", "y", "run_id"])
+    assert shared_sample_grid(df, "x", "run_id", ["y"], max_points=10).empty
 
 
 def _metrics_df(points_per_run: int, n_runs: int = 2) -> pd.DataFrame:
@@ -108,3 +135,19 @@ def test_line_chart_x_axis_type_is_configurable() -> None:
     df = _metrics_df(20)
     chart = LineChart.render(LineChartSettings(column="loss", x_axis="step", x_axis_type="category"), df)
     assert _props(chart)["xAxisProps"] == {"type": "category"}
+
+
+def test_line_chart_sampled_siblings_share_x_values_for_syncing() -> None:
+    """Two charts in the same panel (same shared dataframe), plotting different metrics, must
+    sample the same x-values -- otherwise a synced tooltip only lines up where their independently
+    picked sample sets happen to intersect.
+    """
+    n = 2000
+    df = _metrics_df(n).assign(acc=lambda d: (d["loss"] * -1 + 3).round(2))
+
+    loss_chart = LineChart.render(LineChartSettings(column="loss", x_axis="step", max_points=50), df)
+    acc_chart = LineChart.render(LineChartSettings(column="acc", x_axis="step", max_points=50), df)
+
+    loss_steps = {row["step"] for row in _props(loss_chart)["data"]}
+    acc_steps = {row["step"] for row in _props(acc_chart)["data"]}
+    assert loss_steps == acc_steps

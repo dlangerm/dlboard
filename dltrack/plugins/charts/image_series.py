@@ -5,11 +5,13 @@ from __future__ import annotations
 import hashlib
 import json
 import typing
+from typing import cast
 
 import dash
 import dash_mantine_components as dmc
 import pandas as pd
-from dash import dcc, html
+from dash import ALL, MATCH, Input, Output, State, ctx, dcc, html
+from dash.exceptions import PreventUpdate
 from pydantic import BaseModel
 from structlog.stdlib import get_logger
 
@@ -28,6 +30,9 @@ class ImageChartSettings(BaseModel, frozen=True, extra="forbid"):
     key: str
     x_axis: str = "step"
     height: int = 220
+    native_size: bool = False
+    """Show each thumbnail at its logged resolution (capped by `height`, never upscaled) instead
+    of stretching small images to fill the thumbnail box."""
 
 
 def _escape_ref(ref: str) -> str:
@@ -120,15 +125,39 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
         inst = _instance_id(parameters)
         pages = [run_ids[i : i + PAGE_SIZE] for i in range(0, len(run_ids), PAGE_SIZE)]
 
+        # Small logged images (icons, tiny debug crops) get stretched to fill the thumbnail box
+        # either way (`fit="contain"` upscales as well as downscales) -- "pixelated" keeps that
+        # upscaling crisp/blocky instead of the default blurry interpolation.
+        thumb_style = {
+            "imageRendering": "pixelated",
+            **(
+                {
+                    "maxHeight": f"{parameters.height}px",
+                    "maxWidth": "100%",
+                    "width": "auto",
+                    "margin": "0 auto",
+                }
+                if parameters.native_size
+                else {}
+            ),
+        }
+
         def _run_block(rid: int) -> dmc.Stack:
             first_step = str(per_run_steps[str(rid)][0])
+            image = dmc.Image(
+                id={"type": "image-series-img", "instance": inst, "run": str(rid)},
+                src=per_run_urls[str(rid)][first_step],
+                h=None if parameters.native_size else parameters.height,
+                fit="contain",
+                style=thumb_style,
+            )
             children = [
                 dmc.Text(f"Run {rid}", size="sm", fw=600),
-                dmc.Image(
-                    id={"type": "image-series-img", "instance": inst, "run": str(rid)},
-                    src=per_run_urls[str(rid)][first_step],
-                    h=parameters.height,
-                    fit="contain",
+                html.Div(
+                    image,
+                    id={"type": "image-series-thumb", "instance": inst, "run": str(rid)},
+                    n_clicks=0,
+                    style={"cursor": "zoom-in"},
                 ),
             ]
             if has_tags:
@@ -137,7 +166,6 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
                         id={"type": "image-series-caption", "instance": inst, "run": str(rid)},
                         children=per_run_captions[str(rid)].get(first_step, ""),
                         size="xs",
-                        c="dimmed",
                     )
                 )
             return dmc.Stack(children, gap="xs")
@@ -187,6 +215,28 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
                 ),
                 *page_grids,
                 pager,
+                dmc.Modal(
+                    id={"type": "image-series-modal", "instance": inst},
+                    opened=False,
+                    size="90%",
+                    padding=0,
+                    centered=True,
+                    children=html.Div(
+                        dmc.Image(
+                            id={"type": "image-series-modal-img", "instance": inst},
+                            # fit="contain" within a fixed box scales a small image up (rather
+                            # than showing it as a speck in an otherwise-empty modal) and a large
+                            # one down to fit -- either way, the browser's own pinch/ctrl-scroll
+                            # zoom still reveals further detail on top of this, no custom +/-
+                            # control needed.
+                            fit="contain",
+                            h="80vh",
+                            w="100%",
+                            style={"imageRendering": "pixelated"},
+                        ),
+                        style={"display": "flex", "justifyContent": "center"},
+                    ),
+                ),
             ],
             gap="sm",
         )
@@ -261,3 +311,23 @@ def plug(app: dash.Dash) -> None:
         dash.Input({"type": "image-series-pager", "instance": dash.MATCH}, "value"),
         dash.State({"type": "image-series-page", "instance": dash.MATCH, "page": dash.ALL}, "id"),
     )
+
+    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+        Output({"type": "image-series-modal", "instance": MATCH}, "opened"),
+        Output({"type": "image-series-modal-img", "instance": MATCH}, "src"),
+        Input({"type": "image-series-thumb", "instance": MATCH, "run": ALL}, "n_clicks"),
+        State({"type": "image-series-img", "instance": MATCH, "run": ALL}, "src"),
+        State({"type": "image-series-img", "instance": MATCH, "run": ALL}, "id"),
+        prevent_initial_call=True,
+    )
+    def open_image_modal(
+        n_clicks_list: list[int], srcs: list[str], ids: list[dict[str, str]]
+    ) -> tuple[bool, str]:
+        triggered_id = cast("dict[str, str] | None", ctx.triggered_id)  # pyright: ignore[reportUnknownMemberType]
+        if not triggered_id or not any(n_clicks_list):
+            raise PreventUpdate
+        triggered_run = triggered_id["run"]
+        for src, img_id in zip(srcs, ids, strict=True):
+            if img_id["run"] == triggered_run:
+                return True, src
+        raise PreventUpdate

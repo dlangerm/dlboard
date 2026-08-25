@@ -185,12 +185,25 @@ def _delete_chart_button_id(panel_name: str, index: int) -> _ChartID:
     return {"type": "delete-chart", "panel": panel_name, "index": index}
 
 
+_ChartMoveDirection = typing.Literal["left", "right"]
+
+
+def _move_chart_button_id(
+    panel_name: str, index: int, direction: _ChartMoveDirection
+) -> dict[str, str | int]:
+    return {"type": "move-chart", "panel": panel_name, "index": index, "direction": direction}
+
+
 def _delete_panel_button_id(panel_name: str) -> dict[str, str]:
     return {"type": "delete-panel", "panel": panel_name}
 
 
 def _rename_panel_button_id(panel_name: str) -> dict[str, str]:
     return {"type": "rename-panel", "panel": panel_name}
+
+
+def _panel_sync_switch_id(panel_name: str) -> dict[str, str]:
+    return {"type": "panel-sync", "panel": panel_name}
 
 
 def _move_panel_button_id(panel_name: str, direction: _PanelMoveDirection) -> dict[str, str]:
@@ -275,7 +288,7 @@ def _render_panel_content(
     """Fetch + render one panel's charts. Only called for panels that are actually open."""
     df = _fetch_panel_dataframe(store, experiment_id, panel, page_settings)
     return [
-        dmc.Flex(_render_panel_charts(panel, df, edit_mode=edit_mode), justify="flex-start", gap="xs"),
+        dmc.Flex(_render_panel_charts(panel, df, edit_mode=edit_mode), justify="flex-start", gap="lg"),
         dmc.Button(
             id=_open_chart_button_id(panel.name),
             n_clicks=0,
@@ -290,9 +303,9 @@ def _panel_placeholder() -> dmc.Skeleton:
     return dmc.Skeleton(height=60, radius="sm")
 
 
-def _panel_management_row(panel_name: str, *, index: int, count: int) -> Component:
+def _panel_management_row(panel: PanelInstance[Any, Any], *, index: int, count: int) -> Component:
     """
-    One row of the "Manage panels" list: name + reorder/rename/delete, all plain sibling buttons.
+    One row of the "Manage panels" list: name + sync/reorder/rename/delete, all plain sibling buttons.
 
     Deliberately kept out of the accordion header — `AccordionControl` is a native full-width
     `<button>`, and any attempt to share that row with other interactive controls (flex sibling,
@@ -300,9 +313,16 @@ def _panel_management_row(panel_name: str, *, index: int, count: int) -> Compone
     button, which is the kind of thing screen readers and keyboard nav get confused by. This list
     is a completely separate, ordinary block of buttons instead.
     """
+    panel_name = panel.name
     return dmc.Group(
         [
             dmc.Text(panel_name, size="sm"),
+            dmc.Switch(
+                id=_panel_sync_switch_id(panel_name),
+                label="Sync",
+                checked=panel.sync,
+                size="xs",
+            ),
             dmc.ActionIcon(
                 "↑",
                 id=_move_panel_button_id(panel_name, "up"),
@@ -343,7 +363,7 @@ def _panel_management_row(panel_name: str, *, index: int, count: int) -> Compone
 
 def _panel_management_list(panels: list[PanelInstance[Any, Any]]) -> Component:
     """
-    The edit-mode "Manage panels" list: reorder/rename/delete without opening anything.
+    The edit-mode "Manage panels" list: sync/reorder/rename/delete without opening anything.
 
     Lives in the toolbar, entirely outside the accordion, so none of this fights the accordion's
     own click/toggle handling.
@@ -352,7 +372,7 @@ def _panel_management_list(panels: list[PanelInstance[Any, Any]]) -> Component:
         return html.Div()
     count = len(panels)
     return dmc.Stack(
-        [_panel_management_row(p.name, index=idx, count=count) for idx, p in enumerate(panels)],
+        [_panel_management_row(p, index=idx, count=count) for idx, p in enumerate(panels)],
         gap="xs",
     )
 
@@ -431,18 +451,45 @@ def _render_chart_safely(
         )
 
 
+def _apply_panel_sync(rendered: Component, *, sync: bool) -> Component:
+    """Drop a rendered line chart's crosshair sync when the panel has sync switched off."""
+    if not sync and isinstance(rendered, dmc.LineChart):
+        untyped = cast("Any", rendered)
+        props: dict[str, Any] = dict(untyped.lineChartProps or {})
+        props.pop("syncId", None)
+        untyped.lineChartProps = props
+    return rendered
+
+
 def _render_panel_charts(
     panel: PanelInstance[Any, Any], dataframe: pd.DataFrame, *, edit_mode: bool = False
 ) -> list[dmc.Stack]:
     """Render each chart in a panel with edit/delete controls above it."""
     items: list[dmc.Stack] = []
+    last_index = len(panel.charts) - 1
     for idx, chart in enumerate(panel.charts):
-        rendered = _render_chart_safely(chart, dataframe, panel.name)
+        rendered = _apply_panel_sync(_render_chart_safely(chart, dataframe, panel.name), sync=panel.sync)
         items.append(
             dmc.Stack(
                 [
                     dmc.Group(
                         [
+                            dmc.ActionIcon(
+                                "←",
+                                id=_move_chart_button_id(panel.name, idx, "left"),
+                                n_clicks=0,
+                                disabled=not edit_mode or idx == 0,
+                                variant="subtle",
+                                size="xs",
+                            ),
+                            dmc.ActionIcon(
+                                "→",
+                                id=_move_chart_button_id(panel.name, idx, "right"),
+                                n_clicks=0,
+                                disabled=not edit_mode or idx == last_index,
+                                variant="subtle",
+                                size="xs",
+                            ),
                             dmc.ActionIcon(
                                 "✎",
                                 id=_edit_chart_button_id(panel.name, idx),  # pyright: ignore[reportArgumentType]
@@ -470,6 +517,7 @@ def _render_panel_charts(
                 ],
                 gap="xs",
                 w="100%",
+                p="xs",
             )
         )
     return items
@@ -735,6 +783,28 @@ def _move_panel(
         return panels
     new_panels = list(panels)
     new_panels[idx], new_panels[swap_with] = new_panels[swap_with], new_panels[idx]
+    return new_panels
+
+
+def _set_panel_sync(
+    panels: list[PanelInstance[Any, Any]], panel_name: str, *, sync: bool
+) -> list[PanelInstance[Any, Any]]:
+    return [p.model_copy(update={"sync": sync}) if p.name == panel_name else p for p in panels]
+
+
+def _move_chart(
+    panels: list[PanelInstance[Any, Any]], panel_name: str, index: int, direction: _ChartMoveDirection
+) -> list[PanelInstance[Any, Any]]:
+    """Swap the chart at `index` in the panel named `panel_name` with its neighbor in `direction`."""
+    swap_with = index - 1 if direction == "left" else index + 1
+    new_panels: list[PanelInstance[Any, Any]] = []
+    for p in panels:
+        if p.name != panel_name or swap_with < 0 or swap_with >= len(p.charts):
+            new_panels.append(p)
+            continue
+        charts = list(p.charts)
+        charts[index], charts[swap_with] = charts[swap_with], charts[index]
+        new_panels.append(p.model_copy(update={"charts": charts}))
     return new_panels
 
 
@@ -1472,6 +1542,96 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
             page_json,
             experiment_id,
             reorder,
+            view_state=EditViewState(
+                edit_mode=bool(edit_mode),
+                edit_drawer_opened=bool(edit_drawer_opened),
+                full_df_json=full_df_json,
+                column_kinds=column_kinds,
+            ),
+        )
+        return container, page.model_dump_json()
+
+    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+        Output(constants.METRIC_CONTENT_ID, "children", allow_duplicate=True),
+        Output(constants.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
+        Input({"type": "move-chart", "panel": ALL, "index": ALL, "direction": ALL}, "n_clicks"),
+        State(constants.STATE_PAGE_STORAGE, "data"),
+        State(constants.STATE_EXPERIMENT_ID, "data"),
+        State(EDIT_MODE_ID, "checked", allow_optional=True),
+        State(EDIT_DRAWER_ID, "opened", allow_optional=True),
+        State(FULL_DF_STORE_ID, "data", allow_optional=True),
+        State(COLUMN_KINDS_STORE_ID, "data", allow_optional=True),
+        prevent_initial_call=True,
+    )
+    def move_chart(  # noqa: PLR0913
+        _n_clicks_list: list[int],
+        page_json: str,
+        experiment_id: int,
+        edit_mode: bool | None,  # noqa: FBT001
+        edit_drawer_opened: bool | None,  # noqa: FBT001
+        full_df_json: str | None,
+        column_kinds: dict[str, str] | None,
+    ) -> tuple[html.Div, str]:
+        triggered_id = cast("dict[str, Any]", _require_triggered_id())
+        panel_name, index, direction = (
+            triggered_id["panel"],
+            triggered_id["index"],
+            cast("_ChartMoveDirection", triggered_id["direction"]),
+        )
+
+        def reorder(panels: list[PanelInstance[Any, Any]]) -> list[PanelInstance[Any, Any]]:
+            return _move_chart(panels, panel_name, index, direction)
+
+        page, container = _mutate_panels_and_rerender(
+            page_json,
+            experiment_id,
+            reorder,
+            view_state=EditViewState(
+                edit_mode=bool(edit_mode),
+                edit_drawer_opened=bool(edit_drawer_opened),
+                full_df_json=full_df_json,
+                column_kinds=column_kinds,
+            ),
+        )
+        return container, page.model_dump_json()
+
+    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+        Output(constants.METRIC_CONTENT_ID, "children", allow_duplicate=True),
+        Output(constants.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
+        Input({"type": "panel-sync", "panel": ALL}, "checked"),
+        State(constants.STATE_PAGE_STORAGE, "data"),
+        State(constants.STATE_EXPERIMENT_ID, "data"),
+        State(EDIT_MODE_ID, "checked", allow_optional=True),
+        State(EDIT_DRAWER_ID, "opened", allow_optional=True),
+        State(FULL_DF_STORE_ID, "data", allow_optional=True),
+        State(COLUMN_KINDS_STORE_ID, "data", allow_optional=True),
+        prevent_initial_call=True,
+    )
+    def toggle_panel_sync(  # noqa: PLR0913
+        _checked_list: list[bool],
+        page_json: str,
+        experiment_id: int,
+        edit_mode: bool | None,  # noqa: FBT001
+        edit_drawer_opened: bool | None,  # noqa: FBT001
+        full_df_json: str | None,
+        column_kinds: dict[str, str] | None,
+    ) -> tuple[html.Div, str]:
+        # Unlike button clicks, a Switch's `checked` is a meaningful trigger value even when
+        # `False`, so this can't reuse `_require_triggered_id`'s "falsy value means no real
+        # trigger" check.
+        if not ctx.triggered_id:  # pyright: ignore[reportUnknownMemberType]
+            raise PreventUpdate
+        triggered_id = cast("dict[str, str]", ctx.triggered_id)  # pyright: ignore[reportUnknownMemberType]
+        panel_name = triggered_id["panel"]
+        sync = bool(cast("Any", ctx.triggered[0]["value"]))
+
+        def toggle(panels: list[PanelInstance[Any, Any]]) -> list[PanelInstance[Any, Any]]:
+            return _set_panel_sync(panels, panel_name, sync=sync)
+
+        page, container = _mutate_panels_and_rerender(
+            page_json,
+            experiment_id,
+            toggle,
             view_state=EditViewState(
                 edit_mode=bool(edit_mode),
                 edit_drawer_opened=bool(edit_drawer_opened),

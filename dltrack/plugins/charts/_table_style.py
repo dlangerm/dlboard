@@ -40,7 +40,12 @@ def themed_datatable_kwargs(*, font_size: str = DEFAULT_TABLE_FONT_SIZE) -> dict
     Spread into a `dash_table.DataTable(...)` call: `dash_table.DataTable(..., **themed_datatable_kwargs())`.
     """
     return {
-        "style_table": {"overflowX": "auto"},
+        "style_table": {
+            "overflowX": "auto",
+            "overflowY": "hidden",
+            "border": "1px solid var(--mantine-color-default-border)",
+            "borderRadius": "var(--mantine-radius-md)",
+        },
         "style_header": {
             "backgroundColor": "var(--mantine-color-default-hover)",
             "color": "var(--mantine-color-text)",
@@ -56,7 +61,6 @@ def themed_datatable_kwargs(*, font_size: str = DEFAULT_TABLE_FONT_SIZE) -> dict
             "fontFamily": "var(--mantine-font-family)",
             "fontSize": font_size,
             "border": "none",
-            "borderBottom": "1px solid var(--mantine-color-default-border)",
             "padding": "6px 10px",
         },
         "style_data_conditional": [
@@ -82,7 +86,7 @@ def themed_datatable_kwargs(*, font_size: str = DEFAULT_TABLE_FONT_SIZE) -> dict
             },
             {
                 "selector": ".dash-spreadsheet-pagination",
-                "rule": "color: var(--mantine-color-text);",
+                "rule": "color: var(--mantine-color-text); border-top: 1px solid var(--mantine-color-default-border); padding-top: 6px;",
             },
             {
                 "selector": ".dash-spreadsheet-pagination button",
@@ -90,6 +94,7 @@ def themed_datatable_kwargs(*, font_size: str = DEFAULT_TABLE_FONT_SIZE) -> dict
                     "background-color: var(--mantine-color-default-hover);"
                     "color: var(--mantine-color-text);"
                     "border: 1px solid var(--mantine-color-default-border);"
+                    "border-radius: 4px;"
                 ),
             },
         ],

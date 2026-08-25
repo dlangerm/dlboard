@@ -54,7 +54,10 @@ def test_render_panel_charts_controls_visibility_matches_edit_mode(*, edit_mode:
     expected_style = {} if edit_mode else {"display": "none"}
     assert controls["style"] == expected_style
 
-    [edit_icon, delete_icon] = controls["children"]
+    [move_left_icon, move_right_icon, edit_icon, delete_icon] = controls["children"]
+    # a single chart has no neighbor to swap with, so move controls stay disabled either way
+    assert _to_props(move_left_icon)["disabled"] is True
+    assert _to_props(move_right_icon)["disabled"] is True
     assert _to_props(edit_icon)["disabled"] is not edit_mode
     assert _to_props(delete_icon)["disabled"] is not edit_mode
 
