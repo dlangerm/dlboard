@@ -8,6 +8,7 @@ from typing import Any
 import pandas as pd
 import pytest
 
+from dltrack.conftest import props as _props
 from dltrack.plugins.charts.image_series import (
     MAX_SLIDER_LABELS,
     PAGE_SIZE,
@@ -15,7 +16,6 @@ from dltrack.plugins.charts.image_series import (
     ImageChartSettings,
     _slider_marks,
 )
-from tests.conftest import props as _props
 
 
 def _artifacts_df(n_runs: int, steps_per_run: int = 1) -> pd.DataFrame:

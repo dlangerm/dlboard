@@ -12,6 +12,7 @@ from typing import Any
 
 import dash_mantine_components as dmc
 
+from dltrack.conftest import find_props as _find_props
 from dltrack.models._view import ChartInstance, PanelInstance
 from dltrack.plugins.pages.simple_experiment_page import (
     _add_chart_to_panel_by_name,
@@ -25,7 +26,6 @@ from dltrack.plugins.pages.simple_experiment_page import (
     _rename_panel_button_id,
     _set_panel_sync,
 )
-from tests.conftest import find_props as _find_props
 
 # ---- "Manage panels" list: rename/delete/reorder controls work without opening a panel ----
 

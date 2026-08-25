@@ -13,10 +13,10 @@ from typing import Any
 import dash_mantine_components as dmc
 import pandas as pd
 
+from dltrack.conftest import props as _props
 from dltrack.models._view import ChartInstance, PanelInstance
 from dltrack.plugins.charts.line_chart import LineChart
 from dltrack.plugins.pages.simple_experiment_page import _render_panel_charts
-from tests.conftest import props as _props
 
 LineChart.register(allow_override=True)
 

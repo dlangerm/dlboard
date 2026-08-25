@@ -5,8 +5,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from dltrack.conftest import find_props as _find_props
 from dltrack.plugins.pages._description_editor import DescriptionEditorIds, render_header
-from tests.conftest import find_props as _find_props
 
 _IDS = DescriptionEditorIds(
     header="h",

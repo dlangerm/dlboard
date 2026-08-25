@@ -82,6 +82,7 @@ def _experiment_card(experiment: Experiment, color: str) -> dmc.Card:
         radius="md",
         padding="lg",
         shadow="sm",
+        className="experiment-card",
     )
 
 

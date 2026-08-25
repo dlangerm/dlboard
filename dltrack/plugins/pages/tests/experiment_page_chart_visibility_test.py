@@ -10,6 +10,8 @@ import pandas as pd
 import pytest
 
 from dltrack import models
+from dltrack.conftest import find_props as _find_props
+from dltrack.conftest import props as _to_props
 from dltrack.models import constants
 from dltrack.models._view import ChartInstance, PanelInstance
 from dltrack.plugins.charts.line_chart import LineChart
@@ -21,8 +23,6 @@ from dltrack.plugins.pages.simple_experiment_page import (
     _render_panel_charts,
     _render_panel_content,
 )
-from tests.conftest import find_props as _find_props
-from tests.conftest import props as _to_props
 
 if TYPE_CHECKING:
     from dltrack.plugins.data_stores.sqlite import SQLLiteStore

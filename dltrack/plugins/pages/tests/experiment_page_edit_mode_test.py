@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
 from dltrack import models
+from dltrack.conftest import find_props as _find_props
 from dltrack.models._view import ColumnKind, PanelInstance
 from dltrack.plugins.charts.line_chart import LineChart
 from dltrack.plugins.pages.simple_experiment_page import (
@@ -29,7 +30,6 @@ from dltrack.plugins.pages.simple_experiment_page import (
     _persist_settings_and_rerender,
     accordion_view,
 )
-from tests.conftest import find_props as _find_props
 
 if TYPE_CHECKING:
     from dltrack.plugins.data_stores.sqlite import SQLLiteStore

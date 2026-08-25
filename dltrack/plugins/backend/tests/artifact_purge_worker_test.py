@@ -6,6 +6,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, ClassVar, Self
 
 from dltrack import models
+from dltrack.conftest import create_entity_chain
 from dltrack.plugins.backend import artifact_purge_worker
 
 if TYPE_CHECKING:
@@ -46,18 +47,10 @@ class _RaisingArtifactStore:
         self.deleted.append(str(ref))
 
 
-def _project_experiment_run(store: SQLLiteStore) -> tuple[int, int]:
-    project = store.create_project(models.NewProject(name="p", description="d"))
-    experiment = store.create_experiment(models.NewExperiment(project_id=project.id))
-    run = store.create_run(models.NewRun(experiment_id=experiment.id))
-    return project.id, run.id
-
-
 def _queue_purge_tasks(store: SQLLiteStore, count: int) -> int:
     """Soft-delete then purge a project with `count` artifacts, queuing one task per artifact."""
     admin = store.get_or_create_user("admin")
-    project_id, run_id = _project_experiment_run(store)
-    experiment_id = next(store.get_experiments(project_id)).id
+    project_id, experiment_id, run_id, _artifact_id = create_entity_chain(store)
     store.log_artifact_refs(
         [
             models.Artifact(

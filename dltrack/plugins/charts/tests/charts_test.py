@@ -9,10 +9,10 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from dltrack.conftest import props as _props
 from dltrack.plugins.charts._sampling import downsample_grouped, downsample_series, shared_sample_grid
 from dltrack.plugins.charts.bar_chart import BarChart, BarChartSettings
 from dltrack.plugins.charts.line_chart import LineChart, LineChartSettings
-from tests.conftest import props as _props
 
 
 def _series_df(n: int) -> pd.DataFrame:
