@@ -34,6 +34,12 @@ class DataStore[**P](typing.Protocol):
         """Create a project."""
         ...
 
+    def get_or_create_project(
+        self, name: str, description: str = "", created_by: int | None = None
+    ) -> models.Project:
+        """Get the project named `name`, creating it (with `description`) if it doesn't exist yet."""
+        ...
+
     def get_project(self, database_id: int) -> models.Project:
         """Get a project."""
         ...
@@ -48,6 +54,12 @@ class DataStore[**P](typing.Protocol):
 
     def create_experiment(self, experiment: models.NewExperiment) -> models.Experiment:
         """Create an experiment within a project."""
+        ...
+
+    def get_or_create_experiment(
+        self, project_id: int, name: str = "default", created_by: int | None = None
+    ) -> models.Experiment:
+        """Get the named experiment within a project, creating it if it doesn't exist yet."""
         ...
 
     def get_experiment(self, database_id: int) -> models.Experiment | None:

@@ -343,6 +343,21 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         statement, values = sql.insert(models.Project, project)
         return self._first_committed_row(self._execute_sql_query(models.Project, statement, values))
 
+    def get_or_create_project(
+        self, name: str, description: str = "", created_by: int | None = None
+    ) -> models.Project:
+        """Get the project named `name`, creating it (with `description`) if it doesn't exist yet."""
+        existing = list(
+            self._execute_sql_query(
+                models.Project, sql.get_all_by_field(models.Project, "name", name, exclude_deleted=True)
+            )
+        )
+        if existing:
+            return existing[0]
+        return self.create_project(
+            models.NewProject(name=name, description=description, created_by=created_by)
+        )
+
     def get_project(self, database_id: int) -> models.Project:
         """Get project."""
         _log.debug("getting project %s", database_id)
@@ -369,6 +384,29 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         self._ensure_not_deleted(models.Project, experiment.project_id)
         statement, values = sql.insert(models.Experiment, experiment)
         return self._first_committed_row(self._execute_sql_query(models.Experiment, statement, values))
+
+    def get_or_create_experiment(
+        self, project_id: int, name: str = "default", created_by: int | None = None
+    ) -> models.Experiment:
+        """Get the named experiment within `project_id`, creating it if it doesn't exist yet."""
+        existing = list(
+            self._execute_sql_query(
+                models.Experiment,
+                sql.get_all_by_field(
+                    models.Experiment,
+                    "project_id",
+                    project_id,
+                    match_field="name",
+                    match_field_values={name},
+                    exclude_deleted=True,
+                ),
+            )
+        )
+        if existing:
+            return existing[0]
+        return self.create_experiment(
+            models.NewExperiment(project_id=project_id, name=name, created_by=created_by)
+        )
 
     def get_experiment(self, database_id: int) -> models.Experiment | None:
         """Get an experiment by id, or None if it doesn't exist (or has been deleted)."""

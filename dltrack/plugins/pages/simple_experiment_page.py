@@ -277,6 +277,29 @@ def _fetch_panel_dataframe(
     return filter_excluded_runs(df, page_settings)
 
 
+def _compute_full_df_and_column_kinds(
+    store: DataStore[...], experiment_id: int
+) -> tuple[str, dict[str, str]]:
+    """
+    Fetch every metric/artifact/hparam for `experiment_id` and infer each column's kind.
+
+    The expensive "load everything" path, normally triggered once by switching edit mode on and
+    cached client-side afterward (`FULL_DF_STORE_ID`/`COLUMN_KINDS_STORE_ID`). Also used as a
+    fallback wherever a column-kind lookup is needed before edit mode has ever been toggled on this
+    page load -- e.g. auto-generating charts right after opening a brand new experiment.
+    """
+    metrics_df = build_metrics_dataframe(store.fetch_metrics(experiment_id))
+    artifacts = list(store.fetch_artifacts(experiment_id=experiment_id))
+    artifacts_df = build_artifacts_dataframe(artifacts)
+    hparams = list(store.fetch_hyperparams(experiment_id))
+    hparams_df = build_hyperparams_dataframe(hparams)
+    df = merge_metrics_and_artifacts(metrics_df, artifacts_df)
+    df = merge_hyperparams(df, hparams_df)
+    hparam_keys = {k for h in hparams for k in h.hparams_dict}
+    column_kinds = infer_column_kinds(metrics_df.columns, {a.key for a in artifacts}, hparam_keys)
+    return df.to_json(orient="split"), {k: v.value for k, v in column_kinds.items()}
+
+
 def _render_panel_content(
     store: DataStore[...],
     experiment_id: int,
@@ -451,13 +474,23 @@ def _render_chart_safely(
         )
 
 
-def _apply_panel_sync(rendered: Component, *, sync: bool) -> Component:
-    """Drop a rendered line chart's crosshair sync when the panel has sync switched off."""
-    if not sync and isinstance(rendered, dmc.LineChart):
-        untyped = cast("Any", rendered)
-        props: dict[str, Any] = dict(untyped.lineChartProps or {})
-        props.pop("syncId", None)
-        untyped.lineChartProps = props
+def _apply_panel_sync(rendered: Component, *, panel_name: str, sync: bool) -> Component:
+    """
+    Scope a rendered line chart's crosshair sync to its own panel, or drop it if sync is off.
+
+    A chart's own `syncId` is just its x-axis column name (e.g. "step"), shared by every line
+    chart on the page with that x-axis -- not just the ones in the same panel. Two panels that
+    both use "step" (e.g. train vs. val, whose step ranges don't correspond to each other) would
+    otherwise wrongly sync their tooltips together.
+    """
+    if not isinstance(rendered, dmc.LineChart):
+        return rendered
+    untyped = cast("Any", rendered)
+    props: dict[str, Any] = dict(untyped.lineChartProps or {})
+    sync_id = props.pop("syncId", None)
+    if sync and sync_id is not None:
+        props["syncId"] = f"{panel_name}:{sync_id}"
+    untyped.lineChartProps = props
     return rendered
 
 
@@ -468,7 +501,9 @@ def _render_panel_charts(
     items: list[dmc.Stack] = []
     last_index = len(panel.charts) - 1
     for idx, chart in enumerate(panel.charts):
-        rendered = _apply_panel_sync(_render_chart_safely(chart, dataframe, panel.name), sync=panel.sync)
+        rendered = _apply_panel_sync(
+            _render_chart_safely(chart, dataframe, panel.name), panel_name=panel.name, sync=panel.sync
+        )
         items.append(
             dmc.Stack(
                 [
@@ -1758,6 +1793,10 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         if not n_clicks:
             raise PreventUpdate
         if not column_kinds:
+            # Edit mode (the only thing that normally populates these caches) may never have been
+            # toggled on this page load -- fetch fresh rather than wrongly reporting no data.
+            full_df_json, column_kinds = _compute_full_df_and_column_kinds(get_data_store(), experiment_id)
+        if not column_kinds:
             msg = "No metrics or artifacts logged for this experiment yet"
             raise ValueError(msg)
         split_mode: SplitMode = "suffix" if mode == "suffix" else "prefix"
@@ -1798,11 +1837,17 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         triggered_id = cast("str | None", ctx.triggered_id)  # pyright: ignore[reportUnknownMemberType]
         if not triggered_id:
             raise PreventUpdate
+        curr_page = BasicExperimentPage.model_validate_json(page_json)
+        if not column_kinds and curr_page.experiment_id is not None:
+            # Edit mode (the only thing that normally populates this cache) may never have been
+            # toggled on this page load -- fetch fresh rather than wrongly reporting no data.
+            _full_df_json, column_kinds = _compute_full_df_and_column_kinds(
+                get_data_store(), curr_page.experiment_id
+            )
         if not column_kinds:
             empty = dmc.Text("No metrics or artifacts logged for this experiment yet", c="dimmed", size="sm")
             return no_update, empty, []
 
-        curr_page = BasicExperimentPage.model_validate_json(page_json)
         split_mode: SplitMode = "suffix" if mode == "suffix" else "prefix"
         uncharted = find_uncharted_keys(curr_page.panels, column_kinds)
         suggestions = build_suggestions(uncharted, delimiter=delimiter or _DEFAULT_DELIMITER, mode=split_mode)
@@ -1914,7 +1959,7 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         controls_ids: list[dict[str, Any]],
     ) -> tuple[
         str | NoUpdate | None,
-        dict[str, ColumnKind] | NoUpdate,
+        dict[str, str] | NoUpdate,
         list[bool],
         list[dict[str, str]],
         list[bool],
@@ -1945,17 +1990,9 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
             )
 
         store = get_data_store()
-        metrics_df = build_metrics_dataframe(store.fetch_metrics(experiment_id))
-        artifacts = list(store.fetch_artifacts(experiment_id=experiment_id))
-        artifacts_df = build_artifacts_dataframe(artifacts)
-        hparams = list(store.fetch_hyperparams(experiment_id))
-        hparams_df = build_hyperparams_dataframe(hparams)
-        df = merge_metrics_and_artifacts(metrics_df, artifacts_df)
-        df = merge_hyperparams(df, hparams_df)
-        hparam_keys = {k for h in hparams for k in h.hparams_dict}
-        column_kinds = infer_column_kinds(metrics_df.columns, {a.key for a in artifacts}, hparam_keys)
+        full_df_json, column_kinds = _compute_full_df_and_column_kinds(store, experiment_id)
         return (
-            df.to_json(orient="split"),
+            full_df_json,
             column_kinds,
             [False] * len(add_disabled),
             add_style,

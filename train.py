@@ -162,7 +162,11 @@ class MnistDataModule(pl.LightningDataModule):
 def main() -> None:
     """Entrypoint for training."""
     LOGDIR.mkdir(exist_ok=True)
-    logger = DLTrackLogger(project_id=1, experiment_id=1)
+    logger = DLTrackLogger.from_names(
+        "character-classification",
+        "mnist",
+        "Classifying characters",
+    )
     data = MnistDataModule(data_dir="./.data", batch_size=128)
     hidden_size = max(16, int((random() * 2048)))
     lr = random() * 1e-3

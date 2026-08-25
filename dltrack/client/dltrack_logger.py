@@ -14,10 +14,13 @@ from queue import Empty
 from typing import TYPE_CHECKING, Any, NamedTuple, override
 
 import pendulum
+from pydantic import BaseModel
 from pytorch_lightning.loggers import Logger
 
 from dltrack import models
 from dltrack.plugins.backend.basic_rest_backend import BasicDltrackAPI
+
+DEFAULT_EXPERIMENT_NAME = "default"
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -124,20 +127,31 @@ def process_artifacts_async(
                 files.clear()
 
 
+class DLTrackLoggerSettings(BaseModel, frozen=True, extra="forbid"):
+    """Tunables for the logger's background metric/artifact-shipping queues."""
+
+    metrics_q_size: int = 500
+    """Max metric batches buffered before `log_metrics` starts warning about backpressure."""
+    metrics_q_flush_size: int = 100
+    """Metric batches accumulated before the background process ships them to the server."""
+    artifact_q_size: int = 100
+    """Max artifact batches buffered before `log_artifact` starts warning about backpressure."""
+    artifact_q_flush_size: int = 10
+    """Artifact batches accumulated before the background process ships them to the server."""
+
+
 class DLTrackLogger(Logger):
     """The lightning logger for dltrack."""
 
-    def __init__(  # noqa: PLR0913
+    def __init__(
         self,
         project_id: int,
         experiment_id: int | None = None,
         server_url: str = "http://localhost:8050",
-        metrics_q_size: int = 500,
-        metrics_q_flush_size: int = 100,
-        artifact_q_size: int = 100,
-        artifact_q_flush_size: int = 10,
+        settings: DLTrackLoggerSettings | None = None,
     ) -> None:
-        """Initialize with an existing experiment id, if none is given one will be created."""
+        """Initialize with an existing project/experiment id; an experiment is created if none is given."""
+        settings = settings or DLTrackLoggerSettings()
         self._project_id = project_id
         self._api = BasicDltrackAPI(base_url=server_url)
         if experiment_id is None:
@@ -146,8 +160,8 @@ class DLTrackLogger(Logger):
         self._experiment_id = experiment_id
         self._run_id = self._api.create_run(models.NewRun(experiment_id=self._experiment_id)).id
         ctx = get_context("spawn")
-        self._metrics_q: QType = ctx.Queue(maxsize=metrics_q_size)
-        self._art_q: ArtifactQType = ctx.Queue(maxsize=artifact_q_size)
+        self._metrics_q: QType = ctx.Queue(maxsize=settings.metrics_q_size)
+        self._art_q: ArtifactQType = ctx.Queue(maxsize=settings.artifact_q_size)
         self._metric_proc = ctx.Process(
             target=process_metrics_async,
             args=(
@@ -155,7 +169,7 @@ class DLTrackLogger(Logger):
                 self._run_id,
                 self._api,
                 self._metrics_q,
-                LogProcParams(flush_size=metrics_q_flush_size, wait_sec=5),
+                LogProcParams(flush_size=settings.metrics_q_flush_size, wait_sec=5),
             ),
             name="logger-proc",
             daemon=True,
@@ -167,7 +181,7 @@ class DLTrackLogger(Logger):
                 self._run_id,
                 self._api,
                 self._art_q,
-                LogProcParams(flush_size=artifact_q_flush_size, wait_sec=5),
+                LogProcParams(flush_size=settings.artifact_q_flush_size, wait_sec=5),
             ),
             name="artifact-proc",
             daemon=True,
@@ -175,6 +189,28 @@ class DLTrackLogger(Logger):
         self._metric_proc.start()
         self._art_proc.start()
         super().__init__()
+
+    @classmethod
+    def from_names(
+        cls,
+        project_name: str,
+        experiment_name: str = DEFAULT_EXPERIMENT_NAME,
+        project_description: str = "",
+        server_url: str = "http://localhost:8050",
+        settings: DLTrackLoggerSettings | None = None,
+    ) -> DLTrackLogger:
+        """
+        Initialize by project/experiment name instead of raw ids, creating either that don't exist yet.
+
+        `project_description` only applies the first time `project_name` is seen -- once a project
+        exists, later calls just reuse it as-is.
+        """
+        api = BasicDltrackAPI(base_url=server_url)
+        project = api.get_or_create_project(project_name, description=project_description)
+        experiment = api.get_or_create_experiment(project.id, name=experiment_name)
+        return cls(
+            project_id=project.id, experiment_id=experiment.id, server_url=server_url, settings=settings
+        )
 
     @property
     @override

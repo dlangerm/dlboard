@@ -10,8 +10,10 @@ because `accordion_view` hardcoded `checked=False` and emitted fresh, empty
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
+from dltrack import models
 from dltrack.models._view import ColumnKind, PanelInstance
 from dltrack.plugins.charts.line_chart import LineChart
 from dltrack.plugins.pages.simple_experiment_page import (
@@ -22,6 +24,7 @@ from dltrack.plugins.pages.simple_experiment_page import (
     SUGGEST_CHARTS_BUTTON_ID,
     BasicExperimentPage,
     EditViewState,
+    _compute_full_df_and_column_kinds,
     _delete_panel_button_id,
     _persist_settings_and_rerender,
     accordion_view,
@@ -30,6 +33,8 @@ from tests.conftest import find_props as _find_props
 
 if TYPE_CHECKING:
     from dltrack.plugins.data_stores.sqlite import SQLLiteStore
+
+_TS = datetime(2026, 1, 1, tzinfo=UTC)
 
 LineChart.register(allow_override=True)
 
@@ -103,6 +108,41 @@ def test_persist_settings_and_rerender_does_not_reset_edit_drawer_state(
     full_df_store = _find_props(cast("Any", container).children, FULL_DF_STORE_ID)
     assert full_df_store is not None
     assert full_df_store["data"] == '{"cached": true}'
+
+
+# ---- _compute_full_df_and_column_kinds: the edit-mode-cache fallback ----
+
+
+def test_compute_full_df_and_column_kinds_finds_data_without_edit_mode_ever_toggled(
+    store: SQLLiteStore, experiment_id: int
+) -> None:
+    """
+    Regression: auto-generating charts (or suggesting them) right after opening a brand new
+    experiment used to wrongly report "no data logged" -- `COLUMN_KINDS_STORE_ID` is normally only
+    populated by toggling edit mode on, which a first-time visitor may never have done, even though
+    metrics were already logged.
+    """
+    run = store.create_run(models.NewRun(experiment_id=experiment_id))
+    store.log_metrics(
+        [
+            models.LoggedMetrics(
+                metrics={"loss": 0.5}, step=0, experiment_id=experiment_id, run_id=run.id, timestamp_utc=_TS
+            )
+        ]
+    )
+
+    full_df_json, column_kinds = _compute_full_df_and_column_kinds(store, experiment_id)
+
+    assert column_kinds["loss"] == ColumnKind.METRIC.value
+    assert full_df_json
+
+
+def test_compute_full_df_and_column_kinds_empty_for_an_experiment_with_no_data(
+    store: SQLLiteStore, experiment_id: int
+) -> None:
+    _full_df_json, column_kinds = _compute_full_df_and_column_kinds(store, experiment_id)
+
+    assert column_kinds == {}
 
 
 # ---- toolbar: auto-generate charts (empty view) vs suggest charts (non-empty view) ----

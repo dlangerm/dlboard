@@ -176,6 +176,44 @@ def test_get_or_create_user_is_idempotent(store: SQLLiteStore) -> None:
     assert list(store._execute_raw_sql("SELECT count(*) FROM User")) == [(1,)]
 
 
+def test_get_or_create_project_creates_on_first_call_and_reuses_after(store: SQLLiteStore) -> None:
+    first = store.get_or_create_project("p", description="d")
+    again = store.get_or_create_project("p", description="ignored on reuse")
+
+    assert again.id == first.id
+    assert again.description == "d"
+    assert list(store._execute_raw_sql("SELECT count(*) FROM Project")) == [(1,)]
+
+
+def test_get_or_create_project_stamps_created_by(store: SQLLiteStore) -> None:
+    actor = store.get_or_create_user("alice")
+
+    project = store.get_or_create_project("p", created_by=actor.id)
+
+    assert project.created_by == actor.id
+
+
+def test_get_or_create_experiment_creates_on_first_call_and_reuses_after(store: SQLLiteStore) -> None:
+    project = store.create_project(models.NewProject(name="p", description="d"))
+
+    first = store.get_or_create_experiment(project.id)
+    again = store.get_or_create_experiment(project.id)
+
+    assert again.id == first.id
+    assert again.name == "default"
+    assert list(store._execute_raw_sql("SELECT count(*) FROM Experiment")) == [(1,)]
+
+
+def test_get_or_create_experiment_is_scoped_to_its_project(store: SQLLiteStore) -> None:
+    project_a = store.create_project(models.NewProject(name="a", description="d"))
+    project_b = store.create_project(models.NewProject(name="b", description="d"))
+
+    exp_a = store.get_or_create_experiment(project_a.id, name="default")
+    exp_b = store.get_or_create_experiment(project_b.id, name="default")
+
+    assert exp_a.id != exp_b.id
+
+
 def test_update_user_persists_scope_changes(store: SQLLiteStore) -> None:
     user = store.get_or_create_user("alice")
     assert user.scopes == [models.Scope.ALL]  # first user ever, bootstrap admin
