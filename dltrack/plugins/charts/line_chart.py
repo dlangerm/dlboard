@@ -5,9 +5,11 @@ from __future__ import annotations
 import contextlib
 import typing
 from hashlib import md5
+from pathlib import Path
 
 import dash_mantine_components as dmc
 import pandas as pd
+from flask import Response
 from pydantic import BaseModel
 
 from dltrack.models._view import ChartType, ColumnKind
@@ -17,6 +19,9 @@ if typing.TYPE_CHECKING:
     from dash import Dash
 
 _BOOKKEEPING_COLS = frozenset({"run_id", "index", "timestamp_utc", "experiment_id"})
+
+_TOOLTIP_JS_PATH = Path(__file__).with_name("line_chart_tooltip.js")
+_TOOLTIP_JS_ROUTE = "line-chart-tooltip.js"
 
 colors = [
     "gray",
@@ -109,9 +114,15 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.LineChart], froze
             )
             df = df.merge(grid, on=["run_id", parameters.x_axis], how="inner")
         df = df.pivot(index=parameters.x_axis, columns="run_id", values=parameters.column).reset_index()
+        data = df.to_dict(orient="records")
+        # Carried on each row (not a real plotted column) so the tooltip's labelFormatter --
+        # `line_chart_tooltip.js` -- can prefix the hovered x-value with what it actually is,
+        # e.g. "step: 5" instead of a bare "5".
+        for row in data:
+            row["__x_axis_name__"] = parameters.x_axis
         return dmc.LineChart(
             h=parameters.height,
-            data=df.to_dict(orient="records"),  # pyright: ignore[reportArgumentType]
+            data=data,  # pyright: ignore[reportArgumentType]
             dataKey=str(parameters.x_axis),
             series=[
                 {
@@ -132,7 +143,9 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.LineChart], froze
             tickLine="xy",
             # A wider tooltip offset keeps it from sitting directly on top of the cursor's
             # point/line, which otherwise obscures the exact spot the reader is looking at.
-            tooltipProps={"offset": 30},
+            # labelFormatter prefixes the hovered x-value with the axis name -- see
+            # `__x_axis_name__` above and `line_chart_tooltip.js` (registered by `plug`, below).
+            tooltipProps={"offset": 30, "labelFormatter": {"function": "lineChartTooltipLabel"}},
             # syncMethod="value" matches synced charts by x-axis value rather than
             # array index — needed because sampled/unsampled charts (or charts
             # sampled at different rates) don't share row counts, so index-based
@@ -172,6 +185,22 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.LineChart], froze
         return {"column": ColumnKind.METRIC, "x_axis": ColumnKind.METRIC}
 
 
-def plug(app: Dash) -> None:  # noqa: ARG001
-    """Plugin."""
+def _serve_tooltip_js() -> Response:
+    return Response(_TOOLTIP_JS_PATH.read_text(), mimetype="application/javascript")
+
+
+def plug(app: Dash) -> None:
+    """
+    Plugin.
+
+    Registers this chart type, plus the `labelFormatter` its tooltip needs (see `render` and
+    `line_chart_tooltip.js`) -- served from a route this plugin owns and appended to this app
+    instance's own script list (`app.scripts`), not Dash's global `hooks.script`/`hooks.route`
+    registry, which -- like `basic_rest_backend.plug` -- would otherwise leak across every `Dash`
+    app built in the same process, not just this one.
+    """
     LineChart.register()
+    prefix = str(app.config.routes_pathname_prefix)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    route = f"{prefix}{_TOOLTIP_JS_ROUTE}"
+    app.server.add_url_rule(route, endpoint=route, view_func=_serve_tooltip_js)
+    app.scripts.append_script({"external_url": route, "external_only": True})  # pyright: ignore[reportUnknownMemberType]

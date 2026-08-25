@@ -122,24 +122,35 @@ def test_apply_panel_sync_drops_sync_id_when_disabled() -> None:
         data=[], dataKey="step", series=[], lineChartProps={"syncId": "step", "syncMethod": "value"}
     )
 
-    result = _apply_panel_sync(chart, sync=False)
+    result = _apply_panel_sync(chart, panel_name="train", sync=False)
 
     assert "syncId" not in result.lineChartProps  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
     assert result.lineChartProps["syncMethod"] == "value"  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
 
 
-def test_apply_panel_sync_leaves_sync_id_when_enabled() -> None:
+def test_apply_panel_sync_scopes_sync_id_to_the_panel_when_enabled() -> None:
     chart = dmc.LineChart(data=[], dataKey="step", series=[], lineChartProps={"syncId": "step"})
 
-    result = _apply_panel_sync(chart, sync=True)
+    result = _apply_panel_sync(chart, panel_name="train", sync=True)
 
-    assert result.lineChartProps["syncId"] == "step"  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+    assert result.lineChartProps["syncId"] == "train:step"  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+
+
+def test_apply_panel_sync_scoping_keeps_different_panels_apart() -> None:
+    """The whole point: two panels sharing the same x-axis name (e.g. "step") must not sync."""
+    train_chart = dmc.LineChart(data=[], dataKey="step", series=[], lineChartProps={"syncId": "step"})
+    val_chart = dmc.LineChart(data=[], dataKey="step", series=[], lineChartProps={"syncId": "step"})
+
+    train_result = _apply_panel_sync(train_chart, panel_name="train", sync=True)
+    val_result = _apply_panel_sync(val_chart, panel_name="val", sync=True)
+
+    assert train_result.lineChartProps["syncId"] != val_result.lineChartProps["syncId"]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
 
 
 def test_apply_panel_sync_ignores_non_line_charts() -> None:
     other = dmc.Text("not a line chart")
 
-    assert _apply_panel_sync(other, sync=False) is other
+    assert _apply_panel_sync(other, panel_name="train", sync=False) is other
 
 
 # ---- _move_chart ----

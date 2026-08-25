@@ -1,0 +1,21 @@
+{
+    "$schema": "https://biomejs.dev/schemas/2.5.10/schema.json",
+    "files": {
+        "includes": ["dltrack/**/*.js"]
+    },
+    "formatter": {
+        "enabled": true,
+        "indentStyle": "space",
+        "indentWidth": 4,
+        "lineWidth": 110
+    },
+    "javascript": {
+        "formatter": {
+            "quoteStyle": "double",
+            "semicolons": "always"
+        }
+    },
+    "linter": {
+        "enabled": true
+    }
+}

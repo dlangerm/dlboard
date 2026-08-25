@@ -23,6 +23,9 @@ repos:
         args:
           - --autofix
           - --indent=2
+        # biome.json is Biome's own config -- Biome reformats it to its own indent width
+        # regardless of `files.includes`, which otherwise fights this hook's --indent=2.
+        exclude: ^biome\.json$
   - repo: https://github.com/astral-sh/ruff-pre-commit
       # Ruff version.
     rev: v0.15.0
@@ -45,3 +48,9 @@ repos:
     rev: 0.10.0
     hooks:
       - id: uv-lock
+  - repo: https://github.com/biomejs/pre-commit
+      # Lints/formats the browser-side JS in dltrack/**/assets/ (see biome.json). Runs in an
+      # isolated node environment pre-commit provisions itself -- no system Node/npm required.
+    rev: v2.5.10
+    hooks:
+      - id: biome-check

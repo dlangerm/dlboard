@@ -48,7 +48,7 @@ def _save_artifact(
                 _target.parent.mkdir(parents=True)
 
             target_artifact_path = _target.with_suffix(f".{_a.fname.split('.')[-1]}")
-            _log.info("Saving artifact at path %s", target_artifact_path)
+            _log.debug("Saving artifact at path %s", target_artifact_path)
             artifact = models.Artifact.model_validate(
                 _a.model_dump()
                 | {

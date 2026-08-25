@@ -60,6 +60,49 @@ def test_handle_create_experiment_stamps_created_by(store: SQLLiteStore) -> None
     assert result["created_by"] == actor.id
 
 
+def test_handle_get_or_create_project_creates_on_first_call(store: SQLLiteStore) -> None:
+    body = backend.GetOrCreateProject(name="p", description="d").model_dump(mode="json")
+    actor = store.get_or_create_user("alice")
+
+    result = backend.handle_get_or_create_project(store, body, actor)
+
+    assert result["name"] == "p"
+    assert result["created_by"] == actor.id
+
+
+def test_handle_get_or_create_project_reuses_an_existing_project_by_name(store: SQLLiteStore) -> None:
+    existing = store.create_project(models.NewProject(name="p", description="d"))
+    body = backend.GetOrCreateProject(name="p", description="ignored").model_dump(mode="json")
+    actor = store.get_or_create_user("alice")
+
+    result = backend.handle_get_or_create_project(store, body, actor)
+
+    assert result["id"] == existing.id
+    assert result["description"] == "d"
+
+
+def test_handle_get_or_create_experiment_creates_on_first_call(store: SQLLiteStore) -> None:
+    project = store.create_project(models.NewProject(name="p", description="d"))
+    body = backend.GetOrCreateExperiment(project_id=project.id, name="default").model_dump(mode="json")
+    actor = store.get_or_create_user("bob")
+
+    result = backend.handle_get_or_create_experiment(store, body, actor)
+
+    assert result["name"] == "default"
+    assert result["created_by"] == actor.id
+
+
+def test_handle_get_or_create_experiment_reuses_an_existing_experiment_by_name(store: SQLLiteStore) -> None:
+    project = store.create_project(models.NewProject(name="p", description="d"))
+    existing = store.create_experiment(models.NewExperiment(project_id=project.id, name="default"))
+    body = backend.GetOrCreateExperiment(project_id=project.id, name="default").model_dump(mode="json")
+    actor = store.get_or_create_user("bob")
+
+    result = backend.handle_get_or_create_experiment(store, body, actor)
+
+    assert result["id"] == existing.id
+
+
 def test_handle_create_run_stamps_created_by(store: SQLLiteStore) -> None:
     project = store.create_project(models.NewProject(name="p", description="d"))
     experiment = store.create_experiment(models.NewExperiment(project_id=project.id))

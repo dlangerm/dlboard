@@ -36,6 +36,37 @@ def entity_path(model: type[BaseModel], entity_id: str = "<int:entity_id>", base
     return f"{base_url}/{model.__name__.lower()}/{entity_id}".strip("/")
 
 
+def get_or_create_path(model: type[BaseModel], base_url: str = "/") -> str:
+    """Make a consistent API path for the get-or-create-by-name idiom, e.g. `project/get-or-create`."""
+    return f"{base_url}/{model.__name__.lower()}/get-or-create".strip("/")
+
+
+class GetOrCreateProject(BaseModel, frozen=True, extra="forbid"):
+    """Request body: find a project by name, creating it (with `description`) if it's missing."""
+
+    name: str
+    description: str = ""
+
+
+class GetOrCreateExperiment(BaseModel, frozen=True, extra="forbid"):
+    """Request body: find an experiment by name within a project, creating it if it's missing."""
+
+    project_id: int
+    name: str = "default"
+
+
+def _post_request[R: BaseModel](
+    path: str, body: BaseModel, return_model: type[R], headers: dict[str, str] | None = None
+) -> R:
+    try:
+        res = requests.post(path, json=body.model_dump(mode="json"), headers=headers)
+        res.raise_for_status()
+        return return_model.model_validate(res.json())
+    except Exception:
+        _log.exception("Failed to post %s", body)
+        raise
+
+
 def _create_request[R: BaseModel](
     create_model: BaseModel,
     return_model: type[R],
@@ -43,14 +74,18 @@ def _create_request[R: BaseModel](
     api_version: Literal[1] = 1,
     headers: dict[str, str] | None = None,
 ) -> R:
-    try:
-        url = create_path(return_model, base_url, api_version)
-        res = requests.post(url, json=create_model.model_dump(mode="json"), headers=headers)
-        res.raise_for_status()
-        return return_model.model_validate(res.json())
-    except Exception:
-        _log.exception("Failed to crete %s", create_model)
-        raise
+    return _post_request(
+        create_path(return_model, base_url, api_version), create_model, return_model, headers
+    )
+
+
+def _get_or_create_request[R: BaseModel](
+    body: BaseModel,
+    return_model: type[R],
+    base_url: str = "/",
+    headers: dict[str, str] | None = None,
+) -> R:
+    return _post_request(get_or_create_path(return_model, base_url), body, return_model, headers)
 
 
 class BasicDltrackAPI:
@@ -67,9 +102,27 @@ class BasicDltrackAPI:
         """Create a new project."""
         return _create_request(new_project, models.Project, self.base_url, headers=self._headers)
 
+    def get_or_create_project(self, name: str, description: str = "") -> models.Project:
+        """Get the project named `name`, creating it (with `description`) if it doesn't exist yet."""
+        return _get_or_create_request(
+            GetOrCreateProject(name=name, description=description),
+            models.Project,
+            self.base_url,
+            headers=self._headers,
+        )
+
     def create_experiment(self, new_experiment: models.NewExperiment) -> models.Experiment:
         """Create a new experiment."""
         return _create_request(new_experiment, models.Experiment, self.base_url, headers=self._headers)
+
+    def get_or_create_experiment(self, project_id: int, name: str = "default") -> models.Experiment:
+        """Get the named experiment within `project_id`, creating it if it doesn't exist yet."""
+        return _get_or_create_request(
+            GetOrCreateExperiment(project_id=project_id, name=name),
+            models.Experiment,
+            self.base_url,
+            headers=self._headers,
+        )
 
     def create_run(self, run: models.NewRun) -> models.Run:
         """Initialize a new run."""
@@ -131,6 +184,24 @@ def handle_create_experiment(
     """Create an experiment, attributed to `actor`."""
     experiment = models.NewExperiment.model_validate(body).model_copy(update={"created_by": actor.id})
     return store.create_experiment(experiment).model_dump(mode="json")
+
+
+def handle_get_or_create_project(
+    store: DataStore[...], body: dict[str, Any], actor: models.User
+) -> dict[str, Any]:
+    """Get or create a project by name, attributed to `actor` if it's newly created."""
+    req = GetOrCreateProject.model_validate(body)
+    return store.get_or_create_project(req.name, req.description, created_by=actor.id).model_dump(mode="json")
+
+
+def handle_get_or_create_experiment(
+    store: DataStore[...], body: dict[str, Any], actor: models.User
+) -> dict[str, Any]:
+    """Get or create an experiment by name within a project, attributed to `actor` if newly created."""
+    req = GetOrCreateExperiment.model_validate(body)
+    return store.get_or_create_experiment(req.project_id, req.name, created_by=actor.id).model_dump(
+        mode="json"
+    )
 
 
 def handle_create_run(store: DataStore[...], body: dict[str, Any], actor: models.User) -> dict[str, Any]:
@@ -253,6 +324,26 @@ def create_project() -> dict[str, Any]:
         return handle_create_project(store, request.json, get_current_user(store))
     except Exception:
         _log.exception("Error creating project")
+        raise
+
+
+def get_or_create_project() -> dict[str, Any]:
+    """Get or create a project by name."""
+    try:
+        store = get_data_store()
+        return handle_get_or_create_project(store, request.json, get_current_user(store))
+    except Exception:
+        _log.exception("Error getting or creating project")
+        raise
+
+
+def get_or_create_experiment() -> dict[str, Any]:
+    """Get or create an experiment by name within a project."""
+    try:
+        store = get_data_store()
+        return handle_get_or_create_experiment(store, request.json, get_current_user(store))
+    except Exception:
+        _log.exception("Error getting or creating experiment")
         raise
 
 
@@ -386,6 +477,8 @@ _ROUTES: tuple[tuple[str, list[str], Callable[..., Any]], ...] = (
     (create_path(models.Experiment), ["POST"], create_experiment),
     (create_path(models.Run), ["POST"], create_run),
     (create_path(models.Project), ["POST"], create_project),
+    (get_or_create_path(models.Project), ["POST"], get_or_create_project),
+    (get_or_create_path(models.Experiment), ["POST"], get_or_create_experiment),
     (create_path(models.Artifact), ["POST"], log_artifact),
     ("artifact/<string:artifact_url>", ["GET"], download_artifact),
     (entity_path(models.Project), ["DELETE"], delete_project),

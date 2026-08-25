@@ -33,6 +33,18 @@ built for commands that produce output and exit, not for something you need to t
 Ruff lint config lives in `pyproject.toml`; `tests/*` and `dltype/tests/*` get relaxed rules (docstrings,
 private-member access, etc). Pyright runs in `strict` mode over `dltrack/` and `tests/`.
 
+A plugin that needs its own browser-side JS (a clientside callback helper, a functions-as-props formatter
+for dash-mantine-components) keeps that `.js` file next to its own module and serves/registers it itself
+from `plug()` — via `app.server.add_url_rule` + `app.scripts.append_script`, same idea as
+`basic_rest_backend.py`'s routes. Never drop it in a shared `assets/` folder or use the global
+`dash.hooks.route`/`hooks.script` registry: both leak across every `Dash` app built in the same process, not
+just the one that owns the file, and a shared assets folder would tie a plugin's JS to the main app package
+instead of the plugin. Every such `dltrack/**/*.js` file is linted/formatted by Biome (`biome.json`), wired
+into `prek`/pre-commit via the `biome-check` hook. It runs in an isolated Node environment pre-commit
+provisions itself, so no system Node/npm is required. These files target whatever JS the installed
+Dash/browser runtime supports, not a specific Node version — keep that in mind before accepting an
+autofix/suggestion that assumes newer syntax.
+
 ## Architecture
 
 
