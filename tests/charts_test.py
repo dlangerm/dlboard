@@ -3,11 +3,14 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 import numpy as np
 import pandas as pd
 import pytest
 
 from dltrack.plugins.charts._sampling import downsample_grouped, downsample_series, shared_sample_grid
+from dltrack.plugins.charts.bar_chart import BarChart, BarChartSettings
 from dltrack.plugins.charts.line_chart import LineChart, LineChartSettings
 from tests.conftest import props as _props
 
@@ -151,3 +154,103 @@ def test_line_chart_sampled_siblings_share_x_values_for_syncing() -> None:
     loss_steps = {row["step"] for row in _props(loss_chart)["data"]}
     acc_steps = {row["step"] for row in _props(acc_chart)["data"]}
     assert loss_steps == acc_steps
+
+
+def _hparam_grouped_df(hidden_sizes: dict[int, int], accuracies: dict[int, list[float]]) -> pd.DataFrame:
+    """One run per key in `hidden_sizes`; each run logs `accuracies[run_id]` at successive steps,
+    plus a constant `hparam__hidden_size` hyperparameter column (as merged onto the wide metrics
+    dataframe by `merge_hyperparams`)."""
+    frames = [
+        pd.DataFrame(
+            {
+                "run_id": run_id,
+                "step": range(len(values)),
+                "accuracy": values,
+                "hparam__hidden_size": hidden_sizes[run_id],
+            }
+        )
+        for run_id, values in accuracies.items()
+    ]
+    return pd.concat(frames, ignore_index=True)
+
+
+def test_bar_chart_aggregates_runs_sharing_an_x_value() -> None:
+    """Multiple runs with the same hidden_size collapse into one bar, aggregated across runs."""
+    df = _hparam_grouped_df({1: 128, 2: 128, 3: 256}, {1: [0.8], 2: [0.9], 3: [0.7]})
+    chart = BarChart.render(BarChartSettings(column="accuracy", x_axis="hidden_size"), df)
+    data = {row["hidden_size"]: row["accuracy"] for row in _props(chart)["data"]}
+    assert data == {128: pytest.approx(0.85), 256: pytest.approx(0.7)}
+
+
+def test_bar_chart_uses_last_logged_value_per_run() -> None:
+    """A run that logs the metric at every step contributes only its final value, not every step."""
+    df = _hparam_grouped_df({1: 128, 2: 128}, {1: [0.1, 0.2, 0.9], 2: [0.5]})
+    chart = BarChart.render(BarChartSettings(column="accuracy", x_axis="hidden_size"), df)
+    data = {row["hidden_size"]: row["accuracy"] for row in _props(chart)["data"]}
+    assert data == {128: pytest.approx(0.7)}  # mean(0.9, 0.5), not mean(0.1, 0.2, 0.9, 0.5)
+
+
+@pytest.mark.parametrize(
+    ("aggregation", "expected"), [("mean", 0.75), ("min", 0.5), ("max", 1.0), ("sum", 1.5), ("count", 2)]
+)
+def test_bar_chart_aggregation_is_configurable(
+    aggregation: Literal["mean", "median", "min", "max", "sum", "count"], expected: float
+) -> None:
+    df = _hparam_grouped_df({1: 128, 2: 128}, {1: [0.5], 2: [1.0]})
+    chart = BarChart.render(
+        BarChartSettings(column="accuracy", x_axis="hidden_size", aggregation=aggregation), df
+    )
+    data = {row["hidden_size"]: row["accuracy"] for row in _props(chart)["data"]}
+    assert data[128] == pytest.approx(expected)
+
+
+def test_bar_chart_sorts_numeric_groups_ascending() -> None:
+    df = _hparam_grouped_df({1: 256, 2: 32, 3: 128}, {1: [0.1], 2: [0.2], 3: [0.3]})
+    chart = BarChart.render(BarChartSettings(column="accuracy", x_axis="hidden_size"), df)
+    assert [row["hidden_size"] for row in _props(chart)["data"]] == [32, 128, 256]
+
+
+def test_bar_chart_sort_disabled_keeps_first_seen_order() -> None:
+    df = _hparam_grouped_df({1: 256, 2: 32, 3: 128}, {1: [0.1], 2: [0.2], 3: [0.3]})
+    chart = BarChart.render(BarChartSettings(column="accuracy", x_axis="hidden_size", sort=False), df)
+    assert [row["hidden_size"] for row in _props(chart)["data"]] == [256, 32, 128]
+
+
+def test_bar_chart_groups_by_metric_column_when_no_hparam_matches() -> None:
+    """x_axis falls back to a plain metric column (its own last-logged step per run) when no
+    hparam column matches it -- e.g. comparing final loss across runs by their final step."""
+    df = pd.concat(
+        [
+            pd.DataFrame({"run_id": 1, "step": [0, 1, 2], "loss": [0.9, 0.5, 0.1]}),
+            pd.DataFrame({"run_id": 2, "step": [0, 1], "loss": [0.9, 0.3]}),
+        ],
+        ignore_index=True,
+    )
+    chart = BarChart.render(BarChartSettings(column="loss", x_axis="step"), df)
+    props = _props(chart)
+    assert props["dataKey"] == "step"
+    data = {row["step"]: row["loss"] for row in props["data"]}
+    assert data == {1: pytest.approx(0.3), 2: pytest.approx(0.1)}
+
+
+def test_bar_chart_series_and_labels() -> None:
+    df = _hparam_grouped_df({1: 128}, {1: [0.8]})
+    chart = BarChart.render(BarChartSettings(column="accuracy", x_axis="hidden_size"), df)
+    props = _props(chart)
+    assert props["series"] == [{"name": "accuracy", "label": "accuracy", "color": "blue.6"}]
+    assert props["yAxisLabel"] == "mean(accuracy)"
+
+
+def test_bar_chart_x_axis_is_categorical() -> None:
+    """Bars are inherently discrete, unlike a line chart's optionally-numeric x-axis."""
+    df = _hparam_grouped_df({1: 128}, {1: [0.8]})
+    chart = BarChart.render(BarChartSettings(column="accuracy", x_axis="hidden_size"), df)
+    assert _props(chart)["xAxisProps"] == {"type": "category"}
+
+
+def test_bar_chart_syncs_by_value_not_index() -> None:
+    df = _hparam_grouped_df({1: 128}, {1: [0.8]})
+    chart = BarChart.render(BarChartSettings(column="accuracy", x_axis="hidden_size"), df)
+    props = _props(chart)
+    assert props["barChartProps"]["syncMethod"] == "value"
+    assert props["barChartProps"]["syncId"] == "hidden_size"

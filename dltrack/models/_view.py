@@ -23,6 +23,9 @@ class ColumnKind(StrEnum):
     METRIC = "metric"
     ARTIFACT = "artifact"
     HPARAM = "hparam"
+    GROUPING = "grouping"
+    """Synthetic kind for fields that group/split by any metric or hparam column, plus `run_id` --
+    see `group_columns_by_kind`. No dataframe column is ever tagged with this kind directly."""
 
 
 class ParameterFieldType(StrEnum):
