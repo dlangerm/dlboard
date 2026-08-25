@@ -201,4 +201,4 @@ class TableChart(
 
 def plug(app: Dash) -> None:  # noqa: ARG001
     """Plugin."""
-    TableChart.register()
+    TableChart.register(allow_override=True)

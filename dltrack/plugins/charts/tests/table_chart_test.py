@@ -8,9 +8,9 @@ from typing import Any
 import pandas as pd
 import pytest
 
+from dltrack.conftest import props as _props
 from dltrack.plugins.charts._table_style import DEFAULT_TABLE_FONT_SIZE, HPARAM_COLUMN_PREFIX
 from dltrack.plugins.charts.table_chart import TableChart, TableChartSettings
-from tests.conftest import props as _props
 
 
 def _rows_by_run(component: object) -> dict[int, dict[str, Any]]:

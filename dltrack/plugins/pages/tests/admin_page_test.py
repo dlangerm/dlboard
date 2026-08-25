@@ -6,9 +6,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, cast
 
 from dltrack import models
+from dltrack.conftest import find_props
 from dltrack.models import constants
 from dltrack.plugins.pages import simple_admin_page as admin
-from tests.conftest import find_props
 
 if TYPE_CHECKING:
     from dltrack.plugins.data_stores.sqlite import SQLLiteStore

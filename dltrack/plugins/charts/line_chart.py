@@ -178,7 +178,7 @@ def plug(app: Dash) -> None:
     registry, which -- like `basic_rest_backend.plug` -- would otherwise leak across every `Dash`
     app built in the same process, not just this one.
     """
-    LineChart.register()
+    LineChart.register(allow_override=True)
     prefix = str(app.config.routes_pathname_prefix)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     route = f"{prefix}{_TOOLTIP_JS_ROUTE}"
     app.server.add_url_rule(route, endpoint=route, view_func=_serve_tooltip_js)

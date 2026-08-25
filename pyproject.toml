@@ -5,6 +5,7 @@ dev = [
   "pyright>=1.1.411",
   "pytest>=9.1.1",
   "pytest-cov>=7.1.0",
+  "pytest-playwright>=0.9.0",
   "ruff>=0.15.22",
   "torchvision>=0.28.0"
 ]
@@ -43,7 +44,7 @@ branch = true
 source = ["dltrack"]
 
 [tool.pyright]
-include = ["dltrack", "tests"]
+include = ["dltrack"]
 reportMissingTypeStubs = false
 reportUnnecessaryTypeIgnoreComment = "error"
 reportUnusedFunction = false
@@ -52,8 +53,16 @@ venv = ".venv"
 venvPath = "."
 
 [tool.pytest.ini_options]
+filterwarnings = [
+  "error",
+  # dash's own bundled DataTable warning that *it* will drop the component in a future major
+  # version in favor of dash-ag-grid -- not something raised by our code, and migrating off it
+  # is a real component rewrite (table_chart.py, the hparam table), not a warnings cleanup.
+  "ignore::DeprecationWarning:dash.development.base_component"
+]
+markers = ["browser: browser-based end-to-end tests requiring a webdriver"]
 pythonpath = ["."]
-testpaths = ["tests"]
+testpaths = ["dltrack"]
 
 [tool.ruff]
 indent-width = 4
@@ -112,5 +121,4 @@ ignore = ["COM812", "D203", "D212", "D401", "E501", "PLR6301", "PLR0917"]
 select = ["E4", "E7", "E9", "F"]
 
 [tool.ruff.lint.per-file-ignores]
-"dltype/tests/*" = ["D", "ARG", "FBT", "PLR2004", "T201"]
-"tests/*" = ["D", "ARG", "FBT", "PLR2004", "T201", "SLF001", "INP001"]
+"**/tests/*" = ["D", "ARG", "FBT", "PLR2004", "T201", "SLF001", "INP001"]

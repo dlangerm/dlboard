@@ -297,7 +297,7 @@ def _compute_full_df_and_column_kinds(
     df = merge_hyperparams(df, hparams_df)
     hparam_keys = {k for h in hparams for k in h.hparams_dict}
     column_kinds = infer_column_kinds(metrics_df.columns, {a.key for a in artifacts}, hparam_keys)
-    return df.to_json(orient="split"), {k: v.value for k, v in column_kinds.items()}
+    return df.to_json(orient="split", date_format="iso"), {k: v.value for k, v in column_kinds.items()}
 
 
 def _render_panel_content(

@@ -8,34 +8,25 @@ from typing import TYPE_CHECKING
 import pytest
 
 from dltrack import models
+from dltrack.conftest import create_entity_chain
 from dltrack.serve._backend._scope_enforcement import ScopeEnforcingDataStore
 
 if TYPE_CHECKING:
     from dltrack.plugins.data_stores.sqlite import SQLLiteStore
 
 
-@pytest.fixture
-def admin(store: SQLLiteStore) -> models.User:
-    """The bootstrap admin -- the first user any fresh store creates gets `Scope.ALL`."""
-    return store.get_or_create_user("admin")
-
-
-def _project_with_one_experiment(store: SQLLiteStore) -> tuple[int, int]:
-    project = store.create_project(models.NewProject(name="p", description="d"))
-    experiment = store.create_experiment(models.NewExperiment(project_id=project.id))
-    return project.id, experiment.id
-
-
 def test_delete_project_records_a_soft_delete_audit_entry(store: SQLLiteStore, admin: models.User) -> None:
-    project_id, _experiment_id = _project_with_one_experiment(store)
+    """A project with an experiment but no runs/artifacts yet: cascade counts should read 1/0/0."""
+    project = store.create_project(models.NewProject(name="p", description="d"))
+    store.create_experiment(models.NewExperiment(project_id=project.id))
 
-    store.delete_project(project_id, admin)
+    store.delete_project(project.id, admin)
 
     (entry,) = list(store.list_audit_log(admin))
     assert entry.user_id == admin.id
     assert entry.action == models.AuditAction.SOFT_DELETE
     assert entry.entity_type == models.EntityType.PROJECT
-    assert entry.entity_id == project_id
+    assert entry.entity_id == project.id
     details = json.loads(entry.details)
     assert details["Experiment"] == 1
     assert details["Run"] == 0
@@ -43,7 +34,7 @@ def test_delete_project_records_a_soft_delete_audit_entry(store: SQLLiteStore, a
 
 
 def test_restore_project_records_a_restore_audit_entry(store: SQLLiteStore, admin: models.User) -> None:
-    project_id, _experiment_id = _project_with_one_experiment(store)
+    project_id, _experiment_id, _run_id, _artifact_id = create_entity_chain(store)
     store.delete_project(project_id, admin)
 
     store.restore_project(project_id, admin)
@@ -57,7 +48,7 @@ def test_restore_project_records_a_restore_audit_entry(store: SQLLiteStore, admi
 
 
 def test_purge_project_records_a_purge_audit_entry(store: SQLLiteStore, admin: models.User) -> None:
-    project_id, _experiment_id = _project_with_one_experiment(store)
+    project_id, _experiment_id, _run_id, _artifact_id = create_entity_chain(store)
     store.delete_project(project_id, admin)
 
     store.purge_project(project_id, admin)

@@ -9,38 +9,17 @@ import pendulum
 import pytest
 
 from dltrack import models
+from dltrack.conftest import create_entity_chain
 from dltrack.serve._backend._scope_enforcement import ScopeEnforcingDataStore
 
 if TYPE_CHECKING:
     from dltrack.plugins.data_stores.sqlite import SQLLiteStore
 
 
-@pytest.fixture
-def admin(store: SQLLiteStore) -> models.User:
-    """The bootstrap admin -- the first user any fresh store creates gets `Scope.ALL`."""
-    return store.get_or_create_user("admin")
-
-
-def _project_experiment_run_artifact(store: SQLLiteStore) -> tuple[int, int, int, int]:
-    project = store.create_project(models.NewProject(name="p", description="d"))
-    experiment = store.create_experiment(models.NewExperiment(project_id=project.id))
-    run = store.create_run(models.NewRun(experiment_id=experiment.id))
-    store.log_artifact_refs(
-        [
-            models.Artifact(
-                key="img", fname="i.png", run_id=run.id, experiment_id=experiment.id, step=0, ref="ref://a"
-            )
-        ]
-    )
-    (artifact,) = list(store.fetch_artifacts(experiment_id=experiment.id))
-    assert artifact.id is not None
-    return project.id, experiment.id, run.id, artifact.id
-
-
 def test_delete_project_cascades_to_experiments_runs_and_artifacts(
     store: SQLLiteStore, admin: models.User
 ) -> None:
-    project_id, experiment_id, _run_id, _artifact_id = _project_experiment_run_artifact(store)
+    project_id, experiment_id, _run_id, _artifact_id = create_entity_chain(store, artifact=True)
 
     store.delete_project(project_id, admin)
 
@@ -64,7 +43,7 @@ def test_delete_project_on_unknown_id_raises(store: SQLLiteStore, admin: models.
 
 
 def test_restore_project_restores_cascaded_children(store: SQLLiteStore, admin: models.User) -> None:
-    project_id, experiment_id, _run_id, artifact_id = _project_experiment_run_artifact(store)
+    project_id, experiment_id, _run_id, artifact_id = create_entity_chain(store, artifact=True)
     store.delete_project(project_id, admin)
 
     store.restore_project(project_id, admin)
@@ -115,7 +94,7 @@ def test_delete_experiment_cascades_to_runs_and_artifacts(store: SQLLiteStore, a
 
 
 def test_delete_run_cascades_to_artifacts_only(store: SQLLiteStore, admin: models.User) -> None:
-    project_id, experiment_id, run_id, artifact_id = _project_experiment_run_artifact(store)
+    project_id, experiment_id, run_id, artifact_id = create_entity_chain(store, artifact=True)
 
     store.delete_run(run_id, admin)
 
@@ -125,7 +104,8 @@ def test_delete_run_cascades_to_artifacts_only(store: SQLLiteStore, admin: model
 
 
 def test_delete_artifact_has_no_cascade(store: SQLLiteStore, admin: models.User) -> None:
-    _project_id, experiment_id, run_id, artifact_id = _project_experiment_run_artifact(store)
+    _project_id, experiment_id, run_id, artifact_id = create_entity_chain(store, artifact=True)
+    assert artifact_id is not None
 
     store.delete_artifact(artifact_id, admin)
 
@@ -160,7 +140,7 @@ def test_delete_requires_the_matching_scope(
     store: SQLLiteStore, admin: models.User, method: str, scope: models.Scope
 ) -> None:
     """Goes through `ScopeEnforcingDataStore` -- see `test_purge_requires_scope`."""
-    project_id, experiment_id, run_id, artifact_id = _project_experiment_run_artifact(store)
+    project_id, experiment_id, run_id, artifact_id = create_entity_chain(store, artifact=True)
     entity_id = {
         "delete_project": project_id,
         "delete_experiment": experiment_id,
@@ -203,7 +183,7 @@ def test_purge_requires_prior_soft_delete(store: SQLLiteStore, admin: models.Use
 def test_purge_project_permanently_removes_everything_under_it(
     store: SQLLiteStore, admin: models.User
 ) -> None:
-    project_id, experiment_id, run_id, artifact_id = _project_experiment_run_artifact(store)
+    project_id, experiment_id, run_id, artifact_id = create_entity_chain(store, artifact=True)
     store.delete_project(project_id, admin)
 
     store.purge_project(project_id, admin)
@@ -219,7 +199,7 @@ def test_purge_project_permanently_removes_everything_under_it(
 def test_purge_project_queues_an_artifact_purge_task_for_each_cascaded_artifact(
     store: SQLLiteStore, admin: models.User
 ) -> None:
-    project_id, _experiment_id, _run_id, artifact_id = _project_experiment_run_artifact(store)
+    project_id, _experiment_id, _run_id, artifact_id = create_entity_chain(store, artifact=True)
     store.delete_project(project_id, admin)
 
     store.purge_project(project_id, admin)
@@ -232,7 +212,8 @@ def test_purge_project_queues_an_artifact_purge_task_for_each_cascaded_artifact(
 
 
 def test_purge_artifact_directly_queues_its_own_purge_task(store: SQLLiteStore, admin: models.User) -> None:
-    _project_id, _experiment_id, _run_id, artifact_id = _project_experiment_run_artifact(store)
+    _project_id, _experiment_id, _run_id, artifact_id = create_entity_chain(store, artifact=True)
+    assert artifact_id is not None
     store.delete_artifact(artifact_id, admin)
 
     store.purge_artifact(artifact_id, admin)
@@ -251,7 +232,7 @@ def test_purge_with_no_artifacts_queues_nothing(store: SQLLiteStore, admin: mode
 
 
 def test_complete_artifact_purge_deletes_the_task_row(store: SQLLiteStore, admin: models.User) -> None:
-    project_id, *_rest = _project_experiment_run_artifact(store)
+    project_id, *_rest = create_entity_chain(store, artifact=True)
     store.delete_project(project_id, admin)
     store.purge_project(project_id, admin)
     (task,) = list(store.list_pending_artifact_purges())
@@ -265,7 +246,7 @@ def test_complete_artifact_purge_deletes_the_task_row(store: SQLLiteStore, admin
 def test_fail_artifact_purge_records_the_error_and_keeps_the_task_pending(
     store: SQLLiteStore, admin: models.User
 ) -> None:
-    project_id, *_rest = _project_experiment_run_artifact(store)
+    project_id, *_rest = create_entity_chain(store, artifact=True)
     store.delete_project(project_id, admin)
     store.purge_project(project_id, admin)
     (task,) = list(store.list_pending_artifact_purges())

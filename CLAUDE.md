@@ -17,9 +17,11 @@ Never use python to edit files, just use your normal mechanisms to do so.
 ```bash
 uv run --env-file .env serve.py     # start the dltrack server (this is how the user runs the app)
 uv run pytest                       # run the full test suite
-uv run pytest tests/sql_store_test.py  # run a single test file
-uv run pytest tests/sql_store_test.py::test_name  # run a single test
+uv run pytest dltrack/serve/_backend/tests/sql_store_test.py  # run a single test file
+uv run pytest dltrack/serve/_backend/tests/sql_store_test.py::test_name  # run a single test
 uv run pytest --cov                 # run with coverage (see pyproject.toml for config)
+uv run pytest -m browser            # run only the browser/e2e tests
+uv run pytest -m "not browser"      # run everything except the browser/e2e tests
 uv run ruff check                   # lint
 uv run ruff format                  # format
 uv run pyright                      # type check (strict mode)
@@ -30,8 +32,17 @@ Prefix the one-shot commands above (`pytest`, `ruff`, `pyright`, `prek`) with `r
 below for compact output. Do **not** prefix `serve.py` — it's a long-running server, and RTK's filters are
 built for commands that produce output and exit, not for something you need to tail live.
 
-Ruff lint config lives in `pyproject.toml`; `tests/*` and `dltype/tests/*` get relaxed rules (docstrings,
-private-member access, etc). Pyright runs in `strict` mode over `dltrack/` and `tests/`.
+Tests live next to the code they test, not in one top-level directory: a `tests/` subfolder sits beside
+every source directory that has tests (e.g. `dltrack/plugins/charts/tests/line_chart_test.py` next to
+`dltrack/plugins/charts/line_chart.py`). A test that exercises multiple files across directories (an
+integration/end-to-end test, not a unit test that merely needs some object as fixture data) lives in the
+`tests/` dir of those files' lowest common parent directory instead — e.g. a test spanning `plugins/pages/`
+and `plugins/charts/` belongs in `plugins/tests/`. Shared fixtures (`store`, `experiment_id`, the
+`props`/`find_props` Dash-component helpers) live in `dltrack/conftest.py` at the package root, which
+pytest's conftest discovery makes visible to every nested `tests/` dir automatically.
+
+Ruff lint config lives in `pyproject.toml`; `**/tests/*` gets relaxed rules (docstrings, private-member
+access, etc). Pyright runs in `strict` mode over `dltrack/` (tests included, since they now live under it).
 
 A plugin that needs its own browser-side JS (a clientside callback helper, a functions-as-props formatter
 for dash-mantine-components) keeps that `.js` file next to its own module and serves/registers it itself
