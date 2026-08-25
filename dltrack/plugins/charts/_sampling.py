@@ -73,3 +73,36 @@ def downsample_grouped(
         for _, g in df.sort_values([group_col, x_col]).groupby(group_col)
     ]
     return pd.concat(parts, ignore_index=True)
+
+
+def shared_sample_grid(
+    df: pd.DataFrame, x_col: str, group_col: str, value_cols: list[str], max_points: int = DEFAULT_MAX_POINTS
+) -> pd.DataFrame:
+    """
+    Pick one shared set of x-values per group, from the union of each value column's own LTTB picks.
+
+    Two line charts showing different metrics but the same x-axis/grouping (e.g. two charts in the
+    same panel) that each downsample independently pick different x-values, so a synced tooltip
+    only lines up where their sample sets happen to intersect. Sampling every relevant column
+    together and taking the union of their picks means every chart built from this grid shares
+    the same x-values, so synced tooltips always land on a real point in every chart.
+
+    Returns a `[group_col, x_col]` frame -- inner-join it against a chart's own (x, y) frame to
+    apply the shared grid.
+    """
+    if df.empty or not value_cols:
+        return df.loc[:, [group_col, x_col]].drop_duplicates()
+
+    parts: list[pd.DataFrame] = []
+    for _, g in df.sort_values([group_col, x_col]).groupby(group_col):
+        selected_x: set[object] = set()
+        for col in value_cols:
+            sub = g.loc[g[col].notna(), [x_col, col]]
+            if sub.empty:
+                continue
+            selected_x.update(downsample_series(sub, x_col, col, max_points)[x_col].tolist())
+        if selected_x:
+            parts.append(g.loc[g[x_col].isin(selected_x), [group_col, x_col]].drop_duplicates())
+    if not parts:
+        return df.loc[:, [group_col, x_col]].drop_duplicates()
+    return pd.concat(parts, ignore_index=True)

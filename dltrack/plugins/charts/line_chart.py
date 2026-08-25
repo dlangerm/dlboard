@@ -11,10 +11,12 @@ import pandas as pd
 from pydantic import BaseModel
 
 from dltrack.models._view import ChartType, ColumnKind
-from dltrack.plugins.charts._sampling import DEFAULT_MAX_POINTS, downsample_grouped
+from dltrack.plugins.charts._sampling import DEFAULT_MAX_POINTS, shared_sample_grid
 
 if typing.TYPE_CHECKING:
     from dash import Dash
+
+_BOOKKEEPING_COLS = frozenset({"run_id", "index", "timestamp_utc", "experiment_id"})
 
 colors = [
     "gray",
@@ -84,13 +86,28 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.LineChart], froze
         df = axis_df.merge(value_df, on=["run_id", "step"], how="inner")
         df = df.groupby([parameters.x_axis, "run_id"], as_index=False)[[parameters.column]].mean()
         if parameters.sample:
-            df = downsample_grouped(
-                df,
-                x_col=parameters.x_axis,
-                y_col=parameters.column,
-                group_col="run_id",
-                max_points=parameters.max_points,
+            # Sample against every sibling metric column sharing this x-axis, not just this
+            # chart's own -- so every chart in the panel picks the same x-values and stays
+            # aligned when synced, regardless of which metric each one plots.
+            value_cols = sorted(
+                {
+                    c
+                    for c in dataframe.columns
+                    if c not in _BOOKKEEPING_COLS
+                    and c != x_col
+                    and pd.api.types.is_numeric_dtype(dataframe[c])
+                }
+                | {parameters.column}
             )
+            wide = (
+                dataframe.loc[dataframe[x_col].notna(), ["run_id", x_col, *value_cols]]
+                .groupby(["run_id", x_col], as_index=False)
+                .mean()
+            )
+            grid = shared_sample_grid(
+                wide, x_col=x_col, group_col="run_id", value_cols=value_cols, max_points=parameters.max_points
+            )
+            df = df.merge(grid, on=["run_id", parameters.x_axis], how="inner")
         df = df.pivot(index=parameters.x_axis, columns="run_id", values=parameters.column).reset_index()
         return dmc.LineChart(
             h=parameters.height,
@@ -113,11 +130,22 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.LineChart], froze
             withYAxis=True,
             withDots=False,
             tickLine="xy",
+            # A wider tooltip offset keeps it from sitting directly on top of the cursor's
+            # point/line, which otherwise obscures the exact spot the reader is looking at.
+            tooltipProps={"offset": 30},
             # syncMethod="value" matches synced charts by x-axis value rather than
             # array index — needed because sampled/unsampled charts (or charts
             # sampled at different rates) don't share row counts, so index-based
             # sync (Recharts' default) lines up the wrong points across charts.
-            lineChartProps={"syncId": parameters.x_axis, "syncMethod": "value"},
+            #
+            # Recharts' default left margin is too tight for a rotated y-axis label plus its
+            # ticks, so the label crowds the plot area (and the next chart over, once several
+            # sit side by side); widen it and give the other edges matching breathing room.
+            lineChartProps={
+                "syncId": parameters.x_axis,
+                "syncMethod": "value",
+                "margin": {"left": 20, "right": 20, "top": 10, "bottom": 10},
+            },
         )
 
     @classmethod

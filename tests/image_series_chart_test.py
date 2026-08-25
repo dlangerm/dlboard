@@ -136,3 +136,54 @@ def test_render_slider_marks_match_max_slider_labels_constant() -> None:
     slider = _slider_props(stack)
     labeled = [m for m in slider["marks"] if "label" in m]
     assert len(labeled) <= MAX_SLIDER_LABELS + 2
+
+
+# ---- click-to-zoom modal + native-size thumbnails ----
+
+
+def _first_run_block(stack: object) -> dict[str, Any]:
+    # children: [Store, Slider, *page_grids, pager, Modal]; first page grid holds the run blocks.
+    first_grid = _props(stack)["children"][2]
+    return _props(_props(first_grid)["children"][0])
+
+
+def test_render_wraps_each_thumbnail_in_a_clickable_div() -> None:
+    df = _artifacts_df(n_runs=1)
+    stack = ImageChart.render(ImageChartSettings(key="img"), df)
+
+    run_block = _first_run_block(stack)
+    thumb_wrapper = _props(run_block["children"][1])
+    assert thumb_wrapper["id"] == {
+        "type": "image-series-thumb",
+        "instance": thumb_wrapper["id"]["instance"],
+        "run": "1",
+    }
+    assert thumb_wrapper["n_clicks"] == 0
+
+
+def test_render_includes_a_zoom_modal() -> None:
+    df = _artifacts_df(n_runs=1)
+    stack = ImageChart.render(ImageChartSettings(key="img"), df)
+
+    modal = _props(_props(stack)["children"][-1])
+    assert modal["id"]["type"] == "image-series-modal"
+    assert modal["opened"] is False
+
+
+def test_native_size_caps_thumbnail_height_without_upscaling() -> None:
+    df = _artifacts_df(n_runs=1)
+    stack = ImageChart.render(ImageChartSettings(key="img", height=150, native_size=True), df)
+
+    run_block = _first_run_block(stack)
+    thumb = _props(_props(run_block["children"][1])["children"])
+    assert thumb["h"] is None
+    assert thumb["style"]["maxHeight"] == "150px"
+
+
+def test_caption_is_not_dimmed() -> None:
+    df = _artifacts_df(n_runs=1)
+    stack = ImageChart.render(ImageChartSettings(key="img"), df)
+
+    run_block = _first_run_block(stack)
+    caption = _props(run_block["children"][2])
+    assert "c" not in caption

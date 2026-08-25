@@ -233,6 +233,9 @@ class PanelInstance[D, C](BaseModel, frozen=True, extra="forbid"):
     charts: list[ChartInstance[D, C]] = []
     """Charts belonging to this panel."""
 
+    sync: bool = True
+    """Whether synced-capable charts (e.g. line charts) in this panel share a hover/tooltip crosshair."""
+
     @property
     def display_name(self) -> str:
         """Return a display-friendly panel name."""

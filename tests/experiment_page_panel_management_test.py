@@ -10,14 +10,20 @@ from __future__ import annotations
 
 from typing import Any
 
+import dash_mantine_components as dmc
+
 from dltrack.models._view import ChartInstance, PanelInstance
 from dltrack.plugins.pages.simple_experiment_page import (
     _add_chart_to_panel_by_name,
+    _apply_panel_sync,
     _delete_panel_button_id,
+    _move_chart,
     _move_panel,
     _move_panel_button_id,
     _panel_management_list,
+    _panel_sync_switch_id,
     _rename_panel_button_id,
+    _set_panel_sync,
 )
 from tests.conftest import find_props as _find_props
 
@@ -85,6 +91,89 @@ def test_move_panel_at_boundary_is_a_noop() -> None:
 def test_move_panel_unknown_panel_is_a_noop() -> None:
     panels = [PanelInstance[Any, Any](name=n) for n in ("a", "b")]
     assert _move_panel(panels, "missing", "up") == panels
+
+
+# ---- panel sync: switch + _set_panel_sync + _apply_panel_sync ----
+
+
+def test_panel_management_list_shows_the_panel_sync_state() -> None:
+    panels = [
+        PanelInstance[Any, Any](name="synced", sync=True),
+        PanelInstance[Any, Any](name="off", sync=False),
+    ]
+
+    rendered = _panel_management_list(panels)
+
+    assert _find_props(rendered, _panel_sync_switch_id("synced"))["checked"] is True  # pyright: ignore[reportOptionalSubscript]
+    assert _find_props(rendered, _panel_sync_switch_id("off"))["checked"] is False  # pyright: ignore[reportOptionalSubscript]
+
+
+def test_set_panel_sync_updates_only_the_named_panel() -> None:
+    panels = [PanelInstance[Any, Any](name=n) for n in ("a", "b")]
+
+    result = _set_panel_sync(panels, "a", sync=False)
+
+    by_name = {p.name: p.sync for p in result}
+    assert by_name == {"a": False, "b": True}
+
+
+def test_apply_panel_sync_drops_sync_id_when_disabled() -> None:
+    chart = dmc.LineChart(
+        data=[], dataKey="step", series=[], lineChartProps={"syncId": "step", "syncMethod": "value"}
+    )
+
+    result = _apply_panel_sync(chart, sync=False)
+
+    assert "syncId" not in result.lineChartProps  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+    assert result.lineChartProps["syncMethod"] == "value"  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+
+
+def test_apply_panel_sync_leaves_sync_id_when_enabled() -> None:
+    chart = dmc.LineChart(data=[], dataKey="step", series=[], lineChartProps={"syncId": "step"})
+
+    result = _apply_panel_sync(chart, sync=True)
+
+    assert result.lineChartProps["syncId"] == "step"  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+
+
+def test_apply_panel_sync_ignores_non_line_charts() -> None:
+    other = dmc.Text("not a line chart")
+
+    assert _apply_panel_sync(other, sync=False) is other
+
+
+# ---- _move_chart ----
+
+
+def _panel_with_charts(*names: str) -> PanelInstance[Any, Any]:
+    charts = [
+        ChartInstance[Any, Any](chart_type="line", parameters={"column": n, "x_axis": "step"}) for n in names
+    ]
+    return PanelInstance[Any, Any](name="p", charts=charts)
+
+
+def test_move_chart_left_swaps_with_previous() -> None:
+    panels = [_panel_with_charts("a", "b", "c")]
+    result = _move_chart(panels, "p", 1, "left")
+    assert [c.parameters["column"] for c in result[0].charts] == ["b", "a", "c"]
+
+
+def test_move_chart_right_swaps_with_next() -> None:
+    panels = [_panel_with_charts("a", "b", "c")]
+    result = _move_chart(panels, "p", 1, "right")
+    assert [c.parameters["column"] for c in result[0].charts] == ["a", "c", "b"]
+
+
+def test_move_chart_at_boundary_is_a_noop() -> None:
+    panels = [_panel_with_charts("a", "b", "c")]
+    assert [c.parameters["column"] for c in _move_chart(panels, "p", 0, "left")[0].charts] == ["a", "b", "c"]
+    assert [c.parameters["column"] for c in _move_chart(panels, "p", 2, "right")[0].charts] == ["a", "b", "c"]
+
+
+def test_move_chart_unknown_panel_is_a_noop() -> None:
+    panels = [_panel_with_charts("a", "b")]
+    result = _move_chart(panels, "missing", 0, "left")
+    assert [c.parameters["column"] for c in result[0].charts] == ["a", "b"]
 
 
 # ---- _add_chart_to_panel_by_name ----
