@@ -15,7 +15,7 @@ from flask import has_request_context, request
 from structlog.stdlib import get_logger
 
 from dltrack._identity import resolve_username
-from dltrack.serve._backend._auth import set_auth_provider
+from dltrack.serve import set_auth_provider
 
 if TYPE_CHECKING:
     from dash import Dash

@@ -9,9 +9,7 @@ from typing import TYPE_CHECKING, Any, Iterator, override
 from pydantic_settings import BaseSettings
 from structlog.stdlib import get_logger
 
-from dltrack.serve._backend import _migrations
-from dltrack.serve._backend._data_store import set_data_store
-from dltrack.serve._backend._sql_store_base import SQLStoreBase
+from dltrack.serve import SQLStoreBase, run_migrations, set_data_store
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -36,7 +34,7 @@ class SQLLiteStore(SQLStoreBase[Path]):
         """Run migrations. SQLite requires the pragma to be set per-connection, not once globally."""
         with sqlite3.connect(self._location) as conn:
             conn.execute("PRAGMA foreign_keys = ON")
-            _migrations.run_migrations(conn)
+            run_migrations(conn)
 
     @override
     def _execute_raw_sql(

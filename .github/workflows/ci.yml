@@ -11,17 +11,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  typecheck:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
-        with:
-          enable-cache: true
-      - run: uv sync --locked --dev
-      - run: uv run pyright
-
-  precommit:
+  typecheck-precommit:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,9 +20,10 @@ jobs:
           enable-cache: true
       - run: uv sync --locked --dev
       - run: uv run prek run --all-files --skip no-commit-to-branch
+      - run: uv run pyright
 
   test:
-    needs: [precommit, typecheck]
+    needs: [typecheck-precommit]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -41,15 +32,5 @@ jobs:
           enable-cache: true
       - run: uv sync --locked --dev
       - run: uv run pytest -m "not browser" --cov
-
-  browser:
-    needs: test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
-        with:
-          enable-cache: true
-      - run: uv sync --locked --dev
       - run: uv run playwright install --with-deps chromium
       - run: uv run pytest -m browser

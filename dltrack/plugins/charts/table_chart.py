@@ -1,5 +1,5 @@
 """
-A plain data table chart, W&B-style: metrics and hyperparameters side by side.
+A plain data table chart: metrics and hyperparameters side by side.
 
 Two modes:
 - Default ("runs"): one row per run, showing each run's hyperparameters alongside its
@@ -18,7 +18,7 @@ from dash import dash_table
 from dash.dash_table.Format import Format
 from pydantic import BaseModel
 
-from dltrack.models._view import ChartType, ColumnKind
+from dltrack.models import ChartType, ColumnKind
 from dltrack.plugins.charts._grouping import last_row_per_run
 from dltrack.plugins.charts._table_style import (
     HPARAM_COLUMN_PREFIX,

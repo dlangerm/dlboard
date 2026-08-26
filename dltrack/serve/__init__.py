@@ -16,15 +16,19 @@ from dltrack.serve._backend._data_store import (
     wait_for_data_store,
 )
 from dltrack.serve._backend._installed_plugins import get_installed_plugins, set_installed_plugins
+from dltrack.serve._backend._migrations import run_migrations
+from dltrack.serve._backend._sql_store_base import SQLStoreBase
 from dltrack.serve.app import app
 
 __all__ = [
+    "SQLStoreBase",
     "app",
     "get_artifact_store",
     "get_auth_provider",
     "get_current_user",
     "get_data_store",
     "get_installed_plugins",
+    "run_migrations",
     "set_artifact_store",
     "set_auth_provider",
     "set_data_store",

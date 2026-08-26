@@ -7,8 +7,7 @@ from typing import Any
 
 import pandas as pd
 
-from dltrack.models import Artifact, Experiment, HyperParams, constants
-from dltrack.models._view import ColumnKind
+from dltrack.models import Artifact, ColumnKind, Experiment, HyperParams, constants
 from dltrack.plugins.charts._table_style import HPARAM_COLUMN_PREFIX
 
 

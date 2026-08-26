@@ -11,7 +11,7 @@ import PIL.Image
 import torch
 from pydantic import BaseModel, field_validator
 
-from dltrack.models._artifact import NewArtifact
+from dltrack.models import NewArtifact
 
 
 class Image(BaseModel, frozen=True, extra="forbid"):

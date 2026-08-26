@@ -1,12 +1,21 @@
 # dltrack
 
-An experiment-tracking server — what if MLflow didn't suck and Weights & Biases was free? dltrack
-is a Dash/Dash-Mantine web app for browsing ML training runs, plus a `pytorch_lightning`-compatible
-logger client that ships metrics, hyperparameters, and artifacts to it over a REST API.
+A free, self-hosted experiment-tracking server. dltrack is a Dash/Dash-Mantine web app for browsing
+ML training runs, plus a `pytorch_lightning`-compatible logger client that ships metrics,
+hyperparameters, and artifacts to it over a REST API (by default).
 
 ## Running it
 
-Everything runs through [`uv`](https://docs.astral.sh/uv/) (Python >=3.12, deps pinned in `uv.lock`).
+Installed as a package (e.g. `uv tool install dltrack` or `pip install dltrack`), dltrack gives
+you a `dltrack` command, the same idea as `tensorboard`:
+
+```bash
+dltrack serve local     # anonymous, single-user, sqlite + local disk -- sane defaults, no setup
+dltrack serve local --sqlite-location ./runs.sqlite --artifact-store-location ./artifacts
+```
+
+Working in this repo instead, everything runs through [`uv`](https://docs.astral.sh/uv/)
+(Python >=3.12, deps pinned in `uv.lock`):
 
 ```bash
 uv run --env-file .env serve.py     # start the server
@@ -40,3 +49,21 @@ way you'd use any other `pytorch_lightning` logger — see [docs/client.md](docs
 Pull requests run lint, type-check, and test CI (see `.github/workflows/ci.yml`) — run the
 commands above locally before pushing. See `CLAUDE.md` for the fuller set of code-style
 conventions this repo follows.
+
+## AI Usage
+
+I started dltrack as a personal project coded by yours truly. As I went down the rabbit hole of implementation I realized
+I was spending a _ton_ of time twiddling with webdev instead of actually doing useful work. At some level, experiment
+tracker libraries live and die by their browser experience and their offered feature set. I set out to make a free, open-source
+tool that I actually wanted to use for my own projects. Making something I actually wanted to use became a behemoth of
+wiring up dash app components in ways that were performant and made sense. So, I decided that it'd be better to get an app
+out the door into hands of users than it would be to do everything by hand.
+
+So, is the app coded in a way I personally would have written it? Absolutely not. Does it work and provide value today instead of 6 months
+down the line? Yeah, it is. However, I remain a healthy skeptic of AI generated code. Therefore, I will only accept PRs (for now) that I myself
+can review and understand. That means contributors to this library need to tools to a high standard and follow best practices for submitting
+PRs and features just like you would if you had coded it yourself.
+
+tl;dr
+Can I submit AI vibe-coded-PRs for plugins I want that I think are useful to the community? Yes you can.
+Will I give serious reviews and (if they're too big) ask you to split features up into a stack up so I can review them properly? Also yes.

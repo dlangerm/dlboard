@@ -11,7 +11,7 @@ import pandas as pd
 from flask import Response
 from pydantic import BaseModel
 
-from dltrack.models._view import ChartType, ColumnKind
+from dltrack.models import ChartType, ColumnKind
 from dltrack.plugins.charts._grouping import last_row_per_run
 from dltrack.plugins.charts._table_style import HPARAM_COLUMN_PREFIX
 

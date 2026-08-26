@@ -12,7 +12,7 @@ from __future__ import annotations
 import typing
 from typing import TYPE_CHECKING, Literal
 
-from dltrack.models._view import ChartInstance, ColumnKind, PanelInstance
+from dltrack.models import ChartInstance, ColumnKind, PanelInstance
 from dltrack.plugins.charts.image_series import ImageChart
 from dltrack.plugins.charts.line_chart import LineChart
 
