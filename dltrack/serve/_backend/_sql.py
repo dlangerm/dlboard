@@ -161,7 +161,6 @@ def create_table_sql(
     model: type[BaseModel],
     foreign_keys: dict[str, ForeignKey] | None = None,
     unique_columns: list[str] | None = None,
-    column_defaults: dict[str, str] | None = None,
 ) -> str:
     """
     Build a `CREATE TABLE IF NOT EXISTS` statement reflecting `model`'s fields.
@@ -169,13 +168,6 @@ def create_table_sql(
     An `OWNERSHIP`-kind foreign key (see `ForeignKeyKind`) gets a real `ON DELETE CASCADE`, so
     purging a parent row lets SQLite cascade the delete natively instead of the caller having to
     enumerate every dependent table by hand.
-
-    `column_defaults` maps a field name to a raw SQL literal (e.g. `"0"`, `"''"`) emitted as a
-    `DEFAULT` clause on that column. This isn't meant for everyday model fields -- application code
-    always supplies every field explicitly on insert (see `insert`) -- it exists so a schema
-    migration rebuilding a table (`_migrations._rebuild_table_with_foreign_keys`) can satisfy a
-    `NOT NULL` column that the old table doesn't have data for yet, as a placeholder the migration
-    that actually owns that column immediately overwrites.
     """
     if ID_KEY not in model.model_fields:
         msg = f"Creation object {model.__class__} must contain an ID key"
@@ -188,10 +180,6 @@ def create_table_sql(
         if field_name not in model.model_fields:
             msg = f"Unique column {field_name} not present in model {model.__name__}"
             raise AssertionError(msg)
-    for field_name in column_defaults or {}:
-        if field_name not in model.model_fields:
-            msg = f"Default column {field_name} not present in model {model.__name__}"
-            raise AssertionError(msg)
     base_str = f"""
     CREATE TABLE IF NOT EXISTS {model.__name__}
     """
@@ -199,10 +187,8 @@ def create_table_sql(
     sorted_keys = list(model.model_fields.keys())
     id_index = sorted_keys.index(ID_KEY)
 
-    for idx, field_name in enumerate(list(model.model_fields.keys())):
-        default = (column_defaults or {}).get(field_name)
-        suffix = f" DEFAULT {default}" if default is not None else ""
-        sorted_keys[idx] = f"{sorted_keys[idx]} {typed_keys[idx]}{suffix}"
+    for idx in range(len(sorted_keys)):
+        sorted_keys[idx] = f"{sorted_keys[idx]} {typed_keys[idx]}"
 
     sorted_keys[id_index] = f"{ID_KEY} INTEGER PRIMARY KEY AUTOINCREMENT"
     fk_clauses = [

@@ -32,7 +32,7 @@ Working in this repo instead, everything runs through [`uv`](https://docs.astral
 (Python >=3.12, deps pinned in `uv.lock`):
 
 ```bash
-uv run --env-file .env serve.py     # start the server
+uv run --env-file .env dltrack serve local     # start the server
 uv run pytest                       # run the test suite
 uv run pytest -m browser            # run only the browser/e2e tests
 uv run ruff check && uv run ruff format   # lint / format

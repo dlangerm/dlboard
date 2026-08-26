@@ -32,9 +32,7 @@ _OWNS = ForeignKeyKind.OWNERSHIP
 # `_foreign_keys.py` -- so a new owned table only ever needs one entry here, not one hardcoded
 # cascade list per delete/restore/purge entry point.
 #
-# Ordered so that a referenced table is always created before the table that references it (SQLite
-# accepts forward references too, but this keeps the migration rebuild in `_migrations.py`, which
-# walks this same map, easy to reason about).
+# Ordered so that a referenced table is always created before the table that references it.
 FOREIGN_KEYS: dict[type[BaseModel], dict[str, ForeignKey]] = {
     models.Project: {
         "created_by": ForeignKey(models.User),
@@ -180,8 +178,6 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
                 )
             )
 
-        self._run_migrations()
-
         list(
             self._execute_raw_sql(
                 sql.create_index_sql(
@@ -197,17 +193,6 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
                 )
             )
         )
-
-    @abstractmethod
-    def _run_migrations(self) -> None:
-        """
-        Bring the underlying schema up to date.
-
-        Called once at startup, after the initial `CREATE TABLE IF NOT EXISTS` pass, so a brand
-        new database already has every column/constraint and this is a no-op, while an existing
-        database gets migrated forward. Implementations must hard-fail (raise) rather than swallow
-        errors if a migration can't be applied cleanly.
-        """
 
     @abstractmethod
     def _execute_raw_sql(

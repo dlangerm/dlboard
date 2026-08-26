@@ -8,7 +8,6 @@ import tempfile
 import time
 from collections.abc import Iterable
 from contextlib import suppress
-from multiprocessing import Queue, get_context
 from pathlib import Path
 from queue import Empty
 from threading import Thread
@@ -20,10 +19,12 @@ from pydantic_settings import BaseSettings
 from structlog.stdlib import get_logger
 
 from dltrack import models
+from dltrack._mp_context import SPAWN_CONTEXT
 from dltrack.serve import set_artifact_store, wait_for_data_store
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
+    from multiprocessing import Queue
 
     from dash import Dash
     from pydantic import AnyUrl
@@ -73,10 +74,9 @@ class FSArtifactStore(models.ArtifactStore[Path, int]):
     def __init__(self, root: Path, store_q_size: int) -> None:
         """Initialize the class with a root directory."""
         self._root_directory = root
-        ctx = get_context("spawn")
-        self._store_q: Queue[tuple[NewArtifact, Path, Path]] = ctx.Queue(store_q_size)
-        self._saved_artifact_q: Queue[Artifact] = ctx.Queue(store_q_size)
-        self._store_artifact_proc = ctx.Process(
+        self._store_q: Queue[tuple[NewArtifact, Path, Path]] = SPAWN_CONTEXT.Queue(store_q_size)
+        self._saved_artifact_q: Queue[Artifact] = SPAWN_CONTEXT.Queue(store_q_size)
+        self._store_artifact_proc = SPAWN_CONTEXT.Process(
             target=_save_artifact,
             args=(self.protocol, root, self._store_q, self._saved_artifact_q),
             daemon=True,

@@ -36,8 +36,7 @@ You don't have to implement `DataStore` from scratch against raw SQL — `SQLSto
 (CRUD, cascading soft-delete, audit log, scopes) against an abstract `_execute_raw_sql`/
 `_execute_raw_sql_query_many`. A new SQL-backed store (Postgres, MySQL) usually only needs to
 subclass `SQLStoreBase` and supply those two methods plus connection handling — see
-`plugins/data_stores/sqlite.py` for the ~30-line reference implementation, including how it runs
-`dltrack/serve/_backend/_migrations.py`'s schema migrations on startup.
+`plugins/data_stores/sqlite.py` for the ~30-line reference implementation.
 
 An `ArtifactStore` has no equivalent base class — `plugins/data_stores/filesystem.py` is the
 reference implementation (local disk, `protocol = "file"`) to model a new one on. Configuration

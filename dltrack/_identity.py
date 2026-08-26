@@ -11,14 +11,19 @@ what it logs) and the server (schema migrations, to pick a name for the one-time
 from __future__ import annotations
 
 import getpass
-import os
 
+from pydantic_settings import BaseSettings
 from structlog.stdlib import get_logger
 
 _log = get_logger(__name__)
 
-ENV_VAR: str = "DLTRACK_USER"
 ANONYMOUS: str = "anonymous"
+
+
+class _IdentitySettings(BaseSettings):
+    """Reads the `DLTRACK_USER` env var `resolve_username` checks first."""
+
+    dltrack_user: str = ""
 
 
 def resolve_username() -> str:
@@ -28,7 +33,7 @@ def resolve_username() -> str:
     Every step is wrapped so a failure (e.g. `getpass.getuser()` raising in a sandboxed container
     with no passwd entry) falls through to the next step instead of raising.
     """
-    env_value = os.environ.get(ENV_VAR, "").strip()
+    env_value = _IdentitySettings().dltrack_user.strip()
     if env_value:
         return env_value
 

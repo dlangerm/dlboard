@@ -23,7 +23,7 @@ from dltrack.serve._settings_env import set_setting_env
 
 
 class WSGISettings(BaseSettings):
-    """Resolves the plugin list `dltrack._wsgi:app` builds the production app from."""
+    """Resolves the plugin list `dltrack.serve._wsgi:app` builds the production app from."""
 
     dltrack_plugins: Annotated[ImportString[list[PluginProtocol]], NoDecode]
     """Import path to a `list[PluginProtocol]`, e.g. `"dltrack.plugins:LOCAL_DEPLOYMENT"`."""
@@ -40,13 +40,13 @@ def run_production_server(
     """
     Serve the app built from the plugin list at `plugins_target` under Granian.
 
-    Granian spawns each worker as a separate process that re-imports `dltrack._wsgi:app`, so
+    Granian spawns each worker as a separate process that re-imports `dltrack.serve._wsgi:app`, so
     `plugins_target` is handed off via the env var `WSGISettings` reads, rather than as a live
-    object -- see `dltrack/_wsgi.py`.
+    object -- see `dltrack/serve/_wsgi.py`.
     """
     set_setting_env(WSGISettings, "dltrack_plugins", plugins_target)
     Granian(
-        "dltrack._wsgi:app",
+        "dltrack.serve._wsgi:app",
         address=host,
         port=port,
         interface=Interfaces.WSGI,

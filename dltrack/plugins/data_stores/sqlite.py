@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, Iterator, override
 from pydantic_settings import BaseSettings
 from structlog.stdlib import get_logger
 
-from dltrack.serve import SQLStoreBase, run_migrations, set_data_store
+from dltrack.serve import SQLStoreBase, set_data_store
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -28,13 +28,6 @@ class SQLLiteStore(SQLStoreBase[Path]):
         self._location = location
         location.parent.mkdir(parents=True, exist_ok=True)
         super().__init__()
-
-    @override
-    def _run_migrations(self) -> None:
-        """Run migrations. SQLite requires the pragma to be set per-connection, not once globally."""
-        with sqlite3.connect(self._location) as conn:
-            conn.execute("PRAGMA foreign_keys = ON")
-            run_migrations(conn)
 
     @override
     def _execute_raw_sql(

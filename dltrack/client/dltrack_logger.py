@@ -8,7 +8,6 @@ import tempfile
 import time
 import warnings
 from argparse import Namespace
-from multiprocessing import Queue, get_context
 from pathlib import Path
 from queue import Empty
 from typing import TYPE_CHECKING, Any, NamedTuple, override
@@ -18,12 +17,14 @@ from pydantic import BaseModel
 from pytorch_lightning.loggers import Logger
 
 from dltrack import models
-from dltrack.plugins.backend.basic_rest_backend import BasicDltrackAPI
+from dltrack._mp_context import SPAWN_CONTEXT
+from dltrack.plugins.backend.basic_rest_backend import DEFAULT_SERVER_URL, BasicDltrackAPI
 
 DEFAULT_EXPERIMENT_NAME = "default"
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from multiprocessing import Queue
 
     from dltrack.models._artifact import AnyArtifact
 
@@ -147,7 +148,7 @@ class DLTrackLogger(Logger):
         self,
         project_id: int,
         experiment_id: int | None = None,
-        server_url: str = "http://localhost:8050",
+        server_url: str = DEFAULT_SERVER_URL,
         settings: DLTrackLoggerSettings | None = None,
     ) -> None:
         """Initialize with an existing project/experiment id; an experiment is created if none is given."""
@@ -159,10 +160,9 @@ class DLTrackLogger(Logger):
             experiment_id = experiment.id
         self._experiment_id = experiment_id
         self._run_id = self._api.create_run(models.NewRun(experiment_id=self._experiment_id)).id
-        ctx = get_context("spawn")
-        self._metrics_q: QType = ctx.Queue(maxsize=settings.metrics_q_size)
-        self._art_q: ArtifactQType = ctx.Queue(maxsize=settings.artifact_q_size)
-        self._metric_proc = ctx.Process(
+        self._metrics_q: QType = SPAWN_CONTEXT.Queue(maxsize=settings.metrics_q_size)
+        self._art_q: ArtifactQType = SPAWN_CONTEXT.Queue(maxsize=settings.artifact_q_size)
+        self._metric_proc = SPAWN_CONTEXT.Process(
             target=process_metrics_async,
             args=(
                 self._experiment_id,
@@ -174,7 +174,7 @@ class DLTrackLogger(Logger):
             name="logger-proc",
             daemon=True,
         )
-        self._art_proc = ctx.Process(
+        self._art_proc = SPAWN_CONTEXT.Process(
             target=process_artifacts_async,
             args=(
                 self._experiment_id,
@@ -196,7 +196,7 @@ class DLTrackLogger(Logger):
         project_name: str,
         experiment_name: str = DEFAULT_EXPERIMENT_NAME,
         project_description: str = "",
-        server_url: str = "http://localhost:8050",
+        server_url: str = DEFAULT_SERVER_URL,
         settings: DLTrackLoggerSettings | None = None,
     ) -> DLTrackLogger:
         """
