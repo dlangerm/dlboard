@@ -11,6 +11,7 @@ if typing.TYPE_CHECKING:
     from dash import Dash
 
 
+@typing.runtime_checkable
 class PluginProtocol(typing.Protocol):
     """Duck typing for plugins."""
 

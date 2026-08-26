@@ -20,6 +20,7 @@ dependencies = [
   "dash>=4.4.1",
   "dash-mantine-components>=2.8.0",
   "dltype>=0.16.0",
+  "granian>=2.8.2",
   "numpy>=2.5.1",
   "pandas>=3.0.5",
   "pendulum>=3.2.0",

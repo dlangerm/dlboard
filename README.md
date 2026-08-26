@@ -12,7 +12,21 @@ you a `dltrack` command, the same idea as `tensorboard`:
 ```bash
 dltrack serve local     # anonymous, single-user, sqlite + local disk -- sane defaults, no setup
 dltrack serve local --sqlite-location ./runs.sqlite --artifact-store-location ./artifacts
+dltrack serve local --host 0.0.0.0 --port 8050 --workers 4   # behind a reverse proxy / in a container
 ```
+
+Outside of `--debug`, this runs on [Granian](https://github.com/emmett-framework/granian) (Rust,
+multi-worker, auto-respawns a crashed worker) instead of Dash's own development server.
+
+Bringing your own storage/auth/pages/chart plugins instead of `local`'s built-in set? `dltrack serve
+custom` runs the same production server against any `list[PluginProtocol]` you point it at:
+
+```bash
+dltrack serve custom --plugins mypackage.deployment:PLUGINS --workers 4
+```
+
+`mypackage/deployment.py` just needs a module-level `PLUGINS: list[PluginProtocol]` -- see
+[docs/plugins/overview.md](docs/plugins/overview.md).
 
 Working in this repo instead, everything runs through [`uv`](https://docs.astral.sh/uv/)
 (Python >=3.12, deps pinned in `uv.lock`):
