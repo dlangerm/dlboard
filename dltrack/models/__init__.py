@@ -13,7 +13,17 @@ from dltrack.models._project import NewProject, Project
 from dltrack.models._run import NewRun, Run
 from dltrack.models._scopes import Scope, has_scope, require_scope
 from dltrack.models._user import NewUser, User
-from dltrack.models._view import ChartType, ColumnKind, NewPage, Page
+from dltrack.models._view import (
+    ChartInstance,
+    ChartType,
+    ChartTypeRegistry,
+    ColumnKind,
+    NewPage,
+    Page,
+    PanelInstance,
+    ParameterField,
+    ParameterFieldType,
+)
 
 __all__ = [
     "AnyArtifact",
@@ -23,7 +33,9 @@ __all__ = [
     "AuditAction",
     "AuditLogEntry",
     "AuthProvider",
+    "ChartInstance",
     "ChartType",
+    "ChartTypeRegistry",
     "ColumnKind",
     "DataStore",
     "EntityType",
@@ -41,6 +53,9 @@ __all__ = [
     "NewRun",
     "NewUser",
     "Page",
+    "PanelInstance",
+    "ParameterField",
+    "ParameterFieldType",
     "PluginProtocol",
     "Project",
     "Run",

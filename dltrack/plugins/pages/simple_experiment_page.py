@@ -17,14 +17,16 @@ from dash.exceptions import PreventUpdate
 from pydantic import ValidationError
 from structlog.stdlib import get_logger
 
-from dltrack.models import HyperParams, Page, constants
-from dltrack.models._view import (
+from dltrack.models import (
     ChartInstance,
     ChartTypeRegistry,
     ColumnKind,
+    HyperParams,
+    Page,
     PanelInstance,
     ParameterField,
     ParameterFieldType,
+    constants,
 )
 from dltrack.plugins.charts._table_style import NUMERIC, infer_column_dtype, themed_datatable_kwargs
 from dltrack.plugins.pages._chart_autogen import (

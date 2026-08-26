@@ -1,3 +1,7 @@
+[build-system]
+build-backend = "hatchling.build"
+requires = ["hatchling"]
+
 [dependency-groups]
 dev = [
   "pandas-stubs>=3.0.5.260730",
@@ -12,6 +16,7 @@ dev = [
 
 [project]
 dependencies = [
+  "cyclopts>=4.23.2",
   "dash>=4.4.1",
   "dash-mantine-components>=2.8.0",
   "dltype>=0.16.0",
@@ -24,13 +29,16 @@ dependencies = [
   "rich>=15.0.0",
   "structlog>=26.1.0"
 ]
-description = "What if mlflow didn't suck and weights & biases was free?"
+description = "A free, self-hosted experiment-tracking server."
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 name = "dltrack"
 readme = "README.md"
 requires-python = ">=3.12"
 version = "0.1.0"
+
+[project.scripts]
+dltrack = "dltrack._cli:main"
 
 [tool.coverage.report]
 exclude_also = [

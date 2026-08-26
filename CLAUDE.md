@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-DLTrack — an experiment-tracking server ("what if mlflow didn't suck and weights & biases was free?"). It's a
-Dash/Dash-Mantine web app for browsing ML training runs, plus a `pytorch_lightning`-compatible logger client
-that ships metrics/hyperparams/artifacts to it over a REST API.
+DLTrack — a free, self-hosted ML experiment-tracking server. It's a Dash/Dash-Mantine web app for browsing ML
+training runs, plus a `pytorch_lightning`-compatible logger client that ships metrics/hyperparams/artifacts
+to it over a REST API.
 
 ## Commands
 

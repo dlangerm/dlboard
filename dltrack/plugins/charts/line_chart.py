@@ -11,7 +11,7 @@ import pandas as pd
 from flask import Response
 from pydantic import BaseModel
 
-from dltrack.models._view import ChartType, ColumnKind
+from dltrack.models import ChartType, ColumnKind
 from dltrack.plugins.charts._colors import hash_color
 from dltrack.plugins.charts._sampling import DEFAULT_MAX_POINTS, shared_sample_grid
 

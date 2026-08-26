@@ -1,6 +1,6 @@
 """All built-in dltrack plugins."""
 
-from dltrack.models._plugin import PluginProtocol
+from dltrack.models import PluginProtocol
 from dltrack.plugins import artifacts, auth, backend, charts, pages, themes
 from dltrack.plugins.auth import anonymous
 from dltrack.plugins.backend import artifact_purge_worker, basic_rest_backend, error
