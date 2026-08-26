@@ -6,6 +6,11 @@ Not part of the public plugin-facing API. Which plugins to build the app from is
 `"dltrack.plugins:LOCAL_DEPLOYMENT"`) rather than hardcoded here, so this module works the same
 whether it's serving `dltrack serve local` or a `dltrack serve custom --plugins ...` deployment
 with a third party's plugin list -- see `dltrack.serve.run_production_server`.
+
+Lives inside `dltrack.serve` (alongside `_production_server.py`, the module that spawns Granian
+workers pointed at this file) rather than at the top-level `dltrack` package, so the production-
+serving pieces stay in one place instead of `_production_server.py` reaching down into a sibling
+top-level module for its own worker entrypoint.
 """
 
 from __future__ import annotations

@@ -15,7 +15,7 @@ Never run raw python commands, if a python command doesn't work through `uv` ask
 Never use python to edit files, just use your normal mechanisms to do so.
 
 ```bash
-uv run --env-file .env serve.py     # start the dltrack server (this is how the user runs the app)
+uv run --env-file .env dltrack serve local     # start the dltrack server (this is how the user runs the app)
 uv run pytest                       # run the full test suite
 uv run pytest dltrack/serve/_backend/tests/sql_store_test.py  # run a single test file
 uv run pytest dltrack/serve/_backend/tests/sql_store_test.py::test_name  # run a single test
@@ -29,7 +29,7 @@ uv run prek run --all-files         # run pre-commit hooks manually
 ```
 
 Prefix the one-shot commands above (`pytest`, `ruff`, `pyright`, `prek`) with `rtk` per the RTK instructions
-below for compact output. Do **not** prefix `serve.py` — it's a long-running server, and RTK's filters are
+below for compact output. Do **not** prefix `dltrack serve local` — it's a long-running server, and RTK's filters are
 built for commands that produce output and exit, not for something you need to tail live.
 
 Tests live next to the code they test, not in one top-level directory: a `tests/` subfolder sits beside
@@ -70,7 +70,7 @@ itself with the Dash app (adds routes/pages, sets the data store, registers a ch
 - `LOCAL_STORAGE` = `[sqlite, filesystem]` — the metadata DB and artifact blob storage
 - `BUILTIN_PAGES` = homepage, project page, experiment page
 - `BUILTIN_CHARTS` = image_series, line_chart, table_chart
-- `LOCAL_DEPLOYMENT` = all of the above, used by `serve.py`
+- `LOCAL_DEPLOYMENT` = all of the above, used by `dltrack serve local`
 
 New functionality (a new chart type, storage backend, page, or artifact kind) is added by writing a new
 plugin module and including it in the list passed to `app()`, not by editing the core app.

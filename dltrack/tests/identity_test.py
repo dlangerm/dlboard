@@ -9,18 +9,18 @@ from dltrack import _identity
 
 @pytest.fixture(autouse=True)
 def _clear_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv(_identity.ENV_VAR, raising=False)
+    monkeypatch.delenv("DLTRACK_USER", raising=False)
 
 
 def test_resolve_username_prefers_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv(_identity.ENV_VAR, "from-env")
+    monkeypatch.setenv("DLTRACK_USER", "from-env")
     monkeypatch.setattr(_identity.getpass, "getuser", lambda: "from-os")
 
     assert _identity.resolve_username() == "from-env"
 
 
 def test_resolve_username_strips_whitespace_from_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv(_identity.ENV_VAR, "  from-env  ")
+    monkeypatch.setenv("DLTRACK_USER", "  from-env  ")
 
     assert _identity.resolve_username() == "from-env"
 
@@ -34,7 +34,7 @@ def test_resolve_username_falls_back_to_os_user_when_env_var_unset(monkeypatch: 
 def test_resolve_username_falls_back_to_os_user_when_env_var_is_blank(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv(_identity.ENV_VAR, "   ")
+    monkeypatch.setenv("DLTRACK_USER", "   ")
     monkeypatch.setattr(_identity.getpass, "getuser", lambda: "from-os")
 
     assert _identity.resolve_username() == "from-os"

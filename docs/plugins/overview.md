@@ -31,7 +31,7 @@ store on the app, register a chart type, wire a callback. Look at
 tackling a bigger category.
 
 **Registering one.** Add the module to the list passed into `app()` — see `LOCAL_DEPLOYMENT` in
-`dltrack/plugins/__init__.py` for the reference bundle `serve.py` uses. There's no other
+`dltrack/plugins/__init__.py` for the reference bundle `dltrack serve local` uses. There's no other
 registration step; a plugin not in that list is never loaded.
 
 **Identity, not state.** Once plugged, a plugin is snapshotted as an `InstalledPlugin`

@@ -2,7 +2,7 @@
 Browser-driven end-to-end regression tests for the composed dltrack app.
 
 Exercises the app the way a real deployment is wired -- `dltrack.serve.app.app()` with the same
-plugin bundle `serve.py` uses -- through an actual rendered browser (Playwright). A real browser
+plugin bundle `dltrack serve local` uses -- through an actual rendered browser (Playwright). A real browser
 is expensive to spin up, so this file is deliberately kept to a couple of full flows rather than
 many shallow ones, and each flow is chosen to cover something a Python-level unit test structurally
 can't: clientside (pure-JS, no Python round-trip) callbacks, the actual chart JS library rendering
@@ -47,7 +47,7 @@ pytestmark = pytest.mark.browser
 @pytest.fixture(scope="session")
 def dltrack_app(tmp_path_factory: pytest.TempPathFactory) -> Dash:
     """
-    A fully wired dltrack app (the `serve.py` plugin bundle) backed by a throwaway sqlite db.
+    A fully wired dltrack app (the `dltrack serve local` plugin bundle) backed by a throwaway sqlite db.
 
     Session-scoped, matching how the real app runs: exactly one process builds it once. Chart
     plugins register their `ChartType` into a process-global registry on `plug()` and reject a

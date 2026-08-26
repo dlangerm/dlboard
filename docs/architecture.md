@@ -18,7 +18,7 @@ script ends up as a row in the database and eventually a chart in the browser.
 (`dltrack/serve/app.py`) builds a `Dash` instance, calls `plug(app)` on every plugin in order, and
 wires the shared `AppShell` layout (header, collapsible navbar, page container) plus a few global
 callbacks: breadcrumbs, navbar collapse state (persisted to `localStorage`), and the navbar's
-project/experiment listing. `serve.py` is the reference composition — it passes
+project/experiment listing. `dltrack serve local` is the reference composition — it passes
 `dltrack.plugins.LOCAL_DEPLOYMENT` (sqlite storage, filesystem artifacts, anonymous auth, the REST
 backend, the four built-in pages, the four built-in chart types) plus a theme.
 
@@ -39,7 +39,7 @@ each other directly. See [plugins/overview.md](plugins/overview.md) for the plug
    hparams) and an `ArtifactStore` (blob storage), both defined as generic protocols in
    `dltrack/models/_data_store.py`. `SQLStoreBase` (`dltrack/serve/_backend/_sql_store_base.py`)
    implements `DataStore` against raw SQL; the `sqlite`/`filesystem` plugins under
-   `dltrack/plugins/data_stores/` supply the concrete backends `serve.py` uses.
+   `dltrack/plugins/data_stores/` supply the concrete backends `dltrack serve local` uses.
 4. Browser-side, routed pages under `dltrack/serve/_pages/` and `dltrack/plugins/pages/` (Dash's
    file-based `use_pages` routing) read back through the same `DataStore`/`ArtifactStore` accessors
    to render what got logged.

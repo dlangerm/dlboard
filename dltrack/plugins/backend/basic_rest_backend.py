@@ -3,7 +3,7 @@
 import itertools
 from pathlib import Path
 from time import perf_counter
-from typing import Any, Callable, Iterable, Literal
+from typing import Any, Callable, Final, Iterable, Literal
 
 import dash
 import requests
@@ -18,6 +18,9 @@ from dltrack.plugins.auth.anonymous import DLTRACK_USER_HEADER
 from dltrack.serve import get_artifact_store, get_current_user, get_data_store
 
 _log = get_logger(__name__)
+
+DEFAULT_SERVER_URL: Final = "http://localhost:8050"
+"""Matches `dltrack serve local`'s own default host/port (see `ServerRuntimeOptions` in `_cli.py`)."""
 
 
 def create_path(
@@ -91,7 +94,7 @@ def _get_or_create_request[R: BaseModel](
 class BasicDltrackAPI:
     """API class."""
 
-    def __init__(self, base_url: str = "http://localhost:8050") -> None:
+    def __init__(self, base_url: str = DEFAULT_SERVER_URL) -> None:
         """Initialize the API class."""
         self.base_url = base_url
         # Resolved once per process (not per call): who's actually running this is not going to
