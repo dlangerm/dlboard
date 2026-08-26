@@ -60,7 +60,7 @@ def _save_artifact(
                 _log.warning("Return queue is full, runtime will be impacted")
             return_q.put(artifact)
         except KeyboardInterrupt:
-            raise
+            return
         except Exception:  # noqa: BLE001
             _log.exception("Failed to save artifacts")
 
