@@ -371,7 +371,11 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         return self._first_committed_row(self._execute_sql_query(models.Experiment, statement, values))
 
     def get_or_create_experiment(
-        self, project_id: int, name: str = "default", created_by: int | None = None
+        self,
+        project_id: int,
+        name: str = "default",
+        created_by: int | None = None,
+        source: models.ExperimentSource | None = None,
     ) -> models.Experiment:
         """Get the named experiment within `project_id`, creating it if it doesn't exist yet."""
         existing = list(
@@ -390,7 +394,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         if existing:
             return existing[0]
         return self.create_experiment(
-            models.NewExperiment(project_id=project_id, name=name, created_by=created_by)
+            models.NewExperiment(project_id=project_id, name=name, created_by=created_by, source=source)
         )
 
     def get_experiment(self, database_id: int) -> models.Experiment | None:

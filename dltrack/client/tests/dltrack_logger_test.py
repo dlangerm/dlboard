@@ -26,9 +26,11 @@ class _FakeAPI:
         self.calls.append(("get_or_create_project", (name,), {"description": description}))
         return models.Project(id=1, name=name, description=description)
 
-    def get_or_create_experiment(self, project_id: int, name: str = "default") -> models.Experiment:
-        self.calls.append(("get_or_create_experiment", (project_id,), {"name": name}))
-        return models.Experiment(id=2, project_id=project_id, name=name)
+    def get_or_create_experiment(
+        self, project_id: int, name: str = "default", source: models.ExperimentSource | None = None
+    ) -> models.Experiment:
+        self.calls.append(("get_or_create_experiment", (project_id,), {"name": name, "source": source}))
+        return models.Experiment(id=2, project_id=project_id, name=name, source=source)
 
 
 def _stub_api(monkeypatch: pytest.MonkeyPatch, fake_api: _FakeAPI) -> None:
@@ -61,7 +63,11 @@ def test_from_names_looks_up_project_and_experiment_by_name(monkeypatch: pytest.
 
     assert fake_api.calls == [
         ("get_or_create_project", ("proj",), {"description": "desc"}),
-        ("get_or_create_experiment", (1,), {"name": "exp"}),
+        (
+            "get_or_create_experiment",
+            (1,),
+            {"name": "exp", "source": models.ExperimentSource.PYTORCH_LIGHTNING},
+        ),
     ]
     assert init_kwargs["project_id"] == 1
     assert init_kwargs["experiment_id"] == 2
@@ -75,7 +81,11 @@ def test_from_names_defaults_the_experiment_name_to_default(monkeypatch: pytest.
 
     DLTrackLogger.from_names("proj")
 
-    assert fake_api.calls[1] == ("get_or_create_experiment", (1,), {"name": "default"})
+    assert fake_api.calls[1] == (
+        "get_or_create_experiment",
+        (1,),
+        {"name": "default", "source": models.ExperimentSource.PYTORCH_LIGHTNING},
+    )
 
 
 def test_from_names_passes_settings_through(monkeypatch: pytest.MonkeyPatch) -> None:

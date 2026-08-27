@@ -15,6 +15,7 @@ from dltrack.plugins.pages._chart_autogen import (
     build_suggestions,
     chartable_metric_columns,
     find_uncharted_keys,
+    lightning_granularity,
     panel_name_for_group,
     split_group_name,
 )
@@ -68,6 +69,24 @@ def test_split_group_name_ignores_leading_and_trailing_delimiters() -> None:
     assert split_group_name("/train/loss/", "/", "suffix") == "loss"
 
 
+# ---- lightning_granularity ----
+
+
+def test_lightning_granularity_detects_step_and_epoch_suffixes() -> None:
+    assert lightning_granularity("train_loss_epoch") == "epoch"
+    assert lightning_granularity("train_loss_step") == "step"
+
+
+def test_lightning_granularity_none_when_no_suffix() -> None:
+    assert lightning_granularity("train_loss") is None
+
+
+def test_lightning_granularity_none_when_suffix_is_the_whole_key() -> None:
+    """A bare `_step`/`_epoch` key isn't a suffixed metric name -- there's no base name left."""
+    assert lightning_granularity("_step") is None
+    assert lightning_granularity("_epoch") is None
+
+
 # ---- panel_name_for_group ----
 
 
@@ -80,6 +99,12 @@ def test_panel_name_for_group_artifact_gets_disambiguating_suffix() -> None:
     assert panel_name_for_group("train", ColumnKind.ARTIFACT) != panel_name_for_group(
         "train", ColumnKind.METRIC
     )
+
+
+def test_panel_name_for_group_granularity_splits_the_panel() -> None:
+    assert panel_name_for_group("train", ColumnKind.METRIC, granularity="epoch") == "train (epoch)"
+    assert panel_name_for_group("train", ColumnKind.METRIC, granularity="step") == "train (step)"
+    assert panel_name_for_group("train", ColumnKind.METRIC, granularity=None) == "train"
 
 
 # ---- chartable_metric_columns / artifact_keys exclusions ----
@@ -164,6 +189,29 @@ def test_build_auto_panels_default_chart_params() -> None:
     assert artifact_chart.parameters == {"key": "img"}
 
 
+def test_build_auto_panels_lightning_splits_step_and_epoch_variants_into_adjacent_panels() -> None:
+    column_kinds = {
+        "train/loss_step": ColumnKind.METRIC,
+        "train/loss_epoch": ColumnKind.METRIC,
+        "train/lr": ColumnKind.METRIC,
+    }
+    panels = build_auto_panels(column_kinds, delimiter="/", mode="prefix", lightning=True)
+
+    by_name = {p.name: p for p in panels}
+    assert set(by_name) == {"train (step)", "train (epoch)", "train"}
+    assert {c.parameters["column"] for c in by_name["train (step)"].charts} == {"train/loss_step"}
+    assert {c.parameters["column"] for c in by_name["train (epoch)"].charts} == {"train/loss_epoch"}
+    assert {c.parameters["column"] for c in by_name["train"].charts} == {"train/lr"}
+
+
+def test_build_auto_panels_ignores_lightning_suffixes_when_not_lightning() -> None:
+    column_kinds = {"train/loss_step": ColumnKind.METRIC, "train/loss_epoch": ColumnKind.METRIC}
+    panels = build_auto_panels(column_kinds, delimiter="/", mode="prefix", lightning=False)
+
+    assert [p.name for p in panels] == ["train"]
+    assert {c.parameters["column"] for c in panels[0].charts} == {"train/loss_step", "train/loss_epoch"}
+
+
 def test_build_auto_panels_empty_column_kinds_produces_no_panels() -> None:
     assert build_auto_panels({}, delimiter="/", mode="prefix") == []
 
@@ -219,4 +267,21 @@ def test_build_suggestions_pairs_each_key_with_its_default_chart_and_target_pane
             panel_name=f"train{ARTIFACT_PANEL_SUFFIX}",
             chart=ChartInstance[object, object](chart_type="image", parameters={"key": "train/sample"}),
         ),
+    ]
+
+
+def test_build_suggestions_lightning_splits_panel_by_granularity() -> None:
+    uncharted = UnchartedKeys(metrics=["train/loss_epoch"], artifacts=[])
+
+    suggestions = build_suggestions(uncharted, delimiter="/", mode="prefix", lightning=True)
+
+    assert suggestions == [
+        Suggestion(
+            key="train/loss_epoch",
+            kind=ColumnKind.METRIC,
+            panel_name="train (epoch)",
+            chart=ChartInstance[object, object](
+                chart_type="line", parameters={"column": "train/loss_epoch", "x_axis": "step"}
+            ),
+        )
     ]

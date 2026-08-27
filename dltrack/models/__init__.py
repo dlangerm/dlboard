@@ -5,7 +5,7 @@ from dltrack.models._artifact_purge_task import ArtifactPurgeTask, NewArtifactPu
 from dltrack.models._audit_log import AuditAction, AuditLogEntry, EntityType, NewAuditLogEntry
 from dltrack.models._auth import AuthProvider
 from dltrack.models._data_store import ArtifactStore, DataStore
-from dltrack.models._experiment import Experiment, NewExperiment
+from dltrack.models._experiment import Experiment, ExperimentSource, NewExperiment
 from dltrack.models._hparams import HyperParams, NewHyperParams
 from dltrack.models._metric import LoggedMetrics, UnderlyingMetricTableEntry
 from dltrack.models._plugin import InstalledPlugin, PluginProtocol
@@ -40,6 +40,7 @@ __all__ = [
     "DataStore",
     "EntityType",
     "Experiment",
+    "ExperimentSource",
     "HyperParams",
     "InstalledPlugin",
     "LoggedMetrics",

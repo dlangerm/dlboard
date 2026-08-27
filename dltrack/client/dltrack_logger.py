@@ -156,7 +156,9 @@ class DLTrackLogger(Logger):
         self._project_id = project_id
         self._api = BasicDltrackAPI(base_url=server_url)
         if experiment_id is None:
-            experiment = self._api.create_experiment(models.NewExperiment(project_id=project_id))
+            experiment = self._api.create_experiment(
+                models.NewExperiment(project_id=project_id, source=models.ExperimentSource.PYTORCH_LIGHTNING)
+            )
             experiment_id = experiment.id
         self._experiment_id = experiment_id
         self._run_id = self._api.create_run(models.NewRun(experiment_id=self._experiment_id)).id
@@ -207,7 +209,9 @@ class DLTrackLogger(Logger):
         """
         api = BasicDltrackAPI(base_url=server_url)
         project = api.get_or_create_project(project_name, description=project_description)
-        experiment = api.get_or_create_experiment(project.id, name=experiment_name)
+        experiment = api.get_or_create_experiment(
+            project.id, name=experiment_name, source=models.ExperimentSource.PYTORCH_LIGHTNING
+        )
         return cls(
             project_id=project.id, experiment_id=experiment.id, server_url=server_url, settings=settings
         )

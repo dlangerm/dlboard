@@ -21,6 +21,7 @@ from dltrack.models import (
     ChartInstance,
     ChartTypeRegistry,
     ColumnKind,
+    ExperimentSource,
     HyperParams,
     Page,
     PanelInstance,
@@ -558,6 +559,17 @@ def _render_panel_charts(
             )
         )
     return items
+
+
+def _is_lightning_experiment(data_store: DataStore[...], experiment_id: int) -> bool:
+    """
+    Whether `experiment_id`'s metrics were logged through `DLTrackLogger`.
+
+    Lightning-specific chart-autogen conventions (see `_chart_autogen.lightning_granularity`) only
+    apply to those.
+    """
+    experiment = data_store.get_experiment(experiment_id)
+    return experiment is not None and experiment.source == ExperimentSource.PYTORCH_LIGHTNING
 
 
 def _split_mode_control(control_id: str) -> dmc.SegmentedControl:
@@ -1802,11 +1814,14 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
             msg = "No metrics or artifacts logged for this experiment yet"
             raise ValueError(msg)
         split_mode: SplitMode = "suffix" if mode == "suffix" else "prefix"
+        lightning = _is_lightning_experiment(get_data_store(), experiment_id)
 
         def replace_with_generated_panels(
             _panels: list[PanelInstance[Any, Any]],
         ) -> list[PanelInstance[Any, Any]]:
-            return build_auto_panels(column_kinds, delimiter=delimiter or _DEFAULT_DELIMITER, mode=split_mode)
+            return build_auto_panels(
+                column_kinds, delimiter=delimiter or _DEFAULT_DELIMITER, mode=split_mode, lightning=lightning
+            )
 
         page, container = _mutate_panels_and_rerender(
             page_json,
@@ -1852,7 +1867,12 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
 
         split_mode: SplitMode = "suffix" if mode == "suffix" else "prefix"
         uncharted = find_uncharted_keys(curr_page.panels, column_kinds)
-        suggestions = build_suggestions(uncharted, delimiter=delimiter or _DEFAULT_DELIMITER, mode=split_mode)
+        lightning = curr_page.experiment_id is not None and _is_lightning_experiment(
+            get_data_store(), curr_page.experiment_id
+        )
+        suggestions = build_suggestions(
+            uncharted, delimiter=delimiter or _DEFAULT_DELIMITER, mode=split_mode, lightning=lightning
+        )
 
         opened = True if triggered_id == SUGGEST_CHARTS_BUTTON_ID else no_update
         return (
