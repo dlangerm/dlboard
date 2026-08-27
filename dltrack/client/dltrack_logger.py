@@ -25,6 +25,7 @@ DEFAULT_EXPERIMENT_NAME = "default"
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from multiprocessing import Queue
+    from multiprocessing.synchronize import Event as MPEvent
 
     from dltrack.models._artifact import AnyArtifact
 
@@ -34,11 +35,30 @@ if TYPE_CHECKING:
 
 _log = logging.getLogger(__name__)
 
+_STARTUP_WARN_THRESHOLD_SEC = 2.0
+"""How long a worker process's import + startup can take before we warn it's the likely cause of
+any backpressure warnings seen right after training starts, rather than dltrack itself."""
+_STARTUP_WAIT_TIMEOUT_SEC = 60.0
+"""Cap on how long `__init__` waits for a worker to report ready, so a wedged import can't hang forever."""
+
+
+def warn_if_startup_was_slow(elapsed_sec: float) -> None:
+    """Warn that any backpressure warnings so far are from worker startup, not sustained throughput."""
+    if elapsed_sec > _STARTUP_WARN_THRESHOLD_SEC:
+        warnings.warn(
+            f"dltrack's logging worker processes took {elapsed_sec:.1f}s to start up. This is "
+            "almost always import overhead from your training script or its other dependencies, not "
+            "dltrack -- any backpressure warnings logged in the next few steps are a side effect of "
+            "this startup delay rather than an ongoing throughput problem.",
+            stacklevel=2,
+        )
+
 
 class LogProcParams(NamedTuple):
     """Process parameters for a logger daemon."""
 
     flush_size: int
+    ready: MPEvent
     wait_sec: float = 1
 
 
@@ -50,6 +70,7 @@ def process_metrics_async(
     params: LogProcParams,
 ) -> None:
     """Logger background process."""
+    params.ready.set()
     last_logged = time.perf_counter()
     cur_batch: list[models.LoggedMetrics] = []
     while True:
@@ -91,6 +112,7 @@ def process_artifacts_async(
     params: LogProcParams,
 ) -> None:
     """Logger background process for artifacts."""
+    params.ready.set()
     last_logged = time.perf_counter()
     cur_batch: list[models.NewArtifact] = []
     files: list[Path] = []
@@ -164,6 +186,8 @@ class DLTrackLogger(Logger):
         self._run_id = self._api.create_run(models.NewRun(experiment_id=self._experiment_id)).id
         self._metrics_q: QType = SPAWN_CONTEXT.Queue(maxsize=settings.metrics_q_size)
         self._art_q: ArtifactQType = SPAWN_CONTEXT.Queue(maxsize=settings.artifact_q_size)
+        metrics_ready = SPAWN_CONTEXT.Event()
+        art_ready = SPAWN_CONTEXT.Event()
         self._metric_proc = SPAWN_CONTEXT.Process(
             target=process_metrics_async,
             args=(
@@ -171,7 +195,7 @@ class DLTrackLogger(Logger):
                 self._run_id,
                 self._api,
                 self._metrics_q,
-                LogProcParams(flush_size=settings.metrics_q_flush_size, wait_sec=5),
+                LogProcParams(flush_size=settings.metrics_q_flush_size, ready=metrics_ready, wait_sec=5),
             ),
             name="logger-proc",
             daemon=True,
@@ -183,13 +207,17 @@ class DLTrackLogger(Logger):
                 self._run_id,
                 self._api,
                 self._art_q,
-                LogProcParams(flush_size=settings.artifact_q_flush_size, wait_sec=5),
+                LogProcParams(flush_size=settings.artifact_q_flush_size, ready=art_ready, wait_sec=5),
             ),
             name="artifact-proc",
             daemon=True,
         )
+        startup_start = time.perf_counter()
         self._metric_proc.start()
         self._art_proc.start()
+        metrics_ready.wait(_STARTUP_WAIT_TIMEOUT_SEC)
+        art_ready.wait(_STARTUP_WAIT_TIMEOUT_SEC)
+        warn_if_startup_was_slow(time.perf_counter() - startup_start)
         super().__init__()
 
     @classmethod

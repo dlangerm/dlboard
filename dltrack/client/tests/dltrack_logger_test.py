@@ -7,14 +7,14 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+import warnings
+from typing import Any
+
+import pytest
 
 from dltrack import models
 from dltrack.client import dltrack_logger
-from dltrack.client.dltrack_logger import DLTrackLogger, DLTrackLoggerSettings
-
-if TYPE_CHECKING:
-    import pytest
+from dltrack.client.dltrack_logger import DLTrackLogger, DLTrackLoggerSettings, warn_if_startup_was_slow
 
 
 class _FakeAPI:
@@ -97,3 +97,14 @@ def test_from_names_passes_settings_through(monkeypatch: pytest.MonkeyPatch) -> 
     DLTrackLogger.from_names("proj", settings=settings)
 
     assert init_kwargs["settings"] is settings
+
+
+def test_warn_if_startup_was_slow_warns_past_the_threshold() -> None:
+    with pytest.warns(UserWarning, match="took 3.0s to start up"):
+        warn_if_startup_was_slow(3.0)
+
+
+def test_warn_if_startup_was_slow_is_silent_within_the_threshold() -> None:
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        warn_if_startup_was_slow(0.1)
