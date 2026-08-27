@@ -33,6 +33,21 @@ ARTIFACT_PANEL_SUFFIX = " (artifacts)"
 # panel.
 UNGROUPED_GROUP_NAME = "Ungrouped"
 
+# Suffixes `pytorch_lightning` appends to a logged metric's name when it's aggregated per-epoch or
+# reported per-step (e.g. `self.log(name, ..., on_step=True, on_epoch=True)` ships both
+# `<name>_step` and `<name>_epoch`). Distinct from the user-configurable delimiter/mode grouping
+# above -- these are fixed, and only ever applied for experiments logged through
+# `DLTrackLogger` (see `ExperimentSource.PYTORCH_LIGHTNING`).
+_LIGHTNING_GRANULARITY_SUFFIXES: typing.Final = {"_epoch": "epoch", "_step": "step"}
+
+
+def lightning_granularity(key: str) -> str | None:
+    """The lightning step/epoch granularity `key` carries, if any, e.g. `"epoch"` for `loss_epoch`."""
+    for suffix, granularity in _LIGHTNING_GRANULARITY_SUFFIXES.items():
+        if key.endswith(suffix) and len(key) > len(suffix):
+            return granularity
+    return None
+
 
 def split_group_name(key: str, delimiter: str, mode: SplitMode) -> str:
     """
@@ -49,9 +64,16 @@ def split_group_name(key: str, delimiter: str, mode: SplitMode) -> str:
     return parts[0] if mode == "prefix" else parts[-1]
 
 
-def panel_name_for_group(group: str, kind: ColumnKind) -> str:
-    """The target panel name for a group, disambiguated by kind so metric/artifact panels never collide."""
-    return f"{group}{ARTIFACT_PANEL_SUFFIX}" if kind == ColumnKind.ARTIFACT else group
+def panel_name_for_group(group: str, kind: ColumnKind, *, granularity: str | None = None) -> str:
+    """
+    The target panel name for a group, disambiguated by kind so metric/artifact panels never collide.
+
+    `granularity` (a lightning step/epoch tag from `lightning_granularity`) further splits the
+    group's panel in two, so step-logged and epoch-logged variants of the same metric land in
+    adjacent but distinct panels instead of competing for one.
+    """
+    name = f"{group}{ARTIFACT_PANEL_SUFFIX}" if kind == ColumnKind.ARTIFACT else group
+    return f"{name} ({granularity})" if granularity else name
 
 
 def default_chart_for_metric(column: str) -> ChartInstance[typing.Any, typing.Any]:
@@ -83,13 +105,16 @@ def build_auto_panels(
     *,
     delimiter: str,
     mode: SplitMode,
+    lightning: bool = False,
 ) -> list[PanelInstance[typing.Any, typing.Any]]:
     """
     Build a full set of panels from every known metric/artifact key, grouped by `delimiter`/`mode`.
 
     Intended for a brand-new (empty) view: metric keys and artifact keys are grouped and charted
     independently, so a metric group and an artifact group with the same name still land in two
-    distinct panels (see `panel_name_for_group`).
+    distinct panels (see `panel_name_for_group`). `lightning` further splits each metric group by
+    step/epoch granularity (see `lightning_granularity`) -- only meaningful for experiments logged
+    through `DLTrackLogger`, so callers should gate it on `ExperimentSource.PYTORCH_LIGHTNING`.
     """
     panels: dict[str, PanelInstance[typing.Any, typing.Any]] = {}
 
@@ -102,7 +127,9 @@ def build_auto_panels(
 
     for column in chartable_metric_columns(column_kinds):
         group = split_group_name(column, delimiter, mode)
-        _append(panel_name_for_group(group, ColumnKind.METRIC), default_chart_for_metric(column))
+        granularity = lightning_granularity(column) if lightning else None
+        panel_name = panel_name_for_group(group, ColumnKind.METRIC, granularity=granularity)
+        _append(panel_name, default_chart_for_metric(column))
 
     for key in artifact_keys(column_kinds):
         group = split_group_name(key, delimiter, mode)
@@ -146,13 +173,19 @@ class Suggestion(typing.NamedTuple):
     chart: ChartInstance[typing.Any, typing.Any]
 
 
-def build_suggestions(uncharted: UnchartedKeys, *, delimiter: str, mode: SplitMode) -> list[Suggestion]:
+def build_suggestions(
+    uncharted: UnchartedKeys, *, delimiter: str, mode: SplitMode, lightning: bool = False
+) -> list[Suggestion]:
     """Turn uncharted keys into ready-to-add `Suggestion`s, grouped the same way as auto-populate."""
     suggestions = [
         Suggestion(
             key=column,
             kind=ColumnKind.METRIC,
-            panel_name=panel_name_for_group(split_group_name(column, delimiter, mode), ColumnKind.METRIC),
+            panel_name=panel_name_for_group(
+                split_group_name(column, delimiter, mode),
+                ColumnKind.METRIC,
+                granularity=lightning_granularity(column) if lightning else None,
+            ),
             chart=default_chart_for_metric(column),
         )
         for column in uncharted.metrics

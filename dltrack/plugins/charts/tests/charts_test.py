@@ -248,6 +248,19 @@ def test_bar_chart_x_axis_is_categorical() -> None:
     assert _props(chart)["xAxisProps"] == {"type": "category"}
 
 
+def test_bar_chart_vertical_orientation_flips_category_axis_and_labels() -> None:
+    df = _hparam_grouped_df({1: 128}, {1: [0.8]})
+    chart = BarChart.render(
+        BarChartSettings(column="accuracy", x_axis="hidden_size", orientation="vertical"), df
+    )
+    props = _props(chart)
+    assert props["orientation"] == "vertical"
+    assert props["xAxisProps"] == {}
+    assert props["yAxisProps"] == {"type": "category"}
+    assert props["xAxisLabel"] == "mean(accuracy)"
+    assert props["yAxisLabel"] == "hidden_size"
+
+
 def test_bar_chart_syncs_by_value_not_index() -> None:
     df = _hparam_grouped_df({1: 128}, {1: [0.8]})
     chart = BarChart.render(BarChartSettings(column="accuracy", x_axis="hidden_size"), df)

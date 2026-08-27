@@ -204,6 +204,17 @@ def test_get_or_create_experiment_creates_on_first_call_and_reuses_after(store: 
     assert list(store._execute_raw_sql("SELECT count(*) FROM Experiment")) == [(1,)]
 
 
+def test_get_or_create_experiment_tags_source_only_on_first_call(store: SQLLiteStore) -> None:
+    project = store.create_project(models.NewProject(name="p", description="d"))
+
+    first = store.get_or_create_experiment(project.id, source=models.ExperimentSource.PYTORCH_LIGHTNING)
+    again = store.get_or_create_experiment(project.id, source=None)
+
+    assert first.source == models.ExperimentSource.PYTORCH_LIGHTNING
+    assert again.id == first.id
+    assert again.source == models.ExperimentSource.PYTORCH_LIGHTNING
+
+
 def test_get_or_create_experiment_is_scoped_to_its_project(store: SQLLiteStore) -> None:
     project_a = store.create_project(models.NewProject(name="a", description="d"))
     project_b = store.create_project(models.NewProject(name="b", description="d"))

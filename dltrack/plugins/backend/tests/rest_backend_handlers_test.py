@@ -92,6 +92,18 @@ def test_handle_get_or_create_experiment_creates_on_first_call(store: SQLLiteSto
     assert result["created_by"] == actor.id
 
 
+def test_handle_get_or_create_experiment_passes_source_through(store: SQLLiteStore) -> None:
+    project = store.create_project(models.NewProject(name="p", description="d"))
+    body = backend.GetOrCreateExperiment(
+        project_id=project.id, name="default", source=models.ExperimentSource.PYTORCH_LIGHTNING
+    ).model_dump(mode="json")
+    actor = store.get_or_create_user("bob")
+
+    result = backend.handle_get_or_create_experiment(store, body, actor)
+
+    assert result["source"] == models.ExperimentSource.PYTORCH_LIGHTNING
+
+
 def test_handle_get_or_create_experiment_reuses_an_existing_experiment_by_name(store: SQLLiteStore) -> None:
     project = store.create_project(models.NewProject(name="p", description="d"))
     existing = store.create_experiment(models.NewExperiment(project_id=project.id, name="default"))

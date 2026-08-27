@@ -33,6 +33,9 @@ class BarChartSettings(BaseModel, frozen=True, extra="forbid"):
     """The metric or hyperparameter key to group runs by, e.g. "hidden_size"."""
     aggregation: typing.Literal["mean", "median", "min", "max", "sum", "count"] = "mean"
     """How to combine runs that share the same `x_axis` value into one bar."""
+    orientation: typing.Literal["horizontal", "vertical"] = "horizontal"
+    """Chart layout: `horizontal` draws upright bars with groups along the x-axis (the default);
+    `vertical` draws sideways bars with groups along the y-axis."""
     sort: bool = True
     """Order bars ascending by `x_axis` value -- numerically if every group parses as a number,
     alphabetically otherwise. Disable to keep groups in first-seen order."""
@@ -96,14 +99,26 @@ class BarChart(ChartType[BarChartSettings, pd.DataFrame, dmc.BarChart], frozen=T
         for row in data:
             row["__x_axis_name__"] = parameters.x_axis
 
+        # Recharts' `layout` (what mantine's `orientation` controls) decides which axis is the
+        # category axis -- x for the default `horizontal` orientation, y for `vertical` -- so the
+        # `type: "category"` override and the axis labels have to follow it too, or the flipped
+        # chart ends up with a numeric category axis and swapped labels.
+        value_label = f"{parameters.aggregation}({parameters.column})"
+        x_axis_props = {"type": "category"} if parameters.orientation == "horizontal" else {}
+        y_axis_props = {"type": "category"} if parameters.orientation == "vertical" else {}
+        x_axis_label = parameters.x_axis if parameters.orientation == "horizontal" else value_label
+        y_axis_label = value_label if parameters.orientation == "horizontal" else parameters.x_axis
+
         return dmc.BarChart(
             h=parameters.height,
             data=data,  # pyright: ignore[reportArgumentType]
             dataKey=parameters.x_axis,
             series=[{"name": parameters.column, "label": parameters.column, "color": _DEFAULT_BAR_COLOR}],  # pyright: ignore[reportArgumentType]
-            xAxisLabel=parameters.x_axis,
-            yAxisLabel=f"{parameters.aggregation}({parameters.column})",
-            xAxisProps={"type": "category"},
+            orientation=parameters.orientation,
+            xAxisLabel=x_axis_label,
+            yAxisLabel=y_axis_label,
+            xAxisProps=x_axis_props,
+            yAxisProps=y_axis_props,
             withLegend=False,
             withXAxis=True,
             withYAxis=True,

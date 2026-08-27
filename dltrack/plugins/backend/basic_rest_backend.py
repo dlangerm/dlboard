@@ -56,6 +56,7 @@ class GetOrCreateExperiment(BaseModel, frozen=True, extra="forbid"):
 
     project_id: int
     name: str = "default"
+    source: models.ExperimentSource | None = None
 
 
 def _post_request[R: BaseModel](
@@ -118,10 +119,12 @@ class BasicDltrackAPI:
         """Create a new experiment."""
         return _create_request(new_experiment, models.Experiment, self.base_url, headers=self._headers)
 
-    def get_or_create_experiment(self, project_id: int, name: str = "default") -> models.Experiment:
+    def get_or_create_experiment(
+        self, project_id: int, name: str = "default", source: models.ExperimentSource | None = None
+    ) -> models.Experiment:
         """Get the named experiment within `project_id`, creating it if it doesn't exist yet."""
         return _get_or_create_request(
-            GetOrCreateExperiment(project_id=project_id, name=name),
+            GetOrCreateExperiment(project_id=project_id, name=name, source=source),
             models.Experiment,
             self.base_url,
             headers=self._headers,
@@ -202,9 +205,9 @@ def handle_get_or_create_experiment(
 ) -> dict[str, Any]:
     """Get or create an experiment by name within a project, attributed to `actor` if newly created."""
     req = GetOrCreateExperiment.model_validate(body)
-    return store.get_or_create_experiment(req.project_id, req.name, created_by=actor.id).model_dump(
-        mode="json"
-    )
+    return store.get_or_create_experiment(
+        req.project_id, req.name, created_by=actor.id, source=req.source
+    ).model_dump(mode="json")
 
 
 def handle_create_run(store: DataStore[...], body: dict[str, Any], actor: models.User) -> dict[str, Any]:

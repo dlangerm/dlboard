@@ -57,9 +57,18 @@ class DataStore[**P](typing.Protocol):
         ...
 
     def get_or_create_experiment(
-        self, project_id: int, name: str = "default", created_by: int | None = None
+        self,
+        project_id: int,
+        name: str = "default",
+        created_by: int | None = None,
+        source: models.ExperimentSource | None = None,
     ) -> models.Experiment:
-        """Get the named experiment within a project, creating it if it doesn't exist yet."""
+        """
+        Get the named experiment within a project, creating it if it doesn't exist yet.
+
+        `source` only applies the first time `name` is seen within `project_id` -- once the
+        experiment exists, later calls just reuse it as-is.
+        """
         ...
 
     def get_experiment(self, database_id: int) -> models.Experiment | None:
