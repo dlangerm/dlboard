@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import dash
@@ -9,6 +10,7 @@ import dash_mantine_components as dmc
 from dash import Dash, Input, Output, State, callback, dcc, html  # pyright: ignore[reportUnknownVariableType]
 from dash.dcc import Store
 from dash.exceptions import PreventUpdate
+from flask import Response
 from structlog.stdlib import get_logger
 
 from dltrack.models import InstalledPlugin, constants
@@ -23,6 +25,16 @@ if TYPE_CHECKING:
 
 
 _log = get_logger(__name__)
+
+_NAVBAR_RESIZE_JS_PATH = Path(__file__).with_name("navbar_resize.js")
+_NAVBAR_RESIZE_JS_ROUTE = "navbar-resize.js"
+_DEFAULT_NAVBAR_WIDTH = 300
+_MIN_NAVBAR_WIDTH = 260
+_MAX_NAVBAR_WIDTH = 640
+
+
+def _serve_navbar_resize_js() -> Response:
+    return Response(_NAVBAR_RESIZE_JS_PATH.read_text(), mimetype="application/javascript")
 
 
 def app(plugins: list[models.PluginProtocol]) -> Dash:
@@ -42,6 +54,18 @@ def app(plugins: list[models.PluginProtocol]) -> Dash:
     # modules/objects themselves, so introspecting this later (the admin page's About tab) can't
     # reach back into a plugin's own state.
     set_installed_plugins(_app, installed)
+    # `navbar_resize.js` (the navbar drag-to-resize handle) served from a route this module owns
+    # and appended to this app instance's own script list, not Dash's global `hooks.script`/
+    # `hooks.route` registry -- same reasoning as `dltrack/plugins/charts/line_chart.py`'s
+    # `plug()`, just inlined here since `app.py` is the one-per-process core, not a plugin.
+    prefix = str(_app.config.routes_pathname_prefix)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    navbar_resize_route = f"{prefix}{_NAVBAR_RESIZE_JS_ROUTE}"
+    _app.server.add_url_rule(
+        navbar_resize_route, endpoint=navbar_resize_route, view_func=_serve_navbar_resize_js
+    )
+    _app.scripts.append_script(  # pyright: ignore[reportUnknownMemberType]
+        {"external_url": navbar_resize_route, "external_only": True}
+    )
     basic_container_layout = dmc.AppShell(
         [
             dmc.AppShellHeader(
@@ -76,15 +100,35 @@ def app(plugins: list[models.PluginProtocol]) -> Dash:
             dmc.AppShellNavbar(
                 id=constants.NAVBAR_ID,
                 p="md",
-                children=[html.Div(id=constants.NAVBAR_CONTENT_ID)],
+                children=[
+                    html.Div(
+                        style={"position": "relative", "height": "100%"},
+                        children=[
+                            html.Div(id=constants.NAVBAR_CONTENT_ID),
+                            html.Div(id=constants.NAVBAR_RUN_LIST_ID),
+                            html.Div(
+                                id=constants.NAVBAR_RESIZE_HANDLE_ID,
+                                style={
+                                    "position": "absolute",
+                                    "top": 0,
+                                    "right": "-1rem",
+                                    "bottom": 0,
+                                    "width": "6px",
+                                    "cursor": "col-resize",
+                                },
+                            ),
+                        ],
+                    ),
+                ],
             ),
             dmc.AppShellMain(dash.page_container),
             dcc.Location(id=constants.LOCATION_ID, refresh=False),
             Store(id=constants.NAVBAR_COLLAPSED_STORE_ID, data=False, storage_type="local"),
+            Store(id=constants.NAVBAR_WIDTH_STORE_ID, data=_DEFAULT_NAVBAR_WIDTH, storage_type="local"),
         ],
         header={"height": 60},
         padding="md",
-        navbar={"width": 300, "breakpoint": "sm", "collapsed": {"mobile": True}},
+        navbar={"width": _DEFAULT_NAVBAR_WIDTH, "breakpoint": "sm", "collapsed": {"mobile": True}},
         id="appshell",
     )
     _app.layout = dmc.MantineProvider(id=constants.MANTINE_PROVIDER_ID, children=[basic_container_layout])
@@ -155,11 +199,15 @@ def toggle_navbar(n_clicks: int, collapsed: bool) -> bool:  # noqa: FBT001
 @callback(
     Output("appshell", "navbar"),
     Input(constants.NAVBAR_COLLAPSED_STORE_ID, "data"),
+    Input(constants.NAVBAR_WIDTH_STORE_ID, "data"),
 )
-def sync_navbar_collapsed(collapsed: bool | None) -> dict[str, str | int | dict[str, bool]]:  # noqa: FBT001
-    """Apply the persisted collapsed state, including on first load (from localStorage)."""
+def sync_navbar_collapsed(
+    collapsed: bool | None,  # noqa: FBT001
+    width: int | None,
+) -> dict[str, str | int | dict[str, bool]]:
+    """Apply the persisted collapsed/width state, including on first load (from localStorage)."""
     return {
-        "width": 300,
+        "width": min(_MAX_NAVBAR_WIDTH, max(_MIN_NAVBAR_WIDTH, width)) if width else _DEFAULT_NAVBAR_WIDTH,
         "breakpoint": "sm",
         "collapsed": {"mobile": bool(collapsed), "desktop": bool(collapsed)},
     }

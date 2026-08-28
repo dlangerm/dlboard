@@ -31,8 +31,11 @@ def layout(experiment_id: str) -> list[html.Div | dcc.Store]:
                         wrap="nowrap",
                         gap="sm",
                     ),
-                    dmc.Loader(id=constants.HPARAM_TABLE_ID),
-                    dmc.Loader(id=constants.METRIC_CONTENT_ID),
+                    # Not `dmc.Loader(id=...)` itself -- `render_initial` only ever replaces
+                    # `children`, never the element itself, so a `Loader` used as its own
+                    # placeholder would keep its spinner styling baked into the DOM node forever,
+                    # showing through/behind whatever real content lands in it.
+                    html.Div(dmc.Loader(), id=constants.METRIC_CONTENT_ID),
                 ],
                 gap="xs",
             ),

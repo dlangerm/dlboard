@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 import pandas as pd
 import pytest
 
-from dltrack.models import Artifact, HyperParams, LoggedMetrics, NewHyperParams
+from dltrack.models import Artifact, HyperParams, LoggedMetrics, NewHyperParams, ValidJsonTypes
 from dltrack.models._view import ColumnKind
 from dltrack.plugins.charts._table_style import HPARAM_COLUMN_PREFIX
 from dltrack.plugins.pages._dataframe_helpers import (
@@ -35,7 +35,7 @@ def _artifact(run_id: int, step: int, key: str, ref: str, tags: dict[str, str] |
     )
 
 
-def _hparams(hparam_id: int, run_id: int, **values: object) -> HyperParams:
+def _hparams(hparam_id: int, run_id: int, **values: ValidJsonTypes) -> HyperParams:
     return HyperParams(
         id=hparam_id,
         run_id=run_id,

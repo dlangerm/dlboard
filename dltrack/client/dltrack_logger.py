@@ -256,7 +256,14 @@ class DLTrackLogger(Logger):
 
     @override
     def log_hyperparams(self, params: dict[str, Any] | Namespace, *args: Any, **kwargs: Any) -> None:
-        """Log hyperparameters."""
+        """
+        Log hyperparameters.
+
+        Values are stored and later displayed exactly as given -- dltrack never guesses at or
+        rewrites a value's type. A `Namespace` built from `argparse` without a `type=` on
+        `add_argument` hands every value over as a string (e.g. `"128"`, not `128`); that's the
+        usual cause of a hyperparameter column that looks numeric but sorts/compares as text.
+        """
         if isinstance(params, Namespace):
             params = vars(params)
         self._api.log_hyperparams(

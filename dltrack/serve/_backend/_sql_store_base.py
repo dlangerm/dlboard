@@ -177,6 +177,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
                     sql.create_table_sql(table, FOREIGN_KEYS.get(table), UNIQUE_COLUMNS.get(table))
                 )
             )
+            self._add_missing_columns(table)
 
         list(
             self._execute_raw_sql(
@@ -193,6 +194,25 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
                 )
             )
         )
+
+    def _add_missing_columns(self, table: type[BaseModel]) -> None:
+        """
+        Backfill a table with any model field it's missing a column for.
+
+        This project has no migration system (see CLAUDE.md): `CREATE TABLE IF NOT EXISTS` is a
+        no-op for a table that already exists, so a field added to a model after someone's
+        database was created would otherwise never appear there and every read/write would fail
+        with a raw sqlite `OperationalError`/`IndexError` instead of a clear one. Every added
+        column is backfilled as nullable regardless of the model's own optionality -- existing
+        rows have no value to put there, so a genuinely required new field still needs a real
+        migration (with a backfill value) rather than relying on this.
+        """
+        existing = {row[1] for row in self._execute_raw_sql(f"PRAGMA table_info({table.__name__})")}
+        for field_name, field in table.model_fields.items():
+            if field_name in existing:
+                continue
+            sql_type = sql.annotation_to_sqltype(field.annotation, nullable=True)  # pyright: ignore[reportArgumentType]
+            list(self._execute_raw_sql(f"ALTER TABLE {table.__name__} ADD COLUMN {field_name} {sql_type}"))
 
     @abstractmethod
     def _execute_raw_sql(
@@ -428,6 +448,22 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         statement, values = sql.insert(models.Run, run)
         return self._first_committed_row(self._execute_sql_query(models.Run, statement, values))
 
+    def get_runs(self, experiment_id: int, *, limit: int = 1000, offset: int = 0) -> Iterator[models.Run]:
+        """Get a page of an experiment's (non-deleted) runs, most recently created first."""
+        return self._execute_sql_query(
+            models.Run,
+            sql.get_all_by_field(
+                models.Run,
+                "experiment_id",
+                experiment_id,
+                order_by=["created_at"],
+                descending=True,
+                exclude_deleted=True,
+                limit=limit,
+                offset=offset,
+            ),
+        )
+
     def log_metrics(self, metric: Iterable[models.LoggedMetrics]) -> None:
         """Log a batch of metrics to the data store."""
         _log.debug("Logging metrics batch")
@@ -476,6 +512,18 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         yield from models.LoggedMetrics.from_underlying(
             self._execute_sql_query(models.UnderlyingMetricTableEntry, statement, no_validate=True)
         )
+
+    def list_metric_keys(self, experiment_id: int) -> list[str]:
+        """List the distinct metric names logged anywhere in an experiment, without fetching values."""
+        rows = self._execute_raw_sql(
+            f"""
+            SELECT DISTINCT m.key FROM {models.UnderlyingMetricTableEntry.__name__} m
+            JOIN {models.Run.__name__} r ON m.run_id = r.id
+            WHERE m.experiment_id = :experiment_id AND r.deleted_at IS NULL;
+            """,
+            {"experiment_id": experiment_id},
+        )
+        return sorted(row[0] for row in rows)
 
     def log_hyperparams(self, hyperparams: models.NewHyperParams) -> models.HyperParams:
         """Log hyperparameters to the data store."""
@@ -593,7 +641,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             clauses.append(f"step = {sql.escape_value_sql(step)}")
 
         statement = f"""
-            SELECT * FROM {models.Artifact.__name__}
+            SELECT {sql.select_columns_sql(models.Artifact)} FROM {models.Artifact.__name__}
             WHERE {" AND ".join(clauses)}
             ORDER BY run_id, step;
         """
@@ -873,7 +921,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
     ) -> Iterator[models.AuditLogEntry]:
         """List audit log entries, most recent first, for a trash/admin view. Requires `Scope.AUDIT_LOG_READ`."""
         statement = f"""
-            SELECT * FROM {models.AuditLogEntry.__name__}
+            SELECT {sql.select_columns_sql(models.AuditLogEntry)} FROM {models.AuditLogEntry.__name__}
             ORDER BY timestamp_utc DESC
             LIMIT {int(limit)} OFFSET {int(offset)};
         """
@@ -888,7 +936,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         get a page, never "every row," the same discipline `list_audit_log` already follows.
         """
         statement = f"""
-            SELECT * FROM {table.__name__}
+            SELECT {sql.select_columns_sql(table)} FROM {table.__name__}
             WHERE deleted_at IS NOT NULL
             ORDER BY deleted_at DESC
             LIMIT {int(limit)} OFFSET {int(offset)};
@@ -922,7 +970,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         column to filter on here.
         """
         statement = f"""
-            SELECT * FROM {models.ArtifactPurgeTask.__name__}
+            SELECT {sql.select_columns_sql(models.ArtifactPurgeTask)} FROM {models.ArtifactPurgeTask.__name__}
             ORDER BY requested_at ASC
             LIMIT {int(limit)} OFFSET {int(offset)};
         """
