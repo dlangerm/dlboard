@@ -87,6 +87,12 @@ class DataStore[**P](typing.Protocol):
         """Create a new run for an experiment."""
         ...
 
+    def get_runs(
+        self, experiment_id: int, *, limit: int = 1000, offset: int = 0
+    ) -> typing.Iterator[models.Run]:
+        """Get a page of an experiment's (non-deleted) runs, most recently created first."""
+        ...
+
     def log_metrics(self, metric: Iterable[models.LoggedMetrics]) -> None:
         """Log metrics to the data store."""
         ...
@@ -99,6 +105,16 @@ class DataStore[**P](typing.Protocol):
         step_range: slice | None = None,
     ) -> typing.Iterator[models.LoggedMetrics]:
         """Fetch metrics for a particular table name, optionally matching a topic string."""
+        ...
+
+    def list_metric_keys(self, experiment_id: int) -> list[str]:
+        """
+        List the distinct metric names logged anywhere in an experiment, without fetching values.
+
+        For callers (e.g. a column picker) that only need to know what's *available* -- fetching
+        every metric row via `fetch_metrics` just to read off `.key` is needlessly expensive once
+        an experiment has any real volume of logged steps.
+        """
         ...
 
     def log_hyperparams(self, hyperparams: models.NewHyperParams) -> models.HyperParams:

@@ -7,6 +7,7 @@ Covers the sql generation/escaping/decoding in `_sql.py` and the CRUD flows in
 
 from __future__ import annotations
 
+import sqlite3
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -14,10 +15,11 @@ import pytest
 
 from dltrack import models
 from dltrack.models._view import PanelInstance
+from dltrack.plugins.data_stores.sqlite import SQLLiteStore
 from dltrack.plugins.pages.simple_experiment_page import BasicExperimentPage
 
 if TYPE_CHECKING:
-    from dltrack.plugins.data_stores.sqlite import SQLLiteStore
+    from pathlib import Path
 
 _TS = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -80,6 +82,66 @@ def test_update_experiment_persists_name_and_description_change(
     assert (refetched.name, refetched.description) == ("renamed", "new description")
 
 
+def test_get_runs_paginates_most_recently_created_first(store: SQLLiteStore, experiment_id: int) -> None:
+    runs = [store.create_run(models.NewRun(experiment_id=experiment_id, name=f"run-{i}")) for i in range(3)]
+
+    first_page = list(store.get_runs(experiment_id, limit=2, offset=0))
+    second_page = list(store.get_runs(experiment_id, limit=2, offset=2))
+
+    assert [r.id for r in first_page] == [runs[2].id, runs[1].id]
+    assert [r.id for r in second_page] == [runs[0].id]
+
+
+def test_get_runs_defaults_to_a_generous_page_covering_typical_use(
+    store: SQLLiteStore, experiment_id: int
+) -> None:
+    run = store.create_run(models.NewRun(experiment_id=experiment_id))
+
+    assert list(store.get_runs(experiment_id)) == [run]
+
+
+def test_get_runs_excludes_deleted_and_other_experiments(store: SQLLiteStore, experiment_id: int) -> None:
+    project = store.create_project(models.NewProject(name="other", description="d"))
+    other_experiment = store.create_experiment(models.NewExperiment(project_id=project.id))
+    store.create_run(models.NewRun(experiment_id=other_experiment.id))
+
+    actor = store.get_or_create_user("alice")
+    kept = store.create_run(models.NewRun(experiment_id=experiment_id))
+    deleted = store.create_run(models.NewRun(experiment_id=experiment_id))
+    store.delete_run(deleted.id, actor)
+
+    runs = list(store.get_runs(experiment_id, limit=100, offset=0))
+
+    assert [r.id for r in runs] == [kept.id]
+
+
+def test_store_init_backfills_a_column_added_to_a_model_since_the_db_was_created(
+    tmp_path: Path,
+) -> None:
+    """
+    Reproduces opening a pre-existing db against a model that's grown a field since.
+
+    `CREATE TABLE IF NOT EXISTS` alone is a no-op for a table that already exists, so without
+    `_add_missing_columns` this would fail every `Run` read/write with a raw sqlite
+    `OperationalError`/`IndexError` instead of picking up the new column.
+    """
+    db_path = tmp_path / "stale.sqlite"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "CREATE TABLE Run (experiment_id INTEGER NOT NULL, created_by INTEGER, "
+            "created_at TEXT NOT NULL, id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "deleted_by INTEGER, deleted_at TEXT)"
+        )
+
+    store = SQLLiteStore(db_path)
+    project = store.create_project(models.NewProject(name="p", description="d"))
+    experiment = store.create_experiment(models.NewExperiment(project_id=project.id))
+    run = store.create_run(models.NewRun(experiment_id=experiment.id, name="backfilled"))
+
+    assert run.name == "backfilled"
+    assert list(store.get_runs(experiment.id, limit=10, offset=0)) == [run]
+
+
 def test_log_hyperparams_skips_duplicate_run(store: SQLLiteStore, experiment_id: int) -> None:
     run = store.create_run(models.NewRun(experiment_id=experiment_id))
     first = store.log_hyperparams(models.NewHyperParams.from_raw(run.id, experiment_id, {"lr": 0.1}))
@@ -112,6 +174,64 @@ def test_log_and_fetch_metrics_round_trips_and_groups_by_step(
     assert [m.step for m in fetched] == [0, 1]
     assert fetched[0].metrics == {"loss": 0.5}
     assert fetched[1].metrics == {"loss": 0.4, "acc": 0.9}
+
+
+def test_list_metric_keys_is_distinct_and_sorted_without_fetching_values(
+    store: SQLLiteStore, experiment_id: int
+) -> None:
+    run = store.create_run(models.NewRun(experiment_id=experiment_id))
+    store.log_metrics(
+        [
+            models.LoggedMetrics(
+                metrics={"loss": 0.5, "acc": 0.1},
+                step=0,
+                experiment_id=experiment_id,
+                run_id=run.id,
+                timestamp_utc=_TS,
+            ),
+            models.LoggedMetrics(
+                metrics={"loss": 0.4}, step=1, experiment_id=experiment_id, run_id=run.id, timestamp_utc=_TS
+            ),
+        ]
+    )
+
+    assert store.list_metric_keys(experiment_id) == ["acc", "loss"]
+
+
+def test_list_metric_keys_excludes_deleted_runs_and_other_experiments(
+    store: SQLLiteStore, experiment_id: int
+) -> None:
+    project = store.create_project(models.NewProject(name="other", description="d"))
+    other_experiment = store.create_experiment(models.NewExperiment(project_id=project.id))
+    other_run = store.create_run(models.NewRun(experiment_id=other_experiment.id))
+    store.log_metrics(
+        [
+            models.LoggedMetrics(
+                metrics={"other_metric": 1.0},
+                step=0,
+                experiment_id=other_experiment.id,
+                run_id=other_run.id,
+                timestamp_utc=_TS,
+            )
+        ]
+    )
+
+    actor = store.get_or_create_user("alice")
+    deleted_run = store.create_run(models.NewRun(experiment_id=experiment_id))
+    store.log_metrics(
+        [
+            models.LoggedMetrics(
+                metrics={"deleted_run_metric": 1.0},
+                step=0,
+                experiment_id=experiment_id,
+                run_id=deleted_run.id,
+                timestamp_utc=_TS,
+            )
+        ]
+    )
+    store.delete_run(deleted_run.id, actor)
+
+    assert store.list_metric_keys(experiment_id) == []
 
 
 def test_log_and_fetch_artifacts_decodes_tags(store: SQLLiteStore, experiment_id: int) -> None:

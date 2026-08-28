@@ -27,6 +27,7 @@ from dltrack.models import (
     PanelInstance,
     ParameterField,
     ParameterFieldType,
+    Run,
     constants,
 )
 from dltrack.plugins.charts._table_style import NUMERIC, infer_column_dtype, themed_datatable_kwargs
@@ -161,12 +162,13 @@ EXPERIMENT_DELETE_IDS = DeleteConfirmIds(
     cancel=constants.DELETE_EXPERIMENT_CANCEL_ID,
 )
 
-RUN_DELETE_IDS = DeleteConfirmIds(
-    button=constants.DELETE_RUN_BUTTON_ID,
-    modal=constants.DELETE_RUN_MODAL_ID,
-    confirm=constants.DELETE_RUN_CONFIRM_ID,
-    cancel=constants.DELETE_RUN_CANCEL_ID,
-)
+NAVBAR_HPARAM_DATATABLE_ID = "navbar-hparam-datatable"
+NAVBAR_HPARAM_COL_SELECT_ID = "navbar-hparam-col-select"
+NAVBAR_HPARAM_TABLE_BODY_ID = "navbar-hparam-table-body"
+NAVBAR_HPARAM_CONFIRM_COLS_ID = "navbar-hparam-confirm-cols"
+NAVBAR_HPARAM_APPLIED_COLS_ID = "navbar-hparam-applied-cols"
+_NAVBAR_HPARAM_PAGE_SIZE = 8
+_DELETE_COLUMN_ID = "_delete"
 
 _METRIC_BOOKKEEPING_COLS = {"run_id", "step", "index", "timestamp_utc", "experiment_id"}
 
@@ -680,7 +682,7 @@ def _suggest_charts_drawer() -> dmc.Drawer:
 
 def _header_actions() -> Component:
     """
-    The Runs/Manage-panels/Edit controls shown inline with the experiment name.
+    The Manage-panels/Edit controls shown inline with the experiment name.
 
     Rendered once by `render_initial` alongside the header, not regenerated on later reruns, so
     none of this state is ever at risk of being silently reset by a later panel/chart mutation.
@@ -692,7 +694,6 @@ def _header_actions() -> Component:
     """
     return dmc.Group(
         [
-            dmc.Button("Runs", id=constants.HPARAM_DRAWER_TOGGLE_ID, size="xs", variant="light"),
             dmc.Button("Manage panels", id=EDIT_DRAWER_TOGGLE_ID, size="xs", variant="light"),
             dmc.Switch(id=EDIT_MODE_ID, label="Edit", checked=False),
             *render_delete_control(
@@ -763,6 +764,16 @@ def accordion_view(
 # ============================================================
 
 
+def _persist_settings(
+    store: DataStore[...], experiment_id: int, updates: dict[str, Any]
+) -> BasicExperimentPage:
+    """Merge `updates` into page_settings (server-authoritative) and persist -- no accordion rebuild."""
+    page = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
+    new_settings = {**page.page_settings, **updates}
+    page = page.model_copy(update={"page_settings": new_settings})
+    return cast("BasicExperimentPage", store.update_page(page))
+
+
 def _persist_settings_and_rerender(
     store: DataStore[...],
     experiment_id: int,
@@ -771,10 +782,7 @@ def _persist_settings_and_rerender(
     view_state: EditViewState | None = None,
 ) -> tuple[BasicExperimentPage, dmc.Container]:
     """Merge `updates` into page_settings (server-authoritative), persist, and re-render the accordion."""
-    page = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
-    new_settings = {**page.page_settings, **updates}
-    page = page.model_copy(update={"page_settings": new_settings})
-    page = store.update_page(page)
+    page = _persist_settings(store, experiment_id, updates)
     container = accordion_view(store, experiment_id=experiment_id, view_state=view_state)
     return page, container  # pyright: ignore[reportReturnType]
 
@@ -999,9 +1007,13 @@ def _rename_panel_modal() -> dmc.Modal:
 # ============================================================
 
 
-def _fetch_last_step_metrics(store: DataStore[...], experiment_id: int) -> dict[int, dict[str, Any]]:
-    """One row per run: metric values at that run's highest logged step."""
-    df = build_metrics_dataframe(store.fetch_metrics(experiment_id))
+def _fetch_last_step_metrics(
+    store: DataStore[...], experiment_id: int, metric_name_match: set[str]
+) -> dict[int, dict[str, Any]]:
+    """One row per run: `metric_name_match`'s values at that run's highest logged step."""
+    if not metric_name_match:
+        return {}
+    df = build_metrics_dataframe(store.fetch_metrics(experiment_id, metric_name_match=metric_name_match))
     if df.empty:
         return {}
     last_rows = df.loc[df.groupby("run_id")["step"].idxmax()]
@@ -1013,72 +1025,187 @@ def _fetch_last_step_metrics(store: DataStore[...], experiment_id: int) -> dict[
 
 
 def _build_hparam_rows(
-    hydrated: list[HyperParams], last_step_metrics: dict[int, dict[str, Any]]
+    runs: list[Run], hparams_by_run: dict[int, HyperParams], last_step_metrics: dict[int, dict[str, Any]]
 ) -> list[dict[str, Any]]:
+    """One row per run, whether or not it has logged hyperparameters or metrics yet."""
     rows: list[dict[str, Any]] = []
-    for run in hydrated:
-        row: dict[str, Any] = {"run_id": run.id}
-        row.update(run.hparams_dict)
+    for run in runs:
+        row: dict[str, Any] = {"run_id": run.id, "run_name": run.name or f"Run {run.id}"}
+        hparam = hparams_by_run.get(run.id)
+        if hparam is not None:
+            row.update(hparam.hparams_dict)
         row.update(last_step_metrics.get(run.id, {}))
         rows.append(row)
     return rows
 
 
+_HPARAM_ROWS_LIMIT = 1000
+"""Cap on runs loaded into the hparam/metric comparison table -- a page, not every row, matching
+the discipline every other `list_*` `DataStore` method already follows."""
+
+
 def _load_hparam_view_data(
-    store: DataStore[...], experiment_id: int, hparams: list[str]
-) -> tuple[list[HyperParams], list[str], list[str], list[dict[str, Any]]]:
-    """Hydrate hparams, compute last-step metrics, and build the combined rows the datatable needs."""
+    store: DataStore[...], experiment_id: int, hparams: list[str], selected_metrics: set[str]
+) -> tuple[list[str], list[str], list[dict[str, Any]]]:
+    """
+    Load every run for the experiment, enriched with its hparams and any selected last-step metrics.
+
+    Metric *names* come from a cheap `DISTINCT key` lookup (for the Columns picker); metric
+    *values* are only fetched for `selected_metrics` -- the columns the table is actually about to
+    show. Fetching every metric ever logged in the experiment just to populate a table nobody's
+    added a metric column to yet is the difference between this loading instantly and taking
+    seconds once an experiment has any real volume of logged steps.
+    """
     hydrated = [HyperParams.model_validate_json(run) for run in hparams]
+    hparams_by_run = {h.run_id: h for h in hydrated}
     hparam_keys = sorted(set(itertools.chain(*[list(k.hparams_dict.keys()) for k in hydrated])))
-    last_step_metrics = _fetch_last_step_metrics(store, experiment_id)
-    metric_keys = sorted({k for m in last_step_metrics.values() for k in m})
-    rows = _build_hparam_rows(hydrated, last_step_metrics)
-    return hydrated, hparam_keys, metric_keys, rows
+    metric_keys = store.list_metric_keys(experiment_id)
+    last_step_metrics = _fetch_last_step_metrics(store, experiment_id, selected_metrics & set(metric_keys))
+    runs = list(store.get_runs(experiment_id, limit=_HPARAM_ROWS_LIMIT, offset=0))
+    rows = _build_hparam_rows(runs, hparams_by_run, last_step_metrics)
+    return hparam_keys, metric_keys, rows
 
 
-def _delete_run_control(rows: list[dict[str, Any]]) -> Component:
-    """A run picker + delete button, so an individual run can be soft-deleted from the Runs drawer."""
-    return dmc.Group(
-        [
-            dmc.Select(
-                id=constants.DELETE_RUN_SELECT_ID,
-                data=[{"value": str(row["run_id"]), "label": f"Run {row['run_id']}"} for row in rows],
-                placeholder="Select a run to delete",
-                style={"flex": 1},
-                size="xs",
+def _delete_run_modal() -> Component:
+    """
+    Confirmation modal for deleting a run.
+
+    Opened by clicking a row's trash icon in the table (see `_DELETE_COLUMN_ID` in
+    `_build_hparam_datatable`) -- mirrors the project/experiment delete modals `render_delete_control`
+    builds, but doesn't use that helper directly since its confirm target here
+    (`DELETE_RUN_PENDING_STORE_ID`) is resolved per-row rather than from a fixed State.
+    """
+    return dmc.Modal(
+        id=constants.DELETE_RUN_MODAL_ID,
+        title="Delete this run?",
+        opened=False,
+        children=[
+            dmc.Text(
+                "This soft-deletes the run and everything under it. It can be restored from the "
+                "admin Trash until it's permanently purged."
             ),
-            *render_delete_control(RUN_DELETE_IDS, label="Delete run", entity_noun="run"),
+            dmc.Group(
+                [
+                    dmc.Button("Cancel", id=constants.DELETE_RUN_CANCEL_ID, variant="default"),
+                    dmc.Button("Delete", id=constants.DELETE_RUN_CONFIRM_ID, color="red"),
+                ],
+                justify="flex-end",
+                mt="sm",
+            ),
         ],
-        gap="xs",
-        mt="md",
-        align="flex-end",
     )
 
 
 def _build_hparam_datatable(
-    rows: list[dict[str, Any]], selected: list[str] | list[int], excluded: list[int] | list[str]
+    rows: list[dict[str, Any]],
+    selected: list[str] | list[int],
+    excluded: list[int] | list[str],
+    *,
+    table_id: str,
+    page_size: int,
 ) -> dash_table.DataTable:
-    columns: list[dict[str, Any]] = [{"name": "Run", "id": "run_id", "type": "numeric"}]
+    columns: list[dict[str, Any]] = [{"name": "Run", "id": "run_name"}]
     for key in selected:
         col: dict[str, Any] = {"name": key, "id": key}
         if infer_column_dtype(rows, str(key)) == NUMERIC:
             col["type"] = "numeric"
             col["format"] = Format(precision=3, scheme="s")
         columns.append(col)
+    columns.append({"name": "", "id": _DELETE_COLUMN_ID, "clearable": False})
 
     selected_rows = [i for i, row in enumerate(rows) if row["run_id"] not in excluded]
+    data = [{**row, _DELETE_COLUMN_ID: "🗑"} for row in rows]
 
     return dash_table.DataTable(
-        id=constants.HPARAM_DATATABLE_ID,
+        id=table_id,
         columns=columns,  # pyright: ignore[reportArgumentType]
-        data=rows,  # pyright: ignore[reportArgumentType]
+        data=data,  # pyright: ignore[reportArgumentType]
         row_selectable="multi",
         selected_rows=selected_rows,
         filter_action="native",
         sort_action="native",
         page_action="native",
-        page_size=20,
+        page_size=page_size,
+        style_cell_conditional=[
+            {
+                "if": {"column_id": _DELETE_COLUMN_ID},
+                "width": "28px",
+                "maxWidth": "28px",
+                "textAlign": "center",
+                "cursor": "pointer",
+                "color": "var(--mantine-color-red-6)",
+            }
+        ],
         **themed_datatable_kwargs(),
+    )
+
+
+def _run_summary(rows: list[dict[str, Any]], excluded: list[int] | list[str]) -> Component:
+    """`N runs` / `M excluded` text, shown above the navbar's run comparison table."""
+    text = f"{len(rows)} runs" + (f" · {len(excluded)} excluded" if excluded else "")
+    return dmc.Text(text, size="xs", c="dimmed")
+
+
+def _render_hparam_panel(
+    rows: list[dict[str, Any]],
+    hparam_keys: list[str],
+    metric_keys: list[str],
+    selected: list[str],
+    excluded: list[int] | list[str],
+) -> Component:
+    """
+    The Columns picker + comparison table, always visible in the navbar.
+
+    Column changes only take effect on "Apply" (not per-tick) -- computing the table involves a
+    hyperparameter/metric fetch per run, so committing it once per intended change instead of once
+    per checkbox click keeps a multi-column edit from queueing up a burst of redundant store reads.
+    "Apply" itself only appears once the picked columns actually differ from what's applied (a
+    clientside callback compares against `NAVBAR_HPARAM_APPLIED_COLS_ID`'s baseline), and the row
+    it sits in never wraps (`wrap="nowrap"`), so it appearing/disappearing can't push the table
+    below it up or down.
+    """
+    applied = [k for k in selected if k in hparam_keys or k in metric_keys]
+    return html.Div(
+        [
+            dmc.Group(
+                [
+                    dmc.MultiSelect(
+                        id=NAVBAR_HPARAM_COL_SELECT_ID,
+                        label="Columns",
+                        data=[
+                            {"group": "Hyperparameters", "items": hparam_keys},
+                            {"group": "Metrics (last step)", "items": metric_keys},
+                        ],
+                        value=applied,
+                        searchable=True,
+                        clearable=True,
+                        size="xs",
+                        style={"flex": 1, "minWidth": 0},
+                    ),
+                    dmc.Button(
+                        "Apply",
+                        id=NAVBAR_HPARAM_CONFIRM_COLS_ID,
+                        size="xs",
+                        mt=22,
+                        style={"display": "none", "flexShrink": 0},
+                    ),
+                    Store(id=NAVBAR_HPARAM_APPLIED_COLS_ID, data=applied),
+                ],
+                align="flex-end",
+                gap="xs",
+                wrap="nowrap",
+            ),
+            html.Div(
+                id=NAVBAR_HPARAM_TABLE_BODY_ID,
+                children=_build_hparam_datatable(
+                    rows,
+                    selected,
+                    excluded,
+                    table_id=NAVBAR_HPARAM_DATATABLE_ID,
+                    page_size=_NAVBAR_HPARAM_PAGE_SIZE,
+                ),
+            ),
+        ]
     )
 
 
@@ -1171,18 +1298,23 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         on_confirm=_delete_experiment,
     )
 
-    # --- delete a single run (Runs drawer) -- redirects back to this same page with a hard
-    # refresh (not a soft `use_pages` navigation) since the path doesn't change, and nothing
+    # --- delete a single run, via its row's trash icon -- redirects back to this same page with a
+    # hard refresh (not a soft `use_pages` navigation) since the path doesn't change, and nothing
     # short of a fresh `layout()` call re-fetches `STATE_HPARAMS`/the metrics accordion.
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(constants.DELETE_RUN_MODAL_ID, "opened", allow_duplicate=True),
-        Input(constants.DELETE_RUN_BUTTON_ID, "n_clicks"),
+        Output(constants.DELETE_RUN_PENDING_STORE_ID, "data"),
+        Input(NAVBAR_HPARAM_DATATABLE_ID, "active_cell", allow_optional=True),
+        State(NAVBAR_HPARAM_DATATABLE_ID, "data", allow_optional=True),
         prevent_initial_call=True,
     )
-    def open_delete_run_modal(n_clicks: int) -> bool:
-        if not n_clicks:
+    def open_delete_run_modal(
+        active_cell: dict[str, Any] | None, table_data: list[dict[str, Any]] | None
+    ) -> tuple[bool, int]:
+        if not active_cell or table_data is None or active_cell["column_id"] != _DELETE_COLUMN_ID:
             raise PreventUpdate
-        return True
+        row_index = cast("int", active_cell["row"])
+        return True, int(table_data[row_index]["run_id"])
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(constants.DELETE_RUN_MODAL_ID, "opened", allow_duplicate=True),
@@ -1199,15 +1331,15 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         Output(constants.LOCATION_ID, "refresh", allow_duplicate=True),
         Output(constants.DELETE_RUN_MODAL_ID, "opened", allow_duplicate=True),
         Input(constants.DELETE_RUN_CONFIRM_ID, "n_clicks"),
-        State(constants.DELETE_RUN_SELECT_ID, "value"),
+        State(constants.DELETE_RUN_PENDING_STORE_ID, "data"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
         prevent_initial_call=True,
     )
-    def confirm_delete_run(n_clicks: int, run_id: str | None, experiment_id: int) -> tuple[str, bool, bool]:
-        if not n_clicks or not run_id:
+    def confirm_delete_run(n_clicks: int, run_id: int | None, experiment_id: int) -> tuple[str, bool, bool]:
+        if not n_clicks or run_id is None:
             raise PreventUpdate
         store = get_data_store()
-        store.delete_run(int(run_id), get_current_user(store))
+        store.delete_run(run_id, get_current_user(store))
         return f"/experiment/{experiment_id}", True, False
 
     # Opens/closes independently of edit mode — you can manage panels without ever needing to
@@ -1220,104 +1352,87 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         prevent_initial_call=True,
     )
 
-    # --- hparam table ---
+    # --- hparam/metric comparison table + run selection, always visible in the navbar
+    # (NAVBAR_RUN_LIST_ID) ---
+    def _load_hparam_panel_data(
+        store: DataStore[...], experiment_id: int, hparams: list[str]
+    ) -> tuple[list[str], list[str], list[dict[str, Any]], list[int] | list[str], list[str]]:
+        page = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
+        excluded = page.page_settings.get(constants.EXCLUDED_RUNS_KEY, [])
+        assert isinstance(excluded, list)
+        selected_setting = page.page_settings.get(constants.SELECTED_HPARAM_COLS_KEY, [])
+        assert isinstance(selected_setting, list)
+        selected = [s for s in selected_setting if isinstance(s, str)]
+
+        hparam_keys, metric_keys, rows = _load_hparam_view_data(store, experiment_id, hparams, set(selected))
+        return hparam_keys, metric_keys, rows, excluded, selected
+
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
-        Output(constants.HPARAM_TABLE_ID, "children"),
+        Output(constants.NAVBAR_RUN_LIST_ID, "children"),
         Input(constants.STATE_HPARAMS, "data"),
         Input(constants.STATE_EXPERIMENT_ID, "data", allow_optional=True),
+        Input(constants.STATE_PAGE_STORAGE, "data", allow_optional=True),
         prevent_initial_callback=True,
     )
-    def render_hparams(hparams: list[str], experiment_id: int | None) -> html.Div:
+    def render_navbar_hparams(
+        hparams: list[str], experiment_id: int | None, _page_json: str | None
+    ) -> dmc.Stack:
         if experiment_id is None:
             raise PreventUpdate
 
         store = get_data_store()
-        _hydrated, hparam_keys, metric_keys, rows = _load_hparam_view_data(store, experiment_id, hparams)
-        page = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
-        excluded = page.page_settings.get(constants.EXCLUDED_RUNS_KEY, [])
-        assert isinstance(excluded, list)
-        selected = page.page_settings.get(constants.SELECTED_HPARAM_COLS_KEY, [])
-        assert isinstance(selected, list)
-
-        summary_bits = [dmc.Text(f"{len(rows)} runs", size="sm", fw=500)]
-        if excluded:
-            summary_bits.append(dmc.Text(f"{len(excluded)} excluded", size="sm", c="dimmed"))
-
-        return html.Div(
+        hparam_keys, metric_keys, rows, excluded, selected = _load_hparam_panel_data(
+            store, experiment_id, hparams
+        )
+        return dmc.Stack(
             [
-                dmc.Group(summary_bits, gap="xs"),
-                dmc.Drawer(
-                    id=constants.HPARAM_DRAWER_ID,
-                    title="Run Metrics and Parameters",
-                    position="right",
-                    size="xl",
-                    opened=False,
-                    children=[
-                        dmc.MultiSelect(
-                            id=constants.HPARAM_COL_SELECT_ID,
-                            label="Columns",
-                            data=[
-                                {"group": "Hyperparameters", "items": hparam_keys},
-                                {"group": "Metrics (last step)", "items": metric_keys},
-                            ],
-                            value=[k for k in selected if k in hparam_keys or k in metric_keys],
-                            searchable=True,
-                            clearable=True,
-                        ),
-                        html.Div(
-                            id=constants.HPARAM_TABLE_BODY_ID,
-                            children=_build_hparam_datatable(rows, selected, excluded),
-                        ),
-                        _delete_run_control(rows),
-                    ],
-                ),
-            ]
+                _run_summary(rows, excluded),
+                _render_hparam_panel(rows, hparam_keys, metric_keys, selected, excluded),
+                _delete_run_modal(),
+                Store(id=constants.DELETE_RUN_PENDING_STORE_ID),
+            ],
+            gap="xs",
+            p="xs",
         )
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
-        Output(constants.HPARAM_TABLE_BODY_ID, "children"),
-        Input(constants.HPARAM_COL_SELECT_ID, "value"),
-        State(constants.STATE_HPARAMS, "data"),
-        State(constants.STATE_EXPERIMENT_ID, "data"),
-        prevent_initial_call=True,
-    )
-    def render_hparam_table_body(
-        selected: list[str], hparams: list[str], experiment_id: int
-    ) -> dash_table.DataTable:
-        store = get_data_store()
-        _hydrated, _hparam_keys, _metric_keys, rows = _load_hparam_view_data(store, experiment_id, hparams)
-        page = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
-        excluded = page.page_settings.get(constants.EXCLUDED_RUNS_KEY, [])
-        assert isinstance(excluded, list)
-        return _build_hparam_datatable(rows, selected, excluded)
-
+    # The Apply button only makes sense once the picked columns diverge from what's applied --
+    # comparing client-side (rather than round-tripping through a server callback per keystroke)
+    # keeps this instant and avoids yet another spurious-rerender source.
     app.clientside_callback(  # pyright: ignore[reportUnknownMemberType]
-        "function(n, opened) { return n ? !opened : window.dash_clientside.no_update; }",
-        Output(constants.HPARAM_DRAWER_ID, "opened"),
-        Input(constants.HPARAM_DRAWER_TOGGLE_ID, "n_clicks"),
-        State(constants.HPARAM_DRAWER_ID, "opened"),
+        "function(value, applied) {"
+        "  const a = [...(value || [])].sort();"
+        "  const b = [...(applied || [])].sort();"
+        "  const changed = a.length !== b.length || a.some((v, i) => v !== b[i]);"
+        "  return changed ? {flexShrink: 0} : {display: 'none', flexShrink: 0};"
+        "}",
+        Output(NAVBAR_HPARAM_CONFIRM_COLS_ID, "style"),
+        Input(NAVBAR_HPARAM_COL_SELECT_ID, "value"),
+        State(NAVBAR_HPARAM_APPLIED_COLS_ID, "data"),
         prevent_initial_call=True,
     )
 
     # --- page_settings-only mutations, via _persist_settings_and_rerender ---
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(constants.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
-        Input(constants.HPARAM_COL_SELECT_ID, "value"),
+        Input(NAVBAR_HPARAM_CONFIRM_COLS_ID, "n_clicks", allow_optional=True),
+        State(NAVBAR_HPARAM_COL_SELECT_ID, "value", allow_optional=True),
         State(constants.STATE_EXPERIMENT_ID, "data"),
         prevent_initial_call=True,
     )
-    def persist_selected_hparam_cols(selected: list[str], experiment_id: int) -> str:
+    def persist_selected_hparam_cols(
+        n_clicks: int | None, selected: list[str] | None, experiment_id: int
+    ) -> str:
+        if not n_clicks:
+            raise PreventUpdate
         store = get_data_store()
-        page, _container = _persist_settings_and_rerender(
-            store, experiment_id, {constants.SELECTED_HPARAM_COLS_KEY: selected}
-        )
+        page = _persist_settings(store, experiment_id, {constants.SELECTED_HPARAM_COLS_KEY: selected or []})
         return page.model_dump_json()
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(constants.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Output(constants.METRIC_CONTENT_ID, "children", allow_duplicate=True),
-        Input(constants.HPARAM_DATATABLE_ID, "selected_rows"),
-        State(constants.HPARAM_DATATABLE_ID, "data"),
+        Input(NAVBAR_HPARAM_DATATABLE_ID, "selected_rows", allow_optional=True),
+        State(NAVBAR_HPARAM_DATATABLE_ID, "data", allow_optional=True),
         State(constants.STATE_EXPERIMENT_ID, "data"),
         State(EDIT_MODE_ID, "checked", allow_optional=True),
         State(EDIT_DRAWER_ID, "opened", allow_optional=True),
@@ -1341,6 +1456,18 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         excluded = sorted(all_ids - selected_ids)
 
         store = get_data_store()
+        # The table's `selected_rows` is *computed from* the currently-persisted `excluded` set
+        # (see `_build_hparam_datatable`), so it mounting for the first time reports a "change"
+        # here even though nothing the user did actually changed anything -- Dash fires this even
+        # with `prevent_initial_call=True`, because that only suppresses the very first page
+        # render, not a dynamically-created component (this navbar table isn't in the static
+        # layout) mounting later with an already-computed value. Skip the (expensive, chart-
+        # remounting) rebuild when the recomputed set matches what's already persisted.
+        current_page = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
+        currently_excluded = current_page.page_settings.get(constants.EXCLUDED_RUNS_KEY, [])
+        if excluded == currently_excluded:
+            raise PreventUpdate
+
         page, container = _persist_settings_and_rerender(
             store,
             experiment_id,
@@ -1362,9 +1489,7 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
     )
     def persist_open_panel(open_value: str | list[str] | None, experiment_id: int) -> str:
         store = get_data_store()
-        page, _container = _persist_settings_and_rerender(
-            store, experiment_id, {OPEN_PANEL_KEY: open_value or []}
-        )
+        page = _persist_settings(store, experiment_id, {OPEN_PANEL_KEY: open_value or []})
         return page.model_dump_json()
 
     # --- panel/chart mutations, via _mutate_panels_and_rerender ---
@@ -1673,6 +1798,16 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
         triggered_id = cast("dict[str, str]", ctx.triggered_id)  # pyright: ignore[reportUnknownMemberType]
         panel_name = triggered_id["panel"]
         sync = bool(cast("Any", ctx.triggered[0]["value"]))
+
+        # Like `sync_run_selection`: this Switch's `checked` is *set from* the panel's current
+        # `sync` value on every render, so a panel-sync switch mounting for the first time (e.g.
+        # this page's very first render) reports that same value back as a "change" even though
+        # nothing was actually toggled -- `prevent_initial_call` doesn't catch it because this
+        # component isn't in the static layout. Skip the rebuild when nothing really changed.
+        current_page = BasicExperimentPage.model_validate_json(page_json)
+        current_sync = next((p.sync for p in current_page.panels if p.name == panel_name), None)
+        if sync == current_sync:
+            raise PreventUpdate
 
         def toggle(panels: list[PanelInstance[Any, Any]]) -> list[PanelInstance[Any, Any]]:
             return _set_panel_sync(panels, panel_name, sync=sync)

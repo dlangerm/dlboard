@@ -132,7 +132,11 @@ def test_insert_rejects_model_with_id_field() -> None:
 
 
 def test_get_all_builds_select() -> None:
-    assert "SELECT *" in _sql.get_all(_WithId)
+    assert "SELECT id,name,tags,created" in _sql.get_all(_WithId)
+
+
+def test_select_columns_sql_lists_fields_in_model_order() -> None:
+    assert _sql.select_columns_sql(_WithId) == "id,name,tags,created"
 
 
 @pytest.mark.parametrize(
@@ -155,6 +159,19 @@ def test_get_all_by_field_builds_match_clause() -> None:
     assert "name in (" in statement
     assert "'a'" in statement
     assert "'b'" in statement
+
+
+def test_get_all_by_field_builds_order_limit_and_offset_clauses() -> None:
+    statement = _sql.get_all_by_field(
+        _WithId, "name", "run-1", order_by=["name"], descending=True, limit=5, offset=10
+    )
+    assert "ORDER BY name DESC" in statement
+    assert "LIMIT 5 OFFSET 10" in statement
+
+
+def test_get_all_by_field_omits_limit_clause_when_unset() -> None:
+    statement = _sql.get_all_by_field(_WithId, "name", "run-1")
+    assert "LIMIT" not in statement
 
 
 @pytest.mark.parametrize(

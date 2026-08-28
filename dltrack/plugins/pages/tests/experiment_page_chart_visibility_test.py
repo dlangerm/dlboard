@@ -12,7 +12,6 @@ import pytest
 from dltrack import models
 from dltrack.conftest import find_props as _find_props
 from dltrack.conftest import props as _to_props
-from dltrack.models import constants
 from dltrack.models._view import ChartInstance, PanelInstance
 from dltrack.plugins.charts.line_chart import LineChart
 from dltrack.plugins.pages.simple_experiment_page import (
@@ -91,14 +90,11 @@ def test_render_panel_content_add_button_visibility_matches_edit_mode(
     assert on["style"] == {}
 
 
-# ---- header actions: Runs + Edit switch, rendered once and never regenerated ----
+# ---- header actions: Edit switch, rendered once and never regenerated ----
 
 
-def test_header_actions_has_runs_button_and_edit_switch_defaulted_off() -> None:
+def test_header_actions_has_edit_switch_defaulted_off() -> None:
     actions = _header_actions()
-
-    runs_button = _find_props(actions, constants.HPARAM_DRAWER_TOGGLE_ID)
-    assert runs_button is not None
 
     switch = _find_props(actions, EDIT_MODE_ID)
     assert switch is not None

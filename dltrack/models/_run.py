@@ -10,6 +10,9 @@ class NewRun(BaseModel, frozen=True, extra="forbid"):
     experiment_id: int
     """The experiment ID to use for this run."""
 
+    name: str | None = None
+    """A human-readable name for this run. Falls back to `Run {id}` in the UI when unset."""
+
     created_by: int | None = None
     """The user who created this run, if known."""
 

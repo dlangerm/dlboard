@@ -8,6 +8,7 @@ entrypoint, installed as a console script by `[project.scripts]` in `pyproject.t
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Annotated
@@ -70,6 +71,14 @@ def _serve(plugins_target: str, runtime: ServerRuntimeOptions) -> None:
     doesn't take down others, and can be auto-respawned) and reverse-proxy/k8s-friendly defaults.
     """
     if runtime.debug:
+        # Flask's `run()` auto-loads a `.env`/`.flaskenv` from cwd via `python-dotenv` by default
+        # (on the reloader's respawned child, specifically) -- independent of dltrack's own env-var
+        # settings. Every `AppSettings` here is already resolved from `--flag`s via
+        # `set_setting_env` above; a `.env` file a user keeps for unrelated local overrides
+        # (`sqlite_location`, say) would otherwise silently outrank an explicit `--sqlite-location`
+        # once pydantic-settings' case-insensitive env matching saw both. `setdefault` so a caller
+        # who explicitly wants Flask's dotenv loading can still opt back in.
+        os.environ.setdefault("FLASK_SKIP_DOTENV", "1")
         plugins = resolve_plugins(plugins_target)
         build_app(plugins).run(  # pyright: ignore[reportUnknownMemberType]
             host=runtime.host, port=runtime.port, debug=True

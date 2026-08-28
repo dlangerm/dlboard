@@ -216,7 +216,7 @@ def update(table: type[BaseModel], model: BaseModel) -> tuple[str, dict[str, typ
         UPDATE {table.__name__}
         set {interpolate_values}
         where id = {id_match}
-        RETURNING *;
+        RETURNING {select_columns_sql(table)};
         """,
         values,
     )
@@ -244,7 +244,7 @@ def insert(table: type[BaseModel], model: BaseModel) -> tuple[str, dict[str, typ
         INSERT INTO {table.__name__}
         ({",".join(columns)})
         VALUES({raw_values})
-        RETURNING *;
+        RETURNING {select_columns_sql(table)};
         """,
         values,
     )
@@ -272,6 +272,20 @@ def insert_many(
     )
 
 
+def select_columns_sql(model: type[BaseModel]) -> str:
+    """
+    A `SELECT`-clause column list in `model.model_fields` order, instead of `SELECT *`.
+
+    `construct()` decodes a row positionally by zipping it against `model.model_fields`, but a
+    column added to an existing table via `_add_missing_columns`' `ALTER TABLE ... ADD COLUMN`
+    always lands physically last regardless of where the field sits in the model -- `SELECT *`
+    would then hand `construct()` values in the wrong order for any table that's been backfilled
+    this way. Naming columns explicitly, in model order, keeps row-to-field alignment correct
+    regardless of physical column order.
+    """
+    return ",".join(model.model_fields)
+
+
 def get_by_id(model: type[BaseModel], id: int, *, exclude_deleted: bool = False) -> str:
     if ID_KEY not in model.model_fields:
         msg = f"Get object {model.__name__} must contain an ID key"
@@ -279,7 +293,7 @@ def get_by_id(model: type[BaseModel], id: int, *, exclude_deleted: bool = False)
 
     deleted_clause = " AND deleted_at IS NULL" if exclude_deleted else ""
     return f"""
-        SELECT *
+        SELECT {select_columns_sql(model)}
         FROM {model.__name__}
         WHERE {ID_KEY} = '{int(id)}'{deleted_clause};
     """
@@ -292,7 +306,7 @@ def get_all(model: type[BaseModel], *, exclude_deleted: bool = False) -> str:
 
     where_clause = "WHERE deleted_at IS NULL" if exclude_deleted else ""
     return f"""
-        SELECT *
+        SELECT {select_columns_sql(model)}
         FROM {model.__name__}
         {where_clause};
     """
@@ -307,6 +321,9 @@ def get_all_by_field(  # noqa: PLR0913
     order_by: list[str] | None = None,
     *,
     exclude_deleted: bool = False,
+    descending: bool = False,
+    limit: int | None = None,
+    offset: int = 0,
 ) -> str:
     if ID_KEY not in model.model_fields:
         msg = f"Get object {model.__name__} must contain an ID key"
@@ -318,7 +335,7 @@ def get_all_by_field(  # noqa: PLR0913
         if order not in model.model_fields:
             msg = f"{order} not present in model"
             raise AssertionError(msg)
-    order_clause = ("ORDER BY " + ",".join(order_by)) if order_by else ""
+    order_clause = ("ORDER BY " + ",".join(order_by) + (" DESC" if descending else "")) if order_by else ""
     if match_field and not match_field_values:
         msg = "Get all by field match field must have values!"
         raise AssertionError(msg)
@@ -329,10 +346,11 @@ def get_all_by_field(  # noqa: PLR0913
         else (f"{match_field} in ({','.join(map(escape_value_sql, list(match_field_values)))})")
     )
     deleted_clause = " AND deleted_at IS NULL" if exclude_deleted else ""
+    limit_clause = f" LIMIT {int(limit)} OFFSET {int(offset)}" if limit is not None else ""
 
     return f"""
-        SELECT *
+        SELECT {select_columns_sql(model)}
         FROM {model.__name__}
         WHERE {field_name} = {escape_value_sql(field_value)} AND {match_clause}{deleted_clause}
-        {order_clause};
+        {order_clause}{limit_clause};
     """

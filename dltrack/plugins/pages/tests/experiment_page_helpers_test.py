@@ -3,20 +3,32 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any, cast
 
 import dash_mantine_components as dmc
 import pandas as pd
 import pytest
 
-from dltrack.models import HyperParams, NewHyperParams
+from dltrack import models
+from dltrack.models import HyperParams, NewHyperParams, Run
 from dltrack.models._view import ChartInstance, ColumnKind, PanelInstance, ParameterField, ParameterFieldType
 from dltrack.plugins.pages.simple_experiment_page import (
+    BasicExperimentPage,
     _build_hparam_rows,
+    _fetch_last_step_metrics,
+    _load_hparam_view_data,
     _merge_chart_param_values,
     _param_field_input,
+    _persist_settings,
+    _run_summary,
     _upsert_chart,
 )
+
+if TYPE_CHECKING:
+    from dltrack.plugins.data_stores.sqlite import SQLLiteStore
+
+_TS = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def _panel(name: str, n_charts: int) -> PanelInstance[pd.DataFrame, object]:
@@ -84,29 +96,129 @@ def test_merge_chart_param_values_drops_cleared_optional_fields() -> None:
     assert _merge_chart_param_values(values, checked, field_ids, fields) == {"column": None}
 
 
+def _run(run_id: int, name: str | None = None) -> Run:
+    return Run(id=run_id, experiment_id=1, name=name, created_at=_TS)
+
+
 def test_build_hparam_rows_merges_hparams_and_last_step_metrics() -> None:
-    hydrated = [
-        HyperParams(
+    runs = [_run(1), _run(2)]
+    hparams_by_run = {
+        1: HyperParams(
             id=1,
             run_id=1,
             experiment_id=1,
             raw_hparams=NewHyperParams.from_raw(1, 1, {"lr": 0.1}).raw_hparams,
         ),
-        HyperParams(
+        2: HyperParams(
             id=2,
             run_id=2,
             experiment_id=1,
             raw_hparams=NewHyperParams.from_raw(2, 1, {"lr": 0.2}).raw_hparams,
         ),
-    ]
+    }
     last_step_metrics = {1: {"loss": 0.5}}
 
-    rows = _build_hparam_rows(hydrated, last_step_metrics)
+    rows = _build_hparam_rows(runs, hparams_by_run, last_step_metrics)
 
     assert rows == [
-        {"run_id": 1, "lr": 0.1, "loss": 0.5},
-        {"run_id": 2, "lr": 0.2},
+        {"run_id": 1, "run_name": "Run 1", "lr": 0.1, "loss": 0.5},
+        {"run_id": 2, "run_name": "Run 2", "lr": 0.2},
     ]
+
+
+def test_build_hparam_rows_includes_runs_with_no_logged_hyperparameters() -> None:
+    """A run that hasn't called `log_hyperparams` yet must still show up, not disappear."""
+    runs = [_run(1, name="baseline"), _run(2)]
+
+    rows = _build_hparam_rows(runs, hparams_by_run={}, last_step_metrics={})
+
+    assert rows == [
+        {"run_id": 1, "run_name": "baseline"},
+        {"run_id": 2, "run_name": "Run 2"},
+    ]
+
+
+def test_run_summary_is_a_single_dimmed_line() -> None:
+    props = cast("Any", _run_summary([{"run_id": 1}], excluded=[])).to_plotly_json()["props"]
+    assert props["children"] == "1 runs"
+    assert props["size"] == "xs"
+    assert props["c"] == "dimmed"
+
+
+def test_run_summary_includes_excluded_count() -> None:
+    props = cast("Any", _run_summary([{"run_id": 1}, {"run_id": 2}], excluded=[2])).to_plotly_json()["props"]
+    assert props["children"] == "2 runs · 1 excluded"
+
+
+def test_persist_settings_merges_into_page_settings_without_touching_panels(
+    store: SQLLiteStore, experiment_id: int
+) -> None:
+    """Unlike `_persist_settings_and_rerender`, this must not need/trigger an accordion rebuild."""
+    store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
+
+    page = _persist_settings(store, experiment_id, {"selected": ["lr"]})
+
+    assert page.page_settings["selected"] == ["lr"]
+    reloaded = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
+    assert reloaded.page_settings["selected"] == ["lr"]
+
+
+def _log_a_metric(store: SQLLiteStore, experiment_id: int, run_id: int, key: str) -> None:
+    store.log_metrics(
+        [
+            models.LoggedMetrics(
+                metrics={key: 1.0}, step=0, experiment_id=experiment_id, run_id=run_id, timestamp_utc=_TS
+            )
+        ]
+    )
+
+
+def test_fetch_last_step_metrics_returns_nothing_when_no_columns_are_requested(
+    store: SQLLiteStore, experiment_id: int
+) -> None:
+    """The perf-critical path: no selected metric columns must mean no metric fetch at all."""
+    run = store.create_run(models.NewRun(experiment_id=experiment_id))
+    _log_a_metric(store, experiment_id, run.id, "loss")
+
+    assert _fetch_last_step_metrics(store, experiment_id, metric_name_match=set()) == {}
+
+
+def test_fetch_last_step_metrics_only_returns_requested_columns(
+    store: SQLLiteStore, experiment_id: int
+) -> None:
+    run = store.create_run(models.NewRun(experiment_id=experiment_id))
+    _log_a_metric(store, experiment_id, run.id, "loss")
+    _log_a_metric(store, experiment_id, run.id, "acc")
+
+    result = _fetch_last_step_metrics(store, experiment_id, metric_name_match={"loss"})
+
+    assert result == {run.id: {"loss": 1.0}}
+
+
+def test_load_hparam_view_data_reports_available_metric_keys_without_fetching_values(
+    store: SQLLiteStore, experiment_id: int
+) -> None:
+    """`metric_keys` (for the Columns picker) must come from the cheap key listing, not a full
+    fetch -- rows stay metric-free until a column is actually selected."""
+    run = store.create_run(models.NewRun(experiment_id=experiment_id))
+    _log_a_metric(store, experiment_id, run.id, "loss")
+
+    hparam_keys, metric_keys, rows = _load_hparam_view_data(store, experiment_id, [], selected_metrics=set())
+
+    assert metric_keys == ["loss"]
+    assert hparam_keys == []
+    assert rows == [{"run_id": run.id, "run_name": f"Run {run.id}"}]
+
+
+def test_load_hparam_view_data_includes_values_for_selected_metrics(
+    store: SQLLiteStore, experiment_id: int
+) -> None:
+    run = store.create_run(models.NewRun(experiment_id=experiment_id))
+    _log_a_metric(store, experiment_id, run.id, "loss")
+
+    _hk, _mk, rows = _load_hparam_view_data(store, experiment_id, [], selected_metrics={"loss"})
+
+    assert rows == [{"run_id": run.id, "run_name": f"Run {run.id}", "loss": 1.0}]
 
 
 @pytest.mark.parametrize(

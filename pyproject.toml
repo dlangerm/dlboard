@@ -131,3 +131,4 @@ select = ["E4", "E7", "E9", "F"]
 
 [tool.ruff.lint.per-file-ignores]
 "**/tests/*" = ["D", "ARG", "FBT", "PLR2004", "T201", "SLF001", "INP001"]
+"dltrack/scripts/*" = ["T201"]
