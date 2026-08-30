@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import typing
+from pathlib import Path
 from typing import cast
 
 import dash
@@ -16,6 +17,7 @@ from pydantic import BaseModel, Field
 from structlog.stdlib import get_logger
 
 from dltrack.models import ChartType, ColumnKind
+from dltrack.serve import ClientsideScript
 
 PAGE_SIZE = 6
 GRID_COLS = 3
@@ -279,30 +281,14 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
 ImageChart.register(allow_override=True)
 
 
+_SCRUB_JS = ClientsideScript(Path(__file__).with_name("image_series_scrub.js"))
+_PAGE_JS = ClientsideScript(Path(__file__).with_name("image_series_page.js"))
+
+
 def plug(app: dash.Dash) -> None:
     """Register clientside callbacks for image-series scrubbing, captions, and pagination."""
     app.clientside_callback(  # pyright: ignore[reportUnknownMemberType]
-        """
-        function(step, data) {
-            if (!data) {
-                return [window.dash_clientside.no_update, window.dash_clientside.no_update];
-            }
-            const runIds = Object.keys(data.per_run_steps);
-            const srcs = [];
-            const captions = [];
-            runIds.forEach(function(rid) {
-                const steps = data.per_run_steps[rid];
-                let chosen = steps[0];
-                for (let i = 0; i < steps.length; i++) {
-                    if (steps[i] <= step) { chosen = steps[i]; } else { break; }
-                }
-                srcs.push(data.per_run_urls[rid][String(chosen)]);
-                const runCaptions = data.per_run_captions ? data.per_run_captions[rid] : null;
-                captions.push(runCaptions ? (runCaptions[String(chosen)] || "") : "");
-            });
-            return [srcs, captions];
-        }
-        """,
+        _SCRUB_JS.source,
         [
             dash.Output({"type": "image-series-img", "instance": dash.MATCH, "run": dash.ALL}, "src"),
             dash.Output(
@@ -314,13 +300,7 @@ def plug(app: dash.Dash) -> None:
     )
 
     app.clientside_callback(  # pyright: ignore[reportUnknownMemberType]
-        """
-        function(page, ids) {
-            return ids.map(function(id) {
-                return id.page === (page - 1) ? {} : {display: "none"};
-            });
-        }
-        """,
+        _PAGE_JS.source,
         dash.Output({"type": "image-series-page", "instance": dash.MATCH, "page": dash.ALL}, "style"),
         dash.Input({"type": "image-series-pager", "instance": dash.MATCH}, "value"),
         dash.State({"type": "image-series-page", "instance": dash.MATCH, "page": dash.ALL}, "id"),

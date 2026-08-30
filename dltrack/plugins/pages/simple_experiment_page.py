@@ -60,7 +60,7 @@ from dltrack.plugins.pages._description_editor import (
     register_edit_callbacks,
     render_header,
 )
-from dltrack.serve import get_current_user, get_data_store
+from dltrack.serve import ClientsideScript, get_current_user, get_data_store
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -87,6 +87,9 @@ LOADED_PANELS_STORE_ID = "loaded-panels-store"
 PACKED_GRID_COLS: typing.Final = 3
 """Fixed column count for a panel's `"grid"` layout -- not user-configurable, matching the
 "packed" default's goal of not needing per-panel tuning."""
+
+_CHART_PARAM_CLEAR_JS = ClientsideScript(Path(__file__).with_name("chart_param_clear.js"))
+_HPARAM_COLS_CHANGED_JS = ClientsideScript(Path(__file__).with_name("hparam_cols_changed.js"))
 
 _HOVER_CSS_PATH = Path(__file__).with_name("_experiment_page_hover.css")
 _HOVER_CSS_ROUTE = "experiment-page-hover.css"
@@ -1454,7 +1457,7 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
     # resets it to empty/default -- purely a client-side convenience for something backspace
     # already does, so no round trip needed.
     app.clientside_callback(  # pyright: ignore[reportUnknownMemberType]
-        "function(n) { return n ? null : window.dash_clientside.no_update; }",
+        _CHART_PARAM_CLEAR_JS.source,
         Output({"type": "chart-param", "field": MATCH}, "value"),
         Input({"type": "chart-param-clear", "field": MATCH}, "n_clicks"),
         prevent_initial_call=True,
@@ -1507,12 +1510,7 @@ def plug(app: Dash) -> None:  # noqa: C901, PLR0915
     # comparing client-side (rather than round-tripping through a server callback per keystroke)
     # keeps this instant and avoids yet another spurious-rerender source.
     app.clientside_callback(  # pyright: ignore[reportUnknownMemberType]
-        "function(value, applied) {"
-        "  const a = [...(value || [])].sort();"
-        "  const b = [...(applied || [])].sort();"
-        "  const changed = a.length !== b.length || a.some((v, i) => v !== b[i]);"
-        "  return changed ? {flexShrink: 0} : {display: 'none', flexShrink: 0};"
-        "}",
+        _HPARAM_COLS_CHANGED_JS.source,
         Output(NAVBAR_HPARAM_CONFIRM_COLS_ID, "style"),
         Input(NAVBAR_HPARAM_COL_SELECT_ID, "value"),
         State(NAVBAR_HPARAM_APPLIED_COLS_ID, "data"),
