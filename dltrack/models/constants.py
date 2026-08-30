@@ -1,18 +1,23 @@
-"""Constants for use by plugins and within the app."""
+"""
+Ids genuinely owned by `serve/app.py` (the app shell), not any single page plugin.
+
+An id that only one page plugin's callbacks read/write belongs in that plugin's own module,
+typed against a page-scoped tag (`StoreId[MyPage]`, `DivId[MyPage]`, ...) via
+`dltrack.models._component_ids` -- see e.g. `simple_experiment_page.py`. Only put an id here if
+`serve/app.py` itself owns it, or if it's a route-skeleton container that both a
+`serve/_pages/x.py` layout and its owning plugin need (and even then, prefer declaring it in the
+owning plugin module and importing it into the route file, as most pages already do).
+"""
 
 from typing import Final
 
-PAGE_HOME_ID: Final = "homepage-container"
-PAGE_ADMIN_ID: Final = "admin-container"
-PAGE_PROJECT_ID: Final = "project-container"
-PAGE_EXPERIMENT_ID: Final = "experiment-container"
-EXPERIMENT_HEADER_ID: Final = "experiment-header"
-EXPERIMENT_HEADER_ACTIONS_ID: Final = "experiment-header-actions"
+from dltrack.models._component_ids import AppShell, StoreId
 
-STATE_PROJECT_ID: Final = "project-id-state"
-STATE_EXPERIMENT_ID: Final = "experiment-id-state"
-STATE_HPARAMS: Final = "hparams-state"
-STATE_PAGE_STORAGE: Final = "current-page"
+# Route/session state, produced by app.py's routing and read by whichever page plugin the current
+# route lands on -- these are the two pieces of shared state every page-scoped module can assume
+# are already populated by the time its own callbacks run.
+STATE_PROJECT_ID: StoreId[AppShell] = StoreId("project-id-state")
+STATE_EXPERIMENT_ID: StoreId[AppShell] = StoreId("experiment-id-state")
 
 MANTINE_PROVIDER_ID: Final = "mantine-provider"
 NAVBAR_ID: Final = "navbar"
@@ -21,39 +26,10 @@ NAVBAR_COLLAPSED_STORE_ID = "navbar-collapsed-store"
 NAVBAR_COLLAPSE_TOGGLE_ID = "navbar-collapse-toggle"
 NAVBAR_WIDTH_STORE_ID: Final = "navbar-width-store"
 NAVBAR_RESIZE_HANDLE_ID: Final = "navbar-resize-handle"
+# app.py's navbar renders this placeholder for whichever page wants to fill it -- currently only
+# the basic experiment page (simple_experiment_page.py) does.
 NAVBAR_RUN_LIST_ID: Final = "navbar-run-list"
 HEADER_USER_INDICATOR_ID: Final = "header-user-indicator"
 
 LOCATION_ID: Final = "location"
-METRIC_CONTENT_ID: Final = "metrics-view"
 PAGE_BREADCRUMB_ID: Final = "page-breadcrumb"
-
-EXCLUDED_RUNS_KEY: Final = "excluded_runs"
-SELECTED_HPARAM_COLS_KEY: Final = "hparam-table-selected"
-
-DELETE_PROJECT_BUTTON_ID: Final = "delete-project-button"
-DELETE_PROJECT_MODAL_ID: Final = "delete-project-modal"
-DELETE_PROJECT_CONFIRM_ID: Final = "delete-project-confirm"
-DELETE_PROJECT_CANCEL_ID: Final = "delete-project-cancel"
-
-DELETE_EXPERIMENT_BUTTON_ID: Final = "delete-experiment-button"
-DELETE_EXPERIMENT_MODAL_ID: Final = "delete-experiment-modal"
-DELETE_EXPERIMENT_CONFIRM_ID: Final = "delete-experiment-confirm"
-DELETE_EXPERIMENT_CANCEL_ID: Final = "delete-experiment-cancel"
-
-DELETE_RUN_PENDING_STORE_ID: Final = "delete-run-pending"
-DELETE_RUN_MODAL_ID: Final = "delete-run-modal"
-DELETE_RUN_CONFIRM_ID: Final = "delete-run-confirm"
-DELETE_RUN_CANCEL_ID: Final = "delete-run-cancel"
-
-ADMIN_TABS_ID: Final = "admin-tabs"
-ADMIN_TRASH_CONTENT_ID: Final = "admin-trash-content"
-ADMIN_AUDIT_LOG_CONTENT_ID: Final = "admin-audit-log-content"
-ADMIN_ABOUT_CONTENT_ID: Final = "admin-about-content"
-ADMIN_RESTORE_BUTTON_TYPE: Final = "admin-restore-button"
-ADMIN_PURGE_BUTTON_TYPE: Final = "admin-purge-button"
-ADMIN_PURGE_MODAL_ID: Final = "admin-purge-modal"
-ADMIN_PURGE_CONFIRM_ID: Final = "admin-purge-confirm"
-ADMIN_PURGE_CANCEL_ID: Final = "admin-purge-cancel"
-ADMIN_PENDING_PURGE_STORE_ID: Final = "admin-pending-purge-store"
-ADMIN_RESUME_PURGE_ID: Final = "admin-resume-purge"

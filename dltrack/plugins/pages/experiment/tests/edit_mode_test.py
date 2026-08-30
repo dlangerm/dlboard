@@ -15,18 +15,7 @@ from dltrack import models
 from dltrack.conftest import find_props as _find_props
 from dltrack.models._view import ColumnKind, PanelInstance
 from dltrack.plugins.charts.line_chart import LineChart
-from dltrack.plugins.pages.simple_experiment_page import (
-    AUTO_POPULATE_BUTTON_ID,
-    COLUMN_KINDS_STORE_ID,
-    FULL_DF_STORE_ID,
-    SUGGEST_CHARTS_BUTTON_ID,
-    BasicExperimentPage,
-    EditViewState,
-    _compute_full_df_and_column_kinds,
-    _delete_panel_button_id,
-    _persist_settings_and_rerender,
-    accordion_view,
-)
+from dltrack.plugins.pages.experiment import _experiment_page_state as state
 
 if TYPE_CHECKING:
     from dltrack.plugins.data_stores.sqlite import SQLLiteStore
@@ -40,28 +29,28 @@ LineChart.register(allow_override=True)
 
 
 def test_accordion_view_defaults_to_no_cached_dataframe(store: SQLLiteStore, experiment_id: int) -> None:
-    container = accordion_view(store, experiment_id)
+    container = state.accordion_view(store, experiment_id)
 
-    full_df_store = _find_props(cast("Any", container).children, FULL_DF_STORE_ID)
+    full_df_store = _find_props(cast("Any", container).children, state.FULL_DF_STORE_ID)
     assert full_df_store is not None
     assert full_df_store.get("data") is None
 
 
 def test_accordion_view_preserves_cached_dataframe(store: SQLLiteStore, experiment_id: int) -> None:
-    container = accordion_view(
+    container = state.accordion_view(
         store,
         experiment_id,
-        view_state=EditViewState(
+        view_state=state.EditViewState(
             full_df_json='{"cached": true}',
             column_kinds={"loss": ColumnKind.METRIC},
         ),
     )
 
-    full_df_store = _find_props(cast("Any", container).children, FULL_DF_STORE_ID)
+    full_df_store = _find_props(cast("Any", container).children, state.FULL_DF_STORE_ID)
     assert full_df_store is not None
     assert full_df_store["data"] == '{"cached": true}'
 
-    column_kinds_store = _find_props(cast("Any", container).children, COLUMN_KINDS_STORE_ID)
+    column_kinds_store = _find_props(cast("Any", container).children, state.COLUMN_KINDS_STORE_ID)
     assert column_kinds_store is not None
     assert column_kinds_store["data"] == {"loss": ColumnKind.METRIC}
 
@@ -72,24 +61,24 @@ def test_persist_settings_and_rerender_does_not_reset_cached_dataframe(
     """Regression: changing run selection (or any page_settings update) must not drop the cached
     dataframe used for chart previews.
     """
-    store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
+    store.get_or_create_page(state.BasicExperimentPage, experiment_id=experiment_id)
 
-    _page, container = _persist_settings_and_rerender(
+    _page, container = state.persist_settings_and_rerender(
         store,
         experiment_id,
         {"open_panel": []},
-        view_state=EditViewState(
+        view_state=state.EditViewState(
             full_df_json='{"cached": true}',
             column_kinds={"loss": ColumnKind.METRIC},
         ),
     )
 
-    full_df_store = _find_props(cast("Any", container).children, FULL_DF_STORE_ID)
+    full_df_store = _find_props(cast("Any", container).children, state.FULL_DF_STORE_ID)
     assert full_df_store is not None
     assert full_df_store["data"] == '{"cached": true}'
 
 
-# ---- _compute_full_df_and_column_kinds: the on-demand fallback used by auto-populate/suggest ----
+# ---- compute_full_df_and_column_kinds: the on-demand fallback used by auto-populate/suggest ----
 
 
 def test_compute_full_df_and_column_kinds_finds_data_without_a_cache_populated(
@@ -110,7 +99,7 @@ def test_compute_full_df_and_column_kinds_finds_data_without_a_cache_populated(
         ]
     )
 
-    full_df_json, column_kinds = _compute_full_df_and_column_kinds(store, experiment_id)
+    full_df_json, column_kinds = state.compute_full_df_and_column_kinds(store, experiment_id)
 
     assert column_kinds["loss"] == ColumnKind.METRIC.value
     assert full_df_json
@@ -119,7 +108,7 @@ def test_compute_full_df_and_column_kinds_finds_data_without_a_cache_populated(
 def test_compute_full_df_and_column_kinds_empty_for_an_experiment_with_no_data(
     store: SQLLiteStore, experiment_id: int
 ) -> None:
-    _full_df_json, column_kinds = _compute_full_df_and_column_kinds(store, experiment_id)
+    _full_df_json, column_kinds = state.compute_full_df_and_column_kinds(store, experiment_id)
 
     assert column_kinds == {}
 
@@ -130,33 +119,33 @@ def test_compute_full_df_and_column_kinds_empty_for_an_experiment_with_no_data(
 def test_accordion_view_shows_auto_populate_when_view_is_empty(
     store: SQLLiteStore, experiment_id: int
 ) -> None:
-    container = accordion_view(store, experiment_id)
+    container = state.accordion_view(store, experiment_id)
 
-    assert _find_props(cast("Any", container).children, AUTO_POPULATE_BUTTON_ID) is not None
-    assert _find_props(cast("Any", container).children, SUGGEST_CHARTS_BUTTON_ID) is None
+    assert _find_props(cast("Any", container).children, state.AUTO_POPULATE_BUTTON_ID) is not None
+    assert _find_props(cast("Any", container).children, state.SUGGEST_CHARTS_BUTTON_ID) is None
 
 
 def test_accordion_view_shows_suggest_charts_when_view_is_not_empty(
     store: SQLLiteStore, experiment_id: int
 ) -> None:
-    page = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
+    page = store.get_or_create_page(state.BasicExperimentPage, experiment_id=experiment_id)
     store.update_page(page.model_copy(update={"panels": [PanelInstance[Any, Any](name="p")]}))
 
-    container = accordion_view(store, experiment_id)
+    container = state.accordion_view(store, experiment_id)
 
-    assert _find_props(cast("Any", container).children, SUGGEST_CHARTS_BUTTON_ID) is not None
-    assert _find_props(cast("Any", container).children, AUTO_POPULATE_BUTTON_ID) is None
+    assert _find_props(cast("Any", container).children, state.SUGGEST_CHARTS_BUTTON_ID) is not None
+    assert _find_props(cast("Any", container).children, state.AUTO_POPULATE_BUTTON_ID) is None
 
 
 def test_accordion_view_delete_panel_reachable_without_opening_a_panel(
     store: SQLLiteStore, experiment_id: int
 ) -> None:
     """The whole point: delete/rename/reorder must be usable without opening (fetching) the panel."""
-    page = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
+    page = store.get_or_create_page(state.BasicExperimentPage, experiment_id=experiment_id)
     store.update_page(page.model_copy(update={"panels": [PanelInstance[Any, Any](name="p")]}))
 
-    container = accordion_view(store, experiment_id)
+    container = state.accordion_view(store, experiment_id)
 
-    delete_button = _find_props(cast("Any", container).children, _delete_panel_button_id("p"))
+    delete_button = _find_props(cast("Any", container).children, state.delete_panel_button_id("p"))
     assert delete_button is not None
     assert delete_button.get("disabled") is not True

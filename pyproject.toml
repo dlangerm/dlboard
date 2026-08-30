@@ -11,7 +11,8 @@ dev = [
   "pytest-cov>=7.1.0",
   "pytest-playwright>=0.9.0",
   "ruff>=0.15.22",
-  "torchvision>=0.28.0"
+  "torchvision>=0.28.0",
+  "vulture>=2.16"
 ]
 
 [project]
@@ -132,3 +133,74 @@ select = ["E4", "E7", "E9", "F"]
 [tool.ruff.lint.per-file-ignores]
 "**/tests/*" = ["D", "ARG", "FBT", "PLR2004", "T201", "SLF001", "INP001"]
 "dltrack/scripts/*" = ["T201"]
+
+[tool.vulture]
+# Deliberately does NOT exclude `tests/`: dltrack is a library as much as an application, and for
+# a fair few public methods (`DataStore.update_user`, `_sampling.downsample_grouped`,
+# `DLTrackLogger.from_names`, ...) the only caller in this repo *is* their own test -- excluding
+# tests would make those look dead instead of correctly "used, just not yet from our own code".
+exclude = []
+ignore_decorators = [
+  # Dash callbacks (`_backend/`, page plugins, `serve/app.py`'s navbar/breadcrumb wiring) --
+  # every one is dispatched by Dash internally via the `Output`/`Input` ids passed to the
+  # decorator, never called by name from our own code.
+  "@callback",
+  "@app.callback",
+  "@dash.callback",
+  "@*.clientside_callback",
+  # Dash's plugin-hooks system (`dash.hooks` -- `@hooks.error()`, `@hooks.route()`, ...),
+  # dispatched by Dash the same way, off the hook name rather than an Output/Input id.
+  "@hooks.*",
+  # cyclopts CLI commands (`_cli.py`, `scripts/dev_harness.py`) -- dispatched by cyclopts from
+  # the command line, never called by name from our own code.
+  "@*.command",
+  # pytest fixtures -- dispatched by pytest via dependency injection (a test's parameter name
+  # matching the fixture name), never called by name directly.
+  "@pytest.fixture",
+  # Pydantic validators -- called by pydantic during (de)serialization/validation, never by a
+  # literal call in our own code (`_view.py`'s `deserialize_json`, `image.py`'s
+  # `_move_image_to_cpu`, ...).
+  "@field_validator",
+  "@model_validator",
+  # Marks a method as fulfilling a base class/Protocol contract (`ChartType.render`,
+  # `DataStore.*`, `pytorch_lightning.loggers.Logger.name`/`.version`, ...) -- by definition
+  # something else (often an external framework, e.g. Lightning calling `logger.version`)
+  # dispatches it polymorphically, not a literal call vulture's static analysis can see. Removing
+  # an `@override` method changes the class's contract regardless of whether *this* codebase
+  # happens to call it today, so it isn't "dead" in the disposal sense even when flagged.
+  "@override",
+  "@typing.override"
+]
+ignore_names = [
+  # `PluginProtocol.plug(app: Dash) -> None` -- every plugin module's install hook, called
+  # structurally as `plugin.plug(app)` off whatever module a deployment's plugin list supplies
+  # (see `dltrack.serve.resolve_plugins`/`dltrack.serve.app.app`), never by a literal `.plug(`
+  # call vulture's static analysis can see.
+  "plug",
+  # `dash.register_page`'s per-route module contract (`serve/_pages/*.py`) -- Dash's page
+  # registry looks this up via `getattr(module, "layout")` at routing time, not a call in our
+  # own code.
+  "layout",
+  # pytest's module-level marker convention (`pytestmark = pytest.mark.browser`) -- applied by
+  # pytest itself scanning the module namespace, never referenced by name in our own code.
+  "pytestmark",
+  # Pydantic model fields that are read structurally (raw SQL column names, `model_dump()`
+  # serialization to REST clients, schema-generation reflection) rather than through a literal
+  # `.name` attribute access vulture's static analysis can see -- not dead, just never accessed
+  # the one way vulture looks for. Named individually (not a broader confidence/exclude change)
+  # so a genuinely dead field of some other name still gets caught.
+  "created_at",
+  "requested_at",
+  "bootstrap_admin_assigned",
+  # `serve/_backend/tests/sql_functions_test.py`'s throwaway schema-reflection model fields --
+  # same "read structurally, not by attribute" story as above, scoped to their test models.
+  "created",
+  "parent_id",
+  # `plugins/backend/tests/rest_backend_test.py`'s `_FakeServer.add_url_rule` -- a keyword-only
+  # parameter that has to keep this exact name to stand in for the real `Flask.add_url_rule`
+  # signature, even though the fake's body never reads it.
+  "endpoint"
+]
+min_confidence = 60
+paths = ["dltrack/"]
+sort_by_size = true

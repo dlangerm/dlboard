@@ -6,6 +6,7 @@ from dash import dcc, html
 from dash.dcc import Store
 
 from dltrack.models import constants
+from dltrack.plugins.pages import experiment
 from dltrack.serve import get_data_store
 
 
@@ -19,13 +20,13 @@ def layout(experiment_id: str) -> list[html.Div | dcc.Store]:
 
     return [
         html.Div(
-            id=constants.PAGE_EXPERIMENT_ID,
+            id=experiment.PAGE_EXPERIMENT_ID,
             children=dmc.Stack(
                 [
                     dmc.Group(
                         [
-                            html.Div(id=constants.EXPERIMENT_HEADER_ID, style={"flex": 1}),
-                            html.Div(id=constants.EXPERIMENT_HEADER_ACTIONS_ID),
+                            html.Div(id=experiment.EXPERIMENT_HEADER_ID, style={"flex": 1}),
+                            html.Div(id=experiment.EXPERIMENT_HEADER_ACTIONS_ID),
                         ],
                         align="center",
                         wrap="nowrap",
@@ -35,15 +36,15 @@ def layout(experiment_id: str) -> list[html.Div | dcc.Store]:
                     # `children`, never the element itself, so a `Loader` used as its own
                     # placeholder would keep its spinner styling baked into the DOM node forever,
                     # showing through/behind whatever real content lands in it.
-                    html.Div(dmc.Loader(), id=constants.METRIC_CONTENT_ID),
+                    html.Div(dmc.Loader(), id=experiment.METRIC_CONTENT_ID),
                 ],
                 gap="xs",
             ),
         ),
-        Store(id=constants.STATE_PAGE_STORAGE),
+        Store(id=experiment.STATE_PAGE_STORAGE),
         Store(id=constants.STATE_PROJECT_ID, data=exp.project_id),
         Store(id=constants.STATE_EXPERIMENT_ID, data=int(experiment_id)),
-        Store(id=constants.STATE_HPARAMS, data=[h.model_dump_json() for h in hparams]),
+        Store(id=experiment.STATE_HPARAMS, data=[h.model_dump_json() for h in hparams]),
     ]
 
 

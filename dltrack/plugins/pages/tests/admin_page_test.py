@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Any, cast
 
 from dltrack import models
 from dltrack.conftest import find_props
-from dltrack.models import constants
 from dltrack.plugins.pages import simple_admin_page as admin
 
 if TYPE_CHECKING:
@@ -30,12 +29,12 @@ def test_render_trash_lists_a_deleted_project_with_restore_and_purge_buttons(
     rendered = admin._render_trash(store)
 
     restore_id = {
-        "type": constants.ADMIN_RESTORE_BUTTON_TYPE,
+        "type": admin.ADMIN_RESTORE_BUTTON_TYPE,
         "entity_type": models.EntityType.PROJECT.value,
         "id": project.id,
     }
     purge_id = {
-        "type": constants.ADMIN_PURGE_BUTTON_TYPE,
+        "type": admin.ADMIN_PURGE_BUTTON_TYPE,
         "entity_type": models.EntityType.PROJECT.value,
         "id": project.id,
     }
@@ -96,7 +95,7 @@ def test_render_pending_purge_banner_shows_the_count_and_a_resume_button(store: 
     banner = cast("Any", admin._render_pending_purge_banner(store))
 
     assert banner is not None
-    assert find_props(banner, constants.ADMIN_RESUME_PURGE_ID) is not None
+    assert find_props(banner, admin.ADMIN_RESUME_PURGE_ID) is not None
     assert "1 artifact blob" in str(banner)
 
 
@@ -162,9 +161,9 @@ def test_render_about_lists_installed_plugins(store: SQLLiteStore) -> None:
 def test_admin_layout_contains_tabs_and_purge_modal() -> None:
     layout = admin._admin_layout()
 
-    assert find_props(layout, constants.ADMIN_TABS_ID) is not None
-    assert find_props(layout, constants.ADMIN_TRASH_CONTENT_ID) is not None
-    assert find_props(layout, constants.ADMIN_AUDIT_LOG_CONTENT_ID) is not None
-    purge_modal_props = find_props(layout, constants.ADMIN_PURGE_MODAL_ID)
+    assert find_props(layout, admin.ADMIN_TABS_ID) is not None
+    assert find_props(layout, admin.ADMIN_TRASH_CONTENT_ID) is not None
+    assert find_props(layout, admin.ADMIN_AUDIT_LOG_CONTENT_ID) is not None
+    purge_modal_props = find_props(layout, admin.ADMIN_PURGE_MODAL_ID)
     assert purge_modal_props is not None
     assert purge_modal_props["opened"] is False

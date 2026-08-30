@@ -3,11 +3,11 @@
 import dash
 from dash import html
 
-from dltrack.models import constants
+from dltrack.plugins.pages.simple_admin_page import PAGE_ADMIN_ID
 
 
 def layout() -> list[html.Div]:
-    return [html.Div(id=constants.PAGE_ADMIN_ID)]
+    return [html.Div(id=PAGE_ADMIN_ID)]
 
 
 dash.register_page(__name__, path="/admin")  # pyright: ignore[reportUnknownMemberType]

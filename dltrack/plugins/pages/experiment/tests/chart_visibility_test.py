@@ -14,13 +14,8 @@ from dltrack.conftest import find_props as _find_props
 from dltrack.conftest import props as _to_props
 from dltrack.models._view import ChartInstance, PanelInstance
 from dltrack.plugins.charts.line_chart import LineChart
-from dltrack.plugins.pages.simple_experiment_page import (
-    _chart_controls_group_id,
-    _header_actions,
-    _open_chart_button_id,
-    _render_panel_charts,
-    _render_panel_content,
-)
+from dltrack.plugins.pages.experiment import _experiment_page_state as state
+from dltrack.plugins.pages.experiment import _header_actions
 
 if TYPE_CHECKING:
     from dltrack.plugins.data_stores.sqlite import SQLLiteStore
@@ -44,10 +39,10 @@ def test_render_panel_charts_controls_are_always_enabled_and_hover_revealed() ->
     panel = _panel_with_chart()
     df = pd.DataFrame({"run_id": [1], "step": [0], "loss": [0.5]})
 
-    [stack] = _render_panel_charts(panel, df)
+    [stack] = state.render_panel_charts(panel, df)
     assert _to_props(stack)["className"] == "dl-chart-item"
 
-    controls = _find_props(stack, _chart_controls_group_id("p", 0))
+    controls = _find_props(stack, state.chart_controls_group_id("p", 0))
     assert controls is not None
     assert controls["className"] == "dl-chart-controls"
 
@@ -72,7 +67,9 @@ def test_render_panel_content_add_button_is_always_enabled_and_hover_revealed(
     )
     panel = _panel_with_chart()
 
-    button = _find_props(_render_panel_content(store, experiment_id, panel, {}), _open_chart_button_id("p"))
+    button = _find_props(
+        state.render_panel_content(store, experiment_id, panel, {}), state.open_chart_button_id("p")
+    )
 
     assert button is not None
     assert button.get("disabled") is not True
@@ -86,7 +83,7 @@ def test_render_panel_charts_packed_layout_uses_natural_width() -> None:
     panel = _panel_with_chart()
     df = pd.DataFrame({"run_id": [1], "step": [0], "loss": [0.5]})
 
-    [stack] = _render_panel_charts(panel, df)
+    [stack] = state.render_panel_charts(panel, df)
 
     assert _to_props(stack)["w"] == panel.charts[0].natural_width()
 
@@ -95,7 +92,7 @@ def test_render_panel_charts_grid_layout_stretches_to_full_width() -> None:
     panel = _panel_with_chart().model_copy(update={"layout": "grid"})
     df = pd.DataFrame({"run_id": [1], "step": [0], "loss": [0.5]})
 
-    [stack] = _render_panel_charts(panel, df)
+    [stack] = state.render_panel_charts(panel, df)
 
     assert _to_props(stack)["w"] == "100%"
 

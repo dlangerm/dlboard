@@ -299,7 +299,6 @@ def log_hyperparams() -> dict[str, str]:
     except Exception:
         _log.exception("Error logging hyperparameters")
         raise
-    return {}
 
 
 def create_experiment() -> dict[str, Any]:
