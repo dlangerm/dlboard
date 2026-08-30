@@ -9,7 +9,7 @@ from pathlib import Path
 import dash_mantine_components as dmc
 import pandas as pd
 from flask import Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from dltrack.models import ChartType, ColumnKind
 from dltrack.plugins.charts._colors import hash_color
@@ -30,15 +30,21 @@ class LineChartSettings(BaseModel, frozen=True, extra="forbid"):
     column: str
     x_axis: str
     height: int = 300
-    sample: bool = True
-    """Downsample each run's series (LTTB) so huge series stay smooth to render."""
-    max_points: int = DEFAULT_MAX_POINTS
-    """Target point count per run when `sample` is enabled."""
-    x_axis_type: typing.Literal["number", "category"] = "number"
-    """`"number"` spaces points by their actual value (e.g. step 10 sits 10x as far from 0 as step
-    1); `"category"` gives every distinct x value equal spacing regardless of its size. For a
-    numeric x axis like step/epoch, `"category"` is what makes irregularly-logged points look like
-    they're nonlinearly compressing — `"number"` renders it true to scale."""
+    width: int | None = Field(
+        default=None,
+        description="Overall chart width in px. Leave blank to size it automatically from height.",
+    )
+    sample: bool = Field(
+        default=True, description="Downsample each run's series (LTTB) so huge series stay smooth to render."
+    )
+    max_points: int = Field(
+        default=DEFAULT_MAX_POINTS, description="Target point count per run when sample is enabled."
+    )
+    x_axis_type: typing.Literal["number", "category"] = Field(
+        default="number",
+        description='"number" spaces points by their actual value (step 10 sits 10x as far from 0 as '
+        'step 1); "category" gives every distinct x value equal spacing regardless of its size.',
+    )
 
 
 class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.LineChart], frozen=True, extra="forbid"):
@@ -121,10 +127,21 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.LineChart], froze
             withDots=False,
             tickLine="xy",
             # A wider tooltip offset keeps it from sitting directly on top of the cursor's
-            # point/line, which otherwise obscures the exact spot the reader is looking at.
+            # point/line, which otherwise obscures the exact spot the reader is looking at --
+            # allowEscapeViewBox lets it actually render outside the plot area at that offset
+            # rather than getting clamped back inside it, which on a short chart otherwise means
+            # the tooltip covers most of the visible plot regardless of the offset. Once it can
+            # escape its own chart's bounds it can visually reach into a neighboring chart's area
+            # too -- wrapperStyle's zIndex keeps it painted above that neighbor rather than
+            # underneath it (later charts in the DOM otherwise paint on top by default).
             # labelFormatter prefixes the hovered x-value with the axis name -- see
             # `__x_axis_name__` above and `line_chart_tooltip.js` (registered by `plug`, below).
-            tooltipProps={"offset": 30, "labelFormatter": {"function": "lineChartTooltipLabel"}},
+            tooltipProps={
+                "offset": 30,
+                "allowEscapeViewBox": {"x": True, "y": True},
+                "wrapperStyle": {"zIndex": 100},
+                "labelFormatter": {"function": "lineChartTooltipLabel"},
+            },
             # syncMethod="value" matches synced charts by x-axis value rather than
             # array index — needed because sampled/unsampled charts (or charts
             # sampled at different rates) don't share row counts, so index-based
@@ -157,6 +174,11 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.LineChart], froze
     @typing.override
     def hint_required_hparams(cls, parameters: LineChartSettings) -> set[str]:
         return set()
+
+    @classmethod
+    @typing.override
+    def natural_width(cls, parameters: LineChartSettings) -> int:
+        return parameters.width or round(parameters.height * 16 / 9)
 
     @classmethod
     @typing.override

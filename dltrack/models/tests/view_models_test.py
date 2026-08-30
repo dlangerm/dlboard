@@ -8,13 +8,13 @@ from typing import ClassVar
 
 import pandas as pd
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, ValidationError
 
 from dltrack.models._view import ChartInstance, ChartType, ChartTypeRegistry, ColumnKind, PanelInstance
 
 
 class _FakeParams(BaseModel, frozen=True, extra="forbid"):
-    metric: str
+    metric: str = Field(description="Which metric to plot.")
     flag: bool = False
     hparam: str = ""
 
@@ -49,6 +49,11 @@ class _FakeChart(ChartType[_FakeParams, pd.DataFrame, dict[str, object]], frozen
 
     @classmethod
     @typing.override
+    def natural_width(cls, parameters: _FakeParams) -> int:
+        return 400
+
+    @classmethod
+    @typing.override
     def field_column_kinds(cls) -> dict[str, ColumnKind]:
         return {"metric": ColumnKind.METRIC, "hparam": ColumnKind.HPARAM}
 
@@ -73,9 +78,11 @@ def test_get_registered_chart_types_describes_fields() -> None:
     assert fields["metric"].type == "str"
     assert fields["metric"].required is True
     assert fields["metric"].column_kind == ColumnKind.METRIC
+    assert fields["metric"].description == "Which metric to plot."
     assert fields["flag"].type == "bool"
     assert fields["flag"].required is False
     assert fields["flag"].default is False
+    assert fields["flag"].description is None
 
 
 def _make_fake_chart(
@@ -116,6 +123,11 @@ def _make_fake_chart(
         @typing.override
         def hint_required_hparams(cls, parameters: BaseModel) -> set[str] | None:
             return set()
+
+        @classmethod
+        @typing.override
+        def natural_width(cls, parameters: BaseModel) -> int:
+            return 400
 
         @classmethod
         @typing.override
@@ -161,6 +173,45 @@ def test_chart_instance_delegates_through_registry() -> None:
     chart = ChartInstance[pd.DataFrame, dict[str, object]](chart_type="fake", parameters={"metric": "loss"})
     assert chart.render(pd.DataFrame({"loss": [1, 2, 3]})) == {"metric": "loss", "rows": 3}
     assert chart.hint_required_columns() == {"loss"}
+
+
+# ---- a chart whose persisted parameters no longer validate must not crash the whole page ----
+
+
+def test_hint_and_width_methods_fall_back_instead_of_raising_for_invalid_parameters() -> None:
+    """
+    Regression: parameters are validated against the chart type's settings model lazily, on every
+    call -- a chart saved before a schema change (or otherwise malformed) used to raise straight out
+    of `hint_required_columns`/`natural_width`, called unguarded while just laying out the page, and
+    take the whole page down with an unhandled 500. These must degrade gracefully instead; only
+    `render()` (already isolated per-chart by the page layer) is allowed to still raise.
+    """
+    _FakeChart.register()
+    # `metric` is required by `_FakeParams`, so an empty `parameters` dict fails validation.
+    chart = ChartInstance[pd.DataFrame, dict[str, object]](chart_type="fake", parameters={})
+
+    assert chart.hint_required_columns() is None
+    assert chart.hint_required_artifact_keys() is None
+    assert chart.hint_required_hparams() is None
+    assert chart.natural_width() == 400
+
+    with pytest.raises(ValidationError):
+        chart.render(pd.DataFrame())
+
+
+def test_panel_hint_required_columns_short_circuits_when_one_chart_is_broken() -> None:
+    """A broken chart's `None` hint must widen the whole panel's fetch to "everything" (the existing
+    short-circuit semantics for `None`), not crash the aggregation.
+    """
+    _FakeChart.register()
+    panel = PanelInstance[pd.DataFrame, dict[str, object]](
+        name="p",
+        charts=[
+            ChartInstance[pd.DataFrame, dict[str, object]](chart_type="fake", parameters={"metric": "loss"}),
+            ChartInstance[pd.DataFrame, dict[str, object]](chart_type="fake", parameters={}),
+        ],
+    )
+    assert panel.hint_required_columns() is None
 
 
 @pytest.mark.parametrize(

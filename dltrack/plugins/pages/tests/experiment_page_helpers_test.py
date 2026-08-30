@@ -9,13 +9,16 @@ from typing import TYPE_CHECKING, Any, cast
 import dash_mantine_components as dmc
 import pandas as pd
 import pytest
+from pydantic import ValidationError
 
 from dltrack import models
 from dltrack.models import HyperParams, NewHyperParams, Run
 from dltrack.models._view import ChartInstance, ColumnKind, PanelInstance, ParameterField, ParameterFieldType
+from dltrack.plugins.charts.line_chart import LineChart
 from dltrack.plugins.pages.simple_experiment_page import (
     BasicExperimentPage,
     _build_hparam_rows,
+    _build_validated_chart_instance,
     _fetch_last_step_metrics,
     _load_hparam_view_data,
     _merge_chart_param_values,
@@ -29,6 +32,8 @@ if TYPE_CHECKING:
     from dltrack.plugins.data_stores.sqlite import SQLLiteStore
 
 _TS = datetime(2026, 1, 1, tzinfo=UTC)
+
+LineChart.register(allow_override=True)
 
 
 def _panel(name: str, n_charts: int) -> PanelInstance[pd.DataFrame, object]:
@@ -94,6 +99,34 @@ def test_merge_chart_param_values_drops_cleared_optional_fields() -> None:
     }
 
     assert _merge_chart_param_values(values, checked, field_ids, fields) == {"column": None}
+
+
+# ---- _build_validated_chart_instance ----
+
+
+def test_build_validated_chart_instance_succeeds_for_valid_parameters() -> None:
+    chart = _build_validated_chart_instance("line", {"column": "loss", "x_axis": "step"})
+    assert chart.chart_type == "line"
+
+
+def test_build_validated_chart_instance_rejects_a_cleared_required_field() -> None:
+    """Regression: a bare `ChartInstance(...)` never validates its `parameters` (untyped dict), so
+    a required field left `None` after `_merge_chart_param_values` (see above) used to sail through
+    unnoticed and only blow up later, unguarded, from `hint_required_columns`/`render` -- with no
+    error surfaced in the UI. This must raise here instead, where the add/edit-chart callback can
+    catch it and show "Invalid parameters: ...".
+    """
+    with pytest.raises(ValidationError):
+        _build_validated_chart_instance("line", {"column": None, "x_axis": "step"})
+
+
+def test_build_validated_chart_instance_rejects_a_bad_optional_field_value() -> None:
+    """A cleared NumberInput isn't guaranteed to report `None` -- if it reports `""` instead, that's
+    not dropped by `_merge_chart_param_values` (only `None` is), so it must still fail validation
+    here rather than reach `render` unguarded.
+    """
+    with pytest.raises(ValidationError):
+        _build_validated_chart_instance("line", {"column": "loss", "x_axis": "step", "width": ""})
 
 
 def _run(run_id: int, name: str | None = None) -> Run:
@@ -245,6 +278,23 @@ def test_param_field_input_picks_widget_by_field_type(field: ParameterField, exp
     columns_by_kind = {ColumnKind.METRIC: ["loss", "acc"]}
     component = _param_field_input(field.name, field, columns_by_kind)
     assert isinstance(component, expected_type)
+
+
+def test_param_field_input_optional_number_gets_a_clear_button() -> None:
+    """An optional numeric field (e.g. width) gets a visible clear button -- backspacing to empty
+    already works, but isn't discoverable on its own."""
+    field = ParameterField(name="width", type=ParameterFieldType.INT, required=False, default=None)
+    component = _param_field_input(field.name, field, {})
+    props = cast("Any", component).to_plotly_json()["props"]
+    assert props["rightSection"] is not None
+    assert props["rightSectionPointerEvents"] == "all"
+
+
+def test_param_field_input_required_number_has_no_clear_button() -> None:
+    field = ParameterField(name="page_size", type=ParameterFieldType.INT, required=True)
+    component = _param_field_input(field.name, field, {})
+    props = cast("Any", component).to_plotly_json()["props"]
+    assert props.get("rightSection") is None
 
 
 def test_param_field_input_offers_grouping_kind_as_a_select() -> None:

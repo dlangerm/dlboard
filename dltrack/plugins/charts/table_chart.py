@@ -16,7 +16,7 @@ from typing import Any
 import pandas as pd
 from dash import dash_table
 from dash.dash_table.Format import Format
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from dltrack.models import ChartType, ColumnKind
 from dltrack.plugins.charts._grouping import last_row_per_run
@@ -37,20 +37,32 @@ _BOOKKEEPING_COLS = frozenset({"run_id", "index", "timestamp_utc", "experiment_i
 class TableChartSettings(BaseModel, frozen=True, extra="forbid"):
     """Table chart settings."""
 
-    metrics: list[str] = []
-    """Metric column names to show; empty shows every metric (run mode uses each run's
-    last-logged value)."""
-    hparams: list[str] = []
-    """Hyperparameter keys to show; empty shows every hyperparameter."""
-    pivot_on: str = ""
-    """A metric column (e.g. "step") to pivot rows around, comparing `pivot_metric` across runs
-    side by side. Leave empty for the default: one row per run."""
-    pivot_metric: str = ""
-    """Which metric's values fill the table when `pivot_on` is set. Ignored otherwise."""
+    metrics: list[str] = Field(
+        default=[],
+        description="Metric column names to show; empty shows every metric (run mode uses each "
+        "run's last-logged value).",
+    )
+    hparams: list[str] = Field(
+        default=[], description="Hyperparameter keys to show; empty shows every hyperparameter."
+    )
+    pivot_on: str = Field(
+        default="",
+        description='A metric column (e.g. "step") to pivot rows around, comparing pivot_metric '
+        "across runs side by side. Leave empty for the default: one row per run.",
+    )
+    pivot_metric: str = Field(
+        default="",
+        description="Which metric's values fill the table when pivot_on is set. Ignored otherwise.",
+    )
     page_size: int = 20
-    font_size: int | None = None
-    """Cell/header font size in pixels. Leave unset to use the same (smaller) default as the rest
-    of the charts; set this to size the table up."""
+    font_size: int | None = Field(
+        default=None,
+        description="Cell/header font size in pixels. Leave unset to use the same (smaller) "
+        "default as the rest of the charts; set this to size the table up.",
+    )
+    width: int | None = Field(
+        default=None, description="Overall chart width in px. Leave blank to use the default flat width."
+    )
 
 
 def _message_table(text: str, *, page_size: int, font_size: int | None) -> dash_table.DataTable:
@@ -187,6 +199,11 @@ class TableChart(
         if not parameters.hparams:
             return None
         return set(parameters.hparams)
+
+    @classmethod
+    @typing.override
+    def natural_width(cls, parameters: TableChartSettings) -> int:
+        return parameters.width or 700
 
     @classmethod
     @typing.override

@@ -9,7 +9,7 @@ from pathlib import Path
 import dash_mantine_components as dmc
 import pandas as pd
 from flask import Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from dltrack.models import ChartType, ColumnKind
 from dltrack.plugins.charts._grouping import last_row_per_run
@@ -27,19 +27,26 @@ _DEFAULT_BAR_COLOR = "blue.6"
 class BarChartSettings(BaseModel, frozen=True, extra="forbid"):
     """Bar chart settings."""
 
-    column: str
-    """The metric to aggregate onto each bar."""
-    x_axis: str
-    """The metric or hyperparameter key to group runs by, e.g. "hidden_size"."""
-    aggregation: typing.Literal["mean", "median", "min", "max", "sum", "count"] = "mean"
-    """How to combine runs that share the same `x_axis` value into one bar."""
-    orientation: typing.Literal["horizontal", "vertical"] = "horizontal"
-    """Chart layout: `horizontal` draws upright bars with groups along the x-axis (the default);
-    `vertical` draws sideways bars with groups along the y-axis."""
-    sort: bool = True
-    """Order bars ascending by `x_axis` value -- numerically if every group parses as a number,
-    alphabetically otherwise. Disable to keep groups in first-seen order."""
+    column: str = Field(description="The metric to aggregate onto each bar.")
+    x_axis: str = Field(description='The metric or hyperparameter key to group runs by, e.g. "hidden_size".')
+    aggregation: typing.Literal["mean", "median", "min", "max", "sum", "count"] = Field(
+        default="mean", description="How to combine runs that share the same x_axis value into one bar."
+    )
+    orientation: typing.Literal["horizontal", "vertical"] = Field(
+        default="horizontal",
+        description="horizontal draws upright bars with groups along the x-axis (the default); "
+        "vertical draws sideways bars with groups along the y-axis.",
+    )
+    sort: bool = Field(
+        default=True,
+        description="Order bars ascending by x_axis value -- numerically if every group parses as "
+        "a number, alphabetically otherwise. Disable to keep groups in first-seen order.",
+    )
     height: int = 300
+    width: int | None = Field(
+        default=None,
+        description="Overall chart width in px. Leave blank to size it automatically from height.",
+    )
 
 
 def _resolve_column(dataframe: pd.DataFrame, name: str) -> str:
@@ -124,10 +131,21 @@ class BarChart(ChartType[BarChartSettings, pd.DataFrame, dmc.BarChart], frozen=T
             withYAxis=True,
             tickLine="xy",
             # A wider tooltip offset keeps it from sitting directly on top of the hovered bar,
-            # which otherwise obscures the exact spot the reader is looking at. labelFormatter
-            # prefixes the hovered x-value with the axis name -- see `__x_axis_name__` above and
-            # `bar_chart_tooltip.js` (registered by `plug`, below).
-            tooltipProps={"offset": 30, "labelFormatter": {"function": "barChartTooltipLabel"}},
+            # which otherwise obscures the exact spot the reader is looking at --
+            # allowEscapeViewBox lets it actually render outside the plot area at that offset
+            # rather than getting clamped back inside it, which on a short chart otherwise means
+            # the tooltip covers most of the visible plot regardless of the offset. Once it can
+            # escape its own chart's bounds it can visually reach into a neighboring chart's area
+            # too -- wrapperStyle's zIndex keeps it painted above that neighbor rather than
+            # underneath it (later charts in the DOM otherwise paint on top by default).
+            # labelFormatter prefixes the hovered x-value with the axis name -- see
+            # `__x_axis_name__` above and `bar_chart_tooltip.js` (registered by `plug`, below).
+            tooltipProps={
+                "offset": 30,
+                "allowEscapeViewBox": {"x": True, "y": True},
+                "wrapperStyle": {"zIndex": 100},
+                "labelFormatter": {"function": "barChartTooltipLabel"},
+            },
             # syncMethod="value" matches synced charts (e.g. accuracy-by-hidden-size next to
             # loss-by-hidden-size) by x-axis value rather than array index, so their tooltips
             # line up even if one chart is missing a group the other has.
@@ -158,6 +176,11 @@ class BarChart(ChartType[BarChartSettings, pd.DataFrame, dmc.BarChart], frozen=T
         # x_axis may be a metric column or a hyperparameter key -- we don't know which until the
         # data comes back, so hint both; fetching a key that isn't a real hyperparameter is a no-op.
         return {parameters.x_axis}
+
+    @classmethod
+    @typing.override
+    def natural_width(cls, parameters: BarChartSettings) -> int:
+        return parameters.width or round(parameters.height * 16 / 9)
 
     @classmethod
     @typing.override

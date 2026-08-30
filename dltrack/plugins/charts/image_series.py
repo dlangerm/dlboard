@@ -12,7 +12,7 @@ import dash_mantine_components as dmc
 import pandas as pd
 from dash import ALL, MATCH, Input, Output, State, ctx, dcc, html
 from dash.exceptions import PreventUpdate
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from structlog.stdlib import get_logger
 
 from dltrack.models import ChartType, ColumnKind
@@ -30,9 +30,18 @@ class ImageChartSettings(BaseModel, frozen=True, extra="forbid"):
     key: str
     x_axis: str = "step"
     height: int = 220
-    native_size: bool = False
-    """Show each thumbnail at its logged resolution (capped by `height`, never upscaled) instead
-    of stretching small images to fill the thumbnail box."""
+    width: int | None = Field(
+        default=None,
+        description="Overall chart width in px. Leave blank to size it automatically from "
+        "height (the default). Unrelated to native_size below, which only affects individual "
+        "thumbnails.",
+    )
+    native_size: bool = Field(
+        default=False,
+        description="Show each thumbnail at its logged resolution (capped by height, never "
+        "upscaled) instead of stretching small images to fill the thumbnail box. Only affects "
+        "individual thumbnails, not the chart's overall width above.",
+    )
 
 
 def _escape_ref(ref: str) -> str:
@@ -255,6 +264,11 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
     @typing.override
     def hint_required_hparams(cls, parameters: ImageChartSettings) -> set[str]:
         return set()
+
+    @classmethod
+    @typing.override
+    def natural_width(cls, parameters: ImageChartSettings) -> int:
+        return parameters.width or GRID_COLS * (parameters.height + 40)
 
     @classmethod
     @typing.override
