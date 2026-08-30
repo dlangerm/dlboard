@@ -6,11 +6,12 @@ import dash
 from dash import dcc, html
 
 from dltrack.models import constants
+from dltrack.plugins.pages.simple_project_page import PAGE_PROJECT_ID
 
 
 def layout(project_id: str) -> list[html.Div | dcc.Store]:
     return [
-        html.Div(id=constants.PAGE_PROJECT_ID),
+        html.Div(id=PAGE_PROJECT_ID),
         dcc.Store(id=constants.STATE_PROJECT_ID, data=int(project_id)),
     ]
 

@@ -15,18 +15,9 @@ from dltrack import models
 from dltrack.models import HyperParams, NewHyperParams, Run
 from dltrack.models._view import ChartInstance, ColumnKind, PanelInstance, ParameterField, ParameterFieldType
 from dltrack.plugins.charts.line_chart import LineChart
-from dltrack.plugins.pages.simple_experiment_page import (
-    BasicExperimentPage,
-    _build_hparam_rows,
-    _build_validated_chart_instance,
-    _fetch_last_step_metrics,
-    _load_hparam_view_data,
-    _merge_chart_param_values,
-    _param_field_input,
-    _persist_settings,
-    _run_summary,
-    _upsert_chart,
-)
+from dltrack.plugins.pages.experiment import _experiment_page_state as state
+from dltrack.plugins.pages.experiment import _run_comparison_table as run_table
+from dltrack.plugins.pages.experiment._chart_editor_modal import _param_field_input
 
 if TYPE_CHECKING:
     from dltrack.plugins.data_stores.sqlite import SQLLiteStore
@@ -51,7 +42,7 @@ def test_upsert_chart_replaces_the_requested_index(index: int) -> None:
     panel = _panel("p", 3)
     new_chart = ChartInstance[pd.DataFrame, object](chart_type="line", parameters={"column": "new"})
 
-    result = _upsert_chart(panel, "p", index, new_chart)
+    result = state.upsert_chart(panel, "p", index, new_chart)
 
     assert result.charts[index].parameters == {"column": "new"}
     untouched = [i for i in range(3) if i != index]
@@ -62,7 +53,7 @@ def test_upsert_chart_appends_when_index_is_none() -> None:
     panel = _panel("p", 1)
     new_chart = ChartInstance[pd.DataFrame, object](chart_type="line", parameters={"column": "new"})
 
-    result = _upsert_chart(panel, "p", None, new_chart)
+    result = state.upsert_chart(panel, "p", None, new_chart)
 
     assert len(result.charts) == 2
     assert result.charts[-1].parameters == {"column": "new"}
@@ -72,7 +63,7 @@ def test_upsert_chart_ignores_other_panels() -> None:
     panel = _panel("other", 1)
     new_chart = ChartInstance[pd.DataFrame, object](chart_type="line", parameters={"column": "new"})
 
-    assert _upsert_chart(panel, "p", 0, new_chart) is panel
+    assert state.upsert_chart(panel, "p", 0, new_chart) is panel
 
 
 def test_merge_chart_param_values_prefers_value_over_checked() -> None:
@@ -80,7 +71,10 @@ def test_merge_chart_param_values_prefers_value_over_checked() -> None:
     checked = [None, True]
     field_ids = [{"field": "column"}, {"field": "sample"}]
 
-    assert _merge_chart_param_values(values, checked, field_ids, {}) == {"column": "loss", "sample": True}
+    assert state.merge_chart_param_values(values, checked, field_ids, {}) == {
+        "column": "loss",
+        "sample": True,
+    }
 
 
 def test_merge_chart_param_values_drops_cleared_optional_fields() -> None:
@@ -98,35 +92,35 @@ def test_merge_chart_param_values_drops_cleared_optional_fields() -> None:
         "column": ParameterField(name="column", type=ParameterFieldType.STR, required=True),
     }
 
-    assert _merge_chart_param_values(values, checked, field_ids, fields) == {"column": None}
+    assert state.merge_chart_param_values(values, checked, field_ids, fields) == {"column": None}
 
 
-# ---- _build_validated_chart_instance ----
+# ---- build_validated_chart_instance ----
 
 
 def test_build_validated_chart_instance_succeeds_for_valid_parameters() -> None:
-    chart = _build_validated_chart_instance("line", {"column": "loss", "x_axis": "step"})
+    chart = state.build_validated_chart_instance("line", {"column": "loss", "x_axis": "step"})
     assert chart.chart_type == "line"
 
 
 def test_build_validated_chart_instance_rejects_a_cleared_required_field() -> None:
     """Regression: a bare `ChartInstance(...)` never validates its `parameters` (untyped dict), so
-    a required field left `None` after `_merge_chart_param_values` (see above) used to sail through
+    a required field left `None` after `state.merge_chart_param_values` (see above) used to sail through
     unnoticed and only blow up later, unguarded, from `hint_required_columns`/`render` -- with no
     error surfaced in the UI. This must raise here instead, where the add/edit-chart callback can
     catch it and show "Invalid parameters: ...".
     """
     with pytest.raises(ValidationError):
-        _build_validated_chart_instance("line", {"column": None, "x_axis": "step"})
+        state.build_validated_chart_instance("line", {"column": None, "x_axis": "step"})
 
 
 def test_build_validated_chart_instance_rejects_a_bad_optional_field_value() -> None:
     """A cleared NumberInput isn't guaranteed to report `None` -- if it reports `""` instead, that's
-    not dropped by `_merge_chart_param_values` (only `None` is), so it must still fail validation
+    not dropped by `state.merge_chart_param_values` (only `None` is), so it must still fail validation
     here rather than reach `render` unguarded.
     """
     with pytest.raises(ValidationError):
-        _build_validated_chart_instance("line", {"column": "loss", "x_axis": "step", "width": ""})
+        state.build_validated_chart_instance("line", {"column": "loss", "x_axis": "step", "width": ""})
 
 
 def _run(run_id: int, name: str | None = None) -> Run:
@@ -151,7 +145,7 @@ def test_build_hparam_rows_merges_hparams_and_last_step_metrics() -> None:
     }
     last_step_metrics = {1: {"loss": 0.5}}
 
-    rows = _build_hparam_rows(runs, hparams_by_run, last_step_metrics)
+    rows = run_table._build_hparam_rows(runs, hparams_by_run, last_step_metrics)
 
     assert rows == [
         {"run_id": 1, "run_name": "Run 1", "lr": 0.1, "loss": 0.5},
@@ -163,7 +157,7 @@ def test_build_hparam_rows_includes_runs_with_no_logged_hyperparameters() -> Non
     """A run that hasn't called `log_hyperparams` yet must still show up, not disappear."""
     runs = [_run(1, name="baseline"), _run(2)]
 
-    rows = _build_hparam_rows(runs, hparams_by_run={}, last_step_metrics={})
+    rows = run_table._build_hparam_rows(runs, hparams_by_run={}, last_step_metrics={})
 
     assert rows == [
         {"run_id": 1, "run_name": "baseline"},
@@ -172,14 +166,16 @@ def test_build_hparam_rows_includes_runs_with_no_logged_hyperparameters() -> Non
 
 
 def test_run_summary_is_a_single_dimmed_line() -> None:
-    props = cast("Any", _run_summary([{"run_id": 1}], excluded=[])).to_plotly_json()["props"]
+    props = cast("Any", run_table._run_summary([{"run_id": 1}], excluded=[])).to_plotly_json()["props"]
     assert props["children"] == "1 runs"
     assert props["size"] == "xs"
     assert props["c"] == "dimmed"
 
 
 def test_run_summary_includes_excluded_count() -> None:
-    props = cast("Any", _run_summary([{"run_id": 1}, {"run_id": 2}], excluded=[2])).to_plotly_json()["props"]
+    props = cast(
+        "Any", run_table._run_summary([{"run_id": 1}, {"run_id": 2}], excluded=[2])
+    ).to_plotly_json()["props"]
     assert props["children"] == "2 runs · 1 excluded"
 
 
@@ -187,12 +183,12 @@ def test_persist_settings_merges_into_page_settings_without_touching_panels(
     store: SQLLiteStore, experiment_id: int
 ) -> None:
     """Unlike `_persist_settings_and_rerender`, this must not need/trigger an accordion rebuild."""
-    store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
+    store.get_or_create_page(state.BasicExperimentPage, experiment_id=experiment_id)
 
-    page = _persist_settings(store, experiment_id, {"selected": ["lr"]})
+    page = state.persist_settings(store, experiment_id, {"selected": ["lr"]})
 
     assert page.page_settings["selected"] == ["lr"]
-    reloaded = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
+    reloaded = store.get_or_create_page(state.BasicExperimentPage, experiment_id=experiment_id)
     assert reloaded.page_settings["selected"] == ["lr"]
 
 
@@ -213,7 +209,7 @@ def test_fetch_last_step_metrics_returns_nothing_when_no_columns_are_requested(
     run = store.create_run(models.NewRun(experiment_id=experiment_id))
     _log_a_metric(store, experiment_id, run.id, "loss")
 
-    assert _fetch_last_step_metrics(store, experiment_id, metric_name_match=set()) == {}
+    assert run_table._fetch_last_step_metrics(store, experiment_id, metric_name_match=set()) == {}
 
 
 def test_fetch_last_step_metrics_only_returns_requested_columns(
@@ -223,7 +219,7 @@ def test_fetch_last_step_metrics_only_returns_requested_columns(
     _log_a_metric(store, experiment_id, run.id, "loss")
     _log_a_metric(store, experiment_id, run.id, "acc")
 
-    result = _fetch_last_step_metrics(store, experiment_id, metric_name_match={"loss"})
+    result = run_table._fetch_last_step_metrics(store, experiment_id, metric_name_match={"loss"})
 
     assert result == {run.id: {"loss": 1.0}}
 
@@ -236,7 +232,9 @@ def test_load_hparam_view_data_reports_available_metric_keys_without_fetching_va
     run = store.create_run(models.NewRun(experiment_id=experiment_id))
     _log_a_metric(store, experiment_id, run.id, "loss")
 
-    hparam_keys, metric_keys, rows = _load_hparam_view_data(store, experiment_id, [], selected_metrics=set())
+    hparam_keys, metric_keys, rows = run_table._load_hparam_view_data(
+        store, experiment_id, [], selected_metrics=set()
+    )
 
     assert metric_keys == ["loss"]
     assert hparam_keys == []
@@ -249,7 +247,7 @@ def test_load_hparam_view_data_includes_values_for_selected_metrics(
     run = store.create_run(models.NewRun(experiment_id=experiment_id))
     _log_a_metric(store, experiment_id, run.id, "loss")
 
-    _hk, _mk, rows = _load_hparam_view_data(store, experiment_id, [], selected_metrics={"loss"})
+    _hk, _mk, rows = run_table._load_hparam_view_data(store, experiment_id, [], selected_metrics={"loss"})
 
     assert rows == [{"run_id": run.id, "run_name": f"Run {run.id}", "loss": 1.0}]
 

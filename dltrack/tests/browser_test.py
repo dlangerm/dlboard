@@ -28,10 +28,13 @@ from playwright.sync_api import expect
 from werkzeug.serving import make_server
 
 from dltrack import models
-from dltrack.models import constants
 from dltrack.plugins import LOCAL_DEPLOYMENT, themes
 from dltrack.plugins.backend.basic_rest_backend import BasicDltrackAPI
-from dltrack.plugins.pages.simple_experiment_page import NEW_PANEL_ID, NEW_PANEL_NAME_ID
+from dltrack.plugins.pages.experiment import (
+    NEW_PANEL_ID,
+    NEW_PANEL_NAME_ID,
+    PAGE_EXPERIMENT_ID,
+)
 from dltrack.plugins.pages.simple_homepage import NEW_PROJECT_BUTTON_ID, NEW_PROJECT_NAME_ID
 from dltrack.plugins.pages.simple_project_page import NEW_EXP_BUTTON_ID, NEW_EXP_NAME_ID
 from dltrack.serve import app as build_app
@@ -135,7 +138,7 @@ def test_logged_metrics_render_as_a_real_chart(
     page.reload()
     page.get_by_role("button", name="Auto-generate charts").click()
 
-    expect(page.locator(f"#{constants.PAGE_EXPERIMENT_ID} svg")).to_be_visible()
+    expect(page.locator(f"#{PAGE_EXPERIMENT_ID} svg")).to_be_visible()
     assert console_errors == []
 
 

@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import dash_mantine_components as dmc
 from dash import Dash, Input, Output, State, html
 
-from dltrack.models import NewExperiment, constants
+from dltrack.models import ButtonId, DivId, ModalId, NewExperiment, constants
 from dltrack.plugins.pages._dataframe_helpers import experiment_display_name
 from dltrack.plugins.pages._delete_confirm import (
     DeleteConfirmIds,
@@ -25,11 +25,23 @@ from dltrack.serve import get_current_user, get_data_store
 if TYPE_CHECKING:
     from dltrack.models import Experiment
 
-PROJECT_ID: typing.Final = "project-id"
+
+class _ProjectPage:
+    """Page tag: marks a component id as belonging to `simple_project_page.py`."""
+
+
 PROJECT_HEADER_ID: typing.Final = "project-header"
 EXP_LIST_ID: typing.Final = "experiment-list-id"
 NEW_EXP_BUTTON_ID: typing.Final = "new-experiment-button"
 NEW_EXP_NAME_ID: typing.Final = "new-experiment-name"
+
+# Route-skeleton container: declared here (the owning plugin), imported by serve/_pages/project.py.
+PAGE_PROJECT_ID: DivId[_ProjectPage] = DivId("project-container")
+
+DELETE_PROJECT_BUTTON_ID: ButtonId[_ProjectPage] = ButtonId("delete-project-button")
+DELETE_PROJECT_MODAL_ID: ModalId[_ProjectPage] = ModalId("delete-project-modal")
+DELETE_PROJECT_CONFIRM_ID: ButtonId[_ProjectPage] = ButtonId("delete-project-confirm")
+DELETE_PROJECT_CANCEL_ID: ButtonId[_ProjectPage] = ButtonId("delete-project-cancel")
 
 PROJECT_DESC_IDS = DescriptionEditorIds(
     header=PROJECT_HEADER_ID,
@@ -41,10 +53,10 @@ PROJECT_DESC_IDS = DescriptionEditorIds(
 )
 
 PROJECT_DELETE_IDS = DeleteConfirmIds(
-    button=constants.DELETE_PROJECT_BUTTON_ID,
-    modal=constants.DELETE_PROJECT_MODAL_ID,
-    confirm=constants.DELETE_PROJECT_CONFIRM_ID,
-    cancel=constants.DELETE_PROJECT_CANCEL_ID,
+    button=DELETE_PROJECT_BUTTON_ID,
+    modal=DELETE_PROJECT_MODAL_ID,
+    confirm=DELETE_PROJECT_CONFIRM_ID,
+    cancel=DELETE_PROJECT_CANCEL_ID,
 )
 
 _CARD_COLORS = ["indigo", "teal", "grape", "orange", "cyan", "pink"]
@@ -113,7 +125,7 @@ def plug(app: Dash) -> None:
     """Plugin."""
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
-        Output(constants.PAGE_PROJECT_ID, component_property="children"),
+        Output(PAGE_PROJECT_ID, component_property="children"),
         State(constants.STATE_PROJECT_ID, component_property="data"),
     )
     def layout(project_id: int) -> dmc.Container:

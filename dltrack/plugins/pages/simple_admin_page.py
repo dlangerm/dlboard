@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Final, cast
 
 import dash_mantine_components as dmc
 from dash import ALL, Dash, Input, Output, State, html
@@ -11,7 +11,8 @@ from dash.dcc import Store
 from dash.exceptions import PreventUpdate
 from structlog.stdlib import get_logger
 
-from dltrack.models import AuditAction, EntityType, Scope, constants, has_scope
+from dltrack import models
+from dltrack.models import ButtonId, DivId, ModalId, StoreId, ValueId, constants
 from dltrack.plugins.backend import artifact_purge_worker
 from dltrack.plugins.pages._dash_helpers import require_triggered_id
 from dltrack.serve import get_auth_provider, get_current_user, get_data_store, get_installed_plugins
@@ -23,36 +24,57 @@ if TYPE_CHECKING:
 
 _log = get_logger(__name__)
 
+
+class _AdminPage:
+    """Page tag: marks a component id as belonging to `simple_admin_page.py`."""
+
+
+# Route-skeleton container: declared here (the owning plugin), imported by serve/_pages/admin.py.
+PAGE_ADMIN_ID: DivId[_AdminPage] = DivId("admin-container")
+
+ADMIN_TABS_ID: ValueId[_AdminPage] = ValueId("admin-tabs")
+ADMIN_TRASH_CONTENT_ID: DivId[_AdminPage] = DivId("admin-trash-content")
+ADMIN_AUDIT_LOG_CONTENT_ID: DivId[_AdminPage] = DivId("admin-audit-log-content")
+ADMIN_ABOUT_CONTENT_ID: DivId[_AdminPage] = DivId("admin-about-content")
+# Pattern-matched "type" discriminators, not standalone component ids -- plain strings.
+ADMIN_RESTORE_BUTTON_TYPE: Final = "admin-restore-button"
+ADMIN_PURGE_BUTTON_TYPE: Final = "admin-purge-button"
+ADMIN_PURGE_MODAL_ID: ModalId[_AdminPage] = ModalId("admin-purge-modal")
+ADMIN_PURGE_CONFIRM_ID: ButtonId[_AdminPage] = ButtonId("admin-purge-confirm")
+ADMIN_PURGE_CANCEL_ID: ButtonId[_AdminPage] = ButtonId("admin-purge-cancel")
+ADMIN_PENDING_PURGE_STORE_ID: StoreId[_AdminPage] = StoreId("admin-pending-purge-store")
+ADMIN_RESUME_PURGE_ID: ButtonId[_AdminPage] = ButtonId("admin-resume-purge")
+
 # One (label, entity type, lister, restorer) tuple per soft-deletable entity -- the single place
 # that needs to grow if a new soft-deletable entity is ever added.
-_TRASH_KINDS: tuple[tuple[str, EntityType], ...] = (
-    ("Project", EntityType.PROJECT),
-    ("Experiment", EntityType.EXPERIMENT),
-    ("Run", EntityType.RUN),
-    ("Artifact", EntityType.ARTIFACT),
+_TRASH_KINDS: tuple[tuple[str, models.EntityType], ...] = (
+    ("Project", models.EntityType.PROJECT),
+    ("Experiment", models.EntityType.EXPERIMENT),
+    ("Run", models.EntityType.RUN),
+    ("Artifact", models.EntityType.ARTIFACT),
 )
 
-_LISTERS: dict[EntityType, str] = {
-    EntityType.PROJECT: "list_deleted_projects",
-    EntityType.EXPERIMENT: "list_deleted_experiments",
-    EntityType.RUN: "list_deleted_runs",
-    EntityType.ARTIFACT: "list_deleted_artifacts",
+_LISTERS: dict[models.EntityType, str] = {
+    models.EntityType.PROJECT: "list_deleted_projects",
+    models.EntityType.EXPERIMENT: "list_deleted_experiments",
+    models.EntityType.RUN: "list_deleted_runs",
+    models.EntityType.ARTIFACT: "list_deleted_artifacts",
 }
-_RESTORERS: dict[EntityType, str] = {
-    EntityType.PROJECT: "restore_project",
-    EntityType.EXPERIMENT: "restore_experiment",
-    EntityType.RUN: "restore_run",
-    EntityType.ARTIFACT: "restore_artifact",
+_RESTORERS: dict[models.EntityType, str] = {
+    models.EntityType.PROJECT: "restore_project",
+    models.EntityType.EXPERIMENT: "restore_experiment",
+    models.EntityType.RUN: "restore_run",
+    models.EntityType.ARTIFACT: "restore_artifact",
 }
-_PURGERS: dict[EntityType, str] = {
-    EntityType.PROJECT: "purge_project",
-    EntityType.EXPERIMENT: "purge_experiment",
-    EntityType.RUN: "purge_run",
-    EntityType.ARTIFACT: "purge_artifact",
+_PURGERS: dict[models.EntityType, str] = {
+    models.EntityType.PROJECT: "purge_project",
+    models.EntityType.EXPERIMENT: "purge_experiment",
+    models.EntityType.RUN: "purge_run",
+    models.EntityType.ARTIFACT: "purge_artifact",
 }
 
 
-def _trash_row(label: str, entity_type: EntityType, item: Any) -> Component:  # noqa: ANN401
+def _trash_row(label: str, entity_type: models.EntityType, item: Any) -> Component:  # noqa: ANN401
     deleted_by = f" by user {item.deleted_by}" if item.deleted_by is not None else ""
     return dmc.Paper(
         dmc.Group(
@@ -69,7 +91,7 @@ def _trash_row(label: str, entity_type: EntityType, item: Any) -> Component:  # 
                         dmc.Button(
                             "Restore",
                             id={
-                                "type": constants.ADMIN_RESTORE_BUTTON_TYPE,
+                                "type": ADMIN_RESTORE_BUTTON_TYPE,
                                 "entity_type": entity_type.value,
                                 "id": item.id,
                             },
@@ -79,7 +101,7 @@ def _trash_row(label: str, entity_type: EntityType, item: Any) -> Component:  # 
                         dmc.Button(
                             "Purge",
                             id={
-                                "type": constants.ADMIN_PURGE_BUTTON_TYPE,
+                                "type": ADMIN_PURGE_BUTTON_TYPE,
                                 "entity_type": entity_type.value,
                                 "id": item.id,
                             },
@@ -109,7 +131,7 @@ of how much history a single delete touched.
 """
 
 
-def _render_trash_kind(label: str, entity_type: EntityType, items: list[Any]) -> Component:
+def _render_trash_kind(label: str, entity_type: models.EntityType, items: list[Any]) -> Component:
     """
     One grouped section of the trash: a heading, then that kind's rows.
 
@@ -155,7 +177,7 @@ def _render_pending_purge_banner(store: DataStore[...]) -> Component | None:
                     "from a previous purge.",
                     size="sm",
                 ),
-                dmc.Button("Resume cleanup", id=constants.ADMIN_RESUME_PURGE_ID, size="xs", variant="light"),
+                dmc.Button("Resume cleanup", id=ADMIN_RESUME_PURGE_ID, size="xs", variant="light"),
             ],
             justify="space-between",
         ),
@@ -178,10 +200,10 @@ def _render_trash(store: DataStore[...]) -> Component:
     return dmc.Stack(sections, gap="lg")
 
 
-_AUDIT_ACTION_COLORS: dict[AuditAction, str] = {
-    AuditAction.SOFT_DELETE: "orange",
-    AuditAction.RESTORE: "teal",
-    AuditAction.PURGE: "red",
+_AUDIT_ACTION_COLORS: dict[models.AuditAction, str] = {
+    models.AuditAction.SOFT_DELETE: "orange",
+    models.AuditAction.RESTORE: "teal",
+    models.AuditAction.PURGE: "red",
 }
 
 
@@ -216,7 +238,7 @@ def _audit_log_row(entry: AuditLogEntry) -> Component:
 
 
 def _render_audit_log(store: DataStore[...], actor: User) -> Component:
-    if not has_scope(actor, Scope.AUDIT_LOG_READ):
+    if not models.has_scope(actor, models.Scope.AUDIT_LOG_READ):
         return dmc.Text("You don't have permission to view the audit log.", c="dimmed")
     entries: list[AuditLogEntry] = list(store.list_audit_log(actor, limit=200))
     if not entries:
@@ -311,17 +333,15 @@ def _admin_layout() -> Component:
                             dmc.TabsTab("About", value="about"),
                         ]
                     ),
-                    dmc.TabsPanel(html.Div(id=constants.ADMIN_TRASH_CONTENT_ID), value="trash", pt="md"),
-                    dmc.TabsPanel(
-                        html.Div(id=constants.ADMIN_AUDIT_LOG_CONTENT_ID), value="audit-log", pt="md"
-                    ),
-                    dmc.TabsPanel(html.Div(id=constants.ADMIN_ABOUT_CONTENT_ID), value="about", pt="md"),
+                    dmc.TabsPanel(html.Div(id=ADMIN_TRASH_CONTENT_ID), value="trash", pt="md"),
+                    dmc.TabsPanel(html.Div(id=ADMIN_AUDIT_LOG_CONTENT_ID), value="audit-log", pt="md"),
+                    dmc.TabsPanel(html.Div(id=ADMIN_ABOUT_CONTENT_ID), value="about", pt="md"),
                 ],
-                id=constants.ADMIN_TABS_ID,
+                id=ADMIN_TABS_ID,
                 value="trash",
             ),
             dmc.Modal(
-                id=constants.ADMIN_PURGE_MODAL_ID,
+                id=ADMIN_PURGE_MODAL_ID,
                 title="Permanently delete this?",
                 opened=False,
                 children=[
@@ -331,15 +351,15 @@ def _admin_layout() -> Component:
                     ),
                     dmc.Group(
                         [
-                            dmc.Button("Cancel", id=constants.ADMIN_PURGE_CANCEL_ID, variant="default"),
-                            dmc.Button("Purge permanently", id=constants.ADMIN_PURGE_CONFIRM_ID, color="red"),
+                            dmc.Button("Cancel", id=ADMIN_PURGE_CANCEL_ID, variant="default"),
+                            dmc.Button("Purge permanently", id=ADMIN_PURGE_CONFIRM_ID, color="red"),
                         ],
                         justify="flex-end",
                         mt="sm",
                     ),
                 ],
             ),
-            Store(id=constants.ADMIN_PENDING_PURGE_STORE_ID),
+            Store(id=ADMIN_PENDING_PURGE_STORE_ID),
         ],
         size="lg",
         py="xl",
@@ -348,8 +368,8 @@ def _admin_layout() -> Component:
 
 def _register_tab_callbacks(app: Dash) -> None:
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
-        Output(constants.ADMIN_TRASH_CONTENT_ID, "children"),
-        Input(constants.ADMIN_TABS_ID, "value"),
+        Output(ADMIN_TRASH_CONTENT_ID, "children"),
+        Input(ADMIN_TABS_ID, "value"),
     )
     def render_trash_tab(tab: str) -> Component:
         if tab != "trash":
@@ -357,8 +377,8 @@ def _register_tab_callbacks(app: Dash) -> None:
         return _render_trash(get_data_store())
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
-        Output(constants.ADMIN_AUDIT_LOG_CONTENT_ID, "children"),
-        Input(constants.ADMIN_TABS_ID, "value"),
+        Output(ADMIN_AUDIT_LOG_CONTENT_ID, "children"),
+        Input(ADMIN_TABS_ID, "value"),
     )
     def render_audit_log_tab(tab: str) -> Component:
         if tab != "audit-log":
@@ -367,8 +387,8 @@ def _register_tab_callbacks(app: Dash) -> None:
         return _render_audit_log(store, get_current_user(store))
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
-        Output(constants.ADMIN_ABOUT_CONTENT_ID, "children"),
-        Input(constants.ADMIN_TABS_ID, "value"),
+        Output(ADMIN_ABOUT_CONTENT_ID, "children"),
+        Input(ADMIN_TABS_ID, "value"),
     )
     def render_about_tab(tab: str) -> Component:
         if tab != "about":
@@ -387,12 +407,12 @@ def _register_restore_callback(app: Dash) -> None:
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(constants.LOCATION_ID, "href", allow_duplicate=True),
         Output(constants.LOCATION_ID, "refresh", allow_duplicate=True),
-        Input({"type": constants.ADMIN_RESTORE_BUTTON_TYPE, "entity_type": ALL, "id": ALL}, "n_clicks"),
+        Input({"type": ADMIN_RESTORE_BUTTON_TYPE, "entity_type": ALL, "id": ALL}, "n_clicks"),
         prevent_initial_call=True,
     )
     def restore_entity(_n_clicks_list: list[int]) -> tuple[str, bool]:
         triggered_id = cast("dict[str, str]", require_triggered_id())
-        entity_type = EntityType(triggered_id["entity_type"])
+        entity_type = models.EntityType(triggered_id["entity_type"])
         entity_id = int(triggered_id["id"])
 
         store = get_data_store()
@@ -406,9 +426,9 @@ def _register_restore_callback(app: Dash) -> None:
 
 def _register_purge_callbacks(app: Dash) -> None:
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
-        Output(constants.ADMIN_PURGE_MODAL_ID, "opened", allow_duplicate=True),
-        Output(constants.ADMIN_PENDING_PURGE_STORE_ID, "data"),
-        Input({"type": constants.ADMIN_PURGE_BUTTON_TYPE, "entity_type": ALL, "id": ALL}, "n_clicks"),
+        Output(ADMIN_PURGE_MODAL_ID, "opened", allow_duplicate=True),
+        Output(ADMIN_PENDING_PURGE_STORE_ID, "data"),
+        Input({"type": ADMIN_PURGE_BUTTON_TYPE, "entity_type": ALL, "id": ALL}, "n_clicks"),
         prevent_initial_call=True,
     )
     def open_purge_modal(_n_clicks_list: list[int]) -> tuple[bool, dict[str, Any]]:
@@ -416,8 +436,8 @@ def _register_purge_callbacks(app: Dash) -> None:
         return True, dict(triggered_id)
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
-        Output(constants.ADMIN_PURGE_MODAL_ID, "opened", allow_duplicate=True),
-        Input(constants.ADMIN_PURGE_CANCEL_ID, "n_clicks"),
+        Output(ADMIN_PURGE_MODAL_ID, "opened", allow_duplicate=True),
+        Input(ADMIN_PURGE_CANCEL_ID, "n_clicks"),
         prevent_initial_call=True,
     )
     def cancel_purge(n_clicks: int) -> bool:
@@ -429,17 +449,17 @@ def _register_purge_callbacks(app: Dash) -> None:
     # symmetric with `restore_entity`, and avoids any similar reliance on in-place reconciliation
     # of dynamically-rendered content.
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
-        Output(constants.ADMIN_PURGE_MODAL_ID, "opened", allow_duplicate=True),
+        Output(ADMIN_PURGE_MODAL_ID, "opened", allow_duplicate=True),
         Output(constants.LOCATION_ID, "href", allow_duplicate=True),
         Output(constants.LOCATION_ID, "refresh", allow_duplicate=True),
-        Input(constants.ADMIN_PURGE_CONFIRM_ID, "n_clicks"),
-        State(constants.ADMIN_PENDING_PURGE_STORE_ID, "data"),
+        Input(ADMIN_PURGE_CONFIRM_ID, "n_clicks"),
+        State(ADMIN_PENDING_PURGE_STORE_ID, "data"),
         prevent_initial_call=True,
     )
     def confirm_purge(n_clicks: int, pending: dict[str, Any] | None) -> tuple[bool, str, bool]:
         if not n_clicks or not pending:
             raise PreventUpdate
-        entity_type = EntityType(pending["entity_type"])
+        entity_type = models.EntityType(pending["entity_type"])
         entity_id = int(pending["id"])
 
         store = get_data_store()
@@ -455,7 +475,7 @@ def _register_purge_callbacks(app: Dash) -> None:
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(constants.LOCATION_ID, "href", allow_duplicate=True),
         Output(constants.LOCATION_ID, "refresh", allow_duplicate=True),
-        Input(constants.ADMIN_RESUME_PURGE_ID, "n_clicks"),
+        Input(ADMIN_RESUME_PURGE_ID, "n_clicks"),
         prevent_initial_call=True,
     )
     def resume_purge_cleanup(n_clicks: int) -> tuple[str, bool]:
@@ -468,7 +488,7 @@ def _register_purge_callbacks(app: Dash) -> None:
 def plug(app: Dash) -> None:
     """An admin page: a Trash tab (restore/purge) and an Audit Log tab."""
 
-    @app.callback(Output(constants.PAGE_ADMIN_ID, component_property="children"))  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(Output(PAGE_ADMIN_ID, component_property="children"))  # pyright: ignore[reportUnknownMemberType]
     def layout() -> Component:
         return _admin_layout()
 

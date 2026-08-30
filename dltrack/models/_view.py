@@ -13,8 +13,6 @@ from pydantic import BaseModel, ValidationError, field_validator
 from structlog.stdlib import get_logger
 
 if typing.TYPE_CHECKING:
-    from collections.abc import Iterable
-
     from dltrack.models._data_store import DataStore
 
 _log = get_logger(__name__)
@@ -300,11 +298,6 @@ class PanelInstance[D, C](BaseModel, frozen=True, extra="forbid"):
     """`"packed"` sizes each chart to its own natural width and wraps them left-to-right;
     `"grid"` forces every chart onto an equal-width column instead."""
 
-    @property
-    def display_name(self) -> str:
-        """Return a display-friendly panel name."""
-        return self.name
-
     def render(self, dataframes: D) -> list[C]:
         """Render a panel."""
         return [c.render(dataframes) for c in self.charts]
@@ -372,18 +365,5 @@ class Page[D, P, C](NewPage[D, C], frozen=True, extra="forbid"):
     """Page ID to be rendered."""
 
     @abstractmethod
-    def retrieve_dataframes(self, store: DataStore[...], experiment_id: int) -> Iterable[D]:
-        """Get the dataframes for a page."""
-
-    @abstractmethod
     def render(self, data_store: DataStore[...], experiment_id: int) -> P:
         """Render the page."""
-
-    @classmethod
-    def sql_schema(cls) -> dict[str, str]:
-        """Return the sql schema for this type."""
-        return {
-            "id": "PRIMARY KEY AUTOINCREMENT",
-            "panels": "TEXT",
-            "page_settings": "TEXT",
-        }

@@ -6,12 +6,20 @@ import dash_mantine_components as dmc
 from dash import Dash, Input, Output, State
 
 from dltrack import models
-from dltrack.models import constants
+from dltrack.models import DivId
 from dltrack.serve import get_data_store
+
+
+class _HomePage:
+    """Page tag: marks a component id as belonging to `simple_homepage.py`."""
+
 
 PROJECT_LIST_ID: typing.Final = "project-list-id"
 NEW_PROJECT_BUTTON_ID: typing.Final = "new-project-button"
 NEW_PROJECT_NAME_ID: typing.Final = "new-project-name"
+
+# Route-skeleton container: declared here (the owning plugin), imported by serve/_pages/home.py.
+PAGE_HOME_ID: DivId[_HomePage] = DivId("homepage-container")
 
 _CARD_COLORS = ["indigo", "teal", "grape", "orange", "cyan", "pink"]
 
@@ -79,7 +87,7 @@ def _list_projects(store: models.DataStore[...]) -> dmc.SimpleGrid | dmc.Center:
 def plug(app: Dash) -> None:
     """Render a basic homepage."""
 
-    @app.callback(Output(constants.PAGE_HOME_ID, component_property="children"))  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(Output(PAGE_HOME_ID, component_property="children"))  # pyright: ignore[reportUnknownMemberType]
     def layout_homepage() -> dmc.Container:
         return dmc.Container(
             children=[

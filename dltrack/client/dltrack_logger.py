@@ -175,7 +175,6 @@ class DLTrackLogger(Logger):
     ) -> None:
         """Initialize with an existing project/experiment id; an experiment is created if none is given."""
         settings = settings or DLTrackLoggerSettings()
-        self._project_id = project_id
         self._api = BasicDltrackAPI(base_url=server_url)
         if experiment_id is None:
             experiment = self._api.create_experiment(
