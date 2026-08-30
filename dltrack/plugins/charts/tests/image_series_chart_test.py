@@ -10,6 +10,7 @@ import pytest
 
 from dltrack.conftest import props as _props
 from dltrack.plugins.charts.image_series import (
+    GRID_COLS,
     MAX_SLIDER_LABELS,
     PAGE_SIZE,
     ImageChart,
@@ -187,3 +188,11 @@ def test_caption_is_not_dimmed() -> None:
     run_block = _first_run_block(stack)
     caption = _props(run_block["children"][2])
     assert "c" not in caption
+
+
+def test_natural_width_derives_from_height_and_grid_cols() -> None:
+    assert ImageChart.natural_width(ImageChartSettings(key="img", height=200)) == GRID_COLS * (200 + 40)
+
+
+def test_natural_width_override() -> None:
+    assert ImageChart.natural_width(ImageChartSettings(key="img", height=200, width=333)) == 333

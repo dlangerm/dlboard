@@ -1,9 +1,9 @@
 # pyright: reportPrivateUsage=false
-"""Tests for the "Manage panels" list and the panel-mutation helpers it drives.
+"""Tests for the panel accordion header (hover controls) and the panel-mutation helpers.
 
-Deliberately a separate list outside the accordion, not layered onto AccordionControl (which
-is a native full-width Mantine button and clips/fights any sibling or overlay content placed
-in its row) — see `_panel_management_row`'s docstring.
+Sync/layout/rename/move/delete all render as hover-revealed controls on each panel's own accordion
+header (`_panel_header`/`_panel_header_controls`) -- true DOM siblings of `AccordionControl` there,
+not nested inside its native `<button>`. There's no separate "Manage panels" drawer/list anymore.
 """
 
 from __future__ import annotations
@@ -21,50 +21,69 @@ from dltrack.plugins.pages.simple_experiment_page import (
     _move_chart,
     _move_panel,
     _move_panel_button_id,
-    _panel_management_list,
+    _panel_header,
+    _panel_header_controls,
+    _panel_layout_control_id,
     _panel_sync_switch_id,
+    _PanelMoveDirection,
     _rename_panel_button_id,
+    _set_panel_layout,
     _set_panel_sync,
 )
 
-# ---- "Manage panels" list: rename/delete/reorder controls work without opening a panel ----
+# ---- panel header: hover-revealed sync/layout/rename/move/delete, siblings of AccordionControl ----
 
 
-def test_panel_management_list_empty_when_no_panels() -> None:
-    from dash import html
+def test_panel_header_contains_accordion_control_and_hover_controls() -> None:
+    panel = PanelInstance[Any, Any](name="train")
 
-    assert isinstance(_panel_management_list([]), html.Div)
+    rendered = _panel_header(panel, index=0, count=1)
+
+    assert _find_props(rendered, _delete_panel_button_id("train")) is not None
+    assert _find_props(rendered, _move_panel_button_id("train", "up")) is not None
+    assert _find_props(rendered, _rename_panel_button_id("train")) is not None
+    assert _find_props(rendered, _panel_sync_switch_id("train")) is not None
+    assert _find_props(rendered, _panel_layout_control_id("train")) is not None
 
 
-def test_panel_management_list_has_a_row_per_panel_with_working_controls() -> None:
-    panels = [PanelInstance[Any, Any](name=n) for n in ("train", "val")]
+def test_panel_header_controls_delete_is_always_enabled() -> None:
+    controls = _panel_header_controls(PanelInstance[Any, Any](name="train"), index=0, count=1)
 
-    rendered = _panel_management_list(panels)
-
-    # Neither button sets `disabled` explicitly: they're plain, always-enabled buttons, hidden as
-    # a unit by the containing edit-mode Collapse rather than individually disabled.
-    delete_button = _find_props(rendered, _delete_panel_button_id("train"))
+    delete_button = _find_props(controls, _delete_panel_button_id("train"))
     assert delete_button is not None
     assert delete_button.get("disabled") is not True
 
-    rename_button = _find_props(rendered, _rename_panel_button_id("train"))
-    assert rename_button is not None
-    assert rename_button.get("disabled") is not True
+
+def test_panel_header_controls_shows_sync_and_layout_state() -> None:
+    synced = _panel_header_controls(
+        PanelInstance[Any, Any](name="p", sync=True, layout="grid"), index=0, count=1
+    )
+    unsynced = _panel_header_controls(
+        PanelInstance[Any, Any](name="p", sync=False, layout="packed"), index=0, count=1
+    )
+
+    assert _find_props(synced, _panel_sync_switch_id("p"))["checked"] is True  # pyright: ignore[reportOptionalSubscript]
+    assert _find_props(synced, _panel_layout_control_id("p"))["value"] == "grid"  # pyright: ignore[reportOptionalSubscript]
+    assert _find_props(unsynced, _panel_sync_switch_id("p"))["checked"] is False  # pyright: ignore[reportOptionalSubscript]
+    assert _find_props(unsynced, _panel_layout_control_id("p"))["value"] == "packed"  # pyright: ignore[reportOptionalSubscript]
 
 
-def test_panel_management_list_move_buttons_disabled_at_boundaries() -> None:
-    panels = [PanelInstance[Any, Any](name=n) for n in ("a", "b", "c")]
+def _move_disabled(panel_name: str, *, index: int, count: int, direction: _PanelMoveDirection) -> bool:
+    controls = _panel_header_controls(PanelInstance[Any, Any](name=panel_name), index=index, count=count)
+    props = _find_props(controls, _move_panel_button_id(panel_name, direction))
+    assert props is not None
+    return bool(props["disabled"])
 
-    rendered = _panel_management_list(panels)
 
-    assert _find_props(rendered, _move_panel_button_id("a", "up"))["disabled"] is True  # pyright: ignore[reportOptionalSubscript]
-    assert _find_props(rendered, _move_panel_button_id("a", "down"))["disabled"] is False  # pyright: ignore[reportOptionalSubscript]
+def test_panel_header_controls_move_buttons_disabled_at_boundaries() -> None:
+    assert _move_disabled("a", index=0, count=3, direction="up") is True
+    assert _move_disabled("a", index=0, count=3, direction="down") is False
 
-    assert _find_props(rendered, _move_panel_button_id("b", "up"))["disabled"] is False  # pyright: ignore[reportOptionalSubscript]
-    assert _find_props(rendered, _move_panel_button_id("b", "down"))["disabled"] is False  # pyright: ignore[reportOptionalSubscript]
+    assert _move_disabled("b", index=1, count=3, direction="up") is False
+    assert _move_disabled("b", index=1, count=3, direction="down") is False
 
-    assert _find_props(rendered, _move_panel_button_id("c", "up"))["disabled"] is False  # pyright: ignore[reportOptionalSubscript]
-    assert _find_props(rendered, _move_panel_button_id("c", "down"))["disabled"] is True  # pyright: ignore[reportOptionalSubscript]
+    assert _move_disabled("c", index=2, count=3, direction="up") is False
+    assert _move_disabled("c", index=2, count=3, direction="down") is True
 
 
 # ---- _move_panel ----
@@ -96,18 +115,6 @@ def test_move_panel_unknown_panel_is_a_noop() -> None:
 # ---- panel sync: switch + _set_panel_sync + _apply_panel_sync ----
 
 
-def test_panel_management_list_shows_the_panel_sync_state() -> None:
-    panels = [
-        PanelInstance[Any, Any](name="synced", sync=True),
-        PanelInstance[Any, Any](name="off", sync=False),
-    ]
-
-    rendered = _panel_management_list(panels)
-
-    assert _find_props(rendered, _panel_sync_switch_id("synced"))["checked"] is True  # pyright: ignore[reportOptionalSubscript]
-    assert _find_props(rendered, _panel_sync_switch_id("off"))["checked"] is False  # pyright: ignore[reportOptionalSubscript]
-
-
 def test_set_panel_sync_updates_only_the_named_panel() -> None:
     panels = [PanelInstance[Any, Any](name=n) for n in ("a", "b")]
 
@@ -126,6 +133,18 @@ def test_apply_panel_sync_drops_sync_id_when_disabled() -> None:
 
     assert "syncId" not in result.lineChartProps  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
     assert result.lineChartProps["syncMethod"] == "value"  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+
+
+# ---- panel layout: segmented control + _set_panel_layout ----
+
+
+def test_set_panel_layout_updates_only_the_named_panel() -> None:
+    panels = [PanelInstance[Any, Any](name=n) for n in ("a", "b")]
+
+    result = _set_panel_layout(panels, "a", "grid")
+
+    by_name = {p.name: p.layout for p in result}
+    assert by_name == {"a": "grid", "b": "packed"}
 
 
 def test_apply_panel_sync_scopes_sync_id_to_the_panel_when_enabled() -> None:

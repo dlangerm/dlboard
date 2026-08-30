@@ -9,12 +9,20 @@ import typing
 from abc import ABC, abstractmethod
 from enum import StrEnum
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ValidationError, field_validator
+from structlog.stdlib import get_logger
 
 if typing.TYPE_CHECKING:
     from collections.abc import Iterable
 
     from dltrack.models._data_store import DataStore
+
+_log = get_logger(__name__)
+
+_FALLBACK_NATURAL_WIDTH: typing.Final = 400
+"""Width used for a chart whose persisted `parameters` no longer validate (e.g. after a schema
+change), so a single broken chart can't crash the whole panel's layout -- `render()` still raises
+for the same case, surfacing as that one chart's own inline error instead."""
 
 
 class ColumnKind(StrEnum):
@@ -70,6 +78,11 @@ class ChartType[P: BaseModel, D, C](ABC, BaseModel, frozen=True, extra="forbid")
         """Hint at the hyperparameter keys required for this chart."""
 
     @classmethod
+    @abstractmethod
+    def natural_width(cls, parameters: P) -> int:
+        """Preferred render width in px, derived from this chart's own settings (e.g. height + aspect ratio)."""
+
+    @classmethod
     def register(cls, *, allow_override: bool = False) -> None:
         ChartTypeRegistry.register(cls, allow_override=allow_override)
 
@@ -93,6 +106,9 @@ class ParameterField(BaseModel, frozen=True, extra="forbid"):
     column_kind: ColumnKind | None = None
     choices: tuple[str, ...] | None = None
     """Fixed set of allowed values for a `Literal[...]`-typed field, rendered as a dropdown."""
+    description: str | None = None
+    """Help text shown alongside the field's widget, sourced from the settings model's own
+    `pydantic.Field(description=...)`."""
 
 
 class ChartTypeRegistry:
@@ -176,6 +192,7 @@ class ChartTypeRegistry:
                 default=field.default if not field.is_required() else None,
                 column_kind=field_column_kinds.get(field_name),
                 choices=choices,
+                description=field.description,
             )
         return field_descriptors
 
@@ -201,6 +218,11 @@ class ChartTypeRegistry:
         chart_type = cls._all_charts[chart.chart_type]
         return chart_type.hint_required_hparams(chart_type.parameter_type().model_validate(chart.parameters))
 
+    @classmethod
+    def natural_width[T, C](cls, chart: ChartInstance[T, C]) -> int:
+        chart_type = cls._all_charts[chart.chart_type]
+        return chart_type.natural_width(chart_type.parameter_type().model_validate(chart.parameters))
+
 
 class ChartInstance[D, C](BaseModel, frozen=True, extra="forbid"):
     """A chart for a set of metrics."""
@@ -216,15 +238,50 @@ class ChartInstance[D, C](BaseModel, frozen=True, extra="forbid"):
         return ChartTypeRegistry.render(self, dataframe)
 
     def hint_required_columns(self) -> set[str] | None:
-        """Hint the required columns for this chart to render."""
-        return ChartTypeRegistry.hint_required_columns(self)
+        """
+        Hint the required columns for this chart to render.
+
+        Falls back to `None` ("fetch everything") if `parameters` no longer validates against this
+        chart type's settings model -- e.g. stale data from before a schema change -- rather than
+        raising and taking the rest of the panel down with it. `render()` still raises for the same
+        case, so the broken chart itself still surfaces as its own inline error.
+        """
+        try:
+            return ChartTypeRegistry.hint_required_columns(self)
+        except ValidationError:
+            _log.warning(
+                "chart has invalid parameters, fetching every column as a fallback",
+                chart_type=self.chart_type,
+            )
+            return None
 
     def hint_required_artifact_keys(self) -> set[str] | None:
-        return ChartTypeRegistry.hint_required_artifact_keys(self)
+        try:
+            return ChartTypeRegistry.hint_required_artifact_keys(self)
+        except ValidationError:
+            _log.warning(
+                "chart has invalid parameters, no artifact-key hint available", chart_type=self.chart_type
+            )
+            return None
 
     def hint_required_hparams(self) -> set[str] | None:
-        """Hint the required hyperparameter keys for this chart to render."""
-        return ChartTypeRegistry.hint_required_hparams(self)
+        """Hint the required hyperparameter keys for this chart to render. See `hint_required_columns`."""
+        try:
+            return ChartTypeRegistry.hint_required_hparams(self)
+        except ValidationError:
+            _log.warning(
+                "chart has invalid parameters, fetching every hparam as a fallback",
+                chart_type=self.chart_type,
+            )
+            return None
+
+    def natural_width(self) -> int:
+        """Preferred render width in px for this chart instance. See `hint_required_columns`."""
+        try:
+            return ChartTypeRegistry.natural_width(self)
+        except ValidationError:
+            _log.warning("chart has invalid parameters, using fallback width", chart_type=self.chart_type)
+            return _FALLBACK_NATURAL_WIDTH
 
 
 class PanelInstance[D, C](BaseModel, frozen=True, extra="forbid"):
@@ -238,6 +295,10 @@ class PanelInstance[D, C](BaseModel, frozen=True, extra="forbid"):
 
     sync: bool = True
     """Whether synced-capable charts (e.g. line charts) in this panel share a hover/tooltip crosshair."""
+
+    layout: typing.Literal["packed", "grid"] = "packed"
+    """`"packed"` sizes each chart to its own natural width and wraps them left-to-right;
+    `"grid"` forces every chart onto an equal-width column instead."""
 
     @property
     def display_name(self) -> str:

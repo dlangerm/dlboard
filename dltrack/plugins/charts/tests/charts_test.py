@@ -266,4 +266,25 @@ def test_bar_chart_syncs_by_value_not_index() -> None:
     chart = BarChart.render(BarChartSettings(column="accuracy", x_axis="hidden_size"), df)
     props = _props(chart)
     assert props["barChartProps"]["syncMethod"] == "value"
+
     assert props["barChartProps"]["syncId"] == "hidden_size"
+
+
+def test_line_chart_natural_width_derives_from_height() -> None:
+    settings = LineChartSettings(column="loss", x_axis="step", height=180)
+    assert LineChart.natural_width(settings) == round(180 * 16 / 9)
+
+
+def test_line_chart_natural_width_override() -> None:
+    settings = LineChartSettings(column="loss", x_axis="step", height=180, width=500)
+    assert LineChart.natural_width(settings) == 500
+
+
+def test_bar_chart_natural_width_derives_from_height() -> None:
+    settings = BarChartSettings(column="loss", x_axis="step", height=180)
+    assert BarChart.natural_width(settings) == round(180 * 16 / 9)
+
+
+def test_bar_chart_natural_width_override() -> None:
+    settings = BarChartSettings(column="loss", x_axis="step", height=180, width=500)
+    assert BarChart.natural_width(settings) == 500

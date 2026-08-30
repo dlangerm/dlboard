@@ -31,6 +31,7 @@ from dltrack import models
 from dltrack.models import constants
 from dltrack.plugins import LOCAL_DEPLOYMENT, themes
 from dltrack.plugins.backend.basic_rest_backend import BasicDltrackAPI
+from dltrack.plugins.pages.simple_experiment_page import NEW_PANEL_ID, NEW_PANEL_NAME_ID
 from dltrack.plugins.pages.simple_homepage import NEW_PROJECT_BUTTON_ID, NEW_PROJECT_NAME_ID
 from dltrack.plugins.pages.simple_project_page import NEW_EXP_BUTTON_ID, NEW_EXP_NAME_ID
 from dltrack.serve import app as build_app
@@ -109,8 +110,8 @@ def test_logged_metrics_render_as_a_real_chart(
     Create a project/experiment via the UI, log metrics through the real REST client, and confirm
     a chart actually renders -- not just that a `LineChart` component was returned with the right
     props (which `chart_render_isolation_test.py` already covers at the Python level), but that the
-    JS chart library drew real SVG from it in a browser, after a *clientside* (JS-only) panel-drawer
-    toggle and the "Auto-generate charts" action -- none of which a Python-level test can see.
+    JS chart library drew real SVG from it in a browser, after the "Auto-generate charts" action --
+    none of which a Python-level test can see.
     """
     _create_project_and_experiment(page, live_server_url, "Browser Test Experiment")
     page.get_by_role("link", name="Open experiment").click()
@@ -132,10 +133,63 @@ def test_logged_metrics_render_as_a_real_chart(
     )
 
     page.reload()
-    page.get_by_role("button", name="Manage panels").click()
     page.get_by_role("button", name="Auto-generate charts").click()
 
     expect(page.locator(f"#{constants.PAGE_EXPERIMENT_ID} svg")).to_be_visible()
+    assert console_errors == []
+
+
+def test_panel_header_hover_controls_toggle_and_delete_without_disturbing_siblings(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """
+    Regression check for on-hover panel move/delete: `AccordionControl` now renders one level
+    deeper, wrapped in a `Group` alongside sibling hover-revealed icons, instead of as a direct
+    child of `AccordionItem` -- exactly the DOM/click-target interaction a Python-level
+    component-tree test can't see. Proves (a) the control button still toggles open/closed despite
+    the extra wrapping, (b) delete requires confirmation -- Cancel leaves the panel alone, Delete
+    actually removes it -- and (c) doing so doesn't also toggle or otherwise disturb a different,
+    currently-open panel.
+    """
+    _create_project_and_experiment(page, live_server_url, "Panel Hover Controls Experiment")
+    page.get_by_role("link", name="Open experiment").click()
+
+    for panel_name in ("keep", "delete-me"):
+        page.locator(f"#{NEW_PANEL_NAME_ID}").fill(panel_name)
+        page.locator(f"#{NEW_PANEL_ID}").click()
+        # Each click's callback bases its mutation on the client-side page-state snapshot, so the
+        # next click must wait for this one's response to land first -- otherwise the second
+        # request reads a stale (pre-mutation) snapshot and its response clobbers the first.
+        expect(page.get_by_role("button", name=panel_name)).to_be_visible()
+
+    # Both panels start closed (this experiment's accordion already persisted an empty
+    # `open_panel` before either panel existed). Round-trip the control button itself: opening,
+    # collapsing, then re-expanding must all still work with the extra wrapping Group in place.
+    add_chart_button = page.get_by_role("button", name="+")
+    keep_control = page.get_by_role("button", name="keep")
+    keep_control.click()
+    expect(add_chart_button).to_be_visible()
+    keep_control.click()
+    expect(add_chart_button).not_to_be_visible()
+    keep_control.click()
+    expect(add_chart_button).to_be_visible()
+
+    # "delete-me" is second in document order and was never opened.
+    delete_me_trash_icon = page.get_by_role("button", name="🗑").nth(1)
+    delete_me_trash_icon.hover()
+    delete_me_trash_icon.click()
+
+    confirm_text = page.get_by_text("Delete this panel?")
+    expect(confirm_text).to_be_visible()
+    page.get_by_role("button", name="Cancel").click()
+    expect(confirm_text).not_to_be_visible()
+    expect(page.get_by_text("delete-me")).to_be_visible()  # Cancel left it alone
+
+    delete_me_trash_icon.click()
+    expect(confirm_text).to_be_visible()
+    page.get_by_role("button", name="Delete", exact=True).click()
+    expect(page.get_by_text("delete-me")).to_have_count(0)
+    expect(add_chart_button).to_be_visible()  # "keep" is untouched by deleting its sibling
     assert console_errors == []
 
 

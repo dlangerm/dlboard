@@ -1,0 +1,9 @@
+.dl-chart-controls, .dl-add-chart-btn, .dl-panel-controls {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.dl-chart-item:hover .dl-chart-controls,
+.dl-panel-body:hover .dl-add-chart-btn,
+.dl-panel-item-header:hover .dl-panel-controls {
+  opacity: 1;
+}

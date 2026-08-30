@@ -163,3 +163,14 @@ def test_render_pivot_mode_missing_columns_shows_a_message() -> None:
     rows = _props(table)["data"]
     assert len(rows) == 1
     assert "message" in rows[0]
+
+
+# ---- natural_width ----
+
+
+def test_natural_width_defaults_to_a_flat_value() -> None:
+    assert TableChart.natural_width(TableChartSettings()) == 700
+
+
+def test_natural_width_override() -> None:
+    assert TableChart.natural_width(TableChartSettings(width=333)) == 333

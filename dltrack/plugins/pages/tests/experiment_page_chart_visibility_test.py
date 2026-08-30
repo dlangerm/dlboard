@@ -1,13 +1,13 @@
 # pyright: reportPrivateUsage=false
-"""Tests for edit-mode-conditional visibility: per-chart controls, the add-chart button, header."""
+"""Tests for hover-revealed chart controls: always enabled, hidden until hovered via CSS."""
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
+import dash_mantine_components as dmc
 import pandas as pd
-import pytest
 
 from dltrack import models
 from dltrack.conftest import find_props as _find_props
@@ -15,7 +15,6 @@ from dltrack.conftest import props as _to_props
 from dltrack.models._view import ChartInstance, PanelInstance
 from dltrack.plugins.charts.line_chart import LineChart
 from dltrack.plugins.pages.simple_experiment_page import (
-    EDIT_MODE_ID,
     _chart_controls_group_id,
     _header_actions,
     _open_chart_button_id,
@@ -38,30 +37,29 @@ def _panel_with_chart() -> PanelInstance[Any, Any]:
     )
 
 
-# ---- per-chart edit/delete controls: hidden (not just disabled) outside edit mode ----
+# ---- per-chart edit/delete controls: always enabled, revealed on hover via CSS class ----
 
 
-@pytest.mark.parametrize("edit_mode", [False, True])
-def test_render_panel_charts_controls_visibility_matches_edit_mode(*, edit_mode: bool) -> None:
+def test_render_panel_charts_controls_are_always_enabled_and_hover_revealed() -> None:
     panel = _panel_with_chart()
     df = pd.DataFrame({"run_id": [1], "step": [0], "loss": [0.5]})
 
-    [stack] = _render_panel_charts(panel, df, edit_mode=edit_mode)
+    [stack] = _render_panel_charts(panel, df)
+    assert _to_props(stack)["className"] == "dl-chart-item"
+
     controls = _find_props(stack, _chart_controls_group_id("p", 0))
     assert controls is not None
-
-    expected_style = {} if edit_mode else {"display": "none"}
-    assert controls["style"] == expected_style
+    assert controls["className"] == "dl-chart-controls"
 
     [move_left_icon, move_right_icon, edit_icon, delete_icon] = controls["children"]
-    # a single chart has no neighbor to swap with, so move controls stay disabled either way
+    # a single chart has no neighbor to swap with, so move controls stay disabled regardless
     assert _to_props(move_left_icon)["disabled"] is True
     assert _to_props(move_right_icon)["disabled"] is True
-    assert _to_props(edit_icon)["disabled"] is not edit_mode
-    assert _to_props(delete_icon)["disabled"] is not edit_mode
+    assert _to_props(edit_icon).get("disabled") is not True
+    assert _to_props(delete_icon).get("disabled") is not True
 
 
-def test_render_panel_content_add_button_visibility_matches_edit_mode(
+def test_render_panel_content_add_button_is_always_enabled_and_hover_revealed(
     store: SQLLiteStore, experiment_id: int
 ) -> None:
     run = store.create_run(models.NewRun(experiment_id=experiment_id))
@@ -74,28 +72,47 @@ def test_render_panel_content_add_button_visibility_matches_edit_mode(
     )
     panel = _panel_with_chart()
 
-    off = _find_props(
-        _render_panel_content(store, experiment_id, panel, {}, edit_mode=False), _open_chart_button_id("p")
-    )
-    on = _find_props(
-        _render_panel_content(store, experiment_id, panel, {}, edit_mode=True), _open_chart_button_id("p")
-    )
+    button = _find_props(_render_panel_content(store, experiment_id, panel, {}), _open_chart_button_id("p"))
 
-    assert off is not None
-    assert off["disabled"] is True
-    assert off["style"] == {"display": "none"}
-
-    assert on is not None
-    assert on["disabled"] is False
-    assert on["style"] == {}
+    assert button is not None
+    assert button.get("disabled") is not True
+    assert button["className"] == "dl-add-chart-btn"
 
 
-# ---- header actions: Edit switch, rendered once and never regenerated ----
+# ---- chart width: packed uses the chart's natural width, grid stretches to its cell ----
 
 
-def test_header_actions_has_edit_switch_defaulted_off() -> None:
-    actions = _header_actions()
+def test_render_panel_charts_packed_layout_uses_natural_width() -> None:
+    panel = _panel_with_chart()
+    df = pd.DataFrame({"run_id": [1], "step": [0], "loss": [0.5]})
 
-    switch = _find_props(actions, EDIT_MODE_ID)
-    assert switch is not None
-    assert switch["checked"] is False
+    [stack] = _render_panel_charts(panel, df)
+
+    assert _to_props(stack)["w"] == panel.charts[0].natural_width()
+
+
+def test_render_panel_charts_grid_layout_stretches_to_full_width() -> None:
+    panel = _panel_with_chart().model_copy(update={"layout": "grid"})
+    df = pd.DataFrame({"run_id": [1], "step": [0], "loss": [0.5]})
+
+    [stack] = _render_panel_charts(panel, df)
+
+    assert _to_props(stack)["w"] == "100%"
+
+
+# ---- header actions: no global edit switch, rendered once and never regenerated ----
+
+
+def _contains_switch(component: object) -> bool:
+    if isinstance(component, dmc.Switch):
+        return True
+    children: object = getattr(component, "children", None)
+    if isinstance(children, list):
+        return any(_contains_switch(cast("object", c)) for c in cast("list[Any]", children))
+    if children is not None:
+        return _contains_switch(children)
+    return False
+
+
+def test_header_actions_has_no_edit_switch() -> None:
+    assert not _contains_switch(_header_actions())
