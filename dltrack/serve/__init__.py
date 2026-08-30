@@ -17,11 +17,13 @@ from dltrack.serve._backend._data_store import (
 )
 from dltrack.serve._backend._installed_plugins import get_installed_plugins, set_installed_plugins
 from dltrack.serve._backend._sql_store_base import SQLStoreBase
+from dltrack.serve._clientside_script import ClientsideScript
 from dltrack.serve._production_server import resolve_plugins, run_production_server
 from dltrack.serve._settings_env import set_setting_env
 from dltrack.serve.app import app
 
 __all__ = [
+    "ClientsideScript",
     "SQLStoreBase",
     "app",
     "get_artifact_store",
