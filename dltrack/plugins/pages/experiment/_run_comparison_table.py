@@ -213,9 +213,9 @@ def _render_hparam_panel(
         [
             dmc.Group(
                 [
+                    dmc.Text("Columns", size="xs", fw=600, style={"flexShrink": 0}),
                     dmc.MultiSelect(
                         id=NAVBAR_HPARAM_COL_SELECT_ID,
-                        label="Columns",
                         data=[
                             {"group": "Hyperparameters", "items": hparam_keys},
                             {"group": "Metrics (last step)", "items": metric_keys},
@@ -230,12 +230,11 @@ def _render_hparam_panel(
                         "Apply",
                         id=NAVBAR_HPARAM_CONFIRM_COLS_ID,
                         size="xs",
-                        mt=22,
                         style={"display": "none", "flexShrink": 0},
                     ),
                     Store(id=NAVBAR_HPARAM_APPLIED_COLS_ID, data=applied),
                 ],
-                align="flex-end",
+                align="center",
                 gap="xs",
                 wrap="nowrap",
             ),

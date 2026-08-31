@@ -13,6 +13,7 @@ import typing
 from typing import TYPE_CHECKING, Literal
 
 from dltrack.models import ChartInstance, ColumnKind, PanelInstance
+from dltrack.plugins.charts.bar_chart import BarChart
 from dltrack.plugins.charts.image_series import ImageChart
 from dltrack.plugins.charts.line_chart import LineChart
 
@@ -76,8 +77,18 @@ def panel_name_for_group(group: str, kind: ColumnKind, *, granularity: str | Non
     return f"{name} ({granularity})" if granularity else name
 
 
-def default_chart_for_metric(column: str) -> ChartInstance[typing.Any, typing.Any]:
-    """The sensible default chart for a metric column: a line chart against `step`."""
+def default_chart_for_metric(
+    column: str, *, single_value: bool = False
+) -> ChartInstance[typing.Any, typing.Any]:
+    """
+    The sensible default chart for a metric column: a line chart against `step`.
+
+    `single_value` (every run logs this metric at most once, per
+    `_dataframe_helpers.single_value_metric_columns`) switches that to a bar chart comparing the
+    value across runs instead -- a line chart of a single point per run isn't a chart at all.
+    """
+    if single_value:
+        return ChartInstance(chart_type=BarChart.name, parameters={"column": column, "x_axis": "run_id"})
     return ChartInstance(chart_type=LineChart.name, parameters={"column": column, "x_axis": "step"})
 
 
@@ -106,6 +117,7 @@ def build_auto_panels(
     delimiter: str,
     mode: SplitMode,
     lightning: bool = False,
+    single_value_columns: frozenset[str] = frozenset(),
 ) -> list[PanelInstance[typing.Any, typing.Any]]:
     """
     Build a full set of panels from every known metric/artifact key, grouped by `delimiter`/`mode`.
@@ -129,7 +141,7 @@ def build_auto_panels(
         group = split_group_name(column, delimiter, mode)
         granularity = lightning_granularity(column) if lightning else None
         panel_name = panel_name_for_group(group, ColumnKind.METRIC, granularity=granularity)
-        _append(panel_name, default_chart_for_metric(column))
+        _append(panel_name, default_chart_for_metric(column, single_value=column in single_value_columns))
 
     for key in artifact_keys(column_kinds):
         group = split_group_name(key, delimiter, mode)
@@ -174,7 +186,12 @@ class Suggestion(typing.NamedTuple):
 
 
 def build_suggestions(
-    uncharted: UnchartedKeys, *, delimiter: str, mode: SplitMode, lightning: bool = False
+    uncharted: UnchartedKeys,
+    *,
+    delimiter: str,
+    mode: SplitMode,
+    lightning: bool = False,
+    single_value_columns: frozenset[str] = frozenset(),
 ) -> list[Suggestion]:
     """Turn uncharted keys into ready-to-add `Suggestion`s, grouped the same way as auto-populate."""
     suggestions = [
@@ -186,7 +203,7 @@ def build_suggestions(
                 ColumnKind.METRIC,
                 granularity=lightning_granularity(column) if lightning else None,
             ),
-            chart=default_chart_for_metric(column),
+            chart=default_chart_for_metric(column, single_value=column in single_value_columns),
         )
         for column in uncharted.metrics
     ]

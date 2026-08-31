@@ -46,6 +46,14 @@ def test_hint_required_columns_pivot_mode_wants_pivot_columns_only() -> None:
     assert TableChart.hint_required_columns(settings) == {"step", "loss"}
 
 
+def test_hint_required_columns_wants_no_metrics_when_only_hparams_are_curated() -> None:
+    """Metrics and hparams are fetched independently -- curating one but leaving the other at its
+    default shouldn't force a full "every metric in the experiment" fetch for a table that isn't
+    even set up to show any."""
+    settings = TableChartSettings(hparams=["lr"])
+    assert TableChart.hint_required_columns(settings) == set()
+
+
 def test_hint_required_hparams_defaults_to_unbounded() -> None:
     assert TableChart.hint_required_hparams(TableChartSettings()) is None
 

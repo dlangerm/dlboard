@@ -15,6 +15,7 @@ from dash import Input, Output, State
 from dash.exceptions import PreventUpdate
 
 from dltrack.models import constants
+from dltrack.plugins.pages._dash_helpers import tooltipped_action_icon
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -37,24 +38,11 @@ def render_delete_control(
 ) -> list[Component]:
     """A delete button (or, with `icon_only`, a tooltipped trash icon) plus its confirmation modal."""
     # `aria-label` is only known dynamically (a dict key, not a literal kwarg -- Python identifiers
-    # can't contain hyphens), so pyright can't match it against `ActionIcon`'s typed signature;
-    # `cast` to `Any` rather than fight that.
-    action_icon = cast("Any", dmc.ActionIcon)
+    # can't contain hyphens), so pyright can't match it against `tooltipped_action_icon`'s typed
+    # keyword params; `cast` to `Any` rather than fight that.
+    extra_attrs = cast("dict[str, Any]", {"aria-label": label})
     trigger = (
-        dmc.Tooltip(
-            action_icon(
-                "🗑",
-                id=ids.button,
-                n_clicks=0,
-                variant="subtle",
-                color="red",
-                size="sm",
-                **{"aria-label": label},
-            ),
-            label=label,
-            position="top",
-            withArrow=True,
-        )
+        tooltipped_action_icon("🗑", component_id=ids.button, label=label, color="red", **extra_attrs)
         if icon_only
         else dmc.Button(label, id=ids.button, n_clicks=0, color="red", variant="light", size="xs")
     )

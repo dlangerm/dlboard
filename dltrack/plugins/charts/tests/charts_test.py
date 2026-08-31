@@ -351,8 +351,23 @@ def test_bar_chart_sorts_numeric_groups_ascending() -> None:
 
 def test_bar_chart_sort_disabled_keeps_first_seen_order() -> None:
     df = _hparam_grouped_df({1: 256, 2: 32, 3: 128}, {1: [0.1], 2: [0.2], 3: [0.3]})
-    chart = BarChart.render(BarChartSettings(column="accuracy", x_axis="hidden_size", sort=False), df)
+    chart = BarChart.render(BarChartSettings(column="accuracy", x_axis="hidden_size", sort="none"), df)
     assert [row["hidden_size"] for row in _props(chart)["data"]] == [256, 32, 128]
+
+
+def test_bar_chart_sort_descending() -> None:
+    df = _hparam_grouped_df({1: 256, 2: 32, 3: 128}, {1: [0.1], 2: [0.2], 3: [0.3]})
+    chart = BarChart.render(BarChartSettings(column="accuracy", x_axis="hidden_size", sort="descending"), df)
+    assert [row["hidden_size"] for row in _props(chart)["data"]] == [256, 128, 32]
+
+
+def test_bar_chart_x_axis_type_category_forces_text_sort_over_numeric() -> None:
+    """A numeric-looking category (e.g. version strings) can be forced to sort as plain text."""
+    df = pd.DataFrame(
+        {"run_id": [1, 2, 3], "step": [0, 0, 0], "version": ["v2", "v10", "v1"], "accuracy": [0.1, 0.2, 0.3]}
+    )
+    chart = BarChart.render(BarChartSettings(column="accuracy", x_axis="version", x_axis_type="category"), df)
+    assert [row["version"] for row in _props(chart)["data"]] == ["v1", "v10", "v2"]
 
 
 def test_bar_chart_groups_by_metric_column_when_no_hparam_matches() -> None:

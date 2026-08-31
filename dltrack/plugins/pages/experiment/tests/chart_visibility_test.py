@@ -11,9 +11,11 @@ from dltrack.conftest import find_props as _find_props
 from dltrack.conftest import props as _to_props
 from dltrack.models._view import ChartInstance, PanelInstance
 from dltrack.plugins.charts.line_chart import LineChart
+from dltrack.plugins.charts.table_chart import TableChart
 from dltrack.plugins.pages.experiment import _experiment_page_state as state
 
 LineChart.register(allow_override=True)
+TableChart.register(allow_override=True)
 
 
 def _panel_with_chart() -> PanelInstance[Any, Any]:
@@ -58,6 +60,43 @@ def test_panel_header_controls_add_button_is_always_enabled_and_hover_revealed()
     button = _find_props(controls, state.open_chart_button_id("p"))
     assert button is not None
     assert button.get("disabled") is not True
+
+
+# ---- unscoped-fetch badge: visible (not hover-gated) when a chart can't hint its columns ----
+
+
+def _header_row(stack: Any) -> Any:  # noqa: ANN401
+    """The chart item's top row: the unscoped-fetch badge (if any) plus the hover-controls group."""
+    return _to_props(stack)["children"][0]
+
+
+def test_render_panel_charts_no_badge_when_chart_hints_its_columns() -> None:
+    panel = _panel_with_chart()  # a line chart, always hints {column, x_axis}
+    df = pd.DataFrame({"run_id": [1], "step": [0], "loss": [0.5]})
+
+    [stack] = state.render_panel_charts(panel, df)
+    header_row = _to_props(_header_row(stack))
+
+    assert header_row["justify"] == "flex-end"
+    assert len(header_row["children"]) == 1  # just the hover-controls group, no badge
+
+
+def test_render_panel_charts_badge_when_chart_cannot_hint_its_columns() -> None:
+    """A table chart with no `metrics` filter set (its documented "show everything" default)
+    can't name specific columns to fetch -- this is exactly the case that logs `fetch_panel_
+    dataframe`'s "fetching every metric" debug trace, so the UI should surface it too."""
+    panel = PanelInstance[Any, Any](
+        name="p", charts=[ChartInstance[Any, Any](chart_type="table", parameters={})]
+    )
+    df = pd.DataFrame({"run_id": [1], "step": [0], "loss": [0.5]})
+
+    [stack] = state.render_panel_charts(panel, df)
+    header_row = _to_props(_header_row(stack))
+
+    assert header_row["justify"] == "space-between"
+    badge, hover_controls = header_row["children"]
+    assert _to_props(hover_controls)["className"] == "dl-chart-controls"
+    assert "fetches all metrics" in str(_to_props(badge))
 
 
 # ---- chart width: packed uses the chart's natural width, grid stretches to its cell ----

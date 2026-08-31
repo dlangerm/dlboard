@@ -25,6 +25,7 @@ from structlog.stdlib import get_logger
 
 from dltrack import models
 from dltrack.models import ButtonId, DivId, ModalId, StoreId, ValueId, constants
+from dltrack.plugins.pages._dash_helpers import tooltipped_action_icon
 from dltrack.plugins.pages.experiment import _dataframe_helpers as dfh
 from dltrack.serve import get_data_store
 
@@ -251,7 +252,11 @@ def fetch_panel_dataframe(
 
     metrics_df = pd.DataFrame()
     if metric_cols is None:
-        _log.warning("A panel had a missing hint, fetching every metric, this can be expensive")
+        # Not a misconfiguration -- a table chart with no `metrics` filter set is documented to
+        # mean "show every metric" (see `TableChartSettings.metrics`), which can only be rendered
+        # by fetching every metric. Worth a debug trace for anyone chasing a slow panel, but not a
+        # warning: it's the chart's normal, common default, not something the user did wrong.
+        _log.debug("A panel had a missing hint, fetching every metric, this can be expensive")
         metrics_df = dfh.build_metrics_dataframe(store.fetch_metrics(experiment_id))
     elif metric_cols:
         metrics_df = dfh.build_metrics_dataframe(
@@ -354,6 +359,31 @@ def _apply_panel_sync(rendered: Component, *, panel_name: str, sync: bool) -> Co
     return rendered
 
 
+def _unscoped_fetch_badge(chart: models.ChartInstance[Any, Any]) -> Component | None:
+    """
+    A small, always-visible warning badge for a chart whose data fetch can't be scoped.
+
+    `chart.hint_required_columns() is None` means this chart's settings don't name specific
+    metrics (e.g. a table chart with no `metrics` filter, left at its "show every metric" default)
+    -- rendering it means fetching every metric logged for the whole experiment, every time its
+    panel updates. That's a real, sometimes-significant cost the user has no other way to notice
+    (it only ever shows up as a backend debug log), so it gets a badge instead of hover-only
+    controls: this should be visible without having to go looking for it.
+    """
+    if chart.hint_required_columns() is not None:
+        return None
+    return dmc.Tooltip(
+        dmc.Badge("fetches all metrics", color="yellow", variant="light", size="xs", radius="sm"),
+        label="No metrics filter is set, so this chart fetches every metric in the experiment on "
+        'every update -- can be slow on a large experiment. Set specific metrics in "Edit chart" '
+        "to scope it down.",
+        position="top",
+        withArrow=True,
+        multiline=True,
+        w=260,
+    )
+
+
 def render_panel_charts(panel: models.PanelInstance[Any, Any], dataframe: pd.DataFrame) -> list[dmc.Stack]:
     """Render each chart in a panel with edit/delete controls above it, revealed on hover."""
     items: list[dmc.Stack] = []
@@ -361,39 +391,44 @@ def render_panel_charts(panel: models.PanelInstance[Any, Any], dataframe: pd.Dat
         rendered = _apply_panel_sync(
             _render_chart_safely(chart, dataframe, panel.name), panel_name=panel.name, sync=panel.sync
         )
+        hover_controls = dmc.Group(
+            [
+                _drag_handle(
+                    class_name="dl-chart-drag-handle",
+                    component_id=chart_drag_handle_id(panel.name, idx),  # pyright: ignore[reportArgumentType]
+                    data_attrs={"panel-name": panel.name, "chart-index": str(idx)},
+                ),
+                tooltipped_action_icon(
+                    "✎",
+                    component_id=edit_chart_button_id(panel.name, idx),  # pyright: ignore[reportArgumentType]
+                    label="Edit chart",
+                    size="xs",
+                ),
+                tooltipped_action_icon(
+                    "🗑",
+                    component_id=delete_chart_button_id(panel.name, idx),  # pyright: ignore[reportArgumentType]
+                    label="Delete chart",
+                    color="red",
+                    size="xs",
+                ),
+            ],
+            id=chart_controls_group_id(panel.name, idx),  # pyright: ignore[reportArgumentType]
+            justify="flex-end",
+            gap="xs",
+            className="dl-chart-controls",
+        )
+        # The badge (when present) must be a *sibling* of `hover_controls`, not nested inside it --
+        # `dl-chart-controls`'s opacity:0-until-hover applies to its whole subtree, and this badge
+        # is the one thing here that's supposed to stay visible without hovering.
+        badge = _unscoped_fetch_badge(chart)
+        header_row = dmc.Group(
+            [*([badge] if badge else []), hover_controls],
+            justify="space-between" if badge else "flex-end",
+            wrap="nowrap",
+        )
         items.append(
             dmc.Stack(
-                [
-                    dmc.Group(
-                        [
-                            _drag_handle(
-                                class_name="dl-chart-drag-handle",
-                                component_id=chart_drag_handle_id(panel.name, idx),  # pyright: ignore[reportArgumentType]
-                                data_attrs={"panel-name": panel.name, "chart-index": str(idx)},
-                            ),
-                            dmc.ActionIcon(
-                                "✎",
-                                id=edit_chart_button_id(panel.name, idx),  # pyright: ignore[reportArgumentType]
-                                n_clicks=0,
-                                variant="subtle",
-                                size="xs",
-                            ),
-                            dmc.ActionIcon(
-                                "🗑",
-                                id=delete_chart_button_id(panel.name, idx),  # pyright: ignore[reportArgumentType]
-                                n_clicks=0,
-                                variant="subtle",
-                                color="red",
-                                size="xs",
-                            ),
-                        ],
-                        id=chart_controls_group_id(panel.name, idx),  # pyright: ignore[reportArgumentType]
-                        justify="flex-end",
-                        gap="xs",
-                        className="dl-chart-controls",
-                    ),
-                    rendered,
-                ],
+                [header_row, rendered],
                 gap="xs",
                 w="100%" if panel.layout == "grid" else chart.natural_width(),
                 maw="100%",
@@ -443,19 +478,6 @@ def _drag_handle(*, class_name: str, component_id: dict[str, str], data_attrs: d
     )
 
 
-def _tooltipped_icon(
-    icon: str, *, component_id: dict[str, str], label: str, disabled: bool = False, color: str | None = None
-) -> Component:
-    return dmc.Tooltip(
-        dmc.ActionIcon(
-            icon, id=component_id, n_clicks=0, variant="subtle", size="sm", disabled=disabled, color=color
-        ),
-        label=label,
-        position="top",
-        withArrow=True,
-    )
-
-
 def panel_header_controls(panel: models.PanelInstance[Any, Any]) -> Component:
     """Sync/layout/rename/drag/suggest/delete for one panel, hover-revealed on the panel's own header."""
     panel_name = panel.name
@@ -466,10 +488,10 @@ def panel_header_controls(panel: models.PanelInstance[Any, Any]) -> Component:
                 component_id=panel_drag_handle_id(panel_name),
                 data_attrs={"panel-name": panel_name},
             ),
-            _tooltipped_icon(
+            tooltipped_action_icon(
                 "+", component_id=open_chart_button_id(panel_name), label="Add chart to this panel"
             ),
-            _tooltipped_icon(
+            tooltipped_action_icon(
                 "✨",
                 component_id=panel_suggest_button_id(panel_name),
                 label="Suggest charts for this panel",
@@ -499,8 +521,10 @@ def panel_header_controls(panel: models.PanelInstance[Any, Any]) -> Component:
                 position="top",
                 withArrow=True,
             ),
-            _tooltipped_icon("✎", component_id=rename_panel_button_id(panel_name), label="Rename panel"),
-            _tooltipped_icon(
+            tooltipped_action_icon(
+                "✎", component_id=rename_panel_button_id(panel_name), label="Rename panel"
+            ),
+            tooltipped_action_icon(
                 "🗑",
                 component_id=delete_panel_button_id(panel_name),
                 label="Delete panel",
@@ -639,13 +663,18 @@ def empty_view_helper(panels: list[models.PanelInstance[Any, Any]]) -> Component
     return dmc.Group(
         [
             add_panel,
-            dmc.Button(
-                children="✨",
-                id=SUGGEST_CHARTS_BUTTON_ID,
-                n_clicks=0,
-                variant="gradient",
-                gradient={"from": "grape", "to": "indigo", "deg": 45},
-                size="sm",
+            dmc.Tooltip(
+                dmc.Button(
+                    children="✨",
+                    id=SUGGEST_CHARTS_BUTTON_ID,
+                    n_clicks=0,
+                    variant="gradient",
+                    gradient={"from": "grape", "to": "indigo", "deg": 45},
+                    size="sm",
+                ),
+                label="Suggest charts for uncharted metrics and artifacts",
+                position="top",
+                withArrow=True,
             ),
         ]
     )
@@ -922,6 +951,19 @@ def set_panel_layout(
     return [p.model_copy(update={"layout": layout}) if p.name == panel_name else p for p in panels]
 
 
+def move_index[T](items: list[T], index: int, target_index: int, *, after: bool) -> list[T]:
+    """Move the item at `index` to sit just before/after `target_index`; a no-op if either is out of range."""
+    if index == target_index or not (0 <= index < len(items)) or not (0 <= target_index < len(items)):
+        return items
+    items = list(items)
+    item = items.pop(index)
+    # `target_index` is the target's index in the *original* list -- popping `item` out from before
+    # it shifts it left by one, so account for that before adding the requested offset.
+    insert_at = target_index + (1 if after else 0) - (1 if index < target_index else 0)
+    items.insert(max(0, min(insert_at, len(items))), item)
+    return items
+
+
 def reorder_chart(
     panels: list[models.PanelInstance[Any, Any]],
     panel_name: str,
@@ -933,22 +975,50 @@ def reorder_chart(
     """Move the chart at `index` in the panel named `panel_name` to sit just before/after `target_index`."""
     new_panels: list[models.PanelInstance[Any, Any]] = []
     for p in panels:
-        if (
-            p.name != panel_name
-            or index == target_index
-            or not (0 <= index < len(p.charts))
-            or not (0 <= target_index < len(p.charts))
-        ):
+        if p.name != panel_name:
             new_panels.append(p)
             continue
-        charts = list(p.charts)
-        chart = charts.pop(index)
-        # `target_index` is the target's index in the *original* list -- popping `chart` out from
-        # before it shifts it left by one, so account for that before adding the requested offset.
-        insert_at = target_index + (1 if after else 0) - (1 if index < target_index else 0)
-        charts.insert(max(0, min(insert_at, len(charts))), chart)
-        new_panels.append(p.model_copy(update={"charts": charts}))
+        new_panels.append(
+            p.model_copy(update={"charts": move_index(p.charts, index, target_index, after=after)})
+        )
     return new_panels
+
+
+def reorder_rendered_panels(container: dict[str, Any], order: list[str]) -> dict[str, Any]:
+    """
+    Reorder an already-rendered `accordion_view` container's panels in place, by panel name.
+
+    A panel drag changes only display order, never a chart's content -- redoing the (potentially
+    expensive) per-panel dataframe fetch and chart render for every open panel on every drag, just
+    to end up with the exact same charts in a different order, is pure waste. `container` is the
+    client's own cached copy of `METRIC_CONTENT_ID.children` (an already-rendered `accordion_view`
+    tree, serialized to plain dicts by Dash), so this just splices its `Accordion`'s children --
+    each an `AccordionItem` keyed by its `value` (the panel name, see `accordion_view`) -- into the
+    requested order.
+    """
+    accordion = container["props"]["children"][0]
+    items = accordion["props"]["children"]
+    by_name = {item["props"]["value"]: item for item in items}
+    accordion["props"]["children"] = [by_name[name] for name in order]
+    return container
+
+
+def reorder_rendered_charts(container: dict[str, Any], panel_name: str, order: list[int]) -> dict[str, Any]:
+    """
+    Reorder one already-rendered panel's charts in place, by their original index. See `reorder_rendered_panels`.
+
+    `order` is a permutation of the panel's original chart indices (from `move_index` applied to
+    `range(len(panel.charts))`), not new chart data -- a chart drag never changes any chart's
+    content either, just where it sits within its panel.
+    """
+    accordion = container["props"]["children"][0]
+    item = next(i for i in accordion["props"]["children"] if i["props"]["value"] == panel_name)
+    accordion_panel = item["props"]["children"][1]
+    panel_body = accordion_panel["props"]["children"]  # html.Div(id=panel_content_id(...))
+    chart_container = panel_body["props"]["children"]  # dmc.SimpleGrid or dmc.Flex of chart items
+    chart_items = chart_container["props"]["children"]
+    chart_container["props"]["children"] = [chart_items[i] for i in order]
+    return container
 
 
 def merge_chart_param_values(

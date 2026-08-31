@@ -179,3 +179,24 @@ def test_merge_hyperparams_empty_df_returns_hparams_df() -> None:
     hparams_df = dfh.build_hyperparams_dataframe([_hparams(1, run_id=1, lr=0.1)])
     merged = dfh.merge_hyperparams(pd.DataFrame(), hparams_df)
     pd.testing.assert_frame_equal(merged, hparams_df)
+
+
+def test_single_value_metric_columns_excludes_metrics_logged_at_multiple_steps() -> None:
+    df = pd.DataFrame(
+        {
+            "run_id": [1, 1, 2, 2],
+            "step": [0, 1, 0, 1],
+            "final_accuracy": [None, 0.9, None, 0.8],
+            "loss": [0.5, 0.4, 0.9, 0.7],
+        }
+    )
+    assert dfh.single_value_metric_columns(df, ["final_accuracy", "loss"]) == {"final_accuracy"}
+
+
+def test_single_value_metric_columns_empty_df() -> None:
+    assert dfh.single_value_metric_columns(pd.DataFrame(), ["loss"]) == set()
+
+
+def test_single_value_metric_columns_ignores_unknown_columns() -> None:
+    df = pd.DataFrame({"run_id": [1], "step": [0], "loss": [0.5]})
+    assert dfh.single_value_metric_columns(df, ["loss", "missing"]) == {"loss"}
