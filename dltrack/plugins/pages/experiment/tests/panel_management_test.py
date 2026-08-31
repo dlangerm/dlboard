@@ -1,9 +1,10 @@
 # pyright: reportPrivateUsage=false
 """Tests for the panel accordion header (hover controls) and the panel-mutation helpers.
 
-Sync/layout/rename/move/delete all render as hover-revealed controls on each panel's own accordion
+Sync/layout/rename/drag/delete all render as hover-revealed controls on each panel's own accordion
 header (`panel_header`/`panel_header_controls`) -- true DOM siblings of `AccordionControl` there,
 not nested inside its native `<button>`. There's no separate "Manage panels" drawer/list anymore.
+Reordering is drag-and-drop (`_experiment_page_dragdrop.js`), not up/down buttons.
 """
 
 from __future__ import annotations
@@ -16,36 +17,41 @@ from dltrack.conftest import find_props as _find_props
 from dltrack.models._view import ChartInstance, PanelInstance
 from dltrack.plugins.pages.experiment import _experiment_page_state as state
 
-# ---- panel header: hover-revealed sync/layout/rename/move/delete, siblings of AccordionControl ----
+# ---- panel header: hover-revealed sync/layout/rename/drag/delete, siblings of AccordionControl ----
 
 
 def test_panel_header_contains_accordion_control_and_hover_controls() -> None:
     panel = PanelInstance[Any, Any](name="train")
 
-    rendered = state.panel_header(panel, index=0, count=1)
+    rendered = state.panel_header(panel)
 
     assert _find_props(rendered, state.delete_panel_button_id("train")) is not None
-    assert _find_props(rendered, state.move_panel_button_id("train", "up")) is not None
+    assert _find_props(rendered, state.panel_drag_handle_id("train")) is not None
     assert _find_props(rendered, state.rename_panel_button_id("train")) is not None
     assert _find_props(rendered, state.panel_sync_switch_id("train")) is not None
     assert _find_props(rendered, state.panel_layout_control_id("train")) is not None
 
 
 def test_panel_header_controls_delete_is_always_enabled() -> None:
-    controls = state.panel_header_controls(PanelInstance[Any, Any](name="train"), index=0, count=1)
+    controls = state.panel_header_controls(PanelInstance[Any, Any](name="train"))
 
     delete_button = _find_props(controls, state.delete_panel_button_id("train"))
     assert delete_button is not None
     assert delete_button.get("disabled") is not True
 
 
+def test_panel_header_controls_drag_handle_carries_the_panel_name() -> None:
+    controls = state.panel_header_controls(PanelInstance[Any, Any](name="train"))
+
+    handle = _find_props(controls, state.panel_drag_handle_id("train"))
+    assert handle is not None
+    assert handle["draggable"] == "true"
+    assert handle["data-panel-name"] == "train"
+
+
 def test_panel_header_controls_shows_sync_and_layout_state() -> None:
-    synced = state.panel_header_controls(
-        PanelInstance[Any, Any](name="p", sync=True, layout="grid"), index=0, count=1
-    )
-    unsynced = state.panel_header_controls(
-        PanelInstance[Any, Any](name="p", sync=False, layout="packed"), index=0, count=1
-    )
+    synced = state.panel_header_controls(PanelInstance[Any, Any](name="p", sync=True, layout="grid"))
+    unsynced = state.panel_header_controls(PanelInstance[Any, Any](name="p", sync=False, layout="packed"))
 
     assert _find_props(synced, state.panel_sync_switch_id("p"))["checked"] is True  # pyright: ignore[reportOptionalSubscript]
     assert _find_props(synced, state.panel_layout_control_id("p"))["value"] == "grid"  # pyright: ignore[reportOptionalSubscript]
@@ -53,48 +59,30 @@ def test_panel_header_controls_shows_sync_and_layout_state() -> None:
     assert _find_props(unsynced, state.panel_layout_control_id("p"))["value"] == "packed"  # pyright: ignore[reportOptionalSubscript]
 
 
-def _move_disabled(panel_name: str, *, index: int, count: int, direction: state.PanelMoveDirection) -> bool:
-    controls = state.panel_header_controls(PanelInstance[Any, Any](name=panel_name), index=index, count=count)
-    props = _find_props(controls, state.move_panel_button_id(panel_name, direction))
-    assert props is not None
-    return bool(props["disabled"])
+# ---- reorder_panel ----
 
 
-def test_panel_header_controls_move_buttons_disabled_at_boundaries() -> None:
-    assert _move_disabled("a", index=0, count=3, direction="up") is True
-    assert _move_disabled("a", index=0, count=3, direction="down") is False
-
-    assert _move_disabled("b", index=1, count=3, direction="up") is False
-    assert _move_disabled("b", index=1, count=3, direction="down") is False
-
-    assert _move_disabled("c", index=2, count=3, direction="up") is False
-    assert _move_disabled("c", index=2, count=3, direction="down") is True
-
-
-# ---- move_panel ----
-
-
-def test_move_panel_up_swaps_with_previous() -> None:
+def test_reorder_panel_moves_before_target() -> None:
     panels = [PanelInstance[Any, Any](name=n) for n in ("a", "b", "c")]
-    result = state.move_panel(panels, "b", "up")
+    result = state.reorder_panel(panels, "c", "a", after=False)
+    assert [p.name for p in result] == ["c", "a", "b"]
+
+
+def test_reorder_panel_moves_after_target() -> None:
+    panels = [PanelInstance[Any, Any](name=n) for n in ("a", "b", "c")]
+    result = state.reorder_panel(panels, "a", "b", after=True)
     assert [p.name for p in result] == ["b", "a", "c"]
 
 
-def test_move_panel_down_swaps_with_next() -> None:
+def test_reorder_panel_same_panel_is_a_noop() -> None:
     panels = [PanelInstance[Any, Any](name=n) for n in ("a", "b", "c")]
-    result = state.move_panel(panels, "b", "down")
-    assert [p.name for p in result] == ["a", "c", "b"]
+    assert state.reorder_panel(panels, "a", "a", after=True) == panels
 
 
-def test_move_panel_at_boundary_is_a_noop() -> None:
-    panels = [PanelInstance[Any, Any](name=n) for n in ("a", "b", "c")]
-    assert [p.name for p in state.move_panel(panels, "a", "up")] == ["a", "b", "c"]
-    assert [p.name for p in state.move_panel(panels, "c", "down")] == ["a", "b", "c"]
-
-
-def test_move_panel_unknown_panel_is_a_noop() -> None:
+def test_reorder_panel_unknown_panel_is_a_noop() -> None:
     panels = [PanelInstance[Any, Any](name=n) for n in ("a", "b")]
-    assert state.move_panel(panels, "missing", "up") == panels
+    assert state.reorder_panel(panels, "missing", "a", after=True) == panels
+    assert state.reorder_panel(panels, "a", "missing", after=True) == panels
 
 
 # ---- panel sync: switch + set_panel_sync + _apply_panel_sync ----
@@ -157,7 +145,7 @@ def test_apply_panel_sync_ignores_non_line_charts() -> None:
     assert state._apply_panel_sync(other, panel_name="train", sync=False) is other
 
 
-# ---- move_chart ----
+# ---- reorder_chart ----
 
 
 def _panel_with_charts(*names: str) -> PanelInstance[Any, Any]:
@@ -167,35 +155,45 @@ def _panel_with_charts(*names: str) -> PanelInstance[Any, Any]:
     return PanelInstance[Any, Any](name="p", charts=charts)
 
 
-def test_move_chart_left_swaps_with_previous() -> None:
+def test_reorder_chart_moves_before_target() -> None:
+    panels = [_panel_with_charts("a", "b", "c", "d")]
+    result = state.reorder_chart(panels, "p", 0, 2, after=False)
+    assert [c.parameters["column"] for c in result[0].charts] == ["b", "a", "c", "d"]
+
+
+def test_reorder_chart_moves_after_target() -> None:
+    panels = [_panel_with_charts("a", "b", "c", "d")]
+    result = state.reorder_chart(panels, "p", 3, 1, after=True)
+    assert [c.parameters["column"] for c in result[0].charts] == ["a", "b", "d", "c"]
+
+
+def test_reorder_chart_same_index_is_a_noop() -> None:
     panels = [_panel_with_charts("a", "b", "c")]
-    result = state.move_chart(panels, "p", 1, "left")
-    assert [c.parameters["column"] for c in result[0].charts] == ["b", "a", "c"]
+    result = state.reorder_chart(panels, "p", 1, 1, after=True)
+    assert [c.parameters["column"] for c in result[0].charts] == ["a", "b", "c"]
 
 
-def test_move_chart_right_swaps_with_next() -> None:
+def test_reorder_chart_out_of_bounds_index_is_a_noop() -> None:
     panels = [_panel_with_charts("a", "b", "c")]
-    result = state.move_chart(panels, "p", 1, "right")
-    assert [c.parameters["column"] for c in result[0].charts] == ["a", "c", "b"]
-
-
-def test_move_chart_at_boundary_is_a_noop() -> None:
-    panels = [_panel_with_charts("a", "b", "c")]
-    assert [c.parameters["column"] for c in state.move_chart(panels, "p", 0, "left")[0].charts] == [
+    assert [
+        c.parameters["column"] for c in state.reorder_chart(panels, "p", 5, 0, after=False)[0].charts
+    ] == [
         "a",
         "b",
         "c",
     ]
-    assert [c.parameters["column"] for c in state.move_chart(panels, "p", 2, "right")[0].charts] == [
+    assert [
+        c.parameters["column"] for c in state.reorder_chart(panels, "p", 0, 5, after=False)[0].charts
+    ] == [
         "a",
         "b",
         "c",
     ]
 
 
-def test_move_chart_unknown_panel_is_a_noop() -> None:
+def test_reorder_chart_unknown_panel_is_a_noop() -> None:
     panels = [_panel_with_charts("a", "b")]
-    result = state.move_chart(panels, "missing", 0, "left")
+    result = state.reorder_chart(panels, "missing", 0, 1, after=True)
     assert [c.parameters["column"] for c in result[0].charts] == ["a", "b"]
 
 

@@ -46,10 +46,17 @@ class ExperimentPage:
 # these from `simple_experiment_page.py` (this module's public façade) rather than from here. ---
 PAGE_EXPERIMENT_ID: DivId[ExperimentPage] = DivId("experiment-container")
 EXPERIMENT_HEADER_ID: DivId[ExperimentPage] = DivId("experiment-header")
-EXPERIMENT_HEADER_ACTIONS_ID: DivId[ExperimentPage] = DivId("experiment-header-actions")
+NEW_PANEL_GROUP_ID: DivId[ExperimentPage] = DivId("new-panel-group")
 METRIC_CONTENT_ID: DivId[ExperimentPage] = DivId("metrics-view")
 STATE_HPARAMS: StoreId[ExperimentPage] = StoreId("hparams-state")
 STATE_PAGE_STORAGE: StoreId[ExperimentPage] = StoreId("current-page")
+
+# --- drag-and-drop reorder requests: a completed drag reports here (`_experiment_page_dragdrop.js`
+# calls `set_props` on drop), consumed by a callback in `_panel_controls.py`. Live in the static
+# page layout (`serve/_pages/experiment.py`), not `accordion_view`'s render tree, so the drop
+# target always exists regardless of what's currently rendered underneath it. ---
+PANEL_REORDER_STORE_ID: StoreId[ExperimentPage] = StoreId("panel-reorder-request")
+CHART_REORDER_STORE_ID: StoreId[ExperimentPage] = StoreId("chart-reorder-request")
 
 # --- accordion / panel state ---
 ACCORDION_ID: ValueId[ExperimentPage] = ValueId("experiment-accordion")
@@ -99,6 +106,7 @@ SUGGEST_DELIMITER_ID: ValueId[ExperimentPage] = ValueId("suggest-charts-delimite
 SUGGEST_MODE_ID: ValueId[ExperimentPage] = ValueId("suggest-charts-mode")
 SUGGEST_CONTENT_ID: DivId[ExperimentPage] = DivId("suggest-charts-content")
 SUGGEST_SUGGESTIONS_STORE_ID: StoreId[ExperimentPage] = StoreId("suggest-charts-store")
+SUGGEST_SCOPE_STORE_ID: StoreId[ExperimentPage] = StoreId("suggest-charts-scope")
 
 AUTO_POPULATE_DELIMITER_ID: ValueId[ExperimentPage] = ValueId("auto-populate-delimiter")
 AUTO_POPULATE_MODE_ID: ValueId[ExperimentPage] = ValueId("auto-populate-mode")
@@ -136,8 +144,21 @@ class ChartID(ChartTargetData):
     type: str
 
 
-PanelMoveDirection = typing.Literal["up", "down"]
-ChartMoveDirection = typing.Literal["left", "right"]
+class PanelReorderRequest(TypedDict):
+    """A completed panel drag: move `panel` to just before/after `target`."""
+
+    panel: str
+    target: str
+    after: bool
+
+
+class ChartReorderRequest(TypedDict):
+    """A completed chart drag: move the chart at `index` in `panel` to just before/after `target_index`."""
+
+    panel: str
+    index: int
+    target_index: int
+    after: bool
 
 
 def require_triggered_id() -> Any:  # noqa: ANN401
@@ -166,10 +187,6 @@ def delete_chart_button_id(panel_name: str, index: int) -> ChartID:
     return {"type": "delete-chart", "panel": panel_name, "index": index}
 
 
-def move_chart_button_id(panel_name: str, index: int, direction: ChartMoveDirection) -> dict[str, str | int]:
-    return {"type": "move-chart", "panel": panel_name, "index": index, "direction": direction}
-
-
 def delete_panel_button_id(panel_name: str) -> dict[str, str]:
     return {"type": "delete-panel", "panel": panel_name}
 
@@ -186,8 +203,16 @@ def panel_layout_control_id(panel_name: str) -> dict[str, str]:
     return {"type": "panel-layout", "panel": panel_name}
 
 
-def move_panel_button_id(panel_name: str, direction: PanelMoveDirection) -> dict[str, str]:
-    return {"type": "move-panel", "panel": panel_name, "direction": direction}
+def panel_suggest_button_id(panel_name: str) -> dict[str, str]:
+    return {"type": "panel-suggest-charts", "panel": panel_name}
+
+
+def panel_drag_handle_id(panel_name: str) -> dict[str, str]:
+    return {"type": "panel-drag-handle", "panel": panel_name}
+
+
+def chart_drag_handle_id(panel_name: str, index: int) -> ChartID:
+    return {"type": "chart-drag-handle", "panel": panel_name, "index": index}
 
 
 def chart_controls_group_id(panel_name: str, index: int) -> ChartID:
@@ -332,7 +357,6 @@ def _apply_panel_sync(rendered: Component, *, panel_name: str, sync: bool) -> Co
 def render_panel_charts(panel: models.PanelInstance[Any, Any], dataframe: pd.DataFrame) -> list[dmc.Stack]:
     """Render each chart in a panel with edit/delete controls above it, revealed on hover."""
     items: list[dmc.Stack] = []
-    last_index = len(panel.charts) - 1
     for idx, chart in enumerate(panel.charts):
         rendered = _apply_panel_sync(
             _render_chart_safely(chart, dataframe, panel.name), panel_name=panel.name, sync=panel.sync
@@ -342,21 +366,10 @@ def render_panel_charts(panel: models.PanelInstance[Any, Any], dataframe: pd.Dat
                 [
                     dmc.Group(
                         [
-                            dmc.ActionIcon(
-                                "←",
-                                id=move_chart_button_id(panel.name, idx, "left"),
-                                n_clicks=0,
-                                disabled=idx == 0,
-                                variant="subtle",
-                                size="xs",
-                            ),
-                            dmc.ActionIcon(
-                                "→",
-                                id=move_chart_button_id(panel.name, idx, "right"),
-                                n_clicks=0,
-                                disabled=idx == last_index,
-                                variant="subtle",
-                                size="xs",
+                            _drag_handle(
+                                class_name="dl-chart-drag-handle",
+                                component_id=chart_drag_handle_id(panel.name, idx),  # pyright: ignore[reportArgumentType]
+                                data_attrs={"panel-name": panel.name, "chart-index": str(idx)},
                             ),
                             dmc.ActionIcon(
                                 "✎",
@@ -396,80 +409,102 @@ def render_panel_content(
     experiment_id: int,
     panel: models.PanelInstance[Any, Any],
     page_settings: dict[str, Any],
-) -> list[Component]:
+) -> Component:
     """Fetch + render one panel's charts. Only called for panels that are actually open."""
     df = fetch_panel_dataframe(store, experiment_id, panel, page_settings)
     items = render_panel_charts(panel, df)
-    container = (
+    return (
         dmc.SimpleGrid(items, cols=PACKED_GRID_COLS, spacing="lg")
         if panel.layout == "grid"
         else dmc.Flex(items, justify="flex-start", gap="lg", wrap="wrap")
     )
-    return [
-        container,
-        dmc.Button(
-            id=open_chart_button_id(panel.name),
-            n_clicks=0,
-            children="+",
-            className="dl-add-chart-btn",
-        ),
-    ]
 
 
 def _panel_placeholder() -> dmc.Skeleton:
     return dmc.Skeleton(height=60, radius="sm")
 
 
-def panel_header_controls(panel: models.PanelInstance[Any, Any], *, index: int, count: int) -> Component:
-    """Sync/layout/rename/move/delete for one panel, hover-revealed on the panel's own header."""
+def _drag_handle(*, class_name: str, component_id: dict[str, str], data_attrs: dict[str, str]) -> Component:
+    """A tooltipped grip glyph, draggable via `_experiment_page_dragdrop.js`."""
+    # `data-*` attrs are only known dynamically (dict keys, not literal kwargs), so pyright can't
+    # match them against `html.Div`'s typed signature -- `cast` to `Any` rather than fight that.
+    div = cast("Any", html.Div)
+    return dmc.Tooltip(
+        div(
+            "⠿",
+            id=component_id,
+            draggable="true",
+            className=class_name,
+            **{f"data-{key}": value for key, value in data_attrs.items()},
+        ),
+        label="Drag to reorder",
+        position="top",
+        withArrow=True,
+    )
+
+
+def _tooltipped_icon(
+    icon: str, *, component_id: dict[str, str], label: str, disabled: bool = False, color: str | None = None
+) -> Component:
+    return dmc.Tooltip(
+        dmc.ActionIcon(
+            icon, id=component_id, n_clicks=0, variant="subtle", size="sm", disabled=disabled, color=color
+        ),
+        label=label,
+        position="top",
+        withArrow=True,
+    )
+
+
+def panel_header_controls(panel: models.PanelInstance[Any, Any]) -> Component:
+    """Sync/layout/rename/drag/suggest/delete for one panel, hover-revealed on the panel's own header."""
     panel_name = panel.name
     return dmc.Group(
         [
-            dmc.Switch(
-                id=panel_sync_switch_id(panel_name),
-                label="Sync",
-                checked=panel.sync,
-                size="xs",
+            _drag_handle(
+                class_name="dl-panel-drag-handle",
+                component_id=panel_drag_handle_id(panel_name),
+                data_attrs={"panel-name": panel_name},
             ),
-            dmc.SegmentedControl(
-                id=panel_layout_control_id(panel_name),
-                data=[
-                    {"value": "packed", "label": "Packed"},
-                    {"value": "grid", "label": "Grid"},
-                ],
-                value=panel.layout,
-                size="xs",
+            _tooltipped_icon(
+                "+", component_id=open_chart_button_id(panel_name), label="Add chart to this panel"
             ),
-            dmc.ActionIcon(
-                "✎",
-                id=rename_panel_button_id(panel_name),
-                n_clicks=0,
-                variant="subtle",
-                size="sm",
+            _tooltipped_icon(
+                "✨",
+                component_id=panel_suggest_button_id(panel_name),
+                label="Suggest charts for this panel",
             ),
-            dmc.ActionIcon(
-                "↑",
-                id=move_panel_button_id(panel_name, "up"),
-                n_clicks=0,
-                disabled=index == 0,
-                variant="subtle",
-                size="sm",
+            dmc.Tooltip(
+                dmc.Switch(
+                    id=panel_sync_switch_id(panel_name),
+                    label="Sync",
+                    checked=panel.sync,
+                    size="xs",
+                ),
+                label="Sync the crosshair/tooltip across this panel's charts that share an x-axis",
+                position="top",
+                withArrow=True,
             ),
-            dmc.ActionIcon(
-                "↓",
-                id=move_panel_button_id(panel_name, "down"),
-                n_clicks=0,
-                disabled=index == count - 1,
-                variant="subtle",
-                size="sm",
+            dmc.Tooltip(
+                dmc.SegmentedControl(
+                    id=panel_layout_control_id(panel_name),
+                    data=[
+                        {"value": "packed", "label": "☰"},
+                        {"value": "grid", "label": "▦"},
+                    ],
+                    value=panel.layout,
+                    size="xs",
+                ),
+                label="Packed: charts sized to their own natural width. Grid: charts stretch to fill equal-width columns",
+                position="top",
+                withArrow=True,
             ),
-            dmc.ActionIcon(
+            _tooltipped_icon("✎", component_id=rename_panel_button_id(panel_name), label="Rename panel"),
+            _tooltipped_icon(
                 "🗑",
-                id=delete_panel_button_id(panel_name),
-                n_clicks=0,
-                variant="subtle",
+                component_id=delete_panel_button_id(panel_name),
+                label="Delete panel",
                 color="red",
-                size="sm",
             ),
         ],
         className="dl-panel-controls",
@@ -478,7 +513,7 @@ def panel_header_controls(panel: models.PanelInstance[Any, Any], *, index: int, 
     )
 
 
-def panel_header(panel: models.PanelInstance[Any, Any], *, index: int, count: int) -> Component:
+def panel_header(panel: models.PanelInstance[Any, Any]) -> Component:
     """
     A panel's accordion header.
 
@@ -494,7 +529,7 @@ def panel_header(panel: models.PanelInstance[Any, Any], *, index: int, count: in
                 px="xs",
                 style={"flex": 1},
             ),
-            panel_header_controls(panel, index=index, count=count),
+            panel_header_controls(panel),
         ],
         className="dl-panel-item-header",
         gap=0,
@@ -517,7 +552,6 @@ class BasicExperimentPage(models.Page[pd.DataFrame, dmc.Accordion, html.Div], fr
         if isinstance(open_value, str):
             open_value = [open_value]
         open_set = set(open_value)  # pyright: ignore[reportUnknownVariableType, reportArgumentType]
-        count = len(self.panels)
 
         return dmc.Accordion(
             id=ACCORDION_ID,
@@ -528,7 +562,7 @@ class BasicExperimentPage(models.Page[pd.DataFrame, dmc.Accordion, html.Div], fr
             children=[
                 dmc.AccordionItem(
                     [
-                        panel_header(p, index=idx, count=count),
+                        panel_header(p),
                         dmc.AccordionPanel(
                             html.Div(
                                 id=panel_content_id(p.name),
@@ -545,7 +579,7 @@ class BasicExperimentPage(models.Page[pd.DataFrame, dmc.Accordion, html.Div], fr
                     ],
                     p.name,
                 )
-                for idx, p in enumerate(self.panels)
+                for p in self.panels
             ],
         )
 
@@ -567,10 +601,15 @@ def empty_view_helper(panels: list[models.PanelInstance[Any, Any]]) -> Component
     """Auto-populate charts for a brand-new (empty) view; suggest un-charted keys once it isn't."""
     add_panel = dmc.Group(
         [
-            dmc.TextInput(id=NEW_PANEL_NAME_ID, placeholder="New Panel Name"),
-            dmc.Button(id=NEW_PANEL_ID, n_clicks=0, children="Create"),
+            dmc.TextInput(id=NEW_PANEL_NAME_ID, placeholder="New Panel Name", size="sm"),
+            dmc.Tooltip(
+                dmc.ActionIcon("+", id=NEW_PANEL_ID, n_clicks=0, variant="filled", size="input-sm"),
+                label="Create panel",
+                position="top",
+                withArrow=True,
+            ),
         ],
-        gap=0,
+        gap="xs",
     )
     if not panels:
         return dmc.Group(
@@ -588,7 +627,9 @@ def empty_view_helper(panels: list[models.PanelInstance[Any, Any]]) -> Component
                     "Auto-generate charts",
                     id=AUTO_POPULATE_BUTTON_ID,
                     n_clicks=0,
-                    variant="light",
+                    leftSection="✨",
+                    variant="gradient",
+                    gradient={"from": "grape", "to": "indigo", "deg": 45},
                     size="sm",
                 ),
             ],
@@ -598,7 +639,14 @@ def empty_view_helper(panels: list[models.PanelInstance[Any, Any]]) -> Component
     return dmc.Group(
         [
             add_panel,
-            dmc.Button("Suggest charts", id=SUGGEST_CHARTS_BUTTON_ID, n_clicks=0, variant="light", size="sm"),
+            dmc.Button(
+                children="✨",
+                id=SUGGEST_CHARTS_BUTTON_ID,
+                n_clicks=0,
+                variant="gradient",
+                gradient={"from": "grape", "to": "indigo", "deg": 45},
+                size="sm",
+            ),
         ]
     )
 
@@ -612,6 +660,7 @@ def _suggest_charts_drawer() -> dmc.Drawer:
         opened=False,
         children=[
             Store(id=SUGGEST_SUGGESTIONS_STORE_ID, data=[]),
+            Store(id=SUGGEST_SCOPE_STORE_ID, data=None),
             dmc.Group(
                 [
                     dmc.TextInput(
@@ -741,9 +790,9 @@ def accordion_view(
     experiment_id: int,
     *,
     view_state: EditViewState | None = None,
-) -> html.Div:
+) -> tuple[Component, html.Div]:
     """
-    Accordion view for experiments.
+    New-panel group (for the experiment header) plus the accordion view for experiments.
 
     `view_state` lets callers that re-render the accordion mid-edit (adding a panel/chart,
     changing run selection, etc.) carry the cached dataframe forward instead of silently
@@ -758,15 +807,9 @@ def accordion_view(
     if isinstance(open_value, str):
         open_value = [open_value]
 
-    return html.Div(
+    container = html.Div(
         [
-            dmc.Stack(
-                [
-                    empty_view_helper(page.panels),
-                    page.render(store, experiment_id),
-                ],
-                gap="xs",
-            ),
+            page.render(store, experiment_id),
             Store(id=LOADED_PANELS_STORE_ID, data=list(open_value)),  # pyright: ignore[reportArgumentType]
             Store(id=FULL_DF_STORE_ID, data=view_state.full_df_json),
             Store(id=COLUMN_KINDS_STORE_ID, data=view_state.column_kinds),
@@ -777,6 +820,7 @@ def accordion_view(
             _delete_chart_confirm_modal(),
         ],
     )
+    return empty_view_helper(page.panels), container
 
 
 # ============================================================
@@ -800,11 +844,11 @@ def persist_settings_and_rerender(
     updates: dict[str, Any],
     *,
     view_state: EditViewState | None = None,
-) -> tuple[BasicExperimentPage, dmc.Container]:
+) -> tuple[BasicExperimentPage, Component, html.Div]:
     """Merge `updates` into page_settings (server-authoritative), persist, and re-render the accordion."""
     page = persist_settings(store, experiment_id, updates)
-    container = accordion_view(store, experiment_id=experiment_id, view_state=view_state)
-    return page, container  # pyright: ignore[reportReturnType]
+    new_panel_group, container = accordion_view(store, experiment_id=experiment_id, view_state=view_state)
+    return page, new_panel_group, container
 
 
 def mutate_panels_and_rerender(
@@ -813,14 +857,14 @@ def mutate_panels_and_rerender(
     mutate: Callable[[list[models.PanelInstance[Any, Any]]], list[models.PanelInstance[Any, Any]]],
     *,
     view_state: EditViewState | None = None,
-) -> tuple[BasicExperimentPage, html.Div]:
+) -> tuple[BasicExperimentPage, Component, html.Div]:
     """Load page from client-cached state, apply `mutate` to its panels, persist, and re-render."""
     curr_page = BasicExperimentPage.model_validate_json(page_json)
     curr_page = curr_page.model_copy(update={"panels": mutate(curr_page.panels)})
     store = get_data_store()
     curr_page = store.update_page(curr_page)
-    container = accordion_view(store, experiment_id=experiment_id, view_state=view_state)
-    return curr_page, container  # pyright: ignore[reportReturnType]
+    new_panel_group, container = accordion_view(store, experiment_id=experiment_id, view_state=view_state)
+    return cast("BasicExperimentPage", curr_page), new_panel_group, container
 
 
 def upsert_chart(
@@ -851,19 +895,19 @@ def add_chart_to_panel_by_name(
     return [*panels, models.PanelInstance(name=panel_name, charts=[chart])]
 
 
-def move_panel(
-    panels: list[models.PanelInstance[Any, Any]], panel_name: str, direction: PanelMoveDirection
+def reorder_panel(
+    panels: list[models.PanelInstance[Any, Any]], panel_name: str, target_name: str, *, after: bool
 ) -> list[models.PanelInstance[Any, Any]]:
-    """Swap the panel named `panel_name` with its neighbor in `direction`."""
-    idx = next((i for i, p in enumerate(panels) if p.name == panel_name), None)
-    if idx is None:
+    """Move the panel named `panel_name` to sit just before/after the panel named `target_name`."""
+    if panel_name == target_name:
         return panels
-    swap_with = idx - 1 if direction == "up" else idx + 1
-    if swap_with < 0 or swap_with >= len(panels):
+    moving = next((p for p in panels if p.name == panel_name), None)
+    if moving is None or not any(p.name == target_name for p in panels):
         return panels
-    new_panels = list(panels)
-    new_panels[idx], new_panels[swap_with] = new_panels[swap_with], new_panels[idx]
-    return new_panels
+    remaining = [p for p in panels if p.name != panel_name]
+    target_idx = next(i for i, p in enumerate(remaining) if p.name == target_name)
+    remaining.insert(target_idx + 1 if after else target_idx, moving)
+    return remaining
 
 
 def set_panel_sync(
@@ -878,18 +922,31 @@ def set_panel_layout(
     return [p.model_copy(update={"layout": layout}) if p.name == panel_name else p for p in panels]
 
 
-def move_chart(
-    panels: list[models.PanelInstance[Any, Any]], panel_name: str, index: int, direction: ChartMoveDirection
+def reorder_chart(
+    panels: list[models.PanelInstance[Any, Any]],
+    panel_name: str,
+    index: int,
+    target_index: int,
+    *,
+    after: bool,
 ) -> list[models.PanelInstance[Any, Any]]:
-    """Swap the chart at `index` in the panel named `panel_name` with its neighbor in `direction`."""
-    swap_with = index - 1 if direction == "left" else index + 1
+    """Move the chart at `index` in the panel named `panel_name` to sit just before/after `target_index`."""
     new_panels: list[models.PanelInstance[Any, Any]] = []
     for p in panels:
-        if p.name != panel_name or swap_with < 0 or swap_with >= len(p.charts):
+        if (
+            p.name != panel_name
+            or index == target_index
+            or not (0 <= index < len(p.charts))
+            or not (0 <= target_index < len(p.charts))
+        ):
             new_panels.append(p)
             continue
         charts = list(p.charts)
-        charts[index], charts[swap_with] = charts[swap_with], charts[index]
+        chart = charts.pop(index)
+        # `target_index` is the target's index in the *original* list -- popping `chart` out from
+        # before it shifts it left by one, so account for that before adding the requested offset.
+        insert_at = target_index + (1 if after else 0) - (1 if index < target_index else 0)
+        charts.insert(max(0, min(insert_at, len(charts))), chart)
         new_panels.append(p.model_copy(update={"charts": charts}))
     return new_panels
 

@@ -8,7 +8,7 @@ Reused wherever a soft-deletable entity needs a delete affordance (project, expe
 from __future__ import annotations
 
 import typing
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 import dash_mantine_components as dmc
 from dash import Input, Output, State
@@ -32,10 +32,34 @@ class DeleteConfirmIds(typing.NamedTuple):
     cancel: str
 
 
-def render_delete_control(ids: DeleteConfirmIds, *, label: str, entity_noun: str) -> list[Component]:
-    """A delete button plus its (initially closed) confirmation modal."""
+def render_delete_control(
+    ids: DeleteConfirmIds, *, label: str, entity_noun: str, icon_only: bool = False
+) -> list[Component]:
+    """A delete button (or, with `icon_only`, a tooltipped trash icon) plus its confirmation modal."""
+    # `aria-label` is only known dynamically (a dict key, not a literal kwarg -- Python identifiers
+    # can't contain hyphens), so pyright can't match it against `ActionIcon`'s typed signature;
+    # `cast` to `Any` rather than fight that.
+    action_icon = cast("Any", dmc.ActionIcon)
+    trigger = (
+        dmc.Tooltip(
+            action_icon(
+                "🗑",
+                id=ids.button,
+                n_clicks=0,
+                variant="subtle",
+                color="red",
+                size="sm",
+                **{"aria-label": label},
+            ),
+            label=label,
+            position="top",
+            withArrow=True,
+        )
+        if icon_only
+        else dmc.Button(label, id=ids.button, n_clicks=0, color="red", variant="light", size="xs")
+    )
     return [
-        dmc.Button(label, id=ids.button, n_clicks=0, color="red", variant="light", size="xs"),
+        trigger,
         dmc.Modal(
             id=ids.modal,
             title=f"Delete this {entity_noun}?",

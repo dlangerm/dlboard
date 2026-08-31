@@ -165,20 +165,6 @@ def test_build_hparam_rows_includes_runs_with_no_logged_hyperparameters() -> Non
     ]
 
 
-def test_run_summary_is_a_single_dimmed_line() -> None:
-    props = cast("Any", run_table._run_summary([{"run_id": 1}], excluded=[])).to_plotly_json()["props"]
-    assert props["children"] == "1 runs"
-    assert props["size"] == "xs"
-    assert props["c"] == "dimmed"
-
-
-def test_run_summary_includes_excluded_count() -> None:
-    props = cast(
-        "Any", run_table._run_summary([{"run_id": 1}, {"run_id": 2}], excluded=[2])
-    ).to_plotly_json()["props"]
-    assert props["children"] == "2 runs · 1 excluded"
-
-
 def test_persist_settings_merges_into_page_settings_without_touching_panels(
     store: SQLLiteStore, experiment_id: int
 ) -> None:

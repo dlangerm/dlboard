@@ -26,7 +26,7 @@ def layout(experiment_id: str) -> list[html.Div | dcc.Store]:
                     dmc.Group(
                         [
                             html.Div(id=experiment.EXPERIMENT_HEADER_ID, style={"flex": 1}),
-                            html.Div(id=experiment.EXPERIMENT_HEADER_ACTIONS_ID),
+                            html.Div(id=experiment.NEW_PANEL_GROUP_ID),
                         ],
                         align="center",
                         wrap="nowrap",
@@ -45,6 +45,11 @@ def layout(experiment_id: str) -> list[html.Div | dcc.Store]:
         Store(id=constants.STATE_PROJECT_ID, data=exp.project_id),
         Store(id=constants.STATE_EXPERIMENT_ID, data=int(experiment_id)),
         Store(id=experiment.STATE_HPARAMS, data=[h.model_dump_json() for h in hparams]),
+        # A completed panel/chart drag reports here (`_experiment_page_dragdrop.js`, via
+        # `set_props`) -- lives in the static layout, not `accordion_view`'s render tree, so the
+        # drop target always exists regardless of what's currently rendered underneath it.
+        Store(id=experiment.PANEL_REORDER_STORE_ID),
+        Store(id=experiment.CHART_REORDER_STORE_ID),
     ]
 
 

@@ -81,6 +81,10 @@ class BarChart(ChartType[BarChartSettings, pd.DataFrame, dmc.BarChart], frozen=T
     @classmethod
     @typing.override
     def render(cls, parameters: BarChartSettings, dataframe: pd.DataFrame) -> dmc.BarChart:
+        # `render_panel_charts` shares one fetched dataframe across every chart in a panel, calling
+        # this once per chart -- mutating the caller's `dataframe` in place (the coercion loop
+        # below does) corrupts it for whichever chart renders next.
+        dataframe = dataframe.copy()
         x_col = _resolve_column(dataframe, parameters.x_axis)
 
         for c in (x_col, parameters.column):

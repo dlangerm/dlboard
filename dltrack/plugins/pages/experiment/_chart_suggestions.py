@@ -8,10 +8,10 @@ the dynamic suggestion list content and the callbacks that drive both flows.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 import dash_mantine_components as dmc
-from dash import ALL, Dash, Input, Output, State, ctx, no_update
+from dash import ALL, Dash, Input, NoUpdate, Output, State, ctx, no_update
 from dash.exceptions import PreventUpdate
 
 from dltrack.models import ChartInstance, ColumnKind, constants
@@ -77,6 +77,7 @@ def _render_suggestions(suggestions: list[Suggestion]) -> Component:
 def _register_auto_populate(app: Dash) -> None:
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
+        Output(core.NEW_PANEL_GROUP_ID, "children", allow_duplicate=True),
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Input(core.AUTO_POPULATE_BUTTON_ID, "n_clicks"),
         {
@@ -87,7 +88,7 @@ def _register_auto_populate(app: Dash) -> None:
         },
         prevent_initial_call=True,
     )
-    def auto_populate_charts(n_clicks: int, auto_populate_ctx: _AutoPopulateCtx) -> tuple[Any, str]:
+    def auto_populate_charts(n_clicks: int, auto_populate_ctx: _AutoPopulateCtx) -> tuple[Any, Any, str]:
         if not n_clicks:
             raise PreventUpdate
         experiment_id = auto_populate_ctx["experiment_id"]
@@ -113,37 +114,78 @@ def _register_auto_populate(app: Dash) -> None:
                 lightning=lightning,
             )
 
-        page, container = core.mutate_panels_and_rerender(
+        page, new_panel_group, container = core.mutate_panels_and_rerender(
             auto_populate_ctx["page_json"],
             experiment_id,
             replace_with_generated_panels,
             view_state=core.EditViewState(full_df_json=full_df_json, column_kinds=column_kinds),
         )
-        return container, page.model_dump_json()
+        return container, new_panel_group, page.model_dump_json()
+
+
+def _resolve_suggestion_trigger(
+    n_clicks: int, current_scope: str | None
+) -> tuple[str | None, bool | NoUpdate]:
+    """
+    The suggestion scope (`None` = whole experiment) and whether to open the drawer.
+
+    Raises `PreventUpdate` for a freshly-mounted button's own spurious "triggered" report (see
+    `refresh_suggestions`); otherwise falls back to `current_scope`/leaving `opened` alone for any
+    other trigger (the drawer's own delimiter/mode inputs, which only need suggestions recomputed).
+    """
+    triggered_id = cast(
+        "str | dict[str, str] | None",
+        ctx.triggered_id,  # pyright: ignore[reportUnknownMemberType]
+    )
+    if not triggered_id:
+        raise PreventUpdate
+    if triggered_id == core.SUGGEST_CHARTS_BUTTON_ID:
+        if not n_clicks:
+            raise PreventUpdate
+        return None, True
+    if isinstance(triggered_id, dict) and triggered_id.get("type") == "panel-suggest-charts":
+        if not ctx.triggered[0]["value"]:
+            raise PreventUpdate
+        return triggered_id["panel"], True
+    return current_scope, no_update
+
+
+class _SuggestCtx(TypedDict):
+    delimiter: str | None
+    mode: str | None
+    page_json: str
+    column_kinds: dict[str, str] | None
+    current_scope: str | None
 
 
 def _register_suggestions(app: Dash) -> None:
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(core.SUGGEST_DRAWER_ID, "opened", allow_duplicate=True),
+        Output(core.SUGGEST_DRAWER_ID, "title", allow_duplicate=True),
         Output(core.SUGGEST_CONTENT_ID, "children", allow_duplicate=True),
         Output(core.SUGGEST_SUGGESTIONS_STORE_ID, "data", allow_duplicate=True),
+        Output(core.SUGGEST_SCOPE_STORE_ID, "data", allow_duplicate=True),
         Input(core.SUGGEST_CHARTS_BUTTON_ID, "n_clicks"),
-        Input(core.SUGGEST_DELIMITER_ID, "value"),
-        Input(core.SUGGEST_MODE_ID, "value"),
-        State(core.STATE_PAGE_STORAGE, "data"),
-        State(core.COLUMN_KINDS_STORE_ID, "data"),
+        Input({"type": "panel-suggest-charts", "panel": ALL}, "n_clicks"),
+        {
+            "delimiter": Input(core.SUGGEST_DELIMITER_ID, "value"),
+            "mode": Input(core.SUGGEST_MODE_ID, "value"),
+            "page_json": State(core.STATE_PAGE_STORAGE, "data"),
+            "column_kinds": State(core.COLUMN_KINDS_STORE_ID, "data"),
+            "current_scope": State(core.SUGGEST_SCOPE_STORE_ID, "data"),
+        },
         prevent_initial_call=True,
     )
     def refresh_suggestions(
-        _n_clicks: int,
-        delimiter: str | None,
-        mode: str | None,
-        page_json: str,
-        column_kinds: dict[str, str] | None,
-    ) -> tuple[bool | Any, Component, list[dict[str, Any]]]:
-        triggered_id = cast("str | None", ctx.triggered_id)  # pyright: ignore[reportUnknownMemberType]
-        if not triggered_id:
-            raise PreventUpdate
+        n_clicks: int, _panel_clicks: list[int], suggest_ctx: _SuggestCtx
+    ) -> tuple[bool | NoUpdate, str | NoUpdate, Component, list[dict[str, Any]], str | None]:
+        # Either button mounting for the first time reports itself as "triggered" with `n_clicks`
+        # still 0 -- each is rendered into its own container (`NEW_PANEL_GROUP_ID`/`panel_header_
+        # controls`), separate from the delimiter/mode inputs below, so `ctx.triggered_id`
+        # unambiguously resolves to the button on that mount even though nothing was clicked.
+        scope, opened = _resolve_suggestion_trigger(n_clicks, suggest_ctx["current_scope"])
+
+        page_json, column_kinds = suggest_ctx["page_json"], suggest_ctx["column_kinds"]
         curr_page = core.BasicExperimentPage.model_validate_json(page_json)
         if not column_kinds and curr_page.experiment_id is not None:
             # Edit mode (the only thing that normally populates this cache) may never have been
@@ -151,22 +193,28 @@ def _register_suggestions(app: Dash) -> None:
             _full_df_json, column_kinds = core.compute_full_df_and_column_kinds(
                 get_data_store(), curr_page.experiment_id
             )
+        title = f"Suggested charts for {scope}" if scope else "Suggested charts"
         if not column_kinds:
             empty = dmc.Text("No metrics or artifacts logged for this experiment yet", c="dimmed", size="sm")
-            return no_update, empty, []
+            return opened, title, empty, [], scope
 
-        split_mode: SplitMode = "suffix" if mode == "suffix" else "prefix"
+        split_mode: SplitMode = "suffix" if suggest_ctx["mode"] == "suffix" else "prefix"
         uncharted = find_uncharted_keys(curr_page.panels, column_kinds)
         lightning = curr_page.experiment_id is not None and core.is_lightning_experiment(
             get_data_store(), curr_page.experiment_id
         )
         suggestions = build_suggestions(
-            uncharted, delimiter=delimiter or core.DEFAULT_DELIMITER, mode=split_mode, lightning=lightning
+            uncharted,
+            delimiter=suggest_ctx["delimiter"] or core.DEFAULT_DELIMITER,
+            mode=split_mode,
+            lightning=lightning,
         )
+        if scope is not None:
+            suggestions = [s for s in suggestions if s.panel_name == scope]
 
-        opened = True if triggered_id == core.SUGGEST_CHARTS_BUTTON_ID else no_update
         return (
             opened,
+            title,
             _render_suggestions(suggestions),
             [
                 {
@@ -178,10 +226,12 @@ def _register_suggestions(app: Dash) -> None:
                 }
                 for s in suggestions
             ],
+            scope,
         )
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
+        Output(core.NEW_PANEL_GROUP_ID, "children", allow_duplicate=True),
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Output(core.SUGGEST_CONTENT_ID, "children", allow_duplicate=True),
         Output(core.SUGGEST_SUGGESTIONS_STORE_ID, "data", allow_duplicate=True),
@@ -200,7 +250,7 @@ def _register_suggestions(app: Dash) -> None:
         experiment_id: int,
         full_df_json: str | None,
         column_kinds: dict[str, str] | None,
-    ) -> tuple[Any, str, Component, list[dict[str, Any]]]:
+    ) -> tuple[Any, Any, str, Component, list[dict[str, Any]]]:
         triggered_id = cast("dict[str, str]", core.require_triggered_id())
         kind, key = triggered_id["kind"], triggered_id["key"]
 
@@ -215,7 +265,7 @@ def _register_suggestions(app: Dash) -> None:
         def apply_chart(panels: list[Any]) -> list[Any]:
             return core.add_chart_to_panel_by_name(panels, panel_name, chart)
 
-        page, container = core.mutate_panels_and_rerender(
+        page, new_panel_group, container = core.mutate_panels_and_rerender(
             page_json,
             experiment_id,
             apply_chart,
@@ -232,7 +282,13 @@ def _register_suggestions(app: Dash) -> None:
             )
             for s in remaining
         ]
-        return container, page.model_dump_json(), _render_suggestions(remaining_suggestions), remaining
+        return (
+            container,
+            new_panel_group,
+            page.model_dump_json(),
+            _render_suggestions(remaining_suggestions),
+            remaining,
+        )
 
 
 def register_chart_suggestions_callbacks(app: Dash) -> None:

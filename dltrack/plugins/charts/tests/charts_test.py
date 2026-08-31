@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Literal
 
 import numpy as np
@@ -10,9 +11,15 @@ import pandas as pd
 import pytest
 
 from dltrack.conftest import props as _props
+from dltrack.plugins.charts import line_chart
 from dltrack.plugins.charts._sampling import downsample_grouped, downsample_series, shared_sample_grid
 from dltrack.plugins.charts.bar_chart import BarChart, BarChartSettings
-from dltrack.plugins.charts.line_chart import LineChart, LineChartSettings
+from dltrack.plugins.charts.line_chart import (
+    _TICK_FORMATTER,
+    _TOOLTIP_LABEL_FORMATTER,
+    LineChart,
+    LineChartSettings,
+)
 
 
 def _series_df(n: int) -> pd.DataFrame:
@@ -140,6 +147,120 @@ def test_line_chart_x_axis_type_is_configurable() -> None:
     assert _props(chart)["xAxisProps"] == {"type": "category"}
 
 
+def test_line_chart_x_axis_type_date_converts_timestamps_to_epoch_millis() -> None:
+    """
+    Regression: a timestamp x-axis (e.g. timestamp_utc) previously only offered "number"/
+    "category" -- neither sensible for a real calendar timestamp. Recharts has no native time
+    scale, so "date" renders as a numeric axis (epoch ms) with a date-formatting tick/tooltip.
+    """
+    df = _metrics_df(3).assign(
+        timestamp_utc=["2026-01-01T00:00:00Z", "2026-01-01T00:00:01Z", "2026-01-01T00:00:02Z"] * 2
+    )
+    chart = LineChart.render(
+        LineChartSettings(column="loss", x_axis="timestamp_utc", x_axis_type="date", sample=False), df
+    )
+    props = _props(chart)
+
+    assert props["xAxisProps"] == {
+        "type": "number",
+        "tickFormatter": {"function": "lineChartDateTick"},
+        "domain": ["dataMin", "dataMax"],
+    }
+    assert props["tooltipProps"]["labelFormatter"] == {"function": "lineChartTooltipLabelDate"}
+    epoch_start = pd.Timestamp("2026-01-01T00:00:00Z").value // 10**6
+    assert sorted(row["timestamp_utc"] for row in props["data"]) == [
+        epoch_start,
+        epoch_start + 1000,
+        epoch_start + 2000,
+    ]
+
+
+def test_line_chart_js_function_names_are_defined_in_the_tooltip_js() -> None:
+    """
+    Every `{"function": "..."}` name `render` can hand to `xAxisProps`/`tooltipProps` must actually
+    be registered on `window.dashMantineFunctions` in `line_chart_tooltip.js`, or the browser fails
+    at render time with "No match for [name] in window.dashMantineFunctions" -- a typo/rename on
+    either side breaks this silently at the Python level (nothing here calls the JS), so check the
+    two files agree directly instead.
+    """
+    js_source = Path(line_chart.__file__).with_name("line_chart_tooltip.js").read_text()
+    referenced_names = {
+        *_TICK_FORMATTER.values(),
+        *_TOOLTIP_LABEL_FORMATTER.values(),
+        "lineChartTooltipLabel",
+    }
+    for name in referenced_names:
+        assert f"window.dashMantineFunctions.{name} =" in js_source, f"{name} is not defined in the JS"
+
+
+def test_line_chart_x_axis_type_time_formats_as_a_duration() -> None:
+    """A "time" x-axis (elapsed seconds, e.g. a run's training time) keeps its raw numeric values
+    but formats ticks/tooltip as h:mm:ss instead of a bare number.
+    """
+    df = _metrics_df(3).assign(elapsed_seconds=[0, 65, 130] * 2)
+    chart = LineChart.render(
+        LineChartSettings(column="loss", x_axis="elapsed_seconds", x_axis_type="time", sample=False), df
+    )
+    props = _props(chart)
+
+    assert props["xAxisProps"] == {
+        "type": "number",
+        "tickFormatter": {"function": "lineChartTimeTick"},
+        "domain": ["dataMin", "dataMax"],
+    }
+    assert props["tooltipProps"]["labelFormatter"] == {"function": "lineChartTooltipLabelTime"}
+    assert sorted(row["elapsed_seconds"] for row in props["data"]) == [0, 65, 130]
+
+
+def test_line_chart_x_axis_type_date_domain_does_not_default_to_the_unix_epoch() -> None:
+    """
+    Regression: Recharts' default numeric-axis domain is `[0, "auto"]`, not the data's own range.
+    For an epoch-ms "date" axis, that drags the left edge back to 1970 regardless of how recent the
+    real data is, squeezing every actual point into a sliver at the far right of the chart --
+    visually "the zero on the x-axis is 1969" instead of the data's own earliest date.
+    """
+    df = _metrics_df(3).assign(
+        timestamp_utc=["2026-01-01T00:00:00Z", "2026-01-01T00:00:01Z", "2026-01-01T00:00:02Z"] * 2
+    )
+    chart = LineChart.render(LineChartSettings(column="loss", x_axis="timestamp_utc", x_axis_type="date"), df)
+    assert _props(chart)["xAxisProps"]["domain"] == ["dataMin", "dataMax"]
+
+
+def test_line_chart_render_does_not_mutate_input_dataframe() -> None:
+    """
+    Regression: `render` used to coerce object/str columns to datetime (and, for a "date" x-axis,
+    all the way to epoch-ms floats) *in place* on the caller's dataframe. `render_panel_charts`
+    renders every chart in a panel against the very same fetched dataframe object -- one chart
+    mutating it corrupted the input every later chart in that panel saw, however unrelated its own
+    x-axis/columns were.
+    """
+    df = _metrics_df(3).assign(
+        timestamp_utc=["2026-01-01T00:00:00Z", "2026-01-01T00:00:01Z", "2026-01-01T00:00:02Z"] * 2
+    )
+    before = df.copy()
+
+    LineChart.render(LineChartSettings(column="loss", x_axis="timestamp_utc", x_axis_type="date"), df)
+
+    pd.testing.assert_frame_equal(df, before)
+
+
+def test_line_chart_date_x_axis_does_not_corrupt_a_later_chart_sharing_the_dataframe() -> None:
+    """A "date" x-axis chart rendered first must not change what a second, unrelated chart in the
+    same panel (sharing the same fetched dataframe) renders.
+    """
+    df = _metrics_df(3, n_runs=3).assign(
+        timestamp_utc=["2026-01-01T00:00:00Z", "2026-01-01T00:00:01Z", "2026-01-01T00:00:02Z"] * 3,
+        epoch=[0, 0, 1] * 3,
+    )
+
+    expected = LineChart.render(LineChartSettings(column="epoch", x_axis="step"), df.copy())
+    LineChart.render(LineChartSettings(column="loss", x_axis="timestamp_utc", x_axis_type="date"), df)
+    actual = LineChart.render(LineChartSettings(column="epoch", x_axis="step"), df)
+
+    assert _props(actual)["data"] == _props(expected)["data"]
+    assert _props(actual)["series"] == _props(expected)["series"]
+
+
 def test_line_chart_sampled_siblings_share_x_values_for_syncing() -> None:
     """Two charts in the same panel (same shared dataframe), plotting different metrics, must
     sample the same x-values -- otherwise a synced tooltip only lines up where their independently
@@ -180,6 +301,24 @@ def test_bar_chart_aggregates_runs_sharing_an_x_value() -> None:
     chart = BarChart.render(BarChartSettings(column="accuracy", x_axis="hidden_size"), df)
     data = {row["hidden_size"]: row["accuracy"] for row in _props(chart)["data"]}
     assert data == {128: pytest.approx(0.85), 256: pytest.approx(0.7)}
+
+
+def test_bar_chart_render_does_not_mutate_input_dataframe() -> None:
+    """
+    Same hazard as `test_line_chart_render_does_not_mutate_input_dataframe`: a panel with both a
+    bar chart and a line chart renders every chart against the same fetched dataframe object. Uses
+    a string x-axis column specifically -- `render`'s object/str -> datetime coercion (the part
+    that used to mutate in place) only ever touches `x_axis`/`column`, so this is the case that
+    actually exercises it (a plain numeric `hidden_size` x-axis wouldn't).
+    """
+    df = _hparam_grouped_df({1: 128, 2: 128, 3: 256}, {1: [0.8], 2: [0.9], 3: [0.7]}).assign(
+        logged_at=["2026-01-01T00:00:00Z", "2026-01-01T00:00:01Z", "2026-01-01T00:00:02Z"]
+    )
+    before = df.copy()
+
+    BarChart.render(BarChartSettings(column="accuracy", x_axis="logged_at"), df)
+
+    pd.testing.assert_frame_equal(df, before)
 
 
 def test_bar_chart_uses_last_logged_value_per_run() -> None:

@@ -60,6 +60,7 @@ class _RenamePanelCtx(core.EditCtx):
 def _register_create_panel(app: Dash) -> None:
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
+        Output(core.NEW_PANEL_GROUP_ID, "children", allow_duplicate=True),
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Input(core.NEW_PANEL_ID, "n_clicks"),
         Input(constants.STATE_EXPERIMENT_ID, "data"),
@@ -69,7 +70,7 @@ def _register_create_panel(app: Dash) -> None:
     )
     def create_panel(
         n_clicks: int, experiment_id: int, panel_name: str, edit_ctx: core.EditCtx
-    ) -> tuple[html.Div, str]:
+    ) -> tuple[html.Div, Any, str]:
         if not n_clicks:
             raise PreventUpdate
         if not panel_name:
@@ -79,18 +80,19 @@ def _register_create_panel(app: Dash) -> None:
         def add_panel(panels: list[Any]) -> list[Any]:
             return [*panels, PanelInstance(name=panel_name)]
 
-        page, container = core.mutate_panels_and_rerender(
+        page, new_panel_group, container = core.mutate_panels_and_rerender(
             edit_ctx["page_json"],
             experiment_id,
             add_panel,
             view_state=core.edit_view_state_from_ctx(edit_ctx),
         )
-        return container, page.model_dump_json()
+        return container, new_panel_group, page.model_dump_json()
 
 
 def _register_add_chart(app: Dash) -> None:
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
+        Output(core.NEW_PANEL_GROUP_ID, "children", allow_duplicate=True),
         Output(core.ADD_CHART_MODAL_ID, "opened", allow_duplicate=True),
         Output(core.ADD_CHART_ERROR_ID, "children", allow_duplicate=True),
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
@@ -106,7 +108,7 @@ def _register_add_chart(app: Dash) -> None:
         },
         prevent_initial_call=True,
     )
-    def add_chart(n_clicks: int, add_chart_ctx: _AddChartCtx) -> tuple[Any, bool, str, str | NoUpdate]:
+    def add_chart(n_clicks: int, add_chart_ctx: _AddChartCtx) -> tuple[Any, Any, bool, str, str | NoUpdate]:
         chart_type_name, target = add_chart_ctx["chart_type_name"], add_chart_ctx["target"]
         if not n_clicks or not chart_type_name or not target:
             raise PreventUpdate
@@ -118,20 +120,20 @@ def _register_add_chart(app: Dash) -> None:
         try:
             new_chart = core.build_validated_chart_instance(chart_type_name, parameters)
         except (ValidationError, KeyError) as exc:
-            return no_update, True, f"Invalid parameters: {exc}", no_update
+            return no_update, no_update, True, f"Invalid parameters: {exc}", no_update
 
         panel_name, index = target["panel"], target.get("index")
 
         def apply_chart(panels: list[Any]) -> list[Any]:
             return [core.upsert_chart(p, panel_name, index, new_chart) for p in panels]
 
-        page, container = core.mutate_panels_and_rerender(
+        page, new_panel_group, container = core.mutate_panels_and_rerender(
             add_chart_ctx["page_json"],
             add_chart_ctx["experiment_id"],
             apply_chart,
             view_state=core.edit_view_state_from_ctx(add_chart_ctx),
         )
-        return container, False, "", page.model_dump_json()
+        return container, new_panel_group, False, "", page.model_dump_json()
 
 
 def _register_delete_chart(app: Dash) -> None:
@@ -148,6 +150,7 @@ def _register_delete_chart(app: Dash) -> None:
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
+        Output(core.NEW_PANEL_GROUP_ID, "children", allow_duplicate=True),
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Output(core.DELETE_CHART_MODAL_ID, "opened", allow_duplicate=True),
         Input(core.DELETE_CHART_CONFIRM_ID, "n_clicks"),
@@ -160,7 +163,7 @@ def _register_delete_chart(app: Dash) -> None:
     )
     def delete_chart(
         n_clicks: int, delete_ctx: _DeleteChartCtx
-    ) -> tuple[html.Div | NoUpdate, str | NoUpdate, bool]:
+    ) -> tuple[html.Div | NoUpdate, Any, str | NoUpdate, bool]:
         target = delete_ctx["target"]
         if not n_clicks or not target:
             raise PreventUpdate
@@ -174,13 +177,13 @@ def _register_delete_chart(app: Dash) -> None:
                 for p in panels
             ]
 
-        page, container = core.mutate_panels_and_rerender(
+        page, new_panel_group, container = core.mutate_panels_and_rerender(
             delete_ctx["page_json"],
             delete_ctx["experiment_id"],
             remove_chart,
             view_state=core.edit_view_state_from_ctx(delete_ctx),
         )
-        return container, page.model_dump_json(), False
+        return container, new_panel_group, page.model_dump_json(), False
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(core.DELETE_CHART_MODAL_ID, "opened", allow_duplicate=True),
@@ -207,6 +210,7 @@ def _register_delete_panel(app: Dash) -> None:
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
+        Output(core.NEW_PANEL_GROUP_ID, "children", allow_duplicate=True),
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Output(core.DELETE_PANEL_MODAL_ID, "opened", allow_duplicate=True),
         Input(core.DELETE_PANEL_CONFIRM_ID, "n_clicks"),
@@ -219,7 +223,7 @@ def _register_delete_panel(app: Dash) -> None:
     )
     def delete_panel(
         n_clicks: int, delete_ctx: _DeletePanelCtx
-    ) -> tuple[html.Div | NoUpdate, str | NoUpdate, bool]:
+    ) -> tuple[html.Div | NoUpdate, Any, str | NoUpdate, bool]:
         panel_name = delete_ctx["target"]
         if not n_clicks or not panel_name:
             raise PreventUpdate
@@ -227,13 +231,13 @@ def _register_delete_panel(app: Dash) -> None:
         def remove_panel(panels: list[Any]) -> list[Any]:
             return [p for p in panels if p.name != panel_name]
 
-        page, container = core.mutate_panels_and_rerender(
+        page, new_panel_group, container = core.mutate_panels_and_rerender(
             delete_ctx["page_json"],
             delete_ctx["experiment_id"],
             remove_panel,
             view_state=core.edit_view_state_from_ctx(delete_ctx),
         )
-        return container, page.model_dump_json(), False
+        return container, new_panel_group, page.model_dump_json(), False
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(core.DELETE_PANEL_MODAL_ID, "opened", allow_duplicate=True),
@@ -246,78 +250,80 @@ def _register_delete_panel(app: Dash) -> None:
         return False
 
 
-def _register_move(app: Dash) -> None:
+def _register_reorder(app: Dash) -> None:
+    """Panel/chart drag-and-drop drop handlers -- see `_experiment_page_dragdrop.js`."""
+
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
+        Output(core.NEW_PANEL_GROUP_ID, "children", allow_duplicate=True),
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
-        Input({"type": "move-panel", "panel": ALL, "direction": ALL}, "n_clicks"),
+        Input(core.PANEL_REORDER_STORE_ID, "data"),
         State(core.STATE_PAGE_STORAGE, "data"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
         State(core.FULL_DF_STORE_ID, "data", allow_optional=True),
         State(core.COLUMN_KINDS_STORE_ID, "data", allow_optional=True),
         prevent_initial_call=True,
     )
-    def move_panel(
-        _n_clicks_list: list[int],
+    def reorder_panel(
+        request: core.PanelReorderRequest | None,
         page_json: str,
         experiment_id: int,
         full_df_json: str | None,
         column_kinds: dict[str, str] | None,
-    ) -> tuple[html.Div, str]:
-        triggered_id = cast("dict[str, str]", core.require_triggered_id())
-        panel_name = triggered_id["panel"]
-        direction = cast("core.PanelMoveDirection", triggered_id["direction"])
+    ) -> tuple[html.Div, Any, str]:
+        if not request:
+            raise PreventUpdate
 
         def reorder(panels: list[Any]) -> list[Any]:
-            return core.move_panel(panels, panel_name, direction)
+            return core.reorder_panel(panels, request["panel"], request["target"], after=request["after"])
 
-        page, container = core.mutate_panels_and_rerender(
+        page, new_panel_group, container = core.mutate_panels_and_rerender(
             page_json,
             experiment_id,
             reorder,
             view_state=core.EditViewState(full_df_json=full_df_json, column_kinds=column_kinds),
         )
-        return container, page.model_dump_json()
+        return container, new_panel_group, page.model_dump_json()
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
+        Output(core.NEW_PANEL_GROUP_ID, "children", allow_duplicate=True),
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
-        Input({"type": "move-chart", "panel": ALL, "index": ALL, "direction": ALL}, "n_clicks"),
+        Input(core.CHART_REORDER_STORE_ID, "data"),
         State(core.STATE_PAGE_STORAGE, "data"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
         State(core.FULL_DF_STORE_ID, "data", allow_optional=True),
         State(core.COLUMN_KINDS_STORE_ID, "data", allow_optional=True),
         prevent_initial_call=True,
     )
-    def move_chart(
-        _n_clicks_list: list[int],
+    def reorder_chart(
+        request: core.ChartReorderRequest | None,
         page_json: str,
         experiment_id: int,
         full_df_json: str | None,
         column_kinds: dict[str, str] | None,
-    ) -> tuple[html.Div, str]:
-        triggered_id = cast("dict[str, Any]", core.require_triggered_id())
-        panel_name, index, direction = (
-            triggered_id["panel"],
-            triggered_id["index"],
-            cast("core.ChartMoveDirection", triggered_id["direction"]),
-        )
+    ) -> tuple[html.Div, Any, str]:
+        if not request:
+            raise PreventUpdate
 
         def reorder(panels: list[Any]) -> list[Any]:
-            return core.move_chart(panels, panel_name, index, direction)
+            return core.reorder_chart(
+                panels, request["panel"], request["index"], request["target_index"], after=request["after"]
+            )
 
-        page, container = core.mutate_panels_and_rerender(
+        page, new_panel_group, container = core.mutate_panels_and_rerender(
             page_json,
             experiment_id,
             reorder,
             view_state=core.EditViewState(full_df_json=full_df_json, column_kinds=column_kinds),
         )
-        return container, page.model_dump_json()
+        return container, new_panel_group, page.model_dump_json()
 
 
 def _register_toggle(app: Dash) -> None:
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
+        Output(core.NEW_PANEL_GROUP_ID, "children", allow_duplicate=True),
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Input({"type": "panel-sync", "panel": ALL}, "checked"),
         State(core.STATE_PAGE_STORAGE, "data"),
@@ -332,7 +338,7 @@ def _register_toggle(app: Dash) -> None:
         experiment_id: int,
         full_df_json: str | None,
         column_kinds: dict[str, str] | None,
-    ) -> tuple[html.Div, str]:
+    ) -> tuple[html.Div, Any, str]:
         # Unlike button clicks, a Switch's `checked` is a meaningful trigger value even when
         # `False`, so this can't reuse `require_triggered_id`'s "falsy value means no real
         # trigger" check.
@@ -356,16 +362,17 @@ def _register_toggle(app: Dash) -> None:
         def toggle(panels: list[Any]) -> list[Any]:
             return core.set_panel_sync(panels, panel_name, sync=sync)
 
-        page, container = core.mutate_panels_and_rerender(
+        page, new_panel_group, container = core.mutate_panels_and_rerender(
             page_json,
             experiment_id,
             toggle,
             view_state=core.EditViewState(full_df_json=full_df_json, column_kinds=column_kinds),
         )
-        return container, page.model_dump_json()
+        return container, new_panel_group, page.model_dump_json()
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
+        Output(core.NEW_PANEL_GROUP_ID, "children", allow_duplicate=True),
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Input({"type": "panel-layout", "panel": ALL}, "value"),
         State(core.STATE_PAGE_STORAGE, "data"),
@@ -380,7 +387,7 @@ def _register_toggle(app: Dash) -> None:
         experiment_id: int,
         full_df_json: str | None,
         column_kinds: dict[str, str] | None,
-    ) -> tuple[html.Div, str]:
+    ) -> tuple[html.Div, Any, str]:
         if not ctx.triggered_id:  # pyright: ignore[reportUnknownMemberType]
             raise PreventUpdate
         triggered_id = cast("dict[str, str]", ctx.triggered_id)  # pyright: ignore[reportUnknownMemberType]
@@ -398,13 +405,13 @@ def _register_toggle(app: Dash) -> None:
         def toggle(panels: list[Any]) -> list[Any]:
             return core.set_panel_layout(panels, panel_name, layout)
 
-        page, container = core.mutate_panels_and_rerender(
+        page, new_panel_group, container = core.mutate_panels_and_rerender(
             page_json,
             experiment_id,
             toggle,
             view_state=core.EditViewState(full_df_json=full_df_json, column_kinds=column_kinds),
         )
-        return container, page.model_dump_json()
+        return container, new_panel_group, page.model_dump_json()
 
 
 def _register_rename(app: Dash) -> None:
@@ -423,6 +430,7 @@ def _register_rename(app: Dash) -> None:
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
+        Output(core.NEW_PANEL_GROUP_ID, "children", allow_duplicate=True),
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Output(core.RENAME_PANEL_MODAL_ID, "opened", allow_duplicate=True),
         Output(core.RENAME_PANEL_ERROR_ID, "children", allow_duplicate=True),
@@ -437,17 +445,17 @@ def _register_rename(app: Dash) -> None:
     )
     def rename_panel(
         n_clicks: int, rename_ctx: _RenamePanelCtx
-    ) -> tuple[Any, str | NoUpdate, bool | NoUpdate, str]:
+    ) -> tuple[Any, Any, str | NoUpdate, bool | NoUpdate, str]:
         old_name = rename_ctx["old_name"]
         if not n_clicks or not old_name:
             raise PreventUpdate
         new_name = (rename_ctx["new_name"] or "").strip()
         if not new_name:
-            return no_update, no_update, no_update, "Panel name cannot be empty"
+            return no_update, no_update, no_update, no_update, "Panel name cannot be empty"
 
         curr_page = core.BasicExperimentPage.model_validate_json(rename_ctx["page_json"])
         if new_name != old_name and any(p.name == new_name for p in curr_page.panels):
-            return no_update, no_update, no_update, f"A panel named {new_name!r} already exists"
+            return no_update, no_update, no_update, no_update, f"A panel named {new_name!r} already exists"
 
         new_panels = [
             p.model_copy(update={"name": new_name}) if p.name == old_name else p for p in curr_page.panels
@@ -468,12 +476,12 @@ def _register_rename(app: Dash) -> None:
         curr_page = store.update_page(
             curr_page.model_copy(update={"panels": new_panels, "page_settings": new_settings})
         )
-        container = core.accordion_view(
+        new_panel_group, container = core.accordion_view(
             store,
             experiment_id=rename_ctx["experiment_id"],
             view_state=core.edit_view_state_from_ctx(rename_ctx),
         )
-        return container, curr_page.model_dump_json(), False, ""
+        return container, new_panel_group, curr_page.model_dump_json(), False, ""
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(core.RENAME_PANEL_MODAL_ID, "opened", allow_duplicate=True),
@@ -491,6 +499,6 @@ def register_panel_controls_callbacks(app: Dash) -> None:
     _register_add_chart(app)
     _register_delete_chart(app)
     _register_delete_panel(app)
-    _register_move(app)
+    _register_reorder(app)
     _register_toggle(app)
     _register_rename(app)

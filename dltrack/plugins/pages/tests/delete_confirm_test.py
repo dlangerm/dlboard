@@ -27,3 +27,16 @@ def test_render_delete_control_modal_mentions_the_entity_noun() -> None:
     )
 
     assert "run" in modal.title
+
+
+def test_render_delete_control_icon_only_renders_a_tooltipped_trash_icon() -> None:
+    tooltip, modal = (
+        cast("Any", c)
+        for c in render_delete_control(_IDS, label="Delete project", entity_noun="project", icon_only=True)
+    )
+
+    assert tooltip.label == "Delete project"
+    icon = tooltip.children
+    assert icon.id == "btn"
+    assert icon.children == "🗑"
+    assert modal.id == "modal"

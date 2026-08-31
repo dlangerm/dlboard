@@ -1,9 +1,49 @@
-.dl-chart-controls, .dl-add-chart-btn, .dl-panel-controls {
+.dl-chart-controls, .dl-panel-controls {
   opacity: 0;
   transition: opacity 120ms ease;
 }
 .dl-chart-item:hover .dl-chart-controls,
-.dl-panel-body:hover .dl-add-chart-btn,
 .dl-panel-item-header:hover .dl-panel-controls {
   opacity: 1;
+}
+
+.dl-panel-drag-handle, .dl-chart-drag-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  cursor: grab;
+  border-radius: var(--mantine-radius-sm);
+  color: var(--mantine-color-dimmed);
+  /* Without this, a mousedown+move on the glyph's own text content ambiguously starts a text
+     selection instead of the native HTML5 drag (`draggable="true"` alone doesn't prevent that) --
+     shows up as a text-select (I-beam) cursor instead of `grab`, and since no real `dragstart`
+     fires, every `dragover` target then shows the browser's default "not allowed" cursor because
+     `_experiment_page_dragdrop.js` never sees a drag start to `preventDefault()` against. */
+  user-select: none;
+  -webkit-user-drag: element;
+}
+.dl-panel-drag-handle:hover, .dl-chart-drag-handle:hover {
+  background: var(--mantine-color-default-hover);
+}
+.dl-panel-drag-handle:active, .dl-chart-drag-handle:active {
+  cursor: grabbing;
+}
+
+/* Insertion-line drop indicators: owned entirely by `_experiment_page_dragdrop.js`, positioned via
+   inline style against `getBoundingClientRect()` -- an outline around the whole hovered panel/
+   chart doesn't say which *side* of it the drop lands on, a line between two items does. */
+.dl-panel-drop-indicator, .dl-chart-drop-indicator {
+  position: fixed;
+  background: var(--mantine-color-blue-5);
+  border-radius: 2px;
+  pointer-events: none;
+  z-index: 1000;
+}
+.dl-panel-drop-indicator {
+  height: 3px;
+}
+.dl-chart-drop-indicator {
+  width: 3px;
 }
