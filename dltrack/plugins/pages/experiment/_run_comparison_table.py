@@ -190,12 +190,6 @@ def _build_hparam_datatable(
     )
 
 
-def _run_summary(rows: list[dict[str, Any]], excluded: list[int] | list[str]) -> Component:
-    """`N runs` / `M excluded` text, shown above the navbar's run comparison table."""
-    text = f"{len(rows)} runs" + (f" · {len(excluded)} excluded" if excluded else "")
-    return dmc.Text(text, size="xs", c="dimmed")
-
-
 def _render_hparam_panel(
     rows: list[dict[str, Any]],
     hparam_keys: list[str],
@@ -293,7 +287,6 @@ def _register_hparam_table(app: Dash) -> None:
         )
         return dmc.Stack(
             [
-                _run_summary(rows, excluded),
                 _render_hparam_panel(rows, hparam_keys, metric_keys, selected, excluded),
                 _delete_run_modal(),
                 Store(id=DELETE_RUN_PENDING_STORE_ID),
@@ -332,6 +325,7 @@ def _register_hparam_table(app: Dash) -> None:
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
+        Output(core.NEW_PANEL_GROUP_ID, "children", allow_duplicate=True),
         Input(NAVBAR_HPARAM_DATATABLE_ID, "selected_rows", allow_optional=True),
         State(NAVBAR_HPARAM_DATATABLE_ID, "data", allow_optional=True),
         State(constants.STATE_EXPERIMENT_ID, "data"),
@@ -345,7 +339,7 @@ def _register_hparam_table(app: Dash) -> None:
         experiment_id: int,
         full_df_json: str | None,
         column_kinds: dict[str, str] | None,
-    ) -> tuple[str, dmc.Container]:
+    ) -> tuple[str, html.Div, Any]:
         if selected_rows is None or table_data is None:
             raise PreventUpdate
         selected_ids = {table_data[i]["run_id"] for i in selected_rows}
@@ -365,7 +359,7 @@ def _register_hparam_table(app: Dash) -> None:
         if excluded == currently_excluded:
             raise PreventUpdate
 
-        page, container = core.persist_settings_and_rerender(
+        page, new_panel_group, container = core.persist_settings_and_rerender(
             store,
             experiment_id,
             {dfh.EXCLUDED_RUNS_KEY: excluded},
@@ -374,7 +368,7 @@ def _register_hparam_table(app: Dash) -> None:
                 column_kinds=column_kinds,
             ),
         )
-        return page.model_dump_json(), container
+        return page.model_dump_json(), container, new_panel_group
 
 
 def _register_delete_run(app: Dash) -> None:

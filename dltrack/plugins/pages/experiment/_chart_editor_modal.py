@@ -21,13 +21,16 @@ from dash.exceptions import PreventUpdate
 from pydantic import ValidationError
 from structlog.stdlib import get_logger
 
-from dltrack.models import ChartInstance, ChartTypeRegistry, ColumnKind, ParameterField, ParameterFieldType
+from dltrack import models
+from dltrack.models import constants
 from dltrack.plugins.pages.experiment import _experiment_page_state as core
 from dltrack.plugins.pages.experiment._dataframe_helpers import group_columns_by_kind
-from dltrack.serve import ClientsideScript
+from dltrack.serve import ClientsideScript, get_data_store
 
 if TYPE_CHECKING:
     from dash.development.base_component import Component
+
+    from dltrack.models import DataStore
 
 _log = get_logger(__name__)
 
@@ -36,8 +39,8 @@ _CHART_PARAM_CLEAR_JS = ClientsideScript(Path(__file__).with_name("chart_param_c
 
 def _param_field_input(
     field_name: str,
-    field: ParameterField,
-    columns_by_kind: dict[ColumnKind, list[str]],
+    field: models.ParameterField,
+    columns_by_kind: dict[models.ColumnKind, list[str]],
     *,
     override: bool | int | float | str | list[str] | None = None,
 ) -> Component:
@@ -46,20 +49,20 @@ def _param_field_input(
     value = override if override is not None else field.default
 
     match field.type:
-        case ParameterFieldType.BOOL:
+        case models.ParameterFieldType.BOOL:
             return dmc.Switch(
                 id=input_id,
                 label=label,
                 checked=bool(value) if value is not None else False,
                 description=field.description,
             )
-        case ParameterFieldType.INT | ParameterFieldType.FLOAT:
+        case models.ParameterFieldType.INT | models.ParameterFieldType.FLOAT:
             number_value = cast("int | float | None", value)
             return dmc.NumberInput(
                 id=input_id,
                 label=label,
                 value=number_value,
-                step=1 if field.type == ParameterFieldType.INT else 0.1,
+                step=1 if field.type == models.ParameterFieldType.INT else 0.1,
                 description=field.description,
                 # Optional fields (a default, not required) get a visible clear button that resets
                 # to that default -- clearing via backspace alone works too, but isn't discoverable.
@@ -77,7 +80,7 @@ def _param_field_input(
                 ),
                 rightSectionPointerEvents="all",
             )
-        case ParameterFieldType.STR | ParameterFieldType.LIST_STR:
+        case models.ParameterFieldType.STR | models.ParameterFieldType.LIST_STR:
             if field.choices is not None:
                 select_value = cast("str | None", value)
                 return dmc.Select(
@@ -90,7 +93,7 @@ def _param_field_input(
                 )
 
             options = columns_by_kind.get(field.column_kind, []) if field.column_kind is not None else None
-            if field.type == ParameterFieldType.LIST_STR:
+            if field.type == models.ParameterFieldType.LIST_STR:
                 multiselect_value = cast("list[str] | None", value)
                 return dmc.MultiSelect(
                     id=input_id,
@@ -182,28 +185,80 @@ def _register_open_close(app: Dash) -> None:
         return False
 
 
+def build_chart_param_form(
+    chart_type_name: str | None,
+    column_kinds: dict[str, str] | None,
+    initial_params: dict[str, Any] | None,
+    *,
+    store: DataStore[...],
+    experiment_id: int,
+) -> list[Component]:
+    """
+    Build the add/edit-chart form's fields, offering real column choices wherever possible.
+
+    `column_kinds` comes from `COLUMN_KINDS_STORE_ID`, which only a prior suggest-charts/auto-
+    populate interaction this page load actually populates -- opening the modal itself doesn't, so
+    a first-time "Add chart" click (nothing else touched yet) falls back to fetching it fresh here,
+    same as `auto_populate_charts`/`refresh_suggestions` already do.
+    """
+    if not chart_type_name:
+        return []
+    if not column_kinds:
+        _full_df_json, column_kinds = core.compute_full_df_and_column_kinds(store, experiment_id)
+    columns_by_kind = group_columns_by_kind(column_kinds or {})
+    fields = models.ChartTypeRegistry.get_registered_chart_types()[chart_type_name]
+    initial_params = initial_params or {}
+    return [
+        _param_field_input(name, field, columns_by_kind, override=initial_params.get(name))
+        for name, field in fields.items()
+    ]
+
+
+def render_chart_preview(  # noqa: PLR0913
+    chart_type_name: str | None,
+    values: list[Any],
+    checked_values: list[Any],
+    field_ids: list[dict[str, str]],
+    df_json: str | None,
+    *,
+    store: DataStore[...],
+    experiment_id: int,
+) -> tuple[Any, str]:
+    """Live-preview the chart -- same `df_json`-missing fallback as `build_chart_param_form`."""
+    if not chart_type_name:
+        return None, ""
+    if df_json is None:
+        df_json, _column_kinds = core.compute_full_df_and_column_kinds(store, experiment_id)
+
+    fields = models.ChartTypeRegistry.get_registered_chart_types().get(chart_type_name, {})
+    parameters = core.merge_chart_param_values(values, checked_values, field_ids, fields)
+    try:
+        chart_instance = models.ChartInstance[Any, Any](chart_type=chart_type_name, parameters=parameters)
+        df = pd.read_json(StringIO(df_json), orient="split")
+        return chart_instance.render(df), ""
+    except (ValidationError, KeyError, ValueError) as exc:
+        _log.exception("error rendering preview")
+        return None, f"Fill in required fields to see a preview ({exc})"
+
+
 def _register_form(app: Dash) -> None:
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(core.ADD_CHART_PARAMS_ID, "children"),
         Input(core.ADD_CHART_TYPE_SELECT_ID, "value"),
         State(core.COLUMN_KINDS_STORE_ID, "data"),
         State(core.ADD_CHART_INITIAL_PARAMS_ID, "data"),
+        State(constants.STATE_EXPERIMENT_ID, "data"),
         prevent_initial_call=True,
     )
     def build_param_form(
         chart_type_name: str | None,
         column_kinds: dict[str, str] | None,
         initial_params: dict[str, Any] | None,
+        experiment_id: int,
     ) -> list[Component]:
-        if not chart_type_name:
-            return []
-        columns_by_kind = group_columns_by_kind(column_kinds or {})
-        fields = ChartTypeRegistry.get_registered_chart_types()[chart_type_name]
-        initial_params = initial_params or {}
-        return [
-            _param_field_input(name, field, columns_by_kind, override=initial_params.get(name))
-            for name, field in fields.items()
-        ]
+        return build_chart_param_form(
+            chart_type_name, column_kinds, initial_params, store=get_data_store(), experiment_id=experiment_id
+        )
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(core.ADD_CHART_PREVIEW_ID, "children"),
@@ -213,27 +268,26 @@ def _register_form(app: Dash) -> None:
         Input({"type": core.CHART_PARAM_TYPE, "field": ALL}, "checked"),
         State({"type": core.CHART_PARAM_TYPE, "field": ALL}, "id"),
         State(core.FULL_DF_STORE_ID, "data"),
+        State(constants.STATE_EXPERIMENT_ID, "data"),
         prevent_initial_call=True,
     )
-    def render_preview(
+    def render_preview(  # noqa: PLR0913
         chart_type_name: str | None,
         values: list[Any],
         checked_values: list[Any],
         field_ids: list[dict[str, str]],
         df_json: str | None,
+        experiment_id: int,
     ) -> tuple[Any, str]:
-        if not chart_type_name or df_json is None:
-            return None, ""
-
-        fields = ChartTypeRegistry.get_registered_chart_types().get(chart_type_name, {})
-        parameters = core.merge_chart_param_values(values, checked_values, field_ids, fields)
-        try:
-            chart_instance = ChartInstance[Any, Any](chart_type=chart_type_name, parameters=parameters)
-            df = pd.read_json(StringIO(df_json), orient="split")
-            return chart_instance.render(df), ""
-        except (ValidationError, KeyError, ValueError) as exc:
-            _log.exception("error rendering preview")
-            return None, f"Fill in required fields to see a preview ({exc})"
+        return render_chart_preview(
+            chart_type_name,
+            values,
+            checked_values,
+            field_ids,
+            df_json,
+            store=get_data_store(),
+            experiment_id=experiment_id,
+        )
 
 
 def register_chart_editor_callbacks(app: Dash) -> None:

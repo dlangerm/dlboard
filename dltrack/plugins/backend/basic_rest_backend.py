@@ -355,7 +355,7 @@ def get_or_create_experiment() -> dict[str, Any]:
 def log_artifact() -> dict[str, str]:
     """Log an artifact with metadata and files."""
     try:
-        _log.info("log artifact batch")
+        _log.debug("log artifact batch")
         t0 = perf_counter()
         jsons = (
             models.NewArtifact.model_validate_json(f.stream.read().decode())
@@ -370,7 +370,7 @@ def log_artifact() -> dict[str, str]:
                 get_current_user(get_data_store()),
             )
         finally:
-            _log.info("logging artifacts took %.3f seconds", perf_counter() - t0)
+            _log.debug("logging artifacts took %.3f seconds", perf_counter() - t0)
     except Exception:
         _log.exception("failed to create new artifacts")
         raise

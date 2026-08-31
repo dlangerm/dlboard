@@ -27,9 +27,18 @@ class DescriptionEditorIds(typing.NamedTuple):
     cancel: str
 
 
-def render_header(ids: DescriptionEditorIds, *, title: str, description: str) -> Component:
+def render_header(
+    ids: DescriptionEditorIds,
+    *,
+    title: str,
+    description: str,
+    extra_actions: list[Component] | None = None,
+) -> Component:
     """
     Build the title/description display plus its (initially closed) edit modal.
+
+    `extra_actions` are rendered inline in the same group as the title/edit-icon (e.g. a delete
+    icon next to the edit icon) -- optional since most callers have no such action.
 
     Carries no margin of its own — callers decide spacing, since some (the experiment page) place
     this inline in a flex row alongside other controls, where an internal margin would misalign it
@@ -43,6 +52,7 @@ def render_header(ids: DescriptionEditorIds, *, title: str, description: str) ->
                     dmc.ActionIcon(
                         "✎", id=ids.edit_button, n_clicks=0, variant="subtle", size="sm", color="gray"
                     ),
+                    *(extra_actions or []),
                 ],
                 gap="xs",
             ),
@@ -68,13 +78,14 @@ def render_header(ids: DescriptionEditorIds, *, title: str, description: str) ->
     )
 
 
-def register_edit_callbacks(
+def register_edit_callbacks(  # noqa: PLR0913
     app: Dash,
     ids: DescriptionEditorIds,
     entity_id_state: State,
     *,
     fetch: Callable[[int], tuple[str, str]],
     save: Callable[[int, str], tuple[str, str]],
+    extra_actions: list[Component] | None = None,
 ) -> None:
     """
     Wire up open/save/cancel for one editable header.
@@ -109,7 +120,7 @@ def register_edit_callbacks(
         if not n_clicks:
             raise PreventUpdate
         name, description = save(entity_id, new_description or "")
-        return False, render_header(ids, title=name, description=description)
+        return False, render_header(ids, title=name, description=description, extra_actions=extra_actions)
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(ids.modal, "opened", allow_duplicate=True),
