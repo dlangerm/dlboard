@@ -37,10 +37,17 @@ class BarChartSettings(BaseModel, frozen=True, extra="forbid"):
         description="horizontal draws upright bars with groups along the x-axis (the default); "
         "vertical draws sideways bars with groups along the y-axis.",
     )
-    sort: bool = Field(
-        default=True,
-        description="Order bars ascending by x_axis value -- numerically if every group parses as "
-        "a number, alphabetically otherwise. Disable to keep groups in first-seen order.",
+    sort: typing.Literal["none", "ascending", "descending"] = Field(
+        default="ascending",
+        description="Order bars by x_axis value -- numerically if every group parses as a number, "
+        "alphabetically otherwise. 'none' keeps groups in first-seen order.",
+    )
+    x_axis_type: typing.Literal["auto", "number", "category", "date"] = Field(
+        default="auto",
+        description='How to interpret x_axis values for sorting/parsing: "auto" detects numbers vs '
+        'text (the previous behavior); "number" and "date" force numeric/timestamp parsing even when '
+        'values look like text; "category" always sorts/groups them as plain text, e.g. to keep '
+        '"v2" before "v10" instead of numeric order.',
     )
     height: int = 300
     width: int | None = Field(
@@ -61,11 +68,21 @@ def _resolve_column(dataframe: pd.DataFrame, name: str) -> str:
     return hparam_column if hparam_column in dataframe.columns else name
 
 
-def _sorted_groups(grouped: pd.DataFrame, x_col: str) -> pd.DataFrame:
-    numeric_x = pd.to_numeric(grouped[x_col], errors="coerce")
-    if numeric_x.notna().all():
-        return grouped.iloc[numeric_x.argsort()]
-    return grouped.sort_values(x_col, key=lambda s: s.astype(str))
+def _sorted_groups(
+    grouped: pd.DataFrame, x_col: str, x_axis_type: typing.Literal["auto", "number", "category", "date"]
+) -> pd.DataFrame:
+    match x_axis_type:
+        case "category":
+            return grouped.sort_values(x_col, key=lambda s: s.astype(str))
+        case "date":
+            return grouped.sort_values(x_col)
+        case "number":
+            return grouped.iloc[pd.to_numeric(grouped[x_col], errors="coerce").argsort()]
+        case "auto":
+            numeric_x = pd.to_numeric(grouped[x_col], errors="coerce")
+            if numeric_x.notna().all():
+                return grouped.iloc[numeric_x.argsort()]
+            return grouped.sort_values(x_col, key=lambda s: s.astype(str))
 
 
 class BarChart(ChartType[BarChartSettings, pd.DataFrame, dmc.BarChart], frozen=True, extra="forbid"):
@@ -87,10 +104,24 @@ class BarChart(ChartType[BarChartSettings, pd.DataFrame, dmc.BarChart], frozen=T
         dataframe = dataframe.copy()
         x_col = _resolve_column(dataframe, parameters.x_axis)
 
-        for c in (x_col, parameters.column):
-            if str(dataframe[c].dtype) in ("object", "str"):
+        if str(dataframe[parameters.column].dtype) in ("object", "str"):
+            with contextlib.suppress(ValueError, TypeError):
+                dataframe[parameters.column] = pd.to_datetime(
+                    dataframe[parameters.column], utc=True, format="ISO8601"
+                )
+
+        match parameters.x_axis_type:
+            case "date":
                 with contextlib.suppress(ValueError, TypeError):
-                    dataframe[c] = pd.to_datetime(dataframe[c], utc=True, format="ISO8601")
+                    dataframe[x_col] = pd.to_datetime(dataframe[x_col], utc=True, format="ISO8601")
+            case "number":
+                dataframe[x_col] = pd.to_numeric(dataframe[x_col], errors="coerce")
+            case "category":
+                dataframe[x_col] = dataframe[x_col].astype(str)
+            case "auto":
+                if str(dataframe[x_col].dtype) in ("object", "str"):
+                    with contextlib.suppress(ValueError, TypeError):
+                        dataframe[x_col] = pd.to_datetime(dataframe[x_col], utc=True, format="ISO8601")
 
         # Collapse each run down to its last-logged value before grouping, so a run that logs
         # `column` at every step doesn't outweigh a run that only logs it once -- every run
@@ -99,8 +130,10 @@ class BarChart(ChartType[BarChartSettings, pd.DataFrame, dmc.BarChart], frozen=T
         grouped = per_run.groupby(x_col, as_index=False, sort=False).agg(
             **{parameters.column: (parameters.column, parameters.aggregation)}
         )
-        if parameters.sort:
-            grouped = _sorted_groups(grouped, x_col)
+        if parameters.sort != "none":
+            grouped = _sorted_groups(grouped, x_col, parameters.x_axis_type)
+            if parameters.sort == "descending":
+                grouped = grouped.iloc[::-1]
         grouped = grouped.rename(columns={x_col: parameters.x_axis})
 
         data = grouped.to_dict(orient="records")

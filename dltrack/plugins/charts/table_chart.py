@@ -40,7 +40,8 @@ class TableChartSettings(BaseModel, frozen=True, extra="forbid"):
     metrics: list[str] = Field(
         default=[],
         description="Metric column names to show; empty shows every metric (run mode uses each "
-        "run's last-logged value).",
+        "run's last-logged value) -- unless hparams is set without this, which is read as "
+        '"hparams only" rather than "every metric too".',
     )
     hparams: list[str] = Field(
         default=[], description="Hyperparameter keys to show; empty shows every hyperparameter."
@@ -182,9 +183,14 @@ class TableChart(
     def hint_required_columns(cls, parameters: TableChartSettings) -> set[str] | None:
         if parameters.pivot_on:
             return {c for c in (parameters.pivot_on, parameters.pivot_metric) if c}
-        if not parameters.metrics:
-            return None
-        return set(parameters.metrics) | {"step"}
+        if parameters.metrics:
+            return set(parameters.metrics) | {"step"}
+        if parameters.hparams:
+            # Metrics and hparams are fetched independently (see `hint_required_hparams`) -- having
+            # curated one but not the other reads as "I only want hparams here", not "fetch every
+            # metric in the experiment for a table that's not even configured to show them nicely".
+            return set()
+        return None
 
     @classmethod
     @typing.override

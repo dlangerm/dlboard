@@ -96,6 +96,7 @@ def _register_add_chart(app: Dash) -> None:
         Output(core.ADD_CHART_MODAL_ID, "opened", allow_duplicate=True),
         Output(core.ADD_CHART_ERROR_ID, "children", allow_duplicate=True),
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
+        Output(core.ADD_CHART_SUBMIT_ID, "loading", allow_duplicate=True),
         Input(core.ADD_CHART_SUBMIT_ID, "n_clicks"),
         {
             "chart_type_name": State(core.ADD_CHART_TYPE_SELECT_ID, "value"),
@@ -108,7 +109,9 @@ def _register_add_chart(app: Dash) -> None:
         },
         prevent_initial_call=True,
     )
-    def add_chart(n_clicks: int, add_chart_ctx: _AddChartCtx) -> tuple[Any, Any, bool, str, str | NoUpdate]:
+    def add_chart(
+        n_clicks: int, add_chart_ctx: _AddChartCtx
+    ) -> tuple[Any, Any, bool, str, str | NoUpdate, bool]:
         chart_type_name, target = add_chart_ctx["chart_type_name"], add_chart_ctx["target"]
         if not n_clicks or not chart_type_name or not target:
             raise PreventUpdate
@@ -120,7 +123,7 @@ def _register_add_chart(app: Dash) -> None:
         try:
             new_chart = core.build_validated_chart_instance(chart_type_name, parameters)
         except (ValidationError, KeyError) as exc:
-            return no_update, no_update, True, f"Invalid parameters: {exc}", no_update
+            return no_update, no_update, True, f"Invalid parameters: {exc}", no_update, False
 
         panel_name, index = target["panel"], target.get("index")
 
@@ -133,7 +136,7 @@ def _register_add_chart(app: Dash) -> None:
             apply_chart,
             view_state=core.edit_view_state_from_ctx(add_chart_ctx),
         )
-        return container, new_panel_group, False, "", page.model_dump_json()
+        return container, new_panel_group, False, "", page.model_dump_json(), False
 
 
 def _register_delete_chart(app: Dash) -> None:
@@ -251,73 +254,64 @@ def _register_delete_panel(app: Dash) -> None:
 
 
 def _register_reorder(app: Dash) -> None:
-    """Panel/chart drag-and-drop drop handlers -- see `_experiment_page_dragdrop.js`."""
+    """
+    Panel/chart drag-and-drop drop handlers -- see `_experiment_page_dragdrop.js`.
+
+    Unlike every other mutation in this module, a reorder never changes what any chart shows --
+    only where it sits. Routing it through `mutate_panels_and_rerender` (refetch + rebuild every
+    open panel from scratch) would pay the full cost of a data-changing edit for a change that has
+    no data to refetch, which is exactly the "blanks out for a couple seconds" experience a drag
+    shouldn't have. Instead: persist the new order (a cheap page-row update, no metric/artifact
+    query) and splice the client's own already-rendered tree into that order in place -- see
+    `core.reorder_rendered_panels`/`reorder_rendered_charts`.
+    """
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
-        Output(core.NEW_PANEL_GROUP_ID, "children", allow_duplicate=True),
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Input(core.PANEL_REORDER_STORE_ID, "data"),
         State(core.STATE_PAGE_STORAGE, "data"),
-        State(constants.STATE_EXPERIMENT_ID, "data"),
-        State(core.FULL_DF_STORE_ID, "data", allow_optional=True),
-        State(core.COLUMN_KINDS_STORE_ID, "data", allow_optional=True),
+        State(core.METRIC_CONTENT_ID, "children"),
         prevent_initial_call=True,
     )
     def reorder_panel(
-        request: core.PanelReorderRequest | None,
-        page_json: str,
-        experiment_id: int,
-        full_df_json: str | None,
-        column_kinds: dict[str, str] | None,
-    ) -> tuple[html.Div, Any, str]:
+        request: core.PanelReorderRequest | None, page_json: str, container: dict[str, Any]
+    ) -> tuple[dict[str, Any], str]:
         if not request:
             raise PreventUpdate
-
-        def reorder(panels: list[Any]) -> list[Any]:
-            return core.reorder_panel(panels, request["panel"], request["target"], after=request["after"])
-
-        page, new_panel_group, container = core.mutate_panels_and_rerender(
-            page_json,
-            experiment_id,
-            reorder,
-            view_state=core.EditViewState(full_df_json=full_df_json, column_kinds=column_kinds),
+        curr_page = core.BasicExperimentPage.model_validate_json(page_json)
+        new_panels = core.reorder_panel(
+            curr_page.panels, request["panel"], request["target"], after=request["after"]
         )
-        return container, new_panel_group, page.model_dump_json()
+        updated_page = get_data_store().update_page(curr_page.model_copy(update={"panels": new_panels}))
+        new_container = core.reorder_rendered_panels(container, [p.name for p in new_panels])
+        return new_container, updated_page.model_dump_json()
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
-        Output(core.NEW_PANEL_GROUP_ID, "children", allow_duplicate=True),
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Input(core.CHART_REORDER_STORE_ID, "data"),
         State(core.STATE_PAGE_STORAGE, "data"),
-        State(constants.STATE_EXPERIMENT_ID, "data"),
-        State(core.FULL_DF_STORE_ID, "data", allow_optional=True),
-        State(core.COLUMN_KINDS_STORE_ID, "data", allow_optional=True),
+        State(core.METRIC_CONTENT_ID, "children"),
         prevent_initial_call=True,
     )
     def reorder_chart(
-        request: core.ChartReorderRequest | None,
-        page_json: str,
-        experiment_id: int,
-        full_df_json: str | None,
-        column_kinds: dict[str, str] | None,
-    ) -> tuple[html.Div, Any, str]:
+        request: core.ChartReorderRequest | None, page_json: str, container: dict[str, Any]
+    ) -> tuple[dict[str, Any], str]:
         if not request:
             raise PreventUpdate
-
-        def reorder(panels: list[Any]) -> list[Any]:
-            return core.reorder_chart(
-                panels, request["panel"], request["index"], request["target_index"], after=request["after"]
-            )
-
-        page, new_panel_group, container = core.mutate_panels_and_rerender(
-            page_json,
-            experiment_id,
-            reorder,
-            view_state=core.EditViewState(full_df_json=full_df_json, column_kinds=column_kinds),
+        curr_page = core.BasicExperimentPage.model_validate_json(page_json)
+        panel_name, index, target_index = request["panel"], request["index"], request["target_index"]
+        panel = next(p for p in curr_page.panels if p.name == panel_name)
+        new_panels = core.reorder_chart(
+            curr_page.panels, panel_name, index, target_index, after=request["after"]
         )
-        return container, new_panel_group, page.model_dump_json()
+        updated_page = get_data_store().update_page(curr_page.model_copy(update={"panels": new_panels}))
+        new_order = core.move_index(
+            list(range(len(panel.charts))), index, target_index, after=request["after"]
+        )
+        new_container = core.reorder_rendered_charts(container, panel_name, new_order)
+        return new_container, updated_page.model_dump_json()
 
 
 def _register_toggle(app: Dash) -> None:
