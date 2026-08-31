@@ -59,11 +59,18 @@ def test_build_chart_param_form_offers_real_columns_on_first_open(
     """
     _log_metrics_and_hparams(store, experiment_id)
 
-    fields = build_chart_param_form("line", None, None, store=store, experiment_id=experiment_id)
+    fields, full_df_json, column_kinds = build_chart_param_form(
+        "line", None, None, store=store, experiment_id=experiment_id
+    )
     by_field = _props_by_field(fields)
 
     assert set(by_field["column"]["data"]) >= {"loss", "acc"}
     assert by_field["x_axis"]["data"]
+    # The resolved cache is handed back too, so the caller can write it into the cache stores and
+    # spare the *next* add/edit-chart click this page load the same full-experiment fetch.
+    assert full_df_json
+    assert column_kinds is not None
+    assert column_kinds["loss"] == "metric"
 
 
 def test_build_chart_param_form_table_chart_offers_metrics_and_hparams(
@@ -72,7 +79,9 @@ def test_build_chart_param_form_table_chart_offers_metrics_and_hparams(
     """Same regression, for the table chart's metrics/hparams/pivot_on/pivot_metric fields."""
     _log_metrics_and_hparams(store, experiment_id)
 
-    fields = build_chart_param_form("table", None, None, store=store, experiment_id=experiment_id)
+    fields, _full_df_json, _column_kinds = build_chart_param_form(
+        "table", None, None, store=store, experiment_id=experiment_id
+    )
     by_field = _props_by_field(fields)
 
     assert set(by_field["metrics"]["data"]) >= {"loss", "acc"}
@@ -87,12 +96,16 @@ def test_build_chart_param_form_respects_an_already_populated_cache(
     """When `column_kinds` *is* already populated (a later add-chart click this page load), use it
     directly rather than re-fetching -- proves the fallback is additive, not a behavior change.
     """
-    fields = build_chart_param_form(
+    fields, full_df_json, column_kinds = build_chart_param_form(
         "line", {"custom_metric": "metric"}, None, store=store, experiment_id=experiment_id
     )
     by_field = _props_by_field(fields)
 
     assert by_field["column"]["data"] == ["custom_metric"]
+    # No fetch happened, so there's nothing new to hand back -- the caller must not clobber an
+    # already-populated cache with `None`.
+    assert full_df_json is None
+    assert column_kinds == {"custom_metric": "metric"}
 
 
 def test_render_chart_preview_renders_on_first_open(store: SQLLiteStore, experiment_id: int) -> None:
@@ -100,9 +113,10 @@ def test_render_chart_preview_renders_on_first_open(store: SQLLiteStore, experim
     _log_metrics_and_hparams(store, experiment_id)
 
     field_ids = [{"type": "chart-param", "field": "column"}, {"type": "chart-param", "field": "x_axis"}]
-    preview, error = render_chart_preview(
+    preview, error, df_json = render_chart_preview(
         "line", ["loss", "step"], [None, None], field_ids, None, store=store, experiment_id=experiment_id
     )
 
     assert error == ""
     assert preview is not None
+    assert df_json

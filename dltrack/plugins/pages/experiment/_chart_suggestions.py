@@ -8,18 +8,22 @@ the dynamic suggestion list content and the callbacks that drive both flows.
 
 from __future__ import annotations
 
+from io import StringIO
 from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 import dash_mantine_components as dmc
+import pandas as pd
 from dash import ALL, Dash, Input, NoUpdate, Output, State, ctx, no_update
 from dash.exceptions import PreventUpdate
 
 from dltrack.models import ChartInstance, ColumnKind, constants
+from dltrack.plugins.pages.experiment import _dataframe_helpers as dfh
 from dltrack.plugins.pages.experiment import _experiment_page_state as core
 from dltrack.plugins.pages.experiment._chart_autogen import (
     Suggestion,
     build_auto_panels,
     build_suggestions,
+    chartable_metric_columns,
     find_uncharted_keys,
 )
 from dltrack.serve import get_data_store
@@ -28,6 +32,14 @@ if TYPE_CHECKING:
     from dash.development.base_component import Component
 
     from dltrack.plugins.pages.experiment._chart_autogen import SplitMode
+
+
+def _single_value_columns(full_df_json: str | None, column_kinds: dict[str, str]) -> frozenset[str]:
+    """Metric columns worth a bar chart instead of a line chart -- see `default_chart_for_metric`."""
+    if not full_df_json:
+        return frozenset()
+    df = pd.read_json(StringIO(full_df_json), orient="split")
+    return frozenset(dfh.single_value_metric_columns(df, chartable_metric_columns(column_kinds)))
 
 
 class _AutoPopulateCtx(core.EditCtx):
@@ -105,6 +117,7 @@ def _register_auto_populate(app: Dash) -> None:
             raise ValueError(msg)
         split_mode: SplitMode = "suffix" if auto_populate_ctx["mode"] == "suffix" else "prefix"
         lightning = core.is_lightning_experiment(get_data_store(), experiment_id)
+        single_value_columns = _single_value_columns(full_df_json, column_kinds)
 
         def replace_with_generated_panels(_panels: list[Any]) -> list[Any]:
             return build_auto_panels(
@@ -112,6 +125,7 @@ def _register_auto_populate(app: Dash) -> None:
                 delimiter=auto_populate_ctx["delimiter"] or core.DEFAULT_DELIMITER,
                 mode=split_mode,
                 lightning=lightning,
+                single_value_columns=single_value_columns,
             )
 
         page, new_panel_group, container = core.mutate_panels_and_rerender(
@@ -155,6 +169,7 @@ class _SuggestCtx(TypedDict):
     mode: str | None
     page_json: str
     column_kinds: dict[str, str] | None
+    full_df_json: str | None
     current_scope: str | None
 
 
@@ -165,6 +180,8 @@ def _register_suggestions(app: Dash) -> None:
         Output(core.SUGGEST_CONTENT_ID, "children", allow_duplicate=True),
         Output(core.SUGGEST_SUGGESTIONS_STORE_ID, "data", allow_duplicate=True),
         Output(core.SUGGEST_SCOPE_STORE_ID, "data", allow_duplicate=True),
+        Output(core.FULL_DF_STORE_ID, "data", allow_duplicate=True),
+        Output(core.COLUMN_KINDS_STORE_ID, "data", allow_duplicate=True),
         Input(core.SUGGEST_CHARTS_BUTTON_ID, "n_clicks"),
         Input({"type": "panel-suggest-charts", "panel": ALL}, "n_clicks"),
         {
@@ -172,13 +189,22 @@ def _register_suggestions(app: Dash) -> None:
             "mode": Input(core.SUGGEST_MODE_ID, "value"),
             "page_json": State(core.STATE_PAGE_STORAGE, "data"),
             "column_kinds": State(core.COLUMN_KINDS_STORE_ID, "data"),
+            "full_df_json": State(core.FULL_DF_STORE_ID, "data"),
             "current_scope": State(core.SUGGEST_SCOPE_STORE_ID, "data"),
         },
         prevent_initial_call=True,
     )
     def refresh_suggestions(
         n_clicks: int, _panel_clicks: list[int], suggest_ctx: _SuggestCtx
-    ) -> tuple[bool | NoUpdate, str | NoUpdate, Component, list[dict[str, Any]], str | None]:
+    ) -> tuple[
+        bool | NoUpdate,
+        str | NoUpdate,
+        Component,
+        list[dict[str, Any]],
+        str | None,
+        str | None,
+        dict[str, str] | None,
+    ]:
         # Either button mounting for the first time reports itself as "triggered" with `n_clicks`
         # still 0 -- each is rendered into its own container (`NEW_PANEL_GROUP_ID`/`panel_header_
         # controls`), separate from the delimiter/mode inputs below, so `ctx.triggered_id`
@@ -186,17 +212,20 @@ def _register_suggestions(app: Dash) -> None:
         scope, opened = _resolve_suggestion_trigger(n_clicks, suggest_ctx["current_scope"])
 
         page_json, column_kinds = suggest_ctx["page_json"], suggest_ctx["column_kinds"]
+        full_df_json = suggest_ctx["full_df_json"]
         curr_page = core.BasicExperimentPage.model_validate_json(page_json)
         if not column_kinds and curr_page.experiment_id is not None:
             # Edit mode (the only thing that normally populates this cache) may never have been
-            # toggled on this page load -- fetch fresh rather than wrongly reporting no data.
-            _full_df_json, column_kinds = core.compute_full_df_and_column_kinds(
+            # toggled on this page load -- fetch fresh rather than wrongly reporting no data, and
+            # write the result back to the cache stores so the *next* add-chart/suggest-charts
+            # click this page load doesn't pay for the same full-experiment fetch again.
+            full_df_json, column_kinds = core.compute_full_df_and_column_kinds(
                 get_data_store(), curr_page.experiment_id
             )
         title = f"Suggested charts for {scope}" if scope else "Suggested charts"
         if not column_kinds:
             empty = dmc.Text("No metrics or artifacts logged for this experiment yet", c="dimmed", size="sm")
-            return opened, title, empty, [], scope
+            return opened, title, empty, [], scope, full_df_json, column_kinds
 
         split_mode: SplitMode = "suffix" if suggest_ctx["mode"] == "suffix" else "prefix"
         uncharted = find_uncharted_keys(curr_page.panels, column_kinds)
@@ -208,6 +237,7 @@ def _register_suggestions(app: Dash) -> None:
             delimiter=suggest_ctx["delimiter"] or core.DEFAULT_DELIMITER,
             mode=split_mode,
             lightning=lightning,
+            single_value_columns=_single_value_columns(full_df_json, column_kinds),
         )
         if scope is not None:
             suggestions = [s for s in suggestions if s.panel_name == scope]
@@ -227,6 +257,8 @@ def _register_suggestions(app: Dash) -> None:
                 for s in suggestions
             ],
             scope,
+            full_df_json,
+            column_kinds,
         )
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]

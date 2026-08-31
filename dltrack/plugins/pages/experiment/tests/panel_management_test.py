@@ -9,13 +9,21 @@ Reordering is drag-and-drop (`_experiment_page_dragdrop.js`), not up/down button
 
 from __future__ import annotations
 
-from typing import Any
+import json
+from typing import TYPE_CHECKING, Any, cast
 
 import dash_mantine_components as dmc
+from dash._utils import to_json  # pyright: ignore[reportUnknownVariableType]
 
 from dltrack.conftest import find_props as _find_props
 from dltrack.models._view import ChartInstance, PanelInstance
+from dltrack.plugins.charts.line_chart import LineChart
 from dltrack.plugins.pages.experiment import _experiment_page_state as state
+
+if TYPE_CHECKING:
+    from dltrack.plugins.data_stores.sqlite import SQLLiteStore
+
+LineChart.register(allow_override=True)
 
 # ---- panel header: hover-revealed sync/layout/rename/drag/delete, siblings of AccordionControl ----
 
@@ -224,3 +232,93 @@ def test_add_chart_to_panel_by_name_appends_to_existing_panel() -> None:
     by_name = {p.name: p for p in result}
     assert by_name["train"].charts == [existing_chart, new_chart]
     assert by_name["val"].charts == []
+
+
+# ---- reorder_rendered_panels / reorder_rendered_charts: reorder-in-place, no refetch ----
+
+
+def _wire_container(store: SQLLiteStore, experiment_id: int) -> dict[str, Any]:
+    """
+    `accordion_view`'s container round-tripped through Dash's own JSON encoder.
+
+    A callback's `State(METRIC_CONTENT_ID, "children")` never sees the live `Component` objects
+    `accordion_view` returns -- Dash serializes them to plain `{"type", "namespace", "props"}`
+    dicts on the wire, and that's the shape `reorder_rendered_panels`/`reorder_rendered_charts`
+    actually operate on in the real callback. Round-tripping through the real encoder here (rather
+    than hand-building a fake dict) is what keeps this test honest about that shape.
+    """
+    _new_panel_group, container = state.accordion_view(store, experiment_id)
+    serialized = to_json(container)
+    assert isinstance(serialized, str)
+    return cast("dict[str, Any]", json.loads(serialized))
+
+
+def test_reorder_rendered_panels_reorders_accordion_items(store: SQLLiteStore, experiment_id: int) -> None:
+    page = store.get_or_create_page(state.BasicExperimentPage, experiment_id=experiment_id)
+    store.update_page(
+        page.model_copy(
+            update={
+                "panels": [PanelInstance[Any, Any](name=n) for n in ("a", "b", "c")],
+                "page_settings": {state.OPEN_PANEL_KEY: []},
+            }
+        )
+    )
+    container = _wire_container(store, experiment_id)
+
+    reordered = state.reorder_rendered_panels(container, ["c", "a", "b"])
+
+    accordion = reordered["props"]["children"][0]
+    assert [item["props"]["value"] for item in accordion["props"]["children"]] == ["c", "a", "b"]
+
+
+def _find_prop_by_key(node: Any, key: str) -> dict[str, Any] | None:  # noqa: ANN401
+    """Depth-first search a JSON-encoded (wire-format) Dash component tree for the first props dict
+    (of any component) that has `key` set."""
+    if isinstance(node, list):
+        for item in cast("list[Any]", node):
+            found = _find_prop_by_key(item, key)
+            if found is not None:
+                return found
+        return None
+    if not isinstance(node, dict) or "props" not in node:
+        return None
+    props = cast("dict[str, Any]", node)["props"]
+    if key in props:
+        return props
+    return _find_prop_by_key(props.get("children"), key)
+
+
+def test_reorder_rendered_charts_reorders_chart_items_within_a_panel(
+    store: SQLLiteStore, experiment_id: int
+) -> None:
+    charts = [
+        ChartInstance[Any, Any](chart_type="line", parameters={"column": n, "x_axis": "step"})
+        for n in ("a", "b", "c")
+    ]
+    page = store.get_or_create_page(state.BasicExperimentPage, experiment_id=experiment_id)
+    store.update_page(
+        page.model_copy(
+            update={
+                "panels": [PanelInstance[Any, Any](name="p", charts=charts)],
+                "page_settings": {state.OPEN_PANEL_KEY: ["p"]},
+            }
+        )
+    )
+    container = _wire_container(store, experiment_id)
+
+    # Same permutation `move_index` would compute for dragging chart 0 to sit after chart 2.
+    order = state.move_index([0, 1, 2], 0, 2, after=True)
+    reordered = state.reorder_rendered_charts(container, "p", order)
+
+    accordion = reordered["props"]["children"][0]
+    item = next(i for i in accordion["props"]["children"] if i["props"]["value"] == "p")
+    chart_items = item["props"]["children"][1]["props"]["children"]["props"]["children"]["props"]["children"]
+    # Each item's drag handle still carries its *original* chart index -- reordering the rendered
+    # tree doesn't (and shouldn't) touch that -- so the sequence of original indices across the
+    # reordered items is exactly `order` if the splice actually worked.
+    original_indices: list[int] = []
+    for chart_item in chart_items:
+        handle_props = _find_prop_by_key(chart_item, "data-chart-index")
+        assert handle_props is not None
+        original_indices.append(int(handle_props["data-chart-index"]))
+    assert original_indices == order

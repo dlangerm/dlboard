@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import dash_mantine_components as dmc
 import pandas as pd
-from dash import ALL, MATCH, Dash, Input, Output, State
+from dash import ALL, MATCH, Dash, Input, NoUpdate, Output, State, no_update
 from dash.exceptions import PreventUpdate
 from pydantic import ValidationError
 from structlog.stdlib import get_logger
@@ -139,6 +139,7 @@ def _register_open_close(app: Dash) -> None:
         Output(core.ADD_CHART_TARGET_ID, "data"),
         Output(core.ADD_CHART_TYPE_SELECT_ID, "value"),
         Output(core.ADD_CHART_INITIAL_PARAMS_ID, "data"),
+        Output(core.ADD_CHART_SUBMIT_ID, "loading", allow_duplicate=True),
         Input({"type": "open-add-chart", "panel": ALL}, "n_clicks"),
         Input({"type": "edit-chart", "panel": ALL, "index": ALL}, "n_clicks"),
         State(core.STATE_PAGE_STORAGE, "data"),
@@ -146,11 +147,11 @@ def _register_open_close(app: Dash) -> None:
     )
     def open_chart_modal(
         _add_clicks: list[int], _edit_clicks: list[int], page_json: str
-    ) -> tuple[bool, core.ChartTargetData, str | None, dict[str, Any]]:
+    ) -> tuple[bool, core.ChartTargetData, str | None, dict[str, Any], bool]:
         triggered_id = cast("core.ChartID", core.require_triggered_id())
 
         if triggered_id["type"] == "open-add-chart":
-            return True, {"panel": str(triggered_id["panel"]), "index": None}, None, {}
+            return True, {"panel": str(triggered_id["panel"]), "index": None}, None, {}, False
 
         curr_page = core.BasicExperimentPage.model_validate_json(page_json)
         panel = next(p for p in curr_page.panels if p.name == triggered_id["panel"])
@@ -159,7 +160,13 @@ def _register_open_close(app: Dash) -> None:
             msg = f"Malformed edit-chart id: {triggered_id}"
             raise ValueError(msg)
         chart = panel.charts[idx]
-        return True, {"panel": str(triggered_id["panel"]), "index": idx}, chart.chart_type, chart.parameters
+        return (
+            True,
+            {"panel": str(triggered_id["panel"]), "index": idx},
+            chart.chart_type,
+            chart.parameters,
+            False,
+        )
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(core.ADD_CHART_SUBMIT_ID, "children"),
@@ -176,13 +183,14 @@ def _register_open_close(app: Dash) -> None:
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(core.ADD_CHART_MODAL_ID, "opened", allow_duplicate=True),
+        Output(core.ADD_CHART_SUBMIT_ID, "loading", allow_duplicate=True),
         Input(core.ADD_CHART_CANCEL_ID, "n_clicks"),
         prevent_initial_call=True,
     )
-    def close_add_chart_modal(n_clicks: int) -> bool:
+    def close_add_chart_modal(n_clicks: int) -> tuple[bool, bool]:
         if not n_clicks:
             raise PreventUpdate
-        return False
+        return False, False
 
 
 def build_chart_param_form(
@@ -192,26 +200,30 @@ def build_chart_param_form(
     *,
     store: DataStore[...],
     experiment_id: int,
-) -> list[Component]:
+) -> tuple[list[Component], str | None, dict[str, str] | None]:
     """
     Build the add/edit-chart form's fields, offering real column choices wherever possible.
 
     `column_kinds` comes from `COLUMN_KINDS_STORE_ID`, which only a prior suggest-charts/auto-
     populate interaction this page load actually populates -- opening the modal itself doesn't, so
     a first-time "Add chart" click (nothing else touched yet) falls back to fetching it fresh here,
-    same as `auto_populate_charts`/`refresh_suggestions` already do.
+    same as `auto_populate_charts`/`refresh_suggestions` already do. Also returns the resolved
+    `(full_df_json, column_kinds)` so the caller can write it back to the cache stores -- otherwise
+    every add/edit-chart click this page load repeats the same full-experiment fetch for nothing.
     """
+    full_df_json: str | None = None
     if not chart_type_name:
-        return []
+        return [], full_df_json, column_kinds
     if not column_kinds:
-        _full_df_json, column_kinds = core.compute_full_df_and_column_kinds(store, experiment_id)
+        full_df_json, column_kinds = core.compute_full_df_and_column_kinds(store, experiment_id)
     columns_by_kind = group_columns_by_kind(column_kinds or {})
     fields = models.ChartTypeRegistry.get_registered_chart_types()[chart_type_name]
     initial_params = initial_params or {}
-    return [
+    field_components = [
         _param_field_input(name, field, columns_by_kind, override=initial_params.get(name))
         for name, field in fields.items()
     ]
+    return field_components, full_df_json, column_kinds
 
 
 def render_chart_preview(  # noqa: PLR0913
@@ -223,10 +235,10 @@ def render_chart_preview(  # noqa: PLR0913
     *,
     store: DataStore[...],
     experiment_id: int,
-) -> tuple[Any, str]:
+) -> tuple[Any, str, str | None]:
     """Live-preview the chart -- same `df_json`-missing fallback as `build_chart_param_form`."""
     if not chart_type_name:
-        return None, ""
+        return None, "", df_json
     if df_json is None:
         df_json, _column_kinds = core.compute_full_df_and_column_kinds(store, experiment_id)
 
@@ -235,15 +247,17 @@ def render_chart_preview(  # noqa: PLR0913
     try:
         chart_instance = models.ChartInstance[Any, Any](chart_type=chart_type_name, parameters=parameters)
         df = pd.read_json(StringIO(df_json), orient="split")
-        return chart_instance.render(df), ""
+        return chart_instance.render(df), "", df_json
     except (ValidationError, KeyError, ValueError) as exc:
         _log.exception("error rendering preview")
-        return None, f"Fill in required fields to see a preview ({exc})"
+        return None, f"Fill in required fields to see a preview ({exc})", df_json
 
 
 def _register_form(app: Dash) -> None:
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(core.ADD_CHART_PARAMS_ID, "children"),
+        Output(core.FULL_DF_STORE_ID, "data", allow_duplicate=True),
+        Output(core.COLUMN_KINDS_STORE_ID, "data", allow_duplicate=True),
         Input(core.ADD_CHART_TYPE_SELECT_ID, "value"),
         State(core.COLUMN_KINDS_STORE_ID, "data"),
         State(core.ADD_CHART_INITIAL_PARAMS_ID, "data"),
@@ -255,14 +269,18 @@ def _register_form(app: Dash) -> None:
         column_kinds: dict[str, str] | None,
         initial_params: dict[str, Any] | None,
         experiment_id: int,
-    ) -> list[Component]:
-        return build_chart_param_form(
+    ) -> tuple[list[Component], str | NoUpdate, dict[str, str] | NoUpdate]:
+        fields, full_df_json, resolved_column_kinds = build_chart_param_form(
             chart_type_name, column_kinds, initial_params, store=get_data_store(), experiment_id=experiment_id
         )
+        # `None` here means "nothing new was fetched" (the cache was already populated), not "clear
+        # the cache" -- `no_update` leaves whatever's already in the store alone either way.
+        return fields, full_df_json or no_update, resolved_column_kinds or no_update
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(core.ADD_CHART_PREVIEW_ID, "children"),
         Output(core.ADD_CHART_ERROR_ID, "children"),
+        Output(core.FULL_DF_STORE_ID, "data", allow_duplicate=True),
         Input(core.ADD_CHART_TYPE_SELECT_ID, "value"),
         Input({"type": core.CHART_PARAM_TYPE, "field": ALL}, "value"),
         Input({"type": core.CHART_PARAM_TYPE, "field": ALL}, "checked"),
@@ -278,8 +296,8 @@ def _register_form(app: Dash) -> None:
         field_ids: list[dict[str, str]],
         df_json: str | None,
         experiment_id: int,
-    ) -> tuple[Any, str]:
-        return render_chart_preview(
+    ) -> tuple[Any, str, str | NoUpdate]:
+        preview, error, resolved_df_json = render_chart_preview(
             chart_type_name,
             values,
             checked_values,
@@ -288,6 +306,9 @@ def _register_form(app: Dash) -> None:
             store=get_data_store(),
             experiment_id=experiment_id,
         )
+        # Only write back when a fetch actually happened (`df_json` came in empty) -- otherwise
+        # this would just re-set the store to the same value it already had, on every keystroke.
+        return preview, error, (resolved_df_json or no_update) if df_json is None else no_update
 
 
 def register_chart_editor_callbacks(app: Dash) -> None:

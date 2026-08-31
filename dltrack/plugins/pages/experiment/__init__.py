@@ -85,6 +85,8 @@ _HOVER_CSS_PATH = Path(__file__).with_name("_experiment_page_hover.css")
 _HOVER_CSS_ROUTE = "experiment-page-hover.css"
 _DRAGDROP_JS_PATH = Path(__file__).with_name("_experiment_page_dragdrop.js")
 _DRAGDROP_JS_ROUTE = "experiment-page-dragdrop.js"
+_CHART_SUBMIT_LOADING_JS_PATH = Path(__file__).with_name("chart_submit_loading.js")
+_CHART_SUBMIT_LOADING_JS_ROUTE = "chart-submit-loading.js"
 
 
 def _delete_experiment_action() -> list[Component]:
@@ -102,6 +104,10 @@ def _serve_dragdrop_js() -> Response:
     return Response(_DRAGDROP_JS_PATH.read_text(), mimetype="application/javascript")
 
 
+def _serve_chart_submit_loading_js() -> Response:
+    return Response(_CHART_SUBMIT_LOADING_JS_PATH.read_text(), mimetype="application/javascript")
+
+
 def plug(app: Dash) -> None:
     """Plugin for the basic experiment page: hparam table + chart accordion + editor."""
     prefix = str(app.config.routes_pathname_prefix)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
@@ -113,6 +119,16 @@ def plug(app: Dash) -> None:
     app.server.add_url_rule(dragdrop_route, endpoint=dragdrop_route, view_func=_serve_dragdrop_js)
     app.scripts.append_script(  # pyright: ignore[reportUnknownMemberType]
         {"external_url": dragdrop_route, "external_only": True}
+    )
+
+    chart_submit_loading_route = f"{prefix}{_CHART_SUBMIT_LOADING_JS_ROUTE}"
+    app.server.add_url_rule(
+        chart_submit_loading_route,
+        endpoint=chart_submit_loading_route,
+        view_func=_serve_chart_submit_loading_js,
+    )
+    app.scripts.append_script(  # pyright: ignore[reportUnknownMemberType]
+        {"external_url": chart_submit_loading_route, "external_only": True}
     )
 
     # --- initial render: fills METRIC_CONTENT_ID/EXPERIMENT_HEADER_ID and seeds STATE_PAGE_STORAGE ---

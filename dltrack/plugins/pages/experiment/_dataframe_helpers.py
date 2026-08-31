@@ -113,6 +113,15 @@ def group_columns_by_kind(column_kinds: dict[str, str]) -> dict[ColumnKind, list
     return grouped
 
 
+def single_value_metric_columns(df: pd.DataFrame, metric_columns: typing.Iterable[str]) -> set[str]:
+    """Metric columns every run logs at most once -- a natural fit for a bar chart, not a line chart."""
+    metric_columns = [c for c in metric_columns if c in df.columns]
+    if df.empty or "run_id" not in df.columns or not metric_columns:
+        return set()
+    counts = df.groupby("run_id")[metric_columns].count()
+    return {col for col in metric_columns if (counts[col] <= 1).all()}
+
+
 def merge_metrics_and_artifacts(metrics_df: pd.DataFrame, artifacts_df: pd.DataFrame) -> pd.DataFrame:
     if not metrics_df.empty and not artifacts_df.empty:
         return metrics_df.merge(artifacts_df, on=["run_id", "step"], how="outer")

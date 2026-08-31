@@ -4,12 +4,14 @@
 from __future__ import annotations
 
 from dltrack.models._view import ChartInstance, ColumnKind, PanelInstance
+from dltrack.plugins.charts.bar_chart import BarChart
 from dltrack.plugins.charts.image_series import ImageChart
 from dltrack.plugins.charts.line_chart import LineChart
 from dltrack.plugins.pages.experiment import _chart_autogen as autogen
 
 LineChart.register(allow_override=True)
 ImageChart.register(allow_override=True)
+BarChart.register(allow_override=True)
 
 
 def _panel(name: str, *charts: ChartInstance[object, object]) -> PanelInstance[object, object]:
@@ -267,6 +269,33 @@ def test_build_suggestions_pairs_each_key_with_its_default_chart_and_target_pane
             chart=ChartInstance[object, object](chart_type="image", parameters={"key": "train/sample"}),
         ),
     ]
+
+
+def test_build_suggestions_single_value_metric_gets_a_bar_chart_across_runs() -> None:
+    uncharted = autogen.UnchartedKeys(metrics=["final_accuracy"], artifacts=[])
+
+    suggestions = autogen.build_suggestions(
+        uncharted, delimiter="/", mode="prefix", single_value_columns=frozenset({"final_accuracy"})
+    )
+
+    assert suggestions == [
+        autogen.Suggestion(
+            key="final_accuracy",
+            kind=ColumnKind.METRIC,
+            panel_name=autogen.UNGROUPED_GROUP_NAME,
+            chart=ChartInstance[object, object](
+                chart_type="bar", parameters={"column": "final_accuracy", "x_axis": "run_id"}
+            ),
+        )
+    ]
+
+
+def test_build_auto_panels_single_value_metric_gets_a_bar_chart() -> None:
+    column_kinds = {"final_accuracy": ColumnKind.METRIC}
+    panels = autogen.build_auto_panels(
+        column_kinds, delimiter="/", mode="prefix", single_value_columns=frozenset({"final_accuracy"})
+    )
+    assert panels[0].charts[0].chart_type == "bar"
 
 
 def test_build_suggestions_lightning_splits_panel_by_granularity() -> None:

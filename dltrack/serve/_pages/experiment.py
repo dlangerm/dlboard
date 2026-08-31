@@ -36,7 +36,13 @@ def layout(experiment_id: str) -> list[html.Div | dcc.Store]:
                     # `children`, never the element itself, so a `Loader` used as its own
                     # placeholder would keep its spinner styling baked into the DOM node forever,
                     # showing through/behind whatever real content lands in it.
-                    html.Div(dmc.Loader(), id=experiment.METRIC_CONTENT_ID),
+                    #
+                    # `dcc.Loading` overlays a spinner over its children for as long as any
+                    # callback updating one of their props is in flight -- panel/chart drag-reorder
+                    # and other mutations rebuild this whole tree server-side, which can take a
+                    # couple of seconds on a large experiment, and without this the page just
+                    # looked frozen for that whole stretch.
+                    dcc.Loading(html.Div(dmc.Loader(), id=experiment.METRIC_CONTENT_ID), delay_show=250),
                 ],
                 gap="xs",
             ),
