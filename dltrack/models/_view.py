@@ -288,6 +288,9 @@ class PanelInstance[D, C](BaseModel, frozen=True, extra="forbid"):
     name: str = ""
     """Human-readable name for the panel."""
 
+    tab: str = ""
+    """Which tab this panel is grouped under; empty means the default/ungrouped tab."""
+
     charts: list[ChartInstance[D, C]] = []
     """Charts belonging to this panel."""
 

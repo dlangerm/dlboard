@@ -1,4 +1,4 @@
-"""Shared dash_table.DataTable theming, reused by the hparam table and the table chart type."""
+"""Shared dash-ag-grid theming, reused by the hparam table and the table chart type."""
 
 from __future__ import annotations
 
@@ -13,14 +13,14 @@ TAGS_COLUMN_SUFFIX = "__tags"
 as a plain table cell."""
 
 ColumnDType = Literal["numeric", "text"]
-"""A `dash_table.DataTable` column dtype, as inferred by `infer_column_dtype`."""
+"""An ag-grid column dtype, as inferred by `infer_column_dtype`."""
 
 NUMERIC: ColumnDType = "numeric"
 TEXT: ColumnDType = "text"
 
 
 def infer_column_dtype[T](rows: list[dict[T, Any]], key: T) -> ColumnDType:
-    """Guess a column's dash_table dtype from the first non-null value seen."""
+    """Guess a column's ag-grid dtype from the first non-null value seen."""
     for row in rows:
         val = row.get(key)
         if val is not None:
@@ -28,74 +28,41 @@ def infer_column_dtype[T](rows: list[dict[T, Any]], key: T) -> ColumnDType:
     return TEXT
 
 
+def column_def(name: str, dtype: ColumnDType, **extra: Any) -> dict[str, Any]:  # noqa: ANN401
+    """Build one ag-grid `columnDefs` entry, `**extra` merged in last so callers can override any key."""
+    base: dict[str, Any] = {"field": name, "headerName": name, "sortable": True, "filter": True}
+    if dtype == NUMERIC:
+        base["filter"] = "agNumberColumnFilter"
+        base["valueFormatter"] = {"function": "params.value == null ? '' : params.value.toFixed(3)"}
+    return {**base, **extra}
+
+
 DEFAULT_TABLE_FONT_SIZE = "var(--mantine-font-size-sm)"
 """Default cell/header font size — matches the rest of the charts, which sit noticeably smaller
-than a `dash_table.DataTable`'s unstyled (browser-default) text."""
+than ag-grid's default text."""
 
 
-def themed_datatable_kwargs(*, font_size: str = DEFAULT_TABLE_FONT_SIZE) -> dict[str, Any]:
+def themed_grid_kwargs(*, font_size: str = DEFAULT_TABLE_FONT_SIZE) -> dict[str, Any]:
     """
-    CSS-var-driven style kwargs so dash_table.DataTable matches the Mantine theme (incl. dark mode).
+    CSS-var-driven style/className kwargs so an `AgGrid` matches the Mantine theme (incl. dark mode).
 
-    Spread into a `dash_table.DataTable(...)` call: `dash_table.DataTable(..., **themed_datatable_kwargs())`.
+    Spread into a `dash_ag_grid.AgGrid(...)` call: `AgGrid(..., **themed_grid_kwargs())`.
     """
     return {
-        "style_table": {
-            "overflowX": "auto",
-            "overflowY": "hidden",
-            "border": "1px solid var(--mantine-color-default-border)",
-            "borderRadius": "var(--mantine-radius-md)",
+        "className": "ag-theme-quartz",
+        "style": {
+            "width": "100%",
+            "--ag-background-color": "var(--mantine-color-body)",
+            "--ag-foreground-color": "var(--mantine-color-text)",
+            "--ag-header-background-color": "var(--mantine-color-default-hover)",
+            "--ag-header-foreground-color": "var(--mantine-color-text)",
+            "--ag-border-color": "var(--mantine-color-default-border)",
+            "--ag-row-border-color": "var(--mantine-color-default-border)",
+            "--ag-odd-row-background-color": "var(--mantine-color-default-hover)",
+            "--ag-row-hover-color": "var(--mantine-color-default-hover)",
+            "--ag-selected-row-background-color": "var(--mantine-primary-color-light)",
+            "--ag-font-family": "var(--mantine-font-family)",
+            "--ag-font-size": font_size,
+            "--ag-border-radius": "var(--mantine-radius-md)",
         },
-        "style_header": {
-            "backgroundColor": "var(--mantine-color-default-hover)",
-            "color": "var(--mantine-color-text)",
-            "fontFamily": "var(--mantine-font-family)",
-            "fontSize": font_size,
-            "fontWeight": 600,
-            "border": "none",
-            "borderBottom": "1px solid var(--mantine-color-default-border)",
-        },
-        "style_cell": {
-            "backgroundColor": "var(--mantine-color-body)",
-            "color": "var(--mantine-color-text)",
-            "fontFamily": "var(--mantine-font-family)",
-            "fontSize": font_size,
-            "border": "none",
-            "padding": "6px 10px",
-        },
-        "style_data_conditional": [
-            {
-                "if": {"state": "selected"},
-                "backgroundColor": "var(--mantine-primary-color-light)",
-                "border": "1px solid var(--mantine-primary-color-filled)",
-            },
-            {
-                "if": {"row_index": "odd"},
-                "backgroundColor": "var(--mantine-color-default-hover)",
-            },
-        ],
-        "css": [
-            {
-                "selector": ".dash-filter input",
-                "rule": (
-                    "background-color: var(--mantine-color-body);"
-                    "color: var(--mantine-color-text);"
-                    "border: 1px solid var(--mantine-color-default-border);"
-                    "border-radius: 4px;"
-                ),
-            },
-            {
-                "selector": ".dash-spreadsheet-pagination",
-                "rule": "color: var(--mantine-color-text); border-top: 1px solid var(--mantine-color-default-border); padding-top: 6px;",
-            },
-            {
-                "selector": ".dash-spreadsheet-pagination button",
-                "rule": (
-                    "background-color: var(--mantine-color-default-hover);"
-                    "color: var(--mantine-color-text);"
-                    "border: 1px solid var(--mantine-color-default-border);"
-                    "border-radius: 4px;"
-                ),
-            },
-        ],
     }

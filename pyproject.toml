@@ -19,6 +19,7 @@ dev = [
 dependencies = [
   "cyclopts>=4.23.2",
   "dash>=4.4.1",
+  "dash-ag-grid>=35.3.0",
   "dash-mantine-components>=2.8.0",
   "dltype>=0.16.0",
   "granian>=2.8.2",
@@ -63,13 +64,7 @@ venv = ".venv"
 venvPath = "."
 
 [tool.pytest.ini_options]
-filterwarnings = [
-  "error",
-  # dash's own bundled DataTable warning that *it* will drop the component in a future major
-  # version in favor of dash-ag-grid -- not something raised by our code, and migrating off it
-  # is a real component rewrite (table_chart.py, the hparam table), not a warnings cleanup.
-  "ignore::DeprecationWarning:dash.development.base_component"
-]
+filterwarnings = ["error"]
 markers = ["browser: browser-based end-to-end tests requiring a webdriver"]
 pythonpath = ["."]
 testpaths = ["dltrack"]

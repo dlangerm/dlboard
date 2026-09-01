@@ -13,19 +13,18 @@ from __future__ import annotations
 import typing
 from typing import Any
 
+import dash_ag_grid as dag
 import pandas as pd
-from dash import dash_table
-from dash.dash_table.Format import Format
 from pydantic import BaseModel, Field
 
 from dltrack.models import ChartType, ColumnKind
 from dltrack.plugins.charts._grouping import last_row_per_run
 from dltrack.plugins.charts._table_style import (
     HPARAM_COLUMN_PREFIX,
-    NUMERIC,
     TAGS_COLUMN_SUFFIX,
+    column_def,
     infer_column_dtype,
-    themed_datatable_kwargs,
+    themed_grid_kwargs,
 )
 
 if typing.TYPE_CHECKING:
@@ -66,36 +65,34 @@ class TableChartSettings(BaseModel, frozen=True, extra="forbid"):
     )
 
 
-def _message_table(text: str, *, page_size: int, font_size: int | None) -> dash_table.DataTable:
+def _message_table(text: str, *, page_size: int, font_size: int | None) -> dag.AgGrid:
     return _build_table([{"message": text}], ["message"], page_size=page_size, font_size=font_size)
 
 
 def _build_table(
     rows: list[dict[str, Any]], columns: list[str], *, page_size: int, font_size: int | None
-) -> dash_table.DataTable:
-    column_defs: list[dict[str, Any]] = []
-    for col in columns:
-        col_def: dict[str, Any] = {"name": col, "id": col, "type": "text"}
-        if infer_column_dtype(rows, col) == NUMERIC:
-            col_def["type"] = "numeric"
-            col_def["format"] = Format(precision=3, scheme="s")
-        column_defs.append(col_def)
-
-    themed_kwargs = (
-        themed_datatable_kwargs(font_size=f"{font_size}px") if font_size else themed_datatable_kwargs()
-    )
-    return dash_table.DataTable(
-        columns=column_defs,  # pyright: ignore[reportArgumentType]
-        data=rows,  # pyright: ignore[reportArgumentType]
-        filter_action="native",
-        sort_action="native",
-        page_action="native",
-        page_size=page_size,
+) -> dag.AgGrid:
+    column_defs = [column_def(col, infer_column_dtype(rows, col)) for col in columns]
+    themed_kwargs = themed_grid_kwargs(font_size=f"{font_size}px") if font_size else themed_grid_kwargs()
+    return dag.AgGrid(
+        columnDefs=column_defs,
+        rowData=rows,
+        columnSize="responsiveSizeToFit",
+        # `column_def`'s numeric `valueFormatter` is a JS expression string -- dash-ag-grid silently
+        # no-ops any string-valued JS prop unless this is set. Safe here: every such string is
+        # static and written by us, never derived from user/request data.
+        dangerously_allow_code=True,
+        dashGridOptions={
+            "pagination": True,
+            "paginationPageSize": page_size,
+            "paginationPageSizeSelector": sorted({page_size, 20, 50, 100}),
+            "domLayout": "autoHeight",
+        },
         **themed_kwargs,
     )
 
 
-def _render_by_run(parameters: TableChartSettings, dataframe: pd.DataFrame) -> dash_table.DataTable:
+def _render_by_run(parameters: TableChartSettings, dataframe: pd.DataFrame) -> dag.AgGrid:
     hparam_cols = [c for c in dataframe.columns if c.startswith(HPARAM_COLUMN_PREFIX)]
     if parameters.hparams:
         wanted_hparams = {f"{HPARAM_COLUMN_PREFIX}{k}" for k in parameters.hparams}
@@ -129,7 +126,7 @@ def _render_by_run(parameters: TableChartSettings, dataframe: pd.DataFrame) -> d
     return _build_table(rows, columns, page_size=parameters.page_size, font_size=parameters.font_size)
 
 
-def _render_pivoted(parameters: TableChartSettings, dataframe: pd.DataFrame) -> dash_table.DataTable:
+def _render_pivoted(parameters: TableChartSettings, dataframe: pd.DataFrame) -> dag.AgGrid:
     if not parameters.pivot_metric:
         return _message_table(
             "Set pivot_metric to compare a metric across runs.",
@@ -155,9 +152,7 @@ def _render_pivoted(parameters: TableChartSettings, dataframe: pd.DataFrame) -> 
     )
 
 
-class TableChart(
-    ChartType[TableChartSettings, pd.DataFrame, dash_table.DataTable], frozen=True, extra="forbid"
-):
+class TableChart(ChartType[TableChartSettings, pd.DataFrame, dag.AgGrid], frozen=True, extra="forbid"):
     """A plain data table: metrics and hyperparameters side by side."""
 
     name: typing.ClassVar[str] = "table"
@@ -169,7 +164,7 @@ class TableChart(
 
     @classmethod
     @typing.override
-    def render(cls, parameters: TableChartSettings, dataframe: pd.DataFrame) -> dash_table.DataTable:
+    def render(cls, parameters: TableChartSettings, dataframe: pd.DataFrame) -> dag.AgGrid:
         if dataframe.empty:
             return _message_table(
                 "No data logged yet.", page_size=parameters.page_size, font_size=parameters.font_size

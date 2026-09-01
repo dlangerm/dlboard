@@ -48,12 +48,12 @@ if TYPE_CHECKING:
 # anything else outside this plugin) imports from this public module, not the private one.
 PAGE_EXPERIMENT_ID = core.PAGE_EXPERIMENT_ID
 EXPERIMENT_HEADER_ID = core.EXPERIMENT_HEADER_ID
-NEW_PANEL_GROUP_ID = core.NEW_PANEL_GROUP_ID
 METRIC_CONTENT_ID = core.METRIC_CONTENT_ID
 STATE_HPARAMS = core.STATE_HPARAMS
 STATE_PAGE_STORAGE = core.STATE_PAGE_STORAGE
 PANEL_REORDER_STORE_ID = core.PANEL_REORDER_STORE_ID
 CHART_REORDER_STORE_ID = core.CHART_REORDER_STORE_ID
+TAB_DROP_STORE_ID = core.TAB_DROP_STORE_ID
 # Driven directly by browser/e2e tests (dltrack/tests/browser_test.py), so re-exported here too.
 NEW_PANEL_ID = core.NEW_PANEL_ID
 NEW_PANEL_NAME_ID = core.NEW_PANEL_NAME_ID
@@ -135,12 +135,11 @@ def plug(app: Dash) -> None:
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(METRIC_CONTENT_ID, "children", allow_duplicate=True),
         Output(EXPERIMENT_HEADER_ID, "children", allow_duplicate=True),
-        Output(NEW_PANEL_GROUP_ID, "children", allow_duplicate=True),
         Output(STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Input(constants.STATE_EXPERIMENT_ID, "data"),
         prevent_initial_call="initial_update",
     )
-    def render_initial(experiment_id: int) -> tuple[html.Div, Component, Component, str]:
+    def render_initial(experiment_id: int) -> tuple[html.Div, Component, str]:
         store = get_data_store()
         page = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
         exp = store.get_experiment(experiment_id)
@@ -151,11 +150,10 @@ def plug(app: Dash) -> None:
             description=description,
             extra_actions=_delete_experiment_action(),
         )
-        new_panel_group, container = core.accordion_view(store, experiment_id=experiment_id)
+        container = core.accordion_view(store, experiment_id=experiment_id)
         return (
             container,
             header,
-            new_panel_group,
             page.model_dump_json(),
         )
 

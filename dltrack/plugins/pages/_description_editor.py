@@ -50,7 +50,7 @@ def render_header(
         [
             dmc.Group(
                 [
-                    dmc.Title(title, order=2, fw=700),
+                    dmc.Text(title, size="sm", fw=600),
                     tooltipped_action_icon(
                         "✎", component_id=ids.edit_button, label="Edit name/description", color="gray"
                     ),

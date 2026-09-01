@@ -47,3 +47,10 @@
 .dl-chart-drop-indicator {
   width: 3px;
 }
+
+/* Dropping a panel onto a tab (`.dl-tab-target`) moves it there -- highlighted while dragged over,
+   toggled by `_experiment_page_dragdrop.js` rather than `:hover` (a real mouseover doesn't fire
+   during an HTML5 drag). */
+.dl-tab-drop-target {
+  background: var(--mantine-color-blue-light);
+}

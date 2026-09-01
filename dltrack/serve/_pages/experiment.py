@@ -23,15 +23,13 @@ def layout(experiment_id: str) -> list[html.Div | dcc.Store]:
             id=experiment.PAGE_EXPERIMENT_ID,
             children=dmc.Stack(
                 [
-                    dmc.Group(
-                        [
-                            html.Div(id=experiment.EXPERIMENT_HEADER_ID, style={"flex": 1}),
-                            html.Div(id=experiment.NEW_PANEL_GROUP_ID),
-                        ],
-                        align="center",
-                        wrap="nowrap",
-                        gap="sm",
-                    ),
+                    html.Div(id=experiment.EXPERIMENT_HEADER_ID),
+                    # The "New Panel Name" input/suggest-charts controls are no longer a separate
+                    # container placed beside this one (that squeezed the whole accordion/tabs tree
+                    # into sharing a row with it, so it was never full width) -- `BasicExperimentPage
+                    # .render()` builds them directly into its own top row instead, so this stays a
+                    # single full-width column, same as the accordion/tabs content below it.
+                    #
                     # Not `dmc.Loader(id=...)` itself -- `render_initial` only ever replaces
                     # `children`, never the element itself, so a `Loader` used as its own
                     # placeholder would keep its spinner styling baked into the DOM node forever,
@@ -51,11 +49,13 @@ def layout(experiment_id: str) -> list[html.Div | dcc.Store]:
         Store(id=constants.STATE_PROJECT_ID, data=exp.project_id),
         Store(id=constants.STATE_EXPERIMENT_ID, data=int(experiment_id)),
         Store(id=experiment.STATE_HPARAMS, data=[h.model_dump_json() for h in hparams]),
-        # A completed panel/chart drag reports here (`_experiment_page_dragdrop.js`, via
-        # `set_props`) -- lives in the static layout, not `accordion_view`'s render tree, so the
-        # drop target always exists regardless of what's currently rendered underneath it.
+        # A completed panel/chart drag (or a panel dropped onto a tab) reports here
+        # (`_experiment_page_dragdrop.js`, via `set_props`) -- lives in the static layout, not
+        # `accordion_view`'s render tree, so the drop target always exists regardless of what's
+        # currently rendered underneath it.
         Store(id=experiment.PANEL_REORDER_STORE_ID),
         Store(id=experiment.CHART_REORDER_STORE_ID),
+        Store(id=experiment.TAB_DROP_STORE_ID),
     ]
 
 

@@ -89,7 +89,6 @@ def _render_suggestions(suggestions: list[Suggestion]) -> Component:
 def _register_auto_populate(app: Dash) -> None:
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
-        Output(core.NEW_PANEL_GROUP_ID, "children", allow_duplicate=True),
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Input(core.AUTO_POPULATE_BUTTON_ID, "n_clicks"),
         {
@@ -100,7 +99,7 @@ def _register_auto_populate(app: Dash) -> None:
         },
         prevent_initial_call=True,
     )
-    def auto_populate_charts(n_clicks: int, auto_populate_ctx: _AutoPopulateCtx) -> tuple[Any, Any, str]:
+    def auto_populate_charts(n_clicks: int, auto_populate_ctx: _AutoPopulateCtx) -> tuple[Any, str]:
         if not n_clicks:
             raise PreventUpdate
         experiment_id = auto_populate_ctx["experiment_id"]
@@ -128,13 +127,13 @@ def _register_auto_populate(app: Dash) -> None:
                 single_value_columns=single_value_columns,
             )
 
-        page, new_panel_group, container = core.mutate_panels_and_rerender(
+        page, container = core.mutate_panels_and_rerender(
             auto_populate_ctx["page_json"],
             experiment_id,
             replace_with_generated_panels,
             view_state=core.EditViewState(full_df_json=full_df_json, column_kinds=column_kinds),
         )
-        return container, new_panel_group, page.model_dump_json()
+        return container, page.model_dump_json()
 
 
 def _resolve_suggestion_trigger(
@@ -206,9 +205,10 @@ def _register_suggestions(app: Dash) -> None:
         dict[str, str] | None,
     ]:
         # Either button mounting for the first time reports itself as "triggered" with `n_clicks`
-        # still 0 -- each is rendered into its own container (`NEW_PANEL_GROUP_ID`/`panel_header_
-        # controls`), separate from the delimiter/mode inputs below, so `ctx.triggered_id`
-        # unambiguously resolves to the button on that mount even though nothing was clicked.
+        # still 0 -- each is rendered into its own container (the panel controls row / a panel's
+        # own `panel_header_controls`), separate from the delimiter/mode inputs below, so
+        # `ctx.triggered_id` unambiguously resolves to the button on that mount even though
+        # nothing was clicked.
         scope, opened = _resolve_suggestion_trigger(n_clicks, suggest_ctx["current_scope"])
 
         page_json, column_kinds = suggest_ctx["page_json"], suggest_ctx["column_kinds"]
@@ -263,7 +263,6 @@ def _register_suggestions(app: Dash) -> None:
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
-        Output(core.NEW_PANEL_GROUP_ID, "children", allow_duplicate=True),
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Output(core.SUGGEST_CONTENT_ID, "children", allow_duplicate=True),
         Output(core.SUGGEST_SUGGESTIONS_STORE_ID, "data", allow_duplicate=True),
@@ -282,7 +281,7 @@ def _register_suggestions(app: Dash) -> None:
         experiment_id: int,
         full_df_json: str | None,
         column_kinds: dict[str, str] | None,
-    ) -> tuple[Any, Any, str, Component, list[dict[str, Any]]]:
+    ) -> tuple[Any, str, Component, list[dict[str, Any]]]:
         triggered_id = cast("dict[str, str]", core.require_triggered_id())
         kind, key = triggered_id["kind"], triggered_id["key"]
 
@@ -297,7 +296,7 @@ def _register_suggestions(app: Dash) -> None:
         def apply_chart(panels: list[Any]) -> list[Any]:
             return core.add_chart_to_panel_by_name(panels, panel_name, chart)
 
-        page, new_panel_group, container = core.mutate_panels_and_rerender(
+        page, container = core.mutate_panels_and_rerender(
             page_json,
             experiment_id,
             apply_chart,
@@ -316,7 +315,6 @@ def _register_suggestions(app: Dash) -> None:
         ]
         return (
             container,
-            new_panel_group,
             page.model_dump_json(),
             _render_suggestions(remaining_suggestions),
             remaining,
