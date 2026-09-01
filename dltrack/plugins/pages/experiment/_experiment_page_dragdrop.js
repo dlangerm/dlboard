@@ -1,18 +1,22 @@
 // Drag-and-drop reordering for panels (`.dl-panel-drag-handle`, dragging `.dl-panel-item-header`
-// rows) and charts within a panel (`.dl-chart-drag-handle`, dragging `.dl-chart-item` boxes).
+// rows) and charts within a panel (`.dl-chart-drag-handle`, dragging `.dl-chart-item` boxes), plus
+// dropping a panel onto a tab (`.dl-tab-target`) to move it there.
 // Only the small grip handle is `draggable` -- not the whole row -- so grabbing a button or the
 // accordion control still works normally; the handle sets the drag image to its whole row via
 // `setDragImage`. Mirrors `navbar_resize.js`: no server round trip during the drag itself, only a
 // single `set_props` call on drop, consumed by a callback in `_panel_controls.py`.
 //
-// While dragging, a thin insertion-line indicator (not an outline around the whole target -- that
-// doesn't say which *side* of it the drop lands on) tracks the cursor: a horizontal line between
-// two panel rows, a vertical line between two chart items. Both indicators are plain `fixed`-
-// positioned elements owned entirely by this script (created once, appended to `<body>`), not part
-// of Dash's render tree, so they survive every panel/chart re-render untouched.
+// While dragging a panel over another panel (reordering) or a chart over another chart, a thin
+// insertion-line indicator (not an outline around the whole target -- that doesn't say which
+// *side* of it the drop lands on) tracks the cursor: a horizontal line between two panel rows, a
+// vertical line between two chart items. Both indicators are plain `fixed`-positioned elements
+// owned entirely by this script (created once, appended to `<body>`), not part of Dash's render
+// tree, so they survive every panel/chart re-render untouched. Dragging a panel over a tab instead
+// highlights that tab (a background change, not a line -- there's no "side" to indicate).
 (() => {
     let draggingPanel = null; // panel name
     let draggingChart = null; // {panel, index}
+    let highlightedTab = null; // the .dl-tab-target element currently highlighted, if any
 
     function makeIndicator(className) {
         const el = document.createElement("div");
@@ -28,6 +32,20 @@
     function hideIndicators() {
         panelIndicator.style.display = "none";
         chartIndicator.style.display = "none";
+        setHighlightedTab(null);
+    }
+
+    function setHighlightedTab(tabTarget) {
+        if (highlightedTab === tabTarget) {
+            return;
+        }
+        if (highlightedTab) {
+            highlightedTab.classList.remove("dl-tab-drop-target");
+        }
+        highlightedTab = tabTarget;
+        if (highlightedTab) {
+            highlightedTab.classList.add("dl-tab-drop-target");
+        }
     }
 
     function showPanelIndicator(header, after) {
@@ -73,6 +91,14 @@
 
     document.addEventListener("dragover", (event) => {
         if (draggingPanel) {
+            const tabTarget = event.target.closest(".dl-tab-target");
+            if (tabTarget) {
+                event.preventDefault();
+                panelIndicator.style.display = "none";
+                setHighlightedTab(tabTarget);
+                return;
+            }
+            setHighlightedTab(null);
             const header = event.target.closest(".dl-panel-item-header");
             if (header) {
                 event.preventDefault();
@@ -89,7 +115,22 @@
         }
     });
 
+    function dropOnTab(event) {
+        const tabTarget = event.target.closest(".dl-tab-target");
+        if (!tabTarget) {
+            return false;
+        }
+        event.preventDefault();
+        window.dash_clientside.set_props("tab-drop-request", {
+            data: { panel: draggingPanel, tab: tabTarget.getAttribute("data-tab") },
+        });
+        return true;
+    }
+
     function dropPanel(event) {
+        if (dropOnTab(event)) {
+            return;
+        }
         const header = event.target.closest(".dl-panel-item-header");
         if (!header) {
             return;

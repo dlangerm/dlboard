@@ -13,17 +13,18 @@ import typing
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+import dash_ag_grid as dag
 import dash_mantine_components as dmc
 import pandas as pd
-from dash import Dash, Input, Output, State, dash_table, html
-from dash.dash_table.Format import Format
+from dash import Dash, Input, Output, State, html
 from dash.dcc import Store
 from dash.exceptions import PreventUpdate
 from structlog.stdlib import get_logger
 
 from dltrack import models
 from dltrack.models import ButtonId, ModalId, StoreId, ValueId, constants
-from dltrack.plugins.charts._table_style import NUMERIC, infer_column_dtype, themed_datatable_kwargs
+from dltrack.plugins.charts._table_style import column_def, infer_column_dtype, themed_grid_kwargs
+from dltrack.plugins.pages._dash_helpers import tooltipped_action_icon
 from dltrack.plugins.pages.experiment import _dataframe_helpers as dfh
 from dltrack.plugins.pages.experiment import _experiment_page_state as core
 from dltrack.serve import ClientsideScript, get_current_user, get_data_store
@@ -39,13 +40,17 @@ NAVBAR_HPARAM_DATATABLE_ID: ValueId[core.ExperimentPage] = ValueId("navbar-hpara
 NAVBAR_HPARAM_COL_SELECT_ID: ValueId[core.ExperimentPage] = ValueId("navbar-hparam-col-select")
 NAVBAR_HPARAM_TABLE_BODY_ID: typing.Final = "navbar-hparam-table-body"
 NAVBAR_HPARAM_CONFIRM_COLS_ID: ButtonId[core.ExperimentPage] = ButtonId("navbar-hparam-confirm-cols")
+NAVBAR_HPARAM_COLUMNS_TOGGLE_ID: ButtonId[core.ExperimentPage] = ButtonId("navbar-hparam-columns-toggle")
 NAVBAR_HPARAM_APPLIED_COLS_ID: StoreId[core.ExperimentPage] = StoreId("navbar-hparam-applied-cols")
 _NAVBAR_HPARAM_PAGE_SIZE = 8
 _DELETE_COLUMN_ID = "_delete"
+_ROW_ID_FIELD = "_row_id"
 
 _METRIC_BOOKKEEPING_COLS = {"run_id", "step", "index", "timestamp_utc", "experiment_id"}
 
 SELECTED_HPARAM_COLS_KEY: typing.Final = "hparam-table-selected"  # a page_settings dict key
+
+NAVBAR_HPARAM_SIGNATURE_ID: StoreId[core.ExperimentPage] = StoreId("navbar-hparam-signature")
 
 DELETE_RUN_PENDING_STORE_ID: StoreId[core.ExperimentPage] = StoreId("delete-run-pending")
 DELETE_RUN_MODAL_ID: ModalId[core.ExperimentPage] = ModalId("delete-run-modal")
@@ -153,40 +158,45 @@ def _build_hparam_datatable(
     *,
     table_id: str,
     page_size: int,
-) -> dash_table.DataTable:
-    columns: list[dict[str, Any]] = [{"name": "Run", "id": "run_name"}]
-    for key in selected:
-        col: dict[str, Any] = {"name": key, "id": key}
-        if infer_column_dtype(rows, str(key)) == NUMERIC:
-            col["type"] = "numeric"
-            col["format"] = Format(precision=3, scheme="s")
-        columns.append(col)
-    columns.append({"name": "", "id": _DELETE_COLUMN_ID, "clearable": False})
+) -> dag.AgGrid:
+    column_defs: list[dict[str, Any]] = [{"field": "run_name", "headerName": "Run", "sortable": True}]
+    column_defs.extend(column_def(str(key), infer_column_dtype(rows, str(key))) for key in selected)
+    column_defs.append(
+        {
+            "field": _DELETE_COLUMN_ID,
+            "headerName": "",
+            "sortable": False,
+            "filter": False,
+            "width": 40,
+            "cellStyle": {"textAlign": "center", "cursor": "pointer", "color": "var(--mantine-color-red-6)"},
+        }
+    )
 
-    selected_rows = [i for i, row in enumerate(rows) if row["run_id"] not in excluded]
-    data = [{**row, _DELETE_COLUMN_ID: "🗑"} for row in rows]
+    selected_ids = [str(row["run_id"]) for row in rows if row["run_id"] not in excluded]
+    data = [{**row, _DELETE_COLUMN_ID: "🗑", _ROW_ID_FIELD: str(row["run_id"])} for row in rows]
 
-    return dash_table.DataTable(
+    return dag.AgGrid(
         id=table_id,
-        columns=columns,  # pyright: ignore[reportArgumentType]
-        data=data,  # pyright: ignore[reportArgumentType]
-        row_selectable="multi",
-        selected_rows=selected_rows,
-        filter_action="native",
-        sort_action="native",
-        page_action="native",
-        page_size=page_size,
-        style_cell_conditional=[
-            {
-                "if": {"column_id": _DELETE_COLUMN_ID},
-                "width": "28px",
-                "maxWidth": "28px",
-                "textAlign": "center",
-                "cursor": "pointer",
-                "color": "var(--mantine-color-red-6)",
-            }
-        ],
-        **themed_datatable_kwargs(),
+        columnDefs=column_defs,
+        rowData=data,
+        # A dedicated already-stringified field, not `params.data.run_id` directly -- dash-ag-grid's
+        # string-prop JS parser only supports bare expressions (no function calls like `String(...)`),
+        # so casting has to happen on the Python side instead.
+        getRowId=f"params.data.{_ROW_ID_FIELD}",
+        # `getRowId` (and the numeric columns' `valueFormatter`, via `column_def`) are JS expression
+        # strings -- dash-ag-grid silently no-ops any string-valued JS prop unless this is set. Safe
+        # here: every such string is static and written by us, never derived from user/request data.
+        dangerously_allow_code=True,
+        selectedRows={"ids": selected_ids},
+        columnSize="responsiveSizeToFit",
+        dashGridOptions={
+            "pagination": True,
+            "paginationPageSize": page_size,
+            "paginationPageSizeSelector": sorted({page_size, 20, 50, 100}),
+            "domLayout": "autoHeight",
+            "rowSelection": {"mode": "multiRow", "checkboxes": True, "headerCheckbox": True},
+        },
+        **themed_grid_kwargs(),
     )
 
 
@@ -198,39 +208,66 @@ def _render_hparam_panel(
     excluded: list[int] | list[str],
 ) -> Component:
     """
-    The Columns picker + comparison table, always visible in the navbar.
+    The comparison table, plus a Columns picker collapsed behind an icon so it doesn't permanently eat a row above the table it configures.
 
     Column changes only take effect on "Apply" (not per-tick) -- computing the table involves a
     hyperparameter/metric fetch per run, so committing it once per intended change instead of once
     per checkbox click keeps a multi-column edit from queueing up a burst of redundant store reads.
     "Apply" itself only appears once the picked columns actually differ from what's applied (a
-    clientside callback compares against `NAVBAR_HPARAM_APPLIED_COLS_ID`'s baseline), and the row
-    it sits in never wraps (`wrap="nowrap"`), so it appearing/disappearing can't push the table
-    below it up or down.
+    clientside callback compares against `NAVBAR_HPARAM_APPLIED_COLS_ID`'s baseline).
     """
     applied = [k for k in selected if k in hparam_keys or k in metric_keys]
     return html.Div(
         [
             dmc.Group(
                 [
-                    dmc.Text("Columns", size="xs", fw=600, style={"flexShrink": 0}),
-                    dmc.MultiSelect(
-                        id=NAVBAR_HPARAM_COL_SELECT_ID,
-                        data=[
-                            {"group": "Hyperparameters", "items": hparam_keys},
-                            {"group": "Metrics (last step)", "items": metric_keys},
+                    dmc.Text("Runs", size="xs", fw=600, style={"flex": 1}),
+                    dmc.Popover(
+                        [
+                            dmc.PopoverTarget(
+                                tooltipped_action_icon(
+                                    "▤",
+                                    component_id=NAVBAR_HPARAM_COLUMNS_TOGGLE_ID,
+                                    label="Choose columns",
+                                )
+                            ),
+                            dmc.PopoverDropdown(
+                                dmc.Group(
+                                    [
+                                        dmc.MultiSelect(
+                                            id=NAVBAR_HPARAM_COL_SELECT_ID,
+                                            data=[
+                                                {"group": "Hyperparameters", "items": hparam_keys},
+                                                {"group": "Metrics (last step)", "items": metric_keys},
+                                            ],
+                                            value=applied,
+                                            searchable=True,
+                                            clearable=True,
+                                            size="xs",
+                                            style={"flex": 1, "minWidth": 220},
+                                            # Render this dropdown inline (not its own portal) so a
+                                            # click on one of its options still lands inside the
+                                            # outer Popover's own DOM subtree -- otherwise the
+                                            # Popover's own "click outside closes it" detection sees
+                                            # the option click as outside and closes before the
+                                            # selection is ever applied.
+                                            comboboxProps={"withinPortal": False},
+                                        ),
+                                        dmc.Button(
+                                            "Apply",
+                                            id=NAVBAR_HPARAM_CONFIRM_COLS_ID,
+                                            size="xs",
+                                            style={"display": "none", "flexShrink": 0},
+                                        ),
+                                    ],
+                                    align="center",
+                                    gap="xs",
+                                    wrap="nowrap",
+                                )
+                            ),
                         ],
-                        value=applied,
-                        searchable=True,
-                        clearable=True,
-                        size="xs",
-                        style={"flex": 1, "minWidth": 0},
-                    ),
-                    dmc.Button(
-                        "Apply",
-                        id=NAVBAR_HPARAM_CONFIRM_COLS_ID,
-                        size="xs",
-                        style={"display": "none", "flexShrink": 0},
+                        position="bottom-end",
+                        withinPortal=True,
                     ),
                     Store(id=NAVBAR_HPARAM_APPLIED_COLS_ID, data=applied),
                 ],
@@ -272,10 +309,14 @@ def _register_hparam_table(app: Dash) -> None:
         Input(core.STATE_HPARAMS, "data"),
         Input(constants.STATE_EXPERIMENT_ID, "data", allow_optional=True),
         Input(core.STATE_PAGE_STORAGE, "data", allow_optional=True),
+        State(NAVBAR_HPARAM_SIGNATURE_ID, "data", allow_optional=True),
         prevent_initial_callback=True,
     )
     def render_navbar_hparams(
-        hparams: list[str], experiment_id: int | None, _page_json: str | None
+        hparams: list[str],
+        experiment_id: int | None,
+        _page_json: str | None,
+        prev_signature: list[Any] | None,
     ) -> dmc.Stack:
         if experiment_id is None:
             raise PreventUpdate
@@ -284,11 +325,21 @@ def _register_hparam_table(app: Dash) -> None:
         hparam_keys, metric_keys, rows, excluded, selected = _load_hparam_panel_data(
             store, experiment_id, hparams
         )
+        # `STATE_PAGE_STORAGE` changes on *every* page-settings write -- a tab switch, a panel
+        # rename, a drag-reorder, none of which this table cares about -- so rebuilding on it
+        # unconditionally (tearing down and remounting the ag-grid) flickered on every one of
+        # those, not just an actual run-selection/column change. Skip the (expensive, chart-
+        # remounting) rebuild unless the specific settings this table renders actually changed.
+        signature = [experiment_id, hparams, sorted(excluded), selected]
+        if signature == prev_signature:
+            raise PreventUpdate
+
         return dmc.Stack(
             [
                 _render_hparam_panel(rows, hparam_keys, metric_keys, selected, excluded),
                 _delete_run_modal(),
                 Store(id=DELETE_RUN_PENDING_STORE_ID),
+                Store(id=NAVBAR_HPARAM_SIGNATURE_ID, data=signature),
             ],
             gap="xs",
             p="xs",
@@ -324,29 +375,35 @@ def _register_hparam_table(app: Dash) -> None:
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
-        Output(core.NEW_PANEL_GROUP_ID, "children", allow_duplicate=True),
-        Input(NAVBAR_HPARAM_DATATABLE_ID, "selected_rows", allow_optional=True),
-        State(NAVBAR_HPARAM_DATATABLE_ID, "data", allow_optional=True),
+        Input(NAVBAR_HPARAM_DATATABLE_ID, "selectedRows", allow_optional=True),
+        State(NAVBAR_HPARAM_DATATABLE_ID, "rowData", allow_optional=True),
         State(constants.STATE_EXPERIMENT_ID, "data"),
         State(core.FULL_DF_STORE_ID, "data", allow_optional=True),
         State(core.COLUMN_KINDS_STORE_ID, "data", allow_optional=True),
         prevent_initial_call=True,
     )
     def sync_run_selection(
-        selected_rows: list[int] | None,
+        selected_rows: list[dict[str, Any]] | dict[str, Any] | None,
         table_data: list[dict[str, Any]] | None,
         experiment_id: int,
         full_df_json: str | None,
         column_kinds: dict[str, str] | None,
-    ) -> tuple[str, html.Div, Any]:
+    ) -> tuple[str, html.Div]:
         if selected_rows is None or table_data is None:
             raise PreventUpdate
-        selected_ids = {table_data[i]["run_id"] for i in selected_rows}
+        # `_build_hparam_datatable` seeds `selectedRows` with the `{"ids": [...]}` shorthand --
+        # ag-grid echoes that same shorthand back on mount (before any real user selection), only
+        # switching to a list of full row objects once the user actually (de)selects a row.
+        selected_ids = (
+            {int(i) for i in selected_rows["ids"]}
+            if isinstance(selected_rows, dict)
+            else {row["run_id"] for row in selected_rows}
+        )
         all_ids = {row["run_id"] for row in table_data}
         excluded = sorted(all_ids - selected_ids)
 
         store = get_data_store()
-        # The table's `selected_rows` is *computed from* the currently-persisted `excluded` set
+        # The table's `selectedRows` is *computed from* the currently-persisted `excluded` set
         # (see `_build_hparam_datatable`), so it mounting for the first time reports a "change"
         # here even though nothing the user did actually changed anything -- Dash fires this even
         # with `prevent_initial_call=True`, because that only suppresses the very first page
@@ -358,7 +415,7 @@ def _register_hparam_table(app: Dash) -> None:
         if excluded == currently_excluded:
             raise PreventUpdate
 
-        page, new_panel_group, container = core.persist_settings_and_rerender(
+        page, container = core.persist_settings_and_rerender(
             store,
             experiment_id,
             {dfh.EXCLUDED_RUNS_KEY: excluded},
@@ -367,24 +424,20 @@ def _register_hparam_table(app: Dash) -> None:
                 column_kinds=column_kinds,
             ),
         )
-        return page.model_dump_json(), container, new_panel_group
+        return page.model_dump_json(), container
 
 
 def _register_delete_run(app: Dash) -> None:
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(DELETE_RUN_MODAL_ID, "opened", allow_duplicate=True),
         Output(DELETE_RUN_PENDING_STORE_ID, "data"),
-        Input(NAVBAR_HPARAM_DATATABLE_ID, "active_cell", allow_optional=True),
-        State(NAVBAR_HPARAM_DATATABLE_ID, "data", allow_optional=True),
+        Input(NAVBAR_HPARAM_DATATABLE_ID, "cellClicked", allow_optional=True),
         prevent_initial_call=True,
     )
-    def open_delete_run_modal(
-        active_cell: dict[str, Any] | None, table_data: list[dict[str, Any]] | None
-    ) -> tuple[bool, int]:
-        if not active_cell or table_data is None or active_cell["column_id"] != _DELETE_COLUMN_ID:
+    def open_delete_run_modal(cell_clicked: dict[str, Any] | None) -> tuple[bool, int]:
+        if not cell_clicked or cell_clicked["colId"] != _DELETE_COLUMN_ID:
             raise PreventUpdate
-        row_index = cast("int", active_cell["row"])
-        return True, int(table_data[row_index]["run_id"])
+        return True, int(cast("str", cell_clicked["rowId"]))
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(DELETE_RUN_MODAL_ID, "opened", allow_duplicate=True),

@@ -14,7 +14,7 @@ from dltrack.plugins.charts.table_chart import TableChart, TableChartSettings
 
 
 def _rows_by_run(component: object) -> dict[int, dict[str, Any]]:
-    return {row["run_id"]: row for row in _props(component)["data"]}
+    return {row["run_id"]: row for row in _props(component)["rowData"]}
 
 
 def _wide_df() -> pd.DataFrame:
@@ -77,7 +77,7 @@ def test_hint_required_artifact_keys_always_empty() -> None:
 
 def test_render_empty_dataframe_shows_a_message() -> None:
     table = TableChart.render(TableChartSettings(), pd.DataFrame())
-    rows = _props(table)["data"]
+    rows = _props(table)["rowData"]
     assert len(rows) == 1
     assert "No data" in rows[0]["message"]
 
@@ -131,18 +131,18 @@ def test_render_run_mode_excludes_artifact_tags_columns() -> None:
 
 def test_render_defaults_to_the_shared_smaller_font_size() -> None:
     table = TableChart.render(TableChartSettings(), _wide_df())
-    assert _props(table)["style_cell"]["fontSize"] == DEFAULT_TABLE_FONT_SIZE
+    assert _props(table)["style"]["--ag-font-size"] == DEFAULT_TABLE_FONT_SIZE
 
 
 def test_render_font_size_override_applies_in_pixels() -> None:
     table = TableChart.render(TableChartSettings(font_size=20), _wide_df())
-    assert _props(table)["style_cell"]["fontSize"] == "20px"
+    assert _props(table)["style"]["--ag-font-size"] == "20px"
 
 
 def test_render_run_mode_without_step_column_dedupes_by_run() -> None:
     df = pd.DataFrame({"run_id": [1, 1], f"{HPARAM_COLUMN_PREFIX}lr": [0.1, 0.1]})
     table = TableChart.render(TableChartSettings(), df)
-    rows = _props(table)["data"]
+    rows = _props(table)["rowData"]
     assert len(rows) == 1
 
 
@@ -153,22 +153,22 @@ def test_render_pivot_mode_one_row_per_pivot_value_one_column_per_run() -> None:
     table = TableChart.render(TableChartSettings(pivot_on="step", pivot_metric="loss"), _wide_df())
     props = _props(table)
 
-    assert {c["id"] for c in props["columns"]} == {"step", "1", "2"}
-    row_by_step = {row["step"]: row for row in props["data"]}
+    assert {c["field"] for c in props["columnDefs"]} == {"step", "1", "2"}
+    row_by_step = {row["step"]: row for row in props["rowData"]}
     assert row_by_step[0]["1"] == pytest.approx(0.5)
     assert row_by_step[1]["2"] == pytest.approx(0.7)
 
 
 def test_render_pivot_mode_without_pivot_metric_shows_a_message() -> None:
     table = TableChart.render(TableChartSettings(pivot_on="step"), _wide_df())
-    rows = _props(table)["data"]
+    rows = _props(table)["rowData"]
     assert len(rows) == 1
     assert "pivot_metric" in rows[0]["message"]
 
 
 def test_render_pivot_mode_missing_columns_shows_a_message() -> None:
     table = TableChart.render(TableChartSettings(pivot_on="epoch", pivot_metric="loss"), _wide_df())
-    rows = _props(table)["data"]
+    rows = _props(table)["rowData"]
     assert len(rows) == 1
     assert "message" in rows[0]
 

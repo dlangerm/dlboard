@@ -247,7 +247,7 @@ def _wire_container(store: SQLLiteStore, experiment_id: int) -> dict[str, Any]:
     actually operate on in the real callback. Round-tripping through the real encoder here (rather
     than hand-building a fake dict) is what keeps this test honest about that shape.
     """
-    _new_panel_group, container = state.accordion_view(store, experiment_id)
+    container = state.accordion_view(store, experiment_id)
     serialized = to_json(container)
     assert isinstance(serialized, str)
     return cast("dict[str, Any]", json.loads(serialized))
@@ -267,7 +267,8 @@ def test_reorder_rendered_panels_reorders_accordion_items(store: SQLLiteStore, e
 
     reordered = state.reorder_rendered_panels(container, ["c", "a", "b"])
 
-    accordion = reordered["props"]["children"][0]
+    accordion = state._find_accordion_containing(reordered, "c")
+    assert accordion is not None
     assert [item["props"]["value"] for item in accordion["props"]["children"]] == ["c", "a", "b"]
 
 
@@ -310,7 +311,8 @@ def test_reorder_rendered_charts_reorders_chart_items_within_a_panel(
     order = state.move_index([0, 1, 2], 0, 2, after=True)
     reordered = state.reorder_rendered_charts(container, "p", order)
 
-    accordion = reordered["props"]["children"][0]
+    accordion = state._find_accordion_containing(reordered, "p")
+    assert accordion is not None
     item = next(i for i in accordion["props"]["children"] if i["props"]["value"] == "p")
     chart_items = item["props"]["children"][1]["props"]["children"]["props"]["children"]["props"]["children"]
     # Each item's drag handle still carries its *original* chart index -- reordering the rendered
@@ -322,3 +324,64 @@ def test_reorder_rendered_charts_reorders_chart_items_within_a_panel(
         assert handle_props is not None
         original_indices.append(int(handle_props["data-chart-index"]))
     assert original_indices == order
+
+
+# ---- panel tabs: grouping panels under `PanelInstance.tab` ----
+
+
+def test_render_with_no_tabbed_panels_shows_no_tabs_chrome(store: SQLLiteStore, experiment_id: int) -> None:
+    """The common case (nobody has tabbed a panel) must look exactly like a plain accordion."""
+    page = store.get_or_create_page(state.BasicExperimentPage, experiment_id=experiment_id)
+    page = store.update_page(page.model_copy(update={"panels": [PanelInstance[Any, Any](name="a")]}))
+
+    rendered = page.render(store, experiment_id)
+    assert not isinstance(rendered, dmc.Tabs)
+    assert _find_props(rendered, state.panel_accordion_id("")) is not None
+
+
+def test_render_groups_panels_into_tabs_by_the_tab_field(store: SQLLiteStore, experiment_id: int) -> None:
+    page = store.get_or_create_page(state.BasicExperimentPage, experiment_id=experiment_id)
+    page = store.update_page(
+        page.model_copy(
+            update={
+                "panels": [
+                    PanelInstance[Any, Any](name="a"),
+                    PanelInstance[Any, Any](name="b", tab="Images"),
+                    PanelInstance[Any, Any](name="c", tab="Images"),
+                ]
+            }
+        )
+    )
+
+    rendered = page.render(store, experiment_id)
+    assert isinstance(rendered, dmc.Tabs)
+    tabs_row = rendered.children[0]  # pyright: ignore[reportUnknownMemberType, reportOptionalSubscript, reportUnknownVariableType]
+    tabs_and_buttons = tabs_row.children[0]  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    tabs_list = tabs_and_buttons.children[0]  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    tabs = tabs_list.children  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    tab_labels = {tab.children for tab in tabs}  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    assert tab_labels == {"General", "Images"}
+    # Mantine's `Tabs` silently refuses to render a tab/panel whose `value` is an empty string --
+    # regression coverage for exactly that: every tab must get a real, non-empty `value`.
+    assert all(tab.value for tab in tabs)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType, reportUnknownArgumentType]
+
+
+def test_reorder_rendered_panels_reorders_within_the_active_tab(
+    store: SQLLiteStore, experiment_id: int
+) -> None:
+    page = store.get_or_create_page(state.BasicExperimentPage, experiment_id=experiment_id)
+    store.update_page(
+        page.model_copy(
+            update={
+                "panels": [PanelInstance[Any, Any](name=n, tab="Images") for n in ("a", "b", "c")],
+                "page_settings": {state.OPEN_PANEL_KEY: []},
+            }
+        )
+    )
+    container = _wire_container(store, experiment_id)
+
+    reordered = state.reorder_rendered_panels(container, ["c", "a", "b"])
+
+    accordion = state._find_accordion_containing(reordered, "c")
+    assert accordion is not None
+    assert [item["props"]["value"] for item in accordion["props"]["children"]] == ["c", "a", "b"]

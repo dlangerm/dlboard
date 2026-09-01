@@ -32,10 +32,23 @@ from dltrack import models
 from dltrack.plugins import LOCAL_DEPLOYMENT, themes
 from dltrack.plugins.backend.basic_rest_backend import BasicDltrackAPI
 from dltrack.plugins.pages.experiment import (
+    METRIC_CONTENT_ID,
     NEW_PANEL_ID,
     NEW_PANEL_NAME_ID,
     PAGE_EXPERIMENT_ID,
     BasicExperimentPage,
+)
+from dltrack.plugins.pages.experiment._experiment_page_state import (
+    NEW_TAB_BUTTON_ID,
+    NEW_TAB_PANELS_SELECT_ID,
+    RENAME_TAB_BUTTON_ID,
+    RENAME_TAB_NAME_INPUT_ID,
+)
+from dltrack.plugins.pages.experiment._run_comparison_table import (
+    NAVBAR_HPARAM_COL_SELECT_ID,
+    NAVBAR_HPARAM_COLUMNS_TOGGLE_ID,
+    NAVBAR_HPARAM_CONFIRM_COLS_ID,
+    NAVBAR_HPARAM_DATATABLE_ID,
 )
 from dltrack.plugins.pages.simple_homepage import NEW_PROJECT_BUTTON_ID, NEW_PROJECT_NAME_ID
 from dltrack.plugins.pages.simple_project_page import NEW_EXP_BUTTON_ID, NEW_EXP_NAME_ID
@@ -140,8 +153,13 @@ def test_logged_metrics_render_as_a_real_chart(
 
     page.reload()
     page.get_by_role("button", name="Auto-generate charts").click()
+    # The new "Ungrouped" panel starts collapsed -- open it, or there's nothing to render yet.
+    page.get_by_role("button", name="Ungrouped").click()
 
-    expect(page.locator(f"#{PAGE_EXPERIMENT_ID} svg")).to_be_visible()
+    # Scoped to the panel's own content area, not the whole page -- the panel header's own hover
+    # controls (the tab-move `Select`'s dropdown chevron, the accordion chevron, ...) are also
+    # `<svg>` elements, and would make this locator ambiguous if it searched the whole container.
+    expect(page.locator(".dl-panel-body svg")).to_be_visible()
     assert console_errors == []
 
 
@@ -176,8 +194,14 @@ def test_panel_header_hover_controls_toggle_and_delete_without_disturbing_siblin
     # "keep" (a brand new, chart-less panel) has no content, so it's not reliable either. Mantine's
     # own collapsible region (`value="keep"` on the `AccordionItem`) is: its height/aria-hidden
     # genuinely track open/closed regardless of what's inside.
-    keep_region = page.locator("#experiment-accordion-panel-keep")
     keep_control = page.get_by_role("button", name="keep")
+    # The accordion's own id is now a pattern-matching dict (one `Accordion` per tab group), so
+    # Mantine's derived panel id is that dict's JSON string plus "-panel-<value>" -- not a clean
+    # CSS identifier. Read the control's own `aria-controls` (which Mantine sets to that same
+    # derived id) instead of hardcoding it, and match via an attribute selector (single-quoted,
+    # since the id itself contains double quotes) rather than a `#id` selector.
+    keep_panel_id = keep_control.get_attribute("aria-controls")
+    keep_region = page.locator(f"[id='{keep_panel_id}']")
     keep_control.click()
     expect(keep_region).to_be_visible()
     keep_control.click()
@@ -355,4 +379,248 @@ def test_drag_and_drop_reorders_charts_within_a_panel(
 
     expect(page.locator(".dl-chart-drag-handle")).to_have_count(3)
     _wait_until(lambda: _ungrouped_chart_columns(experiment_id), ["lr", "accuracy", "loss"])
+    assert console_errors == []
+
+
+def test_navbar_columns_picker_applies_a_selected_column(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """
+    Regression check for the navbar run-comparison grid (ag-grid): the Columns picker is a
+    `dmc.Popover` wrapping a `MultiSelect`, and its own dropdown used to render in a *separate*
+    portal from the outer Popover's -- so clicking an option read as a click *outside* the Popover
+    and closed the whole thing before "Apply" was ever reachable, discarding the pick. Also proves
+    ag-grid doesn't warn about a duplicate/undefined row id along the way (a real row-identity bug:
+    `assert console_errors == []` alone can't catch it, since ag-grid logs it via `console.warn`,
+    not `console.error`) and that switching the grid's page size doesn't leave a phantom empty row.
+    """
+    _create_project_and_experiment(page, live_server_url, "Columns Picker Experiment")
+    page.get_by_role("link", name="Open experiment").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+
+    api = BasicDltrackAPI(live_server_url)
+    for _ in range(2):
+        run = api.create_run(models.NewRun(experiment_id=experiment_id))
+        api.log_metric_batch(
+            [
+                models.LoggedMetrics(
+                    experiment_id=experiment_id,
+                    run_id=run.id,
+                    step=0,
+                    metrics={"accuracy": 0.5},
+                    timestamp_utc=pendulum.now("UTC"),
+                )
+            ]
+        )
+    page.reload()
+
+    ag_grid_warnings: list[str] = []
+    page.on("console", lambda msg: ag_grid_warnings.append(msg.text) if "AG Grid" in msg.text else None)
+
+    grid = page.locator(f"#{NAVBAR_HPARAM_DATATABLE_ID}")
+    expect(grid.locator(".ag-center-cols-container .ag-row")).to_have_count(2)
+
+    page.locator(f"#{NAVBAR_HPARAM_COLUMNS_TOGGLE_ID}").click()
+    page.locator(f"#{NAVBAR_HPARAM_COL_SELECT_ID}").click()
+    page.get_by_role("option", name="accuracy").click()
+
+    apply_button = page.locator(f"#{NAVBAR_HPARAM_CONFIRM_COLS_ID}")
+    expect(apply_button).to_be_visible()
+    apply_button.click()
+
+    expect(grid.get_by_role("columnheader", name="accuracy")).to_be_visible()
+
+    # Changing the page size must not leave a stray extra row -- the count stays exactly 2.
+    page.locator(".ag-picker-field").click()
+    page.get_by_role("option", name="50").click()
+    expect(grid.locator(".ag-center-cols-container .ag-row")).to_have_count(2)
+
+    assert console_errors == []
+    assert ag_grid_warnings == []
+
+
+def test_assign_panel_to_a_new_tab_and_switch_back(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """
+    End-to-end regression check for grouping panels into tabs, driving all three entry points:
+    the "+" button (the *only* place a brand-new tab gets created), dragging a panel onto an
+    already-existing tab to move it there, and renaming the active tab. Mantine's `Tabs` previously
+    refused to render the default/ungrouped tab at all (it silently rejects an empty-string
+    `value`), so the moment a second tab existed there was no way to click back to the original
+    panels -- proves both tabs stay reachable, each shows only its own panels, drag-to-move and
+    rename both work, and it all survives a reload.
+    """
+    _create_project_and_experiment(page, live_server_url, "Panel Tabs Experiment")
+    page.get_by_role("link", name="Open experiment").click()
+
+    for panel_name in ("keep", "tabbed"):
+        page.locator(f"#{NEW_PANEL_NAME_ID}").fill(panel_name)
+        page.locator(f"#{NEW_PANEL_ID}").click()
+        expect(page.get_by_role("button", name=panel_name)).to_be_visible()
+
+    # No tabs assigned yet -- every panel shares the one default tab, so there's no tab bar at all,
+    # just the lone "+" button that's always available to start one.
+    expect(page.get_by_role("tab")).to_have_count(0)
+    new_tab_button = page.locator(f"#{NEW_TAB_BUTTON_ID}")
+    expect(new_tab_button).to_be_visible()
+
+    # Create a new "Images" tab with "tabbed" pre-selected into it -- the only way to create a tab.
+    new_tab_button.click()
+    page.get_by_role("dialog").get_by_role("textbox").first.fill("Images")
+    page.locator(f"#{NEW_TAB_PANELS_SELECT_ID}").click()
+    page.get_by_role("option", name="tabbed").click()
+    page.keyboard.press("Escape")  # close the MultiSelect dropdown -- it's covering the Create button
+    page.get_by_role("button", name="Create", exact=True).click()
+
+    images_tab = page.get_by_role("tab", name="Images")
+    general_tab = page.get_by_role("tab", name="General")
+    expect(images_tab).to_be_visible()
+    expect(general_tab).to_be_visible()
+
+    # Creating a tab jumps straight to it: "tabbed" is visible, "keep" (still on "General") isn't.
+    expect(page.get_by_role("button", name="tabbed")).to_be_visible()
+    expect(page.get_by_role("button", name="keep")).not_to_be_visible()
+
+    # The rename-tab icon is disabled on "General" -- nothing there to rename.
+    rename_tab_button = page.locator(f"#{RENAME_TAB_BUTTON_ID}")
+    expect(rename_tab_button).to_be_enabled()
+
+    # Switching back to "General" is exactly the flow that used to be impossible.
+    general_tab.click()
+    expect(page.get_by_role("button", name="keep")).to_be_visible()
+    expect(page.get_by_role("button", name="tabbed")).not_to_be_visible()
+    expect(rename_tab_button).to_be_disabled()
+
+    # Move "keep" into the *existing* "Images" tab by dragging it there -- no typing, no button.
+    keep_header = page.locator(".dl-panel-item-header", has_text="keep")
+    keep_handle = keep_header.locator(".dl-panel-drag-handle")
+    keep_header.hover()
+    page.wait_for_timeout(200)  # matches the drag tests' own wait for the hover-reveal transition
+    keep_handle.drag_to(images_tab)
+    expect(page.get_by_role("button", name="keep")).not_to_be_visible()
+
+    images_tab.click()
+    expect(page.get_by_role("button", name="tabbed")).to_be_visible()
+    expect(page.get_by_role("button", name="keep")).to_be_visible()
+
+    # Rename the active tab ("Images") -- both panels that were on it follow the rename.
+    rename_tab_button.click()
+    page.locator(f"#{RENAME_TAB_NAME_INPUT_ID}").fill("Screenshots")
+    page.get_by_role("button", name="Save", exact=True).click()
+    expect(page.get_by_role("tab", name="Screenshots")).to_be_visible()
+    expect(page.get_by_role("tab", name="Images")).to_have_count(0)
+    expect(page.get_by_role("button", name="tabbed")).to_be_visible()
+    expect(page.get_by_role("button", name="keep")).to_be_visible()
+
+    # The grouping, the rename, and which tab was active all survive a reload.
+    page.reload()
+    expect(page.get_by_role("tab", name="Screenshots")).to_be_visible()
+    expect(page.get_by_role("button", name="tabbed")).to_be_visible()
+    expect(page.get_by_role("button", name="keep")).to_be_visible()
+
+    assert console_errors == []
+
+
+def test_panel_area_layout_is_not_squeezed_by_the_new_panel_controls(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """
+    Geometry-based regression check for a real layout bug: the "New Panel Name" input/tab-
+    management controls used to live in their own container placed *beside* the accordion/tabs
+    tree (a flex sibling), which visually squeezed that whole tree into sharing a row with it --
+    never full width again -- and left a dead-space gap next to the title/description row above
+    it. A role/text-based test can't catch that kind of thing (every control is still present and
+    labelled correctly; only its position and the container's width are wrong), so this measures
+    actual bounding boxes instead: the accordion/tabs container must span (nearly) the page's full
+    content width, the "New Panel Name" input must sit on the very same row as the tab bar (not a
+    separate row below it), and the tab-management buttons ("+"/rename) must sit right next to the
+    tabs themselves, not clear across the row next to the panel-name input.
+    """
+    _create_project_and_experiment(page, live_server_url, "Layout Regression Experiment")
+    page.get_by_role("link", name="Open experiment").click()
+
+    for panel_name in ("keep", "tabbed"):
+        page.locator(f"#{NEW_PANEL_NAME_ID}").fill(panel_name)
+        page.locator(f"#{NEW_PANEL_ID}").click()
+        expect(page.get_by_role("button", name=panel_name)).to_be_visible()
+
+    # Tab the second panel so a real tab bar (not just the lone "+") is on screen too.
+    page.locator(f"#{NEW_TAB_BUTTON_ID}").click()
+    page.get_by_role("dialog").get_by_role("textbox").first.fill("Images")
+    page.locator(f"#{NEW_TAB_PANELS_SELECT_ID}").click()
+    page.get_by_role("option", name="tabbed").click()
+    page.keyboard.press("Escape")
+    page.get_by_role("button", name="Create", exact=True).click()
+    images_tab = page.get_by_role("tab", name="Images")
+    expect(images_tab).to_be_visible()
+
+    page_box = page.locator(f"#{PAGE_EXPERIMENT_ID}").bounding_box()
+    metric_content_box = page.locator(f"#{METRIC_CONTENT_ID}").bounding_box()
+    tab_box = images_tab.bounding_box()
+    new_tab_button_box = page.locator(f"#{NEW_TAB_BUTTON_ID}").bounding_box()
+    new_panel_input_box = page.locator(f"#{NEW_PANEL_NAME_ID}").bounding_box()
+    assert page_box is not None
+    assert metric_content_box is not None
+    assert tab_box is not None
+    assert new_tab_button_box is not None
+    assert new_panel_input_box is not None
+
+    # The accordion/tabs container spans (almost) the page's full content width -- not squeezed
+    # into sharing a row with a sibling column.
+    assert metric_content_box["width"] >= page_box["width"] * 0.9
+
+    # The "+" new-tab button sits right next to the tabs themselves (a few tab-widths away at
+    # most), not clear across the row next to the "New Panel Name" input.
+    assert new_tab_button_box["x"] - (tab_box["x"] + tab_box["width"]) < 150
+
+    # The "New Panel Name" input is on the very same row as the tab bar (same vertical center,
+    # within a few px), not a separate row below a dead-space gap.
+    tab_center_y = tab_box["y"] + tab_box["height"] / 2
+    input_center_y = new_panel_input_box["y"] + new_panel_input_box["height"] / 2
+    assert abs(tab_center_y - input_center_y) < 10
+
+    assert console_errors == []
+
+
+def test_switching_tabs_does_not_remount_the_navbar_run_table(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """
+    Regression check: switching tabs persists the active tab by writing to the same shared
+    page-state store the navbar's run-comparison grid (`_run_comparison_table.py`) used to
+    unconditionally rebuild itself from on *any* change to that store -- so every tab click tore
+    down and remounted the whole ag-grid, a visible flicker unrelated to anything the grid actually
+    displays (it doesn't even show tab data). A role/text-based assertion can't catch this -- the
+    grid shows the same rows/columns either way -- so this tags the grid's own DOM node before
+    switching tabs and proves that exact node (not a freshly rendered lookalike) is still there
+    after, rather than counting requests or checking visible content.
+    """
+    _create_project_and_experiment(page, live_server_url, "Navbar Flicker Experiment")
+    page.get_by_role("link", name="Open experiment").click()
+
+    for panel_name in ("keep", "tabbed"):
+        page.locator(f"#{NEW_PANEL_NAME_ID}").fill(panel_name)
+        page.locator(f"#{NEW_PANEL_ID}").click()
+        expect(page.get_by_role("button", name=panel_name)).to_be_visible()
+
+    page.locator(f"#{NEW_TAB_BUTTON_ID}").click()
+    page.get_by_role("dialog").get_by_role("textbox").first.fill("Images")
+    page.locator(f"#{NEW_TAB_PANELS_SELECT_ID}").click()
+    page.get_by_role("option", name="tabbed").click()
+    page.keyboard.press("Escape")
+    page.get_by_role("button", name="Create", exact=True).click()
+
+    general_tab = page.get_by_role("tab", name="General")
+    images_tab = page.get_by_role("tab", name="Images")
+    expect(images_tab).to_be_visible()
+
+    grid_root = page.locator(f"#{NAVBAR_HPARAM_DATATABLE_ID} .ag-root-wrapper")
+    expect(grid_root).to_be_visible()
+    grid_root.evaluate("el => el.setAttribute('data-marker', 'untouched')")
+
+    general_tab.click()
+    images_tab.click()
+
+    assert grid_root.get_attribute("data-marker") == "untouched"
     assert console_errors == []

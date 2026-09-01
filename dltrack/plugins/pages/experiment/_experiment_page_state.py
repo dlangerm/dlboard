@@ -14,12 +14,14 @@ from __future__ import annotations
 
 import typing
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 import dash_mantine_components as dmc
 import pandas as pd
 from dash import ALL, Dash, Input, Output, State, ctx, html, no_update
 from dash.dcc import Store
+from dash.development.base_component import Component
 from dash.exceptions import PreventUpdate
 from structlog.stdlib import get_logger
 
@@ -27,16 +29,16 @@ from dltrack import models
 from dltrack.models import ButtonId, DivId, ModalId, StoreId, ValueId, constants
 from dltrack.plugins.pages._dash_helpers import tooltipped_action_icon
 from dltrack.plugins.pages.experiment import _dataframe_helpers as dfh
-from dltrack.serve import get_data_store
+from dltrack.serve import ClientsideScript, get_data_store
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from dash.development.base_component import Component
-
     from dltrack.models import DataStore
 
 _log = get_logger(__name__)
+
+_ACTIVE_TAB_DISABLES_RENAME_JS = ClientsideScript(Path(__file__).with_name("active_tab_disables_rename.js"))
 
 
 class ExperimentPage:
@@ -47,7 +49,6 @@ class ExperimentPage:
 # these from `simple_experiment_page.py` (this module's public façade) rather than from here. ---
 PAGE_EXPERIMENT_ID: DivId[ExperimentPage] = DivId("experiment-container")
 EXPERIMENT_HEADER_ID: DivId[ExperimentPage] = DivId("experiment-header")
-NEW_PANEL_GROUP_ID: DivId[ExperimentPage] = DivId("new-panel-group")
 METRIC_CONTENT_ID: DivId[ExperimentPage] = DivId("metrics-view")
 STATE_HPARAMS: StoreId[ExperimentPage] = StoreId("hparams-state")
 STATE_PAGE_STORAGE: StoreId[ExperimentPage] = StoreId("current-page")
@@ -58,10 +59,39 @@ STATE_PAGE_STORAGE: StoreId[ExperimentPage] = StoreId("current-page")
 # target always exists regardless of what's currently rendered underneath it. ---
 PANEL_REORDER_STORE_ID: StoreId[ExperimentPage] = StoreId("panel-reorder-request")
 CHART_REORDER_STORE_ID: StoreId[ExperimentPage] = StoreId("chart-reorder-request")
+TAB_DROP_STORE_ID: StoreId[ExperimentPage] = StoreId("tab-drop-request")
 
 # --- accordion / panel state ---
-ACCORDION_ID: ValueId[ExperimentPage] = ValueId("experiment-accordion")
+# One `Accordion` per tab group, id'd via `panel_accordion_id` -- see `panel_accordion_id`/`BasicExperimentPage.render`.
 OPEN_PANEL_KEY: typing.Final = "open_panel"  # a page_settings dict key, not a component id
+ACTIVE_TAB_KEY: typing.Final = "active_tab"  # a page_settings dict key, not a component id
+PANEL_TABS_ID: ValueId[ExperimentPage] = ValueId("experiment-panel-tabs")
+_UNGROUPED_TAB: typing.Final = ""
+"""`PanelInstance.tab`'s default -- panels with no explicit tab all share this one implicit group."""
+
+_UNGROUPED_TAB_VALUE: typing.Final = "ungrouped"
+"""
+`dmc.Tabs`/`TabsTab`/`TabsPanel`'s own `value` prop, for `_UNGROUPED_TAB` specifically.
+
+Mantine's `Tabs` treats an empty-string `value` as "no value was set" and refuses to render that
+tab/panel at all (a real, silent failure: the tab becomes unclickable, so there's no way back to
+the ungrouped panels once another tab exists) -- so component `value`s always go through
+`tab_component_value`/`tab_from_component_value` instead of using `PanelInstance.tab`/
+`ACTIVE_TAB_KEY`'s own `""` directly. A Private-Use-Area character prefix keeps this from
+colliding with a tab name any user could actually type into the new-tab modal. Not underscored --
+`_panel_controls.py`'s per-panel tab-move dropdown needs the same mapping for its own `Select`.
+"""
+
+
+def tab_component_value(tab: str) -> str:
+    """Map a real tab name (`""` for the ungrouped tab) to what a Mantine component accepts as `value`."""
+    return tab or _UNGROUPED_TAB_VALUE
+
+
+def tab_from_component_value(value: str) -> str:
+    """Invert `tab_component_value` -- what a component's `value`/`Input` reports back."""
+    return "" if value == _UNGROUPED_TAB_VALUE else value
+
 
 FULL_DF_STORE_ID: StoreId[ExperimentPage] = StoreId("full-dataframe-store")
 COLUMN_KINDS_STORE_ID: StoreId[ExperimentPage] = StoreId("column-kinds-store")
@@ -124,6 +154,28 @@ RENAME_PANEL_ERROR_ID: DivId[ExperimentPage] = DivId("rename-panel-error")
 RENAME_PANEL_SAVE_ID: ButtonId[ExperimentPage] = ButtonId("rename-panel-save")
 RENAME_PANEL_CANCEL_ID: ButtonId[ExperimentPage] = ButtonId("rename-panel-cancel")
 
+
+# --- new-tab modal shell (callbacks in `_panel_controls.py`) -- the *only* place a brand-new tab
+# name can be typed; moving a panel to an already-existing tab is dragging it onto that tab in the
+# tab bar instead (`.dl-tab-target`, see `_experiment_page_dragdrop.js` and `TAB_DROP_STORE_ID`). ---
+NEW_TAB_BUTTON_ID: ButtonId[ExperimentPage] = ButtonId("new-tab-button")
+NEW_TAB_MODAL_ID: ModalId[ExperimentPage] = ModalId("new-tab-modal")
+NEW_TAB_NAME_INPUT_ID: ValueId[ExperimentPage] = ValueId("new-tab-name-input")
+NEW_TAB_PANELS_SELECT_ID: ValueId[ExperimentPage] = ValueId("new-tab-panels-select")
+NEW_TAB_ERROR_ID: DivId[ExperimentPage] = DivId("new-tab-error")
+NEW_TAB_SAVE_ID: ButtonId[ExperimentPage] = ButtonId("new-tab-save")
+NEW_TAB_CANCEL_ID: ButtonId[ExperimentPage] = ButtonId("new-tab-cancel")
+
+# --- rename-tab modal shell (callbacks in `_panel_controls.py`) -- renames whichever tab is
+# currently active (read off `PANEL_TABS_ID`'s own value), not a per-tab control. ---
+RENAME_TAB_BUTTON_ID: ButtonId[ExperimentPage] = ButtonId("rename-tab-button")
+RENAME_TAB_MODAL_ID: ModalId[ExperimentPage] = ModalId("rename-tab-modal")
+RENAME_TAB_TARGET_ID: StoreId[ExperimentPage] = StoreId("rename-tab-target")
+RENAME_TAB_NAME_INPUT_ID: ValueId[ExperimentPage] = ValueId("rename-tab-name-input")
+RENAME_TAB_ERROR_ID: DivId[ExperimentPage] = DivId("rename-tab-error")
+RENAME_TAB_SAVE_ID: ButtonId[ExperimentPage] = ButtonId("rename-tab-save")
+RENAME_TAB_CANCEL_ID: ButtonId[ExperimentPage] = ButtonId("rename-tab-cancel")
+
 # --- delete-panel / delete-chart confirm modal shells (callbacks in `_panel_controls.py`) ---
 DELETE_PANEL_MODAL_ID: ModalId[ExperimentPage] = ModalId("delete-panel-modal")
 DELETE_PANEL_TARGET_ID: StoreId[ExperimentPage] = StoreId("delete-panel-target")
@@ -151,6 +203,13 @@ class PanelReorderRequest(TypedDict):
     panel: str
     target: str
     after: bool
+
+
+class TabDropRequest(TypedDict):
+    """A panel dropped onto an existing tab: move `panel` to `tab` (`""` for the ungrouped tab)."""
+
+    panel: str
+    tab: str
 
 
 class ChartReorderRequest(TypedDict):
@@ -222,6 +281,10 @@ def chart_controls_group_id(panel_name: str, index: int) -> ChartID:
 
 def panel_content_id(panel_name: str) -> dict[str, str]:
     return {"type": "panel-content", "panel": panel_name}
+
+
+def panel_accordion_id(tab: str) -> dict[str, str]:
+    return {"type": "panel-accordion", "tab": tab}
 
 
 def add_suggestion_button_id(kind: str, key: str) -> dict[str, str]:
@@ -479,7 +542,12 @@ def _drag_handle(*, class_name: str, component_id: dict[str, str], data_attrs: d
 
 
 def panel_header_controls(panel: models.PanelInstance[Any, Any]) -> Component:
-    """Sync/layout/rename/drag/suggest/delete for one panel, hover-revealed on the panel's own header."""
+    """
+    Sync/layout/rename/drag/suggest/delete for one panel, hover-revealed on the panel's own header.
+
+    Moving a panel to a tab is drag-and-drop (drag the same handle used to reorder panels onto a
+    tab in the tab bar, see `_experiment_page_dragdrop.js`), not a control here.
+    """
     panel_name = panel.name
     return dmc.Group(
         [
@@ -566,46 +634,143 @@ def panel_header(panel: models.PanelInstance[Any, Any]) -> Component:
 # ============================================================
 
 
-class BasicExperimentPage(models.Page[pd.DataFrame, dmc.Accordion, html.Div], frozen=True, extra="forbid"):
-    """Basic experiment page: per-panel charts rendered in an accordion."""
+def _group_panels_by_tab(
+    panels: list[models.PanelInstance[Any, Any]],
+) -> dict[str, list[models.PanelInstance[Any, Any]]]:
+    """Group panels by `tab`, preserving first-seen tab order (the ungrouped tab always sorts first)."""
+    groups: dict[str, list[models.PanelInstance[Any, Any]]] = {_UNGROUPED_TAB: []}
+    for p in panels:
+        groups.setdefault(p.tab, []).append(p)
+    return groups
+
+
+class BasicExperimentPage(models.Page[pd.DataFrame, Component, html.Div], frozen=True, extra="forbid"):
+    """Basic experiment page: per-panel charts rendered in an accordion, grouped into tabs."""
 
     @typing.override
-    def render(self, data_store: DataStore[...], experiment_id: int) -> dmc.Accordion:
-        """Render the accordion. Only open panels get real content; closed ones get a placeholder."""
+    def render(self, data_store: DataStore[...], experiment_id: int) -> Component:
+        """
+        Render the tab-grouped accordions. Only open panels get real content; closed ones get a placeholder.
+
+        Panels grouped under the same `tab` share one `Accordion`. If every panel shares the
+        (default) ungrouped tab -- the common case today -- no `Tabs` chrome is shown at all, so
+        this looks exactly like a plain accordion until a panel actually gets tabbed. A small "+"
+        next to the tab bar (or floating alone, pre-tabbing) is the *only* place a brand-new tab
+        gets created (see `NEW_TAB_BUTTON_ID`); moving a panel to one that already exists is
+        dragging its drag handle onto that tab (`.dl-tab-target`, see `_experiment_page_dragdrop.js`),
+        the same handle used to reorder panels.
+        """
         open_value = self.page_settings.get(OPEN_PANEL_KEY, [self.panels[0].name] if self.panels else [])
         if isinstance(open_value, str):
             open_value = [open_value]
-        open_set = set(open_value)  # pyright: ignore[reportUnknownVariableType, reportArgumentType]
+        open_set: set[str] = set(cast("list[str]", open_value))
 
-        return dmc.Accordion(
-            id=ACCORDION_ID,
-            multiple=True,
-            value=open_value,  # pyright: ignore[reportArgumentType]
-            variant="contained",
-            chevronPosition="left",
+        groups = _group_panels_by_tab(self.panels)
+        accordions = {
+            tab: _panel_accordion(data_store, experiment_id, tab, group, open_set, self.page_settings)
+            for tab, group in groups.items()
+        }
+        # Built once here, not in a separate `NEW_PANEL_GROUP_ID` container off to the side --
+        # that squeezed this whole accordion/tabs tree into sharing a row with it (never full
+        # width again) instead of the panel/suggest controls just being *part of* this same,
+        # already-full-width top row.
+        panel_controls = empty_view_helper(self.panels)
+        new_tab_button = tooltipped_action_icon(
+            "+", component_id=NEW_TAB_BUTTON_ID, label="New tab", size="xs"
+        )
+        if len(accordions) <= 1:
+            return html.Div(
+                [
+                    dmc.Group([new_tab_button, panel_controls], justify="space-between", wrap="nowrap"),
+                    next(iter(accordions.values())),
+                ]
+            )
+
+        active_tab = self.page_settings.get(ACTIVE_TAB_KEY) or next(iter(accordions))
+        if active_tab not in accordions:
+            active_tab = next(iter(accordions))
+        rename_tab_button = tooltipped_action_icon(
+            "✎",
+            component_id=RENAME_TAB_BUTTON_ID,
+            label="Rename the active tab",
+            size="xs",
+            disabled=active_tab == _UNGROUPED_TAB,
+        )
+        return dmc.Tabs(
+            id=PANEL_TABS_ID,
+            value=tab_component_value(active_tab),
             children=[
-                dmc.AccordionItem(
+                dmc.Group(
                     [
-                        panel_header(p),
-                        dmc.AccordionPanel(
-                            html.Div(
-                                id=panel_content_id(p.name),
-                                className="dl-panel-body",
-                                children=(
-                                    render_panel_content(data_store, experiment_id, p, self.page_settings)
-                                    if p.name in open_set
-                                    else _panel_placeholder()
-                                ),
-                            ),
-                            px="xs",
-                            py="xs",
+                        dmc.Group(
+                            [
+                                dmc.TabsList([_tab_tab(tab) for tab in accordions]),
+                                rename_tab_button,
+                                new_tab_button,
+                            ],
+                            gap="xs",
+                            wrap="nowrap",
                         ),
+                        panel_controls,
                     ],
-                    p.name,
-                )
-                for p in self.panels
+                    justify="space-between",
+                    wrap="nowrap",
+                    gap="xs",
+                ),
+                *(
+                    dmc.TabsPanel(accordion, value=tab_component_value(tab), pt="xs")
+                    for tab, accordion in accordions.items()
+                ),
             ],
         )
+
+
+def _tab_tab(tab: str) -> Component:
+    """One `TabsTab`, also a drag-and-drop target for moving a panel to this (existing) tab."""
+    # `data-*` attrs aren't in `TabsTab`'s typed signature -- `cast` to `Any` rather than fight that.
+    tabs_tab = cast("Any", dmc.TabsTab)
+    return tabs_tab(
+        tab or "General", value=tab_component_value(tab), className="dl-tab-target", **{"data-tab": tab}
+    )
+
+
+def _panel_accordion(  # noqa: PLR0913
+    data_store: DataStore[...],
+    experiment_id: int,
+    tab: str,
+    panels: list[models.PanelInstance[Any, Any]],
+    open_set: set[str],
+    page_settings: dict[str, Any],
+) -> dmc.Accordion:
+    return dmc.Accordion(
+        id=panel_accordion_id(tab),
+        multiple=True,
+        value=[p.name for p in panels if p.name in open_set],
+        variant="contained",
+        chevronPosition="left",
+        children=[
+            dmc.AccordionItem(
+                [
+                    panel_header(p),
+                    dmc.AccordionPanel(
+                        html.Div(
+                            id=panel_content_id(p.name),
+                            className="dl-panel-body",
+                            children=(
+                                render_panel_content(data_store, experiment_id, p, page_settings)
+                                if p.name in open_set
+                                else _panel_placeholder()
+                            ),
+                        ),
+                        px="xs",
+                        py="xs",
+                    ),
+                ],
+                p.name,
+            )
+            for p in panels
+        ],
+    )
 
 
 # ============================================================
@@ -759,6 +924,67 @@ def _rename_panel_modal() -> dmc.Modal:
     )
 
 
+def _new_tab_modal() -> dmc.Modal:
+    """
+    The *only* place a brand-new tab gets created (see `NEW_TAB_BUTTON_ID`).
+
+    Name it and pick which existing panels move into it. Moving one more panel in later is drag-
+    and-drop (`.dl-tab-target`), not this modal, which only ever creates a brand-new tab.
+    """
+    return dmc.Modal(
+        id=NEW_TAB_MODAL_ID,
+        title="New tab",
+        opened=False,
+        children=[
+            dmc.Stack(
+                [
+                    dmc.TextInput(id=NEW_TAB_NAME_INPUT_ID, label="Tab name"),
+                    dmc.MultiSelect(
+                        id=NEW_TAB_PANELS_SELECT_ID,
+                        label="Panels",
+                        description="Which panels should move into this tab",
+                        data=[],
+                        searchable=True,
+                    ),
+                    dmc.Text(id=NEW_TAB_ERROR_ID, c="red", size="sm"),
+                    dmc.Group(
+                        [
+                            dmc.Button("Cancel", id=NEW_TAB_CANCEL_ID, variant="default"),
+                            dmc.Button("Create", id=NEW_TAB_SAVE_ID),
+                        ],
+                        justify="flex-end",
+                    ),
+                ],
+            ),
+        ],
+    )
+
+
+def _rename_tab_modal() -> dmc.Modal:
+    """Renames whichever tab is active when `RENAME_TAB_BUTTON_ID` is clicked -- disabled on "General"."""
+    return dmc.Modal(
+        id=RENAME_TAB_MODAL_ID,
+        title="Rename tab",
+        opened=False,
+        children=[
+            Store(id=RENAME_TAB_TARGET_ID),
+            dmc.Stack(
+                [
+                    dmc.TextInput(id=RENAME_TAB_NAME_INPUT_ID, label="Tab name"),
+                    dmc.Text(id=RENAME_TAB_ERROR_ID, c="red", size="sm"),
+                    dmc.Group(
+                        [
+                            dmc.Button("Cancel", id=RENAME_TAB_CANCEL_ID, variant="default"),
+                            dmc.Button("Save", id=RENAME_TAB_SAVE_ID),
+                        ],
+                        justify="flex-end",
+                    ),
+                ],
+            ),
+        ],
+    )
+
+
 def _delete_panel_confirm_modal() -> dmc.Modal:
     return dmc.Modal(
         id=DELETE_PANEL_MODAL_ID,
@@ -819,9 +1045,9 @@ def accordion_view(
     experiment_id: int,
     *,
     view_state: EditViewState | None = None,
-) -> tuple[Component, html.Div]:
+) -> html.Div:
     """
-    New-panel group (for the experiment header) plus the accordion view for experiments.
+    The full accordion/tabs view for an experiment, plus every modal/drawer shell it can open.
 
     `view_state` lets callers that re-render the accordion mid-edit (adding a panel/chart,
     changing run selection, etc.) carry the cached dataframe forward instead of silently
@@ -836,7 +1062,7 @@ def accordion_view(
     if isinstance(open_value, str):
         open_value = [open_value]
 
-    container = html.Div(
+    return html.Div(
         [
             page.render(store, experiment_id),
             Store(id=LOADED_PANELS_STORE_ID, data=list(open_value)),  # pyright: ignore[reportArgumentType]
@@ -845,11 +1071,12 @@ def accordion_view(
             _add_chart_modal(),
             _suggest_charts_drawer(),
             _rename_panel_modal(),
+            _new_tab_modal(),
+            _rename_tab_modal(),
             _delete_panel_confirm_modal(),
             _delete_chart_confirm_modal(),
         ],
     )
-    return empty_view_helper(page.panels), container
 
 
 # ============================================================
@@ -873,11 +1100,11 @@ def persist_settings_and_rerender(
     updates: dict[str, Any],
     *,
     view_state: EditViewState | None = None,
-) -> tuple[BasicExperimentPage, Component, html.Div]:
+) -> tuple[BasicExperimentPage, html.Div]:
     """Merge `updates` into page_settings (server-authoritative), persist, and re-render the accordion."""
     page = persist_settings(store, experiment_id, updates)
-    new_panel_group, container = accordion_view(store, experiment_id=experiment_id, view_state=view_state)
-    return page, new_panel_group, container
+    container = accordion_view(store, experiment_id=experiment_id, view_state=view_state)
+    return page, container
 
 
 def mutate_panels_and_rerender(
@@ -886,14 +1113,14 @@ def mutate_panels_and_rerender(
     mutate: Callable[[list[models.PanelInstance[Any, Any]]], list[models.PanelInstance[Any, Any]]],
     *,
     view_state: EditViewState | None = None,
-) -> tuple[BasicExperimentPage, Component, html.Div]:
+) -> tuple[BasicExperimentPage, html.Div]:
     """Load page from client-cached state, apply `mutate` to its panels, persist, and re-render."""
     curr_page = BasicExperimentPage.model_validate_json(page_json)
     curr_page = curr_page.model_copy(update={"panels": mutate(curr_page.panels)})
     store = get_data_store()
     curr_page = store.update_page(curr_page)
-    new_panel_group, container = accordion_view(store, experiment_id=experiment_id, view_state=view_state)
-    return cast("BasicExperimentPage", curr_page), new_panel_group, container
+    container = accordion_view(store, experiment_id=experiment_id, view_state=view_state)
+    return cast("BasicExperimentPage", curr_page), container
 
 
 def upsert_chart(
@@ -984,6 +1211,34 @@ def reorder_chart(
     return new_panels
 
 
+def _find_accordion_containing(node: Any, item_value: str) -> dict[str, Any] | None:  # noqa: ANN401
+    """
+    Depth-first search a wire-format Dash component tree for the `Accordion` holding `item_value`.
+
+    Panels grouped under the same tab share one `Accordion` (see `BasicExperimentPage.render`), and
+    with more than one tab, each sits inside its own `TabsPanel` rather than at a fixed position in
+    the tree -- searching for the `AccordionItem` actually being dragged is what lets
+    `reorder_rendered_panels`/`reorder_rendered_charts` stay agnostic to whether `Tabs` are in play.
+    """
+    if isinstance(node, list):
+        for item in cast("list[Any]", node):
+            found = _find_accordion_containing(item, item_value)
+            if found is not None:
+                return found
+        return None
+    if not isinstance(node, dict) or "props" not in node:
+        return None
+    node = cast("dict[str, Any]", node)
+    props = cast("dict[str, Any]", node["props"])
+    children = cast("list[Any]", props.get("children") or [])
+    if node.get("type") == "Accordion" and any(
+        isinstance(c, dict) and cast("dict[str, Any]", c).get("props", {}).get("value") == item_value
+        for c in children
+    ):
+        return node
+    return _find_accordion_containing(children, item_value)
+
+
 def reorder_rendered_panels(container: dict[str, Any], order: list[str]) -> dict[str, Any]:
     """
     Reorder an already-rendered `accordion_view` container's panels in place, by panel name.
@@ -992,11 +1247,14 @@ def reorder_rendered_panels(container: dict[str, Any], order: list[str]) -> dict
     expensive) per-panel dataframe fetch and chart render for every open panel on every drag, just
     to end up with the exact same charts in a different order, is pure waste. `container` is the
     client's own cached copy of `METRIC_CONTENT_ID.children` (an already-rendered `accordion_view`
-    tree, serialized to plain dicts by Dash), so this just splices its `Accordion`'s children --
-    each an `AccordionItem` keyed by its `value` (the panel name, see `accordion_view`) -- into the
-    requested order.
+    tree, serialized to plain dicts by Dash), so this just splices the dragged panel's own
+    `Accordion`'s children -- each an `AccordionItem` keyed by its `value` (the panel name) -- into
+    the requested order.
     """
-    accordion = container["props"]["children"][0]
+    accordion = _find_accordion_containing(container, order[0])
+    if accordion is None:
+        msg = f"no accordion contains panel {order[0]!r}"
+        raise ValueError(msg)
     items = accordion["props"]["children"]
     by_name = {item["props"]["value"]: item for item in items}
     accordion["props"]["children"] = [by_name[name] for name in order]
@@ -1011,7 +1269,10 @@ def reorder_rendered_charts(container: dict[str, Any], panel_name: str, order: l
     `range(len(panel.charts))`), not new chart data -- a chart drag never changes any chart's
     content either, just where it sits within its panel.
     """
-    accordion = container["props"]["children"][0]
+    accordion = _find_accordion_containing(container, panel_name)
+    if accordion is None:
+        msg = f"no accordion contains panel {panel_name!r}"
+        raise ValueError(msg)
     item = next(i for i in accordion["props"]["children"] if i["props"]["value"] == panel_name)
     accordion_panel = item["props"]["children"][1]
     panel_body = accordion_panel["props"]["children"]  # html.Div(id=panel_content_id(...))
@@ -1097,31 +1358,32 @@ def register_state_callbacks(app: Dash) -> None:
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(STATE_PAGE_STORAGE, "data", allow_duplicate=True),
-        Input(ACCORDION_ID, "value"),
+        Input({"type": "panel-accordion", "tab": ALL}, "value"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
         prevent_initial_call=True,
     )
-    def persist_open_panel(open_value: str | list[str] | None, experiment_id: int) -> str:
+    def persist_open_panel(open_values: list[list[str] | None], experiment_id: int) -> str:
+        open_value = [name for group in open_values for name in (group or [])]
         store = get_data_store()
-        page = persist_settings(store, experiment_id, {OPEN_PANEL_KEY: open_value or []})
+        page = persist_settings(store, experiment_id, {OPEN_PANEL_KEY: open_value})
         return page.model_dump_json()
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output({"type": "panel-content", "panel": ALL}, "children"),
         Output(LOADED_PANELS_STORE_ID, "data"),
-        Input(ACCORDION_ID, "value"),
+        Input({"type": "panel-accordion", "tab": ALL}, "value"),
         State({"type": "panel-content", "panel": ALL}, "id"),
         State(LOADED_PANELS_STORE_ID, "data"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
         prevent_initial_call=True,
     )
     def render_opened_panels(
-        open_value: list[str] | None,
+        open_values: list[list[str] | None],
         panel_ids: list[dict[str, str]],
         loaded: list[str] | None,
         experiment_id: int,
     ) -> tuple[list[Any], list[str]]:
-        open_set = set(open_value or [])
+        open_set = {name for group in open_values for name in (group or [])}
         loaded_set = set(loaded or [])
         newly_opened = open_set - loaded_set
         if not newly_opened:
@@ -1141,3 +1403,25 @@ def register_state_callbacks(app: Dash) -> None:
                 render_panel_content(store, experiment_id, panel_by_name[name], page.page_settings)
             )
         return outputs, sorted(loaded_set | newly_opened)
+
+    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+        Output(STATE_PAGE_STORAGE, "data", allow_duplicate=True),
+        Input(PANEL_TABS_ID, "value"),
+        State(constants.STATE_EXPERIMENT_ID, "data"),
+        prevent_initial_call=True,
+    )
+    def persist_active_tab(tab_value: str | None, experiment_id: int) -> str:
+        if tab_value is None:
+            raise PreventUpdate
+        store = get_data_store()
+        page = persist_settings(store, experiment_id, {ACTIVE_TAB_KEY: tab_from_component_value(tab_value)})
+        return page.model_dump_json()
+
+    # Tab switching is entirely client-side (Mantine's own state, no server round trip) -- so
+    # whether "Rename the active tab" should be disabled (on the ungrouped "General" tab) has to
+    # update client-side too, not just from this render's initial `disabled=`.
+    app.clientside_callback(  # pyright: ignore[reportUnknownMemberType]
+        _ACTIVE_TAB_DISABLES_RENAME_JS.source,
+        Output(RENAME_TAB_BUTTON_ID, "disabled"),
+        Input(PANEL_TABS_ID, "value"),
+    )

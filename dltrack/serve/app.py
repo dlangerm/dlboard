@@ -228,7 +228,12 @@ def render_navbar(project_id: int | None, experiment_id: int | None) -> dmc.Stac
     experiments = store.get_experiments(project_id)
     return dmc.Stack(
         [
-            dmc.Text(project.name, fw=600, size="sm"),
+            dcc.Link(
+                project.name,
+                href=f"/project/{project_id}",
+                refresh=False,
+                style={"fontWeight": 600, "fontSize": "var(--mantine-font-size-sm)"},
+            ),
             dmc.Stack(
                 [
                     dmc.NavLink(
