@@ -385,3 +385,141 @@ def test_reorder_rendered_panels_reorders_within_the_active_tab(
     accordion = state._find_accordion_containing(reordered, "c")
     assert accordion is not None
     assert [item["props"]["value"] for item in accordion["props"]["children"]] == ["c", "a", "b"]
+
+
+# ---- panel_name_taken / unique_panel_name ----
+#
+# Two panels sharing a name break every id keyed by panel name alone (`panel_content_id`,
+# `panel_accordion_id`, ...) -- most visibly as a pattern-matching `MATCH` collision on whatever
+# chart both panels happen to render identically. `create_panel`/`rename_panel` both guard against
+# it via `panel_name_taken`; `rename_panel` also ignores the panel being renamed against itself.
+# `unique_panel_name` is its counterpart for the "auto-create a panel" paths (a new tab created
+# without picking existing panels, or a chart dropped onto a tab with no panel yet).
+
+
+def test_panel_name_taken_true_for_an_existing_name() -> None:
+    panels = [PanelInstance[Any, Any](name=n) for n in ("a", "b")]
+    assert state.panel_name_taken(panels, "a") is True
+
+
+def test_panel_name_taken_false_for_a_new_name() -> None:
+    panels = [PanelInstance[Any, Any](name=n) for n in ("a", "b")]
+    assert state.panel_name_taken(panels, "c") is False
+
+
+def test_panel_name_taken_ignores_the_named_panel_itself() -> None:
+    panels = [PanelInstance[Any, Any](name=n) for n in ("a", "b")]
+    assert state.panel_name_taken(panels, "a", ignore="a") is False
+
+
+def test_unique_panel_name_returns_base_when_free() -> None:
+    panels = [PanelInstance[Any, Any](name="a")]
+    assert state.unique_panel_name(panels, "b") == "b"
+
+
+def test_unique_panel_name_suffixes_when_taken() -> None:
+    panels = [PanelInstance[Any, Any](name=n) for n in ("a", "a (2)")]
+    assert state.unique_panel_name(panels, "a") == "a (3)"
+
+
+# ---- move_chart_to_tab ----
+
+
+def test_move_chart_to_tab_appends_to_an_existing_panel_in_that_tab() -> None:
+    panels = [
+        _panel_with_charts("x", "y").model_copy(update={"name": "src"}),
+        PanelInstance[Any, Any](name="dst", tab="Images"),
+    ]
+
+    result = state.move_chart_to_tab(panels, "src", 0, "Images")
+
+    by_name = {p.name: [c.parameters["column"] for c in p.charts] for p in result}
+    assert by_name == {"src": ["y"], "dst": ["x"]}
+
+
+def test_move_chart_to_tab_creates_a_panel_when_the_tab_is_empty() -> None:
+    panels = [_panel_with_charts("x", "y").model_copy(update={"name": "src"})]
+
+    result = state.move_chart_to_tab(panels, "src", 0, "Images")
+
+    new_panel = next(p for p in result if p.tab == "Images")
+    assert [c.parameters["column"] for c in new_panel.charts] == ["x"]
+    assert [c.parameters["column"] for c in next(p for p in result if p.name == "src").charts] == ["y"]
+
+
+def test_move_chart_to_tab_is_a_noop_for_an_out_of_range_index() -> None:
+    panels = [_panel_with_charts("x").model_copy(update={"name": "src"})]
+    assert state.move_chart_to_tab(panels, "src", 5, "Images") == panels
+
+
+# ---- move_chart_to_panel ----
+
+
+def test_move_chart_to_panel_inserts_at_a_specific_position() -> None:
+    panels = [
+        _panel_with_charts("x", "y").model_copy(update={"name": "src"}),
+        _panel_with_charts("a", "b").model_copy(update={"name": "dst"}),
+    ]
+
+    result = state.move_chart_to_panel(panels, "src", 0, "dst", 0, after=False)
+
+    by_name = {p.name: [c.parameters["column"] for c in p.charts] for p in result}
+    assert by_name == {"src": ["y"], "dst": ["x", "a", "b"]}
+
+
+def test_move_chart_to_panel_inserts_after_the_target_index() -> None:
+    panels = [
+        _panel_with_charts("x").model_copy(update={"name": "src"}),
+        _panel_with_charts("a", "b").model_copy(update={"name": "dst"}),
+    ]
+
+    result = state.move_chart_to_panel(panels, "src", 0, "dst", 0, after=True)
+
+    dst = next(p for p in result if p.name == "dst")
+    assert [c.parameters["column"] for c in dst.charts] == ["a", "x", "b"]
+
+
+def test_move_chart_to_panel_appends_when_target_index_is_none() -> None:
+    panels = [
+        _panel_with_charts("x").model_copy(update={"name": "src"}),
+        _panel_with_charts("a").model_copy(update={"name": "dst"}),
+    ]
+
+    result = state.move_chart_to_panel(panels, "src", 0, "dst", None, after=True)
+
+    dst = next(p for p in result if p.name == "dst")
+    assert [c.parameters["column"] for c in dst.charts] == ["a", "x"]
+
+
+def test_move_chart_to_panel_appends_into_an_empty_panel() -> None:
+    panels = [
+        _panel_with_charts("x").model_copy(update={"name": "src"}),
+        PanelInstance[Any, Any](name="dst"),
+    ]
+
+    result = state.move_chart_to_panel(panels, "src", 0, "dst", None, after=True)
+
+    dst = next(p for p in result if p.name == "dst")
+    assert [c.parameters["column"] for c in dst.charts] == ["x"]
+    assert next(p for p in result if p.name == "src").charts == []
+
+
+def test_move_chart_to_panel_same_panel_delegates_to_reorder_chart() -> None:
+    panels = [_panel_with_charts("a", "b", "c").model_copy(update={"name": "p"})]
+
+    result = state.move_chart_to_panel(panels, "p", 0, "p", 2, after=False)
+
+    assert result == state.reorder_chart(panels, "p", 0, 2, after=False)
+
+
+def test_move_chart_to_panel_is_a_noop_for_an_out_of_range_index() -> None:
+    panels = [
+        _panel_with_charts("x").model_copy(update={"name": "src"}),
+        PanelInstance[Any, Any](name="dst"),
+    ]
+    assert state.move_chart_to_panel(panels, "src", 5, "dst", None, after=True) == panels
+
+
+def test_move_chart_to_panel_is_a_noop_for_an_unknown_target_panel() -> None:
+    panels = [_panel_with_charts("x").model_copy(update={"name": "src"})]
+    assert state.move_chart_to_panel(panels, "src", 0, "missing", None, after=True) == panels

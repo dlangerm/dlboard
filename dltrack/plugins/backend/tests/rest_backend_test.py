@@ -162,8 +162,17 @@ def test_log_artifact_batch_pairs_each_artifact_with_its_own_file(monkeypatch: p
         posted.append({"files": list(files), "headers": headers})
         return _FakeResponse()
 
-    def fake_open(path: Path, mode: str = "r") -> str:
-        return path.name
+    class _FakeFile:
+        """Stands in for the real file handle `log_artifact_batch` opens (and now closes)."""
+
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+        def close(self) -> None:
+            return
+
+    def fake_open(path: Path, mode: str = "r") -> _FakeFile:
+        return _FakeFile(path.name)
 
     monkeypatch.setattr(backend.requests, "post", fake_post)
     monkeypatch.setattr(Path, "open", fake_open)

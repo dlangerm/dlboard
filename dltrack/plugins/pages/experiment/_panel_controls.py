@@ -89,6 +89,9 @@ def _register_create_panel(app: Dash) -> None:
             raise ValueError(msg)
 
         def add_panel(panels: list[Any]) -> list[Any]:
+            if core.panel_name_taken(panels, panel_name):
+                msg = f"A panel named {panel_name!r} already exists"
+                raise ValueError(msg)
             return [*panels, PanelInstance(name=panel_name)]
 
         page, container = core.mutate_panels_and_rerender(
@@ -414,10 +417,12 @@ def _register_toggle(app: Dash) -> None:
 
 def _register_tab_drop(app: Dash) -> None:
     """
-    Move a panel to an *existing* tab by dragging it onto that tab -- see `_experiment_page_dragdrop.js`.
+    Move a panel (or a single chart) onto an *existing* tab -- see `_experiment_page_dragdrop.js`.
 
-    The only way to create a brand-new tab is `NEW_TAB_BUTTON_ID`; this only ever moves a panel to
-    a tab that already exists (whatever `.dl-tab-target` the drag landed on).
+    The only way to create a brand-new tab is `NEW_TAB_BUTTON_ID`; both callbacks below only ever
+    move something to a tab that already exists (whatever `.dl-tab-target` the drag landed on). Both
+    also switch the active tab to the destination -- otherwise the thing you just dragged would
+    vanish from view into a tab you're not looking at.
     """
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
@@ -448,6 +453,86 @@ def _register_tab_drop(app: Dash) -> None:
 
         def move(panels: list[Any]) -> list[Any]:
             return [p.model_copy(update={"tab": new_tab}) if p.name == panel_name else p for p in panels]
+
+        page, container = core.mutate_panels_and_rerender(
+            page_json,
+            experiment_id,
+            move,
+            view_state=core.EditViewState(full_df_json=full_df_json, column_kinds=column_kinds),
+            extra_settings={core.ACTIVE_TAB_KEY: new_tab},
+        )
+        return container, page.model_dump_json()
+
+    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+        Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
+        Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
+        Input(core.CHART_TAB_DROP_STORE_ID, "data"),
+        State(core.STATE_PAGE_STORAGE, "data"),
+        State(constants.STATE_EXPERIMENT_ID, "data"),
+        State(core.FULL_DF_STORE_ID, "data", allow_optional=True),
+        State(core.COLUMN_KINDS_STORE_ID, "data", allow_optional=True),
+        prevent_initial_call=True,
+    )
+    def drop_chart_on_tab(
+        request: core.ChartTabDropRequest | None,
+        page_json: str,
+        experiment_id: int,
+        full_df_json: str | None,
+        column_kinds: dict[str, str] | None,
+    ) -> tuple[html.Div, str]:
+        """Move a single chart to an *existing* tab -- see `drop_panel_on_tab`, its panel-level twin."""
+        if not request:
+            raise PreventUpdate
+        panel_name, index, new_tab = request["panel"], request["index"], request["tab"]
+
+        def move(panels: list[Any]) -> list[Any]:
+            return core.move_chart_to_tab(panels, panel_name, index, new_tab)
+
+        page, container = core.mutate_panels_and_rerender(
+            page_json,
+            experiment_id,
+            move,
+            view_state=core.EditViewState(full_df_json=full_df_json, column_kinds=column_kinds),
+            extra_settings={core.ACTIVE_TAB_KEY: new_tab},
+        )
+        return container, page.model_dump_json()
+
+
+def _register_chart_panel_move(app: Dash) -> None:
+    """
+    Move a single chart into a *different* panel by dragging it there.
+
+    See `reorder_chart` for the same-panel case (a cheap client-side splice, since nothing about
+    what's fetched/shown changes), which this defers to via `core.move_chart_to_panel` if the drop
+    somehow targets its own panel.
+    """
+
+    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+        Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
+        Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
+        Input(core.CHART_PANEL_MOVE_STORE_ID, "data"),
+        State(core.STATE_PAGE_STORAGE, "data"),
+        State(constants.STATE_EXPERIMENT_ID, "data"),
+        State(core.FULL_DF_STORE_ID, "data", allow_optional=True),
+        State(core.COLUMN_KINDS_STORE_ID, "data", allow_optional=True),
+        prevent_initial_call=True,
+    )
+    def drop_chart_on_panel(
+        request: core.ChartPanelMoveRequest | None,
+        page_json: str,
+        experiment_id: int,
+        full_df_json: str | None,
+        column_kinds: dict[str, str] | None,
+    ) -> tuple[html.Div, str]:
+        if not request:
+            raise PreventUpdate
+        panel_name, index = request["panel"], request["index"]
+        target_panel, target_index, after = request["target_panel"], request["target_index"], request["after"]
+
+        def move(panels: list[Any]) -> list[Any]:
+            return core.move_chart_to_panel(
+                panels, panel_name, index, target_panel, target_index, after=after
+            )
 
         page, container = core.mutate_panels_and_rerender(
             page_json,
@@ -497,7 +582,7 @@ def _register_rename(app: Dash) -> None:
             return no_update, no_update, no_update, "Panel name cannot be empty"
 
         curr_page = core.BasicExperimentPage.model_validate_json(rename_ctx["page_json"])
-        if new_name != old_name and any(p.name == new_name for p in curr_page.panels):
+        if core.panel_name_taken(curr_page.panels, new_name, ignore=old_name):
             return no_update, no_update, no_update, f"A panel named {new_name!r} already exists"
 
         new_panels = [
@@ -537,14 +622,12 @@ def _register_rename(app: Dash) -> None:
         return False
 
 
-def _new_tab_error(name: str, panel_names: list[str], panels: list[PanelInstance[Any, Any]]) -> str | None:
+def _new_tab_error(name: str, panels: list[PanelInstance[Any, Any]]) -> str | None:
     """Validate a new-tab submission, or `None` if it's good to create."""
     if not name:
         return "Tab name cannot be empty"
     if name == "General":
         return '"General" is reserved for the default tab'
-    if not panel_names:
-        return "Pick at least one panel"
     if any(p.tab == name for p in panels):
         return f"A tab named {name!r} already exists"
     return None
@@ -552,10 +635,12 @@ def _new_tab_error(name: str, panel_names: list[str], panels: list[PanelInstance
 
 def _register_new_tab(app: Dash) -> None:
     """
-    Create a brand-new tab: name it, pick which existing panels move into it.
+    Create a brand-new tab: name it, optionally pick existing panels to move into it.
 
     The *only* place a new tab name can be typed -- moving one more panel into an already-existing
     tab is drag-and-drop (`drop_panel_on_tab`, above), which only ever targets tabs that already exist.
+    Picking no panels doesn't leave the tab empty -- it gets one fresh, empty panel (named after the
+    tab) instead, so there's always somewhere to drag or add a chart into right away.
     """
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
@@ -596,14 +681,16 @@ def _register_new_tab(app: Dash) -> None:
         name = (new_tab_ctx["name"] or "").strip()
         panel_names = new_tab_ctx["panel_names"] or []
         curr_page = core.BasicExperimentPage.model_validate_json(new_tab_ctx["page_json"])
-        error = _new_tab_error(name, panel_names, curr_page.panels)
+        error = _new_tab_error(name, curr_page.panels)
         if error:
             return no_update, no_update, no_update, error
 
         selected = set(panel_names)
-        new_panels = [
+        new_panels: list[PanelInstance[Any, Any]] = [
             p.model_copy(update={"tab": name}) if p.name in selected else p for p in curr_page.panels
         ]
+        if not selected:
+            new_panels.append(PanelInstance(name=core.unique_panel_name(curr_page.panels, name), tab=name))
         new_settings = {**curr_page.page_settings, core.ACTIVE_TAB_KEY: name}
 
         store = get_data_store()
@@ -721,6 +808,7 @@ def register_panel_controls_callbacks(app: Dash) -> None:
     _register_reorder(app)
     _register_toggle(app)
     _register_tab_drop(app)
+    _register_chart_panel_move(app)
     _register_rename(app)
     _register_new_tab(app)
     _register_rename_tab(app)

@@ -16,7 +16,7 @@ import pytest
 from dltrack import models
 from dltrack.models._view import PanelInstance
 from dltrack.plugins.data_stores.sqlite import SQLLiteStore
-from dltrack.plugins.pages.experiment import BasicExperimentPage
+from dltrack.plugins.pages.experiment._experiment_page_state import BasicExperimentPage
 
 if TYPE_CHECKING:
     from pathlib import Path

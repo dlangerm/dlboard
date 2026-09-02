@@ -149,24 +149,32 @@ class BasicDltrackAPI:
 
     def log_artifact_batch(self, artifacts: Iterable[models.NewArtifact], files: list[Path]) -> None:
         """Log a batch of artifacts."""
+        artifacts = list(artifacts)
         keys = {a.key for a in artifacts}
         for k in keys:
-            common_artifacts = ((a, files[i]) for i, a in enumerate(artifacts) if a.key == k)
-
-            res = requests.post(
-                create_path(models.Artifact, self.base_url),
-                files=itertools.chain(
-                    *(
-                        (
-                            (k, (a.fname, f.open("rb"), "application/octet")),
-                            (k + ".json", (a.fname, a.model_dump_json(), "application/json")),
+            common_artifacts = [(a, files[i]) for i, a in enumerate(artifacts) if a.key == k]
+            # `requests` never closes the file handles it's handed -- opened explicitly (not inline
+            # in the `files=` generator below) so they can be closed in `finally` regardless of
+            # whether the request succeeds, rather than leaking a descriptor per artifact.
+            opened = [f.open("rb") for _, f in common_artifacts]
+            try:
+                res = requests.post(
+                    create_path(models.Artifact, self.base_url),
+                    files=itertools.chain(
+                        *(
+                            (
+                                (k, (a.fname, fh, "application/octet")),
+                                (k + ".json", (a.fname, a.model_dump_json(), "application/json")),
+                            )
+                            for (a, _), fh in zip(common_artifacts, opened, strict=True)
                         )
-                        for a, f in common_artifacts
-                    )
-                ),
-                headers=self._headers,
-            )
-            res.raise_for_status()
+                    ),
+                    headers=self._headers,
+                )
+                res.raise_for_status()
+            finally:
+                for fh in opened:
+                    fh.close()
 
 
 # -- Route handlers -------------------------------------------------------------------------------
