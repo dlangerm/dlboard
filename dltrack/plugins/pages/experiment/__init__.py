@@ -1,17 +1,19 @@
 """
 The basic experiment page plugin: hparam/run table + chart accordion, plus the experiment header.
 
-This module is the plugin's public entrypoint -- the only thing external code (namely
-`serve/_pages/experiment.py`, which needs this page's route-skeleton container ids) should import
-from. Its own job is just the page-level chrome (description editing, delete) and
-`plug()`, which wires the CSS/JS routes and delegates every feature to its owning submodule:
+This module's own job is just the page-level chrome (description editing, delete) and `plug()`,
+which wires the CSS/JS routes and delegates every feature to its owning submodule:
 
 - `_experiment_page_state.py` -- the page model, its full render tree, and the mutation
-  primitives/ids every other submodule below builds on.
+  primitives/ids every other submodule below (and `serve/_pages/experiment.py`) builds on.
 - `_panel_controls.py` -- create/rename/delete/move a panel; delete/move a chart; add a chart.
 - `_chart_editor_modal.py` -- the add/edit-chart modal's form-building and live preview.
 - `_chart_suggestions.py` -- auto-populate charts for an empty view; suggest un-charted keys.
 - `_run_comparison_table.py` -- the navbar's hparam/metric/run comparison table + run deletion.
+
+Anything outside this plugin that needs a container id, `BasicExperimentPage`, or similar imports
+straight from `_experiment_page_state` (the underscore is a "this is an implementation detail you're
+reaching into on purpose" signal, not an access restriction) rather than through re-exports here.
 """
 
 from __future__ import annotations
@@ -44,29 +46,13 @@ from dltrack.serve import get_current_user, get_data_store
 if TYPE_CHECKING:
     from dash.development.base_component import Component
 
-# Route-skeleton ids: re-exported from the core module so `serve/_pages/experiment.py` (and
-# anything else outside this plugin) imports from this public module, not the private one.
-PAGE_EXPERIMENT_ID = core.PAGE_EXPERIMENT_ID
-EXPERIMENT_HEADER_ID = core.EXPERIMENT_HEADER_ID
-METRIC_CONTENT_ID = core.METRIC_CONTENT_ID
-STATE_HPARAMS = core.STATE_HPARAMS
-STATE_PAGE_STORAGE = core.STATE_PAGE_STORAGE
-PANEL_REORDER_STORE_ID = core.PANEL_REORDER_STORE_ID
-CHART_REORDER_STORE_ID = core.CHART_REORDER_STORE_ID
-TAB_DROP_STORE_ID = core.TAB_DROP_STORE_ID
-# Driven directly by browser/e2e tests (dltrack/tests/browser_test.py), so re-exported here too.
-NEW_PANEL_ID = core.NEW_PANEL_ID
-NEW_PANEL_NAME_ID = core.NEW_PANEL_NAME_ID
-
-BasicExperimentPage = core.BasicExperimentPage
-
 DELETE_EXPERIMENT_BUTTON_ID: ButtonId[core.ExperimentPage] = ButtonId("delete-experiment-button")
 DELETE_EXPERIMENT_MODAL_ID: ModalId[core.ExperimentPage] = ModalId("delete-experiment-modal")
 DELETE_EXPERIMENT_CONFIRM_ID: ButtonId[core.ExperimentPage] = ButtonId("delete-experiment-confirm")
 DELETE_EXPERIMENT_CANCEL_ID: ButtonId[core.ExperimentPage] = ButtonId("delete-experiment-cancel")
 
 EXPERIMENT_DESC_IDS = DescriptionEditorIds(
-    header=EXPERIMENT_HEADER_ID,
+    header=core.EXPERIMENT_HEADER_ID,
     edit_button="experiment-edit-desc-button",
     modal="experiment-edit-desc-modal",
     textarea="experiment-edit-desc-textarea",
@@ -133,15 +119,15 @@ def plug(app: Dash) -> None:
 
     # --- initial render: fills METRIC_CONTENT_ID/EXPERIMENT_HEADER_ID and seeds STATE_PAGE_STORAGE ---
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
-        Output(METRIC_CONTENT_ID, "children", allow_duplicate=True),
-        Output(EXPERIMENT_HEADER_ID, "children", allow_duplicate=True),
-        Output(STATE_PAGE_STORAGE, "data", allow_duplicate=True),
+        Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
+        Output(core.EXPERIMENT_HEADER_ID, "children", allow_duplicate=True),
+        Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Input(constants.STATE_EXPERIMENT_ID, "data"),
         prevent_initial_call="initial_update",
     )
     def render_initial(experiment_id: int) -> tuple[html.Div, Component, str]:
         store = get_data_store()
-        page = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
+        page = store.get_or_create_page(core.BasicExperimentPage, experiment_id=experiment_id)
         exp = store.get_experiment(experiment_id)
         name, description = (experiment_display_name(exp), exp.description) if exp else ("", "")
         header = render_header(

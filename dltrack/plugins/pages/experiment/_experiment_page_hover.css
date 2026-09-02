@@ -50,7 +50,14 @@
 
 /* Dropping a panel onto a tab (`.dl-tab-target`) moves it there -- highlighted while dragged over,
    toggled by `_experiment_page_dragdrop.js` rather than `:hover` (a real mouseover doesn't fire
-   during an HTML5 drag). */
-.dl-tab-drop-target {
+   during an HTML5 drag). Dropping a chart onto a *different* panel's empty body (`.dl-panel-body`)
+   appends it there the same way, so it gets the same treatment. */
+.dl-tab-drop-target, .dl-panel-body-drop-target {
   background: var(--mantine-color-blue-light);
+}
+
+/* An empty panel's body has no chart to give it any height, so without this it collapses to 0px --
+   not just hard to see, but literally impossible to hover/drop a dragged chart onto. */
+.dl-panel-body {
+  min-height: 2.5rem;
 }

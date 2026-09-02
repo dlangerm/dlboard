@@ -60,6 +60,8 @@ STATE_PAGE_STORAGE: StoreId[ExperimentPage] = StoreId("current-page")
 PANEL_REORDER_STORE_ID: StoreId[ExperimentPage] = StoreId("panel-reorder-request")
 CHART_REORDER_STORE_ID: StoreId[ExperimentPage] = StoreId("chart-reorder-request")
 TAB_DROP_STORE_ID: StoreId[ExperimentPage] = StoreId("tab-drop-request")
+CHART_TAB_DROP_STORE_ID: StoreId[ExperimentPage] = StoreId("chart-tab-drop-request")
+CHART_PANEL_MOVE_STORE_ID: StoreId[ExperimentPage] = StoreId("chart-panel-move-request")
 
 # --- accordion / panel state ---
 # One `Accordion` per tab group, id'd via `panel_accordion_id` -- see `panel_accordion_id`/`BasicExperimentPage.render`.
@@ -210,6 +212,30 @@ class TabDropRequest(TypedDict):
 
     panel: str
     tab: str
+
+
+class ChartTabDropRequest(TypedDict):
+    """A chart dropped onto an existing tab: move the chart at `index` in `panel` to `tab`."""
+
+    panel: str
+    index: int
+    tab: str
+
+
+class ChartPanelMoveRequest(TypedDict):
+    """
+    A chart dropped into a *different* panel: move the chart at `index` in `panel` to `target_panel`.
+
+    `target_index` is `None` when the drop landed on the target panel's body generally (an empty
+    panel, or anywhere that isn't one of its existing charts) rather than on one of its charts --
+    the chart is appended there instead of inserted at a particular position.
+    """
+
+    panel: str
+    index: int
+    target_panel: str
+    target_index: int | None
+    after: bool
 
 
 class ChartReorderRequest(TypedDict):
@@ -753,9 +779,14 @@ def _panel_accordion(  # noqa: PLR0913
                 [
                     panel_header(p),
                     dmc.AccordionPanel(
-                        html.Div(
+                        # `data-panel-name` isn't in `html.Div`'s typed signature -- `cast` to `Any`
+                        # rather than fight that (same as `_drag_handle`'s data attrs). Read by
+                        # `_experiment_page_dragdrop.js` to let a dragged chart be dropped anywhere
+                        # in a *different* panel's body, not only onto one of its existing charts.
+                        cast("Any", html.Div)(
                             id=panel_content_id(p.name),
                             className="dl-panel-body",
+                            **{"data-panel-name": p.name},
                             children=(
                                 render_panel_content(data_store, experiment_id, p, page_settings)
                                 if p.name in open_set
@@ -928,8 +959,10 @@ def _new_tab_modal() -> dmc.Modal:
     """
     The *only* place a brand-new tab gets created (see `NEW_TAB_BUTTON_ID`).
 
-    Name it and pick which existing panels move into it. Moving one more panel in later is drag-
-    and-drop (`.dl-tab-target`), not this modal, which only ever creates a brand-new tab.
+    Name it and, optionally, pick existing panels to move into it -- leave the picker empty and the
+    tab starts with one fresh, empty panel instead. Moving one more panel in later, or moving a
+    single chart into an existing tab, is drag-and-drop (`.dl-tab-target`), not this modal, which
+    only ever creates a brand-new tab.
     """
     return dmc.Modal(
         id=NEW_TAB_MODAL_ID,
@@ -942,7 +975,8 @@ def _new_tab_modal() -> dmc.Modal:
                     dmc.MultiSelect(
                         id=NEW_TAB_PANELS_SELECT_ID,
                         label="Panels",
-                        description="Which panels should move into this tab",
+                        description="Which panels should move into this tab (optional -- leave "
+                        "empty to start with a new, empty panel)",
                         data=[],
                         searchable=True,
                     ),
@@ -1113,10 +1147,20 @@ def mutate_panels_and_rerender(
     mutate: Callable[[list[models.PanelInstance[Any, Any]]], list[models.PanelInstance[Any, Any]]],
     *,
     view_state: EditViewState | None = None,
+    extra_settings: dict[str, Any] | None = None,
 ) -> tuple[BasicExperimentPage, html.Div]:
-    """Load page from client-cached state, apply `mutate` to its panels, persist, and re-render."""
+    """
+    Load page from client-cached state, apply `mutate` to its panels, persist, and re-render.
+
+    `extra_settings` merges into `page_settings` alongside the panel mutation -- e.g. moving a chart
+    or panel to a different tab also switches `ACTIVE_TAB_KEY` to it, in the same page update, rather
+    than leaving the user looking at the tab they dragged *from*.
+    """
     curr_page = BasicExperimentPage.model_validate_json(page_json)
-    curr_page = curr_page.model_copy(update={"panels": mutate(curr_page.panels)})
+    updates: dict[str, Any] = {"panels": mutate(curr_page.panels)}
+    if extra_settings:
+        updates["page_settings"] = {**curr_page.page_settings, **extra_settings}
+    curr_page = curr_page.model_copy(update=updates)
     store = get_data_store()
     curr_page = store.update_page(curr_page)
     container = accordion_view(store, experiment_id=experiment_id, view_state=view_state)
@@ -1209,6 +1253,112 @@ def reorder_chart(
             p.model_copy(update={"charts": move_index(p.charts, index, target_index, after=after)})
         )
     return new_panels
+
+
+def panel_name_taken(
+    panels: list[models.PanelInstance[Any, Any]], name: str, *, ignore: str | None = None
+) -> bool:
+    """Whether `name` is already used by a panel other than `ignore` (the panel being renamed, if any)."""
+    return any(p.name == name for p in panels if p.name != ignore)
+
+
+def unique_panel_name(panels: list[models.PanelInstance[Any, Any]], base: str) -> str:
+    """`base`, or `"{base} (2)"`, `"{base} (3)"`, ... -- whichever isn't already a panel name."""
+    if not panel_name_taken(panels, base):
+        return base
+    n = 2
+    while panel_name_taken(panels, f"{base} ({n})"):
+        n += 1
+    return f"{base} ({n})"
+
+
+def _pop_chart(
+    panels: list[models.PanelInstance[Any, Any]], panel_name: str, index: int
+) -> tuple[models.ChartInstance[Any, Any] | None, list[models.PanelInstance[Any, Any]]]:
+    """
+    Remove the chart at `index` in `panel_name`.
+
+    Returns `(None, panels)` unchanged if `panel_name`/`index` don't resolve to a real chart --
+    shared by every "move this chart somewhere else" mutation (`move_chart_to_tab`,
+    `move_chart_to_panel`) so each only has to say *where* the chart lands, not how to detach it.
+    """
+    source = next((p for p in panels if p.name == panel_name), None)
+    if source is None or not (0 <= index < len(source.charts)):
+        return None, panels
+    chart = source.charts[index]
+    without_chart = [
+        p.model_copy(update={"charts": [c for i, c in enumerate(p.charts) if i != index]})
+        if p.name == panel_name
+        else p
+        for p in panels
+    ]
+    return chart, without_chart
+
+
+def move_chart_to_tab(
+    panels: list[models.PanelInstance[Any, Any]], panel_name: str, index: int, tab: str
+) -> list[models.PanelInstance[Any, Any]]:
+    """
+    Move the chart at `index` in `panel_name` into `tab`'s first panel, creating one if `tab` is empty.
+
+    Unlike `reorder_chart` (same panel, different position), this can change which panel a chart
+    belongs to -- and so, unlike a pure reorder, always goes through a full `mutate_panels_and_rerender`
+    at the call site rather than a client-side splice, since the destination panel may not even be
+    open (or may not exist yet).
+    """
+    chart, without_chart = _pop_chart(panels, panel_name, index)
+    if chart is None:
+        return panels
+    dest = next((p for p in without_chart if p.tab == tab), None)
+    if dest is not None:
+        return [
+            p.model_copy(update={"charts": [*p.charts, chart]}) if p.name == dest.name else p
+            for p in without_chart
+        ]
+    new_panel = models.PanelInstance(
+        name=unique_panel_name(without_chart, tab or "General"), tab=tab, charts=[chart]
+    )
+    return [*without_chart, new_panel]
+
+
+def move_chart_to_panel(  # noqa: PLR0913
+    panels: list[models.PanelInstance[Any, Any]],
+    panel_name: str,
+    index: int,
+    target_panel: str,
+    target_index: int | None,
+    *,
+    after: bool,
+) -> list[models.PanelInstance[Any, Any]]:
+    """
+    Move the chart at `index` in `panel_name` into `target_panel`, at `target_index` there.
+
+    `target_index=None` appends instead of inserting at a position -- the drop landed on the target
+    panel's body generally (an empty panel, or anywhere that isn't one of its existing charts)
+    rather than on a specific chart to land next to. `panel_name == target_panel` degrades to a plain
+    `reorder_chart` (same-panel move, client-splice-friendly) rather than repeating that logic here.
+    """
+    if panel_name == target_panel:
+        return (
+            panels
+            if target_index is None
+            else reorder_chart(panels, panel_name, index, target_index, after=after)
+        )
+    chart, without_chart = _pop_chart(panels, panel_name, index)
+    if chart is None or not any(p.name == target_panel for p in without_chart):
+        return panels
+
+    def _insert(p: models.PanelInstance[Any, Any]) -> models.PanelInstance[Any, Any]:
+        if p.name != target_panel:
+            return p
+        if target_index is None:
+            return p.model_copy(update={"charts": [*p.charts, chart]})
+        new_charts = list(p.charts)
+        insert_at = max(0, min(target_index + (1 if after else 0), len(new_charts)))
+        new_charts.insert(insert_at, chart)
+        return p.model_copy(update={"charts": new_charts})
+
+    return [_insert(p) for p in without_chart]
 
 
 def _find_accordion_containing(node: Any, item_value: str) -> dict[str, Any] | None:  # noqa: ANN401

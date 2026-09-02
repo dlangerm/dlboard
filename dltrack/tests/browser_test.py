@@ -31,18 +31,16 @@ from werkzeug.serving import make_server
 from dltrack import models
 from dltrack.plugins import LOCAL_DEPLOYMENT, themes
 from dltrack.plugins.backend.basic_rest_backend import BasicDltrackAPI
-from dltrack.plugins.pages.experiment import (
+from dltrack.plugins.pages.experiment._experiment_page_state import (
     METRIC_CONTENT_ID,
     NEW_PANEL_ID,
     NEW_PANEL_NAME_ID,
-    PAGE_EXPERIMENT_ID,
-    BasicExperimentPage,
-)
-from dltrack.plugins.pages.experiment._experiment_page_state import (
     NEW_TAB_BUTTON_ID,
     NEW_TAB_PANELS_SELECT_ID,
+    PAGE_EXPERIMENT_ID,
     RENAME_TAB_BUTTON_ID,
     RENAME_TAB_NAME_INPUT_ID,
+    BasicExperimentPage,
 )
 from dltrack.plugins.pages.experiment._run_comparison_table import (
     NAVBAR_HPARAM_COL_SELECT_ID,
@@ -382,6 +380,84 @@ def test_drag_and_drop_reorders_charts_within_a_panel(
     assert console_errors == []
 
 
+def test_drag_and_drop_moves_a_chart_into_a_different_panel(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """
+    A chart's drag handle used to only ever reorder it within its own panel (or move it to a tab) --
+    there was no way to move a chart into a *different* panel without deleting and recreating it.
+    Covers both new drop targets `_experiment_page_dragdrop.js` adds for that: dropping onto one of
+    the target panel's existing charts (inserts next to it) and, separately, onto its otherwise-empty
+    body (appends).
+    """
+    _create_project_and_experiment(page, live_server_url, "Move Chart Between Panels Experiment")
+    page.get_by_role("link", name="Open experiment").click()
+
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    api = BasicDltrackAPI(live_server_url)
+    run = api.create_run(models.NewRun(experiment_id=experiment_id))
+    # A "/" prefix in each name splits these into two panels, "train" and "val", one chart each --
+    # auto-generate would otherwise collapse same-named metrics into one shared panel.
+    api.log_metric_batch(
+        [
+            models.LoggedMetrics(
+                experiment_id=experiment_id,
+                run_id=run.id,
+                step=0,
+                metrics={"train/loss": 1.0, "val/loss": 0.5},
+                timestamp_utc=pendulum.now("UTC"),
+            )
+        ]
+    )
+    page.reload()
+    page.get_by_role("button", name="Auto-generate charts").click()
+    page.get_by_role("button", name="train", exact=True).click()
+    page.get_by_role("button", name="val", exact=True).click()
+    expect(page.locator(".dl-chart-drag-handle")).to_have_count(2)
+    assert _panel_chart_columns(experiment_id, "train") == ["train/loss"]
+    assert _panel_chart_columns(experiment_id, "val") == ["val/loss"]
+
+    # Create the empty "extra" panel *before* any drag -- a completed drop triggers its own
+    # full-page re-render (a separate response from the `drag_to()` call that requested it), and
+    # doing this fill()/click() while that's still in flight can land on a stale, about-to-be-
+    # replaced input node. Doing it up front instead sidesteps that race entirely.
+    page.locator(f"#{NEW_PANEL_NAME_ID}").fill("extra")
+    page.locator(f"#{NEW_PANEL_ID}").click()
+    expect(page.get_by_role("button", name="extra")).to_be_visible()
+    page.get_by_role("button", name="extra").click()
+
+    # A drag gesture needs both endpoints on-screen simultaneously -- auto-scroll (see
+    # `test_dragging_near_the_top_of_the_viewport_auto_scrolls_the_page`) isn't fast enough to keep
+    # up with a single synthetic `drag_to` -- so widen the viewport up front rather than relying on
+    # it here, same as the same-panel reorder tests above.
+    page.set_viewport_size({"width": 1280, "height": 2000})
+
+    # Drop onto "val"'s existing chart -- inserts there rather than reordering (source and target
+    # are different panels), landing before it since the drop is in its left half.
+    source = page.locator('.dl-chart-drag-handle[data-panel-name="train"][data-chart-index="0"]')
+    target = page.locator('.dl-chart-item:has(.dl-chart-drag-handle[data-panel-name="val"])')
+    source.hover()
+    page.wait_for_timeout(200)  # matches the other drag tests' wait for the hover-reveal transition
+    source.drag_to(target, target_position={"x": 2, "y": 5})
+
+    _wait_until(lambda: _panel_chart_columns(experiment_id, "val"), ["train/loss", "val/loss"])
+    assert _panel_chart_columns(experiment_id, "train") == []
+    # `_wait_until` only confirms the backend has the move -- the drop's own re-render can still be
+    # in flight. Wait for the DOM to catch up before starting the next drag on top of it.
+    expect(page.locator(".dl-chart-drag-handle")).to_have_count(2)
+
+    # Drop onto "extra"'s (empty) body -- appends, since there's no chart there to land next to.
+    source = page.locator('.dl-chart-drag-handle[data-panel-name="val"][data-chart-index="0"]')
+    target = page.locator('.dl-panel-body[data-panel-name="extra"]')
+    source.hover()
+    page.wait_for_timeout(200)
+    source.drag_to(target)
+
+    _wait_until(lambda: _panel_chart_columns(experiment_id, "extra"), ["train/loss"])
+    assert _panel_chart_columns(experiment_id, "val") == ["val/loss"]
+    assert console_errors == []
+
+
 def test_navbar_columns_picker_applies_a_selected_column(
     page: Page, live_server_url: str, console_errors: list[str]
 ) -> None:
@@ -493,14 +569,12 @@ def test_assign_panel_to_a_new_tab_and_switch_back(
     expect(rename_tab_button).to_be_disabled()
 
     # Move "keep" into the *existing* "Images" tab by dragging it there -- no typing, no button.
+    # The drop also switches straight to "Images": both its panels are visible with no extra click.
     keep_header = page.locator(".dl-panel-item-header", has_text="keep")
     keep_handle = keep_header.locator(".dl-panel-drag-handle")
     keep_header.hover()
     page.wait_for_timeout(200)  # matches the drag tests' own wait for the hover-reveal transition
     keep_handle.drag_to(images_tab)
-    expect(page.get_by_role("button", name="keep")).not_to_be_visible()
-
-    images_tab.click()
     expect(page.get_by_role("button", name="tabbed")).to_be_visible()
     expect(page.get_by_role("button", name="keep")).to_be_visible()
 
@@ -519,6 +593,127 @@ def test_assign_panel_to_a_new_tab_and_switch_back(
     expect(page.get_by_role("button", name="tabbed")).to_be_visible()
     expect(page.get_by_role("button", name="keep")).to_be_visible()
 
+    assert console_errors == []
+
+
+def _panel_chart_columns(experiment_id: int, panel_name: str) -> list[str]:
+    """Like `_ungrouped_chart_columns`, but for any named panel."""
+    store = get_data_store()
+    page = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
+    panel = next(p for p in page.panels if p.name == panel_name)
+    return [str(c.parameters["column"]) for c in panel.charts]
+
+
+def test_new_tab_without_panels_gets_an_empty_panel_that_accepts_a_dragged_chart(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """
+    Two related gaps in one flow: creating a tab used to require moving an existing whole panel
+    into it (there was no way to end up with an empty tab to drop things into later), and a chart
+    could only ever be reordered within its own panel -- moving just one chart elsewhere meant
+    deleting and recreating it. Proves both: leaving the new-tab panel picker empty still produces a
+    real (empty) panel in that tab, and dragging a chart's handle onto a tab (not just a panel's)
+    moves that one chart into it -- and switches straight to that tab, rather than leaving the
+    chart you just dragged out of view on the tab you dragged it from.
+    """
+    _create_project_and_experiment(page, live_server_url, "Chart To Tab Experiment")
+    page.get_by_role("link", name="Open experiment").click()
+
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    api = BasicDltrackAPI(live_server_url)
+    run = api.create_run(models.NewRun(experiment_id=experiment_id))
+    api.log_metric_batch(
+        [
+            models.LoggedMetrics(
+                experiment_id=experiment_id,
+                run_id=run.id,
+                step=0,
+                metrics={"loss": 1.0},
+                timestamp_utc=pendulum.now("UTC"),
+            )
+        ]
+    )
+    page.reload()
+    page.get_by_role("button", name="Auto-generate charts").click()
+
+    # Create "Images" without picking any panel -- the picker stays empty.
+    page.locator(f"#{NEW_TAB_BUTTON_ID}").click()
+    page.get_by_role("dialog").get_by_role("textbox").first.fill("Images")
+    page.get_by_role("button", name="Create", exact=True).click()
+
+    images_tab = page.get_by_role("tab", name="Images")
+    general_tab = page.get_by_role("tab", name="General")
+    expect(images_tab).to_be_visible()
+    # A real, empty panel exists in the new tab -- not just an empty tab with nothing to drop into.
+    expect(page.get_by_role("button", name="Images", exact=True)).to_be_visible()
+    assert _panel_chart_columns(experiment_id, "Images") == []
+
+    # Drag the "loss" chart (in "Ungrouped", on "General") onto the "Images" tab.
+    general_tab.click()
+    page.get_by_role("button", name="Ungrouped").click()
+    handle = page.locator('.dl-chart-drag-handle[data-panel-name="Ungrouped"][data-chart-index="0"]')
+    handle.hover()
+    page.wait_for_timeout(200)  # matches the other drag tests' wait for the hover-reveal transition
+    handle.drag_to(images_tab)
+
+    _wait_until(lambda: _panel_chart_columns(experiment_id, "Images"), ["loss"])
+    assert _panel_chart_columns(experiment_id, "Ungrouped") == []
+    # The drag switched the active tab to "Images" -- its (now non-empty) panel is visible without
+    # having to click the tab, and "Ungrouped" (still on "General") isn't.
+    expect(page.get_by_role("button", name="Images", exact=True)).to_be_visible()
+    expect(page.get_by_role("button", name="Ungrouped")).not_to_be_visible()
+    assert console_errors == []
+
+
+def test_dragging_near_the_top_of_the_viewport_auto_scrolls_the_page(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """
+    A panel/chart dragged from below the fold couldn't reach the tab bar at the top of the page at
+    all -- native HTML5 drag/drop doesn't auto-scroll on its own, and there was no code filling that
+    gap. `_experiment_page_dragdrop.js` now scrolls the page itself while the cursor sits near a
+    viewport edge during a drag.
+
+    Driving this through `Locator.drag_to` can't prove it: Playwright scrolls the drop target into
+    view *before* starting the drag, which would silently mask a broken auto-scroll. Dispatching the
+    real `dragstart`/`dragover` events by hand instead -- Playwright's own documented recipe for
+    drag-and-drop it can't drive natively -- keeps this a genuine test of the page's own scroll
+    response, not of Playwright doing the scrolling for it.
+    """
+    _create_project_and_experiment(page, live_server_url, "Auto Scroll Experiment")
+    page.get_by_role("link", name="Open experiment").click()
+
+    page.locator(f"#{NEW_PANEL_NAME_ID}").fill("only-panel")
+    page.locator(f"#{NEW_PANEL_ID}").click()
+    handle = page.locator(".dl-panel-drag-handle").first
+    expect(handle).to_be_visible()
+
+    page.set_viewport_size({"width": 1280, "height": 500})
+    # Real content isn't reliably tall enough on its own to need scrolling -- pad it so there's
+    # somewhere for the auto-scroll to actually move the page to.
+    page.evaluate("document.body.style.paddingBottom = '2000px'")
+    page.evaluate("window.scrollTo(0, 800)")
+    start_scroll_y = page.evaluate("window.scrollY")
+    assert start_scroll_y > 0
+
+    page.evaluate("""() => {
+        const dt = new DataTransfer();
+        document.querySelector(".dl-panel-drag-handle").dispatchEvent(
+            new DragEvent("dragstart", { bubbles: true, cancelable: true, dataTransfer: dt })
+        );
+    }""")
+    # clientY near the top edge -- inside `EDGE_SCROLL_ZONE_PX`, so the auto-scroll loop scrolls up.
+    page.evaluate("""() => {
+        document.dispatchEvent(
+            new DragEvent("dragover", { bubbles: true, cancelable: true, clientY: 20 })
+        );
+    }""")
+    # The scroll itself happens over several `requestAnimationFrame` ticks, not instantly on the
+    # `dragover` above -- give it real wall-clock time to actually run a handful of them.
+    page.wait_for_timeout(300)
+    page.evaluate('document.dispatchEvent(new DragEvent("dragend", { bubbles: true }))')
+
+    assert page.evaluate("window.scrollY") < start_scroll_y
     assert console_errors == []
 
 
