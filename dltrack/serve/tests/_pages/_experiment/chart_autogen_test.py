@@ -7,7 +7,7 @@ from dltrack.models._view import ChartInstance, ColumnKind, PanelInstance
 from dltrack.plugins.charts.bar_chart import BarChart
 from dltrack.plugins.charts.image_series import ImageChart
 from dltrack.plugins.charts.line_chart import LineChart
-from dltrack.plugins.pages.experiment import _chart_autogen as autogen
+from dltrack.serve._pages._experiment import _chart_autogen as autogen
 
 LineChart.register(allow_override=True)
 ImageChart.register(allow_override=True)

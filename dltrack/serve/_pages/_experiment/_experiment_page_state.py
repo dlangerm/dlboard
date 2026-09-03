@@ -12,6 +12,7 @@ acyclic: this is the one module every other piece of the experiment page depends
 
 from __future__ import annotations
 
+import hashlib
 import typing
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,13 +24,14 @@ from dash import ALL, Dash, Input, Output, State, ctx, html, no_update
 from dash.dcc import Store
 from dash.development.base_component import Component
 from dash.exceptions import PreventUpdate
+from pydantic_settings import BaseSettings
 from structlog.stdlib import get_logger
 
 from dltrack import models
-from dltrack.models import ButtonId, DivId, ModalId, StoreId, ValueId, constants
-from dltrack.plugins.pages._dash_helpers import tooltipped_action_icon
-from dltrack.plugins.pages.experiment import _dataframe_helpers as dfh
+from dltrack.models import ButtonId, DivId, IntervalId, ModalId, StoreId, ValueId, constants
 from dltrack.serve import ClientsideScript, get_data_store
+from dltrack.serve._pages._dash_helpers import tooltipped_action_icon
+from dltrack.serve._pages._experiment import _dataframe_helpers as dfh
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -39,19 +41,88 @@ if TYPE_CHECKING:
 _log = get_logger(__name__)
 
 _ACTIVE_TAB_DISABLES_RENAME_JS = ClientsideScript(Path(__file__).with_name("active_tab_disables_rename.js"))
+_LIVE_UPDATES_TOGGLE_DISABLES_INTERVAL_JS = ClientsideScript(
+    Path(__file__).with_name("live_updates_toggle_disables_interval.js")
+)
+_LIVE_LAST_FETCH_LABEL_JS = ClientsideScript(Path(__file__).with_name("live_last_fetch_label.js"))
+_LIVE_UPDATES_TOGGLE_SHOWS_PAUSED_BADGE_JS = ClientsideScript(
+    Path(__file__).with_name("live_updates_toggle_shows_paused_badge.js")
+)
 
 
 class ExperimentPage:
-    """Page tag: marks a component id as belonging to the basic-experiment-page plugin."""
+    """Page tag: marks a component id as belonging to the experiment page."""
 
 
 # --- route-skeleton ids: a two-file contract with `serve/_pages/experiment.py`, which imports
-# these from `simple_experiment_page.py` (this module's public façade) rather than from here. ---
+# these from `_experiment/__init__.py` (this package's public façade) rather than from here. ---
 PAGE_EXPERIMENT_ID: DivId[ExperimentPage] = DivId("experiment-container")
 EXPERIMENT_HEADER_ID: DivId[ExperimentPage] = DivId("experiment-header")
 METRIC_CONTENT_ID: DivId[ExperimentPage] = DivId("metrics-view")
 STATE_HPARAMS: StoreId[ExperimentPage] = StoreId("hparams-state")
 STATE_PAGE_STORAGE: StoreId[ExperimentPage] = StoreId("current-page")
+
+# --- live updates: a `dcc.Interval`-driven poll of `Experiment.revision` re-renders the panel when
+# it's changed since the last poll, and a small badge reports whether the poll itself is healthy.
+# See `poll_for_updates` in `__init__.py`. ---
+LIVE_POLL_INTERVAL_ID: IntervalId[ExperimentPage] = IntervalId("live-poll-interval")
+STATE_LAST_KNOWN_REVISION: StoreId[ExperimentPage] = StoreId("last-known-revision")
+LIVE_STATUS_ID: DivId[ExperimentPage] = DivId("live-status")
+
+# --- enable/disable + "fetched Xs ago": both pure client-side concerns, deliberately kept off the
+# server. `LIVE_UPDATES_ENABLED_ID`'s `checked` persists to the browser's own `localStorage` (Dash's
+# built-in `persistence`/`persistence_type="local"`, set where it's rendered in
+# `serve/_pages/experiment.py`) -- a per-browser viewing preference, not something to write into
+# `Experiment`/`Page` and have every other viewer inherit. `LIVE_TICK_INTERVAL_ID` ticks
+# `LIVE_LAST_FETCH_LABEL_ID`'s text once a second purely from `STATE_LAST_FETCH_AT` (a clientside
+# callback, see `live_last_fetch_label.js`) -- no server round trip just to update a clock. ---
+LIVE_UPDATES_ENABLED_ID: ValueId[ExperimentPage] = ValueId("live-updates-enabled")
+LIVE_TICK_INTERVAL_ID: IntervalId[ExperimentPage] = IntervalId("live-tick-interval")
+LIVE_LAST_FETCH_LABEL_ID: DivId[ExperimentPage] = DivId("live-last-fetch-label")
+LIVE_PAUSED_BADGE_ID: DivId[ExperimentPage] = DivId("live-paused-badge")
+"""
+The "Paused" badge shown instead of `LIVE_STATUS_ID` while live updates are switched off.
+
+A sibling element toggled by CSS `display` (see `live_updates_toggle_shows_paused_badge.js`), not a
+second callback writing `LIVE_STATUS_ID.children` -- `poll_for_updates` stays that output's only
+owner. Two callbacks legitimately sharing one *scalar* output is fine (`allow_duplicate=True` exists
+for exactly that), but there's no reason to reach for it here when a plain visibility swap avoids the
+question entirely -- and avoids re-deriving a `dmc.Badge`'s exact rendered shape in hand-written JS.
+"""
+STATE_LAST_FETCH_AT: StoreId[ExperimentPage] = StoreId("last-fetch-at")
+"""ISO 8601 UTC timestamp of the last poll tick that actually reached the store successfully --
+set on *every* such tick, whether or not anything had changed, since it answers "how stale could
+what I'm looking at be" rather than "when did it last change"."""
+STATE_CHART_CONTENT_HASHES: StoreId[ExperimentPage] = StoreId("chart-content-hashes")
+"""
+`dict["panel:index", panel_data_fingerprint(...)]` for whichever charts a poll tick last checked.
+
+`Experiment.revision` is experiment-wide -- any write anywhere (a different run, a different
+metric, an epoch-level chart between epochs) bumps it, so a poll tick can't tell from the revision
+alone whether *this specific chart's* own data actually moved. Keyed per chart, not per panel: a
+panel can (and commonly does, via "Auto-generate charts" grouping related metrics together) hold
+charts with very different update cadences -- an epoch-level chart next to a per-step one -- and a
+panel-level fingerprint would pop the whole panel, untouched chart included, whenever *either*
+changed. Comparing each open chart's own freshly-fetched dataframe against its last-seen fingerprint
+here is what keeps an unrelated write from popping every chart on the page.
+"""
+
+
+class LiveUpdateSettings(BaseSettings):
+    """Environment variables controlling the experiment page's live-update poll."""
+
+    poll_interval_ms: int = 30000
+    """
+    How often the browser checks whether an open experiment has changed. Each check is one indexed
+    primary-key read, cheap even with many concurrent viewers -- turn this down (or up) for a
+    heavily-loaded multi-user deployment without a code change.
+    """
+
+    tick_interval_ms: int = 10000
+    """How often the "fetched Xs ago" label re-renders. Purely client-side (see
+    `LIVE_TICK_INTERVAL_ID`) -- this never touches the server, so it's fine to leave far more
+    frequent than `poll_interval_ms`."""
+
 
 # --- drag-and-drop reorder requests: a completed drag reports here (`_experiment_page_dragdrop.js`
 # calls `set_props` on drop), consumed by a callback in `_panel_controls.py`. Live in the static
@@ -473,59 +544,101 @@ def _unscoped_fetch_badge(chart: models.ChartInstance[Any, Any]) -> Component | 
     )
 
 
-def render_panel_charts(panel: models.PanelInstance[Any, Any], dataframe: pd.DataFrame) -> list[dmc.Stack]:
-    """Render each chart in a panel with edit/delete controls above it, revealed on hover."""
-    items: list[dmc.Stack] = []
-    for idx, chart in enumerate(panel.charts):
-        rendered = _apply_panel_sync(
-            _render_chart_safely(chart, dataframe, panel.name), panel_name=panel.name, sync=panel.sync
-        )
-        hover_controls = dmc.Group(
-            [
-                _drag_handle(
-                    class_name="dl-chart-drag-handle",
-                    component_id=chart_drag_handle_id(panel.name, idx),  # pyright: ignore[reportArgumentType]
-                    data_attrs={"panel-name": panel.name, "chart-index": str(idx)},
-                ),
-                tooltipped_action_icon(
-                    "✎",
-                    component_id=edit_chart_button_id(panel.name, idx),  # pyright: ignore[reportArgumentType]
-                    label="Edit chart",
-                    size="xs",
-                ),
-                tooltipped_action_icon(
-                    "🗑",
-                    component_id=delete_chart_button_id(panel.name, idx),  # pyright: ignore[reportArgumentType]
-                    label="Delete chart",
-                    color="red",
-                    size="xs",
-                ),
-            ],
-            id=chart_controls_group_id(panel.name, idx),  # pyright: ignore[reportArgumentType]
-            justify="flex-end",
-            gap="xs",
-            className="dl-chart-controls",
-        )
-        # The badge (when present) must be a *sibling* of `hover_controls`, not nested inside it --
-        # `dl-chart-controls`'s opacity:0-until-hover applies to its whole subtree, and this badge
-        # is the one thing here that's supposed to stay visible without hovering.
-        badge = _unscoped_fetch_badge(chart)
-        header_row = dmc.Group(
-            [*([badge] if badge else []), hover_controls],
-            justify="space-between" if badge else "flex-end",
-            wrap="nowrap",
-        )
-        items.append(
-            dmc.Stack(
-                [header_row, rendered],
-                gap="xs",
-                w="100%" if panel.layout == "grid" else chart.natural_width(),
-                maw="100%",
-                p="xs",
-                className="dl-chart-item",
-            )
-        )
-    return items
+def live_status_badge(*, ok: bool) -> Component:
+    """
+    Small colored chip reporting whether the live-update poll (`poll_for_updates`) is healthy.
+
+    Stateless by design: a single failed poll is enough to flip it red, and it self-clears green on
+    the very next successful one -- no failure-count/session state to track or leak, matching this
+    feature's "don't trust clients, don't hold server-side connection state" approach.
+    """
+    return (
+        dmc.Badge("Live", color="green", variant="light", size="xs")
+        if ok
+        else dmc.Badge("Reconnecting", color="red", variant="light", size="xs")
+    )
+
+
+def chart_content_id(panel_name: str, index: int) -> ChartID:
+    return {"type": "chart-content", "panel": panel_name, "index": index}
+
+
+def render_chart_item(
+    panel: models.PanelInstance[Any, Any], index: int, dataframe: pd.DataFrame
+) -> Component:
+    """
+    Render one chart in a panel (edit/delete controls above it, revealed on hover) as its own node.
+
+    Individually addressable via `chart_content_id(panel.name, index)` -- a live-update poll patches
+    exactly this node when this specific chart's own data changes, instead of `render_panel_charts`'
+    whole shared-dataframe blob for the panel: two charts sharing a panel (a common
+    "Auto-generate charts" grouping) commonly have very different update cadences -- an epoch-level
+    validation chart next to a per-step training chart -- and patching the *panel* whenever *either*
+    changes pops the untouched one too.
+    """
+    chart = panel.charts[index]
+    rendered = _apply_panel_sync(
+        _render_chart_safely(chart, dataframe, panel.name), panel_name=panel.name, sync=panel.sync
+    )
+    hover_controls = dmc.Group(
+        [
+            _drag_handle(
+                class_name="dl-chart-drag-handle",
+                component_id=chart_drag_handle_id(panel.name, index),  # pyright: ignore[reportArgumentType]
+                data_attrs={"panel-name": panel.name, "chart-index": str(index)},
+            ),
+            tooltipped_action_icon(
+                "✎",
+                component_id=edit_chart_button_id(panel.name, index),  # pyright: ignore[reportArgumentType]
+                label="Edit chart",
+                size="xs",
+            ),
+            tooltipped_action_icon(
+                "🗑",
+                component_id=delete_chart_button_id(panel.name, index),  # pyright: ignore[reportArgumentType]
+                label="Delete chart",
+                color="red",
+                size="xs",
+            ),
+        ],
+        id=chart_controls_group_id(panel.name, index),  # pyright: ignore[reportArgumentType]
+        justify="flex-end",
+        gap="xs",
+        className="dl-chart-controls",
+    )
+    # The badge (when present) must be a *sibling* of `hover_controls`, not nested inside it --
+    # `dl-chart-controls`'s opacity:0-until-hover applies to its whole subtree, and this badge
+    # is the one thing here that's supposed to stay visible without hovering.
+    badge = _unscoped_fetch_badge(chart)
+    header_row = dmc.Group(
+        [*([badge] if badge else []), hover_controls],
+        justify="space-between" if badge else "flex-end",
+        wrap="nowrap",
+    )
+    return dmc.Stack(
+        [header_row, rendered],
+        id=chart_content_id(panel.name, index),  # pyright: ignore[reportArgumentType]
+        gap="xs",
+        w="100%" if panel.layout == "grid" else chart.natural_width(),
+        maw="100%",
+        p="xs",
+        className="dl-chart-item",
+    )
+
+
+def render_panel_charts(panel: models.PanelInstance[Any, Any], dataframe: pd.DataFrame) -> list[Component]:
+    """Render every chart in a panel -- see `render_chart_item`."""
+    return [render_chart_item(panel, idx, dataframe) for idx in range(len(panel.charts))]
+
+
+def render_panel_content_from_df(panel: models.PanelInstance[Any, Any], df: pd.DataFrame) -> Component:
+    """Render a panel's charts from an already-fetched dataframe -- see `render_panel_content`."""
+    items = render_panel_charts(panel, df)
+    return (
+        dmc.SimpleGrid(items, cols=PACKED_GRID_COLS, spacing="lg")
+        if panel.layout == "grid"
+        else dmc.Flex(items, justify="flex-start", gap="lg", wrap="wrap")
+    )
 
 
 def render_panel_content(
@@ -536,12 +649,28 @@ def render_panel_content(
 ) -> Component:
     """Fetch + render one panel's charts. Only called for panels that are actually open."""
     df = fetch_panel_dataframe(store, experiment_id, panel, page_settings)
-    items = render_panel_charts(panel, df)
-    return (
-        dmc.SimpleGrid(items, cols=PACKED_GRID_COLS, spacing="lg")
-        if panel.layout == "grid"
-        else dmc.Flex(items, justify="flex-start", gap="lg", wrap="wrap")
-    )
+    return render_panel_content_from_df(panel, df)
+
+
+def panel_data_fingerprint(df: pd.DataFrame) -> str:
+    """
+    A cheap content hash of a panel's fetched dataframe.
+
+    Lets a live-update poll tell "this panel's underlying data hasn't actually changed" apart from
+    "the experiment changed *something*, somewhere" -- `Experiment.revision` is bumped by any write
+    anywhere in the experiment (a different run, a different metric, an epoch-level chart's data
+    between epochs), so without this every open panel would re-render on every poll tick regardless
+    of whether anything it actually shows moved, which reads as the whole chart popping/flashing on
+    a timer rather than only when its own data changes.
+
+    Hashes the same `to_json(orient="split", ...)` serialization `compute_full_df_and_column_kinds`
+    already relies on elsewhere, not `pandas.util.hash_pandas_object` -- that hashes cell values
+    directly and raises `TypeError: unhashable type` the moment any column holds something like a
+    list (nothing in this dataframe's own columns does today, but a hash used purely to detect "did
+    this change" has no business being pickier about content than the JSON serialization the rest of
+    this page already ships to the browser).
+    """
+    return hashlib.sha1(df.to_json(orient="split", date_format="iso").encode()).hexdigest()
 
 
 def _panel_placeholder() -> dmc.Skeleton:
@@ -670,6 +799,14 @@ def _group_panels_by_tab(
     return groups
 
 
+def open_panel_names(page_settings: dict[str, Any]) -> set[str]:
+    """Which panels are currently expanded, per `page_settings[OPEN_PANEL_KEY]` (none, if unset)."""
+    open_value = page_settings.get(OPEN_PANEL_KEY, [])
+    if isinstance(open_value, str):
+        open_value = [open_value]
+    return set(cast("list[str]", open_value))
+
+
 class BasicExperimentPage(models.Page[pd.DataFrame, Component, html.Div], frozen=True, extra="forbid"):
     """Basic experiment page: per-panel charts rendered in an accordion, grouped into tabs."""
 
@@ -686,10 +823,7 @@ class BasicExperimentPage(models.Page[pd.DataFrame, Component, html.Div], frozen
         dragging its drag handle onto that tab (`.dl-tab-target`, see `_experiment_page_dragdrop.js`),
         the same handle used to reorder panels.
         """
-        open_value = self.page_settings.get(OPEN_PANEL_KEY, [self.panels[0].name] if self.panels else [])
-        if isinstance(open_value, str):
-            open_value = [open_value]
-        open_set: set[str] = set(cast("list[str]", open_value))
+        open_set = open_panel_names(self.page_settings)
 
         groups = _group_panels_by_tab(self.panels)
         accordions = {
@@ -783,6 +917,14 @@ def _panel_accordion(  # noqa: PLR0913
                         # rather than fight that (same as `_drag_handle`'s data attrs). Read by
                         # `_experiment_page_dragdrop.js` to let a dragged chart be dropped anywhere
                         # in a *different* panel's body, not only onto one of its existing charts.
+                        #
+                        # This div's `children` must stay exactly `render_panel_content(...)`'s
+                        # output (or the placeholder) -- `poll_for_updates`
+                        # (`_experiment/__init__.py`) patches live-update data straight into this
+                        # same id via `render_panel_content` alone, bypassing this whole
+                        # `_panel_accordion` tree. Any chrome added here later (e.g. a per-panel
+                        # "last updated" badge) that isn't also part of `render_panel_content`'s
+                        # output would vanish the next time a live-update poll patches an open panel.
                         cast("Any", html.Div)(
                             id=panel_content_id(p.name),
                             className="dl-panel-body",
@@ -1092,14 +1234,12 @@ def accordion_view(
     page = cast(
         "BasicExperimentPage", store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
     )
-    open_value = page.page_settings.get(OPEN_PANEL_KEY, [page.panels[0].name] if page.panels else [])
-    if isinstance(open_value, str):
-        open_value = [open_value]
+    open_value = open_panel_names(page.page_settings)
 
     return html.Div(
         [
             page.render(store, experiment_id),
-            Store(id=LOADED_PANELS_STORE_ID, data=list(open_value)),  # pyright: ignore[reportArgumentType]
+            Store(id=LOADED_PANELS_STORE_ID, data=list(open_value)),
             Store(id=FULL_DF_STORE_ID, data=view_state.full_df_json),
             Store(id=COLUMN_KINDS_STORE_ID, data=view_state.column_kinds),
             _add_chart_modal(),
@@ -1513,6 +1653,15 @@ def register_state_callbacks(app: Dash) -> None:
         prevent_initial_call=True,
     )
     def persist_open_panel(open_values: list[list[str] | None], experiment_id: int) -> str:
+        # Deliberately unguarded, unlike `toggle_panel_sync`/`sync_run_selection`: a guard here
+        # comparing against the client-cached `STATE_PAGE_STORAGE` snapshot races the very next
+        # "create a panel" click, which reads that same, now-stale snapshot and clobbers this write
+        # right back out (confirmed via a SQL trace: open_panel flips ["keep"] -> {} -> [] -> ["keep"]
+        # across the two requests). The mount-fire a guard would dedupe here is already eliminated at
+        # the source for the page's *initial* load (see `render_panel`'s docstring in `__init__.py`);
+        # this callback's own write is cheap (one settings field) regardless, so the residual
+        # mount-fire on a brand new panel's accordion group -- the only case left -- isn't worth
+        # chasing further.
         open_value = [name for group in open_values for name in (group or [])]
         store = get_data_store()
         page = persist_settings(store, experiment_id, {OPEN_PANEL_KEY: open_value})
@@ -1574,4 +1723,25 @@ def register_state_callbacks(app: Dash) -> None:
         _ACTIVE_TAB_DISABLES_RENAME_JS.source,
         Output(RENAME_TAB_BUTTON_ID, "disabled"),
         Input(PANEL_TABS_ID, "value"),
+    )
+
+    # Both pure client-side, deliberately never round-tripping to the server: flipping the
+    # enable/disable switch just needs to stop/start a timer, and the "fetched Xs ago" label just
+    # needs a clock -- see the constants' own docstrings above.
+    app.clientside_callback(  # pyright: ignore[reportUnknownMemberType]
+        _LIVE_UPDATES_TOGGLE_DISABLES_INTERVAL_JS.source,
+        Output(LIVE_POLL_INTERVAL_ID, "disabled"),
+        Input(LIVE_UPDATES_ENABLED_ID, "checked"),
+    )
+    app.clientside_callback(  # pyright: ignore[reportUnknownMemberType]
+        _LIVE_LAST_FETCH_LABEL_JS.source,
+        Output(LIVE_LAST_FETCH_LABEL_ID, "children"),
+        Input(LIVE_TICK_INTERVAL_ID, "n_intervals"),
+        State(STATE_LAST_FETCH_AT, "data"),
+    )
+    app.clientside_callback(  # pyright: ignore[reportUnknownMemberType]
+        _LIVE_UPDATES_TOGGLE_SHOWS_PAUSED_BADGE_JS.source,
+        Output(LIVE_STATUS_ID, "style"),
+        Output(LIVE_PAUSED_BADGE_ID, "style"),
+        Input(LIVE_UPDATES_ENABLED_ID, "checked"),
     )

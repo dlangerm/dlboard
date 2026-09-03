@@ -7,7 +7,8 @@ from typing import TYPE_CHECKING, Any, cast
 
 from dltrack import models
 from dltrack.conftest import find_props
-from dltrack.plugins.pages import simple_admin_page as admin
+from dltrack.plugins.themes import dark
+from dltrack.serve._pages import _simple_admin_page as admin
 
 if TYPE_CHECKING:
     from dltrack.plugins.data_stores.sqlite import SQLLiteStore
@@ -151,11 +152,11 @@ def test_render_about_shows_the_signed_in_user_provider_and_backend(store: SQLLi
 
 def test_render_about_lists_installed_plugins(store: SQLLiteStore) -> None:
     admin_user = store.get_or_create_user("admin")
-    plugin = models.InstalledPlugin.describe(admin)
+    plugin = models.InstalledPlugin.describe(dark)
 
     rendered = admin._render_about(store, admin_user, "AnonymousAuthProvider", [plugin])
 
-    assert "dltrack.plugins.pages.simple_admin_page" in str(rendered)
+    assert "dltrack.plugins.themes.dark" in str(rendered)
 
 
 def test_admin_layout_contains_tabs_and_purge_modal() -> None:

@@ -3,7 +3,7 @@
 import dash
 from dash import html
 
-from dltrack.plugins.pages.simple_homepage import PAGE_HOME_ID
+from dltrack.serve._pages._simple_homepage import PAGE_HOME_ID
 
 
 def layout() -> list[html.Div]:

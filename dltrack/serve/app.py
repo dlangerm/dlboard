@@ -39,6 +39,16 @@ def _serve_navbar_resize_js() -> Response:
 
 def app(plugins: list[models.PluginProtocol]) -> Dash:
     """Get the app initialized with a set of plugins."""
+    # Imported here, not at module level: chart plugins (`dltrack/plugins/charts/*`) import
+    # `from dltrack.serve import ClientsideScript` at their own module level, so importing these
+    # page modules while `dltrack.serve` is still mid-import (as happens if this were a top-level
+    # import here) can race a chart plugin's own still-in-progress import of itself -- these page
+    # modules reach back into concrete chart classes (e.g. `_chart_autogen.py` imports `ImageChart`
+    # directly for auto-suggestion logic). Deferring to call time sidesteps that entirely, since
+    # `app()` only ever runs after process startup import resolution has fully completed.
+    from dltrack.serve._pages import _experiment as _experiment_page
+    from dltrack.serve._pages import _simple_admin_page, _simple_homepage, _simple_project_page
+
     installed = [InstalledPlugin.describe(p) for p in plugins]
     _log.info("DLTrack creating dash app with plugins:")
     for p in installed:
@@ -50,6 +60,17 @@ def app(plugins: list[models.PluginProtocol]) -> Dash:
         suppress_callback_exceptions=True,
         plugins=plugins,
     )
+    # The tab+accordion page layouts (home, project, admin, experiment) are opinionated,
+    # non-optional dltrack behavior -- always wired into every app(), never part of a deployment's
+    # own `plugins` list, and deliberately excluded from the `installed` snapshot above (which
+    # should only reflect what a deployment actually chose to install). Only chart types, storage,
+    # auth, backend, and themes remain real, swappable plugins, so these page modules don't need to
+    # (and don't) implement `PluginProtocol` -- `register(app)` is called directly rather than
+    # threaded through Dash's own `plugins=` constructor kwarg. Callback registration doesn't
+    # depend on `enable_pages()` (the `pages_folder` scan the `Dash(...)` call above just did)
+    # having run first, so this ordering is just as valid as doing it during construction.
+    for page in (_simple_homepage, _simple_project_page, _experiment_page, _simple_admin_page):
+        page.register(_app)
     # Only the immutable `InstalledPlugin` snapshots are retained on the app -- not the plugin
     # modules/objects themselves, so introspecting this later (the admin page's About tab) can't
     # reach back into a plugin's own state.

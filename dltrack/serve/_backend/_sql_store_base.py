@@ -293,6 +293,22 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             msg = f"{table.__name__} {entity_id} has been deleted"
             raise ValueError(msg)
 
+    def _touch_experiment(self, experiment_id: int) -> None:
+        """
+        Bump an experiment's `revision` counter after a mutation visible on its page.
+
+        A second statement after the write's own commit, not folded into one transaction with it --
+        self-healing (the next write to this experiment bumps it again), so the narrow window where
+        a crash could leave `revision` stale by one increment is a possible one-write delay in a live
+        client noticing, not a correctness bug.
+        """
+        list(
+            self._execute_raw_sql(
+                f"UPDATE {models.Experiment.__name__} SET revision = revision + 1 WHERE id = :id",
+                {"id": experiment_id},
+            )
+        )
+
     def get_or_create_user(self, username: str) -> models.User:
         """
         Get the user for `username`, creating it if this is the first time it's been seen.
@@ -446,7 +462,9 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
     def create_run(self, run: models.NewRun) -> models.Run:
         self._ensure_not_deleted(models.Experiment, run.experiment_id)
         statement, values = sql.insert(models.Run, run)
-        return self._first_committed_row(self._execute_sql_query(models.Run, statement, values))
+        created = self._first_committed_row(self._execute_sql_query(models.Run, statement, values))
+        self._touch_experiment(run.experiment_id)
+        return created
 
     def get_runs(self, experiment_id: int, *, limit: int = 1000, offset: int = 0) -> Iterator[models.Run]:
         """Get a page of an experiment's (non-deleted) runs, most recently created first."""
@@ -482,6 +500,8 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
                 no_validate=True,
             )
         )
+        for experiment_id in {m.experiment_id for m in metric}:
+            self._touch_experiment(experiment_id)
 
     def fetch_metrics(
         self,
@@ -548,7 +568,9 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             )
             return existing[0]
         statement, values = sql.insert(models.HyperParams, hyperparams)
-        return self._first_committed_row(self._execute_sql_query(models.HyperParams, statement, values))
+        created = self._first_committed_row(self._execute_sql_query(models.HyperParams, statement, values))
+        self._touch_experiment(hyperparams.experiment_id)
+        return created
 
     def fetch_hyperparams(self, experiment_id: int) -> Iterator[models.HyperParams]:
         """Fetch hyperparameters for a particular experiment."""
@@ -617,6 +639,8 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
                 ),
             )
         )
+        for experiment_id in {a.experiment_id for a in artifacts}:
+            self._touch_experiment(experiment_id)
 
     def fetch_artifacts(
         self,

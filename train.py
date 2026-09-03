@@ -233,7 +233,7 @@ def main() -> None:
     model = MnistMLP(hidden_size=hidden_size, learning_rate=lr)
 
     trainer = pl.Trainer(
-        max_epochs=5,
+        max_epochs=15,
         devices=1,
         logger=logger,
         log_every_n_steps=1,

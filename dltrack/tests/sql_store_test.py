@@ -16,9 +16,10 @@ import pytest
 from dltrack import models
 from dltrack.models._view import PanelInstance
 from dltrack.plugins.data_stores.sqlite import SQLLiteStore
-from dltrack.plugins.pages.experiment._experiment_page_state import BasicExperimentPage
+from dltrack.serve._pages._experiment._experiment_page_state import BasicExperimentPage
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
 _TS = datetime(2026, 1, 1, tzinfo=UTC)
@@ -373,3 +374,74 @@ def test_get_or_create_page_is_idempotent_and_updatable(store: SQLLiteStore, exp
     assert [p.name for p in reloaded.panels] == ["metrics"]
     assert reloaded.page_settings == {"open_panel": ["metrics"]}
     assert stored.id == page.id
+
+
+def test_experiment_revision_starts_at_zero(store: SQLLiteStore, experiment_id: int) -> None:
+    experiment = store.get_experiment(experiment_id)
+    assert experiment is not None
+    assert experiment.revision == 0
+
+
+def _mutate_via_create_run(store: SQLLiteStore, experiment_id: int, _run_id: int) -> None:
+    store.create_run(models.NewRun(experiment_id=experiment_id))
+
+
+def _mutate_via_log_metrics(store: SQLLiteStore, experiment_id: int, run_id: int) -> None:
+    store.log_metrics(
+        [
+            models.LoggedMetrics(
+                metrics={"loss": 0.1}, step=0, experiment_id=experiment_id, run_id=run_id, timestamp_utc=_TS
+            )
+        ]
+    )
+
+
+def _mutate_via_log_hyperparams(store: SQLLiteStore, experiment_id: int, run_id: int) -> None:
+    store.log_hyperparams(models.NewHyperParams.from_raw(run_id, experiment_id, {"lr": 0.1}))
+
+
+def _mutate_via_log_artifact_refs(store: SQLLiteStore, experiment_id: int, run_id: int) -> None:
+    store.log_artifact_refs(
+        [
+            models.Artifact(
+                key="img", fname="img.png", run_id=run_id, experiment_id=experiment_id, step=0, ref="ref://a"
+            )
+        ]
+    )
+
+
+@pytest.mark.parametrize(
+    # No explicit `ids=` -- pytest already derives a readable id from each function's own
+    # `__name__`, which keeps the label and the callable it names impossible to drift apart (a
+    # hand-maintained parallel `ids=[...]` list is one to add/reorder without the other).
+    "mutate",
+    [
+        _mutate_via_create_run,
+        _mutate_via_log_metrics,
+        _mutate_via_log_hyperparams,
+        _mutate_via_log_artifact_refs,
+    ],
+)
+def test_mutation_bumps_experiment_revision_by_one(
+    store: SQLLiteStore, experiment_id: int, mutate: Callable[[SQLLiteStore, int, int], None]
+) -> None:
+    run = store.create_run(models.NewRun(experiment_id=experiment_id))
+    before = store.get_experiment(experiment_id)
+    assert before is not None
+
+    mutate(store, experiment_id, run.id)
+
+    after = store.get_experiment(experiment_id)
+    assert after is not None
+    assert after.revision == before.revision + 1
+
+
+def test_mutation_does_not_bump_an_unrelated_experiments_revision(
+    store: SQLLiteStore, experiment_id: int
+) -> None:
+    project = store.create_project(models.NewProject(name="other", description="d"))
+    other_experiment = store.create_experiment(models.NewExperiment(project_id=project.id))
+
+    store.create_run(models.NewRun(experiment_id=experiment_id))
+
+    assert store.get_experiment(other_experiment.id) == other_experiment

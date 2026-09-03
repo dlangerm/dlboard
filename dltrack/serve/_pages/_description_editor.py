@@ -9,7 +9,7 @@ import dash_mantine_components as dmc
 from dash import Input, Output, State
 from dash.exceptions import PreventUpdate
 
-from dltrack.plugins.pages._dash_helpers import tooltipped_action_icon
+from dltrack.serve._pages._dash_helpers import tooltipped_action_icon
 
 if TYPE_CHECKING:
     from collections.abc import Callable

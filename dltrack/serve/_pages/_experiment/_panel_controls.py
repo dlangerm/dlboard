@@ -28,8 +28,8 @@ from dash.exceptions import PreventUpdate
 from pydantic import ValidationError
 
 from dltrack.models import ChartTypeRegistry, PanelInstance, constants
-from dltrack.plugins.pages.experiment import _experiment_page_state as core
 from dltrack.serve import get_data_store
+from dltrack.serve._pages._experiment import _experiment_page_state as core
 
 
 class _AddChartCtx(core.EditCtx):

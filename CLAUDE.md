@@ -10,11 +10,13 @@ to it over a REST API.
 
 ## Commands
 
-Run everything through `uv` (Python >=3.12, deps pinned in `uv.lock`).
-Never run raw python commands, if a python command doesn't work through `uv` ask for further instructions.
+UNDER NO CIRCUMSTANCES ARE YOU TO EVER run raw python commands (i.e. python3 outside of rtk uv): always always always use `rtk uv run python` or `rtk uv run xyz` as shown below.
+Run everything python-related through `rtk uv` (Python >=3.12, deps pinned in `uv.lock`).
 Never use python to edit files, just use your normal mechanisms to do so.
+Never use python to read files, just use your read skill (or `rtk read`).
 
 ```bash
+uv run python *                     # Run a python command
 uv run --env-file .env dltrack serve local     # start the dltrack server (this is how the user runs the app)
 uv run pytest                       # run the full test suite
 uv run pytest dltrack/serve/_backend/tests/sql_store_test.py  # run a single test file
@@ -36,10 +38,11 @@ Tests live next to the code they test, not in one top-level directory: a `tests/
 every source directory that has tests (e.g. `dltrack/plugins/charts/tests/line_chart_test.py` next to
 `dltrack/plugins/charts/line_chart.py`). A test that exercises multiple files across directories (an
 integration/end-to-end test, not a unit test that merely needs some object as fixture data) lives in the
-`tests/` dir of those files' lowest common parent directory instead — e.g. a test spanning `plugins/pages/`
-and `plugins/charts/` belongs in `plugins/tests/`. Shared fixtures (`store`, `experiment_id`, the
-`props`/`find_props` Dash-component helpers) live in `dltrack/conftest.py` at the package root, which
-pytest's conftest discovery makes visible to every nested `tests/` dir automatically.
+`tests/` dir of those files' lowest common parent directory instead — e.g. a test spanning `serve/_pages/`
+and `plugins/charts/` belongs in `dltrack/tests/` (see `chart_render_isolation_test.py`). Shared fixtures
+(`store`, `experiment_id`, the `props`/`find_props` Dash-component helpers) live in `dltrack/conftest.py`
+at the package root, which pytest's conftest discovery makes visible to every nested `tests/` dir
+automatically.
 
 Ruff lint config lives in `pyproject.toml`; `**/tests/*` gets relaxed rules (docstrings, private-member
 access, etc). Pyright runs in `strict` mode over `dltrack/` (tests included, since they now live under it).
@@ -61,20 +64,31 @@ autofix/suggestion that assumes newer syntax.
 
 ### Plugin system
 
-The whole app — storage, pages, charts, artifact types, themes — is composed at startup as a flat list of
-plugins passed into `dltrack.serve.app.app(plugins)`. Each plugin is any module implementing
-`PluginProtocol` (`dltrack/models/_plugin.py`): a `plug(cls, app: Dash) -> None` classmethod that registers
-itself with the Dash app (adds routes/pages, sets the data store, registers a chart renderer, etc).
+Genuinely swappable functionality — storage, auth, chart types, artifact types, themes, backend routes — is
+composed at startup as a flat list of plugins passed into `dltrack.serve.app.app(plugins)`. Each plugin is
+any module implementing `PluginProtocol` (`dltrack/models/_plugin.py`): a `plug(cls, app: Dash) -> None`
+classmethod that registers itself with the Dash app (adds routes, sets the data store, registers a chart
+renderer, etc).
 
 `dltrack/plugins/__init__.py` defines the bundles used for a local deployment:
 - `LOCAL_STORAGE` = `[sqlite, filesystem]` — the metadata DB and artifact blob storage
-- `BUILTIN_PAGES` = homepage, project page, experiment page
 - `BUILTIN_CHARTS` = image_series, line_chart, table_chart
 - `LOCAL_DEPLOYMENT` = all of the above, used by `dltrack serve local`
 
-New functionality (a new chart type, storage backend, page, or artifact kind) is added by writing a new
-plugin module and including it in the list passed to `app()`, not by editing the core app.
-The core app should expose minimal `Store` hooks for plugins to use, but any opinionated design choices should rest with plugins.
+New functionality (a new chart type, storage backend, or artifact kind) is added by writing a new plugin
+module and including it in the list passed to `app()`, not by editing the core app. The core app should
+expose minimal `Store` hooks for these plugins to use, but any opinionated design choices should rest with
+them.
+
+Page layout is deliberately **not** part of this plugin surface. The built-in pages (home, project, admin,
+experiment) are opinionated, non-optional dltrack behavior — nobody swaps out the experiment page's
+tab+accordion layout the way they might swap sqlite for postgres. They live under `dltrack/serve/_pages/`
+and are wired unconditionally by `dltrack.serve.app.app()` itself (see `core_page_plugins` inside `app()`),
+never listed in `dltrack/plugins/__init__.py` and never something a `dltrack serve custom --plugins ...`
+deployment can omit or override. Only chart *types* remain plugin-owned within a page — a chart's actual
+rendering is always reached polymorphically through `ChartTypeRegistry` (`dltrack/models/_view.py`) via
+`ChartInstance.render()`, never a direct import of a specific chart plugin's render function (auto-suggestion
+logic is a narrow exception: it references concrete chart classes to decide what to suggest, not to render).
 
 ### Data flow: client → server
 
@@ -95,7 +109,17 @@ The core app should expose minimal `Store` hooks for plugins to use, but any opi
 `dltrack/serve/app.py` builds a Mantine `AppShell` (header, collapsible navbar, page container) and wires
 global callbacks: breadcrumbs, navbar collapse/expand (persisted to `localStorage` via `dcc.Store`), and
 navbar content (lists a project's experiments). Actual routed pages live under `dltrack/serve/_pages/` and
-`dltrack/plugins/pages/` and use Dash's `use_pages` file-based routing.
+use Dash's `use_pages` file-based routing, split into two halves per page: a flat, non-underscore-prefixed
+file (`home.py`, `project.py`, `admin.py`, `experiment.py`) that Dash's `pages_folder` scanner picks up —
+it calls `dash.register_page(...)` and defines `layout()` — plus an underscore-prefixed sibling (or, for
+experiment, a whole underscore-prefixed package: `_experiment/`) holding the actual implementation
+(callbacks, a `register(app)` entry point, everything else). The underscore prefix isn't cosmetic: Dash's
+scanner prunes any `_`-prefixed file or directory from its walk, so that's what keeps the implementation
+invisible to it while still being an ordinary Python import for `app.py` and the routed file to use. Unlike
+a real plugin's `plug(app)`, these `register(app)` functions aren't called through Dash's own `plugins=`
+constructor kwarg — `app.py` imports the four page modules directly and calls `register(_app)` on each
+itself, right after `Dash(...)` construction, since they aren't `PluginProtocol` and were never meant to be
+swappable.
 
 Callbacks that need storage reach it via `dltrack/serve/_backend/_data_store.py`: `get_data_store()` /
 `get_artifact_store()` are `@cache`d accessors that pull the store off the running `Dash` app instance (set
@@ -112,8 +136,8 @@ Constants should only be added for globally-accessed values, not for per-plugin 
 ### Charts
 
 Charts are plugins under `dltrack/plugins/charts/`. Chart rendering plugins register how a `Page`/`ChartType`
-gets turned into a Dash component; `_chart_autogen.py` under `plugins/pages/` auto-generates default charts
-for an experiment's logged metrics.
+gets turned into a Dash component; `_chart_autogen.py` under `serve/_pages/_experiment/` auto-generates
+default charts for an experiment's logged metrics.
 
 ### Code Style
 

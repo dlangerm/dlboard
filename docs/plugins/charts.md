@@ -22,8 +22,8 @@ Subclass `ChartType` and implement its abstract methods:
 - `parameter_type() -> type[P]` — the Pydantic model describing this chart's settings.
 - `render(parameters, dataframe) -> C` — turn one instance into a Dash component.
 - `hint_required_columns` / `hint_required_artifact_keys` / `hint_required_hparams` — tell the
-  chart-autogen logic (`dltrack/plugins/pages/_chart_autogen.py`) what a logged run needs before
-  this chart type is even offered.
+  chart-autogen logic (`dltrack/serve/_pages/_experiment/_chart_autogen.py`) what a logged run
+  needs before this chart type is even offered.
 - `field_column_kinds()` — map each parameter field to the `ColumnKind` (metric/artifact/hparam)
   that populates it, so the settings UI knows what to offer as choices.
 

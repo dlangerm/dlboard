@@ -1,12 +1,13 @@
 """
-Ids genuinely owned by `serve/app.py` (the app shell), not any single page plugin.
+Ids genuinely owned by `serve/app.py` (the app shell), not any single page.
 
-An id that only one page plugin's callbacks read/write belongs in that plugin's own module,
+An id that only one page's callbacks read/write belongs in that page's own implementation module,
 typed against a page-scoped tag (`StoreId[MyPage]`, `DivId[MyPage]`, ...) via
-`dltrack.models._component_ids` -- see e.g. `simple_experiment_page.py`. Only put an id here if
-`serve/app.py` itself owns it, or if it's a route-skeleton container that both a
-`serve/_pages/x.py` layout and its owning plugin need (and even then, prefer declaring it in the
-owning plugin module and importing it into the route file, as most pages already do).
+`dltrack.models._component_ids` -- see e.g. `serve/_pages/_experiment/__init__.py`. Only put an id
+here if `serve/app.py` itself owns it, or if it's a route-skeleton container that both a
+`serve/_pages/x.py` routed layout and its underscore-prefixed implementation module need (and even
+then, prefer declaring it in the implementation module and importing it into the routed file, as
+most pages already do).
 """
 
 from typing import Final
@@ -27,7 +28,7 @@ NAVBAR_COLLAPSE_TOGGLE_ID = "navbar-collapse-toggle"
 NAVBAR_WIDTH_STORE_ID: Final = "navbar-width-store"
 NAVBAR_RESIZE_HANDLE_ID: Final = "navbar-resize-handle"
 # app.py's navbar renders this placeholder for whichever page wants to fill it -- currently only
-# the basic experiment page (simple_experiment_page.py) does.
+# the experiment page (`serve/_pages/_experiment/__init__.py`) does.
 NAVBAR_RUN_LIST_ID: Final = "navbar-run-list"
 HEADER_USER_INDICATOR_ID: Final = "header-user-indicator"
 
