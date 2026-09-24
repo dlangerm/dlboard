@@ -36,6 +36,33 @@ _TICK_FORMATTER: typing.Final = {
 }
 
 
+def _nearest_fill_pivot(df: pd.DataFrame, x_axis: str, column: str) -> pd.DataFrame:
+    """
+    Pivot `df` (long: `[x_axis, "run_id", column]`) into one column per run.
+
+    A plain `df.pivot(...)` leaves a cell `NaN` for any `(x, run)` a run never logged at -- routine
+    the moment two runs have different step counts or get sampled differently, not a contrived edge
+    case. Recharts' default tooltip only lists a series whose value at the *exact* hovered row is
+    non-`NaN`, so which runs show up depends entirely on which x gets hovered: series visibly pop in
+    and out as the cursor moves, even though every run has real data spanning the whole visible
+    range. Every run gets a value at every x that *any* run has instead -- its own nearest logged
+    value, via `merge_asof(..., direction="nearest")` -- so hovering anywhere within a run's own
+    range consistently shows that run. A companion `"<run_id>__x"` column records the x each filled
+    value actually came from (which can differ from the row's own, nominal/hovered x), so a tooltip
+    can show where a nearest-filled value is really from instead of implying it was logged exactly
+    at the hovered x.
+    """
+    all_x = pd.DataFrame({x_axis: sorted(df[x_axis].unique())})
+    result = {x_axis: all_x[x_axis]}
+    for run_id, run_df in df.groupby("run_id"):
+        run_df = run_df[[x_axis, column]].sort_values(x_axis)
+        run_df["_source_x"] = run_df[x_axis]
+        filled = pd.merge_asof(all_x, run_df, on=x_axis, direction="nearest")
+        result[str(run_id)] = filled[column]
+        result[f"{run_id}__x"] = filled["_source_x"]
+    return pd.DataFrame(result)
+
+
 def _to_epoch_millis(column: pd.Series) -> pd.Series:
     """
     Coerce `column` to a numeric epoch-milliseconds series, keeping unparseable values as NaN.
@@ -139,7 +166,8 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.LineChart], froze
                 wide, x_col=x_col, group_col="run_id", value_cols=value_cols, max_points=parameters.max_points
             )
             df = df.merge(grid, on=["run_id", parameters.x_axis], how="inner")
-        df = df.pivot(index=parameters.x_axis, columns="run_id", values=parameters.column).reset_index()
+        run_ids = sorted(df["run_id"].unique())
+        df = _nearest_fill_pivot(df, x_axis=parameters.x_axis, column=parameters.column)
         data = df.to_dict(orient="records")
         # Carried on each row (not a real plotted column) so the tooltip's labelFormatter --
         # `line_chart_tooltip.js` -- can prefix the hovered x-value with what it actually is,
@@ -166,12 +194,11 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.LineChart], froze
             dataKey=str(parameters.x_axis),
             series=[
                 {
-                    "name": str(col),
-                    "label": f"Run {col}",
-                    "color": hash_color(int(col)),
+                    "name": str(run_id),
+                    "label": f"Run {run_id}",
+                    "color": hash_color(int(run_id)),
                 }
-                for col in df.columns
-                if col != parameters.x_axis
+                for run_id in run_ids
             ],  # pyright: ignore[reportArgumentType]
             xAxisLabel=f"{parameters.x_axis}",
             yAxisLabel=f"{parameters.column}",
@@ -189,8 +216,9 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.LineChart], froze
             # escape its own chart's bounds it can visually reach into a neighboring chart's area
             # too -- wrapperStyle's zIndex keeps it painted above that neighbor rather than
             # underneath it (later charts in the DOM otherwise paint on top by default).
-            # labelFormatter prefixes the hovered x-value with the axis name -- see
-            # `__x_axis_name__` above and `line_chart_tooltip.js` (registered by `plug`, below).
+            # labelFormatter prefixes the hovered x-value with the axis name, and (see
+            # `line_chart_tooltip.js`'s `dltrackSourceAnnotations`) notes which series' value was
+            # filled in from a different x than the one shown here, e.g. "step: 4 (Run 2@step=3)".
             tooltipProps={
                 "offset": 30,
                 "allowEscapeViewBox": {"x": True, "y": True},

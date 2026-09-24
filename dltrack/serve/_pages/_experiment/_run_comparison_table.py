@@ -310,7 +310,7 @@ def _register_hparam_table(app: Dash) -> None:
         Input(constants.STATE_EXPERIMENT_ID, "data", allow_optional=True),
         Input(core.STATE_PAGE_STORAGE, "data", allow_optional=True),
         State(NAVBAR_HPARAM_SIGNATURE_ID, "data", allow_optional=True),
-        prevent_initial_callback=True,
+        prevent_initial_call=True,
     )
     def render_navbar_hparams(
         hparams: list[str],
