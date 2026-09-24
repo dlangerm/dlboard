@@ -9,18 +9,18 @@ import dash_mantine_components as dmc
 from dash import Dash, Input, Output, State, html
 
 from dltrack.models import ButtonId, DivId, ModalId, NewExperiment, constants
-from dltrack.plugins.pages._dataframe_helpers import experiment_display_name
-from dltrack.plugins.pages._delete_confirm import (
+from dltrack.serve import get_current_user, get_data_store
+from dltrack.serve._pages._dataframe_helpers import experiment_display_name
+from dltrack.serve._pages._delete_confirm import (
     DeleteConfirmIds,
     register_delete_callbacks,
     render_delete_control,
 )
-from dltrack.plugins.pages._description_editor import (
+from dltrack.serve._pages._description_editor import (
     DescriptionEditorIds,
     register_edit_callbacks,
     render_header,
 )
-from dltrack.serve import get_current_user, get_data_store
 
 if TYPE_CHECKING:
     from dltrack.models import Experiment
@@ -121,8 +121,8 @@ def _list_experiments(project_id: int) -> dmc.SimpleGrid | dmc.Center:
     )
 
 
-def plug(app: Dash) -> None:
-    """Plugin."""
+def register(app: Dash) -> None:
+    """Render the project page: its experiment list and the "new experiment" form."""
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(PAGE_PROJECT_ID, component_property="children"),

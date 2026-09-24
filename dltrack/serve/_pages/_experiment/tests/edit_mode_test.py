@@ -15,7 +15,7 @@ from dltrack import models
 from dltrack.conftest import find_props as _find_props
 from dltrack.models._view import ColumnKind, PanelInstance
 from dltrack.plugins.charts.line_chart import LineChart
-from dltrack.plugins.pages.experiment import _experiment_page_state as state
+from dltrack.serve._pages._experiment import _experiment_page_state as state
 
 if TYPE_CHECKING:
     from dltrack.plugins.data_stores.sqlite import SQLLiteStore

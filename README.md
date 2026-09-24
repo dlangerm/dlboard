@@ -49,12 +49,12 @@ way you'd use any other `pytorch_lightning` logger — see [docs/client.md](docs
   request flow from a training script to the browser.
 - [Client & logging](docs/client.md) — `DLTrackLogger`, the REST client, and how to log a new kind
   of artifact.
-- **Plugins** — dltrack has no built-in opinions about storage, auth, charts, pages, or theming;
-  all of it is plugins. Start with the [overview](docs/plugins/overview.md), then the category you
-  need:
+- **Plugins** — dltrack has no built-in opinions about storage, auth, charts, or theming; all of
+  it is plugins. (Page layout is the one deliberate exception — see
+  [architecture.md](docs/architecture.md).) Start with the
+  [overview](docs/plugins/overview.md), then the category you need:
   - [Storage](docs/plugins/storage.md) — where projects/runs/metrics and artifact blobs live
   - [Charts](docs/plugins/charts.md) — how a metric/artifact gets turned into a rendered chart
-  - [Pages](docs/plugins/pages.md) — routed Dash pages (homepage, project, experiment, admin, ...)
   - [Auth](docs/plugins/auth.md) — who a request is attributed to, and gating access
   - [Themes](docs/plugins/themes.md) — the Mantine theme the app renders with
 

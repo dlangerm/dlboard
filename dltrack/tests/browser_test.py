@@ -31,7 +31,9 @@ from werkzeug.serving import make_server
 from dltrack import models
 from dltrack.plugins import LOCAL_DEPLOYMENT, themes
 from dltrack.plugins.backend.basic_rest_backend import BasicDltrackAPI
-from dltrack.plugins.pages.experiment._experiment_page_state import (
+from dltrack.serve import app as build_app
+from dltrack.serve import get_data_store
+from dltrack.serve._pages._experiment._experiment_page_state import (
     METRIC_CONTENT_ID,
     NEW_PANEL_ID,
     NEW_PANEL_NAME_ID,
@@ -42,16 +44,14 @@ from dltrack.plugins.pages.experiment._experiment_page_state import (
     RENAME_TAB_NAME_INPUT_ID,
     BasicExperimentPage,
 )
-from dltrack.plugins.pages.experiment._run_comparison_table import (
+from dltrack.serve._pages._experiment._run_comparison_table import (
     NAVBAR_HPARAM_COL_SELECT_ID,
     NAVBAR_HPARAM_COLUMNS_TOGGLE_ID,
     NAVBAR_HPARAM_CONFIRM_COLS_ID,
     NAVBAR_HPARAM_DATATABLE_ID,
 )
-from dltrack.plugins.pages.simple_homepage import NEW_PROJECT_BUTTON_ID, NEW_PROJECT_NAME_ID
-from dltrack.plugins.pages.simple_project_page import NEW_EXP_BUTTON_ID, NEW_EXP_NAME_ID
-from dltrack.serve import app as build_app
-from dltrack.serve import get_data_store
+from dltrack.serve._pages._simple_homepage import NEW_PROJECT_BUTTON_ID, NEW_PROJECT_NAME_ID
+from dltrack.serve._pages._simple_project_page import NEW_EXP_BUTTON_ID, NEW_EXP_NAME_ID
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator

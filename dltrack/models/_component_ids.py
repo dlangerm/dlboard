@@ -22,7 +22,7 @@ from dash import State
 
 
 class AppShell:
-    """Tag for ids owned by `serve/app.py` itself, not any single page plugin."""
+    """Tag for ids owned by `serve/app.py` itself, not any single page."""
 
 
 class StoreId[P](str):

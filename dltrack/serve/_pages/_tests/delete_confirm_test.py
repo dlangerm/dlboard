@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from dltrack.plugins.pages._delete_confirm import DeleteConfirmIds, render_delete_control
+from dltrack.serve._pages._delete_confirm import DeleteConfirmIds, render_delete_control
 
 _IDS = DeleteConfirmIds(button="btn", modal="modal", confirm="confirm", cancel="cancel")
 

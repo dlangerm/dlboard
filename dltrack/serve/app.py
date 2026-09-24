@@ -39,6 +39,14 @@ def _serve_navbar_resize_js() -> Response:
 
 def app(plugins: list[models.PluginProtocol]) -> Dash:
     """Get the app initialized with a set of plugins."""
+    # Imported here, not at module level: chart plugins import `from dltrack.serve import
+    # ClientsideScript` at their own module level, so importing these page modules (which reach
+    # back into concrete chart classes, e.g. `_chart_autogen.py` imports `ImageChart` directly) at
+    # `dltrack.serve` import time can race that still-in-progress import. Deferring to call time
+    # sidesteps it, since `app()` only ever runs after process startup import resolution finishes.
+    from dltrack.serve._pages import _experiment as _experiment_page
+    from dltrack.serve._pages import _simple_admin_page, _simple_homepage, _simple_project_page
+
     installed = [InstalledPlugin.describe(p) for p in plugins]
     _log.info("DLTrack creating dash app with plugins:")
     for p in installed:
@@ -50,6 +58,14 @@ def app(plugins: list[models.PluginProtocol]) -> Dash:
         suppress_callback_exceptions=True,
         plugins=plugins,
     )
+    # The tab+accordion page layouts (home, project, admin, experiment) are opinionated,
+    # non-optional dltrack behavior -- always wired into every app(), never part of a deployment's
+    # own `plugins` list, and deliberately excluded from the `installed` snapshot above (which
+    # should only reflect what a deployment actually chose to install). These page modules don't
+    # implement `PluginProtocol`, so `register(app)` is called directly rather than threaded
+    # through Dash's own `plugins=` constructor kwarg.
+    for page in (_simple_homepage, _simple_project_page, _experiment_page, _simple_admin_page):
+        page.register(_app)
     # Only the immutable `InstalledPlugin` snapshots are retained on the app -- not the plugin
     # modules/objects themselves, so introspecting this later (the admin page's About tab) can't
     # reach back into a plugin's own state.
