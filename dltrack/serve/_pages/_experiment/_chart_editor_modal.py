@@ -23,9 +23,9 @@ from structlog.stdlib import get_logger
 
 from dltrack import models
 from dltrack.models import constants
-from dltrack.plugins.pages.experiment import _experiment_page_state as core
-from dltrack.plugins.pages.experiment._dataframe_helpers import group_columns_by_kind
 from dltrack.serve import ClientsideScript, get_data_store
+from dltrack.serve._pages._experiment import _experiment_page_state as core
+from dltrack.serve._pages._experiment._dataframe_helpers import group_columns_by_kind
 
 if TYPE_CHECKING:
     from dash.development.base_component import Component

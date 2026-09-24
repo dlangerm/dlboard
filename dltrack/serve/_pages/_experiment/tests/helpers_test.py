@@ -15,9 +15,9 @@ from dltrack import models
 from dltrack.models import HyperParams, NewHyperParams, Run
 from dltrack.models._view import ChartInstance, ColumnKind, PanelInstance, ParameterField, ParameterFieldType
 from dltrack.plugins.charts.line_chart import LineChart
-from dltrack.plugins.pages.experiment import _experiment_page_state as state
-from dltrack.plugins.pages.experiment import _run_comparison_table as run_table
-from dltrack.plugins.pages.experiment._chart_editor_modal import _param_field_input
+from dltrack.serve._pages._experiment import _experiment_page_state as state
+from dltrack.serve._pages._experiment import _run_comparison_table as run_table
+from dltrack.serve._pages._experiment._chart_editor_modal import _param_field_input
 
 if TYPE_CHECKING:
     from dltrack.plugins.data_stores.sqlite import SQLLiteStore

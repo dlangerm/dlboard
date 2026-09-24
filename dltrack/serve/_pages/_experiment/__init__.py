@@ -1,7 +1,7 @@
 """
-The basic experiment page plugin: hparam/run table + chart accordion, plus the experiment header.
+The basic experiment page: hparam/run table + chart accordion, plus the experiment header.
 
-This module's own job is just the page-level chrome (description editing, delete) and `plug()`,
+This module's own job is just the page-level chrome (description editing, delete) and `register()`,
 which wires the CSS/JS routes and delegates every feature to its owning submodule:
 
 - `_experiment_page_state.py` -- the page model, its full render tree, and the mutation
@@ -11,7 +11,7 @@ which wires the CSS/JS routes and delegates every feature to its owning submodul
 - `_chart_suggestions.py` -- auto-populate charts for an empty view; suggest un-charted keys.
 - `_run_comparison_table.py` -- the navbar's hparam/metric/run comparison table + run deletion.
 
-Anything outside this plugin that needs a container id, `BasicExperimentPage`, or similar imports
+Anything outside this package that needs a container id, `BasicExperimentPage`, or similar imports
 straight from `_experiment_page_state` (the underscore is a "this is an implementation detail you're
 reaching into on purpose" signal, not an access restriction) rather than through re-exports here.
 """
@@ -25,23 +25,23 @@ from dash import Dash, Input, Output, State, html
 from flask import Response
 
 from dltrack.models import ButtonId, ModalId, constants
-from dltrack.plugins.pages._dataframe_helpers import experiment_display_name
-from dltrack.plugins.pages._delete_confirm import (
+from dltrack.serve import get_current_user, get_data_store
+from dltrack.serve._pages._dataframe_helpers import experiment_display_name
+from dltrack.serve._pages._delete_confirm import (
     DeleteConfirmIds,
     register_delete_callbacks,
     render_delete_control,
 )
-from dltrack.plugins.pages._description_editor import (
+from dltrack.serve._pages._description_editor import (
     DescriptionEditorIds,
     register_edit_callbacks,
     render_header,
 )
-from dltrack.plugins.pages.experiment import _experiment_page_state as core
-from dltrack.plugins.pages.experiment._chart_editor_modal import register_chart_editor_callbacks
-from dltrack.plugins.pages.experiment._chart_suggestions import register_chart_suggestions_callbacks
-from dltrack.plugins.pages.experiment._panel_controls import register_panel_controls_callbacks
-from dltrack.plugins.pages.experiment._run_comparison_table import register_run_comparison_callbacks
-from dltrack.serve import get_current_user, get_data_store
+from dltrack.serve._pages._experiment import _experiment_page_state as core
+from dltrack.serve._pages._experiment._chart_editor_modal import register_chart_editor_callbacks
+from dltrack.serve._pages._experiment._chart_suggestions import register_chart_suggestions_callbacks
+from dltrack.serve._pages._experiment._panel_controls import register_panel_controls_callbacks
+from dltrack.serve._pages._experiment._run_comparison_table import register_run_comparison_callbacks
 
 if TYPE_CHECKING:
     from dash.development.base_component import Component
@@ -94,8 +94,8 @@ def _serve_chart_submit_loading_js() -> Response:
     return Response(_CHART_SUBMIT_LOADING_JS_PATH.read_text(), mimetype="application/javascript")
 
 
-def plug(app: Dash) -> None:
-    """Plugin for the basic experiment page: hparam table + chart accordion + editor."""
+def register(app: Dash) -> None:
+    """Register the experiment page: hparam table + chart accordion + editor."""
     prefix = str(app.config.routes_pathname_prefix)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     css_route = f"{prefix}{_HOVER_CSS_ROUTE}"
     app.server.add_url_rule(css_route, endpoint=css_route, view_func=_serve_hover_css)

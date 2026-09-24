@@ -16,7 +16,7 @@ import pandas as pd
 from dltrack.conftest import props as _props
 from dltrack.models._view import ChartInstance, PanelInstance
 from dltrack.plugins.charts.line_chart import LineChart
-from dltrack.plugins.pages.experiment._experiment_page_state import (
+from dltrack.serve._pages._experiment._experiment_page_state import (
     render_panel_charts as _render_panel_charts,
 )
 

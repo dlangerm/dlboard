@@ -84,7 +84,7 @@ def _list_projects(store: models.DataStore[...]) -> dmc.SimpleGrid | dmc.Center:
     )
 
 
-def plug(app: Dash) -> None:
+def register(app: Dash) -> None:
     """Render a basic homepage."""
 
     @app.callback(Output(PAGE_HOME_ID, component_property="children"))  # pyright: ignore[reportUnknownMemberType]

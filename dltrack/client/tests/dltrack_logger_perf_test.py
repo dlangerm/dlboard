@@ -12,10 +12,13 @@ silently becoming one request per file).
 
 Deliberately builds its own app from just the storage/backend/auth plugins (`LOCAL_STORAGE` +
 `BUILTIN_BACKEND` + `LOCAL_AUTH`), not the full `LOCAL_DEPLOYMENT` bundle `browser_test.py` uses --
-`BUILTIN_CHARTS`/`BUILTIN_PAGES` register into process-global registries that reject a second
-registration, so only one test process-wide gets to build an app with those. Skipping them here
-(this test never touches a chart or a page) means this file can build its own app safely no matter
-what else is in the same pytest run.
+`BUILTIN_CHARTS` registers chart types into a process-global registry that rejects a second
+registration, so only one test process-wide gets to build an app with those. Skipping it here (this
+test never touches a chart) means this file can build its own app safely no matter what else is in
+the same pytest run. Page layouts (home/project/admin/experiment) are no longer an opt-in bundle --
+`dltrack.serve.app.app()` always wires them in, and re-registering the same page paths across
+multiple `Dash` instances in one process is harmless (confirmed by running this file alongside
+`browser_test.py`'s full-bundle app in the same pytest session).
 """
 
 from __future__ import annotations

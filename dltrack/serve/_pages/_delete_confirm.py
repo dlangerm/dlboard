@@ -15,7 +15,7 @@ from dash import Input, Output, State
 from dash.exceptions import PreventUpdate
 
 from dltrack.models import constants
-from dltrack.plugins.pages._dash_helpers import tooltipped_action_icon
+from dltrack.serve._pages._dash_helpers import tooltipped_action_icon
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -87,7 +87,7 @@ def register_delete_callbacks(
     often needs data only available *before* the delete happens.
 
     Navigation is a hard reload (`Location.refresh=True`), not a soft `use_pages` navigation --
-    matches `simple_experiment_page.py`'s run-delete flow, and reliably lands on the target page
+    matches `_experiment/__init__.py`'s experiment-delete flow, and reliably lands on the target page
     instead of depending on `dcc.Location`'s client-side pathname routing picking up a bare `href`
     update.
     """

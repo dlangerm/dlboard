@@ -17,21 +17,21 @@ from dash import ALL, Dash, Input, NoUpdate, Output, State, ctx, no_update
 from dash.exceptions import PreventUpdate
 
 from dltrack.models import ChartInstance, ColumnKind, constants
-from dltrack.plugins.pages.experiment import _dataframe_helpers as dfh
-from dltrack.plugins.pages.experiment import _experiment_page_state as core
-from dltrack.plugins.pages.experiment._chart_autogen import (
+from dltrack.serve import get_data_store
+from dltrack.serve._pages._experiment import _dataframe_helpers as dfh
+from dltrack.serve._pages._experiment import _experiment_page_state as core
+from dltrack.serve._pages._experiment._chart_autogen import (
     Suggestion,
     build_auto_panels,
     build_suggestions,
     chartable_metric_columns,
     find_uncharted_keys,
 )
-from dltrack.serve import get_data_store
 
 if TYPE_CHECKING:
     from dash.development.base_component import Component
 
-    from dltrack.plugins.pages.experiment._chart_autogen import SplitMode
+    from dltrack.serve._pages._experiment._chart_autogen import SplitMode
 
 
 def _single_value_columns(full_df_json: str | None, column_kinds: dict[str, str]) -> frozenset[str]:

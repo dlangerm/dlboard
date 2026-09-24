@@ -12,7 +12,7 @@ from dltrack.conftest import props as _to_props
 from dltrack.models._view import ChartInstance, PanelInstance
 from dltrack.plugins.charts.line_chart import LineChart
 from dltrack.plugins.charts.table_chart import TableChart
-from dltrack.plugins.pages.experiment import _experiment_page_state as state
+from dltrack.serve._pages._experiment import _experiment_page_state as state
 
 LineChart.register(allow_override=True)
 TableChart.register(allow_override=True)

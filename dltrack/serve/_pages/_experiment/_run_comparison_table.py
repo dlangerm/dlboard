@@ -24,10 +24,10 @@ from structlog.stdlib import get_logger
 from dltrack import models
 from dltrack.models import ButtonId, ModalId, StoreId, ValueId, constants
 from dltrack.plugins.charts._table_style import column_def, infer_column_dtype, themed_grid_kwargs
-from dltrack.plugins.pages._dash_helpers import tooltipped_action_icon
-from dltrack.plugins.pages.experiment import _dataframe_helpers as dfh
-from dltrack.plugins.pages.experiment import _experiment_page_state as core
 from dltrack.serve import ClientsideScript, get_current_user, get_data_store
+from dltrack.serve._pages._dash_helpers import tooltipped_action_icon
+from dltrack.serve._pages._experiment import _dataframe_helpers as dfh
+from dltrack.serve._pages._experiment import _experiment_page_state as core
 
 if TYPE_CHECKING:
     from dash.development.base_component import Component

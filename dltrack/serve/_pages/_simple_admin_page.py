@@ -14,8 +14,8 @@ from structlog.stdlib import get_logger
 from dltrack import models
 from dltrack.models import ButtonId, DivId, ModalId, StoreId, ValueId, constants
 from dltrack.plugins.backend import artifact_purge_worker
-from dltrack.plugins.pages._dash_helpers import require_triggered_id
 from dltrack.serve import get_auth_provider, get_current_user, get_data_store, get_installed_plugins
+from dltrack.serve._pages._dash_helpers import require_triggered_id
 
 if TYPE_CHECKING:
     from dash.development.base_component import Component
@@ -485,7 +485,7 @@ def _register_purge_callbacks(app: Dash) -> None:
         return "/admin", True
 
 
-def plug(app: Dash) -> None:
+def register(app: Dash) -> None:
     """An admin page: a Trash tab (restore/purge) and an Audit Log tab."""
 
     @app.callback(Output(PAGE_ADMIN_ID, component_property="children"))  # pyright: ignore[reportUnknownMemberType]

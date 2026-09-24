@@ -27,9 +27,9 @@ from structlog.stdlib import get_logger
 
 from dltrack import models
 from dltrack.models import ButtonId, DivId, ModalId, StoreId, ValueId, constants
-from dltrack.plugins.pages._dash_helpers import tooltipped_action_icon
-from dltrack.plugins.pages.experiment import _dataframe_helpers as dfh
 from dltrack.serve import ClientsideScript, get_data_store
+from dltrack.serve._pages._dash_helpers import tooltipped_action_icon
+from dltrack.serve._pages._experiment import _dataframe_helpers as dfh
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -42,11 +42,11 @@ _ACTIVE_TAB_DISABLES_RENAME_JS = ClientsideScript(Path(__file__).with_name("acti
 
 
 class ExperimentPage:
-    """Page tag: marks a component id as belonging to the basic-experiment-page plugin."""
+    """Page tag: marks a component id as belonging to the experiment page."""
 
 
 # --- route-skeleton ids: a two-file contract with `serve/_pages/experiment.py`, which imports
-# these from `simple_experiment_page.py` (this module's public façade) rather than from here. ---
+# these from `_experiment/__init__.py` (this package's public façade) rather than from here. ---
 PAGE_EXPERIMENT_ID: DivId[ExperimentPage] = DivId("experiment-container")
 EXPERIMENT_HEADER_ID: DivId[ExperimentPage] = DivId("experiment-header")
 METRIC_CONTENT_ID: DivId[ExperimentPage] = DivId("metrics-view")

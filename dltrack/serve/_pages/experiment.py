@@ -6,8 +6,8 @@ from dash import dcc, html
 from dash.dcc import Store
 
 from dltrack.models import constants
-from dltrack.plugins.pages.experiment import _experiment_page_state as core
 from dltrack.serve import get_data_store
+from dltrack.serve._pages._experiment import _experiment_page_state as core
 
 # One dcc.Store per drag-drop gesture a completed drag can report (`_experiment_page_dragdrop.js`,
 # via `set_props`) -- listed in the static layout below, not `accordion_view`'s render tree, so the

@@ -19,7 +19,7 @@ from dltrack import models
 from dltrack.conftest import props as _to_props
 from dltrack.plugins.charts.line_chart import LineChart
 from dltrack.plugins.charts.table_chart import TableChart
-from dltrack.plugins.pages.experiment._chart_editor_modal import build_chart_param_form, render_chart_preview
+from dltrack.serve._pages._experiment._chart_editor_modal import build_chart_param_form, render_chart_preview
 
 if TYPE_CHECKING:
     from dltrack.plugins.data_stores.sqlite import SQLLiteStore

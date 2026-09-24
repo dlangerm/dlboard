@@ -11,7 +11,7 @@ import pytest
 from dltrack.models import Artifact, HyperParams, LoggedMetrics, NewHyperParams, ValidJsonTypes
 from dltrack.models._view import ColumnKind
 from dltrack.plugins.charts._table_style import HPARAM_COLUMN_PREFIX
-from dltrack.plugins.pages.experiment import _dataframe_helpers as dfh
+from dltrack.serve._pages._experiment import _dataframe_helpers as dfh
 
 _TS = datetime(2026, 1, 1, tzinfo=UTC)
 
