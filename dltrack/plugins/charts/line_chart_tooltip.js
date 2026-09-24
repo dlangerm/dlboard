@@ -27,16 +27,49 @@ function dltrackAxisNamePrefix(payload) {
     return axisName ? axisName + ": " : "";
 }
 
+// A hovered x is only ever exact for the run(s) that actually logged there -- every other run's
+// shown value is its *nearest* logged value instead (see `_nearest_fill_pivot` in `line_chart.py`),
+// which can be from a different x than the one in the tooltip's shared label. Each row carries a
+// "<run_id>__x" companion field recording where a given series' value actually came from; this
+// notes it for any series whose value didn't come from the hovered x, so a filled-in value never
+// reads as if it were logged exactly where the cursor happens to be. Folded into the *label*
+// (Mantine's `ChartTooltip` doesn't forward a per-item `formatter`/`valueFormatter` the way it
+// forwards `labelFormatter` -- confirmed by hand, not documented -- so per-item annotation isn't
+// available; this is the one hook that reliably reaches the rendered tooltip).
+function dltrackSourceAnnotations(payload) {
+    var axisName =
+        payload && payload.length && payload[0].payload ? payload[0].payload.__x_axis_name__ : null;
+    if (!axisName) {
+        return "";
+    }
+    var notes = (payload || [])
+        .map((item) => {
+            var row = item.payload;
+            if (!row) {
+                return null;
+            }
+            var sourceX = row[item.dataKey + "__x"];
+            var hoveredX = row[axisName];
+            return sourceX != null && hoveredX != null && sourceX !== hoveredX
+                ? `${item.name}@${axisName}=${sourceX}`
+                : null;
+        })
+        .filter((note) => note != null);
+    return notes.length ? ` (${notes.join(", ")})` : "";
+}
+
 window.dashMantineFunctions.lineChartTooltipLabel = (label, payload) => {
-    return dltrackAxisNamePrefix(payload) + label;
+    return dltrackAxisNamePrefix(payload) + label + dltrackSourceAnnotations(payload);
 };
 
 window.dashMantineFunctions.lineChartTooltipLabelDate = (label, payload) => {
-    return dltrackAxisNamePrefix(payload) + new Date(label).toLocaleString();
+    return (
+        dltrackAxisNamePrefix(payload) + new Date(label).toLocaleString() + dltrackSourceAnnotations(payload)
+    );
 };
 
 window.dashMantineFunctions.lineChartTooltipLabelTime = (label, payload) => {
-    return dltrackAxisNamePrefix(payload) + dltrackFormatDuration(label);
+    return dltrackAxisNamePrefix(payload) + dltrackFormatDuration(label) + dltrackSourceAnnotations(payload);
 };
 
 window.dashMantineFunctions.lineChartDateTick = (value) => new Date(value).toLocaleString();

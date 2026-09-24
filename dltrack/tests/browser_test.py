@@ -819,3 +819,96 @@ def test_switching_tabs_does_not_remount_the_navbar_run_table(
 
     assert grid_root.get_attribute("data-marker") == "untouched"
     assert console_errors == []
+
+
+def test_chart_tooltip_shows_every_series_at_every_hovered_x_position(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """
+    Regression test for inconsistent hover tooltips.
+
+    `LineChart.render()` pivots each run's logged points into its own column, indexed by x-value
+    (`line_chart.py`'s `df.pivot(index=x_axis, columns="run_id", ...)`); any (x, run) combination a
+    run never logged at -- routine the moment two runs have different step counts or get sampled
+    differently, not a contrived edge case -- becomes `NaN` in that pivoted table. Recharts' default
+    tooltip only lists a series whose value at the *exact* hovered row is non-`NaN`, so which runs
+    show up depends entirely on which exact x happens to get hovered -- series visibly pop in and
+    out as the cursor moves, even though every run has real data spanning the whole visible range.
+
+    Expected behavior: hovering any x position within a series' own logged range shows that
+    series' *closest* value, consistently, not "whichever run happened to log exactly this x" --
+    and since a closest value isn't necessarily *from* the hovered x, the tooltip label says so
+    (e.g. "step: 4 (2@step=3)") whenever a shown value was filled in from elsewhere.
+    """
+    _create_project_and_experiment(page, live_server_url, "Tooltip Consistency Experiment")
+    page.get_by_role("link", name="Open experiment").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+
+    api = BasicDltrackAPI(live_server_url)
+    run_a = api.create_run(models.NewRun(experiment_id=experiment_id))
+    run_b = api.create_run(models.NewRun(experiment_id=experiment_id))
+    # Run A logs every step 0-9; Run B only every third step -- a routine mismatch (different
+    # epoch counts, different sampling rates), not an artificial edge case.
+    api.log_metric_batch(
+        [
+            models.LoggedMetrics(
+                experiment_id=experiment_id,
+                run_id=run_a.id,
+                step=step,
+                metrics={"loss": 1.0 - step * 0.05},
+                timestamp_utc=pendulum.now("UTC"),
+            )
+            for step in range(10)
+        ]
+    )
+    api.log_metric_batch(
+        [
+            models.LoggedMetrics(
+                experiment_id=experiment_id,
+                run_id=run_b.id,
+                step=step,
+                metrics={"loss": 1.0 - step * 0.03},
+                timestamp_utc=pendulum.now("UTC"),
+            )
+            for step in (0, 3, 6, 9)
+        ]
+    )
+    page.reload()
+    page.get_by_role("button", name="Auto-generate charts").click()
+    page.get_by_role("button", name="Ungrouped").click()
+
+    svg = page.locator(".dl-panel-body svg").first
+    expect(svg).to_be_visible()
+    box = svg.bounding_box()
+    assert box is not None
+
+    # `LineChart.render()` labels each series "Run <run_id>" (`line_chart.py`), not the run's name.
+    expected_series = {f"Run {run_a.id}", f"Run {run_b.id}"}
+
+    # Both runs' data spans this entire x range (steps 0-9) -- every position across it must show
+    # both series, not just whichever run happened to log that exact step.
+    saw_a_source_annotation = False
+    for frac in (0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8):
+        x = box["x"] + box["width"] * frac
+        y = box["y"] + box["height"] * 0.5
+        # Two moves, not one -- Recharts only recomputes the hovered index on a real position
+        # change, and the cursor may already be sitting at this exact pixel from a previous frac.
+        page.mouse.move(x - 1, y)
+        page.mouse.move(x, y)
+        page.wait_for_timeout(150)
+        shown = set(page.locator(".mantine-ChartTooltip-tooltipItemName").all_text_contents())
+        assert shown == expected_series, (
+            f"at x-fraction {frac}: tooltip showed {shown}, expected {expected_series}"
+        )
+
+        # Run B only logged every third step, so most hovered positions show *its* value filled in
+        # from a nearby step, not the exact hovered one -- the label must say so (e.g.
+        # "step: 4 (2@step=3)"), never implying it was logged exactly where the cursor is.
+        label = page.locator(".mantine-ChartTooltip-tooltipLabel").text_content() or ""
+        if "@step=" in label:
+            saw_a_source_annotation = True
+
+    assert saw_a_source_annotation, (
+        "expected at least one hover position to annotate a filled-in value's source x"
+    )
+    assert console_errors == []
