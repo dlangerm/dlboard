@@ -21,7 +21,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from dash import Dash, Input, Output, State, html
+from dash import Dash, State
 from flask import Response
 
 from dltrack.models import ButtonId, ModalId, constants
@@ -44,7 +44,10 @@ from dltrack.serve._pages._experiment._panel_controls import register_panel_cont
 from dltrack.serve._pages._experiment._run_comparison_table import register_run_comparison_callbacks
 
 if TYPE_CHECKING:
+    from dash import html
     from dash.development.base_component import Component
+
+    from dltrack.models import DataStore
 
 DELETE_EXPERIMENT_BUTTON_ID: ButtonId[core.ExperimentPage] = ButtonId("delete-experiment-button")
 DELETE_EXPERIMENT_MODAL_ID: ModalId[core.ExperimentPage] = ModalId("delete-experiment-modal")
@@ -94,6 +97,42 @@ def _serve_chart_submit_loading_js() -> Response:
     return Response(_CHART_SUBMIT_LOADING_JS_PATH.read_text(), mimetype="application/javascript")
 
 
+def render_panel(store: DataStore[...], experiment_id: int) -> tuple[html.Div, Component, str]:
+    """
+    Build the whole experiment panel: accordion, header, and its persisted page storage.
+
+    Called directly from `serve/_pages/experiment.py`'s `layout()` -- not a callback -- so the
+    panel/chart tree exists in the page's very first response instead of being mounted later by a
+    follow-up callback. The static shell used to render `METRIC_CONTENT_ID`/`EXPERIMENT_HEADER_ID`
+    as empty placeholders and fill them via a `render_initial` callback fired on mount; that meant
+    every experiment-page load paid for two full round trips (the static shell, then this content)
+    where one now does the job.
+
+    Side effect worth knowing about: `render_initial`'s accordion was always "a component added by
+    a later callback" from dash-renderer's perspective, which force-fires any pattern-matching
+    `Input` watching it once on mount regardless of `prevent_initial_call` (see
+    `_experiment_page_state.py`'s own docstring on this). That forced the accordion's
+    `Input({"type": "panel-accordion", ...}, "value")`-watching `persist_open_panel` callback to
+    run before any panel ever existed, persisting an explicit `open_panel: []` -- which silently
+    defeated `BasicExperimentPage.render()`'s own "open the first panel by default" fallback for
+    the rest of that experiment's life, since the fallback only applies when the setting is
+    *absent*, not merely empty. The accordion being part of the page's genuine first response now
+    means that forced fire no longer happens, so a brand-new experiment's first panel opens by
+    default exactly as `render()`'s fallback already says it should.
+    """
+    page = store.get_or_create_page(core.BasicExperimentPage, experiment_id=experiment_id)
+    exp = store.get_experiment(experiment_id)
+    name, description = (experiment_display_name(exp), exp.description) if exp else ("", "")
+    header = render_header(
+        EXPERIMENT_DESC_IDS,
+        title=name,
+        description=description,
+        extra_actions=_delete_experiment_action(),
+    )
+    container = core.accordion_view(store, experiment_id=experiment_id)
+    return container, header, page.model_dump_json()
+
+
 def register(app: Dash) -> None:
     """Register the experiment page: hparam table + chart accordion + editor."""
     prefix = str(app.config.routes_pathname_prefix)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
@@ -116,32 +155,6 @@ def register(app: Dash) -> None:
     app.scripts.append_script(  # pyright: ignore[reportUnknownMemberType]
         {"external_url": chart_submit_loading_route, "external_only": True}
     )
-
-    # --- initial render: fills METRIC_CONTENT_ID/EXPERIMENT_HEADER_ID and seeds STATE_PAGE_STORAGE ---
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
-        Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
-        Output(core.EXPERIMENT_HEADER_ID, "children", allow_duplicate=True),
-        Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
-        Input(constants.STATE_EXPERIMENT_ID, "data"),
-        prevent_initial_call="initial_update",
-    )
-    def render_initial(experiment_id: int) -> tuple[html.Div, Component, str]:
-        store = get_data_store()
-        page = store.get_or_create_page(core.BasicExperimentPage, experiment_id=experiment_id)
-        exp = store.get_experiment(experiment_id)
-        name, description = (experiment_display_name(exp), exp.description) if exp else ("", "")
-        header = render_header(
-            EXPERIMENT_DESC_IDS,
-            title=name,
-            description=description,
-            extra_actions=_delete_experiment_action(),
-        )
-        container = core.accordion_view(store, experiment_id=experiment_id)
-        return (
-            container,
-            header,
-            page.model_dump_json(),
-        )
 
     def _fetch_experiment_header(experiment_id: int) -> tuple[str, str]:
         store = get_data_store()

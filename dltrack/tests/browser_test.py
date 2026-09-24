@@ -151,8 +151,9 @@ def test_logged_metrics_render_as_a_real_chart(
 
     page.reload()
     page.get_by_role("button", name="Auto-generate charts").click()
-    # The new "Ungrouped" panel starts collapsed -- open it, or there's nothing to render yet.
-    page.get_by_role("button", name="Ungrouped").click()
+    # No explicit `open_panel` setting exists yet for a brand new experiment, so
+    # `BasicExperimentPage.render()`'s own fallback opens the first (and here, only) panel by
+    # default -- no click needed to see it render.
 
     # Scoped to the panel's own content area, not the whole page -- the panel header's own hover
     # controls (the tab-move `Select`'s dropdown chevron, the accordion chevron, ...) are also
@@ -184,14 +185,16 @@ def test_panel_header_hover_controls_toggle_and_delete_without_disturbing_siblin
         # request reads a stale (pre-mutation) snapshot and its response clobbers the first.
         expect(page.get_by_role("button", name=panel_name)).to_be_visible()
 
-    # Both panels start closed (this experiment's accordion already persisted an empty
-    # `open_panel` before either panel existed). Round-trip the control button itself: opening,
-    # collapsing, then re-expanding must all still work with the extra wrapping Group in place.
-    # Every panel header (open or closed) carries its own hover-revealed "+", so that's no longer
-    # a usable open/closed signal -- and `.dl-panel-body` itself collapses to zero height once
-    # "keep" (a brand new, chart-less panel) has no content, so it's not reliable either. Mantine's
-    # own collapsible region (`value="keep"` on the `AccordionItem`) is: its height/aria-hidden
-    # genuinely track open/closed regardless of what's inside.
+    # "keep" (created first) starts open -- no explicit `open_panel` setting exists yet for a
+    # brand new experiment, so `BasicExperimentPage.render()`'s own fallback opens the first panel
+    # by default. "delete-me" (created second) isn't the fallback's pick, so it starts closed.
+    # Round-trip "keep"'s control button itself: collapsing, re-expanding, then collapsing again
+    # must all still work with the extra wrapping Group in place. Every panel header (open or
+    # closed) carries its own hover-revealed "+", so that's no longer a usable open/closed signal
+    # -- and `.dl-panel-body` itself collapses to zero height once "keep" (a brand new, chart-less
+    # panel) has no content, so it's not reliable either. Mantine's own collapsible region
+    # (`value="keep"` on the `AccordionItem`) is: its height/aria-hidden genuinely track
+    # open/closed regardless of what's inside.
     keep_control = page.get_by_role("button", name="keep")
     # The accordion's own id is now a pattern-matching dict (one `Accordion` per tab group), so
     # Mantine's derived panel id is that dict's JSON string plus "-panel-<value>" -- not a clean
@@ -200,12 +203,13 @@ def test_panel_header_hover_controls_toggle_and_delete_without_disturbing_siblin
     # since the id itself contains double quotes) rather than a `#id` selector.
     keep_panel_id = keep_control.get_attribute("aria-controls")
     keep_region = page.locator(f"[id='{keep_panel_id}']")
-    keep_control.click()
     expect(keep_region).to_be_visible()
     keep_control.click()
     expect(keep_region).not_to_be_visible()
     keep_control.click()
     expect(keep_region).to_be_visible()
+    keep_control.click()
+    expect(keep_region).not_to_be_visible()
 
     # "delete-me" is second in document order and was never opened.
     delete_me_trash_icon = page.get_by_role("button", name="🗑").nth(1)
@@ -222,7 +226,9 @@ def test_panel_header_hover_controls_toggle_and_delete_without_disturbing_siblin
     expect(confirm_text).to_be_visible()
     page.get_by_role("button", name="Delete", exact=True).click()
     expect(page.get_by_text("delete-me")).to_have_count(0)
-    expect(keep_region).to_be_visible()  # "keep" is untouched by deleting its sibling
+    expect(
+        keep_region
+    ).not_to_be_visible()  # "keep" (left closed above) is untouched by its sibling's deletion
     assert console_errors == []
 
 
@@ -354,9 +360,9 @@ def test_drag_and_drop_reorders_charts_within_a_panel(
 
     page.reload()
     page.get_by_role("button", name="Auto-generate charts").click()
-    # The new "Ungrouped" panel starts collapsed (`open_panel` was already persisted as `[]` before
-    # any panel existed) -- charts (and their drag handles) only render once it's open.
-    page.get_by_role("button", name="Ungrouped").click()
+    # No explicit `open_panel` setting exists yet for a brand new experiment, so
+    # `BasicExperimentPage.render()`'s own fallback opens the first (and here, only) panel by
+    # default -- no click needed for its charts (and their drag handles) to render.
     expect(page.locator(".dl-chart-drag-handle")).to_have_count(3)
     assert _ungrouped_chart_columns(experiment_id) == ["accuracy", "loss", "lr"]
 
@@ -411,7 +417,10 @@ def test_drag_and_drop_moves_a_chart_into_a_different_panel(
     )
     page.reload()
     page.get_by_role("button", name="Auto-generate charts").click()
-    page.get_by_role("button", name="train", exact=True).click()
+    # No explicit `open_panel` setting exists yet for a brand new experiment, so
+    # `BasicExperimentPage.render()`'s own fallback already opens the first panel ("train" --
+    # metrics dict insertion order is preserved through to panel-creation order) -- only "val"
+    # needs a click.
     page.get_by_role("button", name="val", exact=True).click()
     expect(page.locator(".dl-chart-drag-handle")).to_have_count(2)
     assert _panel_chart_columns(experiment_id, "train") == ["train/loss"]
@@ -650,7 +659,8 @@ def test_new_tab_without_panels_gets_an_empty_panel_that_accepts_a_dragged_chart
 
     # Drag the "loss" chart (in "Ungrouped", on "General") onto the "Images" tab.
     general_tab.click()
-    page.get_by_role("button", name="Ungrouped").click()
+    # "Ungrouped" is already open -- it was the first (and, at auto-generate time, only) panel, so
+    # `BasicExperimentPage.render()`'s fallback opened it by default; no click needed.
     handle = page.locator('.dl-chart-drag-handle[data-panel-name="Ungrouped"][data-chart-index="0"]')
     handle.hover()
     page.wait_for_timeout(200)  # matches the other drag tests' wait for the hover-reveal transition
@@ -875,7 +885,9 @@ def test_chart_tooltip_shows_every_series_at_every_hovered_x_position(
     )
     page.reload()
     page.get_by_role("button", name="Auto-generate charts").click()
-    page.get_by_role("button", name="Ungrouped").click()
+    # No explicit `open_panel` setting exists yet for a brand new experiment, so
+    # `BasicExperimentPage.render()`'s own fallback opens the first (and here, only) panel by
+    # default -- no click needed to see it render.
 
     svg = page.locator(".dl-panel-body svg").first
     expect(svg).to_be_visible()
