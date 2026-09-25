@@ -394,18 +394,17 @@ def fetch_panel_dataframe(
             panel.name,
         )
 
-    metrics_df = pd.DataFrame()
-    if metric_cols is None:
-        # Not a misconfiguration -- a table chart with no `metrics` filter set is documented to
-        # mean "show every metric" (see `TableChartSettings.metrics`), which can only be rendered
-        # by fetching every metric. Worth a debug trace for anyone chasing a slow panel, but not a
-        # warning: it's the chart's normal, common default, not something the user did wrong.
-        _log.debug("A panel had a missing hint, fetching every metric, this can be expensive")
-        metrics_df = dfh.build_metrics_dataframe(store.fetch_metrics(experiment_id))
-    elif metric_cols:
-        metrics_df = dfh.build_metrics_dataframe(
-            store.fetch_metrics(experiment_id=experiment_id, metric_name_match=metric_cols)
-        )
+    # `None` is not a misconfiguration -- a table chart with no `metrics` filter set is documented to
+    # mean "show every metric" (see `TableChartSettings.metrics`), which can only be rendered by
+    # fetching every metric. It's the chart's normal default, so no warning; `_unscoped_fetch_badge`
+    # already flags it where the user can see it.
+    metrics_df = (
+        store.fetch_metrics(
+            experiment_id, keys=None if metric_cols is None else frozenset(metric_cols)
+        ).to_frame()
+        if metric_cols is None or metric_cols
+        else pd.DataFrame()
+    )
 
     artifacts_df = pd.DataFrame()
     if artifact_keys:
@@ -439,7 +438,8 @@ def compute_full_df_and_column_kinds(store: DataStore[...], experiment_id: int) 
     suggest-charts interaction this page load, e.g. auto-generating charts right after opening a
     brand new experiment.
     """
-    metrics_df = dfh.build_metrics_dataframe(store.fetch_metrics(experiment_id))
+    metrics = store.fetch_metrics(experiment_id)
+    metrics_df = metrics.to_frame() if metrics.keys else pd.DataFrame()
     artifacts = list(store.fetch_artifacts(experiment_id=experiment_id))
     artifacts_df = dfh.build_artifacts_dataframe(artifacts)
     hparams = list(store.fetch_hyperparams(experiment_id))

@@ -6,7 +6,7 @@ import itertools
 import json
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
-from typing import TYPE_CHECKING, Any, Iterator
+from typing import TYPE_CHECKING, Any, Iterator, cast
 
 import pendulum
 from pydantic import BaseModel
@@ -517,35 +517,28 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         for experiment_id in {m.experiment_id for m in metric}:
             self._touch_experiment(experiment_id)
 
-    def fetch_metrics(
-        self,
-        experiment_id: int,
-        run_id: int | None = None,
-        metric_name_match: set[str] | None = None,
-        step_range: slice[Any, Any, Any] | None = None,
-    ) -> Iterator[models.LoggedMetrics]:
-        """Fetch logged metrics for an experiment, optionally filtered by metric name."""
-        if step_range is not None or run_id is not None:
-            raise NotImplementedError
-
-        _log.debug("Match fields %s", metric_name_match)
-
+    def fetch_metrics(self, experiment_id: int, *, keys: frozenset[str] | None = None) -> models.MetricFrame:
+        """An experiment's (non-deleted runs') metrics -- only `keys`, if given, else every metric."""
         # `UnderlyingMetricTableEntry` has no `deleted_at` of its own -- visibility is inherited
         # transitively through its run, which is always soft-deleted in the same cascade as its
         # metrics' logical owner (see `_soft_delete`), so a join against `Run` is sufficient.
-        clauses = [f"m.experiment_id = {sql.escape_value_sql(experiment_id)}", "r.deleted_at IS NULL"]
-        if metric_name_match:
-            clauses.append(f"m.key in ({','.join(sql.escape_value_sql(k) for k in metric_name_match)})")
-        statement = f"""
-            SELECT m.* FROM {models.UnderlyingMetricTableEntry.__name__} m
+        params: dict[str, Any] = {"experiment_id": experiment_id}
+        key_filter = ""
+        if keys is not None:
+            params |= {f"k{i}": key for i, key in enumerate(sorted(keys))}
+            key_filter = f"AND m.key IN ({', '.join(f':k{i}' for i in range(len(keys)))})"
+        # `ORDER BY m.id` is insertion order, which is what `MetricFrame.from_rows`' last-write-wins needs.
+        rows = self._execute_raw_sql(
+            f"""
+            SELECT {", ".join(f"m.{f}" for f in models.MetricRow._fields)}
+            FROM {models.UnderlyingMetricTableEntry.__name__} m
             JOIN {models.Run.__name__} r ON m.run_id = r.id
-            WHERE {" AND ".join(clauses)}
-            ORDER BY m.run_id, m.step;
-        """
-
-        yield from models.LoggedMetrics.from_underlying(
-            self._execute_sql_query(models.UnderlyingMetricTableEntry, statement, no_validate=True)
+            WHERE m.experiment_id = :experiment_id AND r.deleted_at IS NULL {key_filter}
+            ORDER BY m.id;
+            """,
+            params,
         )
+        return models.MetricFrame.from_rows(cast("Iterator[models.MetricRow]", rows))
 
     def list_metric_keys(self, experiment_id: int) -> list[str]:
         """List the distinct metric names logged anywhere in an experiment, without fetching values."""

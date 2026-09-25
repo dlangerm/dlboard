@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING, Any, cast
 
 import dash_ag_grid as dag
 import dash_mantine_components as dmc
-import pandas as pd
 from dash import Dash, Input, Output, State, html
 from dash.dcc import Store
 from dash.exceptions import PreventUpdate
@@ -46,8 +45,6 @@ _NAVBAR_HPARAM_PAGE_SIZE = 8
 _DELETE_COLUMN_ID = "_delete"
 _ROW_ID_FIELD = "_row_id"
 
-_METRIC_BOOKKEEPING_COLS = {"run_id", "step", "index", "timestamp_utc", "experiment_id"}
-
 SELECTED_HPARAM_COLS_KEY: typing.Final = "hparam-table-selected"  # a page_settings dict key
 
 NAVBAR_HPARAM_SIGNATURE_ID: StoreId[core.ExperimentPage] = StoreId("navbar-hparam-signature")
@@ -60,27 +57,10 @@ DELETE_RUN_CANCEL_ID: ButtonId[core.ExperimentPage] = ButtonId("delete-run-cance
 _HPARAM_COLS_CHANGED_JS = ClientsideScript(Path(__file__).with_name("hparam_cols_changed.js"))
 
 
-def _fetch_last_step_metrics(
-    store: DataStore[...], experiment_id: int, metric_name_match: set[str]
-) -> dict[int, dict[str, Any]]:
-    """One row per run: `metric_name_match`'s values at that run's highest logged step."""
-    if not metric_name_match:
-        return {}
-    df = dfh.build_metrics_dataframe(store.fetch_metrics(experiment_id, metric_name_match=metric_name_match))
-    if df.empty:
-        return {}
-    last_rows = df.loc[df.groupby("run_id")["step"].idxmax()]
-    metric_cols = [c for c in df.columns if c not in _METRIC_BOOKKEEPING_COLS]
-    return {
-        int(row["run_id"]): {c: row[c] for c in metric_cols if pd.notna(row[c])}
-        for _, row in last_rows.iterrows()
-    }
-
-
 def _build_hparam_rows(
     runs: list[Run],
     hparams_by_run: dict[int, models.HyperParams],
-    last_step_metrics: dict[int, dict[str, Any]],
+    latest_metrics: dict[int, dict[str, float]],
 ) -> list[dict[str, Any]]:
     """One row per run, whether or not it has logged hyperparameters or metrics yet."""
     rows: list[dict[str, Any]] = []
@@ -89,7 +69,7 @@ def _build_hparam_rows(
         hparam = hparams_by_run.get(run.id)
         if hparam is not None:
             row.update(hparam.hparams_dict)
-        row.update(last_step_metrics.get(run.id, {}))
+        row.update(latest_metrics.get(run.id, {}))
         rows.append(row)
     return rows
 
@@ -119,8 +99,9 @@ def _load_hparam_view_data(
     hparams_by_run = {h.run_id: h for h in hydrated}
     hparam_keys = sorted(set(itertools.chain(*[list(k.hparams_dict.keys()) for k in hydrated])))
     metric_keys = store.list_metric_keys(experiment_id)
-    last_step_metrics = _fetch_last_step_metrics(store, experiment_id, selected_metrics & set(metric_keys))
-    rows = _build_hparam_rows(runs, hparams_by_run, last_step_metrics)
+    wanted = frozenset(selected_metrics & set(metric_keys))
+    latest = store.fetch_metrics(experiment_id, keys=wanted).latest_per_run() if wanted else {}
+    rows = _build_hparam_rows(runs, hparams_by_run, latest)
     return hparam_keys, metric_keys, rows
 
 
@@ -241,7 +222,7 @@ def _render_hparam_panel(
                                             id=NAVBAR_HPARAM_COL_SELECT_ID,
                                             data=[
                                                 {"group": "Hyperparameters", "items": hparam_keys},
-                                                {"group": "Metrics (last step)", "items": metric_keys},
+                                                {"group": "Metrics (latest)", "items": metric_keys},
                                             ],
                                             value=applied,
                                             searchable=True,

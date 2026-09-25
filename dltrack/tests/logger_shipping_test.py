@@ -47,7 +47,7 @@ def test_finalize_ships_everything_logged_before_it(
 
     logger.finalize("success")
 
-    assert len(list(backend_server.store.fetch_metrics(logger._experiment_id))) == 3
+    assert list(backend_server.store.fetch_metrics(logger._experiment_id).step) == [0, 1, 2]
     # The server itself records an uploaded artifact's ref asynchronously (see `FSArtifactStore`),
     # a second or so after accepting the upload -- `finalize`'s guarantee ends at "accepted".
     deadline = time.monotonic() + 10

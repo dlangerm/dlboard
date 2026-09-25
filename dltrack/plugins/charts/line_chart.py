@@ -11,14 +11,14 @@ import pandas as pd
 from flask import Response
 from pydantic import BaseModel, Field
 
-from dltrack.models import ChartType, ColumnKind
+from dltrack.models import ChartType, ColumnKind, MetricColumn
 from dltrack.plugins.charts._colors import hash_color
 from dltrack.plugins.charts._sampling import DEFAULT_MAX_POINTS, shared_sample_grid
 
 if typing.TYPE_CHECKING:
     from dash import Dash
 
-_BOOKKEEPING_COLS = frozenset({"run_id", "index", "timestamp_utc", "experiment_id"})
+_BOOKKEEPING_COLS = frozenset({MetricColumn.RUN_ID, MetricColumn.TIMESTAMP_UTC})
 
 _TOOLTIP_JS_PATH = Path(__file__).with_name("line_chart_tooltip.js")
 _TOOLTIP_JS_ROUTE = "line-chart-tooltip.js"

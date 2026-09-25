@@ -97,14 +97,8 @@ class DataStore[**P](typing.Protocol):
         """Log metrics to the data store."""
         ...
 
-    def fetch_metrics(
-        self,
-        experiment_id: int,
-        run_id: int | None = None,
-        metric_name_match: set[str] | None = None,
-        step_range: slice | None = None,
-    ) -> typing.Iterator[models.LoggedMetrics]:
-        """Fetch metrics for a particular table name, optionally matching a topic string."""
+    def fetch_metrics(self, experiment_id: int, *, keys: frozenset[str] | None = None) -> models.MetricFrame:
+        """An experiment's (non-deleted runs') metrics -- only `keys`, if given, else every metric."""
         ...
 
     def list_metric_keys(self, experiment_id: int) -> list[str]:

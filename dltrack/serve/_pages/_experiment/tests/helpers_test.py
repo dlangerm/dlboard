@@ -127,7 +127,7 @@ def _run(run_id: int, name: str | None = None) -> Run:
     return Run(id=run_id, experiment_id=1, name=name, created_at=_TS)
 
 
-def test_build_hparam_rows_merges_hparams_and_last_step_metrics() -> None:
+def test_build_hparam_rows_merges_hparams_and_latest_metrics() -> None:
     runs = [_run(1), _run(2)]
     hparams_by_run = {
         1: HyperParams(
@@ -143,9 +143,9 @@ def test_build_hparam_rows_merges_hparams_and_last_step_metrics() -> None:
             raw_hparams=NewHyperParams.from_raw(2, 1, {"lr": 0.2}).raw_hparams,
         ),
     }
-    last_step_metrics = {1: {"loss": 0.5}}
+    latest_metrics = {1: {"loss": 0.5}}
 
-    rows = run_table._build_hparam_rows(runs, hparams_by_run, last_step_metrics)
+    rows = run_table._build_hparam_rows(runs, hparams_by_run, latest_metrics)
 
     assert rows == [
         {"run_id": 1, "run_name": "Run 1", "lr": 0.1, "loss": 0.5},
@@ -157,7 +157,7 @@ def test_build_hparam_rows_includes_runs_with_no_logged_hyperparameters() -> Non
     """A run that hasn't called `log_hyperparams` yet must still show up, not disappear."""
     runs = [_run(1, name="baseline"), _run(2)]
 
-    rows = run_table._build_hparam_rows(runs, hparams_by_run={}, last_step_metrics={})
+    rows = run_table._build_hparam_rows(runs, hparams_by_run={}, latest_metrics={})
 
     assert rows == [
         {"run_id": 1, "run_name": "baseline"},
@@ -178,36 +178,29 @@ def test_persist_settings_merges_into_page_settings_without_touching_panels(
     assert reloaded.page_settings["selected"] == ["lr"]
 
 
-def _log_a_metric(store: SQLLiteStore, experiment_id: int, run_id: int, key: str) -> None:
+def _log_a_metric(store: SQLLiteStore, experiment_id: int, run_id: int, key: str, step: int = 0) -> None:
     store.log_metrics(
         [
             models.LoggedMetrics(
-                metrics={key: 1.0}, step=0, experiment_id=experiment_id, run_id=run_id, timestamp_utc=_TS
+                metrics={key: 1.0}, step=step, experiment_id=experiment_id, run_id=run_id, timestamp_utc=_TS
             )
         ]
     )
 
 
-def test_fetch_last_step_metrics_returns_nothing_when_no_columns_are_requested(
+def test_load_hparam_view_data_shows_each_selected_metrics_latest_value(
     store: SQLLiteStore, experiment_id: int
 ) -> None:
-    """The perf-critical path: no selected metric columns must mean no metric fetch at all."""
+    """Used to read only the run's highest-step row, blanking any metric not logged at that exact step."""
     run = store.create_run(models.NewRun(experiment_id=experiment_id))
-    _log_a_metric(store, experiment_id, run.id, "loss")
+    _log_a_metric(store, experiment_id, run.id, "val/acc", step=5)
+    _log_a_metric(store, experiment_id, run.id, "train/loss", step=9)
 
-    assert run_table._fetch_last_step_metrics(store, experiment_id, metric_name_match=set()) == {}
+    _hk, _mk, rows = run_table._load_hparam_view_data(
+        store, experiment_id, [], selected_metrics={"val/acc", "train/loss"}, runs=[run]
+    )
 
-
-def test_fetch_last_step_metrics_only_returns_requested_columns(
-    store: SQLLiteStore, experiment_id: int
-) -> None:
-    run = store.create_run(models.NewRun(experiment_id=experiment_id))
-    _log_a_metric(store, experiment_id, run.id, "loss")
-    _log_a_metric(store, experiment_id, run.id, "acc")
-
-    result = run_table._fetch_last_step_metrics(store, experiment_id, metric_name_match={"loss"})
-
-    assert result == {run.id: {"loss": 1.0}}
+    assert rows == [{"run_id": run.id, "run_name": f"Run {run.id}", "val/acc": 1.0, "train/loss": 1.0}]
 
 
 def test_load_hparam_view_data_reports_available_metric_keys_without_fetching_values(
