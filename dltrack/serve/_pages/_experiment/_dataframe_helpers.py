@@ -11,17 +11,8 @@ from dltrack.models import Artifact, ColumnKind, HyperParams, MetricColumn
 from dltrack.plugins.charts._table_style import HPARAM_COLUMN_PREFIX
 
 EXCLUDED_RUNS_KEY: typing.Final = "excluded_runs"
-"""A `Page.page_settings` key -- which run's data `filter_excluded_runs` should filter out.
-
-Only the run-comparison table writes this key, but it's read here rather than there since this
-module is what actually filters by it."""
-
-
-def filter_excluded_runs(df: pd.DataFrame, page_settings: dict[str, Any]) -> pd.DataFrame:
-    excluded = set(page_settings.get(EXCLUDED_RUNS_KEY) or [])
-    if not excluded or df.empty:
-        return df
-    return df[~df["run_id"].isin(excluded)]
+"""A `Page.page_settings` key -- the run ids the run-comparison table has deselected, which
+`fetch_panel_dataframe` leaves out of every panel's fetch."""
 
 
 def build_artifacts_dataframe(artifacts: typing.Iterable[Artifact]) -> pd.DataFrame:

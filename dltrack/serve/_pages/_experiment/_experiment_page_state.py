@@ -394,39 +394,40 @@ def fetch_panel_dataframe(
             panel.name,
         )
 
-    # `None` is not a misconfiguration -- a table chart with no `metrics` filter set is documented to
-    # mean "show every metric" (see `TableChartSettings.metrics`), which can only be rendered by
-    # fetching every metric. It's the chart's normal default, so no warning; `_unscoped_fetch_badge`
-    # already flags it where the user can see it.
+    # Each hint is `None` for "everything" (e.g. a table chart with no `metrics` filter -- its normal
+    # default, flagged to the user by `_unscoped_fetch_badge`) or a set of keys, where empty means
+    # "none of this kind at all".
+    hparam_keys = panel.hint_required_hparams()
+    excluded = frozenset[int](page_settings.get(dfh.EXCLUDED_RUNS_KEY) or [])
     metrics_df = (
         store.fetch_metrics(
-            experiment_id, keys=None if metric_cols is None else frozenset(metric_cols)
+            experiment_id,
+            keys=None if metric_cols is None else frozenset(metric_cols),
+            exclude_run_ids=excluded,
         ).to_frame()
         if metric_cols is None or metric_cols
         else pd.DataFrame()
     )
-
-    artifacts_df = pd.DataFrame()
-    if artifact_keys:
-        artifacts_df = dfh.build_artifacts_dataframe(
+    artifacts_df = (
+        dfh.build_artifacts_dataframe(
             store.fetch_artifacts(
-                experiment_id=experiment_id, keys={k for k in artifact_keys if k is not None}
+                experiment_id,
+                keys=frozenset(k for k in artifact_keys if k is not None),
+                exclude_run_ids=excluded,
             )
         )
-
-    hparam_keys = panel.hint_required_hparams()
-    hparams_df = pd.DataFrame()
-    if hparam_keys is None:
-        # fetch_hyperparams has no server-side key filter (unlike fetch_metrics), so "fetch
-        # everything" and "fetch a specific set" cost the same query -- only the local column
-        # filter in dfh.build_hyperparams_dataframe differs.
-        hparams_df = dfh.build_hyperparams_dataframe(store.fetch_hyperparams(experiment_id))
-    elif hparam_keys:
-        hparams_df = dfh.build_hyperparams_dataframe(store.fetch_hyperparams(experiment_id), keys=hparam_keys)
-
-    df = dfh.merge_metrics_and_artifacts(metrics_df, artifacts_df)
-    df = dfh.merge_hyperparams(df, hparams_df)
-    return dfh.filter_excluded_runs(df, page_settings)
+        if artifact_keys
+        else pd.DataFrame()
+    )
+    # fetch_hyperparams has no server-side key filter -- it's one small row per run either way.
+    hparams_df = (
+        dfh.build_hyperparams_dataframe(
+            store.fetch_hyperparams(experiment_id, exclude_run_ids=excluded), keys=hparam_keys
+        )
+        if hparam_keys is None or hparam_keys
+        else pd.DataFrame()
+    )
+    return dfh.merge_hyperparams(dfh.merge_metrics_and_artifacts(metrics_df, artifacts_df), hparams_df)
 
 
 def compute_full_df_and_column_kinds(store: DataStore[...], experiment_id: int) -> tuple[str, dict[str, str]]:
