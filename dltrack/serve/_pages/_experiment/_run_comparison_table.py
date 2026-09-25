@@ -100,23 +100,26 @@ the discipline every other `list_*` `DataStore` method already follows."""
 
 
 def _load_hparam_view_data(
-    store: DataStore[...], experiment_id: int, hparams: list[str], selected_metrics: set[str]
+    store: DataStore[...], experiment_id: int, hparams: list[str], selected_metrics: set[str], runs: list[Run]
 ) -> tuple[list[str], list[str], list[dict[str, Any]]]:
     """
-    Load every run for the experiment, enriched with its hparams and any selected last-step metrics.
+    Build displayable rows for `runs`, enriched with hparams and any selected last-step metrics.
 
     Metric *names* come from a cheap `DISTINCT key` lookup (for the Columns picker); metric
     *values* are only fetched for `selected_metrics` -- the columns the table is actually about to
     show. Fetching every metric ever logged in the experiment just to populate a table nobody's
     added a metric column to yet is the difference between this loading instantly and taking
-    seconds once an experiment has any real volume of logged steps.
+    seconds once an experiment has any real volume of logged steps. Takes `runs` rather than
+    querying them itself: `render_navbar_hparams` already needs that query to decide *whether* to
+    call this at all (see `_render_signature`), and this is also the callback that fires on every
+    live-update poll tick -- querying twice would mean paying for it even on the many ticks that
+    end up not calling this function at all.
     """
     hydrated = [models.HyperParams.model_validate_json(run) for run in hparams]
     hparams_by_run = {h.run_id: h for h in hydrated}
     hparam_keys = sorted(set(itertools.chain(*[list(k.hparams_dict.keys()) for k in hydrated])))
     metric_keys = store.list_metric_keys(experiment_id)
     last_step_metrics = _fetch_last_step_metrics(store, experiment_id, selected_metrics & set(metric_keys))
-    runs = list(store.get_runs(experiment_id, limit=_HPARAM_ROWS_LIMIT, offset=0))
     rows = _build_hparam_rows(runs, hparams_by_run, last_step_metrics)
     return hparam_keys, metric_keys, rows
 
@@ -289,18 +292,47 @@ def _render_hparam_panel(
     )
 
 
-def _load_hparam_panel_data(
-    store: DataStore[...], experiment_id: int, hparams: list[str]
-) -> tuple[list[str], list[str], list[dict[str, Any]], list[int] | list[str], list[str]]:
+def _load_hparam_panel_settings(
+    store: DataStore[...], experiment_id: int
+) -> tuple[list[Run], list[int] | list[str], list[str]]:
+    """
+    The cheap, always-needed inputs for the navbar table: its run list and its persisted settings.
+
+    Deliberately doesn't touch metric keys/values (`_load_hparam_view_data`, the expensive part) --
+    `render_navbar_hparams` needs exactly this much to decide *whether* a re-render is even
+    happening before paying for that, since it's re-evaluated on every live-update poll tick, not
+    just on a real settings change.
+    """
     page = store.get_or_create_page(core.BasicExperimentPage, experiment_id=experiment_id)
     excluded = page.page_settings.get(dfh.EXCLUDED_RUNS_KEY, [])
     assert isinstance(excluded, list)
     selected_setting = page.page_settings.get(SELECTED_HPARAM_COLS_KEY, [])
     assert isinstance(selected_setting, list)
     selected = [s for s in selected_setting if isinstance(s, str)]
+    runs = list(store.get_runs(experiment_id, limit=_HPARAM_ROWS_LIMIT, offset=0))
+    return runs, excluded, selected
 
-    hparam_keys, metric_keys, rows = _load_hparam_view_data(store, experiment_id, hparams, set(selected))
-    return hparam_keys, metric_keys, rows, excluded, selected
+
+def _render_signature(
+    experiment_id: int,
+    hparams: list[str],
+    excluded: list[int] | list[str],
+    selected: list[str],
+    run_ids: list[int],
+) -> list[Any]:
+    """
+    Everything `render_navbar_hparams`'s output actually depends on, as one comparable value.
+
+    Stored in (and read back from) `NAVBAR_HPARAM_SIGNATURE_ID`'s `dcc.Store`, so it round-trips
+    through JSON either way -- a typed structure here couldn't stay typed past that store anyway,
+    but naming every tracked field in one place (rather than as an inline list literal at the call
+    site) means a future addition to what this table renders from has one obvious place to also add
+    it, instead of a silently-still-passing equality check against a signature nobody remembered to
+    extend. `run_ids` (not just `hparams`) must be included: a run with no hyperparameters yet still
+    needs to appear the moment `store.get_runs` (queried fresh in `_load_hparam_panel_settings`,
+    *before* this signature is even built) reports it, even though `hparams` itself hasn't changed.
+    """
+    return [experiment_id, hparams, sorted(excluded), selected, run_ids]
 
 
 def _register_hparam_table(app: Dash) -> None:
@@ -322,17 +354,32 @@ def _register_hparam_table(app: Dash) -> None:
             raise PreventUpdate
 
         store = get_data_store()
-        hparam_keys, metric_keys, rows, excluded, selected = _load_hparam_panel_data(
-            store, experiment_id, hparams
-        )
+        runs, excluded, selected = _load_hparam_panel_settings(store, experiment_id)
         # `STATE_PAGE_STORAGE` changes on *every* page-settings write -- a tab switch, a panel
         # rename, a drag-reorder, none of which this table cares about -- so rebuilding on it
         # unconditionally (tearing down and remounting the ag-grid) flickered on every one of
         # those, not just an actual run-selection/column change. Skip the (expensive, chart-
-        # remounting) rebuild unless the specific settings this table renders actually changed.
-        signature = [experiment_id, hparams, sorted(excluded), selected]
+        # remounting) rebuild unless the specific settings this table renders actually changed --
+        # see `_render_signature` for exactly what "changed" is measured against.
+        #
+        # Checked *before* `_load_hparam_view_data` below (not after): `STATE_HPARAMS` is rewritten
+        # on every live-update poll tick that finds *any* change in the experiment, metrics
+        # included -- so this callback re-fires roughly as often as metrics get flushed during
+        # active training, not just when a run/hparam/column-selection actually changes.
+        # `_load_hparam_view_data`'s `list_metric_keys` scan and (if a metric column is selected)
+        # full metric-history refetch would otherwise run on every one of those ticks only to
+        # almost always end in the `PreventUpdate` below anyway -- a cost every open experiment
+        # page would pay constantly during training, not just the ones actually using the
+        # metric-column feature. `runs` (from `_load_hparam_panel_settings`, already cheap/bounded)
+        # is enough to detect every case this table needs to react to, so the expensive part only
+        # runs on the (comparatively rare) ticks that actually need a re-render.
+        signature = _render_signature(experiment_id, hparams, excluded, selected, [r.id for r in runs])
         if signature == prev_signature:
             raise PreventUpdate
+
+        hparam_keys, metric_keys, rows = _load_hparam_view_data(
+            store, experiment_id, hparams, set(selected), runs
+        )
 
         return dmc.Stack(
             [

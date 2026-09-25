@@ -19,10 +19,12 @@ reaching into on purpose" signal, not an access restriction) rather than through
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
-from dash import Dash, State
+import pendulum
+from dash import ALL, Dash, Input, Output, State, no_update
 from flask import Response
+from structlog.stdlib import get_logger
 
 from dltrack.models import ButtonId, ModalId, constants
 from dltrack.serve import get_current_user, get_data_store
@@ -44,10 +46,14 @@ from dltrack.serve._pages._experiment._panel_controls import register_panel_cont
 from dltrack.serve._pages._experiment._run_comparison_table import register_run_comparison_callbacks
 
 if TYPE_CHECKING:
+    import pandas as pd
     from dash import html
     from dash.development.base_component import Component
 
+    from dltrack import models
     from dltrack.models import DataStore
+
+_log = get_logger(__name__)
 
 DELETE_EXPERIMENT_BUTTON_ID: ButtonId[core.ExperimentPage] = ButtonId("delete-experiment-button")
 DELETE_EXPERIMENT_MODAL_ID: ModalId[core.ExperimentPage] = ModalId("delete-experiment-modal")
@@ -133,6 +139,163 @@ def render_panel(store: DataStore[...], experiment_id: int) -> tuple[html.Div, C
     return container, header, page.model_dump_json()
 
 
+def _fetch_open_panel_dataframes(
+    store: DataStore[...],
+    experiment_id: int,
+    page: core.BasicExperimentPage,
+    panel_names: set[str],
+) -> tuple[dict[str, pd.DataFrame], bool]:
+    """
+    Fetch each of `panel_names`'s own dataframe once -- the same call the initial render makes.
+
+    Not once per chart: "Auto-generate charts" routinely groups several charts sharing a panel, so
+    fetching per panel (rather than per chart) keeps a poll tick's cost proportional to how many
+    panels are open, not how many charts they hold.
+    """
+    panels_by_name = {p.name: p for p in page.panels}
+    dataframes: dict[str, pd.DataFrame] = {}
+    ok = True
+    for panel_name in panel_names:
+        panel = panels_by_name.get(panel_name)
+        if panel is None:
+            continue
+        try:
+            dataframes[panel_name] = core.fetch_panel_dataframe(
+                store, experiment_id, panel, page.page_settings
+            )
+        except Exception:  # noqa: BLE001 -- one bad panel must not break the whole poll tick
+            _log.exception("Live-update poll failed to fetch panel %r", panel_name)
+            ok = False
+    return dataframes, ok
+
+
+def _refresh_chart_contents(
+    chart_ids: list[core.ChartID],
+    panels_by_name: dict[str, models.PanelInstance[Any, Any]],
+    dataframes: dict[str, pd.DataFrame],
+    prev_hashes: dict[str, str] | None,
+) -> tuple[list[Any], dict[str, str], bool]:
+    """Re-render just the charts whose own `chart_data_fingerprint` moved since the last poll."""
+    new_hashes = dict(prev_hashes or {})
+    contents: list[Any] = []
+    ok = True
+    for chart_id in chart_ids:
+        panel_name, index = chart_id["panel"], chart_id["index"]
+        panel = panels_by_name.get(panel_name)
+        df = dataframes.get(panel_name)
+        if panel is None or df is None or index is None or index >= len(panel.charts):
+            contents.append(no_update)
+            continue
+        key = f"{panel_name}:{index}"
+        try:
+            fingerprint = core.chart_data_fingerprint(panel.charts[index], df)
+            if fingerprint == new_hashes.get(key):
+                contents.append(no_update)
+                continue
+            new_hashes[key] = fingerprint
+            contents.append(core.render_chart_item(panel, index, df))
+        except Exception:  # noqa: BLE001 -- one bad chart must not break the whole poll tick
+            _log.exception("Live-update poll failed to refresh chart %r", key)
+            contents.append(no_update)
+            ok = False
+    return contents, new_hashes, ok
+
+
+def register_render_callbacks(app: Dash) -> None:
+    """The live-update poll; the initial render itself happens synchronously in `layout()`."""
+
+    # --- live updates: a cheap poll of `Experiment.revision` re-renders only the individual open
+    # charts whose own data actually changed (never touching the accordion/tabs shell, closed
+    # panels, or sibling charts sharing a panel), so new data appears without any page/panel-level
+    # flash a coarser rebuild would cause. Also refreshes `STATE_HPARAMS`, since the navbar
+    # run-comparison table (`_run_comparison_table.py`) reads run/hparam data from it, not from a
+    # live store query of its own.
+    #
+    # Each open *panel* is still fetched only once per tick (`fetch_panel_dataframe`, the same call
+    # the initial render makes) -- "Auto-generate charts" routinely groups several charts sharing a
+    # panel, and fetching once per panel rather than once per chart keeps this poll's per-tick cost
+    # proportional to how many panels are open, not how many charts they hold. Each chart's own
+    # `chart_data_fingerprint` (scoped to just its own columns of that shared dataframe) is what
+    # decides whether *that* chart actually needs to re-render. ---
+    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+        # `chart_content_id(...)` is typed `(str, int) -> ChartID` (every other call site passes a
+        # real panel name/index), so it can't be called with the `ALL` wildcard without breaking
+        # that typing -- same reason `_panel_controls.py`'s own `ALL`-pattern callbacks spell their
+        # pattern-matching ids out as literal dicts too, rather than routing through a helper.
+        Output({"type": "chart-content", "panel": ALL, "index": ALL}, "children"),
+        Output(core.STATE_HPARAMS, "data", allow_duplicate=True),
+        Output(core.STATE_LAST_KNOWN_REVISION, "data", allow_duplicate=True),
+        Output(core.STATE_CHART_CONTENT_HASHES, "data", allow_duplicate=True),
+        Output(core.STATE_LAST_FETCH_AT, "data", allow_duplicate=True),
+        Output(core.LIVE_STATUS_ID, "children"),
+        Input(core.LIVE_POLL_INTERVAL_ID, "n_intervals"),
+        State({"type": "chart-content", "panel": ALL, "index": ALL}, "id"),
+        State(constants.STATE_EXPERIMENT_ID, "data"),
+        State(core.STATE_LAST_KNOWN_REVISION, "data"),
+        State(core.STATE_CHART_CONTENT_HASHES, "data"),
+        prevent_initial_call=True,
+    )
+    def poll_for_updates(
+        _n_intervals: int,
+        chart_ids: list[core.ChartID],
+        experiment_id: int,
+        last_known_revision: int | None,
+        prev_hashes: dict[str, str] | None,
+    ) -> tuple[list[Any], Any, Any, Any, Any, Component]:
+        store = get_data_store()
+        ok = True
+        try:
+            experiment = store.get_experiment(experiment_id)
+        except Exception:  # noqa: BLE001 -- a poll failure is reported via the status badge, not raised
+            _log.exception("Live-update poll failed for experiment %s", experiment_id)
+            experiment, ok = None, False
+
+        # Set on every tick that actually reached the store, whether or not anything had changed --
+        # "how stale could this be" (`LIVE_LAST_FETCH_LABEL_ID`, ticked purely client-side) needs the
+        # time of the last real check, not the time of the last real change.
+        fetched_at = pendulum.now("UTC").isoformat() if ok else no_update
+
+        if not ok or experiment is None or experiment.revision == last_known_revision:
+            return (
+                [no_update] * len(chart_ids),
+                no_update,
+                no_update,
+                no_update,
+                fetched_at,
+                core.live_status_badge(ok=ok),
+            )
+
+        page = cast(
+            "core.BasicExperimentPage",
+            store.get_or_create_page(core.BasicExperimentPage, experiment_id=experiment_id),
+        )
+        panels_by_name = {p.name: p for p in page.panels}
+        panel_names = {chart_id["panel"] for chart_id in chart_ids}
+
+        dataframes, fetch_ok = _fetch_open_panel_dataframes(store, experiment_id, page, panel_names)
+        contents, new_hashes, render_ok = _refresh_chart_contents(
+            chart_ids, panels_by_name, dataframes, prev_hashes
+        )
+        poll_ok = fetch_ok and render_ok
+
+        try:
+            hparams_json: Any = [h.model_dump_json() for h in store.fetch_hyperparams(experiment_id)]
+        except Exception:  # noqa: BLE001 -- charts refreshed above still ship even if this fails
+            _log.exception(
+                "Live-update poll failed to refresh hyperparameters for experiment %s", experiment_id
+            )
+            hparams_json, poll_ok = no_update, False
+
+        return (
+            contents,
+            hparams_json,
+            experiment.revision,
+            new_hashes,
+            fetched_at,
+            core.live_status_badge(ok=poll_ok),
+        )
+
+
 def register(app: Dash) -> None:
     """Register the experiment page: hparam table + chart accordion + editor."""
     prefix = str(app.config.routes_pathname_prefix)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
@@ -155,6 +318,8 @@ def register(app: Dash) -> None:
     app.scripts.append_script(  # pyright: ignore[reportUnknownMemberType]
         {"external_url": chart_submit_loading_route, "external_only": True}
     )
+
+    register_render_callbacks(app)
 
     def _fetch_experiment_header(experiment_id: int) -> tuple[str, str]:
         store = get_data_store()

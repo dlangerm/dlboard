@@ -43,6 +43,16 @@ class Experiment(NewExperiment, frozen=True, extra="forbid"):
     id: int
     """The ID of the experiment."""
 
+    revision: int = 0
+    """
+    Monotonic counter, bumped by every write that changes what the experiment page renders (new
+    run, metric, hyperparameter, or artifact). Server-managed -- never set by a client. A live-update
+    poll (see `serve/_pages/_experiment/__init__.py`) detects "something changed" with one cheap
+    indexed read instead of re-fetching or diffing the experiment's full contents. A `DataStore`
+    implementation not built on `SQLStoreBase` must bump this itself on any experiment-scoped
+    mutation to support live updates.
+    """
+
     deleted_by: int | None = None
     """The user who soft-deleted this experiment, if it's been deleted."""
 

@@ -167,6 +167,10 @@ class BarChart(ChartType[BarChartSettings, pd.DataFrame, dmc.BarChart], frozen=T
             withXAxis=True,
             withYAxis=True,
             tickLine="xy",
+            # See `line_chart.py`'s matching `lineProps` -- Recharts otherwise replays a `<Bar>`'s
+            # enter animation on every data-prop change, not just the first render, which reads as
+            # the whole chart flashing on each live-update poll rather than just its values moving.
+            barProps={"isAnimationActive": False},
             # A wider tooltip offset keeps it from sitting directly on top of the hovered bar,
             # which otherwise obscures the exact spot the reader is looking at --
             # allowEscapeViewBox lets it actually render outside the plot area at that offset

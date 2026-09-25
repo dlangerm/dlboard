@@ -34,6 +34,9 @@ from dltrack.plugins.backend.basic_rest_backend import BasicDltrackAPI
 from dltrack.serve import app as build_app
 from dltrack.serve import get_data_store
 from dltrack.serve._pages._experiment._experiment_page_state import (
+    LIVE_PAUSED_BADGE_ID,
+    LIVE_STATUS_ID,
+    LIVE_UPDATES_ENABLED_ID,
     METRIC_CONTENT_ID,
     NEW_PANEL_ID,
     NEW_PANEL_NAME_ID,
@@ -76,10 +79,30 @@ def dltrack_app(tmp_path_factory: pytest.TempPathFactory) -> Dash:
     monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setenv("SQLITE_LOCATION", str(tmp_path / "test.sqlite"))
     monkeypatch.setenv("ARTIFACT_STORE_LOCATION", str(tmp_path / "artifacts"))
+    # `LiveUpdateSettings` is instantiated once, at `serve/_pages/experiment.py`'s own first
+    # import -- which (via `app.py`'s deferred page import) happens inside this very `build_app`
+    # call, so this env var only has to be set before that, not for the whole test session. Down
+    # from its 30s production default so the live-update browser tests below don't need multi-poll
+    # patience just to observe one tick.
+    monkeypatch.setenv("POLL_INTERVAL_MS", "2000")
     try:
-        return build_app([*LOCAL_DEPLOYMENT, themes.dark])
+        app = build_app([*LOCAL_DEPLOYMENT, themes.dark])
     finally:
         monkeypatch.undo()
+
+    # Dash's callback-graph checks (circular dependencies, two callbacks writing to the same/an
+    # overlapping output without `allow_duplicate=True`, a pattern-matching Output/Input mismatch,
+    # ...) run client-side in dash-renderer, only when the server tells it to -- serving via a
+    # plain `werkzeug` server the way `live_server_url` does (rather than `app.run(debug=...)`)
+    # skips that entirely by default, same as a production deployment does. Turning it on here
+    # means this suite -- the one place callbacks actually run end to end -- catches that whole
+    # class of wiring mistake, not just a developer happening to notice it running `dltrack serve
+    # local` in debug mode. `dev_tools_hot_reload`/`dev_tools_ui` are off -- neither is needed to
+    # trigger the validation itself, and hot-reload's periodic polling and the dev-tools UI's own
+    # DOM footprint are both pure noise (or, for the layout-geometry tests, actively
+    # counterproductive) in a test session.
+    app.enable_dev_tools(dev_tools_hot_reload=False, dev_tools_ui=False)
+    return app
 
 
 @pytest.fixture(scope="session")
@@ -923,4 +946,196 @@ def test_chart_tooltip_shows_every_series_at_every_hovered_x_position(
     assert saw_a_source_annotation, (
         "expected at least one hover position to annotate a filled-in value's source x"
     )
+    assert console_errors == []
+
+
+def test_live_update_poll_shows_a_new_run_without_a_reload(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """
+    End-to-end proof of the live-update poll (`poll_for_updates`, driven by `LIVE_POLL_INTERVAL_ID`):
+    a run started purely through the backend -- exactly how a real training process talks to
+    dltrack, with the browser tab never touched -- must show up in the navbar run-comparison table
+    on its own, with no `page.reload()`. It must also do so *without* remounting the panel: this
+    tags the "Ungrouped" panel's own content node (`.dl-panel-body`, the same DOM node
+    `poll_for_updates` patches via individual `chart_content_id(...)` nodes inside it) before the
+    second run exists, then proves that exact node -- not a freshly rendered lookalike -- is still
+    there afterward, the same "still the same node" proof
+    `test_switching_tabs_does_not_remount_the_navbar_run_table` uses for the sibling flicker
+    regression this feature was built to avoid.
+    """
+    _create_project_and_experiment(page, live_server_url, "Live Update Experiment")
+    page.get_by_role("link", name="Open experiment").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+
+    api = BasicDltrackAPI(live_server_url)
+    first_run = api.create_run(models.NewRun(experiment_id=experiment_id))
+    api.log_metric_batch(
+        [
+            models.LoggedMetrics(
+                experiment_id=experiment_id,
+                run_id=first_run.id,
+                step=0,
+                metrics={"loss": 1.0},
+                timestamp_utc=pendulum.now("UTC"),
+            )
+        ]
+    )
+    page.reload()
+    page.get_by_role("button", name="Auto-generate charts").click()
+    # No explicit `open_panel` setting exists yet for a brand new experiment, so
+    # `BasicExperimentPage.render()`'s own fallback already opened "Ungrouped" by default -- the
+    # poll only patches currently-open panels' charts, so it has one to patch without a click.
+
+    grid = page.locator(f"#{NAVBAR_HPARAM_DATATABLE_ID}")
+    expect(grid.locator(".ag-center-cols-container .ag-row")).to_have_count(1)
+    expect(page.locator(".dl-panel-body svg")).to_be_visible()
+
+    panel_body = page.locator(".dl-panel-body")
+    panel_body.evaluate("el => el.setAttribute('data-marker', 'untouched')")
+
+    # A second run, started entirely through the backend -- nothing from here on ever touches the
+    # page until the assertions below.
+    second_run = api.create_run(models.NewRun(experiment_id=experiment_id))
+    api.log_metric_batch(
+        [
+            models.LoggedMetrics(
+                experiment_id=experiment_id,
+                run_id=second_run.id,
+                step=0,
+                metrics={"loss": 0.8},
+                timestamp_utc=pendulum.now("UTC"),
+            )
+        ]
+    )
+
+    # The poll interval is 2s in this test session (`browser_test.py`'s `dltrack_app` fixture) --
+    # give it comfortably more than one full cycle rather than racing Playwright's default 5s
+    # timeout.
+    expect(grid.locator(".ag-center-cols-container .ag-row")).to_have_count(2, timeout=8000)
+    expect(page.locator(".dl-panel-body svg")).to_be_visible()
+    assert panel_body.get_attribute("data-marker") == "untouched"
+    assert console_errors == []
+
+
+def test_live_update_poll_patches_only_the_chart_whose_data_changed(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """
+    Regression check for `poll_for_updates` operating at chart granularity, not panel granularity.
+
+    Two charts sharing one panel -- a routine "Auto-generate charts" grouping -- can have very
+    different update cadences (an epoch-level chart next to a per-step one); a panel-level
+    live-update fingerprint would rebuild -- and visually pop -- *both* whenever *either* changed,
+    since a panel's charts share one fetched dataframe. Logs an initial point for two metrics that
+    land in one auto-generated panel, tags both rendered chart items, then logs new data for only
+    one of them: the untouched chart's DOM node must survive exactly as it was, while the updated
+    one gets a real new node.
+    """
+    _create_project_and_experiment(page, live_server_url, "Chart Granularity Experiment")
+    page.get_by_role("link", name="Open experiment").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+
+    api = BasicDltrackAPI(live_server_url)
+    run = api.create_run(models.NewRun(experiment_id=experiment_id))
+    # No delimiter in either name, so auto-generate collapses them into one "Ungrouped" panel with
+    # two charts, alphabetically: cold_metric, hot_metric.
+    api.log_metric_batch(
+        [
+            models.LoggedMetrics(
+                experiment_id=experiment_id,
+                run_id=run.id,
+                step=0,
+                metrics={"cold_metric": 1.0, "hot_metric": 1.0},
+                timestamp_utc=pendulum.now("UTC"),
+            )
+        ]
+    )
+    page.reload()
+    page.get_by_role("button", name="Auto-generate charts").click()
+
+    chart_items = page.locator(".dl-chart-item")
+    expect(chart_items).to_have_count(2)
+    cold_item, hot_item = chart_items.nth(0), chart_items.nth(1)
+    cold_item.evaluate("el => el.setAttribute('data-marker', 'untouched')")
+    hot_item.evaluate("el => el.setAttribute('data-marker', 'untouched')")
+
+    # Only "hot_metric" gets new data from here on -- "cold_metric" is never touched again.
+    api.log_metric_batch(
+        [
+            models.LoggedMetrics(
+                experiment_id=experiment_id,
+                run_id=run.id,
+                step=1,
+                metrics={"hot_metric": 2.0},
+                timestamp_utc=pendulum.now("UTC"),
+            )
+        ]
+    )
+
+    # The poll interval is 2s in this test session -- give it comfortably more than one full cycle.
+    expect(hot_item).not_to_have_attribute("data-marker", "untouched", timeout=8000)
+    assert cold_item.get_attribute("data-marker") == "untouched"
+    assert console_errors == []
+
+
+def test_live_update_toggle_pauses_polling_and_persists_across_reload(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """
+    The enable/disable switch must actually stop the poll from running -- `dcc.Interval.disabled`,
+    flipped client-side, not a server-side callback that keeps firing and gets ignored -- and its
+    state must survive a reload via the browser's own `localStorage` (`persistence_type="local"`),
+    not the experiment's persisted `page_settings`, which every other viewer would then inherit.
+    """
+    _create_project_and_experiment(page, live_server_url, "Live Toggle Experiment")
+    page.get_by_role("link", name="Open experiment").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+
+    api = BasicDltrackAPI(live_server_url)
+    run = api.create_run(models.NewRun(experiment_id=experiment_id))
+    api.log_metric_batch(
+        [
+            models.LoggedMetrics(
+                experiment_id=experiment_id,
+                run_id=run.id,
+                step=0,
+                metrics={"loss": 1.0},
+                timestamp_utc=pendulum.now("UTC"),
+            )
+        ]
+    )
+    page.reload()
+
+    grid = page.locator(f"#{NAVBAR_HPARAM_DATATABLE_ID}")
+    expect(grid.locator(".ag-center-cols-container .ag-row")).to_have_count(1)
+
+    switch = page.locator(f"#{LIVE_UPDATES_ENABLED_ID}")
+    live_badge = page.locator(f"#{LIVE_STATUS_ID}")
+    paused_badge = page.locator(f"#{LIVE_PAUSED_BADGE_ID}")
+    expect(switch).to_be_checked()
+    expect(live_badge).to_be_visible()
+    expect(paused_badge).not_to_be_visible()
+    # `force=True` -- Mantine's `Switch` overlays a decorative track-label span that intercepts a
+    # plain click before it reaches the actual (visible, enabled) `<input>` underneath.
+    switch.click(force=True)
+    expect(switch).not_to_be_checked()
+    expect(paused_badge).to_be_visible()
+    expect(live_badge).not_to_be_visible()
+
+    # A second run, started entirely through the backend while live updates are paused.
+    api.create_run(models.NewRun(experiment_id=experiment_id))
+
+    # Comfortably longer than one full poll cycle -- nothing should change while paused.
+    page.wait_for_timeout(4000)
+    expect(grid.locator(".ag-center-cols-container .ag-row")).to_have_count(1)
+
+    # The paused state survives a reload -- not reset back to the server-rendered default.
+    page.reload()
+    expect(page.locator(f"#{LIVE_UPDATES_ENABLED_ID}")).not_to_be_checked()
+    expect(page.locator(f"#{LIVE_PAUSED_BADGE_ID}")).to_be_visible()
+
+    # Re-enabling picks the missed update up on the next tick.
+    page.locator(f"#{LIVE_UPDATES_ENABLED_ID}").click(force=True)
+    expect(grid.locator(".ag-center-cols-container .ag-row")).to_have_count(2, timeout=8000)
     assert console_errors == []

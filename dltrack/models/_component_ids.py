@@ -41,6 +41,10 @@ class ButtonId[P](str):
     """A `dmc.Button`/`dmc.ActionIcon` id -- only `"n_clicks"` is a meaningful prop."""
 
 
+class IntervalId[P](str):
+    """A `dcc.Interval` id -- only `"n_intervals"` is a meaningful prop."""
+
+
 class ValueId[P](str):
     """A `TextInput`/`Select`/`NumberInput`/`Switch`-style id -- `"value"` or `"checked"`."""
 

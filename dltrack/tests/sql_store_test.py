@@ -19,6 +19,7 @@ from dltrack.plugins.data_stores.sqlite import SQLLiteStore
 from dltrack.serve._pages._experiment._experiment_page_state import BasicExperimentPage
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
 _TS = datetime(2026, 1, 1, tzinfo=UTC)
@@ -140,6 +141,40 @@ def test_store_init_backfills_a_column_added_to_a_model_since_the_db_was_created
 
     assert run.name == "backfilled"
     assert list(store.get_runs(experiment.id, limit=10, offset=0)) == [run]
+
+
+def test_store_init_backfills_a_scalar_default_not_null_for_pre_existing_rows(
+    tmp_path: Path,
+) -> None:
+    """
+    A column with a plain scalar default (`Experiment.revision: int = 0`) must backfill existing
+    rows with that default, not `NULL` -- `_add_missing_columns` passes it through as a real SQL
+    `DEFAULT`, same as `create_table_sql` does for a brand new table. Without this, an experiment
+    that existed before `revision` was added would start `NULL`, and `NULL + 1`
+    (`_touch_experiment`) stays `NULL` forever -- live updates would never fire for it.
+    """
+    db_path = tmp_path / "stale.sqlite"
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "CREATE TABLE Experiment (project_id INTEGER NOT NULL, name TEXT NOT NULL, "
+            "description TEXT NOT NULL, source TEXT, created_by INTEGER, created_at TEXT NOT NULL, "
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, deleted_by INTEGER, deleted_at TEXT)"
+        )
+        conn.execute(
+            "INSERT INTO Experiment (project_id, name, description, created_at) "
+            "VALUES (1, 'pre-existing', '', '2026-01-01T00:00:00+00:00')"
+        )
+
+    store = SQLLiteStore(db_path)
+    pre_existing = store.get_experiment(1)
+    assert pre_existing is not None
+    assert pre_existing.revision == 0
+
+    store.create_run(models.NewRun(experiment_id=1))
+
+    bumped = store.get_experiment(1)
+    assert bumped is not None
+    assert bumped.revision == 1
 
 
 def test_log_hyperparams_skips_duplicate_run(store: SQLLiteStore, experiment_id: int) -> None:
@@ -373,3 +408,95 @@ def test_get_or_create_page_is_idempotent_and_updatable(store: SQLLiteStore, exp
     assert [p.name for p in reloaded.panels] == ["metrics"]
     assert reloaded.page_settings == {"open_panel": ["metrics"]}
     assert stored.id == page.id
+
+
+def test_experiment_revision_starts_at_zero(store: SQLLiteStore, experiment_id: int) -> None:
+    experiment = store.get_experiment(experiment_id)
+    assert experiment is not None
+    assert experiment.revision == 0
+
+
+def _mutate_via_create_run(store: SQLLiteStore, experiment_id: int, _run_id: int) -> None:
+    store.create_run(models.NewRun(experiment_id=experiment_id))
+
+
+def _mutate_via_log_metrics(store: SQLLiteStore, experiment_id: int, run_id: int) -> None:
+    store.log_metrics(
+        [
+            models.LoggedMetrics(
+                metrics={"loss": 0.1}, step=0, experiment_id=experiment_id, run_id=run_id, timestamp_utc=_TS
+            )
+        ]
+    )
+
+
+def _mutate_via_log_hyperparams(store: SQLLiteStore, experiment_id: int, run_id: int) -> None:
+    store.log_hyperparams(models.NewHyperParams.from_raw(run_id, experiment_id, {"lr": 0.1}))
+
+
+def _mutate_via_log_artifact_refs(store: SQLLiteStore, experiment_id: int, run_id: int) -> None:
+    store.log_artifact_refs(
+        [
+            models.Artifact(
+                key="img", fname="img.png", run_id=run_id, experiment_id=experiment_id, step=0, ref="ref://a"
+            )
+        ]
+    )
+
+
+@pytest.mark.parametrize(
+    # No explicit `ids=` -- pytest already derives a readable id from each function's own
+    # `__name__`, which keeps the label and the callable it names impossible to drift apart (a
+    # hand-maintained parallel `ids=[...]` list is one to add/reorder without the other).
+    "mutate",
+    [
+        _mutate_via_create_run,
+        _mutate_via_log_metrics,
+        _mutate_via_log_hyperparams,
+        _mutate_via_log_artifact_refs,
+    ],
+)
+def test_mutation_bumps_experiment_revision_by_one(
+    store: SQLLiteStore, experiment_id: int, mutate: Callable[[SQLLiteStore, int, int], None]
+) -> None:
+    run = store.create_run(models.NewRun(experiment_id=experiment_id))
+    before = store.get_experiment(experiment_id)
+    assert before is not None
+
+    mutate(store, experiment_id, run.id)
+
+    after = store.get_experiment(experiment_id)
+    assert after is not None
+    assert after.revision == before.revision + 1
+
+
+def test_mutation_does_not_bump_an_unrelated_experiments_revision(
+    store: SQLLiteStore, experiment_id: int
+) -> None:
+    project = store.create_project(models.NewProject(name="other", description="d"))
+    other_experiment = store.create_experiment(models.NewExperiment(project_id=project.id))
+
+    store.create_run(models.NewRun(experiment_id=experiment_id))
+
+    assert store.get_experiment(other_experiment.id) == other_experiment
+
+
+def test_update_experiment_does_not_clobber_a_concurrently_bumped_revision(
+    store: SQLLiteStore, experiment_id: int
+) -> None:
+    """
+    `update_experiment` (editing the description) reads an `Experiment` snapshot, edits it, and
+    writes it back -- if a metric/run/hyperparam/artifact write bumps `revision` in between, that
+    snapshot's own (now-stale) `revision` value must not overwrite the bump.
+    """
+    stale = store.get_experiment(experiment_id)
+    assert stale is not None
+
+    store.create_run(models.NewRun(experiment_id=experiment_id))  # bumps revision to 1, concurrently
+
+    store.update_experiment(stale.model_copy(update={"description": "edited"}))
+
+    after = store.get_experiment(experiment_id)
+    assert after is not None
+    assert after.description == "edited"
+    assert after.revision == 1
