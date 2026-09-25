@@ -8,9 +8,19 @@ HPARAM_COLUMN_PREFIX = "hparam__"
 """Hyperparameter columns are merged into the same wide dataframe as metrics/artifacts, prefixed
 so a hparam key can never collide with a same-named metric or artifact column."""
 
-TAGS_COLUMN_SUFFIX = "__tags"
-"""Artifact tag columns (`<artifact_key>__tags`) hold dicts, not scalar values — not renderable
-as a plain table cell."""
+ARTIFACT_COLUMN_PREFIX = "artifact__"
+"""Artifact columns are prefixed for the same reason -- see `artifact_column`/`artifact_tags_column`."""
+
+
+def artifact_column(key: str) -> str:
+    """The panel-dataframe column holding each step's ref for artifact `key`."""
+    return f"{ARTIFACT_COLUMN_PREFIX}{key}"
+
+
+def artifact_tags_column(key: str) -> str:
+    """The panel-dataframe column holding each step's tags dict for artifact `key`."""
+    return f"{artifact_column(key)}__tags"
+
 
 ColumnDType = Literal["numeric", "text"]
 """An ag-grid column dtype, as inferred by `infer_column_dtype`."""

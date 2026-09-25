@@ -9,6 +9,7 @@ import pandas as pd
 import pytest
 
 from dltrack.conftest import props as _props
+from dltrack.plugins.charts._table_style import artifact_column, artifact_tags_column
 from dltrack.plugins.charts.image_series import (
     GRID_COLS,
     MAX_SLIDER_LABELS,
@@ -21,7 +22,12 @@ from dltrack.plugins.charts.image_series import (
 
 def _artifacts_df(n_runs: int, steps_per_run: int = 1) -> pd.DataFrame:
     rows = [
-        {"run_id": run_id, "step": step, "img": f"ref://{run_id}-{step}", "img__tags": {"run": str(run_id)}}
+        {
+            "run_id": run_id,
+            "step": step,
+            artifact_column("img"): f"ref://{run_id}-{step}",
+            artifact_tags_column("img"): {"run": str(run_id)},
+        }
         for run_id in range(1, n_runs + 1)
         for step in range(steps_per_run)
     ]
@@ -82,8 +88,13 @@ def test_render_formats_tags_dict_into_captions() -> None:
 def test_render_handles_missing_tags_for_some_rows_without_crashing() -> None:
     df = pd.DataFrame(
         [
-            {"run_id": 1, "step": 0, "img": "ref://1-0", "img__tags": {"split": "train"}},
-            {"run_id": 1, "step": 1, "img": "ref://1-1", "img__tags": None},
+            {
+                "run_id": 1,
+                "step": 0,
+                artifact_column("img"): "ref://1-0",
+                artifact_tags_column("img"): {"split": "train"},
+            },
+            {"run_id": 1, "step": 1, artifact_column("img"): "ref://1-1", artifact_tags_column("img"): None},
         ]
     )
     stack = ImageChart.render(ImageChartSettings(key="img"), df)
@@ -131,7 +142,7 @@ def test_render_slider_snaps_only_to_real_steps_and_has_bottom_margin() -> None:
 
 
 def test_render_slider_marks_match_max_slider_labels_constant() -> None:
-    df = pd.DataFrame([{"run_id": 1, "step": s, "img": f"ref://{s}"} for s in range(200)])
+    df = pd.DataFrame([{"run_id": 1, "step": s, artifact_column("img"): f"ref://{s}"} for s in range(200)])
     stack = ImageChart.render(ImageChartSettings(key="img"), df)
 
     slider = _slider_props(stack)

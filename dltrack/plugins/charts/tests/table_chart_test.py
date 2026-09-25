@@ -9,7 +9,12 @@ import pandas as pd
 import pytest
 
 from dltrack.conftest import props as _props
-from dltrack.plugins.charts._table_style import DEFAULT_TABLE_FONT_SIZE, HPARAM_COLUMN_PREFIX
+from dltrack.plugins.charts._table_style import (
+    DEFAULT_TABLE_FONT_SIZE,
+    HPARAM_COLUMN_PREFIX,
+    artifact_column,
+    artifact_tags_column,
+)
 from dltrack.plugins.charts.table_chart import TableChart, TableChartSettings
 
 
@@ -118,15 +123,17 @@ def test_render_run_mode_hparams_filter_narrows_columns() -> None:
     assert "batch_size" not in rows[1]
 
 
-def test_render_run_mode_excludes_artifact_tags_columns() -> None:
+def test_render_run_mode_excludes_artifact_columns() -> None:
+    """An artifact's ref (a storage URL) and tags (a dict) aren't metric values -- neither is a table column."""
     df = _wide_df()
-    df["img"] = ["ref://1-0", "ref://1-1", "ref://2-0", "ref://2-1"]
-    df["img__tags"] = pd.Series([{"split": "train"}, {"split": "train"}, None, None], dtype=object)
+    df[artifact_column("img")] = ["ref://1-0", "ref://1-1", "ref://2-0", "ref://2-1"]
+    df[artifact_tags_column("img")] = pd.Series(
+        [{"split": "train"}, {"split": "train"}, None, None], dtype=object
+    )
     table = TableChart.render(TableChartSettings(), df)
     rows = _rows_by_run(table)
 
-    assert "img__tags" not in rows[1]
-    assert "img" in rows[1]
+    assert not {artifact_column("img"), artifact_tags_column("img")} & rows[1].keys()
 
 
 def test_render_defaults_to_the_shared_smaller_font_size() -> None:

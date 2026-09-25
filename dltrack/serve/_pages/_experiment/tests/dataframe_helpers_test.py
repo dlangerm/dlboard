@@ -8,7 +8,7 @@ import pytest
 
 from dltrack.models import Artifact, HyperParams, NewHyperParams, ValidJsonTypes
 from dltrack.models._view import ColumnKind
-from dltrack.plugins.charts._table_style import HPARAM_COLUMN_PREFIX
+from dltrack.plugins.charts._table_style import HPARAM_COLUMN_PREFIX, artifact_column, artifact_tags_column
 from dltrack.serve._pages._experiment import _dataframe_helpers as dfh
 
 
@@ -31,9 +31,9 @@ def test_build_artifacts_dataframe_pivots_ref_and_tags() -> None:
     df = dfh.build_artifacts_dataframe(
         [_artifact(1, 0, "img", "ref://a", tags={"split": "train"}), _artifact(1, 1, "img", "ref://b")]
     )
-    assert list(df.loc[df["step"] == 0, "img"]) == ["ref://a"]
-    assert df.loc[df["step"] == 0, "img__tags"].iloc[0] == {"split": "train"}
-    assert df.loc[df["step"] == 1, "img__tags"].iloc[0] == {}
+    assert list(df.loc[df["step"] == 0, artifact_column("img")]) == ["ref://a"]
+    assert df.loc[df["step"] == 0, artifact_tags_column("img")].iloc[0] == {"split": "train"}
+    assert df.loc[df["step"] == 1, artifact_tags_column("img")].iloc[0] == {}
 
 
 def test_build_artifacts_dataframe_empty() -> None:

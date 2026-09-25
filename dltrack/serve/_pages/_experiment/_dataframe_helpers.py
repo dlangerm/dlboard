@@ -8,7 +8,7 @@ from typing import Any
 import pandas as pd
 
 from dltrack.models import Artifact, ColumnKind, HyperParams, MetricColumn
-from dltrack.plugins.charts._table_style import HPARAM_COLUMN_PREFIX
+from dltrack.plugins.charts._table_style import HPARAM_COLUMN_PREFIX, artifact_column, artifact_tags_column
 
 EXCLUDED_RUNS_KEY: typing.Final = "excluded_runs"
 """A `Page.page_settings` key -- the run ids the run-comparison table has deselected, which
@@ -23,9 +23,11 @@ def build_artifacts_dataframe(artifacts: typing.Iterable[Artifact]) -> pd.DataFr
 
     ref_pivot = df.pivot_table(index=["run_id", "step"], columns="key", values="ref", aggfunc="first")
     tags_pivot = df.pivot_table(index=["run_id", "step"], columns="key", values="tags", aggfunc="first")
-    tags_pivot.columns = [f"{c}__tags" for c in tags_pivot.columns]
-
-    return ref_pivot.join(tags_pivot).reset_index()
+    return (
+        ref_pivot.rename(columns=artifact_column)
+        .join(tags_pivot.rename(columns=artifact_tags_column))
+        .reset_index()
+    )
 
 
 def build_hyperparams_dataframe(

@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from structlog.stdlib import get_logger
 
 from dltrack.models import ChartType, ColumnKind
+from dltrack.plugins.charts._table_style import artifact_column, artifact_tags_column
 from dltrack.serve import ClientsideScript
 
 PAGE_SIZE = 6
@@ -99,12 +100,12 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
     @classmethod
     @typing.override
     def render(cls, parameters: ImageChartSettings, dataframe: pd.DataFrame) -> dmc.Stack:
-        col = parameters.key
+        col = artifact_column(parameters.key)
         x_col = parameters.x_axis
         if col not in dataframe.columns:
-            return dmc.Stack([dmc.Text(f"No artifacts logged for key '{col}'", c="dimmed")])
+            return dmc.Stack([dmc.Text(f"No artifacts logged for key '{parameters.key}'", c="dimmed")])
 
-        tag_col = f"{col}__tags"
+        tag_col = artifact_tags_column(parameters.key)
         has_tags = tag_col in dataframe.columns
         select_cols = ["run_id", x_col, col, *([tag_col] if has_tags else [])]
 
@@ -114,7 +115,7 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
             .sort_values(["run_id", x_col])
         )
         if df.empty:
-            return dmc.Stack([dmc.Text(f"No artifacts logged for key '{col}'", c="dimmed")])
+            return dmc.Stack([dmc.Text(f"No artifacts logged for key '{parameters.key}'", c="dimmed")])
 
         run_ids = sorted(df["run_id"].unique().tolist())
         all_steps = sorted(df[x_col].unique().tolist())
