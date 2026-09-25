@@ -1,14 +1,18 @@
-"""Pure dataframe-building helpers used only by the basic experiment page. No Dash, no Page classes."""
+"""Dataframe-building and column-catalog helpers used only by the basic experiment page. No Dash."""
 
 from __future__ import annotations
 
 import typing
+from dataclasses import dataclass
 from typing import Any
 
 import pandas as pd
 
 from dltrack.models import Artifact, ColumnKind, HyperParams, MetricColumn
 from dltrack.plugins.charts._table_style import HPARAM_COLUMN_PREFIX, artifact_column, artifact_tags_column
+
+if typing.TYPE_CHECKING:
+    from dltrack.models import DataStore
 
 EXCLUDED_RUNS_KEY: typing.Final = "excluded_runs"
 """A `Page.page_settings` key -- the run ids the run-comparison table has deselected, which
@@ -60,47 +64,49 @@ def merge_hyperparams(df: pd.DataFrame, hparams_df: pd.DataFrame) -> pd.DataFram
     return df.merge(hparams_df, on="run_id", how="left")
 
 
-def infer_column_kinds(
-    metric_columns: typing.Iterable[str],
-    artifact_keys: typing.Iterable[str],
-    hparam_keys: typing.Iterable[str] = (),
-) -> dict[str, ColumnKind]:
+@dataclass(frozen=True)
+class ColumnCatalog:
     """
-    Tag every known column with its kind.
+    Every name an experiment's charts can be configured with, by kind -- no values, just keys.
 
-    run_id is excluded (never a sensible field value);
-    step is kept since it's a common x_axis choice.
+    What the chart editor offers as field choices, and what auto-populate/suggest-charts build
+    charts from. Loaded fresh (a few key-listing queries) whenever it's needed, never cached
+    client-side: it's cheap, and a cached copy goes stale the moment training logs a new key.
     """
-    kinds = {c: ColumnKind.METRIC for c in metric_columns if c != MetricColumn.RUN_ID}
-    kinds.update(dict.fromkeys(artifact_keys, ColumnKind.ARTIFACT))
-    kinds.update(dict.fromkeys(hparam_keys, ColumnKind.HPARAM))
-    return kinds
 
+    metrics: tuple[str, ...] = ()
+    single_value_metrics: frozenset[str] = frozenset()
+    """Metrics every run logged at most once -- a natural fit for a bar chart, not a line chart."""
+    artifacts: tuple[str, ...] = ()
+    hparams: tuple[str, ...] = ()
 
-def group_columns_by_kind(column_kinds: dict[str, str]) -> dict[ColumnKind, list[str]]:
-    """
-    Round-trip Store data (plain strings) back into ColumnKind-keyed groups.
+    @classmethod
+    def load(cls, store: DataStore[...], experiment_id: int) -> ColumnCatalog:
+        metrics = store.summarize_metric_keys(experiment_id)
+        return cls(
+            metrics=tuple(m.key for m in metrics),
+            single_value_metrics=frozenset(m.key for m in metrics if m.max_steps_per_run <= 1),
+            artifacts=tuple(sorted({a.key for a in store.fetch_artifacts(experiment_id)})),
+            hparams=tuple(
+                sorted({k for h in store.fetch_hyperparams(experiment_id) for k in h.hparams_dict})
+            ),
+        )
 
-    Also synthesizes a `GROUPING` bucket -- metric and hparam columns plus `run_id` -- for fields
-    (e.g. a bar chart's `x_axis`) that group/split by any of those rather than being restricted to
-    one specific kind.
-    """
-    grouped: dict[ColumnKind, list[str]] = {}
-    for col, kind in column_kinds.items():
-        grouped.setdefault(ColumnKind(kind), []).append(col)
-    grouped[ColumnKind.GROUPING] = sorted(
-        {"run_id", *grouped.get(ColumnKind.METRIC, []), *grouped.get(ColumnKind.HPARAM, [])}
-    )
-    return grouped
+    @property
+    def has_chartable_keys(self) -> bool:
+        return bool(self.metrics or self.artifacts)
 
-
-def single_value_metric_columns(df: pd.DataFrame, metric_columns: typing.Iterable[str]) -> set[str]:
-    """Metric columns every run logs at most once -- a natural fit for a bar chart, not a line chart."""
-    metric_columns = [c for c in metric_columns if c in df.columns]
-    if df.empty or "run_id" not in df.columns or not metric_columns:
-        return set()
-    counts = df.groupby("run_id")[metric_columns].count()
-    return {col for col in metric_columns if (counts[col] <= 1).all()}
+    def options(self, kind: ColumnKind) -> list[str]:
+        """The choices for a chart field of `kind` -- `step`/`timestamp_utc` being common metric x-axes."""
+        match kind:
+            case ColumnKind.METRIC:
+                return [*self.metrics, MetricColumn.STEP, MetricColumn.TIMESTAMP_UTC] if self.metrics else []
+            case ColumnKind.ARTIFACT:
+                return list(self.artifacts)
+            case ColumnKind.HPARAM:
+                return list(self.hparams)
+            case ColumnKind.GROUPING:
+                return sorted({MetricColumn.RUN_ID, *self.options(ColumnKind.METRIC), *self.hparams})
 
 
 def merge_metrics_and_artifacts(metrics_df: pd.DataFrame, artifacts_df: pd.DataFrame) -> pd.DataFrame:

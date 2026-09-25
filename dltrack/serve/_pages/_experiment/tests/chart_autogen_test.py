@@ -8,6 +8,7 @@ from dltrack.plugins.charts.bar_chart import BarChart
 from dltrack.plugins.charts.image_series import ImageChart
 from dltrack.plugins.charts.line_chart import LineChart
 from dltrack.serve._pages._experiment import _chart_autogen as autogen
+from dltrack.serve._pages._experiment._dataframe_helpers import ColumnCatalog
 
 LineChart.register(allow_override=True)
 ImageChart.register(allow_override=True)
@@ -101,33 +102,12 @@ def test_panel_name_for_group_granularity_splits_the_panel() -> None:
     assert autogen.panel_name_for_group("train", ColumnKind.METRIC, granularity=None) == "train"
 
 
-# ---- chartable_metric_columns / artifact_keys exclusions ----
-
-
-def test_chartable_metric_columns_excludes_bookkeeping_columns() -> None:
-    column_kinds = {
-        "train/loss": ColumnKind.METRIC,
-        "step": ColumnKind.METRIC,
-        "run_id": ColumnKind.METRIC,
-        "timestamp_utc": ColumnKind.METRIC,
-        "index": ColumnKind.METRIC,
-        "experiment_id": ColumnKind.METRIC,
-        "img": ColumnKind.ARTIFACT,
-    }
-    assert autogen.chartable_metric_columns(column_kinds) == ["train/loss"]
-
-
 # ---- build_auto_panels ----
 
 
 def test_build_auto_panels_groups_metrics_by_prefix() -> None:
-    column_kinds = {
-        "train/loss": ColumnKind.METRIC,
-        "train/acc": ColumnKind.METRIC,
-        "val/loss": ColumnKind.METRIC,
-        "step": ColumnKind.METRIC,
-    }
-    panels = autogen.build_auto_panels(column_kinds, delimiter="/", mode="prefix")
+    catalog = ColumnCatalog(metrics=("train/loss", "train/acc", "val/loss"))
+    panels = autogen.build_auto_panels(catalog, delimiter="/", mode="prefix")
 
     by_name = {p.name: p for p in panels}
     assert set(by_name) == {"train", "val"}
@@ -136,12 +116,8 @@ def test_build_auto_panels_groups_metrics_by_prefix() -> None:
 
 
 def test_build_auto_panels_groups_metrics_by_suffix() -> None:
-    column_kinds = {
-        "train/loss": ColumnKind.METRIC,
-        "val/loss": ColumnKind.METRIC,
-        "val/acc": ColumnKind.METRIC,
-    }
-    panels = autogen.build_auto_panels(column_kinds, delimiter="/", mode="suffix")
+    catalog = ColumnCatalog(metrics=("train/loss", "val/loss", "val/acc"))
+    panels = autogen.build_auto_panels(catalog, delimiter="/", mode="suffix")
 
     by_name = {p.name: p for p in panels}
     assert set(by_name) == {"loss", "acc"}
@@ -149,8 +125,8 @@ def test_build_auto_panels_groups_metrics_by_suffix() -> None:
 
 
 def test_build_auto_panels_groups_undelimited_metrics_into_one_shared_panel() -> None:
-    column_kinds = {"loss": ColumnKind.METRIC, "accuracy": ColumnKind.METRIC, "train/lr": ColumnKind.METRIC}
-    panels = autogen.build_auto_panels(column_kinds, delimiter="/", mode="prefix")
+    catalog = ColumnCatalog(metrics=("loss", "accuracy", "train/lr"))
+    panels = autogen.build_auto_panels(catalog, delimiter="/", mode="prefix")
 
     by_name = {p.name: p for p in panels}
     assert set(by_name) == {autogen.UNGROUPED_GROUP_NAME, "train"}
@@ -163,11 +139,8 @@ def test_build_auto_panels_groups_undelimited_metrics_into_one_shared_panel() ->
 
 def test_build_auto_panels_keeps_artifacts_in_their_own_panel_even_on_name_collision() -> None:
     """A metric group and an artifact group sharing a name must never merge into one panel."""
-    column_kinds = {
-        "train/loss": ColumnKind.METRIC,
-        "train/sample_image": ColumnKind.ARTIFACT,
-    }
-    panels = autogen.build_auto_panels(column_kinds, delimiter="/", mode="prefix")
+    catalog = ColumnCatalog(metrics=("train/loss",), artifacts=("train/sample_image",))
+    panels = autogen.build_auto_panels(catalog, delimiter="/", mode="prefix")
 
     by_name = {p.name: p for p in panels}
     assert set(by_name) == {"train", f"train{autogen.ARTIFACT_PANEL_SUFFIX}"}
@@ -176,8 +149,8 @@ def test_build_auto_panels_keeps_artifacts_in_their_own_panel_even_on_name_colli
 
 
 def test_build_auto_panels_default_chart_params() -> None:
-    column_kinds = {"loss": ColumnKind.METRIC, "img": ColumnKind.ARTIFACT}
-    panels = autogen.build_auto_panels(column_kinds, delimiter="/", mode="prefix")
+    catalog = ColumnCatalog(metrics=("loss",), artifacts=("img",))
+    panels = autogen.build_auto_panels(catalog, delimiter="/", mode="prefix")
 
     metric_chart = next(c for p in panels for c in p.charts if c.chart_type == "line")
     assert metric_chart.parameters == {"column": "loss", "x_axis": "step"}
@@ -187,12 +160,8 @@ def test_build_auto_panels_default_chart_params() -> None:
 
 
 def test_build_auto_panels_lightning_splits_step_and_epoch_variants_into_adjacent_panels() -> None:
-    column_kinds = {
-        "train/loss_step": ColumnKind.METRIC,
-        "train/loss_epoch": ColumnKind.METRIC,
-        "train/lr": ColumnKind.METRIC,
-    }
-    panels = autogen.build_auto_panels(column_kinds, delimiter="/", mode="prefix", lightning=True)
+    catalog = ColumnCatalog(metrics=("train/loss_step", "train/loss_epoch", "train/lr"))
+    panels = autogen.build_auto_panels(catalog, delimiter="/", mode="prefix", lightning=True)
 
     by_name = {p.name: p for p in panels}
     assert set(by_name) == {"train (step)", "train (epoch)", "train"}
@@ -202,15 +171,15 @@ def test_build_auto_panels_lightning_splits_step_and_epoch_variants_into_adjacen
 
 
 def test_build_auto_panels_ignores_lightning_suffixes_when_not_lightning() -> None:
-    column_kinds = {"train/loss_step": ColumnKind.METRIC, "train/loss_epoch": ColumnKind.METRIC}
-    panels = autogen.build_auto_panels(column_kinds, delimiter="/", mode="prefix", lightning=False)
+    catalog = ColumnCatalog(metrics=("train/loss_step", "train/loss_epoch"))
+    panels = autogen.build_auto_panels(catalog, delimiter="/", mode="prefix", lightning=False)
 
     assert [p.name for p in panels] == ["train"]
     assert {c.parameters["column"] for c in panels[0].charts} == {"train/loss_step", "train/loss_epoch"}
 
 
-def test_build_auto_panels_empty_column_kinds_produces_no_panels() -> None:
-    assert autogen.build_auto_panels({}, delimiter="/", mode="prefix") == []
+def test_build_auto_panels_empty_catalog_produces_no_panels() -> None:
+    assert autogen.build_auto_panels(ColumnCatalog(), delimiter="/", mode="prefix") == []
 
 
 # ---- find_uncharted_keys ----
@@ -218,31 +187,26 @@ def test_build_auto_panels_empty_column_kinds_produces_no_panels() -> None:
 
 def test_find_uncharted_keys_excludes_already_charted_metrics_and_artifacts() -> None:
     panels = [_panel("train", _line("train/loss")), _panel("imgs", _image("train/sample"))]
-    column_kinds = {
-        "train/loss": ColumnKind.METRIC,
-        "train/acc": ColumnKind.METRIC,
-        "train/sample": ColumnKind.ARTIFACT,
-        "train/other_img": ColumnKind.ARTIFACT,
-    }
+    catalog = ColumnCatalog(
+        metrics=("train/loss", "train/acc"), artifacts=("train/sample", "train/other_img")
+    )
 
-    uncharted = autogen.find_uncharted_keys(panels, column_kinds)
+    uncharted = autogen.find_uncharted_keys(panels, catalog)
 
     assert uncharted == autogen.UnchartedKeys(metrics=["train/acc"], artifacts=["train/other_img"])
 
 
 def test_find_uncharted_keys_all_uncharted_when_no_panels() -> None:
-    column_kinds = {"loss": ColumnKind.METRIC, "img": ColumnKind.ARTIFACT}
-    assert autogen.find_uncharted_keys([], column_kinds) == autogen.UnchartedKeys(
+    catalog = ColumnCatalog(metrics=("loss",), artifacts=("img",))
+    assert autogen.find_uncharted_keys([], catalog) == autogen.UnchartedKeys(
         metrics=["loss"], artifacts=["img"]
     )
 
 
 def test_find_uncharted_keys_nothing_uncharted_when_fully_covered() -> None:
     panels = [_panel("p", _line("loss"), _image("img"))]
-    column_kinds = {"loss": ColumnKind.METRIC, "img": ColumnKind.ARTIFACT}
-    assert autogen.find_uncharted_keys(panels, column_kinds) == autogen.UnchartedKeys(
-        metrics=[], artifacts=[]
-    )
+    catalog = ColumnCatalog(metrics=("loss",), artifacts=("img",))
+    assert autogen.find_uncharted_keys(panels, catalog) == autogen.UnchartedKeys(metrics=[], artifacts=[])
 
 
 # ---- build_suggestions ----
@@ -291,10 +255,8 @@ def test_build_suggestions_single_value_metric_gets_a_bar_chart_across_runs() ->
 
 
 def test_build_auto_panels_single_value_metric_gets_a_bar_chart() -> None:
-    column_kinds = {"final_accuracy": ColumnKind.METRIC}
-    panels = autogen.build_auto_panels(
-        column_kinds, delimiter="/", mode="prefix", single_value_columns=frozenset({"final_accuracy"})
-    )
+    catalog = ColumnCatalog(metrics=("final_accuracy",), single_value_metrics=frozenset({"final_accuracy"}))
+    panels = autogen.build_auto_panels(catalog, delimiter="/", mode="prefix")
     assert panels[0].charts[0].chart_type == "bar"
 
 

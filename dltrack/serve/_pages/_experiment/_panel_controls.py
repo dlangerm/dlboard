@@ -4,13 +4,10 @@ Panel/chart CRUD callbacks: create/rename/delete/move a panel; delete/move a cha
 The add/edit-chart modal's own form-building/preview callbacks live in `_chart_editor_modal.py`;
 this module owns the "submit" mutation, plus toggling a panel's sync/layout.
 
-Several of these callbacks repeat the same `(page_json, experiment_id, full_df_json, column_kinds)`
-tail. Rather than list each as its own Python parameter (which is what earned the original
-`plug()` its `# noqa: PLR0913`s), they're passed as one Dash "flexible callback signature" grouping
--- a `dict` of `Input`/`State` objects that Dash flattens for dependency-tracking purposes but
-delivers back to the callback as a single dict argument. `_experiment_page_state.edit_ctx_state()`
-supplies the `(page_json, view_state)` portion shared by every callback below; each callback merges
-in whatever else it needs (a `target`, `old_name`/`new_name`, ...) into the same grouped `State`.
+Callbacks needing more than a couple of `State`s take them as one Dash "flexible callback
+signature" grouping -- a `dict` of `Input`/`State` objects that Dash flattens for dependency
+tracking but delivers back as a single dict argument (typed by a `core.EditCtx` subclass), which is
+what keeps them under ruff's `max-args`.
 
 Each feature (create, add-chart, delete-chart, delete-panel, move, toggle, rename) registers via
 its own small `_register_*` function -- mirroring `simple_admin_page.py`'s existing
@@ -76,11 +73,11 @@ def _register_create_panel(app: Dash) -> None:
         Input(core.NEW_PANEL_ID, "n_clicks"),
         Input(constants.STATE_EXPERIMENT_ID, "data"),
         State(core.NEW_PANEL_NAME_ID, "value"),
-        core.edit_ctx_state(),
+        State(core.STATE_PAGE_STORAGE, "data"),
         prevent_initial_call=True,
     )
     def create_panel(
-        n_clicks: int, experiment_id: int, panel_name: str, edit_ctx: core.EditCtx
+        n_clicks: int, experiment_id: int, panel_name: str, page_json: str
     ) -> tuple[html.Div, str]:
         if not n_clicks:
             raise PreventUpdate
@@ -94,12 +91,7 @@ def _register_create_panel(app: Dash) -> None:
                 raise ValueError(msg)
             return [*panels, PanelInstance(name=panel_name)]
 
-        page, container = core.mutate_panels_and_rerender(
-            edit_ctx["page_json"],
-            experiment_id,
-            add_panel,
-            view_state=core.edit_view_state_from_ctx(edit_ctx),
-        )
+        page, container = core.mutate_panels_and_rerender(page_json, experiment_id, add_panel)
         return container, page.model_dump_json()
 
 
@@ -118,7 +110,7 @@ def _register_add_chart(app: Dash) -> None:
             "field_ids": State({"type": core.CHART_PARAM_TYPE, "field": ALL}, "id"),
             "target": State(core.ADD_CHART_TARGET_ID, "data"),
             "experiment_id": State(constants.STATE_EXPERIMENT_ID, "data"),
-            **core.edit_ctx_state(),
+            "page_json": State(core.STATE_PAGE_STORAGE, "data"),
         },
         prevent_initial_call=True,
     )
@@ -145,7 +137,6 @@ def _register_add_chart(app: Dash) -> None:
             add_chart_ctx["page_json"],
             add_chart_ctx["experiment_id"],
             apply_chart,
-            view_state=core.edit_view_state_from_ctx(add_chart_ctx),
         )
         return container, False, "", page.model_dump_json(), False
 
@@ -170,7 +161,7 @@ def _register_delete_chart(app: Dash) -> None:
         {
             "target": State(core.DELETE_CHART_TARGET_ID, "data"),
             "experiment_id": State(constants.STATE_EXPERIMENT_ID, "data"),
-            **core.edit_ctx_state(),
+            "page_json": State(core.STATE_PAGE_STORAGE, "data"),
         },
         prevent_initial_call=True,
     )
@@ -194,7 +185,6 @@ def _register_delete_chart(app: Dash) -> None:
             delete_ctx["page_json"],
             delete_ctx["experiment_id"],
             remove_chart,
-            view_state=core.edit_view_state_from_ctx(delete_ctx),
         )
         return container, page.model_dump_json(), False
 
@@ -229,7 +219,7 @@ def _register_delete_panel(app: Dash) -> None:
         {
             "target": State(core.DELETE_PANEL_TARGET_ID, "data"),
             "experiment_id": State(constants.STATE_EXPERIMENT_ID, "data"),
-            **core.edit_ctx_state(),
+            "page_json": State(core.STATE_PAGE_STORAGE, "data"),
         },
         prevent_initial_call=True,
     )
@@ -247,7 +237,6 @@ def _register_delete_panel(app: Dash) -> None:
             delete_ctx["page_json"],
             delete_ctx["experiment_id"],
             remove_panel,
-            view_state=core.edit_view_state_from_ctx(delete_ctx),
         )
         return container, page.model_dump_json(), False
 
@@ -330,16 +319,12 @@ def _register_toggle(app: Dash) -> None:
         Input({"type": "panel-sync", "panel": ALL}, "checked"),
         State(core.STATE_PAGE_STORAGE, "data"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
-        State(core.FULL_DF_STORE_ID, "data", allow_optional=True),
-        State(core.COLUMN_KINDS_STORE_ID, "data", allow_optional=True),
         prevent_initial_call=True,
     )
     def toggle_panel_sync(
         _checked_list: list[bool],
         page_json: str,
         experiment_id: int,
-        full_df_json: str | None,
-        column_kinds: dict[str, str] | None,
     ) -> tuple[html.Div, str]:
         # Unlike button clicks, a Switch's `checked` is a meaningful trigger value even when
         # `False`, so this can't reuse `require_triggered_id`'s "falsy value means no real
@@ -368,7 +353,6 @@ def _register_toggle(app: Dash) -> None:
             page_json,
             experiment_id,
             toggle,
-            view_state=core.EditViewState(full_df_json=full_df_json, column_kinds=column_kinds),
         )
         return container, page.model_dump_json()
 
@@ -378,16 +362,12 @@ def _register_toggle(app: Dash) -> None:
         Input({"type": "panel-layout", "panel": ALL}, "value"),
         State(core.STATE_PAGE_STORAGE, "data"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
-        State(core.FULL_DF_STORE_ID, "data", allow_optional=True),
-        State(core.COLUMN_KINDS_STORE_ID, "data", allow_optional=True),
         prevent_initial_call=True,
     )
     def toggle_panel_layout(
         _value_list: list[str],
         page_json: str,
         experiment_id: int,
-        full_df_json: str | None,
-        column_kinds: dict[str, str] | None,
     ) -> tuple[html.Div, str]:
         if not ctx.triggered_id:  # pyright: ignore[reportUnknownMemberType]
             raise PreventUpdate
@@ -410,7 +390,6 @@ def _register_toggle(app: Dash) -> None:
             page_json,
             experiment_id,
             toggle,
-            view_state=core.EditViewState(full_df_json=full_df_json, column_kinds=column_kinds),
         )
         return container, page.model_dump_json()
 
@@ -431,16 +410,12 @@ def _register_tab_drop(app: Dash) -> None:
         Input(core.TAB_DROP_STORE_ID, "data"),
         State(core.STATE_PAGE_STORAGE, "data"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
-        State(core.FULL_DF_STORE_ID, "data", allow_optional=True),
-        State(core.COLUMN_KINDS_STORE_ID, "data", allow_optional=True),
         prevent_initial_call=True,
     )
     def drop_panel_on_tab(
         request: core.TabDropRequest | None,
         page_json: str,
         experiment_id: int,
-        full_df_json: str | None,
-        column_kinds: dict[str, str] | None,
     ) -> tuple[html.Div, str]:
         if not request:
             raise PreventUpdate
@@ -458,7 +433,6 @@ def _register_tab_drop(app: Dash) -> None:
             page_json,
             experiment_id,
             move,
-            view_state=core.EditViewState(full_df_json=full_df_json, column_kinds=column_kinds),
             extra_settings={core.ACTIVE_TAB_KEY: new_tab},
         )
         return container, page.model_dump_json()
@@ -469,16 +443,12 @@ def _register_tab_drop(app: Dash) -> None:
         Input(core.CHART_TAB_DROP_STORE_ID, "data"),
         State(core.STATE_PAGE_STORAGE, "data"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
-        State(core.FULL_DF_STORE_ID, "data", allow_optional=True),
-        State(core.COLUMN_KINDS_STORE_ID, "data", allow_optional=True),
         prevent_initial_call=True,
     )
     def drop_chart_on_tab(
         request: core.ChartTabDropRequest | None,
         page_json: str,
         experiment_id: int,
-        full_df_json: str | None,
-        column_kinds: dict[str, str] | None,
     ) -> tuple[html.Div, str]:
         """Move a single chart to an *existing* tab -- see `drop_panel_on_tab`, its panel-level twin."""
         if not request:
@@ -492,7 +462,6 @@ def _register_tab_drop(app: Dash) -> None:
             page_json,
             experiment_id,
             move,
-            view_state=core.EditViewState(full_df_json=full_df_json, column_kinds=column_kinds),
             extra_settings={core.ACTIVE_TAB_KEY: new_tab},
         )
         return container, page.model_dump_json()
@@ -513,16 +482,12 @@ def _register_chart_panel_move(app: Dash) -> None:
         Input(core.CHART_PANEL_MOVE_STORE_ID, "data"),
         State(core.STATE_PAGE_STORAGE, "data"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
-        State(core.FULL_DF_STORE_ID, "data", allow_optional=True),
-        State(core.COLUMN_KINDS_STORE_ID, "data", allow_optional=True),
         prevent_initial_call=True,
     )
     def drop_chart_on_panel(
         request: core.ChartPanelMoveRequest | None,
         page_json: str,
         experiment_id: int,
-        full_df_json: str | None,
-        column_kinds: dict[str, str] | None,
     ) -> tuple[html.Div, str]:
         if not request:
             raise PreventUpdate
@@ -538,7 +503,6 @@ def _register_chart_panel_move(app: Dash) -> None:
             page_json,
             experiment_id,
             move,
-            view_state=core.EditViewState(full_df_json=full_df_json, column_kinds=column_kinds),
         )
         return container, page.model_dump_json()
 
@@ -567,7 +531,7 @@ def _register_rename(app: Dash) -> None:
             "old_name": State(core.RENAME_PANEL_TARGET_ID, "data"),
             "new_name": State(core.RENAME_PANEL_NAME_INPUT_ID, "value"),
             "experiment_id": State(constants.STATE_EXPERIMENT_ID, "data"),
-            **core.edit_ctx_state(),
+            "page_json": State(core.STATE_PAGE_STORAGE, "data"),
         },
         prevent_initial_call=True,
     )
@@ -607,7 +571,6 @@ def _register_rename(app: Dash) -> None:
         container = core.accordion_view(
             store,
             experiment_id=rename_ctx["experiment_id"],
-            view_state=core.edit_view_state_from_ctx(rename_ctx),
         )
         return container, curr_page.model_dump_json(), False, ""
 
@@ -669,7 +632,7 @@ def _register_new_tab(app: Dash) -> None:
             "name": State(core.NEW_TAB_NAME_INPUT_ID, "value"),
             "panel_names": State(core.NEW_TAB_PANELS_SELECT_ID, "value"),
             "experiment_id": State(constants.STATE_EXPERIMENT_ID, "data"),
-            **core.edit_ctx_state(),
+            "page_json": State(core.STATE_PAGE_STORAGE, "data"),
         },
         prevent_initial_call=True,
     )
@@ -700,7 +663,6 @@ def _register_new_tab(app: Dash) -> None:
         container = core.accordion_view(
             store,
             experiment_id=new_tab_ctx["experiment_id"],
-            view_state=core.edit_view_state_from_ctx(new_tab_ctx),
         )
         return container, curr_page.model_dump_json(), False, ""
 
@@ -754,7 +716,7 @@ def _register_rename_tab(app: Dash) -> None:
             "old_name": State(core.RENAME_TAB_TARGET_ID, "data"),
             "new_name": State(core.RENAME_TAB_NAME_INPUT_ID, "value"),
             "experiment_id": State(constants.STATE_EXPERIMENT_ID, "data"),
-            **core.edit_ctx_state(),
+            "page_json": State(core.STATE_PAGE_STORAGE, "data"),
         },
         prevent_initial_call=True,
     )
@@ -785,7 +747,6 @@ def _register_rename_tab(app: Dash) -> None:
         container = core.accordion_view(
             store,
             experiment_id=rename_ctx["experiment_id"],
-            view_state=core.edit_view_state_from_ctx(rename_ctx),
         )
         return container, curr_page.model_dump_json(), False, ""
 

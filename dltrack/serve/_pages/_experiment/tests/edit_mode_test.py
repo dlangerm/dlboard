@@ -1,116 +1,19 @@
 # pyright: reportPrivateUsage=false
-"""Regression tests for the cached-dataframe store surviving a panel/chart re-render.
-
-Adding a panel or chart (or changing run selection) used to silently emit fresh, empty `Store`s on
-every re-render, wiping the cached full-dataframe store used for chart previews. These tests pin
-the fix: `full_df_json`/`column_kinds` must round-trip through a re-render.
-"""
+"""Tests for which edit controls `accordion_view` offers for a page's current state."""
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
-from dltrack import models
 from dltrack.conftest import find_props as _find_props
-from dltrack.models._view import ColumnKind, PanelInstance
+from dltrack.models._view import PanelInstance
 from dltrack.plugins.charts.line_chart import LineChart
 from dltrack.serve._pages._experiment import _experiment_page_state as state
 
 if TYPE_CHECKING:
     from dltrack.plugins.data_stores.sqlite import SQLLiteStore
 
-_TS = datetime(2026, 1, 1, tzinfo=UTC)
-
 LineChart.register(allow_override=True)
-
-
-# ---- accordion_view: cached dataframe must round-trip, not reset ----
-
-
-def test_accordion_view_defaults_to_no_cached_dataframe(store: SQLLiteStore, experiment_id: int) -> None:
-    container = state.accordion_view(store, experiment_id)
-
-    full_df_store = _find_props(cast("Any", container).children, state.FULL_DF_STORE_ID)
-    assert full_df_store is not None
-    assert full_df_store.get("data") is None
-
-
-def test_accordion_view_preserves_cached_dataframe(store: SQLLiteStore, experiment_id: int) -> None:
-    container = state.accordion_view(
-        store,
-        experiment_id,
-        view_state=state.EditViewState(
-            full_df_json='{"cached": true}',
-            column_kinds={"loss": ColumnKind.METRIC},
-        ),
-    )
-
-    full_df_store = _find_props(cast("Any", container).children, state.FULL_DF_STORE_ID)
-    assert full_df_store is not None
-    assert full_df_store["data"] == '{"cached": true}'
-
-    column_kinds_store = _find_props(cast("Any", container).children, state.COLUMN_KINDS_STORE_ID)
-    assert column_kinds_store is not None
-    assert column_kinds_store["data"] == {"loss": ColumnKind.METRIC}
-
-
-def test_persist_settings_and_rerender_does_not_reset_cached_dataframe(
-    store: SQLLiteStore, experiment_id: int
-) -> None:
-    """Regression: changing run selection (or any page_settings update) must not drop the cached
-    dataframe used for chart previews.
-    """
-    store.get_or_create_page(state.BasicExperimentPage, experiment_id=experiment_id)
-
-    _page, container = state.persist_settings_and_rerender(
-        store,
-        experiment_id,
-        {"open_panel": []},
-        view_state=state.EditViewState(
-            full_df_json='{"cached": true}',
-            column_kinds={"loss": ColumnKind.METRIC},
-        ),
-    )
-
-    full_df_store = _find_props(cast("Any", container).children, state.FULL_DF_STORE_ID)
-    assert full_df_store is not None
-    assert full_df_store["data"] == '{"cached": true}'
-
-
-# ---- compute_full_df_and_column_kinds: the on-demand fallback used by auto-populate/suggest ----
-
-
-def test_compute_full_df_and_column_kinds_finds_data_without_a_cache_populated(
-    store: SQLLiteStore, experiment_id: int
-) -> None:
-    """
-    Regression: auto-generating charts (or suggesting them) right after opening a brand new
-    experiment used to wrongly report "no data logged" -- `COLUMN_KINDS_STORE_ID` is only ever
-    populated by a prior add/edit-chart or suggest-charts interaction, which a first-time visitor
-    may never have done, even though metrics were already logged.
-    """
-    run = store.create_run(models.NewRun(experiment_id=experiment_id))
-    store.log_metrics(
-        [
-            models.LoggedMetrics(
-                metrics={"loss": 0.5}, step=0, experiment_id=experiment_id, run_id=run.id, timestamp_utc=_TS
-            )
-        ]
-    )
-
-    full_df_json, column_kinds = state.compute_full_df_and_column_kinds(store, experiment_id)
-
-    assert column_kinds["loss"] == ColumnKind.METRIC.value
-    assert full_df_json
-
-
-def test_compute_full_df_and_column_kinds_empty_for_an_experiment_with_no_data(
-    store: SQLLiteStore, experiment_id: int
-) -> None:
-    _full_df_json, column_kinds = state.compute_full_df_and_column_kinds(store, experiment_id)
-
-    assert column_kinds == {}
 
 
 # ---- toolbar: auto-generate charts (empty view) vs suggest charts (non-empty view) ----

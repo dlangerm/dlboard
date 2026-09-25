@@ -75,6 +75,14 @@ class LoggedMetrics(BaseModel, frozen=True, extra="forbid"):
             )
 
 
+class MetricKeySummary(NamedTuple):
+    """One metric key logged in an experiment, summarized without fetching its values."""
+
+    key: str
+    max_steps_per_run: int
+    """The most distinct steps any one run logged this key at -- 1 means "a single value per run"."""
+
+
 class MetricRow(NamedTuple):
     """One stored metric value -- the exact row shape `DataStore.fetch_metrics` reads, in insertion order."""
 

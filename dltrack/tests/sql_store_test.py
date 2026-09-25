@@ -235,62 +235,30 @@ def test_fetch_metrics_keeps_the_last_value_written_for_a_key_relogged_at_one_st
     assert list(store.fetch_metrics(experiment_id).values("loss")) == [2.0]
 
 
-def test_list_metric_keys_is_distinct_and_sorted_without_fetching_values(
+def test_summarize_metric_keys_counts_each_keys_steps_per_run(
     store: SQLLiteStore, experiment_id: int
 ) -> None:
     run = store.create_run(models.NewRun(experiment_id=experiment_id))
-    store.log_metrics(
-        [
-            models.LoggedMetrics(
-                metrics={"loss": 0.5, "acc": 0.1},
-                step=0,
-                experiment_id=experiment_id,
-                run_id=run.id,
-                timestamp_utc=_TS,
-            ),
-            models.LoggedMetrics(
-                metrics={"loss": 0.4}, step=1, experiment_id=experiment_id, run_id=run.id, timestamp_utc=_TS
-            ),
-        ]
-    )
+    _log_step(store, run, 0, loss=0.5, acc=0.1)
+    _log_step(store, run, 1, loss=0.4)
 
-    assert store.list_metric_keys(experiment_id) == ["acc", "loss"]
+    assert store.summarize_metric_keys(experiment_id) == [
+        models.MetricKeySummary("acc", 1),
+        models.MetricKeySummary("loss", 2),
+    ]
 
 
-def test_list_metric_keys_excludes_deleted_runs_and_other_experiments(
+def test_summarize_metric_keys_excludes_deleted_runs_and_other_experiments(
     store: SQLLiteStore, experiment_id: int
 ) -> None:
     project = store.create_project(models.NewProject(name="other", description="d"))
     other_experiment = store.create_experiment(models.NewExperiment(project_id=project.id))
-    other_run = store.create_run(models.NewRun(experiment_id=other_experiment.id))
-    store.log_metrics(
-        [
-            models.LoggedMetrics(
-                metrics={"other_metric": 1.0},
-                step=0,
-                experiment_id=other_experiment.id,
-                run_id=other_run.id,
-                timestamp_utc=_TS,
-            )
-        ]
-    )
-
-    actor = store.get_or_create_user("alice")
+    _log_step(store, store.create_run(models.NewRun(experiment_id=other_experiment.id)), 0, other_metric=1.0)
     deleted_run = store.create_run(models.NewRun(experiment_id=experiment_id))
-    store.log_metrics(
-        [
-            models.LoggedMetrics(
-                metrics={"deleted_run_metric": 1.0},
-                step=0,
-                experiment_id=experiment_id,
-                run_id=deleted_run.id,
-                timestamp_utc=_TS,
-            )
-        ]
-    )
-    store.delete_run(deleted_run.id, actor)
+    _log_step(store, deleted_run, 0, deleted_run_metric=1.0)
+    store.delete_run(deleted_run.id, store.get_or_create_user("alice"))
 
-    assert store.list_metric_keys(experiment_id) == []
+    assert store.summarize_metric_keys(experiment_id) == []
 
 
 def test_log_and_fetch_artifacts_decodes_tags(store: SQLLiteStore, experiment_id: int) -> None:
