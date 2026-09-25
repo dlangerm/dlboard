@@ -21,6 +21,7 @@ from dltrack.models._metric import (
     LoggedMetrics,
     MetricColumn,
     MetricFrame,
+    MetricKeySummary,
     MetricRow,
     UnderlyingMetricTableEntry,
 )
@@ -67,6 +68,7 @@ __all__ = [
     "LoggedMetrics",
     "MetricColumn",
     "MetricFrame",
+    "MetricKeySummary",
     "MetricRow",
     "ModalId",
     "NewArtifact",

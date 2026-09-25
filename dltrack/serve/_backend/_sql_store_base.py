@@ -543,17 +543,22 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         )
         return models.MetricFrame.from_rows(cast("Iterator[models.MetricRow]", rows))
 
-    def list_metric_keys(self, experiment_id: int) -> list[str]:
-        """List the distinct metric names logged anywhere in an experiment, without fetching values."""
+    def summarize_metric_keys(self, experiment_id: int) -> list[models.MetricKeySummary]:
+        """Every metric key logged in an experiment (non-deleted runs), sorted, without fetching values."""
         rows = self._execute_raw_sql(
             f"""
-            SELECT DISTINCT m.key FROM {models.UnderlyingMetricTableEntry.__name__} m
-            JOIN {models.Run.__name__} r ON m.run_id = r.id
-            WHERE m.experiment_id = :experiment_id AND r.deleted_at IS NULL;
+            SELECT key, MAX(steps) FROM (
+                SELECT m.key, COUNT(DISTINCT m.step) AS steps
+                FROM {models.UnderlyingMetricTableEntry.__name__} m
+                JOIN {models.Run.__name__} r ON m.run_id = r.id
+                WHERE m.experiment_id = :experiment_id AND r.deleted_at IS NULL
+                GROUP BY m.key, m.run_id
+            )
+            GROUP BY key ORDER BY key;
             """,
             {"experiment_id": experiment_id},
         )
-        return sorted(row[0] for row in rows)
+        return [models.MetricKeySummary(key, steps) for key, steps in rows]
 
     def log_hyperparams(self, hyperparams: models.NewHyperParams) -> models.HyperParams:
         """Log hyperparameters to the data store."""

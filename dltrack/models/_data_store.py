@@ -107,13 +107,13 @@ class DataStore[**P](typing.Protocol):
         """An experiment's (non-deleted runs') metrics -- only `keys`, if given, else every metric."""
         ...
 
-    def list_metric_keys(self, experiment_id: int) -> list[str]:
+    def summarize_metric_keys(self, experiment_id: int) -> list[models.MetricKeySummary]:
         """
-        List the distinct metric names logged anywhere in an experiment, without fetching values.
+        Every metric key logged in an experiment (non-deleted runs), sorted, without fetching values.
 
-        For callers (e.g. a column picker) that only need to know what's *available* -- fetching
-        every metric row via `fetch_metrics` just to read off `.key` is needlessly expensive once
-        an experiment has any real volume of logged steps.
+        For callers (a column picker, chart suggestions) that only need to know what's *available*
+        -- fetching every metric row via `fetch_metrics` for that is needlessly expensive once an
+        experiment has any real volume of logged steps.
         """
         ...
 

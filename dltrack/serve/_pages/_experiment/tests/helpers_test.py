@@ -19,6 +19,7 @@ from dltrack.plugins.charts.line_chart import LineChart
 from dltrack.serve._pages._experiment import _experiment_page_state as state
 from dltrack.serve._pages._experiment import _run_comparison_table as run_table
 from dltrack.serve._pages._experiment._chart_editor_modal import _param_field_input
+from dltrack.serve._pages._experiment._dataframe_helpers import ColumnCatalog
 
 if TYPE_CHECKING:
     from dltrack.plugins.data_stores.sqlite import SQLLiteStore
@@ -283,8 +284,8 @@ def test_load_hparam_view_data_includes_values_for_selected_metrics(
     ],
 )
 def test_param_field_input_picks_widget_by_field_type(field: ParameterField, expected_type: type) -> None:
-    columns_by_kind = {ColumnKind.METRIC: ["loss", "acc"]}
-    component = _param_field_input(field.name, field, columns_by_kind)
+    catalog = ColumnCatalog(metrics=("loss", "acc"))
+    component = _param_field_input(field.name, field, catalog)
     assert isinstance(component, expected_type)
 
 
@@ -292,7 +293,7 @@ def test_param_field_input_optional_number_gets_a_clear_button() -> None:
     """An optional numeric field (e.g. width) gets a visible clear button -- backspacing to empty
     already works, but isn't discoverable on its own."""
     field = ParameterField(name="width", type=ParameterFieldType.INT, required=False, default=None)
-    component = _param_field_input(field.name, field, {})
+    component = _param_field_input(field.name, field, ColumnCatalog())
     props = cast("Any", component).to_plotly_json()["props"]
     assert props["rightSection"] is not None
     assert props["rightSectionPointerEvents"] == "all"
@@ -300,7 +301,7 @@ def test_param_field_input_optional_number_gets_a_clear_button() -> None:
 
 def test_param_field_input_required_number_has_no_clear_button() -> None:
     field = ParameterField(name="page_size", type=ParameterFieldType.INT, required=True)
-    component = _param_field_input(field.name, field, {})
+    component = _param_field_input(field.name, field, ColumnCatalog())
     props = cast("Any", component).to_plotly_json()["props"]
     assert props.get("rightSection") is None
 
@@ -311,7 +312,7 @@ def test_param_field_input_offers_grouping_kind_as_a_select() -> None:
     field = ParameterField(
         name="x_axis", type=ParameterFieldType.STR, required=True, column_kind=ColumnKind.GROUPING
     )
-    component = _param_field_input(field.name, field, {ColumnKind.GROUPING: ["loss", "lr", "run_id"]})
+    component = _param_field_input(field.name, field, ColumnCatalog(metrics=("loss",), hparams=("lr",)))
     assert isinstance(component, dmc.Select)
 
 
@@ -319,13 +320,13 @@ def test_param_field_input_falls_back_to_text_when_no_columns_of_kind() -> None:
     field = ParameterField(
         name="column", type=ParameterFieldType.STR, required=True, column_kind=ColumnKind.ARTIFACT
     )
-    component = _param_field_input(field.name, field, {ColumnKind.METRIC: ["loss"]})
+    component = _param_field_input(field.name, field, ColumnCatalog(metrics=("loss",)))
     assert isinstance(component, dmc.TextInput)
 
 
 def test_param_field_input_uses_override_over_default() -> None:
     field = ParameterField(name="sample", type=ParameterFieldType.BOOL, required=False, default=True)
-    component = _param_field_input(field.name, field, {}, override=False)
+    component = _param_field_input(field.name, field, ColumnCatalog(), override=False)
     # dash-mantine-components ships no py.typed marker, so pyright can't see this attr.
     assert cast("Any", component).to_plotly_json()["props"]["checked"] is False
 
@@ -341,7 +342,7 @@ def test_param_field_input_renders_fixed_choices_as_a_select() -> None:
         default="number",
         choices=("number", "category"),
     )
-    component = _param_field_input(field.name, field, {}, override="category")
+    component = _param_field_input(field.name, field, ColumnCatalog(), override="category")
 
     assert isinstance(component, dmc.Select)
     props = cast("Any", component).to_plotly_json()["props"]

@@ -18,12 +18,9 @@ from dltrack.plugins.charts.image_series import ImageChart
 from dltrack.plugins.charts.line_chart import LineChart
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from dltrack.serve._pages._experiment._dataframe_helpers import ColumnCatalog
 
 SplitMode = Literal["prefix", "suffix"]
-
-# Bookkeeping columns that ride along with every metric row; never sensible to chart directly.
-_METRIC_BOOKKEEPING_COLS = frozenset({"run_id", "step", "index", "timestamp_utc", "experiment_id"})
 
 # Artifact-derived panels always get this suffix, so they can never collide with a same-named
 # metric panel even when the prefix/suffix grouping produces the same group name for both.
@@ -84,7 +81,7 @@ def default_chart_for_metric(
     The sensible default chart for a metric column: a line chart against `step`.
 
     `single_value` (every run logs this metric at most once, per
-    `_dataframe_helpers.single_value_metric_columns`) switches that to a bar chart comparing the
+    `ColumnCatalog.single_value_metrics`) switches that to a bar chart comparing the
     value across runs instead -- a line chart of a single point per run isn't a chart at all.
     """
     if single_value:
@@ -97,27 +94,12 @@ def default_chart_for_artifact(key: str) -> ChartInstance[typing.Any, typing.Any
     return ChartInstance(chart_type=ImageChart.name, parameters={"key": key})
 
 
-def chartable_metric_columns(column_kinds: Mapping[str, str]) -> list[str]:
-    """Metric columns worth offering a chart for (i.e. not step/run_id/etc bookkeeping)."""
-    return sorted(
-        col
-        for col, kind in column_kinds.items()
-        if ColumnKind(kind) == ColumnKind.METRIC and col not in _METRIC_BOOKKEEPING_COLS
-    )
-
-
-def artifact_keys(column_kinds: Mapping[str, str]) -> list[str]:
-    """Artifact keys available for this experiment."""
-    return sorted(col for col, kind in column_kinds.items() if ColumnKind(kind) == ColumnKind.ARTIFACT)
-
-
 def build_auto_panels(
-    column_kinds: Mapping[str, str],
+    catalog: ColumnCatalog,
     *,
     delimiter: str,
     mode: SplitMode,
     lightning: bool = False,
-    single_value_columns: frozenset[str] = frozenset(),
 ) -> list[PanelInstance[typing.Any, typing.Any]]:
     """
     Build a full set of panels from every known metric/artifact key, grouped by `delimiter`/`mode`.
@@ -137,13 +119,15 @@ def build_auto_panels(
         else:
             panels[panel_name] = existing.model_copy(update={"charts": [*existing.charts, chart]})
 
-    for column in chartable_metric_columns(column_kinds):
+    for column in catalog.metrics:
         group = split_group_name(column, delimiter, mode)
         granularity = lightning_granularity(column) if lightning else None
         panel_name = panel_name_for_group(group, ColumnKind.METRIC, granularity=granularity)
-        _append(panel_name, default_chart_for_metric(column, single_value=column in single_value_columns))
+        _append(
+            panel_name, default_chart_for_metric(column, single_value=column in catalog.single_value_metrics)
+        )
 
-    for key in artifact_keys(column_kinds):
+    for key in catalog.artifacts:
         group = split_group_name(key, delimiter, mode)
         _append(panel_name_for_group(group, ColumnKind.ARTIFACT), default_chart_for_artifact(key))
 
@@ -158,8 +142,7 @@ class UnchartedKeys(typing.NamedTuple):
 
 
 def find_uncharted_keys(
-    panels: typing.Iterable[PanelInstance[typing.Any, typing.Any]],
-    column_kinds: Mapping[str, str],
+    panels: typing.Iterable[PanelInstance[typing.Any, typing.Any]], catalog: ColumnCatalog
 ) -> UnchartedKeys:
     """Diff every known metric/artifact key against what's already charted somewhere on the page."""
     charted_metrics: set[str] = set()
@@ -171,8 +154,8 @@ def find_uncharted_keys(
         charted_artifacts |= {k for k in panel.hint_required_artifact_keys() if k is not None}
 
     return UnchartedKeys(
-        metrics=[c for c in chartable_metric_columns(column_kinds) if c not in charted_metrics],
-        artifacts=[k for k in artifact_keys(column_kinds) if k not in charted_artifacts],
+        metrics=[c for c in catalog.metrics if c not in charted_metrics],
+        artifacts=[k for k in catalog.artifacts if k not in charted_artifacts],
     )
 
 

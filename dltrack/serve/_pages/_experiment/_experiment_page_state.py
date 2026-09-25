@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import hashlib
 import typing
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypedDict, cast
 
@@ -146,8 +145,6 @@ def tab_from_component_value(value: str) -> str:
     return "" if value == _UNGROUPED_TAB_VALUE else value
 
 
-FULL_DF_STORE_ID: StoreId[ExperimentPage] = StoreId("full-dataframe-store")
-COLUMN_KINDS_STORE_ID: StoreId[ExperimentPage] = StoreId("column-kinds-store")
 LOADED_PANELS_STORE_ID: StoreId[ExperimentPage] = StoreId("loaded-panels-store")
 
 NEW_PANEL_ID: ButtonId[ExperimentPage] = ButtonId("new-panel-button")
@@ -430,28 +427,6 @@ def fetch_panel_dataframe(
     return dfh.merge_hyperparams(dfh.merge_metrics_and_artifacts(metrics_df, artifacts_df), hparams_df)
 
 
-def compute_full_df_and_column_kinds(store: DataStore[...], experiment_id: int) -> tuple[str, dict[str, str]]:
-    """
-    Fetch every metric/artifact/hparam for `experiment_id` and infer each column's kind.
-
-    The expensive "load everything" path -- used wherever a column-kind lookup is needed but
-    `FULL_DF_STORE_ID`/`COLUMN_KINDS_STORE_ID` haven't been populated yet by an add/edit-chart or
-    suggest-charts interaction this page load, e.g. auto-generating charts right after opening a
-    brand new experiment.
-    """
-    metrics = store.fetch_metrics(experiment_id)
-    metrics_df = metrics.to_frame() if metrics.keys else pd.DataFrame()
-    artifacts = list(store.fetch_artifacts(experiment_id=experiment_id))
-    artifacts_df = dfh.build_artifacts_dataframe(artifacts)
-    hparams = list(store.fetch_hyperparams(experiment_id))
-    hparams_df = dfh.build_hyperparams_dataframe(hparams)
-    df = dfh.merge_metrics_and_artifacts(metrics_df, artifacts_df)
-    df = dfh.merge_hyperparams(df, hparams_df)
-    hparam_keys = {k for h in hparams for k in h.hparams_dict}
-    column_kinds = dfh.infer_column_kinds(metrics_df.columns, {a.key for a in artifacts}, hparam_keys)
-    return df.to_json(orient="split", date_format="iso"), {k: v.value for k, v in column_kinds.items()}
-
-
 def is_lightning_experiment(data_store: DataStore[...], experiment_id: int) -> bool:
     """
     Whether `experiment_id`'s metrics were logged through `DLTrackLogger`.
@@ -651,8 +626,8 @@ def chart_data_fingerprint(chart: models.ChartInstance[Any, Any], df: pd.DataFra
     metrics filter, documented to mean "show every metric") can't be scoped any tighter than the
     panel fetch already was.
 
-    Hashes the same `to_json(orient="split", ...)` serialization `compute_full_df_and_column_kinds`
-    already relies on elsewhere, not `pandas.util.hash_pandas_object` -- that hashes cell values
+    Hashes the `to_json(orient="split", ...)` serialization the rest of this page relies on,
+    not `pandas.util.hash_pandas_object` -- that hashes cell values
     directly and raises `TypeError: unhashable type` the moment any column holds something like a
     list (nothing in this dataframe's own columns does today, but a hash used purely to detect "did
     this change" has no business being pickier about content than the JSON serialization the rest of
@@ -1186,35 +1161,8 @@ def _delete_chart_confirm_modal() -> dmc.Modal:
     )
 
 
-@dataclass(frozen=True, slots=True)
-class EditViewState:
-    """
-    Client-cached dataframe/column-kind cache carried across a panel/chart mutation and its re-render.
-
-    Dash reports these as two separate `dcc.Store` properties, so callbacks still receive them as
-    two positional arguments -- but every callback bundles them into one `EditViewState`
-    immediately, so `accordion_view` and the mutation helpers below only need to thread one value
-    through instead of two.
-    """
-
-    full_df_json: str | None = None
-    column_kinds: dict[str, str] | None = None
-
-
-def accordion_view(
-    store: DataStore[...],
-    experiment_id: int,
-    *,
-    view_state: EditViewState | None = None,
-) -> html.Div:
-    """
-    The full accordion/tabs view for an experiment, plus every modal/drawer shell it can open.
-
-    `view_state` lets callers that re-render the accordion mid-edit (adding a panel/chart,
-    changing run selection, etc.) carry the cached dataframe forward instead of silently
-    resetting it.
-    """
-    view_state = view_state or EditViewState()
+def accordion_view(store: DataStore[...], experiment_id: int) -> html.Div:
+    """The full accordion/tabs view for an experiment, plus every modal/drawer shell it can open."""
     _log.debug("rendering chart for experiment %s", experiment_id)
     page = cast(
         "BasicExperimentPage", store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
@@ -1227,8 +1175,6 @@ def accordion_view(
         [
             page.render(store, experiment_id),
             Store(id=LOADED_PANELS_STORE_ID, data=list(open_value)),  # pyright: ignore[reportArgumentType]
-            Store(id=FULL_DF_STORE_ID, data=view_state.full_df_json),
-            Store(id=COLUMN_KINDS_STORE_ID, data=view_state.column_kinds),
             _add_chart_modal(),
             _suggest_charts_drawer(),
             _rename_panel_modal(),
@@ -1259,12 +1205,10 @@ def persist_settings_and_rerender(
     store: DataStore[...],
     experiment_id: int,
     updates: dict[str, Any],
-    *,
-    view_state: EditViewState | None = None,
 ) -> tuple[BasicExperimentPage, html.Div]:
     """Merge `updates` into page_settings (server-authoritative), persist, and re-render the accordion."""
     page = persist_settings(store, experiment_id, updates)
-    container = accordion_view(store, experiment_id=experiment_id, view_state=view_state)
+    container = accordion_view(store, experiment_id=experiment_id)
     return page, container
 
 
@@ -1273,7 +1217,6 @@ def mutate_panels_and_rerender(
     experiment_id: int,
     mutate: Callable[[list[models.PanelInstance[Any, Any]]], list[models.PanelInstance[Any, Any]]],
     *,
-    view_state: EditViewState | None = None,
     extra_settings: dict[str, Any] | None = None,
 ) -> tuple[BasicExperimentPage, html.Div]:
     """
@@ -1290,7 +1233,7 @@ def mutate_panels_and_rerender(
     curr_page = curr_page.model_copy(update=updates)
     store = get_data_store()
     curr_page = store.update_page(curr_page)
-    container = accordion_view(store, experiment_id=experiment_id, view_state=view_state)
+    container = accordion_view(store, experiment_id=experiment_id)
     return cast("BasicExperimentPage", curr_page), container
 
 
@@ -1599,35 +1542,15 @@ def build_validated_chart_instance(
     return models.ChartInstance[Any, Any](chart_type=chart_type_name, parameters=parameters)
 
 
-def edit_ctx_state() -> dict[str, Any]:
-    """
-    Grouped `State` for the `(page_json, full_df_json, column_kinds)` trio most mutation callbacks need.
-
-    A Dash "flexible callback signature" `State` argument instead of three separate ones -- this is
-    what keeps `create_panel`/`add_chart`/`delete_chart`/etc. under ruff's `max-args`.
-    `experiment_id` deliberately isn't part of this group: most of these callbacks read it as a
-    `State`, but `create_panel` listens to it as an `Input` too, so it stays a separate,
-    per-callback dependency instead of being folded in here.
-    """
-    return {
-        "page_json": models.store_state(STATE_PAGE_STORAGE),
-        "view_state": {
-            "full_df_json": models.store_state(FULL_DF_STORE_ID, allow_optional=True),
-            "column_kinds": models.store_state(COLUMN_KINDS_STORE_ID, allow_optional=True),
-        },
-    }
-
-
 class EditCtx(TypedDict):
+    """
+    Base for the grouped ("flexible callback signature") `State` dicts panel/chart mutations take.
+
+    One dict argument instead of several separate ones keeps those callbacks under ruff's
+    `max-args`; each subclass adds whatever that one callback needs next to `page_json`.
+    """
+
     page_json: str
-    view_state: dict[str, Any]
-
-
-def edit_view_state_from_ctx(edit_ctx: EditCtx) -> EditViewState:
-    return EditViewState(
-        full_df_json=edit_ctx["view_state"]["full_df_json"],
-        column_kinds=edit_ctx["view_state"]["column_kinds"],
-    )
 
 
 def register_state_callbacks(app: Dash) -> None:

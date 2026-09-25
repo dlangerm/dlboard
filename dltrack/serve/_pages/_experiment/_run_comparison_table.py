@@ -98,7 +98,7 @@ def _load_hparam_view_data(
     hydrated = [models.HyperParams.model_validate_json(run) for run in hparams]
     hparams_by_run = {h.run_id: h for h in hydrated}
     hparam_keys = sorted(set(itertools.chain(*[list(k.hparams_dict.keys()) for k in hydrated])))
-    metric_keys = store.list_metric_keys(experiment_id)
+    metric_keys = [s.key for s in store.summarize_metric_keys(experiment_id)]
     wanted = frozenset(selected_metrics & set(metric_keys))
     latest = store.fetch_metrics(experiment_id, keys=wanted).latest_per_run() if wanted else {}
     rows = _build_hparam_rows(runs, hparams_by_run, latest)
@@ -347,7 +347,7 @@ def _register_hparam_table(app: Dash) -> None:
         # on every live-update poll tick that finds *any* change in the experiment, metrics
         # included -- so this callback re-fires roughly as often as metrics get flushed during
         # active training, not just when a run/hparam/column-selection actually changes.
-        # `_load_hparam_view_data`'s `list_metric_keys` scan and (if a metric column is selected)
+        # `_load_hparam_view_data`'s `summarize_metric_keys` scan and (if a metric column is selected)
         # full metric-history refetch would otherwise run on every one of those ticks only to
         # almost always end in the `PreventUpdate` below anyway -- a cost every open experiment
         # page would pay constantly during training, not just the ones actually using the
@@ -406,16 +406,12 @@ def _register_hparam_table(app: Dash) -> None:
         Input(NAVBAR_HPARAM_DATATABLE_ID, "selectedRows", allow_optional=True),
         State(NAVBAR_HPARAM_DATATABLE_ID, "rowData", allow_optional=True),
         State(constants.STATE_EXPERIMENT_ID, "data"),
-        State(core.FULL_DF_STORE_ID, "data", allow_optional=True),
-        State(core.COLUMN_KINDS_STORE_ID, "data", allow_optional=True),
         prevent_initial_call=True,
     )
     def sync_run_selection(
         selected_rows: list[dict[str, Any]] | dict[str, Any] | None,
         table_data: list[dict[str, Any]] | None,
         experiment_id: int,
-        full_df_json: str | None,
-        column_kinds: dict[str, str] | None,
     ) -> tuple[str, html.Div]:
         if selected_rows is None or table_data is None:
             raise PreventUpdate
@@ -447,10 +443,6 @@ def _register_hparam_table(app: Dash) -> None:
             store,
             experiment_id,
             {dfh.EXCLUDED_RUNS_KEY: excluded},
-            view_state=core.EditViewState(
-                full_df_json=full_df_json,
-                column_kinds=column_kinds,
-            ),
         )
         return page.model_dump_json(), container
 

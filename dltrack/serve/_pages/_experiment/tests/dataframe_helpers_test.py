@@ -3,13 +3,21 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
+
 import pandas as pd
 import pytest
 
-from dltrack.models import Artifact, HyperParams, NewHyperParams, ValidJsonTypes
+from dltrack.models import Artifact, HyperParams, LoggedMetrics, NewHyperParams, NewRun, ValidJsonTypes
 from dltrack.models._view import ColumnKind
 from dltrack.plugins.charts._table_style import HPARAM_COLUMN_PREFIX, artifact_column, artifact_tags_column
 from dltrack.serve._pages._experiment import _dataframe_helpers as dfh
+
+if TYPE_CHECKING:
+    from dltrack.plugins.data_stores.sqlite import SQLLiteStore
+
+_TS = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def _artifact(run_id: int, step: int, key: str, ref: str, tags: dict[str, str] | None = None) -> Artifact:
@@ -40,43 +48,57 @@ def test_build_artifacts_dataframe_empty() -> None:
     assert dfh.build_artifacts_dataframe([]).empty
 
 
+_CATALOG = dfh.ColumnCatalog(metrics=("loss", "shared"), artifacts=("shared",), hparams=("lr",))
+
+
 @pytest.mark.parametrize(
-    ("metric_columns", "artifact_keys", "hparam_keys", "expected"),
+    ("kind", "expected"),
     [
-        (["run_id", "loss"], [], [], {"loss": ColumnKind.METRIC}),
-        (["loss"], ["image"], [], {"loss": ColumnKind.METRIC, "image": ColumnKind.ARTIFACT}),
-        (["shared"], ["shared"], [], {"shared": ColumnKind.ARTIFACT}),
-        (
-            ["loss"],
-            ["image"],
-            ["lr"],
-            {"loss": ColumnKind.METRIC, "image": ColumnKind.ARTIFACT, "lr": ColumnKind.HPARAM},
-        ),
+        (ColumnKind.METRIC, ["loss", "shared", "step", "timestamp_utc"]),
+        # A metric and an artifact sharing a name are each offered under their own kind -- the old
+        # `{name: kind}` dict could only hold one of them.
+        (ColumnKind.ARTIFACT, ["shared"]),
+        (ColumnKind.HPARAM, ["lr"]),
+        (ColumnKind.GROUPING, ["loss", "lr", "run_id", "shared", "step", "timestamp_utc"]),
     ],
 )
-def test_infer_column_kinds(
-    metric_columns: list[str],
-    artifact_keys: list[str],
-    hparam_keys: list[str],
-    expected: dict[str, ColumnKind],
+def test_column_catalog_options_by_kind(kind: ColumnKind, expected: list[str]) -> None:
+    assert _CATALOG.options(kind) == expected
+
+
+def test_column_catalog_offers_no_metric_axes_without_metrics() -> None:
+    assert dfh.ColumnCatalog(artifacts=("img",)).options(ColumnKind.METRIC) == []
+
+
+def test_column_catalog_load_summarizes_keys_without_their_values(
+    store: SQLLiteStore, experiment_id: int
 ) -> None:
-    assert dfh.infer_column_kinds(metric_columns, artifact_keys, hparam_keys) == expected
-
-
-def test_group_columns_by_kind_round_trips_plain_strings() -> None:
-    grouped = dfh.group_columns_by_kind(
-        {"loss": ColumnKind.METRIC, "image": ColumnKind.ARTIFACT, "acc": ColumnKind.METRIC}
+    runs = [store.create_run(NewRun(experiment_id=experiment_id)) for _ in range(2)]
+    steps: list[dict[str, float | None]] = [{"loss": 0.5}, {"loss": 0.4, "final_acc": 0.9}]
+    for run in runs:
+        store.log_metrics(
+            LoggedMetrics(
+                metrics=metrics, step=step, experiment_id=experiment_id, run_id=run.id, timestamp_utc=_TS
+            )
+            for step, metrics in enumerate(steps)
+        )
+        store.log_hyperparams(NewHyperParams.from_raw(run.id, experiment_id, {"lr": 0.1}))
+    store.log_artifact_refs(
+        [
+            Artifact(
+                key="img", fname="i.png", run_id=runs[0].id, experiment_id=experiment_id, step=0, ref="r://a"
+            )
+        ]
     )
-    assert grouped == {
-        ColumnKind.METRIC: ["loss", "acc"],
-        ColumnKind.ARTIFACT: ["image"],
-        ColumnKind.GROUPING: ["acc", "loss", "run_id"],
-    }
 
+    catalog = dfh.ColumnCatalog.load(store, experiment_id)
 
-def test_group_columns_by_kind_grouping_bucket_includes_hparams_and_run_id() -> None:
-    grouped = dfh.group_columns_by_kind({"loss": ColumnKind.METRIC, "lr": ColumnKind.HPARAM})
-    assert grouped[ColumnKind.GROUPING] == ["loss", "lr", "run_id"]
+    assert catalog == dfh.ColumnCatalog(
+        metrics=("final_acc", "loss"),
+        single_value_metrics=frozenset({"final_acc"}),
+        artifacts=("img",),
+        hparams=("lr",),
+    )
 
 
 @pytest.mark.parametrize(
@@ -139,24 +161,3 @@ def test_merge_hyperparams_empty_df_returns_hparams_df() -> None:
     hparams_df = dfh.build_hyperparams_dataframe([_hparams(1, run_id=1, lr=0.1)])
     merged = dfh.merge_hyperparams(pd.DataFrame(), hparams_df)
     pd.testing.assert_frame_equal(merged, hparams_df)
-
-
-def test_single_value_metric_columns_excludes_metrics_logged_at_multiple_steps() -> None:
-    df = pd.DataFrame(
-        {
-            "run_id": [1, 1, 2, 2],
-            "step": [0, 1, 0, 1],
-            "final_accuracy": [None, 0.9, None, 0.8],
-            "loss": [0.5, 0.4, 0.9, 0.7],
-        }
-    )
-    assert dfh.single_value_metric_columns(df, ["final_accuracy", "loss"]) == {"final_accuracy"}
-
-
-def test_single_value_metric_columns_empty_df() -> None:
-    assert dfh.single_value_metric_columns(pd.DataFrame(), ["loss"]) == set()
-
-
-def test_single_value_metric_columns_ignores_unknown_columns() -> None:
-    df = pd.DataFrame({"run_id": [1], "step": [0], "loss": [0.5]})
-    assert dfh.single_value_metric_columns(df, ["loss", "missing"]) == {"loss"}
