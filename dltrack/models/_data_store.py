@@ -97,7 +97,13 @@ class DataStore[**P](typing.Protocol):
         """Log metrics to the data store."""
         ...
 
-    def fetch_metrics(self, experiment_id: int, *, keys: frozenset[str] | None = None) -> models.MetricFrame:
+    def fetch_metrics(
+        self,
+        experiment_id: int,
+        *,
+        keys: frozenset[str] | None = None,
+        exclude_run_ids: frozenset[int] = frozenset(),
+    ) -> models.MetricFrame:
         """An experiment's (non-deleted runs') metrics -- only `keys`, if given, else every metric."""
         ...
 
@@ -115,8 +121,10 @@ class DataStore[**P](typing.Protocol):
         """Log hyperparameters to the data store."""
         ...
 
-    def fetch_hyperparams(self, experiment_id: int) -> typing.Iterator[models.HyperParams]:
-        """Fetch hyperparameters for all runs for a particular experiment_id."""
+    def fetch_hyperparams(
+        self, experiment_id: int, *, exclude_run_ids: frozenset[int] = frozenset()
+    ) -> typing.Iterator[models.HyperParams]:
+        """Every (non-deleted) run's hyperparameters for an experiment."""
         ...
 
     def get_or_create_page[Dataframe, Panel, Chart](
@@ -143,13 +151,12 @@ class DataStore[**P](typing.Protocol):
 
     def fetch_artifacts(
         self,
-        keys: set[str] | None = None,
-        run_id: int | None = None,
-        experiment_id: int | None = None,
-        step: int | None = None,
-        fname: str | None = None,
+        experiment_id: int,
+        *,
+        keys: frozenset[str] | None = None,
+        exclude_run_ids: frozenset[int] = frozenset(),
     ) -> typing.Iterator[models.Artifact]:
-        """Get artifacts for a run or experiment."""
+        """An experiment's (non-deleted) artifact metadata, not bytes -- only `keys`, if given."""
         ...
 
     def delete_project(self, project_id: int, actor: models.User) -> None:

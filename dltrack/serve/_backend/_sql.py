@@ -120,6 +120,15 @@ def escape_value_sql(value: object) -> str:
             raise NotImplementedError(type(value))
 
 
+def in_clause(
+    column: str, values: Iterable[object], *, prefix: str, negate: bool = False
+) -> tuple[str, dict[str, object]]:
+    """`AND <column> [NOT] IN (...)` plus its bound parameters, to append to a `WHERE` (`IN ()` is valid sqlite)."""
+    params = {f"{prefix}{i}": value for i, value in enumerate(values)}
+    placeholders = ", ".join(f":{name}" for name in params)
+    return f"AND {column} {'NOT IN' if negate else 'IN'} ({placeholders})", params
+
+
 def create_index_sql(model: type[BaseModel], columns: list[str], *, index_name: str | None = None) -> str:
     for c in columns:
         if c not in model.model_fields:

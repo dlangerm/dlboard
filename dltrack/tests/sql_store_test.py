@@ -317,10 +317,34 @@ def test_log_and_fetch_artifacts_decodes_tags(store: SQLLiteStore, experiment_id
         ]
     )
 
-    fetched = list(store.fetch_artifacts(experiment_id=experiment_id, keys={"img"}))
+    fetched = list(store.fetch_artifacts(experiment_id=experiment_id, keys=frozenset({"img"})))
     assert len(fetched) == 1
     assert fetched[0].tags == {"split": "train"}
     assert fetched[0].ref == "ref://a"
+
+
+def test_fetches_leave_out_excluded_runs(store: SQLLiteStore, experiment_id: int) -> None:
+    kept, excluded = (store.create_run(models.NewRun(experiment_id=experiment_id)) for _ in range(2))
+    for run in (kept, excluded):
+        _log_step(store, run, 0, loss=1.0)
+        store.log_hyperparams(models.NewHyperParams.from_raw(run.id, experiment_id, {"lr": 0.1}))
+        store.log_artifact_refs(
+            [
+                models.Artifact(
+                    key="img",
+                    fname="i.png",
+                    run_id=run.id,
+                    experiment_id=experiment_id,
+                    step=0,
+                    ref="ref://a",
+                )
+            ]
+        )
+    skip = frozenset({excluded.id})
+
+    assert set(store.fetch_metrics(experiment_id, exclude_run_ids=skip).run_id) == {kept.id}
+    assert {h.run_id for h in store.fetch_hyperparams(experiment_id, exclude_run_ids=skip)} == {kept.id}
+    assert {a.run_id for a in store.fetch_artifacts(experiment_id, exclude_run_ids=skip)} == {kept.id}
 
 
 @pytest.mark.parametrize(

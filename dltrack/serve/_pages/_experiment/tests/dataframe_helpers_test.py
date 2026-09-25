@@ -102,25 +102,6 @@ def test_merge_metrics_and_artifacts(*, metrics_empty: bool, artifacts_empty: bo
         assert set(merged.columns) == {"run_id", "step", "loss", "img"}
 
 
-@pytest.mark.parametrize(
-    ("excluded", "expected_runs"),
-    [
-        ([], [1, 2]),
-        ([1], [2]),
-        ([1, 2], []),
-    ],
-)
-def test_filter_excluded_runs(excluded: list[int], expected_runs: list[int]) -> None:
-    df = pd.DataFrame({"run_id": [1, 2], "value": [10, 20]})
-    filtered = dfh.filter_excluded_runs(df, {"excluded_runs": excluded})
-    assert sorted(filtered["run_id"]) == expected_runs
-
-
-def test_filter_excluded_runs_empty_df_is_noop() -> None:
-    df = pd.DataFrame()
-    assert dfh.filter_excluded_runs(df, {"excluded_runs": [1]}).empty
-
-
 def test_build_hyperparams_dataframe_prefixes_columns() -> None:
     df = dfh.build_hyperparams_dataframe([_hparams(1, run_id=1, lr=0.1, batch_size=32)])
     assert set(df.columns) == {"run_id", f"{HPARAM_COLUMN_PREFIX}lr", f"{HPARAM_COLUMN_PREFIX}batch_size"}

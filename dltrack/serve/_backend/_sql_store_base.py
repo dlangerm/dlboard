@@ -517,26 +517,29 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         for experiment_id in {m.experiment_id for m in metric}:
             self._touch_experiment(experiment_id)
 
-    def fetch_metrics(self, experiment_id: int, *, keys: frozenset[str] | None = None) -> models.MetricFrame:
+    def fetch_metrics(
+        self,
+        experiment_id: int,
+        *,
+        keys: frozenset[str] | None = None,
+        exclude_run_ids: frozenset[int] = frozenset(),
+    ) -> models.MetricFrame:
         """An experiment's (non-deleted runs') metrics -- only `keys`, if given, else every metric."""
         # `UnderlyingMetricTableEntry` has no `deleted_at` of its own -- visibility is inherited
         # transitively through its run, which is always soft-deleted in the same cascade as its
         # metrics' logical owner (see `_soft_delete`), so a join against `Run` is sufficient.
-        params: dict[str, Any] = {"experiment_id": experiment_id}
-        key_filter = ""
-        if keys is not None:
-            params |= {f"k{i}": key for i, key in enumerate(sorted(keys))}
-            key_filter = f"AND m.key IN ({', '.join(f':k{i}' for i in range(len(keys)))})"
+        run_filter, params = sql.in_clause("m.run_id", exclude_run_ids, prefix="x", negate=True)
+        key_filter, key_params = sql.in_clause("m.key", keys, prefix="k") if keys is not None else ("", {})
         # `ORDER BY m.id` is insertion order, which is what `MetricFrame.from_rows`' last-write-wins needs.
         rows = self._execute_raw_sql(
             f"""
             SELECT {", ".join(f"m.{f}" for f in models.MetricRow._fields)}
             FROM {models.UnderlyingMetricTableEntry.__name__} m
             JOIN {models.Run.__name__} r ON m.run_id = r.id
-            WHERE m.experiment_id = :experiment_id AND r.deleted_at IS NULL {key_filter}
+            WHERE m.experiment_id = :experiment_id AND r.deleted_at IS NULL {run_filter} {key_filter}
             ORDER BY m.id;
             """,
-            params,
+            {"experiment_id": experiment_id, **params, **key_params},
         )
         return models.MetricFrame.from_rows(cast("Iterator[models.MetricRow]", rows))
 
@@ -579,15 +582,19 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         self._touch_experiment(hyperparams.experiment_id)
         return created
 
-    def fetch_hyperparams(self, experiment_id: int) -> Iterator[models.HyperParams]:
-        """Fetch hyperparameters for a particular experiment."""
-        _log.debug("Fetching hyperparameters for experiment %s", experiment_id)
+    def fetch_hyperparams(
+        self, experiment_id: int, *, exclude_run_ids: frozenset[int] = frozenset()
+    ) -> Iterator[models.HyperParams]:
+        """Every (non-deleted) run's hyperparameters for an experiment."""
+        run_filter, params = sql.in_clause("h.run_id", exclude_run_ids, prefix="x", negate=True)
         statement = f"""
             SELECT h.* FROM {models.HyperParams.__name__} h
             JOIN {models.Run.__name__} r ON h.run_id = r.id
-            WHERE h.experiment_id = {sql.escape_value_sql(experiment_id)} AND r.deleted_at IS NULL;
+            WHERE h.experiment_id = :experiment_id AND r.deleted_at IS NULL {run_filter};
         """
-        yield from self._execute_sql_query(models.HyperParams, statement)
+        yield from self._execute_sql_query(
+            models.HyperParams, statement, {"experiment_id": experiment_id, **params}
+        )
 
     def get_or_create_page[D, P, C](
         self,
@@ -651,32 +658,25 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
 
     def fetch_artifacts(
         self,
-        keys: set[str] | None = None,
-        run_id: int | None = None,
-        experiment_id: int | None = None,
-        step: int | None = None,
-        fname: str | None = None,
+        experiment_id: int,
+        *,
+        keys: frozenset[str] | None = None,
+        exclude_run_ids: frozenset[int] = frozenset(),
     ) -> Iterator[models.Artifact]:
-        """Get artifact metadata (not bytes) for a run or experiment. Excludes deleted artifacts."""
-        if experiment_id is None:
-            raise NotImplementedError
-        if fname:
-            raise NotImplementedError
-
-        clauses = [f"experiment_id = {sql.escape_value_sql(experiment_id)}", "deleted_at IS NULL"]
-        if keys:
-            clauses.append(f"key in ({','.join(sql.escape_value_sql(k) for k in keys)})")
-        if run_id is not None:
-            clauses.append(f"run_id = {sql.escape_value_sql(run_id)}")
-        if step is not None:
-            clauses.append(f"step = {sql.escape_value_sql(step)}")
-
+        """An experiment's (non-deleted) artifact metadata, not bytes -- only `keys`, if given."""
+        run_filter, params = sql.in_clause("run_id", exclude_run_ids, prefix="x", negate=True)
+        key_filter, key_params = sql.in_clause("key", keys, prefix="k") if keys is not None else ("", {})
         statement = f"""
             SELECT {sql.select_columns_sql(models.Artifact)} FROM {models.Artifact.__name__}
-            WHERE {" AND ".join(clauses)}
+            WHERE experiment_id = :experiment_id AND deleted_at IS NULL {run_filter} {key_filter}
             ORDER BY run_id, step;
         """
-        return self._execute_sql_query(models.Artifact, statement, no_validate=True)
+        return self._execute_sql_query(
+            models.Artifact,
+            statement,
+            {"experiment_id": experiment_id, **params, **key_params},
+            no_validate=True,
+        )
 
     # -- Soft-delete / restore / purge -----------------------------------------------------------
     #
