@@ -72,15 +72,15 @@ def _drain_pending(store: DataStore[...], artifact_store: ArtifactStore[...]) ->
         offset += still_pending
 
 
-def _run() -> None:
-    store = wait_for_data_store()
-    artifact_store = wait_for_artifact_store()
+def _run(app: Dash) -> None:
+    store = wait_for_data_store(app)
+    artifact_store = wait_for_artifact_store(app)
     while True:
         _wake_event.wait()
         _wake_event.clear()
         _drain_pending(store, artifact_store)
 
 
-def plug(app: Dash) -> None:  # noqa: ARG001 -- required by `PluginProtocol`; state comes from `wait_for_*` instead
+def plug(app: Dash) -> None:
     """Start the background artifact-blob purge worker."""
-    threading.Thread(target=_run, daemon=True, name="artifact-purge-worker").start()
+    threading.Thread(target=_run, args=(app,), daemon=True, name="artifact-purge-worker").start()
