@@ -1,52 +1,19 @@
-"""A plugin using dash hooks that exposes the current auth provider to callbacks via callback context."""
+"""The app's auth provider, set once by an auth plugin, and the one place identity becomes a `User`."""
 
 from __future__ import annotations
 
-import time
-from functools import cache
-from typing import TYPE_CHECKING, Final, cast
-
-from dash import Dash, get_app
-from dash.exceptions import AppNotFoundError
-from structlog.stdlib import get_logger
+from typing import TYPE_CHECKING
 
 from dltrack._identity import ANONYMOUS
-
-_log = get_logger(__name__)
-
+from dltrack.serve._backend._app_slot import AppSlot
 
 if TYPE_CHECKING:
     from dltrack.models import AuthProvider, DataStore, User
 
-_DLTRACK_AUTH_PROVIDER: Final = "_dltrack_auth_provider_"
+AUTH_PROVIDER: AppSlot[AuthProvider[...]] = AppSlot("auth provider")
 
-
-def set_auth_provider(app: Dash, provider: AuthProvider[...]) -> None:
-    """Set the auth provider for a dash app, use this in plugins."""
-    if hasattr(app, _DLTRACK_AUTH_PROVIDER):
-        msg = "Refusing to overwrite an existing auth provider."
-        raise AttributeError(msg)
-    _log.info("set auth provider to %s", provider.__class__.__name__)
-    setattr(app, _DLTRACK_AUTH_PROVIDER, provider)
-
-
-@cache
-def get_auth_provider() -> AuthProvider[...]:
-    """Strongly typed helper function for callbacks who need the auth provider."""
-    app = cast("Dash", get_app())
-    if not hasattr(app, _DLTRACK_AUTH_PROVIDER):
-        msg = "Auth provider was not set for the app"
-        raise AttributeError(msg)
-    return cast("AuthProvider[...]", getattr(app, _DLTRACK_AUTH_PROVIDER))
-
-
-def wait_for_auth_provider() -> AuthProvider[...]:
-    """Like `get_auth_provider`, but retries once a second until the app exists. See `wait_for_data_store`."""
-    try:
-        return get_auth_provider()
-    except AppNotFoundError:
-        time.sleep(1)
-        return wait_for_auth_provider()
+set_auth_provider = AUTH_PROVIDER.set
+get_auth_provider = AUTH_PROVIDER.get
 
 
 def get_current_user(store: DataStore[...]) -> User:

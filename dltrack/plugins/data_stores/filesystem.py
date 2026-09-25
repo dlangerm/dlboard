@@ -80,17 +80,12 @@ class FSArtifactStore(models.ArtifactStore[Path, int]):
             args=(self.protocol, root, self._store_q, self._saved_artifact_q),
             daemon=True,
         )
-        self._save_artifact_thread = Thread(target=self._ingest_stored_artifacts, daemon=True)
         self._file_staging_dir = Path(tempfile.gettempdir())
-        self._save_artifact_thread.start()
         self._store_artifact_proc.start()
 
-    def _ingest_stored_artifacts(self) -> None:
-        try:
-            store = wait_for_data_store()
-        except Exception:
-            _log.exception("failed to get data store")
-            raise
+    def ingest_stored_artifacts(self, app: Dash) -> None:
+        """Forever record the refs of blobs `_save_artifact` has finished writing into `app`'s data store."""
+        store = wait_for_data_store(app)
         return_q_batchsize = 10
         maxwait = 1
         tlast = time.perf_counter()
@@ -181,7 +176,6 @@ class AppSettings(BaseSettings):
 def plug(app: Dash) -> None:
     """Plugin content."""
     env = AppSettings()
-
-    set_artifact_store(
-        app, FSArtifactStore.get_or_create(env.artifact_store_location, env.filesystem_store_queue_size)
-    )
+    store = FSArtifactStore.get_or_create(env.artifact_store_location, env.filesystem_store_queue_size)
+    set_artifact_store(app, store)
+    Thread(target=store.ingest_stored_artifacts, args=(app,), daemon=True, name="artifact-ref-ingest").start()
