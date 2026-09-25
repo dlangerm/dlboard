@@ -30,7 +30,7 @@ class LoggedMetrics(BaseModel, frozen=True, extra="forbid"):
 
     metrics: dict[str, float | None] = {}
     """The k/v pairs of metric values."""
-    step: int | None = None
+    step: int
     """The step these metrics were logged at."""
     experiment_id: int
     """The experiment to associate with the metrics."""

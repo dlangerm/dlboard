@@ -3,16 +3,20 @@
 from __future__ import annotations
 
 import contextlib
+import functools
 import logging
 import tempfile
 import time
 import warnings
 from argparse import Namespace
+from dataclasses import dataclass
+from http import HTTPStatus
 from pathlib import Path
 from queue import Empty
-from typing import TYPE_CHECKING, Any, NamedTuple, override
+from typing import TYPE_CHECKING, Any, Final, NamedTuple, Protocol, override
 
 import pendulum
+import requests
 from pydantic import BaseModel
 from pytorch_lightning.loggers import Logger
 
@@ -23,14 +27,12 @@ from dltrack.plugins.backend.basic_rest_backend import DEFAULT_SERVER_URL, Basic
 DEFAULT_EXPERIMENT_NAME = "default"
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
     from multiprocessing import Queue
+    from multiprocessing.context import SpawnProcess
     from multiprocessing.synchronize import Event as MPEvent
 
     from dltrack.models._artifact import AnyArtifact
-
-    type QType = Queue[tuple[dict[str, float], int | None]]
-    type ArtifactQType = Queue[Sequence[models.AnyArtifact]]
 
 
 _log = logging.getLogger(__name__)
@@ -40,6 +42,11 @@ _STARTUP_WARN_THRESHOLD_SEC = 2.0
 any backpressure warnings seen right after training starts, rather than dltrack itself."""
 _STARTUP_WAIT_TIMEOUT_SEC = 60.0
 """Cap on how long `__init__` waits for a worker to report ready, so a wedged import can't hang forever."""
+_FLUSH_TIMEOUT_SEC = 60.0
+"""Cap on how long `finalize` waits for a worker to ship everything queued, so a dead server can't hang it."""
+_SHIP_INTERVAL_SEC = 5.0
+"""How long a worker lets a partial batch sit before shipping it anyway."""
+_TRANSIENT_CLIENT_ERRORS: Final = frozenset({HTTPStatus.REQUEST_TIMEOUT, HTTPStatus.TOO_MANY_REQUESTS})
 
 
 def warn_if_startup_was_slow(elapsed_sec: float) -> None:
@@ -59,95 +66,123 @@ class LogProcParams(NamedTuple):
 
     flush_size: int
     ready: MPEvent
-    wait_sec: float = 1
+    flushed: MPEvent
+    wait_sec: float = _SHIP_INTERVAL_SEC
 
 
-def process_metrics_async(
-    exp_id: int,
-    run_id: int,
-    api: BasicDltrackAPI,
-    q: QType,
-    params: LogProcParams,
-) -> None:
-    """Logger background process."""
+class Receiver[T](Protocol):
+    """The one queue method `ship_batches` needs -- both `multiprocessing` and `queue` queues have it."""
+
+    def get(self, block: bool = True, timeout: float | None = None) -> T: ...  # noqa: D102, FBT001, FBT002
+
+
+def _is_rejection(exc: Exception) -> bool:
+    """Whether the server refused a batch outright -- resending the exact same batch can never succeed."""
+    if not isinstance(exc, requests.HTTPError) or exc.response is None:
+        return False
+    status = exc.response.status_code
+    return HTTPStatus.BAD_REQUEST <= status < HTTPStatus.INTERNAL_SERVER_ERROR and (
+        status not in _TRANSIENT_CLIENT_ERRORS
+    )
+
+
+def ship_batches[T](q: Receiver[T | None], ship: Callable[[list[T]], None], params: LogProcParams) -> None:
+    """
+    Drain `q` into batches, shipping one once it's full, `wait_sec` old, or a flush asks for it.
+
+    A batch the server rejects (4xx) is dropped: resending it can never succeed, and keeping it would
+    wedge every later item behind it. Any other failure (connection error, 5xx) is transient -- the
+    batch is kept, keeps growing with whatever arrives meanwhile, and is retried after `wait_sec`.
+    A `None` queued in place of an item requests a flush, acknowledged (`params.flushed`) only once
+    everything queued before it is gone.
+    """
     params.ready.set()
-    last_logged = time.perf_counter()
-    cur_batch: list[models.LoggedMetrics] = []
+    batch: list[T] = []
+    flush_requested = False
+    last_attempt = time.perf_counter()
     while True:
-        try:
-            step = -1
-            metrics = {}
-            with contextlib.suppress(Empty):
-                metrics, step = q.get(timeout=params.wait_sec / 10)
-
-            if metrics:
-                obj = models.LoggedMetrics(
-                    metrics=metrics,  # pyright: ignore[reportArgumentType]
-                    step=step,
-                    experiment_id=exp_id,
-                    run_id=run_id,
-                    timestamp_utc=pendulum.now(pendulum.UTC),
-                )
-                cur_batch.append(obj)
-            log_diff = time.perf_counter() - last_logged
-            if len(cur_batch) > params.flush_size or log_diff > params.wait_sec:
-                _log.debug("logging batch of length %s", len(cur_batch))
-                api.log_metric_batch(cur_batch)
-                _log.info("Shipped len %s/%s metrics", len(cur_batch), q.qsize())
-                cur_batch.clear()
-                if log_diff > params.wait_sec:
-                    _log.debug("Metrics logger process was idle")
-                last_logged = time.perf_counter()
-        except KeyboardInterrupt:
-            raise
-        except Exception:  # noqa: BLE001
-            _log.exception("Failed to ship metrics")
-
-
-def process_artifacts_async(
-    exp_id: int,
-    run_id: int,
-    api: BasicDltrackAPI,
-    q: ArtifactQType,
-    params: LogProcParams,
-) -> None:
-    """Logger background process for artifacts."""
-    params.ready.set()
-    last_logged = time.perf_counter()
-    cur_batch: list[models.NewArtifact] = []
-    files: list[Path] = []
-    with tempfile.TemporaryDirectory() as _tmp:
-        tmp = Path(_tmp)
-        while True:
+        with contextlib.suppress(Empty):
+            item = q.get(timeout=params.wait_sec / 10)
+            if item is None:
+                flush_requested = True
+            else:
+                batch.append(item)
+        due = flush_requested or len(batch) >= params.flush_size
+        if batch and (due or time.perf_counter() - last_attempt > params.wait_sec):
             try:
-                artifact_list = None
-                with contextlib.suppress(Empty):
-                    artifact_list = q.get(timeout=params.wait_sec / 10)
+                ship(batch)
+                batch = []
+            except Exception as exc:  # noqa: BLE001 -- nothing may kill the shipping process
+                if _is_rejection(exc):
+                    _log.exception("The server rejected a batch of %s, dropping it", len(batch))
+                    batch = []
+                else:
+                    _log.exception("Failed to ship a batch of %s, retrying", len(batch))
+                    time.sleep(params.wait_sec)
+            last_attempt = time.perf_counter()
+        if flush_requested and not batch:
+            flush_requested = False
+            params.flushed.set()
 
-                if artifact_list:
-                    _log.debug("popped %s off q len %s", len(artifact_list), q.qsize())
-                    for art in artifact_list:
-                        obj, target = art.to_artifact(tmp, run_id=run_id, experiment_id=exp_id)
-                        cur_batch.append(obj)
-                        files.append(target)
 
-                log_diff = time.perf_counter() - last_logged
-                if len(cur_batch) > params.flush_size or log_diff > params.wait_sec:
-                    _log.debug("logging batch of artifacts length %s", len(cur_batch))
-                    api.log_artifact_batch(cur_batch, files)
-                    _log.info("shipped artifact batch of length %s/%s", len(files), q.qsize())
-                    cur_batch.clear()
-                    files.clear()
-                    if log_diff > params.wait_sec:
-                        _log.warning("Artifact logger process was idle")
-                    last_logged = time.perf_counter()
-            except KeyboardInterrupt:
-                _log.info("keyboard interrupt detected")
-                raise
-            except Exception:  # noqa: BLE001
-                _log.exception("Failed to ship artifacts")
-                cur_batch.clear()
-                files.clear()
+def _ship_artifacts(
+    api: BasicDltrackAPI, experiment_id: int, run_id: int, batch: list[Sequence[AnyArtifact]]
+) -> None:
+    """Encode `batch` into a scratch dir that's deleted once it's uploaded, then upload it."""
+    with tempfile.TemporaryDirectory() as tmp:
+        pairs = [
+            artifact.to_artifact(Path(tmp), run_id=run_id, experiment_id=experiment_id)
+            for artifacts in batch
+            for artifact in artifacts
+        ]
+        api.log_artifact_batch([new for new, _ in pairs], [path for _, path in pairs])
+
+
+@dataclass(frozen=True)
+class _Shipper[T]:
+    """One background process running `ship_batches`, plus the queue feeding it."""
+
+    name: str
+    queue: Queue[T | None]
+    process: SpawnProcess
+    ready: MPEvent
+    flushed: MPEvent
+
+    def put(self, item: T) -> None:
+        if not self.process.is_alive():
+            msg = f"dltrack's {self.name} shipping process died, refusing to back up its queue"
+            raise RuntimeError(msg)
+        if self.queue.full():
+            warnings.warn(
+                f"Backpressure on dltrack's {self.name} queue, this will impact iteration speed", stacklevel=3
+            )
+        self.queue.put(item)
+
+    def flush(self) -> None:
+        """Block until everything queued so far has been shipped (or rejected by the server)."""
+        self.flushed.clear()
+        self.queue.put(None)
+        if not self.flushed.wait(_FLUSH_TIMEOUT_SEC):
+            warnings.warn(
+                f"dltrack's {self.name} still hadn't all been shipped after {_FLUSH_TIMEOUT_SEC}s -- "
+                "anything not yet shipped is lost if this process exits now.",
+                stacklevel=3,
+            )
+
+
+def _start_shipper[T](
+    name: str, ship: Callable[[list[T]], None], *, q_size: int, flush_size: int
+) -> _Shipper[T]:
+    queue: Queue[T | None] = SPAWN_CONTEXT.Queue(maxsize=q_size)
+    ready, flushed = SPAWN_CONTEXT.Event(), SPAWN_CONTEXT.Event()
+    process = SPAWN_CONTEXT.Process(
+        target=ship_batches,
+        args=(queue, ship, LogProcParams(flush_size=flush_size, ready=ready, flushed=flushed)),
+        name=f"dltrack-{name}",
+        daemon=True,
+    )
+    process.start()
+    return _Shipper(name, queue, process, ready, flushed)
 
 
 class DLTrackLoggerSettings(BaseModel, frozen=True, extra="forbid"):
@@ -183,39 +218,21 @@ class DLTrackLogger(Logger):
             experiment_id = experiment.id
         self._experiment_id = experiment_id
         self._run_id = self._api.create_run(models.NewRun(experiment_id=self._experiment_id)).id
-        self._metrics_q: QType = SPAWN_CONTEXT.Queue(maxsize=settings.metrics_q_size)
-        self._art_q: ArtifactQType = SPAWN_CONTEXT.Queue(maxsize=settings.artifact_q_size)
-        metrics_ready = SPAWN_CONTEXT.Event()
-        art_ready = SPAWN_CONTEXT.Event()
-        self._metric_proc = SPAWN_CONTEXT.Process(
-            target=process_metrics_async,
-            args=(
-                self._experiment_id,
-                self._run_id,
-                self._api,
-                self._metrics_q,
-                LogProcParams(flush_size=settings.metrics_q_flush_size, ready=metrics_ready, wait_sec=5),
-            ),
-            name="logger-proc",
-            daemon=True,
-        )
-        self._art_proc = SPAWN_CONTEXT.Process(
-            target=process_artifacts_async,
-            args=(
-                self._experiment_id,
-                self._run_id,
-                self._api,
-                self._art_q,
-                LogProcParams(flush_size=settings.artifact_q_flush_size, ready=art_ready, wait_sec=5),
-            ),
-            name="artifact-proc",
-            daemon=True,
-        )
         startup_start = time.perf_counter()
-        self._metric_proc.start()
-        self._art_proc.start()
-        metrics_ready.wait(_STARTUP_WAIT_TIMEOUT_SEC)
-        art_ready.wait(_STARTUP_WAIT_TIMEOUT_SEC)
+        self._metrics = _start_shipper(
+            "metrics",
+            self._api.log_metric_batch,
+            q_size=settings.metrics_q_size,
+            flush_size=settings.metrics_q_flush_size,
+        )
+        self._artifacts = _start_shipper(
+            "artifacts",
+            functools.partial(_ship_artifacts, self._api, self._experiment_id, self._run_id),
+            q_size=settings.artifact_q_size,
+            flush_size=settings.artifact_q_flush_size,
+        )
+        for shipper in (self._metrics, self._artifacts):
+            shipper.ready.wait(_STARTUP_WAIT_TIMEOUT_SEC)
         warn_if_startup_was_slow(time.perf_counter() - startup_start)
         super().__init__()
 
@@ -275,19 +292,38 @@ class DLTrackLogger(Logger):
 
     @override
     def log_metrics(self, metrics: dict[str, float], step: int | None = None) -> None:
-        assert self._metric_proc.is_alive(), "Metric process failed, refusing to back up queue"
-        if self._metrics_q.full():
-            warnings.warn(
-                "Backpressure on metric queue detected, this will impact iteration speed", stacklevel=2
-            )
+        """
+        Validate and timestamp `metrics` right here, at the call site, then queue them for shipping.
 
-        self._metrics_q.put((metrics, step))
+        Validating here (not in the shipping process) raises a bad metric at the line that logged
+        it, instead of the server rejecting a whole batch of otherwise-good metrics later on.
+        """
+        if step is None:
+            msg = "dltrack needs an explicit step for every metric (Lightning always passes one)"
+            raise ValueError(msg)
+        self._metrics.put(
+            models.LoggedMetrics(
+                metrics=metrics,  # pyright: ignore[reportArgumentType]
+                step=step,
+                experiment_id=self._experiment_id,
+                run_id=self._run_id,
+                timestamp_utc=pendulum.now(pendulum.UTC),
+            )
+        )
 
     def log_artifact(self, artifacts: Sequence[AnyArtifact]) -> None:
-        """Log an image."""
-        assert self._metric_proc.is_alive(), "Artifact process failed, refusing to back up queue"
-        if self._art_q.full():
-            warnings.warn(
-                "Backpressure on artifact queue detected, this will impact iteration speed", stacklevel=2
-            )
-        self._art_q.put(artifacts)
+        """Queue `artifacts` for encoding and upload."""
+        self._artifacts.put(artifacts)
+
+    @override
+    def finalize(self, status: str) -> None:
+        """
+        Block until everything logged so far has actually reached the server.
+
+        Lightning calls this at the end of every `fit`/`test`/...; the shipping processes are
+        daemons, so a script that exits right after (the usual case) would otherwise kill them with
+        up to `_SHIP_INTERVAL_SEC` of logged-but-unshipped metrics and artifacts still queued.
+        """
+        for shipper in (self._metrics, self._artifacts):
+            shipper.flush()
+        super().finalize(status)

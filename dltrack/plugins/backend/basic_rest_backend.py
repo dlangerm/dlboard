@@ -8,7 +8,7 @@ from typing import Any, Callable, Final, Iterable, Literal
 import dash
 import requests
 from flask import Response, request
-from pydantic import AnyUrl, BaseModel
+from pydantic import AnyUrl, BaseModel, ValidationError
 from structlog.stdlib import get_logger
 
 from dltrack import models
@@ -510,8 +510,18 @@ def _handle_permission_error(err: PermissionError) -> tuple[dict[str, str], int]
     return {"error": str(err)}, 403
 
 
+def _handle_validation_error(err: ValidationError) -> tuple[dict[str, str], int]:
+    """
+    Map an invalid request body to a 400, instead of Flask's default 500.
+
+    The distinction matters to the client's shipping processes (`dltrack_logger.ship_batches`): a
+    4xx means "this batch can never succeed, drop it", a 5xx means "transient, retry it".
+    """
+    return {"error": str(err)}, 400
+
+
 def plug(app: dash.Dash) -> None:
-    """Register this module's REST routes and the `PermissionError` -> 403 mapping onto `app`."""
+    """Register this module's REST routes and its error -> HTTP status mappings onto `app`."""
     for path, methods, view_func in _ROUTES:
         # `_ROUTES` paths are prefix-relative (no leading slash, see `create_path`/`entity_path`)
         # -- mirrors how Dash's own `@dash.hooks.route`-registered routes get mounted, so this
@@ -520,3 +530,4 @@ def plug(app: dash.Dash) -> None:
         full_path = prefix + path
         app.server.add_url_rule(full_path, endpoint=full_path, view_func=view_func, methods=methods)
     app.server.errorhandler(PermissionError)(_handle_permission_error)
+    app.server.errorhandler(ValidationError)(_handle_validation_error)
