@@ -219,7 +219,7 @@ def test_load_hparam_view_data_reports_available_metric_keys_without_fetching_va
     _log_a_metric(store, experiment_id, run.id, "loss")
 
     hparam_keys, metric_keys, rows = run_table._load_hparam_view_data(
-        store, experiment_id, [], selected_metrics=set()
+        store, experiment_id, [], selected_metrics=set(), runs=[run]
     )
 
     assert metric_keys == ["loss"]
@@ -233,7 +233,9 @@ def test_load_hparam_view_data_includes_values_for_selected_metrics(
     run = store.create_run(models.NewRun(experiment_id=experiment_id))
     _log_a_metric(store, experiment_id, run.id, "loss")
 
-    _hk, _mk, rows = run_table._load_hparam_view_data(store, experiment_id, [], selected_metrics={"loss"})
+    _hk, _mk, rows = run_table._load_hparam_view_data(
+        store, experiment_id, [], selected_metrics={"loss"}, runs=[run]
+    )
 
     assert rows == [{"run_id": run.id, "run_name": f"Run {run.id}", "loss": 1.0}]
 

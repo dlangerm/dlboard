@@ -22,6 +22,12 @@ if typing.TYPE_CHECKING:
 ID_KEY: typing.Final = "id"
 _log = get_logger(__name__)
 
+# Fields no `update()` may ever write, regardless of what value the caller's in-memory model
+# happens to hold -- each is bumped exclusively by its own dedicated mechanism (`revision` by
+# `SQLStoreBase._touch_experiment`), so writing it back here would let a stale snapshot (fetched
+# before some *other* write bumped it concurrently) silently undo that bump.
+_NEVER_UPDATE_FIELDS: typing.Final = frozenset({"revision"})
+
 
 def _unwrap_optional(annotation: type) -> type:
     org = typing.get_origin(annotation)
@@ -187,8 +193,18 @@ def create_table_sql(
     sorted_keys = list(model.model_fields.keys())
     id_index = sorted_keys.index(ID_KEY)
 
-    for idx in range(len(sorted_keys)):
-        sorted_keys[idx] = f"{sorted_keys[idx]} {typed_keys[idx]}"
+    for idx, field_name in enumerate(sorted_keys):
+        # A real SQL `DEFAULT` only for a plain scalar default (e.g. `revision: int = 0`) -- so an
+        # `insert()` that omits the column (every `New*` payload omits every server-managed field)
+        # gets that value instead of SQLite's implicit NULL. A field whose default *is* `None` (a
+        # genuinely optional field, e.g. `deleted_at`) and a dict/list default (JSON-serialized on
+        # insert, not something `escape_value_sql` can turn into a literal) are deliberately left
+        # alone -- both keep relying on the implicit NULL for an omitted column, exactly as before.
+        default = model.model_fields[field_name].default
+        default_clause = (
+            f" DEFAULT {escape_value_sql(default)}" if isinstance(default, bool | int | float | str) else ""
+        )
+        sorted_keys[idx] = f"{field_name} {typed_keys[idx]}{default_clause}"
 
     sorted_keys[id_index] = f"{ID_KEY} INTEGER PRIMARY KEY AUTOINCREMENT"
     fk_clauses = [
@@ -205,8 +221,8 @@ def create_table_sql(
 
 
 def update(table: type[BaseModel], model: BaseModel) -> tuple[str, dict[str, typing.Any]]:
-    """Update an existing entry."""
-    sorted_keys = list(model.__class__.model_fields.keys())
+    """Update an existing entry. Never writes a `_NEVER_UPDATE_FIELDS` column -- see its docstring."""
+    sorted_keys = [k for k in model.__class__.model_fields if k not in _NEVER_UPDATE_FIELDS]
     sorted_keys.remove(ID_KEY)
     interpolate_values = ",".join([f"{k} = :{k}" for k in sorted_keys])
     values = serialize_base_model(model)

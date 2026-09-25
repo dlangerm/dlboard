@@ -208,6 +208,12 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.LineChart], froze
             withYAxis=True,
             withDots=False,
             tickLine="xy",
+            # Recharts animates a `<Line>`'s enter transition by default -- redrawing the whole
+            # curve from scratch -- on *every* data-prop change, not just the first render. That
+            # reads as the whole chart flashing/re-rendering each time a live-update poll delivers
+            # new points, not just the line growing by one point. `lineProps` passes straight
+            # through to Recharts' `Line` component, which is where this is actually controlled.
+            lineProps={"isAnimationActive": False},
             # A wider tooltip offset keeps it from sitting directly on top of the cursor's
             # point/line, which otherwise obscures the exact spot the reader is looking at --
             # allowEscapeViewBox lets it actually render outside the plot area at that offset
