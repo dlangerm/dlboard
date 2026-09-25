@@ -14,6 +14,7 @@ from pydantic import ValidationError
 from dltrack import models
 from dltrack.models import HyperParams, NewHyperParams, Run
 from dltrack.models._view import ChartInstance, ColumnKind, PanelInstance, ParameterField, ParameterFieldType
+from dltrack.plugins.charts.image_series import ImageChart
 from dltrack.plugins.charts.line_chart import LineChart
 from dltrack.serve._pages._experiment import _experiment_page_state as state
 from dltrack.serve._pages._experiment import _run_comparison_table as run_table
@@ -25,6 +26,7 @@ if TYPE_CHECKING:
 _TS = datetime(2026, 1, 1, tzinfo=UTC)
 
 LineChart.register(allow_override=True)
+ImageChart.register(allow_override=True)
 
 
 def _panel(name: str, n_charts: int) -> PanelInstance[pd.DataFrame, object]:
@@ -186,6 +188,33 @@ def _log_a_metric(store: SQLLiteStore, experiment_id: int, run_id: int, key: str
             )
         ]
     )
+
+
+def test_a_metric_and_an_artifact_sharing_a_key_both_render(store: SQLLiteStore, experiment_id: int) -> None:
+    """They used to be outer-merged into `img_x`/`img_y`, so a chart of either `img` raised `KeyError`."""
+    run = store.create_run(models.NewRun(experiment_id=experiment_id))
+    _log_a_metric(store, experiment_id, run.id, "img")
+    store.log_artifact_refs(
+        [
+            models.Artifact(
+                key="img", fname="i.png", run_id=run.id, experiment_id=experiment_id, step=0, ref="r://a"
+            )
+        ]
+    )
+    panel = PanelInstance[pd.DataFrame, object](
+        name="p",
+        charts=[
+            ChartInstance[pd.DataFrame, object](
+                chart_type="line", parameters={"column": "img", "x_axis": "step"}
+            ),
+            ChartInstance[pd.DataFrame, object](chart_type="image", parameters={"key": "img"}),
+        ],
+    )
+
+    df = state.fetch_panel_dataframe(store, experiment_id, panel, {})
+
+    for chart in panel.charts:
+        chart.render(df)
 
 
 def test_load_hparam_view_data_shows_each_selected_metrics_latest_value(
