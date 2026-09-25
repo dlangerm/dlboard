@@ -17,7 +17,13 @@ from dltrack.models._component_ids import (
 from dltrack.models._data_store import ArtifactStore, DataStore
 from dltrack.models._experiment import Experiment, ExperimentSource, NewExperiment
 from dltrack.models._hparams import FlatHparamDict, HyperParams, NewHyperParams, ValidJsonTypes
-from dltrack.models._metric import LoggedMetrics, UnderlyingMetricTableEntry
+from dltrack.models._metric import (
+    LoggedMetrics,
+    MetricColumn,
+    MetricFrame,
+    MetricRow,
+    UnderlyingMetricTableEntry,
+)
 from dltrack.models._plugin import InstalledPlugin, PluginProtocol
 from dltrack.models._project import NewProject, Project
 from dltrack.models._run import NewRun, Run
@@ -59,6 +65,9 @@ __all__ = [
     "InstalledPlugin",
     "IntervalId",
     "LoggedMetrics",
+    "MetricColumn",
+    "MetricFrame",
+    "MetricRow",
     "ModalId",
     "NewArtifact",
     "NewArtifactPurgeTask",

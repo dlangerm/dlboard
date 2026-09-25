@@ -3,21 +3,13 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
 import pandas as pd
 import pytest
 
-from dltrack.models import Artifact, HyperParams, LoggedMetrics, NewHyperParams, ValidJsonTypes
+from dltrack.models import Artifact, HyperParams, NewHyperParams, ValidJsonTypes
 from dltrack.models._view import ColumnKind
 from dltrack.plugins.charts._table_style import HPARAM_COLUMN_PREFIX
 from dltrack.serve._pages._experiment import _dataframe_helpers as dfh
-
-_TS = datetime(2026, 1, 1, tzinfo=UTC)
-
-
-def _metric(run_id: int, step: int, **metrics: float | None) -> LoggedMetrics:
-    return LoggedMetrics(metrics=metrics, step=step, experiment_id=1, run_id=run_id, timestamp_utc=_TS)
 
 
 def _artifact(run_id: int, step: int, key: str, ref: str, tags: dict[str, str] | None = None) -> Artifact:
@@ -33,19 +25,6 @@ def _hparams(hparam_id: int, run_id: int, **values: ValidJsonTypes) -> HyperPara
         experiment_id=1,
         raw_hparams=NewHyperParams.from_raw(run_id, 1, values).raw_hparams,
     )
-
-
-def test_build_metrics_dataframe_merges_differing_keys_and_indexes() -> None:
-    df = dfh.build_metrics_dataframe(
-        [_metric(1, 0, loss=0.5), _metric(1, 1, loss=0.4, acc=0.9)],
-    )
-    assert set(df.columns) == {"loss", "acc", "step", "experiment_id", "run_id", "timestamp_utc", "index"}
-    assert pd.isna(df.loc[df["step"] == 0, "acc"]).all()
-    assert df.loc[df["step"] == 1, "acc"].iloc[0] == pytest.approx(0.9)
-
-
-def test_build_metrics_dataframe_empty() -> None:
-    assert dfh.build_metrics_dataframe([]).empty
 
 
 def test_build_artifacts_dataframe_pivots_ref_and_tags() -> None:
@@ -64,7 +43,7 @@ def test_build_artifacts_dataframe_empty() -> None:
 @pytest.mark.parametrize(
     ("metric_columns", "artifact_keys", "hparam_keys", "expected"),
     [
-        (["run_id", "index", "loss"], [], [], {"loss": ColumnKind.METRIC}),
+        (["run_id", "loss"], [], [], {"loss": ColumnKind.METRIC}),
         (["loss"], ["image"], [], {"loss": ColumnKind.METRIC, "image": ColumnKind.ARTIFACT}),
         (["shared"], ["shared"], [], {"shared": ColumnKind.ARTIFACT}),
         (

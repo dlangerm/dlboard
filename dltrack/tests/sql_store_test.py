@@ -8,7 +8,7 @@ Covers the sql generation/escaping/decoding in `_sql.py` and the CRUD flows in
 from __future__ import annotations
 
 import sqlite3
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import pytest
@@ -186,29 +186,53 @@ def test_log_hyperparams_skips_duplicate_run(store: SQLLiteStore, experiment_id:
     assert [h.id for h in store.fetch_hyperparams(experiment_id)] == [first.id]
 
 
-def test_log_and_fetch_metrics_round_trips_and_groups_by_step(
-    store: SQLLiteStore, experiment_id: int
+def _log_step(
+    store: SQLLiteStore, run: models.Run, step: int, ts: datetime = _TS, **metrics: float | None
 ) -> None:
-    run = store.create_run(models.NewRun(experiment_id=experiment_id))
     store.log_metrics(
         [
             models.LoggedMetrics(
-                metrics={"loss": 0.5}, step=0, experiment_id=experiment_id, run_id=run.id, timestamp_utc=_TS
-            ),
-            models.LoggedMetrics(
-                metrics={"loss": 0.4, "acc": 0.9},
-                step=1,
-                experiment_id=experiment_id,
-                run_id=run.id,
-                timestamp_utc=_TS,
-            ),
+                metrics=metrics, step=step, experiment_id=run.experiment_id, run_id=run.id, timestamp_utc=ts
+            )
         ]
     )
 
-    fetched = list(store.fetch_metrics(experiment_id))
-    assert [m.step for m in fetched] == [0, 1]
-    assert fetched[0].metrics == {"loss": 0.5}
-    assert fetched[1].metrics == {"loss": 0.4, "acc": 0.9}
+
+def test_fetch_metrics_pivots_to_one_row_per_run_and_step(store: SQLLiteStore, experiment_id: int) -> None:
+    run = store.create_run(models.NewRun(experiment_id=experiment_id))
+    _log_step(store, run, 0, loss=0.5)
+    _log_step(store, run, 1, loss=0.4, acc=0.9)
+
+    frame = store.fetch_metrics(experiment_id)
+
+    assert frame.keys == {"loss", "acc"}
+    assert list(frame.step) == [0, 1]
+    assert list(frame.values("loss")) == [0.5, 0.4]
+    assert frame.values("acc").isna().tolist() == [True, False]
+    assert store.fetch_metrics(experiment_id, keys=frozenset({"acc"})).keys == {"acc"}
+
+
+def test_fetch_metrics_stamps_each_step_with_its_own_timestamp(
+    store: SQLLiteStore, experiment_id: int
+) -> None:
+    """Used to stamp every step with the *next* step's timestamp, shifting date/time x-axes by one."""
+    run = store.create_run(models.NewRun(experiment_id=experiment_id))
+    later = _TS + timedelta(minutes=1)
+    _log_step(store, run, 0, _TS, loss=0.5)
+    _log_step(store, run, 1, later, loss=0.4)
+
+    assert list(store.fetch_metrics(experiment_id).timestamp_utc) == [_TS, later]
+
+
+def test_fetch_metrics_keeps_the_last_value_written_for_a_key_relogged_at_one_step(
+    store: SQLLiteStore, experiment_id: int
+) -> None:
+    """Which duplicate won used to be whatever order sqlite's sort happened to emit ties in."""
+    run = store.create_run(models.NewRun(experiment_id=experiment_id))
+    _log_step(store, run, 0, loss=1.0)
+    _log_step(store, run, 0, loss=2.0)
+
+    assert list(store.fetch_metrics(experiment_id).values("loss")) == [2.0]
 
 
 def test_list_metric_keys_is_distinct_and_sorted_without_fetching_values(

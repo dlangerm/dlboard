@@ -7,7 +7,7 @@ from typing import Any
 
 import pandas as pd
 
-from dltrack.models import Artifact, ColumnKind, HyperParams
+from dltrack.models import Artifact, ColumnKind, HyperParams, MetricColumn
 from dltrack.plugins.charts._table_style import HPARAM_COLUMN_PREFIX
 
 EXCLUDED_RUNS_KEY: typing.Final = "excluded_runs"
@@ -35,18 +35,6 @@ def build_artifacts_dataframe(artifacts: typing.Iterable[Artifact]) -> pd.DataFr
     tags_pivot.columns = [f"{c}__tags" for c in tags_pivot.columns]
 
     return ref_pivot.join(tags_pivot).reset_index()
-
-
-def build_metrics_dataframe(metrics: typing.Iterable[Any]) -> pd.DataFrame:
-    """Build a metrics dataframe from an iterable of LoggedMetrics."""
-    from dltrack.models._metric import LoggedMetrics
-
-    rows = [
-        d.metrics | {f: getattr(d, f) for f in LoggedMetrics.model_fields if f != "metrics"} for d in metrics
-    ]
-    if not rows:
-        return pd.DataFrame()
-    return pd.DataFrame.from_records(rows).reset_index()
 
 
 def build_hyperparams_dataframe(
@@ -90,7 +78,7 @@ def infer_column_kinds(
     run_id is excluded (never a sensible field value);
     step is kept since it's a common x_axis choice.
     """
-    kinds = {c: ColumnKind.METRIC for c in metric_columns if c not in ("run_id", "index")}
+    kinds = {c: ColumnKind.METRIC for c in metric_columns if c != MetricColumn.RUN_ID}
     kinds.update(dict.fromkeys(artifact_keys, ColumnKind.ARTIFACT))
     kinds.update(dict.fromkeys(hparam_keys, ColumnKind.HPARAM))
     return kinds

@@ -353,5 +353,5 @@ def test_fetch_metrics_excludes_metrics_from_a_deleted_run(
 
     store.delete_run(deleted_run.id, admin)
 
-    fetched = list(store.fetch_metrics(experiment_id))
-    assert {m.run_id for m in fetched} == {kept_run.id}
+    fetched = store.fetch_metrics(experiment_id)
+    assert set(fetched.run_id) == {kept_run.id}
