@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import dash
+from pydantic import ValidationError
 
 from dltrack import models
 from dltrack.plugins.backend import basic_rest_backend as backend
@@ -83,7 +84,10 @@ def test_plug_registers_routes_only_on_the_given_app_not_globally() -> None:
     backend.plug(_FakeApp())  # pyright: ignore[reportArgumentType]
 
     assert len(registered_rules) == len(backend._ROUTES)
-    assert registered_errorhandlers[PermissionError] is backend._handle_permission_error
+    assert registered_errorhandlers == {
+        PermissionError: backend._handle_permission_error,
+        ValidationError: backend._handle_validation_error,
+    }
 
 
 def test_create_path_handles_no_model() -> None:

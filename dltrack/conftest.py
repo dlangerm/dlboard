@@ -3,15 +3,20 @@
 
 from __future__ import annotations
 
+import threading
 import typing
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
+from werkzeug.serving import make_server
 
 from dltrack import models
+from dltrack.plugins import BUILTIN_BACKEND, LOCAL_AUTH, LOCAL_STORAGE
 from dltrack.plugins.data_stores.sqlite import SQLLiteStore
+from dltrack.serve import app as build_app
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from pathlib import Path
 
 
@@ -72,6 +77,40 @@ def create_entity_chain(store: SQLLiteStore, *, artifact: bool = False) -> Entit
         assert logged.id is not None
         artifact_id = logged.id
     return EntityChain(project.id, experiment.id, run.id, artifact_id)
+
+
+class BackendServer(typing.NamedTuple):
+    """A live dltrack backend's URL, plus a store reading the same sqlite file it writes to."""
+
+    url: str
+    store: SQLLiteStore
+
+
+@pytest.fixture
+def backend_server(tmp_path: Path) -> Iterator[BackendServer]:
+    """
+    A real dltrack backend (storage + REST routes, no charts) on a background thread.
+
+    Deliberately leaves out `BUILTIN_CHARTS`: chart plugins register into a process-global registry
+    that rejects a second registration, so only one app per pytest process may include them
+    (`browser_test.py`'s). Everything this fixture builds can be built any number of times.
+    """
+    sqlite_location = tmp_path / "test.sqlite"
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setenv("SQLITE_LOCATION", str(sqlite_location))
+    monkeypatch.setenv("ARTIFACT_STORE_LOCATION", str(tmp_path / "artifacts"))
+    try:
+        app = build_app([*LOCAL_STORAGE, *LOCAL_AUTH, *BUILTIN_BACKEND])
+    finally:
+        monkeypatch.undo()
+    server = make_server("127.0.0.1", 0, app.server)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield BackendServer(f"http://127.0.0.1:{server.server_port}", SQLLiteStore(sqlite_location))
+    finally:
+        server.shutdown()
+        thread.join()
 
 
 def props(component: object) -> dict[str, Any]:

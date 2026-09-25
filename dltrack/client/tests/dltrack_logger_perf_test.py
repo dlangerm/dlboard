@@ -9,63 +9,29 @@ user could instead blame on their network. This logs a batch of realistically la
 a generous-but-not-toothless budget -- loose enough not to flake on a slow CI box, tight enough to
 still catch a real regression (e.g. per-request overhead creeping back in, or a batched upload
 silently becoming one request per file).
-
-Deliberately builds its own app from just the storage/backend/auth plugins (`LOCAL_STORAGE` +
-`BUILTIN_BACKEND` + `LOCAL_AUTH`), not the full `LOCAL_DEPLOYMENT` bundle `browser_test.py` uses --
-`BUILTIN_CHARTS` registers chart types into a process-global registry that rejects a second
-registration, so only one test process-wide gets to build an app with those. Skipping it here (this
-test never touches a chart) means this file can build its own app safely no matter what else is in
-the same pytest run. Page layouts (home/project/admin/experiment) are no longer an opt-in bundle --
-`dltrack.serve.app.app()` always wires them in, and re-registering the same page paths across
-multiple `Dash` instances in one process is harmless (confirmed by running this file alongside
-`browser_test.py`'s full-bundle app in the same pytest session).
 """
 
 from __future__ import annotations
 
-import threading
 import time
 from typing import TYPE_CHECKING
 
-import pytest
 import torch
-from werkzeug.serving import make_server
 
 from dltrack import models
-from dltrack.plugins import BUILTIN_BACKEND, LOCAL_AUTH, LOCAL_STORAGE
 from dltrack.plugins.artifacts import image
 from dltrack.plugins.backend.basic_rest_backend import BasicDltrackAPI
-from dltrack.serve import app as build_app
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
     from pathlib import Path
+
+    from dltrack.conftest import BackendServer
 
 _MOSAIC_COUNT = 8
 _MOSAIC_SIDE_PX = 512
 _UPLOAD_BUDGET_SEC = 5.0
 """Generous enough not to flake on a loaded CI box; tight enough that a real per-request or
 per-image regression still trips it -- colocated has no real network hop to blame slack on."""
-
-
-@pytest.fixture
-def live_server_url(tmp_path: Path) -> Iterator[str]:
-    """A real dltrack backend (storage + REST routes, no charts/pages) on a background thread."""
-    monkeypatch = pytest.MonkeyPatch()
-    monkeypatch.setenv("SQLITE_LOCATION", str(tmp_path / "test.sqlite"))
-    monkeypatch.setenv("ARTIFACT_STORE_LOCATION", str(tmp_path / "artifacts"))
-    try:
-        app = build_app([*LOCAL_STORAGE, *LOCAL_AUTH, *BUILTIN_BACKEND])
-    finally:
-        monkeypatch.undo()
-    server = make_server("127.0.0.1", 0, app.server)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        yield f"http://127.0.0.1:{server.server_port}"
-    finally:
-        server.shutdown()
-        thread.join()
 
 
 def _mosaic_batch(count: int) -> list[image.Image]:
@@ -81,9 +47,9 @@ def _mosaic_batch(count: int) -> list[image.Image]:
 
 
 def test_logging_a_batch_of_large_images_stays_within_budget_when_colocated(
-    live_server_url: str, tmp_path: Path
+    backend_server: BackendServer, tmp_path: Path
 ) -> None:
-    api = BasicDltrackAPI(base_url=live_server_url)
+    api = BasicDltrackAPI(base_url=backend_server.url)
     project = api.get_or_create_project("perf")
     experiment = api.create_experiment(
         models.NewExperiment(project_id=project.id, source=models.ExperimentSource.PYTORCH_LIGHTNING)
