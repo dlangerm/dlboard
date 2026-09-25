@@ -55,6 +55,7 @@ from dltrack.serve._pages._experiment._run_comparison_table import (
 )
 from dltrack.serve._pages._simple_homepage import NEW_PROJECT_BUTTON_ID, NEW_PROJECT_NAME_ID
 from dltrack.serve._pages._simple_project_page import NEW_EXP_BUTTON_ID, NEW_EXP_NAME_ID
+from dltrack.serve.app import PAGE_LOADING_CLASS
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -183,6 +184,27 @@ def test_logged_metrics_render_as_a_real_chart(
     # `<svg>` elements, and would make this locator ambiguous if it searched the whole container.
     expect(page.locator(".dl-panel-body svg")).to_be_visible()
     assert console_errors == []
+
+
+def test_slow_page_render_shows_a_loading_indicator(
+    page: Page, live_server_url: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A page whose `layout()` is slow shows a spinner until it renders, not a blank main area."""
+    _create_project_and_experiment(page, live_server_url, "Slow Page Experiment")
+    store = get_data_store()
+    fetch_hyperparams = store.fetch_hyperparams
+
+    def slow_fetch_hyperparams(experiment_id: int) -> Iterator[models.HyperParams]:
+        time.sleep(2)
+        return fetch_hyperparams(experiment_id)
+
+    monkeypatch.setattr(store, "fetch_hyperparams", slow_fetch_hyperparams)
+    page.get_by_role("link", name="Open experiment").click()
+
+    spinner = page.locator(f".{PAGE_LOADING_CLASS} .mantine-Loader-root")
+    expect(spinner).to_be_visible()
+    expect(page.locator(f"#{PAGE_EXPERIMENT_ID}")).to_be_visible(timeout=10_000)
+    expect(spinner).to_be_hidden()
 
 
 def test_panel_header_hover_controls_toggle_and_delete_without_disturbing_siblings(

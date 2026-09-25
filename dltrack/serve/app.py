@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 import dash
 import dash_mantine_components as dmc
@@ -31,6 +31,7 @@ _NAVBAR_RESIZE_JS_ROUTE = "navbar-resize.js"
 _DEFAULT_NAVBAR_WIDTH = 300
 _MIN_NAVBAR_WIDTH = 260
 _MAX_NAVBAR_WIDTH = 640
+PAGE_LOADING_CLASS = "dl-page-loading"
 
 
 def _serve_navbar_resize_js() -> Response:
@@ -137,7 +138,21 @@ def app(plugins: list[models.PluginProtocol]) -> Dash:
                     ),
                 ],
             ),
-            dmc.AppShellMain(dash.page_container),
+            dmc.AppShellMain(
+                # Dash renders a routed page's `layout()` in a callback fired after this shell
+                # mounts, so a slow page would otherwise show nothing at all until it returns.
+                # Scoped to `_pages_content` (the div Dash fills with each page's layout) so a
+                # page's own in-page callbacks never trigger this page-wide spinner. The
+                # `target_components` stub is an empty TypedDict (a Dash codegen gap) -- hence the
+                # cast, same as `serve/_pages/experiment.py`'s own scoped `dcc.Loading`.
+                cast("Any", dcc.Loading)(
+                    dash.page_container,
+                    target_components={"_pages_content": "children"},
+                    delay_show=250,
+                    custom_spinner=dmc.Loader(size="lg"),
+                    parent_className=PAGE_LOADING_CLASS,
+                )
+            ),
             dcc.Location(id=constants.LOCATION_ID, refresh=False),
             Store(id=constants.NAVBAR_COLLAPSED_STORE_ID, data=False, storage_type="local"),
             Store(id=constants.NAVBAR_WIDTH_STORE_ID, data=_DEFAULT_NAVBAR_WIDTH, storage_type="local"),
