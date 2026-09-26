@@ -10,6 +10,7 @@ import requests
 from flask import Response, request
 from pydantic import AnyUrl, BaseModel, ValidationError
 from structlog.stdlib import get_logger
+from werkzeug.datastructures import FileStorage
 
 from dltrack import models
 from dltrack._identity import resolve_username
@@ -21,6 +22,9 @@ _log = get_logger(__name__)
 
 DEFAULT_SERVER_URL: Final = "http://localhost:8050"
 """Matches `dltrack serve local`'s own default host/port (see `ServerRuntimeOptions` in `_cli.py`)."""
+
+_METADATA_PART_SUFFIX: Final = ".json"
+"""Appended to an artifact file's multipart part name to name the part carrying its `NewArtifact` JSON."""
 
 
 def create_path(
@@ -148,33 +152,39 @@ class BasicDltrackAPI:
         res.raise_for_status()
 
     def log_artifact_batch(self, artifacts: Iterable[models.NewArtifact], files: list[Path]) -> None:
-        """Log a batch of artifacts."""
+        """
+        Log a batch of artifacts in one request.
+
+        Every artifact travels as two multipart parts named by its position in the batch -- its
+        file (`0`) and its metadata (`0.json`) -- never by its key: many artifacts routinely share
+        a key (one image per step), and the server matches metadata to file by part name.
+        """
         artifacts = list(artifacts)
-        keys = {a.key for a in artifacts}
-        for k in keys:
-            common_artifacts = [(a, files[i]) for i, a in enumerate(artifacts) if a.key == k]
-            # `requests` never closes the file handles it's handed -- opened explicitly (not inline
-            # in the `files=` generator below) so they can be closed in `finally` regardless of
-            # whether the request succeeds, rather than leaking a descriptor per artifact.
-            opened = [f.open("rb") for _, f in common_artifacts]
-            try:
-                res = requests.post(
-                    create_path(models.Artifact, self.base_url),
-                    files=itertools.chain(
-                        *(
+        # `requests` never closes the file handles it's handed -- opened explicitly (not inline
+        # in the `files=` generator below) so they can be closed in `finally` regardless of
+        # whether the request succeeds, rather than leaking a descriptor per artifact.
+        opened = [f.open("rb") for f in files]
+        try:
+            res = requests.post(
+                create_path(models.Artifact, self.base_url),
+                files=itertools.chain(
+                    *(
+                        (
+                            (str(i), (a.fname, fh, "application/octet")),
                             (
-                                (k, (a.fname, fh, "application/octet")),
-                                (k + ".json", (a.fname, a.model_dump_json(), "application/json")),
-                            )
-                            for (a, _), fh in zip(common_artifacts, opened, strict=True)
+                                f"{i}{_METADATA_PART_SUFFIX}",
+                                (a.fname, a.model_dump_json(), "application/json"),
+                            ),
                         )
-                    ),
-                    headers=self._headers,
-                )
-                res.raise_for_status()
-            finally:
-                for fh in opened:
-                    fh.close()
+                        for i, (a, fh) in enumerate(zip(artifacts, opened, strict=True))
+                    )
+                ),
+                headers=self._headers,
+            )
+            res.raise_for_status()
+        finally:
+            for fh in opened:
+                fh.close()
 
 
 # -- Route handlers -------------------------------------------------------------------------------
@@ -226,13 +236,11 @@ def handle_create_run(store: DataStore[...], body: dict[str, Any], actor: models
 
 def handle_log_artifacts(
     store: models.ArtifactStore[...],
-    artifacts: Iterable[models.NewArtifact],
-    files: Any,  # noqa: ANN401 -- `werkzeug.datastructures.FileStorage` mapping, matches `ArtifactStore.log_artifacts`
+    artifacts: Iterable[tuple[models.NewArtifact, FileStorage]],
     actor: models.User,
 ) -> None:
     """Log a batch of artifacts, each attributed to `actor`."""
-    stamped = (a.model_copy(update={"created_by": actor.id}) for a in artifacts)
-    store.log_artifacts(stamped, files)
+    store.log_artifacts((a.model_copy(update={"created_by": actor.id}), file) for a, file in artifacts)
 
 
 def handle_delete_project(store: DataStore[...], project_id: int, actor: models.User) -> None:
@@ -365,18 +373,16 @@ def log_artifact() -> dict[str, str]:
     try:
         _log.debug("log artifact batch")
         t0 = perf_counter()
-        jsons = (
-            models.NewArtifact.model_validate_json(f.stream.read().decode())
-            for f in request.files.values()
-            if f.content_type == "application/json"
+        pairs = (
+            (
+                models.NewArtifact.model_validate_json(part.stream.read().decode()),
+                request.files[name.removesuffix(_METADATA_PART_SUFFIX)],
+            )
+            for name, part in request.files.items()
+            if part.content_type == "application/json"
         )
         try:
-            handle_log_artifacts(
-                get_artifact_store(),
-                jsons,
-                request.files,
-                get_current_user(get_data_store()),
-            )
+            handle_log_artifacts(get_artifact_store(), pairs, get_current_user(get_data_store()))
         finally:
             _log.debug("logging artifacts took %.3f seconds", perf_counter() - t0)
     except Exception:

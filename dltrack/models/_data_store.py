@@ -261,12 +261,8 @@ class ArtifactStore[**P](typing.Protocol):
         """Initialize a data store."""
         ...
 
-    def log_artifacts(
-        self,
-        artifacts: Iterable[models.NewArtifact],
-        files: typing.Mapping[str, FileStorage],
-    ) -> None:
-        """Log a set of artifacts."""
+    def log_artifacts(self, artifacts: Iterable[tuple[models.NewArtifact, FileStorage]]) -> None:
+        """Log a set of artifacts, each paired with its own uploaded file."""
         ...
 
     def download_artifact(self, ref: AnyUrl) -> Response:
