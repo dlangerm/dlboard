@@ -2,23 +2,23 @@
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import shutil
 import tempfile
-import time
 from collections.abc import Iterable
-from contextlib import suppress
 from pathlib import Path
-from queue import Empty
 from threading import Thread
 from typing import TYPE_CHECKING, ClassVar, Mapping, Self, override
 from uuid import uuid4
 
 from flask import Response, send_from_directory
+from pydantic import AnyUrl
 from pydantic_settings import BaseSettings
 from structlog.stdlib import get_logger
 
 from dltrack import models
+from dltrack._batching import BatchParams, ship_batches
 from dltrack._mp_context import SPAWN_CONTEXT
 from dltrack.serve import set_artifact_store, wait_for_data_store
 
@@ -27,9 +27,9 @@ if TYPE_CHECKING:
     from multiprocessing import Queue
 
     from dash import Dash
-    from pydantic import AnyUrl
     from werkzeug.datastructures import FileStorage
 
+    from dltrack.models import DataStore
     from dltrack.models._artifact import Artifact, NewArtifact
 
 
@@ -85,24 +85,35 @@ class FSArtifactStore(models.ArtifactStore[Path, int]):
 
     def ingest_stored_artifacts(self, app: Dash) -> None:
         """Forever record the refs of blobs `_save_artifact` has finished writing into `app`'s data store."""
-        store = wait_for_data_store(app)
-        return_q_batchsize = 10
-        maxwait = 1
-        tlast = time.perf_counter()
-        cur_batch: list[Artifact] = []
-        while True:
-            try:
-                with suppress(Empty):
-                    new_artifact = self._saved_artifact_q.get(timeout=maxwait)
-                    cur_batch.append(new_artifact)
+        ship_batches(
+            self._saved_artifact_q,
+            functools.partial(self._record_refs, wait_for_data_store(app)),
+            BatchParams(
+                flush_size=10, wait_sec=1, ready=SPAWN_CONTEXT.Event(), flushed=SPAWN_CONTEXT.Event()
+            ),
+            # `_record_refs` already drops (and cleans up after) anything the store rejects outright,
+            # so whatever still escapes it -- a locked database, say -- is worth retrying.
+            is_permanent=lambda _exc: False,
+        )
 
-                if len(cur_batch) >= return_q_batchsize or time.perf_counter() - tlast > maxwait:
-                    store.log_artifact_refs(cur_batch)
-                    tlast = time.perf_counter()
-                    cur_batch.clear()
-            except Exception:  # noqa: BLE001
-                _log.exception("Failed to store an artifact ref")
-                cur_batch.clear()
+    def _record_refs(self, store: DataStore[...], artifacts: list[Artifact]) -> None:
+        """
+        Record `artifacts`' refs; one the store rejects outright is dropped alone, its blob deleted.
+
+        `log_artifact_refs` raises `ValueError` for input it will never accept (e.g. a run deleted
+        while its upload was in flight) and checks the whole batch before writing any of it -- so on
+        one, retry each artifact alone: only the rejected ones are dropped, and their already-written
+        blobs deleted rather than orphaned on disk with nothing referencing them.
+        """
+        try:
+            store.log_artifact_refs(artifacts)
+        except ValueError:
+            if len(artifacts) > 1:
+                for artifact in artifacts:
+                    self._record_refs(store, [artifact])
+                return
+            _log.exception("The data store rejected artifact %s, deleting its blob", artifacts[0].ref)
+            self.delete_artifact(AnyUrl(artifacts[0].ref))
 
     @classmethod
     def get_or_create(cls, root_directory: Path, store_q_size: int) -> Self:
