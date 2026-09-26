@@ -9,7 +9,7 @@ import tempfile
 from collections.abc import Iterable
 from pathlib import Path
 from threading import Thread
-from typing import TYPE_CHECKING, ClassVar, Mapping, Self, override
+from typing import TYPE_CHECKING, ClassVar, Self, override
 from uuid import uuid4
 
 from flask import Response, send_from_directory
@@ -134,14 +134,10 @@ class FSArtifactStore(models.ArtifactStore[Path, int]):
             / fname_hsh.hexdigest(16)
         )
 
-    def log_artifacts(
-        self,
-        artifacts: Iterable[NewArtifact],
-        files: Mapping[str, FileStorage],
-    ) -> None:
+    def log_artifacts(self, artifacts: Iterable[tuple[NewArtifact, FileStorage]]) -> None:
         """Log an artifact to the store."""
         try:
-            for a in artifacts:
+            for a, file in artifacts:
                 target = self._get_fname(
                     a.experiment_id,
                     a.run_id,
@@ -156,7 +152,7 @@ class FSArtifactStore(models.ArtifactStore[Path, int]):
                 if self._store_q.full():
                     _log.warning("Store queue is full, runtime will be impacted")
                 staging_path = self._file_staging_dir / str(uuid4())
-                files[a.key].save(staging_path, buffer_size=int(1e6))
+                file.save(staging_path, buffer_size=int(1e6))
                 self._store_q.put((a, target, staging_path))
 
         except Exception:

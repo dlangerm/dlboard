@@ -8,10 +8,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, ClassVar
 
+from werkzeug.datastructures import FileStorage
+
 from dltrack import models
 from dltrack.plugins.backend import basic_rest_backend as backend
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from flask import Response
     from pydantic import AnyUrl
 
@@ -30,8 +34,8 @@ class _FakeArtifactStore:
     def get_or_create(cls) -> _FakeArtifactStore:
         return cls()
 
-    def log_artifacts(self, artifacts: object, files: object) -> None:
-        self.logged = list(artifacts)  # pyright: ignore[reportArgumentType]
+    def log_artifacts(self, artifacts: Iterable[tuple[models.NewArtifact, FileStorage]]) -> None:
+        self.logged = [artifact for artifact, _ in artifacts]
 
     def download_artifact(self, ref: AnyUrl) -> Response:
         raise NotImplementedError
@@ -137,7 +141,9 @@ def test_handle_log_artifacts_stamps_created_by_on_every_artifact(store: SQLLite
         models.NewArtifact(key="other", fname="b.bin", run_id=run.id, experiment_id=experiment.id, step=0),
     ]
 
-    backend.handle_log_artifacts(artifact_store, new_artifacts, files={}, actor=actor)
+    backend.handle_log_artifacts(
+        artifact_store, [(artifact, FileStorage()) for artifact in new_artifacts], actor=actor
+    )
 
     assert len(artifact_store.logged) == 2
     assert all(a.created_by == actor.id for a in artifact_store.logged)

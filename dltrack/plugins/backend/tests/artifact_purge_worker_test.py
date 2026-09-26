@@ -10,7 +10,7 @@ from dltrack.conftest import create_entity_chain
 from dltrack.plugins.backend import artifact_purge_worker
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping
+    from collections.abc import Iterable
 
     from flask import Response
     from pydantic import AnyUrl
@@ -32,9 +32,7 @@ class _RaisingArtifactStore:
     def get_or_create(cls, bad_refs: set[str]) -> Self:
         return cls(bad_refs)
 
-    def log_artifacts(
-        self, artifacts: Iterable[models.NewArtifact], files: Mapping[str, FileStorage]
-    ) -> None:
+    def log_artifacts(self, artifacts: Iterable[tuple[models.NewArtifact, FileStorage]]) -> None:
         raise NotImplementedError
 
     def download_artifact(self, ref: AnyUrl) -> Response:
