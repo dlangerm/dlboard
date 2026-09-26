@@ -8,12 +8,12 @@ from pathlib import Path
 
 import dash_mantine_components as dmc
 import pandas as pd
-from flask import Response
 from pydantic import BaseModel, Field
 
 from dltrack.models import ChartType, ColumnKind, MetricColumn
 from dltrack.plugins.charts._colors import hash_color
 from dltrack.plugins.charts._sampling import DEFAULT_MAX_POINTS, shared_sample_grid
+from dltrack.serve import AssetKind, serve_asset
 
 if typing.TYPE_CHECKING:
     from dash import Dash
@@ -21,7 +21,6 @@ if typing.TYPE_CHECKING:
 _BOOKKEEPING_COLS = frozenset({MetricColumn.RUN_ID, MetricColumn.TIMESTAMP_UTC})
 
 _TOOLTIP_JS_PATH = Path(__file__).with_name("line_chart_tooltip.js")
-_TOOLTIP_JS_ROUTE = "line-chart-tooltip.js"
 
 # Recharts' XAxis has no real time/date scale (only "number"/"category") -- a "date" x-axis is
 # rendered as a numeric one, epoch-milliseconds-valued, with a tick/tooltip formatter
@@ -275,22 +274,12 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.LineChart], froze
         return {"column": ColumnKind.METRIC, "x_axis": ColumnKind.METRIC}
 
 
-def _serve_tooltip_js() -> Response:
-    return Response(_TOOLTIP_JS_PATH.read_text(), mimetype="application/javascript")
-
-
 def plug(app: Dash) -> None:
     """
     Plugin.
 
     Registers this chart type, plus the `labelFormatter` its tooltip needs (see `render` and
-    `line_chart_tooltip.js`) -- served from a route this plugin owns and appended to this app
-    instance's own script list (`app.scripts`), not Dash's global `hooks.script`/`hooks.route`
-    registry, which -- like `basic_rest_backend.plug` -- would otherwise leak across every `Dash`
-    app built in the same process, not just this one.
+    `line_chart_tooltip.js`), served from this app instance only via `serve_asset`.
     """
     LineChart.register(allow_override=True)
-    prefix = str(app.config.routes_pathname_prefix)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-    route = f"{prefix}{_TOOLTIP_JS_ROUTE}"
-    app.server.add_url_rule(route, endpoint=route, view_func=_serve_tooltip_js)
-    app.scripts.append_script({"external_url": route, "external_only": True})  # pyright: ignore[reportUnknownMemberType]
+    serve_asset(app, AssetKind.SCRIPT, _TOOLTIP_JS_PATH.name, _TOOLTIP_JS_PATH.read_bytes())

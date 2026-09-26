@@ -39,7 +39,8 @@ formatter, say), serves it from a route this plugin owns:
 ```python
 def plug(app: Dash) -> None:
     MyChart.register(allow_override=True)
-    ...  # optional: app.server.add_url_rule + app.scripts.append_script for chart-local JS
+    # optional, for chart-local JS: served from this app only, cached forever under a content hash
+    serve_asset(app, AssetKind.SCRIPT, _JS_PATH.name, _JS_PATH.read_bytes())
 ```
 
 Always pass `allow_override=True` — the composed app can get built more than once in a process

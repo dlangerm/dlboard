@@ -8,18 +8,17 @@ from pathlib import Path
 
 import dash_mantine_components as dmc
 import pandas as pd
-from flask import Response
 from pydantic import BaseModel, Field
 
 from dltrack.models import ChartType, ColumnKind
 from dltrack.plugins.charts._grouping import last_row_per_run
 from dltrack.plugins.charts._table_style import HPARAM_COLUMN_PREFIX
+from dltrack.serve import AssetKind, serve_asset
 
 if typing.TYPE_CHECKING:
     from dash import Dash
 
 _TOOLTIP_JS_PATH = Path(__file__).with_name("bar_chart_tooltip.js")
-_TOOLTIP_JS_ROUTE = "bar-chart-tooltip.js"
 
 _DEFAULT_BAR_COLOR = "blue.6"
 
@@ -229,22 +228,12 @@ class BarChart(ChartType[BarChartSettings, pd.DataFrame, dmc.BarChart], frozen=T
         return {"column": ColumnKind.METRIC, "x_axis": ColumnKind.GROUPING}
 
 
-def _serve_tooltip_js() -> Response:
-    return Response(_TOOLTIP_JS_PATH.read_text(), mimetype="application/javascript")
-
-
 def plug(app: Dash) -> None:
     """
     Plugin.
 
     Registers this chart type, plus the `labelFormatter` its tooltip needs (see `render` and
-    `bar_chart_tooltip.js`) -- served from a route this plugin owns and appended to this app
-    instance's own script list (`app.scripts`), not Dash's global `hooks.script`/`hooks.route`
-    registry, which -- like `basic_rest_backend.plug` -- would otherwise leak across every `Dash`
-    app built in the same process, not just this one.
+    `bar_chart_tooltip.js`), served from this app instance only via `serve_asset`.
     """
     BarChart.register(allow_override=True)
-    prefix = str(app.config.routes_pathname_prefix)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-    route = f"{prefix}{_TOOLTIP_JS_ROUTE}"
-    app.server.add_url_rule(route, endpoint=route, view_func=_serve_tooltip_js)
-    app.scripts.append_script({"external_url": route, "external_only": True})  # pyright: ignore[reportUnknownMemberType]
+    serve_asset(app, AssetKind.SCRIPT, _TOOLTIP_JS_PATH.name, _TOOLTIP_JS_PATH.read_bytes())
