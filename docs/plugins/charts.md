@@ -8,6 +8,12 @@ its parameter model `P`, the data shape it renders from `D`, and the rendered co
 Built-ins: `line_chart.py`, `bar_chart.py`, `table_chart.py`, `image_series.py`
 (`dltrack/plugins/charts/`).
 
+The built-in line charts, and the image series that steps through logged images:
+
+![Line charts of logged metrics](../images/experiment-charts.png)
+
+![An image-series chart](../images/image-series.png)
+
 ## When you'd need this
 
 You want a new way to visualize logged metrics/artifacts that the built-in line/bar/table/image

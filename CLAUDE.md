@@ -22,6 +22,8 @@ uv run pytest dltrack/serve/_backend/tests/sql_store_test.py::test_name  # run a
 uv run pytest --cov                 # run with coverage (see pyproject.toml for config)
 uv run pytest -m browser            # run only the browser/e2e tests
 uv run pytest -m "not browser"      # run everything except the browser/e2e tests
+uv run pytest --screenshots=check   # re-render the docs screenshots and fail if docs/images is stale
+uv run pytest --screenshots=update  # rewrite docs/images (local preview; CI's render is the one to commit)
 uv run ruff check                   # lint
 uv run ruff format                  # format
 uv run pyright                      # type check (strict mode)

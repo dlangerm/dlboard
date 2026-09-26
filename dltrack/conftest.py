@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import threading
 import typing
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
@@ -18,6 +19,52 @@ from dltrack.serve import app as build_app
 if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
+
+
+class ScreenshotMode(StrEnum):
+    """What the `screenshots`-marked tests do with the docs images (`--screenshots`)."""
+
+    CHECK = "check"
+    """Fail if a freshly rendered screenshot differs from the committed one."""
+
+    UPDATE = "update"
+    """Overwrite the committed screenshots with freshly rendered ones."""
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    """Register `--screenshots`, the switch for the docs-screenshot tests (`docs_screenshots_test.py`)."""
+    parser.addoption(
+        "--screenshots",
+        type=ScreenshotMode,
+        choices=list(ScreenshotMode),
+        default=None,
+        help="Run the docs-screenshot tests: `check` against, or `update`, the images in docs/images.",
+    )
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """
+    Keep the docs-screenshot tests out of ordinary runs, and out of everything else in their own.
+
+    Their images depend on the whole database (the home page lists every project), so a run that
+    asks for screenshots renders them in a process that ran nothing else.
+    """
+    screenshots_requested = config.getoption("--screenshots") is not None
+    if screenshots_requested:
+        deselected = [item for item in items if item.get_closest_marker("screenshots") is None]
+        config.hook.pytest_deselected(items=deselected)
+        items[:] = [item for item in items if item not in deselected]
+        return
+    skip = pytest.mark.skip(reason="docs screenshots are rendered by CI; pass --screenshots=check|update")
+    for item in items:
+        if item.get_closest_marker("screenshots") is not None:
+            item.add_marker(skip)
+
+
+@pytest.fixture(scope="session")
+def screenshot_mode(request: pytest.FixtureRequest) -> ScreenshotMode:
+    """The `--screenshots` mode this run was started with."""
+    return cast("ScreenshotMode", request.config.getoption("--screenshots"))
 
 
 @pytest.fixture
