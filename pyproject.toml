@@ -5,6 +5,7 @@ requires = ["hatchling"]
 [dependency-groups]
 dev = [
   "pandas-stubs>=3.0.5.260730",
+  "pillow>=12.3.0",
   "prek>=0.4.10",
   "pyright>=1.1.411",
   "pytest>=9.1.1",
@@ -65,7 +66,10 @@ venvPath = "."
 
 [tool.pytest.ini_options]
 filterwarnings = ["error"]
-markers = ["browser: browser-based end-to-end tests requiring a webdriver"]
+markers = [
+  "browser: browser-based end-to-end tests requiring a webdriver",
+  "screenshots: renders the docs screenshots; only runs with --screenshots=check|update"
+]
 pythonpath = ["."]
 testpaths = ["dltrack"]
 
@@ -183,6 +187,9 @@ ignore_names = [
   # pytest's module-level marker convention (`pytestmark = pytest.mark.browser`) -- applied by
   # pytest itself scanning the module namespace, never referenced by name in our own code.
   "pytestmark",
+  # pytest's own conftest hooks (`dltrack/conftest.py`) -- discovered and called by pytest by name.
+  "pytest_addoption",
+  "pytest_collection_modifyitems",
   # Pydantic model fields that are read structurally (raw SQL column names, `model_dump()`
   # serialization to REST clients, schema-generation reflection) rather than through a literal
   # `.name` attribute access vulture's static analysis can see -- not dead, just never accessed

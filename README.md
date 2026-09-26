@@ -4,6 +4,18 @@ A free, self-hosted experiment-tracking server. dltrack is a Dash/Dash-Mantine w
 ML training runs, plus a `pytorch_lightning`-compatible logger client that ships metrics,
 hyperparameters, and artifacts to it over a REST API (by default).
 
+![An experiment page: run comparison table and metric charts](docs/images/experiment-charts.png)
+
+## What it looks like
+
+Browse projects and their experiments, compare runs side by side, and step through logged images:
+
+![The projects page](docs/images/home.png)
+
+![A project and its experiments](docs/images/project.png)
+
+![A confusion matrix logged at each step, one image per run](docs/images/image-series.png)
+
 ## Running it
 
 Installed as a package (e.g. `uv tool install dltrack` or `pip install dltrack`), dltrack gives
@@ -35,6 +47,7 @@ Working in this repo instead, everything runs through [`uv`](https://docs.astral
 uv run --env-file .env dltrack serve local     # start the server
 uv run pytest                       # run the test suite
 uv run pytest -m browser            # run only the browser/e2e tests
+uv run pytest --screenshots=update  # regenerate the docs screenshots in docs/images (a local preview)
 uv run ruff check && uv run ruff format   # lint / format
 uv run pyright                      # type check
 uv run prek run --all-files         # run pre-commit hooks manually
@@ -61,7 +74,14 @@ way you'd use any other `pytorch_lightning` logger — see [docs/client.md](docs
 ## Contributing
 
 Pull requests run lint, type-check, and test CI (see `.github/workflows/ci.yml`) — run the
-commands above locally before pushing. See `CLAUDE.md` for the fuller set of code-style
+commands above locally before pushing.
+
+The screenshots above are rendered by the same Playwright harness the browser tests use
+(`dltrack/tests/docs_screenshots_test.py`), and CI fails if they no longer match the app. Font
+rendering differs between machines, so the committed images are the ones CI renders: when that check
+fails, download the `doc-screenshots` artifact from the run, copy its `actual/` PNGs over
+`docs/images/`, and commit. `uv run pytest --screenshots=update` regenerates them locally as a
+preview. See `CLAUDE.md` for the fuller set of code-style
 conventions this repo follows.
 
 ## AI Usage

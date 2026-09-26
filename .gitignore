@@ -13,3 +13,6 @@ wheels/
 lightning-logs/
 _scratch_test.py
 .coverage
+
+# Output of the docs-screenshot check (see dltrack/tests/docs_screenshots_test.py)
+screenshot-diffs/

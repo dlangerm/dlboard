@@ -519,6 +519,7 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "pandas-stubs" },
+    { name = "pillow" },
     { name = "prek" },
     { name = "pyright" },
     { name = "pytest" },
@@ -550,6 +551,7 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "pandas-stubs", specifier = ">=3.0.5.260730" },
+    { name = "pillow", specifier = ">=12.3.0" },
     { name = "prek", specifier = ">=0.4.10" },
     { name = "pyright", specifier = ">=1.1.411" },
     { name = "pytest", specifier = ">=9.1.1" },
