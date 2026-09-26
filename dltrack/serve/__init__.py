@@ -1,5 +1,6 @@
 """Server backend, just expose the app for running."""
 
+from dltrack.serve._assets import AssetKind, serve_asset
 from dltrack.serve._backend import _sql as sql
 from dltrack.serve._backend._auth import get_auth_provider, get_current_user, set_auth_provider
 from dltrack.serve._backend._data_store import (
@@ -18,6 +19,7 @@ from dltrack.serve._settings_env import set_setting_env
 from dltrack.serve.app import app
 
 __all__ = [
+    "AssetKind",
     "ClientsideScript",
     "SQLStoreBase",
     "app",
@@ -28,6 +30,7 @@ __all__ = [
     "get_installed_plugins",
     "resolve_plugins",
     "run_production_server",
+    "serve_asset",
     "set_artifact_store",
     "set_auth_provider",
     "set_data_store",

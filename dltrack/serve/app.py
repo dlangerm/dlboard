@@ -10,10 +10,10 @@ import dash_mantine_components as dmc
 from dash import Dash, Input, Output, State, callback, dcc, html  # pyright: ignore[reportUnknownVariableType]
 from dash.dcc import Store
 from dash.exceptions import PreventUpdate
-from flask import Response
 from structlog.stdlib import get_logger
 
 from dltrack.models import InstalledPlugin, constants
+from dltrack.serve._assets import AssetKind, serve_asset
 from dltrack.serve._backend._auth import get_auth_provider, get_current_user
 from dltrack.serve._backend._data_store import get_data_store
 from dltrack.serve._backend._installed_plugins import set_installed_plugins
@@ -27,15 +27,10 @@ if TYPE_CHECKING:
 _log = get_logger(__name__)
 
 _NAVBAR_RESIZE_JS_PATH = Path(__file__).with_name("navbar_resize.js")
-_NAVBAR_RESIZE_JS_ROUTE = "navbar-resize.js"
 _DEFAULT_NAVBAR_WIDTH = 300
 _MIN_NAVBAR_WIDTH = 260
 _MAX_NAVBAR_WIDTH = 640
 PAGE_LOADING_CLASS = "dl-page-loading"
-
-
-def _serve_navbar_resize_js() -> Response:
-    return Response(_NAVBAR_RESIZE_JS_PATH.read_text(), mimetype="application/javascript")
 
 
 def app(plugins: list[models.PluginProtocol]) -> Dash:
@@ -71,18 +66,8 @@ def app(plugins: list[models.PluginProtocol]) -> Dash:
     # modules/objects themselves, so introspecting this later (the admin page's About tab) can't
     # reach back into a plugin's own state.
     set_installed_plugins(_app, installed)
-    # `navbar_resize.js` (the navbar drag-to-resize handle) served from a route this module owns
-    # and appended to this app instance's own script list, not Dash's global `hooks.script`/
-    # `hooks.route` registry -- same reasoning as `dltrack/plugins/charts/line_chart.py`'s
-    # `plug()`, just inlined here since `app.py` is the one-per-process core, not a plugin.
-    prefix = str(_app.config.routes_pathname_prefix)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-    navbar_resize_route = f"{prefix}{_NAVBAR_RESIZE_JS_ROUTE}"
-    _app.server.add_url_rule(
-        navbar_resize_route, endpoint=navbar_resize_route, view_func=_serve_navbar_resize_js
-    )
-    _app.scripts.append_script(  # pyright: ignore[reportUnknownMemberType]
-        {"external_url": navbar_resize_route, "external_only": True}
-    )
+    # The navbar drag-to-resize handle.
+    serve_asset(_app, AssetKind.SCRIPT, _NAVBAR_RESIZE_JS_PATH.name, _NAVBAR_RESIZE_JS_PATH.read_bytes())
     basic_container_layout = dmc.AppShell(
         [
             dmc.AppShellHeader(

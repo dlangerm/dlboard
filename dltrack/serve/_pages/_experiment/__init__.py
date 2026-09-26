@@ -23,11 +23,10 @@ from typing import TYPE_CHECKING, Any, cast
 
 import pendulum
 from dash import ALL, Dash, Input, Output, State, no_update
-from flask import Response
 from structlog.stdlib import get_logger
 
 from dltrack.models import ButtonId, ModalId, constants
-from dltrack.serve import get_current_user, get_data_store
+from dltrack.serve import AssetKind, get_current_user, get_data_store, serve_asset
 from dltrack.serve._pages._dataframe_helpers import experiment_display_name
 from dltrack.serve._pages._delete_confirm import (
     DeleteConfirmIds,
@@ -76,12 +75,11 @@ EXPERIMENT_DELETE_IDS = DeleteConfirmIds(
     cancel=DELETE_EXPERIMENT_CANCEL_ID,
 )
 
-_HOVER_CSS_PATH = Path(__file__).with_name("_experiment_page_hover.css")
-_HOVER_CSS_ROUTE = "experiment-page-hover.css"
-_DRAGDROP_JS_PATH = Path(__file__).with_name("_experiment_page_dragdrop.js")
-_DRAGDROP_JS_ROUTE = "experiment-page-dragdrop.js"
-_CHART_SUBMIT_LOADING_JS_PATH = Path(__file__).with_name("chart_submit_loading.js")
-_CHART_SUBMIT_LOADING_JS_ROUTE = "chart-submit-loading.js"
+_ASSETS = [
+    (AssetKind.STYLESHEET, Path(__file__).with_name("_experiment_page_hover.css")),
+    (AssetKind.SCRIPT, Path(__file__).with_name("_experiment_page_dragdrop.js")),
+    (AssetKind.SCRIPT, Path(__file__).with_name("chart_submit_loading.js")),
+]
 
 
 def _delete_experiment_action() -> list[Component]:
@@ -89,18 +87,6 @@ def _delete_experiment_action() -> list[Component]:
     return render_delete_control(
         EXPERIMENT_DELETE_IDS, label="Delete experiment", entity_noun="experiment", icon_only=True
     )
-
-
-def _serve_hover_css() -> Response:
-    return Response(_HOVER_CSS_PATH.read_text(), mimetype="text/css")
-
-
-def _serve_dragdrop_js() -> Response:
-    return Response(_DRAGDROP_JS_PATH.read_text(), mimetype="application/javascript")
-
-
-def _serve_chart_submit_loading_js() -> Response:
-    return Response(_CHART_SUBMIT_LOADING_JS_PATH.read_text(), mimetype="application/javascript")
 
 
 def render_panel(store: DataStore[...], experiment_id: int) -> tuple[html.Div, Component, str]:
@@ -298,26 +284,8 @@ def register_render_callbacks(app: Dash) -> None:
 
 def register(app: Dash) -> None:
     """Register the experiment page: hparam table + chart accordion + editor."""
-    prefix = str(app.config.routes_pathname_prefix)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
-    css_route = f"{prefix}{_HOVER_CSS_ROUTE}"
-    app.server.add_url_rule(css_route, endpoint=css_route, view_func=_serve_hover_css)
-    app.css.append_css({"external_url": css_route, "external_only": True})
-
-    dragdrop_route = f"{prefix}{_DRAGDROP_JS_ROUTE}"
-    app.server.add_url_rule(dragdrop_route, endpoint=dragdrop_route, view_func=_serve_dragdrop_js)
-    app.scripts.append_script(  # pyright: ignore[reportUnknownMemberType]
-        {"external_url": dragdrop_route, "external_only": True}
-    )
-
-    chart_submit_loading_route = f"{prefix}{_CHART_SUBMIT_LOADING_JS_ROUTE}"
-    app.server.add_url_rule(
-        chart_submit_loading_route,
-        endpoint=chart_submit_loading_route,
-        view_func=_serve_chart_submit_loading_js,
-    )
-    app.scripts.append_script(  # pyright: ignore[reportUnknownMemberType]
-        {"external_url": chart_submit_loading_route, "external_only": True}
-    )
+    for kind, path in _ASSETS:
+        serve_asset(app, kind, path.name, path.read_bytes())
 
     register_render_callbacks(app)
 
