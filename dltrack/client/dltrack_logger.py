@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import contextlib
 import functools
-import logging
 import tempfile
 import time
 import warnings
@@ -12,8 +10,7 @@ from argparse import Namespace
 from dataclasses import dataclass
 from http import HTTPStatus
 from pathlib import Path
-from queue import Empty
-from typing import TYPE_CHECKING, Any, Final, NamedTuple, Protocol, override
+from typing import TYPE_CHECKING, Any, Final, override
 
 import pendulum
 import requests
@@ -21,6 +18,7 @@ from pydantic import BaseModel
 from pytorch_lightning.loggers import Logger
 
 from dltrack import models
+from dltrack._batching import BatchParams, ship_batches
 from dltrack._mp_context import SPAWN_CONTEXT
 from dltrack.plugins.backend.basic_rest_backend import DEFAULT_SERVER_URL, BasicDltrackAPI
 
@@ -34,8 +32,6 @@ if TYPE_CHECKING:
 
     from dltrack.models._artifact import AnyArtifact
 
-
-_log = logging.getLogger(__name__)
 
 _STARTUP_WARN_THRESHOLD_SEC = 2.0
 """How long a worker process's import + startup can take before we warn it's the likely cause of
@@ -61,68 +57,18 @@ def warn_if_startup_was_slow(elapsed_sec: float) -> None:
         )
 
 
-class LogProcParams(NamedTuple):
-    """Process parameters for a logger daemon."""
+def is_rejection(exc: Exception) -> bool:
+    """
+    Whether the server refused a batch outright (4xx) -- resending the exact same batch can never succeed.
 
-    flush_size: int
-    ready: MPEvent
-    flushed: MPEvent
-    wait_sec: float = _SHIP_INTERVAL_SEC
-
-
-class Receiver[T](Protocol):
-    """The one queue method `ship_batches` needs -- both `multiprocessing` and `queue` queues have it."""
-
-    def get(self, block: bool = True, timeout: float | None = None) -> T: ...  # noqa: D102, FBT001, FBT002
-
-
-def _is_rejection(exc: Exception) -> bool:
-    """Whether the server refused a batch outright -- resending the exact same batch can never succeed."""
+    A connection error or 5xx is transient instead, as are a 408/429, which only ask to retry later.
+    """
     if not isinstance(exc, requests.HTTPError) or exc.response is None:
         return False
     status = exc.response.status_code
     return HTTPStatus.BAD_REQUEST <= status < HTTPStatus.INTERNAL_SERVER_ERROR and (
         status not in _TRANSIENT_CLIENT_ERRORS
     )
-
-
-def ship_batches[T](q: Receiver[T | None], ship: Callable[[list[T]], None], params: LogProcParams) -> None:
-    """
-    Drain `q` into batches, shipping one once it's full, `wait_sec` old, or a flush asks for it.
-
-    A batch the server rejects (4xx) is dropped: resending it can never succeed, and keeping it would
-    wedge every later item behind it. Any other failure (connection error, 5xx) is transient -- the
-    batch is kept, keeps growing with whatever arrives meanwhile, and is retried after `wait_sec`.
-    A `None` queued in place of an item requests a flush, acknowledged (`params.flushed`) only once
-    everything queued before it is gone.
-    """
-    params.ready.set()
-    batch: list[T] = []
-    flush_requested = False
-    last_attempt = time.perf_counter()
-    while True:
-        with contextlib.suppress(Empty):
-            item = q.get(timeout=params.wait_sec / 10)
-            if item is None:
-                flush_requested = True
-            else:
-                batch.append(item)
-        due = flush_requested or len(batch) >= params.flush_size
-        if batch and (due or time.perf_counter() - last_attempt > params.wait_sec):
-            try:
-                ship(batch)
-                batch = []
-            except Exception as exc:  # noqa: BLE001 -- nothing may kill the shipping process
-                if _is_rejection(exc):
-                    _log.exception("The server rejected a batch of %s, dropping it", len(batch))
-                    batch = []
-                else:
-                    _log.exception("Failed to ship a batch of %s, retrying", len(batch))
-                    time.sleep(params.wait_sec)
-            last_attempt = time.perf_counter()
-        if flush_requested and not batch:
-            flush_requested = False
-            params.flushed.set()
 
 
 def _ship_artifacts(
@@ -177,7 +123,8 @@ def _start_shipper[T](
     ready, flushed = SPAWN_CONTEXT.Event(), SPAWN_CONTEXT.Event()
     process = SPAWN_CONTEXT.Process(
         target=ship_batches,
-        args=(queue, ship, LogProcParams(flush_size=flush_size, ready=ready, flushed=flushed)),
+        args=(queue, ship, BatchParams(flush_size, _SHIP_INTERVAL_SEC, ready, flushed)),
+        kwargs={"is_permanent": is_rejection},
         name=f"dltrack-{name}",
         daemon=True,
     )
