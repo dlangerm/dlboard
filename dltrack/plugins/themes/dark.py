@@ -4,12 +4,14 @@ from dash import Dash, Input, Output
 from structlog.stdlib import get_logger
 
 from dltrack.models import constants
+from dltrack.plugins.themes._inter import install_inter
 
 _log = get_logger(__name__)
 
 
 def plug(app: Dash) -> None:
     """Set the mantine theme for the dltrack server."""
+    install_inter(app)
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(component_id=constants.MANTINE_PROVIDER_ID, component_property="theme"),

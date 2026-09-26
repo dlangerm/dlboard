@@ -7,6 +7,11 @@ A theme plugin sets the Mantine theme the whole app renders with — colors, fon
 smallest plugin category: `dltrack/plugins/themes/dark.py` is the entire built-in, one callback,
 no state.
 
+The built-in theme asks for the `Inter` font and ships it: `dltrack/plugins/themes/_inter.py` serves a
+bundled variable-font subset (SIL OFL, license alongside) from the app itself, so it renders the same
+on every machine and works offline. A theme that names a different font is responsible for loading it
+the same way -- a `fontFamily` alone only works if the font is already on the viewer's machine.
+
 ## When you'd need this
 
 You want different branding (colors, font) or a light theme instead of the built-in dark one.
