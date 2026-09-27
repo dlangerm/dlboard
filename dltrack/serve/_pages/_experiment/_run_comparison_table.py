@@ -23,7 +23,7 @@ from structlog.stdlib import get_logger
 from dltrack import models
 from dltrack.models import ButtonId, ModalId, StoreId, ValueId, constants
 from dltrack.plugins.charts._table_style import column_def, infer_column_dtype, themed_grid_kwargs
-from dltrack.serve import ClientsideScript, get_current_user, get_data_store
+from dltrack.serve import ClientsideScript, Icon, get_current_user, get_data_store, icon_cell_class
 from dltrack.serve._pages._dash_helpers import tooltipped_action_icon
 from dltrack.serve._pages._experiment import _dataframe_helpers as dfh
 from dltrack.serve._pages._experiment import _experiment_page_state as core
@@ -152,12 +152,13 @@ def _build_hparam_datatable(
             "sortable": False,
             "filter": False,
             "width": 40,
+            "cellClass": icon_cell_class(Icon.DELETE),
             "cellStyle": {"textAlign": "center", "cursor": "pointer", "color": "var(--mantine-color-red-6)"},
         }
     )
 
     selected_ids = [str(row["run_id"]) for row in rows if row["run_id"] not in excluded]
-    data = [{**row, _DELETE_COLUMN_ID: "🗑", _ROW_ID_FIELD: str(row["run_id"])} for row in rows]
+    data = [{**row, _ROW_ID_FIELD: str(row["run_id"])} for row in rows]
 
     return dag.AgGrid(
         id=table_id,
@@ -210,7 +211,7 @@ def _render_hparam_panel(
                         [
                             dmc.PopoverTarget(
                                 tooltipped_action_icon(
-                                    "▤",
+                                    Icon.COLUMNS,
                                     component_id=NAVBAR_HPARAM_COLUMNS_TOGGLE_ID,
                                     label="Choose columns",
                                 )

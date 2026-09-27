@@ -15,7 +15,7 @@ from dash import ALL, Dash, Input, NoUpdate, Output, State, ctx, no_update
 from dash.exceptions import PreventUpdate
 
 from dltrack.models import ChartInstance, ColumnKind, constants
-from dltrack.serve import get_data_store
+from dltrack.serve import Icon, get_data_store, icon
 from dltrack.serve._pages._experiment import _experiment_page_state as core
 from dltrack.serve._pages._experiment._chart_autogen import (
     Suggestion,
@@ -50,16 +50,17 @@ def _render_suggestions(suggestions: list[Suggestion]) -> Component:
                 dmc.Stack(
                     [
                         dmc.Text(s.key, size="sm", ff="monospace"),
-                        dmc.Text(f"→ {s.panel_name}", size="xs", c="dimmed"),
+                        dmc.Text([icon(Icon.MOVE_TO), " ", s.panel_name], size="xs", c="dimmed"),
                     ],
                     gap=0,
                 ),
                 dmc.ActionIcon(
-                    "+",
+                    icon(Icon.ADD),
                     id=core.add_suggestion_button_id(s.kind.value, s.key),
                     n_clicks=0,
                     variant="light",
                     size="sm",
+                    **cast("dict[str, Any]", {"aria-label": f"Add a chart for {s.key}"}),
                 ),
             ],
             justify="space-between",

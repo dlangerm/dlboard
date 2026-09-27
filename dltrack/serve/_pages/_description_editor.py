@@ -9,6 +9,7 @@ import dash_mantine_components as dmc
 from dash import Input, Output, State
 from dash.exceptions import PreventUpdate
 
+from dltrack.serve import Icon
 from dltrack.serve._pages._dash_helpers import tooltipped_action_icon
 
 if TYPE_CHECKING:
@@ -52,7 +53,7 @@ def render_header(
                 [
                     dmc.Text(title, size="sm", fw=600),
                     tooltipped_action_icon(
-                        "✎", component_id=ids.edit_button, label="Edit name/description", color="gray"
+                        Icon.EDIT, component_id=ids.edit_button, label="Edit name/description"
                     ),
                     *(extra_actions or []),
                 ],

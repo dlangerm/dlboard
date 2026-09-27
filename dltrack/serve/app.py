@@ -20,6 +20,7 @@ from dltrack.serve._backend._auth import get_auth_provider, get_current_user
 from dltrack.serve._backend._data_store import get_data_store
 from dltrack.serve._backend._installed_plugins import set_installed_plugins
 from dltrack.serve._backend._theme import get_theme
+from dltrack.serve._icons import Icon, icon, install_icons
 
 if TYPE_CHECKING:
     from dash.development.base_component import Component
@@ -77,6 +78,7 @@ def app(plugins: list[models.PluginProtocol]) -> Dash:
     set_installed_plugins(_app, installed)
     for kind, path in _ASSETS:
         serve_asset(_app, kind, path.name, path.read_bytes())
+    install_icons(_app)
     # A theme plugin's `plug()` has already run by now (inside `Dash(...)` above), so its theme
     # goes straight into the first response -- no callback, no flash of an unthemed page.
     theme = get_theme(_app)
@@ -107,10 +109,12 @@ def _layout(theme: ThemeSpec) -> dmc.MantineProvider:
                             [
                                 dmc.Burger(id="burger", size="sm", hiddenFrom="sm", opened=False),
                                 dmc.ActionIcon(
-                                    "☰",
+                                    icon(Icon.SIDEBAR, size="1.25rem"),
                                     id=constants.NAVBAR_COLLAPSE_TOGGLE_ID,
                                     variant="subtle",
+                                    color="gray",
                                     visibleFrom="sm",
+                                    **cast("dict[str, Any]", {"aria-label": "Toggle sidebar"}),
                                 ),
                                 dmc.Title("DLTrack"),
                                 dmc.Breadcrumbs(id=constants.PAGE_BREADCRUMB_ID, separator="/", children=[]),

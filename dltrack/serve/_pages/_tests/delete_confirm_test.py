@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from typing import Any, cast
 
+from dltrack.conftest import props
+from dltrack.serve import Icon
 from dltrack.serve._pages._delete_confirm import DeleteConfirmIds, render_delete_control
 
 _IDS = DeleteConfirmIds(button="btn", modal="modal", confirm="confirm", cancel="cancel")
@@ -36,7 +38,8 @@ def test_render_delete_control_icon_only_renders_a_tooltipped_trash_icon() -> No
     )
 
     assert tooltip.label == "Delete project"
-    icon = tooltip.children
-    assert icon.id == "btn"
-    assert icon.children == "🗑"
+    button = props(tooltip.children)
+    assert button["id"] == "btn"
+    assert button["aria-label"] == "Delete project"
+    assert Icon.DELETE.class_name in button["children"].className
     assert modal.id == "modal"
