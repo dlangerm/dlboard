@@ -1,0 +1,9 @@
+/* The canvas behind cards and panels: a step deeper than the (body-colored) cards in dark mode, a
+   faint gray under white cards in light mode -- so a card reads as a raised surface, not a box. */
+:root[data-mantine-color-scheme="dark"] {
+  --dl-canvas: var(--mantine-color-dark-8);
+}
+
+:root[data-mantine-color-scheme="light"] {
+  --dl-canvas: var(--mantine-color-gray-0);
+}

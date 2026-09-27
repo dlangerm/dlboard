@@ -4,7 +4,7 @@
 
 A theme plugin sets the Mantine theme the whole app renders with — colors, fonts, light/dark mode
 — by handing the core app a `ThemeSpec` via `dltrack.serve.set_theme` from its `plug()`. It's the
-smallest plugin category: `dltrack/plugins/themes/dark.py` is the entire built-in, one call, no
+smallest plugin category: `dltrack/plugins/themes/default.py` is the entire built-in, one call, no
 state.
 
 The core app builds its `MantineProvider` from that spec directly, in the very first response, and
@@ -19,7 +19,7 @@ the same way -- a `fontFamily` alone only works if the font is already on the vi
 
 ## When you'd need this
 
-You want different branding (colors, font) or a light theme instead of the built-in dark one.
+You want different branding (colors, font) or a look other than the built-in one.
 
 ## How do I build one
 
@@ -42,5 +42,14 @@ def plug(app: Dash) -> None:
 `mantine` is a [Mantine theme object](https://mantine.dev/theming/theme-object/) — anything valid
 there (colors, fonts, spacing, component defaults) is fair game. `page_background` should match
 the theme's `--mantine-color-body` for each scheme, since it's what the page shows before Mantine's
-own CSS has loaded. Register your theme instead of `dark` in the plugin list passed to `app()`;
+own CSS has loaded. Register your theme instead of `default` in the plugin list passed to `app()`;
 only one theme plugin can be active at a time — a second `set_theme` on the same app raises.
+
+Beyond the Mantine theme, the core app exposes a few `--dl-*` CSS variables of its own, with
+neutral defaults in `dltrack/serve/_shell.css`. A theme overrides them from a stylesheet it serves
+itself via `dltrack.serve.serve_asset` (see `dltrack/plugins/themes/default.css`), scoped per
+scheme with `:root[data-mantine-color-scheme="dark"]`:
+
+| Variable | What it colors |
+|---|---|
+| `--dl-canvas` | the main area behind cards and panels |

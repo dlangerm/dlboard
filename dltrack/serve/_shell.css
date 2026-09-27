@@ -1,0 +1,23 @@
+/* The core app shell's own styles: structure, plus the `--dl-*` CSS variables the core app owns.
+   Values here are neutral defaults -- a theme plugin overrides any `--dl-*` variable in its own
+   stylesheet (see `dltrack/plugins/themes/default.css`). */
+
+:root {
+  /* The main area's background, behind cards and panels. */
+  --dl-canvas: var(--mantine-color-body);
+  scrollbar-color: var(--mantine-color-default-border) transparent;
+}
+
+* {
+  scrollbar-width: thin;
+}
+
+.dl-app-main {
+  background-color: var(--dl-canvas);
+}
+
+/* Columns of numbers line up digit for digit. */
+.ag-theme-quartz,
+.dl-tabular {
+  font-variant-numeric: tabular-nums;
+}
