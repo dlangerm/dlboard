@@ -45,6 +45,10 @@ class AppSlot[T]:
             raise AttributeError(msg)
         return cast("T", getattr(app, self._attribute))
 
+    def find(self, app: Dash) -> T | None:
+        """Like `get`, but `None` when nothing set it -- for state that's optional to install."""
+        return cast("T | None", getattr(app, self._attribute, None))
+
     def wait(self, app: Dash) -> T:
         """Like `get`, but blocks until some plugin's `plug()` sets it -- plugin order isn't guaranteed."""
         while not hasattr(app, self._attribute):
