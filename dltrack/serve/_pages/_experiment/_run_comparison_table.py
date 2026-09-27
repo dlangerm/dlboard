@@ -41,7 +41,8 @@ NAVBAR_HPARAM_TABLE_BODY_ID: typing.Final = "navbar-hparam-table-body"
 NAVBAR_HPARAM_CONFIRM_COLS_ID: ButtonId[core.ExperimentPage] = ButtonId("navbar-hparam-confirm-cols")
 NAVBAR_HPARAM_COLUMNS_TOGGLE_ID: ButtonId[core.ExperimentPage] = ButtonId("navbar-hparam-columns-toggle")
 NAVBAR_HPARAM_APPLIED_COLS_ID: StoreId[core.ExperimentPage] = StoreId("navbar-hparam-applied-cols")
-_NAVBAR_HPARAM_PAGE_SIZE = 8
+_ROW_HEIGHT = 34
+_MAX_TABLE_HEIGHT = "50vh"
 _DELETE_COLUMN_ID = "_delete"
 _ROW_ID_FIELD = "_row_id"
 
@@ -141,7 +142,6 @@ def _build_hparam_datatable(
     excluded: list[int] | list[str],
     *,
     table_id: str,
-    page_size: int,
 ) -> dag.AgGrid:
     column_defs: list[dict[str, Any]] = [{"field": "run_name", "headerName": "Run", "sortable": True}]
     column_defs.extend(column_def(str(key), infer_column_dtype(rows, str(key))) for key in selected)
@@ -160,6 +160,16 @@ def _build_hparam_datatable(
     selected_ids = [str(row["run_id"]) for row in rows if row["run_id"] not in excluded]
     data = [{**row, _ROW_ID_FIELD: str(row["run_id"])} for row in rows]
 
+    # Sized to fit its rows (header included, and room for the empty-table overlay), up to a cap
+    # past which it scrolls -- and since it isn't `autoHeight`, ag-grid then only renders the rows
+    # actually in view, so a 500-run sweep costs the DOM what a 15-run one does. No pagination:
+    # scrolling a long list is fewer clicks than paging through it.
+    grid = themed_grid_kwargs()
+    grid["className"] = f"{grid['className']} dl-run-table"
+    grid["style"] = {
+        **grid["style"],
+        "height": f"min({(max(len(rows), 2) + 1) * _ROW_HEIGHT + 2}px, {_MAX_TABLE_HEIGHT})",
+    }
     return dag.AgGrid(
         id=table_id,
         columnDefs=column_defs,
@@ -175,13 +185,11 @@ def _build_hparam_datatable(
         selectedRows={"ids": selected_ids},
         columnSize="responsiveSizeToFit",
         dashGridOptions={
-            "pagination": True,
-            "paginationPageSize": page_size,
-            "paginationPageSizeSelector": sorted({page_size, 20, 50, 100}),
-            "domLayout": "autoHeight",
+            "rowHeight": _ROW_HEIGHT,
+            "headerHeight": _ROW_HEIGHT,
             "rowSelection": {"mode": "multiRow", "checkboxes": True, "headerCheckbox": True},
         },
-        **themed_grid_kwargs(),
+        **grid,
     )
 
 
@@ -268,7 +276,6 @@ def _render_hparam_panel(
                     selected,
                     excluded,
                     table_id=NAVBAR_HPARAM_DATATABLE_ID,
-                    page_size=_NAVBAR_HPARAM_PAGE_SIZE,
                 ),
             ),
         ]
