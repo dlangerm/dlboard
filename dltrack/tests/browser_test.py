@@ -191,7 +191,7 @@ def test_panel_header_hover_controls_toggle_and_delete_without_disturbing_siblin
     expect(keep_region).not_to_be_visible()
 
     # "delete-me" is second in document order and was never opened.
-    delete_me_trash_icon = page.get_by_role("button", name="🗑").nth(1)
+    delete_me_trash_icon = page.get_by_role("button", name="Delete panel", exact=True).nth(1)
     delete_me_trash_icon.hover()
     delete_me_trash_icon.click()
 
@@ -623,6 +623,10 @@ def test_new_tab_without_panels_gets_an_empty_panel_that_accepts_a_dragged_chart
     )
     page.reload()
     page.get_by_role("button", name="Auto-generate charts").click()
+    # The rebuild that lands the generated panels also re-renders the new-tab button; wait for it
+    # (the auto-generate button only exists on a view with no panels) so the click below can't hit
+    # the outgoing copy.
+    expect(page.get_by_role("button", name="Auto-generate charts")).to_have_count(0)
 
     # Create "Images" without picking any panel -- the picker stays empty.
     page.locator(f"#{NEW_TAB_BUTTON_ID}").click()

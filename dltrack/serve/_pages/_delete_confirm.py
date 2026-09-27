@@ -8,13 +8,14 @@ Reused wherever a soft-deletable entity needs a delete affordance (project, expe
 from __future__ import annotations
 
 import typing
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
 import dash_mantine_components as dmc
 from dash import Input, Output, State
 from dash.exceptions import PreventUpdate
 
 from dltrack.models import constants
+from dltrack.serve import Icon
 from dltrack.serve._pages._dash_helpers import tooltipped_action_icon
 
 if TYPE_CHECKING:
@@ -37,12 +38,8 @@ def render_delete_control(
     ids: DeleteConfirmIds, *, label: str, entity_noun: str, icon_only: bool = False
 ) -> list[Component]:
     """A delete button (or, with `icon_only`, a tooltipped trash icon) plus its confirmation modal."""
-    # `aria-label` is only known dynamically (a dict key, not a literal kwarg -- Python identifiers
-    # can't contain hyphens), so pyright can't match it against `tooltipped_action_icon`'s typed
-    # keyword params; `cast` to `Any` rather than fight that.
-    extra_attrs = cast("dict[str, Any]", {"aria-label": label})
     trigger = (
-        tooltipped_action_icon("🗑", component_id=ids.button, label=label, color="red", **extra_attrs)
+        tooltipped_action_icon(Icon.DELETE, component_id=ids.button, label=label, color="red")
         if icon_only
         else dmc.Button(label, id=ids.button, n_clicks=0, color="red", variant="light", size="xs")
     )

@@ -15,6 +15,7 @@ from dltrack.serve._backend._installed_plugins import get_installed_plugins, set
 from dltrack.serve._backend._sql_store_base import SQLStoreBase
 from dltrack.serve._backend._theme import get_theme, set_theme
 from dltrack.serve._clientside_script import ClientsideScript
+from dltrack.serve._icons import Icon, icon, icon_cell_class
 from dltrack.serve._production_server import resolve_plugins, run_production_server
 from dltrack.serve._settings_env import set_setting_env
 from dltrack.serve.app import app
@@ -22,6 +23,7 @@ from dltrack.serve.app import app
 __all__ = [
     "AssetKind",
     "ClientsideScript",
+    "Icon",
     "SQLStoreBase",
     "app",
     "get_artifact_store",
@@ -30,6 +32,8 @@ __all__ = [
     "get_data_store",
     "get_installed_plugins",
     "get_theme",
+    "icon",
+    "icon_cell_class",
     "resolve_plugins",
     "run_production_server",
     "serve_asset",

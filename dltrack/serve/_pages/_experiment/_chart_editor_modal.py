@@ -21,7 +21,7 @@ from structlog.stdlib import get_logger
 
 from dltrack import models
 from dltrack.models import constants
-from dltrack.serve import ClientsideScript, get_data_store
+from dltrack.serve import ClientsideScript, Icon, get_data_store, icon
 from dltrack.serve._pages._experiment import _experiment_page_state as core
 from dltrack.serve._pages._experiment._dataframe_helpers import ColumnCatalog
 
@@ -66,12 +66,13 @@ def _param_field_input(
                 # to that default -- clearing via backspace alone works too, but isn't discoverable.
                 rightSection=(
                     dmc.ActionIcon(
-                        "✕",
+                        icon(Icon.CLOSE),
                         id=core.chart_param_clear_id(field_name),
                         n_clicks=0,
                         variant="subtle",
                         color="gray",
                         size="xs",
+                        **cast("dict[str, Any]", {"aria-label": "Reset to default"}),
                     )
                     if not field.required
                     else None

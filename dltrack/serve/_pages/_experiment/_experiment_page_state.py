@@ -28,7 +28,7 @@ from structlog.stdlib import get_logger
 
 from dltrack import models
 from dltrack.models import ButtonId, DivId, IntervalId, ModalId, StoreId, ValueId, constants
-from dltrack.serve import ClientsideScript, get_data_store
+from dltrack.serve import ClientsideScript, Icon, get_data_store, icon
 from dltrack.serve._pages._dash_helpers import tooltipped_action_icon
 from dltrack.serve._pages._experiment import _dataframe_helpers as dfh
 
@@ -544,13 +544,13 @@ def render_chart_item(
                 data_attrs={"panel-name": panel.name, "chart-index": str(index)},
             ),
             tooltipped_action_icon(
-                "✎",
+                Icon.EDIT,
                 component_id=edit_chart_button_id(panel.name, index),  # pyright: ignore[reportArgumentType]
                 label="Edit chart",
                 size="xs",
             ),
             tooltipped_action_icon(
-                "🗑",
+                Icon.DELETE,
                 component_id=delete_chart_button_id(panel.name, index),  # pyright: ignore[reportArgumentType]
                 label="Delete chart",
                 color="red",
@@ -649,7 +649,7 @@ def _drag_handle(*, class_name: str, component_id: dict[str, str], data_attrs: d
     div = cast("Any", html.Div)
     return dmc.Tooltip(
         div(
-            "⠿",
+            icon(Icon.DRAG),
             id=component_id,
             draggable="true",
             className=class_name,
@@ -677,10 +677,10 @@ def panel_header_controls(panel: models.PanelInstance[Any, Any]) -> Component:
                 data_attrs={"panel-name": panel_name},
             ),
             tooltipped_action_icon(
-                "+", component_id=open_chart_button_id(panel_name), label="Add chart to this panel"
+                Icon.ADD, component_id=open_chart_button_id(panel_name), label="Add chart to this panel"
             ),
             tooltipped_action_icon(
-                "✨",
+                Icon.SUGGEST,
                 component_id=panel_suggest_button_id(panel_name),
                 label="Suggest charts for this panel",
             ),
@@ -699,8 +699,8 @@ def panel_header_controls(panel: models.PanelInstance[Any, Any]) -> Component:
                 dmc.SegmentedControl(
                     id=panel_layout_control_id(panel_name),
                     data=[
-                        {"value": "packed", "label": "☰"},
-                        {"value": "grid", "label": "▦"},
+                        {"value": "packed", "label": "Packed"},
+                        {"value": "grid", "label": "Grid"},
                     ],
                     value=panel.layout,
                     size="xs",
@@ -710,10 +710,10 @@ def panel_header_controls(panel: models.PanelInstance[Any, Any]) -> Component:
                 withArrow=True,
             ),
             tooltipped_action_icon(
-                "✎", component_id=rename_panel_button_id(panel_name), label="Rename panel"
+                Icon.EDIT, component_id=rename_panel_button_id(panel_name), label="Rename panel"
             ),
             tooltipped_action_icon(
-                "🗑",
+                Icon.DELETE,
                 component_id=delete_panel_button_id(panel_name),
                 label="Delete panel",
                 color="red",
@@ -796,7 +796,7 @@ class BasicExperimentPage(models.Page[pd.DataFrame, Component, html.Div], frozen
         # already-full-width top row.
         panel_controls = empty_view_helper(self.panels)
         new_tab_button = tooltipped_action_icon(
-            "+", component_id=NEW_TAB_BUTTON_ID, label="New tab", size="xs"
+            Icon.ADD, component_id=NEW_TAB_BUTTON_ID, label="New tab", size="xs"
         )
         if len(accordions) <= 1:
             return html.Div(
@@ -810,7 +810,7 @@ class BasicExperimentPage(models.Page[pd.DataFrame, Component, html.Div], frozen
         if active_tab not in accordions:
             active_tab = next(iter(accordions))
         rename_tab_button = tooltipped_action_icon(
-            "✎",
+            Icon.EDIT,
             component_id=RENAME_TAB_BUTTON_ID,
             label="Rename the active tab",
             size="xs",
@@ -925,7 +925,14 @@ def empty_view_helper(panels: list[models.PanelInstance[Any, Any]]) -> Component
         [
             dmc.TextInput(id=NEW_PANEL_NAME_ID, placeholder="New Panel Name", size="sm"),
             dmc.Tooltip(
-                dmc.ActionIcon("+", id=NEW_PANEL_ID, n_clicks=0, variant="filled", size="input-sm"),
+                dmc.ActionIcon(
+                    icon(Icon.ADD),
+                    id=NEW_PANEL_ID,
+                    n_clicks=0,
+                    variant="filled",
+                    size="input-sm",
+                    **cast("dict[str, Any]", {"aria-label": "Create panel"}),
+                ),
                 label="Create panel",
                 position="top",
                 withArrow=True,
@@ -949,7 +956,7 @@ def empty_view_helper(panels: list[models.PanelInstance[Any, Any]]) -> Component
                     "Auto-generate charts",
                     id=AUTO_POPULATE_BUTTON_ID,
                     n_clicks=0,
-                    leftSection="✨",
+                    leftSection=icon(Icon.SUGGEST),
                     variant="gradient",
                     gradient={"from": "grape", "to": "indigo", "deg": 45},
                     size="sm",
@@ -963,8 +970,9 @@ def empty_view_helper(panels: list[models.PanelInstance[Any, Any]]) -> Component
             add_panel,
             dmc.Tooltip(
                 dmc.Button(
-                    children="✨",
+                    children=icon(Icon.SUGGEST),
                     id=SUGGEST_CHARTS_BUTTON_ID,
+                    **cast("dict[str, Any]", {"aria-label": "Suggest charts"}),
                     n_clicks=0,
                     variant="gradient",
                     gradient={"from": "grape", "to": "indigo", "deg": 45},
