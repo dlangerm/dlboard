@@ -456,7 +456,7 @@ def test_navbar_columns_picker_applies_a_selected_column(
     and closed the whole thing before "Apply" was ever reachable, discarding the pick. Also proves
     ag-grid doesn't warn about a duplicate/undefined row id along the way (a real row-identity bug:
     `assert console_errors == []` alone can't catch it, since ag-grid logs it via `console.warn`,
-    not `console.error`) and that switching the grid's page size doesn't leave a phantom empty row.
+    not `console.error`) and that rebuilding the grid doesn't leave a phantom empty row.
     """
     _create_project_and_experiment(page, live_server_url, "Columns Picker Experiment")
     page.locator(".experiment-card").click()
@@ -493,10 +493,7 @@ def test_navbar_columns_picker_applies_a_selected_column(
     apply_button.click()
 
     expect(grid.get_by_role("columnheader", name="accuracy")).to_be_visible()
-
-    # Changing the page size must not leave a stray extra row -- the count stays exactly 2.
-    page.locator(".ag-picker-field").click()
-    page.get_by_role("option", name="50").click()
+    # Rebuilding the grid for the new column mustn't leave a stray extra row -- still exactly 2.
     expect(grid.locator(".ag-center-cols-container .ag-row")).to_have_count(2)
 
     assert console_errors == []

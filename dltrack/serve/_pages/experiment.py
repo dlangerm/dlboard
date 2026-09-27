@@ -41,7 +41,7 @@ def _live_update_header(header: Component) -> dmc.Group:
                     # with the div above (see `live_switch_state.js`), not a second callback
                     # writing that div's `children`.
                     html.Div(
-                        dmc.Badge("Paused", color="gray", variant="light", size="xs"),
+                        dmc.Badge("Paused", color="gray", variant="dot", size="sm", tt="none"),
                         id=core.LIVE_PAUSED_BADGE_ID,
                         style={"display": "none"},
                     ),

@@ -513,9 +513,9 @@ def live_status_badge(*, ok: bool) -> Component:
     feature's "don't trust clients, don't hold server-side connection state" approach.
     """
     return (
-        dmc.Badge("Live", color="green", variant="light", size="xs")
+        dmc.Badge("Live", color="green", variant="dot", size="sm", tt="none")
         if ok
-        else dmc.Badge("Reconnecting", color="red", variant="light", size="xs")
+        else dmc.Badge("Reconnecting", color="red", variant="dot", size="sm", tt="none")
     )
 
 
@@ -684,6 +684,7 @@ def panel_header_controls(panel: models.PanelInstance[Any, Any]) -> Component:
                 component_id=panel_suggest_button_id(panel_name),
                 label="Suggest charts for this panel",
             ),
+            dmc.Divider(orientation="vertical"),
             dmc.Tooltip(
                 dmc.Switch(
                     id=panel_sync_switch_id(panel_name),
@@ -866,7 +867,8 @@ def _panel_accordion(  # noqa: PLR0913
         id=panel_accordion_id(tab),
         multiple=True,
         value=[p.name for p in panels if p.name in open_set],
-        variant="contained",
+        variant="separated",
+        className="dl-panels",
         chevronPosition="left",
         children=[
             dmc.AccordionItem(
@@ -958,7 +960,6 @@ def empty_view_helper(panels: list[models.PanelInstance[Any, Any]]) -> Component
                     n_clicks=0,
                     leftSection=icon(Icon.SUGGEST),
                     variant="gradient",
-                    gradient={"from": "grape", "to": "indigo", "deg": 45},
                     size="sm",
                 ),
             ],
@@ -975,7 +976,6 @@ def empty_view_helper(panels: list[models.PanelInstance[Any, Any]]) -> Component
                     **cast("dict[str, Any]", {"aria-label": "Suggest charts"}),
                     n_clicks=0,
                     variant="gradient",
-                    gradient={"from": "grape", "to": "indigo", "deg": 45},
                     size="sm",
                 ),
                 label="Suggest charts for uncharted metrics and artifacts",

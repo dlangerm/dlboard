@@ -128,3 +128,20 @@
   top: var(--mantine-spacing-xs);
   right: var(--mantine-spacing-xs);
 }
+
+/* The experiment page's panels: separate cards on the canvas, each on the body surface (where the
+   series palette's contrast is checked), whether open or closed. */
+.dl-panels .mantine-Accordion-item {
+  background-color: var(--mantine-color-body);
+  border: 1px solid var(--mantine-color-default-border);
+}
+
+/* The run table's per-row delete icon only shows on the row being pointed at (or focused). */
+.dl-run-table .ag-row .dl-icon-cell::before {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.dl-run-table .ag-row-hover .dl-icon-cell::before,
+.dl-run-table .ag-row-focus .dl-icon-cell::before {
+  opacity: 1;
+}

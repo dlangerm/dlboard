@@ -58,6 +58,8 @@ def plug(app: Dash) -> None:
                 "fontFamilyMonospace": _MONO,
                 "fontSmoothing": True,
                 "defaultRadius": "md",
+                # The one decorative flourish: "magic" actions (auto-generate/suggest charts).
+                "defaultGradient": {"from": "brand.5", "to": "grape.6", "deg": 135},
                 "cursorType": "pointer",
                 "headings": {
                     "fontFamily": _SANS,
