@@ -317,6 +317,10 @@ def edit_chart_button_id(panel_name: str, index: int) -> ChartID:
     return {"type": "edit-chart", "panel": panel_name, "index": index}
 
 
+def copy_chart_link_button_id(panel_name: str, index: int) -> ChartID:
+    return {"type": "copy-chart-link", "panel": panel_name, "index": index}
+
+
 def delete_chart_button_id(panel_name: str, index: int) -> ChartID:
     return {"type": "delete-chart", "panel": panel_name, "index": index}
 
@@ -549,6 +553,14 @@ def render_chart_item(
                 label="Edit chart",
                 size="xs",
             ),
+            # Copied client-side by `chart_deep_link.js`, from the page's own URL -- no round trip.
+            tooltipped_action_icon(
+                Icon.LINK,
+                component_id=copy_chart_link_button_id(panel.name, index),  # pyright: ignore[reportArgumentType]
+                label="Copy a link to this chart",
+                size="xs",
+                **cast("dict[str, Any]", {"data-dl-copy-chart-link": chart.id}),
+            ),
             tooltipped_action_icon(
                 Icon.DELETE,
                 component_id=delete_chart_button_id(panel.name, index),  # pyright: ignore[reportArgumentType]
@@ -579,6 +591,7 @@ def render_chart_item(
         maw="100%",
         p="xs",
         className="dl-chart-item",
+        **cast("dict[str, Any]", {"data-chart-id": chart.id}),
     )
 
 
@@ -1169,12 +1182,42 @@ def _delete_chart_confirm_modal() -> dmc.Modal:
     )
 
 
-def accordion_view(store: DataStore[...], experiment_id: int) -> html.Div:
-    """The full accordion/tabs view for an experiment, plus every modal/drawer shell it can open."""
+def _focus_on_chart(page: BasicExperimentPage, chart_id: str) -> BasicExperimentPage:
+    """
+    `page` as rendered for a `?chart=` deep link: that chart's panel open, and its tab active.
+
+    Only for this one render, never persisted -- following a link someone shared mustn't change the
+    experiment's layout for everyone else. An id that matches no chart leaves `page` as it is.
+    """
+    panel = next((p for p in page.panels if any(c.id == chart_id for c in p.charts)), None)
+    if panel is None:
+        return page
+    open_value = page.page_settings.get(OPEN_PANEL_KEY, [page.panels[0].name])
+    open_panels = [open_value] if isinstance(open_value, str) else cast("list[str]", open_value or [])
+    return page.model_copy(
+        update={
+            "page_settings": {
+                **page.page_settings,
+                OPEN_PANEL_KEY: [*open_panels, panel.name],
+                ACTIVE_TAB_KEY: panel.tab,
+            }
+        }
+    )
+
+
+def accordion_view(store: DataStore[...], experiment_id: int, *, focus_chart: str | None = None) -> html.Div:
+    """
+    The full accordion/tabs view for an experiment, plus every modal/drawer shell it can open.
+
+    `focus_chart` (a `ChartInstance.id`, from a `?chart=` deep link) opens that chart's panel and
+    tab for this render -- see `_focus_on_chart`.
+    """
     _log.debug("rendering chart for experiment %s", experiment_id)
     page = cast(
         "BasicExperimentPage", store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
     )
+    if focus_chart:
+        page = _focus_on_chart(page, focus_chart)
     open_value = page.page_settings.get(OPEN_PANEL_KEY, [page.panels[0].name] if page.panels else [])
     if isinstance(open_value, str):
         open_value = [open_value]

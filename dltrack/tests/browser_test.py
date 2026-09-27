@@ -19,8 +19,9 @@ instead, sidestepping that whole class of problem.
 
 from __future__ import annotations
 
+import re
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pendulum
 import pytest
@@ -39,6 +40,7 @@ from dltrack.serve._pages._experiment._experiment_page_state import (
     NEW_PANEL_NAME_ID,
     NEW_TAB_BUTTON_ID,
     NEW_TAB_PANELS_SELECT_ID,
+    OPEN_PANEL_KEY,
     PAGE_EXPERIMENT_ID,
     RENAME_TAB_BUTTON_ID,
     RENAME_TAB_NAME_INPUT_ID,
@@ -1196,3 +1198,56 @@ def test_ctrl_k_dropdown_options_are_visible_and_clickable(
     expect(page).to_have_url(f"{live_server_url}/experiment/{target.id}")
     expect(page.get_by_role("dialog")).to_have_count(0)
     assert console_errors == []
+
+
+def test_a_copied_chart_link_opens_that_chart_without_changing_the_shared_layout(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """
+    Copy a link to a chart in the first (open) panel, close that panel, and follow the link: the
+    chart's panel opens for this visit and the chart is scrolled to and highlighted -- but the
+    experiment's saved layout (the panel still closed, for everyone else) is untouched.
+    """
+    page.context.grant_permissions(["clipboard-read", "clipboard-write"])
+    _create_project_and_experiment(page, live_server_url, "Deep Link Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    api = BasicDltrackAPI(live_server_url)
+    run = api.create_run(models.NewRun(experiment_id=experiment_id))
+    api.log_metric_batch(
+        [
+            models.LoggedMetrics(
+                experiment_id=experiment_id,
+                run_id=run.id,
+                step=step,
+                metrics={"train/loss": 1.0 / (step + 1), "val/loss": 2.0 / (step + 1)},
+                timestamp_utc=pendulum.now("UTC"),
+            )
+            for step in range(3)
+        ]
+    )
+    page.reload()
+    page.get_by_role("button", name="Auto-generate charts").click()
+
+    chart = page.locator(".dl-chart-item").first
+    chart.hover()
+    chart.get_by_role("button", name="Copy a link to this chart").click()
+    link = page.evaluate("navigator.clipboard.readText()")
+    chart_id = chart.get_attribute("data-chart-id")
+    assert link == f"{page.url.split('?')[0]}?chart={chart_id}"
+
+    page.get_by_role("button", name="train", exact=True).click()  # close its panel
+    _wait_until(lambda: _open_panels(experiment_id), [])
+
+    page.goto(link)
+    linked = page.locator(f'[data-chart-id="{chart_id}"]')
+    expect(linked).to_be_in_viewport()
+    expect(linked).to_have_class(re.compile("dl-chart-focus"))
+    assert _open_panels(experiment_id) == []
+    assert console_errors == []
+
+
+def _open_panels(experiment_id: int) -> list[str]:
+    store = get_data_store()
+    page = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
+    return list(cast("list[str]", page.page_settings.get(OPEN_PANEL_KEY, [])))

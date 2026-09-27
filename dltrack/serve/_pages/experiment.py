@@ -74,7 +74,15 @@ def _live_update_header(header: Component) -> dmc.Group:
     )
 
 
-def layout(experiment_id: str) -> list[html.Div | dcc.Store | dcc.Interval]:
+def layout(
+    experiment_id: str, chart: str | None = None, **_query: str
+) -> list[html.Div | dcc.Store | dcc.Interval]:
+    """
+    The experiment page, with its URL's query parameters passed in as keyword arguments by Dash.
+
+    `?chart=` (a `ChartInstance.id`, from a copied chart link) opens that chart's panel and tab, and
+    `chart_deep_link.js` scrolls to it. Any other query parameter is ignored.
+    """
     store = get_data_store()
     exp = store.get_experiment(int(experiment_id))
     if not exp:
@@ -84,7 +92,7 @@ def layout(experiment_id: str) -> list[html.Div | dcc.Store | dcc.Interval]:
     # Rendered synchronously, here, rather than by a `render_initial`-style callback fired after
     # this static shell mounts -- see `render_panel`'s own docstring for why that's the one thing
     # that actually eliminates the page's extra round trip, not just hides it behind a spinner.
-    container, header, page_json = render_panel(store, int(experiment_id))
+    container, header, page_json = render_panel(store, int(experiment_id), focus_chart=chart)
 
     return [
         html.Div(

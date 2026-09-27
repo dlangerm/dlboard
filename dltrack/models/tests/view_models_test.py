@@ -273,3 +273,23 @@ def test_panel_hint_required_hparams_aggregates_and_short_circuits(
         ],
     )
     assert panel.hint_required_hparams() == expected
+
+
+def test_a_chart_without_an_id_gets_a_stable_one_from_its_content() -> None:
+    chart = ChartInstance[object, object](chart_type="line", parameters={"column": "loss"})
+
+    assert chart.id
+    assert chart.id == ChartInstance[object, object](chart_type="line", parameters={"column": "loss"}).id
+    assert chart.id != ChartInstance[object, object](chart_type="line", parameters={"column": "acc"}).id
+
+
+def test_a_saved_chart_keeps_its_id_when_its_parameters_change() -> None:
+    saved = ChartInstance[object, object].model_validate_json(
+        ChartInstance[object, object](chart_type="line", parameters={"column": "loss"}).model_dump_json()
+    )
+
+    edited = ChartInstance[object, object].model_validate(
+        {**saved.model_dump(), "parameters": {"column": "loss", "height": 400}}
+    )
+
+    assert edited.id == saved.id

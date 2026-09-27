@@ -61,3 +61,19 @@
 .dl-panel-body {
   min-height: 2.5rem;
 }
+
+/* A chart opened from a `?chart=` link (`chart_deep_link.js`): outlined for a moment so the eye
+   lands on it. */
+.dl-chart-item {
+  border-radius: var(--mantine-radius-md);
+  outline: 2px solid transparent;
+  transition: outline-color 600ms ease;
+}
+.dl-chart-item.dl-chart-focus {
+  outline-color: var(--mantine-primary-color-filled);
+}
+
+/* A chart's "copy link" button, just after copying. */
+[data-dl-copy-chart-link][data-dl-copied] {
+  color: var(--mantine-color-green-6);
+}
