@@ -79,6 +79,7 @@ _ASSETS = [
     (AssetKind.STYLESHEET, Path(__file__).with_name("_experiment_page_hover.css")),
     (AssetKind.SCRIPT, Path(__file__).with_name("_experiment_page_dragdrop.js")),
     (AssetKind.SCRIPT, Path(__file__).with_name("chart_submit_loading.js")),
+    (AssetKind.SCRIPT, Path(__file__).with_name("chart_deep_link.js")),
 ]
 
 
@@ -89,7 +90,9 @@ def _delete_experiment_action() -> list[Component]:
     )
 
 
-def render_panel(store: DataStore[...], experiment_id: int) -> tuple[html.Div, Component, str]:
+def render_panel(
+    store: DataStore[...], experiment_id: int, *, focus_chart: str | None = None
+) -> tuple[html.Div, Component, str]:
     """
     Build the whole experiment panel: accordion, header, and its persisted page storage.
 
@@ -121,7 +124,7 @@ def render_panel(store: DataStore[...], experiment_id: int) -> tuple[html.Div, C
         description=description,
         extra_actions=_delete_experiment_action(),
     )
-    container = core.accordion_view(store, experiment_id=experiment_id)
+    container = core.accordion_view(store, experiment_id=experiment_id, focus_chart=focus_chart)
     return container, header, page.model_dump_json()
 
 

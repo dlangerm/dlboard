@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import itertools
 import json
 import types
@@ -9,13 +10,15 @@ import typing
 from abc import ABC, abstractmethod
 from enum import StrEnum
 
-from pydantic import BaseModel, ValidationError, field_validator
+from pydantic import BaseModel, ValidationError, field_validator, model_validator
 from structlog.stdlib import get_logger
 
 if typing.TYPE_CHECKING:
     from dltrack.models._data_store import DataStore
 
 _log = get_logger(__name__)
+
+_CHART_ID_LENGTH = 10
 
 _FALLBACK_NATURAL_WIDTH: typing.Final = 400
 """Width used for a chart whose persisted `parameters` no longer validate (e.g. after a schema
@@ -225,11 +228,34 @@ class ChartTypeRegistry:
 class ChartInstance[D, C](BaseModel, frozen=True, extra="forbid"):
     """A chart for a set of metrics."""
 
+    id: str = ""
+    """
+    A stable handle for this chart (what a `?chart=` deep link points at), unlike its position.
+
+    Never needs to be passed: when absent -- a new chart, or one saved before ids existed -- it's
+    derived from the chart's type and parameters, so it's stable across loads without a write. Once
+    saved it's kept as-is, so editing a chart's parameters later doesn't change it. Two charts with
+    identical type and parameters on one page share an id; a link to either opens the first.
+    """
+
     chart_type: str
     """The type of chart."""
 
     parameters: dict[str, object] = {}
     """Parameters for the specific chart."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _default_id_from_content(cls, data: object) -> object:
+        if not isinstance(data, dict):
+            return data
+        fields = typing.cast("dict[str, object]", data)
+        if fields.get("id"):
+            return fields
+        content = json.dumps(
+            [fields.get("chart_type"), fields.get("parameters", {})], sort_keys=True, default=str
+        )
+        return {**fields, "id": hashlib.sha256(content.encode()).hexdigest()[:_CHART_ID_LENGTH]}
 
     def render(self, dataframe: D) -> C:
         """Render the chart instance."""

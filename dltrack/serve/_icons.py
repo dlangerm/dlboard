@@ -69,6 +69,7 @@ class Icon(StrEnum):
     DRAG = "grip-vertical"
     EDIT = "pencil"
     LIGHT_MODE = "sun"
+    LINK = "link"
     LOGO = "chart-line"
     MOVE_TO = "arrow-right"
     SEARCH = "search"
