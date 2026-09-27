@@ -182,3 +182,8 @@
 .dl-swatch-8 {
   --dl-swatch: var(--dl-series-8);
 }
+/* An empty swatch is a dot on its own (e.g. a badge's `leftSection`), not a prefix to any text. */
+.dl-swatch:empty::before {
+  margin-right: 0;
+  vertical-align: middle;
+}

@@ -5,6 +5,7 @@ from dltrack.models._artifact import AnyArtifact, Artifact, NewArtifact
 from dltrack.models._artifact_purge_task import ArtifactPurgeTask, NewArtifactPurgeTask
 from dltrack.models._audit_log import AuditAction, AuditLogEntry, EntityType, NewAuditLogEntry
 from dltrack.models._auth import AuthProvider
+from dltrack.models._comment import Comment, NewComment
 from dltrack.models._component_ids import (
     AppShell,
     ButtonId,
@@ -61,6 +62,7 @@ __all__ = [
     "ChartTypeRegistry",
     "ColorScheme",
     "ColumnKind",
+    "Comment",
     "DataStore",
     "DivId",
     "EntityType",
@@ -79,6 +81,7 @@ __all__ = [
     "NewArtifact",
     "NewArtifactPurgeTask",
     "NewAuditLogEntry",
+    "NewComment",
     "NewExperiment",
     "NewHyperParams",
     "NewPage",

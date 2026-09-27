@@ -173,6 +173,22 @@ class DataStore[**P](typing.Protocol):
         """Delete one of `owner_id`'s views; never anyone else's, nor a shared page."""
         ...
 
+    def add_comment(self, comment: models.NewComment) -> models.Comment:
+        """Post a note to an experiment's thread, bumping its `notes_revision`."""
+        ...
+
+    def list_comments(self, experiment_id: int) -> list[models.Comment]:
+        """An experiment's notes, oldest first."""
+        ...
+
+    def delete_comment(self, comment_id: int, author_id: int) -> None:
+        """Delete one of `author_id`'s own notes (bumping `notes_revision`); never anyone else's."""
+        ...
+
+    def list_users(self) -> list[models.User]:
+        """Every user, by username."""
+        ...
+
     def log_artifact_refs(self, artifacts: Iterable[models.Artifact]) -> None:
         """Log a set of artifacts."""
         ...

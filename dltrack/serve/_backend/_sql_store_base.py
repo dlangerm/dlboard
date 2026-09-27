@@ -67,6 +67,10 @@ FOREIGN_KEYS: dict[type[BaseModel], dict[str, ForeignKey]] = {
         "experiment_id": ForeignKey(models.Experiment, _OWNS),
         "project_id": ForeignKey(models.Project, _OWNS),
     },
+    models.Comment: {
+        "experiment_id": ForeignKey(models.Experiment, _OWNS),
+        "author_id": ForeignKey(models.User),
+    },
     models.AuditLogEntry: {"user_id": ForeignKey(models.User)},
     models.ArtifactPurgeTask: {"requested_by": ForeignKey(models.User)},
 }
@@ -85,6 +89,7 @@ TABLES: tuple[type[BaseModel], ...] = (
     models.HyperParams,
     models.Artifact,
     models.Page,
+    models.Comment,
     models.AuditLogEntry,
     models.ArtifactPurgeTask,
 )
@@ -757,6 +762,52 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             self._execute_raw_sql(
                 f"DELETE FROM {models.Page.__name__} WHERE id = :id AND owner_id = :owner_id;",
                 {"id": view_id, "owner_id": owner_id},
+            )
+        )
+
+    def _bump_notes_revision(self, experiment_id: int) -> None:
+        list(
+            self._execute_raw_sql(
+                f"UPDATE {models.Experiment.__name__} SET notes_revision = notes_revision + 1 WHERE id = :id",
+                {"id": experiment_id},
+            )
+        )
+
+    def add_comment(self, comment: models.NewComment) -> models.Comment:
+        """Post a note to an experiment's thread."""
+        self._ensure_not_deleted(models.Experiment, comment.experiment_id)
+        statement, values = sql.insert(models.Comment, comment)
+        created = self._first_committed_row(self._execute_sql_query(models.Comment, statement, values))
+        self._bump_notes_revision(comment.experiment_id)
+        return created
+
+    def list_comments(self, experiment_id: int) -> list[models.Comment]:
+        """An experiment's notes, oldest first."""
+        return list(
+            self._execute_sql_query(
+                models.Comment,
+                sql.get_all_by_field(models.Comment, "experiment_id", experiment_id, order_by=["id"]),
+            )
+        )
+
+    def delete_comment(self, comment_id: int, author_id: int) -> None:
+        """Delete one of `author_id`'s own notes; anyone else's is left alone."""
+        rows = list(
+            self._execute_raw_sql(
+                f"DELETE FROM {models.Comment.__name__} WHERE id = :id AND author_id = :author_id "
+                "RETURNING experiment_id;",
+                {"id": comment_id, "author_id": author_id},
+            )
+        )
+        for (experiment_id,) in rows:
+            self._bump_notes_revision(experiment_id)
+
+    def list_users(self) -> list[models.User]:
+        """Every user, by username -- e.g. who a note can mention."""
+        return list(
+            self._execute_sql_query(
+                models.User,
+                f"SELECT {sql.select_columns_sql(models.User)} FROM {models.User.__name__} ORDER BY username;",
             )
         )
 

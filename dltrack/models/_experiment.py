@@ -53,6 +53,12 @@ class Experiment(NewExperiment, frozen=True, extra="forbid"):
     mutation to support live updates.
     """
 
+    notes_revision: int = 0
+    """
+    Like `revision`, but bumped only when a note is posted or deleted -- so the live-update poll can
+    refresh an open notes thread without the notes making it re-fetch any chart data.
+    """
+
     last_activity_at: AwareDatetime | None = None
     """
     Server time of the most recent write that bumped `revision`, or `None` if there hasn't been one.

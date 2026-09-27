@@ -41,6 +41,7 @@ from dltrack.serve._pages._description_editor import (
 from dltrack.serve._pages._experiment import _experiment_page_state as core
 from dltrack.serve._pages._experiment._chart_editor_modal import register_chart_editor_callbacks
 from dltrack.serve._pages._experiment._chart_suggestions import register_chart_suggestions_callbacks
+from dltrack.serve._pages._experiment._notes import STATE_NOTES_REVISION, register_notes_callbacks
 from dltrack.serve._pages._experiment._panel_controls import register_panel_controls_callbacks
 from dltrack.serve._pages._experiment._run_comparison_table import register_run_comparison_callbacks
 from dltrack.serve._pages._experiment._views import register_view_callbacks
@@ -218,22 +219,25 @@ def register_render_callbacks(app: Dash) -> None:
         Output(core.STATE_CHART_CONTENT_HASHES, "data", allow_duplicate=True),
         Output(core.STATE_LAST_FETCH_AT, "data", allow_duplicate=True),
         Output(core.LIVE_STATUS_ID, "children"),
+        Output(STATE_NOTES_REVISION, "data"),
         Input(core.LIVE_POLL_INTERVAL_ID, "n_intervals"),
         State({"type": "chart-content", "panel": ALL, "index": ALL}, "id"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
         State(core.STATE_VIEW_ID, "data"),
         State(core.STATE_LAST_KNOWN_REVISION, "data"),
         State(core.STATE_CHART_CONTENT_HASHES, "data"),
+        State(STATE_NOTES_REVISION, "data"),
         prevent_initial_call=True,
     )
-    def poll_for_updates(
+    def poll_for_updates(  # noqa: PLR0913
         _n_intervals: int,
         chart_ids: list[core.ChartID],
         experiment_id: int,
         view_id: int | None,
         last_known_revision: int | None,
         prev_hashes: dict[str, str] | None,
-    ) -> tuple[list[Any], Any, Any, Any, Any, Component]:
+        last_notes_revision: int | None,
+    ) -> tuple[list[Any], Any, Any, Any, Any, Component, Any]:
         store = get_data_store()
         ok = True
         try:
@@ -246,6 +250,13 @@ def register_render_callbacks(app: Dash) -> None:
         # "how stale could this be" (`LIVE_LAST_FETCH_LABEL_ID`, ticked purely client-side) needs the
         # time of the last real check, not the time of the last real change.
         fetched_at = pendulum.now("UTC").isoformat() if ok else no_update
+        # Notes changed (posted/deleted) since the last tick: tells an open notes thread to refresh,
+        # from the same one-row read -- and independently of whether any chart data changed.
+        notes_revision = (
+            experiment.notes_revision
+            if experiment is not None and experiment.notes_revision != last_notes_revision
+            else no_update
+        )
 
         if not ok or experiment is None or experiment.revision == last_known_revision:
             return (
@@ -255,6 +266,7 @@ def register_render_callbacks(app: Dash) -> None:
                 no_update,
                 fetched_at,
                 core.live_status_badge(ok=ok),
+                notes_revision,
             )
 
         page = core.load_page(store, core.PageRef(experiment_id, view_id))
@@ -282,6 +294,7 @@ def register_render_callbacks(app: Dash) -> None:
             new_hashes,
             fetched_at,
             core.live_status_badge(ok=poll_ok),
+            notes_revision,
         )
 
 
@@ -341,3 +354,4 @@ def register(app: Dash) -> None:
     register_chart_suggestions_callbacks(app)
     register_run_comparison_callbacks(app)
     register_view_callbacks(app)
+    register_notes_callbacks(app)
