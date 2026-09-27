@@ -56,6 +56,12 @@ _IMAGE_STEPS = (0, 20, 40, 59)
 _PROJECT_NAME = "image-classification"
 _EXPERIMENT_NAME = "lr-sweep"
 _CONFUSION_KEY = "samples/confusion_matrix"
+_NOW = _T0.add(days=1)
+
+
+def _frozen_now(tz: str | None = None) -> pendulum.DateTime:
+    """Stands in for `pendulum.now` while the demo runs: always `_NOW`, in whichever zone is asked for."""
+    return _NOW.in_timezone(tz) if tz else _NOW
 
 
 class DocScreenshot(StrEnum):
@@ -112,6 +118,9 @@ def demo(live_server_url: str, dltrack_app: Dash, tmp_path_factory: pytest.TempP
     # every machine's screenshots differ -- pin it for the whole run.
     monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setenv("DLTRACK_USER", "demo")
+    # Likewise the clock: cards read "active N minutes ago" off the server's own time. Frozen for
+    # the whole run, every render sees the same "now" the demo data was written at.
+    monkeypatch.setattr(pendulum, "now", _frozen_now)
     api = BasicDltrackAPI(live_server_url)
     rng = np.random.default_rng(0)
     artifact_dir = tmp_path_factory.mktemp("demo-artifacts")
@@ -285,6 +294,13 @@ def test_doc_screenshot(
     screenshot_mode: ScreenshotMode,
 ) -> None:
     """The committed docs image for `shot` is what the app renders today (or is rewritten to be)."""
+    # Shift the browser's `Date.now` to start at the server's frozen `_NOW`, so client-side relative
+    # times ("Fetched just now") agree with it. Shifted rather than frozen, and no fake timers
+    # (Playwright's `page.clock` stalls the page's own rendering): time still flows from there.
+    page.add_init_script(
+        f"(() => {{ const realNow = Date.now; const offset = {int(_NOW.timestamp() * 1000)} - realNow();"
+        " Date.now = () => realNow() + offset; })()"
+    )
     target = _stage(shot, page, demo)
     page.evaluate("document.fonts.ready")  # a late-swapping web font would otherwise reflow mid-capture
     png = _stable_screenshot(target)

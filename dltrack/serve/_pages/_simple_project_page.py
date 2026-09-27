@@ -1,4 +1,4 @@
-"""A project page."""
+"""A project page: its experiments as cards, plus an inline "new experiment" field."""
 
 from __future__ import annotations
 
@@ -6,10 +6,11 @@ import typing
 from typing import TYPE_CHECKING
 
 import dash_mantine_components as dmc
-from dash import Dash, Input, Output, State, html
+from dash import Dash, Input, Output, State, html, no_update
 
-from dltrack.models import ButtonId, DivId, ModalId, NewExperiment, constants
-from dltrack.serve import get_current_user, get_data_store
+from dltrack.models import ActivityStats, ButtonId, ModalId, NewExperiment, constants
+from dltrack.serve import Icon, get_current_user, get_data_store, icon
+from dltrack.serve._pages._dash_helpers import entity_card
 from dltrack.serve._pages._dataframe_helpers import experiment_display_name
 from dltrack.serve._pages._delete_confirm import (
     DeleteConfirmIds,
@@ -23,7 +24,9 @@ from dltrack.serve._pages._description_editor import (
 )
 
 if TYPE_CHECKING:
-    from dltrack.models import Experiment
+    from dash.development.base_component import Component
+
+    from dltrack.models import DataStore, Experiment
 
 
 class _ProjectPage:
@@ -34,9 +37,6 @@ PROJECT_HEADER_ID: typing.Final = "project-header"
 EXP_LIST_ID: typing.Final = "experiment-list-id"
 NEW_EXP_BUTTON_ID: typing.Final = "new-experiment-button"
 NEW_EXP_NAME_ID: typing.Final = "new-experiment-name"
-
-# Route-skeleton container: declared here (the owning plugin), imported by serve/_pages/project.py.
-PAGE_PROJECT_ID: DivId[_ProjectPage] = DivId("project-container")
 
 DELETE_PROJECT_BUTTON_ID: ButtonId[_ProjectPage] = ButtonId("delete-project-button")
 DELETE_PROJECT_MODAL_ID: ModalId[_ProjectPage] = ModalId("delete-project-modal")
@@ -59,148 +59,113 @@ PROJECT_DELETE_IDS = DeleteConfirmIds(
     cancel=DELETE_PROJECT_CANCEL_ID,
 )
 
-_CARD_COLORS = ["indigo", "teal", "grape", "orange", "cyan", "pink"]
 
-
-def _experiment_card(experiment: Experiment, color: str) -> dmc.Card:
-    return dmc.Card(
-        [
-            dmc.CardSection(
-                dmc.Box(h=6, bg=f"{color}.5"),
-            ),
-            dmc.Group(
-                [
-                    dmc.ThemeIcon("E", size="lg", radius="xl", color=color, variant="light"),
-                    dmc.Title(experiment_display_name(experiment), order=4, fw=600),
-                ],
-                gap="sm",
-                mt="md",
-            ),
-            dmc.Text(
-                experiment.description or "No description",
-                size="sm",
-                c="dimmed",
-                mt="xs",
-                lineClamp=2,
-            ),
-            dmc.Anchor(
-                dmc.Button("Open experiment", variant="light", color=color, fullWidth=True, mt="md"),
-                href=f"/experiment/{experiment.id}",
-                underline="never",
-                refresh=False,
-            ),
-        ],
-        withBorder=True,
-        radius="md",
-        padding="lg",
-        shadow="sm",
-        className="experiment-card",
+def _delete_project_action() -> list[Component]:
+    """The trash icon shown next to the header's edit icon, plus its confirmation modal."""
+    return render_delete_control(
+        PROJECT_DELETE_IDS, label="Delete project", entity_noun="project", icon_only=True
     )
 
 
-def _list_experiments(project_id: int) -> dmc.SimpleGrid | dmc.Center:
-    store = get_data_store()
+def _experiment_card(experiment: Experiment, stats: ActivityStats) -> Component:
+    return entity_card(
+        title=experiment_display_name(experiment),
+        description=experiment.description,
+        href=f"/experiment/{experiment.id}",
+        stats=stats,
+        class_name="experiment-card",
+    )
+
+
+def _experiment_grid(store: DataStore[...], project_id: int) -> Component:
     experiments = list(store.get_experiments(project_id))
     if not experiments:
-        return dmc.Center(
-            dmc.Stack(
-                [
-                    dmc.Text("No experiments yet", fw=600, size="lg"),
-                    dmc.Text("Create your first experiment above to get started.", c="dimmed", size="sm"),
-                ],
-                align="center",
-                gap=4,
-            ),
-            mt="xl",
-            mb="xl",
+        return dmc.Stack(
+            [
+                dmc.Text("No experiments yet", fw=600, size="lg"),
+                dmc.Text("Name your first experiment above to get started.", c="dimmed", size="sm"),
+            ],
+            align="center",
+            gap=4,
+            py="xl",
         )
+    stats = store.get_experiment_stats(project_id)
     return dmc.SimpleGrid(
-        [_experiment_card(e, _CARD_COLORS[i % len(_CARD_COLORS)]) for i, e in enumerate(experiments)],
-        cols=3,
+        [_experiment_card(e, stats.get(e.id, ActivityStats())) for e in experiments],
+        cols={"base": 1, "sm": 2, "lg": 3},
         spacing="md",
     )
 
 
-def register(app: Dash) -> None:
-    """Render the project page: its experiment list and the "new experiment" form."""
-
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
-        Output(PAGE_PROJECT_ID, component_property="children"),
-        State(constants.STATE_PROJECT_ID, component_property="data"),
-    )
-    def layout(project_id: int) -> dmc.Container:
-        store = get_data_store()
-        project = store.get_project(project_id)
-        return dmc.Container(
-            [
-                dmc.Group(
-                    [
-                        html.Div(
-                            id=PROJECT_HEADER_ID,
-                            children=render_header(
-                                PROJECT_DESC_IDS, title=project.name, description=project.description
-                            ),
-                            style={"flex": 1},
+def render_project_page(project_id: int) -> dmc.Container:
+    """The whole project page, rendered in the page's own `layout()` -- no callback round trip."""
+    store = get_data_store()
+    project = store.get_project(project_id)
+    return dmc.Container(
+        [
+            dmc.Group(
+                [
+                    html.Div(
+                        id=PROJECT_HEADER_ID,
+                        children=render_header(
+                            PROJECT_DESC_IDS,
+                            title=project.name,
+                            description=project.description,
+                            extra_actions=_delete_project_action(),
                         ),
-                        *render_delete_control(
-                            PROJECT_DELETE_IDS, label="Delete project", entity_noun="project"
-                        ),
-                    ],
-                    justify="space-between",
-                    align="flex-start",
-                    style={
-                        "marginTop": "var(--mantine-spacing-lg)",
-                        "marginBottom": "var(--mantine-spacing-md)",
-                    },
-                ),
-                dmc.Paper(
+                        style={"flex": 1, "minWidth": 0},
+                    ),
                     dmc.Group(
                         [
                             dmc.TextInput(
                                 id=NEW_EXP_NAME_ID,
                                 placeholder="New experiment name",
-                                style={"flex": 1},
-                                size="sm",
+                                w=240,
+                                **typing.cast("dict[str, typing.Any]", {"aria-label": "New experiment name"}),
                             ),
-                            dmc.Button(id=NEW_EXP_BUTTON_ID, n_clicks=0, children="Create experiment"),
+                            dmc.Button("Create", id=NEW_EXP_BUTTON_ID, leftSection=icon(Icon.ADD)),
                         ],
-                        gap="sm",
+                        gap="xs",
+                        align="flex-start",
                         wrap="nowrap",
                     ),
-                    withBorder=True,
-                    radius="md",
-                    p="md",
-                    mb="lg",
-                ),
-                dmc.Divider(mb="lg"),
-                dmc.Box(id=EXP_LIST_ID),
-            ],
-            size="lg",
-            py="xl",
-        )
+                ],
+                justify="space-between",
+                align="flex-start",
+                mb="lg",
+            ),
+            dmc.Box(_experiment_grid(store, project_id), id=EXP_LIST_ID),
+        ],
+        size="lg",
+        py="xl",
+    )
+
+
+def register(app: Dash) -> None:
+    """Wire the project page's create/edit/delete actions."""
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
-        Output(component_id=EXP_LIST_ID, component_property="children"),
-        Input(component_id=NEW_EXP_BUTTON_ID, component_property="n_clicks"),
-        State(constants.STATE_PROJECT_ID, component_property="data"),
-        State(component_id=NEW_EXP_NAME_ID, component_property="value"),
+        Output(EXP_LIST_ID, "children"),
+        Output(NEW_EXP_NAME_ID, "value"),
+        Output(NEW_EXP_NAME_ID, "error"),
+        Input(NEW_EXP_BUTTON_ID, "n_clicks"),
+        Input(NEW_EXP_NAME_ID, "n_submit"),
+        State(constants.STATE_PROJECT_ID, "data"),
+        State(NEW_EXP_NAME_ID, "value"),
+        prevent_initial_call=True,
     )
     def create_experiment(
-        n_clicks: int, project_id: int, new_experiment_name: str
-    ) -> dmc.SimpleGrid | dmc.Center:
-        if n_clicks > 0:
-            if not new_experiment_name:
-                msg = "Experiment name cannot be empty"
-                raise ValueError(msg)
-            store = get_data_store()
-            store.create_experiment(
-                NewExperiment(
-                    project_id=int(project_id),
-                    name=new_experiment_name,
-                    created_by=get_current_user(store).id,
-                )
+        _clicks: int, _submits: int, project_id: int, name: str | None
+    ) -> tuple[typing.Any, ...]:
+        if not name or not name.strip():
+            return no_update, no_update, "Give the experiment a name"
+        store = get_data_store()
+        store.create_experiment(
+            NewExperiment(
+                project_id=int(project_id), name=name.strip(), created_by=get_current_user(store).id
             )
-        return _list_experiments(project_id)
+        )
+        return _experiment_grid(store, int(project_id)), "", None
 
     def _fetch_project_header(project_id: int) -> tuple[str, str]:
         store = get_data_store()
@@ -219,6 +184,7 @@ def register(app: Dash) -> None:
         State(constants.STATE_PROJECT_ID, "data"),
         fetch=_fetch_project_header,
         save=_save_project_description,
+        extra_actions=_delete_project_action(),
     )
 
     def _delete_project(project_id: int) -> str:

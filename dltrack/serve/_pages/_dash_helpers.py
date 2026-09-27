@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import dash_mantine_components as dmc
-from dash import ctx
+import pendulum
+from dash import ctx, html
 from dash.exceptions import PreventUpdate
 
+from dltrack import models
 from dltrack.serve import Icon, icon
 
 if TYPE_CHECKING:
@@ -46,6 +48,76 @@ def tooltipped_action_icon(  # noqa: PLR0913
         label=label,
         position="top",
         withArrow=True,
+    )
+
+
+LIVE_WINDOW = pendulum.duration(minutes=5)
+"""Data arriving within this long ago marks a project/experiment as live (a pulsing dot)."""
+
+
+def _plural(count: int, noun: str) -> str:
+    return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
+
+
+def entity_card(
+    *,
+    title: str,
+    description: str,
+    href: str,
+    stats: models.ActivityStats,
+    class_name: str,
+) -> Component:
+    """
+    A whole-card link to a project/experiment: name, description, and an at-a-glance activity line.
+
+    The entire card is the click target (not a button inside it), and `stats` reads as e.g.
+    "3 experiments · 12 runs · active 3 minutes ago", with a live dot when data arrived within
+    `LIVE_WINDOW`.
+    """
+    match stats:
+        case models.ProjectStats():
+            counts = {"experiment": stats.experiment_count, "run": stats.run_count}
+        case models.ActivityStats():
+            counts = {"run": stats.run_count}
+    # Measured against an explicit UTC "now": left implicit (no `other`), pendulum reported a
+    # 2-minutes-old UTC timestamp as "1 hour ago" here (see `entity_card_test.py`).
+    now = pendulum.now("UTC")
+    last_seen = pendulum.instance(stats.last_activity_at) if stats.last_activity_at else None
+    activity = (
+        f"active {last_seen.diff_for_humans(now, absolute=True)} ago" if last_seen else "no activity yet"
+    )
+    live = last_seen is not None and now - last_seen < LIVE_WINDOW
+    return dmc.Anchor(
+        dmc.Card(
+            [
+                dmc.Group(
+                    [
+                        dmc.Text(title, fw=600, truncate="end"),
+                        dmc.Tooltip(html.Span(className="dl-live-dot"), label="Receiving data")
+                        if live
+                        else None,
+                    ],
+                    justify="space-between",
+                    wrap="nowrap",
+                ),
+                dmc.Text(description or "No description", size="sm", c="dimmed", lineClamp=2, mt=4),
+                dmc.Text(
+                    " · ".join([*(_plural(n, noun) for noun, n in counts.items()), activity]),
+                    size="xs",
+                    c="dimmed",
+                    mt="auto",
+                    pt="md",
+                    className="dl-tabular",
+                ),
+            ],
+            padding="lg",
+            h="100%",
+        ),
+        href=href,
+        underline="never",
+        c="inherit",
+        className=f"dl-card-link {class_name}",
+        **cast("dict[str, Any]", {"aria-label": title}),
     )
 
 
