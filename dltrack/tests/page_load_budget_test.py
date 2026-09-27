@@ -33,9 +33,9 @@ class _Route(StrEnum):
 
 
 PAGE_LOAD_CALLBACK_BUDGET: dict[_Route, int] = {
-    _Route.HOME: 7,
-    _Route.PROJECT: 10,
-    _Route.EXPERIMENT: 13,
+    _Route.HOME: 5,
+    _Route.PROJECT: 8,
+    _Route.EXPERIMENT: 11,
 }
 """The most `_dash-update-component` requests each page's initial load may issue. Only ever lower."""
 

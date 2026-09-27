@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from functools import partial
+from html import escape
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -17,16 +19,19 @@ from dltrack.serve._assets import AssetKind, serve_asset
 from dltrack.serve._backend._auth import get_auth_provider, get_current_user
 from dltrack.serve._backend._data_store import get_data_store
 from dltrack.serve._backend._installed_plugins import set_installed_plugins
+from dltrack.serve._backend._theme import get_theme
 
 if TYPE_CHECKING:
     from dash.development.base_component import Component
 
     from dltrack import models
+    from dltrack.models import ThemeSpec
 
 
 _log = get_logger(__name__)
 
 _NAVBAR_RESIZE_JS_PATH = Path(__file__).with_name("navbar_resize.js")
+_COLOR_SCHEME_PRELOAD_JS = Path(__file__).with_name("color_scheme_preload.js").read_text()
 _DEFAULT_NAVBAR_WIDTH = 300
 _MIN_NAVBAR_WIDTH = 260
 _MAX_NAVBAR_WIDTH = 640
@@ -68,7 +73,28 @@ def app(plugins: list[models.PluginProtocol]) -> Dash:
     set_installed_plugins(_app, installed)
     # The navbar drag-to-resize handle.
     serve_asset(_app, AssetKind.SCRIPT, _NAVBAR_RESIZE_JS_PATH.name, _NAVBAR_RESIZE_JS_PATH.read_bytes())
-    basic_container_layout = dmc.AppShell(
+    # A theme plugin's `plug()` has already run by now (inside `Dash(...)` above), so its theme
+    # goes straight into the first response -- no callback, no flash of an unthemed page.
+    theme = get_theme(_app)
+    _app.index_string = _preload_color_scheme(_app.index_string, theme)
+    _app.layout = partial(_layout, theme)
+    return _app
+
+
+def _preload_color_scheme(index_string: str, theme: ThemeSpec) -> str:
+    """Paint the theme's page background before any JS or Mantine CSS has loaded."""
+    background = theme.page_background
+    preload = (
+        f"<style>html[data-mantine-color-scheme=light]{{background-color:{background.light}}}"
+        f"html[data-mantine-color-scheme=dark]{{background-color:{background.dark}}}</style>"
+        f'<script data-default-scheme="{escape(theme.default_color_scheme)}">{_COLOR_SCHEME_PRELOAD_JS}</script>'
+    )
+    return index_string.replace("<head>", f"<head>{preload}", 1)
+
+
+def _layout(theme: ThemeSpec) -> dmc.MantineProvider:
+    """The app shell, rendered on every page load so the header can name the current user."""
+    shell = dmc.AppShell(
         [
             dmc.AppShellHeader(
                 dmc.Group(
@@ -88,7 +114,7 @@ def app(plugins: list[models.PluginProtocol]) -> Dash:
                         ),
                         dmc.Group(
                             [
-                                html.Div(id=constants.HEADER_USER_INDICATOR_ID),
+                                html.Div(_user_indicator(), id=constants.HEADER_USER_INDICATOR_ID),
                                 dcc.Link("Admin", href="/admin", refresh=True),
                             ],
                             gap="md",
@@ -147,8 +173,12 @@ def app(plugins: list[models.PluginProtocol]) -> Dash:
         navbar={"width": _DEFAULT_NAVBAR_WIDTH, "breakpoint": "sm", "collapsed": {"mobile": True}},
         id="appshell",
     )
-    _app.layout = dmc.MantineProvider(id=constants.MANTINE_PROVIDER_ID, children=[basic_container_layout])
-    return _app
+    return dmc.MantineProvider(
+        id=constants.MANTINE_PROVIDER_ID,
+        theme=theme.mantine,
+        defaultColorScheme=theme.default_color_scheme.value,
+        children=[shell],
+    )
 
 
 # show breadcrumbs to get back to the project list
@@ -180,13 +210,8 @@ def breadcrumbs(_: str, project_id: int | None, experiment_id: int | None) -> li
     ]
 
 
-# show who the app currently resolves the caller to be, and which auth mechanism resolved it
-@callback(
-    Output(constants.HEADER_USER_INDICATOR_ID, component_property="children"),
-    Input(constants.LOCATION_ID, component_property="pathname"),
-)
-def user_indicator(_: str) -> Component:
-    """Render the current auth provider and resolved user in the header, refreshed on navigation."""
+def _user_indicator() -> Component:
+    """Who the app resolves the caller to be, and which auth mechanism resolved it."""
     store = get_data_store()
     user = get_current_user(store)
     provider_name = get_auth_provider().__class__.__name__

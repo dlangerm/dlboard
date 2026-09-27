@@ -34,7 +34,7 @@ page describes. See [architecture.md](../architecture.md) for where their code l
 **Writing one.** A plugin module needs a `plug(app: Dash) -> None` function. What it does inside
 is entirely up to the category: register a Flask route, set a data store on the app, register a
 chart type, wire a callback. Look at `dltrack/plugins/themes/dark.py` for the smallest real example
-(one callback, no state) before tackling a bigger category.
+(one `set_theme` call, no state) before tackling a bigger category.
 
 **Registering one.** Add the module to the list passed into `app()` — see `LOCAL_DEPLOYMENT` in
 `dltrack/plugins/__init__.py` for the reference bundle `dltrack serve local` uses. There's no other

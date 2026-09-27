@@ -29,6 +29,7 @@ from dltrack.models._plugin import InstalledPlugin, PluginProtocol
 from dltrack.models._project import NewProject, Project
 from dltrack.models._run import NewRun, Run
 from dltrack.models._scopes import Scope, has_scope, require_scope
+from dltrack.models._theme import ColorScheme, SchemeColors, ThemeSpec
 from dltrack.models._user import NewUser, User
 from dltrack.models._view import (
     ChartInstance,
@@ -55,6 +56,7 @@ __all__ = [
     "ChartInstance",
     "ChartType",
     "ChartTypeRegistry",
+    "ColorScheme",
     "ColumnKind",
     "DataStore",
     "DivId",
@@ -87,8 +89,10 @@ __all__ = [
     "PluginProtocol",
     "Project",
     "Run",
+    "SchemeColors",
     "Scope",
     "StoreId",
+    "ThemeSpec",
     "UnderlyingMetricTableEntry",
     "User",
     "ValidJsonTypes",
