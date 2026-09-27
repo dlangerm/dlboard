@@ -71,6 +71,7 @@ class Icon(StrEnum):
     LIGHT_MODE = "sun"
     LOGO = "chart-line"
     MOVE_TO = "arrow-right"
+    SEARCH = "search"
     SIDEBAR = "layout-sidebar"
     SUGGEST = "sparkles"
 

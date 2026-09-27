@@ -29,6 +29,7 @@ from playwright.sync_api import expect
 from dltrack import models
 from dltrack.plugins.backend.basic_rest_backend import BasicDltrackAPI
 from dltrack.serve import get_data_store
+from dltrack.serve._jump import JUMP_SELECT_ID
 from dltrack.serve._pages._experiment._experiment_page_state import (
     LIVE_PAUSED_BADGE_ID,
     LIVE_STATUS_ID,
@@ -1139,4 +1140,59 @@ def test_live_update_toggle_pauses_polling_and_persists_across_reload(
     # Re-enabling picks the missed update up on the next tick.
     page.locator(f"#{LIVE_UPDATES_ENABLED_ID}").click(force=True)
     expect(grid.locator(".ag-center-cols-container .ag-row")).to_have_count(2, timeout=8000)
+    assert console_errors == []
+
+
+def test_ctrl_k_jumps_straight_to_an_experiment_by_name(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """From any page: Ctrl+K, a few letters of an experiment's name, Enter -- and you're on it."""
+    api = BasicDltrackAPI(live_server_url)
+    project = api.create_project(models.NewProject(name="Jump Project", description=""))
+    target = api.create_experiment(models.NewExperiment(project_id=project.id, name="needle-in-a-haystack"))
+
+    page.goto(live_server_url)
+    expect(page.get_by_role("heading", name="Projects")).to_be_visible()
+    page.keyboard.press("Control+K")
+    search = page.locator(f"#{JUMP_SELECT_ID}")
+    expect(search).to_be_focused()
+    search.press_sequentially("needle")
+    page.keyboard.press("Enter")
+
+    expect(page).to_have_url(f"{live_server_url}/experiment/{target.id}")
+    expect(page.locator(f"#{PAGE_EXPERIMENT_ID}")).to_be_visible()
+    expect(page.get_by_role("dialog")).to_have_count(0)
+    assert console_errors == []
+
+
+def test_ctrl_k_dropdown_options_are_visible_and_clickable(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """
+    Regression test: the palette's `Select` dropdown used to render inline inside the modal
+    (`comboboxProps={"withinPortal": False}`), which put it inside the modal content box's own
+    `overflow: auto` -- that box sizes to the search input alone, so the option list rendered below
+    it was clipped and invisible even though it existed in the DOM. Defaulting to Mantine's own
+    `withinPortal: True` portals the dropdown to the document body instead, outside that clipping
+    box, without reintroducing the *other* failure mode a bare `Popover` has in this situation (see
+    `_run_comparison_table.py`'s own Columns picker): a portalled dropdown's option is still
+    click-through-able here because `Modal`'s outside-click detection (unlike `Popover`'s) already
+    accounts for its own nested portals.
+    """
+    api = BasicDltrackAPI(live_server_url)
+    project = api.create_project(models.NewProject(name="Jump Click Project", description=""))
+    target = api.create_experiment(
+        models.NewExperiment(project_id=project.id, name="click-target-experiment")
+    )
+
+    page.goto(live_server_url)
+    expect(page.get_by_role("heading", name="Projects")).to_be_visible()
+    page.keyboard.press("Control+K")
+    page.locator(f"#{JUMP_SELECT_ID}").press_sequentially("click-target")
+    option = page.get_by_role("option", name="click-target-experiment")
+    expect(option).to_be_in_viewport()
+    option.click()
+
+    expect(page).to_have_url(f"{live_server_url}/experiment/{target.id}")
+    expect(page.get_by_role("dialog")).to_have_count(0)
     assert console_errors == []
