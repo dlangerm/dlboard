@@ -198,6 +198,9 @@ ignore_names = [
   "created_at",
   "requested_at",
   "bootstrap_admin_assigned",
+  # `ViewFile.dltrack_view` (`serve/_pages/_experiment/_views.py`): an exported view's format
+  # version, only ever checked by its own `Literal[1]` validation on import.
+  "dltrack_view",
   # `serve/_backend/tests/sql_functions_test.py`'s throwaway schema-reflection model fields --
   # same "read structurally, not by attribute" story as above, scoped to their test models.
   "created",

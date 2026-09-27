@@ -42,6 +42,7 @@ from dltrack.models._view import (
     PanelInstance,
     ParameterField,
     ParameterFieldType,
+    ViewSummary,
 )
 
 __all__ = [
@@ -100,6 +101,7 @@ __all__ = [
     "User",
     "ValidJsonTypes",
     "ValueId",
+    "ViewSummary",
     "has_scope",
     "require_scope",
     "store_state",

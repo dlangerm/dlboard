@@ -643,13 +643,13 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         new_page_type: type[models.NewPage[D, C]] | None = None,
     ) -> models.Page[D, P, C]:
         field, value = _resolve_page_scope(run_id=run_id, experiment_id=experiment_id, project_id=project_id)
+        # The shared page only: every named view of it (`owner_id` set) is its own `Page` row with
+        # the same scope, reached through `get_view` instead.
         for row in self._execute_sql_query(
             page_type,
-            sql.get_all_by_field(
-                models.Page,
-                field,
-                value,
-            ),
+            f"SELECT {sql.select_columns_sql(models.Page)} FROM {models.Page.__name__} "
+            f"WHERE {field} = :value AND owner_id IS NULL ORDER BY id LIMIT 1;",
+            {"value": value},
         ):
             return row
 
@@ -664,6 +664,46 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
                 page_type,
                 statement,
                 values,
+            )
+        )
+
+    def create_view[D, P, C](
+        self, page_type: type[models.Page[D, P, C]], view: models.NewPage[D, C]
+    ) -> models.Page[D, P, C]:
+        """Save `view` -- a named, owned copy of a page's panels and settings -- as its own page."""
+        if view.owner_id is None or not view.name:
+            msg = "A view needs an owner and a name"
+            raise ValueError(msg)
+        statement, values = sql.insert(models.Page, view)
+        return self._first_committed_row(self._execute_sql_query(page_type, statement, values))
+
+    def get_view[D, P, C](
+        self, page_type: type[models.Page[D, P, C]], view_id: int
+    ) -> models.Page[D, P, C] | None:
+        """A named view by id, or `None` if there's no such view (a shared page's id doesn't count)."""
+        rows = self._execute_sql_query(
+            page_type,
+            f"SELECT {sql.select_columns_sql(models.Page)} FROM {models.Page.__name__} "
+            "WHERE id = :id AND owner_id IS NOT NULL;",
+            {"id": view_id},
+        )
+        return next(rows, None)
+
+    def list_views(self, experiment_id: int, owner_id: int) -> list[models.ViewSummary]:
+        """`owner_id`'s views of an experiment's page, by name."""
+        rows = self._execute_raw_sql(
+            f"SELECT id, name FROM {models.Page.__name__} "
+            "WHERE experiment_id = :experiment_id AND owner_id = :owner_id ORDER BY name, id;",
+            {"experiment_id": experiment_id, "owner_id": owner_id},
+        )
+        return [models.ViewSummary(id=view_id, name=name) for view_id, name in rows]
+
+    def delete_view(self, view_id: int, owner_id: int) -> None:
+        """Delete one of `owner_id`'s views; anyone else's (or the shared page) is left alone."""
+        list(
+            self._execute_raw_sql(
+                f"DELETE FROM {models.Page.__name__} WHERE id = :id AND owner_id = :owner_id;",
+                {"id": view_id, "owner_id": owner_id},
             )
         )
 

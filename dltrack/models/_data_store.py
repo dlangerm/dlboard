@@ -153,6 +153,26 @@ class DataStore[**P](typing.Protocol):
         """Update a page."""
         ...
 
+    def create_view[Dataframe, Panel, Chart](
+        self, page_type: type[models.Page[Dataframe, Panel, Chart]], view: models.NewPage[Dataframe, Chart]
+    ) -> models.Page[Dataframe, Panel, Chart]:
+        """Save a named, owned view of a page (see `NewPage.owner_id`) as its own page."""
+        ...
+
+    def get_view[Dataframe, Panel, Chart](
+        self, page_type: type[models.Page[Dataframe, Panel, Chart]], view_id: int
+    ) -> models.Page[Dataframe, Panel, Chart] | None:
+        """A named view by id, or `None` if there's no such view."""
+        ...
+
+    def list_views(self, experiment_id: int, owner_id: int) -> list[models.ViewSummary]:
+        """`owner_id`'s views of an experiment's page."""
+        ...
+
+    def delete_view(self, view_id: int, owner_id: int) -> None:
+        """Delete one of `owner_id`'s views; never anyone else's, nor a shared page."""
+        ...
+
     def log_artifact_refs(self, artifacts: Iterable[models.Artifact]) -> None:
         """Log a set of artifacts."""
         ...

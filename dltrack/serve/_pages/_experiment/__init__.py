@@ -19,7 +19,7 @@ reaching into on purpose" signal, not an access restriction) rather than through
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 import pendulum
 from dash import ALL, Dash, Input, Output, State, no_update
@@ -43,6 +43,7 @@ from dltrack.serve._pages._experiment._chart_editor_modal import register_chart_
 from dltrack.serve._pages._experiment._chart_suggestions import register_chart_suggestions_callbacks
 from dltrack.serve._pages._experiment._panel_controls import register_panel_controls_callbacks
 from dltrack.serve._pages._experiment._run_comparison_table import register_run_comparison_callbacks
+from dltrack.serve._pages._experiment._views import register_view_callbacks
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -91,7 +92,7 @@ def _delete_experiment_action() -> list[Component]:
 
 
 def render_panel(
-    store: DataStore[...], experiment_id: int, *, focus_chart: str | None = None
+    store: DataStore[...], ref: core.PageRef, *, focus_chart: str | None = None
 ) -> tuple[html.Div, Component, str]:
     """
     Build the whole experiment panel: accordion, header, and its persisted page storage.
@@ -115,8 +116,8 @@ def render_panel(
     means that forced fire no longer happens, so a brand-new experiment's first panel opens by
     default exactly as `render()`'s fallback already says it should.
     """
-    page = store.get_or_create_page(core.BasicExperimentPage, experiment_id=experiment_id)
-    exp = store.get_experiment(experiment_id)
+    page = core.load_page(store, ref)
+    exp = store.get_experiment(ref.experiment_id)
     name, description = (experiment_display_name(exp), exp.description) if exp else ("", "")
     header = render_header(
         EXPERIMENT_DESC_IDS,
@@ -124,7 +125,7 @@ def render_panel(
         description=description,
         extra_actions=_delete_experiment_action(),
     )
-    container = core.accordion_view(store, experiment_id=experiment_id, focus_chart=focus_chart)
+    container = core.accordion_view(store, page, focus_chart=focus_chart)
     return container, header, page.model_dump_json()
 
 
@@ -220,6 +221,7 @@ def register_render_callbacks(app: Dash) -> None:
         Input(core.LIVE_POLL_INTERVAL_ID, "n_intervals"),
         State({"type": "chart-content", "panel": ALL, "index": ALL}, "id"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
+        State(core.STATE_VIEW_ID, "data"),
         State(core.STATE_LAST_KNOWN_REVISION, "data"),
         State(core.STATE_CHART_CONTENT_HASHES, "data"),
         prevent_initial_call=True,
@@ -228,6 +230,7 @@ def register_render_callbacks(app: Dash) -> None:
         _n_intervals: int,
         chart_ids: list[core.ChartID],
         experiment_id: int,
+        view_id: int | None,
         last_known_revision: int | None,
         prev_hashes: dict[str, str] | None,
     ) -> tuple[list[Any], Any, Any, Any, Any, Component]:
@@ -254,10 +257,7 @@ def register_render_callbacks(app: Dash) -> None:
                 core.live_status_badge(ok=ok),
             )
 
-        page = cast(
-            "core.BasicExperimentPage",
-            store.get_or_create_page(core.BasicExperimentPage, experiment_id=experiment_id),
-        )
+        page = core.load_page(store, core.PageRef(experiment_id, view_id))
         panels_by_name = {p.name: p for p in page.panels}
         panel_names = {chart_id["panel"] for chart_id in chart_ids}
 
@@ -340,3 +340,4 @@ def register(app: Dash) -> None:
     register_chart_editor_callbacks(app)
     register_chart_suggestions_callbacks(app)
     register_run_comparison_callbacks(app)
+    register_view_callbacks(app)

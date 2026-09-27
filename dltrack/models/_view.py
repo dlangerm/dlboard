@@ -373,6 +373,17 @@ class NewPage[D, C](BaseModel, frozen=True, extra="forbid"):
     project_id: int | None = None
     """Project id for this page, could be none."""
 
+    owner_id: int | None = None
+    """
+    `None` for the shared page everyone sees; a user's id for that user's own named view of it.
+
+    A view is an independent copy of the page's panels and settings: editing it never touches the
+    shared page (or anyone else's view), and vice versa.
+    """
+
+    name: str = ""
+    """A view's name, as listed in the view picker. Empty for the shared page."""
+
     panels: list[PanelInstance[D, C]] = []
     """The set of panel instances on a page."""
 
@@ -396,3 +407,10 @@ class Page[D, P, C](NewPage[D, C], frozen=True, extra="forbid"):
     @abstractmethod
     def render(self, data_store: DataStore[...], experiment_id: int) -> P:
         """Render the page."""
+
+
+class ViewSummary(BaseModel, frozen=True, extra="forbid"):
+    """Just enough of a saved view to list it in a picker."""
+
+    id: int
+    name: str

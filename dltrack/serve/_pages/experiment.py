@@ -13,6 +13,7 @@ from dltrack.models import constants
 from dltrack.serve import get_data_store
 from dltrack.serve._pages._experiment import _experiment_page_state as core
 from dltrack.serve._pages._experiment import render_panel
+from dltrack.serve._pages._experiment._views import resolve_view_id, view_controls
 from dltrack.serve._pages._onboarding import first_run_snippet, onboarding_card
 
 _LIVE_UPDATE_SETTINGS = core.LiveUpdateSettings()
@@ -29,13 +30,15 @@ _DRAG_DROP_STORE_IDS = [
 ]
 
 
-def _live_update_header(header: Component) -> dmc.Group:
-    """The experiment header, plus the live-update status badge/switch/"fetched Xs ago" label."""
+def _live_update_header(header: Component, views: Component) -> dmc.Group:
+    """The experiment header, its view picker, and the live-update status badge/switch/"fetched Xs ago" label."""
     return dmc.Group(
         [
             html.Div(header, id=core.EXPERIMENT_HEADER_ID),
             dmc.Group(
                 [
+                    views,
+                    dmc.Divider(orientation="vertical"),
                     html.Div(core.live_status_badge(ok=True), id=core.LIVE_STATUS_ID),
                     # Hidden until the switch below is unchecked -- a plain CSS visibility swap
                     # with the div above (see `live_switch_state.js`), not a second callback
@@ -75,11 +78,12 @@ def _live_update_header(header: Component) -> dmc.Group:
 
 
 def layout(
-    experiment_id: str, chart: str | None = None, **_query: str
+    experiment_id: str, chart: str | None = None, view: str | None = None, **_query: str
 ) -> list[html.Div | dcc.Store | dcc.Interval]:
     """
     The experiment page, with its URL's query parameters passed in as keyword arguments by Dash.
 
+    `?view=` (a `Page.id`) shows one of the named views instead of the shared page (see `_views.py`).
     `?chart=` (a `ChartInstance.id`, from a copied chart link) opens that chart's panel and tab, and
     `chart_deep_link.js` scrolls to it. Any other query parameter is ignored.
     """
@@ -92,14 +96,15 @@ def layout(
     # Rendered synchronously, here, rather than by a `render_initial`-style callback fired after
     # this static shell mounts -- see `render_panel`'s own docstring for why that's the one thing
     # that actually eliminates the page's extra round trip, not just hides it behind a spinner.
-    container, header, page_json = render_panel(store, int(experiment_id), focus_chart=chart)
+    view_id = resolve_view_id(store, exp.id, view)
+    container, header, page_json = render_panel(store, core.PageRef(exp.id, view_id), focus_chart=chart)
 
     return [
         html.Div(
             id=core.PAGE_EXPERIMENT_ID,
             children=dmc.Stack(
                 [
-                    _live_update_header(header),
+                    _live_update_header(header, view_controls(store, exp.id, view_id)),
                     # Nothing logged yet: show how to log the first run, right where its charts will go.
                     onboarding_card(
                         title="No runs yet — log your first one",
@@ -151,6 +156,7 @@ def layout(
         Store(id=core.STATE_CHART_CONTENT_HASHES, data={}),
         Store(id=core.STATE_LAST_FETCH_AT, data=pendulum.now("UTC").isoformat()),
         Store(id=core.STATE_PAGE_STORAGE, data=page_json),
+        Store(id=core.STATE_VIEW_ID, data=view_id),
         Store(id=constants.STATE_PROJECT_ID, data=exp.project_id),
         Store(id=constants.STATE_EXPERIMENT_ID, data=int(experiment_id)),
         Store(id=core.STATE_HPARAMS, data=[h.model_dump_json() for h in hparams]),

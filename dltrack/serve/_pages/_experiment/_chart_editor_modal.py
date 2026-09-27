@@ -218,7 +218,7 @@ def render_chart_preview(  # noqa: PLR0913
     field_ids: list[dict[str, str]],
     *,
     store: DataStore[...],
-    experiment_id: int,
+    ref: core.PageRef,
 ) -> tuple[Any, str]:
     """
     Live-preview the chart exactly as it'd render in a panel of its own -- same fetch, same runs.
@@ -233,9 +233,11 @@ def render_chart_preview(  # noqa: PLR0913
     parameters = core.merge_chart_param_values(values, checked_values, field_ids, fields)
     try:
         chart = core.build_validated_chart_instance(chart_type_name, parameters)
-        page = store.get_or_create_page(core.BasicExperimentPage, experiment_id=experiment_id)
+        page = core.load_page(store, ref)
         panel = models.PanelInstance[Any, Any](name="preview", charts=[chart])
-        return chart.render(core.fetch_panel_dataframe(store, experiment_id, panel, page.page_settings)), ""
+        return chart.render(
+            core.fetch_panel_dataframe(store, ref.experiment_id, panel, page.page_settings)
+        ), ""
     except (ValidationError, KeyError, ValueError) as exc:
         _log.exception("error rendering preview")
         return None, f"Fill in required fields to see a preview ({exc})"
@@ -264,14 +266,16 @@ def _register_form(app: Dash) -> None:
         Input({"type": core.CHART_PARAM_TYPE, "field": ALL}, "checked"),
         State({"type": core.CHART_PARAM_TYPE, "field": ALL}, "id"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
+        State(core.STATE_VIEW_ID, "data"),
         prevent_initial_call=True,
     )
-    def render_preview(
+    def render_preview(  # noqa: PLR0913
         chart_type_name: str | None,
         values: list[Any],
         checked_values: list[Any],
         field_ids: list[dict[str, str]],
         experiment_id: int,
+        view_id: int | None,
     ) -> tuple[Any, str]:
         return render_chart_preview(
             chart_type_name,
@@ -279,7 +283,7 @@ def _register_form(app: Dash) -> None:
             checked_values,
             field_ids,
             store=get_data_store(),
-            experiment_id=experiment_id,
+            ref=core.PageRef(experiment_id, view_id),
         )
 
 

@@ -63,11 +63,16 @@ def test_render_chart_preview_leaves_out_excluded_runs_like_the_real_panel(
 ) -> None:
     """It used to render from the whole experiment, so it showed runs the panel itself hides."""
     kept, excluded = _log_a_run(store, experiment_id), _log_a_run(store, experiment_id)
-    state.persist_settings(store, experiment_id, {EXCLUDED_RUNS_KEY: [excluded.id]})
+    state.persist_settings(store, state.PageRef(experiment_id, None), {EXCLUDED_RUNS_KEY: [excluded.id]})
 
     field_ids = [{"type": "chart-param", "field": "column"}, {"type": "chart-param", "field": "x_axis"}]
     preview, error = render_chart_preview(
-        "line", ["loss", "step"], [None, None], field_ids, store=store, experiment_id=experiment_id
+        "line",
+        ["loss", "step"],
+        [None, None],
+        field_ids,
+        store=store,
+        ref=state.PageRef(experiment_id, None),
     )
 
     assert error == ""

@@ -1251,3 +1251,55 @@ def _open_panels(experiment_id: int) -> list[str]:
     store = get_data_store()
     page = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
     return list(cast("list[str]", page.page_settings.get(OPEN_PANEL_KEY, [])))
+
+
+def test_changes_in_a_saved_view_leave_the_shared_view_alone(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """
+    Save the page as a personal view, change it there (a panel's layout), and the shared page --
+    what everyone else sees -- keeps its own layout; switching back shows exactly that.
+    """
+    _create_project_and_experiment(page, live_server_url, "Views Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    api = BasicDltrackAPI(live_server_url)
+    run = api.create_run(models.NewRun(experiment_id=experiment_id))
+    api.log_metric_batch(
+        [
+            models.LoggedMetrics(
+                experiment_id=experiment_id,
+                run_id=run.id,
+                step=0,
+                metrics={"loss": 1.0},
+                timestamp_utc=pendulum.now("UTC"),
+            )
+        ]
+    )
+    page.reload()
+    page.get_by_role("button", name="Auto-generate charts").click()
+    expect(page.locator(".dl-panel-body svg").first).to_be_visible()
+
+    page.get_by_role("button", name="View actions").click()
+    page.get_by_role("menuitem", name="Save as a new view…").click()
+    page.get_by_role("textbox", name="View name").fill("my layout")
+    page.get_by_role("button", name="Save view").click()
+    expect(page).to_have_url(re.compile(r"\?view=\d+$"))
+    view_id = int(page.url.rsplit("=", 1)[-1])
+    expect(page.get_by_role("textbox", name="View", exact=True)).to_have_value("my layout")
+
+    page.locator(".dl-panel-item-header").first.hover()
+    page.get_by_text("Grid", exact=True).first.click()
+    store = get_data_store()
+    _wait_until(
+        lambda: [p.layout for p in store.get_view(BasicExperimentPage, view_id).panels][:1],  # pyright: ignore[reportOptionalMemberAccess]
+        ["grid"],
+    )
+    shared = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
+    assert {p.layout for p in shared.panels} == {"packed"}
+
+    page.get_by_role("textbox", name="View", exact=True).click()
+    page.get_by_role("option", name="Shared view").click()
+    expect(page).to_have_url(f"{live_server_url}/experiment/{experiment_id}")
+    expect(page.get_by_role("textbox", name="View", exact=True)).to_have_value("Shared view")
+    assert console_errors == []
