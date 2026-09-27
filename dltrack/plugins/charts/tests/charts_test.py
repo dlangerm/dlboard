@@ -391,7 +391,7 @@ def test_bar_chart_series_and_labels() -> None:
     df = _hparam_grouped_df({1: 128}, {1: [0.8]})
     chart = BarChart.render(BarChartSettings(column="accuracy", x_axis="hidden_size"), df)
     props = _props(chart)
-    assert props["series"] == [{"name": "accuracy", "label": "accuracy", "color": "blue.6"}]
+    assert props["series"] == [{"name": "accuracy", "label": "accuracy", "color": "var(--dl-series-1)"}]
     assert props["yAxisLabel"] == "mean(accuracy)"
 
 

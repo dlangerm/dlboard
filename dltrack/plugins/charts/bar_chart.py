@@ -13,14 +13,12 @@ from pydantic import BaseModel, Field
 from dltrack.models import ChartType, ColumnKind
 from dltrack.plugins.charts._grouping import last_row_per_run
 from dltrack.plugins.charts._table_style import HPARAM_COLUMN_PREFIX
-from dltrack.serve import AssetKind, serve_asset
+from dltrack.serve import AssetKind, series_color, serve_asset
 
 if typing.TYPE_CHECKING:
     from dash import Dash
 
 _TOOLTIP_JS_PATH = Path(__file__).with_name("bar_chart_tooltip.js")
-
-_DEFAULT_BAR_COLOR = "blue.6"
 
 
 class BarChartSettings(BaseModel, frozen=True, extra="forbid"):
@@ -156,7 +154,7 @@ class BarChart(ChartType[BarChartSettings, pd.DataFrame, dmc.BarChart], frozen=T
             h=parameters.height,
             data=data,  # pyright: ignore[reportArgumentType]
             dataKey=parameters.x_axis,
-            series=[{"name": parameters.column, "label": parameters.column, "color": _DEFAULT_BAR_COLOR}],  # pyright: ignore[reportArgumentType]
+            series=[{"name": parameters.column, "label": parameters.column, "color": series_color(0)}],  # pyright: ignore[reportArgumentType]
             orientation=parameters.orientation,
             xAxisLabel=x_axis_label,
             yAxisLabel=y_axis_label,
