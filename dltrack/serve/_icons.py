@@ -62,6 +62,8 @@ class Icon(StrEnum):
     BREADCRUMB = "chevron-right"
     CLOSE = "x"
     COLUMNS = "columns-3"
+    COPIED = "check"
+    COPY = "copy"
     DARK_MODE = "moon"
     DELETE = "trash"
     DRAG = "grip-vertical"

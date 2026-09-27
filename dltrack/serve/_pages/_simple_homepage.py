@@ -9,6 +9,7 @@ from dash.development.base_component import Component
 from dltrack import models
 from dltrack.serve import Icon, get_data_store, icon
 from dltrack.serve._pages._dash_helpers import entity_card
+from dltrack.serve._pages._onboarding import first_project_snippet, onboarding_card
 
 PROJECT_LIST_ID: typing.Final = "project-list-id"
 NEW_PROJECT_BUTTON_ID: typing.Final = "new-project-button"
@@ -24,18 +25,9 @@ def _project_grid(store: models.DataStore[...]) -> tuple[Component, int]:
     """The project cards (or an empty state), and how many projects there are."""
     projects = list(store.get_projects())
     if not projects:
-        return (
-            dmc.Stack(
-                [
-                    dmc.Text("No projects yet", fw=600, size="lg"),
-                    dmc.Text("Name your first project above to get started.", c="dimmed", size="sm"),
-                ],
-                align="center",
-                gap=4,
-                py="xl",
-            ),
-            0,
-        )
+        return onboarding_card(
+            title="No projects yet — log your first run", snippet=first_project_snippet()
+        ), 0
     stats = store.get_project_stats()
     cards = [_project_card(p, stats.get(p.id, models.ProjectStats())) for p in projects]
     return dmc.SimpleGrid(cards, cols={"base": 1, "sm": 2, "lg": 3}, spacing="md"), len(projects)

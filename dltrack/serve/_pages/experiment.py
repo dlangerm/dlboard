@@ -13,6 +13,7 @@ from dltrack.models import constants
 from dltrack.serve import get_data_store
 from dltrack.serve._pages._experiment import _experiment_page_state as core
 from dltrack.serve._pages._experiment import render_panel
+from dltrack.serve._pages._onboarding import first_run_snippet, onboarding_card
 
 _LIVE_UPDATE_SETTINGS = core.LiveUpdateSettings()
 
@@ -91,6 +92,13 @@ def layout(experiment_id: str) -> list[html.Div | dcc.Store | dcc.Interval]:
             children=dmc.Stack(
                 [
                     _live_update_header(header),
+                    # Nothing logged yet: show how to log the first run, right where its charts will go.
+                    onboarding_card(
+                        title="No runs yet — log your first one",
+                        snippet=first_run_snippet(exp.project_id, exp.id),
+                    )
+                    if next(store.get_runs(exp.id, limit=1), None) is None
+                    else None,
                     # `container` (from `render_panel`, above) is real content from the very first
                     # response now, not a `dmc.Loader()` placeholder -- `dcc.Loading` still wraps it
                     # for every *later* full-panel rebuild (add/delete/rename a panel or chart,

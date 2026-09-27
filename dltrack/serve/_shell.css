@@ -92,3 +92,16 @@
     opacity: 0;
   }
 }
+
+/* An onboarding code snippet (`_onboarding.py`), with its copy button pinned top-right. */
+.dl-snippet {
+  padding: var(--mantine-spacing-md);
+  padding-right: 6rem;
+  font-size: var(--mantine-font-size-sm);
+  line-height: 1.6;
+}
+.dl-snippet-copy {
+  position: absolute;
+  top: var(--mantine-spacing-xs);
+  right: var(--mantine-spacing-xs);
+}

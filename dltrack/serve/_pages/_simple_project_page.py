@@ -22,6 +22,7 @@ from dltrack.serve._pages._description_editor import (
     register_edit_callbacks,
     render_header,
 )
+from dltrack.serve._pages._onboarding import first_experiment_snippet, onboarding_card
 
 if TYPE_CHECKING:
     from dash.development.base_component import Component
@@ -80,14 +81,8 @@ def _experiment_card(experiment: Experiment, stats: ActivityStats) -> Component:
 def _experiment_grid(store: DataStore[...], project_id: int) -> Component:
     experiments = list(store.get_experiments(project_id))
     if not experiments:
-        return dmc.Stack(
-            [
-                dmc.Text("No experiments yet", fw=600, size="lg"),
-                dmc.Text("Name your first experiment above to get started.", c="dimmed", size="sm"),
-            ],
-            align="center",
-            gap=4,
-            py="xl",
+        return onboarding_card(
+            title="No experiments yet — log your first run", snippet=first_experiment_snippet(project_id)
         )
     stats = store.get_experiment_stats(project_id)
     return dmc.SimpleGrid(
