@@ -302,7 +302,7 @@ def _render_hparam_panel(
 
 
 def _load_hparam_panel_settings(
-    store: DataStore[...], experiment_id: int
+    store: DataStore[...], ref: core.PageRef
 ) -> tuple[list[Run], list[int] | list[str], list[str]]:
     """
     The cheap, always-needed inputs for the navbar table: its run list and its persisted settings.
@@ -312,13 +312,13 @@ def _load_hparam_panel_settings(
     happening before paying for that, since it's re-evaluated on every live-update poll tick, not
     just on a real settings change.
     """
-    page = store.get_or_create_page(core.BasicExperimentPage, experiment_id=experiment_id)
+    page = core.load_page(store, ref)
     excluded = page.page_settings.get(dfh.EXCLUDED_RUNS_KEY, [])
     assert isinstance(excluded, list)
     selected_setting = page.page_settings.get(SELECTED_HPARAM_COLS_KEY, [])
     assert isinstance(selected_setting, list)
     selected = [s for s in selected_setting if isinstance(s, str)]
-    runs = list(store.get_runs(experiment_id, limit=_HPARAM_ROWS_LIMIT, offset=0))
+    runs = list(store.get_runs(ref.experiment_id, limit=_HPARAM_ROWS_LIMIT, offset=0))
     return runs, excluded, selected
 
 
@@ -351,6 +351,7 @@ def _register_hparam_table(app: Dash) -> None:
         Input(constants.STATE_EXPERIMENT_ID, "data", allow_optional=True),
         Input(core.STATE_PAGE_STORAGE, "data", allow_optional=True),
         State(NAVBAR_HPARAM_SIGNATURE_ID, "data", allow_optional=True),
+        State(core.STATE_VIEW_ID, "data", allow_optional=True),
         prevent_initial_call=True,
     )
     def render_navbar_hparams(
@@ -358,12 +359,13 @@ def _register_hparam_table(app: Dash) -> None:
         experiment_id: int | None,
         _page_json: str | None,
         prev_signature: list[Any] | None,
+        view_id: int | None,
     ) -> dmc.Stack:
         if experiment_id is None:
             raise PreventUpdate
 
         store = get_data_store()
-        runs, excluded, selected = _load_hparam_panel_settings(store, experiment_id)
+        runs, excluded, selected = _load_hparam_panel_settings(store, core.PageRef(experiment_id, view_id))
         # `STATE_PAGE_STORAGE` changes on *every* page-settings write -- a tab switch, a panel
         # rename, a drag-reorder, none of which this table cares about -- so rebuilding on it
         # unconditionally (tearing down and remounting the ag-grid) flickered on every one of
@@ -417,15 +419,18 @@ def _register_hparam_table(app: Dash) -> None:
         Input(NAVBAR_HPARAM_CONFIRM_COLS_ID, "n_clicks", allow_optional=True),
         State(NAVBAR_HPARAM_COL_SELECT_ID, "value", allow_optional=True),
         State(constants.STATE_EXPERIMENT_ID, "data"),
+        State(core.STATE_VIEW_ID, "data"),
         prevent_initial_call=True,
     )
     def persist_selected_hparam_cols(
-        n_clicks: int | None, selected: list[str] | None, experiment_id: int
+        n_clicks: int | None, selected: list[str] | None, experiment_id: int, view_id: int | None
     ) -> str:
         if not n_clicks:
             raise PreventUpdate
         store = get_data_store()
-        page = core.persist_settings(store, experiment_id, {SELECTED_HPARAM_COLS_KEY: selected or []})
+        page = core.persist_settings(
+            store, core.PageRef(experiment_id, view_id), {SELECTED_HPARAM_COLS_KEY: selected or []}
+        )
         return page.model_dump_json()
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
@@ -434,12 +439,14 @@ def _register_hparam_table(app: Dash) -> None:
         Input(NAVBAR_HPARAM_DATATABLE_ID, "selectedRows", allow_optional=True),
         State(NAVBAR_HPARAM_DATATABLE_ID, "rowData", allow_optional=True),
         State(constants.STATE_EXPERIMENT_ID, "data"),
+        State(core.STATE_VIEW_ID, "data"),
         prevent_initial_call=True,
     )
     def sync_run_selection(
         selected_rows: list[dict[str, Any]] | dict[str, Any] | None,
         table_data: list[dict[str, Any]] | None,
         experiment_id: int,
+        view_id: int | None,
     ) -> tuple[str, html.Div]:
         if selected_rows is None or table_data is None:
             raise PreventUpdate
@@ -462,14 +469,14 @@ def _register_hparam_table(app: Dash) -> None:
         # render, not a dynamically-created component (this navbar table isn't in the static
         # layout) mounting later with an already-computed value. Skip the (expensive, chart-
         # remounting) rebuild when the recomputed set matches what's already persisted.
-        current_page = store.get_or_create_page(core.BasicExperimentPage, experiment_id=experiment_id)
+        current_page = core.load_page(store, core.PageRef(experiment_id, view_id))
         currently_excluded = current_page.page_settings.get(dfh.EXCLUDED_RUNS_KEY, [])
         if excluded == currently_excluded:
             raise PreventUpdate
 
         page, container = core.persist_settings_and_rerender(
             store,
-            experiment_id,
+            core.PageRef(experiment_id, view_id),
             {dfh.EXCLUDED_RUNS_KEY: excluded},
         )
         return page.model_dump_json(), container

@@ -112,7 +112,7 @@ def _register_auto_populate(app: Dash) -> None:
             )
 
         page, container = core.mutate_panels_and_rerender(
-            auto_populate_ctx["page_json"], experiment_id, replace_with_generated_panels
+            auto_populate_ctx["page_json"], replace_with_generated_panels
         )
         return container, page.model_dump_json()
 
@@ -228,14 +228,12 @@ def _register_suggestions(app: Dash) -> None:
         Input({"type": "add-suggestion", "kind": ALL, "key": ALL}, "n_clicks"),
         State(core.SUGGEST_SUGGESTIONS_STORE_ID, "data"),
         State(core.STATE_PAGE_STORAGE, "data"),
-        State(constants.STATE_EXPERIMENT_ID, "data"),
         prevent_initial_call=True,
     )
     def add_suggested_chart(
         _n_clicks_list: list[int],
         stored_suggestions: list[dict[str, Any]] | None,
         page_json: str,
-        experiment_id: int,
     ) -> tuple[Any, str, Component, list[dict[str, Any]]]:
         triggered_id = cast("dict[str, str]", core.require_triggered_id())
         kind, key = triggered_id["kind"], triggered_id["key"]
@@ -251,7 +249,7 @@ def _register_suggestions(app: Dash) -> None:
         def apply_chart(panels: list[Any]) -> list[Any]:
             return core.add_chart_to_panel_by_name(panels, panel_name, chart)
 
-        page, container = core.mutate_panels_and_rerender(page_json, experiment_id, apply_chart)
+        page, container = core.mutate_panels_and_rerender(page_json, apply_chart)
 
         remaining = [s for s in stored_suggestions if not (s["kind"] == kind and s["key"] == key)]
         remaining_suggestions = [

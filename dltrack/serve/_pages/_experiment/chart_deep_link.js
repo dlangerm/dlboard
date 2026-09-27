@@ -1,6 +1,7 @@
 // Chart deep links, entirely client-side:
 // - A chart's "copy link" button (`data-dl-copy-chart-link`) copies this page's URL with
-//   `?chart=<chart id>`, built from the browser's own location so it's right behind any proxy.
+//   `?chart=<chart id>` (keeping any `?view=`), built from the browser's own location so it's right
+//   behind any proxy.
 // - Landing on a URL with `?chart=` (the server already opened that chart's panel and tab) scrolls
 //   the chart into view and briefly highlights it, once Dash has rendered it.
 (() => {
@@ -31,7 +32,6 @@
             return;
         }
         const url = new URL(window.location.href);
-        url.search = "";
         url.hash = "";
         url.searchParams.set("chart", button.dataset.dlCopyChartLink);
         copy(url.toString()).then(() => {

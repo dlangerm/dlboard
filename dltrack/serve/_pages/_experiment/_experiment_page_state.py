@@ -55,6 +55,8 @@ EXPERIMENT_HEADER_ID: DivId[ExperimentPage] = DivId("experiment-header")
 METRIC_CONTENT_ID: DivId[ExperimentPage] = DivId("metrics-view")
 STATE_HPARAMS: StoreId[ExperimentPage] = StoreId("hparams-state")
 STATE_PAGE_STORAGE: StoreId[ExperimentPage] = StoreId("current-page")
+STATE_VIEW_ID: StoreId[ExperimentPage] = StoreId("view-id-state")
+"""The named view (`Page.id`) this page is showing, from its `?view=` URL, or `None` for the shared page."""
 
 # --- live updates: a `dcc.Interval`-driven poll of `Experiment.revision` re-renders whichever open
 # charts have actually changed since the last poll; a small badge reports whether the poll itself
@@ -1205,17 +1207,45 @@ def _focus_on_chart(page: BasicExperimentPage, chart_id: str) -> BasicExperiment
     )
 
 
-def accordion_view(store: DataStore[...], experiment_id: int, *, focus_chart: str | None = None) -> html.Div:
+class PageRef(typing.NamedTuple):
     """
-    The full accordion/tabs view for an experiment, plus every modal/drawer shell it can open.
+    Which page an experiment-page callback reads and writes: the shared one, or a named view of it.
+
+    Every callback that loads the page by experiment builds one of these from `STATE_EXPERIMENT_ID`
+    and `STATE_VIEW_ID`, so an edit made while looking at a view lands in that view, never the
+    shared page. (Callbacks that already hold the page itself -- `STATE_PAGE_STORAGE` -- write it back
+    by its own id, which is right either way.)
+    """
+
+    experiment_id: int
+    view_id: int | None
+
+
+def load_page(store: DataStore[...], ref: PageRef) -> BasicExperimentPage:
+    """The page `ref` points at; the shared page if its view no longer exists or isn't this experiment's."""
+    if ref.view_id is not None:
+        view = store.get_view(BasicExperimentPage, ref.view_id)
+        if view is not None and view.experiment_id == ref.experiment_id:
+            return cast("BasicExperimentPage", view)
+    return cast(
+        "BasicExperimentPage", store.get_or_create_page(BasicExperimentPage, experiment_id=ref.experiment_id)
+    )
+
+
+def accordion_view(
+    store: DataStore[...], page: BasicExperimentPage, *, focus_chart: str | None = None
+) -> html.Div:
+    """
+    The full accordion/tabs view of `page`, plus every modal/drawer shell it can open.
+
+    Takes the page itself rather than re-reading it: every caller already has the version it just
+    loaded or saved, which is also the only way to be sure a view is rendered, not the shared page.
 
     `focus_chart` (a `ChartInstance.id`, from a `?chart=` deep link) opens that chart's panel and
     tab for this render -- see `_focus_on_chart`.
     """
+    experiment_id = typing.cast("int", page.experiment_id)
     _log.debug("rendering chart for experiment %s", experiment_id)
-    page = cast(
-        "BasicExperimentPage", store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
-    )
     if focus_chart:
         page = _focus_on_chart(page, focus_chart)
     open_value = page.page_settings.get(OPEN_PANEL_KEY, [page.panels[0].name] if page.panels else [])
@@ -1242,11 +1272,9 @@ def accordion_view(store: DataStore[...], experiment_id: int, *, focus_chart: st
 # ============================================================
 
 
-def persist_settings(
-    store: DataStore[...], experiment_id: int, updates: dict[str, Any]
-) -> BasicExperimentPage:
+def persist_settings(store: DataStore[...], ref: PageRef, updates: dict[str, Any]) -> BasicExperimentPage:
     """Merge `updates` into page_settings (server-authoritative) and persist -- no accordion rebuild."""
-    page = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
+    page = load_page(store, ref)
     new_settings = {**page.page_settings, **updates}
     page = page.model_copy(update={"page_settings": new_settings})
     return cast("BasicExperimentPage", store.update_page(page))
@@ -1254,18 +1282,16 @@ def persist_settings(
 
 def persist_settings_and_rerender(
     store: DataStore[...],
-    experiment_id: int,
+    ref: PageRef,
     updates: dict[str, Any],
 ) -> tuple[BasicExperimentPage, html.Div]:
     """Merge `updates` into page_settings (server-authoritative), persist, and re-render the accordion."""
-    page = persist_settings(store, experiment_id, updates)
-    container = accordion_view(store, experiment_id=experiment_id)
-    return page, container
+    page = persist_settings(store, ref, updates)
+    return page, accordion_view(store, page)
 
 
 def mutate_panels_and_rerender(
     page_json: str,
-    experiment_id: int,
     mutate: Callable[[list[models.PanelInstance[Any, Any]]], list[models.PanelInstance[Any, Any]]],
     *,
     extra_settings: dict[str, Any] | None = None,
@@ -1283,9 +1309,8 @@ def mutate_panels_and_rerender(
         updates["page_settings"] = {**curr_page.page_settings, **extra_settings}
     curr_page = curr_page.model_copy(update=updates)
     store = get_data_store()
-    curr_page = store.update_page(curr_page)
-    container = accordion_view(store, experiment_id=experiment_id)
-    return cast("BasicExperimentPage", curr_page), container
+    curr_page = cast("BasicExperimentPage", store.update_page(curr_page))
+    return curr_page, accordion_view(store, curr_page)
 
 
 def upsert_chart(
@@ -1611,12 +1636,15 @@ def register_state_callbacks(app: Dash) -> None:
         Output(STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Input({"type": "panel-accordion", "tab": ALL}, "value"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
+        State(STATE_VIEW_ID, "data"),
         prevent_initial_call=True,
     )
-    def persist_open_panel(open_values: list[list[str] | None], experiment_id: int) -> str:
+    def persist_open_panel(
+        open_values: list[list[str] | None], experiment_id: int, view_id: int | None
+    ) -> str:
         open_value = [name for group in open_values for name in (group or [])]
         store = get_data_store()
-        page = persist_settings(store, experiment_id, {OPEN_PANEL_KEY: open_value})
+        page = persist_settings(store, PageRef(experiment_id, view_id), {OPEN_PANEL_KEY: open_value})
         return page.model_dump_json()
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
@@ -1626,6 +1654,7 @@ def register_state_callbacks(app: Dash) -> None:
         State({"type": "panel-content", "panel": ALL}, "id"),
         State(LOADED_PANELS_STORE_ID, "data"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
+        State(STATE_VIEW_ID, "data"),
         prevent_initial_call=True,
     )
     def render_opened_panels(
@@ -1633,6 +1662,7 @@ def register_state_callbacks(app: Dash) -> None:
         panel_ids: list[dict[str, str]],
         loaded: list[str] | None,
         experiment_id: int,
+        view_id: int | None,
     ) -> tuple[list[Any], list[str]]:
         open_set = {name for group in open_values for name in (group or [])}
         loaded_set = set(loaded or [])
@@ -1641,7 +1671,7 @@ def register_state_callbacks(app: Dash) -> None:
             raise PreventUpdate
 
         store = get_data_store()
-        page = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
+        page = load_page(store, PageRef(experiment_id, view_id))
         panel_by_name = {p.name: p for p in page.panels}
 
         outputs: list[Any] = []
@@ -1659,13 +1689,16 @@ def register_state_callbacks(app: Dash) -> None:
         Output(STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Input(PANEL_TABS_ID, "value"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
+        State(STATE_VIEW_ID, "data"),
         prevent_initial_call=True,
     )
-    def persist_active_tab(tab_value: str | None, experiment_id: int) -> str:
+    def persist_active_tab(tab_value: str | None, experiment_id: int, view_id: int | None) -> str:
         if tab_value is None:
             raise PreventUpdate
         store = get_data_store()
-        page = persist_settings(store, experiment_id, {ACTIVE_TAB_KEY: tab_from_component_value(tab_value)})
+        page = persist_settings(
+            store, PageRef(experiment_id, view_id), {ACTIVE_TAB_KEY: tab_from_component_value(tab_value)}
+        )
         return page.model_dump_json()
 
     # Tab switching is entirely client-side (Mantine's own state, no server round trip) -- so

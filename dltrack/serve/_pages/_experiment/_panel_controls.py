@@ -71,14 +71,11 @@ def _register_create_panel(app: Dash) -> None:
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Input(core.NEW_PANEL_ID, "n_clicks"),
-        Input(constants.STATE_EXPERIMENT_ID, "data"),
         State(core.NEW_PANEL_NAME_ID, "value"),
         State(core.STATE_PAGE_STORAGE, "data"),
         prevent_initial_call=True,
     )
-    def create_panel(
-        n_clicks: int, experiment_id: int, panel_name: str, page_json: str
-    ) -> tuple[html.Div, str]:
+    def create_panel(n_clicks: int, panel_name: str, page_json: str) -> tuple[html.Div, str]:
         if not n_clicks:
             raise PreventUpdate
         if not panel_name:
@@ -91,7 +88,7 @@ def _register_create_panel(app: Dash) -> None:
                 raise ValueError(msg)
             return [*panels, PanelInstance(name=panel_name)]
 
-        page, container = core.mutate_panels_and_rerender(page_json, experiment_id, add_panel)
+        page, container = core.mutate_panels_and_rerender(page_json, add_panel)
         return container, page.model_dump_json()
 
 
@@ -135,7 +132,6 @@ def _register_add_chart(app: Dash) -> None:
 
         page, container = core.mutate_panels_and_rerender(
             add_chart_ctx["page_json"],
-            add_chart_ctx["experiment_id"],
             apply_chart,
         )
         return container, False, "", page.model_dump_json(), False
@@ -183,7 +179,6 @@ def _register_delete_chart(app: Dash) -> None:
 
         page, container = core.mutate_panels_and_rerender(
             delete_ctx["page_json"],
-            delete_ctx["experiment_id"],
             remove_chart,
         )
         return container, page.model_dump_json(), False
@@ -235,7 +230,6 @@ def _register_delete_panel(app: Dash) -> None:
 
         page, container = core.mutate_panels_and_rerender(
             delete_ctx["page_json"],
-            delete_ctx["experiment_id"],
             remove_panel,
         )
         return container, page.model_dump_json(), False
@@ -318,13 +312,11 @@ def _register_toggle(app: Dash) -> None:
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Input({"type": "panel-sync", "panel": ALL}, "checked"),
         State(core.STATE_PAGE_STORAGE, "data"),
-        State(constants.STATE_EXPERIMENT_ID, "data"),
         prevent_initial_call=True,
     )
     def toggle_panel_sync(
         _checked_list: list[bool],
         page_json: str,
-        experiment_id: int,
     ) -> tuple[html.Div, str]:
         # Unlike button clicks, a Switch's `checked` is a meaningful trigger value even when
         # `False`, so this can't reuse `require_triggered_id`'s "falsy value means no real
@@ -351,7 +343,6 @@ def _register_toggle(app: Dash) -> None:
 
         page, container = core.mutate_panels_and_rerender(
             page_json,
-            experiment_id,
             toggle,
         )
         return container, page.model_dump_json()
@@ -361,13 +352,11 @@ def _register_toggle(app: Dash) -> None:
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Input({"type": "panel-layout", "panel": ALL}, "value"),
         State(core.STATE_PAGE_STORAGE, "data"),
-        State(constants.STATE_EXPERIMENT_ID, "data"),
         prevent_initial_call=True,
     )
     def toggle_panel_layout(
         _value_list: list[str],
         page_json: str,
-        experiment_id: int,
     ) -> tuple[html.Div, str]:
         if not ctx.triggered_id:  # pyright: ignore[reportUnknownMemberType]
             raise PreventUpdate
@@ -388,7 +377,6 @@ def _register_toggle(app: Dash) -> None:
 
         page, container = core.mutate_panels_and_rerender(
             page_json,
-            experiment_id,
             toggle,
         )
         return container, page.model_dump_json()
@@ -409,13 +397,11 @@ def _register_tab_drop(app: Dash) -> None:
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Input(core.TAB_DROP_STORE_ID, "data"),
         State(core.STATE_PAGE_STORAGE, "data"),
-        State(constants.STATE_EXPERIMENT_ID, "data"),
         prevent_initial_call=True,
     )
     def drop_panel_on_tab(
         request: core.TabDropRequest | None,
         page_json: str,
-        experiment_id: int,
     ) -> tuple[html.Div, str]:
         if not request:
             raise PreventUpdate
@@ -431,7 +417,6 @@ def _register_tab_drop(app: Dash) -> None:
 
         page, container = core.mutate_panels_and_rerender(
             page_json,
-            experiment_id,
             move,
             extra_settings={core.ACTIVE_TAB_KEY: new_tab},
         )
@@ -442,13 +427,11 @@ def _register_tab_drop(app: Dash) -> None:
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Input(core.CHART_TAB_DROP_STORE_ID, "data"),
         State(core.STATE_PAGE_STORAGE, "data"),
-        State(constants.STATE_EXPERIMENT_ID, "data"),
         prevent_initial_call=True,
     )
     def drop_chart_on_tab(
         request: core.ChartTabDropRequest | None,
         page_json: str,
-        experiment_id: int,
     ) -> tuple[html.Div, str]:
         """Move a single chart to an *existing* tab -- see `drop_panel_on_tab`, its panel-level twin."""
         if not request:
@@ -460,7 +443,6 @@ def _register_tab_drop(app: Dash) -> None:
 
         page, container = core.mutate_panels_and_rerender(
             page_json,
-            experiment_id,
             move,
             extra_settings={core.ACTIVE_TAB_KEY: new_tab},
         )
@@ -481,13 +463,11 @@ def _register_chart_panel_move(app: Dash) -> None:
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Input(core.CHART_PANEL_MOVE_STORE_ID, "data"),
         State(core.STATE_PAGE_STORAGE, "data"),
-        State(constants.STATE_EXPERIMENT_ID, "data"),
         prevent_initial_call=True,
     )
     def drop_chart_on_panel(
         request: core.ChartPanelMoveRequest | None,
         page_json: str,
-        experiment_id: int,
     ) -> tuple[html.Div, str]:
         if not request:
             raise PreventUpdate
@@ -501,7 +481,6 @@ def _register_chart_panel_move(app: Dash) -> None:
 
         page, container = core.mutate_panels_and_rerender(
             page_json,
-            experiment_id,
             move,
         )
         return container, page.model_dump_json()
@@ -568,10 +547,7 @@ def _register_rename(app: Dash) -> None:
         curr_page = store.update_page(
             curr_page.model_copy(update={"panels": new_panels, "page_settings": new_settings})
         )
-        container = core.accordion_view(
-            store,
-            experiment_id=rename_ctx["experiment_id"],
-        )
+        container = core.accordion_view(store, cast("core.BasicExperimentPage", curr_page))
         return container, curr_page.model_dump_json(), False, ""
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
@@ -660,10 +636,7 @@ def _register_new_tab(app: Dash) -> None:
         curr_page = store.update_page(
             curr_page.model_copy(update={"panels": new_panels, "page_settings": new_settings})
         )
-        container = core.accordion_view(
-            store,
-            experiment_id=new_tab_ctx["experiment_id"],
-        )
+        container = core.accordion_view(store, cast("core.BasicExperimentPage", curr_page))
         return container, curr_page.model_dump_json(), False, ""
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
@@ -744,10 +717,7 @@ def _register_rename_tab(app: Dash) -> None:
         curr_page = store.update_page(
             curr_page.model_copy(update={"panels": new_panels, "page_settings": new_settings})
         )
-        container = core.accordion_view(
-            store,
-            experiment_id=rename_ctx["experiment_id"],
-        )
+        container = core.accordion_view(store, cast("core.BasicExperimentPage", curr_page))
         return container, curr_page.model_dump_json(), False, ""
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]

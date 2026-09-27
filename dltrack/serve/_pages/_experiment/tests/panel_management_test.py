@@ -247,7 +247,7 @@ def _wire_container(store: SQLLiteStore, experiment_id: int) -> dict[str, Any]:
     actually operate on in the real callback. Round-tripping through the real encoder here (rather
     than hand-building a fake dict) is what keeps this test honest about that shape.
     """
-    container = state.accordion_view(store, experiment_id)
+    container = state.accordion_view(store, state.load_page(store, state.PageRef(experiment_id, None)))
     serialized = to_json(container)
     assert isinstance(serialized, str)
     return cast("dict[str, Any]", json.loads(serialized))

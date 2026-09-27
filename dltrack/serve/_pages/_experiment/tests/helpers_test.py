@@ -174,7 +174,7 @@ def test_persist_settings_merges_into_page_settings_without_touching_panels(
     """Unlike `_persist_settings_and_rerender`, this must not need/trigger an accordion rebuild."""
     store.get_or_create_page(state.BasicExperimentPage, experiment_id=experiment_id)
 
-    page = state.persist_settings(store, experiment_id, {"selected": ["lr"]})
+    page = state.persist_settings(store, state.PageRef(experiment_id, None), {"selected": ["lr"]})
 
     assert page.page_settings["selected"] == ["lr"]
     reloaded = store.get_or_create_page(state.BasicExperimentPage, experiment_id=experiment_id)
