@@ -13,6 +13,7 @@ from dltrack.models import constants
 from dltrack.serve import get_current_user, get_data_store
 from dltrack.serve._pages._experiment import _experiment_page_state as core
 from dltrack.serve._pages._experiment import render_panel
+from dltrack.serve._pages._experiment._notes import STATE_NOTES_REVISION, notes_button, notes_drawer
 from dltrack.serve._pages._experiment._views import resolve_view_id, view_controls
 from dltrack.serve._pages._onboarding import first_run_snippet, onboarding_card
 
@@ -30,13 +31,14 @@ _DRAG_DROP_STORE_IDS = [
 ]
 
 
-def _live_update_header(header: Component, views: Component) -> dmc.Group:
+def _live_update_header(header: Component, notes: Component, views: Component) -> dmc.Group:
     """The experiment header, its view picker, and the live-update status badge/switch/"fetched Xs ago" label."""
     return dmc.Group(
         [
             html.Div(header, id=core.EXPERIMENT_HEADER_ID),
             dmc.Group(
                 [
+                    notes,
                     views,
                     dmc.Divider(orientation="vertical"),
                     html.Div(core.live_status_badge(ok=True), id=core.LIVE_STATUS_ID),
@@ -108,8 +110,10 @@ def layout(
                 [
                     _live_update_header(
                         header,
+                        notes_button(len(store.list_comments(exp.id))),
                         view_controls(store, exp.id, view_id, is_owner=is_owner, view_name=current_page.name),
                     ),
+                    notes_drawer(),
                     # Nothing logged yet: show how to log the first run, right where its charts will go.
                     onboarding_card(
                         title="No runs yet — log your first one",
@@ -162,6 +166,7 @@ def layout(
         Store(id=core.STATE_LAST_FETCH_AT, data=pendulum.now("UTC").isoformat()),
         Store(id=core.STATE_PAGE_STORAGE, data=page_json),
         Store(id=core.STATE_VIEW_ID, data=view_id),
+        Store(id=STATE_NOTES_REVISION, data=exp.notes_revision),
         Store(id=constants.STATE_PROJECT_ID, data=exp.project_id),
         Store(id=constants.STATE_EXPERIMENT_ID, data=int(experiment_id)),
         Store(id=core.STATE_HPARAMS, data=[h.model_dump_json() for h in hparams]),

@@ -47,6 +47,7 @@ from dltrack.serve._pages._experiment._experiment_page_state import (
     RENAME_TAB_NAME_INPUT_ID,
     BasicExperimentPage,
 )
+from dltrack.serve._pages._experiment._notes import NOTES_COUNT_ID
 from dltrack.serve._pages._experiment._run_comparison_table import (
     NAVBAR_HPARAM_COL_SELECT_ID,
     NAVBAR_HPARAM_COLUMNS_TOGGLE_ID,
@@ -1458,4 +1459,37 @@ def test_renaming_a_view_you_own_updates_the_picker(
     page.get_by_role("button", name="Save name").click()
 
     expect(page.get_by_role("textbox", name="View", exact=True)).to_have_value("better name")
+    assert console_errors == []
+
+
+def test_notes_post_to_the_thread_and_arrive_live_from_others(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """Post a note about a run; then someone else's note shows up in the open thread without a reload."""
+    _create_project_and_experiment(page, live_server_url, "Notes Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    api = BasicDltrackAPI(live_server_url)
+    api.create_run(models.NewRun(experiment_id=experiment_id, name="baseline-run"))
+    page.reload()
+
+    page.get_by_role("button", name=re.compile("^Notes")).click()
+    drawer = page.get_by_role("dialog", name="Notes")
+    expect(drawer.get_by_text("No notes yet")).to_be_visible()
+    drawer.get_by_role("textbox", name="Note").fill("baseline diverges after step 40")
+    drawer.get_by_placeholder("About runs…").click()
+    page.get_by_role("option", name="baseline-run").click()
+    drawer.get_by_role("button", name="Post").click()
+
+    expect(drawer.get_by_text("baseline diverges after step 40")).to_be_visible()
+    expect(
+        drawer.locator(".mantine-Badge-root", has=page.locator(".dl-swatch"), has_text="baseline-run")
+    ).to_be_visible()
+    expect(page.locator(f"#{NOTES_COUNT_ID}")).to_have_text("1")
+
+    store = get_data_store()
+    colleague = store.get_or_create_user("colleague")
+    store.add_comment(models.NewComment(experiment_id=experiment_id, author_id=colleague.id, body="agreed"))
+    expect(drawer.get_by_text("agreed")).to_be_visible(timeout=10_000)  # one live-poll tick away
+    expect(page.locator(f"#{NOTES_COUNT_ID}")).to_have_text("2")
     assert console_errors == []
