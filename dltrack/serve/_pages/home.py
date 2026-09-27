@@ -1,13 +1,13 @@
 """The homepage for dltrack."""
 
 import dash
-from dash import html
+import dash_mantine_components as dmc
 
-from dltrack.serve._pages._simple_homepage import PAGE_HOME_ID
+from dltrack.serve._pages._simple_homepage import render_homepage
 
 
-def layout() -> list[html.Div]:
-    return [html.Div(id=PAGE_HOME_ID)]
+def layout() -> dmc.Container:
+    return render_homepage()
 
 
 dash.register_page(__name__, path="/", layout=layout)  # pyright: ignore[reportUnknownMemberType]

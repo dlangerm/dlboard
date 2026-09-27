@@ -38,3 +38,57 @@
 .dl-section-label {
   letter-spacing: 0.04em;
 }
+
+/* A whole-card link (`entity_card`): the card itself is the click target. */
+.dl-card-link {
+  display: block;
+  height: 100%;
+}
+.dl-card-link > .mantine-Card-root {
+  transition: border-color 120ms ease, transform 120ms ease;
+}
+.dl-card-link:hover > .mantine-Card-root,
+.dl-card-link:focus-visible > .mantine-Card-root {
+  border-color: var(--mantine-primary-color-filled);
+}
+
+/* "Receiving data": a green dot with a soft ring pulsing out of it. The ring animates only
+   transform/opacity, so it runs on the compositor without repainting the page. */
+.dl-live-dot {
+  position: relative;
+  display: inline-block;
+  flex-shrink: 0;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background-color: var(--mantine-color-green-6);
+}
+.dl-live-dot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background-color: inherit;
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .dl-card-link:hover > .mantine-Card-root {
+    transform: translateY(-1px);
+  }
+  .dl-live-dot::after {
+    animation: dl-live-ping 2s cubic-bezier(0, 0, 0.2, 1) infinite;
+  }
+}
+
+@keyframes dl-live-ping {
+  0% {
+    transform: scale(1);
+    opacity: 0.6;
+  }
+  75%,
+  100% {
+    transform: scale(2.5);
+    opacity: 0;
+  }
+}

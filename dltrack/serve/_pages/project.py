@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import dash
-from dash import dcc, html
+from dash import dcc
 
 from dltrack.models import constants
-from dltrack.serve._pages._simple_project_page import PAGE_PROJECT_ID
+from dltrack.serve._pages._simple_project_page import render_project_page
+
+if TYPE_CHECKING:
+    import dash_mantine_components as dmc
 
 
-def layout(project_id: str) -> list[html.Div | dcc.Store]:
+def layout(project_id: str) -> list[dmc.Container | dcc.Store]:
     return [
-        html.Div(id=PAGE_PROJECT_ID),
+        render_project_page(int(project_id)),
         dcc.Store(id=constants.STATE_PROJECT_ID, data=int(project_id)),
     ]
 

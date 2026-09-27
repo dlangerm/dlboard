@@ -72,7 +72,7 @@ def _create_project_and_experiment(page: Page, live_server_url: str, name: str) 
     page.goto(live_server_url)
     page.locator(f"#{NEW_PROJECT_NAME_ID}").fill(name)
     page.locator(f"#{NEW_PROJECT_BUTTON_ID}").click()
-    page.locator(".project-card", has_text=name).get_by_role("link", name="Open project").click()
+    page.get_by_role("link", name=name, exact=True).click()
 
     page.locator(f"#{NEW_EXP_NAME_ID}").fill(name)
     page.locator(f"#{NEW_EXP_BUTTON_ID}").click()
@@ -89,7 +89,7 @@ def test_logged_metrics_render_as_a_real_chart(
     none of which a Python-level test can see.
     """
     _create_project_and_experiment(page, live_server_url, "Browser Test Experiment")
-    page.get_by_role("link", name="Open experiment").click()
+    page.locator(".experiment-card").click()
 
     experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
     api = BasicDltrackAPI(live_server_url)
@@ -133,7 +133,7 @@ def test_slow_page_render_shows_a_loading_indicator(
         return fetch_hyperparams(experiment_id)
 
     monkeypatch.setattr(store, "fetch_hyperparams", slow_fetch_hyperparams)
-    page.get_by_role("link", name="Open experiment").click()
+    page.locator(".experiment-card").click()
 
     spinner = page.locator(f".{PAGE_LOADING_CLASS} .mantine-Loader-root")
     expect(spinner).to_be_visible()
@@ -154,7 +154,7 @@ def test_panel_header_hover_controls_toggle_and_delete_without_disturbing_siblin
     currently-open panel.
     """
     _create_project_and_experiment(page, live_server_url, "Panel Hover Controls Experiment")
-    page.get_by_role("link", name="Open experiment").click()
+    page.locator(".experiment-card").click()
 
     for panel_name in ("keep", "delete-me"):
         page.locator(f"#{NEW_PANEL_NAME_ID}").fill(panel_name)
@@ -222,19 +222,19 @@ def test_delete_experiment_and_restore_from_admin_trash(
     _create_project_and_experiment(page, live_server_url, "Delete Me Experiment")
 
     project_url = page.url
-    page.get_by_role("link", name="Open experiment").click()
+    page.locator(".experiment-card").click()
     page.get_by_role("button", name="Delete experiment").click()
     page.get_by_role("button", name="Delete", exact=True).click()
 
     expect(page).to_have_url(project_url)
-    expect(page.get_by_role("link", name="Open experiment")).to_have_count(0)
+    expect(page.locator(".experiment-card")).to_have_count(0)
 
     page.goto(f"{live_server_url}/admin")
     page.get_by_role("button", name="Restore").click()
     expect(page.get_by_role("button", name="Restore")).to_have_count(0)
 
     page.goto(project_url)
-    expect(page.get_by_role("link", name="Open experiment")).to_have_count(1)
+    expect(page.locator(".experiment-card")).to_have_count(1)
     assert console_errors == []
 
 
@@ -270,7 +270,7 @@ def test_drag_and_drop_reorders_panels(page: Page, live_server_url: str, console
     browser drag gesture or its `dragover`/`drop` event flow.
     """
     _create_project_and_experiment(page, live_server_url, "Drag Reorder Experiment")
-    page.get_by_role("link", name="Open experiment").click()
+    page.locator(".experiment-card").click()
 
     for panel_name in ("alpha", "beta", "gamma"):
         page.locator(f"#{NEW_PANEL_NAME_ID}").fill(panel_name)
@@ -318,7 +318,7 @@ def test_drag_and_drop_reorders_charts_within_a_panel(
     onto a sibling chart in the same panel reorders just those two, via `CHART_REORDER_STORE_ID`.
     """
     _create_project_and_experiment(page, live_server_url, "Drag Reorder Charts Experiment")
-    page.get_by_role("link", name="Open experiment").click()
+    page.locator(".experiment-card").click()
 
     experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
     api = BasicDltrackAPI(live_server_url)
@@ -376,7 +376,7 @@ def test_drag_and_drop_moves_a_chart_into_a_different_panel(
     body (appends).
     """
     _create_project_and_experiment(page, live_server_url, "Move Chart Between Panels Experiment")
-    page.get_by_role("link", name="Open experiment").click()
+    page.locator(".experiment-card").click()
 
     experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
     api = BasicDltrackAPI(live_server_url)
@@ -459,7 +459,7 @@ def test_navbar_columns_picker_applies_a_selected_column(
     not `console.error`) and that switching the grid's page size doesn't leave a phantom empty row.
     """
     _create_project_and_experiment(page, live_server_url, "Columns Picker Experiment")
-    page.get_by_role("link", name="Open experiment").click()
+    page.locator(".experiment-card").click()
     experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
 
     api = BasicDltrackAPI(live_server_url)
@@ -516,7 +516,7 @@ def test_assign_panel_to_a_new_tab_and_switch_back(
     rename both work, and it all survives a reload.
     """
     _create_project_and_experiment(page, live_server_url, "Panel Tabs Experiment")
-    page.get_by_role("link", name="Open experiment").click()
+    page.locator(".experiment-card").click()
 
     for panel_name in ("keep", "tabbed"):
         page.locator(f"#{NEW_PANEL_NAME_ID}").fill(panel_name)
@@ -605,7 +605,7 @@ def test_new_tab_without_panels_gets_an_empty_panel_that_accepts_a_dragged_chart
     chart you just dragged out of view on the tab you dragged it from.
     """
     _create_project_and_experiment(page, live_server_url, "Chart To Tab Experiment")
-    page.get_by_role("link", name="Open experiment").click()
+    page.locator(".experiment-card").click()
 
     experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
     api = BasicDltrackAPI(live_server_url)
@@ -674,7 +674,7 @@ def test_dragging_near_the_top_of_the_viewport_auto_scrolls_the_page(
     response, not of Playwright doing the scrolling for it.
     """
     _create_project_and_experiment(page, live_server_url, "Auto Scroll Experiment")
-    page.get_by_role("link", name="Open experiment").click()
+    page.locator(".experiment-card").click()
 
     page.locator(f"#{NEW_PANEL_NAME_ID}").fill("only-panel")
     page.locator(f"#{NEW_PANEL_ID}").click()
@@ -726,7 +726,7 @@ def test_panel_area_layout_is_not_squeezed_by_the_new_panel_controls(
     tabs themselves, not clear across the row next to the panel-name input.
     """
     _create_project_and_experiment(page, live_server_url, "Layout Regression Experiment")
-    page.get_by_role("link", name="Open experiment").click()
+    page.locator(".experiment-card").click()
 
     for panel_name in ("keep", "tabbed"):
         page.locator(f"#{NEW_PANEL_NAME_ID}").fill(panel_name)
@@ -785,7 +785,7 @@ def test_switching_tabs_does_not_remount_the_navbar_run_table(
     after, rather than counting requests or checking visible content.
     """
     _create_project_and_experiment(page, live_server_url, "Navbar Flicker Experiment")
-    page.get_by_role("link", name="Open experiment").click()
+    page.locator(".experiment-card").click()
 
     for panel_name in ("keep", "tabbed"):
         page.locator(f"#{NEW_PANEL_NAME_ID}").fill(panel_name)
@@ -834,7 +834,7 @@ def test_chart_tooltip_shows_every_series_at_every_hovered_x_position(
     (e.g. "step: 4 (2@step=3)") whenever a shown value was filled in from elsewhere.
     """
     _create_project_and_experiment(page, live_server_url, "Tooltip Consistency Experiment")
-    page.get_by_role("link", name="Open experiment").click()
+    page.locator(".experiment-card").click()
     experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
 
     api = BasicDltrackAPI(live_server_url)
@@ -925,7 +925,7 @@ def test_live_update_poll_shows_a_new_run_without_a_reload(
     regression this feature was built to avoid.
     """
     _create_project_and_experiment(page, live_server_url, "Live Update Experiment")
-    page.get_by_role("link", name="Open experiment").click()
+    page.locator(".experiment-card").click()
     experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
 
     api = BasicDltrackAPI(live_server_url)
@@ -993,7 +993,7 @@ def test_live_update_poll_patches_only_the_chart_whose_data_changed(
     one gets a real new node.
     """
     _create_project_and_experiment(page, live_server_url, "Chart Granularity Experiment")
-    page.get_by_role("link", name="Open experiment").click()
+    page.locator(".experiment-card").click()
     experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
 
     api = BasicDltrackAPI(live_server_url)
@@ -1049,7 +1049,7 @@ def test_live_update_toggle_pauses_polling_and_persists_across_reload(
     not the experiment's persisted `page_settings`, which every other viewer would then inherit.
     """
     _create_project_and_experiment(page, live_server_url, "Live Toggle Experiment")
-    page.get_by_role("link", name="Open experiment").click()
+    page.locator(".experiment-card").click()
     experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
 
     api = BasicDltrackAPI(live_server_url)
