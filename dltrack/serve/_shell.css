@@ -21,3 +21,20 @@
 .dl-tabular {
   font-variant-numeric: tabular-nums;
 }
+
+/* The brand mark in the header: the logo icon on a small primary-color gradient tile. */
+.dl-logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: var(--mantine-radius-md);
+  color: var(--mantine-color-white);
+  background: linear-gradient(135deg, var(--mantine-primary-color-4), var(--mantine-primary-color-8));
+  font-size: 1.125rem;
+}
+
+.dl-section-label {
+  letter-spacing: 0.04em;
+}

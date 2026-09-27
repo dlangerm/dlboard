@@ -24,7 +24,7 @@ from dltrack import models
 from dltrack.models import ButtonId, ModalId, StoreId, ValueId, constants
 from dltrack.plugins.charts._table_style import column_def, infer_column_dtype, themed_grid_kwargs
 from dltrack.serve import ClientsideScript, Icon, get_current_user, get_data_store, icon_cell_class
-from dltrack.serve._pages._dash_helpers import tooltipped_action_icon
+from dltrack.serve._pages._dash_helpers import section_label, tooltipped_action_icon
 from dltrack.serve._pages._experiment import _dataframe_helpers as dfh
 from dltrack.serve._pages._experiment import _experiment_page_state as core
 
@@ -206,7 +206,7 @@ def _render_hparam_panel(
         [
             dmc.Group(
                 [
-                    dmc.Text("Runs", size="xs", fw=600, style={"flex": 1}),
+                    section_label("Runs"),
                     dmc.Popover(
                         [
                             dmc.PopoverTarget(
@@ -257,6 +257,7 @@ def _render_hparam_panel(
                     Store(id=NAVBAR_HPARAM_APPLIED_COLS_ID, data=applied),
                 ],
                 align="center",
+                justify="space-between",
                 gap="xs",
                 wrap="nowrap",
             ),

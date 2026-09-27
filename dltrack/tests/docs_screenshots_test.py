@@ -62,6 +62,7 @@ class DocScreenshot(StrEnum):
     """Every screenshot the docs embed; the value is the PNG's name in `docs/images/`."""
 
     HOME = "home"
+    HOME_LIGHT = "home-light"
     PROJECT = "project"
     EXPERIMENT_CHARTS = "experiment-charts"
     IMAGE_SERIES = "image-series"
@@ -213,6 +214,13 @@ def _stage(shot: DocScreenshot, page: Page, demo: Demo) -> Page | Locator:
         case DocScreenshot.HOME:
             page.goto(demo.url)
             expect(page.locator(".project-card")).to_have_count(demo.n_projects)
+            return page
+        case DocScreenshot.HOME_LIGHT:
+            page.goto(demo.url)
+            expect(page.locator(".project-card")).to_have_count(demo.n_projects)
+            page.get_by_role("button", name="Toggle light/dark mode").click()
+            expect(page.locator("html")).to_have_attribute("data-mantine-color-scheme", "light")
+            page.mouse.move(0, _VIEWPORT["height"] - 1)  # off the toggle, so it isn't shown hovered
             return page
         case DocScreenshot.PROJECT:
             page.goto(f"{demo.url}/project/{demo.project_id}")
