@@ -17,6 +17,7 @@ from dltrack.serve._backend._theme import get_theme, set_theme
 from dltrack.serve._clientside_script import ClientsideScript
 from dltrack.serve._icons import Icon, icon, icon_cell_class
 from dltrack.serve._production_server import resolve_plugins, run_production_server
+from dltrack.serve._series import series_color
 from dltrack.serve._settings_env import set_setting_env
 from dltrack.serve.app import app
 
@@ -36,6 +37,7 @@ __all__ = [
     "icon_cell_class",
     "resolve_plugins",
     "run_production_server",
+    "series_color",
     "serve_asset",
     "set_artifact_store",
     "set_auth_provider",

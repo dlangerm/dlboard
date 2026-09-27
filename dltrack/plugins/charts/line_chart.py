@@ -11,9 +11,8 @@ import pandas as pd
 from pydantic import BaseModel, Field
 
 from dltrack.models import ChartType, ColumnKind, MetricColumn
-from dltrack.plugins.charts._colors import hash_color
 from dltrack.plugins.charts._sampling import DEFAULT_MAX_POINTS, shared_sample_grid
-from dltrack.serve import AssetKind, serve_asset
+from dltrack.serve import AssetKind, series_color, serve_asset
 
 if typing.TYPE_CHECKING:
     from dash import Dash
@@ -195,7 +194,7 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.LineChart], froze
                 {
                     "name": str(run_id),
                     "label": f"Run {run_id}",
-                    "color": hash_color(int(run_id)),
+                    "color": series_color(int(run_id)),
                 }
                 for run_id in run_ids
             ],  # pyright: ignore[reportArgumentType]

@@ -1,11 +1,34 @@
 /* The core app shell's own styles: structure, plus the `--dl-*` CSS variables the core app owns.
-   Values here are neutral defaults -- a theme plugin overrides any `--dl-*` variable in its own
-   stylesheet (see `dltrack/plugins/themes/default.css`). */
+   Their values here are neutral defaults, declared inside `:where(...)` (zero specificity) so a
+   theme plugin's own stylesheet overrides any of them without depending on load order (see
+   `dltrack/plugins/themes/default.css`). */
 
-:root {
+:where(:root) {
   /* The main area's background, behind cards and panels. */
   --dl-canvas: var(--mantine-color-body);
+  /* Series colors (`dltrack.serve.series_color`), in this order. Chosen and ordered so adjacent
+     slots stay distinguishable under common color-vision deficiencies. */
+  --dl-series-1: #2a78d6;
+  --dl-series-2: #eb6834;
+  --dl-series-3: #1baf7a;
+  --dl-series-4: #eda100;
+  --dl-series-5: #e87ba4;
+  --dl-series-6: #008300;
+  --dl-series-7: #4a3aa7;
+  --dl-series-8: #e34948;
   scrollbar-color: var(--mantine-color-default-border) transparent;
+}
+
+/* The same hues, stepped for a dark surface. */
+:where(:root[data-mantine-color-scheme="dark"]) {
+  --dl-series-1: #3987e5;
+  --dl-series-2: #d95926;
+  --dl-series-3: #199e70;
+  --dl-series-4: #c98500;
+  --dl-series-5: #d55181;
+  --dl-series-6: #008300;
+  --dl-series-7: #9085e9;
+  --dl-series-8: #e66767;
 }
 
 * {

@@ -814,6 +814,43 @@ def test_switching_tabs_does_not_remount_the_navbar_run_table(
     assert console_errors == []
 
 
+def test_each_run_is_drawn_in_its_own_palette_color(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """
+    Runs are colored by `series_color` -- CSS variables, not literal colors -- so this checks the
+    part a Python test can't: that the variables actually resolve through Recharts' SVG to real,
+    distinct stroke colors, one per run.
+    """
+    _create_project_and_experiment(page, live_server_url, "Palette Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    api = BasicDltrackAPI(live_server_url)
+    for _ in range(3):
+        run = api.create_run(models.NewRun(experiment_id=experiment_id))
+        api.log_metric_batch(
+            [
+                models.LoggedMetrics(
+                    experiment_id=experiment_id,
+                    run_id=run.id,
+                    step=step,
+                    metrics={"loss": 1.0 / (step + 1)},
+                    timestamp_utc=pendulum.now("UTC"),
+                )
+                for step in range(3)
+            ]
+        )
+    page.reload()
+    page.get_by_role("button", name="Auto-generate charts").click()
+
+    curves = page.locator(".dl-panel-body .recharts-line-curve")
+    expect(curves).to_have_count(3)
+    strokes = curves.evaluate_all("paths => paths.map(p => getComputedStyle(p).stroke)")
+    assert len(set(strokes)) == 3
+    assert all(stroke.startswith("rgb(") for stroke in strokes), strokes
+    assert console_errors == []
+
+
 def test_chart_tooltip_shows_every_series_at_every_hovered_x_position(
     page: Page, live_server_url: str, console_errors: list[str]
 ) -> None:
