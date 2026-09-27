@@ -70,6 +70,7 @@ class DocScreenshot(StrEnum):
     HOME = "home"
     HOME_LIGHT = "home-light"
     PROJECT = "project"
+    JUMP_PALETTE = "jump-palette"
     EXPERIMENT_CHARTS = "experiment-charts"
     IMAGE_SERIES = "image-series"
 
@@ -234,6 +235,13 @@ def _stage(shot: DocScreenshot, page: Page, demo: Demo) -> Page | Locator:
         case DocScreenshot.PROJECT:
             page.goto(f"{demo.url}/project/{demo.project_id}")
             expect(page.locator(".experiment-card")).to_have_count(demo.n_experiments)
+            return page
+        case DocScreenshot.JUMP_PALETTE:
+            page.goto(demo.url)
+            expect(page.locator(".project-card")).to_have_count(demo.n_projects)
+            page.keyboard.press("Control+K")
+            page.locator("#jump-select").press_sequentially("lr")
+            expect(page.get_by_role("option", name=_EXPERIMENT_NAME)).to_be_visible()
             return page
         case DocScreenshot.EXPERIMENT_CHARTS:
             _open_charted_experiment(page, demo)

@@ -21,6 +21,7 @@ from dltrack.serve._backend._installed_plugins import set_installed_plugins
 from dltrack.serve._backend._theme import get_theme
 from dltrack.serve._clientside_script import ClientsideScript
 from dltrack.serve._icons import Icon, icon, install_icons
+from dltrack.serve._jump import install_jump, jump_modal, jump_trigger
 from dltrack.serve._pages._dash_helpers import section_label
 
 if TYPE_CHECKING:
@@ -80,6 +81,7 @@ def app(plugins: list[models.PluginProtocol]) -> Dash:
     for kind, path in _ASSETS:
         serve_asset(_app, kind, path.name, path.read_bytes())
     install_icons(_app)
+    install_jump(_app)
     # Pure client-side: whether the navbar shows at all only depends on the URL, and its
     # collapsed/width state lives in localStorage -- neither needs the server.
     _app.clientside_callback(  # pyright: ignore[reportUnknownMemberType]
@@ -162,6 +164,7 @@ def _layout(theme: ThemeSpec) -> dmc.MantineProvider:
                         ),
                         dmc.Group(
                             [
+                                jump_trigger(),
                                 dmc.ColorSchemeToggle(
                                     lightIcon=icon(Icon.LIGHT_MODE, size="1.125rem"),
                                     darkIcon=icon(Icon.DARK_MODE, size="1.125rem"),
@@ -222,6 +225,7 @@ def _layout(theme: ThemeSpec) -> dmc.MantineProvider:
                 className="dl-app-main",
             ),
             dcc.Location(id=constants.LOCATION_ID, refresh=False),
+            jump_modal(),
             Store(id=constants.NAVBAR_COLLAPSED_STORE_ID, data=False, storage_type="local"),
             Store(id=constants.NAVBAR_WIDTH_STORE_ID, data=_DEFAULT_NAVBAR_WIDTH, storage_type="local"),
         ],

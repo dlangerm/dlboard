@@ -16,6 +16,8 @@ Browse projects and their experiments, compare runs side by side, and step throu
 
 ![A project and its experiments](docs/images/project.png)
 
+![The Ctrl+K jump palette, open and matching an experiment by name](docs/images/jump-palette.png)
+
 ![A confusion matrix logged at each step, one image per run](docs/images/image-series.png)
 
 ## Running it
