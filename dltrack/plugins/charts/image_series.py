@@ -18,7 +18,7 @@ from structlog.stdlib import get_logger
 
 from dltrack.models import ChartType, ColumnKind
 from dltrack.plugins.charts._table_style import artifact_column, artifact_tags_column
-from dltrack.serve import ClientsideScript
+from dltrack.serve import ClientsideScript, series_swatch_class
 
 PAGE_SIZE = 6
 GRID_COLS = 3
@@ -164,7 +164,7 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
                 style=thumb_style,
             )
             children = [
-                dmc.Text(f"Run {rid}", size="sm", fw=600),
+                dmc.Text(f"Run {rid}", size="sm", fw=600, className=series_swatch_class(int(rid))),
                 html.Div(
                     image,
                     id={"type": "image-series-thumb", "instance": inst, "run": str(rid)},

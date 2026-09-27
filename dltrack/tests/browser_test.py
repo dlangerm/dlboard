@@ -811,13 +811,14 @@ def test_switching_tabs_does_not_remount_the_navbar_run_table(
     assert console_errors == []
 
 
-def test_each_run_is_drawn_in_its_own_palette_color(
+def test_each_run_is_drawn_in_its_own_palette_color_matching_its_run_table_swatch(
     page: Page, live_server_url: str, console_errors: list[str]
 ) -> None:
     """
     Runs are colored by `series_color` -- CSS variables, not literal colors -- so this checks the
     part a Python test can't: that the variables actually resolve through Recharts' SVG to real,
-    distinct stroke colors, one per run.
+    distinct stroke colors, one per run -- and that the navbar run table labels each run with the
+    very same color, so it reads as the charts' legend.
     """
     _create_project_and_experiment(page, live_server_url, "Palette Experiment")
     page.locator(".experiment-card").click()
@@ -845,6 +846,12 @@ def test_each_run_is_drawn_in_its_own_palette_color(
     strokes = curves.evaluate_all("paths => paths.map(p => getComputedStyle(p).stroke)")
     assert len(set(strokes)) == 3
     assert all(stroke.startswith("rgb(") for stroke in strokes), strokes
+    swatch_cells = page.locator(f"#{NAVBAR_HPARAM_DATATABLE_ID} .dl-swatch")
+    expect(swatch_cells).to_have_count(3)
+    swatches = swatch_cells.evaluate_all(
+        "cells => cells.map(c => getComputedStyle(c, '::before').backgroundColor)"
+    )
+    assert sorted(swatches) == sorted(strokes)
     assert console_errors == []
 
 

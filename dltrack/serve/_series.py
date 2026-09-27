@@ -22,3 +22,13 @@ def series_color(index: int) -> str:
     created one after another (a sweep) get distinct colors rather than colliding.
     """
     return f"var(--dl-series-{index % SERIES_SLOTS + 1})"
+
+
+def series_swatch_class(index: int) -> str:
+    """
+    A class that draws a small dot in `series_color(index)` before an element's content.
+
+    For labeling a run with its color where a chart legend isn't -- the run table, image captions --
+    and usable anywhere a class name is (an ag-grid `cellClass`, not just a Dash component).
+    """
+    return f"dl-swatch dl-swatch-{index % SERIES_SLOTS + 1}"
