@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from dltrack import models
 from dltrack.conftest import find_props
-from dltrack.plugins.themes import dark
+from dltrack.plugins.themes import default
 from dltrack.serve._pages import _simple_admin_page as admin
 
 if TYPE_CHECKING:
@@ -154,12 +154,12 @@ def test_render_about_lists_installed_plugins(store: SQLLiteStore) -> None:
     admin_user = store.get_or_create_user("admin")
     # `admin` (the page module under test) is no longer a `PluginProtocol` -- the page move made
     # page layout non-optional dltrack behavior rather than a plugin, so `describe()` needs a real
-    # plugin here instead. Any real plugin module works; `dark` is the smallest one.
-    plugin = models.InstalledPlugin.describe(dark)
+    # plugin here instead. Any real plugin module works; `default` (the theme) is a small one.
+    plugin = models.InstalledPlugin.describe(default)
 
     rendered = admin._render_about(store, admin_user, "AnonymousAuthProvider", [plugin])
 
-    assert "dltrack.plugins.themes.dark" in str(rendered)
+    assert "dltrack.plugins.themes.default" in str(rendered)
 
 
 def test_admin_layout_contains_tabs_and_purge_modal() -> None:

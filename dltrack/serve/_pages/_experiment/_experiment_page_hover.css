@@ -36,7 +36,7 @@
    chart doesn't say which *side* of it the drop lands on, a line between two items does. */
 .dl-panel-drop-indicator, .dl-chart-drop-indicator {
   position: fixed;
-  background: var(--mantine-color-blue-5);
+  background: var(--mantine-primary-color-filled);
   border-radius: 2px;
   pointer-events: none;
   z-index: 1000;
@@ -53,7 +53,7 @@
    during an HTML5 drag). Dropping a chart onto a *different* panel's empty body (`.dl-panel-body`)
    appends it there the same way, so it gets the same treatment. */
 .dl-tab-drop-target, .dl-panel-body-drop-target {
-  background: var(--mantine-color-blue-light);
+  background: var(--mantine-primary-color-light);
 }
 
 /* An empty panel's body has no chart to give it any height, so without this it collapses to 0px --

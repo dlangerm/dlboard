@@ -31,7 +31,7 @@ LOCAL_DEPLOYMENT: list[PluginProtocol] = [
 # built inline in `dltrack._cli`) so `local`'s target is a real, publicly importable
 # `list[PluginProtocol]`, resolved the exact same way a `dltrack serve custom --plugins ...`
 # deployment resolves its own.
-LOCAL_DEPLOYMENT_DEFAULT: list[PluginProtocol] = [*LOCAL_DEPLOYMENT, themes.dark]
+LOCAL_DEPLOYMENT_DEFAULT: list[PluginProtocol] = [*LOCAL_DEPLOYMENT, themes.default]
 
 __all__ = [
     "BUILTIN_BACKEND",

@@ -1,5 +1,5 @@
 """All default themes."""
 
-from dltrack.plugins.themes import dark
+from dltrack.plugins.themes import default
 
-__all__ = ["dark"]
+__all__ = ["default"]

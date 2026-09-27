@@ -37,7 +37,7 @@ class _FollowTheOsTheme:
 @pytest.mark.parametrize(
     ("theme_plugins", "scheme", "primary_color"),
     [
-        pytest.param([themes.dark], ColorScheme.DARK, "teal", id="built-in-dark"),
+        pytest.param([themes.default], ColorScheme.DARK, "brand", id="built-in"),
         pytest.param([_FollowTheOsTheme], ColorScheme.AUTO, None, id="custom"),
         pytest.param([], ColorScheme.LIGHT, None, id="no-theme-plugin"),
     ],

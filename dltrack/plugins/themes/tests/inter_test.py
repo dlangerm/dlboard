@@ -6,16 +6,16 @@ import re
 
 from dash import Dash, html
 
-from dltrack.plugins.themes import dark
+from dltrack.plugins.themes import default
 
 _WOFF2_MAGIC = b"wOF2"
 
 
-def test_the_dark_theme_serves_the_inter_it_asks_for() -> None:
+def test_the_default_theme_serves_the_inter_it_asks_for() -> None:
     """Follow the links a browser would: page -> the `@font-face` stylesheet -> the woff2 it names."""
     app = Dash(__name__)
     app.layout = html.Div()
-    dark.plug(app)
+    default.plug(app)
     client = app.server.test_client()
 
     page = client.get("/").get_data(as_text=True)

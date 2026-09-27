@@ -30,7 +30,11 @@ if TYPE_CHECKING:
 
 _log = get_logger(__name__)
 
-_NAVBAR_RESIZE_JS_PATH = Path(__file__).with_name("navbar_resize.js")
+_ASSETS = [
+    # The navbar drag-to-resize handle.
+    (AssetKind.SCRIPT, Path(__file__).with_name("navbar_resize.js")),
+    (AssetKind.STYLESHEET, Path(__file__).with_name("_shell.css")),
+]
 _COLOR_SCHEME_PRELOAD_JS = Path(__file__).with_name("color_scheme_preload.js").read_text()
 _DEFAULT_NAVBAR_WIDTH = 300
 _MIN_NAVBAR_WIDTH = 260
@@ -71,8 +75,8 @@ def app(plugins: list[models.PluginProtocol]) -> Dash:
     # modules/objects themselves, so introspecting this later (the admin page's About tab) can't
     # reach back into a plugin's own state.
     set_installed_plugins(_app, installed)
-    # The navbar drag-to-resize handle.
-    serve_asset(_app, AssetKind.SCRIPT, _NAVBAR_RESIZE_JS_PATH.name, _NAVBAR_RESIZE_JS_PATH.read_bytes())
+    for kind, path in _ASSETS:
+        serve_asset(_app, kind, path.name, path.read_bytes())
     # A theme plugin's `plug()` has already run by now (inside `Dash(...)` above), so its theme
     # goes straight into the first response -- no callback, no flash of an unthemed page.
     theme = get_theme(_app)
@@ -162,7 +166,8 @@ def _layout(theme: ThemeSpec) -> dmc.MantineProvider:
                     delay_show=250,
                     custom_spinner=dmc.Loader(size="lg"),
                     parent_className=PAGE_LOADING_CLASS,
-                )
+                ),
+                className="dl-app-main",
             ),
             dcc.Location(id=constants.LOCATION_ID, refresh=False),
             Store(id=constants.NAVBAR_COLLAPSED_STORE_ID, data=False, storage_type="local"),
