@@ -48,6 +48,10 @@ class DataStore[**P](typing.Protocol):
         """Get all projects."""
         ...
 
+    def get_project_stats(self) -> dict[int, models.ProjectStats]:
+        """Every (non-deleted) project's activity, keyed by project id -- in one read, for a listing."""
+        ...
+
     def update_project(self, project: models.Project) -> models.Project:
         """Update a project."""
         ...
@@ -77,6 +81,10 @@ class DataStore[**P](typing.Protocol):
 
     def get_experiments(self, project_id: int) -> typing.Iterator[models.Experiment]:
         """Get all experiments for a project."""
+        ...
+
+    def get_experiment_stats(self, project_id: int) -> dict[int, models.ActivityStats]:
+        """Each of a project's (non-deleted) experiments' activity, keyed by experiment id -- in one read."""
         ...
 
     def update_experiment(self, experiment: models.Experiment) -> models.Experiment:
