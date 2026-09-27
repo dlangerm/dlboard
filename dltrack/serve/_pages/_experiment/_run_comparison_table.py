@@ -23,7 +23,14 @@ from structlog.stdlib import get_logger
 from dltrack import models
 from dltrack.models import ButtonId, ModalId, StoreId, ValueId, constants
 from dltrack.plugins.charts._table_style import column_def, infer_column_dtype, themed_grid_kwargs
-from dltrack.serve import ClientsideScript, Icon, get_current_user, get_data_store, icon_cell_class
+from dltrack.serve import (
+    ClientsideScript,
+    Icon,
+    get_current_user,
+    get_data_store,
+    icon_cell_class,
+    series_swatch_class,
+)
 from dltrack.serve._pages._dash_helpers import section_label, tooltipped_action_icon
 from dltrack.serve._pages._experiment import _dataframe_helpers as dfh
 from dltrack.serve._pages._experiment import _experiment_page_state as core
@@ -45,6 +52,7 @@ _ROW_HEIGHT = 34
 _MAX_TABLE_HEIGHT = "50vh"
 _DELETE_COLUMN_ID = "_delete"
 _ROW_ID_FIELD = "_row_id"
+_SWATCH_FIELD = "_swatch"
 
 SELECTED_HPARAM_COLS_KEY: typing.Final = "hparam-table-selected"  # a page_settings dict key
 
@@ -143,7 +151,15 @@ def _build_hparam_datatable(
     *,
     table_id: str,
 ) -> dag.AgGrid:
-    column_defs: list[dict[str, Any]] = [{"field": "run_name", "headerName": "Run", "sortable": True}]
+    column_defs: list[dict[str, Any]] = [
+        {
+            "field": "run_name",
+            "headerName": "Run",
+            "sortable": True,
+            # Each run's chart color as a dot before its name, so this table doubles as the legend.
+            "cellClass": {"function": f"params.data.{_SWATCH_FIELD}"},
+        }
+    ]
     column_defs.extend(column_def(str(key), infer_column_dtype(rows, str(key))) for key in selected)
     column_defs.append(
         {
@@ -158,7 +174,10 @@ def _build_hparam_datatable(
     )
 
     selected_ids = [str(row["run_id"]) for row in rows if row["run_id"] not in excluded]
-    data = [{**row, _ROW_ID_FIELD: str(row["run_id"])} for row in rows]
+    data = [
+        {**row, _ROW_ID_FIELD: str(row["run_id"]), _SWATCH_FIELD: series_swatch_class(int(row["run_id"]))}
+        for row in rows
+    ]
 
     # Sized to fit its rows (header included, and room for the empty-table overlay), up to a cap
     # past which it scrolls -- and since it isn't `autoHeight`, ag-grid then only renders the rows

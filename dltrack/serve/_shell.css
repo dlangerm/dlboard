@@ -145,3 +145,40 @@
 .dl-run-table .ag-row-focus .dl-icon-cell::before {
   opacity: 1;
 }
+
+/* A run's color as a small dot before its name (`dltrack.serve.series_swatch_class`). */
+.dl-swatch::before {
+  content: "";
+  display: inline-block;
+  flex-shrink: 0;
+  width: 0.625rem;
+  height: 0.625rem;
+  margin-right: 0.5rem;
+  border-radius: 50%;
+  vertical-align: baseline;
+  background-color: var(--dl-swatch);
+}
+.dl-swatch-1 {
+  --dl-swatch: var(--dl-series-1);
+}
+.dl-swatch-2 {
+  --dl-swatch: var(--dl-series-2);
+}
+.dl-swatch-3 {
+  --dl-swatch: var(--dl-series-3);
+}
+.dl-swatch-4 {
+  --dl-swatch: var(--dl-series-4);
+}
+.dl-swatch-5 {
+  --dl-swatch: var(--dl-series-5);
+}
+.dl-swatch-6 {
+  --dl-swatch: var(--dl-series-6);
+}
+.dl-swatch-7 {
+  --dl-swatch: var(--dl-series-7);
+}
+.dl-swatch-8 {
+  --dl-swatch: var(--dl-series-8);
+}
