@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 import pytest
 
@@ -14,6 +14,8 @@ if TYPE_CHECKING:
 
 
 class _FakeAuthProvider:
+    display_name: ClassVar[str] = "Fake"
+
     def __init__(self, identity: str | None) -> None:
         self._identity = identity
 

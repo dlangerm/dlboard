@@ -19,6 +19,9 @@ import typing
 class AuthProvider[**P](typing.Protocol):
     """Resolves who is making the current request/callback."""
 
+    display_name: typing.ClassVar[str]
+    """How the app names this sign-in mechanism to a person, e.g. "Anonymous" or "Google SSO"."""
+
     @classmethod
     def get_or_create(cls, *args: P.args, **kwargs: P.kwargs) -> typing.Self:
         """Initialize an auth provider."""

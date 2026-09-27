@@ -9,7 +9,7 @@ A deployment that wants real login/session/approval flows swaps this plugin out 
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, ClassVar, Final
 
 from flask import has_request_context, request
 from structlog.stdlib import get_logger
@@ -38,6 +38,8 @@ class AnonymousAuthProvider:
     The header covers REST calls; the server's own best-effort environment/OS-login chain covers
     in-process Dash callbacks, which have no header to read.
     """
+
+    display_name: ClassVar[str] = "Anonymous"
 
     def resolve_identity(self) -> str | None:
         """Resolve identity from the request header, falling back to the server's own environment."""

@@ -12,6 +12,8 @@ Browse projects and their experiments, compare runs side by side, and step throu
 
 ![The projects page](docs/images/home.png)
 
+![The projects page, in light mode](docs/images/home-light.png)
+
 ![A project and its experiments](docs/images/project.png)
 
 ![A confusion matrix logged at each step, one image per run](docs/images/image-series.png)

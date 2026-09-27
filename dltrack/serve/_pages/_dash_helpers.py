@@ -49,6 +49,11 @@ def tooltipped_action_icon(  # noqa: PLR0913
     )
 
 
+def section_label(text: str) -> dmc.Text:
+    """A small, quiet uppercase heading that groups a list (the navbar's Experiments, Runs, ...)."""
+    return dmc.Text(text, size="xs", fw=600, c="dimmed", tt="uppercase", className="dl-section-label")
+
+
 def require_triggered_id() -> Any:  # noqa: ANN401
     """
     Return `ctx.triggered_id`, or raise `PreventUpdate` if nothing meaningfully triggered.
