@@ -1,5 +1,6 @@
 """All exported data models."""
 
+from dltrack.models._activity import ActivityStats, ProjectStats
 from dltrack.models._artifact import AnyArtifact, Artifact, NewArtifact
 from dltrack.models._artifact_purge_task import ArtifactPurgeTask, NewArtifactPurgeTask
 from dltrack.models._audit_log import AuditAction, AuditLogEntry, EntityType, NewAuditLogEntry
@@ -44,6 +45,7 @@ from dltrack.models._view import (
 )
 
 __all__ = [
+    "ActivityStats",
     "AnyArtifact",
     "AppShell",
     "Artifact",
@@ -88,6 +90,7 @@ __all__ = [
     "ParameterFieldType",
     "PluginProtocol",
     "Project",
+    "ProjectStats",
     "Run",
     "SchemeColors",
     "Scope",

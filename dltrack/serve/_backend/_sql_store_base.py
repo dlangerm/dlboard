@@ -309,7 +309,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
 
     def _touch_experiment(self, experiment_id: int) -> None:
         """
-        Bump an experiment's `revision` counter after a mutation visible on its page.
+        Bump an experiment's `revision` counter (and `last_activity_at`) after a mutation visible on its page.
 
         A second statement after the write's own commit, not folded into one transaction with it --
         self-healing (the next write to this experiment bumps it again), so the narrow window where
@@ -318,10 +318,42 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         """
         list(
             self._execute_raw_sql(
-                f"UPDATE {models.Experiment.__name__} SET revision = revision + 1 WHERE id = :id",
-                {"id": experiment_id},
+                f"UPDATE {models.Experiment.__name__} "
+                "SET revision = revision + 1, last_activity_at = :now WHERE id = :id",
+                {"id": experiment_id, "now": pendulum.now(pendulum.UTC).isoformat()},
             )
         )
+
+    def _activity_rows(self, group_by: str, where: str, values: dict[str, Any]) -> Iterator[tuple[Any, ...]]:
+        """`(group id, experiment count, run count, last activity)` per `group_by`, non-deleted rows only."""
+        return self._execute_raw_sql(
+            f"""
+            SELECT {group_by}, COUNT(DISTINCT e.id), COUNT(r.id), MAX(e.last_activity_at)
+            FROM {models.Project.__name__} p
+            JOIN {models.Experiment.__name__} e ON e.project_id = p.id AND e.deleted_at IS NULL
+            LEFT JOIN {models.Run.__name__} r ON r.experiment_id = e.id AND r.deleted_at IS NULL
+            WHERE p.deleted_at IS NULL {where}
+            GROUP BY {group_by};
+            """,
+            values,
+        )
+
+    def get_project_stats(self) -> dict[int, models.ProjectStats]:
+        """Every (non-deleted) project's activity; a project with no experiments is simply absent."""
+        return {
+            project_id: models.ProjectStats(
+                experiment_count=experiments, run_count=runs, last_activity_at=last_activity
+            )
+            for project_id, experiments, runs, last_activity in self._activity_rows("p.id", "", {})
+        }
+
+    def get_experiment_stats(self, project_id: int) -> dict[int, models.ActivityStats]:
+        """Each of a project's (non-deleted) experiments' activity, keyed by experiment id."""
+        rows = self._activity_rows("e.id", "AND p.id = :project_id", {"project_id": project_id})
+        return {
+            experiment_id: models.ActivityStats(run_count=runs, last_activity_at=last_activity)
+            for experiment_id, _experiments, runs, last_activity in rows
+        }
 
     def get_or_create_user(self, username: str) -> models.User:
         """

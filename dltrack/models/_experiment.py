@@ -53,6 +53,15 @@ class Experiment(NewExperiment, frozen=True, extra="forbid"):
     mutation to support live updates.
     """
 
+    last_activity_at: AwareDatetime | None = None
+    """
+    Server time of the most recent write that bumped `revision`, or `None` if there hasn't been one.
+
+    Server-managed, like `revision`, and stamped by the server's own clock rather than taken from
+    logged metrics' client-supplied timestamps -- so "active 2m ago" means data actually arrived 2m
+    ago, even from a client replaying an old run.
+    """
+
     deleted_by: int | None = None
     """The user who soft-deleted this experiment, if it's been deleted."""
 
