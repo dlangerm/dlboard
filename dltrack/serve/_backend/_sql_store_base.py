@@ -194,6 +194,34 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
                 )
             )
         )
+        # At most one *shared* page (owner_id NULL) per scope -- exactly what `get_or_create_page`
+        # relies on to make its own check-then-insert race-safe (see its own docstring). A database
+        # that already has duplicates from hitting that race before this index existed would
+        # otherwise fail to open at all (SQLite validates a new unique index against existing rows
+        # on creation) -- clear those out first, keeping the earliest one (the one `ORDER BY id
+        # LIMIT 1` -- what `get_or_create_page` itself reads -- always used to pick anyway).
+        for scope_field in ("run_id", "experiment_id", "project_id"):
+            list(
+                self._execute_raw_sql(f"""
+                    DELETE FROM {models.Page.__name__}
+                    WHERE owner_id IS NULL AND {scope_field} IS NOT NULL AND id NOT IN (
+                        SELECT MIN(id) FROM {models.Page.__name__}
+                        WHERE owner_id IS NULL AND {scope_field} IS NOT NULL
+                        GROUP BY {scope_field}
+                    );
+                """)
+            )
+            list(
+                self._execute_raw_sql(
+                    sql.create_index_sql(
+                        models.Page,
+                        [scope_field],
+                        index_name=f"idx_Page_shared_{scope_field}",
+                        unique=True,
+                        where="owner_id IS NULL",
+                    )
+                )
+            )
 
     def _add_missing_columns(self, table: type[BaseModel]) -> None:
         """
@@ -643,29 +671,28 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         new_page_type: type[models.NewPage[D, C]] | None = None,
     ) -> models.Page[D, P, C]:
         field, value = _resolve_page_scope(run_id=run_id, experiment_id=experiment_id, project_id=project_id)
+        select_statement = (
+            f"SELECT {sql.select_columns_sql(models.Page)} FROM {models.Page.__name__} "
+            f"WHERE {field} = :value AND owner_id IS NULL ORDER BY id LIMIT 1;"
+        )
         # The shared page only: every named view of it (`owner_id` set) is its own `Page` row with
         # the same scope, reached through `get_view` instead.
-        for row in self._execute_sql_query(
-            page_type,
-            f"SELECT {sql.select_columns_sql(models.Page)} FROM {models.Page.__name__} "
-            f"WHERE {field} = :value AND owner_id IS NULL ORDER BY id LIMIT 1;",
-            {"value": value},
-        ):
+        for row in self._execute_sql_query(page_type, select_statement, {"value": value}):
             return row
 
         _log.warning("Inserting new page model for %s = %s", field, value)
-        statement, values = sql.insert(
+        # `INSERT OR IGNORE`, then re-select -- exactly `get_or_create_user`'s own pattern, and for
+        # the same reason: two callers racing the check above (e.g. a page load and a script both
+        # reaching the same brand-new experiment before either has created its shared page) would
+        # otherwise both insert one, leaving two "the" shared pages for one scope. The partial
+        # unique index on {field} WHERE owner_id IS NULL (this class's own `__init__`) turns the
+        # loser's insert into a no-op instead, and the re-select returns whichever one actually won.
+        insert_statement, insert_values = sql.insert_or_ignore(
             models.Page,
             (new_page_type or models.NewPage[D, C])(**{field: value}),  # pyright: ignore[reportArgumentType]
         )
-
-        return self._first_committed_row(
-            self._execute_sql_query(
-                page_type,
-                statement,
-                values,
-            )
-        )
+        list(self._execute_sql_query(page_type, insert_statement, insert_values))
+        return next(self._execute_sql_query(page_type, select_statement, {"value": value}))
 
     def create_view[D, P, C](
         self, page_type: type[models.Page[D, P, C]], view: models.NewPage[D, C]

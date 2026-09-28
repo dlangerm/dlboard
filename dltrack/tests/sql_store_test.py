@@ -8,8 +8,9 @@ Covers the sql generation/escaping/decoding in `_sql.py` and the CRUD flows in
 from __future__ import annotations
 
 import sqlite3
+import threading
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
@@ -424,6 +425,67 @@ def test_get_or_create_page_is_idempotent_and_updatable(store: SQLLiteStore, exp
     assert [p.name for p in reloaded.panels] == ["metrics"]
     assert reloaded.page_settings == {"open_panel": ["metrics"]}
     assert stored.id == page.id
+
+
+def _shared_page_count(store: SQLLiteStore, experiment_id: int) -> int:
+    (count,) = next(
+        store._execute_raw_sql(
+            "SELECT count(*) FROM Page WHERE experiment_id = :experiment_id AND owner_id IS NULL",
+            {"experiment_id": experiment_id},
+        )
+    )
+    return cast("int", count)
+
+
+def test_get_or_create_page_rejects_a_second_shared_page_for_one_experiment(
+    store: SQLLiteStore, experiment_id: int
+) -> None:
+    """
+    `get_or_create_page`'s check-then-insert used to race: two callers that both find no shared
+    page yet (e.g. a page load and a script reaching the same brand-new experiment at once) could
+    each insert one, leaving two "the" shared pages for one experiment -- reached at random
+    depending on which query happened to run first. The partial unique index this now relies on is
+    what actually prevents that; proven directly here, bypassing `get_or_create_page` itself to
+    insert the second one exactly as a genuinely racing caller would, since reproducing the
+    original interleaving deterministically would need real concurrent threads.
+    """
+    first = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
+
+    with pytest.raises(sqlite3.IntegrityError):
+        list(
+            store._execute_raw_sql(
+                "INSERT INTO Page "
+                "(run_id, experiment_id, project_id, owner_id, name, panels, page_settings, id) "
+                "VALUES (NULL, :experiment_id, NULL, NULL, '', '[]', '{}', NULL);",
+                {"experiment_id": experiment_id},
+            )
+        )
+
+    assert _shared_page_count(store, experiment_id) == 1
+    assert store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id).id == first.id
+
+
+def test_concurrent_get_or_create_page_converges_on_one_shared_page(
+    store: SQLLiteStore, experiment_id: int
+) -> None:
+    """Same race as above, but the real thing: many threads racing a brand-new experiment at once."""
+    page_ids: list[int] = []
+    lock = threading.Lock()
+
+    def _call() -> None:
+        page = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
+        with lock:
+            page_ids.append(page.id)
+
+    threads = [threading.Thread(target=_call) for _ in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert len(page_ids) == 8
+    assert len(set(page_ids)) == 1
+    assert _shared_page_count(store, experiment_id) == 1
 
 
 def test_experiment_revision_starts_at_zero(store: SQLLiteStore, experiment_id: int) -> None:
