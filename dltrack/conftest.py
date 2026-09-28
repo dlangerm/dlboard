@@ -15,9 +15,10 @@ from dltrack import models
 from dltrack.plugins import BUILTIN_BACKEND, LOCAL_AUTH, LOCAL_STORAGE
 from dltrack.plugins.data_stores.sqlite import SQLLiteStore
 from dltrack.serve import app as build_app
+from dltrack.serve._backend import _auth
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
     from pathlib import Path
 
 
@@ -85,6 +86,33 @@ def experiment_id(store: SQLLiteStore) -> int:
 def admin(store: SQLLiteStore) -> models.User:
     """The bootstrap admin -- the first user any fresh store creates gets `Scope.ALL`."""
     return store.get_or_create_user("admin")
+
+
+class _FakeAuthProvider:
+    """Resolves to whatever identity it was built with -- `resolve_identity` is all `sign_in_as` needs."""
+
+    def __init__(self, identity: str) -> None:
+        self._identity = identity
+
+    def resolve_identity(self) -> str:
+        return self._identity
+
+
+@pytest.fixture
+def sign_in_as(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], None]:
+    """
+    Make `get_current_user` resolve to `username` for the rest of this test, outside a real Dash app.
+
+    A bare call to `get_current_user`/`get_auth_provider` needs a running app (`dash.get_app()`),
+    which most unit tests in this suite never build -- this monkeypatches the one thing it actually
+    calls instead. Call the returned setter again with a different name to switch identities
+    mid-test (e.g. to simulate two different people editing the same page).
+    """
+
+    def _sign_in(username: str) -> None:
+        monkeypatch.setattr(_auth, "get_auth_provider", lambda: _FakeAuthProvider(username))
+
+    return _sign_in
 
 
 class EntityChain(typing.NamedTuple):

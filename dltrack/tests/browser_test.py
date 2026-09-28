@@ -21,13 +21,14 @@ from __future__ import annotations
 
 import re
 import time
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import pendulum
 import pytest
 from playwright.sync_api import expect
 
 from dltrack import models
+from dltrack.models import PanelInstance
 from dltrack.plugins.backend.basic_rest_backend import BasicDltrackAPI
 from dltrack.serve import get_data_store
 from dltrack.serve._jump import JUMP_SELECT_ID
@@ -299,7 +300,30 @@ def test_drag_and_drop_reorders_panels(page: Page, live_server_url: str, console
     assert console_errors == []
 
 
-def _ungrouped_chart_columns(experiment_id: int) -> list[str]:
+def _current_page_model(page: Page, experiment_id: int) -> BasicExperimentPage:
+    """
+    The page (shared, or whichever view the browser is currently on) the UI is actually showing.
+
+    A structural edit branches into a view of the acting user's own the moment it happens (see
+    `_experiment_page_state.save_page`), so a helper that always reads the shared page stops
+    matching what's on screen the instant that first happens -- read `page`'s own `?view=` instead
+    of assuming which one applies.
+    """
+    query = page.url.split("?", 1)[1] if "?" in page.url else ""
+    view_id = next(
+        (int(part.removeprefix("view=")) for part in query.split("&") if part.startswith("view=")), None
+    )
+    store = get_data_store()
+    if view_id is not None:
+        view = store.get_view(BasicExperimentPage, view_id)
+        if view is not None:
+            return cast("BasicExperimentPage", view)
+    return cast(
+        "BasicExperimentPage", store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
+    )
+
+
+def _ungrouped_chart_columns(page: Page, experiment_id: int) -> list[str]:
     """
     The "Ungrouped" panel's charts' `column` params, in order -- reads the persisted page directly,
     since a chart's rendered `data-chart-index` alone can't distinguish *which* chart (they're
@@ -307,9 +331,7 @@ def _ungrouped_chart_columns(experiment_id: int) -> list[str]:
     a callback, `get_data_store()` falls back to Dash's module-global `APP` when there's no active
     callback context, and `dltrack_app` is the only app this test session ever builds.
     """
-    store = get_data_store()
-    page = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
-    panel = next(p for p in page.panels if p.name == "Ungrouped")
+    panel = next(p for p in _current_page_model(page, experiment_id).panels if p.name == "Ungrouped")
     return [str(c.parameters["column"]) for c in panel.charts]
 
 
@@ -346,7 +368,11 @@ def test_drag_and_drop_reorders_charts_within_a_panel(
     # `BasicExperimentPage.render()`'s own fallback opens the first (and here, only) panel by
     # default -- no click needed for its charts (and their drag handles) to render.
     expect(page.locator(".dl-chart-drag-handle")).to_have_count(3)
-    assert _ungrouped_chart_columns(experiment_id) == ["accuracy", "loss", "lr"]
+    # Auto-generating on the shared page branches into a view of your own (see `save_page`) --
+    # wait for that branch's `?view=` to land before reading `_ungrouped_chart_columns` off it,
+    # or it's still reading the (now-untouched) shared page the branch just moved away from.
+    expect(page).to_have_url(re.compile(r"\?view=\d+$"))
+    assert _ungrouped_chart_columns(page, experiment_id) == ["accuracy", "loss", "lr"]
 
     # Drag the last chart (index 2, "lr") to just before the first (index 0, "accuracy") -- drop
     # near its drag handle (top-left, in the controls row) rather than over its rendered chart SVG,
@@ -364,7 +390,7 @@ def test_drag_and_drop_reorders_charts_within_a_panel(
     source.drag_to(target, target_position={"x": 2, "y": 5})
 
     expect(page.locator(".dl-chart-drag-handle")).to_have_count(3)
-    _wait_until(lambda: _ungrouped_chart_columns(experiment_id), ["lr", "accuracy", "loss"])
+    _wait_until(lambda: _ungrouped_chart_columns(page, experiment_id), ["lr", "accuracy", "loss"])
     assert console_errors == []
 
 
@@ -399,14 +425,17 @@ def test_drag_and_drop_moves_a_chart_into_a_different_panel(
     )
     page.reload()
     page.get_by_role("button", name="Auto-generate charts").click()
+    # Auto-generating on the shared page branches into a view of your own (see `save_page`) --
+    # wait for that branch's `?view=` to land before anything below reads the page off it.
+    expect(page).to_have_url(re.compile(r"\?view=\d+$"))
     # No explicit `open_panel` setting exists yet for a brand new experiment, so
     # `BasicExperimentPage.render()`'s own fallback already opens the first panel ("train" --
     # metrics dict insertion order is preserved through to panel-creation order) -- only "val"
     # needs a click.
     page.get_by_role("button", name="val", exact=True).click()
     expect(page.locator(".dl-chart-drag-handle")).to_have_count(2)
-    assert _panel_chart_columns(experiment_id, "train") == ["train/loss"]
-    assert _panel_chart_columns(experiment_id, "val") == ["val/loss"]
+    assert _panel_chart_columns(page, experiment_id, "train") == ["train/loss"]
+    assert _panel_chart_columns(page, experiment_id, "val") == ["val/loss"]
 
     # Create the empty "extra" panel *before* any drag -- a completed drop triggers its own
     # full-page re-render (a separate response from the `drag_to()` call that requested it), and
@@ -431,8 +460,8 @@ def test_drag_and_drop_moves_a_chart_into_a_different_panel(
     page.wait_for_timeout(200)  # matches the other drag tests' wait for the hover-reveal transition
     source.drag_to(target, target_position={"x": 2, "y": 5})
 
-    _wait_until(lambda: _panel_chart_columns(experiment_id, "val"), ["train/loss", "val/loss"])
-    assert _panel_chart_columns(experiment_id, "train") == []
+    _wait_until(lambda: _panel_chart_columns(page, experiment_id, "val"), ["train/loss", "val/loss"])
+    assert _panel_chart_columns(page, experiment_id, "train") == []
     # `_wait_until` only confirms the backend has the move -- the drop's own re-render can still be
     # in flight. Wait for the DOM to catch up before starting the next drag on top of it.
     expect(page.locator(".dl-chart-drag-handle")).to_have_count(2)
@@ -444,8 +473,8 @@ def test_drag_and_drop_moves_a_chart_into_a_different_panel(
     page.wait_for_timeout(200)
     source.drag_to(target)
 
-    _wait_until(lambda: _panel_chart_columns(experiment_id, "extra"), ["train/loss"])
-    assert _panel_chart_columns(experiment_id, "val") == ["val/loss"]
+    _wait_until(lambda: _panel_chart_columns(page, experiment_id, "extra"), ["train/loss"])
+    assert _panel_chart_columns(page, experiment_id, "val") == ["val/loss"]
     assert console_errors == []
 
 
@@ -584,11 +613,9 @@ def test_assign_panel_to_a_new_tab_and_switch_back(
     assert console_errors == []
 
 
-def _panel_chart_columns(experiment_id: int, panel_name: str) -> list[str]:
+def _panel_chart_columns(page: Page, experiment_id: int, panel_name: str) -> list[str]:
     """Like `_ungrouped_chart_columns`, but for any named panel."""
-    store = get_data_store()
-    page = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
-    panel = next(p for p in page.panels if p.name == panel_name)
+    panel = next(p for p in _current_page_model(page, experiment_id).panels if p.name == panel_name)
     return [str(c.parameters["column"]) for c in panel.charts]
 
 
@@ -627,6 +654,9 @@ def test_new_tab_without_panels_gets_an_empty_panel_that_accepts_a_dragged_chart
     # (the auto-generate button only exists on a view with no panels) so the click below can't hit
     # the outgoing copy.
     expect(page.get_by_role("button", name="Auto-generate charts")).to_have_count(0)
+    # Auto-generating on the shared page branches into a view of your own (see `save_page`) --
+    # wait for that branch's `?view=` to land before anything below reads the page off it.
+    expect(page).to_have_url(re.compile(r"\?view=\d+$"))
 
     # Create "Images" without picking any panel -- the picker stays empty.
     page.locator(f"#{NEW_TAB_BUTTON_ID}").click()
@@ -638,7 +668,7 @@ def test_new_tab_without_panels_gets_an_empty_panel_that_accepts_a_dragged_chart
     expect(images_tab).to_be_visible()
     # A real, empty panel exists in the new tab -- not just an empty tab with nothing to drop into.
     expect(page.get_by_role("button", name="Images", exact=True)).to_be_visible()
-    assert _panel_chart_columns(experiment_id, "Images") == []
+    assert _panel_chart_columns(page, experiment_id, "Images") == []
 
     # Drag the "loss" chart (in "Ungrouped", on "General") onto the "Images" tab.
     general_tab.click()
@@ -649,8 +679,8 @@ def test_new_tab_without_panels_gets_an_empty_panel_that_accepts_a_dragged_chart
     page.wait_for_timeout(200)  # matches the other drag tests' wait for the hover-reveal transition
     handle.drag_to(images_tab)
 
-    _wait_until(lambda: _panel_chart_columns(experiment_id, "Images"), ["loss"])
-    assert _panel_chart_columns(experiment_id, "Ungrouped") == []
+    _wait_until(lambda: _panel_chart_columns(page, experiment_id, "Images"), ["loss"])
+    assert _panel_chart_columns(page, experiment_id, "Ungrouped") == []
     # The drag switched the active tab to "Images" -- its (now non-empty) panel is visible without
     # having to click the tab, and "Ungrouped" (still on "General") isn't.
     expect(page.get_by_role("button", name="Images", exact=True)).to_be_visible()
@@ -1228,29 +1258,37 @@ def test_a_copied_chart_link_opens_that_chart_without_changing_the_shared_layout
     )
     page.reload()
     page.get_by_role("button", name="Auto-generate charts").click()
+    # Auto-generating on the shared page branches into a view of your own (see `save_page`) --
+    # wait for that branch's `?view=` to land before copying a link off `page.url`, or the copied
+    # link (and the "close its panel"/`_open_panels` checks below, which also have to follow the
+    # branch rather than the now-untouched shared page) would still be reading the page it just
+    # branched *away* from.
+    expect(page).to_have_url(re.compile(r"\?view=\d+$"))
 
     chart = page.locator(".dl-chart-item").first
     chart.hover()
     chart.get_by_role("button", name="Copy a link to this chart").click()
     link = page.evaluate("navigator.clipboard.readText()")
     chart_id = chart.get_attribute("data-chart-id")
-    assert link == f"{page.url.split('?')[0]}?chart={chart_id}"
+    assert link == f"{page.url}&chart={chart_id}"
 
     page.get_by_role("button", name="train", exact=True).click()  # close its panel
-    _wait_until(lambda: _open_panels(experiment_id), [])
+    view_id = int(page.url.rsplit("=", 1)[-1].split("&")[0])
+    _wait_until(lambda: _open_panels(view_id), [])
 
     page.goto(link)
     linked = page.locator(f'[data-chart-id="{chart_id}"]')
     expect(linked).to_be_in_viewport()
     expect(linked).to_have_class(re.compile("dl-chart-focus"))
-    assert _open_panels(experiment_id) == []
+    assert _open_panels(view_id) == []
     assert console_errors == []
 
 
-def _open_panels(experiment_id: int) -> list[str]:
+def _open_panels(view_id: int) -> list[str]:
     store = get_data_store()
-    page = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
-    return list(cast("list[str]", page.page_settings.get(OPEN_PANEL_KEY, [])))
+    view = store.get_view(BasicExperimentPage, view_id)
+    assert view is not None
+    return list(cast("list[str]", view.page_settings.get(OPEN_PANEL_KEY, [])))
 
 
 def test_changes_in_a_saved_view_leave_the_shared_view_alone(
@@ -1261,6 +1299,54 @@ def test_changes_in_a_saved_view_leave_the_shared_view_alone(
     what everyone else sees -- keeps its own layout; switching back shows exactly that.
     """
     _create_project_and_experiment(page, live_server_url, "Views Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    # Seeded directly on the shared page, bypassing the UI -- going through "Auto-generate charts"
+    # instead would itself already branch into a view of the saving user's own (`save_page` forks
+    # on *every* structural edit, including this one), leaving the shared page with nothing to
+    # keep for this test to actually prove.
+    store = get_data_store()
+    shared = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
+    store.update_page(shared.model_copy(update={"panels": [PanelInstance[Any, Any](name="Losses")]}))
+    page.reload()
+    expect(page.get_by_role("textbox", name="View", exact=True)).to_have_value("Shared view")
+
+    page.get_by_role("button", name="View actions").click()
+    page.get_by_role("menuitem", name="Save as a new view…").click()
+    page.get_by_role("textbox", name="View name").fill("my layout")
+    page.get_by_role("button", name="Save view").click()
+    # Not just "some `?view=`" -- the bare experiment URL (no `?view=` at all, where this started)
+    # would never match that regex anyway, but wait for the *navigation itself* first so the two
+    # checks below aren't just reading the empty content between actions.
+    expect(page).to_have_url(re.compile(r"\?view=\d+$"))
+    view_id = int(page.url.rsplit("=", 1)[-1])
+    expect(page.get_by_role("textbox", name="View", exact=True)).to_have_value("my layout")
+
+    page.locator(".dl-panel-item-header").first.hover()
+    page.get_by_text("Grid", exact=True).first.click()
+    _wait_until(
+        lambda: [p.layout for p in store.get_view(BasicExperimentPage, view_id).panels][:1],  # pyright: ignore[reportOptionalMemberAccess]
+        ["grid"],
+    )
+    shared = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
+    assert {p.layout for p in shared.panels} == {"packed"}
+
+    page.get_by_role("textbox", name="View", exact=True).click()
+    page.get_by_role("option", name="Shared view").click()
+    expect(page).to_have_url(f"{live_server_url}/experiment/{experiment_id}")
+    expect(page.get_by_role("textbox", name="View", exact=True)).to_have_value("Shared view")
+    assert console_errors == []
+
+
+def test_editing_the_shared_page_branches_into_your_own_view_without_asking(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """
+    The whole point: deleting a panel while looking at the shared page -- no "save as a view" step
+    first -- must not delete it for everyone. It should silently branch into a view of your own
+    (landing on `?view=<id>` with no page reload) and delete it there instead.
+    """
+    _create_project_and_experiment(page, live_server_url, "Branch On Edit Experiment")
     page.locator(".experiment-card").click()
     experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
     api = BasicDltrackAPI(live_server_url)
@@ -1276,30 +1362,100 @@ def test_changes_in_a_saved_view_leave_the_shared_view_alone(
             )
         ]
     )
+    # Seeded directly on the shared page, bypassing the UI, so deleting it below is the *first*
+    # edit anyone's made -- auto-generating it through the UI first would itself already have
+    # branched into a view of the deleting user's own (`save_page` forks on *every* structural
+    # edit, not just this one), leaving nothing here to prove.
+    store = get_data_store()
+    shared = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
+    store.update_page(shared.model_copy(update={"panels": [PanelInstance[Any, Any](name="Losses")]}))
     page.reload()
-    page.get_by_role("button", name="Auto-generate charts").click()
-    expect(page.locator(".dl-panel-body svg").first).to_be_visible()
+    expect(page.get_by_role("textbox", name="View", exact=True)).to_have_value("Shared view")
+
+    page.locator(".dl-panel-item-header").first.hover()
+    page.get_by_role("button", name="Delete panel").click()
+    page.get_by_role("button", name="Delete", exact=True).click()
+
+    expect(page).to_have_url(re.compile(r"\?view=\d+$"))
+    view_id = int(page.url.rsplit("=", 1)[-1])
+    expect(page.get_by_role("textbox", name="View", exact=True)).to_have_value("Copy of Shared view")
+    store = get_data_store()
+    branched = store.get_view(BasicExperimentPage, view_id)
+    assert branched is not None
+    assert branched.panels == []
+
+    page.goto(f"{live_server_url}/experiment/{experiment_id}")
+    expect(page.locator(".dl-panel-item-header")).to_be_visible()
+    shared = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
+    assert [p.name for p in shared.panels] == ["Losses"]
+    assert console_errors == []
+
+
+def test_editing_a_view_you_do_not_own_branches_into_a_separate_view_of_your_own(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """Opening someone else's view from a link and editing it must not change what they see either."""
+    _create_project_and_experiment(page, live_server_url, "Foreign View Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    store = get_data_store()
+    alice = store.get_or_create_user("alice-owns-this-view")
+    alices_view = store.create_view(
+        BasicExperimentPage,
+        models.NewPage[Any, Any](
+            experiment_id=experiment_id,
+            owner_id=alice.id,
+            name="alice's view",
+            panels=[PanelInstance[Any, Any](name="kept")],
+        ),
+    )
+
+    page.goto(f"{live_server_url}/experiment/{experiment_id}?view={alices_view.id}")
+    expect(page.get_by_role("textbox", name="View", exact=True)).to_have_value("alice's view")
+    # Not the owner: no rename/delete for a view that isn't yours.
+    expect(page.get_by_role("button", name="View actions")).to_be_visible()
+    page.get_by_role("button", name="View actions").click()
+    expect(page.get_by_role("menuitem", name="Rename this view…")).to_have_count(0)
+    expect(page.get_by_role("button", name="Delete this view")).to_have_count(0)
+    page.keyboard.press("Escape")
+
+    page.locator(".dl-panel-item-header").first.hover()
+    page.get_by_role("button", name="Rename panel").click()
+    page.get_by_role("textbox", name="Panel name", exact=True).fill("renamed by someone else")
+    page.get_by_role("button", name="Save", exact=True).click()
+
+    # Not just "some `?view=`" -- alice's own id already satisfies that trivially, so this has to
+    # wait for it to actually become a *different* one (the branch), which is the whole point.
+    expect(page).not_to_have_url(f"{live_server_url}/experiment/{experiment_id}?view={alices_view.id}")
+    expect(page).to_have_url(re.compile(r"\?view=\d+$"))
+    my_view_id = int(page.url.rsplit("=", 1)[-1])
+    assert my_view_id != alices_view.id
+    mine = store.get_view(BasicExperimentPage, my_view_id)
+    assert mine is not None
+    assert mine.owner_id != alice.id
+    assert [p.name for p in mine.panels] == ["renamed by someone else"]
+    untouched = store.get_view(BasicExperimentPage, alices_view.id)
+    assert untouched is not None
+    assert [p.name for p in untouched.panels] == ["kept"]
+    assert console_errors == []
+
+
+def test_renaming_a_view_you_own_updates_the_picker(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    _create_project_and_experiment(page, live_server_url, "Rename View Experiment")
+    page.locator(".experiment-card").click()
 
     page.get_by_role("button", name="View actions").click()
     page.get_by_role("menuitem", name="Save as a new view…").click()
-    page.get_by_role("textbox", name="View name").fill("my layout")
+    page.get_by_role("textbox", name="View name").fill("first name")
     page.get_by_role("button", name="Save view").click()
-    expect(page).to_have_url(re.compile(r"\?view=\d+$"))
-    view_id = int(page.url.rsplit("=", 1)[-1])
-    expect(page.get_by_role("textbox", name="View", exact=True)).to_have_value("my layout")
+    expect(page.get_by_role("textbox", name="View", exact=True)).to_have_value("first name")
 
-    page.locator(".dl-panel-item-header").first.hover()
-    page.get_by_text("Grid", exact=True).first.click()
-    store = get_data_store()
-    _wait_until(
-        lambda: [p.layout for p in store.get_view(BasicExperimentPage, view_id).panels][:1],  # pyright: ignore[reportOptionalMemberAccess]
-        ["grid"],
-    )
-    shared = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
-    assert {p.layout for p in shared.panels} == {"packed"}
+    page.get_by_role("button", name="View actions").click()
+    page.get_by_role("menuitem", name="Rename this view…").click()
+    page.get_by_role("textbox", name="View name").fill("better name")
+    page.get_by_role("button", name="Save name").click()
 
-    page.get_by_role("textbox", name="View", exact=True).click()
-    page.get_by_role("option", name="Shared view").click()
-    expect(page).to_have_url(f"{live_server_url}/experiment/{experiment_id}")
-    expect(page.get_by_role("textbox", name="View", exact=True)).to_have_value("Shared view")
+    expect(page.get_by_role("textbox", name="View", exact=True)).to_have_value("better name")
     assert console_errors == []

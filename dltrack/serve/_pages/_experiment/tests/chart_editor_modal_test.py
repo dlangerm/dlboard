@@ -15,6 +15,8 @@ from dltrack.serve._pages._experiment._chart_editor_modal import build_chart_par
 from dltrack.serve._pages._experiment._dataframe_helpers import EXCLUDED_RUNS_KEY
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from dltrack.plugins.data_stores.sqlite import SQLLiteStore
 
 _TS = datetime(2026, 1, 1, tzinfo=UTC)
@@ -59,11 +61,16 @@ def test_build_chart_param_form_offers_the_experiments_columns(
 
 
 def test_render_chart_preview_leaves_out_excluded_runs_like_the_real_panel(
-    store: SQLLiteStore, experiment_id: int
+    store: SQLLiteStore, experiment_id: int, sign_in_as: Callable[[str], None]
 ) -> None:
     """It used to render from the whole experiment, so it showed runs the panel itself hides."""
+    sign_in_as("alice")
     kept, excluded = _log_a_run(store, experiment_id), _log_a_run(store, experiment_id)
-    state.persist_settings(store, state.PageRef(experiment_id, None), {EXCLUDED_RUNS_KEY: [excluded.id]})
+    # Excluding a run branches into a view of alice's own (see `save_page`) -- preview from that
+    # same view, not the (untouched) shared page, to see the exclusion it just made.
+    view = state.persist_settings(
+        store, state.PageRef(experiment_id, None), {EXCLUDED_RUNS_KEY: [excluded.id]}
+    )
 
     field_ids = [{"type": "chart-param", "field": "column"}, {"type": "chart-param", "field": "x_axis"}]
     preview, error = render_chart_preview(
@@ -72,7 +79,7 @@ def test_render_chart_preview_leaves_out_excluded_runs_like_the_real_panel(
         [None, None],
         field_ids,
         store=store,
-        ref=state.PageRef(experiment_id, None),
+        ref=state.PageRef(experiment_id, view.id),
     )
 
     assert error == ""

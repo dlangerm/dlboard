@@ -10,7 +10,7 @@ from dash.dcc import Store
 from dash.development.base_component import Component
 
 from dltrack.models import constants
-from dltrack.serve import get_data_store
+from dltrack.serve import get_current_user, get_data_store
 from dltrack.serve._pages._experiment import _experiment_page_state as core
 from dltrack.serve._pages._experiment import render_panel
 from dltrack.serve._pages._experiment._views import resolve_view_id, view_controls
@@ -98,13 +98,18 @@ def layout(
     # that actually eliminates the page's extra round trip, not just hides it behind a spinner.
     view_id = resolve_view_id(store, exp.id, view)
     container, header, page_json = render_panel(store, core.PageRef(exp.id, view_id), focus_chart=chart)
+    current_page = core.BasicExperimentPage.model_validate_json(page_json)
+    is_owner = view_id is not None and current_page.owner_id == get_current_user(store).id
 
     return [
         html.Div(
             id=core.PAGE_EXPERIMENT_ID,
             children=dmc.Stack(
                 [
-                    _live_update_header(header, view_controls(store, exp.id, view_id)),
+                    _live_update_header(
+                        header,
+                        view_controls(store, exp.id, view_id, is_owner=is_owner, view_name=current_page.name),
+                    ),
                     # Nothing logged yet: show how to log the first run, right where its charts will go.
                     onboarding_card(
                         title="No runs yet — log your first one",
