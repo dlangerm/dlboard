@@ -28,7 +28,7 @@ from structlog.stdlib import get_logger
 
 from dltrack import models
 from dltrack.models import ButtonId, DivId, IntervalId, ModalId, StoreId, ValueId, constants
-from dltrack.serve import ClientsideScript, Icon, get_data_store, icon
+from dltrack.serve import ClientsideScript, Icon, get_current_user, get_data_store, icon
 from dltrack.serve._pages._dash_helpers import tooltipped_action_icon
 from dltrack.serve._pages._experiment import _dataframe_helpers as dfh
 
@@ -1232,6 +1232,21 @@ def load_page(store: DataStore[...], ref: PageRef) -> BasicExperimentPage:
     )
 
 
+def ref_of(experiment_id: int, page: BasicExperimentPage) -> PageRef:
+    """
+    The `PageRef` that an already-loaded `page` itself represents.
+
+    The shared page if it's nobody's, otherwise its own view id. A callback that reacts to
+    `STATE_PAGE_STORAGE` (rather than to some other trigger that only
+    incidentally carries `page`) should build its `PageRef` this way instead of from `STATE_VIEW_ID`:
+    both changes land in the *same* server response as a structural edit that just branched into a
+    new view, but `STATE_PAGE_STORAGE` is one of that response's own outputs, while `STATE_VIEW_ID`
+    is only set by a *separate*, slightly later round trip (`_views.py`'s `sync_view_after_edit`) --
+    reading it back too early would still see the view you were on before the edit branched.
+    """
+    return PageRef(experiment_id, page.id if page.owner_id is not None else None)
+
+
 def accordion_view(
     store: DataStore[...], page: BasicExperimentPage, *, focus_chart: str | None = None
 ) -> html.Div:
@@ -1272,12 +1287,53 @@ def accordion_view(
 # ============================================================
 
 
-def persist_settings(store: DataStore[...], ref: PageRef, updates: dict[str, Any]) -> BasicExperimentPage:
-    """Merge `updates` into page_settings (server-authoritative) and persist -- no accordion rebuild."""
+def save_page(store: DataStore[...], mutated: BasicExperimentPage) -> BasicExperimentPage:
+    """
+    Persist `mutated`, branching into a new view of your own first if you don't already own it.
+
+    Written in place if you already own the page it came from, otherwise created as a brand-new
+    view of your own, seeded with `mutated`'s own (already-edited) content. "Owning" it means its
+    `owner_id` is your own user id; the shared page (`owner_id` is `None`) and a view someone else
+    owns both fail that check. This is what lets an edit made while looking at the shared page, or a
+    view that isn't yours, branch into a view of your own the moment you make it -- no separate
+    "save as a view" step first, and nobody else's page is ever changed by an edit that isn't theirs.
+    """
+    user_id = get_current_user(store).id
+    if mutated.owner_id == user_id:
+        return cast("BasicExperimentPage", store.update_page(mutated))
+    return cast(
+        "BasicExperimentPage",
+        store.create_view(
+            BasicExperimentPage,
+            models.NewPage[Any, Any](
+                experiment_id=cast("int", mutated.experiment_id),
+                owner_id=user_id,
+                name=f"Copy of {mutated.name or 'Shared view'}",
+                panels=mutated.panels,
+                page_settings=mutated.page_settings,
+            ),
+        ),
+    )
+
+
+def persist_settings(
+    store: DataStore[...], ref: PageRef, updates: dict[str, Any], *, branch_on_edit: bool = True
+) -> BasicExperimentPage:
+    """
+    Merge `updates` into page_settings (server-authoritative) and persist -- no accordion rebuild.
+
+    `branch_on_edit` (on by default) branches into a view of your own first if `ref` doesn't already
+    point at one you own -- see `save_page`. The two call sites that pass `False` (which panel/tab
+    is open) are purely per-viewer browsing state: opening a panel isn't "editing the view" the way
+    deleting a chart or excluding a run is, so those two keep writing straight to whatever page
+    `ref` names, exactly as before this existed.
+    """
     page = load_page(store, ref)
     new_settings = {**page.page_settings, **updates}
-    page = page.model_copy(update={"page_settings": new_settings})
-    return cast("BasicExperimentPage", store.update_page(page))
+    mutated = page.model_copy(update={"page_settings": new_settings})
+    if not branch_on_edit:
+        return cast("BasicExperimentPage", store.update_page(mutated))
+    return save_page(store, mutated)
 
 
 def persist_settings_and_rerender(
@@ -1302,15 +1358,19 @@ def mutate_panels_and_rerender(
     `extra_settings` merges into `page_settings` alongside the panel mutation -- e.g. moving a chart
     or panel to a different tab also switches `ACTIVE_TAB_KEY` to it, in the same page update, rather
     than leaving the user looking at the tab they dragged *from*.
+
+    Always branches into a view of your own first if this page isn't already one of your own -- see
+    `save_page`. A panel/chart structure edit is never "just viewing", unlike `persist_settings`'s
+    two opt-outs, so there's no equivalent flag here.
     """
     curr_page = BasicExperimentPage.model_validate_json(page_json)
     updates: dict[str, Any] = {"panels": mutate(curr_page.panels)}
     if extra_settings:
         updates["page_settings"] = {**curr_page.page_settings, **extra_settings}
-    curr_page = curr_page.model_copy(update=updates)
+    mutated = curr_page.model_copy(update=updates)
     store = get_data_store()
-    curr_page = cast("BasicExperimentPage", store.update_page(curr_page))
-    return curr_page, accordion_view(store, curr_page)
+    saved = save_page(store, mutated)
+    return saved, accordion_view(store, saved)
 
 
 def upsert_chart(
@@ -1636,15 +1696,39 @@ def register_state_callbacks(app: Dash) -> None:
         Output(STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Input({"type": "panel-accordion", "tab": ALL}, "value"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
-        State(STATE_VIEW_ID, "data"),
+        State(STATE_PAGE_STORAGE, "data"),
         prevent_initial_call=True,
     )
-    def persist_open_panel(
-        open_values: list[list[str] | None], experiment_id: int, view_id: int | None
-    ) -> str:
+    def persist_open_panel(open_values: list[list[str] | None], experiment_id: int, page_json: str) -> str:
         open_value = [name for group in open_values for name in (group or [])]
+        curr_page = BasicExperimentPage.model_validate_json(page_json)
+        # Mirrors `toggle_panel_layout`'s own "a mount can echo the current value back as a
+        # 'change'" check: the accordion's `value` prop mounting with whatever `accordion_view`
+        # just initialized it to (every render, including ones that aren't about panels being open
+        # at all) reports back here as if the user had just opened/closed something. Comparing
+        # against what's already stored catches that mount echo before it turns into a write --
+        # which matters beyond just the wasted round trip: unlike a real open/close, that write's
+        # own `page_json` can be arbitrarily stale (captured whenever the accordion was last built,
+        # not necessarily this instant), and writing it back can undo a *later* edit that branched
+        # into a view of its own in between.
+        stored_open = curr_page.page_settings.get(
+            OPEN_PANEL_KEY, [curr_page.panels[0].name] if curr_page.panels else []
+        )
+        normalized_stored = [stored_open] if isinstance(stored_open, str) else stored_open
+        if open_value == normalized_stored:
+            raise PreventUpdate
         store = get_data_store()
-        page = persist_settings(store, PageRef(experiment_id, view_id), {OPEN_PANEL_KEY: open_value})
+        # Which panel is expanded is per-viewer browsing state, not part of what the view "is" --
+        # see `persist_settings`'s own docstring on why this one opts out of branching. Its ref
+        # comes from the accordion's own page (`ref_of`), not `STATE_VIEW_ID` -- the accordion
+        # remounting is itself often a *side effect* of a structural edit elsewhere on this same
+        # page that just branched into a new view, and `STATE_VIEW_ID` only catches up to that a
+        # separate round trip later. Reading it here would race that catch-up and, since this
+        # write goes straight through regardless of ownership, land back on the view the edit had
+        # already branched away from.
+        page = persist_settings(
+            store, ref_of(experiment_id, curr_page), {OPEN_PANEL_KEY: open_value}, branch_on_edit=False
+        )
         return page.model_dump_json()
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
@@ -1654,7 +1738,7 @@ def register_state_callbacks(app: Dash) -> None:
         State({"type": "panel-content", "panel": ALL}, "id"),
         State(LOADED_PANELS_STORE_ID, "data"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
-        State(STATE_VIEW_ID, "data"),
+        State(STATE_PAGE_STORAGE, "data"),
         prevent_initial_call=True,
     )
     def render_opened_panels(
@@ -1662,7 +1746,7 @@ def register_state_callbacks(app: Dash) -> None:
         panel_ids: list[dict[str, str]],
         loaded: list[str] | None,
         experiment_id: int,
-        view_id: int | None,
+        page_json: str,
     ) -> tuple[list[Any], list[str]]:
         open_set = {name for group in open_values for name in (group or [])}
         loaded_set = set(loaded or [])
@@ -1671,7 +1755,10 @@ def register_state_callbacks(app: Dash) -> None:
             raise PreventUpdate
 
         store = get_data_store()
-        page = load_page(store, PageRef(experiment_id, view_id))
+        # Same `ref_of`-over-`STATE_VIEW_ID` reasoning as `persist_open_panel` -- this accordion
+        # remount can itself be the tail end of an edit that just branched into a new view.
+        curr_page = BasicExperimentPage.model_validate_json(page_json)
+        page = load_page(store, ref_of(experiment_id, curr_page))
         panel_by_name = {p.name: p for p in page.panels}
 
         outputs: list[Any] = []
@@ -1689,15 +1776,26 @@ def register_state_callbacks(app: Dash) -> None:
         Output(STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Input(PANEL_TABS_ID, "value"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
-        State(STATE_VIEW_ID, "data"),
+        State(STATE_PAGE_STORAGE, "data"),
         prevent_initial_call=True,
     )
-    def persist_active_tab(tab_value: str | None, experiment_id: int, view_id: int | None) -> str:
+    def persist_active_tab(tab_value: str | None, experiment_id: int, page_json: str) -> str:
         if tab_value is None:
             raise PreventUpdate
+        curr_page = BasicExperimentPage.model_validate_json(page_json)
+        # Same mount-echo guard as `persist_open_panel`, and for the same reason: `PANEL_TABS_ID`
+        # mounting with whichever tab `accordion_view` already had active reports back here as if
+        # the user had just switched tabs.
+        if curr_page.page_settings.get(ACTIVE_TAB_KEY) == tab_from_component_value(tab_value):
+            raise PreventUpdate
         store = get_data_store()
+        # Which tab is active is per-viewer browsing state -- same reasoning, including the ref,
+        # as `persist_open_panel`.
         page = persist_settings(
-            store, PageRef(experiment_id, view_id), {ACTIVE_TAB_KEY: tab_from_component_value(tab_value)}
+            store,
+            ref_of(experiment_id, curr_page),
+            {ACTIVE_TAB_KEY: tab_from_component_value(tab_value)},
+            branch_on_edit=False,
         )
         return page.model_dump_json()
 

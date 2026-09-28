@@ -6,8 +6,15 @@ right now and from then on is edited on its own -- rearranging, filtering runs o
 in a view never changes the shared page, nor anyone else's view. The active view is part of the
 URL (`?view=<id>`), so it survives a reload and can be bookmarked or sent to someone.
 
-Views can also be exported as JSON and imported back (into this or another experiment), validated
-by `ViewFile` on the way in.
+A view doesn't have to be created up front, either: every edit anywhere on this page goes through
+`_experiment_page_state.save_page`, which branches into a new view of your own the moment you edit
+something you don't already own (the shared page, or someone else's view) -- so pruning the shared
+page down to "just one chart type" never touches what anyone else sees, even mid-experiment, with
+no separate "save as a view" step first. `sync_view_after_edit`/`sync_view_url.js`, below, are what
+make that branch show up in the picker and the URL without a page reload.
+
+Views can also be renamed, and exported as JSON and imported back (into this or another
+experiment), validated by `ViewFile` on the way in.
 """
 
 from __future__ import annotations
@@ -17,7 +24,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 import dash_mantine_components as dmc
-from dash import Input, Output, State, html, no_update
+from dash import Input, NoUpdate, Output, State, html, no_update
+from dash.dcc import Store
 from dash.exceptions import PreventUpdate
 from pydantic import BaseModel, ValidationError
 
@@ -41,10 +49,22 @@ SHARED_VIEW: typing.Final = "shared"
 """The picker's value for the shared page (a view's value is its id)."""
 
 VIEW_SELECT_ID: typing.Final = "view-select"
+VIEW_NAV_SUPPRESS_ID: typing.Final = "view-nav-suppress"
+"""
+One-shot flag: `sync_view_after_edit` sets it right before writing `VIEW_SELECT_ID.value` itself
+(not from a real pick), so `_register_switching`'s navigate-on-select callback -- which can't
+otherwise tell "the user picked a view" from "an edit just branched into one" apart, since both
+show up as the exact same prop change -- knows to skip navigating that once instead of pushing a
+reload-triggering `?view=` change out from under whatever the edit itself already did.
+"""
 SAVE_VIEW_OPEN_ID: typing.Final = "save-view-open"
 SAVE_VIEW_MODAL_ID: typing.Final = "save-view-modal"
 SAVE_VIEW_NAME_ID: typing.Final = "save-view-name"
 SAVE_VIEW_CONFIRM_ID: typing.Final = "save-view-confirm"
+RENAME_VIEW_OPEN_ID: typing.Final = "rename-view-open"
+RENAME_VIEW_MODAL_ID: typing.Final = "rename-view-modal"
+RENAME_VIEW_NAME_ID: typing.Final = "rename-view-name"
+RENAME_VIEW_CONFIRM_ID: typing.Final = "rename-view-confirm"
 EXPORT_VIEW_OPEN_ID: typing.Final = "export-view-open"
 EXPORT_VIEW_MODAL_ID: typing.Final = "export-view-modal"
 EXPORT_VIEW_BODY_ID: typing.Final = "export-view-body"
@@ -62,6 +82,7 @@ DELETE_VIEW_IDS = DeleteConfirmIds(
 
 _NAVIGATE_JS = ClientsideScript(Path(__file__).with_name("view_navigate.js"))
 _OPEN_ON_CLICK_JS = ClientsideScript(Path(__file__).with_name("open_on_click.js"))
+_SYNC_VIEW_URL_JS = ClientsideScript(Path(__file__).with_name("sync_view_url.js"))
 
 
 class ViewFile(BaseModel, extra="forbid"):
@@ -79,12 +100,24 @@ class ViewFile(BaseModel, extra="forbid"):
         return cls(name=name, panels=page.panels, page_settings=page.page_settings)
 
 
-def _options(store: DataStore[...], experiment_id: int) -> list[dict[str, str]]:
+def _options(
+    store: DataStore[...], experiment_id: int, *, foreign_view: tuple[int, str] | None = None
+) -> list[dict[str, str]]:
+    """
+    The picker's options: the shared page, then every view *you* own.
+
+    `foreign_view` (the id and name of a view you're currently looking at but don't own, reached by
+    a link someone else sent you) is appended too, if it isn't already one of your own -- otherwise
+    the picker would have nothing to show for the view you're actually on.
+    """
     views = store.list_views(experiment_id, get_current_user(store).id)
-    return [
+    options = [
         {"value": SHARED_VIEW, "label": "Shared view"},
         *({"value": str(v.id), "label": v.name} for v in views),
     ]
+    if foreign_view is not None and not any(o["value"] == str(foreign_view[0]) for o in options):
+        options.append({"value": str(foreign_view[0]), "label": foreign_view[1]})
+    return options
 
 
 def resolve_view_id(store: DataStore[...], experiment_id: int, requested: str | None) -> int | None:
@@ -95,13 +128,32 @@ def resolve_view_id(store: DataStore[...], experiment_id: int, requested: str | 
     return view.id if view is not None and view.experiment_id == experiment_id else None
 
 
-def view_controls(store: DataStore[...], experiment_id: int, view_id: int | None) -> Component:
-    """The header's view picker, its actions menu, and (in a view) a delete button."""
+def view_controls(
+    store: DataStore[...],
+    experiment_id: int,
+    view_id: int | None,
+    *,
+    is_owner: bool,
+    view_name: str | None = None,
+) -> Component:
+    """
+    The header's view picker, its actions menu, and (in a view of your own) rename/delete buttons.
+
+    `is_owner` is `False` for the shared page (nobody "owns" it) and for a view someone else's --
+    editing either still works, it just branches you into a view of your own the moment you make a
+    change (see `_experiment_page_state.save_page`) rather than letting you rename or delete theirs.
+    `view_name` is the current page's own name, needed only to show a view that isn't yours (`not
+    is_owner`, `view_id` not `None`) in the picker at all -- see `_options`'s `foreign_view`.
+    """
     return dmc.Group(
         [
             dmc.Select(
                 id=VIEW_SELECT_ID,
-                data=_options(store, experiment_id),
+                data=_options(
+                    store,
+                    experiment_id,
+                    foreign_view=(view_id, view_name or "") if view_id is not None and not is_owner else None,
+                ),
                 value=str(view_id) if view_id is not None else SHARED_VIEW,
                 allowDeselect=False,
                 size="xs",
@@ -120,6 +172,17 @@ def view_controls(store: DataStore[...], experiment_id: int, view_id: int | None
                     ),
                     dmc.MenuDropdown(
                         [
+                            *(
+                                [
+                                    dmc.MenuItem(
+                                        "Rename this view…",
+                                        id=RENAME_VIEW_OPEN_ID,
+                                        leftSection=icon(Icon.EDIT),
+                                    )
+                                ]
+                                if is_owner
+                                else []
+                            ),
                             dmc.MenuItem(
                                 "Save as a new view…", id=SAVE_VIEW_OPEN_ID, leftSection=icon(Icon.SAVE)
                             ),
@@ -138,12 +201,14 @@ def view_controls(store: DataStore[...], experiment_id: int, view_id: int | None
                 render_delete_control(
                     DELETE_VIEW_IDS, label="Delete this view", entity_noun="view", icon_only=True
                 )
-                if view_id is not None
+                if is_owner
                 else []
             ),
             _save_modal(),
+            _rename_modal(),
             _export_modal(),
             _import_modal(),
+            Store(id=VIEW_NAV_SUPPRESS_ID, data=False),
         ],
         gap=4,
         wrap="nowrap",
@@ -169,6 +234,24 @@ def _save_modal() -> dmc.Modal:
                     **cast("dict[str, Any]", {"data-autofocus": True, "aria-label": "View name"}),
                 ),
                 dmc.Group(dmc.Button("Save view", id=SAVE_VIEW_CONFIRM_ID), justify="flex-end"),
+            ]
+        ),
+    )
+
+
+def _rename_modal() -> dmc.Modal:
+    return dmc.Modal(
+        id=RENAME_VIEW_MODAL_ID,
+        title="Rename this view",
+        opened=False,
+        children=dmc.Stack(
+            [
+                dmc.TextInput(
+                    id=RENAME_VIEW_NAME_ID,
+                    placeholder="View name",
+                    **cast("dict[str, Any]", {"data-autofocus": True, "aria-label": "View name"}),
+                ),
+                dmc.Group(dmc.Button("Save name", id=RENAME_VIEW_CONFIRM_ID), justify="flex-end"),
             ]
         ),
     )
@@ -223,14 +306,15 @@ def _create_view(
     return _options(store, experiment_id), str(created.id)
 
 
-def register_view_callbacks(app: Dash) -> None:
-    """Wire the view picker: switching views, and saving/exporting/importing/deleting them."""
+def _register_switching(app: Dash) -> None:
     # Switching views is a client-side navigation to `?view=` (or back to no view), like a link.
     app.clientside_callback(  # pyright: ignore[reportUnknownMemberType]
         _NAVIGATE_JS.source,
         Output(core.STATE_VIEW_ID, "data"),
+        Output(VIEW_NAV_SUPPRESS_ID, "data", allow_duplicate=True),
         Input(VIEW_SELECT_ID, "value"),
         State(core.STATE_VIEW_ID, "data"),
+        State(VIEW_NAV_SUPPRESS_ID, "data"),
         prevent_initial_call=True,
     )
 
@@ -245,6 +329,8 @@ def register_view_callbacks(app: Dash) -> None:
             prevent_initial_call=True,
         )
 
+
+def _register_save(app: Dash) -> None:
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(VIEW_SELECT_ID, "data", allow_duplicate=True),
         Output(VIEW_SELECT_ID, "value", allow_duplicate=True),
@@ -267,6 +353,51 @@ def register_view_callbacks(app: Dash) -> None:
         options, value = _create_view(get_data_store(), experiment_id, ViewFile.of(page, name=name.strip()))
         return options, value, False, None, ""
 
+
+def _register_rename(app: Dash) -> None:
+    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+        Output(RENAME_VIEW_MODAL_ID, "opened", allow_duplicate=True),
+        Output(RENAME_VIEW_NAME_ID, "value"),
+        Input(RENAME_VIEW_OPEN_ID, "n_clicks"),
+        State(VIEW_SELECT_ID, "value"),
+        State(VIEW_SELECT_ID, "data"),
+        prevent_initial_call=True,
+    )
+    def open_rename_view(n_clicks: int | None, value: str, options: list[dict[str, str]]) -> tuple[bool, str]:
+        if not n_clicks:
+            raise PreventUpdate
+        current_name = next((o["label"] for o in options if o["value"] == value), "")
+        return True, current_name
+
+    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+        Output(VIEW_SELECT_ID, "data", allow_duplicate=True),
+        Output(RENAME_VIEW_MODAL_ID, "opened", allow_duplicate=True),
+        Output(RENAME_VIEW_NAME_ID, "error"),
+        Input(RENAME_VIEW_CONFIRM_ID, "n_clicks"),
+        Input(RENAME_VIEW_NAME_ID, "n_submit"),
+        State(RENAME_VIEW_NAME_ID, "value"),
+        State(core.STATE_VIEW_ID, "data"),
+        State(constants.STATE_EXPERIMENT_ID, "data"),
+        prevent_initial_call=True,
+    )
+    def rename_view(
+        _clicks: int | None, _submits: int | None, name: str | None, view_id: int | None, experiment_id: int
+    ) -> tuple[Any, bool | NoUpdate, str | None]:
+        if not name or not name.strip():
+            return no_update, no_update, "Give the view a name"
+        if view_id is None:
+            raise PreventUpdate
+        store = get_data_store()
+        # Defensive, not just decorative -- `view_controls` only *shows* this to a view's owner,
+        # but the callback itself is reachable regardless, so it checks again before writing.
+        view = store.get_view(core.BasicExperimentPage, view_id)
+        if view is None or view.owner_id != get_current_user(store).id:
+            raise PreventUpdate
+        store.update_page(view.model_copy(update={"name": name.strip()}))
+        return _options(store, experiment_id), False, None
+
+
+def _register_export_import(app: Dash) -> None:
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(EXPORT_VIEW_MODAL_ID, "opened"),
         Output(EXPORT_VIEW_BODY_ID, "children"),
@@ -323,6 +454,52 @@ def register_view_callbacks(app: Dash) -> None:
         options, value = _create_view(get_data_store(), experiment_id, view)
         return options, value, False, None
 
+
+def _register_sync_after_edit(app: Dash) -> None:
+    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+        Output(VIEW_SELECT_ID, "data", allow_duplicate=True),
+        Output(VIEW_SELECT_ID, "value", allow_duplicate=True),
+        Output(core.STATE_VIEW_ID, "data", allow_duplicate=True),
+        Output(VIEW_NAV_SUPPRESS_ID, "data", allow_duplicate=True),
+        Input(core.STATE_PAGE_STORAGE, "data"),
+        State(core.STATE_VIEW_ID, "data"),
+        State(constants.STATE_EXPERIMENT_ID, "data"),
+        prevent_initial_call=True,
+    )
+    def sync_view_after_edit(
+        page_json: str, current_view_id: int | None, experiment_id: int
+    ) -> tuple[list[dict[str, str]], str, int | None, bool]:
+        """
+        Keep the picker and `STATE_VIEW_ID` in step with whichever page an edit actually landed in.
+
+        Every persisting callback on this page writes its result to `STATE_PAGE_STORAGE` -- this is
+        the one place that reacts to *any* of them, so an edit that branched into a new personal
+        view (`_experiment_page_state.save_page`) shows up here without every one of those callbacks
+        needing to know views exist at all. Cheap on the (overwhelmingly common) no-branch tick: the
+        comparison below is pure Python, so the `list_views` read only happens on an actual branch.
+
+        Arms `VIEW_NAV_SUPPRESS_ID` alongside its own `VIEW_SELECT_ID.value` write -- see that id's
+        own docstring for why the picker's navigate-on-select callback needs it.
+        """
+        page = core.BasicExperimentPage.model_validate_json(page_json)
+        effective = page.id if page.owner_id is not None else None
+        if effective == current_view_id:
+            raise PreventUpdate
+        store = get_data_store()
+        value = str(effective) if effective is not None else SHARED_VIEW
+        return _options(store, experiment_id), value, effective, True
+
+    # The above changing `STATE_VIEW_ID` (without a page reload) still needs the address bar to
+    # catch up, so a bookmark or a refresh keeps landing on the same branch -- purely client-side.
+    app.clientside_callback(  # pyright: ignore[reportUnknownMemberType]
+        _SYNC_VIEW_URL_JS.source,
+        Output(core.STATE_VIEW_ID, "data", allow_duplicate=True),
+        Input(core.STATE_VIEW_ID, "data"),
+        prevent_initial_call=True,
+    )
+
+
+def _register_delete(app: Dash) -> None:
     def _delete_view(view_id: int) -> str:
         store = get_data_store()
         view = store.get_view(core.BasicExperimentPage, view_id)
@@ -332,3 +509,13 @@ def register_view_callbacks(app: Dash) -> None:
     register_delete_callbacks(
         app, DELETE_VIEW_IDS, State(core.STATE_VIEW_ID, "data"), on_confirm=_delete_view
     )
+
+
+def register_view_callbacks(app: Dash) -> None:
+    """Wire the view picker: switching views, and saving/renaming/exporting/importing/deleting them."""
+    _register_switching(app)
+    _register_save(app)
+    _register_rename(app)
+    _register_export_import(app)
+    _register_sync_after_edit(app)
+    _register_delete(app)

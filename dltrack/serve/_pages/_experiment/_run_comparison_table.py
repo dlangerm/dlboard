@@ -357,7 +357,7 @@ def _register_hparam_table(app: Dash) -> None:
     def render_navbar_hparams(
         hparams: list[str],
         experiment_id: int | None,
-        _page_json: str | None,
+        page_json: str | None,
         prev_signature: list[Any] | None,
         view_id: int | None,
     ) -> dmc.Stack:
@@ -365,7 +365,17 @@ def _register_hparam_table(app: Dash) -> None:
             raise PreventUpdate
 
         store = get_data_store()
-        runs, excluded, selected = _load_hparam_panel_settings(store, core.PageRef(experiment_id, view_id))
+        # `page_json` (this callback's own `STATE_PAGE_STORAGE` trigger) is the freshest known page,
+        # ahead of `STATE_VIEW_ID` when a structural edit just branched into a new view of its own
+        # (`_experiment_page_state.save_page`) -- reading `view_id` instead here would still find
+        # the page that edit branched *away* from, since `sync_view_after_edit` only catches
+        # `STATE_VIEW_ID` up to it a separate, slightly later round trip.
+        ref = (
+            core.ref_of(experiment_id, core.BasicExperimentPage.model_validate_json(page_json))
+            if page_json is not None
+            else core.PageRef(experiment_id, view_id)
+        )
+        runs, excluded, selected = _load_hparam_panel_settings(store, ref)
         # `STATE_PAGE_STORAGE` changes on *every* page-settings write -- a tab switch, a panel
         # rename, a drag-reorder, none of which this table cares about -- so rebuilding on it
         # unconditionally (tearing down and remounting the ag-grid) flickered on every one of
@@ -419,17 +429,19 @@ def _register_hparam_table(app: Dash) -> None:
         Input(NAVBAR_HPARAM_CONFIRM_COLS_ID, "n_clicks", allow_optional=True),
         State(NAVBAR_HPARAM_COL_SELECT_ID, "value", allow_optional=True),
         State(constants.STATE_EXPERIMENT_ID, "data"),
-        State(core.STATE_VIEW_ID, "data"),
+        State(core.STATE_PAGE_STORAGE, "data"),
         prevent_initial_call=True,
     )
     def persist_selected_hparam_cols(
-        n_clicks: int | None, selected: list[str] | None, experiment_id: int, view_id: int | None
+        n_clicks: int | None, selected: list[str] | None, experiment_id: int, page_json: str
     ) -> str:
         if not n_clicks:
             raise PreventUpdate
         store = get_data_store()
+        # `ref_of`, not `STATE_VIEW_ID` -- see `render_navbar_hparams`'s own comment on why.
+        curr_page = core.BasicExperimentPage.model_validate_json(page_json)
         page = core.persist_settings(
-            store, core.PageRef(experiment_id, view_id), {SELECTED_HPARAM_COLS_KEY: selected or []}
+            store, core.ref_of(experiment_id, curr_page), {SELECTED_HPARAM_COLS_KEY: selected or []}
         )
         return page.model_dump_json()
 
@@ -439,14 +451,14 @@ def _register_hparam_table(app: Dash) -> None:
         Input(NAVBAR_HPARAM_DATATABLE_ID, "selectedRows", allow_optional=True),
         State(NAVBAR_HPARAM_DATATABLE_ID, "rowData", allow_optional=True),
         State(constants.STATE_EXPERIMENT_ID, "data"),
-        State(core.STATE_VIEW_ID, "data"),
+        State(core.STATE_PAGE_STORAGE, "data"),
         prevent_initial_call=True,
     )
     def sync_run_selection(
         selected_rows: list[dict[str, Any]] | dict[str, Any] | None,
         table_data: list[dict[str, Any]] | None,
         experiment_id: int,
-        view_id: int | None,
+        page_json: str,
     ) -> tuple[str, html.Div]:
         if selected_rows is None or table_data is None:
             raise PreventUpdate
@@ -468,15 +480,17 @@ def _register_hparam_table(app: Dash) -> None:
         # with `prevent_initial_call=True`, because that only suppresses the very first page
         # render, not a dynamically-created component (this navbar table isn't in the static
         # layout) mounting later with an already-computed value. Skip the (expensive, chart-
-        # remounting) rebuild when the recomputed set matches what's already persisted.
-        current_page = core.load_page(store, core.PageRef(experiment_id, view_id))
+        # remounting) rebuild when the recomputed set matches what's already persisted. `ref_of`,
+        # not `STATE_VIEW_ID` -- see `render_navbar_hparams`'s own comment on why.
+        ref = core.ref_of(experiment_id, core.BasicExperimentPage.model_validate_json(page_json))
+        current_page = core.load_page(store, ref)
         currently_excluded = current_page.page_settings.get(dfh.EXCLUDED_RUNS_KEY, [])
         if excluded == currently_excluded:
             raise PreventUpdate
 
         page, container = core.persist_settings_and_rerender(
             store,
-            core.PageRef(experiment_id, view_id),
+            ref,
             {dfh.EXCLUDED_RUNS_KEY: excluded},
         )
         return page.model_dump_json(), container

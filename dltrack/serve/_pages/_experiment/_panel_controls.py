@@ -275,7 +275,7 @@ def _register_reorder(app: Dash) -> None:
         new_panels = core.reorder_panel(
             curr_page.panels, request["panel"], request["target"], after=request["after"]
         )
-        updated_page = get_data_store().update_page(curr_page.model_copy(update={"panels": new_panels}))
+        updated_page = core.save_page(get_data_store(), curr_page.model_copy(update={"panels": new_panels}))
         new_container = core.reorder_rendered_panels(container, [p.name for p in new_panels])
         return new_container, updated_page.model_dump_json()
 
@@ -298,7 +298,7 @@ def _register_reorder(app: Dash) -> None:
         new_panels = core.reorder_chart(
             curr_page.panels, panel_name, index, target_index, after=request["after"]
         )
-        updated_page = get_data_store().update_page(curr_page.model_copy(update={"panels": new_panels}))
+        updated_page = core.save_page(get_data_store(), curr_page.model_copy(update={"panels": new_panels}))
         new_order = core.move_index(
             list(range(len(panel.charts))), index, target_index, after=request["after"]
         )
@@ -486,6 +486,12 @@ def _register_chart_panel_move(app: Dash) -> None:
         return container, page.model_dump_json()
 
 
+def _panels_with_renamed_panel(
+    panels: list[PanelInstance[Any, Any]], *, old_name: str, new_name: str
+) -> list[PanelInstance[Any, Any]]:
+    return [p.model_copy(update={"name": new_name}) if p.name == old_name else p for p in panels]
+
+
 def _register_rename(app: Dash) -> None:
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(core.RENAME_PANEL_MODAL_ID, "opened", allow_duplicate=True),
@@ -528,27 +534,24 @@ def _register_rename(app: Dash) -> None:
         if core.panel_name_taken(curr_page.panels, new_name, ignore=old_name):
             return no_update, no_update, no_update, f"A panel named {new_name!r} already exists"
 
-        new_panels = [
-            p.model_copy(update={"name": new_name}) if p.name == old_name else p for p in curr_page.panels
-        ]
         # Carry the rename into OPEN_PANEL_KEY too, so a currently-open panel doesn't appear to
         # collapse just because its name changed underneath it.
         open_panel = curr_page.page_settings.get(core.OPEN_PANEL_KEY)
-        new_settings = dict(curr_page.page_settings)
+        extra_settings: dict[str, Any] = {}
         if isinstance(open_panel, list):
             # Panel names (and so OPEN_PANEL_KEY) are always strings; page_settings' value type is
             # broader (shared by every settings key), hence the cast.
             open_panel = cast("list[str]", open_panel)
-            new_settings[core.OPEN_PANEL_KEY] = [new_name if v == old_name else v for v in open_panel]
+            extra_settings[core.OPEN_PANEL_KEY] = [new_name if v == old_name else v for v in open_panel]
         elif open_panel == old_name:
-            new_settings[core.OPEN_PANEL_KEY] = new_name
+            extra_settings[core.OPEN_PANEL_KEY] = new_name
 
-        store = get_data_store()
-        curr_page = store.update_page(
-            curr_page.model_copy(update={"panels": new_panels, "page_settings": new_settings})
+        page, container = core.mutate_panels_and_rerender(
+            rename_ctx["page_json"],
+            lambda panels: _panels_with_renamed_panel(panels, old_name=old_name, new_name=new_name),
+            extra_settings=extra_settings,
         )
-        container = core.accordion_view(store, cast("core.BasicExperimentPage", curr_page))
-        return container, curr_page.model_dump_json(), False, ""
+        return container, page.model_dump_json(), False, ""
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(core.RENAME_PANEL_MODAL_ID, "opened", allow_duplicate=True),
@@ -559,6 +562,27 @@ def _register_rename(app: Dash) -> None:
         if not n_clicks:
             raise PreventUpdate
         return False
+
+
+def _panels_with_new_tab(
+    panels: list[PanelInstance[Any, Any]], *, name: str, panel_names: set[str]
+) -> list[PanelInstance[Any, Any]]:
+    """
+    `panels`, moving each named in `panel_names` onto tab `name`.
+
+    If none were picked, adds a fresh empty panel on that tab instead, so there's always somewhere
+    to drop a chart right away.
+    """
+    new_panels = [p.model_copy(update={"tab": name}) if p.name in panel_names else p for p in panels]
+    if not panel_names:
+        new_panels.append(PanelInstance(name=core.unique_panel_name(panels, name), tab=name))
+    return new_panels
+
+
+def _panels_with_renamed_tab(
+    panels: list[PanelInstance[Any, Any]], *, old_name: str, new_name: str
+) -> list[PanelInstance[Any, Any]]:
+    return [p.model_copy(update={"tab": new_name}) if p.tab == old_name else p for p in panels]
 
 
 def _new_tab_error(name: str, panels: list[PanelInstance[Any, Any]]) -> str | None:
@@ -625,19 +649,12 @@ def _register_new_tab(app: Dash) -> None:
             return no_update, no_update, no_update, error
 
         selected = set(panel_names)
-        new_panels: list[PanelInstance[Any, Any]] = [
-            p.model_copy(update={"tab": name}) if p.name in selected else p for p in curr_page.panels
-        ]
-        if not selected:
-            new_panels.append(PanelInstance(name=core.unique_panel_name(curr_page.panels, name), tab=name))
-        new_settings = {**curr_page.page_settings, core.ACTIVE_TAB_KEY: name}
-
-        store = get_data_store()
-        curr_page = store.update_page(
-            curr_page.model_copy(update={"panels": new_panels, "page_settings": new_settings})
+        page, container = core.mutate_panels_and_rerender(
+            new_tab_ctx["page_json"],
+            lambda panels: _panels_with_new_tab(panels, name=name, panel_names=selected),
+            extra_settings={core.ACTIVE_TAB_KEY: name},
         )
-        container = core.accordion_view(store, cast("core.BasicExperimentPage", curr_page))
-        return container, curr_page.model_dump_json(), False, ""
+        return container, page.model_dump_json(), False, ""
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(core.NEW_TAB_MODAL_ID, "opened", allow_duplicate=True),
@@ -705,20 +722,15 @@ def _register_rename_tab(app: Dash) -> None:
         if error:
             return no_update, no_update, no_update, error
 
-        new_panels = [
-            p.model_copy(update={"tab": new_name}) if p.tab == old_name else p for p in curr_page.panels
-        ]
         active_tab = curr_page.page_settings.get(core.ACTIVE_TAB_KEY)
-        new_settings = dict(curr_page.page_settings)
-        if active_tab == old_name:
-            new_settings[core.ACTIVE_TAB_KEY] = new_name
+        extra_settings = {core.ACTIVE_TAB_KEY: new_name} if active_tab == old_name else {}
 
-        store = get_data_store()
-        curr_page = store.update_page(
-            curr_page.model_copy(update={"panels": new_panels, "page_settings": new_settings})
+        page, container = core.mutate_panels_and_rerender(
+            rename_ctx["page_json"],
+            lambda panels: _panels_with_renamed_tab(panels, old_name=old_name, new_name=new_name),
+            extra_settings=extra_settings,
         )
-        container = core.accordion_view(store, cast("core.BasicExperimentPage", curr_page))
-        return container, curr_page.model_dump_json(), False, ""
+        return container, page.model_dump_json(), False, ""
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(core.RENAME_TAB_MODAL_ID, "opened", allow_duplicate=True),
