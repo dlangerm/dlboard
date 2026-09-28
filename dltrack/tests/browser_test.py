@@ -47,7 +47,7 @@ from dltrack.serve._pages._experiment._experiment_page_state import (
     RENAME_TAB_NAME_INPUT_ID,
     BasicExperimentPage,
 )
-from dltrack.serve._pages._experiment._notes import NOTES_COUNT_ID
+from dltrack.serve._pages._experiment._notes import NOTES_COUNT_ID, NOTES_THREAD_ID
 from dltrack.serve._pages._experiment._run_comparison_table import (
     NAVBAR_HPARAM_COL_SELECT_ID,
     NAVBAR_HPARAM_COLUMNS_TOGGLE_ID,
@@ -1475,21 +1475,25 @@ def test_notes_post_to_the_thread_and_arrive_live_from_others(
 
     page.get_by_role("button", name=re.compile("^Notes")).click()
     drawer = page.get_by_role("dialog", name="Notes")
-    expect(drawer.get_by_text("No notes yet")).to_be_visible()
+    # Scoped to the thread itself, not the whole drawer -- the drawer also holds the compose
+    # textarea, which still holds this same text for a moment after posting (until `post_note`'s
+    # own response clears it), and a bare `drawer.get_by_text(...)` would match both.
+    thread = drawer.locator(f"#{NOTES_THREAD_ID}")
+    expect(thread.get_by_text("No notes yet")).to_be_visible()
     drawer.get_by_role("textbox", name="Note").fill("baseline diverges after step 40")
     drawer.get_by_placeholder("About runs…").click()
     page.get_by_role("option", name="baseline-run").click()
     drawer.get_by_role("button", name="Post").click()
 
-    expect(drawer.get_by_text("baseline diverges after step 40")).to_be_visible()
+    expect(thread.get_by_text("baseline diverges after step 40")).to_be_visible()
     expect(
-        drawer.locator(".mantine-Badge-root", has=page.locator(".dl-swatch"), has_text="baseline-run")
+        thread.locator(".mantine-Badge-root", has=page.locator(".dl-swatch"), has_text="baseline-run")
     ).to_be_visible()
     expect(page.locator(f"#{NOTES_COUNT_ID}")).to_have_text("1")
 
     store = get_data_store()
     colleague = store.get_or_create_user("colleague")
     store.add_comment(models.NewComment(experiment_id=experiment_id, author_id=colleague.id, body="agreed"))
-    expect(drawer.get_by_text("agreed")).to_be_visible(timeout=10_000)  # one live-poll tick away
+    expect(thread.get_by_text("agreed")).to_be_visible(timeout=10_000)  # one live-poll tick away
     expect(page.locator(f"#{NOTES_COUNT_ID}")).to_have_text("2")
     assert console_errors == []
