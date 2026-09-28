@@ -129,15 +129,29 @@ def in_clause(
     return f"AND {column} {'NOT IN' if negate else 'IN'} ({placeholders})", params
 
 
-def create_index_sql(model: type[BaseModel], columns: list[str], *, index_name: str | None = None) -> str:
+def create_index_sql(
+    model: type[BaseModel],
+    columns: list[str],
+    *,
+    index_name: str | None = None,
+    unique: bool = False,
+    where: str | None = None,
+) -> str:
+    """
+    `CREATE INDEX IF NOT EXISTS` over `columns`; `unique` and `where` build a partial unique index.
+
+    A partial unique index (`unique=True` with a `where`) enforces "at most one row matching this
+    condition" -- e.g. at most one row per scope column with `owner_id IS NULL` -- the same
+    constraint a plain `UNIQUE(column)` can't express since it's conditional, not global.
+    """
     for c in columns:
         if c not in model.model_fields:
             msg = f"{c} not present in model"
             raise AssertionError(msg)
     name = index_name or f"idx_{model.__name__}_{'_'.join(columns)}"
     raw = f"""
-    CREATE INDEX IF NOT EXISTS {name}
-    ON {model.__name__} ({",".join(columns)});
+    CREATE {"UNIQUE " if unique else ""}INDEX IF NOT EXISTS {name}
+    ON {model.__name__} ({",".join(columns)}){f" WHERE {where}" if where else ""};
     """
     _log.debug("Create index sql: %s", raw)
     return raw
