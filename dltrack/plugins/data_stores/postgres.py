@@ -20,7 +20,7 @@ from pydantic import NonNegativeInt, PositiveFloat, PositiveInt, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.dialects import postgresql
 
-from dltrack.serve import SQLStoreBase, set_data_store
+from dltrack.serve import SqlDialect, SQLStoreBase, set_data_store, set_sql_store
 
 if TYPE_CHECKING:
     from dash import Dash
@@ -80,6 +80,13 @@ class PostgresSettings(BaseSettings):
     connect_args: dict[str, str] = {}
     """Any other libpq connection parameter (as a JSON object), e.g. `{"sslcrl": "/etc/ssl/crl.pem"}`."""
 
+    extensions: list[str] = []
+    """
+    Postgres extensions to `CREATE EXTENSION IF NOT EXISTS` at startup (a JSON list), e.g. `["vector"]`
+    for a plugin that stores pgvector columns. Needs the privilege to create them; on a managed
+    database where an administrator pre-creates extensions instead, leave this empty.
+    """
+
     def libpq_connect_args(self) -> dict[str, Any]:
         """Everything psycopg's `connect()` gets: libpq parameters, plus psycopg's own `prepare_threshold`."""
         # Every session in UTC, so timestamps read back with a UTC offset whatever the server's own TimeZone is.
@@ -114,6 +121,8 @@ class PostgresSettings(BaseSettings):
 class PostgresStore(SQLStoreBase[PostgresSettings]):
     """Use a Postgres database as the data store."""
 
+    dialect = SqlDialect.POSTGRES
+
     def __init__(self, settings: PostgresSettings) -> None:
         """Connect with `settings`, and create/migrate dltrack's schema in it."""
         engine = sa.create_engine(
@@ -127,6 +136,7 @@ class PostgresStore(SQLStoreBase[PostgresSettings]):
             pool_recycle=settings.pool_recycle_s,
             pool_pre_ping=settings.pool_pre_ping,
         )
+        self._extensions = settings.extensions
         super().__init__(engine, schema=settings.db_schema)
 
     @override
@@ -136,7 +146,7 @@ class PostgresStore(SQLStoreBase[PostgresSettings]):
     @override
     def _prepare_schema(self, conn: sa.Connection) -> None:
         """
-        Serialize schema creation across processes, then make sure the schema itself exists.
+        Serialize schema creation across processes, then make sure the schema and extensions exist.
 
         Every worker process starts up against the same database at once, and concurrent
         `CREATE TABLE IF NOT EXISTS` for the same table can fail on Postgres (a unique violation in
@@ -145,6 +155,10 @@ class PostgresStore(SQLStoreBase[PostgresSettings]):
         """
         conn.execute(sa.select(sa.func.pg_advisory_xact_lock(_SCHEMA_LOCK_KEY)))
         conn.execute(sa.schema.CreateSchema(self._metadata.schema or "public", if_not_exists=True))
+        for extension in self._extensions:
+            conn.execute(
+                sa.text(f"CREATE EXTENSION IF NOT EXISTS {conn.dialect.identifier_preparer.quote(extension)}")
+            )
 
     @classmethod
     def get_or_create(cls, settings: PostgresSettings) -> PostgresStore:
@@ -154,4 +168,6 @@ class PostgresStore(SQLStoreBase[PostgresSettings]):
 
 def plug(app: Dash) -> None:
     """Plugin content."""
-    set_data_store(app, PostgresStore.get_or_create(PostgresSettings()))
+    store = PostgresStore.get_or_create(PostgresSettings())
+    set_data_store(app, store)
+    set_sql_store(app, store)

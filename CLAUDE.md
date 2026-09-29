@@ -119,7 +119,9 @@ logic is a narrow exception: it references concrete chart classes to decide what
    and implements `_insert_ignoring_conflicts`; `plugins/data_stores/sqlite.py` is the reference one, and
    `filesystem.py` supplies artifact blob storage on disk. There is no migration system: startup creates
    missing tables and backfills missing columns (`_add_missing_columns`), and existing sqlite databases keep
-   their on-disk format (`serve/_backend/tests/legacy_schema.sql` guards that).
+   their on-disk format (`serve/_backend/tests/legacy_schema.sql` guards that). A plugin can keep its own tables in the
+   same database via `get_sql_store(app)` (`engine`, `metadata`, `tables`, `create_tables`, and a `SqlDialect` to
+   `match` on for backend-specific features like pgvector) -- see `docs/plugins/storage.md`.
 
 ### Server-side app (Dash)
 

@@ -5,7 +5,8 @@ from __future__ import annotations
 import itertools
 import json
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Literal
+from enum import StrEnum
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 import pendulum
 import sqlalchemy as sa
@@ -26,6 +27,20 @@ _log = get_logger(__name__)
 
 type AnyRow = sa.Row[*tuple[Any, ...]]
 """A result row of any shape -- `Row` is generic over its columns' types, which raw aggregates don't pin down."""
+
+
+class SqlDialect(StrEnum):
+    """
+    Which database a `SQLStoreBase` runs on (its `dialect`).
+
+    For a plugin that uses a database-specific feature where it exists -- e.g. pgvector columns
+    on Postgres -- and falls back elsewhere: `match store.dialect` with no default case, so a new
+    backend is a type error in that plugin rather than a silent fallback.
+    """
+
+    SQLITE = "sqlite"
+    POSTGRES = "postgres"
+
 
 _OWNS = ForeignKeyKind.OWNERSHIP
 
@@ -188,8 +203,14 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
     The full `DataStore` contract over any database SQLAlchemy has a dialect for.
 
     A concrete store supplies only an `Engine` (connection handling, pooling, per-connection
-    setup) and `_insert_ignoring_conflicts` -- the one statement SQLAlchemy spells per dialect.
+    setup), its `dialect`, and `_insert_ignoring_conflicts` -- the one statement SQLAlchemy spells
+    per dialect.
+
+    A plugin can keep its own tables in the same database, using whatever that database offers
+    (`engine`, `metadata`, `tables`, `create_tables`) -- see `docs/plugins/storage.md`.
     """
+
+    dialect: ClassVar[SqlDialect]
 
     def __init__(self, engine: sa.Engine, *, schema: str | None = None) -> None:
         """Declare every table on one `MetaData`, then create/migrate the schema in one transaction."""
@@ -247,8 +268,39 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
 
     @property
     def tables(self) -> Mapping[type[BaseModel], sa.Table]:
-        """Every table this store manages, keyed by the pydantic model it stores."""
+        """
+        Every table this store manages, keyed by the pydantic model it stores.
+
+        A plugin's own table can reference these -- e.g. `sa.ForeignKey(tables[models.Run].c.id,
+        ondelete="CASCADE")`, so purging a run removes the plugin's rows for it too.
+        """
         return self._tables
+
+    @property
+    def engine(self) -> sa.Engine:
+        """The engine (and connection pool) every query runs through, for a plugin's own queries."""
+        return self._engine
+
+    @property
+    def metadata(self) -> sa.MetaData:
+        """The `MetaData` every table is declared on -- declare a plugin's own tables here, then `create_tables`."""
+        return self._metadata
+
+    def create_tables(self, *tables: sa.Table) -> None:
+        """
+        Create a plugin's own `tables` (declared on `metadata`) if missing, the way the store's own are.
+
+        Idempotent, and safe for every worker process to call at startup: it runs under the same
+        `_prepare_schema` as the store's own tables, adds any column a table is missing (see
+        `_add_missing_columns`), and creates any index declared on it that doesn't exist yet.
+        """
+        with self._engine.begin() as conn:
+            self._prepare_schema(conn)
+            self._metadata.create_all(conn, tables=list(tables))
+            for table in tables:
+                self._add_missing_columns(conn, table)
+                for index in table.indexes:
+                    index.create(conn, checkfirst=True)
 
     def dispose(self) -> None:
         """Close every connection this store's pool holds open (a later call just opens new ones)."""

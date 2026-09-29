@@ -70,12 +70,12 @@ def test_store_lives_in_its_schema_with_utc_sessions_and_no_password_in_the_engi
 ) -> None:
     store = PostgresStore(postgres_settings)
     try:
-        with store._engine.connect() as conn:
+        with store.engine.connect() as conn:
             tables = set(sa.inspect(conn).get_table_names(schema=postgres_settings.db_schema))
             timezone = conn.execute(sa.text("SHOW TimeZone")).scalar_one()
         assert {table.name for table in store.tables.values()} <= tables
         assert timezone == "UTC"
-        assert str(store._engine.url) == "postgresql+psycopg://"
+        assert str(store.engine.url) == "postgresql+psycopg://"
     finally:
         store.dispose()
 
@@ -108,3 +108,14 @@ def test_workers_starting_at_once_against_a_fresh_schema_all_come_up(
     finally:
         for store in stores:
             store.dispose()
+
+
+@pytest.mark.postgres
+def test_configured_extensions_are_created_at_startup(postgres_settings: PostgresSettings) -> None:
+    store = PostgresStore(postgres_settings.model_copy(update={"extensions": ["citext"]}))
+    try:
+        with store.engine.connect() as conn:
+            installed = conn.execute(sa.text("SELECT extname FROM pg_extension")).scalars().all()
+        assert "citext" in installed
+    finally:
+        store.dispose()

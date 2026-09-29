@@ -11,7 +11,7 @@ from sqlalchemy import event
 from sqlalchemy.dialects import sqlite
 from sqlalchemy.pool import NullPool
 
-from dltrack.serve import SQLStoreBase, set_data_store
+from dltrack.serve import SqlDialect, SQLStoreBase, set_data_store, set_sql_store
 
 if TYPE_CHECKING:
     import sqlite3
@@ -53,6 +53,8 @@ def _configure_connection(dbapi_connection: sqlite3.Connection, _record: object)
 class SQLLiteStore(SQLStoreBase[Path]):
     """Use a sqllite database as the data store."""
 
+    dialect = SqlDialect.SQLITE
+
     def __init__(self, location: Path, busy_timeout_ms: int = DEFAULT_BUSY_TIMEOUT_MS) -> None:
         """Initialize."""
         self._location = location
@@ -81,4 +83,6 @@ class AppSettings(BaseSettings):
 def plug(app: Dash) -> None:
     """Plugin content."""
     env = AppSettings()
-    set_data_store(app, SQLLiteStore.get_or_create(env.sqlite_location, env.sqlite_busy_timeout_ms))
+    store = SQLLiteStore.get_or_create(env.sqlite_location, env.sqlite_busy_timeout_ms)
+    set_data_store(app, store)
+    set_sql_store(app, store)

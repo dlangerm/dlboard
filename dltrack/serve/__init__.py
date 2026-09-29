@@ -6,13 +6,15 @@ from dltrack.serve._backend._auth import get_auth_provider, get_current_user, se
 from dltrack.serve._backend._data_store import (
     get_artifact_store,
     get_data_store,
+    get_sql_store,
     set_artifact_store,
     set_data_store,
+    set_sql_store,
     wait_for_artifact_store,
     wait_for_data_store,
 )
 from dltrack.serve._backend._installed_plugins import get_installed_plugins, set_installed_plugins
-from dltrack.serve._backend._sql_store_base import SQLStoreBase
+from dltrack.serve._backend._sql_store_base import SqlDialect, SQLStoreBase
 from dltrack.serve._backend._theme import get_theme, set_theme
 from dltrack.serve._clientside_script import ClientsideScript
 from dltrack.serve._icons import Icon, icon, icon_cell_class
@@ -26,12 +28,14 @@ __all__ = [
     "ClientsideScript",
     "Icon",
     "SQLStoreBase",
+    "SqlDialect",
     "app",
     "get_artifact_store",
     "get_auth_provider",
     "get_current_user",
     "get_data_store",
     "get_installed_plugins",
+    "get_sql_store",
     "get_theme",
     "icon",
     "icon_cell_class",
@@ -45,6 +49,7 @@ __all__ = [
     "set_data_store",
     "set_installed_plugins",
     "set_setting_env",
+    "set_sql_store",
     "set_theme",
     "sql",
     "wait_for_artifact_store",
