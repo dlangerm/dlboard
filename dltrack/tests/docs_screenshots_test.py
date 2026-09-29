@@ -14,6 +14,7 @@ Run with `--screenshots=check` (compare) or `--screenshots=update` (overwrite `d
 from __future__ import annotations
 
 import io
+import re
 import time
 from enum import StrEnum
 from pathlib import Path
@@ -73,6 +74,7 @@ class DocScreenshot(StrEnum):
     JUMP_PALETTE = "jump-palette"
     EXPERIMENT_CHARTS = "experiment-charts"
     IMAGE_SERIES = "image-series"
+    PERSONAL_VIEWS = "personal-views"
 
     @property
     def path(self) -> Path:
@@ -101,6 +103,7 @@ class Demo(NamedTuple):
     url: str
     project_id: int
     experiment_id: int
+    baseline_experiment_id: int
     n_projects: int
     n_experiments: int
 
@@ -139,7 +142,9 @@ def demo(live_server_url: str, dltrack_app: Dash, tmp_path_factory: pytest.TempP
     project("text-summarization", "Fine-tuning small seq2seq models on long-form documents.")
     sweep = experiment(main.id, _EXPERIMENT_NAME, "Learning-rate sweep with AdamW, 60 steps per run.")
     experiment(main.id, "augmentation-ablation", "Which of RandAugment, MixUp and CutMix earns its keep.")
-    experiment(main.id, "baseline", "The reference run every other experiment is compared against.")
+    baseline = experiment(
+        main.id, "baseline", "The reference run every other experiment is compared against."
+    )
 
     for index, config in enumerate(_SWEEP):
         run = api.create_run(
@@ -179,6 +184,25 @@ def demo(live_server_url: str, dltrack_app: Dash, tmp_path_factory: pytest.TempP
             for step in _IMAGE_STEPS
         ]
         api.log_artifact_batch([artifact for artifact, _ in converted], [path for _, path in converted])
+
+    # Kept separate from `sweep` (which every other scene charts and forks personal views off of) so
+    # the PERSONAL_VIEWS scene's own view picker only ever shows what it creates itself. Seeded after
+    # the sweep's own runs so it doesn't shift their default "Run N" numbering.
+    baseline_run = api.create_run(models.NewRun(experiment_id=baseline.id, created_at=_T0))
+    baseline_steps = np.arange(20)
+    baseline_loss = 0.4 + 1.5 * np.exp(-baseline_steps * 0.05) + rng.normal(0, 0.02, 20)
+    api.log_metric_batch(
+        [
+            models.LoggedMetrics(
+                experiment_id=baseline.id,
+                run_id=baseline_run.id,
+                step=int(step),
+                metrics={"loss": float(baseline_loss[step])},
+                timestamp_utc=_T0.add(minutes=int(step)),
+            )
+            for step in baseline_steps
+        ]
+    )
     # The server records uploaded artifacts on a background batch (see `FSArtifactStore`), so
     # they land shortly after the uploads above return.
     store = get_data_store(dltrack_app)
@@ -188,7 +212,7 @@ def demo(live_server_url: str, dltrack_app: Dash, tmp_path_factory: pytest.TempP
         assert time.monotonic() < deadline, "the demo artifacts were never recorded"
         time.sleep(0.2)
     try:
-        yield Demo(live_server_url, main.id, sweep.id, n_projects=3, n_experiments=3)
+        yield Demo(live_server_url, main.id, sweep.id, baseline.id, n_projects=3, n_experiments=3)
     finally:
         monkeypatch.undo()
 
@@ -216,9 +240,15 @@ def _open_charted_experiment(page: Page, demo: Demo) -> None:
     button = page.get_by_role("button", name="Auto-generate charts")
     if button.count():
         button.click()
+        # Auto-generating from the shared page branches into a view of your own (see `save_page`),
+        # and the panels render a beat before that branch's own second round trip -- sync_view_after_edit
+        # reacting to the first callback's own `STATE_PAGE_STORAGE` write -- lands and updates the view
+        # picker and URL. Without waiting for it here, a screenshot can land in that gap and flakily
+        # show "Shared view" instead of the branched view's name, depending on nothing but timing.
+        expect(page).to_have_url(re.compile(r"\?view=\d+$"))
 
 
-def _stage(shot: DocScreenshot, page: Page, demo: Demo) -> Page | Locator:
+def _stage(shot: DocScreenshot, page: Page, demo: Demo) -> Page | Locator:  # noqa: PLR0911 -- one case per screenshot, kept exhaustive
     """Drive the real UI to `shot`'s state, and return what to photograph."""
     match shot:
         case DocScreenshot.HOME:
@@ -254,6 +284,25 @@ def _stage(shot: DocScreenshot, page: Page, demo: Demo) -> Page | Locator:
             expect(panel).to_be_visible()
             page.wait_for_function("[...document.images].every(i => i.complete && i.naturalWidth > 0)")
             return panel
+        case DocScreenshot.PERSONAL_VIEWS:
+            # A dedicated experiment, untouched by any other scene, so this view picker only ever
+            # shows what this scene itself creates. Saved as a view *before* generating any charts
+            # (while it's still an empty copy of the shared page) and populated from inside it --
+            # already owning it by then, so that edit lands in place instead of branching again.
+            page.goto(f"{demo.url}/experiment/{demo.baseline_experiment_id}")
+            expect(page.locator(f"#{PAGE_EXPERIMENT_ID}")).to_be_visible()
+            page.get_by_role("button", name="View actions").click()
+            page.get_by_role("menuitem", name="Save as a new view…").click()
+            page.get_by_role("textbox", name="View name").fill("Just the loss curve")
+            page.get_by_role("button", name="Save view").click()
+            expect(page).to_have_url(re.compile(r"\?view=\d+$"))
+            view_select = page.get_by_role("textbox", name="View", exact=True)
+            expect(view_select).to_have_value("Just the loss curve")
+            page.get_by_role("button", name="Auto-generate charts").click()
+            expect(page.locator(".dl-panel-body svg").first).to_be_visible()
+            view_select.click()
+            expect(page.get_by_role("option", name="Shared view", exact=True)).to_be_visible()
+            return page
 
 
 def _stable_screenshot(target: Page | Locator) -> bytes:

@@ -20,6 +20,11 @@ Browse projects and their experiments, compare runs side by side, and step throu
 
 ![A confusion matrix logged at each step, one image per run](docs/images/image-series.png)
 
+Save your own layout as a personal view — rearranging panels or filtering runs there never
+touches the shared page everyone else sees:
+
+![The view picker, with a personal view saved alongside the shared view](docs/images/personal-views.png)
+
 ## Running it
 
 Installed as a package (e.g. `uv tool install dltrack` or `pip install dltrack`), dltrack gives
