@@ -31,6 +31,7 @@ dependencies = [
   "pydantic-settings>=2.14.2",
   "pytorch-lightning>=2.6.5",
   "rich>=15.0.0",
+  "sqlalchemy>=2.0.40",
   "structlog>=26.1.0"
 ]
 description = "A free, self-hosted experiment-tracking server."
@@ -205,6 +206,11 @@ ignore_names = [
   # same "read structurally, not by attribute" story as above, scoped to their test models.
   "created",
   "parent_id",
+  "score",
+  # SQLAlchemy's `TypeDecorator` contract (`_sql.UTCDateTime`) -- class attributes SQLAlchemy reads
+  # off the type itself, never referenced by name in our own code.
+  "impl",
+  "cache_ok",
   # `plugins/backend/tests/rest_backend_test.py`'s `_FakeServer.add_url_rule` -- a keyword-only
   # parameter that has to keep this exact name to stand in for the real `Flask.add_url_rule`
   # signature, even though the fake's body never reads it.

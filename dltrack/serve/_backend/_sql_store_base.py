@@ -5,10 +5,10 @@ from __future__ import annotations
 import itertools
 import json
 from abc import ABC, abstractmethod
-from collections.abc import Iterable
-from typing import TYPE_CHECKING, Any, Iterator, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal
 
 import pendulum
+import sqlalchemy as sa
 from pydantic import BaseModel
 from structlog.stdlib import get_logger
 
@@ -18,10 +18,14 @@ from dltrack.serve._backend._app_state import APP_STATE_ROW_ID, AppState
 from dltrack.serve._backend._foreign_keys import ForeignKey, ForeignKeyKind
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable, Iterator, Mapping
+    from datetime import datetime
 
 
 _log = get_logger(__name__)
+
+type AnyRow = sa.Row[*tuple[Any, ...]]
+"""A result row of any shape -- `Row` is generic over its columns' types, which raw aggregates don't pin down."""
 
 _OWNS = ForeignKeyKind.OWNERSHIP
 
@@ -31,8 +35,6 @@ _OWNS = ForeignKeyKind.OWNERSHIP
 # single source of truth for both SQL schema generation and cascade behavior -- see
 # `_foreign_keys.py` -- so a new owned table only ever needs one entry here, not one hardcoded
 # cascade list per delete/restore/purge entry point.
-#
-# Ordered so that a referenced table is always created before the table that references it.
 FOREIGN_KEYS: dict[type[BaseModel], dict[str, ForeignKey]] = {
     models.Project: {
         "created_by": ForeignKey(models.User),
@@ -81,6 +83,7 @@ UNIQUE_COLUMNS: dict[type[BaseModel], list[str]] = {
 
 # Dependency order: every table appears after the tables its foreign keys point to.
 TABLES: tuple[type[BaseModel], ...] = (
+    AppState,
     models.User,
     models.Project,
     models.Experiment,
@@ -103,19 +106,32 @@ SOFT_DELETABLE: frozenset[type[BaseModel]] = frozenset(
     {models.Project, models.Experiment, models.Run, models.Artifact}
 )
 
+# Indexes the raw-SQL store used to create under column-list names -- too long for Postgres' 63-char
+# identifier limit, so they're now named for what they're for instead. A sqlite database from before
+# that still has the old ones: dropped once at startup, replaced by the renamed equivalents.
+_LEGACY_INDEXES: tuple[str, ...] = (
+    "idx_UnderlyingMetricTableEntry_key_experiment_id_run_id_step_timestamp_utc",
+    "idx_Artifact_key_fname_run_id_experiment_id_step_created_by_created_at_ref_deleted_by_deleted_at",
+)
+
+type CascadePath = tuple[tuple[type[BaseModel], str], ...]
+"""
+The ownership edges from a cascade's root down to one descendant table, root-most first: each is
+`(table, its foreign-key column pointing at the previous table)`. The last one is the descendant.
+"""
+
 
 def _cascade_targets(
     root: type[BaseModel], *, within: frozenset[type[BaseModel]] | None = None
-) -> list[tuple[type[BaseModel], str]]:
+) -> list[CascadePath]:
     """
     Breadth-first walk of the `OWNERSHIP` foreign-key graph (see `FOREIGN_KEYS`) starting at `root`.
 
-    Returns every descendant table paired with a SQL WHERE clause (referencing `:id`, the root
-    row's id) that selects that table's rows under `root`. `within`, if given, prunes the walk to
-    only tables in that set (e.g. `SOFT_DELETABLE`) -- a table outside it is skipped entirely,
-    neither returned nor recursed into, since it and everything under it are irrelevant to why
-    `within` was passed (e.g. `Page` has no `deleted_at` to filter on, so a soft-delete/restore
-    cascade must never touch it even though it's directly owned by `Project`).
+    Returns the path to every descendant table. `within`, if given, prunes the walk to only
+    tables in that set (e.g. `SOFT_DELETABLE`) -- a table outside it is skipped entirely, neither
+    returned nor recursed into, since it and everything under it are irrelevant to why `within`
+    was passed (e.g. `Page` has no `deleted_at` to filter on, so a soft-delete/restore cascade must
+    never touch it even though it's directly owned by `Project`).
 
     This is the single place "what belongs to what" is resolved for soft-delete/restore cascades
     and for purge's audit-log counts: adding a new owned table to `FOREIGN_KEYS` is enough for it to
@@ -127,31 +143,21 @@ def _cascade_targets(
         for column, fk in columns.items()
         if fk.kind is ForeignKeyKind.OWNERSHIP
     ]
-    results: list[tuple[type[BaseModel], str]] = []
-    frontier: list[tuple[type[BaseModel], str]] = [(root, "id = :id")]
+    results: list[CascadePath] = []
+    frontier: list[tuple[type[BaseModel], CascadePath]] = [(root, ())]
     while frontier:
-        parent, parent_where = frontier.pop(0)
-        for child, column, parent_table in edges:
-            if parent_table is not parent:
+        parent, path = frontier.pop(0)
+        for child, column, parent_model in edges:
+            if parent_model is not parent or (within is not None and child not in within):
                 continue
-            if within is not None and child not in within:
-                continue
-            where = (
-                f"{column} = :id"
-                if parent is root
-                else f"{column} IN (SELECT id FROM {parent.__name__} WHERE {parent_where})"
-            )
-            results.append((child, where))
-            frontier.append((child, where))
+            child_path = (*path, (child, column))
+            results.append(child_path)
+            frontier.append((child, child_path))
     return results
 
 
 type PageScopeField = Literal["run_id", "experiment_id", "project_id"]
-"""
-The column a `Page` is scoped by -- typed, not a bare `str`, so pyright (not a runtime check) is
-what stops one of the raw SQL statements below from ever interpolating anything else as a column
-name, even if a future edit adds another caller.
-"""
+"""The column a `Page` is scoped by -- typed, not a bare `str`, so only these three ever reach a query."""
 
 PAGE_SCOPE_FIELDS: tuple[PageScopeField, ...] = ("run_id", "experiment_id", "project_id")
 
@@ -178,192 +184,163 @@ def _resolve_page_scope(
 
 
 class SQLStoreBase[T](ABC, models.DataStore[T]):
-    """Use any sql-compatible database as the data store."""
+    """
+    The full `DataStore` contract over any database SQLAlchemy has a dialect for.
 
-    def __init__(self) -> None:
-        """Initialize the underlying tables."""
-        list(self._execute_raw_sql(sql.create_table_sql(AppState)))
-        list(
-            self._execute_raw_sql(
-                f"INSERT OR IGNORE INTO {AppState.__name__} (id, bootstrap_admin_assigned) "
-                f"VALUES ({APP_STATE_ROW_ID}, 0);"
+    A concrete store supplies only an `Engine` (connection handling, pooling, per-connection
+    setup) and `_insert_ignoring_conflicts` -- the one statement SQLAlchemy spells per dialect.
+    """
+
+    def __init__(self, engine: sa.Engine, *, schema: str | None = None) -> None:
+        """Declare every table on one `MetaData`, then create/migrate the schema in one transaction."""
+        self._engine = engine
+        self._metadata = sa.MetaData(schema=schema)
+        self._tables: dict[type[BaseModel], sa.Table] = {}
+        for model in TABLES:
+            self._tables[model] = sql.table_for(
+                model, self._metadata, self._tables, FOREIGN_KEYS.get(model), UNIQUE_COLUMNS.get(model)
             )
+        metrics, artifacts, pages = (
+            self._tables[m] for m in (models.UnderlyingMetricTableEntry, models.Artifact, models.Page)
         )
+        indexes = [
+            sa.Index("idx_metric_lookup", *(c for c in metrics.c if c.name not in ("id", "value"))),
+            sa.Index("idx_artifact_lookup", *(c for c in artifacts.c if c.name not in ("id", "tags"))),
+            # At most one *shared* page (owner_id NULL) per scope -- exactly what
+            # `get_or_create_page` relies on to make its own check-then-insert race-safe.
+            *(
+                sa.Index(
+                    f"idx_Page_shared_{field}",
+                    pages.c[field],
+                    unique=True,
+                    sqlite_where=pages.c.owner_id.is_(None),
+                    postgresql_where=pages.c.owner_id.is_(None),
+                )
+                for field in PAGE_SCOPE_FIELDS
+            ),
+        ]
 
-        for table in TABLES:
-            list(
-                self._execute_raw_sql(
-                    sql.create_table_sql(table, FOREIGN_KEYS.get(table), UNIQUE_COLUMNS.get(table))
+        with engine.begin() as conn:
+            self._lock_schema(conn)
+            self._metadata.create_all(conn)
+            for table in self._tables.values():
+                self._add_missing_columns(conn, table)
+            for name in _LEGACY_INDEXES:
+                conn.execute(sa.text(f"DROP INDEX IF EXISTS {conn.dialect.identifier_preparer.quote(name)}"))
+            # A database that hit `get_or_create_page`'s race before the shared-page index existed
+            # would otherwise fail to create it at all (the database validates a new unique index
+            # against existing rows) -- keep the earliest shared page per scope, the one `ORDER BY
+            # id LIMIT 1` always picked anyway. `create_all` skips an existing table's indexes, so
+            # they're each created (if missing) explicitly, after that cleanup.
+            for field in PAGE_SCOPE_FIELDS:
+                shared = sa.and_(pages.c.owner_id.is_(None), pages.c[field].is_not(None))
+                keep = sa.select(sa.func.min(pages.c.id)).where(shared).group_by(pages.c[field])
+                conn.execute(sa.delete(pages).where(shared, pages.c.id.not_in(keep)))
+            for index in indexes:
+                index.create(conn, checkfirst=True)
+            state = self._tables[AppState]
+            conn.execute(
+                self._insert_ignoring_conflicts(state).values(
+                    id=APP_STATE_ROW_ID, bootstrap_admin_assigned=False
                 )
             )
-            self._add_missing_columns(table)
 
-        list(
-            self._execute_raw_sql(
-                sql.create_index_sql(
-                    models.UnderlyingMetricTableEntry,
-                    [k for k in models.UnderlyingMetricTableEntry.model_fields if k not in ("id", "value")],
-                )
-            )
-        )
-        list(
-            self._execute_raw_sql(
-                sql.create_index_sql(
-                    models.Artifact, [k for k in models.Artifact.model_fields if k not in ("id", "tags")]
-                )
-            )
-        )
-        # At most one *shared* page (owner_id NULL) per scope -- exactly what `get_or_create_page`
-        # relies on to make its own check-then-insert race-safe (see its own docstring). A database
-        # that already has duplicates from hitting that race before this index existed would
-        # otherwise fail to open at all (SQLite validates a new unique index against existing rows
-        # on creation) -- clear those out first, keeping the earliest one (the one `ORDER BY id
-        # LIMIT 1` -- what `get_or_create_page` itself reads -- always used to pick anyway). One
-        # transaction for every scope's dedup-and-index pair: each `CREATE UNIQUE INDEX` would
-        # otherwise fail outright if its own `DELETE` hadn't actually landed first (a prior run
-        # crashing between the two, or the database being read-only, left a partial migration),
-        # and six unrelated round trips to the database is needless overhead on every single
-        # startup regardless.
-        self._execute_in_transaction(
-            [
-                statement
-                for scope_field in PAGE_SCOPE_FIELDS
-                for statement in (
-                    (
-                        f"""
-                        DELETE FROM {models.Page.__name__}
-                        WHERE owner_id IS NULL AND {scope_field} IS NOT NULL AND id NOT IN (
-                            SELECT MIN(id) FROM {models.Page.__name__}
-                            WHERE owner_id IS NULL AND {scope_field} IS NOT NULL
-                            GROUP BY {scope_field}
-                        );
-                        """,
-                        None,
-                    ),
-                    (
-                        sql.create_index_sql(
-                            models.Page,
-                            [scope_field],
-                            index_name=f"idx_Page_shared_{scope_field}",
-                            unique=True,
-                            where="owner_id IS NULL",
-                        ),
-                        None,
-                    ),
-                )
-            ]
-        )
+    @property
+    def tables(self) -> Mapping[type[BaseModel], sa.Table]:
+        """Every table this store manages, keyed by the pydantic model it stores."""
+        return self._tables
 
-    def _add_missing_columns(self, table: type[BaseModel]) -> None:
+    @abstractmethod
+    def _insert_ignoring_conflicts(self, table: sa.Table) -> sa.Insert:
+        """
+        An `INSERT` into `table` that silently skips a row violating a unique constraint or index.
+
+        Every dialect spells this differently (`INSERT ... ON CONFLICT DO NOTHING` via its own
+        `sqlalchemy.dialects.<name>.insert`), so it's the one statement each store supplies itself.
+        """
+
+    def _lock_schema(self, conn: sa.Connection) -> None:
+        """
+        Serialize schema creation/migration across processes, for the transaction `conn` is in.
+
+        A no-op by default. A server-based database, where several worker processes can start
+        against it at once, overrides this to take a lock that concurrent schema init then waits on.
+        """
+
+    @staticmethod
+    def _add_missing_columns(conn: sa.Connection, table: sa.Table) -> None:
         """
         Backfill a table with any model field it's missing a column for.
 
-        This project has no migration system (see CLAUDE.md): `CREATE TABLE IF NOT EXISTS` is a
-        no-op for a table that already exists, so a field added to a model after someone's
-        database was created would otherwise never appear there and every read/write would fail
-        with a raw sqlite `OperationalError`/`IndexError` instead of a clear one. Every added
-        column is backfilled as nullable regardless of the model's own optionality -- existing
-        rows have no value to put there, so a genuinely required new field still needs a real
-        migration (with a backfill value) rather than relying on this. A plain scalar default
-        (e.g. `revision: int = 0`) is the one exception: `ALTER TABLE ... ADD COLUMN ... DEFAULT`
-        backfills existing rows with that value instead of NULL, same as `create_table_sql` does
-        for a brand new table -- without it, every experiment that existed before `revision` was
-        added would start with `NULL`, and `NULL + 1` (`_touch_experiment`) stays `NULL` forever.
+        This project has no migration system: `create_all` skips a table that already exists, so a
+        field added to a model after someone's database was created would otherwise never appear
+        there. Every added column is nullable regardless of the model's own optionality -- existing
+        rows have no value to put there -- except that a plain scalar default (e.g.
+        `revision: int = 0`) comes along as a real SQL `DEFAULT`, which backfills existing rows with
+        it instead of NULL (`NULL + 1`, in `_touch_experiment`, would stay `NULL` forever).
         """
-        existing = {row[1] for row in self._execute_raw_sql(f"PRAGMA table_info({table.__name__})")}
-        for field_name, field in table.model_fields.items():
-            if field_name in existing:
-                continue
-            sql_type = sql.annotation_to_sqltype(field.annotation, nullable=True)  # pyright: ignore[reportArgumentType]
-            default = field.default
-            default_clause = (
-                f" DEFAULT {sql.escape_value_sql(default)}"
-                if isinstance(default, bool | int | float | str)
-                else ""
-            )
-            list(
-                self._execute_raw_sql(
-                    f"ALTER TABLE {table.__name__} ADD COLUMN {field_name} {sql_type}{default_clause}"
-                )
-            )
+        existing = {c["name"] for c in sa.inspect(conn).get_columns(table.name, schema=table.schema)}
+        for column in table.columns:
+            if column.name not in existing:
+                conn.execute(sa.text(sql.add_column_ddl(table, column, conn.dialect)))
 
-    @abstractmethod
-    def _execute_raw_sql(
-        self,
-        statement: str,
-        values: dict[str, Any] | None = None,
-    ) -> Iterator[tuple[Any, ...]]:
-        """Execute raw sql."""
+    def _execute(self, statement: sa.Executable) -> list[AnyRow]:
+        """Run one statement in its own transaction, returning its rows (if it has any)."""
+        with self._engine.begin() as conn:
+            result = conn.execute(statement)
+            return list(result) if result.returns_rows else []
 
-    @abstractmethod
-    def _execute_raw_sql_query_many(
-        self,
-        statement: str,
-        values: Iterable[dict[str, Any]] | None = None,
-    ) -> Iterator[tuple[Any, ...]]:
-        """Execute raw sql."""
+    def _fetch[RowT: BaseModel](
+        self, model: type[RowT], statement: sa.Executable, *, no_validate: bool = False
+    ) -> list[RowT]:
+        """Run one statement in its own transaction, building a `model` from each row by column name."""
+        with self._engine.begin() as conn:
+            return [
+                sql.construct(model, row, no_validate=no_validate)
+                for row in conn.execute(statement).mappings()
+            ]
 
-    @abstractmethod
-    def _execute_in_transaction(
-        self, statements: Iterable[tuple[str, dict[str, Any] | None]]
-    ) -> list[list[tuple[Any, ...]]]:
+    def _transaction(self, statements: Iterable[sa.Executable]) -> list[list[AnyRow]]:
         """
-        Execute several statements as one atomic transaction, returning each statement's rows.
+        Run several statements as one atomic transaction, returning each statement's rows.
 
         All-or-nothing: used for cascading soft-delete/restore/purge across multiple tables, where
         a failure partway through must not leave e.g. a project deleted but its experiments intact.
         """
+        results: list[list[AnyRow]] = []
+        with self._engine.begin() as conn:
+            for statement in statements:
+                result = conn.execute(statement)
+                results.append(list(result) if result.returns_rows else [])
+        return results
 
-    def _execute_sql_query[RowT: BaseModel](
-        self,
-        expected_model: type[RowT],
-        statement: str,
-        values: dict[str, Any] | None = None,
-        *,
-        no_validate: bool = False,
-    ) -> Iterator[RowT]:
-        """Execute raw sql."""
-        for row in self._execute_raw_sql(statement, values):
-            yield sql.construct(expected_model, row, no_validate=no_validate)
+    def _insert_rows(self, model: type[BaseModel], rows: Iterable[BaseModel]) -> None:
+        """Bulk-insert `rows` into `model`'s table in one transaction, as a single executemany."""
+        values = [sql.row_values(row, exclude=frozenset({sql.ID_KEY})) for row in rows]
+        if values:
+            with self._engine.begin() as conn:
+                conn.execute(sa.insert(self._tables[model]), values)
 
-    def _execute_sql_query_many[RowT: BaseModel](
-        self,
-        expected_model: type[RowT],
-        statement: str,
-        values: Iterable[dict[str, Any]],
-        *,
-        no_validate: bool = False,
-    ) -> Iterator[RowT]:
-        """Execute raw sql."""
-        for row in self._execute_raw_sql_query_many(statement, values):
-            yield sql.construct(expected_model, row, no_validate=no_validate)
-
-    def _first_committed_row[RowT: BaseModel](self, rows: Iterator[RowT]) -> RowT:
-        """
-        Return the first row of a write query, forcing the underlying transaction to commit.
-
-        `_execute_raw_sql` implementations (e.g. sqlite's) run inside a `with` block that
-        only commits once its generator is fully drained; taking just `next(rows)` would
-        leave the generator suspended mid-write and the change uncommitted.
-        """
-        return list(rows)[0]  # noqa: RUF015 -- must fully drain `rows` to commit; see docstring
-
-    def _fetch_deleted_at(self, table: type[BaseModel], entity_id: int) -> str | None:
-        """Return the raw `deleted_at` value for a row, or raise if the row doesn't exist at all."""
-        rows = list(
-            self._execute_raw_sql(
-                f"SELECT deleted_at FROM {table.__name__} WHERE id = :id", {"id": entity_id}
-            )
+    def _by_id[RowT: BaseModel](self, model: type[RowT], entity_id: int) -> list[RowT]:
+        """`model`'s row with `entity_id`, if it exists and isn't soft-deleted."""
+        table = self._tables[model]
+        return self._fetch(
+            model, sa.select(table).where(table.c.id == entity_id, table.c.deleted_at.is_(None))
         )
+
+    def _fetch_deleted_at(self, model: type[BaseModel], entity_id: int) -> datetime | None:
+        """Return a row's `deleted_at`, or raise if the row doesn't exist at all."""
+        table = self._tables[model]
+        rows = self._execute(sa.select(table.c.deleted_at).where(table.c.id == entity_id))
         if not rows:
-            msg = f"{table.__name__} {entity_id} does not exist"
+            msg = f"{model.__name__} {entity_id} does not exist"
             raise ValueError(msg)
         return rows[0][0]
 
-    def _ensure_not_deleted(self, table: type[BaseModel], entity_id: int) -> None:
+    def _ensure_not_deleted(self, model: type[BaseModel], entity_id: int) -> None:
         """Raise if `entity_id` doesn't exist, or has been soft-deleted."""
-        if self._fetch_deleted_at(table, entity_id) is not None:
-            msg = f"{table.__name__} {entity_id} has been deleted"
+        if self._fetch_deleted_at(model, entity_id) is not None:
+            msg = f"{model.__name__} {entity_id} has been deleted"
             raise ValueError(msg)
 
     def _touch_experiment(self, experiment_id: int) -> None:
@@ -375,26 +352,34 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         a crash could leave `revision` stale by one increment is a possible one-write delay in a live
         client noticing, not a correctness bug.
         """
-        list(
-            self._execute_raw_sql(
-                f"UPDATE {models.Experiment.__name__} "
-                "SET revision = revision + 1, last_activity_at = :now WHERE id = :id",
-                {"id": experiment_id, "now": pendulum.now(pendulum.UTC).isoformat()},
-            )
+        experiments = self._tables[models.Experiment]
+        self._execute(
+            sa.update(experiments)
+            .where(experiments.c.id == experiment_id)
+            .values(revision=experiments.c.revision + 1, last_activity_at=pendulum.now(pendulum.UTC))
         )
 
-    def _activity_rows(self, group_by: str, where: str, values: dict[str, Any]) -> Iterator[tuple[Any, ...]]:
-        """`(group id, experiment count, run count, last activity)` per `group_by`, non-deleted rows only."""
-        return self._execute_raw_sql(
-            f"""
-            SELECT {group_by}, COUNT(DISTINCT e.id), COUNT(r.id), MAX(e.last_activity_at)
-            FROM {models.Project.__name__} p
-            JOIN {models.Experiment.__name__} e ON e.project_id = p.id AND e.deleted_at IS NULL
-            LEFT JOIN {models.Run.__name__} r ON r.experiment_id = e.id AND r.deleted_at IS NULL
-            WHERE p.deleted_at IS NULL {where}
-            GROUP BY {group_by};
-            """,
-            values,
+    def _activity_rows(
+        self, group: type[models.Project | models.Experiment], project_id: int | None = None
+    ) -> list[AnyRow]:
+        """`(group id, experiment count, run count, last activity)` per project or experiment, non-deleted rows only."""
+        p, e, r = (self._tables[m] for m in (models.Project, models.Experiment, models.Run))
+        group_id = p.c.id if group is models.Project else e.c.id
+        project_filter = [p.c.id == project_id] if project_id is not None else []
+        return self._execute(
+            sa.select(
+                group_id,
+                sa.func.count(sa.distinct(e.c.id)),
+                sa.func.count(r.c.id),
+                sa.func.max(e.c.last_activity_at),
+            )
+            .select_from(
+                p.join(e, sa.and_(e.c.project_id == p.c.id, e.c.deleted_at.is_(None))).outerjoin(
+                    r, sa.and_(r.c.experiment_id == e.c.id, r.c.deleted_at.is_(None))
+                )
+            )
+            .where(p.c.deleted_at.is_(None), *project_filter)
+            .group_by(group_id)
         )
 
     def get_project_stats(self) -> dict[int, models.ProjectStats]:
@@ -403,15 +388,16 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             project_id: models.ProjectStats(
                 experiment_count=experiments, run_count=runs, last_activity_at=last_activity
             )
-            for project_id, experiments, runs, last_activity in self._activity_rows("p.id", "", {})
+            for project_id, experiments, runs, last_activity in self._activity_rows(models.Project)
         }
 
     def get_experiment_stats(self, project_id: int) -> dict[int, models.ActivityStats]:
         """Each of a project's (non-deleted) experiments' activity, keyed by experiment id."""
-        rows = self._activity_rows("e.id", "AND p.id = :project_id", {"project_id": project_id})
         return {
             experiment_id: models.ActivityStats(run_count=runs, last_activity_at=last_activity)
-            for experiment_id, _experiments, runs, last_activity in rows
+            for experiment_id, _experiments, runs, last_activity in self._activity_rows(
+                models.Experiment, project_id
+            )
         }
 
     def get_or_create_user(self, username: str) -> models.User:
@@ -425,58 +411,51 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         silently generalizes into "everyone who connects is admin" if the same database ends up
         shared by more than one person.
         """
-        existing = list(
-            self._execute_sql_query(models.User, sql.get_all_by_field(models.User, "username", username))
-        )
-        if existing:
+        users = self._tables[models.User]
+        by_name = sa.select(users).where(users.c.username == username)
+        if existing := self._fetch(models.User, by_name):
             return existing[0]
 
-        insert_statement, insert_values = sql.insert_or_ignore(models.User, models.NewUser(username=username))
-        list(self._execute_sql_query(models.User, insert_statement, insert_values))
-        user = next(
-            self._execute_sql_query(models.User, sql.get_all_by_field(models.User, "username", username))
+        self._execute(
+            self._insert_ignoring_conflicts(users).values(sql.row_values(models.NewUser(username=username)))
         )
+        (user,) = self._fetch(models.User, by_name)
 
-        # A single `UPDATE ... WHERE bootstrap_admin_assigned = 0` is atomic under SQLite's
-        # serialized writes: if two processes race this for the first time simultaneously, only one
-        # can ever see (and flip) the flag while it's still 0.
-        claimed = list(
-            self._execute_raw_sql(
-                f"UPDATE {AppState.__name__} SET bootstrap_admin_assigned = 1 "
-                f"WHERE id = {APP_STATE_ROW_ID} AND bootstrap_admin_assigned = 0 RETURNING id;"
-            )
+        # A single conditional `UPDATE` is atomic under concurrent writers: if two processes race
+        # this for the first time simultaneously, only one can ever see (and flip) the flag unset.
+        state = self._tables[AppState]
+        claimed = self._execute(
+            sa.update(state)
+            .where(state.c.id == APP_STATE_ROW_ID, sa.not_(state.c.bootstrap_admin_assigned))
+            .values(bootstrap_admin_assigned=True)
+            .returning(state.c.id)
         )
         if not claimed:
             return user
 
         _log.info("Granting bootstrap admin scopes to user %s (%s)", user.id, username)
-        update_statement, update_values = sql.update(
-            models.User, user.model_copy(update={"scopes": [models.Scope.ALL]})
-        )
-        return self._first_committed_row(
-            self._execute_sql_query(models.User, update_statement, update_values)
-        )
+        return self.update_user(user.model_copy(update={"scopes": [models.Scope.ALL]}))
 
     def update_user(self, user: models.User) -> models.User:
         """Update a user, e.g. to grant/revoke scopes."""
         _log.debug("updating user %s", user.id)
-        statement, values = sql.update(models.User, user)
-        return self._first_committed_row(self._execute_sql_query(models.User, statement, values))
+        (updated,) = self._fetch(models.User, sql.update(self._tables[models.User], user))
+        return updated
 
     def create_project(self, project: models.NewProject) -> models.Project:
         """Create a new project."""
         _log.debug("Creating project with name %s", project.name)
-        statement, values = sql.insert(models.Project, project)
-        return self._first_committed_row(self._execute_sql_query(models.Project, statement, values))
+        (created,) = self._fetch(models.Project, sql.insert(self._tables[models.Project], project))
+        return created
 
     def get_or_create_project(
         self, name: str, description: str = "", created_by: int | None = None
     ) -> models.Project:
         """Get the project named `name`, creating it (with `description`) if it doesn't exist yet."""
-        existing = list(
-            self._execute_sql_query(
-                models.Project, sql.get_all_by_field(models.Project, "name", name, exclude_deleted=True)
-            )
+        projects = self._tables[models.Project]
+        existing = self._fetch(
+            models.Project,
+            sa.select(projects).where(projects.c.name == name, projects.c.deleted_at.is_(None)),
         )
         if existing:
             return existing[0]
@@ -487,29 +466,26 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
     def get_project(self, database_id: int) -> models.Project:
         """Get project."""
         _log.debug("getting project %s", database_id)
-        return next(
-            self._execute_sql_query(
-                models.Project, sql.get_by_id(models.Project, database_id, exclude_deleted=True)
-            )
-        )
+        return next(iter(self._by_id(models.Project, database_id)))
 
     def get_projects(self) -> Iterator[models.Project]:
         """Get all (non-deleted) projects."""
         _log.debug("getting projects")
-        yield from self._execute_sql_query(models.Project, sql.get_all(models.Project, exclude_deleted=True))
+        projects = self._tables[models.Project]
+        yield from self._fetch(models.Project, sa.select(projects).where(projects.c.deleted_at.is_(None)))
 
     def update_project(self, project: models.Project) -> models.Project:
         """Update a project."""
         _log.debug("updating project %s", project.id)
-        statement, values = sql.update(models.Project, project)
-        return self._first_committed_row(self._execute_sql_query(models.Project, statement, values))
+        (updated,) = self._fetch(models.Project, sql.update(self._tables[models.Project], project))
+        return updated
 
     def create_experiment(self, experiment: models.NewExperiment) -> models.Experiment:
         """Create a new experiment."""
         _log.info("Creating experiment for project %s", experiment.project_id)
         self._ensure_not_deleted(models.Project, experiment.project_id)
-        statement, values = sql.insert(models.Experiment, experiment)
-        return self._first_committed_row(self._execute_sql_query(models.Experiment, statement, values))
+        (created,) = self._fetch(models.Experiment, sql.insert(self._tables[models.Experiment], experiment))
+        return created
 
     def get_or_create_experiment(
         self,
@@ -519,18 +495,14 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         source: models.ExperimentSource | None = None,
     ) -> models.Experiment:
         """Get the named experiment within `project_id`, creating it if it doesn't exist yet."""
-        existing = list(
-            self._execute_sql_query(
-                models.Experiment,
-                sql.get_all_by_field(
-                    models.Experiment,
-                    "project_id",
-                    project_id,
-                    match_field="name",
-                    match_field_values={name},
-                    exclude_deleted=True,
-                ),
-            )
+        experiments = self._tables[models.Experiment]
+        existing = self._fetch(
+            models.Experiment,
+            sa.select(experiments).where(
+                experiments.c.project_id == project_id,
+                experiments.c.name == name,
+                experiments.c.deleted_at.is_(None),
+            ),
         )
         if existing:
             return existing[0]
@@ -541,50 +513,45 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
     def get_experiment(self, database_id: int) -> models.Experiment | None:
         """Get an experiment by id, or None if it doesn't exist (or has been deleted)."""
         _log.debug("Getting experiment id %s", database_id)
-        try:
-            return next(
-                self._execute_sql_query(
-                    models.Experiment, sql.get_by_id(models.Experiment, database_id, exclude_deleted=True)
-                )
-            )
-        except StopIteration:
-            return None
+        return next(iter(self._by_id(models.Experiment, database_id)), None)
 
     def get_experiments(self, project_id: int) -> Iterator[models.Experiment]:
         """Get all (non-deleted) experiments belonging to a project."""
         _log.debug("Get experiments for project %s", project_id)
-        return self._execute_sql_query(
-            models.Experiment,
-            sql.get_all_by_field(models.Experiment, "project_id", project_id, exclude_deleted=True),
+        experiments = self._tables[models.Experiment]
+        return iter(
+            self._fetch(
+                models.Experiment,
+                sa.select(experiments).where(
+                    experiments.c.project_id == project_id, experiments.c.deleted_at.is_(None)
+                ),
+            )
         )
 
     def update_experiment(self, experiment: models.Experiment) -> models.Experiment:
         """Update an experiment."""
         _log.debug("updating experiment %s", experiment.id)
-        statement, values = sql.update(models.Experiment, experiment)
-        return self._first_committed_row(self._execute_sql_query(models.Experiment, statement, values))
+        (updated,) = self._fetch(models.Experiment, sql.update(self._tables[models.Experiment], experiment))
+        return updated
 
     def create_run(self, run: models.NewRun) -> models.Run:
         self._ensure_not_deleted(models.Experiment, run.experiment_id)
-        statement, values = sql.insert(models.Run, run)
-        created = self._first_committed_row(self._execute_sql_query(models.Run, statement, values))
+        (created,) = self._fetch(models.Run, sql.insert(self._tables[models.Run], run))
         self._touch_experiment(run.experiment_id)
         return created
 
     def get_runs(self, experiment_id: int, *, limit: int = 1000, offset: int = 0) -> Iterator[models.Run]:
         """Get a page of an experiment's (non-deleted) runs, most recently created first."""
-        return self._execute_sql_query(
-            models.Run,
-            sql.get_all_by_field(
+        runs = self._tables[models.Run]
+        return iter(
+            self._fetch(
                 models.Run,
-                "experiment_id",
-                experiment_id,
-                order_by=["created_at"],
-                descending=True,
-                exclude_deleted=True,
-                limit=limit,
-                offset=offset,
-            ),
+                sa.select(runs)
+                .where(runs.c.experiment_id == experiment_id, runs.c.deleted_at.is_(None))
+                .order_by(runs.c.created_at.desc())
+                .limit(limit)
+                .offset(offset),
+            )
         )
 
     def log_metrics(self, metric: Iterable[models.LoggedMetrics]) -> None:
@@ -593,17 +560,9 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         metric = list(metric)
         for run_id in {m.run_id for m in metric}:
             self._ensure_not_deleted(models.Run, run_id)
-        list(
-            self._execute_sql_query_many(
-                models.UnderlyingMetricTableEntry,
-                *sql.insert_many(
-                    models.UnderlyingMetricTableEntry,
-                    itertools.chain(
-                        *(m.to_underlying() for m in metric),
-                    ),
-                ),
-                no_validate=True,
-            )
+        self._insert_rows(
+            models.UnderlyingMetricTableEntry,
+            itertools.chain.from_iterable(m.to_underlying() for m in metric),
         )
         for experiment_id in {m.experiment_id for m in metric}:
             self._touch_experiment(experiment_id)
@@ -619,35 +578,36 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         # `UnderlyingMetricTableEntry` has no `deleted_at` of its own -- visibility is inherited
         # transitively through its run, which is always soft-deleted in the same cascade as its
         # metrics' logical owner (see `_soft_delete`), so a join against `Run` is sufficient.
-        run_filter, params = sql.in_clause("m.run_id", exclude_run_ids, prefix="x", negate=True)
-        key_filter, key_params = sql.in_clause("m.key", keys, prefix="k") if keys is not None else ("", {})
+        m, r = self._tables[models.UnderlyingMetricTableEntry], self._tables[models.Run]
+        key_filter = [m.c.key.in_(keys)] if keys is not None else []
         # `ORDER BY m.id` is insertion order, which is what `MetricFrame.from_rows`' last-write-wins needs.
-        rows = self._execute_raw_sql(
-            f"""
-            SELECT {", ".join(f"m.{f}" for f in models.MetricRow._fields)}
-            FROM {models.UnderlyingMetricTableEntry.__name__} m
-            JOIN {models.Run.__name__} r ON m.run_id = r.id
-            WHERE m.experiment_id = :experiment_id AND r.deleted_at IS NULL {run_filter} {key_filter}
-            ORDER BY m.id;
-            """,
-            {"experiment_id": experiment_id, **params, **key_params},
+        rows = self._execute(
+            sa.select(*(m.c[f] for f in models.MetricRow._fields))
+            .join(r, m.c.run_id == r.c.id)
+            .where(
+                m.c.experiment_id == experiment_id,
+                r.c.deleted_at.is_(None),
+                m.c.run_id.not_in(exclude_run_ids),
+                *key_filter,
+            )
+            .order_by(m.c.id)
         )
-        return models.MetricFrame.from_rows(cast("Iterator[models.MetricRow]", rows))
+        return models.MetricFrame.from_rows(models.MetricRow._make(row) for row in rows)
 
     def summarize_metric_keys(self, experiment_id: int) -> list[models.MetricKeySummary]:
         """Every metric key logged in an experiment (non-deleted runs), sorted, without fetching values."""
-        rows = self._execute_raw_sql(
-            f"""
-            SELECT key, MAX(steps) FROM (
-                SELECT m.key, COUNT(DISTINCT m.step) AS steps
-                FROM {models.UnderlyingMetricTableEntry.__name__} m
-                JOIN {models.Run.__name__} r ON m.run_id = r.id
-                WHERE m.experiment_id = :experiment_id AND r.deleted_at IS NULL
-                GROUP BY m.key, m.run_id
-            )
-            GROUP BY key ORDER BY key;
-            """,
-            {"experiment_id": experiment_id},
+        m, r = self._tables[models.UnderlyingMetricTableEntry], self._tables[models.Run]
+        per_run = (
+            sa.select(m.c.key, sa.func.count(sa.distinct(m.c.step)).label("steps"))
+            .join(r, m.c.run_id == r.c.id)
+            .where(m.c.experiment_id == experiment_id, r.c.deleted_at.is_(None))
+            .group_by(m.c.key, m.c.run_id)
+            .subquery("per_run")
+        )
+        rows = self._execute(
+            sa.select(per_run.c.key, sa.func.max(per_run.c.steps))
+            .group_by(per_run.c.key)
+            .order_by(per_run.c.key)
         )
         return [models.MetricKeySummary(key, steps) for key, steps in rows]
 
@@ -655,26 +615,17 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         """Log hyperparameters to the data store."""
         _log.debug("Logging hyperparameters for experiment %s", hyperparams.experiment_id)
         self._ensure_not_deleted(models.Run, hyperparams.run_id)
-        existing = list(
-            self._execute_sql_query(
-                models.HyperParams,
-                sql.get_all_by_field(
-                    models.HyperParams,
-                    "run_id",
-                    hyperparams.run_id,
-                ),
-            )
-        )
-
-        if existing:
+        table = self._tables[models.HyperParams]
+        if existing := self._fetch(
+            models.HyperParams, sa.select(table).where(table.c.run_id == hyperparams.run_id)
+        ):
             _log.warning(
                 "Skipping duplicate hyperparameters for experiment %s run %s",
                 hyperparams.experiment_id,
                 hyperparams.run_id,
             )
             return existing[0]
-        statement, values = sql.insert(models.HyperParams, hyperparams)
-        created = self._first_committed_row(self._execute_sql_query(models.HyperParams, statement, values))
+        (created,) = self._fetch(models.HyperParams, sql.insert(table, hyperparams))
         self._touch_experiment(hyperparams.experiment_id)
         return created
 
@@ -682,14 +633,16 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         self, experiment_id: int, *, exclude_run_ids: frozenset[int] = frozenset()
     ) -> Iterator[models.HyperParams]:
         """Every (non-deleted) run's hyperparameters for an experiment."""
-        run_filter, params = sql.in_clause("h.run_id", exclude_run_ids, prefix="x", negate=True)
-        statement = f"""
-            SELECT h.* FROM {models.HyperParams.__name__} h
-            JOIN {models.Run.__name__} r ON h.run_id = r.id
-            WHERE h.experiment_id = :experiment_id AND r.deleted_at IS NULL {run_filter};
-        """
-        yield from self._execute_sql_query(
-            models.HyperParams, statement, {"experiment_id": experiment_id, **params}
+        h, r = self._tables[models.HyperParams], self._tables[models.Run]
+        yield from self._fetch(
+            models.HyperParams,
+            sa.select(h)
+            .join(r, h.c.run_id == r.c.id)
+            .where(
+                h.c.experiment_id == experiment_id,
+                r.c.deleted_at.is_(None),
+                h.c.run_id.not_in(exclude_run_ids),
+            ),
         )
 
     def get_or_create_page[D, P, C](
@@ -702,28 +655,29 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         new_page_type: type[models.NewPage[D, C]] | None = None,
     ) -> models.Page[D, P, C]:
         field, value = _resolve_page_scope(run_id=run_id, experiment_id=experiment_id, project_id=project_id)
-        select_statement = (
-            f"SELECT {sql.select_columns_sql(models.Page)} FROM {models.Page.__name__} "
-            f"WHERE {field} = :value AND owner_id IS NULL ORDER BY id LIMIT 1;"
-        )
+        pages = self._tables[models.Page]
         # The shared page only: every named view of it (`owner_id` set) is its own `Page` row with
         # the same scope, reached through `get_view` instead.
-        for row in self._execute_sql_query(page_type, select_statement, {"value": value}):
-            return row
+        shared = (
+            sa.select(pages)
+            .where(pages.c[field] == value, pages.c.owner_id.is_(None))
+            .order_by(pages.c.id)
+            .limit(1)
+        )
+        if existing := self._fetch(page_type, shared):
+            return existing[0]
 
         _log.warning("Inserting new page model for %s = %s", field, value)
-        # `INSERT OR IGNORE`, then re-select -- exactly `get_or_create_user`'s own pattern, and for
-        # the same reason: two callers racing the check above (e.g. a page load and a script both
+        # Insert-ignoring-conflicts, then re-select -- exactly `get_or_create_user`'s own pattern, and
+        # for the same reason: two callers racing the check above (e.g. a page load and a script both
         # reaching the same brand-new experiment before either has created its shared page) would
         # otherwise both insert one, leaving two "the" shared pages for one scope. The partial
         # unique index on {field} WHERE owner_id IS NULL (this class's own `__init__`) turns the
         # loser's insert into a no-op instead, and the re-select returns whichever one actually won.
-        insert_statement, insert_values = sql.insert_or_ignore(
-            models.Page,
-            (new_page_type or models.NewPage[D, C])(**{field: value}),  # pyright: ignore[reportArgumentType]
-        )
-        list(self._execute_sql_query(page_type, insert_statement, insert_values))
-        return next(self._execute_sql_query(page_type, select_statement, {"value": value}))
+        new_page = (new_page_type or models.NewPage[D, C])(**{field: value})  # pyright: ignore[reportArgumentType]
+        self._execute(self._insert_ignoring_conflicts(pages).values(sql.row_values(new_page)))
+        (created,) = self._fetch(page_type, shared)
+        return created
 
     def create_view[D, P, C](
         self, page_type: type[models.Page[D, P, C]], view: models.NewPage[D, C]
@@ -732,108 +686,82 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         if view.owner_id is None or not view.name:
             msg = "A view needs an owner and a name"
             raise ValueError(msg)
-        statement, values = sql.insert(models.Page, view)
-        return self._first_committed_row(self._execute_sql_query(page_type, statement, values))
+        (created,) = self._fetch(page_type, sql.insert(self._tables[models.Page], view))
+        return created
 
     def get_view[D, P, C](
         self, page_type: type[models.Page[D, P, C]], view_id: int
     ) -> models.Page[D, P, C] | None:
         """A named view by id, or `None` if there's no such view (a shared page's id doesn't count)."""
-        rows = self._execute_sql_query(
-            page_type,
-            f"SELECT {sql.select_columns_sql(models.Page)} FROM {models.Page.__name__} "
-            "WHERE id = :id AND owner_id IS NOT NULL;",
-            {"id": view_id},
+        pages = self._tables[models.Page]
+        rows = self._fetch(
+            page_type, sa.select(pages).where(pages.c.id == view_id, pages.c.owner_id.is_not(None))
         )
-        return next(rows, None)
+        return next(iter(rows), None)
 
     def list_views(self, experiment_id: int, owner_id: int) -> list[models.ViewSummary]:
         """`owner_id`'s views of an experiment's page, by name."""
-        rows = self._execute_raw_sql(
-            f"SELECT id, name FROM {models.Page.__name__} "
-            "WHERE experiment_id = :experiment_id AND owner_id = :owner_id ORDER BY name, id;",
-            {"experiment_id": experiment_id, "owner_id": owner_id},
+        pages = self._tables[models.Page]
+        rows = self._execute(
+            sa.select(pages.c.id, pages.c.name)
+            .where(pages.c.experiment_id == experiment_id, pages.c.owner_id == owner_id)
+            .order_by(pages.c.name, pages.c.id)
         )
         return [models.ViewSummary(id=view_id, name=name) for view_id, name in rows]
 
     def delete_view(self, view_id: int, owner_id: int) -> None:
         """Delete one of `owner_id`'s views; anyone else's (or the shared page) is left alone."""
-        list(
-            self._execute_raw_sql(
-                f"DELETE FROM {models.Page.__name__} WHERE id = :id AND owner_id = :owner_id;",
-                {"id": view_id, "owner_id": owner_id},
-            )
-        )
+        pages = self._tables[models.Page]
+        self._execute(sa.delete(pages).where(pages.c.id == view_id, pages.c.owner_id == owner_id))
 
     def _bump_notes_revision(self, experiment_id: int) -> None:
-        list(
-            self._execute_raw_sql(
-                f"UPDATE {models.Experiment.__name__} SET notes_revision = notes_revision + 1 WHERE id = :id",
-                {"id": experiment_id},
-            )
+        experiments = self._tables[models.Experiment]
+        self._execute(
+            sa.update(experiments)
+            .where(experiments.c.id == experiment_id)
+            .values(notes_revision=experiments.c.notes_revision + 1)
         )
 
     def add_comment(self, comment: models.NewComment) -> models.Comment:
         """Post a note to an experiment's thread."""
         self._ensure_not_deleted(models.Experiment, comment.experiment_id)
-        statement, values = sql.insert(models.Comment, comment)
-        created = self._first_committed_row(self._execute_sql_query(models.Comment, statement, values))
+        (created,) = self._fetch(models.Comment, sql.insert(self._tables[models.Comment], comment))
         self._bump_notes_revision(comment.experiment_id)
         return created
 
     def list_comments(self, experiment_id: int) -> list[models.Comment]:
         """An experiment's notes, oldest first."""
-        return list(
-            self._execute_sql_query(
-                models.Comment,
-                sql.get_all_by_field(models.Comment, "experiment_id", experiment_id, order_by=["id"]),
-            )
+        comments = self._tables[models.Comment]
+        return self._fetch(
+            models.Comment,
+            sa.select(comments).where(comments.c.experiment_id == experiment_id).order_by(comments.c.id),
         )
 
     def delete_comment(self, comment_id: int, author_id: int) -> None:
         """Delete one of `author_id`'s own notes; anyone else's is left alone."""
-        rows = list(
-            self._execute_raw_sql(
-                f"DELETE FROM {models.Comment.__name__} WHERE id = :id AND author_id = :author_id "
-                "RETURNING experiment_id;",
-                {"id": comment_id, "author_id": author_id},
-            )
+        comments = self._tables[models.Comment]
+        rows = self._execute(
+            sa.delete(comments)
+            .where(comments.c.id == comment_id, comments.c.author_id == author_id)
+            .returning(comments.c.experiment_id)
         )
         for (experiment_id,) in rows:
             self._bump_notes_revision(experiment_id)
 
     def list_users(self) -> list[models.User]:
         """Every user, by username -- e.g. who a note can mention."""
-        return list(
-            self._execute_sql_query(
-                models.User,
-                f"SELECT {sql.select_columns_sql(models.User)} FROM {models.User.__name__} ORDER BY username;",
-            )
-        )
+        users = self._tables[models.User]
+        return self._fetch(models.User, sa.select(users).order_by(users.c.username))
 
     def update_page[D, P, C](self, page: models.Page[D, P, C]) -> models.Page[D, P, C]:
-        statement, values = sql.update(models.Page, page)
-        return self._first_committed_row(
-            self._execute_sql_query(
-                type(page),
-                statement,
-                values,
-            ),
-        )
+        (updated,) = self._fetch(type(page), sql.update(self._tables[models.Page], page))
+        return updated
 
     def log_artifact_refs(self, artifacts: Iterable[models.Artifact]) -> None:
         artifacts = list(artifacts)
         for run_id in {a.run_id for a in artifacts}:
             self._ensure_not_deleted(models.Run, run_id)
-        list(
-            self._execute_sql_query_many(
-                models.Artifact,
-                *sql.insert_many(
-                    models.Artifact,
-                    artifacts,
-                ),
-            )
-        )
+        self._insert_rows(models.Artifact, artifacts)
         for experiment_id in {a.experiment_id for a in artifacts}:
             self._touch_experiment(experiment_id)
 
@@ -845,18 +773,21 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         exclude_run_ids: frozenset[int] = frozenset(),
     ) -> Iterator[models.Artifact]:
         """An experiment's (non-deleted) artifact metadata, not bytes -- only `keys`, if given."""
-        run_filter, params = sql.in_clause("run_id", exclude_run_ids, prefix="x", negate=True)
-        key_filter, key_params = sql.in_clause("key", keys, prefix="k") if keys is not None else ("", {})
-        statement = f"""
-            SELECT {sql.select_columns_sql(models.Artifact)} FROM {models.Artifact.__name__}
-            WHERE experiment_id = :experiment_id AND deleted_at IS NULL {run_filter} {key_filter}
-            ORDER BY run_id, step;
-        """
-        return self._execute_sql_query(
-            models.Artifact,
-            statement,
-            {"experiment_id": experiment_id, **params, **key_params},
-            no_validate=True,
+        a = self._tables[models.Artifact]
+        key_filter = [a.c.key.in_(keys)] if keys is not None else []
+        return iter(
+            self._fetch(
+                models.Artifact,
+                sa.select(a)
+                .where(
+                    a.c.experiment_id == experiment_id,
+                    a.c.deleted_at.is_(None),
+                    a.c.run_id.not_in(exclude_run_ids),
+                    *key_filter,
+                )
+                .order_by(a.c.run_id, a.c.step),
+                no_validate=True,
+            )
         )
 
     # -- Soft-delete / restore / purge -----------------------------------------------------------
@@ -866,39 +797,50 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
     # against their run (see `fetch_metrics`/`fetch_hyperparams`), since a run under a deleted
     # experiment/project is always itself soft-deleted by the same cascade.
 
-    def _count_matching(
+    def _cascade(
+        self, root: type[BaseModel], entity_id: int, *, within: frozenset[type[BaseModel]] | None = None
+    ) -> list[tuple[sa.Table, sa.ColumnElement[bool]]]:
+        """
+        Every table `_cascade_targets` finds under `root`, paired with a predicate selecting its rows under `entity_id`.
+
+        Each predicate nests one `IN (SELECT id ...)` per ownership edge on the way down, e.g. an
+        artifact under a project: `run_id IN (SELECT id FROM Run WHERE experiment_id IN (SELECT id
+        FROM Experiment WHERE project_id = :id))`.
+        """
+        results: list[tuple[sa.Table, sa.ColumnElement[bool]]] = []
+        for path in _cascade_targets(root, within=within):
+            top, top_column = path[0]
+            where = self._tables[top].c[top_column] == entity_id
+            for (parent, _), (child, column) in itertools.pairwise(path):
+                where = self._tables[child].c[column].in_(sa.select(self._tables[parent].c.id).where(where))
+            results.append((self._tables[path[-1][0]], where))
+        return results
+
+    def _cascade_counts(
         self,
-        table: type[BaseModel],
-        where_clause: str,
-        entity_id: int,
-        extra_clause: str = "",
-        extra_values: dict[str, Any] | None = None,
-    ) -> int:
-        """
-        Count rows in `table` matching `where_clause` (which may reference `:id`), plus `extra_clause`.
-
-        `extra_clause` may itself reference bind parameters (e.g. `:deleted_at`) supplied via
-        `extra_values` -- kept as separate parameters rather than interpolated into the SQL text.
-        """
-        rows = list(
-            self._execute_raw_sql(
-                f"SELECT count(*) FROM {table.__name__} WHERE {where_clause}{extra_clause}",
-                {"id": entity_id, **(extra_values or {})},
+        cascade: list[tuple[sa.Table, sa.ColumnElement[bool]]],
+        extra: Callable[[sa.Table], sa.ColumnElement[bool]] = lambda _: sa.true(),
+    ) -> dict[str, int]:
+        """How many rows each cascade target has matching its predicate (and `extra`), for the audit log."""
+        details: dict[str, int] = {}
+        for table, where in cascade:
+            ((count,),) = self._execute(
+                sa.select(sa.func.count()).select_from(table).where(where, extra(table))
             )
-        )
-        return rows[0][0]
+            details[table.name] = details.get(table.name, 0) + count
+        return details
 
-    def _record_audit_log(
+    def _audit_log_insert(
         self,
         actor_id: int,
         action: models.AuditAction,
         entity_type: models.EntityType,
         entity_id: int,
         details: dict[str, int],
-    ) -> tuple[str, dict[str, Any]]:
-        """Build the (statement, values) pair for one audit log row, to fold into a bigger transaction."""
+    ) -> sa.Insert:
+        """One audit log row's `INSERT`, to fold into a bigger transaction."""
         return sql.insert(
-            models.AuditLogEntry,
+            self._tables[models.AuditLogEntry],
             models.NewAuditLogEntry(
                 user_id=actor_id,
                 action=action,
@@ -910,7 +852,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
 
     def _soft_delete(
         self,
-        table: type[BaseModel],
+        model: type[BaseModel],
         entity_id: int,
         actor: models.User,
         *,
@@ -925,45 +867,34 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         `ScopeEnforcingDataStore`, which every `DataStore` (this one included) is wrapped in before
         it's reachable from the running app.
         """
-        actor_id = actor.id
-        cascade = _cascade_targets(table, within=SOFT_DELETABLE)
-        # Counted *before* the mutation (same WHERE clause, same "not already deleted" guard) so the
+        table = self._tables[model]
+        cascade = self._cascade(model, entity_id, within=SOFT_DELETABLE)
+        # Counted *before* the mutation (same predicate, same "not already deleted" guard) so the
         # audit row -- inserted in the same transaction as the mutation, right below -- can record
-        # cascade counts without needing the UPDATEs' own row counts, which `_execute_in_transaction`
-        # doesn't expose for statements without `RETURNING`.
-        details: dict[str, int] = {}
-        for child, where_clause in cascade:
-            details[child.__name__] = details.get(child.__name__, 0) + self._count_matching(
-                child, where_clause, entity_id, " AND deleted_at IS NULL"
-            )
-
-        now = pendulum.now(pendulum.UTC).isoformat()
-        audit_statement, audit_values = self._record_audit_log(
-            actor_id, models.AuditAction.SOFT_DELETE, entity_type, entity_id, details
+        # cascade counts without needing the UPDATEs' own row counts.
+        details = self._cascade_counts(cascade, lambda t: t.c.deleted_at.is_(None))
+        stamp = {"deleted_at": pendulum.now(pendulum.UTC), "deleted_by": actor.id}
+        results = self._transaction(
+            [
+                sa.update(table)
+                .where(table.c.id == entity_id, table.c.deleted_at.is_(None))
+                .values(stamp)
+                .returning(table.c.id),
+                *(
+                    sa.update(child).where(where, child.c.deleted_at.is_(None)).values(stamp)
+                    for child, where in cascade
+                ),
+                self._audit_log_insert(
+                    actor.id, models.AuditAction.SOFT_DELETE, entity_type, entity_id, details
+                ),
+            ]
         )
-        statements = [
-            (
-                f"UPDATE {table.__name__} SET deleted_at = :now, deleted_by = :actor "
-                "WHERE id = :id AND deleted_at IS NULL RETURNING id",
-                {"now": now, "actor": actor_id, "id": entity_id},
-            ),
-            *(
-                (
-                    f"UPDATE {child.__name__} SET deleted_at = :now, deleted_by = :actor "
-                    f"WHERE {where_clause} AND deleted_at IS NULL",
-                    {"now": now, "actor": actor_id, "id": entity_id},
-                )
-                for child, where_clause in cascade
-            ),
-            (audit_statement, audit_values),
-        ]
-        results = self._execute_in_transaction(statements)
         if not results[0]:
-            msg = f"{table.__name__} {entity_id} does not exist or is already deleted"
+            msg = f"{model.__name__} {entity_id} does not exist or is already deleted"
             raise ValueError(msg)
 
     def _restore(
-        self, table: type[BaseModel], entity_id: int, actor: models.User, *, entity_type: models.EntityType
+        self, model: type[BaseModel], entity_id: int, actor: models.User, *, entity_type: models.EntityType
     ) -> None:
         """
         Restore one soft-deleted row and cascade to dependents deleted at the exact same instant.
@@ -974,67 +905,33 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         accidentally resurrected just because an ancestor is being restored. Scope enforcement isn't
         this module's job -- see `ScopeEnforcingDataStore`.
         """
-        actor_id = actor.id
-        deleted_at = self._fetch_deleted_at(table, entity_id)
+        deleted_at = self._fetch_deleted_at(model, entity_id)
         if deleted_at is None:
-            msg = f"{table.__name__} {entity_id} is not deleted"
+            msg = f"{model.__name__} {entity_id} is not deleted"
             raise ValueError(msg)
 
-        cascade = _cascade_targets(table, within=SOFT_DELETABLE)
-        details: dict[str, int] = {}
-        for child, where_clause in cascade:
-            details[child.__name__] = details.get(child.__name__, 0) + self._count_matching(
-                child, where_clause, entity_id, " AND deleted_at = :deleted_at", {"deleted_at": deleted_at}
-            )
-
-        audit_statement, audit_values = self._record_audit_log(
-            actor_id, models.AuditAction.RESTORE, entity_type, entity_id, details
+        table = self._tables[model]
+        cascade = self._cascade(model, entity_id, within=SOFT_DELETABLE)
+        details = self._cascade_counts(cascade, lambda t: t.c.deleted_at == deleted_at)
+        cleared = {"deleted_at": None, "deleted_by": None}
+        self._transaction(
+            [
+                sa.update(table).where(table.c.id == entity_id).values(cleared),
+                *(
+                    sa.update(child).where(where, child.c.deleted_at == deleted_at).values(cleared)
+                    for child, where in cascade
+                ),
+                self._audit_log_insert(actor.id, models.AuditAction.RESTORE, entity_type, entity_id, details),
+            ]
         )
-        statements = [
-            (
-                f"UPDATE {table.__name__} SET deleted_at = NULL, deleted_by = NULL WHERE id = :id",
-                {"id": entity_id},
-            ),
-            *(
-                (
-                    f"UPDATE {child.__name__} SET deleted_at = NULL, deleted_by = NULL "
-                    f"WHERE {where_clause} AND deleted_at = :deleted_at",
-                    {"id": entity_id, "deleted_at": deleted_at},
-                )
-                for child, where_clause in cascade
-            ),
-            (audit_statement, audit_values),
-        ]
-        self._execute_in_transaction(statements)
-
-    def _artifact_refs_to_purge(self, table: type[BaseModel], entity_id: int) -> list[tuple[int, str]]:
-        """
-        Find every `Artifact` row about to disappear when `entity_id` (of type `table`) is purged.
-
-        Reuses `_cascade_targets`'s generic graph walk rather than hardcoding "artifacts live under
-        runs" here -- if `table` *is* `Artifact`, it's the one row being purged directly; otherwise
-        look for `Artifact` among its cascade descendants (today that's always via `Run`, but this
-        doesn't assume that). Must run *before* the purge's `DELETE`, since that's the only place
-        an `Artifact` row's `ref` -- the blob location -- is ever readable; SQLite's `ON DELETE
-        CASCADE` removes cascaded rows without any Python code seeing them.
-        """
-        if table is models.Artifact:
-            where_clause = "id = :id"
-        else:
-            matches = [wc for child, wc in _cascade_targets(table) if child is models.Artifact]
-            if not matches:
-                return []
-            where_clause = matches[0]
-        rows = self._execute_raw_sql(f"SELECT id, ref FROM Artifact WHERE {where_clause}", {"id": entity_id})
-        return [(row[0], row[1]) for row in rows]
 
     def _purge(
-        self, table: type[BaseModel], entity_id: int, actor: models.User, *, entity_type: models.EntityType
+        self, model: type[BaseModel], entity_id: int, actor: models.User, *, entity_type: models.EntityType
     ) -> None:
         """
         Permanently delete one already-soft-deleted row.
 
-        SQLite's `ON DELETE CASCADE` (see `FOREIGN_KEYS`/`ForeignKeyKind.OWNERSHIP`) handles
+        The database's `ON DELETE CASCADE` (see `FOREIGN_KEYS`/`ForeignKeyKind.OWNERSHIP`) handles
         removing every dependent row natively -- no per-table `DELETE` statements to enumerate here.
         The one irreversible action in this module -- everything else (soft-delete, restore) can be
         undone. Cascade counts for the audit log are computed with `_cascade_targets`'s *full*
@@ -1045,31 +942,34 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         Every artifact blob about to be orphaned by the cascade gets one `ArtifactPurgeTask` row, in
         the same transaction as the delete, so a background worker can clean up the underlying
         `ArtifactStore` blobs afterward without risking losing track of one if the process dies
-        right after this commits. Scope enforcement isn't this module's job -- see
-        `ScopeEnforcingDataStore`.
+        right after this commits. The artifact rows' `ref`s -- the blob locations -- have to be read
+        *before* that delete, since the cascade removes them without any Python code seeing them.
+        Scope enforcement isn't this module's job -- see `ScopeEnforcingDataStore`.
         """
-        if self._fetch_deleted_at(table, entity_id) is None:
-            msg = f"{table.__name__} {entity_id} must be soft-deleted before it can be purged"
+        if self._fetch_deleted_at(model, entity_id) is None:
+            msg = f"{model.__name__} {entity_id} must be soft-deleted before it can be purged"
             raise ValueError(msg)
 
-        details: dict[str, int] = {}
-        for child, where_clause in _cascade_targets(table):
-            details[child.__name__] = details.get(child.__name__, 0) + self._count_matching(
-                child, where_clause, entity_id
-            )
+        table = self._tables[model]
+        cascade = self._cascade(model, entity_id)
+        details = self._cascade_counts(cascade)
 
-        artifact_refs = self._artifact_refs_to_purge(table, entity_id)
-
-        audit_statement, audit_values = self._record_audit_log(
-            actor.id, models.AuditAction.PURGE, entity_type, entity_id, details
+        artifacts = self._tables[models.Artifact]
+        artifact_where = (
+            artifacts.c.id == entity_id
+            if model is models.Artifact
+            else next((where for child, where in cascade if child is artifacts), sa.false())
         )
-        self._execute_in_transaction(
+        artifact_refs = self._execute(sa.select(artifacts.c.id, artifacts.c.ref).where(artifact_where))
+
+        purge_tasks = self._tables[models.ArtifactPurgeTask]
+        self._transaction(
             [
-                (f"DELETE FROM {table.__name__} WHERE id = :id", {"id": entity_id}),
-                (audit_statement, audit_values),
+                sa.delete(table).where(table.c.id == entity_id),
+                self._audit_log_insert(actor.id, models.AuditAction.PURGE, entity_type, entity_id, details),
                 *(
                     sql.insert(
-                        models.ArtifactPurgeTask,
+                        purge_tasks,
                         models.NewArtifactPurgeTask(artifact_id=artifact_id, ref=ref, requested_by=actor.id),
                     )
                     for artifact_id, ref in artifact_refs
@@ -1132,14 +1032,13 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         offset: int = 0,
     ) -> Iterator[models.AuditLogEntry]:
         """List audit log entries, most recent first, for a trash/admin view. Requires `Scope.AUDIT_LOG_READ`."""
-        statement = f"""
-            SELECT {sql.select_columns_sql(models.AuditLogEntry)} FROM {models.AuditLogEntry.__name__}
-            ORDER BY timestamp_utc DESC
-            LIMIT {int(limit)} OFFSET {int(offset)};
-        """
-        yield from self._execute_sql_query(models.AuditLogEntry, statement)
+        log = self._tables[models.AuditLogEntry]
+        yield from self._fetch(
+            models.AuditLogEntry,
+            sa.select(log).order_by(log.c.timestamp_utc.desc()).limit(limit).offset(offset),
+        )
 
-    def _list_deleted[RowT: BaseModel](self, table: type[RowT], *, limit: int, offset: int) -> Iterator[RowT]:
+    def _list_deleted[RowT: BaseModel](self, model: type[RowT], *, limit: int, offset: int) -> Iterator[RowT]:
         """
         Shared query behind every `list_deleted_*` method: most-recently-deleted first, capped.
 
@@ -1147,13 +1046,15 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         artifact rows for a training-heavy project -- so this is never unbounded: callers always
         get a page, never "every row," the same discipline `list_audit_log` already follows.
         """
-        statement = f"""
-            SELECT {sql.select_columns_sql(table)} FROM {table.__name__}
-            WHERE deleted_at IS NOT NULL
-            ORDER BY deleted_at DESC
-            LIMIT {int(limit)} OFFSET {int(offset)};
-        """
-        yield from self._execute_sql_query(table, statement)
+        table = self._tables[model]
+        yield from self._fetch(
+            model,
+            sa.select(table)
+            .where(table.c.deleted_at.is_not(None))
+            .order_by(table.c.deleted_at.desc())
+            .limit(limit)
+            .offset(offset),
+        )
 
     def list_deleted_projects(self, limit: int = 100, offset: int = 0) -> Iterator[models.Project]:
         """List soft-deleted projects, most recently deleted first, for a trash/admin view."""
@@ -1181,31 +1082,25 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         outright (see `complete_artifact_purge`) rather than marked done, so there's no status
         column to filter on here.
         """
-        statement = f"""
-            SELECT {sql.select_columns_sql(models.ArtifactPurgeTask)} FROM {models.ArtifactPurgeTask.__name__}
-            ORDER BY requested_at ASC
-            LIMIT {int(limit)} OFFSET {int(offset)};
-        """
-        yield from self._execute_sql_query(models.ArtifactPurgeTask, statement)
+        tasks = self._tables[models.ArtifactPurgeTask]
+        yield from self._fetch(
+            models.ArtifactPurgeTask,
+            sa.select(tasks).order_by(tasks.c.requested_at).limit(limit).offset(offset),
+        )
 
     def count_pending_artifact_purges(self) -> int:
         """Count artifact blobs still waiting to be deleted. 0 means the last purge fully cleaned up."""
-        rows = list(self._execute_raw_sql(f"SELECT count(*) FROM {models.ArtifactPurgeTask.__name__}"))
-        return rows[0][0]
+        ((count,),) = self._execute(
+            sa.select(sa.func.count()).select_from(self._tables[models.ArtifactPurgeTask])
+        )
+        return count
 
     def complete_artifact_purge(self, task_id: int) -> None:
         """Record that a queued blob deletion succeeded by deleting its task row."""
-        list(
-            self._execute_raw_sql(
-                f"DELETE FROM {models.ArtifactPurgeTask.__name__} WHERE id = :id", {"id": task_id}
-            )
-        )
+        tasks = self._tables[models.ArtifactPurgeTask]
+        self._execute(sa.delete(tasks).where(tasks.c.id == task_id))
 
     def fail_artifact_purge(self, task_id: int, error: str) -> None:
         """Record that a queued blob deletion failed. The task stays pending and is retried later."""
-        list(
-            self._execute_raw_sql(
-                f"UPDATE {models.ArtifactPurgeTask.__name__} SET last_error = :error WHERE id = :id",
-                {"error": error, "id": task_id},
-            )
-        )
+        tasks = self._tables[models.ArtifactPurgeTask]
+        self._execute(sa.update(tasks).where(tasks.c.id == task_id).values(last_error=error))

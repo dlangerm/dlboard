@@ -13,8 +13,8 @@ from dltrack import models
 from dltrack.serve._backend import _sql_store_base as store_base
 
 
-def _table_names(targets: list[tuple[type, str]]) -> list[str]:
-    return [t.__name__ for t, _ in targets]
+def _table_names(targets: list[store_base.CascadePath]) -> list[str]:
+    return [path[-1][0].__name__ for path in targets]
 
 
 def test_cascade_targets_from_project_unfiltered_includes_every_owned_descendant() -> None:
@@ -50,18 +50,17 @@ def test_cascade_targets_from_artifact_is_empty_leaf() -> None:
     assert store_base._cascade_targets(models.Artifact) == []
 
 
-def test_cascade_targets_where_clauses_reference_id_and_nest_through_ancestors() -> None:
+def test_cascade_targets_paths_nest_through_ancestors() -> None:
     targets = {
-        t.__name__: w
-        for t, w in store_base._cascade_targets(models.Project, within=store_base.SOFT_DELETABLE)
+        path[-1][0].__name__: path
+        for path in store_base._cascade_targets(models.Project, within=store_base.SOFT_DELETABLE)
     }
 
-    assert targets["Experiment"] == "project_id = :id"
-    assert targets["Run"] == "experiment_id IN (SELECT id FROM Experiment WHERE project_id = :id)"
-    assert targets["Artifact"] == (
-        "run_id IN (SELECT id FROM Run WHERE "
-        "experiment_id IN (SELECT id FROM Experiment WHERE project_id = :id))"
-    )
+    experiment = (models.Experiment, "project_id")
+    run = (models.Run, "experiment_id")
+    assert targets["Experiment"] == (experiment,)
+    assert targets["Run"] == (experiment, run)
+    assert targets["Artifact"] == (experiment, run, (models.Artifact, "run_id"))
 
 
 def test_a_newly_registered_owned_table_participates_with_no_other_code_change() -> None:

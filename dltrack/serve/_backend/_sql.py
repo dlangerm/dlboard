@@ -1,26 +1,34 @@
-"""Common functions for data stores."""
+"""
+The pydantic-model <-> SQLAlchemy Core mapping every SQL-backed data store is built on.
+
+Tables are generated from the pydantic models themselves, one column per field, so the model stays
+the single source of truth for what gets stored. SQLAlchemy then owns everything dialect-specific:
+column types, identity columns, identifier quoting, bind-parameter style, `ON CONFLICT`, and
+schema introspection. A store only ever supplies an `Engine` (see `SQLStoreBase`).
+"""
 
 from __future__ import annotations
 
 import enum
-import json
 import typing
-from datetime import datetime
+from datetime import UTC, datetime
 from types import NoneType, UnionType
 
+import sqlalchemy as sa
 from pydantic import AwareDatetime, BaseModel
-from structlog.stdlib import get_logger
+from sqlalchemy.dialects.postgresql import JSONB
 
 from dltrack.serve._backend._foreign_keys import ForeignKeyKind
 
 if typing.TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Mapping
+
+    from sqlalchemy.engine.interfaces import Dialect
 
     from dltrack.serve._backend._foreign_keys import ForeignKey
 
 
 ID_KEY: typing.Final = "id"
-_log = get_logger(__name__)
 
 # Fields no `update()` may ever write, regardless of what value the caller's in-memory model
 # happens to hold -- each is bumped exclusively by its own dedicated mechanism (`revision` by
@@ -28,368 +36,201 @@ _log = get_logger(__name__)
 # before some *other* write bumped it concurrently) silently undo that bump.
 _NEVER_UPDATE_FIELDS: typing.Final = frozenset({"revision"})
 
+# sqlite only treats a column as its auto-incrementing rowid alias when it is spelled exactly
+# `INTEGER PRIMARY KEY`, so every integer is `INTEGER` there; everywhere else it's 64-bit, since a
+# busy metrics table outgrows a 32-bit id.
+_INT = sa.BigInteger().with_variant(sa.Integer(), "sqlite")
+_JSON = sa.JSON().with_variant(JSONB(), "postgresql")
+# `AwareDatetime` is only `Annotated[datetime, ...]` to a type checker; at runtime it's its own marker class.
+_DATETIMES: tuple[object, ...] = (datetime, AwareDatetime)
 
-def _unwrap_optional(annotation: type) -> type:
-    org = typing.get_origin(annotation)
+
+class UTCDateTime(sa.TypeDecorator[datetime]):
+    """
+    A timezone-aware datetime: `TIMESTAMPTZ` where the database has one, ISO-8601 text on sqlite.
+
+    sqlite has no datetime type, and every sqlite database written before this layer existed holds
+    `isoformat()` strings -- which also sort chronologically as plain text -- so sqlite keeps
+    exactly that. Reads are always aware: a string is parsed, a naive value is taken to be UTC.
+    Binds accept either a datetime or an ISO-8601 string (what `model_dump(mode="json")` produces).
+    """
+
+    impl = sa.DateTime(timezone=True)
+    cache_ok = True
+
+    @typing.override
+    def load_dialect_impl(self, dialect: Dialect) -> sa.types.TypeEngine[typing.Any]:
+        if dialect.name == "sqlite":
+            return dialect.type_descriptor(sa.Text())
+        return dialect.type_descriptor(sa.DateTime(timezone=True))
+
+    @typing.override
+    def process_bind_param(self, value: datetime | str | None, dialect: Dialect) -> datetime | str | None:
+        if value is None:
+            return None
+        aware = _aware(value)
+        return aware.isoformat() if dialect.name == "sqlite" else aware
+
+    @typing.override
+    def process_result_value(self, value: datetime | str | None, dialect: Dialect) -> datetime | None:
+        return None if value is None else _aware(value)
+
+
+def _aware(value: datetime | str) -> datetime:
+    parsed = datetime.fromisoformat(value) if isinstance(value, str) else value
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+
+
+def _unwrap_optional(annotation: object) -> tuple[object, bool]:
+    """`(inner type, nullable)` for `X | None`; `(annotation, False)` for anything else."""
     args = typing.get_args(annotation)
-    if org is UnionType and len(args) > 0 and args[1] is NoneType:
-        return args[0]
-    return annotation
+    if typing.get_origin(annotation) in (UnionType, typing.Union) and NoneType in args:
+        (inner,) = (a for a in args if a is not NoneType)
+        return inner, True
+    return annotation, False
 
 
-def _decode_stored_value(annotation: type, value: object) -> object:
-    """Reverse `serialize_complex_sql`: JSON-decode dict/list columns, parse datetime columns."""
-    if value is None or not isinstance(value, str):
-        return value
+def column_type(annotation: object) -> sa.types.TypeEngine[typing.Any]:  # noqa: PLR0911 -- one return per SQL type is the clearest shape here
+    """The SQL column type a model field's (already un-`Optional`ed) annotation is stored as."""
+    if typing.get_origin(annotation) in (dict, list):
+        return _JSON
+    if not isinstance(annotation, type):
+        raise NotImplementedError(annotation)
+    kind: type[object] = annotation
+    # `bool` before `int` (a subclass of it), and enums before `str` -- every enum here is a `StrEnum`.
+    if issubclass(kind, bool):
+        return sa.Boolean()
+    if issubclass(kind, enum.Enum | str):
+        return sa.Text()
+    if issubclass(kind, int):
+        return _INT
+    if issubclass(kind, float):
+        return sa.Double()
+    if kind in _DATETIMES or issubclass(kind, datetime):
+        return UTCDateTime()
+    if issubclass(kind, bytes):
+        return sa.LargeBinary()
+    raise NotImplementedError(kind)
 
-    ann = _unwrap_optional(annotation)
-    org = typing.get_origin(ann)
 
-    if org in (dict, list):
-        try:
-            return json.loads(value)
-        except (TypeError, ValueError) as exc:
-            msg = f"Expected JSON-decodable value for annotation {ann!r}, got {value!r}"
-            raise ValueError(msg) from exc
+def _server_default(default: object) -> sa.TextClause | sa.ColumnElement[bool] | None:
+    """
+    A real SQL `DEFAULT` for a plain scalar field default (e.g. `revision: int = 0`).
 
-    if ann in (datetime, AwareDatetime):
-        return datetime.fromisoformat(value)
+    So an `INSERT` that omits the column -- every `New*` payload omits every server-managed field --
+    gets that value, and so does an existing row when `ALTER TABLE ... ADD COLUMN` backfills it.
+    A `None` default (a genuinely optional field) and dict/list defaults are left to the implicit NULL.
+    """
+    match default:
+        case bool():
+            return sa.true() if default else sa.false()
+        case int() | float():
+            return sa.text(repr(default))
+        case str():
+            return sa.text("'" + default.replace("'", "''") + "'")
+        case _:
+            return None
 
-    return value
+
+def table_for(
+    model: type[BaseModel],
+    metadata: sa.MetaData,
+    references: Mapping[type[BaseModel], sa.Table],
+    foreign_keys: Mapping[str, ForeignKey] | None = None,
+    unique_columns: list[str] | None = None,
+) -> sa.Table:
+    """
+    Declare the table storing `model` on `metadata`: one column per field, named after the model.
+
+    `references` resolves each foreign key's target model to its (already declared) table. An
+    `OWNERSHIP`-kind foreign key (see `ForeignKeyKind`) gets a real `ON DELETE CASCADE`, so purging a
+    parent row lets the database cascade the delete natively.
+    """
+    fields = model.model_fields
+    for name in [ID_KEY, *(foreign_keys or {}), *(unique_columns or [])]:
+        if name not in fields:
+            msg = f"Column {name} not present in model {model.__name__}"
+            raise AssertionError(msg)
+
+    def column(name: str) -> sa.Column[typing.Any]:
+        if name == ID_KEY:
+            return sa.Column(ID_KEY, _INT, sa.Identity(), primary_key=True)
+        annotation, nullable = _unwrap_optional(fields[name].annotation)
+        fk = (foreign_keys or {}).get(name)
+        fk_args = (
+            [
+                sa.ForeignKey(
+                    references[fk.references].c[ID_KEY],
+                    ondelete="CASCADE" if fk.kind is ForeignKeyKind.OWNERSHIP else None,
+                )
+            ]
+            if fk is not None
+            else []
+        )
+        return sa.Column(
+            name,
+            column_type(annotation),
+            *fk_args,
+            nullable=nullable,
+            server_default=_server_default(fields[name].default),
+        )
+
+    return sa.Table(
+        model.__name__,
+        metadata,
+        *(column(name) for name in fields),
+        *(sa.UniqueConstraint(name) for name in unique_columns or []),
+        sqlite_autoincrement=True,
+    )
+
+
+def add_column_ddl(table: sa.Table, column: sa.Column[typing.Any], dialect: Dialect) -> str:
+    """
+    `ALTER TABLE ... ADD COLUMN` for `column`, always nullable -- existing rows have nothing to put there.
+
+    Rendered from a nullable copy of `column` on a throwaway table of the same name, so the column
+    spec (type, `DEFAULT`) is exactly what `CREATE TABLE` would have produced for it.
+    """
+    # Only ever what `_server_default` produced for it.
+    default = typing.cast(
+        "sa.TextClause | sa.ColumnElement[bool] | None",
+        column.server_default.arg if isinstance(column.server_default, sa.DefaultClause) else None,
+    )
+    nullable = sa.Column(column.name, column.type, nullable=True, server_default=default)
+    sa.Table(table.name, sa.MetaData(schema=table.schema), nullable)
+    spec = sa.schema.CreateColumn(nullable).compile(dialect=dialect)
+    return f"ALTER TABLE {dialect.identifier_preparer.format_table(table)} ADD COLUMN {spec}"
 
 
 def construct[T: BaseModel](
-    obj_type: type[T], args: tuple[typing.Any, ...], *, no_validate: bool = True
+    model: type[T], row: Mapping[str, typing.Any] | sa.RowMapping, *, no_validate: bool = False
 ) -> T:
-    fields = list(obj_type.model_fields.keys())
-    decoded = {
-        f: _decode_stored_value(obj_type.model_fields[f].annotation, args[i])  # pyright: ignore[reportArgumentType]
-        for i, f in enumerate(fields)
-    }
-    if no_validate:
-        return obj_type.model_construct(**decoded)  # pyright: ignore[reportArgumentType]
-    _log.debug("validating %s with args %s", obj_type, args)
-    return obj_type(**decoded)
+    """Build `model` from a result row, by column name; the column types already decoded every value."""
+    values = {name: row[name] for name in model.model_fields if name in row}
+    return model.model_construct(**values) if no_validate else model(**values)
 
 
-def ensure_basemodel(arg: typing.Any) -> typing.TypeGuard[list[BaseModel]]:  # noqa: ANN401
-    return isinstance(arg, list) and all(isinstance(a, BaseModel) for a in arg)  # pyright: ignore[reportUnknownVariableType]
+def row_values(model: BaseModel, *, exclude: frozenset[str] = frozenset[str]()) -> dict[str, typing.Any]:
+    """`model`'s fields as bind values for its table -- JSON-safe, which is what the JSON columns need."""
+    return model.model_dump(mode="json", exclude=set(exclude))
 
 
-def ensure_basemodel_dict(arg: typing.Any) -> typing.TypeGuard[dict[str, BaseModel]]:  # noqa: ANN401
-    return isinstance(arg, dict) and all(
-        isinstance(k, str) and isinstance(v, BaseModel)
-        for k, v in arg.items()  # pyright: ignore[reportUnknownVariableType]
-    )
-
-
-def serialize_complex_sql(value: object) -> object:
-    """Serialize lists and dictionaries if they appear."""
-    match value:
-        case dict():
-            if ensure_basemodel_dict(value):
-                return f"{json.dumps({k: v.model_dump(mode='json') for k, v in value.items()})}"
-            return f"{json.dumps(value)}"
-        case list():
-            if ensure_basemodel(value):
-                return f"{json.dumps([m.model_dump(mode='json') for m in value])}"
-            return f"{json.dumps(value)}"
-        case _:
-            return value
-
-
-def serialize_base_model(value: BaseModel) -> dict[str, typing.Any]:
-    """Serialize a base model."""
-    return {k: serialize_complex_sql(v) for k, v in value.model_dump(mode="json").items()}
-
-
-def escape_value_sql(value: object) -> str:
-    _log.debug("Escaping value %s type %s", value, type(value))
-    match value:
-        case bool():
-            return "true" if value else "false"
-        case int() | float():
-            return f"{value}"
-        case str():
-            return f"'{value.replace("'", "''")}'"
-        case NoneType():
-            return "NULL"
-        case datetime():
-            return value.isoformat()
-        case _:
-            raise NotImplementedError(type(value))
-
-
-def in_clause(
-    column: str, values: Iterable[object], *, prefix: str, negate: bool = False
-) -> tuple[str, dict[str, object]]:
-    """`AND <column> [NOT] IN (...)` plus its bound parameters, to append to a `WHERE` (`IN ()` is valid sqlite)."""
-    params = {f"{prefix}{i}": value for i, value in enumerate(values)}
-    placeholders = ", ".join(f":{name}" for name in params)
-    return f"AND {column} {'NOT IN' if negate else 'IN'} ({placeholders})", params
-
-
-def create_index_sql(
-    model: type[BaseModel],
-    columns: list[str],
-    *,
-    index_name: str | None = None,
-    unique: bool = False,
-    where: str | None = None,
-) -> str:
+def insert(table: sa.Table, model: BaseModel) -> sa.Insert:
     """
-    `CREATE INDEX IF NOT EXISTS` over `columns`; `unique` and `where` build a partial unique index.
+    `INSERT` `model` into `table`, returning the stored row.
 
-    A partial unique index (`unique=True` with a `where`) enforces "at most one row matching this
-    condition" -- e.g. at most one row per scope column with `owner_id IS NULL` -- the same
-    constraint a plain `UNIQUE(column)` can't express since it's conditional, not global.
+    Only `model`'s own fields are written: a `New*` model doesn't declare server-managed columns
+    (`id`, `deleted_at`, ...), which are left to the database's identity/default/NULL instead.
     """
-    for c in columns:
-        if c not in model.model_fields:
-            msg = f"{c} not present in model"
-            raise AssertionError(msg)
-    name = index_name or f"idx_{model.__name__}_{'_'.join(columns)}"
-    raw = f"""
-    CREATE {"UNIQUE " if unique else ""}INDEX IF NOT EXISTS {name}
-    ON {model.__name__} ({",".join(columns)}){f" WHERE {where}" if where else ""};
-    """
-    _log.debug("Create index sql: %s", raw)
-    return raw
+    exclude = frozenset[str]({ID_KEY}) if getattr(model, ID_KEY, None) is None else frozenset[str]()
+    return sa.insert(table).values(row_values(model, exclude=exclude)).returning(table)
 
 
-def annotation_to_sqltype(annotation: type, *, nullable: bool = False) -> str:  # noqa: PLR0911 -- one return per SQL type is the clearest shape here
-    org = typing.get_origin(annotation)
-    args = typing.get_args(annotation)
-    if org is UnionType and len(args) > 0 and args[1] is NoneType:
-        # optional
-        return annotation_to_sqltype(args[0], nullable=True)
-    suffix = "" if nullable else " NOT NULL"
-    if issubclass(annotation, enum.Enum):
-        # Calling a bare enum class with no args (as the generic `annotation()` probe below does)
-        # raises -- e.g. `Scope()` -- rather than constructing a sentinel instance like `str()`
-        # does, so enums need to be special-cased instead of falling through to `match`. Every enum
-        # in this codebase is a `StrEnum`, so TEXT is always correct; a plain `IntEnum` would need
-        # its own branch if one is ever introduced.
-        return f"TEXT{suffix}"
-    match annotation():
-        case str():
-            return f"TEXT{suffix}"
-        case int():
-            return f"INTEGER{suffix}"
-        case float():
-            return f"REAL{suffix}"
-        case dict() | list() | datetime() | AwareDatetime():  # pyright: ignore[reportGeneralTypeIssues]
-            return f"TEXT{suffix}"
-        case bytes():
-            return f"BLOB{suffix}"
-        case _:
-            raise NotImplementedError((annotation, type(annotation)))  # pyright: ignore[reportUnknownArgumentType]
-
-
-def create_table_sql(
-    model: type[BaseModel],
-    foreign_keys: dict[str, ForeignKey] | None = None,
-    unique_columns: list[str] | None = None,
-) -> str:
-    """
-    Build a `CREATE TABLE IF NOT EXISTS` statement reflecting `model`'s fields.
-
-    An `OWNERSHIP`-kind foreign key (see `ForeignKeyKind`) gets a real `ON DELETE CASCADE`, so
-    purging a parent row lets SQLite cascade the delete natively instead of the caller having to
-    enumerate every dependent table by hand.
-    """
-    if ID_KEY not in model.model_fields:
-        msg = f"Creation object {model.__class__} must contain an ID key"
-        raise AssertionError(msg)
-    for field_name in foreign_keys or {}:
-        if field_name not in model.model_fields:
-            msg = f"Foreign key column {field_name} not present in model {model.__name__}"
-            raise AssertionError(msg)
-    for field_name in unique_columns or []:
-        if field_name not in model.model_fields:
-            msg = f"Unique column {field_name} not present in model {model.__name__}"
-            raise AssertionError(msg)
-    base_str = f"""
-    CREATE TABLE IF NOT EXISTS {model.__name__}
-    """
-    typed_keys = [annotation_to_sqltype(field.annotation) for field in model.model_fields.values()]  # pyright: ignore[reportArgumentType]
-    sorted_keys = list(model.model_fields.keys())
-    id_index = sorted_keys.index(ID_KEY)
-
-    for idx, field_name in enumerate(sorted_keys):
-        # A real SQL `DEFAULT` only for a plain scalar default (e.g. `revision: int = 0`) -- so an
-        # `insert()` that omits the column (every `New*` payload omits every server-managed field)
-        # gets that value instead of SQLite's implicit NULL. A field whose default *is* `None` (a
-        # genuinely optional field, e.g. `deleted_at`) and a dict/list default (JSON-serialized on
-        # insert, not something `escape_value_sql` can turn into a literal) are deliberately left
-        # alone -- both keep relying on the implicit NULL for an omitted column, exactly as before.
-        default = model.model_fields[field_name].default
-        default_clause = (
-            f" DEFAULT {escape_value_sql(default)}" if isinstance(default, bool | int | float | str) else ""
-        )
-        sorted_keys[idx] = f"{field_name} {typed_keys[idx]}{default_clause}"
-
-    sorted_keys[id_index] = f"{ID_KEY} INTEGER PRIMARY KEY AUTOINCREMENT"
-    fk_clauses = [
-        f"FOREIGN KEY ({field_name}) REFERENCES {fk.references.__name__}({ID_KEY})"
-        + (" ON DELETE CASCADE" if fk.kind is ForeignKeyKind.OWNERSHIP else "")
-        for field_name, fk in (foreign_keys or {}).items()
-    ]
-    unique_clauses = [f"UNIQUE ({field_name})" for field_name in unique_columns or []]
-    base_str += "("
-    base_str += ",".join([*sorted_keys, *fk_clauses, *unique_clauses])
-    base_str += ");"
-    _log.debug("Create table sql: %s", base_str)
-    return base_str
-
-
-def update(table: type[BaseModel], model: BaseModel) -> tuple[str, dict[str, typing.Any]]:
-    """Update an existing entry. Never writes a `_NEVER_UPDATE_FIELDS` column -- see its docstring."""
-    sorted_keys = [k for k in model.__class__.model_fields if k not in _NEVER_UPDATE_FIELDS]
-    sorted_keys.remove(ID_KEY)
-    interpolate_values = ",".join([f"{k} = :{k}" for k in sorted_keys])
-    values = serialize_base_model(model)
-    id_match = values.pop(ID_KEY)
+def update(table: sa.Table, model: BaseModel) -> sa.Update:
+    """Update the row `model` was read from. Never writes a `_NEVER_UPDATE_FIELDS` column -- see its docstring."""
     return (
-        f"""
-        UPDATE {table.__name__}
-        set {interpolate_values}
-        where id = {id_match}
-        RETURNING {select_columns_sql(table)};
-        """,
-        values,
+        sa.update(table)
+        .where(table.c[ID_KEY] == getattr(model, ID_KEY))
+        .values(row_values(model, exclude=frozenset({ID_KEY, *_NEVER_UPDATE_FIELDS})))
+        .returning(table)
     )
-
-
-def insert(table: type[BaseModel], model: BaseModel) -> tuple[str, dict[str, typing.Any]]:
-    """
-    Build an `INSERT` for `model` into `table`.
-
-    Uses an explicit column list rather than positional `VALUES(...)` -- `model`'s class (typically
-    a `New*` type) doesn't have to declare every column `table` has (e.g. `deleted_at`/`deleted_by`
-    exist only on the stored `Project`/etc., never on `NewProject`); omitted columns are simply left
-    at their SQL-level default (NULL) instead of requiring positional arity to match exactly.
-    """
-    sorted_keys = list(model.__class__.model_fields.keys())
-    if ID_KEY in sorted_keys:
-        msg = f"Creation object {model.__class__} must not contain an ID key"
-        raise AssertionError(msg)
-    columns = [*sorted_keys, ID_KEY]
-    raw_values = ",".join([f":{k}" for k in columns])
-    values = serialize_base_model(model) | {ID_KEY: None}
-
-    return (
-        f"""
-        INSERT INTO {table.__name__}
-        ({",".join(columns)})
-        VALUES({raw_values})
-        RETURNING {select_columns_sql(table)};
-        """,
-        values,
-    )
-
-
-def insert_or_ignore(table: type[BaseModel], model: BaseModel) -> tuple[str, dict[str, typing.Any]]:
-    """Like `insert`, but a conflicting row (e.g. a duplicate unique `username`) is silently skipped."""
-    statement, values = insert(table, model)
-    return statement.replace("INSERT INTO", "INSERT OR IGNORE INTO", 1), values
-
-
-def insert_many(
-    table: type[BaseModel],
-    models: Iterable[BaseModel],
-) -> tuple[str, Iterable[dict[str, typing.Any]]]:
-    sorted_keys = list(table.model_fields.keys())
-    joined_keys = ",".join(sorted_keys)
-    return (
-        f"""
-        INSERT INTO {table.__name__}
-        ({joined_keys})
-        VALUES({",".join([f":{k}" for k in sorted_keys])});
-        """,
-        (serialize_base_model(model) | {ID_KEY: None} for model in models),
-    )
-
-
-def select_columns_sql(model: type[BaseModel]) -> str:
-    """
-    A `SELECT`-clause column list in `model.model_fields` order, instead of `SELECT *`.
-
-    `construct()` decodes a row positionally by zipping it against `model.model_fields`, but a
-    column added to an existing table via `_add_missing_columns`' `ALTER TABLE ... ADD COLUMN`
-    always lands physically last regardless of where the field sits in the model -- `SELECT *`
-    would then hand `construct()` values in the wrong order for any table that's been backfilled
-    this way. Naming columns explicitly, in model order, keeps row-to-field alignment correct
-    regardless of physical column order.
-    """
-    return ",".join(model.model_fields)
-
-
-def get_by_id(model: type[BaseModel], id: int, *, exclude_deleted: bool = False) -> str:
-    if ID_KEY not in model.model_fields:
-        msg = f"Get object {model.__name__} must contain an ID key"
-        raise AssertionError(msg)
-
-    deleted_clause = " AND deleted_at IS NULL" if exclude_deleted else ""
-    return f"""
-        SELECT {select_columns_sql(model)}
-        FROM {model.__name__}
-        WHERE {ID_KEY} = '{int(id)}'{deleted_clause};
-    """
-
-
-def get_all(model: type[BaseModel], *, exclude_deleted: bool = False) -> str:
-    if ID_KEY not in model.model_fields:
-        msg = f"Get object {model.__name__} must contain an ID key"
-        raise AssertionError(msg)
-
-    where_clause = "WHERE deleted_at IS NULL" if exclude_deleted else ""
-    return f"""
-        SELECT {select_columns_sql(model)}
-        FROM {model.__name__}
-        {where_clause};
-    """
-
-
-def get_all_by_field(  # noqa: PLR0913
-    model: type[BaseModel],
-    field_name: str,
-    field_value: str | int | bool,  # noqa: FBT001
-    match_field: str | None = None,
-    match_field_values: set[str | bool | int | float] | None = None,
-    order_by: list[str] | None = None,
-    *,
-    exclude_deleted: bool = False,
-    descending: bool = False,
-    limit: int | None = None,
-    offset: int = 0,
-) -> str:
-    if ID_KEY not in model.model_fields:
-        msg = f"Get object {model.__name__} must contain an ID key"
-        raise AssertionError(msg)
-    if field_name not in model.model_fields:
-        msg = f"Get all {model.__name__} must contain key {field_name}"
-        raise AssertionError(msg)
-    for order in order_by or []:
-        if order not in model.model_fields:
-            msg = f"{order} not present in model"
-            raise AssertionError(msg)
-    order_clause = ("ORDER BY " + ",".join(order_by) + (" DESC" if descending else "")) if order_by else ""
-    if match_field and not match_field_values:
-        msg = "Get all by field match field must have values!"
-        raise AssertionError(msg)
-
-    match_clause = (
-        "1=1"
-        if not match_field or not match_field_values
-        else (f"{match_field} in ({','.join(map(escape_value_sql, list(match_field_values)))})")
-    )
-    deleted_clause = " AND deleted_at IS NULL" if exclude_deleted else ""
-    limit_clause = f" LIMIT {int(limit)} OFFSET {int(offset)}" if limit is not None else ""
-
-    return f"""
-        SELECT {select_columns_sql(model)}
-        FROM {model.__name__}
-        WHERE {field_name} = {escape_value_sql(field_value)} AND {match_clause}{deleted_clause}
-        {order_clause}{limit_clause};
-    """

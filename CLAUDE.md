@@ -109,8 +109,13 @@ logic is a narrow exception: it references concrete chart classes to decide what
 3. Server-side storage is split into a `DataStore` (structured metadata: projects, experiments, runs, metrics,
    hparams) and an `ArtifactStore` (blob storage), both defined as generic protocols in
    `dltrack/models/_data_store.py`. `SQLStoreBase` (`dltrack/serve/_backend/_sql_store_base.py`) implements
-   the `DataStore` contract against raw SQL; `plugins/data_stores/sqlite.py` supplies the sqlite
-   `_execute_raw_sql` implementation, `filesystem.py` supplies artifact blob storage on disk.
+   the `DataStore` contract on SQLAlchemy Core (not the ORM): `_sql.py` generates each table from its
+   pydantic model, and every query is a Core expression, so SQLAlchemy owns everything dialect-specific
+   (types, identity columns, quoting, bind style). A concrete store only hands `SQLStoreBase` an `Engine`
+   and implements `_insert_ignoring_conflicts`; `plugins/data_stores/sqlite.py` is the reference one, and
+   `filesystem.py` supplies artifact blob storage on disk. There is no migration system: startup creates
+   missing tables and backfills missing columns (`_add_missing_columns`), and existing sqlite databases keep
+   their on-disk format (`serve/_backend/tests/legacy_schema.sql` guards that).
 
 ### Server-side app (Dash)
 

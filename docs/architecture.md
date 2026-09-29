@@ -42,8 +42,9 @@ each other directly. See [plugins/overview.md](plugins/overview.md) for the plug
 3. Storage is split into a `DataStore` (structured metadata — projects, experiments, runs, metrics,
    hparams) and an `ArtifactStore` (blob storage), both defined as generic protocols in
    `dltrack/models/_data_store.py`. `SQLStoreBase` (`dltrack/serve/_backend/_sql_store_base.py`)
-   implements `DataStore` against raw SQL; the `sqlite`/`filesystem` plugins under
-   `dltrack/plugins/data_stores/` supply the concrete backends `dltrack serve local` uses.
+   implements `DataStore` on SQLAlchemy Core, with tables generated from the pydantic models; the
+   `sqlite`/`filesystem` plugins under `dltrack/plugins/data_stores/` supply the concrete backends
+   `dltrack serve local` uses.
 4. Browser-side, routed pages under `dltrack/serve/_pages/` (Dash's file-based `use_pages` routing)
    read back through the same `DataStore`/`ArtifactStore` accessors to render what got logged.
 

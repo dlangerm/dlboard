@@ -10,9 +10,11 @@ from __future__ import annotations
 import sqlite3
 import threading
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 import pytest
+import sqlalchemy as sa
+from sqlalchemy.exc import IntegrityError
 
 from dltrack import models
 from dltrack.models._view import PanelInstance
@@ -23,7 +25,14 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
+    from pydantic import BaseModel
+
 _TS = datetime(2026, 1, 1, tzinfo=UTC)
+
+
+def _count(store: SQLLiteStore, model: type[BaseModel], *where: sa.ColumnElement[bool]) -> int:
+    ((count,),) = store._execute(sa.select(sa.func.count()).select_from(store.tables[model]).where(*where))
+    return count
 
 
 def test_project_and_experiment_are_persisted(store: SQLLiteStore) -> None:
@@ -345,7 +354,7 @@ def test_get_or_create_user_is_idempotent(store: SQLLiteStore) -> None:
     again = store.get_or_create_user("alice")
 
     assert again == first
-    assert list(store._execute_raw_sql("SELECT count(*) FROM User")) == [(1,)]
+    assert _count(store, models.User) == 1
 
 
 def test_get_or_create_project_creates_on_first_call_and_reuses_after(store: SQLLiteStore) -> None:
@@ -354,7 +363,7 @@ def test_get_or_create_project_creates_on_first_call_and_reuses_after(store: SQL
 
     assert again.id == first.id
     assert again.description == "d"
-    assert list(store._execute_raw_sql("SELECT count(*) FROM Project")) == [(1,)]
+    assert _count(store, models.Project) == 1
 
 
 def test_get_or_create_project_stamps_created_by(store: SQLLiteStore) -> None:
@@ -373,7 +382,7 @@ def test_get_or_create_experiment_creates_on_first_call_and_reuses_after(store: 
 
     assert again.id == first.id
     assert again.name == "default"
-    assert list(store._execute_raw_sql("SELECT count(*) FROM Experiment")) == [(1,)]
+    assert _count(store, models.Experiment) == 1
 
 
 def test_get_or_create_experiment_tags_source_only_on_first_call(store: SQLLiteStore) -> None:
@@ -428,13 +437,8 @@ def test_get_or_create_page_is_idempotent_and_updatable(store: SQLLiteStore, exp
 
 
 def _shared_page_count(store: SQLLiteStore, experiment_id: int) -> int:
-    (count,) = next(
-        store._execute_raw_sql(
-            "SELECT count(*) FROM Page WHERE experiment_id = :experiment_id AND owner_id IS NULL",
-            {"experiment_id": experiment_id},
-        )
-    )
-    return cast("int", count)
+    pages = store.tables[models.Page]
+    return _count(store, models.Page, pages.c.experiment_id == experiment_id, pages.c.owner_id.is_(None))
 
 
 def test_get_or_create_page_rejects_a_second_shared_page_for_one_experiment(
@@ -451,13 +455,10 @@ def test_get_or_create_page_rejects_a_second_shared_page_for_one_experiment(
     """
     first = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
 
-    with pytest.raises(sqlite3.IntegrityError):
-        list(
-            store._execute_raw_sql(
-                "INSERT INTO Page "
-                "(run_id, experiment_id, project_id, owner_id, name, panels, page_settings, id) "
-                "VALUES (NULL, :experiment_id, NULL, NULL, '', '[]', '{}', NULL);",
-                {"experiment_id": experiment_id},
+    with pytest.raises(IntegrityError):
+        store._execute(
+            sa.insert(store.tables[models.Page]).values(
+                experiment_id=experiment_id, panels=[], page_settings={}
             )
         )
 

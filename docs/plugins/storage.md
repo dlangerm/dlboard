@@ -31,12 +31,16 @@ def plug(app: Dash) -> None:
     set_artifact_store(app, MyArtifactStore.get_or_create(...))
 ```
 
-You don't have to implement `DataStore` from scratch against raw SQL — `SQLStoreBase`
+You don't have to implement `DataStore` from scratch — `SQLStoreBase`
 (`dltrack/serve/_backend/_sql_store_base.py`) already implements the full `DataStore` contract
-(CRUD, cascading soft-delete, audit log, scopes) against an abstract `_execute_raw_sql`/
-`_execute_raw_sql_query_many`. A new SQL-backed store (Postgres, MySQL) usually only needs to
-subclass `SQLStoreBase` and supply those two methods plus connection handling — see
-`plugins/data_stores/sqlite.py` for the ~30-line reference implementation.
+(CRUD, cascading soft-delete, audit log, scopes) on SQLAlchemy Core. It generates every table from
+its pydantic model and writes every query as a Core expression, so column types, identity columns,
+quoting and bind style all come from SQLAlchemy's dialect for your database. A new SQL-backed store
+only needs to subclass `SQLStoreBase`, pass `super().__init__()` an `sqlalchemy.Engine` (your
+connection settings and pooling live there), and implement `_insert_ignoring_conflicts` — an
+`INSERT ... ON CONFLICT DO NOTHING`, which each dialect spells through its own
+`sqlalchemy.dialects.<name>.insert`. See `plugins/data_stores/sqlite.py` for the reference
+implementation.
 
 An `ArtifactStore` has no equivalent base class — `plugins/data_stores/filesystem.py` is the
 reference implementation (local disk, `protocol = "file"`) to model a new one on. Configuration
