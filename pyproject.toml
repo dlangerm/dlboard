@@ -7,11 +7,13 @@ dev = [
   "pandas-stubs>=3.0.5.260730",
   "pillow>=12.3.0",
   "prek>=0.4.10",
+  "psycopg[binary]>=3.2",
   "pyright>=1.1.411",
   "pytest>=9.1.1",
   "pytest-cov>=7.1.0",
   "pytest-playwright>=0.9.0",
   "ruff>=0.15.22",
+  "testcontainers[postgres]>=4.10",
   "torchvision>=0.28.0",
   "vulture>=2.16"
 ]
@@ -42,6 +44,11 @@ readme = "README.md"
 requires-python = ">=3.12"
 version = "0.1.0"
 
+[project.optional-dependencies]
+postgres = [
+  "psycopg[binary]>=3.2"
+]
+
 [project.scripts]
 dltrack = "dltrack._cli:main"
 
@@ -69,6 +76,7 @@ venvPath = "."
 filterwarnings = ["error"]
 markers = [
   "browser: browser-based end-to-end tests requiring a webdriver",
+  "postgres: runs against a real Postgres in a throwaway container; needs Docker",
   "screenshots: renders the docs screenshots; only runs with --screenshots=check|update"
 ]
 pythonpath = ["."]
@@ -129,6 +137,11 @@ extend-select = [
 fixable = ["ALL"]
 ignore = ["COM812", "D203", "D212", "D401", "E501", "PLR6301", "PLR0917"]
 select = ["E4", "E7", "E9", "F"]
+
+[tool.ruff.lint.flake8-type-checking]
+# Pydantic resolves these classes' field annotations at runtime, so what they annotate with has to
+# be importable at runtime too -- never moved into a `TYPE_CHECKING` block.
+runtime-evaluated-base-classes = ["pydantic.BaseModel", "pydantic_settings.BaseSettings"]
 
 [tool.ruff.lint.per-file-ignores]
 # `_pages/_tests/` (underscore-prefixed, unlike every other `tests/` dir) exists only so Dash's
@@ -211,6 +224,8 @@ ignore_names = [
   # off the type itself, never referenced by name in our own code.
   "impl",
   "cache_ok",
+  # Pydantic's class-level config attribute (`postgres.PostgresSettings`) -- read by pydantic itself.
+  "model_config",
   # `plugins/backend/tests/rest_backend_test.py`'s `_FakeServer.add_url_rule` -- a keyword-only
   # parameter that has to keep this exact name to stand in for the real `Flask.add_url_rule`
   # signature, even though the fake's body never reads it.

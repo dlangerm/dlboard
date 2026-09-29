@@ -15,9 +15,39 @@ the same plugin.
 
 ## When you'd need this
 
-You're deploying somewhere the built-in backends don't fit — a shared Postgres instance instead of
-per-deployment sqlite, or S3/GCS instead of local filesystem for artifacts. The built-ins,
-`dltrack/plugins/data_stores/sqlite.py` and `filesystem.py`, are what `LOCAL_DEPLOYMENT` uses.
+You're deploying somewhere the built-in backends don't fit — e.g. S3/GCS instead of local
+filesystem for artifacts. The built-ins are `dltrack/plugins/data_stores/sqlite.py` and
+`filesystem.py` (what `LOCAL_DEPLOYMENT` uses) and `postgres.py`, below.
+
+## Postgres
+
+`dltrack.plugins.POSTGRES_STORAGE` (`postgres` + `filesystem` + the artifact purge worker) swaps
+sqlite for a shared Postgres. Install the driver with the `postgres` extra
+(`pip install 'dltrack[postgres]'`), put `POSTGRES_STORAGE` in your own plugin list, and run it with
+`dltrack serve custom --plugins yourmodule:PLUGINS`:
+
+```python
+from dltrack.plugins import BUILTIN_BACKEND, BUILTIN_CHARTS, POSTGRES_STORAGE, themes
+
+PLUGINS = [*POSTGRES_STORAGE, my_auth_plugin, *BUILTIN_BACKEND, *BUILTIN_CHARTS, themes.default]
+```
+
+Every setting is a `POSTGRES_*` environment variable. The full list, with docs, is
+`PostgresSettings` in `dltrack/plugins/data_stores/postgres.py`:
+
+| Concern | Variables |
+|---|---|
+| Connection | `POSTGRES_HOST` (a comma-separated list fails over between hosts), `_PORT`, `_DATABASE`, `_USER`, `_PASSWORD`, `_DB_SCHEMA` (created if missing), `_APPLICATION_NAME`, `_TARGET_SESSION_ATTRS` (e.g. `read-write`) |
+| TLS | `POSTGRES_SSLMODE` (default `prefer`; use `verify-full` in production), `_SSLROOTCERT`, `_SSLCERT`, `_SSLKEY` |
+| Timeouts | `POSTGRES_CONNECT_TIMEOUT_S`, `_STATEMENT_TIMEOUT_MS`, `_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS`, `_KEEPALIVES_IDLE_S` |
+| Pooling | `POSTGRES_POOL_SIZE`, `_MAX_OVERFLOW`, `_POOL_TIMEOUT_S`, `_POOL_RECYCLE_S`, `_POOL_PRE_PING` |
+| PgBouncer | `POSTGRES_PREPARE_THRESHOLD=null` disables server-side prepared statements for transaction pooling |
+| Anything else | `POSTGRES_CONNECT_ARGS` — a JSON object of extra libpq parameters, e.g. `{"sslcrl": "..."}` |
+
+The driver is libpq-based, so libpq's own environment (`PGPASSFILE`, `PGSERVICE`, ...) still works
+underneath these. Each server worker process has its own pool, so keep
+`workers × (pool_size + max_overflow)` under the server's `max_connections`. Workers starting at
+once take turns creating/migrating the schema, under an advisory lock.
 
 ## How do I build one
 

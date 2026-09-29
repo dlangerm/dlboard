@@ -221,7 +221,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         ]
 
         with engine.begin() as conn:
-            self._lock_schema(conn)
+            self._prepare_schema(conn)
             self._metadata.create_all(conn)
             for table in self._tables.values():
                 self._add_missing_columns(conn, table)
@@ -250,6 +250,10 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         """Every table this store manages, keyed by the pydantic model it stores."""
         return self._tables
 
+    def dispose(self) -> None:
+        """Close every connection this store's pool holds open (a later call just opens new ones)."""
+        self._engine.dispose()
+
     @abstractmethod
     def _insert_ignoring_conflicts(self, table: sa.Table) -> sa.Insert:
         """
@@ -259,12 +263,13 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         `sqlalchemy.dialects.<name>.insert`), so it's the one statement each store supplies itself.
         """
 
-    def _lock_schema(self, conn: sa.Connection) -> None:
+    def _prepare_schema(self, conn: sa.Connection) -> None:
         """
-        Serialize schema creation/migration across processes, for the transaction `conn` is in.
+        Run first in the schema creation/migration transaction `conn` is in.
 
         A no-op by default. A server-based database, where several worker processes can start
-        against it at once, overrides this to take a lock that concurrent schema init then waits on.
+        against it at once, overrides this to take a lock that concurrent schema init then waits
+        on (and to create anything the tables need to exist first, e.g. their schema).
         """
 
     @staticmethod

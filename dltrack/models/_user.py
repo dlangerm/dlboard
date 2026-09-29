@@ -11,7 +11,7 @@ from __future__ import annotations
 import pendulum
 from pydantic import AwareDatetime, BaseModel, Field
 
-from dltrack.models._scopes import Scope  # noqa: TC001 -- a real Pydantic field, needed at runtime
+from dltrack.models._scopes import Scope
 
 
 class NewUser(BaseModel, frozen=True, extra="forbid"):

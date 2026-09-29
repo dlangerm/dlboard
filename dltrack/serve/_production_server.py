@@ -15,10 +15,10 @@ from typing import Annotated
 
 from granian import Granian
 from granian.constants import Interfaces
-from pydantic import ImportString  # noqa: TC002 -- a real Pydantic field type, needed at runtime
+from pydantic import ImportString
 from pydantic_settings import BaseSettings, NoDecode
 
-from dltrack.models import PluginProtocol  # noqa: TC001 -- a real Pydantic field type, needed at runtime
+from dltrack.models import PluginProtocol
 from dltrack.serve._settings_env import set_setting_env
 
 

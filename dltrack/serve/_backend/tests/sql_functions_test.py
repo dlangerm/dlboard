@@ -88,11 +88,16 @@ def test_table_for_renders_each_dialects_types(dialect: Dialect, expected: list[
 @pytest.mark.parametrize(
     ("kind", "expected"),
     [
-        (ForeignKeyKind.ATTRIBUTION, 'FOREIGN KEY(parent_id) REFERENCES "User" (id) )'),
-        (ForeignKeyKind.OWNERSHIP, 'FOREIGN KEY(parent_id) REFERENCES "User" (id) ON DELETE CASCADE'),
+        (
+            ForeignKeyKind.ATTRIBUTION,
+            'FOREIGN KEY(parent_id) REFERENCES "User" (id) DEFERRABLE INITIALLY DEFERRED )',
+        ),
+        (ForeignKeyKind.OWNERSHIP, 'FOREIGN KEY(parent_id) REFERENCES "User" (id) ON DELETE CASCADE )'),
     ],
 )
-def test_table_for_cascades_only_ownership_foreign_keys(kind: ForeignKeyKind, expected: str) -> None:
+def test_table_for_cascades_ownership_and_defers_attribution_foreign_keys(
+    kind: ForeignKeyKind, expected: str
+) -> None:
     assert expected in _ddl(postgresql.dialect(), ForeignKey(User, kind))
 
 

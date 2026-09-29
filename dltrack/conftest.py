@@ -5,14 +5,18 @@ from __future__ import annotations
 
 import threading
 import typing
+import uuid
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
+import sqlalchemy as sa
+from pydantic import SecretStr
 from werkzeug.serving import make_server
 
 from dltrack import models
-from dltrack.plugins import BUILTIN_BACKEND, LOCAL_AUTH, LOCAL_STORAGE
+from dltrack.plugins import BUILTIN_BACKEND, LOCAL_AUTH, LOCAL_STORAGE, POSTGRES_STORAGE
+from dltrack.plugins.data_stores.postgres import PostgresSettings, PostgresStore
 from dltrack.plugins.data_stores.sqlite import SQLLiteStore
 from dltrack.serve import app as build_app
 from dltrack.serve._backend import _auth
@@ -20,6 +24,8 @@ from dltrack.serve._backend import _auth
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
     from pathlib import Path
+
+    from dltrack.serve import SQLStoreBase
 
 
 class ScreenshotMode(StrEnum):
@@ -68,14 +74,79 @@ def screenshot_mode(request: pytest.FixtureRequest) -> ScreenshotMode:
     return cast("ScreenshotMode", request.config.getoption("--screenshots"))
 
 
-@pytest.fixture
-def store(tmp_path: Path) -> SQLLiteStore:
-    """A throwaway sqlite-backed store for a single test."""
-    return SQLLiteStore(tmp_path / "test.sqlite")
+class StoreBackend(StrEnum):
+    """Which database the `store`/`backend_server` fixtures are backed by (see `store_backend`)."""
+
+    SQLITE = "sqlite"
+    POSTGRES = "postgres"
+
+
+EVERY_STORE_BACKEND: list[Any] = [
+    StoreBackend.SQLITE,
+    pytest.param(StoreBackend.POSTGRES, marks=pytest.mark.postgres),
+]
+"""
+`params` for a module's own `store_backend` override, to run its tests against every backend:
+
+    @pytest.fixture(params=EVERY_STORE_BACKEND)
+    def store_backend(request: pytest.FixtureRequest) -> StoreBackend:
+        return request.param
+"""
+
+
+@pytest.fixture(scope="session")
+def postgres_server() -> Iterator[PostgresSettings]:
+    """A real Postgres in a throwaway container (needs Docker), started once per test session."""
+    from testcontainers.community.postgres import (
+        PostgresContainer,
+    )
+
+    with PostgresContainer(
+        "postgres:17-alpine", username="dltrack", password="dltrack", dbname="dltrack"
+    ) as pg:
+        yield PostgresSettings(
+            host=pg.get_container_host_ip(),
+            port=pg.get_exposed_port(5432),
+            database="dltrack",
+            user="dltrack",
+            password=SecretStr("dltrack"),
+            sslmode="disable",
+        )
 
 
 @pytest.fixture
-def experiment_id(store: SQLLiteStore) -> int:
+def postgres_settings(postgres_server: PostgresSettings) -> Iterator[PostgresSettings]:
+    """Settings for a fresh, empty schema of its own in the session's Postgres, dropped afterwards."""
+    settings = postgres_server.model_copy(update={"db_schema": f"test_{uuid.uuid4().hex[:12]}"})
+    yield settings
+    admin = sa.create_engine("postgresql+psycopg://", connect_args=postgres_server.libpq_connect_args())
+    with admin.begin() as conn:
+        conn.execute(sa.schema.DropSchema(settings.db_schema, cascade=True, if_exists=True))
+    admin.dispose()
+
+
+@pytest.fixture
+def store_backend() -> StoreBackend:
+    """sqlite, unless a module overrides this to run against every backend (see `EVERY_STORE_BACKEND`)."""
+    return StoreBackend.SQLITE
+
+
+@pytest.fixture
+def store(
+    store_backend: StoreBackend, tmp_path: Path, request: pytest.FixtureRequest
+) -> Iterator[SQLStoreBase[Any]]:
+    """A throwaway store for a single test, backed by `store_backend`."""
+    match store_backend:
+        case StoreBackend.SQLITE:
+            yield SQLLiteStore(tmp_path / "test.sqlite")
+        case StoreBackend.POSTGRES:
+            postgres = PostgresStore(request.getfixturevalue("postgres_settings"))
+            yield postgres
+            postgres.dispose()
+
+
+@pytest.fixture
+def experiment_id(store: SQLStoreBase[Any]) -> int:
     """A freshly created project/experiment pair, returning the experiment's id."""
     project = store.create_project(models.NewProject(name="p", description="d"))
     experiment = store.create_experiment(models.NewExperiment(project_id=project.id))
@@ -83,7 +154,7 @@ def experiment_id(store: SQLLiteStore) -> int:
 
 
 @pytest.fixture
-def admin(store: SQLLiteStore) -> models.User:
+def admin(store: SQLStoreBase[Any]) -> models.User:
     """The bootstrap admin -- the first user any fresh store creates gets `Scope.ALL`."""
     return store.get_or_create_user("admin")
 
@@ -124,7 +195,7 @@ class EntityChain(typing.NamedTuple):
     artifact_id: int | None
 
 
-def create_entity_chain(store: SQLLiteStore, *, artifact: bool = False) -> EntityChain:
+def create_entity_chain(store: SQLStoreBase[Any], *, artifact: bool = False) -> EntityChain:
     """
     Create a project/experiment/run, and optionally one artifact.
 
@@ -155,37 +226,54 @@ def create_entity_chain(store: SQLLiteStore, *, artifact: bool = False) -> Entit
 
 
 class BackendServer(typing.NamedTuple):
-    """A live dltrack backend's URL, plus a store reading the same sqlite file it writes to."""
+    """A live dltrack backend's URL, plus a store reading the same database it writes to."""
 
     url: str
-    store: SQLLiteStore
+    store: SQLStoreBase[Any]
 
 
 @pytest.fixture
-def backend_server(tmp_path: Path) -> Iterator[BackendServer]:
+def backend_server(
+    store_backend: StoreBackend, tmp_path: Path, request: pytest.FixtureRequest
+) -> Iterator[BackendServer]:
     """
-    A real dltrack backend (storage + REST routes, no charts) on a background thread.
+    A real dltrack backend (storage + REST routes, no charts) on a background thread, on `store_backend`.
 
     Deliberately leaves out `BUILTIN_CHARTS`: chart plugins register into a process-global registry
     that rejects a second registration, so only one app per pytest process may include them
     (`browser_test.py`'s). Everything this fixture builds can be built any number of times.
     """
-    sqlite_location = tmp_path / "test.sqlite"
     monkeypatch = pytest.MonkeyPatch()
-    monkeypatch.setenv("SQLITE_LOCATION", str(sqlite_location))
     monkeypatch.setenv("ARTIFACT_STORE_LOCATION", str(tmp_path / "artifacts"))
+    store: SQLStoreBase[Any]
+    match store_backend:
+        case StoreBackend.SQLITE:
+            monkeypatch.setenv("SQLITE_LOCATION", str(tmp_path / "test.sqlite"))
+            storage, store = LOCAL_STORAGE, SQLLiteStore(tmp_path / "test.sqlite")
+        case StoreBackend.POSTGRES:
+            settings: PostgresSettings = request.getfixturevalue("postgres_settings")
+            for name, value in settings.model_dump(
+                include={"host", "port", "database", "user", "db_schema"}
+            ).items():
+                monkeypatch.setenv(f"POSTGRES_{name.upper()}", str(value))
+            monkeypatch.setenv(
+                "POSTGRES_PASSWORD", settings.password.get_secret_value() if settings.password else ""
+            )
+            monkeypatch.setenv("POSTGRES_SSLMODE", settings.sslmode)
+            storage, store = POSTGRES_STORAGE, PostgresStore(settings)
     try:
-        app = build_app([*LOCAL_STORAGE, *LOCAL_AUTH, *BUILTIN_BACKEND])
+        app = build_app([*storage, *LOCAL_AUTH, *BUILTIN_BACKEND])
     finally:
         monkeypatch.undo()
     server = make_server("127.0.0.1", 0, app.server)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
-        yield BackendServer(f"http://127.0.0.1:{server.server_port}", SQLLiteStore(sqlite_location))
+        yield BackendServer(f"http://127.0.0.1:{server.server_port}", store)
     finally:
         server.shutdown()
         thread.join()
+        store.dispose()
 
 
 def props(component: object) -> dict[str, Any]:
