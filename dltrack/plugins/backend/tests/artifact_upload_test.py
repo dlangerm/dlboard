@@ -40,7 +40,7 @@ def test_a_batch_of_same_key_artifacts_is_stored_with_each_ones_own_bytes(
 
     api.log_artifact_batch(artifacts, files)
 
-    # The server records an uploaded artifact's ref asynchronously (see `FSArtifactStore`).
+    # The server records an uploaded artifact's ref asynchronously (see `BlobArtifactStore`).
     deadline = time.monotonic() + _INGEST_TIMEOUT_S
     while len(stored := list(backend_server.store.fetch_artifacts(experiment_id=experiment.id))) < len(blobs):
         assert time.monotonic() < deadline, f"only {len(stored)} of {len(blobs)} artifacts were recorded"

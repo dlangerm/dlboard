@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, ClassVar, Self
+from typing import TYPE_CHECKING, Self
 
 from dltrack import models
 from dltrack.conftest import create_entity_chain
@@ -21,8 +21,6 @@ if TYPE_CHECKING:
 
 class _RaisingArtifactStore:
     """A minimal `ArtifactStore` stand-in that deletes every ref except those in `bad_refs`."""
-
-    protocol: ClassVar[str] = "file"
 
     def __init__(self, bad_refs: set[str]) -> None:
         self.bad_refs = bad_refs

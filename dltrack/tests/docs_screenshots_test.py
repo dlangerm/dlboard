@@ -205,7 +205,7 @@ def demo(live_server_url: str, dltrack_app: Dash, tmp_path_factory: pytest.TempP
             for step in baseline_steps
         ]
     )
-    # The server records uploaded artifacts on a background batch (see `FSArtifactStore`), so
+    # The server records uploaded artifacts on a background batch (see `BlobArtifactStore`), so
     # they land shortly after the uploads above return.
     store = get_data_store(dltrack_app)
     expected = len(_SWEEP) * len(_IMAGE_STEPS)

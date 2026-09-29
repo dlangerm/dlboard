@@ -1,7 +1,7 @@
 """
 Shared multiprocessing context for dltrack's background worker processes.
 
-`DLTrackLogger` (client-side metric/artifact shipping) and `FSArtifactStore` (server-side blob
+`DLTrackLogger` (client-side metric/artifact shipping) and `BlobArtifactStore` (server-side blob
 writes) each spawn a worker process off a `multiprocessing.Queue`; both need the same "spawn"
 context (never "fork", which can deadlock a process that already has threads running -- both of
 these do, e.g. Flask's/Dash's request-handling threads on the server side). Sharing one context
