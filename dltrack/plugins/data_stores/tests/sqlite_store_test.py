@@ -7,6 +7,8 @@ import sqlite3
 import threading
 from typing import TYPE_CHECKING
 
+import sqlalchemy as sa
+
 from dltrack.plugins.data_stores.sqlite import DEFAULT_BUSY_TIMEOUT_MS, SQLLiteStore
 
 if TYPE_CHECKING:
@@ -14,8 +16,7 @@ if TYPE_CHECKING:
 
 
 def test_connect_enables_wal_journal_mode(store: SQLLiteStore) -> None:
-    with store._connect() as conn:
-        (mode,) = conn.execute("PRAGMA journal_mode").fetchone()
+    ((mode,),) = store._execute(sa.text("PRAGMA journal_mode"))
     assert mode.lower() == "wal"
 
 
@@ -50,8 +51,7 @@ def test_writer_holding_the_database_does_not_lock_out_a_concurrent_reader(store
     writer.start()
     try:
         assert writer_holds_lock.wait(timeout=5)
-        result = list(store._execute_raw_sql("SELECT 1"))
-        assert result == [(1,)]
+        assert [tuple(row) for row in store._execute(sa.select(1))] == [(1,)]
     finally:
         release_writer.set()
         writer.join(timeout=5)
