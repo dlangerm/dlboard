@@ -25,6 +25,10 @@ touches the shared page everyone else sees:
 
 ![The view picker, with a personal view saved alongside the shared view](docs/images/personal-views.png)
 
+Leave notes on an experiment, calling out specific runs or teammates by name:
+
+![A notes thread, with badges linking a note to a run and a mentioned teammate](docs/images/notes.png)
+
 ## Running it
 
 Installed as a package (e.g. `uv tool install dltrack` or `pip install dltrack`), dltrack gives

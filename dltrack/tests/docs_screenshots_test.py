@@ -33,6 +33,7 @@ from dltrack.plugins.backend.basic_rest_backend import BasicDltrackAPI
 from dltrack.serve import get_data_store
 from dltrack.serve._pages._experiment._chart_autogen import ARTIFACT_PANEL_SUFFIX
 from dltrack.serve._pages._experiment._experiment_page_state import PAGE_EXPERIMENT_ID
+from dltrack.serve._pages._experiment._notes import NOTES_THREAD_ID
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -75,6 +76,7 @@ class DocScreenshot(StrEnum):
     EXPERIMENT_CHARTS = "experiment-charts"
     IMAGE_SERIES = "image-series"
     PERSONAL_VIEWS = "personal-views"
+    NOTES = "notes"
 
     @property
     def path(self) -> Path:
@@ -248,7 +250,7 @@ def _open_charted_experiment(page: Page, demo: Demo) -> None:
         expect(page).to_have_url(re.compile(r"\?view=\d+$"))
 
 
-def _stage(shot: DocScreenshot, page: Page, demo: Demo) -> Page | Locator:  # noqa: PLR0911 -- one case per screenshot, kept exhaustive
+def _stage(shot: DocScreenshot, page: Page, demo: Demo, dltrack_app: Dash) -> Page | Locator:  # noqa: PLR0911, PLR0915 -- one case per screenshot, kept exhaustive
     """Drive the real UI to `shot`'s state, and return what to photograph."""
     match shot:
         case DocScreenshot.HOME:
@@ -303,6 +305,40 @@ def _stage(shot: DocScreenshot, page: Page, demo: Demo) -> Page | Locator:  # no
             view_select.click()
             expect(page.get_by_role("option", name="Shared view", exact=True)).to_be_visible()
             return page
+        case DocScreenshot.NOTES:
+            # A second user has to exist before the drawer opens, so "Mention people..." has someone
+            # besides "demo" (the pinned logged-in user) to offer.
+            store = get_data_store(dltrack_app)
+            jordan = store.get_or_create_user("jordan")
+            page.goto(f"{demo.url}/experiment/{demo.experiment_id}")
+            expect(page.locator(f"#{PAGE_EXPERIMENT_ID}")).to_be_visible()
+            page.get_by_role("button", name=re.compile("^Notes")).click()
+            drawer = page.get_by_role("dialog", name="Notes")
+            thread = drawer.locator(f"#{NOTES_THREAD_ID}")
+            drawer.get_by_role("textbox", name="Note").fill(
+                "Val accuracy stalls after step 40 on the smallest batch size -- can you take a look?"
+            )
+            drawer.get_by_placeholder("About runs…").click()
+            page.get_by_role("option", name=_SWEEP[-1].name).click()
+            page.keyboard.press(
+                "Escape"
+            )  # closes the (unportalled) run dropdown, still covering the field below
+            drawer.get_by_placeholder("Mention people…").click()
+            page.get_by_role("option", name="jordan").click()
+            page.keyboard.press("Escape")  # closes the (unportalled) mentions dropdown, still covering Post
+            drawer.get_by_role("button", name="Post").click()
+            expect(thread.get_by_text("Val accuracy stalls")).to_be_visible()
+            # Seeded straight through the store, the way a colleague's reply arrives for real --
+            # the drawer's own live poll picks it up without a reload.
+            store.add_comment(
+                models.NewComment(
+                    experiment_id=demo.experiment_id,
+                    author_id=jordan.id,
+                    body="Grad norms spike right there -- looks like warmup, not a real plateau.",
+                )
+            )
+            expect(thread.get_by_text("Grad norms spike")).to_be_visible(timeout=10_000)
+            return drawer
 
 
 def _stable_screenshot(target: Page | Locator) -> bytes:
@@ -343,10 +379,11 @@ def _matches_committed(shot: DocScreenshot, png: bytes) -> bool:
 
 @pytest.mark.screenshots
 @pytest.mark.parametrize("shot", list(DocScreenshot))
-def test_doc_screenshot(
+def test_doc_screenshot(  # noqa: PLR0913 -- one fixture per thing the render needs to be reproducible
     shot: DocScreenshot,
     page: Page,
     demo: Demo,
+    dltrack_app: Dash,
     console_errors: list[str],
     screenshot_mode: ScreenshotMode,
 ) -> None:
@@ -358,7 +395,7 @@ def test_doc_screenshot(
         f"(() => {{ const realNow = Date.now; const offset = {int(_NOW.timestamp() * 1000)} - realNow();"
         " Date.now = () => realNow() + offset; })()"
     )
-    target = _stage(shot, page, demo)
+    target = _stage(shot, page, demo, dltrack_app)
     page.evaluate("document.fonts.ready")  # a late-swapping web font would otherwise reflow mid-capture
     png = _stable_screenshot(target)
     assert console_errors == []
