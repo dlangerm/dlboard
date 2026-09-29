@@ -1,5 +1,5 @@
 # pyright: reportPrivateUsage=false
-"""Tests for cascading soft-delete/restore/purge and the read/write guards around them."""
+"""Tests for cascading soft-delete/restore/purge and the read/write guards around them, on every backend."""
 
 from __future__ import annotations
 
@@ -9,11 +9,16 @@ import pendulum
 import pytest
 
 from dltrack import models
-from dltrack.conftest import create_entity_chain
+from dltrack.conftest import EVERY_STORE_BACKEND, StoreBackend, create_entity_chain
 from dltrack.serve._backend._scope_enforcement import ScopeEnforcingDataStore
 
 if TYPE_CHECKING:
     from dltrack.plugins.data_stores.sqlite import SQLLiteStore
+
+
+@pytest.fixture(params=EVERY_STORE_BACKEND)
+def store_backend(request: pytest.FixtureRequest) -> StoreBackend:
+    return request.param
 
 
 def test_delete_project_cascades_to_experiments_runs_and_artifacts(

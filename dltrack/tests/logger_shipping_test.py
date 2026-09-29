@@ -12,6 +12,7 @@ import torch
 
 from dltrack import models
 from dltrack.client import DLTrackLogger
+from dltrack.conftest import EVERY_STORE_BACKEND, StoreBackend
 from dltrack.plugins.artifacts import image
 from dltrack.plugins.backend.basic_rest_backend import create_path
 
@@ -37,10 +38,16 @@ def _image(step: int) -> image.Image:
     return image.Image(key="img", image=torch.zeros(4, 4, dtype=torch.uint8), step=step)
 
 
+@pytest.mark.parametrize("store_backend", EVERY_STORE_BACKEND)
 def test_finalize_ships_everything_logged_before_it(
-    logger: DLTrackLogger, backend_server: BackendServer
+    logger: DLTrackLogger, backend_server: BackendServer, store_backend: StoreBackend
 ) -> None:
-    """Lightning calls `finalize` right before a script usually exits, killing the daemon shippers."""
+    """
+    Lightning calls `finalize` right before a script usually exits, killing the daemon shippers.
+
+    The whole path -- client shipping processes, REST ingest, store -- on every `store_backend`.
+    """
+    del store_backend  # only selects which database `backend_server` runs on
     for step in range(3):
         logger.log_metrics({"loss": float(step)}, step=step)
     logger.log_artifact([_image(0)])

@@ -4,9 +4,12 @@ from dltrack.models import PluginProtocol
 from dltrack.plugins import artifacts, auth, backend, charts, themes
 from dltrack.plugins.auth import anonymous
 from dltrack.plugins.backend import artifact_purge_worker, basic_rest_backend, error
-from dltrack.plugins.data_stores import filesystem, sqlite
+from dltrack.plugins.data_stores import filesystem, postgres, sqlite
 
 LOCAL_STORAGE: list[PluginProtocol] = [sqlite, filesystem, artifact_purge_worker]
+# Postgres metadata (configured from `POSTGRES_*` env vars -- see `postgres.PostgresSettings`) with
+# the same on-disk artifact store; compose it into a `dltrack serve custom --plugins` list.
+POSTGRES_STORAGE: list[PluginProtocol] = [postgres, filesystem, artifact_purge_worker]
 LOCAL_AUTH: list[PluginProtocol] = [anonymous]
 BUILTIN_BACKEND: list[PluginProtocol] = [basic_rest_backend, error]
 BUILTIN_CHARTS: list[PluginProtocol] = [
@@ -40,11 +43,13 @@ __all__ = [
     "LOCAL_DEPLOYMENT",
     "LOCAL_DEPLOYMENT_DEFAULT",
     "LOCAL_STORAGE",
+    "POSTGRES_STORAGE",
     "artifacts",
     "auth",
     "backend",
     "charts",
     "filesystem",
+    "postgres",
     "sqlite",
     "themes",
 ]

@@ -22,6 +22,8 @@ uv run pytest dltrack/serve/_backend/tests/sql_store_test.py::test_name  # run a
 uv run pytest --cov                 # run with coverage (see pyproject.toml for config)
 uv run pytest -m browser            # run only the browser/e2e tests
 uv run pytest -m "not browser"      # run everything except the browser/e2e tests
+uv run pytest -m postgres           # run the store suites against a real Postgres (needs Docker; testcontainers)
+uv run pytest -m "not browser and not postgres"  # everything that needs neither a browser nor Docker
 uv run pytest --screenshots=check   # re-render the docs screenshots and fail if docs/images is stale
 uv run pytest --screenshots=update  # rewrite docs/images (local preview; CI's render is the one to commit)
 uv run ruff check                   # lint
@@ -82,6 +84,8 @@ renderer, etc).
 - `LOCAL_STORAGE` = `[sqlite, filesystem]` — the metadata DB and artifact blob storage
 - `BUILTIN_CHARTS` = image_series, line_chart, table_chart
 - `LOCAL_DEPLOYMENT` = all of the above, used by `dltrack serve local`
+- `POSTGRES_STORAGE` = `[postgres, filesystem, artifact_purge_worker]` — for a shared deployment, composed
+  into a `dltrack serve custom --plugins` list; configured by `POSTGRES_*` env vars (`PostgresSettings`)
 
 New functionality (a new chart type, storage backend, or artifact kind) is added by writing a new plugin
 module and including it in the list passed to `app()`, not by editing the core app. The core app should

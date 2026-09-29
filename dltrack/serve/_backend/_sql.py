@@ -145,6 +145,12 @@ def table_for(
     `references` resolves each foreign key's target model to its (already declared) table. An
     `OWNERSHIP`-kind foreign key (see `ForeignKeyKind`) gets a real `ON DELETE CASCADE`, so purging a
     parent row lets the database cascade the delete natively.
+
+    Every other (`ATTRIBUTION`) foreign key is checked at commit rather than per statement
+    (`DEFERRABLE INITIALLY DEFERRED`). Some of them point at a row the same purge is removing by
+    cascade -- `Artifact.experiment_id` next to its ownership edge through `run_id` -- and
+    Postgres, unlike sqlite, may check that reference before the cascade reaching the artifact has
+    run. By commit, the cascade has finished and the reference is gone.
     """
     fields = model.model_fields
     for name in [ID_KEY, *(foreign_keys or {}), *(unique_columns or [])]:
@@ -157,16 +163,14 @@ def table_for(
             return sa.Column(ID_KEY, _INT, sa.Identity(), primary_key=True)
         annotation, nullable = _unwrap_optional(fields[name].annotation)
         fk = (foreign_keys or {}).get(name)
-        fk_args = (
-            [
-                sa.ForeignKey(
-                    references[fk.references].c[ID_KEY],
-                    ondelete="CASCADE" if fk.kind is ForeignKeyKind.OWNERSHIP else None,
-                )
-            ]
-            if fk is not None
-            else []
-        )
+        fk_args: list[sa.ForeignKey] = []
+        if fk is not None:
+            target = references[fk.references].c[ID_KEY]
+            match fk.kind:
+                case ForeignKeyKind.OWNERSHIP:
+                    fk_args.append(sa.ForeignKey(target, ondelete="CASCADE"))
+                case ForeignKeyKind.ATTRIBUTION:
+                    fk_args.append(sa.ForeignKey(target, deferrable=True, initially="DEFERRED"))
         return sa.Column(
             name,
             column_type(annotation),

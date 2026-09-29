@@ -1,8 +1,8 @@
 # pyright: reportPrivateUsage=false
-"""End-to-end tests against a real (temp-file) sqlite-backed data store.
+"""End-to-end tests against real data stores, on every backend.
 
-Covers the sql generation/escaping/decoding in `_sql.py` and the CRUD flows in
-`SQLStoreBase` together, using the real sqlite backend rather than mocks.
+Covers the table mapping in `_sql.py` and the CRUD flows in `SQLStoreBase` together, against
+real databases rather than mocks -- the `store` fixture is sqlite and Postgres in turn.
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 
 from dltrack import models
+from dltrack.conftest import EVERY_STORE_BACKEND, StoreBackend
 from dltrack.models._view import PanelInstance
 from dltrack.plugins.data_stores.sqlite import SQLLiteStore
 from dltrack.serve._pages._experiment._experiment_page_state import BasicExperimentPage
@@ -28,6 +29,11 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
 _TS = datetime(2026, 1, 1, tzinfo=UTC)
+
+
+@pytest.fixture(params=EVERY_STORE_BACKEND)
+def store_backend(request: pytest.FixtureRequest) -> StoreBackend:
+    return request.param
 
 
 def _count(store: SQLLiteStore, model: type[BaseModel], *where: sa.ColumnElement[bool]) -> int:

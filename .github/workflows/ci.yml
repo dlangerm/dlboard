@@ -31,7 +31,7 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --locked --dev
-      - run: uv run pytest -m "not browser" --cov
+      - run: uv run pytest -m "not browser and not postgres" --cov
       - run: uv run playwright install --with-deps chromium
       - run: uv run pytest -m browser
       - run: uv run pytest --screenshots=check
@@ -41,3 +41,17 @@ jobs:
           name: doc-screenshots
           path: screenshot-diffs/
           if-no-files-found: ignore
+
+  # The store suite, soft-delete/purge, and the client -> REST -> store end-to-end test, against a
+  # real Postgres: testcontainers starts one in Docker (preinstalled on GitHub's Ubuntu runners), the
+  # same way `uv run pytest -m postgres` does locally.
+  test-postgres:
+    needs: [typecheck-precommit]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --locked --dev
+      - run: uv run pytest -m postgres
