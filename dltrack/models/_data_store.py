@@ -193,6 +193,10 @@ class DataStore[**P](typing.Protocol):
         """Log a set of artifacts."""
         ...
 
+    def get_artifact(self, artifact_id: int) -> models.Artifact | None:
+        """Get one (non-deleted) artifact by id, or `None` if it doesn't exist (or has been deleted)."""
+        ...
+
     def fetch_artifacts(
         self,
         experiment_id: int,

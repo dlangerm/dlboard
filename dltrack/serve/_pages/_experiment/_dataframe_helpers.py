@@ -10,6 +10,7 @@ import pandas as pd
 
 from dltrack.models import Artifact, ColumnKind, HyperParams, MetricColumn
 from dltrack.plugins.charts._table_style import HPARAM_COLUMN_PREFIX, artifact_column, artifact_tags_column
+from dltrack.serve._backend._artifact_download import artifact_url
 
 if typing.TYPE_CHECKING:
     from dltrack.models import DataStore
@@ -20,15 +21,18 @@ EXCLUDED_RUNS_KEY: typing.Final = "excluded_runs"
 
 
 def build_artifacts_dataframe(artifacts: typing.Iterable[Artifact]) -> pd.DataFrame:
-    """Pivot artifact refs (and tags) into columns per key, indexed by (run_id, step)."""
+    """Pivot artifact download URLs (and tags) into columns per key, indexed by (run_id, step)."""
     df = pd.DataFrame([a.model_dump(mode="json") for a in artifacts])
     if df.empty:
         return df
 
-    ref_pivot = df.pivot_table(index=["run_id", "step"], columns="key", values="ref", aggfunc="first")
+    # A URL, not the underlying `ref` -- charts (and anything else consuming this dataframe) fetch
+    # an artifact by id through `/artifact/<id>`, never by talking to the ref's backend directly.
+    df["url"] = df["id"].map(artifact_url)
+    url_pivot = df.pivot_table(index=["run_id", "step"], columns="key", values="url", aggfunc="first")
     tags_pivot = df.pivot_table(index=["run_id", "step"], columns="key", values="tags", aggfunc="first")
     return (
-        ref_pivot.rename(columns=artifact_column)
+        url_pivot.rename(columns=artifact_column)
         .join(tags_pivot.rename(columns=artifact_tags_column))
         .reset_index()
     )

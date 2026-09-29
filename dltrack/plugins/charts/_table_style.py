@@ -13,7 +13,7 @@ ARTIFACT_COLUMN_PREFIX = "artifact__"
 
 
 def artifact_column(key: str) -> str:
-    """The panel-dataframe column holding each step's ref for artifact `key`."""
+    """The panel-dataframe column holding each step's download URL for artifact `key`."""
     return f"{ARTIFACT_COLUMN_PREFIX}{key}"
 
 
