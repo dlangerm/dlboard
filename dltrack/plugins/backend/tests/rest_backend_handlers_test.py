@@ -6,7 +6,7 @@ request or auth provider.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING
 
 from werkzeug.datastructures import FileStorage
 
@@ -24,8 +24,6 @@ if TYPE_CHECKING:
 
 class _FakeArtifactStore:
     """A minimal `ArtifactStore` stand-in that just records what it was asked to log."""
-
-    protocol: ClassVar[str] = "fake"
 
     def __init__(self) -> None:
         self.logged: list[models.NewArtifact] = []

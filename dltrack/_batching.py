@@ -1,8 +1,8 @@
 """
 Drain a queue into batches and ship each one somewhere that can fail.
 
-Shared by the client's metric/artifact shipping processes (`dltrack_logger.py`) and the filesystem
-artifact store's ref-ingest thread (`plugins/data_stores/filesystem.py`) -- both batch items off a
+Shared by the client's metric/artifact shipping processes (`dltrack_logger.py`) and every blob
+artifact store's ref-ingest thread (`plugins/data_stores/_blob_store.py`) -- both batch items off a
 queue towards a destination that can fail transiently (a server, a locked database), and both must
 never lose a batch to a failure that a retry would have survived.
 """

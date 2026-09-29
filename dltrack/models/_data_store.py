@@ -297,9 +297,6 @@ class DataStore[**P](typing.Protocol):
 class ArtifactStore[**P](typing.Protocol):
     """An artifact store for files and arbitrary byte-like data."""
 
-    protocol: typing.ClassVar[str]
-    """The protocol for the artifact store, used to create urls."""
-
     @classmethod
     def get_or_create(cls, *args: P.args, **kwargs: P.kwargs) -> typing.Self:
         """Initialize a data store."""
