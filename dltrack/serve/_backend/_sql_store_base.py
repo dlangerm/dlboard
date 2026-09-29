@@ -6,7 +6,7 @@ import itertools
 import json
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
-from typing import TYPE_CHECKING, Any, Iterator, cast
+from typing import TYPE_CHECKING, Any, Iterator, Literal, cast
 
 import pendulum
 from pydantic import BaseModel
@@ -141,17 +141,31 @@ def _cascade_targets(
     return results
 
 
+type PageScopeField = Literal["run_id", "experiment_id", "project_id"]
+"""
+The column a `Page` is scoped by -- typed, not a bare `str`, so pyright (not a runtime check) is
+what stops one of the raw SQL statements below from ever interpolating anything else as a column
+name, even if a future edit adds another caller.
+"""
+
+PAGE_SCOPE_FIELDS: tuple[PageScopeField, ...] = ("run_id", "experiment_id", "project_id")
+
+
 def _resolve_page_scope(
     *, run_id: int | None, experiment_id: int | None, project_id: int | None
-) -> tuple[str, int]:
+) -> tuple[PageScopeField, int]:
     """
     Resolve the single scope (run, experiment, or project) a page belongs to.
 
     A page is always owned by exactly one of these three ids; this validates that
     invariant and returns the owning field name paired with its id.
     """
-    scopes = {"run_id": run_id, "experiment_id": experiment_id, "project_id": project_id}
-    owned = {field: id_ for field, id_ in scopes.items() if id_ is not None}
+    scopes: dict[PageScopeField, int | None] = {
+        "run_id": run_id,
+        "experiment_id": experiment_id,
+        "project_id": project_id,
+    }
+    owned: dict[PageScopeField, int] = {field: id_ for field, id_ in scopes.items() if id_ is not None}
     if len(owned) != 1:
         msg = "Exactly one of run, experiment, or project must be defined."
         raise ValueError(msg)
@@ -199,29 +213,41 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         # that already has duplicates from hitting that race before this index existed would
         # otherwise fail to open at all (SQLite validates a new unique index against existing rows
         # on creation) -- clear those out first, keeping the earliest one (the one `ORDER BY id
-        # LIMIT 1` -- what `get_or_create_page` itself reads -- always used to pick anyway).
-        for scope_field in ("run_id", "experiment_id", "project_id"):
-            list(
-                self._execute_raw_sql(f"""
-                    DELETE FROM {models.Page.__name__}
-                    WHERE owner_id IS NULL AND {scope_field} IS NOT NULL AND id NOT IN (
-                        SELECT MIN(id) FROM {models.Page.__name__}
-                        WHERE owner_id IS NULL AND {scope_field} IS NOT NULL
-                        GROUP BY {scope_field}
-                    );
-                """)
-            )
-            list(
-                self._execute_raw_sql(
-                    sql.create_index_sql(
-                        models.Page,
-                        [scope_field],
-                        index_name=f"idx_Page_shared_{scope_field}",
-                        unique=True,
-                        where="owner_id IS NULL",
-                    )
+        # LIMIT 1` -- what `get_or_create_page` itself reads -- always used to pick anyway). One
+        # transaction for every scope's dedup-and-index pair: each `CREATE UNIQUE INDEX` would
+        # otherwise fail outright if its own `DELETE` hadn't actually landed first (a prior run
+        # crashing between the two, or the database being read-only, left a partial migration),
+        # and six unrelated round trips to the database is needless overhead on every single
+        # startup regardless.
+        self._execute_in_transaction(
+            [
+                statement
+                for scope_field in PAGE_SCOPE_FIELDS
+                for statement in (
+                    (
+                        f"""
+                        DELETE FROM {models.Page.__name__}
+                        WHERE owner_id IS NULL AND {scope_field} IS NOT NULL AND id NOT IN (
+                            SELECT MIN(id) FROM {models.Page.__name__}
+                            WHERE owner_id IS NULL AND {scope_field} IS NOT NULL
+                            GROUP BY {scope_field}
+                        );
+                        """,
+                        None,
+                    ),
+                    (
+                        sql.create_index_sql(
+                            models.Page,
+                            [scope_field],
+                            index_name=f"idx_Page_shared_{scope_field}",
+                            unique=True,
+                            where="owner_id IS NULL",
+                        ),
+                        None,
+                    ),
                 )
-            )
+            ]
+        )
 
     def _add_missing_columns(self, table: type[BaseModel]) -> None:
         """
