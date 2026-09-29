@@ -770,6 +770,10 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         for experiment_id in {a.experiment_id for a in artifacts}:
             self._touch_experiment(experiment_id)
 
+    def get_artifact(self, artifact_id: int) -> models.Artifact | None:
+        """Get one (non-deleted) artifact by id, or `None` if it doesn't exist (or has been deleted)."""
+        return next(iter(self._by_id(models.Artifact, artifact_id)), None)
+
     def fetch_artifacts(
         self,
         experiment_id: int,

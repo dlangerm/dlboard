@@ -7,8 +7,8 @@ from typing import Any, Callable, Final, Iterable, Literal
 
 import dash
 import requests
-from flask import Response, request
-from pydantic import AnyUrl, BaseModel, ValidationError
+from flask import request
+from pydantic import BaseModel, ValidationError
 from structlog.stdlib import get_logger
 from werkzeug.datastructures import FileStorage
 
@@ -391,17 +391,6 @@ def log_artifact() -> dict[str, str]:
     return {}
 
 
-def download_artifact(artifact_url: str) -> Response:
-    """Download an artifact at a specified url."""
-    try:
-        return get_artifact_store().download_artifact(
-            AnyUrl(artifact_url.replace("=", "/").replace("+", ":"))
-        )
-    except Exception:
-        _log.exception("failed to load artifact")
-        raise
-
-
 def delete_project(entity_id: int) -> dict[str, str]:
     """Soft-delete a project and cascade to its experiments, runs, and artifacts."""
     try:
@@ -499,7 +488,6 @@ _ROUTES: tuple[tuple[str, list[str], Callable[..., Any]], ...] = (
     (get_or_create_path(models.Project), ["POST"], get_or_create_project),
     (get_or_create_path(models.Experiment), ["POST"], get_or_create_experiment),
     (create_path(models.Artifact), ["POST"], log_artifact),
-    ("artifact/<string:artifact_url>", ["GET"], download_artifact),
     (entity_path(models.Project), ["DELETE"], delete_project),
     (f"{entity_path(models.Project)}/restore", ["POST"], restore_project),
     (entity_path(models.Experiment), ["DELETE"], delete_experiment),

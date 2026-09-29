@@ -47,10 +47,6 @@ class ImageChartSettings(BaseModel, frozen=True, extra="forbid"):
     )
 
 
-def _escape_ref(ref: str) -> str:
-    return ref.replace("/", "=").replace(":", "+")
-
-
 def _instance_id(parameters: ImageChartSettings) -> str:
     """Stable id for pattern-matching Dash IDs. See earlier caveat re: collisions on identical configs."""
     raw = json.dumps(parameters.model_dump(), sort_keys=True)
@@ -126,9 +122,7 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
         for rid, g in df.groupby("run_id"):
             steps = g[x_col].tolist()
             per_run_steps[str(rid)] = steps
-            per_run_urls[str(rid)] = {
-                str(s): f"/artifact/{_escape_ref(str(ref))}" for s, ref in zip(steps, g[col], strict=True)
-            }
+            per_run_urls[str(rid)] = dict(zip((str(s) for s in steps), g[col], strict=True))
             if has_tags:
                 per_run_captions[str(rid)] = {
                     str(s): _format_caption(raw) for s, raw in zip(steps, g[tag_col], strict=True)

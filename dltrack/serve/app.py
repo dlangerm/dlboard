@@ -15,6 +15,7 @@ from structlog.stdlib import get_logger
 
 from dltrack.models import InstalledPlugin, constants
 from dltrack.serve._assets import AssetKind, serve_asset
+from dltrack.serve._backend import _artifact_download
 from dltrack.serve._backend._auth import get_auth_provider, get_current_user
 from dltrack.serve._backend._data_store import get_data_store
 from dltrack.serve._backend._installed_plugins import set_installed_plugins
@@ -74,6 +75,9 @@ def app(plugins: list[models.PluginProtocol]) -> Dash:
     # through Dash's own `plugins=` constructor kwarg.
     for page in (_simple_homepage, _simple_project_page, _experiment_page, _simple_admin_page):
         page.register(_app)
+    # Also core, non-optional: every chart that shows an artifact fetches it from this one route,
+    # by id -- never by talking to whatever `ArtifactStore` a deployment happens to have plugged in.
+    _artifact_download.register(_app)
     # Only the immutable `InstalledPlugin` snapshots are retained on the app -- not the plugin
     # modules/objects themselves, so introspecting this later (the admin page's About tab) can't
     # reach back into a plugin's own state.

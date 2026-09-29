@@ -12,6 +12,7 @@ import pytest
 from dltrack.models import Artifact, HyperParams, LoggedMetrics, NewHyperParams, NewRun, ValidJsonTypes
 from dltrack.models._view import ColumnKind
 from dltrack.plugins.charts._table_style import HPARAM_COLUMN_PREFIX, artifact_column, artifact_tags_column
+from dltrack.serve._backend._artifact_download import artifact_url
 from dltrack.serve._pages._experiment import _dataframe_helpers as dfh
 
 if TYPE_CHECKING:
@@ -22,7 +23,7 @@ _TS = datetime(2026, 1, 1, tzinfo=UTC)
 
 def _artifact(run_id: int, step: int, key: str, ref: str, tags: dict[str, str] | None = None) -> Artifact:
     return Artifact(
-        key=key, fname=f"{key}.bin", run_id=run_id, experiment_id=1, step=step, ref=ref, tags=tags or {}
+        id=1, key=key, fname=f"{key}.bin", run_id=run_id, experiment_id=1, step=step, ref=ref, tags=tags or {}
     )
 
 
@@ -35,11 +36,16 @@ def _hparams(hparam_id: int, run_id: int, **values: ValidJsonTypes) -> HyperPara
     )
 
 
-def test_build_artifacts_dataframe_pivots_ref_and_tags() -> None:
+def test_build_artifacts_dataframe_pivots_url_and_tags() -> None:
+    """The pivoted column holds a fetchable `/artifact/<id>` URL, not the artifact's own `ref`."""
     df = dfh.build_artifacts_dataframe(
-        [_artifact(1, 0, "img", "ref://a", tags={"split": "train"}), _artifact(1, 1, "img", "ref://b")]
+        [
+            _artifact(1, 0, "img", "ref://a", tags={"split": "train"}).model_copy(update={"id": 1}),
+            _artifact(1, 1, "img", "ref://b").model_copy(update={"id": 2}),
+        ]
     )
-    assert list(df.loc[df["step"] == 0, artifact_column("img")]) == ["ref://a"]
+    assert list(df.loc[df["step"] == 0, artifact_column("img")]) == [artifact_url(1)]
+    assert list(df.loc[df["step"] == 1, artifact_column("img")]) == [artifact_url(2)]
     assert df.loc[df["step"] == 0, artifact_tags_column("img")].iloc[0] == {"split": "train"}
     assert df.loc[df["step"] == 1, artifact_tags_column("img")].iloc[0] == {}
 
