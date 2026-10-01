@@ -99,8 +99,8 @@ class DataStore[**P](typing.Protocol):
         """Get the project named `name`, creating it (with `description`) if it doesn't exist yet."""
         ...
 
-    def get_project(self, database_id: int) -> models.Project:
-        """Get a project."""
+    def get_project(self, database_id: int) -> models.Project | None:
+        """A (non-deleted) project by id."""
         ...
 
     def get_projects(self) -> typing.Iterator[models.Project]:

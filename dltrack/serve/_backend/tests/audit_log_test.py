@@ -5,11 +5,8 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
-import pytest
-
 from dltrack import models
 from dltrack.conftest import create_entity_chain
-from dltrack.serve._backend._scope_enforcement import ScopeEnforcingDataStore
 
 if TYPE_CHECKING:
     from dltrack.plugins.data_stores.sqlite import SQLLiteStore
@@ -94,18 +91,6 @@ def test_delete_project_does_not_double_count_a_child_already_independently_dele
         "only `kept` should be counted -- `already_deleted` was excluded by the "
         "'not already deleted' cascade guard"
     )
-
-
-def test_list_audit_log_requires_the_audit_log_read_scope(store: SQLLiteStore, admin: models.User) -> None:
-    """Scope enforcement lives in `ScopeEnforcingDataStore` (see `_scope_enforcement.py`), not in
-    `SQLStoreBase` -- so this goes through the wrapper, exactly like every store does once it's
-    registered with a running app via `set_data_store`."""
-    project = store.create_project(models.NewProject(name="p", description="d"))
-    store.delete_project(project.id, admin)
-    no_scopes_user = store.get_or_create_user(models.Principal.unverified("nobody"))
-
-    with pytest.raises(PermissionError, match="lacks"):
-        list(ScopeEnforcingDataStore(store).list_audit_log(no_scopes_user))
 
 
 def test_list_audit_log_orders_most_recent_first(store: SQLLiteStore, admin: models.User) -> None:

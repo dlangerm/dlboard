@@ -628,6 +628,11 @@ def _handle_validation_error(err: ValidationError) -> tuple[dict[str, str], int]
     return {"error": str(err)}, 400
 
 
+def _handle_ambiguous_project(err: models.AmbiguousProjectError) -> tuple[dict[str, str], int]:
+    """Map a project name the caller can write to more than one of to a 409 -- they must pick one by id."""
+    return {"error": str(err)}, 409
+
+
 def _handle_unservable_ref_error(err: models.UnservableArtifactRefError) -> tuple[dict[str, str], int]:
     """Map a link to a ref this server's `ArtifactStore` won't serve to a 400, not a 500 -- same 4xx-vs-5xx reasoning as `_handle_validation_error`."""
     return {"error": str(err)}, 400
@@ -645,3 +650,4 @@ def plug(app: dash.Dash) -> None:
     app.server.errorhandler(PermissionError)(_handle_permission_error)
     app.server.errorhandler(ValidationError)(_handle_validation_error)
     app.server.errorhandler(models.UnservableArtifactRefError)(_handle_unservable_ref_error)
+    app.server.errorhandler(models.AmbiguousProjectError)(_handle_ambiguous_project)

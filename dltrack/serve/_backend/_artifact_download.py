@@ -23,8 +23,9 @@ if TYPE_CHECKING:
 
 _log = get_logger(__name__)
 
-_IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable"
-"""An artifact id's bytes never change once logged, so a browser may cache it forever."""
+_IMMUTABLE_CACHE_CONTROL = "private, max-age=31536000, immutable"
+"""An artifact id's bytes never change once logged, so a browser may cache it forever -- but only
+the browser (`private`): who may see it is per-user, so a shared proxy cache must never keep a copy."""
 
 
 def artifact_url(artifact_id: int) -> str:

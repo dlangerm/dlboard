@@ -567,10 +567,10 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             models.NewProject(name=name, description=description, created_by=created_by)
         )
 
-    def get_project(self, database_id: int) -> models.Project:
-        """Get project."""
+    def get_project(self, database_id: int) -> models.Project | None:
+        """A (non-deleted) project by id, or `None` if it doesn't exist (or has been deleted)."""
         _log.debug("getting project %s", database_id)
-        return next(iter(self._by_id(models.Project, database_id)))
+        return next(iter(self._by_id(models.Project, database_id)), None)
 
     def get_projects(self) -> Iterator[models.Project]:
         """Get all (non-deleted) projects."""

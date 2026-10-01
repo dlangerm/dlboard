@@ -266,9 +266,10 @@ def _layout(theme: ThemeSpec) -> dmc.MantineProvider:
 def breadcrumbs(_: str, project_id: int | None, experiment_id: int | None) -> list[Component]:
     """Where the current page sits: Projects > project > experiment, the last one emphasized."""
     trail = [("Projects", "/")]
-    if project_id is not None:
-        store = get_data_store()
-        trail.append((store.get_project(project_id).name, f"/project/{project_id}"))
+    store = get_data_store()
+    project = store.get_project(project_id) if project_id is not None else None
+    if project is not None:
+        trail.append((project.name, f"/project/{project.id}"))
         if experiment_id is not None:
             experiment = store.get_experiment(experiment_id)
             name = experiment.name if experiment and experiment.name else f"Experiment {experiment_id}"
@@ -338,12 +339,12 @@ def _user_menu() -> Component:
 )
 def render_navbar(project_id: int | None, experiment_id: int | None) -> Component:
     """The current project's experiments. Empty outside a project, where the navbar is hidden."""
-    if project_id is None:
+    store = get_data_store()
+    project = store.get_project(project_id) if project_id is not None else None
+    if project is None:
         return html.Div()
 
-    store = get_data_store()
-    project = store.get_project(project_id)
-    experiments = list(store.get_experiments(project_id))
+    experiments = list(store.get_experiments(project.id))
     return dmc.Stack(
         [
             dmc.Anchor(
