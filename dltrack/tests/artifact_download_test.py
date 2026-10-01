@@ -21,10 +21,10 @@ _INGEST_TIMEOUT_S = 10
 
 def _log_one_artifact(api: BasicDltrackAPI, run: models.Run, experiment_id: int, path: Path) -> None:
     path.write_bytes(b"hello")
-    api.log_artifact_batch(
-        [models.NewArtifact(key="img", fname=path.name, run_id=run.id, experiment_id=experiment_id, step=0)],
-        [path],
+    new_artifact = models.NewArtifact(
+        key="img", fname=path.name, run_id=run.id, experiment_id=experiment_id, step=0
     )
+    api.log_artifact_batch([(new_artifact, path)])
 
 
 def _wait_for_artifact(store: SQLStoreBase[Any], experiment_id: int) -> models.Artifact:

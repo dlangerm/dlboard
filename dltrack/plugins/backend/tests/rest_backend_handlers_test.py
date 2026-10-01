@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from pydantic import AnyUrl
 from werkzeug.datastructures import FileStorage
 
 from dltrack import models
@@ -17,7 +18,6 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from flask import Response
-    from pydantic import AnyUrl
 
     from dltrack.plugins.data_stores.sqlite import SQLLiteStore
 
@@ -34,6 +34,11 @@ class _FakeArtifactStore:
 
     def log_artifacts(self, artifacts: Iterable[tuple[models.NewArtifact, FileStorage]]) -> None:
         self.logged = [artifact for artifact, _ in artifacts]
+
+    def link_artifacts(self, links: Iterable[tuple[models.NewArtifact, AnyUrl]]) -> list[models.Artifact]:
+        linked = [models.Artifact.model_validate(a.model_dump() | {"ref": str(ref)}) for a, ref in links]
+        self.logged = [a for a, _ in links]
+        return linked
 
     def download_artifact(self, ref: AnyUrl) -> Response:
         raise NotImplementedError
@@ -145,6 +150,30 @@ def test_handle_log_artifacts_stamps_created_by_on_every_artifact(store: SQLLite
 
     assert len(artifact_store.logged) == 2
     assert all(a.created_by == actor.id for a in artifact_store.logged)
+
+
+def test_handle_link_artifacts_stamps_created_by_and_records_refs(store: SQLLiteStore) -> None:
+    project = store.create_project(models.NewProject(name="p", description="d"))
+    experiment = store.create_experiment(models.NewExperiment(project_id=project.id))
+    run = store.create_run(models.NewRun(experiment_id=experiment.id))
+    artifact_store = _FakeArtifactStore()
+    actor = store.get_or_create_user("dave")
+    links = [
+        models.NewArtifactLink(
+            key="img",
+            fname="a.png",
+            run_id=run.id,
+            experiment_id=experiment.id,
+            step=0,
+            ref=AnyUrl("s3://bucket/a.png"),
+        )
+    ]
+
+    backend.handle_link_artifacts(store, artifact_store, links, actor=actor)
+
+    (stored,) = store.fetch_artifacts(experiment_id=experiment.id)
+    assert stored.ref == "s3://bucket/a.png"
+    assert stored.created_by == actor.id
 
 
 def test_handle_delete_and_restore_project_attribute_the_actor(store: SQLLiteStore) -> None:

@@ -62,11 +62,9 @@ def test_logging_a_batch_of_large_images_stays_within_budget_when_colocated(
         img.to_artifact(local_temp, run_id=run.id, experiment_id=experiment.id)
         for img in _mosaic_batch(_MOSAIC_COUNT)
     ]
-    artifacts = [obj for obj, _ in pairs]
-    files = [path for _, path in pairs]
 
     start = time.perf_counter()
-    api.log_artifact_batch(artifacts, files)
+    api.log_artifact_batch(pairs)
     elapsed = time.perf_counter() - start
 
     assert elapsed < _UPLOAD_BUDGET_SEC, (

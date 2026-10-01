@@ -5,7 +5,7 @@ from __future__ import annotations
 import typing
 
 import pendulum
-from pydantic import AwareDatetime, BaseModel, Field
+from pydantic import AnyUrl, AwareDatetime, BaseModel, Field
 
 if typing.TYPE_CHECKING:
     from pathlib import Path
@@ -30,8 +30,16 @@ class AnyArtifact(typing.Protocol):
         """Global step where this artifact was logged."""
         ...
 
-    def to_artifact(self, local_temp: Path, run_id: int, experiment_id: int) -> tuple[NewArtifact, Path]:
-        """Convert this artifact to a new artifact."""
+    def to_artifact(
+        self, local_temp: Path, run_id: int, experiment_id: int
+    ) -> tuple[NewArtifact, Path | AnyUrl]:
+        """
+        Convert this artifact to a `NewArtifact`, plus either a local file to upload or a ref to link.
+
+        A `Path` (written under `local_temp`) is uploaded; an `AnyUrl` is registered as-is, with no
+        bytes moved -- for an artifact kind (`plugins.artifacts.link.Link`) that logs a blob it put
+        in the store's own space some other way.
+        """
         ...
 
 
@@ -63,6 +71,15 @@ class NewArtifact(BaseModel, frozen=True, extra="forbid"):
     """When this artifact was logged."""
 
 
+class NewArtifactLink(NewArtifact, frozen=True, extra="forbid"):
+    """A `NewArtifact` for a blob a client has already put in the store's own space, by its ref."""
+
+    ref: AnyUrl
+    """Where the blob already lives. The server only accepts one inside its own `ArtifactStore`'s
+    space (or an allowlisted read-only location), never an arbitrary ref -- see
+    `ArtifactStore.link_artifacts`."""
+
+
 class Artifact(NewArtifact, frozen=True, extra="forbid"):
     """Underlying table of artifacts."""
 
@@ -77,3 +94,7 @@ class Artifact(NewArtifact, frozen=True, extra="forbid"):
 
     deleted_at: AwareDatetime | None = None
     """When this artifact was soft-deleted, if at all. See `Project.deleted_at`."""
+
+
+class UnservableArtifactRefError(ValueError):
+    """Raised when a linked artifact's `ref` isn't one this server's `ArtifactStore` can serve."""

@@ -79,6 +79,7 @@ def test_plug_registers_routes_only_on_the_given_app_not_globally() -> None:
     assert registered_errorhandlers == {
         PermissionError: backend._handle_permission_error,
         ValidationError: backend._handle_validation_error,
+        models.UnservableArtifactRefError: backend._handle_unservable_ref_error,
     }
 
 
