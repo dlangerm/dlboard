@@ -7,6 +7,7 @@ entrypoint, installed as a console script by `[project.scripts]` in `pyproject.t
 
 from __future__ import annotations
 
+import getpass
 import logging
 import os
 import sys
@@ -17,14 +18,19 @@ from typing import Annotated
 import cyclopts
 import structlog
 
+from dltrack.plugins.auth.password import create_or_reset_user, new_password_problem
 from dltrack.plugins.data_stores.filesystem import AppSettings as FilesystemAppSettings
 from dltrack.plugins.data_stores.sqlite import AppSettings as SqliteAppSettings
 from dltrack.serve import app as build_app
-from dltrack.serve import resolve_plugins, run_production_server, set_setting_env
+from dltrack.serve import get_system_data_store, resolve_plugins, run_production_server, set_setting_env
 
 app = cyclopts.App(name="dltrack", help="dltrack: a free, self-hosted experiment-tracking server.")
 serve_app = cyclopts.App(name="serve", help="Run the dltrack server against a specific deployment target.")
 app.command(serve_app)
+users_app = cyclopts.App(
+    name="users", help="Manage the users of a deployment that signs people in with a password."
+)
+app.command(users_app)
 
 _log = structlog.stdlib.get_logger(__name__)
 
@@ -168,6 +174,29 @@ def custom(*, opts: Annotated[CustomServeOptions, cyclopts.Parameter(name="*")])
     _configure_logging()
     _log.info("dltrack server is starting...")
     _serve(opts.plugins, opts.runtime)
+
+
+@users_app.command
+def set_password(
+    username: str,
+    *,
+    plugins: Annotated[
+        str,
+        cyclopts.Parameter(
+            env_var="DLTRACK_PLUGINS",
+            help="The deployment's plugin list (the same `--plugins` it's served with), so this writes to its database.",
+        ),
+    ],
+    admin: Annotated[bool, cyclopts.Parameter(help="Also make them an admin.")] = False,
+) -> None:
+    """Create a password user, or reset an existing one's password -- e.g. to make a deployment's first admin."""
+    password = getpass.getpass(f"New password for {username}: ")
+    problem = new_password_problem(password, getpass.getpass("Confirm it: "))
+    if problem is not None:
+        raise SystemExit(problem)
+    store = get_system_data_store(build_app(resolve_plugins(plugins)))
+    user = create_or_reset_user(store, username, password, admin=admin)
+    print(f"Saved {user.username}" + (" (admin)" if admin else ""))  # noqa: T201 -- this is a CLI
 
 
 def main() -> None:
