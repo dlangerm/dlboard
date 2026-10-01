@@ -1,0 +1,207 @@
+"""
+S3 artifact store: a `BlobBackend` over any S3-protocol object store (AWS, MinIO, VAST, ...).
+
+Nothing here is AWS-specific -- `endpoint_url` points this at any S3-compatible endpoint, and
+`addressing_style` switches to path-style for stores (MinIO, most on-prem/VAST deployments) that
+don't support virtual-hosted-style bucket addressing. Credentials left unset fall back to boto3's
+own default chain (environment, shared config/profile, instance/container role).
+"""
+
+from __future__ import annotations
+
+import functools
+import mimetypes
+from enum import StrEnum
+from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING, Literal, cast
+
+from flask import Response, redirect
+from pydantic import AnyHttpUrl, AnyUrl, NonNegativeInt, PositiveInt, SecretStr
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from structlog.stdlib import get_logger
+
+from dltrack.plugins.data_stores._blob_store import RefAccess, plug_blob_store
+
+if TYPE_CHECKING:
+    from dash import Dash
+    from types_boto3_s3.client import S3Client
+
+_log = get_logger(__name__)
+
+
+class S3DownloadMode(StrEnum):
+    """How `S3Blobs.download` hands an artifact's bytes to a browser."""
+
+    PROXY = "proxy"
+    """Stream the object through this server. Always reachable, even from an endpoint
+    (MinIO in a private network, say) browsers themselves can't reach."""
+
+    PRESIGN = "presign"
+    """302-redirect to a short-lived presigned URL. No bytes pass through this server, but the
+    endpoint must be directly reachable from the browser."""
+
+
+class S3Settings(BaseSettings):
+    """Connection and behavior settings, read from `S3_*` environment variables."""
+
+    model_config = SettingsConfigDict(env_prefix="S3_", frozen=True)
+
+    bucket: str
+    prefix: str = "dltrack"
+    """Every blob this store writes lives under `s3://bucket/prefix/...`."""
+
+    endpoint_url: AnyHttpUrl | None = None
+    """Left unset, boto3 talks to AWS; set it to point at any other S3-protocol endpoint
+    (MinIO, VAST, ...)."""
+    region: str | None = None
+    access_key_id: str | None = None
+    secret_access_key: SecretStr | None = None
+    session_token: str | None = None
+    """Left unset along with the two above, boto3 falls back to its own default credential chain
+    (environment, shared config/profile, instance/container role)."""
+
+    addressing_style: Literal["auto", "path", "virtual"] = "auto"
+    """MinIO and most on-prem/VAST deployments need `path` -- they don't support virtual-hosted
+    bucket addressing (`<bucket>.<endpoint>/...`), only `<endpoint>/<bucket>/...`."""
+    verify_tls: bool = True
+    ca_bundle: Path | None = None
+    """A CA bundle for a self-signed or private-CA endpoint. Implies TLS verification."""
+
+    download_mode: S3DownloadMode = S3DownloadMode.PROXY
+    presign_ttl_s: PositiveInt = 300
+
+    extra_read_buckets: frozenset[str] = frozenset()
+    """Other buckets this store's credentials may read (and link/download) from, but never
+    write to or delete from -- for a blob a client put somewhere outside this store's own
+    `bucket`/`prefix` itself."""
+
+    queue_size: NonNegativeInt = 100
+
+
+@functools.cache
+def _client(settings: S3Settings) -> S3Client:
+    """
+    Get this process's boto3 client for `settings`, built once and reused.
+
+    Cached by value (`S3Settings` is frozen, hence hashable), not by identity: the write worker
+    gets its own freshly unpickled `S3Settings` with every call, and this still reuses one client
+    per distinct settings rather than opening a new connection pool per blob.
+    """
+    import boto3
+    from botocore.config import Config
+
+    session = boto3.session.Session(
+        aws_access_key_id=settings.access_key_id,
+        aws_secret_access_key=settings.secret_access_key.get_secret_value()
+        if settings.secret_access_key
+        else None,
+        aws_session_token=settings.session_token,
+        region_name=settings.region,
+    )
+    # `types-boto3[s3]` alone (not the much larger "full" stub set covering every AWS service)
+    # leaves `Session.client`'s own overloads partially unknown to pyright, hence the ignore --
+    # the one overload that actually matches `"s3"` still resolves to the real `S3Client`.
+    return session.client(  # pyright: ignore[reportUnknownMemberType]
+        "s3",
+        endpoint_url=str(settings.endpoint_url) if settings.endpoint_url else None,
+        config=Config(s3={"addressing_style": settings.addressing_style}),
+        verify=str(settings.ca_bundle) if settings.ca_bundle else settings.verify_tls,
+    )
+
+
+class S3Blobs:
+    """Keep every blob under `s3://settings.bucket/settings.prefix/...`."""
+
+    def __init__(self, settings: S3Settings) -> None:
+        """
+        Initialize the backend.
+
+        Only `settings` (plain, picklable data) is stored -- never the boto3 client itself, which
+        `_client` builds fresh in whichever process needs it.
+        """
+        self._settings = settings
+
+    def _client(self) -> S3Client:
+        return _client(self._settings)  # pyright: ignore[reportArgumentType]
+
+    def _bucket_and_key(self, ref: AnyUrl) -> tuple[str, str]:
+        """`ref`'s bucket and key, for one of boto3's own `Bucket=`/`Key=` calls."""
+        assert ref.host is not None, f"not a bucket-having s3 ref: {ref}"
+        return ref.host, str(ref.path or "").lstrip("/")
+
+    def _own_key(self, key: PurePosixPath) -> str:
+        return str(PurePosixPath(self._settings.prefix) / key)
+
+    def ref_for(self, key: PurePosixPath) -> AnyUrl:
+        """The ref a freshly written blob at `key` will get."""
+        return AnyUrl(f"s3://{self._settings.bucket}/{self._own_key(key)}")
+
+    def access(self, ref: AnyUrl) -> RefAccess | None:
+        """`OWNED` inside `bucket`/`prefix`, `READ_ONLY` in an allowlisted bucket, else `None`."""
+        if ref.scheme != "s3" or ref.host is None:
+            return None
+        own_prefix = f"{self._settings.prefix}/" if self._settings.prefix else ""
+        path = str(ref.path or "").lstrip("/")
+        if ref.host == self._settings.bucket and path.startswith(own_prefix):
+            return RefAccess.OWNED
+        if ref.host in self._settings.extra_read_buckets:
+            return RefAccess.READ_ONLY
+        return None
+
+    def exists(self, ref: AnyUrl) -> bool:
+        """Whether a blob is already stored at `ref`."""
+        from botocore.exceptions import ClientError
+
+        bucket, key = self._bucket_and_key(ref)
+        try:
+            self._client().head_object(Bucket=bucket, Key=key)
+        except ClientError as exc:
+            if exc.response.get("Error", {}).get("Code") in ("404", "NoSuchKey"):
+                return False
+            raise
+        return True
+
+    def write(self, staged: Path, ref: AnyUrl) -> None:
+        """Upload `staged`'s bytes to `ref`, then remove `staged`."""
+        bucket, key = self._bucket_and_key(ref)
+        content_type, _ = mimetypes.guess_type(key)
+        try:
+            self._client().upload_file(
+                str(staged),
+                Bucket=bucket,
+                Key=key,
+                ExtraArgs={"ContentType": content_type} if content_type else {},
+            )
+        finally:
+            staged.unlink(missing_ok=True)
+
+    def download(self, ref: AnyUrl) -> Response:
+        """Serve `ref`'s bytes to a browser, proxied or presigned per `download_mode`."""
+        bucket, key = self._bucket_and_key(ref)
+        match self._settings.download_mode:
+            case S3DownloadMode.PRESIGN:
+                url = self._client().generate_presigned_url(
+                    "get_object",
+                    Params={"Bucket": bucket, "Key": key},
+                    ExpiresIn=self._settings.presign_ttl_s,
+                )
+                return cast("Response", redirect(url))
+            case S3DownloadMode.PROXY:
+                obj = self._client().get_object(Bucket=bucket, Key=key)
+                return Response(
+                    obj["Body"].iter_chunks(),
+                    content_type=obj.get("ContentType") or "application/octet-stream",
+                    direct_passthrough=True,
+                )
+
+    def delete(self, ref: AnyUrl) -> None:
+        """Permanently delete the blob at `ref`. Idempotent: S3's own `delete_object` always is."""
+        _log.info("Deleting artifact blob at %s", ref)
+        bucket, key = self._bucket_and_key(ref)
+        self._client().delete_object(Bucket=bucket, Key=key)
+
+
+def plug(app: Dash) -> None:
+    """Plugin content."""
+    settings = S3Settings()  # pyright: ignore[reportCallIssue] -- `bucket` is required, via S3_BUCKET
+    plug_blob_store(app, S3Blobs(settings), settings.queue_size)

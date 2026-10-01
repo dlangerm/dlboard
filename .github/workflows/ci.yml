@@ -31,7 +31,7 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --locked --dev
-      - run: uv run pytest -m "not browser and not postgres" --cov
+      - run: uv run pytest -m "not browser and not postgres and not s3" --cov
       - run: uv run playwright install --with-deps chromium
       - run: uv run pytest -m browser
       - run: uv run pytest --screenshots=check
@@ -55,3 +55,16 @@ jobs:
           enable-cache: true
       - run: uv sync --locked --dev
       - run: uv run pytest -m postgres
+
+  # The S3 artifact store, against a real S3-protocol endpoint (LocalStack, in Docker) -- the same
+  # way `uv run pytest -m s3` does locally. See `dltrack/conftest.py`'s `s3_test_server`.
+  test-s3:
+    needs: [typecheck-precommit]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --locked --dev
+      - run: uv run pytest -m s3
