@@ -19,7 +19,7 @@ from dltrack.plugins import BUILTIN_BACKEND, LOCAL_AUTH
 from dltrack.plugins.backend import artifact_purge_worker
 from dltrack.plugins.data_stores import filesystem, postgres, s3, sqlite
 from dltrack.plugins.data_stores.postgres import PostgresSettings, PostgresStore
-from dltrack.plugins.data_stores.s3 import S3Settings
+from dltrack.plugins.data_stores.s3 import S3DownloadMode, S3Settings
 from dltrack.plugins.data_stores.sqlite import SQLLiteStore
 from dltrack.serve import app as build_app
 from dltrack.serve._backend import _auth
@@ -198,6 +198,17 @@ def artifact_backend() -> ArtifactBackend:
 
 
 @pytest.fixture
+def s3_download_mode(request: pytest.FixtureRequest) -> S3DownloadMode:
+    """
+    `backend_server`'s S3 branch proxies by default.
+
+    A test parametrizes `s3_download_mode` indirectly (`@pytest.mark.parametrize("s3_download_mode",
+    [S3DownloadMode.PRESIGN], indirect=True)`) to exercise presigning instead.
+    """
+    return cast("S3DownloadMode", getattr(request, "param", S3DownloadMode.PROXY))
+
+
+@pytest.fixture
 def blob_backend(
     artifact_backend: ArtifactBackend, tmp_path: Path, request: pytest.FixtureRequest
 ) -> BlobBackend:
@@ -367,6 +378,7 @@ def backend_server(
                 "S3_SECRET_ACCESS_KEY",
                 s3_config.secret_access_key.get_secret_value() if s3_config.secret_access_key else "",
             )
+            monkeypatch.setenv("S3_DOWNLOAD_MODE", request.getfixturevalue("s3_download_mode").value)
             artifact_plugin = s3
     try:
         app = build_app(
