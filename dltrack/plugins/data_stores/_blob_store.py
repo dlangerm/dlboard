@@ -132,6 +132,21 @@ class BlobArtifactStore(models.ArtifactStore[BlobBackend, int]):
         self._file_staging_dir = Path(tempfile.gettempdir())
         self._store_artifact_proc.start()
 
+    def dispose(self) -> None:
+        """
+        Stop the write-worker process and close its queues, for a store that's going away.
+
+        A real deployment's `Dash` app never calls this -- its store lives as long as the server
+        does. A test building many short-lived stores in one process does need it: left running,
+        each one's worker process and queues (and the ref-ingest thread reading from them, which
+        this also stops -- `ship_batches` returns once its queue is closed) pile up for the rest
+        of the session instead of releasing their OS-level resources (file descriptors, semaphores).
+        """
+        self._store_artifact_proc.terminate()
+        self._store_artifact_proc.join()
+        self._store_q.close()
+        self._saved_artifact_q.close()
+
     def ingest_stored_artifacts(self, app: Dash) -> None:
         """Forever record the refs of blobs the write worker has finished writing into `app`'s data store."""
         ship_batches(
