@@ -21,10 +21,10 @@ the extension points are and how a plugin gets composed into a running app. Read
 specific category you're building — [storage](storage.md), [charts](charts.md), [auth](auth.md),
 [themes](themes.md) — this page is about the plugin mechanism itself, not any one category.
 
-Page layout (home, project, admin, experiment) is deliberately **not** a plugin category — these
+Page layout (home, project, admin, experiment, account) is deliberately **not** a plugin category — these
 modules don't implement `PluginProtocol` at all, since nobody swaps out the experiment page's
 tab+accordion layout the way they might swap sqlite for postgres. `dltrack.serve.app.app()` calls
-`register(app)` on each of the four built-in pages directly and unconditionally — they're never
+`register(app)` on each of the built-in pages directly and unconditionally — they're never
 part of the `plugins` list a deployment passes in, and never touch the `plug(app)` mechanism this
 page describes. See [architecture.md](../architecture.md) for where their code lives
 (`dltrack/serve/_pages/`).

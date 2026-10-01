@@ -26,7 +26,7 @@ BUILTIN_CHARTS: list[PluginProtocol] = [
     charts.table_chart,
 ]
 
-# Built-in pages (home, project, admin, experiment) aren't listed here -- their tab+accordion
+# Built-in pages (home, project, admin, experiment, account) aren't listed here -- their tab+accordion
 # layout is opinionated, non-optional dltrack behavior, wired unconditionally by
 # `dltrack.serve.app.app()` itself rather than offered as something a deployment opts into. See
 # `dltrack/serve/app.py`.

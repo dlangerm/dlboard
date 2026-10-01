@@ -4,7 +4,7 @@
 
 dltrack is a single Dash web app assembled at startup from a flat list of **plugins** — storage,
 charts, auth, theming, backend routes. The core app just gives plugins a few places to hook into a
-running `Dash` instance. Page layout (home, project, admin, experiment) is the one deliberate
+running `Dash` instance. Page layout (home, project, admin, experiment, account) is the one deliberate
 exception: it's opinionated, non-optional dltrack behavior, not a plugin category — see
 [plugins/overview.md](plugins/overview.md) for why.
 
@@ -18,7 +18,7 @@ script ends up as a row in the database and eventually a chart in the browser.
 
 **Composing the app.** `dltrack.serve.app.app(plugins: list[PluginProtocol]) -> Dash`
 (`dltrack/serve/app.py`) builds a `Dash` instance, calls `plug(app)` on every plugin in the caller's
-list, then calls `register(app)` directly on each of the four built-in pages (always, unconditionally
+list, then calls `register(app)` directly on each of the built-in pages (always, unconditionally
 — they aren't `PluginProtocol` and are never part of the `plugins` argument at all), and wires the
 shared `AppShell` layout (header, collapsible navbar, page container) plus a few global callbacks:
 breadcrumbs, navbar collapse state (persisted to `localStorage`), and the navbar's project/experiment
@@ -29,9 +29,16 @@ plus a theme.
 **Where plugins reach shared state.** A plugin's `plug(app)` registers whatever it needs — routes,
 a chart renderer, the data store — directly on the `Dash` app instance. Anything another
 plugin needs to read back (the data store, the artifact store, the auth provider, the current
-user) goes through small `@cache`d accessor functions in `dltrack/serve/_backend/` (e.g.
+user) goes through small accessor functions in `dltrack/serve/_backend/` (e.g.
 `get_data_store()`, `get_auth_provider()`, `get_current_user()`) rather than plugins reaching into
 each other directly. See [plugins/overview.md](plugins/overview.md) for the plugin contract itself.
+
+**Who's asking, and what they may do.** Every route sits behind one request gate, which resolves
+the caller to a `User` before the route runs: by API token, session, or the auth plugin. Within a
+request, `get_data_store()`/`get_artifact_store()` return wrappers bound to that user, which
+enforce project-level access on every call. A storage backend never knows who's asking, and
+background work no user is behind uses `get_system_data_store()` instead. See
+[plugins/auth.md](plugins/auth.md).
 
 **Request flow, client to server.**
 1. `DLTrackLogger` (`dltrack/client/dltrack_logger.py`) creates a run via `BasicDltrackAPI`

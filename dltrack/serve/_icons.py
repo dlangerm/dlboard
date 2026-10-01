@@ -70,6 +70,7 @@ class Icon(StrEnum):
     EDIT = "pencil"
     EXPORT = "download"
     IMPORT = "upload"
+    KEY = "key"
     LIGHT_MODE = "sun"
     LINK = "link"
     LOGO = "chart-line"

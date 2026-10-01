@@ -342,6 +342,7 @@ class PasswordAuthProvider:
     display_name: ClassVar[str] = "Password"
     verifies_identity: ClassVar[bool] = True
     manage_url: ClassVar[str | None] = "/password"
+    admin_url: ClassVar[str | None] = "/password/admin"
 
     def authenticate(self) -> None:
         """Only ever a session (started by the login form) -- never anything on the request itself."""

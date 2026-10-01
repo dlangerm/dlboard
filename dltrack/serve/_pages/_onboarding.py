@@ -12,7 +12,9 @@ import dash_mantine_components as dmc
 from dash import html
 from flask import request
 
-from dltrack.serve import Icon, icon
+from dltrack.serve import Icon, get_auth_provider, icon
+
+_API_KEY_HINT = "First set DLTRACK_API_KEY to a token from your Account page (top-right menu)."
 
 
 def _server_url() -> str:
@@ -65,6 +67,12 @@ def onboarding_card(*, title: str, snippet: str) -> dmc.Paper:
                                 "Point the PyTorch Lightning logger at this server — it's already filled in:",
                                 size="sm",
                                 c="dimmed",
+                            ),
+                            # A server that verifies identity needs the script to authenticate too.
+                            *(
+                                [dmc.Text(_API_KEY_HINT, size="sm", c="dimmed")]
+                                if get_auth_provider().verifies_identity
+                                else []
                             ),
                         ],
                         gap=2,

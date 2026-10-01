@@ -92,6 +92,8 @@ renderer, etc).
   vars (`S3Settings`). `filesystem` and `s3` are both just a `BlobBackend`
   (`plugins/data_stores/_blob_store.py`) plugged into the shared `BlobArtifactStore` -- see
   `docs/plugins/storage.md` for the pattern and `S3Settings`'s full env var list.
+- `LOCAL_AUTH` = `[anonymous]` (no sign-in, access control off); `PASSWORD_AUTH` = `[password]` -- swap it
+  in for a deployment where people sign in (needs `DLTRACK_SECRET_KEY`; see `docs/plugins/auth.md`)
 
 New functionality (a new chart type, storage backend, or artifact kind) is added by writing a new plugin
 module and including it in the list passed to `app()`, not by editing the core app. The core app should
@@ -99,7 +101,7 @@ expose minimal `Store` hooks for these plugins to use, but any opinionated desig
 them.
 
 Page layout is deliberately **not** part of this plugin surface. The built-in pages (home, project, admin,
-experiment) are opinionated, non-optional dltrack behavior — nobody swaps out the experiment page's
+experiment, account) are opinionated, non-optional dltrack behavior — nobody swaps out the experiment page's
 tab+accordion layout the way they might swap sqlite for postgres. They live under `dltrack/serve/_pages/`
 and are wired unconditionally by `dltrack.serve.app.app()` itself, never listed in
 `dltrack/plugins/__init__.py` and never something a `dltrack serve custom --plugins ...` deployment can
@@ -135,20 +137,25 @@ logic is a narrow exception: it references concrete chart classes to decide what
 global callbacks: breadcrumbs, navbar collapse/expand (persisted to `localStorage` via `dcc.Store`), and
 navbar content (lists a project's experiments). Actual routed pages live under `dltrack/serve/_pages/` and
 use Dash's `use_pages` file-based routing, split into two halves per page: a flat, non-underscore-prefixed
-file (`home.py`, `project.py`, `admin.py`, `experiment.py`) that Dash's `pages_folder` scanner picks up —
+file (`home.py`, `project.py`, `admin.py`, `experiment.py`, `account.py`) that Dash's `pages_folder` scanner picks up —
 it calls `dash.register_page(...)` and defines `layout()` — plus an underscore-prefixed sibling (or, for
 experiment, a whole underscore-prefixed package: `_experiment/`) holding the actual implementation
 (callbacks, a `register(app)` entry point, everything else). The underscore prefix isn't cosmetic: Dash's
 scanner prunes any `_`-prefixed file or directory from its walk, so that's what keeps the implementation
 invisible to it while still being an ordinary Python import for `app.py` and the routed file to use. Unlike
 a real plugin's `plug(app)`, these `register(app)` functions aren't called through Dash's own `plugins=`
-constructor kwarg — `app.py` imports the four page modules directly and calls `register(_app)` on each
+constructor kwarg — `app.py` imports the page modules directly and calls `register(_app)` on each
 itself, right after `Dash(...)` construction, since they aren't `PluginProtocol` and were never meant to be
 swappable.
 
 Callbacks that need storage reach it via `dltrack/serve/_backend/_data_store.py`: `get_data_store()` /
-`get_artifact_store()` are `@cache`d accessors that pull the store off the running `Dash` app instance (set
-once at startup via `set_data_store`/`set_artifact_store`, called by the storage plugins' `plug()`).
+`get_artifact_store()` return per-request authorizing wrappers (`_authorization.py`) around the store a
+storage plugin set on the app, bound to the user the request gate (`_auth.py`) authenticated -- every
+route, callback included, is behind that gate. Never authorize by hand in a page or handler, and never
+reach for `get_system_data_store()` from request code: it bypasses authorization, and is only for work no
+user is behind (background workers, the gate itself, the password provider's credential checks). A new
+`DataStore` method needs an explicit rule in `AuthorizingDataStore` -- `authorization_test.py` fails
+without one.
 Constants for Dash component IDs live in `dltrack/models/constants.py`.
 Constants should only be added for globally-accessed values, not for per-plugin items that won't be used in other contexts.
 

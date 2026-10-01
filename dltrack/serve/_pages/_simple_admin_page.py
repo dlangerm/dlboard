@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Final, cast
 
 import dash_mantine_components as dmc
+import pendulum
 from dash import ALL, Dash, Input, Output, State, html
 from dash.dcc import Store
 from dash.exceptions import PreventUpdate
@@ -14,7 +16,14 @@ from structlog.stdlib import get_logger
 from dltrack import models
 from dltrack.models import ButtonId, DivId, ModalId, StoreId, ValueId, constants
 from dltrack.plugins.backend import artifact_purge_worker
-from dltrack.serve import get_auth_provider, get_current_user, get_data_store, get_installed_plugins
+from dltrack.serve import (
+    Icon,
+    get_auth_provider,
+    get_current_user,
+    get_data_store,
+    get_installed_plugins,
+    icon,
+)
 from dltrack.serve._pages._dash_helpers import require_triggered_id
 
 if TYPE_CHECKING:
@@ -36,9 +45,12 @@ ADMIN_TABS_ID: ValueId[_AdminPage] = ValueId("admin-tabs")
 ADMIN_TRASH_CONTENT_ID: DivId[_AdminPage] = DivId("admin-trash-content")
 ADMIN_AUDIT_LOG_CONTENT_ID: DivId[_AdminPage] = DivId("admin-audit-log-content")
 ADMIN_ABOUT_CONTENT_ID: DivId[_AdminPage] = DivId("admin-about-content")
+ADMIN_USERS_CONTENT_ID: DivId[_AdminPage] = DivId("admin-users-content")
+ADMIN_INITIAL_TAB_ID: StoreId[_AdminPage] = StoreId("admin-initial-tab")
 # Pattern-matched "type" discriminators, not standalone component ids -- plain strings.
 ADMIN_RESTORE_BUTTON_TYPE: Final = "admin-restore-button"
 ADMIN_PURGE_BUTTON_TYPE: Final = "admin-purge-button"
+ADMIN_USER_ACTION_TYPE: Final = "admin-user-action"
 ADMIN_PURGE_MODAL_ID: ModalId[_AdminPage] = ModalId("admin-purge-modal")
 ADMIN_PURGE_CONFIRM_ID: ButtonId[_AdminPage] = ButtonId("admin-purge-confirm")
 ADMIN_PURGE_CANCEL_ID: ButtonId[_AdminPage] = ButtonId("admin-purge-cancel")
@@ -257,6 +269,113 @@ def _render_audit_log(store: DataStore[...], actor: User) -> Component:
     )
 
 
+class UserAction(StrEnum):
+    """What an admin can do to a user from the Users tab."""
+
+    ENABLE = "enable"
+    DISABLE = "disable"
+    GRANT_ADMIN = "grant-admin"
+    REVOKE_ADMIN = "revoke-admin"
+
+
+def apply_user_action(store: DataStore[...], user: User, action: UserAction) -> User:
+    """`user`, with `action` applied (and stored)."""
+    match action:
+        case UserAction.ENABLE:
+            update: dict[str, Any] = {"disabled_at": None}
+        case UserAction.DISABLE:
+            update = {"disabled_at": pendulum.now(pendulum.UTC)}
+        case UserAction.GRANT_ADMIN:
+            update = {"scopes": [*user.scopes, models.Scope.ALL]}
+        case UserAction.REVOKE_ADMIN:
+            update = {"scopes": [s for s in user.scopes if s is not models.Scope.ALL]}
+    return store.update_user(user.model_copy(update=update))
+
+
+def _user_action_button(user: User, action: UserAction, label: str, *, disabled: bool) -> Component:
+    return dmc.Button(
+        label,
+        id={"type": ADMIN_USER_ACTION_TYPE, "action": action.value, "user": user.id},
+        size="xs",
+        variant="light",
+        color="red" if action in (UserAction.DISABLE, UserAction.REVOKE_ADMIN) else "blue",
+        disabled=disabled,
+    )
+
+
+def _user_row(user: User, actor: User) -> Component:
+    is_admin = models.Scope.ALL in user.scopes
+    is_self = user.id == actor.id  # never lock yourself out
+    return dmc.TableTr(
+        [
+            dmc.TableTd(dmc.Text(user.username, fw=600, size="sm")),
+            dmc.TableTd(dmc.Text(user.email or "-", size="sm", c="dimmed")),
+            dmc.TableTd(dmc.Badge(user.issuer, variant="light", color="gray", size="sm")),
+            dmc.TableTd(
+                dmc.Group(
+                    [
+                        *(
+                            [dmc.Badge("Admin", color="violet", variant="light", size="sm")]
+                            if is_admin
+                            else []
+                        ),
+                        *(
+                            [dmc.Badge("Disabled", color="red", variant="light", size="sm")]
+                            if user.disabled_at
+                            else []
+                        ),
+                    ],
+                    gap=4,
+                )
+            ),
+            dmc.TableTd(
+                dmc.Group(
+                    [
+                        _user_action_button(user, UserAction.ENABLE, "Enable", disabled=False)
+                        if user.disabled_at
+                        else _user_action_button(user, UserAction.DISABLE, "Disable", disabled=is_self),
+                        _user_action_button(user, UserAction.REVOKE_ADMIN, "Remove admin", disabled=is_self)
+                        if is_admin
+                        else _user_action_button(user, UserAction.GRANT_ADMIN, "Make admin", disabled=False),
+                    ],
+                    gap="xs",
+                    justify="flex-end",
+                )
+            ),
+        ]
+    )
+
+
+def _render_users(store: DataStore[...], actor: User, admin_url: str | None) -> Component:
+    if not models.has_scope(actor, models.Scope.USER_MANAGE):
+        return dmc.Text("You don't have permission to manage users.", c="dimmed")
+    add_users = (
+        dmc.Anchor(
+            dmc.Button("Add a user or reset a password", size="xs", leftSection=icon(Icon.ADD)),
+            href=admin_url,
+        )
+        if admin_url is not None
+        else dmc.Text("Users are created the first time they sign in.", size="sm", c="dimmed")
+    )
+    return dmc.Stack(
+        [
+            add_users,
+            dmc.Table(
+                [
+                    dmc.TableThead(
+                        dmc.TableTr([dmc.TableTh(h) for h in ("User", "Email", "Signs in via", "", "")])
+                    ),
+                    dmc.TableTbody([_user_row(u, actor) for u in store.list_users()]),
+                ],
+                withTableBorder=True,
+                verticalSpacing="xs",
+            ),
+        ],
+        gap="md",
+        align="flex-start",
+    )
+
+
 def _plugin_row(plugin: InstalledPlugin) -> Component:
     return dmc.Paper(
         dmc.Stack(
@@ -320,7 +439,7 @@ def _render_about(
     )
 
 
-def _admin_layout() -> Component:
+def _admin_layout(tab: str) -> Component:
     return dmc.Container(
         [
             dmc.Title("Admin", order=2, fw=700, mb="md"),
@@ -330,15 +449,17 @@ def _admin_layout() -> Component:
                         [
                             dmc.TabsTab("Trash", value="trash"),
                             dmc.TabsTab("Audit Log", value="audit-log"),
+                            dmc.TabsTab("Users", value="users"),
                             dmc.TabsTab("About", value="about"),
                         ]
                     ),
                     dmc.TabsPanel(html.Div(id=ADMIN_TRASH_CONTENT_ID), value="trash", pt="md"),
                     dmc.TabsPanel(html.Div(id=ADMIN_AUDIT_LOG_CONTENT_ID), value="audit-log", pt="md"),
+                    dmc.TabsPanel(html.Div(id=ADMIN_USERS_CONTENT_ID), value="users", pt="md"),
                     dmc.TabsPanel(html.Div(id=ADMIN_ABOUT_CONTENT_ID), value="about", pt="md"),
                 ],
                 id=ADMIN_TABS_ID,
-                value="trash",
+                value=tab,
             ),
             dmc.Modal(
                 id=ADMIN_PURGE_MODAL_ID,
@@ -374,7 +495,10 @@ def _register_tab_callbacks(app: Dash) -> None:
     def render_trash_tab(tab: str) -> Component:
         if tab != "trash":
             raise PreventUpdate
-        return _render_trash(get_data_store())
+        try:
+            return _render_trash(get_data_store())
+        except PermissionError:
+            return dmc.Text("You don't have permission to view the trash.", c="dimmed")
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(ADMIN_AUDIT_LOG_CONTENT_ID, "children"),
@@ -385,6 +509,15 @@ def _register_tab_callbacks(app: Dash) -> None:
             raise PreventUpdate
         store = get_data_store()
         return _render_audit_log(store, get_current_user())
+
+    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+        Output(ADMIN_USERS_CONTENT_ID, "children"),
+        Input(ADMIN_TABS_ID, "value"),
+    )
+    def render_users_tab(tab: str) -> Component:
+        if tab != "users":
+            raise PreventUpdate
+        return _render_users(get_data_store(), get_current_user(), get_auth_provider().admin_url)
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(ADMIN_ABOUT_CONTENT_ID, "children"),
@@ -485,13 +618,37 @@ def _register_purge_callbacks(app: Dash) -> None:
         return "/admin", True
 
 
-def register(app: Dash) -> None:
-    """An admin page: a Trash tab (restore/purge) and an Audit Log tab."""
+def _register_user_action_callback(app: Dash) -> None:
+    # Hard-reloads (back to the Users tab) for the same reason `restore_entity` does.
+    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+        Output(constants.LOCATION_ID, "href", allow_duplicate=True),
+        Output(constants.LOCATION_ID, "refresh", allow_duplicate=True),
+        Input({"type": ADMIN_USER_ACTION_TYPE, "action": ALL, "user": ALL}, "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def act_on_user(_n_clicks_list: list[int]) -> tuple[str, bool]:
+        triggered_id = cast("dict[str, Any]", require_triggered_id())
+        store = get_data_store()
+        user, action = store.get_user(int(triggered_id["user"])), UserAction(triggered_id["action"])
+        locks_self_out = (
+            action in (UserAction.DISABLE, UserAction.REVOKE_ADMIN) and user == get_current_user()
+        )
+        if user is not None and not locks_self_out:
+            apply_user_action(store, user, action)
+        return "/admin?tab=users", True
 
-    @app.callback(Output(PAGE_ADMIN_ID, component_property="children"))  # pyright: ignore[reportUnknownMemberType]
-    def layout() -> Component:
-        return _admin_layout()
+
+def register(app: Dash) -> None:
+    """An admin page: Trash (restore/purge), Audit Log, Users, and About tabs."""
+
+    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+        Output(PAGE_ADMIN_ID, component_property="children"),
+        Input(ADMIN_INITIAL_TAB_ID, "data"),
+    )
+    def layout(tab: str | None) -> Component:
+        return _admin_layout(tab or "trash")
 
     _register_tab_callbacks(app)
     _register_restore_callback(app)
     _register_purge_callbacks(app)
+    _register_user_action_callback(app)

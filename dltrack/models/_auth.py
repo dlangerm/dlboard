@@ -35,6 +35,9 @@ class AuthProvider[**P](typing.Protocol):
     manage_url: typing.ClassVar[str | None]
     """Where a signed-in person manages how they sign in (e.g. changes their password), or `None` if there's nothing to manage."""
 
+    admin_url: typing.ClassVar[str | None]
+    """Where an admin adds users or resets their credentials, or `None` if users come from somewhere else (an external IdP)."""
+
     @classmethod
     def get_or_create(cls, *args: P.args, **kwargs: P.kwargs) -> typing.Self:
         """Initialize an auth provider."""
