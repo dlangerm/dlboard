@@ -26,7 +26,10 @@ if TYPE_CHECKING:
     from dltrack.conftest import BackendServer
     from dltrack.serve import SQLStoreBase
 
-_INGEST_TIMEOUT_S = 10
+# The S3 backend's first write of a session pays for a cold boto3 session plus a real network
+# round trip to the (containerized) store, on top of the usual async-ingest delay -- 30s matches
+# the headroom `docs_screenshots_test.py` already gives the same wait on a loaded CI runner.
+_INGEST_TIMEOUT_S = 30
 
 
 @pytest.fixture(params=EVERY_ARTIFACT_BACKEND)
