@@ -18,11 +18,13 @@ from dltrack import models
 from dltrack.plugins import BUILTIN_BACKEND, LOCAL_AUTH
 from dltrack.plugins.backend import artifact_purge_worker
 from dltrack.plugins.data_stores import filesystem, postgres, s3, sqlite
+from dltrack.plugins.data_stores._blob_store import BlobArtifactStore
 from dltrack.plugins.data_stores.postgres import PostgresSettings, PostgresStore
 from dltrack.plugins.data_stores.s3 import S3DownloadMode, S3Settings
 from dltrack.plugins.data_stores.sqlite import SQLLiteStore
 from dltrack.serve import app as build_app
 from dltrack.serve._backend import _auth
+from dltrack.serve._backend._data_store import get_artifact_store
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -395,6 +397,9 @@ def backend_server(
         server.shutdown()
         thread.join()
         store.dispose()
+        artifact_store = get_artifact_store(app)
+        if isinstance(artifact_store, BlobArtifactStore):
+            artifact_store.dispose()
 
 
 def props(component: object) -> dict[str, Any]:
