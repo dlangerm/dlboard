@@ -30,7 +30,7 @@ from playwright.sync_api import expect
 from dltrack import models
 from dltrack.models import PanelInstance
 from dltrack.plugins.backend.basic_rest_backend import BasicDltrackAPI
-from dltrack.serve import get_data_store
+from dltrack.serve import get_system_data_store
 from dltrack.serve._jump import JUMP_SELECT_ID
 from dltrack.serve._pages._experiment._experiment_page_state import (
     LIVE_PAUSED_BADGE_ID,
@@ -130,12 +130,12 @@ def test_slow_page_render_shows_a_loading_indicator(
 ) -> None:
     """A page whose `layout()` is slow shows a spinner until it renders, not a blank main area."""
     _create_project_and_experiment(page, live_server_url, "Slow Page Experiment")
-    store = get_data_store()
+    store = get_system_data_store()
     fetch_hyperparams = store.fetch_hyperparams
 
-    def slow_fetch_hyperparams(experiment_id: int) -> Iterator[models.HyperParams]:
+    def slow_fetch_hyperparams(experiment_id: int, **kwargs: Any) -> Iterator[models.HyperParams]:  # noqa: ANN401
         time.sleep(2)
-        return fetch_hyperparams(experiment_id)
+        return fetch_hyperparams(experiment_id, **kwargs)
 
     monkeypatch.setattr(store, "fetch_hyperparams", slow_fetch_hyperparams)
     page.locator(".experiment-card").click()
@@ -314,7 +314,7 @@ def _current_page_model(page: Page, experiment_id: int) -> BasicExperimentPage:
     view_id = next(
         (int(part.removeprefix("view=")) for part in query.split("&") if part.startswith("view=")), None
     )
-    store = get_data_store()
+    store = get_system_data_store()
     if view_id is not None:
         view = store.get_view(BasicExperimentPage, view_id)
         if view is not None:
@@ -329,7 +329,7 @@ def _ungrouped_chart_columns(page: Page, experiment_id: int) -> list[str]:
     The "Ungrouped" panel's charts' `column` params, in order -- reads the persisted page directly,
     since a chart's rendered `data-chart-index` alone can't distinguish *which* chart (they're
     always contiguous 0..N-1 post-render) moved where. Safe to call off the request thread: unlike
-    a callback, `get_data_store()` falls back to Dash's module-global `APP` when there's no active
+    a callback, `get_system_data_store()` falls back to Dash's module-global `APP` when there's no active
     callback context, and `dltrack_app` is the only app this test session ever builds.
     """
     panel = next(p for p in _current_page_model(page, experiment_id).panels if p.name == "Ungrouped")
@@ -1286,7 +1286,7 @@ def test_a_copied_chart_link_opens_that_chart_without_changing_the_shared_layout
 
 
 def _open_panels(view_id: int) -> list[str]:
-    store = get_data_store()
+    store = get_system_data_store()
     view = store.get_view(BasicExperimentPage, view_id)
     assert view is not None
     return list(cast("list[str]", view.page_settings.get(OPEN_PANEL_KEY, [])))
@@ -1306,7 +1306,7 @@ def test_changes_in_a_saved_view_leave_the_shared_view_alone(
     # instead would itself already branch into a view of the saving user's own (`save_page` forks
     # on *every* structural edit, including this one), leaving the shared page with nothing to
     # keep for this test to actually prove.
-    store = get_data_store()
+    store = get_system_data_store()
     shared = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
     store.update_page(shared.model_copy(update={"panels": [PanelInstance[Any, Any](name="Losses")]}))
     page.reload()
@@ -1367,7 +1367,7 @@ def test_editing_the_shared_page_branches_into_your_own_view_without_asking(
     # edit anyone's made -- auto-generating it through the UI first would itself already have
     # branched into a view of the deleting user's own (`save_page` forks on *every* structural
     # edit, not just this one), leaving nothing here to prove.
-    store = get_data_store()
+    store = get_system_data_store()
     shared = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
     store.update_page(shared.model_copy(update={"panels": [PanelInstance[Any, Any](name="Losses")]}))
     page.reload()
@@ -1380,7 +1380,7 @@ def test_editing_the_shared_page_branches_into_your_own_view_without_asking(
     expect(page).to_have_url(re.compile(r"\?view=\d+$"))
     view_id = int(page.url.rsplit("=", 1)[-1])
     expect(page.get_by_role("textbox", name="View", exact=True)).to_have_value("Copy of Shared view")
-    store = get_data_store()
+    store = get_system_data_store()
     branched = store.get_view(BasicExperimentPage, view_id)
     assert branched is not None
     assert branched.panels == []
@@ -1399,7 +1399,7 @@ def test_editing_a_view_you_do_not_own_branches_into_a_separate_view_of_your_own
     _create_project_and_experiment(page, live_server_url, "Foreign View Experiment")
     page.locator(".experiment-card").click()
     experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
-    store = get_data_store()
+    store = get_system_data_store()
     alice = store.get_or_create_user(models.Principal.unverified("alice-owns-this-view"))
     alices_view = store.create_view(
         BasicExperimentPage,
@@ -1491,7 +1491,7 @@ def test_notes_post_to_the_thread_and_arrive_live_from_others(
     ).to_be_visible()
     expect(page.locator(f"#{NOTES_COUNT_ID}")).to_have_text("1")
 
-    store = get_data_store()
+    store = get_system_data_store()
     colleague = store.get_or_create_user(models.Principal.unverified("colleague"))
     store.add_comment(models.NewComment(experiment_id=experiment_id, author_id=colleague.id, body="agreed"))
     expect(thread.get_by_text("agreed")).to_be_visible(timeout=10_000)  # one live-poll tick away

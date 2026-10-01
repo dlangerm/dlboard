@@ -30,7 +30,7 @@ from dltrack import models
 from dltrack.conftest import ScreenshotMode
 from dltrack.plugins.artifacts.image import Image
 from dltrack.plugins.backend.basic_rest_backend import BasicDltrackAPI
-from dltrack.serve import get_data_store
+from dltrack.serve import get_system_data_store
 from dltrack.serve._pages._experiment._chart_autogen import ARTIFACT_PANEL_SUFFIX
 from dltrack.serve._pages._experiment._experiment_page_state import PAGE_EXPERIMENT_ID
 from dltrack.serve._pages._experiment._notes import NOTES_THREAD_ID
@@ -207,7 +207,7 @@ def demo(live_server_url: str, dltrack_app: Dash, tmp_path_factory: pytest.TempP
     )
     # The server records uploaded artifacts on a background batch (see `BlobArtifactStore`), so
     # they land shortly after the uploads above return.
-    store = get_data_store(dltrack_app)
+    store = get_system_data_store(dltrack_app)
     expected = len(_SWEEP) * len(_IMAGE_STEPS)
     deadline = time.monotonic() + _ARTIFACT_INGEST_TIMEOUT_S
     while len(list(store.fetch_artifacts(experiment_id=sweep.id))) < expected:
@@ -308,7 +308,7 @@ def _stage(shot: DocScreenshot, page: Page, demo: Demo, dltrack_app: Dash) -> Pa
         case DocScreenshot.NOTES:
             # A second user has to exist before the drawer opens, so "Mention people..." has someone
             # besides "demo" (the pinned logged-in user) to offer.
-            store = get_data_store(dltrack_app)
+            store = get_system_data_store(dltrack_app)
             jordan = store.get_or_create_user(models.Principal.unverified("jordan"))
             page.goto(f"{demo.url}/experiment/{demo.experiment_id}")
             expect(page.locator(f"#{PAGE_EXPERIMENT_ID}")).to_be_visible()

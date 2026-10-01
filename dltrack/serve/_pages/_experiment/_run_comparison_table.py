@@ -531,7 +531,7 @@ def _register_delete_run(app: Dash) -> None:
         if not n_clicks or run_id is None:
             raise PreventUpdate
         store = get_data_store()
-        store.delete_run(run_id, get_current_user(store))
+        store.delete_run(run_id, get_current_user())
         return f"/experiment/{experiment_id}", True, False
 
 

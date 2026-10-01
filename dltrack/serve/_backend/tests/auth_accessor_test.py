@@ -1,59 +1,96 @@
 # pyright: reportPrivateUsage=false
-"""Tests for `dltrack.serve._backend._auth`: the auth-provider accessor and `get_current_user`."""
+"""Tests for `dltrack.serve._backend._auth`: the provider slot, `get_current_user`, and `sign_in`."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING
 
+import pendulum
 import pytest
+from flask import Flask
 
 from dltrack import models
+from dltrack.plugins.auth.anonymous import AnonymousAuthProvider
 from dltrack.serve._backend import _auth
 
 if TYPE_CHECKING:
     from dltrack.plugins.data_stores.sqlite import SQLLiteStore
 
 
-class _FakeAuthProvider:
-    display_name: ClassVar[str] = "Fake"
-
-    def __init__(self, identity: str | None) -> None:
-        self._identity = identity
-
-    def resolve_identity(self) -> str | None:
-        return self._identity
-
-    @classmethod
-    def get_or_create(cls, identity: str | None) -> _FakeAuthProvider:
-        return cls(identity)
-
-
 class _FakeApp:
     """A bare stand-in for `Dash` -- `set_auth_provider`/`get_auth_provider` only need `hasattr`/`setattr`."""
 
 
+def _principal(username: str, *groups: str) -> models.Principal:
+    return models.Principal(issuer="test", subject=username, username=username, groups=frozenset(groups))
+
+
 def test_set_auth_provider_refuses_to_overwrite_an_existing_one() -> None:
     app = _FakeApp()
-    _auth.set_auth_provider(app, _FakeAuthProvider.get_or_create("alice"))  # pyright: ignore[reportArgumentType]
+    _auth.set_auth_provider(app, AnonymousAuthProvider.get_or_create())  # pyright: ignore[reportArgumentType]
 
     with pytest.raises(AttributeError):
-        _auth.set_auth_provider(app, _FakeAuthProvider.get_or_create("bob"))  # pyright: ignore[reportArgumentType]
+        _auth.set_auth_provider(app, AnonymousAuthProvider.get_or_create())  # pyright: ignore[reportArgumentType]
 
 
-def test_get_current_user_resolves_and_creates_a_user(
-    store: SQLLiteStore, monkeypatch: pytest.MonkeyPatch
+def test_get_current_user_refuses_a_request_nobody_authenticated() -> None:
+    with Flask(__name__).test_request_context(), pytest.raises(RuntimeError, match="request gate"):
+        _auth.get_current_user()
+
+
+@pytest.mark.parametrize(
+    ("principal", "is_admin"),
+    [
+        (_principal("root"), True),
+        (_principal("someone", "platform-admins"), True),
+        (_principal("someone", "ml-team"), False),
+    ],
+)
+def test_sign_in_grants_configured_admins(
+    store: SQLLiteStore, principal: models.Principal, is_admin: bool
 ) -> None:
-    monkeypatch.setattr(_auth, "get_auth_provider", lambda: _FakeAuthProvider("alice"))
+    settings = _auth.AuthSettings(admin_users=["root"], admin_groups=["platform-admins"])
 
-    user = _auth.get_current_user(store)
+    user = _auth.sign_in(store, principal, settings)
 
-    assert user.username == "alice"
-    assert store.get_or_create_user(models.Principal.unverified("alice")).id == user.id
+    assert user is not None
+    assert (models.Scope.ALL in user.scopes) is is_admin
 
 
-def test_get_current_user_falls_back_to_anonymous_when_identity_is_none(
-    store: SQLLiteStore, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(_auth, "get_auth_provider", lambda: _FakeAuthProvider(None))
+def test_sign_in_never_makes_the_first_verified_user_an_admin(store: SQLLiteStore) -> None:
+    """Whoever signs in first is only made admin locally -- never once identity is actually verified."""
+    user = _auth.sign_in(store, _principal("first"), _auth.AuthSettings())
 
-    assert _auth.get_current_user(store).username == "anonymous"
+    assert user is not None
+    assert user.scopes == []
+
+
+def test_sign_in_refuses_a_disabled_user(store: SQLLiteStore) -> None:
+    user = store.get_or_create_user(_principal("gone"))
+    store.update_user(user.model_copy(update={"disabled_at": pendulum.now(pendulum.UTC)}))
+
+    assert _auth.sign_in(store, _principal("gone"), _auth.AuthSettings()) is None
+
+
+def test_sign_in_refreshes_groups_and_keeps_one_user_per_identity(store: SQLLiteStore) -> None:
+    first = _auth.sign_in(store, _principal("ann", "a"), _auth.AuthSettings())
+    again = _auth.sign_in(store, _principal("ann", "b"), _auth.AuthSettings())
+
+    assert first is not None
+    assert again is not None
+    assert (again.id, again.groups) == (first.id, ["b"])
+
+
+def test_a_username_taken_by_another_identity_is_refused(store: SQLLiteStore) -> None:
+    store.get_or_create_user(models.Principal.unverified("sam"))
+
+    with pytest.raises(ValueError, match="already taken"):
+        store.get_or_create_user(_principal("sam"))
+
+
+@pytest.mark.parametrize(
+    ("next_path", "expected"),
+    [("/project/1", "/project/1"), ("//evil.example", "/"), ("https://evil.example", "/"), (None, "/")],
+)
+def test_safe_next_path_only_allows_same_site_paths(next_path: str | None, expected: str) -> None:
+    assert _auth.safe_next_path(next_path) == expected

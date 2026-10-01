@@ -156,9 +156,7 @@ def register(app: Dash) -> None:
             return no_update, no_update, "Give the experiment a name"
         store = get_data_store()
         store.create_experiment(
-            NewExperiment(
-                project_id=int(project_id), name=name.strip(), created_by=get_current_user(store).id
-            )
+            NewExperiment(project_id=int(project_id), name=name.strip(), created_by=get_current_user().id)
         )
         return _experiment_grid(store, int(project_id)), "", None
 
@@ -184,7 +182,7 @@ def register(app: Dash) -> None:
 
     def _delete_project(project_id: int) -> str:
         store = get_data_store()
-        store.delete_project(project_id, get_current_user(store))
+        store.delete_project(project_id, get_current_user())
         return "/"
 
     register_delete_callbacks(

@@ -16,9 +16,12 @@ DATA_STORE: AppSlot[DataStore[...]] = AppSlot("data store")
 ARTIFACT_STORE: AppSlot[ArtifactStore[...]] = AppSlot("artifact store")
 
 get_data_store = DATA_STORE.get
+# For work no user is behind -- the request gate resolving who a caller is, background workers.
+get_system_data_store = DATA_STORE.get
 wait_for_data_store = DATA_STORE.wait
 set_artifact_store = ARTIFACT_STORE.set
 get_artifact_store = ARTIFACT_STORE.get
+get_system_artifact_store = ARTIFACT_STORE.get
 wait_for_artifact_store = ARTIFACT_STORE.wait
 
 

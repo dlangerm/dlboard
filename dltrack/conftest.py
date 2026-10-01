@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 import sqlalchemy as sa
+from flask import Flask
 from pydantic import AnyHttpUrl, SecretStr
 from werkzeug.serving import make_server
 
@@ -22,17 +23,19 @@ from dltrack.plugins.data_stores._blob_store import BlobArtifactStore
 from dltrack.plugins.data_stores.postgres import PostgresSettings, PostgresStore
 from dltrack.plugins.data_stores.s3 import S3DownloadMode, S3Settings
 from dltrack.plugins.data_stores.sqlite import SQLLiteStore
+from dltrack.serve import SQLStoreBase, get_system_data_store
 from dltrack.serve import app as build_app
 from dltrack.serve._backend import _auth
-from dltrack.serve._backend._data_store import get_artifact_store
+from dltrack.serve._backend._data_store import ARTIFACT_STORE
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
     from pathlib import Path
 
+    from dash import Dash
+
     from dltrack.models import PluginProtocol
     from dltrack.plugins.data_stores._blob_store import BlobBackend
-    from dltrack.serve import SQLStoreBase
 
 
 class ScreenshotMode(StrEnum):
@@ -250,31 +253,23 @@ def admin(store: SQLStoreBase[Any]) -> models.User:
     return store.get_or_create_user(models.Principal.unverified("admin"))
 
 
-class _FakeAuthProvider:
-    """Resolves to whatever identity it was built with -- `resolve_identity` is all `sign_in_as` needs."""
-
-    def __init__(self, identity: str) -> None:
-        self._identity = identity
-
-    def resolve_identity(self) -> str:
-        return self._identity
-
-
 @pytest.fixture
-def sign_in_as(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], None]:
+def sign_in_as(store: SQLStoreBase[Any]) -> Iterator[Callable[[str], models.User]]:
     """
-    Make `get_current_user` resolve to `username` for the rest of this test, outside a real Dash app.
+    Make `get_current_user()` resolve to `username` for the rest of this test, outside a real Dash app.
 
-    A bare call to `get_current_user`/`get_auth_provider` needs a running app (`dash.get_app()`),
-    which most unit tests in this suite never build -- this monkeypatches the one thing it actually
-    calls instead. Call the returned setter again with a different name to switch identities
-    mid-test (e.g. to simulate two different people editing the same page).
+    Pushes a bare Flask request context for the whole test and binds the user to it, exactly as the
+    request gate does for a real request. Call the returned setter again with a different name to
+    switch identities mid-test (e.g. to simulate two different people editing the same page).
     """
+    with Flask(__name__).test_request_context():
 
-    def _sign_in(username: str) -> None:
-        monkeypatch.setattr(_auth, "get_auth_provider", lambda: _FakeAuthProvider(username))
+        def _sign_in(username: str) -> models.User:
+            user = store.get_or_create_user(models.Principal.unverified(username))
+            _auth.bind_current_user(user)
+            return user
 
-    return _sign_in
+        yield _sign_in
 
 
 class EntityChain(typing.NamedTuple):
@@ -314,6 +309,21 @@ def create_entity_chain(store: SQLStoreBase[Any], *, artifact: bool = False) -> 
         assert logged.id is not None
         artifact_id = logged.id
     return EntityChain(project.id, experiment.id, run.id, artifact_id)
+
+
+def dispose_stores(app: Dash) -> None:
+    """
+    Release `app`'s storage: its database pool, and its artifact store's worker process if it has one.
+
+    Every test that builds its own app needs this -- a filesystem/S3 artifact store spawns a worker
+    process per app, and enough leaked ones slow the rest of the session to a crawl.
+    """
+    data_store = get_system_data_store(app)
+    if isinstance(data_store, SQLStoreBase):
+        data_store.dispose()
+    artifact_store = ARTIFACT_STORE.find(app)
+    if isinstance(artifact_store, BlobArtifactStore):
+        artifact_store.dispose()
 
 
 class BackendServer(typing.NamedTuple):
@@ -397,9 +407,7 @@ def backend_server(
         server.shutdown()
         thread.join()
         store.dispose()
-        artifact_store = get_artifact_store(app)
-        if isinstance(artifact_store, BlobArtifactStore):
-            artifact_store.dispose()
+        dispose_stores(app)
 
 
 def props(component: object) -> dict[str, Any]:

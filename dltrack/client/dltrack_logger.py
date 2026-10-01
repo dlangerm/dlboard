@@ -158,6 +158,9 @@ class DLTrackLogger(Logger):
         """Initialize with an existing project/experiment id; an experiment is created if none is given."""
         settings = settings or DLTrackLoggerSettings()
         self._api = BasicDltrackAPI(base_url=server_url)
+        # Up front, before any worker starts: the workers treat every 4xx as "drop this batch" (see
+        # `is_rejection`), so bad credentials would otherwise only show up as silently lost metrics.
+        self._api.whoami()
         if experiment_id is None:
             experiment = self._api.create_experiment(
                 models.NewExperiment(project_id=project_id, source=models.ExperimentSource.PYTORCH_LIGHTNING)
@@ -199,6 +202,7 @@ class DLTrackLogger(Logger):
         exists, later calls just reuse it as-is.
         """
         api = BasicDltrackAPI(base_url=server_url)
+        api.whoami()
         project = api.get_or_create_project(project_name, description=project_description)
         experiment = api.get_or_create_experiment(
             project.id, name=experiment_name, source=models.ExperimentSource.PYTORCH_LIGHTNING

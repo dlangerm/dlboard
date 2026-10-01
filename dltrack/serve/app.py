@@ -16,8 +16,13 @@ from structlog.stdlib import get_logger
 from dltrack.models import InstalledPlugin, constants
 from dltrack.serve._assets import AssetKind, serve_asset
 from dltrack.serve._backend import _artifact_download
-from dltrack.serve._backend._auth import get_auth_provider, get_current_user
-from dltrack.serve._backend._data_store import get_data_store
+from dltrack.serve._backend._auth import (
+    SIGN_OUT_PATH,
+    find_current_user,
+    get_auth_provider,
+    install_request_gate,
+)
+from dltrack.serve._backend._data_store import get_data_store, get_system_data_store
 from dltrack.serve._backend._installed_plugins import set_installed_plugins
 from dltrack.serve._backend._theme import get_theme
 from dltrack.serve._clientside_script import ClientsideScript
@@ -78,6 +83,8 @@ def app(plugins: list[models.PluginProtocol]) -> Dash:
     # Also core, non-optional: every chart that shows an artifact fetches it from this one route,
     # by id -- never by talking to whatever `ArtifactStore` a deployment happens to have plugged in.
     _artifact_download.register(_app)
+    # Every route above (and every plugin route) sits behind this one gate -- see `_auth.py`.
+    install_request_gate(_app, lambda: get_system_data_store(_app))
     # Only the immutable `InstalledPlugin` snapshots are retained on the app -- not the plugin
     # modules/objects themselves, so introspecting this later (the admin page's About tab) can't
     # reach back into a plugin's own state.
@@ -278,8 +285,11 @@ def breadcrumbs(_: str, project_id: int | None, experiment_id: int | None) -> li
 
 
 def _user_menu() -> Component:
-    """Who the app resolves the caller to be, how, and the account-level links (Admin)."""
-    user = get_current_user(get_data_store())
+    """Who the app resolves the caller to be, how, and the account-level links (Admin, sign-out)."""
+    user = find_current_user()
+    if user is None:  # Dash's one-time layout validation, on whatever the first request happens to be
+        return html.Div()
+    provider = get_auth_provider()
     return dmc.Menu(
         [
             dmc.MenuTarget(
@@ -296,9 +306,23 @@ def _user_menu() -> Component:
                 [
                     dmc.MenuLabel("Signed in as"),
                     dmc.Text(user.username, size="sm", fw=600, px="sm"),
-                    dmc.Text(f"via {get_auth_provider().display_name}", size="xs", c="dimmed", px="sm", pb=6),
+                    dmc.Text(f"via {provider.display_name}", size="xs", c="dimmed", px="sm", pb=6),
                     dmc.MenuDivider(),
+                    *(
+                        [dmc.MenuItem("Sign-in settings", href=provider.manage_url, refresh=True)]
+                        if provider.manage_url is not None
+                        else []
+                    ),
                     dmc.MenuItem("Admin", href="/admin", refresh=True, leftSection=icon(Icon.ADMIN)),
+                    *(
+                        [
+                            dmc.MenuItem(
+                                "Sign out", href=SIGN_OUT_PATH, refresh=True, leftSection=icon(Icon.SIGN_OUT)
+                            )
+                        ]
+                        if provider.verifies_identity
+                        else []
+                    ),
                 ]
             ),
         ],

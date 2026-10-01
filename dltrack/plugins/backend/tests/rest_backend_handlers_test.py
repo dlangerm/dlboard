@@ -54,7 +54,7 @@ def test_handle_create_project_stamps_created_by(store: SQLLiteStore) -> None:
     result = backend.handle_create_project(store, body, actor)
 
     assert result["created_by"] == actor.id
-    assert store.get_project(result["id"]).created_by == actor.id
+    assert store.get_project(result["id"]) == models.Project.model_validate(result)
 
 
 def test_handle_create_experiment_stamps_created_by(store: SQLLiteStore) -> None:

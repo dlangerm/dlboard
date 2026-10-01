@@ -384,7 +384,7 @@ def _register_tab_callbacks(app: Dash) -> None:
         if tab != "audit-log":
             raise PreventUpdate
         store = get_data_store()
-        return _render_audit_log(store, get_current_user(store))
+        return _render_audit_log(store, get_current_user())
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(ADMIN_ABOUT_CONTENT_ID, "children"),
@@ -395,7 +395,7 @@ def _register_tab_callbacks(app: Dash) -> None:
             raise PreventUpdate
         store = get_data_store()
         auth_provider_name = get_auth_provider().__class__.__name__
-        return _render_about(store, get_current_user(store), auth_provider_name, get_installed_plugins())
+        return _render_about(store, get_current_user(), auth_provider_name, get_installed_plugins())
 
 
 def _register_restore_callback(app: Dash) -> None:
@@ -416,7 +416,7 @@ def _register_restore_callback(app: Dash) -> None:
         entity_id = int(triggered_id["id"])
 
         store = get_data_store()
-        actor = get_current_user(store)
+        actor = get_current_user()
         try:
             getattr(store, _RESTORERS[entity_type])(entity_id, actor)
         except (ValueError, PermissionError):
@@ -463,7 +463,7 @@ def _register_purge_callbacks(app: Dash) -> None:
         entity_id = int(pending["id"])
 
         store = get_data_store()
-        actor = get_current_user(store)
+        actor = get_current_user()
         try:
             getattr(store, _PURGERS[entity_type])(entity_id, actor)
         except (ValueError, PermissionError):

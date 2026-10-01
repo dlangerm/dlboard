@@ -338,7 +338,7 @@ def register(app: Dash) -> None:
             msg = f"Experiment {experiment_id} not found"
             raise ValueError(msg)
         project_id = exp.project_id
-        store.delete_experiment(experiment_id, get_current_user(store))
+        store.delete_experiment(experiment_id, get_current_user())
         return f"/project/{project_id}"
 
     register_delete_callbacks(

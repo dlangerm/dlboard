@@ -101,7 +101,7 @@ def layout(
     view_id = resolve_view_id(store, exp.id, view)
     container, header, page_json = render_panel(store, core.PageRef(exp.id, view_id), focus_chart=chart)
     current_page = core.BasicExperimentPage.model_validate_json(page_json)
-    is_owner = view_id is not None and current_page.owner_id == get_current_user(store).id
+    is_owner = view_id is not None and current_page.owner_id == get_current_user().id
 
     return [
         html.Div(
