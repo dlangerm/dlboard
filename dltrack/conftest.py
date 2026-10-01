@@ -11,12 +11,15 @@ from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 import sqlalchemy as sa
-from pydantic import SecretStr
+from pydantic import AnyHttpUrl, SecretStr
 from werkzeug.serving import make_server
 
 from dltrack import models
-from dltrack.plugins import BUILTIN_BACKEND, LOCAL_AUTH, LOCAL_STORAGE, POSTGRES_STORAGE
+from dltrack.plugins import BUILTIN_BACKEND, LOCAL_AUTH
+from dltrack.plugins.backend import artifact_purge_worker
+from dltrack.plugins.data_stores import filesystem, postgres, s3, sqlite
 from dltrack.plugins.data_stores.postgres import PostgresSettings, PostgresStore
+from dltrack.plugins.data_stores.s3 import S3Settings
 from dltrack.plugins.data_stores.sqlite import SQLLiteStore
 from dltrack.serve import app as build_app
 from dltrack.serve._backend import _auth
@@ -25,6 +28,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
     from pathlib import Path
 
+    from dltrack.models import PluginProtocol
+    from dltrack.plugins.data_stores._blob_store import BlobBackend
     from dltrack.serve import SQLStoreBase
 
 
@@ -131,6 +136,79 @@ def store_backend() -> StoreBackend:
     return StoreBackend.SQLITE
 
 
+class ArtifactBackend(StrEnum):
+    """Which `BlobBackend` the `artifact_backend`-parametrized fixtures are backed by."""
+
+    FILESYSTEM = "filesystem"
+    S3 = "s3"
+
+
+EVERY_ARTIFACT_BACKEND: list[Any] = [
+    ArtifactBackend.FILESYSTEM,
+    pytest.param(ArtifactBackend.S3, marks=pytest.mark.s3),
+]
+"""
+`params` for a module's own `artifact_backend` override, to run its tests against every backend:
+
+    @pytest.fixture(params=EVERY_ARTIFACT_BACKEND)
+    def artifact_backend(request: pytest.FixtureRequest) -> ArtifactBackend:
+        return request.param
+"""
+
+
+@pytest.fixture(scope="session")
+def s3_test_server() -> Iterator[S3Settings]:
+    """
+    A real S3-protocol endpoint in a throwaway container (needs Docker), started once per session.
+
+    LocalStack's S3 emulation, not MinIO: MinIO's own container images now require a Docker
+    Hub/quay.io login, which a public CI runner doesn't have. Either way, this exercises the exact
+    same `S3Blobs` code path a real MinIO/VAST deployment would -- a non-AWS `endpoint_url`, with
+    path-style addressing (`addressing_style="path"`), both settings that matter equally for any
+    S3-protocol store that isn't AWS itself.
+    """
+    from testcontainers.community.localstack import LocalStackContainer
+
+    bucket = "dltrack-test"
+    with LocalStackContainer() as localstack:
+        localstack.get_client("s3").create_bucket(  # pyright: ignore[reportUnknownMemberType, reportCallIssue]
+            Bucket=bucket, CreateBucketConfiguration={"LocationConstraint": localstack.region_name}
+        )
+        yield S3Settings(
+            bucket=bucket,
+            endpoint_url=AnyHttpUrl(localstack.get_url()),
+            access_key_id="testcontainers-localstack",
+            secret_access_key=SecretStr("testcontainers-localstack"),
+            region=localstack.region_name,
+            addressing_style="path",
+            verify_tls=False,
+        )
+
+
+@pytest.fixture
+def s3_settings(s3_test_server: S3Settings) -> S3Settings:
+    """Settings for a fresh prefix of its own in the session's S3 test bucket."""
+    return s3_test_server.model_copy(update={"prefix": f"test-{uuid.uuid4().hex[:12]}"})
+
+
+@pytest.fixture
+def artifact_backend() -> ArtifactBackend:
+    """Filesystem, unless a module overrides this to run against every backend (see `EVERY_ARTIFACT_BACKEND`)."""
+    return ArtifactBackend.FILESYSTEM
+
+
+@pytest.fixture
+def blob_backend(
+    artifact_backend: ArtifactBackend, tmp_path: Path, request: pytest.FixtureRequest
+) -> BlobBackend:
+    """A throwaway `BlobBackend` for a single test, backed by `artifact_backend`."""
+    match artifact_backend:
+        case ArtifactBackend.FILESYSTEM:
+            return filesystem.FSBlobs(tmp_path)
+        case ArtifactBackend.S3:
+            return s3.S3Blobs(request.getfixturevalue("s3_settings"))
+
+
 @pytest.fixture
 def store(
     store_backend: StoreBackend, tmp_path: Path, request: pytest.FixtureRequest
@@ -234,22 +312,28 @@ class BackendServer(typing.NamedTuple):
 
 @pytest.fixture
 def backend_server(
-    store_backend: StoreBackend, tmp_path: Path, request: pytest.FixtureRequest
+    store_backend: StoreBackend,
+    artifact_backend: ArtifactBackend,
+    tmp_path: Path,
+    request: pytest.FixtureRequest,
 ) -> Iterator[BackendServer]:
     """
-    A real dltrack backend (storage + REST routes, no charts) on a background thread, on `store_backend`.
+    A real dltrack backend (storage + REST routes, no charts) on a background thread.
+
+    Metadata storage is on `store_backend`, artifact (blob) storage is on `artifact_backend` --
+    independent axes, since `DataStore` and `ArtifactStore` are entirely separate plugins.
 
     Deliberately leaves out `BUILTIN_CHARTS`: chart plugins register into a process-global registry
     that rejects a second registration, so only one app per pytest process may include them
     (`browser_test.py`'s). Everything this fixture builds can be built any number of times.
     """
     monkeypatch = pytest.MonkeyPatch()
-    monkeypatch.setenv("ARTIFACT_STORE_LOCATION", str(tmp_path / "artifacts"))
     store: SQLStoreBase[Any]
+    metadata_plugin: PluginProtocol
     match store_backend:
         case StoreBackend.SQLITE:
             monkeypatch.setenv("SQLITE_LOCATION", str(tmp_path / "test.sqlite"))
-            storage, store = LOCAL_STORAGE, SQLLiteStore(tmp_path / "test.sqlite")
+            metadata_plugin, store = sqlite, SQLLiteStore(tmp_path / "test.sqlite")
         case StoreBackend.POSTGRES:
             settings: PostgresSettings = request.getfixturevalue("postgres_settings")
             for name, value in settings.model_dump(
@@ -260,9 +344,34 @@ def backend_server(
                 "POSTGRES_PASSWORD", settings.password.get_secret_value() if settings.password else ""
             )
             monkeypatch.setenv("POSTGRES_SSLMODE", settings.sslmode)
-            storage, store = POSTGRES_STORAGE, PostgresStore(settings)
+            metadata_plugin, store = postgres, PostgresStore(settings)
+    artifact_plugin: PluginProtocol
+    match artifact_backend:
+        case ArtifactBackend.FILESYSTEM:
+            monkeypatch.setenv("ARTIFACT_STORE_LOCATION", str(tmp_path / "artifacts"))
+            artifact_plugin = filesystem
+        case ArtifactBackend.S3:
+            s3_config: S3Settings = request.getfixturevalue("s3_settings")
+            for name, value in s3_config.model_dump(
+                include={
+                    "bucket",
+                    "prefix",
+                    "endpoint_url",
+                    "access_key_id",
+                    "addressing_style",
+                    "verify_tls",
+                }
+            ).items():
+                monkeypatch.setenv(f"S3_{name.upper()}", str(value))
+            monkeypatch.setenv(
+                "S3_SECRET_ACCESS_KEY",
+                s3_config.secret_access_key.get_secret_value() if s3_config.secret_access_key else "",
+            )
+            artifact_plugin = s3
     try:
-        app = build_app([*storage, *LOCAL_AUTH, *BUILTIN_BACKEND])
+        app = build_app(
+            [metadata_plugin, artifact_plugin, artifact_purge_worker, *LOCAL_AUTH, *BUILTIN_BACKEND]
+        )
     finally:
         monkeypatch.undo()
     server = make_server("127.0.0.1", 0, app.server)

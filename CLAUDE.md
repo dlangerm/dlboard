@@ -23,7 +23,8 @@ uv run pytest --cov                 # run with coverage (see pyproject.toml for 
 uv run pytest -m browser            # run only the browser/e2e tests
 uv run pytest -m "not browser"      # run everything except the browser/e2e tests
 uv run pytest -m postgres           # run the store suites against a real Postgres (needs Docker; testcontainers)
-uv run pytest -m "not browser and not postgres"  # everything that needs neither a browser nor Docker
+uv run pytest -m s3                 # run the S3 artifact store against a real S3 endpoint (needs Docker; testcontainers)
+uv run pytest -m "not browser and not postgres and not s3"  # everything that needs neither a browser nor Docker
 uv run pytest --screenshots=check   # re-render the docs screenshots and fail if docs/images is stale
 uv run pytest --screenshots=update  # rewrite docs/images (local preview; CI's render is the one to commit)
 uv run ruff check                   # lint
@@ -86,6 +87,11 @@ renderer, etc).
 - `LOCAL_DEPLOYMENT` = all of the above, used by `dltrack serve local`
 - `POSTGRES_STORAGE` = `[postgres, filesystem, artifact_purge_worker]` — for a shared deployment, composed
   into a `dltrack serve custom --plugins` list; configured by `POSTGRES_*` env vars (`PostgresSettings`)
+- `POSTGRES_S3_STORAGE` = `[postgres, s3, artifact_purge_worker]` — same, but artifacts go to any
+  S3-protocol object store (AWS, MinIO, VAST, ...) instead of local disk; configured by `S3_*` env
+  vars (`S3Settings`). `filesystem` and `s3` are both just a `BlobBackend`
+  (`plugins/data_stores/_blob_store.py`) plugged into the shared `BlobArtifactStore` -- see
+  `docs/plugins/storage.md` for the pattern and `S3Settings`'s full env var list.
 
 New functionality (a new chart type, storage backend, or artifact kind) is added by writing a new plugin
 module and including it in the list passed to `app()`, not by editing the core app. The core app should

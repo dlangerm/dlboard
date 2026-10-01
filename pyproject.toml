@@ -4,6 +4,7 @@ requires = ["hatchling"]
 
 [dependency-groups]
 dev = [
+  "boto3>=1.40",
   "pandas-stubs>=3.0.5.260730",
   "pillow>=12.3.0",
   "prek>=0.4.10",
@@ -13,8 +14,9 @@ dev = [
   "pytest-cov>=7.1.0",
   "pytest-playwright>=0.9.0",
   "ruff>=0.15.22",
-  "testcontainers[postgres]>=4.10",
+  "testcontainers[localstack,postgres]>=4.10",
   "torchvision>=0.28.0",
+  "types-boto3[s3]>=1.40",
   "vulture>=2.16"
 ]
 
@@ -48,6 +50,9 @@ version = "0.1.0"
 postgres = [
   "psycopg[binary]>=3.2"
 ]
+s3 = [
+  "boto3>=1.40"
+]
 
 [project.scripts]
 dltrack = "dltrack._cli:main"
@@ -73,10 +78,17 @@ venv = ".venv"
 venvPath = "."
 
 [tool.pytest.ini_options]
-filterwarnings = ["error"]
+filterwarnings = [
+  "error",
+  # `LocalStackContainer.start()` (`s3_test_server`, `dltrack/conftest.py`) calls testcontainers'
+  # own legacy `wait_for_logs(container, "<regex>")` internally -- nothing we call directly, and
+  # not actionable from here.
+  "ignore:The wait_for_logs function with string or callable predicates is deprecated:DeprecationWarning"
+]
 markers = [
   "browser: browser-based end-to-end tests requiring a webdriver",
   "postgres: runs against a real Postgres in a throwaway container; needs Docker",
+  "s3: runs against a real S3-compatible store (MinIO) in a throwaway container; needs Docker",
   "screenshots: renders the docs screenshots; only runs with --screenshots=check|update"
 ]
 pythonpath = ["."]
