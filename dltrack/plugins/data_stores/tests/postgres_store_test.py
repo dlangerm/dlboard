@@ -104,7 +104,7 @@ def test_workers_starting_at_once_against_a_fresh_schema_all_come_up(
         thread.join()
     try:
         assert errors == []
-        assert stores[0].get_or_create_user("admin").scopes == [models.Scope.ALL]
+        assert stores[0].get_or_create_user(models.Principal.unverified("admin")).scopes == [models.Scope.ALL]
     finally:
         for store in stores:
             store.dispose()

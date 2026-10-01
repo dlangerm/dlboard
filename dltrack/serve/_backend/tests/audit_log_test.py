@@ -102,7 +102,7 @@ def test_list_audit_log_requires_the_audit_log_read_scope(store: SQLLiteStore, a
     registered with a running app via `set_data_store`."""
     project = store.create_project(models.NewProject(name="p", description="d"))
     store.delete_project(project.id, admin)
-    no_scopes_user = store.get_or_create_user("nobody")
+    no_scopes_user = store.get_or_create_user(models.Principal.unverified("nobody"))
 
     with pytest.raises(PermissionError, match="lacks"):
         list(ScopeEnforcingDataStore(store).list_audit_log(no_scopes_user))

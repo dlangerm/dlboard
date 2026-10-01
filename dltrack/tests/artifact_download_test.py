@@ -105,7 +105,7 @@ def test_a_soft_deleted_artifacts_id_404s(backend_server: BackendServer, tmp_pat
     run = api.create_run(models.NewRun(experiment_id=experiment.id))
     _log_one_artifact(api, run, experiment.id, tmp_path / "a.bin")
     artifact = _wait_for_artifact(backend_server.store, experiment.id)
-    admin = backend_server.store.get_or_create_user("admin")
+    admin = backend_server.store.get_or_create_user(models.Principal.unverified("admin"))
     assert artifact.id is not None
     backend_server.store.delete_artifact(artifact.id, admin)
 

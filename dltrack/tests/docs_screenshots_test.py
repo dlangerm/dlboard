@@ -309,7 +309,7 @@ def _stage(shot: DocScreenshot, page: Page, demo: Demo, dltrack_app: Dash) -> Pa
             # A second user has to exist before the drawer opens, so "Mention people..." has someone
             # besides "demo" (the pinned logged-in user) to offer.
             store = get_data_store(dltrack_app)
-            jordan = store.get_or_create_user("jordan")
+            jordan = store.get_or_create_user(models.Principal.unverified("jordan"))
             page.goto(f"{demo.url}/experiment/{demo.experiment_id}")
             expect(page.locator(f"#{PAGE_EXPERIMENT_ID}")).to_be_visible()
             page.get_by_role("button", name=re.compile("^Notes")).click()

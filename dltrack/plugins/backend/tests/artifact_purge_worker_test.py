@@ -48,7 +48,7 @@ class _RaisingArtifactStore:
 
 def _queue_purge_tasks(store: SQLLiteStore, count: int) -> int:
     """Soft-delete then purge a project with `count` artifacts, queuing one task per artifact."""
-    admin = store.get_or_create_user("admin")
+    admin = store.get_or_create_user(models.Principal.unverified("admin"))
     project_id, experiment_id, run_id, _artifact_id = create_entity_chain(store)
     store.log_artifact_refs(
         [

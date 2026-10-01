@@ -125,7 +125,7 @@ def test_purge_requires_scope(store: SQLLiteStore, admin: models.User) -> None:
     registered with a running app via `set_data_store`."""
     project = store.create_project(models.NewProject(name="p", description="d"))
     store.delete_project(project.id, admin)
-    no_scopes_user = store.get_or_create_user("nobody")
+    no_scopes_user = store.get_or_create_user(models.Principal.unverified("nobody"))
     wrapped = ScopeEnforcingDataStore(store)
 
     with pytest.raises(PermissionError, match="lacks"):
@@ -152,30 +152,34 @@ def test_delete_requires_the_matching_scope(
         "delete_run": run_id,
         "delete_artifact": artifact_id,
     }[method]
-    no_scopes_user = store.get_or_create_user("nobody")
+    no_scopes_user = store.get_or_create_user(models.Principal.unverified("nobody"))
     wrapped = ScopeEnforcingDataStore(store)
 
     with pytest.raises(PermissionError, match="lacks"):
         getattr(wrapped, method)(entity_id, no_scopes_user)
 
-    scoped_user = store.get_or_create_user("scoped")
+    scoped_user = store.get_or_create_user(models.Principal.unverified("scoped"))
     store.update_user(scoped_user.model_copy(update={"scopes": [scope]}))
-    getattr(wrapped, method)(entity_id, store.get_or_create_user("scoped"))  # does not raise
+    getattr(wrapped, method)(
+        entity_id, store.get_or_create_user(models.Principal.unverified("scoped"))
+    )  # does not raise
 
 
 def test_restore_requires_the_restore_scope(store: SQLLiteStore, admin: models.User) -> None:
     """Goes through `ScopeEnforcingDataStore` -- see `test_purge_requires_scope`."""
     project = store.create_project(models.NewProject(name="p", description="d"))
     store.delete_project(project.id, admin)
-    no_scopes_user = store.get_or_create_user("nobody")
+    no_scopes_user = store.get_or_create_user(models.Principal.unverified("nobody"))
     wrapped = ScopeEnforcingDataStore(store)
 
     with pytest.raises(PermissionError, match="lacks"):
         wrapped.restore_project(project.id, no_scopes_user)
 
-    scoped_user = store.get_or_create_user("scoped")
+    scoped_user = store.get_or_create_user(models.Principal.unverified("scoped"))
     store.update_user(scoped_user.model_copy(update={"scopes": [models.Scope.RESTORE]}))
-    wrapped.restore_project(project.id, store.get_or_create_user("scoped"))  # does not raise
+    wrapped.restore_project(
+        project.id, store.get_or_create_user(models.Principal.unverified("scoped"))
+    )  # does not raise
 
 
 def test_purge_requires_prior_soft_delete(store: SQLLiteStore, admin: models.User) -> None:

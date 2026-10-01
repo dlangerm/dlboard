@@ -3,6 +3,8 @@
 import pendulum
 from pydantic import AwareDatetime, BaseModel, Field
 
+from dltrack.models._access import ProjectRole
+
 
 class NewProject(BaseModel, frozen=True, extra="forbid"):
     """A deep learning project."""
@@ -12,6 +14,13 @@ class NewProject(BaseModel, frozen=True, extra="forbid"):
 
     description: str
     """A description of the project."""
+
+    everyone_role: ProjectRole | None = None
+    """
+    The role every signed-in user has on this project, on top of any explicit grant -- `None` keeps it
+    to its members. Only meaningful under an identity-verifying auth provider (see
+    `AuthProvider.verifies_identity`); without one, everyone can already edit everything.
+    """
 
     created_by: int | None = None
     """The user who created this project, if known."""

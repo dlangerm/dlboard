@@ -27,6 +27,7 @@ class Scope(StrEnum):
     RESTORE = "restore"
     PURGE = "purge"
     AUDIT_LOG_READ = "audit_log:read"
+    USER_MANAGE = "user:manage"
 
 
 def has_scope(user: User, scope: Scope) -> bool:

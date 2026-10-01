@@ -77,7 +77,7 @@ def test_update_project_persists_description_change(store: SQLLiteStore) -> None
 
     assert updated.id == project.id
     assert updated.description == "new"
-    assert store.get_project(project.id).description == "new"
+    assert store.get_project(project.id) == updated
 
 
 def test_update_experiment_persists_name_and_description_change(
@@ -121,7 +121,7 @@ def test_get_runs_excludes_deleted_and_other_experiments(store: SQLLiteStore, ex
     other_experiment = store.create_experiment(models.NewExperiment(project_id=project.id))
     store.create_run(models.NewRun(experiment_id=other_experiment.id))
 
-    actor = store.get_or_create_user("alice")
+    actor = store.get_or_create_user(models.Principal.unverified("alice"))
     kept = store.create_run(models.NewRun(experiment_id=experiment_id))
     deleted = store.create_run(models.NewRun(experiment_id=experiment_id))
     store.delete_run(deleted.id, actor)
@@ -210,7 +210,7 @@ def test_summarize_metric_keys_excludes_deleted_runs_and_other_experiments(
     _log_step(store, store.create_run(models.NewRun(experiment_id=other_experiment.id)), 0, other_metric=1.0)
     deleted_run = store.create_run(models.NewRun(experiment_id=experiment_id))
     _log_step(store, deleted_run, 0, deleted_run_metric=1.0)
-    store.delete_run(deleted_run.id, store.get_or_create_user("alice"))
+    store.delete_run(deleted_run.id, store.get_or_create_user(models.Principal.unverified("alice")))
 
     assert store.summarize_metric_keys(experiment_id) == []
 
@@ -286,16 +286,16 @@ def test_get_or_create_page_requires_exactly_one_id(
 
 
 def test_get_or_create_user_grants_bootstrap_scopes_to_the_first_user_only(store: SQLLiteStore) -> None:
-    first = store.get_or_create_user("alice")
-    second = store.get_or_create_user("bob")
+    first = store.get_or_create_user(models.Principal.unverified("alice"))
+    second = store.get_or_create_user(models.Principal.unverified("bob"))
 
     assert first.scopes == [models.Scope.ALL]
     assert second.scopes == []
 
 
 def test_get_or_create_user_is_idempotent(store: SQLLiteStore) -> None:
-    first = store.get_or_create_user("alice")
-    again = store.get_or_create_user("alice")
+    first = store.get_or_create_user(models.Principal.unverified("alice"))
+    again = store.get_or_create_user(models.Principal.unverified("alice"))
 
     assert again == first
     assert _count(store, models.User) == 1
@@ -311,7 +311,7 @@ def test_get_or_create_project_creates_on_first_call_and_reuses_after(store: SQL
 
 
 def test_get_or_create_project_stamps_created_by(store: SQLLiteStore) -> None:
-    actor = store.get_or_create_user("alice")
+    actor = store.get_or_create_user(models.Principal.unverified("alice"))
 
     project = store.get_or_create_project("p", created_by=actor.id)
 
@@ -351,13 +351,13 @@ def test_get_or_create_experiment_is_scoped_to_its_project(store: SQLLiteStore) 
 
 
 def test_update_user_persists_scope_changes(store: SQLLiteStore) -> None:
-    user = store.get_or_create_user("alice")
+    user = store.get_or_create_user(models.Principal.unverified("alice"))
     assert user.scopes == [models.Scope.ALL]  # first user ever, bootstrap admin
 
     updated = store.update_user(user.model_copy(update={"scopes": [models.Scope.PURGE]}))
 
     assert updated.scopes == [models.Scope.PURGE]
-    assert store.get_or_create_user("alice").scopes == [models.Scope.PURGE]
+    assert store.get_or_create_user(models.Principal.unverified("alice")).scopes == [models.Scope.PURGE]
 
 
 def test_get_or_create_page_is_idempotent_and_updatable(store: SQLLiteStore, experiment_id: int) -> None:

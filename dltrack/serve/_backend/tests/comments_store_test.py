@@ -17,7 +17,7 @@ def _notes_revision(store: SQLLiteStore, experiment_id: int) -> int:
 def test_a_thread_lists_notes_oldest_first_and_bumps_only_the_notes_revision(
     store: SQLLiteStore, experiment_id: int
 ) -> None:
-    me = store.get_or_create_user("me")
+    me = store.get_or_create_user(models.Principal.unverified("me"))
     revision_before = store.get_experiment(experiment_id).revision  # pyright: ignore[reportOptionalMemberAccess]
 
     first = store.add_comment(
@@ -37,7 +37,10 @@ def test_a_thread_lists_notes_oldest_first_and_bumps_only_the_notes_revision(
 
 
 def test_only_its_author_can_delete_a_note(store: SQLLiteStore, experiment_id: int) -> None:
-    me, them = store.get_or_create_user("me"), store.get_or_create_user("them")
+    me, them = (
+        store.get_or_create_user(models.Principal.unverified("me")),
+        store.get_or_create_user(models.Principal.unverified("them")),
+    )
     note = store.add_comment(models.NewComment(experiment_id=experiment_id, author_id=me.id, body="mine"))
 
     store.delete_comment(note.id, them.id)
@@ -50,6 +53,6 @@ def test_only_its_author_can_delete_a_note(store: SQLLiteStore, experiment_id: i
 
 def test_list_users_is_sorted_by_username(store: SQLLiteStore) -> None:
     for name in ("carol", "alice", "bob"):
-        store.get_or_create_user(name)
+        store.get_or_create_user(models.Principal.unverified(name))
 
     assert [u.username for u in store.list_users()] == ["alice", "bob", "carol"]

@@ -5,7 +5,7 @@ from __future__ import annotations
 import typing
 
 if typing.TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Collection, Iterable
 
     from flask import Response
     from pydantic import AnyUrl
@@ -22,12 +22,71 @@ class DataStore[**P](typing.Protocol):
         """Initialize a data store."""
         ...
 
-    def get_or_create_user(self, username: str) -> models.User:
-        """Get or create a user by username. Brand new users are granted no scopes."""
+    def get_or_create_user(self, principal: models.Principal) -> models.User:
+        """
+        The user for `principal`'s `(issuer, subject)`, creating it the first time it's seen.
+
+        Refreshes a known user's `email`/`groups` from `principal`. Brand new users are granted no
+        scopes -- except the very first `UNVERIFIED_ISSUER` user a store ever creates, which gets
+        `Scope.ALL` so a local single-user install has a working admin with zero configuration.
+        Raises `ValueError` if `principal.username` is already taken by a different identity.
+        """
+        ...
+
+    def get_user(self, user_id: int) -> models.User | None:
+        """A user by id."""
+        ...
+
+    def find_user(self, username: str) -> models.User | None:
+        """A user by their (unique) username."""
         ...
 
     def update_user(self, user: models.User) -> models.User:
-        """Update a user, e.g. to grant/revoke scopes. For admin-driven user management."""
+        """Update a user, e.g. to grant/revoke scopes or disable them. For admin-driven user management."""
+        ...
+
+    def list_project_grants(self, project_ids: Collection[int]) -> list[models.ProjectGrant]:
+        """Every grant on any of `project_ids`."""
+        ...
+
+    def grants_for(self, user: models.User) -> list[models.ProjectGrant]:
+        """Every grant naming `user` directly, or one of `user.groups`."""
+        ...
+
+    def set_project_grant(self, grant: models.NewProjectGrant) -> models.ProjectGrant:
+        """Grant a role on a project, replacing whatever role that same user/group already had there."""
+        ...
+
+    def delete_project_grant(self, project_id: int, grant_id: int) -> None:
+        """Remove one of `project_id`'s grants."""
+        ...
+
+    def create_api_token(self, token: models.NewApiToken) -> models.ApiToken:
+        """Store a freshly minted API token (its hash -- see `NewApiToken.secret_hash`)."""
+        ...
+
+    def get_api_token(self, token_id: str) -> models.ApiToken | None:
+        """An API token by its public `token_id`, revoked or not."""
+        ...
+
+    def list_api_tokens(self, user_id: int) -> list[models.ApiToken]:
+        """`user_id`'s API tokens, newest first, including revoked ones."""
+        ...
+
+    def revoke_api_token(self, api_token_id: int, user_id: int) -> None:
+        """Revoke one of `user_id`'s API tokens; anyone else's is left alone."""
+        ...
+
+    def touch_api_token(self, api_token_id: int) -> None:
+        """Record that an API token was just used."""
+        ...
+
+    def get_password_credential(self, user_id: int) -> models.PasswordCredential | None:
+        """`user_id`'s password hash, if they have one."""
+        ...
+
+    def set_password_credential(self, credential: models.PasswordCredential) -> None:
+        """Set (or replace) a user's password hash."""
         ...
 
     def create_project(self, project: models.NewProject) -> models.Project:
@@ -93,6 +152,10 @@ class DataStore[**P](typing.Protocol):
 
     def create_run(self, run: models.NewRun) -> models.Run:
         """Create a new run for an experiment."""
+        ...
+
+    def get_run(self, run_id: int) -> models.Run | None:
+        """A (non-deleted) run by id."""
         ...
 
     def get_runs(

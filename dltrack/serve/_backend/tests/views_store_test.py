@@ -24,7 +24,7 @@ def _view(store: SQLLiteStore, experiment_id: int, owner: models.User, name: str
 
 
 def test_views_never_stand_in_for_the_shared_page(store: SQLLiteStore, experiment_id: int) -> None:
-    owner = store.get_or_create_user("me")
+    owner = store.get_or_create_user(models.Principal.unverified("me"))
     view_id = _view(store, experiment_id, owner, "mine")
 
     shared = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
@@ -36,7 +36,10 @@ def test_views_never_stand_in_for_the_shared_page(store: SQLLiteStore, experimen
 
 
 def test_each_user_lists_and_deletes_only_their_own_views(store: SQLLiteStore, experiment_id: int) -> None:
-    me, them = store.get_or_create_user("me"), store.get_or_create_user("them")
+    me, them = (
+        store.get_or_create_user(models.Principal.unverified("me")),
+        store.get_or_create_user(models.Principal.unverified("them")),
+    )
     b = _view(store, experiment_id, me, "b")
     a = _view(store, experiment_id, me, "a")
     theirs = _view(store, experiment_id, them, "theirs")

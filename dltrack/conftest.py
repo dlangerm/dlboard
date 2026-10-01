@@ -247,7 +247,7 @@ def experiment_id(store: SQLStoreBase[Any]) -> int:
 @pytest.fixture
 def admin(store: SQLStoreBase[Any]) -> models.User:
     """The bootstrap admin -- the first user any fresh store creates gets `Scope.ALL`."""
-    return store.get_or_create_user("admin")
+    return store.get_or_create_user(models.Principal.unverified("admin"))
 
 
 class _FakeAuthProvider:

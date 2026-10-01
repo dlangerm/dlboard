@@ -178,7 +178,9 @@ def test_persist_settings_merges_into_page_settings_without_touching_panels(
     view = store.create_view(
         state.BasicExperimentPage,
         models.NewPage[Any, Any](
-            experiment_id=experiment_id, owner_id=store.get_or_create_user("alice").id, name="mine"
+            experiment_id=experiment_id,
+            owner_id=store.get_or_create_user(models.Principal.unverified("alice")).id,
+            name="mine",
         ),
     )
 
@@ -204,7 +206,7 @@ def test_persist_settings_branches_into_your_own_view_when_editing_the_shared_pa
     page = state.persist_settings(store, state.PageRef(experiment_id, None), {"selected": ["lr"]})
 
     assert page.page_settings["selected"] == ["lr"]
-    assert page.owner_id == store.get_or_create_user("alice").id
+    assert page.owner_id == store.get_or_create_user(models.Principal.unverified("alice")).id
     shared = store.get_or_create_page(state.BasicExperimentPage, experiment_id=experiment_id)
     assert shared.id != page.id
     assert shared.page_settings == {}
@@ -219,7 +221,7 @@ def test_persist_settings_branches_into_a_separate_view_when_editing_someone_els
         state.BasicExperimentPage,
         models.NewPage[Any, Any](
             experiment_id=experiment_id,
-            owner_id=store.get_or_create_user("alice").id,
+            owner_id=store.get_or_create_user(models.Principal.unverified("alice")).id,
             name="alice's view",
             panels=[PanelInstance[Any, Any](name="p")],
         ),
@@ -229,7 +231,7 @@ def test_persist_settings_branches_into_a_separate_view_when_editing_someone_els
     page = state.persist_settings(store, state.PageRef(experiment_id, alices_view.id), {"selected": ["lr"]})
 
     assert page.id != alices_view.id
-    assert page.owner_id == store.get_or_create_user("bob").id
+    assert page.owner_id == store.get_or_create_user(models.Principal.unverified("bob")).id
     assert page.panels == alices_view.panels  # seeded from what bob was looking at
     assert page.page_settings["selected"] == ["lr"]
     untouched = store.get_view(state.BasicExperimentPage, alices_view.id)

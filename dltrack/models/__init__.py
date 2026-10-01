@@ -1,5 +1,6 @@
 """All exported data models."""
 
+from dltrack.models._access import AmbiguousProjectError, NewProjectGrant, ProjectGrant, ProjectRole
 from dltrack.models._activity import ActivityStats, ProjectStats
 from dltrack.models._artifact import (
     AnyArtifact,
@@ -22,6 +23,7 @@ from dltrack.models._component_ids import (
     ValueId,
     store_state,
 )
+from dltrack.models._credentials import ApiToken, NewApiToken, PasswordCredential
 from dltrack.models._data_store import ArtifactStore, DataStore
 from dltrack.models._experiment import Experiment, ExperimentSource, NewExperiment
 from dltrack.models._hparams import FlatHparamDict, HyperParams, NewHyperParams, ValidJsonTypes
@@ -38,7 +40,7 @@ from dltrack.models._project import NewProject, Project
 from dltrack.models._run import NewRun, Run
 from dltrack.models._scopes import Scope, has_scope, require_scope
 from dltrack.models._theme import ColorScheme, SchemeColors, ThemeSpec
-from dltrack.models._user import NewUser, User
+from dltrack.models._user import UNVERIFIED_ISSUER, NewUser, Principal, User
 from dltrack.models._view import (
     ChartInstance,
     ChartType,
@@ -53,8 +55,11 @@ from dltrack.models._view import (
 )
 
 __all__ = [
+    "UNVERIFIED_ISSUER",
     "ActivityStats",
+    "AmbiguousProjectError",
     "AnyArtifact",
+    "ApiToken",
     "AppShell",
     "Artifact",
     "ArtifactPurgeTask",
@@ -84,6 +89,7 @@ __all__ = [
     "MetricKeySummary",
     "MetricRow",
     "ModalId",
+    "NewApiToken",
     "NewArtifact",
     "NewArtifactLink",
     "NewArtifactPurgeTask",
@@ -93,14 +99,19 @@ __all__ = [
     "NewHyperParams",
     "NewPage",
     "NewProject",
+    "NewProjectGrant",
     "NewRun",
     "NewUser",
     "Page",
     "PanelInstance",
     "ParameterField",
     "ParameterFieldType",
+    "PasswordCredential",
     "PluginProtocol",
+    "Principal",
     "Project",
+    "ProjectGrant",
+    "ProjectRole",
     "ProjectStats",
     "Run",
     "SchemeColors",
