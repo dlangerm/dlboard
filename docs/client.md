@@ -29,16 +29,32 @@ logged via PL's normal `self.log(...)` and hyperparameters via `save_hyperparame
 up automatically. See `train.py` at the repo root for a complete, runnable example (MNIST MLP).
 
 **Logging artifacts.** Call `logger.log_artifact([...])` with anything implementing `AnyArtifact`
-(`dltrack/models/_artifact.py`): a `key`, `tags`, a `step`, and a `to_artifact(local_temp, run_id,
-experiment_id)` method that writes the artifact to a local temp path and returns the `NewArtifact`
-metadata plus that path for upload. `dltrack.plugins.artifacts.image.Image` is the only built-in
-kind — wraps a `torch.Tensor`/`np.ndarray` (validated CHW `uint8` via `dltype`), used like:
+(`dltrack/models/_artifact.py`): a `key`, `tags`, a `step`, and a
+`to_artifact(local_temp, run_id, experiment_id) -> tuple[NewArtifact, Path | AnyUrl]` method.
+Returning a `Path` (written under `local_temp`) uploads that file; returning an `AnyUrl` instead
+registers it as a *link* — no bytes move, the server just checks the ref is one its
+`ArtifactStore` can actually serve (see [Storage](plugins/storage.md)) and records it. There are
+two built-in kinds:
 
-```python
-from dltrack.plugins.artifacts import image
+- `dltrack.plugins.artifacts.image.Image` — uploads. Wraps a `torch.Tensor`/`np.ndarray`
+  (validated CHW `uint8` via `dltype`), used like:
 
-logger.log_artifact([image.Image(key="sample", image=tensor, step=global_step)])
-```
+  ```python
+  from dltrack.plugins.artifacts import image
+
+  logger.log_artifact([image.Image(key="sample", image=tensor, step=global_step)])
+  ```
+
+- `dltrack.plugins.artifacts.link.Link` — links. For a blob a training job already wrote
+  somewhere dltrack's `ArtifactStore` can serve (e.g. the same S3 bucket), without shipping the
+  bytes through dltrack a second time:
+
+  ```python
+  from pydantic import AnyUrl
+  from dltrack.plugins.artifacts import link
+
+  logger.log_artifact([link.Link(key="checkpoint", ref=AnyUrl("s3://my-bucket/ckpt.pt"), step=global_step)])
+  ```
 
 **Adding a new artifact kind.** Note this is a *client-side* protocol, not a `PluginProtocol`
 plugin — there's no `plug()`, and it's never passed into `app()`. Implement `AnyArtifact`

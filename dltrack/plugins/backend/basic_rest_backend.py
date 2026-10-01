@@ -8,7 +8,7 @@ from typing import Any, Callable, Final, Iterable, Literal
 import dash
 import requests
 from flask import request
-from pydantic import BaseModel, ValidationError
+from pydantic import AnyUrl, BaseModel, ValidationError
 from structlog.stdlib import get_logger
 from werkzeug.datastructures import FileStorage
 
@@ -151,19 +151,39 @@ class BasicDltrackAPI:
         )
         res.raise_for_status()
 
-    def log_artifact_batch(self, artifacts: Iterable[models.NewArtifact], files: list[Path]) -> None:
+    def log_artifact_batch(self, artifacts: Iterable[tuple[models.NewArtifact, Path | AnyUrl]]) -> None:
         """
-        Log a batch of artifacts in one request.
+        Log a batch of artifacts in one request, split into an upload batch and a link batch.
+
+        Each artifact is paired with either a local file to upload (written by its own
+        `to_artifact`, e.g. `plugins.artifacts.image.Image`) or an already-stored ref to link
+        (`plugins.artifacts.link.Link`) -- see `AnyArtifact.to_artifact`.
+        """
+        uploads: list[tuple[models.NewArtifact, Path]] = []
+        links: list[tuple[models.NewArtifact, AnyUrl]] = []
+        for artifact, source in artifacts:
+            match source:
+                case Path():
+                    uploads.append((artifact, source))
+                case AnyUrl():
+                    links.append((artifact, source))
+        if uploads:
+            self._upload_artifacts(uploads)
+        if links:
+            self._link_artifacts(links)
+
+    def _upload_artifacts(self, uploads: list[tuple[models.NewArtifact, Path]]) -> None:
+        """
+        Upload a batch of artifacts in one request.
 
         Every artifact travels as two multipart parts named by its position in the batch -- its
         file (`0`) and its metadata (`0.json`) -- never by its key: many artifacts routinely share
         a key (one image per step), and the server matches metadata to file by part name.
         """
-        artifacts = list(artifacts)
         # `requests` never closes the file handles it's handed -- opened explicitly (not inline
         # in the `files=` generator below) so they can be closed in `finally` regardless of
         # whether the request succeeds, rather than leaking a descriptor per artifact.
-        opened = [f.open("rb") for f in files]
+        opened = [path.open("rb") for _, path in uploads]
         try:
             res = requests.post(
                 create_path(models.Artifact, self.base_url),
@@ -176,7 +196,7 @@ class BasicDltrackAPI:
                                 (a.fname, a.model_dump_json(), "application/json"),
                             ),
                         )
-                        for i, (a, fh) in enumerate(zip(artifacts, opened, strict=True))
+                        for i, ((a, _path), fh) in enumerate(zip(uploads, opened, strict=True))
                     )
                 ),
                 headers=self._headers,
@@ -185,6 +205,17 @@ class BasicDltrackAPI:
         finally:
             for fh in opened:
                 fh.close()
+
+    def _link_artifacts(self, links: list[tuple[models.NewArtifact, AnyUrl]]) -> None:
+        """Register a batch of already-stored artifacts by ref, with no bytes uploaded."""
+        body = [
+            models.NewArtifactLink.model_validate(a.model_dump() | {"ref": ref}).model_dump(mode="json")
+            for a, ref in links
+        ]
+        res = requests.post(
+            create_path(models.NewArtifactLink, self.base_url), json=body, headers=self._headers
+        )
+        res.raise_for_status()
 
 
 # -- Route handlers -------------------------------------------------------------------------------
@@ -239,8 +270,32 @@ def handle_log_artifacts(
     artifacts: Iterable[tuple[models.NewArtifact, FileStorage]],
     actor: models.User,
 ) -> None:
-    """Log a batch of artifacts, each attributed to `actor`."""
+    """Log a batch of uploaded artifacts, each attributed to `actor`."""
     store.log_artifacts((a.model_copy(update={"created_by": actor.id}), file) for a, file in artifacts)
+
+
+def handle_link_artifacts(
+    data_store: DataStore[...],
+    artifact_store: models.ArtifactStore[...],
+    links: Iterable[models.NewArtifactLink],
+    actor: models.User,
+) -> None:
+    """
+    Register a batch of already-stored artifacts, each attributed to `actor`.
+
+    Unlike an upload (recorded asynchronously once its blob is actually written -- see
+    `BlobArtifactStore.ingest_stored_artifacts`), a link moves no bytes, so it's recorded
+    synchronously here: `link_artifacts` raises `UnservableArtifactRefError` for the whole batch before
+    any of it reaches `data_store`, rather than a client having to wait and find out later.
+    """
+    pairs = [
+        (
+            models.NewArtifact.model_validate(link.model_dump(exclude={"ref"}) | {"created_by": actor.id}),
+            link.ref,
+        )
+        for link in links
+    ]
+    data_store.log_artifact_refs(artifact_store.link_artifacts(pairs))
 
 
 def handle_delete_project(store: DataStore[...], project_id: int, actor: models.User) -> None:
@@ -391,6 +446,19 @@ def log_artifact() -> dict[str, str]:
     return {}
 
 
+def link_artifact() -> dict[str, str]:
+    """Register a batch of already-stored artifacts by ref, with no bytes uploaded."""
+    try:
+        links = [models.NewArtifactLink.model_validate(item) for item in request.json]
+        handle_link_artifacts(
+            get_data_store(), get_artifact_store(), links, get_current_user(get_data_store())
+        )
+    except Exception:
+        _log.exception("failed to link new artifacts")
+        raise
+    return {}
+
+
 def delete_project(entity_id: int) -> dict[str, str]:
     """Soft-delete a project and cascade to its experiments, runs, and artifacts."""
     try:
@@ -488,6 +556,7 @@ _ROUTES: tuple[tuple[str, list[str], Callable[..., Any]], ...] = (
     (get_or_create_path(models.Project), ["POST"], get_or_create_project),
     (get_or_create_path(models.Experiment), ["POST"], get_or_create_experiment),
     (create_path(models.Artifact), ["POST"], log_artifact),
+    (create_path(models.NewArtifactLink), ["POST"], link_artifact),
     (entity_path(models.Project), ["DELETE"], delete_project),
     (f"{entity_path(models.Project)}/restore", ["POST"], restore_project),
     (entity_path(models.Experiment), ["DELETE"], delete_experiment),
@@ -514,6 +583,11 @@ def _handle_validation_error(err: ValidationError) -> tuple[dict[str, str], int]
     return {"error": str(err)}, 400
 
 
+def _handle_unservable_ref_error(err: models.UnservableArtifactRefError) -> tuple[dict[str, str], int]:
+    """Map a link to a ref this server's `ArtifactStore` won't serve to a 400, not a 500 -- same 4xx-vs-5xx reasoning as `_handle_validation_error`."""
+    return {"error": str(err)}, 400
+
+
 def plug(app: dash.Dash) -> None:
     """Register this module's REST routes and its error -> HTTP status mappings onto `app`."""
     for path, methods, view_func in _ROUTES:
@@ -525,3 +599,4 @@ def plug(app: dash.Dash) -> None:
         app.server.add_url_rule(full_path, endpoint=full_path, view_func=view_func, methods=methods)
     app.server.errorhandler(PermissionError)(_handle_permission_error)
     app.server.errorhandler(ValidationError)(_handle_validation_error)
+    app.server.errorhandler(models.UnservableArtifactRefError)(_handle_unservable_ref_error)

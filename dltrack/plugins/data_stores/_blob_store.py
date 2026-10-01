@@ -188,6 +188,17 @@ class BlobArtifactStore(models.ArtifactStore[BlobBackend, int]):
             raise
 
     @override
+    def link_artifacts(self, links: Iterable[tuple[NewArtifact, AnyUrl]]) -> list[Artifact]:
+        links = list(links)
+        unservable = [
+            ref for _, ref in links if self._backend.access(ref) is None or not self._backend.exists(ref)
+        ]
+        if unservable:
+            msg = f"refusing to link {len(unservable)} ref(s) this store can't serve: {unservable}"
+            raise models.UnservableArtifactRefError(msg)
+        return [models.Artifact.model_validate(a.model_dump() | {"ref": str(ref)}) for a, ref in links]
+
+    @override
     def download_artifact(self, ref: AnyUrl) -> Response:
         if self._backend.access(ref) is None:
             _log.warning("Refusing to serve a ref this backend doesn't recognize: %s", ref)

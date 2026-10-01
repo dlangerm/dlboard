@@ -185,7 +185,7 @@ def demo(live_server_url: str, dltrack_app: Dash, tmp_path_factory: pytest.TempP
             )
             for step in _IMAGE_STEPS
         ]
-        api.log_artifact_batch([artifact for artifact, _ in converted], [path for _, path in converted])
+        api.log_artifact_batch(converted)
 
     # Kept separate from `sweep` (which every other scene charts and forks personal views off of) so
     # the PERSONAL_VIEWS scene's own view picker only ever shows what it creates itself. Seeded after

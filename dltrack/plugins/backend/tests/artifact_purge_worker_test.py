@@ -33,6 +33,9 @@ class _RaisingArtifactStore:
     def log_artifacts(self, artifacts: Iterable[tuple[models.NewArtifact, FileStorage]]) -> None:
         raise NotImplementedError
 
+    def link_artifacts(self, links: Iterable[tuple[models.NewArtifact, AnyUrl]]) -> list[models.Artifact]:
+        raise NotImplementedError
+
     def download_artifact(self, ref: AnyUrl) -> Response:
         raise NotImplementedError
 

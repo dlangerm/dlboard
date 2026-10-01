@@ -146,3 +146,31 @@ def test_log_artifacts_rejects_a_duplicate_key_fname(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="duplicate"):
         store.log_artifacts([(new_artifact, FileStorage(io.BytesIO(b"x"), filename="a.png"))])
+
+
+def test_link_artifacts_accepts_a_ref_already_written_inside_the_stores_own_space(tmp_path: Path) -> None:
+    store = BlobArtifactStore.get_or_create(FSBlobs(tmp_path), 10)
+    (tmp_path / "a.png").write_bytes(b"data")
+    ref = AnyUrl("file:///a.png")
+    new_artifact = models.NewArtifact(key="img", fname="a.png", run_id=1, experiment_id=1, step=0)
+
+    (linked,) = store.link_artifacts([(new_artifact, ref)])
+
+    assert linked.ref == str(ref)
+
+
+def test_link_artifacts_rejects_a_ref_outside_the_stores_own_space(tmp_path: Path) -> None:
+    store = BlobArtifactStore.get_or_create(FSBlobs(tmp_path), 10)
+    new_artifact = models.NewArtifact(key="img", fname="passwd", run_id=1, experiment_id=1, step=0)
+
+    with pytest.raises(models.UnservableArtifactRefError):
+        store.link_artifacts([(new_artifact, AnyUrl("file:///etc/passwd"))])
+
+
+def test_link_artifacts_rejects_a_ref_nothing_is_actually_stored_at(tmp_path: Path) -> None:
+    """A ref inside the store's own space that no blob was ever written to still isn't linkable."""
+    store = BlobArtifactStore.get_or_create(FSBlobs(tmp_path), 10)
+    new_artifact = models.NewArtifact(key="img", fname="missing.png", run_id=1, experiment_id=1, step=0)
+
+    with pytest.raises(models.UnservableArtifactRefError):
+        store.link_artifacts([(new_artifact, AnyUrl("file:///missing.png"))])

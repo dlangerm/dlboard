@@ -74,14 +74,14 @@ def is_rejection(exc: Exception) -> bool:
 def _ship_artifacts(
     api: BasicDltrackAPI, experiment_id: int, run_id: int, batch: list[Sequence[AnyArtifact]]
 ) -> None:
-    """Encode `batch` into a scratch dir that's deleted once it's uploaded, then upload it."""
+    """Encode `batch` into a scratch dir that's deleted once it's shipped, then ship it."""
     with tempfile.TemporaryDirectory() as tmp:
         pairs = [
             artifact.to_artifact(Path(tmp), run_id=run_id, experiment_id=experiment_id)
             for artifacts in batch
             for artifact in artifacts
         ]
-        api.log_artifact_batch([new for new, _ in pairs], [path for _, path in pairs])
+        api.log_artifact_batch(pairs)
 
 
 @dataclass(frozen=True)

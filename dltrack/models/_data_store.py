@@ -310,6 +310,17 @@ class ArtifactStore[**P](typing.Protocol):
         """Log a set of artifacts, each paired with its own uploaded file."""
         ...
 
+    def link_artifacts(self, links: Iterable[tuple[models.NewArtifact, AnyUrl]]) -> list[models.Artifact]:
+        """
+        Register a set of artifacts already stored at their given ref, with no bytes moved.
+
+        Raises `UnservableArtifactRefError` for any ref this store won't serve (outside its own space
+        and not on an allowlist, or nothing actually stored there yet) -- checked for the whole
+        batch before any of it is registered, the
+        same all-or-nothing way `DataStore.log_artifact_refs` treats artifacts it must reject outright.
+        """
+        ...
+
     def download_artifact(self, ref: AnyUrl) -> Response:
         """Download an artifact given a url."""
         ...

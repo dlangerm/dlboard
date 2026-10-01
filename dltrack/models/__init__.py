@@ -1,7 +1,13 @@
 """All exported data models."""
 
 from dltrack.models._activity import ActivityStats, ProjectStats
-from dltrack.models._artifact import AnyArtifact, Artifact, NewArtifact
+from dltrack.models._artifact import (
+    AnyArtifact,
+    Artifact,
+    NewArtifact,
+    NewArtifactLink,
+    UnservableArtifactRefError,
+)
 from dltrack.models._artifact_purge_task import ArtifactPurgeTask, NewArtifactPurgeTask
 from dltrack.models._audit_log import AuditAction, AuditLogEntry, EntityType, NewAuditLogEntry
 from dltrack.models._auth import AuthProvider
@@ -79,6 +85,7 @@ __all__ = [
     "MetricRow",
     "ModalId",
     "NewArtifact",
+    "NewArtifactLink",
     "NewArtifactPurgeTask",
     "NewAuditLogEntry",
     "NewComment",
@@ -101,6 +108,7 @@ __all__ = [
     "StoreId",
     "ThemeSpec",
     "UnderlyingMetricTableEntry",
+    "UnservableArtifactRefError",
     "User",
     "ValidJsonTypes",
     "ValueId",
