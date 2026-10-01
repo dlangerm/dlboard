@@ -28,6 +28,16 @@ If you don't already have an experiment, omit `experiment_id` and one is created
 logged via PL's normal `self.log(...)` and hyperparameters via `save_hyperparameters()` are picked
 up automatically. See `train.py` at the repo root for a complete, runnable example (MNIST MLP).
 
+**Authenticating.** If the server signs people in (see [Auth](plugins/auth.md)), the script has to
+sign in too:
+
+- Create an API token on your Account page.
+- Set it as `DLTRACK_API_KEY` wherever the script runs, or pass `api_key=` to `BasicDltrackAPI`.
+
+Before it starts, the logger checks the key with the server's `/whoami` and fails right away if
+it's missing or wrong. Without that check, bad credentials would only show up later, as metrics
+that were never stored. `dltrack serve local` needs no key.
+
 **Logging artifacts.** Call `logger.log_artifact([...])` with anything implementing `AnyArtifact`
 (`dltrack/models/_artifact.py`): a `key`, `tags`, a `step`, and a
 `to_artifact(local_temp, run_id, experiment_id) -> tuple[NewArtifact, Path | AnyUrl]` method.

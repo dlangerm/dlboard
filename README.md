@@ -53,6 +53,11 @@ dltrack serve custom --plugins mypackage.deployment:PLUGINS --workers 4
 `mypackage/deployment.py` just needs a module-level `PLUGINS: list[PluginProtocol]` -- see
 [docs/plugins/overview.md](docs/plugins/overview.md).
 
+Hosting it for other people? Swap `anonymous` for `dltrack.plugins.PASSWORD_AUTH` in that list and
+everyone signs in. Each user sees only the projects they own or that someone shared with them, and
+their training scripts authenticate with API tokens. See [docs/plugins/auth.md](docs/plugins/auth.md)
+for setup.
+
 Working in this repo instead, everything runs through [`uv`](https://docs.astral.sh/uv/)
 (Python >=3.12, deps pinned in `uv.lock`):
 
@@ -81,7 +86,7 @@ way you'd use any other `pytorch_lightning` logger — see [docs/client.md](docs
   [overview](docs/plugins/overview.md), then the category you need:
   - [Storage](docs/plugins/storage.md) — where projects/runs/metrics and artifact blobs live
   - [Charts](docs/plugins/charts.md) — how a metric/artifact gets turned into a rendered chart
-  - [Auth](docs/plugins/auth.md) — who a request is attributed to, and gating access
+  - [Auth](docs/plugins/auth.md) — signing people in, API tokens, and who can see which projects
   - [Themes](docs/plugins/themes.md) — the Mantine theme the app renders with
 
 ## Contributing

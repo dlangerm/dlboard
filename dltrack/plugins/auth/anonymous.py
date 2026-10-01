@@ -44,6 +44,7 @@ class AnonymousAuthProvider:
     display_name: ClassVar[str] = "Anonymous"
     verifies_identity: ClassVar[bool] = False
     manage_url: ClassVar[str | None] = None
+    admin_url: ClassVar[str | None] = None
 
     def authenticate(self) -> Principal:
         """Resolve identity from the request header, falling back to the server's own environment."""

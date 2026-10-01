@@ -28,9 +28,9 @@ sqlite for a shared Postgres. Install the driver with the `postgres` extra
 `dltrack serve custom --plugins yourmodule:PLUGINS`:
 
 ```python
-from dltrack.plugins import BUILTIN_BACKEND, BUILTIN_CHARTS, POSTGRES_STORAGE, themes
+from dltrack.plugins import BUILTIN_BACKEND, BUILTIN_CHARTS, PASSWORD_AUTH, POSTGRES_STORAGE, themes
 
-PLUGINS = [*POSTGRES_STORAGE, my_auth_plugin, *BUILTIN_BACKEND, *BUILTIN_CHARTS, themes.default]
+PLUGINS = [*POSTGRES_STORAGE, *PASSWORD_AUTH, *BUILTIN_BACKEND, *BUILTIN_CHARTS, themes.default]
 ```
 
 Every setting is a `POSTGRES_*` environment variable. The full list, with docs, is
@@ -59,9 +59,9 @@ you're using (`dltrack.plugins.POSTGRES_S3_STORAGE` is `postgres` + `s3` + the a
 worker, ready-made), and run it with `dltrack serve custom --plugins yourmodule:PLUGINS`:
 
 ```python
-from dltrack.plugins import BUILTIN_BACKEND, BUILTIN_CHARTS, POSTGRES_S3_STORAGE, themes
+from dltrack.plugins import BUILTIN_BACKEND, BUILTIN_CHARTS, PASSWORD_AUTH, POSTGRES_S3_STORAGE, themes
 
-PLUGINS = [*POSTGRES_S3_STORAGE, my_auth_plugin, *BUILTIN_BACKEND, *BUILTIN_CHARTS, themes.default]
+PLUGINS = [*POSTGRES_S3_STORAGE, *PASSWORD_AUTH, *BUILTIN_BACKEND, *BUILTIN_CHARTS, themes.default]
 ```
 
 Every setting is an `S3_*` environment variable. The full list, with docs, is `S3Settings` in

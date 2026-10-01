@@ -58,8 +58,8 @@ def app(plugins: list[models.PluginProtocol]) -> Dash:
     # back into concrete chart classes, e.g. `_chart_autogen.py` imports `ImageChart` directly) at
     # `dltrack.serve` import time can race that still-in-progress import. Deferring to call time
     # sidesteps it, since `app()` only ever runs after process startup import resolution finishes.
+    from dltrack.serve._pages import _account_page, _simple_admin_page, _simple_homepage, _simple_project_page
     from dltrack.serve._pages import _experiment as _experiment_page
-    from dltrack.serve._pages import _simple_admin_page, _simple_homepage, _simple_project_page
 
     installed = [InstalledPlugin.describe(p) for p in plugins]
     _log.info("DLTrack creating dash app with plugins:")
@@ -72,13 +72,13 @@ def app(plugins: list[models.PluginProtocol]) -> Dash:
         suppress_callback_exceptions=True,
         plugins=plugins,
     )
-    # The tab+accordion page layouts (home, project, admin, experiment) are opinionated,
+    # The tab+accordion page layouts (home, project, admin, experiment, account) are opinionated,
     # non-optional dltrack behavior -- always wired into every app(), never part of a deployment's
     # own `plugins` list, and deliberately excluded from the `installed` snapshot above (which
     # should only reflect what a deployment actually chose to install). These page modules don't
     # implement `PluginProtocol`, so `register(app)` is called directly rather than threaded
     # through Dash's own `plugins=` constructor kwarg.
-    for page in (_simple_homepage, _simple_project_page, _experiment_page, _simple_admin_page):
+    for page in (_simple_homepage, _simple_project_page, _experiment_page, _simple_admin_page, _account_page):
         page.register(_app)
     # Also core, non-optional: every chart that shows an artifact fetches it from this one route,
     # by id -- never by talking to whatever `ArtifactStore` a deployment happens to have plugged in.
@@ -286,7 +286,7 @@ def breadcrumbs(_: str, project_id: int | None, experiment_id: int | None) -> li
 
 
 def _user_menu() -> Component:
-    """Who the app resolves the caller to be, how, and the account-level links (Admin, sign-out)."""
+    """Who the app resolves the caller to be, how, and the account-level links (Account, Admin, sign-out)."""
     user = find_current_user()
     if user is None:  # Dash's one-time layout validation, on whatever the first request happens to be
         return html.Div()
@@ -309,6 +309,7 @@ def _user_menu() -> Component:
                     dmc.Text(user.username, size="sm", fw=600, px="sm"),
                     dmc.Text(f"via {provider.display_name}", size="xs", c="dimmed", px="sm", pb=6),
                     dmc.MenuDivider(),
+                    dmc.MenuItem("Account", href="/account", refresh=True, leftSection=icon(Icon.KEY)),
                     *(
                         [dmc.MenuItem("Sign-in settings", href=provider.manage_url, refresh=True)]
                         if provider.manage_url is not None

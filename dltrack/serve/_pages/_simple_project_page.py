@@ -23,6 +23,7 @@ from dltrack.serve._pages._description_editor import (
     render_header,
 )
 from dltrack.serve._pages._onboarding import first_experiment_snippet, onboarding_card
+from dltrack.serve._pages._project_members import register_members_callbacks, render_members_section
 
 if TYPE_CHECKING:
     from dash.development.base_component import Component
@@ -142,6 +143,7 @@ def render_project_page(project_id: int) -> dmc.Container:
                 mb="lg",
             ),
             dmc.Box(_experiment_grid(store, project_id), id=EXP_LIST_ID),
+            render_members_section(project),
         ],
         size="lg",
         py="xl",
@@ -201,3 +203,4 @@ def register(app: Dash) -> None:
         State(constants.STATE_PROJECT_ID, "data"),
         on_confirm=_delete_project,
     )
+    register_members_callbacks(app)

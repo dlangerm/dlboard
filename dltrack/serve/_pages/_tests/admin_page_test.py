@@ -165,7 +165,7 @@ def test_render_about_lists_installed_plugins(store: SQLLiteStore) -> None:
 
 
 def test_admin_layout_contains_tabs_and_purge_modal() -> None:
-    layout = admin._admin_layout()
+    layout = admin._admin_layout("trash")
 
     assert find_props(layout, admin.ADMIN_TABS_ID) is not None
     assert find_props(layout, admin.ADMIN_TRASH_CONTENT_ID) is not None
