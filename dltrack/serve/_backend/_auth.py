@@ -88,6 +88,9 @@ class AuthSettings(BaseSettings):
     admin_groups: Annotated[list[str], NoDecode] = []
     """Comma-separated IdP groups whose members are granted `Scope.ALL` whenever they sign in."""
 
+    new_project_access: models.ProjectRole | None = None
+    """The `Project.everyone_role` a newly created project starts with. Unset keeps new projects private."""
+
     @field_validator("admin_users", "admin_groups", mode="before")
     @classmethod
     def _split_commas(cls, value: Any) -> Any:  # noqa: ANN401 -- a `mode="before"` validator sees the raw input

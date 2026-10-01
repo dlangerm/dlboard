@@ -16,9 +16,11 @@ from dltrack.serve._backend._auth import (
     sign_in,
     start_session,
 )
+from dltrack.serve._backend._authorization import AuthorizingDataStore
 from dltrack.serve._backend._data_store import (
     get_artifact_store,
     get_data_store,
+    get_project_role,
     get_system_artifact_store,
     get_system_data_store,
     set_artifact_store,
@@ -40,6 +42,7 @@ __all__ = [
     "AppSlot",
     "AssetKind",
     "AuthSettings",
+    "AuthorizingDataStore",
     "ClientsideScript",
     "Icon",
     "SQLStoreBase",
@@ -52,6 +55,7 @@ __all__ = [
     "get_current_user",
     "get_data_store",
     "get_installed_plugins",
+    "get_project_role",
     "get_system_artifact_store",
     "get_system_data_store",
     "get_theme",

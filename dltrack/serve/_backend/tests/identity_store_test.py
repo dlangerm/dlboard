@@ -91,6 +91,7 @@ def test_a_project_remembers_its_everyone_role(store: SQLLiteStore) -> None:
 
     stored = store.get_project(project.id)
 
+    assert stored is not None
     assert stored.everyone_role == models.ProjectRole.VIEWER
     assert models.ProjectRole.OWNER.includes(models.ProjectRole.EDITOR)
     assert not models.ProjectRole.VIEWER.includes(models.ProjectRole.EDITOR)

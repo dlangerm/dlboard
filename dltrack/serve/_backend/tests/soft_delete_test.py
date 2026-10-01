@@ -10,7 +10,6 @@ import pytest
 
 from dltrack import models
 from dltrack.conftest import EVERY_STORE_BACKEND, StoreBackend, create_entity_chain
-from dltrack.serve._backend._scope_enforcement import ScopeEnforcingDataStore
 
 if TYPE_CHECKING:
     from dltrack.plugins.data_stores.sqlite import SQLLiteStore
@@ -117,69 +116,6 @@ def test_delete_artifact_has_no_cascade(store: SQLLiteStore, admin: models.User)
     assert list(store.fetch_artifacts(experiment_id=experiment_id)) == []
     # the run it belonged to is untouched
     assert store._fetch_deleted_at(models.Run, run_id) is None
-
-
-def test_purge_requires_scope(store: SQLLiteStore, admin: models.User) -> None:
-    """Scope enforcement lives in `ScopeEnforcingDataStore` (see `_scope_enforcement.py`), not in
-    `SQLStoreBase` -- so this goes through the wrapper, exactly like every store does once it's
-    registered with a running app via `set_data_store`."""
-    project = store.create_project(models.NewProject(name="p", description="d"))
-    store.delete_project(project.id, admin)
-    no_scopes_user = store.get_or_create_user(models.Principal.unverified("nobody"))
-    wrapped = ScopeEnforcingDataStore(store)
-
-    with pytest.raises(PermissionError, match="lacks"):
-        wrapped.purge_project(project.id, no_scopes_user)
-
-
-@pytest.mark.parametrize(
-    ("method", "scope"),
-    [
-        ("delete_project", models.Scope.PROJECT_DELETE),
-        ("delete_experiment", models.Scope.EXPERIMENT_DELETE),
-        ("delete_run", models.Scope.RUN_DELETE),
-        ("delete_artifact", models.Scope.ARTIFACT_DELETE),
-    ],
-)
-def test_delete_requires_the_matching_scope(
-    store: SQLLiteStore, admin: models.User, method: str, scope: models.Scope
-) -> None:
-    """Goes through `ScopeEnforcingDataStore` -- see `test_purge_requires_scope`."""
-    project_id, experiment_id, run_id, artifact_id = create_entity_chain(store, artifact=True)
-    entity_id = {
-        "delete_project": project_id,
-        "delete_experiment": experiment_id,
-        "delete_run": run_id,
-        "delete_artifact": artifact_id,
-    }[method]
-    no_scopes_user = store.get_or_create_user(models.Principal.unverified("nobody"))
-    wrapped = ScopeEnforcingDataStore(store)
-
-    with pytest.raises(PermissionError, match="lacks"):
-        getattr(wrapped, method)(entity_id, no_scopes_user)
-
-    scoped_user = store.get_or_create_user(models.Principal.unverified("scoped"))
-    store.update_user(scoped_user.model_copy(update={"scopes": [scope]}))
-    getattr(wrapped, method)(
-        entity_id, store.get_or_create_user(models.Principal.unverified("scoped"))
-    )  # does not raise
-
-
-def test_restore_requires_the_restore_scope(store: SQLLiteStore, admin: models.User) -> None:
-    """Goes through `ScopeEnforcingDataStore` -- see `test_purge_requires_scope`."""
-    project = store.create_project(models.NewProject(name="p", description="d"))
-    store.delete_project(project.id, admin)
-    no_scopes_user = store.get_or_create_user(models.Principal.unverified("nobody"))
-    wrapped = ScopeEnforcingDataStore(store)
-
-    with pytest.raises(PermissionError, match="lacks"):
-        wrapped.restore_project(project.id, no_scopes_user)
-
-    scoped_user = store.get_or_create_user(models.Principal.unverified("scoped"))
-    store.update_user(scoped_user.model_copy(update={"scopes": [models.Scope.RESTORE]}))
-    wrapped.restore_project(
-        project.id, store.get_or_create_user(models.Principal.unverified("scoped"))
-    )  # does not raise
 
 
 def test_purge_requires_prior_soft_delete(store: SQLLiteStore, admin: models.User) -> None:

@@ -1,5 +1,5 @@
 # pyright: reportPrivateUsage=false
-"""Tests for `AppSlot` (per-app plugin state) and the data store's scope-enforcing wrap."""
+"""Tests for `AppSlot` (per-app plugin state) and the per-request data store accessor."""
 
 from __future__ import annotations
 
@@ -9,7 +9,6 @@ import pytest
 
 from dltrack.serve._backend import _app_slot, _data_store
 from dltrack.serve._backend._app_slot import AppSlot
-from dltrack.serve._backend._scope_enforcement import ScopeEnforcingDataStore
 
 
 class _FakeApp:
@@ -53,13 +52,7 @@ def test_wait_blocks_until_set_on_that_specific_app() -> None:
     assert result == ["mine"]
 
 
-def test_set_data_store_wraps_whatever_it_is_given_in_the_scope_enforcer() -> None:
-    """Never hand back a bare `DataStore` -- that's the exact bypass `ScopeEnforcingDataStore` closes."""
-    app = _FakeApp()
-    inner = object()
-    _data_store.set_data_store(app, inner)  # pyright: ignore[reportArgumentType]
-
-    stored = _data_store.get_data_store(app)  # pyright: ignore[reportArgumentType]
-
-    assert isinstance(stored, ScopeEnforcingDataStore)
-    assert stored._inner is inner
+def test_get_data_store_refuses_outside_a_request() -> None:
+    """Outside a request there's nobody to authorize as -- background work must say so explicitly."""
+    with pytest.raises(RuntimeError, match="get_system_data_store"):
+        _data_store.get_data_store()

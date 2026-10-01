@@ -27,7 +27,7 @@ from dltrack.serve._pages._onboarding import first_experiment_snippet, onboardin
 if TYPE_CHECKING:
     from dash.development.base_component import Component
 
-    from dltrack.models import DataStore, Experiment
+    from dltrack.models import DataStore, Experiment, Project
 
 
 class _ProjectPage:
@@ -92,10 +92,22 @@ def _experiment_grid(store: DataStore[...], project_id: int) -> Component:
     )
 
 
+def _visible_project(project_id: int) -> Project:
+    project = get_data_store().get_project(project_id)
+    if project is None:
+        msg = f"Project {project_id} doesn't exist, or you don't have access to it"
+        raise LookupError(msg)
+    return project
+
+
 def render_project_page(project_id: int) -> dmc.Container:
     """The whole project page, rendered in the page's own `layout()` -- no callback round trip."""
     store = get_data_store()
     project = store.get_project(project_id)
+    if project is None:
+        return dmc.Container(
+            dmc.Text("This project doesn't exist, or you don't have access to it.", c="dimmed"), py="xl"
+        )
     return dmc.Container(
         [
             dmc.Group(
@@ -161,14 +173,12 @@ def register(app: Dash) -> None:
         return _experiment_grid(store, int(project_id)), "", None
 
     def _fetch_project_header(project_id: int) -> tuple[str, str]:
-        store = get_data_store()
-        project = store.get_project(project_id)
+        project = _visible_project(project_id)
         return project.name, project.description
 
     def _save_project_description(project_id: int, description: str) -> tuple[str, str]:
-        store = get_data_store()
-        project = store.get_project(project_id)
-        updated = store.update_project(project.model_copy(update={"description": description}))
+        project = _visible_project(project_id)
+        updated = get_data_store().update_project(project.model_copy(update={"description": description}))
         return updated.name, updated.description
 
     register_edit_callbacks(
