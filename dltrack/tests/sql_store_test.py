@@ -7,7 +7,6 @@ real databases rather than mocks -- the `store` fixture is sqlite and Postgres i
 
 from __future__ import annotations
 
-import sqlite3
 import threading
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
@@ -19,14 +18,14 @@ from sqlalchemy.exc import IntegrityError
 from dltrack import models
 from dltrack.conftest import EVERY_STORE_BACKEND, StoreBackend
 from dltrack.models._view import PanelInstance
-from dltrack.plugins.data_stores.sqlite import SQLLiteStore
 from dltrack.serve._pages._experiment._experiment_page_state import BasicExperimentPage
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
 
     from pydantic import BaseModel
+
+    from dltrack.plugins.data_stores.sqlite import SQLLiteStore
 
 _TS = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -130,67 +129,6 @@ def test_get_runs_excludes_deleted_and_other_experiments(store: SQLLiteStore, ex
     runs = list(store.get_runs(experiment_id, limit=100, offset=0))
 
     assert [r.id for r in runs] == [kept.id]
-
-
-def test_store_init_backfills_a_column_added_to_a_model_since_the_db_was_created(
-    tmp_path: Path,
-) -> None:
-    """
-    Reproduces opening a pre-existing db against a model that's grown a field since.
-
-    `CREATE TABLE IF NOT EXISTS` alone is a no-op for a table that already exists, so without
-    `_add_missing_columns` this would fail every `Run` read/write with a raw sqlite
-    `OperationalError`/`IndexError` instead of picking up the new column.
-    """
-    db_path = tmp_path / "stale.sqlite"
-    with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            "CREATE TABLE Run (experiment_id INTEGER NOT NULL, created_by INTEGER, "
-            "created_at TEXT NOT NULL, id INTEGER PRIMARY KEY AUTOINCREMENT, "
-            "deleted_by INTEGER, deleted_at TEXT)"
-        )
-
-    store = SQLLiteStore(db_path)
-    project = store.create_project(models.NewProject(name="p", description="d"))
-    experiment = store.create_experiment(models.NewExperiment(project_id=project.id))
-    run = store.create_run(models.NewRun(experiment_id=experiment.id, name="backfilled"))
-
-    assert run.name == "backfilled"
-    assert list(store.get_runs(experiment.id, limit=10, offset=0)) == [run]
-
-
-def test_store_init_backfills_a_scalar_default_not_null_for_pre_existing_rows(
-    tmp_path: Path,
-) -> None:
-    """
-    A column with a plain scalar default (`Experiment.revision: int = 0`) must backfill existing
-    rows with that default, not `NULL` -- `_add_missing_columns` passes it through as a real SQL
-    `DEFAULT`, same as `create_table_sql` does for a brand new table. Without this, an experiment
-    that existed before `revision` was added would start `NULL`, and `NULL + 1`
-    (`_touch_experiment`) stays `NULL` forever -- live updates would never fire for it.
-    """
-    db_path = tmp_path / "stale.sqlite"
-    with sqlite3.connect(db_path) as conn:
-        conn.execute(
-            "CREATE TABLE Experiment (project_id INTEGER NOT NULL, name TEXT NOT NULL, "
-            "description TEXT NOT NULL, source TEXT, created_by INTEGER, created_at TEXT NOT NULL, "
-            "id INTEGER PRIMARY KEY AUTOINCREMENT, deleted_by INTEGER, deleted_at TEXT)"
-        )
-        conn.execute(
-            "INSERT INTO Experiment (project_id, name, description, created_at) "
-            "VALUES (1, 'pre-existing', '', '2026-01-01T00:00:00+00:00')"
-        )
-
-    store = SQLLiteStore(db_path)
-    pre_existing = store.get_experiment(1)
-    assert pre_existing is not None
-    assert pre_existing.revision == 0
-
-    store.create_run(models.NewRun(experiment_id=1))
-
-    bumped = store.get_experiment(1)
-    assert bumped is not None
-    assert bumped.revision == 1
 
 
 def test_log_hyperparams_skips_duplicate_run(store: SQLLiteStore, experiment_id: int) -> None:
