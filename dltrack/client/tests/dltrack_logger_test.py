@@ -20,12 +20,16 @@ from dltrack.client.dltrack_logger import (
     is_rejection,
     warn_if_startup_was_slow,
 )
+from dltrack.plugins.backend.basic_rest_backend import Identity
 
 
 class _FakeAPI:
     def __init__(self, base_url: str) -> None:
         self.base_url = base_url
         self.calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
+
+    def whoami(self) -> Identity:
+        return Identity(id=1, username="me")
 
     def get_or_create_project(self, name: str, description: str = "") -> models.Project:
         self.calls.append(("get_or_create_project", (name,), {"description": description}))

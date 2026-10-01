@@ -1,6 +1,7 @@
 """Routes for doing general api things."""
 
 import itertools
+from http import HTTPStatus
 from pathlib import Path
 from time import perf_counter
 from typing import Any, Callable, Final, Iterable, Literal
@@ -8,7 +9,8 @@ from typing import Any, Callable, Final, Iterable, Literal
 import dash
 import requests
 from flask import request
-from pydantic import AnyUrl, BaseModel, ValidationError
+from pydantic import AnyUrl, BaseModel, SecretStr, ValidationError
+from pydantic_settings import BaseSettings
 from structlog.stdlib import get_logger
 from werkzeug.datastructures import FileStorage
 
@@ -46,6 +48,27 @@ def entity_path(model: type[BaseModel], entity_id: str = "<int:entity_id>", base
 def get_or_create_path(model: type[BaseModel], base_url: str = "/") -> str:
     """Make a consistent API path for the get-or-create-by-name idiom, e.g. `project/get-or-create`."""
     return f"{base_url}/{model.__name__.lower()}/get-or-create".strip("/")
+
+
+WHOAMI_PATH: Final = "whoami"
+
+
+class ClientAuthSettings(BaseSettings):
+    """The client's credentials, from env vars."""
+
+    dltrack_api_key: SecretStr | None = None
+    """An API token (`dlt_...`) from the server's Account page. Not needed by a server that doesn't verify identity."""
+
+
+class AuthenticationFailedError(RuntimeError):
+    """The server didn't accept this client's credentials (or it sent none, and the server needs some)."""
+
+
+class Identity(BaseModel, frozen=True, extra="forbid"):
+    """Who the server authenticated a request as -- what `whoami` returns."""
+
+    id: int
+    username: str
 
 
 class GetOrCreateProject(BaseModel, frozen=True, extra="forbid"):
@@ -99,12 +122,29 @@ def _get_or_create_request[R: BaseModel](
 class BasicDltrackAPI:
     """API class."""
 
-    def __init__(self, base_url: str = DEFAULT_SERVER_URL) -> None:
-        """Initialize the API class."""
+    def __init__(self, base_url: str = DEFAULT_SERVER_URL, api_key: SecretStr | None = None) -> None:
+        """Initialize the API class, authenticating with `api_key` (default: the `DLTRACK_API_KEY` env var)."""
         self.base_url = base_url
+        api_key = api_key or ClientAuthSettings().dltrack_api_key
         # Resolved once per process (not per call): who's actually running this is not going to
         # change mid-run, and every request this client makes should be attributed consistently.
+        # The username header only matters to a server that doesn't verify identity; one that does
+        # goes by the API key alone.
         self._headers = {DLTRACK_USER_HEADER: resolve_username()}
+        if api_key is not None:
+            self._headers["Authorization"] = f"Bearer {api_key.get_secret_value()}"
+
+    def whoami(self) -> Identity:
+        """Who the server authenticates this client as. Raises `AuthenticationFailedError` if nobody."""
+        res = requests.get(f"{self.base_url}/{WHOAMI_PATH}", headers=self._headers)
+        if res.status_code == HTTPStatus.UNAUTHORIZED:
+            msg = (
+                f"The dltrack server at {self.base_url} rejected this client's credentials. Create an API "
+                "token from your Account page and set it as DLTRACK_API_KEY (or pass `api_key`)."
+            )
+            raise AuthenticationFailedError(msg)
+        res.raise_for_status()
+        return Identity.model_validate(res.json())
 
     def create_project(self, new_project: models.NewProject) -> models.Project:
         """Create a new project."""
@@ -349,6 +389,12 @@ def handle_restore_artifact(store: DataStore[...], artifact_id: int, actor: mode
 # actually used.
 
 
+def whoami() -> dict[str, Any]:
+    """Who this request was authenticated as -- lets a client fail fast on bad credentials."""
+    user = get_current_user()
+    return Identity(id=user.id, username=user.username).model_dump(mode="json")
+
+
 def log_batch() -> dict[str, str]:
     """Log a batch of metrics."""
     try:
@@ -376,7 +422,7 @@ def create_experiment() -> dict[str, Any]:
     """Create a new experiment for a project."""
     try:
         store = get_data_store()
-        return handle_create_experiment(store, request.json, get_current_user(store))
+        return handle_create_experiment(store, request.json, get_current_user())
     except Exception:
         _log.exception("Error creating")
         raise
@@ -387,7 +433,7 @@ def create_run() -> dict[str, Any]:
     try:
         _log.info("create new run")
         store = get_data_store()
-        return handle_create_run(store, request.json, get_current_user(store))
+        return handle_create_run(store, request.json, get_current_user())
     except Exception:
         _log.exception("Error creating")
         raise
@@ -397,7 +443,7 @@ def create_project() -> dict[str, Any]:
     """Create a new project."""
     try:
         store = get_data_store()
-        return handle_create_project(store, request.json, get_current_user(store))
+        return handle_create_project(store, request.json, get_current_user())
     except Exception:
         _log.exception("Error creating project")
         raise
@@ -407,7 +453,7 @@ def get_or_create_project() -> dict[str, Any]:
     """Get or create a project by name."""
     try:
         store = get_data_store()
-        return handle_get_or_create_project(store, request.json, get_current_user(store))
+        return handle_get_or_create_project(store, request.json, get_current_user())
     except Exception:
         _log.exception("Error getting or creating project")
         raise
@@ -417,7 +463,7 @@ def get_or_create_experiment() -> dict[str, Any]:
     """Get or create an experiment by name within a project."""
     try:
         store = get_data_store()
-        return handle_get_or_create_experiment(store, request.json, get_current_user(store))
+        return handle_get_or_create_experiment(store, request.json, get_current_user())
     except Exception:
         _log.exception("Error getting or creating experiment")
         raise
@@ -437,7 +483,7 @@ def log_artifact() -> dict[str, str]:
             if part.content_type == "application/json"
         )
         try:
-            handle_log_artifacts(get_artifact_store(), pairs, get_current_user(get_data_store()))
+            handle_log_artifacts(get_artifact_store(), pairs, get_current_user())
         finally:
             _log.debug("logging artifacts took %.3f seconds", perf_counter() - t0)
     except Exception:
@@ -450,9 +496,7 @@ def link_artifact() -> dict[str, str]:
     """Register a batch of already-stored artifacts by ref, with no bytes uploaded."""
     try:
         links = [models.NewArtifactLink.model_validate(item) for item in request.json]
-        handle_link_artifacts(
-            get_data_store(), get_artifact_store(), links, get_current_user(get_data_store())
-        )
+        handle_link_artifacts(get_data_store(), get_artifact_store(), links, get_current_user())
     except Exception:
         _log.exception("failed to link new artifacts")
         raise
@@ -463,7 +507,7 @@ def delete_project(entity_id: int) -> dict[str, str]:
     """Soft-delete a project and cascade to its experiments, runs, and artifacts."""
     try:
         store = get_data_store()
-        handle_delete_project(store, entity_id, get_current_user(store))
+        handle_delete_project(store, entity_id, get_current_user())
     except Exception:
         _log.exception("Error deleting project %s", entity_id)
         raise
@@ -474,7 +518,7 @@ def restore_project(entity_id: int) -> dict[str, str]:
     """Restore a soft-deleted project and everything deleted with it."""
     try:
         store = get_data_store()
-        handle_restore_project(store, entity_id, get_current_user(store))
+        handle_restore_project(store, entity_id, get_current_user())
     except Exception:
         _log.exception("Error restoring project %s", entity_id)
         raise
@@ -485,7 +529,7 @@ def delete_experiment(entity_id: int) -> dict[str, str]:
     """Soft-delete an experiment and cascade to its runs and artifacts."""
     try:
         store = get_data_store()
-        handle_delete_experiment(store, entity_id, get_current_user(store))
+        handle_delete_experiment(store, entity_id, get_current_user())
     except Exception:
         _log.exception("Error deleting experiment %s", entity_id)
         raise
@@ -496,7 +540,7 @@ def restore_experiment(entity_id: int) -> dict[str, str]:
     """Restore a soft-deleted experiment and everything deleted with it."""
     try:
         store = get_data_store()
-        handle_restore_experiment(store, entity_id, get_current_user(store))
+        handle_restore_experiment(store, entity_id, get_current_user())
     except Exception:
         _log.exception("Error restoring experiment %s", entity_id)
         raise
@@ -507,7 +551,7 @@ def delete_run(entity_id: int) -> dict[str, str]:
     """Soft-delete a run and cascade to its artifacts."""
     try:
         store = get_data_store()
-        handle_delete_run(store, entity_id, get_current_user(store))
+        handle_delete_run(store, entity_id, get_current_user())
     except Exception:
         _log.exception("Error deleting run %s", entity_id)
         raise
@@ -518,7 +562,7 @@ def restore_run(entity_id: int) -> dict[str, str]:
     """Restore a soft-deleted run and everything deleted with it."""
     try:
         store = get_data_store()
-        handle_restore_run(store, entity_id, get_current_user(store))
+        handle_restore_run(store, entity_id, get_current_user())
     except Exception:
         _log.exception("Error restoring run %s", entity_id)
         raise
@@ -529,7 +573,7 @@ def delete_artifact(entity_id: int) -> dict[str, str]:
     """Soft-delete a single artifact."""
     try:
         store = get_data_store()
-        handle_delete_artifact(store, entity_id, get_current_user(store))
+        handle_delete_artifact(store, entity_id, get_current_user())
     except Exception:
         _log.exception("Error deleting artifact %s", entity_id)
         raise
@@ -540,7 +584,7 @@ def restore_artifact(entity_id: int) -> dict[str, str]:
     """Restore a soft-deleted artifact."""
     try:
         store = get_data_store()
-        handle_restore_artifact(store, entity_id, get_current_user(store))
+        handle_restore_artifact(store, entity_id, get_current_user())
     except Exception:
         _log.exception("Error restoring artifact %s", entity_id)
         raise
@@ -548,6 +592,7 @@ def restore_artifact(entity_id: int) -> dict[str, str]:
 
 
 _ROUTES: tuple[tuple[str, list[str], Callable[..., Any]], ...] = (
+    (WHOAMI_PATH, ["GET"], whoami),
     (create_path(models.LoggedMetrics), ["POST"], log_batch),
     (create_path(models.HyperParams), ["POST"], log_hyperparams),
     (create_path(models.Experiment), ["POST"], create_experiment),

@@ -110,7 +110,7 @@ def _options(
     a link someone else sent you) is appended too, if it isn't already one of your own -- otherwise
     the picker would have nothing to show for the view you're actually on.
     """
-    views = store.list_views(experiment_id, get_current_user(store).id)
+    views = store.list_views(experiment_id, get_current_user().id)
     options = [
         {"value": SHARED_VIEW, "label": "Shared view"},
         *({"value": str(v.id), "label": v.name} for v in views),
@@ -297,7 +297,7 @@ def _create_view(
         core.BasicExperimentPage,
         models.NewPage[Any, Any](
             experiment_id=experiment_id,
-            owner_id=get_current_user(store).id,
+            owner_id=get_current_user().id,
             name=view.name,
             panels=view.panels,
             page_settings=view.page_settings,
@@ -391,7 +391,7 @@ def _register_rename(app: Dash) -> None:
         # Defensive, not just decorative -- `view_controls` only *shows* this to a view's owner,
         # but the callback itself is reachable regardless, so it checks again before writing.
         view = store.get_view(core.BasicExperimentPage, view_id)
-        if view is None or view.owner_id != get_current_user(store).id:
+        if view is None or view.owner_id != get_current_user().id:
             raise PreventUpdate
         store.update_page(view.model_copy(update={"name": name.strip()}))
         return _options(store, experiment_id), False, None
@@ -503,7 +503,7 @@ def _register_delete(app: Dash) -> None:
     def _delete_view(view_id: int) -> str:
         store = get_data_store()
         view = store.get_view(core.BasicExperimentPage, view_id)
-        store.delete_view(view_id, get_current_user(store).id)
+        store.delete_view(view_id, get_current_user().id)
         return f"/experiment/{view.experiment_id}" if view is not None else "/"
 
     register_delete_callbacks(

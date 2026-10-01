@@ -79,6 +79,7 @@ class Icon(StrEnum):
     SAVE = "device-floppy"
     SEARCH = "search"
     SIDEBAR = "layout-sidebar"
+    SIGN_OUT = "logout"
     SUGGEST = "sparkles"
 
     @property

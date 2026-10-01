@@ -210,6 +210,8 @@ ignore_names = [
   # registry looks this up via `getattr(module, "layout")` at routing time, not a call in our
   # own code.
   "layout",
+  # `flask.session.permanent` (`_auth.start_session`) -- a flag Flask itself reads when it saves the session.
+  "permanent",
   # pytest's module-level marker convention (`pytestmark = pytest.mark.browser`) -- applied by
   # pytest itself scanning the module namespace, never referenced by name in our own code.
   "pytestmark",
@@ -223,6 +225,7 @@ ignore_names = [
   # so a genuinely dead field of some other name still gets caught.
   "created_at",
   "requested_at",
+  "updated_at",
   "bootstrap_admin_assigned",
   # `ViewFile.dltrack_view` (`serve/_pages/_experiment/_views.py`): an exported view's format
   # version, only ever checked by its own `Literal[1]` validation on import.

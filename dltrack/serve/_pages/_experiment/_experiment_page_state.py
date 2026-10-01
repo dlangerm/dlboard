@@ -1298,7 +1298,7 @@ def save_page(store: DataStore[...], mutated: BasicExperimentPage) -> BasicExper
     view that isn't yours, branch into a view of your own the moment you make it -- no separate
     "save as a view" step first, and nobody else's page is ever changed by an edit that isn't theirs.
     """
-    user_id = get_current_user(store).id
+    user_id = get_current_user().id
     if mutated.owner_id == user_id:
         return cast("BasicExperimentPage", store.update_page(mutated))
     return cast(

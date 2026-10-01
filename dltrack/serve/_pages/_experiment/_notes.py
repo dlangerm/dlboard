@@ -169,7 +169,7 @@ def _thread(
     comments = store.list_comments(experiment_id)
     users = store.list_users()
     runs = list(store.get_runs(experiment_id))
-    me = get_current_user(store)
+    me = get_current_user()
     users_by_id, runs_by_id = {u.id: u for u in users}, {r.id: r for r in runs}
     thread = (
         dmc.Stack([_note(c, users_by_id, runs_by_id, me) for c in comments], gap="xs")
@@ -238,7 +238,7 @@ def register_notes_callbacks(app: Dash) -> None:
         store.add_comment(
             models.NewComment(
                 experiment_id=experiment_id,
-                author_id=get_current_user(store).id,
+                author_id=get_current_user().id,
                 body=body.strip(),
                 run_ids=[int(r) for r in run_ids or []],
                 mentioned_user_ids=[int(u) for u in user_ids or []],
@@ -257,6 +257,6 @@ def register_notes_callbacks(app: Dash) -> None:
     def delete_note(_n_clicks: list[int | None], experiment_id: int) -> tuple[Any, str]:
         note_id = cast("dict[str, int]", require_triggered_id())["note"]
         store = get_data_store()
-        store.delete_comment(note_id, get_current_user(store).id)
+        store.delete_comment(note_id, get_current_user().id)
         thread, count, _runs, _users = _thread(store, experiment_id)
         return thread, str(count)
