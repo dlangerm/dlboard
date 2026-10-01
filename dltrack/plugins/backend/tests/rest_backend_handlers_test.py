@@ -49,7 +49,7 @@ class _FakeArtifactStore:
 
 def test_handle_create_project_stamps_created_by(store: SQLLiteStore) -> None:
     body = models.NewProject(name="p", description="d").model_dump(mode="json")
-    actor = store.get_or_create_user("alice")
+    actor = store.get_or_create_user(models.Principal.unverified("alice"))
 
     result = backend.handle_create_project(store, body, actor)
 
@@ -60,7 +60,7 @@ def test_handle_create_project_stamps_created_by(store: SQLLiteStore) -> None:
 def test_handle_create_experiment_stamps_created_by(store: SQLLiteStore) -> None:
     project = store.create_project(models.NewProject(name="p", description="d"))
     body = models.NewExperiment(project_id=project.id).model_dump(mode="json")
-    actor = store.get_or_create_user("bob")
+    actor = store.get_or_create_user(models.Principal.unverified("bob"))
 
     result = backend.handle_create_experiment(store, body, actor)
 
@@ -69,7 +69,7 @@ def test_handle_create_experiment_stamps_created_by(store: SQLLiteStore) -> None
 
 def test_handle_get_or_create_project_creates_on_first_call(store: SQLLiteStore) -> None:
     body = backend.GetOrCreateProject(name="p", description="d").model_dump(mode="json")
-    actor = store.get_or_create_user("alice")
+    actor = store.get_or_create_user(models.Principal.unverified("alice"))
 
     result = backend.handle_get_or_create_project(store, body, actor)
 
@@ -80,7 +80,7 @@ def test_handle_get_or_create_project_creates_on_first_call(store: SQLLiteStore)
 def test_handle_get_or_create_project_reuses_an_existing_project_by_name(store: SQLLiteStore) -> None:
     existing = store.create_project(models.NewProject(name="p", description="d"))
     body = backend.GetOrCreateProject(name="p", description="ignored").model_dump(mode="json")
-    actor = store.get_or_create_user("alice")
+    actor = store.get_or_create_user(models.Principal.unverified("alice"))
 
     result = backend.handle_get_or_create_project(store, body, actor)
 
@@ -91,7 +91,7 @@ def test_handle_get_or_create_project_reuses_an_existing_project_by_name(store: 
 def test_handle_get_or_create_experiment_creates_on_first_call(store: SQLLiteStore) -> None:
     project = store.create_project(models.NewProject(name="p", description="d"))
     body = backend.GetOrCreateExperiment(project_id=project.id, name="default").model_dump(mode="json")
-    actor = store.get_or_create_user("bob")
+    actor = store.get_or_create_user(models.Principal.unverified("bob"))
 
     result = backend.handle_get_or_create_experiment(store, body, actor)
 
@@ -104,7 +104,7 @@ def test_handle_get_or_create_experiment_passes_source_through(store: SQLLiteSto
     body = backend.GetOrCreateExperiment(
         project_id=project.id, name="default", source=models.ExperimentSource.PYTORCH_LIGHTNING
     ).model_dump(mode="json")
-    actor = store.get_or_create_user("bob")
+    actor = store.get_or_create_user(models.Principal.unverified("bob"))
 
     result = backend.handle_get_or_create_experiment(store, body, actor)
 
@@ -115,7 +115,7 @@ def test_handle_get_or_create_experiment_reuses_an_existing_experiment_by_name(s
     project = store.create_project(models.NewProject(name="p", description="d"))
     existing = store.create_experiment(models.NewExperiment(project_id=project.id, name="default"))
     body = backend.GetOrCreateExperiment(project_id=project.id, name="default").model_dump(mode="json")
-    actor = store.get_or_create_user("bob")
+    actor = store.get_or_create_user(models.Principal.unverified("bob"))
 
     result = backend.handle_get_or_create_experiment(store, body, actor)
 
@@ -126,7 +126,7 @@ def test_handle_create_run_stamps_created_by(store: SQLLiteStore) -> None:
     project = store.create_project(models.NewProject(name="p", description="d"))
     experiment = store.create_experiment(models.NewExperiment(project_id=project.id))
     body = models.NewRun(experiment_id=experiment.id).model_dump(mode="json")
-    actor = store.get_or_create_user("carol")
+    actor = store.get_or_create_user(models.Principal.unverified("carol"))
 
     result = backend.handle_create_run(store, body, actor)
 
@@ -138,7 +138,7 @@ def test_handle_log_artifacts_stamps_created_by_on_every_artifact(store: SQLLite
     experiment = store.create_experiment(models.NewExperiment(project_id=project.id))
     run = store.create_run(models.NewRun(experiment_id=experiment.id))
     artifact_store = _FakeArtifactStore()
-    actor = store.get_or_create_user("dave")
+    actor = store.get_or_create_user(models.Principal.unverified("dave"))
     new_artifacts = [
         models.NewArtifact(key="img", fname="a.png", run_id=run.id, experiment_id=experiment.id, step=0),
         models.NewArtifact(key="other", fname="b.bin", run_id=run.id, experiment_id=experiment.id, step=0),
@@ -157,7 +157,7 @@ def test_handle_link_artifacts_stamps_created_by_and_records_refs(store: SQLLite
     experiment = store.create_experiment(models.NewExperiment(project_id=project.id))
     run = store.create_run(models.NewRun(experiment_id=experiment.id))
     artifact_store = _FakeArtifactStore()
-    actor = store.get_or_create_user("dave")
+    actor = store.get_or_create_user(models.Principal.unverified("dave"))
     links = [
         models.NewArtifactLink(
             key="img",
@@ -178,7 +178,7 @@ def test_handle_link_artifacts_stamps_created_by_and_records_refs(store: SQLLite
 
 def test_handle_delete_and_restore_project_attribute_the_actor(store: SQLLiteStore) -> None:
     project = store.create_project(models.NewProject(name="p", description="d"))
-    actor = store.get_or_create_user("erin")
+    actor = store.get_or_create_user(models.Principal.unverified("erin"))
 
     backend.handle_delete_project(store, project.id, actor)
 
@@ -195,7 +195,7 @@ def test_handle_delete_and_restore_project_attribute_the_actor(store: SQLLiteSto
 def test_handle_delete_and_restore_experiment_attribute_the_actor(store: SQLLiteStore) -> None:
     project = store.create_project(models.NewProject(name="p", description="d"))
     experiment = store.create_experiment(models.NewExperiment(project_id=project.id))
-    actor = store.get_or_create_user("frank")
+    actor = store.get_or_create_user(models.Principal.unverified("frank"))
 
     backend.handle_delete_experiment(store, experiment.id, actor)
     assert store.get_experiment(experiment.id) is None
@@ -206,7 +206,7 @@ def test_handle_delete_and_restore_experiment_attribute_the_actor(store: SQLLite
 
 def test_handle_delete_and_restore_run_attribute_the_actor(store: SQLLiteStore, experiment_id: int) -> None:
     run = store.create_run(models.NewRun(experiment_id=experiment_id))
-    actor = store.get_or_create_user("gina")
+    actor = store.get_or_create_user(models.Principal.unverified("gina"))
 
     backend.handle_delete_run(store, run.id, actor)
     assert store._fetch_deleted_at(models.Run, run.id) is not None
@@ -228,7 +228,7 @@ def test_handle_delete_and_restore_artifact_attribute_the_actor(
     )
     (artifact,) = list(store.fetch_artifacts(experiment_id=experiment_id))
     assert artifact.id is not None
-    actor = store.get_or_create_user("hank")
+    actor = store.get_or_create_user(models.Principal.unverified("hank"))
 
     backend.handle_delete_artifact(store, artifact.id, actor)
     assert list(store.fetch_artifacts(experiment_id=experiment_id)) == []

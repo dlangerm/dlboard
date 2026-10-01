@@ -8,7 +8,14 @@ from dltrack import models
 
 
 def _user(scopes: list[models.Scope]) -> models.User:
-    return models.User(id=1, username="u", scopes=scopes, created_at=datetime(2026, 1, 1, tzinfo=UTC))
+    return models.User(
+        id=1,
+        username="u",
+        issuer="test",
+        subject="u",
+        scopes=scopes,
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
 
 
 def test_has_scope_true_for_directly_granted_scope() -> None:

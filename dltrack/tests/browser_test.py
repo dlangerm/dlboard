@@ -1400,7 +1400,7 @@ def test_editing_a_view_you_do_not_own_branches_into_a_separate_view_of_your_own
     page.locator(".experiment-card").click()
     experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
     store = get_data_store()
-    alice = store.get_or_create_user("alice-owns-this-view")
+    alice = store.get_or_create_user(models.Principal.unverified("alice-owns-this-view"))
     alices_view = store.create_view(
         BasicExperimentPage,
         models.NewPage[Any, Any](
@@ -1492,7 +1492,7 @@ def test_notes_post_to_the_thread_and_arrive_live_from_others(
     expect(page.locator(f"#{NOTES_COUNT_ID}")).to_have_text("1")
 
     store = get_data_store()
-    colleague = store.get_or_create_user("colleague")
+    colleague = store.get_or_create_user(models.Principal.unverified("colleague"))
     store.add_comment(models.NewComment(experiment_id=experiment_id, author_id=colleague.id, body="agreed"))
     expect(thread.get_by_text("agreed")).to_be_visible(timeout=10_000)  # one live-poll tick away
     expect(page.locator(f"#{NOTES_COUNT_ID}")).to_have_text("2")

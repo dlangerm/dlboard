@@ -23,7 +23,7 @@ def test_render_trash_is_empty_message_when_nothing_deleted(store: SQLLiteStore)
 def test_render_trash_lists_a_deleted_project_with_restore_and_purge_buttons(
     store: SQLLiteStore,
 ) -> None:
-    admin_user = store.get_or_create_user("admin")
+    admin_user = store.get_or_create_user(models.Principal.unverified("admin"))
     project = store.create_project(models.NewProject(name="p", description="d"))
     store.delete_project(project.id, admin_user)
 
@@ -45,7 +45,7 @@ def test_render_trash_lists_a_deleted_project_with_restore_and_purge_buttons(
 
 def test_render_trash_caps_each_kind_and_notes_the_overflow(store: SQLLiteStore) -> None:
     """A single cascade can soft-delete thousands of artifacts; the trash must never render all of them."""
-    admin_user = store.get_or_create_user("admin")
+    admin_user = store.get_or_create_user(models.Principal.unverified("admin"))
     project = store.create_project(models.NewProject(name="p", description="d"))
     experiment = store.create_experiment(models.NewExperiment(project_id=project.id))
     run = store.create_run(models.NewRun(experiment_id=experiment.id))
@@ -83,7 +83,7 @@ def test_render_pending_purge_banner_is_none_when_nothing_pending(store: SQLLite
 
 
 def test_render_pending_purge_banner_shows_the_count_and_a_resume_button(store: SQLLiteStore) -> None:
-    admin_user = store.get_or_create_user("admin")
+    admin_user = store.get_or_create_user(models.Principal.unverified("admin"))
     project = store.create_project(models.NewProject(name="p", description="d"))
     experiment = store.create_experiment(models.NewExperiment(project_id=project.id))
     run = store.create_run(models.NewRun(experiment_id=experiment.id))
@@ -109,7 +109,7 @@ def test_render_trash_omits_a_project_that_is_not_deleted(store: SQLLiteStore) -
 
 
 def test_render_audit_log_is_empty_message_with_no_entries(store: SQLLiteStore) -> None:
-    admin_user = store.get_or_create_user("admin")
+    admin_user = store.get_or_create_user(models.Principal.unverified("admin"))
 
     rendered = admin._render_audit_log(store, admin_user)
 
@@ -117,8 +117,10 @@ def test_render_audit_log_is_empty_message_with_no_entries(store: SQLLiteStore) 
 
 
 def test_render_audit_log_shows_a_permission_message_without_the_scope(store: SQLLiteStore) -> None:
-    store.get_or_create_user("admin")  # claim the bootstrap admin grant so the next user gets nothing
-    no_scopes_user = store.get_or_create_user("nobody")
+    store.get_or_create_user(
+        models.Principal.unverified("admin")
+    )  # claim the bootstrap admin grant so the next user gets nothing
+    no_scopes_user = store.get_or_create_user(models.Principal.unverified("nobody"))
 
     rendered = admin._render_audit_log(store, no_scopes_user)
 
@@ -126,7 +128,7 @@ def test_render_audit_log_shows_a_permission_message_without_the_scope(store: SQ
 
 
 def test_render_audit_log_lists_a_recorded_action(store: SQLLiteStore) -> None:
-    admin_user = store.get_or_create_user("admin")
+    admin_user = store.get_or_create_user(models.Principal.unverified("admin"))
     project = store.create_project(models.NewProject(name="p", description="d"))
     store.delete_project(project.id, admin_user)
 
@@ -140,7 +142,7 @@ def test_render_audit_log_lists_a_recorded_action(store: SQLLiteStore) -> None:
 
 
 def test_render_about_shows_the_signed_in_user_provider_and_backend(store: SQLLiteStore) -> None:
-    admin_user = store.get_or_create_user("admin")
+    admin_user = store.get_or_create_user(models.Principal.unverified("admin"))
 
     rendered = admin._render_about(store, admin_user, "AnonymousAuthProvider", [])
 
@@ -151,7 +153,7 @@ def test_render_about_shows_the_signed_in_user_provider_and_backend(store: SQLLi
 
 
 def test_render_about_lists_installed_plugins(store: SQLLiteStore) -> None:
-    admin_user = store.get_or_create_user("admin")
+    admin_user = store.get_or_create_user(models.Principal.unverified("admin"))
     # `admin` (the page module under test) is no longer a `PluginProtocol` -- the page move made
     # page layout non-optional dltrack behavior rather than a plugin, so `describe()` needs a real
     # plugin here instead. Any real plugin module works; `default` (the theme) is a small one.

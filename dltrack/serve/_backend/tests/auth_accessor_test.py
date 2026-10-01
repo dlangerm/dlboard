@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 import pytest
 
+from dltrack import models
 from dltrack.serve._backend import _auth
 
 if TYPE_CHECKING:
@@ -47,7 +48,7 @@ def test_get_current_user_resolves_and_creates_a_user(
     user = _auth.get_current_user(store)
 
     assert user.username == "alice"
-    assert store.get_or_create_user("alice").id == user.id
+    assert store.get_or_create_user(models.Principal.unverified("alice")).id == user.id
 
 
 def test_get_current_user_falls_back_to_anonymous_when_identity_is_none(

@@ -71,7 +71,14 @@ class _UnscopedFakeStore:
 
 
 def _user(*scopes: models.Scope) -> models.User:
-    return models.User(id=1, username="u", scopes=list(scopes), created_at=pendulum.now(pendulum.UTC))
+    return models.User(
+        id=1,
+        username="u",
+        issuer="test",
+        subject="u",
+        scopes=list(scopes),
+        created_at=pendulum.now(pendulum.UTC),
+    )
 
 
 def _wrap(inner: _UnscopedFakeStore) -> ScopeEnforcingDataStore:

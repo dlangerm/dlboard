@@ -137,7 +137,7 @@ def table_for(
     metadata: sa.MetaData,
     references: Mapping[type[BaseModel], sa.Table],
     foreign_keys: Mapping[str, ForeignKey] | None = None,
-    unique_columns: list[str] | None = None,
+    unique_columns: list[tuple[str, ...]] | None = None,
 ) -> sa.Table:
     """
     Declare the table storing `model` on `metadata`: one column per field, named after the model.
@@ -153,7 +153,7 @@ def table_for(
     run. By commit, the cascade has finished and the reference is gone.
     """
     fields = model.model_fields
-    for name in [ID_KEY, *(foreign_keys or {}), *(unique_columns or [])]:
+    for name in [ID_KEY, *(foreign_keys or {}), *(c for cols in unique_columns or [] for c in cols)]:
         if name not in fields:
             msg = f"Column {name} not present in model {model.__name__}"
             raise AssertionError(msg)
@@ -183,7 +183,7 @@ def table_for(
         model.__name__,
         metadata,
         *(column(name) for name in fields),
-        *(sa.UniqueConstraint(name) for name in unique_columns or []),
+        *(sa.UniqueConstraint(*cols) for cols in unique_columns or []),
         sqlite_autoincrement=True,
     )
 

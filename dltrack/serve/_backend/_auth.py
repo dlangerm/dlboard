@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from dltrack import models
 from dltrack._identity import ANONYMOUS
 from dltrack.serve._backend._app_slot import AppSlot
 
@@ -25,4 +26,4 @@ def get_current_user(store: DataStore[...]) -> User:
     thing that knows how to answer that.
     """
     username = get_auth_provider().resolve_identity() or ANONYMOUS
-    return store.get_or_create_user(username)
+    return store.get_or_create_user(models.Principal.unverified(username))

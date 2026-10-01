@@ -103,10 +103,10 @@ def test_table_for_cascades_ownership_and_defers_attribution_foreign_keys(
 
 @pytest.mark.parametrize(
     ("foreign_keys", "unique_columns"),
-    [({"nope": ForeignKey(User)}, None), (None, ["nope"])],
+    [({"nope": ForeignKey(User)}, None), (None, [("nope",)])],
 )
 def test_table_for_rejects_unknown_columns(
-    foreign_keys: dict[str, ForeignKey] | None, unique_columns: list[str] | None
+    foreign_keys: dict[str, ForeignKey] | None, unique_columns: list[tuple[str, ...]] | None
 ) -> None:
     with pytest.raises(AssertionError, match="not present in model"):
         _sql.table_for(

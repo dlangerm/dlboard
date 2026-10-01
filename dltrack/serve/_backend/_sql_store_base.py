@@ -18,7 +18,7 @@ from dltrack.serve._backend._app_state import APP_STATE_ROW_ID, AppState
 from dltrack.serve._backend._foreign_keys import ForeignKey, ForeignKeyKind
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Iterator, Mapping
+    from collections.abc import Callable, Collection, Iterable, Iterator, Mapping
     from datetime import datetime
 
 
@@ -75,17 +75,31 @@ FOREIGN_KEYS: dict[type[BaseModel], dict[str, ForeignKey]] = {
     },
     models.AuditLogEntry: {"user_id": ForeignKey(models.User)},
     models.ArtifactPurgeTask: {"requested_by": ForeignKey(models.User)},
+    models.ProjectGrant: {
+        "project_id": ForeignKey(models.Project, _OWNS),
+        "user_id": ForeignKey(models.User),
+    },
+    models.ApiToken: {"user_id": ForeignKey(models.User)},
+    models.PasswordCredential: {"user_id": ForeignKey(models.User)},
 }
 
-UNIQUE_COLUMNS: dict[type[BaseModel], list[str]] = {
-    models.User: ["username"],
+# One unique constraint per tuple. A grant's grantee columns are each nullable (exactly one is set),
+# and SQL treats NULLs as distinct, so a user grant and a group grant on one project never collide.
+UNIQUE_COLUMNS: dict[type[BaseModel], list[tuple[str, ...]]] = {
+    models.User: [("username",), ("issuer", "subject")],
+    models.ProjectGrant: [("project_id", "user_id"), ("project_id", "group")],
+    models.ApiToken: [("token_id",)],
+    models.PasswordCredential: [("user_id",)],
 }
 
 # Dependency order: every table appears after the tables its foreign keys point to.
 TABLES: tuple[type[BaseModel], ...] = (
     AppState,
     models.User,
+    models.ApiToken,
+    models.PasswordCredential,
     models.Project,
+    models.ProjectGrant,
     models.Experiment,
     models.Run,
     models.UnderlyingMetricTableEntry,
@@ -369,26 +383,38 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             )
         }
 
-    def get_or_create_user(self, username: str) -> models.User:
+    def get_or_create_user(self, principal: models.Principal) -> models.User:
         """
-        Get the user for `username`, creating it if this is the first time it's been seen.
+        Get the user for `principal`'s `(issuer, subject)`, creating it if this is the first time it's been seen.
 
-        A brand new user is granted no scopes. The exception is the very first user any store
-        instance ever creates: it atomically claims a one-time "bootstrap admin" grant
-        (`Scope.ALL`), via `AppState.bootstrap_admin_assigned`, so a single local user gets full
-        permissions with zero configuration. Every user after that gets nothing, so this never
-        silently generalizes into "everyone who connects is admin" if the same database ends up
-        shared by more than one person.
+        A brand new user is granted no scopes. The exception is the very first unverified user any
+        store instance ever creates (see `models.UNVERIFIED_ISSUER`): it atomically claims a one-time
+        "bootstrap admin" grant (`Scope.ALL`), via `AppState.bootstrap_admin_assigned`, so a single
+        local user gets full permissions with zero configuration. Every user after that gets
+        nothing, so this never silently generalizes into "everyone who connects is admin" if the
+        same database ends up shared by more than one person. A verified identity never claims it at
+        all: on a deployment that actually authenticates people, "whoever signs in first" is not an
+        acceptable way to pick an admin (see `AuthSettings.admin_users` instead).
         """
         users = self._tables[models.User]
-        by_name = sa.select(users).where(users.c.username == username)
-        if existing := self._fetch(models.User, by_name):
-            return existing[0]
+        by_identity = sa.select(users).where(
+            users.c.issuer == principal.issuer, users.c.subject == principal.subject
+        )
+        if existing := self._fetch(models.User, by_identity):
+            return self._refresh_user(existing[0], principal)
 
         self._execute(
-            self._insert_ignoring_conflicts(users).values(sql.row_values(models.NewUser(username=username)))
+            self._insert_ignoring_conflicts(users).values(
+                sql.row_values(models.NewUser.from_principal(principal))
+            )
         )
-        (user,) = self._fetch(models.User, by_name)
+        created = self._fetch(models.User, by_identity)
+        if not created:
+            msg = f"The username {principal.username!r} is already taken by a different identity"
+            raise ValueError(msg)
+        (user,) = created
+        if principal.issuer != models.UNVERIFIED_ISSUER:
+            return user
 
         # A single conditional `UPDATE` is atomic under concurrent writers: if two processes race
         # this for the first time simultaneously, only one can ever see (and flip) the flag unset.
@@ -402,14 +428,123 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         if not claimed:
             return user
 
-        _log.info("Granting bootstrap admin scopes to user %s (%s)", user.id, username)
+        _log.info("Granting bootstrap admin scopes to user %s (%s)", user.id, user.username)
         return self.update_user(user.model_copy(update={"scopes": [models.Scope.ALL]}))
+
+    def _refresh_user(self, user: models.User, principal: models.Principal) -> models.User:
+        """`user`, with whatever its issuer now says about its email/groups written back if it changed."""
+        groups = sorted(principal.groups)
+        if (user.email, user.groups) == (principal.email, groups):
+            return user
+        return self.update_user(user.model_copy(update={"email": principal.email, "groups": groups}))
+
+    def get_user(self, user_id: int) -> models.User | None:
+        """A user by id."""
+        users = self._tables[models.User]
+        return next(iter(self._fetch(models.User, sa.select(users).where(users.c.id == user_id))), None)
+
+    def find_user(self, username: str) -> models.User | None:
+        """A user by their (unique) username."""
+        users = self._tables[models.User]
+        return next(
+            iter(self._fetch(models.User, sa.select(users).where(users.c.username == username))), None
+        )
 
     def update_user(self, user: models.User) -> models.User:
         """Update a user, e.g. to grant/revoke scopes."""
         _log.debug("updating user %s", user.id)
         (updated,) = self._fetch(models.User, sql.update(self._tables[models.User], user))
         return updated
+
+    def list_project_grants(self, project_ids: Collection[int]) -> list[models.ProjectGrant]:
+        """Every grant on any of `project_ids`."""
+        grants = self._tables[models.ProjectGrant]
+        return self._fetch(
+            models.ProjectGrant,
+            sa.select(grants).where(grants.c.project_id.in_(project_ids)).order_by(grants.c.id),
+        )
+
+    def grants_for(self, user: models.User) -> list[models.ProjectGrant]:
+        """Every grant naming `user` directly, or one of `user.groups`."""
+        grants = self._tables[models.ProjectGrant]
+        return self._fetch(
+            models.ProjectGrant,
+            sa.select(grants).where(sa.or_(grants.c.user_id == user.id, grants.c.group.in_(user.groups))),
+        )
+
+    def set_project_grant(self, grant: models.NewProjectGrant) -> models.ProjectGrant:
+        """Grant a role on a project, replacing whatever that same user/group already had there."""
+        grants = self._tables[models.ProjectGrant]
+        grantee = (
+            grants.c.user_id == grant.user_id if grant.user_id is not None else grants.c.group == grant.group
+        )
+        replace = sa.delete(grants).where(grants.c.project_id == grant.project_id, grantee)
+        self._transaction([replace, sql.insert(grants, grant)])
+        (stored,) = self._fetch(
+            models.ProjectGrant, sa.select(grants).where(grants.c.project_id == grant.project_id, grantee)
+        )
+        return stored
+
+    def delete_project_grant(self, project_id: int, grant_id: int) -> None:
+        """Remove one of `project_id`'s grants."""
+        grants = self._tables[models.ProjectGrant]
+        self._execute(sa.delete(grants).where(grants.c.id == grant_id, grants.c.project_id == project_id))
+
+    def create_api_token(self, token: models.NewApiToken) -> models.ApiToken:
+        """Store a freshly minted API token's hash."""
+        (created,) = self._fetch(models.ApiToken, sql.insert(self._tables[models.ApiToken], token))
+        return created
+
+    def get_api_token(self, token_id: str) -> models.ApiToken | None:
+        """An API token by its public `token_id`, revoked or not."""
+        tokens = self._tables[models.ApiToken]
+        return next(
+            iter(self._fetch(models.ApiToken, sa.select(tokens).where(tokens.c.token_id == token_id))), None
+        )
+
+    def list_api_tokens(self, user_id: int) -> list[models.ApiToken]:
+        """`user_id`'s API tokens, newest first, including revoked ones."""
+        tokens = self._tables[models.ApiToken]
+        return self._fetch(
+            models.ApiToken,
+            sa.select(tokens).where(tokens.c.user_id == user_id).order_by(tokens.c.id.desc()),
+        )
+
+    def revoke_api_token(self, api_token_id: int, user_id: int) -> None:
+        """Revoke one of `user_id`'s API tokens; anyone else's is left alone."""
+        tokens = self._tables[models.ApiToken]
+        self._execute(
+            sa.update(tokens)
+            .where(tokens.c.id == api_token_id, tokens.c.user_id == user_id, tokens.c.revoked_at.is_(None))
+            .values(revoked_at=pendulum.now(pendulum.UTC))
+        )
+
+    def touch_api_token(self, api_token_id: int) -> None:
+        """Record that an API token was just used."""
+        tokens = self._tables[models.ApiToken]
+        self._execute(
+            sa.update(tokens)
+            .where(tokens.c.id == api_token_id)
+            .values(last_used_at=pendulum.now(pendulum.UTC))
+        )
+
+    def get_password_credential(self, user_id: int) -> models.PasswordCredential | None:
+        """`user_id`'s password hash, if they have one."""
+        creds = self._tables[models.PasswordCredential]
+        return next(
+            iter(self._fetch(models.PasswordCredential, sa.select(creds).where(creds.c.user_id == user_id))),
+            None,
+        )
+
+    def set_password_credential(self, credential: models.PasswordCredential) -> None:
+        """Set (or replace) a user's password hash."""
+        creds = self._tables[models.PasswordCredential]
+        self._transaction(
+            [
+                sa.delete(creds).where(creds.c.user_id == credential.user_id),
+                sql.insert(creds, credential.model_copy(update={"id": None})),
+            ]
+        )
 
     def create_project(self, project: models.NewProject) -> models.Project:
         """Create a new project."""
@@ -508,6 +643,10 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         (created,) = self._fetch(models.Run, sql.insert(self._tables[models.Run], run))
         self._touch_experiment(run.experiment_id)
         return created
+
+    def get_run(self, run_id: int) -> models.Run | None:
+        """A (non-deleted) run by id."""
+        return next(iter(self._by_id(models.Run, run_id)), None)
 
     def get_runs(self, experiment_id: int, *, limit: int = 1000, offset: int = 0) -> Iterator[models.Run]:
         """Get a page of an experiment's (non-deleted) runs, most recently created first."""
@@ -837,8 +976,8 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         Cascade is restricted to `SOFT_DELETABLE`, since only those tables have `deleted_at`. Only
         rows not already independently deleted are touched, so a child soft-deleted earlier on its
         own keeps its original `deleted_at`. Scope enforcement isn't this module's job -- see
-        `ScopeEnforcingDataStore`, which every `DataStore` (this one included) is wrapped in before
-        it's reachable from the running app.
+        `AuthorizingDataStore` (`_authorization.py`), which every request reaches any `DataStore`
+        (this one included) through.
         """
         table = self._tables[model]
         cascade = self._cascade(model, entity_id, within=SOFT_DELETABLE)
@@ -876,7 +1015,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         delete cascade in `_soft_delete`) means a child that was independently soft-deleted at a
         different time -- before or after its parent -- keeps its own deletion and isn't
         accidentally resurrected just because an ancestor is being restored. Scope enforcement isn't
-        this module's job -- see `ScopeEnforcingDataStore`.
+        this module's job -- see `AuthorizingDataStore`.
         """
         deleted_at = self._fetch_deleted_at(model, entity_id)
         if deleted_at is None:
@@ -917,7 +1056,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         `ArtifactStore` blobs afterward without risking losing track of one if the process dies
         right after this commits. The artifact rows' `ref`s -- the blob locations -- have to be read
         *before* that delete, since the cascade removes them without any Python code seeing them.
-        Scope enforcement isn't this module's job -- see `ScopeEnforcingDataStore`.
+        Scope enforcement isn't this module's job -- see `AuthorizingDataStore`.
         """
         if self._fetch_deleted_at(model, entity_id) is None:
             msg = f"{model.__name__} {entity_id} must be soft-deleted before it can be purged"
@@ -1000,7 +1139,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
 
     def list_audit_log(
         self,
-        actor: models.User,  # noqa: ARG002 -- part of the `DataStore` contract; enforced by `ScopeEnforcingDataStore`
+        actor: models.User,  # noqa: ARG002 -- part of the `DataStore` contract; enforced by `AuthorizingDataStore`
         limit: int = 100,
         offset: int = 0,
     ) -> Iterator[models.AuditLogEntry]:
