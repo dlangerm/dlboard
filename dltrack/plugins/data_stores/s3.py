@@ -11,22 +11,20 @@ from __future__ import annotations
 
 import functools
 import mimetypes
+import urllib.parse
 from enum import StrEnum
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Literal, cast
 
 from flask import Response, redirect
-from pydantic import AnyHttpUrl, AnyUrl, NonNegativeInt, PositiveInt, SecretStr
+from pydantic import AnyHttpUrl, AnyUrl, NonNegativeInt, PositiveInt, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from structlog.stdlib import get_logger
 
 from dltrack.plugins.data_stores._blob_store import RefAccess, plug_blob_store
 
 if TYPE_CHECKING:
     from dash import Dash
     from types_boto3_s3.client import S3Client
-
-_log = get_logger(__name__)
 
 
 class S3DownloadMode(StrEnum):
@@ -49,6 +47,12 @@ class S3Settings(BaseSettings):
     bucket: str
     prefix: str = "dltrack"
     """Every blob this store writes lives under `s3://bucket/prefix/...`."""
+
+    @field_validator("prefix")
+    @classmethod
+    def _strip_slashes(cls, value: str) -> str:
+        """Normalize away a leading/trailing slash, so `_own_key` and `access` agree on one shape."""
+        return value.strip("/")
 
     endpoint_url: AnyHttpUrl | None = None
     """Left unset, boto3 talks to AWS; set it to point at any other S3-protocol endpoint
@@ -121,13 +125,11 @@ class S3Blobs:
         """
         self._settings = settings
 
-    def _client(self) -> S3Client:
-        return _client(self._settings)  # pyright: ignore[reportArgumentType]
-
     def _bucket_and_key(self, ref: AnyUrl) -> tuple[str, str]:
         """`ref`'s bucket and key, for one of boto3's own `Bucket=`/`Key=` calls."""
         assert ref.host is not None, f"not a bucket-having s3 ref: {ref}"
-        return ref.host, str(ref.path or "").lstrip("/")
+        # `ref.path` is URL-percent-encoded (pydantic's `AnyUrl`); the real S3 key isn't.
+        return ref.host, urllib.parse.unquote(str(ref.path or "").lstrip("/"))
 
     def _own_key(self, key: PurePosixPath) -> str:
         return str(PurePosixPath(self._settings.prefix) / key)
@@ -154,9 +156,12 @@ class S3Blobs:
 
         bucket, key = self._bucket_and_key(ref)
         try:
-            self._client().head_object(Bucket=bucket, Key=key)
+            _client(self._settings).head_object(Bucket=bucket, Key=key)  # pyright: ignore[reportArgumentType]
         except ClientError as exc:
-            if exc.response.get("Error", {}).get("Code") in ("404", "NoSuchKey"):
+            # Least-privilege credentials (no s3:ListBucket) make AWS answer a HEAD on a missing
+            # key with 403 rather than 404 -- indistinguishable here from a real permission error,
+            # and either way this store can't confirm the blob, so treat both as "not found".
+            if exc.response.get("Error", {}).get("Code") in ("404", "NoSuchKey", "403", "AccessDenied"):
                 return False
             raise
         return True
@@ -166,7 +171,7 @@ class S3Blobs:
         bucket, key = self._bucket_and_key(ref)
         content_type, _ = mimetypes.guess_type(key)
         try:
-            self._client().upload_file(
+            _client(self._settings).upload_file(  # pyright: ignore[reportArgumentType]
                 str(staged),
                 Bucket=bucket,
                 Key=key,
@@ -178,30 +183,36 @@ class S3Blobs:
     def download(self, ref: AnyUrl) -> Response:
         """Serve `ref`'s bytes to a browser, proxied or presigned per `download_mode`."""
         bucket, key = self._bucket_and_key(ref)
+        client = _client(self._settings)  # pyright: ignore[reportArgumentType]
         match self._settings.download_mode:
             case S3DownloadMode.PRESIGN:
-                url = self._client().generate_presigned_url(
+                url = client.generate_presigned_url(
                     "get_object",
                     Params={"Bucket": bucket, "Key": key},
                     ExpiresIn=self._settings.presign_ttl_s,
                 )
                 return cast("Response", redirect(url))
             case S3DownloadMode.PROXY:
-                obj = self._client().get_object(Bucket=bucket, Key=key)
-                return Response(
-                    obj["Body"].iter_chunks(),
+                obj = client.get_object(Bucket=bucket, Key=key)
+                body = obj["Body"]
+                response = Response(
+                    body.iter_chunks(chunk_size=256 * 1024),
                     content_type=obj.get("ContentType") or "application/octet-stream",
                     direct_passthrough=True,
                 )
+                response.content_length = obj["ContentLength"]
+                response.call_on_close(body.close)
+                return response
 
     def delete(self, ref: AnyUrl) -> None:
         """Permanently delete the blob at `ref`. Idempotent: S3's own `delete_object` always is."""
-        _log.info("Deleting artifact blob at %s", ref)
         bucket, key = self._bucket_and_key(ref)
-        self._client().delete_object(Bucket=bucket, Key=key)
+        _client(self._settings).delete_object(Bucket=bucket, Key=key)  # pyright: ignore[reportArgumentType]
 
 
 def plug(app: Dash) -> None:
     """Plugin content."""
     settings = S3Settings()  # pyright: ignore[reportCallIssue] -- `bucket` is required, via S3_BUCKET
+    # Fail fast on a bad bucket/endpoint/credential instead of only discovering it on the first upload.
+    _client(settings).head_bucket(Bucket=settings.bucket)  # pyright: ignore[reportArgumentType]
     plug_blob_store(app, S3Blobs(settings), settings.queue_size)

@@ -39,7 +39,10 @@ def _download(artifact_id: int) -> Response:
         _log.warning("Artifact %s not found (missing or deleted)", artifact_id)
         abort(404)
     response = get_artifact_store().download_artifact(AnyUrl(artifact.ref))
-    response.headers["Cache-Control"] = _IMMUTABLE_CACHE_CONTROL
+    # A redirect to a short-lived presigned URL (`S3Blobs.download`'s presign mode) must never be
+    # cached this long -- only the bytes behind it are immutable, not the redirect itself.
+    if not (300 <= response.status_code < 400):  # noqa: PLR2004
+        response.headers["Cache-Control"] = _IMMUTABLE_CACHE_CONTROL
     return response
 
 

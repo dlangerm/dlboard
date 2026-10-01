@@ -1,14 +1,24 @@
-"""End-to-end: an uploaded artifact is fetched back by id through `/artifact/<id>`, not by ref."""
+# pyright: reportPrivateUsage=false
+"""
+End-to-end: an uploaded artifact is fetched back by id through `/artifact/<id>`, not by ref.
+
+Parametrized over every `artifact_backend` -- a chart/client only ever fetches by id, so this
+route's behavior must be identical whichever `BlobBackend` is doing the actual serving.
+"""
 
 from __future__ import annotations
 
 import time
 from typing import TYPE_CHECKING, Any
 
+import pytest
 import requests
 
 from dltrack import models
+from dltrack.conftest import EVERY_ARTIFACT_BACKEND, ArtifactBackend
 from dltrack.plugins.backend.basic_rest_backend import BasicDltrackAPI
+from dltrack.plugins.data_stores.s3 import S3DownloadMode
+from dltrack.serve._backend._artifact_download import _IMMUTABLE_CACHE_CONTROL
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -17,6 +27,12 @@ if TYPE_CHECKING:
     from dltrack.serve import SQLStoreBase
 
 _INGEST_TIMEOUT_S = 10
+
+
+@pytest.fixture(params=EVERY_ARTIFACT_BACKEND)
+def artifact_backend(request: pytest.FixtureRequest) -> ArtifactBackend:
+    """Override the default (filesystem-only) fixture: every test below runs on every backend."""
+    return request.param
 
 
 def _log_one_artifact(api: BasicDltrackAPI, run: models.Run, experiment_id: int, path: Path) -> None:
@@ -47,6 +63,31 @@ def test_an_uploaded_artifacts_bytes_are_served_by_id(backend_server: BackendSer
 
     assert response.status_code == 200
     assert response.content == b"hello"
+
+
+@pytest.mark.s3
+@pytest.mark.parametrize("artifact_backend", [ArtifactBackend.S3], indirect=True)
+@pytest.mark.parametrize("s3_download_mode", [S3DownloadMode.PRESIGN], indirect=True)
+def test_a_presigned_downloads_redirect_is_never_cached_as_long_as_the_bytes_it_points_to(
+    backend_server: BackendServer, tmp_path: Path, s3_download_mode: S3DownloadMode
+) -> None:
+    """
+    `S3Blobs.download` in presign mode 302s to a URL that expires -- the redirect itself must not
+    get the artifact's own, year-long `Cache-Control`, or a browser would replay it past expiry.
+    """
+    del s3_download_mode  # only selects `backend_server`'s S3 download mode, via indirect parametrize
+    api = BasicDltrackAPI(backend_server.url)
+    experiment = api.get_or_create_experiment(api.get_or_create_project("p").id, "e")
+    run = api.create_run(models.NewRun(experiment_id=experiment.id))
+    _log_one_artifact(api, run, experiment.id, tmp_path / "a.bin")
+    artifact = _wait_for_artifact(backend_server.store, experiment.id)
+
+    response = requests.get(f"{backend_server.url}/artifact/{artifact.id}", timeout=5)
+
+    assert response.status_code == 200
+    assert response.content == b"hello"
+    assert len(response.history) == 1, "expected exactly one presigned redirect hop"
+    assert response.history[0].headers.get("Cache-Control") != _IMMUTABLE_CACHE_CONTROL
 
 
 def test_an_unknown_artifact_id_404s(backend_server: BackendServer) -> None:
