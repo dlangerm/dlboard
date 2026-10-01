@@ -123,9 +123,11 @@ logic is a narrow exception: it references concrete chart classes to decide what
    pydantic model, and every query is a Core expression, so SQLAlchemy owns everything dialect-specific
    (types, identity columns, quoting, bind style). A concrete store only hands `SQLStoreBase` an `Engine`
    and implements `_insert_ignoring_conflicts`; `plugins/data_stores/sqlite.py` is the reference one, and
-   `filesystem.py` supplies artifact blob storage on disk. There is no migration system: startup creates
-   missing tables and backfills missing columns (`_add_missing_columns`), and existing sqlite databases keep
-   their on-disk format (`serve/_backend/tests/legacy_schema.sql` guards that).
+   `filesystem.py` supplies artifact blob storage on disk. There is no migration system and no backward
+   compatibility with an older schema: startup only creates whatever tables/indexes don't exist yet
+   (`create_all`, `checkfirst=True`). A model field added or changed after a database was created never
+   retroactively appears there -- pre-release, with no deployed databases to preserve, the database is
+   simply deleted and recreated rather than migrated.
 
 ### Server-side app (Dash)
 

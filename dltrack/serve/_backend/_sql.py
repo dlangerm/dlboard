@@ -118,8 +118,8 @@ def _server_default(default: object) -> sa.TextClause | sa.ColumnElement[bool] |
     A real SQL `DEFAULT` for a plain scalar field default (e.g. `revision: int = 0`).
 
     So an `INSERT` that omits the column -- every `New*` payload omits every server-managed field --
-    gets that value, and so does an existing row when `ALTER TABLE ... ADD COLUMN` backfills it.
-    A `None` default (a genuinely optional field) and dict/list defaults are left to the implicit NULL.
+    gets that value. A `None` default (a genuinely optional field) and dict/list defaults are left
+    to the implicit NULL.
     """
     match default:
         case bool():
@@ -186,24 +186,6 @@ def table_for(
         *(sa.UniqueConstraint(name) for name in unique_columns or []),
         sqlite_autoincrement=True,
     )
-
-
-def add_column_ddl(table: sa.Table, column: sa.Column[typing.Any], dialect: Dialect) -> str:
-    """
-    `ALTER TABLE ... ADD COLUMN` for `column`, always nullable -- existing rows have nothing to put there.
-
-    Rendered from a nullable copy of `column` on a throwaway table of the same name, so the column
-    spec (type, `DEFAULT`) is exactly what `CREATE TABLE` would have produced for it.
-    """
-    # Only ever what `_server_default` produced for it.
-    default = typing.cast(
-        "sa.TextClause | sa.ColumnElement[bool] | None",
-        column.server_default.arg if isinstance(column.server_default, sa.DefaultClause) else None,
-    )
-    nullable = sa.Column(column.name, column.type, nullable=True, server_default=default)
-    sa.Table(table.name, sa.MetaData(schema=table.schema), nullable)
-    spec = sa.schema.CreateColumn(nullable).compile(dialect=dialect)
-    return f"ALTER TABLE {dialect.identifier_preparer.format_table(table)} ADD COLUMN {spec}"
 
 
 def construct[T: BaseModel](

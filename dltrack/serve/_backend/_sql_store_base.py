@@ -106,14 +106,6 @@ SOFT_DELETABLE: frozenset[type[BaseModel]] = frozenset(
     {models.Project, models.Experiment, models.Run, models.Artifact}
 )
 
-# Indexes the raw-SQL store used to create under column-list names -- too long for Postgres' 63-char
-# identifier limit, so they're now named for what they're for instead. A sqlite database from before
-# that still has the old ones: dropped once at startup, replaced by the renamed equivalents.
-_LEGACY_INDEXES: tuple[str, ...] = (
-    "idx_UnderlyingMetricTableEntry_key_experiment_id_run_id_step_timestamp_utc",
-    "idx_Artifact_key_fname_run_id_experiment_id_step_created_by_created_at_ref_deleted_by_deleted_at",
-)
-
 type CascadePath = tuple[tuple[type[BaseModel], str], ...]
 """
 The ownership edges from a cascade's root down to one descendant table, root-most first: each is
@@ -223,19 +215,8 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         with engine.begin() as conn:
             self._prepare_schema(conn)
             self._metadata.create_all(conn)
-            for table in self._tables.values():
-                self._add_missing_columns(conn, table)
-            for name in _LEGACY_INDEXES:
-                conn.execute(sa.text(f"DROP INDEX IF EXISTS {conn.dialect.identifier_preparer.quote(name)}"))
-            # A database that hit `get_or_create_page`'s race before the shared-page index existed
-            # would otherwise fail to create it at all (the database validates a new unique index
-            # against existing rows) -- keep the earliest shared page per scope, the one `ORDER BY
-            # id LIMIT 1` always picked anyway. `create_all` skips an existing table's indexes, so
-            # they're each created (if missing) explicitly, after that cleanup.
-            for field in PAGE_SCOPE_FIELDS:
-                shared = sa.and_(pages.c.owner_id.is_(None), pages.c[field].is_not(None))
-                keep = sa.select(sa.func.min(pages.c.id)).where(shared).group_by(pages.c[field])
-                conn.execute(sa.delete(pages).where(shared, pages.c.id.not_in(keep)))
+            # `create_all` skips an existing table's indexes, so they're each created (if missing)
+            # explicitly too.
             for index in indexes:
                 index.create(conn, checkfirst=True)
             state = self._tables[AppState]
@@ -271,23 +252,6 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         against it at once, overrides this to take a lock that concurrent schema init then waits
         on (and to create anything the tables need to exist first, e.g. their schema).
         """
-
-    @staticmethod
-    def _add_missing_columns(conn: sa.Connection, table: sa.Table) -> None:
-        """
-        Backfill a table with any model field it's missing a column for.
-
-        This project has no migration system: `create_all` skips a table that already exists, so a
-        field added to a model after someone's database was created would otherwise never appear
-        there. Every added column is nullable regardless of the model's own optionality -- existing
-        rows have no value to put there -- except that a plain scalar default (e.g.
-        `revision: int = 0`) comes along as a real SQL `DEFAULT`, which backfills existing rows with
-        it instead of NULL (`NULL + 1`, in `_touch_experiment`, would stay `NULL` forever).
-        """
-        existing = {c["name"] for c in sa.inspect(conn).get_columns(table.name, schema=table.schema)}
-        for column in table.columns:
-            if column.name not in existing:
-                conn.execute(sa.text(sql.add_column_ddl(table, column, conn.dialect)))
 
     def _execute(self, statement: sa.Executable) -> list[AnyRow]:
         """Run one statement in its own transaction, returning its rows (if it has any)."""
