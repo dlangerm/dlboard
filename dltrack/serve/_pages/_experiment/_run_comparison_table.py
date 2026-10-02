@@ -21,7 +21,7 @@ from dash.exceptions import PreventUpdate
 from structlog.stdlib import get_logger
 
 from dltrack import models
-from dltrack.models import ButtonId, ModalId, StoreId, ValueId, constants
+from dltrack.models import RUN_NAME_COLUMN, ButtonId, ModalId, StoreId, ValueId, constants
 from dltrack.plugins.charts._table_style import column_def, infer_column_dtype, themed_grid_kwargs
 from dltrack.serve import (
     ClientsideScript,
@@ -32,6 +32,7 @@ from dltrack.serve import (
     series_swatch_class,
 )
 from dltrack.serve._pages._dash_helpers import section_label, tooltipped_action_icon
+from dltrack.serve._pages._dataframe_helpers import run_display_name
 from dltrack.serve._pages._experiment import _dataframe_helpers as dfh
 from dltrack.serve._pages._experiment import _experiment_page_state as core
 
@@ -74,7 +75,7 @@ def _build_hparam_rows(
     """One row per run, whether or not it has logged hyperparameters or metrics yet."""
     rows: list[dict[str, Any]] = []
     for run in runs:
-        row: dict[str, Any] = {"run_id": run.id, "run_name": run.name or f"Run {run.id}"}
+        row: dict[str, Any] = {"run_id": run.id, RUN_NAME_COLUMN: run_display_name(run)}
         hparam = hparams_by_run.get(run.id)
         if hparam is not None:
             row.update(hparam.hparams_dict)
@@ -153,7 +154,7 @@ def _build_hparam_datatable(
 ) -> dag.AgGrid:
     column_defs: list[dict[str, Any]] = [
         {
-            "field": "run_name",
+            "field": RUN_NAME_COLUMN,
             "headerName": "Run",
             "sortable": True,
             # Each run's chart color as a dot before its name, so this table doubles as the legend.

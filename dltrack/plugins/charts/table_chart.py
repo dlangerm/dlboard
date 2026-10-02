@@ -17,7 +17,7 @@ import dash_ag_grid as dag
 import pandas as pd
 from pydantic import BaseModel, Field
 
-from dltrack.models import ChartType, ColumnKind, MetricColumn
+from dltrack.models import RUN_NAME_COLUMN, ChartType, ColumnKind, MetricColumn
 from dltrack.plugins.charts._grouping import last_row_per_run
 from dltrack.plugins.charts._table_style import (
     ARTIFACT_COLUMN_PREFIX,
@@ -30,7 +30,7 @@ from dltrack.plugins.charts._table_style import (
 if typing.TYPE_CHECKING:
     from dash import Dash
 
-_BOOKKEEPING_COLS = frozenset({MetricColumn.RUN_ID, MetricColumn.TIMESTAMP_UTC})
+_BOOKKEEPING_COLS = frozenset({MetricColumn.RUN_ID, MetricColumn.TIMESTAMP_UTC, RUN_NAME_COLUMN})
 
 
 class TableChartSettings(BaseModel, frozen=True, extra="forbid"):

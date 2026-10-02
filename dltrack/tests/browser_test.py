@@ -899,6 +899,43 @@ def test_each_run_is_drawn_in_its_own_palette_color_matching_its_run_table_swatc
     assert console_errors == []
 
 
+def test_chart_legend_labels_each_run_by_name_matching_its_run_table_row(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """The line chart's legend reads a run's auto-generated name, not its bare id -- same name the
+    navbar run table already shows for that run."""
+    _create_project_and_experiment(page, live_server_url, "Chart Legend Names Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    api = BasicDltrackAPI(live_server_url)
+    for _ in range(3):
+        run = api.create_run(models.NewRun(experiment_id=experiment_id))
+        api.log_metric_batch(
+            [
+                models.LoggedMetrics(
+                    experiment_id=experiment_id,
+                    run_id=run.id,
+                    step=step,
+                    metrics={"loss": 1.0 / (step + 1)},
+                    timestamp_utc=pendulum.now("UTC"),
+                )
+                for step in range(3)
+            ]
+        )
+    page.reload()
+    _auto_generate_charts(page)
+
+    legend_items = page.locator(".mantine-ChartLegend-legendItemName")
+    expect(legend_items).to_have_count(3)
+    legend_names = set(legend_items.all_text_contents())
+    table_names = set(
+        page.locator(f"#{NAVBAR_HPARAM_DATATABLE_ID} .ag-cell[col-id='run_name']").all_text_contents()
+    )
+    assert legend_names == table_names
+    assert not any(name.startswith("Run ") for name in legend_names), legend_names
+    assert console_errors == []
+
+
 def test_chart_tooltip_shows_every_series_at_every_hovered_x_position(
     page: Page, live_server_url: str, console_errors: list[str]
 ) -> None:
@@ -962,8 +999,10 @@ def test_chart_tooltip_shows_every_series_at_every_hovered_x_position(
     box = svg.bounding_box()
     assert box is not None
 
-    # `LineChart.render()` labels each series "Run <run_id>" (`line_chart.py`), not the run's name.
-    expected_series = {f"Run {run_a.id}", f"Run {run_b.id}"}
+    # Auto-generated -- never actually None here, just typed that way.
+    assert run_a.name is not None
+    assert run_b.name is not None
+    expected_series = {run_a.name, run_b.name}
 
     # Both runs' data spans this entire x range (steps 0-9) -- every position across it must show
     # both series, not just whichever run happened to log that exact step.

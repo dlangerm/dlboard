@@ -16,7 +16,7 @@ from dash.exceptions import PreventUpdate
 from pydantic import BaseModel, Field
 from structlog.stdlib import get_logger
 
-from dltrack.models import ChartType, ColumnKind
+from dltrack.models import RUN_NAME_COLUMN, ChartType, ColumnKind
 from dltrack.plugins.charts._table_style import artifact_column, artifact_tags_column
 from dltrack.serve import ClientsideScript, series_swatch_class
 
@@ -103,7 +103,14 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
 
         tag_col = artifact_tags_column(parameters.key)
         has_tags = tag_col in dataframe.columns
-        select_cols = ["run_id", x_col, col, *([tag_col] if has_tags else [])]
+        has_names = RUN_NAME_COLUMN in dataframe.columns
+        select_cols = [
+            "run_id",
+            x_col,
+            col,
+            *([tag_col] if has_tags else []),
+            *([RUN_NAME_COLUMN] if has_names else []),
+        ]
 
         df = (
             dataframe.loc[dataframe[col].notna(), select_cols]
@@ -119,6 +126,7 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
         per_run_steps: dict[str, list[int]] = {}
         per_run_urls: dict[str, dict[str, str]] = {}
         per_run_captions: dict[str, dict[str, str]] = {}
+        per_run_names: dict[str, str] = {}
         for rid, g in df.groupby("run_id"):
             steps = g[x_col].tolist()
             per_run_steps[str(rid)] = steps
@@ -127,6 +135,8 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
                 per_run_captions[str(rid)] = {
                     str(s): _format_caption(raw) for s, raw in zip(steps, g[tag_col], strict=True)
                 }
+            if has_names:
+                per_run_names[str(rid)] = g[RUN_NAME_COLUMN].iloc[0]
 
         inst = _instance_id(parameters)
         pages = [run_ids[i : i + PAGE_SIZE] for i in range(0, len(run_ids), PAGE_SIZE)]
@@ -158,7 +168,12 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
                 style=thumb_style,
             )
             children = [
-                dmc.Text(f"Run {rid}", size="sm", fw=600, className=series_swatch_class(int(rid))),
+                dmc.Text(
+                    per_run_names.get(str(rid), f"Run {rid}"),
+                    size="sm",
+                    fw=600,
+                    className=series_swatch_class(int(rid)),
+                ),
                 html.Div(
                     image,
                     id={"type": "image-series-thumb", "instance": inst, "run": str(rid)},
