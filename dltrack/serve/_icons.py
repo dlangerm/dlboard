@@ -77,7 +77,6 @@ class Icon(StrEnum):
     MORE = "dots"
     MOVE_TO = "arrow-right"
     NOTES = "message-circle"
-    SAVE = "device-floppy"
     SEARCH = "search"
     SIDEBAR = "layout-sidebar"
     SIGN_OUT = "logout"
