@@ -57,6 +57,16 @@ otherwise tell "the user picked a view" from "an edit just branched into one" ap
 show up as the exact same prop change -- knows to skip navigating that once instead of pushing a
 reload-triggering `?view=` change out from under whatever the edit itself already did.
 """
+VIEW_NOTIFY_ID: typing.Final = "view-notify"
+"""Toasts about views -- chiefly that an edit just branched into a new view of your own."""
+VIEW_DUPLICATED_ID: typing.Final = "view-duplicated"
+"""
+One-shot flag: "Duplicate this view" sets it alongside its new page, so `sync_view_after_edit` -- which
+sees that new page exactly as it sees an edit branching into one -- knows you named this one
+yourself and skips the "saved to your own view" toast it would otherwise show.
+"""
+VIEW_FORK_HINT_ID: typing.Final = "view-fork-hint"
+"""The "edits save to a copy" badge, shown only while the page on screen isn't yours."""
 VIEW_MENU_ID: typing.Final = "view-menu-dropdown"
 """
 The actions menu's dropdown. Its `className` says whether you own the view on screen, which
@@ -139,6 +149,11 @@ def _menu_class(*, is_owner: bool) -> str:
     return "dl-view-owned" if is_owner else ""
 
 
+def _fork_hint_style(*, is_owner: bool) -> dict[str, str]:
+    """Always in the layout (a callback writes to it), just hidden once the page on screen is yours."""
+    return {"display": "none"} if is_owner else {}
+
+
 def view_controls(
     store: DataStore[...],
     experiment_id: int,
@@ -171,6 +186,20 @@ def view_controls(
                 size="xs",
                 w=180,
                 **cast("dict[str, Any]", {"aria-label": "View"}),
+            ),
+            # The wrapper (not the badge) is what's hidden: a hidden badge inside its tooltip still
+            # left a gap in this group, nudging the picker 4px left on every view you own.
+            html.Div(
+                dmc.Tooltip(
+                    dmc.Badge("Edits save to a copy", variant="light", color="gray", size="sm"),
+                    label="This view isn't yours, so your first change is saved as a new view of your own. "
+                    "The original stays as it is.",
+                    multiline=True,
+                    w=260,
+                    withArrow=True,
+                ),
+                id=VIEW_FORK_HINT_ID,
+                style=_fork_hint_style(is_owner=is_owner),
             ),
             dmc.Menu(
                 [
@@ -225,6 +254,8 @@ def view_controls(
             _export_modal(),
             _import_modal(),
             Store(id=VIEW_NAV_SUPPRESS_ID, data=False),
+            Store(id=VIEW_DUPLICATED_ID, data=False),
+            dmc.NotificationContainer(id=VIEW_NOTIFY_ID),
         ],
         gap=4,
         wrap="nowrap",
@@ -352,6 +383,7 @@ def _register_duplicate(app: Dash) -> None:
         Output(DUPLICATE_VIEW_MODAL_ID, "opened", allow_duplicate=True),
         Output(DUPLICATE_VIEW_NAME_ID, "error"),
         Output(DUPLICATE_VIEW_NAME_ID, "value"),
+        Output(VIEW_DUPLICATED_ID, "data", allow_duplicate=True),
         Input(DUPLICATE_VIEW_CONFIRM_ID, "n_clicks"),
         Input(DUPLICATE_VIEW_NAME_ID, "n_submit"),
         State(DUPLICATE_VIEW_NAME_ID, "value"),
@@ -363,10 +395,10 @@ def _register_duplicate(app: Dash) -> None:
         _clicks: int | None, _submits: int | None, name: str | None, page_json: str, experiment_id: int
     ) -> tuple[Any, ...]:
         if not name or not name.strip():
-            return no_update, no_update, "Give the view a name", no_update
+            return no_update, no_update, "Give the view a name", no_update, no_update
         page = core.BasicExperimentPage.model_validate_json(page_json)
         created = _create_view(get_data_store(), experiment_id, ViewFile.of(page, name=name.strip()))
-        return created.model_dump_json(), False, None, ""
+        return created.model_dump_json(), False, None, "", True
 
 
 def _register_rename(app: Dash) -> None:
@@ -478,14 +510,21 @@ def _register_sync_after_edit(app: Dash) -> None:
         Output(core.STATE_VIEW_ID, "data", allow_duplicate=True),
         Output(VIEW_NAV_SUPPRESS_ID, "data", allow_duplicate=True),
         Output(VIEW_MENU_ID, "className"),
+        Output(VIEW_FORK_HINT_ID, "style"),
+        Output(VIEW_NOTIFY_ID, "sendNotifications"),
+        Output(VIEW_DUPLICATED_ID, "data", allow_duplicate=True),
         Input(core.STATE_PAGE_STORAGE, "data"),
         State(core.STATE_VIEW_ID, "data"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
+        State(VIEW_DUPLICATED_ID, "data"),
         prevent_initial_call=True,
     )
     def sync_view_after_edit(
-        page_json: str, current_view_id: int | None, experiment_id: int
-    ) -> tuple[list[dict[str, str]], str, int | None, bool, str]:
+        page_json: str,
+        current_view_id: int | None,
+        experiment_id: int,
+        duplicated: bool,  # noqa: FBT001
+    ) -> tuple[Any, ...]:
         """
         Keep the picker and `STATE_VIEW_ID` in step with whichever page an edit actually landed in.
 
@@ -497,7 +536,10 @@ def _register_sync_after_edit(app: Dash) -> None:
 
         Arms `VIEW_NAV_SUPPRESS_ID` alongside its own `VIEW_SELECT_ID.value` write -- see that id's
         own docstring for why the picker's navigate-on-select callback needs it. Also reveals the
-        menu's rename/delete items, since the page on screen is now yours.
+        menu's rename/delete items and hides the "edits save to a copy" badge, since the page on
+        screen is now yours -- and says so in a toast, because a branch is otherwise silent: it's
+        the edit you were making that created a view, and nothing on screen would tell you. Not for
+        "Duplicate this view" (`VIEW_DUPLICATED_ID`), where you named the new view yourself.
         """
         page = core.BasicExperimentPage.model_validate_json(page_json)
         effective = page.id if page.owner_id is not None else None
@@ -506,7 +548,33 @@ def _register_sync_after_edit(app: Dash) -> None:
         store = get_data_store()
         value = str(effective) if effective is not None else SHARED_VIEW
         is_owner = page.owner_id == get_current_user().id
-        return _options(store, experiment_id), value, effective, True, _menu_class(is_owner=is_owner)
+        toast: list[dict[str, Any]] | NoUpdate = no_update
+        if is_owner and not duplicated:
+            previous = (
+                None if current_view_id is None else store.get_view(core.BasicExperimentPage, current_view_id)
+            )
+            original = f"“{previous.name}”" if previous is not None else "The shared view"
+            toast = [
+                {
+                    "action": "show",
+                    "id": f"view-fork-{page.id}",
+                    "title": "Saved to your own view",
+                    "message": f"Your change went into a new view, “{page.name}”. {original} is unchanged. "
+                    "Rename your copy from the ⋯ menu.",
+                    "color": "teal",
+                    "autoClose": 10_000,
+                }
+            ]
+        return (
+            _options(store, experiment_id),
+            value,
+            effective,
+            True,
+            _menu_class(is_owner=is_owner),
+            _fork_hint_style(is_owner=is_owner),
+            toast,
+            False,
+        )
 
     # The above changing `STATE_VIEW_ID` (without a page reload) still needs the address bar to
     # catch up, so a bookmark or a refresh keeps landing on the same branch -- purely client-side.
