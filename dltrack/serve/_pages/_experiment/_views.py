@@ -34,8 +34,8 @@ from dltrack.models import ButtonId, ModalId, constants
 from dltrack.serve import ClientsideScript, Icon, get_current_user, get_data_store, icon
 from dltrack.serve._pages._delete_confirm import (
     DeleteConfirmIds,
+    delete_confirm_modal,
     register_delete_callbacks,
-    render_delete_control,
 )
 from dltrack.serve._pages._experiment import _experiment_page_state as core
 
@@ -56,6 +56,13 @@ One-shot flag: `sync_view_after_edit` sets it right before writing `VIEW_SELECT_
 otherwise tell "the user picked a view" from "an edit just branched into one" apart, since both
 show up as the exact same prop change -- knows to skip navigating that once instead of pushing a
 reload-triggering `?view=` change out from under whatever the edit itself already did.
+"""
+VIEW_MENU_ID: typing.Final = "view-menu-dropdown"
+"""
+The actions menu's dropdown. Its `className` says whether you own the view on screen, which
+`_experiment_page_hover.css` uses to show or hide the owner-only items (rename, delete). It's a
+class rather than a rebuilt menu so `sync_view_after_edit` can update it when an edit branches
+into a view of your own, with no reload.
 """
 SAVE_VIEW_OPEN_ID: typing.Final = "save-view-open"
 SAVE_VIEW_MODAL_ID: typing.Final = "save-view-modal"
@@ -128,6 +135,10 @@ def resolve_view_id(store: DataStore[...], experiment_id: int, requested: str | 
     return view.id if view is not None and view.experiment_id == experiment_id else None
 
 
+def _menu_class(*, is_owner: bool) -> str:
+    return "dl-view-owned" if is_owner else ""
+
+
 def view_controls(
     store: DataStore[...],
     experiment_id: int,
@@ -137,7 +148,7 @@ def view_controls(
     view_name: str | None = None,
 ) -> Component:
     """
-    The header's view picker, its actions menu, and (in a view of your own) rename/delete buttons.
+    The header's view picker and its actions menu (rename/delete included, in a view of your own).
 
     `is_owner` is `False` for the shared page (nobody "owns" it) and for a view someone else's --
     editing either still works, it just branches you into a view of your own the moment you make a
@@ -145,6 +156,7 @@ def view_controls(
     `view_name` is the current page's own name, needed only to show a view that isn't yours (`not
     is_owner`, `view_id` not `None`) in the picker at all -- see `_options`'s `foreign_view`.
     """
+    owner_only = "dl-view-owner-only"
     return dmc.Group(
         [
             dmc.Select(
@@ -172,16 +184,11 @@ def view_controls(
                     ),
                     dmc.MenuDropdown(
                         [
-                            *(
-                                [
-                                    dmc.MenuItem(
-                                        "Rename this view…",
-                                        id=RENAME_VIEW_OPEN_ID,
-                                        leftSection=icon(Icon.EDIT),
-                                    )
-                                ]
-                                if is_owner
-                                else []
+                            dmc.MenuItem(
+                                "Rename this view…",
+                                id=RENAME_VIEW_OPEN_ID,
+                                leftSection=icon(Icon.EDIT),
+                                className=owner_only,
                             ),
                             dmc.MenuItem(
                                 "Save as a new view…", id=SAVE_VIEW_OPEN_ID, leftSection=icon(Icon.SAVE)
@@ -192,17 +199,26 @@ def view_controls(
                             dmc.MenuItem(
                                 "Import from JSON…", id=IMPORT_VIEW_OPEN_ID, leftSection=icon(Icon.IMPORT)
                             ),
-                        ]
+                            dmc.MenuDivider(className=owner_only),
+                            dmc.MenuItem(
+                                "Delete this view…",
+                                id=DELETE_VIEW_IDS.button,
+                                leftSection=icon(Icon.DELETE),
+                                color="red",
+                                className=owner_only,
+                            ),
+                        ],
+                        id=VIEW_MENU_ID,
+                        className=_menu_class(is_owner=is_owner),
                     ),
                 ],
                 position="bottom-end",
             ),
-            *(
-                render_delete_control(
-                    DELETE_VIEW_IDS, label="Delete this view", entity_noun="view", icon_only=True
-                )
-                if is_owner
-                else []
+            delete_confirm_modal(
+                DELETE_VIEW_IDS,
+                entity_noun="view",
+                body="This deletes your view for good. The shared view and everyone else's views "
+                "are left as they are.",
             ),
             _save_modal(),
             _rename_modal(),
@@ -289,11 +305,9 @@ def _import_modal() -> dmc.Modal:
     )
 
 
-def _create_view(
-    store: DataStore[...], experiment_id: int, view: ViewFile
-) -> tuple[list[dict[str, str]], str]:
-    """Save `view` as the current user's, and return the picker's new options and value."""
-    created = store.create_view(
+def _create_view(store: DataStore[...], experiment_id: int, view: ViewFile) -> models.Page[Any, Any, Any]:
+    """Save `view` as the current user's."""
+    return store.create_view(
         core.BasicExperimentPage,
         models.NewPage[Any, Any](
             experiment_id=experiment_id,
@@ -303,7 +317,6 @@ def _create_view(
             page_settings=view.page_settings,
         ),
     )
-    return _options(store, experiment_id), str(created.id)
 
 
 def _register_switching(app: Dash) -> None:
@@ -331,9 +344,11 @@ def _register_switching(app: Dash) -> None:
 
 
 def _register_save(app: Dash) -> None:
+    # The new view looks exactly like the page on screen, so there's nothing to re-render: writing
+    # it to `STATE_PAGE_STORAGE` hands off to `sync_view_after_edit`, the same as an edit branching
+    # into a view of your own, which catches the picker, menu and URL up without a reload.
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
-        Output(VIEW_SELECT_ID, "data", allow_duplicate=True),
-        Output(VIEW_SELECT_ID, "value", allow_duplicate=True),
+        Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Output(SAVE_VIEW_MODAL_ID, "opened", allow_duplicate=True),
         Output(SAVE_VIEW_NAME_ID, "error"),
         Output(SAVE_VIEW_NAME_ID, "value"),
@@ -348,10 +363,10 @@ def _register_save(app: Dash) -> None:
         _clicks: int | None, _submits: int | None, name: str | None, page_json: str, experiment_id: int
     ) -> tuple[Any, ...]:
         if not name or not name.strip():
-            return no_update, no_update, no_update, "Give the view a name", no_update
+            return no_update, no_update, "Give the view a name", no_update
         page = core.BasicExperimentPage.model_validate_json(page_json)
-        options, value = _create_view(get_data_store(), experiment_id, ViewFile.of(page, name=name.strip()))
-        return options, value, False, None, ""
+        created = _create_view(get_data_store(), experiment_id, ViewFile.of(page, name=name.strip()))
+        return created.model_dump_json(), False, None, ""
 
 
 def _register_rename(app: Dash) -> None:
@@ -451,8 +466,9 @@ def _register_export_import(app: Dash) -> None:
             first = exc.errors()[0]
             where = ".".join(str(part) for part in first["loc"]) or "file"
             return no_update, no_update, no_update, f"Not a dltrack view ({where}: {first['msg']})"
-        options, value = _create_view(get_data_store(), experiment_id, view)
-        return options, value, False, None
+        store = get_data_store()
+        created = _create_view(store, experiment_id, view)
+        return _options(store, experiment_id), str(created.id), False, None
 
 
 def _register_sync_after_edit(app: Dash) -> None:
@@ -461,6 +477,7 @@ def _register_sync_after_edit(app: Dash) -> None:
         Output(VIEW_SELECT_ID, "value", allow_duplicate=True),
         Output(core.STATE_VIEW_ID, "data", allow_duplicate=True),
         Output(VIEW_NAV_SUPPRESS_ID, "data", allow_duplicate=True),
+        Output(VIEW_MENU_ID, "className"),
         Input(core.STATE_PAGE_STORAGE, "data"),
         State(core.STATE_VIEW_ID, "data"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
@@ -468,7 +485,7 @@ def _register_sync_after_edit(app: Dash) -> None:
     )
     def sync_view_after_edit(
         page_json: str, current_view_id: int | None, experiment_id: int
-    ) -> tuple[list[dict[str, str]], str, int | None, bool]:
+    ) -> tuple[list[dict[str, str]], str, int | None, bool, str]:
         """
         Keep the picker and `STATE_VIEW_ID` in step with whichever page an edit actually landed in.
 
@@ -479,7 +496,8 @@ def _register_sync_after_edit(app: Dash) -> None:
         comparison below is pure Python, so the `list_views` read only happens on an actual branch.
 
         Arms `VIEW_NAV_SUPPRESS_ID` alongside its own `VIEW_SELECT_ID.value` write -- see that id's
-        own docstring for why the picker's navigate-on-select callback needs it.
+        own docstring for why the picker's navigate-on-select callback needs it. Also reveals the
+        menu's rename/delete items, since the page on screen is now yours.
         """
         page = core.BasicExperimentPage.model_validate_json(page_json)
         effective = page.id if page.owner_id is not None else None
@@ -487,7 +505,8 @@ def _register_sync_after_edit(app: Dash) -> None:
             raise PreventUpdate
         store = get_data_store()
         value = str(effective) if effective is not None else SHARED_VIEW
-        return _options(store, experiment_id), value, effective, True
+        is_owner = page.owner_id == get_current_user().id
+        return _options(store, experiment_id), value, effective, True, _menu_class(is_owner=is_owner)
 
     # The above changing `STATE_VIEW_ID` (without a page reload) still needs the address bar to
     # catch up, so a bookmark or a refresh keeps landing on the same branch -- purely client-side.

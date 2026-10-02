@@ -34,6 +34,34 @@ class DeleteConfirmIds(typing.NamedTuple):
     cancel: str
 
 
+def delete_confirm_modal(ids: DeleteConfirmIds, *, entity_noun: str, body: str | None = None) -> dmc.Modal:
+    """
+    The confirmation modal on its own, for a trigger that isn't a plain button (e.g. a menu item).
+
+    `body` defaults to the soft-delete wording; pass one for an entity that's deleted for good.
+    """
+    return dmc.Modal(
+        id=ids.modal,
+        title=f"Delete this {entity_noun}?",
+        opened=False,
+        children=[
+            dmc.Text(
+                body
+                or f"This soft-deletes the {entity_noun} and everything under it. It can be "
+                "restored from the admin Trash until it's permanently purged."
+            ),
+            dmc.Group(
+                [
+                    dmc.Button("Cancel", id=ids.cancel, variant="default"),
+                    dmc.Button("Delete", id=ids.confirm, color="red"),
+                ],
+                justify="flex-end",
+                mt="sm",
+            ),
+        ],
+    )
+
+
 def render_delete_control(
     ids: DeleteConfirmIds, *, label: str, entity_noun: str, icon_only: bool = False
 ) -> list[Component]:
@@ -43,28 +71,7 @@ def render_delete_control(
         if icon_only
         else dmc.Button(label, id=ids.button, n_clicks=0, color="red", variant="light", size="xs")
     )
-    return [
-        trigger,
-        dmc.Modal(
-            id=ids.modal,
-            title=f"Delete this {entity_noun}?",
-            opened=False,
-            children=[
-                dmc.Text(
-                    f"This soft-deletes the {entity_noun} and everything under it. It can be "
-                    "restored from the admin Trash until it's permanently purged."
-                ),
-                dmc.Group(
-                    [
-                        dmc.Button("Cancel", id=ids.cancel, variant="default"),
-                        dmc.Button("Delete", id=ids.confirm, color="red"),
-                    ],
-                    justify="flex-end",
-                    mt="sm",
-                ),
-            ],
-        ),
-    ]
+    return [trigger, delete_confirm_modal(ids, entity_noun=entity_noun)]
 
 
 def register_delete_callbacks(
@@ -94,7 +101,7 @@ def register_delete_callbacks(
         Input(ids.button, "n_clicks"),
         prevent_initial_call=True,
     )
-    def open_modal(n_clicks: int) -> bool:
+    def open_modal(n_clicks: int | None) -> bool:
         if not n_clicks:
             raise PreventUpdate
         return True
