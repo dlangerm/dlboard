@@ -48,7 +48,14 @@ DIFFS_DIR = REPO_ROOT / "screenshot-diffs"
 _VIEWPORT = {"width": 1440, "height": 900}
 _CHANNEL_TOLERANCE = 8
 """Per-channel difference (out of 255) below which two pixels count as identical (anti-aliasing noise)."""
-_MAX_DIFFERING_PIXEL_FRACTION = 0.001
+_MAX_DIFFERING_PIXEL_FRACTION = 0.00001
+"""
+Fraction of an image's pixels that may differ by more than `_CHANNEL_TOLERANCE`: about a dozen of a
+1440x900 render. That's room for the stray anti-aliased pixel or two another machine's text
+rasterizing leaves behind (a few pixels, measured), and nowhere near a changed word -- "4 runs" becoming
+"5 runs" is around 60. It used to be 0.001, some 1,300 pixels, which let whole edited lines of text
+through and left the docs images quietly out of date.
+"""
 _STABLE_ATTEMPTS = 20
 _ARTIFACT_INGEST_TIMEOUT_S = 30
 
@@ -421,3 +428,36 @@ def test_doc_images_are_referenced_and_accounted_for() -> None:
     assert [shot for shot in DocScreenshot if f"images/{shot.value}.png" not in docs] == []
     known = {shot.path.name for shot in DocScreenshot}
     assert {path.name for path in IMAGES_DIR.glob("*.png")} <= known
+
+
+@pytest.mark.parametrize(
+    ("rows", "cols", "delta", "matches"),
+    [
+        (slice(0, 1), slice(0, 3), 100, True),
+        (slice(None), slice(None), 5, True),
+        (slice(0, 8), slice(0, 8), 100, False),
+    ],
+    ids=["a-stray-antialiased-pixel-or-two", "faint-noise-everywhere", "a-changed-digit"],
+)
+def test_the_screenshot_check_tolerates_rendering_noise_but_not_a_changed_word(  # noqa: PLR0913 -- one parameter per axis of the render being compared
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    rows: slice,
+    cols: slice,
+    delta: int,
+    *,
+    matches: bool,
+) -> None:
+    def png(pixels: np.ndarray[Any, Any]) -> bytes:
+        buffer = io.BytesIO()
+        PILImage.fromarray(pixels.astype(np.uint8)).save(buffer, format="PNG")
+        return buffer.getvalue()
+
+    monkeypatch.setitem(globals(), "IMAGES_DIR", tmp_path)
+    monkeypatch.setitem(globals(), "DIFFS_DIR", tmp_path / "diffs")
+    committed = np.full((900, 1440, 3), 40, dtype=int)
+    DocScreenshot.HOME.path.write_bytes(png(committed))
+    fresh = committed.copy()
+    fresh[rows, cols] += delta
+
+    assert _matches_committed(DocScreenshot.HOME, png(fresh)) is matches
