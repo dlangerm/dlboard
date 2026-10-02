@@ -1452,6 +1452,9 @@ def test_renaming_a_view_you_own_updates_the_picker(
     page.get_by_role("textbox", name="View name").fill("first name")
     page.get_by_role("button", name="Save view").click()
     expect(page.get_by_role("textbox", name="View", exact=True)).to_have_value("first name")
+    # The header is re-rendered as the view you now own (which adds the rename item and delete button) a
+    # beat after the picker changes; opening the menu before then would open the stale, rename-less one.
+    expect(page.get_by_role("button", name="Delete this view")).to_be_visible()
 
     page.get_by_role("button", name="View actions").click()
     page.get_by_role("menuitem", name="Rename this view…").click()
