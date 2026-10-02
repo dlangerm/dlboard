@@ -27,9 +27,10 @@ from pydantic_settings import BaseSettings
 from structlog.stdlib import get_logger
 
 from dltrack import models
-from dltrack.models import ButtonId, DivId, IntervalId, ModalId, StoreId, ValueId, constants
+from dltrack.models import RUN_NAME_COLUMN, ButtonId, DivId, IntervalId, ModalId, StoreId, ValueId, constants
 from dltrack.serve import ClientsideScript, Icon, get_current_user, get_data_store, icon
 from dltrack.serve._pages._dash_helpers import tooltipped_action_icon
+from dltrack.serve._pages._dataframe_helpers import run_display_name
 from dltrack.serve._pages._experiment import _dataframe_helpers as dfh
 
 if TYPE_CHECKING:
@@ -437,7 +438,19 @@ def fetch_panel_dataframe(
         if hparam_keys is None or hparam_keys
         else pd.DataFrame()
     )
-    return dfh.merge_hyperparams(dfh.merge_metrics_and_artifacts(metrics_df, artifacts_df), hparams_df)
+    merged = dfh.merge_hyperparams(dfh.merge_metrics_and_artifacts(metrics_df, artifacts_df), hparams_df)
+    if merged.empty:
+        return merged
+    # Carried in alongside the metric/artifact/hparam data (not fetched separately by each chart
+    # that wants it) so `LineChart`/`ImageChart` can label a run by its name instead of its bare id
+    # -- `table_chart.py`'s default "runs" mode explicitly excludes this column, since it isn't a
+    # real metric/hparam. `store.get_runs`'s own default page size caps this at 1000 runs, same as
+    # every other `list_*` read on this page; a larger experiment just leaves the extra runs'
+    # `RUN_NAME_COLUMN` cell blank after the merge below.
+    run_names = pd.DataFrame.from_records(
+        [{"run_id": run.id, RUN_NAME_COLUMN: run_display_name(run)} for run in store.get_runs(experiment_id)]
+    )
+    return merged if run_names.empty else merged.merge(run_names, on="run_id", how="left")
 
 
 def is_lightning_experiment(data_store: DataStore[...], experiment_id: int) -> bool:

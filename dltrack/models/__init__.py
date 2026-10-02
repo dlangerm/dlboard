@@ -42,6 +42,7 @@ from dltrack.models._scopes import Scope, has_scope, require_scope
 from dltrack.models._theme import ColorScheme, SchemeColors, ThemeSpec
 from dltrack.models._user import UNVERIFIED_ISSUER, NewUser, Principal, User
 from dltrack.models._view import (
+    RUN_NAME_COLUMN,
     ChartInstance,
     ChartType,
     ChartTypeRegistry,
@@ -55,6 +56,7 @@ from dltrack.models._view import (
 )
 
 __all__ = [
+    "RUN_NAME_COLUMN",
     "UNVERIFIED_ISSUER",
     "ActivityStats",
     "AmbiguousProjectError",

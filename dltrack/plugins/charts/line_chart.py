@@ -10,7 +10,7 @@ import dash_mantine_components as dmc
 import pandas as pd
 from pydantic import BaseModel, Field
 
-from dltrack.models import ChartType, ColumnKind, MetricColumn
+from dltrack.models import RUN_NAME_COLUMN, ChartType, ColumnKind, MetricColumn
 from dltrack.plugins.charts._sampling import DEFAULT_MAX_POINTS, shared_sample_grid
 from dltrack.serve import AssetKind, series_color, serve_asset
 
@@ -134,6 +134,16 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.LineChart], froze
         # this once per chart -- mutating the caller's `dataframe` in place (the coercion loop and
         # `_to_epoch_millis` below both used to) corrupts it for whichever chart renders next.
         dataframe = dataframe.copy()
+        # Captured before `axis_df`/`value_df` below slice the dataframe down to just the plotted
+        # columns, and before `_nearest_fill_pivot` rebuilds it from scratch -- `run_name` doesn't
+        # survive either. A run with no name in the merged dataframe (an older, pre-auto-naming
+        # row -- see `RUN_NAME_COLUMN`) falls back to its bare id, same as everywhere else that
+        # reads `run.name`.
+        run_names = (
+            dataframe.drop_duplicates("run_id").set_index("run_id")[RUN_NAME_COLUMN].to_dict()
+            if RUN_NAME_COLUMN in dataframe.columns
+            else {}
+        )
         x_col = parameters.x_axis
         axis_cols = ["run_id", "step"]
         if x_col != "step":
@@ -179,7 +189,11 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.LineChart], froze
         df = _nearest_fill_pivot(df, x_axis=parameters.x_axis, column=parameters.column)
         data = df.to_dict(orient="records")
         series = [
-            {"name": str(run_id), "label": f"Run {run_id}", "color": series_color(int(run_id))}
+            {
+                "name": str(run_id),
+                "label": run_names.get(run_id, f"Run {run_id}"),
+                "color": series_color(int(run_id)),
+            }
             for run_id in run_ids
         ]
 

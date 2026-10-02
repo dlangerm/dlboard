@@ -9,6 +9,7 @@ import pandas as pd
 import pytest
 
 from dltrack.conftest import props as _props
+from dltrack.models import RUN_NAME_COLUMN
 from dltrack.plugins.charts._table_style import (
     DEFAULT_TABLE_FONT_SIZE,
     HPARAM_COLUMN_PREFIX,
@@ -134,6 +135,17 @@ def test_render_run_mode_excludes_artifact_columns() -> None:
     rows = _rows_by_run(table)
 
     assert not {artifact_column("img"), artifact_tags_column("img")} & rows[1].keys()
+
+
+def test_render_run_mode_excludes_the_run_name_column() -> None:
+    """A run's display name (merged in for charts that label by name, see `RUN_NAME_COLUMN`) isn't
+    a metric value either -- it shouldn't leak into the table as a bogus column."""
+    df = _wide_df()
+    df[RUN_NAME_COLUMN] = ["one", "one", "two", "two"]
+    table = TableChart.render(TableChartSettings(), df)
+    rows = _rows_by_run(table)
+
+    assert RUN_NAME_COLUMN not in rows[1]
 
 
 def test_render_defaults_to_the_shared_smaller_font_size() -> None:

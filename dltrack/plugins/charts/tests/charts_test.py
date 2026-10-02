@@ -11,6 +11,7 @@ import pandas as pd
 import pytest
 
 from dltrack.conftest import props as _props
+from dltrack.models import RUN_NAME_COLUMN
 from dltrack.plugins.charts import line_chart
 from dltrack.plugins.charts._sampling import downsample_grouped, downsample_series, shared_sample_grid
 from dltrack.plugins.charts.bar_chart import BarChart, BarChartSettings
@@ -115,6 +116,23 @@ def test_line_chart_render_series_and_datakey() -> None:
     props = _props(chart)
     assert props["dataKey"] == "step"
     assert {s["name"] for s in props["series"]} == {"1", "2", "3"}
+
+
+def test_line_chart_series_label_defaults_to_run_id_without_a_run_name_column() -> None:
+    df = _metrics_df(5, n_runs=2)
+    chart = LineChart.render(LineChartSettings(column="loss", x_axis="step"), df)
+    labels = {s["name"]: s["label"] for s in _props(chart)["series"]}
+    assert labels == {"1": "Run 1", "2": "Run 2"}
+
+
+def test_line_chart_series_label_uses_the_run_name_column_when_present() -> None:
+    """`fetch_panel_dataframe` merges a `run_name` column onto the dataframe for charts that want
+    to label by name instead of bare id -- `line_chart.py` must read it, not just carry it along."""
+    df = _metrics_df(5, n_runs=2)
+    df[RUN_NAME_COLUMN] = df["run_id"].map({1: "uptight-yak", 2: "abstract-goldfish"})
+    chart = LineChart.render(LineChartSettings(column="loss", x_axis="step"), df)
+    labels = {s["name"]: s["label"] for s in _props(chart)["series"]}
+    assert labels == {"1": "uptight-yak", "2": "abstract-goldfish"}
 
 
 @pytest.mark.parametrize(

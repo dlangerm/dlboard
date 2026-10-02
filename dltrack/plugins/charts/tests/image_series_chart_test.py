@@ -9,6 +9,7 @@ import pandas as pd
 import pytest
 
 from dltrack.conftest import props as _props
+from dltrack.models import RUN_NAME_COLUMN
 from dltrack.plugins.charts._table_style import artifact_column, artifact_tags_column
 from dltrack.plugins.charts.image_series import (
     GRID_COLS,
@@ -171,6 +172,26 @@ def test_render_wraps_each_thumbnail_in_a_clickable_div() -> None:
         "run": "1",
     }
     assert thumb_wrapper["n_clicks"] == 0
+
+
+def test_run_block_label_defaults_to_run_id_without_a_run_name_column() -> None:
+    df = _artifacts_df(n_runs=1)
+    stack = ImageChart.render(ImageChartSettings(key="img"), df)
+
+    run_block = _first_run_block(stack)
+    assert _props(run_block["children"][0])["children"] == "Run 1"
+
+
+def test_run_block_label_uses_the_run_name_column_when_present() -> None:
+    """`fetch_panel_dataframe` merges a `run_name` column onto the dataframe for charts that want
+    to label by name instead of bare id -- this one slices down to an explicit `select_cols`
+    before any further processing, so it must be told to keep that column."""
+    df = _artifacts_df(n_runs=1)
+    df[RUN_NAME_COLUMN] = "uptight-yak"
+    stack = ImageChart.render(ImageChartSettings(key="img"), df)
+
+    run_block = _first_run_block(stack)
+    assert _props(run_block["children"][0])["children"] == "uptight-yak"
 
 
 def test_render_includes_a_zoom_modal() -> None:

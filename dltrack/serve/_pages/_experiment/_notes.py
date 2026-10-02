@@ -23,6 +23,7 @@ from dltrack import models
 from dltrack.models import StoreId, constants
 from dltrack.serve import ClientsideScript, Icon, get_current_user, get_data_store, icon, series_swatch_class
 from dltrack.serve._pages._dash_helpers import require_triggered_id, tooltipped_action_icon
+from dltrack.serve._pages._dataframe_helpers import run_display_name
 
 if TYPE_CHECKING:
     from dash import Dash
@@ -105,10 +106,6 @@ def notes_drawer() -> dmc.Drawer:
     )
 
 
-def _run_label(run: models.Run) -> str:
-    return run.name or f"Run {run.id}"
-
-
 def _note(
     comment: models.Comment,
     users: dict[int, models.User],
@@ -119,7 +116,7 @@ def _note(
     chips = [
         *(
             dmc.Badge(
-                _run_label(runs[run_id]),
+                run_display_name(runs[run_id]),
                 variant="default",
                 leftSection=html.Span(className=series_swatch_class(run_id)),
                 tt="none",
@@ -209,7 +206,7 @@ def register_notes_callbacks(app: Dash) -> None:
         return (
             thread,
             str(count),
-            [{"value": str(r.id), "label": _run_label(r)} for r in runs],
+            [{"value": str(r.id), "label": run_display_name(r)} for r in runs],
             [{"value": str(u.id), "label": u.username} for u in users],
         )
 
