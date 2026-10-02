@@ -13,6 +13,7 @@ from pydantic import AnyUrl, BaseModel, SecretStr, ValidationError
 from pydantic_settings import BaseSettings
 from structlog.stdlib import get_logger
 from werkzeug.datastructures import FileStorage
+from werkzeug.exceptions import NotFound
 
 from dltrack import models
 from dltrack._identity import resolve_username
@@ -178,6 +179,12 @@ class BasicDltrackAPI:
         """Initialize a new run."""
         return _create_request(run, models.Run, self.base_url, headers=self._headers)
 
+    def get_run(self, run_id: int) -> models.Run:
+        """The existing run `run_id`. Raises `requests.HTTPError` (404) if it's missing, deleted, or not yours to see."""
+        res = requests.get(f"{self.base_url}/{entity_path(models.Run, str(run_id))}", headers=self._headers)
+        res.raise_for_status()
+        return models.Run.model_validate(res.json())
+
     def log_hyperparams(self, hyperparams: models.NewHyperParams) -> models.HyperParams:
         """Log hyperparameters."""
         return _create_request(hyperparams, models.HyperParams, self.base_url, headers=self._headers)
@@ -303,6 +310,14 @@ def handle_create_run(store: DataStore[...], body: dict[str, Any], actor: models
     """Create a run, attributed to `actor`."""
     run = models.NewRun.model_validate(body).model_copy(update={"created_by": actor.id})
     return store.create_run(run).model_dump(mode="json")
+
+
+def handle_get_run(store: DataStore[...], run_id: int) -> dict[str, Any]:
+    """An existing run, for a client attaching to it. 404 when it's missing, deleted or not visible to the caller."""
+    run = store.get_run(run_id)
+    if run is None:
+        raise NotFound
+    return run.model_dump(mode="json")
 
 
 def handle_log_artifacts(
@@ -437,6 +452,11 @@ def create_run() -> dict[str, Any]:
     except Exception:
         _log.exception("Error creating")
         raise
+
+
+def get_run(entity_id: int) -> dict[str, Any]:
+    """Look up an existing run by id."""
+    return handle_get_run(get_data_store(), entity_id)
 
 
 def create_project() -> dict[str, Any]:
@@ -606,6 +626,7 @@ _ROUTES: tuple[tuple[str, list[str], Callable[..., Any]], ...] = (
     (f"{entity_path(models.Project)}/restore", ["POST"], restore_project),
     (entity_path(models.Experiment), ["DELETE"], delete_experiment),
     (f"{entity_path(models.Experiment)}/restore", ["POST"], restore_experiment),
+    (entity_path(models.Run), ["GET"], get_run),
     (entity_path(models.Run), ["DELETE"], delete_run),
     (f"{entity_path(models.Run)}/restore", ["POST"], restore_run),
     (entity_path(models.Artifact), ["DELETE"], delete_artifact),
@@ -646,7 +667,11 @@ def plug(app: dash.Dash) -> None:
         # still works under a non-default `routes_pathname_prefix`.
         prefix = str(app.config.routes_pathname_prefix)  # pyright: ignore[reportUnknownArgumentType,reportUnknownMemberType]
         full_path = prefix + path
-        app.server.add_url_rule(full_path, endpoint=full_path, view_func=view_func, methods=methods)
+        # One path can carry several methods (`GET`/`DELETE` on a run), so the endpoint name has to
+        # be per-handler, not per-path, or Flask rejects the second as a duplicate endpoint.
+        app.server.add_url_rule(
+            full_path, endpoint=f"{full_path}:{view_func.__name__}", view_func=view_func, methods=methods
+        )
     app.server.errorhandler(PermissionError)(_handle_permission_error)
     app.server.errorhandler(ValidationError)(_handle_validation_error)
     app.server.errorhandler(models.UnservableArtifactRefError)(_handle_unservable_ref_error)

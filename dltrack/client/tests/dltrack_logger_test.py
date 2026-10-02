@@ -6,11 +6,13 @@
 
 from __future__ import annotations
 
+import threading
 import warnings
 from typing import Any
 
 import pytest
 import requests
+from pytorch_lightning.utilities import rank_zero_only
 
 from dltrack import models
 from dltrack.client import dltrack_logger
@@ -40,6 +42,44 @@ class _FakeAPI:
     ) -> models.Experiment:
         self.calls.append(("get_or_create_experiment", (project_id,), {"name": name, "source": source}))
         return models.Experiment(id=2, project_id=project_id, name=name, source=source)
+
+
+class _FakeRunAPI(_FakeAPI):
+    """Adds what `__init__` itself (not just `from_names`) calls: an existing run is #7, in experiment 2."""
+
+    def log_metric_batch(self, metrics: list[models.LoggedMetrics]) -> None:
+        """Only referenced (bound into the stubbed shippers), never called."""
+
+    def create_experiment(self, new_experiment: models.NewExperiment) -> models.Experiment:
+        self.calls.append(("create_experiment", (new_experiment.project_id,), {}))
+        return models.Experiment(id=2, project_id=new_experiment.project_id, name="new")
+
+    def get_run(self, run_id: int) -> models.Run:
+        self.calls.append(("get_run", (run_id,), {}))
+        return models.Run(id=run_id, experiment_id=2)
+
+    def create_run(self, run: models.NewRun) -> models.Run:
+        self.calls.append(("create_run", (run.experiment_id,), {}))
+        return models.Run(id=99, experiment_id=run.experiment_id)
+
+
+class _FakeShipper:
+    """Stands in for `_Shipper`: nothing spawns, and `ready` is already set so `__init__` doesn't wait."""
+
+    def __init__(self) -> None:
+        self.ready = threading.Event()
+        self.ready.set()
+
+
+def _stub_shippers(monkeypatch: pytest.MonkeyPatch) -> list[_FakeShipper]:
+    started: list[_FakeShipper] = []
+
+    def _start(*_args: Any, **_kwargs: Any) -> _FakeShipper:  # noqa: ANN401
+        started.append(_FakeShipper())
+        return started[-1]
+
+    monkeypatch.setattr(dltrack_logger, "_start_shipper", _start)
+    return started
 
 
 def _stub_api(monkeypatch: pytest.MonkeyPatch, fake_api: _FakeAPI) -> None:
@@ -106,6 +146,54 @@ def test_from_names_passes_settings_through(monkeypatch: pytest.MonkeyPatch) -> 
     DLTrackLogger.from_names("proj", settings=settings)
 
     assert init_kwargs["settings"] is settings
+
+
+@pytest.mark.parametrize(
+    ("run_id_arg", "run_id_env", "creates_a_run"),
+    [(7, None, False), (None, "7", False), (None, None, True)],
+    ids=["argument", "env-var", "neither"],
+)
+def test_a_logger_attaches_to_the_run_it_is_given_and_otherwise_creates_one(
+    monkeypatch: pytest.MonkeyPatch, run_id_arg: int | None, run_id_env: str | None, *, creates_a_run: bool
+) -> None:
+    fake_api = _FakeRunAPI("http://x")
+    _stub_api(monkeypatch, fake_api)
+    _stub_shippers(monkeypatch)
+    if run_id_env is not None:
+        monkeypatch.setenv("DLTRACK_RUN_ID", run_id_env)
+
+    logger = DLTrackLogger(project_id=1, experiment_id=None, run_id=run_id_arg)
+
+    created = [call for call in fake_api.calls if call[0] == "create_run"]
+    assert bool(created) is creates_a_run
+    assert logger.run_id == (99 if creates_a_run else 7)
+    # An attached run's own experiment is used, instead of creating a new experiment around it.
+    assert ("create_experiment" in {call[0] for call in fake_api.calls}) is creates_a_run
+
+
+def test_a_run_from_another_experiment_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_api(monkeypatch, _FakeRunAPI("http://x"))
+    _stub_shippers(monkeypatch)
+
+    with pytest.raises(ValueError, match="belongs to experiment 2, not 5"):
+        DLTrackLogger(project_id=1, experiment_id=5, run_id=7)
+
+
+def test_a_non_zero_rank_makes_no_server_calls_and_logs_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _no_api(base_url: str) -> None:
+        msg = f"a non-zero rank must not talk to the server ({base_url})"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr(dltrack_logger, "BasicDltrackAPI", _no_api)
+    monkeypatch.setattr(rank_zero_only, "rank", 1, raising=False)
+    started = _stub_shippers(monkeypatch)
+
+    logger = DLTrackLogger.from_names("proj", run_id=7)
+    logger.log_metrics({"loss": 1.0})  # no step: raises on rank 0, silently dropped here
+    logger.finalize("success")
+
+    assert started == []
+    assert logger.run_id == 7
 
 
 def _http_error(status: int) -> requests.HTTPError:
