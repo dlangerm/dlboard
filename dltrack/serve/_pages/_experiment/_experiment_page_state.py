@@ -13,6 +13,7 @@ acyclic: this is the one module every other piece of the experiment page depends
 from __future__ import annotations
 
 import hashlib
+import itertools
 import typing
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypedDict, cast
@@ -1406,6 +1407,20 @@ def accordion_view(
 # ============================================================
 
 
+_FORK_NAME: typing.Final = "My view"
+"""
+What a view an edit branched into is called (numbered if you already have one). Named for whose it
+is, not "Copy of ...": those stacked up as "Copy of Copy of Shared view" and said nothing.
+"""
+
+
+def unique_view_name(store: DataStore[...], experiment_id: int, owner_id: int) -> str:
+    """The first of "My view", "My view 2", ... that `owner_id` hasn't used for a view of this experiment yet."""
+    taken = {view.name for view in store.list_views(experiment_id, owner_id)}
+    candidates = (_FORK_NAME if n == 1 else f"{_FORK_NAME} {n}" for n in itertools.count(1))
+    return next(name for name in candidates if name not in taken)
+
+
 def save_page(store: DataStore[...], mutated: BasicExperimentPage) -> BasicExperimentPage:
     """
     Persist `mutated`, branching into a new view of your own first if you don't already own it.
@@ -1420,14 +1435,15 @@ def save_page(store: DataStore[...], mutated: BasicExperimentPage) -> BasicExper
     user_id = get_current_user().id
     if mutated.owner_id == user_id:
         return cast("BasicExperimentPage", store.update_page(mutated))
+    experiment_id = cast("int", mutated.experiment_id)
     return cast(
         "BasicExperimentPage",
         store.create_view(
             BasicExperimentPage,
             models.NewPage[Any, Any](
-                experiment_id=cast("int", mutated.experiment_id),
+                experiment_id=experiment_id,
                 owner_id=user_id,
-                name=f"Copy of {mutated.name or 'Shared view'}",
+                name=unique_view_name(store, experiment_id, user_id),
                 panels=mutated.panels,
                 page_settings=mutated.page_settings,
             ),

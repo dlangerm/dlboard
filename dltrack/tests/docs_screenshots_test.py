@@ -257,6 +257,10 @@ def _open_charted_experiment(page: Page, demo: Demo) -> None:
         # picker and URL. Without waiting for it here, a screenshot can land in that gap and flakily
         # show "Shared view" instead of the branched view's name, depending on nothing but timing.
         expect(page).to_have_url(re.compile(r"\?view=\d+$"))
+        # That branch also toasts ("Saved to your own view"), which isn't part of what these images
+        # document -- and would sit in the corner of every one of them for its ten seconds.
+        page.locator(".mantine-Notification-closeButton").click()
+        expect(page.locator(".mantine-Notification-root")).to_have_count(0)
 
 
 def _stage(shot: DocScreenshot, page: Page, demo: Demo, dltrack_app: Dash) -> Page | Locator:  # noqa: PLR0911, PLR0915 -- one case per screenshot, kept exhaustive

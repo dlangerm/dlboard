@@ -1433,6 +1433,9 @@ def test_editing_the_shared_page_branches_into_your_own_view_without_asking(
     store.update_page(shared.model_copy(update={"panels": [PanelInstance[Any, Any](name="Losses")]}))
     page.reload()
     expect(page.get_by_role("textbox", name="View", exact=True)).to_have_value("Shared view")
+    # Not yours, so the header says up front that an edit will land in a copy.
+    hint = page.get_by_text("Edits save to a copy")
+    expect(hint).to_be_visible()
 
     page.locator(".dl-panel-item-header").first.hover()
     page.get_by_role("button", name="Delete panel").click()
@@ -1440,7 +1443,10 @@ def test_editing_the_shared_page_branches_into_your_own_view_without_asking(
 
     expect(page).to_have_url(re.compile(r"\?view=\d+$"))
     view_id = int(page.url.rsplit("=", 1)[-1])
-    expect(page.get_by_role("textbox", name="View", exact=True)).to_have_value("Copy of Shared view")
+    expect(page.get_by_role("textbox", name="View", exact=True)).to_have_value("My view")
+    # ...and says what just happened, instead of leaving a new view to be noticed in the picker.
+    expect(page.get_by_text("Saved to your own view")).to_be_visible()
+    expect(hint).to_be_hidden()
     store = get_system_data_store()
     branched = store.get_view(BasicExperimentPage, view_id)
     assert branched is not None
