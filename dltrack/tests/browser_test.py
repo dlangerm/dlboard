@@ -263,7 +263,7 @@ def _panel_order(page: Page) -> list[str]:
     )
 
 
-def _wait_until(get_actual: Callable[[], list[str]], expected: list[str]) -> None:
+def _wait_until[T](get_actual: Callable[[], list[T]], expected: list[T]) -> None:
     """
     Poll `get_actual()` until it equals `expected` or ~5s pass.
 
@@ -1377,8 +1377,21 @@ def test_changes_in_a_saved_view_leave_the_shared_view_alone(
         lambda: [p.layout for p in store.get_view(BasicExperimentPage, view_id).panels][:1],  # pyright: ignore[reportOptionalMemberAccess]
         ["grid"],
     )
+    # A grid panel's column count is its own setting too, saved with the view and surviving a reload.
+    page.locator(".dl-panel-item-header").first.hover()
+    columns = page.get_by_role("textbox", name="Grid columns")
+    expect(columns).to_have_value("3")
+    columns.fill("2")
+    columns.press("Enter")
+    _wait_until(
+        lambda: [p.grid_columns for p in store.get_view(BasicExperimentPage, view_id).panels][:1],  # pyright: ignore[reportOptionalMemberAccess]
+        [2],
+    )
+    page.reload()
+    page.locator(".dl-panel-item-header").first.hover()
+    expect(page.get_by_role("textbox", name="Grid columns")).to_have_value("2")
     shared = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
-    assert {p.layout for p in shared.panels} == {"packed"}
+    assert {(p.layout, p.grid_columns) for p in shared.panels} == {("packed", 3)}
 
     page.get_by_role("textbox", name="View", exact=True).click()
     page.get_by_role("option", name="Shared view").click()

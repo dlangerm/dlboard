@@ -10,7 +10,7 @@ import typing
 from abc import ABC, abstractmethod
 from enum import StrEnum
 
-from pydantic import BaseModel, ValidationError, field_validator, model_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 from structlog.stdlib import get_logger
 
 if typing.TYPE_CHECKING:
@@ -24,6 +24,12 @@ _FALLBACK_NATURAL_WIDTH: typing.Final = 400
 """Width used for a chart whose persisted `parameters` no longer validate (e.g. after a schema
 change), so a single broken chart can't crash the whole panel's layout -- `render()` still raises
 for the same case, surfacing as that one chart's own inline error instead."""
+
+
+MIN_GRID_COLUMNS: typing.Final = 1
+MAX_GRID_COLUMNS: typing.Final = 6
+GridColumns = typing.Annotated[int, Field(ge=MIN_GRID_COLUMNS, le=MAX_GRID_COLUMNS)]
+"""How many columns a panel's `"grid"` layout has -- the one range both the model and the UI use."""
 
 
 class ColumnKind(StrEnum):
@@ -340,6 +346,9 @@ class PanelInstance[D, C](BaseModel, frozen=True, extra="forbid"):
     layout: typing.Literal["packed", "grid"] = "packed"
     """`"packed"` sizes each chart to its own natural width and wraps them left-to-right;
     `"grid"` forces every chart onto an equal-width column instead."""
+
+    grid_columns: GridColumns = 3
+    """How many equal-width columns the `"grid"` layout has; unused by `"packed"`."""
 
     def render(self, dataframes: D) -> list[C]:
         """Render a panel."""

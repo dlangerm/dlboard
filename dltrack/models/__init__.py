@@ -42,11 +42,14 @@ from dltrack.models._scopes import Scope, has_scope, require_scope
 from dltrack.models._theme import ColorScheme, SchemeColors, ThemeSpec
 from dltrack.models._user import UNVERIFIED_ISSUER, NewUser, Principal, User
 from dltrack.models._view import (
+    MAX_GRID_COLUMNS,
+    MIN_GRID_COLUMNS,
     RUN_NAME_COLUMN,
     ChartInstance,
     ChartType,
     ChartTypeRegistry,
     ColumnKind,
+    GridColumns,
     NewPage,
     Page,
     PanelInstance,
@@ -56,6 +59,8 @@ from dltrack.models._view import (
 )
 
 __all__ = [
+    "MAX_GRID_COLUMNS",
+    "MIN_GRID_COLUMNS",
     "RUN_NAME_COLUMN",
     "UNVERIFIED_ISSUER",
     "ActivityStats",
@@ -82,6 +87,7 @@ __all__ = [
     "Experiment",
     "ExperimentSource",
     "FlatHparamDict",
+    "GridColumns",
     "HyperParams",
     "InstalledPlugin",
     "IntervalId",
