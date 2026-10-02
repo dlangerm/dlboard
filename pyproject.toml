@@ -201,6 +201,11 @@ ignore_decorators = [
   "@typing.override"
 ]
 ignore_names = [
+  # `plugins/auth/password.py`'s `_Field`/`_Footer` NamedTuple members -- read by `password_form.html` (Jinja attribute
+  # access), never by a Python `.name` vulture can see.
+  "input_type",
+  "autocomplete",
+  "link_text",
   # `PluginProtocol.plug(app: Dash) -> None` -- every plugin module's install hook, called
   # structurally as `plugin.plug(app)` off whatever module a deployment's plugin list supplies
   # (see `dltrack.serve.resolve_plugins`/`dltrack.serve.app.app`), never by a literal `.plug(`

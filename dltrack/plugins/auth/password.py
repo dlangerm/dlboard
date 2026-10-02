@@ -23,8 +23,8 @@ import time
 from collections import defaultdict
 from dataclasses import dataclass
 from enum import StrEnum
-from functools import cache
-from typing import TYPE_CHECKING, ClassVar, Final
+from pathlib import Path
+from typing import TYPE_CHECKING, ClassVar, Final, NamedTuple
 from urllib.parse import quote
 
 import pendulum
@@ -98,10 +98,11 @@ def verify_password(password: str, encoded: str) -> bool:
     return hmac.compare_digest(actual, expected)
 
 
-@cache
-def _decoy_hash() -> str:
-    """Checked against when a username doesn't exist, so a miss takes as long as a wrong password."""
-    return hash_password(secrets.token_urlsafe())
+_DECOY_HASH: Final = hash_password(secrets.token_urlsafe())
+"""Checked against when a username doesn't exist, so a miss takes as long as a wrong password.
+
+Hashed once at import: computing it lazily would make the first miss pay for two hashes, which is itself
+a timing tell."""
 
 
 def set_password(store: DataStore[...], user: User, password: str) -> User:
@@ -162,50 +163,27 @@ _THROTTLE: AppSlot[_Throttle] = AppSlot("password sign-in throttle")
 
 # -- Pages ----------------------------------------------------------------------------------------
 
-_PAGE: Final = """<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{ title }} · dltrack</title>
-<style>
-:root { color-scheme: light dark; --bg: #f8f9fa; --card: #fff; --fg: #212529; --dim: #6c757d;
-  --line: #dee2e6; --accent: #228be6; --bad: #e03131; --good: #2f9e44; }
-@media (prefers-color-scheme: dark) { :root { --bg: #1a1b1e; --card: #25262b; --fg: #c1c2c5;
-  --dim: #909296; --line: #373a40; } }
-body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: var(--bg);
-  color: var(--fg); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
-main { width: min(360px, calc(100vw - 32px)); background: var(--card); border: 1px solid var(--line);
-  border-radius: 10px; padding: 28px; box-sizing: border-box; }
-h1 { font-size: 20px; margin: 0 0 4px; } .brand { color: var(--dim); font-size: 13px; margin-bottom: 20px; }
-label { display: block; font-size: 13px; font-weight: 600; margin: 14px 0 4px; }
-input[type=text], input[type=password] { width: 100%; box-sizing: border-box; padding: 8px 10px;
-  border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit; font: inherit; }
-.check { display: flex; gap: 8px; align-items: center; margin-top: 14px; font-size: 14px; }
-button { width: 100%; margin-top: 22px; padding: 9px; border: 0; border-radius: 6px;
-  background: var(--accent); color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
-.error { color: var(--bad); font-size: 14px; margin-top: 14px; } .message { color: var(--good); font-size: 14px; margin-top: 14px; }
-.footer { margin-top: 18px; font-size: 13px; color: var(--dim); text-align: center; } a { color: var(--accent); }
-</style></head><body><main>
-<div class="brand">dltrack</div><h1>{{ title }}</h1>
-<form method="post">
-<input type="hidden" name="csrf" value="{{ csrf }}">
-{% for name, label, kind, autocomplete in fields %}
-{% if kind == "checkbox" %}<label class="check"><input type="checkbox" name="{{ name }}"> {{ label }}</label>
-{% else %}<label for="{{ name }}">{{ label }}</label>
-<input id="{{ name }}" name="{{ name }}" type="{{ kind }}" required autocomplete="{{ autocomplete }}">
-{% endif %}{% endfor %}
-{% if error %}<div class="error">{{ error }}</div>{% endif %}
-{% if message %}<div class="message">{{ message }}</div>{% endif %}
-<button type="submit">{{ submit }}</button>
-</form>
-{% if footer %}<div class="footer">{{ footer[0] }} <a href="{{ footer[1] }}">{{ footer[2] }}</a></div>{% endif %}
-</main></body></html>"""
 
-type _Field = tuple[str, str, str, str]
-"""`(form field name, label, input type, autocomplete hint)`."""
+_PAGE: Final = Path(__file__).with_name("password_form.html").read_text()
 
-_USERNAME: Final[_Field] = ("username", "Username", "text", "username")
-_PASSWORD: Final[_Field] = ("password", "Password", "password", "current-password")
-_NEW_PASSWORD: Final[_Field] = ("password", "New password", "password", "new-password")
-_CONFIRM: Final[_Field] = ("confirm", "Confirm password", "password", "new-password")
+
+class _Field(NamedTuple):
+    name: str
+    label: str
+    input_type: str
+    autocomplete: str
+
+
+class _Footer(NamedTuple):
+    text: str
+    href: str
+    link_text: str
+
+
+_USERNAME: Final = _Field("username", "Username", "text", "username")
+_PASSWORD: Final = _Field("password", "Password", "password", "current-password")
+_NEW_PASSWORD: Final = _Field("password", "New password", "password", "new-password")
+_CONFIRM: Final = _Field("confirm", "Confirm password", "password", "new-password")
 
 
 def _csrf_token() -> str:
@@ -227,8 +205,7 @@ class _Form:
     title: str
     fields: list[_Field]
     submit: str
-    footer: tuple[str, str, str] | None = None
-    """`(text, link href, link text)` under the form."""
+    footer: _Footer | None = None
 
     def render(self, *, error: str | None = None, message: str | None = None) -> str:
         return render_template_string(
@@ -259,7 +236,7 @@ def _login() -> str | Response:
         "Sign in",
         [_USERNAME, _PASSWORD],
         "Sign in",
-        ("No account yet?", "/signup", "Create one") if open_signup else None,
+        _Footer("No account yet?", "/signup", "Create one") if open_signup else None,
     )
     if request.method == "GET":
         return form.render()
@@ -271,7 +248,7 @@ def _login() -> str | Response:
     store = get_system_data_store()
     user = store.find_user(username)
     credential = store.get_password_credential(user.id) if user and user.issuer == PASSWORD_ISSUER else None
-    matches = verify_password(password, credential.password_hash if credential else _decoy_hash())
+    matches = verify_password(password, credential.password_hash if credential else _DECOY_HASH)
     if credential is None or not matches:
         throttle.fail(username)
         return form.render(error="Wrong username or password.")
@@ -291,7 +268,7 @@ def _signup() -> str | Response:
         "Create an account",
         [_USERNAME, _NEW_PASSWORD, _CONFIRM],
         "Create account",
-        ("Already have an account?", "/login", "Sign in"),
+        _Footer("Already have an account?", "/login", "Sign in"),
     )
     if request.method == "GET":
         return form.render()
@@ -316,9 +293,9 @@ def _signup() -> str | Response:
 def _change_password() -> str | Response:
     form = _Form(
         "Change password",
-        [("current", "Current password", "password", "current-password"), _NEW_PASSWORD, _CONFIRM],
+        [_Field("current", "Current password", "password", "current-password"), _NEW_PASSWORD, _CONFIRM],
         "Change password",
-        ("", "/", "Back to dltrack"),
+        _Footer("", "/", "Back to dltrack"),
     )
     if request.method == "GET":
         return form.render()
@@ -340,9 +317,9 @@ def _manage_users() -> str | Response:
         abort(403)
     form = _Form(
         "Add a user or reset a password",
-        [_USERNAME, _NEW_PASSWORD, _CONFIRM, ("admin", "Make them an admin", "checkbox", "off")],
+        [_USERNAME, _NEW_PASSWORD, _CONFIRM, _Field("admin", "Make them an admin", "checkbox", "off")],
         "Save",
-        ("", "/admin", "Back to admin"),
+        _Footer("", "/admin", "Back to admin"),
     )
     if request.method == "GET":
         return form.render()
