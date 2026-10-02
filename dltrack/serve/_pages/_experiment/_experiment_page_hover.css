@@ -77,3 +77,8 @@
 [data-dl-copy-chart-link][data-dl-copied] {
   color: var(--mantine-color-green-6);
 }
+
+/* The view menu's rename/delete items only apply to a view you own -- see `_views.VIEW_MENU_ID`. */
+.mantine-Menu-dropdown:not(.dl-view-owned) .dl-view-owner-only {
+  display: none;
+}

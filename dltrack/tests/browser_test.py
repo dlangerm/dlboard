@@ -1416,8 +1416,9 @@ def test_editing_a_view_you_do_not_own_branches_into_a_separate_view_of_your_own
     # Not the owner: no rename/delete for a view that isn't yours.
     expect(page.get_by_role("button", name="View actions")).to_be_visible()
     page.get_by_role("button", name="View actions").click()
+    expect(page.get_by_role("menuitem", name="Save as a new view…")).to_be_visible()
     expect(page.get_by_role("menuitem", name="Rename this view…")).to_have_count(0)
-    expect(page.get_by_role("button", name="Delete this view")).to_have_count(0)
+    expect(page.get_by_role("menuitem", name="Delete this view…")).to_have_count(0)
     page.keyboard.press("Escape")
 
     page.locator(".dl-panel-item-header").first.hover()
@@ -1452,9 +1453,6 @@ def test_renaming_a_view_you_own_updates_the_picker(
     page.get_by_role("textbox", name="View name").fill("first name")
     page.get_by_role("button", name="Save view").click()
     expect(page.get_by_role("textbox", name="View", exact=True)).to_have_value("first name")
-    # The header is re-rendered as the view you now own (which adds the rename item and delete button) a
-    # beat after the picker changes; opening the menu before then would open the stale, rename-less one.
-    expect(page.get_by_role("button", name="Delete this view")).to_be_visible()
 
     page.get_by_role("button", name="View actions").click()
     page.get_by_role("menuitem", name="Rename this view…").click()
@@ -1462,6 +1460,38 @@ def test_renaming_a_view_you_own_updates_the_picker(
     page.get_by_role("button", name="Save name").click()
 
     expect(page.get_by_role("textbox", name="View", exact=True)).to_have_value("better name")
+    assert console_errors == []
+
+
+def test_a_view_branched_by_an_edit_can_be_deleted_without_a_reload(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """
+    Most views are never saved on purpose -- an edit on the shared page branches into one (see
+    `save_page`). The header isn't rebuilt when that happens, so its delete item has to appear in
+    place, not only after a reload.
+    """
+    _create_project_and_experiment(page, live_server_url, "Delete Branched View Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    store = get_system_data_store()
+    shared = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
+    store.update_page(shared.model_copy(update={"panels": [PanelInstance[Any, Any](name="Losses")]}))
+    page.reload()
+
+    page.locator(".dl-panel-item-header").first.hover()
+    page.get_by_role("button", name="Delete panel").click()
+    page.get_by_role("button", name="Delete", exact=True).click()
+    expect(page).to_have_url(re.compile(r"\?view=\d+$"))
+    view_id = int(page.url.rsplit("=", 1)[-1])
+
+    page.get_by_role("button", name="View actions").click()
+    page.get_by_role("menuitem", name="Delete this view…").click()
+    page.get_by_role("button", name="Delete", exact=True).click()
+
+    expect(page).to_have_url(re.compile(rf"/experiment/{experiment_id}\??$"))
+    expect(page.get_by_role("textbox", name="View", exact=True)).to_have_value("Shared view")
+    assert store.get_view(BasicExperimentPage, view_id) is None
     assert console_errors == []
 
 
