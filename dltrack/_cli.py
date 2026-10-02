@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Annotated
@@ -26,6 +27,24 @@ serve_app = cyclopts.App(name="serve", help="Run the dltrack server against a sp
 app.command(serve_app)
 
 _log = structlog.stdlib.get_logger(__name__)
+
+
+def _configure_logging() -> None:
+    """
+    Log at INFO, with tracebacks that never print local variables.
+
+    structlog's default traceback renderer shows every frame's locals, which is how a password or an
+    API token held by a function that then raised would end up in the server log.
+    """
+    *defaults, _ = structlog.get_config()["processors"]
+    renderer = structlog.dev.ConsoleRenderer(
+        colors=sys.stdout.isatty(),
+        exception_formatter=structlog.dev.RichTracebackFormatter(show_locals=False),
+    )
+    structlog.configure_once(
+        processors=[*defaults, renderer], wrapper_class=structlog.make_filtering_bound_logger(logging.INFO)
+    )
+
 
 _DEFAULT_SQLITE_LOCATION = Path.home() / ".dltrack.sqlite"
 _DEFAULT_ARTIFACT_STORE_LOCATION = Path.home() / ".dltrack_artifacts"
@@ -118,7 +137,7 @@ def local(
     *, opts: Annotated[LocalServeOptions, cyclopts.Parameter(name="*")] = _DEFAULT_LOCAL_SERVE_OPTIONS
 ) -> None:
     """Run the dltrack server locally -- anonymous, single-user, just like `tensorboard`."""
-    structlog.configure_once(wrapper_class=structlog.make_filtering_bound_logger(logging.INFO))
+    _configure_logging()
     set_setting_env(SqliteAppSettings, "sqlite_location", opts.sqlite_location)
     set_setting_env(FilesystemAppSettings, "artifact_store_location", opts.artifact_store_location)
     _log.info("dltrack server is starting...")
@@ -146,7 +165,7 @@ class CustomServeOptions:
 @serve_app.command
 def custom(*, opts: Annotated[CustomServeOptions, cyclopts.Parameter(name="*")]) -> None:
     """Run the dltrack server against a caller-supplied plugin list -- storage, auth, and all."""
-    structlog.configure_once(wrapper_class=structlog.make_filtering_bound_logger(logging.INFO))
+    _configure_logging()
     _log.info("dltrack server is starting...")
     _serve(opts.plugins, opts.runtime)
 

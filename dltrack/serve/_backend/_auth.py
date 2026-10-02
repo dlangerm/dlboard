@@ -11,7 +11,10 @@ reads it back; a request it can't resolve never reaches its route at all.
 from __future__ import annotations
 
 from datetime import timedelta
+from enum import StrEnum
+from http import HTTPMethod, HTTPStatus
 from typing import TYPE_CHECKING, Annotated, Any, Final
+from urllib.parse import urlsplit, urlunsplit
 
 from flask import g, has_request_context, jsonify, redirect, request, session
 from pydantic import SecretStr, field_validator
@@ -42,6 +45,16 @@ get_auth_settings = AUTH_SETTINGS.get
 
 _USER_KEY: Final = "dltrack_user"
 """Where the request's resolved `User` lives on `flask.g`."""
+
+
+class UnauthenticatedRequestError(RuntimeError):
+    """`get_current_user()` ran outside a request, or on one that never went through the request gate."""
+
+
+class _Mime(StrEnum):
+    JSON = "application/json"
+    HTML = "text/html"
+
 
 SIGN_OUT_PATH: Final = "/sign-out"
 """Ends the browser's session, then returns it to the app (and so, signed out, to the provider's login)."""
@@ -99,10 +112,16 @@ def add_public_route(app: Dash, rule: str, view_func: Callable[..., Any], method
 
 
 def safe_next_path(next_path: str | None) -> str:
-    """`next_path` if it's a same-site path, else `/` -- so a login form's `?next=` can't redirect off-site."""
-    if next_path and next_path.startswith("/") and not next_path.startswith(("//", "/\\")):
-        return next_path
-    return "/"
+    """
+    `next_path` reduced to a same-site path and query, else `/` -- so a login form's `?next=` can't redirect off-site.
+
+    Rebuilt from the parsed path and query alone, so nothing it carried (scheme, host, fragment) survives.
+    Browsers read a backslash as a slash, so a path that opens with `/` and a backslash is a protocol-relative URL in disguise.
+    """
+    target = urlsplit(next_path or "")
+    if target.scheme or target.netloc or "\\" in target.path or not target.path.startswith("/"):
+        return "/"
+    return urlunsplit(("", "", target.path, target.query, ""))
 
 
 def bind_current_user(user: User) -> None:
@@ -120,7 +139,7 @@ def get_current_user() -> User:
     user = find_current_user()
     if user is None:
         msg = "No authenticated user for this request -- is it running behind the request gate?"
-        raise RuntimeError(msg)
+        raise UnauthenticatedRequestError(msg)
     return user
 
 
@@ -167,7 +186,7 @@ def _session_user(store: DataStore[...]) -> User | None:
 def _authenticate(store: DataStore[...], provider: AuthProvider[...], settings: AuthSettings) -> User | None:
     auth = request.authorization
     if auth is not None and auth.type == "bearer" and _api_tokens.is_api_token(auth.token or ""):
-        # A dltrack token that doesn't check out is a hard failure -- never quietly fall back to
+        # A well-formed dltrack token that doesn't check out is a hard failure -- never quietly fall back to
         # some other identity for a caller that plainly meant to be this one.
         return _api_tokens.user_for_token(store, auth.token or "")
     if provider.verifies_identity and (user := _session_user(store)) is not None:
@@ -181,10 +200,10 @@ def _challenge(provider: AuthProvider[...]) -> BaseResponse | tuple[BaseResponse
     login = provider.login_url(request.full_path.rstrip("?"))
     # A browser *prefers* HTML; a script's `Accept: */*` merely tolerates it, and must get a plain 401
     # rather than be redirected to a login form it would happily follow to a 200.
-    prefers_html = request.accept_mimetypes.best_match(["application/json", "text/html"]) == "text/html"
-    if login is not None and request.method == "GET" and prefers_html:
+    prefers_html = request.accept_mimetypes.best_match([_Mime.JSON, _Mime.HTML]) == _Mime.HTML
+    if login is not None and request.method == HTTPMethod.GET and prefers_html:
         return redirect(login)
-    return jsonify(error="Authentication required"), 401
+    return jsonify(error="Authentication required"), HTTPStatus.UNAUTHORIZED
 
 
 def _sign_out() -> BaseResponse:

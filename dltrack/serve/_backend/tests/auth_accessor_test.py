@@ -34,7 +34,10 @@ def test_set_auth_provider_refuses_to_overwrite_an_existing_one() -> None:
 
 
 def test_get_current_user_refuses_a_request_nobody_authenticated() -> None:
-    with Flask(__name__).test_request_context(), pytest.raises(RuntimeError, match="request gate"):
+    with (
+        Flask(__name__).test_request_context(),
+        pytest.raises(_auth.UnauthenticatedRequestError, match="request gate"),
+    ):
         _auth.get_current_user()
 
 
@@ -90,7 +93,18 @@ def test_a_username_taken_by_another_identity_is_refused(store: SQLLiteStore) ->
 
 @pytest.mark.parametrize(
     ("next_path", "expected"),
-    [("/project/1", "/project/1"), ("//evil.example", "/"), ("https://evil.example", "/"), (None, "/")],
+    [
+        ("/project/1", "/project/1"),
+        ("/project/1?tab=runs#top", "/project/1?tab=runs"),
+        ("//evil.example", "/"),
+        ("///evil.example", "/evil.example"),
+        ("/\\evil.example", "/"),
+        ("https://evil.example", "/"),
+        ("javascript:alert(1)", "/"),
+        ("relative/path", "/"),
+        ("", "/"),
+        (None, "/"),
+    ],
 )
 def test_safe_next_path_only_allows_same_site_paths(next_path: str | None, expected: str) -> None:
     assert _auth.safe_next_path(next_path) == expected

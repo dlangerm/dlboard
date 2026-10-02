@@ -59,12 +59,33 @@ def test_an_expired_token_stops_authenticating(store: SQLLiteStore) -> None:
     assert _api_tokens.user_for_token(store, raw) is None
 
 
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "dlt_nope_nope",
+        "dlt_",
+        "Bearer something-else",
+        "{token}\n",
+        "{token}extra",
+        "{token}_more",
+        "x{token}",
+    ],
+)
+def test_only_a_whole_well_formed_token_is_shaped_like_one(store: SQLLiteStore, raw: str) -> None:
+    owner = store.get_or_create_user(models.Principal.unverified("owner"))
+    _, minted = _api_tokens.mint_api_token(store, owner, "ci")
+    candidate = raw.format(token=minted)
+
+    assert not _api_tokens.is_api_token(candidate)
+    assert _api_tokens.user_for_token(store, candidate) is None
+
+
 def _flip_last_char(raw: str) -> str:
     return raw[:-1] + ("A" if raw[-1] != "A" else "B")
 
 
 def _unknown_token(_raw: str) -> str:
-    return "dlt_nope_nope"
+    return "dlt_" + "0" * 16 + "_" + "A" * 43
 
 
 @pytest.mark.parametrize("tamper", [_flip_last_char, _unknown_token])
