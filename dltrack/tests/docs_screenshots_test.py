@@ -188,9 +188,10 @@ def demo(live_server_url: str, dltrack_app: Dash, tmp_path_factory: pytest.TempP
         api.log_artifact_batch(converted)
 
     # Kept separate from `sweep` (which every other scene charts and forks personal views off of) so
-    # the PERSONAL_VIEWS scene's own view picker only ever shows what it creates itself. Seeded after
-    # the sweep's own runs so it doesn't shift their default "Run N" numbering.
-    baseline_run = api.create_run(models.NewRun(experiment_id=baseline.id, created_at=_T0))
+    # the PERSONAL_VIEWS scene's own view picker only ever shows what it creates itself. Named
+    # explicitly (not left to the auto-generated default) so the PERSONAL_VIEWS screenshot stays
+    # deterministic rather than showing a different random name on every render.
+    baseline_run = api.create_run(models.NewRun(experiment_id=baseline.id, name="baseline", created_at=_T0))
     baseline_steps = np.arange(20)
     baseline_loss = 0.4 + 1.5 * np.exp(-baseline_steps * 0.05) + rng.normal(0, 0.02, 20)
     api.log_metric_batch(

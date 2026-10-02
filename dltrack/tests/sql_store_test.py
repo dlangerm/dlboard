@@ -108,6 +108,17 @@ def test_get_runs_paginates_most_recently_created_first(store: SQLLiteStore, exp
     assert [r.id for r in second_page] == [runs[0].id]
 
 
+def test_a_run_created_without_a_name_gets_a_generated_one_that_survives_persistence(
+    store: SQLLiteStore, experiment_id: int
+) -> None:
+    created = store.create_run(models.NewRun(experiment_id=experiment_id))
+
+    assert created.name
+    refetched = store.get_run(created.id)
+    assert refetched is not None
+    assert refetched.name == created.name
+
+
 def test_get_runs_defaults_to_a_generous_page_covering_typical_use(
     store: SQLLiteStore, experiment_id: int
 ) -> None:
