@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import re
 import secrets
 from typing import TYPE_CHECKING, Final
 
@@ -23,6 +24,13 @@ if TYPE_CHECKING:
     from dltrack.models import DataStore, User
 
 API_TOKEN_PREFIX: Final = "dlt_"
+_ID_BYTES: Final = 8
+_SECRET_BYTES: Final = 32
+_URLSAFE_SECRET_LENGTH: Final = 43
+"""`secrets.token_urlsafe(_SECRET_BYTES)` is unpadded base64: 4 characters per 3 bytes, rounded up."""
+_TOKEN_SHAPE: Final = re.compile(
+    rf"{API_TOKEN_PREFIX}(?P<token_id>[0-9a-f]{{{2 * _ID_BYTES}}})_(?P<secret>[A-Za-z0-9_-]{{{_URLSAFE_SECRET_LENGTH}}})"
+)
 _TOUCH_INTERVAL: Final = pendulum.duration(minutes=1)
 """How stale `ApiToken.last_used_at` may get -- so a busy training job doesn't write on every request."""
 
@@ -32,15 +40,15 @@ def _hash(secret: str) -> str:
 
 
 def is_api_token(raw: str) -> bool:
-    """Whether `raw` is shaped like a dltrack API token (as opposed to some other bearer credential)."""
-    return raw.startswith(API_TOKEN_PREFIX)
+    """Whether `raw`, in full, is shaped like a dltrack API token (as opposed to some other bearer credential)."""
+    return _TOKEN_SHAPE.fullmatch(raw) is not None
 
 
 def mint_api_token(
     store: DataStore[...], user: User, name: str, expires_at: AwareDatetime | None = None
 ) -> tuple[models.ApiToken, str]:
     """Create a token for `user`, returning it alongside the only copy of its full secret string."""
-    token_id, secret = secrets.token_hex(8), secrets.token_urlsafe(32)
+    token_id, secret = secrets.token_hex(_ID_BYTES), secrets.token_urlsafe(_SECRET_BYTES)
     token = store.create_api_token(
         models.NewApiToken(
             user_id=user.id, name=name, token_id=token_id, secret_hash=_hash(secret), expires_at=expires_at
@@ -51,12 +59,14 @@ def mint_api_token(
 
 def user_for_token(store: DataStore[...], raw: str) -> User | None:
     """The (enabled) user an unexpired, unrevoked token `raw` authenticates as, else `None`."""
-    token_id, _, secret = raw.removeprefix(API_TOKEN_PREFIX).partition("_")
-    token = store.get_api_token(token_id)
+    shape = _TOKEN_SHAPE.fullmatch(raw)
+    if shape is None:
+        return None
+    token = store.get_api_token(shape["token_id"])
     now = pendulum.now(pendulum.UTC)
     if (
         token is None
-        or not hmac.compare_digest(token.secret_hash, _hash(secret))
+        or not hmac.compare_digest(token.secret_hash, _hash(shape["secret"]))
         or token.revoked_at is not None
         or (token.expires_at is not None and token.expires_at <= now)
     ):
