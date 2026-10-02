@@ -165,7 +165,7 @@ class AuthorizingDataStore(models.DataStore[...]):
         return self._inner.get_or_create_user(principal)
 
     def get_user(self, user_id: int) -> models.User | None:
-        return next((u for u in self.list_users() if u.id == user_id), None)
+        return next((u for u in self._visible_users() if u.id == user_id), None)
 
     def find_user(self, username: str) -> models.User | None:
         return self._inner.find_user(username)
@@ -175,14 +175,19 @@ class AuthorizingDataStore(models.DataStore[...]):
         return self._inner.update_user(user)
 
     def list_users(self) -> list[models.User]:
+        return list(self._visible_users())
+
+    def _visible_users(self) -> Iterator[models.User]:
         """Everyone, for an admin; otherwise the actor and the members of projects they can see."""
-        users = self._inner.list_users()
         if not self._enforce or has_scope(self._actor, Scope.USER_MANAGE):
-            return users
-        visible = list(self._visible_project_ids())
-        known = {g.user_id for g in self._inner.list_project_grants(visible)} | {self._actor.id}
-        known |= {p.created_by for p in self._all_projects().values() if p.id in visible}
-        return [u for u in users if u.id in known]
+            yield from self._inner.list_users()
+            return
+        visible = frozenset(self._visible_project_ids())
+        projects = self._all_projects()
+        known: set[int | None] = {self._actor.id}
+        known.update(g.user_id for g in self._inner.list_project_grants(visible))
+        known.update(projects[pid].created_by for pid in visible)
+        yield from (u for u in self._inner.list_users() if u.id in known)
 
     def create_api_token(self, token: models.NewApiToken) -> models.ApiToken:
         self._require_self_or(token.user_id, Scope.USER_MANAGE)
@@ -253,14 +258,15 @@ class AuthorizingDataStore(models.DataStore[...]):
         get their own rather than one being refused the other's. Raises `AmbiguousProjectError` if
         the actor can write to more than one project of that name.
         """
-        matches = [p for p in self.get_projects() if p.name == name and self._can(p.id, ProjectRole.EDITOR)]
-        match matches:
-            case []:
+        writable = (p for p in self.get_projects() if p.name == name and self._can(p.id, ProjectRole.EDITOR))
+        # Two is all it takes to know the name is ambiguous, so never look past the second match.
+        match next(writable, None), next(writable, None):
+            case None, _:
                 return self.create_project(models.NewProject(name=name, description=description))
-            case [project]:
+            case project, None:
                 return project
             case _:
-                msg = f"You can write to {len(matches)} projects named {name!r}; refer to one by id instead"
+                msg = f"You can write to more than one project named {name!r}; refer to one by id instead"
                 raise models.AmbiguousProjectError(msg)
 
     def get_project(self, database_id: int) -> models.Project | None:
