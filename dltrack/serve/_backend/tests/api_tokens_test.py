@@ -21,7 +21,6 @@ def test_a_minted_token_authenticates_as_its_owner_and_is_stored_hashed(store: S
 
     token, raw = _api_tokens.mint_api_token(store, owner, "ci")
 
-    assert _api_tokens.is_api_token(raw)
     assert raw.split("_", 2)[2] not in token.secret_hash
     user = _api_tokens.user_for_token(store, raw)
     assert user is not None
@@ -71,12 +70,11 @@ def test_an_expired_token_stops_authenticating(store: SQLLiteStore) -> None:
         "x{token}",
     ],
 )
-def test_only_a_whole_well_formed_token_is_shaped_like_one(store: SQLLiteStore, raw: str) -> None:
+def test_only_a_whole_well_formed_token_authenticates(store: SQLLiteStore, raw: str) -> None:
     owner = store.get_or_create_user(models.Principal.unverified("owner"))
     _, minted = _api_tokens.mint_api_token(store, owner, "ci")
     candidate = raw.format(token=minted)
 
-    assert not _api_tokens.is_api_token(candidate)
     assert _api_tokens.user_for_token(store, candidate) is None
 
 

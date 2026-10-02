@@ -39,11 +39,6 @@ def _hash(secret: str) -> str:
     return hashlib.sha256(secret.encode()).hexdigest()
 
 
-def is_api_token(raw: str) -> bool:
-    """Whether `raw`, in full, is shaped like a dltrack API token (as opposed to some other bearer credential)."""
-    return _TOKEN_SHAPE.fullmatch(raw) is not None
-
-
 def mint_api_token(
     store: DataStore[...], user: User, name: str, expires_at: AwareDatetime | None = None
 ) -> tuple[models.ApiToken, str]:
