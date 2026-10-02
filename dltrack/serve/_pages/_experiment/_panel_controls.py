@@ -70,26 +70,36 @@ def _register_create_panel(app: Dash) -> None:
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
+        Output(core.NEW_PANEL_NAME_ID, "error"),
         Input(core.NEW_PANEL_ID, "n_clicks"),
+        Input(core.NEW_PANEL_NAME_ID, "n_submit"),
         State(core.NEW_PANEL_NAME_ID, "value"),
         State(core.STATE_PAGE_STORAGE, "data"),
         prevent_initial_call=True,
     )
-    def create_panel(n_clicks: int, panel_name: str, page_json: str) -> tuple[html.Div, str]:
-        if not n_clicks:
+    def create_panel(
+        n_clicks: int | None, n_submit: int | None, panel_name: str | None, page_json: str
+    ) -> tuple[Any, str | NoUpdate, str | None]:
+        """Add an empty panel to whichever tab is showing, so it appears right where you are."""
+        if not n_clicks and not n_submit:
             raise PreventUpdate
+        panel_name = (panel_name or "").strip()
+        curr_page = core.BasicExperimentPage.model_validate_json(page_json)
         if not panel_name:
-            msg = "Panel name cannot be empty"
-            raise ValueError(msg)
+            return no_update, no_update, "Give the panel a name"
+        if core.panel_name_taken(curr_page.panels, panel_name):
+            return no_update, no_update, f"A panel named {panel_name!r} already exists"
 
-        def add_panel(panels: list[Any]) -> list[Any]:
-            if core.panel_name_taken(panels, panel_name):
-                msg = f"A panel named {panel_name!r} already exists"
-                raise ValueError(msg)
-            return [*panels, PanelInstance(name=panel_name)]
-
-        page, container = core.mutate_panels_and_rerender(page_json, add_panel)
-        return container, page.model_dump_json()
+        active_tab = curr_page.page_settings.get(core.ACTIVE_TAB_KEY)
+        tab = (
+            active_tab
+            if isinstance(active_tab, str) and any(p.tab == active_tab for p in curr_page.panels)
+            else ""
+        )
+        page, container = core.mutate_panels_and_rerender(
+            page_json, lambda panels: [*panels, PanelInstance(name=panel_name, tab=tab)]
+        )
+        return container, page.model_dump_json(), None
 
 
 def _register_add_chart(app: Dash) -> None:
