@@ -190,6 +190,7 @@ def set_password(
     admin: Annotated[bool, cyclopts.Parameter(help="Also make them an admin.")] = False,
 ) -> None:
     """Create a password user, or reset an existing one's password -- e.g. to make a deployment's first admin."""
+    _configure_logging()
     password = getpass.getpass(f"New password for {username}: ")
     problem = new_password_problem(password, getpass.getpass("Confirm it: "))
     if problem is not None:
