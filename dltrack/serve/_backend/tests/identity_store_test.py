@@ -141,3 +141,12 @@ def test_a_run_is_fetched_by_id_until_it_is_deleted(store: SQLLiteStore, experim
     store.delete_run(run.id, actor)
 
     assert store.get_run(run.id) is None
+
+
+def test_new_users_start_from_unrelated_session_epochs_so_a_recreated_database_cannot_honor_old_sessions(
+    store: SQLLiteStore,
+) -> None:
+    users = [store.get_or_create_user(_principal(f"sub-{i}")) for i in range(5)]
+
+    assert len({u.session_epoch for u in users}) > 1
+    assert all(store.get_user(u.id) == u for u in users)

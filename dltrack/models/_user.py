@@ -10,6 +10,7 @@ added by and a note names its author with.
 
 from __future__ import annotations
 
+import secrets
 from typing import Final, Self
 
 import pendulum
@@ -69,6 +70,14 @@ class NewUser(BaseModel, frozen=True, extra="forbid"):
     created_at: AwareDatetime = Field(default_factory=lambda: pendulum.now(pendulum.UTC))
     """When this user was first seen."""
 
+    session_epoch: int = Field(default_factory=lambda: secrets.randbits(31))
+    """
+    A session is only valid while its epoch matches this one, so bumping it signs the user out everywhere.
+
+    It starts random, not at 0: a session cookie names a user id, and a recreated database hands the same
+    ids out again -- a fixed starting epoch would let an old cookie sign in as whoever now holds its id.
+    """
+
     @classmethod
     def from_principal(cls, principal: Principal) -> Self:
         """The user a never-before-seen `principal` is created as."""
@@ -89,6 +98,3 @@ class User(NewUser, frozen=True, extra="forbid"):
 
     disabled_at: AwareDatetime | None = None
     """When an admin disabled this user, if at all. A disabled user can't authenticate by any means."""
-
-    session_epoch: int = 0
-    """Bumped to sign this user out everywhere (e.g. on a password change): older sessions stop matching."""
