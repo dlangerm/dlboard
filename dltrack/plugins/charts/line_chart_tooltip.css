@@ -1,0 +1,71 @@
+/* The line chart's hover tooltip -- drawn by `lineChartTooltip` in `line_chart_tooltip.js`. */
+.dl-chart-tooltip {
+  min-width: 11rem;
+  max-width: 20rem;
+  padding: 0.5rem 0.625rem;
+  background: var(--mantine-color-body);
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-md);
+  box-shadow: var(--mantine-shadow-md);
+  font-size: var(--mantine-font-size-xs);
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+.dl-chart-tooltip-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.375rem;
+  padding-bottom: 0.375rem;
+  margin-bottom: 0.25rem;
+  border-bottom: 1px solid var(--mantine-color-default-border);
+}
+
+.dl-chart-tooltip-axis {
+  color: var(--mantine-color-dimmed);
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.dl-chart-tooltip-x {
+  font-weight: 600;
+}
+
+.dl-chart-tooltip-row {
+  display: grid;
+  grid-template-columns: 0.5rem minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 0.5rem;
+  padding: 0.125rem 0;
+}
+
+.dl-chart-tooltip-swatch {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+}
+
+.dl-chart-tooltip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dl-chart-tooltip-source {
+  margin-left: 0.375rem;
+  color: var(--mantine-color-dimmed);
+}
+
+.dl-chart-tooltip-value {
+  padding-left: 0.75rem;
+  font-weight: 600;
+  text-align: right;
+}
+
+.dl-chart-tooltip-more {
+  padding-top: 0.25rem;
+  color: var(--mantine-color-dimmed);
+}

@@ -16,6 +16,7 @@ from dltrack.plugins.charts._sampling import downsample_grouped, downsample_seri
 from dltrack.plugins.charts.bar_chart import BarChart, BarChartSettings
 from dltrack.plugins.charts.line_chart import (
     _TICK_FORMATTER,
+    _TOOLTIP_CONTENT,
     _TOOLTIP_LABEL_FORMATTER,
     LineChart,
     LineChartSettings,
@@ -116,6 +117,26 @@ def test_line_chart_render_series_and_datakey() -> None:
     assert {s["name"] for s in props["series"]} == {"1", "2", "3"}
 
 
+@pytest.mark.parametrize(
+    ("column", "has_value_at"),
+    [("2", {0, 4, 8}), ("2__y", set(range(9)))],
+    ids=["plotted-line-only-where-logged", "tooltip-nearest-value-within-the-runs-range"],
+)
+def test_line_chart_never_shows_a_run_where_it_did_not_log(column: str, has_value_at: set[int]) -> None:
+    """
+    Run 2 logs steps 0, 4 and 8 of run 1's 0-11. Its line is drawn only through what it logged (not
+    as a staircase of nearest values), and stops at step 8 rather than running flat to 11; the
+    tooltip's nearest value covers its own range and nothing past it.
+    """
+    df = pd.concat(
+        [_metrics_df(12, n_runs=1), _metrics_df(9, n_runs=2).query("run_id == 2 and step % 4 == 0")]
+    )
+    chart = LineChart.render(LineChartSettings(column="loss", x_axis="step", sample=False), df)
+
+    values: dict[int, float] = {row["step"]: row[column] for row in _props(chart)["data"]}
+    assert {step for step, value in values.items() if not np.isnan(value)} == has_value_at
+
+
 def test_line_chart_syncs_by_value_not_index() -> None:
     """Charts with the same syncId but different sampling rates must sync by x-value.
 
@@ -188,6 +209,7 @@ def test_line_chart_js_function_names_are_defined_in_the_tooltip_js() -> None:
         *_TICK_FORMATTER.values(),
         *_TOOLTIP_LABEL_FORMATTER.values(),
         "lineChartTooltipLabel",
+        _TOOLTIP_CONTENT,
     }
     for name in referenced_names:
         assert f"window.dashMantineFunctions.{name} =" in js_source, f"{name} is not defined in the JS"
