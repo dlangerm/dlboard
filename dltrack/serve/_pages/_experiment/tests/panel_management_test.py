@@ -10,10 +10,13 @@ Reordering is drag-and-drop (`_experiment_page_dragdrop.js`), not up/down button
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import dash_mantine_components as dmc
+import pandas as pd
+import pytest
 from dash._utils import to_json  # pyright: ignore[reportUnknownVariableType]
+from pydantic import ValidationError
 
 from dltrack.conftest import find_props as _find_props
 from dltrack.models._view import ChartInstance, PanelInstance
@@ -116,16 +119,42 @@ def test_apply_panel_sync_drops_sync_id_when_disabled() -> None:
     assert result.lineChartProps["syncMethod"] == "value"  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
 
 
-# ---- panel layout: segmented control + set_panel_layout ----
+# ---- panel layout: segmented control, grid column count, update_panel ----
 
 
-def test_set_panel_layout_updates_only_the_named_panel() -> None:
+def test_update_panel_changes_only_the_named_panel() -> None:
     panels = [PanelInstance[Any, Any](name=n) for n in ("a", "b")]
 
-    result = state.set_panel_layout(panels, "a", "grid")
+    result = state.update_panel(panels, "a", {"layout": "grid", "grid_columns": 2})
 
-    by_name = {p.name: p.layout for p in result}
-    assert by_name == {"a": "grid", "b": "packed"}
+    assert {p.name: (p.layout, p.grid_columns) for p in result} == {"a": ("grid", 2), "b": ("packed", 3)}
+
+
+@pytest.mark.parametrize("columns", [0, 7, -1])
+def test_a_grid_column_count_outside_the_supported_range_is_rejected(columns: int) -> None:
+    with pytest.raises(ValidationError):
+        PanelInstance[Any, Any](name="a", grid_columns=columns)
+
+
+def test_a_grid_panel_renders_with_its_own_column_count() -> None:
+    panel = PanelInstance[Any, Any](name="a", layout="grid", grid_columns=2)
+
+    rendered = state.render_panel_content_from_df(panel, pd.DataFrame())
+
+    assert isinstance(rendered, dmc.SimpleGrid)
+    assert rendered.cols == 2  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+
+
+@pytest.mark.parametrize(("layout", "shows_columns"), [("grid", True), ("packed", False)])
+def test_the_grid_column_input_is_only_offered_for_a_grid_panel(
+    layout: Literal["packed", "grid"], *, shows_columns: bool
+) -> None:
+    controls = state.panel_header_controls(PanelInstance[Any, Any](name="a", layout=layout, grid_columns=4))
+
+    columns = _find_props(controls, state.panel_grid_columns_id("a"))
+    assert (columns is not None) is shows_columns
+    if columns is not None:
+        assert columns["value"] == 4
 
 
 def test_apply_panel_sync_scopes_sync_id_to_the_panel_when_enabled() -> None:

@@ -155,10 +155,6 @@ NEW_PANEL_OPEN_ID: ButtonId[ExperimentPage] = ButtonId("new-panel-open")
 NEW_PANEL_NAME_ID: ValueId[ExperimentPage] = ValueId("panel-name")
 NEW_PANEL_ID: ButtonId[ExperimentPage] = ButtonId("new-panel-button")
 
-PACKED_GRID_COLS: typing.Final = 3
-"""Fixed column count for a panel's `"grid"` layout -- not user-configurable, matching the
-"packed" default's goal of not needing per-panel tuning."""
-
 # --- add/edit-chart modal shell (content is filled in by `_chart_editor_modal.py`'s callbacks) ---
 ADD_CHART_MODAL_ID: ModalId[ExperimentPage] = ModalId("add-chart-modal")
 ADD_CHART_TARGET_ID: StoreId[ExperimentPage] = StoreId("add-chart-target")
@@ -343,12 +339,21 @@ def rename_panel_button_id(panel_name: str) -> dict[str, str]:
     return {"type": "rename-panel", "panel": panel_name}
 
 
+PANEL_LAYOUT_TYPE: typing.Final = "panel-layout"
+PANEL_GRID_COLUMNS_TYPE: typing.Final = "panel-grid-columns"
+"""Pattern-matching id `type`s of a panel's Packed/Grid control and its grid column count (one callback serves both)."""
+
+
 def panel_sync_switch_id(panel_name: str) -> dict[str, str]:
     return {"type": "panel-sync", "panel": panel_name}
 
 
 def panel_layout_control_id(panel_name: str) -> dict[str, str]:
-    return {"type": "panel-layout", "panel": panel_name}
+    return {"type": PANEL_LAYOUT_TYPE, "panel": panel_name}
+
+
+def panel_grid_columns_id(panel_name: str) -> dict[str, str]:
+    return {"type": PANEL_GRID_COLUMNS_TYPE, "panel": panel_name}
 
 
 def panel_suggest_button_id(panel_name: str) -> dict[str, str]:
@@ -626,7 +631,7 @@ def render_panel_content_from_df(panel: models.PanelInstance[Any, Any], df: pd.D
     """Render a panel's charts from an already-fetched dataframe -- see `render_panel_content`."""
     items = render_panel_charts(panel, df)
     return (
-        dmc.SimpleGrid(items, cols=PACKED_GRID_COLS, spacing="lg")
+        dmc.SimpleGrid(items, cols=panel.grid_columns, spacing="lg")
         if panel.layout == "grid"
         else dmc.Flex(items, justify="flex-start", gap="lg", wrap="wrap")
     )
@@ -744,6 +749,29 @@ def panel_header_controls(panel: models.PanelInstance[Any, Any]) -> Component:
                 label="Packed: charts sized to their own natural width. Grid: charts stretch to fill equal-width columns",
                 position="top",
                 withArrow=True,
+            ),
+            *(
+                [
+                    dmc.Tooltip(
+                        dmc.NumberInput(
+                            id=panel_grid_columns_id(panel_name),
+                            value=panel.grid_columns,
+                            min=models.MIN_GRID_COLUMNS,
+                            max=models.MAX_GRID_COLUMNS,
+                            allowDecimal=False,
+                            allowNegative=False,
+                            clampBehavior="strict",
+                            size="xs",
+                            w=56,
+                            **cast("dict[str, Any]", {"aria-label": "Grid columns"}),
+                        ),
+                        label="How many columns the grid has",
+                        position="top",
+                        withArrow=True,
+                    )
+                ]
+                if panel.layout == "grid"
+                else []
             ),
             tooltipped_action_icon(
                 Icon.EDIT, component_id=rename_panel_button_id(panel_name), label="Rename panel"
@@ -1513,10 +1541,11 @@ def set_panel_sync(
     return [p.model_copy(update={"sync": sync}) if p.name == panel_name else p for p in panels]
 
 
-def set_panel_layout(
-    panels: list[models.PanelInstance[Any, Any]], panel_name: str, layout: typing.Literal["packed", "grid"]
+def update_panel(
+    panels: list[models.PanelInstance[Any, Any]], panel_name: str, changes: dict[str, Any]
 ) -> list[models.PanelInstance[Any, Any]]:
-    return [p.model_copy(update={"layout": layout}) if p.name == panel_name else p for p in panels]
+    """Apply `changes` (already-validated `PanelInstance` field values) to the panel named `panel_name`."""
+    return [p.model_copy(update=changes) if p.name == panel_name else p for p in panels]
 
 
 def move_index[T](items: list[T], index: int, target_index: int, *, after: bool) -> list[T]:

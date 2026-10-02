@@ -28,6 +28,12 @@ from dltrack.models import ChartTypeRegistry, PanelInstance, constants
 from dltrack.serve import get_data_store
 from dltrack.serve._pages._experiment import _experiment_page_state as core
 
+_LAYOUT_FIELD_BY_CONTROL: typing.Final = {
+    core.PANEL_LAYOUT_TYPE: "layout",
+    core.PANEL_GRID_COLUMNS_TYPE: "grid_columns",
+}
+"""Which `PanelInstance` field each layout control (by its id `type`) edits."""
+
 
 class _AddChartCtx(core.EditCtx):
     chart_type_name: str | None
@@ -360,34 +366,41 @@ def _register_toggle(app: Dash) -> None:
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
-        Input({"type": "panel-layout", "panel": ALL}, "value"),
+        Input({"type": core.PANEL_LAYOUT_TYPE, "panel": ALL}, "value"),
+        Input({"type": core.PANEL_GRID_COLUMNS_TYPE, "panel": ALL}, "value"),
         State(core.STATE_PAGE_STORAGE, "data"),
         prevent_initial_call=True,
     )
-    def toggle_panel_layout(
-        _value_list: list[str],
+    def change_panel_layout(
+        _layouts: list[str],
+        _grid_columns: list[int],
         page_json: str,
     ) -> tuple[html.Div, str]:
+        """Apply a panel's Packed/Grid toggle or grid column count -- they're one `PanelInstance` edit."""
         if not ctx.triggered_id:  # pyright: ignore[reportUnknownMemberType]
             raise PreventUpdate
         triggered_id = cast("dict[str, str]", ctx.triggered_id)  # pyright: ignore[reportUnknownMemberType]
         panel_name = triggered_id["panel"]
-        layout = cast("typing.Literal['packed', 'grid']", ctx.triggered[0]["value"])
+        field = _LAYOUT_FIELD_BY_CONTROL[triggered_id["type"]]
+        value = cast("Any", ctx.triggered[0]["value"])
 
-        # Mirrors `toggle_panel_sync`: a SegmentedControl's `value` mounting for the first time
-        # reports the panel's current layout back as a "change" even though nothing was actually
-        # toggled -- skip the rebuild when nothing really changed.
+        # Mirrors `toggle_panel_sync`: a control's `value` mounting for the first time reports the
+        # panel's current value back as a "change" even though nothing was actually touched (and a
+        # cleared number input reports nothing usable) -- skip the rebuild unless the *validated*
+        # new value really differs.
         current_page = core.BasicExperimentPage.model_validate_json(page_json)
-        current_layout = next((p.layout for p in current_page.panels if p.name == panel_name), None)
-        if layout == current_layout:
+        panel = next((p for p in current_page.panels if p.name == panel_name), None)
+        if panel is None:
+            raise PreventUpdate
+        try:
+            changed = PanelInstance[Any, Any].model_validate({**panel.model_dump(), field: value})
+        except ValidationError:
+            raise PreventUpdate from None
+        if changed == panel:
             raise PreventUpdate
 
-        def toggle(panels: list[Any]) -> list[Any]:
-            return core.set_panel_layout(panels, panel_name, layout)
-
         page, container = core.mutate_panels_and_rerender(
-            page_json,
-            toggle,
+            page_json, lambda panels: core.update_panel(panels, panel_name, {field: getattr(changed, field)})
         )
         return container, page.model_dump_json()
 
