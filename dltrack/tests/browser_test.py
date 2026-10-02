@@ -905,8 +905,8 @@ def test_chart_tooltip_shows_every_series_at_every_hovered_x_position(
 
     Expected behavior: hovering any x position within a series' own logged range shows that
     series' *closest* value, consistently, not "whichever run happened to log exactly this x" --
-    and since a closest value isn't necessarily *from* the hovered x, the tooltip label says so
-    (e.g. "step: 4 (2@step=3)") whenever a shown value was filled in from elsewhere.
+    and since a closest value isn't necessarily *from* the hovered x, that run's tooltip row says
+    where it came from (e.g. "@ 3") whenever it was filled in from elsewhere.
     """
     _create_project_and_experiment(page, live_server_url, "Tooltip Consistency Experiment")
     page.locator(".experiment-card").click()
@@ -966,16 +966,15 @@ def test_chart_tooltip_shows_every_series_at_every_hovered_x_position(
         page.mouse.move(x - 1, y)
         page.mouse.move(x, y)
         page.wait_for_timeout(150)
-        shown = set(page.locator(".mantine-ChartTooltip-tooltipItemName").all_text_contents())
+        shown = set(page.locator(".dl-chart-tooltip-name").all_text_contents())
         assert shown == expected_series, (
             f"at x-fraction {frac}: tooltip showed {shown}, expected {expected_series}"
         )
 
         # Run B only logged every third step, so most hovered positions show *its* value filled in
-        # from a nearby step, not the exact hovered one -- the label must say so (e.g.
-        # "step: 4 (2@step=3)"), never implying it was logged exactly where the cursor is.
-        label = page.locator(".mantine-ChartTooltip-tooltipLabel").text_content() or ""
-        if "@step=" in label:
+        # from a nearby step, not the exact hovered one -- its row must say so ("@ 3"), never
+        # implying it was logged exactly where the cursor is.
+        if page.locator(".dl-chart-tooltip-source").count():
             saw_a_source_annotation = True
 
     assert saw_a_source_annotation, (

@@ -20,6 +20,10 @@ if typing.TYPE_CHECKING:
 _BOOKKEEPING_COLS = frozenset({MetricColumn.RUN_ID, MetricColumn.TIMESTAMP_UTC})
 
 _TOOLTIP_JS_PATH = Path(__file__).with_name("line_chart_tooltip.js")
+_TOOLTIP_CSS_PATH = Path(__file__).with_name("line_chart_tooltip.css")
+
+_TOOLTIP_CONTENT: typing.Final = "lineChartTooltip"
+"""Draws the hover tooltip itself (`line_chart_tooltip.js`), in place of Mantine's default."""
 
 # Recharts' XAxis has no real time/date scale (only "number"/"category") -- a "date" x-axis is
 # rendered as a numeric one, epoch-milliseconds-valued, with a tick/tooltip formatter
@@ -36,19 +40,23 @@ _TICK_FORMATTER: typing.Final = {
 
 def _nearest_fill_pivot(df: pd.DataFrame, x_axis: str, column: str) -> pd.DataFrame:
     """
-    Pivot `df` (long: `[x_axis, "run_id", column]`) into one column per run.
+    Pivot `df` (long: `[x_axis, "run_id", column]`) into one row per x that *any* run logged at.
 
-    A plain `df.pivot(...)` leaves a cell `NaN` for any `(x, run)` a run never logged at -- routine
-    the moment two runs have different step counts or get sampled differently, not a contrived edge
-    case. Recharts' default tooltip only lists a series whose value at the *exact* hovered row is
-    non-`NaN`, so which runs show up depends entirely on which x gets hovered: series visibly pop in
-    and out as the cursor moves, even though every run has real data spanning the whole visible
-    range. Every run gets a value at every x that *any* run has instead -- its own nearest logged
-    value, via `merge_asof(..., direction="nearest")` -- so hovering anywhere within a run's own
-    range consistently shows that run. A companion `"<run_id>__x"` column records the x each filled
-    value actually came from (which can differ from the row's own, nominal/hovered x), so a tooltip
-    can show where a nearest-filled value is really from instead of implying it was logged exactly
-    at the hovered x.
+    Each run gets three columns:
+
+    - `"<run_id>"`, the plotted one: only what the run really logged at that x, empty elsewhere.
+      The line is drawn straight between a run's logged points (Mantine's `connectNulls`), not
+      through values it never logged.
+    - `"<run_id>__y"`, the run's *nearest* logged value (`merge_asof(..., direction="nearest")`),
+      for the tooltip. Runs routinely log at different x's (different step counts, different
+      sampling), so going by the plotted column alone, runs would pop in and out of the tooltip
+      depending on exactly which x is hovered.
+    - `"<run_id>__x"`, the x that nearest value came from, so the tooltip can say where it really
+      came from, rather than implying it was logged at the hovered x.
+
+    Filling stops at a run's own first and last logged x: outside that range the run's cells stay
+    empty. Otherwise a run that stopped early would show its final value out to the longest run's
+    last step, as if it had kept logging it.
     """
     all_x = pd.DataFrame({x_axis: sorted(df[x_axis].unique())})
     result = {x_axis: all_x[x_axis]}
@@ -56,8 +64,11 @@ def _nearest_fill_pivot(df: pd.DataFrame, x_axis: str, column: str) -> pd.DataFr
         run_df = run_df[[x_axis, column]].sort_values(x_axis)
         run_df["_source_x"] = run_df[x_axis]
         filled = pd.merge_asof(all_x, run_df, on=x_axis, direction="nearest")
-        result[str(run_id)] = filled[column]
-        result[f"{run_id}__x"] = filled["_source_x"]
+        in_range = all_x[x_axis].between(run_df[x_axis].iloc[0], run_df[x_axis].iloc[-1])
+        logged_here = filled["_source_x"] == all_x[x_axis]
+        result[str(run_id)] = filled[column].where(logged_here)
+        result[f"{run_id}__y"] = filled[column].where(in_range)
+        result[f"{run_id}__x"] = filled["_source_x"].where(in_range)
     return pd.DataFrame(result)
 
 
@@ -167,11 +178,10 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.LineChart], froze
         run_ids = sorted(df["run_id"].unique())
         df = _nearest_fill_pivot(df, x_axis=parameters.x_axis, column=parameters.column)
         data = df.to_dict(orient="records")
-        # Carried on each row (not a real plotted column) so the tooltip's labelFormatter --
-        # `line_chart_tooltip.js` -- can prefix the hovered x-value with what it actually is,
-        # e.g. "step: 5" instead of a bare "5".
-        for row in data:
-            row["__x_axis_name__"] = parameters.x_axis
+        series = [
+            {"name": str(run_id), "label": f"Run {run_id}", "color": series_color(int(run_id))}
+            for run_id in run_ids
+        ]
 
         x_axis_props: dict[str, typing.Any] = {
             "type": "category" if parameters.x_axis_type == "category" else "number"
@@ -190,14 +200,7 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.LineChart], froze
             h=parameters.height,
             data=data,  # pyright: ignore[reportArgumentType]
             dataKey=str(parameters.x_axis),
-            series=[
-                {
-                    "name": str(run_id),
-                    "label": f"Run {run_id}",
-                    "color": series_color(int(run_id)),
-                }
-                for run_id in run_ids
-            ],  # pyright: ignore[reportArgumentType]
+            series=series,  # pyright: ignore[reportArgumentType]
             xAxisLabel=f"{parameters.x_axis}",
             yAxisLabel=f"{parameters.column}",
             xAxisProps=x_axis_props,
@@ -220,14 +223,19 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.LineChart], froze
             # escape its own chart's bounds it can visually reach into a neighboring chart's area
             # too -- wrapperStyle's zIndex keeps it painted above that neighbor rather than
             # underneath it (later charts in the DOM otherwise paint on top by default).
-            # labelFormatter prefixes the hovered x-value with the axis name, and (see
-            # `line_chart_tooltip.js`'s `dltrackSourceAnnotations`) notes which series' value was
-            # filled in from a different x than the one shown here, e.g. "step: 4 (Run 2@step=3)".
+            # `content` draws the tooltip (see `line_chart_tooltip.js`), formatting x-values -- the
+            # hovered one, and any a series' nearest-filled value really came from -- with
+            # labelFormatter. Recharts hands every tooltip prop on to `content`, which is how it
+            # gets the axis name and the series: it lists every run with a value near the hovered
+            # x (see `_nearest_fill_pivot`), not only those Recharts' own payload has a point for.
             tooltipProps={
                 "offset": 30,
                 "allowEscapeViewBox": {"x": True, "y": True},
                 "wrapperStyle": {"zIndex": 100},
+                "content": {"function": _TOOLTIP_CONTENT},
                 "labelFormatter": {"function": label_formatter},
+                "xAxisName": parameters.x_axis,
+                "series": series,
             },
             # syncMethod="value" matches synced charts by x-axis value rather than
             # array index — needed because sampled/unsampled charts (or charts
@@ -277,8 +285,9 @@ def plug(app: Dash) -> None:
     """
     Plugin.
 
-    Registers this chart type, plus the `labelFormatter` its tooltip needs (see `render` and
+    Registers this chart type, plus the script and styles its tooltip needs (see `render` and
     `line_chart_tooltip.js`), served from this app instance only via `serve_asset`.
     """
     LineChart.register(allow_override=True)
     serve_asset(app, AssetKind.SCRIPT, _TOOLTIP_JS_PATH.name, _TOOLTIP_JS_PATH.read_bytes())
+    serve_asset(app, AssetKind.STYLESHEET, _TOOLTIP_CSS_PATH.name, _TOOLTIP_CSS_PATH.read_bytes())

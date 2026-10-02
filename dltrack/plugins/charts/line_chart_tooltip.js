@@ -1,14 +1,16 @@
-// Registers dmc.LineChart's hover-tooltip labelFormatter and XAxis tickFormatter functions via
-// DMC's "functions as props" mechanism (https://www.dash-mantine-components.com/functions-as-props).
+// Registers dmc.LineChart's hover tooltip and its x-value formatters via DMC's "functions as props"
+// mechanism (https://www.dash-mantine-components.com/functions-as-props).
 //
 // Recharts' XAxis only supports "number"/"category" scales -- no real time/date scale -- so a
 // "date" x-axis (see `LineChartSettings.x_axis_type` in `line_chart.py`) is rendered as a plain
 // numeric one, epoch-milliseconds-valued, and a "time" x-axis as a plain numeric one valued in
-// elapsed seconds. These formatters turn those raw numbers back into something readable, both on
-// the axis ticks and in the tooltip label (which also gets the axis name prefixed, e.g. "step: 5",
-// reading it off a `__x_axis_name__` marker each chart's data rows carry alongside the real
-// plotted columns).
+// elapsed seconds. The formatters below turn those raw numbers back into something readable, both
+// on the axis ticks and in the tooltip; `line_chart.py` passes the matching one as the tooltip's
+// `labelFormatter`, which `lineChartTooltip` then uses for every x-value it shows.
 window.dashMantineFunctions = window.dashMantineFunctions || {};
+
+// More rows than this and the tooltip outgrows the chart it describes; the rest are summarized.
+var DLTRACK_TOOLTIP_MAX_ROWS = 10;
 
 function dltrackFormatDuration(totalSeconds) {
     var seconds = Math.round(totalSeconds);
@@ -21,56 +23,77 @@ function dltrackFormatDuration(totalSeconds) {
     return hours > 0 ? `${sign}${hours}:${pad(minutes)}:${pad(secs)}` : `${sign}${minutes}:${pad(secs)}`;
 }
 
-function dltrackAxisNamePrefix(payload) {
-    var row = payload && payload.length ? payload[0].payload : null;
-    var axisName = row ? row.__x_axis_name__ : null;
-    return axisName ? axisName + ": " : "";
-}
-
-// A hovered x is only ever exact for the run(s) that actually logged there -- every other run's
-// shown value is its *nearest* logged value instead (see `_nearest_fill_pivot` in `line_chart.py`),
-// which can be from a different x than the one in the tooltip's shared label. Each row carries a
-// "<run_id>__x" companion field recording where a given series' value actually came from; this
-// notes it for any series whose value didn't come from the hovered x, so a filled-in value never
-// reads as if it were logged exactly where the cursor happens to be. Folded into the *label*
-// (Mantine's `ChartTooltip` doesn't forward a per-item `formatter`/`valueFormatter` the way it
-// forwards `labelFormatter` -- confirmed by hand, not documented -- so per-item annotation isn't
-// available; this is the one hook that reliably reaches the rendered tooltip).
-function dltrackSourceAnnotations(payload) {
-    var axisName =
-        payload && payload.length && payload[0].payload ? payload[0].payload.__x_axis_name__ : null;
-    if (!axisName) {
-        return "";
+// Five significant digits reads well for losses and accuracies alike; very large or very small
+// magnitudes switch to exponent form rather than growing a long run of zeros.
+function dltrackFormatValue(value) {
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+        return String(value);
     }
-    var notes = (payload || [])
-        .map((item) => {
-            var row = item.payload;
-            if (!row) {
-                return null;
-            }
-            var sourceX = row[item.dataKey + "__x"];
-            var hoveredX = row[axisName];
-            return sourceX != null && hoveredX != null && sourceX !== hoveredX
-                ? `${item.name}@${axisName}=${sourceX}`
-                : null;
-        })
-        .filter((note) => note != null);
-    return notes.length ? ` (${notes.join(", ")})` : "";
+    var magnitude = Math.abs(value);
+    if (magnitude !== 0 && (magnitude < 1e-4 || magnitude >= 1e7)) {
+        return value.toExponential(3);
+    }
+    return value.toLocaleString(undefined, { maximumSignificantDigits: 5 });
 }
 
-window.dashMantineFunctions.lineChartTooltipLabel = (label, payload) => {
-    return dltrackAxisNamePrefix(payload) + label + dltrackSourceAnnotations(payload);
-};
+// The custom `content` of the tooltip: the hovered x-value under its axis name, then one row per
+// run, highest value first. `line_chart.py` passes the chart's `series` and `xAxisName` alongside
+// the usual tooltip props. Every run shows its *nearest* logged value ("<run_id>__y", see
+// `_nearest_fill_pivot` in `line_chart.py`), not just runs that logged exactly at the hovered x,
+// and "<run_id>__x" says where that value came from -- shown beside the run's name whenever it
+// differs, so a filled-in value never reads as if it were logged right at the cursor. A run with no
+// value here (the cursor is outside the range it logged over) is left out entirely.
+window.dashMantineFunctions.lineChartTooltip = (props) => {
+    var h = window.React.createElement;
+    var row = props.active && props.payload && props.payload.length ? props.payload[0].payload : null;
+    if (!row) {
+        return null;
+    }
+    var axisName = props.xAxisName;
+    var hoveredX = row[axisName];
+    var formatX = (x) => (props.labelFormatter ? props.labelFormatter(x, props.payload) : String(x));
+    var runs = (props.series || [])
+        .map((s) => ({ series: s, value: row[`${s.name}__y`], sourceX: row[`${s.name}__x`] }))
+        .filter((run) => run.value != null)
+        .sort((a, b) => b.value - a.value);
+    var shown = runs.slice(0, DLTRACK_TOOLTIP_MAX_ROWS);
+    var hidden = runs.length - shown.length;
 
-window.dashMantineFunctions.lineChartTooltipLabelDate = (label, payload) => {
-    return (
-        dltrackAxisNamePrefix(payload) + new Date(label).toLocaleString() + dltrackSourceAnnotations(payload)
+    return h(
+        "div",
+        { className: "dl-chart-tooltip" },
+        h(
+            "div",
+            { className: "dl-chart-tooltip-header" },
+            h("span", { className: "dl-chart-tooltip-axis" }, axisName),
+            h("span", { className: "dl-chart-tooltip-x" }, formatX(hoveredX)),
+        ),
+        shown.map((run) =>
+            h(
+                "div",
+                { className: "dl-chart-tooltip-row", key: run.series.name },
+                h("span", { className: "dl-chart-tooltip-swatch", style: { background: run.series.color } }),
+                h(
+                    "span",
+                    { className: "dl-chart-tooltip-label" },
+                    h("span", { className: "dl-chart-tooltip-name" }, run.series.label),
+                    run.sourceX !== hoveredX
+                        ? h("span", { className: "dl-chart-tooltip-source" }, `@ ${formatX(run.sourceX)}`)
+                        : null,
+                ),
+                h("span", { className: "dl-chart-tooltip-value" }, dltrackFormatValue(run.value)),
+            ),
+        ),
+        hidden > 0 ? h("div", { className: "dl-chart-tooltip-more" }, `+${hidden} more`) : null,
     );
 };
 
-window.dashMantineFunctions.lineChartTooltipLabelTime = (label, payload) => {
-    return dltrackAxisNamePrefix(payload) + dltrackFormatDuration(label) + dltrackSourceAnnotations(payload);
-};
+window.dashMantineFunctions.lineChartTooltipLabel = (label) =>
+    typeof label === "number" ? label.toLocaleString() : String(label);
+
+window.dashMantineFunctions.lineChartTooltipLabelDate = (label) => new Date(label).toLocaleString();
+
+window.dashMantineFunctions.lineChartTooltipLabelTime = (label) => dltrackFormatDuration(label);
 
 window.dashMantineFunctions.lineChartDateTick = (value) => new Date(value).toLocaleString();
 
