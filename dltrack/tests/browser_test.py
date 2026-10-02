@@ -1361,9 +1361,9 @@ def test_changes_in_a_saved_view_leave_the_shared_view_alone(
     expect(page.get_by_role("textbox", name="View", exact=True)).to_have_value("Shared view")
 
     page.get_by_role("button", name="View actions").click()
-    page.get_by_role("menuitem", name="Save as a new view…").click()
+    page.get_by_role("menuitem", name="Duplicate this view…").click()
     page.get_by_role("textbox", name="View name").fill("my layout")
-    page.get_by_role("button", name="Save view").click()
+    page.get_by_role("button", name="Duplicate").click()
     # Not just "some `?view=`" -- the bare experiment URL (no `?view=` at all, where this started)
     # would never match that regex anyway, but wait for the *navigation itself* first so the two
     # checks below aren't just reading the empty content between actions.
@@ -1464,7 +1464,7 @@ def test_editing_a_view_you_do_not_own_branches_into_a_separate_view_of_your_own
     # Not the owner: no rename/delete for a view that isn't yours.
     expect(page.get_by_role("button", name="View actions")).to_be_visible()
     page.get_by_role("button", name="View actions").click()
-    expect(page.get_by_role("menuitem", name="Save as a new view…")).to_be_visible()
+    expect(page.get_by_role("menuitem", name="Duplicate this view…")).to_be_visible()
     expect(page.get_by_role("menuitem", name="Rename this view…")).to_have_count(0)
     expect(page.get_by_role("menuitem", name="Delete this view…")).to_have_count(0)
     page.keyboard.press("Escape")
@@ -1497,9 +1497,9 @@ def test_renaming_a_view_you_own_updates_the_picker(
     page.locator(".experiment-card").click()
 
     page.get_by_role("button", name="View actions").click()
-    page.get_by_role("menuitem", name="Save as a new view…").click()
+    page.get_by_role("menuitem", name="Duplicate this view…").click()
     page.get_by_role("textbox", name="View name").fill("first name")
-    page.get_by_role("button", name="Save view").click()
+    page.get_by_role("button", name="Duplicate").click()
     expect(page.get_by_role("textbox", name="View", exact=True)).to_have_value("first name")
 
     page.get_by_role("button", name="View actions").click()

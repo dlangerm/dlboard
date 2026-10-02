@@ -10,7 +10,7 @@ A view doesn't have to be created up front, either: every edit anywhere on this 
 `_experiment_page_state.save_page`, which branches into a new view of your own the moment you edit
 something you don't already own (the shared page, or someone else's view) -- so pruning the shared
 page down to "just one chart type" never touches what anyone else sees, even mid-experiment, with
-no separate "save as a view" step first. `sync_view_after_edit`/`sync_view_url.js`, below, are what
+no separate "duplicate this view" step first. `sync_view_after_edit`/`sync_view_url.js`, below, are what
 make that branch show up in the picker and the URL without a page reload.
 
 Views can also be renamed, and exported as JSON and imported back (into this or another
@@ -64,10 +64,10 @@ The actions menu's dropdown. Its `className` says whether you own the view on sc
 class rather than a rebuilt menu so `sync_view_after_edit` can update it when an edit branches
 into a view of your own, with no reload.
 """
-SAVE_VIEW_OPEN_ID: typing.Final = "save-view-open"
-SAVE_VIEW_MODAL_ID: typing.Final = "save-view-modal"
-SAVE_VIEW_NAME_ID: typing.Final = "save-view-name"
-SAVE_VIEW_CONFIRM_ID: typing.Final = "save-view-confirm"
+DUPLICATE_VIEW_OPEN_ID: typing.Final = "duplicate-view-open"
+DUPLICATE_VIEW_MODAL_ID: typing.Final = "duplicate-view-modal"
+DUPLICATE_VIEW_NAME_ID: typing.Final = "duplicate-view-name"
+DUPLICATE_VIEW_CONFIRM_ID: typing.Final = "duplicate-view-confirm"
 RENAME_VIEW_OPEN_ID: typing.Final = "rename-view-open"
 RENAME_VIEW_MODAL_ID: typing.Final = "rename-view-modal"
 RENAME_VIEW_NAME_ID: typing.Final = "rename-view-name"
@@ -191,7 +191,7 @@ def view_controls(
                                 className=owner_only,
                             ),
                             dmc.MenuItem(
-                                "Save as a new view…", id=SAVE_VIEW_OPEN_ID, leftSection=icon(Icon.SAVE)
+                                "Duplicate this view…", id=DUPLICATE_VIEW_OPEN_ID, leftSection=icon(Icon.COPY)
                             ),
                             dmc.MenuItem(
                                 "Export as JSON", id=EXPORT_VIEW_OPEN_ID, leftSection=icon(Icon.EXPORT)
@@ -220,7 +220,7 @@ def view_controls(
                 body="This deletes your view for good. The shared view and everyone else's views "
                 "are left as they are.",
             ),
-            _save_modal(),
+            _duplicate_modal(),
             _rename_modal(),
             _export_modal(),
             _import_modal(),
@@ -231,25 +231,25 @@ def view_controls(
     )
 
 
-def _save_modal() -> dmc.Modal:
+def _duplicate_modal() -> dmc.Modal:
     return dmc.Modal(
-        id=SAVE_VIEW_MODAL_ID,
-        title="Save as a new view",
+        id=DUPLICATE_VIEW_MODAL_ID,
+        title="Duplicate this view",
         opened=False,
         children=dmc.Stack(
             [
                 dmc.Text(
-                    "Saves the page as it looks now as your own view. Changes you make in it won't "
-                    "affect the shared view.",
+                    "Copies the page as it looks now into a new view of your own. Changes you make in the "
+                    "copy won't affect the original.",
                     size="sm",
                     c="dimmed",
                 ),
                 dmc.TextInput(
-                    id=SAVE_VIEW_NAME_ID,
+                    id=DUPLICATE_VIEW_NAME_ID,
                     placeholder="View name",
                     **cast("dict[str, Any]", {"data-autofocus": True, "aria-label": "View name"}),
                 ),
-                dmc.Group(dmc.Button("Save view", id=SAVE_VIEW_CONFIRM_ID), justify="flex-end"),
+                dmc.Group(dmc.Button("Duplicate", id=DUPLICATE_VIEW_CONFIRM_ID), justify="flex-end"),
             ]
         ),
     )
@@ -332,7 +332,7 @@ def _register_switching(app: Dash) -> None:
     )
 
     for opener, modal in [
-        (SAVE_VIEW_OPEN_ID, SAVE_VIEW_MODAL_ID),
+        (DUPLICATE_VIEW_OPEN_ID, DUPLICATE_VIEW_MODAL_ID),
         (IMPORT_VIEW_OPEN_ID, IMPORT_VIEW_MODAL_ID),
     ]:
         app.clientside_callback(  # pyright: ignore[reportUnknownMemberType]
@@ -343,23 +343,23 @@ def _register_switching(app: Dash) -> None:
         )
 
 
-def _register_save(app: Dash) -> None:
+def _register_duplicate(app: Dash) -> None:
     # The new view looks exactly like the page on screen, so there's nothing to re-render: writing
     # it to `STATE_PAGE_STORAGE` hands off to `sync_view_after_edit`, the same as an edit branching
     # into a view of your own, which catches the picker, menu and URL up without a reload.
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
-        Output(SAVE_VIEW_MODAL_ID, "opened", allow_duplicate=True),
-        Output(SAVE_VIEW_NAME_ID, "error"),
-        Output(SAVE_VIEW_NAME_ID, "value"),
-        Input(SAVE_VIEW_CONFIRM_ID, "n_clicks"),
-        Input(SAVE_VIEW_NAME_ID, "n_submit"),
-        State(SAVE_VIEW_NAME_ID, "value"),
+        Output(DUPLICATE_VIEW_MODAL_ID, "opened", allow_duplicate=True),
+        Output(DUPLICATE_VIEW_NAME_ID, "error"),
+        Output(DUPLICATE_VIEW_NAME_ID, "value"),
+        Input(DUPLICATE_VIEW_CONFIRM_ID, "n_clicks"),
+        Input(DUPLICATE_VIEW_NAME_ID, "n_submit"),
+        State(DUPLICATE_VIEW_NAME_ID, "value"),
         State(core.STATE_PAGE_STORAGE, "data"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
         prevent_initial_call=True,
     )
-    def save_view(
+    def duplicate_view(
         _clicks: int | None, _submits: int | None, name: str | None, page_json: str, experiment_id: int
     ) -> tuple[Any, ...]:
         if not name or not name.strip():
@@ -531,9 +531,9 @@ def _register_delete(app: Dash) -> None:
 
 
 def register_view_callbacks(app: Dash) -> None:
-    """Wire the view picker: switching views, and saving/renaming/exporting/importing/deleting them."""
+    """Wire the view picker: switching views, and duplicating/renaming/exporting/importing/deleting them."""
     _register_switching(app)
-    _register_save(app)
+    _register_duplicate(app)
     _register_rename(app)
     _register_export_import(app)
     _register_sync_after_edit(app)
