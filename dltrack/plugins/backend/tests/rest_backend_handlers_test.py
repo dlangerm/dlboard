@@ -8,8 +8,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import pytest
 from pydantic import AnyUrl
 from werkzeug.datastructures import FileStorage
+from werkzeug.exceptions import NotFound
 
 from dltrack import models
 from dltrack.plugins.backend import basic_rest_backend as backend
@@ -131,6 +133,19 @@ def test_handle_create_run_stamps_created_by(store: SQLLiteStore) -> None:
     result = backend.handle_create_run(store, body, actor)
 
     assert result["created_by"] == actor.id
+
+
+def test_handle_get_run_returns_a_live_run_and_404s_otherwise(
+    store: SQLLiteStore, experiment_id: int
+) -> None:
+    run = store.create_run(models.NewRun(experiment_id=experiment_id))
+    deleted = store.create_run(models.NewRun(experiment_id=experiment_id))
+    store.delete_run(deleted.id, store.get_or_create_user(models.Principal.unverified("heidi")))
+
+    assert models.Run.model_validate(backend.handle_get_run(store, run.id)) == run
+    for missing in (deleted.id, run.id + 1000):
+        with pytest.raises(NotFound):
+            backend.handle_get_run(store, missing)
 
 
 def test_handle_log_artifacts_stamps_created_by_on_every_artifact(store: SQLLiteStore) -> None:

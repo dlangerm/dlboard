@@ -15,7 +15,9 @@ from typing import TYPE_CHECKING, Any, Final, override
 import pendulum
 import requests
 from pydantic import BaseModel
+from pydantic_settings import BaseSettings
 from pytorch_lightning.loggers import Logger
+from pytorch_lightning.utilities import rank_zero_only
 
 from dltrack import models
 from dltrack._batching import BatchParams, ship_batches
@@ -145,8 +147,40 @@ class DLTrackLoggerSettings(BaseModel, frozen=True, extra="forbid"):
     """Artifact batches accumulated before the background process ships them to the server."""
 
 
+class _LoggerEnv(BaseSettings):
+    """Env vars the logger reads when the matching argument isn't passed."""
+
+    dltrack_run_id: int | None = None
+    """An existing run to attach to instead of creating one -- see `DLTrackLogger`'s `run_id`."""
+
+
+def _is_rank_zero() -> bool:
+    """
+    Whether this is global rank 0, the same notion `rank_zero_only` uses.
+
+    Lightning sets `.rank` on it from the launcher's env vars at import, but doesn't declare it for
+    type checkers.
+    """
+    return getattr(rank_zero_only, "rank", 0) == 0
+
+
+_UNRESOLVED_ID: Final = 0
+"""Stands in for an id a non-zero rank never resolves (it makes no server calls, see `DLTrackLogger`)."""
+
+
 class DLTrackLogger(Logger):
-    """The lightning logger for dltrack."""
+    """
+    The lightning logger for dltrack.
+
+    Only global rank 0 logs, like Lightning's own loggers: under DDP every rank builds a logger and
+    Lightning calls every one of them, but a non-zero rank here makes no server calls, starts no
+    shipping processes and drops whatever it's asked to log. A single run is therefore created per
+    job, not per GPU.
+    """
+
+    _experiment_id: int
+    _run_id: int
+    """Both resolved on rank 0 only -- every method that reads them is `rank_zero_only`."""
 
     def __init__(
         self,
@@ -154,20 +188,43 @@ class DLTrackLogger(Logger):
         experiment_id: int | None = None,
         server_url: str = DEFAULT_SERVER_URL,
         settings: DLTrackLoggerSettings | None = None,
+        run_id: int | None = None,
     ) -> None:
-        """Initialize with an existing project/experiment id; an experiment is created if none is given."""
+        """
+        Initialize with an existing project/experiment id; an experiment is created if none is given.
+
+        A run is created too, unless `run_id` (default: the `DLTRACK_RUN_ID` env var) names an
+        existing one to attach to -- for resuming a run, or sharing one between processes that were
+        launched separately. `experiment_id` may be omitted then (it's the run's own); a different
+        one is an error.
+        """
+        super().__init__()
+        run_id = run_id if run_id is not None else _LoggerEnv().dltrack_run_id
+        if not _is_rank_zero():
+            if run_id is not None:
+                self._run_id = run_id
+            return
         settings = settings or DLTrackLoggerSettings()
         self._api = BasicDltrackAPI(base_url=server_url)
         # Up front, before any worker starts: the workers treat every 4xx as "drop this batch" (see
         # `is_rejection`), so bad credentials would otherwise only show up as silently lost metrics.
         self._api.whoami()
-        if experiment_id is None:
-            experiment = self._api.create_experiment(
+        if run_id is not None:
+            run = self._api.get_run(run_id)
+            if experiment_id not in (None, run.experiment_id):
+                msg = f"run {run_id} belongs to experiment {run.experiment_id}, not {experiment_id}"
+                raise ValueError(msg)
+            experiment_id = run.experiment_id
+        elif experiment_id is None:
+            experiment_id = self._api.create_experiment(
                 models.NewExperiment(project_id=project_id, source=models.ExperimentSource.PYTORCH_LIGHTNING)
-            )
-            experiment_id = experiment.id
+            ).id
         self._experiment_id = experiment_id
-        self._run_id = self._api.create_run(models.NewRun(experiment_id=self._experiment_id)).id
+        self._run_id = (
+            run_id
+            if run_id is not None
+            else self._api.create_run(models.NewRun(experiment_id=experiment_id)).id
+        )
         startup_start = time.perf_counter()
         self._metrics = _start_shipper(
             "metrics",
@@ -187,20 +244,25 @@ class DLTrackLogger(Logger):
         super().__init__()
 
     @classmethod
-    def from_names(
+    def from_names(  # noqa: PLR0913
         cls,
         project_name: str,
         experiment_name: str = DEFAULT_EXPERIMENT_NAME,
         project_description: str = "",
         server_url: str = DEFAULT_SERVER_URL,
         settings: DLTrackLoggerSettings | None = None,
+        run_id: int | None = None,
     ) -> DLTrackLogger:
         """
         Initialize by project/experiment name instead of raw ids, creating either that don't exist yet.
 
         `project_description` only applies the first time `project_name` is seen -- once a project
-        exists, later calls just reuse it as-is.
+        exists, later calls just reuse it as-is. `run_id` is as for `__init__`.
         """
+        if not _is_rank_zero():
+            # Every rank runs this, and a get-or-create isn't safe to race: two ranks asking for the
+            # same new experiment at once could each create it. Rank 0 alone resolves the names.
+            return cls(project_id=_UNRESOLVED_ID, server_url=server_url, settings=settings, run_id=run_id)
         api = BasicDltrackAPI(base_url=server_url)
         api.whoami()
         project = api.get_or_create_project(project_name, description=project_description)
@@ -208,8 +270,17 @@ class DLTrackLogger(Logger):
             project.id, name=experiment_name, source=models.ExperimentSource.PYTORCH_LIGHTNING
         )
         return cls(
-            project_id=project.id, experiment_id=experiment.id, server_url=server_url, settings=settings
+            project_id=project.id,
+            experiment_id=experiment.id,
+            server_url=server_url,
+            settings=settings,
+            run_id=run_id,
         )
+
+    @property
+    def run_id(self) -> int | None:
+        """The run this logger writes to -- hand it to other processes' `run_id=` to share the run."""
+        return getattr(self, "_run_id", None)
 
     @property
     @override
@@ -222,6 +293,7 @@ class DLTrackLogger(Logger):
         return 1
 
     @override
+    @rank_zero_only
     def log_hyperparams(self, params: dict[str, Any] | Namespace, *args: Any, **kwargs: Any) -> None:
         """
         Log hyperparameters.
@@ -242,6 +314,7 @@ class DLTrackLogger(Logger):
         )
 
     @override
+    @rank_zero_only
     def log_metrics(self, metrics: dict[str, float], step: int | None = None) -> None:
         """
         Validate and timestamp `metrics` right here, at the call site, then queue them for shipping.
@@ -262,11 +335,13 @@ class DLTrackLogger(Logger):
             )
         )
 
+    @rank_zero_only
     def log_artifact(self, artifacts: Sequence[AnyArtifact]) -> None:
         """Queue `artifacts` for encoding and upload."""
         self._artifacts.put(artifacts)
 
     @override
+    @rank_zero_only
     def finalize(self, status: str) -> None:
         """
         Block until everything logged so far has actually reached the server.

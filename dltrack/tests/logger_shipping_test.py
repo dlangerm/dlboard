@@ -63,6 +63,23 @@ def test_finalize_ships_everything_logged_before_it(
         time.sleep(0.1)
 
 
+def test_a_second_logger_given_the_run_id_logs_into_the_same_run(
+    logger: DLTrackLogger, backend_server: BackendServer
+) -> None:
+    """The multi-process case: a separately launched process attaches instead of creating its own run."""
+    second = DLTrackLogger.from_names("shipping", server_url=backend_server.url, run_id=logger.run_id)
+    try:
+        second.log_metrics({"loss": 1.0}, step=0)
+        second.finalize("success")
+    finally:
+        for shipper in (second._metrics, second._artifacts):
+            shipper.process.kill()
+
+    assert second.run_id == logger.run_id
+    assert [run.id for run in backend_server.store.get_runs(logger._experiment_id)] == [logger.run_id]
+    assert list(backend_server.store.fetch_metrics(logger._experiment_id).step) == [0]
+
+
 def test_a_metric_without_a_step_is_rejected_where_it_was_logged(logger: DLTrackLogger) -> None:
     with pytest.raises(ValueError, match="explicit step"):
         logger.log_metrics({"loss": 1.0})

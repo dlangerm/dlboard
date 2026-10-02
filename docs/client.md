@@ -38,6 +38,14 @@ Before it starts, the logger checks the key with the server's `/whoami` and fail
 it's missing or wrong. Without that check, bad credentials would only show up later, as metrics
 that were never stored. `dltrack serve local` needs no key.
 
+**Multi-GPU (DDP).** Every rank builds its own logger and Lightning calls all of them, so only
+global rank 0 logs: a non-zero rank makes no server calls, starts no shipping processes and drops
+whatever it's asked to log, which means one run per job rather than one per GPU. To log into a run
+that already exists instead of creating one — resuming it, or sharing it between processes you
+launch separately — pass `run_id=` or set `DLTRACK_RUN_ID`; the logger checks it exists up front
+and uses its experiment. `logger.run_id` is how you read the id of a run the logger created, to
+hand on to such a process.
+
 **Logging artifacts.** Call `logger.log_artifact([...])` with anything implementing `AnyArtifact`
 (`dltrack/models/_artifact.py`): a `key`, `tags`, a `step`, and a
 `to_artifact(local_temp, run_id, experiment_id) -> tuple[NewArtifact, Path | AnyUrl]` method.
