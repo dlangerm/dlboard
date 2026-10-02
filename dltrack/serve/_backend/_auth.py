@@ -185,8 +185,12 @@ def _session_user(store: DataStore[...]) -> User | None:
 
 def _authenticate(store: DataStore[...], provider: AuthProvider[...], settings: AuthSettings) -> User | None:
     auth = request.authorization
-    if auth is not None and auth.type == "bearer" and _api_tokens.is_api_token(auth.token or ""):
-        # A well-formed dltrack token that doesn't check out is a hard failure -- never quietly fall back to
+    if (
+        auth is not None
+        and auth.type == "bearer"
+        and (auth.token or "").startswith(_api_tokens.API_TOKEN_PREFIX)
+    ):
+        # Anything claiming to be a dltrack token that doesn't check out (malformed or wrong) is a hard failure -- never quietly fall back to
         # some other identity for a caller that plainly meant to be this one.
         return _api_tokens.user_for_token(store, auth.token or "")
     if provider.verifies_identity and (user := _session_user(store)) is not None:
