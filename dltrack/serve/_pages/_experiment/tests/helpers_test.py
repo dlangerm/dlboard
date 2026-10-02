@@ -304,7 +304,7 @@ def test_load_hparam_view_data_shows_each_selected_metrics_latest_value(
         store, experiment_id, [], selected_metrics={"val/acc", "train/loss"}, runs=[run]
     )
 
-    assert rows == [{"run_id": run.id, "run_name": f"Run {run.id}", "val/acc": 1.0, "train/loss": 1.0}]
+    assert rows == [{"run_id": run.id, "run_name": run.name, "val/acc": 1.0, "train/loss": 1.0}]
 
 
 def test_load_hparam_view_data_reports_available_metric_keys_without_fetching_values(
@@ -321,7 +321,7 @@ def test_load_hparam_view_data_reports_available_metric_keys_without_fetching_va
 
     assert metric_keys == ["loss"]
     assert hparam_keys == []
-    assert rows == [{"run_id": run.id, "run_name": f"Run {run.id}"}]
+    assert rows == [{"run_id": run.id, "run_name": run.name}]
 
 
 def test_load_hparam_view_data_includes_values_for_selected_metrics(
@@ -334,7 +334,7 @@ def test_load_hparam_view_data_includes_values_for_selected_metrics(
         store, experiment_id, [], selected_metrics={"loss"}, runs=[run]
     )
 
-    assert rows == [{"run_id": run.id, "run_name": f"Run {run.id}", "loss": 1.0}]
+    assert rows == [{"run_id": run.id, "run_name": run.name, "loss": 1.0}]
 
 
 @pytest.mark.parametrize(
