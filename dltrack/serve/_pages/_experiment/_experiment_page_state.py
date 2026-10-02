@@ -149,8 +149,10 @@ def tab_from_component_value(value: str) -> str:
 
 LOADED_PANELS_STORE_ID: StoreId[ExperimentPage] = StoreId("loaded-panels-store")
 
-NEW_PANEL_ID: ButtonId[ExperimentPage] = ButtonId("new-panel-button")
+# --- new-panel popover, anchored to the toolbar's "New panel" button (callback in `_panel_controls.py`) ---
+NEW_PANEL_OPEN_ID: ButtonId[ExperimentPage] = ButtonId("new-panel-open")
 NEW_PANEL_NAME_ID: ValueId[ExperimentPage] = ValueId("panel-name")
+NEW_PANEL_ID: ButtonId[ExperimentPage] = ButtonId("new-panel-button")
 
 PACKED_GRID_COLS: typing.Final = 3
 """Fixed column count for a panel's `"grid"` layout -- not user-configurable, matching the
@@ -191,9 +193,14 @@ SUGGEST_CONTENT_ID: DivId[ExperimentPage] = DivId("suggest-charts-content")
 SUGGEST_SUGGESTIONS_STORE_ID: StoreId[ExperimentPage] = StoreId("suggest-charts-store")
 SUGGEST_SCOPE_STORE_ID: StoreId[ExperimentPage] = StoreId("suggest-charts-scope")
 
+# --- auto-generate modal, opened from an empty view (callbacks in `_chart_suggestions.py`) ---
+AUTO_POPULATE_OPEN_ID: ButtonId[ExperimentPage] = ButtonId("auto-populate-open")
+AUTO_POPULATE_MODAL_ID: ModalId[ExperimentPage] = ModalId("auto-populate-modal")
 AUTO_POPULATE_DELIMITER_ID: ValueId[ExperimentPage] = ValueId("auto-populate-delimiter")
 AUTO_POPULATE_MODE_ID: ValueId[ExperimentPage] = ValueId("auto-populate-mode")
+AUTO_POPULATE_PREVIEW_ID: DivId[ExperimentPage] = DivId("auto-populate-preview")
 AUTO_POPULATE_BUTTON_ID: ButtonId[ExperimentPage] = ButtonId("auto-populate-button")
+AUTO_POPULATE_CANCEL_ID: ButtonId[ExperimentPage] = ButtonId("auto-populate-cancel")
 
 _SPLIT_MODE_DATA = [{"label": "Prefix", "value": "prefix"}, {"label": "Suffix", "value": "suffix"}]
 DEFAULT_DELIMITER: typing.Final = "/"
@@ -790,13 +797,25 @@ class BasicExperimentPage(models.Page[pd.DataFrame, Component, html.Div], frozen
 
         Panels grouped under the same `tab` share one `Accordion`. If every panel shares the
         (default) ungrouped tab -- the common case today -- no `Tabs` chrome is shown at all, so
-        this looks exactly like a plain accordion until a panel actually gets tabbed. A small "+"
-        next to the tab bar (or floating alone, pre-tabbing) is the *only* place a brand-new tab
-        gets created (see `NEW_TAB_BUTTON_ID`); moving a panel to one that already exists is
-        dragging its drag handle onto that tab (`.dl-tab-target`, see `_experiment_page_dragdrop.js`),
-        the same handle used to reorder panels.
+        this looks exactly like a plain accordion until a panel actually gets tabbed. Above the
+        panels sits one toolbar row: tabs on the left, followed by the labeled "New tab" button,
+        the *only* place a brand-new tab gets created (see `NEW_TAB_BUTTON_ID`) -- moving a panel to
+        one that already exists is dragging its drag handle onto that tab (`.dl-tab-target`, see
+        `_experiment_page_dragdrop.js`), the same handle used to reorder panels. Panel actions sit on
+        the right. A view with no panels at all shows an empty state offering to auto-generate them.
         """
-        open_value = self.page_settings.get(OPEN_PANEL_KEY, [self.panels[0].name] if self.panels else [])
+        new_tab_button = dmc.Button(
+            "New tab",
+            id=NEW_TAB_BUTTON_ID,
+            leftSection=icon(Icon.ADD),
+            variant="subtle",
+            color="gray",
+            size="xs",
+        )
+        if not self.panels:
+            return html.Div([_toolbar([new_tab_button], [_new_panel_popover()]), _empty_view()])
+
+        open_value = self.page_settings.get(OPEN_PANEL_KEY, [self.panels[0].name])
         if isinstance(open_value, str):
             open_value = [open_value]
         open_set: set[str] = set(cast("list[str]", open_value))
@@ -806,21 +825,9 @@ class BasicExperimentPage(models.Page[pd.DataFrame, Component, html.Div], frozen
             tab: _panel_accordion(data_store, experiment_id, tab, group, open_set, self.page_settings)
             for tab, group in groups.items()
         }
-        # Built once here, not in a separate `NEW_PANEL_GROUP_ID` container off to the side --
-        # that squeezed this whole accordion/tabs tree into sharing a row with it (never full
-        # width again) instead of the panel/suggest controls just being *part of* this same,
-        # already-full-width top row.
-        panel_controls = empty_view_helper(self.panels)
-        new_tab_button = tooltipped_action_icon(
-            Icon.ADD, component_id=NEW_TAB_BUTTON_ID, label="New tab", size="xs"
-        )
+        panel_actions: list[Component] = [_new_panel_popover(), _suggest_charts_button()]
         if len(accordions) <= 1:
-            return html.Div(
-                [
-                    dmc.Group([new_tab_button, panel_controls], justify="space-between", wrap="nowrap"),
-                    next(iter(accordions.values())),
-                ]
-            )
+            return html.Div([_toolbar([new_tab_button], panel_actions), next(iter(accordions.values()))])
 
         active_tab = self.page_settings.get(ACTIVE_TAB_KEY) or next(iter(accordions))
         if active_tab not in accordions:
@@ -836,29 +843,32 @@ class BasicExperimentPage(models.Page[pd.DataFrame, Component, html.Div], frozen
             id=PANEL_TABS_ID,
             value=tab_component_value(active_tab),
             children=[
-                dmc.Group(
-                    [
-                        dmc.Group(
-                            [
-                                dmc.TabsList([_tab_tab(tab) for tab in accordions]),
-                                rename_tab_button,
-                                new_tab_button,
-                            ],
-                            gap="xs",
-                            wrap="nowrap",
-                        ),
-                        panel_controls,
-                    ],
-                    justify="space-between",
-                    wrap="nowrap",
-                    gap="xs",
+                _toolbar(
+                    [dmc.TabsList([_tab_tab(tab) for tab in accordions]), rename_tab_button, new_tab_button],
+                    panel_actions,
                 ),
                 *(
-                    dmc.TabsPanel(accordion, value=tab_component_value(tab), pt="xs")
+                    dmc.TabsPanel(accordion, value=tab_component_value(tab))
                     for tab, accordion in accordions.items()
                 ),
             ],
         )
+
+
+def _toolbar(tab_controls: list[Component], panel_actions: list[Component]) -> dmc.Group:
+    """
+    The row above the panels: tab controls on the left, panel actions on the right.
+
+    Part of the same full-width tree as the panels rather than a container off to the side, which
+    squeezed the panels into sharing a row with it.
+    """
+    return dmc.Group(
+        [dmc.Group(tab_controls, gap="xs", wrap="nowrap"), dmc.Group(panel_actions, gap="xs", wrap="nowrap")],
+        justify="space-between",
+        wrap="nowrap",
+        gap="xs",
+        mb="sm",
+    )
 
 
 def _tab_tab(tab: str) -> Component:
@@ -936,66 +946,134 @@ def split_mode_control(control_id: ValueId[ExperimentPage]) -> dmc.SegmentedCont
     return dmc.SegmentedControl(id=control_id, data=_SPLIT_MODE_DATA, value="prefix", size="sm")
 
 
-def empty_view_helper(panels: list[models.PanelInstance[Any, Any]]) -> Component:
-    """Auto-populate charts for a brand-new (empty) view; suggest un-charted keys once it isn't."""
-    add_panel = dmc.Group(
+def _new_panel_popover() -> dmc.Popover:
+    """
+    The toolbar's "New panel" button, and the name form it opens right beneath it.
+
+    Creating the panel re-renders the whole panel area, this popover included, which is what
+    closes it -- no open/close state to keep. A bad name leaves it open with the error inline.
+    """
+    return dmc.Popover(
         [
-            dmc.TextInput(id=NEW_PANEL_NAME_ID, placeholder="New Panel Name", size="sm"),
-            dmc.Tooltip(
-                dmc.ActionIcon(
-                    icon(Icon.ADD),
-                    id=NEW_PANEL_ID,
-                    n_clicks=0,
-                    variant="filled",
-                    size="input-sm",
-                    **cast("dict[str, Any]", {"aria-label": "Create panel"}),
-                ),
-                label="Create panel",
-                position="top",
-                withArrow=True,
+            dmc.PopoverTarget(
+                dmc.Button(
+                    "New panel", id=NEW_PANEL_OPEN_ID, leftSection=icon(Icon.ADD), variant="light", size="xs"
+                )
+            ),
+            dmc.PopoverDropdown(
+                dmc.Stack(
+                    [
+                        dmc.TextInput(
+                            id=NEW_PANEL_NAME_ID,
+                            label="Panel name",
+                            placeholder="e.g. Losses",
+                            size="xs",
+                            **cast("dict[str, Any]", {"data-autofocus": True}),
+                        ),
+                        dmc.Group(
+                            dmc.Button("Create panel", id=NEW_PANEL_ID, n_clicks=0, size="xs"),
+                            justify="flex-end",
+                        ),
+                    ],
+                    gap="xs",
+                )
             ),
         ],
-        gap="xs",
+        position="bottom-end",
+        width=260,
+        withArrow=True,
+        shadow="md",
+        trapFocus=True,
     )
-    if not panels:
-        return dmc.Group(
-            [
-                add_panel,
-                dmc.TextInput(
-                    id=AUTO_POPULATE_DELIMITER_ID,
-                    label="Delimiter",
-                    value=DEFAULT_DELIMITER,
-                    w=90,
-                    size="sm",
-                ),
-                split_mode_control(AUTO_POPULATE_MODE_ID),
-                dmc.Button(
-                    "Auto-generate charts",
-                    id=AUTO_POPULATE_BUTTON_ID,
-                    n_clicks=0,
-                    leftSection=icon(Icon.SUGGEST),
-                    variant="gradient",
-                    size="sm",
-                ),
-            ],
-            align="flex-end",
-            gap="sm",
-        )
-    return dmc.Group(
+
+
+def _suggest_charts_button() -> dmc.Button:
+    return dmc.Button(
+        "Suggest charts",
+        id=SUGGEST_CHARTS_BUTTON_ID,
+        n_clicks=0,
+        leftSection=icon(Icon.SUGGEST),
+        variant="subtle",
+        size="xs",
+    )
+
+
+def _empty_view() -> Component:
+    """A view with no panels: offer to auto-generate them, behind a modal that previews the result first."""
+    return html.Div(
         [
-            add_panel,
-            dmc.Tooltip(
-                dmc.Button(
-                    children=icon(Icon.SUGGEST),
-                    id=SUGGEST_CHARTS_BUTTON_ID,
-                    **cast("dict[str, Any]", {"aria-label": "Suggest charts"}),
-                    n_clicks=0,
-                    variant="gradient",
-                    size="sm",
+            dmc.Paper(
+                dmc.Stack(
+                    [
+                        dmc.ThemeIcon(icon(Icon.SUGGEST), size="xl", radius="xl", variant="light"),
+                        dmc.Text("No charts in this view yet", fw=600, size="lg"),
+                        dmc.Text(
+                            "Auto-generate a panel for each group of logged metrics and artifacts, "
+                            "or start from an empty panel with New panel.",
+                            c="dimmed",
+                            size="sm",
+                            ta="center",
+                            maw=440,
+                        ),
+                        dmc.Button(
+                            "Auto-generate charts",
+                            id=AUTO_POPULATE_OPEN_ID,
+                            n_clicks=0,
+                            leftSection=icon(Icon.SUGGEST),
+                            variant="gradient",
+                            mt="xs",
+                        ),
+                    ],
+                    align="center",
+                    gap="xs",
                 ),
-                label="Suggest charts for uncharted metrics and artifacts",
-                position="top",
-                withArrow=True,
+                withBorder=True,
+                radius="md",
+                p="xl",
+                style={"borderStyle": "dashed"},
+            ),
+            dmc.Modal(
+                id=AUTO_POPULATE_MODAL_ID,
+                title="Auto-generate charts",
+                size="lg",
+                opened=False,
+                children=dmc.Stack(
+                    [
+                        dmc.Text(
+                            "Each metric and artifact name is split on the delimiter, and grouped into a "
+                            "panel by its first part (prefix) or last part (suffix).",
+                            size="sm",
+                            c="dimmed",
+                        ),
+                        dmc.Group(
+                            [
+                                dmc.TextInput(
+                                    id=AUTO_POPULATE_DELIMITER_ID,
+                                    label="Delimiter",
+                                    value=DEFAULT_DELIMITER,
+                                    w=90,
+                                    size="sm",
+                                ),
+                                dmc.Stack(
+                                    [
+                                        dmc.Text("Group by", size="sm", fw=500),
+                                        split_mode_control(AUTO_POPULATE_MODE_ID),
+                                    ],
+                                    gap=4,
+                                ),
+                            ],
+                            align="flex-end",
+                        ),
+                        html.Div(id=AUTO_POPULATE_PREVIEW_ID),
+                        dmc.Group(
+                            [
+                                dmc.Button("Cancel", id=AUTO_POPULATE_CANCEL_ID, variant="default"),
+                                dmc.Button("Create charts", id=AUTO_POPULATE_BUTTON_ID, n_clicks=0),
+                            ],
+                            justify="flex-end",
+                        ),
+                    ]
+                ),
             ),
         ]
     )

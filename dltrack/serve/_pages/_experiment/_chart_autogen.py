@@ -94,6 +94,36 @@ def default_chart_for_artifact(key: str) -> ChartInstance[typing.Any, typing.Any
     return ChartInstance(chart_type=ImageChart.name, parameters={"key": key})
 
 
+def group_keys_into_panels(
+    catalog: ColumnCatalog,
+    *,
+    delimiter: str,
+    mode: SplitMode,
+    lightning: bool = False,
+) -> dict[str, list[tuple[str, ColumnKind]]]:
+    """
+    Every known metric/artifact key, grouped by `delimiter`/`mode` under the panel it'd land in.
+
+    Metric keys and artifact keys are grouped independently, so a metric group and an artifact
+    group with the same name still land in two distinct panels (see `panel_name_for_group`).
+    `lightning` further splits each metric group by step/epoch granularity (see
+    `lightning_granularity`) -- only meaningful for experiments logged through `DLTrackLogger`, so
+    callers should gate it on `ExperimentSource.PYTORCH_LIGHTNING`.
+    """
+    panels: dict[str, list[tuple[str, ColumnKind]]] = {}
+    for column in catalog.metrics:
+        granularity = lightning_granularity(column) if lightning else None
+        group = split_group_name(column, delimiter, mode)
+        panel_name = panel_name_for_group(group, ColumnKind.METRIC, granularity=granularity)
+        panels.setdefault(panel_name, []).append((column, ColumnKind.METRIC))
+    for key in catalog.artifacts:
+        group = split_group_name(key, delimiter, mode)
+        panels.setdefault(panel_name_for_group(group, ColumnKind.ARTIFACT), []).append(
+            (key, ColumnKind.ARTIFACT)
+        )
+    return panels
+
+
 def build_auto_panels(
     catalog: ColumnCatalog,
     *,
@@ -101,37 +131,21 @@ def build_auto_panels(
     mode: SplitMode,
     lightning: bool = False,
 ) -> list[PanelInstance[typing.Any, typing.Any]]:
-    """
-    Build a full set of panels from every known metric/artifact key, grouped by `delimiter`/`mode`.
-
-    Intended for a brand-new (empty) view: metric keys and artifact keys are grouped and charted
-    independently, so a metric group and an artifact group with the same name still land in two
-    distinct panels (see `panel_name_for_group`). `lightning` further splits each metric group by
-    step/epoch granularity (see `lightning_granularity`) -- only meaningful for experiments logged
-    through `DLTrackLogger`, so callers should gate it on `ExperimentSource.PYTORCH_LIGHTNING`.
-    """
-    panels: dict[str, PanelInstance[typing.Any, typing.Any]] = {}
-
-    def _append(panel_name: str, chart: ChartInstance[typing.Any, typing.Any]) -> None:
-        existing = panels.get(panel_name)
-        if existing is None:
-            panels[panel_name] = PanelInstance(name=panel_name, charts=[chart])
-        else:
-            panels[panel_name] = existing.model_copy(update={"charts": [*existing.charts, chart]})
-
-    for column in catalog.metrics:
-        group = split_group_name(column, delimiter, mode)
-        granularity = lightning_granularity(column) if lightning else None
-        panel_name = panel_name_for_group(group, ColumnKind.METRIC, granularity=granularity)
-        _append(
-            panel_name, default_chart_for_metric(column, single_value=column in catalog.single_value_metrics)
+    """A full set of panels for a brand-new (empty) view: one default chart per key, grouped as `group_keys_into_panels`."""
+    return [
+        PanelInstance(
+            name=panel_name,
+            charts=[
+                default_chart_for_metric(key, single_value=key in catalog.single_value_metrics)
+                if kind == ColumnKind.METRIC
+                else default_chart_for_artifact(key)
+                for key, kind in keys
+            ],
         )
-
-    for key in catalog.artifacts:
-        group = split_group_name(key, delimiter, mode)
-        _append(panel_name_for_group(group, ColumnKind.ARTIFACT), default_chart_for_artifact(key))
-
-    return list(panels.values())
+        for panel_name, keys in group_keys_into_panels(
+            catalog, delimiter=delimiter, mode=mode, lightning=lightning
+        ).items()
+    ]
 
 
 class UnchartedKeys(typing.NamedTuple):

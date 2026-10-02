@@ -22,6 +22,7 @@ from dltrack.serve._pages._experiment._chart_autogen import (
     build_auto_panels,
     build_suggestions,
     find_uncharted_keys,
+    group_keys_into_panels,
 )
 from dltrack.serve._pages._experiment._dataframe_helpers import ColumnCatalog
 
@@ -79,7 +80,95 @@ def _render_suggestions(suggestions: list[Suggestion]) -> Component:
     return dmc.Stack(sections, gap="xs")
 
 
+def _plural(n: int, noun: str) -> str:
+    return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
+
+
+def _render_auto_preview(groups: dict[str, list[tuple[str, ColumnKind]]]) -> Component:
+    """What "Create charts" would add: each panel, and the keys charted in it."""
+    n_charts = sum(len(keys) for keys in groups.values())
+    return dmc.Stack(
+        [
+            dmc.Text(f"{_plural(len(groups), 'panel')} · {_plural(n_charts, 'chart')}", size="sm", fw=600),
+            dmc.ScrollArea(
+                dmc.Stack(
+                    [
+                        dmc.Paper(
+                            [
+                                dmc.Group(
+                                    [
+                                        dmc.Text(panel_name, size="sm", fw=600),
+                                        dmc.Badge(_plural(len(keys), "chart"), variant="light", size="sm"),
+                                    ],
+                                    justify="space-between",
+                                    wrap="nowrap",
+                                ),
+                                dmc.Text(
+                                    ", ".join(key for key, _kind in keys), size="xs", c="dimmed", lineClamp=2
+                                ),
+                            ],
+                            withBorder=True,
+                            radius="sm",
+                            px="sm",
+                            py="xs",
+                        )
+                        for panel_name, keys in groups.items()
+                    ],
+                    gap="xs",
+                ),
+                mah=320,
+                type="auto",
+            ),
+        ],
+        gap="xs",
+    )
+
+
 def _register_auto_populate(app: Dash) -> None:
+    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+        Output(core.AUTO_POPULATE_MODAL_ID, "opened"),
+        Output(core.AUTO_POPULATE_PREVIEW_ID, "children"),
+        Output(core.AUTO_POPULATE_BUTTON_ID, "disabled"),
+        Input(core.AUTO_POPULATE_OPEN_ID, "n_clicks"),
+        Input(core.AUTO_POPULATE_DELIMITER_ID, "value"),
+        Input(core.AUTO_POPULATE_MODE_ID, "value"),
+        State(core.AUTO_POPULATE_MODAL_ID, "opened"),
+        State(constants.STATE_EXPERIMENT_ID, "data"),
+        prevent_initial_call=True,
+    )
+    def preview_auto_populate(
+        n_clicks: int | None,
+        delimiter: str | None,
+        mode: str | None,
+        opened: bool,  # noqa: FBT001
+        experiment_id: int,
+    ) -> tuple[bool | NoUpdate, Component, bool]:
+        """Open the confirm modal, and keep its preview in step with the delimiter and grouping picked."""
+        opening = cast("str | None", ctx.triggered_id) == core.AUTO_POPULATE_OPEN_ID  # pyright: ignore[reportUnknownMemberType]
+        if (opening and not n_clicks) or (not opening and not opened):
+            raise PreventUpdate
+        store = get_data_store()
+        catalog = ColumnCatalog.load(store, experiment_id)
+        if not catalog.has_chartable_keys:
+            return True, dmc.Text(_NO_KEYS_MESSAGE, c="dimmed", size="sm"), True
+        groups = group_keys_into_panels(
+            catalog,
+            delimiter=delimiter or core.DEFAULT_DELIMITER,
+            mode="suffix" if mode == "suffix" else "prefix",
+            lightning=core.is_lightning_experiment(store, experiment_id),
+        )
+        return True if opening else no_update, _render_auto_preview(groups), False
+
+    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+        Output(core.AUTO_POPULATE_MODAL_ID, "opened", allow_duplicate=True),
+        Input(core.AUTO_POPULATE_CANCEL_ID, "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def cancel_auto_populate(n_clicks: int | None) -> bool:
+        if not n_clicks:
+            raise PreventUpdate
+        return False
+
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),

@@ -39,6 +39,7 @@ from dltrack.serve._pages._experiment._experiment_page_state import (
     METRIC_CONTENT_ID,
     NEW_PANEL_ID,
     NEW_PANEL_NAME_ID,
+    NEW_PANEL_OPEN_ID,
     NEW_TAB_BUTTON_ID,
     NEW_TAB_PANELS_SELECT_ID,
     OPEN_PANEL_KEY,
@@ -83,6 +84,20 @@ def _create_project_and_experiment(page: Page, live_server_url: str, name: str) 
     page.locator(f"#{NEW_EXP_BUTTON_ID}").click()
 
 
+def _create_panel(page: Page, name: str) -> None:
+    """Add an empty panel through the toolbar's "New panel" popover, and wait for it to show up."""
+    page.locator(f"#{NEW_PANEL_OPEN_ID}").click()
+    page.locator(f"#{NEW_PANEL_NAME_ID}").fill(name)
+    page.locator(f"#{NEW_PANEL_ID}").click()
+    expect(page.locator(".dl-panel-item-header", has_text=name)).to_be_visible()
+
+
+def _auto_generate_charts(page: Page) -> None:
+    """Auto-generate an empty view's charts with the default grouping, confirming the preview."""
+    page.get_by_role("button", name="Auto-generate charts").click()
+    page.get_by_role("button", name="Create charts").click()
+
+
 def test_logged_metrics_render_as_a_real_chart(
     page: Page, live_server_url: str, console_errors: list[str]
 ) -> None:
@@ -113,7 +128,7 @@ def test_logged_metrics_render_as_a_real_chart(
     )
 
     page.reload()
-    page.get_by_role("button", name="Auto-generate charts").click()
+    _auto_generate_charts(page)
     # No explicit `open_panel` setting exists yet for a brand new experiment, so
     # `BasicExperimentPage.render()`'s own fallback opens the first (and here, only) panel by
     # default -- no click needed to see it render.
@@ -162,8 +177,7 @@ def test_panel_header_hover_controls_toggle_and_delete_without_disturbing_siblin
     page.locator(".experiment-card").click()
 
     for panel_name in ("keep", "delete-me"):
-        page.locator(f"#{NEW_PANEL_NAME_ID}").fill(panel_name)
-        page.locator(f"#{NEW_PANEL_ID}").click()
+        _create_panel(page, panel_name)
         # Each click's callback bases its mutation on the client-side page-state snapshot, so the
         # next click must wait for this one's response to land first -- otherwise the second
         # request reads a stale (pre-mutation) snapshot and its response clobbers the first.
@@ -278,8 +292,7 @@ def test_drag_and_drop_reorders_panels(page: Page, live_server_url: str, console
     page.locator(".experiment-card").click()
 
     for panel_name in ("alpha", "beta", "gamma"):
-        page.locator(f"#{NEW_PANEL_NAME_ID}").fill(panel_name)
-        page.locator(f"#{NEW_PANEL_ID}").click()
+        _create_panel(page, panel_name)
         expect(page.get_by_role("button", name=panel_name)).to_be_visible()
 
     assert _panel_order(page) == ["alpha", "beta", "gamma"]
@@ -364,7 +377,7 @@ def test_drag_and_drop_reorders_charts_within_a_panel(
     )
 
     page.reload()
-    page.get_by_role("button", name="Auto-generate charts").click()
+    _auto_generate_charts(page)
     # No explicit `open_panel` setting exists yet for a brand new experiment, so
     # `BasicExperimentPage.render()`'s own fallback opens the first (and here, only) panel by
     # default -- no click needed for its charts (and their drag handles) to render.
@@ -425,7 +438,7 @@ def test_drag_and_drop_moves_a_chart_into_a_different_panel(
         ]
     )
     page.reload()
-    page.get_by_role("button", name="Auto-generate charts").click()
+    _auto_generate_charts(page)
     # Auto-generating on the shared page branches into a view of your own (see `save_page`) --
     # wait for that branch's `?view=` to land before anything below reads the page off it.
     expect(page).to_have_url(re.compile(r"\?view=\d+$"))
@@ -442,8 +455,7 @@ def test_drag_and_drop_moves_a_chart_into_a_different_panel(
     # full-page re-render (a separate response from the `drag_to()` call that requested it), and
     # doing this fill()/click() while that's still in flight can land on a stale, about-to-be-
     # replaced input node. Doing it up front instead sidesteps that race entirely.
-    page.locator(f"#{NEW_PANEL_NAME_ID}").fill("extra")
-    page.locator(f"#{NEW_PANEL_ID}").click()
+    _create_panel(page, "extra")
     expect(page.get_by_role("button", name="extra")).to_be_visible()
     page.get_by_role("button", name="extra").click()
 
@@ -549,8 +561,7 @@ def test_assign_panel_to_a_new_tab_and_switch_back(
     page.locator(".experiment-card").click()
 
     for panel_name in ("keep", "tabbed"):
-        page.locator(f"#{NEW_PANEL_NAME_ID}").fill(panel_name)
-        page.locator(f"#{NEW_PANEL_ID}").click()
+        _create_panel(page, panel_name)
         expect(page.get_by_role("button", name=panel_name)).to_be_visible()
 
     # No tabs assigned yet -- every panel shares the one default tab, so there's no tab bar at all,
@@ -650,7 +661,7 @@ def test_new_tab_without_panels_gets_an_empty_panel_that_accepts_a_dragged_chart
         ]
     )
     page.reload()
-    page.get_by_role("button", name="Auto-generate charts").click()
+    _auto_generate_charts(page)
     # The rebuild that lands the generated panels also re-renders the new-tab button; wait for it
     # (the auto-generate button only exists on a view with no panels) so the click below can't hit
     # the outgoing copy.
@@ -707,8 +718,7 @@ def test_dragging_near_the_top_of_the_viewport_auto_scrolls_the_page(
     _create_project_and_experiment(page, live_server_url, "Auto Scroll Experiment")
     page.locator(".experiment-card").click()
 
-    page.locator(f"#{NEW_PANEL_NAME_ID}").fill("only-panel")
-    page.locator(f"#{NEW_PANEL_ID}").click()
+    _create_panel(page, "only-panel")
     handle = page.locator(".dl-panel-drag-handle").first
     expect(handle).to_be_visible()
 
@@ -741,30 +751,38 @@ def test_dragging_near_the_top_of_the_viewport_auto_scrolls_the_page(
     assert console_errors == []
 
 
+def _toolbar_clearance(page: Page) -> float:
+    """The gap between the bottom of the panel toolbar and the top of the first visible panel."""
+    button_box = page.locator(f"#{NEW_PANEL_OPEN_ID}").bounding_box()
+    panel_box = page.locator(".mantine-Accordion-item:visible").first.bounding_box()
+    assert button_box is not None
+    assert panel_box is not None
+    return panel_box["y"] - (button_box["y"] + button_box["height"])
+
+
 def test_panel_area_layout_is_not_squeezed_by_the_new_panel_controls(
     page: Page, live_server_url: str, console_errors: list[str]
 ) -> None:
     """
-    Geometry-based regression check for a real layout bug: the "New Panel Name" input/tab-
-    management controls used to live in their own container placed *beside* the accordion/tabs
-    tree (a flex sibling), which visually squeezed that whole tree into sharing a row with it --
-    never full width again -- and left a dead-space gap next to the title/description row above
-    it. A role/text-based test can't catch that kind of thing (every control is still present and
-    labelled correctly; only its position and the container's width are wrong), so this measures
-    actual bounding boxes instead: the accordion/tabs container must span (nearly) the page's full
-    content width, the "New Panel Name" input must sit on the very same row as the tab bar (not a
-    separate row below it), and the tab-management buttons ("+"/rename) must sit right next to the
-    tabs themselves, not clear across the row next to the panel-name input.
+    Geometry-based regression check for real layout bugs. A role/text-based test can't catch these
+    (every control is still present and labelled correctly; only positions and widths are wrong),
+    so this measures bounding boxes instead:
+
+    - The panel/tab controls once lived in a container *beside* the accordion/tabs tree, squeezing
+      it into sharing a row -- it must span (nearly) the page's full content width.
+    - The panel actions sit on the very same row as the tab bar, not a separate row below it, and
+      "New tab" sits right next to the tabs themselves, not clear across the row.
+    - The toolbar once butted straight up against the first panel's border -- with or without tabs,
+      it must leave a visible gap above the panels.
     """
     _create_project_and_experiment(page, live_server_url, "Layout Regression Experiment")
     page.locator(".experiment-card").click()
 
     for panel_name in ("keep", "tabbed"):
-        page.locator(f"#{NEW_PANEL_NAME_ID}").fill(panel_name)
-        page.locator(f"#{NEW_PANEL_ID}").click()
-        expect(page.get_by_role("button", name=panel_name)).to_be_visible()
+        _create_panel(page, panel_name)
+    assert _toolbar_clearance(page) >= 8
 
-    # Tab the second panel so a real tab bar (not just the lone "+") is on screen too.
+    # Tab the second panel so a real tab bar is on screen too.
     page.locator(f"#{NEW_TAB_BUTTON_ID}").click()
     page.get_by_role("dialog").get_by_role("textbox").first.fill("Images")
     page.locator(f"#{NEW_TAB_PANELS_SELECT_ID}").click()
@@ -773,31 +791,24 @@ def test_panel_area_layout_is_not_squeezed_by_the_new_panel_controls(
     page.get_by_role("button", name="Create", exact=True).click()
     images_tab = page.get_by_role("tab", name="Images")
     expect(images_tab).to_be_visible()
+    assert _toolbar_clearance(page) >= 8
 
     page_box = page.locator(f"#{PAGE_EXPERIMENT_ID}").bounding_box()
     metric_content_box = page.locator(f"#{METRIC_CONTENT_ID}").bounding_box()
     tab_box = images_tab.bounding_box()
     new_tab_button_box = page.locator(f"#{NEW_TAB_BUTTON_ID}").bounding_box()
-    new_panel_input_box = page.locator(f"#{NEW_PANEL_NAME_ID}").bounding_box()
+    new_panel_button_box = page.locator(f"#{NEW_PANEL_OPEN_ID}").bounding_box()
     assert page_box is not None
     assert metric_content_box is not None
     assert tab_box is not None
     assert new_tab_button_box is not None
-    assert new_panel_input_box is not None
+    assert new_panel_button_box is not None
 
-    # The accordion/tabs container spans (almost) the page's full content width -- not squeezed
-    # into sharing a row with a sibling column.
     assert metric_content_box["width"] >= page_box["width"] * 0.9
-
-    # The "+" new-tab button sits right next to the tabs themselves (a few tab-widths away at
-    # most), not clear across the row next to the "New Panel Name" input.
     assert new_tab_button_box["x"] - (tab_box["x"] + tab_box["width"]) < 150
-
-    # The "New Panel Name" input is on the very same row as the tab bar (same vertical center,
-    # within a few px), not a separate row below a dead-space gap.
     tab_center_y = tab_box["y"] + tab_box["height"] / 2
-    input_center_y = new_panel_input_box["y"] + new_panel_input_box["height"] / 2
-    assert abs(tab_center_y - input_center_y) < 10
+    button_center_y = new_panel_button_box["y"] + new_panel_button_box["height"] / 2
+    assert abs(tab_center_y - button_center_y) < 10
 
     assert console_errors == []
 
@@ -819,8 +830,7 @@ def test_switching_tabs_does_not_remount_the_navbar_run_table(
     page.locator(".experiment-card").click()
 
     for panel_name in ("keep", "tabbed"):
-        page.locator(f"#{NEW_PANEL_NAME_ID}").fill(panel_name)
-        page.locator(f"#{NEW_PANEL_ID}").click()
+        _create_panel(page, panel_name)
         expect(page.get_by_role("button", name=panel_name)).to_be_visible()
 
     page.locator(f"#{NEW_TAB_BUTTON_ID}").click()
@@ -873,7 +883,7 @@ def test_each_run_is_drawn_in_its_own_palette_color_matching_its_run_table_swatc
             ]
         )
     page.reload()
-    page.get_by_role("button", name="Auto-generate charts").click()
+    _auto_generate_charts(page)
 
     curves = page.locator(".dl-panel-body .recharts-line-curve")
     expect(curves).to_have_count(3)
@@ -942,7 +952,7 @@ def test_chart_tooltip_shows_every_series_at_every_hovered_x_position(
         ]
     )
     page.reload()
-    page.get_by_role("button", name="Auto-generate charts").click()
+    _auto_generate_charts(page)
     # No explicit `open_panel` setting exists yet for a brand new experiment, so
     # `BasicExperimentPage.render()`'s own fallback opens the first (and here, only) panel by
     # default -- no click needed to see it render.
@@ -1016,7 +1026,7 @@ def test_live_update_poll_shows_a_new_run_without_a_reload(
         ]
     )
     page.reload()
-    page.get_by_role("button", name="Auto-generate charts").click()
+    _auto_generate_charts(page)
     # No explicit `open_panel` setting exists yet for a brand new experiment, so
     # `BasicExperimentPage.render()`'s own fallback already opened "Ungrouped" by default -- the
     # poll only patches currently-open panels' charts, so it has one to patch without a click.
@@ -1086,7 +1096,7 @@ def test_live_update_poll_patches_only_the_chart_whose_data_changed(
         ]
     )
     page.reload()
-    page.get_by_role("button", name="Auto-generate charts").click()
+    _auto_generate_charts(page)
 
     chart_items = page.locator(".dl-chart-item")
     expect(chart_items).to_have_count(2)
@@ -1257,7 +1267,7 @@ def test_a_copied_chart_link_opens_that_chart_without_changing_the_shared_layout
         ]
     )
     page.reload()
-    page.get_by_role("button", name="Auto-generate charts").click()
+    _auto_generate_charts(page)
     # Auto-generating on the shared page branches into a view of your own (see `save_page`) --
     # wait for that branch's `?view=` to land before copying a link off `page.url`, or the copied
     # link (and the "close its panel"/`_open_panels` checks below, which also have to follow the

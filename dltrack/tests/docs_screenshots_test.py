@@ -242,6 +242,7 @@ def _open_charted_experiment(page: Page, demo: Demo) -> None:
     button = page.get_by_role("button", name="Auto-generate charts")
     if button.count():
         button.click()
+        page.get_by_role("button", name="Create charts").click()
         # Auto-generating from the shared page branches into a view of your own (see `save_page`),
         # and the panels render a beat before that branch's own second round trip -- sync_view_after_edit
         # reacting to the first callback's own `STATE_PAGE_STORAGE` write -- lands and updates the view
@@ -301,6 +302,7 @@ def _stage(shot: DocScreenshot, page: Page, demo: Demo, dltrack_app: Dash) -> Pa
             view_select = page.get_by_role("textbox", name="View", exact=True)
             expect(view_select).to_have_value("Just the loss curve")
             page.get_by_role("button", name="Auto-generate charts").click()
+            page.get_by_role("button", name="Create charts").click()
             expect(page.locator(".dl-panel-body svg").first).to_be_visible()
             view_select.click()
             expect(page.get_by_role("option", name="Shared view", exact=True)).to_be_visible()
