@@ -38,4 +38,4 @@ server = [
 path = "hatch_build.py"
 
 [tool.uv.sources]
-dltrack-server = {workspace = true}
+dltrack-server = { workspace = true }
