@@ -122,19 +122,24 @@ from dltrack.serve import set_auth_provider
 class ProxyHeaderProvider:
     display_name: ClassVar[str] = "Company SSO"
     verifies_identity: ClassVar[bool] = True
-    manage_url: ClassVar[str | None] = None   # where a user manages their own sign-in
-    admin_url: ClassVar[str | None] = None    # where an admin adds users; None = users come from the IdP
+    manage_url: ClassVar[str | None] = None  # where a user manages their own sign-in
+    admin_url: ClassVar[str | None] = None  # where an admin adds users; None = users come from the IdP
 
     def authenticate(self) -> Principal | None:
         email = request.headers.get("X-Forwarded-Email")
         if email is None:
             return None
         groups = frozenset(filter(None, request.headers.get("X-Forwarded-Groups", "").split(",")))
-        return Principal(issuer="https://sso.example.com", subject=email, username=email.split("@")[0],
-                         email=email, groups=groups)
+        return Principal(
+            issuer="https://sso.example.com",
+            subject=email,
+            username=email.split("@")[0],
+            email=email,
+            groups=groups,
+        )
 
     def login_url(self, next_path: str) -> str | None:
-        return None   # the proxy handles sign-in before a request ever gets here
+        return None  # the proxy handles sign-in before a request ever gets here
 
     @classmethod
     def get_or_create(cls) -> "ProxyHeaderProvider":

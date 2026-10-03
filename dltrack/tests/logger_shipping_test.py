@@ -11,9 +11,9 @@ import requests
 import torch
 
 from dltrack import models
-from dltrack.client import DLTrackLogger
 from dltrack.client._rest_api import create_path
 from dltrack.client.artifacts import image
+from dltrack.client.dltrack_logger import DLTrackLogger
 from dltrack.conftest import EVERY_STORE_BACKEND, StoreBackend
 
 if TYPE_CHECKING:

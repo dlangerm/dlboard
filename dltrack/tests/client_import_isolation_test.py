@@ -49,7 +49,7 @@ builtins.__import__ = _guarded
 
 def test_importing_the_client_never_needs_the_server_stack() -> None:
     script = """
-from dltrack.client import DLTrackLogger, DLTrackLoggerSettings
+from dltrack.client.dltrack_logger import DLTrackLogger, DLTrackLoggerSettings
 from dltrack.client._rest_api import BasicDltrackAPI
 from dltrack.client.artifacts.image import Image
 from dltrack.client.artifacts.link import Link

@@ -31,8 +31,8 @@ Leave notes on an experiment, calling out specific runs or teammates by name:
 
 ## Running it
 
-Installed as a package (e.g. `uv tool install dltrack` or `pip install dltrack`), dltrack gives
-you a `dltrack` command, the same idea as `tensorboard`:
+Installed as a package (e.g. `uv tool install dltrack[server]` or `pip install dltrack[server]`),
+dltrack gives you a `dltrack` command, the same idea as `tensorboard`:
 
 ```bash
 dltrack serve local     # anonymous, single-user, sqlite + local disk -- sane defaults, no setup

@@ -96,7 +96,7 @@ Implement the protocol (`DataStore` or `ArtifactStore`, or both) and register th
 
 ```python
 def plug(app: Dash) -> None:
-    set_data_store(app, MyStore.get_or_create(...))       # dltrack.serve._backend._data_store
+    set_data_store(app, MyStore.get_or_create(...))  # dltrack.serve._backend._data_store
     # or, for a blob store:
     set_artifact_store(app, MyArtifactStore.get_or_create(...))
 ```
