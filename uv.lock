@@ -571,12 +571,14 @@ dependencies = [
     { name = "numpy" },
     { name = "pandas" },
     { name = "pendulum" },
+    { name = "pillow" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "pytorch-lightning" },
     { name = "rich" },
     { name = "sqlalchemy" },
     { name = "structlog" },
+    { name = "typing-extensions" },
 ]
 
 [package.optional-dependencies]
@@ -591,7 +593,6 @@ s3 = [
 dev = [
     { name = "boto3" },
     { name = "pandas-stubs" },
-    { name = "pillow" },
     { name = "prek" },
     { name = "psycopg", extra = ["binary"] },
     { name = "pyright" },
@@ -619,6 +620,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=2.5.1" },
     { name = "pandas", specifier = ">=3.0.5" },
     { name = "pendulum", specifier = ">=3.2.0" },
+    { name = "pillow", specifier = ">=12.3.0" },
     { name = "psycopg", extras = ["binary"], marker = "extra == 'postgres'", specifier = ">=3.2" },
     { name = "pydantic", specifier = ">=2.13.4" },
     { name = "pydantic-settings", specifier = ">=2.14.2" },
@@ -626,6 +628,7 @@ requires-dist = [
     { name = "rich", specifier = ">=15.0.0" },
     { name = "sqlalchemy", specifier = ">=2.0.40" },
     { name = "structlog", specifier = ">=26.1.0" },
+    { name = "typing-extensions", specifier = ">=4.12.0" },
 ]
 provides-extras = ["postgres", "s3"]
 
@@ -633,7 +636,6 @@ provides-extras = ["postgres", "s3"]
 dev = [
     { name = "boto3", specifier = ">=1.40" },
     { name = "pandas-stubs", specifier = ">=3.0.5.260730" },
-    { name = "pillow", specifier = ">=12.3.0" },
     { name = "prek", specifier = ">=0.4.10" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "pyright", specifier = ">=1.1.411" },

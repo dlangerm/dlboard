@@ -9,10 +9,10 @@ logging traffic a project sees.
 
 from __future__ import annotations
 
-from enum import StrEnum
-
 import pendulum
 from pydantic import AwareDatetime, BaseModel, Field
+
+from dltrack._compat import StrEnum
 
 
 class AuditAction(StrEnum):

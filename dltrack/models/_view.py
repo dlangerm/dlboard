@@ -8,15 +8,24 @@ import json
 import types
 import typing
 from abc import ABC, abstractmethod
-from enum import StrEnum
 
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 from structlog.stdlib import get_logger
+
+from dltrack._compat import StrEnum
 
 if typing.TYPE_CHECKING:
     from dltrack.models._data_store import DataStore
 
 _log = get_logger(__name__)
+
+# Pre-3.12 `TypeVar` style (the client's floor is 3.10). `_Parameters` is a chart type's own
+# settings model; `_Dataframe`/`_Chart` are its input/output; `_Panel` is what a `Page` renders
+# a panel of charts into (named to match `DataStore.get_or_create_page`'s own `Panel`).
+_Parameters = typing.TypeVar("_Parameters", bound=BaseModel)
+_Dataframe = typing.TypeVar("_Dataframe")
+_Chart = typing.TypeVar("_Chart")
+_Panel = typing.TypeVar("_Panel")
 
 _CHART_ID_LENGTH = 10
 
@@ -67,7 +76,7 @@ class ParameterFieldType(StrEnum):
     LIST_STR = "list[str]"
 
 
-class ChartType[P: BaseModel, D, C](ABC, BaseModel, frozen=True, extra="forbid"):
+class ChartType(ABC, BaseModel, typing.Generic[_Parameters, _Dataframe, _Chart], frozen=True, extra="forbid"):
     """A type of chart."""
 
     name: typing.ClassVar[str]
@@ -75,32 +84,32 @@ class ChartType[P: BaseModel, D, C](ABC, BaseModel, frozen=True, extra="forbid")
 
     @classmethod
     @abstractmethod
-    def parameter_type(cls) -> type[P]:
+    def parameter_type(cls) -> type[_Parameters]:
         """The parameter container type."""
 
     @classmethod
     @abstractmethod
-    def render(cls, parameters: P, dataframe: D) -> C:
+    def render(cls, parameters: _Parameters, dataframe: _Dataframe) -> _Chart:
         """Render a chart given an instance."""
 
     @classmethod
     @abstractmethod
-    def hint_required_columns(cls, parameters: P) -> set[str] | None:
+    def hint_required_columns(cls, parameters: _Parameters) -> set[str] | None:
         """Hint at the columns required for this chart."""
 
     @classmethod
     @abstractmethod
-    def hint_required_artifact_keys(cls, parameters: P) -> set[str] | None:
+    def hint_required_artifact_keys(cls, parameters: _Parameters) -> set[str] | None:
         """Hint at the columns required for this chart."""
 
     @classmethod
     @abstractmethod
-    def hint_required_hparams(cls, parameters: P) -> set[str] | None:
+    def hint_required_hparams(cls, parameters: _Parameters) -> set[str] | None:
         """Hint at the hyperparameter keys required for this chart."""
 
     @classmethod
     @abstractmethod
-    def natural_width(cls, parameters: P) -> int:
+    def natural_width(cls, parameters: _Parameters) -> int:
         """Preferred render width in px, derived from this chart's own settings (e.g. height + aspect ratio)."""
 
     @classmethod
@@ -218,34 +227,34 @@ class ChartTypeRegistry:
         return field_descriptors
 
     @classmethod
-    def render[T, C](cls, chart: ChartInstance[T, C], dataframe: object) -> C:
+    def render(cls, chart: ChartInstance[_Dataframe, _Chart], dataframe: object) -> _Chart:
         chart_type = cls._all_charts[chart.chart_type]
         return chart_type.render(chart_type.parameter_type().model_validate(chart.parameters), dataframe)
 
     @classmethod
-    def hint_required_columns[T, C](cls, chart: ChartInstance[T, C]) -> set[str] | None:
+    def hint_required_columns(cls, chart: ChartInstance[_Dataframe, _Chart]) -> set[str] | None:
         chart_type = cls._all_charts[chart.chart_type]
         return chart_type.hint_required_columns(chart_type.parameter_type().model_validate(chart.parameters))
 
     @classmethod
-    def hint_required_artifact_keys[T, C](cls, chart: ChartInstance[T, C]) -> set[str] | None:
+    def hint_required_artifact_keys(cls, chart: ChartInstance[_Dataframe, _Chart]) -> set[str] | None:
         chart_type = cls._all_charts[chart.chart_type]
         return chart_type.hint_required_artifact_keys(
             chart_type.parameter_type().model_validate(chart.parameters)
         )
 
     @classmethod
-    def hint_required_hparams[T, C](cls, chart: ChartInstance[T, C]) -> set[str] | None:
+    def hint_required_hparams(cls, chart: ChartInstance[_Dataframe, _Chart]) -> set[str] | None:
         chart_type = cls._all_charts[chart.chart_type]
         return chart_type.hint_required_hparams(chart_type.parameter_type().model_validate(chart.parameters))
 
     @classmethod
-    def natural_width[T, C](cls, chart: ChartInstance[T, C]) -> int:
+    def natural_width(cls, chart: ChartInstance[_Dataframe, _Chart]) -> int:
         chart_type = cls._all_charts[chart.chart_type]
         return chart_type.natural_width(chart_type.parameter_type().model_validate(chart.parameters))
 
 
-class ChartInstance[D, C](BaseModel, frozen=True, extra="forbid"):
+class ChartInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, extra="forbid"):
     """A chart for a set of metrics."""
 
     id: str = ""
@@ -277,7 +286,7 @@ class ChartInstance[D, C](BaseModel, frozen=True, extra="forbid"):
         )
         return {**fields, "id": hashlib.sha256(content.encode()).hexdigest()[:_CHART_ID_LENGTH]}
 
-    def render(self, dataframe: D) -> C:
+    def render(self, dataframe: _Dataframe) -> _Chart:
         """Render the chart instance."""
         return ChartTypeRegistry.render(self, dataframe)
 
@@ -328,7 +337,7 @@ class ChartInstance[D, C](BaseModel, frozen=True, extra="forbid"):
             return _FALLBACK_NATURAL_WIDTH
 
 
-class PanelInstance[D, C](BaseModel, frozen=True, extra="forbid"):
+class PanelInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, extra="forbid"):
     """A panel containing one or more charts."""
 
     name: str = ""
@@ -337,7 +346,7 @@ class PanelInstance[D, C](BaseModel, frozen=True, extra="forbid"):
     tab: str = ""
     """Which tab this panel is grouped under; empty means the default/ungrouped tab."""
 
-    charts: list[ChartInstance[D, C]] = []
+    charts: list[ChartInstance[_Dataframe, _Chart]] = []
     """Charts belonging to this panel."""
 
     sync: bool = True
@@ -350,7 +359,7 @@ class PanelInstance[D, C](BaseModel, frozen=True, extra="forbid"):
     grid_columns: GridColumns = 3
     """How many equal-width columns the `"grid"` layout has; unused by `"packed"`."""
 
-    def render(self, dataframes: D) -> list[C]:
+    def render(self, dataframes: _Dataframe) -> list[_Chart]:
         """Render a panel."""
         return [c.render(dataframes) for c in self.charts]
 
@@ -384,7 +393,7 @@ class PanelInstance[D, C](BaseModel, frozen=True, extra="forbid"):
         return hparams
 
 
-class NewPage[D, C](BaseModel, frozen=True, extra="forbid"):
+class NewPage(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, extra="forbid"):
     """A page view model."""
 
     run_id: int | None = None
@@ -407,7 +416,7 @@ class NewPage[D, C](BaseModel, frozen=True, extra="forbid"):
     name: str = ""
     """A view's name, as listed in the view picker. Empty for the shared page."""
 
-    panels: list[PanelInstance[D, C]] = []
+    panels: list[PanelInstance[_Dataframe, _Chart]] = []
     """The set of panel instances on a page."""
 
     page_settings: dict[str, int | float | bool | str | list[str] | list[int] | None] = {}
@@ -421,14 +430,16 @@ class NewPage[D, C](BaseModel, frozen=True, extra="forbid"):
         return raw_value
 
 
-class Page[D, P, C](NewPage[D, C], frozen=True, extra="forbid"):
+class Page(
+    NewPage[_Dataframe, _Chart], typing.Generic[_Dataframe, _Panel, _Chart], frozen=True, extra="forbid"
+):
     """A page stored in sql."""
 
     id: int
     """Page ID to be rendered."""
 
     @abstractmethod
-    def render(self, data_store: DataStore[...], experiment_id: int) -> P:
+    def render(self, data_store: DataStore[...], experiment_id: int) -> _Panel:
         """Render the page."""
 
 

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from enum import StrEnum
 from typing import TYPE_CHECKING
+
+from dltrack._compat import StrEnum
 
 if TYPE_CHECKING:
     from dltrack.models._user import User

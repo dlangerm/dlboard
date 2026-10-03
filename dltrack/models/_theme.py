@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
+
+from dltrack._compat import StrEnum
 
 if TYPE_CHECKING:
     from dash_mantine_components import MantineProvider

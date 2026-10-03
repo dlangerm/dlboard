@@ -1,9 +1,9 @@
 """An experiment within a project."""
 
-from enum import StrEnum
-
 import pendulum
 from pydantic import AwareDatetime, BaseModel, Field
+
+from dltrack._compat import StrEnum
 
 
 class ExperimentSource(StrEnum):

@@ -4,22 +4,32 @@ from __future__ import annotations
 
 import typing
 
+# Pre-3.12 `TypeVar`/`ParamSpec` style (the client's floor is 3.10) -- `P` is `get_or_create`'s
+# constructor signature; `Dataframe`/`Panel`/`Chart` are `Page`'s own three type parameters,
+# reused here rather than declared fresh per method (PEP 695's per-method `def foo[T](...)` needs
+# 3.12).
+_P = typing.ParamSpec("_P")
+_Dataframe = typing.TypeVar("_Dataframe")
+_Panel = typing.TypeVar("_Panel")
+_Chart = typing.TypeVar("_Chart")
+
 if typing.TYPE_CHECKING:
     from collections.abc import Collection, Iterable
 
     from flask import Response
     from pydantic import AnyUrl
+    from typing_extensions import Self
     from werkzeug.datastructures import FileStorage
 
     from dltrack import models
     from dltrack.serve._backend._metric_frame import MetricFrame, MetricKeySummary
 
 
-class DataStore[**P](typing.Protocol):
+class DataStore(typing.Protocol[_P]):
     """Any data store."""
 
     @classmethod
-    def get_or_create(cls, *args: P.args, **kwargs: P.kwargs) -> typing.Self:
+    def get_or_create(cls, *args: _P.args, **kwargs: _P.kwargs) -> Self:
         """Initialize a data store."""
         ...
 
@@ -199,33 +209,35 @@ class DataStore[**P](typing.Protocol):
         """Every (non-deleted) run's hyperparameters for an experiment."""
         ...
 
-    def get_or_create_page[Dataframe, Panel, Chart](
+    def get_or_create_page(
         self,
-        page_type: type[models.Page[Dataframe, Panel, Chart]],
+        page_type: type[models.Page[_Dataframe, _Panel, _Chart]],
         *,
         run_id: int | None = None,
         experiment_id: int | None = None,
         project_id: int | None = None,
-        new_page_type: type[models.NewPage[Dataframe, Chart]] | None = None,
-    ) -> models.Page[Dataframe, Panel, Chart]:
+        new_page_type: type[models.NewPage[_Dataframe, _Chart]] | None = None,
+    ) -> models.Page[_Dataframe, _Panel, _Chart]:
         """Fetch the pages for a run, experiment, or project."""
         ...
 
-    def update_page[Dataframe, Panel, Chart](
-        self, page: models.Page[Dataframe, Panel, Chart]
-    ) -> models.Page[Dataframe, Panel, Chart]:
+    def update_page(
+        self, page: models.Page[_Dataframe, _Panel, _Chart]
+    ) -> models.Page[_Dataframe, _Panel, _Chart]:
         """Update a page."""
         ...
 
-    def create_view[Dataframe, Panel, Chart](
-        self, page_type: type[models.Page[Dataframe, Panel, Chart]], view: models.NewPage[Dataframe, Chart]
-    ) -> models.Page[Dataframe, Panel, Chart]:
+    def create_view(
+        self,
+        page_type: type[models.Page[_Dataframe, _Panel, _Chart]],
+        view: models.NewPage[_Dataframe, _Chart],
+    ) -> models.Page[_Dataframe, _Panel, _Chart]:
         """Save a named, owned view of a page (see `NewPage.owner_id`) as its own page."""
         ...
 
-    def get_view[Dataframe, Panel, Chart](
-        self, page_type: type[models.Page[Dataframe, Panel, Chart]], view_id: int
-    ) -> models.Page[Dataframe, Panel, Chart] | None:
+    def get_view(
+        self, page_type: type[models.Page[_Dataframe, _Panel, _Chart]], view_id: int
+    ) -> models.Page[_Dataframe, _Panel, _Chart] | None:
         """A named view by id, or `None` if there's no such view."""
         ...
 
@@ -362,11 +374,11 @@ class DataStore[**P](typing.Protocol):
         ...
 
 
-class ArtifactStore[**P](typing.Protocol):
+class ArtifactStore(typing.Protocol[_P]):
     """An artifact store for files and arbitrary byte-like data."""
 
     @classmethod
-    def get_or_create(cls, *args: P.args, **kwargs: P.kwargs) -> typing.Self:
+    def get_or_create(cls, *args: _P.args, **kwargs: _P.kwargs) -> Self:
         """Initialize a data store."""
         ...
 

@@ -11,12 +11,15 @@ added by and a note names its author with.
 from __future__ import annotations
 
 import secrets
-from typing import Final, Self
+from typing import TYPE_CHECKING, Final
 
 import pendulum
 from pydantic import AwareDatetime, BaseModel, Field
 
 from dltrack.models._scopes import Scope
+
+if TYPE_CHECKING:
+    from typing_extensions import Self
 
 UNVERIFIED_ISSUER: Final = "unverified"
 """The issuer of an identity nobody proved -- the anonymous provider's (see `Principal.unverified`)."""
