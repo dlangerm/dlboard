@@ -125,11 +125,14 @@ logic is a narrow exception: it references concrete chart classes to decide what
    pydantic model, and every query is a Core expression, so SQLAlchemy owns everything dialect-specific
    (types, identity columns, quoting, bind style). A concrete store only hands `SQLStoreBase` an `Engine`
    and implements `_insert_ignoring_conflicts`; `plugins/data_stores/sqlite.py` is the reference one, and
-   `filesystem.py` supplies artifact blob storage on disk. There is no migration system and no backward
-   compatibility with an older schema: startup only creates whatever tables/indexes don't exist yet
-   (`create_all`, `checkfirst=True`). A model field added or changed after a database was created never
-   retroactively appears there -- pre-release, with no deployed databases to preserve, the database is
-   simply deleted and recreated rather than migrated.
+   `filesystem.py` supplies artifact blob storage on disk. Schema changes go through Alembic
+   (`dltrack/serve/_backend/migrations/`): `build_metadata()` in `_sql_store_base.py` is the one place
+   the full schema is assembled from the pydantic models, used both to build a concrete store's live
+   tables and, with `schema=None`, as `migrations/env.py`'s `target_metadata` for autogenerating future
+   revisions. Every store runs `alembic upgrade head` at construction (`_schema_upgrade.run_migrations`),
+   in the same transaction as any Postgres-only schema-creation step (`_prepare_schema`). Pre-release,
+   with no deployed databases to preserve, a migration is free to be a blunt `ALTER`/`DROP`+recreate --
+   nothing here needs to carry old rows forward correctly yet.
 
 ### Server-side app (Dash)
 

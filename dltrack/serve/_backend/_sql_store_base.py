@@ -16,6 +16,7 @@ from dltrack import models
 from dltrack.serve import sql
 from dltrack.serve._backend._app_state import APP_STATE_ROW_ID, AppState
 from dltrack.serve._backend._foreign_keys import ForeignKey, ForeignKeyKind
+from dltrack.serve._backend._schema_upgrade import run_migrations
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Collection, Iterable, Iterator, Mapping
@@ -189,6 +190,40 @@ def _resolve_page_scope(
     return next(iter(owned.items()))
 
 
+def build_metadata(schema: str | None = None) -> tuple[sa.MetaData, dict[type[BaseModel], sa.Table]]:
+    """
+    Declare every table (and the indexes not implied by a column alone) on one `MetaData`.
+
+    The one place the full schema is assembled from the pydantic models -- used both to build a
+    concrete store's live tables and, with `schema=None`, as the `target_metadata` the `migrations/`
+    env imports to autogenerate future revisions against.
+    """
+    metadata = sa.MetaData(schema=schema)
+    tables: dict[type[BaseModel], sa.Table] = {}
+    for model in TABLES:
+        tables[model] = sql.table_for(
+            model, metadata, tables, FOREIGN_KEYS.get(model), UNIQUE_COLUMNS.get(model)
+        )
+    metrics, artifacts, pages = (
+        tables[m] for m in (models.UnderlyingMetricTableEntry, models.Artifact, models.Page)
+    )
+    # `sa.Index(...)` registers itself onto its columns' table/metadata on construction, so building
+    # these is enough to make them part of `metadata` -- nothing further needs to reference them.
+    sa.Index("idx_metric_lookup", *(c for c in metrics.c if c.name not in ("id", "value")))
+    sa.Index("idx_artifact_lookup", *(c for c in artifacts.c if c.name not in ("id", "tags")))
+    for field in PAGE_SCOPE_FIELDS:
+        # At most one *shared* page (owner_id NULL) per scope -- exactly what `get_or_create_page`
+        # relies on to make its own check-then-insert race-safe.
+        sa.Index(
+            f"idx_Page_shared_{field}",
+            pages.c[field],
+            unique=True,
+            sqlite_where=pages.c.owner_id.is_(None),
+            postgresql_where=pages.c.owner_id.is_(None),
+        )
+    return metadata, tables
+
+
 class SQLStoreBase[T](ABC, models.DataStore[T]):
     """
     The full `DataStore` contract over any database SQLAlchemy has a dialect for.
@@ -198,41 +233,18 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
     """
 
     def __init__(self, engine: sa.Engine, *, schema: str | None = None) -> None:
-        """Declare every table on one `MetaData`, then create/migrate the schema in one transaction."""
+        """Declare every table on one `MetaData`, then bring the schema to the latest revision."""
         self._engine = engine
-        self._metadata = sa.MetaData(schema=schema)
-        self._tables: dict[type[BaseModel], sa.Table] = {}
-        for model in TABLES:
-            self._tables[model] = sql.table_for(
-                model, self._metadata, self._tables, FOREIGN_KEYS.get(model), UNIQUE_COLUMNS.get(model)
-            )
-        metrics, artifacts, pages = (
-            self._tables[m] for m in (models.UnderlyingMetricTableEntry, models.Artifact, models.Page)
-        )
-        indexes = [
-            sa.Index("idx_metric_lookup", *(c for c in metrics.c if c.name not in ("id", "value"))),
-            sa.Index("idx_artifact_lookup", *(c for c in artifacts.c if c.name not in ("id", "tags"))),
-            # At most one *shared* page (owner_id NULL) per scope -- exactly what
-            # `get_or_create_page` relies on to make its own check-then-insert race-safe.
-            *(
-                sa.Index(
-                    f"idx_Page_shared_{field}",
-                    pages.c[field],
-                    unique=True,
-                    sqlite_where=pages.c.owner_id.is_(None),
-                    postgresql_where=pages.c.owner_id.is_(None),
-                )
-                for field in PAGE_SCOPE_FIELDS
-            ),
-        ]
+        self._metadata, self._tables = build_metadata(schema)
 
         with engine.begin() as conn:
             self._prepare_schema(conn)
-            self._metadata.create_all(conn)
-            # `create_all` skips an existing table's indexes, so they're each created (if missing)
-            # explicitly too.
-            for index in indexes:
-                index.create(conn, checkfirst=True)
+            if schema is not None:
+                # Postgres-only: everything the baseline revision creates is unqualified (built
+                # with `schema=None`, see `migrations/env.py`), so which schema it lands in is
+                # whatever the connection's search_path resolves to for the rest of this transaction.
+                conn.execute(sa.text(f'SET search_path TO "{schema}"'))
+            run_migrations(conn)
             state = self._tables[AppState]
             conn.execute(
                 self._insert_ignoring_conflicts(state).values(
