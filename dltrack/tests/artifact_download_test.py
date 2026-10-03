@@ -15,8 +15,8 @@ import pytest
 import requests
 
 from dltrack import models
+from dltrack.client._rest_api import BasicDltrackAPI
 from dltrack.conftest import EVERY_ARTIFACT_BACKEND, ArtifactBackend
-from dltrack.plugins.backend.basic_rest_backend import BasicDltrackAPI
 from dltrack.plugins.data_stores.s3 import S3DownloadMode
 from dltrack.serve._backend._artifact_download import _IMMUTABLE_CACHE_CONTROL
 

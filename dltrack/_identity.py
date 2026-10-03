@@ -11,6 +11,7 @@ what it logs) and the server (schema migrations, to pick a name for the one-time
 from __future__ import annotations
 
 import getpass
+from typing import Final
 
 from pydantic_settings import BaseSettings
 from structlog.stdlib import get_logger
@@ -18,6 +19,15 @@ from structlog.stdlib import get_logger
 _log = get_logger(__name__)
 
 ANONYMOUS: str = "anonymous"
+
+DLTRACK_USER_HEADER: Final = "X-Dltrack-User"
+"""Carries the client's best-effort identity (see `resolve_username`).
+
+Never trusted blindly -- a missing/blank header falls back to the same best-effort resolution the
+client itself falls back to. This is attribution, not authentication: nothing here proves a caller
+actually is who the header claims. Read server-side by `dltrack.plugins.auth.anonymous`, the one
+provider that doesn't verify identity another way.
+"""
 
 
 class _IdentitySettings(BaseSettings):

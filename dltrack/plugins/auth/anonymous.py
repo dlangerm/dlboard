@@ -10,12 +10,12 @@ in the app needs to change.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, ClassVar, Final
+from typing import TYPE_CHECKING, ClassVar
 
 from flask import has_request_context, request
 from structlog.stdlib import get_logger
 
-from dltrack._identity import resolve_username
+from dltrack._identity import DLTRACK_USER_HEADER, resolve_username
 from dltrack.models import Principal
 from dltrack.serve import set_auth_provider
 
@@ -23,14 +23,6 @@ if TYPE_CHECKING:
     from dash import Dash
 
 _log = get_logger(__name__)
-
-DLTRACK_USER_HEADER: Final = "X-Dltrack-User"
-"""Carries the client's best-effort identity (see `dltrack._identity.resolve_username`).
-
-Never trusted blindly -- a missing/blank header falls back to the same best-effort resolution the
-client itself falls back to. This is attribution, not authentication: nothing here proves a caller
-actually is who the header claims.
-"""
 
 
 class AnonymousAuthProvider:

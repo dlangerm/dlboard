@@ -1,268 +1,30 @@
 """Routes for doing general api things."""
 
-import itertools
-from http import HTTPStatus
-from pathlib import Path
 from time import perf_counter
-from typing import Any, Callable, Final, Iterable, Literal
+from typing import Any, Callable, Iterable
 
 import dash
-import requests
 from flask import request
-from pydantic import AnyUrl, BaseModel, SecretStr, ValidationError
-from pydantic_settings import BaseSettings
+from pydantic import ValidationError
 from structlog.stdlib import get_logger
 from werkzeug.datastructures import FileStorage
 from werkzeug.exceptions import NotFound
 
 from dltrack import models
-from dltrack._identity import resolve_username
+from dltrack.client._rest_api import (
+    METADATA_PART_SUFFIX,
+    WHOAMI_PATH,
+    GetOrCreateExperiment,
+    GetOrCreateProject,
+    Identity,
+    create_path,
+    entity_path,
+    get_or_create_path,
+)
 from dltrack.models import DataStore
-from dltrack.plugins.auth.anonymous import DLTRACK_USER_HEADER
 from dltrack.serve import get_artifact_store, get_current_user, get_data_store
 
 _log = get_logger(__name__)
-
-DEFAULT_SERVER_URL: Final = "http://localhost:8050"
-"""Matches `dltrack serve local`'s own default host/port (see `ServerRuntimeOptions` in `_cli.py`)."""
-
-_METADATA_PART_SUFFIX: Final = ".json"
-"""Appended to an artifact file's multipart part name to name the part carrying its `NewArtifact` JSON."""
-
-
-def create_path(
-    model: type[BaseModel] | None,
-    base_url: str = "/",
-    api_version: Literal[1] = 1,
-) -> str:
-    """Make a consistent API path."""
-    match api_version:
-        case 1:
-            return f"{base_url}/create/{model.__name__ if model is not None else ''}".strip("/")
-
-
-def entity_path(model: type[BaseModel], entity_id: str = "<int:entity_id>", base_url: str = "/") -> str:
-    """Make a consistent API path for an action on a single existing entity, e.g. `project/<id>`."""
-    return f"{base_url}/{model.__name__.lower()}/{entity_id}".strip("/")
-
-
-def get_or_create_path(model: type[BaseModel], base_url: str = "/") -> str:
-    """Make a consistent API path for the get-or-create-by-name idiom, e.g. `project/get-or-create`."""
-    return f"{base_url}/{model.__name__.lower()}/get-or-create".strip("/")
-
-
-WHOAMI_PATH: Final = "whoami"
-
-
-class ClientAuthSettings(BaseSettings):
-    """The client's credentials, from env vars."""
-
-    dltrack_api_key: SecretStr | None = None
-    """An API token (`dlt_...`) from the server's Account page. Not needed by a server that doesn't verify identity."""
-
-
-class AuthenticationFailedError(RuntimeError):
-    """The server didn't accept this client's credentials (or it sent none, and the server needs some)."""
-
-
-class Identity(BaseModel, frozen=True, extra="forbid"):
-    """Who the server authenticated a request as -- what `whoami` returns."""
-
-    id: int
-    username: str
-
-
-class GetOrCreateProject(BaseModel, frozen=True, extra="forbid"):
-    """Request body: find a project by name, creating it (with `description`) if it's missing."""
-
-    name: str
-    description: str = ""
-
-
-class GetOrCreateExperiment(BaseModel, frozen=True, extra="forbid"):
-    """Request body: find an experiment by name within a project, creating it if it's missing."""
-
-    project_id: int
-    name: str = "default"
-    source: models.ExperimentSource | None = None
-
-
-def _post_request[R: BaseModel](
-    path: str, body: BaseModel, return_model: type[R], headers: dict[str, str] | None = None
-) -> R:
-    try:
-        res = requests.post(path, json=body.model_dump(mode="json"), headers=headers)
-        res.raise_for_status()
-        return return_model.model_validate(res.json())
-    except Exception:
-        _log.exception("Failed to post %s", body)
-        raise
-
-
-def _create_request[R: BaseModel](
-    create_model: BaseModel,
-    return_model: type[R],
-    base_url: str = "/",
-    api_version: Literal[1] = 1,
-    headers: dict[str, str] | None = None,
-) -> R:
-    return _post_request(
-        create_path(return_model, base_url, api_version), create_model, return_model, headers
-    )
-
-
-def _get_or_create_request[R: BaseModel](
-    body: BaseModel,
-    return_model: type[R],
-    base_url: str = "/",
-    headers: dict[str, str] | None = None,
-) -> R:
-    return _post_request(get_or_create_path(return_model, base_url), body, return_model, headers)
-
-
-class BasicDltrackAPI:
-    """API class."""
-
-    def __init__(self, base_url: str = DEFAULT_SERVER_URL, api_key: SecretStr | None = None) -> None:
-        """Initialize the API class, authenticating with `api_key` (default: the `DLTRACK_API_KEY` env var)."""
-        self.base_url = base_url
-        api_key = api_key or ClientAuthSettings().dltrack_api_key
-        # Resolved once per process (not per call): who's actually running this is not going to
-        # change mid-run, and every request this client makes should be attributed consistently.
-        # The username header only matters to a server that doesn't verify identity; one that does
-        # goes by the API key alone.
-        self._headers = {DLTRACK_USER_HEADER: resolve_username()}
-        if api_key is not None:
-            self._headers["Authorization"] = f"Bearer {api_key.get_secret_value()}"
-
-    def whoami(self) -> Identity:
-        """Who the server authenticates this client as. Raises `AuthenticationFailedError` if nobody."""
-        res = requests.get(f"{self.base_url}/{WHOAMI_PATH}", headers=self._headers)
-        if res.status_code == HTTPStatus.UNAUTHORIZED:
-            msg = (
-                f"The dltrack server at {self.base_url} rejected this client's credentials. Create an API "
-                "token from your Account page and set it as DLTRACK_API_KEY (or pass `api_key`)."
-            )
-            raise AuthenticationFailedError(msg)
-        res.raise_for_status()
-        return Identity.model_validate(res.json())
-
-    def create_project(self, new_project: models.NewProject) -> models.Project:
-        """Create a new project."""
-        return _create_request(new_project, models.Project, self.base_url, headers=self._headers)
-
-    def get_or_create_project(self, name: str, description: str = "") -> models.Project:
-        """Get the project named `name`, creating it (with `description`) if it doesn't exist yet."""
-        return _get_or_create_request(
-            GetOrCreateProject(name=name, description=description),
-            models.Project,
-            self.base_url,
-            headers=self._headers,
-        )
-
-    def create_experiment(self, new_experiment: models.NewExperiment) -> models.Experiment:
-        """Create a new experiment."""
-        return _create_request(new_experiment, models.Experiment, self.base_url, headers=self._headers)
-
-    def get_or_create_experiment(
-        self, project_id: int, name: str = "default", source: models.ExperimentSource | None = None
-    ) -> models.Experiment:
-        """Get the named experiment within `project_id`, creating it if it doesn't exist yet."""
-        return _get_or_create_request(
-            GetOrCreateExperiment(project_id=project_id, name=name, source=source),
-            models.Experiment,
-            self.base_url,
-            headers=self._headers,
-        )
-
-    def create_run(self, run: models.NewRun) -> models.Run:
-        """Initialize a new run."""
-        return _create_request(run, models.Run, self.base_url, headers=self._headers)
-
-    def get_run(self, run_id: int) -> models.Run:
-        """The existing run `run_id`. Raises `requests.HTTPError` (404) if it's missing, deleted, or not yours to see."""
-        res = requests.get(f"{self.base_url}/{entity_path(models.Run, str(run_id))}", headers=self._headers)
-        res.raise_for_status()
-        return models.Run.model_validate(res.json())
-
-    def log_hyperparams(self, hyperparams: models.NewHyperParams) -> models.HyperParams:
-        """Log hyperparameters."""
-        return _create_request(hyperparams, models.HyperParams, self.base_url, headers=self._headers)
-
-    def log_metric_batch(self, metrics: list[models.LoggedMetrics]) -> None:
-        """Log a batch of metrics."""
-        res = requests.post(
-            create_path(models.LoggedMetrics, self.base_url),
-            json=[m.model_dump(mode="json") for m in metrics],
-            headers=self._headers,
-        )
-        res.raise_for_status()
-
-    def log_artifact_batch(self, artifacts: Iterable[tuple[models.NewArtifact, Path | AnyUrl]]) -> None:
-        """
-        Log a batch of artifacts in one request, split into an upload batch and a link batch.
-
-        Each artifact is paired with either a local file to upload (written by its own
-        `to_artifact`, e.g. `plugins.artifacts.image.Image`) or an already-stored ref to link
-        (`plugins.artifacts.link.Link`) -- see `AnyArtifact.to_artifact`.
-        """
-        uploads: list[tuple[models.NewArtifact, Path]] = []
-        links: list[tuple[models.NewArtifact, AnyUrl]] = []
-        for artifact, source in artifacts:
-            match source:
-                case Path():
-                    uploads.append((artifact, source))
-                case AnyUrl():
-                    links.append((artifact, source))
-        if uploads:
-            self._upload_artifacts(uploads)
-        if links:
-            self._link_artifacts(links)
-
-    def _upload_artifacts(self, uploads: list[tuple[models.NewArtifact, Path]]) -> None:
-        """
-        Upload a batch of artifacts in one request.
-
-        Every artifact travels as two multipart parts named by its position in the batch -- its
-        file (`0`) and its metadata (`0.json`) -- never by its key: many artifacts routinely share
-        a key (one image per step), and the server matches metadata to file by part name.
-        """
-        # `requests` never closes the file handles it's handed -- opened explicitly (not inline
-        # in the `files=` generator below) so they can be closed in `finally` regardless of
-        # whether the request succeeds, rather than leaking a descriptor per artifact.
-        opened = [path.open("rb") for _, path in uploads]
-        try:
-            res = requests.post(
-                create_path(models.Artifact, self.base_url),
-                files=itertools.chain(
-                    *(
-                        (
-                            (str(i), (a.fname, fh, "application/octet")),
-                            (
-                                f"{i}{_METADATA_PART_SUFFIX}",
-                                (a.fname, a.model_dump_json(), "application/json"),
-                            ),
-                        )
-                        for i, ((a, _path), fh) in enumerate(zip(uploads, opened, strict=True))
-                    )
-                ),
-                headers=self._headers,
-            )
-            res.raise_for_status()
-        finally:
-            for fh in opened:
-                fh.close()
-
-    def _link_artifacts(self, links: list[tuple[models.NewArtifact, AnyUrl]]) -> None:
-        """Register a batch of already-stored artifacts by ref, with no bytes uploaded."""
-        body = [
-            models.NewArtifactLink.model_validate(a.model_dump() | {"ref": ref}).model_dump(mode="json")
-            for a, ref in links
-        ]
-        res = requests.post(
-            create_path(models.NewArtifactLink, self.base_url), json=body, headers=self._headers
-        )
-        res.raise_for_status()
 
 
 # -- Route handlers -------------------------------------------------------------------------------
@@ -497,7 +259,7 @@ def log_artifact() -> dict[str, str]:
         pairs = (
             (
                 models.NewArtifact.model_validate_json(part.stream.read().decode()),
-                request.files[name.removesuffix(_METADATA_PART_SUFFIX)],
+                request.files[name.removesuffix(METADATA_PART_SUFFIX)],
             )
             for name, part in request.files.items()
             if part.content_type == "application/json"

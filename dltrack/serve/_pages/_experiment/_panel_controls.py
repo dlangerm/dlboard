@@ -24,7 +24,8 @@ from dash import ALL, Dash, Input, NoUpdate, Output, State, ctx, html, no_update
 from dash.exceptions import PreventUpdate
 from pydantic import ValidationError
 
-from dltrack.models import ChartTypeRegistry, PanelInstance, constants
+from dltrack.models import ChartTypeRegistry, PanelInstance
+from dltrack.serve import _constants as constants
 from dltrack.serve import get_data_store
 from dltrack.serve._pages._experiment import _experiment_page_state as core
 

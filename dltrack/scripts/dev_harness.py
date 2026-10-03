@@ -33,7 +33,7 @@ import pendulum
 import requests
 
 from dltrack import models
-from dltrack.plugins.backend.basic_rest_backend import BasicDltrackAPI
+from dltrack.client._rest_api import BasicDltrackAPI
 
 app = cyclopts.App(name="dev-harness", help="Start/seed/stop an isolated dltrack dev server.")
 

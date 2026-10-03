@@ -54,22 +54,22 @@ registers it as a *link* — no bytes move, the server just checks the ref is on
 `ArtifactStore` can actually serve (see [Storage](plugins/storage.md)) and records it. There are
 two built-in kinds:
 
-- `dltrack.plugins.artifacts.image.Image` — uploads. Wraps a `torch.Tensor`/`np.ndarray`
+- `dltrack.client.artifacts.image.Image` — uploads. Wraps a `torch.Tensor`/`np.ndarray`
   (validated CHW `uint8` via `dltype`), used like:
 
   ```python
-  from dltrack.plugins.artifacts import image
+  from dltrack.client.artifacts import image
 
   logger.log_artifact([image.Image(key="sample", image=tensor, step=global_step)])
   ```
 
-- `dltrack.plugins.artifacts.link.Link` — links. For a blob a training job already wrote
+- `dltrack.client.artifacts.link.Link` — links. For a blob a training job already wrote
   somewhere dltrack's `ArtifactStore` can serve (e.g. the same S3 bucket), without shipping the
   bytes through dltrack a second time:
 
   ```python
   from pydantic import AnyUrl
-  from dltrack.plugins.artifacts import link
+  from dltrack.client.artifacts import link
 
   logger.log_artifact([link.Link(key="checkpoint", ref=AnyUrl("s3://my-bucket/ckpt.pt"), step=global_step)])
   ```

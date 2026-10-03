@@ -35,6 +35,8 @@ if TYPE_CHECKING:
     from pydantic import AnyUrl
     from werkzeug.datastructures import FileStorage
 
+    from dltrack.serve._backend._metric_frame import MetricFrame, MetricKeySummary
+
 
 def _forbid(what: str) -> NoReturn:
     msg = f"Not allowed: {what}"
@@ -348,11 +350,11 @@ class AuthorizingDataStore(models.DataStore[...]):
         *,
         keys: frozenset[str] | None = None,
         exclude_run_ids: frozenset[int] = frozenset(),
-    ) -> models.MetricFrame:
+    ) -> MetricFrame:
         self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
         return self._inner.fetch_metrics(experiment_id, keys=keys, exclude_run_ids=exclude_run_ids)
 
-    def summarize_metric_keys(self, experiment_id: int) -> list[models.MetricKeySummary]:
+    def summarize_metric_keys(self, experiment_id: int) -> list[MetricKeySummary]:
         self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
         return self._inner.summarize_metric_keys(experiment_id)
 

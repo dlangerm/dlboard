@@ -20,8 +20,9 @@ from dash import ALL, Input, Output, State, ctx, html, no_update
 from dash.exceptions import PreventUpdate
 
 from dltrack import models
-from dltrack.models import StoreId, constants
 from dltrack.serve import ClientsideScript, Icon, get_current_user, get_data_store, icon, series_swatch_class
+from dltrack.serve import _constants as constants
+from dltrack.serve._component_ids import StoreId
 from dltrack.serve._pages._dash_helpers import require_triggered_id, tooltipped_action_icon
 from dltrack.serve._pages._dataframe_helpers import run_display_name
 

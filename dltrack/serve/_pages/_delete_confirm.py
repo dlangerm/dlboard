@@ -14,8 +14,8 @@ import dash_mantine_components as dmc
 from dash import Input, Output, State
 from dash.exceptions import PreventUpdate
 
-from dltrack.models import constants
 from dltrack.serve import Icon
+from dltrack.serve import _constants as constants
 from dltrack.serve._pages._dash_helpers import tooltipped_action_icon
 
 if TYPE_CHECKING:

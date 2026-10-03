@@ -10,7 +10,7 @@ import requests
 from pydantic import AnyUrl
 
 from dltrack import models
-from dltrack.plugins.backend.basic_rest_backend import BasicDltrackAPI
+from dltrack.client._rest_api import BasicDltrackAPI
 
 if TYPE_CHECKING:
     from pathlib import Path

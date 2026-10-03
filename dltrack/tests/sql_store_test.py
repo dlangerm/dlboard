@@ -18,6 +18,7 @@ from sqlalchemy.exc import IntegrityError
 from dltrack import models
 from dltrack.conftest import EVERY_STORE_BACKEND, StoreBackend
 from dltrack.models._view import PanelInstance
+from dltrack.serve._backend._metric_frame import MetricKeySummary
 from dltrack.serve._pages._experiment._experiment_page_state import BasicExperimentPage
 
 if TYPE_CHECKING:
@@ -208,8 +209,8 @@ def test_summarize_metric_keys_counts_each_keys_steps_per_run(
     _log_step(store, run, 1, loss=0.4)
 
     assert store.summarize_metric_keys(experiment_id) == [
-        models.MetricKeySummary("acc", 1),
-        models.MetricKeySummary("loss", 2),
+        MetricKeySummary("acc", 1),
+        MetricKeySummary("loss", 2),
     ]
 
 

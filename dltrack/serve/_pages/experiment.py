@@ -9,7 +9,7 @@ from dash import dcc, html
 from dash.dcc import Store
 from dash.development.base_component import Component
 
-from dltrack.models import constants
+from dltrack.serve import _constants as constants
 from dltrack.serve import get_current_user, get_data_store
 from dltrack.serve._pages._experiment import _experiment_page_state as core
 from dltrack.serve._pages._experiment import render_panel

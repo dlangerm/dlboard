@@ -27,9 +27,9 @@ from PIL import Image as PILImage
 from playwright.sync_api import expect
 
 from dltrack import models
+from dltrack.client._rest_api import BasicDltrackAPI
+from dltrack.client.artifacts.image import Image
 from dltrack.conftest import ScreenshotMode
-from dltrack.plugins.artifacts.image import Image
-from dltrack.plugins.backend.basic_rest_backend import BasicDltrackAPI
 from dltrack.serve import get_system_data_store
 from dltrack.serve._pages._experiment._chart_autogen import ARTIFACT_PANEL_SUFFIX
 from dltrack.serve._pages._experiment._experiment_page_state import PAGE_EXPERIMENT_ID

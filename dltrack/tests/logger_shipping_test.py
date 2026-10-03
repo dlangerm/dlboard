@@ -12,9 +12,9 @@ import torch
 
 from dltrack import models
 from dltrack.client import DLTrackLogger
+from dltrack.client._rest_api import create_path
+from dltrack.client.artifacts import image
 from dltrack.conftest import EVERY_STORE_BACKEND, StoreBackend
-from dltrack.plugins.artifacts import image
-from dltrack.plugins.backend.basic_rest_backend import create_path
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

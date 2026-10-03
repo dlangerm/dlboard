@@ -22,7 +22,7 @@ from pytorch_lightning.utilities import rank_zero_only
 from dltrack import models
 from dltrack._batching import BatchParams, ship_batches
 from dltrack._mp_context import SPAWN_CONTEXT
-from dltrack.plugins.backend.basic_rest_backend import DEFAULT_SERVER_URL, BasicDltrackAPI
+from dltrack.client._rest_api import DEFAULT_SERVER_URL, BasicDltrackAPI
 
 DEFAULT_EXPERIMENT_NAME = "default"
 

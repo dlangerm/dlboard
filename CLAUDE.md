@@ -75,11 +75,18 @@ autofix/suggestion that assumes newer syntax.
 
 ### Plugin system
 
-Genuinely swappable functionality — storage, auth, chart types, artifact types, themes, backend routes — is
+Genuinely swappable functionality — storage, auth, chart types, themes, backend routes — is
 composed at startup as a flat list of plugins passed into `dltrack.serve.app.app(plugins)`. Each plugin is
 any module implementing `PluginProtocol` (`dltrack/models/_plugin.py`): a `plug(cls, app: Dash) -> None`
 classmethod that registers itself with the Dash app (adds routes, sets the data store, registers a chart
 renderer, etc).
+
+A logged artifact's *kind* (`dltrack/client/artifacts/`: `Image`, `Link`) isn't part of this list --
+there's nothing server-side to register. Each is a plain client-side value type structurally matching
+`AnyArtifact` (`dltrack/models/_artifact.py`): the client builds one and calls its own `to_artifact()`
+to turn it into bytes/a ref the generic upload path sends, and the server never imports the concrete
+class at all. Lives under `client/`, not `plugins/`, so a client install never needs the server stack
+just to construct one.
 
 `dltrack/plugins/__init__.py` defines the bundles used for a local deployment:
 - `LOCAL_STORAGE` = `[sqlite, filesystem]` — the metadata DB and artifact blob storage
@@ -159,7 +166,7 @@ reach for `get_system_data_store()` from request code: it bypasses authorization
 user is behind (background workers, the gate itself, the password provider's credential checks). A new
 `DataStore` method needs an explicit rule in `AuthorizingDataStore` -- `authorization_test.py` fails
 without one.
-Constants for Dash component IDs live in `dltrack/models/constants.py`.
+Constants for Dash component IDs live in `dltrack/serve/_constants.py`.
 Constants should only be added for globally-accessed values, not for per-plugin items that won't be used in other contexts.
 
 ### Models

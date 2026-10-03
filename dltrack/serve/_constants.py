@@ -3,7 +3,7 @@ Ids genuinely owned by `serve/app.py` (the app shell), not any single page.
 
 An id that only one page's callbacks read/write belongs in that page's own implementation module,
 typed against a page-scoped tag (`StoreId[MyPage]`, `DivId[MyPage]`, ...) via
-`dltrack.models._component_ids` -- see e.g. `serve/_pages/_experiment/__init__.py`. Only put an id
+`dltrack.serve._component_ids` -- see e.g. `serve/_pages/_experiment/__init__.py`. Only put an id
 here if `serve/app.py` itself owns it, or if it's a route-skeleton container that both a
 `serve/_pages/x.py` routed layout and its underscore-prefixed implementation module need (and even
 then, prefer declaring it in the implementation module and importing it into the routed file, as
@@ -12,7 +12,7 @@ most pages already do).
 
 from typing import Final
 
-from dltrack.models._component_ids import AppShell, StoreId
+from dltrack.serve._component_ids import AppShell, StoreId
 
 # Route/session state, produced by app.py's routing and read by whichever page the current route
 # lands on -- these are the two pieces of shared state every page-scoped module can assume are

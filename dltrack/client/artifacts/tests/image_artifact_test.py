@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import torch
 
-from dltrack.plugins.artifacts.image import Image
+from dltrack.client.artifacts.image import Image
 
 if TYPE_CHECKING:
     from pathlib import Path

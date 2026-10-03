@@ -14,7 +14,6 @@ from dash.exceptions import PreventUpdate
 from structlog.stdlib import get_logger
 
 from dltrack import models
-from dltrack.models import ButtonId, DivId, ModalId, StoreId, ValueId, constants
 from dltrack.plugins.backend import artifact_purge_worker
 from dltrack.serve import (
     Icon,
@@ -24,6 +23,8 @@ from dltrack.serve import (
     get_installed_plugins,
     icon,
 )
+from dltrack.serve import _constants as constants
+from dltrack.serve._component_ids import ButtonId, DivId, ModalId, StoreId, ValueId
 from dltrack.serve._pages._dash_helpers import require_triggered_id
 
 if TYPE_CHECKING:

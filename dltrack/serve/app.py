@@ -13,7 +13,8 @@ from dash import Dash, Input, Output, State, callback, dcc, html  # pyright: ign
 from dash.dcc import Store
 from structlog.stdlib import get_logger
 
-from dltrack.models import InstalledPlugin, constants
+from dltrack.models import InstalledPlugin
+from dltrack.serve import _constants as constants
 from dltrack.serve._assets import AssetKind, serve_asset
 from dltrack.serve._backend import _artifact_download
 from dltrack.serve._backend._auth import (
