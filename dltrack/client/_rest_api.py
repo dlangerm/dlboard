@@ -1,11 +1,8 @@
 """
-The client's HTTP transport, and the request/response shapes it shares with the server.
+The client's HTTP transport: `BasicDltrackAPI`, built on the wire contract in `dltrack._wire`.
 
 Pure `requests` -- no `dash`/`flask`, so importing this (and anything that imports it, like
-`dltrack.client.dltrack_logger`) never needs the server stack installed. The path builders and
-request-body models here (`create_path`, `GetOrCreateProject`, ...) are also imported by
-`dltrack.plugins.backend.basic_rest_backend` (the server side), so a route always matches exactly
-what this client sends -- one definition, not two that have to be kept in sync by hand.
+`dltrack.client.dltrack_logger`) never needs the server stack installed.
 """
 
 from __future__ import annotations
@@ -21,7 +18,18 @@ from pydantic_settings import BaseSettings
 from structlog.stdlib import get_logger
 
 from dltrack import models
-from dltrack._identity import DLTRACK_USER_HEADER, resolve_username
+from dltrack._identity import resolve_username
+from dltrack._wire import (
+    DLTRACK_USER_HEADER,
+    METADATA_PART_SUFFIX,
+    WHOAMI_PATH,
+    GetOrCreateExperiment,
+    GetOrCreateProject,
+    Identity,
+    create_path,
+    entity_path,
+    get_or_create_path,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -30,32 +38,6 @@ _log = get_logger(__name__)
 
 DEFAULT_SERVER_URL: Final = "http://localhost:8050"
 """Matches `dltrack serve local`'s own default host/port (see `ServerRuntimeOptions` in `_cli.py`)."""
-
-METADATA_PART_SUFFIX: Final = ".json"
-"""Appended to an artifact file's multipart part name to name the part carrying its `NewArtifact` JSON."""
-
-WHOAMI_PATH: Final = "whoami"
-
-
-def create_path(
-    model: type[BaseModel] | None,
-    base_url: str = "/",
-    api_version: Literal[1] = 1,
-) -> str:
-    """Make a consistent API path."""
-    match api_version:
-        case 1:
-            return f"{base_url}/create/{model.__name__ if model is not None else ''}".strip("/")
-
-
-def entity_path(model: type[BaseModel], entity_id: str = "<int:entity_id>", base_url: str = "/") -> str:
-    """Make a consistent API path for an action on a single existing entity, e.g. `project/<id>`."""
-    return f"{base_url}/{model.__name__.lower()}/{entity_id}".strip("/")
-
-
-def get_or_create_path(model: type[BaseModel], base_url: str = "/") -> str:
-    """Make a consistent API path for the get-or-create-by-name idiom, e.g. `project/get-or-create`."""
-    return f"{base_url}/{model.__name__.lower()}/get-or-create".strip("/")
 
 
 class ClientAuthSettings(BaseSettings):
@@ -67,28 +49,6 @@ class ClientAuthSettings(BaseSettings):
 
 class AuthenticationFailedError(RuntimeError):
     """The server didn't accept this client's credentials (or it sent none, and the server needs some)."""
-
-
-class Identity(BaseModel, frozen=True, extra="forbid"):
-    """Who the server authenticated a request as -- what `whoami` returns."""
-
-    id: int
-    username: str
-
-
-class GetOrCreateProject(BaseModel, frozen=True, extra="forbid"):
-    """Request body: find a project by name, creating it (with `description`) if it's missing."""
-
-    name: str
-    description: str = ""
-
-
-class GetOrCreateExperiment(BaseModel, frozen=True, extra="forbid"):
-    """Request body: find an experiment by name within a project, creating it if it's missing."""
-
-    project_id: int
-    name: str = "default"
-    source: models.ExperimentSource | None = None
 
 
 def _post_request[R: BaseModel](
@@ -253,6 +213,9 @@ class BasicDltrackAPI:
                 headers=self._headers,
             )
             res.raise_for_status()
+        except Exception:
+            _log.exception("Failed to upload %d artifact(s)", len(uploads))
+            raise
         finally:
             for fh in opened:
                 fh.close()
@@ -263,7 +226,11 @@ class BasicDltrackAPI:
             models.NewArtifactLink.model_validate(a.model_dump() | {"ref": ref}).model_dump(mode="json")
             for a, ref in links
         ]
-        res = requests.post(
-            create_path(models.NewArtifactLink, self.base_url), json=body, headers=self._headers
-        )
-        res.raise_for_status()
+        try:
+            res = requests.post(
+                create_path(models.NewArtifactLink, self.base_url), json=body, headers=self._headers
+            )
+            res.raise_for_status()
+        except Exception:
+            _log.exception("Failed to link %d artifact(s)", len(links))
+            raise

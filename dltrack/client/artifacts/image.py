@@ -18,17 +18,19 @@ if TYPE_CHECKING:
     # client install that never actually constructs an `Image` from a tensor.
     import torch
 
-    _TensorType = torch.Tensor
+    _ImageArray = torch.Tensor | np.ndarray
 else:
     try:
         import torch
 
-        _TensorType = torch.Tensor
+        _ImageArray = torch.Tensor | np.ndarray
     except ImportError:
+        # No placeholder type standing in for `torch.Tensor` here -- a client without torch
+        # literally cannot hold one, so narrowing the field to `np.ndarray` alone is both more
+        # accurate and sidesteps whatever pydantic/dltype's schema generation might do with an
+        # annotation branch that's a fake, fieldless, non-array-like class.
         torch = None
-
-        class _TensorType:
-            """Stands in for `torch.Tensor` when torch isn't installed -- nothing is ever an instance of it."""
+        _ImageArray = np.ndarray
 
 
 class Image(BaseModel, frozen=True, extra="forbid"):
@@ -36,7 +38,7 @@ class Image(BaseModel, frozen=True, extra="forbid"):
 
     key: str
     """Key for this artifact."""
-    image: Annotated[_TensorType | np.ndarray, dltype.UInt8Tensor("height width *channels")]
+    image: Annotated[_ImageArray, dltype.UInt8Tensor("height width *channels")]
     """An image to log. Expected to be in CHW format."""
     tags: dict[str, str] = {}
     """Tags for the image, for use by plugins."""
@@ -45,7 +47,7 @@ class Image(BaseModel, frozen=True, extra="forbid"):
 
     @field_validator("image", mode="before")
     @classmethod
-    def _move_image_to_cpu(cls, image: _TensorType | np.ndarray) -> _TensorType | np.ndarray:
+    def _move_image_to_cpu(cls, image: _ImageArray) -> _ImageArray:
         if torch is not None and isinstance(image, torch.Tensor):
             return image.cpu()
         return image
@@ -53,11 +55,11 @@ class Image(BaseModel, frozen=True, extra="forbid"):
     def to_artifact(self, local_temp: Path, run_id: int, experiment_id: int) -> tuple[NewArtifact, Path]:
         """Convert this artifact."""
         if torch is not None and isinstance(self.image, torch.Tensor):
-            im_underlying = self.image.numpy()
+            im_underlying = self.image.cpu().numpy()
         else:
-            # Not a `torch.Tensor` (checked above whenever torch is even installed), so the
-            # `Annotated[_TensorType | np.ndarray, ...]` field leaves only `np.ndarray` here --
-            # pyright just can't follow that through the compound `torch is not None and ...` above.
+            # Not a `torch.Tensor` (checked above whenever torch is even installed), so `_ImageArray`
+            # leaves only `np.ndarray` here -- pyright just can't follow that through the compound
+            # `torch is not None and ...` above.
             im_underlying = cast("np.ndarray", self.image)
         pil_img = PIL.Image.fromarray(im_underlying)
         target = (local_temp / str(uuid.uuid4())).with_suffix(".jpg")
