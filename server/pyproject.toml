@@ -44,4 +44,4 @@ dltrack = "dltrack._cli:main"
 path = "hatch_build.py"
 
 [tool.uv.sources]
-dltrack = {workspace = true}
+dltrack = { workspace = true }
