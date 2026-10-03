@@ -18,7 +18,7 @@ import pytest
 from pydantic import BaseModel
 
 from dltrack import models
-from dltrack.plugins.backend.basic_rest_backend import BasicDltrackAPI
+from dltrack.client._rest_api import BasicDltrackAPI
 
 if TYPE_CHECKING:
     from playwright.sync_api import Page, Request

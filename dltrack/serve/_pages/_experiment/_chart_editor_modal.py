@@ -20,8 +20,8 @@ from pydantic import ValidationError
 from structlog.stdlib import get_logger
 
 from dltrack import models
-from dltrack.models import constants
 from dltrack.serve import ClientsideScript, Icon, get_data_store, icon
+from dltrack.serve import _constants as constants
 from dltrack.serve._pages._experiment import _experiment_page_state as core
 from dltrack.serve._pages._experiment._dataframe_helpers import ColumnCatalog
 

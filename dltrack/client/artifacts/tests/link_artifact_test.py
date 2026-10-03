@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import AnyUrl
 
-from dltrack.plugins.artifacts.link import Link
+from dltrack.client.artifacts.link import Link
 
 if TYPE_CHECKING:
     from pathlib import Path

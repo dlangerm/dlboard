@@ -1,7 +1,7 @@
 """All built-in dltrack plugins."""
 
 from dltrack.models import PluginProtocol
-from dltrack.plugins import artifacts, auth, backend, charts, themes
+from dltrack.plugins import auth, backend, charts, themes
 from dltrack.plugins.auth import anonymous, password
 from dltrack.plugins.backend import artifact_purge_worker, basic_rest_backend, error
 from dltrack.plugins.data_stores import filesystem, postgres, s3, sqlite
@@ -53,7 +53,6 @@ __all__ = [
     "PASSWORD_AUTH",
     "POSTGRES_S3_STORAGE",
     "POSTGRES_STORAGE",
-    "artifacts",
     "auth",
     "backend",
     "charts",

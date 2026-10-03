@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 import dash
 from dash import dcc
 
-from dltrack.models import constants
+from dltrack.serve import _constants as constants
 from dltrack.serve._pages._simple_project_page import render_project_page
 
 if TYPE_CHECKING:

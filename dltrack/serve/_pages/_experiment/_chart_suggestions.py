@@ -14,8 +14,9 @@ import dash_mantine_components as dmc
 from dash import ALL, Dash, Input, NoUpdate, Output, State, ctx, no_update
 from dash.exceptions import PreventUpdate
 
-from dltrack.models import ChartInstance, ColumnKind, constants
+from dltrack.models import ChartInstance, ColumnKind
 from dltrack.serve import Icon, get_data_store, icon
+from dltrack.serve import _constants as constants
 from dltrack.serve._pages._experiment import _experiment_page_state as core
 from dltrack.serve._pages._experiment._chart_autogen import (
     Suggestion,

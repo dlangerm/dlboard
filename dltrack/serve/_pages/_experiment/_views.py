@@ -30,8 +30,9 @@ from dash.exceptions import PreventUpdate
 from pydantic import BaseModel, ValidationError
 
 from dltrack import models
-from dltrack.models import ButtonId, ModalId, constants
 from dltrack.serve import ClientsideScript, Icon, get_current_user, get_data_store, icon
+from dltrack.serve import _constants as constants
+from dltrack.serve._component_ids import ButtonId, ModalId
 from dltrack.serve._pages._delete_confirm import (
     DeleteConfirmIds,
     delete_confirm_modal,

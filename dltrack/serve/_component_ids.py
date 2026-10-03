@@ -5,20 +5,15 @@ A bare `str` id doesn't stop a callback from reading a `dcc.Store`'s `"data"` of
 actually an `html.Div`, or from reaching across pages to reference another plugin's internal id.
 `StoreId[P]`/`DivId[P]`/etc. are `str` subclasses generic over a page-tag type `P` -- each page
 plugin declares its own never-instantiated tag class and types its ids against it, so pyright
-rejects both a role mismatch (passing a `DivId` where a `store_*` helper wants a `StoreId`) and a
-page mismatch (passing `StoreId[_AdminPage]` where `StoreId[_ExperimentPage]` is expected).
+rejects both a role mismatch (a `DivId` where a `State`/`Input`/`Output` call expects a `StoreId`)
+and a page mismatch (`StoreId[_AdminPage]` where `StoreId[_ExperimentPage]` is expected).
 
 These are pure `str` at runtime -- zero behavior change, still valid Dash component ids -- so
-`store_state` (the one typed constructor callers actually need, for the grouped `State` used to
-cut down `PLR0913`-triggering callback signatures -- see `_experiment_page_state.edit_ctx_state`)
-is what pyright checks against; using `Input`/`Output`/`State` directly still accepts a bare `str`.
+using `Input`/`Output`/`State` directly still accepts one, typed against whichever role/page it's
+declared for.
 """
 
 from __future__ import annotations
-
-from typing import Literal
-
-from dash import State
 
 
 class AppShell:
@@ -47,7 +42,3 @@ class IntervalId[P](str):
 
 class ValueId[P](str):
     """A `TextInput`/`Select`/`NumberInput`/`Switch`-style id -- `"value"` or `"checked"`."""
-
-
-def store_state[P](id_: StoreId[P], prop: Literal["data"] = "data", *, allow_optional: bool = False) -> State:
-    return State(id_, prop, allow_optional=allow_optional)

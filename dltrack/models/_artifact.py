@@ -37,7 +37,7 @@ class AnyArtifact(typing.Protocol):
         Convert this artifact to a `NewArtifact`, plus either a local file to upload or a ref to link.
 
         A `Path` (written under `local_temp`) is uploaded; an `AnyUrl` is registered as-is, with no
-        bytes moved -- for an artifact kind (`plugins.artifacts.link.Link`) that logs a blob it put
+        bytes moved -- for an artifact kind (`client.artifacts.link.Link`) that logs a blob it put
         in the store's own space some other way.
         """
         ...

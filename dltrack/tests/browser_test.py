@@ -28,8 +28,8 @@ import pytest
 from playwright.sync_api import expect
 
 from dltrack import models
+from dltrack.client._rest_api import BasicDltrackAPI
 from dltrack.models import PanelInstance
-from dltrack.plugins.backend.basic_rest_backend import BasicDltrackAPI
 from dltrack.serve import get_system_data_store
 from dltrack.serve._jump import JUMP_SELECT_ID
 from dltrack.serve._pages._experiment._experiment_page_state import (

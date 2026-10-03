@@ -19,8 +19,8 @@ from typing import TYPE_CHECKING
 import torch
 
 from dltrack import models
-from dltrack.plugins.artifacts import image
-from dltrack.plugins.backend.basic_rest_backend import BasicDltrackAPI
+from dltrack.client._rest_api import BasicDltrackAPI
+from dltrack.client.artifacts import image
 
 if TYPE_CHECKING:
     from pathlib import Path

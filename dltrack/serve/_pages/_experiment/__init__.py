@@ -25,8 +25,9 @@ import pendulum
 from dash import ALL, Dash, Input, Output, State, no_update
 from structlog.stdlib import get_logger
 
-from dltrack.models import ButtonId, ModalId, constants
 from dltrack.serve import AssetKind, get_current_user, get_data_store, serve_asset
+from dltrack.serve import _constants as constants
+from dltrack.serve._component_ids import ButtonId, ModalId
 from dltrack.serve._pages._dataframe_helpers import experiment_display_name
 from dltrack.serve._pages._delete_confirm import (
     DeleteConfirmIds,

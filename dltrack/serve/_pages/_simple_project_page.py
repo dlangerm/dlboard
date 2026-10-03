@@ -8,8 +8,10 @@ from typing import TYPE_CHECKING
 import dash_mantine_components as dmc
 from dash import Dash, Input, Output, State, html, no_update
 
-from dltrack.models import ActivityStats, ButtonId, ModalId, NewExperiment, constants
+from dltrack.models import ActivityStats, NewExperiment
 from dltrack.serve import Icon, get_current_user, get_data_store, icon
+from dltrack.serve import _constants as constants
+from dltrack.serve._component_ids import ButtonId, ModalId
 from dltrack.serve._pages._dash_helpers import entity_card
 from dltrack.serve._pages._dataframe_helpers import experiment_display_name
 from dltrack.serve._pages._delete_confirm import (

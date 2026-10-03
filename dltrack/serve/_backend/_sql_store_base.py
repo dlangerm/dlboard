@@ -16,6 +16,7 @@ from dltrack import models
 from dltrack.serve import sql
 from dltrack.serve._backend._app_state import APP_STATE_ROW_ID, AppState
 from dltrack.serve._backend._foreign_keys import ForeignKey, ForeignKeyKind
+from dltrack.serve._backend._metric_frame import MetricFrame, MetricKeySummary, MetricRow
 from dltrack.serve._backend._schema_upgrade import run_migrations
 
 if TYPE_CHECKING:
@@ -693,7 +694,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         *,
         keys: frozenset[str] | None = None,
         exclude_run_ids: frozenset[int] = frozenset(),
-    ) -> models.MetricFrame:
+    ) -> MetricFrame:
         """An experiment's (non-deleted runs') metrics -- only `keys`, if given, else every metric."""
         # `UnderlyingMetricTableEntry` has no `deleted_at` of its own -- visibility is inherited
         # transitively through its run, which is always soft-deleted in the same cascade as its
@@ -702,7 +703,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         key_filter = [m.c.key.in_(keys)] if keys is not None else []
         # `ORDER BY m.id` is insertion order, which is what `MetricFrame.from_rows`' last-write-wins needs.
         rows = self._execute(
-            sa.select(*(m.c[f] for f in models.MetricRow._fields))
+            sa.select(*(m.c[f] for f in MetricRow._fields))
             .join(r, m.c.run_id == r.c.id)
             .where(
                 m.c.experiment_id == experiment_id,
@@ -712,9 +713,9 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             )
             .order_by(m.c.id)
         )
-        return models.MetricFrame.from_rows(models.MetricRow._make(row) for row in rows)
+        return MetricFrame.from_rows(MetricRow._make(row) for row in rows)
 
-    def summarize_metric_keys(self, experiment_id: int) -> list[models.MetricKeySummary]:
+    def summarize_metric_keys(self, experiment_id: int) -> list[MetricKeySummary]:
         """Every metric key logged in an experiment (non-deleted runs), sorted, without fetching values."""
         m, r = self._tables[models.UnderlyingMetricTableEntry], self._tables[models.Run]
         per_run = (
@@ -729,7 +730,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             .group_by(per_run.c.key)
             .order_by(per_run.c.key)
         )
-        return [models.MetricKeySummary(key, steps) for key, steps in rows]
+        return [MetricKeySummary(key, steps) for key, steps in rows]
 
     def log_hyperparams(self, hyperparams: models.NewHyperParams) -> models.HyperParams:
         """Log hyperparameters to the data store."""

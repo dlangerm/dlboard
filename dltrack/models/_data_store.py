@@ -12,6 +12,7 @@ if typing.TYPE_CHECKING:
     from werkzeug.datastructures import FileStorage
 
     from dltrack import models
+    from dltrack.serve._backend._metric_frame import MetricFrame, MetricKeySummary
 
 
 class DataStore[**P](typing.Protocol):
@@ -174,11 +175,11 @@ class DataStore[**P](typing.Protocol):
         *,
         keys: frozenset[str] | None = None,
         exclude_run_ids: frozenset[int] = frozenset(),
-    ) -> models.MetricFrame:
+    ) -> MetricFrame:
         """An experiment's (non-deleted runs') metrics -- only `keys`, if given, else every metric."""
         ...
 
-    def summarize_metric_keys(self, experiment_id: int) -> list[models.MetricKeySummary]:
+    def summarize_metric_keys(self, experiment_id: int) -> list[MetricKeySummary]:
         """
         Every metric key logged in an experiment (non-deleted runs), sorted, without fetching values.
 

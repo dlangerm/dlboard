@@ -16,13 +16,13 @@ from pytorch_lightning.utilities import rank_zero_only
 
 from dltrack import models
 from dltrack.client import dltrack_logger
+from dltrack.client._rest_api import Identity
 from dltrack.client.dltrack_logger import (
     DLTrackLogger,
     DLTrackLoggerSettings,
     is_rejection,
     warn_if_startup_was_slow,
 )
-from dltrack.plugins.backend.basic_rest_backend import Identity
 
 
 class _FakeAPI:
