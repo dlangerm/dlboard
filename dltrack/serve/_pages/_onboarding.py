@@ -28,7 +28,7 @@ def _snippet(constructor: str, *args: str) -> str:
     return "\n".join(
         [
             "import pytorch_lightning as pl",
-            "from dltrack.client import DLTrackLogger",
+            "from dltrack.client.dltrack_logger import DLTrackLogger",
             "",
             f"logger = {constructor}(",
             *arg_lines,

@@ -18,7 +18,7 @@ below.
 ## How it works
 
 ```python
-from dltrack.client import DLTrackLogger
+from dltrack.client.dltrack_logger import DLTrackLogger
 
 logger = DLTrackLogger(project_id=project.id, server_url="http://localhost:8050")
 trainer = pl.Trainer(logger=logger)

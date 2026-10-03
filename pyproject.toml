@@ -1,6 +1,10 @@
-[build-system]
-build-backend = "hatchling.build"
-requires = ["hatchling"]
+# A virtual workspace root: no `[project]` table of its own, on purpose -- `client/` (the
+# `dltrack` distribution) and `server/` (`dltrack-server`) are the two real packages, both built
+# from this one shared `dltrack/` source tree (see their own `pyproject.toml`s and
+# `hatch_build.py`s). A virtual root is what makes bare `uv run`/`uv sync` default to every
+# workspace member instead of just one, so every command below (and in CLAUDE.md) keeps working
+# unchanged -- a `[project]` table here would make this directory an explicit, single default
+# target instead.
 
 [dependency-groups]
 dev = [
@@ -12,53 +16,17 @@ dev = [
   "pytest>=9.1.1",
   "pytest-cov>=7.1.0",
   "pytest-playwright>=0.9.0",
+  # Not a real dependency of the `dltrack` distribution -- `client/pyproject.toml`'s
+  # `[project.optional-dependencies] lightning` is that, for an actual `dltrack[lightning]`
+  # consumer. This repo's own test suite (and `train.py`) exercises the Lightning adapter
+  # directly, so it needs installing without anyone having to remember `--extra lightning`.
+  "pytorch-lightning>=2.6.5",
   "ruff>=0.15.22",
   "testcontainers[localstack,postgres]>=4.10",
   "torchvision>=0.28.0",
   "types-boto3[s3]>=1.40",
   "vulture>=2.16"
 ]
-
-[project]
-dependencies = [
-  "alembic>=1.13",
-  "coolname>=5.0.0",
-  "cyclopts>=4.23.2",
-  "dash>=4.4.1",
-  "dash-ag-grid>=35.3.0",
-  "dash-mantine-components>=2.8.0",
-  "dltype>=0.16.0",
-  "granian>=2.8.2",
-  "numpy>=2.5.1",
-  "pandas>=3.0.5",
-  "pendulum>=3.2.0",
-  "pillow>=12.3.0",
-  "pydantic>=2.13.4",
-  "pydantic-settings>=2.14.2",
-  "pytorch-lightning>=2.6.5",
-  "rich>=15.0.0",
-  "sqlalchemy>=2.0.40",
-  "structlog>=26.1.0",
-  "typing-extensions>=4.12.0"
-]
-description = "A free, self-hosted experiment-tracking server."
-license = "Apache-2.0"
-license-files = ["LICENSE"]
-name = "dltrack"
-readme = "README.md"
-requires-python = ">=3.12"
-version = "0.1.0"
-
-[project.optional-dependencies]
-postgres = [
-  "psycopg[binary]>=3.2"
-]
-s3 = [
-  "boto3>=1.40"
-]
-
-[project.scripts]
-dltrack = "dltrack._cli:main"
 
 [tool.coverage.report]
 exclude_also = [
@@ -165,6 +133,17 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel", "pydantic_settings.BaseS
 # every other tests dir.
 "**/{tests,_tests}/*" = ["D", "ARG", "FBT", "PLR2004", "T201", "SLF001", "INP001"]
 "dltrack/scripts/*" = ["T201"]
+# `client/`/`server/`'s own build-time scripts, not `dltrack/`'s -- standalone hatchling hooks,
+# never imported as part of either package.
+"{client,server}/hatch_build.py" = ["INP001"]
+
+[tool.uv.workspace]
+# `client/` is `dltrack` (the client + shared models) and `server/` is `dltrack-server` (the Dash
+# app, storage/auth plugins, and the `dltrack` CLI) -- both built from different subsets of this
+# one shared `dltrack/` tree (see each one's own `hatch_build.py`). One repo, one source tree, two
+# distributions: a client-only install never needs dash, granian, or sqlalchemy, and the published
+# server image never needs torch.
+members = ["client", "server"]
 
 [tool.vulture]
 # Deliberately does NOT exclude `tests/`: dltrack is a library as much as an application, and for

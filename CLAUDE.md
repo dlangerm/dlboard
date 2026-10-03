@@ -6,11 +6,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 DLTrack — a free, self-hosted ML experiment-tracking server. It's a Dash/Dash-Mantine web app for browsing ML
 training runs, plus a `pytorch_lightning`-compatible logger client that ships metrics/hyperparams/artifacts
-to it over a REST API.
+to it over a REST API. Published as two PyPI distributions from one source tree -- `dltrack` (the
+client; Python >=3.10) and `dltrack-server` (the Dash app; Python >=3.12) -- see "Packaging" under
+Architecture.
 
 ## Commands
 
-Run everything through `uv` (Python >=3.12, deps pinned in `uv.lock`).
+Run everything through `uv`, from the repo root (deps pinned in `uv.lock`). This repo's own `pyproject.toml`
+is a virtual uv workspace root with no package of its own -- `uv sync`/`uv run` default to every member
+(`client/`, `server/`) without needing `--all-packages`, so the commands below need no extra flags.
 Never run raw python commands, if a python command doesn't work through `uv` ask for further instructions.
 Never use python to edit files, just use your normal mechanisms to do so.
 
@@ -72,6 +76,44 @@ autofix/suggestion that assumes newer syntax.
 
 ## Architecture
 
+### Packaging: two distributions, one source tree
+
+Everything still lives under one `dltrack/` directory, as one git repo -- but it's published as
+two separate PyPI distributions, built from different subsets of that same tree:
+
+- **`client/`** -- the `dltrack` distribution: `dltrack/__init__.py`, `dltrack/_identity.py`,
+  `dltrack/_batching.py`, `dltrack/_mp_context.py`, `dltrack/_wire.py`, `dltrack/client/`, and
+  `dltrack/models/`. Python >=3.10, and intentionally light -- pydantic, numpy, pendulum, requests,
+  and the like. `pytorch_lightning` (needed only by `dltrack.client.dltrack_logger`) is the
+  `[lightning]` extra, not a base dependency, so a client install never needs torch unless it
+  actually wants the Lightning adapter.
+- **`server/`** -- the `dltrack-server` distribution: `dltrack/serve/`, `dltrack/plugins/` (every
+  plugin *except* `dltrack/client/artifacts/`, which is client-owned), `dltrack/_cli.py`, and
+  `dltrack/scripts/`. Python >=3.12, depends on `dltrack` for the shared models, and is where
+  dash/granian/sqlalchemy/pandas actually live -- a client install never needs any of them.
+
+Each side's `pyproject.toml` lives in its own directory (`client/pyproject.toml`,
+`server/pyproject.toml`) and pulls its files from `../dltrack/...` via a `hatch_build.py` build
+hook (plain `[tool.hatch.build] include`/`exclude` can't reach outside its own project directory,
+and `force-include` -- the one mechanism that can -- ignores `exclude` entirely, so each hook
+walks its own subset of the tree and builds the `force_include` mapping itself, skipping every
+`tests`/`_tests` directory on the way). Neither side ships `dltrack/__init__.py` *and* claims to
+own the whole package: only `client/`'s wheel has it, so `dltrack-server`'s wheel is an implicit
+namespace package (PEP 420) that layers its `dltrack/serve`, `dltrack/plugins`, etc. on top of the
+client's `dltrack/` when both are installed together -- verified by building both wheels and
+installing them into a clean venv, not just by inspecting the config.
+
+This repo's own root `pyproject.toml` is a **virtual workspace root**: no `[project]` table of its
+own, just `[tool.uv.workspace] members = ["client", "server"]` plus the shared dev tooling config
+(`[tool.ruff]`, `[tool.pyright]`, `[tool.pytest.ini_options]`, `[dependency-groups] dev`, ...). A
+virtual root is what makes bare `uv run`/`uv sync` default to every workspace member instead of
+just one -- give it a real `[project]` table and those commands go back to defaulting to that one
+package alone.
+
+A change to the client/server boundary itself (moving a file between `dltrack/client/` and
+`dltrack/serve/`, say) means updating whichever `hatch_build.py`'s include/exclude logic notices
+it -- both are driven by path, not an explicit file list, so most changes within an existing
+top-level directory need no change there at all.
 
 ### Plugin system
 

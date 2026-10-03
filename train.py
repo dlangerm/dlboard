@@ -22,8 +22,8 @@ from torch import nn
 from torch.utils.data import DataLoader, random_split
 from torchvision import datasets, transforms
 
-from dltrack.client import DLTrackLogger
 from dltrack.client.artifacts import image
+from dltrack.client.dltrack_logger import DLTrackLogger
 
 LOGDIR = Path("./lightning-logs")
 NUM_CLASSES = 10
