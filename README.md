@@ -91,8 +91,9 @@ way you'd use any other `pytorch_lightning` logger — see [docs/client.md](docs
 
 ## Contributing
 
-Pull requests run lint, type-check, and test CI (see `.github/workflows/ci.yml`) — run the
-commands above locally before pushing.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and PR expectations. In short: pull requests run
+lint, type-check, and test CI (see `.github/workflows/ci.yml`) — run the commands above locally
+before pushing.
 
 The screenshots above are rendered by the same Playwright harness the browser tests use
 (`dltrack/tests/docs_screenshots_test.py`), and CI fails if they no longer match the app. Font
