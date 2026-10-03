@@ -113,8 +113,8 @@ out the door into hands of users than it would be to do everything by hand.
 
 So, is the app coded in a way I personally would have written it? Absolutely not. Does it work and provide value today instead of 6 months
 down the line? Yeah, it does. However, I remain a healthy skeptic of AI generated code. Therefore, I will only accept PRs (for now) that I myself
-can review and understand. That means contributors to this library need to tools to a high standard and follow best practices for submitting
-PRs and features just like you would if you had coded it yourself.
+can review and understand. That means contributors to this library need to hold their tools to a high standard and follow
+best practices for submitting PRs and features just like you would if you had coded it yourself.
 
 tl;dr
 Can I submit AI vibe-coded-PRs for plugins I want that I think are useful to the community? Yes you can.
