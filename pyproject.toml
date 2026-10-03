@@ -22,6 +22,7 @@ dev = [
 
 [project]
 dependencies = [
+  "alembic>=1.13",
   "coolname>=5.0.0",
   "cyclopts>=4.23.2",
   "dash>=4.4.1",
@@ -250,7 +251,15 @@ ignore_names = [
   # `plugins/backend/tests/rest_backend_test.py`'s `_FakeServer.add_url_rule` -- a keyword-only
   # parameter that has to keep this exact name to stand in for the real `Flask.add_url_rule`
   # signature, even though the fake's body never reads it.
-  "endpoint"
+  "endpoint",
+  # Alembic's revision-script contract (`serve/_backend/migrations/versions/*.py`): every
+  # revision module is read by these exact module-level names and this exact function name,
+  # by Alembic itself inspecting the module, never by a literal reference in our own code.
+  # `upgrade` isn't here -- `command.upgrade(...)` already reads as a use to vulture.
+  "down_revision",
+  "branch_labels",
+  "depends_on",
+  "downgrade"
 ]
 min_confidence = 60
 paths = ["dltrack/"]
