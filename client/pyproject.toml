@@ -37,5 +37,13 @@ server = [
 # No static `include`/`force-include` here -- see `hatch_build.py`'s docstring.
 path = "hatch_build.py"
 
+[tool.uv]
+# `hatch_build.py` pulls this package's real source from `../dltrack` (see its docstring), which
+# uv's own default cache key (`pyproject.toml`/`setup.py`/`setup.cfg` in *this* directory, nothing
+# outside it) has no way to see -- so without this, `uv sync` leaves a stale editable install in
+# place after a source-only change, until something else (a dependency bump, say) forces a rebuild.
+# Declaring our own `cache-keys` replaces that default outright, so it's repeated here too.
+cache-keys = [{ file = "pyproject.toml" }, { file = "hatch_build.py" }, { file = "../dltrack/**/*.py" }]
+
 [tool.uv.sources]
 dltrack-server = { workspace = true }

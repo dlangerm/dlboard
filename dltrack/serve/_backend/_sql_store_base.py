@@ -5,7 +5,7 @@ from __future__ import annotations
 import itertools
 import json
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Final, Literal
 
 import pendulum
 import sqlalchemy as sa
@@ -25,6 +25,16 @@ if TYPE_CHECKING:
 
 
 _log = get_logger(__name__)
+
+SCHEMA_PREP_OPTION: Final = "dltrack_schema_prep"
+"""
+Execution option marking the one transaction that creates/migrates the schema (`SQLStoreBase.__init__`).
+
+A dialect's engine setup (e.g. sqlite's, which otherwise can't tell this transaction apart from an
+ordinary query at `begin()` time) reads this via `conn.get_execution_options()` to take a stronger
+lock for just this one transaction, instead of paying for it on every query for the engine's whole
+lifetime.
+"""
 
 type AnyRow = sa.Row[*tuple[Any, ...]]
 """A result row of any shape -- `Row` is generic over its columns' types, which raw aggregates don't pin down."""
@@ -238,20 +248,22 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         self._engine = engine
         self._metadata, self._tables = build_metadata(schema)
 
-        with engine.begin() as conn:
-            self._prepare_schema(conn)
-            if schema is not None:
-                # Postgres-only: everything the baseline revision creates is unqualified (built
-                # with `schema=None`, see `migrations/env.py`), so which schema it lands in is
-                # whatever the connection's search_path resolves to for the rest of this transaction.
-                conn.execute(sa.text(f'SET search_path TO "{schema}"'))
-            run_migrations(conn)
-            state = self._tables[AppState]
-            conn.execute(
-                self._insert_ignoring_conflicts(state).values(
-                    id=APP_STATE_ROW_ID, bootstrap_admin_assigned=False
+        with engine.connect() as conn:
+            conn = conn.execution_options(**{SCHEMA_PREP_OPTION: True})
+            with conn.begin():
+                self._prepare_schema(conn)
+                if schema is not None:
+                    # Postgres-only: everything the baseline revision creates is unqualified (built
+                    # with `schema=None`, see `migrations/env.py`), so which schema it lands in is
+                    # whatever the connection's search_path resolves to for the rest of this transaction.
+                    conn.execute(sa.text(f'SET search_path TO "{schema}"'))
+                run_migrations(conn)
+                state = self._tables[AppState]
+                conn.execute(
+                    self._insert_ignoring_conflicts(state).values(
+                        id=APP_STATE_ROW_ID, bootstrap_admin_assigned=False
+                    )
                 )
-            )
 
     @property
     def tables(self) -> Mapping[type[BaseModel], sa.Table]:

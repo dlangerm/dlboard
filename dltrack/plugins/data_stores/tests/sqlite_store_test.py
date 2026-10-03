@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import sqlite3
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING
 
 import sqlalchemy as sa
@@ -28,6 +29,25 @@ def test_get_or_create_defaults_busy_timeout(tmp_path: Path) -> None:
 def test_get_or_create_honors_a_custom_busy_timeout(tmp_path: Path) -> None:
     created = SQLLiteStore.get_or_create(tmp_path / "custom.sqlite", busy_timeout_ms=500)
     assert created._busy_timeout_ms == 500
+
+
+def test_concurrent_first_time_schema_creation_does_not_race(tmp_path: Path) -> None:
+    """
+    Regression test for the race this module's `_begin` closes.
+
+    Several processes starting against the same brand-new database at once can each see "no
+    schema yet" and race to create one. Constructing several stores against the same path at once
+    must not raise, and every one of them must end up with a working, migrated schema.
+    """
+    location = tmp_path / "concurrent.sqlite"
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        stores = [
+            future.result(timeout=10) for future in [pool.submit(SQLLiteStore, location) for _ in range(5)]
+        ]
+
+    for created in stores:
+        assert [tuple(row) for row in created._execute(sa.select(1))] == [(1,)]
+        created.dispose()
 
 
 def test_writer_holding_the_database_does_not_lock_out_a_concurrent_reader(store: SQLLiteStore) -> None:
