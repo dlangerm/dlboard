@@ -29,7 +29,7 @@ from dltrack.serve._backend._data_store import (
     wait_for_data_store,
 )
 from dltrack.serve._backend._installed_plugins import get_installed_plugins, set_installed_plugins
-from dltrack.serve._backend._sql_store_base import SQLStoreBase
+from dltrack.serve._backend._sql_store_base import SCHEMA_PREP_OPTION, SQLStoreBase
 from dltrack.serve._backend._theme import get_theme, set_theme
 from dltrack.serve._clientside_script import ClientsideScript
 from dltrack.serve._icons import Icon, icon, icon_cell_class
@@ -39,6 +39,7 @@ from dltrack.serve._settings_env import set_setting_env
 from dltrack.serve.app import app
 
 __all__ = [
+    "SCHEMA_PREP_OPTION",
     "AppSlot",
     "AssetKind",
     "AuthSettings",

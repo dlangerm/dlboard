@@ -11,7 +11,7 @@ from sqlalchemy import event
 from sqlalchemy.dialects import sqlite
 from sqlalchemy.pool import NullPool
 
-from dltrack.serve import SQLStoreBase, set_data_store
+from dltrack.serve import SCHEMA_PREP_OPTION, SQLStoreBase, set_data_store
 
 if TYPE_CHECKING:
     import sqlite3
@@ -42,12 +42,37 @@ def _engine(location: Path, busy_timeout_ms: int) -> sa.Engine:
     )
 
     event.listen(engine, "connect", _configure_connection)
+    event.listen(engine, "begin", _begin)
     return engine
 
 
 def _configure_connection(dbapi_connection: sqlite3.Connection, _record: object) -> None:
     dbapi_connection.execute("PRAGMA foreign_keys = ON")
     dbapi_connection.execute("PRAGMA journal_mode = WAL")
+    # pysqlite's own implicit transaction handling defers the real `BEGIN` until the first write
+    # statement, which is both generally broken for DDL and (see `_begin`) is specifically how two
+    # connections can both run a read (e.g. "does this table exist yet?") before either actually
+    # holds a lock, race past each other, and both decide to create it. Disabling it here (and
+    # emitting our own explicit `BEGIN` below, in the `begin` hook) fixes both: the lock is taken
+    # at a point we choose, not at an implicit first write.
+    dbapi_connection.isolation_level = None
+
+
+def _begin(conn: sa.Connection) -> None:
+    """
+    Explicitly `BEGIN` every transaction (see `_configure_connection`), deferred except one.
+
+    Deferred (the default) only takes sqlite's write-intent lock at the first write, which is what
+    lets WAL readers proceed concurrently with a writer -- see `_engine`. The one exception is
+    `SQLStoreBase.__init__`'s schema creation/migration transaction (flagged via
+    `SCHEMA_PREP_OPTION`, since several processes can start that one concurrently against a brand
+    new database): that one takes the lock immediately, before its own first read, so a second
+    connection doing the same waits (via the busy handler `_engine`'s `timeout` configures) rather
+    than racing it. Forcing that onto every ordinary query too would serialize all of them behind
+    this one lock for the engine's whole lifetime, throwing away the WAL concurrency above.
+    """
+    mode = "IMMEDIATE" if conn.get_execution_options().get(SCHEMA_PREP_OPTION) else "DEFERRED"
+    conn.exec_driver_sql(f"BEGIN {mode}")
 
 
 class SQLLiteStore(SQLStoreBase[Path]):
