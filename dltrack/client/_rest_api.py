@@ -10,7 +10,7 @@ from __future__ import annotations
 import itertools
 from http import HTTPStatus
 from pathlib import Path
-from typing import TYPE_CHECKING, Final, Literal
+from typing import TYPE_CHECKING, Final, Literal, TypeVar
 
 import requests
 from pydantic import AnyUrl, BaseModel, SecretStr
@@ -36,6 +36,9 @@ if TYPE_CHECKING:
 
 _log = get_logger(__name__)
 
+R = TypeVar("R", bound=BaseModel)
+"""Pre-3.12 `TypeVar` style (the client's floor is 3.10): the response body a request validates into."""
+
 DEFAULT_SERVER_URL: Final = "http://localhost:8050"
 """Matches `dltrack serve local`'s own default host/port (see `ServerRuntimeOptions` in `_cli.py`)."""
 
@@ -51,7 +54,7 @@ class AuthenticationFailedError(RuntimeError):
     """The server didn't accept this client's credentials (or it sent none, and the server needs some)."""
 
 
-def _post_request[R: BaseModel](
+def _post_request(
     path: str, body: BaseModel, return_model: type[R], headers: dict[str, str] | None = None
 ) -> R:
     try:
@@ -63,7 +66,7 @@ def _post_request[R: BaseModel](
         raise
 
 
-def _create_request[R: BaseModel](
+def _create_request(
     create_model: BaseModel,
     return_model: type[R],
     base_url: str = "/",
@@ -75,7 +78,7 @@ def _create_request[R: BaseModel](
     )
 
 
-def _get_or_create_request[R: BaseModel](
+def _get_or_create_request(
     body: BaseModel,
     return_model: type[R],
     base_url: str = "/",

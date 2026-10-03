@@ -12,11 +12,17 @@ from __future__ import annotations
 
 import typing
 
+# Pre-3.12 `ParamSpec` style (the client's floor is 3.10) -- `_P` is `get_or_create`'s own
+# constructor signature.
+_P = typing.ParamSpec("_P")
+
 if typing.TYPE_CHECKING:
+    from typing_extensions import Self
+
     from dltrack.models._user import Principal
 
 
-class AuthProvider[**P](typing.Protocol):
+class AuthProvider(typing.Protocol[_P]):
     """Resolves who is making the current request."""
 
     display_name: typing.ClassVar[str]
@@ -39,7 +45,7 @@ class AuthProvider[**P](typing.Protocol):
     """Where an admin adds users or resets their credentials, or `None` if users come from somewhere else (an external IdP)."""
 
     @classmethod
-    def get_or_create(cls, *args: P.args, **kwargs: P.kwargs) -> typing.Self:
+    def get_or_create(cls, *args: _P.args, **kwargs: _P.kwargs) -> Self:
         """Initialize an auth provider."""
         ...
 

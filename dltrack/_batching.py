@@ -12,13 +12,19 @@ from __future__ import annotations
 import logging
 import time
 from queue import Empty
-from typing import TYPE_CHECKING, NamedTuple, Protocol
+from typing import TYPE_CHECKING, NamedTuple, Protocol, TypeVar
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from multiprocessing.synchronize import Event as MPEvent
 
 _log = logging.getLogger(__name__)
+
+T = TypeVar("T")
+"""Pre-3.12 `TypeVar` style (the client's floor is 3.10): the kind of item `ship_batches` moves."""
+
+_T_co = TypeVar("_T_co", covariant=True)
+"""`Receiver`'s own type parameter -- covariant, since it only ever appears in a return position."""
 
 
 class BatchParams(NamedTuple):
@@ -30,13 +36,13 @@ class BatchParams(NamedTuple):
     flushed: MPEvent
 
 
-class Receiver[T](Protocol):
+class Receiver(Protocol[_T_co]):
     """The one queue method `ship_batches` needs -- both `multiprocessing` and `queue` queues have it."""
 
-    def get(self, block: bool = True, timeout: float | None = None) -> T: ...  # noqa: FBT001, FBT002
+    def get(self, block: bool = True, timeout: float | None = None) -> _T_co: ...  # noqa: FBT001, FBT002
 
 
-def ship_batches[T](
+def ship_batches(
     q: Receiver[T | None],
     ship: Callable[[list[T]], None],
     params: BatchParams,

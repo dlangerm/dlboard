@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from pydantic import AwareDatetime, BaseModel, field_validator
+
+from dltrack._compat import StrEnum
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

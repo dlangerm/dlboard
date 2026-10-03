@@ -8,11 +8,15 @@ there are no per-experiment grants. Site-wide powers (purge, the audit log, user
 
 from __future__ import annotations
 
-from enum import StrEnum
-from typing import Self
+from typing import TYPE_CHECKING
 
 import pendulum
 from pydantic import AwareDatetime, BaseModel, Field, model_validator
+
+from dltrack._compat import StrEnum
+
+if TYPE_CHECKING:
+    from typing_extensions import Self
 
 
 class ProjectRole(StrEnum):

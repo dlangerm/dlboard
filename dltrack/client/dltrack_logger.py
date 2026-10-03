@@ -10,7 +10,7 @@ from argparse import Namespace
 from dataclasses import dataclass
 from http import HTTPStatus
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Final, override
+from typing import TYPE_CHECKING, Any, Final, Generic, TypeVar
 
 import pendulum
 import requests
@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from pydantic_settings import BaseSettings
 from pytorch_lightning.loggers import Logger
 from pytorch_lightning.utilities import rank_zero_only
+from typing_extensions import override
 
 from dltrack import models
 from dltrack._batching import BatchParams, ship_batches
@@ -86,8 +87,12 @@ def _ship_artifacts(
         api.log_artifact_batch(pairs)
 
 
+T = TypeVar("T")
+"""Pre-3.12 `TypeVar` style (the client's floor is 3.10): the kind of item a shipper moves."""
+
+
 @dataclass(frozen=True)
-class _Shipper[T]:
+class _Shipper(Generic[T]):
     """One background process running `ship_batches`, plus the queue feeding it."""
 
     name: str
@@ -118,7 +123,7 @@ class _Shipper[T]:
             )
 
 
-def _start_shipper[T](
+def _start_shipper(
     name: str, ship: Callable[[list[T]], None], *, q_size: int, flush_size: int
 ) -> _Shipper[T]:
     queue: Queue[T | None] = SPAWN_CONTEXT.Queue(maxsize=q_size)
