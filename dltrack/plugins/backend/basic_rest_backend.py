@@ -11,7 +11,7 @@ from werkzeug.datastructures import FileStorage
 from werkzeug.exceptions import NotFound
 
 from dltrack import models
-from dltrack.client._rest_api import (
+from dltrack._wire import (
     METADATA_PART_SUFFIX,
     WHOAMI_PATH,
     GetOrCreateExperiment,

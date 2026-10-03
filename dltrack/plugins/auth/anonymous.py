@@ -15,7 +15,8 @@ from typing import TYPE_CHECKING, ClassVar
 from flask import has_request_context, request
 from structlog.stdlib import get_logger
 
-from dltrack._identity import DLTRACK_USER_HEADER, resolve_username
+from dltrack._identity import resolve_username
+from dltrack._wire import DLTRACK_USER_HEADER
 from dltrack.models import Principal
 from dltrack.serve import set_auth_provider
 
