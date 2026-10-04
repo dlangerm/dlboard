@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 import dash_mantine_components as dmc
 from dash import Dash, Input, Output, State, html, no_update
+from dash.exceptions import PreventUpdate
 
 from dltrack.models import ActivityStats, NewExperiment
 from dltrack.serve import Icon, get_current_user, get_data_store, icon
@@ -166,8 +167,10 @@ def register(app: Dash) -> None:
         prevent_initial_call=True,
     )
     def create_experiment(
-        _clicks: int, _submits: int, project_id: int, name: str | None
+        n_clicks: int | None, n_submit: int | None, project_id: int, name: str | None
     ) -> tuple[typing.Any, ...]:
+        if not n_clicks and not n_submit:
+            raise PreventUpdate
         if not name or not name.strip():
             return no_update, no_update, "Give the experiment a name"
         store = get_data_store()

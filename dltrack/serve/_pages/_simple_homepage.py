@@ -5,6 +5,7 @@ import typing
 import dash_mantine_components as dmc
 from dash import Dash, Input, Output, State, no_update
 from dash.development.base_component import Component
+from dash.exceptions import PreventUpdate
 
 from dltrack import models
 from dltrack.serve import Icon, get_data_store, icon
@@ -96,7 +97,11 @@ def register(app: Dash) -> None:
         State(NEW_PROJECT_NAME_ID, "value"),
         prevent_initial_call=True,
     )
-    def create_project(_clicks: int, _submits: int, name: str | None) -> tuple[typing.Any, ...]:
+    def create_project(
+        n_clicks: int | None, n_submit: int | None, name: str | None
+    ) -> tuple[typing.Any, ...]:
+        if not n_clicks and not n_submit:
+            raise PreventUpdate
         if not name or not name.strip():
             return no_update, no_update, no_update, "Give the project a name"
         store = get_data_store()

@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any, Final, cast
 
 import dash_mantine_components as dmc
 from dash import ALL, Dash, Input, Output, State, html, no_update
+from dash.exceptions import PreventUpdate
 
 from dltrack.serve import Icon, get_auth_provider, get_current_user, get_data_store, icon, mint_api_token
 from dltrack.serve import _constants as constants
@@ -145,7 +146,11 @@ def register(app: Dash) -> None:
         State(TOKEN_NAME_ID, "value"),
         prevent_initial_call=True,
     )
-    def create_token(_clicks: int, _submits: int, name: str | None) -> tuple[Any, Any, str | None]:
+    def create_token(
+        n_clicks: int | None, n_submit: int | None, name: str | None
+    ) -> tuple[Any, Any, str | None]:
+        if not n_clicks and not n_submit:
+            raise PreventUpdate
         if not name or not name.strip():
             return no_update, no_update, "Name the token"
         _token, raw = mint_api_token(get_data_store(), get_current_user(), name.strip())

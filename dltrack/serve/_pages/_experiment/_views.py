@@ -408,8 +408,10 @@ def _register_duplicate(app: Dash) -> None:
         prevent_initial_call=True,
     )
     def duplicate_view(
-        _clicks: int | None, _submits: int | None, name: str | None, page_json: str, experiment_id: int
+        n_clicks: int | None, n_submit: int | None, name: str | None, page_json: str, experiment_id: int
     ) -> tuple[Any, ...]:
+        if not n_clicks and not n_submit:
+            raise PreventUpdate
         if not name or not name.strip():
             return no_update, no_update, "Give the view a name", no_update, no_update
         page = core.BasicExperimentPage.model_validate_json(page_json)
@@ -444,8 +446,10 @@ def _register_rename(app: Dash) -> None:
         prevent_initial_call=True,
     )
     def rename_view(
-        _clicks: int | None, _submits: int | None, name: str | None, view_id: int | None, experiment_id: int
+        n_clicks: int | None, n_submit: int | None, name: str | None, view_id: int | None, experiment_id: int
     ) -> tuple[Any, bool | NoUpdate, str | None]:
+        if not n_clicks and not n_submit:
+            raise PreventUpdate
         if not name or not name.strip():
             return no_update, no_update, "Give the view a name"
         if view_id is None:
