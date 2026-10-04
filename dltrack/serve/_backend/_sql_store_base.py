@@ -832,12 +832,15 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         )
         return next(iter(rows), None)
 
-    def list_views(self, experiment_id: int, owner_id: int) -> list[models.ViewSummary]:
-        """`owner_id`'s views of an experiment's page, by name."""
+    def list_views(self, experiment_id: int, viewer_id: int) -> list[models.ViewSummary]:
+        """`viewer_id`'s own views of an experiment's page, plus anyone else's shared ones, by name."""
         pages = self._tables[models.Page]
         rows = self._execute(
             sa.select(pages.c.id, pages.c.name)
-            .where(pages.c.experiment_id == experiment_id, pages.c.owner_id == owner_id)
+            .where(
+                pages.c.experiment_id == experiment_id,
+                sa.or_(pages.c.owner_id == viewer_id, pages.c.shared.is_(True)),
+            )
             .order_by(pages.c.name, pages.c.id)
         )
         return [models.ViewSummary(id=view_id, name=name) for view_id, name in rows]

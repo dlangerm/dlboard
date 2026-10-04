@@ -416,6 +416,16 @@ class NewPage(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, extra=
     name: str = ""
     """A view's name, as listed in the view picker. Empty for the shared page."""
 
+    shared: bool = False
+    """
+    Whether a named view (`owner_id` set) is visible to every project viewer, not just its owner.
+
+    Meaningless for the shared page itself (`owner_id` is `None`), which every project viewer
+    already sees. A `False` view is private: only its owner can open it at all, by id/URL or
+    otherwise (see `AuthorizingDataStore.get_view`) -- `shared` is what makes a view reachable, and
+    listed in everyone else's own view picker, the same as one of their own views.
+    """
+
     panels: list[PanelInstance[_Dataframe, _Chart]] = []
     """The set of panel instances on a page."""
 

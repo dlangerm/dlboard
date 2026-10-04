@@ -277,7 +277,7 @@ def test_only_a_views_owner_can_change_it(store: SQLLiteStore) -> None:
     assert alice is not None
     view = _as(store, alice).create_view(
         BasicExperimentPage,
-        models.NewPage[Any, Any](experiment_id=experiment.id, owner_id=alice.id, name="mine"),
+        models.NewPage[Any, Any](experiment_id=experiment.id, owner_id=alice.id, name="mine", shared=True),
     )
 
     assert _as(store, bob).get_view(BasicExperimentPage, view.id) is not None
@@ -287,3 +287,45 @@ def test_only_a_views_owner_can_change_it(store: SQLLiteStore) -> None:
         _as(store, bob).add_comment(
             models.NewComment(experiment_id=experiment.id, author_id=alice.id, body="hi")
         )
+
+
+def test_a_private_view_is_invisible_to_everyone_but_its_owner(store: SQLLiteStore) -> None:
+    bob, (_project, experiment, _run) = _shared_chain(store, ProjectRole.VIEWER)
+    alice = store.find_user("alice")
+    assert alice is not None
+    view = _as(store, alice).create_view(
+        BasicExperimentPage,
+        models.NewPage[Any, Any](experiment_id=experiment.id, owner_id=alice.id, name="private"),
+    )
+
+    assert _as(store, alice).get_view(BasicExperimentPage, view.id) is not None
+    assert _as(store, bob).get_view(BasicExperimentPage, view.id) is None
+    assert view.id not in {v.id for v in _as(store, bob).list_views(experiment.id, bob.id)}
+
+
+def test_a_shared_view_is_visible_to_every_project_viewer(store: SQLLiteStore) -> None:
+    bob, (_project, experiment, _run) = _shared_chain(store, ProjectRole.VIEWER)
+    alice = store.find_user("alice")
+    assert alice is not None
+    view = _as(store, alice).create_view(
+        BasicExperimentPage,
+        models.NewPage[Any, Any](experiment_id=experiment.id, owner_id=alice.id, name="shared", shared=True),
+    )
+
+    fetched = _as(store, bob).get_view(BasicExperimentPage, view.id)
+    assert fetched is not None
+    assert fetched.id == view.id
+    assert view.id in {v.id for v in _as(store, bob).list_views(experiment.id, bob.id)}
+
+
+def test_a_stranger_cannot_see_a_shared_view_outside_the_project(store: SQLLiteStore) -> None:
+    _bob, (_project, experiment, _run) = _shared_chain(store, ProjectRole.VIEWER)
+    alice = store.find_user("alice")
+    assert alice is not None
+    stranger = _user(store, "stranger")
+    view = _as(store, alice).create_view(
+        BasicExperimentPage,
+        models.NewPage[Any, Any](experiment_id=experiment.id, owner_id=alice.id, name="shared", shared=True),
+    )
+
+    assert _as(store, stranger).get_view(BasicExperimentPage, view.id) is None
