@@ -46,18 +46,27 @@ RUN groupadd --system dltrack && useradd --system --gid dltrack --create-home dl
 COPY --from=builder --chown=dltrack:dltrack /app/.venv /app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
 
-# Postgres + S3 deployment -- unlike `dltrack serve local`'s sqlite+filesystem, both stores are
-# external services, so the container itself holds no state and needs no volume. Configure it
-# entirely with env vars:
+# Postgres (metadata) + local disk (artifacts) deployment, password sign-in -- see
+# `dltrack/scripts/docker_deployment.py` for the exact plugin composition `--plugins` resolves
+# below, and docs/docker.md to swap the artifact store for S3 instead (the image already ships the
+# `s3` extra, so that needs no rebuild). Configure it entirely with env vars:
 #   POSTGRES_HOST / _PORT / _DATABASE / _USER / _PASSWORD  (dltrack/plugins/data_stores/postgres.py)
-#   S3_BUCKET (required) / _ENDPOINT_URL / _ACCESS_KEY_ID / _SECRET_ACCESS_KEY / ...  (.../s3.py)
+#   ARTIFACT_STORE_LOCATION  -- where blobs land inside the container; defaults to /data/artifacts
+#   (set below), so a volume mounted at /data is the only thing that needs to persist besides
+#   Postgres itself.
 #   DLTRACK_SECRET_KEY  -- required by the password auth plugin this image runs; a missing one is a
 #   startup error, not a silent fall-through to anonymous access.
-# See docs/plugins/storage.md and docs/plugins/auth.md for the full variable lists, and
-# `dltrack/scripts/docker_deployment.py` for the exact plugin composition `--plugins` resolves
-# below. Create the first admin with:
+# See docs/plugins/storage.md and docs/plugins/auth.md for the full variable lists. Create the
+# first admin with:
 #   docker run --rm -it --env-file .env <image> users set-password <name> --admin \
 #     --plugins dltrack.scripts.docker_deployment:PLUGINS
+ENV ARTIFACT_STORE_LOCATION=/data/artifacts
+# `FSBlobs` creates its own leaf directory on first use, but never the volume mount point above it
+# -- `/data` has to exist (and be writable by `dltrack`) before a volume is mounted over it at
+# `docker run` time.
+RUN mkdir -p /data && chown dltrack:dltrack /data
+VOLUME ["/data"]
+
 USER dltrack
 WORKDIR /home/dltrack
 EXPOSE 8050

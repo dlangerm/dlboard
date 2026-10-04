@@ -1,9 +1,10 @@
-# A self-contained way to try the published image's default deployment (Postgres + S3, password
-# sign-in -- see dltrack/scripts/docker_deployment.py) locally: `docker compose up` needs nothing
-# else installed or configured. Postgres and the S3-protocol store here are both throwaway
-# (LocalStack, not MinIO -- see dltrack/conftest.py's `s3_test_server` for why MinIO's own images
-# don't work for this unauthenticated) -- swap them, and DLTRACK_SECRET_KEY, for your own
-# infrastructure before using this anywhere real. See docs/docker.md.
+# A self-contained way to try the published image's default deployment (Postgres + local-disk
+# artifacts, password sign-in -- see dltrack/scripts/docker_deployment.py) locally: `docker compose
+# up` needs nothing else installed or configured, and both volumes below genuinely persist across
+# `docker compose down`/`up` (no `-v`) -- verified by restarting the stack and checking the data is
+# still there, not assumed. Swap `dltrack-postgres`/`dltrack-artifacts` for your own infrastructure,
+# and DLTRACK_SECRET_KEY for a real one, before using this anywhere real. See docs/docker.md --
+# including "Using an S3 artifact store instead" if you want one.
 
 services:
   dltrack:
@@ -15,20 +16,18 @@ services:
       POSTGRES_USER: dltrack
       POSTGRES_PASSWORD: dltrack
       POSTGRES_DATABASE: dltrack
-      S3_BUCKET: dltrack
-      S3_ENDPOINT_URL: http://localstack:4566
-      S3_ADDRESSING_STYLE: path
-      S3_ACCESS_KEY_ID: dltrack
-      S3_SECRET_ACCESS_KEY: dltrack
-      S3_REGION: us-east-1
       # Local-trial-only: generate a real one with `openssl rand -hex 32` for anything that outlives
       # `docker compose down`.
       DLTRACK_SECRET_KEY: local-trial-only-change-me
+      # This stack is plain HTTP -- a `Secure` session cookie (the default) is dropped by most HTTP
+      # clients on a non-HTTPS origin, which breaks sign-in outright. Never set this to false behind
+      # real infrastructure; serve that over HTTPS instead (see docs/docker.md).
+      DLTRACK_SECURE_COOKIES: 'false'
+    volumes:
+      - dltrack-artifacts:/data
     depends_on:
       postgres:
         condition: service_healthy
-      s3-init:
-        condition: service_completed_successfully
 
   postgres:
     image: postgres:16-alpine
@@ -44,32 +43,6 @@ services:
       timeout: 3s
       retries: 20
 
-  localstack:
-    image: localstack/localstack:2.0.1
-    environment:
-      SERVICES: s3
-      DEFAULT_REGION: us-east-1
-    volumes:
-      - dltrack-s3:/var/lib/localstack
-    healthcheck:
-      test: [CMD, curl, -f, http://localhost:4566/_localstack/health]
-      interval: 2s
-      timeout: 3s
-      retries: 30
-
-  # One-shot: creates the bucket `dltrack` writes to, then exits -- LocalStack never does this itself.
-  s3-init:
-    image: amazon/aws-cli:latest
-    depends_on:
-      localstack:
-        condition: service_healthy
-    environment:
-      AWS_ACCESS_KEY_ID: dltrack
-      AWS_SECRET_ACCESS_KEY: dltrack
-      AWS_DEFAULT_REGION: us-east-1
-    entrypoint: [sh, -c, aws --endpoint-url http://localstack:4566 s3 mb 
-          s3://dltrack || true]
-
 volumes:
   dltrack-postgres:
-  dltrack-s3:
+  dltrack-artifacts:
