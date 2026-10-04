@@ -164,6 +164,27 @@ def test_render_about_lists_installed_plugins(store: SQLLiteStore) -> None:
     assert "dltrack.plugins.themes.default" in str(rendered)
 
 
+def test_render_users_add_user_link_forces_a_full_page_load(store: SQLLiteStore) -> None:
+    """
+    The "Add a user" link points at a raw Flask route, not a Dash page -- without `refresh=True`,
+    Dash's client-side router intercepts the click, fails to resolve it against `page_registry`, and
+    renders its own 404 instead of a real navigation (a browser refresh on the same URL works fine,
+    since that bypasses the router entirely). See `dltrack/scripts/docker_deployment.py`'s sibling
+    bug for `manage_url` in `app.py`, which already gets this right.
+    """
+    admin_user = store.update_user(
+        store.get_or_create_user(models.Principal.unverified("admin")).model_copy(
+            update={"scopes": [models.Scope.USER_MANAGE]}
+        )
+    )
+
+    rendered = admin._render_users(store, admin_user, "/password/admin")
+
+    add_user_link = cast("Any", rendered).children[0]
+    assert add_user_link.href == "/password/admin"
+    assert add_user_link.refresh is True
+
+
 def test_admin_layout_contains_tabs_and_purge_modal() -> None:
     layout = admin._admin_layout("trash")
 

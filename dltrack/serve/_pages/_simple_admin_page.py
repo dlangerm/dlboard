@@ -354,6 +354,7 @@ def _render_users(store: DataStore[...], actor: User, admin_url: str | None) -> 
         dmc.Anchor(
             dmc.Button("Add a user or reset a password", size="xs", leftSection=icon(Icon.ADD)),
             href=admin_url,
+            refresh=True,
         )
         if admin_url is not None
         else dmc.Text("Users are created the first time they sign in.", size="sm", c="dimmed")
