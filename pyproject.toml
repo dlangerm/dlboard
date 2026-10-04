@@ -248,7 +248,8 @@ ignore_names = [
   "branch_labels",
   "depends_on",
   "downgrade",
-  "isolation_level"  # sqlite api is used internally
+  "isolation_level",  # sqlite api is used internally
+  "PLUGINS"  # used when configuring custom dltrack plugins in the server
 ]
 min_confidence = 60
 paths = ["dltrack/"]

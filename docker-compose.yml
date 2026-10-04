@@ -1,0 +1,75 @@
+# A self-contained way to try the published image's default deployment (Postgres + S3, password
+# sign-in -- see dltrack/scripts/docker_deployment.py) locally: `docker compose up` needs nothing
+# else installed or configured. Postgres and the S3-protocol store here are both throwaway
+# (LocalStack, not MinIO -- see dltrack/conftest.py's `s3_test_server` for why MinIO's own images
+# don't work for this unauthenticated) -- swap them, and DLTRACK_SECRET_KEY, for your own
+# infrastructure before using this anywhere real. See docs/docker.md.
+
+services:
+  dltrack:
+    build: .
+    ports:
+      - 8050:8050
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: dltrack
+      POSTGRES_PASSWORD: dltrack
+      POSTGRES_DATABASE: dltrack
+      S3_BUCKET: dltrack
+      S3_ENDPOINT_URL: http://localstack:4566
+      S3_ADDRESSING_STYLE: path
+      S3_ACCESS_KEY_ID: dltrack
+      S3_SECRET_ACCESS_KEY: dltrack
+      S3_REGION: us-east-1
+      # Local-trial-only: generate a real one with `openssl rand -hex 32` for anything that outlives
+      # `docker compose down`.
+      DLTRACK_SECRET_KEY: local-trial-only-change-me
+    depends_on:
+      postgres:
+        condition: service_healthy
+      s3-init:
+        condition: service_completed_successfully
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: dltrack
+      POSTGRES_PASSWORD: dltrack
+      POSTGRES_DB: dltrack
+    volumes:
+      - dltrack-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U dltrack]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  localstack:
+    image: localstack/localstack:2.0.1
+    environment:
+      SERVICES: s3
+      DEFAULT_REGION: us-east-1
+    volumes:
+      - dltrack-s3:/var/lib/localstack
+    healthcheck:
+      test: [CMD, curl, -f, http://localhost:4566/_localstack/health]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # One-shot: creates the bucket `dltrack` writes to, then exits -- LocalStack never does this itself.
+  s3-init:
+    image: amazon/aws-cli:latest
+    depends_on:
+      localstack:
+        condition: service_healthy
+    environment:
+      AWS_ACCESS_KEY_ID: dltrack
+      AWS_SECRET_ACCESS_KEY: dltrack
+      AWS_DEFAULT_REGION: us-east-1
+    entrypoint: [sh, -c, aws --endpoint-url http://localstack:4566 s3 mb 
+          s3://dltrack || true]
+
+volumes:
+  dltrack-postgres:
+  dltrack-s3:

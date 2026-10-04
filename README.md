@@ -58,6 +58,9 @@ everyone signs in. Each user sees only the projects they own or that someone sha
 their training scripts authenticate with API tokens. See [docs/plugins/auth.md](docs/plugins/auth.md)
 for setup.
 
+Running it in Docker instead? See [docs/docker.md](docs/docker.md) — the published image defaults
+to a Postgres + S3, password-sign-in deployment.
+
 Working in this repo instead, everything runs through [`uv`](https://docs.astral.sh/uv/)
 (Python >=3.12, deps pinned in `uv.lock`):
 
@@ -80,6 +83,8 @@ way you'd use any other `pytorch_lightning` logger — see [docs/client.md](docs
   request flow from a training script to the browser.
 - [Client & logging](docs/client.md) — `DLTrackLogger`, the REST client, and how to log a new kind
   of artifact.
+- [Docker](docs/docker.md) — running the published image, its Postgres + S3 default, and
+  configuring it.
 - **Plugins** — dltrack has no built-in opinions about storage, auth, charts, or theming; all of
   it is plugins. (Page layout is the one deliberate exception — see
   [architecture.md](docs/architecture.md).) Start with the
