@@ -111,7 +111,14 @@ def layout(
                     _live_update_header(
                         header,
                         notes_button(len(store.list_comments(exp.id))),
-                        view_controls(store, exp.id, view_id, is_owner=is_owner, view_name=current_page.name),
+                        view_controls(
+                            store,
+                            exp.id,
+                            view_id,
+                            is_owner=is_owner,
+                            view_name=current_page.name,
+                            is_shared=current_page.shared,
+                        ),
                     ),
                     notes_drawer(),
                     # Nothing logged yet: show how to log the first run, right where its charts will go.

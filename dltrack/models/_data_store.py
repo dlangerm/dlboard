@@ -241,8 +241,8 @@ class DataStore(typing.Protocol[_P]):
         """A named view by id, or `None` if there's no such view."""
         ...
 
-    def list_views(self, experiment_id: int, owner_id: int) -> list[models.ViewSummary]:
-        """`owner_id`'s views of an experiment's page."""
+    def list_views(self, experiment_id: int, viewer_id: int) -> list[models.ViewSummary]:
+        """The views of an experiment's page visible to `viewer_id`: their own, plus anyone's shared ones."""
         ...
 
     def delete_view(self, view_id: int, owner_id: int) -> None:

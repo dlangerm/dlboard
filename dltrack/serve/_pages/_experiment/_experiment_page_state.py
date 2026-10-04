@@ -1416,9 +1416,15 @@ is, not "Copy of ...": those stacked up as "Copy of Copy of Shared view" and sai
 """
 
 
-def unique_view_name(store: DataStore[...], experiment_id: int, owner_id: int) -> str:
-    """The first of "My view", "My view 2", ... that `owner_id` hasn't used for a view of this experiment yet."""
-    taken = {view.name for view in store.list_views(experiment_id, owner_id)}
+def unique_view_name(store: DataStore[...], experiment_id: int, viewer_id: int) -> str:
+    """
+    The first of "My view", "My view 2", ... not already taken in `viewer_id`'s own view picker.
+
+    "Taken" means any name already shown there -- `viewer_id`'s own views and anyone else's shared
+    ones alike (`list_views`) -- so a freshly forked view never collides with (or looks like a
+    rename of) one already in the same dropdown.
+    """
+    taken = {view.name for view in store.list_views(experiment_id, viewer_id)}
     candidates = (_FORK_NAME if n == 1 else f"{_FORK_NAME} {n}" for n in itertools.count(1))
     return next(name for name in candidates if name not in taken)
 

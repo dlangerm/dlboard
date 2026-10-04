@@ -75,6 +75,8 @@ The actions menu's dropdown. Its `className` says whether you own the view on sc
 class rather than a rebuilt menu so `sync_view_after_edit` can update it when an edit branches
 into a view of your own, with no reload.
 """
+SHARE_VIEW_TOGGLE_ID: typing.Final = "share-view-toggle"
+"""Owner-only menu item that flips a view's `shared` flag; its own label reflects the new state."""
 DUPLICATE_VIEW_OPEN_ID: typing.Final = "duplicate-view-open"
 DUPLICATE_VIEW_MODAL_ID: typing.Final = "duplicate-view-modal"
 DUPLICATE_VIEW_NAME_ID: typing.Final = "duplicate-view-name"
@@ -155,13 +157,18 @@ def _fork_hint_style(*, is_owner: bool) -> dict[str, str]:
     return {"display": "none"} if is_owner else {}
 
 
-def view_controls(
+def _share_label(*, is_shared: bool) -> str:
+    return "Stop sharing with project" if is_shared else "Share with project"
+
+
+def view_controls(  # noqa: PLR0913
     store: DataStore[...],
     experiment_id: int,
     view_id: int | None,
     *,
     is_owner: bool,
     view_name: str | None = None,
+    is_shared: bool = False,
 ) -> Component:
     """
     The header's view picker and its actions menu (rename/delete included, in a view of your own).
@@ -171,6 +178,8 @@ def view_controls(
     change (see `_experiment_page_state.save_page`) rather than letting you rename or delete theirs.
     `view_name` is the current page's own name, needed only to show a view that isn't yours (`not
     is_owner`, `view_id` not `None`) in the picker at all -- see `_options`'s `foreign_view`.
+    `is_shared` is the current page's own `NewPage.shared` -- meaningless (and the toggle hidden)
+    unless `is_owner`, same as rename/delete.
     """
     owner_only = "dl-view-owner-only"
     return dmc.Group(
@@ -218,6 +227,12 @@ def view_controls(
                                 "Rename this view…",
                                 id=RENAME_VIEW_OPEN_ID,
                                 leftSection=icon(Icon.EDIT),
+                                className=owner_only,
+                            ),
+                            dmc.MenuItem(
+                                _share_label(is_shared=is_shared),
+                                id=SHARE_VIEW_TOGGLE_ID,
+                                leftSection=icon(Icon.LINK),
                                 className=owner_only,
                             ),
                             dmc.MenuItem(
@@ -445,6 +460,26 @@ def _register_rename(app: Dash) -> None:
         return _options(store, experiment_id), False, None
 
 
+def _register_share_toggle(app: Dash) -> None:
+    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+        Output(SHARE_VIEW_TOGGLE_ID, "children"),
+        Input(SHARE_VIEW_TOGGLE_ID, "n_clicks"),
+        State(core.STATE_VIEW_ID, "data"),
+        prevent_initial_call=True,
+    )
+    def toggle_share(n_clicks: int | None, view_id: int | None) -> str:
+        if not n_clicks or view_id is None:
+            raise PreventUpdate
+        store = get_data_store()
+        # Defensive, not just decorative -- `view_controls` only *shows* this to a view's owner,
+        # but the callback itself is reachable regardless, so it checks again before writing.
+        view = store.get_view(core.BasicExperimentPage, view_id)
+        if view is None or view.owner_id != get_current_user().id:
+            raise PreventUpdate
+        updated = store.update_page(view.model_copy(update={"shared": not view.shared}))
+        return _share_label(is_shared=updated.shared)
+
+
 def _register_export_import(app: Dash) -> None:
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(EXPORT_VIEW_MODAL_ID, "opened"),
@@ -512,6 +547,7 @@ def _register_sync_after_edit(app: Dash) -> None:
         Output(VIEW_NAV_SUPPRESS_ID, "data", allow_duplicate=True),
         Output(VIEW_MENU_ID, "className"),
         Output(VIEW_FORK_HINT_ID, "style"),
+        Output(SHARE_VIEW_TOGGLE_ID, "children", allow_duplicate=True),
         Output(VIEW_NOTIFY_ID, "sendNotifications"),
         Output(VIEW_DUPLICATED_ID, "data", allow_duplicate=True),
         Input(core.STATE_PAGE_STORAGE, "data"),
@@ -537,10 +573,14 @@ def _register_sync_after_edit(app: Dash) -> None:
 
         Arms `VIEW_NAV_SUPPRESS_ID` alongside its own `VIEW_SELECT_ID.value` write -- see that id's
         own docstring for why the picker's navigate-on-select callback needs it. Also reveals the
-        menu's rename/delete items and hides the "edits save to a copy" badge, since the page on
-        screen is now yours -- and says so in a toast, because a branch is otherwise silent: it's
+        menu's rename/delete/share items and hides the "edits save to a copy" badge, since the page
+        on screen is now yours -- and says so in a toast, because a branch is otherwise silent: it's
         the edit you were making that created a view, and nothing on screen would tell you. Not for
         "Duplicate this view" (`VIEW_DUPLICATED_ID`), where you named the new view yourself.
+
+        The share toggle's own label needs refreshing here too, same reasoning: a branch always
+        creates a brand-new, private view (see `save_page`), so it may no longer match whatever this
+        menu item said about the page you branched *from* (if that one happened to be shared).
         """
         page = core.BasicExperimentPage.model_validate_json(page_json)
         effective = page.id if page.owner_id is not None else None
@@ -573,6 +613,7 @@ def _register_sync_after_edit(app: Dash) -> None:
             True,
             _menu_class(is_owner=is_owner),
             _fork_hint_style(is_owner=is_owner),
+            _share_label(is_shared=page.shared),
             toast,
             False,
         )
@@ -600,10 +641,11 @@ def _register_delete(app: Dash) -> None:
 
 
 def register_view_callbacks(app: Dash) -> None:
-    """Wire the view picker: switching views, and duplicating/renaming/exporting/importing/deleting them."""
+    """Wire the view picker: switching views, and duplicating/renaming/sharing/exporting/importing/deleting them."""
     _register_switching(app)
     _register_duplicate(app)
     _register_rename(app)
+    _register_share_toggle(app)
     _register_export_import(app)
     _register_sync_after_edit(app)
     _register_delete(app)

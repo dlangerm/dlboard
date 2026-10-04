@@ -450,18 +450,21 @@ class AuthorizingDataStore(models.DataStore[...]):
     def get_view[Dataframe, Panel, Chart](
         self, page_type: type[models.Page[Dataframe, Panel, Chart]], view_id: int
     ) -> models.Page[Dataframe, Panel, Chart] | None:
+        """A view by id, if `self._actor` can see it: its owner, always; anyone else only if it's shared."""
         view = self._inner.get_view(page_type, view_id)
         if view is None:
+            return None
+        if self._enforce and view.owner_id != self._actor.id and not view.shared:
             return None
         owner = self._page_project(
             run_id=view.run_id, experiment_id=view.experiment_id, project_id=view.project_id
         )
         return view if self._can(owner, ProjectRole.VIEWER) else None
 
-    def list_views(self, experiment_id: int, owner_id: int) -> list[models.ViewSummary]:
-        self._require_self_or(owner_id, Scope.ALL)
+    def list_views(self, experiment_id: int, viewer_id: int) -> list[models.ViewSummary]:
+        self._require_self_or(viewer_id, Scope.ALL)
         self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
-        return self._inner.list_views(experiment_id, owner_id)
+        return self._inner.list_views(experiment_id, viewer_id)
 
     def delete_view(self, view_id: int, owner_id: int) -> None:
         self._require_self_or(owner_id, Scope.ALL)
