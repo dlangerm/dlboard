@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, Final, cast
 
 import dash_mantine_components as dmc
 from dash import ALL, Dash, Input, Output, State, ctx, no_update
+from dash.exceptions import PreventUpdate
 
 from dltrack.models import NewProjectGrant, ProjectGrant, ProjectRole
 from dltrack.serve import Icon, get_auth_provider, get_data_store, get_project_role, icon
@@ -212,8 +213,10 @@ def register_members_callbacks(app: Dash) -> None:
         prevent_initial_call=True,
     )
     def add_member(
-        _clicks: int, _submits: int, grantee: str | None, role: str, project_id: int
+        n_clicks: int | None, n_submit: int | None, grantee: str | None, role: str, project_id: int
     ) -> tuple[Any, Any, str]:
+        if not n_clicks and not n_submit:
+            raise PreventUpdate
         grant = _new_grant(int(project_id), (grantee or "").strip(), ProjectRole(role))
         if isinstance(grant, str):
             return no_update, no_update, grant
