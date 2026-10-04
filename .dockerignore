@@ -1,0 +1,32 @@
+# Keep the build context to what the Dockerfile actually needs: the workspace's source and lock
+# files. Mirrors .gitignore, plus the dev-only/local-run cruft that's tracked or git-ignored but
+# never belongs in an image build context either.
+.venv
+__pycache__
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+.git
+.github
+.claude
+.data
+lightning-logs/
+screenshot-diffs/
+.coverage
+*.env
+.env
+
+docs/
+README.md
+CONTRIBUTING.md
+CODE_OF_CONDUCT.md
+SECURITY.md
+# LICENSE is kept: client/server pyproject.toml's `license-files = ["../LICENSE"]` needs it present
+# in the build context for hatchling to bundle into the wheel's dist-info.
+
+Dockerfile
+.dockerignore
+docker-compose.yml
