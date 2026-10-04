@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sqlite3
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, override
 
@@ -14,12 +16,12 @@ from sqlalchemy.pool import NullPool
 from dltrack.serve import SCHEMA_PREP_OPTION, SQLStoreBase, set_data_store
 
 if TYPE_CHECKING:
-    import sqlite3
-
     from dash import Dash
 
 
 DEFAULT_BUSY_TIMEOUT_MS: int = 30_000
+_WAL_MODE_RETRY_ATTEMPTS: int = 10
+_WAL_MODE_RETRY_BACKOFF_S: float = 0.05
 
 
 def _engine(location: Path, busy_timeout_ms: int) -> sa.Engine:
@@ -48,7 +50,7 @@ def _engine(location: Path, busy_timeout_ms: int) -> sa.Engine:
 
 def _configure_connection(dbapi_connection: sqlite3.Connection, _record: object) -> None:
     dbapi_connection.execute("PRAGMA foreign_keys = ON")
-    dbapi_connection.execute("PRAGMA journal_mode = WAL")
+    _set_wal_mode(dbapi_connection)
     # pysqlite's own implicit transaction handling defers the real `BEGIN` until the first write
     # statement, which is both generally broken for DDL and (see `_begin`) is specifically how two
     # connections can both run a read (e.g. "does this table exist yet?") before either actually
@@ -56,6 +58,31 @@ def _configure_connection(dbapi_connection: sqlite3.Connection, _record: object)
     # emitting our own explicit `BEGIN` below, in the `begin` hook) fixes both: the lock is taken
     # at a point we choose, not at an implicit first write.
     dbapi_connection.isolation_level = None
+
+
+def _set_wal_mode(dbapi_connection: sqlite3.Connection) -> None:
+    """
+    Switch to WAL mode, retrying "database is locked" a few times.
+
+    Converting a brand-new file to WAL needs its own brief exclusive lock, on top of (and not
+    covered by) the busy-timeout `_engine`'s `connect_args` configures for ordinary write
+    contention: several connections opened against the very same not-yet-WAL file at once (e.g.
+    several processes/threads racing to construct the first store against a fresh database) can
+    each see `OperationalError: database is locked` here specifically, immediately rather than
+    after waiting out that timeout -- a real race this module's `_begin` doesn't reach, since it
+    only serializes the schema-creation transaction itself, not the connections leading up to it.
+    Safe to retry: once any one connection wins, the file is WAL from then on and every later call
+    here (racing or not) is a fast no-op.
+    """
+    for attempt in range(_WAL_MODE_RETRY_ATTEMPTS):
+        try:
+            dbapi_connection.execute("PRAGMA journal_mode = WAL")
+        except sqlite3.OperationalError:
+            if attempt == _WAL_MODE_RETRY_ATTEMPTS - 1:
+                raise
+            time.sleep(_WAL_MODE_RETRY_BACKOFF_S * (attempt + 1))
+        else:
+            return
 
 
 def _begin(conn: sa.Connection) -> None:
