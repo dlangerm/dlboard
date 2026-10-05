@@ -19,6 +19,7 @@ from werkzeug.utils import secure_filename
 
 from dltrack.models import INLINEABLE_ARTIFACT_CONTENT_TYPES
 from dltrack.serve._backend._data_store import get_artifact_store, get_data_store
+from dltrack.serve._url import relative_path
 
 if TYPE_CHECKING:
     from dash import Dash
@@ -32,7 +33,7 @@ the browser (`private`): who may see it is per-user, so a shared proxy cache mus
 
 def artifact_url(artifact_id: int) -> str:
     """The URL a browser (or a chart's own `<img>`/`<a>`) fetches artifact `artifact_id` from."""
-    return f"/artifact/{artifact_id}"
+    return relative_path(f"/artifact/{artifact_id}")
 
 
 def _download(artifact_id: int) -> Response:

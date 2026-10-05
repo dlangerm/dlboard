@@ -78,6 +78,15 @@ class ServerRuntimeOptions:
             "its own startup warning."
         ),
     ] = 16
+    url_prefix: Annotated[
+        str,
+        cyclopts.Parameter(
+            env_var="DLTRACK_URL_PREFIX",
+            help="Serve under this path prefix (e.g. 'dltrack' for https://host/dltrack/...), for a "
+            "reverse proxy that forwards the full path through unchanged rather than stripping the "
+            "prefix first. Leave unset to serve at the root.",
+        ),
+    ] = ""
 
 
 def _serve(plugins_target: str, runtime: ServerRuntimeOptions) -> None:
@@ -106,7 +115,7 @@ def _serve(plugins_target: str, runtime: ServerRuntimeOptions) -> None:
         # who explicitly wants Flask's dotenv loading can still opt back in.
         os.environ.setdefault("FLASK_SKIP_DOTENV", "1")
         plugins = resolve_plugins(plugins_target)
-        build_app(plugins).run(  # pyright: ignore[reportUnknownMemberType]
+        build_app(plugins, url_prefix=runtime.url_prefix).run(  # pyright: ignore[reportUnknownMemberType]
             host=runtime.host, port=runtime.port, debug=True
         )
         return
@@ -116,6 +125,7 @@ def _serve(plugins_target: str, runtime: ServerRuntimeOptions) -> None:
         port=runtime.port,
         workers=runtime.workers,
         blocking_threads=runtime.blocking_threads,
+        url_prefix=runtime.url_prefix,
     )
 
 

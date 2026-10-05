@@ -27,6 +27,7 @@ from dltrack.serve import (
 from dltrack.serve import _constants as constants
 from dltrack.serve._component_ids import ButtonId, DivId, ModalId, StoreId, ValueId
 from dltrack.serve._pages._dash_helpers import require_triggered_id
+from dltrack.serve._url import relative_path
 
 if TYPE_CHECKING:
     from dash.development.base_component import Component
@@ -563,7 +564,7 @@ def _register_restore_callback(app: Dash) -> None:
             getattr(store, _RESTORERS[entity_type])(entity_id, actor)
         except (ValueError, PermissionError):
             _log.exception("Failed to restore %s %s", entity_type, entity_id)
-        return "/admin", True
+        return relative_path("/admin"), True
 
 
 def _register_purge_callbacks(app: Dash) -> None:
@@ -624,7 +625,7 @@ def _register_purge_callbacks(app: Dash) -> None:
         if not n_clicks:
             raise PreventUpdate
         artifact_purge_worker.wake()
-        return "/admin", True
+        return relative_path("/admin"), True
 
 
 def _register_user_action_callback(app: Dash) -> None:
@@ -644,7 +645,7 @@ def _register_user_action_callback(app: Dash) -> None:
         )
         if user is not None and not locks_self_out:
             apply_user_action(store, user, action)
-        return "/admin?tab=users", True
+        return relative_path("/admin?tab=users"), True
 
 
 def register(app: Dash) -> None:

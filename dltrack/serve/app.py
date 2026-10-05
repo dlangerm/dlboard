@@ -30,6 +30,8 @@ from dltrack.serve._clientside_script import ClientsideScript
 from dltrack.serve._icons import Icon, icon, install_icons
 from dltrack.serve._jump import install_jump, jump_modal, jump_trigger
 from dltrack.serve._pages._dash_helpers import section_label
+from dltrack.serve._proxy import apply_proxy_fix
+from dltrack.serve._url import relative_path
 
 if TYPE_CHECKING:
     from dash.development.base_component import Component
@@ -52,8 +54,19 @@ _DEFAULT_NAVBAR_WIDTH = 300
 PAGE_LOADING_CLASS = "dl-page-loading"
 
 
-def app(plugins: list[models.PluginProtocol]) -> Dash:
-    """Get the app initialized with a set of plugins."""
+def app(plugins: list[models.PluginProtocol], *, url_prefix: str = "") -> Dash:
+    """
+    Get the app initialized with a set of plugins.
+
+    `url_prefix` (`DLTRACK_URL_PREFIX`, e.g. `"dltrack"`) is for a reverse proxy that forwards the
+    full, un-rewritten path (`https://host/dltrack/...`) straight through rather than stripping the
+    prefix first -- the simpler and far more common nginx/Caddy config. Every route this app
+    registers (Dash's own, and every `add_public_route`/`add_url_rule` call elsewhere, which already
+    read `app.config.routes_pathname_prefix`) lives under that same prefix, via Dash's single
+    `url_base_pathname` knob rather than its `requests_pathname_prefix`/`routes_pathname_prefix`
+    split -- that split exists for a proxy that *does* strip the prefix (pairing with a WSGI-level
+    `SCRIPT_NAME`), a fiddlier setup this doesn't try to support.
+    """
     # Imported here, not at module level: chart plugins import `from dltrack.serve import
     # ClientsideScript` at their own module level, so importing these page modules (which reach
     # back into concrete chart classes, e.g. `_chart_autogen.py` imports `ImageChart` directly) at
@@ -72,6 +85,7 @@ def app(plugins: list[models.PluginProtocol]) -> Dash:
         pages_folder="_pages",
         suppress_callback_exceptions=True,
         plugins=plugins,
+        url_base_pathname=f"/{url_prefix.strip('/')}/" if url_prefix else None,
     )
     # The tab+accordion page layouts (home, project, admin, experiment, account) are opinionated,
     # non-optional dltrack behavior -- always wired into every app(), never part of a deployment's
@@ -90,6 +104,9 @@ def app(plugins: list[models.PluginProtocol]) -> Dash:
     _request_logging.register(_app)
     # Every route above (and every plugin route) sits behind this one gate -- see `_auth.py`.
     install_request_gate(_app, lambda: get_system_data_store(_app))
+    # Opt-in (DLTRACK_TRUSTED_PROXIES): trust a reverse proxy's X-Forwarded-* headers for scheme/
+    # host detection, so DLTRACK_SECURE_COOKIES sessions survive behind a TLS-terminating proxy.
+    apply_proxy_fix(_app)
     # Only the immutable `InstalledPlugin` snapshots are retained on the app -- not the plugin
     # modules/objects themselves, so introspecting this later (the admin page's About tab) can't
     # reach back into a plugin's own state.
@@ -161,7 +178,7 @@ def _layout(theme: ThemeSpec) -> dmc.MantineProvider:
                                         gap=8,
                                         wrap="nowrap",
                                     ),
-                                    href="/",
+                                    href=relative_path("/"),
                                     refresh=True,
                                     underline="never",
                                     c="bright",
@@ -270,20 +287,21 @@ def _layout(theme: ThemeSpec) -> dmc.MantineProvider:
 )
 def breadcrumbs(_: str, project_id: int | None, experiment_id: int | None) -> list[Component]:
     """Where the current page sits: Projects > project > experiment, the last one emphasized."""
-    trail = [("Projects", "/")]
+    trail = [("Projects", relative_path("/"))]
     store = get_data_store()
     project = store.get_project(project_id) if project_id is not None else None
     if project is not None:
-        trail.append((project.name, f"/project/{project.id}"))
+        trail.append((project.name, relative_path(f"/project/{project.id}")))
         if experiment_id is not None:
             experiment = store.get_experiment(experiment_id)
             name = experiment.name if experiment and experiment.name else f"Experiment {experiment_id}"
-            trail.append((name, f"/experiment/{experiment_id}"))
+            trail.append((name, relative_path(f"/experiment/{experiment_id}")))
+    home_href = relative_path("/")
     *parents, (current, _href) = trail
     return [
         *(
             # Home is a full reload; in-project links stay client-side (see each page's layout).
-            dmc.Anchor(label, href=href, refresh=href == "/", c="dimmed", size="sm", underline="hover")
+            dmc.Anchor(label, href=href, refresh=href == home_href, c="dimmed", size="sm", underline="hover")
             for label, href in parents
         ),
         dmc.Text(current, c="bright", size="sm", fw=500, truncate="end", maw=320),
@@ -314,17 +332,30 @@ def _user_menu() -> Component:
                     dmc.Text(user.username, size="sm", fw=600, px="sm"),
                     dmc.Text(f"via {provider.display_name}", size="xs", c="dimmed", px="sm", pb=6),
                     dmc.MenuDivider(),
-                    dmc.MenuItem("Account", href="/account", refresh=True, leftSection=icon(Icon.KEY)),
+                    dmc.MenuItem(
+                        "Account",
+                        href=relative_path("/account"),
+                        refresh=True,
+                        leftSection=icon(Icon.KEY),
+                    ),
                     *(
                         [dmc.MenuItem("Sign-in settings", href=provider.manage_url, refresh=True)]
                         if provider.manage_url is not None
                         else []
                     ),
-                    dmc.MenuItem("Admin", href="/admin", refresh=True, leftSection=icon(Icon.ADMIN)),
+                    dmc.MenuItem(
+                        "Admin",
+                        href=relative_path("/admin"),
+                        refresh=True,
+                        leftSection=icon(Icon.ADMIN),
+                    ),
                     *(
                         [
                             dmc.MenuItem(
-                                "Sign out", href=SIGN_OUT_PATH, refresh=True, leftSection=icon(Icon.SIGN_OUT)
+                                "Sign out",
+                                href=relative_path(SIGN_OUT_PATH),
+                                refresh=True,
+                                leftSection=icon(Icon.SIGN_OUT),
                             )
                         ]
                         if provider.verifies_identity
@@ -355,7 +386,7 @@ def render_navbar(project_id: int | None, experiment_id: int | None) -> Componen
         [
             dmc.Anchor(
                 project.name,
-                href=f"/project/{project_id}",
+                href=relative_path(f"/project/{project_id}"),
                 refresh=False,
                 c="bright",
                 fw=600,
@@ -368,7 +399,7 @@ def render_navbar(project_id: int | None, experiment_id: int | None) -> Componen
                 [
                     dmc.NavLink(
                         label=e.name or f"Experiment {e.id}",
-                        href=f"/experiment/{e.id}",
+                        href=relative_path(f"/experiment/{e.id}"),
                         active=e.id == experiment_id,
                         variant="light",
                     )

@@ -12,6 +12,7 @@ from dltrack.serve import Icon, get_auth_provider, get_current_user, get_data_st
 from dltrack.serve import _constants as constants
 from dltrack.serve._component_ids import ButtonId, DivId, ValueId
 from dltrack.serve._pages._dash_helpers import require_triggered_id, section_label
+from dltrack.serve._url import relative_path
 
 if TYPE_CHECKING:
     from dash.development.base_component import Component
@@ -167,4 +168,4 @@ def register(app: Dash) -> None:
     def revoke_token(_clicks: list[int]) -> tuple[str, bool]:
         token_id = int(cast("dict[str, int]", require_triggered_id())["token"])
         get_data_store().revoke_api_token(token_id, get_current_user().id)
-        return "/account", True
+        return relative_path("/account"), True

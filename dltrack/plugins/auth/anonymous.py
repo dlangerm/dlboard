@@ -36,8 +36,16 @@ class AnonymousAuthProvider:
 
     display_name: ClassVar[str] = "Anonymous"
     verifies_identity: ClassVar[bool] = False
-    manage_url: ClassVar[str | None] = None
-    admin_url: ClassVar[str | None] = None
+
+    @property
+    def manage_url(self) -> str | None:
+        """Nothing to manage -- there's no sign-in to change."""
+        return None
+
+    @property
+    def admin_url(self) -> str | None:
+        """No users to administer -- everyone resolves to a best-effort identity."""
+        return None
 
     def authenticate(self) -> Principal:
         """Resolve identity from the request header, falling back to the server's own environment."""

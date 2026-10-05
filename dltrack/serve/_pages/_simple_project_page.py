@@ -27,6 +27,7 @@ from dltrack.serve._pages._description_editor import (
 )
 from dltrack.serve._pages._onboarding import first_experiment_snippet, onboarding_card
 from dltrack.serve._pages._project_members import register_members_callbacks, render_members_section
+from dltrack.serve._url import relative_path
 
 if TYPE_CHECKING:
     from dash.development.base_component import Component
@@ -76,7 +77,7 @@ def _experiment_card(experiment: Experiment, stats: ActivityStats) -> Component:
     return entity_card(
         title=experiment_display_name(experiment),
         description=experiment.description,
-        href=f"/experiment/{experiment.id}",
+        href=relative_path(f"/experiment/{experiment.id}"),
         stats=stats,
         class_name="experiment-card",
     )
@@ -200,7 +201,7 @@ def register(app: Dash) -> None:
     def _delete_project(project_id: int) -> str:
         store = get_data_store()
         store.delete_project(project_id, get_current_user())
-        return "/"
+        return relative_path("/")
 
     register_delete_callbacks(
         app,

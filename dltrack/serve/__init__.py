@@ -36,6 +36,7 @@ from dltrack.serve._icons import Icon, icon, icon_cell_class
 from dltrack.serve._production_server import resolve_plugins, run_production_server
 from dltrack.serve._series import series_color, series_swatch_class
 from dltrack.serve._settings_env import set_setting_env
+from dltrack.serve._url import relative_path
 from dltrack.serve.app import app
 
 __all__ = [
@@ -63,6 +64,7 @@ __all__ = [
     "icon",
     "icon_cell_class",
     "mint_api_token",
+    "relative_path",
     "resolve_plugins",
     "run_production_server",
     "safe_next_path",

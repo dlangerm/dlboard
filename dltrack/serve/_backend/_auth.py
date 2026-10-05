@@ -24,6 +24,7 @@ from structlog.stdlib import get_logger
 from dltrack import models
 from dltrack.serve._backend import _api_tokens
 from dltrack.serve._backend._app_slot import AppSlot
+from dltrack.serve._url import relative_path
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -150,7 +151,7 @@ def safe_next_path(next_path: str | None) -> str:
     """
     target = urlsplit(next_path or "")
     if target.scheme or target.netloc or "\\" in target.path or not target.path.startswith("/"):
-        return "/"
+        return relative_path("/")
     return urlunsplit(("", "", target.path, target.query, ""))
 
 
@@ -269,7 +270,7 @@ def _challenge(provider: AuthProvider[...]) -> BaseResponse | tuple[BaseResponse
 
 def _sign_out() -> BaseResponse:
     end_session()
-    return redirect("/")
+    return redirect(relative_path("/"))
 
 
 def install_request_gate(app: Dash, store_for: Callable[[], DataStore[...]]) -> None:

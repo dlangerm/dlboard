@@ -24,4 +24,5 @@ from dltrack.serve._production_server import WSGISettings
 # parent process's structlog setup -- so this has to run again here, not just once in `_cli.py`.
 configure_logging()
 
-app = build_app(WSGISettings().dltrack_plugins).server  # pyright: ignore[reportCallIssue]
+_settings = WSGISettings()  # pyright: ignore[reportCallIssue]
+app = build_app(_settings.dltrack_plugins, url_prefix=_settings.dltrack_url_prefix).server

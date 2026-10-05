@@ -20,6 +20,7 @@ from dltrack.serve import Icon, get_auth_provider, get_data_store, get_project_r
 from dltrack.serve import _constants as constants
 from dltrack.serve._component_ids import ButtonId, DivId, ValueId
 from dltrack.serve._pages._dash_helpers import require_triggered_id, section_label, tooltipped_action_icon
+from dltrack.serve._url import relative_path
 
 if TYPE_CHECKING:
     from dash.development.base_component import Component
@@ -200,7 +201,7 @@ def register_members_callbacks(app: Dash) -> None:
     def remove_member(_clicks: list[int], project_id: int) -> tuple[str, bool]:
         grant_id = int(cast("dict[str, int]", require_triggered_id())["grant"])
         get_data_store().delete_project_grant(int(project_id), grant_id)
-        return f"/project/{project_id}", True
+        return relative_path(f"/project/{project_id}"), True
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         *reload_outputs,
@@ -221,4 +222,4 @@ def register_members_callbacks(app: Dash) -> None:
         if isinstance(grant, str):
             return no_update, no_update, grant
         get_data_store().set_project_grant(grant)
-        return f"/project/{project_id}", True, ""
+        return relative_path(f"/project/{project_id}"), True, ""

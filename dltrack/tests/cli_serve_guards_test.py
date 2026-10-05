@@ -97,8 +97,8 @@ def test_debug_allows_the_loopback_default(monkeypatch: pytest.MonkeyPatch) -> N
         del target
         return []
 
-    def fake_build_app(plugins: list[Any]) -> _FakeApp:
-        del plugins
+    def fake_build_app(plugins: list[Any], *, url_prefix: str = "") -> _FakeApp:
+        del plugins, url_prefix
         return _FakeApp()
 
     monkeypatch.setattr(_cli, "resolve_plugins", fake_resolve_plugins)

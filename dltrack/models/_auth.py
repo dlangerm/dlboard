@@ -38,11 +38,15 @@ class AuthProvider(typing.Protocol[_P]):
     `AuthSettings`), and makes a missing `DLTRACK_SECRET_KEY` a startup error.
     """
 
-    manage_url: typing.ClassVar[str | None]
-    """Where a signed-in person manages how they sign in (e.g. changes their password), or `None` if there's nothing to manage."""
+    @property
+    def manage_url(self) -> str | None:
+        """Where a signed-in person manages how they sign in (e.g. changes their password), or `None` if there's nothing to manage."""
+        ...
 
-    admin_url: typing.ClassVar[str | None]
-    """Where an admin adds users or resets their credentials, or `None` if users come from somewhere else (an external IdP)."""
+    @property
+    def admin_url(self) -> str | None:
+        """Where an admin adds users or resets their credentials, or `None` if users come from somewhere else (an external IdP)."""
+        ...
 
     @classmethod
     def get_or_create(cls, *args: _P.args, **kwargs: _P.kwargs) -> Self:
