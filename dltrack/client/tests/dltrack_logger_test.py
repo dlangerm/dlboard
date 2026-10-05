@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import queue
 import threading
 import warnings
 from typing import Any
@@ -20,6 +21,7 @@ from dltrack.client._rest_api import Identity
 from dltrack.client.dltrack_logger import (
     DLTrackLogger,
     DLTrackLoggerSettings,
+    is_oversized,
     is_rejection,
     warn_if_startup_was_slow,
 )
@@ -69,6 +71,11 @@ class _FakeShipper:
     def __init__(self) -> None:
         self.ready = threading.Event()
         self.ready.set()
+        self.flushed = False
+
+    def flush(self) -> None:
+        """So `finalize()` (called explicitly, or by the logger's own atexit hook) has something to call."""
+        self.flushed = True
 
 
 def _stub_shippers(monkeypatch: pytest.MonkeyPatch) -> list[_FakeShipper]:
@@ -169,6 +176,7 @@ def test_a_logger_attaches_to_the_run_it_is_given_and_otherwise_creates_one(
     assert logger.run_id == (99 if creates_a_run else 7)
     # An attached run's own experiment is used, instead of creating a new experiment around it.
     assert ("create_experiment" in {call[0] for call in fake_api.calls}) is creates_a_run
+    logger.finalize("success")  # marks it finalized, so its atexit hook is a no-op at session end
 
 
 def test_a_run_from_another_experiment_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -217,6 +225,87 @@ def test_is_rejection_only_treats_a_4xx_that_can_never_succeed_as_permanent(
     failure: Exception, *, rejected: bool
 ) -> None:
     assert is_rejection(failure) is rejected
+
+
+@pytest.mark.parametrize(
+    ("failure", "oversized"),
+    [(_http_error(413), True), (_http_error(400), False), (requests.ConnectionError(), False)],
+)
+def test_is_oversized_only_matches_413(failure: Exception, *, oversized: bool) -> None:
+    assert is_oversized(failure) is oversized
+
+
+class _FakeProcess:
+    """`alive` is a plain mutable attribute, not init-only -- a real process can die mid-test too."""
+
+    def __init__(self, *, alive: bool) -> None:
+        self.alive = alive
+
+    def is_alive(self) -> bool:
+        return self.alive
+
+
+def _shipper(*, alive: bool = True, maxsize: int = 0) -> dltrack_logger._Shipper[str]:
+    """
+    A real `_Shipper` over test doubles: a plain `queue.Queue` (not a real `multiprocessing.Queue`,
+    which needs a spawned process on the other end) and `threading.Event` (not
+    `multiprocessing.synchronize.Event`) -- structurally identical for every method `_Shipper` calls.
+    """
+    q: queue.Queue[str | None] = queue.Queue(maxsize=maxsize)
+    shipper: dltrack_logger._Shipper[str] = dltrack_logger._Shipper(  # pyright: ignore[reportUnknownVariableType]
+        "test",
+        q,  # pyright: ignore[reportArgumentType]
+        _FakeProcess(alive=alive),  # pyright: ignore[reportArgumentType]
+        threading.Event(),  # pyright: ignore[reportArgumentType]
+        threading.Event(),  # pyright: ignore[reportArgumentType]
+    )
+    return shipper
+
+
+def test_shipper_put_drops_rather_than_blocks_once_the_queue_is_full() -> None:
+    """Regression: training must never stall on dltrack falling behind -- the old blocking `put` could."""
+    shipper = _shipper(maxsize=1)
+    shipper.put("a")
+
+    with pytest.warns(UserWarning, match="queue is full"):
+        shipper.put("b")
+
+    assert shipper.queue.get_nowait() == "a"
+    assert shipper.queue.empty()  # "b" was dropped, never queued
+    assert shipper._dropped_total == 1
+
+
+def test_shipper_put_raises_if_the_shipping_process_already_died() -> None:
+    shipper = _shipper(alive=False)
+
+    with pytest.raises(RuntimeError, match="died"):
+        shipper.put("a")
+
+
+def test_shipper_flush_warns_and_returns_instead_of_hanging_on_a_dead_process() -> None:
+    shipper = _shipper(alive=False)
+
+    with pytest.warns(UserWarning, match="dead"):
+        shipper.flush()
+
+    assert shipper.queue.empty()  # no flush sentinel was queued for nothing to ever drain
+
+
+def test_shipper_flush_warns_once_with_the_total_dropped_this_run() -> None:
+    shipper = _shipper(maxsize=1)
+    shipper.put("a")
+    with pytest.warns(UserWarning, match="queue is full"):
+        shipper.put("b")
+    shipper.put("c")  # dropped too, but rate-limited: no second warning right after the first
+
+    # Dead now, so `flush()` doesn't block waiting on `flushed` -- nothing would ever set it here.
+    assert isinstance(shipper.process, _FakeProcess)
+    shipper.process.alive = False
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        shipper.flush()
+
+    assert any("dropped 2 test" in str(w.message) for w in caught)
 
 
 def test_warn_if_startup_was_slow_warns_past_the_threshold() -> None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from dltrack import _batching
 from dltrack._batching import BatchParams, ship_batches
 from dltrack._mp_context import SPAWN_CONTEXT
 
@@ -55,3 +56,112 @@ def test_ship_batches_drops_permanent_failures_and_retries_transient_ones(
 
     assert successes == shipped
     assert flushed.is_set()
+
+
+def test_ship_batches_backs_off_exponentially_and_resets_on_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each consecutive transient failure waits longer than the last, reset the moment one ships."""
+    slept: list[float] = []
+
+    def no_jitter(low: float, high: float) -> float:
+        del low, high
+        return 0.0
+
+    monkeypatch.setattr(_batching.time, "sleep", slept.append)
+    monkeypatch.setattr(_batching.random, "uniform", no_jitter)
+
+    # Fails 3 times, succeeds, fails once more (backoff must restart from the base), then succeeds
+    # again -- the last success is the flush sentinel's own retry of what the 5th attempt left behind.
+    outcomes: list[Exception | None] = [
+        RuntimeError(),
+        RuntimeError(),
+        RuntimeError(),
+        None,
+        RuntimeError(),
+        None,
+    ]
+
+    def ship(batch: list[str]) -> None:
+        del batch
+        if outcome := outcomes.pop(0):
+            raise outcome
+
+    params = BatchParams(flush_size=1, wait_sec=1, ready=SPAWN_CONTEXT.Event(), flushed=SPAWN_CONTEXT.Event())
+    with pytest.raises(_ScriptDone):
+        ship_batches(
+            _ScriptedQueue(["a", "a", "a", "a", "a", None]),
+            ship,
+            params,
+            is_permanent=lambda _exc: False,
+        )
+
+    assert slept == [1, 2, 4, 1]
+
+
+def test_ship_batches_splits_an_oversized_batch_and_ships_both_halves(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A batch too large for one request is split in half; each half ships once both fit."""
+
+    def no_sleep(seconds: float) -> None:
+        del seconds
+
+    monkeypatch.setattr(_batching.time, "sleep", no_sleep)
+
+    class _TooLargeError(Exception):
+        pass
+
+    successes: list[list[str]] = []
+
+    def ship(batch: list[str]) -> None:
+        if len(batch) > 1:
+            raise _TooLargeError
+        successes.append(list(batch))
+
+    # A large `wait_sec`, so only `flush_size` being reached (not the batch going stale) triggers a
+    # ship attempt -- isolates the splitting behavior from the unrelated staleness-based trigger.
+    params = BatchParams(
+        flush_size=4, wait_sec=100, ready=SPAWN_CONTEXT.Event(), flushed=SPAWN_CONTEXT.Event()
+    )
+    with pytest.raises(_ScriptDone):
+        ship_batches(
+            _ScriptedQueue(["a", "b", "c", "d", None]),
+            ship,
+            params,
+            is_permanent=lambda _exc: False,
+            is_oversized=lambda exc: isinstance(exc, _TooLargeError),
+        )
+
+    assert sorted(successes) == [["a"], ["b"], ["c"], ["d"]]
+
+
+def test_ship_batches_drops_a_single_item_still_too_large_to_split(monkeypatch: pytest.MonkeyPatch) -> None:
+    """One item alone over the limit can never succeed by splitting further -- it's dropped, not retried forever."""
+
+    def no_sleep(seconds: float) -> None:
+        del seconds
+
+    monkeypatch.setattr(_batching.time, "sleep", no_sleep)
+
+    class _TooLargeError(Exception):
+        pass
+
+    successes: list[list[str]] = []
+
+    def ship(batch: list[str]) -> None:
+        if "huge" in batch:
+            raise _TooLargeError
+        successes.append(list(batch))
+
+    params = BatchParams(
+        flush_size=2, wait_sec=100, ready=SPAWN_CONTEXT.Event(), flushed=SPAWN_CONTEXT.Event()
+    )
+    with pytest.raises(_ScriptDone):
+        ship_batches(
+            _ScriptedQueue(["huge", "fine", None]),
+            ship,
+            params,
+            is_permanent=lambda exc: isinstance(exc, _TooLargeError),
+            is_oversized=lambda exc: isinstance(exc, _TooLargeError),
+        )
+
+    assert successes == [["fine"]]

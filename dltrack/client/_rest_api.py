@@ -8,13 +8,15 @@ Pure `requests` -- no `dash`/`flask`, so importing this (and anything that impor
 from __future__ import annotations
 
 import itertools
+import warnings
 from http import HTTPStatus
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, TypeVar
+from urllib.parse import urlsplit
 
 import requests
-from pydantic import AnyUrl, BaseModel, SecretStr
-from pydantic_settings import BaseSettings
+from pydantic import AnyUrl, BaseModel, PositiveFloat, SecretStr
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from structlog.stdlib import get_logger
 
 from dltrack import models
@@ -54,44 +56,36 @@ class ClientAuthSettings(BaseSettings):
     """An API token (`dlt_...`) from the server's Account page. Not needed by a server that doesn't verify identity."""
 
 
+class ClientTimeoutSettings(BaseSettings):
+    """
+    How long any one request waits before giving up, from `DLTRACK_*` env vars.
+
+    Without these, a hung server or a half-open TCP connection would block the training loop
+    forever -- `requests` applies no timeout at all by default. Split into connect/read because a
+    slow network (connect) and a slow server actually doing the write (read) call for different
+    patience; both are generous defaults since the shipping loop already retries a timeout as
+    transient (see `dltrack._batching.ship_batches`) rather than needing the first attempt to be fast.
+    """
+
+    model_config = SettingsConfigDict(env_prefix="DLTRACK_")
+
+    connect_timeout_s: PositiveFloat = 10
+    read_timeout_s: PositiveFloat = 60
+
+
+_LOOPBACK_HOSTS: Final = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+def _is_loopback(url: str) -> bool:
+    return urlsplit(url).hostname in _LOOPBACK_HOSTS
+
+
 class AuthenticationFailedError(RuntimeError):
     """The server didn't accept this client's credentials (or it sent none, and the server needs some)."""
 
 
 class UnsupportedServerError(RuntimeError):
     """The server speaks a REST API major this client doesn't -- see `BasicDltrackAPI.whoami`."""
-
-
-def _post_request(
-    path: str, body: BaseModel, return_model: type[R], headers: dict[str, str] | None = None
-) -> R:
-    try:
-        res = requests.post(path, json=body.model_dump(mode="json"), headers=headers)
-        res.raise_for_status()
-        return return_model.model_validate(res.json())
-    except Exception:
-        _log.exception("Failed to post %s", body)
-        raise
-
-
-def _create_request(
-    resource: Resource,
-    create_model: BaseModel,
-    return_model: type[R],
-    base_url: str = "/",
-    headers: dict[str, str] | None = None,
-) -> R:
-    return _post_request(create_path(resource, base_url), create_model, return_model, headers)
-
-
-def _get_or_create_request(
-    resource: Resource,
-    body: BaseModel,
-    return_model: type[R],
-    base_url: str = "/",
-    headers: dict[str, str] | None = None,
-) -> R:
-    return _post_request(get_or_create_path(resource, base_url), body, return_model, headers)
 
 
 class BasicDltrackAPI:
@@ -111,6 +105,32 @@ class BasicDltrackAPI:
         }
         if api_key is not None:
             self._headers["Authorization"] = f"Bearer {api_key.get_secret_value()}"
+            if urlsplit(base_url).scheme == "http" and not _is_loopback(base_url):
+                warnings.warn(
+                    f"Sending an API key to {base_url} over plain HTTP -- anyone on the network path "
+                    "can read it. Use an https:// URL, or keep this server on localhost/a private network.",
+                    stacklevel=2,
+                )
+        # One `Session` per client, reused across every request this process makes: `requests`
+        # otherwise opens a fresh TCP/TLS connection per call, which adds up over a training run's
+        # worth of metric/artifact batches.
+        self._session = requests.Session()
+        timeouts = ClientTimeoutSettings()
+        self._timeout = (timeouts.connect_timeout_s, timeouts.read_timeout_s)
+
+    def _post(self, path: str, body: BaseModel, return_model: type[R]) -> R:
+        try:
+            res = self._session.post(
+                f"{self.base_url}/{path}",
+                json=body.model_dump(mode="json"),
+                headers=self._headers,
+                timeout=self._timeout,
+            )
+            res.raise_for_status()
+            return return_model.model_validate(res.json())
+        except Exception:
+            _log.exception("Failed to post %s", body)
+            raise
 
     def whoami(self) -> Identity:
         """
@@ -121,7 +141,9 @@ class BasicDltrackAPI:
         fail fast, before `DLTrackLogger.__init__` spawns the shipping processes that would
         otherwise just silently drop every batch against a server like that.
         """
-        res = requests.get(f"{self.base_url}/{WHOAMI_PATH}", headers=self._headers)
+        res = self._session.get(
+            f"{self.base_url}/{WHOAMI_PATH}", headers=self._headers, timeout=self._timeout
+        )
         if res.status_code == HTTPStatus.UNAUTHORIZED:
             msg = (
                 f"The dltrack server at {self.base_url} rejected this client's credentials. Create an API "
@@ -141,62 +163,55 @@ class BasicDltrackAPI:
 
     def create_project(self, new_project: models.NewProject) -> models.Project:
         """Create a new project."""
-        return _create_request(
-            Resource.PROJECTS, new_project, models.Project, self.base_url, headers=self._headers
-        )
+        return self._post(create_path(Resource.PROJECTS), new_project, models.Project)
 
     def get_or_create_project(self, name: str, description: str = "") -> models.Project:
         """Get the project named `name`, creating it (with `description`) if it doesn't exist yet."""
-        return _get_or_create_request(
-            Resource.PROJECTS,
+        return self._post(
+            get_or_create_path(Resource.PROJECTS),
             GetOrCreateProject(name=name, description=description),
             models.Project,
-            self.base_url,
-            headers=self._headers,
         )
 
     def create_experiment(self, new_experiment: models.NewExperiment) -> models.Experiment:
         """Create a new experiment."""
-        return _create_request(
-            Resource.EXPERIMENTS, new_experiment, models.Experiment, self.base_url, headers=self._headers
-        )
+        return self._post(create_path(Resource.EXPERIMENTS), new_experiment, models.Experiment)
 
     def get_or_create_experiment(
         self, project_id: int, name: str = "default", source: models.ExperimentSource | None = None
     ) -> models.Experiment:
         """Get the named experiment within `project_id`, creating it if it doesn't exist yet."""
-        return _get_or_create_request(
-            Resource.EXPERIMENTS,
+        return self._post(
+            get_or_create_path(Resource.EXPERIMENTS),
             GetOrCreateExperiment(project_id=project_id, name=name, source=source),
             models.Experiment,
-            self.base_url,
-            headers=self._headers,
         )
 
     def create_run(self, run: models.NewRun) -> models.Run:
         """Initialize a new run."""
-        return _create_request(Resource.RUNS, run, models.Run, self.base_url, headers=self._headers)
+        return self._post(create_path(Resource.RUNS), run, models.Run)
 
     def get_run(self, run_id: int) -> models.Run:
         """The existing run `run_id`. Raises `requests.HTTPError` (404) if it's missing, deleted, or not yours to see."""
-        res = requests.get(
-            f"{self.base_url}/{entity_path(Resource.RUNS, str(run_id))}", headers=self._headers
+        res = self._session.get(
+            f"{self.base_url}/{entity_path(Resource.RUNS, str(run_id))}",
+            headers=self._headers,
+            timeout=self._timeout,
         )
         res.raise_for_status()
         return models.Run.model_validate(res.json())
 
     def log_hyperparams(self, hyperparams: models.NewHyperParams) -> models.HyperParams:
         """Log hyperparameters."""
-        return _create_request(
-            Resource.HYPERPARAMS, hyperparams, models.HyperParams, self.base_url, headers=self._headers
-        )
+        return self._post(create_path(Resource.HYPERPARAMS), hyperparams, models.HyperParams)
 
     def log_metric_batch(self, metrics: list[models.LoggedMetrics]) -> None:
         """Log a batch of metrics."""
-        res = requests.post(
-            create_path(Resource.METRICS, self.base_url),
+        res = self._session.post(
+            f"{self.base_url}/{create_path(Resource.METRICS)}",
             json=[m.model_dump(mode="json") for m in metrics],
             headers=self._headers,
+            timeout=self._timeout,
         )
         res.raise_for_status()
 
@@ -234,8 +249,8 @@ class BasicDltrackAPI:
         # whether the request succeeds, rather than leaking a descriptor per artifact.
         opened = [path.open("rb") for _, path in uploads]
         try:
-            res = requests.post(
-                create_path(Resource.ARTIFACTS, self.base_url),
+            res = self._session.post(
+                f"{self.base_url}/{create_path(Resource.ARTIFACTS)}",
                 files=itertools.chain(
                     *(
                         (
@@ -249,6 +264,7 @@ class BasicDltrackAPI:
                     )
                 ),
                 headers=self._headers,
+                timeout=self._timeout,
             )
             res.raise_for_status()
         except Exception:
@@ -265,8 +281,11 @@ class BasicDltrackAPI:
             for a, ref in links
         ]
         try:
-            res = requests.post(
-                create_path(Resource.ARTIFACT_LINKS, self.base_url), json=body, headers=self._headers
+            res = self._session.post(
+                f"{self.base_url}/{create_path(Resource.ARTIFACT_LINKS)}",
+                json=body,
+                headers=self._headers,
+                timeout=self._timeout,
             )
             res.raise_for_status()
         except Exception:
