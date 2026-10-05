@@ -62,6 +62,14 @@ SIGN_OUT_PATH: Final = "/sign-out"
 _SESSION_USER_ID: Final = "uid"
 _SESSION_EPOCH: Final = "epoch"
 
+_MIN_SECRET_KEY_LENGTH: Final = 32
+"""Matches `openssl rand -hex 32`'s output length -- every "generate one" instruction in this
+codebase (docker-compose.yml, docs/docker.md) already says this exact command."""
+
+_PLACEHOLDER_SECRET_KEYS: Final = frozenset({"local-trial-only-change-me"})
+"""Known placeholders this codebase itself ships (docker-compose.yml's trial stack) -- a deployment
+that copied that file without following its own comment telling them to replace this."""
+
 
 class AuthSettings(BaseSettings):
     """
@@ -232,7 +240,22 @@ def install_request_gate(app: Dash, store_for: Callable[[], DataStore[...]]) -> 
         if settings.secret_key is None:
             msg = f"The {provider.display_name} auth provider needs DLTRACK_SECRET_KEY set to sign sessions"
             raise ValueError(msg)
-        app.server.secret_key = settings.secret_key.get_secret_value()
+        secret_key = settings.secret_key.get_secret_value()
+        if secret_key in _PLACEHOLDER_SECRET_KEYS:
+            msg = (
+                "DLTRACK_SECRET_KEY is still a placeholder from docker-compose.yml's local-trial "
+                "stack -- generate a real one with `openssl rand -hex 32` before using this anywhere "
+                "that outlives `docker compose down`."
+            )
+            raise ValueError(msg)
+        if len(secret_key) < _MIN_SECRET_KEY_LENGTH:
+            msg = (
+                f"DLTRACK_SECRET_KEY is only {len(secret_key)} characters -- anyone who guesses or "
+                f"brute-forces it can forge a session for any user. Generate at least "
+                f"{_MIN_SECRET_KEY_LENGTH} with `openssl rand -hex 32`."
+            )
+            raise ValueError(msg)
+        app.server.secret_key = secret_key
         app.server.config.update(
             SESSION_COOKIE_HTTPONLY=True,
             SESSION_COOKIE_SECURE=settings.secure_cookies,

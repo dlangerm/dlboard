@@ -3,6 +3,7 @@
 from dltrack.models._access import AmbiguousProjectError, NewProjectGrant, ProjectGrant, ProjectRole
 from dltrack.models._activity import ActivityStats, ProjectStats
 from dltrack.models._artifact import (
+    INLINEABLE_ARTIFACT_CONTENT_TYPES,
     AnyArtifact,
     Artifact,
     NewArtifact,
@@ -43,6 +44,7 @@ from dltrack.models._view import (
 )
 
 __all__ = [
+    "INLINEABLE_ARTIFACT_CONTENT_TYPES",
     "MAX_GRID_COLUMNS",
     "MIN_GRID_COLUMNS",
     "RUN_NAME_COLUMN",

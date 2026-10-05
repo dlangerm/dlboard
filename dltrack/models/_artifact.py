@@ -3,12 +3,25 @@
 from __future__ import annotations
 
 import typing
+from typing import Final
 
 import pendulum
 from pydantic import AnyUrl, AwareDatetime, BaseModel, Field
 
 if typing.TYPE_CHECKING:
     from pathlib import Path
+
+INLINEABLE_ARTIFACT_CONTENT_TYPES: Final = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
+"""
+Content types safe for a browser to render inline, rather than only download, when serving an
+artifact's blob back (`/artifact/<id>`, any `ArtifactStore.download_artifact` implementation).
+
+An artifact's `fname` (and so its guessed content type) is entirely client-supplied
+(`NewArtifact.fname`, `AnyArtifact.to_artifact`), so anyone who can log an artifact can upload
+anything, including an HTML or SVG file (`image/svg+xml` can carry an embedded `<script>`) crafted
+to run script in this origin the moment someone else opens it. Everything not in this set is served
+as `Content-Disposition: attachment` instead.
+"""
 
 
 @typing.runtime_checkable

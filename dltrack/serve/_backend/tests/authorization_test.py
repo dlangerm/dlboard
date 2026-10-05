@@ -8,15 +8,19 @@ from typing import TYPE_CHECKING, Any
 
 import pendulum
 import pytest
+from pydantic import AnyUrl
 
 from dltrack import models
 from dltrack.conftest import EVERY_STORE_BACKEND, StoreBackend, create_entity_chain
 from dltrack.models import ProjectRole, Scope
+from dltrack.plugins.data_stores._blob_store import BlobArtifactStore, blob_key
+from dltrack.plugins.data_stores.filesystem import FSBlobs
 from dltrack.serve._backend._authorization import AuthorizingArtifactStore, AuthorizingDataStore
 from dltrack.serve._pages._experiment._experiment_page_state import BasicExperimentPage
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
 
     from dltrack.plugins.data_stores.sqlite import SQLLiteStore
 
@@ -261,6 +265,48 @@ def test_list_users_only_shows_people_you_share_a_project_with(store: SQLLiteSto
     assert len(_as(store, _user(store, "root", Scope.USER_MANAGE)).list_users()) == 4
 
 
+def test_user_manage_alone_cannot_grant_all(store: SQLLiteStore) -> None:
+    """
+    Regression: `USER_MANAGE` used to be enough to grant `Scope.ALL` to anyone, including yourself
+    -- a strictly weaker scope in name only, since its holder could self-escalate to full admin.
+    """
+    manager = _user(store, "manager", Scope.USER_MANAGE)
+    target = _user(store, "target")
+
+    with pytest.raises(PermissionError):
+        _as(store, manager).update_user(target.model_copy(update={"scopes": [Scope.ALL]}))
+
+
+def test_user_manage_alone_cannot_modify_an_existing_all_admin(store: SQLLiteStore) -> None:
+    """Not even an unrelated field -- disabling a real admin needs `ALL`, not just `USER_MANAGE`."""
+    manager = _user(store, "manager", Scope.USER_MANAGE)
+    admin = _user(store, "admin", Scope.ALL)
+
+    with pytest.raises(PermissionError):
+        _as(store, manager).update_user(admin.model_copy(update={"groups": ["anything"]}))
+
+
+def test_all_can_grant_all_and_modify_an_existing_all_admin(store: SQLLiteStore) -> None:
+    root = _user(store, "root", Scope.ALL)
+    target = _user(store, "target")
+    other_admin = _user(store, "other-admin", Scope.ALL)
+
+    granted = _as(store, root).update_user(target.model_copy(update={"scopes": [Scope.ALL]}))
+    modified = _as(store, root).update_user(other_admin.model_copy(update={"groups": ["ml-team"]}))
+
+    assert Scope.ALL in granted.scopes
+    assert modified.groups == ["ml-team"]
+
+
+def test_user_manage_can_still_update_an_ordinary_user(store: SQLLiteStore) -> None:
+    manager = _user(store, "manager", Scope.USER_MANAGE)
+    target = _user(store, "target")
+
+    updated = _as(store, manager).update_user(target.model_copy(update={"groups": ["ml-team"]}))
+
+    assert updated.groups == ["ml-team"]
+
+
 def test_a_viewer_can_change_shared_viewing_state_but_not_the_layout(store: SQLLiteStore) -> None:
     bob, (_project, experiment, _run) = _shared_chain(store, ProjectRole.VIEWER)
     shared = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment.id)
@@ -329,3 +375,56 @@ def test_a_stranger_cannot_see_a_shared_view_outside_the_project(store: SQLLiteS
     )
 
     assert _as(store, stranger).get_view(BasicExperimentPage, view.id) is None
+
+
+# -- Artifact linking -------------------------------------------------------------------------
+
+
+def _artifact_store(inner: AuthorizingDataStore, tmp_path: Path) -> AuthorizingArtifactStore:
+    blob_store = BlobArtifactStore.get_or_create(FSBlobs(tmp_path), 10)
+    return AuthorizingArtifactStore(blob_store, inner)
+
+
+def test_link_artifacts_refuses_a_ref_already_attached_to_another_artifact(
+    store: SQLLiteStore, tmp_path: Path
+) -> None:
+    """
+    Regression: linking only checked that the caller could write to the *target* run, not whether
+    the ref itself already belonged to someone else's artifact -- letting anyone who knew (or
+    guessed) another artifact's ref link it into a run of their own, then read it back through
+    their own, now-authorized, artifact id. `enforce=False` below isolates exactly that: with every
+    *other* check (project role) turned off, this is the one thing left refusing the link.
+    """
+    chain = create_entity_chain(store, artifact=True)
+    existing_ref = next(iter(store.fetch_artifacts(experiment_id=chain.experiment_id))).ref
+    other_run = store.create_run(models.NewRun(experiment_id=chain.experiment_id))
+    mallory = _user(store, "mallory")
+    artifact_store = _artifact_store(_as(store, mallory, enforce=False), tmp_path)
+    stolen = models.NewArtifact(
+        key="stolen", fname="x.png", run_id=other_run.id, experiment_id=chain.experiment_id, step=0
+    )
+
+    with pytest.raises(models.UnservableArtifactRefError):
+        artifact_store.link_artifacts([(stolen, AnyUrl(existing_ref))])
+
+
+def test_link_artifacts_still_accepts_a_fresh_ref(store: SQLLiteStore, tmp_path: Path) -> None:
+    chain = create_entity_chain(store)
+    mallory = _user(store, "mallory")
+    artifact_store = _artifact_store(_as(store, mallory, enforce=False), tmp_path)
+    blob_backend = FSBlobs(tmp_path)
+    ref = blob_backend.ref_for(blob_key(chain.experiment_id, chain.run_id, "img", 0, "a.png"))
+    blob_backend.write(_staged(tmp_path, b"data"), ref)
+    new_artifact = models.NewArtifact(
+        key="img", fname="a.png", run_id=chain.run_id, experiment_id=chain.experiment_id, step=0
+    )
+
+    (linked,) = artifact_store.link_artifacts([(new_artifact, ref)])
+
+    assert linked.ref == str(ref)
+
+
+def _staged(tmp_path: Path, content: bytes) -> Path:
+    path = tmp_path / "staged"
+    path.write_bytes(content)
+    return path

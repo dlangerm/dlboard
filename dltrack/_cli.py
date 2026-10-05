@@ -59,6 +59,13 @@ _DEFAULT_ARTIFACT_STORE_LOCATION = Path.home() / ".dltrack_artifacts"
 # through the exact same import mechanism as a caller-supplied `--plugins module:attr` target.
 _LOCAL_PLUGINS_TARGET = "dltrack.plugins:LOCAL_DEPLOYMENT_DEFAULT"
 
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+def _is_loopback(host: str) -> bool:
+    """Whether `host` only ever accepts connections from this same machine."""
+    return host in _LOOPBACK_HOSTS
+
 
 @dataclass(frozen=True)
 class ServerRuntimeOptions:
@@ -95,6 +102,13 @@ def _serve(plugins_target: str, runtime: ServerRuntimeOptions) -> None:
     production-ready WSGI server with real multi-worker process isolation (a crashed worker
     doesn't take down others, and can be auto-respawned) and reverse-proxy/k8s-friendly defaults.
     """
+    if runtime.debug and not _is_loopback(runtime.host):
+        msg = (
+            f"--debug runs Werkzeug's interactive debugger, which lets anyone who can reach it "
+            f"execute arbitrary Python -- refusing to bind it to {runtime.host!r}. Drop --debug, "
+            "or keep --host at its loopback default."
+        )
+        raise SystemExit(msg)
     if runtime.debug:
         # Flask's `run()` auto-loads a `.env`/`.flaskenv` from cwd via `python-dotenv` by default
         # (on the reloader's respawned child, specifically) -- independent of dltrack's own env-var
@@ -134,6 +148,15 @@ class LocalServeOptions:
             env_var="DLTRACK_ARTIFACT_STORE_LOCATION", help="Where to store artifact blobs on disk."
         ),
     ] = _DEFAULT_ARTIFACT_STORE_LOCATION
+    i_understand_anyone_who_can_reach_this_is_an_admin: Annotated[
+        bool,
+        cyclopts.Parameter(
+            help="Required to bind --host to anything but loopback. `serve local` has no sign-in -- "
+            "every request is treated as the same admin user, including purge. Put a real auth "
+            "provider in front (`serve custom` with `PASSWORD_AUTH`) before exposing this past your "
+            "own machine, unless you're fronting it with your own access control."
+        ),
+    ] = False
     runtime: Annotated[ServerRuntimeOptions, cyclopts.Parameter(name="*")] = field(
         default_factory=ServerRuntimeOptions
     )
@@ -148,6 +171,14 @@ def local(
 ) -> None:
     """Run the dltrack server locally -- anonymous, single-user, just like `tensorboard`."""
     _configure_logging()
+    if not _is_loopback(opts.runtime.host) and not opts.i_understand_anyone_who_can_reach_this_is_an_admin:
+        msg = (
+            f"`serve local` has no sign-in -- anyone who can reach {opts.runtime.host!r} is a full "
+            "admin, including purge. Pass --i-understand-anyone-who-can-reach-this-is-an-admin to "
+            "proceed anyway (e.g. behind your own network boundary or reverse-proxy auth), or use "
+            "`serve custom` with a real auth provider (see dltrack.plugins.PASSWORD_AUTH) instead."
+        )
+        raise SystemExit(msg)
     set_setting_env(SqliteAppSettings, "sqlite_location", opts.sqlite_location)
     set_setting_env(FilesystemAppSettings, "artifact_store_location", opts.artifact_store_location)
     _log.info("dltrack server is starting...")

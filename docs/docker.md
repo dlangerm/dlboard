@@ -34,20 +34,22 @@ has no other metadata store to fall back to. Artifact storage defaults to a loca
 the container (`/data/artifacts`), so it only needs a volume, not another service.
 
 To try it with no infrastructure of your own, [`docker-compose.yml`](../docker-compose.yml) at the
-repo root is entirely self-contained:
+repo root is entirely self-contained apart from one thing it refuses to make up a default for — a
+session secret:
 
 ```bash
+export DLTRACK_SECRET_KEY=$(openssl rand -hex 32)
 docker compose up --build
 docker compose exec dltrack \
   dltrack users set-password alice --admin --plugins dltrack.scripts.docker_deployment:PLUGINS
 ```
 
-It builds the image and brings up a Postgres container alongside it — nothing to configure first.
-Both of its volumes (`dltrack-postgres`, `dltrack-artifacts`) genuinely persist across `docker
-compose down`/`up` (no `-v`); that was checked by actually restarting the stack and confirming a
-project and an uploaded artifact were both still there afterward, not assumed from "it's a volume."
-It's still a local trial, not a deployment you'd run as-is: `DLTRACK_SECRET_KEY` is a hardcoded
-placeholder in the file, and `docker compose down -v` throws both volumes away on purpose.
+It builds the image and brings up a Postgres container alongside it — nothing else to configure
+first. Both of its volumes (`dltrack-postgres`, `dltrack-artifacts`) genuinely persist across
+`docker compose down`/`up` (no `-v`); that was checked by actually restarting the stack and
+confirming a project and an uploaded artifact were both still there afterward, not assumed from
+"it's a volume." It's still a local trial, not a deployment you'd run as-is: `docker compose down
+-v` throws both volumes away on purpose.
 
 Pointed at your own Postgres instead, override that same file's environment (or write your own
 `docker-compose.yml`/Kubernetes manifest): point `DLTRACK_POSTGRES_HOST` at your real database, set a real
