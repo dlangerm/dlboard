@@ -6,29 +6,29 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from dltrack import models
+from dltrack._wire import Resource
 from dltrack.client import _rest_api as backend
 
 if TYPE_CHECKING:
     import pytest
 
 
-def test_create_path_joins_base_url_and_model_name() -> None:
-    assert backend.create_path(models.Project, base_url="http://host:1") == "http://host:1/create/Project"
+def test_create_path_joins_base_url_and_resource() -> None:
+    assert backend.create_path(Resource.PROJECTS, base_url="http://host:1") == "http://host:1/api/v1/projects"
 
 
-def test_create_path_handles_no_model() -> None:
-    assert backend.create_path(None, base_url="http://host:1") == "http://host:1/create"
-
-
-def test_entity_path_lowercases_model_name_and_defaults_placeholder() -> None:
+def test_entity_path_defaults_placeholder() -> None:
     assert (
-        backend.entity_path(models.Project, base_url="http://host:1")
-        == "http://host:1/project/<int:entity_id>"
+        backend.entity_path(Resource.PROJECTS, base_url="http://host:1")
+        == "http://host:1/api/v1/projects/<int:entity_id>"
     )
 
 
 def test_entity_path_accepts_a_real_id() -> None:
-    assert backend.entity_path(models.Run, entity_id="7", base_url="http://host:1") == "http://host:1/run/7"
+    assert (
+        backend.entity_path(Resource.RUNS, entity_id="7", base_url="http://host:1")
+        == "http://host:1/api/v1/runs/7"
+    )
 
 
 def test_client_sends_resolved_username_header_on_every_request(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -67,4 +67,4 @@ def test_create_project_sends_the_user_header(monkeypatch: pytest.MonkeyPatch) -
 
     backend.BasicDltrackAPI().create_project(models.NewProject(name="p", description="d"))
 
-    assert captured["headers"] == {backend.DLTRACK_USER_HEADER: "alice"}
+    assert captured["headers"][backend.DLTRACK_USER_HEADER] == "alice"

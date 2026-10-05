@@ -15,8 +15,8 @@ FlatHparamDict: TypeAlias = dict[str, ValidJsonTypes]
 _flat_hparam_dict_adapter: TypeAdapter[FlatHparamDict] = TypeAdapter(FlatHparamDict)
 
 
-class NewHyperParams(BaseModel, frozen=True, extra="forbid"):
-    """A new hyperparameter blob to store in the database."""
+class NewHyperParams(BaseModel, frozen=True, extra="ignore"):
+    """A new hyperparameter blob to store in the database. `extra="ignore"`: this crosses the wire -- see `dltrack._wire`."""
 
     run_id: int
     """The run ID for this set of hyperparameters."""
@@ -49,8 +49,8 @@ class NewHyperParams(BaseModel, frozen=True, extra="forbid"):
         return json.loads(self.raw_hparams)
 
 
-class HyperParams(NewHyperParams, frozen=True, extra="forbid"):
-    """A hyperparameter blob stored in the database."""
+class HyperParams(NewHyperParams, frozen=True, extra="ignore"):
+    """A hyperparameter blob stored in the database. `extra="ignore"`: this crosses the wire -- see `dltrack._wire`."""
 
     id: int
     """The ID of this hyperparameter blob."""

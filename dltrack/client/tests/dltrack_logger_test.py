@@ -31,7 +31,7 @@ class _FakeAPI:
         self.calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
 
     def whoami(self) -> Identity:
-        return Identity(id=1, username="me")
+        return Identity(id=1, username="me", server_version="0.0.0-test")
 
     def get_or_create_project(self, name: str, description: str = "") -> models.Project:
         self.calls.append(("get_or_create_project", (name,), {"description": description}))

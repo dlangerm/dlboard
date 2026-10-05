@@ -19,6 +19,7 @@ from playwright.sync_api import expect
 from werkzeug.serving import make_server
 
 from dltrack import models
+from dltrack._wire import WHOAMI_PATH
 from dltrack.conftest import dispose_stores
 from dltrack.plugins import BUILTIN_BACKEND, PASSWORD_AUTH
 from dltrack.plugins.auth.password import create_or_reset_user
@@ -133,7 +134,7 @@ def test_a_token_made_on_the_account_page_authenticates_a_script(
     assert raw is not None
 
     whoami = requests.get(
-        f"{deployment.url}/whoami", headers={"Authorization": f"Bearer {raw.group(0)}"}, timeout=5
+        f"{deployment.url}/{WHOAMI_PATH}", headers={"Authorization": f"Bearer {raw.group(0)}"}, timeout=5
     )
     assert whoami.json()["username"] == "bob"
 
@@ -142,7 +143,7 @@ def test_a_token_made_on_the_account_page_authenticates_a_script(
     page.get_by_role("button", name="Revoke").click()
     expect(page.get_by_text("Revoked")).to_be_visible()
     revoked = requests.get(
-        f"{deployment.url}/whoami", headers={"Authorization": f"Bearer {raw.group(0)}"}, timeout=5
+        f"{deployment.url}/{WHOAMI_PATH}", headers={"Authorization": f"Bearer {raw.group(0)}"}, timeout=5
     )
     assert revoked.status_code == 401
     assert console_errors == []

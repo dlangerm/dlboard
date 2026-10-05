@@ -141,6 +141,23 @@ class ParameterField(BaseModel, frozen=True, extra="forbid"):
     `pydantic.Field(description=...)`."""
 
 
+class UnknownChartTypeError(KeyError):
+    """
+    No chart plugin registered `chart_type_name`.
+
+    A saved view names a chart type this deployment doesn't have installed (a plugin that was
+    removed, or never installed on this server at all). Subclasses `KeyError` so existing
+    `except KeyError` handling still catches it; callers that want to react to this specifically
+    (as opposed to a bare lookup miss elsewhere) can catch it by name instead.
+    """
+
+    def __init__(self, chart_type_name: str) -> None:
+        self.chart_type_name = chart_type_name
+        super().__init__(
+            f"No chart plugin registered for chart type {chart_type_name!r} -- it may need to be installed."
+        )
+
+
 class ChartTypeRegistry:
     """Registry of all chart types."""
 
@@ -161,10 +178,9 @@ class ChartTypeRegistry:
 
     @classmethod
     def get_chart_type(cls, chart_type_name: str) -> type[ChartType[typing.Any, typing.Any, typing.Any]]:
-        """Fetch a registered chart type by name."""
+        """Fetch a registered chart type by name. Raises `UnknownChartTypeError` if none is registered."""
         if chart_type_name not in cls._all_charts:
-            msg = f"Unknown chart type {chart_type_name=}"
-            raise KeyError(msg)
+            raise UnknownChartTypeError(chart_type_name)
         return cls._all_charts[chart_type_name]
 
     @classmethod
@@ -228,29 +244,29 @@ class ChartTypeRegistry:
 
     @classmethod
     def render(cls, chart: ChartInstance[_Dataframe, _Chart], dataframe: object) -> _Chart:
-        chart_type = cls._all_charts[chart.chart_type]
+        chart_type = cls.get_chart_type(chart.chart_type)
         return chart_type.render(chart_type.parameter_type().model_validate(chart.parameters), dataframe)
 
     @classmethod
     def hint_required_columns(cls, chart: ChartInstance[_Dataframe, _Chart]) -> set[str] | None:
-        chart_type = cls._all_charts[chart.chart_type]
+        chart_type = cls.get_chart_type(chart.chart_type)
         return chart_type.hint_required_columns(chart_type.parameter_type().model_validate(chart.parameters))
 
     @classmethod
     def hint_required_artifact_keys(cls, chart: ChartInstance[_Dataframe, _Chart]) -> set[str] | None:
-        chart_type = cls._all_charts[chart.chart_type]
+        chart_type = cls.get_chart_type(chart.chart_type)
         return chart_type.hint_required_artifact_keys(
             chart_type.parameter_type().model_validate(chart.parameters)
         )
 
     @classmethod
     def hint_required_hparams(cls, chart: ChartInstance[_Dataframe, _Chart]) -> set[str] | None:
-        chart_type = cls._all_charts[chart.chart_type]
+        chart_type = cls.get_chart_type(chart.chart_type)
         return chart_type.hint_required_hparams(chart_type.parameter_type().model_validate(chart.parameters))
 
     @classmethod
     def natural_width(cls, chart: ChartInstance[_Dataframe, _Chart]) -> int:
-        chart_type = cls._all_charts[chart.chart_type]
+        chart_type = cls.get_chart_type(chart.chart_type)
         return chart_type.natural_width(chart_type.parameter_type().model_validate(chart.parameters))
 
 
@@ -295,15 +311,17 @@ class ChartInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, 
         Hint the required columns for this chart to render.
 
         Falls back to `None` ("fetch everything") if `parameters` no longer validates against this
-        chart type's settings model -- e.g. stale data from before a schema change -- rather than
-        raising and taking the rest of the panel down with it. `render()` still raises for the same
-        case, so the broken chart itself still surfaces as its own inline error.
+        chart type's settings model (e.g. stale data from before a schema change) or if no chart
+        plugin is registered for `chart_type` at all (e.g. one that was uninstalled) -- rather than
+        raising and taking the rest of the panel's data-fetching down with it. `render()` still
+        raises for the same cases, so the broken chart itself still surfaces as its own inline error.
         """
         try:
             return ChartTypeRegistry.hint_required_columns(self)
-        except ValidationError:
+        except (ValidationError, UnknownChartTypeError):
             _log.warning(
-                "chart has invalid parameters, fetching every column as a fallback",
+                "chart has invalid parameters or an unregistered chart type, fetching every column "
+                "as a fallback",
                 chart_type=self.chart_type,
             )
             return None
@@ -311,9 +329,10 @@ class ChartInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, 
     def hint_required_artifact_keys(self) -> set[str] | None:
         try:
             return ChartTypeRegistry.hint_required_artifact_keys(self)
-        except ValidationError:
+        except (ValidationError, UnknownChartTypeError):
             _log.warning(
-                "chart has invalid parameters, no artifact-key hint available", chart_type=self.chart_type
+                "chart has invalid parameters or an unregistered chart type, no artifact-key hint available",
+                chart_type=self.chart_type,
             )
             return None
 
@@ -321,9 +340,10 @@ class ChartInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, 
         """Hint the required hyperparameter keys for this chart to render. See `hint_required_columns`."""
         try:
             return ChartTypeRegistry.hint_required_hparams(self)
-        except ValidationError:
+        except (ValidationError, UnknownChartTypeError):
             _log.warning(
-                "chart has invalid parameters, fetching every hparam as a fallback",
+                "chart has invalid parameters or an unregistered chart type, fetching every hparam "
+                "as a fallback",
                 chart_type=self.chart_type,
             )
             return None
@@ -332,8 +352,11 @@ class ChartInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, 
         """Preferred render width in px for this chart instance. See `hint_required_columns`."""
         try:
             return ChartTypeRegistry.natural_width(self)
-        except ValidationError:
-            _log.warning("chart has invalid parameters, using fallback width", chart_type=self.chart_type)
+        except (ValidationError, UnknownChartTypeError):
+            _log.warning(
+                "chart has invalid parameters or an unregistered chart type, using fallback width",
+                chart_type=self.chart_type,
+            )
             return _FALLBACK_NATURAL_WIDTH
 
 

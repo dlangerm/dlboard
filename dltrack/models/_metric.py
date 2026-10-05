@@ -39,8 +39,8 @@ class UnderlyingMetricTableEntry(BaseModel, frozen=True, extra="forbid"):
     """Time recorded from the client."""
 
 
-class LoggedMetrics(BaseModel, frozen=True, extra="forbid"):
-    """A mapping of keys to values for a step."""
+class LoggedMetrics(BaseModel, frozen=True, extra="ignore"):
+    """A mapping of keys to values for a step. `extra="ignore"`: this crosses the wire -- see `dltrack._wire`."""
 
     metrics: dict[str, float | None] = {}
     """The k/v pairs of metric values."""

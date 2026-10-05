@@ -10,7 +10,7 @@ from __future__ import annotations
 import itertools
 from http import HTTPStatus
 from pathlib import Path
-from typing import TYPE_CHECKING, Final, Literal, TypeVar
+from typing import TYPE_CHECKING, Final, TypeVar
 
 import requests
 from pydantic import AnyUrl, BaseModel, SecretStr
@@ -19,13 +19,17 @@ from structlog.stdlib import get_logger
 
 from dltrack import models
 from dltrack._identity import resolve_username
+from dltrack._version import __version__
 from dltrack._wire import (
+    API_VERSION,
+    DLTRACK_CLIENT_VERSION_HEADER,
     DLTRACK_USER_HEADER,
     METADATA_PART_SUFFIX,
     WHOAMI_PATH,
     GetOrCreateExperiment,
     GetOrCreateProject,
     Identity,
+    Resource,
     create_path,
     entity_path,
     get_or_create_path,
@@ -54,6 +58,10 @@ class AuthenticationFailedError(RuntimeError):
     """The server didn't accept this client's credentials (or it sent none, and the server needs some)."""
 
 
+class UnsupportedServerError(RuntimeError):
+    """The server speaks a REST API major this client doesn't -- see `BasicDltrackAPI.whoami`."""
+
+
 def _post_request(
     path: str, body: BaseModel, return_model: type[R], headers: dict[str, str] | None = None
 ) -> R:
@@ -67,24 +75,23 @@ def _post_request(
 
 
 def _create_request(
+    resource: Resource,
     create_model: BaseModel,
     return_model: type[R],
     base_url: str = "/",
-    api_version: Literal[1] = 1,
     headers: dict[str, str] | None = None,
 ) -> R:
-    return _post_request(
-        create_path(return_model, base_url, api_version), create_model, return_model, headers
-    )
+    return _post_request(create_path(resource, base_url), create_model, return_model, headers)
 
 
 def _get_or_create_request(
+    resource: Resource,
     body: BaseModel,
     return_model: type[R],
     base_url: str = "/",
     headers: dict[str, str] | None = None,
 ) -> R:
-    return _post_request(get_or_create_path(return_model, base_url), body, return_model, headers)
+    return _post_request(get_or_create_path(resource, base_url), body, return_model, headers)
 
 
 class BasicDltrackAPI:
@@ -98,12 +105,22 @@ class BasicDltrackAPI:
         # change mid-run, and every request this client makes should be attributed consistently.
         # The username header only matters to a server that doesn't verify identity; one that does
         # goes by the API key alone.
-        self._headers = {DLTRACK_USER_HEADER: resolve_username()}
+        self._headers = {
+            DLTRACK_USER_HEADER: resolve_username(),
+            DLTRACK_CLIENT_VERSION_HEADER: __version__,
+        }
         if api_key is not None:
             self._headers["Authorization"] = f"Bearer {api_key.get_secret_value()}"
 
     def whoami(self) -> Identity:
-        """Who the server authenticates this client as. Raises `AuthenticationFailedError` if nobody."""
+        """
+        Who the server authenticates this client as, and the version/API handshake.
+
+        Raises `AuthenticationFailedError` if the server rejected this client's credentials, or
+        `UnsupportedServerError` if it speaks a REST API major this client doesn't -- both meant to
+        fail fast, before `DLTrackLogger.__init__` spawns the shipping processes that would
+        otherwise just silently drop every batch against a server like that.
+        """
         res = requests.get(f"{self.base_url}/{WHOAMI_PATH}", headers=self._headers)
         if res.status_code == HTTPStatus.UNAUTHORIZED:
             msg = (
@@ -112,15 +129,26 @@ class BasicDltrackAPI:
             )
             raise AuthenticationFailedError(msg)
         res.raise_for_status()
-        return Identity.model_validate(res.json())
+        identity = Identity.model_validate(res.json())
+        if identity.api_version != API_VERSION:
+            msg = (
+                f"The dltrack server at {self.base_url} speaks REST API v{identity.api_version} "
+                f"(server version {identity.server_version}), but this client ({__version__}) speaks "
+                f"v{API_VERSION}. Install a matching `dltrack` version."
+            )
+            raise UnsupportedServerError(msg)
+        return identity
 
     def create_project(self, new_project: models.NewProject) -> models.Project:
         """Create a new project."""
-        return _create_request(new_project, models.Project, self.base_url, headers=self._headers)
+        return _create_request(
+            Resource.PROJECTS, new_project, models.Project, self.base_url, headers=self._headers
+        )
 
     def get_or_create_project(self, name: str, description: str = "") -> models.Project:
         """Get the project named `name`, creating it (with `description`) if it doesn't exist yet."""
         return _get_or_create_request(
+            Resource.PROJECTS,
             GetOrCreateProject(name=name, description=description),
             models.Project,
             self.base_url,
@@ -129,13 +157,16 @@ class BasicDltrackAPI:
 
     def create_experiment(self, new_experiment: models.NewExperiment) -> models.Experiment:
         """Create a new experiment."""
-        return _create_request(new_experiment, models.Experiment, self.base_url, headers=self._headers)
+        return _create_request(
+            Resource.EXPERIMENTS, new_experiment, models.Experiment, self.base_url, headers=self._headers
+        )
 
     def get_or_create_experiment(
         self, project_id: int, name: str = "default", source: models.ExperimentSource | None = None
     ) -> models.Experiment:
         """Get the named experiment within `project_id`, creating it if it doesn't exist yet."""
         return _get_or_create_request(
+            Resource.EXPERIMENTS,
             GetOrCreateExperiment(project_id=project_id, name=name, source=source),
             models.Experiment,
             self.base_url,
@@ -144,22 +175,26 @@ class BasicDltrackAPI:
 
     def create_run(self, run: models.NewRun) -> models.Run:
         """Initialize a new run."""
-        return _create_request(run, models.Run, self.base_url, headers=self._headers)
+        return _create_request(Resource.RUNS, run, models.Run, self.base_url, headers=self._headers)
 
     def get_run(self, run_id: int) -> models.Run:
         """The existing run `run_id`. Raises `requests.HTTPError` (404) if it's missing, deleted, or not yours to see."""
-        res = requests.get(f"{self.base_url}/{entity_path(models.Run, str(run_id))}", headers=self._headers)
+        res = requests.get(
+            f"{self.base_url}/{entity_path(Resource.RUNS, str(run_id))}", headers=self._headers
+        )
         res.raise_for_status()
         return models.Run.model_validate(res.json())
 
     def log_hyperparams(self, hyperparams: models.NewHyperParams) -> models.HyperParams:
         """Log hyperparameters."""
-        return _create_request(hyperparams, models.HyperParams, self.base_url, headers=self._headers)
+        return _create_request(
+            Resource.HYPERPARAMS, hyperparams, models.HyperParams, self.base_url, headers=self._headers
+        )
 
     def log_metric_batch(self, metrics: list[models.LoggedMetrics]) -> None:
         """Log a batch of metrics."""
         res = requests.post(
-            create_path(models.LoggedMetrics, self.base_url),
+            create_path(Resource.METRICS, self.base_url),
             json=[m.model_dump(mode="json") for m in metrics],
             headers=self._headers,
         )
@@ -200,7 +235,7 @@ class BasicDltrackAPI:
         opened = [path.open("rb") for _, path in uploads]
         try:
             res = requests.post(
-                create_path(models.Artifact, self.base_url),
+                create_path(Resource.ARTIFACTS, self.base_url),
                 files=itertools.chain(
                     *(
                         (
@@ -231,7 +266,7 @@ class BasicDltrackAPI:
         ]
         try:
             res = requests.post(
-                create_path(models.NewArtifactLink, self.base_url), json=body, headers=self._headers
+                create_path(Resource.ARTIFACT_LINKS, self.base_url), json=body, headers=self._headers
             )
             res.raise_for_status()
         except Exception:

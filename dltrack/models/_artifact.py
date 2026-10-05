@@ -43,8 +43,8 @@ class AnyArtifact(typing.Protocol):
         ...
 
 
-class NewArtifact(BaseModel, frozen=True, extra="forbid"):
-    """An artifact."""
+class NewArtifact(BaseModel, frozen=True, extra="ignore"):
+    """An artifact. `extra="ignore"`: this crosses the wire -- see `dltrack._wire`."""
 
     key: str
     """Key of this artifact for querying."""
@@ -71,7 +71,7 @@ class NewArtifact(BaseModel, frozen=True, extra="forbid"):
     """When this artifact was logged."""
 
 
-class NewArtifactLink(NewArtifact, frozen=True, extra="forbid"):
+class NewArtifactLink(NewArtifact, frozen=True, extra="ignore"):
     """A `NewArtifact` for a blob a client has already put in the store's own space, by its ref."""
 
     ref: AnyUrl
@@ -80,8 +80,8 @@ class NewArtifactLink(NewArtifact, frozen=True, extra="forbid"):
     `ArtifactStore.link_artifacts`."""
 
 
-class Artifact(NewArtifact, frozen=True, extra="forbid"):
-    """Underlying table of artifacts."""
+class Artifact(NewArtifact, frozen=True, extra="ignore"):
+    """Underlying table of artifacts. `extra="ignore"`: this crosses the wire -- see `dltrack._wire`."""
 
     id: int | None = None
     """ID in the database."""

@@ -11,12 +11,14 @@ from werkzeug.datastructures import FileStorage
 from werkzeug.exceptions import NotFound
 
 from dltrack import models
+from dltrack._version import __version__
 from dltrack._wire import (
     METADATA_PART_SUFFIX,
     WHOAMI_PATH,
     GetOrCreateExperiment,
     GetOrCreateProject,
     Identity,
+    Resource,
     create_path,
     entity_path,
     get_or_create_path,
@@ -167,9 +169,9 @@ def handle_restore_artifact(store: DataStore[...], artifact_id: int, actor: mode
 
 
 def whoami() -> dict[str, Any]:
-    """Who this request was authenticated as -- lets a client fail fast on bad credentials."""
+    """Who this request was authenticated as, plus this server's version -- the client's handshake."""
     user = get_current_user()
-    return Identity(id=user.id, username=user.username).model_dump(mode="json")
+    return Identity(id=user.id, username=user.username, server_version=__version__).model_dump(mode="json")
 
 
 def log_batch() -> dict[str, str]:
@@ -375,24 +377,24 @@ def restore_artifact(entity_id: int) -> dict[str, str]:
 
 _ROUTES: tuple[tuple[str, list[str], Callable[..., Any]], ...] = (
     (WHOAMI_PATH, ["GET"], whoami),
-    (create_path(models.LoggedMetrics), ["POST"], log_batch),
-    (create_path(models.HyperParams), ["POST"], log_hyperparams),
-    (create_path(models.Experiment), ["POST"], create_experiment),
-    (create_path(models.Run), ["POST"], create_run),
-    (create_path(models.Project), ["POST"], create_project),
-    (get_or_create_path(models.Project), ["POST"], get_or_create_project),
-    (get_or_create_path(models.Experiment), ["POST"], get_or_create_experiment),
-    (create_path(models.Artifact), ["POST"], log_artifact),
-    (create_path(models.NewArtifactLink), ["POST"], link_artifact),
-    (entity_path(models.Project), ["DELETE"], delete_project),
-    (f"{entity_path(models.Project)}/restore", ["POST"], restore_project),
-    (entity_path(models.Experiment), ["DELETE"], delete_experiment),
-    (f"{entity_path(models.Experiment)}/restore", ["POST"], restore_experiment),
-    (entity_path(models.Run), ["GET"], get_run),
-    (entity_path(models.Run), ["DELETE"], delete_run),
-    (f"{entity_path(models.Run)}/restore", ["POST"], restore_run),
-    (entity_path(models.Artifact), ["DELETE"], delete_artifact),
-    (f"{entity_path(models.Artifact)}/restore", ["POST"], restore_artifact),
+    (create_path(Resource.METRICS), ["POST"], log_batch),
+    (create_path(Resource.HYPERPARAMS), ["POST"], log_hyperparams),
+    (create_path(Resource.EXPERIMENTS), ["POST"], create_experiment),
+    (create_path(Resource.RUNS), ["POST"], create_run),
+    (create_path(Resource.PROJECTS), ["POST"], create_project),
+    (get_or_create_path(Resource.PROJECTS), ["POST"], get_or_create_project),
+    (get_or_create_path(Resource.EXPERIMENTS), ["POST"], get_or_create_experiment),
+    (create_path(Resource.ARTIFACTS), ["POST"], log_artifact),
+    (create_path(Resource.ARTIFACT_LINKS), ["POST"], link_artifact),
+    (entity_path(Resource.PROJECTS), ["DELETE"], delete_project),
+    (f"{entity_path(Resource.PROJECTS)}/restore", ["POST"], restore_project),
+    (entity_path(Resource.EXPERIMENTS), ["DELETE"], delete_experiment),
+    (f"{entity_path(Resource.EXPERIMENTS)}/restore", ["POST"], restore_experiment),
+    (entity_path(Resource.RUNS), ["GET"], get_run),
+    (entity_path(Resource.RUNS), ["DELETE"], delete_run),
+    (f"{entity_path(Resource.RUNS)}/restore", ["POST"], restore_run),
+    (entity_path(Resource.ARTIFACTS), ["DELETE"], delete_artifact),
+    (f"{entity_path(Resource.ARTIFACTS)}/restore", ["POST"], restore_artifact),
 )
 
 

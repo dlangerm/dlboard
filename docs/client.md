@@ -34,7 +34,7 @@ sign in too:
 - Create an API token on your Account page.
 - Set it as `DLTRACK_API_KEY` wherever the script runs, or pass `api_key=` to `BasicDltrackAPI`.
 
-Before it starts, the logger checks the key with the server's `/whoami` and fails right away if
+Before it starts, the logger checks the key with the server's `/api/v1/whoami` and fails right away if
 it's missing or wrong. Without that check, bad credentials would only show up later, as metrics
 that were never stored. `dltrack serve local` needs no key.
 

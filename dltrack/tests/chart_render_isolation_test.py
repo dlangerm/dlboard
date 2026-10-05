@@ -38,6 +38,24 @@ def test_broken_chart_renders_as_error_alert_without_raising() -> None:
     assert "does_not_exist" in str(_props(rendered)["children"])
 
 
+def test_a_chart_whose_plugin_is_not_installed_renders_as_error_alert_without_raising() -> None:
+    """
+    A saved view can name a chart type this deployment has no plugin for (removed, or never
+    installed here) -- same isolation guarantee as a chart with bad parameters, not a 500 that
+    takes the rest of the panel's charts down with it.
+    """
+    df = pd.DataFrame({"run_id": [1], "step": [0], "loss": [0.5]})
+    missing_plugin = ChartInstance[Any, Any](chart_type="not-installed", parameters={})
+    panel = PanelInstance[Any, Any](name="p", charts=[missing_plugin])
+
+    [stack] = _render_panel_charts(panel, df)
+
+    rendered = _props(stack)["children"][1]
+    assert isinstance(rendered, dmc.Alert)
+    assert _props(rendered)["color"] == "red"
+    assert "not-installed" in str(_props(rendered)["children"])
+
+
 def test_broken_chart_does_not_prevent_sibling_charts_from_rendering() -> None:
     df = pd.DataFrame({"run_id": [1], "step": [0], "loss": [0.5]})
     broken = ChartInstance[Any, Any](
