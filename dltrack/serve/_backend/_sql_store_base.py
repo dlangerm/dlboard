@@ -258,6 +258,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
                     # whatever the connection's search_path resolves to for the rest of this transaction.
                     conn.execute(sa.text(f'SET search_path TO "{schema}"'))
                 run_migrations(conn)
+                self._verify_schema(conn)
                 state = self._tables[AppState]
                 conn.execute(
                     self._insert_ignoring_conflicts(state).values(
@@ -290,6 +291,15 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         A no-op by default. A server-based database, where several worker processes can start
         against it at once, overrides this to take a lock that concurrent schema init then waits
         on (and to create anything the tables need to exist first, e.g. their schema).
+        """
+
+    def _verify_schema(self, conn: sa.Connection) -> None:
+        """
+        Run last in the schema creation/migration transaction `conn` is in, after `run_migrations`.
+
+        A no-op by default. Overridden where a migration could commit with a less obvious integrity
+        problem than the database's own constraints would catch -- see `SQLLiteStore`, whose batch
+        migrations run with foreign key enforcement off.
         """
 
     def _execute(self, statement: sa.Executable) -> list[AnyRow]:
