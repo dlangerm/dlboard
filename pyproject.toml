@@ -28,6 +28,13 @@ dev = [
   "vulture>=2.16"
 ]
 
+[tool.alembic]
+# So the bare `alembic` CLI (`revision --autogenerate`, `history`, ...) works from the repo root
+# with no `alembic.ini` -- `_schema_upgrade.py` and `migrations/env.py` build their own `Config`
+# and never read this section themselves. A developer authoring a new revision still needs
+# `DLTRACK_MIGRATIONS_URL` set (see `migrations/env.py`), since there's no database to default to.
+script_location = "dltrack/serve/_backend/migrations"
+
 [tool.coverage.report]
 exclude_also = ["if TYPE_CHECKING:", "\\.\\.\\."]
 skip_covered = false

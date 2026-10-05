@@ -97,8 +97,19 @@ def _begin(conn: sa.Connection) -> None:
     connection doing the same waits (via the busy handler `_engine`'s `timeout` configures) rather
     than racing it. Forcing that onto every ordinary query too would serialize all of them behind
     this one lock for the engine's whole lifetime, throwing away the WAL concurrency above.
+
+    That same schema-prep transaction also turns foreign key enforcement off before taking the
+    lock -- sqlite only allows changing it outside a transaction, and `_configure_connection`
+    already turned it on for this connection at connect time. A migration's batch table-recreate
+    (`migrations/env.py`'s `render_as_batch=True`, needed for anything beyond adding a column)
+    drops the old table to rename its replacement into place, and with enforcement on, sqlite
+    treats that drop as a cascading `DELETE` into every child row the same `ON DELETE CASCADE`
+    edge (`_sql.py`) would follow for a real one. `SQLLiteStore._verify_schema` closes the gap this
+    leaves, once migrations are done and before this transaction commits.
     """
     mode = "IMMEDIATE" if conn.get_execution_options().get(SCHEMA_PREP_OPTION) else "DEFERRED"
+    if mode == "IMMEDIATE":
+        conn.exec_driver_sql("PRAGMA foreign_keys = OFF")
     conn.exec_driver_sql(f"BEGIN {mode}")
 
 
@@ -115,6 +126,21 @@ class SQLLiteStore(SQLStoreBase[Path]):
     @override
     def _insert_ignoring_conflicts(self, table: sa.Table) -> sa.Insert:
         return sqlite.insert(table).on_conflict_do_nothing()
+
+    @override
+    def _verify_schema(self, conn: sa.Connection) -> None:
+        """
+        Fail loudly if a migration's batch table-recreate cascaded a delete into child rows.
+
+        Foreign key enforcement was off for this whole transaction (see `_begin`), precisely so
+        that recreate couldn't cascade -- this is the check that would otherwise have caught it.
+        `PRAGMA foreign_key_check` reports every row whose foreign key doesn't resolve, regardless
+        of whether enforcement was on while it got that way.
+        """
+        violations = conn.exec_driver_sql("PRAGMA foreign_key_check").fetchall()
+        if violations:
+            msg = f"Migration left {len(violations)} dangling foreign-key reference(s): {violations!r}"
+            raise RuntimeError(msg)
 
     @classmethod
     def get_or_create(cls, loc: Path, busy_timeout_ms: int = DEFAULT_BUSY_TIMEOUT_MS) -> SQLLiteStore:

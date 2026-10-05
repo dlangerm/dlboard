@@ -15,6 +15,7 @@ import sqlalchemy as sa
 from dltrack.conftest import EVERY_STORE_BACKEND, StoreBackend
 from dltrack.plugins.data_stores.postgres import PostgresSettings, PostgresStore
 from dltrack.plugins.data_stores.sqlite import SQLLiteStore
+from dltrack.serve._backend.tests.migrations_test import schema_diff
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -46,6 +47,7 @@ def test_second_store_against_an_already_migrated_database_is_a_no_op(
         ((revision,),) = second._execute(sa.text("select version_num from alembic_version"))
         assert revision == "0001"
         assert first.tables.keys() == second.tables.keys()
+        assert schema_diff(second) == []
     finally:
         first.dispose()
         second.dispose()
