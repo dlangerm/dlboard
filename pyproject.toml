@@ -179,6 +179,11 @@ ignore_decorators = [
   # Dash's plugin-hooks system (`dash.hooks` -- `@hooks.error()`, `@hooks.route()`, ...),
   # dispatched by Dash the same way, off the hook name rather than an Output/Input id.
   "@hooks.*",
+  # Flask's own request-lifecycle hooks (`_request_logging.py`) -- dispatched by Flask itself
+  # around every request/response, never called by name from our own code.
+  "@*.before_request",
+  "@*.after_request",
+  "@*.teardown_request",
   # cyclopts CLI commands (`_cli.py`, `scripts/dev_harness.py`) -- dispatched by cyclopts from
   # the command line, never called by name from our own code.
   "@*.command",

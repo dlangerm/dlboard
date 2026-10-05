@@ -71,5 +71,11 @@ USER dltrack
 WORKDIR /home/dltrack
 EXPOSE 8050
 
+# `curl`/`wget` aren't in this slim image and installing either just for this would pull in apt
+# machinery this image otherwise never needs -- the base image's own python (already on PATH) can
+# hit the liveness route with nothing extra installed.
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+    CMD python -c "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8050/healthz', timeout=2).status == 200 else 1)"
+
 ENTRYPOINT ["dltrack"]
 CMD ["serve", "custom", "--plugins", "dltrack.scripts.docker_deployment:PLUGINS", "--host", "0.0.0.0"]
