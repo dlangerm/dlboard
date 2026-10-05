@@ -57,7 +57,7 @@ def test_a_proxied_download_always_gets_nosniff_and_a_sandboxed_csp(monkeypatch:
     response = _artifact_download._download(1)
 
     assert response.headers["X-Content-Type-Options"] == "nosniff"
-    assert response.headers["Content-Security-Policy"] == "sandbox"
+    assert response.headers["Content-Security-Policy"] == "sandbox; frame-ancestors 'none'"
 
 
 def test_an_inlineable_image_is_not_forced_to_download(monkeypatch: pytest.MonkeyPatch) -> None:

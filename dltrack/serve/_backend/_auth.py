@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Final
 from urllib.parse import urlsplit, urlunsplit
 
 from flask import g, has_request_context, jsonify, redirect, request, session
-from pydantic import SecretStr, field_validator
+from pydantic import PositiveInt, SecretStr, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from structlog.stdlib import get_logger
 
@@ -62,6 +62,10 @@ SIGN_OUT_PATH: Final = "/sign-out"
 _SESSION_USER_ID: Final = "uid"
 _SESSION_EPOCH: Final = "epoch"
 
+_SAFE_METHODS: Final = frozenset({"GET", "HEAD", "OPTIONS"})
+"""Methods that must never have a side effect -- never worth blocking cross-site, and blocking them
+would break an ordinary cross-site `<img>`/link to something like `/artifact/<id>`."""
+
 _MIN_SECRET_KEY_LENGTH: Final = 32
 """Matches `openssl rand -hex 32`'s output length -- every "generate one" instruction in this
 codebase (docker-compose.yml, docs/docker.md) already says this exact command."""
@@ -103,6 +107,21 @@ class AuthSettings(BaseSettings):
     @classmethod
     def _split_commas(cls, value: Any) -> Any:  # noqa: ANN401 -- a `mode="before"` validator sees the raw input
         return [v.strip() for v in value.split(",") if v.strip()] if isinstance(value, str) else value
+
+
+class RequestLimits(BaseSettings):
+    """Request-size limits that apply regardless of auth provider -- `dltrack serve local` included."""
+
+    model_config = SettingsConfigDict(env_prefix="DLTRACK_")
+
+    max_upload_mb: PositiveInt = 256
+    """
+    Hard cap on any single request body, mainly artifact uploads.
+
+    Flask rejects anything over this with a 413 as the body streams in, not after it's already
+    filled memory or disk -- otherwise any editor (or, under anonymous auth, anyone at all) could
+    fill either with one oversized upload.
+    """
 
 
 def add_public_route(app: Dash, rule: str, view_func: Callable[..., Any], methods: list[str]) -> None:
@@ -194,20 +213,47 @@ def _session_user(store: DataStore[...]) -> User | None:
     return user
 
 
-def _authenticate(store: DataStore[...], provider: AuthProvider[...], settings: AuthSettings) -> User | None:
+def _bearer_dltrack_token() -> str | None:
+    """The `Authorization: Bearer dlt_...` token on this request, or `None` if it's using anything else."""
     auth = request.authorization
     if (
         auth is not None
         and auth.type == "bearer"
         and (auth.token or "").startswith(_api_tokens.API_TOKEN_PREFIX)
     ):
+        return auth.token
+    return None
+
+
+def _authenticate(store: DataStore[...], provider: AuthProvider[...], settings: AuthSettings) -> User | None:
+    if (token := _bearer_dltrack_token()) is not None:
         # Anything claiming to be a dltrack token that doesn't check out (malformed or wrong) is a hard failure -- never quietly fall back to
         # some other identity for a caller that plainly meant to be this one.
-        return _api_tokens.user_for_token(store, auth.token or "")
+        return _api_tokens.user_for_token(store, token)
     if provider.verifies_identity and (user := _session_user(store)) is not None:
         return user
     principal = provider.authenticate()
     return sign_in(store, principal, settings) if principal is not None else None
+
+
+def _same_site_request() -> bool:
+    """
+    Whether this request's own declared origin is this app's, not a cross-site page's.
+
+    That distinction is what keeps a cross-site page from riding the browser's ambient session
+    cookie. `Sec-Fetch-Site` (sent by every modern browser on every request) is authoritative when
+    present:
+    `same-origin` or `none` (not a fetch at all -- a typed URL, a bookmark) means the browser itself
+    vouches for this. Falls back to `Origin`, sent on any cross-site request a browser this old
+    would still make (including a plain cross-site form POST, which gets no `Sec-Fetch-Site` either)
+    -- missing entirely only for a same-origin navigation old enough to lack both, never a cross-site
+    POST/PUT/DELETE/PATCH.
+    """
+    fetch_site = request.headers.get("Sec-Fetch-Site")
+    if fetch_site is not None:
+        return fetch_site in ("same-origin", "none")
+    origin = request.headers.get("Origin")
+    return origin is None or urlsplit(origin).netloc == request.host
 
 
 def _challenge(provider: AuthProvider[...]) -> BaseResponse | tuple[BaseResponse, int]:
@@ -236,6 +282,7 @@ def install_request_gate(app: Dash, store_for: Callable[[], DataStore[...]]) -> 
     provider = get_auth_provider(app)
     settings = AuthSettings()
     AUTH_SETTINGS.set(app, settings)
+    app.server.config["MAX_CONTENT_LENGTH"] = RequestLimits().max_upload_mb * 1024 * 1024
     if provider.verifies_identity:
         if settings.secret_key is None:
             msg = f"The {provider.display_name} auth provider needs DLTRACK_SECRET_KEY set to sign sessions"
@@ -271,9 +318,37 @@ def install_request_gate(app: Dash, store_for: Callable[[], DataStore[...]]) -> 
         user = _authenticate(store_for(), provider, settings)
         if user is None:
             return _challenge(provider)
+        # A bearer token is never ambient -- a cross-site page can't attach one a browser didn't
+        # already hand it, so only a session-cookie-authenticated request needs this at all. Every
+        # password-auth form route (login, signup, account) already carries its own CSRF token
+        # (`password.py`'s `_require_csrf`) and is public pre-auth anyway; this instead covers every
+        # *other* state-changing route -- the REST API and Dash's own callback endpoint -- which
+        # ride the cookie with no token of their own.
+        if (
+            provider.verifies_identity
+            and request.method not in _SAFE_METHODS
+            and _bearer_dltrack_token() is None
+            and not _same_site_request()
+        ):
+            return jsonify(error="Cross-site request blocked"), HTTPStatus.FORBIDDEN
         bind_current_user(user)
         return None
 
     # First, ahead of Dash's own `before_request` hook: that one renders the layout on the first
     # request, which (via the header's user menu) needs the user this gate resolves.
     app.server.before_request_funcs.setdefault(None, []).insert(0, gate)
+    app.server.after_request(_add_security_headers)
+
+
+def _add_security_headers(response: BaseResponse) -> BaseResponse:
+    """
+    Headers every response gets, regardless of auth provider.
+
+    Defense in depth, not the primary control for any one of these -- the gate above, and
+    `_artifact_download.py`'s own stricter CSP for a route that serves client-controlled bytes, are.
+    """
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Content-Security-Policy", "frame-ancestors 'none'")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "same-origin")
+    return response

@@ -28,6 +28,7 @@ from dltrack import models
 from dltrack._batching import BatchParams, ship_batches
 from dltrack._mp_context import SPAWN_CONTEXT
 from dltrack.serve import set_artifact_store, wait_for_data_store
+from dltrack.serve._logging import configure_logging
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -102,6 +103,11 @@ def _write_blobs(
     input_q: Queue[tuple[NewArtifact, AnyUrl, Path]],
     return_q: Queue[Artifact],
 ) -> None:
+    # This runs in its own `SPAWN_CONTEXT`-spawned process (see `BlobArtifactStore.__init__`), a
+    # fresh interpreter with none of the parent's structlog setup -- without this, a write failure
+    # here (an S3 signing error, say) would log with structlog's own default traceback renderer,
+    # which prints every frame's locals, including whatever credentials `backend.write` was holding.
+    configure_logging()
     while True:
         try:
             a, ref, staged = input_q.get()

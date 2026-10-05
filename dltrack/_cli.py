@@ -8,9 +8,7 @@ entrypoint, installed as a console script by `[project.scripts]` in `pyproject.t
 from __future__ import annotations
 
 import getpass
-import logging
 import os
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Annotated
@@ -23,6 +21,7 @@ from dltrack.plugins.data_stores.filesystem import AppSettings as FilesystemAppS
 from dltrack.plugins.data_stores.sqlite import AppSettings as SqliteAppSettings
 from dltrack.serve import app as build_app
 from dltrack.serve import get_system_data_store, resolve_plugins, run_production_server, set_setting_env
+from dltrack.serve._logging import configure_logging as _configure_logging
 
 app = cyclopts.App(name="dltrack", help="dltrack: a free, self-hosted experiment-tracking server.")
 serve_app = cyclopts.App(name="serve", help="Run the dltrack server against a specific deployment target.")
@@ -33,23 +32,6 @@ users_app = cyclopts.App(
 app.command(users_app)
 
 _log = structlog.stdlib.get_logger(__name__)
-
-
-def _configure_logging() -> None:
-    """
-    Log at INFO, with tracebacks that never print local variables.
-
-    structlog's default traceback renderer shows every frame's locals, which is how a password or an
-    API token held by a function that then raised would end up in the server log.
-    """
-    *defaults, _ = structlog.get_config()["processors"]
-    renderer = structlog.dev.ConsoleRenderer(
-        colors=sys.stdout.isatty(),
-        exception_formatter=structlog.dev.RichTracebackFormatter(show_locals=False),
-    )
-    structlog.configure_once(
-        processors=[*defaults, renderer], wrapper_class=structlog.make_filtering_bound_logger(logging.INFO)
-    )
 
 
 _DEFAULT_SQLITE_LOCATION = Path.home() / ".dltrack.sqlite"
