@@ -50,7 +50,7 @@ def _download(artifact_id: int) -> Response:
     if not (300 <= response.status_code < 400):  # noqa: PLR2004
         response.headers["Cache-Control"] = _IMMUTABLE_CACHE_CONTROL
         response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["Content-Security-Policy"] = "sandbox"
+        response.headers["Content-Security-Policy"] = "sandbox; frame-ancestors 'none'"
         if response.mimetype not in INLINEABLE_ARTIFACT_CONTENT_TYPES:
             response.headers["Content-Disposition"] = (
                 f'attachment; filename="{secure_filename(artifact.fname) or artifact_id}"'

@@ -16,6 +16,12 @@ top-level module for its own worker entrypoint.
 from __future__ import annotations
 
 from dltrack.serve import app as build_app
+from dltrack.serve._logging import configure_logging
 from dltrack.serve._production_server import WSGISettings
+
+# Granian can start its workers with the `spawn` method (always on Python 3.14+, see its own
+# `spawn-ctx-methods`), which re-imports this module from scratch in each one with none of the
+# parent process's structlog setup -- so this has to run again here, not just once in `_cli.py`.
+configure_logging()
 
 app = build_app(WSGISettings().dltrack_plugins).server  # pyright: ignore[reportCallIssue]

@@ -102,6 +102,110 @@ def test_the_anonymous_username_header_means_nothing_here(deployment: PasswordDe
     assert deployment.client.get(f"/{WHOAMI_PATH}", headers={"X-Dltrack-User": "alice"}).status_code == 401
 
 
+def test_every_response_gets_baseline_security_headers(deployment: PasswordDeployment) -> None:
+    """Applies even to a 401 -- these are set in `after_request`, which runs regardless of outcome."""
+    response = deployment.client.get(f"/{WHOAMI_PATH}")
+
+    assert response.status_code == 401
+    assert response.headers["X-Content-Type-Options"] == "nosniff"
+    assert response.headers["X-Frame-Options"] == "DENY"
+    assert "frame-ancestors 'none'" in response.headers["Content-Security-Policy"]
+    assert response.headers["Referrer-Policy"] == "same-origin"
+
+
+def test_oversized_request_bodies_get_a_413(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Rejected as the body streams in, not after an unbounded upload already filled memory or disk."""
+    for name, value in {
+        "DLTRACK_SQLITE_LOCATION": str(tmp_path / "db.sqlite"),
+        "DLTRACK_ARTIFACT_STORE_LOCATION": str(tmp_path / "artifacts"),
+        "DLTRACK_SECRET_KEY": "test-secret-at-least-32-characters-long",
+        "DLTRACK_SECURE_COOKIES": "false",
+        "DLTRACK_MAX_UPLOAD_MB": "1",
+    }.items():
+        monkeypatch.setenv(name, value)
+    app = build_app([sqlite, filesystem, *PASSWORD_AUTH, *BUILTIN_BACKEND])
+    store = get_system_data_store(app)
+    create_or_reset_user(store, "alice", _PASSWORD)
+    client = app.server.test_client()
+    _sign_in(client, "alice")
+
+    response = client.post(
+        f"/{get_or_create_path(Resource.PROJECTS)}", json={"name": "p", "padding": "x" * (2 * 1024 * 1024)}
+    )
+
+    assert response.status_code == 413
+    dispose_stores(app)
+
+
+# -- Cross-site request protection -----------------------------------------------------------------
+#
+# A session cookie is ambient -- any page in the browser can make it send a request, which a bearer
+# token (never attached automatically) cannot. `Sec-Fetch-Site`/`Origin` is what tells the two apart.
+
+
+def test_a_cross_site_post_riding_only_the_session_cookie_is_blocked(
+    deployment: PasswordDeployment,
+) -> None:
+    _sign_in(deployment.client, "alice")
+
+    response = deployment.client.post(
+        f"/{get_or_create_path(Resource.PROJECTS)}",
+        json={"name": "p"},
+        headers={"Sec-Fetch-Site": "cross-site"},
+    )
+
+    assert response.status_code == 403
+
+
+def test_a_same_site_post_is_not_blocked(deployment: PasswordDeployment) -> None:
+    _sign_in(deployment.client, "alice")
+
+    response = deployment.client.post(
+        f"/{get_or_create_path(Resource.PROJECTS)}",
+        json={"name": "p"},
+        headers={"Sec-Fetch-Site": "same-origin"},
+    )
+
+    assert response.status_code == 200
+
+
+def test_a_cross_origin_post_with_no_sec_fetch_site_header_falls_back_to_origin(
+    deployment: PasswordDeployment,
+) -> None:
+    """A browser old enough to not send `Sec-Fetch-Site` still sends `Origin` on a cross-site request."""
+    _sign_in(deployment.client, "alice")
+
+    response = deployment.client.post(
+        f"/{get_or_create_path(Resource.PROJECTS)}",
+        json={"name": "p"},
+        headers={"Origin": "https://evil.example"},
+    )
+
+    assert response.status_code == 403
+
+
+def test_a_cross_site_post_with_a_bearer_token_is_not_blocked(deployment: PasswordDeployment) -> None:
+    """A bearer token isn't ambient -- a cross-site page can't attach one, so there's nothing to block."""
+    alice = _bearer(deployment.store, "alice")
+
+    response = deployment.client.post(
+        f"/{get_or_create_path(Resource.PROJECTS)}",
+        json={"name": "p"},
+        headers={**alice, "Sec-Fetch-Site": "cross-site"},
+    )
+
+    assert response.status_code == 200
+
+
+def test_a_cross_site_get_is_never_blocked(deployment: PasswordDeployment) -> None:
+    """Safe methods have no side effect to protect, and blocking them would break an ordinary link."""
+    _sign_in(deployment.client, "alice")
+
+    response = deployment.client.get(f"/{WHOAMI_PATH}", headers={"Sec-Fetch-Site": "cross-site"})
+
+    assert response.status_code == 200
+
+
 # -- Signing in -----------------------------------------------------------------------------------
 
 
