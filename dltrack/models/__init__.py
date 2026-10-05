@@ -38,6 +38,7 @@ from dltrack.models._view import (
     PanelInstance,
     ParameterField,
     ParameterFieldType,
+    UnknownChartTypeError,
     ViewSummary,
 )
 
@@ -101,6 +102,7 @@ __all__ = [
     "Scope",
     "ThemeSpec",
     "UnderlyingMetricTableEntry",
+    "UnknownChartTypeError",
     "UnservableArtifactRefError",
     "User",
     "ValidJsonTypes",

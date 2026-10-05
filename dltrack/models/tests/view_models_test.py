@@ -10,7 +10,14 @@ import pandas as pd
 import pytest
 from pydantic import BaseModel, Field, ValidationError
 
-from dltrack.models._view import ChartInstance, ChartType, ChartTypeRegistry, ColumnKind, PanelInstance
+from dltrack.models._view import (
+    ChartInstance,
+    ChartType,
+    ChartTypeRegistry,
+    ColumnKind,
+    PanelInstance,
+    UnknownChartTypeError,
+)
 
 
 class _FakeParams(BaseModel, frozen=True, extra="forbid"):
@@ -199,6 +206,24 @@ def test_hint_and_width_methods_fall_back_instead_of_raising_for_invalid_paramet
         chart.render(pd.DataFrame())
 
 
+def test_hint_and_width_methods_fall_back_instead_of_raising_for_an_unregistered_chart_type() -> None:
+    """
+    Regression: a saved view can name a chart type whose plugin isn't installed on this deployment
+    (removed, or just not part of this server's plugin list) -- `ChartTypeRegistry` raises
+    `UnknownChartTypeError` (a `KeyError`) for that, and these must degrade the same way they do for
+    invalid parameters, not crash the whole page's layout.
+    """
+    chart = ChartInstance[pd.DataFrame, dict[str, object]](chart_type="not-installed", parameters={})
+
+    assert chart.hint_required_columns() is None
+    assert chart.hint_required_artifact_keys() is None
+    assert chart.hint_required_hparams() is None
+    assert chart.natural_width() == 400
+
+    with pytest.raises(UnknownChartTypeError):
+        chart.render(pd.DataFrame())
+
+
 def test_panel_hint_required_columns_short_circuits_when_one_chart_is_broken() -> None:
     """A broken chart's `None` hint must widen the whole panel's fetch to "everything" (the existing
     short-circuit semantics for `None`), not crash the aggregation.
@@ -209,6 +234,19 @@ def test_panel_hint_required_columns_short_circuits_when_one_chart_is_broken() -
         charts=[
             ChartInstance[pd.DataFrame, dict[str, object]](chart_type="fake", parameters={"metric": "loss"}),
             ChartInstance[pd.DataFrame, dict[str, object]](chart_type="fake", parameters={}),
+        ],
+    )
+    assert panel.hint_required_columns() is None
+
+
+def test_panel_hint_required_columns_short_circuits_when_one_chart_type_is_unregistered() -> None:
+    """Same short-circuit as a broken chart's parameters, but for a chart type with no plugin installed."""
+    _FakeChart.register()
+    panel = PanelInstance[pd.DataFrame, dict[str, object]](
+        name="p",
+        charts=[
+            ChartInstance[pd.DataFrame, dict[str, object]](chart_type="fake", parameters={"metric": "loss"}),
+            ChartInstance[pd.DataFrame, dict[str, object]](chart_type="not-installed", parameters={}),
         ],
     )
     assert panel.hint_required_columns() is None

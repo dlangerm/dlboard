@@ -5,8 +5,8 @@ import pendulum
 from pydantic import AwareDatetime, BaseModel, Field
 
 
-class NewRun(BaseModel, frozen=True, extra="forbid"):
-    """A run within an experiment."""
+class NewRun(BaseModel, frozen=True, extra="ignore"):
+    """A run within an experiment. `extra="ignore"`: this crosses the wire -- see `dltrack._wire`."""
 
     experiment_id: int
     """The experiment ID to use for this run."""
@@ -30,8 +30,8 @@ class NewRun(BaseModel, frozen=True, extra="forbid"):
     """When this run was created."""
 
 
-class Run(NewRun, frozen=True, extra="forbid"):
-    """A run stored in the database."""
+class Run(NewRun, frozen=True, extra="ignore"):
+    """A run stored in the database. `extra="ignore"`: this crosses the wire -- see `dltrack._wire`."""
 
     id: int
     """The ID of the run."""

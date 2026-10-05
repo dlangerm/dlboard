@@ -104,7 +104,7 @@ training script is a separate caller from your browser session, and it authentic
 
 If the training script runs in its own container on the same Compose network, use the service name
 instead of `localhost` — `server_url="http://dltrack:8050"`. The logger checks the key against
-`/whoami` before training starts, so a missing or wrong `DLTRACK_API_KEY` fails immediately rather
+`/api/v1/whoami` before training starts, so a missing or wrong `DLTRACK_API_KEY` fails immediately rather
 than silently dropping every metric.
 
 ## Using an S3 artifact store instead

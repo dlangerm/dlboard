@@ -15,6 +15,7 @@ import pendulum
 import pytest
 
 from dltrack import models
+from dltrack._wire import WHOAMI_PATH, Resource, create_path, get_or_create_path
 from dltrack.conftest import dispose_stores
 from dltrack.plugins import BUILTIN_BACKEND, PASSWORD_AUTH
 from dltrack.plugins.auth.password import SignupPolicy, create_or_reset_user, hash_password, verify_password
@@ -87,14 +88,18 @@ def test_a_signed_out_browser_is_sent_to_the_login_form(deployment: PasswordDepl
 
 @pytest.mark.parametrize(
     ("method", "path"),
-    [("POST", "/project/get-or-create"), ("POST", "/_dash-update-component"), ("GET", "/artifact/1")],
+    [
+        ("POST", f"/{get_or_create_path(Resource.PROJECTS)}"),
+        ("POST", "/_dash-update-component"),
+        ("GET", "/artifact/1"),
+    ],
 )
 def test_anything_else_signed_out_gets_a_401(deployment: PasswordDeployment, method: str, path: str) -> None:
     assert deployment.client.open(path, method=method, json={}).status_code == 401
 
 
 def test_the_anonymous_username_header_means_nothing_here(deployment: PasswordDeployment) -> None:
-    assert deployment.client.get("/whoami", headers={"X-Dltrack-User": "alice"}).status_code == 401
+    assert deployment.client.get(f"/{WHOAMI_PATH}", headers={"X-Dltrack-User": "alice"}).status_code == 401
 
 
 # -- Signing in -----------------------------------------------------------------------------------
@@ -106,7 +111,9 @@ def test_signing_in_starts_a_session_and_returns_to_where_you_were_going(
     response = _sign_in(deployment.client, "alice")
 
     assert (response.status_code, response.location) == (302, "/admin")
-    assert deployment.client.get("/whoami").json == {"id": 1, "username": "alice"}
+    identity = deployment.client.get(f"/{WHOAMI_PATH}").json
+    assert identity is not None
+    assert (identity["id"], identity["username"]) == (1, "alice")
 
 
 @pytest.mark.parametrize(("username", "password"), [("alice", "wrong password"), ("nobody", _PASSWORD)])
@@ -117,7 +124,7 @@ def test_a_wrong_username_or_password_is_refused_alike(
 
     assert response.status_code == 200
     assert "Wrong username or password." in response.get_data(as_text=True)
-    assert deployment.client.get("/whoami").status_code == 401
+    assert deployment.client.get(f"/{WHOAMI_PATH}").status_code == 401
 
 
 def test_repeated_failures_lock_a_username_out(deployment: PasswordDeployment) -> None:
@@ -138,7 +145,7 @@ def test_signing_out_ends_the_session(deployment: PasswordDeployment) -> None:
 
     deployment.client.get("/sign-out")
 
-    assert deployment.client.get("/whoami").status_code == 401
+    assert deployment.client.get(f"/{WHOAMI_PATH}").status_code == 401
 
 
 def test_disabling_a_user_ends_their_session(deployment: PasswordDeployment) -> None:
@@ -148,7 +155,7 @@ def test_disabling_a_user_ends_their_session(deployment: PasswordDeployment) -> 
 
     deployment.store.update_user(alice.model_copy(update={"disabled_at": pendulum.now(pendulum.UTC)}))
 
-    assert deployment.client.get("/whoami").status_code == 401
+    assert deployment.client.get(f"/{WHOAMI_PATH}").status_code == 401
 
 
 def test_the_server_refuses_to_start_without_a_secret_key(
@@ -170,10 +177,15 @@ def test_a_token_authenticates_a_script_and_a_bad_one_never_falls_back(
 ) -> None:
     alice = _bearer(deployment.store, "alice")
 
-    assert deployment.client.get("/whoami", headers=alice).json == {"id": 1, "username": "alice"}
+    identity = deployment.client.get(f"/{WHOAMI_PATH}", headers=alice).json
+    assert identity is not None
+    assert (identity["id"], identity["username"]) == (1, "alice")
     _sign_in(deployment.client, "bob")
     assert (
-        deployment.client.get("/whoami", headers={"Authorization": "Bearer dlt_bad_token"}).status_code == 401
+        deployment.client.get(
+            f"/{WHOAMI_PATH}", headers={"Authorization": "Bearer dlt_bad_token"}
+        ).status_code
+        == 401
     )
 
 
@@ -183,23 +195,28 @@ def test_each_user_only_ever_sees_and_writes_their_own_projects(deployment: Pass
         _bearer(deployment.store, "alice"),
         _bearer(deployment.store, "bob"),
     )
-    alices = client.post("/project/get-or-create", json={"name": "mnist"}, headers=alice).json
-    bobs = client.post("/project/get-or-create", json={"name": "mnist"}, headers=bob).json
+    projects_path = get_or_create_path(Resource.PROJECTS)
+    alices = client.post(f"/{projects_path}", json={"name": "mnist"}, headers=alice).json
+    bobs = client.post(f"/{projects_path}", json={"name": "mnist"}, headers=bob).json
     assert alices is not None
     assert bobs is not None
-    experiment = client.post("/create/Experiment", json={"project_id": alices["id"]}, headers=alice).json
+    experiments_path = create_path(Resource.EXPERIMENTS)
+    experiment = client.post(f"/{experiments_path}", json={"project_id": alices["id"]}, headers=alice).json
     assert experiment is not None
-    run = client.post("/create/Run", json={"experiment_id": experiment["id"]}, headers=alice).json
+    run = client.post(
+        f"/{create_path(Resource.RUNS)}", json={"experiment_id": experiment["id"]}, headers=alice
+    ).json
     assert run is not None
 
     assert alices["id"] != bobs["id"]
     assert (
-        client.post("/create/Experiment", json={"project_id": alices["id"]}, headers=bob).status_code == 403
+        client.post(f"/{experiments_path}", json={"project_id": alices["id"]}, headers=bob).status_code == 403
     )
     metric = {"metrics": {"loss": 1.0}, "step": 0, "experiment_id": experiment["id"], "run_id": run["id"]}
     metric["timestamp_utc"] = pendulum.now(pendulum.UTC).isoformat()
-    assert client.post("/create/LoggedMetrics", json=[metric], headers=bob).status_code == 403
-    assert client.post("/create/LoggedMetrics", json=[metric], headers=alice).status_code == 200
+    metrics_path = create_path(Resource.METRICS)
+    assert client.post(f"/{metrics_path}", json=[metric], headers=bob).status_code == 403
+    assert client.post(f"/{metrics_path}", json=[metric], headers=alice).status_code == 200
 
 
 def test_an_artifact_you_cannot_see_is_not_found(deployment: PasswordDeployment) -> None:
@@ -258,7 +275,7 @@ def test_signing_up_follows_the_deployments_policy(
     carol = deployment.store.find_user("carol")
     assert carol is not None
     assert (carol.disabled_at is not None) is disabled
-    assert (deployment.client.get("/whoami").status_code == 200) is signed_in
+    assert (deployment.client.get(f"/{WHOAMI_PATH}").status_code == 200) is signed_in
 
 
 def test_changing_your_password_signs_out_your_other_sessions(deployment: PasswordDeployment) -> None:
@@ -274,8 +291,8 @@ def test_changing_your_password_signs_out_your_other_sessions(deployment: Passwo
     }
 
     assert "Password changed." in deployment.client.post("/password", data=form).get_data(as_text=True)
-    assert deployment.client.get("/whoami").status_code == 200
-    assert other_browser.get("/whoami").status_code == 401
+    assert deployment.client.get(f"/{WHOAMI_PATH}").status_code == 200
+    assert other_browser.get(f"/{WHOAMI_PATH}").status_code == 401
     assert _sign_in(other_browser, "alice", new).status_code == 302
 
 
@@ -304,4 +321,4 @@ def test_a_password_hash_is_salted_and_verifies_only_its_password() -> None:
 
 def test_a_script_accepting_anything_gets_a_401_not_the_login_form(deployment: PasswordDeployment) -> None:
     """`requests` sends `Accept: */*` -- redirecting it to a login page would read as a 200."""
-    assert deployment.client.get("/whoami", headers={"Accept": "*/*"}).status_code == 401
+    assert deployment.client.get(f"/{WHOAMI_PATH}", headers={"Accept": "*/*"}).status_code == 401

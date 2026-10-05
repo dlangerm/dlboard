@@ -10,7 +10,7 @@ import pytest
 import requests
 import torch
 
-from dltrack import models
+from dltrack._wire import Resource
 from dltrack.client._rest_api import create_path
 from dltrack.client.artifacts import image
 from dltrack.client.dltrack_logger import DLTrackLogger
@@ -96,8 +96,6 @@ def test_logging_an_artifact_after_its_shipping_process_died_raises(logger: DLTr
 
 def test_an_invalid_metric_batch_is_a_400_not_a_500(backend_server: BackendServer) -> None:
     """The client's shipping loop drops a 4xx batch but retries a 5xx one, so the difference matters."""
-    res = requests.post(
-        create_path(models.LoggedMetrics, backend_server.url), json=[{"metrics": {}}], timeout=10
-    )
+    res = requests.post(create_path(Resource.METRICS, backend_server.url), json=[{"metrics": {}}], timeout=10)
 
     assert res.status_code == 400

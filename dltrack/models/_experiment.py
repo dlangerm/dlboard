@@ -13,8 +13,8 @@ class ExperimentSource(StrEnum):
     """Logged via `dltrack.client.dltrack_logger.DLTrackLogger`, a `pytorch_lightning` `Logger`."""
 
 
-class NewExperiment(BaseModel, frozen=True, extra="forbid"):
-    """An experiment within a project."""
+class NewExperiment(BaseModel, frozen=True, extra="ignore"):
+    """An experiment within a project. `extra="ignore"`: this crosses the wire -- see `dltrack._wire`."""
 
     project_id: int
     """The project ID to use for this experiment."""
@@ -37,8 +37,8 @@ class NewExperiment(BaseModel, frozen=True, extra="forbid"):
     """When this experiment was created."""
 
 
-class Experiment(NewExperiment, frozen=True, extra="forbid"):
-    """An experiment stored in the database."""
+class Experiment(NewExperiment, frozen=True, extra="ignore"):
+    """An experiment stored in the database. `extra="ignore"`: this crosses the wire -- see `dltrack._wire`."""
 
     id: int
     """The ID of the experiment."""

@@ -6,8 +6,8 @@ from pydantic import AwareDatetime, BaseModel, Field
 from dltrack.models._access import ProjectRole
 
 
-class NewProject(BaseModel, frozen=True, extra="forbid"):
-    """A deep learning project."""
+class NewProject(BaseModel, frozen=True, extra="ignore"):
+    """A deep learning project. `extra="ignore"`: this crosses the wire -- see `dltrack._wire`."""
 
     name: str
     """The name of the project."""
@@ -29,8 +29,8 @@ class NewProject(BaseModel, frozen=True, extra="forbid"):
     """When this project was created."""
 
 
-class Project(NewProject, frozen=True, extra="forbid"):
-    """A project stored in the database."""
+class Project(NewProject, frozen=True, extra="ignore"):
+    """A project stored in the database. `extra="ignore"`: this crosses the wire -- see `dltrack._wire`."""
 
     id: int
     """The ID for a project if it exists in the databse, otherwise none."""
