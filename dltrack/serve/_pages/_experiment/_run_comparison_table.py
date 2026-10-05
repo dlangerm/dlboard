@@ -37,6 +37,7 @@ from dltrack.serve._pages._dash_helpers import section_label, tooltipped_action_
 from dltrack.serve._pages._dataframe_helpers import run_display_name
 from dltrack.serve._pages._experiment import _dataframe_helpers as dfh
 from dltrack.serve._pages._experiment import _experiment_page_state as core
+from dltrack.serve._url import relative_path
 
 if TYPE_CHECKING:
     from dash.development.base_component import Component
@@ -535,7 +536,7 @@ def _register_delete_run(app: Dash) -> None:
             raise PreventUpdate
         store = get_data_store()
         store.delete_run(run_id, get_current_user())
-        return f"/experiment/{experiment_id}", True, False
+        return relative_path(f"/experiment/{experiment_id}"), True, False
 
 
 def register_run_comparison_callbacks(app: Dash) -> None:

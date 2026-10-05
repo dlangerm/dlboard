@@ -20,6 +20,7 @@ from dltrack.serve._assets import AssetKind, serve_asset
 from dltrack.serve._backend._data_store import get_data_store
 from dltrack.serve._clientside_script import ClientsideScript
 from dltrack.serve._icons import Icon, icon
+from dltrack.serve._url import relative_path
 
 if TYPE_CHECKING:
     from dash import Dash
@@ -78,11 +79,17 @@ def _destinations() -> list[dict[str, Any]]:
     store = get_data_store()
     projects = list(store.get_projects())
     groups: list[dict[str, Any]] = [
-        {"group": "Projects", "items": [{"value": f"/project/{p.id}", "label": p.name} for p in projects]}
+        {
+            "group": "Projects",
+            "items": [{"value": relative_path(f"/project/{p.id}"), "label": p.name} for p in projects],
+        }
     ]
     for project in projects:
         experiments = [
-            {"value": f"/experiment/{e.id}", "label": e.name or f"Experiment {e.id}"}
+            {
+                "value": relative_path(f"/experiment/{e.id}"),
+                "label": e.name or f"Experiment {e.id}",
+            }
             for e in store.get_experiments(project.id)
         ]
         if experiments:

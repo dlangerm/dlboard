@@ -23,10 +23,12 @@ from dltrack.serve._settings_env import set_setting_env
 
 
 class WSGISettings(BaseSettings):
-    """Resolves the plugin list `dltrack.serve._wsgi:app` builds the production app from."""
+    """Resolves the plugin list (and URL prefix) `dltrack.serve._wsgi:app` builds the production app from."""
 
     dltrack_plugins: Annotated[ImportString[list[PluginProtocol]], NoDecode]
     """Import path to a `list[PluginProtocol]`, e.g. `"dltrack.plugins:LOCAL_DEPLOYMENT"`."""
+    dltrack_url_prefix: str = ""
+    """See `dltrack.serve.app.app`'s `url_prefix` -- `DLTRACK_URL_PREFIX` from the CLI."""
 
 
 def resolve_plugins(target: str) -> list[PluginProtocol]:
@@ -34,17 +36,18 @@ def resolve_plugins(target: str) -> list[PluginProtocol]:
     return WSGISettings(dltrack_plugins=target).dltrack_plugins  # pyright: ignore[reportArgumentType]
 
 
-def run_production_server(
-    plugins_target: str, *, host: str, port: int, workers: int, blocking_threads: int
+def run_production_server(  # noqa: PLR0913
+    plugins_target: str, *, host: str, port: int, workers: int, blocking_threads: int, url_prefix: str = ""
 ) -> None:
     """
     Serve the app built from the plugin list at `plugins_target` under Granian.
 
     Granian spawns each worker as a separate process that re-imports `dltrack.serve._wsgi:app`, so
-    `plugins_target` is handed off via the env var `WSGISettings` reads, rather than as a live
-    object -- see `dltrack/serve/_wsgi.py`.
+    `plugins_target`/`url_prefix` are handed off via the env vars `WSGISettings` reads, rather than
+    as live objects -- see `dltrack/serve/_wsgi.py`.
     """
     set_setting_env(WSGISettings, "dltrack_plugins", plugins_target)
+    set_setting_env(WSGISettings, "dltrack_url_prefix", url_prefix)
     Granian(
         "dltrack.serve._wsgi:app",
         address=host,

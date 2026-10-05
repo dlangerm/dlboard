@@ -38,6 +38,7 @@ from dltrack.serve import (
     get_auth_settings,
     get_current_user,
     get_system_data_store,
+    relative_path,
     safe_next_path,
     set_auth_provider,
     sign_in,
@@ -236,7 +237,7 @@ def _login() -> str | Response:
         "Sign in",
         [_USERNAME, _PASSWORD],
         "Sign in",
-        _Footer("No account yet?", "/signup", "Create one") if open_signup else None,
+        _Footer("No account yet?", relative_path("/signup"), "Create one") if open_signup else None,
     )
     if request.method == "GET":
         return form.render()
@@ -268,7 +269,7 @@ def _signup() -> str | Response:
         "Create an account",
         [_USERNAME, _NEW_PASSWORD, _CONFIRM],
         "Create account",
-        _Footer("Already have an account?", "/login", "Sign in"),
+        _Footer("Already have an account?", relative_path("/login"), "Sign in"),
     )
     if request.method == "GET":
         return form.render()
@@ -287,7 +288,7 @@ def _signup() -> str | Response:
     signed_in = sign_in(store, _principal(username), get_auth_settings())
     if signed_in is not None:
         start_session(signed_in)
-    return redirect("/")
+    return redirect(relative_path("/"))
 
 
 def _change_password() -> str | Response:
@@ -295,7 +296,7 @@ def _change_password() -> str | Response:
         "Change password",
         [_Field("current", "Current password", "password", "current-password"), _NEW_PASSWORD, _CONFIRM],
         "Change password",
-        _Footer("", "/", "Back to dltrack"),
+        _Footer("", relative_path("/"), "Back to dltrack"),
     )
     if request.method == "GET":
         return form.render()
@@ -319,7 +320,7 @@ def _manage_users() -> str | Response:
         "Add a user or reset a password",
         [_USERNAME, _NEW_PASSWORD, _CONFIRM, _Field("admin", "Make them an admin", "checkbox", "off")],
         "Save",
-        _Footer("", "/admin", "Back to admin"),
+        _Footer("", relative_path("/admin"), "Back to admin"),
     )
     if request.method == "GET":
         return form.render()
@@ -341,15 +342,23 @@ class PasswordAuthProvider:
 
     display_name: ClassVar[str] = "Password"
     verifies_identity: ClassVar[bool] = True
-    manage_url: ClassVar[str | None] = "/password"
-    admin_url: ClassVar[str | None] = "/password/admin"
+
+    @property
+    def manage_url(self) -> str:
+        """Where a signed-in user changes their own password."""
+        return relative_path("/password")
+
+    @property
+    def admin_url(self) -> str:
+        """Where an admin adds a user or resets someone's password."""
+        return relative_path("/password/admin")
 
     def authenticate(self) -> None:
         """Only ever a session (started by the login form) -- never anything on the request itself."""
 
     def login_url(self, next_path: str) -> str:
         """The login form, returning to `next_path` once signed in."""
-        return f"/login?next={quote(next_path)}"
+        return relative_path(f"/login?next={quote(next_path)}")
 
     @classmethod
     def get_or_create(cls) -> PasswordAuthProvider:

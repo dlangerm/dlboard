@@ -11,6 +11,7 @@ from dltrack import models
 from dltrack.serve import Icon, get_data_store, icon
 from dltrack.serve._pages._dash_helpers import entity_card
 from dltrack.serve._pages._onboarding import first_project_snippet, onboarding_card
+from dltrack.serve._url import relative_path
 
 PROJECT_LIST_ID: typing.Final = "project-list-id"
 NEW_PROJECT_BUTTON_ID: typing.Final = "new-project-button"
@@ -38,7 +39,7 @@ def _project_card(project: models.Project, stats: models.ProjectStats) -> Compon
     return entity_card(
         title=project.name,
         description=project.description,
-        href=f"/project/{project.id}",
+        href=relative_path(f"/project/{project.id}"),
         stats=stats,
         class_name="project-card",
     )

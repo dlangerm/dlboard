@@ -39,6 +39,7 @@ from dltrack.serve._pages._delete_confirm import (
     register_delete_callbacks,
 )
 from dltrack.serve._pages._experiment import _experiment_page_state as core
+from dltrack.serve._url import relative_path
 
 if TYPE_CHECKING:
     from dash import Dash
@@ -637,7 +638,7 @@ def _register_delete(app: Dash) -> None:
         store = get_data_store()
         view = store.get_view(core.BasicExperimentPage, view_id)
         store.delete_view(view_id, get_current_user().id)
-        return f"/experiment/{view.experiment_id}" if view is not None else "/"
+        return relative_path(f"/experiment/{view.experiment_id}" if view is not None else "/")
 
     register_delete_callbacks(
         app, DELETE_VIEW_IDS, State(core.STATE_VIEW_ID, "data"), on_confirm=_delete_view

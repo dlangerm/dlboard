@@ -46,6 +46,7 @@ from dltrack.serve._pages._experiment._notes import STATE_NOTES_REVISION, regist
 from dltrack.serve._pages._experiment._panel_controls import register_panel_controls_callbacks
 from dltrack.serve._pages._experiment._run_comparison_table import register_run_comparison_callbacks
 from dltrack.serve._pages._experiment._views import register_view_callbacks
+from dltrack.serve._url import relative_path
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -340,7 +341,7 @@ def register(app: Dash) -> None:
             raise ValueError(msg)
         project_id = exp.project_id
         store.delete_experiment(experiment_id, get_current_user())
-        return f"/project/{project_id}"
+        return relative_path(f"/project/{project_id}")
 
     register_delete_callbacks(
         app,
