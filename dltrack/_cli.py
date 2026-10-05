@@ -124,11 +124,15 @@ class LocalServeOptions:
 
     sqlite_location: Annotated[
         Path,
-        cyclopts.Parameter(env_var="SQLITE_LOCATION", help="Where to store the sqlite metadata database."),
+        cyclopts.Parameter(
+            env_var="DLTRACK_SQLITE_LOCATION", help="Where to store the sqlite metadata database."
+        ),
     ] = _DEFAULT_SQLITE_LOCATION
     artifact_store_location: Annotated[
         Path,
-        cyclopts.Parameter(env_var="ARTIFACT_STORE_LOCATION", help="Where to store artifact blobs on disk."),
+        cyclopts.Parameter(
+            env_var="DLTRACK_ARTIFACT_STORE_LOCATION", help="Where to store artifact blobs on disk."
+        ),
     ] = _DEFAULT_ARTIFACT_STORE_LOCATION
     runtime: Annotated[ServerRuntimeOptions, cyclopts.Parameter(name="*")] = field(
         default_factory=ServerRuntimeOptions

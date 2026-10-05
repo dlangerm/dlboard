@@ -50,7 +50,7 @@ It's still a local trial, not a deployment you'd run as-is: `DLTRACK_SECRET_KEY`
 placeholder in the file, and `docker compose down -v` throws both volumes away on purpose.
 
 Pointed at your own Postgres instead, override that same file's environment (or write your own
-`docker-compose.yml`/Kubernetes manifest): point `POSTGRES_HOST` at your real database, set a real
+`docker-compose.yml`/Kubernetes manifest): point `DLTRACK_POSTGRES_HOST` at your real database, set a real
 `DLTRACK_SECRET_KEY` (`openssl rand -hex 32`), and either keep mounting a volume at `/data` for
 artifacts or switch to S3 (below).
 
@@ -63,8 +63,8 @@ settings table).
 
 | Variable | Required | |
 |---|---|---|
-| `POSTGRES_HOST` | yes | Also `_PORT` (5432), `_DATABASE` (`dltrack`), `_USER` (`dltrack`), `_PASSWORD`. |
-| `ARTIFACT_STORE_LOCATION` | no | Where artifact blobs land inside the container. Defaults to `/data/artifacts` — mount a volume at `/data` to persist them. |
+| `DLTRACK_POSTGRES_HOST` | yes | Also `_PORT` (5432), `_DATABASE` (`dltrack`), `_USER` (`dltrack`), `_PASSWORD`. |
+| `DLTRACK_ARTIFACT_STORE_LOCATION` | no | Where artifact blobs land inside the container. Defaults to `/data/artifacts` — mount a volume at `/data` to persist them. |
 | `DLTRACK_SECRET_KEY` | yes | Signs session cookies for the password auth plugin this image runs. A missing one is a startup error, not a silent fall-through to anonymous access — generate one with `openssl rand -hex 32`. |
 | `DLTRACK_ADMIN_USERS` | no | Comma-separated usernames made admin whenever they sign in — the alternative to creating the first admin by hand (below). |
 
@@ -82,7 +82,7 @@ docker run --rm -it --env-file .env dltrack-server \
   users set-password alice --admin --plugins dltrack.scripts.docker_deployment:PLUGINS
 ```
 
-`--env-file .env` needs the same `POSTGRES_*` variables as the running container, since this writes
+`--env-file .env` needs the same `DLTRACK_POSTGRES_*` variables as the running container, since this writes
 to the same database. After that, admins can add more users and reset passwords from Admin → Users
 in the app itself — see [auth.md](plugins/auth.md).
 
@@ -126,11 +126,11 @@ Mount it into the container and point `--plugins` at it instead:
 
 ```bash
 docker run -v ./mydeployment.py:/app/mydeployment.py:ro -e PYTHONPATH=/app \
-  -e POSTGRES_HOST=... -e S3_BUCKET=... -e DLTRACK_SECRET_KEY=... \
+  -e DLTRACK_POSTGRES_HOST=... -e DLTRACK_S3_BUCKET=... -e DLTRACK_SECRET_KEY=... \
   dltrack-server serve custom --plugins mydeployment:PLUGINS --host 0.0.0.0
 ```
 
-`S3_BUCKET` is required once you do this; `S3_ENDPOINT_URL`/`S3_ADDRESSING_STYLE=path` instead of
+`DLTRACK_S3_BUCKET` is required once you do this; `DLTRACK_S3_ENDPOINT_URL`/`DLTRACK_S3_ADDRESSING_STYLE=path` instead of
 AWS for a self-hosted S3-protocol store (MinIO, VAST, ...). See [storage.md](plugins/storage.md) for
 the full `S3Settings` list.
 

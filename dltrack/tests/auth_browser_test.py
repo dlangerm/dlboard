@@ -49,8 +49,8 @@ def deployment(tmp_path_factory: pytest.TempPathFactory) -> Iterator[_Deployment
     tmp_path = tmp_path_factory.mktemp("dltrack-auth-browser")
     monkeypatch = pytest.MonkeyPatch()
     for name, value in {
-        "SQLITE_LOCATION": str(tmp_path / "db.sqlite"),
-        "ARTIFACT_STORE_LOCATION": str(tmp_path / "artifacts"),
+        "DLTRACK_SQLITE_LOCATION": str(tmp_path / "db.sqlite"),
+        "DLTRACK_ARTIFACT_STORE_LOCATION": str(tmp_path / "artifacts"),
         "DLTRACK_SECRET_KEY": "test-secret",
         "DLTRACK_SECURE_COOKIES": "false",
     }.items():

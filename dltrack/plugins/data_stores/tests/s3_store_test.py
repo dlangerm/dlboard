@@ -28,14 +28,14 @@ def _body(response: Response) -> bytes:
 
 
 def test_settings_are_read_from_s3_env_vars(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("S3_BUCKET", "my-bucket")
-    monkeypatch.setenv("S3_PREFIX", "runs")
-    monkeypatch.setenv("S3_ENDPOINT_URL", "http://minio.internal:9000")
-    monkeypatch.setenv("S3_ADDRESSING_STYLE", "path")
-    monkeypatch.setenv("S3_DOWNLOAD_MODE", "presign")
-    monkeypatch.setenv("S3_EXTRA_READ_BUCKETS", '["shared-bucket"]')
+    monkeypatch.setenv("DLTRACK_S3_BUCKET", "my-bucket")
+    monkeypatch.setenv("DLTRACK_S3_PREFIX", "runs")
+    monkeypatch.setenv("DLTRACK_S3_ENDPOINT_URL", "http://minio.internal:9000")
+    monkeypatch.setenv("DLTRACK_S3_ADDRESSING_STYLE", "path")
+    monkeypatch.setenv("DLTRACK_S3_DOWNLOAD_MODE", "presign")
+    monkeypatch.setenv("DLTRACK_S3_EXTRA_READ_BUCKETS", '["shared-bucket"]')
 
-    settings = S3Settings()  # pyright: ignore[reportCallIssue] -- `bucket` is required, via S3_BUCKET
+    settings = S3Settings()  # pyright: ignore[reportCallIssue] -- `bucket` is required, via DLTRACK_S3_BUCKET
 
     assert settings.bucket == "my-bucket"
     assert settings.prefix == "runs"
@@ -47,7 +47,7 @@ def test_settings_are_read_from_s3_env_vars(monkeypatch: pytest.MonkeyPatch) -> 
 
 @pytest.mark.parametrize("raw_prefix", ["dltrack", "dltrack/", "/dltrack", "/dltrack/"])
 def test_prefix_is_normalized_regardless_of_a_leading_or_trailing_slash(raw_prefix: str) -> None:
-    """`_own_key` and `access` must agree on one shape, however `S3_PREFIX` was spelled."""
+    """`_own_key` and `access` must agree on one shape, however `DLTRACK_S3_PREFIX` was spelled."""
     settings = S3Settings(bucket="b", prefix=raw_prefix)
     backend = S3Blobs(settings)
 
@@ -121,7 +121,7 @@ def test_exists_still_raises_on_an_unrelated_client_error(monkeypatch: pytest.Mo
 
 def test_plug_fails_fast_on_an_unreachable_bucket(monkeypatch: pytest.MonkeyPatch) -> None:
     """A bad bucket/endpoint/credential should surface at startup, not on the first upload."""
-    monkeypatch.setenv("S3_BUCKET", "missing-bucket")
+    monkeypatch.setenv("DLTRACK_S3_BUCKET", "missing-bucket")
     monkeypatch.setattr(s3_module, "_client", _fake_client(_DeniedHeadBucketClient()))
 
     from botocore.exceptions import ClientError

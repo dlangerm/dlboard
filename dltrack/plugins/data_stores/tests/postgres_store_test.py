@@ -48,10 +48,10 @@ def test_settings_become_libpq_connect_args() -> None:
 
 
 def test_settings_are_read_from_postgres_env_vars(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("POSTGRES_HOST", "db.internal")
-    monkeypatch.setenv("POSTGRES_PASSWORD", "s3cret")
-    monkeypatch.setenv("POSTGRES_POOL_SIZE", "20")
-    monkeypatch.setenv("POSTGRES_CONNECT_ARGS", '{"sslcrl": "/etc/ssl/crl.pem"}')
+    monkeypatch.setenv("DLTRACK_POSTGRES_HOST", "db.internal")
+    monkeypatch.setenv("DLTRACK_POSTGRES_PASSWORD", "s3cret")
+    monkeypatch.setenv("DLTRACK_POSTGRES_POOL_SIZE", "20")
+    monkeypatch.setenv("DLTRACK_POSTGRES_CONNECT_ARGS", '{"sslcrl": "/etc/ssl/crl.pem"}')
 
     settings = PostgresSettings()
 

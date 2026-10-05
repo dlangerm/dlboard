@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from flask import send_from_directory
 from pydantic import AnyUrl
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from dltrack.plugins.data_stores._blob_store import RefAccess, plug_blob_store
 
@@ -66,7 +66,9 @@ class FSBlobs:
 
 
 class AppSettings(BaseSettings):
-    """Environment variables."""
+    """`DLTRACK_*` environment variables."""
+
+    model_config = SettingsConfigDict(env_prefix="DLTRACK_")
 
     artifact_store_location: Path = Path.home() / ".dltrack_artifacts"
     filesystem_store_queue_size: int = 100

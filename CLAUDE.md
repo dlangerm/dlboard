@@ -135,9 +135,9 @@ just to construct one.
 - `BUILTIN_CHARTS` = image_series, line_chart, table_chart
 - `LOCAL_DEPLOYMENT` = all of the above, used by `dltrack serve local`
 - `POSTGRES_STORAGE` = `[postgres, filesystem, artifact_purge_worker]` — for a shared deployment, composed
-  into a `dltrack serve custom --plugins` list; configured by `POSTGRES_*` env vars (`PostgresSettings`)
+  into a `dltrack serve custom --plugins` list; configured by `DLTRACK_POSTGRES_*` env vars (`PostgresSettings`)
 - `POSTGRES_S3_STORAGE` = `[postgres, s3, artifact_purge_worker]` — same, but artifacts go to any
-  S3-protocol object store (AWS, MinIO, VAST, ...) instead of local disk; configured by `S3_*` env
+  S3-protocol object store (AWS, MinIO, VAST, ...) instead of local disk; configured by `DLTRACK_S3_*` env
   vars (`S3Settings`). `filesystem` and `s3` are both just a `BlobBackend`
   (`plugins/data_stores/_blob_store.py`) plugged into the shared `BlobArtifactStore` -- see
   `docs/plugins/storage.md` for the pattern and `S3Settings`'s full env var list.

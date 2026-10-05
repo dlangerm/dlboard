@@ -49,8 +49,8 @@ def test_the_theme_is_in_the_first_response(
     scheme: ColorScheme,
     primary_color: str | None,
 ) -> None:
-    monkeypatch.setenv("SQLITE_LOCATION", str(tmp_path / "test.sqlite"))
-    monkeypatch.setenv("ARTIFACT_STORE_LOCATION", str(tmp_path / "artifacts"))
+    monkeypatch.setenv("DLTRACK_SQLITE_LOCATION", str(tmp_path / "test.sqlite"))
+    monkeypatch.setenv("DLTRACK_ARTIFACT_STORE_LOCATION", str(tmp_path / "artifacts"))
     client = build_app([*LOCAL_STORAGE, *LOCAL_AUTH, *theme_plugins]).server.test_client()
 
     index = client.get("/").get_data(as_text=True)

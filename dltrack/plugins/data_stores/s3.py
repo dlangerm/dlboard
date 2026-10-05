@@ -40,9 +40,9 @@ class S3DownloadMode(StrEnum):
 
 
 class S3Settings(BaseSettings):
-    """Connection and behavior settings, read from `S3_*` environment variables."""
+    """Connection and behavior settings, read from `DLTRACK_S3_*` environment variables."""
 
-    model_config = SettingsConfigDict(env_prefix="S3_", frozen=True)
+    model_config = SettingsConfigDict(env_prefix="DLTRACK_S3_", frozen=True)
 
     bucket: str
     prefix: str = "dltrack"
