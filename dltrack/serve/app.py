@@ -16,7 +16,7 @@ from structlog.stdlib import get_logger
 from dltrack.models import InstalledPlugin
 from dltrack.serve import _constants as constants
 from dltrack.serve._assets import AssetKind, serve_asset
-from dltrack.serve._backend import _artifact_download
+from dltrack.serve._backend import _artifact_download, _health, _request_logging
 from dltrack.serve._backend._auth import (
     SIGN_OUT_PATH,
     find_current_user,
@@ -84,6 +84,10 @@ def app(plugins: list[models.PluginProtocol]) -> Dash:
     # Also core, non-optional: every chart that shows an artifact fetches it from this one route,
     # by id -- never by talking to whatever `ArtifactStore` a deployment happens to have plugged in.
     _artifact_download.register(_app)
+    # `/healthz`/`/readyz` for a process manager or orchestrator -- public, like sign-out below.
+    _health.register(_app)
+    # A request id on every log line, for every route (auth included) -- see its own docstring.
+    _request_logging.register(_app)
     # Every route above (and every plugin route) sits behind this one gate -- see `_auth.py`.
     install_request_gate(_app, lambda: get_system_data_store(_app))
     # Only the immutable `InstalledPlugin` snapshots are retained on the app -- not the plugin
