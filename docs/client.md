@@ -38,6 +38,14 @@ Before it starts, the logger checks the key with the server's `/api/v1/whoami` a
 it's missing or wrong. Without that check, bad credentials would only show up later, as metrics
 that were never stored. `dltrack serve local` needs no key.
 
+**Guard your script's entry point.** The two shipping processes are started with `multiprocessing`'s
+`spawn` method, which re-imports your training script's `__main__` module from scratch in each one.
+A script that builds the logger (or starts training) at module level, with no
+`if __name__ == "__main__":` guard, re-runs that code in every shipping process too — usually
+visible as training appearing to restart, or the logger itself being constructed more than once.
+This is the same requirement Python's own `multiprocessing` docs describe for any spawn-based code,
+not something specific to dltrack.
+
 **Multi-GPU (DDP).** Every rank builds its own logger and Lightning calls all of them, so only
 global rank 0 logs: a non-zero rank makes no server calls, starts no shipping processes and drops
 whatever it's asked to log, which means one run per job rather than one per GPU. To log into a run
@@ -45,6 +53,15 @@ that already exists instead of creating one — resuming it, or sharing it betwe
 launch separately — pass `run_id=` or set `DLTRACK_RUN_ID`; the logger checks it exists up front
 and uses its experiment. `logger.run_id` is how you read the id of a run the logger created, to
 hand on to such a process.
+
+**If the server (or your network) is down.** Logging never blocks training: `log_metrics`/
+`log_artifact` queue onto a bounded buffer the shipping processes drain in the background, retrying
+a failure with exponential backoff rather than hammering a server that's still down. If the buffer
+fills faster than it can drain, the oldest-queued item is dropped (not blocked on), with a
+rate-limited warning while it keeps happening and a final count at `finalize()`. Size the buffers
+with `DLTrackLoggerSettings` (`metrics_q_size`, `artifact_q_size`, ...) if your logging rate is high
+enough that this matters; `DLTRACK_CONNECT_TIMEOUT_S`/`DLTRACK_READ_TIMEOUT_S` (defaults 10s/60s)
+cap how long any one request waits before it's treated as failed.
 
 **Logging artifacts.** Call `logger.log_artifact([...])` with anything implementing `AnyArtifact`
 (`dltrack/models/_artifact.py`): a `key`, `tags`, a `step`, and a
