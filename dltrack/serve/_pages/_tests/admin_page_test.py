@@ -6,6 +6,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, cast
 
 from dltrack import models
+from dltrack._version import __version__
 from dltrack.conftest import find_props
 from dltrack.plugins.themes import default
 from dltrack.serve._pages import _simple_admin_page as admin
@@ -150,6 +151,7 @@ def test_render_about_shows_the_signed_in_user_provider_and_backend(store: SQLLi
     assert "admin" in rendered_str
     assert "AnonymousAuthProvider" in rendered_str
     assert "SQLLiteStore" in rendered_str
+    assert __version__ in rendered_str
 
 
 def test_render_about_lists_installed_plugins(store: SQLLiteStore) -> None:

@@ -18,7 +18,7 @@ dev = [
   "pytest-playwright>=0.9.0",
   # Not a real dependency of the `dltrack` distribution -- `client/pyproject.toml`'s
   # `[project.optional-dependencies] lightning` is that, for an actual `dltrack[lightning]`
-  # consumer. This repo's own test suite (and `train.py`) exercises the Lightning adapter
+  # consumer. This repo's own test suite (and `examples/lightning_quickstart.py`) exercises the Lightning adapter
   # directly, so it needs installing without anyone having to remember `--extra lightning`.
   "pytorch-lightning>=2.6.5",
   "ruff>=0.15.22",
@@ -148,6 +148,8 @@ runtime-evaluated-base-classes = [
   "INP001"
 ]
 "dltrack/scripts/*" = ["T201"]
+# A standalone runnable example, not a package -- never imported, so no `__init__.py` is needed.
+"examples/*" = ["INP001", "T201"]
 # `client/`/`server/`'s own build-time scripts, not `dltrack/`'s -- standalone hatchling hooks,
 # never imported as part of either package.
 "{client,server}/hatch_build.py" = ["INP001"]

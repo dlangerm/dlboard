@@ -16,6 +16,7 @@ from typing import Annotated
 import cyclopts
 import structlog
 
+from dltrack._version import __version__
 from dltrack.plugins.auth.password import create_or_reset_user, new_password_problem
 from dltrack.plugins.data_stores.filesystem import AppSettings as FilesystemAppSettings
 from dltrack.plugins.data_stores.sqlite import AppSettings as SqliteAppSettings
@@ -23,7 +24,11 @@ from dltrack.serve import app as build_app
 from dltrack.serve import get_system_data_store, resolve_plugins, run_production_server, set_setting_env
 from dltrack.serve._logging import configure_logging as _configure_logging
 
-app = cyclopts.App(name="dltrack", help="dltrack: a free, self-hosted experiment-tracking server.")
+app = cyclopts.App(
+    name="dltrack",
+    help="dltrack: a free, self-hosted experiment-tracking server.",
+    version=__version__,
+)
 serve_app = cyclopts.App(name="serve", help="Run the dltrack server against a specific deployment target.")
 app.command(serve_app)
 users_app = cyclopts.App(

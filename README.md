@@ -31,8 +31,9 @@ Leave notes on an experiment, calling out specific runs or teammates by name:
 
 ## Running it
 
-Installed as a package (e.g. `uv tool install dltrack[server]` or `pip install dltrack[server]`),
-dltrack gives you a `dltrack` command, the same idea as `tensorboard`:
+Installed as a package (e.g. `uv tool install 'dltrack[server]'` or `pip install 'dltrack[server]'`
+— quoted so your shell doesn't treat `[server]` as a glob), dltrack gives you a `dltrack` command,
+the same idea as `tensorboard`:
 
 ```bash
 dltrack serve local     # anonymous, single-user, sqlite + local disk -- sane defaults, no setup
@@ -63,8 +64,8 @@ everyone signs in. Each user sees only the projects they own or that someone sha
 their training scripts authenticate with API tokens. See [docs/plugins/auth.md](docs/plugins/auth.md)
 for setup.
 
-Running it in Docker instead? See [docs/docker.md](docs/docker.md) — the published image defaults
-to a Postgres + local-disk, password-sign-in deployment (S3 is a config change away).
+Running it in Docker instead? See [docs/docker.md](docs/docker.md) — building the image gets you a
+Postgres + local-disk, password-sign-in deployment by default (S3 is a config change away).
 
 Working in this repo instead, everything runs through [`uv`](https://docs.astral.sh/uv/)
 (Python >=3.12, deps pinned in `uv.lock`):
@@ -88,7 +89,7 @@ way you'd use any other `pytorch_lightning` logger — see [docs/client.md](docs
   request flow from a training script to the browser.
 - [Client & logging](docs/client.md) — `DLTrackLogger`, the REST client, and how to log a new kind
   of artifact.
-- [Docker](docs/docker.md) — running the published image, its Postgres + local-disk default, and
+- [Docker](docs/docker.md) — building and running the image, its Postgres + local-disk default, and
   configuring it (including swapping in S3).
 - **Plugins** — dltrack has no built-in opinions about storage, auth, charts, or theming; all of
   it is plugins. (Page layout is the one deliberate exception — see

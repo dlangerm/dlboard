@@ -62,3 +62,15 @@ repos:
     rev: v2.16
     hooks:
       - id: vulture
+
+  - repo: local
+    hooks:
+      - id: license-files-match
+        # `client/LICENSE` and `server/LICENSE` are copies, not symlinks (a symlink doesn't survive
+        # into a built wheel) -- PyPI's `license-files` validation rejects a path like `../LICENSE`
+        # that escapes the project directory, so each side needs its own copy of the root file.
+        name: client/server LICENSE copies match the root one
+        language: system
+        entry: bash -c 'cmp LICENSE client/LICENSE&&cmp LICENSE server/LICENSE'
+        files: ^(LICENSE|client/LICENSE|server/LICENSE)$
+        pass_filenames: false

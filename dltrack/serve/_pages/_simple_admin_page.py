@@ -14,6 +14,7 @@ from dash.exceptions import PreventUpdate
 from structlog.stdlib import get_logger
 
 from dltrack import models
+from dltrack._version import __version__
 from dltrack.plugins.backend import artifact_purge_worker
 from dltrack.serve import (
     Icon,
@@ -402,6 +403,12 @@ def _render_about(
                 dmc.Stack(
                     [
                         dmc.Text("Application", fw=700, size="sm", tt="uppercase", c="dimmed"),
+                        dmc.Group(
+                            [
+                                dmc.Text("dltrack version", size="sm"),
+                                dmc.Badge(__version__, variant="light", size="sm"),
+                            ]
+                        ),
                         dmc.Group(
                             [dmc.Text("Signed in as", size="sm"), dmc.Text(actor.username, fw=600, size="sm")]
                         ),

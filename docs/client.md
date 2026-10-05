@@ -26,7 +26,7 @@ trainer = pl.Trainer(logger=logger)
 
 If you don't already have an experiment, omit `experiment_id` and one is created for you. Metrics
 logged via PL's normal `self.log(...)` and hyperparameters via `save_hyperparameters()` are picked
-up automatically. See `train.py` at the repo root for a complete, runnable example (MNIST MLP).
+up automatically. See `examples/lightning_quickstart.py` for a complete, runnable example (MNIST MLP).
 
 **Authenticating.** If the server signs people in (see [Auth](plugins/auth.md)), the script has to
 sign in too:
