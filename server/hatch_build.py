@@ -22,12 +22,26 @@ _SOURCE_FILES = ("_cli.py",)
 _EXCLUDED_DIR_NAMES = frozenset({"tests", "_tests", "__pycache__"})
 
 
+def _dltrack_root(root: Path) -> Path:
+    """
+    Where this build's copy of the shared `dltrack/` tree actually lives.
+
+    Building straight from the repo, it's a sibling of this project directory (`../dltrack`). An
+    sdist is built by this exact same hook (see `[tool.hatch.build.targets.sdist.hooks.custom]` in
+    `pyproject.toml`), which already wrote every force-included file under `dltrack/` *inside* the
+    sdist -- so a wheel built from an extracted sdist finds its copy nested one level down instead,
+    not up (verified by actually building a wheel from an extracted sdist, not just inspecting config).
+    """
+    sibling = root.parent / "dltrack"
+    return sibling if sibling.is_dir() else root / "dltrack"
+
+
 class ServerSourcesBuildHook(BuildHookInterface[Any]):
     """Populate `force_include` with every server source file, skipping test directories."""
 
     def initialize(self, _version: str, build_data: dict[str, Any]) -> None:
-        """Walk `../dltrack`'s server-owned subset, mapping each file into this wheel's `dltrack/`."""
-        dltrack_root = Path(self.root).parent / "dltrack"
+        """Walk the shared `dltrack/` tree's server-owned subset, mapping each file into this wheel's `dltrack/`."""
+        dltrack_root = _dltrack_root(Path(self.root))
         force_include: dict[str, str] = build_data.setdefault("force_include", {})
 
         for name in _SOURCE_FILES:

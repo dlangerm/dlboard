@@ -37,10 +37,6 @@ uv run pyright                      # type check (strict mode)
 uv run prek run --all-files         # run pre-commit hooks manually
 ```
 
-Prefix the one-shot commands above (`pytest`, `ruff`, `pyright`, `prek`) with `rtk` per the RTK instructions
-below for compact output. Do **not** prefix `dltrack serve local` — it's a long-running server, and RTK's filters are
-built for commands that produce output and exit, not for something you need to tail live.
-
 Tests live next to the code they test, not in one top-level directory: a `tests/` subfolder sits beside
 every source directory that has tests (e.g. `dltrack/plugins/charts/tests/line_chart_test.py` next to
 `dltrack/plugins/charts/line_chart.py`). A test that exercises multiple files across directories (an
@@ -237,127 +233,6 @@ Always keep in mind this code is meant to be read and maintained by humans, line
 and extra functions that serve only to break up blocks of code but not to separate logic are hard to parse and reason about. Wherever
 possible, fold large blocks or repeated logic into compartmentalized units that can easily be reused.
 
-Whenever you finish an instruction, make sure to at least run ruff `rtk uv run ruff check` and `rtk uv run ruff format` as well as `rtk uv run pyright` to ensure code quality is maintained before review.
+Whenever you finish an instruction, make sure to at least run `uv run ruff check` and `uv run ruff format` as well as `uv run pyright` to ensure code quality is maintained before review.
 
 Always rely on pydantic validation instead of performing your own, use `pendulum` instead of `datetime` and use `pydantic_settings` for environment variables.
-
-## RTK (Rust Token Killer) - Token-Optimized Commands
-
-<!-- rtk-instructions v2 -->
-## Golden Rule
-
-**Always prefix commands with `rtk`**. If RTK has a dedicated filter, it uses it. If not, it passes through unchanged. This means RTK is always safe to use.
-
-**Important**: Even in command chains with `&&`, use `rtk`:
-```bash
-# ❌ Wrong
-git add . && git commit -m "msg" && git push
-
-# ✅ Correct
-rtk git add . && rtk git commit -m "msg" && rtk git push
-```
-
-**Wrapper commands** (`rtk test <cmd>`, `rtk err <cmd>`, `rtk summary <cmd>`, `rtk proxy <cmd>`) take the raw,
-un-prefixed inner command — `rtk` is the wrapper, not a prefix to repeat inside it:
-```bash
-# ❌ Wrong — double-wrapped
-rtk err rtk cargo build
-
-# ✅ Correct
-rtk err cargo build
-```
-
-## RTK Commands by Workflow
-
-### Test (90% savings)
-```bash
-rtk pytest              # Python test failures only (90%)
-rtk test <cmd>          # Generic test wrapper - failures only
-```
-
-### Git (59-80% savings)
-```bash
-rtk git status          # Compact status
-rtk git log             # Compact log (works with all git flags)
-rtk git diff            # Compact diff (80%)
-rtk git show            # Compact show (80%)
-rtk git add             # Ultra-compact confirmations (59%)
-rtk git commit          # Ultra-compact confirmations (59%)
-rtk git push            # Ultra-compact confirmations
-rtk git pull            # Ultra-compact confirmations
-rtk git branch          # Compact branch list
-rtk git fetch           # Compact fetch
-rtk git stash           # Compact stash
-rtk git worktree        # Compact worktree
-```
-
-Note: Git passthrough works for ALL subcommands, even those not explicitly listed.
-
-### GitHub (26-87% savings)
-```bash
-rtk gh pr view <num>    # Compact PR view (87%)
-rtk gh pr checks        # Compact PR checks (79%)
-rtk gh run list         # Compact workflow runs (82%)
-rtk gh api              # Compact API responses (26%)
-```
-
-### Files & Search (60-75% savings)
-```bash
-rtk ls <path>           # Tree format, compact (65%)
-rtk read <file>         # Code reading with filtering (60%)
-rtk grep <pattern>      # Search grouped by file (75%). With format flags (-c, -l, -L, -o, -Z),
-                         # still fine to type `rtk grep`, but it runs unfiltered — those flags
-                         # already produce compact output, so there's nothing for rtk to strip.
-rtk find <pattern>      # Find grouped by directory (70%)
-```
-
-### Analysis & Debug (70-90% savings)
-```bash
-rtk err <cmd>           # Filter errors only from any command
-rtk log <file>          # Deduplicated logs with counts
-rtk json <file>         # JSON structure without values
-rtk deps                # Dependency overview
-rtk env                 # Environment variables compact
-rtk summary <cmd>       # Smart summary of command output
-rtk diff                # Ultra-compact diffs
-```
-
-### Infrastructure (85% savings)
-```bash
-rtk docker ps           # Compact container list
-rtk docker images       # Compact image list
-rtk docker logs <c>     # Deduplicated logs
-rtk kubectl get         # Compact resource list
-rtk kubectl logs        # Deduplicated pod logs
-```
-
-### Network (65-70% savings)
-```bash
-rtk curl <url>          # Compact HTTP responses (70%)
-rtk wget <url>          # Compact download output (65%)
-```
-
-### Meta Commands
-```bash
-rtk gain                # View token savings statistics
-rtk gain --history      # View command history with savings
-rtk discover            # Analyze Claude Code sessions for missed RTK usage
-rtk proxy <cmd>         # Run command without filtering (for debugging)
-rtk init                # Add RTK instructions to CLAUDE.md
-rtk init --global       # Add RTK to ~/.claude/CLAUDE.md
-```
-
-## Token Savings Overview
-
-| Category | Commands | Typical Savings |
-|----------|----------|-----------------|
-| Tests | pytest | 90% |
-| Git | status, log, diff, add, commit | 59-80% |
-| GitHub | gh pr, gh run, gh api | 26-87% |
-| Files | ls, read, grep, find | 60-75% |
-| Infrastructure | docker, kubectl | 85% |
-| Network | curl, wget | 65-70% |
-
-Savings vary by command, roughly 26-99% depending on how compressible the underlying output is; most
-everyday commands (tests, git, file search) land in the 60-90% range.
-<!-- /rtk-instructions -->

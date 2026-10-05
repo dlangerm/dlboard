@@ -159,7 +159,16 @@ CMD ["serve", "custom", "--plugins", "mydeployment:PLUGINS", "--host", "0.0.0.0"
 See [plugins/overview.md](plugins/overview.md) for what a `PLUGINS` module needs, and
 [storage.md](plugins/storage.md)/[auth.md](plugins/auth.md) for the built-in plugins it can compose.
 
-## CI
+## CI and releases
 
 `.github/workflows/ci.yml`'s `docker-build` job builds this image on every PR as a sanity check — it
-never pushes it anywhere. Publishing an image to a registry isn't set up yet.
+never pushes it anywhere. Pushing a `vX.Y.Z` tag runs `.github/workflows/release.yml` instead, which
+publishes `dltrack`/`dltrack-server` to PyPI and this image as `ghcr.io/dlangerm/dltrack-server`,
+tagged `X.Y.Z`, `X.Y`, and `latest`:
+
+```bash
+docker pull ghcr.io/dlangerm/dltrack-server:latest
+```
+
+See [CHANGELOG.md](../CHANGELOG.md) for what each release contains, and the repo's GitHub Releases
+page for the full tag history.

@@ -1,0 +1,131 @@
+name: Release
+
+# Triggered by pushing a `vX.Y.Z` tag. The whole pipeline assumes that tag and
+# `dltrack/_version.py`'s `__version__` already agree -- `check-version` fails fast if a release was
+# tagged without bumping that file first, before anything gets published anywhere.
+on:
+  push:
+    tags: [v*.*.*]
+
+permissions:
+  contents: read
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag matches dltrack/_version.py
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          repo_version="$(grep -oP '(?<=^__version__ = ")[^"]+' dltrack/_version.py)"
+          if [ "$tag_version" != "$repo_version" ]; then
+            echo "Tag $GITHUB_REF_NAME doesn't match dltrack/_version.py's __version__ ($repo_version)." >&2
+            exit 1
+          fi
+
+  # Re-runs the same checks CI already ran on this commit as a PR -- belt-and-suspenders against
+  # tagging a commit CI never actually validated (e.g. a tag pushed from a local branch).
+  test:
+    needs: [check-version]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --locked --dev
+      - run: uv run prek run --all-files --skip no-commit-to-branch
+      - run: uv run pyright
+      - run: uv run pytest --cov
+
+  # PyPI trusted publishing (OIDC, no stored token) -- one job per distribution, since each is a
+  # separate PyPI project with its own trusted-publisher registration. See the PR description /
+  # release docs for the exact pypi.org setup this expects (repo, workflow filename, environment).
+  publish-dltrack:
+    needs: [test]
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv build --package dltrack --out-dir dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+
+  publish-dltrack-server:
+    needs: [test]
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv build --package dltrack-server --out-dir dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+
+  # Multi-arch dltrack-server image, pushed only once the PyPI publish above succeeded -- avoids a
+  # published image whose exact PyPI release failed partway through.
+  publish-image:
+    needs: [publish-dltrack, publish-dltrack-server]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/dltrack-server
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  github-release:
+    needs: [publish-image]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract this version's CHANGELOG.md section
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v ver="## [$version]" '
+            index($0, ver) == 1 { found=1; next }
+            found && index($0, "## [") == 1 { exit }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "No '## [$version]' section found in CHANGELOG.md -- add one before tagging." >&2
+            exit 1
+          fi
+      - name: Create the GitHub release
+        run: |
+          gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file release-notes.md
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

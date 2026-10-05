@@ -69,6 +69,29 @@ jobs:
       - run: uv sync --locked --dev
       - run: uv run pytest -m s3
 
+  # Confirms the client actually installs and imports on every Python version
+  # `client/pyproject.toml`'s `requires-python = ">=3.10"` claims -- nothing else does: the repo's
+  # own dev environment (and so every other job above) only ever runs on `.python-version`'s 3.12,
+  # which numpy alone (`client/pyproject.toml`'s own comment) was once enough to silently break.
+  client-compat:
+    needs: [typecheck-precommit]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv build --package dltrack --wheel --out-dir dist
+      - run: uv venv --python ${{ matrix.python-version }} client-venv
+      - run: uv pip install --python client-venv/bin/python dist/*.whl
+      - run: >
+          client-venv/bin/python -c
+          "import dltrack, dltrack.client, dltrack.client.artifacts.image, dltrack.models"
+
   # Build-only: proves the root `Dockerfile`'s multi-stage build still produces a working
   # dltrack-server image. Not pushed anywhere -- just a build sanity check on every PR.
   docker-build:

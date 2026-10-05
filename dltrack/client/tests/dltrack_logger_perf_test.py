@@ -5,7 +5,7 @@ Colocated (client and server on the same machine, which is how most dltrack depl
 case that has to always be fast -- there's no network hop in the way, so any slowness here is
 dltrack's own overhead (image encoding, HTTP handling, sqlite/filesystem writes), not something a
 user could instead blame on their network. This logs a batch of realistically large images (roughly
-`train.py`'s startup mosaic) through a real HTTP round-trip on localhost and asserts it stays inside
+`examples/lightning_quickstart.py`'s startup mosaic) through a real HTTP round-trip on localhost and asserts it stays inside
 a generous-but-not-toothless budget -- loose enough not to flake on a slow CI box, tight enough to
 still catch a real regression (e.g. per-request overhead creeping back in, or a batched upload
 silently becoming one request per file).
