@@ -38,9 +38,9 @@ type TargetSessionAttrs = Literal["any", "read-write", "read-only", "primary", "
 
 
 class PostgresSettings(BaseSettings):
-    """Connection, TLS, timeout, and pool settings, read from `POSTGRES_*` environment variables."""
+    """Connection, TLS, timeout, and pool settings, read from `DLTRACK_POSTGRES_*` environment variables."""
 
-    model_config = SettingsConfigDict(env_prefix="POSTGRES_")
+    model_config = SettingsConfigDict(env_prefix="DLTRACK_POSTGRES_")
 
     host: str = "localhost"
     """A host name, IP, or unix-socket directory -- or a comma-separated list of them, for failover."""

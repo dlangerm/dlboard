@@ -40,8 +40,8 @@ class PasswordDeployment(NamedTuple):
 @pytest.fixture
 def deployment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[PasswordDeployment]:
     for name, value in {
-        "SQLITE_LOCATION": str(tmp_path / "db.sqlite"),
-        "ARTIFACT_STORE_LOCATION": str(tmp_path / "artifacts"),
+        "DLTRACK_SQLITE_LOCATION": str(tmp_path / "db.sqlite"),
+        "DLTRACK_ARTIFACT_STORE_LOCATION": str(tmp_path / "artifacts"),
         "DLTRACK_SECRET_KEY": "test-secret",
         "DLTRACK_SECURE_COOKIES": "false",  # the test client speaks plain HTTP
     }.items():
@@ -161,8 +161,8 @@ def test_disabling_a_user_ends_their_session(deployment: PasswordDeployment) -> 
 def test_the_server_refuses_to_start_without_a_secret_key(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("SQLITE_LOCATION", str(tmp_path / "db.sqlite"))
-    monkeypatch.setenv("ARTIFACT_STORE_LOCATION", str(tmp_path / "artifacts"))
+    monkeypatch.setenv("DLTRACK_SQLITE_LOCATION", str(tmp_path / "db.sqlite"))
+    monkeypatch.setenv("DLTRACK_ARTIFACT_STORE_LOCATION", str(tmp_path / "artifacts"))
     monkeypatch.delenv("DLTRACK_SECRET_KEY", raising=False)
 
     with pytest.raises(ValueError, match="DLTRACK_SECRET_KEY"):

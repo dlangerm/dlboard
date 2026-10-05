@@ -30,14 +30,14 @@ def dltrack_app(tmp_path_factory: pytest.TempPathFactory) -> Dash:
     """
     tmp_path = tmp_path_factory.mktemp("dltrack-browser")
     monkeypatch = pytest.MonkeyPatch()
-    monkeypatch.setenv("SQLITE_LOCATION", str(tmp_path / "test.sqlite"))
-    monkeypatch.setenv("ARTIFACT_STORE_LOCATION", str(tmp_path / "artifacts"))
+    monkeypatch.setenv("DLTRACK_SQLITE_LOCATION", str(tmp_path / "test.sqlite"))
+    monkeypatch.setenv("DLTRACK_ARTIFACT_STORE_LOCATION", str(tmp_path / "artifacts"))
     # `LiveUpdateSettings` is instantiated once, at `serve/_pages/experiment.py`'s own first
     # import -- which (via `app.py`'s deferred page import) happens inside this very `build_app`
     # call, so this env var only has to be set before that, not for the whole test session. Down
     # from its 30s production default so the live-update browser tests don't need multi-poll
     # patience just to observe one tick.
-    monkeypatch.setenv("POLL_INTERVAL_MS", "2000")
+    monkeypatch.setenv("DLTRACK_POLL_INTERVAL_MS", "2000")
     try:
         app = build_app(LOCAL_DEPLOYMENT_DEFAULT)
     finally:

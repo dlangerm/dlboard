@@ -33,17 +33,17 @@ from dltrack.plugins import BUILTIN_BACKEND, BUILTIN_CHARTS, PASSWORD_AUTH, POST
 PLUGINS = [*POSTGRES_STORAGE, *PASSWORD_AUTH, *BUILTIN_BACKEND, *BUILTIN_CHARTS, themes.default]
 ```
 
-Every setting is a `POSTGRES_*` environment variable. The full list, with docs, is
+Every setting is a `DLTRACK_POSTGRES_*` environment variable. The full list, with docs, is
 `PostgresSettings` in `dltrack/plugins/data_stores/postgres.py`:
 
 | Concern | Variables |
 |---|---|
-| Connection | `POSTGRES_HOST` (a comma-separated list fails over between hosts), `_PORT`, `_DATABASE`, `_USER`, `_PASSWORD`, `_DB_SCHEMA` (created if missing), `_APPLICATION_NAME`, `_TARGET_SESSION_ATTRS` (e.g. `read-write`) |
-| TLS | `POSTGRES_SSLMODE` (default `prefer`; use `verify-full` in production), `_SSLROOTCERT`, `_SSLCERT`, `_SSLKEY` |
-| Timeouts | `POSTGRES_CONNECT_TIMEOUT_S`, `_STATEMENT_TIMEOUT_MS`, `_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS`, `_KEEPALIVES_IDLE_S` |
-| Pooling | `POSTGRES_POOL_SIZE`, `_MAX_OVERFLOW`, `_POOL_TIMEOUT_S`, `_POOL_RECYCLE_S`, `_POOL_PRE_PING` |
-| PgBouncer | `POSTGRES_PREPARE_THRESHOLD=null` disables server-side prepared statements for transaction pooling |
-| Anything else | `POSTGRES_CONNECT_ARGS` — a JSON object of extra libpq parameters, e.g. `{"sslcrl": "..."}` |
+| Connection | `DLTRACK_POSTGRES_HOST` (a comma-separated list fails over between hosts), `_PORT`, `_DATABASE`, `_USER`, `_PASSWORD`, `_DB_SCHEMA` (created if missing), `_APPLICATION_NAME`, `_TARGET_SESSION_ATTRS` (e.g. `read-write`) |
+| TLS | `DLTRACK_POSTGRES_SSLMODE` (default `prefer`; use `verify-full` in production), `_SSLROOTCERT`, `_SSLCERT`, `_SSLKEY` |
+| Timeouts | `DLTRACK_POSTGRES_CONNECT_TIMEOUT_S`, `_STATEMENT_TIMEOUT_MS`, `_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS`, `_KEEPALIVES_IDLE_S` |
+| Pooling | `DLTRACK_POSTGRES_POOL_SIZE`, `_MAX_OVERFLOW`, `_POOL_TIMEOUT_S`, `_POOL_RECYCLE_S`, `_POOL_PRE_PING` |
+| PgBouncer | `DLTRACK_POSTGRES_PREPARE_THRESHOLD=null` disables server-side prepared statements for transaction pooling |
+| Anything else | `DLTRACK_POSTGRES_CONNECT_ARGS` — a JSON object of extra libpq parameters, e.g. `{"sslcrl": "..."}` |
 
 The driver is libpq-based, so libpq's own environment (`PGPASSFILE`, `PGSERVICE`, ...) still works
 underneath these. Each server worker process has its own pool, so keep
@@ -64,25 +64,25 @@ from dltrack.plugins import BUILTIN_BACKEND, BUILTIN_CHARTS, PASSWORD_AUTH, POST
 PLUGINS = [*POSTGRES_S3_STORAGE, *PASSWORD_AUTH, *BUILTIN_BACKEND, *BUILTIN_CHARTS, themes.default]
 ```
 
-Every setting is an `S3_*` environment variable. The full list, with docs, is `S3Settings` in
+Every setting is a `DLTRACK_S3_*` environment variable. The full list, with docs, is `S3Settings` in
 `dltrack/plugins/data_stores/s3.py`:
 
 | Concern | Variables |
 |---|---|
-| Where blobs live | `S3_BUCKET` (required), `_PREFIX` (default `dltrack`; every blob lives under `s3://bucket/prefix/...`) |
-| Connection | `S3_ENDPOINT_URL` (unset talks to AWS; set it to any other S3-protocol endpoint), `_REGION`, `_ADDRESSING_STYLE` (`path` for MinIO/most on-prem/VAST — they don't support virtual-hosted bucket addressing) |
-| Credentials | `S3_ACCESS_KEY_ID`, `_SECRET_ACCESS_KEY`, `_SESSION_TOKEN` — left unset, boto3 falls back to its own default chain (environment, shared config/profile, instance/container role) |
-| TLS | `S3_VERIFY_TLS` (default `true`), `_CA_BUNDLE` (a CA bundle for a self-signed/private-CA endpoint) |
-| Downloads | `S3_DOWNLOAD_MODE` (`proxy`, the default — streams through this server, reachable even from a private endpoint; or `presign` — a 302 to a short-lived presigned URL, no bytes through this server, but the endpoint must be reachable from the browser), `_PRESIGN_TTL_S` |
-| Linking (see below) | `S3_EXTRA_READ_BUCKETS` — a JSON array of other buckets this store's credentials may read (and link/download) from, but never write to or delete from |
-| Throughput | `S3_QUEUE_SIZE` |
+| Where blobs live | `DLTRACK_S3_BUCKET` (required), `_PREFIX` (default `dltrack`; every blob lives under `s3://bucket/prefix/...`) |
+| Connection | `DLTRACK_S3_ENDPOINT_URL` (unset talks to AWS; set it to any other S3-protocol endpoint), `_REGION`, `_ADDRESSING_STYLE` (`path` for MinIO/most on-prem/VAST — they don't support virtual-hosted bucket addressing) |
+| Credentials | `DLTRACK_S3_ACCESS_KEY_ID`, `_SECRET_ACCESS_KEY`, `_SESSION_TOKEN` — left unset, boto3 falls back to its own default chain (environment, shared config/profile, instance/container role) |
+| TLS | `DLTRACK_S3_VERIFY_TLS` (default `true`), `_CA_BUNDLE` (a CA bundle for a self-signed/private-CA endpoint) |
+| Downloads | `DLTRACK_S3_DOWNLOAD_MODE` (`proxy`, the default — streams through this server, reachable even from a private endpoint; or `presign` — a 302 to a short-lived presigned URL, no bytes through this server, but the endpoint must be reachable from the browser), `_PRESIGN_TTL_S` |
+| Linking (see below) | `DLTRACK_S3_EXTRA_READ_BUCKETS` — a JSON array of other buckets this store's credentials may read (and link/download) from, but never write to or delete from |
+| Throughput | `DLTRACK_S3_QUEUE_SIZE` |
 
 ## Linking an already-uploaded artifact
 
 A client doesn't have to upload through dltrack at all — `ArtifactStore.link_artifacts` registers
 a blob a client already put somewhere this store can serve, with no bytes moved. The server only
 accepts a ref inside the store's own `bucket`/`prefix` (or `filesystem`'s own root) or an
-allowlisted read-only location (`S3_EXTRA_READ_BUCKETS`); anything else is rejected outright, for
+allowlisted read-only location (`DLTRACK_S3_EXTRA_READ_BUCKETS`); anything else is rejected outright, for
 the whole batch. See [Client & logging](../client.md) for the client-side `Link` artifact kind that
 exercises this.
 

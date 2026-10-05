@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, override
 
 import sqlalchemy as sa
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import event
 from sqlalchemy.dialects import sqlite
 from sqlalchemy.pool import NullPool
@@ -149,7 +149,9 @@ class SQLLiteStore(SQLStoreBase[Path]):
 
 
 class AppSettings(BaseSettings):
-    """Environment variables."""
+    """`DLTRACK_*` environment variables."""
+
+    model_config = SettingsConfigDict(env_prefix="DLTRACK_")
 
     sqlite_location: Path = Path.home() / ".dltrack.sqlite"
     sqlite_busy_timeout_ms: int = DEFAULT_BUSY_TIMEOUT_MS

@@ -24,7 +24,7 @@ from dash import ALL, Dash, Input, Output, State, ctx, html, no_update
 from dash.dcc import Store
 from dash.development.base_component import Component
 from dash.exceptions import PreventUpdate
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from structlog.stdlib import get_logger
 
 from dltrack import models
@@ -94,7 +94,9 @@ what I'm looking at be" rather than "when did it last change"."""
 
 
 class LiveUpdateSettings(BaseSettings):
-    """Environment variables controlling the experiment page's live-update poll."""
+    """`DLTRACK_*` environment variables controlling the experiment page's live-update poll."""
+
+    model_config = SettingsConfigDict(env_prefix="DLTRACK_")
 
     poll_interval_ms: int = 30000
     """

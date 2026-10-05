@@ -355,23 +355,23 @@ def backend_server(
     metadata_plugin: PluginProtocol
     match store_backend:
         case StoreBackend.SQLITE:
-            monkeypatch.setenv("SQLITE_LOCATION", str(tmp_path / "test.sqlite"))
+            monkeypatch.setenv("DLTRACK_SQLITE_LOCATION", str(tmp_path / "test.sqlite"))
             metadata_plugin, store = sqlite, SQLLiteStore(tmp_path / "test.sqlite")
         case StoreBackend.POSTGRES:
             settings: PostgresSettings = request.getfixturevalue("postgres_settings")
             for name, value in settings.model_dump(
                 include={"host", "port", "database", "user", "db_schema"}
             ).items():
-                monkeypatch.setenv(f"POSTGRES_{name.upper()}", str(value))
+                monkeypatch.setenv(f"DLTRACK_POSTGRES_{name.upper()}", str(value))
             monkeypatch.setenv(
-                "POSTGRES_PASSWORD", settings.password.get_secret_value() if settings.password else ""
+                "DLTRACK_POSTGRES_PASSWORD", settings.password.get_secret_value() if settings.password else ""
             )
-            monkeypatch.setenv("POSTGRES_SSLMODE", settings.sslmode)
+            monkeypatch.setenv("DLTRACK_POSTGRES_SSLMODE", settings.sslmode)
             metadata_plugin, store = postgres, PostgresStore(settings)
     artifact_plugin: PluginProtocol
     match artifact_backend:
         case ArtifactBackend.FILESYSTEM:
-            monkeypatch.setenv("ARTIFACT_STORE_LOCATION", str(tmp_path / "artifacts"))
+            monkeypatch.setenv("DLTRACK_ARTIFACT_STORE_LOCATION", str(tmp_path / "artifacts"))
             artifact_plugin = filesystem
         case ArtifactBackend.S3:
             s3_config: S3Settings = request.getfixturevalue("s3_settings")
@@ -385,12 +385,12 @@ def backend_server(
                     "verify_tls",
                 }
             ).items():
-                monkeypatch.setenv(f"S3_{name.upper()}", str(value))
+                monkeypatch.setenv(f"DLTRACK_S3_{name.upper()}", str(value))
             monkeypatch.setenv(
-                "S3_SECRET_ACCESS_KEY",
+                "DLTRACK_S3_SECRET_ACCESS_KEY",
                 s3_config.secret_access_key.get_secret_value() if s3_config.secret_access_key else "",
             )
-            monkeypatch.setenv("S3_DOWNLOAD_MODE", request.getfixturevalue("s3_download_mode").value)
+            monkeypatch.setenv("DLTRACK_S3_DOWNLOAD_MODE", request.getfixturevalue("s3_download_mode").value)
             artifact_plugin = s3
     try:
         app = build_app(

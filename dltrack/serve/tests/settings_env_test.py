@@ -21,7 +21,7 @@ from dltrack.serve import set_setting_env
 def test_set_setting_env_is_picked_up_by_the_real_sqlite_app_settings(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("SQLITE_LOCATION", raising=False)
+    monkeypatch.delenv("DLTRACK_SQLITE_LOCATION", raising=False)
     location = Path("/tmp/some-test.sqlite")
 
     set_setting_env(SqliteAppSettings, "sqlite_location", location)
@@ -32,7 +32,7 @@ def test_set_setting_env_is_picked_up_by_the_real_sqlite_app_settings(
 def test_set_setting_env_is_picked_up_by_the_real_filesystem_app_settings(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("ARTIFACT_STORE_LOCATION", raising=False)
+    monkeypatch.delenv("DLTRACK_ARTIFACT_STORE_LOCATION", raising=False)
     location = Path("/tmp/some-test-artifacts")
 
     set_setting_env(FilesystemAppSettings, "artifact_store_location", location)

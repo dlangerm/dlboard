@@ -50,8 +50,8 @@ ENV PATH="/app/.venv/bin:$PATH"
 # `dltrack/scripts/docker_deployment.py` for the exact plugin composition `--plugins` resolves
 # below, and docs/docker.md to swap the artifact store for S3 instead (the image already ships the
 # `s3` extra, so that needs no rebuild). Configure it entirely with env vars:
-#   POSTGRES_HOST / _PORT / _DATABASE / _USER / _PASSWORD  (dltrack/plugins/data_stores/postgres.py)
-#   ARTIFACT_STORE_LOCATION  -- where blobs land inside the container; defaults to /data/artifacts
+#   DLTRACK_POSTGRES_HOST / _PORT / _DATABASE / _USER / _PASSWORD  (dltrack/plugins/data_stores/postgres.py)
+#   DLTRACK_ARTIFACT_STORE_LOCATION  -- where blobs land inside the container; defaults to /data/artifacts
 #   (set below), so a volume mounted at /data is the only thing that needs to persist besides
 #   Postgres itself.
 #   DLTRACK_SECRET_KEY  -- required by the password auth plugin this image runs; a missing one is a
@@ -60,7 +60,7 @@ ENV PATH="/app/.venv/bin:$PATH"
 # first admin with:
 #   docker run --rm -it --env-file .env <image> users set-password <name> --admin \
 #     --plugins dltrack.scripts.docker_deployment:PLUGINS
-ENV ARTIFACT_STORE_LOCATION=/data/artifacts
+ENV DLTRACK_ARTIFACT_STORE_LOCATION=/data/artifacts
 # `FSBlobs` creates its own leaf directory on first use, but never the volume mount point above it
 # -- `/data` has to exist (and be writable by `dltrack`) before a volume is mounted over it at
 # `docker run` time.

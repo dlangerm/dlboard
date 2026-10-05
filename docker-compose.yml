@@ -12,10 +12,10 @@ services:
     ports:
       - 8050:8050
     environment:
-      POSTGRES_HOST: postgres
-      POSTGRES_USER: dltrack
-      POSTGRES_PASSWORD: dltrack
-      POSTGRES_DATABASE: dltrack
+      DLTRACK_POSTGRES_HOST: postgres
+      DLTRACK_POSTGRES_USER: dltrack
+      DLTRACK_POSTGRES_PASSWORD: dltrack
+      DLTRACK_POSTGRES_DATABASE: dltrack
       # Local-trial-only: generate a real one with `openssl rand -hex 32` for anything that outlives
       # `docker compose down`.
       DLTRACK_SECRET_KEY: local-trial-only-change-me
