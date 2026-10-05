@@ -164,6 +164,37 @@ def test_presign_mode_redirects_to_a_url_that_serves_the_same_bytes(
 
 
 @pytest.mark.s3
+def test_presign_mode_forces_a_non_inlineable_blob_to_download_as_an_attachment(
+    s3_settings: S3Settings, tmp_path: Path
+) -> None:
+    """
+    No bytes pass through this server in presign mode, so `_artifact_download.py`'s own headers
+    (set on the 302 itself) never reach the browser's actual fetch of the object -- the presigned
+    URL has to ask S3 for them directly, via `ResponseContentDisposition`/`ResponseContentType`.
+    """
+    backend = S3Blobs(s3_settings.model_copy(update={"download_mode": S3DownloadMode.PRESIGN}))
+    ref = _write(backend, "evil.html", b"<script>alert(1)</script>", tmp_path)
+
+    response = backend.download(ref)
+
+    served = requests.get(response.headers["Location"], timeout=5)
+    assert served.headers["Content-Disposition"] == "attachment"
+
+
+@pytest.mark.s3
+def test_presign_mode_does_not_force_an_inlineable_image_to_download(
+    s3_settings: S3Settings, tmp_path: Path
+) -> None:
+    backend = S3Blobs(s3_settings.model_copy(update={"download_mode": S3DownloadMode.PRESIGN}))
+    ref = _write(backend, "a.png", b"hello", tmp_path)
+
+    response = backend.download(ref)
+
+    served = requests.get(response.headers["Location"], timeout=5)
+    assert "Content-Disposition" not in served.headers
+
+
+@pytest.mark.s3
 def test_a_read_only_allowlisted_bucket_is_downloadable_but_never_deleted(s3_settings: S3Settings) -> None:
     """
     A ref outside this store's own bucket/prefix, but allowlisted, is `READ_ONLY`.

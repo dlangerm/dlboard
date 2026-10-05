@@ -51,7 +51,7 @@ def deployment(tmp_path_factory: pytest.TempPathFactory) -> Iterator[_Deployment
     for name, value in {
         "DLTRACK_SQLITE_LOCATION": str(tmp_path / "db.sqlite"),
         "DLTRACK_ARTIFACT_STORE_LOCATION": str(tmp_path / "artifacts"),
-        "DLTRACK_SECRET_KEY": "test-secret",
+        "DLTRACK_SECRET_KEY": "test-secret-at-least-32-characters-long",
         "DLTRACK_SECURE_COOKIES": "false",
     }.items():
         monkeypatch.setenv(name, value)

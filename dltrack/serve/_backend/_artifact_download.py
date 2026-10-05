@@ -15,7 +15,9 @@ from typing import TYPE_CHECKING
 from flask import Response, abort
 from pydantic import AnyUrl
 from structlog.stdlib import get_logger
+from werkzeug.utils import secure_filename
 
+from dltrack.models import INLINEABLE_ARTIFACT_CONTENT_TYPES
 from dltrack.serve._backend._data_store import get_artifact_store, get_data_store
 
 if TYPE_CHECKING:
@@ -40,10 +42,19 @@ def _download(artifact_id: int) -> Response:
         _log.warning("Artifact %s not found (missing or deleted)", artifact_id)
         abort(404)
     response = get_artifact_store().download_artifact(AnyUrl(artifact.ref))
-    # A redirect to a short-lived presigned URL (`S3Blobs.download`'s presign mode) must never be
-    # cached this long -- only the bytes behind it are immutable, not the redirect itself.
+    # A redirect to a short-lived presigned URL (`S3Blobs.download`'s presign mode) carries none of
+    # the actual blob's bytes -- the browser fetches those straight from S3, under headers `S3Blobs`
+    # sets on the presigned URL itself, not here. Cache-Control and the content-sniffing/disposition
+    # headers below only apply to a response this server actually serves the bytes on (`PROXY` mode,
+    # or the filesystem backend).
     if not (300 <= response.status_code < 400):  # noqa: PLR2004
         response.headers["Cache-Control"] = _IMMUTABLE_CACHE_CONTROL
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Content-Security-Policy"] = "sandbox"
+        if response.mimetype not in INLINEABLE_ARTIFACT_CONTENT_TYPES:
+            response.headers["Content-Disposition"] = (
+                f'attachment; filename="{secure_filename(artifact.fname) or artifact_id}"'
+            )
     return response
 
 

@@ -911,6 +911,11 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         for experiment_id in {a.experiment_id for a in artifacts}:
             self._touch_experiment(experiment_id)
 
+    def count_artifacts_by_ref(self, ref: str) -> int:
+        a = self._tables[models.Artifact]
+        ((count,),) = self._execute(sa.select(sa.func.count()).select_from(a).where(a.c.ref == ref))
+        return count
+
     def get_artifact(self, artifact_id: int) -> models.Artifact | None:
         """Get one (non-deleted) artifact by id, or `None` if it doesn't exist (or has been deleted)."""
         return next(iter(self._by_id(models.Artifact, artifact_id)), None)

@@ -50,6 +50,53 @@ def test_a_proxied_download_gets_the_immutable_cache_control_header(monkeypatch:
     assert response.headers["Cache-Control"] == _artifact_download._IMMUTABLE_CACHE_CONTROL
 
 
+def test_a_proxied_download_always_gets_nosniff_and_a_sandboxed_csp(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(_artifact_download, "get_data_store", lambda: _FakeDataStore(_artifact()))
+    monkeypatch.setattr(_artifact_download, "get_artifact_store", lambda: _FakeArtifactStore(Response(b"x")))
+
+    response = _artifact_download._download(1)
+
+    assert response.headers["X-Content-Type-Options"] == "nosniff"
+    assert response.headers["Content-Security-Policy"] == "sandbox"
+
+
+def test_an_inlineable_image_is_not_forced_to_download(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(_artifact_download, "get_data_store", lambda: _FakeDataStore(_artifact()))
+    monkeypatch.setattr(
+        _artifact_download,
+        "get_artifact_store",
+        lambda: _FakeArtifactStore(Response(b"x", content_type="image/png")),
+    )
+
+    response = _artifact_download._download(1)
+
+    assert "Content-Disposition" not in response.headers
+
+
+def test_a_non_inlineable_artifact_is_forced_to_download_as_an_attachment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Regression: an artifact's `fname`/content type is entirely client-supplied, so anyone who can
+    log an artifact could otherwise upload HTML or SVG crafted to run script in this origin the
+    moment someone else opens it -- `nosniff` plus this is what stops a browser rendering it instead
+    of downloading it.
+    """
+    html_artifact = models.Artifact(
+        key="k", fname="evil.html", run_id=1, experiment_id=1, step=0, ref="file:///evil.html"
+    )
+    monkeypatch.setattr(_artifact_download, "get_data_store", lambda: _FakeDataStore(html_artifact))
+    monkeypatch.setattr(
+        _artifact_download,
+        "get_artifact_store",
+        lambda: _FakeArtifactStore(Response(b"<script>alert(1)</script>", content_type="text/html")),
+    )
+
+    response = _artifact_download._download(1)
+
+    assert response.headers["Content-Disposition"] == 'attachment; filename="evil.html"'
+
+
 def test_a_presigned_redirect_is_never_given_the_immutable_cache_control_header(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -69,3 +116,6 @@ def test_a_presigned_redirect_is_never_given_the_immutable_cache_control_header(
     response = _artifact_download._download(1)
 
     assert "Cache-Control" not in response.headers
+    assert "X-Content-Type-Options" not in response.headers
+    assert "Content-Security-Policy" not in response.headers
+    assert "Content-Disposition" not in response.headers

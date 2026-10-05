@@ -42,7 +42,7 @@ def deployment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Pass
     for name, value in {
         "DLTRACK_SQLITE_LOCATION": str(tmp_path / "db.sqlite"),
         "DLTRACK_ARTIFACT_STORE_LOCATION": str(tmp_path / "artifacts"),
-        "DLTRACK_SECRET_KEY": "test-secret",
+        "DLTRACK_SECRET_KEY": "test-secret-at-least-32-characters-long",
         "DLTRACK_SECURE_COOKIES": "false",  # the test client speaks plain HTTP
     }.items():
         monkeypatch.setenv(name, value)
@@ -167,6 +167,28 @@ def test_the_server_refuses_to_start_without_a_secret_key(
 
     with pytest.raises(ValueError, match="DLTRACK_SECRET_KEY"):
         build_app([sqlite, *PASSWORD_AUTH, *BUILTIN_BACKEND])  # no artifact store: no worker to leak
+
+
+def test_the_server_refuses_to_start_with_the_docker_compose_placeholder_secret_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("DLTRACK_SQLITE_LOCATION", str(tmp_path / "db.sqlite"))
+    monkeypatch.setenv("DLTRACK_ARTIFACT_STORE_LOCATION", str(tmp_path / "artifacts"))
+    monkeypatch.setenv("DLTRACK_SECRET_KEY", "local-trial-only-change-me")
+
+    with pytest.raises(ValueError, match="placeholder"):
+        build_app([sqlite, *PASSWORD_AUTH, *BUILTIN_BACKEND])
+
+
+def test_the_server_refuses_to_start_with_a_too_short_secret_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("DLTRACK_SQLITE_LOCATION", str(tmp_path / "db.sqlite"))
+    monkeypatch.setenv("DLTRACK_ARTIFACT_STORE_LOCATION", str(tmp_path / "artifacts"))
+    monkeypatch.setenv("DLTRACK_SECRET_KEY", "too-short")
+
+    with pytest.raises(ValueError, match="characters"):
+        build_app([sqlite, *PASSWORD_AUTH, *BUILTIN_BACKEND])
 
 
 # -- API tokens and per-user isolation ----------------------------------------------------------

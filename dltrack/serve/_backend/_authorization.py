@@ -173,7 +173,21 @@ class AuthorizingDataStore(models.DataStore[...]):
         return self._inner.find_user(username)
 
     def update_user(self, user: models.User) -> models.User:
+        """
+        Update a user. `Scope.USER_MANAGE` alone is never enough to touch `Scope.ALL`.
+
+        Granting `ALL` to anyone (including yourself) or changing an existing `ALL` admin's record
+        at all -- scopes, disabling them, anything -- needs `ALL` itself. Otherwise `USER_MANAGE`
+        is a strictly weaker scope than `ALL` in name only: its holder could self-escalate to full
+        admin, or lock out a real one, with no `ALL` of their own.
+        """
         require_scope(self._actor, Scope.USER_MANAGE)
+        existing = self._inner.get_user(user.id)
+        touches_all_admin = Scope.ALL in user.scopes or (
+            existing is not None and Scope.ALL in existing.scopes
+        )
+        if touches_all_admin:
+            require_scope(self._actor, Scope.ALL)
         return self._inner.update_user(user)
 
     def list_users(self) -> list[models.User]:
@@ -372,6 +386,10 @@ class AuthorizingDataStore(models.DataStore[...]):
         artifacts = list(artifacts)
         self._require_runs_write(artifacts)
         self._inner.log_artifact_refs(artifacts)
+
+    def count_artifacts_by_ref(self, ref: str) -> int:
+        """A count, not row contents -- used to decide *whether* a link is safe, not to read anything."""
+        return self._inner.count_artifacts_by_ref(ref)
 
     def get_artifact(self, artifact_id: int) -> models.Artifact | None:
         artifact = self._inner.get_artifact(artifact_id)
@@ -615,9 +633,21 @@ class AuthorizingArtifactStore(models.ArtifactStore[...]):
         self._inner.log_artifacts(artifacts)
 
     def link_artifacts(self, links: Iterable[tuple[models.NewArtifact, AnyUrl]]) -> list[models.Artifact]:
+        """
+        Register a batch of already-stored artifacts by ref, with no bytes moved.
+
+        Refusing a ref already attached to an existing artifact (regardless of who can see it) is
+        what keeps this from being a way to read -- or, on purge, silently orphan -- someone else's
+        blob: knowing (or guessing) another project's ref would otherwise be enough to link it into
+        a run you do control, and then read it back through your own, now-authorized, artifact id.
+        """
         links = list(links)
         for run_id, experiment_id in {(a.run_id, a.experiment_id) for a, _ in links}:
             self._authorizer.require_run_write(run_id, experiment_id)
+        already_linked = [ref for _, ref in links if self._authorizer.count_artifacts_by_ref(str(ref)) > 0]
+        if already_linked:
+            msg = f"refusing to link {len(already_linked)} ref(s) already attached to another artifact: {already_linked}"
+            raise models.UnservableArtifactRefError(msg)
         return self._inner.link_artifacts(links)
 
     def download_artifact(self, ref: AnyUrl) -> Response:

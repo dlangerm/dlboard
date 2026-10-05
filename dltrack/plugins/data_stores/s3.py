@@ -20,6 +20,7 @@ from flask import Response, redirect
 from pydantic import AnyHttpUrl, AnyUrl, NonNegativeInt, PositiveInt, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from dltrack.models import INLINEABLE_ARTIFACT_CONTENT_TYPES
 from dltrack.plugins.data_stores._blob_store import RefAccess, plug_blob_store
 
 if TYPE_CHECKING:
@@ -186,10 +187,20 @@ class S3Blobs:
         client = _client(self._settings)  # pyright: ignore[reportArgumentType]
         match self._settings.download_mode:
             case S3DownloadMode.PRESIGN:
+                content_type, _ = mimetypes.guess_type(key)
+                params: dict[str, str] = {"Bucket": bucket, "Key": key}
+                # The browser fetches the object straight from S3 under whatever headers the
+                # presigned URL asks for -- these two are what `_artifact_download.py` sets
+                # directly in `PROXY` mode, carried over here since this response is just a
+                # redirect to it, not the bytes themselves. `nosniff`/CSP can't travel this way
+                # (S3 has no such response-header override), which is why `PRESIGN` is opt-in, not
+                # the default -- see `S3DownloadMode`.
+                if content_type:
+                    params["ResponseContentType"] = content_type
+                if content_type not in INLINEABLE_ARTIFACT_CONTENT_TYPES:
+                    params["ResponseContentDisposition"] = "attachment"
                 url = client.generate_presigned_url(
-                    "get_object",
-                    Params={"Bucket": bucket, "Key": key},
-                    ExpiresIn=self._settings.presign_ttl_s,
+                    "get_object", Params=params, ExpiresIn=self._settings.presign_ttl_s
                 )
                 return cast("Response", redirect(url))
             case S3DownloadMode.PROXY:

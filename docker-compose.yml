@@ -1,10 +1,15 @@
 # A self-contained way to try the published image's default deployment (Postgres + local-disk
-# artifacts, password sign-in -- see dltrack/scripts/docker_deployment.py) locally: `docker compose
-# up` needs nothing else installed or configured, and both volumes below genuinely persist across
-# `docker compose down`/`up` (no `-v`) -- verified by restarting the stack and checking the data is
-# still there, not assumed. Swap `dltrack-postgres`/`dltrack-artifacts` for your own infrastructure,
-# and DLTRACK_SECRET_KEY for a real one, before using this anywhere real. See docs/docker.md --
-# including "Using an S3 artifact store instead" if you want one.
+# artifacts, password sign-in -- see dltrack/scripts/docker_deployment.py) locally: both volumes
+# below genuinely persist across `docker compose down`/`up` (no `-v`) -- verified by restarting the
+# stack and checking the data is still there, not assumed. The one thing this needs before `docker
+# compose up` is a session secret in your shell (the server itself refuses to start without a real
+# one -- a missing or placeholder DLTRACK_SECRET_KEY is exactly the kind of thing that's silently
+# fine right up until it's a forgeable admin session on something real):
+#
+#   export DLTRACK_SECRET_KEY=$(openssl rand -hex 32)
+#
+# Swap `dltrack-postgres`/`dltrack-artifacts` for your own infrastructure before using this
+# anywhere real. See docs/docker.md -- including "Using an S3 artifact store instead" if you want one.
 
 services:
   dltrack:
@@ -16,9 +21,11 @@ services:
       DLTRACK_POSTGRES_USER: dltrack
       DLTRACK_POSTGRES_PASSWORD: dltrack
       DLTRACK_POSTGRES_DATABASE: dltrack
-      # Local-trial-only: generate a real one with `openssl rand -hex 32` for anything that outlives
-      # `docker compose down`.
-      DLTRACK_SECRET_KEY: local-trial-only-change-me
+      # Required -- see the top of this file. `:?` fails `docker compose up` immediately with a
+      # clear message instead of starting the server with no key (or a placeholder it would refuse
+      # to start with anyway).
+      DLTRACK_SECRET_KEY: ${DLTRACK_SECRET_KEY:?see the export command at the 
+        top of this file}
       # This stack is plain HTTP -- a `Secure` session cookie (the default) is dropped by most HTTP
       # clients on a non-HTTPS origin, which breaks sign-in outright. Never set this to false behind
       # real infrastructure; serve that over HTTPS instead (see docs/docker.md).

@@ -37,11 +37,16 @@ dltrack gives you a `dltrack` command, the same idea as `tensorboard`:
 ```bash
 dltrack serve local     # anonymous, single-user, sqlite + local disk -- sane defaults, no setup
 dltrack serve local --sqlite-location ./runs.sqlite --artifact-store-location ./artifacts
-dltrack serve local --host 0.0.0.0 --port 8050 --workers 4   # behind a reverse proxy / in a container
 ```
 
 Outside of `--debug`, this runs on [Granian](https://github.com/emmett-framework/granian) (Rust,
 multi-worker, auto-respawns a crashed worker) instead of Dash's own development server.
+
+`serve local` has no sign-in -- every request is treated as the same admin user. Fine on your own
+machine (`127.0.0.1`, the default); binding `--host` to anything else needs
+`--i-understand-anyone-who-can-reach-this-is-an-admin` and a network boundary or reverse-proxy auth
+you trust. For a deployment other people reach, use `serve custom` with a real auth provider
+instead (`dltrack.plugins.PASSWORD_AUTH`) -- see [docs/docker.md](docs/docker.md).
 
 Bringing your own storage/auth/pages/chart plugins instead of `local`'s built-in set? `dltrack serve
 custom` runs the same production server against any `list[PluginProtocol]` you point it at:

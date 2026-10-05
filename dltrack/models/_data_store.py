@@ -269,6 +269,18 @@ class DataStore(typing.Protocol[_P]):
         """Log a set of artifacts."""
         ...
 
+    def count_artifacts_by_ref(self, ref: str) -> int:
+        """
+        How many artifact rows (deleted or not) already point at `ref`.
+
+        `link_artifacts` is the only way two rows could ever end up sharing one ref -- an ordinary
+        upload always writes to a freshly hashed path -- so this is what keeps it from ever
+        actually happening: a non-zero count means `ref` already belongs to some other artifact,
+        linking it again would let that artifact's owner read (or, on purge, silently orphan) the
+        first one's blob.
+        """
+        ...
+
     def get_artifact(self, artifact_id: int) -> models.Artifact | None:
         """Get one (non-deleted) artifact by id, or `None` if it doesn't exist (or has been deleted)."""
         ...
