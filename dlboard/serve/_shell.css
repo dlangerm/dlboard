@@ -1,0 +1,205 @@
+/* The core app shell's own styles: structure, plus the `--dl-*` CSS variables the core app owns.
+   Their values here are neutral defaults, declared inside `:where(...)` (zero specificity) so a
+   theme plugin's own stylesheet overrides any of them without depending on load order (see
+   `dlboard/plugins/themes/default.css`). */
+
+:where(:root) {
+  /* The main area's background, behind cards and panels. */
+  --dl-canvas: var(--mantine-color-body);
+  /* Series colors (`dlboard.serve.series_color`), in this order. Chosen and ordered so adjacent
+     slots stay distinguishable under common color-vision deficiencies. */
+  --dl-series-1: #2a78d6;
+  --dl-series-2: #eb6834;
+  --dl-series-3: #1baf7a;
+  --dl-series-4: #eda100;
+  --dl-series-5: #e87ba4;
+  --dl-series-6: #008300;
+  --dl-series-7: #4a3aa7;
+  --dl-series-8: #e34948;
+  scrollbar-color: var(--mantine-color-default-border) transparent;
+}
+
+/* The same hues, stepped for a dark surface. */
+:where(:root[data-mantine-color-scheme="dark"]) {
+  --dl-series-1: #3987e5;
+  --dl-series-2: #d95926;
+  --dl-series-3: #199e70;
+  --dl-series-4: #c98500;
+  --dl-series-5: #d55181;
+  --dl-series-6: #008300;
+  --dl-series-7: #9085e9;
+  --dl-series-8: #e66767;
+}
+
+* {
+  scrollbar-width: thin;
+}
+
+.dl-app-main {
+  background-color: var(--dl-canvas);
+}
+
+/* Columns of numbers line up digit for digit. */
+.ag-theme-quartz,
+.dl-tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* The brand mark in the header: the logo icon on a small primary-color gradient tile. */
+.dl-logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: var(--mantine-radius-md);
+  color: var(--mantine-color-white);
+  background: linear-gradient(135deg, var(--mantine-primary-color-4), var(--mantine-primary-color-8));
+  font-size: 1.125rem;
+}
+
+.dl-section-label {
+  letter-spacing: 0.04em;
+}
+
+/* A whole-card link (`entity_card`): the card itself is the click target. */
+.dl-card-link {
+  display: block;
+  height: 100%;
+}
+
+.dl-card-link>.mantine-Card-root {
+  transition: border-color 120ms ease, transform 120ms ease;
+}
+
+.dl-card-link:hover>.mantine-Card-root,
+.dl-card-link:focus-visible>.mantine-Card-root {
+  border-color: var(--mantine-primary-color-filled);
+}
+
+/* "Receiving data": a green dot with a soft ring pulsing out of it. The ring animates only
+   transform/opacity, so it runs on the compositor without repainting the page. */
+.dl-live-dot {
+  position: relative;
+  display: inline-block;
+  flex-shrink: 0;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background-color: var(--mantine-color-green-6);
+}
+
+.dl-live-dot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background-color: inherit;
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .dl-card-link:hover>.mantine-Card-root {
+    transform: translateY(-1px);
+  }
+
+  .dl-live-dot::after {
+    animation: dl-live-ping 2s cubic-bezier(0, 0, 0.2, 1) infinite;
+  }
+}
+
+@keyframes dl-live-ping {
+  0% {
+    transform: scale(1);
+    opacity: 0.6;
+  }
+
+  75%,
+  100% {
+    transform: scale(2.5);
+    opacity: 0;
+  }
+}
+
+/* An onboarding code snippet (`_onboarding.py`), with its copy button pinned top-right. */
+.dl-snippet {
+  padding: var(--mantine-spacing-md);
+  padding-right: 6rem;
+  font-size: var(--mantine-font-size-sm);
+  line-height: 1.6;
+}
+
+.dl-snippet-copy {
+  position: absolute;
+  top: var(--mantine-spacing-xs);
+  right: var(--mantine-spacing-xs);
+}
+
+/* The experiment page's panels: separate cards on the canvas, each on the body surface (where the
+   series palette's contrast is checked), whether open or closed. */
+.dl-panels .mantine-Accordion-item {
+  background-color: var(--mantine-color-body);
+  border: 1px solid var(--mantine-color-default-border);
+}
+
+/* The run table's per-row delete icon only shows on the row being pointed at (or focused). */
+.dl-run-table .ag-row .dl-icon-cell::before {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.dl-run-table .ag-row-hover .dl-icon-cell::before,
+.dl-run-table .ag-row-focus .dl-icon-cell::before {
+  opacity: 1;
+}
+
+/* A run's color as a small dot before its name (`dlboard.serve.series_swatch_class`). */
+.dl-swatch::before {
+  content: "";
+  display: inline-block;
+  flex-shrink: 0;
+  width: 0.625rem;
+  height: 0.625rem;
+  margin-right: 0.5rem;
+  border-radius: 50%;
+  vertical-align: baseline;
+  background-color: var(--dl-swatch);
+}
+
+.dl-swatch-1 {
+  --dl-swatch: var(--dl-series-1);
+}
+
+.dl-swatch-2 {
+  --dl-swatch: var(--dl-series-2);
+}
+
+.dl-swatch-3 {
+  --dl-swatch: var(--dl-series-3);
+}
+
+.dl-swatch-4 {
+  --dl-swatch: var(--dl-series-4);
+}
+
+.dl-swatch-5 {
+  --dl-swatch: var(--dl-series-5);
+}
+
+.dl-swatch-6 {
+  --dl-swatch: var(--dl-series-6);
+}
+
+.dl-swatch-7 {
+  --dl-swatch: var(--dl-series-7);
+}
+
+.dl-swatch-8 {
+  --dl-swatch: var(--dl-series-8);
+}
+
+/* An empty swatch is a dot on its own (e.g. a badge's `leftSection`), not a prefix to any text. */
+.dl-swatch:empty::before {
+  margin-right: 0;
+  vertical-align: middle;
+}

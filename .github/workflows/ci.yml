@@ -57,7 +57,7 @@ jobs:
       - run: uv run pytest -m postgres
 
   # The S3 artifact store, against a real S3-protocol endpoint (LocalStack, in Docker) -- the same
-  # way `uv run pytest -m s3` does locally. See `dltrack/conftest.py`'s `s3_test_server`.
+  # way `uv run pytest -m s3` does locally. See `dlboard/conftest.py`'s `s3_test_server`.
   test-s3:
     needs: [typecheck-precommit]
     runs-on: ubuntu-latest
@@ -85,15 +85,15 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
-      - run: uv build --package dltrack --wheel --out-dir dist
+      - run: uv build --package dlboard --wheel --out-dir dist
       - run: uv venv --python ${{ matrix.python-version }} client-venv
       - run: uv pip install --python client-venv/bin/python dist/*.whl
       - run: >
           client-venv/bin/python -c
-          "import dltrack, dltrack.client, dltrack.client.artifacts.image, dltrack.models"
+          "import dlboard, dlboard.client, dlboard.client.artifacts.image, dlboard.models"
 
   # Build-only: proves the root `Dockerfile`'s multi-stage build still produces a working
-  # dltrack-server image. Not pushed anywhere -- just a build sanity check on every PR.
+  # dlboard-server image. Not pushed anywhere -- just a build sanity check on every PR.
   docker-build:
     needs: [typecheck-precommit]
     runs-on: ubuntu-latest

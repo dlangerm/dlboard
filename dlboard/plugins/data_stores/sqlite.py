@@ -1,0 +1,164 @@
+"""Functions to use with a backing sqllite store."""
+
+from __future__ import annotations
+
+import sqlite3
+import time
+from pathlib import Path
+from typing import TYPE_CHECKING, override
+
+import sqlalchemy as sa
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy import event
+from sqlalchemy.dialects import sqlite
+from sqlalchemy.pool import NullPool
+
+from dlboard.serve import SCHEMA_PREP_OPTION, SQLStoreBase, set_data_store
+
+if TYPE_CHECKING:
+    from dash import Dash
+
+
+DEFAULT_BUSY_TIMEOUT_MS: int = 30_000
+_WAL_MODE_RETRY_ATTEMPTS: int = 10
+_WAL_MODE_RETRY_BACKOFF_S: float = 0.05
+
+
+def _engine(location: Path, busy_timeout_ms: int) -> sa.Engine:
+    """
+    An engine whose every connection is configured for concurrent access.
+
+    WAL journal mode lets readers proceed while a writer holds the write lock (the default
+    rollback-journal mode locks the whole file for the duration of a write), which is where most
+    "database is locked" errors under concurrent client flush load actually come from -- readers
+    vs. the one writer, not writer vs. writer. `timeout` covers the writer-vs-writer case that's
+    left: it sets sqlite's own busy handler, which retries (with its own internal backoff) for up
+    to that long before raising `OperationalError`, instead of us hand-rolling a Python-side retry
+    loop around every call. `NullPool`: a sqlite connection is just an open file, so each
+    transaction opens its own rather than holding a pool of them open across threads.
+    """
+    engine = sa.create_engine(
+        f"sqlite:///{location}",
+        poolclass=NullPool,
+        connect_args={"timeout": busy_timeout_ms / 1000, "check_same_thread": False},
+    )
+
+    event.listen(engine, "connect", _configure_connection)
+    event.listen(engine, "begin", _begin)
+    return engine
+
+
+def _configure_connection(dbapi_connection: sqlite3.Connection, _record: object) -> None:
+    dbapi_connection.execute("PRAGMA foreign_keys = ON")
+    _set_wal_mode(dbapi_connection)
+    # pysqlite's own implicit transaction handling defers the real `BEGIN` until the first write
+    # statement, which is both generally broken for DDL and (see `_begin`) is specifically how two
+    # connections can both run a read (e.g. "does this table exist yet?") before either actually
+    # holds a lock, race past each other, and both decide to create it. Disabling it here (and
+    # emitting our own explicit `BEGIN` below, in the `begin` hook) fixes both: the lock is taken
+    # at a point we choose, not at an implicit first write.
+    dbapi_connection.isolation_level = None
+
+
+def _set_wal_mode(dbapi_connection: sqlite3.Connection) -> None:
+    """
+    Switch to WAL mode, retrying "database is locked" a few times.
+
+    Converting a brand-new file to WAL needs its own brief exclusive lock, on top of (and not
+    covered by) the busy-timeout `_engine`'s `connect_args` configures for ordinary write
+    contention: several connections opened against the very same not-yet-WAL file at once (e.g.
+    several processes/threads racing to construct the first store against a fresh database) can
+    each see `OperationalError: database is locked` here specifically, immediately rather than
+    after waiting out that timeout -- a real race this module's `_begin` doesn't reach, since it
+    only serializes the schema-creation transaction itself, not the connections leading up to it.
+    Safe to retry: once any one connection wins, the file is WAL from then on and every later call
+    here (racing or not) is a fast no-op.
+    """
+    for attempt in range(_WAL_MODE_RETRY_ATTEMPTS):
+        try:
+            dbapi_connection.execute("PRAGMA journal_mode = WAL")
+        except sqlite3.OperationalError:
+            if attempt == _WAL_MODE_RETRY_ATTEMPTS - 1:
+                raise
+            time.sleep(_WAL_MODE_RETRY_BACKOFF_S * (attempt + 1))
+        else:
+            return
+
+
+def _begin(conn: sa.Connection) -> None:
+    """
+    Explicitly `BEGIN` every transaction (see `_configure_connection`), deferred except one.
+
+    Deferred (the default) only takes sqlite's write-intent lock at the first write, which is what
+    lets WAL readers proceed concurrently with a writer -- see `_engine`. The one exception is
+    `SQLStoreBase.__init__`'s schema creation/migration transaction (flagged via
+    `SCHEMA_PREP_OPTION`, since several processes can start that one concurrently against a brand
+    new database): that one takes the lock immediately, before its own first read, so a second
+    connection doing the same waits (via the busy handler `_engine`'s `timeout` configures) rather
+    than racing it. Forcing that onto every ordinary query too would serialize all of them behind
+    this one lock for the engine's whole lifetime, throwing away the WAL concurrency above.
+
+    That same schema-prep transaction also turns foreign key enforcement off before taking the
+    lock -- sqlite only allows changing it outside a transaction, and `_configure_connection`
+    already turned it on for this connection at connect time. A migration's batch table-recreate
+    (`migrations/env.py`'s `render_as_batch=True`, needed for anything beyond adding a column)
+    drops the old table to rename its replacement into place, and with enforcement on, sqlite
+    treats that drop as a cascading `DELETE` into every child row the same `ON DELETE CASCADE`
+    edge (`_sql.py`) would follow for a real one. `SQLLiteStore._verify_schema` closes the gap this
+    leaves, once migrations are done and before this transaction commits.
+    """
+    mode = "IMMEDIATE" if conn.get_execution_options().get(SCHEMA_PREP_OPTION) else "DEFERRED"
+    if mode == "IMMEDIATE":
+        conn.exec_driver_sql("PRAGMA foreign_keys = OFF")
+    conn.exec_driver_sql(f"BEGIN {mode}")
+
+
+class SQLLiteStore(SQLStoreBase[Path]):
+    """Use a sqllite database as the data store."""
+
+    def __init__(self, location: Path, busy_timeout_ms: int = DEFAULT_BUSY_TIMEOUT_MS) -> None:
+        """Initialize."""
+        self._location = location
+        self._busy_timeout_ms = busy_timeout_ms
+        location.parent.mkdir(parents=True, exist_ok=True)
+        super().__init__(_engine(location, busy_timeout_ms))
+
+    @override
+    def _insert_ignoring_conflicts(self, table: sa.Table) -> sa.Insert:
+        return sqlite.insert(table).on_conflict_do_nothing()
+
+    @override
+    def _verify_schema(self, conn: sa.Connection) -> None:
+        """
+        Fail loudly if a migration's batch table-recreate cascaded a delete into child rows.
+
+        Foreign key enforcement was off for this whole transaction (see `_begin`), precisely so
+        that recreate couldn't cascade -- this is the check that would otherwise have caught it.
+        `PRAGMA foreign_key_check` reports every row whose foreign key doesn't resolve, regardless
+        of whether enforcement was on while it got that way.
+        """
+        violations = conn.exec_driver_sql("PRAGMA foreign_key_check").fetchall()
+        if violations:
+            msg = f"Migration left {len(violations)} dangling foreign-key reference(s): {violations!r}"
+            raise RuntimeError(msg)
+
+    @classmethod
+    def get_or_create(cls, loc: Path, busy_timeout_ms: int = DEFAULT_BUSY_TIMEOUT_MS) -> SQLLiteStore:
+        """Create."""
+        return cls(location=loc, busy_timeout_ms=busy_timeout_ms)
+
+
+class AppSettings(BaseSettings):
+    """`DLBOARD_*` environment variables."""
+
+    model_config = SettingsConfigDict(env_prefix="DLBOARD_")
+
+    sqlite_location: Path = Path.home() / ".dlboard.sqlite"
+    sqlite_busy_timeout_ms: int = DEFAULT_BUSY_TIMEOUT_MS
+    """How long sqlite's own busy handler retries a locked database before raising `OperationalError`."""
+
+
+def plug(app: Dash) -> None:
+    """Plugin content."""
+    env = AppSettings()
+    set_data_store(app, SQLLiteStore.get_or_create(env.sqlite_location, env.sqlite_busy_timeout_ms))

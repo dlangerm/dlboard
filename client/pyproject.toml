@@ -37,36 +37,38 @@ dependencies = [
   "structlog>=26.1.0",
   "typing-extensions>=4.12.0"
 ]
-description = "A pytorch_lightning-compatible logger client for dltrack, a free, self-hosted experiment-tracking server."
+description = "A pytorch_lightning-compatible logger client for dlboard, a free, self-hosted experiment-tracking server."
 dynamic = ["version"]
-keywords = ["experiment-tracking", "logging", "machine-learning", "mlops", "pytorch-lightning"]
+keywords = [
+  "experiment-tracking",
+  "logging",
+  "machine-learning",
+  "mlops",
+  "pytorch-lightning"
+]
 license = "Apache-2.0"
 license-files = ["LICENSE"]
-name = "dltrack"
+name = "dlboard"
 readme = "README.md"
 requires-python = ">=3.10"
 
 [project.optional-dependencies]
-# Needed by `dltrack.client.dltrack_logger.DLTrackLogger`, the `pytorch_lightning.loggers.Logger`
-# adapter. Nothing else under `dltrack.client`/`dltrack.models` needs it.
-lightning = [
-  "pytorch-lightning>=2.6.5"
-]
-# Run `dltrack serve ...` from this same install, instead of a separate `pip install dltrack-server`.
-server = [
-  "dltrack-server"
-]
+# Needed by `dlboard.client.dlboard_logger.DLBoardLogger`, the `pytorch_lightning.loggers.Logger`
+# adapter. Nothing else under `dlboard.client`/`dlboard.models` needs it.
+lightning = ["pytorch-lightning>=2.6.5"]
+# Run `dlboard serve ...` from this same install, instead of a separate `pip install dlboard-server`.
+server = ["dlboard-server"]
 
 [project.urls]
-Changelog = "https://github.com/dlangerm/dltrack/blob/main/CHANGELOG.md"
-Documentation = "https://github.com/dlangerm/dltrack#readme"
-Homepage = "https://github.com/dlangerm/dltrack"
-Issues = "https://github.com/dlangerm/dltrack/issues"
-Repository = "https://github.com/dlangerm/dltrack"
+Changelog = "https://github.com/dlangerm/dlboard/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/dlangerm/dlboard#readme"
+Homepage = "https://github.com/dlangerm/dlboard"
+Issues = "https://github.com/dlangerm/dlboard/issues"
+Repository = "https://github.com/dlangerm/dlboard"
 
 [tool.hatch.build.targets.sdist.hooks.custom]
 # Same hook, registered again: a target-specific hook only runs for the target it's declared
-# under, and without this an `sdist` build sees none of `../dltrack` -- only `pyproject.toml`/
+# under, and without this an `sdist` build sees none of `../dlboard` -- only `pyproject.toml`/
 # `hatch_build.py` themselves, since those are the only files actually inside this project
 # directory. `uv build`'s default output (wheel + sdist) silently produced a near-empty sdist
 # before this was added; now a wheel built *from* that sdist works the same as one built straight
@@ -78,16 +80,20 @@ path = "hatch_build.py"
 path = "hatch_build.py"
 
 [tool.hatch.version]
-# The single source of truth for both distributions' version -- see `dltrack/_version.py`.
-path = "../dltrack/_version.py"
+# The single source of truth for both distributions' version -- see `dlboard/_version.py`.
+path = "../dlboard/_version.py"
 
 [tool.uv]
-# `hatch_build.py` pulls this package's real source from `../dltrack` (see its docstring), which
+# `hatch_build.py` pulls this package's real source from `../dlboard` (see its docstring), which
 # uv's own default cache key (`pyproject.toml`/`setup.py`/`setup.cfg` in *this* directory, nothing
 # outside it) has no way to see -- so without this, `uv sync` leaves a stale editable install in
 # place after a source-only change, until something else (a dependency bump, say) forces a rebuild.
 # Declaring our own `cache-keys` replaces that default outright, so it's repeated here too.
-cache-keys = [{ file = "pyproject.toml" }, { file = "hatch_build.py" }, { file = "../dltrack/**/*.py" }]
+cache-keys = [
+  { file = "pyproject.toml" },
+  { file = "hatch_build.py" },
+  { file = "../dlboard/**/*.py" }
+]
 
 [tool.uv.sources]
-dltrack-server = { workspace = true }
+dlboard-server = { workspace = true }

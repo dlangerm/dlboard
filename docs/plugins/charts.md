@@ -3,10 +3,10 @@
 ## What is this
 
 A chart plugin defines one `ChartType` — a way to turn parameters and a dataframe of logged data
-into a rendered Dash component. `ChartType[P, D, C]` (`dltrack/models/_view.py`) is generic over
+into a rendered Dash component. `ChartType[P, D, C]` (`dlboard/models/_view.py`) is generic over
 its parameter model `P`, the data shape it renders from `D`, and the rendered component type `C`.
 Built-ins: `line_chart.py`, `bar_chart.py`, `table_chart.py`, `image_series.py`
-(`dltrack/plugins/charts/`).
+(`dlboard/plugins/charts/`).
 
 The built-in line charts, and the image series that steps through logged images:
 
@@ -28,7 +28,7 @@ Subclass `ChartType` and implement its abstract methods:
 - `parameter_type() -> type[P]` — the Pydantic model describing this chart's settings.
 - `render(parameters, dataframe) -> C` — turn one instance into a Dash component.
 - `hint_required_columns` / `hint_required_artifact_keys` / `hint_required_hparams` — tell the
-  chart-autogen logic (`dltrack/serve/_pages/_experiment/_chart_autogen.py`) what a logged run
+  chart-autogen logic (`dlboard/serve/_pages/_experiment/_chart_autogen.py`) what a logged run
   needs before this chart type is even offered.
 - `field_column_kinds()` — map each parameter field to the `ColumnKind` (metric/artifact/hparam)
   that populates it, so the settings UI knows what to offer as choices.

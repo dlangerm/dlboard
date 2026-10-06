@@ -1,5 +1,5 @@
 blank_issues_enabled: true
 contact_links:
   - name: Report a security vulnerability
-    url: https://github.com/dlangerm/dltrack/security/advisories/new
+    url: https://github.com/dlangerm/dlboard/security/advisories/new
     about: Please don't file a public issue -- see SECURITY.md instead.

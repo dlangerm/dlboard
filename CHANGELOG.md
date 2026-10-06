@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to dltrack are documented here. The format follows
+All notable changes to dlboard are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows the tiers described in
 [docs/compatibility.md](docs/compatibility.md).
 
@@ -14,6 +14,6 @@ All notable changes to dltrack are documented here. The format follows
 
 <!--
 To cut a release: rename this section to `## [X.Y.Z] - YYYY-MM-DD`, start a fresh empty
-`## [Unreleased]` above it, bump `dltrack/_version.py`, and tag `vX.Y.Z` -- the release workflow
+`## [Unreleased]` above it, bump `dlboard/_version.py`, and tag `vX.Y.Z` -- the release workflow
 pulls that section's body into the GitHub release notes and publishes both distributions from it.
 -->

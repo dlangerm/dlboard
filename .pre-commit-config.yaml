@@ -52,7 +52,7 @@ repos:
     hooks:
       - id: uv-lock
   - repo: https://github.com/biomejs/pre-commit
-      # Lints/formats the browser-side JS in dltrack/**/assets/ (see biome.json). Runs in an
+      # Lints/formats the browser-side JS in dlboard/**/assets/ (see biome.json). Runs in an
       # isolated node environment pre-commit provisions itself -- no system Node/npm required.
     rev: v2.5.10
     hooks:

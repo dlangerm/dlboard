@@ -1,7 +1,7 @@
 name: Release
 
 # Triggered by pushing a `vX.Y.Z` tag. The whole pipeline assumes that tag and
-# `dltrack/_version.py`'s `__version__` already agree -- `check-version` fails fast if a release was
+# `dlboard/_version.py`'s `__version__` already agree -- `check-version` fails fast if a release was
 # tagged without bumping that file first, before anything gets published anywhere.
 on:
   push:
@@ -15,12 +15,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Tag matches dltrack/_version.py
+      - name: Tag matches dlboard/_version.py
         run: |
           tag_version="${GITHUB_REF_NAME#v}"
-          repo_version="$(grep -oP '(?<=^__version__ = ")[^"]+' dltrack/_version.py)"
+          repo_version="$(grep -oP '(?<=^__version__ = ")[^"]+' dlboard/_version.py)"
           if [ "$tag_version" != "$repo_version" ]; then
-            echo "Tag $GITHUB_REF_NAME doesn't match dltrack/_version.py's __version__ ($repo_version)." >&2
+            echo "Tag $GITHUB_REF_NAME doesn't match dlboard/_version.py's __version__ ($repo_version)." >&2
             exit 1
           fi
 
@@ -42,38 +42,38 @@ jobs:
   # PyPI trusted publishing (OIDC, no stored token) -- one job per distribution, since each is a
   # separate PyPI project with its own trusted-publisher registration. See the PR description /
   # release docs for the exact pypi.org setup this expects (repo, workflow filename, environment).
-  publish-dltrack:
+  publish-dlboard:
     needs: [test]
     runs-on: ubuntu-latest
-    environment: pypi
+    environment: pypi-client
     permissions:
       id-token: write
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
-      - run: uv build --package dltrack --out-dir dist
+      - run: uv build --package dlboard --out-dir dist
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist
 
-  publish-dltrack-server:
+  publish-dlboard-server:
     needs: [test]
     runs-on: ubuntu-latest
-    environment: pypi
+    environment: pypi-server
     permissions:
       id-token: write
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
-      - run: uv build --package dltrack-server --out-dir dist
+      - run: uv build --package dlboard-server --out-dir dist
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist
 
-  # Multi-arch dltrack-server image, pushed only once the PyPI publish above succeeded -- avoids a
+  # Multi-arch dlboard-server image, pushed only once the PyPI publish above succeeded -- avoids a
   # published image whose exact PyPI release failed partway through.
   publish-image:
-    needs: [publish-dltrack, publish-dltrack-server]
+    needs: [publish-dlboard, publish-dlboard-server]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -90,7 +90,7 @@ jobs:
       - id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository_owner }}/dltrack-server
+          images: ghcr.io/${{ github.repository_owner }}/dlboard-server
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
