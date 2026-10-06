@@ -1,13 +1,13 @@
 # Contributing
 
-Thanks for considering a contribution to dltrack.
+Thanks for considering a contribution to dlboard.
 
 ## Setup
 
 Everything runs through [`uv`](https://docs.astral.sh/uv/) (Python >=3.12, deps pinned in `uv.lock`):
 
 ```bash
-uv run --env-file .env dltrack serve local     # start the server
+uv run --env-file .env dlboard serve local     # start the server
 uv run pytest                       # run the test suite
 uv run pytest -m browser            # run only the browser/e2e tests
 uv run pytest -m "not browser and not postgres and not s3"  # everything that needs neither a browser nor Docker
@@ -33,7 +33,7 @@ repo follows -- file layout, the plugin system, test placement, and the rest.
 
 ## AI-assisted contributions
 
-dltrack's own history includes a fair amount of AI-assisted code (see the README's "AI Usage"
+dlboard's own history includes a fair amount of AI-assisted code (see the README's "AI Usage"
 section) -- so a PR being AI-assisted is not by itself a reason it won't be considered. It does need
 to meet the same bar as a PR you wrote by hand: you understand what it does and why, you can defend
 it in review, and it follows this repo's conventions rather than generic defaults. A PR too large

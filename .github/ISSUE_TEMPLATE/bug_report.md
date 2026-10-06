@@ -22,7 +22,7 @@ What you expected to happen instead.
 
 ## Environment
 
-- dltrack version (or commit):
+- dlboard version (or commit):
 - Deployment: `serve local` / `serve custom` (which plugins?) / other
 - Python version:
 - OS:

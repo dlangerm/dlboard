@@ -13,29 +13,29 @@ first part is a plugin:
 
 Built-in providers:
 
-- `anonymous` (`LOCAL_AUTH`, what `dltrack serve local` uses) — nobody signs in. A request is
-  attributed to a best-effort name (the client's `X-Dltrack-User` header, `DLTRACK_USER`, or the OS
+- `anonymous` (`LOCAL_AUTH`, what `dlboard serve local` uses) — nobody signs in. A request is
+  attributed to a best-effort name (the client's `X-Dlboard-User` header, `DLBOARD_USER`, or the OS
   login), which nothing proves, so access control stays off: everyone can see and edit everything,
   like `tensorboard`.
-- `password` (`PASSWORD_AUTH`) — username/password accounts, for hosting dltrack for other people
+- `password` (`PASSWORD_AUTH`) — username/password accounts, for hosting dlboard for other people
   without an identity provider.
 
 ## When you'd need this
 
-- You're hosting dltrack for more than yourself, and people should only see their own (or their
+- You're hosting dlboard for more than yourself, and people should only see their own (or their
   team's) projects: deploy with `PASSWORD_AUTH` (below).
 - Your organization already has an identity provider (Okta, Entra ID, Google, Keycloak, ...):
   write a provider for it (below). An OIDC provider and a "trusted reverse-proxy header" provider
   (for oauth2-proxy, Pomerium, an AWS ALB, Cloudflare Access) are the planned next built-ins; the
-  pieces they need (`Principal.groups`, group grants, `DLTRACK_ADMIN_GROUPS`) are already in place.
+  pieces they need (`Principal.groups`, group grants, `DLBOARD_ADMIN_GROUPS`) are already in place.
 
 ## How it works
 
-**Every request goes through one gate.** `install_request_gate` (`dltrack/serve/_backend/_auth.py`)
+**Every request goes through one gate.** `install_request_gate` (`dlboard/serve/_backend/_auth.py`)
 puts a `before_request` hook in front of every route: pages, Dash callbacks, REST, and
 `/artifact/<id>`. In order, it tries:
 
-1. an API token, `Authorization: Bearer dlt_...`. A token that doesn't check out is a 401. It
+1. an API token, `Authorization: Bearer dlb_...`. A token that doesn't check out is a 401. It
    never falls back to another way of identifying the caller.
 2. a signed-in session cookie (only under a provider that verifies identity),
 3. the provider's own `authenticate()`.
@@ -45,7 +45,7 @@ it can't resolve is redirected to the provider's `login_url()` if they're a brow
 page. Anything else gets a 401. Only routes registered with `add_public_route` skip the gate.
 
 **Every store access is authorized.** `get_data_store()`/`get_artifact_store()` return wrappers
-bound to the request's user (`dltrack/serve/_backend/_authorization.py`), so no page, callback or
+bound to the request's user (`dlboard/serve/_backend/_authorization.py`), so no page, callback or
 REST handler can forget to check, and no storage backend has to know about users. Background work
 with no user behind it uses `get_system_data_store()` explicitly.
 
@@ -68,19 +68,19 @@ Under `anonymous`, grants aren't enforced: everyone is an editor everywhere, and
 takes the scope it always has. The first user `anonymous` ever sees becomes the admin. A provider
 that verifies identity never does that; its admins come from configuration instead.
 
-## Hosting dltrack for other people (`PASSWORD_AUTH`)
+## Hosting dlboard for other people (`PASSWORD_AUTH`)
 
 ```python
 # mydeployment.py
-from dltrack.plugins import BUILTIN_BACKEND, BUILTIN_CHARTS, PASSWORD_AUTH, POSTGRES_S3_STORAGE, themes
+from dlboard.plugins import BUILTIN_BACKEND, BUILTIN_CHARTS, PASSWORD_AUTH, POSTGRES_S3_STORAGE, themes
 
 PLUGINS = [*POSTGRES_S3_STORAGE, *PASSWORD_AUTH, *BUILTIN_BACKEND, *BUILTIN_CHARTS, themes.default]
 ```
 
 ```bash
-export DLTRACK_SECRET_KEY=$(openssl rand -hex 32)   # signs sessions; the same for every worker
-dltrack users set-password alice --admin --plugins mydeployment:PLUGINS   # your first admin
-dltrack serve custom --plugins mydeployment:PLUGINS --host 0.0.0.0 --workers 4
+export DLBOARD_SECRET_KEY=$(openssl rand -hex 32)   # signs sessions; the same for every worker
+dlboard users set-password alice --admin --plugins mydeployment:PLUGINS   # your first admin
+dlboard serve custom --plugins mydeployment:PLUGINS --host 0.0.0.0 --workers 4
 ```
 
 Serve it over HTTPS (session cookies are `Secure` by default), behind a reverse proxy that
@@ -88,14 +88,14 @@ rate-limits `/login`. The provider's own throttle is per username, per worker pr
 
 | Setting | Default | |
 |---|---|---|
-| `DLTRACK_SECRET_KEY` | — (required) | Signs session cookies. Startup fails without it. |
-| `DLTRACK_ADMIN_USERS` | none | Comma-separated usernames made admin whenever they sign in. |
-| `DLTRACK_ADMIN_GROUPS` | none | Comma-separated IdP groups whose members are made admin. |
-| `DLTRACK_NEW_PROJECT_ACCESS` | unset (private) | `viewer`/`editor`: what everyone signed in gets on a new project. |
-| `DLTRACK_SESSION_LIFETIME_HOURS` | 336 | How long a browser stays signed in. |
-| `DLTRACK_SECURE_COOKIES` | `true` | Turn off only for plain-HTTP testing. |
-| `DLTRACK_PASSWORD_SIGNUP` | `admin_creates` | `approval` (sign up, then an admin enables you) or `open`. |
-| `DLTRACK_PASSWORD_MIN_LENGTH` | 12 | |
+| `DLBOARD_SECRET_KEY` | — (required) | Signs session cookies. Startup fails without it. |
+| `DLBOARD_ADMIN_USERS` | none | Comma-separated usernames made admin whenever they sign in. |
+| `DLBOARD_ADMIN_GROUPS` | none | Comma-separated IdP groups whose members are made admin. |
+| `DLBOARD_NEW_PROJECT_ACCESS` | unset (private) | `viewer`/`editor`: what everyone signed in gets on a new project. |
+| `DLBOARD_SESSION_LIFETIME_HOURS` | 336 | How long a browser stays signed in. |
+| `DLBOARD_SECURE_COOKIES` | `true` | Turn off only for plain-HTTP testing. |
+| `DLBOARD_PASSWORD_SIGNUP` | `admin_creates` | `approval` (sign up, then an admin enables you) or `open`. |
+| `DLBOARD_PASSWORD_MIN_LENGTH` | 12 | |
 
 The rest happens in the app:
 
@@ -103,11 +103,11 @@ The rest happens in the app:
   admin there.
 - Project owners share a project from its page's Sharing section.
 - Everyone creates API tokens for their training scripts on their Account page, then sets
-  `DLTRACK_API_KEY` wherever `DLTrackLogger` runs (see [client.md](../client.md)).
+  `DLBOARD_API_KEY` wherever `DLBoardLogger` runs (see [client.md](../client.md)).
 
 ## How do I build a provider
 
-Implement `AuthProvider` (`dltrack/models/_auth.py`) and register it from `plug(app)`. For example,
+Implement `AuthProvider` (`dlboard/models/_auth.py`) and register it from `plug(app)`. For example,
 behind a proxy that has already authenticated the caller:
 
 ```python
@@ -115,8 +115,8 @@ from typing import ClassVar
 
 from flask import request
 
-from dltrack.models import Principal
-from dltrack.serve import set_auth_provider
+from dlboard.models import Principal
+from dlboard.serve import set_auth_provider
 
 
 class ProxyHeaderProvider:

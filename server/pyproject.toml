@@ -26,7 +26,7 @@ dependencies = [
   "dash>=4.4.1",
   "dash-ag-grid>=35.3.0",
   "dash-mantine-components>=2.8.0",
-  "dltrack",
+  "dlboard",
   "granian>=2.8.2",
   "pandas>=3.0.5",
   "pendulum>=3.2.0",
@@ -36,36 +36,38 @@ dependencies = [
   "sqlalchemy>=2.0.40",
   "structlog>=26.1.0"
 ]
-description = "dltrack's server: the Dash app, storage/auth plugins, and the `dltrack` CLI."
+description = "dlboard's server: the Dash app, storage/auth plugins, and the `dlboard` CLI."
 dynamic = ["version"]
-keywords = ["dash", "dashboard", "experiment-tracking", "machine-learning", "mlops"]
+keywords = [
+  "dash",
+  "dashboard",
+  "experiment-tracking",
+  "machine-learning",
+  "mlops"
+]
 license = "Apache-2.0"
 license-files = ["LICENSE"]
-name = "dltrack-server"
+name = "dlboard-server"
 readme = "README.md"
 requires-python = ">=3.12"
 
 [project.optional-dependencies]
-postgres = [
-  "psycopg[binary]>=3.2"
-]
-s3 = [
-  "boto3>=1.40"
-]
+postgres = ["psycopg[binary]>=3.2"]
+s3 = ["boto3>=1.40"]
 
 [project.scripts]
-dltrack = "dltrack._cli:main"
+dlboard = "dlboard._cli:main"
 
 [project.urls]
-Changelog = "https://github.com/dlangerm/dltrack/blob/main/CHANGELOG.md"
-Documentation = "https://github.com/dlangerm/dltrack#readme"
-Homepage = "https://github.com/dlangerm/dltrack"
-Issues = "https://github.com/dlangerm/dltrack/issues"
-Repository = "https://github.com/dlangerm/dltrack"
+Changelog = "https://github.com/dlangerm/dlboard/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/dlangerm/dlboard#readme"
+Homepage = "https://github.com/dlangerm/dlboard"
+Issues = "https://github.com/dlangerm/dlboard/issues"
+Repository = "https://github.com/dlangerm/dlboard"
 
 [tool.hatch.build.targets.sdist.hooks.custom]
 # Same hook, registered again: a target-specific hook only runs for the target it's declared
-# under, and without this an `sdist` build sees none of `../dltrack`'s server-owned files -- only
+# under, and without this an `sdist` build sees none of `../dlboard`'s server-owned files -- only
 # `pyproject.toml`/`hatch_build.py` themselves, since those are the only files actually inside this
 # project directory. `uv build`'s default output (wheel + sdist) silently produced a near-empty
 # sdist before this was added; now a wheel built *from* that sdist works the same as one built
@@ -79,18 +81,22 @@ path = "hatch_build.py"
 path = "hatch_build.py"
 
 [tool.hatch.version]
-# The single source of truth for both distributions' version -- see `dltrack/_version.py`. Kept in
-# lockstep with the `dltrack` dependency above only informally for now (both are bumped by the same
+# The single source of truth for both distributions' version -- see `dlboard/_version.py`. Kept in
+# lockstep with the `dlboard` dependency above only informally for now (both are bumped by the same
 # release); pinning that dependency to this exact version is a release-process concern, not this one.
-path = "../dltrack/_version.py"
+path = "../dlboard/_version.py"
 
 [tool.uv]
-# `hatch_build.py` pulls this package's real source from `../dltrack` (see its docstring), which
+# `hatch_build.py` pulls this package's real source from `../dlboard` (see its docstring), which
 # uv's own default cache key (`pyproject.toml`/`setup.py`/`setup.cfg` in *this* directory, nothing
 # outside it) has no way to see -- so without this, `uv sync` leaves a stale editable install in
 # place after a source-only change, until something else (a dependency bump, say) forces a rebuild.
 # Declaring our own `cache-keys` replaces that default outright, so it's repeated here too.
-cache-keys = [{ file = "pyproject.toml" }, { file = "hatch_build.py" }, { file = "../dltrack/**/*.py" }]
+cache-keys = [
+  { file = "pyproject.toml" },
+  { file = "hatch_build.py" },
+  { file = "../dlboard/**/*.py" }
+]
 
 [tool.uv.sources]
-dltrack = { workspace = true }
+dlboard = { workspace = true }

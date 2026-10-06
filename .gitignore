@@ -14,7 +14,7 @@ lightning-logs/
 _scratch_test.py
 .coverage
 
-# Output of the docs-screenshot check (see dltrack/tests/docs_screenshots_test.py)
+# Output of the docs-screenshot check (see dlboard/tests/docs_screenshots_test.py)
 screenshot-diffs/
 
 # Claude Code's own local settings/session state -- developer-machine-local, not project config.

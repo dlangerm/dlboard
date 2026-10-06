@@ -8,7 +8,7 @@ assignees: ""
 
 ## What problem does this solve
 
-What are you trying to do that dltrack doesn't support today?
+What are you trying to do that dlboard doesn't support today?
 
 ## Proposed solution
 

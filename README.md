@@ -1,6 +1,6 @@
-# dltrack
+# dlboard
 
-A free, self-hosted experiment-tracking server. dltrack is a Dash/Dash-Mantine web app for browsing
+A free, self-hosted experiment-tracking server. dlboard is a Dash/Dash-Mantine web app for browsing
 ML training runs, plus a `pytorch_lightning`-compatible logger client that ships metrics,
 hyperparameters, and artifacts to it over a REST API (by default).
 
@@ -31,13 +31,13 @@ Leave notes on an experiment, calling out specific runs or teammates by name:
 
 ## Running it
 
-Installed as a package (e.g. `uv tool install 'dltrack[server]'` or `pip install 'dltrack[server]'`
-— quoted so your shell doesn't treat `[server]` as a glob), dltrack gives you a `dltrack` command,
+Installed as a package (e.g. `uv tool install 'dlboard[server]'` or `pip install 'dlboard[server]'`
+— quoted so your shell doesn't treat `[server]` as a glob), dlboard gives you a `dlboard` command,
 the same idea as `tensorboard`:
 
 ```bash
-dltrack serve local     # anonymous, single-user, sqlite + local disk -- sane defaults, no setup
-dltrack serve local --sqlite-location ./runs.sqlite --artifact-store-location ./artifacts
+dlboard serve local     # anonymous, single-user, sqlite + local disk -- sane defaults, no setup
+dlboard serve local --sqlite-location ./runs.sqlite --artifact-store-location ./artifacts
 ```
 
 Outside of `--debug`, this runs on [Granian](https://github.com/emmett-framework/granian) (Rust,
@@ -47,19 +47,19 @@ multi-worker, auto-respawns a crashed worker) instead of Dash's own development 
 machine (`127.0.0.1`, the default); binding `--host` to anything else needs
 `--i-understand-anyone-who-can-reach-this-is-an-admin` and a network boundary or reverse-proxy auth
 you trust. For a deployment other people reach, use `serve custom` with a real auth provider
-instead (`dltrack.plugins.PASSWORD_AUTH`) -- see [docs/docker.md](docs/docker.md).
+instead (`dlboard.plugins.PASSWORD_AUTH`) -- see [docs/docker.md](docs/docker.md).
 
-Bringing your own storage/auth/pages/chart plugins instead of `local`'s built-in set? `dltrack serve
+Bringing your own storage/auth/pages/chart plugins instead of `local`'s built-in set? `dlboard serve
 custom` runs the same production server against any `list[PluginProtocol]` you point it at:
 
 ```bash
-dltrack serve custom --plugins mypackage.deployment:PLUGINS --workers 4
+dlboard serve custom --plugins mypackage.deployment:PLUGINS --workers 4
 ```
 
 `mypackage/deployment.py` just needs a module-level `PLUGINS: list[PluginProtocol]` -- see
 [docs/plugins/overview.md](docs/plugins/overview.md).
 
-Hosting it for other people? Swap `anonymous` for `dltrack.plugins.PASSWORD_AUTH` in that list and
+Hosting it for other people? Swap `anonymous` for `dlboard.plugins.PASSWORD_AUTH` in that list and
 everyone signs in. Each user sees only the projects they own or that someone shared with them, and
 their training scripts authenticate with API tokens. See [docs/plugins/auth.md](docs/plugins/auth.md)
 for setup.
@@ -71,7 +71,7 @@ Working in this repo instead, everything runs through [`uv`](https://docs.astral
 (Python >=3.12, deps pinned in `uv.lock`):
 
 ```bash
-uv run --env-file .env dltrack serve local     # start the server
+uv run --env-file .env dlboard serve local     # start the server
 uv run pytest                       # run the test suite
 uv run pytest -m browser            # run only the browser/e2e tests
 uv run pytest --screenshots=update  # regenerate the docs screenshots in docs/images (a local preview)
@@ -80,18 +80,18 @@ uv run pyright                      # type check
 uv run prek run --all-files         # run pre-commit hooks manually
 ```
 
-To log a training run against a running server, point `dltrack.client.DLTrackLogger` at it the
+To log a training run against a running server, point `dlboard.client.DLBoardLogger` at it the
 way you'd use any other `pytorch_lightning` logger — see [docs/client.md](docs/client.md).
 
 ## Docs
 
 - [Architecture](docs/architecture.md) — how the app is put together: the plugin system, and the
   request flow from a training script to the browser.
-- [Client & logging](docs/client.md) — `DLTrackLogger`, the REST client, and how to log a new kind
+- [Client & logging](docs/client.md) — `DLBoardLogger`, the REST client, and how to log a new kind
   of artifact.
 - [Docker](docs/docker.md) — building and running the image, its Postgres + local-disk default, and
   configuring it (including swapping in S3).
-- **Plugins** — dltrack has no built-in opinions about storage, auth, charts, or theming; all of
+- **Plugins** — dlboard has no built-in opinions about storage, auth, charts, or theming; all of
   it is plugins. (Page layout is the one deliberate exception — see
   [architecture.md](docs/architecture.md).) Start with the
   [overview](docs/plugins/overview.md), then the category you need:
@@ -107,7 +107,7 @@ lint, type-check, and test CI (see `.github/workflows/ci.yml`) — run the comma
 before pushing.
 
 The screenshots above are rendered by the same Playwright harness the browser tests use
-(`dltrack/tests/docs_screenshots_test.py`), and CI fails if they no longer match the app. Font
+(`dlboard/tests/docs_screenshots_test.py`), and CI fails if they no longer match the app. Font
 rendering differs between machines, so the committed images are the ones CI renders: when that check
 fails, download the `doc-screenshots` artifact from the run, copy its `actual/` PNGs over
 `docs/images/`, and commit. `uv run pytest --screenshots=update` regenerates them locally as a
@@ -116,7 +116,7 @@ conventions this repo follows.
 
 ## AI Usage
 
-I started dltrack as a personal project coded by yours truly. As I went down the rabbit hole of implementation I realized
+I started dlboard as a personal project coded by yours truly. As I went down the rabbit hole of implementation I realized
 I was spending a _ton_ of time twiddling with webdev instead of actually doing useful work. At some level, experiment
 tracker libraries live and die by their browser experience and their offered feature set. I set out to make a free, open-source
 tool that I actually wanted to use for my own projects. Making something I actually wanted to use became a behemoth of

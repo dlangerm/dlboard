@@ -1,6 +1,6 @@
 # A virtual workspace root: no `[project]` table of its own, on purpose -- `client/` (the
-# `dltrack` distribution) and `server/` (`dltrack-server`) are the two real packages, both built
-# from this one shared `dltrack/` source tree (see their own `pyproject.toml`s and
+# `dlboard` distribution) and `server/` (`dlboard-server`) are the two real packages, both built
+# from this one shared `dlboard/` source tree (see their own `pyproject.toml`s and
 # `hatch_build.py`s). A virtual root is what makes bare `uv run`/`uv sync` default to every
 # workspace member instead of just one, so every command below (and in CLAUDE.md) keeps working
 # unchanged -- a `[project]` table here would make this directory an explicit, single default
@@ -16,8 +16,8 @@ dev = [
   "pytest>=9.1.1",
   "pytest-cov>=7.1.0",
   "pytest-playwright>=0.9.0",
-  # Not a real dependency of the `dltrack` distribution -- `client/pyproject.toml`'s
-  # `[project.optional-dependencies] lightning` is that, for an actual `dltrack[lightning]`
+  # Not a real dependency of the `dlboard` distribution -- `client/pyproject.toml`'s
+  # `[project.optional-dependencies] lightning` is that, for an actual `dlboard[lightning]`
   # consumer. This repo's own test suite (and `examples/lightning_quickstart.py`) exercises the Lightning adapter
   # directly, so it needs installing without anyone having to remember `--extra lightning`.
   "pytorch-lightning>=2.6.5",
@@ -32,8 +32,8 @@ dev = [
 # So the bare `alembic` CLI (`revision --autogenerate`, `history`, ...) works from the repo root
 # with no `alembic.ini` -- `_schema_upgrade.py` and `migrations/env.py` build their own `Config`
 # and never read this section themselves. A developer authoring a new revision still needs
-# `DLTRACK_MIGRATIONS_URL` set (see `migrations/env.py`), since there's no database to default to.
-script_location = "dltrack/serve/_backend/migrations"
+# `DLBOARD_MIGRATIONS_URL` set (see `migrations/env.py`), since there's no database to default to.
+script_location = "dlboard/serve/_backend/migrations"
 
 [tool.coverage.report]
 exclude_also = ["if TYPE_CHECKING:", "\\.\\.\\."]
@@ -41,10 +41,10 @@ skip_covered = false
 
 [tool.coverage.run]
 branch = true
-source = ["dltrack"]
+source = ["dlboard"]
 
 [tool.pyright]
-include = ["dltrack"]
+include = ["dlboard"]
 reportMissingTypeStubs = false
 reportUnnecessaryTypeIgnoreComment = "error"
 reportUnusedFunction = false
@@ -55,7 +55,7 @@ venvPath = "."
 [tool.pytest.ini_options]
 filterwarnings = [
   "error",
-  # `LocalStackContainer.start()` (`s3_test_server`, `dltrack/conftest.py`) calls testcontainers'
+  # `LocalStackContainer.start()` (`s3_test_server`, `dlboard/conftest.py`) calls testcontainers'
   # own legacy `wait_for_logs(container, "<regex>")` internally -- nothing we call directly, and
   # not actionable from here.
   "ignore:The wait_for_logs function with string or callable predicates is deprecated:DeprecationWarning"
@@ -67,7 +67,7 @@ markers = [
   "screenshots: renders the docs screenshots; only runs with --screenshots=check|update"
 ]
 pythonpath = ["."]
-testpaths = ["dltrack"]
+testpaths = ["dlboard"]
 
 [tool.ruff]
 indent-width = 4
@@ -147,25 +147,25 @@ runtime-evaluated-base-classes = [
   "SLF001",
   "INP001"
 ]
-"dltrack/scripts/*" = ["T201"]
+"dlboard/scripts/*" = ["T201"]
 # A standalone runnable example, not a package -- never imported, so no `__init__.py` is needed.
 "examples/*" = ["INP001", "T201"]
-# `client/`/`server/`'s own build-time scripts, not `dltrack/`'s -- standalone hatchling hooks,
+# `client/`/`server/`'s own build-time scripts, not `dlboard/`'s -- standalone hatchling hooks,
 # never imported as part of either package.
 "{client,server}/hatch_build.py" = ["INP001"]
 
 [tool.uv.workspace]
-# `client/` is `dltrack` (the client + shared models) and `server/` is `dltrack-server` (the Dash
-# app, storage/auth plugins, and the `dltrack` CLI) -- both built from different subsets of this
-# one shared `dltrack/` tree (see each one's own `hatch_build.py`). One repo, one source tree, two
+# `client/` is `dlboard` (the client + shared models) and `server/` is `dlboard-server` (the Dash
+# app, storage/auth plugins, and the `dlboard` CLI) -- both built from different subsets of this
+# one shared `dlboard/` tree (see each one's own `hatch_build.py`). One repo, one source tree, two
 # distributions: a client-only install never needs dash, granian, or sqlalchemy, and the published
 # server image never needs torch.
 members = ["client", "server"]
 
 [tool.vulture]
-# Deliberately does NOT exclude `tests/`: dltrack is a library as much as an application, and for
+# Deliberately does NOT exclude `tests/`: dlboard is a library as much as an application, and for
 # a fair few public methods (`DataStore.update_user`, `_sampling.downsample_grouped`,
-# `DLTrackLogger.from_names`, ...) the only caller in this repo *is* their own test -- excluding
+# `DLBoardLogger.from_names`, ...) the only caller in this repo *is* their own test -- excluding
 # tests would make those look dead instead of correctly "used, just not yet from our own code".
 exclude = []
 ignore_decorators = [
@@ -212,7 +212,7 @@ ignore_names = [
   "link_text",
   # `PluginProtocol.plug(app: Dash) -> None` -- every plugin module's install hook, called
   # structurally as `plugin.plug(app)` off whatever module a deployment's plugin list supplies
-  # (see `dltrack.serve.resolve_plugins`/`dltrack.serve.app.app`), never by a literal `.plug(`
+  # (see `dlboard.serve.resolve_plugins`/`dlboard.serve.app.app`), never by a literal `.plug(`
   # call vulture's static analysis can see.
   "plug",
   # `dash.register_page`'s per-route module contract (`serve/_pages/*.py`) -- Dash's page
@@ -224,7 +224,7 @@ ignore_names = [
   # pytest's module-level marker convention (`pytestmark = pytest.mark.browser`) -- applied by
   # pytest itself scanning the module namespace, never referenced by name in our own code.
   "pytestmark",
-  # pytest's own conftest hooks (`dltrack/conftest.py`) -- discovered and called by pytest by name.
+  # pytest's own conftest hooks (`dlboard/conftest.py`) -- discovered and called by pytest by name.
   "pytest_addoption",
   "pytest_collection_modifyitems",
   # Pydantic model fields that are read structurally (raw SQL column names, `model_dump()`
@@ -236,9 +236,9 @@ ignore_names = [
   "requested_at",
   "updated_at",
   "bootstrap_admin_assigned",
-  # `ViewFile.dltrack_view` (`serve/_pages/_experiment/_views.py`): an exported view's format
+  # `ViewFile.dlboard_view` (`serve/_pages/_experiment/_views.py`): an exported view's format
   # version, only ever checked by its own `Literal[1]` validation on import.
-  "dltrack_view",
+  "dlboard_view",
   # `serve/_backend/tests/sql_functions_test.py`'s throwaway schema-reflection model fields --
   # same "read structurally, not by attribute" story as above, scoped to their test models.
   "created",
@@ -263,8 +263,8 @@ ignore_names = [
   "depends_on",
   "downgrade",
   "isolation_level",  # sqlite api is used internally
-  "PLUGINS"  # used when configuring custom dltrack plugins in the server
+  "PLUGINS"  # used when configuring custom dlboard plugins in the server
 ]
 min_confidence = 60
-paths = ["dltrack/"]
+paths = ["dlboard/"]
 sort_by_size = true

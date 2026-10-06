@@ -1,11 +1,11 @@
 """
-Training loop, doubling as a demo of dltrack's image-logging path under realistic image weight.
+Training loop, doubling as a demo of dlboard's image-logging path under realistic image weight.
 
 Per-batch debug crops (the old version's `log_extra_artifacts`) barely exercise the upload path --
 they're tiny and infrequent. This logs two heavier things instead: a full-resolution confusion
 matrix once per validation epoch, and a large tiled mosaic once at startup. The actual performance
 guarantee for that workload (colocated client/server should be fast; degradation beyond that should
-come from the network, not dltrack) is asserted in `dltrack/client/tests/dltrack_logger_perf_test.py`,
+come from the network, not dlboard) is asserted in `dlboard/client/tests/dlboard_logger_perf_test.py`,
 not here -- this script is just meant to look like something a real training run would log.
 """
 
@@ -22,8 +22,8 @@ from torch import nn
 from torch.utils.data import DataLoader, random_split
 from torchvision import datasets, transforms
 
-from dltrack.client.artifacts import image
-from dltrack.client.dltrack_logger import DLTrackLogger
+from dlboard.client.artifacts import image
+from dlboard.client.dlboard_logger import DLBoardLogger
 
 LOGDIR = Path("./lightning-logs")
 NUM_CLASSES = 10
@@ -140,7 +140,7 @@ class MnistMLP(pl.LightningModule):
     @override
     def on_validation_epoch_end(self) -> None:
         assert self.trainer.logger is not None
-        lg = cast("DLTrackLogger", self.trainer.logger)
+        lg = cast("DLBoardLogger", self.trainer.logger)
         lg.log_artifact(
             [
                 image.Image(
@@ -210,7 +210,7 @@ class MnistDataModule(pl.LightningDataModule):
         )
 
 
-def log_startup_mosaic(logger: DLTrackLogger, data_dir: str | Path) -> None:
+def log_startup_mosaic(logger: DLBoardLogger, data_dir: str | Path) -> None:
     """Log one large tiled mosaic of raw (unnormalized) digits -- a heavier one-shot upload."""
     raw = datasets.MNIST(root=data_dir, train=False, download=True, transform=transforms.ToTensor())
     sample = torch.stack([raw[i][0].squeeze(0) for i in range(MOSAIC_GRID * MOSAIC_GRID)])
@@ -220,7 +220,7 @@ def log_startup_mosaic(logger: DLTrackLogger, data_dir: str | Path) -> None:
 def main() -> None:
     """Entrypoint for training."""
     LOGDIR.mkdir(exist_ok=True)
-    logger = DLTrackLogger.from_names(
+    logger = DLBoardLogger.from_names(
         "character-classification",
         "mnist",
         "Classifying characters",

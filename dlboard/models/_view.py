@@ -1,0 +1,483 @@
+"""Data models for rendering an experiment view."""
+
+from __future__ import annotations
+
+import hashlib
+import itertools
+import json
+import types
+import typing
+from abc import ABC, abstractmethod
+
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
+from structlog.stdlib import get_logger
+
+from dlboard._compat import StrEnum
+
+if typing.TYPE_CHECKING:
+    from dlboard.models._data_store import DataStore
+
+_log = get_logger(__name__)
+
+# Pre-3.12 `TypeVar` style (the client's floor is 3.10). `_Parameters` is a chart type's own
+# settings model; `_Dataframe`/`_Chart` are its input/output; `_Panel` is what a `Page` renders
+# a panel of charts into (named to match `DataStore.get_or_create_page`'s own `Panel`).
+_Parameters = typing.TypeVar("_Parameters", bound=BaseModel)
+_Dataframe = typing.TypeVar("_Dataframe")
+_Chart = typing.TypeVar("_Chart")
+_Panel = typing.TypeVar("_Panel")
+
+_CHART_ID_LENGTH = 10
+
+_FALLBACK_NATURAL_WIDTH: typing.Final = 400
+"""Width used for a chart whose persisted `parameters` no longer validate (e.g. after a schema
+change), so a single broken chart can't crash the whole panel's layout -- `render()` still raises
+for the same case, surfacing as that one chart's own inline error instead."""
+
+
+MIN_GRID_COLUMNS: typing.Final = 1
+MAX_GRID_COLUMNS: typing.Final = 6
+GridColumns = typing.Annotated[int, Field(ge=MIN_GRID_COLUMNS, le=MAX_GRID_COLUMNS)]
+"""How many columns a panel's `"grid"` layout has -- the one range both the model and the UI use."""
+
+
+class ColumnKind(StrEnum):
+    """Registry of dataframe column kinds a chart parameter field can be populated from."""
+
+    METRIC = "metric"
+    ARTIFACT = "artifact"
+    HPARAM = "hparam"
+    GROUPING = "grouping"
+    """Synthetic kind for fields that group/split by any metric or hparam column, plus `run_id` --
+    see `group_columns_by_kind`. No dataframe column is ever tagged with this kind directly."""
+
+
+RUN_NAME_COLUMN: typing.Final = "run_name"
+"""
+The column a run's display name is carried under, when a chart's dataframe has one.
+
+Not a real metric/hparam/artifact column -- never fetched from the store directly, and not part
+of `MetricColumn`'s "fixed columns of a `MetricFrame`" -- it's merged onto a panel's fetched
+dataframe afterward (see `fetch_panel_dataframe`), so a chart can label a run by name instead of
+its bare id without fetching run metadata itself. One shared symbol (rather than every chart type
+repeating the string literal) so a plugin and the page code that feeds it stay in sync, and so a
+chart that needs to *exclude* non-metric columns (e.g. `table_chart.py`'s "runs" mode) can name it
+precisely rather than guessing at string prefixes.
+"""
+
+
+class ParameterFieldType(StrEnum):
+    """Widget type a chart parameter field should be rendered as."""
+
+    BOOL = "bool"
+    INT = "int"
+    FLOAT = "float"
+    STR = "str"
+    LIST_STR = "list[str]"
+
+
+class ChartType(ABC, BaseModel, typing.Generic[_Parameters, _Dataframe, _Chart], frozen=True, extra="forbid"):
+    """A type of chart."""
+
+    name: typing.ClassVar[str]
+    """The name of the chart type."""
+
+    @classmethod
+    @abstractmethod
+    def parameter_type(cls) -> type[_Parameters]:
+        """The parameter container type."""
+
+    @classmethod
+    @abstractmethod
+    def render(cls, parameters: _Parameters, dataframe: _Dataframe) -> _Chart:
+        """Render a chart given an instance."""
+
+    @classmethod
+    @abstractmethod
+    def hint_required_columns(cls, parameters: _Parameters) -> set[str] | None:
+        """Hint at the columns required for this chart."""
+
+    @classmethod
+    @abstractmethod
+    def hint_required_artifact_keys(cls, parameters: _Parameters) -> set[str] | None:
+        """Hint at the columns required for this chart."""
+
+    @classmethod
+    @abstractmethod
+    def hint_required_hparams(cls, parameters: _Parameters) -> set[str] | None:
+        """Hint at the hyperparameter keys required for this chart."""
+
+    @classmethod
+    @abstractmethod
+    def natural_width(cls, parameters: _Parameters) -> int:
+        """Preferred render width in px, derived from this chart's own settings (e.g. height + aspect ratio)."""
+
+    @classmethod
+    def register(cls, *, allow_override: bool = False) -> None:
+        ChartTypeRegistry.register(cls, allow_override=allow_override)
+
+    @classmethod
+    @abstractmethod
+    def field_column_kinds(cls) -> dict[str, ColumnKind]:
+        """
+        Map string parameter field names to the column kind that populates them.
+
+        Fields left unlisted default to ColumnKind.METRIC.
+        """
+
+
+class ParameterField(BaseModel, frozen=True, extra="forbid"):
+    """A field describing a chart parameter."""
+
+    name: str
+    type: ParameterFieldType
+    required: bool
+    default: bool | int | float | str | list[str] | None = None
+    column_kind: ColumnKind | None = None
+    choices: tuple[str, ...] | None = None
+    """Fixed set of allowed values for a `Literal[...]`-typed field, rendered as a dropdown."""
+    description: str | None = None
+    """Help text shown alongside the field's widget, sourced from the settings model's own
+    `pydantic.Field(description=...)`."""
+
+
+class UnknownChartTypeError(KeyError):
+    """
+    No chart plugin registered `chart_type_name`.
+
+    A saved view names a chart type this deployment doesn't have installed (a plugin that was
+    removed, or never installed on this server at all). Subclasses `KeyError` so existing
+    `except KeyError` handling still catches it; callers that want to react to this specifically
+    (as opposed to a bare lookup miss elsewhere) can catch it by name instead.
+    """
+
+    def __init__(self, chart_type_name: str) -> None:
+        self.chart_type_name = chart_type_name
+        super().__init__(
+            f"No chart plugin registered for chart type {chart_type_name!r} -- it may need to be installed."
+        )
+
+
+class ChartTypeRegistry:
+    """Registry of all chart types."""
+
+    _all_charts: typing.ClassVar[dict[str, type[ChartType[typing.Any, typing.Any, typing.Any]]]] = {}
+
+    @classmethod
+    def register(
+        cls,
+        chart_type: type[ChartType[typing.Any, typing.Any, typing.Any]],
+        *,
+        allow_override: bool = False,
+    ) -> None:
+        """Register a chart type."""
+        if not allow_override and chart_type.name in cls._all_charts:
+            msg = f"Duplicated chart type {chart_type.name=}"
+            raise AttributeError(msg)
+        cls._all_charts[chart_type.name] = chart_type
+
+    @classmethod
+    def get_chart_type(cls, chart_type_name: str) -> type[ChartType[typing.Any, typing.Any, typing.Any]]:
+        """Fetch a registered chart type by name. Raises `UnknownChartTypeError` if none is registered."""
+        if chart_type_name not in cls._all_charts:
+            raise UnknownChartTypeError(chart_type_name)
+        return cls._all_charts[chart_type_name]
+
+    @classmethod
+    def get_registered_chart_types(cls) -> dict[str, dict[str, ParameterField]]:
+        """Expose chart metadata for simple editors and plugins."""
+        return {
+            name: cls._describe_parameter_fields(
+                cls.get_chart_type(name).parameter_type(),
+                cls.get_chart_type(name).field_column_kinds(),
+            )
+            for name in sorted(cls._all_charts)
+        }
+
+    @staticmethod
+    def _describe_parameter_fields(
+        parameter_type: type[BaseModel],
+        field_column_kinds: dict[str, ColumnKind],
+    ) -> dict[str, ParameterField]:
+        """Describe parameter fields for generic UI generation."""
+        field_column_kinds = field_column_kinds
+        field_descriptors: dict[str, ParameterField] = {}
+        for field_name, field in parameter_type.model_fields.items():
+            annotation = field.annotation
+            if typing.get_origin(annotation) in (typing.Union, types.UnionType):
+                # Unwrap `X | None` (an optional field) down to the underlying `X` — the widget
+                # type is the same either way; only `required` (from `field.is_required()`) differs.
+                non_none_args = [a for a in typing.get_args(annotation) if a is not type(None)]
+                if len(non_none_args) == 1:
+                    annotation = non_none_args[0]
+            choices: tuple[str, ...] | None = None
+            match annotation:
+                case _ if annotation is bool:
+                    field_type = ParameterFieldType.BOOL
+                case _ if annotation is float:
+                    field_type = ParameterFieldType.FLOAT
+                case _ if annotation is int:
+                    field_type = ParameterFieldType.INT
+                case _ if annotation is str:
+                    field_type = ParameterFieldType.STR
+                case _ if typing.get_origin(annotation) is list and typing.get_args(annotation) == (str,):
+                    field_type = ParameterFieldType.LIST_STR
+                case _ if typing.get_origin(annotation) is typing.Literal:
+                    # A fixed set of string choices, e.g. `Literal["number", "category"]` — rendered
+                    # as a dropdown rather than a free-text field.
+                    field_type = ParameterFieldType.STR
+                    choices = typing.get_args(annotation)
+                case _:
+                    msg = f"{annotation} unsupported"
+                    raise TypeError(msg)
+
+            field_descriptors[field_name] = ParameterField(
+                name=field_name,
+                type=field_type,
+                required=field.is_required(),
+                default=field.default if not field.is_required() else None,
+                column_kind=field_column_kinds.get(field_name),
+                choices=choices,
+                description=field.description,
+            )
+        return field_descriptors
+
+    @classmethod
+    def render(cls, chart: ChartInstance[_Dataframe, _Chart], dataframe: object) -> _Chart:
+        chart_type = cls.get_chart_type(chart.chart_type)
+        return chart_type.render(chart_type.parameter_type().model_validate(chart.parameters), dataframe)
+
+    @classmethod
+    def hint_required_columns(cls, chart: ChartInstance[_Dataframe, _Chart]) -> set[str] | None:
+        chart_type = cls.get_chart_type(chart.chart_type)
+        return chart_type.hint_required_columns(chart_type.parameter_type().model_validate(chart.parameters))
+
+    @classmethod
+    def hint_required_artifact_keys(cls, chart: ChartInstance[_Dataframe, _Chart]) -> set[str] | None:
+        chart_type = cls.get_chart_type(chart.chart_type)
+        return chart_type.hint_required_artifact_keys(
+            chart_type.parameter_type().model_validate(chart.parameters)
+        )
+
+    @classmethod
+    def hint_required_hparams(cls, chart: ChartInstance[_Dataframe, _Chart]) -> set[str] | None:
+        chart_type = cls.get_chart_type(chart.chart_type)
+        return chart_type.hint_required_hparams(chart_type.parameter_type().model_validate(chart.parameters))
+
+    @classmethod
+    def natural_width(cls, chart: ChartInstance[_Dataframe, _Chart]) -> int:
+        chart_type = cls.get_chart_type(chart.chart_type)
+        return chart_type.natural_width(chart_type.parameter_type().model_validate(chart.parameters))
+
+
+class ChartInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, extra="forbid"):
+    """A chart for a set of metrics."""
+
+    id: str = ""
+    """
+    A stable handle for this chart (what a `?chart=` deep link points at), unlike its position.
+
+    Never needs to be passed: when absent -- a new chart, or one saved before ids existed -- it's
+    derived from the chart's type and parameters, so it's stable across loads without a write. Once
+    saved it's kept as-is, so editing a chart's parameters later doesn't change it. Two charts with
+    identical type and parameters on one page share an id; a link to either opens the first.
+    """
+
+    chart_type: str
+    """The type of chart."""
+
+    parameters: dict[str, object] = {}
+    """Parameters for the specific chart."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _default_id_from_content(cls, data: object) -> object:
+        if not isinstance(data, dict):
+            return data
+        fields = typing.cast("dict[str, object]", data)
+        if fields.get("id"):
+            return fields
+        content = json.dumps(
+            [fields.get("chart_type"), fields.get("parameters", {})], sort_keys=True, default=str
+        )
+        return {**fields, "id": hashlib.sha256(content.encode()).hexdigest()[:_CHART_ID_LENGTH]}
+
+    def render(self, dataframe: _Dataframe) -> _Chart:
+        """Render the chart instance."""
+        return ChartTypeRegistry.render(self, dataframe)
+
+    def hint_required_columns(self) -> set[str] | None:
+        """
+        Hint the required columns for this chart to render.
+
+        Falls back to `None` ("fetch everything") if `parameters` no longer validates against this
+        chart type's settings model (e.g. stale data from before a schema change) or if no chart
+        plugin is registered for `chart_type` at all (e.g. one that was uninstalled) -- rather than
+        raising and taking the rest of the panel's data-fetching down with it. `render()` still
+        raises for the same cases, so the broken chart itself still surfaces as its own inline error.
+        """
+        try:
+            return ChartTypeRegistry.hint_required_columns(self)
+        except (ValidationError, UnknownChartTypeError):
+            _log.warning(
+                "chart has invalid parameters or an unregistered chart type, fetching every column "
+                "as a fallback",
+                chart_type=self.chart_type,
+            )
+            return None
+
+    def hint_required_artifact_keys(self) -> set[str] | None:
+        try:
+            return ChartTypeRegistry.hint_required_artifact_keys(self)
+        except (ValidationError, UnknownChartTypeError):
+            _log.warning(
+                "chart has invalid parameters or an unregistered chart type, no artifact-key hint available",
+                chart_type=self.chart_type,
+            )
+            return None
+
+    def hint_required_hparams(self) -> set[str] | None:
+        """Hint the required hyperparameter keys for this chart to render. See `hint_required_columns`."""
+        try:
+            return ChartTypeRegistry.hint_required_hparams(self)
+        except (ValidationError, UnknownChartTypeError):
+            _log.warning(
+                "chart has invalid parameters or an unregistered chart type, fetching every hparam "
+                "as a fallback",
+                chart_type=self.chart_type,
+            )
+            return None
+
+    def natural_width(self) -> int:
+        """Preferred render width in px for this chart instance. See `hint_required_columns`."""
+        try:
+            return ChartTypeRegistry.natural_width(self)
+        except (ValidationError, UnknownChartTypeError):
+            _log.warning(
+                "chart has invalid parameters or an unregistered chart type, using fallback width",
+                chart_type=self.chart_type,
+            )
+            return _FALLBACK_NATURAL_WIDTH
+
+
+class PanelInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, extra="forbid"):
+    """A panel containing one or more charts."""
+
+    name: str = ""
+    """Human-readable name for the panel."""
+
+    tab: str = ""
+    """Which tab this panel is grouped under; empty means the default/ungrouped tab."""
+
+    charts: list[ChartInstance[_Dataframe, _Chart]] = []
+    """Charts belonging to this panel."""
+
+    sync: bool = True
+    """Whether synced-capable charts (e.g. line charts) in this panel share a hover/tooltip crosshair."""
+
+    layout: typing.Literal["packed", "grid"] = "packed"
+    """`"packed"` sizes each chart to its own natural width and wraps them left-to-right;
+    `"grid"` forces every chart onto an equal-width column instead."""
+
+    grid_columns: GridColumns = 3
+    """How many equal-width columns the `"grid"` layout has; unused by `"packed"`."""
+
+    def render(self, dataframes: _Dataframe) -> list[_Chart]:
+        """Render a panel."""
+        return [c.render(dataframes) for c in self.charts]
+
+    def hint_required_columns(self) -> set[str] | None:
+        """
+        Hint the required columns for the panel.
+
+        ## Performance!
+        If all charts in a panel hint their required columns:
+        A page should only fetch the required columns for the panel.
+        """
+        columns: set[str] = set()
+        for chart in self.charts:
+            hint = chart.hint_required_columns()
+            if hint is None:
+                return None
+            columns |= hint
+        return columns
+
+    def hint_required_artifact_keys(self) -> set[str | None]:
+        return set(itertools.chain(*[c.hint_required_artifact_keys() or set() for c in self.charts]))
+
+    def hint_required_hparams(self) -> set[str] | None:
+        """Hint the required hyperparameter keys for the panel; `None` means "fetch every one"."""
+        hparams: set[str] = set()
+        for chart in self.charts:
+            hint = chart.hint_required_hparams()
+            if hint is None:
+                return None
+            hparams |= hint
+        return hparams
+
+
+class NewPage(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, extra="forbid"):
+    """A page view model."""
+
+    run_id: int | None = None
+    """Run ID for the experiment, could be none."""
+
+    experiment_id: int | None = None
+    """The experiment id associated with this page, could be none."""
+
+    project_id: int | None = None
+    """Project id for this page, could be none."""
+
+    owner_id: int | None = None
+    """
+    `None` for the shared page everyone sees; a user's id for that user's own named view of it.
+
+    A view is an independent copy of the page's panels and settings: editing it never touches the
+    shared page (or anyone else's view), and vice versa.
+    """
+
+    name: str = ""
+    """A view's name, as listed in the view picker. Empty for the shared page."""
+
+    shared: bool = False
+    """
+    Whether a named view (`owner_id` set) is visible to every project viewer, not just its owner.
+
+    Meaningless for the shared page itself (`owner_id` is `None`), which every project viewer
+    already sees. A `False` view is private: only its owner can open it at all, by id/URL or
+    otherwise (see `AuthorizingDataStore.get_view`) -- `shared` is what makes a view reachable, and
+    listed in everyone else's own view picker, the same as one of their own views.
+    """
+
+    panels: list[PanelInstance[_Dataframe, _Chart]] = []
+    """The set of panel instances on a page."""
+
+    page_settings: dict[str, int | float | bool | str | list[str] | list[int] | None] = {}
+    """Page settings."""
+
+    @field_validator("panels", "page_settings", mode="before")
+    @classmethod
+    def deserialize_json(cls, raw_value: dict[str, object] | str) -> dict[str, object]:
+        if isinstance(raw_value, str):
+            return json.loads(raw_value)
+        return raw_value
+
+
+class Page(
+    NewPage[_Dataframe, _Chart], typing.Generic[_Dataframe, _Panel, _Chart], frozen=True, extra="forbid"
+):
+    """A page stored in sql."""
+
+    id: int
+    """Page ID to be rendered."""
+
+    @abstractmethod
+    def render(self, data_store: DataStore[...], experiment_id: int) -> _Panel:
+        """Render the page."""
+
+
+class ViewSummary(BaseModel, frozen=True, extra="forbid"):
+    """Just enough of a saved view to list it in a picker."""
+
+    id: int
+    name: str
