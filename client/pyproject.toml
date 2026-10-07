@@ -29,13 +29,13 @@ dependencies = [
   # is actually installing this -- verified by installing into a real 3.10 venv, not just read off
   # numpy's own PyPI metadata.
   "numpy>=2.2.0",
-  "pendulum>=3.2.0",
-  "pillow>=12.3.0",
-  "pydantic>=2.13.4",
-  "pydantic-settings>=2.14.2",
-  "requests>=2.32.0",
-  "structlog>=26.1.0",
-  "typing-extensions>=4.12.0"
+  "pendulum>=3.0.0",
+  "pillow>=10.0.0",
+  "pydantic>=2.5.0",
+  "pydantic-settings>=2.0.0",
+  "requests>=2.28.0",
+  "structlog>=23.1.0",
+  "typing-extensions>=4.5.0"
 ]
 description = "A pytorch_lightning-compatible logger client for dlboard, a free, self-hosted experiment-tracking server."
 dynamic = ["version"]
@@ -55,7 +55,7 @@ requires-python = ">=3.10"
 [project.optional-dependencies]
 # Needed by `dlboard.client.dlboard_logger.DLBoardLogger`, the `pytorch_lightning.loggers.Logger`
 # adapter. Nothing else under `dlboard.client`/`dlboard.models` needs it.
-lightning = ["pytorch-lightning>=2.6.5"]
+lightning = ["pytorch-lightning>=2.0.0"]
 # Run `dlboard serve ...` from this same install, instead of a separate `pip install dlboard`.
 server = ["dlboard"]
 

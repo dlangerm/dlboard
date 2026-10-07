@@ -21,20 +21,20 @@ classifiers = [
   "Typing :: Typed"
 ]
 dependencies = [
-  "alembic>=1.13",
-  "cyclopts>=4.23.2",
-  "dash>=4.4.1",
-  "dash-ag-grid>=35.3.0",
-  "dash-mantine-components>=2.8.0",
+  "alembic>=1.10.0",
+  "cyclopts>=4.0.0",
+  "dash>=4.0.0",
+  "dash-ag-grid>=35.0.0",
+  "dash-mantine-components>=2.0.0",
   "dlboard-client",
-  "granian>=2.8.2",
-  "pandas>=3.0.5",
-  "pendulum>=3.2.0",
-  "pydantic>=2.13.4",
-  "pydantic-settings>=2.14.2",
-  "rich>=15.0.0",
-  "sqlalchemy>=2.0.40",
-  "structlog>=26.1.0"
+  "granian>=2.5.0",
+  "pandas>=2.0.0",
+  "pendulum>=3.0.0",
+  "pydantic>=2.5.0",
+  "pydantic-settings>=2.0.0",
+  "rich>=13.0.0",
+  "sqlalchemy>=2.0.0",
+  "structlog>=23.1.0"
 ]
 description = "dlboard's server: the Dash app, storage/auth plugins, and the `dlboard` CLI."
 dynamic = ["version"]
@@ -52,8 +52,8 @@ readme = "README.md"
 requires-python = ">=3.12"
 
 [project.optional-dependencies]
-postgres = ["psycopg[binary]>=3.2"]
-s3 = ["boto3>=1.40"]
+postgres = ["psycopg[binary]>=3.0.0"]
+s3 = ["boto3>=1.26.0"]
 
 [project.scripts]
 dlboard = "dlboard._cli:main"
