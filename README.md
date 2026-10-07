@@ -65,6 +65,7 @@ Every metric, hyperparameter, and artifact you log gets synced to dlboard in the
 
 ![The home page with a list of projects](docs/images/home.png)
 
+![The home page in light mode](docs/images/home-light.png)
 
 ![A project and its experiments](docs/images/project.png)
 

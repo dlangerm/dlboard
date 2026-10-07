@@ -81,6 +81,7 @@ def app(plugins: list[models.PluginProtocol], *, url_prefix: str = "") -> Dash:
         _log.info(p.name)
     _app = Dash(
         __name__,
+        title="dlboard",
         use_pages=True,
         pages_folder="_pages",
         suppress_callback_exceptions=True,
