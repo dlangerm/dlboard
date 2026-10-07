@@ -14,7 +14,7 @@ Browse experiments side-by-side, compare metrics across runs, track hyperparamet
 ### 1. Install
 
 ```bash
-pip install 'dlboard' # dlboard-client for just the logger
+pip install dlboard # dlboard-client for just the logger
 ```
 
 ### 2. Run
