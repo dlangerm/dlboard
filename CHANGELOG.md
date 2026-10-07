@@ -10,7 +10,7 @@ To cut a release: rename this section to `## [X.Y.Z] - YYYY-MM-DD`, start a fres
 pulls that section's body into the GitHub release notes and publishes both distributions from it.
 -->
 
-## [v0.1.1] - 2026-10-06
+## [0.1.3] - 2026-10-07
 
 ### Added
 
