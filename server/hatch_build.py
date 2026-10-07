@@ -1,7 +1,7 @@
 """
 Hatchling build hook: pull the server's code out of the shared `../dlboard` source tree.
 
-`dlboard-server`'s own files (`dlboard/serve/`, `dlboard/plugins/`, `dlboard/scripts/`,
+`dlboard`'s own files (`dlboard/serve/`, `dlboard/plugins/`, `dlboard/scripts/`,
 `dlboard/_cli.py`) live one directory up, alongside the client package's -- one git repo, one
 source tree, two distributions built from different subsets of it (see this package's
 `pyproject.toml`). `force-include` is the only mechanism that can pull files in from outside this

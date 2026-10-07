@@ -90,7 +90,7 @@ class Identity(BaseModel, frozen=True, extra="ignore"):
     id: int
     username: str
     server_version: str
-    """The running server's `dlboard-server` version -- e.g. for an error message, never parsed by the client."""
+    """The running server's `dlboard` version -- e.g. for an error message, never parsed by the client."""
     api_version: int = API_VERSION
     """The REST API major this server speaks. A client that doesn't recognize it should refuse to
     proceed rather than guess -- see `DLBoardLogger.__init__`."""

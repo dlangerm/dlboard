@@ -6,8 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 DLBoard — a free, self-hosted ML experiment-tracking server. It's a Dash/Dash-Mantine web app for browsing ML
 training runs, plus a `pytorch_lightning`-compatible logger client that ships metrics/hyperparams/artifacts
-to it over a REST API. Published as two PyPI distributions from one source tree -- `dlboard` (the
-client; Python >=3.10) and `dlboard-server` (the Dash app; Python >=3.12) -- see "Packaging" under
+to it over a REST API. Published as two PyPI distributions from one source tree -- `dlboard-client` (the
+client; Python >=3.10) and `dlboard` (the Dash app; Python >=3.12) -- see "Packaging" under
 Architecture.
 
 ## Commands
@@ -77,15 +77,15 @@ autofix/suggestion that assumes newer syntax.
 Everything still lives under one `dlboard/` directory, as one git repo -- but it's published as
 two separate PyPI distributions, built from different subsets of that same tree:
 
-- **`client/`** -- the `dlboard` distribution: `dlboard/__init__.py`, `dlboard/_identity.py`,
+- **`client/`** -- the `dlboard-client` distribution: `dlboard/__init__.py`, `dlboard/_identity.py`,
   `dlboard/_batching.py`, `dlboard/_mp_context.py`, `dlboard/_wire.py`, `dlboard/client/`, and
   `dlboard/models/`. Python >=3.10, and intentionally light -- pydantic, numpy, pendulum, requests,
   and the like. `pytorch_lightning` (needed only by `dlboard.client.dlboard_logger`) is the
   `[lightning]` extra, not a base dependency, so a client install never needs torch unless it
   actually wants the Lightning adapter.
-- **`server/`** -- the `dlboard-server` distribution: `dlboard/serve/`, `dlboard/plugins/` (every
+- **`server/`** -- the `dlboard` distribution: `dlboard/serve/`, `dlboard/plugins/` (every
   plugin *except* `dlboard/client/artifacts/`, which is client-owned), `dlboard/_cli.py`, and
-  `dlboard/scripts/`. Python >=3.12, depends on `dlboard` for the shared models, and is where
+  `dlboard/scripts/`. Python >=3.12, depends on `dlboard-client` for the shared models, and is where
   dash/granian/sqlalchemy/pandas actually live -- a client install never needs any of them.
 
 Each side's `pyproject.toml` lives in its own directory (`client/pyproject.toml`,
@@ -94,7 +94,7 @@ hook (plain `[tool.hatch.build] include`/`exclude` can't reach outside its own p
 and `force-include` -- the one mechanism that can -- ignores `exclude` entirely, so each hook
 walks its own subset of the tree and builds the `force_include` mapping itself, skipping every
 `tests`/`_tests` directory on the way). Neither side ships `dlboard/__init__.py` *and* claims to
-own the whole package: only `client/`'s wheel has it, so `dlboard-server`'s wheel is an implicit
+own the whole package: only `client/`'s wheel has it, so `dlboard`'s wheel is an implicit
 namespace package (PEP 420) that layers its `dlboard/serve`, `dlboard/plugins`, etc. on top of the
 client's `dlboard/` when both are installed together -- verified by building both wheels and
 installing them into a clean venv, not just by inspecting the config.

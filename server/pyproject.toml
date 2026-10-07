@@ -26,7 +26,7 @@ dependencies = [
   "dash>=4.4.1",
   "dash-ag-grid>=35.3.0",
   "dash-mantine-components>=2.8.0",
-  "dlboard",
+  "dlboard-client",
   "granian>=2.8.2",
   "pandas>=3.0.5",
   "pendulum>=3.2.0",
@@ -47,7 +47,7 @@ keywords = [
 ]
 license = "Apache-2.0"
 license-files = ["LICENSE"]
-name = "dlboard-server"
+name = "dlboard"
 readme = "README.md"
 requires-python = ">=3.12"
 
@@ -99,4 +99,4 @@ cache-keys = [
 ]
 
 [tool.uv.sources]
-dlboard = { workspace = true }
+dlboard-client = { workspace = true }

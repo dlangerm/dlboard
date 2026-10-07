@@ -2,7 +2,7 @@
 
 ## What is this
 
-The root [`Dockerfile`](../Dockerfile) builds the `dlboard-server` distribution into a container
+The root [`Dockerfile`](../Dockerfile) builds the `dlboard` distribution into a container
 image. It's a two-stage build — a `uv`-based builder stage that resolves and compiles the project,
 and a slim runtime stage that only ever sees the finished virtual environment, never `uv`, a
 compiler, or the source tree outside what got installed into `site-packages`.
@@ -81,7 +81,7 @@ it at its default (`true`) everywhere else (see [auth.md](plugins/auth.md) for r
 ## Creating the first admin
 
 ```bash
-docker run --rm -it --env-file .env dlboard-server \
+docker run --rm -it --env-file .env dlboard \
   users set-password alice --admin --plugins dlboard.scripts.docker_deployment:PLUGINS
 ```
 
@@ -130,7 +130,7 @@ Mount it into the container and point `--plugins` at it instead:
 ```bash
 docker run -v ./mydeployment.py:/app/mydeployment.py:ro -e PYTHONPATH=/app \
   -e DLBOARD_POSTGRES_HOST=... -e DLBOARD_S3_BUCKET=... -e DLBOARD_SECRET_KEY=... \
-  dlboard-server serve custom --plugins mydeployment:PLUGINS --host 0.0.0.0
+  dlboard serve custom --plugins mydeployment:PLUGINS --host 0.0.0.0
 ```
 
 `DLBOARD_S3_BUCKET` is required once you do this; `DLBOARD_S3_ENDPOINT_URL`/`DLBOARD_S3_ADDRESSING_STYLE=path` instead of
@@ -150,7 +150,7 @@ dlboard.scripts.docker_deployment:PLUGINS --host 0.0.0.0` — override either to
 `PLUGINS` module (a different auth provider, a different theme, S3 as above) the same way:
 
 ```dockerfile
-FROM dlboard-server
+FROM dlboard
 COPY mydeployment.py /app/mydeployment.py
 ENV PYTHONPATH=/app
 CMD ["serve", "custom", "--plugins", "mydeployment:PLUGINS", "--host", "0.0.0.0"]
@@ -163,11 +163,11 @@ See [plugins/overview.md](plugins/overview.md) for what a `PLUGINS` module needs
 
 `.github/workflows/ci.yml`'s `docker-build` job builds this image on every PR as a sanity check — it
 never pushes it anywhere. Pushing a `vX.Y.Z` tag runs `.github/workflows/release.yml` instead, which
-publishes `dlboard`/`dlboard-server` to PyPI and this image as `ghcr.io/dlangerm/dlboard-server`,
+publishes `dlboard-client`/`dlboard` to PyPI and this image as `ghcr.io/dlangerm/dlboard`,
 tagged `X.Y.Z`, `X.Y`, and `latest`:
 
 ```bash
-docker pull ghcr.io/dlangerm/dlboard-server:latest
+docker pull ghcr.io/dlangerm/dlboard:latest
 ```
 
 See [CHANGELOG.md](../CHANGELOG.md) for what each release contains, and the repo's GitHub Releases

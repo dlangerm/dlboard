@@ -85,7 +85,7 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
-      - run: uv build --package dlboard --wheel --out-dir dist
+      - run: uv build --package dlboard-client --wheel --out-dir dist
       - run: uv venv --python ${{ matrix.python-version }} client-venv
       - run: uv pip install --python client-venv/bin/python dist/*.whl
       - run: >
@@ -93,7 +93,7 @@ jobs:
           "import dlboard, dlboard.client, dlboard.client.artifacts.image, dlboard.models"
 
   # Build-only: proves the root `Dockerfile`'s multi-stage build still produces a working
-  # dlboard-server image. Not pushed anywhere -- just a build sanity check on every PR.
+  # dlboard image. Not pushed anywhere -- just a build sanity check on every PR.
   docker-build:
     needs: [typecheck-precommit]
     runs-on: ubuntu-latest
