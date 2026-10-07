@@ -2,8 +2,8 @@
 Both distributions actually build and install together -- not just that their config looks right.
 
 Regression coverage for a real bug this caught: `uv build`'s default output is a wheel *and* an
-sdist, but each `hatch_build.py` hook only ran for the wheel target -- an `sdist` built `dlboard`'s
-or `dlboard-server`'s own `pyproject.toml`/`hatch_build.py` and nothing else, since those are the
+sdist, but each `hatch_build.py` hook only ran for the wheel target -- an `sdist` built `dlboard-client`'s
+or `dlboard`'s own `pyproject.toml`/`hatch_build.py` and nothing else, since those are the
 only files actually inside `client/`/`server/`. A wheel built from that sdist (as a release
 pipeline, or a conda-forge/Linux-distro rebuild, would) silently shipped empty (client) or failed
 outright (server, missing `dlboard/_cli.py`). This builds an sdist for each distribution, builds a

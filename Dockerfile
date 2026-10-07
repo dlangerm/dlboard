@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 #
-# Two-stage build for the `dlboard-server` distribution (see CLAUDE.md's "Packaging" section):
+# Two-stage build for the `dlboard` distribution (see CLAUDE.md's "Packaging" section):
 # stage 1 resolves and builds the project with uv, including its own build-time tooling (hatchling,
 # the workspace's `hatch_build.py` hooks); stage 2 is a from-scratch runtime image that only ever
 # sees the finished virtual environment, never uv, a C compiler, or the two packages' source tree
@@ -19,7 +19,7 @@ ENV UV_PYTHON_DOWNLOADS=0 \
     UV_LINK_MODE=copy
 WORKDIR /app
 
-# Dependency-only layer: resolve and install everything `dlboard-server` depends on, without
+# Dependency-only layer: resolve and install everything `dlboard` depends on, without
 # building the workspace members themselves yet, so this layer only invalidates when the lockfile
 # or one of the three `pyproject.toml`s actually changes -- not on every source edit. uv needs each
 # workspace member's `pyproject.toml` on disk to know the workspace layout even with
@@ -30,15 +30,15 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=client/pyproject.toml,target=client/pyproject.toml \
     --mount=type=bind,source=server/pyproject.toml,target=server/pyproject.toml \
     uv sync --frozen --no-install-workspace --no-dev --no-editable \
-    --package dlboard-server --extra postgres --extra s3
+    --package dlboard --extra postgres --extra s3
 
-# Now the real source tree (both packages' code, since `dlboard-server` is built from a
+# Now the real source tree (both packages' code, since `dlboard` is built from a
 # `force_include` of `../dlboard`'s server-owned subset -- see `server/hatch_build.py`) and the
 # project itself, built non-editable so the wheel's files land in `site-packages` instead of a
 # `.pth` pointing back at this stage's `/app`.
 COPY . /app
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --no-dev --no-editable --package dlboard-server --extra postgres --extra s3
+    uv sync --locked --no-dev --no-editable --package dlboard --extra postgres --extra s3
 
 FROM python:3.12-slim-bookworm
 RUN groupadd --system dlboard && useradd --system --gid dlboard --create-home dlboard

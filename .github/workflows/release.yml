@@ -67,10 +67,32 @@ jobs:
   # PyPI trusted publishing (OIDC, no stored token) -- one job per distribution, since each is a
   # separate PyPI project with its own trusted-publisher registration. See the PR description /
   # release docs for the exact pypi.org setup this expects (repo, workflow filename, environment).
-  publish-dlboard:
+  publish-dlboard-client:
     needs: [test]
     runs-on: ubuntu-latest
     environment: pypi-client
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv build --package dlboard-client --out-dir dist
+      - name: Verify packages were built
+        run: |
+          if [ ! -f dist/*.whl ]; then
+            echo "No wheel file found in dist/" >&2
+            exit 1
+          fi
+          ls -lh dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+
+  publish-dlboard:
+    needs: [test]
+    runs-on: ubuntu-latest
+    environment: pypi
     permissions:
       contents: read
       id-token: write
@@ -89,32 +111,10 @@ jobs:
         with:
           packages-dir: dist
 
-  publish-dlboard-server:
-    needs: [test]
-    runs-on: ubuntu-latest
-    environment: pypi-server
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
-      - run: uv build --package dlboard-server --out-dir dist
-      - name: Verify packages were built
-        run: |
-          if [ ! -f dist/*.whl ]; then
-            echo "No wheel file found in dist/" >&2
-            exit 1
-          fi
-          ls -lh dist/
-      - uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: dist
-
-  # Multi-arch dlboard-server image, pushed only once the PyPI publish above succeeded -- avoids a
+  # Multi-arch dlboard image, pushed only once the PyPI publish above succeeded -- avoids a
   # published image whose exact PyPI release failed partway through.
   publish-image:
-    needs: [publish-dlboard, publish-dlboard-server]
+    needs: [publish-dlboard-client, publish-dlboard]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -131,7 +131,7 @@ jobs:
       - id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository_owner }}/dlboard-server
+          images: ghcr.io/${{ github.repository_owner }}/dlboard
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}

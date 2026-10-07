@@ -48,7 +48,7 @@ keywords = [
 ]
 license = "Apache-2.0"
 license-files = ["LICENSE"]
-name = "dlboard"
+name = "dlboard-client"
 readme = "README.md"
 requires-python = ">=3.10"
 
@@ -56,8 +56,8 @@ requires-python = ">=3.10"
 # Needed by `dlboard.client.dlboard_logger.DLBoardLogger`, the `pytorch_lightning.loggers.Logger`
 # adapter. Nothing else under `dlboard.client`/`dlboard.models` needs it.
 lightning = ["pytorch-lightning>=2.6.5"]
-# Run `dlboard serve ...` from this same install, instead of a separate `pip install dlboard-server`.
-server = ["dlboard-server"]
+# Run `dlboard serve ...` from this same install, instead of a separate `pip install dlboard`.
+server = ["dlboard"]
 
 [project.urls]
 Changelog = "https://github.com/dlangerm/dlboard/blob/main/CHANGELOG.md"
@@ -96,4 +96,4 @@ cache-keys = [
 ]
 
 [tool.uv.sources]
-dlboard-server = { workspace = true }
+dlboard = { workspace = true }

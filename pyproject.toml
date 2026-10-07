@@ -1,5 +1,5 @@
 # A virtual workspace root: no `[project]` table of its own, on purpose -- `client/` (the
-# `dlboard` distribution) and `server/` (`dlboard-server`) are the two real packages, both built
+# `dlboard-client` distribution) and `server/` (`dlboard`) are the two real packages, both built
 # from this one shared `dlboard/` source tree (see their own `pyproject.toml`s and
 # `hatch_build.py`s). A virtual root is what makes bare `uv run`/`uv sync` default to every
 # workspace member instead of just one, so every command below (and in CLAUDE.md) keeps working
@@ -155,7 +155,7 @@ runtime-evaluated-base-classes = [
 "{client,server}/hatch_build.py" = ["INP001"]
 
 [tool.uv.workspace]
-# `client/` is `dlboard` (the client + shared models) and `server/` is `dlboard-server` (the Dash
+# `client/` is `dlboard-client` (the client + shared models) and `server/` is `dlboard` (the Dash
 # app, storage/auth plugins, and the `dlboard` CLI) -- both built from different subsets of this
 # one shared `dlboard/` tree (see each one's own `hatch_build.py`). One repo, one source tree, two
 # distributions: a client-only install never needs dash, granian, or sqlalchemy, and the published
