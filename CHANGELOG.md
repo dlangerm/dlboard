@@ -10,6 +10,12 @@ To cut a release: rename this section to `## [X.Y.Z] - YYYY-MM-DD`, start a fres
 pulls that section's body into the GitHub release notes and publishes both distributions from it.
 -->
 
+## [0.2.1] - 2026-10-07
+
+* Lower version requirements to enable broader install base
+* Fix Dash in tab title
+* Adjust readme
+
 ## [0.2.0] - 2026-10-07
 
 * Change dlboard to install the full fat server+client and dlboard-client to install only the pytorch lightning logger to make it more straightforward to install for tensorboard-like use cases.
