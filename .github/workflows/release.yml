@@ -35,6 +35,18 @@ jobs:
             echo "Tag $GITHUB_REF_NAME doesn't match dlboard/_version.py's __version__ ($repo_version)." >&2
             exit 1
           fi
+      - name: Extract this version's CHANGELOG.md section
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v ver="## [$version]" '
+            index($0, ver) == 1 { found=1; next }
+            found && index($0, "## [") == 1 { exit }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "No '## [$version]' section found in CHANGELOG.md -- add one before tagging." >&2
+            exit 1
+          fi
 
   # Re-runs the same checks CI already ran on this commit as a PR -- belt-and-suspenders against
   # tagging a commit CI never actually validated (e.g. a tag pushed from a local branch).
