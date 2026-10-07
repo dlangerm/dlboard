@@ -1,74 +1,105 @@
 # dlboard
 
-A free, self-hosted experiment-tracking server. dlboard is a Dash/Dash-Mantine web app for browsing
-ML training runs, plus a `pytorch_lightning`-compatible logger client that ships metrics,
-hyperparameters, and artifacts to it over a REST API (by default).
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![PyPI - dlboard](https://img.shields.io/pypi/v/dlboard?label=dlboard)](https://pypi.org/project/dlboard/)
+[![PyPI - dlboard-client](https://img.shields.io/pypi/v/dlboard-client?label=dlboard-client)](https://pypi.org/project/dlboard-client/)
+[![CI](https://github.com/dlangerm/dlboard/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/dlangerm/dlboard/actions/workflows/ci.yml)
+
+**A free, self-hosted ML experiment tracker** that's as easy to run as TensorBoard, purpose-built for comparing runs and scaling to teams, large and small.
+
+Browse experiments side-by-side, compare metrics across runs, track hyperparameters, and log artifacts — all without leaving your infrastructure. dlboard is a modern web UI built on Dash/Dash-Mantine, with a PyTorch Lightning logger client that ships metrics and artifacts to your server over a REST API.
+
+## Quick Start
+
+### 1. Install
+
+```bash
+pip install 'dlboard[server]'
+```
+
+### 2. Run
+
+```bash
+dlboard serve local
+```
+
+That's it. Visit `http://localhost:8050` and you'll have a clean, modern experiment tracker running locally with SQLite and local disk storage — no database setup, no configuration needed.
+
+### 3. Log a training run
+
+Point your training script at the running server:
+
+```python
+from dlboard.client import DLBoardLogger
+import pytorch_lightning as pl
+
+logger = DLBoardLogger.from_names(
+  project_name="character-classification",
+  experiment_name="mnist",
+)
+
+trainer = pl.Trainer(logger=logger, ...)
+trainer.fit(model, dataloader)
+```
+
+Every metric, hyperparameter, and artifact you log gets synced to dlboard in the background.
+
+## Features
+
+- **One-command setup** — `dlboard serve local` with zero configuration
+- **Side-by-side run comparison** — compare metrics, hyperparameters, and artifacts across any runs
+- **PyTorch Lightning integration** — drop in `DLBoardLogger` and you're done
+- **Personal views** — save custom layouts and filters without touching the shared experiment page
+- **Artifact streaming** — log images, plots, and structured data; browse them in the UI
+- **Multi-project support** — organize experiments by project
+- **Light & dark mode** — built with Dash-Mantine for a modern UI
+- **Lightweight client** — the Python client has minimal dependencies (no torch required unless you use Lightning)
+
+## See It In Action
+
+**Compare runs side-by-side** — Filter, sort, and compare runs without losing context:
 
 ![An experiment page: run comparison table and metric charts](docs/images/experiment-charts.png)
 
-## What it looks like
+**Projects & experiments** — Browse all your projects, see experiment results at a glance:
 
-Browse projects and their experiments, compare runs side by side, and step through logged images:
+![The home page with a list of projects](docs/images/home.png)
 
-![The projects page](docs/images/home.png)
-
-![The projects page, in light mode](docs/images/home-light.png)
 
 ![A project and its experiments](docs/images/project.png)
 
-![The Ctrl+K jump palette, open and matching an experiment by name](docs/images/jump-palette.png)
+
+**Step through artifacts** — View confusion matrices, learning curves, or any images logged during training:
 
 ![A confusion matrix logged at each step, one image per run](docs/images/image-series.png)
 
-Save your own layout as a personal view — rearranging panels or filtering runs there never
-touches the shared page everyone else sees:
+**Personal views** — Customize layouts per-user without affecting what others see (or share it with them with a click of a button):
 
 ![The view picker, with a personal view saved alongside the shared view](docs/images/personal-views.png)
 
-Leave notes on an experiment, calling out specific runs or teammates by name:
+**Collaborate with notes** — Leave notes on experiments, calling out specific runs or teammates by name:
 
 ![A notes thread, with badges linking a note to a run and a mentioned teammate](docs/images/notes.png)
 
-## Running it
+**Quick jump** — Search experiments by name with Ctrl+K:
 
-Installed as a package (e.g. `uv tool install 'dlboard[server]'` or `pip install 'dlboard[server]'`
-— quoted so your shell doesn't treat `[server]` as a glob), dlboard gives you a `dlboard` command,
-the same idea as `tensorboard`:
+![The Ctrl+K jump palette, open and matching an experiment by name](docs/images/jump-palette.png)
 
-```bash
-dlboard serve local     # anonymous, single-user, sqlite + local disk -- sane defaults, no setup
-dlboard serve local --sqlite-location ./runs.sqlite --artifact-store-location ./artifacts
-```
+## Deployment
 
-Outside of `--debug`, this runs on [Granian](https://github.com/emmett-framework/granian) (Rust,
-multi-worker, auto-respawns a crashed worker) instead of Dash's own development server.
+**Local development** is just `dlboard serve local`. For production deployments:
 
-`serve local` has no sign-in -- every request is treated as the same admin user. Fine on your own
-machine (`127.0.0.1`, the default); binding `--host` to anything else needs
-`--i-understand-anyone-who-can-reach-this-is-an-admin` and a network boundary or reverse-proxy auth
-you trust. For a deployment other people reach, use `serve custom` with a real auth provider
-instead (`dlboard.plugins.PASSWORD_AUTH`) -- see [docs/docker.md](docs/docker.md).
+- **Docker** — See [docs/docker.md](docs/docker.md) for building an image with Postgres + S3 support
+- **Custom plugins** — Bring your own storage backend, auth provider, or chart types:
+  ```bash
+  dlboard serve custom --plugins mypackage.deployment:PLUGINS --workers 4
+  ```
+  See [docs/plugins/overview.md](docs/plugins/overview.md) for the plugin protocol.
+- **Multi-user with auth** — Swap in `dlboard.plugins.PASSWORD_AUTH` for user sign-in and API tokens. See [docs/plugins/auth.md](docs/plugins/auth.md).
 
-Bringing your own storage/auth/pages/chart plugins instead of `local`'s built-in set? `dlboard serve
-custom` runs the same production server against any `list[PluginProtocol]` you point it at:
+## Development
 
-```bash
-dlboard serve custom --plugins mypackage.deployment:PLUGINS --workers 4
-```
-
-`mypackage/deployment.py` just needs a module-level `PLUGINS: list[PluginProtocol]` -- see
-[docs/plugins/overview.md](docs/plugins/overview.md).
-
-Hosting it for other people? Swap `anonymous` for `dlboard.plugins.PASSWORD_AUTH` in that list and
-everyone signs in. Each user sees only the projects they own or that someone shared with them, and
-their training scripts authenticate with API tokens. See [docs/plugins/auth.md](docs/plugins/auth.md)
-for setup.
-
-Running it in Docker instead? See [docs/docker.md](docs/docker.md) — building the image gets you a
-Postgres + local-disk, password-sign-in deployment by default (S3 is a config change away).
-
-Working in this repo instead, everything runs through [`uv`](https://docs.astral.sh/uv/)
-(Python >=3.12, deps pinned in `uv.lock`):
+Everything runs through [`uv`](https://docs.astral.sh/uv/) (Python >=3.12):
 
 ```bash
 uv run --env-file .env dlboard serve local     # start the server
@@ -80,10 +111,7 @@ uv run pyright                      # type check
 uv run prek run --all-files         # run pre-commit hooks manually
 ```
 
-To log a training run against a running server, point `dlboard.client.DLBoardLogger` at it the
-way you'd use any other `pytorch_lightning` logger — see [docs/client.md](docs/client.md).
-
-## Docs
+## Learn More
 
 - [Architecture](docs/architecture.md) — how the app is put together: the plugin system, and the
   request flow from a training script to the browser.
@@ -102,17 +130,12 @@ way you'd use any other `pytorch_lightning` logger — see [docs/client.md](docs
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and PR expectations. In short: pull requests run
-lint, type-check, and test CI (see `.github/workflows/ci.yml`) — run the commands above locally
-before pushing.
+Pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and expectations.
 
-The screenshots above are rendered by the same Playwright harness the browser tests use
-(`dlboard/tests/docs_screenshots_test.py`), and CI fails if they no longer match the app. Font
-rendering differs between machines, so the committed images are the ones CI renders: when that check
-fails, download the `doc-screenshots` artifact from the run, copy its `actual/` PNGs over
-`docs/images/`, and commit. `uv run pytest --screenshots=update` regenerates them locally as a
-preview. See `CLAUDE.md` for the fuller set of code-style
-conventions this repo follows.
+The project follows these principles:
+- **Code quality over volume** — all PRs are reviewed and understood before merging
+- **AI-generated code is welcome** — but hold it to the same standard as hand-written code
+- **Keep it small** — large features are split into reviewable stacks
 
 ## AI Usage
 
