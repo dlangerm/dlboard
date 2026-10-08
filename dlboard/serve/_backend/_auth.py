@@ -16,8 +16,11 @@ from http import HTTPMethod, HTTPStatus
 from typing import TYPE_CHECKING, Annotated, Any, Final
 from urllib.parse import urlsplit, urlunsplit
 
+import pendulum
 from flask import g, has_request_context, jsonify, redirect, request, session
-from pydantic import PositiveInt, SecretStr, field_validator
+from flask.sessions import SecureCookieSessionInterface
+from itsdangerous import BadSignature
+from pydantic import NonNegativeInt, PositiveInt, SecretStr, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from structlog.stdlib import get_logger
 
@@ -30,6 +33,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from dash import Dash
+    from flask import Flask, Request
+    from flask.sessions import SecureCookieSession
     from werkzeug.wrappers import Response as BaseResponse
 
     from dlboard.models import AuthProvider, DataStore, User
@@ -91,6 +96,15 @@ class AuthSettings(BaseSettings):
 
     session_lifetime_hours: int = 24 * 14
     """How long a browser stays signed in."""
+
+    session_clock_skew_seconds: NonNegativeInt = 120
+    """
+    How far ahead of this process's clock a session cookie's signature may be dated and still be accepted.
+
+    Replicas (and one host across a clock step) never agree to the second, and every response
+    re-signs the cookie, so without this a request landing on a node slightly behind the last
+    signer is treated as signed out. See `SkewTolerantSessions`.
+    """
 
     secure_cookies: bool = True
     """Only send the session cookie over HTTPS. Turn off only for plain-HTTP local testing."""
@@ -273,6 +287,40 @@ def _sign_out() -> BaseResponse:
     return redirect(relative_path("/"))
 
 
+class SkewTolerantSessions(SecureCookieSessionInterface):
+    """
+    Flask's cookie sessions, minus its rejection of a cookie signed slightly in the future.
+
+    Flask refuses a cookie whose signature timestamp is later than the verifier's own clock and
+    quietly treats it as no session at all: a 401 on the request, or -- on the login form, whose CSRF
+    token lives in the session -- a 400 on the POST. Behind several replicas, or across one clock
+    step, that happens to perfectly good cookies: every response re-signs the cookie, so a request
+    that lands on a node a hair behind the one that last signed it fails. Only the lower bound is
+    relaxed, by `leeway`; a cookie older than `PERMANENT_SESSION_LIFETIME` still expires exactly as
+    before. Forgery is no easier either way (the timestamp is covered by the signature), and signing
+    a user out is unaffected -- that's `_session_user`'s `session_epoch`/`disabled_at` check.
+    """
+
+    def __init__(self, leeway: timedelta) -> None:
+        super().__init__()
+        self._leeway = leeway
+
+    def open_session(self, app: Flask, request: Request) -> SecureCookieSession | None:
+        serializer = self.get_signing_serializer(app)
+        cookie = request.cookies.get(self.get_cookie_name(app))
+        if serializer is None or not cookie:
+            return super().open_session(app, request)
+        try:
+            # No `max_age`: only the signature is checked here; the age is judged below.
+            data, signed_at = serializer.loads(cookie, return_timestamp=True)
+        except BadSignature:
+            return self.session_class()
+        age = pendulum.now("UTC") - signed_at
+        if not -self._leeway <= age <= app.permanent_session_lifetime:
+            return self.session_class()
+        return self.session_class(data)
+
+
 def install_request_gate(app: Dash, store_for: Callable[[], DataStore[...]]) -> None:
     """
     Put every route on `app` (except `add_public_route` ones) behind authentication.
@@ -309,6 +357,9 @@ def install_request_gate(app: Dash, store_for: Callable[[], DataStore[...]]) -> 
             SESSION_COOKIE_SECURE=settings.secure_cookies,
             SESSION_COOKIE_SAMESITE="Lax",
             PERMANENT_SESSION_LIFETIME=timedelta(hours=settings.session_lifetime_hours),
+        )
+        app.server.session_interface = SkewTolerantSessions(
+            pendulum.duration(seconds=settings.session_clock_skew_seconds)
         )
         add_public_route(app, SIGN_OUT_PATH.lstrip("/"), _sign_out, ["GET"])
 
