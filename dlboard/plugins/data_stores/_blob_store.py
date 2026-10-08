@@ -13,11 +13,15 @@ from __future__ import annotations
 
 import functools
 import hashlib
+import queue
+import signal
 import tempfile
+import time
 from enum import Enum, auto
+from multiprocessing import parent_process, util
 from pathlib import Path, PurePosixPath
 from threading import Thread
-from typing import TYPE_CHECKING, Protocol, Self, override
+from typing import TYPE_CHECKING, Final, Protocol, Self, override
 from uuid import uuid4
 
 from flask import abort
@@ -43,6 +47,24 @@ if TYPE_CHECKING:
 
 
 _log = get_logger(__name__)
+
+_ENQUEUE_TIMEOUT_SEC: Final = 30
+"""How long an upload waits for room in a full write queue before it's turned away with a 503."""
+
+_DRAIN_TIMEOUT_SEC: Final = 20
+"""How long shutdown waits for queued blobs to be written and their refs recorded. Kept under
+Granian's `DLBOARD_WORKERS_KILL_TIMEOUT_S` default so the drain finishes before the worker is killed."""
+
+_STALE_STAGING_SEC: Final = 24 * 60 * 60
+"""A staged upload this old belongs to a process that died; every worker shares one staging dir, so
+only files older than any live upload could be are swept."""
+
+_FINALIZER_PRIORITY: Final = 100
+"""Above the priority (10) `multiprocessing.Queue` closes its own feeder thread at: this drain still
+has to put its stop signals through those queues, so it must run before they shut."""
+
+_WRITER_POLL_SEC: Final = 1.0
+"""How often an idle write worker checks that the server process that spawned it is still alive."""
 
 
 class RefAccess(Enum):
@@ -100,43 +122,104 @@ def blob_key(experiment_id: int, run_id: int, key: str, step: int | None, fname:
 
 def _write_blobs(
     backend: BlobBackend,
-    input_q: Queue[tuple[NewArtifact, AnyUrl, Path]],
-    return_q: Queue[Artifact],
+    input_q: Queue[tuple[NewArtifact, AnyUrl, Path] | None],
+    return_q: Queue[Artifact | None],
 ) -> None:
     # This runs in its own `SPAWN_CONTEXT`-spawned process (see `BlobArtifactStore.__init__`), a
     # fresh interpreter with none of the parent's structlog setup -- without this, a write failure
     # here (an S3 signing error, say) would log with structlog's own default traceback renderer,
     # which prints every frame's locals, including whatever credentials `backend.write` was holding.
     configure_logging()
+    # A Ctrl-C reaches this process too (same process group); it must keep writing until the server
+    # process tells it to stop with a `None`, or the blobs still queued would be lost on shutdown.
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    parent = parent_process()
     while True:
         try:
-            a, ref, staged = input_q.get()
+            item = input_q.get(timeout=_WRITER_POLL_SEC)
+        except queue.Empty:
+            if parent is not None and not parent.is_alive():
+                return  # the server died without asking us to stop; nothing will record our refs
+            continue
+        if item is None:
+            return
+        a, ref, staged = item
+        try:
             backend.write(staged, ref)
             artifact = models.Artifact.model_validate(a.model_dump() | {"ref": str(ref)})
             if return_q.full():
                 _log.warning("Return queue is full, runtime will be impacted")
             return_q.put(artifact)
-        except KeyboardInterrupt:
-            return
         except Exception:  # noqa: BLE001
             _log.exception("Failed to save artifacts")
+            staged.unlink(missing_ok=True)
 
 
 class BlobArtifactStore(models.ArtifactStore[BlobBackend, int]):
     """An `ArtifactStore` for any `BlobBackend` -- staging, batched writes, and ref-ingest are shared."""
 
-    def __init__(self, backend: BlobBackend, store_q_size: int) -> None:
-        """Initialize the store, starting its background blob-writing worker process."""
+    def __init__(self, backend: BlobBackend, store_q_size: int, staging_dir: Path | None = None) -> None:
+        """
+        Initialize the store, starting its background blob-writing worker process.
+
+        Uploads are staged in `staging_dir` before being written to `backend`. Pass a directory on the
+        same filesystem as the backend's storage so the final move is a rename, and a crash leaves
+        its leftovers somewhere the operator already provisions and monitors. Defaults to the system temp dir.
+        """
         self._backend = backend
-        self._store_q: Queue[tuple[NewArtifact, AnyUrl, Path]] = SPAWN_CONTEXT.Queue(store_q_size)
-        self._saved_artifact_q: Queue[Artifact] = SPAWN_CONTEXT.Queue(store_q_size)
+        self._store_q: Queue[tuple[NewArtifact, AnyUrl, Path] | None] = SPAWN_CONTEXT.Queue(store_q_size)
+        self._saved_artifact_q: Queue[Artifact | None] = SPAWN_CONTEXT.Queue(store_q_size)
         self._store_artifact_proc = SPAWN_CONTEXT.Process(
             target=_write_blobs,
             args=(backend, self._store_q, self._saved_artifact_q),
             daemon=True,
         )
-        self._file_staging_dir = Path(tempfile.gettempdir())
+        self._file_staging_dir = staging_dir or Path(tempfile.gettempdir())
+        self._file_staging_dir.mkdir(parents=True, exist_ok=True)
+        self._sweep_stale_staging()
+        self._ingest_flushed = SPAWN_CONTEXT.Event()
+        self._ingest_ready = SPAWN_CONTEXT.Event()
         self._store_artifact_proc.start()
+        # Not `atexit`: a Granian worker is a `multiprocessing` child, which exits through
+        # `util._exit_function` (running only these finalizers) and never reaches `atexit` handlers.
+        # Priority >= 0 also runs it before multiprocessing terminates its daemonic children (our writer).
+        self._finalizer = util.Finalize(None, self.close, exitpriority=_FINALIZER_PRIORITY)
+
+    def _sweep_stale_staging(self) -> None:
+        """Delete staged uploads left behind by a process that died before writing them."""
+        cutoff = time.time() - _STALE_STAGING_SEC
+        for leftover in self._file_staging_dir.iterdir():
+            if leftover.is_file() and leftover.stat().st_mtime < cutoff:
+                leftover.unlink(missing_ok=True)
+
+    def close(self, timeout: float = _DRAIN_TIMEOUT_SEC) -> None:
+        """
+        Gracefully stop: write every queued blob, record their refs, then stop the write worker.
+
+        Runs when the process exits (and is safe to call early or twice). Whatever doesn't finish within
+        `timeout` is abandoned with a warning -- the worker is terminated, and the client's retry of
+        the upload that never got a ref recorded is what recovers it.
+        """
+        self._finalizer.cancel()
+        proc = self._store_artifact_proc
+        if not proc.is_alive():
+            return
+        deadline = time.monotonic() + timeout
+        try:
+            self._store_q.put(None, timeout=max(deadline - time.monotonic(), 0))
+        except queue.Full:
+            _log.warning("Shutting down with the blob write queue still full")
+        proc.join(max(deadline - time.monotonic(), 0))
+        if proc.is_alive():
+            _log.warning("Blob writer did not finish in %ss, abandoning its remaining queue", timeout)
+            proc.terminate()
+            proc.join()
+        elif self._ingest_ready.is_set():
+            self._saved_artifact_q.put(
+                None
+            )  # a flush request: acked once every ref queued before it is recorded
+            if not self._ingest_flushed.wait(max(deadline - time.monotonic(), 0)):
+                _log.warning("Some written artifacts' refs were not recorded before shutdown")
 
     def dispose(self) -> None:
         """
@@ -148,6 +231,7 @@ class BlobArtifactStore(models.ArtifactStore[BlobBackend, int]):
         this also stops -- `ship_batches` returns once its queue is closed) pile up for the rest
         of the session instead of releasing their OS-level resources (file descriptors, semaphores).
         """
+        self._finalizer.cancel()
         self._store_artifact_proc.terminate()
         self._store_artifact_proc.join()
         self._store_q.close()
@@ -158,9 +242,7 @@ class BlobArtifactStore(models.ArtifactStore[BlobBackend, int]):
         ship_batches(
             self._saved_artifact_q,
             functools.partial(self._record_refs, wait_for_data_store(app)),
-            BatchParams(
-                flush_size=10, wait_sec=1, ready=SPAWN_CONTEXT.Event(), flushed=SPAWN_CONTEXT.Event()
-            ),
+            BatchParams(flush_size=10, wait_sec=1, ready=self._ingest_ready, flushed=self._ingest_flushed),
             # `_record_refs` already drops (and cleans up after) anything the store rejects outright,
             # so whatever still escapes it -- a locked database, say -- is worth retrying.
             is_permanent=lambda _exc: False,
@@ -192,6 +274,10 @@ class BlobArtifactStore(models.ArtifactStore[BlobBackend, int]):
 
     def log_artifacts(self, artifacts: Iterable[tuple[NewArtifact, FileStorage]]) -> None:
         """Stage each uploaded file, then queue it for the write worker."""
+        if not self._store_artifact_proc.is_alive():
+            msg = "the artifact write worker is not running"
+            raise models.ArtifactStoreUnavailableError(msg)
+        staging_path: Path | None = None
         try:
             for a, file in artifacts:
                 ref = self._backend.ref_for(blob_key(a.experiment_id, a.run_id, a.key, a.step, a.fname))
@@ -203,10 +289,17 @@ class BlobArtifactStore(models.ArtifactStore[BlobBackend, int]):
                     _log.warning("Store queue is full, runtime will be impacted")
                 staging_path = self._file_staging_dir / str(uuid4())
                 file.save(staging_path, buffer_size=int(1e6))
-                self._store_q.put((a, ref, staging_path))
+                self._store_q.put((a, ref, staging_path), timeout=_ENQUEUE_TIMEOUT_SEC)
+                staging_path = None  # the write worker owns it now
+        except queue.Full as exc:
+            msg = "the artifact write queue is full"
+            raise models.ArtifactStoreUnavailableError(msg) from exc
         except Exception:
             _log.exception("failed to save artifact batch, reverting to allow client retry")
             raise
+        finally:
+            if staging_path is not None:
+                staging_path.unlink(missing_ok=True)
 
     @override
     def link_artifacts(self, links: Iterable[tuple[NewArtifact, AnyUrl]]) -> list[Artifact]:
@@ -238,8 +331,10 @@ class BlobArtifactStore(models.ArtifactStore[BlobBackend, int]):
                 _log.warning("Refusing to delete a ref this backend doesn't recognize: %s", ref)
 
 
-def plug_blob_store(app: Dash, backend: BlobBackend, store_q_size: int) -> None:
+def plug_blob_store(
+    app: Dash, backend: BlobBackend, store_q_size: int, staging_dir: Path | None = None
+) -> None:
     """Set `app`'s artifact store to a `BlobArtifactStore` over `backend`, and start ingesting its refs."""
-    store = BlobArtifactStore.get_or_create(backend, store_q_size)
+    store = BlobArtifactStore(backend, store_q_size, staging_dir)
     set_artifact_store(app, store)
     Thread(target=store.ingest_stored_artifacts, args=(app,), daemon=True, name="artifact-ref-ingest").start()

@@ -423,6 +423,13 @@ def _handle_unservable_ref_error(err: models.UnservableArtifactRefError) -> tupl
     return {"error": str(err)}, 400
 
 
+def _handle_store_unavailable(
+    err: models.ArtifactStoreUnavailableError,
+) -> tuple[dict[str, str], int, dict[str, str]]:
+    """Map an artifact store that can't take an upload right now to a 503 -- a 5xx, so the client retries it."""
+    return {"error": str(err)}, 503, {"Retry-After": "5"}
+
+
 def plug(app: dash.Dash) -> None:
     """Register this module's REST routes and its error -> HTTP status mappings onto `app`."""
     for path, methods, view_func in _ROUTES:
@@ -440,3 +447,4 @@ def plug(app: dash.Dash) -> None:
     app.server.errorhandler(ValidationError)(_handle_validation_error)
     app.server.errorhandler(models.UnservableArtifactRefError)(_handle_unservable_ref_error)
     app.server.errorhandler(models.AmbiguousProjectError)(_handle_ambiguous_project)
+    app.server.errorhandler(models.ArtifactStoreUnavailableError)(_handle_store_unavailable)

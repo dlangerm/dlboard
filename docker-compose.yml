@@ -14,6 +14,9 @@
 services:
   dlboard:
     build: .
+    # On `docker compose stop`/`down`, give the server time to write queued artifact blobs and
+    # record them (DLBOARD_WORKERS_KILL_TIMEOUT_S, 30 by default) -- Docker's own 10s default would SIGKILL it first.
+    stop_grace_period: 35s
     ports:
       - 8050:8050
     environment:
