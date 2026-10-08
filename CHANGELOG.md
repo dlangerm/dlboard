@@ -10,6 +10,10 @@ To cut a release: rename this section to `## [X.Y.Z] - YYYY-MM-DD`, start a fres
 pulls that section's body into the GitHub release notes and publishes both distributions from it.
 -->
 
+## [0.3.1] - 2026-10-08
+
+* Reduce numpy requirement floor to 1.26 to expand compatibility.
+
 ## [0.3.0] - 2026-10-08
 
 ### Added

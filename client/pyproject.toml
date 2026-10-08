@@ -23,12 +23,12 @@ classifiers = [
 dependencies = [
   "coolname>=5.0.0",
   "dltype>=0.16.0",
-  # The real floor for `requires-python = ">=3.10"` below: numpy 2.3+ needs 3.11, and 2.5+ needs
-  # 3.12 -- 2.2.x is numpy's last release line that still supports 3.10. Left otherwise unpinned
-  # (no upper bound), so the resolver still picks the newest numpy that fits whichever interpreter
-  # is actually installing this -- verified by installing into a real 3.10 venv, not just read off
-  # numpy's own PyPI metadata.
-  "numpy>=2.2.0",
+  # Deliberately loose so dlboard-client can live alongside legacy code still pinned to numpy 1.x:
+  # we only use the basic ndarray API (array creation, arithmetic, `argmax`, `PIL.Image.fromarray`),
+  # none of it 2.x-specific. 1.26 is the oldest release with 3.12 wheels. Left without an upper bound,
+  # so the resolver still picks the newest numpy that fits whichever interpreter is installing this
+  # (3.13+ needs numpy 2.x regardless of this floor).
+  "numpy>=1.26.0",
   "pendulum>=3.0.0",
   "pillow>=10.0.0",
   "pydantic>=2.5.0",

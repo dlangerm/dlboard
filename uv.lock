@@ -810,7 +810,7 @@ lightning = [
 requires-dist = [
     { name = "coolname", specifier = ">=5.0.0" },
     { name = "dltype", specifier = ">=0.16.0" },
-    { name = "numpy", specifier = ">=2.2.0" },
+    { name = "numpy", specifier = ">=1.26.0" },
     { name = "pendulum", specifier = ">=3.0.0" },
     { name = "pillow", specifier = ">=10.0.0" },
     { name = "pydantic", specifier = ">=2.5.0" },
