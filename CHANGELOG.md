@@ -10,7 +10,7 @@ To cut a release: rename this section to `## [X.Y.Z] - YYYY-MM-DD`, start a fres
 pulls that section's body into the GitHub release notes and publishes both distributions from it.
 -->
 
-## [Unreleased]
+## [0.3.0] - 2026-10-08
 
 ### Added
 
@@ -18,6 +18,21 @@ pulls that section's body into the GitHub release notes and publishes both distr
   matplotlib figure (a lossless PNG by default, or whatever supported extension the key ends in) and
   logs it as an image-series artifact. Backed by the new
   `dlboard.client.artifacts.figure.Figure` artifact kind.
+* Run compare: a **Compare** button above the experiment's run table opens a modal that diffs up to
+  five runs' hyperparameters and latest metric values, as differences only or every key, with a
+  search box over keys and values. Differing cells are highlighted against the first run picked.
+  The picked runs, mode and search are kept in the URL, so copying the address (or the modal's link
+  button) shares exactly what you're looking at.
+* `DLBOARD_SESSION_CLOCK_SKEW_SECONDS` (default `120`): how far ahead of a replica's own clock a
+  session cookie may be dated and still be accepted. See [docs/configuration.md](docs/configuration.md).
+
+### Fixed
+
+* People are no longer randomly signed out, or bounced with a 400 from the login form, when a
+  session cookie was signed by a replica (or a clock) a moment ahead of the one reading it. Flask
+  rejected such a cookie outright and treated the browser as signed out; under several replicas, or
+  across a clock step, that hit perfectly good sessions. Only the lower bound is relaxed -- a cookie
+  older than the session lifetime still expires as before, and revoking a session is unaffected.
 
 ## [0.2.1] - 2026-10-07
 
