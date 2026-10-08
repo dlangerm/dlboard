@@ -26,6 +26,7 @@ from dlboard import models
 from dlboard._batching import BatchParams, ship_batches
 from dlboard._mp_context import SPAWN_CONTEXT
 from dlboard.client._rest_api import DEFAULT_SERVER_URL, BasicDlboardAPI
+from dlboard.client.artifacts.figure import Figure
 
 DEFAULT_EXPERIMENT_NAME = "default"
 
@@ -35,6 +36,7 @@ if TYPE_CHECKING:
     from multiprocessing.context import SpawnProcess
     from multiprocessing.synchronize import Event as MPEvent
 
+    from dlboard.client.artifacts.figure import SavesFigure
     from dlboard.models._artifact import AnyArtifact
 
 
@@ -404,6 +406,26 @@ class DLBoardLogger(Logger):
     def log_artifact(self, artifacts: Sequence[AnyArtifact]) -> None:
         """Queue `artifacts` for encoding and upload."""
         self._artifacts.put(artifacts)
+
+    @rank_zero_only
+    def log_figure(
+        self,
+        figure: SavesFigure,
+        key: str,
+        step: int,
+        *,
+        tags: dict[str, str] | None = None,
+        save_kwargs: dict[str, Any] | None = None,
+    ) -> None:
+        """
+        Render `figure` to an image now and queue it as an artifact, like `mlflow.log_figure`.
+
+        Rendered here, at the call site, so the figure can be closed or mutated straight after.
+        The format is PNG unless `key` ends in another supported extension (`"loss.svg"`) or
+        `save_kwargs` has a `format`; `key` itself is used as given. `save_kwargs` goes to
+        `figure.savefig`.
+        """
+        self.log_artifact([Figure.from_figure(figure, key, step, tags=tags, save_kwargs=save_kwargs)])
 
     @override
     @rank_zero_only

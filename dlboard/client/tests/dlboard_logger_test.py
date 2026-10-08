@@ -6,11 +6,14 @@
 
 from __future__ import annotations
 
+import io
 import queue
 import threading
 import warnings
 from typing import Any
 
+import matplotlib.figure
+import PIL.Image
 import pytest
 import requests
 from pytorch_lightning.utilities import rank_zero_only
@@ -18,6 +21,7 @@ from pytorch_lightning.utilities import rank_zero_only
 from dlboard import models
 from dlboard.client import dlboard_logger
 from dlboard.client._rest_api import Identity
+from dlboard.client.artifacts.figure import Figure
 from dlboard.client.dlboard_logger import (
     DLBoardLogger,
     DLBoardLoggerSettings,
@@ -72,6 +76,11 @@ class _FakeShipper:
         self.ready = threading.Event()
         self.ready.set()
         self.flushed = False
+        self.items: list[Any] = []
+
+    def put(self, item: Any) -> None:  # noqa: ANN401
+        """Record what the logger queued, instead of shipping it."""
+        self.items.append(item)
 
     def flush(self) -> None:
         """So `finalize()` (called explicitly, or by the logger's own atexit hook) has something to call."""
@@ -185,6 +194,26 @@ def test_a_run_from_another_experiment_is_rejected(monkeypatch: pytest.MonkeyPat
 
     with pytest.raises(ValueError, match="belongs to experiment 2, not 5"):
         DLBoardLogger(project_id=1, experiment_id=5, run_id=7)
+
+
+def test_log_figure_queues_a_png_rendered_at_the_call_site(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_api(monkeypatch, _FakeRunAPI("http://x"))
+    started = _stub_shippers(monkeypatch)
+    logger = DLBoardLogger(project_id=1, experiment_id=None)
+    _metrics, artifacts = started
+    fig = matplotlib.figure.Figure()
+    fig.subplots().plot([1, 2, 3])  # pyright: ignore[reportUnknownMemberType]
+
+    logger.log_figure(fig, "loss_curve", step=4, tags={"split": "val"}, save_kwargs={"dpi": 50})
+    fig.clear()  # callers close or reuse the figure right after logging -- the queued PNG mustn't change
+
+    (queued,) = artifacts.items
+    (figure,) = queued
+    assert isinstance(figure, Figure)
+    assert (figure.key, figure.step, figure.tags) == ("loss_curve", 4, {"split": "val"})
+    assert figure.format == "png"
+    assert PIL.Image.open(io.BytesIO(figure.data)).size == (320, 240)
+    logger.finalize("success")
 
 
 def test_a_non_zero_rank_makes_no_server_calls_and_logs_nothing(monkeypatch: pytest.MonkeyPatch) -> None:

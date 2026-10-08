@@ -9,6 +9,9 @@
 [dependency-groups]
 dev = [
   "boto3>=1.40",
+  # Test-only: `client.artifacts.figure` takes anything with matplotlib's `savefig` signature
+  # structurally, so neither distribution depends on it -- but its tests render real figures.
+  "matplotlib>=3.10",
   "pandas-stubs>=3.0.5.260730",
   "prek>=0.4.10",
   "psycopg[binary]>=3.2",

@@ -10,6 +10,15 @@ To cut a release: rename this section to `## [X.Y.Z] - YYYY-MM-DD`, start a fres
 pulls that section's body into the GitHub release notes and publishes both distributions from it.
 -->
 
+## [Unreleased]
+
+### Added
+
+* `DLBoardLogger.log_figure(figure, key, step)`, a near drop-in for `mlflow.log_figure`: renders a
+  matplotlib figure (a lossless PNG by default, or whatever supported extension the key ends in) and
+  logs it as an image-series artifact. Backed by the new
+  `dlboard.client.artifacts.figure.Figure` artifact kind.
+
 ## [0.2.1] - 2026-10-07
 
 * Lower version requirements to enable broader install base

@@ -2,8 +2,9 @@
 Training loop, doubling as a demo of dlboard's image-logging path under realistic image weight.
 
 Per-batch debug crops (the old version's `log_extra_artifacts`) barely exercise the upload path --
-they're tiny and infrequent. This logs two heavier things instead: a full-resolution confusion
-matrix once per validation epoch, and a large tiled mosaic once at startup. The actual performance
+they're tiny and infrequent. This logs two heavier things instead: a matplotlib confusion matrix
+once per validation epoch (via `logger.log_figure`, dlboard's `mlflow.log_figure`; needs
+`matplotlib` installed), and a large tiled mosaic once at startup. The actual performance
 guarantee for that workload (colocated client/server should be fast; degradation beyond that should
 come from the network, not dlboard) is asserted in `dlboard/client/tests/dlboard_logger_perf_test.py`,
 not here -- this script is just meant to look like something a real training run would log.
@@ -16,8 +17,7 @@ from typing import cast, override
 import numpy as np
 import pytorch_lightning as pl
 import torch
-from PIL import Image as PILImage
-from PIL import ImageDraw
+from matplotlib.figure import Figure
 from torch import nn
 from torch.utils.data import DataLoader, random_split
 from torchvision import datasets, transforms
@@ -29,29 +29,33 @@ LOGDIR = Path("./lightning-logs")
 NUM_CLASSES = 10
 MOSAIC_GRID = 16
 MOSAIC_CELL_PX = 128
-CONFUSION_MATRIX_CELL_PX = 80
-_LIGHT_CELL_THRESHOLD = 127
-"""Above this grayscale intensity, a cell is light enough that its count label needs dark text."""
 
 
-def render_confusion_matrix(counts: np.ndarray, cell_px: int = CONFUSION_MATRIX_CELL_PX) -> np.ndarray:
-    """Render a count matrix as a high-resolution grayscale heatmap, darker cell = more counts."""
+def plot_confusion_matrix(counts: np.ndarray) -> Figure:
+    """Plot a count matrix as an annotated heatmap, darker cell = more counts."""
     n = counts.shape[0]
-    size = n * cell_px
-    img = PILImage.new("L", (size, size), color=255)
-    draw = ImageDraw.Draw(img)
-    vmax = max(int(counts.max()), 1)
+    fig = Figure(figsize=(8, 8), layout="constrained")
+    ax = fig.subplots()
+    ax.imshow(counts, cmap="Blues")  # pyright: ignore[reportUnknownMemberType]
+    ax.set(  # pyright: ignore[reportUnknownMemberType]
+        xticks=range(n),
+        yticks=range(n),
+        xlabel="Predicted",
+        ylabel="Actual",
+        title="Validation confusion matrix",
+    )
+    threshold = counts.max() / 2
     for row in range(n):
         for col in range(n):
-            intensity = 255 - round(255 * int(counts[row, col]) / vmax)
-            x0, y0 = col * cell_px, row * cell_px
-            draw.rectangle([x0, y0, x0 + cell_px, y0 + cell_px], fill=intensity)
-            fill = 0 if intensity > _LIGHT_CELL_THRESHOLD else 255
-            draw.text((x0 + 4, y0 + 4), str(int(counts[row, col])), fill=fill)  # pyright: ignore[reportUnknownMemberType]
-    for k in range(n + 1):
-        draw.line([(0, k * cell_px), (size, k * cell_px)], fill=128)
-        draw.line([(k * cell_px, 0), (k * cell_px, size)], fill=128)
-    return np.array(img)
+            ax.text(  # pyright: ignore[reportUnknownMemberType]
+                col,
+                row,
+                str(counts[row, col]),
+                ha="center",
+                va="center",
+                color="white" if counts[row, col] > threshold else "black",
+            )
+    return fig
 
 
 def build_mosaic(
@@ -141,14 +145,8 @@ class MnistMLP(pl.LightningModule):
     def on_validation_epoch_end(self) -> None:
         assert self.trainer.logger is not None
         lg = cast("DLBoardLogger", self.trainer.logger)
-        lg.log_artifact(
-            [
-                image.Image(
-                    key="val/confusion_matrix",
-                    image=render_confusion_matrix(self._val_confusion),
-                    step=self.trainer.global_step,
-                )
-            ]
+        lg.log_figure(
+            plot_confusion_matrix(self._val_confusion), "val/confusion_matrix", step=self.trainer.global_step
         )
 
     @override
