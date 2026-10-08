@@ -224,6 +224,8 @@ ignore_names = [
   "layout",
   # `flask.session.permanent` (`_auth.start_session`) -- a flag Flask itself reads when it saves the session.
   "permanent",
+  # `Flask.session_interface` (`_auth.install_request_gate`) -- the attribute Flask looks up to open and save every session.
+  "session_interface",
   # pytest's module-level marker convention (`pytestmark = pytest.mark.browser`) -- applied by
   # pytest itself scanning the module namespace, never referenced by name in our own code.
   "pytestmark",

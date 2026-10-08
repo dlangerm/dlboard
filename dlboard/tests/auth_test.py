@@ -9,6 +9,7 @@ tokens over REST, and per-user isolation -- rather than any one piece in isolati
 from __future__ import annotations
 
 import re
+import time
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 import pendulum
@@ -448,3 +449,31 @@ def test_a_password_hash_is_salted_and_verifies_only_its_password() -> None:
 def test_a_script_accepting_anything_gets_a_401_not_the_login_form(deployment: PasswordDeployment) -> None:
     """`requests` sends `Accept: */*` -- redirecting it to a login page would read as a 200."""
     assert deployment.client.get(f"/{WHOAMI_PATH}", headers={"Accept": "*/*"}).status_code == 401
+
+
+# -- Clock skew between whoever signed the session cookie and whoever reads it --------------------
+
+
+@pytest.mark.parametrize(
+    ("signed_seconds_from_now", "signed_in"),
+    [
+        (30, True),  # a replica a little ahead: well within the default leeway
+        (-1, True),
+        (10 * 60, False),  # further ahead than any plausible skew
+        (-15 * 24 * 3600, False),  # older than the session lifetime: still expires as ever
+    ],
+)
+def test_a_session_signed_by_a_node_with_a_skewed_clock_is_honoured_within_the_leeway(
+    deployment: PasswordDeployment,
+    monkeypatch: pytest.MonkeyPatch,
+    signed_seconds_from_now: int,
+    signed_in: bool,
+) -> None:
+    """Replicas never agree to the second; a cookie dated slightly ahead used to read as signed out."""
+    csrf = _csrf(deployment.client, "/login")
+    real_time = time.time
+    with monkeypatch.context() as skewed:
+        skewed.setattr(time, "time", lambda: real_time() + signed_seconds_from_now)
+        deployment.client.post("/login", data={"username": "alice", "password": _PASSWORD, "csrf": csrf})
+
+    assert deployment.client.get(f"/{WHOAMI_PATH}").status_code == (200 if signed_in else 401)

@@ -103,6 +103,8 @@ def test_an_owner_shares_a_project_and_the_member_sees_it_read_only(
     page.click(f"#{ADD_BUTTON_ID}")
     expect(page.get_by_role("cell", name="bob", exact=True)).to_be_visible()
 
+    # Leave alice's page first: it polls, and a callback sent after her cookie is gone is a 401 in the console.
+    page.goto("about:blank")
     page.context.clear_cookies()
     _sign_in(page, deployment, "bob")
     expect(page.get_by_text("shared-with-bob")).to_be_visible()
