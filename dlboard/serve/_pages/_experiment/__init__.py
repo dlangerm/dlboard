@@ -44,6 +44,7 @@ from dlboard.serve._pages._experiment._chart_editor_modal import register_chart_
 from dlboard.serve._pages._experiment._chart_suggestions import register_chart_suggestions_callbacks
 from dlboard.serve._pages._experiment._notes import STATE_NOTES_REVISION, register_notes_callbacks
 from dlboard.serve._pages._experiment._panel_controls import register_panel_controls_callbacks
+from dlboard.serve._pages._experiment._run_compare import register_run_compare_callbacks
 from dlboard.serve._pages._experiment._run_comparison_table import register_run_comparison_callbacks
 from dlboard.serve._pages._experiment._views import register_view_callbacks
 from dlboard.serve._url import relative_path
@@ -355,5 +356,6 @@ def register(app: Dash) -> None:
     register_chart_editor_callbacks(app)
     register_chart_suggestions_callbacks(app)
     register_run_comparison_callbacks(app)
+    register_run_compare_callbacks(app)
     register_view_callbacks(app)
     register_notes_callbacks(app)

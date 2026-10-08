@@ -49,6 +49,12 @@ from dlboard.serve._pages._experiment._experiment_page_state import (
     BasicExperimentPage,
 )
 from dlboard.serve._pages._experiment._notes import NOTES_COUNT_ID, NOTES_THREAD_ID
+from dlboard.serve._pages._experiment._run_compare import (
+    COMPARE_GRID_ID,
+    COMPARE_MODE_ID,
+    COMPARE_OPEN_ID,
+    COMPARE_SEARCH_ID,
+)
 from dlboard.serve._pages._experiment._run_comparison_table import (
     NAVBAR_HPARAM_COL_SELECT_ID,
     NAVBAR_HPARAM_COLUMNS_TOGGLE_ID,
@@ -1596,4 +1602,62 @@ def test_notes_post_to_the_thread_and_arrive_live_from_others(
     store.add_comment(models.NewComment(experiment_id=experiment_id, author_id=colleague.id, body="agreed"))
     expect(thread.get_by_text("agreed")).to_be_visible(timeout=10_000)  # one live-poll tick away
     expect(page.locator(f"#{NOTES_COUNT_ID}")).to_have_text("2")
+    assert console_errors == []
+
+
+def test_run_compare_modal_diffs_runs_and_its_state_is_a_shareable_link(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """
+    The compare modal opens from the navbar, diffs the runs' hyperparameters and latest metrics, and
+    mirrors its state (runs, mode, search) into the URL -- which, loaded fresh, reopens the same view.
+    Only a browser sees the clientside URL sync and the cell highlighting, and the modal opening
+    already filled in from a link.
+    """
+    _create_project_and_experiment(page, live_server_url, "Compare Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+
+    api = BasicDlboardAPI(live_server_url)
+    for name, optimizer, loss in (("run-a", "adam", 0.5), ("run-b", "sgd", 0.4)):
+        run = api.create_run(models.NewRun(experiment_id=experiment_id, name=name))
+        api.log_hyperparams(
+            models.NewHyperParams.from_raw(run.id, experiment_id, {"lr": 0.1, "optimizer": optimizer})
+        )
+        api.log_metric_batch(
+            [
+                models.LoggedMetrics(
+                    experiment_id=experiment_id,
+                    run_id=run.id,
+                    step=0,
+                    metrics={"loss": loss},
+                    timestamp_utc=pendulum.now("UTC"),
+                )
+            ]
+        )
+    page.reload()
+
+    page.locator(f"#{COMPARE_OPEN_ID}").click()
+    grid = page.locator(f"#{COMPARE_GRID_ID}")
+    rows = grid.locator(".ag-center-cols-container .ag-row")
+    # Pre-filled with the charted runs (newest first, so run-b is the baseline); only differing keys are listed, with the other run's cell flagged.
+    expect(rows).to_have_count(2)
+    expect(grid.get_by_role("gridcell", name="adam")).to_be_visible()
+    expect(grid.locator(".dl-compare-changed", has_text="adam")).to_be_visible()
+    expect(page).to_have_url(re.compile(r"compare=\d+%2C\d+"))
+
+    page.locator(f"#{COMPARE_MODE_ID}").get_by_text("All").click()
+    expect(rows).to_have_count(3)
+    page.locator(f"#{COMPARE_SEARCH_ID}").fill("opt")
+    expect(rows).to_have_count(1)
+    expect(page).to_have_url(re.compile(r"compare_mode=all.*compare_q=opt"))
+    link = page.url
+
+    page.goto(link)
+    expect(page.get_by_role("dialog", name="Compare runs")).to_be_visible()
+    expect(rows).to_have_count(1)
+    expect(page.locator(f"#{COMPARE_SEARCH_ID}")).to_have_value("opt")
+
+    page.keyboard.press("Escape")
+    expect(page).not_to_have_url(re.compile(r"compare"))
     assert console_errors == []

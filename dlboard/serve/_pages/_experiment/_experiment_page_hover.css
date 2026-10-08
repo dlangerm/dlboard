@@ -73,12 +73,31 @@
   outline-color: var(--mantine-primary-color-filled);
 }
 
-/* A chart's "copy link" button, just after copying. */
-[data-dl-copy-chart-link][data-dl-copied] {
+/* A "copy link" button (a chart's, or the compare modal's), just after copying. */
+[data-dl-copy-chart-link][data-dl-copied],
+[data-dl-copy-page-link][data-dl-copied] {
   color: var(--mantine-color-green-6);
+}
+
+/* A compare-modal cell whose value differs from the baseline run's (`_run_compare.py`). */
+.ag-theme-quartz .ag-cell.dl-compare-changed {
+  background-color: var(--mantine-color-yellow-light);
 }
 
 /* The view menu's rename/delete items only apply to a view you own -- see `_views.VIEW_MENU_ID`. */
 .mantine-Menu-dropdown:not(.dl-view-owned) .dl-view-owner-only {
   display: none;
+}
+
+/* The compare grid's run headers carry the run's swatch dot, which ag-grid's header cell can't lay
+   out as a flex item: pin it in the cell's left padding instead. */
+.dl-compare-grid .ag-header-cell.dl-swatch {
+  padding-left: calc(var(--ag-cell-horizontal-padding) + 1rem);
+}
+.dl-compare-grid .ag-header-cell.dl-swatch::before {
+  position: absolute;
+  top: 50%;
+  left: var(--ag-cell-horizontal-padding);
+  margin: 0;
+  transform: translateY(-50%);
 }

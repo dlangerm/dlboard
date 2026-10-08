@@ -3,9 +3,9 @@ Renders the screenshots embedded in the docs from the same browser harness `brow
 
 The PNGs in `docs/images/` are committed, and `test_doc_screenshot` re-renders each one and fails if
 it no longer matches -- so a UI change that isn't reflected in the docs (or a bug that changes how
-the app looks) fails CI instead of going stale. Font rendering differs between machines, so the
-committed images are the ones CI renders: on a mismatch CI uploads `screenshot-diffs/` (the fresh
-render plus a diff image) as a workflow artifact, to be copied over `docs/images/` and committed.
+the app looks) fails CI instead of going stale. The app serves its own font, so a render on any
+machine matches CI's: on a mismatch, re-run with `--screenshots=update` and commit. CI also uploads
+`screenshot-diffs/` (the fresh render plus a diff image) as a workflow artifact.
 
 Run with `--screenshots=check` (compare) or `--screenshots=update` (overwrite `docs/images/`); see
 `dlboard/conftest.py` for how those runs are isolated from every other test.
@@ -35,6 +35,7 @@ from dlboard.serve import get_system_data_store
 from dlboard.serve._pages._experiment._chart_autogen import ARTIFACT_PANEL_SUFFIX
 from dlboard.serve._pages._experiment._experiment_page_state import PAGE_EXPERIMENT_ID
 from dlboard.serve._pages._experiment._notes import NOTES_THREAD_ID
+from dlboard.serve._pages._experiment._run_compare import COMPARE_OPEN_ID
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -85,6 +86,7 @@ class DocScreenshot(StrEnum):
     IMAGE_SERIES = "image-series"
     PERSONAL_VIEWS = "personal-views"
     NOTES = "notes"
+    RUN_COMPARE = "run-compare"
 
     @property
     def path(self) -> Path:
@@ -359,6 +361,15 @@ def _stage(shot: DocScreenshot, page: Page, demo: Demo, dlboard_app: Dash) -> Pa
             )
             expect(thread.get_by_text("Grad norms spike")).to_be_visible(timeout=10_000)
             return drawer
+        case DocScreenshot.RUN_COMPARE:
+            page.goto(f"{demo.url}/experiment/{demo.experiment_id}")
+            expect(page.locator(f"#{PAGE_EXPERIMENT_ID}")).to_be_visible()
+            page.locator(f"#{COMPARE_OPEN_ID}").click()
+            dialog = page.get_by_role("dialog", name="Compare runs")
+            # Differences only: the sweep varies the learning rate and batch size, and every run ends at its own metrics.
+            expect(dialog.locator(".ag-center-cols-container .ag-row")).not_to_have_count(0)
+            expect(dialog.locator(".dl-compare-changed").first).to_be_visible()
+            return dialog
 
 
 def _stable_screenshot(target: Page | Locator) -> bytes:
@@ -425,8 +436,8 @@ def test_doc_screenshot(  # noqa: PLR0913 -- one fixture per thing the render ne
             shot.path.write_bytes(png)
         case ScreenshotMode.CHECK:
             assert _matches_committed(shot, png), (
-                f"{shot.path.relative_to(REPO_ROOT)} is stale or missing. Copy the fresh render from "
-                f"screenshot-diffs/actual/ (CI uploads it as the `doc-screenshots` artifact) over it and commit."
+                f"{shot.path.relative_to(REPO_ROOT)} is stale or missing. Re-run with --screenshots=update and "
+                f"commit (CI also uploads the fresh render, screenshot-diffs/actual/, as the `doc-screenshots` artifact)."
             )
 
 
