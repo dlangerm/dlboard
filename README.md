@@ -120,6 +120,11 @@ uv run prek run --all-files         # run pre-commit hooks manually
   of artifact.
 - [Docker](docs/docker.md) — building and running the image, its Postgres + local-disk default, and
   configuring it (including swapping in S3).
+- **Running it in production**
+  - [Configuration](docs/configuration.md) — every environment variable
+  - [Reverse proxy & TLS](docs/reverse-proxy.md) — Caddy and nginx examples
+  - [Upgrading](docs/upgrading.md) and [Backup & restore](docs/backup.md)
+  - [Compatibility](docs/compatibility.md) — what's stable across releases and what may still change
 - **Plugins** — dlboard has no built-in opinions about storage, auth, charts, or theming; all of
   it is plugins. (Page layout is the one deliberate exception — see
   [architecture.md](docs/architecture.md).) Start with the

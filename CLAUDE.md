@@ -175,9 +175,10 @@ logic is a narrow exception: it references concrete chart classes to decide what
    the full schema is assembled from the pydantic models, used both to build a concrete store's live
    tables and, with `schema=None`, as `migrations/env.py`'s `target_metadata` for autogenerating future
    revisions. Every store runs `alembic upgrade head` at construction (`_schema_upgrade.run_migrations`),
-   in the same transaction as any Postgres-only schema-creation step (`_prepare_schema`). Pre-release,
-   with no deployed databases to preserve, a migration is free to be a blunt `ALTER`/`DROP`+recreate --
-   nothing here needs to carry old rows forward correctly yet.
+   in the same transaction as any Postgres-only schema-creation step (`_prepare_schema`). Released versions
+   exist, so migrations follow expand/contract (`docs/compatibility.md`): additive and data-preserving,
+   a destructive step only lands one minor release after the code stopped using it, and a released
+   migration is never edited.
 
 ### Server-side app (Dash)
 
