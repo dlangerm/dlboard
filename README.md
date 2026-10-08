@@ -13,9 +13,16 @@ Browse experiments side-by-side, compare metrics across runs, track hyperparamet
 
 ### 1. Install
 
+dlboard is two packages. Install whichever matches the machine:
+
 ```bash
-pip install dlboard # dlboard-client for just the logger
+pip install dlboard                       # the server and the `dlboard` command (includes the client)
+pip install "dlboard-client[lightning]"   # just the logger, for a training environment
 ```
+
+They don't need to be on the same machine: install `dlboard` where you want to browse runs, and
+`dlboard-client[lightning]` wherever you train. Postgres and S3 support are extras of the server:
+`pip install "dlboard[postgres,s3]"`.
 
 ### 2. Run
 
@@ -30,7 +37,7 @@ That's it. Visit `http://localhost:8050` and you'll have a clean, modern experim
 Point your training script at the running server:
 
 ```python
-from dlboard.client import DLBoardLogger
+from dlboard.client.dlboard_logger import DLBoardLogger
 import pytorch_lightning as pl
 
 logger = DLBoardLogger.from_names(
