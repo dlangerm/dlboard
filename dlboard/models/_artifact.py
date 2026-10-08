@@ -109,5 +109,9 @@ class Artifact(NewArtifact, frozen=True, extra="ignore"):
     """When this artifact was soft-deleted, if at all. See `Project.deleted_at`."""
 
 
+class ArtifactStoreUnavailableError(RuntimeError):
+    """Raised when an `ArtifactStore` can't accept an upload right now (its write worker died, or its queue stays full); retry later."""
+
+
 class UnservableArtifactRefError(ValueError):
     """Raised when a linked artifact's `ref` isn't one this server's `ArtifactStore` can serve."""

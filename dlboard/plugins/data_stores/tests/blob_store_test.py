@@ -10,6 +10,7 @@ ingest-thread pipeline that only `FSBlobs` happens to exercise here) stay filesy
 from __future__ import annotations
 
 import io
+import os
 import sqlite3
 import threading
 import time
@@ -201,3 +202,67 @@ def test_a_rejected_artifact_is_dropped_alone_and_its_blob_deleted(
 
     _wait_until(lambda: not orphan.exists())
     assert [a.run_id for a in store.fetch_artifacts(experiment_id)] == [kept_run.id]
+
+
+# -- Shutdown and staging -------------------------------------------------------------------------
+
+
+def _upload(store: BlobArtifactStore, run: models.Run, name: str) -> None:
+    new_artifact = models.NewArtifact(
+        key="img", fname=name, run_id=run.id, experiment_id=run.experiment_id, step=0
+    )
+    store.log_artifacts([(new_artifact, FileStorage(io.BytesIO(b"data"), filename=name))])
+
+
+def test_close_writes_every_queued_blob_and_records_its_ref_before_returning(
+    store: SQLLiteStore, experiment_id: int, tmp_path: Path
+) -> None:
+    run = store.create_run(models.NewRun(experiment_id=experiment_id))
+    blobs = FSBlobs(tmp_path / "artifacts")
+    artifact_store = BlobArtifactStore.get_or_create(blobs, 50)
+    _ingest(artifact_store, store, [])
+    _wait_until(artifact_store._ingest_ready.is_set)  # pyright: ignore[reportPrivateUsage]
+
+    for i in range(20):
+        _upload(artifact_store, run, f"{i}.png")
+    artifact_store.close()
+
+    assert len(list(store.fetch_artifacts(experiment_id))) == 20
+
+
+def test_uploads_are_turned_away_once_the_write_worker_is_gone(tmp_path: Path) -> None:
+    store = BlobArtifactStore.get_or_create(FSBlobs(tmp_path), 10)
+    store.dispose()
+
+    with pytest.raises(models.ArtifactStoreUnavailableError):
+        _upload(store, models.Run.model_construct(id=1, experiment_id=1), "a.png")
+
+
+def test_a_failed_upload_leaves_nothing_in_the_staging_dir(tmp_path: Path) -> None:
+    class _Broken(io.BytesIO):
+        def read(self, *_args: object) -> bytes:
+            msg = "client hung up"
+            raise ConnectionError(msg)
+
+    staging = tmp_path / "staging"
+    store = BlobArtifactStore(FSBlobs(tmp_path / "artifacts"), 10, staging)
+    new_artifact = models.NewArtifact(key="img", fname="a.png", run_id=1, experiment_id=1, step=0)
+
+    with pytest.raises(ConnectionError):
+        store.log_artifacts([(new_artifact, FileStorage(_Broken(), filename="a.png"))])
+
+    assert list(staging.iterdir()) == []
+    store.dispose()
+
+
+def test_stale_staged_uploads_from_a_dead_process_are_swept_on_startup(tmp_path: Path) -> None:
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    stale, fresh = staging / "stale", staging / "fresh"
+    stale.write_bytes(b"x")
+    fresh.write_bytes(b"x")
+    os.utime(stale, (0, 0))
+
+    BlobArtifactStore(FSBlobs(tmp_path / "artifacts"), 10, staging).dispose()
+
+    assert [p.name for p in staging.iterdir()] == ["fresh"]

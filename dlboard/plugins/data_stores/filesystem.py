@@ -17,6 +17,10 @@ if TYPE_CHECKING:
     from flask import Response
 
 
+STAGING_DIRNAME = ".staging"
+"""Where uploads wait to be written, under the store's root. Blob keys start with an experiment id, so never collide."""
+
+
 class FSBlobs:
     """Keep every blob under `root`, on local disk."""
 
@@ -77,4 +81,11 @@ class AppSettings(BaseSettings):
 def plug(app: Dash) -> None:
     """Plugin content."""
     env = AppSettings()
-    plug_blob_store(app, FSBlobs(env.artifact_store_location), env.filesystem_store_queue_size)
+    # Staged inside the store's own directory, so the final `shutil.move` is an in-volume rename
+    # rather than a copy out of `/tmp` (often a small tmpfs, or a different volume entirely).
+    plug_blob_store(
+        app,
+        FSBlobs(env.artifact_store_location),
+        env.filesystem_store_queue_size,
+        staging_dir=env.artifact_store_location / STAGING_DIRNAME,
+    )
