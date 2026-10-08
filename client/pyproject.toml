@@ -56,8 +56,6 @@ requires-python = ">=3.10"
 # Needed by `dlboard.client.dlboard_logger.DLBoardLogger`, the `pytorch_lightning.loggers.Logger`
 # adapter. Nothing else under `dlboard.client`/`dlboard.models` needs it.
 lightning = ["pytorch-lightning>=2.0.0"]
-# Run `dlboard serve ...` from this same install, instead of a separate `pip install dlboard`.
-server = ["dlboard"]
 
 [project.urls]
 Changelog = "https://github.com/dlangerm/dlboard/blob/main/CHANGELOG.md"

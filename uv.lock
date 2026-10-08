@@ -715,14 +715,10 @@ dependencies = [
 lightning = [
     { name = "pytorch-lightning" },
 ]
-server = [
-    { name = "dlboard" },
-]
 
 [package.metadata]
 requires-dist = [
     { name = "coolname", specifier = ">=5.0.0" },
-    { name = "dlboard", marker = "extra == 'server'", editable = "server" },
     { name = "dltype", specifier = ">=0.16.0" },
     { name = "numpy", specifier = ">=2.2.0" },
     { name = "pendulum", specifier = ">=3.0.0" },
@@ -734,7 +730,7 @@ requires-dist = [
     { name = "structlog", specifier = ">=23.1.0" },
     { name = "typing-extensions", specifier = ">=4.5.0" },
 ]
-provides-extras = ["lightning", "server"]
+provides-extras = ["lightning"]
 
 [[package]]
 name = "dltype"
