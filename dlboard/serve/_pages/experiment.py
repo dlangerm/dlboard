@@ -14,6 +14,7 @@ from dlboard.serve import get_current_user, get_data_store
 from dlboard.serve._pages._experiment import _experiment_page_state as core
 from dlboard.serve._pages._experiment import render_panel
 from dlboard.serve._pages._experiment._notes import STATE_NOTES_REVISION, notes_button, notes_drawer
+from dlboard.serve._pages._experiment._run_compare import CompareQuery, compare_components
 from dlboard.serve._pages._experiment._views import resolve_view_id, view_controls
 from dlboard.serve._pages._onboarding import first_run_snippet, onboarding_card
 
@@ -80,14 +81,15 @@ def _live_update_header(header: Component, notes: Component, views: Component) -
 
 
 def layout(
-    experiment_id: str, chart: str | None = None, view: str | None = None, **_query: str
+    experiment_id: str, chart: str | None = None, view: str | None = None, **query: str
 ) -> list[html.Div | dcc.Store | dcc.Interval]:
     """
     The experiment page, with its URL's query parameters passed in as keyword arguments by Dash.
 
     `?view=` (a `Page.id`) shows one of the named views instead of the shared page (see `_views.py`).
     `?chart=` (a `ChartInstance.id`, from a copied chart link) opens that chart's panel and tab, and
-    `chart_deep_link.js` scrolls to it. Any other query parameter is ignored.
+    `chart_deep_link.js` scrolls to it. `?compare=`, `?compare_mode=` and `?compare_q=` open the
+    run-compare modal on that state (see `CompareQuery`). Any other query parameter is ignored.
     """
     store = get_data_store()
     exp = store.get_experiment(int(experiment_id))
@@ -121,6 +123,7 @@ def layout(
                         ),
                     ),
                     notes_drawer(),
+                    *compare_components(store, exp.id, CompareQuery.from_query(query)),
                     # Nothing logged yet: show how to log the first run, right where its charts will go.
                     onboarding_card(
                         title="No runs yet — log your first one",

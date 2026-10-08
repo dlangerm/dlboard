@@ -54,7 +54,7 @@ Every metric, hyperparameter, and artifact you log gets synced to dlboard in the
 ## Features
 
 - **One-command setup** — `dlboard serve local` with zero configuration
-- **Side-by-side run comparison** — compare metrics, hyperparameters, and artifacts across any runs
+- **Side-by-side run comparison** — compare metrics, hyperparameters, and artifacts across any runs, or diff up to five runs in a shareable modal
 - **PyTorch Lightning integration** — drop in `DLBoardLogger` and you're done
 - **Personal views** — save custom layouts and filters without touching the shared experiment page
 - **Artifact streaming** — log images, plots, and structured data; browse them in the UI
@@ -89,6 +89,10 @@ Every metric, hyperparameter, and artifact you log gets synced to dlboard in the
 
 ![A notes thread, with badges linking a note to a run and a mentioned teammate](docs/images/notes.png)
 
+**Compare runs** — Pick up to five runs and diff their hyperparameters and latest metrics in a modal; the URL carries the whole comparison, so you can share it:
+
+![The run-compare modal, listing the hyperparameters and metrics that differ between four runs](docs/images/run-compare.png)
+
 **Quick jump** — Search experiments by name with Ctrl+K:
 
 ![The Ctrl+K jump palette, open and matching an experiment by name](docs/images/jump-palette.png)
@@ -113,7 +117,7 @@ Everything runs through [`uv`](https://docs.astral.sh/uv/) (Python >=3.12):
 uv run --env-file .env dlboard serve local     # start the server
 uv run pytest                       # run the test suite
 uv run pytest -m browser            # run only the browser/e2e tests
-uv run pytest --screenshots=update  # regenerate the docs screenshots in docs/images (a local preview)
+uv run pytest --screenshots=update  # regenerate the docs screenshots in docs/images
 uv run ruff check && uv run ruff format   # lint / format
 uv run pyright                      # type check
 uv run prek run --all-files         # run pre-commit hooks manually

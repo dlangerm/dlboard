@@ -37,6 +37,7 @@ from dlboard.serve._pages._dash_helpers import section_label, tooltipped_action_
 from dlboard.serve._pages._dataframe_helpers import run_display_name
 from dlboard.serve._pages._experiment import _dataframe_helpers as dfh
 from dlboard.serve._pages._experiment import _experiment_page_state as core
+from dlboard.serve._pages._experiment._run_compare import compare_button
 from dlboard.serve._url import relative_path
 
 if TYPE_CHECKING:
@@ -238,6 +239,7 @@ def _render_hparam_panel(
             dmc.Group(
                 [
                     section_label("Runs"),
+                    compare_button(),
                     dmc.Popover(
                         [
                             dmc.PopoverTarget(

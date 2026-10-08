@@ -62,6 +62,7 @@ class Icon(StrEnum):
     BREADCRUMB = "chevron-right"
     CLOSE = "x"
     COLUMNS = "columns-3"
+    COMPARE = "git-compare"
     COPIED = "check"
     COPY = "copy"
     DARK_MODE = "moon"

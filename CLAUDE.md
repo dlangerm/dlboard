@@ -30,7 +30,7 @@ uv run pytest -m postgres           # run the store suites against a real Postgr
 uv run pytest -m s3                 # run the S3 artifact store against a real S3 endpoint (needs Docker; testcontainers)
 uv run pytest -m "not browser and not postgres and not s3"  # everything that needs neither a browser nor Docker
 uv run pytest --screenshots=check   # re-render the docs screenshots and fail if docs/images is stale
-uv run pytest --screenshots=update  # rewrite docs/images (local preview; CI's render is the one to commit)
+uv run pytest --screenshots=update  # rewrite docs/images (dlboard serves its own font, so a local render matches CI's -- commit it)
 uv run ruff check                   # lint
 uv run ruff format                  # format
 uv run pyright                      # type check (strict mode)
