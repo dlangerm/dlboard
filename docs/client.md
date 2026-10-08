@@ -69,7 +69,7 @@ cap how long any one request waits before it's treated as failed.
 Returning a `Path` (written under `local_temp`) uploads that file; returning an `AnyUrl` instead
 registers it as a *link* — no bytes move, the server just checks the ref is one its
 `ArtifactStore` can actually serve (see [Storage](plugins/storage.md)) and records it. There are
-two built-in kinds:
+three built-in kinds:
 
 - `dlboard.client.artifacts.image.Image` — uploads. Wraps a `torch.Tensor`/`np.ndarray`
   (validated CHW `uint8` via `dlbype`), used like:
@@ -79,6 +79,24 @@ two built-in kinds:
 
   logger.log_artifact([image.Image(key="sample", image=tensor, step=global_step)])
   ```
+
+- `dlboard.client.artifacts.figure.Figure` — uploads a matplotlib figure as an image. You
+  rarely build one yourself: `logger.log_figure` mirrors `mlflow.log_figure`, with the one
+  difference that dlboard needs a `step`:
+
+  ```python
+  # mlflow: mlflow.log_figure(fig, "loss_curve.png")
+  logger.log_figure(fig, "loss_curve.png", step=global_step)  # same name works as-is
+  logger.log_figure(fig, "loss_curve", step=global_step)  # or leave the extension off
+  ```
+
+  The format is a lossless PNG by default. If the key ends in another supported extension
+  (`.png`, `.jpg`, `.jpeg`, `.svg`) that format is used instead, and a `format` in `save_kwargs`
+  overrides both (an unsupported one is an error). Any other extension just falls back to PNG. The
+  key itself is used exactly as given. The figure is rendered right at the call, so it's safe to
+  `plt.close(fig)` straight after. `tags=` is optional, and `save_kwargs=` goes to `fig.savefig`
+  (`dpi`, `bbox_inches`, ...). Any object with a matplotlib-style `savefig(fname, **kwargs)`
+  works, and dlboard doesn't depend on matplotlib itself.
 
 - `dlboard.client.artifacts.link.Link` — links. For a blob a training job already wrote
   somewhere dlboard's `ArtifactStore` can serve (e.g. the same S3 bucket), without shipping the

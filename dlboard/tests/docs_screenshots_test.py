@@ -23,12 +23,13 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 import numpy as np
 import pendulum
 import pytest
+from matplotlib.figure import Figure as MplFigure
 from PIL import Image as PILImage
 from playwright.sync_api import expect
 
 from dlboard import models
 from dlboard.client._rest_api import BasicDlboardAPI
-from dlboard.client.artifacts.image import Image
+from dlboard.client.artifacts.figure import Figure
 from dlboard.conftest import ScreenshotMode
 from dlboard.serve import get_system_data_store
 from dlboard.serve._pages._experiment._chart_autogen import ARTIFACT_PANEL_SUFFIX
@@ -117,11 +118,16 @@ class Demo(NamedTuple):
     n_experiments: int
 
 
-def _confusion_matrix(step: int, rng: np.random.Generator) -> np.ndarray:
+def _confusion_matrix(step: int, rng: np.random.Generator) -> MplFigure:
     """A 10-class confusion heatmap that sharpens along the diagonal as `step` grows."""
     progress = step / _N_STEPS
     counts = rng.random((10, 10)) * (1 - progress) * 20 + np.eye(10) * (20 + 80 * progress)
-    return np.kron(255 - counts / counts.max() * 255, np.ones((16, 16))).astype(np.uint8)
+    # Small on purpose: the image-series chart shows it as a thumbnail, so the labels have to survive downscaling.
+    fig = MplFigure(figsize=(4, 4), layout="constrained")
+    ax = fig.subplots()
+    ax.imshow(counts, cmap="Blues")  # pyright: ignore[reportUnknownMemberType]
+    ax.set(xticks=range(10), yticks=range(10), xlabel="Predicted", ylabel="Actual", title=f"Step {step}")
+    return fig
 
 
 @pytest.fixture(scope="session")
@@ -187,7 +193,7 @@ def demo(live_server_url: str, dlboard_app: Dash, tmp_path_factory: pytest.TempP
             ]
         )
         converted = [
-            Image(key=_CONFUSION_KEY, image=_confusion_matrix(step, rng), step=step).to_artifact(
+            Figure.from_figure(_confusion_matrix(step, rng), _CONFUSION_KEY, step=step).to_artifact(
                 artifact_dir, run.id, sweep.id
             )
             for step in _IMAGE_STEPS
