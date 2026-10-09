@@ -1743,3 +1743,48 @@ def test_auto_generate_leaves_a_huge_panel_closed_and_opens_a_small_one(
 
     expect(page.get_by_text(f"{AUTO_OPEN_MAX_CHARTS + 1} charts", exact=True)).to_be_visible()
     expect(page.locator(".dl-panel-body .recharts-surface")).to_have_count(1)
+
+
+def test_suggest_charts_filters_selects_and_adds_many_at_once(page: Page, live_server_url: str) -> None:
+    """
+    Suggestions used to be one add button per key, which is a hundred clicks (and a hundred page
+    rebuilds) on an experiment with a hundred un-charted metrics. A filter narrows the list, "Select
+    all" ticks what it shows, and one button adds everything ticked in a single update.
+    """
+    _create_project_and_experiment(page, live_server_url, "Suggest Many Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    api = BasicDlboardAPI(live_server_url)
+    run = api.create_run(models.NewRun(experiment_id=experiment_id))
+    api.log_metric_batch(
+        [
+            models.LoggedMetrics(
+                experiment_id=experiment_id,
+                run_id=run.id,
+                step=step,
+                metrics={"train/loss": 1.0, "train/acc": 0.5, "val/loss": 0.9},
+                timestamp_utc=pendulum.now("UTC"),
+            )
+            for step in range(3)
+        ]
+    )
+    page.reload()
+    page.locator(f"#{NEW_PANEL_OPEN_ID}").click()
+    page.locator(f"#{NEW_PANEL_NAME_ID}").fill("Scratch")
+    page.locator(f"#{NEW_PANEL_ID}").click()
+    page.get_by_role("button", name="Suggest charts").first.click()
+    for key in ("train/loss", "train/acc", "val/loss"):
+        expect(page.get_by_text(key, exact=True)).to_be_visible()
+
+    page.get_by_placeholder("Filter by name or panel").fill("train/")
+    expect(page.get_by_text("val/loss", exact=True)).to_have_count(0)
+    page.get_by_role("button", name="Select all").click()
+    page.get_by_role("button", name="Add selected (2)").click()
+
+    # Both charts went into the "train" panel in the one update (the drawer closes with the rebuilt
+    # page); what is left to suggest is just the one that was filtered out.
+    expect(page.get_by_text("2 charts", exact=True)).to_be_visible()
+    page.get_by_role("button", name="Suggest charts").first.click()
+    expect(page.get_by_text("val/loss", exact=True)).to_be_visible()
+    expect(page.get_by_text("train/loss", exact=True)).to_have_count(0)
+    expect(page.get_by_role("button", name="Add selected (0)")).to_be_disabled()

@@ -35,6 +35,7 @@ from dlboard.serve._component_ids import ButtonId, DivId, IntervalId, ModalId, S
 from dlboard.serve._pages._dash_helpers import tooltipped_action_icon
 from dlboard.serve._pages._dataframe_helpers import run_display_name
 from dlboard.serve._pages._experiment import _dataframe_helpers as dfh
+from dlboard.serve._pages._experiment._chart_autogen import SuggestSort
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -194,6 +195,12 @@ SUGGEST_MODE_ID: ValueId[ExperimentPage] = ValueId("suggest-charts-mode")
 SUGGEST_CONTENT_ID: DivId[ExperimentPage] = DivId("suggest-charts-content")
 SUGGEST_SUGGESTIONS_STORE_ID: StoreId[ExperimentPage] = StoreId("suggest-charts-store")
 SUGGEST_SCOPE_STORE_ID: StoreId[ExperimentPage] = StoreId("suggest-charts-scope")
+SUGGEST_FILTER_ID: ValueId[ExperimentPage] = ValueId("suggest-charts-filter")
+SUGGEST_SORT_ID: ValueId[ExperimentPage] = ValueId("suggest-charts-sort")
+SUGGEST_SELECTION_ID: ValueId[ExperimentPage] = ValueId("suggest-charts-selection")
+SUGGEST_SELECT_ALL_ID: ButtonId[ExperimentPage] = ButtonId("suggest-charts-select-all")
+SUGGEST_CLEAR_ID: ButtonId[ExperimentPage] = ButtonId("suggest-charts-clear")
+SUGGEST_ADD_SELECTED_ID: ButtonId[ExperimentPage] = ButtonId("suggest-charts-add-selected")
 
 # --- auto-generate modal, opened from an empty view (callbacks in `_chart_suggestions.py`) ---
 AUTO_POPULATE_OPEN_ID: ButtonId[ExperimentPage] = ButtonId("auto-populate-open")
@@ -1167,7 +1174,53 @@ def _suggest_charts_drawer() -> dmc.Drawer:
                 gap="sm",
                 mb="sm",
             ),
-            html.Div(id=SUGGEST_CONTENT_ID),
+            # Sticky, so "Add selected" stays in reach however far down a long list you have scrolled.
+            dmc.Stack(
+                [
+                    dmc.TextInput(
+                        id=SUGGEST_FILTER_ID, placeholder="Filter by name or panel", debounce=300, size="sm"
+                    ),
+                    dmc.Group(
+                        [
+                            dmc.SegmentedControl(
+                                id=SUGGEST_SORT_ID,
+                                data=[
+                                    {"value": sort.value, "label": f"By {sort.value}"} for sort in SuggestSort
+                                ],
+                                value=SuggestSort.NAME.value,
+                                size="xs",
+                            ),
+                            dmc.Button(
+                                "Select all",
+                                id=SUGGEST_SELECT_ALL_ID,
+                                variant="default",
+                                size="xs",
+                                n_clicks=0,
+                            ),
+                            dmc.Button(
+                                "Clear", id=SUGGEST_CLEAR_ID, variant="default", size="xs", n_clicks=0
+                            ),
+                            dmc.Button(
+                                "Add selected (0)",
+                                id=SUGGEST_ADD_SELECTED_ID,
+                                size="xs",
+                                disabled=True,
+                                n_clicks=0,
+                            ),
+                        ],
+                        gap="xs",
+                    ),
+                ],
+                gap="xs",
+                pb="sm",
+                style={
+                    "position": "sticky",
+                    "top": 0,
+                    "zIndex": 1,
+                    "background": "var(--mantine-color-body)",
+                },
+            ),
+            dmc.CheckboxGroup(id=SUGGEST_SELECTION_ID, value=[], children=html.Div(id=SUGGEST_CONTENT_ID)),
         ],
     )
 

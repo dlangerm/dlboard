@@ -356,3 +356,53 @@ def test_auto_generate_only_opens_a_panel_small_enough_to_render_at_once(
     sizes: list[tuple[str, int]], expected: list[str]
 ) -> None:
     assert autogen.panel_to_open([_panel_of(name, n) for name, n in sizes]) == expected
+
+
+def _suggestion(key: str, panel_name: str, kind: ColumnKind = ColumnKind.METRIC) -> autogen.Suggestion:
+    return autogen.Suggestion(key=key, kind=kind, panel_name=panel_name, chart=_line(key))
+
+
+_SUGGESTIONS = [
+    _suggestion("val/loss", "val"),
+    _suggestion("train/loss", "train"),
+    _suggestion("train/acc", "train"),
+    _suggestion("img", "samples (artifacts)", ColumnKind.ARTIFACT),
+    _suggestion("aaa/last", "zz"),
+]
+
+
+@pytest.mark.parametrize(
+    ("text", "sort", "expected"),
+    [
+        pytest.param(
+            "",
+            autogen.SuggestSort.NAME,
+            ["aaa/last", "img", "train/acc", "train/loss", "val/loss"],
+            id="by-name",
+        ),
+        pytest.param(
+            "",
+            autogen.SuggestSort.PANEL,
+            ["img", "train/acc", "train/loss", "val/loss", "aaa/last"],
+            id="by-panel",
+        ),
+        pytest.param("LOSS", autogen.SuggestSort.NAME, ["train/loss", "val/loss"], id="key-ignoring-case"),
+        pytest.param(
+            "  train ", autogen.SuggestSort.NAME, ["train/acc", "train/loss"], id="trimmed-panel-name"
+        ),
+        pytest.param("nothing like this", autogen.SuggestSort.NAME, [], id="no-match"),
+    ],
+)
+def test_visible_suggestions_filters_by_key_or_panel_and_sorts(
+    text: str, sort: autogen.SuggestSort, expected: list[str]
+) -> None:
+    assert [s.key for s in autogen.visible_suggestions(_SUGGESTIONS, text=text, sort=sort)] == expected
+
+
+def test_a_suggestions_checkbox_value_round_trips_even_when_the_key_has_a_colon() -> None:
+    picked = [_suggestion("val/loss", "val"), _suggestion("a:b", "p", ColumnKind.ARTIFACT)]
+
+    assert autogen.parse_selection(s.selection_value for s in picked) == {
+        (ColumnKind.METRIC, "val/loss"),
+        (ColumnKind.ARTIFACT, "a:b"),
+    }

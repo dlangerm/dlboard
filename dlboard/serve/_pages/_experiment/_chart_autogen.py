@@ -10,6 +10,7 @@ decent default panel layout for a brand-new experiment, and the same grouping lo
 from __future__ import annotations
 
 import typing
+from enum import StrEnum
 from typing import TYPE_CHECKING, Literal
 
 from dlboard.models import Artifact, ChartInstance, ChartType, ColumnKind, PanelInstance
@@ -213,6 +214,36 @@ class Suggestion(typing.NamedTuple):
     kind: ColumnKind
     panel_name: str
     chart: ChartInstance[typing.Any, typing.Any]
+
+    @property
+    def selection_value(self) -> str:
+        """What a checkbox for this suggestion carries, and `parse_selection` reads back."""
+        return f"{self.kind.value}:{self.key}"
+
+
+class SuggestSort(StrEnum):
+    """How the suggestions list is ordered."""
+
+    NAME = "name"
+    PANEL = "panel"
+
+
+def parse_selection(values: typing.Iterable[str]) -> frozenset[tuple[ColumnKind, str]]:
+    """The (kind, key) pairs behind checkbox values made by `Suggestion.selection_value`."""
+    return frozenset((ColumnKind(kind), key) for kind, _, key in (value.partition(":") for value in values))
+
+
+def visible_suggestions(
+    suggestions: typing.Iterable[Suggestion], *, text: str, sort: SuggestSort
+) -> list[Suggestion]:
+    """The suggestions whose key or target panel contains `text` (ignoring case), in `sort` order."""
+    needle = text.strip().lower()
+    matching = [s for s in suggestions if needle in s.key.lower() or needle in s.panel_name.lower()]
+    match sort:
+        case SuggestSort.NAME:
+            return sorted(matching, key=lambda s: s.key)
+        case SuggestSort.PANEL:
+            return sorted(matching, key=lambda s: (s.panel_name, s.key))
 
 
 def build_suggestions(

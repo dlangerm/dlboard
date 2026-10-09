@@ -14,6 +14,10 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ### Added
 
+* **Suggest charts** is a selection list, not one add button per key: a filter (by key or target panel), a
+  By name / By panel sort, **Select all** and **Clear** for what the filter shows, and **Add selected (N)**,
+  which adds everything ticked in a single page update (65 charts at once on the advanced example, instead of
+  65 clicks and 65 rebuilds). The one-click add on each row is still there.
 * Artifact `tags` (on `Image`, `Figure`, `File`, `Link` and anything implementing `AnyArtifact`) accept
   numbers and booleans as well as strings, and format them identically wherever they come from (floats to
   four significant digits). Callers no longer stringify, and so no longer disagree. Tags are still stored
