@@ -3,24 +3,10 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Final
 
 from pydantic import BaseModel
 
-from dlboard._compat import StrEnum
-from dlboard.models import NewArtifact
-
-FILE_KIND_TAG: Final = "file_kind"
-"""The tag `File.to_artifact` records its `FileKind` under, for anything consuming or displaying the file."""
-
-
-class FileKind(StrEnum):
-    """What a logged `File` actually is -- a bare file extension says too little (`.pt`, `.ckpt`, ...)."""
-
-    CHECKPOINT = "checkpoint"
-    """A model checkpoint, e.g. one `ModelCheckpoint` saved."""
-    OTHER = "other"
-    """Anything else."""
+from dlboard.models import FILE_KIND_TAG, FileKind, NewArtifact
 
 
 class File(BaseModel, frozen=True, extra="forbid"):
@@ -35,7 +21,7 @@ class File(BaseModel, frozen=True, extra="forbid"):
     """Key for this artifact."""
     path: Path
     """The file to upload; its name becomes the artifact's `fname`."""
-    kind: FileKind = FileKind.OTHER
+    kind: FileKind
     """What the file is, recorded as a tag (`FILE_KIND_TAG`)."""
     tags: dict[str, str] = {}
     """Tags for the file, for use by plugins."""

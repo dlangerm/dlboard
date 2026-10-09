@@ -3,10 +3,12 @@
 from dlboard.models._access import AmbiguousProjectError, NewProjectGrant, ProjectGrant, ProjectRole
 from dlboard.models._activity import ActivityStats, ProjectStats
 from dlboard.models._artifact import (
+    FILE_KIND_TAG,
     INLINEABLE_ARTIFACT_CONTENT_TYPES,
     AnyArtifact,
     Artifact,
     ArtifactStoreUnavailableError,
+    FileKind,
     NewArtifact,
     NewArtifactLink,
     UnservableArtifactRefError,
@@ -45,6 +47,7 @@ from dlboard.models._view import (
 )
 
 __all__ = [
+    "FILE_KIND_TAG",
     "INLINEABLE_ARTIFACT_CONTENT_TYPES",
     "MAX_GRID_COLUMNS",
     "MIN_GRID_COLUMNS",
@@ -71,6 +74,7 @@ __all__ = [
     "EntityType",
     "Experiment",
     "ExperimentSource",
+    "FileKind",
     "FlatHparamDict",
     "GridColumns",
     "HyperParams",
