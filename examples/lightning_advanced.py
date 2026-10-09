@@ -20,8 +20,8 @@ exists to produce. Where the script itself works around one, a `# DLBOARD GAP:` 
    toggle classes, change opacity or compare ground truth against prediction.
 2. One artifact per (run, key, step), so N previews need N keys (`sample_0`, `sample_1`, ...) rather than
    one batch rendered as a gallery.
-3. Artifact tags are `dict[str, str]`, so a numeric score has to be stringified to be shown as a caption,
-   and each caller formats it differently (#179).
+3. Artifact tags are stored as text: numbers you log are formatted consistently (4 significant digits), but
+   can't be sorted or filtered as numbers (#179).
 4. A run has no status: Lightning's `finalize("success" | "failed")` is never recorded, so a crashed run
    looks the same as a finished one, and there is no duration (#177).
 5. Nothing to skip or collapse a noisy group: `DeviceStatsMonitor` alone adds ~500 series, so auto-generate
@@ -420,14 +420,14 @@ class ShapesSegmenter(pl.LightningModule):
         if self.trainer.sanity_checking or self._preview is None:
             return
         logger = cast("DLBoardLogger", self.trainer.logger)
-        step, epoch = self.trainer.global_step, str(self.trainer.current_epoch)
+        step, epoch = self.trainer.global_step, self.trainer.current_epoch
         images, masks, preds = self._preview
         artifacts: list[Image] = []
         for i in range(len(images)):
             rgb = (images[i].permute(1, 2, 0).numpy() * 255).astype(np.uint8)
             truth, pred = masks[i], preds[i]
             # DLBOARD GAP: no mask/box artifact (see the module docstring) -- composite them into a
-            # picture ourselves. Tags are the only way to attach numbers, and must be strings.
+            # picture ourselves. Tags are how numbers ride along with it.
             side_by_side = np.concatenate(
                 [rgb, overlay(rgb, truth.numpy()), overlay(rgb, pred.numpy())], axis=1
             )
@@ -437,7 +437,7 @@ class ShapesSegmenter(pl.LightningModule):
                     key=f"val/segmentation/sample_{i}",
                     image=side_by_side.repeat(PREVIEW_SCALE, axis=0).repeat(PREVIEW_SCALE, axis=1),
                     step=step,
-                    tags={"epoch": epoch, "iou": f"{sample_iou(truth, pred):.3f}"},
+                    tags={"epoch": epoch, "iou": sample_iou(truth, pred)},
                 ),
                 Image(
                     key=f"val/detection/sample_{i}",
@@ -445,7 +445,8 @@ class ShapesSegmenter(pl.LightningModule):
                     step=step,
                     tags={
                         "epoch": epoch,
-                        "boxes": f"{len(class_boxes(truth))} true / {len(class_boxes(pred))} predicted",
+                        "true_boxes": len(class_boxes(truth)),
+                        "predicted_boxes": len(class_boxes(pred)),
                     },
                 ),
             ]

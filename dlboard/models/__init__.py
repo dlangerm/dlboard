@@ -11,7 +11,9 @@ from dlboard.models._artifact import (
     FileKind,
     NewArtifact,
     NewArtifactLink,
+    TagValue,
     UnservableArtifactRefError,
+    format_tags,
     is_inlineable_artifact,
 )
 from dlboard.models._artifact_purge_task import ArtifactPurgeTask, NewArtifactPurgeTask
@@ -109,6 +111,7 @@ __all__ = [
     "Run",
     "SchemeColors",
     "Scope",
+    "TagValue",
     "ThemeSpec",
     "UnderlyingMetricTableEntry",
     "UnknownChartTypeError",
@@ -116,6 +119,7 @@ __all__ = [
     "User",
     "ValidJsonTypes",
     "ViewSummary",
+    "format_tags",
     "has_scope",
     "is_inlineable_artifact",
     "require_scope",

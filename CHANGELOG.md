@@ -14,6 +14,10 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ### Added
 
+* Artifact `tags` (on `Image`, `Figure`, `File`, `Link` and anything implementing `AnyArtifact`) accept
+  numbers and booleans as well as strings, and format them identically wherever they come from (floats to
+  four significant digits). Callers no longer stringify, and so no longer disagree. Tags are still stored
+  as text -- a numeric tag would be rejected by an older server, which the supported version skew allows.
 * `DLBoardLogger` flattens nested hyperparameters, like Lightning's own loggers do: a pydantic model,
   a pydantic or stdlib dataclass, a `Namespace` or a plain dict, nested however deeply, is logged as
   `parent/child` keys instead of being rejected. Pydantic does the serializing, so a model's own

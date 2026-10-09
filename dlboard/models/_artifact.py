@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import mimetypes
 import typing
-from typing import Final
+from typing import Final, TypeAlias
 
 import pendulum
 from pydantic import AnyUrl, AwareDatetime, BaseModel, Field
@@ -12,6 +12,7 @@ from pydantic import AnyUrl, AwareDatetime, BaseModel, Field
 from dlboard._compat import StrEnum
 
 if typing.TYPE_CHECKING:
+    from collections.abc import Mapping
     from pathlib import Path
 
 FILE_KIND_TAG: Final = "file_kind"
@@ -42,6 +43,34 @@ as `Content-Disposition: attachment` instead.
 """
 
 
+TagValue: TypeAlias = str | int | float | bool
+"""What a caller may put in a tag. Stored as text: see `format_tags`."""
+
+_TAG_FLOAT_FORMAT: Final = "#.4g"
+"""Four significant digits, trailing zeros kept, so a column of scores lines up (`0.1410`, `0.1438`)."""
+
+
+def format_tags(tags: Mapping[str, TagValue]) -> dict[str, str]:
+    """
+    `tags` as the text they are stored and shown as, numbers and booleans formatted the same way everywhere.
+
+    Callers used to stringify numbers themselves, each their own way (`:.3f`, `:.6g`, ...), so one
+    panel's captions disagreed with each other. The wire and the stored value stay text: a numeric
+    tag would be rejected by an older server within the supported version skew.
+    """
+    return {key: _format_tag_value(value) for key, value in tags.items()}
+
+
+def _format_tag_value(value: TagValue) -> str:
+    match value:
+        case bool():
+            return "true" if value else "false"
+        case float():
+            return format(value, _TAG_FLOAT_FORMAT)
+        case int() | str():
+            return str(value)
+
+
 def is_inlineable_artifact(fname: str) -> bool:
     """Whether a browser shows an artifact named `fname` inline (an image), rather than only offering it as a download."""
     return mimetypes.guess_type(fname)[0] in INLINEABLE_ARTIFACT_CONTENT_TYPES
@@ -57,8 +86,8 @@ class AnyArtifact(typing.Protocol):
         ...
 
     @property
-    def tags(self) -> dict[str, str]:
-        """Tags for this artifact."""
+    def tags(self) -> Mapping[str, TagValue]:
+        """Tags for this artifact; numbers and booleans are stored as text, see `format_tags`."""
         ...
 
     @property

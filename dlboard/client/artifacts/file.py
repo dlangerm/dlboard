@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 
 from pydantic import BaseModel
 
-from dlboard.models import FILE_KIND_TAG, FileKind, NewArtifact
+from dlboard.models import FILE_KIND_TAG, FileKind, NewArtifact, TagValue, format_tags
 
 
 class File(BaseModel, frozen=True, extra="forbid"):
@@ -23,7 +24,7 @@ class File(BaseModel, frozen=True, extra="forbid"):
     """The file to upload; its name becomes the artifact's `fname`."""
     kind: FileKind
     """What the file is, recorded as a tag (`FILE_KIND_TAG`)."""
-    tags: dict[str, str] = {}
+    tags: Mapping[str, TagValue] = {}
     """Tags for the file, for use by plugins."""
     step: int
     """The global step of the trainer."""
@@ -36,6 +37,6 @@ class File(BaseModel, frozen=True, extra="forbid"):
             run_id=run_id,
             experiment_id=experiment_id,
             step=self.step,
-            tags={**self.tags, FILE_KIND_TAG: self.kind},
+            tags=format_tags({**self.tags, FILE_KIND_TAG: self.kind}),
         )
         return obj, self.path

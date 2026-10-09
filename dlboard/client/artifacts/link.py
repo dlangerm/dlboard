@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
 from pydantic import AnyUrl, BaseModel
 
-from dlboard.models import NewArtifact
+from dlboard.models import NewArtifact, TagValue, format_tags
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -26,7 +27,7 @@ class Link(BaseModel, frozen=True, extra="forbid"):
     ref: AnyUrl
     """Where the blob already lives. Must be inside the server's own `ArtifactStore` space (or one
     of its allowlisted read-only locations) -- see `ArtifactStore.link_artifacts`."""
-    tags: dict[str, str] = {}
+    tags: Mapping[str, TagValue] = {}
     """Tags for the artifact, for use by plugins."""
     step: int
 
@@ -38,6 +39,6 @@ class Link(BaseModel, frozen=True, extra="forbid"):
             run_id=run_id,
             experiment_id=experiment_id,
             step=self.step,
-            tags=self.tags,
+            tags=format_tags(self.tags),
         )
         return obj, self.ref

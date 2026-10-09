@@ -1,6 +1,7 @@
 """Log an image at a step."""
 
 import uuid
+from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Final, Literal, cast
 
@@ -10,7 +11,7 @@ import PIL
 import PIL.Image
 from pydantic import BaseModel, field_validator
 
-from dlboard.models import NewArtifact
+from dlboard.models import NewArtifact, TagValue, format_tags
 
 if TYPE_CHECKING:
     # Pyright always sees the real `torch.Tensor` -- this repo's own dev/CI env always has torch
@@ -44,7 +45,7 @@ class Image(BaseModel, frozen=True, extra="forbid"):
     """Key for this artifact."""
     image: Annotated[_ImageArray, dltype.UInt8Tensor("height width *channels")]
     """An image to log. Expected to be in CHW format."""
-    tags: dict[str, str] = {}
+    tags: Mapping[str, TagValue] = {}
     """Tags for the image, for use by plugins."""
     step: int
     """The global step of the trainer."""
@@ -79,6 +80,6 @@ class Image(BaseModel, frozen=True, extra="forbid"):
             run_id=run_id,
             experiment_id=experiment_id,
             step=self.step,
-            tags=self.tags,
+            tags=format_tags(self.tags),
         )
         return obj, target
