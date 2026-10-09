@@ -54,6 +54,10 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ### Fixed
 
+* `dlboard` and `dlboard-client` now import together when each is installed into its own directory on `sys.path`, as
+  hermetic builds such as Bazel do. The client's regular `dlboard` package used to hide the server's half
+  (`dlboard.serve`, `dlboard.plugins`), so depending on `dlboard` failed to import it. `dlboard/__init__.py` now
+  extends its `__path__` with `pkgutil.extend_path`. Ordinary single-directory installs are unaffected.
 * Creating charts with **Auto-generate** no longer makes the page wait for the first panel to draw when that panel
   is big. A panel opens by itself only if it holds 12 charts or fewer (otherwise the first small one does,
   or none); a big panel stays closed with its chart count on its header. On a run with 886 charts the
