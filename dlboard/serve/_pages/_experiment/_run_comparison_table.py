@@ -58,6 +58,54 @@ _MAX_TABLE_HEIGHT = "50vh"
 _DELETE_COLUMN_ID = "_delete"
 _ROW_ID_FIELD = "_row_id"
 _SWATCH_FIELD = "_swatch"
+_STATUS_FIELD = "_status"
+_DURATION_FIELD = "_duration_s"
+_STATUS_DETAIL_FIELD = "_status_detail"
+_STATUS_MIN_WIDTH = 74
+"""Reserved row fields (underscore-prefixed, like `_swatch`): a hyperparameter or metric named "status" can't shadow them."""
+_STATUS_FORMAT = (
+    # One narrow cell for the sidebar: "running", or how long it took -- "3m 12s", "1h 5m", "42s" -- with a
+    # cross in front of a failure. Whole seconds in; arithmetic only, since dash-ag-grid's JS-string parser
+    # takes bare expressions (no `Math.floor(...)`).
+    f"params.data.{_STATUS_FIELD} == 'running' ? 'running' : params.value == null ? '' : "
+    f"(params.data.{_STATUS_FIELD} == 'failed' ? '✕ ' : '') + ("
+    "params.value >= 3600"
+    " ? ((params.value - params.value % 3600) / 3600) + 'h ' + ((params.value % 3600 - params.value % 60) / 60) + 'm'"
+    " : params.value >= 60 ? ((params.value - params.value % 60) / 60) + 'm ' + (params.value % 60) + 's'"
+    " : params.value + 's')"
+)
+_STATUS_STYLES: dict[models.RunStatus, str] = {
+    models.RunStatus.RUNNING: "var(--mantine-color-blue-5)",
+    models.RunStatus.FINISHED: "var(--mantine-color-dimmed)",
+    models.RunStatus.FAILED: "var(--mantine-color-red-6)",
+}
+
+
+def _duration_text(seconds: int) -> str:
+    """`seconds` as "42s", "3m 12s" or "1h 5m" -- what `_STATUS_FORMAT` shows in the cell."""
+    hours, rest = divmod(seconds, 3600)
+    minutes, secs = divmod(rest, 60)
+    if hours:
+        return f"{hours}h {minutes}m"
+    return f"{minutes}m {secs}s" if minutes else f"{secs}s"
+
+
+def _status_detail(run: Run) -> str:
+    """The cell's tooltip: how the run ended and how long it took, in words. Empty for a run with no status."""
+    match run.status:
+        case None:
+            return ""
+        case models.RunStatus.RUNNING:
+            return "running"
+        case models.RunStatus.FINISHED | models.RunStatus.FAILED:
+            took = f" after {_duration_text(_duration_seconds(run))}" if run.ended_at else ""
+            return f"{run.status.value}{took}"
+
+
+def _duration_seconds(run: Run) -> int:
+    assert run.ended_at is not None
+    return int((run.ended_at - run.created_at).total_seconds())
+
 
 SELECTED_HPARAM_COLS_KEY: typing.Final = "hparam-table-selected"  # a page_settings dict key
 
@@ -79,7 +127,13 @@ def _build_hparam_rows(
     """One row per run, whether or not it has logged hyperparameters or metrics yet."""
     rows: list[dict[str, Any]] = []
     for run in runs:
-        row: dict[str, Any] = {"run_id": run.id, RUN_NAME_COLUMN: run_display_name(run)}
+        row: dict[str, Any] = {
+            "run_id": run.id,
+            RUN_NAME_COLUMN: run_display_name(run),
+            _STATUS_FIELD: run.status.value if run.status else None,
+            _DURATION_FIELD: _duration_seconds(run) if run.ended_at else None,
+            _STATUS_DETAIL_FIELD: _status_detail(run),
+        }
         hparam = hparams_by_run.get(run.id)
         if hparam is not None:
             row.update(hparam.hparams_dict)
@@ -163,7 +217,29 @@ def _build_hparam_datatable(
             "sortable": True,
             # Each run's chart color as a dot before its name, so this table doubles as the legend.
             "cellClass": {"function": f"params.data.{_SWATCH_FIELD}"},
-        }
+        },
+        {
+            # Sorts by how long the run took; filters (as text) by its status.
+            "field": _DURATION_FIELD,
+            "headerName": "Status",
+            "headerTooltip": "How the run ended, and how long it took",
+            "sortable": True,
+            "filter": True,
+            "filterValueGetter": {"function": f"params.data.{_STATUS_FIELD}"},
+            "valueFormatter": {"function": _STATUS_FORMAT},
+            "tooltipField": _STATUS_DETAIL_FIELD,
+            # The run name gets what is left, but this has to stay readable ("✕ 1h 2m") in a narrow sidebar.
+            "minWidth": _STATUS_MIN_WIDTH,
+            "cellStyle": {
+                "styleConditions": [
+                    {
+                        "condition": f"params.data.{_STATUS_FIELD} == '{status.value}'",
+                        "style": {"color": color},
+                    }
+                    for status, color in _STATUS_STYLES.items()
+                ]
+            },
+        },
     ]
     column_defs.extend(column_def(str(key), infer_column_dtype(rows, str(key))) for key in selected)
     column_defs.append(
@@ -172,7 +248,8 @@ def _build_hparam_datatable(
             "headerName": "",
             "sortable": False,
             "filter": False,
-            "width": 40,
+            "minWidth": 36,
+            "maxWidth": 40,
             "cellClass": icon_cell_class(Icon.DELETE),
             "cellStyle": {"textAlign": "center", "cursor": "pointer", "color": "var(--mantine-color-red-6)"},
         }
@@ -192,6 +269,8 @@ def _build_hparam_datatable(
     grid["className"] = f"{grid['className']} dl-run-table"
     grid["style"] = {
         **grid["style"],
+        # Less than ag-grid's default padding a side: in a sidebar this narrow it is a third of every column.
+        "--ag-cell-horizontal-padding": "8px",
         "height": f"min({(max(len(rows), 2) + 1) * _ROW_HEIGHT + 2}px, {_MAX_TABLE_HEIGHT})",
     }
     return dag.AgGrid(
@@ -333,7 +412,7 @@ def _render_signature(
     hparams: list[str],
     excluded: list[int] | list[str],
     selected: list[str],
-    run_ids: list[int],
+    runs: list[Run],
 ) -> list[Any]:
     """
     Everything `render_navbar_hparams`'s output actually depends on, as one comparable value.
@@ -343,11 +422,13 @@ def _render_signature(
     but naming every tracked field in one place (rather than as an inline list literal at the call
     site) means a future addition to what this table renders from has one obvious place to also add
     it, instead of a silently-still-passing equality check against a signature nobody remembered to
-    extend. `run_ids` (not just `hparams`) must be included: a run with no hyperparameters yet still
+    extend. The runs (not just `hparams`) must be included: a run with no hyperparameters yet still
     needs to appear the moment `store.get_runs` (queried fresh in `_load_hparam_panel_settings`,
-    *before* this signature is even built) reports it, even though `hparams` itself hasn't changed.
+    *before* this signature is even built) reports it, even though `hparams` itself hasn't changed --
+    and so must each one's status and end time, or a run finishing would never redraw its row.
     """
-    return [experiment_id, hparams, sorted(excluded), selected, run_ids]
+    run_states = [[run.id, run.status, run.ended_at.isoformat() if run.ended_at else None] for run in runs]
+    return [experiment_id, hparams, sorted(excluded), selected, run_states]
 
 
 def _register_hparam_table(app: Dash) -> None:
@@ -400,7 +481,7 @@ def _register_hparam_table(app: Dash) -> None:
         # metric-column feature. `runs` (from `_load_hparam_panel_settings`, already cheap/bounded)
         # is enough to detect every case this table needs to react to, so the expensive part only
         # runs on the (comparatively rare) ticks that actually need a re-render.
-        signature = _render_signature(experiment_id, hparams, excluded, selected, [r.id for r in runs])
+        signature = _render_signature(experiment_id, hparams, excluded, selected, runs)
         if signature == prev_signature:
             raise PreventUpdate
 

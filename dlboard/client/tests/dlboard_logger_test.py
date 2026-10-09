@@ -78,6 +78,13 @@ class _FakeRunAPI(_FakeAPI):
         self.calls.append(("get_run", (run_id,), {}))
         return models.Run(id=run_id, experiment_id=2)
 
+    finish_error: Exception | None = None
+
+    def finish_run(self, run_id: int, status: models.RunStatus) -> None:
+        self.calls.append(("finish_run", (run_id, status), {}))
+        if self.finish_error is not None:
+            raise self.finish_error
+
     def create_run(self, run: models.NewRun) -> models.Run:
         self.calls.append(("create_run", (run.experiment_id,), {}))
         return models.Run(id=99, experiment_id=run.experiment_id)
@@ -530,3 +537,38 @@ def test_every_checkpoint_callback_gets_its_kept_checkpoints_uploaded(
         "checkpoints/first-epoch=2.ckpt",
         "checkpoints/second-epoch=1.ckpt",
     }
+
+
+@pytest.mark.parametrize(
+    ("lightning_status", "reported"),
+    [
+        pytest.param("success", [models.RunStatus.FINISHED], id="success"),
+        pytest.param("failed", [models.RunStatus.FAILED], id="failed"),
+        pytest.param("atexit", [], id="the-exit-flush-cannot-tell-a-crash-from-an-end"),
+        pytest.param("interrupted", [], id="anything-else"),
+    ],
+)
+def test_finalize_reports_how_the_run_ended(
+    monkeypatch: pytest.MonkeyPatch, lightning_status: str, reported: list[models.RunStatus]
+) -> None:
+    api = _FakeRunAPI("http://x")
+    _stub_api(monkeypatch, api)
+    _stub_shippers(monkeypatch)
+    logger = DLBoardLogger(project_id=1, experiment_id=None)
+
+    logger.finalize(lightning_status)
+
+    assert [call[1][1] for call in api.calls if call[0] == "finish_run"] == reported
+
+
+def test_a_server_that_cannot_record_the_status_never_fails_the_script(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    api = _FakeRunAPI("http://x")
+    api.finish_error = requests.ConnectionError("down")
+    _stub_api(monkeypatch, api)
+    _stub_shippers(monkeypatch)
+    logger = DLBoardLogger(project_id=1, experiment_id=None)
+
+    with pytest.warns(UserWarning, match="could not record that the run finished"):
+        logger.finalize("success")

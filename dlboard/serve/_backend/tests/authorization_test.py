@@ -151,6 +151,10 @@ _OPERATIONS: dict[str, tuple[ProjectRole, Callable[[AuthorizingDataStore, _Chain
     "read metrics": (ProjectRole.VIEWER, lambda s, c: s.fetch_metrics(c[1].id)),
     "create a run": (ProjectRole.EDITOR, lambda s, c: s.create_run(models.NewRun(experiment_id=c[1].id))),
     "log metrics": (ProjectRole.EDITOR, lambda s, c: s.log_metrics([_metric(c[1].id, c[2].id)])),
+    "finish a run": (
+        ProjectRole.EDITOR,
+        lambda s, c: s.finish_run(c[2].id, models.RunStatus.FINISHED, pendulum.now("UTC")),
+    ),
     "delete an experiment": (ProjectRole.EDITOR, lambda s, c: s.delete_experiment(c[1].id, s.actor)),
     "share the project": (
         ProjectRole.OWNER,

@@ -18,7 +18,8 @@ Breaking any of these needs a migration path and a deprecation window of at leas
 - **Stored data.**
   - View and panel JSON.
   - Chart type names (`line`, `bar`, `image`, `table`).
-  - The *values* of persisted enums (roles, scopes, audit actions, entity types, experiment sources).
+  - The *values* of persisted enums (roles, scopes, audit actions, entity types, experiment sources, run
+    statuses).
   - Artifact refs (`file:///...`, `s3://...`).
   - The API token format, `dlb_<id>_<secret>`.
 - **Configuration.** Environment variable names ([configuration.md](configuration.md)), the CLI commands

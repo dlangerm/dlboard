@@ -194,6 +194,11 @@ def demo(live_server_url: str, dlboard_app: Dash, tmp_path_factory: pytest.TempP
                 for step in range(_N_STEPS)
             ]
         )
+        # Finished, as a real sweep is by the time anyone screenshots it -- with fixed end times, so the "Status"
+        # column is the same on every render.
+        api.finish_run(
+            run.id, models.RunStatus.FINISHED, ended_at=_T0.add(hours=index, minutes=_N_STEPS + 7 * index)
+        )
         converted = [
             Figure.from_figure(_confusion_matrix(step, rng), _CONFUSION_KEY, step=step).to_artifact(
                 artifact_dir, run.id, sweep.id
@@ -221,6 +226,7 @@ def demo(live_server_url: str, dlboard_app: Dash, tmp_path_factory: pytest.TempP
             for step in baseline_steps
         ]
     )
+    api.finish_run(baseline_run.id, models.RunStatus.FINISHED, ended_at=_T0.add(minutes=len(baseline_steps)))
     # The server records uploaded artifacts on a background batch (see `BlobArtifactStore`), so
     # they land shortly after the uploads above return.
     store = get_system_data_store(dlboard_app)

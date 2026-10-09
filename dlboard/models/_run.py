@@ -4,6 +4,24 @@ import coolname
 import pendulum
 from pydantic import AwareDatetime, BaseModel, Field
 
+from dlboard._compat import StrEnum
+
+
+class RunStatus(StrEnum):
+    """
+    Where a run is, as its client last reported it.
+
+    Written to a database column and sent over the REST API as the plain string value, so a value is
+    never renamed or removed -- see `docs/compatibility.md`.
+    """
+
+    RUNNING = "running"
+    """Started, and not yet reported done -- including a run whose process died without a word."""
+    FINISHED = "finished"
+    """The client reported it ended normally."""
+    FAILED = "failed"
+    """The client reported it ended with an error."""
+
 
 class NewRun(BaseModel, frozen=True, extra="ignore"):
     """A run within an experiment. `extra="ignore"`: this crosses the wire -- see `dlboard._wire`."""
@@ -29,12 +47,26 @@ class NewRun(BaseModel, frozen=True, extra="ignore"):
     created_at: AwareDatetime = Field(default_factory=lambda: pendulum.now(pendulum.UTC))
     """When this run was created."""
 
+    status: RunStatus | None = RunStatus.RUNNING
+    """
+    Where this run is. A new run is `RUNNING`; `None` only for a run stored before status was
+    tracked, which is shown as having no status rather than guessed at (like `name`).
+    """
+
 
 class Run(NewRun, frozen=True, extra="ignore"):
     """A run stored in the database. `extra="ignore"`: this crosses the wire -- see `dlboard._wire`."""
 
     id: int
     """The ID of the run."""
+
+    ended_at: AwareDatetime | None = None
+    """
+    When its client last reported it was done (`DataStore.finish_run`), if it has.
+
+    A later stage reporting done again (Lightning finalizes after `fit` and after `test`) moves it
+    later. `None` while `RUNNING`, and for a run that never reported.
+    """
 
     deleted_by: int | None = None
     """The user who soft-deleted this run, if it's been deleted."""

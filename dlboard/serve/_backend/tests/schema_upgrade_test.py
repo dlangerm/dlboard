@@ -45,7 +45,7 @@ def test_second_store_against_an_already_migrated_database_is_a_no_op(
     second = _restart(store_backend, tmp_path, postgres_settings)
     try:
         ((revision,),) = second._execute(sa.text("select version_num from alembic_version"))
-        assert revision == "0001"
+        assert revision == "0002"
         assert first.tables.keys() == second.tables.keys()
         assert schema_diff(second) == []
     finally:

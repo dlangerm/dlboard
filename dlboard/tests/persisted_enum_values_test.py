@@ -18,7 +18,7 @@ import typing
 
 import pytest
 
-from dlboard.models import AuditAction, EntityType, ExperimentSource, FileKind, ProjectRole, Scope
+from dlboard.models import AuditAction, EntityType, ExperimentSource, FileKind, ProjectRole, RunStatus, Scope
 from dlboard.models._metric import MetricColumn
 from dlboard.plugins.charts.bar_chart import BarChart
 from dlboard.plugins.charts.image_series import ImageChart
@@ -48,6 +48,7 @@ _FROZEN_ENUM_VALUES: dict[type[StrEnum], frozenset[str]] = {
     EntityType: frozenset({"project", "experiment", "run", "artifact"}),
     ExperimentSource: frozenset({"pytorch_lightning"}),
     FileKind: frozenset({"checkpoint"}),
+    RunStatus: frozenset({"running", "finished", "failed"}),
     MetricColumn: frozenset({"run_id", "step", "timestamp_utc"}),
 }
 

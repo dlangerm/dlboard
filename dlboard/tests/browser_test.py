@@ -1788,3 +1788,31 @@ def test_suggest_charts_filters_selects_and_adds_many_at_once(page: Page, live_s
     expect(page.get_by_text("val/loss", exact=True)).to_be_visible()
     expect(page.get_by_text("train/loss", exact=True)).to_have_count(0)
     expect(page.get_by_role("button", name="Add selected (0)")).to_be_disabled()
+
+
+def test_the_runs_table_shows_how_each_run_ended_and_for_how_long(page: Page, live_server_url: str) -> None:
+    """A crashed run used to look exactly like a finished one, and nothing said how long either took."""
+    _create_project_and_experiment(page, live_server_url, "Run Status Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    api = BasicDlboardAPI(live_server_url)
+    still_running = api.create_run(models.NewRun(experiment_id=experiment_id, name="still-going"))
+    crashed = api.create_run(models.NewRun(experiment_id=experiment_id, name="crashed"))
+    done = api.create_run(models.NewRun(experiment_id=experiment_id, name="all-done"))
+    store = get_system_data_store()
+    store.finish_run(
+        crashed.id,
+        models.RunStatus.FAILED,
+        crashed.created_at + pendulum.duration(hours=1, minutes=2, seconds=5),
+    )
+    store.finish_run(
+        done.id, models.RunStatus.FINISHED, done.created_at + pendulum.duration(minutes=3, seconds=23)
+    )
+    assert still_running.status == models.RunStatus.RUNNING
+
+    page.reload()
+
+    rows = page.locator(".dl-run-table .ag-row")
+    expect(rows.filter(has_text="still-going")).to_contain_text("running")
+    expect(rows.filter(has_text="crashed")).to_contain_text("✕ 1h 2m")
+    expect(rows.filter(has_text="all-done")).to_contain_text("3m 23s")

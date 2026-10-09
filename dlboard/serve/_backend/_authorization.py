@@ -30,6 +30,7 @@ from dlboard.models import ProjectRole, Scope, has_scope, require_scope
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Iterable, Iterator
+    from datetime import datetime
 
     from flask import Response
     from pydantic import AnyUrl
@@ -348,6 +349,10 @@ class AuthorizingDataStore(models.DataStore[...]):
             if run and self._can(self._experiment_project(run.experiment_id), ProjectRole.VIEWER)
             else None
         )
+
+    def finish_run(self, run_id: int, status: models.RunStatus, ended_at: datetime) -> models.Run:
+        self._require(self._run_project(run_id), ProjectRole.EDITOR)
+        return self._inner.finish_run(run_id, status, ended_at)
 
     def get_runs(self, experiment_id: int, *, limit: int = 1000, offset: int = 0) -> Iterator[models.Run]:
         self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)

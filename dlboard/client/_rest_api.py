@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Final, TypeVar
 from urllib.parse import urlsplit
 
 import requests
-from pydantic import AnyUrl, BaseModel, PositiveFloat, SecretStr
+from pydantic import AnyUrl, AwareDatetime, BaseModel, PositiveFloat, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from structlog.stdlib import get_logger
 
@@ -28,6 +28,7 @@ from dlboard._wire import (
     DLBOARD_USER_HEADER,
     METADATA_PART_SUFFIX,
     WHOAMI_PATH,
+    FinishRun,
     GetOrCreateExperiment,
     GetOrCreateProject,
     Identity,
@@ -35,10 +36,14 @@ from dlboard._wire import (
     create_path,
     entity_path,
     get_or_create_path,
+    run_finish_path,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
+
+    from dlboard._wire import DoneStatus
+
 
 _log = get_logger(__name__)
 
@@ -200,6 +205,24 @@ class BasicDlboardAPI:
         )
         res.raise_for_status()
         return models.Run.model_validate(res.json())
+
+    def finish_run(self, run_id: int, status: DoneStatus, ended_at: AwareDatetime | None = None) -> None:
+        """
+        Report that run `run_id` is done, as `status`, ending at `ended_at` -- by default now, by this machine's clock.
+
+        A server from before this existed answers 404, as does a run that is gone or not yours: both
+        mean there is nothing to record, so neither is an error. Anything else raises.
+        """
+        res = self._session.post(
+            f"{self.base_url}/{run_finish_path(str(run_id))}",
+            json=(
+                FinishRun(status=status) if ended_at is None else FinishRun(status=status, ended_at=ended_at)
+            ).model_dump(mode="json"),
+            headers=self._headers,
+            timeout=self._timeout,
+        )
+        if res.status_code != HTTPStatus.NOT_FOUND:
+            res.raise_for_status()
 
     def log_hyperparams(self, hyperparams: models.NewHyperParams) -> models.HyperParams:
         """Log hyperparameters."""

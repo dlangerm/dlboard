@@ -13,12 +13,12 @@ import torch
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.demos.boring_classes import BoringModel
 
-from dlboard._wire import Resource
+from dlboard._wire import Resource, run_finish_path
 from dlboard.client._rest_api import create_path
 from dlboard.client.artifacts import image
 from dlboard.client.dlboard_logger import DLBoardLogger
 from dlboard.conftest import EVERY_STORE_BACKEND, StoreBackend
-from dlboard.models import FILE_KIND_TAG, FileKind
+from dlboard.models import FILE_KIND_TAG, FileKind, RunStatus
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -158,3 +158,55 @@ def test_log_model_uploads_the_checkpoints_a_real_fit_saves(
     assert {a.key for a in artifacts} == expected_keys
     assert {a.tags[FILE_KIND_TAG] for a in artifacts} == {FileKind.CHECKPOINT.value}
     assert all(a.fname.endswith(".ckpt") for a in artifacts)
+
+
+def test_finalize_records_how_the_run_ended_and_the_newest_report_wins(
+    logger: DLBoardLogger, backend_server: BackendServer
+) -> None:
+    """The whole path: the client's `finalize`, the REST route, the store. Lightning finalizes per stage."""
+    run = backend_server.store.get_run(logger.run_id or 0)
+    assert run is not None
+    assert (run.status, run.ended_at) == (RunStatus.RUNNING, None)
+
+    logger.finalize("success")
+    finished = backend_server.store.get_run(run.id)
+    assert finished is not None
+    assert (finished.status, finished.ended_at is not None) == (RunStatus.FINISHED, True)
+
+    logger.finalize("failed")
+    failed = backend_server.store.get_run(run.id)
+    assert failed is not None
+    assert failed.status == RunStatus.FAILED
+
+
+def test_the_exit_flush_does_not_claim_the_run_ended(
+    logger: DLBoardLogger, backend_server: BackendServer
+) -> None:
+    """It can't tell a crash from a script that simply ended, so the run is left as it was."""
+    logger.finalize("atexit")
+
+    run = backend_server.store.get_run(logger.run_id or 0)
+    assert run is not None
+    assert (run.status, run.ended_at) == (RunStatus.RUNNING, None)
+
+
+@pytest.mark.parametrize(
+    ("run_id", "body", "expected_status"),
+    [
+        pytest.param(None, {"status": "running"}, 400, id="running-is-not-a-way-to-end"),
+        pytest.param(None, {"status": "exploded"}, 400, id="unknown-status"),
+        pytest.param(999_999, {"status": "finished"}, 404, id="no-such-run"),
+    ],
+)
+def test_the_finish_route_rejects_what_it_cannot_record(
+    logger: DLBoardLogger,
+    backend_server: BackendServer,
+    run_id: int | None,
+    body: dict[str, str],
+    expected_status: int,
+) -> None:
+    res = requests.post(
+        f"{backend_server.url}/{run_finish_path(str(run_id or logger.run_id))}", json=body, timeout=10
+    )
+
+    assert res.status_code == expected_status

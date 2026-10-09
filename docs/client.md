@@ -62,6 +62,12 @@ visible as training appearing to restart, or the logger itself being constructed
 This is the same requirement Python's own `multiprocessing` docs describe for any spawn-based code,
 not something specific to dlboard.
 
+**How a run ends.** Lightning finalizes the logger when a stage finishes: `"success"` records the run as
+*finished* and `"failed"` as *failed*, with the time it ended (stamped by your machine, like the run's start,
+ so the duration never mixes two clocks). The runs table shows it as "running", "3m 23s" or "✕ 1h 2m" next to
+the run. A later stage (`trainer.test` after `fit`) moves the end time later. A process that is killed never
+finalizes, so its run stays *running*. A server that predates this simply doesn't record it.
+
 **Multi-GPU (DDP).** Every rank builds its own logger and Lightning calls all of them, so only
 global rank 0 logs: a non-zero rank makes no server calls, starts no shipping processes and drops
 whatever it's asked to log, which means one run per job rather than one per GPU. To log into a run
