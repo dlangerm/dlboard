@@ -15,6 +15,7 @@ from dlboard._version import __version__
 from dlboard._wire import (
     METADATA_PART_SUFFIX,
     WHOAMI_PATH,
+    FinishRun,
     GetOrCreateExperiment,
     GetOrCreateProject,
     Identity,
@@ -22,6 +23,7 @@ from dlboard._wire import (
     create_path,
     entity_path,
     get_or_create_path,
+    run_finish_path,
 )
 from dlboard.models import DataStore
 from dlboard.serve import get_artifact_store, get_current_user, get_data_store
@@ -74,6 +76,14 @@ def handle_create_run(store: DataStore[...], body: dict[str, Any], actor: models
     """Create a run, attributed to `actor`."""
     run = models.NewRun.model_validate(body).model_copy(update={"created_by": actor.id})
     return store.create_run(run).model_dump(mode="json")
+
+
+def handle_finish_run(store: DataStore[...], run_id: int, body: dict[str, Any]) -> dict[str, Any]:
+    """Record that run `run_id`'s client is done, as and when it reports (`FinishRun`). 404 as `handle_get_run`."""
+    req = FinishRun.model_validate(body)
+    if store.get_run(run_id) is None:
+        raise NotFound
+    return store.finish_run(run_id, req.status, req.ended_at).model_dump(mode="json")
 
 
 def handle_get_run(store: DataStore[...], run_id: int) -> dict[str, Any]:
@@ -221,6 +231,11 @@ def create_run() -> dict[str, Any]:
 def get_run(entity_id: int) -> dict[str, Any]:
     """Look up an existing run by id."""
     return handle_get_run(get_data_store(), entity_id)
+
+
+def finish_run(entity_id: int) -> dict[str, Any]:
+    """A run's client reports it is done (finished or failed)."""
+    return handle_finish_run(get_data_store(), entity_id, request.json)
 
 
 def create_project() -> dict[str, Any]:
@@ -392,6 +407,7 @@ _ROUTES: tuple[tuple[str, list[str], Callable[..., Any]], ...] = (
     (f"{entity_path(Resource.EXPERIMENTS)}/restore", ["POST"], restore_experiment),
     (entity_path(Resource.RUNS), ["GET"], get_run),
     (entity_path(Resource.RUNS), ["DELETE"], delete_run),
+    (run_finish_path(), ["POST"], finish_run),
     (f"{entity_path(Resource.RUNS)}/restore", ["POST"], restore_run),
     (entity_path(Resource.ARTIFACTS), ["DELETE"], delete_artifact),
     (f"{entity_path(Resource.ARTIFACTS)}/restore", ["POST"], restore_artifact),

@@ -15,6 +15,7 @@ _Chart = typing.TypeVar("_Chart")
 
 if typing.TYPE_CHECKING:
     from collections.abc import Collection, Iterable
+    from datetime import datetime
 
     from flask import Response
     from pydantic import AnyUrl
@@ -167,6 +168,14 @@ class DataStore(typing.Protocol[_P]):
 
     def get_run(self, run_id: int) -> models.Run | None:
         """A (non-deleted) run by id."""
+        ...
+
+    def finish_run(self, run_id: int, status: models.RunStatus, ended_at: datetime) -> models.Run:
+        """
+        Record that a run is done: its `status` and when it `ended_at`. Raises if it is missing or deleted.
+
+        Safe to call again (a later stage reporting done): the newest report wins.
+        """
         ...
 
     def get_runs(

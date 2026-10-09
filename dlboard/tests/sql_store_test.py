@@ -109,6 +109,68 @@ def test_get_runs_paginates_most_recently_created_first(store: SQLLiteStore, exp
     assert [r.id for r in second_page] == [runs[0].id]
 
 
+def test_a_new_run_is_running_and_finishing_it_records_how_and_when(
+    store: SQLLiteStore, experiment_id: int
+) -> None:
+    created = store.create_run(models.NewRun(experiment_id=experiment_id))
+    assert (created.status, created.ended_at) == (models.RunStatus.RUNNING, None)
+    ended_at = datetime(2026, 1, 1, 12, tzinfo=UTC)
+
+    finished = store.finish_run(created.id, models.RunStatus.FAILED, ended_at)
+
+    assert (finished.status, finished.ended_at) == (models.RunStatus.FAILED, ended_at)
+    assert store.get_run(created.id) == finished
+
+
+def test_finishing_a_run_again_keeps_the_newest_report(store: SQLLiteStore, experiment_id: int) -> None:
+    """Lightning finalizes after `fit` and again after `test`."""
+    run = store.create_run(models.NewRun(experiment_id=experiment_id))
+    first = datetime(2026, 1, 1, 12, tzinfo=UTC)
+    store.finish_run(run.id, models.RunStatus.FINISHED, first)
+
+    store.finish_run(run.id, models.RunStatus.FAILED, first + timedelta(minutes=5))
+
+    latest = store.get_run(run.id)
+    assert latest is not None
+    assert (latest.status, latest.ended_at) == (models.RunStatus.FAILED, first + timedelta(minutes=5))
+
+
+def test_finishing_a_run_bumps_its_experiments_revision_so_a_live_page_notices(
+    store: SQLLiteStore, experiment_id: int
+) -> None:
+    run = store.create_run(models.NewRun(experiment_id=experiment_id))
+    before = store.get_experiment(experiment_id)
+    assert before is not None
+
+    store.finish_run(run.id, models.RunStatus.FINISHED, datetime(2026, 1, 1, tzinfo=UTC))
+
+    after = store.get_experiment(experiment_id)
+    assert after is not None
+    assert after.revision > before.revision
+
+
+def test_a_run_stored_before_status_existed_reads_back_with_none(
+    store: SQLLiteStore, experiment_id: int
+) -> None:
+    run = store.create_run(models.NewRun(experiment_id=experiment_id))
+    runs = store._tables[models.Run]
+    store._execute(sa.update(runs).where(runs.c.id == run.id).values(status=None))
+
+    legacy = store.get_run(run.id)
+
+    assert legacy is not None
+    assert (legacy.status, legacy.ended_at) == (None, None)
+
+
+def test_finishing_a_missing_or_deleted_run_raises(store: SQLLiteStore, experiment_id: int) -> None:
+    deleted = store.create_run(models.NewRun(experiment_id=experiment_id))
+    store.delete_run(deleted.id, store.get_or_create_user(models.Principal.unverified("alice")))
+
+    for run_id in (deleted.id, 999_999):
+        with pytest.raises(ValueError, match=r"deleted|does not exist"):
+            store.finish_run(run_id, models.RunStatus.FINISHED, datetime(2026, 1, 1, tzinfo=UTC))
+
+
 def test_a_run_created_without_a_name_gets_a_generated_one_that_survives_persistence(
     store: SQLLiteStore, experiment_id: int
 ) -> None:

@@ -27,7 +27,7 @@ from dlboard.models._hparams import FlatHparamDict, HyperParams, NewHyperParams,
 from dlboard.models._metric import LoggedMetrics, MetricColumn, UnderlyingMetricTableEntry
 from dlboard.models._plugin import InstalledPlugin, PluginProtocol
 from dlboard.models._project import NewProject, Project
-from dlboard.models._run import NewRun, Run
+from dlboard.models._run import NewRun, Run, RunStatus
 from dlboard.models._scopes import Scope, has_scope, require_scope
 from dlboard.models._theme import ColorScheme, SchemeColors, ThemeSpec
 from dlboard.models._user import UNVERIFIED_ISSUER, NewUser, Principal, User
@@ -109,6 +109,7 @@ __all__ = [
     "ProjectRole",
     "ProjectStats",
     "Run",
+    "RunStatus",
     "SchemeColors",
     "Scope",
     "TagValue",

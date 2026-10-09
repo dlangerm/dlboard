@@ -14,6 +14,12 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ### Added
 
+* A run records how it ended and when. `DLBoardLogger.finalize` reports `"success"` as *finished* and
+  `"failed"` as *failed* (`POST /api/v1/runs/<id>/finish`, a new path), stamped with the client's clock; the
+  runs table gets a compact **Status** column (`running`, `3m 23s`, `✕ 1h 2m`) that sorts by duration and
+  filters by status. A killed process never reports, so its run stays *running*. Two nullable columns are
+  added to `Run` by migration `0002` (expand-only: run `dlboard` servers upgrade first, as always); an older
+  server answers 404 to the new path and the client carries on.
 * **Suggest charts** is a selection list, not one add button per key: a filter (by key or target panel), a
   By name / By panel sort, **Select all** and **Clear** for what the filter shows, and **Add selected (N)**,
   which adds everything ticked in a single page update (65 charts at once on the advanced example, instead of

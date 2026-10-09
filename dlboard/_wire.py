@@ -11,9 +11,10 @@ never actually touches either. Pure `pydantic`/`typing` -- no heavy dependency o
 
 from __future__ import annotations
 
-from typing import Final
+from typing import Final, Literal
 
-from pydantic import BaseModel
+import pendulum
+from pydantic import AwareDatetime, BaseModel, Field
 
 from dlboard import models
 from dlboard._compat import StrEnum
@@ -84,6 +85,11 @@ def get_or_create_path(resource: Resource, base_url: str = "/") -> str:
     return f"{base_url}/{API_PREFIX}/{resource}/get-or-create".strip("/")
 
 
+def run_finish_path(run_id: str = "<int:entity_id>", base_url: str = "/") -> str:
+    """The REST path a run's client reports it is done on, e.g. `api/v1/runs/<id>/finish`."""
+    return f"{entity_path(Resource.RUNS, run_id, base_url)}/finish"
+
+
 class Identity(BaseModel, frozen=True, extra="ignore"):
     """Who the server authenticated a request as, plus enough to let a client self-diagnose -- what `whoami` returns."""
 
@@ -101,6 +107,22 @@ class GetOrCreateProject(BaseModel, frozen=True, extra="ignore"):
 
     name: str
     description: str = ""
+
+
+DoneStatus = Literal[models.RunStatus.FINISHED, models.RunStatus.FAILED]
+"""The statuses a client may report a run done with -- `RUNNING` is only ever what a run starts as."""
+
+
+class FinishRun(BaseModel, frozen=True, extra="ignore"):
+    """
+    Request body: a run's client reports it is done, how, and when.
+
+    `ended_at` is the client's clock, like the run's own `created_at`, so the duration between them
+    never mixes two machines' clocks.
+    """
+
+    status: DoneStatus
+    ended_at: AwareDatetime = Field(default_factory=lambda: pendulum.now(pendulum.UTC))
 
 
 class GetOrCreateExperiment(BaseModel, frozen=True, extra="ignore"):

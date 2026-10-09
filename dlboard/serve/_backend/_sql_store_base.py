@@ -683,6 +683,20 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         """A (non-deleted) run by id."""
         return next(iter(self._by_id(models.Run, run_id)), None)
 
+    def finish_run(self, run_id: int, status: models.RunStatus, ended_at: datetime) -> models.Run:
+        """Record that a run is done: its `status` and when it `ended_at`. Raises if it is missing or deleted."""
+        self._ensure_not_deleted(models.Run, run_id)
+        runs = self._tables[models.Run]
+        (finished,) = self._fetch(
+            models.Run,
+            sa.update(runs)
+            .where(runs.c.id == run_id)
+            .values(status=status.value, ended_at=ended_at)
+            .returning(runs),
+        )
+        self._touch_experiment(finished.experiment_id)
+        return finished
+
     def get_runs(self, experiment_id: int, *, limit: int = 1000, offset: int = 0) -> Iterator[models.Run]:
         """Get a page of an experiment's (non-deleted) runs, most recently created first."""
         runs = self._tables[models.Run]

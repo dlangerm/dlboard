@@ -3,10 +3,13 @@
 
 from __future__ import annotations
 
+import contextlib
 import warnings
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
+import requests
 from pydantic import SecretStr
 
 from dlboard import models
@@ -122,3 +125,58 @@ def test_client_sends_a_timeout_on_every_request(monkeypatch: pytest.MonkeyPatch
         backend.ClientTimeoutSettings().connect_timeout_s,
         backend.ClientTimeoutSettings().read_timeout_s,
     )
+
+
+class _Reply:
+    """A bare `requests.Response` stand-in: a status, and `raise_for_status` for 4xx/5xx."""
+
+    def __init__(self, status_code: int) -> None:
+        self.status_code = status_code
+
+    def raise_for_status(self) -> None:
+        if self.status_code >= 400:
+            raise requests.HTTPError(str(self.status_code))
+
+
+@pytest.mark.parametrize(
+    ("status_code", "raises"),
+    [
+        pytest.param(200, False, id="recorded"),
+        pytest.param(404, False, id="a-server-without-the-route-or-a-run-that-is-gone"),
+        pytest.param(500, True, id="a-real-failure"),
+    ],
+)
+def test_finish_run_reports_how_a_run_ended_and_tolerates_a_server_that_cannot_record_it(
+    monkeypatch: pytest.MonkeyPatch, status_code: int, *, raises: bool
+) -> None:
+    api = backend.BasicDlboardAPI(base_url="http://host:1")
+    sent: dict[str, Any] = {}
+
+    def _post(url: str, **kwargs: Any) -> _Reply:  # noqa: ANN401
+        sent.update(url=url, json=kwargs["json"])
+        return _Reply(status_code)
+
+    monkeypatch.setattr(api._session, "post", _post)
+
+    with pytest.raises(requests.HTTPError) if raises else contextlib.nullcontext():
+        api.finish_run(7, models.RunStatus.FAILED)
+
+    assert sent["url"] == "http://host:1/api/v1/runs/7/finish"
+    assert sent["json"]["status"] == "failed"
+    assert sent["json"]["ended_at"]  # stamped by this machine, like the run's created_at
+
+
+def test_finish_run_sends_the_end_time_it_is_given(monkeypatch: pytest.MonkeyPatch) -> None:
+    """For a run being backfilled or imported, whose end is not "now"."""
+    api = backend.BasicDlboardAPI(base_url="http://host:1")
+    sent: dict[str, Any] = {}
+
+    def _post(url: str, **kwargs: Any) -> _Reply:  # noqa: ANN401
+        sent.update(url=url, json=kwargs["json"])
+        return _Reply(200)
+
+    monkeypatch.setattr(api._session, "post", _post)
+
+    api.finish_run(7, models.RunStatus.FINISHED, ended_at=datetime(2026, 1, 1, 12, 30, tzinfo=UTC))
+
+    assert sent["json"] == {"status": "finished", "ended_at": "2026-01-01T12:30:00Z"}

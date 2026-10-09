@@ -48,6 +48,7 @@ if TYPE_CHECKING:
 
     from pytorch_lightning.callbacks import ModelCheckpoint
 
+    from dlboard._wire import DoneStatus
     from dlboard.client.artifacts.figure import SavesFigure
     from dlboard.models import TagValue
     from dlboard.models._artifact import AnyArtifact
@@ -278,6 +279,15 @@ def _is_rank_zero() -> bool:
     """
     return getattr(rank_zero_only, "rank", 0) == 0
 
+
+_DONE_STATUS_OF: Final[dict[str, DoneStatus]] = {
+    "success": models.RunStatus.FINISHED,
+    "failed": models.RunStatus.FAILED,
+}
+"""
+What the status string Lightning hands `Logger.finalize` means for the run. Any other (this logger's own
+`"atexit"` flush, which cannot tell a crash from a script that simply ended) reports nothing.
+"""
 
 _UNRESOLVED_ID: Final = 0
 """Stands in for an id a non-zero rank never resolves (it makes no server calls, see `DLBoardLogger`)."""
@@ -562,7 +572,16 @@ class DLBoardLogger(Logger):
         for copy_dir in self._checkpoint_copy_dirs:
             shutil.rmtree(copy_dir, ignore_errors=True)
         self._unflushed = False
+        if (done := _DONE_STATUS_OF.get(status)) is not None:
+            self._report_done(done)
         super().finalize(status)
+
+    def _report_done(self, status: DoneStatus) -> None:
+        """Tell the server how the run ended, once everything it logged has been shipped. Never fails the script."""
+        try:
+            self._api.finish_run(self._run_id, status)
+        except requests.RequestException as exc:
+            warnings.warn(f"dlboard could not record that the run {status.value}: {exc}", stacklevel=3)
 
     @rank_zero_only
     def _finalize_at_exit(self) -> None:

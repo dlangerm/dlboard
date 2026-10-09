@@ -22,11 +22,9 @@ exists to produce. Where the script itself works around one, a `# DLBOARD GAP:` 
    one batch rendered as a gallery.
 3. Artifact tags are stored as text: numbers you log are formatted consistently (4 significant digits), but
    can't be sorted or filtered as numbers (#179).
-4. A run has no status: Lightning's `finalize("success" | "failed")` is never recorded, so a crashed run
-   looks the same as a finished one, and there is no duration (#177).
-5. Nothing to skip or collapse a noisy group: `DeviceStatsMonitor` alone adds ~500 series, so auto-generate
+4. Nothing to skip or collapse a noisy group: `DeviceStatsMonitor` alone adds ~500 series, so auto-generate
    offers 886 charts, and its panels sort first, ahead of `train` and `val`.
-6. A panel header carries about 30 Mantine components (8 tooltips), so a view with hundreds of panels is slow
+5. A panel header carries about 30 Mantine components (8 tooltips), so a view with hundreds of panels is slow
    to draw: 239 panels, which grouping this run by suffix makes, take about 14 s (#192).
 """
 
@@ -554,7 +552,6 @@ def main() -> None:
             ),
         ],
     )
-    # DLBOARD GAP 4: the status Lightning reports when this finishes (or crashes) is dropped.
     trainer.fit(model, datamodule=data)
     trainer.test(model, datamodule=data)
 
