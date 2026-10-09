@@ -30,6 +30,13 @@ ARTIFACT_PANEL_SUFFIX = " (artifacts)"
 # Keys the delimiter doesn't actually split (no delimiter configured, or the key doesn't contain
 # it) all land together in this one shared panel, rather than each getting its own single-chart
 # panel.
+AUTO_OPEN_MAX_CHARTS: typing.Final = 12
+"""
+The most charts a panel can hold and still be opened for you by auto-generate. Mounting a panel costs
+about 40 ms per chart in the browser, so a panel of a hundred stays closed -- its header says how many
+charts it holds -- until you open it, instead of making the whole page wait for it.
+"""
+
 UNGROUPED_GROUP_NAME = "Ungrouped"
 
 # Suffixes `pytorch_lightning` appends to a logged metric's name when it's aggregated per-epoch or
@@ -143,6 +150,11 @@ def group_keys_into_panels(
             (key, ColumnKind.ARTIFACT)
         )
     return panels
+
+
+def panel_to_open(panels: typing.Sequence[PanelInstance[typing.Any, typing.Any]]) -> list[str]:
+    """The panels auto-generate leaves open: the first one small enough to render at once, or none."""
+    return [p.name for p in panels if len(p.charts) <= AUTO_OPEN_MAX_CHARTS][:1]
 
 
 def build_auto_panels(

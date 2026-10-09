@@ -26,7 +26,8 @@ exists to produce. Where the script itself works around one, a `# DLBOARD GAP:` 
    looks the same as a finished one, and there is no duration (#177).
 5. Nothing to skip or collapse a noisy group: `DeviceStatsMonitor` alone adds ~500 series, so auto-generate
    offers 886 charts, and its panels sort first, ahead of `train` and `val`.
-6. Auto-generating that many charts is slow (#168).
+6. A panel header carries about 30 Mantine components (8 tooltips), so a view with hundreds of panels is slow
+   to draw: 239 panels, which grouping this run by suffix makes, take about 14 s (#192).
 7. Suggest charts is one add button per key: no select-all, filter or sort (#173).
 """
 

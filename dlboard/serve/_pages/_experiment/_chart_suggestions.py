@@ -24,6 +24,7 @@ from dlboard.serve._pages._experiment._chart_autogen import (
     build_suggestions,
     find_uncharted_keys,
     group_keys_into_panels,
+    panel_to_open,
 )
 from dlboard.serve._pages._experiment._dataframe_helpers import ColumnCatalog
 
@@ -208,16 +209,16 @@ def _register_auto_populate(app: Dash) -> None:
         split_mode: SplitMode = "suffix" if auto_populate_ctx["mode"] == "suffix" else "prefix"
         lightning = core.is_lightning_experiment(store, experiment_id)
 
-        def replace_with_generated_panels(_panels: list[Any]) -> list[Any]:
-            return build_auto_panels(
-                catalog,
-                delimiter=auto_populate_ctx["delimiter"] or core.DEFAULT_DELIMITER,
-                mode=split_mode,
-                lightning=lightning,
-            )
-
+        panels = build_auto_panels(
+            catalog,
+            delimiter=auto_populate_ctx["delimiter"] or core.DEFAULT_DELIMITER,
+            mode=split_mode,
+            lightning=lightning,
+        )
         page, container = core.mutate_panels_and_rerender(
-            auto_populate_ctx["page_json"], replace_with_generated_panels
+            auto_populate_ctx["page_json"],
+            lambda _panels: panels,
+            extra_settings={core.OPEN_PANEL_KEY: panel_to_open(panels)},
         )
         return container, page.model_dump_json()
 
