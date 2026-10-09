@@ -35,6 +35,11 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ### Fixed
 
+* A chart could show the wrong image when the browser had visited another dlboard database at the same
+  address (a wiped or restored database, or a different `--sqlite-location`). Artifact URLs are keyed by
+  id, ids start over in a new database, and the browser was told to cache them for a year; so artifact
+  `5` of the old database was shown in place of artifact `5` of the new one. Artifact URLs now carry a
+  version token (`?v=`) that changes with the artifact behind the id.
 * A long metric name no longer spills its y-axis title out of the chart (over the chart header and the
   charts beside it): titles are shortened to fit, keeping the end of the name. How long a title may be is a
   setting of the line and bar charts (`max_axis_label_chars`, 36 by default).

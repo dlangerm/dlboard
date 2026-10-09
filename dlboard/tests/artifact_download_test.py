@@ -18,7 +18,7 @@ from dlboard import models
 from dlboard.client._rest_api import BasicDlboardAPI
 from dlboard.conftest import EVERY_ARTIFACT_BACKEND, ArtifactBackend
 from dlboard.plugins.data_stores.s3 import S3DownloadMode
-from dlboard.serve._backend._artifact_download import _IMMUTABLE_CACHE_CONTROL
+from dlboard.serve._backend._artifact_download import _IMMUTABLE_CACHE_CONTROL, artifact_version
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -62,7 +62,10 @@ def test_an_uploaded_artifacts_bytes_are_served_by_id(backend_server: BackendSer
     _log_one_artifact(api, run, experiment.id, tmp_path / "a.bin")
     artifact = _wait_for_artifact(backend_server.store, experiment.id)
 
-    response = requests.get(f"{backend_server.url}/artifact/{artifact.id}", timeout=5)
+    # The versioned URL the charts use, not just the bare id: the route has to ignore the `v` token.
+    response = requests.get(
+        f"{backend_server.url}/artifact/{artifact.id}?v={artifact_version(artifact)}", timeout=5
+    )
 
     assert response.status_code == 200
     assert response.content == b"hello"

@@ -3,15 +3,16 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
+import pytest
 from flask import Response
 
 from dlboard import models
 from dlboard.serve._backend import _artifact_download
 
 if TYPE_CHECKING:
-    import pytest
     from pydantic import AnyUrl
 
 
@@ -119,3 +120,38 @@ def test_a_presigned_redirect_is_never_given_the_immutable_cache_control_header(
     assert "X-Content-Type-Options" not in response.headers
     assert "Content-Security-Policy" not in response.headers
     assert "Content-Disposition" not in response.headers
+
+
+_LOGGED_AT = datetime(2026, 1, 1, tzinfo=UTC)
+
+
+def _artifact_with(ref: str = "file:///blobs/a.png", logged_at: datetime = _LOGGED_AT) -> models.Artifact:
+    return models.Artifact(
+        id=5, key="img", fname="a.png", run_id=1, experiment_id=1, step=0, ref=ref, created_at=logged_at
+    )
+
+
+@pytest.mark.parametrize(
+    ("other", "same_artifact"),
+    [
+        pytest.param(_artifact_with(), True, id="the-same-artifact"),
+        pytest.param(_artifact_with(ref="file:///blobs/b.png"), False, id="another-blob-under-the-same-id"),
+        pytest.param(
+            _artifact_with(logged_at=_LOGGED_AT + timedelta(seconds=1)),
+            False,
+            id="logged-later-under-the-same-id",
+        ),
+    ],
+)
+def test_an_artifacts_url_token_changes_when_its_id_is_reused_by_another_artifact(
+    other: models.Artifact, *, same_artifact: bool
+) -> None:
+    """
+    Ids restart in a fresh database, and the browser caches `/artifact/<id>` for a year.
+
+    Reproduced by running two databases one after the other on the same address under one browser
+    profile: the second's pages showed the first's images, straight from the browser cache.
+    """
+    assert (
+        _artifact_download.artifact_version(_artifact_with()) == _artifact_download.artifact_version(other)
+    ) is (same_artifact)

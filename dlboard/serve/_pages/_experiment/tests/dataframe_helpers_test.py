@@ -38,14 +38,11 @@ def _hparams(hparam_id: int, run_id: int, **values: ValidJsonTypes) -> HyperPara
 
 def test_build_artifacts_dataframe_pivots_url_and_tags() -> None:
     """The pivoted column holds a fetchable `/artifact/<id>` URL, not the artifact's own `ref`."""
-    df = dfh.build_artifacts_dataframe(
-        [
-            _artifact(1, 0, "img", "ref://a", tags={"split": "train"}).model_copy(update={"id": 1}),
-            _artifact(1, 1, "img", "ref://b").model_copy(update={"id": 2}),
-        ]
-    )
-    assert list(df.loc[df["step"] == 0, artifact_column("img")]) == [artifact_url(1)]
-    assert list(df.loc[df["step"] == 1, artifact_column("img")]) == [artifact_url(2)]
+    first = _artifact(1, 0, "img", "ref://a", tags={"split": "train"}).model_copy(update={"id": 1})
+    second = _artifact(1, 1, "img", "ref://b").model_copy(update={"id": 2})
+    df = dfh.build_artifacts_dataframe([first, second])
+    assert list(df.loc[df["step"] == 0, artifact_column("img")]) == [artifact_url(first)]
+    assert list(df.loc[df["step"] == 1, artifact_column("img")]) == [artifact_url(second)]
     assert df.loc[df["step"] == 0, artifact_tags_column("img")].iloc[0] == {"split": "train"}
     assert df.loc[df["step"] == 1, artifact_tags_column("img")].iloc[0] == {}
 
