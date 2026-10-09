@@ -11,6 +11,7 @@ import pandas as pd
 from pydantic import BaseModel, Field
 
 from dlboard.models import ChartType, ColumnKind
+from dlboard.plugins.charts._axis_label import MAX_AXIS_LABEL_CHARS, fit_axis_label
 from dlboard.plugins.charts._grouping import last_row_per_run
 from dlboard.plugins.charts._table_style import HPARAM_COLUMN_PREFIX
 from dlboard.serve import AssetKind, series_color, serve_asset
@@ -144,11 +145,15 @@ class BarChart(ChartType[BarChartSettings, pd.DataFrame, dmc.BarChart], frozen=T
         # category axis -- x for the default `horizontal` orientation, y for `vertical` -- so the
         # `type: "category"` override and the axis labels have to follow it too, or the flipped
         # chart ends up with a numeric category axis and swapped labels.
-        value_label = f"{parameters.aggregation}({parameters.column})"
+        value_label = f"{parameters.aggregation}({fit_axis_label(parameters.column, MAX_AXIS_LABEL_CHARS - len(parameters.aggregation) - 2)})"
         x_axis_props = {"type": "category"} if parameters.orientation == "horizontal" else {}
         y_axis_props = {"type": "category"} if parameters.orientation == "vertical" else {}
-        x_axis_label = parameters.x_axis if parameters.orientation == "horizontal" else value_label
-        y_axis_label = value_label if parameters.orientation == "horizontal" else parameters.x_axis
+        x_axis_label = (
+            fit_axis_label(parameters.x_axis) if parameters.orientation == "horizontal" else value_label
+        )
+        y_axis_label = (
+            value_label if parameters.orientation == "horizontal" else fit_axis_label(parameters.x_axis)
+        )
 
         return dmc.BarChart(
             h=parameters.height,

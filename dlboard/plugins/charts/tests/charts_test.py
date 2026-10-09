@@ -13,6 +13,7 @@ import pytest
 from dlboard.conftest import props as _props
 from dlboard.models import RUN_NAME_COLUMN
 from dlboard.plugins.charts import line_chart
+from dlboard.plugins.charts._axis_label import MAX_AXIS_LABEL_CHARS
 from dlboard.plugins.charts._sampling import downsample_grouped, downsample_series, shared_sample_grid
 from dlboard.plugins.charts.bar_chart import BarChart, BarChartSettings
 from dlboard.plugins.charts.line_chart import (
@@ -482,3 +483,28 @@ def test_bar_chart_natural_width_derives_from_height() -> None:
 def test_bar_chart_natural_width_override() -> None:
     settings = BarChartSettings(column="loss", x_axis="step", height=180, width=500)
     assert BarChart.natural_width(settings) == 500
+
+
+LONG_METRIC = "DeviceStatsMonitor.on_test_batch_end/active.all.allocated"
+
+
+def test_line_chart_shortens_a_long_metric_name_to_fit_its_axis_title() -> None:
+    df = _metrics_df(20, n_runs=1).rename(columns={"loss": LONG_METRIC})
+
+    chart = LineChart.render(LineChartSettings(column=LONG_METRIC, x_axis="step"), df)
+
+    label = _props(chart)["yAxisLabel"]
+    assert label.startswith("…")
+    assert len(label) <= MAX_AXIS_LABEL_CHARS
+    assert LONG_METRIC.endswith(label.removeprefix("…"))
+
+
+def test_bar_chart_shortens_a_long_metric_name_inside_its_aggregation_label() -> None:
+    df = _hparam_grouped_df({1: 128}, {1: [0.8]}).rename(columns={"accuracy": LONG_METRIC})
+
+    chart = BarChart.render(BarChartSettings(column=LONG_METRIC, x_axis="hidden_size"), df)
+
+    label = _props(chart)["yAxisLabel"]
+    assert label.startswith("mean(…")
+    assert label.endswith(")")
+    assert len(label) <= MAX_AXIS_LABEL_CHARS
