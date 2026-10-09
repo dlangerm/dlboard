@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import typing
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import pandas as pd
 
-from dlboard.models import Artifact, ColumnKind, HyperParams, MetricColumn, is_inlineable_artifact
+from dlboard.models import Artifact, ColumnKind, HyperParams, MetricColumn
 from dlboard.plugins.charts._table_style import HPARAM_COLUMN_PREFIX, artifact_column, artifact_tags_column
 from dlboard.serve._backend._artifact_download import artifact_url
+from dlboard.serve._pages._experiment._chart_autogen import default_artifact_chart
 
 if typing.TYPE_CHECKING:
     from dlboard.models import DataStore
@@ -82,8 +83,8 @@ class ColumnCatalog:
     single_value_metrics: frozenset[str] = frozenset()
     """Metrics every run logged at most once -- a natural fit for a bar chart, not a line chart."""
     artifacts: tuple[str, ...] = ()
-    file_artifacts: frozenset[str] = frozenset()
-    """Artifact keys holding files a browser can only download (checkpoints, ...), not images it can show inline."""
+    artifact_chart_types: dict[str, str] = field(default_factory=dict[str, str])
+    """The chart type that displays each artifact key by default, by name. A key no chart type can display is absent."""
     hparams: tuple[str, ...] = ()
 
     @classmethod
@@ -94,7 +95,9 @@ class ColumnCatalog:
             metrics=tuple(m.key for m in metrics),
             single_value_metrics=frozenset(m.key for m in metrics if m.max_steps_per_run <= 1),
             artifacts=tuple(sorted({a.key for a in artifacts})),
-            file_artifacts=frozenset(a.key for a in artifacts if not is_inlineable_artifact(a.fname)),
+            artifact_chart_types={
+                a.key: chart_type for a in artifacts if (chart_type := default_artifact_chart(a)) is not None
+            },
             hparams=tuple(
                 sorted({k for h in store.fetch_hyperparams(experiment_id) for k in h.hparams_dict})
             ),
@@ -102,7 +105,7 @@ class ColumnCatalog:
 
     @property
     def has_chartable_keys(self) -> bool:
-        return bool(self.metrics or self.artifacts)
+        return bool(self.metrics or self.artifact_chart_types)
 
     def options(self, kind: ColumnKind) -> list[str]:
         """The choices for a chart field of `kind` -- `step`/`timestamp_utc` being common metric x-axes."""

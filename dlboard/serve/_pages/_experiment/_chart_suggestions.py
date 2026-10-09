@@ -285,10 +285,10 @@ def _register_suggestions(app: Dash) -> None:
         )
         suggestions = build_suggestions(
             find_uncharted_keys(curr_page.panels, catalog),
+            catalog,
             delimiter=suggest_ctx["delimiter"] or core.DEFAULT_DELIMITER,
             mode=split_mode,
             lightning=lightning,
-            catalog=catalog,
         )
         if scope is not None:
             suggestions = [s for s in suggestions if s.panel_name == scope]

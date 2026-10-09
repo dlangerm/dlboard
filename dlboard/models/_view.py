@@ -15,6 +15,7 @@ from structlog.stdlib import get_logger
 from dlboard._compat import StrEnum
 
 if typing.TYPE_CHECKING:
+    from dlboard.models._artifact import Artifact
     from dlboard.models._data_store import DataStore
 
 _log = get_logger(__name__)
@@ -124,6 +125,18 @@ class ChartType(ABC, BaseModel, typing.Generic[_Parameters, _Dataframe, _Chart],
 
         Fields left unlisted default to ColumnKind.METRIC.
         """
+
+    @classmethod
+    def can_display_artifact(cls, artifact: Artifact) -> bool:  # noqa: ARG003
+        """
+        Whether this chart type can display `artifact`.
+
+        What auto-generating and suggesting charts go by to pick a chart for an artifact key: the first
+        built-in chart type that says yes. An artifact no chart type claims (a histogram of gradients
+        logged as a custom kind, say) simply gets no generated chart, rather than one that cannot show it.
+        Defaults to `False`, so a chart type that does not display artifacts need not say anything.
+        """
+        return False
 
 
 class ParameterField(BaseModel, frozen=True, extra="forbid"):

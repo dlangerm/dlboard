@@ -68,3 +68,12 @@ def test_render_says_so_when_there_is_nothing_logged_under_the_key(df: pd.DataFr
     texts = [n["props"]["children"] for n in _render(df) if n["type"] == "Text"]
 
     assert texts == ["No artifacts logged for key 'ckpt'"]
+
+
+def test_the_size_of_the_list_is_a_setting() -> None:
+    settings = FileListSettings(key="ckpt", height=120, width=640)
+
+    assert FileListChart.natural_width(settings) == 640
+    rendered = _nodes(json.loads(cast("str", to_json(FileListChart.render(settings, _files_df())))))
+    scroll_area = next(n for n in rendered if n["type"] == "ScrollArea")
+    assert scroll_area["props"]["mah"] == 120

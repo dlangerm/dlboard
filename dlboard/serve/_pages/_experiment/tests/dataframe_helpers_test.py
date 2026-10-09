@@ -9,7 +9,15 @@ from typing import TYPE_CHECKING
 import pandas as pd
 import pytest
 
-from dlboard.models import Artifact, HyperParams, LoggedMetrics, NewHyperParams, NewRun, ValidJsonTypes
+from dlboard.models import (
+    FILE_KIND_TAG,
+    Artifact,
+    HyperParams,
+    LoggedMetrics,
+    NewHyperParams,
+    NewRun,
+    ValidJsonTypes,
+)
 from dlboard.models._view import ColumnKind
 from dlboard.plugins.charts._table_style import HPARAM_COLUMN_PREFIX, artifact_column, artifact_tags_column
 from dlboard.serve._backend._artifact_download import artifact_url
@@ -98,6 +106,15 @@ def test_column_catalog_load_summarizes_keys_without_their_values(
                 experiment_id=experiment_id,
                 step=0,
                 ref="r://b",
+                tags={FILE_KIND_TAG: "checkpoint"},
+            ),
+            Artifact(
+                key="grads",
+                fname="grads.npy",
+                run_id=runs[0].id,
+                experiment_id=experiment_id,
+                step=0,
+                ref="r://c",
             ),
         ]
     )
@@ -107,8 +124,8 @@ def test_column_catalog_load_summarizes_keys_without_their_values(
     assert catalog == dfh.ColumnCatalog(
         metrics=("final_acc", "loss"),
         single_value_metrics=frozenset({"final_acc"}),
-        artifacts=("ckpt", "img"),
-        file_artifacts=frozenset({"ckpt"}),
+        artifacts=("ckpt", "grads", "img"),
+        artifact_chart_types={"ckpt": "files", "img": "image"},  # nothing displays the grads
         hparams=("lr",),
     )
 

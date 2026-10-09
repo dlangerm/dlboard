@@ -16,7 +16,7 @@ from dash.exceptions import PreventUpdate
 from pydantic import BaseModel, Field
 from structlog.stdlib import get_logger
 
-from dlboard.models import RUN_NAME_COLUMN, ChartType, ColumnKind
+from dlboard.models import RUN_NAME_COLUMN, Artifact, ChartType, ColumnKind, is_inlineable_artifact
 from dlboard.plugins.charts._table_style import artifact_column, artifact_tags_column, format_tags_caption
 from dlboard.serve import ClientsideScript, series_swatch_class
 
@@ -79,6 +79,12 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
     @classmethod
     def parameter_type(cls) -> type[ImageChartSettings]:
         return ImageChartSettings
+
+    @classmethod
+    @typing.override
+    def can_display_artifact(cls, artifact: Artifact) -> bool:
+        """Images a browser shows inline (PNG, JPEG, GIF, WebP)."""
+        return is_inlineable_artifact(artifact.fname)
 
     @classmethod
     @typing.override
