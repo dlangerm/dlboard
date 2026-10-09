@@ -13,7 +13,7 @@ import threading
 import warnings
 from argparse import Namespace
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import matplotlib.figure
 import numpy as np
@@ -21,13 +21,17 @@ import PIL.Image
 import pydantic
 import pydantic.dataclasses
 import pytest
+import pytorch_lightning as pl
 import requests
+from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.demos.boring_classes import BoringModel
 from pytorch_lightning.utilities import rank_zero_only
 
 from dlboard import models
 from dlboard.client import dlboard_logger
 from dlboard.client._rest_api import Identity
 from dlboard.client.artifacts.figure import Figure
+from dlboard.client.artifacts.file import File
 from dlboard.client.dlboard_logger import (
     DLBoardLogger,
     DLBoardLoggerSettings,
@@ -36,6 +40,9 @@ from dlboard.client.dlboard_logger import (
     is_rejection,
     warn_if_startup_was_slow,
 )
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class _FakeAPI:
@@ -455,3 +462,71 @@ def test_every_finalize_flushes_what_was_logged_since_the_last_one(monkeypatch: 
     logger.finalize("success")
 
     assert all(shipper.flushed for shipper in started)
+
+
+def _fit_with(logger: DLBoardLogger, tmp_path: Path, *checkpoints: ModelCheckpoint) -> None:
+    """Three epochs of two steps each, on CPU, with nothing logged -- so no metric step to borrow."""
+    pl.Trainer(
+        max_epochs=3,
+        limit_train_batches=2,
+        limit_val_batches=0,
+        accelerator="cpu",
+        logger=logger,
+        callbacks=list(checkpoints),
+        default_root_dir=tmp_path,
+        enable_progress_bar=False,
+        enable_model_summary=False,
+    ).fit(BoringModel())
+
+
+def _uploaded_files(artifacts: _FakeShipper) -> list[File]:
+    return [artifact for batch in artifacts.items for artifact in batch if isinstance(artifact, File)]
+
+
+_QUIET_LIGHTNING = pytest.mark.filterwarnings(
+    "ignore::lightning_fabric.utilities.warnings.PossibleUserWarning",
+    r"ignore:.isinstance\(treespec, LeafSpec\).:FutureWarning",
+)
+
+
+@_QUIET_LIGHTNING
+def test_each_checkpoint_is_stamped_with_the_step_it_was_saved_at(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """
+    `last.ckpt` is rewritten every epoch, and a (key, step) pair can be stored only once: the server
+    rejects a second upload as a duplicate and the client then retries that batch forever. With no
+    metrics logged there is no step to borrow from them, so each save carries its own.
+    """
+    _stub_api(monkeypatch, _FakeRunAPI("http://x"))
+    started = _stub_shippers(monkeypatch)
+    logger = DLBoardLogger(project_id=1, experiment_id=None, log_model="all")
+    _metrics, artifacts = started
+
+    _fit_with(logger, tmp_path, ModelCheckpoint(dirpath=tmp_path / "ckpts", save_top_k=1, save_last=True))
+
+    steps = {(f.key, f.step) for f in _uploaded_files(artifacts)}
+    assert [step for key, step in sorted(steps) if key == "checkpoints/last.ckpt"] == [2, 4, 6]
+    assert len(steps) == len(_uploaded_files(artifacts))
+
+
+@_QUIET_LIGHTNING
+def test_every_checkpoint_callback_gets_its_kept_checkpoints_uploaded(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _stub_api(monkeypatch, _FakeRunAPI("http://x"))
+    started = _stub_shippers(monkeypatch)
+    logger = DLBoardLogger(project_id=1, experiment_id=None, log_model=True)
+    _metrics, artifacts = started
+
+    _fit_with(
+        logger,
+        tmp_path,
+        ModelCheckpoint(dirpath=tmp_path / "a", filename="first-{epoch}", save_top_k=1),
+        ModelCheckpoint(dirpath=tmp_path / "b", filename="second-{epoch}", save_top_k=1, every_n_epochs=2),
+    )
+
+    assert {f.key for f in _uploaded_files(artifacts)} == {
+        "checkpoints/first-epoch=2.ckpt",
+        "checkpoints/second-epoch=1.ckpt",
+    }

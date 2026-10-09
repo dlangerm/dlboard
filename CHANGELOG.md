@@ -21,7 +21,7 @@ pulls that section's body into the GitHub release notes and publishes both distr
 * `DLBoardLogger(log_model=...)` uploads `ModelCheckpoint` checkpoints, like the MLflow and W&B
   loggers: `"all"` as each one is saved, `True` only the ones kept once training finishes. Backed by
   the new `dlboard.client.artifacts.file.File` artifact kind, which uploads a file in place and tags
-  what it is (`FileKind.CHECKPOINT`, ...).
+  what it is (`FileKind.CHECKPOINT`).
 * `examples/lightning_advanced.py`: a 25-epoch UNet on synthetic shapes with nested hyperparameters,
   Lightning's learning-rate, throughput and device-stats callbacks, checkpoints, and segmentation and
   bounding-box previews -- a deliberately heavy run for exercising the UI.

@@ -35,7 +35,8 @@ from dlboard._batching import BatchParams, ship_batches
 from dlboard._mp_context import SPAWN_CONTEXT
 from dlboard.client._rest_api import DEFAULT_SERVER_URL, BasicDlboardAPI
 from dlboard.client.artifacts.figure import Figure
-from dlboard.client.artifacts.file import File, FileKind
+from dlboard.client.artifacts.file import File
+from dlboard.models import FileKind
 
 DEFAULT_EXPERIMENT_NAME = "default"
 
@@ -294,8 +295,6 @@ class DLBoardLogger(Logger):
     _experiment_id: int
     _run_id: int
     """Both resolved on rank 0 only -- every method that reads them is `rank_zero_only`."""
-    _last_step = 0
-    """The step of the latest logged metrics, which a checkpoint saved right after is stamped with."""
 
     def __init__(  # noqa: PLR0913
         self,
@@ -365,7 +364,7 @@ class DLBoardLogger(Logger):
         warn_if_startup_was_slow(time.perf_counter() - startup_start)
         self._unflushed = False
         self._log_model = log_model
-        self._checkpoint_callback: ModelCheckpoint | None = None
+        self._checkpoint_callbacks: dict[str, ModelCheckpoint] = {}
         self._logged_checkpoint_mtimes: dict[str, float] = {}
         self._checkpoint_copy_dirs: list[Path] = []
         # The shipping processes are daemons -- killed with whatever's still queued the moment the
@@ -465,7 +464,6 @@ class DLBoardLogger(Logger):
         if step is None:
             msg = "dlboard needs an explicit step for every metric (Lightning always passes one)"
             raise ValueError(msg)
-        self._last_step = step
         self._metrics.put(
             models.LoggedMetrics(
                 metrics=metrics,  # pyright: ignore[reportArgumentType]
@@ -510,7 +508,9 @@ class DLBoardLogger(Logger):
         if self._log_model == "all" or (self._log_model is True and checkpoint_callback.save_top_k == -1):
             self._upload_new_checkpoints(checkpoint_callback)
         elif self._log_model is True:
-            self._checkpoint_callback = checkpoint_callback
+            # By `state_key`, which Lightning requires to be unique among a trainer's callbacks: more than
+            # one `ModelCheckpoint` is allowed, and each one's kept checkpoints get uploaded.
+            self._checkpoint_callbacks[checkpoint_callback.state_key] = checkpoint_callback
 
     def _upload_new_checkpoints(self, checkpoint_callback: ModelCheckpoint) -> None:
         """Queue every checkpoint `checkpoint_callback` has saved or rewritten since the last call."""
@@ -529,7 +529,9 @@ class DLBoardLogger(Logger):
                         key=f"checkpoints/{copy.name}",
                         path=copy,
                         kind=FileKind.CHECKPOINT,
-                        step=self._last_step,
+                        # The step the callback saved this at, not the last one metrics were logged for: that
+                        # can be the same for several saves, and a (key, step) pair is stored once.
+                        step=checkpoint_callback._last_global_step_saved,  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
                         tags={"tag": tag}
                         | ({} if raw_score is None else {"score": f"{float(raw_score):.6g}"}),
                     )
@@ -549,10 +551,10 @@ class DLBoardLogger(Logger):
         later one logged is just as unshipped. Safe to call more than once -- `_Shipper.flush` itself
         tolerates a dead process, and warns about each dropped item only once.
         """
-        if self._checkpoint_callback is not None:
+        for callback in self._checkpoint_callbacks.values():
             # Lightning hands over a weak proxy: once the trainer is gone there is nothing left to scan.
             with contextlib.suppress(ReferenceError):
-                self._upload_new_checkpoints(self._checkpoint_callback)
+                self._upload_new_checkpoints(callback)
         for shipper in (self._metrics, self._artifacts):
             shipper.flush()
         for copy_dir in self._checkpoint_copy_dirs:

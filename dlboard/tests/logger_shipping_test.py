@@ -16,9 +16,9 @@ from pytorch_lightning.demos.boring_classes import BoringModel
 from dlboard._wire import Resource
 from dlboard.client._rest_api import create_path
 from dlboard.client.artifacts import image
-from dlboard.client.artifacts.file import FILE_KIND_TAG, FileKind
 from dlboard.client.dlboard_logger import DLBoardLogger
 from dlboard.conftest import EVERY_STORE_BACKEND, StoreBackend
+from dlboard.models import FILE_KIND_TAG, FileKind
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

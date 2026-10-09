@@ -40,8 +40,9 @@ scalars are stored exactly as given.
 **Checkpoints.** `DLBoardLogger(..., log_model="all")` uploads every checkpoint a `ModelCheckpoint`
 saves, even one `save_top_k` deletes moments later (each is copied before it's queued). `log_model=True`
 uploads only the ones still kept, when training finishes. Each is a `File` (below) of kind `checkpoint`,
-keyed `checkpoints/<file name>`, tagged with its score and Lightning's `latest`/`best`/`best_k`. Its
-step is the latest one the logger saw metrics for.
+keyed `checkpoints/<file name>`, tagged with its score and Lightning's `latest`/`best`/`best_k`, and
+stamped with the global step its callback saved at (with `log_model=True`, the step of that callback's last
+save). Any number of `ModelCheckpoint` callbacks work.
 
 **Authenticating.** If the server signs people in (see [Auth](plugins/auth.md)), the script has to
 sign in too:
@@ -114,13 +115,14 @@ four built-in kinds:
   works, and dlboard doesn't depend on matplotlib itself.
 
 - `dlboard.client.artifacts.file.File` — uploads a file that already exists on disk, as-is, tagged with a
-  `FileKind` saying what it is (`FileKind.CHECKPOINT`, or `OTHER`). `log_model` builds these for you; the
+  `FileKind` saying what it is (`FileKind.CHECKPOINT`). `log_model` builds these for you; the
   file must stay put until the logger has flushed:
 
   ```python
-  from dlboard.client.artifacts import file
+  from dlboard.client.artifacts.file import File
+  from dlboard.models import FileKind
 
-  logger.log_artifact([file.File(key="weights", path=path, kind=file.FileKind.CHECKPOINT, step=global_step)])
+  logger.log_artifact([File(key="weights", path=path, kind=FileKind.CHECKPOINT, step=global_step)])
   ```
 
 - `dlboard.client.artifacts.link.Link` — links. For a blob a training job already wrote

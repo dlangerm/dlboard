@@ -6,7 +6,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from dlboard.client.artifacts.file import FILE_KIND_TAG, File, FileKind
+from dlboard.client.artifacts.file import File
+from dlboard.models import FILE_KIND_TAG, FileKind
 
 if TYPE_CHECKING:
     from pathlib import Path

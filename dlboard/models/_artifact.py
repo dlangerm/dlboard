@@ -8,8 +8,25 @@ from typing import Final
 import pendulum
 from pydantic import AnyUrl, AwareDatetime, BaseModel, Field
 
+from dlboard._compat import StrEnum
+
 if typing.TYPE_CHECKING:
     from pathlib import Path
+
+FILE_KIND_TAG: Final = "file_kind"
+"""The tag a file artifact records its `FileKind` under, for anything consuming or displaying it."""
+
+
+class FileKind(StrEnum):
+    """
+    What a logged file artifact is -- a bare extension says too little (`.pt`, `.ckpt`, ...).
+
+    Stored as the value of the `FILE_KIND_TAG` tag, so a value is never renamed or removed.
+    """
+
+    CHECKPOINT = "checkpoint"
+    """A model checkpoint, e.g. one `ModelCheckpoint` saved."""
+
 
 INLINEABLE_ARTIFACT_CONTENT_TYPES: Final = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
 """
