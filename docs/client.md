@@ -96,6 +96,9 @@ four built-in kinds:
   logger.log_artifact([image.Image(key="sample", image=tensor, step=global_step)])
   ```
 
+  It is encoded as a lossless PNG by default, so masks, label images and annotated overlays stay
+  pixel-exact. Pass `format="jpg"` for a much smaller (lossy) file when it is a large photograph.
+
 - `dlboard.client.artifacts.figure.Figure` — uploads a matplotlib figure as an image. You
   rarely build one yourself: `logger.log_figure` mirrors `mlflow.log_figure`, with the one
   difference that dlboard needs a `step`:

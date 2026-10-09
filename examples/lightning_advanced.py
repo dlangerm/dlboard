@@ -16,8 +16,8 @@ Run it a few times: each run samples fresh hyperparameters, so the run-compariso
 to compare. What follows is what dlboard can't do yet, found by running this -- the backlog this example
 exists to produce. Where the script itself works around one, a `# DLBOARD GAP:` comment says so:
 
-1. No mask/box artifact. Overlays and boxes are composited into a plain image client-side (and re-encoded
-   as lossy JPEG, #178), so the UI can't toggle classes, change opacity or compare ground truth against prediction.
+1. No mask/box artifact. Overlays and boxes are composited into a plain image client-side, so the UI can't
+   toggle classes, change opacity or compare ground truth against prediction.
 2. One artifact per (run, key, step), so N previews need N keys (`sample_0`, `sample_1`, ...) rather than
    one batch rendered as a gallery.
 3. A checkpoint gets an image chart like any artifact: a broken image, with only its tags as a caption (#176).
