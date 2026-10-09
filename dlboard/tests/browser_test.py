@@ -32,6 +32,7 @@ from dlboard.client._rest_api import BasicDlboardAPI
 from dlboard.models import PanelInstance
 from dlboard.serve import get_system_data_store
 from dlboard.serve._jump import JUMP_SELECT_ID
+from dlboard.serve._pages._experiment._chart_autogen import AUTO_OPEN_MAX_CHARTS
 from dlboard.serve._pages._experiment._experiment_page_state import (
     LIVE_PAUSED_BADGE_ID,
     LIVE_STATUS_ID,
@@ -1709,3 +1710,36 @@ def test_changing_a_grids_column_count_restyles_it_without_rebuilding_its_charts
     page.reload()
     page.locator(".dl-panel-item-header").first.hover()
     expect(page.get_by_role("textbox", name="Grid columns")).to_have_value("2")
+
+
+def test_auto_generate_leaves_a_huge_panel_closed_and_opens_a_small_one(
+    page: Page, live_server_url: str
+) -> None:
+    """
+    Mounting a panel costs the browser about 40 ms per chart, so one of a hundred charts used to make
+    the whole page wait for it right after "Create charts". It stays closed now, with its chart count
+    on its header, and the first panel small enough to render at once is opened instead.
+    """
+    _create_project_and_experiment(page, live_server_url, "Big Panel Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    api = BasicDlboardAPI(live_server_url)
+    run = api.create_run(models.NewRun(experiment_id=experiment_id))
+    many = {f"big/m{i}": 1.0 for i in range(AUTO_OPEN_MAX_CHARTS + 1)}
+    api.log_metric_batch(
+        [
+            models.LoggedMetrics(
+                experiment_id=experiment_id,
+                run_id=run.id,
+                step=step,
+                metrics={**many, "small/x": 1.0},
+                timestamp_utc=pendulum.now("UTC"),
+            )
+            for step in range(3)
+        ]
+    )
+    page.reload()
+    _auto_generate_charts(page)
+
+    expect(page.get_by_text(f"{AUTO_OPEN_MAX_CHARTS + 1} charts", exact=True)).to_be_visible()
+    expect(page.locator(".dl-panel-body .recharts-surface")).to_have_count(1)

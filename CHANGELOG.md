@@ -43,6 +43,10 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ### Fixed
 
+* Creating charts with **Auto-generate** no longer makes the page wait for the first panel to draw when that panel
+  is big. A panel opens by itself only if it holds 12 charts or fewer (otherwise the first small one does,
+  or none); a big panel stays closed with its chart count on its header. On a run with 886 charts the
+  default grouping now shows its panels in about 1.6 s instead of 5.8 s.
 * Switching **Prefix**/**Suffix** in the Auto-generate charts dialog no longer freezes the page for seconds on an
   experiment with many metrics: the preview lists the first 20 panels and counts the rest (239 panels took
   the browser about 3 s to draw; it takes about 0.1 s now).

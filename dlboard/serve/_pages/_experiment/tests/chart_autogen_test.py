@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import typing
+
 import pytest
 
 from dlboard.models import FILE_KIND_TAG, Artifact
@@ -334,3 +336,23 @@ def test_each_artifact_key_is_charted_as_the_catalog_says() -> None:
     }
 
     assert auto == suggested == {"ckpt": "files", "img": "image"}
+
+
+def _panel_of(name: str, n_charts: int) -> PanelInstance[typing.Any, typing.Any]:
+    return _panel(name, *[_line(f"{name}{i}") for i in range(n_charts)])
+
+
+@pytest.mark.parametrize(
+    ("sizes", "expected"),
+    [
+        pytest.param([], [], id="no-panels"),
+        pytest.param([("a", 3), ("b", 3)], ["a"], id="the-first-panel-if-it-is-small"),
+        pytest.param([("a", autogen.AUTO_OPEN_MAX_CHARTS)], ["a"], id="exactly-at-the-limit"),
+        pytest.param([("a", 126), ("b", 4), ("c", 2)], ["b"], id="skips-a-huge-first-panel"),
+        pytest.param([("a", 126), ("b", 40)], [], id="nothing-small-enough-so-nothing-opens"),
+    ],
+)
+def test_auto_generate_only_opens_a_panel_small_enough_to_render_at_once(
+    sizes: list[tuple[str, int]], expected: list[str]
+) -> None:
+    assert autogen.panel_to_open([_panel_of(name, n) for name, n in sizes]) == expected
