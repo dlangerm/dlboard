@@ -238,7 +238,7 @@ def visible_suggestions(
 ) -> list[Suggestion]:
     """The suggestions whose key or target panel contains `text` (ignoring case), in `sort` order."""
     needle = text.strip().lower()
-    matching = [s for s in suggestions if needle in s.key.lower() or needle in s.panel_name.lower()]
+    matching = (s for s in suggestions if needle in s.key.lower() or needle in s.panel_name.lower())
     match sort:
         case SuggestSort.NAME:
             return sorted(matching, key=lambda s: s.key)
