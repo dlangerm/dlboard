@@ -1692,12 +1692,14 @@ def test_changing_a_grids_column_count_restyles_it_without_rebuilding_its_charts
     )
     page.reload()
     _auto_generate_charts(page)
+    page.locator(".dl-panel-item-header").first.hover()
+    page.get_by_text("Grid", exact=True).first.click()
+    columns = page.get_by_role("textbox", name="Grid columns")
+    expect(columns).to_be_visible()
+    # Marked once the panel is a grid (switching layout rebuilds it): only a rebuild can lose this.
     chart = page.locator(".dl-chart-item").first
     expect(chart).to_be_visible()
     chart.evaluate("el => { el.dataset.survives = 'yes' }")
-
-    page.locator(".dl-panel-item-header").first.hover()
-    columns = page.get_by_role("textbox", name="Grid columns")
     columns.fill("2")
     columns.press("Enter")
 
