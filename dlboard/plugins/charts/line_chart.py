@@ -11,6 +11,7 @@ import pandas as pd
 from pydantic import BaseModel, Field
 
 from dlboard.models import RUN_NAME_COLUMN, ChartType, ColumnKind, MetricColumn
+from dlboard.plugins.charts._axis_label import fit_axis_label
 from dlboard.plugins.charts._sampling import DEFAULT_MAX_POINTS, shared_sample_grid
 from dlboard.serve import AssetKind, series_color, serve_asset
 
@@ -215,8 +216,8 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.LineChart], froze
             data=data,  # pyright: ignore[reportArgumentType]
             dataKey=str(parameters.x_axis),
             series=series,  # pyright: ignore[reportArgumentType]
-            xAxisLabel=f"{parameters.x_axis}",
-            yAxisLabel=f"{parameters.column}",
+            xAxisLabel=fit_axis_label(str(parameters.x_axis)),
+            yAxisLabel=fit_axis_label(parameters.column),
             xAxisProps=x_axis_props,
             withLegend=True,
             withXAxis=True,

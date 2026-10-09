@@ -27,11 +27,10 @@ exists to produce. Where the script itself works around one, a `# DLBOARD GAP:` 
    looks the same as a finished one, and there is no duration (#177).
 6. Nothing to skip or collapse a noisy group: `DeviceStatsMonitor` alone adds ~500 series, so auto-generate
    offers 886 charts, and its panels sort first, ahead of `train` and `val`.
-7. A long metric name overflows the chart's axis title into the chart next to it (#175).
-8. Auto-generating that many charts is slow, and so is switching Prefix/Suffix in its dialog (#168, #167).
-9. Changing charts-per-row in a big Grid panel blanks the UI (#169).
-10. Suggest charts is one add button per key: no select-all, filter or sort (#173).
-11. After running the quickstart too, image-series charts can show other keys' artifacts, even another
+7. Auto-generating that many charts is slow, and so is switching Prefix/Suffix in its dialog (#168, #167).
+8. Changing charts-per-row in a big Grid panel blanks the UI (#169).
+9. Suggest charts is one add button per key: no select-all, filter or sort (#173).
+10. After running the quickstart too, image-series charts can show other keys' artifacts, even another
     experiment's (#171).
 """
 
