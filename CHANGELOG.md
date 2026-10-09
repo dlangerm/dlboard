@@ -43,6 +43,9 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ### Fixed
 
+* Changing a Grid panel's charts-per-row no longer rebuilds every chart in the panel. The browser applies the
+  new column count itself and the server only saves it, so a panel with over a hundred charts freezes the
+  page for about a quarter of the time (0.8s instead of 3s per click, measured on 126 charts).
 * A chart could show the wrong image when the browser had visited another dlboard database at the same
   address (a wiped or restored database, or a different `--sqlite-location`). Artifact URLs are keyed by
   id, ids start over in a new database, and the browser was told to cache them for a year; so artifact

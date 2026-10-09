@@ -346,7 +346,8 @@ def rename_panel_button_id(panel_name: str) -> dict[str, str]:
 
 PANEL_LAYOUT_TYPE: typing.Final = "panel-layout"
 PANEL_GRID_COLUMNS_TYPE: typing.Final = "panel-grid-columns"
-"""Pattern-matching id `type`s of a panel's Packed/Grid control and its grid column count (one callback serves both)."""
+PANEL_GRID_TYPE: typing.Final = "panel-grid"
+"""Pattern-matching id `type`s of a panel's Packed/Grid control, its grid column count, and the grid itself."""
 
 
 def panel_sync_switch_id(panel_name: str) -> dict[str, str]:
@@ -359,6 +360,10 @@ def panel_layout_control_id(panel_name: str) -> dict[str, str]:
 
 def panel_grid_columns_id(panel_name: str) -> dict[str, str]:
     return {"type": PANEL_GRID_COLUMNS_TYPE, "panel": panel_name}
+
+
+def panel_grid_id(panel_name: str) -> dict[str, str]:
+    return {"type": PANEL_GRID_TYPE, "panel": panel_name}
 
 
 def panel_suggest_button_id(panel_name: str) -> dict[str, str]:
@@ -636,7 +641,7 @@ def render_panel_content_from_df(panel: models.PanelInstance[Any, Any], df: pd.D
     """Render a panel's charts from an already-fetched dataframe -- see `render_panel_content`."""
     items = render_panel_charts(panel, df)
     return (
-        dmc.SimpleGrid(items, cols=panel.grid_columns, spacing="lg")
+        dmc.SimpleGrid(items, id=panel_grid_id(panel.name), cols=panel.grid_columns, spacing="lg")
         if panel.layout == "grid"
         else dmc.Flex(items, justify="flex-start", gap="lg", wrap="wrap")
     )
@@ -1508,14 +1513,17 @@ def persist_settings_and_rerender(
     return page, accordion_view(store, page)
 
 
-def mutate_panels_and_rerender(
+def mutate_panels(
     page_json: str,
     mutate: Callable[[list[models.PanelInstance[Any, Any]]], list[models.PanelInstance[Any, Any]]],
     *,
     extra_settings: dict[str, Any] | None = None,
-) -> tuple[BasicExperimentPage, html.Div]:
+) -> BasicExperimentPage:
     """
-    Load page from client-cached state, apply `mutate` to its panels, persist, and re-render.
+    Load page from client-cached state, apply `mutate` to its panels, and persist -- without re-rendering.
+
+    For an edit the browser has already applied itself (see `panel_grid_columns.js`); `mutate_panels_and_rerender`
+    is for every other one.
 
     `extra_settings` merges into `page_settings` alongside the panel mutation -- e.g. moving a chart
     or panel to a different tab also switches `ACTIVE_TAB_KEY` to it, in the same page update, rather
@@ -1529,10 +1537,23 @@ def mutate_panels_and_rerender(
     updates: dict[str, Any] = {"panels": mutate(curr_page.panels)}
     if extra_settings:
         updates["page_settings"] = {**curr_page.page_settings, **extra_settings}
-    mutated = curr_page.model_copy(update=updates)
-    store = get_data_store()
-    saved = save_page(store, mutated)
-    return saved, accordion_view(store, saved)
+    return save_page(get_data_store(), curr_page.model_copy(update=updates))
+
+
+def mutate_panels_and_rerender(
+    page_json: str,
+    mutate: Callable[[list[models.PanelInstance[Any, Any]]], list[models.PanelInstance[Any, Any]]],
+    *,
+    extra_settings: dict[str, Any] | None = None,
+) -> tuple[BasicExperimentPage, html.Div]:
+    """
+    `mutate_panels`, then re-render the whole accordion from the saved page.
+
+    The saved page is a branch into a view of your own first if this page isn't already one of your
+    own -- see `save_page`.
+    """
+    saved = mutate_panels(page_json, mutate, extra_settings=extra_settings)
+    return saved, accordion_view(get_data_store(), saved)
 
 
 def upsert_chart(
