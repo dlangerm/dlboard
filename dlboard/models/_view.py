@@ -375,9 +375,9 @@ class PanelInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, 
     sync: bool = True
     """Whether synced-capable charts (e.g. line charts) in this panel share a hover/tooltip crosshair."""
 
-    layout: typing.Literal["packed", "grid"] = "packed"
-    """`"packed"` sizes each chart to its own natural width and wraps them left-to-right;
-    `"grid"` forces every chart onto an equal-width column instead."""
+    layout: typing.Literal["packed", "grid"] = "grid"
+    """`"grid"` (the default) forces every chart onto an equal-width column;
+    `"packed"` sizes each chart to its own natural width and wraps them left-to-right instead."""
 
     grid_columns: GridColumns = 3
     """How many equal-width columns the `"grid"` layout has; unused by `"packed"`."""

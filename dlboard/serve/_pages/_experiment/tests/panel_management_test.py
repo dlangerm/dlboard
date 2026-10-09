@@ -125,9 +125,9 @@ def test_apply_panel_sync_drops_sync_id_when_disabled() -> None:
 def test_update_panel_changes_only_the_named_panel() -> None:
     panels = [PanelInstance[Any, Any](name=n) for n in ("a", "b")]
 
-    result = state.update_panel(panels, "a", {"layout": "grid", "grid_columns": 2})
+    result = state.update_panel(panels, "a", {"layout": "packed", "grid_columns": 2})
 
-    assert {p.name: (p.layout, p.grid_columns) for p in result} == {"a": ("grid", 2), "b": ("packed", 3)}
+    assert {p.name: (p.layout, p.grid_columns) for p in result} == {"a": ("packed", 2), "b": ("grid", 3)}
 
 
 @pytest.mark.parametrize("columns", [0, 7, -1])

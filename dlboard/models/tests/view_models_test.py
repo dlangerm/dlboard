@@ -331,3 +331,7 @@ def test_a_saved_chart_keeps_its_id_when_its_parameters_change() -> None:
     )
 
     assert edited.id == saved.id
+
+
+def test_a_new_panel_lays_its_charts_out_in_a_grid() -> None:
+    assert PanelInstance[typing.Any, typing.Any]().layout == "grid"

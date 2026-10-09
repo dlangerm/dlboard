@@ -29,8 +29,8 @@ exists to produce. Where the script itself works around one, a `# DLBOARD GAP:` 
    offers 886 charts, and its panels sort first, ahead of `train` and `val`.
 7. A long metric name overflows the chart's axis title into the chart next to it (#175).
 8. Auto-generating that many charts is slow, and so is switching Prefix/Suffix in its dialog (#168, #167).
-9. Changing charts-per-row in a big Grid panel blanks the UI (#169); Packed is the default layout (#170); a
-   collapsed panel doesn't say how many charts it holds (#172).
+9. Changing charts-per-row in a big Grid panel blanks the UI (#169); a collapsed panel doesn't say how many
+   charts it holds (#172).
 10. Suggest charts is one add button per key: no select-all, filter or sort (#173).
 11. After running the quickstart too, image-series charts can show other keys' artifacts, even another
     experiment's (#171).

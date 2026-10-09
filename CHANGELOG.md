@@ -26,6 +26,11 @@ pulls that section's body into the GitHub release notes and publishes both distr
   Lightning's learning-rate, throughput and device-stats callbacks, checkpoints, and segmentation and
   bounding-box previews -- a deliberately heavy run for exercising the UI.
 
+### Changed
+
+* A new panel lays its charts out in a **Grid** by default, instead of **Packed**. Panels already saved
+  keep the layout they were saved with, and **Packed** is still one click away on the panel's header.
+
 ### Fixed
 
 * Metrics and artifacts logged by a later stage were never shipped when a script exited right after

@@ -1000,9 +1000,11 @@ def test_chart_tooltip_shows_every_series_at_every_hovered_x_position(
     # `BasicExperimentPage.render()`'s own fallback opens the first (and here, only) panel by
     # default -- no click needed to see it render.
 
-    svg = page.locator(".dl-panel-body svg").first
-    expect(svg).to_be_visible()
-    box = svg.bounding_box()
+    # The plot area, not the whole svg: its axis gutters take a fixed width, so at a narrow (grid) chart
+    # a fraction of the svg would land inside them rather than on the data.
+    plot = page.locator(".dl-panel-body .recharts-cartesian-grid").first
+    expect(plot).to_be_visible()
+    box = plot.bounding_box()
     assert box is not None
 
     # Auto-generated -- never actually None here, just typed that way.
@@ -1350,7 +1352,7 @@ def test_changes_in_a_saved_view_leave_the_shared_view_alone(
     page: Page, live_server_url: str, console_errors: list[str]
 ) -> None:
     """
-    Save the page as a personal view, change it there (a panel's layout), and the shared page --
+    Save the page as a personal view, change it there (a panel's grid columns), and the shared page --
     what everyone else sees -- keeps its own layout; switching back shows exactly that.
     """
     _create_project_and_experiment(page, live_server_url, "Views Experiment")
@@ -1377,13 +1379,7 @@ def test_changes_in_a_saved_view_leave_the_shared_view_alone(
     view_id = int(page.url.rsplit("=", 1)[-1])
     expect(page.get_by_role("textbox", name="View", exact=True)).to_have_value("my layout")
 
-    page.locator(".dl-panel-item-header").first.hover()
-    page.get_by_text("Grid", exact=True).first.click()
-    _wait_until(
-        lambda: [p.layout for p in store.get_view(BasicExperimentPage, view_id).panels][:1],  # pyright: ignore[reportOptionalMemberAccess]
-        ["grid"],
-    )
-    # A grid panel's column count is its own setting too, saved with the view and surviving a reload.
+    # A panel's grid column count is its own setting, saved with the view and surviving a reload.
     page.locator(".dl-panel-item-header").first.hover()
     columns = page.get_by_role("textbox", name="Grid columns")
     expect(columns).to_have_value("3")
@@ -1397,7 +1393,7 @@ def test_changes_in_a_saved_view_leave_the_shared_view_alone(
     page.locator(".dl-panel-item-header").first.hover()
     expect(page.get_by_role("textbox", name="Grid columns")).to_have_value("2")
     shared = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
-    assert {(p.layout, p.grid_columns) for p in shared.panels} == {("packed", 3)}
+    assert {(p.layout, p.grid_columns) for p in shared.panels} == {("grid", 3)}
 
     page.get_by_role("textbox", name="View", exact=True).click()
     page.get_by_role("option", name="Shared view").click()

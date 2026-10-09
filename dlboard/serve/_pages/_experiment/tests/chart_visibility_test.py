@@ -103,7 +103,7 @@ def test_render_panel_charts_badge_when_chart_cannot_hint_its_columns() -> None:
 
 
 def test_render_panel_charts_packed_layout_uses_natural_width() -> None:
-    panel = _panel_with_chart()
+    panel = _panel_with_chart().model_copy(update={"layout": "packed"})
     df = pd.DataFrame({"run_id": [1], "step": [0], "loss": [0.5]})
 
     [stack] = state.render_panel_charts(panel, df)
@@ -112,7 +112,7 @@ def test_render_panel_charts_packed_layout_uses_natural_width() -> None:
 
 
 def test_render_panel_charts_grid_layout_stretches_to_full_width() -> None:
-    panel = _panel_with_chart().model_copy(update={"layout": "grid"})
+    panel = _panel_with_chart()
     df = pd.DataFrame({"run_id": [1], "step": [0], "loss": [0.5]})
 
     [stack] = state.render_panel_charts(panel, df)
