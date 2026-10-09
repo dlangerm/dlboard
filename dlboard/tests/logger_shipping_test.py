@@ -179,15 +179,15 @@ def test_finalize_records_how_the_run_ended_and_the_newest_report_wins(
     assert failed.status == RunStatus.FAILED
 
 
-def test_the_exit_flush_does_not_claim_the_run_ended(
+def test_the_exit_flush_records_that_the_run_ended_without_saying_how(
     logger: DLBoardLogger, backend_server: BackendServer
 ) -> None:
-    """It can't tell a crash from a script that simply ended, so the run is left as it was."""
+    """It can't tell a crash from a script that simply ended -- but it did end, so it is not "running"."""
     logger.finalize("atexit")
 
     run = backend_server.store.get_run(logger.run_id or 0)
     assert run is not None
-    assert (run.status, run.ended_at) == (RunStatus.RUNNING, None)
+    assert (run.status, run.ended_at is not None) == (RunStatus.UNKNOWN, True)
 
 
 @pytest.mark.parametrize(

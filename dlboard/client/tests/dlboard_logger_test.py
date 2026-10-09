@@ -544,7 +544,9 @@ def test_every_checkpoint_callback_gets_its_kept_checkpoints_uploaded(
     [
         pytest.param("success", [models.RunStatus.FINISHED], id="success"),
         pytest.param("failed", [models.RunStatus.FAILED], id="failed"),
-        pytest.param("atexit", [], id="the-exit-flush-cannot-tell-a-crash-from-an-end"),
+        pytest.param(
+            "atexit", [models.RunStatus.UNKNOWN], id="the-exit-flush-cannot-tell-a-crash-from-an-end"
+        ),
         pytest.param("interrupted", [], id="anything-else"),
     ],
 )
@@ -572,3 +574,32 @@ def test_a_server_that_cannot_record_the_status_never_fails_the_script(
 
     with pytest.warns(UserWarning, match="could not record that the run finished"):
         logger.finalize("success")
+
+
+def test_the_exit_flush_does_not_overwrite_an_outcome_the_run_already_reported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    api = _FakeRunAPI("http://x")
+    _stub_api(monkeypatch, api)
+    _stub_shippers(monkeypatch)
+    logger = DLBoardLogger(project_id=1, experiment_id=None)
+
+    logger.finalize("success")
+    logger.finalize("atexit")
+
+    assert [call[1][1] for call in api.calls if call[0] == "finish_run"] == [models.RunStatus.FINISHED]
+
+
+def test_a_logger_that_was_never_finalized_reports_an_unknown_outcome_at_exit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A script that exits without Lightning finalizing it would otherwise read as "running" forever."""
+    api = _FakeRunAPI("http://x")
+    _stub_api(monkeypatch, api)
+    _stub_shippers(monkeypatch)
+    logger = DLBoardLogger(project_id=1, experiment_id=None)
+
+    with pytest.warns(UserWarning, match="never finalized"):
+        logger._finalize_at_exit()
+
+    assert [call[1][1] for call in api.calls if call[0] == "finish_run"] == [models.RunStatus.UNKNOWN]

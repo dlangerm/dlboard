@@ -11,10 +11,10 @@ never actually touches either. Pure `pydantic`/`typing` -- no heavy dependency o
 
 from __future__ import annotations
 
-from typing import Final, Literal
+from typing import Final
 
 import pendulum
-from pydantic import AwareDatetime, BaseModel, Field
+from pydantic import AwareDatetime, BaseModel, Field, field_validator
 
 from dlboard import models
 from dlboard._compat import StrEnum
@@ -109,10 +109,6 @@ class GetOrCreateProject(BaseModel, frozen=True, extra="ignore"):
     description: str = ""
 
 
-DoneStatus = Literal[models.RunStatus.FINISHED, models.RunStatus.FAILED]
-"""The statuses a client may report a run done with -- `RUNNING` is only ever what a run starts as."""
-
-
 class FinishRun(BaseModel, frozen=True, extra="ignore"):
     """
     Request body: a run's client reports it is done, how, and when.
@@ -121,8 +117,17 @@ class FinishRun(BaseModel, frozen=True, extra="ignore"):
     never mixes two machines' clocks.
     """
 
-    status: DoneStatus
+    status: models.RunStatus
     ended_at: AwareDatetime = Field(default_factory=lambda: pendulum.now(pendulum.UTC))
+
+    @field_validator("status")
+    @classmethod
+    def _must_be_an_ending(cls, status: models.RunStatus) -> models.RunStatus:
+        """`running` is only ever what a run starts as: reporting it done makes no sense."""
+        if status is models.RunStatus.RUNNING:
+            msg = "a run is finished as finished, failed or unknown, not running"
+            raise ValueError(msg)
+        return status
 
 
 class GetOrCreateExperiment(BaseModel, frozen=True, extra="ignore"):

@@ -21,6 +21,8 @@ class RunStatus(StrEnum):
     """The client reported it ended normally."""
     FAILED = "failed"
     """The client reported it ended with an error."""
+    UNKNOWN = "unknown"
+    """Ended, but its client never said how: a script that exited without Lightning finalizing the logger."""
 
 
 class NewRun(BaseModel, frozen=True, extra="ignore"):

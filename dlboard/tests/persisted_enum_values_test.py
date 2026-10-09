@@ -48,7 +48,7 @@ _FROZEN_ENUM_VALUES: dict[type[StrEnum], frozenset[str]] = {
     EntityType: frozenset({"project", "experiment", "run", "artifact"}),
     ExperimentSource: frozenset({"pytorch_lightning"}),
     FileKind: frozenset({"checkpoint"}),
-    RunStatus: frozenset({"running", "finished", "failed"}),
+    RunStatus: frozenset({"running", "finished", "failed", "unknown"}),
     MetricColumn: frozenset({"run_id", "step", "timestamp_utc"}),
 }
 
