@@ -10,6 +10,7 @@ has to know or care which `ArtifactStore` backend is in play.
 
 from __future__ import annotations
 
+import hashlib
 from typing import TYPE_CHECKING
 
 from flask import Response, abort
@@ -24,16 +25,36 @@ from dlboard.serve._url import relative_path
 if TYPE_CHECKING:
     from dash import Dash
 
+    from dlboard.models import Artifact
+
 _log = get_logger(__name__)
 
 _IMMUTABLE_CACHE_CONTROL = "private, max-age=31536000, immutable"
-"""An artifact id's bytes never change once logged, so a browser may cache it forever -- but only
-the browser (`private`): who may see it is per-user, so a shared proxy cache must never keep a copy."""
+"""What an artifact URL's bytes may be cached as: forever, since `artifact_url` puts a version in the URL that changes
+whenever the artifact behind an id does. Only by the browser (`private`): who may see it is per-user, so a shared
+proxy cache must never keep a copy."""
 
 
-def artifact_url(artifact_id: int) -> str:
-    """The URL a browser (or a chart's own `<img>`/`<a>`) fetches artifact `artifact_id` from."""
-    return relative_path(f"/artifact/{artifact_id}")
+def artifact_version(artifact: Artifact) -> str:
+    """
+    A token that differs between two artifacts that share an id: where the blob lives, and when it was logged.
+
+    The route is by id, but an id is only unique within one database: a browser that cached
+    `/artifact/5` from an earlier database (wiped, restored, or a different `--sqlite-location`) on
+    the same address would otherwise show that image for as long as `_IMMUTABLE_CACHE_CONTROL` says --
+    a year -- in place of this database's artifact 5.
+    """
+    return hashlib.sha256(f"{artifact.ref}|{artifact.created_at.isoformat()}".encode()).hexdigest()[:12]
+
+
+def artifact_url(artifact: Artifact) -> str:
+    """
+    The URL a browser (or a chart's own `<img>`/`<a>`) fetches `artifact` from.
+
+    `v` is `artifact_version`, so a cached copy is only ever reused for the artifact it was fetched
+    for. The route ignores it.
+    """
+    return relative_path(f"/artifact/{artifact.id}?v={artifact_version(artifact)}")
 
 
 def _download(artifact_id: int) -> Response:

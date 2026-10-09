@@ -30,8 +30,6 @@ exists to produce. Where the script itself works around one, a `# DLBOARD GAP:` 
 7. Auto-generating that many charts is slow, and so is switching Prefix/Suffix in its dialog (#168, #167).
 8. Changing charts-per-row in a big Grid panel blanks the UI (#169).
 9. Suggest charts is one add button per key: no select-all, filter or sort (#173).
-10. After running the quickstart too, image-series charts can show other keys' artifacts, even another
-    experiment's (#171).
 """
 
 import math
