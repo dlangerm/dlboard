@@ -8,6 +8,7 @@ the dynamic suggestion list content and the callbacks that drive both flows.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, TypedDict, cast
 
 import dash_mantine_components as dmc
@@ -15,16 +16,19 @@ from dash import ALL, Dash, Input, NoUpdate, Output, State, ctx, no_update
 from dash.exceptions import PreventUpdate
 
 from dlboard.models import ChartInstance, ColumnKind
-from dlboard.serve import Icon, get_data_store, icon
+from dlboard.serve import ClientsideScript, Icon, get_data_store, icon
 from dlboard.serve import _constants as constants
 from dlboard.serve._pages._experiment import _experiment_page_state as core
 from dlboard.serve._pages._experiment._chart_autogen import (
     Suggestion,
+    SuggestSort,
     build_auto_panels,
     build_suggestions,
     find_uncharted_keys,
     group_keys_into_panels,
     panel_to_open,
+    parse_selection,
+    visible_suggestions,
 )
 from dlboard.serve._pages._experiment._dataframe_helpers import ColumnCatalog
 
@@ -33,6 +37,8 @@ if TYPE_CHECKING:
 
     from dlboard.serve._pages._experiment._chart_autogen import SplitMode
 
+
+_SUGGEST_SELECTION_JS = ClientsideScript(Path(__file__).with_name("suggest_selection.js"))
 
 _NO_KEYS_MESSAGE = "No metrics or artifacts logged for this experiment yet"
 
@@ -43,19 +49,34 @@ class _AutoPopulateCtx(core.EditCtx):
     experiment_id: int
 
 
-def _render_suggestions(suggestions: list[Suggestion]) -> Component:
+def _render_suggestions(suggestions: list[Suggestion], *, filtered_out_all: bool = False) -> Component:
+    """
+    The suggestion rows, each a checkbox (for the selection) plus a one-click add.
+
+    `filtered_out_all` says the list is empty because of the filter, not because there is nothing left to chart.
+    """
     if not suggestions:
-        return dmc.Text("Every metric and artifact already has a chart.", c="dimmed", size="sm")
+        return dmc.Text(
+            "No suggestion matches that filter."
+            if filtered_out_all
+            else "Every metric and artifact already has a chart.",
+            c="dimmed",
+            size="sm",
+        )
 
     def _row(s: Suggestion) -> Component:
         return dmc.Group(
             [
-                dmc.Stack(
-                    [
-                        dmc.Text(s.key, size="sm", ff="monospace"),
-                        dmc.Text([icon(Icon.MOVE_TO), " ", s.panel_name], size="xs", c="dimmed"),
-                    ],
-                    gap=0,
+                dmc.Checkbox(
+                    value=s.selection_value,
+                    size="sm",
+                    label=dmc.Stack(
+                        [
+                            dmc.Text(s.key, size="sm", ff="monospace"),
+                            dmc.Text([icon(Icon.MOVE_TO), " ", s.panel_name], size="xs", c="dimmed"),
+                        ],
+                        gap=0,
+                    ),
                 ),
                 dmc.ActionIcon(
                     icon(Icon.ADD),
@@ -80,6 +101,45 @@ def _render_suggestions(suggestions: list[Suggestion]) -> Component:
         sections.append(dmc.Text("Artifacts", fw=600, size="sm", mt="sm"))
         sections.extend(_row(s) for s in artifacts)
     return dmc.Stack(sections, gap="xs")
+
+
+def _suggestions_in(stored: list[dict[str, Any]]) -> list[Suggestion]:
+    """The `Suggestion`s a `SUGGEST_SUGGESTIONS_STORE_ID` payload describes."""
+    return [
+        Suggestion(
+            key=s["key"],
+            kind=ColumnKind(s["kind"]),
+            panel_name=s["panel_name"],
+            chart=ChartInstance[Any, Any](chart_type=s["chart_type"], parameters=s["parameters"]),
+        )
+        for s in stored
+    ]
+
+
+def _stored(suggestions: list[Suggestion]) -> list[dict[str, Any]]:
+    """What `SUGGEST_SUGGESTIONS_STORE_ID` holds for `suggestions` -- `_suggestions_in`'s input."""
+    return [
+        {
+            "key": s.key,
+            "kind": s.kind.value,
+            "panel_name": s.panel_name,
+            "chart_type": s.chart.chart_type,
+            "parameters": s.chart.parameters,
+        }
+        for s in suggestions
+    ]
+
+
+def _shown(stored: list[dict[str, Any]], text: str | None, sort: str | None) -> list[Suggestion]:
+    """The stored suggestions that pass the drawer's filter, in its sort order."""
+    return visible_suggestions(
+        _suggestions_in(stored), text=text or "", sort=SuggestSort(sort or SuggestSort.NAME)
+    )
+
+
+def _render_list(stored: list[dict[str, Any]], text: str | None, sort: str | None) -> Component:
+    shown = _shown(stored, text, sort)
+    return _render_suggestions(shown, filtered_out_all=bool(stored) and not shown)
 
 
 def _plural(n: int, noun: str) -> str:
@@ -255,6 +315,32 @@ class _SuggestCtx(TypedDict):
     mode: str | None
     page_json: str
     current_scope: str | None
+    filter_text: str | None
+    sort: str | None
+
+
+def _add_charts(
+    page_json: str, stored: list[dict[str, Any]], picked: frozenset[tuple[ColumnKind, str]]
+) -> tuple[Any, str, list[dict[str, Any]]]:
+    """
+    Add the chart of every stored suggestion in `picked` to its panel, in one page update.
+
+    Returns the re-rendered page content, the saved page, and the suggestions still left. However
+    many are picked, the page is saved and rebuilt once -- adding them one click at a time did that
+    per chart.
+    """
+    chosen = [s for s in _suggestions_in(stored) if (s.kind, s.key) in picked]
+    if not chosen:
+        raise PreventUpdate
+
+    def add_all(panels: list[Any]) -> list[Any]:
+        for s in chosen:
+            panels = core.add_chart_to_panel_by_name(panels, s.panel_name, s.chart)
+        return panels
+
+    page, container = core.mutate_panels_and_rerender(page_json, add_all)
+    remaining = [e for e in stored if (ColumnKind(e["kind"]), e["key"]) not in picked]
+    return container, page.model_dump_json(), remaining
 
 
 def _register_suggestions(app: Dash) -> None:
@@ -264,6 +350,7 @@ def _register_suggestions(app: Dash) -> None:
         Output(core.SUGGEST_CONTENT_ID, "children", allow_duplicate=True),
         Output(core.SUGGEST_SUGGESTIONS_STORE_ID, "data", allow_duplicate=True),
         Output(core.SUGGEST_SCOPE_STORE_ID, "data", allow_duplicate=True),
+        Output(core.SUGGEST_SELECTION_ID, "value", allow_duplicate=True),
         Input(core.SUGGEST_CHARTS_BUTTON_ID, "n_clicks"),
         Input({"type": "panel-suggest-charts", "panel": ALL}, "n_clicks"),
         {
@@ -271,12 +358,14 @@ def _register_suggestions(app: Dash) -> None:
             "mode": Input(core.SUGGEST_MODE_ID, "value"),
             "page_json": State(core.STATE_PAGE_STORAGE, "data"),
             "current_scope": State(core.SUGGEST_SCOPE_STORE_ID, "data"),
+            "filter_text": State(core.SUGGEST_FILTER_ID, "value"),
+            "sort": State(core.SUGGEST_SORT_ID, "value"),
         },
         prevent_initial_call=True,
     )
     def refresh_suggestions(
         n_clicks: int, _panel_clicks: list[int], suggest_ctx: _SuggestCtx
-    ) -> tuple[bool | NoUpdate, str | NoUpdate, Component, list[dict[str, Any]], str | None]:
+    ) -> tuple[bool | NoUpdate, str | NoUpdate, Component, list[dict[str, Any]], str | None, list[str]]:
         # Either button mounting for the first time reports itself as "triggered" with `n_clicks`
         # still 0 -- each is rendered into its own container (the panel controls row / a panel's
         # own `panel_header_controls`), separate from the delimiter/mode inputs below, so
@@ -293,7 +382,7 @@ def _register_suggestions(app: Dash) -> None:
         )
         title = f"Suggested charts for {scope}" if scope else "Suggested charts"
         if not catalog.has_chartable_keys:
-            return opened, title, dmc.Text(_NO_KEYS_MESSAGE, c="dimmed", size="sm"), [], scope
+            return opened, title, dmc.Text(_NO_KEYS_MESSAGE, c="dimmed", size="sm"), [], scope, []
 
         split_mode: SplitMode = "suffix" if suggest_ctx["mode"] == "suffix" else "prefix"
         lightning = curr_page.experiment_id is not None and core.is_lightning_experiment(
@@ -309,72 +398,127 @@ def _register_suggestions(app: Dash) -> None:
         if scope is not None:
             suggestions = [s for s in suggestions if s.panel_name == scope]
 
+        stored = _stored(suggestions)
+        # A different scope, or a regrouping, is a different list: whatever was ticked no longer applies.
         return (
             opened,
             title,
-            _render_suggestions(suggestions),
-            [
-                {
-                    "key": s.key,
-                    "kind": s.kind.value,
-                    "panel_name": s.panel_name,
-                    "chart_type": s.chart.chart_type,
-                    "parameters": s.chart.parameters,
-                }
-                for s in suggestions
-            ],
+            _render_list(stored, suggest_ctx["filter_text"], suggest_ctx["sort"]),
+            stored,
             scope,
+            [],
         )
+
+    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+        Output(core.SUGGEST_CONTENT_ID, "children", allow_duplicate=True),
+        Input(core.SUGGEST_FILTER_ID, "value"),
+        Input(core.SUGGEST_SORT_ID, "value"),
+        State(core.SUGGEST_SUGGESTIONS_STORE_ID, "data"),
+        prevent_initial_call=True,
+    )
+    def filter_and_sort_suggestions(
+        filter_text: str | None, sort: str | None, stored: list[dict[str, Any]] | None
+    ) -> Component:
+        """Re-list what is already loaded; the ticked boxes live in the checkbox group, so they survive."""
+        return _render_list(stored or [], filter_text, sort)
+
+    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+        Output(core.SUGGEST_SELECTION_ID, "value", allow_duplicate=True),
+        Input(core.SUGGEST_SELECT_ALL_ID, "n_clicks"),
+        Input(core.SUGGEST_CLEAR_ID, "n_clicks"),
+        State(core.SUGGEST_FILTER_ID, "value"),
+        State(core.SUGGEST_SORT_ID, "value"),
+        State(core.SUGGEST_SUGGESTIONS_STORE_ID, "data"),
+        State(core.SUGGEST_SELECTION_ID, "value"),
+        prevent_initial_call=True,
+    )
+    def select_suggestions(  # noqa: PLR0913
+        select_all_clicks: int | None,
+        clear_clicks: int | None,
+        filter_text: str | None,
+        sort: str | None,
+        stored: list[dict[str, Any]] | None,
+        selected: list[str] | None,
+    ) -> list[str]:
+        """Tick every suggestion the filter shows (keeping what was already ticked), or untick everything."""
+        if cast("str | None", ctx.triggered_id) == core.SUGGEST_CLEAR_ID:  # pyright: ignore[reportUnknownMemberType]
+            if not clear_clicks:
+                raise PreventUpdate
+            return []
+        if not select_all_clicks:
+            raise PreventUpdate
+        shown = [s.selection_value for s in _shown(stored or [], filter_text, sort)]
+        return [*dict.fromkeys([*(selected or []), *shown])]
+
+    app.clientside_callback(  # pyright: ignore[reportUnknownMemberType]
+        _SUGGEST_SELECTION_JS.source,
+        Output(core.SUGGEST_ADD_SELECTED_ID, "children"),
+        Output(core.SUGGEST_ADD_SELECTED_ID, "disabled"),
+        Input(core.SUGGEST_SELECTION_ID, "value"),
+    )
+
+
+def _register_suggestion_adds(app: Dash) -> None:
+    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+        Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
+        Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
+        Output(core.SUGGEST_CONTENT_ID, "children", allow_duplicate=True),
+        Output(core.SUGGEST_SUGGESTIONS_STORE_ID, "data", allow_duplicate=True),
+        Output(core.SUGGEST_SELECTION_ID, "value", allow_duplicate=True),
+        Input({"type": "add-suggestion", "kind": ALL, "key": ALL}, "n_clicks"),
+        State(core.SUGGEST_SUGGESTIONS_STORE_ID, "data"),
+        State(core.STATE_PAGE_STORAGE, "data"),
+        State(core.SUGGEST_FILTER_ID, "value"),
+        State(core.SUGGEST_SORT_ID, "value"),
+        State(core.SUGGEST_SELECTION_ID, "value"),
+        prevent_initial_call=True,
+    )
+    def add_suggested_chart(
+        _n_clicks_list: list[int],
+        stored: list[dict[str, Any]] | None,
+        page_json: str,
+        filter_text: str | None,
+        sort: str | None,
+        selected: list[str] | None,
+    ) -> tuple[Any, str, Component, list[dict[str, Any]], list[str]]:
+        triggered_id = cast("dict[str, str]", core.require_triggered_id())
+        picked = frozenset({(ColumnKind(triggered_id["kind"]), triggered_id["key"])})
+        container, saved_page, remaining = _add_charts(page_json, stored or [], picked)
+        still_ticked = [v for v in selected or [] if parse_selection([v]) != picked]
+        return container, saved_page, _render_list(remaining, filter_text, sort), remaining, still_ticked
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Output(core.SUGGEST_CONTENT_ID, "children", allow_duplicate=True),
         Output(core.SUGGEST_SUGGESTIONS_STORE_ID, "data", allow_duplicate=True),
-        Input({"type": "add-suggestion", "kind": ALL, "key": ALL}, "n_clicks"),
+        Output(core.SUGGEST_SELECTION_ID, "value", allow_duplicate=True),
+        Input(core.SUGGEST_ADD_SELECTED_ID, "n_clicks"),
+        State(core.SUGGEST_SELECTION_ID, "value"),
         State(core.SUGGEST_SUGGESTIONS_STORE_ID, "data"),
         State(core.STATE_PAGE_STORAGE, "data"),
+        State(core.SUGGEST_FILTER_ID, "value"),
+        State(core.SUGGEST_SORT_ID, "value"),
         prevent_initial_call=True,
     )
-    def add_suggested_chart(
-        _n_clicks_list: list[int],
-        stored_suggestions: list[dict[str, Any]] | None,
+    def add_selected_suggestions(  # noqa: PLR0913
+        n_clicks: int | None,
+        selected: list[str] | None,
+        stored: list[dict[str, Any]] | None,
         page_json: str,
-    ) -> tuple[Any, str, Component, list[dict[str, Any]]]:
-        triggered_id = cast("dict[str, str]", core.require_triggered_id())
-        kind, key = triggered_id["kind"], triggered_id["key"]
-
-        stored_suggestions = stored_suggestions or []
-        match = next((s for s in stored_suggestions if s["kind"] == kind and s["key"] == key), None)
-        if match is None:
+        filter_text: str | None,
+        sort: str | None,
+    ) -> tuple[Any, str, Component, list[dict[str, Any]], list[str]]:
+        """Add every ticked suggestion's chart at once, wherever the current filter has scrolled them."""
+        if not n_clicks:
             raise PreventUpdate
-
-        chart = ChartInstance[Any, Any](chart_type=match["chart_type"], parameters=match["parameters"])
-        panel_name = match["panel_name"]
-
-        def apply_chart(panels: list[Any]) -> list[Any]:
-            return core.add_chart_to_panel_by_name(panels, panel_name, chart)
-
-        page, container = core.mutate_panels_and_rerender(page_json, apply_chart)
-
-        remaining = [s for s in stored_suggestions if not (s["kind"] == kind and s["key"] == key)]
-        remaining_suggestions = [
-            Suggestion(
-                key=s["key"],
-                kind=ColumnKind(s["kind"]),
-                panel_name=s["panel_name"],
-                chart=ChartInstance[Any, Any](chart_type=s["chart_type"], parameters=s["parameters"]),
-            )
-            for s in remaining
-        ]
-        return (
-            container,
-            page.model_dump_json(),
-            _render_suggestions(remaining_suggestions),
-            remaining,
+        container, saved_page, remaining = _add_charts(
+            page_json, stored or [], parse_selection(selected or [])
         )
+        return container, saved_page, _render_list(remaining, filter_text, sort), remaining, []
 
 
 def register_chart_suggestions_callbacks(app: Dash) -> None:
     _register_auto_populate(app)
     _register_suggestions(app)
+    _register_suggestion_adds(app)
