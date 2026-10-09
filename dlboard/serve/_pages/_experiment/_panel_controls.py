@@ -17,7 +17,6 @@ single function accumulates enough nested callbacks to trip ruff's complexity/st
 
 from __future__ import annotations
 
-import typing
 from pathlib import Path
 from typing import Any, cast
 
@@ -32,16 +31,10 @@ from dlboard.serve._pages._experiment import _experiment_page_state as core
 
 _PANEL_GRID_COLUMNS_JS = ClientsideScript(Path(__file__).with_name("panel_grid_columns.js"))
 
-_LAYOUT_FIELD_BY_CONTROL: typing.Final = {
-    core.PANEL_LAYOUT_TYPE: "layout",
-    core.PANEL_GRID_COLUMNS_TYPE: "grid_columns",
-}
-"""Which `PanelInstance` field each layout control (by its id `type`) edits."""
 
-
-def _validated_layout_change(page_json: str) -> tuple[str, str, Any]:
+def _validated_layout_change(page_json: str) -> tuple[str, dict[str, Any]]:
     """
-    The panel, `PanelInstance` field and validated new value a layout control just changed.
+    The panel a layout control just changed, and the validated edit that makes to it (`{field: value}`).
 
     Raises `PreventUpdate` unless the value really differs: a control's `value` mounting for the first
     time reports the panel's current value back as a "change" even though nothing was actually
@@ -51,20 +44,26 @@ def _validated_layout_change(page_json: str) -> tuple[str, str, Any]:
         raise PreventUpdate
     triggered_id = cast("dict[str, str]", ctx.triggered_id)  # pyright: ignore[reportUnknownMemberType]
     panel_name = triggered_id["panel"]
-    field = _LAYOUT_FIELD_BY_CONTROL[triggered_id["type"]]
     value = cast("Any", ctx.triggered[0]["value"])
+    match triggered_id["type"]:
+        case core.PANEL_LAYOUT_TYPE:
+            edit = {"layout": value}
+        case core.PANEL_GRID_COLUMNS_TYPE:
+            edit = {"grid_columns": value}
+        case _:
+            raise PreventUpdate
 
     current_page = core.BasicExperimentPage.model_validate_json(page_json)
     panel = next((p for p in current_page.panels if p.name == panel_name), None)
     if panel is None:
         raise PreventUpdate
     try:
-        changed = PanelInstance[Any, Any].model_validate({**panel.model_dump(), field: value})
+        changed = PanelInstance[Any, Any].model_validate({**panel.model_dump(), **edit})
     except ValidationError:
         raise PreventUpdate from None
     if changed == panel:
         raise PreventUpdate
-    return panel_name, field, getattr(changed, field)
+    return panel_name, changed.model_dump(include=set(edit))
 
 
 class _AddChartCtx(core.EditCtx):
@@ -404,9 +403,9 @@ def _register_toggle(app: Dash) -> None:
     )
     def change_panel_layout(_layouts: list[str], page_json: str) -> tuple[html.Div, str]:
         """Apply a panel's Packed/Grid toggle -- every chart's width changes with it, so the page is rebuilt."""
-        panel_name, field, value = _validated_layout_change(page_json)
+        panel_name, edit = _validated_layout_change(page_json)
         page, container = core.mutate_panels_and_rerender(
-            page_json, lambda panels: core.update_panel(panels, panel_name, {field: value})
+            page_json, lambda panels: core.update_panel(panels, panel_name, edit)
         )
         return container, page.model_dump_json()
 
@@ -428,10 +427,8 @@ def _register_toggle(app: Dash) -> None:
     )
     def save_panel_grid_columns(_grid_columns: list[int], page_json: str) -> str:
         """Persist a column count the browser has already applied -- see `panel_grid_columns.js`."""
-        panel_name, field, value = _validated_layout_change(page_json)
-        page = core.mutate_panels(
-            page_json, lambda panels: core.update_panel(panels, panel_name, {field: value})
-        )
+        panel_name, edit = _validated_layout_change(page_json)
+        page = core.mutate_panels(page_json, lambda panels: core.update_panel(panels, panel_name, edit))
         return page.model_dump_json()
 
 
