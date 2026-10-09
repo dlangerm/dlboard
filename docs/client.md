@@ -64,9 +64,11 @@ not something specific to dlboard.
 
 **How a run ends.** Lightning finalizes the logger when a stage finishes: `"success"` records the run as
 *finished* and `"failed"` as *failed*, with the time it ended (stamped by your machine, like the run's start,
- so the duration never mixes two clocks). The runs table shows it as "running", "3m 23s" or "✕ 1h 2m" next to
-the run. A later stage (`trainer.test` after `fit`) moves the end time later. A process that is killed never
-finalizes, so its run stays *running*. A server that predates this simply doesn't record it.
+ so the duration never mixes two clocks). The runs table shows it as "running", "3m 23s", "2d 3h" or "✕ 1h 2m" next to
+the run. A later stage (`trainer.test` after `fit`) moves the end time later. A script that exits without Lightning
+finalizing the logger (an exception outside the trainer, say) is recorded as *unknown* -- ended, but not known how.
+A process that is killed outright (`kill -9`, the OOM killer) can't say anything, so its run stays *running*. A
+server that predates this simply doesn't record any of it.
 
 **Multi-GPU (DDP).** Every rank builds its own logger and Lightning calls all of them, so only
 global rank 0 logs: a non-zero rank makes no server calls, starts no shipping processes and drops

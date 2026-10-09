@@ -1799,6 +1799,7 @@ def test_the_runs_table_shows_how_each_run_ended_and_for_how_long(page: Page, li
     still_running = api.create_run(models.NewRun(experiment_id=experiment_id, name="still-going"))
     crashed = api.create_run(models.NewRun(experiment_id=experiment_id, name="crashed"))
     done = api.create_run(models.NewRun(experiment_id=experiment_id, name="all-done"))
+    walked_away = api.create_run(models.NewRun(experiment_id=experiment_id, name="walked-away"))
     store = get_system_data_store()
     store.finish_run(
         crashed.id,
@@ -1808,6 +1809,9 @@ def test_the_runs_table_shows_how_each_run_ended_and_for_how_long(page: Page, li
     store.finish_run(
         done.id, models.RunStatus.FINISHED, done.created_at + pendulum.duration(minutes=3, seconds=23)
     )
+    store.finish_run(
+        walked_away.id, models.RunStatus.UNKNOWN, walked_away.created_at + pendulum.duration(days=2, hours=3)
+    )
     assert still_running.status == models.RunStatus.RUNNING
 
     page.reload()
@@ -1816,3 +1820,4 @@ def test_the_runs_table_shows_how_each_run_ended_and_for_how_long(page: Page, li
     expect(rows.filter(has_text="still-going")).to_contain_text("running")
     expect(rows.filter(has_text="crashed")).to_contain_text("✕ 1h 2m")
     expect(rows.filter(has_text="all-done")).to_contain_text("3m 23s")
+    expect(rows.filter(has_text="walked-away")).to_contain_text("? 2d 3h")

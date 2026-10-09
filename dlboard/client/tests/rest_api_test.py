@@ -6,7 +6,7 @@ from __future__ import annotations
 import contextlib
 import warnings
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 import pytest
 import requests
@@ -135,7 +135,10 @@ class _Reply:
 
     def raise_for_status(self) -> None:
         if self.status_code >= 400:
-            raise requests.HTTPError(str(self.status_code))
+            raise requests.HTTPError(str(self.status_code), response=cast("requests.Response", self))
+
+    def json(self) -> dict[str, Any]:
+        return {"id": 7, "experiment_id": 1, "created_at": "2026-01-01T00:00:00+00:00", "status": "failed"}
 
 
 @pytest.mark.parametrize(

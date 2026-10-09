@@ -21,7 +21,7 @@ from dash.exceptions import PreventUpdate
 from structlog.stdlib import get_logger
 
 from dlboard import models
-from dlboard.models import RUN_NAME_COLUMN
+from dlboard.models import RUN_NAME_COLUMN, MetricColumn
 from dlboard.plugins.charts._table_style import column_def, infer_column_dtype, themed_grid_kwargs
 from dlboard.serve import (
     ClientsideScript,
@@ -33,6 +33,7 @@ from dlboard.serve import (
 )
 from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import ButtonId, ModalId, StoreId, ValueId
+from dlboard.serve._format import format_duration
 from dlboard.serve._pages._dash_helpers import section_label, tooltipped_action_icon
 from dlboard.serve._pages._dataframe_helpers import run_display_name
 from dlboard.serve._pages._experiment import _dataframe_helpers as dfh
@@ -60,51 +61,54 @@ _ROW_ID_FIELD = "_row_id"
 _SWATCH_FIELD = "_swatch"
 _STATUS_FIELD = "_status"
 _DURATION_FIELD = "_duration_s"
+_STATUS_TEXT_FIELD = "_status_text"
 _STATUS_DETAIL_FIELD = "_status_detail"
-_STATUS_MIN_WIDTH = 74
 """Reserved row fields (underscore-prefixed, like `_swatch`): a hyperparameter or metric named "status" can't shadow them."""
-_STATUS_FORMAT = (
-    # One narrow cell for the sidebar: "running", or how long it took -- "3m 12s", "1h 5m", "42s" -- with a
-    # cross in front of a failure. Whole seconds in; arithmetic only, since dash-ag-grid's JS-string parser
-    # takes bare expressions (no `Math.floor(...)`).
-    f"params.data.{_STATUS_FIELD} == 'running' ? 'running' : params.value == null ? '' : "
-    f"(params.data.{_STATUS_FIELD} == 'failed' ? '✕ ' : '') + ("
-    "params.value >= 3600"
-    " ? ((params.value - params.value % 3600) / 3600) + 'h ' + ((params.value % 3600 - params.value % 60) / 60) + 'm'"
-    " : params.value >= 60 ? ((params.value - params.value % 60) / 60) + 'm ' + (params.value % 60) + 's'"
-    " : params.value + 's')"
-)
+_STATUS_MIN_WIDTH = 74
+"""Room for "✕ 1h 2m" in the narrow sidebar the table lives in."""
 _STATUS_STYLES: dict[models.RunStatus, str] = {
     models.RunStatus.RUNNING: "var(--mantine-color-blue-5)",
     models.RunStatus.FINISHED: "var(--mantine-color-dimmed)",
     models.RunStatus.FAILED: "var(--mantine-color-red-6)",
+    models.RunStatus.UNKNOWN: "var(--mantine-color-yellow-6)",
 }
 
 
-def _duration_text(seconds: int) -> str:
-    """`seconds` as "42s", "3m 12s" or "1h 5m" -- what `_STATUS_FORMAT` shows in the cell."""
-    hours, rest = divmod(seconds, 3600)
-    minutes, secs = divmod(rest, 60)
-    if hours:
-        return f"{hours}h {minutes}m"
-    return f"{minutes}m {secs}s" if minutes else f"{secs}s"
+def _duration_seconds(run: Run) -> int | None:
+    """How long the run took, if it has ended."""
+    return int((run.ended_at - run.created_at).total_seconds()) if run.ended_at else None
+
+
+def _status_text(run: Run) -> str:
+    """The cell's text, short enough for the sidebar: "running", how long it took, marked if it failed or is unknown."""
+    seconds = _duration_seconds(run)
+    took = "" if seconds is None else format_duration(seconds)
+    match run.status:
+        case None:
+            return ""
+        case models.RunStatus.RUNNING:
+            return "running"
+        case models.RunStatus.FINISHED:
+            return took
+        case models.RunStatus.FAILED:
+            return f"✕ {took}".strip()
+        case models.RunStatus.UNKNOWN:
+            return f"? {took}".strip()
 
 
 def _status_detail(run: Run) -> str:
     """The cell's tooltip: how the run ended and how long it took, in words. Empty for a run with no status."""
+    seconds = _duration_seconds(run)
+    after = "" if seconds is None else f" after {format_duration(seconds)}"
     match run.status:
         case None:
             return ""
         case models.RunStatus.RUNNING:
             return "running"
         case models.RunStatus.FINISHED | models.RunStatus.FAILED:
-            took = f" after {_duration_text(_duration_seconds(run))}" if run.ended_at else ""
-            return f"{run.status.value}{took}"
-
-
-def _duration_seconds(run: Run) -> int:
-    assert run.ended_at is not None
-    return int((run.ended_at - run.created_at).total_seconds())
+            return f"{run.status.value}{after}"
+        case models.RunStatus.UNKNOWN:
+            return f"ended without saying how{after}"
 
 
 SELECTED_HPARAM_COLS_KEY: typing.Final = "hparam-table-selected"  # a page_settings dict key
@@ -128,10 +132,11 @@ def _build_hparam_rows(
     rows: list[dict[str, Any]] = []
     for run in runs:
         row: dict[str, Any] = {
-            "run_id": run.id,
+            MetricColumn.RUN_ID: run.id,
             RUN_NAME_COLUMN: run_display_name(run),
             _STATUS_FIELD: run.status.value if run.status else None,
-            _DURATION_FIELD: _duration_seconds(run) if run.ended_at else None,
+            _DURATION_FIELD: _duration_seconds(run),
+            _STATUS_TEXT_FIELD: _status_text(run),
             _STATUS_DETAIL_FIELD: _status_detail(run),
         }
         hparam = hparams_by_run.get(run.id)
@@ -226,7 +231,7 @@ def _build_hparam_datatable(
             "sortable": True,
             "filter": True,
             "filterValueGetter": {"function": f"params.data.{_STATUS_FIELD}"},
-            "valueFormatter": {"function": _STATUS_FORMAT},
+            "valueFormatter": {"function": f"params.data.{_STATUS_TEXT_FIELD}"},
             "tooltipField": _STATUS_DETAIL_FIELD,
             # The run name gets what is left, but this has to stay readable ("✕ 1h 2m") in a narrow sidebar.
             "minWidth": _STATUS_MIN_WIDTH,
@@ -255,9 +260,13 @@ def _build_hparam_datatable(
         }
     )
 
-    selected_ids = [str(row["run_id"]) for row in rows if row["run_id"] not in excluded]
+    selected_ids = [str(row[MetricColumn.RUN_ID]) for row in rows if row[MetricColumn.RUN_ID] not in excluded]
     data = [
-        {**row, _ROW_ID_FIELD: str(row["run_id"]), _SWATCH_FIELD: series_swatch_class(int(row["run_id"]))}
+        {
+            **row,
+            _ROW_ID_FIELD: str(row[MetricColumn.RUN_ID]),
+            _SWATCH_FIELD: series_swatch_class(int(row[MetricColumn.RUN_ID])),
+        }
         for row in rows
     ]
 
@@ -555,9 +564,9 @@ def _register_hparam_table(app: Dash) -> None:
         selected_ids = (
             {int(i) for i in selected_rows["ids"]}
             if isinstance(selected_rows, dict)
-            else {row["run_id"] for row in selected_rows}
+            else {row[MetricColumn.RUN_ID] for row in selected_rows}
         )
-        all_ids = {row["run_id"] for row in table_data}
+        all_ids = {row[MetricColumn.RUN_ID] for row in table_data}
         excluded = sorted(all_ids - selected_ids)
 
         store = get_data_store()

@@ -132,7 +132,12 @@ def _run(run_id: int, name: str | None = None) -> Run:
     return Run(id=run_id, experiment_id=1, name=name, created_at=_TS)
 
 
-_RUNNING_FIELDS = {"_status": "running", "_duration_s": None, "_status_detail": "running"}
+_RUNNING_FIELDS = {
+    "_status": "running",
+    "_duration_s": None,
+    "_status_text": "running",
+    "_status_detail": "running",
+}
 
 
 def test_build_hparam_rows_merges_hparams_and_latest_metrics() -> None:
@@ -433,39 +438,39 @@ def test_param_field_input_renders_fixed_choices_as_a_select() -> None:
     ("status", "ran_for_s", "expected"),
     [
         pytest.param(
-            models.RunStatus.FINISHED, 203, ("finished", 203, "finished after 3m 23s"), id="finished"
+            models.RunStatus.FINISHED,
+            203,
+            ("finished", 203, "3m 23s", "finished after 3m 23s"),
+            id="finished",
         ),
-        pytest.param(models.RunStatus.FAILED, 3725, ("failed", 3725, "failed after 1h 2m"), id="failed"),
-        pytest.param(models.RunStatus.FINISHED, 42, ("finished", 42, "finished after 42s"), id="seconds"),
-        pytest.param(models.RunStatus.RUNNING, None, ("running", None, "running"), id="running"),
-        pytest.param(None, None, (None, None, ""), id="a-run-stored-before-status-existed"),
+        pytest.param(
+            models.RunStatus.FAILED, 3725, ("failed", 3725, "✕ 1h 2m", "failed after 1h 2m"), id="failed"
+        ),
+        pytest.param(
+            models.RunStatus.FINISHED,
+            2 * 86400 + 3 * 3600,
+            ("finished", 183600, "2d 3h", "finished after 2d 3h"),
+            id="days",
+        ),
+        pytest.param(
+            models.RunStatus.UNKNOWN,
+            300,
+            ("unknown", 300, "? 5m 0s", "ended without saying how after 5m 0s"),
+            id="the-script-exited-without-saying-how",
+        ),
+        pytest.param(models.RunStatus.RUNNING, None, ("running", None, "running", "running"), id="running"),
+        pytest.param(None, None, (None, None, "", ""), id="a-run-stored-before-status-existed"),
     ],
 )
 def test_build_hparam_rows_shows_how_a_run_ended_and_how_long_it_took(
-    status: models.RunStatus | None, ran_for_s: int | None, expected: tuple[str | None, int | None, str]
+    status: models.RunStatus | None, ran_for_s: int | None, expected: tuple[str | None, int | None, str, str]
 ) -> None:
     ended_at = None if ran_for_s is None else _TS + timedelta(seconds=ran_for_s)
     run = _run(1).model_copy(update={"status": status, "ended_at": ended_at})
 
     (row,) = run_table._build_hparam_rows([run], hparams_by_run={}, latest_metrics={})
 
-    assert (row["_status"], row["_duration_s"], row["_status_detail"]) == expected
-
-
-@pytest.mark.parametrize(
-    ("seconds", "text"),
-    [
-        (0, "0s"),
-        (59, "59s"),
-        (60, "1m 0s"),
-        (203, "3m 23s"),
-        (3599, "59m 59s"),
-        (3600, "1h 0m"),
-        (3725, "1h 2m"),
-    ],
-)
-def test_a_duration_reads_as_seconds_minutes_or_hours(seconds: int, text: str) -> None:
-    assert run_table._duration_text(seconds) == text
+    assert (row["_status"], row["_duration_s"], row["_status_text"], row["_status_detail"]) == expected
 
 
 def test_the_runs_table_redraws_when_a_run_finishes() -> None:

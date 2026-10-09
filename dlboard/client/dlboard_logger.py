@@ -48,7 +48,6 @@ if TYPE_CHECKING:
 
     from pytorch_lightning.callbacks import ModelCheckpoint
 
-    from dlboard._wire import DoneStatus
     from dlboard.client.artifacts.figure import SavesFigure
     from dlboard.models import TagValue
     from dlboard.models._artifact import AnyArtifact
@@ -280,14 +279,23 @@ def _is_rank_zero() -> bool:
     return getattr(rank_zero_only, "rank", 0) == 0
 
 
-_DONE_STATUS_OF: Final[dict[str, DoneStatus]] = {
-    "success": models.RunStatus.FINISHED,
-    "failed": models.RunStatus.FAILED,
-}
-"""
-What the status string Lightning hands `Logger.finalize` means for the run. Any other (this logger's own
-`"atexit"` flush, which cannot tell a crash from a script that simply ended) reports nothing.
-"""
+def _done_status(lightning_status: str, *, already_reported: bool) -> models.RunStatus | None:
+    """
+    What the status string Lightning hands `Logger.finalize` means for the run, or `None` if it means nothing.
+
+    `"atexit"` is this logger's own flush when the script is ending without anyone having finalized it: it cannot
+    tell a crash from a script that simply ended, so the outcome is unknown -- unless the run already reported one.
+    """
+    match lightning_status:
+        case "success":
+            return models.RunStatus.FINISHED
+        case "failed":
+            return models.RunStatus.FAILED
+        case "atexit" if not already_reported:
+            return models.RunStatus.UNKNOWN
+        case _:
+            return None
+
 
 _UNRESOLVED_ID: Final = 0
 """Stands in for an id a non-zero rank never resolves (it makes no server calls, see `DLBoardLogger`)."""
@@ -374,6 +382,7 @@ class DLBoardLogger(Logger):
             shipper.ready.wait(_STARTUP_WAIT_TIMEOUT_SEC)
         warn_if_startup_was_slow(time.perf_counter() - startup_start)
         self._unflushed = False
+        self._reported_done = False
         self._log_model = log_model
         self._checkpoint_callbacks: dict[str, ModelCheckpoint] = {}
         self._logged_checkpoint_mtimes: dict[str, float] = {}
@@ -572,21 +581,22 @@ class DLBoardLogger(Logger):
         for copy_dir in self._checkpoint_copy_dirs:
             shutil.rmtree(copy_dir, ignore_errors=True)
         self._unflushed = False
-        if (done := _DONE_STATUS_OF.get(status)) is not None:
+        if (done := _done_status(status, already_reported=self._reported_done)) is not None:
             self._report_done(done)
         super().finalize(status)
 
-    def _report_done(self, status: DoneStatus) -> None:
+    def _report_done(self, status: models.RunStatus) -> None:
         """Tell the server how the run ended, once everything it logged has been shipped. Never fails the script."""
         try:
             self._api.finish_run(self._run_id, status)
+            self._reported_done = True
         except requests.RequestException as exc:
             warnings.warn(f"dlboard could not record that the run {status.value}: {exc}", stacklevel=3)
 
     @rank_zero_only
     def _finalize_at_exit(self) -> None:
         """Catch a crash, or any training loop that drives this logger without a `Trainer` at all."""
-        if self._unflushed:
+        if self._unflushed or not self._reported_done:
             warnings.warn(
                 "dlboard's logger was never finalized -- flushing whatever's still queued now, at "
                 "interpreter exit. Call `trainer.logger.finalize('success')` yourself to avoid this "
