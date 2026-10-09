@@ -6,14 +6,20 @@
 
 from __future__ import annotations
 
+import dataclasses
 import io
 import queue
 import threading
 import warnings
+from argparse import Namespace
+from enum import Enum
 from typing import Any
 
 import matplotlib.figure
+import numpy as np
 import PIL.Image
+import pydantic
+import pydantic.dataclasses
 import pytest
 import requests
 from pytorch_lightning.utilities import rank_zero_only
@@ -25,6 +31,7 @@ from dlboard.client.artifacts.figure import Figure
 from dlboard.client.dlboard_logger import (
     DLBoardLogger,
     DLBoardLoggerSettings,
+    flatten_hparams,
     is_oversized,
     is_rejection,
     warn_if_startup_was_slow,
@@ -67,6 +74,9 @@ class _FakeRunAPI(_FakeAPI):
     def create_run(self, run: models.NewRun) -> models.Run:
         self.calls.append(("create_run", (run.experiment_id,), {}))
         return models.Run(id=99, experiment_id=run.experiment_id)
+
+    def log_hyperparams(self, hparams: models.NewHyperParams) -> None:
+        self.calls.append(("log_hyperparams", (hparams.hparams_dict,), {}))
 
 
 class _FakeShipper:
@@ -346,3 +356,102 @@ def test_warn_if_startup_was_slow_is_silent_within_the_threshold() -> None:
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         warn_if_startup_was_slow(0.1)
+
+
+class _Optimizer(Enum):
+    ADAMW = "adamw"
+
+
+class _Schedule(pydantic.BaseModel):
+    kind: _Optimizer = _Optimizer.ADAMW
+    betas: tuple[float, float] = (0.9, 0.999)
+
+
+@pydantic.dataclasses.dataclass
+class _PydanticDataclass:
+    warmup: int = 100
+
+
+@dataclasses.dataclass
+class _StdlibDataclass:
+    flip: bool = True
+
+
+class _Config(pydantic.BaseModel):
+    lr: float = 1e-3
+    schedule: _Schedule = _Schedule()
+    warmup: _PydanticDataclass = _PydanticDataclass()
+    renamed: int = pydantic.Field(default=3, serialization_alias="alias")
+
+    @pydantic.field_serializer("lr")
+    def _as_text(self, lr: float) -> str:
+        return f"{lr:.0e}"
+
+
+@pytest.mark.parametrize(
+    ("params", "expected"),
+    [
+        pytest.param(
+            {"hidden": 128, "name": "a", "n": "128"}, {"hidden": 128, "name": "a", "n": "128"}, id="flat"
+        ),
+        pytest.param(
+            {"fraction": np.float32(0.5), "n": np.int64(3)}, {"fraction": 0.5, "n": 3}, id="numpy-scalars"
+        ),
+        pytest.param(Namespace(a=1, b=Namespace(c="x")), {"a": 1, "b/c": "x"}, id="namespace"),
+        pytest.param(
+            {"opt": _Optimizer.ADAMW, "ids": [1, 2]}, {"opt": "adamw", "ids": "[1, 2]"}, id="enum-and-list"
+        ),
+        pytest.param({"aug": _StdlibDataclass()}, {"aug/flip": True}, id="stdlib-dataclass"),
+        pytest.param({"data": _PydanticDataclass(warmup=5)}, {"data/warmup": 5}, id="pydantic-dataclass"),
+        pytest.param(
+            {"optim": _Config(), "seed": 1},
+            {
+                "optim/lr": "1e-03",
+                "optim/schedule/kind": "adamw",
+                "optim/schedule/betas": "[0.9, 0.999]",
+                "optim/warmup/warmup": 100,
+                "optim/alias": 3,
+                "seed": 1,
+            },
+            id="nested-pydantic-honours-its-own-serializers",
+        ),
+        pytest.param({"layer": _Config}, {"layer": str(_Config)}, id="unserializable-becomes-text"),
+    ],
+)
+def test_flatten_hparams_joins_nested_configs_with_slashes(params: Any, expected: dict[str, Any]) -> None:  # noqa: ANN401
+    assert flatten_hparams(params) == expected
+
+
+def test_log_hyperparams_sends_a_nested_config_flattened(monkeypatch: pytest.MonkeyPatch) -> None:
+    api = _FakeRunAPI("http://x")
+    _stub_api(monkeypatch, api)
+    _stub_shippers(monkeypatch)
+    logger = DLBoardLogger(project_id=1, experiment_id=None)
+
+    logger.log_hyperparams({"optim": _Schedule(), "seed": 1})
+
+    assert (
+        "log_hyperparams",
+        ({"optim/kind": "adamw", "optim/betas": "[0.9, 0.999]", "seed": 1},),
+        {},
+    ) in api.calls
+    logger.finalize("success")
+
+
+def test_every_finalize_flushes_what_was_logged_since_the_last_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Lightning finalizes after `fit` and again after `test`; the second one's metrics must ship too."""
+    _stub_api(monkeypatch, _FakeRunAPI("http://x"))
+    started = _stub_shippers(monkeypatch)
+    logger = DLBoardLogger(project_id=1, experiment_id=None)
+    logger.log_metrics({"fit/loss": 1.0}, step=0)
+    logger.finalize("success")
+    for shipper in started:
+        shipper.flushed = False
+
+    logger._finalize_at_exit()  # nothing new was logged: no warning, no flush
+    assert not any(shipper.flushed for shipper in started)
+
+    logger.log_metrics({"test/loss": 1.0}, step=1)
+    logger.finalize("success")
+
+    assert all(shipper.flushed for shipper in started)

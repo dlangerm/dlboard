@@ -26,7 +26,22 @@ trainer = pl.Trainer(logger=logger)
 
 If you don't already have an experiment, omit `experiment_id` and one is created for you. Metrics
 logged via PL's normal `self.log(...)` and hyperparameters via `save_hyperparameters()` are picked
-up automatically. See `examples/lightning_quickstart.py` for a complete, runnable example (MNIST MLP).
+up automatically. See `examples/lightning_quickstart.py` for a complete, runnable example (MNIST MLP), and
+`examples/lightning_advanced.py` for a heavier one (nested hyperparameters, checkpoints, mask and box
+previews, Lightning's monitoring callbacks) that doubles as a stress test for the UI.
+
+**Hyperparameters.** `save_hyperparameters()` (or `logger.log_hyperparams(...)`) takes anything
+nested: pydantic models, pydantic and stdlib dataclasses, a `Namespace`, plain dicts and ordinary
+init args. They're flattened to `parent/child` keys (`optim/schedule/warmup_steps`), which the
+experiment page's hyperparameter columns and run compare group on the same `/`. Pydantic serializes
+them, so a model's aliases and field serializers apply; a list is stored as one JSON string, and
+scalars are stored exactly as given.
+
+**Checkpoints.** `DLBoardLogger(..., log_model="all")` uploads every checkpoint a `ModelCheckpoint`
+saves, even one `save_top_k` deletes moments later (each is copied before it's queued). `log_model=True`
+uploads only the ones still kept, when training finishes. Each is a `File` (below) of kind `checkpoint`,
+keyed `checkpoints/<file name>`, tagged with its score and Lightning's `latest`/`best`/`best_k`. Its
+step is the latest one the logger saw metrics for.
 
 **Authenticating.** If the server signs people in (see [Auth](plugins/auth.md)), the script has to
 sign in too:
@@ -69,7 +84,7 @@ cap how long any one request waits before it's treated as failed.
 Returning a `Path` (written under `local_temp`) uploads that file; returning an `AnyUrl` instead
 registers it as a *link* — no bytes move, the server just checks the ref is one its
 `ArtifactStore` can actually serve (see [Storage](plugins/storage.md)) and records it. There are
-three built-in kinds:
+four built-in kinds:
 
 - `dlboard.client.artifacts.image.Image` — uploads. Wraps a `torch.Tensor`/`np.ndarray`
   (validated CHW `uint8` via `dlbype`), used like:
@@ -97,6 +112,16 @@ three built-in kinds:
   `plt.close(fig)` straight after. `tags=` is optional, and `save_kwargs=` goes to `fig.savefig`
   (`dpi`, `bbox_inches`, ...). Any object with a matplotlib-style `savefig(fname, **kwargs)`
   works, and dlboard doesn't depend on matplotlib itself.
+
+- `dlboard.client.artifacts.file.File` — uploads a file that already exists on disk, as-is, tagged with a
+  `FileKind` saying what it is (`FileKind.CHECKPOINT`, or `OTHER`). `log_model` builds these for you; the
+  file must stay put until the logger has flushed:
+
+  ```python
+  from dlboard.client.artifacts import file
+
+  logger.log_artifact([file.File(key="weights", path=path, kind=file.FileKind.CHECKPOINT, step=global_step)])
+  ```
 
 - `dlboard.client.artifacts.link.Link` — links. For a blob a training job already wrote
   somewhere dlboard's `ArtifactStore` can serve (e.g. the same S3 bucket), without shipping the

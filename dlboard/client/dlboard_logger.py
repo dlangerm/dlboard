@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import atexit
+import contextlib
 import functools
+import json
+import shutil
 import tempfile
 import time
 import warnings
@@ -12,13 +15,18 @@ from dataclasses import dataclass, field
 from http import HTTPStatus
 from pathlib import Path
 from queue import Full
-from typing import TYPE_CHECKING, Any, Final, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, Final, Generic, Literal, TypeVar, cast
 
+import numpy as np
 import pendulum
 import requests
 from pydantic import BaseModel
+from pydantic_core import to_jsonable_python
 from pydantic_settings import BaseSettings
 from pytorch_lightning.loggers import Logger
+from pytorch_lightning.loggers.utilities import (
+    _scan_checkpoints,  # pyright: ignore[reportPrivateUsage, reportUnknownVariableType]
+)
 from pytorch_lightning.utilities import rank_zero_only
 from typing_extensions import override
 
@@ -27,6 +35,7 @@ from dlboard._batching import BatchParams, ship_batches
 from dlboard._mp_context import SPAWN_CONTEXT
 from dlboard.client._rest_api import DEFAULT_SERVER_URL, BasicDlboardAPI
 from dlboard.client.artifacts.figure import Figure
+from dlboard.client.artifacts.file import File, FileKind
 
 DEFAULT_EXPERIMENT_NAME = "default"
 
@@ -35,6 +44,8 @@ if TYPE_CHECKING:
     from multiprocessing import Queue
     from multiprocessing.context import SpawnProcess
     from multiprocessing.synchronize import Event as MPEvent
+
+    from pytorch_lightning.callbacks import ModelCheckpoint
 
     from dlboard.client.artifacts.figure import SavesFigure
     from dlboard.models._artifact import AnyArtifact
@@ -163,6 +174,7 @@ class _Shipper(Generic[T]):
                 "queue was full -- see the warnings above for when.",
                 stacklevel=3,
             )
+            self._dropped_total = 0
         if not self.process.is_alive():
             warnings.warn(
                 f"dlboard's {self.name} shipping process is dead, nothing queued can be flushed",
@@ -215,6 +227,46 @@ class _LoggerEnv(BaseSettings):
     """An existing run to attach to instead of creating one -- see `DLBoardLogger`'s `run_id`."""
 
 
+def _jsonable_fallback(value: object) -> object:
+    """What pydantic's JSON serializer can't convert itself: numpy scalars, `Namespace`s, anything else as text."""
+    match value:
+        case np.generic():
+            return cast("object", value.item())
+        case Namespace():
+            return vars(value)
+        case _:
+            return str(value)
+
+
+def _flatten_json(value: object, prefix: str) -> dict[str, models.ValidJsonTypes]:
+    """Join nested dict keys with `"/"`, and keep a list as one JSON string -- a hparam is a single cell."""
+    match value:
+        case dict():
+            return {
+                key: leaf
+                for name, child in cast("dict[str, object]", value).items()
+                for key, leaf in _flatten_json(child, f"{prefix}/{name}" if prefix else name).items()
+            }
+        case list():
+            return {prefix: json.dumps(value)}
+        case str() | int() | float() | bool() | None:
+            return {prefix: value}
+        case _:
+            return {prefix: str(value)}
+
+
+def flatten_hparams(params: dict[str, Any] | Namespace) -> models.FlatHparamDict:
+    """
+    Turn `params` into the flat `{"a/b": scalar}` dict a hyperparameter blob stores, like Lightning's loggers do.
+
+    Pydantic does the serializing, so a `BaseModel`, a pydantic dataclass (and its own aliases and
+    field serializers), a stdlib dataclass, a `Namespace`, an enum or a tuple all just work, nested
+    arbitrarily. Nested keys are joined with `"/"`, which is also how the experiment page groups
+    them. A list stays one value (as a JSON string). Scalars pass through untouched.
+    """
+    return _flatten_json(to_jsonable_python(params, fallback=_jsonable_fallback), "")
+
+
 def _is_rank_zero() -> bool:
     """
     Whether this is global rank 0, the same notion `rank_zero_only` uses.
@@ -242,14 +294,18 @@ class DLBoardLogger(Logger):
     _experiment_id: int
     _run_id: int
     """Both resolved on rank 0 only -- every method that reads them is `rank_zero_only`."""
+    _last_step = 0
+    """The step of the latest logged metrics, which a checkpoint saved right after is stamped with."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         project_id: int,
         experiment_id: int | None = None,
         server_url: str = DEFAULT_SERVER_URL,
         settings: DLBoardLoggerSettings | None = None,
         run_id: int | None = None,
+        *,
+        log_model: bool | Literal["all"] = False,
     ) -> None:
         """
         Initialize with an existing project/experiment id; an experiment is created if none is given.
@@ -258,6 +314,11 @@ class DLBoardLogger(Logger):
         existing one to attach to -- for resuming a run, or sharing one between processes that were
         launched separately. `experiment_id` may be omitted then (it's the run's own); a different
         one is an error.
+
+        `log_model` is as for Lightning's MLflow/W&B loggers, for a `ModelCheckpoint` callback:
+        `"all"` uploads every checkpoint as it is saved (or `True`, when `save_top_k=-1`), while `True`
+        otherwise uploads only the ones still kept (best/last) once training finishes. Each is a
+        `File` of kind `FileKind.CHECKPOINT`, keyed `checkpoints/<file name>`.
         """
         super().__init__()
         run_id = run_id if run_id is not None else _LoggerEnv().dlboard_run_id
@@ -302,7 +363,11 @@ class DLBoardLogger(Logger):
         for shipper in (self._metrics, self._artifacts):
             shipper.ready.wait(_STARTUP_WAIT_TIMEOUT_SEC)
         warn_if_startup_was_slow(time.perf_counter() - startup_start)
-        self._finalized = False
+        self._unflushed = False
+        self._log_model = log_model
+        self._checkpoint_callback: ModelCheckpoint | None = None
+        self._logged_checkpoint_mtimes: dict[str, float] = {}
+        self._checkpoint_copy_dirs: list[Path] = []
         # The shipping processes are daemons -- killed with whatever's still queued the moment the
         # interpreter exits, unless something flushes them first. Lightning's trainer calls
         # `finalize()` after `fit`/`test`/..., but a crash, or any script that drives this logger
@@ -319,17 +384,25 @@ class DLBoardLogger(Logger):
         server_url: str = DEFAULT_SERVER_URL,
         settings: DLBoardLoggerSettings | None = None,
         run_id: int | None = None,
+        *,
+        log_model: bool | Literal["all"] = False,
     ) -> DLBoardLogger:
         """
         Initialize by project/experiment name instead of raw ids, creating either that don't exist yet.
 
         `project_description` only applies the first time `project_name` is seen -- once a project
-        exists, later calls just reuse it as-is. `run_id` is as for `__init__`.
+        exists, later calls just reuse it as-is. `run_id` and `log_model` are as for `__init__`.
         """
         if not _is_rank_zero():
             # Every rank runs this, and a get-or-create isn't safe to race: two ranks asking for the
             # same new experiment at once could each create it. Rank 0 alone resolves the names.
-            return cls(project_id=_UNRESOLVED_ID, server_url=server_url, settings=settings, run_id=run_id)
+            return cls(
+                project_id=_UNRESOLVED_ID,
+                server_url=server_url,
+                settings=settings,
+                run_id=run_id,
+                log_model=log_model,
+            )
         api = BasicDlboardAPI(base_url=server_url)
         api.whoami()
         project = api.get_or_create_project(project_name, description=project_description)
@@ -342,6 +415,7 @@ class DLBoardLogger(Logger):
             server_url=server_url,
             settings=settings,
             run_id=run_id,
+            log_model=log_model,
         )
 
     @property
@@ -365,18 +439,17 @@ class DLBoardLogger(Logger):
         """
         Log hyperparameters.
 
-        Values are stored and later displayed exactly as given -- dlboard never guesses at or
-        rewrites a value's type. A `Namespace` built from `argparse` without a `type=` on
+        Nested configs (pydantic models and dataclasses, stdlib dataclasses, dicts, ...) are flattened
+        to `"parent/child"` keys -- see `flatten_hparams`. Scalar values are stored and later displayed
+        exactly as given -- dlboard never guesses at or rewrites a value's type. A `Namespace` built from `argparse` without a `type=` on
         `add_argument` hands every value over as a string (e.g. `"128"`, not `128`); that's the
         usual cause of a hyperparameter column that looks numeric but sorts/compares as text.
         """
-        if isinstance(params, Namespace):
-            params = vars(params)
         self._api.log_hyperparams(
             models.NewHyperParams.from_raw(
                 run_id=self._run_id,
                 experiment_id=self._experiment_id,
-                hparams=params,
+                hparams=flatten_hparams(params),
             )
         )
 
@@ -392,6 +465,7 @@ class DLBoardLogger(Logger):
         if step is None:
             msg = "dlboard needs an explicit step for every metric (Lightning always passes one)"
             raise ValueError(msg)
+        self._last_step = step
         self._metrics.put(
             models.LoggedMetrics(
                 metrics=metrics,  # pyright: ignore[reportArgumentType]
@@ -401,11 +475,13 @@ class DLBoardLogger(Logger):
                 timestamp_utc=pendulum.now(pendulum.UTC),
             )
         )
+        self._unflushed = True
 
     @rank_zero_only
     def log_artifact(self, artifacts: Sequence[AnyArtifact]) -> None:
         """Queue `artifacts` for encoding and upload."""
         self._artifacts.put(artifacts)
+        self._unflushed = True
 
     @rank_zero_only
     def log_figure(
@@ -429,27 +505,65 @@ class DLBoardLogger(Logger):
 
     @override
     @rank_zero_only
+    def after_save_checkpoint(self, checkpoint_callback: ModelCheckpoint) -> None:
+        """Upload what `log_model` asks for: every checkpoint as it's saved, or just the kept ones at `finalize`."""
+        if self._log_model == "all" or (self._log_model is True and checkpoint_callback.save_top_k == -1):
+            self._upload_new_checkpoints(checkpoint_callback)
+        elif self._log_model is True:
+            self._checkpoint_callback = checkpoint_callback
+
+    def _upload_new_checkpoints(self, checkpoint_callback: ModelCheckpoint) -> None:
+        """Queue every checkpoint `checkpoint_callback` has saved or rewritten since the last call."""
+        for mtime, path, score, tag in _scan_checkpoints(checkpoint_callback, self._logged_checkpoint_mtimes):
+            # A copy: `save_top_k` can delete the original before the shipping process gets to read it.
+            copy_dir = Path(tempfile.mkdtemp(prefix="dlboard-checkpoint-"))
+            self._checkpoint_copy_dirs.append(copy_dir)
+            copy = copy_dir / Path(path).name
+            shutil.copy2(path, copy)
+            self._logged_checkpoint_mtimes[path] = mtime
+            # Lightning types `score` as a float, but it's `None` for a callback with no `monitor`.
+            raw_score = cast("float | None", score)
+            self.log_artifact(
+                [
+                    File(
+                        key=f"checkpoints/{copy.name}",
+                        path=copy,
+                        kind=FileKind.CHECKPOINT,
+                        step=self._last_step,
+                        tags={"tag": tag}
+                        | ({} if raw_score is None else {"score": f"{float(raw_score):.6g}"}),
+                    )
+                ]
+            )
+
+    @override
+    @rank_zero_only
     def finalize(self, status: str) -> None:
         """
         Block until everything logged so far has actually reached the server.
 
         Lightning calls this at the end of every `fit`/`test`/...; the shipping processes are
         daemons, so a script that exits right after (the usual case) would otherwise kill them with
-        up to `_SHIP_INTERVAL_SEC` of logged-but-unshipped metrics and artifacts still queued. Safe
-        to call more than once (`_finalize_at_exit` might, if something already called this) --
-        `_Shipper.flush` itself tolerates a dead process, and only warns about dropped items once.
+        up to `_SHIP_INTERVAL_SEC` of logged-but-unshipped metrics and artifacts still queued. Every call
+        flushes, since Lightning calls this after each stage (`fit`, then `test`, ...) and what the
+        later one logged is just as unshipped. Safe to call more than once -- `_Shipper.flush` itself
+        tolerates a dead process, and warns about each dropped item only once.
         """
-        if self._finalized:
-            return
-        self._finalized = True
+        if self._checkpoint_callback is not None:
+            # Lightning hands over a weak proxy: once the trainer is gone there is nothing left to scan.
+            with contextlib.suppress(ReferenceError):
+                self._upload_new_checkpoints(self._checkpoint_callback)
         for shipper in (self._metrics, self._artifacts):
             shipper.flush()
+        for copy_dir in self._checkpoint_copy_dirs:
+            shutil.rmtree(copy_dir, ignore_errors=True)
+        self._unflushed = False
         super().finalize(status)
 
     @rank_zero_only
     def _finalize_at_exit(self) -> None:
         """Catch a crash, or any training loop that drives this logger without a `Trainer` at all."""
-        if not self._finalized:
+        if self._unflushed:
             warnings.warn(
                 "dlboard's logger was never finalized -- flushing whatever's still queued now, at "
                 "interpreter exit. Call `trainer.logger.finalize('success')` yourself to avoid this "

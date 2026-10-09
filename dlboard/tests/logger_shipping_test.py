@@ -4,20 +4,25 @@
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import pytest
+import pytorch_lightning as pl
 import requests
 import torch
+from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.demos.boring_classes import BoringModel
 
 from dlboard._wire import Resource
 from dlboard.client._rest_api import create_path
 from dlboard.client.artifacts import image
+from dlboard.client.artifacts.file import FILE_KIND_TAG, FileKind
 from dlboard.client.dlboard_logger import DLBoardLogger
 from dlboard.conftest import EVERY_STORE_BACKEND, StoreBackend
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from pathlib import Path
 
     from dlboard.conftest import BackendServer
 
@@ -99,3 +104,57 @@ def test_an_invalid_metric_batch_is_a_400_not_a_500(backend_server: BackendServe
     res = requests.post(create_path(Resource.METRICS, backend_server.url), json=[{"metrics": {}}], timeout=10)
 
     assert res.status_code == 400
+
+
+@pytest.mark.parametrize(
+    ("log_model", "expected_keys"),
+    [
+        pytest.param(
+            "all",
+            {f"checkpoints/epoch={e}-step={2 * (e + 1)}.ckpt" for e in range(3)} | {"checkpoints/last.ckpt"},
+            id="every-save-even-ones-rotated-away-before-shipping",
+        ),
+        pytest.param(
+            True,
+            {"checkpoints/epoch=2-step=6.ckpt", "checkpoints/last.ckpt"},
+            id="only-the-kept-ones-at-finalize",
+        ),
+    ],
+)
+@pytest.mark.filterwarnings(
+    "ignore::lightning_fabric.utilities.warnings.PossibleUserWarning"
+)  # GPU/worker-count advice
+@pytest.mark.filterwarnings(
+    "ignore:.isinstance\\(treespec, LeafSpec\\).:FutureWarning"
+)  # torch/Lightning internals
+def test_log_model_uploads_the_checkpoints_a_real_fit_saves(
+    backend_server: BackendServer, tmp_path: Path, log_model: bool | Literal["all"], expected_keys: set[str]
+) -> None:
+    logger = DLBoardLogger.from_names("shipping", server_url=backend_server.url, log_model=log_model)
+    trainer = pl.Trainer(
+        max_epochs=3,
+        limit_train_batches=2,
+        limit_val_batches=0,
+        accelerator="cpu",
+        logger=logger,
+        callbacks=[ModelCheckpoint(dirpath=tmp_path / "checkpoints", save_top_k=1, save_last=True)],
+        enable_progress_bar=False,
+        enable_model_summary=False,
+    )
+    try:
+        trainer.fit(BoringModel())
+    finally:
+        for shipper in (logger._metrics, logger._artifacts):
+            shipper.process.kill()
+
+    assert not logger._unflushed, "the kept checkpoints were queued after the last flush"
+
+    deadline = time.monotonic() + 10
+    while True:
+        artifacts = list(backend_server.store.fetch_artifacts(experiment_id=logger._experiment_id))
+        if {a.key for a in artifacts} >= expected_keys or time.monotonic() > deadline:
+            break
+        time.sleep(0.1)
+    assert {a.key for a in artifacts} == expected_keys
+    assert {a.tags[FILE_KIND_TAG] for a in artifacts} == {FileKind.CHECKPOINT.value}
+    assert all(a.fname.endswith(".ckpt") for a in artifacts)
