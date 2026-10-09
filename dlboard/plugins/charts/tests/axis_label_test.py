@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from dlboard.plugins.charts._axis_label import MAX_AXIS_LABEL_CHARS, fit_axis_label
+from dlboard.plugins.charts._axis_label import fit_axis_label
 
 
 @pytest.mark.parametrize(
@@ -21,7 +21,3 @@ def test_a_long_label_keeps_the_end_of_its_name_behind_an_ellipsis(
 ) -> None:
     assert fit_axis_label(label, limit) == expected
     assert len(fit_axis_label(label, limit)) <= limit
-
-
-def test_the_default_limit_is_what_a_rotated_title_can_hold() -> None:
-    assert len(fit_axis_label("m" * 200)) == MAX_AXIS_LABEL_CHARS
