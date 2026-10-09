@@ -1661,3 +1661,49 @@ def test_run_compare_modal_diffs_runs_and_its_state_is_a_shareable_link(
     page.keyboard.press("Escape")
     expect(page).not_to_have_url(re.compile(r"compare"))
     assert console_errors == []
+
+
+def test_changing_a_grids_column_count_restyles_it_without_rebuilding_its_charts(
+    page: Page, live_server_url: str
+) -> None:
+    """
+    The count is only CSS, so the browser applies it itself and the server just saves it.
+
+    It used to rebuild every chart in the panel for each click of the counter -- on a panel with
+    hundreds of charts that blanked the page. A chart's DOM node surviving the change is what tells
+    "restyled in place" from "torn down and rebuilt".
+    """
+    _create_project_and_experiment(page, live_server_url, "Grid Columns Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    api = BasicDlboardAPI(live_server_url)
+    run = api.create_run(models.NewRun(experiment_id=experiment_id))
+    api.log_metric_batch(
+        [
+            models.LoggedMetrics(
+                experiment_id=experiment_id,
+                run_id=run.id,
+                step=step,
+                metrics={"loss": 1.0 - step * 0.1},
+                timestamp_utc=pendulum.now("UTC"),
+            )
+            for step in range(5)
+        ]
+    )
+    page.reload()
+    _auto_generate_charts(page)
+    chart = page.locator(".dl-chart-item").first
+    expect(chart).to_be_visible()
+    chart.evaluate("el => { el.dataset.survives = 'yes' }")
+
+    page.locator(".dl-panel-item-header").first.hover()
+    columns = page.get_by_role("textbox", name="Grid columns")
+    columns.fill("2")
+    columns.press("Enter")
+
+    grid = page.locator(".dl-panel-body .mantine-SimpleGrid-root").first
+    expect(grid).to_have_css("grid-template-columns", re.compile(r"^\S+ \S+$"))
+    expect(chart).to_have_attribute("data-survives", "yes")
+    page.reload()
+    page.locator(".dl-panel-item-header").first.hover()
+    expect(page.get_by_role("textbox", name="Grid columns")).to_have_value("2")
