@@ -802,13 +802,30 @@ def panel_header(panel: models.PanelInstance[Any, Any]) -> Component:
     this wrapping `Group`) -- not nested inside the control's own `<button>`, which native HTML
     doesn't allow another interactive element inside anyway.
     """
+    n_charts = len(panel.charts)
+    count_label = f"{n_charts} chart" if n_charts == 1 else f"{n_charts} charts"
     return dmc.Group(
         [
             dmc.AccordionControl(
-                [dmc.Text(panel.name, size="xs", fw=600)],
+                dmc.Group(
+                    [
+                        dmc.Text(panel.name, size="xs", fw=600),
+                        # How much is inside, before opening it -- a big panel can take a while to render.
+                        *(
+                            [dmc.Badge(count_label, variant="light", size="xs", tt="none")]
+                            if n_charts
+                            else []
+                        ),
+                    ],
+                    gap="xs",
+                    wrap="nowrap",
+                ),
                 py="xs",
                 px="xs",
                 style={"flex": 1},
+                # The badge stays out of the button's name (tests and screen readers look a panel up by it);
+                # the count is its description instead.
+                **cast("dict[str, Any]", {"aria-label": panel.name, "aria-description": count_label}),
             ),
             panel_header_controls(panel),
         ],
