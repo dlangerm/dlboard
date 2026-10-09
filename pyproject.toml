@@ -14,6 +14,8 @@ dev = [
   "matplotlib>=3.10",
   "pandas-stubs>=3.0.5.260730",
   "prek>=0.4.10",
+  # `DeviceStatsMonitor(cpu_stats=True)` (used by `examples/lightning_advanced.py`) reads CPU stats through it.
+  "psutil>=7.2.2",
   "psycopg[binary]>=3.2",
   "pyright>=1.1.411",
   "pytest>=9.1.1",
@@ -198,6 +200,7 @@ ignore_decorators = [
   # `_move_image_to_cpu`, ...).
   "@field_validator",
   "@model_validator",
+  "@*field_serializer",
   # Marks a method as fulfilling a base class/Protocol contract (`ChartType.render`,
   # `DataStore.*`, `pytorch_lightning.loggers.Logger.name`/`.version`, ...) -- by definition
   # something else (often an external framework, e.g. Lightning calling `logger.version`)
@@ -249,6 +252,14 @@ ignore_names = [
   "created",
   "parent_id",
   "score",
+  # `client/tests/dlboard_logger_test.py`'s throwaway hyperparameter config classes -- their fields
+  # are only ever read by pydantic's serializer inside `flatten_hparams`, same "read structurally,
+  # not by attribute" story as above, scoped to that test's models.
+  "betas",
+  "warmup",
+  "flip",
+  "schedule",
+  "renamed",
   # SQLAlchemy's `TypeDecorator` contract (`_sql.UTCDateTime`) -- class attributes SQLAlchemy reads
   # off the type itself, never referenced by name in our own code.
   "impl",

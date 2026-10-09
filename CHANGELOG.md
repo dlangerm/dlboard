@@ -10,6 +10,28 @@ To cut a release: rename this section to `## [X.Y.Z] - YYYY-MM-DD`, start a fres
 pulls that section's body into the GitHub release notes and publishes both distributions from it.
 -->
 
+## [Unreleased]
+
+### Added
+
+* `DLBoardLogger` flattens nested hyperparameters, like Lightning's own loggers do: a pydantic model,
+  a pydantic or stdlib dataclass, a `Namespace` or a plain dict, nested however deeply, is logged as
+  `parent/child` keys instead of being rejected. Pydantic does the serializing, so a model's own
+  aliases and field serializers apply. Lists are stored as a JSON string. See `flatten_hparams`.
+* `DLBoardLogger(log_model=...)` uploads `ModelCheckpoint` checkpoints, like the MLflow and W&B
+  loggers: `"all"` as each one is saved, `True` only the ones kept once training finishes. Backed by
+  the new `dlboard.client.artifacts.file.File` artifact kind, which uploads a file in place and tags
+  what it is (`FileKind.CHECKPOINT`, ...).
+* `examples/lightning_advanced.py`: a 25-epoch UNet on synthetic shapes with nested hyperparameters,
+  Lightning's learning-rate, throughput and device-stats callbacks, checkpoints, and segmentation and
+  bounding-box previews -- a deliberately heavy run for exercising the UI.
+
+### Fixed
+
+* Metrics and artifacts logged by a later stage were never shipped when a script exited right after
+  it -- notably everything `trainer.test` logs after `trainer.fit`. Lightning finalizes the logger
+  after every stage, but only the first call flushed.
+
 ## [0.3.1] - 2026-10-08
 
 * Reduce numpy requirement floor to 1.26 to expand compatibility.
