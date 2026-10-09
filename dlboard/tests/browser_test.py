@@ -105,6 +105,12 @@ def _auto_generate_charts(page: Page) -> None:
     page.get_by_role("button", name="Create charts").click()
 
 
+def _open_panel_menu(page: Page, index: int = 0) -> None:
+    """Open the actions menu on the `index`th panel header (its controls only mount once it opens)."""
+    page.locator(".dl-panel-item-header").nth(index).hover()
+    page.get_by_role("button", name="Panel actions").nth(index).click()
+
+
 def test_logged_metrics_render_as_a_real_chart(
     page: Page, live_server_url: str, console_errors: list[str]
 ) -> None:
@@ -217,9 +223,8 @@ def test_panel_header_hover_controls_toggle_and_delete_without_disturbing_siblin
     expect(keep_region).not_to_be_visible()
 
     # "delete-me" is second in document order and was never opened.
-    delete_me_trash_icon = page.get_by_role("button", name="Delete panel", exact=True).nth(1)
-    delete_me_trash_icon.hover()
-    delete_me_trash_icon.click()
+    _open_panel_menu(page, 1)
+    page.get_by_role("menuitem", name="Delete panel…").click()
 
     confirm_text = page.get_by_text("Delete this panel?")
     expect(confirm_text).to_be_visible()
@@ -227,7 +232,8 @@ def test_panel_header_hover_controls_toggle_and_delete_without_disturbing_siblin
     expect(confirm_text).not_to_be_visible()
     expect(page.get_by_text("delete-me")).to_be_visible()  # Cancel left it alone
 
-    delete_me_trash_icon.click()
+    _open_panel_menu(page, 1)
+    page.get_by_role("menuitem", name="Delete panel…").click()
     expect(confirm_text).to_be_visible()
     page.get_by_role("button", name="Delete", exact=True).click()
     expect(page.get_by_text("delete-me")).to_have_count(0)
@@ -1378,14 +1384,14 @@ def test_changes_in_a_saved_view_leave_the_shared_view_alone(
     view_id = int(page.url.rsplit("=", 1)[-1])
     expect(page.get_by_role("textbox", name="View", exact=True)).to_have_value("my layout")
 
-    page.locator(".dl-panel-item-header").first.hover()
+    _open_panel_menu(page)
     page.get_by_text("Grid", exact=True).first.click()
     _wait_until(
         lambda: [p.layout for p in store.get_view(BasicExperimentPage, view_id).panels][:1],  # pyright: ignore[reportOptionalMemberAccess]
         ["grid"],
     )
     # A grid panel's column count is its own setting too, saved with the view and surviving a reload.
-    page.locator(".dl-panel-item-header").first.hover()
+    _open_panel_menu(page)
     columns = page.get_by_role("textbox", name="Grid columns")
     expect(columns).to_have_value("3")
     columns.fill("2")
@@ -1395,7 +1401,7 @@ def test_changes_in_a_saved_view_leave_the_shared_view_alone(
         [2],
     )
     page.reload()
-    page.locator(".dl-panel-item-header").first.hover()
+    _open_panel_menu(page)
     expect(page.get_by_role("textbox", name="Grid columns")).to_have_value("2")
     shared = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
     assert {(p.layout, p.grid_columns) for p in shared.panels} == {("packed", 3)}
@@ -1444,8 +1450,8 @@ def test_editing_the_shared_page_branches_into_your_own_view_without_asking(
     hint = page.get_by_text("Edits save to a copy")
     expect(hint).to_be_visible()
 
-    page.locator(".dl-panel-item-header").first.hover()
-    page.get_by_role("button", name="Delete panel").click()
+    _open_panel_menu(page)
+    page.get_by_role("menuitem", name="Delete panel…").click()
     page.get_by_role("button", name="Delete", exact=True).click()
 
     expect(page).to_have_url(re.compile(r"\?view=\d+$"))
@@ -1495,8 +1501,8 @@ def test_editing_a_view_you_do_not_own_branches_into_a_separate_view_of_your_own
     expect(page.get_by_role("menuitem", name="Delete this view…")).to_have_count(0)
     page.keyboard.press("Escape")
 
-    page.locator(".dl-panel-item-header").first.hover()
-    page.get_by_role("button", name="Rename panel").click()
+    _open_panel_menu(page)
+    page.get_by_role("menuitem", name="Rename panel…").click()
     page.get_by_role("textbox", name="Panel name", exact=True).fill("renamed by someone else")
     page.get_by_role("button", name="Save", exact=True).click()
 
@@ -1553,8 +1559,8 @@ def test_a_view_branched_by_an_edit_can_be_deleted_without_a_reload(
     store.update_page(shared.model_copy(update={"panels": [PanelInstance[Any, Any](name="Losses")]}))
     page.reload()
 
-    page.locator(".dl-panel-item-header").first.hover()
-    page.get_by_role("button", name="Delete panel").click()
+    _open_panel_menu(page)
+    page.get_by_role("menuitem", name="Delete panel…").click()
     page.get_by_role("button", name="Delete", exact=True).click()
     expect(page).to_have_url(re.compile(r"\?view=\d+$"))
     view_id = int(page.url.rsplit("=", 1)[-1])
@@ -1693,8 +1699,11 @@ def test_changing_a_grids_column_count_restyles_it_without_rebuilding_its_charts
     )
     page.reload()
     _auto_generate_charts(page)
-    page.locator(".dl-panel-item-header").first.hover()
+    _open_panel_menu(page)
     page.get_by_text("Grid", exact=True).first.click()
+    # Switching layout rebuilds the panel, which closes its menu.
+    expect(page.locator(".dl-panel-body .mantine-SimpleGrid-root").first).to_be_visible()
+    _open_panel_menu(page)
     columns = page.get_by_role("textbox", name="Grid columns")
     expect(columns).to_be_visible()
     # Marked once the panel is a grid (switching layout rebuilds it): only a rebuild can lose this.
@@ -1708,7 +1717,7 @@ def test_changing_a_grids_column_count_restyles_it_without_rebuilding_its_charts
     expect(grid).to_have_css("grid-template-columns", re.compile(r"^\S+ \S+$"))
     expect(chart).to_have_attribute("data-survives", "yes")
     page.reload()
-    page.locator(".dl-panel-item-header").first.hover()
+    _open_panel_menu(page)
     expect(page.get_by_role("textbox", name="Grid columns")).to_have_value("2")
 
 
@@ -1821,3 +1830,18 @@ def test_the_runs_table_shows_how_each_run_ended_and_for_how_long(page: Page, li
     expect(rows.filter(has_text="crashed")).to_contain_text("✕ 1h 2m")
     expect(rows.filter(has_text="all-done")).to_contain_text("3m 23s")
     expect(rows.filter(has_text="walked-away")).to_contain_text("? 2d 3h")
+
+
+def test_panel_menu_controls_mount_only_when_the_menu_opens(page: Page, live_server_url: str) -> None:
+    """
+    A header's less-used controls cost the browser ~50 ms each to mount, which made a page of hundreds
+    of panels take seconds to appear -- so they live in a menu whose contents only exist once it opens.
+    """
+    _create_project_and_experiment(page, live_server_url, "Lazy Panel Menu Experiment")
+    page.locator(".experiment-card").click()
+    _create_panel(page, "only")
+
+    sync_switch = page.get_by_role("switch", name="Sync crosshair across charts")
+    expect(sync_switch).to_have_count(0)
+    _open_panel_menu(page)
+    expect(sync_switch).to_have_count(1)

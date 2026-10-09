@@ -700,27 +700,33 @@ def _panel_placeholder() -> dmc.Skeleton:
 
 
 def _drag_handle(*, class_name: str, component_id: dict[str, str], data_attrs: dict[str, str]) -> Component:
-    """A tooltipped grip glyph, draggable via `_experiment_page_dragdrop.js`."""
+    """
+    A grip glyph, draggable via `_experiment_page_dragdrop.js`.
+
+    Its hint is a native `title`, not a `dmc.Tooltip`: every chart and panel carries one of these,
+    and a mounted Mantine tooltip costs the browser several milliseconds apiece.
+    """
     # `data-*` attrs are only known dynamically (dict keys, not literal kwargs), so pyright can't
     # match them against `html.Div`'s typed signature -- `cast` to `Any` rather than fight that.
     div = cast("Any", html.Div)
-    return dmc.Tooltip(
-        div(
-            icon(Icon.DRAG),
-            id=component_id,
-            draggable="true",
-            className=class_name,
-            **{f"data-{key}": value for key, value in data_attrs.items()},
-        ),
-        label="Drag to reorder",
-        position="top",
-        withArrow=True,
+    return div(
+        icon(Icon.DRAG),
+        id=component_id,
+        draggable="true",
+        className=class_name,
+        title="Drag to reorder",
+        **{f"data-{key}": value for key, value in data_attrs.items()},
     )
 
 
 def panel_header_controls(panel: models.PanelInstance[Any, Any]) -> Component:
     """
-    Sync/layout/rename/drag/suggest/delete for one panel, hover-revealed on the panel's own header.
+    Drag, add and an actions menu for one panel, hover-revealed on the panel's own header.
+
+    The menu holds everything used less often (suggest, rename, sync, layout, delete): Mantine
+    mounts a menu's dropdown only once it opens, so a page of hundreds of panels pays for one
+    icon button apiece instead of ~30 components. The callbacks over those controls are
+    pattern-matched (`ALL`), so they simply see the controls appear when the menu opens.
 
     Moving a panel to a tab is drag-and-drop (drag the same handle used to reorder panels onto a
     tab in the tab bar, see `_experiment_page_dragdrop.js`), not a control here.
@@ -733,71 +739,90 @@ def panel_header_controls(panel: models.PanelInstance[Any, Any]) -> Component:
                 component_id=panel_drag_handle_id(panel_name),
                 data_attrs={"panel-name": panel_name},
             ),
-            tooltipped_action_icon(
-                Icon.ADD, component_id=open_chart_button_id(panel_name), label="Add chart to this panel"
-            ),
-            tooltipped_action_icon(
-                Icon.SUGGEST,
-                component_id=panel_suggest_button_id(panel_name),
-                label="Suggest charts for this panel",
-            ),
-            dmc.Divider(orientation="vertical"),
-            dmc.Tooltip(
-                dmc.Switch(
-                    id=panel_sync_switch_id(panel_name),
-                    label="Sync",
-                    checked=panel.sync,
-                    size="xs",
+            html.Span(
+                dmc.ActionIcon(
+                    icon(Icon.ADD),
+                    id=open_chart_button_id(panel_name),
+                    n_clicks=0,
+                    variant="subtle",
+                    size="sm",
+                    color="gray",
+                    **cast("dict[str, Any]", {"aria-label": "Add chart to this panel"}),
                 ),
-                label="Sync the crosshair/tooltip across this panel's charts that share an x-axis",
-                position="top",
-                withArrow=True,
+                title="Add chart to this panel",
             ),
-            dmc.Tooltip(
-                dmc.SegmentedControl(
-                    id=panel_layout_control_id(panel_name),
-                    data=[
-                        {"value": "packed", "label": "Packed"},
-                        {"value": "grid", "label": "Grid"},
-                    ],
-                    value=panel.layout,
-                    size="xs",
-                ),
-                label="Packed: charts sized to their own natural width. Grid: charts stretch to fill equal-width columns",
-                position="top",
-                withArrow=True,
-            ),
-            *(
+            dmc.Menu(
                 [
-                    dmc.Tooltip(
-                        dmc.NumberInput(
-                            id=panel_grid_columns_id(panel_name),
-                            value=panel.grid_columns,
-                            min=models.MIN_GRID_COLUMNS,
-                            max=models.MAX_GRID_COLUMNS,
-                            allowDecimal=False,
-                            allowNegative=False,
-                            clampBehavior="strict",
-                            size="xs",
-                            w=56,
-                            **cast("dict[str, Any]", {"aria-label": "Grid columns"}),
-                        ),
-                        label="How many columns the grid has",
-                        position="top",
-                        withArrow=True,
-                    )
-                ]
-                if panel.layout == "grid"
-                else []
-            ),
-            tooltipped_action_icon(
-                Icon.EDIT, component_id=rename_panel_button_id(panel_name), label="Rename panel"
-            ),
-            tooltipped_action_icon(
-                Icon.DELETE,
-                component_id=delete_panel_button_id(panel_name),
-                label="Delete panel",
-                color="red",
+                    dmc.MenuTarget(
+                        dmc.ActionIcon(
+                            icon(Icon.MORE),
+                            variant="subtle",
+                            size="sm",
+                            color="gray",
+                            **cast("dict[str, Any]", {"aria-label": "Panel actions"}),
+                        )
+                    ),
+                    dmc.MenuDropdown(
+                        [
+                            dmc.MenuItem(
+                                "Suggest charts",
+                                id=panel_suggest_button_id(panel_name),
+                                leftSection=icon(Icon.SUGGEST),
+                            ),
+                            dmc.MenuItem(
+                                "Rename panel…",
+                                id=rename_panel_button_id(panel_name),
+                                leftSection=icon(Icon.EDIT),
+                            ),
+                            dmc.MenuDivider(),
+                            dmc.Switch(
+                                id=panel_sync_switch_id(panel_name),
+                                label="Sync crosshair across charts",
+                                checked=panel.sync,
+                                size="xs",
+                                px="sm",
+                                py="xs",
+                            ),
+                            dmc.SegmentedControl(
+                                id=panel_layout_control_id(panel_name),
+                                data=[
+                                    {"value": "packed", "label": "Packed"},
+                                    {"value": "grid", "label": "Grid"},
+                                ],
+                                value=panel.layout,
+                                size="xs",
+                                fullWidth=True,
+                            ),
+                            *(
+                                [
+                                    dmc.NumberInput(
+                                        id=panel_grid_columns_id(panel_name),
+                                        value=panel.grid_columns,
+                                        min=models.MIN_GRID_COLUMNS,
+                                        max=models.MAX_GRID_COLUMNS,
+                                        allowDecimal=False,
+                                        allowNegative=False,
+                                        clampBehavior="strict",
+                                        size="xs",
+                                        mt="xs",
+                                        **cast("dict[str, Any]", {"aria-label": "Grid columns"}),
+                                    )
+                                ]
+                                if panel.layout == "grid"
+                                else []
+                            ),
+                            dmc.MenuDivider(),
+                            dmc.MenuItem(
+                                "Delete panel…",
+                                id=delete_panel_button_id(panel_name),
+                                leftSection=icon(Icon.DELETE),
+                                color="red",
+                            ),
+                        ],
+                        w=240,
+                    ),
+                ],
+                position="bottom-end",
             ),
         ],
         className="dl-panel-controls",
