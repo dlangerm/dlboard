@@ -28,9 +28,10 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ### Changed
 
-* A checkpoint (or any artifact that isn't a browser-renderable image) now gets a **file list** with
-  download links when charts are auto-generated or suggested, instead of an image chart full of broken
-  images. It's the new built-in `files` chart type.
+* A checkpoint (anything logged as a `File`) now gets a **file list** with download links when charts are
+  auto-generated or suggested, instead of an image chart full of broken images. It's the new built-in
+  `files` chart type. Chart types now say which artifacts they can display (`ChartType.can_display_artifact`),
+  and an artifact no chart type claims gets no generated chart at all.
 * `Image` artifacts are encoded as lossless PNG by default instead of always as lossy JPEG, so masks,
   label images and overlays are no longer degraded on upload. Pass `format="jpg"` to keep the old,
   smaller files. Artifacts already stored are unchanged.

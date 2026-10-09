@@ -12,7 +12,7 @@ from __future__ import annotations
 import typing
 from typing import TYPE_CHECKING, Literal
 
-from dlboard.models import ChartInstance, ColumnKind, PanelInstance
+from dlboard.models import Artifact, ChartInstance, ChartType, ColumnKind, PanelInstance
 from dlboard.plugins.charts.bar_chart import BarChart
 from dlboard.plugins.charts.file_list import FileListChart
 from dlboard.plugins.charts.image_series import ImageChart
@@ -90,14 +90,29 @@ def default_chart_for_metric(
     return ChartInstance(chart_type=LineChart.name, parameters={"column": column, "x_axis": "step"})
 
 
-def default_chart_for_artifact(key: str, *, is_file: bool = False) -> ChartInstance[typing.Any, typing.Any]:
-    """
-    The sensible default chart for an artifact key: an image series (x_axis defaults to `step`).
+ARTIFACT_CHART_TYPES: typing.Final[tuple[type[ChartType[typing.Any, typing.Any, typing.Any]], ...]] = (
+    FileListChart,
+    ImageChart,
+)
+"""
+The built-in chart types auto-generate may give an artifact key, most specific first: a file is marked
+as one by its tag, which a file named like an image could otherwise be mistaken for.
+"""
 
-    `is_file` (a checkpoint, say -- see `ColumnCatalog.file_artifacts`) lists its files with download
-    links instead, since a browser has no image to show for it.
+
+def default_artifact_chart(artifact: Artifact) -> str | None:
     """
-    return ChartInstance(chart_type=(FileListChart if is_file else ImageChart).name, parameters={"key": key})
+    The name of the chart type that displays `artifact` by default, or `None` if none of the built-in ones can.
+
+    Each chart type says what it can display (`ChartType.can_display_artifact`), so an artifact no
+    chart type claims gets no generated chart instead of one that can't show it.
+    """
+    return next((c.name for c in ARTIFACT_CHART_TYPES if c.can_display_artifact(artifact)), None)
+
+
+def default_chart_for_artifact(key: str, chart_type: str) -> ChartInstance[typing.Any, typing.Any]:
+    """The default chart for an artifact key, of the chart type `default_artifact_chart` chose for it."""
+    return ChartInstance(chart_type=chart_type, parameters={"key": key})
 
 
 def group_keys_into_panels(
@@ -122,7 +137,7 @@ def group_keys_into_panels(
         group = split_group_name(column, delimiter, mode)
         panel_name = panel_name_for_group(group, ColumnKind.METRIC, granularity=granularity)
         panels.setdefault(panel_name, []).append((column, ColumnKind.METRIC))
-    for key in catalog.artifacts:
+    for key in catalog.artifact_chart_types:
         group = split_group_name(key, delimiter, mode)
         panels.setdefault(panel_name_for_group(group, ColumnKind.ARTIFACT), []).append(
             (key, ColumnKind.ARTIFACT)
@@ -144,7 +159,7 @@ def build_auto_panels(
             charts=[
                 default_chart_for_metric(key, single_value=key in catalog.single_value_metrics)
                 if kind == ColumnKind.METRIC
-                else default_chart_for_artifact(key, is_file=key in catalog.file_artifacts)
+                else default_chart_for_artifact(key, catalog.artifact_chart_types[key])
                 for key, kind in keys
             ],
         )
@@ -175,7 +190,7 @@ def find_uncharted_keys(
 
     return UnchartedKeys(
         metrics=[c for c in catalog.metrics if c not in charted_metrics],
-        artifacts=[k for k in catalog.artifacts if k not in charted_artifacts],
+        artifacts=[k for k in catalog.artifact_chart_types if k not in charted_artifacts],
     )
 
 
@@ -190,20 +205,18 @@ class Suggestion(typing.NamedTuple):
 
 def build_suggestions(
     uncharted: UnchartedKeys,
+    catalog: ColumnCatalog,
     *,
     delimiter: str,
     mode: SplitMode,
     lightning: bool = False,
-    catalog: ColumnCatalog | None = None,
 ) -> list[Suggestion]:
     """
     Turn uncharted keys into ready-to-add `Suggestion`s, grouped the same way as auto-populate.
 
-    `catalog` says which metrics are single-valued (a bar chart) and which artifacts are files (a file
-    list), exactly as it does for `build_auto_panels`; without one every key gets the plain default.
+    `catalog` says which metrics are single-valued (a bar chart) and which chart type displays each
+    artifact key, exactly as it does for `build_auto_panels`.
     """
-    single_value_columns = catalog.single_value_metrics if catalog else frozenset[str]()
-    file_artifacts = catalog.file_artifacts if catalog else frozenset[str]()
     suggestions = [
         Suggestion(
             key=column,
@@ -213,7 +226,7 @@ def build_suggestions(
                 ColumnKind.METRIC,
                 granularity=lightning_granularity(column) if lightning else None,
             ),
-            chart=default_chart_for_metric(column, single_value=column in single_value_columns),
+            chart=default_chart_for_metric(column, single_value=column in catalog.single_value_metrics),
         )
         for column in uncharted.metrics
     ]
@@ -222,7 +235,7 @@ def build_suggestions(
             key=key,
             kind=ColumnKind.ARTIFACT,
             panel_name=panel_name_for_group(split_group_name(key, delimiter, mode), ColumnKind.ARTIFACT),
-            chart=default_chart_for_artifact(key, is_file=key in file_artifacts),
+            chart=default_chart_for_artifact(key, catalog.artifact_chart_types[key]),
         )
         for key in uncharted.artifacts
     )

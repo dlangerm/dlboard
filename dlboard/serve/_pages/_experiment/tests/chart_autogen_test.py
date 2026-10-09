@@ -3,6 +3,9 @@
 
 from __future__ import annotations
 
+import pytest
+
+from dlboard.models import FILE_KIND_TAG, Artifact
 from dlboard.models._view import ChartInstance, ColumnKind, PanelInstance
 from dlboard.plugins.charts.bar_chart import BarChart
 from dlboard.plugins.charts.image_series import ImageChart
@@ -139,7 +142,7 @@ def test_build_auto_panels_groups_undelimited_metrics_into_one_shared_panel() ->
 
 def test_build_auto_panels_keeps_artifacts_in_their_own_panel_even_on_name_collision() -> None:
     """A metric group and an artifact group sharing a name must never merge into one panel."""
-    catalog = ColumnCatalog(metrics=("train/loss",), artifacts=("train/sample_image",))
+    catalog = ColumnCatalog(metrics=("train/loss",), artifact_chart_types={"train/sample_image": "image"})
     panels = autogen.build_auto_panels(catalog, delimiter="/", mode="prefix")
 
     by_name = {p.name: p for p in panels}
@@ -149,7 +152,7 @@ def test_build_auto_panels_keeps_artifacts_in_their_own_panel_even_on_name_colli
 
 
 def test_build_auto_panels_default_chart_params() -> None:
-    catalog = ColumnCatalog(metrics=("loss",), artifacts=("img",))
+    catalog = ColumnCatalog(metrics=("loss",), artifact_chart_types={"img": "image"})
     panels = autogen.build_auto_panels(catalog, delimiter="/", mode="prefix")
 
     metric_chart = next(c for p in panels for c in p.charts if c.chart_type == "line")
@@ -188,7 +191,8 @@ def test_build_auto_panels_empty_catalog_produces_no_panels() -> None:
 def test_find_uncharted_keys_excludes_already_charted_metrics_and_artifacts() -> None:
     panels = [_panel("train", _line("train/loss")), _panel("imgs", _image("train/sample"))]
     catalog = ColumnCatalog(
-        metrics=("train/loss", "train/acc"), artifacts=("train/sample", "train/other_img")
+        metrics=("train/loss", "train/acc"),
+        artifact_chart_types={"train/sample": "image", "train/other_img": "image"},
     )
 
     uncharted = autogen.find_uncharted_keys(panels, catalog)
@@ -197,7 +201,7 @@ def test_find_uncharted_keys_excludes_already_charted_metrics_and_artifacts() ->
 
 
 def test_find_uncharted_keys_all_uncharted_when_no_panels() -> None:
-    catalog = ColumnCatalog(metrics=("loss",), artifacts=("img",))
+    catalog = ColumnCatalog(metrics=("loss",), artifact_chart_types={"img": "image"})
     assert autogen.find_uncharted_keys([], catalog) == autogen.UnchartedKeys(
         metrics=["loss"], artifacts=["img"]
     )
@@ -205,7 +209,7 @@ def test_find_uncharted_keys_all_uncharted_when_no_panels() -> None:
 
 def test_find_uncharted_keys_nothing_uncharted_when_fully_covered() -> None:
     panels = [_panel("p", _line("loss"), _image("img"))]
-    catalog = ColumnCatalog(metrics=("loss",), artifacts=("img",))
+    catalog = ColumnCatalog(metrics=("loss",), artifact_chart_types={"img": "image"})
     assert autogen.find_uncharted_keys(panels, catalog) == autogen.UnchartedKeys(metrics=[], artifacts=[])
 
 
@@ -215,7 +219,9 @@ def test_find_uncharted_keys_nothing_uncharted_when_fully_covered() -> None:
 def test_build_suggestions_pairs_each_key_with_its_default_chart_and_target_panel() -> None:
     uncharted = autogen.UnchartedKeys(metrics=["train/acc"], artifacts=["train/sample"])
 
-    suggestions = autogen.build_suggestions(uncharted, delimiter="/", mode="prefix")
+    catalog = ColumnCatalog(artifact_chart_types={"train/sample": "image"})
+
+    suggestions = autogen.build_suggestions(uncharted, catalog, delimiter="/", mode="prefix")
 
     assert suggestions == [
         autogen.Suggestion(
@@ -240,9 +246,9 @@ def test_build_suggestions_single_value_metric_gets_a_bar_chart_across_runs() ->
 
     suggestions = autogen.build_suggestions(
         uncharted,
+        ColumnCatalog(single_value_metrics=frozenset({"final_accuracy"})),
         delimiter="/",
         mode="prefix",
-        catalog=ColumnCatalog(single_value_metrics=frozenset({"final_accuracy"})),
     )
 
     assert suggestions == [
@@ -266,7 +272,9 @@ def test_build_auto_panels_single_value_metric_gets_a_bar_chart() -> None:
 def test_build_suggestions_lightning_splits_panel_by_granularity() -> None:
     uncharted = autogen.UnchartedKeys(metrics=["train/loss_epoch"], artifacts=[])
 
-    suggestions = autogen.build_suggestions(uncharted, delimiter="/", mode="prefix", lightning=True)
+    suggestions = autogen.build_suggestions(
+        uncharted, ColumnCatalog(), delimiter="/", mode="prefix", lightning=True
+    )
 
     assert suggestions == [
         autogen.Suggestion(
@@ -280,8 +288,38 @@ def test_build_suggestions_lightning_splits_panel_by_granularity() -> None:
     ]
 
 
-def test_a_file_artifact_gets_a_file_list_where_an_image_gets_an_image_chart() -> None:
-    catalog = ColumnCatalog(artifacts=("ckpt", "img"), file_artifacts=frozenset({"ckpt"}))
+def _artifact(fname: str, **tags: str) -> Artifact:
+    return Artifact(key="k", fname=fname, run_id=1, experiment_id=1, step=0, ref="r://a", tags=tags)
+
+
+@pytest.mark.parametrize(
+    ("artifact", "chart_type"),
+    [
+        pytest.param(_artifact("a.png"), "image", id="an-image"),
+        pytest.param(_artifact("last.ckpt", **{FILE_KIND_TAG: "checkpoint"}), "files", id="a-checkpoint"),
+        pytest.param(
+            _artifact("a.png", **{FILE_KIND_TAG: "checkpoint"}), "files", id="a-file-named-like-an-image"
+        ),
+        pytest.param(_artifact("grads.npy"), None, id="something-no-chart-type-claims"),
+    ],
+)
+def test_an_artifact_gets_the_chart_type_that_says_it_can_display_it(
+    artifact: Artifact, chart_type: str | None
+) -> None:
+    assert autogen.default_artifact_chart(artifact) == chart_type
+
+
+def test_an_artifact_key_no_chart_type_can_display_gets_no_generated_chart() -> None:
+    """Rather than a chart that cannot show it -- there are more kinds of artifact than images and files."""
+    catalog = ColumnCatalog(artifacts=("grads",))
+
+    assert not catalog.has_chartable_keys
+    assert autogen.build_auto_panels(catalog, delimiter="/", mode="prefix") == []
+    assert autogen.find_uncharted_keys([], catalog) == autogen.UnchartedKeys(metrics=[], artifacts=[])
+
+
+def test_each_artifact_key_is_charted_as_the_catalog_says() -> None:
+    catalog = ColumnCatalog(artifact_chart_types={"ckpt": "files", "img": "image"})
 
     auto = {
         c.parameters["key"]: c.chart_type
@@ -291,10 +329,7 @@ def test_a_file_artifact_gets_a_file_list_where_an_image_gets_an_image_chart() -
     suggested = {
         s.key: s.chart.chart_type
         for s in autogen.build_suggestions(
-            autogen.UnchartedKeys(metrics=[], artifacts=["ckpt", "img"]),
-            delimiter="",
-            mode="prefix",
-            catalog=catalog,
+            autogen.UnchartedKeys(metrics=[], artifacts=["ckpt", "img"]), catalog, delimiter="", mode="prefix"
         )
     }
 

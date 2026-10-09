@@ -1,4 +1,4 @@
-"""A file list with download links: one row per run and step, for artifacts a browser can't show inline."""
+"""A file list with download links: one row per run and step, for artifacts logged as files."""
 
 from __future__ import annotations
 
@@ -6,23 +6,24 @@ import typing
 
 import dash_mantine_components as dmc
 import pandas as pd
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from dlboard.models import RUN_NAME_COLUMN, ChartType, ColumnKind
+from dlboard.models import FILE_KIND_TAG, RUN_NAME_COLUMN, Artifact, ChartType, ColumnKind, MetricColumn
 from dlboard.plugins.charts._table_style import artifact_column, artifact_tags_column, format_tags_caption
 from dlboard.serve import series_swatch_class
 
 if typing.TYPE_CHECKING:
     import dash
 
-_NATURAL_WIDTH = 480
-_MAX_HEIGHT_PX = 300
-
 
 class FileListSettings(BaseModel, frozen=True, extra="forbid"):
     """File list settings."""
 
     key: str
+    height: int = Field(
+        default=300, description="Tallest the list gets, in px, before it scrolls instead of growing."
+    )
+    width: int = Field(default=480, description="Overall chart width in px.")
 
 
 class FileListChart(ChartType[FileListSettings, pd.DataFrame, dmc.Stack], frozen=True, extra="forbid"):
@@ -37,6 +38,12 @@ class FileListChart(ChartType[FileListSettings, pd.DataFrame, dmc.Stack], frozen
 
     @typing.override
     @classmethod
+    def can_display_artifact(cls, artifact: Artifact) -> bool:
+        """Files: what was logged with a file kind (`FILE_KIND_TAG`), whatever kinds a later client adds."""
+        return FILE_KIND_TAG in artifact.tags
+
+    @typing.override
+    @classmethod
     def render(cls, parameters: FileListSettings, dataframe: pd.DataFrame) -> dmc.Stack:
         col = artifact_column(parameters.key)
         if col not in dataframe.columns:
@@ -44,17 +51,17 @@ class FileListChart(ChartType[FileListSettings, pd.DataFrame, dmc.Stack], frozen
 
         tag_col = artifact_tags_column(parameters.key)
         has_names = RUN_NAME_COLUMN in dataframe.columns
+        ordering = [MetricColumn.RUN_ID, MetricColumn.STEP]
         columns = [
-            "run_id",
-            "step",
+            *ordering,
             col,
             *([tag_col] if tag_col in dataframe.columns else []),
             *([RUN_NAME_COLUMN] if has_names else []),
         ]
         files = (
             dataframe.loc[dataframe[col].notna(), columns]
-            .drop_duplicates(subset=["run_id", "step"])
-            .sort_values(["run_id", "step"])
+            .drop_duplicates(subset=ordering)
+            .sort_values(ordering)
         )
         if files.empty:
             return dmc.Stack([dmc.Text(f"No artifacts logged for key '{parameters.key}'", c="dimmed")])
@@ -64,12 +71,12 @@ class FileListChart(ChartType[FileListSettings, pd.DataFrame, dmc.Stack], frozen
                 [
                     dmc.TableTd(
                         dmc.Text(
-                            row[RUN_NAME_COLUMN] if has_names else f"Run {row['run_id']}",
+                            row[RUN_NAME_COLUMN] if has_names else f"Run {row[MetricColumn.RUN_ID]}",
                             size="xs",
-                            className=series_swatch_class(int(row["run_id"])),
+                            className=series_swatch_class(int(row[MetricColumn.RUN_ID])),
                         )
                     ),
-                    dmc.TableTd(dmc.Text(str(row["step"]), size="xs")),
+                    dmc.TableTd(dmc.Text(str(row[MetricColumn.STEP]), size="xs")),
                     dmc.TableTd(dmc.Text(format_tags_caption(row.get(tag_col)), size="xs", c="dimmed")),
                     dmc.TableTd(dmc.Anchor("Download", href=row[col], refresh=True, size="xs")),
                 ]
@@ -85,7 +92,7 @@ class FileListChart(ChartType[FileListSettings, pd.DataFrame, dmc.Stack], frozen
                         stickyHeader=True,
                         highlightOnHover=True,
                     ),
-                    mah=_MAX_HEIGHT_PX,
+                    mah=parameters.height,
                 )
             ],
             gap="xs",
@@ -109,7 +116,7 @@ class FileListChart(ChartType[FileListSettings, pd.DataFrame, dmc.Stack], frozen
     @typing.override
     @classmethod
     def natural_width(cls, parameters: FileListSettings) -> int:
-        return _NATURAL_WIDTH
+        return parameters.width
 
     @typing.override
     @classmethod

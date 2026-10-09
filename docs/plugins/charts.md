@@ -33,6 +33,9 @@ Subclass `ChartType` and implement its abstract methods:
   needs before this chart type is even offered.
 - `field_column_kinds()` — map each parameter field to the `ColumnKind` (metric/artifact/hparam)
   that populates it, so the settings UI knows what to offer as choices.
+- `can_display_artifact(artifact) -> bool` (optional, `False` by default) — say which logged artifacts this
+  chart type can display. Auto-generating and suggesting charts give an artifact key the first built-in
+  chart type that says yes; an artifact no chart type claims simply gets no generated chart.
 
 `plug(app)` registers the class and, if the chart needs its own clientside JS (a tooltip
 formatter, say), serves it from a route this plugin owns:
