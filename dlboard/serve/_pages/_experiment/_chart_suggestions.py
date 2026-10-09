@@ -8,7 +8,7 @@ the dynamic suggestion list content and the callbacks that drive both flows.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, TypedDict, cast
+from typing import TYPE_CHECKING, Any, Final, TypedDict, cast
 
 import dash_mantine_components as dmc
 from dash import ALL, Dash, Input, NoUpdate, Output, State, ctx, no_update
@@ -85,9 +85,19 @@ def _plural(n: int, noun: str) -> str:
     return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
 
 
+_PREVIEW_MAX_PANELS: Final = 20
+"""
+How many panels the preview lists. Each is a handful of Mantine components, and the browser spends
+about 12 ms on each (239 panels -- grouping a Lightning run by suffix -- froze it for 3 s), while a
+list that long can't be read anyway. The heading still counts every panel and chart.
+"""
+
+
 def _render_auto_preview(groups: dict[str, list[tuple[str, ColumnKind]]]) -> Component:
-    """What "Create charts" would add: each panel, and the keys charted in it."""
+    """What "Create charts" would add: each panel (the first `_PREVIEW_MAX_PANELS`), and the keys charted in it."""
     n_charts = sum(len(keys) for keys in groups.values())
+    shown = list(groups.items())[:_PREVIEW_MAX_PANELS]
+    hidden = len(groups) - len(shown)
     return dmc.Stack(
         [
             dmc.Text(f"{_plural(len(groups), 'panel')} · {_plural(n_charts, 'chart')}", size="sm", fw=600),
@@ -113,8 +123,13 @@ def _render_auto_preview(groups: dict[str, list[tuple[str, ColumnKind]]]) -> Com
                             px="sm",
                             py="xs",
                         )
-                        for panel_name, keys in groups.items()
-                    ],
+                        for panel_name, keys in shown
+                    ]
+                    + (
+                        [dmc.Text(f"…and {_plural(hidden, 'more panel')}", size="xs", c="dimmed")]
+                        if hidden
+                        else []
+                    ),
                     gap="xs",
                 ),
                 mah=320,

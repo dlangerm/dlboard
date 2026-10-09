@@ -26,7 +26,7 @@ exists to produce. Where the script itself works around one, a `# DLBOARD GAP:` 
    looks the same as a finished one, and there is no duration (#177).
 5. Nothing to skip or collapse a noisy group: `DeviceStatsMonitor` alone adds ~500 series, so auto-generate
    offers 886 charts, and its panels sort first, ahead of `train` and `val`.
-6. Auto-generating that many charts is slow, and so is switching Prefix/Suffix in its dialog (#168, #167).
+6. Auto-generating that many charts is slow (#168).
 7. Suggest charts is one add button per key: no select-all, filter or sort (#173).
 """
 
