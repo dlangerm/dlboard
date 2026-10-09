@@ -8,6 +8,7 @@ the dynamic suggestion list content and the callbacks that drive both flows.
 
 from __future__ import annotations
 
+import itertools
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, TypedDict, cast
 
@@ -33,6 +34,8 @@ from dlboard.serve._pages._experiment._chart_autogen import (
 from dlboard.serve._pages._experiment._dataframe_helpers import ColumnCatalog
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable, Iterator
+
     from dash.development.base_component import Component
 
     from dlboard.serve._pages._experiment._chart_autogen import SplitMode
@@ -49,20 +52,12 @@ class _AutoPopulateCtx(core.EditCtx):
     experiment_id: int
 
 
-def _render_suggestions(suggestions: list[Suggestion], *, filtered_out_all: bool = False) -> Component:
+def _render_suggestions(suggestions: Iterable[Suggestion], *, filtered_out_all: bool = False) -> Component:
     """
     The suggestion rows, each a checkbox (for the selection) plus a one-click add.
 
     `filtered_out_all` says the list is empty because of the filter, not because there is nothing left to chart.
     """
-    if not suggestions:
-        return dmc.Text(
-            "No suggestion matches that filter."
-            if filtered_out_all
-            else "Every metric and artifact already has a chart.",
-            c="dimmed",
-            size="sm",
-        )
 
     def _row(s: Suggestion) -> Component:
         return dmc.Group(
@@ -91,33 +86,42 @@ def _render_suggestions(suggestions: list[Suggestion], *, filtered_out_all: bool
             wrap="nowrap",
         )
 
-    metrics = [s for s in suggestions if s.kind == ColumnKind.METRIC]
-    artifacts = [s for s in suggestions if s.kind == ColumnKind.ARTIFACT]
-    sections: list[Component] = []
-    if metrics:
-        sections.append(dmc.Text("Metrics", fw=600, size="sm", mt="sm"))
-        sections.extend(_row(s) for s in metrics)
-    if artifacts:
-        sections.append(dmc.Text("Artifacts", fw=600, size="sm", mt="sm"))
-        sections.extend(_row(s) for s in artifacts)
-    return dmc.Stack(sections, gap="xs")
+    # One pass, straight into the sections it will be rendered in.
+    sections: dict[ColumnKind, list[Component]] = {ColumnKind.METRIC: [], ColumnKind.ARTIFACT: []}
+    for s in suggestions:
+        sections[s.kind].append(_row(s))
+    if not any(sections.values()):
+        return dmc.Text(
+            "No suggestion matches that filter."
+            if filtered_out_all
+            else "Every metric and artifact already has a chart.",
+            c="dimmed",
+            size="sm",
+        )
+    return dmc.Stack(
+        [
+            part
+            for kind, title in ((ColumnKind.METRIC, "Metrics"), (ColumnKind.ARTIFACT, "Artifacts"))
+            if sections[kind]
+            for part in (dmc.Text(title, fw=600, size="sm", mt="sm"), *sections[kind])
+        ],
+        gap="xs",
+    )
 
 
-def _suggestions_in(stored: list[dict[str, Any]]) -> list[Suggestion]:
-    """The `Suggestion`s a `SUGGEST_SUGGESTIONS_STORE_ID` payload describes."""
-    return [
-        Suggestion(
+def _suggestions_in(stored: Iterable[dict[str, Any]]) -> Iterator[Suggestion]:
+    """The `Suggestion`s a `SUGGEST_SUGGESTIONS_STORE_ID` payload describes, one at a time."""
+    for s in stored:
+        yield Suggestion(
             key=s["key"],
             kind=ColumnKind(s["kind"]),
             panel_name=s["panel_name"],
             chart=ChartInstance[Any, Any](chart_type=s["chart_type"], parameters=s["parameters"]),
         )
-        for s in stored
-    ]
 
 
-def _stored(suggestions: list[Suggestion]) -> list[dict[str, Any]]:
-    """What `SUGGEST_SUGGESTIONS_STORE_ID` holds for `suggestions` -- `_suggestions_in`'s input."""
+def _stored(suggestions: Iterable[Suggestion]) -> list[dict[str, Any]]:
+    """What `SUGGEST_SUGGESTIONS_STORE_ID` holds for `suggestions` (a list: it is JSON) -- `_suggestions_in`'s input."""
     return [
         {
             "key": s.key,
@@ -329,12 +333,13 @@ def _add_charts(
     many are picked, the page is saved and rebuilt once -- adding them one click at a time did that
     per chart.
     """
-    chosen = [s for s in _suggestions_in(stored) if (s.kind, s.key) in picked]
-    if not chosen:
+    chosen = (s for s in _suggestions_in(stored) if (s.kind, s.key) in picked)
+    first = next(chosen, None)
+    if first is None:
         raise PreventUpdate
 
     def add_all(panels: list[Any]) -> list[Any]:
-        for s in chosen:
+        for s in itertools.chain([first], chosen):
             panels = core.add_chart_to_panel_by_name(panels, s.panel_name, s.chart)
         return panels
 
