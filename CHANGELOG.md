@@ -26,6 +26,10 @@ pulls that section's body into the GitHub release notes and publishes both distr
   Lightning's learning-rate, throughput and device-stats callbacks, checkpoints, and segmentation and
   bounding-box previews -- a deliberately heavy run for exercising the UI.
 
+### Changed
+
+* A panel's header shows how many charts it holds, so you can tell how big it is before expanding it.
+
 ### Fixed
 
 * Metrics and artifacts logged by a later stage were never shipped when a script exited right after

@@ -552,3 +552,28 @@ def test_move_chart_to_panel_is_a_noop_for_an_out_of_range_index() -> None:
 def test_move_chart_to_panel_is_a_noop_for_an_unknown_target_panel() -> None:
     panels = [_panel_with_charts("x").model_copy(update={"name": "src"})]
     assert state.move_chart_to_panel(panels, "src", 0, "missing", None, after=True) == panels
+
+
+def _badge_labels(node: Any) -> list[str]:  # noqa: ANN401
+    """The text of every `Badge` in a serialized Dash component tree."""
+    match node:
+        case {"type": "Badge", "props": {"children": str(label)}}:
+            return [label]
+        case {"props": {"children": children}}:
+            return _badge_labels(children)
+        case list():
+            return [label for child in cast("list[Any]", node) for label in _badge_labels(child)]
+        case _:
+            return []
+
+
+@pytest.mark.parametrize(("n_charts", "badges"), [(0, []), (1, ["1 chart"]), (126, ["126 charts"])])
+def test_panel_header_says_how_many_charts_are_inside(n_charts: int, badges: list[str]) -> None:
+    charts = [
+        ChartInstance[Any, Any](chart_type=LineChart.name, parameters={"column": f"m{i}"})
+        for i in range(n_charts)
+    ]
+
+    rendered = state.panel_header(PanelInstance[Any, Any](name="train", charts=charts))
+
+    assert _badge_labels(json.loads(cast("str", to_json(rendered)))) == badges
