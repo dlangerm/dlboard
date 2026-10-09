@@ -43,6 +43,9 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ### Fixed
 
+* Switching **Prefix**/**Suffix** in the Auto-generate charts dialog no longer freezes the page for seconds on an
+  experiment with many metrics: the preview lists the first 20 panels and counts the rest (239 panels took
+  the browser about 3 s to draw; it takes about 0.1 s now).
 * Changing a Grid panel's charts-per-row no longer rebuilds every chart in the panel. The browser applies the
   new column count itself and the server only saves it, so a panel with over a hundred charts freezes the
   page for about a quarter of the time (0.8s instead of 3s per click, measured on 126 charts).
