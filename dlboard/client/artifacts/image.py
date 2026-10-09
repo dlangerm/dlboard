@@ -2,7 +2,7 @@
 
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, cast
+from typing import TYPE_CHECKING, Annotated, Final, Literal, cast
 
 import dltype
 import numpy as np
@@ -33,6 +33,10 @@ else:
         _ImageArray = np.ndarray
 
 
+DEFAULT_FORMAT: Final = "png"
+ImageFormat = Literal["png", "jpg"]
+
+
 class Image(BaseModel, frozen=True, extra="forbid"):
     """An image to log to the backend."""
 
@@ -44,6 +48,10 @@ class Image(BaseModel, frozen=True, extra="forbid"):
     """Tags for the image, for use by plugins."""
     step: int
     """The global step of the trainer."""
+    format: ImageFormat = DEFAULT_FORMAT
+    """How the image is encoded for upload: lossless `"png"` (the default), or `"jpg"` -- lossy, but a good
+    deal smaller for large photographic images. Anything that must stay pixel-exact (masks, label images,
+    annotated overlays) wants PNG."""
 
     @field_validator("image", mode="before")
     @classmethod
@@ -62,7 +70,7 @@ class Image(BaseModel, frozen=True, extra="forbid"):
             # `torch is not None and ...` above.
             im_underlying = cast("np.ndarray", self.image)
         pil_img = PIL.Image.fromarray(im_underlying)
-        target = (local_temp / str(uuid.uuid4())).with_suffix(".jpg")
+        target = (local_temp / str(uuid.uuid4())).with_suffix(f".{self.format}")
         pil_img.save(target)
 
         obj = NewArtifact(

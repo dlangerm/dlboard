@@ -28,6 +28,9 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ### Changed
 
+* `Image` artifacts are encoded as lossless PNG by default instead of always as lossy JPEG, so masks,
+  label images and overlays are no longer degraded on upload. Pass `format="jpg"` to keep the old,
+  smaller files. Artifacts already stored are unchanged.
 * A panel's header shows how many charts it holds, so you can tell how big it is before expanding it.
 
 ### Fixed
