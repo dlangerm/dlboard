@@ -22,14 +22,13 @@ EXCLUDED_RUNS_KEY: typing.Final = "excluded_runs"
 
 def build_artifacts_dataframe(artifacts: typing.Iterable[Artifact]) -> pd.DataFrame:
     """Pivot artifact download URLs (and tags) into columns per key, indexed by (run_id, step)."""
-    artifacts = list(artifacts)
-    df = pd.DataFrame([a.model_dump(mode="json") for a in artifacts])
+    # A URL, not the underlying `ref` -- charts (and anything else consuming this dataframe) fetch
+    # an artifact by id through `/artifact/<id>`, never by talking to the ref's backend directly.
+    # One pass: each artifact is dumped and given its URL as it streams into the frame.
+    df = pd.DataFrame(a.model_dump(mode="json") | {"url": artifact_url(a)} for a in artifacts)
     if df.empty:
         return df
 
-    # A URL, not the underlying `ref` -- charts (and anything else consuming this dataframe) fetch
-    # an artifact by id through `/artifact/<id>`, never by talking to the ref's backend directly.
-    df["url"] = [artifact_url(a) for a in artifacts]
     url_pivot = df.pivot_table(index=["run_id", "step"], columns="key", values="url", aggfunc="first")
     tags_pivot = df.pivot_table(index=["run_id", "step"], columns="key", values="tags", aggfunc="first")
     return (
