@@ -20,16 +20,15 @@ exists to produce. Where the script itself works around one, a `# DLBOARD GAP:` 
    toggle classes, change opacity or compare ground truth against prediction.
 2. One artifact per (run, key, step), so N previews need N keys (`sample_0`, `sample_1`, ...) rather than
    one batch rendered as a gallery.
-3. A checkpoint gets an image chart like any artifact: a broken image, with only its tags as a caption (#176).
-4. Artifact tags are `dict[str, str]`, so a numeric score has to be stringified to be shown as a caption,
+3. Artifact tags are `dict[str, str]`, so a numeric score has to be stringified to be shown as a caption,
    and each caller formats it differently (#179).
-5. A run has no status: Lightning's `finalize("success" | "failed")` is never recorded, so a crashed run
+4. A run has no status: Lightning's `finalize("success" | "failed")` is never recorded, so a crashed run
    looks the same as a finished one, and there is no duration (#177).
-6. Nothing to skip or collapse a noisy group: `DeviceStatsMonitor` alone adds ~500 series, so auto-generate
+5. Nothing to skip or collapse a noisy group: `DeviceStatsMonitor` alone adds ~500 series, so auto-generate
    offers 886 charts, and its panels sort first, ahead of `train` and `val`.
-7. Auto-generating that many charts is slow, and so is switching Prefix/Suffix in its dialog (#168, #167).
-8. Changing charts-per-row in a big Grid panel blanks the UI (#169).
-9. Suggest charts is one add button per key: no select-all, filter or sort (#173).
+6. Auto-generating that many charts is slow, and so is switching Prefix/Suffix in its dialog (#168, #167).
+7. Changing charts-per-row in a big Grid panel blanks the UI (#169).
+8. Suggest charts is one add button per key: no select-all, filter or sort (#173).
 """
 
 import math
@@ -508,7 +507,6 @@ def batch_size_of(batch: tuple[torch.Tensor, torch.Tensor]) -> int:
 def main() -> None:
     """Sample hyperparameters, train for `MAX_EPOCHS`, then evaluate on the test split."""
     LOGDIR.mkdir(exist_ok=True)
-    # DLBOARD GAP 3: `log_model="all"` uploads every checkpoint, but they'll show as broken images.
     logger = DLBoardLogger.from_names(
         "shape-segmentation",
         "unet-advanced",
@@ -556,7 +554,7 @@ def main() -> None:
             ),
         ],
     )
-    # DLBOARD GAP 5: the status Lightning reports when this finishes (or crashes) is dropped.
+    # DLBOARD GAP 4: the status Lightning reports when this finishes (or crashes) is dropped.
     trainer.fit(model, datamodule=data)
     trainer.test(model, datamodule=data)
 

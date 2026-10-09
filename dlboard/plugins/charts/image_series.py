@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 from structlog.stdlib import get_logger
 
 from dlboard.models import RUN_NAME_COLUMN, ChartType, ColumnKind
-from dlboard.plugins.charts._table_style import artifact_column, artifact_tags_column
+from dlboard.plugins.charts._table_style import artifact_column, artifact_tags_column, format_tags_caption
 from dlboard.serve import ClientsideScript, series_swatch_class
 
 PAGE_SIZE = 6
@@ -70,19 +70,6 @@ def _slider_marks(all_steps: list[int], max_labels: int = MAX_SLIDER_LABELS) -> 
     return [{"value": s, "label": str(s)} if s in labeled else {"value": s} for s in all_steps]
 
 
-def _format_caption(raw_tags: dict[str, str] | float | None) -> str:
-    """
-    Format a `<key>__tags` cell into a caption.
-
-    `Artifact.tags` is a `dict[str, str]`, and `build_artifacts_dataframe` pivots it straight into the
-    dataframe unchanged — so a real row is always a dict. A `float` (NaN) shows up only when pivoting
-    left a gap for a (run, step) with no tags logged; that's the sole non-dict case to handle.
-    """
-    if not isinstance(raw_tags, dict):
-        return ""
-    return ", ".join(f"{k}: {v}" for k, v in raw_tags.items())
-
-
 class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=True, extra="forbid"):
     """Scroll through images logged at each step, one column per run, paginated."""
 
@@ -133,7 +120,7 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
             per_run_urls[str(rid)] = dict(zip((str(s) for s in steps), g[col], strict=True))
             if has_tags:
                 per_run_captions[str(rid)] = {
-                    str(s): _format_caption(raw) for s, raw in zip(steps, g[tag_col], strict=True)
+                    str(s): format_tags_caption(raw) for s, raw in zip(steps, g[tag_col], strict=True)
                 }
             if has_names:
                 per_run_names[str(rid)] = g[RUN_NAME_COLUMN].iloc[0]

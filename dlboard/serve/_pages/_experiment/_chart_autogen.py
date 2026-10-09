@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Literal
 
 from dlboard.models import ChartInstance, ColumnKind, PanelInstance
 from dlboard.plugins.charts.bar_chart import BarChart
+from dlboard.plugins.charts.file_list import FileListChart
 from dlboard.plugins.charts.image_series import ImageChart
 from dlboard.plugins.charts.line_chart import LineChart
 
@@ -89,9 +90,14 @@ def default_chart_for_metric(
     return ChartInstance(chart_type=LineChart.name, parameters={"column": column, "x_axis": "step"})
 
 
-def default_chart_for_artifact(key: str) -> ChartInstance[typing.Any, typing.Any]:
-    """The sensible default chart for an artifact key: an image series (x_axis defaults to `step`)."""
-    return ChartInstance(chart_type=ImageChart.name, parameters={"key": key})
+def default_chart_for_artifact(key: str, *, is_file: bool = False) -> ChartInstance[typing.Any, typing.Any]:
+    """
+    The sensible default chart for an artifact key: an image series (x_axis defaults to `step`).
+
+    `is_file` (a checkpoint, say -- see `ColumnCatalog.file_artifacts`) lists its files with download
+    links instead, since a browser has no image to show for it.
+    """
+    return ChartInstance(chart_type=(FileListChart if is_file else ImageChart).name, parameters={"key": key})
 
 
 def group_keys_into_panels(
@@ -138,7 +144,7 @@ def build_auto_panels(
             charts=[
                 default_chart_for_metric(key, single_value=key in catalog.single_value_metrics)
                 if kind == ColumnKind.METRIC
-                else default_chart_for_artifact(key)
+                else default_chart_for_artifact(key, is_file=key in catalog.file_artifacts)
                 for key, kind in keys
             ],
         )
@@ -188,9 +194,16 @@ def build_suggestions(
     delimiter: str,
     mode: SplitMode,
     lightning: bool = False,
-    single_value_columns: frozenset[str] = frozenset(),
+    catalog: ColumnCatalog | None = None,
 ) -> list[Suggestion]:
-    """Turn uncharted keys into ready-to-add `Suggestion`s, grouped the same way as auto-populate."""
+    """
+    Turn uncharted keys into ready-to-add `Suggestion`s, grouped the same way as auto-populate.
+
+    `catalog` says which metrics are single-valued (a bar chart) and which artifacts are files (a file
+    list), exactly as it does for `build_auto_panels`; without one every key gets the plain default.
+    """
+    single_value_columns = catalog.single_value_metrics if catalog else frozenset[str]()
+    file_artifacts = catalog.file_artifacts if catalog else frozenset[str]()
     suggestions = [
         Suggestion(
             key=column,
@@ -209,7 +222,7 @@ def build_suggestions(
             key=key,
             kind=ColumnKind.ARTIFACT,
             panel_name=panel_name_for_group(split_group_name(key, delimiter, mode), ColumnKind.ARTIFACT),
-            chart=default_chart_for_artifact(key),
+            chart=default_chart_for_artifact(key, is_file=key in file_artifacts),
         )
         for key in uncharted.artifacts
     )

@@ -8,7 +8,7 @@ from typing import Any
 
 import pandas as pd
 
-from dlboard.models import Artifact, ColumnKind, HyperParams, MetricColumn
+from dlboard.models import Artifact, ColumnKind, HyperParams, MetricColumn, is_inlineable_artifact
 from dlboard.plugins.charts._table_style import HPARAM_COLUMN_PREFIX, artifact_column, artifact_tags_column
 from dlboard.serve._backend._artifact_download import artifact_url
 
@@ -82,15 +82,19 @@ class ColumnCatalog:
     single_value_metrics: frozenset[str] = frozenset()
     """Metrics every run logged at most once -- a natural fit for a bar chart, not a line chart."""
     artifacts: tuple[str, ...] = ()
+    file_artifacts: frozenset[str] = frozenset()
+    """Artifact keys holding files a browser can only download (checkpoints, ...), not images it can show inline."""
     hparams: tuple[str, ...] = ()
 
     @classmethod
     def load(cls, store: DataStore[...], experiment_id: int) -> ColumnCatalog:
         metrics = store.summarize_metric_keys(experiment_id)
+        artifacts = list(store.fetch_artifacts(experiment_id))
         return cls(
             metrics=tuple(m.key for m in metrics),
             single_value_metrics=frozenset(m.key for m in metrics if m.max_steps_per_run <= 1),
-            artifacts=tuple(sorted({a.key for a in store.fetch_artifacts(experiment_id)})),
+            artifacts=tuple(sorted({a.key for a in artifacts})),
+            file_artifacts=frozenset(a.key for a in artifacts if not is_inlineable_artifact(a.fname)),
             hparams=tuple(
                 sorted({k for h in store.fetch_hyperparams(experiment_id) for k in h.hparams_dict})
             ),

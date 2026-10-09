@@ -90,7 +90,15 @@ def test_column_catalog_load_summarizes_keys_without_their_values(
         [
             Artifact(
                 key="img", fname="i.png", run_id=runs[0].id, experiment_id=experiment_id, step=0, ref="r://a"
-            )
+            ),
+            Artifact(
+                key="ckpt",
+                fname="last.ckpt",
+                run_id=runs[0].id,
+                experiment_id=experiment_id,
+                step=0,
+                ref="r://b",
+            ),
         ]
     )
 
@@ -99,7 +107,8 @@ def test_column_catalog_load_summarizes_keys_without_their_values(
     assert catalog == dfh.ColumnCatalog(
         metrics=("final_acc", "loss"),
         single_value_metrics=frozenset({"final_acc"}),
-        artifacts=("img",),
+        artifacts=("ckpt", "img"),
+        file_artifacts=frozenset({"ckpt"}),
         hparams=("lr",),
     )
 

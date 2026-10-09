@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import mimetypes
 import typing
 from typing import Final
 
@@ -39,6 +40,11 @@ anything, including an HTML or SVG file (`image/svg+xml` can carry an embedded `
 to run script in this origin the moment someone else opens it. Everything not in this set is served
 as `Content-Disposition: attachment` instead.
 """
+
+
+def is_inlineable_artifact(fname: str) -> bool:
+    """Whether a browser shows an artifact named `fname` inline (an image), rather than only offering it as a download."""
+    return mimetypes.guess_type(fname)[0] in INLINEABLE_ARTIFACT_CONTENT_TYPES
 
 
 @typing.runtime_checkable
