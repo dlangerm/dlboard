@@ -14,4 +14,4 @@ handshake actually sees.
 
 # No type annotation -- hatchling's default `regex` version source (`[tool.hatch.version]` in both
 # `pyproject.toml`s) matches `__version__ *= *"..."` literally and wouldn't see this past a `: str`.
-__version__ = "0.3.1"
+__version__ = "0.4.0"
