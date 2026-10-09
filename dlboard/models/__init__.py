@@ -12,6 +12,7 @@ from dlboard.models._artifact import (
     NewArtifact,
     NewArtifactLink,
     UnservableArtifactRefError,
+    is_inlineable_artifact,
 )
 from dlboard.models._artifact_purge_task import ArtifactPurgeTask, NewArtifactPurgeTask
 from dlboard.models._audit_log import AuditAction, AuditLogEntry, EntityType, NewAuditLogEntry
@@ -116,5 +117,6 @@ __all__ = [
     "ValidJsonTypes",
     "ViewSummary",
     "has_scope",
+    "is_inlineable_artifact",
     "require_scope",
 ]

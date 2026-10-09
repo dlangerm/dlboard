@@ -21,6 +21,7 @@ PASSWORD_AUTH: list[PluginProtocol] = [password]
 BUILTIN_BACKEND: list[PluginProtocol] = [basic_rest_backend, error]
 BUILTIN_CHARTS: list[PluginProtocol] = [
     charts.image_series,
+    charts.file_list,
     charts.line_chart,
     charts.bar_chart,
     charts.table_chart,

@@ -5,8 +5,9 @@
 A chart plugin defines one `ChartType` — a way to turn parameters and a dataframe of logged data
 into a rendered Dash component. `ChartType[P, D, C]` (`dlboard/models/_view.py`) is generic over
 its parameter model `P`, the data shape it renders from `D`, and the rendered component type `C`.
-Built-ins: `line_chart.py`, `bar_chart.py`, `table_chart.py`, `image_series.py`
-(`dlboard/plugins/charts/`).
+Built-ins: `line_chart.py`, `bar_chart.py`, `table_chart.py`, `image_series.py`, `file_list.py`
+(`dlboard/plugins/charts/`). `file_list.py` is what an artifact a browser can't show inline gets (a
+checkpoint, say): its files by run and step, each with a download link.
 
 The built-in line charts, and the image series that steps through logged images:
 

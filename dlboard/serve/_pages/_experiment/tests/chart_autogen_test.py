@@ -239,7 +239,10 @@ def test_build_suggestions_single_value_metric_gets_a_bar_chart_across_runs() ->
     uncharted = autogen.UnchartedKeys(metrics=["final_accuracy"], artifacts=[])
 
     suggestions = autogen.build_suggestions(
-        uncharted, delimiter="/", mode="prefix", single_value_columns=frozenset({"final_accuracy"})
+        uncharted,
+        delimiter="/",
+        mode="prefix",
+        catalog=ColumnCatalog(single_value_metrics=frozenset({"final_accuracy"})),
     )
 
     assert suggestions == [
@@ -275,3 +278,24 @@ def test_build_suggestions_lightning_splits_panel_by_granularity() -> None:
             ),
         )
     ]
+
+
+def test_a_file_artifact_gets_a_file_list_where_an_image_gets_an_image_chart() -> None:
+    catalog = ColumnCatalog(artifacts=("ckpt", "img"), file_artifacts=frozenset({"ckpt"}))
+
+    auto = {
+        c.parameters["key"]: c.chart_type
+        for p in autogen.build_auto_panels(catalog, delimiter="", mode="prefix")
+        for c in p.charts
+    }
+    suggested = {
+        s.key: s.chart.chart_type
+        for s in autogen.build_suggestions(
+            autogen.UnchartedKeys(metrics=[], artifacts=["ckpt", "img"]),
+            delimiter="",
+            mode="prefix",
+            catalog=catalog,
+        )
+    }
+
+    assert auto == suggested == {"ckpt": "files", "img": "image"}

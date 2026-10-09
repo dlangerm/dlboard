@@ -10,6 +10,7 @@ import pandas as pd
 import pytest
 from pydantic import BaseModel, Field, ValidationError
 
+from dlboard.models import is_inlineable_artifact
 from dlboard.models._view import (
     ChartInstance,
     ChartType,
@@ -331,3 +332,19 @@ def test_a_saved_chart_keeps_its_id_when_its_parameters_change() -> None:
     )
 
     assert edited.id == saved.id
+
+
+@pytest.mark.parametrize(
+    ("fname", "inline"),
+    [
+        ("a.png", True),
+        ("a.jpg", True),
+        ("a.webp", True),
+        ("last.ckpt", False),
+        ("plot.svg", False),
+        ("a", False),
+    ],
+)
+def test_only_raster_images_are_shown_inline(fname: str, *, inline: bool) -> None:
+    """Matches what the download route serves without forcing a download (SVG can carry script)."""
+    assert is_inlineable_artifact(fname) is inline
