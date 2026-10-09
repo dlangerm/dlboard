@@ -36,7 +36,8 @@ pulls that section's body into the GitHub release notes and publishes both distr
 ### Fixed
 
 * A long metric name no longer spills its y-axis title out of the chart (over the chart header and the
-  charts beside it): titles are shortened to fit, keeping the end of the name.
+  charts beside it): titles are shortened to fit, keeping the end of the name. How long a title may be is a
+  setting of the line and bar charts (`max_axis_label_chars`, 36 by default).
 * Metrics and artifacts logged by a later stage were never shipped when a script exited right after
   it -- notably everything `trainer.test` logs after `trainer.fit`. Lightning finalizes the logger
   after every stage, but only the first call flushed.
