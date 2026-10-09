@@ -41,7 +41,7 @@ from dlboard.models import FileKind
 DEFAULT_EXPERIMENT_NAME = "default"
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Mapping, Sequence
     from multiprocessing import Queue
     from multiprocessing.context import SpawnProcess
     from multiprocessing.synchronize import Event as MPEvent
@@ -49,6 +49,7 @@ if TYPE_CHECKING:
     from pytorch_lightning.callbacks import ModelCheckpoint
 
     from dlboard.client.artifacts.figure import SavesFigure
+    from dlboard.models import TagValue
     from dlboard.models._artifact import AnyArtifact
 
 
@@ -488,7 +489,7 @@ class DLBoardLogger(Logger):
         key: str,
         step: int,
         *,
-        tags: dict[str, str] | None = None,
+        tags: Mapping[str, TagValue] | None = None,
         save_kwargs: dict[str, Any] | None = None,
     ) -> None:
         """
@@ -521,8 +522,10 @@ class DLBoardLogger(Logger):
             copy = copy_dir / Path(path).name
             shutil.copy2(path, copy)
             self._logged_checkpoint_mtimes[path] = mtime
+            tags: dict[str, TagValue] = {"tag": tag}
             # Lightning types `score` as a float, but it's `None` for a callback with no `monitor`.
-            raw_score = cast("float | None", score)
+            if (raw_score := cast("float | None", score)) is not None:
+                tags["score"] = float(raw_score)
             self.log_artifact(
                 [
                     File(
@@ -532,8 +535,7 @@ class DLBoardLogger(Logger):
                         # The step the callback saved this at, not the last one metrics were logged for: that
                         # can be the same for several saves, and a (key, step) pair is stored once.
                         step=checkpoint_callback._last_global_step_saved,  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
-                        tags={"tag": tag}
-                        | ({} if raw_score is None else {"score": f"{float(raw_score):.6g}"}),
+                        tags=tags,
                     )
                 ]
             )

@@ -84,8 +84,11 @@ cap how long any one request waits before it's treated as failed.
 `to_artifact(local_temp, run_id, experiment_id) -> tuple[NewArtifact, Path | AnyUrl]` method.
 Returning a `Path` (written under `local_temp`) uploads that file; returning an `AnyUrl` instead
 registers it as a *link* — no bytes move, the server just checks the ref is one its
-`ArtifactStore` can actually serve (see [Storage](plugins/storage.md)) and records it. There are
-four built-in kinds:
+`ArtifactStore` can actually serve (see [Storage](plugins/storage.md)) and records it. `tags` are shown as a
+caption next to the artifact and take strings, numbers or booleans: numbers are formatted the same way
+everywhere (floats to four significant digits, `0.1410`), so log `tags={"iou": iou}` rather than
+formatting it yourself. They are stored as text, so they can't yet be sorted or filtered as numbers.
+There are four built-in kinds:
 
 - `dlboard.client.artifacts.image.Image` — uploads. Wraps a `torch.Tensor`/`np.ndarray`
   (validated CHW `uint8` via `dlbype`), used like:

@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import io
 import uuid
+from collections.abc import Mapping
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, Final, Literal, Protocol, get_args
 
 from pydantic import BaseModel
 
-from dlboard.models import NewArtifact
+from dlboard.models import NewArtifact, TagValue, format_tags
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -35,7 +36,7 @@ class Figure(BaseModel, frozen=True, extra="forbid"):
     """Key for this artifact."""
     data: bytes
     """The rendered figure, encoded as `format`."""
-    tags: dict[str, str] = {}
+    tags: Mapping[str, TagValue] = {}
     """Tags for the figure, for use by plugins."""
     step: int
     """The global step of the trainer."""
@@ -49,7 +50,7 @@ class Figure(BaseModel, frozen=True, extra="forbid"):
         key: str,
         step: int,
         *,
-        tags: dict[str, str] | None = None,
+        tags: Mapping[str, TagValue] | None = None,
         save_kwargs: dict[str, Any] | None = None,
     ) -> Figure:
         """
@@ -84,6 +85,6 @@ class Figure(BaseModel, frozen=True, extra="forbid"):
             run_id=run_id,
             experiment_id=experiment_id,
             step=self.step,
-            tags=self.tags,
+            tags=format_tags(self.tags),
         )
         return obj, target
