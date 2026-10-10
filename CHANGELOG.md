@@ -10,6 +10,13 @@ To cut a release: rename this section to `## [X.Y.Z] - YYYY-MM-DD`, start a fres
 pulls that section's body into the GitHub release notes and publishes both distributions from it.
 -->
 
+## [Unreleased]
+
+### Changed
+
+* `dlboard` now depends on `dlboard-client~=X.Y.0`, a client of its own minor version, instead of any
+  version, so an environment holding both can no longer end up with a mismatched pair.
+
 ## [0.4.0] - 2026-10-09
 
 ### Added

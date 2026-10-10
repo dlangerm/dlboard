@@ -36,8 +36,9 @@ the server's API major and refuses to start training if it differs, with a messa
 versions, instead of silently dropping every batch. The REST API major only changes for a breaking
 change, which this policy says won't happen within `0.x` without a deprecation window.
 
-Keep `dlboard` and `dlboard-client` on the same version where you can. Different versions of the same
-API major work together, but fixes and new features land in both.
+`dlboard` requires a `dlboard-client` of its own minor version (`~=0.4.0`, say, so patch releases mix freely), so
+any install that has both stays matched. A client in a training environment can still be any version with the
+same API major, but fixes and new features land in both, so keep them close.
 
 An older server can't open a database a newer version has upgraded. Upgrade servers before you
 upgrade clients, and never point an older server at a database a newer one has touched.

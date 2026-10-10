@@ -74,3 +74,13 @@ repos:
         entry: bash -c 'cmp LICENSE client/LICENSE&&cmp LICENSE server/LICENSE'
         files: ^(LICENSE|client/LICENSE|server/LICENSE)$
         pass_filenames: false
+      - id: server-client-pin-matches-version
+        # The server wheel must pull in a `dlboard-client` of its own major.minor, so the two never skew in
+        # one install. Like any autofixing hook, it rewrites the pin in `server/pyproject.toml` when it
+        # drifted from `dlboard/_version.py` (so the run fails once, until you stage it), and fails outright
+        # when there isn't exactly one `dlboard-client` dependency to rewrite. See the script.
+        name: server's dlboard-client pin matches the version's major.minor
+        language: system
+        entry: uv run --no-project python tools/check_server_client_pin.py
+        files: ^(dlboard/_version\.py|server/pyproject\.toml)$
+        pass_filenames: false
