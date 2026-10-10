@@ -665,6 +665,10 @@ def render_panel_content(
     return render_panel_content_from_df(panel, df)
 
 
+_NO_DATA_COLUMNS: typing.Final = frozenset({*models.MetricColumn, RUN_NAME_COLUMN})
+"""Columns that say where a row is, not what a chart shows: present on every row whatever was logged."""
+
+
 def chart_data_fingerprint(chart: models.ChartInstance[Any, Any], df: pd.DataFrame) -> str:
     """
     A cheap content hash of the slice of a panel's shared dataframe one chart actually renders from.
@@ -689,9 +693,16 @@ def chart_data_fingerprint(chart: models.ChartInstance[Any, Any], df: pd.DataFra
     list (nothing in this dataframe's own columns does today, but a hash used purely to detect "did
     this change" has no business being pickier about content than the JSON serialization the rest of
     this page already ships to the browser).
+
+    Only rows where the chart has data of its own count: the dataframe is wide, so another metric
+    logging a step the chart has nothing at adds a row to it -- which is not a change to the chart,
+    and must not redraw it.
     """
     cols = chart.hint_required_columns()
     scoped = df if cols is None else df[[c for c in cols if c in df.columns]]
+    data_cols = [c for c in scoped.columns if c not in _NO_DATA_COLUMNS]
+    if data_cols:
+        scoped = scoped.dropna(how="all", subset=data_cols)
     return hashlib.sha1(scoped.to_json(orient="split", date_format="iso").encode()).hexdigest()
 
 
