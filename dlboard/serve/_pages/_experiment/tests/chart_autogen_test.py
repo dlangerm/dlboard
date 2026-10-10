@@ -10,6 +10,7 @@ import pytest
 from dlboard.models import FILE_KIND_TAG, Artifact
 from dlboard.models._view import ChartInstance, ColumnKind, PanelInstance
 from dlboard.plugins.charts.bar_chart import BarChart
+from dlboard.plugins.charts.file_list import FileListChart
 from dlboard.plugins.charts.image_series import ImageChart
 from dlboard.plugins.charts.line_chart import LineChart
 from dlboard.serve._pages._experiment import _chart_autogen as autogen
@@ -18,6 +19,7 @@ from dlboard.serve._pages._experiment._dataframe_helpers import ColumnCatalog
 LineChart.register(allow_override=True)
 ImageChart.register(allow_override=True)
 BarChart.register(allow_override=True)
+FileListChart.register(allow_override=True)
 
 
 def _panel(name: str, *charts: ChartInstance[object, object]) -> PanelInstance[object, object]:
@@ -213,6 +215,49 @@ def test_find_uncharted_keys_nothing_uncharted_when_fully_covered() -> None:
     panels = [_panel("p", _line("loss"), _image("img"))]
     catalog = ColumnCatalog(metrics=("loss",), artifact_chart_types={"img": "image"})
     assert autogen.find_uncharted_keys(panels, catalog) == autogen.UnchartedKeys(metrics=[], artifacts=[])
+
+
+def test_files_in_one_directory_share_one_chart_listing_the_directory() -> None:
+    catalog = ColumnCatalog(
+        artifact_chart_types={
+            "checkpoints/a.ckpt": "files",
+            "checkpoints/b.ckpt": "files",
+            "model.onnx": "files",
+            "samples/x.png": "image",
+            "samples/y.png": "image",
+        }
+    )
+
+    by_name = {p.name: p for p in autogen.build_auto_panels(catalog, delimiter="/", mode="prefix")}
+
+    assert [(c.chart_type, c.parameters) for c in by_name["checkpoints (artifacts)"].charts] == [
+        ("files", {"key_prefix": "checkpoints/"})
+    ]
+    assert [(c.chart_type, c.parameters) for c in by_name["Ungrouped (artifacts)"].charts] == [
+        ("files", {"key": "model.onnx"})
+    ]
+    assert len(by_name["samples (artifacts)"].charts) == 2
+
+
+def test_the_auto_generate_preview_counts_a_directory_of_files_as_one_chart() -> None:
+    catalog = ColumnCatalog(artifact_chart_types={f"checkpoints/{n}.ckpt": "files" for n in range(40)})
+
+    groups = autogen.group_keys_into_panels(catalog, delimiter="/", mode="prefix")
+
+    assert groups == {"checkpoints (artifacts)": [("checkpoints/", ColumnKind.ARTIFACT)]}
+
+
+def test_keys_under_a_charted_prefix_are_not_suggested_again() -> None:
+    charted = ChartInstance[object, object](chart_type="files", parameters={"key_prefix": "checkpoints/"})
+    catalog = ColumnCatalog(
+        artifact_chart_types={"checkpoints/a.ckpt": "files", "other/b.ckpt": "files", "other/c.ckpt": "files"}
+    )
+
+    uncharted = autogen.find_uncharted_keys([_panel("p", charted)], catalog)
+    suggestions = autogen.build_suggestions(uncharted, catalog, delimiter="/", mode="prefix")
+
+    assert uncharted.artifacts == ["other/b.ckpt", "other/c.ckpt"]
+    assert [(s.key, s.chart.parameters) for s in suggestions] == [("other/", {"key_prefix": "other/"})]
 
 
 # ---- build_suggestions ----

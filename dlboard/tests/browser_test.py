@@ -1868,3 +1868,40 @@ def test_a_page_from_an_older_version_offers_a_reload(page: Page, live_server_ur
     page.unroute(callbacks)
     banner.get_by_role("button", name="Reload").click()
     expect(banner).to_have_count(0)
+
+
+def test_checkpoints_are_one_tabbed_list_with_download_links(page: Page, live_server_url: str) -> None:
+    """
+    Auto-generate gives a directory of checkpoint files (one key apiece) a single list, split into a
+    tab per kind with a link to each file -- AG Grid's own rendering, which only a browser shows.
+    """
+    _create_project_and_experiment(page, live_server_url, "Checkpoint List Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+
+    store = get_system_data_store()
+    run = store.create_run(models.NewRun(experiment_id=experiment_id))
+    store.log_artifact_refs(
+        [
+            models.Artifact(
+                key=f"checkpoints/{name}.ckpt",
+                fname=f"{name}.ckpt",
+                run_id=run.id,
+                experiment_id=experiment_id,
+                step=step,
+                ref=f"file:///{name}.ckpt",
+                tags={models.FILE_KIND_TAG: "checkpoint", "tag": tag},
+            )
+            for step, (name, tag) in enumerate(
+                [("last", "latest"), ("epoch-1", "best"), ("epoch-2", "best_k")]
+            )
+        ]
+    )
+    page.reload()
+    _auto_generate_charts(page)
+
+    expect(page.get_by_role("tab", name=re.compile("^Latest"))).to_be_visible()
+    page.get_by_role("tab", name=re.compile("^Best")).click()
+    link = page.locator(".dl-file-list .ag-cell a")
+    expect(link).to_have_text("epoch-1.ckpt")
+    expect(link).to_have_attribute("href", re.compile(r"^/artifact/\d+"))

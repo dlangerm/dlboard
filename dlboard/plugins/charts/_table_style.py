@@ -65,14 +65,15 @@ DEFAULT_TABLE_FONT_SIZE = "var(--mantine-font-size-sm)"
 than ag-grid's default text."""
 
 
-def themed_grid_kwargs(*, font_size: str = DEFAULT_TABLE_FONT_SIZE) -> dict[str, Any]:
+def themed_grid_kwargs(*, font_size: str = DEFAULT_TABLE_FONT_SIZE, class_name: str = "") -> dict[str, Any]:
     """
     CSS-var-driven style/className kwargs so an `AgGrid` matches the Mantine theme (incl. dark mode).
 
-    Spread into a `dash_ag_grid.AgGrid(...)` call: `AgGrid(..., **themed_grid_kwargs())`.
+    Spread into a `dash_ag_grid.AgGrid(...)` call: `AgGrid(..., **themed_grid_kwargs())`. `class_name`
+    adds a class of the caller's own, for its stylesheet to pick the grid out by.
     """
     return {
-        "className": "ag-theme-quartz",
+        "className": f"ag-theme-quartz {class_name}".strip(),
         "style": {
             "width": "100%",
             "--ag-background-color": "var(--mantine-color-body)",

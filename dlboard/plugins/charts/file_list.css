@@ -1,0 +1,4 @@
+/* The file list's download links (`file_list.py`): the browser's default link blue is unreadable on the dark theme. */
+.dl-file-list .ag-cell a {
+  color: var(--mantine-color-anchor);
+}

@@ -42,7 +42,8 @@ saves, even one `save_top_k` deletes moments later (each is copied before it's q
 uploads only the ones still kept, when training finishes. Each is a `File` (below) of kind `checkpoint`,
 keyed `checkpoints/<file name>`, tagged with its score and Lightning's `latest`/`best`/`best_k`, and
 stamped with the global step its callback saved at (with `log_model=True`, the step of that callback's last
-save). Any number of `ModelCheckpoint` callbacks work.
+save). Any number of `ModelCheckpoint` callbacks work. On the experiment page they are one list, split into
+`Latest`, `Best` and `Top-k` tabs by those tags, paged and sortable by step and score.
 
 **Authenticating.** If the server signs people in (see [Auth](plugins/auth.md)), the script has to
 sign in too:

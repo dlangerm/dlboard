@@ -7,7 +7,11 @@ into a rendered Dash component. `ChartType[P, D, C]` (`dlboard/models/_view.py`)
 its parameter model `P`, the data shape it renders from `D`, and the rendered component type `C`.
 Built-ins: `line_chart.py`, `bar_chart.py`, `table_chart.py`, `image_series.py`, `file_list.py`
 (`dlboard/plugins/charts/`). `file_list.py` is what an artifact a browser can't show inline gets (a
-checkpoint, say): its files by run and step, each with a download link.
+checkpoint, say): its files by run and step, each with a download link. It is paged and sortable, and
+splits files into tabs by what they are -- for the checkpoints `DLBoardLogger` uploads, `Latest`, `Best`
+and `Top-k`, read from the `tag` and `score` tags the logger records. Set `key_prefix` (say
+`checkpoints/`) instead of `key` and one chart lists every key under it, so a run's hundreds of
+checkpoints (one key apiece) are one list, and Auto-generate makes exactly that.
 
 The built-in line charts, and the image series that steps through logged images:
 
@@ -31,6 +35,9 @@ Subclass `ChartType` and implement its abstract methods:
 - `hint_required_columns` / `hint_required_artifact_keys` / `hint_required_hparams` — tell the
   chart-autogen logic (`dlboard/serve/_pages/_experiment/_chart_autogen.py`) what a logged run
   needs before this chart type is even offered.
+- `hint_required_artifact_key_prefixes` (optional, none by default) — for a chart that lists a whole
+  family of artifacts (every `checkpoints/...` key) rather than named ones: every key starting with one of
+  these is fetched, including keys logged later.
 - `field_column_kinds()` — map each parameter field to the `ColumnKind` (metric/artifact/hparam)
   that populates it, so the settings UI knows what to offer as choices.
 - `can_display_artifact(artifact) -> bool` (optional, `False` by default) — say which logged artifacts this
