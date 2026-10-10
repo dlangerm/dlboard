@@ -207,7 +207,9 @@ def _render_trash(store: DataStore[...]) -> Component:
     if banner is not None:
         sections.append(banner)
     for label, entity_type in _TRASH_KINDS:
-        items = list(getattr(store, _LISTERS[entity_type])(limit=_TRASH_PAGE_SIZE_PER_KIND))
+        items = list(
+            getattr(store, _LISTERS[entity_type])(limit=_TRASH_PAGE_SIZE_PER_KIND)
+        )  # pyrefly: ignore [unknown-argument-type]
         if items:
             sections.append(_render_trash_kind(label, entity_type, items))
     if not sections:
@@ -498,7 +500,7 @@ def _admin_layout(tab: str) -> Component:
 
 
 def _register_tab_callbacks(app: Dash) -> None:
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(ADMIN_TRASH_CONTENT_ID, "children"),
         Input(ADMIN_TABS_ID, "value"),
     )
@@ -510,7 +512,7 @@ def _register_tab_callbacks(app: Dash) -> None:
         except PermissionError:
             return dmc.Text("You don't have permission to view the trash.", c="dimmed")
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(ADMIN_AUDIT_LOG_CONTENT_ID, "children"),
         Input(ADMIN_TABS_ID, "value"),
     )
@@ -520,7 +522,7 @@ def _register_tab_callbacks(app: Dash) -> None:
         store = get_data_store()
         return _render_audit_log(store, get_current_user())
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(ADMIN_USERS_CONTENT_ID, "children"),
         Input(ADMIN_TABS_ID, "value"),
     )
@@ -529,7 +531,7 @@ def _register_tab_callbacks(app: Dash) -> None:
             raise PreventUpdate
         return _render_users(get_data_store(), get_current_user(), get_auth_provider().admin_url)
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(ADMIN_ABOUT_CONTENT_ID, "children"),
         Input(ADMIN_TABS_ID, "value"),
     )
@@ -547,7 +549,7 @@ def _register_restore_callback(app: Dash) -> None:
     # listens to (`ALL`), so an in-place re-render changes the matched-component set on every
     # firing, which makes Dash re-invoke the callback again -- a runaway render loop that hangs
     # the browser. A full reload sidesteps the self-reference entirely.
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(constants.LOCATION_ID, "href", allow_duplicate=True),
         Output(constants.LOCATION_ID, "refresh", allow_duplicate=True),
         Input({"type": ADMIN_RESTORE_BUTTON_TYPE, "entity_type": ALL, "id": ALL}, "n_clicks"),
@@ -568,7 +570,7 @@ def _register_restore_callback(app: Dash) -> None:
 
 
 def _register_purge_callbacks(app: Dash) -> None:
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(ADMIN_PURGE_MODAL_ID, "opened", allow_duplicate=True),
         Output(ADMIN_PENDING_PURGE_STORE_ID, "data"),
         Input({"type": ADMIN_PURGE_BUTTON_TYPE, "entity_type": ALL, "id": ALL}, "n_clicks"),
@@ -578,7 +580,7 @@ def _register_purge_callbacks(app: Dash) -> None:
         triggered_id = cast("dict[str, str]", require_triggered_id())
         return True, dict(triggered_id)
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(ADMIN_PURGE_MODAL_ID, "opened", allow_duplicate=True),
         Input(ADMIN_PURGE_CANCEL_ID, "n_clicks"),
         prevent_initial_call=True,
@@ -591,7 +593,7 @@ def _register_purge_callbacks(app: Dash) -> None:
     # Hard-reloads back to `/admin` rather than re-rendering the trash list in place -- keeps this
     # symmetric with `restore_entity`, and avoids any similar reliance on in-place reconciliation
     # of dynamically-rendered content.
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(ADMIN_PURGE_MODAL_ID, "opened", allow_duplicate=True),
         Output(constants.LOCATION_ID, "href", allow_duplicate=True),
         Output(constants.LOCATION_ID, "refresh", allow_duplicate=True),
@@ -615,7 +617,7 @@ def _register_purge_callbacks(app: Dash) -> None:
             artifact_purge_worker.wake()
         return False, "/admin", True
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(constants.LOCATION_ID, "href", allow_duplicate=True),
         Output(constants.LOCATION_ID, "refresh", allow_duplicate=True),
         Input(ADMIN_RESUME_PURGE_ID, "n_clicks"),
@@ -630,7 +632,7 @@ def _register_purge_callbacks(app: Dash) -> None:
 
 def _register_user_action_callback(app: Dash) -> None:
     # Hard-reloads (back to the Users tab) for the same reason `restore_entity` does.
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(constants.LOCATION_ID, "href", allow_duplicate=True),
         Output(constants.LOCATION_ID, "refresh", allow_duplicate=True),
         Input({"type": ADMIN_USER_ACTION_TYPE, "action": ALL, "user": ALL}, "n_clicks"),
@@ -651,7 +653,7 @@ def _register_user_action_callback(app: Dash) -> None:
 def register(app: Dash) -> None:
     """An admin page: Trash (restore/purge), Audit Log, Users, and About tabs."""
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(PAGE_ADMIN_ID, component_property="children"),
         Input(ADMIN_INITIAL_TAB_ID, "data"),
     )

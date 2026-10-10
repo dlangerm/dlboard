@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 """Tests for the shared editable name/description header used by the project and experiment pages."""
 
 from __future__ import annotations
@@ -25,13 +24,13 @@ def _all_text(component: Any) -> list[str]:  # noqa: ANN401
     if isinstance(component, list):
         return [
             text
-            for item in component  # pyright: ignore[reportUnknownVariableType]
-            for text in _all_text(item)
+            for item in component
+            for text in _all_text(item)  # pyrefly: ignore [unknown-argument-type]
         ]
     if not hasattr(component, "to_plotly_json"):
         return []
-    children = component.to_plotly_json()["props"].get("children")
-    return _all_text(children) if children is not None else []
+    children = component.to_plotly_json()["props"].get("children")  # pyrefly: ignore [unknown-variable-type]
+    return _all_text(children) if children is not None else []  # pyrefly: ignore [unknown-argument-type]
 
 
 def test_render_header_shows_edit_button_and_description() -> None:

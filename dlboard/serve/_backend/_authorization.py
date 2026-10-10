@@ -105,7 +105,8 @@ class AuthorizingDataStore(models.DataStore[...]):
         if has_scope(self._actor, Scope.ALL):
             return ProjectRole.OWNER
         project = self._all_projects().get(project_id)
-        roles = [r for r in (self._granted_roles().get(project_id), project and project.everyone_role) if r]
+        everyone_role = project.everyone_role if project else None
+        roles = [r for r in (self._granted_roles().get(project_id), everyone_role) if r]
         return max(roles, key=list(ProjectRole).index, default=None)
 
     def _can(self, project_id: int | None, role: ProjectRole) -> bool:
@@ -280,7 +281,7 @@ class AuthorizingDataStore(models.DataStore[...]):
         match next(writable, None), next(writable, None):
             case None, _:
                 return self.create_project(models.NewProject(name=name, description=description))
-            case project, None:
+            case models.Project() as project, None:
                 return project
             case _:
                 msg = f"You can write to more than one project named {name!r}; refer to one by id instead"

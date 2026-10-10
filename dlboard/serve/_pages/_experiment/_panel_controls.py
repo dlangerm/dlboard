@@ -54,11 +54,11 @@ def _validated_layout_change(page_json: str) -> tuple[str, dict[str, Any]]:
     time reports the panel's current value back as a "change" even though nothing was actually
     touched (and a cleared number input reports nothing usable).
     """
-    if not ctx.triggered_id:  # pyright: ignore[reportUnknownMemberType]
+    if not ctx.triggered_id:
         raise PreventUpdate
-    triggered_id = cast("dict[str, str]", ctx.triggered_id)  # pyright: ignore[reportUnknownMemberType]
+    triggered_id = cast("dict[str, str]", ctx.triggered_id)
     panel_name = triggered_id["panel"]
-    value = cast("Any", ctx.triggered[0]["value"])
+    value = cast("Any", ctx.triggered[0]["value"])  # pyrefly: ignore [unsupported-operation]
     match triggered_id["type"]:
         case core.PANEL_LAYOUT_TYPE:
             edit = {"layout": value}
@@ -118,7 +118,7 @@ class _RenameTabCtx(core.EditCtx):
 
 
 def _register_create_panel(app: Dash) -> None:
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Output(core.NEW_PANEL_NAME_ID, "error"),
@@ -159,7 +159,7 @@ def _register_create_panel(app: Dash) -> None:
 
 
 def _register_add_chart(app: Dash) -> None:
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
         Output(core.ADD_CHART_MODAL_ID, "opened", allow_duplicate=True),
         Output(core.ADD_CHART_ERROR_ID, "children", allow_duplicate=True),
@@ -208,7 +208,7 @@ def _register_add_chart(app: Dash) -> None:
 
 def _register_delete_chart(app: Dash) -> None:
     # --- delete chart: click opens a confirm modal, Delete in the modal does the actual mutation ---
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(core.DELETE_CHART_MODAL_ID, "opened", allow_duplicate=True),
         Output(core.DELETE_CHART_TARGET_ID, "data"),
         Input({"type": "delete-chart", "panel": ALL, "index": ALL}, "n_clicks"),
@@ -218,7 +218,7 @@ def _register_delete_chart(app: Dash) -> None:
         triggered_id = cast("core.ChartTargetData", core.require_triggered_id())
         return True, {"panel": triggered_id["panel"], "index": triggered_id["index"]}
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Output(core.DELETE_CHART_MODAL_ID, "opened", allow_duplicate=True),
@@ -255,7 +255,7 @@ def _register_delete_chart(app: Dash) -> None:
         )
         return container, page.model_dump_json(), False
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(core.DELETE_CHART_MODAL_ID, "opened", allow_duplicate=True),
         Input(core.DELETE_CHART_CANCEL_ID, "n_clicks"),
         prevent_initial_call=True,
@@ -268,7 +268,7 @@ def _register_delete_chart(app: Dash) -> None:
 
 def _register_delete_panel(app: Dash) -> None:
     # --- delete panel: same shape as delete chart, above ---
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(core.DELETE_PANEL_MODAL_ID, "opened", allow_duplicate=True),
         Output(core.DELETE_PANEL_TARGET_ID, "data"),
         Input({"type": "delete-panel", "panel": ALL}, "n_clicks"),
@@ -278,7 +278,7 @@ def _register_delete_panel(app: Dash) -> None:
         triggered_id = cast("dict[str, str]", core.require_triggered_id())
         return True, triggered_id["panel"]
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Output(core.DELETE_PANEL_MODAL_ID, "opened", allow_duplicate=True),
@@ -309,7 +309,7 @@ def _register_delete_panel(app: Dash) -> None:
         )
         return container, page.model_dump_json(), False
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(core.DELETE_PANEL_MODAL_ID, "opened", allow_duplicate=True),
         Input(core.DELETE_PANEL_CANCEL_ID, "n_clicks"),
         prevent_initial_call=True,
@@ -329,7 +329,7 @@ def _register_reorder(app: Dash) -> None:
     moves between may not be in it. That rebuild fetches only the pages being shown.
     """
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Input(core.PANEL_REORDER_STORE_ID, "data"),
@@ -352,7 +352,7 @@ def _register_reorder(app: Dash) -> None:
         )
         return container, page.model_dump_json()
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Input(core.CHART_REORDER_STORE_ID, "data"),
@@ -378,7 +378,7 @@ def _register_reorder(app: Dash) -> None:
 
 
 def _register_toggle(app: Dash) -> None:
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Input({"type": "panel-sync", "panel": ALL}, "checked"),
@@ -394,11 +394,11 @@ def _register_toggle(app: Dash) -> None:
         # Unlike button clicks, a Switch's `checked` is a meaningful trigger value even when
         # `False`, so this can't reuse `require_triggered_id`'s "falsy value means no real
         # trigger" check.
-        if not ctx.triggered_id:  # pyright: ignore[reportUnknownMemberType]
+        if not ctx.triggered_id:
             raise PreventUpdate
-        triggered_id = cast("dict[str, str]", ctx.triggered_id)  # pyright: ignore[reportUnknownMemberType]
+        triggered_id = cast("dict[str, str]", ctx.triggered_id)
         panel_name = triggered_id["panel"]
-        sync = bool(cast("Any", ctx.triggered[0]["value"]))
+        sync = bool(cast("Any", ctx.triggered[0]["value"]))  # pyrefly: ignore [unsupported-operation]
 
         # Like `sync_run_selection` (`_run_comparison_table.py`): this Switch's `checked` is *set
         # from* the panel's current `sync` value on every render, so a panel-sync switch mounting
@@ -421,7 +421,7 @@ def _register_toggle(app: Dash) -> None:
         )
         return container, page.model_dump_json()
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Input({"type": core.PANEL_LAYOUT_TYPE, "panel": ALL}, "value"),
@@ -440,14 +440,14 @@ def _register_toggle(app: Dash) -> None:
     # A grid's column count is only CSS: the browser applies it the instant the number changes, and the
     # server just saves it. Rebuilding every chart in a big panel for it (as the layout toggle above
     # must) blanked the page for as long as that took, on every click of the counter.
-    app.clientside_callback(  # pyright: ignore[reportUnknownMemberType]
+    app.clientside_callback(
         _PANEL_GRID_COLUMNS_JS.source,
         Output({"type": core.PANEL_GRID_TYPE, "panel": MATCH}, "cols"),
         Input({"type": core.PANEL_GRID_COLUMNS_TYPE, "panel": MATCH}, "value"),
         prevent_initial_call=True,
     )
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Input({"type": core.PANEL_GRID_COLUMNS_TYPE, "panel": ALL}, "value"),
         State(core.STATE_PAGE_STORAGE, "data"),
@@ -470,7 +470,7 @@ def _register_tab_drop(app: Dash) -> None:
     vanish from view into a tab you're not looking at.
     """
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Input(core.TAB_DROP_STORE_ID, "data"),
@@ -504,7 +504,7 @@ def _register_tab_drop(app: Dash) -> None:
         )
         return container, page.model_dump_json()
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Input(core.CHART_TAB_DROP_STORE_ID, "data"),
@@ -544,7 +544,7 @@ def _register_chart_panel_move(app: Dash) -> None:
     somehow targets its own panel.
     """
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Input(core.CHART_PANEL_MOVE_STORE_ID, "data"),
@@ -583,7 +583,7 @@ def _panels_with_renamed_panel(
 
 
 def _register_rename(app: Dash) -> None:
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(core.RENAME_PANEL_MODAL_ID, "opened", allow_duplicate=True),
         Output(core.RENAME_PANEL_TARGET_ID, "data"),
         Output(core.RENAME_PANEL_NAME_INPUT_ID, "value"),
@@ -596,7 +596,7 @@ def _register_rename(app: Dash) -> None:
         panel_name = triggered_id["panel"]
         return True, panel_name, panel_name, ""
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Output(core.RENAME_PANEL_MODAL_ID, "opened", allow_duplicate=True),
@@ -646,7 +646,7 @@ def _register_rename(app: Dash) -> None:
         )
         return container, page.model_dump_json(), False, ""
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(core.RENAME_PANEL_MODAL_ID, "opened", allow_duplicate=True),
         Input(core.RENAME_PANEL_CANCEL_ID, "n_clicks"),
         prevent_initial_call=True,
@@ -699,7 +699,7 @@ def _register_new_tab(app: Dash) -> None:
     tab) instead, so there's always somewhere to drag or add a chart into right away.
     """
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(core.NEW_TAB_MODAL_ID, "opened", allow_duplicate=True),
         Output(core.NEW_TAB_NAME_INPUT_ID, "value"),
         Output(core.NEW_TAB_PANELS_SELECT_ID, "data"),
@@ -715,7 +715,7 @@ def _register_new_tab(app: Dash) -> None:
         page = core.BasicExperimentPage.model_validate_json(page_json)
         return True, "", [p.name for p in page.panels], [], ""
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Output(core.NEW_TAB_MODAL_ID, "opened", allow_duplicate=True),
@@ -752,7 +752,7 @@ def _register_new_tab(app: Dash) -> None:
         )
         return container, page.model_dump_json(), False, ""
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(core.NEW_TAB_MODAL_ID, "opened", allow_duplicate=True),
         Input(core.NEW_TAB_CANCEL_ID, "n_clicks"),
         prevent_initial_call=True,
@@ -777,7 +777,7 @@ def _rename_tab_error(old_name: str, new_name: str, panels: list[PanelInstance[A
 def _register_rename_tab(app: Dash) -> None:
     """Rename whichever tab is currently active (read off `PANEL_TABS_ID`'s own value)."""
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(core.RENAME_TAB_MODAL_ID, "opened", allow_duplicate=True),
         Output(core.RENAME_TAB_TARGET_ID, "data"),
         Output(core.RENAME_TAB_NAME_INPUT_ID, "value"),
@@ -792,7 +792,7 @@ def _register_rename_tab(app: Dash) -> None:
             raise PreventUpdate
         return True, active_tab, active_tab, ""
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Output(core.RENAME_TAB_MODAL_ID, "opened", allow_duplicate=True),
@@ -821,7 +821,7 @@ def _register_rename_tab(app: Dash) -> None:
             return no_update, no_update, no_update, error
 
         active_tab = curr_page.page_settings.get(core.ACTIVE_TAB_KEY)
-        extra_settings = {core.ACTIVE_TAB_KEY: new_name} if active_tab == old_name else {}
+        extra_settings: dict[str, str] = {core.ACTIVE_TAB_KEY: new_name} if active_tab == old_name else {}
 
         page, container = core.mutate_panels_and_rerender(
             rename_ctx["page_json"],
@@ -831,7 +831,7 @@ def _register_rename_tab(app: Dash) -> None:
         )
         return container, page.model_dump_json(), False, ""
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(core.RENAME_TAB_MODAL_ID, "opened", allow_duplicate=True),
         Input(core.RENAME_TAB_CANCEL_ID, "n_clicks"),
         prevent_initial_call=True,

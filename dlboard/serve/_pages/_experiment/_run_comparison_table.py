@@ -173,7 +173,9 @@ def _load_hparam_view_data(
     hparam_keys = sorted(set(itertools.chain(*[list(k.hparams_dict.keys()) for k in hydrated])))
     metric_keys = [s.key for s in store.summarize_metric_keys(experiment_id)]
     wanted = frozenset(selected_metrics & set(metric_keys))
-    latest = store.fetch_metrics(experiment_id, keys=wanted).latest_per_run() if wanted else {}
+    latest: dict[int, dict[str, float]] = (
+        store.fetch_metrics(experiment_id, keys=wanted).latest_per_run() if wanted else {}
+    )
     rows = _build_hparam_rows(runs, hparams_by_run, latest)
     return hparam_keys, metric_keys, rows
 
@@ -441,7 +443,7 @@ def _render_signature(
 
 
 def _register_hparam_table(app: Dash) -> None:
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(constants.NAVBAR_RUN_LIST_ID, "children"),
         Input(core.STATE_HPARAMS, "data"),
         Input(constants.STATE_EXPERIMENT_ID, "data", allow_optional=True),
@@ -512,7 +514,7 @@ def _register_hparam_table(app: Dash) -> None:
     # The Apply button only makes sense once the picked columns diverge from what's applied --
     # comparing client-side (rather than round-tripping through a server callback per keystroke)
     # keeps this instant and avoids yet another spurious-rerender source.
-    app.clientside_callback(  # pyright: ignore[reportUnknownMemberType]
+    app.clientside_callback(
         _HPARAM_COLS_CHANGED_JS.source,
         Output(NAVBAR_HPARAM_CONFIRM_COLS_ID, "style"),
         Input(NAVBAR_HPARAM_COL_SELECT_ID, "value"),
@@ -520,7 +522,7 @@ def _register_hparam_table(app: Dash) -> None:
         prevent_initial_call=True,
     )
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Input(NAVBAR_HPARAM_CONFIRM_COLS_ID, "n_clicks", allow_optional=True),
         State(NAVBAR_HPARAM_COL_SELECT_ID, "value", allow_optional=True),
@@ -541,7 +543,7 @@ def _register_hparam_table(app: Dash) -> None:
         )
         return page.model_dump_json()
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
         Input(NAVBAR_HPARAM_DATATABLE_ID, "selectedRows", allow_optional=True),
@@ -596,7 +598,7 @@ def _register_hparam_table(app: Dash) -> None:
 
 
 def _register_delete_run(app: Dash) -> None:
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(DELETE_RUN_MODAL_ID, "opened", allow_duplicate=True),
         Output(DELETE_RUN_PENDING_STORE_ID, "data"),
         Input(NAVBAR_HPARAM_DATATABLE_ID, "cellClicked", allow_optional=True),
@@ -607,7 +609,7 @@ def _register_delete_run(app: Dash) -> None:
             raise PreventUpdate
         return True, int(cast("str", cell_clicked["rowId"]))
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(DELETE_RUN_MODAL_ID, "opened", allow_duplicate=True),
         Input(DELETE_RUN_CANCEL_ID, "n_clicks"),
         prevent_initial_call=True,
@@ -617,7 +619,7 @@ def _register_delete_run(app: Dash) -> None:
             raise PreventUpdate
         return False
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(constants.LOCATION_ID, "href", allow_duplicate=True),
         Output(constants.LOCATION_ID, "refresh", allow_duplicate=True),
         Output(DELETE_RUN_MODAL_ID, "opened", allow_duplicate=True),

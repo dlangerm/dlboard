@@ -82,6 +82,6 @@ def _download(artifact_id: int) -> Response:
 
 def register(app: Dash) -> None:
     """Register the `/artifact/<id>` download route onto `app`."""
-    prefix = str(app.config.routes_pathname_prefix)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    prefix = str(app.config.routes_pathname_prefix)  # pyrefly: ignore [unknown-argument-type]
     route = f"{prefix}artifact/<int:artifact_id>"
     app.server.add_url_rule(route, endpoint=route, view_func=_download, methods=["GET"])

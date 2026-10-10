@@ -62,7 +62,7 @@ class GranianSettings(BaseSettings):
 
 def resolve_plugins(target: str) -> list[PluginProtocol]:
     """Import and validate the `list[PluginProtocol]` at `target`, e.g. `"myapp.deployment:PLUGINS"`."""
-    return WSGISettings(dlboard_plugins=target).dlboard_plugins  # pyright: ignore[reportArgumentType]
+    return WSGISettings(dlboard_plugins=target).dlboard_plugins
 
 
 def run_production_server(  # noqa: PLR0913

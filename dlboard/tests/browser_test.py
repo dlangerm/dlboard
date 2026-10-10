@@ -541,7 +541,9 @@ def test_navbar_columns_picker_applies_a_selected_column(
     page.reload()
 
     ag_grid_warnings: list[str] = []
-    page.on("console", lambda msg: ag_grid_warnings.append(msg.text) if "AG Grid" in msg.text else None)
+    page.on(
+        "console", lambda msg: ag_grid_warnings.append(msg.text) if "AG Grid" in msg.text else None
+    )  # pyrefly: ignore [bad-argument-type]
 
     grid = page.locator(f"#{NAVBAR_HPARAM_DATATABLE_ID}")
     expect(grid.locator(".ag-center-cols-container .ag-row")).to_have_count(2)
@@ -1391,7 +1393,9 @@ def test_changes_in_a_saved_view_leave_the_shared_view_alone(
     _open_panel_menu(page)
     page.get_by_text("Grid", exact=True).first.click()
     _wait_until(
-        lambda: [p.layout for p in store.get_view(BasicExperimentPage, view_id).panels][:1],  # pyright: ignore[reportOptionalMemberAccess]
+        lambda: [p.layout for p in store.get_view(BasicExperimentPage, view_id).panels][
+            :1
+        ],  # pyrefly: ignore [missing-attribute]
         ["grid"],
     )
     # A grid panel's column count is its own setting too, saved with the view and surviving a reload.
@@ -1401,7 +1405,9 @@ def test_changes_in_a_saved_view_leave_the_shared_view_alone(
     columns.fill("2")
     columns.press("Enter")
     _wait_until(
-        lambda: [p.grid_columns for p in store.get_view(BasicExperimentPage, view_id).panels][:1],  # pyright: ignore[reportOptionalMemberAccess]
+        lambda: [p.grid_columns for p in store.get_view(BasicExperimentPage, view_id).panels][
+            :1
+        ],  # pyrefly: ignore [missing-attribute]
         [2],
     )
     page.reload()

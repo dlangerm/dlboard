@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 """Tests for the shared `_delete_confirm.py` button+modal markup."""
 
 from __future__ import annotations
@@ -38,7 +37,7 @@ def test_render_delete_control_icon_only_renders_a_tooltipped_trash_icon() -> No
     )
 
     assert tooltip.label == "Delete project"
-    button = props(tooltip.children)
+    button = props(tooltip.children)  # pyrefly: ignore [unknown-argument-type]
     assert button["id"] == "btn"
     assert button["aria-label"] == "Delete project"
     assert Icon.DELETE.class_name in button["children"].className

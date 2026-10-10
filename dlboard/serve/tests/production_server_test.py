@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 """Tests for `dlboard.serve._production_server`: resolving a plugin list from an import path."""
 
 from __future__ import annotations
@@ -30,4 +29,4 @@ def test_resolve_plugins_rejects_a_list_of_non_plugins() -> None:
 def test_wsgi_settings_reads_from_the_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DLBOARD_PLUGINS", "dlboard.plugins:LOCAL_DEPLOYMENT")
 
-    assert len(WSGISettings().dlboard_plugins) > 0  # pyright: ignore[reportCallIssue]
+    assert len(WSGISettings().dlboard_plugins) > 0

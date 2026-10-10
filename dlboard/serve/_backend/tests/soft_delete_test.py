@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 """Tests for cascading soft-delete/restore/purge and the read/write guards around them, on every backend."""
 
 from __future__ import annotations

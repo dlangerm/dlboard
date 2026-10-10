@@ -35,7 +35,7 @@ class _CallbackRequest(BaseModel):
 
 def install_stale_page_guard(app: Dash) -> None:
     """Answer callback requests the app no longer has the shape of with a 409, and serve the banner script."""
-    update_path = f"{app.config.routes_pathname_prefix}_dash-update-component"  # pyright: ignore[reportUnknownMemberType]
+    update_path = f"{app.config.routes_pathname_prefix}_dash-update-component"
     serve_asset(app, AssetKind.SCRIPT, _BANNER_JS.name, _BANNER_JS.read_bytes())
 
     @app.server.before_request
@@ -47,7 +47,7 @@ def install_stale_page_guard(app: Dash) -> None:
         except ValidationError:
             return None  # not a request Dash would understand either; let it say so
         # Dash ships no types for its callback registry.
-        callback = cast("dict[str, Any] | None", app.callback_map.get(sent.output))  # pyright: ignore[reportUnknownMemberType]
+        callback = cast("dict[str, Any] | None", app.callback_map.get(sent.output))
         if callback is not None:
             expected = len(cast("list[Any]", callback["inputs"])) + len(cast("list[Any]", callback["state"]))
             if expected == len(sent.inputs) + len(sent.state):

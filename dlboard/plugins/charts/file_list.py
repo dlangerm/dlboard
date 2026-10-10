@@ -88,7 +88,7 @@ def _file_rows(parameters: FileListSettings, dataframe: pd.DataFrame) -> list[di
         key = column.removeprefix(ARTIFACT_COLUMN_PREFIX)
         for _, file in dataframe.loc[dataframe[column].notna()].iterrows():
             raw_tags = file.get(tags_column)
-            tags = cast("dict[str, str]", raw_tags) if isinstance(raw_tags, dict) else {}
+            tags: dict[str, str] = cast("dict[str, str]", raw_tags) if isinstance(raw_tags, dict) else {}
             run_id = int(file[MetricColumn.RUN_ID])
             run_name = file.get(RUN_NAME_COLUMN)
             rows.append(

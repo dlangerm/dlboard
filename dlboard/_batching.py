@@ -143,7 +143,8 @@ def ship_batches(
                     consecutive_failures = 0
                 else:
                     _log.exception("Failed to ship a batch of %s, retrying", len(batch))
-                    backoff = params.wait_sec * 2 ** min(consecutive_failures, _MAX_BACKOFF_FACTOR)
+                    # `int ** int` is typed `Any` (it's a float for a negative exponent), hence the annotation.
+                    backoff: float = params.wait_sec * 2 ** min(consecutive_failures, _MAX_BACKOFF_FACTOR)
                     jitter = backoff * _JITTER_FRACTION
                     time.sleep(backoff + random.uniform(-jitter, jitter))
                     consecutive_failures += 1

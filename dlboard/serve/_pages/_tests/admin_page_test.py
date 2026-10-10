@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 """Tests for the admin page's pure rendering functions (trash list, audit log, layout)."""
 
 from __future__ import annotations
@@ -136,9 +135,9 @@ def test_render_audit_log_lists_a_recorded_action(store: SQLLiteStore) -> None:
     rendered = cast("Any", admin._render_audit_log(store, admin_user))
 
     # one row in the table body (`rendered.children` is [Thead, Tbody])
-    body_rows = rendered.children[1].children
-    assert len(body_rows) == 1
-    action_cell = body_rows[0].children[2]
+    body_rows = rendered.children[1].children  # pyrefly: ignore [unknown-variable-type]
+    assert len(body_rows) == 1  # pyrefly: ignore [unknown-argument-type]
+    action_cell = body_rows[0].children[2]  # pyrefly: ignore [unknown-variable-type]
     assert action_cell.children.children == "soft delete"
 
 
@@ -182,7 +181,7 @@ def test_render_users_add_user_link_forces_a_full_page_load(store: SQLLiteStore)
 
     rendered = admin._render_users(store, admin_user, "/password/admin")
 
-    add_user_link = cast("Any", rendered).children[0]
+    add_user_link = cast("Any", rendered).children[0]  # pyrefly: ignore [unknown-variable-type]
     assert add_user_link.href == "/password/admin"
     assert add_user_link.refresh is True
 

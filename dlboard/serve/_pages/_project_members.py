@@ -159,7 +159,7 @@ def register_members_callbacks(app: Dash) -> None:
         Output(constants.LOCATION_ID, "refresh", allow_duplicate=True),
     )
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(MEMBERS_ERROR_ID, "children", allow_duplicate=True),
         Input(EVERYONE_ROLE_ID, "value"),
         State(constants.STATE_PROJECT_ID, "data"),
@@ -167,43 +167,43 @@ def register_members_callbacks(app: Dash) -> None:
     )
     def set_everyone_role(value: str, project_id: int) -> str:
         store = get_data_store()
-        project = store.get_project(int(project_id))
+        project = store.get_project(project_id)
         if project is None:
             return "Project not found"
         everyone = None if value == _NOBODY else ProjectRole(value)
         store.update_project(project.model_copy(update={"everyone_role": everyone}))
         return ""
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(MEMBERS_ERROR_ID, "children", allow_duplicate=True),
         Input({"type": MEMBER_ROLE_TYPE, "grant": ALL}, "value"),
         State(constants.STATE_PROJECT_ID, "data"),
         prevent_initial_call=True,
     )
     def change_role(_values: list[str], project_id: int) -> str:
-        grant_id = int(cast("dict[str, int]", require_triggered_id())["grant"])
+        grant_id = cast("dict[str, int]", require_triggered_id())["grant"]
         store = get_data_store()
-        grant = next((g for g in store.list_project_grants([int(project_id)]) if g.id == grant_id), None)
+        grant = next((g for g in store.list_project_grants([project_id]) if g.id == grant_id), None)
         if grant is None:
             return "That member was already removed"
-        role = ProjectRole(ctx.triggered[0]["value"])
+        role = ProjectRole(ctx.triggered[0]["value"])  # pyrefly: ignore [unsupported-operation]
         store.set_project_grant(
             NewProjectGrant.model_validate(grant.model_dump(exclude={"id"}) | {"role": role})
         )
         return ""
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         *reload_outputs,
         Input({"type": MEMBER_REMOVE_TYPE, "grant": ALL}, "n_clicks"),
         State(constants.STATE_PROJECT_ID, "data"),
         prevent_initial_call=True,
     )
     def remove_member(_clicks: list[int], project_id: int) -> tuple[str, bool]:
-        grant_id = int(cast("dict[str, int]", require_triggered_id())["grant"])
-        get_data_store().delete_project_grant(int(project_id), grant_id)
+        grant_id = cast("dict[str, int]", require_triggered_id())["grant"]
+        get_data_store().delete_project_grant(project_id, grant_id)
         return relative_path(f"/project/{project_id}"), True
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         *reload_outputs,
         Output(MEMBERS_ERROR_ID, "children", allow_duplicate=True),
         Input(ADD_BUTTON_ID, "n_clicks"),
@@ -218,7 +218,7 @@ def register_members_callbacks(app: Dash) -> None:
     ) -> tuple[Any, Any, str]:
         if not n_clicks and not n_submit:
             raise PreventUpdate
-        grant = _new_grant(int(project_id), (grantee or "").strip(), ProjectRole(role))
+        grant = _new_grant(project_id, (grantee or "").strip(), ProjectRole(role))
         if isinstance(grant, str):
             return no_update, no_update, grant
         get_data_store().set_project_grant(grant)

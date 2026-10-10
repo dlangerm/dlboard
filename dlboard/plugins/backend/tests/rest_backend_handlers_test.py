@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 """Tests for the REST route handler functions: `created_by` stamping and the soft-delete/restore
 handlers -- all against a real store and an already-resolved actor, without needing a live Flask
 request or auth provider.

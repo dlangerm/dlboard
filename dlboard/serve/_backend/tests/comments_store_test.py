@@ -18,7 +18,7 @@ def test_a_thread_lists_notes_oldest_first_and_bumps_only_the_notes_revision(
     store: SQLLiteStore, experiment_id: int
 ) -> None:
     me = store.get_or_create_user(models.Principal.unverified("me"))
-    revision_before = store.get_experiment(experiment_id).revision  # pyright: ignore[reportOptionalMemberAccess]
+    revision_before = store.get_experiment(experiment_id).revision  # pyrefly: ignore [missing-attribute]
 
     first = store.add_comment(
         models.NewComment(experiment_id=experiment_id, author_id=me.id, body="lr too high?")
@@ -33,7 +33,9 @@ def test_a_thread_lists_notes_oldest_first_and_bumps_only_the_notes_revision(
     assert store.list_comments(experiment_id)[1].run_ids == [3]
     assert _notes_revision(store, experiment_id) == 2
     # Posting a note mustn't look like new data to the chart poll.
-    assert store.get_experiment(experiment_id).revision == revision_before  # pyright: ignore[reportOptionalMemberAccess]
+    assert (
+        store.get_experiment(experiment_id).revision == revision_before
+    )  # pyrefly: ignore [missing-attribute]
 
 
 def test_only_its_author_can_delete_a_note(store: SQLLiteStore, experiment_id: int) -> None:

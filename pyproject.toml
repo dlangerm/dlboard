@@ -17,7 +17,7 @@ dev = [
   # `DeviceStatsMonitor(cpu_stats=True)` (used by `examples/lightning_advanced.py`) reads CPU stats through it.
   "psutil>=7.2.2",
   "psycopg[binary]>=3.2",
-  "pyright>=1.1.411",
+  "pyrefly>=1.3.2",
   "pytest>=9.1.1",
   "pytest-cov>=7.1.0",
   "pytest-playwright>=0.9.0",
@@ -48,14 +48,34 @@ skip_covered = false
 branch = true
 source = ["dlboard"]
 
-[tool.pyright]
-include = ["dlboard"]
-reportMissingTypeStubs = false
-reportUnnecessaryTypeIgnoreComment = "error"
-reportUnusedFunction = false
-typeCheckingMode = "strict"
-venv = ".venv"
-venvPath = "."
+[tool.pyrefly]
+infer-with-first-use = false
+project-includes = ["dlboard"]
+
+# Pyrefly has no single `strict` switch, so the error kinds that pyright's strict mode turned on are
+# listed here by hand. `untyped-import` stays off, so third-party packages without type information don't error.
+[tool.pyrefly.errors]
+deprecated = "error"
+implicit-any = "error"
+implicit-any-attribute = "error"
+implicit-any-empty-container = "error"
+implicit-any-lambda = "error"
+implicit-any-parameter = "error"
+implicit-any-type-argument = "error"
+implicit-reexport = "error"
+missing-override-decorator = "error"
+redundant-cast = "error"
+redundant-condition = "error"
+unannotated-attribute = "error"
+unannotated-parameter = "error"
+unannotated-return = "error"
+unknown-argument-type = "error"
+unknown-attribute-type = "error"
+unknown-variable-type = "error"
+unnecessary-comparison = "error"
+unnecessary-type-conversion = "error"
+untyped-import = "ignore"
+unused-ignore = "error"
 
 [tool.pytest.ini_options]
 filterwarnings = [

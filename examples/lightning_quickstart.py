@@ -36,8 +36,8 @@ def plot_confusion_matrix(counts: np.ndarray) -> Figure:
     n = counts.shape[0]
     fig = Figure(figsize=(8, 8), layout="constrained")
     ax = fig.subplots()
-    ax.imshow(counts, cmap="Blues")  # pyright: ignore[reportUnknownMemberType]
-    ax.set(  # pyright: ignore[reportUnknownMemberType]
+    ax.imshow(counts, cmap="Blues")
+    ax.set(
         xticks=range(n),
         yticks=range(n),
         xlabel="Predicted",
@@ -47,7 +47,7 @@ def plot_confusion_matrix(counts: np.ndarray) -> Figure:
     threshold = counts.max() / 2
     for row in range(n):
         for col in range(n):
-            ax.text(  # pyright: ignore[reportUnknownMemberType]
+            ax.text(
                 col,
                 row,
                 str(counts[row, col]),
@@ -177,13 +177,13 @@ class MnistDataModule(pl.LightningDataModule):
 
         train_size = int(len(full_train) * 0.9)
         val_size = len(full_train) - train_size
-        self.train_dataset, self.val_dataset = random_split(full_train, [train_size, val_size])  # pyright: ignore[reportUnknownMemberType]
+        self.train_dataset, self.val_dataset = random_split(full_train, [train_size, val_size])
         self.test_dataset = full_test
 
     @override
     def train_dataloader(self) -> DataLoader[datasets.MNIST]:
         return DataLoader[datasets.MNIST](
-            self.train_dataset,  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+            self.train_dataset,
             batch_size=self.batch_size,
             shuffle=True,
             num_workers=7,
@@ -192,7 +192,7 @@ class MnistDataModule(pl.LightningDataModule):
     @override
     def val_dataloader(self) -> DataLoader[datasets.MNIST]:
         return DataLoader[datasets.MNIST](
-            self.val_dataset,  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+            self.val_dataset,
             batch_size=self.batch_size,
             shuffle=False,
             num_workers=2,

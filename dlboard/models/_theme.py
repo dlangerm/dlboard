@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 else:
     # dash-mantine-components' `Theme` TypedDict names its nested types as string forward refs that
     # only resolve inside `MantineProvider`'s class body, which pydantic can't follow -- so a theme
-    # is statically checked against it (pyright catches a mistyped key in any theme plugin) but
+    # is statically checked against it (pyrefly catches a mistyped key in any theme plugin) but
     # validated as a plain dict at runtime, then handed to Mantine as-is.
     MantineTheme = dict[str, Any]
 

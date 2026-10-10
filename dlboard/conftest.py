@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 """Shared fixtures and Dash-component helpers for the test suite."""
 
 from __future__ import annotations
@@ -66,7 +65,7 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     Their images depend on the whole database (the home page lists every project), so a run that
     asks for screenshots renders them in a process that ran nothing else.
     """
-    screenshots_requested = config.getoption("--screenshots") is not None
+    screenshots_requested: bool = config.getoption("--screenshots") is not None
     if screenshots_requested:
         deselected = [item for item in items if item.get_closest_marker("screenshots") is None]
         config.hook.pytest_deselected(items=deselected)
@@ -176,7 +175,7 @@ def s3_test_server() -> Iterator[S3Settings]:
 
     bucket = "dlboard-test"
     with LocalStackContainer() as localstack:
-        localstack.get_client("s3").create_bucket(  # pyright: ignore[reportUnknownMemberType, reportCallIssue]
+        localstack.get_client("s3").create_bucket(
             Bucket=bucket, CreateBucketConfiguration={"LocationConstraint": localstack.region_name}
         )
         yield S3Settings(
@@ -401,7 +400,8 @@ def backend_server(
                 "DLBOARD_S3_SECRET_ACCESS_KEY",
                 s3_config.secret_access_key.get_secret_value() if s3_config.secret_access_key else "",
             )
-            monkeypatch.setenv("DLBOARD_S3_DOWNLOAD_MODE", request.getfixturevalue("s3_download_mode").value)
+            download_mode = cast("S3DownloadMode", request.getfixturevalue("s3_download_mode"))
+            monkeypatch.setenv("DLBOARD_S3_DOWNLOAD_MODE", download_mode.value)
             artifact_plugin = s3
     try:
         app = build_app(
@@ -426,7 +426,7 @@ def props(component: object) -> dict[str, Any]:
     Extract a rendered Dash component's props.
 
     dash-mantine-components ships no py.typed marker, so its component attrs are Unknown to
-    pyright regardless of how this is typed.
+    pyrefly regardless of how this is typed.
     """
     return cast("Any", component).to_plotly_json()["props"]
 

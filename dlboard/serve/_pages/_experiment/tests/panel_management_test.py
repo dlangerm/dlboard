@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 """Tests for the panel accordion header (hover controls) and the panel-mutation helpers.
 
 Sync/layout/rename/drag/delete all render as hover-revealed controls on each panel's own accordion
@@ -15,7 +14,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 import dash_mantine_components as dmc
 import pandas as pd
 import pytest
-from dash._utils import to_json  # pyright: ignore[reportUnknownVariableType]
+from dash._utils import to_json
 from pydantic import ValidationError
 
 from dlboard.conftest import find_props as _find_props
@@ -64,10 +63,10 @@ def test_panel_header_controls_shows_sync_and_layout_state() -> None:
     synced = state.panel_header_controls(PanelInstance[Any, Any](name="p", sync=True, layout="grid"))
     unsynced = state.panel_header_controls(PanelInstance[Any, Any](name="p", sync=False, layout="packed"))
 
-    assert _find_props(synced, state.panel_sync_switch_id("p"))["checked"] is True  # pyright: ignore[reportOptionalSubscript]
-    assert _find_props(synced, state.panel_layout_control_id("p"))["value"] == "grid"  # pyright: ignore[reportOptionalSubscript]
-    assert _find_props(unsynced, state.panel_sync_switch_id("p"))["checked"] is False  # pyright: ignore[reportOptionalSubscript]
-    assert _find_props(unsynced, state.panel_layout_control_id("p"))["value"] == "packed"  # pyright: ignore[reportOptionalSubscript]
+    assert _find_props(synced, state.panel_sync_switch_id("p"))["checked"] is True  # pyrefly: ignore [unsupported-operation]
+    assert _find_props(synced, state.panel_layout_control_id("p"))["value"] == "grid"  # pyrefly: ignore [unsupported-operation]
+    assert _find_props(unsynced, state.panel_sync_switch_id("p"))["checked"] is False  # pyrefly: ignore [unsupported-operation]
+    assert _find_props(unsynced, state.panel_layout_control_id("p"))["value"] == "packed"  # pyrefly: ignore [unsupported-operation]
 
 
 # ---- reorder_panel ----
@@ -115,8 +114,8 @@ def test_apply_panel_sync_drops_sync_id_when_disabled() -> None:
 
     result = state._apply_panel_sync(chart, panel_name="train", sync=False)
 
-    assert "syncId" not in result.lineChartProps  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
-    assert result.lineChartProps["syncMethod"] == "value"  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+    assert "syncId" not in result.lineChartProps  # pyrefly: ignore [missing-attribute]
+    assert result.lineChartProps["syncMethod"] == "value"  # pyrefly: ignore [bad-index]
 
 
 # ---- panel layout: segmented control, grid column count, update_panel ----
@@ -142,7 +141,7 @@ def test_a_grid_panel_renders_with_its_own_column_count() -> None:
     rendered = state.render_panel_content_from_df(panel, pd.DataFrame())
 
     assert isinstance(rendered, dmc.SimpleGrid)
-    assert rendered.cols == 2  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+    assert rendered.cols == 2  # pyrefly: ignore [missing-attribute]
 
 
 @pytest.mark.parametrize(("layout", "shows_columns"), [("grid", True), ("packed", False)])
@@ -162,7 +161,7 @@ def test_apply_panel_sync_scopes_sync_id_to_the_panel_when_enabled() -> None:
 
     result = state._apply_panel_sync(chart, panel_name="train", sync=True)
 
-    assert result.lineChartProps["syncId"] == "train:step"  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+    assert result.lineChartProps["syncId"] == "train:step"  # pyrefly: ignore [missing-attribute]
 
 
 def test_apply_panel_sync_scoping_keeps_different_panels_apart() -> None:
@@ -173,7 +172,7 @@ def test_apply_panel_sync_scoping_keeps_different_panels_apart() -> None:
     train_result = state._apply_panel_sync(train_chart, panel_name="train", sync=True)
     val_result = state._apply_panel_sync(val_chart, panel_name="val", sync=True)
 
-    assert train_result.lineChartProps["syncId"] != val_result.lineChartProps["syncId"]  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType]
+    assert train_result.lineChartProps["syncId"] != val_result.lineChartProps["syncId"]  # pyrefly: ignore [missing-attribute]
 
 
 def test_apply_panel_sync_ignores_non_line_charts() -> None:
@@ -292,15 +291,15 @@ def test_render_groups_panels_into_tabs_by_the_tab_field(store: SQLLiteStore, ex
 
     rendered = page.render(store, experiment_id)
     assert isinstance(rendered, dmc.Tabs)
-    tabs_row = rendered.children[0]  # pyright: ignore[reportUnknownMemberType, reportOptionalSubscript, reportUnknownVariableType]
-    tabs_and_buttons = tabs_row.children[0]  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
-    tabs_list = tabs_and_buttons.children[0]  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
-    tabs = tabs_list.children  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
-    tab_labels = {tab.children for tab in tabs}  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    tabs_row = rendered.children[0]  # pyrefly: ignore [unsupported-operation]
+    tabs_and_buttons = tabs_row.children[0]
+    tabs_list = tabs_and_buttons.children[0]
+    tabs = tabs_list.children
+    tab_labels = {tab.children for tab in tabs}
     assert tab_labels == {"General", "Images"}
     # Mantine's `Tabs` silently refuses to render a tab/panel whose `value` is an empty string --
     # regression coverage for exactly that: every tab must get a real, non-empty `value`.
-    assert all(tab.value for tab in tabs)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType, reportUnknownArgumentType]
+    assert all(tab.value for tab in tabs)
 
 
 # ---- panel_name_taken / unique_panel_name ----
@@ -447,7 +446,7 @@ def _badge_labels(node: Any) -> list[str]:  # noqa: ANN401
         case {"type": "Badge", "props": {"children": str(label)}}:
             return [label]
         case {"props": {"children": children}}:
-            return _badge_labels(children)
+            return _badge_labels(children)  # pyrefly: ignore [unknown-argument-type]
         case list():
             return [label for child in cast("list[Any]", node) for label in _badge_labels(child)]
         case _:

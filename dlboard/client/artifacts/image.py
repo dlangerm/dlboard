@@ -14,7 +14,7 @@ from pydantic import BaseModel, field_validator
 from dlboard.models import NewArtifact, TagValue, format_tags
 
 if TYPE_CHECKING:
-    # Pyright always sees the real `torch.Tensor` -- this repo's own dev/CI env always has torch
+    # Pyrefly always sees the real `torch.Tensor` -- this repo's own dev/CI env always has torch
     # installed. The try/except below is the runtime-only fallback, for a `dlboard[torch]`-less
     # client install that never actually constructs an `Image` from a tensor.
     import torch
@@ -67,7 +67,7 @@ class Image(BaseModel, frozen=True, extra="forbid"):
             im_underlying = self.image.cpu().numpy()
         else:
             # Not a `torch.Tensor` (checked above whenever torch is even installed), so `_ImageArray`
-            # leaves only `np.ndarray` here -- pyright just can't follow that through the compound
+            # leaves only `np.ndarray` here -- pyrefly just can't follow that through the compound
             # `torch is not None and ...` above.
             im_underlying = cast("np.ndarray", self.image)
         pil_img = PIL.Image.fromarray(im_underlying)

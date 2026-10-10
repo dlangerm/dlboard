@@ -216,7 +216,7 @@ def update(table: sa.Table, model: BaseModel) -> sa.Update:
     """Update the row `model` was read from. Never writes a `_NEVER_UPDATE_FIELDS` column -- see its docstring."""
     return (
         sa.update(table)
-        .where(table.c[ID_KEY] == getattr(model, ID_KEY))
+        .where(table.c[ID_KEY] == getattr(model, ID_KEY))  # pyrefly: ignore [unknown-argument-type]
         .values(row_values(model, exclude=frozenset({ID_KEY, *_NEVER_UPDATE_FIELDS})))
         .returning(table)
     )

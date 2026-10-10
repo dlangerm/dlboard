@@ -218,7 +218,7 @@ def register_render_callbacks(app: Dash) -> None:
     # proportional to how many panels are open, not how many charts they hold. Each chart's own
     # `chart_data_fingerprint` (scoped to just its own columns of that shared dataframe) is what
     # decides whether *that* chart actually needs to re-render. ---
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         # `chart_content_id(...)` is typed `(str, int) -> ChartID` (every other call site passes a
         # real panel name/index), so it can't be called with the `ALL` wildcard without breaking
         # that typing -- same reason `_panel_controls.py`'s own `ALL`-pattern callbacks spell their

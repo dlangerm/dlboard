@@ -10,4 +10,4 @@ def layout() -> dmc.Container:
     return render_homepage()
 
 
-dash.register_page(__name__, path="/", layout=layout)  # pyright: ignore[reportUnknownMemberType]
+dash.register_page(__name__, path="/", layout=layout)

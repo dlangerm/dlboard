@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 """End-to-end tests against real data stores, on every backend.
 
 Covers the table mapping in `_sql.py` and the CRUD flows in `SQLStoreBase` together, against

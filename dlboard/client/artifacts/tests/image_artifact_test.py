@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 """Tests for the Image artifact's tensor/array -> file conversion."""
 
 from __future__ import annotations

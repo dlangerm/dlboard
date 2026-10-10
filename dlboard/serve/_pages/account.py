@@ -10,4 +10,4 @@ def layout() -> html.Div:
     return html.Div(render_account_page(), id=PAGE_ACCOUNT_ID)
 
 
-dash.register_page(__name__, path="/account")  # pyright: ignore[reportUnknownMemberType]
+dash.register_page(__name__, path="/account")

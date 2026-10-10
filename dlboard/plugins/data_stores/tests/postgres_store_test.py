@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 """
 Tests for `PostgresStore`'s own settings and startup -- the shared store behavior is covered on
 every backend by `dlboard/tests/sql_store_test.py` and `soft_delete_test.py`.
@@ -72,7 +71,7 @@ def test_store_lives_in_its_schema_with_utc_sessions_and_no_password_in_the_engi
     try:
         with store._engine.connect() as conn:
             tables = set(sa.inspect(conn).get_table_names(schema=postgres_settings.db_schema))
-            timezone = conn.execute(sa.text("SHOW TimeZone")).scalar_one()
+            timezone: str = conn.execute(sa.text("SHOW TimeZone")).scalar_one()
         assert {table.name for table in store.tables.values()} <= tables
         assert timezone == "UTC"
         assert str(store._engine.url) == "postgresql+psycopg://"

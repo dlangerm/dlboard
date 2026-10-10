@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 """Tests for the paginated image-series chart's render/hint logic."""
 
 from __future__ import annotations
@@ -37,7 +36,7 @@ def _artifacts_df(n_runs: int, steps_per_run: int = 1) -> pd.DataFrame:
 
 def test_render_reports_missing_key() -> None:
     stack = ImageChart.render(ImageChartSettings(key="missing"), pd.DataFrame({"run_id": [1], "step": [0]}))
-    text = _props(_props(stack)["children"][0])["children"]
+    text = _props(_props(stack)["children"][0])["children"]  # pyrefly: ignore [unknown-argument-type]
     assert "No artifacts logged" in text
 
 
@@ -56,7 +55,7 @@ def test_render_single_page_has_no_pager() -> None:
     stack = ImageChart.render(ImageChartSettings(key="img"), df)
     children = _props(stack)["children"]
     # last child is the pager slot; with one page it's an empty html.Div (no "total" prop)
-    assert _props(children[-1]).get("total") is None
+    assert _props(children[-1]).get("total") is None  # pyrefly: ignore [unknown-argument-type]
 
 
 @pytest.mark.parametrize(
@@ -73,7 +72,9 @@ def test_hint_required_artifact_keys() -> None:
 
 def _captions_store_data(stack: object) -> dict[str, Any]:
     # dcc.Store is always the first child of the returned Stack.
-    return _props(_props(stack)["children"][0])["data"]["per_run_captions"]
+    return _props(_props(stack)["children"][0])["data"][
+        "per_run_captions"
+    ]  # pyrefly: ignore [unknown-argument-type]
 
 
 def test_render_formats_tags_dict_into_captions() -> None:
@@ -125,7 +126,7 @@ def test_slider_marks_has_a_mark_for_every_step_even_when_many() -> None:
 
 def _slider_props(stack: object) -> dict[str, Any]:
     # dcc.Store is child 0; dmc.Slider is child 1.
-    return _props(_props(stack)["children"][1])
+    return _props(_props(stack)["children"][1])  # pyrefly: ignore [unknown-argument-type]
 
 
 def test_render_slider_snaps_only_to_real_steps_and_has_bottom_margin() -> None:
@@ -156,8 +157,8 @@ def test_render_slider_marks_match_max_slider_labels_constant() -> None:
 
 def _first_run_block(stack: object) -> dict[str, Any]:
     # children: [Store, Slider, *page_grids, pager, Modal]; first page grid holds the run blocks.
-    first_grid = _props(stack)["children"][2]
-    return _props(_props(first_grid)["children"][0])
+    first_grid = _props(stack)["children"][2]  # pyrefly: ignore [unknown-variable-type]
+    return _props(_props(first_grid)["children"][0])  # pyrefly: ignore [unknown-argument-type]
 
 
 def test_render_wraps_each_thumbnail_in_a_clickable_div() -> None:
@@ -165,7 +166,7 @@ def test_render_wraps_each_thumbnail_in_a_clickable_div() -> None:
     stack = ImageChart.render(ImageChartSettings(key="img"), df)
 
     run_block = _first_run_block(stack)
-    thumb_wrapper = _props(run_block["children"][1])
+    thumb_wrapper = _props(run_block["children"][1])  # pyrefly: ignore [unknown-argument-type]
     assert thumb_wrapper["id"] == {
         "type": "image-series-thumb",
         "instance": thumb_wrapper["id"]["instance"],
@@ -179,7 +180,7 @@ def test_run_block_label_defaults_to_run_id_without_a_run_name_column() -> None:
     stack = ImageChart.render(ImageChartSettings(key="img"), df)
 
     run_block = _first_run_block(stack)
-    assert _props(run_block["children"][0])["children"] == "Run 1"
+    assert _props(run_block["children"][0])["children"] == "Run 1"  # pyrefly: ignore [unknown-argument-type]
 
 
 def test_run_block_label_uses_the_run_name_column_when_present() -> None:
@@ -191,14 +192,16 @@ def test_run_block_label_uses_the_run_name_column_when_present() -> None:
     stack = ImageChart.render(ImageChartSettings(key="img"), df)
 
     run_block = _first_run_block(stack)
-    assert _props(run_block["children"][0])["children"] == "uptight-yak"
+    assert (
+        _props(run_block["children"][0])["children"] == "uptight-yak"
+    )  # pyrefly: ignore [unknown-argument-type]
 
 
 def test_render_includes_a_zoom_modal() -> None:
     df = _artifacts_df(n_runs=1)
     stack = ImageChart.render(ImageChartSettings(key="img"), df)
 
-    modal = _props(_props(stack)["children"][-1])
+    modal = _props(_props(stack)["children"][-1])  # pyrefly: ignore [unknown-argument-type]
     assert modal["id"]["type"] == "image-series-modal"
     assert modal["opened"] is False
 
@@ -208,7 +211,7 @@ def test_native_size_caps_thumbnail_height_without_upscaling() -> None:
     stack = ImageChart.render(ImageChartSettings(key="img", height=150, native_size=True), df)
 
     run_block = _first_run_block(stack)
-    thumb = _props(_props(run_block["children"][1])["children"])
+    thumb = _props(_props(run_block["children"][1])["children"])  # pyrefly: ignore [unknown-argument-type]
     assert thumb["h"] is None
     assert thumb["style"]["maxHeight"] == "150px"
 
@@ -218,7 +221,7 @@ def test_caption_is_not_dimmed() -> None:
     stack = ImageChart.render(ImageChartSettings(key="img"), df)
 
     run_block = _first_run_block(stack)
-    caption = _props(run_block["children"][2])
+    caption = _props(run_block["children"][2])  # pyrefly: ignore [unknown-argument-type]
     assert "c" not in caption
 
 

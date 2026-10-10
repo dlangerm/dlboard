@@ -14,4 +14,4 @@ def relative_path(path: str) -> str:
     -- the one place that's *not* true is a route's own registration (`add_public_route`/
     `add_url_rule`), which already reads `app.config.routes_pathname_prefix` directly.
     """
-    return dash.get_relative_path(path)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    return dash.get_relative_path(path)

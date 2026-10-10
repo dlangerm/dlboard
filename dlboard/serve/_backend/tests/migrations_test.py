@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 """
 The contract the whole migration history has to hold once this is a real release: a fresh database
 migrated through every revision in order must end up with exactly the schema the current models

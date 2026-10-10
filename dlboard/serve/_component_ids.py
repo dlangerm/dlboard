@@ -4,7 +4,7 @@ Component-id types, scoped by both Dash-prop role and owning page.
 A bare `str` id doesn't stop a callback from reading a `dcc.Store`'s `"data"` off an id that's
 actually an `html.Div`, or from reaching across pages to reference another plugin's internal id.
 `StoreId[P]`/`DivId[P]`/etc. are `str` subclasses generic over a page-tag type `P` -- each page
-plugin declares its own never-instantiated tag class and types its ids against it, so pyright
+plugin declares its own never-instantiated tag class and types its ids against it, so pyrefly
 rejects both a role mismatch (a `DivId` where a `State`/`Input`/`Output` call expects a `StoreId`)
 and a page mismatch (`StoreId[_AdminPage]` where `StoreId[_ExperimentPage]` is expected).
 

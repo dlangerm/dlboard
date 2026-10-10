@@ -24,5 +24,5 @@ from dlboard.serve._production_server import WSGISettings
 # parent process's structlog setup -- so this has to run again here, not just once in `_cli.py`.
 configure_logging()
 
-_settings = WSGISettings()  # pyright: ignore[reportCallIssue]
+_settings = WSGISettings()
 app = build_app(_settings.dlboard_plugins, url_prefix=_settings.dlboard_url_prefix).server

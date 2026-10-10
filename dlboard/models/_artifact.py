@@ -65,10 +65,12 @@ def _format_tag_value(value: TagValue) -> str:
     match value:
         case bool():
             return "true" if value else "false"
+        case int():
+            return str(value)
         case float():
             return format(value, _TAG_FLOAT_FORMAT)
-        case int() | str():
-            return str(value)
+        case str():
+            return value
 
 
 def is_inlineable_artifact(fname: str) -> bool:

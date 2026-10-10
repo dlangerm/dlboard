@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 """Unit tests for the logger's name lookup and failure classification, with no real processes/network.
 
 `dlboard/tests/logger_shipping_test.py` covers the real thing end to end against a live server.
@@ -28,8 +27,8 @@ from pytorch_lightning.demos.boring_classes import BoringModel
 from pytorch_lightning.utilities import rank_zero_only
 
 from dlboard import models
+from dlboard._wire import Identity
 from dlboard.client import dlboard_logger
-from dlboard.client._rest_api import Identity
 from dlboard.client.artifacts.figure import Figure
 from dlboard.client.artifacts.file import File
 from dlboard.client.dlboard_logger import (
@@ -226,7 +225,7 @@ def test_log_figure_queues_a_png_rendered_at_the_call_site(monkeypatch: pytest.M
     logger = DLBoardLogger(project_id=1, experiment_id=None)
     _metrics, artifacts = started
     fig = matplotlib.figure.Figure()
-    fig.subplots().plot([1, 2, 3])  # pyright: ignore[reportUnknownMemberType]
+    fig.subplots().plot([1, 2, 3])
 
     logger.log_figure(fig, "loss_curve", step=4, tags={"split": "val"}, save_kwargs={"dpi": 50})
     fig.clear()  # callers close or reuse the figure right after logging -- the queued PNG mustn't change
@@ -305,12 +304,12 @@ def _shipper(*, alive: bool = True, maxsize: int = 0) -> dlboard_logger._Shipper
     `multiprocessing.synchronize.Event`) -- structurally identical for every method `_Shipper` calls.
     """
     q: queue.Queue[str | None] = queue.Queue(maxsize=maxsize)
-    shipper: dlboard_logger._Shipper[str] = dlboard_logger._Shipper(  # pyright: ignore[reportUnknownVariableType]
+    shipper: dlboard_logger._Shipper[str] = dlboard_logger._Shipper(
         "test",
-        q,  # pyright: ignore[reportArgumentType]
-        _FakeProcess(alive=alive),  # pyright: ignore[reportArgumentType]
-        threading.Event(),  # pyright: ignore[reportArgumentType]
-        threading.Event(),  # pyright: ignore[reportArgumentType]
+        q,  # pyrefly: ignore [bad-argument-type]
+        _FakeProcess(alive=alive),  # pyrefly: ignore [bad-argument-type]
+        threading.Event(),  # pyrefly: ignore [bad-argument-type]
+        threading.Event(),  # pyrefly: ignore [bad-argument-type]
     )
     return shipper
 

@@ -60,7 +60,7 @@ jobs:
           enable-cache: true
       - run: uv sync --locked --dev
       - run: uv run prek run --all-files --skip no-commit-to-branch
-      - run: uv run pyright
+      - run: uv run pyrefly
       - run: uv run playwright install --with-deps chromium
       - run: uv run pytest --cov
 

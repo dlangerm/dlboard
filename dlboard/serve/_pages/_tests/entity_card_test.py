@@ -19,7 +19,7 @@ def _rendered(node: Any) -> str:  # noqa: ANN401
         case str():
             return node
         case list():
-            return " ".join(_rendered(child) for child in node)  # pyright: ignore[reportUnknownVariableType]
+            return " ".join(_rendered(child) for child in node)  # pyrefly: ignore [unknown-argument-type]
         case None:
             return ""
         case _:

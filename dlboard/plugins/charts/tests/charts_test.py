@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 """Tests for LTTB downsampling and the line chart that relies on it."""
 
 from __future__ import annotations
@@ -562,7 +561,7 @@ def test_line_chart_shortens_a_long_metric_name_to_the_chosen_axis_title_length(
     label = _props(chart)["yAxisLabel"]
     assert label.startswith("…")
     assert len(label) == limit
-    assert LONG_METRIC.endswith(label.removeprefix("…"))
+    assert LONG_METRIC.endswith(label.removeprefix("…"))  # pyrefly: ignore [unknown-argument-type]
 
 
 @pytest.mark.parametrize("limit", [MIN_MAX_AXIS_LABEL_CHARS, 20, DEFAULT_MAX_AXIS_LABEL_CHARS])

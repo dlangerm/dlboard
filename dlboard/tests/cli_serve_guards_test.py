@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 """
 `dlboard serve`'s guards against two ways of exposing something dangerous to the network:
 `serve local` has no sign-in at all, and `--debug` runs Werkzeug's interactive debugger.

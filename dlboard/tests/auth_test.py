@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 """
 End-to-end: a deployment that signs people in with a password (`dlboard.plugins.PASSWORD_AUTH`).
 
@@ -15,6 +14,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 
 import pendulum
 import pytest
+from flask.testing import FlaskClient
 
 from dlboard import models
 from dlboard._wire import WHOAMI_PATH, Resource, create_path, get_or_create_path
@@ -138,7 +138,7 @@ def test_oversized_request_bodies_get_a_413(tmp_path: Path, monkeypatch: pytest.
     app = build_app([sqlite, filesystem, *PASSWORD_AUTH, *BUILTIN_BACKEND])
     store = get_system_data_store(app)
     create_or_reset_user(store, "alice", _PASSWORD)
-    client = app.server.test_client()
+    client: FlaskClient = app.server.test_client()
     _sign_in(client, "alice")
 
     response = client.post(

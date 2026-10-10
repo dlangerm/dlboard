@@ -96,7 +96,7 @@ def register_delete_callbacks(
     update.
     """
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(ids.modal, "opened", allow_duplicate=True),
         Input(ids.button, "n_clicks"),
         prevent_initial_call=True,
@@ -106,7 +106,7 @@ def register_delete_callbacks(
             raise PreventUpdate
         return True
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(ids.modal, "opened", allow_duplicate=True),
         Input(ids.cancel, "n_clicks"),
         prevent_initial_call=True,
@@ -116,7 +116,7 @@ def register_delete_callbacks(
             raise PreventUpdate
         return False
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(constants.LOCATION_ID, "href", allow_duplicate=True),
         Output(constants.LOCATION_ID, "refresh", allow_duplicate=True),
         Output(ids.modal, "opened", allow_duplicate=True),
@@ -127,4 +127,4 @@ def register_delete_callbacks(
     def confirm_delete(n_clicks: int, entity_id: int | None) -> tuple[str, bool, bool]:
         if not n_clicks or entity_id is None:
             raise PreventUpdate
-        return on_confirm(int(entity_id)), True, False
+        return on_confirm(entity_id), True, False

@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from dash import Dash
+    from flask.testing import FlaskClient
 
     from dlboard.models import PluginProtocol
 
@@ -51,10 +52,10 @@ def test_the_theme_is_in_the_first_response(
 ) -> None:
     monkeypatch.setenv("DLBOARD_SQLITE_LOCATION", str(tmp_path / "test.sqlite"))
     monkeypatch.setenv("DLBOARD_ARTIFACT_STORE_LOCATION", str(tmp_path / "artifacts"))
-    client = build_app([*LOCAL_STORAGE, *LOCAL_AUTH, *theme_plugins]).server.test_client()
+    client: FlaskClient = build_app([*LOCAL_STORAGE, *LOCAL_AUTH, *theme_plugins]).server.test_client()
 
     index = client.get("/").get_data(as_text=True)
-    provider = client.get("/_dash-layout").get_json()["props"]
+    provider = client.get("/_dash-layout").get_json()["props"]  # pyrefly: ignore [unknown-variable-type]
 
     assert f'<script data-default-scheme="{scheme}">' in index
     assert provider["defaultColorScheme"] == scheme

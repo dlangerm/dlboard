@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 """Unit tests for `_artifact_download`'s own logic -- whether the download gets cached forever."""
 
 from __future__ import annotations

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import dash
 import dash_mantine_components as dmc
-from dash import Dash, Input, Output, State, callback, dcc, html  # pyright: ignore[reportUnknownVariableType]
+from dash import Dash, Input, Output, State, callback, dcc, html
 from dash.dcc import Store
 from structlog.stdlib import get_logger
 
@@ -122,7 +122,7 @@ def app(plugins: list[models.PluginProtocol], *, url_prefix: str = "") -> Dash:
     install_stale_page_guard(_app)
     # Pure client-side: whether the navbar shows at all only depends on the URL, and its
     # collapsed/width state lives in localStorage -- neither needs the server.
-    _app.clientside_callback(  # pyright: ignore[reportUnknownMemberType]
+    _app.clientside_callback(
         _NAVBAR_STATE_JS.source,
         Output("appshell", "navbar"),
         Output(constants.NAVBAR_COLLAPSE_TOGGLE_ID, "style"),
@@ -130,7 +130,7 @@ def app(plugins: list[models.PluginProtocol], *, url_prefix: str = "") -> Dash:
         Input(constants.NAVBAR_COLLAPSED_STORE_ID, "data"),
         Input(constants.NAVBAR_WIDTH_STORE_ID, "data"),
     )
-    _app.clientside_callback(  # pyright: ignore[reportUnknownMemberType]
+    _app.clientside_callback(
         _NAVBAR_TOGGLE_JS.source,
         Output(constants.NAVBAR_COLLAPSED_STORE_ID, "data"),
         Input(constants.NAVBAR_COLLAPSE_TOGGLE_ID, "n_clicks"),
@@ -255,7 +255,7 @@ def _layout(theme: ThemeSpec) -> dmc.MantineProvider:
                 # page's own in-page callbacks never trigger this page-wide spinner. The
                 # `target_components` stub is an empty TypedDict (a Dash codegen gap) -- hence the
                 # cast, same as `serve/_pages/experiment.py`'s own scoped `dcc.Loading`.
-                cast("Any", dcc.Loading)(
+                cast("Any", dcc.Loading)(  # pyrefly: ignore [unknown-argument-type]
                     dash.page_container,
                     target_components={"_pages_content": "children"},
                     delay_show=250,

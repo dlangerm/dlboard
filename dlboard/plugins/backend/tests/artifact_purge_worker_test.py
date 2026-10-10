@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 """Tests for `_drain_pending`: the pure, synchronous core of the background purge worker."""
 
 from __future__ import annotations

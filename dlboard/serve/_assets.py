@@ -51,7 +51,7 @@ def serve_asset(app: Dash, kind: AssetKind, name: str, content: bytes) -> str:
     """
     digest = hashlib.sha256(content).hexdigest()[:_HASH_LENGTH]
     filename = PurePosixPath(name)
-    prefix = str(app.config.routes_pathname_prefix)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    prefix = str(app.config.routes_pathname_prefix)  # pyrefly: ignore [unknown-argument-type]
     route = f"{prefix}{filename.stem}.{digest}{filename.suffix}"
     app.server.add_url_rule(
         route,
@@ -62,7 +62,7 @@ def serve_asset(app: Dash, kind: AssetKind, name: str, content: bytes) -> str:
     )
     match kind:
         case AssetKind.SCRIPT:
-            app.scripts.append_script({"external_url": route, "external_only": True})  # pyright: ignore[reportUnknownMemberType]
+            app.scripts.append_script({"external_url": route, "external_only": True})
         case AssetKind.STYLESHEET:
             app.css.append_css({"external_url": route, "external_only": True})
         case AssetKind.FONT:

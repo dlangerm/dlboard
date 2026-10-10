@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 """Tests for the pure dataframe-building helpers used by experiment pages."""
 
 from __future__ import annotations

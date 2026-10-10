@@ -37,5 +37,9 @@ def apply_proxy_fix(app: Dash) -> None:
     if not count:
         return
     app.server.wsgi_app = ProxyFix(
-        app.server.wsgi_app, x_for=count, x_proto=count, x_host=count, x_port=count
+        app.server.wsgi_app,  # pyrefly: ignore [unknown-argument-type]
+        x_for=count,
+        x_proto=count,
+        x_host=count,
+        x_port=count,
     )

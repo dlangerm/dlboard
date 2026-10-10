@@ -369,7 +369,7 @@ def _create_view(store: DataStore[...], experiment_id: int, view: ViewFile) -> m
 
 def _register_switching(app: Dash) -> None:
     # Switching views is a client-side navigation to `?view=` (or back to no view), like a link.
-    app.clientside_callback(  # pyright: ignore[reportUnknownMemberType]
+    app.clientside_callback(
         _NAVIGATE_JS.source,
         Output(core.STATE_VIEW_ID, "data"),
         Output(VIEW_NAV_SUPPRESS_ID, "data", allow_duplicate=True),
@@ -383,7 +383,7 @@ def _register_switching(app: Dash) -> None:
         (DUPLICATE_VIEW_OPEN_ID, DUPLICATE_VIEW_MODAL_ID),
         (IMPORT_VIEW_OPEN_ID, IMPORT_VIEW_MODAL_ID),
     ]:
-        app.clientside_callback(  # pyright: ignore[reportUnknownMemberType]
+        app.clientside_callback(
             _OPEN_ON_CLICK_JS.source,
             Output(modal, "opened", allow_duplicate=True),
             Input(opener, "n_clicks"),
@@ -395,7 +395,7 @@ def _register_duplicate(app: Dash) -> None:
     # The new view looks exactly like the page on screen, so there's nothing to re-render: writing
     # it to `STATE_PAGE_STORAGE` hands off to `sync_view_after_edit`, the same as an edit branching
     # into a view of your own, which catches the picker, menu and URL up without a reload.
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Output(DUPLICATE_VIEW_MODAL_ID, "opened", allow_duplicate=True),
         Output(DUPLICATE_VIEW_NAME_ID, "error"),
@@ -421,7 +421,7 @@ def _register_duplicate(app: Dash) -> None:
 
 
 def _register_rename(app: Dash) -> None:
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(RENAME_VIEW_MODAL_ID, "opened", allow_duplicate=True),
         Output(RENAME_VIEW_NAME_ID, "value"),
         Input(RENAME_VIEW_OPEN_ID, "n_clicks"),
@@ -435,7 +435,7 @@ def _register_rename(app: Dash) -> None:
         current_name = next((o["label"] for o in options if o["value"] == value), "")
         return True, current_name
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(VIEW_SELECT_ID, "data", allow_duplicate=True),
         Output(RENAME_VIEW_MODAL_ID, "opened", allow_duplicate=True),
         Output(RENAME_VIEW_NAME_ID, "error"),
@@ -466,7 +466,7 @@ def _register_rename(app: Dash) -> None:
 
 
 def _register_share_toggle(app: Dash) -> None:
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(SHARE_VIEW_TOGGLE_ID, "children"),
         Input(SHARE_VIEW_TOGGLE_ID, "n_clicks"),
         State(core.STATE_VIEW_ID, "data"),
@@ -486,7 +486,7 @@ def _register_share_toggle(app: Dash) -> None:
 
 
 def _register_export_import(app: Dash) -> None:
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(EXPORT_VIEW_MODAL_ID, "opened"),
         Output(EXPORT_VIEW_BODY_ID, "children"),
         Input(EXPORT_VIEW_OPEN_ID, "n_clicks"),
@@ -520,7 +520,7 @@ def _register_export_import(app: Dash) -> None:
             style={"position": "relative"},
         )
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(VIEW_SELECT_ID, "data", allow_duplicate=True),
         Output(VIEW_SELECT_ID, "value", allow_duplicate=True),
         Output(IMPORT_VIEW_MODAL_ID, "opened", allow_duplicate=True),
@@ -545,7 +545,7 @@ def _register_export_import(app: Dash) -> None:
 
 
 def _register_sync_after_edit(app: Dash) -> None:
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(VIEW_SELECT_ID, "data", allow_duplicate=True),
         Output(VIEW_SELECT_ID, "value", allow_duplicate=True),
         Output(core.STATE_VIEW_ID, "data", allow_duplicate=True),
@@ -625,7 +625,7 @@ def _register_sync_after_edit(app: Dash) -> None:
 
     # The above changing `STATE_VIEW_ID` (without a page reload) still needs the address bar to
     # catch up, so a bookmark or a refresh keeps landing on the same branch -- purely client-side.
-    app.clientside_callback(  # pyright: ignore[reportUnknownMemberType]
+    app.clientside_callback(
         _SYNC_VIEW_URL_JS.source,
         Output(core.STATE_VIEW_ID, "data", allow_duplicate=True),
         Input(core.STATE_VIEW_ID, "data"),

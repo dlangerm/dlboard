@@ -155,7 +155,9 @@ class BarChart(ChartType[BarChartSettings, pd.DataFrame, dmc.BarChart], frozen=T
             f"{parameters.aggregation}("
             f"{fit_axis_label(parameters.column, parameters.max_axis_label_chars - len(parameters.aggregation) - 2)})"
         )
-        x_axis_props = {"type": "category"} if parameters.orientation == "horizontal" else {}
+        x_axis_props: dict[str, typing.Any] = (
+            {"type": "category"} if parameters.orientation == "horizontal" else {}
+        )
         y_axis_props: dict[str, typing.Any] = (
             {"type": "category"}
             if parameters.orientation == "vertical"
@@ -174,9 +176,11 @@ class BarChart(ChartType[BarChartSettings, pd.DataFrame, dmc.BarChart], frozen=T
 
         return dmc.BarChart(
             h=parameters.height,
-            data=data,  # pyright: ignore[reportArgumentType]
+            data=data,  # pyrefly: ignore [bad-argument-type]
             dataKey=parameters.x_axis,
-            series=[{"name": parameters.column, "label": parameters.column, "color": series_color(0)}],  # pyright: ignore[reportArgumentType]
+            series=[
+                {"name": parameters.column, "label": parameters.column, "color": series_color(0)}
+            ],  # pyrefly: ignore [bad-assignment]
             orientation=parameters.orientation,
             xAxisLabel=x_axis_label,
             yAxisLabel=y_axis_label,

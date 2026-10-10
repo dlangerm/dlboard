@@ -107,14 +107,14 @@ def _param_field_input(
                     id=input_id,
                     label=label,
                     data=sorted(options),
-                    value=value,  # pyright: ignore[reportArgumentType]
+                    value=value,  # pyrefly: ignore [bad-argument-type]
                     searchable=True,
                     description=field.description,
                 )
             return dmc.TextInput(
                 id=input_id,
                 label=label,
-                value=value or "",  # pyright: ignore[reportArgumentType]
+                value=value or "",  # pyrefly: ignore [bad-argument-type]
                 description=field.description,
             )
 
@@ -123,7 +123,7 @@ def _register_clear_button(app: Dash) -> None:
     # The ✕ button next to an optional numeric chart-param field (see `_param_field_input`)
     # resets it to empty/default -- purely a client-side convenience for something backspace
     # already does, so no round trip needed.
-    app.clientside_callback(  # pyright: ignore[reportUnknownMemberType]
+    app.clientside_callback(
         _CHART_PARAM_CLEAR_JS.source,
         Output({"type": core.CHART_PARAM_TYPE, "field": MATCH}, "value"),
         Input({"type": "chart-param-clear", "field": MATCH}, "n_clicks"),
@@ -133,7 +133,7 @@ def _register_clear_button(app: Dash) -> None:
 
 def _register_open_close(app: Dash) -> None:
     # --- open the modal, either to add a new chart or edit an existing one ---
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(core.ADD_CHART_MODAL_ID, "opened", allow_duplicate=True),
         Output(core.ADD_CHART_TARGET_ID, "data"),
         Output(core.ADD_CHART_TYPE_SELECT_ID, "value"),
@@ -150,7 +150,7 @@ def _register_open_close(app: Dash) -> None:
         triggered_id = cast("core.ChartID", core.require_triggered_id())
 
         if triggered_id["type"] == "open-add-chart":
-            return True, {"panel": str(triggered_id["panel"]), "index": None}, None, {}, False
+            return True, {"panel": triggered_id["panel"], "index": None}, None, {}, False
 
         curr_page = core.BasicExperimentPage.model_validate_json(page_json)
         panel = next(p for p in curr_page.panels if p.name == triggered_id["panel"])
@@ -161,13 +161,13 @@ def _register_open_close(app: Dash) -> None:
         chart = panel.charts[idx]
         return (
             True,
-            {"panel": str(triggered_id["panel"]), "index": idx},
+            {"panel": triggered_id["panel"], "index": idx},
             chart.chart_type,
             chart.parameters,
             False,
         )
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(core.ADD_CHART_SUBMIT_ID, "children"),
         Output(core.ADD_CHART_MODAL_ID, "title"),
         Input(core.ADD_CHART_TARGET_ID, "data"),
@@ -180,7 +180,7 @@ def _register_open_close(app: Dash) -> None:
             return "Add chart", "Add chart"
         return "Save changes", "Edit chart"
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(core.ADD_CHART_MODAL_ID, "opened", allow_duplicate=True),
         Output(core.ADD_CHART_SUBMIT_ID, "loading", allow_duplicate=True),
         Input(core.ADD_CHART_CANCEL_ID, "n_clicks"),
@@ -244,7 +244,7 @@ def render_chart_preview(  # noqa: PLR0913
 
 
 def _register_form(app: Dash) -> None:
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(core.ADD_CHART_PARAMS_ID, "children"),
         Input(core.ADD_CHART_TYPE_SELECT_ID, "value"),
         State(core.ADD_CHART_INITIAL_PARAMS_ID, "data"),
@@ -258,7 +258,7 @@ def _register_form(app: Dash) -> None:
             chart_type_name, initial_params, store=get_data_store(), experiment_id=experiment_id
         )
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(core.ADD_CHART_PREVIEW_ID, "children"),
         Output(core.ADD_CHART_ERROR_ID, "children"),
         Input(core.ADD_CHART_TYPE_SELECT_ID, "value"),

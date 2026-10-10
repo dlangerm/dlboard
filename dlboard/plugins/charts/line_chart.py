@@ -146,7 +146,7 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.LineChart], froze
         # either. A run with no name in the merged dataframe (an older, pre-auto-naming
         # row -- see `RUN_NAME_COLUMN`) falls back to its bare id, same as everywhere else that
         # reads `run.name`.
-        run_names = (
+        run_names: dict[typing.Any, typing.Any] = (
             dataframe.drop_duplicates("run_id").set_index("run_id")[RUN_NAME_COLUMN].to_dict()
             if RUN_NAME_COLUMN in dataframe.columns
             else {}
@@ -214,10 +214,10 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.LineChart], froze
 
         return dmc.LineChart(
             h=parameters.height,
-            data=data,  # pyright: ignore[reportArgumentType]
-            dataKey=str(parameters.x_axis),
-            series=series,  # pyright: ignore[reportArgumentType]
-            xAxisLabel=fit_axis_label(str(parameters.x_axis), parameters.max_axis_label_chars),
+            data=data,  # pyrefly: ignore [bad-argument-type]
+            dataKey=parameters.x_axis,
+            series=series,  # pyrefly: ignore [bad-argument-type]
+            xAxisLabel=fit_axis_label(parameters.x_axis, parameters.max_axis_label_chars),
             yAxisLabel=fit_axis_label(parameters.column, parameters.max_axis_label_chars),
             xAxisProps=x_axis_props,
             yAxisProps={"width": VALUE_AXIS_WIDTH, "tickFormatter": {"function": "lineChartValueTick"}},

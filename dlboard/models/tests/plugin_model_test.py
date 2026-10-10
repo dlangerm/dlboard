@@ -18,7 +18,9 @@ def test_describe_uses_the_plugin_modules_dotted_name_and_first_docstring_line()
     described = models.InstalledPlugin.describe(anonymous)
 
     assert described.name == "dlboard.plugins.auth.anonymous"
-    assert described.description == inspect.getdoc(anonymous).splitlines()[0]  # pyright: ignore[reportOptionalMemberAccess]
+    doc = inspect.getdoc(anonymous)
+    assert doc is not None
+    assert described.description == doc.splitlines()[0]
 
 
 def test_describe_has_no_description_for_an_undocumented_plugin() -> None:

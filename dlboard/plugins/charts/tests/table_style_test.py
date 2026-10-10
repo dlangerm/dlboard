@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 """Tests for the shared ag-grid theming/dtype-inference helpers."""
 
 from __future__ import annotations

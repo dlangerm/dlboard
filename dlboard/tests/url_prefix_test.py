@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
+from flask.testing import FlaskClient
 
 from dlboard.conftest import dispose_stores
 from dlboard.plugins import BUILTIN_BACKEND, LOCAL_AUTH
@@ -29,7 +30,7 @@ def prefixed_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator
     monkeypatch.setenv("DLBOARD_SQLITE_LOCATION", str(tmp_path / "db.sqlite"))
     monkeypatch.setenv("DLBOARD_ARTIFACT_STORE_LOCATION", str(tmp_path / "artifacts"))
     app = build_app([sqlite, filesystem, *LOCAL_AUTH, *BUILTIN_BACKEND], url_prefix="dlboard")
-    client = app.server.test_client()
+    client: FlaskClient = app.server.test_client()
     yield client
     dispose_stores(app)
 

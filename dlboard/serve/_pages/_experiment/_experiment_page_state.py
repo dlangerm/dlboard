@@ -361,9 +361,9 @@ def require_triggered_id() -> Any:  # noqa: ANN401
     `ctx.triggered[0]["value"]` distinguishes that no-op firing from an actual click/change.
     Callers `cast(...)` the result to the triggered-id shape they expect.
     """
-    if not ctx.triggered_id or not ctx.triggered[0]["value"]:  # pyright: ignore[reportUnknownMemberType]
+    if not ctx.triggered_id or not ctx.triggered[0]["value"]:  # pyrefly: ignore [unsupported-operation]
         raise PreventUpdate
-    return ctx.triggered_id  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    return ctx.triggered_id
 
 
 def open_chart_button_id(panel_name: str) -> dict[str, str]:
@@ -646,32 +646,32 @@ def render_chart_item(
         [
             _drag_handle(
                 class_name="dl-chart-drag-handle",
-                component_id=chart_drag_handle_id(panel.name, index),  # pyright: ignore[reportArgumentType]
+                component_id=chart_drag_handle_id(panel.name, index),  # pyrefly: ignore [bad-argument-type]
                 data_attrs={"panel-name": panel.name, "chart-index": str(index)},
             ),
             tooltipped_action_icon(
                 Icon.EDIT,
-                component_id=edit_chart_button_id(panel.name, index),  # pyright: ignore[reportArgumentType]
+                component_id=edit_chart_button_id(panel.name, index),  # pyrefly: ignore [bad-argument-type]
                 label="Edit chart",
                 size="xs",
             ),
             # Copied client-side by `chart_deep_link.js`, from the page's own URL -- no round trip.
             tooltipped_action_icon(
                 Icon.LINK,
-                component_id=copy_chart_link_button_id(panel.name, index),  # pyright: ignore[reportArgumentType]
+                component_id=copy_chart_link_button_id(panel.name, index),  # pyrefly: ignore [bad-argument-type]
                 label="Copy a link to this chart",
                 size="xs",
                 **cast("dict[str, Any]", {"data-dl-copy-chart-link": chart.id}),
             ),
             tooltipped_action_icon(
                 Icon.DELETE,
-                component_id=delete_chart_button_id(panel.name, index),  # pyright: ignore[reportArgumentType]
+                component_id=delete_chart_button_id(panel.name, index),  # pyrefly: ignore [bad-argument-type]
                 label="Delete chart",
                 color="red",
                 size="xs",
             ),
         ],
-        id=chart_controls_group_id(panel.name, index),  # pyright: ignore[reportArgumentType]
+        id=chart_controls_group_id(panel.name, index),  # pyrefly: ignore [bad-argument-type]
         justify="flex-end",
         gap="xs",
         className="dl-chart-controls",
@@ -687,7 +687,7 @@ def render_chart_item(
     )
     return dmc.Stack(
         [header_row, rendered],
-        id=chart_content_id(panel.name, index),  # pyright: ignore[reportArgumentType]
+        id=chart_content_id(panel.name, index),  # pyrefly: ignore [bad-argument-type]
         gap="xs",
         w="100%" if panel.layout == "grid" else chart.natural_width(),
         maw="100%",
@@ -794,7 +794,7 @@ def _drag_handle(*, class_name: str, component_id: dict[str, str], data_attrs: d
     Its hint is a native `title`, not a `dmc.Tooltip`: every chart and panel carries one of these,
     and a mounted Mantine tooltip costs the browser several milliseconds apiece.
     """
-    # `data-*` attrs are only known dynamically (dict keys, not literal kwargs), so pyright can't
+    # `data-*` attrs are only known dynamically (dict keys, not literal kwargs), so pyrefly can't
     # match them against `html.Div`'s typed signature -- `cast` to `Any` rather than fight that.
     div = cast("Any", html.Div)
     return div(
@@ -2360,7 +2360,7 @@ def register_state_callbacks(app: Dash) -> None:
     """Callbacks belonging to the core render tree itself, not any one feature."""
     _register_paging(app)
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Input({"type": "panel-accordion", "tab": ALL}, "value"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
@@ -2407,7 +2407,7 @@ def register_state_callbacks(app: Dash) -> None:
         )
         return page.model_dump_json()
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output({"type": "panel-content", "panel": ALL}, "children"),
         Output(LOADED_PANELS_STORE_ID, "data"),
         Input({"type": "panel-accordion", "tab": ALL}, "value"),
@@ -2451,7 +2451,7 @@ def register_state_callbacks(app: Dash) -> None:
             )
         return outputs, sorted(loaded_set | newly_opened)
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Input(PANEL_TABS_ID, "value"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
@@ -2481,7 +2481,7 @@ def register_state_callbacks(app: Dash) -> None:
     # Tab switching is entirely client-side (Mantine's own state, no server round trip) -- so
     # whether "Rename the active tab" should be disabled (on the ungrouped "General" tab) has to
     # update client-side too, not just from this render's initial `disabled=`.
-    app.clientside_callback(  # pyright: ignore[reportUnknownMemberType]
+    app.clientside_callback(
         _ACTIVE_TAB_DISABLES_RENAME_JS.source,
         Output(RENAME_TAB_BUTTON_ID, "disabled"),
         Input(PANEL_TABS_ID, "value"),
@@ -2489,14 +2489,14 @@ def register_state_callbacks(app: Dash) -> None:
 
     # Both pure client-side, deliberately never round-tripping to the server -- see
     # `live_switch_state.js`/`live_last_fetch_label.js` and the constants' own docstrings above.
-    app.clientside_callback(  # pyright: ignore[reportUnknownMemberType]
+    app.clientside_callback(
         _LIVE_SWITCH_STATE_JS.source,
         Output(LIVE_POLL_INTERVAL_ID, "disabled"),
         Output(LIVE_STATUS_ID, "style"),
         Output(LIVE_PAUSED_BADGE_ID, "style"),
         Input(LIVE_UPDATES_ENABLED_ID, "checked"),
     )
-    app.clientside_callback(  # pyright: ignore[reportUnknownMemberType]
+    app.clientside_callback(
         _LIVE_LAST_FETCH_LABEL_JS.source,
         Output(LIVE_LAST_FETCH_LABEL_ID, "children"),
         Input(LIVE_TICK_INTERVAL_ID, "n_intervals"),

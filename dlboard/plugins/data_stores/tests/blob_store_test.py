@@ -14,9 +14,10 @@ import os
 import sqlite3
 import threading
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 import pytest
+from dash import Dash
 from pydantic import AnyUrl
 from werkzeug.datastructures import FileStorage
 
@@ -129,8 +130,12 @@ def test_link_artifacts_rejects_a_ref_outside_the_stores_own_space(tmp_path: Pat
         store.link_artifacts([(new_artifact, AnyUrl("file:///etc/passwd"))])
 
 
-class _FakeApp:
+class _FakeApp(Dash):
     """A bare stand-in for `Dash` -- the ingest thread only needs the data store set on it."""
+
+    def __init__(self) -> None:
+        # Deliberately skips `Dash.__init__`: nothing here needs a real app, only an identity to hang state on.
+        pass
 
 
 class _LockedOnceStore:
@@ -151,9 +156,9 @@ class _LockedOnceStore:
 def _ingest(store: BlobArtifactStore, data_store: object, artifacts: list[models.Artifact]) -> None:
     """Queue `artifacts` as though `_write_blobs` just wrote their blobs, then start ingesting them."""
     for artifact in artifacts:
-        store._saved_artifact_q.put(artifact)  # pyright: ignore[reportPrivateUsage]
+        store._saved_artifact_q.put(artifact)
     app = _FakeApp()
-    set_data_store(app, data_store)  # pyright: ignore[reportArgumentType]
+    set_data_store(app, data_store)  # pyrefly: ignore [bad-argument-type]
     threading.Thread(target=store.ingest_stored_artifacts, args=(app,), daemon=True).start()
 
 
@@ -221,7 +226,7 @@ def test_close_writes_every_queued_blob_and_records_its_ref_before_returning(
     blobs = FSBlobs(tmp_path / "artifacts")
     artifact_store = BlobArtifactStore.get_or_create(blobs, 50)
     _ingest(artifact_store, store, [])
-    _wait_until(artifact_store._ingest_ready.is_set)  # pyright: ignore[reportPrivateUsage]
+    _wait_until(artifact_store._ingest_ready.is_set)
 
     for i in range(20):
         _upload(artifact_store, run, f"{i}.png")
@@ -240,6 +245,7 @@ def test_uploads_are_turned_away_once_the_write_worker_is_gone(tmp_path: Path) -
 
 def test_a_failed_upload_leaves_nothing_in_the_staging_dir(tmp_path: Path) -> None:
     class _Broken(io.BytesIO):
+        @override
         def read(self, *_args: object) -> bytes:
             msg = "client hung up"
             raise ConnectionError(msg)

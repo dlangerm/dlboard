@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 """Tests for `_cascade_targets`: the generic ownership-graph walk soft-delete/restore/purge use.
 
 These are pure unit tests against the graph-walking function itself -- no database involved --

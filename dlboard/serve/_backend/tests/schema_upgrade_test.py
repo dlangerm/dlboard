@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 """
 Running migrations is the one new risk this adds over the old `create_all`: a second store,
 constructed against a database a first one already brought to `head` (a worker restart, or a

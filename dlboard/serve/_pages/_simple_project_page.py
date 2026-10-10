@@ -157,7 +157,7 @@ def render_project_page(project_id: int) -> dmc.Container:
 def register(app: Dash) -> None:
     """Wire the project page's create/edit/delete actions."""
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(EXP_LIST_ID, "children"),
         Output(NEW_EXP_NAME_ID, "value"),
         Output(NEW_EXP_NAME_ID, "error"),
@@ -176,9 +176,9 @@ def register(app: Dash) -> None:
             return no_update, no_update, "Give the experiment a name"
         store = get_data_store()
         store.create_experiment(
-            NewExperiment(project_id=int(project_id), name=name.strip(), created_by=get_current_user().id)
+            NewExperiment(project_id=project_id, name=name.strip(), created_by=get_current_user().id)
         )
-        return _experiment_grid(store, int(project_id)), "", None
+        return _experiment_grid(store, project_id), "", None
 
     def _fetch_project_header(project_id: int) -> tuple[str, str]:
         project = _visible_project(project_id)

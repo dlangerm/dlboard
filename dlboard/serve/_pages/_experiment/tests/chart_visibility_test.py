@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 """Tests for hover-revealed chart controls: always enabled, hidden until hovered via CSS."""
 
 from __future__ import annotations

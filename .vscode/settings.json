@@ -22,7 +22,7 @@
     "pytest",
     "setuptools",
     "pydantic",
-    "pyright",
+    "pyrefly",
     "ndarray",
     "ndims",
     "multiaxis",

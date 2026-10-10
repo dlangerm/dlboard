@@ -6,7 +6,7 @@ import io
 import uuid
 from collections.abc import Mapping
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, Any, Final, Literal, Protocol, get_args
+from typing import TYPE_CHECKING, Any, Final, Literal, Protocol, cast, get_args
 
 from pydantic import BaseModel
 
@@ -72,7 +72,8 @@ class Figure(BaseModel, frozen=True, extra="forbid"):
             data=buf.getvalue(),
             step=step,
             tags=tags or {},
-            format=kwargs[format_key],  # pyright: ignore[reportArgumentType]
+            # `savefig` above already rejected any format it can't write, so this one is a `FigureFormat`.
+            format=cast("FigureFormat", kwargs[format_key]),
         )
 
     def to_artifact(self, local_temp: Path, run_id: int, experiment_id: int) -> tuple[NewArtifact, Path]:

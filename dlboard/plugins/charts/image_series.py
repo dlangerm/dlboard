@@ -165,7 +165,7 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
                     per_run_names.get(str(rid), f"Run {rid}"),
                     size="sm",
                     fw=600,
-                    className=series_swatch_class(int(rid)),
+                    className=series_swatch_class(int(rid)),  # pyrefly: ignore [unnecessary-type-conversion]
                 ),
                 html.Div(
                     image,
@@ -220,7 +220,7 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
                     min=all_steps[0],
                     max=all_steps[-1],
                     value=all_steps[0],
-                    marks=_slider_marks(all_steps),  # pyright: ignore[reportArgumentType]
+                    marks=_slider_marks(all_steps),  # pyrefly: ignore [bad-argument-type]
                     restrictToMarks=True,
                     persistence=True,
                     persistence_type="session",
@@ -290,7 +290,7 @@ _PAGE_JS = ClientsideScript(Path(__file__).with_name("image_series_page.js"))
 
 def plug(app: dash.Dash) -> None:
     """Register clientside callbacks for image-series scrubbing, captions, and pagination."""
-    app.clientside_callback(  # pyright: ignore[reportUnknownMemberType]
+    app.clientside_callback(
         _SCRUB_JS.source,
         [
             dash.Output({"type": "image-series-img", "instance": dash.MATCH, "run": dash.ALL}, "src"),
@@ -302,14 +302,14 @@ def plug(app: dash.Dash) -> None:
         dash.State({"type": "image-series-data", "instance": dash.MATCH}, "data"),
     )
 
-    app.clientside_callback(  # pyright: ignore[reportUnknownMemberType]
+    app.clientside_callback(
         _PAGE_JS.source,
         dash.Output({"type": "image-series-page", "instance": dash.MATCH, "page": dash.ALL}, "style"),
         dash.Input({"type": "image-series-pager", "instance": dash.MATCH}, "value"),
         dash.State({"type": "image-series-page", "instance": dash.MATCH, "page": dash.ALL}, "id"),
     )
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output({"type": "image-series-modal", "instance": MATCH}, "opened"),
         Output({"type": "image-series-modal-img", "instance": MATCH}, "src"),
         Input({"type": "image-series-thumb", "instance": MATCH, "run": ALL}, "n_clicks"),
@@ -320,7 +320,7 @@ def plug(app: dash.Dash) -> None:
     def open_image_modal(
         n_clicks_list: list[int], srcs: list[str], ids: list[dict[str, str]]
     ) -> tuple[bool, str]:
-        triggered_id = cast("dict[str, str] | None", ctx.triggered_id)  # pyright: ignore[reportUnknownMemberType]
+        triggered_id = cast("dict[str, str] | None", ctx.triggered_id)
         if not triggered_id or not any(n_clicks_list):
             raise PreventUpdate
         triggered_run = triggered_id["run"]

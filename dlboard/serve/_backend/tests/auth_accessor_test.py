@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 """Tests for `dlboard.serve._backend._auth`: the provider slot, `get_current_user`, and `sign_in`."""
 
 from __future__ import annotations
@@ -7,6 +6,7 @@ from typing import TYPE_CHECKING
 
 import pendulum
 import pytest
+from dash import Dash
 from flask import Flask
 
 from dlboard import models
@@ -17,8 +17,12 @@ if TYPE_CHECKING:
     from dlboard.plugins.data_stores.sqlite import SQLLiteStore
 
 
-class _FakeApp:
+class _FakeApp(Dash):
     """A bare stand-in for `Dash` -- `set_auth_provider`/`get_auth_provider` only need `hasattr`/`setattr`."""
+
+    def __init__(self) -> None:
+        # Deliberately skips `Dash.__init__`: nothing here needs a real app, only an identity to hang state on.
+        pass
 
 
 def _principal(username: str, *groups: str) -> models.Principal:
@@ -27,10 +31,10 @@ def _principal(username: str, *groups: str) -> models.Principal:
 
 def test_set_auth_provider_refuses_to_overwrite_an_existing_one() -> None:
     app = _FakeApp()
-    _auth.set_auth_provider(app, AnonymousAuthProvider.get_or_create())  # pyright: ignore[reportArgumentType]
+    _auth.set_auth_provider(app, AnonymousAuthProvider.get_or_create())
 
     with pytest.raises(AttributeError):
-        _auth.set_auth_provider(app, AnonymousAuthProvider.get_or_create())  # pyright: ignore[reportArgumentType]
+        _auth.set_auth_provider(app, AnonymousAuthProvider.get_or_create())
 
 
 def test_get_current_user_refuses_a_request_nobody_authenticated() -> None:

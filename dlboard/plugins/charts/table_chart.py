@@ -37,13 +37,13 @@ class TableChartSettings(BaseModel, frozen=True, extra="forbid"):
     """Table chart settings."""
 
     metrics: list[str] = Field(
-        default=[],
+        default_factory=list,
         description="Metric column names to show; empty shows every metric (run mode uses each "
         "run's last-logged value) -- unless hparams is set without this, which is read as "
         '"hparams only" rather than "every metric too".',
     )
     hparams: list[str] = Field(
-        default=[], description="Hyperparameter keys to show; empty shows every hyperparameter."
+        default_factory=list, description="Hyperparameter keys to show; empty shows every hyperparameter."
     )
     pivot_on: str = Field(
         default="",
@@ -144,7 +144,7 @@ def _render_pivoted(parameters: TableChartSettings, dataframe: pd.DataFrame) -> 
     pivoted = df.pivot_table(
         index=parameters.pivot_on, columns="run_id", values=parameters.pivot_metric, aggfunc="mean"
     ).reset_index()
-    pivoted.columns = [str(c) for c in pivoted.columns]
+    pivoted.columns = [str(c) for c in pivoted.columns]  # pyrefly: ignore [unnecessary-type-conversion]
 
     rows = typing.cast("list[dict[str, Any]]", pivoted.to_dict(orient="records"))
     return _build_table(

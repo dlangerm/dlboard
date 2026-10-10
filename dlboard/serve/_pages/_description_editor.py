@@ -96,7 +96,7 @@ def register_edit_callbacks(  # noqa: PLR0913
     `fetch`/`save` take the entity id (read off `entity_id_state`) and return `(name, description)`.
     """
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(ids.modal, "opened", allow_duplicate=True),
         Output(ids.textarea, "value"),
         Input(ids.edit_button, "n_clicks"),
@@ -109,7 +109,7 @@ def register_edit_callbacks(  # noqa: PLR0913
         _name, description = fetch(entity_id)
         return True, description
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(ids.modal, "opened", allow_duplicate=True),
         Output(ids.header, "children", allow_duplicate=True),
         Input(ids.save, "n_clicks"),
@@ -125,7 +125,7 @@ def register_edit_callbacks(  # noqa: PLR0913
         name, description = save(entity_id, new_description or "")
         return False, render_header(ids, title=name, description=description, extra_actions=extra_actions)
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(ids.modal, "opened", allow_duplicate=True),
         Input(ids.cancel, "n_clicks"),
         prevent_initial_call=True,

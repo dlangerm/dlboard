@@ -25,7 +25,7 @@ from pydantic_core import to_jsonable_python
 from pydantic_settings import BaseSettings
 from pytorch_lightning.loggers import Logger
 from pytorch_lightning.loggers.utilities import (
-    _scan_checkpoints,  # pyright: ignore[reportPrivateUsage, reportUnknownVariableType]
+    _scan_checkpoints,
 )
 from pytorch_lightning.utilities import rank_zero_only
 from typing_extensions import override
@@ -85,7 +85,7 @@ def is_rejection(exc: Exception) -> bool:
     """
     if not isinstance(exc, requests.HTTPError) or exc.response is None:
         return False
-    status = exc.response.status_code
+    status = cast("int", exc.response.status_code)  # `requests` ships no type information
     return HTTPStatus.BAD_REQUEST <= status < HTTPStatus.INTERNAL_SERVER_ERROR and (
         status not in _TRANSIENT_CLIENT_ERRORS
     )
@@ -486,7 +486,7 @@ class DLBoardLogger(Logger):
             raise ValueError(msg)
         self._metrics.put(
             models.LoggedMetrics(
-                metrics=metrics,  # pyright: ignore[reportArgumentType]
+                metrics=metrics,
                 step=step,
                 experiment_id=self._experiment_id,
                 run_id=self._run_id,
@@ -553,7 +553,7 @@ class DLBoardLogger(Logger):
                         kind=FileKind.CHECKPOINT,
                         # The step the callback saved this at, not the last one metrics were logged for: that
                         # can be the same for several saves, and a (key, step) pair is stored once.
-                        step=checkpoint_callback._last_global_step_saved,  # noqa: SLF001  # pyright: ignore[reportPrivateUsage]
+                        step=checkpoint_callback._last_global_step_saved,  # noqa: SLF001
                         tags=tags,
                     )
                 ]
