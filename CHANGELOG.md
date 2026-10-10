@@ -22,6 +22,12 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 * Line charts render much faster on a panel with many charts: the server no longer copies and scans the whole
   panel's data once per chart (200 charts took 99 s of server time, now 4.6 s).
+* Chart axes are readable: the value axis has room for its ticks beside the rotated title, ticks show at most
+  four significant digits (no more `0.30000000000000004`), and a line chart's tooltip is titled with the whole
+  metric name, which the axis title may shorten.
+* The panel menu button is a sliders icon rather than three dots (which read as one more drag handle next to
+  the grip), the header is padded off the panel's right border, and each button that rebuilds the panel area
+  (create, rename, delete) spins until it finishes.
 * `dlboard` now depends on `dlboard-client~=X.Y.0`, a client of its own minor version, instead of any
   version, so an environment holding both can no longer end up with a mismatched pair.
 
