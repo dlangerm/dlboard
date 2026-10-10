@@ -123,6 +123,41 @@ def default_chart_for_artifact(key: str, chart_type: str) -> ChartInstance[typin
     return ChartInstance(chart_type=chart_type, parameters={"key": key})
 
 
+class ArtifactChart(typing.NamedTuple):
+    """A default chart for some artifact keys, and what to call it."""
+
+    label: str
+    """The key it charts, or for a directory of files the prefix it charts (`checkpoints/`)."""
+    group_key: str
+    """One real key it covers, which decides the panel it lands in (`split_group_name`)."""
+    chart: ChartInstance[typing.Any, typing.Any]
+
+
+def default_artifact_charts(keys: typing.Iterable[str], catalog: ColumnCatalog) -> list[ArtifactChart]:
+    """
+    The default charts for artifact `keys`: one each, except that files in one directory share a chart.
+
+    Files are logged one key apiece (`checkpoints/epoch=3-step=300.ckpt`), so a long run gives hundreds
+    of keys that are really one list. A single chart over the directory (`checkpoints/`) shows them
+    together, grouped and paged, and includes any logged later.
+    """
+    charts: list[ArtifactChart] = []
+    directories: set[str] = set()
+    for key in keys:
+        chart_type = catalog.artifact_chart_types[key]
+        directory = key.rpartition("/")[0]
+        if chart_type != FileListChart.name or not directory:
+            charts.append(ArtifactChart(key, key, default_chart_for_artifact(key, chart_type)))
+        elif (prefix := f"{directory}/") not in directories:
+            directories.add(prefix)
+            charts.append(
+                ArtifactChart(
+                    prefix, key, ChartInstance(chart_type=chart_type, parameters={"key_prefix": prefix})
+                )
+            )
+    return charts
+
+
 def group_keys_into_panels(
     catalog: ColumnCatalog,
     *,
@@ -145,10 +180,10 @@ def group_keys_into_panels(
         group = split_group_name(column, delimiter, mode)
         panel_name = panel_name_for_group(group, ColumnKind.METRIC, granularity=granularity)
         panels.setdefault(panel_name, []).append((column, ColumnKind.METRIC))
-    for key in catalog.artifact_chart_types:
-        group = split_group_name(key, delimiter, mode)
+    for artifact in default_artifact_charts(catalog.artifact_chart_types, catalog):
+        group = split_group_name(artifact.group_key, delimiter, mode)
         panels.setdefault(panel_name_for_group(group, ColumnKind.ARTIFACT), []).append(
-            (key, ColumnKind.ARTIFACT)
+            (artifact.label, ColumnKind.ARTIFACT)
         )
     return panels
 
@@ -166,13 +201,16 @@ def build_auto_panels(
     lightning: bool = False,
 ) -> list[PanelInstance[typing.Any, typing.Any]]:
     """A full set of panels for a brand-new (empty) view: one default chart per key, grouped as `group_keys_into_panels`."""
+    artifact_charts = {
+        a.label: a.chart for a in default_artifact_charts(catalog.artifact_chart_types, catalog)
+    }
     return [
         PanelInstance(
             name=panel_name,
             charts=[
                 default_chart_for_metric(key, single_value=key in catalog.single_value_metrics)
                 if kind == ColumnKind.METRIC
-                else default_chart_for_artifact(key, catalog.artifact_chart_types[key])
+                else artifact_charts[key]
                 for key, kind in keys
             ],
         )
@@ -195,15 +233,21 @@ def find_uncharted_keys(
     """Diff every known metric/artifact key against what's already charted somewhere on the page."""
     charted_metrics: set[str] = set()
     charted_artifacts: set[str] = set()
+    charted_prefixes: set[str] = set()
     for panel in panels:
         hinted_columns = panel.hint_required_columns()
         if hinted_columns is not None:
             charted_metrics |= hinted_columns
         charted_artifacts |= {k for k in panel.hint_required_artifact_keys() if k is not None}
+        charted_prefixes |= panel.hint_required_artifact_key_prefixes()
 
     return UnchartedKeys(
         metrics=[c for c in catalog.metrics if c not in charted_metrics],
-        artifacts=[k for k in catalog.artifact_chart_types if k not in charted_artifacts],
+        artifacts=[
+            k
+            for k in catalog.artifact_chart_types
+            if k not in charted_artifacts and not k.startswith(tuple(charted_prefixes))
+        ],
     )
 
 
@@ -275,11 +319,13 @@ def build_suggestions(
     ]
     suggestions.extend(
         Suggestion(
-            key=key,
+            key=artifact.label,
             kind=ColumnKind.ARTIFACT,
-            panel_name=panel_name_for_group(split_group_name(key, delimiter, mode), ColumnKind.ARTIFACT),
-            chart=default_chart_for_artifact(key, catalog.artifact_chart_types[key]),
+            panel_name=panel_name_for_group(
+                split_group_name(artifact.group_key, delimiter, mode), ColumnKind.ARTIFACT
+            ),
+            chart=artifact.chart,
         )
-        for key in uncharted.artifacts
+        for artifact in default_artifact_charts(uncharted.artifacts, catalog)
     )
     return suggestions

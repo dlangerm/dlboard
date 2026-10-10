@@ -17,6 +17,13 @@ pulls that section's body into the GitHub release notes and publishes both distr
 * A page left open across an upgrade offers a **Reload** prompt instead of failing every live-update poll: the
   server answers a callback request in an older shape with a `409` (not Dash's bare `500`), and the page
   shows the prompt once.
+* A run's checkpoints are one list, not one chart per file. The file list takes a `key_prefix`
+  (`checkpoints/`) in place of a `key` and shows every key under it, including ones logged later; Auto-generate
+  and Suggest charts make exactly that for a directory of files, so a run that kept hundreds of checkpoints no
+  longer gets hundreds of charts. The list is paged and sortable, and splits into `Latest`, `Best` and `Top-k`
+  tabs from the tags `DLBoardLogger` records (any other file kind gets its own tab). A view with a
+  `key_prefix` chart is not valid on an older server, so it can't be opened after a downgrade; the `height`
+  setting no longer does anything (the list pages instead of scrolling) but is still accepted.
 
 ### Changed
 

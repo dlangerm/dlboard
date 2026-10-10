@@ -14,6 +14,8 @@ from pydantic import ValidationError
 from dlboard import models
 from dlboard.models import HyperParams, NewHyperParams, Run
 from dlboard.models._view import ChartInstance, ColumnKind, PanelInstance, ParameterField, ParameterFieldType
+from dlboard.plugins.charts._table_style import ARTIFACT_COLUMN_PREFIX
+from dlboard.plugins.charts.file_list import FileListChart
 from dlboard.plugins.charts.image_series import ImageChart
 from dlboard.plugins.charts.line_chart import LineChart
 from dlboard.serve._pages._experiment import _experiment_page_state as state
@@ -29,6 +31,7 @@ if TYPE_CHECKING:
 _TS = datetime(2026, 1, 1, tzinfo=UTC)
 
 LineChart.register(allow_override=True)
+FileListChart.register(allow_override=True)
 ImageChart.register(allow_override=True)
 
 
@@ -298,6 +301,50 @@ def test_a_metric_and_an_artifact_sharing_a_key_both_render(store: SQLLiteStore,
 
     for chart in panel.charts:
         chart.render(df)
+
+
+def test_a_file_list_of_a_key_prefix_fetches_every_key_under_it_including_later_ones(
+    store: SQLLiteStore, experiment_id: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Download URLs are made relative to a running Dash app, which this test doesn't need.
+    monkeypatch.setattr("dlboard.serve._backend._artifact_download.relative_path", str)
+    run = store.create_run(models.NewRun(experiment_id=experiment_id))
+
+    def log_file(key: str, step: int) -> None:
+        store.log_artifact_refs(
+            [
+                models.Artifact(
+                    key=key,
+                    fname=key,
+                    run_id=run.id,
+                    experiment_id=experiment_id,
+                    step=step,
+                    ref=f"r://{key}",
+                    tags={models.FILE_KIND_TAG: "checkpoint"},
+                )
+            ]
+        )
+
+    panel = PanelInstance[pd.DataFrame, object](
+        name="p",
+        charts=[ChartInstance[pd.DataFrame, object](chart_type="files", parameters={"key_prefix": "ckpt/"})],
+    )
+    log_file("ckpt/a", 0)
+    log_file("elsewhere/b", 0)
+
+    first = state.fetch_panel_dataframe(store, experiment_id, panel, {})
+    log_file("ckpt/c", 1)
+    later = state.fetch_panel_dataframe(store, experiment_id, panel, {})
+
+    def files(df: pd.DataFrame) -> set[str]:
+        return {
+            c.removeprefix(ARTIFACT_COLUMN_PREFIX)
+            for c in df.columns
+            if c.startswith(ARTIFACT_COLUMN_PREFIX) and not c.endswith("__tags")
+        }
+
+    assert files(first) == {"ckpt/a"}
+    assert files(later) == {"ckpt/a", "ckpt/c"}
 
 
 def test_load_hparam_view_data_shows_each_selected_metrics_latest_value(
