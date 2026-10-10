@@ -20,6 +20,8 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ### Changed
 
+* Line charts render much faster on a panel with many charts: the server no longer copies and scans the whole
+  panel's data once per chart (200 charts took 99 s of server time, now 4.6 s).
 * `dlboard` now depends on `dlboard-client~=X.Y.0`, a client of its own minor version, instead of any
   version, so an environment holding both can no longer end up with a mismatched pair.
 
