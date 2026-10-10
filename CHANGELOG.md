@@ -12,6 +12,12 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ## [Unreleased]
 
+### Added
+
+* A page left open across an upgrade offers a **Reload** prompt instead of failing every live-update poll: the
+  server answers a callback request in an older shape with a `409` (not Dash's bare `500`), and the page
+  shows the prompt once.
+
 ### Changed
 
 * Line charts render much faster on a panel with many charts: the server no longer copies and scans the whole
