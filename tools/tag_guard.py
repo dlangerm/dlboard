@@ -87,6 +87,12 @@ def install() -> int:
     if hooks_dir is None:
         sys.stderr.write("error: not in a git repository\n")
         return 1
+
+    # if we're in a worktree don't install the hook in the main repo's hooks dir, because it won't be run for worktree updates
+    if _git("rev-parse", "--is-inside-work-tree") == "true":
+        sys.stdout.write("not installing hook in a worktree; install it in the main repo instead\n")
+        return 0
+
     link, script = Path(hooks_dir) / HOOK_NAME, Path(__file__).resolve()
     if link.is_symlink() and link.resolve() == script:
         return 0
