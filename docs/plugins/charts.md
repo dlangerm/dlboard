@@ -38,6 +38,12 @@ Subclass `ChartType` and implement its abstract methods:
 - `hint_required_artifact_key_prefixes` (optional, none by default) — for a chart that lists a whole
   family of artifacts (every `checkpoints/...` key) rather than named ones: every key starting with one of
   these is fetched, including keys logged later.
+
+The same hints bound what the experiment page fetches: a panel shows one page of its charts, and only
+those charts' columns and keys are requested. They are also what the panel's chart filter matches
+against (a fuzzy match on each metric and artifact key, and on the chart type), so a chart type that hints
+accurately is both cheap to page and easy to find. A chart whose hint is `None` ("everything") is found by
+its chart type alone.
 - `field_column_kinds()` — map each parameter field to the `ColumnKind` (metric/artifact/hparam)
   that populates it, so the settings UI knows what to offer as choices.
 - `can_display_artifact(artifact) -> bool` (optional, `False` by default) — say which logged artifacts this

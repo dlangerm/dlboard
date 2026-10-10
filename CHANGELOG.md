@@ -14,6 +14,13 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ### Added
 
+* The experiment page pages its panels and charts, so its cost no longer grows with the experiment (#168: 886
+  charts took about 30 s). It shows one page of the active tab's panels (default 10) with a pager, and a
+  fuzzy filter on panel names (`vl` finds `val/loss`); inside a panel, one page of its charts (default 12), with
+  a filter on the metric and artifact names they show. Only the charts on screen are fetched, on load and on
+  every live-update poll. The page and filters are in the URL (`?panels_page=`, `?panels_q=`, `?charts=`), so a
+  link reproduces what you were looking at, and a `?chart=` link lands on the page holding that chart. How many
+  panels and charts per page is each viewer's own choice, kept in a `dlboard_page_sizes` cookie.
 * A page left open across an upgrade offers a **Reload** prompt instead of failing every live-update poll: the
   server answers a callback request in an older shape with a `409` (not Dash's bare `500`), and the page
   shows the prompt once.
@@ -27,6 +34,10 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ### Changed
 
+* Only the active tab renders; the other tabs' panels are no longer fetched and drawn behind it. Dragging a
+  panel or chart to reorder it now rebuilds the page of panels (or charts) being shown, rather than moving the
+  nodes already on screen, so it can only be dropped among what is showing. Opening and closing a panel keeps
+  the open state of the panels on other pages and tabs.
 * Line charts render much faster on a panel with many charts: the server no longer copies and scans the whole
   panel's data once per chart (200 charts took 99 s of server time, now 4.6 s).
 * Chart axes are readable: the value axis has room for its ticks beside the rotated title, ticks show at most

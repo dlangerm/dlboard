@@ -57,6 +57,7 @@ Every metric, hyperparameter, and artifact you log gets synced to dlboard in the
 - **Side-by-side run comparison** — compare metrics, hyperparameters, and artifacts across any runs, or diff up to five runs in a shareable modal
 - **PyTorch Lightning integration** — drop in `DLBoardLogger` and you're done
 - **Personal views** — save custom layouts and filters without touching the shared experiment page
+- **Built for big experiments** — panels and the charts in them are paged and fuzzy-filterable, so an experiment with thousands of charts opens as fast as a small one, and every page and filter is a shareable link
 - **Artifact streaming** — log images, plots, and structured data; browse them in the UI
 - **Multi-project support** — organize experiments by project
 - **Light & dark mode** — built with Dash-Mantine for a modern UI
