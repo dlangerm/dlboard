@@ -16,6 +16,11 @@ uv run pyright                      # type check (strict mode)
 uv run prek run --all-files         # run pre-commit hooks manually
 ```
 
+Run `uv run prek install` once after cloning. Besides the commit checks it links a `reference-transaction` git hook
+(`tools/tag_guard.py`) the first time a commit runs them, which refuses to create a `vX.Y.Z` tag that disagrees with
+`dlboard/_version.py` at the tagged commit -- a pushed release tag is painful to move, so it is caught before one
+exists. It only judges tags you make (`git tag`, `git update-ref`); tags that arrive via `git fetch` or `pull` are never refused. Delete tags rather than moving them; `git tag -d` is always allowed.
+
 See [CLAUDE.md](CLAUDE.md) for the fuller set of architecture notes and code-style conventions this
 repo follows -- file layout, the plugin system, test placement, and the rest.
 

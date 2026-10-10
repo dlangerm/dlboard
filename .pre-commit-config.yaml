@@ -83,4 +83,14 @@ repos:
         language: system
         entry: uv run --no-project python tools/check_server_client_pin.py
         files: ^(dlboard/_version\.py|server/pyproject\.toml)$
+      - id: install-tag-guard
+        # Git has no pre-tag hook, but its `reference-transaction` hook can veto the ref update `git tag`
+        # makes. prek can't install that hook type, so this links `tools/tag_guard.py` in as
+        # `.git/hooks/reference-transaction` the first time any commit runs the hooks, which is what makes
+        # a `vX.Y.Z` tag that disagrees with `dlboard/_version.py` impossible to create locally. Silent
+        # once installed; fails (rather than overwrites) if some other hook of that name is already there.
+        name: tag guard for vX.Y.Z release tags is installed
+        language: system
+        entry: uv run --no-project python tools/tag_guard.py --install
+        always_run: true
         pass_filenames: false
