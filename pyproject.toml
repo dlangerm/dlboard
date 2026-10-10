@@ -155,6 +155,8 @@ runtime-evaluated-base-classes = [
 "dlboard/scripts/*" = ["T201"]
 # A standalone runnable example, not a package -- never imported, so no `__init__.py` is needed.
 "examples/*" = ["INP001", "T201"]
+# Repo tooling scripts, not part of any package.
+"tools/*" = ["INP001"]
 # `client/`/`server/`'s own build-time scripts, not `dlboard/`'s -- standalone hatchling hooks,
 # never imported as part of either package.
 "{client,server}/hatch_build.py" = ["INP001"]
