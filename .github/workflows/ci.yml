@@ -11,8 +11,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  typecheck-precommit:
+  check_doc_only:
     runs-on: ubuntu-latest
+    outputs:
+      skip-tests: ${{ steps.check_doc_only.outputs.skip-tests }}
+    steps:
+      # A PR checkout is a merge commit, so HEAD^1..HEAD is exactly the PR's changes whatever branch
+      # it targets (stacked PRs included); depth 2 is enough to see its first parent.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - id: check_doc_only
+        name: Check if PR touches only documentation files
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = pull_request ] && ! git diff --name-only HEAD^1 HEAD | grep -qvE '(^_config\.yml$|\.md$)'; then
+            echo "PR touches only doc files; will skip tests"
+            echo "skip-tests=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "will run tests"
+            echo "skip-tests=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  typecheck-precommit:
+    needs: [check_doc_only]
+    runs-on: ubuntu-latest
+    if: needs.check_doc_only.outputs.skip-tests != 'true'
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -23,8 +46,9 @@ jobs:
       - run: uv run pyright
 
   test:
-    needs: [typecheck-precommit]
+    needs: [check_doc_only, typecheck-precommit]
     runs-on: ubuntu-latest
+    if: needs.check_doc_only.outputs.skip-tests != 'true'
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -46,7 +70,8 @@ jobs:
   # real Postgres: testcontainers starts one in Docker (preinstalled on GitHub's Ubuntu runners), the
   # same way `uv run pytest -m postgres` does locally.
   test-postgres:
-    needs: [typecheck-precommit]
+    if: needs.check_doc_only.outputs.skip-tests != 'true'
+    needs: [check_doc_only, typecheck-precommit]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -59,7 +84,8 @@ jobs:
   # The S3 artifact store, against a real S3-protocol endpoint (LocalStack, in Docker) -- the same
   # way `uv run pytest -m s3` does locally. See `dlboard/conftest.py`'s `s3_test_server`.
   test-s3:
-    needs: [typecheck-precommit]
+    if: needs.check_doc_only.outputs.skip-tests != 'true'
+    needs: [check_doc_only, typecheck-precommit]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -74,7 +100,8 @@ jobs:
   # own dev environment (and so every other job above) only ever runs on `.python-version`'s 3.12,
   # which numpy alone (`client/pyproject.toml`'s own comment) was once enough to silently break.
   client-compat:
-    needs: [typecheck-precommit]
+    if: needs.check_doc_only.outputs.skip-tests != 'true'
+    needs: [check_doc_only, typecheck-precommit]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -95,7 +122,8 @@ jobs:
   # Build-only: proves the root `Dockerfile`'s multi-stage build still produces a working
   # dlboard image. Not pushed anywhere -- just a build sanity check on every PR.
   docker-build:
-    needs: [typecheck-precommit]
+    if: needs.check_doc_only.outputs.skip-tests != 'true'
+    needs: [check_doc_only, typecheck-precommit]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
