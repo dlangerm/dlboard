@@ -14,7 +14,11 @@ from pydantic import ValidationError
 from dlboard.conftest import props as _props
 from dlboard.models import RUN_NAME_COLUMN
 from dlboard.plugins.charts import line_chart
-from dlboard.plugins.charts._axis_label import DEFAULT_MAX_AXIS_LABEL_CHARS, MIN_MAX_AXIS_LABEL_CHARS
+from dlboard.plugins.charts._axis_label import (
+    DEFAULT_MAX_AXIS_LABEL_CHARS,
+    MIN_MAX_AXIS_LABEL_CHARS,
+    VALUE_AXIS_WIDTH,
+)
 from dlboard.plugins.charts._sampling import downsample_grouped, downsample_series, shared_sample_grid
 from dlboard.plugins.charts.bar_chart import BarChart, BarChartSettings
 from dlboard.plugins.charts.line_chart import (
@@ -581,3 +585,43 @@ def test_an_axis_title_limit_too_small_to_keep_a_name_recognizable_is_rejected(
 ) -> None:
     with pytest.raises(ValidationError):
         settings(column="loss", x_axis="step", max_axis_label_chars=MIN_MAX_AXIS_LABEL_CHARS - 1)
+
+
+def test_line_chart_gives_its_value_axis_room_for_ticks_beside_the_title() -> None:
+    chart = LineChart.render(LineChartSettings(column="loss", x_axis="step"), _metrics_df(5))
+
+    y_axis = _props(chart)["yAxisProps"]
+    assert y_axis["width"] == VALUE_AXIS_WIDTH
+    js_source = Path(line_chart.__file__).with_name("line_chart_tooltip.js").read_text()
+    assert f"window.dashMantineFunctions.{y_axis['tickFormatter']['function']} =" in js_source
+
+
+def test_line_chart_tooltip_is_titled_with_the_whole_metric_name_even_when_its_axis_title_is_shortened() -> (
+    None
+):
+    df = _metrics_df(20, n_runs=1).rename(columns={"loss": LONG_METRIC})
+
+    chart = LineChart.render(
+        LineChartSettings(column=LONG_METRIC, x_axis="step", max_axis_label_chars=MIN_MAX_AXIS_LABEL_CHARS),
+        df,
+    )
+
+    assert _props(chart)["tooltipProps"]["chartTitle"] == LONG_METRIC
+    assert _props(chart)["yAxisLabel"] != LONG_METRIC
+
+
+@pytest.mark.parametrize(("orientation", "gets_room_for_ticks"), [("horizontal", True), ("vertical", False)])
+def test_bar_chart_gives_its_value_axis_room_for_ticks_only_when_the_values_are_on_it(
+    orientation: Literal["horizontal", "vertical"], gets_room_for_ticks: bool
+) -> None:
+    df = _hparam_grouped_df({1: 128}, {1: [0.8]})
+
+    chart = BarChart.render(
+        BarChartSettings(column="accuracy", x_axis="hidden_size", orientation=orientation), df
+    )
+
+    y_axis = _props(chart)["yAxisProps"]
+    assert (y_axis.get("width") == VALUE_AXIS_WIDTH) is gets_room_for_ticks
+    if gets_room_for_ticks:
+        js_source = Path(line_chart.__file__).with_name("bar_chart_tooltip.js").read_text()
+        assert f"window.dashMantineFunctions.{y_axis['tickFormatter']['function']} =" in js_source

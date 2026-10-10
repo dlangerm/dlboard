@@ -11,7 +11,12 @@ import pandas as pd
 from pydantic import BaseModel, Field
 
 from dlboard.models import RUN_NAME_COLUMN, ChartType, ColumnKind, MetricColumn
-from dlboard.plugins.charts._axis_label import DEFAULT_MAX_AXIS_LABEL_CHARS, MaxAxisLabelChars, fit_axis_label
+from dlboard.plugins.charts._axis_label import (
+    DEFAULT_MAX_AXIS_LABEL_CHARS,
+    VALUE_AXIS_WIDTH,
+    MaxAxisLabelChars,
+    fit_axis_label,
+)
 from dlboard.plugins.charts._sampling import DEFAULT_MAX_POINTS, shared_sample_grid
 from dlboard.serve import AssetKind, series_color, serve_asset
 
@@ -215,6 +220,7 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.LineChart], froze
             xAxisLabel=fit_axis_label(str(parameters.x_axis), parameters.max_axis_label_chars),
             yAxisLabel=fit_axis_label(parameters.column, parameters.max_axis_label_chars),
             xAxisProps=x_axis_props,
+            yAxisProps={"width": VALUE_AXIS_WIDTH, "tickFormatter": {"function": "lineChartValueTick"}},
             withLegend=True,
             withXAxis=True,
             withYAxis=True,
@@ -246,6 +252,7 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.LineChart], froze
                 "content": {"function": _TOOLTIP_CONTENT},
                 "labelFormatter": {"function": label_formatter},
                 "xAxisName": parameters.x_axis,
+                "chartTitle": parameters.column,
                 "series": series,
             },
             # syncMethod="value" matches synced charts by x-axis value rather than

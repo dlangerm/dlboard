@@ -11,7 +11,12 @@ import pandas as pd
 from pydantic import BaseModel, Field
 
 from dlboard.models import ChartType, ColumnKind
-from dlboard.plugins.charts._axis_label import DEFAULT_MAX_AXIS_LABEL_CHARS, MaxAxisLabelChars, fit_axis_label
+from dlboard.plugins.charts._axis_label import (
+    DEFAULT_MAX_AXIS_LABEL_CHARS,
+    VALUE_AXIS_WIDTH,
+    MaxAxisLabelChars,
+    fit_axis_label,
+)
 from dlboard.plugins.charts._grouping import last_row_per_run
 from dlboard.plugins.charts._table_style import HPARAM_COLUMN_PREFIX
 from dlboard.serve import AssetKind, series_color, serve_asset
@@ -151,7 +156,11 @@ class BarChart(ChartType[BarChartSettings, pd.DataFrame, dmc.BarChart], frozen=T
             f"{fit_axis_label(parameters.column, parameters.max_axis_label_chars - len(parameters.aggregation) - 2)})"
         )
         x_axis_props = {"type": "category"} if parameters.orientation == "horizontal" else {}
-        y_axis_props = {"type": "category"} if parameters.orientation == "vertical" else {}
+        y_axis_props: dict[str, typing.Any] = (
+            {"type": "category"}
+            if parameters.orientation == "vertical"
+            else {"width": VALUE_AXIS_WIDTH, "tickFormatter": {"function": "barChartValueTick"}}
+        )
         x_axis_label = (
             fit_axis_label(parameters.x_axis, parameters.max_axis_label_chars)
             if parameters.orientation == "horizontal"

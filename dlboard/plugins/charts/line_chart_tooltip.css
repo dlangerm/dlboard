@@ -13,6 +13,13 @@
   pointer-events: none;
 }
 
+/* What the values are of: the chart's metric, in full (its axis title may be shortened to fit). */
+.dl-chart-tooltip-title {
+  margin-bottom: 0.375rem;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
 .dl-chart-tooltip-header {
   display: flex;
   align-items: baseline;

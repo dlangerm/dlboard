@@ -12,6 +12,12 @@ Roughly what fits along a default-height (300px) chart's rotated y-axis title --
 run out of room. A longer one is drawn past the chart's own area, over whatever is next to it.
 """
 
+VALUE_AXIS_WIDTH: Final = 72
+"""
+Width in px of a chart's value (y) axis: room for its tick labels *and* the rotated title beside them.
+Recharts' default is narrower than a long tick and the title together, so they were drawn over each other.
+"""
+
 MIN_MAX_AXIS_LABEL_CHARS: Final = 12
 """Room for a bar chart's `median(...)` wrapper around at least a few characters of the name."""
 

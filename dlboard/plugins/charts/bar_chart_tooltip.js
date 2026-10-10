@@ -9,3 +9,15 @@ window.dashMantineFunctions.barChartTooltipLabel = (label, payload) => {
     var axisName = row ? row.__x_axis_name__ : null;
     return axisName ? axisName + ": " + label : label;
 };
+
+// A value-axis tick: see `lineChartValueTick` in `line_chart_tooltip.js`.
+window.dashMantineFunctions.barChartValueTick = (value) => {
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+        return String(value);
+    }
+    var magnitude = Math.abs(value);
+    if (magnitude !== 0 && (magnitude < 1e-3 || magnitude >= 1e5)) {
+        return value.toExponential(1).replace("e+", "e");
+    }
+    return String(parseFloat(value.toPrecision(4)));
+};
