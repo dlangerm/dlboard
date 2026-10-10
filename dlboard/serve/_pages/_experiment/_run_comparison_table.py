@@ -548,6 +548,7 @@ def _register_hparam_table(app: Dash) -> None:
         State(NAVBAR_HPARAM_DATATABLE_ID, "rowData", allow_optional=True),
         State(constants.STATE_EXPERIMENT_ID, "data"),
         State(core.STATE_PAGE_STORAGE, "data"),
+        State(core.PANEL_PAGING_ID, "data"),
         prevent_initial_call=True,
     )
     def sync_run_selection(
@@ -555,6 +556,7 @@ def _register_hparam_table(app: Dash) -> None:
         table_data: list[dict[str, Any]] | None,
         experiment_id: int,
         page_json: str,
+        paging_json: str,
     ) -> tuple[str, html.Div]:
         if selected_rows is None or table_data is None:
             raise PreventUpdate
@@ -587,6 +589,7 @@ def _register_hparam_table(app: Dash) -> None:
         page, container = core.persist_settings_and_rerender(
             store,
             ref,
+            paging_json,
             {dfh.EXCLUDED_RUNS_KEY: excluded},
         )
         return page.model_dump_json(), container

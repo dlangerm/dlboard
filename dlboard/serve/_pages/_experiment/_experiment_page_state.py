@@ -36,6 +36,7 @@ from dlboard.serve._pages._dash_helpers import tooltipped_action_icon
 from dlboard.serve._pages._dataframe_helpers import run_display_name
 from dlboard.serve._pages._experiment import _dataframe_helpers as dfh
 from dlboard.serve._pages._experiment._chart_autogen import SuggestSort
+from dlboard.serve._pages._experiment._paging import Paging
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -155,6 +156,15 @@ def tab_from_component_value(value: str) -> str:
 
 
 LOADED_PANELS_STORE_ID: StoreId[ExperimentPage] = StoreId("loaded-panels-store")
+
+PANEL_PAGING_ID: StoreId[ExperimentPage] = StoreId("panel-paging")
+"""
+The `Paging` (as JSON) of what the panel area is showing.
+
+Part of `accordion_view`'s output, so it is always the paging of the tree it sits in. Every callback that
+rebuilds that tree takes it as a `State` and hands it back to `accordion_view`, so a rebuild stays on the
+page the viewer was looking at.
+"""
 
 # --- new-panel popover, anchored to the toolbar's "New panel" button (callback in `_panel_controls.py`) ---
 NEW_PANEL_OPEN_ID: ButtonId[ExperimentPage] = ButtonId("new-panel-open")
@@ -1486,7 +1496,7 @@ def ref_of(experiment_id: int, page: BasicExperimentPage) -> PageRef:
 
 
 def accordion_view(
-    store: DataStore[...], page: BasicExperimentPage, *, focus_chart: str | None = None
+    store: DataStore[...], page: BasicExperimentPage, paging: Paging, *, focus_chart: str | None = None
 ) -> html.Div:
     """
     The full accordion/tabs view of `page`, plus every modal/drawer shell it can open.
@@ -1509,6 +1519,7 @@ def accordion_view(
         [
             page.render(store, experiment_id),
             Store(id=LOADED_PANELS_STORE_ID, data=list(open_value)),  # pyright: ignore[reportArgumentType]
+            Store(id=PANEL_PAGING_ID, data=paging.model_dump_json()),
             _add_chart_modal(),
             _suggest_charts_drawer(),
             _rename_panel_modal(),
@@ -1598,11 +1609,12 @@ def persist_settings(
 def persist_settings_and_rerender(
     store: DataStore[...],
     ref: PageRef,
+    paging_json: str,
     updates: dict[str, Any],
 ) -> tuple[BasicExperimentPage, html.Div]:
     """Merge `updates` into page_settings (server-authoritative), persist, and re-render the accordion."""
     page = persist_settings(store, ref, updates)
-    return page, accordion_view(store, page)
+    return page, accordion_view(store, page, Paging.model_validate_json(paging_json))
 
 
 def mutate_panels(
@@ -1634,6 +1646,7 @@ def mutate_panels(
 
 def mutate_panels_and_rerender(
     page_json: str,
+    paging_json: str,
     mutate: Callable[[list[models.PanelInstance[Any, Any]]], list[models.PanelInstance[Any, Any]]],
     *,
     extra_settings: dict[str, Any] | None = None,
@@ -1645,7 +1658,7 @@ def mutate_panels_and_rerender(
     own -- see `save_page`.
     """
     saved = mutate_panels(page_json, mutate, extra_settings=extra_settings)
-    return saved, accordion_view(get_data_store(), saved)
+    return saved, accordion_view(get_data_store(), saved, Paging.model_validate_json(paging_json))
 
 
 def upsert_chart(
@@ -1963,6 +1976,7 @@ class EditCtx(TypedDict):
     """
 
     page_json: str
+    paging_json: str
 
 
 def register_state_callbacks(app: Dash) -> None:

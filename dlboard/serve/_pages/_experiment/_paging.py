@@ -31,6 +31,10 @@ if TYPE_CHECKING:
 PanelsPerPage = Literal[5, 10, 20, 50]
 ChartsPerPage = Literal[6, 12, 24, 48]
 
+SIZES_COOKIE: typing.Final = "dlboard_page_sizes"
+"""The cookie holding the viewer's `PageSizes`: a cookie rather than browser storage because the
+server needs the sizes to render the page's very first response."""
+
 
 def fuzzy_match(query: str, text: str) -> bool:
     """

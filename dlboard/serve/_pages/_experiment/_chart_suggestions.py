@@ -259,6 +259,7 @@ def _register_auto_populate(app: Dash) -> None:
             "mode": State(core.AUTO_POPULATE_MODE_ID, "value"),
             "experiment_id": State(constants.STATE_EXPERIMENT_ID, "data"),
             "page_json": State(core.STATE_PAGE_STORAGE, "data"),
+            "paging_json": State(core.PANEL_PAGING_ID, "data"),
         },
         prevent_initial_call=True,
     )
@@ -281,6 +282,7 @@ def _register_auto_populate(app: Dash) -> None:
         )
         page, container = core.mutate_panels_and_rerender(
             auto_populate_ctx["page_json"],
+            auto_populate_ctx["paging_json"],
             lambda _panels: panels,
             extra_settings={core.OPEN_PANEL_KEY: panel_to_open(panels)},
         )
@@ -324,7 +326,10 @@ class _SuggestCtx(TypedDict):
 
 
 def _add_charts(
-    page_json: str, stored: list[dict[str, Any]], picked: frozenset[tuple[ColumnKind, str]]
+    page_json: str,
+    paging_json: str,
+    stored: list[dict[str, Any]],
+    picked: frozenset[tuple[ColumnKind, str]],
 ) -> tuple[Any, str, list[dict[str, Any]]]:
     """
     Add the chart of every stored suggestion in `picked` to its panel, in one page update.
@@ -343,7 +348,7 @@ def _add_charts(
             panels = core.add_chart_to_panel_by_name(panels, s.panel_name, s.chart)
         return panels
 
-    page, container = core.mutate_panels_and_rerender(page_json, add_all)
+    page, container = core.mutate_panels_and_rerender(page_json, paging_json, add_all)
     remaining = [e for e in stored if (ColumnKind(e["kind"]), e["key"]) not in picked]
     return container, page.model_dump_json(), remaining
 
@@ -473,22 +478,24 @@ def _register_suggestion_adds(app: Dash) -> None:
         Input({"type": "add-suggestion", "kind": ALL, "key": ALL}, "n_clicks"),
         State(core.SUGGEST_SUGGESTIONS_STORE_ID, "data"),
         State(core.STATE_PAGE_STORAGE, "data"),
+        State(core.PANEL_PAGING_ID, "data"),
         State(core.SUGGEST_FILTER_ID, "value"),
         State(core.SUGGEST_SORT_ID, "value"),
         State(core.SUGGEST_SELECTION_ID, "value"),
         prevent_initial_call=True,
     )
-    def add_suggested_chart(
+    def add_suggested_chart(  # noqa: PLR0913
         _n_clicks_list: list[int],
         stored: list[dict[str, Any]] | None,
         page_json: str,
+        paging_json: str,
         filter_text: str | None,
         sort: str | None,
         selected: list[str] | None,
     ) -> tuple[Any, str, Component, list[dict[str, Any]], list[str]]:
         triggered_id = cast("dict[str, str]", core.require_triggered_id())
         picked = frozenset({(ColumnKind(triggered_id["kind"]), triggered_id["key"])})
-        container, saved_page, remaining = _add_charts(page_json, stored or [], picked)
+        container, saved_page, remaining = _add_charts(page_json, paging_json, stored or [], picked)
         still_ticked = [v for v in selected or [] if parse_selection([v]) != picked]
         return container, saved_page, _render_list(remaining, filter_text, sort), remaining, still_ticked
 
@@ -502,6 +509,7 @@ def _register_suggestion_adds(app: Dash) -> None:
         State(core.SUGGEST_SELECTION_ID, "value"),
         State(core.SUGGEST_SUGGESTIONS_STORE_ID, "data"),
         State(core.STATE_PAGE_STORAGE, "data"),
+        State(core.PANEL_PAGING_ID, "data"),
         State(core.SUGGEST_FILTER_ID, "value"),
         State(core.SUGGEST_SORT_ID, "value"),
         prevent_initial_call=True,
@@ -511,6 +519,7 @@ def _register_suggestion_adds(app: Dash) -> None:
         selected: list[str] | None,
         stored: list[dict[str, Any]] | None,
         page_json: str,
+        paging_json: str,
         filter_text: str | None,
         sort: str | None,
     ) -> tuple[Any, str, Component, list[dict[str, Any]], list[str]]:
@@ -518,7 +527,7 @@ def _register_suggestion_adds(app: Dash) -> None:
         if not n_clicks:
             raise PreventUpdate
         container, saved_page, remaining = _add_charts(
-            page_json, stored or [], parse_selection(selected or [])
+            page_json, paging_json, stored or [], parse_selection(selected or [])
         )
         return container, saved_page, _render_list(remaining, filter_text, sort), remaining, []
 

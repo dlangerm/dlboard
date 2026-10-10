@@ -8,12 +8,14 @@ import pendulum
 from dash import dcc, html
 from dash.dcc import Store
 from dash.development.base_component import Component
+from flask import request
 
 from dlboard.serve import _constants as constants
 from dlboard.serve import get_current_user, get_data_store
 from dlboard.serve._pages._experiment import _experiment_page_state as core
 from dlboard.serve._pages._experiment import render_panel
 from dlboard.serve._pages._experiment._notes import STATE_NOTES_REVISION, notes_button, notes_drawer
+from dlboard.serve._pages._experiment._paging import SIZES_COOKIE, Paging
 from dlboard.serve._pages._experiment._run_compare import CompareQuery, compare_components
 from dlboard.serve._pages._experiment._views import resolve_view_id, view_controls
 from dlboard.serve._pages._onboarding import first_run_snippet, onboarding_card
@@ -89,7 +91,8 @@ def layout(
     `?view=` (a `Page.id`) shows one of the named views instead of the shared page (see `_views.py`).
     `?chart=` (a `ChartInstance.id`, from a copied chart link) opens that chart's panel and tab, and
     `chart_deep_link.js` scrolls to it. `?compare=`, `?compare_mode=` and `?compare_q=` open the
-    run-compare modal on that state (see `CompareQuery`). Any other query parameter is ignored.
+    run-compare modal on that state (see `CompareQuery`). `?panels_q=`, `?panels_page=` and
+    `?charts=` say which page of panels and charts is showing (see `Paging`). Any other query parameter is ignored.
     """
     store = get_data_store()
     exp = store.get_experiment(int(experiment_id))
@@ -101,7 +104,12 @@ def layout(
     # this static shell mounts -- see `render_panel`'s own docstring for why that's the one thing
     # that actually eliminates the page's extra round trip, not just hides it behind a spinner.
     view_id = resolve_view_id(store, exp.id, view)
-    container, header, page_json = render_panel(store, core.PageRef(exp.id, view_id), focus_chart=chart)
+    container, header, page_json = render_panel(
+        store,
+        core.PageRef(exp.id, view_id),
+        Paging.from_request(query, request.cookies.get(SIZES_COOKIE)),
+        focus_chart=chart,
+    )
     current_page = core.BasicExperimentPage.model_validate_json(page_json)
     is_owner = view_id is not None and current_page.owner_id == get_current_user().id
 

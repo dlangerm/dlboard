@@ -56,6 +56,7 @@ if TYPE_CHECKING:
 
     from dlboard import models
     from dlboard.models import DataStore
+    from dlboard.serve._pages._experiment._paging import Paging
 
 _log = get_logger(__name__)
 
@@ -96,7 +97,7 @@ def _delete_experiment_action() -> list[Component]:
 
 
 def render_panel(
-    store: DataStore[...], ref: core.PageRef, *, focus_chart: str | None = None
+    store: DataStore[...], ref: core.PageRef, paging: Paging, *, focus_chart: str | None = None
 ) -> tuple[html.Div, Component, str]:
     """
     Build the whole experiment panel: accordion, header, and its persisted page storage.
@@ -129,7 +130,7 @@ def render_panel(
         description=description,
         extra_actions=_delete_experiment_action(),
     )
-    container = core.accordion_view(store, page, focus_chart=focus_chart)
+    container = core.accordion_view(store, page, paging, focus_chart=focus_chart)
     return container, header, page.model_dump_json()
 
 

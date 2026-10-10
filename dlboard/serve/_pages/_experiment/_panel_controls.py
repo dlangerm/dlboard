@@ -126,11 +126,12 @@ def _register_create_panel(app: Dash) -> None:
         Input(core.NEW_PANEL_NAME_ID, "n_submit"),
         State(core.NEW_PANEL_NAME_ID, "value"),
         State(core.STATE_PAGE_STORAGE, "data"),
+        State(core.PANEL_PAGING_ID, "data"),
         prevent_initial_call=True,
         running=_busy_while_running(core.NEW_PANEL_ID),
     )
     def create_panel(
-        n_clicks: int | None, n_submit: int | None, panel_name: str | None, page_json: str
+        n_clicks: int | None, n_submit: int | None, panel_name: str | None, page_json: str, paging_json: str
     ) -> tuple[Any, str | NoUpdate, str | None]:
         """Add an empty panel to whichever tab is showing, so it appears right where you are."""
         if not n_clicks and not n_submit:
@@ -149,7 +150,7 @@ def _register_create_panel(app: Dash) -> None:
             else ""
         )
         page, container = core.mutate_panels_and_rerender(
-            page_json, lambda panels: [*panels, PanelInstance(name=panel_name, tab=tab)]
+            page_json, paging_json, lambda panels: [*panels, PanelInstance(name=panel_name, tab=tab)]
         )
         return container, page.model_dump_json(), None
 
@@ -170,6 +171,7 @@ def _register_add_chart(app: Dash) -> None:
             "target": State(core.ADD_CHART_TARGET_ID, "data"),
             "experiment_id": State(constants.STATE_EXPERIMENT_ID, "data"),
             "page_json": State(core.STATE_PAGE_STORAGE, "data"),
+            "paging_json": State(core.PANEL_PAGING_ID, "data"),
         },
         prevent_initial_call=True,
     )
@@ -194,6 +196,7 @@ def _register_add_chart(app: Dash) -> None:
 
         page, container = core.mutate_panels_and_rerender(
             add_chart_ctx["page_json"],
+            add_chart_ctx["paging_json"],
             apply_chart,
         )
         return container, False, "", page.model_dump_json(), False
@@ -220,6 +223,7 @@ def _register_delete_chart(app: Dash) -> None:
             "target": State(core.DELETE_CHART_TARGET_ID, "data"),
             "experiment_id": State(constants.STATE_EXPERIMENT_ID, "data"),
             "page_json": State(core.STATE_PAGE_STORAGE, "data"),
+            "paging_json": State(core.PANEL_PAGING_ID, "data"),
         },
         prevent_initial_call=True,
         running=_busy_while_running(core.DELETE_CHART_CONFIRM_ID),
@@ -242,6 +246,7 @@ def _register_delete_chart(app: Dash) -> None:
 
         page, container = core.mutate_panels_and_rerender(
             delete_ctx["page_json"],
+            delete_ctx["paging_json"],
             remove_chart,
         )
         return container, page.model_dump_json(), False
@@ -278,6 +283,7 @@ def _register_delete_panel(app: Dash) -> None:
             "target": State(core.DELETE_PANEL_TARGET_ID, "data"),
             "experiment_id": State(constants.STATE_EXPERIMENT_ID, "data"),
             "page_json": State(core.STATE_PAGE_STORAGE, "data"),
+            "paging_json": State(core.PANEL_PAGING_ID, "data"),
         },
         prevent_initial_call=True,
         running=_busy_while_running(core.DELETE_PANEL_CONFIRM_ID),
@@ -294,6 +300,7 @@ def _register_delete_panel(app: Dash) -> None:
 
         page, container = core.mutate_panels_and_rerender(
             delete_ctx["page_json"],
+            delete_ctx["paging_json"],
             remove_panel,
         )
         return container, page.model_dump_json(), False
@@ -376,11 +383,13 @@ def _register_toggle(app: Dash) -> None:
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Input({"type": "panel-sync", "panel": ALL}, "checked"),
         State(core.STATE_PAGE_STORAGE, "data"),
+        State(core.PANEL_PAGING_ID, "data"),
         prevent_initial_call=True,
     )
     def toggle_panel_sync(
         _checked_list: list[bool],
         page_json: str,
+        paging_json: str,
     ) -> tuple[html.Div, str]:
         # Unlike button clicks, a Switch's `checked` is a meaningful trigger value even when
         # `False`, so this can't reuse `require_triggered_id`'s "falsy value means no real
@@ -407,6 +416,7 @@ def _register_toggle(app: Dash) -> None:
 
         page, container = core.mutate_panels_and_rerender(
             page_json,
+            paging_json,
             toggle,
         )
         return container, page.model_dump_json()
@@ -416,13 +426,14 @@ def _register_toggle(app: Dash) -> None:
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Input({"type": core.PANEL_LAYOUT_TYPE, "panel": ALL}, "value"),
         State(core.STATE_PAGE_STORAGE, "data"),
+        State(core.PANEL_PAGING_ID, "data"),
         prevent_initial_call=True,
     )
-    def change_panel_layout(_layouts: list[str], page_json: str) -> tuple[html.Div, str]:
+    def change_panel_layout(_layouts: list[str], page_json: str, paging_json: str) -> tuple[html.Div, str]:
         """Apply a panel's Packed/Grid toggle -- every chart's width changes with it, so the page is rebuilt."""
         panel_name, edit = _validated_layout_change(page_json)
         page, container = core.mutate_panels_and_rerender(
-            page_json, lambda panels: core.update_panel(panels, panel_name, edit)
+            page_json, paging_json, lambda panels: core.update_panel(panels, panel_name, edit)
         )
         return container, page.model_dump_json()
 
@@ -464,11 +475,13 @@ def _register_tab_drop(app: Dash) -> None:
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Input(core.TAB_DROP_STORE_ID, "data"),
         State(core.STATE_PAGE_STORAGE, "data"),
+        State(core.PANEL_PAGING_ID, "data"),
         prevent_initial_call=True,
     )
     def drop_panel_on_tab(
         request: core.TabDropRequest | None,
         page_json: str,
+        paging_json: str,
     ) -> tuple[html.Div, str]:
         if not request:
             raise PreventUpdate
@@ -484,6 +497,7 @@ def _register_tab_drop(app: Dash) -> None:
 
         page, container = core.mutate_panels_and_rerender(
             page_json,
+            paging_json,
             move,
             extra_settings={core.ACTIVE_TAB_KEY: new_tab},
         )
@@ -494,11 +508,13 @@ def _register_tab_drop(app: Dash) -> None:
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Input(core.CHART_TAB_DROP_STORE_ID, "data"),
         State(core.STATE_PAGE_STORAGE, "data"),
+        State(core.PANEL_PAGING_ID, "data"),
         prevent_initial_call=True,
     )
     def drop_chart_on_tab(
         request: core.ChartTabDropRequest | None,
         page_json: str,
+        paging_json: str,
     ) -> tuple[html.Div, str]:
         """Move a single chart to an *existing* tab -- see `drop_panel_on_tab`, its panel-level twin."""
         if not request:
@@ -510,6 +526,7 @@ def _register_tab_drop(app: Dash) -> None:
 
         page, container = core.mutate_panels_and_rerender(
             page_json,
+            paging_json,
             move,
             extra_settings={core.ACTIVE_TAB_KEY: new_tab},
         )
@@ -530,11 +547,13 @@ def _register_chart_panel_move(app: Dash) -> None:
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Input(core.CHART_PANEL_MOVE_STORE_ID, "data"),
         State(core.STATE_PAGE_STORAGE, "data"),
+        State(core.PANEL_PAGING_ID, "data"),
         prevent_initial_call=True,
     )
     def drop_chart_on_panel(
         request: core.ChartPanelMoveRequest | None,
         page_json: str,
+        paging_json: str,
     ) -> tuple[html.Div, str]:
         if not request:
             raise PreventUpdate
@@ -548,6 +567,7 @@ def _register_chart_panel_move(app: Dash) -> None:
 
         page, container = core.mutate_panels_and_rerender(
             page_json,
+            paging_json,
             move,
         )
         return container, page.model_dump_json()
@@ -584,6 +604,7 @@ def _register_rename(app: Dash) -> None:
             "new_name": State(core.RENAME_PANEL_NAME_INPUT_ID, "value"),
             "experiment_id": State(constants.STATE_EXPERIMENT_ID, "data"),
             "page_json": State(core.STATE_PAGE_STORAGE, "data"),
+            "paging_json": State(core.PANEL_PAGING_ID, "data"),
         },
         prevent_initial_call=True,
         running=_busy_while_running(core.RENAME_PANEL_SAVE_ID),
@@ -616,6 +637,7 @@ def _register_rename(app: Dash) -> None:
 
         page, container = core.mutate_panels_and_rerender(
             rename_ctx["page_json"],
+            rename_ctx["paging_json"],
             lambda panels: _panels_with_renamed_panel(panels, old_name=old_name, new_name=new_name),
             extra_settings=extra_settings,
         )
@@ -701,6 +723,7 @@ def _register_new_tab(app: Dash) -> None:
             "panel_names": State(core.NEW_TAB_PANELS_SELECT_ID, "value"),
             "experiment_id": State(constants.STATE_EXPERIMENT_ID, "data"),
             "page_json": State(core.STATE_PAGE_STORAGE, "data"),
+            "paging_json": State(core.PANEL_PAGING_ID, "data"),
         },
         prevent_initial_call=True,
         running=_busy_while_running(core.NEW_TAB_SAVE_ID),
@@ -720,6 +743,7 @@ def _register_new_tab(app: Dash) -> None:
         selected = set(panel_names)
         page, container = core.mutate_panels_and_rerender(
             new_tab_ctx["page_json"],
+            new_tab_ctx["paging_json"],
             lambda panels: _panels_with_new_tab(panels, name=name, panel_names=selected),
             extra_settings={core.ACTIVE_TAB_KEY: name},
         )
@@ -776,6 +800,7 @@ def _register_rename_tab(app: Dash) -> None:
             "new_name": State(core.RENAME_TAB_NAME_INPUT_ID, "value"),
             "experiment_id": State(constants.STATE_EXPERIMENT_ID, "data"),
             "page_json": State(core.STATE_PAGE_STORAGE, "data"),
+            "paging_json": State(core.PANEL_PAGING_ID, "data"),
         },
         prevent_initial_call=True,
         running=_busy_while_running(core.RENAME_TAB_SAVE_ID),
@@ -797,6 +822,7 @@ def _register_rename_tab(app: Dash) -> None:
 
         page, container = core.mutate_panels_and_rerender(
             rename_ctx["page_json"],
+            rename_ctx["paging_json"],
             lambda panels: _panels_with_renamed_tab(panels, old_name=old_name, new_name=new_name),
             extra_settings=extra_settings,
         )
