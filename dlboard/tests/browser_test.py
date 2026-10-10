@@ -1968,3 +1968,55 @@ def test_panels_are_paged_and_filtered_and_the_page_is_a_shareable_link(
     page.reload()
     expect(headers).to_have_count(5)
     assert console_errors == []
+
+
+def test_a_panels_charts_are_paged_and_filtered_by_metric_name(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """
+    A panel with many charts mounts one page of them, narrowed by a fuzzy filter on the metric names the
+    charts show. Both the page and the filter are in the URL, and a reload lands on the same charts.
+    """
+    _create_project_and_experiment(page, live_server_url, "Paged Charts Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    api = BasicDlboardAPI(live_server_url)
+    run = api.create_run(models.NewRun(experiment_id=experiment_id))
+    api.log_metric_batch(
+        [
+            models.LoggedMetrics(
+                experiment_id=experiment_id,
+                run_id=run.id,
+                step=step,
+                metrics={f"g/m{i:02}": float(i) for i in range(14)},
+                timestamp_utc=pendulum.now("UTC"),
+            )
+            for step in range(2)
+        ]
+    )
+    page.reload()
+    _auto_generate_charts(page)
+
+    charts = page.locator(".dl-chart-item")
+    panel = page.locator(".mantine-Accordion-panel")
+    expect(charts).to_have_count(0)  # more than AUTO_OPEN_MAX_CHARTS, so it starts closed
+    page.locator(".dl-panel-item-header", has_text="g").first.click()
+    expect(charts).to_have_count(12)
+    expect(page).not_to_have_url(re.compile(r"charts="))
+
+    panel.get_by_role("button", name="2", exact=True).click()
+    expect(charts).to_have_count(2)
+    expect(page).to_have_url(re.compile(r"charts="))
+
+    chart_filter = page.get_by_placeholder("Filter charts by metric or artifact")
+    chart_filter.fill("m03")
+    expect(charts).to_have_count(1)
+    expect(charts.first).to_contain_text("m03")
+
+    page.reload()
+    expect(charts).to_have_count(1)
+    expect(chart_filter).to_have_value("m03")
+
+    chart_filter.fill("")
+    expect(charts).to_have_count(12)
+    assert console_errors == []

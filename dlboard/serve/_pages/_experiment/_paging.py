@@ -19,7 +19,15 @@ import typing
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
-from pydantic import BaseModel, BeforeValidator, Field, TypeAdapter, ValidationError, computed_field
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    BeforeValidator,
+    Field,
+    TypeAdapter,
+    ValidationError,
+    computed_field,
+)
 
 from dlboard.serve._pages._experiment import _dataframe_helpers as dfh
 
@@ -33,6 +41,8 @@ ChartsPerPage = Literal[6, 12, 24, 48]
 
 PANEL_SIZES: typing.Final = typing.get_args(PanelsPerPage)
 """The panels-per-page choices the UI offers -- the very values `PanelsPerPage` accepts, so they can't drift."""
+CHART_SIZES: typing.Final = typing.get_args(ChartsPerPage)
+"""The charts-per-page choices the UI offers, likewise."""
 
 SIZES_COOKIE: typing.Final = "dlboard_page_sizes"
 """The cookie holding the viewer's `PageSizes`: a cookie rather than browser storage because the
@@ -83,6 +93,11 @@ def _load_json(value: object) -> object:
     return json.loads(value) if isinstance(value, str) else value
 
 
+def _drop_default_charts(charts: dict[str, ChartPaging]) -> dict[str, ChartPaging]:
+    """A panel at its defaults is the same as one that isn't mentioned, so two equal pagings compare equal."""
+    return {name: paging for name, paging in charts.items() if paging != ChartPaging()}
+
+
 class Paging(BaseModel, frozen=True, extra="ignore", populate_by_name=True):
     """Which slice of the experiment page is showing. See the module docstring."""
 
@@ -91,7 +106,9 @@ class Paging(BaseModel, frozen=True, extra="ignore", populate_by_name=True):
 
     panel_page: int = Field(default=1, ge=1, alias="panels_page")
 
-    charts: Annotated[dict[str, ChartPaging], BeforeValidator(_load_json)] = Field(default_factory=dict)
+    charts: Annotated[
+        dict[str, ChartPaging], BeforeValidator(_load_json), AfterValidator(_drop_default_charts)
+    ] = Field(default_factory=dict)
     """Per panel (by name): its chart filter and page. A panel absent here is unfiltered, on page 1."""
 
     sizes: PageSizes = Field(default_factory=PageSizes)
@@ -114,11 +131,12 @@ class Paging(BaseModel, frozen=True, extra="ignore", populate_by_name=True):
         Part of the serialized form, so `sync_paging_url.js` can mirror a paging store into the address
         bar without knowing the URL's shape itself.
         """
-        charts = {name: paging for name, paging in self.charts.items() if paging != ChartPaging()}
         return {
             "panels_q": self.panel_q,
             "panels_page": str(self.panel_page) if self.panel_page > 1 else "",
-            "charts": _CHARTS_ADAPTER.dump_json(charts, exclude_defaults=True).decode() if charts else "",
+            "charts": _CHARTS_ADAPTER.dump_json(self.charts, exclude_defaults=True).decode()
+            if self.charts
+            else "",
         }
 
     def chart_paging(self, panel_name: str) -> ChartPaging:
@@ -133,17 +151,29 @@ class Paging(BaseModel, frozen=True, extra="ignore", populate_by_name=True):
             }
         )
 
-    def with_sizes(self, *, panels: PanelsPerPage | None = None) -> Paging:
-        """A copy with the viewer's page size changed; a new size goes back to the first page."""
-        if panels is None:
-            return self
-        return self.model_copy(
-            update={"sizes": self.sizes.model_copy(update={"panels": panels}), "panel_page": 1}
-        )
+    def with_sizes(
+        self, *, panels: PanelsPerPage | None = None, charts: ChartsPerPage | None = None
+    ) -> Paging:
+        """A copy with the viewer's page size changed; a new size puts what it pages back on its first page."""
+        paging = self
+        if panels is not None:
+            paging = paging.model_copy(
+                update={"sizes": paging.sizes.model_copy(update={"panels": panels}), "panel_page": 1}
+            )
+        if charts is not None:
+            paging = paging.model_copy(
+                update={
+                    "sizes": paging.sizes.model_copy(update={"charts": charts}),
+                    "charts": {name: ChartPaging(q=chart.q) for name, chart in paging.charts.items()},
+                }
+            )
+        return paging
 
     def with_charts(self, panel_name: str, chart_paging: ChartPaging) -> Paging:
         """A copy with one panel's chart filter and page replaced."""
-        return self.model_copy(update={"charts": {**self.charts, panel_name: chart_paging}})
+        return self.model_copy(
+            update={"charts": _drop_default_charts({**self.charts, panel_name: chart_paging})}
+        )
 
 
 @dataclass(frozen=True)
@@ -187,8 +217,14 @@ def chart_matches(chart: models.ChartInstance[Any, Any], query: str) -> bool:
     return not query.strip() or any(fuzzy_match(query, key) for key in chart_search_keys(chart))
 
 
-def next_panel_paging(
-    paging: Paging, *, q: str, pager_values: Sequence[int], size: PanelsPerPage, tab_changed: bool
+def next_panel_paging(  # noqa: PLR0913
+    paging: Paging,
+    *,
+    q: str,
+    pager_values: Sequence[int],
+    size: PanelsPerPage,
+    chart_size: ChartsPerPage,
+    tab_changed: bool,
 ) -> Paging:
     """
     `paging` after the panel controls report their current values.
@@ -200,11 +236,28 @@ def next_panel_paging(
         return paging.with_panels(q=q)
     if size != paging.sizes.panels:
         return paging.with_sizes(panels=size)
+    if chart_size != paging.sizes.charts:
+        return paging.with_sizes(charts=chart_size)
     if tab_changed:
         return paging.with_panels(page=1)
     return paging.with_panels(
         page=next((v for v in pager_values if v != paging.panel_page), paging.panel_page)
     )
+
+
+def next_chart_paging(paging: Paging, *, filters: Mapping[str, str], pagers: Mapping[str, int]) -> Paging:
+    """
+    `paging` after the panels' chart filters and pagers report their values (by panel name).
+
+    Whichever differs from what is stored is the change; a new filter goes back to the first page.
+    A panel with no control for something (a pager when there is one page) keeps what it has.
+    """
+    for name in filters.keys() | pagers.keys():
+        current = paging.chart_paging(name)
+        q = filters.get(name, current.q)
+        page = 1 if q != current.q else pagers.get(name, current.page)
+        paging = paging.with_charts(name, ChartPaging(q=q, page=page))
+    return paging
 
 
 def visible_panels[P: models.PanelInstance[Any, Any]](

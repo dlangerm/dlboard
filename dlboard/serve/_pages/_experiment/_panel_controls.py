@@ -25,7 +25,7 @@ from dash.exceptions import PreventUpdate
 from pydantic import ValidationError
 
 from dlboard.models import ChartTypeRegistry, PanelInstance
-from dlboard.serve import ClientsideScript, get_data_store
+from dlboard.serve import ClientsideScript
 from dlboard.serve import _constants as constants
 from dlboard.serve._pages._experiment import _experiment_page_state as core
 
@@ -201,6 +201,7 @@ def _register_add_chart(app: Dash) -> None:
             add_chart_ctx["page_json"],
             add_chart_ctx["paging_json"],
             apply_chart,
+            reveal_chart=new_chart.id,
         )
         return container, False, "", page.model_dump_json(), False
 
@@ -323,12 +324,9 @@ def _register_reorder(app: Dash) -> None:
     """
     Panel/chart drag-and-drop drop handlers -- see `_experiment_page_dragdrop.js`.
 
-    A panel reorder rebuilds the panel area: only one page of panels is ever rendered, so the new order
-    can't be spliced into the client's tree the way it once could -- the panels it moves between may
-    not be in it. That rebuild fetches only the page being shown. A chart reorder never changes what
-    any chart shows, only where it sits, so it persists the new order (a cheap page-row update, no
-    metric/artifact query) and splices the client's own already-rendered tree into that order in place
-    -- see `core.reorder_rendered_charts`.
+    A reorder rebuilds the panel area: only one page of panels, and of each panel's charts, is ever
+    rendered, so the new order can't be spliced into the client's tree the way it once could -- what it
+    moves between may not be in it. That rebuild fetches only the pages being shown.
     """
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
@@ -359,26 +357,24 @@ def _register_reorder(app: Dash) -> None:
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Input(core.CHART_REORDER_STORE_ID, "data"),
         State(core.STATE_PAGE_STORAGE, "data"),
-        State(core.METRIC_CONTENT_ID, "children"),
+        State(core.PANEL_PAGING_ID, "data"),
         prevent_initial_call=True,
     )
     def reorder_chart(
-        request: core.ChartReorderRequest | None, page_json: str, container: dict[str, Any]
-    ) -> tuple[dict[str, Any], str]:
+        request: core.ChartReorderRequest | None, page_json: str, paging_json: str
+    ) -> tuple[html.Div, str]:
         if not request:
             raise PreventUpdate
-        curr_page = core.BasicExperimentPage.model_validate_json(page_json)
-        panel_name, index, target_index = request["panel"], request["index"], request["target_index"]
-        panel = next(p for p in curr_page.panels if p.name == panel_name)
-        new_panels = core.reorder_chart(
-            curr_page.panels, panel_name, index, target_index, after=request["after"]
+        panel_name, index = request["panel"], request["index"]
+        page, container = core.mutate_panels_and_rerender(
+            page_json,
+            paging_json,
+            lambda panels: core.reorder_chart(
+                panels, panel_name, index, request["target_index"], after=request["after"]
+            ),
+            reveal_chart=core.chart_id_at(page_json, panel_name, index),
         )
-        updated_page = core.save_page(get_data_store(), curr_page.model_copy(update={"panels": new_panels}))
-        new_order = core.move_index(
-            list(range(len(panel.charts))), index, target_index, after=request["after"]
-        )
-        new_container = core.reorder_rendered_charts(container, panel_name, new_order)
-        return new_container, updated_page.model_dump_json()
+        return container, page.model_dump_json()
 
 
 def _register_toggle(app: Dash) -> None:
@@ -534,6 +530,7 @@ def _register_tab_drop(app: Dash) -> None:
             paging_json,
             move,
             extra_settings={core.ACTIVE_TAB_KEY: new_tab},
+            reveal_chart=core.chart_id_at(page_json, panel_name, index),
         )
         return container, page.model_dump_json()
 
@@ -574,6 +571,7 @@ def _register_chart_panel_move(app: Dash) -> None:
             page_json,
             paging_json,
             move,
+            reveal_chart=core.chart_id_at(page_json, panel_name, index),
         )
         return container, page.model_dump_json()
 

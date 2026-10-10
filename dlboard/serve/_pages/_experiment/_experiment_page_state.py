@@ -39,18 +39,21 @@ from dlboard.serve._pages._dataframe_helpers import run_display_name
 from dlboard.serve._pages._experiment import _dataframe_helpers as dfh
 from dlboard.serve._pages._experiment._chart_autogen import SuggestSort
 from dlboard.serve._pages._experiment._paging import (
+    CHART_SIZES,
     PANEL_SIZES,
     SIZES_COOKIE,
     PageSizes,
     Paging,
     Slice,
+    next_chart_paging,
     next_panel_paging,
     reveal,
+    visible_chart_indexes,
     visible_panels,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
     from dlboard.models import DataStore
 
@@ -188,6 +191,10 @@ PANEL_AREA_ID: DivId[ExperimentPage] = DivId("panel-area")
 PANEL_FILTER_ID: ValueId[ExperimentPage] = ValueId("panel-filter")
 PANEL_PAGER_TYPE: typing.Final = "panel-pager"  # `PagerPosition` says which
 PANEL_PAGE_SIZE_ID: ValueId[ExperimentPage] = ValueId("panel-page-size")
+CHART_PAGE_SIZE_ID: ValueId[ExperimentPage] = ValueId("chart-page-size")
+CHART_FILTER_TYPE: typing.Final = "chart-filter"
+CHART_PAGER_TYPE: typing.Final = "chart-pager"
+CHART_PAGER_SLOT_TYPE: typing.Final = "chart-pager-slot"
 
 # --- new-panel popover, anchored to the toolbar's "New panel" button (callback in `_panel_controls.py`) ---
 NEW_PANEL_OPEN_ID: ButtonId[ExperimentPage] = ButtonId("new-panel-open")
@@ -428,6 +435,18 @@ def chart_content_id(panel_name: str, index: int) -> ChartID:
 
 def panel_content_id(panel_name: str) -> dict[str, str]:
     return {"type": "panel-content", "panel": panel_name}
+
+
+def chart_filter_id(panel_name: str) -> dict[str, str]:
+    return {"type": CHART_FILTER_TYPE, "panel": panel_name}
+
+
+def chart_pager_id(panel_name: str) -> dict[str, str]:
+    return {"type": CHART_PAGER_TYPE, "panel": panel_name}
+
+
+def chart_pager_slot_id(panel_name: str) -> dict[str, str]:
+    return {"type": CHART_PAGER_SLOT_TYPE, "panel": panel_name}
 
 
 def panel_accordion_id(tab: str) -> dict[str, str]:
@@ -675,14 +694,22 @@ def render_chart_item(
     )
 
 
-def render_panel_charts(panel: models.PanelInstance[Any, Any], dataframe: pd.DataFrame) -> list[Component]:
-    """Render every chart in a panel -- see `render_chart_item`."""
-    return [render_chart_item(panel, idx, dataframe) for idx in range(len(panel.charts))]
+def render_panel_charts(
+    panel: models.PanelInstance[Any, Any], dataframe: pd.DataFrame, indexes: Sequence[int] | None = None
+) -> list[Component]:
+    """Render the charts of a panel at `indexes` (every chart, if not given) -- see `render_chart_item`."""
+    return [
+        render_chart_item(panel, idx, dataframe)
+        for idx in range(len(panel.charts))
+        if indexes is None or idx in indexes
+    ]
 
 
-def render_panel_content_from_df(panel: models.PanelInstance[Any, Any], df: pd.DataFrame) -> Component:
-    """Render a panel's charts from an already-fetched dataframe -- see `render_panel_content`."""
-    items = render_panel_charts(panel, df)
+def render_panel_content_from_df(
+    panel: models.PanelInstance[Any, Any], df: pd.DataFrame, indexes: Sequence[int] | None = None
+) -> Component:
+    """Render a panel's charts at `indexes` from an already-fetched dataframe -- see `render_panel_content`."""
+    items = render_panel_charts(panel, df, indexes)
     return (
         dmc.SimpleGrid(items, id=panel_grid_id(panel.name), cols=panel.grid_columns, spacing="lg")
         if panel.layout == "grid"
@@ -695,10 +722,25 @@ def render_panel_content(
     experiment_id: int,
     panel: models.PanelInstance[Any, Any],
     page_settings: dict[str, Any],
+    paging: Paging,
 ) -> Component:
-    """Fetch + render one panel's charts. Only called for panels that are actually open."""
-    df = fetch_panel_dataframe(store, experiment_id, panel, page_settings)
-    return render_panel_content_from_df(panel, df)
+    """
+    Fetch + render the page of one panel's charts `paging` shows. Only called for panels that are open.
+
+    Only that page's charts are fetched for -- a panel of a thousand charts costs what one page of them does.
+    """
+    indexes = visible_chart_indexes(panel, paging).items
+    if not indexes:
+        return dmc.Text(
+            f"No charts match {paging.chart_paging(panel.name).q!r}",
+            c="dimmed",
+            size="sm",
+            ta="center",
+            py="md",
+        )
+    shown = panel.model_copy(update={"charts": [panel.charts[i] for i in indexes]})
+    df = fetch_panel_dataframe(store, experiment_id, shown, page_settings)
+    return render_panel_content_from_df(panel, df, indexes)
 
 
 def chart_data_fingerprint(chart: models.ChartInstance[Any, Any], df: pd.DataFrame) -> str:
@@ -1014,12 +1056,15 @@ class PagerPosition(StrEnum):
     BOTTOM = "bottom"
 
 
-def _panel_pager(shown: Slice[Any], paging: Paging, position: PagerPosition) -> Component:
+def _panel_pager(
+    shown: Slice[Any], paging: Paging, position: PagerPosition, *, chart_heavy: bool
+) -> Component:
     """
-    A page selector for the panels (`withEdges` adds first/last), and above them the page-size choice.
+    A page selector for the panels (`withEdges` adds first/last), and above them the page-size choices.
 
     Both pagers are drawn showing the stored page, which is how `next_panel_paging` tells which one
-    was clicked. Nothing is drawn when there is nothing to page through.
+    was clicked. Nothing is drawn when there is nothing to page through. `chart_heavy` says some
+    panel here has more charts than the smallest page, so the charts-per-page choice is offered too.
     """
     pager = dmc.Pagination(
         id={"type": PANEL_PAGER_TYPE, "pos": position.value},
@@ -1032,20 +1077,26 @@ def _panel_pager(shown: Slice[Any], paging: Paging, position: PagerPosition) -> 
         case PagerPosition.BOTTOM:
             return pager if shown.total > 1 else html.Div()
         case PagerPosition.TOP:
-            if shown.count <= PANEL_SIZES[0]:
+            many_panels = shown.count > PANEL_SIZES[0]
+            if not (many_panels or chart_heavy):
                 return html.Div()
+            size_selects = [
+                dmc.Select(
+                    id=select_id,
+                    data=[{"value": str(size), "label": f"{size} {unit} / page"} for size in sizes],
+                    value=str(current),
+                    allowDeselect=False,
+                    size="xs",
+                    w=170,
+                )
+                for select_id, unit, sizes, current, offered in (
+                    (PANEL_PAGE_SIZE_ID, "panels", PANEL_SIZES, paging.sizes.panels, many_panels),
+                    (CHART_PAGE_SIZE_ID, "charts per panel", CHART_SIZES, paging.sizes.charts, chart_heavy),
+                )
+                if offered
+            ]
             return dmc.Group(
-                [
-                    pager if shown.total > 1 else html.Div(),
-                    dmc.Select(
-                        id=PANEL_PAGE_SIZE_ID,
-                        data=[{"value": str(size), "label": f"{size} panels / page"} for size in PANEL_SIZES],
-                        value=str(paging.sizes.panels),
-                        allowDeselect=False,
-                        size="xs",
-                        w=150,
-                    ),
-                ],
+                [pager if shown.total > 1 else html.Div(), dmc.Group(size_selects, gap="xs")],
                 justify="space-between",
                 mb="xs",
             )
@@ -1070,18 +1121,19 @@ def panel_area_children(
     """The pager(s) and accordion for the page of `tab`'s panels `paging` shows -- all that a page flip re-renders."""
     shown = visible_panels(page.panels, tab, paging)
     accordion = _panel_accordion(
-        data_store, experiment_id, tab, shown.items, set(page.open_panels()), page.page_settings
+        data_store, experiment_id, tab, shown.items, set(page.open_panels()), page, paging
     )
+    chart_heavy = any(len(p.charts) > CHART_SIZES[0] for p in page.panels if p.tab == tab)
     no_match = (
         dmc.Text(f"No panels match {paging.panel_q!r}", c="dimmed", size="sm", ta="center", py="xl")
         if paging.panel_q and not shown.items
         else html.Div()
     )
     return [
-        _panel_pager(shown, paging, PagerPosition.TOP),
+        _panel_pager(shown, paging, PagerPosition.TOP, chart_heavy=chart_heavy),
         no_match,
         accordion,
-        _panel_pager(shown, paging, PagerPosition.BOTTOM),
+        _panel_pager(shown, paging, PagerPosition.BOTTOM, chart_heavy=chart_heavy),
     ]
 
 
@@ -1092,8 +1144,14 @@ def panel_area(
 
 
 def clamped_paging(page: BasicExperimentPage, tab: str, paging: Paging) -> Paging:
-    """`paging` with a panel page that no longer exists (panels deleted, a stale link) moved to the last one."""
-    return paging.with_panels(page=visible_panels(page.panels, tab, paging).number)
+    """`paging` with any page that no longer exists (panels or charts deleted, a stale link) moved to the last one."""
+    paging = paging.with_panels(page=visible_panels(page.panels, tab, paging).number)
+    for panel in visible_panels(page.panels, tab, paging).items:
+        chart_paging = paging.chart_paging(panel.name)
+        number = visible_chart_indexes(panel, paging).number
+        if number != chart_paging.page:
+            paging = paging.with_charts(panel.name, chart_paging.model_copy(update={"page": number}))
+    return paging
 
 
 def visible_open_panels(page: BasicExperimentPage, tab: str, paging: Paging) -> list[str]:
@@ -1127,13 +1185,56 @@ def _tab_tab(tab: str) -> Component:
     )
 
 
+def _chart_pager(panel: models.PanelInstance[Any, Any], shown: Slice[int]) -> Component:
+    if shown.total <= 1:
+        return html.Div()
+    return dmc.Pagination(
+        id=chart_pager_id(panel.name), total=shown.total, value=shown.number, withEdges=True, size="xs"
+    )
+
+
+def chart_pager_slot(panel: models.PanelInstance[Any, Any], paging: Paging) -> html.Div:
+    """
+    The pager over a panel's charts, in a slot of its own so it can be redrawn without its filter.
+
+    The filter box can't be: replacing the input someone is typing in loses their focus.
+    """
+    return html.Div(
+        _chart_pager(panel, visible_chart_indexes(panel, paging)), id=chart_pager_slot_id(panel.name)
+    )
+
+
+def _chart_controls(panel: models.PanelInstance[Any, Any], paging: Paging) -> Component:
+    """A panel's fuzzy chart filter (on metric and artifact names) and pager; drawn when there is anything to page."""
+    chart_paging = paging.chart_paging(panel.name)
+    if len(panel.charts) <= CHART_SIZES[0] and not chart_paging.q:
+        return html.Div()
+    return dmc.Group(
+        [
+            dmc.TextInput(
+                id=chart_filter_id(panel.name),
+                value=chart_paging.q,
+                placeholder="Filter charts by metric or artifact",
+                leftSection=icon(Icon.SEARCH),
+                debounce=300,
+                size="xs",
+                w=280,
+            ),
+            chart_pager_slot(panel, paging),
+        ],
+        justify="space-between",
+        mb="xs",
+    )
+
+
 def _panel_accordion(  # noqa: PLR0913
     data_store: DataStore[...],
     experiment_id: int,
     tab: str,
     panels: list[models.PanelInstance[Any, Any]],
     open_set: set[str],
-    page_settings: dict[str, Any],
+    page: BasicExperimentPage,
+    paging: Paging,
 ) -> dmc.Accordion:
     return dmc.Accordion(
         id=panel_accordion_id(tab),
@@ -1147,28 +1248,34 @@ def _panel_accordion(  # noqa: PLR0913
                 [
                     panel_header(p),
                     dmc.AccordionPanel(
-                        # `data-panel-name` isn't in `html.Div`'s typed signature -- `cast` to `Any`
-                        # rather than fight that (same as `_drag_handle`'s data attrs). Read by
-                        # `_experiment_page_dragdrop.js` to let a dragged chart be dropped anywhere
-                        # in a *different* panel's body, not only onto one of its existing charts.
-                        #
-                        # This div's own children must stay exactly `render_panel_content(...)`'s
-                        # output (or the placeholder) -- `poll_for_updates` (`_experiment/__init__.py`)
-                        # patches live-update data straight into each individual chart's own
-                        # `chart_content_id(...)` node inside here, bypassing this whole
-                        # `_panel_accordion` tree. Any chrome added here later (e.g. a per-panel
-                        # "last updated" badge) that isn't also part of `render_panel_content`'s
-                        # output would vanish the next time a live-update poll patches an open panel.
-                        cast("Any", html.Div)(
-                            id=panel_content_id(p.name),
-                            className="dl-panel-body",
-                            **{"data-panel-name": p.name},
-                            children=(
-                                render_panel_content(data_store, experiment_id, p, page_settings)
-                                if p.name in open_set
-                                else _panel_placeholder()
+                        [
+                            _chart_controls(p, paging),
+                            # `data-panel-name` isn't in `html.Div`'s typed signature -- `cast` to `Any`
+                            # rather than fight that (same as `_drag_handle`'s data attrs). Read by
+                            # `_experiment_page_dragdrop.js` to let a dragged chart be dropped anywhere
+                            # in a *different* panel's body, not only onto one of its existing charts.
+                            #
+                            # This div's own children must stay exactly `render_panel_content(...)`'s
+                            # output (or the placeholder) -- `poll_for_updates` (`_experiment/__init__.py`)
+                            # patches live-update data straight into each individual chart's own
+                            # `chart_content_id(...)` node inside here, bypassing this whole
+                            # `_panel_accordion` tree. Any chrome added here later (e.g. a per-panel
+                            # "last updated" badge) that isn't also part of `render_panel_content`'s
+                            # output would vanish the next time a live-update poll patches an open panel.
+                            # That's why the chart filter and pager above are siblings of it, not in it.
+                            cast("Any", html.Div)(
+                                id=panel_content_id(p.name),
+                                className="dl-panel-body",
+                                **{"data-panel-name": p.name},
+                                children=(
+                                    render_panel_content(
+                                        data_store, experiment_id, p, page.page_settings, paging
+                                    )
+                                    if p.name in open_set
+                                    else _panel_placeholder()
+                                ),
                             ),
-                        ),
+                        ],
                         px="xs",
                         py="xs",
                     ),
@@ -1577,7 +1684,7 @@ def _focus_on_chart(
             }
         }
     )
-    return focused, reveal(page.panels, paging, panel_name=panel.name)
+    return focused, reveal(page.panels, paging, panel_name=panel.name, chart_id=chart_id)
 
 
 class PageRef(typing.NamedTuple):
@@ -1771,24 +1878,36 @@ def mutate_panels(
     return save_page(get_data_store(), curr_page.model_copy(update=updates))
 
 
-def mutate_panels_and_rerender(
+def chart_id_at(page_json: str, panel_name: str, index: int) -> str | None:
+    """The `ChartInstance.id` of the chart at `index` in the panel named `panel_name`, if there is one."""
+    page = BasicExperimentPage.model_validate_json(page_json)
+    panel = next((p for p in page.panels if p.name == panel_name), None)
+    return panel.charts[index].id if panel is not None and index < len(panel.charts) else None
+
+
+def mutate_panels_and_rerender(  # noqa: PLR0913
     page_json: str,
     paging_json: str,
     mutate: Callable[[list[models.PanelInstance[Any, Any]]], list[models.PanelInstance[Any, Any]]],
     *,
     extra_settings: dict[str, Any] | None = None,
     reveal_panel: str | None = None,
+    reveal_chart: str | None = None,
 ) -> tuple[BasicExperimentPage, html.Div]:
     """
     `mutate_panels`, then re-render the whole accordion from the saved page.
 
     The saved page is a branch into a view of your own first if this page isn't already one of your
-    own -- see `save_page`. `reveal_panel` names a panel the edit just made or moved that must be on
-    screen afterwards, whichever page of panels it landed on (see `reveal`).
+    own -- see `save_page`. `reveal_panel` names a panel, and `reveal_chart` (a `ChartInstance.id`) a chart,
+    that the edit just made or moved and that must be on screen afterwards, whichever page of panels
+    or charts it landed on (see `reveal`).
     """
     saved = mutate_panels(page_json, mutate, extra_settings=extra_settings)
     paging = Paging.model_validate_json(paging_json)
-    if reveal_panel is not None:
+    holder = next((p.name for p in saved.panels if any(c.id == reveal_chart for c in p.charts)), None)
+    if reveal_chart is not None and holder is not None:
+        paging = reveal(saved.panels, paging, panel_name=holder, chart_id=reveal_chart)
+    elif reveal_panel is not None:
         paging = reveal(saved.panels, paging, panel_name=reveal_panel)
     return saved, accordion_view(get_data_store(), saved, paging)
 
@@ -1988,55 +2107,6 @@ def move_chart_to_panel(  # noqa: PLR0913
     return [_insert(p) for p in without_chart]
 
 
-def _find_accordion_containing(node: Any, item_value: str) -> dict[str, Any] | None:  # noqa: ANN401
-    """
-    Depth-first search a wire-format Dash component tree for the `Accordion` holding `item_value`.
-
-    Panels grouped under the same tab share one `Accordion` (see `BasicExperimentPage.render`), and
-    with more than one tab, each sits inside its own `TabsPanel` rather than at a fixed position in
-    the tree -- searching for the `AccordionItem` actually being dragged is what lets
-    `reorder_rendered_charts` stays agnostic to whether `Tabs` are in play.
-    """
-    if isinstance(node, list):
-        for item in cast("list[Any]", node):
-            found = _find_accordion_containing(item, item_value)
-            if found is not None:
-                return found
-        return None
-    if not isinstance(node, dict) or "props" not in node:
-        return None
-    node = cast("dict[str, Any]", node)
-    props = cast("dict[str, Any]", node["props"])
-    children = cast("list[Any]", props.get("children") or [])
-    if node.get("type") == "Accordion" and any(
-        isinstance(c, dict) and cast("dict[str, Any]", c).get("props", {}).get("value") == item_value
-        for c in children
-    ):
-        return node
-    return _find_accordion_containing(children, item_value)
-
-
-def reorder_rendered_charts(container: dict[str, Any], panel_name: str, order: list[int]) -> dict[str, Any]:
-    """
-    Reorder one already-rendered panel's charts in place, by their original index.
-
-    `order` is a permutation of the panel's original chart indices (from `move_index` applied to
-    `range(len(panel.charts))`), not new chart data -- a chart drag never changes any chart's
-    content either, just where it sits within its panel.
-    """
-    accordion = _find_accordion_containing(container, panel_name)
-    if accordion is None:
-        msg = f"no accordion contains panel {panel_name!r}"
-        raise ValueError(msg)
-    item = next(i for i in accordion["props"]["children"] if i["props"]["value"] == panel_name)
-    accordion_panel = item["props"]["children"][1]
-    panel_body = accordion_panel["props"]["children"]  # html.Div(id=panel_content_id(...))
-    chart_container = panel_body["props"]["children"]  # dmc.SimpleGrid or dmc.Flex of chart items
-    chart_items = chart_container["props"]["children"]
-    chart_container["props"]["children"] = [chart_items[i] for i in order]
-    return container
-
-
 def merge_chart_param_values(
     values: list[Any],
     checked_values: list[Any],
@@ -2089,9 +2159,21 @@ class EditCtx(TypedDict):
     paging_json: str
 
 
+class _PageChartsCtx(TypedDict):
+    filter_ids: list[dict[str, str]]
+    pager_ids: list[dict[str, str]]
+    slot_ids: list[dict[str, str]]
+    content_ids: list[dict[str, str]]
+    loaded: list[str] | None
+    paging_json: str
+    page_json: str
+    experiment_id: int
+
+
 class _PagePanelsCtx(TypedDict):
     q: str | None
     size: str | None
+    chart_size: str | None
     tabs_value: str | None
     paging_json: str
     page_json: str
@@ -2110,6 +2192,7 @@ def _register_paging(app: Dash) -> None:
         {
             "q": Input(PANEL_FILTER_ID, "value", allow_optional=True),
             "size": Input(PANEL_PAGE_SIZE_ID, "value", allow_optional=True),
+            "chart_size": Input(CHART_PAGE_SIZE_ID, "value", allow_optional=True),
             "tabs_value": Input(PANEL_TABS_ID, "value", allow_optional=True),
             "paging_json": State(PANEL_PAGING_ID, "data"),
             "page_json": State(STATE_PAGE_STORAGE, "data"),
@@ -2129,7 +2212,12 @@ def _register_paging(app: Dash) -> None:
         tabs_value = panel_ctx["tabs_value"]
         tab = tab_from_component_value(tabs_value) if tabs_value else rendered_tab
         try:
-            size = PageSizes(panels=int(panel_ctx["size"] or paging.sizes.panels)).panels  # pyright: ignore[reportArgumentType]
+            sizes = PageSizes.model_validate(
+                {
+                    "panels": int(panel_ctx["size"] or paging.sizes.panels),
+                    "charts": int(panel_ctx["chart_size"] or paging.sizes.charts),
+                }
+            )
         except (ValueError, ValidationError):
             raise PreventUpdate from None
 
@@ -2137,7 +2225,8 @@ def _register_paging(app: Dash) -> None:
             paging,
             q=panel_ctx["q"] or "",
             pager_values=pager_values,
-            size=size,
+            size=sizes.panels,
+            chart_size=sizes.charts,
             tab_changed=tab != rendered_tab,
         )
         # Not `STATE_VIEW_ID`, for the same reason as `render_opened_panels`' own `ref_of`.
@@ -2163,6 +2252,78 @@ def _register_paging(app: Dash) -> None:
             panel_area_children(store, panel_ctx["experiment_id"], page, tab, new_paging),
             new_paging.model_dump_json(),
             visible_open_panels(page, tab, new_paging),
+        )
+
+    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+        Output({"type": CHART_PAGER_SLOT_TYPE, "panel": ALL}, "children"),
+        Output({"type": "panel-content", "panel": ALL}, "children", allow_duplicate=True),
+        Output(PANEL_PAGING_ID, "data", allow_duplicate=True),
+        Input({"type": CHART_FILTER_TYPE, "panel": ALL}, "value"),
+        Input({"type": CHART_PAGER_TYPE, "panel": ALL}, "value"),
+        {
+            "filter_ids": State({"type": CHART_FILTER_TYPE, "panel": ALL}, "id"),
+            "pager_ids": State({"type": CHART_PAGER_TYPE, "panel": ALL}, "id"),
+            "slot_ids": State({"type": CHART_PAGER_SLOT_TYPE, "panel": ALL}, "id"),
+            "content_ids": State({"type": "panel-content", "panel": ALL}, "id"),
+            "loaded": State(LOADED_PANELS_STORE_ID, "data"),
+            "paging_json": State(PANEL_PAGING_ID, "data"),
+            "page_json": State(STATE_PAGE_STORAGE, "data"),
+            "experiment_id": State(constants.STATE_EXPERIMENT_ID, "data"),
+        },
+        prevent_initial_call=True,
+        running=[(Output(PANEL_AREA_ID, "style"), {"opacity": 0.5}, {"opacity": 1})],
+    )
+    def page_panel_charts(
+        filter_values: list[str | None], pager_values: list[int], chart_ctx: _PageChartsCtx
+    ) -> tuple[list[Any], list[Any], str]:
+        """Show the page of a panel's charts that its filter or pager asks for; the other panels are untouched."""
+        filter_ids, pager_ids = chart_ctx["filter_ids"], chart_ctx["pager_ids"]
+        slot_ids, content_ids = chart_ctx["slot_ids"], chart_ctx["content_ids"]
+        paging = Paging.model_validate_json(chart_ctx["paging_json"])
+        requested = next_chart_paging(
+            paging,
+            filters={pid["panel"]: value or "" for pid, value in zip(filter_ids, filter_values, strict=True)},
+            pagers={pid["panel"]: value for pid, value in zip(pager_ids, pager_values, strict=True)},
+        )
+        # Controls mounting report their current value back as a "change" -- nothing to do for that.
+        if requested == paging:
+            raise PreventUpdate
+
+        experiment_id = chart_ctx["experiment_id"]
+        store = get_data_store()
+        page = load_page(
+            store, ref_of(experiment_id, BasicExperimentPage.model_validate_json(chart_ctx["page_json"]))
+        )
+        panel_by_name = {p.name: p for p in page.panels}
+        changed = {
+            name
+            for name in requested.charts.keys() | paging.charts.keys()
+            if requested.chart_paging(name) != paging.chart_paging(name) and name in panel_by_name
+        }
+        for name in changed:
+            chart_paging = requested.chart_paging(name)
+            number = visible_chart_indexes(panel_by_name[name], requested).number
+            requested = requested.with_charts(name, chart_paging.model_copy(update={"page": number}))
+
+        loaded = set(chart_ctx["loaded"] or [])
+        return (
+            [
+                _chart_pager(
+                    panel_by_name[pid["panel"]], visible_chart_indexes(panel_by_name[pid["panel"]], requested)
+                )
+                if pid["panel"] in changed
+                else no_update
+                for pid in slot_ids
+            ],
+            [
+                render_panel_content(
+                    store, experiment_id, panel_by_name[pid["panel"]], page.page_settings, requested
+                )
+                if pid["panel"] in changed and pid["panel"] in loaded
+                else no_update
+                for pid in content_ids
+            ],
+            requested.model_dump_json(),
         )
 
     # Mirrors the paging into the address bar so a page or filter can be bookmarked and shared -- a plain
@@ -2235,14 +2396,16 @@ def register_state_callbacks(app: Dash) -> None:
         State(LOADED_PANELS_STORE_ID, "data"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
         State(STATE_PAGE_STORAGE, "data"),
+        State(PANEL_PAGING_ID, "data"),
         prevent_initial_call=True,
     )
-    def render_opened_panels(
+    def render_opened_panels(  # noqa: PLR0913
         open_values: list[list[str] | None],
         panel_ids: list[dict[str, str]],
         loaded: list[str] | None,
         experiment_id: int,
         page_json: str,
+        paging_json: str,
     ) -> tuple[list[Any], list[str]]:
         open_set = {name for group in open_values for name in (group or [])}
         loaded_set = set(loaded or [])
@@ -2250,6 +2413,7 @@ def register_state_callbacks(app: Dash) -> None:
         if not newly_opened:
             raise PreventUpdate
 
+        paging = Paging.model_validate_json(paging_json)
         store = get_data_store()
         # Same `ref_of`-over-`STATE_VIEW_ID` reasoning as `persist_open_panel` -- this accordion
         # remount can itself be the tail end of an edit that just branched into a new view.
@@ -2264,7 +2428,7 @@ def register_state_callbacks(app: Dash) -> None:
                 outputs.append(no_update)
                 continue
             outputs.append(
-                render_panel_content(store, experiment_id, panel_by_name[name], page.page_settings)
+                render_panel_content(store, experiment_id, panel_by_name[name], page.page_settings, paging)
             )
         return outputs, sorted(loaded_set | newly_opened)
 

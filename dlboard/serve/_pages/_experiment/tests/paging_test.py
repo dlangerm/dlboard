@@ -161,7 +161,13 @@ def test_next_panel_paging_resets_the_page_unless_a_pager_was_clicked(
     kwargs: dict[str, Any], expected_page: int, expected_q: str, expected_size: int
 ) -> None:
     current = paging.Paging().with_panels(page=3)
-    controls: dict[str, Any] = {"q": "", "pager_values": [3, 3], "size": 10, "tab_changed": False} | kwargs
+    controls: dict[str, Any] = {
+        "q": "",
+        "pager_values": [3, 3],
+        "size": 10,
+        "chart_size": 12,
+        "tab_changed": False,
+    } | kwargs
 
     result = paging.next_panel_paging(current, **controls)
 
@@ -170,3 +176,38 @@ def test_next_panel_paging_resets_the_page_unless_a_pager_was_clicked(
         expected_q,
         expected_size,
     )
+
+
+@pytest.mark.parametrize(
+    ("filters", "pagers", "expected"),
+    [
+        ({"a": "loss"}, {}, {"a": paging.ChartPaging(q="loss")}),
+        ({"a": "loss"}, {"a": 4}, {"a": paging.ChartPaging(q="loss")}),
+        ({}, {"a": 4}, {"a": paging.ChartPaging(page=4)}),
+        ({"a": "", "b": ""}, {"a": 1}, {}),
+        ({}, {"a": 2, "b": 3}, {"a": paging.ChartPaging(page=2), "b": paging.ChartPaging(page=3)}),
+    ],
+)
+def test_next_chart_paging_resets_a_panels_page_when_its_filter_changes(
+    filters: dict[str, str], pagers: dict[str, int], expected: dict[str, paging.ChartPaging]
+) -> None:
+    assert paging.next_chart_paging(paging.Paging(), filters=filters, pagers=pagers).charts == expected
+
+
+def test_next_chart_paging_only_changes_the_panels_that_differ() -> None:
+    current = paging.Paging().with_charts("a", paging.ChartPaging(q="x", page=2))
+
+    assert paging.next_chart_paging(current, filters={"a": "x"}, pagers={"a": 2}) == current
+
+
+def test_a_new_charts_per_page_size_keeps_every_filter_but_returns_to_the_first_page() -> None:
+    current = paging.Paging().with_charts("a", paging.ChartPaging(q="x", page=3))
+
+    resized = current.with_sizes(charts=24)
+
+    assert resized.sizes.charts == 24
+    assert resized.chart_paging("a") == paging.ChartPaging(q="x", page=1)
+
+
+def test_a_panel_at_its_defaults_is_the_same_as_one_never_mentioned() -> None:
+    assert paging.Paging().with_charts("a", paging.ChartPaging()) == paging.Paging()
