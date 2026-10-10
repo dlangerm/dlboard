@@ -37,8 +37,9 @@ function dlboardFormatValue(value) {
 }
 
 // The custom `content` of the tooltip: the hovered x-value under its axis name, then one row per
-// run, highest value first. `line_chart.py` passes the chart's `series` and `xAxisName` alongside
-// the usual tooltip props. Every run shows its *nearest* logged value ("<run_id>__y", see
+// run, highest value first, under the chart's own title (the full metric name -- every value below
+// is a value of it). `line_chart.py` passes the chart's `series`, `xAxisName` and `chartTitle`
+// alongside the usual tooltip props. Every run shows its *nearest* logged value ("<run_id>__y", see
 // `_nearest_fill_pivot` in `line_chart.py`), not just runs that logged exactly at the hovered x,
 // and "<run_id>__x" says where that value came from -- shown beside the run's name whenever it
 // differs, so a filled-in value never reads as if it were logged right at the cursor. A run with no
@@ -62,6 +63,7 @@ window.dashMantineFunctions.lineChartTooltip = (props) => {
     return h(
         "div",
         { className: "dl-chart-tooltip" },
+        props.chartTitle ? h("div", { className: "dl-chart-tooltip-title" }, props.chartTitle) : null,
         h(
             "div",
             { className: "dl-chart-tooltip-header" },
@@ -98,3 +100,16 @@ window.dashMantineFunctions.lineChartTooltipLabelTime = (label) => dlboardFormat
 window.dashMantineFunctions.lineChartDateTick = (value) => new Date(value).toLocaleString();
 
 window.dashMantineFunctions.lineChartTimeTick = (value) => dlboardFormatDuration(value);
+
+// A y-axis tick: four significant digits at most (float noise like 0.30000000000000004 is what
+// pushed ticks into the rotated axis title), exponent form for the very small and very large.
+window.dashMantineFunctions.lineChartValueTick = (value) => {
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+        return String(value);
+    }
+    var magnitude = Math.abs(value);
+    if (magnitude !== 0 && (magnitude < 1e-3 || magnitude >= 1e5)) {
+        return value.toExponential(1).replace("e+", "e");
+    }
+    return String(parseFloat(value.toPrecision(4)));
+};
