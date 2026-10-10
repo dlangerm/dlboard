@@ -766,7 +766,9 @@ def panel_header_controls(panel: models.PanelInstance[Any, Any]) -> Component:
                 [
                     dmc.MenuTarget(
                         dmc.ActionIcon(
-                            icon(Icon.MORE),
+                            # Not the three dots: next to the drag handle's grip (also dots) that
+                            # read as one more handle, not as a menu.
+                            icon(Icon.OPTIONS),
                             variant="subtle",
                             size="sm",
                             color="gray",
@@ -839,6 +841,8 @@ def panel_header_controls(panel: models.PanelInstance[Any, Any]) -> Component:
         className="dl-panel-controls",
         gap="xs",
         wrap="nowrap",
+        # The header runs to the panel's border; without this the menu sat right against it.
+        pr="sm",
     )
 
 

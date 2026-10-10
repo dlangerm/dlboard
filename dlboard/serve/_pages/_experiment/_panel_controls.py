@@ -18,7 +18,7 @@ single function accumulates enough nested callbacks to trip ruff's complexity/st
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from dash import ALL, MATCH, Dash, Input, NoUpdate, Output, State, ctx, html, no_update
 from dash.exceptions import PreventUpdate
@@ -29,7 +29,21 @@ from dlboard.serve import ClientsideScript, get_data_store
 from dlboard.serve import _constants as constants
 from dlboard.serve._pages._experiment import _experiment_page_state as core
 
+if TYPE_CHECKING:
+    from dlboard.serve._component_ids import ButtonId
+
 _PANEL_GRID_COLUMNS_JS = ClientsideScript(Path(__file__).with_name("panel_grid_columns.js"))
+
+
+def _busy_while_running(button: ButtonId[core.ExperimentPage]) -> list[tuple[Output, bool, bool]]:
+    """
+    A callback's `running=` argument: `button` shows its spinner, and can't be clicked again, until it returns.
+
+    Everything that rebuilds the panel area (creating a tab, deleting a panel, ...) can take a while
+    on a big experiment, and its button -- under a modal, where the page's own loading overlay can't
+    be seen -- otherwise sits there looking like it did nothing.
+    """
+    return [(Output(button, "loading"), True, False)]
 
 
 def _validated_layout_change(page_json: str) -> tuple[str, dict[str, Any]]:
@@ -113,6 +127,7 @@ def _register_create_panel(app: Dash) -> None:
         State(core.NEW_PANEL_NAME_ID, "value"),
         State(core.STATE_PAGE_STORAGE, "data"),
         prevent_initial_call=True,
+        running=_busy_while_running(core.NEW_PANEL_ID),
     )
     def create_panel(
         n_clicks: int | None, n_submit: int | None, panel_name: str | None, page_json: str
@@ -207,6 +222,7 @@ def _register_delete_chart(app: Dash) -> None:
             "page_json": State(core.STATE_PAGE_STORAGE, "data"),
         },
         prevent_initial_call=True,
+        running=_busy_while_running(core.DELETE_CHART_CONFIRM_ID),
     )
     def delete_chart(
         n_clicks: int, delete_ctx: _DeleteChartCtx
@@ -264,6 +280,7 @@ def _register_delete_panel(app: Dash) -> None:
             "page_json": State(core.STATE_PAGE_STORAGE, "data"),
         },
         prevent_initial_call=True,
+        running=_busy_while_running(core.DELETE_PANEL_CONFIRM_ID),
     )
     def delete_panel(
         n_clicks: int, delete_ctx: _DeletePanelCtx
@@ -569,6 +586,7 @@ def _register_rename(app: Dash) -> None:
             "page_json": State(core.STATE_PAGE_STORAGE, "data"),
         },
         prevent_initial_call=True,
+        running=_busy_while_running(core.RENAME_PANEL_SAVE_ID),
     )
     def rename_panel(
         n_clicks: int, rename_ctx: _RenamePanelCtx
@@ -685,6 +703,7 @@ def _register_new_tab(app: Dash) -> None:
             "page_json": State(core.STATE_PAGE_STORAGE, "data"),
         },
         prevent_initial_call=True,
+        running=_busy_while_running(core.NEW_TAB_SAVE_ID),
     )
     def create_new_tab(
         n_clicks: int, new_tab_ctx: _NewTabCtx
@@ -759,6 +778,7 @@ def _register_rename_tab(app: Dash) -> None:
             "page_json": State(core.STATE_PAGE_STORAGE, "data"),
         },
         prevent_initial_call=True,
+        running=_busy_while_running(core.RENAME_TAB_SAVE_ID),
     )
     def rename_tab(
         n_clicks: int, rename_ctx: _RenameTabCtx

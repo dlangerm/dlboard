@@ -78,6 +78,7 @@ class Icon(StrEnum):
     MORE = "dots"
     MOVE_TO = "arrow-right"
     NOTES = "message-circle"
+    OPTIONS = "adjustments-horizontal"
     SEARCH = "search"
     SIDEBAR = "layout-sidebar"
     SIGN_OUT = "logout"
