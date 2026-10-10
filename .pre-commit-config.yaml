@@ -11,7 +11,8 @@ repos:
       - id: trailing-whitespace
         # ignore docker-compose.yml's trailing whitespace in the comments at the top, which are
         # intentionally formatted that way to be readable in the terminal.
-        exclude: ^docker-compose\.yml$
+        # ignore ci yml which conflicts with pretty-format yaml
+        exclude: ^docker-compose\.yml$|^\.github/workflows/ci\.yml$
       - id: end-of-file-fixer
       - id: check-yaml
       - id: check-toml
