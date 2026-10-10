@@ -138,25 +138,31 @@ def _fetch_open_panel_dataframes(
     store: DataStore[...],
     experiment_id: int,
     page: core.BasicExperimentPage,
-    panel_names: set[str],
+    chart_ids: list[core.ChartID],
 ) -> tuple[dict[str, pd.DataFrame], bool]:
     """
-    Fetch each of `panel_names`'s own dataframe once -- the same call the initial render makes.
+    Fetch the dataframe of each panel with charts on screen, for just those charts -- once per panel.
 
     Not once per chart: "Auto-generate charts" routinely groups several charts sharing a panel, so
     fetching per panel (rather than per chart) keeps a poll tick's cost proportional to how many
-    panels are open, not how many charts they hold.
+    panels are open. And not for the panel's other charts: only one page of them is on screen (see
+    `Paging`), so a tick costs what that page does, however many charts the panel holds.
     """
     panels_by_name = {p.name: p for p in page.panels}
+    mounted: dict[str, set[int]] = {}
+    for chart_id in chart_ids:
+        if chart_id["index"] is not None:
+            mounted.setdefault(chart_id["panel"], set()).add(chart_id["index"])
     dataframes: dict[str, pd.DataFrame] = {}
     ok = True
-    for panel_name in panel_names:
+    for panel_name, indexes in mounted.items():
         panel = panels_by_name.get(panel_name)
         if panel is None:
             continue
+        shown = panel.model_copy(update={"charts": [c for i, c in enumerate(panel.charts) if i in indexes]})
         try:
             dataframes[panel_name] = core.fetch_panel_dataframe(
-                store, experiment_id, panel, page.page_settings
+                store, experiment_id, shown, page.page_settings
             )
         except Exception:  # noqa: BLE001 -- one bad panel must not break the whole poll tick
             _log.exception("Live-update poll failed to fetch panel %r", panel_name)
@@ -275,9 +281,7 @@ def register_render_callbacks(app: Dash) -> None:
 
         page = core.load_page(store, core.PageRef(experiment_id, view_id))
         panels_by_name = {p.name: p for p in page.panels}
-        panel_names = {chart_id["panel"] for chart_id in chart_ids}
-
-        dataframes, fetch_ok = _fetch_open_panel_dataframes(store, experiment_id, page, panel_names)
+        dataframes, fetch_ok = _fetch_open_panel_dataframes(store, experiment_id, page, chart_ids)
         contents, new_hashes, render_ok = _refresh_chart_contents(
             chart_ids, panels_by_name, dataframes, prev_hashes
         )
