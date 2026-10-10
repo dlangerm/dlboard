@@ -30,7 +30,7 @@ dev = [
   "testcontainers[localstack,postgres]>=4.10",
   "torchvision>=0.28.0",
   "types-boto3[s3]>=1.40",
-  "vulture>=2.16",
+  "vulture>=2.16"
 ]
 
 [tool.alembic]
@@ -63,13 +63,13 @@ filterwarnings = [
   # `LocalStackContainer.start()` (`s3_test_server`, `dlboard/conftest.py`) calls testcontainers'
   # own legacy `wait_for_logs(container, "<regex>")` internally -- nothing we call directly, and
   # not actionable from here.
-  "ignore:The wait_for_logs function with string or callable predicates is deprecated:DeprecationWarning",
+  "ignore:The wait_for_logs function with string or callable predicates is deprecated:DeprecationWarning"
 ]
 markers = [
   "browser: browser-based end-to-end tests requiring a webdriver",
   "postgres: runs against a real Postgres in a throwaway container; needs Docker",
   "s3: runs against a real S3-compatible store (MinIO) in a throwaway container; needs Docker",
-  "screenshots: renders the docs screenshots; only runs with --screenshots=check|update",
+  "screenshots: renders the docs screenshots; only runs with --screenshots=check|update"
 ]
 pythonpath = ["."]
 testpaths = ["dlboard"]
@@ -124,7 +124,7 @@ extend-select = [
   "TC",
   "TID",
   "TRY",
-  "W",
+  "W"
 ]
 fixable = ["ALL"]
 ignore = ["COM812", "D203", "D212", "D401", "E501", "PLR6301", "PLR0917"]
@@ -135,7 +135,7 @@ select = ["E4", "E7", "E9", "F"]
 # be importable at runtime too -- never moved into a `TYPE_CHECKING` block.
 runtime-evaluated-base-classes = [
   "pydantic.BaseModel",
-  "pydantic_settings.BaseSettings",
+  "pydantic_settings.BaseSettings"
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -150,7 +150,7 @@ runtime-evaluated-base-classes = [
   "PLR2004",
   "T201",
   "SLF001",
-  "INP001",
+  "INP001"
 ]
 "dlboard/scripts/*" = ["T201"]
 # A standalone runnable example, not a package -- never imported, so no `__init__.py` is needed.
@@ -210,7 +210,7 @@ ignore_decorators = [
   # an `@override` method changes the class's contract regardless of whether *this* codebase
   # happens to call it today, so it isn't "dead" in the disposal sense even when flagged.
   "@override",
-  "@typing.override",
+  "@typing.override"
 ]
 ignore_names = [
   # `plugins/auth/password.py`'s `_Field`/`_Footer` NamedTuple members -- read by `password_form.html` (Jinja attribute
@@ -280,8 +280,8 @@ ignore_names = [
   "branch_labels",
   "depends_on",
   "downgrade",
-  "isolation_level", # sqlite api is used internally
-  "PLUGINS",         # used when configuring custom dlboard plugins in the server
+  "isolation_level",  # sqlite api is used internally
+  "PLUGINS"  # used when configuring custom dlboard plugins in the server
 ]
 min_confidence = 60
 paths = ["dlboard/"]
