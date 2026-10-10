@@ -133,12 +133,12 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.LineChart], froze
     @typing.override
     def render(cls, parameters: LineChartSettings, dataframe: pd.DataFrame) -> dmc.LineChart:
         # `render_panel_charts` shares one fetched dataframe across every chart in a panel, calling
-        # this once per chart -- mutating the caller's `dataframe` in place (the coercion loop and
-        # `_to_epoch_millis` below both used to) corrupts it for whichever chart renders next.
-        dataframe = dataframe.copy()
-        # Captured before `axis_df`/`value_df` below slice the dataframe down to just the plotted
-        # columns, and before `_nearest_fill_pivot` rebuilds it from scratch -- `run_name` doesn't
-        # survive either. A run with no name in the merged dataframe (an older, pre-auto-naming
+        # this once per chart, so this works on the few columns it needs and never writes to
+        # `dataframe` -- a panel of hundreds of charts would otherwise copy, and scan every column
+        # of, the whole panel's data once per chart.
+        # Captured before the columns below are sliced down to just the plotted ones, and before
+        # `_nearest_fill_pivot` rebuilds the frame from scratch -- `run_name` doesn't survive
+        # either. A run with no name in the merged dataframe (an older, pre-auto-naming
         # row -- see `RUN_NAME_COLUMN`) falls back to its bare id, same as everywhere else that
         # reads `run.name`.
         run_names = (
@@ -147,42 +147,37 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.LineChart], froze
             else {}
         )
         x_col = parameters.x_axis
-        axis_cols = ["run_id", "step"]
-        if x_col != "step":
-            axis_cols.append(x_col)
+        x_values = dataframe[x_col]
+        if str(x_values.dtype) in ("object", "str"):
+            with contextlib.suppress(ValueError, TypeError):
+                x_values = pd.to_datetime(x_values, utc=True, format="ISO8601")
+        if parameters.x_axis_type == "date":
+            x_values = _to_epoch_millis(x_values)
+        has_x = x_values.notna()
 
-        for c in dataframe.columns:
-            if str(dataframe[c].dtype) in ("object", "str"):
-                with contextlib.suppress(ValueError, TypeError):
-                    dataframe[c] = pd.to_datetime(dataframe[c], utc=True, format="ISO8601")
-
-        if parameters.x_axis_type == "date" and x_col in dataframe.columns:
-            dataframe[x_col] = _to_epoch_millis(dataframe[x_col])
-
-        axis_df = dataframe.loc[dataframe[x_col].notna(), axis_cols]
-        value_df = dataframe.loc[dataframe[parameters.column].notna(), ["run_id", "step", parameters.column]]
-
-        df = axis_df.merge(value_df, on=["run_id", "step"], how="inner")
-        df = df.groupby([parameters.x_axis, "run_id"], as_index=False)[[parameters.column]].mean()
+        plotted = dataframe.loc[has_x, ["run_id", "step", parameters.column]].assign(
+            **{x_col: x_values[has_x]}
+        )
+        df = (
+            plotted.loc[plotted[parameters.column].notna()]
+            .groupby([x_col, "run_id"], as_index=False)[[parameters.column]]
+            .mean()
+        )
         if parameters.sample:
             # Sample against every sibling metric column sharing this x-axis, not just this
             # chart's own -- so every chart in the panel picks the same x-values and stays
             # aligned when synced, regardless of which metric each one plots.
             value_cols = sorted(
                 {
-                    c
-                    for c in dataframe.columns
-                    if c not in _BOOKKEEPING_COLS
-                    and c != x_col
-                    and pd.api.types.is_numeric_dtype(dataframe[c])
+                    str(c)
+                    for c, dtype in dataframe.dtypes.items()
+                    if c not in _BOOKKEEPING_COLS and c != x_col and pd.api.types.is_numeric_dtype(dtype)
                 }
                 | {parameters.column}
             )
-            wide = (
-                dataframe.loc[dataframe[x_col].notna(), ["run_id", x_col, *value_cols]]
-                .groupby(["run_id", x_col], as_index=False)
-                .mean()
-            )
+            wide = dataframe.loc[has_x, ["run_id", *value_cols]].assign(**{x_col: x_values[has_x]})
+            if wide.duplicated(["run_id", x_col]).any():
+                wide = wide.groupby(["run_id", x_col], as_index=False).mean()
             grid = shared_sample_grid(
                 wide, x_col=x_col, group_col="run_id", value_cols=value_cols, max_points=parameters.max_points
             )
