@@ -276,6 +276,7 @@ def _log_a_metric(store: SQLLiteStore, experiment_id: int, run_id: int, key: str
     )
 
 
+@pytest.mark.usefixtures("_plain_artifact_urls")
 def test_a_metric_and_an_artifact_sharing_a_key_both_render(store: SQLLiteStore, experiment_id: int) -> None:
     """They used to be outer-merged into `img_x`/`img_y`, so a chart of either `img` raised `KeyError`."""
     run = store.create_run(models.NewRun(experiment_id=experiment_id))
@@ -303,11 +304,10 @@ def test_a_metric_and_an_artifact_sharing_a_key_both_render(store: SQLLiteStore,
         chart.render(df)
 
 
+@pytest.mark.usefixtures("_plain_artifact_urls")
 def test_a_file_list_of_a_key_prefix_fetches_every_key_under_it_including_later_ones(
-    store: SQLLiteStore, experiment_id: int, monkeypatch: pytest.MonkeyPatch
+    store: SQLLiteStore, experiment_id: int
 ) -> None:
-    # Download URLs are made relative to a running Dash app, which this test doesn't need.
-    monkeypatch.setattr("dlboard.serve._backend._artifact_download.relative_path", str)
     run = store.create_run(models.NewRun(experiment_id=experiment_id))
 
     def log_file(key: str, step: int) -> None:

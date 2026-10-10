@@ -248,6 +248,17 @@ def experiment_id(store: SQLStoreBase[Any]) -> int:
 
 
 @pytest.fixture
+def _plain_artifact_urls(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    Make artifact download URLs plain `/artifact/<id>` paths, with no running Dash app.
+
+    `relative_path` reads Dash's process-global config, which only exists once some test has built a
+    `Dash` app -- so a test that builds artifact URLs without one passes or fails by test order.
+    """
+    monkeypatch.setattr("dlboard.serve._backend._artifact_download.relative_path", str)
+
+
+@pytest.fixture
 def admin(store: SQLStoreBase[Any]) -> models.User:
     """The bootstrap admin -- the first user any fresh store creates gets `Scope.ALL`."""
     return store.get_or_create_user(models.Principal.unverified("admin"))

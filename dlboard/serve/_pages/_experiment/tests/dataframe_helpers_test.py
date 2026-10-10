@@ -44,6 +44,7 @@ def _hparams(hparam_id: int, run_id: int, **values: ValidJsonTypes) -> HyperPara
     )
 
 
+@pytest.mark.usefixtures("_plain_artifact_urls")
 def test_build_artifacts_dataframe_pivots_url_and_tags() -> None:
     """The pivoted column holds a fetchable `/artifact/<id>` URL, not the artifact's own `ref`."""
     first = _artifact(1, 0, "img", "ref://a", tags={"split": "train"}).model_copy(update={"id": 1})
