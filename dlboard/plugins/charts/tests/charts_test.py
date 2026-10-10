@@ -86,6 +86,52 @@ def test_shared_sample_grid_empty_df_is_noop() -> None:
     assert shared_sample_grid(df, "x", "run_id", ["y"], max_points=10).empty
 
 
+def _per_column_shared_sample_grid(
+    df: pd.DataFrame, x_col: str, group_col: str, value_cols: list[str], max_points: int
+) -> pd.DataFrame:
+    """The straightforward per-column definition `shared_sample_grid` is a vectorized form of."""
+    parts: list[pd.DataFrame] = []
+    for _, g in df.sort_values([group_col, x_col]).groupby(group_col):
+        selected_x: set[object] = set()
+        for col in value_cols:
+            sub = g.loc[g[col].notna(), [x_col, col]]
+            if not sub.empty:
+                selected_x.update(downsample_series(sub, x_col, col, max_points)[x_col].tolist())
+        if selected_x:
+            parts.append(g.loc[g[x_col].isin(selected_x), [group_col, x_col]].drop_duplicates())
+    return pd.concat(parts, ignore_index=True) if parts else df.loc[:, [group_col, x_col]].drop_duplicates()
+
+
+@pytest.mark.parametrize("x_kind", ["int", "datetime"])
+@pytest.mark.parametrize("max_points", [5, 40, 500])
+def test_shared_sample_grid_picks_what_sampling_each_column_on_its_own_would(
+    x_kind: Literal["int", "datetime"], max_points: int
+) -> None:
+    n = 300
+    rng = np.random.default_rng(0)
+    x = pd.date_range("2026-01-01", periods=n, freq="s") if x_kind == "datetime" else np.arange(n)
+    frames = [
+        pd.DataFrame(
+            {
+                "x": x,
+                "run_id": run_id,
+                "dense": rng.normal(size=n).cumsum(),
+                "short": np.where(np.arange(n) % 50 == 0, rng.normal(size=n), np.nan),  # fits the budget
+                "sparse": np.where(rng.random(n) < 0.4, rng.normal(size=n), np.nan),
+                "never": np.nan,
+            }
+        )
+        for run_id in (1, 2)
+    ]
+    df = pd.concat(frames, ignore_index=True)
+    value_cols = ["dense", "short", "sparse", "never"]
+
+    actual = shared_sample_grid(df, "x", "run_id", value_cols, max_points)
+    expected = _per_column_shared_sample_grid(df, "x", "run_id", value_cols, max_points)
+
+    pd.testing.assert_frame_equal(actual, expected)
+
+
 def _metrics_df(points_per_run: int, n_runs: int = 2) -> pd.DataFrame:
     frames = [
         pd.DataFrame(
@@ -317,6 +363,18 @@ def test_line_chart_sampled_siblings_share_x_values_for_syncing() -> None:
     loss_steps = {row["step"] for row in _props(loss_chart)["data"]}
     acc_steps = {row["step"] for row in _props(acc_chart)["data"]}
     assert loss_steps == acc_steps
+
+
+def test_line_chart_averages_a_sampled_x_axis_that_repeats_within_a_run() -> None:
+    """Several steps per epoch plot as one point per epoch, at the mean of the steps in it."""
+    steps = 2000
+    df = _metrics_df(steps, n_runs=1).assign(epoch=lambda d: d["step"] // 10, loss=lambda d: d["step"] % 10)
+
+    chart = LineChart.render(LineChartSettings(column="loss", x_axis="epoch", max_points=20), df)
+
+    data = _props(chart)["data"]
+    assert 3 <= len(data) <= 20
+    assert {row["1"] for row in data} == {4.5}
 
 
 def _hparam_grouped_df(hidden_sizes: dict[int, int], accuracies: dict[int, list[float]]) -> pd.DataFrame:

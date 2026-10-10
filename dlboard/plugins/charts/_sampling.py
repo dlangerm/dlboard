@@ -93,16 +93,29 @@ def shared_sample_grid(
     if df.empty or not value_cols:
         return df.loc[:, [group_col, x_col]].drop_duplicates()
 
+    # Every column is handled as one numpy matrix rather than sliced out of the frame one by one: a
+    # panel of hundreds of charts runs this once per chart, over every sibling column, so per-column
+    # pandas indexing here was by far the biggest cost of rendering a big panel.
     parts: list[pd.DataFrame] = []
     for _, g in df.sort_values([group_col, x_col]).groupby(group_col):
-        selected_x: set[object] = set()
-        for col in value_cols:
-            sub = g.loc[g[col].notna(), [x_col, col]]
-            if sub.empty:
-                continue
-            selected_x.update(downsample_series(sub, x_col, col, max_points)[x_col].tolist())
-        if selected_x:
-            parts.append(g.loc[g[x_col].isin(selected_x), [group_col, x_col]].drop_duplicates())
+        values = g[value_cols].to_numpy(dtype=float)
+        present = ~np.isnan(values)
+        counts = present.sum(axis=0)
+        # A column within budget keeps every x it has a value at; only longer ones need LTTB.
+        selected = present[:, counts <= max_points].any(axis=1)
+        too_long = np.flatnonzero(counts > max_points)
+        if too_long.size:
+            x = g[x_col]
+            x_numeric = (
+                x.astype("int64").to_numpy(dtype=float)
+                if pd.api.types.is_datetime64_any_dtype(x)
+                else x.to_numpy(dtype=float)
+            )
+            for col in too_long:
+                rows = np.flatnonzero(present[:, col])
+                selected[rows[_lttb_indices(x_numeric[rows], values[rows, col], max_points)]] = True
+        if selected.any():
+            parts.append(g.loc[selected, [group_col, x_col]].drop_duplicates())
     if not parts:
         return df.loc[:, [group_col, x_col]].drop_duplicates()
     return pd.concat(parts, ignore_index=True)
