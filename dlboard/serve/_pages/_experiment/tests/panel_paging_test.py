@@ -168,3 +168,73 @@ def test_a_chart_link_lands_on_the_page_of_charts_holding_it(store: SQLLiteStore
     carried = _find_props(container.children, state.PANEL_PAGING_ID)
     assert carried is not None
     assert Paging.model_validate_json(carried["data"]).chart_paging("p").page == 2
+
+
+def test_the_page_size_choices_are_bare_numbers_in_the_footer_with_the_pager(
+    store: SQLLiteStore, experiment_id: int
+) -> None:
+    container = _render(store, experiment_id, _numbered(12), Paging())
+
+    area = cast("Any", _find_props(container.children, state.PANEL_AREA_ID))
+    select = _find_props(area["children"], state.PANEL_PAGE_SIZE_ID)
+    assert select is not None
+    assert [option["label"] for option in select["data"]] == ["5", "10", "20", "50"]
+    assert _find_props(area["children"], state.PANEL_PAGER_ID) is not None
+
+
+@pytest.mark.parametrize(
+    ("panel_count", "charts_per_panel", "panel_select", "chart_select"),
+    [(5, 6, False, False), (6, 6, True, False), (1, 7, False, True), (6, 7, True, True)],
+)
+def test_a_page_size_choice_is_only_offered_once_something_is_big_enough_to_page(  # noqa: PLR0913
+    store: SQLLiteStore,
+    experiment_id: int,
+    panel_count: int,
+    charts_per_panel: int,
+    *,
+    panel_select: bool,
+    chart_select: bool,
+) -> None:
+    panels = [
+        PanelInstance[Any, Any](name=f"panel {i:02}", charts=_charts(charts_per_panel))
+        for i in range(panel_count)
+    ]
+
+    container = _render(store, experiment_id, panels, Paging())
+
+    assert (_find_props(container.children, state.PANEL_PAGE_SIZE_ID) is not None) is panel_select
+    assert (_find_props(container.children, state.CHART_PAGE_SIZE_ID) is not None) is chart_select
+
+
+def _panel_header_filter(container: Any, panel: str) -> dict[str, Any] | None:  # noqa: ANN401
+    return _find_props(container.children, state.chart_filter_id(panel))
+
+
+def test_a_panel_with_enough_charts_has_its_chart_filter_in_its_header_and_its_pager_under_the_charts(
+    store: SQLLiteStore, experiment_id: int
+) -> None:
+    panels = [PanelInstance[Any, Any](name="p", charts=_charts(14))]
+    paging = SIX_CHARTS.with_charts("p", ChartPaging(q="m1"))
+
+    container = _render(store, experiment_id, panels, paging, open_panels=["p"])
+
+    header = _find_props(container.children, state.panel_header_id("p"))
+    assert header is not None
+    assert _find_props(header["children"], state.chart_filter_id("p")) is not None
+    body = _find_props(container.children, state.panel_content_id("p"))
+    assert body is not None
+    assert _find_props(body["children"], state.chart_filter_id("p")) is None
+    assert _find_props(container.children, state.chart_pager_slot_id("p")) is not None
+
+
+@pytest.mark.parametrize(
+    ("chart_count", "query", "offered"), [(6, "", False), (7, "", True), (3, "m1", True)]
+)
+def test_a_panels_chart_filter_is_only_offered_when_there_are_charts_to_page_or_one_is_on(
+    store: SQLLiteStore, experiment_id: int, chart_count: int, query: str, *, offered: bool
+) -> None:
+    panels = [PanelInstance[Any, Any](name="p", charts=_charts(chart_count))]
+
+    container = _render(store, experiment_id, panels, Paging().with_charts("p", ChartPaging(q=query)))
+
+    assert (_panel_header_filter(container, "p") is not None) is offered

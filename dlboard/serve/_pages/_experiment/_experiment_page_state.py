@@ -15,7 +15,6 @@ from __future__ import annotations
 import hashlib
 import itertools
 import typing
-from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypedDict, cast
 
@@ -62,7 +61,7 @@ _log = get_logger(__name__)
 _ACTIVE_TAB_DISABLES_RENAME_JS = ClientsideScript(Path(__file__).with_name("active_tab_disables_rename.js"))
 _LIVE_SWITCH_STATE_JS = ClientsideScript(Path(__file__).with_name("live_switch_state.js"))
 _LIVE_LAST_FETCH_LABEL_JS = ClientsideScript(Path(__file__).with_name("live_last_fetch_label.js"))
-_SYNC_PAGING_URL_JS = ClientsideScript(Path(__file__).with_name("sync_paging_url.js"))
+_PAGING_SIDE_EFFECTS_JS = ClientsideScript(Path(__file__).with_name("paging_side_effects.js"))
 
 _SIZES_COOKIE_MAX_AGE: typing.Final = 365 * 24 * 60 * 60
 
@@ -189,7 +188,7 @@ FIRST_PAGE: typing.Final = Paging()
 PANEL_AREA_ID: DivId[ExperimentPage] = DivId("panel-area")
 """What a page flip re-renders: the panel pagers and the active tab's accordion, and nothing else."""
 PANEL_FILTER_ID: ValueId[ExperimentPage] = ValueId("panel-filter")
-PANEL_PAGER_TYPE: typing.Final = "panel-pager"  # `PagerPosition` says which
+PANEL_PAGER_ID: ValueId[ExperimentPage] = ValueId("panel-pager")
 PANEL_PAGE_SIZE_ID: ValueId[ExperimentPage] = ValueId("panel-page-size")
 CHART_PAGE_SIZE_ID: ValueId[ExperimentPage] = ValueId("chart-page-size")
 CHART_FILTER_TYPE: typing.Final = "chart-filter"
@@ -447,6 +446,10 @@ def chart_pager_id(panel_name: str) -> dict[str, str]:
 
 def chart_pager_slot_id(panel_name: str) -> dict[str, str]:
     return {"type": CHART_PAGER_SLOT_TYPE, "panel": panel_name}
+
+
+def panel_header_id(panel_name: str) -> dict[str, str]:
+    return {"type": "panel-header", "panel": panel_name}
 
 
 def panel_accordion_id(tab: str) -> dict[str, str]:
@@ -920,13 +923,33 @@ def panel_header_controls(panel: models.PanelInstance[Any, Any]) -> Component:
     )
 
 
-def panel_header(panel: models.PanelInstance[Any, Any]) -> Component:
+def _chart_filter_offered(panel: models.PanelInstance[Any, Any], chart_query: str) -> bool:
+    """Whether a panel gets a chart filter: it has more charts than the smallest page, or one is on."""
+    return len(panel.charts) > CHART_SIZES[0] or bool(chart_query)
+
+
+def _chart_filter(panel: models.PanelInstance[Any, Any], chart_query: str) -> dmc.TextInput:
+    """Fuzzy filter on the metric and artifact names a panel's charts show (see `chart_search_keys`)."""
+    return dmc.TextInput(
+        id=chart_filter_id(panel.name),
+        value=chart_query,
+        placeholder="Filter charts",
+        leftSection=icon(Icon.SEARCH),
+        debounce=300,
+        size="xs",
+        w=200,
+    )
+
+
+def panel_header(panel: models.PanelInstance[Any, Any], chart_query: str = "") -> Component:
     """
     A panel's accordion header.
 
-    `AccordionControl` plus hover-revealed controls as true DOM siblings (both direct children of
-    this wrapping `Group`) -- not nested inside the control's own `<button>`, which native HTML
-    doesn't allow another interactive element inside anyway.
+    `AccordionControl`, a chart filter box (when there are enough charts to page) and hover-revealed
+    controls as true DOM siblings (all direct children of this wrapping `Group`) -- not nested inside
+    the control's own `<button>`, which native HTML doesn't allow another interactive element inside
+    anyway. The filter box sits in the header, not above the charts, so it costs no vertical space; it
+    isn't one of the hover-revealed controls, so a filter that is on stays in sight.
     """
     n_charts = len(panel.charts)
     count_label = f"{n_charts} chart" if n_charts == 1 else f"{n_charts} charts"
@@ -953,8 +976,10 @@ def panel_header(panel: models.PanelInstance[Any, Any]) -> Component:
                 # the count is its description instead.
                 **cast("dict[str, Any]", {"aria-label": panel.name, "aria-description": count_label}),
             ),
+            *([_chart_filter(panel, chart_query)] if _chart_filter_offered(panel, chart_query) else []),
             panel_header_controls(panel),
         ],
+        id=panel_header_id(panel.name),
         className="dl-panel-item-header",
         gap=0,
         wrap="nowrap",
@@ -1051,55 +1076,73 @@ class BasicExperimentPage(models.Page[pd.DataFrame, Component, html.Div], frozen
         )
 
 
-class PagerPosition(StrEnum):
-    TOP = "top"
-    BOTTOM = "bottom"
-
-
-def _panel_pager(
-    shown: Slice[Any], paging: Paging, position: PagerPosition, *, chart_heavy: bool
-) -> Component:
+def _panel_footer(shown: Slice[Any], size_controls: list[Component]) -> Component:
     """
-    A page selector for the panels (`withEdges` adds first/last), and above them the page-size choices.
+    The row under the panels: the page selector centered, and the page-size choices at its right.
 
-    Both pagers are drawn showing the stored page, which is how `next_panel_paging` tells which one
-    was clicked. Nothing is drawn when there is nothing to page through. `chart_heavy` says some
-    panel here has more charts than the smallest page, so the charts-per-page choice is offered too.
+    The selector has `withEdges` for first/last, and nothing is drawn when there is one page and no
+    size choice to offer. The two share a row, below what they page, so neither takes room above it.
     """
-    pager = dmc.Pagination(
-        id={"type": PANEL_PAGER_TYPE, "pos": position.value},
-        total=shown.total,
-        value=shown.number,
-        withEdges=True,
-        size="sm",
+    if shown.total <= 1 and not size_controls:
+        return html.Div()
+    return dmc.Flex(
+        [
+            html.Div(style={"flex": 1}),
+            dmc.Pagination(
+                id=PANEL_PAGER_ID, total=shown.total, value=shown.number, withEdges=True, size="sm"
+            )
+            if shown.total > 1
+            else html.Div(),
+            html.Div(
+                dmc.Group(size_controls, gap="sm", wrap="nowrap"),
+                style={"flex": 1, "display": "flex", "justifyContent": "flex-end"},
+            ),
+        ],
+        align="center",
+        my="xs",
     )
-    match position:
-        case PagerPosition.BOTTOM:
-            return pager if shown.total > 1 else html.Div()
-        case PagerPosition.TOP:
-            many_panels = shown.count > PANEL_SIZES[0]
-            if not (many_panels or chart_heavy):
-                return html.Div()
-            size_selects = [
+
+
+def _page_size_controls(page: BasicExperimentPage, paging: Paging) -> list[Component]:
+    """
+    The panels-per-page and charts-per-page choices, each offered once something is big enough to page.
+
+    Judged over the whole page, not the active tab, so they don't come and go as you switch tabs.
+    """
+    return [
+        dmc.Group(
+            [
                 dmc.Select(
                     id=select_id,
-                    data=[{"value": str(size), "label": f"{size} {unit} / page"} for size in sizes],
+                    data=[{"value": str(size), "label": str(size)} for size in sizes],
                     value=str(current),
                     allowDeselect=False,
                     size="xs",
-                    w=170,
-                )
-                for select_id, unit, sizes, current, offered in (
-                    (PANEL_PAGE_SIZE_ID, "panels", PANEL_SIZES, paging.sizes.panels, many_panels),
-                    (CHART_PAGE_SIZE_ID, "charts per panel", CHART_SIZES, paging.sizes.charts, chart_heavy),
-                )
-                if offered
-            ]
-            return dmc.Group(
-                [pager if shown.total > 1 else html.Div(), dmc.Group(size_selects, gap="xs")],
-                justify="space-between",
-                mb="xs",
-            )
+                    w=64,
+                ),
+                dmc.Text(label, size="xs", c="dimmed"),
+            ],
+            gap=4,
+            wrap="nowrap",
+        )
+        for select_id, label, sizes, current, offered in (
+            (
+                PANEL_PAGE_SIZE_ID,
+                "panels/page",
+                PANEL_SIZES,
+                paging.sizes.panels,
+                len(page.panels) > PANEL_SIZES[0],
+            ),
+            (
+                CHART_PAGE_SIZE_ID,
+                "charts/page",
+                CHART_SIZES,
+                paging.sizes.charts,
+                any(len(p.charts) > CHART_SIZES[0] for p in page.panels),
+            ),
+        )
+        if offered
+    ]
 
 
 def _panel_filter(paging: Paging) -> dmc.TextInput:
@@ -1118,23 +1161,17 @@ def _panel_filter(paging: Paging) -> dmc.TextInput:
 def panel_area_children(
     data_store: DataStore[...], experiment_id: int, page: BasicExperimentPage, tab: str, paging: Paging
 ) -> list[Component]:
-    """The pager(s) and accordion for the page of `tab`'s panels `paging` shows -- all that a page flip re-renders."""
+    """The accordion and footer for the page of `tab`'s panels `paging` shows -- all that a page flip re-renders."""
     shown = visible_panels(page.panels, tab, paging)
     accordion = _panel_accordion(
         data_store, experiment_id, tab, shown.items, set(page.open_panels()), page, paging
     )
-    chart_heavy = any(len(p.charts) > CHART_SIZES[0] for p in page.panels if p.tab == tab)
     no_match = (
         dmc.Text(f"No panels match {paging.panel_q!r}", c="dimmed", size="sm", ta="center", py="xl")
         if paging.panel_q and not shown.items
         else html.Div()
     )
-    return [
-        _panel_pager(shown, paging, PagerPosition.TOP, chart_heavy=chart_heavy),
-        no_match,
-        accordion,
-        _panel_pager(shown, paging, PagerPosition.BOTTOM, chart_heavy=chart_heavy),
-    ]
+    return [no_match, accordion, _panel_footer(shown, _page_size_controls(page, paging))]
 
 
 def panel_area(
@@ -1186,44 +1223,26 @@ def _tab_tab(tab: str) -> Component:
 
 
 def _chart_pager(panel: models.PanelInstance[Any, Any], shown: Slice[int]) -> Component:
+    """A panel's centered chart pager, under its charts; nothing when there is one page."""
     if shown.total <= 1:
         return html.Div()
-    return dmc.Pagination(
-        id=chart_pager_id(panel.name), total=shown.total, value=shown.number, withEdges=True, size="xs"
+    return dmc.Group(
+        dmc.Pagination(
+            id=chart_pager_id(panel.name), total=shown.total, value=shown.number, withEdges=True, size="xs"
+        ),
+        justify="center",
+        mt="sm",
     )
 
 
 def chart_pager_slot(panel: models.PanelInstance[Any, Any], paging: Paging) -> html.Div:
     """
-    The pager over a panel's charts, in a slot of its own so it can be redrawn without its filter.
+    The pager under a panel's charts, in a slot of its own so a filter change can redraw it.
 
-    The filter box can't be: replacing the input someone is typing in loses their focus.
+    A sibling of `panel_content_id`'s div, not inside it: `poll_for_updates` patches into that one.
     """
     return html.Div(
         _chart_pager(panel, visible_chart_indexes(panel, paging)), id=chart_pager_slot_id(panel.name)
-    )
-
-
-def _chart_controls(panel: models.PanelInstance[Any, Any], paging: Paging) -> Component:
-    """A panel's fuzzy chart filter (on metric and artifact names) and pager; drawn when there is anything to page."""
-    chart_paging = paging.chart_paging(panel.name)
-    if len(panel.charts) <= CHART_SIZES[0] and not chart_paging.q:
-        return html.Div()
-    return dmc.Group(
-        [
-            dmc.TextInput(
-                id=chart_filter_id(panel.name),
-                value=chart_paging.q,
-                placeholder="Filter charts by metric or artifact",
-                leftSection=icon(Icon.SEARCH),
-                debounce=300,
-                size="xs",
-                w=280,
-            ),
-            chart_pager_slot(panel, paging),
-        ],
-        justify="space-between",
-        mb="xs",
     )
 
 
@@ -1246,10 +1265,9 @@ def _panel_accordion(  # noqa: PLR0913
         children=[
             dmc.AccordionItem(
                 [
-                    panel_header(p),
+                    panel_header(p, paging.chart_paging(p.name).q),
                     dmc.AccordionPanel(
                         [
-                            _chart_controls(p, paging),
                             # `data-panel-name` isn't in `html.Div`'s typed signature -- `cast` to `Any`
                             # rather than fight that (same as `_drag_handle`'s data attrs). Read by
                             # `_experiment_page_dragdrop.js` to let a dragged chart be dropped anywhere
@@ -1275,6 +1293,7 @@ def _panel_accordion(  # noqa: PLR0913
                                     else _panel_placeholder()
                                 ),
                             ),
+                            chart_pager_slot(p, paging),
                         ],
                         px="xs",
                         py="xs",
@@ -2188,7 +2207,7 @@ def _register_paging(app: Dash) -> None:
         Output(PANEL_AREA_ID, "children"),
         Output(PANEL_PAGING_ID, "data", allow_duplicate=True),
         Output(LOADED_PANELS_STORE_ID, "data", allow_duplicate=True),
-        Input({"type": PANEL_PAGER_TYPE, "pos": ALL}, "value"),
+        Input(PANEL_PAGER_ID, "value", allow_optional=True),
         {
             "q": Input(PANEL_FILTER_ID, "value", allow_optional=True),
             "size": Input(PANEL_PAGE_SIZE_ID, "value", allow_optional=True),
@@ -2203,7 +2222,7 @@ def _register_paging(app: Dash) -> None:
         running=[(Output(PANEL_AREA_ID, "style"), {"opacity": 0.5}, {"opacity": 1})],
     )
     def page_panels(
-        pager_values: list[int], panel_ctx: _PagePanelsCtx
+        pager_value: int | None, panel_ctx: _PagePanelsCtx
     ) -> tuple[list[Component], str, list[str]]:
         """Show the page of panels a filter, pager, page size or tab change asks for."""
         paging = Paging.model_validate_json(panel_ctx["paging_json"])
@@ -2224,7 +2243,7 @@ def _register_paging(app: Dash) -> None:
         requested = next_panel_paging(
             paging,
             q=panel_ctx["q"] or "",
-            pager_values=pager_values,
+            pager_value=pager_value,
             size=sizes.panels,
             chart_size=sizes.charts,
             tab_changed=tab != rendered_tab,
@@ -2326,11 +2345,11 @@ def _register_paging(app: Dash) -> None:
             requested.model_dump_json(),
         )
 
-    # Mirrors the paging into the address bar so a page or filter can be bookmarked and shared -- a plain
-    # `replaceState`, purely client-side (see `sync_paging_url.js`). Runs once on load too: the paging
-    # rendered can differ from the URL's (a page that no longer exists, a `?chart=` link).
+    # Mirrors the paging into the address bar so a page or filter can be bookmarked and shared, and scrolls
+    # a flipped page back to its top -- purely client-side, see `paging_side_effects.js`. Runs once on load
+    # too: the paging rendered can differ from the URL's (a page that no longer exists, a `?chart=` link).
     app.clientside_callback(  # pyright: ignore[reportUnknownMemberType]
-        _SYNC_PAGING_URL_JS.source,
+        _PAGING_SIDE_EFFECTS_JS.source,
         Output(PANEL_PAGING_ID, "data", allow_duplicate=True),
         Input(PANEL_PAGING_ID, "data"),
         prevent_initial_call="initial_duplicate",

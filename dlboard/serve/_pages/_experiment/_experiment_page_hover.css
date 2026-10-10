@@ -101,3 +101,9 @@
   margin: 0;
   transform: translateY(-50%);
 }
+
+/* Where `paging_side_effects.js` scrolls a flipped page to: below the app header, not under it. */
+#panel-area,
+.dl-panel-body {
+  scroll-margin-top: 72px;
+}

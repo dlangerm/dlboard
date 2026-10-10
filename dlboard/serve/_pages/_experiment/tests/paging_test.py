@@ -152,8 +152,7 @@ def test_reveal_of_an_unknown_target_leaves_paging_alone() -> None:
         ({"q": "loss"}, 1, "loss", 10),
         ({"size": 20}, 1, "", 20),
         ({"tab_changed": True}, 1, "", 10),
-        ({"pager_values": [4, 4]}, 4, "", 10),
-        ({"pager_values": [3, 2]}, 2, "", 10),
+        ({"pager_value": 4}, 4, "", 10),
         ({}, 3, "", 10),
     ],
 )
@@ -163,7 +162,7 @@ def test_next_panel_paging_resets_the_page_unless_a_pager_was_clicked(
     current = paging.Paging().with_panels(page=3)
     controls: dict[str, Any] = {
         "q": "",
-        "pager_values": [3, 3],
+        "pager_value": 3,
         "size": 10,
         "chart_size": 12,
         "tab_changed": False,

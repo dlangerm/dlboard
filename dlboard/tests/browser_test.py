@@ -1961,8 +1961,19 @@ def test_panels_are_paged_and_filtered_and_the_page_is_a_shareable_link(
 
     page.locator(f"#{PANEL_FILTER_ID}").fill("")
     expect(headers).to_have_count(10)
-    page.locator(f"#{PANEL_PAGE_SIZE_ID}").click()
-    page.get_by_role("option", name="5 panels / page").click()
+    # The page-size choice is a bare number at the bottom, in line with and to the right of the pager.
+    size_select = page.locator(f"#{PANEL_PAGE_SIZE_ID}")
+    size_box = size_select.bounding_box()
+    pager_box = area.locator(".mantine-Pagination-root").bounding_box()
+    last_header_box = headers.last.bounding_box()
+    assert size_box is not None
+    assert pager_box is not None
+    assert last_header_box is not None
+    assert abs(size_box["y"] - pager_box["y"]) < 20
+    assert size_box["x"] > pager_box["x"] + pager_box["width"]
+    assert size_box["y"] > last_header_box["y"]
+    size_select.click()
+    page.get_by_role("option", name="5", exact=True).click()
     expect(headers).to_have_count(5)
     expect(page).not_to_have_url(re.compile(r"sizes|per_page"))
     page.reload()
@@ -1999,16 +2010,37 @@ def test_a_panels_charts_are_paged_and_filtered_by_metric_name(
 
     charts = page.locator(".dl-chart-item")
     panel = page.locator(".mantine-Accordion-panel")
+    chart_filter = page.get_by_placeholder("Filter charts")
     expect(charts).to_have_count(0)  # more than AUTO_OPEN_MAX_CHARTS, so it starts closed
     page.locator(".dl-panel-item-header", has_text="g").first.click()
     expect(charts).to_have_count(12)
     expect(page).not_to_have_url(re.compile(r"charts="))
 
+    # Nothing sits above the charts: the filter is in the panel's header, and the pager (centered) is
+    # under the last chart.
+    header_box = page.locator(".dl-panel-item-header").first.bounding_box()
+    filter_box = chart_filter.bounding_box()
+    panel_box = panel.bounding_box()
+    pager = panel.locator(".mantine-Pagination-root")
+    pager_box = pager.bounding_box()
+    last_chart_box = charts.last.bounding_box()
+    assert header_box is not None
+    assert filter_box is not None
+    assert panel_box is not None
+    assert pager_box is not None
+    assert last_chart_box is not None
+    assert header_box["y"] <= filter_box["y"] <= header_box["y"] + header_box["height"]
+    assert pager_box["y"] >= last_chart_box["y"] + last_chart_box["height"] - 1
+    assert abs((pager_box["x"] + pager_box["width"] / 2) - (panel_box["x"] + panel_box["width"] / 2)) < 30
+
+    # Flipping from the bottom of a long page takes you back to the top of it.
+    pager.scroll_into_view_if_needed()
+    expect(page.locator(".dl-panel-item-header").first).not_to_be_in_viewport()
     panel.get_by_role("button", name="2", exact=True).click()
+    expect(page.locator(".dl-panel-item-header").first).to_be_in_viewport()
     expect(charts).to_have_count(2)
     expect(page).to_have_url(re.compile(r"charts="))
 
-    chart_filter = page.get_by_placeholder("Filter charts by metric or artifact")
     chart_filter.fill("m03")
     expect(charts).to_have_count(1)
     expect(charts.first).to_contain_text("m03")

@@ -128,7 +128,7 @@ class Paging(BaseModel, frozen=True, extra="ignore", populate_by_name=True):
         """
         The URL query parameters that reproduce this; one that is at its default is "" (and left out of the URL).
 
-        Part of the serialized form, so `sync_paging_url.js` can mirror a paging store into the address
+        Part of the serialized form, so `paging_side_effects.js` can mirror a paging store into the address
         bar without knowing the URL's shape itself.
         """
         return {
@@ -183,8 +183,6 @@ class Slice[T]:
     items: list[T]
     number: int
     total: int
-    count: int
-    """How many items there were before paging."""
 
 
 def page_slice[T](items: Sequence[T], number: int, per_page: int) -> Slice[T]:
@@ -192,7 +190,7 @@ def page_slice[T](items: Sequence[T], number: int, per_page: int) -> Slice[T]:
     total = max(1, math.ceil(len(items) / per_page))
     number = min(max(number, 1), total)
     start = (number - 1) * per_page
-    return Slice(list(items[start : start + per_page]), number, total, len(items))
+    return Slice(list(items[start : start + per_page]), number, total)
 
 
 def chart_search_keys(chart: models.ChartInstance[Any, Any]) -> set[str]:
@@ -221,7 +219,7 @@ def next_panel_paging(  # noqa: PLR0913
     paging: Paging,
     *,
     q: str,
-    pager_values: Sequence[int],
+    pager_value: int | None,
     size: PanelsPerPage,
     chart_size: ChartsPerPage,
     tab_changed: bool,
@@ -229,8 +227,8 @@ def next_panel_paging(  # noqa: PLR0913
     """
     `paging` after the panel controls report their current values.
 
-    A new filter, page size or tab goes back to the first page. Otherwise it was a pager: both of them
-    are drawn showing the stored page, so whichever now shows a different one is the one clicked.
+    A new filter, page size or tab goes back to the first page. Otherwise it was the pager (`None` when
+    there is none, because everything fits on one page).
     """
     if q != paging.panel_q:
         return paging.with_panels(q=q)
@@ -240,9 +238,7 @@ def next_panel_paging(  # noqa: PLR0913
         return paging.with_sizes(charts=chart_size)
     if tab_changed:
         return paging.with_panels(page=1)
-    return paging.with_panels(
-        page=next((v for v in pager_values if v != paging.panel_page), paging.panel_page)
-    )
+    return paging.with_panels(page=paging.panel_page if pager_value is None else pager_value)
 
 
 def next_chart_paging(paging: Paging, *, filters: Mapping[str, str], pagers: Mapping[str, int]) -> Paging:
