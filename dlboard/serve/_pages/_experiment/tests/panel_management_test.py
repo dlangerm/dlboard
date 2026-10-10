@@ -264,7 +264,7 @@ def test_add_chart_to_panel_by_name_appends_to_existing_panel() -> None:
     assert by_name["val"].charts == []
 
 
-# ---- reorder_rendered_panels / reorder_rendered_charts: reorder-in-place, no refetch ----
+# ---- reorder_rendered_charts: reorder-in-place, no refetch ----
 
 
 def _wire_container(store: SQLLiteStore, experiment_id: int) -> dict[str, Any]:
@@ -273,8 +273,8 @@ def _wire_container(store: SQLLiteStore, experiment_id: int) -> dict[str, Any]:
 
     A callback's `State(METRIC_CONTENT_ID, "children")` never sees the live `Component` objects
     `accordion_view` returns -- Dash serializes them to plain `{"type", "namespace", "props"}`
-    dicts on the wire, and that's the shape `reorder_rendered_panels`/`reorder_rendered_charts`
-    actually operate on in the real callback. Round-tripping through the real encoder here (rather
+    dicts on the wire, and that's the shape `reorder_rendered_charts`
+    actually operates on in the real callback. Round-tripping through the real encoder here (rather
     than hand-building a fake dict) is what keeps this test honest about that shape.
     """
     container = state.accordion_view(
@@ -283,25 +283,6 @@ def _wire_container(store: SQLLiteStore, experiment_id: int) -> dict[str, Any]:
     serialized = to_json(container)
     assert isinstance(serialized, str)
     return cast("dict[str, Any]", json.loads(serialized))
-
-
-def test_reorder_rendered_panels_reorders_accordion_items(store: SQLLiteStore, experiment_id: int) -> None:
-    page = store.get_or_create_page(state.BasicExperimentPage, experiment_id=experiment_id)
-    store.update_page(
-        page.model_copy(
-            update={
-                "panels": [PanelInstance[Any, Any](name=n) for n in ("a", "b", "c")],
-                "page_settings": {state.OPEN_PANEL_KEY: []},
-            }
-        )
-    )
-    container = _wire_container(store, experiment_id)
-
-    reordered = state.reorder_rendered_panels(container, ["c", "a", "b"])
-
-    accordion = state._find_accordion_containing(reordered, "c")
-    assert accordion is not None
-    assert [item["props"]["value"] for item in accordion["props"]["children"]] == ["c", "a", "b"]
 
 
 def _find_prop_by_key(node: Any, key: str) -> dict[str, Any] | None:  # noqa: ANN401
@@ -364,7 +345,7 @@ def test_reorder_rendered_charts_reorders_chart_items_within_a_panel(
 def test_accordion_view_carries_the_paging_it_was_rendered_with(
     store: SQLLiteStore, experiment_id: int
 ) -> None:
-    paging = Paging().with_panels(q="loss", page=2)
+    paging = Paging().with_panels(q="loss")
 
     container = state.accordion_view(
         store, state.load_page(store, state.PageRef(experiment_id, None)), paging
@@ -413,27 +394,6 @@ def test_render_groups_panels_into_tabs_by_the_tab_field(store: SQLLiteStore, ex
     # Mantine's `Tabs` silently refuses to render a tab/panel whose `value` is an empty string --
     # regression coverage for exactly that: every tab must get a real, non-empty `value`.
     assert all(tab.value for tab in tabs)  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType, reportUnknownArgumentType]
-
-
-def test_reorder_rendered_panels_reorders_within_the_active_tab(
-    store: SQLLiteStore, experiment_id: int
-) -> None:
-    page = store.get_or_create_page(state.BasicExperimentPage, experiment_id=experiment_id)
-    store.update_page(
-        page.model_copy(
-            update={
-                "panels": [PanelInstance[Any, Any](name=n, tab="Images") for n in ("a", "b", "c")],
-                "page_settings": {state.OPEN_PANEL_KEY: []},
-            }
-        )
-    )
-    container = _wire_container(store, experiment_id)
-
-    reordered = state.reorder_rendered_panels(container, ["c", "a", "b"])
-
-    accordion = state._find_accordion_containing(reordered, "c")
-    assert accordion is not None
-    assert [item["props"]["value"] for item in accordion["props"]["children"]] == ["c", "a", "b"]
 
 
 # ---- panel_name_taken / unique_panel_name ----

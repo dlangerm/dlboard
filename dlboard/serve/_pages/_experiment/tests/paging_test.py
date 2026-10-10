@@ -94,7 +94,8 @@ def test_chart_search_keys_cover_metrics_and_artifacts_but_not_axes() -> None:
 )
 def test_query_round_trips(raw: dict[str, str]) -> None:
     parsed = paging.Paging.from_request(raw, None)
-    assert paging.Paging.from_request(parsed.to_query(), None) == parsed
+    url = {name: value for name, value in parsed.query.items() if value}
+    assert paging.Paging.from_request(url, None) == parsed
 
 
 @pytest.mark.parametrize(
@@ -121,7 +122,7 @@ def test_sizes_come_from_the_cookie_and_fall_back_to_defaults(
 
 
 def test_default_paging_adds_nothing_to_the_url() -> None:
-    assert paging.Paging().to_query() == {}
+    assert not any(paging.Paging().query.values())
 
 
 def test_reveal_pages_to_the_panel_and_chart_clearing_filters_that_hide_them() -> None:
@@ -143,3 +144,29 @@ def test_reveal_pages_to_the_panel_and_chart_clearing_filters_that_hide_them() -
 def test_reveal_of_an_unknown_target_leaves_paging_alone() -> None:
     current = paging.Paging(panels_q="x")
     assert paging.reveal(_panels(3), current, panel_name="missing") == current
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "expected_page", "expected_q", "expected_size"),
+    [
+        ({"q": "loss"}, 1, "loss", 10),
+        ({"size": 20}, 1, "", 20),
+        ({"tab_changed": True}, 1, "", 10),
+        ({"pager_values": [4, 4]}, 4, "", 10),
+        ({"pager_values": [3, 2]}, 2, "", 10),
+        ({}, 3, "", 10),
+    ],
+)
+def test_next_panel_paging_resets_the_page_unless_a_pager_was_clicked(
+    kwargs: dict[str, Any], expected_page: int, expected_q: str, expected_size: int
+) -> None:
+    current = paging.Paging().with_panels(page=3)
+    controls: dict[str, Any] = {"q": "", "pager_values": [3, 3], "size": 10, "tab_changed": False} | kwargs
+
+    result = paging.next_panel_paging(current, **controls)
+
+    assert (result.panel_page, result.panel_q, result.sizes.panels) == (
+        expected_page,
+        expected_q,
+        expected_size,
+    )

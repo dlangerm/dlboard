@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import itertools
 import typing
+from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypedDict, cast
 
@@ -24,6 +25,7 @@ from dash import ALL, Dash, Input, Output, State, ctx, html, no_update
 from dash.dcc import Store
 from dash.development.base_component import Component
 from dash.exceptions import PreventUpdate
+from pydantic import ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from structlog.stdlib import get_logger
 
@@ -36,7 +38,16 @@ from dlboard.serve._pages._dash_helpers import tooltipped_action_icon
 from dlboard.serve._pages._dataframe_helpers import run_display_name
 from dlboard.serve._pages._experiment import _dataframe_helpers as dfh
 from dlboard.serve._pages._experiment._chart_autogen import SuggestSort
-from dlboard.serve._pages._experiment._paging import Paging
+from dlboard.serve._pages._experiment._paging import (
+    PANEL_SIZES,
+    SIZES_COOKIE,
+    PageSizes,
+    Paging,
+    Slice,
+    next_panel_paging,
+    reveal,
+    visible_panels,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -48,6 +59,9 @@ _log = get_logger(__name__)
 _ACTIVE_TAB_DISABLES_RENAME_JS = ClientsideScript(Path(__file__).with_name("active_tab_disables_rename.js"))
 _LIVE_SWITCH_STATE_JS = ClientsideScript(Path(__file__).with_name("live_switch_state.js"))
 _LIVE_LAST_FETCH_LABEL_JS = ClientsideScript(Path(__file__).with_name("live_last_fetch_label.js"))
+_SYNC_PAGING_URL_JS = ClientsideScript(Path(__file__).with_name("sync_paging_url.js"))
+
+_SIZES_COOKIE_MAX_AGE: typing.Final = 365 * 24 * 60 * 60
 
 
 class ExperimentPage:
@@ -165,6 +179,15 @@ Part of `accordion_view`'s output, so it is always the paging of the tree it sit
 rebuilds that tree takes it as a `State` and hands it back to `accordion_view`, so a rebuild stays on the
 page the viewer was looking at.
 """
+
+FIRST_PAGE: typing.Final = Paging()
+"""Every panel list's first page, unfiltered -- what a render with no particular paging shows."""
+
+PANEL_AREA_ID: DivId[ExperimentPage] = DivId("panel-area")
+"""What a page flip re-renders: the panel pagers and the active tab's accordion, and nothing else."""
+PANEL_FILTER_ID: ValueId[ExperimentPage] = ValueId("panel-filter")
+PANEL_PAGER_TYPE: typing.Final = "panel-pager"  # `PagerPosition` says which
+PANEL_PAGE_SIZE_ID: ValueId[ExperimentPage] = ValueId("panel-page-size")
 
 # --- new-panel popover, anchored to the toolbar's "New panel" button (callback in `_panel_controls.py`) ---
 NEW_PANEL_OPEN_ID: ButtonId[ExperimentPage] = ButtonId("new-panel-open")
@@ -914,19 +937,35 @@ def _group_panels_by_tab(
 class BasicExperimentPage(models.Page[pd.DataFrame, Component, html.Div], frozen=True, extra="forbid"):
     """Basic experiment page: per-panel charts rendered in an accordion, grouped into tabs."""
 
-    @typing.override
-    def render(self, data_store: DataStore[...], experiment_id: int) -> Component:
-        """
-        Render the tab-grouped accordions. Only open panels get real content; closed ones get a placeholder.
+    def open_panels(self) -> list[str]:
+        """Names of the panels the viewer has open (the first panel's, until they open or close any)."""
+        default = [self.panels[0].name] if self.panels else []
+        open_value = self.page_settings.get(OPEN_PANEL_KEY, default)
+        return [open_value] if isinstance(open_value, str) else cast("list[str]", open_value)
 
-        Panels grouped under the same `tab` share one `Accordion`. If every panel shares the
-        (default) ungrouped tab -- the common case today -- no `Tabs` chrome is shown at all, so
-        this looks exactly like a plain accordion until a panel actually gets tabbed. Above the
-        panels sits one toolbar row: tabs on the left, followed by the labeled "New tab" button,
-        the *only* place a brand-new tab gets created (see `NEW_TAB_BUTTON_ID`) -- moving a panel to
-        one that already exists is dragging its drag handle onto that tab (`.dl-tab-target`, see
-        `_experiment_page_dragdrop.js`), the same handle used to reorder panels. Panel actions sit on
-        the right. A view with no panels at all shows an empty state offering to auto-generate them.
+    def active_tab(self) -> str:
+        """The tab being shown: the one last selected, if it still has a panel; otherwise the first."""
+        tabs = _group_panels_by_tab(self.panels)
+        selected = self.page_settings.get(ACTIVE_TAB_KEY)
+        return selected if isinstance(selected, str) and selected in tabs else next(iter(tabs))
+
+    @typing.override
+    def render(
+        self, data_store: DataStore[...], experiment_id: int, paging: Paging = FIRST_PAGE
+    ) -> Component:
+        """
+        Render the toolbar and the active tab's page of panels. Only open panels get real content.
+
+        Only the active tab's panels are rendered, and of those only the page `paging` is on (see
+        `panel_area`) -- a tab or an experiment with hundreds of panels costs the same as one with a
+        few. If every panel shares the (default) ungrouped tab -- the common case today -- no `Tabs`
+        chrome is shown at all, so this looks exactly like a plain accordion until a panel actually
+        gets tabbed. Above the panels sits one toolbar row: tabs on the left, followed by the labeled
+        "New tab" button, the *only* place a brand-new tab gets created (see `NEW_TAB_BUTTON_ID`) --
+        moving a panel to one that already exists is dragging its drag handle onto that tab
+        (`.dl-tab-target`, see `_experiment_page_dragdrop.js`), the same handle used to reorder
+        panels. The panel filter and panel actions sit on the right. A view with no panels at all
+        shows an empty state offering to auto-generate them.
         """
         new_tab_button = dmc.Button(
             "New tab",
@@ -939,23 +978,17 @@ class BasicExperimentPage(models.Page[pd.DataFrame, Component, html.Div], frozen
         if not self.panels:
             return html.Div([_toolbar([new_tab_button], [_new_panel_popover()]), _empty_view()])
 
-        open_value = self.page_settings.get(OPEN_PANEL_KEY, [self.panels[0].name])
-        if isinstance(open_value, str):
-            open_value = [open_value]
-        open_set: set[str] = set(cast("list[str]", open_value))
+        tabs = list(_group_panels_by_tab(self.panels))
+        active_tab = self.active_tab()
+        area = panel_area(data_store, experiment_id, self, active_tab, paging)
+        panel_actions: list[Component] = [
+            _panel_filter(paging),
+            _new_panel_popover(),
+            _suggest_charts_button(),
+        ]
+        if len(tabs) <= 1:
+            return html.Div([_toolbar([new_tab_button], panel_actions), area])
 
-        groups = _group_panels_by_tab(self.panels)
-        accordions = {
-            tab: _panel_accordion(data_store, experiment_id, tab, group, open_set, self.page_settings)
-            for tab, group in groups.items()
-        }
-        panel_actions: list[Component] = [_new_panel_popover(), _suggest_charts_button()]
-        if len(accordions) <= 1:
-            return html.Div([_toolbar([new_tab_button], panel_actions), next(iter(accordions.values()))])
-
-        active_tab = self.page_settings.get(ACTIVE_TAB_KEY) or next(iter(accordions))
-        if active_tab not in accordions:
-            active_tab = next(iter(accordions))
         rename_tab_button = tooltipped_action_icon(
             Icon.EDIT,
             component_id=RENAME_TAB_BUTTON_ID,
@@ -968,15 +1001,105 @@ class BasicExperimentPage(models.Page[pd.DataFrame, Component, html.Div], frozen
             value=tab_component_value(active_tab),
             children=[
                 _toolbar(
-                    [dmc.TabsList([_tab_tab(tab) for tab in accordions]), rename_tab_button, new_tab_button],
+                    [dmc.TabsList([_tab_tab(tab) for tab in tabs]), rename_tab_button, new_tab_button],
                     panel_actions,
                 ),
-                *(
-                    dmc.TabsPanel(accordion, value=tab_component_value(tab))
-                    for tab, accordion in accordions.items()
-                ),
+                area,
             ],
         )
+
+
+class PagerPosition(StrEnum):
+    TOP = "top"
+    BOTTOM = "bottom"
+
+
+def _panel_pager(shown: Slice[Any], paging: Paging, position: PagerPosition) -> Component:
+    """
+    A page selector for the panels (`withEdges` adds first/last), and above them the page-size choice.
+
+    Both pagers are drawn showing the stored page, which is how `next_panel_paging` tells which one
+    was clicked. Nothing is drawn when there is nothing to page through.
+    """
+    pager = dmc.Pagination(
+        id={"type": PANEL_PAGER_TYPE, "pos": position.value},
+        total=shown.total,
+        value=shown.number,
+        withEdges=True,
+        size="sm",
+    )
+    match position:
+        case PagerPosition.BOTTOM:
+            return pager if shown.total > 1 else html.Div()
+        case PagerPosition.TOP:
+            if shown.count <= PANEL_SIZES[0]:
+                return html.Div()
+            return dmc.Group(
+                [
+                    pager if shown.total > 1 else html.Div(),
+                    dmc.Select(
+                        id=PANEL_PAGE_SIZE_ID,
+                        data=[{"value": str(size), "label": f"{size} panels / page"} for size in PANEL_SIZES],
+                        value=str(paging.sizes.panels),
+                        allowDeselect=False,
+                        size="xs",
+                        w=150,
+                    ),
+                ],
+                justify="space-between",
+                mb="xs",
+            )
+
+
+def _panel_filter(paging: Paging) -> dmc.TextInput:
+    """Fuzzy filter on the panel names of the active tab. Lives in the toolbar, outside `panel_area`, so typing never remounts it."""
+    return dmc.TextInput(
+        id=PANEL_FILTER_ID,
+        value=paging.panel_q,
+        placeholder="Filter panels",
+        leftSection=icon(Icon.SEARCH),
+        debounce=300,
+        size="xs",
+        w=200,
+    )
+
+
+def panel_area_children(
+    data_store: DataStore[...], experiment_id: int, page: BasicExperimentPage, tab: str, paging: Paging
+) -> list[Component]:
+    """The pager(s) and accordion for the page of `tab`'s panels `paging` shows -- all that a page flip re-renders."""
+    shown = visible_panels(page.panels, tab, paging)
+    accordion = _panel_accordion(
+        data_store, experiment_id, tab, shown.items, set(page.open_panels()), page.page_settings
+    )
+    no_match = (
+        dmc.Text(f"No panels match {paging.panel_q!r}", c="dimmed", size="sm", ta="center", py="xl")
+        if paging.panel_q and not shown.items
+        else html.Div()
+    )
+    return [
+        _panel_pager(shown, paging, PagerPosition.TOP),
+        no_match,
+        accordion,
+        _panel_pager(shown, paging, PagerPosition.BOTTOM),
+    ]
+
+
+def panel_area(
+    data_store: DataStore[...], experiment_id: int, page: BasicExperimentPage, tab: str, paging: Paging
+) -> html.Div:
+    return html.Div(panel_area_children(data_store, experiment_id, page, tab, paging), id=PANEL_AREA_ID)
+
+
+def clamped_paging(page: BasicExperimentPage, tab: str, paging: Paging) -> Paging:
+    """`paging` with a panel page that no longer exists (panels deleted, a stale link) moved to the last one."""
+    return paging.with_panels(page=visible_panels(page.panels, tab, paging).number)
+
+
+def visible_open_panels(page: BasicExperimentPage, tab: str, paging: Paging) -> list[str]:
+    """The panels that are open and on the page `paging` shows -- the ones whose content gets rendered."""
+    opened = set(page.open_panels())
+    return [p.name for p in visible_panels(page.panels, tab, paging).items if p.name in opened]
 
 
 def _toolbar(tab_controls: list[Component], panel_actions: list[Component]) -> dmc.Group:
@@ -1432,27 +1555,29 @@ def _delete_chart_confirm_modal() -> dmc.Modal:
     )
 
 
-def _focus_on_chart(page: BasicExperimentPage, chart_id: str) -> BasicExperimentPage:
+def _focus_on_chart(
+    page: BasicExperimentPage, paging: Paging, chart_id: str
+) -> tuple[BasicExperimentPage, Paging]:
     """
-    `page` as rendered for a `?chart=` deep link: that chart's panel open, and its tab active.
+    `page` and `paging` as rendered for a `?chart=` deep link: that chart's panel open and on screen.
 
-    Only for this one render, never persisted -- following a link someone shared mustn't change the
-    experiment's layout for everyone else. An id that matches no chart leaves `page` as it is.
+    Its tab is made active and `paging` moved to the page of panels it is on, but only for this one
+    render, never persisted -- following a link someone shared mustn't change the experiment's layout
+    for everyone else. An id that matches no chart leaves both as they are.
     """
     panel = next((p for p in page.panels if any(c.id == chart_id for c in p.charts)), None)
     if panel is None:
-        return page
-    open_value = page.page_settings.get(OPEN_PANEL_KEY, [page.panels[0].name])
-    open_panels = [open_value] if isinstance(open_value, str) else cast("list[str]", open_value or [])
-    return page.model_copy(
+        return page, paging
+    focused = page.model_copy(
         update={
             "page_settings": {
                 **page.page_settings,
-                OPEN_PANEL_KEY: [*open_panels, panel.name],
+                OPEN_PANEL_KEY: [*page.open_panels(), panel.name],
                 ACTIVE_TAB_KEY: panel.tab,
             }
         }
     )
+    return focused, reveal(page.panels, paging, panel_name=panel.name)
 
 
 class PageRef(typing.NamedTuple):
@@ -1506,19 +1631,21 @@ def accordion_view(
 
     `focus_chart` (a `ChartInstance.id`, from a `?chart=` deep link) opens that chart's panel and
     tab for this render -- see `_focus_on_chart`.
+
+    `paging` is which page of panels to show; it is first moved onto the last page that exists, and the
+    store this emits (`PANEL_PAGING_ID`) always holds the paging actually rendered.
     """
     experiment_id = typing.cast("int", page.experiment_id)
     _log.debug("rendering chart for experiment %s", experiment_id)
     if focus_chart:
-        page = _focus_on_chart(page, focus_chart)
-    open_value = page.page_settings.get(OPEN_PANEL_KEY, [page.panels[0].name] if page.panels else [])
-    if isinstance(open_value, str):
-        open_value = [open_value]
+        page, paging = _focus_on_chart(page, paging, focus_chart)
+    tab = page.active_tab()
+    paging = clamped_paging(page, tab, paging)
 
     return html.Div(
         [
-            page.render(store, experiment_id),
-            Store(id=LOADED_PANELS_STORE_ID, data=list(open_value)),  # pyright: ignore[reportArgumentType]
+            page.render(store, experiment_id, paging),
+            Store(id=LOADED_PANELS_STORE_ID, data=visible_open_panels(page, tab, paging)),
             Store(id=PANEL_PAGING_ID, data=paging.model_dump_json()),
             _add_chart_modal(),
             _suggest_charts_drawer(),
@@ -1650,15 +1777,20 @@ def mutate_panels_and_rerender(
     mutate: Callable[[list[models.PanelInstance[Any, Any]]], list[models.PanelInstance[Any, Any]]],
     *,
     extra_settings: dict[str, Any] | None = None,
+    reveal_panel: str | None = None,
 ) -> tuple[BasicExperimentPage, html.Div]:
     """
     `mutate_panels`, then re-render the whole accordion from the saved page.
 
     The saved page is a branch into a view of your own first if this page isn't already one of your
-    own -- see `save_page`.
+    own -- see `save_page`. `reveal_panel` names a panel the edit just made or moved that must be on
+    screen afterwards, whichever page of panels it landed on (see `reveal`).
     """
     saved = mutate_panels(page_json, mutate, extra_settings=extra_settings)
-    return saved, accordion_view(get_data_store(), saved, Paging.model_validate_json(paging_json))
+    paging = Paging.model_validate_json(paging_json)
+    if reveal_panel is not None:
+        paging = reveal(saved.panels, paging, panel_name=reveal_panel)
+    return saved, accordion_view(get_data_store(), saved, paging)
 
 
 def upsert_chart(
@@ -1863,7 +1995,7 @@ def _find_accordion_containing(node: Any, item_value: str) -> dict[str, Any] | N
     Panels grouped under the same tab share one `Accordion` (see `BasicExperimentPage.render`), and
     with more than one tab, each sits inside its own `TabsPanel` rather than at a fixed position in
     the tree -- searching for the `AccordionItem` actually being dragged is what lets
-    `reorder_rendered_panels`/`reorder_rendered_charts` stay agnostic to whether `Tabs` are in play.
+    `reorder_rendered_charts` stays agnostic to whether `Tabs` are in play.
     """
     if isinstance(node, list):
         for item in cast("list[Any]", node):
@@ -1884,31 +2016,9 @@ def _find_accordion_containing(node: Any, item_value: str) -> dict[str, Any] | N
     return _find_accordion_containing(children, item_value)
 
 
-def reorder_rendered_panels(container: dict[str, Any], order: list[str]) -> dict[str, Any]:
-    """
-    Reorder an already-rendered `accordion_view` container's panels in place, by panel name.
-
-    A panel drag changes only display order, never a chart's content -- redoing the (potentially
-    expensive) per-panel dataframe fetch and chart render for every open panel on every drag, just
-    to end up with the exact same charts in a different order, is pure waste. `container` is the
-    client's own cached copy of `METRIC_CONTENT_ID.children` (an already-rendered `accordion_view`
-    tree, serialized to plain dicts by Dash), so this just splices the dragged panel's own
-    `Accordion`'s children -- each an `AccordionItem` keyed by its `value` (the panel name) -- into
-    the requested order.
-    """
-    accordion = _find_accordion_containing(container, order[0])
-    if accordion is None:
-        msg = f"no accordion contains panel {order[0]!r}"
-        raise ValueError(msg)
-    items = accordion["props"]["children"]
-    by_name = {item["props"]["value"]: item for item in items}
-    accordion["props"]["children"] = [by_name[name] for name in order]
-    return container
-
-
 def reorder_rendered_charts(container: dict[str, Any], panel_name: str, order: list[int]) -> dict[str, Any]:
     """
-    Reorder one already-rendered panel's charts in place, by their original index. See `reorder_rendered_panels`.
+    Reorder one already-rendered panel's charts in place, by their original index.
 
     `order` is a permutation of the panel's original chart indices (from `move_index` applied to
     `range(len(panel.charts))`), not new chart data -- a chart drag never changes any chart's
@@ -1979,19 +2089,119 @@ class EditCtx(TypedDict):
     paging_json: str
 
 
+class _PagePanelsCtx(TypedDict):
+    q: str | None
+    size: str | None
+    tabs_value: str | None
+    paging_json: str
+    page_json: str
+    experiment_id: int
+    rendered_accordions: list[dict[str, str]]
+
+
+def _register_paging(app: Dash) -> None:
+    """Which page of panels is showing: the filter, pagers, page size and tab, and the address bar mirroring them."""
+
+    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+        Output(PANEL_AREA_ID, "children"),
+        Output(PANEL_PAGING_ID, "data", allow_duplicate=True),
+        Output(LOADED_PANELS_STORE_ID, "data", allow_duplicate=True),
+        Input({"type": PANEL_PAGER_TYPE, "pos": ALL}, "value"),
+        {
+            "q": Input(PANEL_FILTER_ID, "value", allow_optional=True),
+            "size": Input(PANEL_PAGE_SIZE_ID, "value", allow_optional=True),
+            "tabs_value": Input(PANEL_TABS_ID, "value", allow_optional=True),
+            "paging_json": State(PANEL_PAGING_ID, "data"),
+            "page_json": State(STATE_PAGE_STORAGE, "data"),
+            "experiment_id": State(constants.STATE_EXPERIMENT_ID, "data"),
+            "rendered_accordions": State({"type": "panel-accordion", "tab": ALL}, "id"),
+        },
+        prevent_initial_call=True,
+        running=[(Output(PANEL_AREA_ID, "style"), {"opacity": 0.5}, {"opacity": 1})],
+    )
+    def page_panels(
+        pager_values: list[int], panel_ctx: _PagePanelsCtx
+    ) -> tuple[list[Component], str, list[str]]:
+        """Show the page of panels a filter, pager, page size or tab change asks for."""
+        paging = Paging.model_validate_json(panel_ctx["paging_json"])
+        rendered_accordions = panel_ctx["rendered_accordions"]
+        rendered_tab = rendered_accordions[0]["tab"] if rendered_accordions else ""
+        tabs_value = panel_ctx["tabs_value"]
+        tab = tab_from_component_value(tabs_value) if tabs_value else rendered_tab
+        try:
+            size = PageSizes(panels=int(panel_ctx["size"] or paging.sizes.panels)).panels  # pyright: ignore[reportArgumentType]
+        except (ValueError, ValidationError):
+            raise PreventUpdate from None
+
+        requested = next_panel_paging(
+            paging,
+            q=panel_ctx["q"] or "",
+            pager_values=pager_values,
+            size=size,
+            tab_changed=tab != rendered_tab,
+        )
+        # Not `STATE_VIEW_ID`, for the same reason as `render_opened_panels`' own `ref_of`.
+        store = get_data_store()
+        page = load_page(
+            store,
+            ref_of(
+                panel_ctx["experiment_id"], BasicExperimentPage.model_validate_json(panel_ctx["page_json"])
+            ),
+        )
+        new_paging = clamped_paging(page, tab, requested)
+        # A control mounting reports its current value back as a "change" -- nothing to do for that.
+        if new_paging == paging and tab == rendered_tab:
+            raise PreventUpdate
+        if new_paging.sizes != paging.sizes:
+            ctx.response.set_cookie(
+                SIZES_COOKIE,
+                new_paging.sizes.model_dump_json(),
+                max_age=_SIZES_COOKIE_MAX_AGE,
+                samesite="Lax",
+            )
+        return (
+            panel_area_children(store, panel_ctx["experiment_id"], page, tab, new_paging),
+            new_paging.model_dump_json(),
+            visible_open_panels(page, tab, new_paging),
+        )
+
+    # Mirrors the paging into the address bar so a page or filter can be bookmarked and shared -- a plain
+    # `replaceState`, purely client-side (see `sync_paging_url.js`). Runs once on load too: the paging
+    # rendered can differ from the URL's (a page that no longer exists, a `?chart=` link).
+    app.clientside_callback(  # pyright: ignore[reportUnknownMemberType]
+        _SYNC_PAGING_URL_JS.source,
+        Output(PANEL_PAGING_ID, "data", allow_duplicate=True),
+        Input(PANEL_PAGING_ID, "data"),
+        prevent_initial_call="initial_duplicate",
+    )
+
+
 def register_state_callbacks(app: Dash) -> None:
     """Callbacks belonging to the core render tree itself, not any one feature."""
+    _register_paging(app)
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Input({"type": "panel-accordion", "tab": ALL}, "value"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
         State(STATE_PAGE_STORAGE, "data"),
+        State({"type": "panel-content", "panel": ALL}, "id"),
         prevent_initial_call=True,
     )
-    def persist_open_panel(open_values: list[list[str] | None], experiment_id: int, page_json: str) -> str:
-        open_value = [name for group in open_values for name in (group or [])]
+    def persist_open_panel(
+        open_values: list[list[str] | None],
+        experiment_id: int,
+        page_json: str,
+        shown_panels: list[dict[str, str]],
+    ) -> str:
         curr_page = BasicExperimentPage.model_validate_json(page_json)
+        # Only the panels on screen are in `open_values`; the open state of every other panel (on another
+        # page or tab) is carried over untouched.
+        shown = {pid["panel"] for pid in shown_panels}
+        stored_open = curr_page.open_panels()
+        open_value = [name for name in stored_open if name not in shown] + [
+            name for group in open_values for name in (group or [])
+        ]
         # Mirrors `toggle_panel_layout`'s own "a mount can echo the current value back as a
         # 'change'" check: the accordion's `value` prop mounting with whatever `accordion_view`
         # just initialized it to (every render, including ones that aren't about panels being open
@@ -2001,11 +2211,7 @@ def register_state_callbacks(app: Dash) -> None:
         # own `page_json` can be arbitrarily stale (captured whenever the accordion was last built,
         # not necessarily this instant), and writing it back can undo a *later* edit that branched
         # into a view of its own in between.
-        stored_open = curr_page.page_settings.get(
-            OPEN_PANEL_KEY, [curr_page.panels[0].name] if curr_page.panels else []
-        )
-        normalized_stored = [stored_open] if isinstance(stored_open, str) else stored_open
-        if open_value == normalized_stored:
+        if set(open_value) == set(stored_open):
             raise PreventUpdate
         store = get_data_store()
         # Which panel is expanded is per-viewer browsing state, not part of what the view "is" --

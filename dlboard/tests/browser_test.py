@@ -46,6 +46,9 @@ from dlboard.serve._pages._experiment._experiment_page_state import (
     NEW_TAB_PANELS_SELECT_ID,
     OPEN_PANEL_KEY,
     PAGE_EXPERIMENT_ID,
+    PANEL_AREA_ID,
+    PANEL_FILTER_ID,
+    PANEL_PAGE_SIZE_ID,
     RENAME_TAB_BUTTON_ID,
     RENAME_TAB_NAME_INPUT_ID,
     BasicExperimentPage,
@@ -1905,3 +1908,63 @@ def test_checkpoints_are_one_tabbed_list_with_download_links(page: Page, live_se
     link = page.locator(".dl-file-list .ag-cell a")
     expect(link).to_have_text("epoch-1.ckpt")
     expect(link).to_have_attribute("href", re.compile(r"^/artifact/\d+"))
+
+
+def test_panels_are_paged_and_filtered_and_the_page_is_a_shareable_link(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """
+    An experiment with many panels shows one page of them, narrowed by a fuzzy name filter and sized by
+    the viewer. Which page and filter is in the URL, so the link reproduces it; the page size is the
+    viewer's own, and survives a reload without being in the link.
+    """
+    _create_project_and_experiment(page, live_server_url, "Paged Panels Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    api = BasicDlboardAPI(live_server_url)
+    run = api.create_run(models.NewRun(experiment_id=experiment_id))
+    api.log_metric_batch(
+        [
+            models.LoggedMetrics(
+                experiment_id=experiment_id,
+                run_id=run.id,
+                step=step,
+                metrics={f"p{i:02}/loss": 1.0 for i in range(13)},
+                timestamp_utc=pendulum.now("UTC"),
+            )
+            for step in range(2)
+        ]
+    )
+    page.reload()
+    _auto_generate_charts(page)
+
+    headers = page.locator(".dl-panel-item-header")
+    area = page.locator(f"#{PANEL_AREA_ID}")
+    expect(headers).to_have_count(10)
+    expect(page).not_to_have_url(re.compile(r"panels_page"))
+
+    area.get_by_role("button", name="2", exact=True).first.click()
+    expect(headers).to_have_count(3)
+    expect(headers.first).to_contain_text("p10")
+    expect(page).to_have_url(re.compile(r"panels_page=2"))
+
+    page.locator(f"#{PANEL_FILTER_ID}").fill("p07")
+    expect(headers).to_have_count(1)
+    expect(headers.first).to_contain_text("p07")
+    expect(page).to_have_url(re.compile(r"panels_q=p07"))
+    expect(page).not_to_have_url(re.compile(r"panels_page"))
+
+    link = page.url
+    page.goto(link)
+    expect(headers).to_have_count(1)
+    expect(page.locator(f"#{PANEL_FILTER_ID}")).to_have_value("p07")
+
+    page.locator(f"#{PANEL_FILTER_ID}").fill("")
+    expect(headers).to_have_count(10)
+    page.locator(f"#{PANEL_PAGE_SIZE_ID}").click()
+    page.get_by_role("option", name="5 panels / page").click()
+    expect(headers).to_have_count(5)
+    expect(page).not_to_have_url(re.compile(r"sizes|per_page"))
+    page.reload()
+    expect(headers).to_have_count(5)
+    assert console_errors == []

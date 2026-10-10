@@ -150,7 +150,10 @@ def _register_create_panel(app: Dash) -> None:
             else ""
         )
         page, container = core.mutate_panels_and_rerender(
-            page_json, paging_json, lambda panels: [*panels, PanelInstance(name=panel_name, tab=tab)]
+            page_json,
+            paging_json,
+            lambda panels: [*panels, PanelInstance(name=panel_name, tab=tab)],
+            reveal_panel=panel_name,
         )
         return container, page.model_dump_json(), None
 
@@ -320,13 +323,12 @@ def _register_reorder(app: Dash) -> None:
     """
     Panel/chart drag-and-drop drop handlers -- see `_experiment_page_dragdrop.js`.
 
-    Unlike every other mutation in this module, a reorder never changes what any chart shows --
-    only where it sits. Routing it through `mutate_panels_and_rerender` (refetch + rebuild every
-    open panel from scratch) would pay the full cost of a data-changing edit for a change that has
-    no data to refetch, which is exactly the "blanks out for a couple seconds" experience a drag
-    shouldn't have. Instead: persist the new order (a cheap page-row update, no metric/artifact
-    query) and splice the client's own already-rendered tree into that order in place -- see
-    `core.reorder_rendered_panels`/`reorder_rendered_charts`.
+    A panel reorder rebuilds the panel area: only one page of panels is ever rendered, so the new order
+    can't be spliced into the client's tree the way it once could -- the panels it moves between may
+    not be in it. That rebuild fetches only the page being shown. A chart reorder never changes what
+    any chart shows, only where it sits, so it persists the new order (a cheap page-row update, no
+    metric/artifact query) and splices the client's own already-rendered tree into that order in place
+    -- see `core.reorder_rendered_charts`.
     """
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
@@ -334,21 +336,23 @@ def _register_reorder(app: Dash) -> None:
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Input(core.PANEL_REORDER_STORE_ID, "data"),
         State(core.STATE_PAGE_STORAGE, "data"),
-        State(core.METRIC_CONTENT_ID, "children"),
+        State(core.PANEL_PAGING_ID, "data"),
         prevent_initial_call=True,
     )
     def reorder_panel(
-        request: core.PanelReorderRequest | None, page_json: str, container: dict[str, Any]
-    ) -> tuple[dict[str, Any], str]:
+        request: core.PanelReorderRequest | None, page_json: str, paging_json: str
+    ) -> tuple[html.Div, str]:
         if not request:
             raise PreventUpdate
-        curr_page = core.BasicExperimentPage.model_validate_json(page_json)
-        new_panels = core.reorder_panel(
-            curr_page.panels, request["panel"], request["target"], after=request["after"]
+        page, container = core.mutate_panels_and_rerender(
+            page_json,
+            paging_json,
+            lambda panels: core.reorder_panel(
+                panels, request["panel"], request["target"], after=request["after"]
+            ),
+            reveal_panel=request["panel"],
         )
-        updated_page = core.save_page(get_data_store(), curr_page.model_copy(update={"panels": new_panels}))
-        new_container = core.reorder_rendered_panels(container, [p.name for p in new_panels])
-        return new_container, updated_page.model_dump_json()
+        return container, page.model_dump_json()
 
     @app.callback(  # pyright: ignore[reportUnknownMemberType]
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
@@ -500,6 +504,7 @@ def _register_tab_drop(app: Dash) -> None:
             paging_json,
             move,
             extra_settings={core.ACTIVE_TAB_KEY: new_tab},
+            reveal_panel=panel_name,
         )
         return container, page.model_dump_json()
 
