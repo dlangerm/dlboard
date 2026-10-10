@@ -31,6 +31,7 @@ from dlboard.serve._icons import Icon, icon, install_icons
 from dlboard.serve._jump import install_jump, jump_modal, jump_trigger
 from dlboard.serve._pages._dash_helpers import section_label
 from dlboard.serve._proxy import apply_proxy_fix
+from dlboard.serve._stale_page import install_stale_page_guard
 from dlboard.serve._url import relative_path
 
 if TYPE_CHECKING:
@@ -116,6 +117,8 @@ def app(plugins: list[models.PluginProtocol], *, url_prefix: str = "") -> Dash:
         serve_asset(_app, kind, path.name, path.read_bytes())
     install_icons(_app)
     install_jump(_app)
+    # A page left open across a deploy still sends the old callbacks' shape: say so, once, instead of a 500 per poll.
+    install_stale_page_guard(_app)
     # Pure client-side: whether the navbar shows at all only depends on the URL, and its
     # collapsed/width state lives in localStorage -- neither needs the server.
     _app.clientside_callback(  # pyright: ignore[reportUnknownMemberType]

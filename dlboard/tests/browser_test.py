@@ -19,6 +19,7 @@ instead, sidestepping that whole class of problem.
 
 from __future__ import annotations
 
+import json
 import re
 import time
 from typing import TYPE_CHECKING, Any, cast
@@ -69,7 +70,7 @@ from dlboard.serve.app import PAGE_LOADING_CLASS
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
-    from playwright.sync_api import Page
+    from playwright.sync_api import Page, Route
 
 pytestmark = pytest.mark.browser
 
@@ -1845,3 +1846,25 @@ def test_panel_menu_controls_mount_only_when_the_menu_opens(page: Page, live_ser
     expect(sync_switch).to_have_count(0)
     _open_panel_menu(page)
     expect(sync_switch).to_have_count(1)
+
+
+def test_a_page_from_an_older_version_offers_a_reload(page: Page, live_server_url: str) -> None:
+    """
+    A tab left open across a deploy sends callbacks in their old shape; the server answers with a 409
+    and the page shows one "Reload" prompt, which a Python-level test can't see the banner side of.
+    Rewrites Dash's own request into an old shape, so the 409 comes from the real server.
+    """
+
+    def with_an_extra_input(route: Route) -> None:
+        body = cast("dict[str, Any]", route.request.post_data_json)
+        route.continue_(post_data=json.dumps({**body, "inputs": [*body.get("inputs", []), {}]}))
+
+    callbacks = re.compile(r"/_dash-update-component")  # Dash adds a query string, so a bare glob misses it
+    page.route(callbacks, with_an_extra_input)
+    page.goto(live_server_url)
+
+    banner = page.locator("#dl-stale-page")
+    expect(banner).to_contain_text("dlboard was updated since this page loaded")
+    page.unroute(callbacks)
+    banner.get_by_role("button", name="Reload").click()
+    expect(banner).to_have_count(0)
