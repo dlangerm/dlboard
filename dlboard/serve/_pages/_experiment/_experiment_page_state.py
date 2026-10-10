@@ -419,8 +419,10 @@ def fetch_panel_dataframe(
     """Fetch just the data one panel needs -- not the whole experiment."""
     metric_cols = panel.hint_required_columns()
     artifact_keys = panel.hint_required_artifact_keys()
+    artifact_key_prefixes = frozenset(panel.hint_required_artifact_key_prefixes())
+    has_artifacts = bool(artifact_keys or artifact_key_prefixes)
 
-    if (metric_cols is None or metric_cols) and artifact_keys:
+    if (metric_cols is None or metric_cols) and has_artifacts:
         _log.warning(
             "Panel %r mixes metric and artifact charts, fetching both is "
             "less efficient than a panel of one kind; consider splitting it.",
@@ -446,10 +448,11 @@ def fetch_panel_dataframe(
             store.fetch_artifacts(
                 experiment_id,
                 keys=frozenset(k for k in artifact_keys if k is not None),
+                key_prefixes=artifact_key_prefixes,
                 exclude_run_ids=excluded,
             )
         )
-        if artifact_keys
+        if has_artifacts
         else pd.DataFrame()
     )
     # fetch_hyperparams has no server-side key filter -- it's one small row per run either way.

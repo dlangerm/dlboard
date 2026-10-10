@@ -104,6 +104,17 @@ class ChartType(ABC, BaseModel, typing.Generic[_Parameters, _Dataframe, _Chart],
         """Hint at the columns required for this chart."""
 
     @classmethod
+    def hint_required_artifact_key_prefixes(cls, parameters: _Parameters) -> set[str]:  # noqa: ARG003
+        """
+        Hint at artifact key prefixes this chart needs: every key that starts with one of them.
+
+        For a chart that lists a whole family of artifacts (every `checkpoints/...` file) rather
+        than one named key, so keys logged later are included without editing the chart.
+        Defaults to none, so a chart type that only ever names its keys need not say anything.
+        """
+        return set()
+
+    @classmethod
     @abstractmethod
     def hint_required_hparams(cls, parameters: _Parameters) -> set[str] | None:
         """Hint at the hyperparameter keys required for this chart."""
@@ -273,6 +284,13 @@ class ChartTypeRegistry:
         )
 
     @classmethod
+    def hint_required_artifact_key_prefixes(cls, chart: ChartInstance[_Dataframe, _Chart]) -> set[str]:
+        chart_type = cls.get_chart_type(chart.chart_type)
+        return chart_type.hint_required_artifact_key_prefixes(
+            chart_type.parameter_type().model_validate(chart.parameters)
+        )
+
+    @classmethod
     def hint_required_hparams(cls, chart: ChartInstance[_Dataframe, _Chart]) -> set[str] | None:
         chart_type = cls.get_chart_type(chart.chart_type)
         return chart_type.hint_required_hparams(chart_type.parameter_type().model_validate(chart.parameters))
@@ -349,6 +367,16 @@ class ChartInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, 
             )
             return None
 
+    def hint_required_artifact_key_prefixes(self) -> set[str]:
+        try:
+            return ChartTypeRegistry.hint_required_artifact_key_prefixes(self)
+        except (ValidationError, UnknownChartTypeError):
+            _log.warning(
+                "chart has invalid parameters or an unregistered chart type, no artifact-key prefix hint available",
+                chart_type=self.chart_type,
+            )
+            return set()
+
     def hint_required_hparams(self) -> set[str] | None:
         """Hint the required hyperparameter keys for this chart to render. See `hint_required_columns`."""
         try:
@@ -417,6 +445,11 @@ class PanelInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, 
 
     def hint_required_artifact_keys(self) -> set[str | None]:
         return set(itertools.chain(*[c.hint_required_artifact_keys() or set() for c in self.charts]))
+
+    def hint_required_artifact_key_prefixes(self) -> set[str]:
+        return set(
+            itertools.chain.from_iterable(c.hint_required_artifact_key_prefixes() for c in self.charts)
+        )
 
     def hint_required_hparams(self) -> set[str] | None:
         """Hint the required hyperparameter keys for the panel; `None` means "fetch every one"."""

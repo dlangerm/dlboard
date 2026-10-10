@@ -939,11 +939,26 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         experiment_id: int,
         *,
         keys: frozenset[str] | None = None,
+        key_prefixes: frozenset[str] = frozenset(),
         exclude_run_ids: frozenset[int] = frozenset(),
     ) -> Iterator[models.Artifact]:
-        """An experiment's (non-deleted) artifact metadata, not bytes -- only `keys`, if given."""
+        """
+        An experiment's (non-deleted) artifact metadata, not bytes.
+
+        Only the artifacts under `keys` and under any key starting with one of `key_prefixes`, if either
+        is given -- `keys=None` with no prefixes means every artifact.
+        """
         a = self._tables[models.Artifact]
-        key_filter = [a.c.key.in_(keys)] if keys is not None else []
+        key_filter = (
+            [
+                sa.or_(
+                    a.c.key.in_(keys or ()),
+                    *(a.c.key.startswith(prefix, autoescape=True) for prefix in key_prefixes),
+                )
+            ]
+            if keys is not None or key_prefixes
+            else []
+        )
         return iter(
             self._fetch(
                 models.Artifact,

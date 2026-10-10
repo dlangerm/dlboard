@@ -319,6 +319,39 @@ def test_log_and_fetch_artifacts_decodes_tags(store: SQLLiteStore, experiment_id
     assert fetched[0].ref == "ref://a"
 
 
+@pytest.mark.parametrize(
+    ("keys", "key_prefixes", "expected"),
+    [
+        pytest.param(None, frozenset[str](), {"ckpt/a", "ckpt/b", "ckpt_other", "img"}, id="everything"),
+        pytest.param(frozenset({"img"}), frozenset[str](), {"img"}, id="exact-key"),
+        pytest.param(None, frozenset({"ckpt/"}), {"ckpt/a", "ckpt/b"}, id="prefix"),
+        pytest.param(frozenset({"img"}), frozenset({"ckpt/"}), {"ckpt/a", "ckpt/b", "img"}, id="both"),
+        pytest.param(frozenset[str](), frozenset[str](), set[str](), id="no-keys"),
+        pytest.param(None, frozenset({"ck_t"}), set[str](), id="wildcards-are-literal"),
+    ],
+)
+def test_fetch_artifacts_by_key_and_key_prefix(
+    store: SQLLiteStore,
+    experiment_id: int,
+    keys: frozenset[str] | None,
+    key_prefixes: frozenset[str],
+    expected: set[str],
+) -> None:
+    run = store.create_run(models.NewRun(experiment_id=experiment_id))
+    store.log_artifact_refs(
+        [
+            models.Artifact(
+                key=key, fname=key, run_id=run.id, experiment_id=experiment_id, step=0, ref=f"ref://{key}"
+            )
+            for key in ("ckpt/a", "ckpt/b", "ckpt_other", "img")
+        ]
+    )
+
+    fetched = store.fetch_artifacts(experiment_id, keys=keys, key_prefixes=key_prefixes)
+
+    assert {a.key for a in fetched} == expected
+
+
 def test_fetches_leave_out_excluded_runs(store: SQLLiteStore, experiment_id: int) -> None:
     kept, excluded = (store.create_run(models.NewRun(experiment_id=experiment_id)) for _ in range(2))
     for run in (kept, excluded):

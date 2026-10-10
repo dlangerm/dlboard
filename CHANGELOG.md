@@ -30,6 +30,9 @@ pulls that section's body into the GitHub release notes and publishes both distr
   (create, rename, delete) spins until it finishes.
 * `dlboard` now depends on `dlboard-client~=X.Y.0`, a client of its own minor version, instead of any
   version, so an environment holding both can no longer end up with a mismatched pair.
+* `DataStore.fetch_artifacts` takes a `key_prefixes` keyword (default none) that also selects every artifact whose
+  key starts with one of the prefixes, and `ChartType.hint_required_artifact_key_prefixes` lets a chart ask for
+  them. A custom `DataStore` must accept the new keyword; a custom `ChartType` needs no change.
 
 ## [0.4.0] - 2026-10-09
 

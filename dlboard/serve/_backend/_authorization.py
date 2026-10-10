@@ -406,10 +406,13 @@ class AuthorizingDataStore(models.DataStore[...]):
         experiment_id: int,
         *,
         keys: frozenset[str] | None = None,
+        key_prefixes: frozenset[str] = frozenset(),
         exclude_run_ids: frozenset[int] = frozenset(),
     ) -> Iterator[models.Artifact]:
         self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
-        return self._inner.fetch_artifacts(experiment_id, keys=keys, exclude_run_ids=exclude_run_ids)
+        return self._inner.fetch_artifacts(
+            experiment_id, keys=keys, key_prefixes=key_prefixes, exclude_run_ids=exclude_run_ids
+        )
 
     # -- Pages, views, and notes --------------------------------------------------------------------
 
