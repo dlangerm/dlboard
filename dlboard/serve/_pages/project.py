@@ -21,4 +21,4 @@ def layout(project_id: str) -> list[dmc.Container | dcc.Store]:
     ]
 
 
-dash.register_page(__name__, path_template="/project/<project_id>")  # pyright: ignore[reportUnknownMemberType]
+dash.register_page(__name__, path_template="/project/<project_id>")

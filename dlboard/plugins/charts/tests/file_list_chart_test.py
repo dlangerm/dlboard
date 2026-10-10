@@ -7,7 +7,7 @@ from typing import Any, cast
 
 import pandas as pd
 import pytest
-from dash._utils import to_json  # pyright: ignore[reportUnknownVariableType]
+from dash._utils import to_json
 from pydantic import ValidationError
 
 from dlboard.models import RUN_NAME_COLUMN
@@ -19,7 +19,10 @@ def _nodes(node: Any) -> list[dict[str, Any]]:  # noqa: ANN401
     """Every component in a serialized Dash tree, depth first."""
     match node:
         case {"props": props}:
-            return [cast("dict[str, Any]", node), *_nodes(props.get("children"))]
+            return [
+                cast("dict[str, Any]", node),
+                *_nodes(props.get("children")),
+            ]  # pyrefly: ignore [unknown-argument-type]
         case list():
             return [found for child in cast("list[Any]", node) for found in _nodes(child)]
         case _:

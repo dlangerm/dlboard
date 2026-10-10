@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 """Tests for `AppSlot` (per-app plugin state) and the per-request data store accessor."""
 
 from __future__ import annotations
@@ -6,30 +5,35 @@ from __future__ import annotations
 import threading
 
 import pytest
+from dash import Dash
 
 from dlboard.serve._backend import _app_slot, _data_store
 from dlboard.serve._backend._app_slot import AppSlot
 
 
-class _FakeApp:
+class _FakeApp(Dash):
     """A bare stand-in for `Dash` -- an `AppSlot` only needs `hasattr`/`setattr` on it."""
+
+    def __init__(self) -> None:
+        # Deliberately skips `Dash.__init__`: nothing here needs a real app, only an identity to hang state on.
+        pass
 
 
 def test_set_refuses_to_overwrite() -> None:
     slot = AppSlot[str]("thing")
     app = _FakeApp()
-    slot.set(app, "a")  # pyright: ignore[reportArgumentType]
+    slot.set(app, "a")
 
     with pytest.raises(AttributeError, match="Refusing to overwrite"):
-        slot.set(app, "b")  # pyright: ignore[reportArgumentType]
+        slot.set(app, "b")
 
 
 def test_get_follows_the_current_app(monkeypatch: pytest.MonkeyPatch) -> None:
     """Accessors used to be `functools.cache`d, pinning every later app in a process to the first one's state."""
     slot = AppSlot[str]("thing")
     first, second = _FakeApp(), _FakeApp()
-    slot.set(first, "first")  # pyright: ignore[reportArgumentType]
-    slot.set(second, "second")  # pyright: ignore[reportArgumentType]
+    slot.set(first, "first")
+    slot.set(second, "second")
 
     monkeypatch.setattr(_app_slot, "get_app", lambda: first)
     from_first = slot.get()
@@ -42,11 +46,11 @@ def test_wait_blocks_until_set_on_that_specific_app() -> None:
     slot = AppSlot[str]("thing")
     app = _FakeApp()
     result: list[str] = []
-    waiter = threading.Thread(target=lambda: result.append(slot.wait(app)))  # pyright: ignore[reportArgumentType]
+    waiter = threading.Thread(target=lambda: result.append(slot.wait(app)))
     waiter.start()
 
-    slot.set(_FakeApp(), "some other app's")  # pyright: ignore[reportArgumentType]
-    slot.set(app, "mine")  # pyright: ignore[reportArgumentType]
+    slot.set(_FakeApp(), "some other app's")
+    slot.set(app, "mine")
     waiter.join(timeout=5)
 
     assert result == ["mine"]

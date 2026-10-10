@@ -120,7 +120,7 @@ uv run pytest                       # run the test suite
 uv run pytest -m browser            # run only the browser/e2e tests
 uv run pytest --screenshots=update  # regenerate the docs screenshots in docs/images
 uv run ruff check && uv run ruff format   # lint / format
-uv run pyright                      # type check
+uv run pyrefly                      # type check
 uv run prek run --all-files         # run pre-commit hooks manually
 ```
 

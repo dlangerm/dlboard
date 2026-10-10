@@ -33,7 +33,7 @@ uv run pytest --screenshots=check   # re-render the docs screenshots and fail if
 uv run pytest --screenshots=update  # rewrite docs/images (dlboard serves its own font, so a local render matches CI's -- commit it)
 uv run ruff check                   # lint
 uv run ruff format                  # format
-uv run pyright                      # type check (strict mode)
+uv run pyrefly                      # type check (strict mode)
 uv run prek run --all-files         # run pre-commit hooks manually
 ```
 
@@ -56,7 +56,7 @@ implementation module under `_pages/` is. `_pages/_experiment/`'s own tests need
 the scanner ever looks inside it.
 
 Ruff lint config lives in `pyproject.toml`; `**/tests/*` gets relaxed rules (docstrings, private-member
-access, etc). Pyright runs in `strict` mode over `dlboard/` (tests included, since they now live under it).
+access, etc). Pyrefly checks `dlboard/` (tests included, since they now live under it) with the strict error set in `[tool.pyrefly.errors]`.
 
 A plugin that needs its own browser-side JS or CSS (a clientside callback helper, a functions-as-props
 formatter for dash-mantine-components) keeps that file next to its own module and serves/registers it
@@ -101,7 +101,7 @@ installing them into a clean venv, not just by inspecting the config.
 
 This repo's own root `pyproject.toml` is a **virtual workspace root**: no `[project]` table of its
 own, just `[tool.uv.workspace] members = ["client", "server"]` plus the shared dev tooling config
-(`[tool.ruff]`, `[tool.pyright]`, `[tool.pytest.ini_options]`, `[dependency-groups] dev`, ...). A
+(`[tool.ruff]`, `[tool.pyrefly]`, `[tool.pytest.ini_options]`, `[dependency-groups] dev`, ...). A
 virtual root is what makes bare `uv run`/`uv sync` default to every workspace member instead of
 just one -- give it a real `[project]` table and those commands go back to defaulting to that one
 package alone.
@@ -234,6 +234,6 @@ Always keep in mind this code is meant to be read and maintained by humans, line
 and extra functions that serve only to break up blocks of code but not to separate logic are hard to parse and reason about. Wherever
 possible, fold large blocks or repeated logic into compartmentalized units that can easily be reused.
 
-Whenever you finish an instruction, make sure to at least run `uv run ruff check` and `uv run ruff format` as well as `uv run pyright` to ensure code quality is maintained before review.
+Whenever you finish an instruction, make sure to at least run `uv run ruff check` and `uv run ruff format` as well as `uv run pyrefly` to ensure code quality is maintained before review.
 
 Always rely on pydantic validation instead of performing your own, use `pendulum` instead of `datetime` and use `pydantic_settings` for environment variables.

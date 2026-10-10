@@ -135,6 +135,6 @@ def require_triggered_id() -> Any:  # noqa: ANN401
     `ctx.triggered[0]["value"]` distinguishes that no-op firing from an actual click/change.
     Callers `cast(...)` the result to the triggered-id shape they expect.
     """
-    if not ctx.triggered_id or not ctx.triggered[0]["value"]:  # pyright: ignore[reportUnknownMemberType]
+    if not ctx.triggered_id or not ctx.triggered[0]["value"]:  # pyrefly: ignore [unsupported-operation]
         raise PreventUpdate
-    return ctx.triggered_id  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+    return ctx.triggered_id

@@ -138,7 +138,7 @@ def render_account_page() -> Component:
 def register(app: Dash) -> None:
     """Wire the account page's token controls."""
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(NEW_TOKEN_ID, "children"),
         Output(TOKEN_NAME_ID, "value"),
         Output(TOKEN_NAME_ID, "error"),
@@ -159,13 +159,13 @@ def register(app: Dash) -> None:
 
     # Hard-reloads rather than re-rendering the table in place: the table holds the very
     # pattern-matched (`ALL`) Revoke buttons this callback listens to (see the admin page's trash).
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(constants.LOCATION_ID, "href", allow_duplicate=True),
         Output(constants.LOCATION_ID, "refresh", allow_duplicate=True),
         Input({"type": REVOKE_TOKEN_TYPE, "token": ALL}, "n_clicks"),
         prevent_initial_call=True,
     )
     def revoke_token(_clicks: list[int]) -> tuple[str, bool]:
-        token_id = int(cast("dict[str, int]", require_triggered_id())["token"])
+        token_id = cast("dict[str, int]", require_triggered_id())["token"]
         get_data_store().revoke_api_token(token_id, get_current_user().id)
         return relative_path("/account"), True

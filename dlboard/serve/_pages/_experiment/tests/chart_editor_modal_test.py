@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 """The add/edit-chart modal offers the experiment's real columns and previews exactly what a panel would show."""
 
 from __future__ import annotations

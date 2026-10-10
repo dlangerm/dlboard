@@ -13,7 +13,7 @@ from __future__ import annotations
 from datetime import timedelta
 from enum import StrEnum
 from http import HTTPMethod, HTTPStatus
-from typing import TYPE_CHECKING, Annotated, Any, Final
+from typing import TYPE_CHECKING, Annotated, Any, Final, override
 from urllib.parse import urlsplit, urlunsplit
 
 import pendulum
@@ -146,7 +146,7 @@ def add_public_route(app: Dash, rule: str, view_func: Callable[..., Any], method
     Every other route on the app is behind the request gate. `rule` is prefix-relative, like
     every other plugin route (see `basic_rest_backend.plug`).
     """
-    prefix = str(app.config.routes_pathname_prefix)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    prefix = str(app.config.routes_pathname_prefix)  # pyrefly: ignore [unknown-argument-type]
     endpoint = prefix + rule
     app.server.add_url_rule(endpoint, endpoint=endpoint, view_func=view_func, methods=methods)
     public = PUBLIC_ENDPOINTS.find(app)
@@ -305,6 +305,7 @@ class SkewTolerantSessions(SecureCookieSessionInterface):
         super().__init__()
         self._leeway = leeway
 
+    @override
     def open_session(self, app: Flask, request: Request) -> SecureCookieSession | None:
         serializer = self.get_signing_serializer(app)
         cookie = request.cookies.get(self.get_cookie_name(app))
@@ -315,7 +316,7 @@ class SkewTolerantSessions(SecureCookieSessionInterface):
             data, signed_at = serializer.loads(cookie, return_timestamp=True)
         except BadSignature:
             return self.session_class()
-        age = pendulum.now("UTC") - signed_at
+        age = pendulum.now("UTC") - signed_at  # pyrefly: ignore [unknown-variable-type]
         if not -self._leeway <= age <= app.permanent_session_lifetime:
             return self.session_class()
         return self.session_class(data)

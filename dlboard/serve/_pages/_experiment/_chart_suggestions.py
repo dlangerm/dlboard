@@ -206,7 +206,7 @@ def _render_auto_preview(groups: dict[str, list[tuple[str, ColumnKind]]]) -> Com
 
 
 def _register_auto_populate(app: Dash) -> None:
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(core.AUTO_POPULATE_MODAL_ID, "opened"),
         Output(core.AUTO_POPULATE_PREVIEW_ID, "children"),
         Output(core.AUTO_POPULATE_BUTTON_ID, "disabled"),
@@ -225,7 +225,7 @@ def _register_auto_populate(app: Dash) -> None:
         experiment_id: int,
     ) -> tuple[bool | NoUpdate, Component, bool]:
         """Open the confirm modal, and keep its preview in step with the delimiter and grouping picked."""
-        opening = cast("str | None", ctx.triggered_id) == core.AUTO_POPULATE_OPEN_ID  # pyright: ignore[reportUnknownMemberType]
+        opening = cast("str | None", ctx.triggered_id) == core.AUTO_POPULATE_OPEN_ID
         if (opening and not n_clicks) or (not opening and not opened):
             raise PreventUpdate
         store = get_data_store()
@@ -240,7 +240,7 @@ def _register_auto_populate(app: Dash) -> None:
         )
         return True if opening else no_update, _render_auto_preview(groups), False
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(core.AUTO_POPULATE_MODAL_ID, "opened", allow_duplicate=True),
         Input(core.AUTO_POPULATE_CANCEL_ID, "n_clicks"),
         prevent_initial_call=True,
@@ -250,7 +250,7 @@ def _register_auto_populate(app: Dash) -> None:
             raise PreventUpdate
         return False
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Input(core.AUTO_POPULATE_BUTTON_ID, "n_clicks"),
@@ -301,7 +301,7 @@ def _resolve_suggestion_trigger(
     """
     triggered_id = cast(
         "str | dict[str, str] | None",
-        ctx.triggered_id,  # pyright: ignore[reportUnknownMemberType]
+        ctx.triggered_id,
     )
     if not triggered_id:
         raise PreventUpdate
@@ -310,7 +310,7 @@ def _resolve_suggestion_trigger(
             raise PreventUpdate
         return None, True
     if isinstance(triggered_id, dict) and triggered_id.get("type") == "panel-suggest-charts":
-        if not ctx.triggered[0]["value"]:
+        if not ctx.triggered[0]["value"]:  # pyrefly: ignore [unsupported-operation]
             raise PreventUpdate
         return triggered_id["panel"], True
     return current_scope, no_update
@@ -354,7 +354,7 @@ def _add_charts(
 
 
 def _register_suggestions(app: Dash) -> None:
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(core.SUGGEST_DRAWER_ID, "opened", allow_duplicate=True),
         Output(core.SUGGEST_DRAWER_ID, "title", allow_duplicate=True),
         Output(core.SUGGEST_CONTENT_ID, "children", allow_duplicate=True),
@@ -419,7 +419,7 @@ def _register_suggestions(app: Dash) -> None:
             [],
         )
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(core.SUGGEST_CONTENT_ID, "children", allow_duplicate=True),
         Input(core.SUGGEST_FILTER_ID, "value"),
         Input(core.SUGGEST_SORT_ID, "value"),
@@ -432,7 +432,7 @@ def _register_suggestions(app: Dash) -> None:
         """Re-list what is already loaded; the ticked boxes live in the checkbox group, so they survive."""
         return _render_list(stored or [], filter_text, sort)
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(core.SUGGEST_SELECTION_ID, "value", allow_duplicate=True),
         Input(core.SUGGEST_SELECT_ALL_ID, "n_clicks"),
         Input(core.SUGGEST_CLEAR_ID, "n_clicks"),
@@ -451,7 +451,7 @@ def _register_suggestions(app: Dash) -> None:
         selected: list[str] | None,
     ) -> list[str]:
         """Tick every suggestion the filter shows (keeping what was already ticked), or untick everything."""
-        if cast("str | None", ctx.triggered_id) == core.SUGGEST_CLEAR_ID:  # pyright: ignore[reportUnknownMemberType]
+        if cast("str | None", ctx.triggered_id) == core.SUGGEST_CLEAR_ID:
             if not clear_clicks:
                 raise PreventUpdate
             return []
@@ -460,7 +460,7 @@ def _register_suggestions(app: Dash) -> None:
         shown = [s.selection_value for s in _shown(stored or [], filter_text, sort)]
         return [*dict.fromkeys([*(selected or []), *shown])]
 
-    app.clientside_callback(  # pyright: ignore[reportUnknownMemberType]
+    app.clientside_callback(
         _SUGGEST_SELECTION_JS.source,
         Output(core.SUGGEST_ADD_SELECTED_ID, "children"),
         Output(core.SUGGEST_ADD_SELECTED_ID, "disabled"),
@@ -469,7 +469,7 @@ def _register_suggestions(app: Dash) -> None:
 
 
 def _register_suggestion_adds(app: Dash) -> None:
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Output(core.SUGGEST_CONTENT_ID, "children", allow_duplicate=True),
@@ -499,7 +499,7 @@ def _register_suggestion_adds(app: Dash) -> None:
         still_ticked = [v for v in selected or [] if parse_selection([v]) != picked]
         return container, saved_page, _render_list(remaining, filter_text, sort), remaining, still_ticked
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Output(core.SUGGEST_CONTENT_ID, "children", allow_duplicate=True),

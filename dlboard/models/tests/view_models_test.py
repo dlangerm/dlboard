@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 """Tests for the chart/panel view model registry and aggregation logic."""
 
 from __future__ import annotations

@@ -10,7 +10,7 @@ dropped or rewritten, and an older server that doesn't know the columns simply n
 from __future__ import annotations
 
 import sqlalchemy as sa
-from alembic import op
+from alembic import op  # pyrefly: ignore [implicit-reexport]
 
 from dlboard.serve import sql
 

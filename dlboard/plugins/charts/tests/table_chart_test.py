@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 """Tests for the table chart type: run-mode rows, pivot mode, and its column hints."""
 
 from __future__ import annotations

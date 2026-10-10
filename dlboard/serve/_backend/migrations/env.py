@@ -36,7 +36,7 @@ import os
 from typing import TYPE_CHECKING, Literal
 
 import sqlalchemy as sa
-from alembic import context
+from alembic import context  # pyrefly: ignore [implicit-reexport]
 
 from dlboard.serve import sql
 from dlboard.serve._backend._sql_store_base import build_metadata

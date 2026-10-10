@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 """
 End-to-end: an uploaded artifact is fetched back by id through `/artifact/<id>`, not by ref.
 

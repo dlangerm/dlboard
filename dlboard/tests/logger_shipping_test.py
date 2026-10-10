@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 """End-to-end: a real `DLBoardLogger` (real shipping processes) logging to a live dlboard backend."""
 
 from __future__ import annotations
@@ -13,8 +12,7 @@ import torch
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.demos.boring_classes import BoringModel
 
-from dlboard._wire import Resource, run_finish_path
-from dlboard.client._rest_api import create_path
+from dlboard._wire import Resource, create_path, run_finish_path
 from dlboard.client.artifacts import image
 from dlboard.client.dlboard_logger import DLBoardLogger
 from dlboard.conftest import EVERY_STORE_BACKEND, StoreBackend

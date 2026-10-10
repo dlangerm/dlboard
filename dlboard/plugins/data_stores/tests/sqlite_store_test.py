@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 """Tests for `SQLLiteStore`'s connection setup: WAL mode, busy-timeout retry, and schema-prep locking."""
 
 from __future__ import annotations

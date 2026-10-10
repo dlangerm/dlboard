@@ -192,4 +192,4 @@ def layout(
     ]
 
 
-dash.register_page(__name__, path_template="/experiment/<experiment_id>")  # pyright: ignore[reportUnknownMemberType]
+dash.register_page(__name__, path_template="/experiment/<experiment_id>")

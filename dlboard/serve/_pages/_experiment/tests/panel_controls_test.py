@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 """The panel controls that rebuild the whole panel area show a spinner on their button while they run."""
 
 from __future__ import annotations
@@ -16,7 +15,7 @@ def test_buttons_that_rebuild_the_panel_area_spin_until_their_callback_returns()
     register_panel_controls_callbacks(app)
 
     # Dash ships no types for its callback registry.
-    callbacks = cast("list[dict[str, Any]]", app._callback_list)  # pyright: ignore[reportUnknownMemberType]
+    callbacks = cast("list[dict[str, Any]]", app._callback_list)
     spinning = {
         prop: (cb["running"]["running"][prop], cb["running"]["runningOff"][prop])
         for cb in callbacks

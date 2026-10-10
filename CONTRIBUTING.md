@@ -12,7 +12,7 @@ uv run pytest                       # run the test suite
 uv run pytest -m browser            # run only the browser/e2e tests
 uv run pytest -m "not browser and not postgres and not s3"  # everything that needs neither a browser nor Docker
 uv run ruff check && uv run ruff format   # lint / format
-uv run pyright                      # type check (strict mode)
+uv run pyrefly                      # type check (strict mode)
 uv run prek run --all-files         # run pre-commit hooks manually
 ```
 

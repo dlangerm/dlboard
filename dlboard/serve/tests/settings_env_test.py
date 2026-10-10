@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 """
 Tests for `dlboard.serve.set_setting_env`.
 

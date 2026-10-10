@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import re
+from typing import TYPE_CHECKING
 
 from dash import Dash, html
 
 from dlboard.conftest import props
 from dlboard.serve import Icon, icon
 from dlboard.serve._icons import ICONS_DIR, install_icons
+
+if TYPE_CHECKING:
+    from flask.testing import FlaskClient
 
 
 def test_every_icon_has_an_svg_and_every_svg_is_an_icon() -> None:
@@ -17,7 +21,7 @@ def test_the_served_stylesheet_draws_every_icon() -> None:
     app = Dash(__name__)
     app.layout = html.Div()
     install_icons(app)
-    client = app.server.test_client()
+    client: FlaskClient = app.server.test_client()
 
     stylesheet_url = re.search(r'href="(/icons\.[0-9a-f]+\.css)"', client.get("/").get_data(as_text=True))
     assert stylesheet_url

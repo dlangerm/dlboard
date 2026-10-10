@@ -17,7 +17,7 @@ CLAUDE.md. A later schema change is always a new revision.
 from __future__ import annotations
 
 import sqlalchemy as sa
-from alembic import op
+from alembic import op  # pyrefly: ignore [implicit-reexport]
 from sqlalchemy.dialects import postgresql
 
 from dlboard.serve import sql

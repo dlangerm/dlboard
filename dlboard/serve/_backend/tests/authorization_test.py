@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 """Tests for `AuthorizingDataStore`/`AuthorizingArtifactStore`: the per-request access-control wrappers."""
 
 from __future__ import annotations

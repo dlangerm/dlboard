@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 
     import pytest
     from dash import Dash
+    from flask.testing import FlaskClient
 
 
 def _build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Dash:
@@ -56,7 +57,7 @@ def test_proxy_fix_then_trusts_the_forwarded_scheme_and_address(
         def _record() -> None:
             seen.append((request.scheme, request.remote_addr))
 
-        client = app.server.test_client()
+        client: FlaskClient = app.server.test_client()
         client.get("/healthz", headers={"X-Forwarded-Proto": "https", "X-Forwarded-For": "1.2.3.4"})
 
         assert seen == [("https", "1.2.3.4")]

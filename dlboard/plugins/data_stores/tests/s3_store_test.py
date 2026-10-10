@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 """Tests for `S3Settings`/`S3Blobs` on their own: env parsing, download modes, read-only buckets."""
 
 from __future__ import annotations
@@ -35,7 +34,7 @@ def test_settings_are_read_from_s3_env_vars(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setenv("DLBOARD_S3_DOWNLOAD_MODE", "presign")
     monkeypatch.setenv("DLBOARD_S3_EXTRA_READ_BUCKETS", '["shared-bucket"]')
 
-    settings = S3Settings()  # pyright: ignore[reportCallIssue] -- `bucket` is required, via DLBOARD_S3_BUCKET
+    settings = S3Settings()
 
     assert settings.bucket == "my-bucket"
     assert settings.prefix == "runs"
@@ -203,10 +202,12 @@ def test_a_read_only_allowlisted_bucket_is_downloadable_but_never_deleted(s3_set
     didn't write it there, and has no business deleting something it doesn't own.
     """
     foreign_bucket = f"{s3_settings.bucket}-foreign"
-    client = _client(s3_settings)  # pyright: ignore[reportArgumentType]
+    client = _client(s3_settings)  # pyrefly: ignore [bad-argument-type]
     client.create_bucket(
         Bucket=foreign_bucket,
-        CreateBucketConfiguration={"LocationConstraint": s3_settings.region},  # pyright: ignore[reportArgumentType]
+        CreateBucketConfiguration={
+            "LocationConstraint": s3_settings.region
+        },  # pyrefly: ignore [bad-assignment]
     )
     client.put_object(Bucket=foreign_bucket, Key="already-there.bin", Body=b"owned by someone else")
     ref = AnyUrl(f"s3://{foreign_bucket}/already-there.bin")

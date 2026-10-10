@@ -9,7 +9,7 @@ health-check probe or a failed login attempt by request id is exactly as useful 
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from uuid import uuid4
 
 import structlog
@@ -40,7 +40,8 @@ def register(app: Dash) -> None:
     def _finish_request(response: BaseResponse) -> BaseResponse:
         response.headers[_REQUEST_ID_HEADER] = structlog.contextvars.get_contextvars().get("request_id", "")
         if access_log:
-            duration_ms = (time.perf_counter() - g.dlboard_request_started_at) * 1000
+            started_at = cast("float", g.dlboard_request_started_at)
+            duration_ms = (time.perf_counter() - started_at) * 1000
             _log.info(
                 "request",
                 method=request.method,

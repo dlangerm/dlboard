@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 """Tests for route registration and the error -> HTTP status mappings (no real HTTP calls)."""
 
 from __future__ import annotations
@@ -25,8 +24,8 @@ def test_importing_this_module_registers_nothing_in_dash_hooks_global_registry()
     called with a specific `app`, may do that. Otherwise a process building more than one `Dash`
     app would double-register them."""
     registered_paths: set[str] = {
-        h.data["name"]  # pyright: ignore[reportUnknownMemberType,reportOptionalSubscript]
-        for h in dash.hooks.get_hooks("routes")  # pyright: ignore[reportUnknownMemberType,reportUnknownVariableType]
+        h.data["name"]  # pyrefly: ignore [unsupported-operation]
+        for h in dash.hooks.get_hooks("routes")
     }
     route_paths = {path for path, _methods, _view_func in backend._ROUTES}
 
@@ -65,7 +64,7 @@ def test_plug_registers_routes_only_on_the_given_app_not_globally() -> None:
         server = _FakeServer()
         config = _FakeConfig()
 
-    backend.plug(_FakeApp())  # pyright: ignore[reportArgumentType]
+    backend.plug(_FakeApp())  # pyrefly: ignore [bad-argument-type]
 
     assert len(registered_rules) == len(backend._ROUTES)
     assert registered_errorhandlers == {

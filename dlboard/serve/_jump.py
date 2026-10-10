@@ -101,7 +101,7 @@ def install_jump(app: Dash) -> None:
     """Serve the shortcut listener and wire the palette's data and navigation, on `app` only."""
     serve_asset(app, AssetKind.SCRIPT, _SHORTCUT_JS.name, _SHORTCUT_JS.read_bytes())
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(JUMP_SELECT_ID, "data"),
         Input(JUMP_MODAL_ID, "opened"),
         prevent_initial_call=True,
@@ -111,7 +111,7 @@ def install_jump(app: Dash) -> None:
             raise PreventUpdate
         return _destinations()
 
-    app.clientside_callback(  # pyright: ignore[reportUnknownMemberType]
+    app.clientside_callback(
         _NAVIGATE_JS.source,
         Output(JUMP_MODAL_ID, "opened"),
         Output(JUMP_SELECT_ID, "value"),

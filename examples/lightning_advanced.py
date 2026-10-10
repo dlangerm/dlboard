@@ -189,7 +189,7 @@ class ShapesDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
     @override
     def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor]:
         image, mask = render_sample(np.random.default_rng([self.seed, index]), self.size, self.noise_std)
-        return torch.from_numpy(image), torch.from_numpy(mask)  # pyright: ignore[reportUnknownMemberType]
+        return torch.from_numpy(image), torch.from_numpy(mask)
 
 
 class ShapesDataModule(pl.LightningDataModule):
@@ -290,7 +290,7 @@ def class_boxes(mask: torch.Tensor) -> list[tuple[ShapeClass, list[float]]]:
     if not present:
         return []
     boxes = masks_to_boxes(torch.stack([mask == c for c in present]))
-    return [(c, cast("list[float]", box.tolist())) for c, box in zip(present, boxes, strict=True)]  # pyright: ignore[reportUnknownMemberType]
+    return [(c, cast("list[float]", box.tolist())) for c, box in zip(present, boxes, strict=True)]
 
 
 def draw_boxes(image: np.ndarray, truth: torch.Tensor, pred: torch.Tensor) -> np.ndarray:
@@ -324,7 +324,7 @@ def plot_class_iou(iou: dict[str, float]) -> Figure:
     """A bar per foreground class."""
     fig = Figure(figsize=(5, 3), layout="constrained")
     ax = fig.subplots()
-    ax.bar(list(iou), list(iou.values()))  # pyright: ignore[reportUnknownMemberType]
+    ax.bar(list(iou), list(iou.values()))
     ax.set(ylim=(0, 1), ylabel="IoU", title="Validation IoU per class")
     return fig
 
@@ -393,7 +393,7 @@ class ShapesSegmenter(pl.LightningModule):
         _, preds = self._step(batch, Stage.VAL)
         if batch_idx == 0:  # the loader doesn't shuffle, so these are the same images every epoch
             images, masks = batch
-            self._preview = tuple(t[:PREVIEW_SAMPLES].cpu() for t in (images, masks, preds))  # pyright: ignore[reportAttributeAccessIssue]
+            self._preview = tuple(t[:PREVIEW_SAMPLES].cpu() for t in (images, masks, preds))
 
     def _log_segmentation_metrics(self, stage: Stage) -> dict[str, float]:
         """Log mIoU, dice and per-class IoU of the confusion matrix `_step` accumulated; returns per-class IoU."""

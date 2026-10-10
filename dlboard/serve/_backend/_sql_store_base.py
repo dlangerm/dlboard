@@ -5,7 +5,7 @@ from __future__ import annotations
 import itertools
 import json
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Final, Literal
+from typing import TYPE_CHECKING, Any, Final, Literal, cast
 
 import pendulum
 import sqlalchemy as sa
@@ -383,7 +383,9 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         """`(group id, experiment count, run count, last activity)` per project or experiment, non-deleted rows only."""
         p, e, r = (self._tables[m] for m in (models.Project, models.Experiment, models.Run))
         group_id = p.c.id if group is models.Project else e.c.id
-        project_filter = [p.c.id == project_id] if project_id is not None else []
+        project_filter: list[sa.ColumnElement[bool]] = (
+            [p.c.id == project_id] if project_id is not None else []
+        )
         return self._execute(
             sa.select(
                 group_id,
@@ -736,7 +738,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         # transitively through its run, which is always soft-deleted in the same cascade as its
         # metrics' logical owner (see `_soft_delete`), so a join against `Run` is sufficient.
         m, r = self._tables[models.UnderlyingMetricTableEntry], self._tables[models.Run]
-        key_filter = [m.c.key.in_(keys)] if keys is not None else []
+        key_filter: list[sa.ColumnElement[bool]] = [m.c.key.in_(keys)] if keys is not None else []
         # `ORDER BY m.id` is insertion order, which is what `MetricFrame.from_rows`' last-write-wins needs.
         rows = self._execute(
             sa.select(*(m.c[f] for f in MetricRow._fields))
@@ -831,7 +833,8 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         # otherwise both insert one, leaving two "the" shared pages for one scope. The partial
         # unique index on {field} WHERE owner_id IS NULL (this class's own `__init__`) turns the
         # loser's insert into a no-op instead, and the re-select returns whichever one actually won.
-        new_page = (new_page_type or models.NewPage[D, C])(**{field: value})  # pyright: ignore[reportArgumentType]
+        new_page_fields: dict[str, Any] = {field: value}
+        new_page = (new_page_type or models.NewPage[D, C])(**new_page_fields)
         self._execute(self._insert_ignoring_conflicts(pages).values(sql.row_values(new_page)))
         (created,) = self._fetch(page_type, shared)
         return created
@@ -949,7 +952,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         is given -- `keys=None` with no prefixes means every artifact.
         """
         a = self._tables[models.Artifact]
-        key_filter = (
+        key_filter: list[sa.ColumnElement[bool]] = (
             [
                 sa.or_(
                     a.c.key.in_(keys or ()),
@@ -1011,7 +1014,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             ((count,),) = self._execute(
                 sa.select(sa.func.count()).select_from(table).where(where, extra(table))
             )
-            details[table.name] = details.get(table.name, 0) + count
+            details[table.name] = details.get(table.name, 0) + cast("int", count)
         return details
 
     def _audit_log_insert(
@@ -1097,7 +1100,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         table = self._tables[model]
         cascade = self._cascade(model, entity_id, within=SOFT_DELETABLE)
         details = self._cascade_counts(cascade, lambda t: t.c.deleted_at == deleted_at)
-        cleared = {"deleted_at": None, "deleted_by": None}
+        cleared: dict[str, None] = {"deleted_at": None, "deleted_by": None}
         self._transaction(
             [
                 sa.update(table).where(table.c.id == entity_id).values(cleared),

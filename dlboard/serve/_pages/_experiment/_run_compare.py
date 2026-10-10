@@ -219,7 +219,9 @@ def compare_components(store: DataStore[...], experiment_id: int, query: Compare
     modal starts empty and the button's callbacks fill it in.
     """
     runs, rows = load_comparison(store, experiment_id, query.runs)
-    options = _run_options(list(store.get_runs(experiment_id, limit=_RUNS_LIMIT))) if query.runs else []
+    options: list[dict[str, str]] = (
+        _run_options(list(store.get_runs(experiment_id, limit=_RUNS_LIMIT))) if query.runs else []
+    )
     grid = themed_grid_kwargs()
     modal = dmc.Modal(
         id=COMPARE_MODAL_ID,
@@ -290,14 +292,14 @@ def register_run_compare_callbacks(app: Dash) -> None:
     controls (all in the page's static layout), so none of them costs a request on page load; the
     button, which is mounted later with the navbar, opens the modal clientside for the same reason.
     """
-    app.clientside_callback(  # pyright: ignore[reportUnknownMemberType]
+    app.clientside_callback(
         _OPEN_JS.source,
         Output(COMPARE_MODAL_ID, "opened"),
         Input(COMPARE_OPEN_ID, "n_clicks", allow_optional=True),
         prevent_initial_call=True,
     )
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(COMPARE_RUNS_ID, "data"),
         Output(COMPARE_RUNS_ID, "value"),
         Input(COMPARE_MODAL_ID, "opened"),
@@ -322,7 +324,7 @@ def register_run_compare_callbacks(app: Dash) -> None:
         default = [str(run.id) for run in charted[:MAX_COMPARED_RUNS]]
         return _run_options(runs), picked or default
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(COMPARE_ROWS_STORE_ID, "data"),
         Output(COMPARE_GRID_ID, "columnDefs"),
         Input(COMPARE_RUNS_ID, "value"),
@@ -335,7 +337,7 @@ def register_run_compare_callbacks(app: Dash) -> None:
         runs, rows = load_comparison(get_data_store(), experiment_id, [int(run_id) for run_id in picked])
         return rows, comparison_columns(runs)
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(COMPARE_GRID_ID, "rowData"),
         Input(COMPARE_ROWS_STORE_ID, "data"),
         Input(COMPARE_MODE_ID, "value"),
@@ -349,7 +351,7 @@ def register_run_compare_callbacks(app: Dash) -> None:
 
     # Side-effect only (it writes `history.replaceState`, never the prop): declared as both Input and
     # Output of `opened` for the same reason `sync_view_url.js` is -- Dash has no prop for the address bar.
-    app.clientside_callback(  # pyright: ignore[reportUnknownMemberType]
+    app.clientside_callback(
         _SYNC_URL_JS.source,
         Output(COMPARE_MODAL_ID, "opened", allow_duplicate=True),
         Input(COMPARE_MODAL_ID, "opened"),

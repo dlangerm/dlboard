@@ -127,7 +127,7 @@ def _confusion_matrix(step: int, rng: np.random.Generator) -> MplFigure:
     # Small on purpose: the image-series chart shows it as a thumbnail, so the labels have to survive downscaling.
     fig = MplFigure(figsize=(4, 4), layout="constrained")
     ax = fig.subplots()
-    ax.imshow(counts, cmap="Blues")  # pyright: ignore[reportUnknownMemberType]
+    ax.imshow(counts, cmap="Blues")
     ax.set(xticks=range(10), yticks=range(10), xlabel="Predicted", ylabel="Actual", title=f"Step {step}")
     return fig
 
@@ -403,14 +403,18 @@ def _matches_committed(shot: DocScreenshot, png: bytes) -> bool:
     if shot.path.exists():
         committed = np.asarray(PILImage.open(shot.path).convert("RGB"), dtype=int)
         if committed.shape == fresh.shape:
-            differing = np.abs(fresh - committed).max(axis=2) > _CHANNEL_TOLERANCE
+            differing = (
+                np.abs(fresh - committed).max(axis=2) > _CHANNEL_TOLERANCE
+            )  # pyrefly: ignore [unknown-variable-type]
             if differing.mean() <= _MAX_DIFFERING_PIXEL_FRACTION:
                 return True
     for subdir in ("actual", "diff"):
         (DIFFS_DIR / subdir).mkdir(parents=True, exist_ok=True)
     (DIFFS_DIR / "actual" / shot.path.name).write_bytes(png)
     if differing is not None:
-        PILImage.fromarray((differing * 255).astype(np.uint8)).save(DIFFS_DIR / "diff" / shot.path.name)
+        PILImage.fromarray((differing * 255).astype(np.uint8)).save(
+            DIFFS_DIR / "diff" / shot.path.name
+        )  # pyrefly: ignore [unknown-argument-type]
     return False
 
 

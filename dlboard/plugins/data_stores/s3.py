@@ -83,6 +83,7 @@ class S3Settings(BaseSettings):
     queue_size: NonNegativeInt = 100
 
 
+# S3Settings is a frozen (so hashable) pydantic model; pyrefly does not see the `__hash__` pydantic generates.
 @functools.cache
 def _client(settings: S3Settings) -> S3Client:
     """
@@ -104,9 +105,9 @@ def _client(settings: S3Settings) -> S3Client:
         region_name=settings.region,
     )
     # `types-boto3[s3]` alone (not the much larger "full" stub set covering every AWS service)
-    # leaves `Session.client`'s own overloads partially unknown to pyright, hence the ignore --
+    # leaves `Session.client`'s own overloads partially unknown to pyrefly, hence the ignore --
     # the one overload that actually matches `"s3"` still resolves to the real `S3Client`.
-    return session.client(  # pyright: ignore[reportUnknownMemberType]
+    return session.client(
         "s3",
         endpoint_url=str(settings.endpoint_url) if settings.endpoint_url else None,
         config=Config(s3={"addressing_style": settings.addressing_style}),
@@ -130,7 +131,7 @@ class S3Blobs:
         """`ref`'s bucket and key, for one of boto3's own `Bucket=`/`Key=` calls."""
         assert ref.host is not None, f"not a bucket-having s3 ref: {ref}"
         # `ref.path` is URL-percent-encoded (pydantic's `AnyUrl`); the real S3 key isn't.
-        return ref.host, urllib.parse.unquote(str(ref.path or "").lstrip("/"))
+        return ref.host, urllib.parse.unquote((ref.path or "").lstrip("/"))
 
     def _own_key(self, key: PurePosixPath) -> str:
         return str(PurePosixPath(self._settings.prefix) / key)
@@ -144,7 +145,7 @@ class S3Blobs:
         if ref.scheme != "s3" or ref.host is None:
             return None
         own_prefix = f"{self._settings.prefix}/" if self._settings.prefix else ""
-        path = str(ref.path or "").lstrip("/")
+        path = (ref.path or "").lstrip("/")
         if ref.host == self._settings.bucket and path.startswith(own_prefix):
             return RefAccess.OWNED
         if ref.host in self._settings.extra_read_buckets:
@@ -157,7 +158,7 @@ class S3Blobs:
 
         bucket, key = self._bucket_and_key(ref)
         try:
-            _client(self._settings).head_object(Bucket=bucket, Key=key)  # pyright: ignore[reportArgumentType]
+            _client(self._settings).head_object(Bucket=bucket, Key=key)  # pyrefly: ignore [bad-argument-type]
         except ClientError as exc:
             # Least-privilege credentials (no s3:ListBucket) make AWS answer a HEAD on a missing
             # key with 403 rather than 404 -- indistinguishable here from a real permission error,
@@ -172,7 +173,7 @@ class S3Blobs:
         bucket, key = self._bucket_and_key(ref)
         content_type, _ = mimetypes.guess_type(key)
         try:
-            _client(self._settings).upload_file(  # pyright: ignore[reportArgumentType]
+            _client(self._settings).upload_file(  # pyrefly: ignore [bad-argument-type]
                 str(staged),
                 Bucket=bucket,
                 Key=key,
@@ -184,7 +185,7 @@ class S3Blobs:
     def download(self, ref: AnyUrl) -> Response:
         """Serve `ref`'s bytes to a browser, proxied or presigned per `download_mode`."""
         bucket, key = self._bucket_and_key(ref)
-        client = _client(self._settings)  # pyright: ignore[reportArgumentType]
+        client = _client(self._settings)  # pyrefly: ignore [bad-argument-type]
         match self._settings.download_mode:
             case S3DownloadMode.PRESIGN:
                 content_type, _ = mimetypes.guess_type(key)
@@ -218,12 +219,12 @@ class S3Blobs:
     def delete(self, ref: AnyUrl) -> None:
         """Permanently delete the blob at `ref`. Idempotent: S3's own `delete_object` always is."""
         bucket, key = self._bucket_and_key(ref)
-        _client(self._settings).delete_object(Bucket=bucket, Key=key)  # pyright: ignore[reportArgumentType]
+        _client(self._settings).delete_object(Bucket=bucket, Key=key)  # pyrefly: ignore [bad-argument-type]
 
 
 def plug(app: Dash) -> None:
     """Plugin content."""
-    settings = S3Settings()  # pyright: ignore[reportCallIssue] -- `bucket` is required, via S3_BUCKET
+    settings = S3Settings()
     # Fail fast on a bad bucket/endpoint/credential instead of only discovering it on the first upload.
-    _client(settings).head_bucket(Bucket=settings.bucket)  # pyright: ignore[reportArgumentType]
+    _client(settings).head_bucket(Bucket=settings.bucket)  # pyrefly: ignore [bad-argument-type]
     plug_blob_store(app, S3Blobs(settings), settings.queue_size)

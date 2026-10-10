@@ -179,14 +179,14 @@ def _thread(
 
 def register_notes_callbacks(app: Dash) -> None:
     """Wire the notes drawer: open, load/refresh, post, delete."""
-    app.clientside_callback(  # pyright: ignore[reportUnknownMemberType]
+    app.clientside_callback(
         _OPEN_ON_CLICK_JS.source,
         Output(NOTES_DRAWER_ID, "opened"),
         Input(NOTES_OPEN_ID, "n_clicks"),
         prevent_initial_call=True,
     )
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(NOTES_THREAD_ID, "children"),
         Output(NOTES_COUNT_ID, "children"),
         Output(NOTES_RUNS_ID, "data"),
@@ -197,7 +197,7 @@ def register_notes_callbacks(app: Dash) -> None:
         prevent_initial_call=True,
     )
     def load_notes(opened: bool, _revision: int | None, experiment_id: int) -> tuple[Any, ...]:  # noqa: FBT001
-        if ctx.triggered_id == NOTES_DRAWER_ID and not opened:  # pyright: ignore[reportUnknownMemberType]
+        if ctx.triggered_id == NOTES_DRAWER_ID and not opened:
             raise PreventUpdate
         store = get_data_store()
         if not opened:
@@ -211,7 +211,7 @@ def register_notes_callbacks(app: Dash) -> None:
             [{"value": str(u.id), "label": u.username} for u in users],
         )
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(NOTES_THREAD_ID, "children", allow_duplicate=True),
         Output(NOTES_COUNT_ID, "children", allow_duplicate=True),
         Output(NOTES_BODY_ID, "value"),
@@ -245,7 +245,7 @@ def register_notes_callbacks(app: Dash) -> None:
         thread, count, _runs, _users = _thread(store, experiment_id)
         return thread, str(count), "", None, [], []
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(NOTES_THREAD_ID, "children", allow_duplicate=True),
         Output(NOTES_COUNT_ID, "children", allow_duplicate=True),
         Input({"type": _DELETE_NOTE_TYPE, "note": ALL}, "n_clicks"),

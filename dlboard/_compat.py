@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    # Pyright always sees the real `enum.StrEnum` -- this repo's own dev/CI env always has 3.12+.
+    # Pyrefly always sees the real `enum.StrEnum` -- this repo's own dev/CI env always has 3.12+.
     # The try/except below is the runtime-only fallback, for an actual 3.10/3.11 interpreter.
     from enum import StrEnum
 else:

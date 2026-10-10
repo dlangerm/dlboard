@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 """Tests for the pure (non-Dash) helpers in the basic experiment page."""
 
 from __future__ import annotations
@@ -425,7 +424,7 @@ def test_param_field_input_optional_number_gets_a_clear_button() -> None:
     already works, but isn't discoverable on its own."""
     field = ParameterField(name="width", type=ParameterFieldType.INT, required=False, default=None)
     component = _param_field_input(field.name, field, ColumnCatalog())
-    props = cast("Any", component).to_plotly_json()["props"]
+    props = cast("Any", component).to_plotly_json()["props"]  # pyrefly: ignore [unknown-variable-type]
     assert props["rightSection"] is not None
     assert props["rightSectionPointerEvents"] == "all"
 
@@ -433,7 +432,7 @@ def test_param_field_input_optional_number_gets_a_clear_button() -> None:
 def test_param_field_input_required_number_has_no_clear_button() -> None:
     field = ParameterField(name="page_size", type=ParameterFieldType.INT, required=True)
     component = _param_field_input(field.name, field, ColumnCatalog())
-    props = cast("Any", component).to_plotly_json()["props"]
+    props = cast("Any", component).to_plotly_json()["props"]  # pyrefly: ignore [unknown-variable-type]
     assert props.get("rightSection") is None
 
 
@@ -458,7 +457,7 @@ def test_param_field_input_falls_back_to_text_when_no_columns_of_kind() -> None:
 def test_param_field_input_uses_override_over_default() -> None:
     field = ParameterField(name="sample", type=ParameterFieldType.BOOL, required=False, default=True)
     component = _param_field_input(field.name, field, ColumnCatalog(), override=False)
-    # dash-mantine-components ships no py.typed marker, so pyright can't see this attr.
+    # dash-mantine-components ships no py.typed marker, so pyrefly can't see this attr.
     assert cast("Any", component).to_plotly_json()["props"]["checked"] is False
 
 
@@ -476,7 +475,7 @@ def test_param_field_input_renders_fixed_choices_as_a_select() -> None:
     component = _param_field_input(field.name, field, ColumnCatalog(), override="category")
 
     assert isinstance(component, dmc.Select)
-    props = cast("Any", component).to_plotly_json()["props"]
+    props = cast("Any", component).to_plotly_json()["props"]  # pyrefly: ignore [unknown-variable-type]
     assert props["data"] == ["number", "category"]
     assert props["value"] == "category"
 

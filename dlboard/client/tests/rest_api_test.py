@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 """Tests for the REST client's request shaping (no real HTTP calls)."""
 
 from __future__ import annotations

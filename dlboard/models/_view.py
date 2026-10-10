@@ -267,38 +267,42 @@ class ChartTypeRegistry:
         return field_descriptors
 
     @classmethod
-    def render(cls, chart: ChartInstance[_Dataframe, _Chart], dataframe: object) -> _Chart:
+    def _typed_chart(
+        cls, chart: ChartInstance[_Dataframe, _Chart]
+    ) -> tuple[type[ChartType[typing.Any, typing.Any, typing.Any]], typing.Any]:
+        """The registered chart type for `chart`, plus its parameters validated against that type's own model."""
         chart_type = cls.get_chart_type(chart.chart_type)
-        return chart_type.render(chart_type.parameter_type().model_validate(chart.parameters), dataframe)
+        return chart_type, chart_type.parameter_type().model_validate(chart.parameters)
+
+    @classmethod
+    def render(cls, chart: ChartInstance[_Dataframe, _Chart], dataframe: object) -> _Chart:
+        chart_type, parameters = cls._typed_chart(chart)
+        return chart_type.render(parameters, dataframe)
 
     @classmethod
     def hint_required_columns(cls, chart: ChartInstance[_Dataframe, _Chart]) -> set[str] | None:
-        chart_type = cls.get_chart_type(chart.chart_type)
-        return chart_type.hint_required_columns(chart_type.parameter_type().model_validate(chart.parameters))
+        chart_type, parameters = cls._typed_chart(chart)
+        return chart_type.hint_required_columns(parameters)
 
     @classmethod
     def hint_required_artifact_keys(cls, chart: ChartInstance[_Dataframe, _Chart]) -> set[str] | None:
-        chart_type = cls.get_chart_type(chart.chart_type)
-        return chart_type.hint_required_artifact_keys(
-            chart_type.parameter_type().model_validate(chart.parameters)
-        )
+        chart_type, parameters = cls._typed_chart(chart)
+        return chart_type.hint_required_artifact_keys(parameters)
 
     @classmethod
     def hint_required_artifact_key_prefixes(cls, chart: ChartInstance[_Dataframe, _Chart]) -> set[str]:
-        chart_type = cls.get_chart_type(chart.chart_type)
-        return chart_type.hint_required_artifact_key_prefixes(
-            chart_type.parameter_type().model_validate(chart.parameters)
-        )
+        chart_type, parameters = cls._typed_chart(chart)
+        return chart_type.hint_required_artifact_key_prefixes(parameters)
 
     @classmethod
     def hint_required_hparams(cls, chart: ChartInstance[_Dataframe, _Chart]) -> set[str] | None:
-        chart_type = cls.get_chart_type(chart.chart_type)
-        return chart_type.hint_required_hparams(chart_type.parameter_type().model_validate(chart.parameters))
+        chart_type, parameters = cls._typed_chart(chart)
+        return chart_type.hint_required_hparams(parameters)
 
     @classmethod
     def natural_width(cls, chart: ChartInstance[_Dataframe, _Chart]) -> int:
-        chart_type = cls.get_chart_type(chart.chart_type)
-        return chart_type.natural_width(chart_type.parameter_type().model_validate(chart.parameters))
+        chart_type, parameters = cls._typed_chart(chart)
+        return chart_type.natural_width(parameters)
 
 
 class ChartInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, extra="forbid"):

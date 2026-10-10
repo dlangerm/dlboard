@@ -88,7 +88,7 @@ def render_homepage() -> dmc.Container:
 def register(app: Dash) -> None:
     """Create a project from the inline field (button or Enter), then refresh the list in place."""
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(PROJECT_LIST_ID, "children"),
         Output(PROJECT_COUNT_ID, "children"),
         Output(NEW_PROJECT_NAME_ID, "value"),

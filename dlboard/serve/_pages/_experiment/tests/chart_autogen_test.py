@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 """Tests for auto-generating chart panels from metric/artifact key naming conventions."""
 
 from __future__ import annotations

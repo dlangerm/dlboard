@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 from dash import Dash, html
 
 from dlboard.serve import AssetKind, serve_asset
+
+if TYPE_CHECKING:
+    from flask.testing import FlaskClient
 
 
 def _app() -> Dash:
@@ -25,7 +30,7 @@ def test_an_asset_is_served_immutably_and_linked_only_if_the_page_loads_it(
 ) -> None:
     app = _app()
     url = serve_asset(app, kind, name, b"content")
-    client = app.server.test_client()
+    client: FlaskClient = app.server.test_client()
 
     response = client.get(url)
     page = client.get("/").get_data(as_text=True)

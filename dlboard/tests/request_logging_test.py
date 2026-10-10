@@ -36,7 +36,7 @@ def _deploy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Generator[_Deplo
     monkeypatch.setenv("DLBOARD_ARTIFACT_STORE_LOCATION", str(tmp_path / "artifacts"))
     app = build_app([sqlite, filesystem, *LOCAL_AUTH, *BUILTIN_BACKEND])
     try:
-        yield _Deployment(app.server.test_client(), app)
+        yield _Deployment(app.server.test_client(), app)  # pyrefly: ignore [unknown-argument-type]
     finally:
         dispose_stores(app)
 

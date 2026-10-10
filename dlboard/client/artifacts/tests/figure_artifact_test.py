@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 """Tests for the Figure artifact's matplotlib figure -> image file conversion."""
 
 from __future__ import annotations
@@ -18,7 +17,7 @@ if TYPE_CHECKING:
 
 def _figure() -> matplotlib.figure.Figure:
     fig = matplotlib.figure.Figure(figsize=(2, 1))
-    fig.subplots().plot([1, 2, 3])  # pyright: ignore[reportUnknownMemberType]
+    fig.subplots().plot([1, 2, 3])
     return fig
 
 

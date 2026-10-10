@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 """A chart that fails to render must not take the rest of its panel down with it.
 
 Regression: a suggested/auto-generated chart referencing a column that isn't actually present
@@ -32,7 +31,7 @@ def test_broken_chart_renders_as_error_alert_without_raising() -> None:
 
     [stack] = _render_panel_charts(panel, df)
 
-    rendered = _props(stack)["children"][1]
+    rendered = _props(stack)["children"][1]  # pyrefly: ignore [unknown-variable-type]
     assert isinstance(rendered, dmc.Alert)
     assert _props(rendered)["color"] == "red"
     assert "does_not_exist" in str(_props(rendered)["children"])
@@ -50,7 +49,7 @@ def test_a_chart_whose_plugin_is_not_installed_renders_as_error_alert_without_ra
 
     [stack] = _render_panel_charts(panel, df)
 
-    rendered = _props(stack)["children"][1]
+    rendered = _props(stack)["children"][1]  # pyrefly: ignore [unknown-variable-type]
     assert isinstance(rendered, dmc.Alert)
     assert _props(rendered)["color"] == "red"
     assert "not-installed" in str(_props(rendered)["children"])
@@ -67,7 +66,7 @@ def test_broken_chart_does_not_prevent_sibling_charts_from_rendering() -> None:
     stacks = _render_panel_charts(panel, df)
 
     assert len(stacks) == 2
-    broken_rendered = _props(stacks[0])["children"][1]
-    working_rendered = _props(stacks[1])["children"][1]
+    broken_rendered = _props(stacks[0])["children"][1]  # pyrefly: ignore [unknown-variable-type]
+    working_rendered = _props(stacks[1])["children"][1]  # pyrefly: ignore [unknown-variable-type]
     assert isinstance(broken_rendered, dmc.Alert)
     assert isinstance(working_rendered, dmc.LineChart)

@@ -452,7 +452,7 @@ def plug(app: dash.Dash) -> None:
         # `_ROUTES` paths are prefix-relative (no leading slash, see `create_path`/`entity_path`)
         # -- mirrors how Dash's own `@dash.hooks.route`-registered routes get mounted, so this
         # still works under a non-default `routes_pathname_prefix`.
-        prefix = str(app.config.routes_pathname_prefix)  # pyright: ignore[reportUnknownArgumentType,reportUnknownMemberType]
+        prefix = str(app.config.routes_pathname_prefix)  # pyrefly: ignore [unknown-argument-type]
         full_path = prefix + path
         # One path can carry several methods (`GET`/`DELETE` on a run), so the endpoint name has to
         # be per-handler, not per-path, or Flask rejects the second as a duplicate endpoint.
