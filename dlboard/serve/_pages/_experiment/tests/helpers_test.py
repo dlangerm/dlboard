@@ -485,3 +485,25 @@ def test_the_runs_table_redraws_when_a_run_finishes() -> None:
 
     assert signature(running) != signature(finished)
     assert signature(finished) == signature(finished.model_copy())
+
+
+@pytest.mark.parametrize(
+    ("new_row", "redraws"),
+    [
+        pytest.param({"loss": 0.5, "acc": None}, True, id="a-new-point-for-the-chart"),
+        pytest.param({"loss": None, "acc": 0.9}, False, id="a-new-point-for-another-metric-only"),
+    ],
+)
+def test_a_chart_only_redraws_for_rows_where_it_has_data_of_its_own(
+    new_row: dict[str, float | None], redraws: bool
+) -> None:
+    """The panel's dataframe is wide, so another metric logging a step adds a (blank) row for this chart."""
+    chart = ChartInstance[pd.DataFrame, object](
+        chart_type="line", parameters={"column": "loss", "x_axis": "step"}
+    )
+    before = pd.DataFrame({"run_id": [1], "step": [0], "loss": [1.0], "acc": [0.8]})
+    after = pd.concat([before, pd.DataFrame({"run_id": [1], "step": [1], **new_row})], ignore_index=True)
+
+    changed = state.chart_data_fingerprint(chart, before) != state.chart_data_fingerprint(chart, after)
+
+    assert changed is redraws
