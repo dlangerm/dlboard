@@ -27,11 +27,13 @@ def test_accordion_view_shows_auto_populate_when_view_is_empty(
     )
 
     assert (
+        # pyrefly: ignore [unknown-argument-type]
         _find_props(cast("Any", container).children, state.AUTO_POPULATE_BUTTON_ID) is not None
-    )  # pyrefly: ignore [unknown-argument-type]
+    )
     assert (
+        # pyrefly: ignore [unknown-argument-type]
         _find_props(cast("Any", container).children, state.SUGGEST_CHARTS_BUTTON_ID) is None
-    )  # pyrefly: ignore [unknown-argument-type]
+    )
 
 
 def test_accordion_view_shows_suggest_charts_when_view_is_not_empty(
@@ -45,11 +47,13 @@ def test_accordion_view_shows_suggest_charts_when_view_is_not_empty(
     )
 
     assert (
+        # pyrefly: ignore [unknown-argument-type]
         _find_props(cast("Any", container).children, state.SUGGEST_CHARTS_BUTTON_ID) is not None
-    )  # pyrefly: ignore [unknown-argument-type]
+    )
     assert (
+        # pyrefly: ignore [unknown-argument-type]
         _find_props(cast("Any", container).children, state.AUTO_POPULATE_BUTTON_ID) is None
-    )  # pyrefly: ignore [unknown-argument-type]
+    )
 
 
 def test_accordion_view_delete_panel_reachable_without_opening_a_panel(
@@ -64,7 +68,9 @@ def test_accordion_view_delete_panel_reachable_without_opening_a_panel(
     )
 
     delete_button = _find_props(
-        cast("Any", container).children, state.delete_panel_button_id("p")
-    )  # pyrefly: ignore [unknown-argument-type]
+        # pyrefly: ignore [unknown-argument-type]
+        cast("Any", container).children,
+        state.delete_panel_button_id("p"),
+    )
     assert delete_button is not None
     assert delete_button.get("disabled") is not True

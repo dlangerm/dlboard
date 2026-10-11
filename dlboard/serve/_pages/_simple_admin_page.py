@@ -208,8 +208,9 @@ def _render_trash(store: DataStore[...]) -> Component:
         sections.append(banner)
     for label, entity_type in _TRASH_KINDS:
         items = list(
+            # pyrefly: ignore [unknown-argument-type]
             getattr(store, _LISTERS[entity_type])(limit=_TRASH_PAGE_SIZE_PER_KIND)
-        )  # pyrefly: ignore [unknown-argument-type]
+        )
         if items:
             sections.append(_render_trash_kind(label, entity_type, items))
     if not sections:

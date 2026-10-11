@@ -179,8 +179,13 @@ class BarChart(ChartType[BarChartSettings, pd.DataFrame, dmc.BarChart], frozen=T
             data=data,  # pyrefly: ignore [bad-argument-type]
             dataKey=parameters.x_axis,
             series=[
-                {"name": parameters.column, "label": parameters.column, "color": series_color(0)}
-            ],  # pyrefly: ignore [bad-assignment]
+                {
+                    "name": parameters.column,
+                    "label": parameters.column,
+                    # pyrefly: ignore [bad-assignment]
+                    "color": series_color(0),
+                }
+            ],
             orientation=parameters.orientation,
             xAxisLabel=x_axis_label,
             yAxisLabel=y_axis_label,

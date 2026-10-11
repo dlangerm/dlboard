@@ -84,6 +84,14 @@ repos:
         language: system
         entry: uv run --no-project python tools/check_server_client_pin.py
         files: ^(dlboard/_version\.py|server/pyproject\.toml)$
+      - id: pyrefly
+        # Type-checks the whole project (see `[tool.pyrefly]` in pyproject.toml) -- it's fast enough (~2s)
+        # to run on every commit, and it needs the project's own environment, so it runs through `uv run`.
+        name: pyrefly type check
+        language: system
+        entry: uv run pyrefly check
+        files: \.pyi?$|^pyproject\.toml$
+        pass_filenames: false
       - id: install-tag-guard
         # Git has no pre-tag hook, but its `reference-transaction` hook can veto the ref update `git tag`
         # makes. prek can't install that hook type, so this links `tools/tag_guard.py` in as

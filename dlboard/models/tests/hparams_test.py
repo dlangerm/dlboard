@@ -51,5 +51,7 @@ def test_from_raw_rejects_non_flat_or_non_json_scalar_values(hparams: dict[str, 
     """
     with pytest.raises(ValidationError):
         NewHyperParams.from_raw(
-            run_id=1, experiment_id=1, hparams=hparams
-        )  # pyrefly: ignore [bad-argument-type]
+            run_id=1,
+            experiment_id=1,
+            hparams=hparams,  # pyrefly: ignore [bad-argument-type]
+        )

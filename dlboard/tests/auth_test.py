@@ -55,6 +55,7 @@ def empty_deployment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterato
     }.items():
         monkeypatch.setenv(name, value)
     app = build_app([sqlite, filesystem, *PASSWORD_AUTH, *BUILTIN_BACKEND])
+    # pyrefly: ignore [unknown-argument-type]
     yield PasswordDeployment(app.server.test_client(), get_system_data_store(app))
     dispose_stores(app)
 

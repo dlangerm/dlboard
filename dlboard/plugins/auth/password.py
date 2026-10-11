@@ -473,7 +473,7 @@ def plug(app: Dash) -> None:
     _SETUP.set(app, _SetupLatch())
     add_public_route(app, "setup", _setup, ["GET", "POST"])
     add_startup_check(app, _refuse_setup_left_on)
-    prefix = str(app.config.routes_pathname_prefix)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
+    prefix = str(app.config.routes_pathname_prefix)  # pyrefly: ignore [unknown-argument-type]
     for rule, view in (("password", _change_password), ("password/admin", _manage_users)):
         app.server.add_url_rule(
             prefix + rule, endpoint=prefix + rule, view_func=view, methods=["GET", "POST"]

@@ -63,10 +63,18 @@ def test_panel_header_controls_shows_sync_and_layout_state() -> None:
     synced = state.panel_header_controls(PanelInstance[Any, Any](name="p", sync=True, layout="grid"))
     unsynced = state.panel_header_controls(PanelInstance[Any, Any](name="p", sync=False, layout="packed"))
 
-    assert _find_props(synced, state.panel_sync_switch_id("p"))["checked"] is True  # pyrefly: ignore [unsupported-operation]
-    assert _find_props(synced, state.panel_layout_control_id("p"))["value"] == "grid"  # pyrefly: ignore [unsupported-operation]
-    assert _find_props(unsynced, state.panel_sync_switch_id("p"))["checked"] is False  # pyrefly: ignore [unsupported-operation]
-    assert _find_props(unsynced, state.panel_layout_control_id("p"))["value"] == "packed"  # pyrefly: ignore [unsupported-operation]
+    synced_switch = _find_props(synced, state.panel_sync_switch_id("p"))
+    synced_layout = _find_props(synced, state.panel_layout_control_id("p"))
+    unsynced_switch = _find_props(unsynced, state.panel_sync_switch_id("p"))
+    unsynced_layout = _find_props(unsynced, state.panel_layout_control_id("p"))
+    assert synced_switch is not None
+    assert synced_switch["checked"] is True
+    assert synced_layout is not None
+    assert synced_layout["value"] == "grid"
+    assert unsynced_switch is not None
+    assert unsynced_switch["checked"] is False
+    assert unsynced_layout is not None
+    assert unsynced_layout["value"] == "packed"
 
 
 # ---- reorder_panel ----
@@ -172,7 +180,8 @@ def test_apply_panel_sync_scoping_keeps_different_panels_apart() -> None:
     train_result = state._apply_panel_sync(train_chart, panel_name="train", sync=True)
     val_result = state._apply_panel_sync(val_chart, panel_name="val", sync=True)
 
-    assert train_result.lineChartProps["syncId"] != val_result.lineChartProps["syncId"]  # pyrefly: ignore [missing-attribute]
+    # pyrefly: ignore [missing-attribute]
+    assert train_result.lineChartProps["syncId"] != val_result.lineChartProps["syncId"]
 
 
 def test_apply_panel_sync_ignores_non_line_charts() -> None:

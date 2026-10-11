@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 """Tests for which panels `accordion_view` renders: one page of the active tab's, after the name filter."""
 
 from __future__ import annotations
@@ -14,6 +13,8 @@ from dlboard.serve._pages._experiment import _experiment_page_state as state
 from dlboard.serve._pages._experiment._paging import ChartPaging, PageSizes, Paging
 
 if TYPE_CHECKING:
+    from dash import html
+
     from dlboard.plugins.data_stores.sqlite import SQLLiteStore
 
 LineChart.register(allow_override=True)
@@ -30,7 +31,7 @@ def _render(  # noqa: PLR0913
     active_tab: str = "",
     open_panels: list[str] | None = None,
     focus_chart: str | None = None,
-) -> Any:  # noqa: ANN401
+) -> html.Div:
     page = store.get_or_create_page(state.BasicExperimentPage, experiment_id=experiment_id)
     store.update_page(
         page.model_copy(
@@ -44,7 +45,7 @@ def _render(  # noqa: PLR0913
     return state.accordion_view(store, loaded, paging, focus_chart=focus_chart)
 
 
-def _shown(container: Any, tab: str = "") -> list[str]:  # noqa: ANN401
+def _shown(container: html.Div, tab: str = "") -> list[str]:
     """Names of the panels in `tab`'s rendered accordion, in order."""
     accordion = _find_props(container.children, state.panel_accordion_id(tab))
     assert accordion is not None
@@ -107,7 +108,7 @@ def _charts(count: int) -> list[ChartInstance[Any, Any]]:
     ]
 
 
-def _chart_indexes_shown(container: Any, panel: str, count: int) -> list[int]:  # noqa: ANN401
+def _chart_indexes_shown(container: html.Div, panel: str, count: int) -> list[int]:
     return [i for i in range(count) if _find_props(container.children, state.chart_content_id(panel, i))]
 
 
@@ -176,10 +177,11 @@ def test_the_page_size_choices_are_bare_numbers_in_the_footer_with_the_pager(
     container = _render(store, experiment_id, _numbered(12), Paging())
 
     area = cast("Any", _find_props(container.children, state.PANEL_AREA_ID))
-    select = _find_props(area["children"], state.PANEL_PAGE_SIZE_ID)
+    children = cast("list[Any]", area["children"])
+    select = _find_props(children, state.PANEL_PAGE_SIZE_ID)
     assert select is not None
     assert [option["label"] for option in select["data"]] == ["5", "10", "20", "50"]
-    assert _find_props(area["children"], state.PANEL_PAGER_ID) is not None
+    assert _find_props(children, state.PANEL_PAGER_ID) is not None
 
 
 @pytest.mark.parametrize(
@@ -206,7 +208,7 @@ def test_a_page_size_choice_is_only_offered_once_something_is_big_enough_to_page
     assert (_find_props(container.children, state.CHART_PAGE_SIZE_ID) is not None) is chart_select
 
 
-def _panel_header_filter(container: Any, panel: str) -> dict[str, Any] | None:  # noqa: ANN401
+def _panel_header_filter(container: html.Div, panel: str) -> dict[str, Any] | None:
     return _find_props(container.children, state.chart_filter_id(panel))
 
 
