@@ -72,9 +72,9 @@ def test_hint_required_artifact_keys() -> None:
 
 def _captions_store_data(stack: object) -> dict[str, Any]:
     # dcc.Store is always the first child of the returned Stack.
-    return _props(_props(stack)["children"][0])["data"][
+    return _props(_props(stack)["children"][0])["data"][  # pyrefly: ignore [unknown-argument-type]
         "per_run_captions"
-    ]  # pyrefly: ignore [unknown-argument-type]
+    ]
 
 
 def test_render_formats_tags_dict_into_captions() -> None:
@@ -193,8 +193,9 @@ def test_run_block_label_uses_the_run_name_column_when_present() -> None:
 
     run_block = _first_run_block(stack)
     assert (
+        # pyrefly: ignore [unknown-argument-type]
         _props(run_block["children"][0])["children"] == "uptight-yak"
-    )  # pyrefly: ignore [unknown-argument-type]
+    )
 
 
 def test_render_includes_a_zoom_modal() -> None:

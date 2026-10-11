@@ -651,21 +651,21 @@ def render_chart_item(
             ),
             tooltipped_action_icon(
                 Icon.EDIT,
-                component_id=edit_chart_button_id(panel.name, index),  # pyrefly: ignore [bad-argument-type]
+                component_id=edit_chart_button_id(panel.name, index),
                 label="Edit chart",
                 size="xs",
             ),
             # Copied client-side by `chart_deep_link.js`, from the page's own URL -- no round trip.
             tooltipped_action_icon(
                 Icon.LINK,
-                component_id=copy_chart_link_button_id(panel.name, index),  # pyrefly: ignore [bad-argument-type]
+                component_id=copy_chart_link_button_id(panel.name, index),
                 label="Copy a link to this chart",
                 size="xs",
                 **cast("dict[str, Any]", {"data-dl-copy-chart-link": chart.id}),
             ),
             tooltipped_action_icon(
                 Icon.DELETE,
-                component_id=delete_chart_button_id(panel.name, index),  # pyrefly: ignore [bad-argument-type]
+                component_id=delete_chart_button_id(panel.name, index),
                 label="Delete chart",
                 color="red",
                 size="xs",
@@ -1006,7 +1006,7 @@ class BasicExperimentPage(models.Page[pd.DataFrame, Component, html.Div], frozen
 
     def open_panels(self) -> list[str]:
         """Names of the panels the viewer has open (the first panel's, until they open or close any)."""
-        default = [self.panels[0].name] if self.panels else []
+        default: list[str] = [self.panels[0].name] if self.panels else []
         open_value = self.page_settings.get(OPEN_PANEL_KEY, default)
         return [open_value] if isinstance(open_value, str) else cast("list[str]", open_value)
 
@@ -2203,7 +2203,7 @@ class _PagePanelsCtx(TypedDict):
 def _register_paging(app: Dash) -> None:
     """Which page of panels is showing: the filter, pagers, page size and tab, and the address bar mirroring them."""
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output(PANEL_AREA_ID, "children"),
         Output(PANEL_PAGING_ID, "data", allow_duplicate=True),
         Output(LOADED_PANELS_STORE_ID, "data", allow_duplicate=True),
@@ -2261,7 +2261,8 @@ def _register_paging(app: Dash) -> None:
         if new_paging == paging and tab == rendered_tab:
             raise PreventUpdate
         if new_paging.sizes != paging.sizes:
-            ctx.response.set_cookie(
+            # Dash's `has_context` wrapper hides `response`'s property type from pyrefly.
+            cast("Any", ctx).response.set_cookie(
                 SIZES_COOKIE,
                 new_paging.sizes.model_dump_json(),
                 max_age=_SIZES_COOKIE_MAX_AGE,
@@ -2273,7 +2274,7 @@ def _register_paging(app: Dash) -> None:
             visible_open_panels(page, tab, new_paging),
         )
 
-    @app.callback(  # pyright: ignore[reportUnknownMemberType]
+    @app.callback(
         Output({"type": CHART_PAGER_SLOT_TYPE, "panel": ALL}, "children"),
         Output({"type": "panel-content", "panel": ALL}, "children", allow_duplicate=True),
         Output(PANEL_PAGING_ID, "data", allow_duplicate=True),
@@ -2348,7 +2349,7 @@ def _register_paging(app: Dash) -> None:
     # Mirrors the paging into the address bar so a page or filter can be bookmarked and shared, and scrolls
     # a flipped page back to its top -- purely client-side, see `paging_side_effects.js`. Runs once on load
     # too: the paging rendered can differ from the URL's (a page that no longer exists, a `?chart=` link).
-    app.clientside_callback(  # pyright: ignore[reportUnknownMemberType]
+    app.clientside_callback(
         _PAGING_SIDE_EFFECTS_JS.source,
         Output(PANEL_PAGING_ID, "data", allow_duplicate=True),
         Input(PANEL_PAGING_ID, "data"),

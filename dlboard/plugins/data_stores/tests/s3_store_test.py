@@ -206,8 +206,8 @@ def test_a_read_only_allowlisted_bucket_is_downloadable_but_never_deleted(s3_set
     client.create_bucket(
         Bucket=foreign_bucket,
         CreateBucketConfiguration={
-            "LocationConstraint": s3_settings.region
-        },  # pyrefly: ignore [bad-assignment]
+            "LocationConstraint": s3_settings.region  # pyrefly: ignore [bad-assignment]
+        },
     )
     client.put_object(Bucket=foreign_bucket, Key="already-there.bin", Body=b"owned by someone else")
     ref = AnyUrl(f"s3://{foreign_bucket}/already-there.bin")

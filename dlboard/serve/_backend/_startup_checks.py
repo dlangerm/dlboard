@@ -21,9 +21,10 @@ def add_startup_check(app: Dash, check: Callable[[Dash], None]) -> None:
     For a check that reads state another plugin sets (the data store, say): plugin order isn't
     guaranteed, so `plug()` itself can't rely on it being there yet.
     """
-    checks = _STARTUP_CHECKS.find(app)
+    checks: list[Callable[[Dash], None]] | None = _STARTUP_CHECKS.find(app)
     if checks is None:
-        _STARTUP_CHECKS.set(app, checks := [])
+        checks = []
+        _STARTUP_CHECKS.set(app, checks)
     checks.append(check)
 
 

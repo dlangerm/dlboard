@@ -34,8 +34,8 @@ def test_a_thread_lists_notes_oldest_first_and_bumps_only_the_notes_revision(
     assert _notes_revision(store, experiment_id) == 2
     # Posting a note mustn't look like new data to the chart poll.
     assert (
-        store.get_experiment(experiment_id).revision == revision_before
-    )  # pyrefly: ignore [missing-attribute]
+        store.get_experiment(experiment_id).revision == revision_before  # pyrefly: ignore [missing-attribute]
+    )
 
 
 def test_only_its_author_can_delete_a_note(store: SQLLiteStore, experiment_id: int) -> None:

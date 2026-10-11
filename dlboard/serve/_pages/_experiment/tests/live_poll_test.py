@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 """Tests for what a live-update poll tick fetches."""
 
 from __future__ import annotations

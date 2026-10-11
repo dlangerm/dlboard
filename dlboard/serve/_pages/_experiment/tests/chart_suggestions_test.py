@@ -18,8 +18,8 @@ def _nodes(node: Any) -> list[dict[str, Any]]:  # noqa: ANN401
         case {"props": props}:
             return [
                 cast("dict[str, Any]", node),
-                *_nodes(props.get("children")),
-            ]  # pyrefly: ignore [unknown-argument-type]
+                *_nodes(props.get("children")),  # pyrefly: ignore [unknown-argument-type]
+            ]
         case list():
             return [found for child in cast("list[Any]", node) for found in _nodes(child)]
         case _:

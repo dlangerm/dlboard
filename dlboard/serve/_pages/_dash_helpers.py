@@ -13,13 +13,15 @@ from dlboard import models
 from dlboard.serve import Icon, icon
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from dash.development.base_component import Component
 
 
 def tooltipped_action_icon(  # noqa: PLR0913
     name: Icon,
     *,
-    component_id: str | dict[str, Any],
+    component_id: str | Mapping[str, Any],
     label: str,
     color: str = "gray",
     size: str = "sm",
@@ -36,7 +38,7 @@ def tooltipped_action_icon(  # noqa: PLR0913
     return dmc.Tooltip(
         dmc.ActionIcon(
             icon(name),
-            id=component_id,
+            id=component_id if isinstance(component_id, str) else dict(component_id),
             n_clicks=0,
             variant="subtle",
             size=size,

@@ -33,7 +33,7 @@ uv run pytest --screenshots=check   # re-render the docs screenshots and fail if
 uv run pytest --screenshots=update  # rewrite docs/images (dlboard serves its own font, so a local render matches CI's -- commit it)
 uv run ruff check                   # lint
 uv run ruff format                  # format
-uv run pyrefly                      # type check (strict mode)
+uv run pyrefly check              # type check (strict mode)
 uv run prek run --all-files         # run pre-commit hooks manually
 ```
 
@@ -234,6 +234,6 @@ Always keep in mind this code is meant to be read and maintained by humans, line
 and extra functions that serve only to break up blocks of code but not to separate logic are hard to parse and reason about. Wherever
 possible, fold large blocks or repeated logic into compartmentalized units that can easily be reused.
 
-Whenever you finish an instruction, make sure to at least run `uv run ruff check` and `uv run ruff format` as well as `uv run pyrefly` to ensure code quality is maintained before review.
+Whenever you finish an instruction, make sure to at least run `uv run ruff check` and `uv run ruff format` as well as `uv run pyrefly check` to ensure code quality is maintained before review.
 
 Always rely on pydantic validation instead of performing your own, use `pendulum` instead of `datetime` and use `pydantic_settings` for environment variables.

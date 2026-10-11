@@ -35,8 +35,9 @@ def _lttb_indices(x: np.ndarray, y: np.ndarray, threshold: int) -> np.ndarray:
         seg_x = x[bucket_start:bucket_end]
         seg_y = y[bucket_start:bucket_end]
         areas = np.abs(
+            # pyrefly: ignore [unknown-argument-type]
             (px - avg_x) * (seg_y - py) - (px - seg_x) * (avg_y - py)
-        )  # pyrefly: ignore [unknown-argument-type]
+        )
         chosen = bucket_start + int(np.argmax(areas))
 
         indices[i + 1] = chosen

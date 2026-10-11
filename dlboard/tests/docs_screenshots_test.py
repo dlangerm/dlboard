@@ -404,17 +404,19 @@ def _matches_committed(shot: DocScreenshot, png: bytes) -> bool:
         committed = np.asarray(PILImage.open(shot.path).convert("RGB"), dtype=int)
         if committed.shape == fresh.shape:
             differing = (
+                # pyrefly: ignore [unknown-variable-type]
                 np.abs(fresh - committed).max(axis=2) > _CHANNEL_TOLERANCE
-            )  # pyrefly: ignore [unknown-variable-type]
+            )
             if differing.mean() <= _MAX_DIFFERING_PIXEL_FRACTION:
                 return True
     for subdir in ("actual", "diff"):
         (DIFFS_DIR / subdir).mkdir(parents=True, exist_ok=True)
     (DIFFS_DIR / "actual" / shot.path.name).write_bytes(png)
     if differing is not None:
-        PILImage.fromarray((differing * 255).astype(np.uint8)).save(
-            DIFFS_DIR / "diff" / shot.path.name
-        )  # pyrefly: ignore [unknown-argument-type]
+        PILImage.fromarray(
+            # pyrefly: ignore [unknown-argument-type]
+            (differing * 255).astype(np.uint8)
+        ).save(DIFFS_DIR / "diff" / shot.path.name)
     return False
 
 
