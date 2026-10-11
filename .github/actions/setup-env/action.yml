@@ -1,0 +1,21 @@
+name: Set up the dev environment
+description: Install uv, then sync the dev environment, restoring the .venv from
+  cache when the lockfile and pyprojects are unchanged.
+
+runs:
+  using: composite
+  steps:
+    - uses: astral-sh/setup-uv@v6
+      with:
+        enable-cache: true
+    # Restoring the whole .venv skips the install itself (uv sync only has to verify it), which is
+    # most of the 16-30s a cold `uv sync` takes. The key covers everything that decides what gets
+    # installed; editable workspace members resolve to the checkout, so source edits need no new key.
+    - uses: actions/cache@v4
+      with:
+        path: .venv
+        key: >-
+          venv-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.python-version',
+          'uv.lock', '**/pyproject.toml', '**/hatch_build.py') }}
+    - run: uv sync --locked --dev
+      shell: bash

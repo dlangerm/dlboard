@@ -5,13 +5,14 @@ from __future__ import annotations
 import threading
 import typing
 import uuid
-from enum import StrEnum
+from enum import IntEnum, StrEnum
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 import sqlalchemy as sa
 from flask import Flask
-from pydantic import AnyHttpUrl, SecretStr
+from pydantic import AnyHttpUrl, SecretStr, TypeAdapter
 from werkzeug.serving import make_server
 
 from dlboard import models
@@ -29,7 +30,6 @@ from dlboard.serve._backend._data_store import ARTIFACT_STORE
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
-    from pathlib import Path
 
     from dash import Dash
 
@@ -47,8 +47,78 @@ class ScreenshotMode(StrEnum):
     """Overwrite the committed screenshots with freshly rendered ones."""
 
 
+class DurationTier(IntEnum):
+    """
+    How long a test takes, from its recorded duration in `test-durations.json`.
+
+    Ordered so sorting runs the cheap tests first. Each member's name is also the marker it applies,
+    so `-m huge` or `-m "not long"` selects by tier.
+    """
+
+    SHORT = 0
+    MEDIUM = 1
+    LONG = 2
+    HUGE = 3
+
+    @property
+    def marker(self) -> pytest.MarkDecorator:
+        """The pytest marker for this tier, registered in `pyproject.toml`."""
+        return getattr(pytest.mark, self.name.lower())
+
+
+DURATIONS_PATH = Path(__file__).parents[1] / "test-durations.json"
+"""Per-test wall time in seconds, from the last `--record-durations` run; committed so CI sorts the same way."""
+
+MAX_HUGE_TESTS = 5
+"""The most tests the suite may have in the `huge` tier; collection fails past it."""
+
+_TIER_THRESHOLDS: tuple[tuple[float, DurationTier], ...] = (
+    (60.0, DurationTier.HUGE),
+    (30.0, DurationTier.LONG),
+    (10.0, DurationTier.MEDIUM),
+)
+"""A test lands in the first tier whose threshold its duration exceeds, so 61s is huge and 30s is medium."""
+
+_MEASURED = pytest.StashKey[dict[str, float]]()
+"""This run's per-test wall time, summed over setup, call and teardown -- what `--record-durations` saves."""
+
+_DURATIONS = TypeAdapter(dict[str, float])
+
+
+def _load_durations() -> dict[str, float]:
+    """The recorded durations, or nothing if no run has recorded any yet."""
+    if not DURATIONS_PATH.exists():
+        return {}
+    return _DURATIONS.validate_json(DURATIONS_PATH.read_bytes())
+
+
+def _tier_for(seconds: float) -> DurationTier:
+    return next((tier for limit, tier in _TIER_THRESHOLDS if seconds > limit), DurationTier.SHORT)
+
+
+def _order_by_tier(items: list[pytest.Item]) -> None:
+    """
+    Mark each item with its duration tier, fail if the huge tier is over its cap, then run short to huge.
+
+    A test with no recorded duration counts as short, so a new test runs early until a
+    `--record-durations` run has measured it.
+    """
+    durations = _load_durations()
+    tiers = {item.nodeid: _tier_for(durations.get(item.nodeid, 0.0)) for item in items}
+    for item in items:
+        item.add_marker(tiers[item.nodeid].marker)
+    huge = [nodeid for nodeid, tier in tiers.items() if tier is DurationTier.HUGE]
+    if len(huge) > MAX_HUGE_TESTS:
+        msg = (
+            f"{len(huge)} tests are in the huge tier (over 60s), past the cap of {MAX_HUGE_TESTS}: "
+            f"{', '.join(huge)}. Speed them up or split them."
+        )
+        raise pytest.UsageError(msg)
+    items.sort(key=lambda item: tiers[item.nodeid])
+
+
 def pytest_addoption(parser: pytest.Parser) -> None:
-    """Register `--screenshots`, the switch for the docs-screenshot tests (`docs_screenshots_test.py`)."""
+    """Register `--screenshots` (`docs_screenshots_test.py`) and `--record-durations` (`DURATIONS_PATH`)."""
     parser.addoption(
         "--screenshots",
         type=ScreenshotMode,
@@ -56,6 +126,30 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=None,
         help="Run the docs-screenshot tests: `check` against, or `update`, the images in docs/images.",
     )
+    parser.addoption(
+        "--record-durations",
+        action="store_true",
+        help="Save this run's per-test durations to test-durations.json, which tiers and orders later runs.",
+    )
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Start an empty per-test duration tally for this run."""
+    config.stash[_MEASURED] = {}
+
+
+def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) -> None:
+    """Add each phase's time (setup, call, teardown) to the test's total, for `--record-durations`."""
+    measured = item.config.stash[_MEASURED]
+    measured[item.nodeid] = measured.get(item.nodeid, 0.0) + call.duration
+
+
+def pytest_sessionfinish(session: pytest.Session) -> None:
+    """Merge this run's durations into `DURATIONS_PATH`, keeping tests this run didn't touch."""
+    if not session.config.getoption("--record-durations"):
+        return
+    durations = _load_durations() | session.config.stash[_MEASURED]
+    DURATIONS_PATH.write_bytes(_DURATIONS.dump_json(dict(sorted(durations.items())), indent=2) + b"\n")
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
@@ -65,6 +159,7 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     Their images depend on the whole database (the home page lists every project), so a run that
     asks for screenshots renders them in a process that ran nothing else.
     """
+    _order_by_tier(items)
     screenshots_requested: bool = config.getoption("--screenshots") is not None
     if screenshots_requested:
         deselected = [item for item in items if item.get_closest_marker("screenshots") is None]
