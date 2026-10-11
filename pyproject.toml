@@ -86,6 +86,11 @@ filterwarnings = [
   "ignore:The wait_for_logs function with string or callable predicates is deprecated:DeprecationWarning"
 ]
 markers = [
+  # `short`/`medium`/`long`/`huge` are applied automatically from `test-durations.json` (see `dlboard/conftest.py`).
+  "short: test took 10s or less in the last recorded run",
+  "medium: test took over 10s in the last recorded run",
+  "long: test took over 30s in the last recorded run",
+  "huge: test took over 60s in the last recorded run; the suite may have at most 5",
   "browser: browser-based end-to-end tests requiring a webdriver",
   "postgres: runs against a real Postgres in a throwaway container; needs Docker",
   "s3: runs against a real S3-compatible store (MinIO) in a throwaway container; needs Docker",
@@ -257,6 +262,9 @@ ignore_names = [
   # pytest's own conftest hooks (`dlboard/conftest.py`) -- discovered and called by pytest by name.
   "pytest_addoption",
   "pytest_collection_modifyitems",
+  "pytest_configure",
+  "pytest_runtest_makereport",
+  "pytest_sessionfinish",
   # Pydantic model fields that are read structurally (raw SQL column names, `model_dump()`
   # serialization to REST clients, schema-generation reflection) rather than through a literal
   # `.name` attribute access vulture's static analysis can see -- not dead, just never accessed

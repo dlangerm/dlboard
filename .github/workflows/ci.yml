@@ -38,10 +38,7 @@ jobs:
     if: needs.check_doc_only.outputs.skip-tests != 'true'
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
-        with:
-          enable-cache: true
-      - run: uv sync --locked --dev
+      - uses: ./.github/actions/setup-env
       - run: uv run prek run --all-files --skip no-commit-to-branch
       - run: uv run pyrefly check
 
@@ -51,10 +48,7 @@ jobs:
     if: needs.check_doc_only.outputs.skip-tests != 'true'
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
-        with:
-          enable-cache: true
-      - run: uv sync --locked --dev
+      - uses: ./.github/actions/setup-env
       - run: uv run pytest -m "not browser and not postgres and not s3" --cov
       - run: uv run playwright install --with-deps chromium
       - run: uv run pytest -m browser
@@ -75,10 +69,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
-        with:
-          enable-cache: true
-      - run: uv sync --locked --dev
+      - uses: ./.github/actions/setup-env
       - run: uv run pytest -m postgres
 
   # The S3 artifact store, against a real S3-protocol endpoint (LocalStack, in Docker) -- the same
@@ -89,10 +80,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
-        with:
-          enable-cache: true
-      - run: uv sync --locked --dev
+      - uses: ./.github/actions/setup-env
       - run: uv run pytest -m s3
 
   # Confirms the client actually installs and imports on every Python version
