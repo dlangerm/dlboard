@@ -185,46 +185,48 @@ def test_chart_instance_delegates_through_registry() -> None:
 # ---- a chart whose persisted parameters no longer validate must not crash the whole page ----
 
 
-def test_hint_and_width_methods_fall_back_instead_of_raising_for_invalid_parameters() -> None:
+@pytest.mark.parametrize(
+    ("chart_type", "parameters", "render_error"),
+    [
+        # `metric` is required by `_FakeParams`, so an empty `parameters` dict fails validation.
+        pytest.param("fake", {}, ValidationError, id="invalid-parameters"),
+        # A saved view can name a chart type whose plugin isn't installed on this deployment.
+        pytest.param("not-installed", {}, UnknownChartTypeError, id="unregistered-chart-type"),
+    ],
+)
+def test_hint_and_width_methods_fall_back_instead_of_raising_for_a_broken_chart(
+    chart_type: str, parameters: dict[str, object], render_error: type[Exception]
+) -> None:
     """
     Regression: parameters are validated against the chart type's settings model lazily, on every
     call -- a chart saved before a schema change (or otherwise malformed) used to raise straight out
     of `hint_required_columns`/`natural_width`, called unguarded while just laying out the page, and
-    take the whole page down with an unhandled 500. These must degrade gracefully instead; only
-    `render()` (already isolated per-chart by the page layer) is allowed to still raise.
+    take the whole page down with an unhandled 500. The same went for a chart type no installed
+    plugin provides. These must degrade gracefully instead; only `render()` (already isolated
+    per-chart by the page layer) is allowed to still raise.
     """
     _FakeChart.register()
-    # `metric` is required by `_FakeParams`, so an empty `parameters` dict fails validation.
-    chart = ChartInstance[pd.DataFrame, dict[str, object]](chart_type="fake", parameters={})
+    chart = ChartInstance[pd.DataFrame, dict[str, object]](chart_type=chart_type, parameters=parameters)
 
     assert chart.hint_required_columns() is None
     assert chart.hint_required_artifact_keys() is None
     assert chart.hint_required_hparams() is None
     assert chart.natural_width() == 400
 
-    with pytest.raises(ValidationError):
+    with pytest.raises(render_error):
         chart.render(pd.DataFrame())
 
 
-def test_hint_and_width_methods_fall_back_instead_of_raising_for_an_unregistered_chart_type() -> None:
-    """
-    Regression: a saved view can name a chart type whose plugin isn't installed on this deployment
-    (removed, or just not part of this server's plugin list) -- `ChartTypeRegistry` raises
-    `UnknownChartTypeError` (a `KeyError`) for that, and these must degrade the same way they do for
-    invalid parameters, not crash the whole page's layout.
-    """
-    chart = ChartInstance[pd.DataFrame, dict[str, object]](chart_type="not-installed", parameters={})
-
-    assert chart.hint_required_columns() is None
-    assert chart.hint_required_artifact_keys() is None
-    assert chart.hint_required_hparams() is None
-    assert chart.natural_width() == 400
-
-    with pytest.raises(UnknownChartTypeError):
-        chart.render(pd.DataFrame())
-
-
-def test_panel_hint_required_columns_short_circuits_when_one_chart_is_broken() -> None:
+@pytest.mark.parametrize(
+    ("broken_chart_type", "broken_parameters"),
+    [
+        pytest.param("fake", {}, id="invalid-parameters"),
+        pytest.param("not-installed", {}, id="unregistered-chart-type"),
+    ],
+)
+def test_panel_hint_required_columns_short_circuits_when_one_chart_is_broken(
+    broken_chart_type: str, broken_parameters: dict[str, object]
+) -> None:
     """A broken chart's `None` hint must widen the whole panel's fetch to "everything" (the existing
     short-circuit semantics for `None`), not crash the aggregation.
     """
@@ -233,20 +235,9 @@ def test_panel_hint_required_columns_short_circuits_when_one_chart_is_broken() -
         name="p",
         charts=[
             ChartInstance[pd.DataFrame, dict[str, object]](chart_type="fake", parameters={"metric": "loss"}),
-            ChartInstance[pd.DataFrame, dict[str, object]](chart_type="fake", parameters={}),
-        ],
-    )
-    assert panel.hint_required_columns() is None
-
-
-def test_panel_hint_required_columns_short_circuits_when_one_chart_type_is_unregistered() -> None:
-    """Same short-circuit as a broken chart's parameters, but for a chart type with no plugin installed."""
-    _FakeChart.register()
-    panel = PanelInstance[pd.DataFrame, dict[str, object]](
-        name="p",
-        charts=[
-            ChartInstance[pd.DataFrame, dict[str, object]](chart_type="fake", parameters={"metric": "loss"}),
-            ChartInstance[pd.DataFrame, dict[str, object]](chart_type="not-installed", parameters={}),
+            ChartInstance[pd.DataFrame, dict[str, object]](
+                chart_type=broken_chart_type, parameters=broken_parameters
+            ),
         ],
     )
     assert panel.hint_required_columns() is None
