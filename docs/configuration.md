@@ -63,6 +63,7 @@ Only matter with an identity-verifying provider such as `PASSWORD_AUTH`. See [au
 | `DLBOARD_NEW_PROJECT_ACCESS` | none (private) | The role (`viewer`, `editor`, `owner`) everyone gets on a newly created project. |
 | `DLBOARD_PASSWORD_SIGNUP` | `admin_creates` | Who may create an account: `admin_creates`, `approval` (signs up disabled until an admin enables it) or `open`. |
 | `DLBOARD_PASSWORD_MIN_LENGTH` | `12` | Minimum password length. |
+| `DLBOARD_PASSWORD_FIRST_ADMIN_SETUP` | `false` | Serve `/setup`, which creates the first admin on an empty database using a token from the server log. Turn it on for first setup, then off again: startup fails if it's on and the database already has users. |
 
 ## SQLite storage
 

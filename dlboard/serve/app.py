@@ -25,6 +25,7 @@ from dlboard.serve._backend._auth import (
 )
 from dlboard.serve._backend._data_store import get_data_store, get_system_data_store
 from dlboard.serve._backend._installed_plugins import set_installed_plugins
+from dlboard.serve._backend._startup_checks import run_startup_checks
 from dlboard.serve._backend._theme import get_theme
 from dlboard.serve._clientside_script import ClientsideScript
 from dlboard.serve._icons import Icon, icon, install_icons
@@ -141,6 +142,8 @@ def app(plugins: list[models.PluginProtocol], *, url_prefix: str = "") -> Dash:
     theme = get_theme(_app)
     _app.index_string = _preload_color_scheme(_app.index_string, theme)
     _app.layout = partial(_layout, theme)
+    # Last, so a plugin's check sees the app exactly as it will serve -- every plugin plugged, the gate installed.
+    run_startup_checks(_app)
     return _app
 
 

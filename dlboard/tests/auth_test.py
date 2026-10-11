@@ -8,6 +8,7 @@ tokens over REST, and per-user isolation -- rather than any one piece in isolati
 
 from __future__ import annotations
 
+import os
 import re
 import time
 from typing import TYPE_CHECKING, Any, NamedTuple
@@ -19,7 +20,13 @@ from dlboard import models
 from dlboard._wire import WHOAMI_PATH, Resource, create_path, get_or_create_path
 from dlboard.conftest import dispose_stores
 from dlboard.plugins import BUILTIN_BACKEND, PASSWORD_AUTH
-from dlboard.plugins.auth.password import SignupPolicy, create_or_reset_user, hash_password, verify_password
+from dlboard.plugins.auth.password import (
+    SignupPolicy,
+    _setup_token,
+    create_or_reset_user,
+    hash_password,
+    verify_password,
+)
 from dlboard.plugins.data_stores import filesystem, sqlite
 from dlboard.serve import app as build_app
 from dlboard.serve import get_system_data_store, mint_api_token
@@ -39,7 +46,7 @@ class PasswordDeployment(NamedTuple):
 
 
 @pytest.fixture
-def deployment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[PasswordDeployment]:
+def empty_deployment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[PasswordDeployment]:
     for name, value in {
         "DLBOARD_SQLITE_LOCATION": str(tmp_path / "db.sqlite"),
         "DLBOARD_ARTIFACT_STORE_LOCATION": str(tmp_path / "artifacts"),
@@ -48,11 +55,15 @@ def deployment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Pass
     }.items():
         monkeypatch.setenv(name, value)
     app = build_app([sqlite, filesystem, *PASSWORD_AUTH, *BUILTIN_BACKEND])
-    store = get_system_data_store(app)
-    for username in ("alice", "bob"):
-        create_or_reset_user(store, username, _PASSWORD)
-    yield PasswordDeployment(app.server.test_client(), store)
+    yield PasswordDeployment(app.server.test_client(), get_system_data_store(app))
     dispose_stores(app)
+
+
+@pytest.fixture
+def deployment(empty_deployment: PasswordDeployment) -> PasswordDeployment:
+    for username in ("alice", "bob"):
+        create_or_reset_user(empty_deployment.store, username, _PASSWORD)
+    return empty_deployment
 
 
 def _csrf(client: FlaskClient, path: str) -> str:
@@ -378,6 +389,70 @@ def _sign_up(client: FlaskClient, username: str) -> Any:  # noqa: ANN401
         "csrf": _csrf(client, "/login"),
     }
     return client.post("/signup", data=form)
+
+
+def _setup_form(client: FlaskClient, token: str) -> dict[str, str]:
+    return {
+        "setup_token": token,
+        "username": "root",
+        "password": _PASSWORD,
+        "confirm": _PASSWORD,
+        "csrf": _csrf(client, "/login"),
+    }
+
+
+@pytest.fixture
+def setup_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DLBOARD_PASSWORD_FIRST_ADMIN_SETUP", "true")
+
+
+def test_first_admin_setup_is_off_unless_enabled(empty_deployment: PasswordDeployment) -> None:
+    form = _setup_form(empty_deployment.client, _setup_token(os.environ["DLBOARD_SECRET_KEY"]))
+
+    assert empty_deployment.client.get("/setup").status_code == 404
+    assert empty_deployment.client.post("/setup", data=form).status_code == 404
+    assert empty_deployment.store.find_user("root") is None
+
+
+@pytest.mark.usefixtures("setup_enabled")
+@pytest.mark.parametrize("token", ["", "not-the-token"])
+def test_first_admin_setup_refuses_a_wrong_token(empty_deployment: PasswordDeployment, token: str) -> None:
+    form = _setup_form(empty_deployment.client, token)
+
+    assert "Wrong setup token." in empty_deployment.client.post("/setup", data=form).get_data(as_text=True)
+    assert empty_deployment.store.find_user("root") is None
+
+
+@pytest.mark.usefixtures("setup_enabled")
+def test_first_admin_setup_makes_one_admin_then_closes(empty_deployment: PasswordDeployment) -> None:
+    client, store = empty_deployment
+    assert client.get("/setup").status_code == 200
+    form = _setup_form(client, _setup_token(os.environ["DLBOARD_SECRET_KEY"]))
+
+    assert client.post("/setup", data=form).status_code == 302
+    root = store.find_user("root")
+    assert root is not None
+    assert models.has_scope(root, models.Scope.ALL)
+    assert client.get(f"/{WHOAMI_PATH}").status_code == 200
+    assert client.get("/setup").status_code == 404
+
+
+@pytest.mark.usefixtures("setup_enabled")
+def test_first_admin_setup_stays_closed_on_a_server_with_users_but_no_admin(
+    deployment: PasswordDeployment,
+) -> None:
+    """A server whose admins were all demoted (or only get `Scope.ALL` from config at sign-in) isn't a fresh one."""
+    form = _setup_form(deployment.client, _setup_token(os.environ["DLBOARD_SECRET_KEY"]))
+
+    assert deployment.client.get("/setup").status_code == 404
+    assert deployment.client.post("/setup", data=form).status_code == 404
+    assert deployment.store.find_user("root") is None
+
+
+@pytest.mark.usefixtures("deployment", "setup_enabled")
+def test_startup_fails_when_first_admin_setup_is_left_on() -> None:
+    with pytest.raises(ValueError, match="DLBOARD_PASSWORD_FIRST_ADMIN_SETUP is on"):
+        build_app([sqlite, filesystem, *PASSWORD_AUTH, *BUILTIN_BACKEND])
 
 
 def test_nobody_can_sign_up_unless_the_deployment_allows_it(deployment: PasswordDeployment) -> None:

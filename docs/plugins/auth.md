@@ -79,12 +79,22 @@ PLUGINS = [*POSTGRES_S3_STORAGE, *PASSWORD_AUTH, *BUILTIN_BACKEND, *BUILTIN_CHAR
 
 ```bash
 export DLBOARD_SECRET_KEY=$(openssl rand -hex 32)   # signs sessions; the same for every worker
-dlboard users set-password alice --admin --plugins mydeployment:PLUGINS   # your first admin
 dlboard serve custom --plugins mydeployment:PLUGINS --host 0.0.0.0 --workers 4
+dlboard users set-password alice --admin --plugins mydeployment:PLUGINS   # your first admin
 ```
 
 Serve it over HTTPS (session cookies are `Secure` by default), behind a reverse proxy that
 rate-limits `/login`. The provider's own throttle is per username, per worker process.
+
+Without a shell, set `DLBOARD_PASSWORD_FIRST_ADMIN_SETUP=true` for the first start instead. Then open
+`/setup`, which logs a setup token derived from `DLBOARD_SECRET_KEY` so every worker agrees on it, and
+enter that token to create the admin. Turn the setting back off afterwards. If it's still on once the
+database has users, the server refuses to start until you turn it off.
+
+The setting is off by default, and even when it's on, `/setup` only works while the database has no users
+at all. Once any user exists, `/setup` returns 404 for good. Demoting every admin doesn't reopen it, and
+neither does relying on `DLBOARD_ADMIN_USERS`. Anyone who can read the server log during that first window
+could create the admin first, so do it before sharing the address.
 
 | Setting | Default | |
 |---|---|---|
@@ -96,6 +106,7 @@ rate-limits `/login`. The provider's own throttle is per username, per worker pr
 | `DLBOARD_SECURE_COOKIES` | `true` | Turn off only for plain-HTTP testing. |
 | `DLBOARD_PASSWORD_SIGNUP` | `admin_creates` | `approval` (sign up, then an admin enables you) or `open`. |
 | `DLBOARD_PASSWORD_MIN_LENGTH` | 12 | |
+| `DLBOARD_PASSWORD_FIRST_ADMIN_SETUP` | `false` | Serve `/setup` for the first admin (above). Startup fails if it's on and the database already has users. |
 
 The rest happens in the app:
 
@@ -157,6 +168,9 @@ def plug(app) -> None:
   `None` if your provider signs people in through a form or redirect instead. In that case,
   register those routes with `add_public_route`. Once the person proves who they are, call
   `sign_in(store, principal, get_auth_settings())`, then `start_session(user)`. See `password.py`.
+- **Check configuration that needs the data store with `add_startup_check(app, check)`.** Plugin
+  order isn't guaranteed, so the store may not be set yet during your `plug()`. A registered check
+  runs once every plugin has plugged in, and startup fails if it raises.
 - **Only set `verifies_identity = True` if the provider really proves identity.** It turns on
   access control, and that's only as strong as the provider's proof. `trusted_header`-style
   providers must only be reachable through the proxy.

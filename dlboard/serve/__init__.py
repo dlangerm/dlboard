@@ -30,6 +30,7 @@ from dlboard.serve._backend._data_store import (
 )
 from dlboard.serve._backend._installed_plugins import get_installed_plugins, set_installed_plugins
 from dlboard.serve._backend._sql_store_base import SCHEMA_PREP_OPTION, SQLStoreBase
+from dlboard.serve._backend._startup_checks import add_startup_check
 from dlboard.serve._backend._theme import get_theme, set_theme
 from dlboard.serve._clientside_script import ClientsideScript
 from dlboard.serve._icons import Icon, icon, icon_cell_class
@@ -49,6 +50,7 @@ __all__ = [
     "Icon",
     "SQLStoreBase",
     "add_public_route",
+    "add_startup_check",
     "app",
     "end_session",
     "get_artifact_store",
