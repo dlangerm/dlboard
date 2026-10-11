@@ -242,6 +242,8 @@ def test_line_chart_x_axis_type_date_converts_timestamps_to_epoch_millis() -> No
     Regression: a timestamp x-axis (e.g. timestamp_utc) previously only offered "number"/
     "category" -- neither sensible for a real calendar timestamp. Recharts has no native time
     scale, so "date" renders as a numeric axis (epoch ms) with a date-formatting tick/tooltip.
+    The domain must be the data's own range: Recharts' default `[0, "auto"]` would drag an epoch-ms
+    axis back to 1970 and squeeze every real point into a sliver at the right edge.
     """
     df = _metrics_df(3).assign(
         timestamp_utc=["2026-01-01T00:00:00Z", "2026-01-01T00:00:01Z", "2026-01-01T00:00:02Z"] * 2
@@ -301,20 +303,6 @@ def test_line_chart_x_axis_type_time_formats_as_a_duration() -> None:
     }
     assert props["tooltipProps"]["labelFormatter"] == {"function": "lineChartTooltipLabelTime"}
     assert sorted(row["elapsed_seconds"] for row in props["data"]) == [0, 65, 130]
-
-
-def test_line_chart_x_axis_type_date_domain_does_not_default_to_the_unix_epoch() -> None:
-    """
-    Regression: Recharts' default numeric-axis domain is `[0, "auto"]`, not the data's own range.
-    For an epoch-ms "date" axis, that drags the left edge back to 1970 regardless of how recent the
-    real data is, squeezing every actual point into a sliver at the far right of the chart --
-    visually "the zero on the x-axis is 1969" instead of the data's own earliest date.
-    """
-    df = _metrics_df(3).assign(
-        timestamp_utc=["2026-01-01T00:00:00Z", "2026-01-01T00:00:01Z", "2026-01-01T00:00:02Z"] * 2
-    )
-    chart = LineChart.render(LineChartSettings(column="loss", x_axis="timestamp_utc", x_axis_type="date"), df)
-    assert _props(chart)["xAxisProps"]["domain"] == ["dataMin", "dataMax"]
 
 
 def test_line_chart_render_does_not_mutate_input_dataframe() -> None:
@@ -446,22 +434,20 @@ def test_bar_chart_aggregation_is_configurable(
     assert data[128] == pytest.approx(expected)
 
 
-def test_bar_chart_sorts_numeric_groups_ascending() -> None:
+@pytest.mark.parametrize(
+    ("sort", "expected"),
+    [
+        pytest.param("ascending", [32, 128, 256], id="ascending-numerically"),
+        pytest.param("none", [256, 32, 128], id="first-seen-order"),
+        pytest.param("descending", [256, 128, 32], id="descending"),
+    ],
+)
+def test_bar_chart_orders_its_groups_as_its_sort_setting_says(
+    sort: Literal["none", "ascending", "descending"], expected: list[int]
+) -> None:
     df = _hparam_grouped_df({1: 256, 2: 32, 3: 128}, {1: [0.1], 2: [0.2], 3: [0.3]})
-    chart = BarChart.render(BarChartSettings(column="accuracy", x_axis="hidden_size"), df)
-    assert [row["hidden_size"] for row in _props(chart)["data"]] == [32, 128, 256]
-
-
-def test_bar_chart_sort_disabled_keeps_first_seen_order() -> None:
-    df = _hparam_grouped_df({1: 256, 2: 32, 3: 128}, {1: [0.1], 2: [0.2], 3: [0.3]})
-    chart = BarChart.render(BarChartSettings(column="accuracy", x_axis="hidden_size", sort="none"), df)
-    assert [row["hidden_size"] for row in _props(chart)["data"]] == [256, 32, 128]
-
-
-def test_bar_chart_sort_descending() -> None:
-    df = _hparam_grouped_df({1: 256, 2: 32, 3: 128}, {1: [0.1], 2: [0.2], 3: [0.3]})
-    chart = BarChart.render(BarChartSettings(column="accuracy", x_axis="hidden_size", sort="descending"), df)
-    assert [row["hidden_size"] for row in _props(chart)["data"]] == [256, 128, 32]
+    chart = BarChart.render(BarChartSettings(column="accuracy", x_axis="hidden_size", sort=sort), df)
+    assert [row["hidden_size"] for row in _props(chart)["data"]] == expected
 
 
 def test_bar_chart_x_axis_type_category_forces_text_sort_over_numeric() -> None:

@@ -134,20 +134,6 @@ def test_finishing_a_run_again_keeps_the_newest_report(store: SQLLiteStore, expe
     assert (latest.status, latest.ended_at) == (models.RunStatus.FAILED, first + timedelta(minutes=5))
 
 
-def test_finishing_a_run_bumps_its_experiments_revision_so_a_live_page_notices(
-    store: SQLLiteStore, experiment_id: int
-) -> None:
-    run = store.create_run(models.NewRun(experiment_id=experiment_id))
-    before = store.get_experiment(experiment_id)
-    assert before is not None
-
-    store.finish_run(run.id, models.RunStatus.FINISHED, datetime(2026, 1, 1, tzinfo=UTC))
-
-    after = store.get_experiment(experiment_id)
-    assert after is not None
-    assert after.revision > before.revision
-
-
 def test_a_run_stored_before_status_existed_reads_back_with_none(
     store: SQLLiteStore, experiment_id: int
 ) -> None:
@@ -573,6 +559,10 @@ def _mutate_via_log_artifact_refs(store: SQLLiteStore, experiment_id: int, run_i
     )
 
 
+def _mutate_via_finish_run(store: SQLLiteStore, _experiment_id: int, run_id: int) -> None:
+    store.finish_run(run_id, models.RunStatus.FINISHED, _TS)
+
+
 @pytest.mark.parametrize(
     # No explicit `ids=` -- pytest already derives a readable id from each function's own
     # `__name__`, which keeps the label and the callable it names impossible to drift apart (a
@@ -583,6 +573,7 @@ def _mutate_via_log_artifact_refs(store: SQLLiteStore, experiment_id: int, run_i
         _mutate_via_log_metrics,
         _mutate_via_log_hyperparams,
         _mutate_via_log_artifact_refs,
+        _mutate_via_finish_run,
     ],
 )
 def test_mutation_bumps_experiment_revision_by_one(
