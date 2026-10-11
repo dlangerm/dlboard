@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import pandas as pd
+import pytest
 
 from dlboard.conftest import find_props as _find_props
 from dlboard.conftest import props as _to_props
@@ -101,19 +102,18 @@ def test_render_panel_charts_badge_when_chart_cannot_hint_its_columns() -> None:
 # ---- chart width: packed uses the chart's natural width, grid stretches to its cell ----
 
 
-def test_render_panel_charts_packed_layout_uses_natural_width() -> None:
-    panel = _panel_with_chart()
+@pytest.mark.parametrize(
+    ("layout", "expected_width"),
+    [
+        pytest.param("packed", "natural", id="packed-uses-the-chart-natural-width"),
+        pytest.param("grid", "100%", id="grid-stretches-to-its-cell"),
+    ],
+)
+def test_render_panel_charts_width_follows_the_layout(layout: str, expected_width: str) -> None:
+    panel = _panel_with_chart().model_copy(update={"layout": layout})
     df = pd.DataFrame({"run_id": [1], "step": [0], "loss": [0.5]})
 
     [stack] = state.render_panel_charts(panel, df)
 
-    assert _to_props(stack)["w"] == panel.charts[0].natural_width()
-
-
-def test_render_panel_charts_grid_layout_stretches_to_full_width() -> None:
-    panel = _panel_with_chart().model_copy(update={"layout": "grid"})
-    df = pd.DataFrame({"run_id": [1], "step": [0], "loss": [0.5]})
-
-    [stack] = state.render_panel_charts(panel, df)
-
-    assert _to_props(stack)["w"] == "100%"
+    expected = panel.charts[0].natural_width() if expected_width == "natural" else expected_width
+    assert _to_props(stack)["w"] == expected

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast
 
+import pytest
+
 from dlboard.conftest import find_props as _find_props
 from dlboard.models._view import PanelInstance
 from dlboard.plugins.charts.line_chart import LineChart
@@ -19,41 +21,32 @@ LineChart.register(allow_override=True)
 # ---- toolbar: auto-generate charts (empty view) vs suggest charts (non-empty view) ----
 
 
-def test_accordion_view_shows_auto_populate_when_view_is_empty(
-    store: SQLLiteStore, experiment_id: int
-) -> None:
-    container = state.accordion_view(
-        store, state.load_page(store, state.PageRef(experiment_id, None)), Paging()
-    )
-
-    assert (
-        # pyrefly: ignore [unknown-argument-type]
-        _find_props(cast("Any", container).children, state.AUTO_POPULATE_BUTTON_ID) is not None
-    )
-    assert (
-        # pyrefly: ignore [unknown-argument-type]
-        _find_props(cast("Any", container).children, state.SUGGEST_CHARTS_BUTTON_ID) is None
-    )
-
-
-def test_accordion_view_shows_suggest_charts_when_view_is_not_empty(
-    store: SQLLiteStore, experiment_id: int
+@pytest.mark.parametrize(
+    ("panels", "auto_populate_offered"),
+    [
+        pytest.param([], True, id="empty-view-offers-auto-populate"),
+        pytest.param(
+            [PanelInstance[Any, Any](name="p")], False, id="a-view-with-panels-offers-suggest-charts"
+        ),
+    ],
+)
+def test_accordion_view_offers_auto_populate_only_for_an_empty_view(
+    store: SQLLiteStore,
+    experiment_id: int,
+    panels: list[PanelInstance[Any, Any]],
+    *,
+    auto_populate_offered: bool,
 ) -> None:
     page = store.get_or_create_page(state.BasicExperimentPage, experiment_id=experiment_id)
-    store.update_page(page.model_copy(update={"panels": [PanelInstance[Any, Any](name="p")]}))
+    store.update_page(page.model_copy(update={"panels": panels}))
 
     container = state.accordion_view(
         store, state.load_page(store, state.PageRef(experiment_id, None)), Paging()
     )
 
-    assert (
-        # pyrefly: ignore [unknown-argument-type]
-        _find_props(cast("Any", container).children, state.SUGGEST_CHARTS_BUTTON_ID) is not None
-    )
-    assert (
-        # pyrefly: ignore [unknown-argument-type]
-        _find_props(cast("Any", container).children, state.AUTO_POPULATE_BUTTON_ID) is None
-    )
+    children = cast("list[Any]", container.children)
+    assert (_find_props(children, state.AUTO_POPULATE_BUTTON_ID) is not None) is auto_populate_offered
+    assert (_find_props(children, state.SUGGEST_CHARTS_BUTTON_ID) is not None) is not auto_populate_offered
 
 
 def test_accordion_view_delete_panel_reachable_without_opening_a_panel(

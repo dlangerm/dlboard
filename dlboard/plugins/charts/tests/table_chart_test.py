@@ -37,40 +37,46 @@ def _wide_df() -> pd.DataFrame:
 # ---- hint_required_columns / hint_required_hparams / hint_required_artifact_keys ----
 
 
-def test_hint_required_columns_defaults_to_unbounded() -> None:
-    assert TableChart.hint_required_columns(TableChartSettings()) is None
+@pytest.mark.parametrize(
+    ("settings", "expected"),
+    [
+        pytest.param(TableChartSettings(), None, id="unbounded-by-default"),
+        pytest.param(
+            TableChartSettings(metrics=["loss", "acc"]), {"loss", "acc", "step"}, id="metrics-filter"
+        ),
+        pytest.param(
+            TableChartSettings(pivot_on="step", pivot_metric="loss"),
+            {"step", "loss"},
+            id="pivot-wants-its-columns",
+        ),
+        # Metrics and hparams are fetched independently -- curating one but leaving the other at its
+        # default shouldn't force a full "every metric in the experiment" fetch for a table that isn't
+        # even set up to show any.
+        pytest.param(TableChartSettings(hparams=["lr"]), set(), id="only-hparams-curated"),
+    ],
+)
+def test_hint_required_columns_follows_the_settings(
+    settings: TableChartSettings, expected: set[str] | None
+) -> None:
+    assert TableChart.hint_required_columns(settings) == expected
 
 
-def test_hint_required_columns_respects_metrics_filter() -> None:
-    settings = TableChartSettings(metrics=["loss", "acc"])
-    assert TableChart.hint_required_columns(settings) == {"loss", "acc", "step"}
-
-
-def test_hint_required_columns_pivot_mode_wants_pivot_columns_only() -> None:
-    settings = TableChartSettings(pivot_on="step", pivot_metric="loss")
-    assert TableChart.hint_required_columns(settings) == {"step", "loss"}
-
-
-def test_hint_required_columns_wants_no_metrics_when_only_hparams_are_curated() -> None:
-    """Metrics and hparams are fetched independently -- curating one but leaving the other at its
-    default shouldn't force a full "every metric in the experiment" fetch for a table that isn't
-    even set up to show any."""
-    settings = TableChartSettings(hparams=["lr"])
-    assert TableChart.hint_required_columns(settings) == set()
-
-
-def test_hint_required_hparams_defaults_to_unbounded() -> None:
-    assert TableChart.hint_required_hparams(TableChartSettings()) is None
-
-
-def test_hint_required_hparams_respects_hparams_filter() -> None:
-    settings = TableChartSettings(hparams=["lr", "batch_size"])
-    assert TableChart.hint_required_hparams(settings) == {"lr", "batch_size"}
-
-
-def test_hint_required_hparams_empty_in_pivot_mode() -> None:
-    settings = TableChartSettings(pivot_on="step", pivot_metric="loss")
-    assert TableChart.hint_required_hparams(settings) == set()
+@pytest.mark.parametrize(
+    ("settings", "expected"),
+    [
+        pytest.param(TableChartSettings(), None, id="unbounded-by-default"),
+        pytest.param(
+            TableChartSettings(hparams=["lr", "batch_size"]), {"lr", "batch_size"}, id="hparams-filter"
+        ),
+        pytest.param(
+            TableChartSettings(pivot_on="step", pivot_metric="loss"), set(), id="empty-in-pivot-mode"
+        ),
+    ],
+)
+def test_hint_required_hparams_follows_the_settings(
+    settings: TableChartSettings, expected: set[str] | None
+) -> None:
+    assert TableChart.hint_required_hparams(settings) == expected
 
 
 def test_hint_required_artifact_keys_always_empty() -> None:

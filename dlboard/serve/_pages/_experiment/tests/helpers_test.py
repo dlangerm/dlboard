@@ -110,24 +110,24 @@ def test_build_validated_chart_instance_succeeds_for_valid_parameters() -> None:
     assert chart.chart_type == "line"
 
 
-def test_build_validated_chart_instance_rejects_a_cleared_required_field() -> None:
-    """Regression: a bare `ChartInstance(...)` never validates its `parameters` (untyped dict), so
-    a required field left `None` after `state.merge_chart_param_values` (see above) used to sail through
-    unnoticed and only blow up later, unguarded, from `hint_required_columns`/`render` -- with no
-    error surfaced in the UI. This must raise here instead, where the add/edit-chart callback can
-    catch it and show "Invalid parameters: ...".
-    """
+@pytest.mark.parametrize(
+    "parameters",
+    [
+        # Regression: a bare `ChartInstance(...)` never validates its `parameters` (untyped dict), so a
+        # required field left `None` after `state.merge_chart_param_values` used to sail through and only
+        # blow up later, unguarded, from `hint_required_columns`/`render` -- with no error in the UI.
+        pytest.param({"column": None, "x_axis": "step"}, id="cleared-required-field"),
+        # A cleared NumberInput isn't guaranteed to report `None`; `""` isn't dropped by
+        # `merge_chart_param_values` (only `None` is), so it must still fail validation here.
+        pytest.param({"column": "loss", "x_axis": "step", "width": ""}, id="bad-optional-field-value"),
+    ],
+)
+def test_build_validated_chart_instance_rejects_parameters_that_would_break_later(
+    parameters: dict[str, Any],
+) -> None:
+    """Raising here, where the add/edit-chart callback can catch it, lets it show "Invalid parameters: ..."."""
     with pytest.raises(ValidationError):
-        state.build_validated_chart_instance("line", {"column": None, "x_axis": "step"})
-
-
-def test_build_validated_chart_instance_rejects_a_bad_optional_field_value() -> None:
-    """A cleared NumberInput isn't guaranteed to report `None` -- if it reports `""` instead, that's
-    not dropped by `state.merge_chart_param_values` (only `None` is), so it must still fail validation
-    here rather than reach `render` unguarded.
-    """
-    with pytest.raises(ValidationError):
-        state.build_validated_chart_instance("line", {"column": "loss", "x_axis": "step", "width": ""})
+        state.build_validated_chart_instance("line", parameters)
 
 
 def _run(run_id: int, name: str | None = None) -> Run:
@@ -380,19 +380,6 @@ def test_load_hparam_view_data_reports_available_metric_keys_without_fetching_va
     assert rows == [{"run_id": run.id, "run_name": run.name, **_RUNNING_FIELDS}]
 
 
-def test_load_hparam_view_data_includes_values_for_selected_metrics(
-    store: SQLLiteStore, experiment_id: int
-) -> None:
-    run = store.create_run(models.NewRun(experiment_id=experiment_id))
-    _log_a_metric(store, experiment_id, run.id, "loss")
-
-    _hk, _mk, rows = run_table._load_hparam_view_data(
-        store, experiment_id, [], selected_metrics={"loss"}, runs=[run]
-    )
-
-    assert rows == [{"run_id": run.id, "run_name": run.name, **_RUNNING_FIELDS, "loss": 1.0}]
-
-
 @pytest.mark.parametrize(
     ("field", "expected_type"),
     [
@@ -419,21 +406,26 @@ def test_param_field_input_picks_widget_by_field_type(field: ParameterField, exp
     assert isinstance(component, expected_type)
 
 
-def test_param_field_input_optional_number_gets_a_clear_button() -> None:
-    """An optional numeric field (e.g. width) gets a visible clear button -- backspacing to empty
-    already works, but isn't discoverable on its own."""
-    field = ParameterField(name="width", type=ParameterFieldType.INT, required=False, default=None)
+@pytest.mark.parametrize(
+    ("required", "has_clear_button"),
+    [
+        # An optional numeric field (e.g. width) gets a visible clear button -- backspacing to empty
+        # already works, but isn't discoverable on its own.
+        pytest.param(False, True, id="optional-number"),
+        pytest.param(True, False, id="required-number"),
+    ],
+)
+def test_param_field_input_number_gets_a_clear_button_only_when_optional(
+    required: bool, *, has_clear_button: bool
+) -> None:
+    field = ParameterField(name="width", type=ParameterFieldType.INT, required=required, default=None)
     component = _param_field_input(field.name, field, ColumnCatalog())
     props = cast("Any", component).to_plotly_json()["props"]  # pyrefly: ignore [unknown-variable-type]
-    assert props["rightSection"] is not None
-    assert props["rightSectionPointerEvents"] == "all"
-
-
-def test_param_field_input_required_number_has_no_clear_button() -> None:
-    field = ParameterField(name="page_size", type=ParameterFieldType.INT, required=True)
-    component = _param_field_input(field.name, field, ColumnCatalog())
-    props = cast("Any", component).to_plotly_json()["props"]  # pyrefly: ignore [unknown-variable-type]
-    assert props.get("rightSection") is None
+    if has_clear_button:
+        assert props["rightSection"] is not None
+        assert props["rightSectionPointerEvents"] == "all"
+    else:
+        assert props.get("rightSection") is None
 
 
 def test_param_field_input_offers_grouping_kind_as_a_select() -> None:

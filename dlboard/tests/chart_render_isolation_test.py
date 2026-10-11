@@ -11,6 +11,7 @@ from typing import Any
 
 import dash_mantine_components as dmc
 import pandas as pd
+import pytest
 
 from dlboard.conftest import props as _props
 from dlboard.models._view import ChartInstance, PanelInstance
@@ -22,11 +23,30 @@ from dlboard.serve._pages._experiment._experiment_page_state import (
 LineChart.register(allow_override=True)
 
 
-def test_broken_chart_renders_as_error_alert_without_raising() -> None:
+@pytest.mark.parametrize(
+    ("broken", "named_in_alert"),
+    [
+        # A chart referencing a column that isn't present (e.g. a bad manual edit).
+        pytest.param(
+            ChartInstance[Any, Any](
+                chart_type="line", parameters={"column": "does_not_exist", "x_axis": "step"}
+            ),
+            "does_not_exist",
+            id="missing-column",
+        ),
+        # A saved view can name a chart type this deployment has no plugin for (removed, or never
+        # installed here) -- same isolation guarantee, not a 500 that takes the panel down with it.
+        pytest.param(
+            ChartInstance[Any, Any](chart_type="not-installed", parameters={}),
+            "not-installed",
+            id="missing-plugin",
+        ),
+    ],
+)
+def test_broken_chart_renders_as_error_alert_without_raising(
+    broken: ChartInstance[Any, Any], named_in_alert: str
+) -> None:
     df = pd.DataFrame({"run_id": [1], "step": [0], "loss": [0.5]})
-    broken = ChartInstance[Any, Any](
-        chart_type="line", parameters={"column": "does_not_exist", "x_axis": "step"}
-    )
     panel = PanelInstance[Any, Any](name="p", charts=[broken])
 
     [stack] = _render_panel_charts(panel, df)
@@ -34,25 +54,7 @@ def test_broken_chart_renders_as_error_alert_without_raising() -> None:
     rendered = _props(stack)["children"][1]  # pyrefly: ignore [unknown-variable-type]
     assert isinstance(rendered, dmc.Alert)
     assert _props(rendered)["color"] == "red"
-    assert "does_not_exist" in str(_props(rendered)["children"])
-
-
-def test_a_chart_whose_plugin_is_not_installed_renders_as_error_alert_without_raising() -> None:
-    """
-    A saved view can name a chart type this deployment has no plugin for (removed, or never
-    installed here) -- same isolation guarantee as a chart with bad parameters, not a 500 that
-    takes the rest of the panel's charts down with it.
-    """
-    df = pd.DataFrame({"run_id": [1], "step": [0], "loss": [0.5]})
-    missing_plugin = ChartInstance[Any, Any](chart_type="not-installed", parameters={})
-    panel = PanelInstance[Any, Any](name="p", charts=[missing_plugin])
-
-    [stack] = _render_panel_charts(panel, df)
-
-    rendered = _props(stack)["children"][1]  # pyrefly: ignore [unknown-variable-type]
-    assert isinstance(rendered, dmc.Alert)
-    assert _props(rendered)["color"] == "red"
-    assert "not-installed" in str(_props(rendered)["children"])
+    assert named_in_alert in str(_props(rendered)["children"])
 
 
 def test_broken_chart_does_not_prevent_sibling_charts_from_rendering() -> None:

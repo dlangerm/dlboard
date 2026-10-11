@@ -43,8 +43,15 @@ def test_local_refuses_a_non_loopback_host_without_the_opt_in(tmp_path: Path) ->
         _cli.local(opts=opts)
 
 
-def test_local_allows_a_non_loopback_host_with_the_opt_in(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("host", "opted_in"),
+    [
+        pytest.param("0.0.0.0", True, id="non-loopback-with-the-opt-in"),
+        pytest.param("127.0.0.1", False, id="loopback-default-needs-no-opt-in"),
+    ],
+)
+def test_local_serves_when_the_host_is_loopback_or_the_opt_in_is_given(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, host: str, *, opted_in: bool
 ) -> None:
     served: list[tuple[str, ServerRuntimeOptions]] = []
 
@@ -55,25 +62,9 @@ def test_local_allows_a_non_loopback_host_with_the_opt_in(
     opts = LocalServeOptions(
         sqlite_location=tmp_path / "db.sqlite",
         artifact_store_location=tmp_path / "artifacts",
-        i_understand_anyone_who_can_reach_this_is_an_admin=True,
-        runtime=ServerRuntimeOptions(host="0.0.0.0"),
+        i_understand_anyone_who_can_reach_this_is_an_admin=opted_in,
+        runtime=ServerRuntimeOptions(host=host),
     )
-
-    _cli.local(opts=opts)
-
-    assert len(served) == 1
-
-
-def test_local_needs_no_opt_in_for_the_loopback_default(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    served: list[tuple[str, ServerRuntimeOptions]] = []
-
-    def fake_serve(target: str, runtime: ServerRuntimeOptions) -> None:
-        served.append((target, runtime))
-
-    monkeypatch.setattr(_cli, "_serve", fake_serve)
-    opts = LocalServeOptions(sqlite_location=tmp_path / "db.sqlite", artifact_store_location=tmp_path / "a")
 
     _cli.local(opts=opts)
 

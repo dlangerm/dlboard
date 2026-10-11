@@ -36,17 +36,21 @@ def _image(key: str) -> ChartInstance[object, object]:
 # ---- split_group_name ----
 
 
-def test_split_group_name_prefix() -> None:
-    assert autogen.split_group_name("train/loss/mean", "/", "prefix") == "train"
-
-
-def test_split_group_name_suffix() -> None:
-    assert autogen.split_group_name("train/loss/mean", "/", "suffix") == "mean"
-
-
-def test_split_group_name_underscore_delimiter() -> None:
-    assert autogen.split_group_name("val_accuracy_top1", "_", "prefix") == "val"
-    assert autogen.split_group_name("val_accuracy_top1", "_", "suffix") == "top1"
+@pytest.mark.parametrize(
+    ("key", "delimiter", "mode", "expected"),
+    [
+        pytest.param("train/loss/mean", "/", "prefix", "train", id="prefix"),
+        pytest.param("train/loss/mean", "/", "suffix", "mean", id="suffix"),
+        pytest.param("val_accuracy_top1", "_", "prefix", "val", id="underscore-prefix"),
+        pytest.param("val_accuracy_top1", "_", "suffix", "top1", id="underscore-suffix"),
+        pytest.param("/train/loss/", "/", "prefix", "train", id="ignores-leading-delimiter"),
+        pytest.param("/train/loss/", "/", "suffix", "loss", id="ignores-trailing-delimiter"),
+    ],
+)
+def test_split_group_name_takes_the_prefix_or_suffix_around_the_delimiter(
+    key: str, delimiter: str, mode: typing.Literal["prefix", "suffix"], expected: str
+) -> None:
+    assert autogen.split_group_name(key, delimiter, mode) == expected
 
 
 def test_split_group_name_groups_undelimited_keys_together() -> None:
@@ -63,27 +67,22 @@ def test_split_group_name_empty_delimiter_groups_everything_together() -> None:
     assert autogen.split_group_name("val/acc", "", "prefix") == autogen.UNGROUPED_GROUP_NAME
 
 
-def test_split_group_name_ignores_leading_and_trailing_delimiters() -> None:
-    assert autogen.split_group_name("/train/loss/", "/", "prefix") == "train"
-    assert autogen.split_group_name("/train/loss/", "/", "suffix") == "loss"
-
-
 # ---- lightning_granularity ----
 
 
-def test_lightning_granularity_detects_step_and_epoch_suffixes() -> None:
-    assert autogen.lightning_granularity("train_loss_epoch") == "epoch"
-    assert autogen.lightning_granularity("train_loss_step") == "step"
-
-
-def test_lightning_granularity_none_when_no_suffix() -> None:
-    assert autogen.lightning_granularity("train_loss") is None
-
-
-def test_lightning_granularity_none_when_suffix_is_the_whole_key() -> None:
-    """A bare `_step`/`_epoch` key isn't a suffixed metric name -- there's no base name left."""
-    assert autogen.lightning_granularity("_step") is None
-    assert autogen.lightning_granularity("_epoch") is None
+@pytest.mark.parametrize(
+    ("key", "expected"),
+    [
+        pytest.param("train_loss_epoch", "epoch", id="epoch-suffix"),
+        pytest.param("train_loss_step", "step", id="step-suffix"),
+        pytest.param("train_loss", None, id="no-suffix"),
+        # A bare `_step`/`_epoch` key isn't a suffixed metric name -- there's no base name left.
+        pytest.param("_step", None, id="suffix-is-the-whole-key"),
+        pytest.param("_epoch", None, id="epoch-is-the-whole-key"),
+    ],
+)
+def test_lightning_granularity_reads_only_a_real_step_or_epoch_suffix(key: str, expected: str | None) -> None:
+    assert autogen.lightning_granularity(key) == expected
 
 
 # ---- panel_name_for_group ----

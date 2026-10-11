@@ -275,36 +275,25 @@ def test_disabling_a_user_ends_their_session(deployment: PasswordDeployment) -> 
     assert deployment.client.get(f"/{WHOAMI_PATH}").status_code == 401
 
 
-def test_the_server_refuses_to_start_without_a_secret_key(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("secret_key", "error"),
+    [
+        pytest.param(None, "DLBOARD_SECRET_KEY", id="unset"),
+        pytest.param("local-trial-only-change-me", "placeholder", id="docker-compose-placeholder"),
+        pytest.param("too-short", "characters", id="too-short"),
+    ],
+)
+def test_the_server_refuses_to_start_without_a_usable_secret_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, secret_key: str | None, error: str
 ) -> None:
     monkeypatch.setenv("DLBOARD_SQLITE_LOCATION", str(tmp_path / "db.sqlite"))
     monkeypatch.setenv("DLBOARD_ARTIFACT_STORE_LOCATION", str(tmp_path / "artifacts"))
-    monkeypatch.delenv("DLBOARD_SECRET_KEY", raising=False)
+    if secret_key is None:
+        monkeypatch.delenv("DLBOARD_SECRET_KEY", raising=False)
+    else:
+        monkeypatch.setenv("DLBOARD_SECRET_KEY", secret_key)
 
-    with pytest.raises(ValueError, match="DLBOARD_SECRET_KEY"):
-        build_app([sqlite, *PASSWORD_AUTH, *BUILTIN_BACKEND])  # no artifact store: no worker to leak
-
-
-def test_the_server_refuses_to_start_with_the_docker_compose_placeholder_secret_key(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("DLBOARD_SQLITE_LOCATION", str(tmp_path / "db.sqlite"))
-    monkeypatch.setenv("DLBOARD_ARTIFACT_STORE_LOCATION", str(tmp_path / "artifacts"))
-    monkeypatch.setenv("DLBOARD_SECRET_KEY", "local-trial-only-change-me")
-
-    with pytest.raises(ValueError, match="placeholder"):
-        build_app([sqlite, *PASSWORD_AUTH, *BUILTIN_BACKEND])
-
-
-def test_the_server_refuses_to_start_with_a_too_short_secret_key(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("DLBOARD_SQLITE_LOCATION", str(tmp_path / "db.sqlite"))
-    monkeypatch.setenv("DLBOARD_ARTIFACT_STORE_LOCATION", str(tmp_path / "artifacts"))
-    monkeypatch.setenv("DLBOARD_SECRET_KEY", "too-short")
-
-    with pytest.raises(ValueError, match="characters"):
+    with pytest.raises(ValueError, match=error):
         build_app([sqlite, *PASSWORD_AUTH, *BUILTIN_BACKEND])
 
 
