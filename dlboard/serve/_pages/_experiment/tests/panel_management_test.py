@@ -80,16 +80,19 @@ def test_panel_header_controls_shows_sync_and_layout_state() -> None:
 # ---- reorder_panel ----
 
 
-def test_reorder_panel_moves_before_target() -> None:
+@pytest.mark.parametrize(
+    ("moved", "target", "after", "expected"),
+    [
+        pytest.param("c", "a", False, ["c", "a", "b"], id="before-target"),
+        pytest.param("a", "b", True, ["b", "a", "c"], id="after-target"),
+    ],
+)
+def test_reorder_panel_moves_it_before_or_after_the_target(
+    moved: str, target: str, *, after: bool, expected: list[str]
+) -> None:
     panels = [PanelInstance[Any, Any](name=n) for n in ("a", "b", "c")]
-    result = state.reorder_panel(panels, "c", "a", after=False)
-    assert [p.name for p in result] == ["c", "a", "b"]
-
-
-def test_reorder_panel_moves_after_target() -> None:
-    panels = [PanelInstance[Any, Any](name=n) for n in ("a", "b", "c")]
-    result = state.reorder_panel(panels, "a", "b", after=True)
-    assert [p.name for p in result] == ["b", "a", "c"]
+    result = state.reorder_panel(panels, moved, target, after=after)
+    assert [p.name for p in result] == expected
 
 
 def test_reorder_panel_same_panel_is_a_noop() -> None:
@@ -200,16 +203,19 @@ def _panel_with_charts(*names: str) -> PanelInstance[Any, Any]:
     return PanelInstance[Any, Any](name="p", charts=charts)
 
 
-def test_reorder_chart_moves_before_target() -> None:
+@pytest.mark.parametrize(
+    ("index", "target", "after", "expected"),
+    [
+        pytest.param(0, 2, False, ["b", "a", "c", "d"], id="before-target"),
+        pytest.param(3, 1, True, ["a", "b", "d", "c"], id="after-target"),
+    ],
+)
+def test_reorder_chart_moves_it_before_or_after_the_target(
+    index: int, target: int, *, after: bool, expected: list[str]
+) -> None:
     panels = [_panel_with_charts("a", "b", "c", "d")]
-    result = state.reorder_chart(panels, "p", 0, 2, after=False)
-    assert [c.parameters["column"] for c in result[0].charts] == ["b", "a", "c", "d"]
-
-
-def test_reorder_chart_moves_after_target() -> None:
-    panels = [_panel_with_charts("a", "b", "c", "d")]
-    result = state.reorder_chart(panels, "p", 3, 1, after=True)
-    assert [c.parameters["column"] for c in result[0].charts] == ["a", "b", "d", "c"]
+    result = state.reorder_chart(panels, "p", index, target, after=after)
+    assert [c.parameters["column"] for c in result[0].charts] == expected
 
 
 def test_reorder_chart_same_index_is_a_noop() -> None:
@@ -321,14 +327,13 @@ def test_render_groups_panels_into_tabs_by_the_tab_field(store: SQLLiteStore, ex
 # without picking existing panels, or a chart dropped onto a tab with no panel yet).
 
 
-def test_panel_name_taken_true_for_an_existing_name() -> None:
+@pytest.mark.parametrize(
+    ("name", "taken"),
+    [pytest.param("a", True, id="existing"), pytest.param("c", False, id="new")],
+)
+def test_panel_name_taken_only_for_a_name_already_in_use(name: str, *, taken: bool) -> None:
     panels = [PanelInstance[Any, Any](name=n) for n in ("a", "b")]
-    assert state.panel_name_taken(panels, "a") is True
-
-
-def test_panel_name_taken_false_for_a_new_name() -> None:
-    panels = [PanelInstance[Any, Any](name=n) for n in ("a", "b")]
-    assert state.panel_name_taken(panels, "c") is False
+    assert state.panel_name_taken(panels, name) is taken
 
 
 def test_panel_name_taken_ignores_the_named_panel_itself() -> None:

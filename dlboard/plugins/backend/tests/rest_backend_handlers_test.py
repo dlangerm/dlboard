@@ -213,9 +213,13 @@ def test_handle_delete_and_restore_experiment_attribute_the_actor(store: SQLLite
 
     backend.handle_delete_experiment(store, experiment.id, actor)
     assert store.get_experiment(experiment.id) is None
+    (delete_entry,) = list(store.list_audit_log(actor))
+    assert (delete_entry.user_id, delete_entry.entity_type) == (actor.id, models.EntityType.EXPERIMENT)
 
     backend.handle_restore_experiment(store, experiment.id, actor)
     assert store.get_experiment(experiment.id) is not None
+    restore_entry = next(e for e in store.list_audit_log(actor) if e.action == models.AuditAction.RESTORE)
+    assert (restore_entry.user_id, restore_entry.entity_type) == (actor.id, models.EntityType.EXPERIMENT)
 
 
 def test_handle_delete_and_restore_run_attribute_the_actor(store: SQLLiteStore, experiment_id: int) -> None:
@@ -224,9 +228,13 @@ def test_handle_delete_and_restore_run_attribute_the_actor(store: SQLLiteStore, 
 
     backend.handle_delete_run(store, run.id, actor)
     assert store._fetch_deleted_at(models.Run, run.id) is not None
+    (delete_entry,) = list(store.list_audit_log(actor))
+    assert (delete_entry.user_id, delete_entry.entity_type) == (actor.id, models.EntityType.RUN)
 
     backend.handle_restore_run(store, run.id, actor)
     assert store._fetch_deleted_at(models.Run, run.id) is None
+    restore_entry = next(e for e in store.list_audit_log(actor) if e.action == models.AuditAction.RESTORE)
+    assert (restore_entry.user_id, restore_entry.entity_type) == (actor.id, models.EntityType.RUN)
 
 
 def test_handle_delete_and_restore_artifact_attribute_the_actor(
@@ -246,6 +254,10 @@ def test_handle_delete_and_restore_artifact_attribute_the_actor(
 
     backend.handle_delete_artifact(store, artifact.id, actor)
     assert list(store.fetch_artifacts(experiment_id=experiment_id)) == []
+    (delete_entry,) = list(store.list_audit_log(actor))
+    assert (delete_entry.user_id, delete_entry.entity_type) == (actor.id, models.EntityType.ARTIFACT)
 
     backend.handle_restore_artifact(store, artifact.id, actor)
     assert len(list(store.fetch_artifacts(experiment_id=experiment_id))) == 1
+    restore_entry = next(e for e in store.list_audit_log(actor) if e.action == models.AuditAction.RESTORE)
+    assert (restore_entry.user_id, restore_entry.entity_type) == (actor.id, models.EntityType.ARTIFACT)
