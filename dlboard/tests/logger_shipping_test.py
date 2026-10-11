@@ -158,10 +158,8 @@ def test_log_model_uploads_the_checkpoints_a_real_fit_saves(
     assert all(a.fname.endswith(".ckpt") for a in artifacts)
 
 
-def test_finalize_records_how_the_run_ended_and_the_newest_report_wins(
-    logger: DLBoardLogger, backend_server: BackendServer
-) -> None:
-    """The whole path: the client's `finalize`, the REST route, the store. Lightning finalizes per stage."""
+def test_finalize_records_how_the_run_ended(logger: DLBoardLogger, backend_server: BackendServer) -> None:
+    """The whole path: the client's `finalize`, the REST route, the store. Which report wins is store-level."""
     run = backend_server.store.get_run(logger.run_id or 0)
     assert run is not None
     assert (run.status, run.ended_at) == (RunStatus.RUNNING, None)
@@ -170,11 +168,6 @@ def test_finalize_records_how_the_run_ended_and_the_newest_report_wins(
     finished = backend_server.store.get_run(run.id)
     assert finished is not None
     assert (finished.status, finished.ended_at is not None) == (RunStatus.FINISHED, True)
-
-    logger.finalize("failed")
-    failed = backend_server.store.get_run(run.id)
-    assert failed is not None
-    assert failed.status == RunStatus.FAILED
 
 
 def test_the_exit_flush_records_that_the_run_ended_without_saying_how(
