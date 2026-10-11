@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 import pandas as pd
 import pytest
@@ -102,18 +102,12 @@ def test_render_panel_charts_badge_when_chart_cannot_hint_its_columns() -> None:
 # ---- chart width: packed uses the chart's natural width, grid stretches to its cell ----
 
 
-@pytest.mark.parametrize(
-    ("layout", "expected_width"),
-    [
-        pytest.param("packed", "natural", id="packed-uses-the-chart-natural-width"),
-        pytest.param("grid", "100%", id="grid-stretches-to-its-cell"),
-    ],
-)
-def test_render_panel_charts_width_follows_the_layout(layout: str, expected_width: str) -> None:
+@pytest.mark.parametrize("layout", ["packed", "grid"])
+def test_render_panel_charts_width_follows_the_layout(layout: Literal["packed", "grid"]) -> None:
+    """Packed uses the chart's natural width; grid stretches to its cell."""
     panel = _panel_with_chart().model_copy(update={"layout": layout})
     df = pd.DataFrame({"run_id": [1], "step": [0], "loss": [0.5]})
 
     [stack] = state.render_panel_charts(panel, df)
 
-    expected = panel.charts[0].natural_width() if expected_width == "natural" else expected_width
-    assert _to_props(stack)["w"] == expected
+    assert _to_props(stack)["w"] == (panel.charts[0].natural_width() if layout == "packed" else "100%")
