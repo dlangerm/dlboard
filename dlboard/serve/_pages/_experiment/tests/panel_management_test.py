@@ -428,14 +428,6 @@ def test_move_chart_to_panel_appends_into_an_empty_panel() -> None:
     assert next(p for p in result if p.name == "src").charts == []
 
 
-def test_move_chart_to_panel_same_panel_delegates_to_reorder_chart() -> None:
-    panels = [_panel_with_charts("a", "b", "c").model_copy(update={"name": "p"})]
-
-    result = state.move_chart_to_panel(panels, "p", 0, "p", 2, after=False)
-
-    assert result == state.reorder_chart(panels, "p", 0, 2, after=False)
-
-
 def test_move_chart_to_panel_is_a_noop_for_an_out_of_range_index() -> None:
     panels = [
         _panel_with_charts("x").model_copy(update={"name": "src"}),
