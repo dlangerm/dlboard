@@ -6,8 +6,11 @@ like every identity-verifying provider, and is configured by `DLBOARD_PASSWORD_*
 `PasswordSettings`). Its pages are plain server-rendered forms rather than Dash pages, so nothing
 of the app itself is served to someone who hasn't signed in.
 
-The first admin is made with `dlboard users set-password <name> --admin`, or by naming them in
-`DLBOARD_ADMIN_USERS` before they sign up. Passwords are hashed with scrypt; failed sign-ins are
+The first admin is made at `/setup` while the database has no users at all and
+`DLBOARD_PASSWORD_FIRST_ADMIN_SETUP` is on -- the form asks for a setup token it logs, derived from
+`DLBOARD_SECRET_KEY` -- or with `dlboard users set-password
+<name> --admin`, or by naming them in `DLBOARD_ADMIN_USERS` before they sign up. Passwords are hashed
+with scrypt; failed sign-ins are
 throttled per username, per server process -- put a rate-limiting reverse proxy in front of any
 deployment exposed to the internet.
 """
@@ -30,11 +33,14 @@ from urllib.parse import quote
 import pendulum
 from flask import abort, redirect, render_template_string, request, session
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from structlog.stdlib import get_logger
 
 from dlboard import models
 from dlboard.serve import (
     AppSlot,
+    AuthSettings,
     add_public_route,
+    add_startup_check,
     get_auth_settings,
     get_current_user,
     get_system_data_store,
@@ -52,6 +58,8 @@ if TYPE_CHECKING:
     from dlboard.models import DataStore, User
 
 PASSWORD_ISSUER: Final = "password"
+
+_log = get_logger(__name__)
 
 
 class SignupPolicy(StrEnum):
@@ -74,6 +82,9 @@ class PasswordSettings(BaseSettings):
 
     signup: SignupPolicy = SignupPolicy.ADMIN_CREATES
     min_length: int = 12
+
+    first_admin_setup: bool = False
+    """Serve `/setup`, which makes the first admin on an empty database. Turn it on for that, then off again."""
 
 
 # -- Hashing --------------------------------------------------------------------------------------
@@ -337,6 +348,93 @@ def _manage_users() -> str | Response:
     return form.render(message=f"{'Password reset' if existing else 'User created'} for {username}.")
 
 
+_SETUP_TOKEN_CONTEXT: Final = b"dlboard first admin setup"
+
+
+def _setup_token(secret_key: str) -> str:
+    """
+    The token `/setup` asks for, derived from the session secret: every worker agrees on it without sharing state.
+
+    It never changes, so it's only ever safe because `/setup` itself can never reopen (see `_SetupLatch`).
+    """
+    digest = hmac.digest(secret_key.encode(), _SETUP_TOKEN_CONTEXT, "sha256")
+    return base64.b32encode(digest[:12]).decode()  # 12 bytes is exactly 20 base32 characters, no padding
+
+
+class _SetupLatch:
+    """
+    Whether `/setup` may still make the first admin: only while the database has no users at all.
+
+    Deliberately not "no admin exists": admins can be demoted, and `DLBOARD_ADMIN_USERS` only grants
+    `Scope.ALL` at sign-in, so a server with no `Scope.ALL` user isn't necessarily a fresh one. Users are
+    never deleted, so once any exists `/setup` stays closed for good -- remembered here, so a closed
+    `/setup` costs an unauthenticated caller nothing.
+    """
+
+    def __init__(self) -> None:
+        self._closed = False
+
+    def is_open(self, store: DataStore[...]) -> bool:
+        if not self._closed:
+            self._closed = bool(store.list_users())
+        return not self._closed
+
+
+_SETUP: AppSlot[_SetupLatch] = AppSlot("first-admin setup latch")
+
+
+def _refuse_setup_left_on(app: Dash) -> None:
+    """Fail startup if `/setup` is switched on for a database it can never work on: it was left on by mistake."""
+    if PasswordSettings().first_admin_setup and not _SETUP.get(app).is_open(get_system_data_store(app)):
+        msg = (
+            "DLBOARD_PASSWORD_FIRST_ADMIN_SETUP is on, but this database already has users, so /setup can "
+            "never be used here. Turn it off -- admins add users from Admin -> Users, or with "
+            "`dlboard users set-password`."
+        )
+        raise ValueError(msg)
+
+
+def _setup() -> str | Response:
+    if not PasswordSettings().first_admin_setup:
+        abort(404)
+    store = get_system_data_store()
+    if not _SETUP.get().is_open(store):
+        abort(404)
+    secret = AuthSettings().secret_key
+    if secret is None:  # the request gate refuses to start without one anyway
+        abort(404)
+    token = _setup_token(secret.get_secret_value())
+    form = _Form(
+        "Create the first admin",
+        [
+            _Field("setup_token", "Setup token (from the server log)", "text", "off"),
+            _USERNAME,
+            _NEW_PASSWORD,
+            _CONFIRM,
+        ],
+        "Create admin",
+    )
+    if request.method == "GET":
+        # Logged only while the database is empty, never at startup: a token in every startup log would
+        # outlive the window it's good for in every log archive.
+        _log.info("First-admin setup is open. Setup token: %s", token)
+        return form.render()
+    _require_csrf()
+    if not hmac.compare_digest(request.form.get("setup_token", "").strip(), token):
+        return form.render(error="Wrong setup token. Check the server log for it.")
+    username, password = request.form.get("username", "").strip(), request.form.get("password", "")
+    problem = new_password_problem(password, request.form.get("confirm", ""))
+    if not username:
+        problem = "Choose a username."
+    if problem is not None:
+        return form.render(error=problem)
+    create_or_reset_user(store, username, password, admin=True)
+    signed_in = sign_in(store, _principal(username), get_auth_settings())
+    if signed_in is not None:
+        start_session(signed_in)
+    return redirect(relative_path("/"))
+
+
 class PasswordAuthProvider:
     """Signs people in with a username and password, then keeps them signed in with a session."""
 
@@ -372,6 +470,9 @@ def plug(app: Dash) -> None:
     _THROTTLE.set(app, _Throttle())
     add_public_route(app, "login", _login, ["GET", "POST"])
     add_public_route(app, "signup", _signup, ["GET", "POST"])
+    _SETUP.set(app, _SetupLatch())
+    add_public_route(app, "setup", _setup, ["GET", "POST"])
+    add_startup_check(app, _refuse_setup_left_on)
     prefix = str(app.config.routes_pathname_prefix)  # pyright: ignore[reportUnknownArgumentType, reportUnknownMemberType]
     for rule, view in (("password", _change_password), ("password/admin", _manage_users)):
         app.server.add_url_rule(

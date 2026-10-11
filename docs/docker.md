@@ -80,6 +80,23 @@ it at its default (`true`) everywhere else (see [auth.md](plugins/auth.md) for r
 
 ## Creating the first admin
 
+Without a shell (a NAS or hosting UI that only shows you logs):
+
+1. Start the container with `DLBOARD_PASSWORD_FIRST_ADMIN_SETUP=true`.
+2. Open `/setup` on your server, for example `https://dlboard.example.com/setup`. Opening it writes a
+   setup token to the container log (`First-admin setup is open. Setup token: ...`).
+3. Enter that token along with a username and password. You're signed in as an admin.
+4. Remove `DLBOARD_PASSWORD_FIRST_ADMIN_SETUP` (or set it to `false`). The container won't start again
+   with it still on, since the database now has users.
+
+`/setup` is off unless you set that variable, and even then it only works while the database has no users
+at all. Once anyone exists it returns 404 for good, even if every admin is later demoted. Create the admin
+before you share the address: anyone who can read the container log in that window could do it first. If
+`DLBOARD_PASSWORD_SIGNUP` lets people sign up, the first signup also closes `/setup`, and you'd use the
+command below instead.
+
+From a shell, you can also create the admin directly:
+
 ```bash
 docker run --rm -it --env-file .env dlboard \
   users set-password alice --admin --plugins dlboard.scripts.docker_deployment:PLUGINS
