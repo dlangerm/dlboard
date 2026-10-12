@@ -79,7 +79,7 @@ def test_hint_required_artifact_keys() -> None:
 
 def _captions_store_data(stack: object) -> dict[str, Any]:
     # dcc.Store is always the first child of the returned Stack.
-    return _props(_props(stack)["children"][0])["data"][  # pyrefly: ignore [unknown-argument-type]
+    return _props(_props(stack)["children"][1])["data"][  # pyrefly: ignore [unknown-argument-type]
         "per_run_captions"
     ]
 
@@ -171,7 +171,7 @@ def test_slider_marks_has_a_mark_for_every_step_even_when_many() -> None:
 
 def _slider_props(stack: object) -> dict[str, Any]:
     # dcc.Store is child 0; dmc.Slider is child 1.
-    return _props(_props(stack)["children"][1])  # pyrefly: ignore [unknown-argument-type]
+    return _props(_props(stack)["children"][2])  # pyrefly: ignore [unknown-argument-type]
 
 
 def test_render_slider_snaps_only_to_real_steps_and_has_bottom_margin() -> None:
@@ -202,7 +202,7 @@ def test_render_slider_marks_match_max_slider_labels_constant() -> None:
 
 def _first_run_block(stack: object) -> dict[str, Any]:
     # children: [Store, Slider, *page_grids, pager, Modal]; first page grid holds the run blocks.
-    first_grid = _props(stack)["children"][2]  # pyrefly: ignore [unknown-variable-type]
+    first_grid = _props(stack)["children"][3]  # pyrefly: ignore [unknown-variable-type]
     return _props(_props(first_grid)["children"][0])  # pyrefly: ignore [unknown-argument-type]
 
 
@@ -289,3 +289,19 @@ def test_the_per_tag_display_setting_is_described_as_a_table_of_its_display_fiel
         ("size_unit", ParameterFieldType.STR),
     ]
     assert field.default == {}
+
+
+@pytest.mark.parametrize(
+    ("n_runs", "columns"),
+    [(1, 1), (2, 2), (GRID_COLS, GRID_COLS), (GRID_COLS + 4, GRID_COLS)],
+)
+def test_render_titles_the_chart_with_its_key_and_uses_no_more_columns_than_runs(
+    n_runs: int, columns: int
+) -> None:
+    stack = ImageChart.render(ImageChartSettings(key="img"), _artifacts_df(n_runs=n_runs))
+
+    children = _props(stack)["children"]
+    assert _props(children[0])["children"] == "img"  # pyrefly: ignore [unknown-argument-type]
+    first_page = _props(children[3])  # pyrefly: ignore [unknown-argument-type]
+    assert first_page["id"]["page"] == 0
+    assert first_page["cols"] == columns

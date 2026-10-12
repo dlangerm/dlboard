@@ -226,7 +226,8 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
         page_grids = [
             dmc.SimpleGrid(
                 id={"type": "image-series-page", "instance": inst, "page": page_idx},
-                cols=GRID_COLS,
+                # No more columns than runs, so a lone run's image gets the chart's whole width, not a third.
+                cols=min(GRID_COLS, len(page_runs)),
                 style={} if page_idx == 0 else {"display": "none"},
                 children=[_run_block(rid) for rid in page_runs],
             )
@@ -246,6 +247,7 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
 
         return dmc.Stack(
             [
+                dmc.Text(parameters.key, fw=700, style={"overflowWrap": "anywhere"}),
                 dcc.Store(
                     id={"type": "image-series-data", "instance": inst},
                     data={
@@ -325,6 +327,7 @@ ImageChart.register(allow_override=True)
 
 _SCRUB_JS = ClientsideScript(Path(__file__).with_name("image_series_scrub.js"))
 _PAGE_JS = ClientsideScript(Path(__file__).with_name("image_series_page.js"))
+_LOCK_JS = ClientsideScript(Path(__file__).with_name("image_series_lock.js"))
 
 
 def plug(app: dash.Dash) -> None:
@@ -339,6 +342,15 @@ def plug(app: dash.Dash) -> None:
         ],
         dash.Input({"type": "image-series-slider", "instance": dash.MATCH}, "value"),
         dash.State({"type": "image-series-data", "instance": dash.MATCH}, "data"),
+    )
+
+    # Moves every other slider in the same synced panel (`data-dl-panel-sync`) along with the one dragged.
+    app.clientside_callback(
+        _LOCK_JS.source,
+        dash.Input({"type": "image-series-slider", "instance": dash.ALL}, "value"),
+        dash.State({"type": "image-series-slider", "instance": dash.ALL}, "id"),
+        dash.State({"type": "image-series-slider", "instance": dash.ALL}, "marks"),
+        prevent_initial_call=True,
     )
 
     app.clientside_callback(

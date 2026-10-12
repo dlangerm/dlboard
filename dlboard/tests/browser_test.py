@@ -1863,7 +1863,7 @@ def test_panel_menu_controls_mount_only_when_the_menu_opens(page: Page, live_ser
     page.locator(".experiment-card").click()
     _create_panel(page, "only")
 
-    sync_switch = page.get_by_role("switch", name="Sync crosshair across charts")
+    sync_switch = page.get_by_role("switch", name="Sync crosshair and step across charts")
     expect(sync_switch).to_have_count(0)
     _open_panel_menu(page)
     expect(sync_switch).to_have_count(1)
@@ -2117,3 +2117,50 @@ def test_an_image_charts_per_tag_display_is_edited_as_table_rows_in_the_chart_ed
     page.locator(f"#{ADD_CHART_SUBMIT_ID}").click()
 
     expect(chart).to_contain_text("took: 1.5 h")
+
+
+def test_image_series_charts_are_titled_fill_their_chart_and_share_a_synced_panels_step(
+    page: Page, live_server_url: str, tmp_path: Path
+) -> None:
+    """
+    An image chart is titled with its artifact key, and one run's image fills the chart's width rather
+    than a third of it. Its step slider moves the other image charts' in a panel that syncs, each to
+    the latest step it has, and leaves them alone once the panel's sync is switched off.
+    """
+    _create_project_and_experiment(page, live_server_url, "Image Series Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    api = BasicDlboardAPI(live_server_url)
+    run = api.create_run(models.NewRun(experiment_id=experiment_id))
+    wide = np.zeros((400, 1600, 3), dtype=np.uint8)
+    api.log_artifact_batch(
+        [
+            Image(key=key, image=wide, step=step).to_artifact(tmp_path, run.id, experiment_id)
+            for key, steps in {"samples/a": (0, 10), "samples/b": (0, 5)}.items()
+            for step in steps
+        ]
+    )
+    page.reload()
+    _auto_generate_charts(page)
+
+    charts = page.locator(".dl-chart-item")
+    expect(charts).to_have_count(2)
+    expect(charts.get_by_text("samples/a", exact=True)).to_be_visible()
+    expect(charts.get_by_text("samples/b", exact=True)).to_be_visible()
+    first_image_box = charts.first.locator("img").bounding_box()
+    assert first_image_box is not None
+    assert first_image_box["width"] > 600  # a lone run's image spans the chart, not a third of it
+
+    thumbs = charts.get_by_role("slider")
+    expect(thumbs).to_have_count(2)
+    thumbs.nth(0).focus()
+    page.keyboard.press("ArrowRight")
+    expect(thumbs.nth(0)).to_have_attribute("aria-valuenow", "10")
+    expect(thumbs.nth(1)).to_have_attribute("aria-valuenow", "5")  # its latest step, not a step it lacks
+
+    _open_panel_menu(page)
+    page.get_by_role("switch", name="Sync crosshair and step across charts").click()
+    thumbs.nth(0).focus()
+    page.keyboard.press("ArrowLeft")
+    expect(thumbs.nth(0)).to_have_attribute("aria-valuenow", "0")
+    expect(thumbs.nth(1)).to_have_attribute("aria-valuenow", "5")

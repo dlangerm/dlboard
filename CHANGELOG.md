@@ -14,6 +14,9 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ### Added
 
+* A panel's **Sync crosshair and step across charts** setting now also locks its image-series sliders
+  together: moving one moves the others to the latest step each has at or before it.
+* An image-series chart is titled with its artifact key.
 * A tag can carry a unit: `tags={"took": Quantity(value=5400, unit=TimeUnit.SECONDS)}` records what the
   number was measured in (time `ns` to `d`, size `B` to `TB`, decimal); on the wire it is
   `{"value": 5400, "unit": "s"}`. The client never says how to show it: the image chart shows it in the
@@ -24,6 +27,8 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ### Changed
 
+* An image-series chart showing fewer runs than it has columns (three) no longer leaves the other columns
+  empty: one run's image fills the chart's width, so a large chart size now enlarges it.
 * Artifact `tags` values are JSON scalars (`str | int | float | bool`) on the wire and in storage, not
   text (#179): `NewArtifact.tags` is `dict[str, TagValue]`, clients send what the caller logged
   (`tags={"score": 0.14}`), and the image-series and file-list charts format numbers the same way wherever

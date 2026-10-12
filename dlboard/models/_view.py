@@ -445,7 +445,7 @@ class PanelInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, 
     """Charts belonging to this panel."""
 
     sync: bool = True
-    """Whether synced-capable charts (e.g. line charts) in this panel share a hover/tooltip crosshair."""
+    """Whether synced-capable charts in this panel move together: line charts share a hover/tooltip crosshair, image series their step slider."""
 
     layout: typing.Literal["packed", "grid"] = "packed"
     """`"packed"` sizes each chart to its own natural width and wraps them left-to-right;

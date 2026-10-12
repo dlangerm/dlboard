@@ -730,10 +730,14 @@ def render_panel_content_from_df(
 ) -> Component:
     """Render a panel's charts at `indexes` from an already-fetched dataframe -- see `render_panel_content`."""
     items = render_panel_charts(panel, df, indexes)
+    # Read by the image series' slider lock (`image_series_lock.js`): which charts move together.
+    sync_marker = cast("dict[str, Any]", {"data-dl-panel-sync": "1"} if panel.sync else {})
     return (
-        dmc.SimpleGrid(items, id=panel_grid_id(panel.name), cols=panel.grid_columns, spacing="lg")
+        dmc.SimpleGrid(
+            items, id=panel_grid_id(panel.name), cols=panel.grid_columns, spacing="lg", **sync_marker
+        )
         if panel.layout == "grid"
-        else dmc.Flex(items, justify="flex-start", gap="lg", wrap="wrap")
+        else dmc.Flex(items, justify="flex-start", gap="lg", wrap="wrap", **sync_marker)
     )
 
 
@@ -884,7 +888,7 @@ def panel_header_controls(panel: models.PanelInstance[Any, Any]) -> Component:
                             dmc.MenuDivider(),
                             dmc.Switch(
                                 id=panel_sync_switch_id(panel_name),
-                                label="Sync crosshair across charts",
+                                label="Sync crosshair and step across charts",
                                 checked=panel.sync,
                                 size="xs",
                                 px="sm",
