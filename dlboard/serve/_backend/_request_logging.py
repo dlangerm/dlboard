@@ -4,6 +4,8 @@ A request id on every log line for the life of a request, plus an opt-in one-lin
 Independent of auth (see `_auth.py` for the request gate and its own security-header
 `after_request`) -- this runs for every request, public routes included, since correlating a
 health-check probe or a failed login attempt by request id is exactly as useful as any other.
+`register` has to run after the gate is installed: it puts its `before_request` ahead of the gate's,
+so a request the gate turns away (a 401, a redirect to sign in) still has a request id and a start time.
 """
 
 from __future__ import annotations
@@ -30,11 +32,12 @@ def register(app: Dash) -> None:
     """Bind a request id to every log line for the life of each request; log a summary if enabled."""
     access_log = LoggingSettings().access_log
 
-    @app.server.before_request
     def _start_request() -> None:
         request_id = request.headers.get(_REQUEST_ID_HEADER) or str(uuid4())
         structlog.contextvars.bind_contextvars(request_id=request_id)
         g.dlboard_request_started_at = time.perf_counter()
+
+    app.server.before_request_funcs.setdefault(None, []).insert(0, _start_request)
 
     @app.server.after_request
     def _finish_request(response: BaseResponse) -> BaseResponse:
