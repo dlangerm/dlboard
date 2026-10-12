@@ -10,13 +10,22 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
+import threading
+import traceback
 from dataclasses import dataclass
+from enum import StrEnum
 from functools import cache
 from typing import TYPE_CHECKING, Final
 from uuid import uuid4
 
+import pendulum
+from opentelemetry._logs import LogRecord, SeverityNumber
+from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
 from opentelemetry.exporter.prometheus import PrometheusMetricReader
+from opentelemetry.sdk._logs import LoggerProvider
+from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
 from opentelemetry.sdk.metrics import Histogram, MeterProvider
 from opentelemetry.sdk.metrics.export import MetricReader, PeriodicExportingMetricReader
 from opentelemetry.sdk.metrics.view import ExplicitBucketHistogramAggregation, View
@@ -24,10 +33,12 @@ from opentelemetry.sdk.resources import Resource
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from dlboard._version import __version__
-from dlboard.serve.telemetry import SECONDS_BUCKETS, MetricsExporter, TelemetrySettings, Unit
+from dlboard.serve.telemetry import LOGS, SECONDS_BUCKETS, MetricsExporter, TelemetrySettings, Unit
 
 if TYPE_CHECKING:
+    from opentelemetry._logs import Logger
     from opentelemetry.metrics import Meter
+    from opentelemetry.util.types import AttributeValue
 
     from dlboard.serve.telemetry._prometheus import Snapshots
 
@@ -79,6 +90,18 @@ class Metrics:
             self.provider.shutdown()
 
 
+@dataclass(frozen=True)
+class Logs:
+    """The current process's OTLP logger."""
+
+    provider: LoggerProvider
+    logger: Logger
+
+    def close(self) -> None:
+        """Flush the batch of logs still waiting and shut down."""
+        self.provider.shutdown()
+
+
 def build_metrics(settings: TelemetrySettings) -> Metrics:
     """The meter provider with one reader per exporter in `settings.metrics`."""
     readers: list[MetricReader] = []
@@ -107,3 +130,96 @@ def build_metrics(settings: TelemetrySettings) -> Metrics:
 
         snapshots = Snapshots(settings.prometheus_dir, settings.prometheus_snapshot_s)
     return Metrics(provider.get_meter(_SERVICE_NAME, __version__), provider, snapshots)
+
+
+def build_logs(_settings: TelemetrySettings) -> Logs:
+    """The logger provider that batches log records and pushes them over OTLP."""
+    provider = LoggerProvider(resource=_resource(os.getpid()), shutdown_on_exit=False)
+    provider.add_log_record_processor(BatchLogRecordProcessor(OTLPLogExporter()))
+    return Logs(provider, provider.get_logger(_SERVICE_NAME, __version__))
+
+
+class _LogLevel(StrEnum):
+    """The levels structlog's `add_log_level` produces."""
+
+    DEBUG = "debug"
+    INFO = "info"
+    WARNING = "warning"
+    ERROR = "error"
+    CRITICAL = "critical"
+
+
+def _severity(level: str) -> SeverityNumber:
+    try:
+        match _LogLevel(level):
+            case _LogLevel.DEBUG:
+                return SeverityNumber.DEBUG
+            case _LogLevel.INFO:
+                return SeverityNumber.INFO
+            case _LogLevel.WARNING:
+                return SeverityNumber.WARN
+            case _LogLevel.ERROR:
+                return SeverityNumber.ERROR
+            case _LogLevel.CRITICAL:
+                return SeverityNumber.FATAL
+    except ValueError:  # a custom level
+        return SeverityNumber.UNSPECIFIED
+
+
+_NOT_ATTRIBUTES: Final = frozenset({"event", "level", "timestamp", "exc_info", "stack"})
+
+
+def _record(event_dict: dict[str, object]) -> LogRecord:
+    """The OpenTelemetry log record for one structlog event."""
+    level = str(event_dict.get("level", ""))
+    attributes: dict[str, AttributeValue] = {
+        k: v if isinstance(v, str | bool | int | float) else str(v)
+        for k, v in event_dict.items()
+        if k not in _NOT_ATTRIBUTES
+    }
+    # Spelled out as the semconv `exception.*` attributes; `format_exception` never includes locals.
+    exc: BaseException | None
+    match event_dict.get("exc_info"):
+        case True:
+            exc = sys.exc_info()[1]
+        case (BaseException() as raised) | (_, BaseException() as raised, _):
+            exc = raised
+        case _:
+            exc = None
+    if exc is not None:
+        attributes["exception.type"] = type(exc).__qualname__
+        attributes["exception.message"] = str(exc)
+        attributes["exception.stacktrace"] = "".join(traceback.format_exception(exc))
+    now = pendulum.now("UTC")
+    nanoseconds = now.int_timestamp * 1_000_000_000 + now.microsecond * 1_000
+    return LogRecord(
+        timestamp=nanoseconds,
+        observed_timestamp=nanoseconds,
+        severity_text=level.upper(),
+        severity_number=_severity(level),
+        body=str(event_dict.get("event", "")),
+        attributes=attributes,
+    )
+
+
+_WARNED: Final = threading.Event()
+"""Set once a failure to forward has been reported, so a persistent one is not reported per log line."""
+
+
+def forward_log(_logger: object, _method: str, event_dict: dict[str, object]) -> dict[str, object]:
+    """
+    A structlog processor: send each event over OTLP, and pass it on to the console/JSON renderer unchanged.
+
+    Logging must never fail because telemetry did, so nothing in here may raise.
+    """
+    try:
+        if (logs := LOGS.get()) is not None:
+            logs.logger.emit(_record(event_dict))
+    except Exception:
+        if not _WARNED.is_set():
+            _WARNED.set()
+            # The standard library's logger, not structlog's: a failure of *this* processor must not recurse into it.
+            logging.getLogger(__name__).exception(
+                "could not send a log event over OTLP; further failures are not logged"
+            )
+    return event_dict

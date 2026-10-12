@@ -17,6 +17,8 @@ from enum import StrEnum
 import structlog
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from dlboard.serve.telemetry import TelemetrySettings
+
 
 class LogFormat(StrEnum):
     """How a log line is rendered."""
@@ -50,10 +52,18 @@ def configure_logging() -> None:
     `traceback.format_exception` (what `format_exc_info` uses for JSON) never includes locals to
     begin with. Otherwise a password, an API token, or (inside a blob-store worker process) cloud
     storage credentials held by a function that then raised would end up in the log.
+
+    With `DLBOARD_TELEMETRY_LOGS` on, every event is also sent over OTLP (see `dlboard.serve.telemetry`).
     """
     settings = LoggingSettings()
     level = logging.getLevelNamesMapping()[settings.log_level.upper()]
     *defaults, _ = structlog.get_config()["processors"]
+    if TelemetrySettings().logs:
+        from dlboard.serve.telemetry._sdk import (
+            forward_log,
+        )
+
+        defaults.append(forward_log)
     match settings.log_format:
         case LogFormat.JSON:
             processors = [

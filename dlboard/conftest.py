@@ -28,7 +28,7 @@ from dlboard.serve import SQLStoreBase, get_system_data_store
 from dlboard.serve import app as build_app
 from dlboard.serve._backend import _auth
 from dlboard.serve._backend._data_store import ARTIFACT_STORE
-from dlboard.serve.telemetry import METRICS
+from dlboard.serve.telemetry import LOGS, METRICS
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -523,12 +523,14 @@ def telemetry(monkeypatch: pytest.MonkeyPatch) -> Iterator[pytest.MonkeyPatch]:
     """
     A test that switches telemetry on: set `DLBOARD_TELEMETRY_*` on the yielded `monkeypatch`.
 
-    The per-process singleton remembers what it found (including "off") for the life of the
-    process, so it is closed before and after to rebuild from the test's environment.
+    The per-process singletons remember what they found (including "off") for the life of the
+    process, so they are closed before and after to rebuild from the test's environment.
     """
     METRICS.close()
+    LOGS.close()
     yield monkeypatch
     METRICS.close()
+    LOGS.close()
 
 
 def scraped_total(scrape: str, name: str, **labels: str) -> float:

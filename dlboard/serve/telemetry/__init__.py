@@ -22,6 +22,7 @@ Settings are `DLBOARD_TELEMETRY_*`; the exporters themselves read the standard `
 
 from __future__ import annotations
 
+import importlib.metadata
 import importlib.util
 import os
 import shutil
@@ -51,7 +52,7 @@ if TYPE_CHECKING:
     from opentelemetry.util.types import Attributes as OtelAttributes
     from opentelemetry.util.types import AttributeValue
 
-    from dlboard.serve.telemetry._sdk import Metrics
+    from dlboard.serve.telemetry._sdk import Logs, Metrics
 
 _log = get_logger(__name__)
 
@@ -72,6 +73,8 @@ class TelemetrySettings(BaseSettings):
 
     metrics: Annotated[frozenset[MetricsExporter], NoDecode] = frozenset()
     """Comma-separated exporters (`otlp`, `prometheus`) to send metrics to. Unset exports none."""
+    logs: bool = False
+    """Also send every log event over OTLP."""
     prometheus_dir: Path | None = None
     """
     A directory for the Prometheus exporter's per-process snapshots, so `/metrics` can add up every worker.
@@ -88,10 +91,27 @@ class TelemetrySettings(BaseSettings):
 
     @model_validator(mode="after")
     def _require_extra(self) -> Self:
-        if self.metrics and not _sdk_installed():
+        if (self.metrics or self.logs) and not _sdk_installed():
             msg = "DLBOARD_TELEMETRY_* is set, but the OpenTelemetry SDK is missing: pip install 'dlboard[otel]'"
             raise ValueError(msg)
+        if self.logs and _sdk_version() < _LOGS_MIN_SDK:
+            msg = f"DLBOARD_TELEMETRY_LOGS needs opentelemetry-sdk>={_LOGS_MIN_SDK[0]}.{_LOGS_MIN_SDK[1]}, found {importlib.metadata.version('opentelemetry-sdk')}"
+            raise ValueError(msg)
         return self
+
+
+_LOGS_MIN_SDK: Final = (1, 37)
+"""The first SDK whose `Logger.emit` takes the API's `LogRecord`; metrics work with far older ones."""
+
+
+def _sdk_version() -> tuple[int, int]:
+    try:
+        major, minor, *_ = importlib.metadata.version("opentelemetry-sdk").split(".")
+    except (
+        importlib.metadata.PackageNotFoundError
+    ):  # importable but not installed as a distribution: take it as new enough
+        return _LOGS_MIN_SDK
+    return int(major), int(minor)
 
 
 def _sdk_installed() -> bool:
@@ -115,7 +135,8 @@ class _PerProcess[T: _Closeable]:
 
     `build` returns `None` when its signal is switched off. A call that arrives on another thread
     mid-build also gets `None`, rather than waiting -- so does one that re-enters from the build
-    itself. A build that fails is tried again after a back-off that doubles from 5 seconds to 5
+    itself (the warning it logs on failure goes through the log processor, which asks for `LOGS`).
+    A build that fails is tried again after a back-off that doubles from 5 seconds to 5
     minutes, so a setup that was broken when the process started (a bad endpoint, a full disk)
     recovers on its own instead of costing the process its telemetry for good.
     """
@@ -188,7 +209,18 @@ def _build_metrics(settings: TelemetrySettings) -> Metrics | None:
     return build_metrics(settings)
 
 
+def _build_logs(settings: TelemetrySettings) -> Logs | None:
+    if not settings.logs:
+        return None
+    from dlboard.serve.telemetry._sdk import (
+        build_logs,
+    )
+
+    return build_logs(settings)
+
+
 METRICS: Final = _PerProcess(_build_metrics)
+LOGS: Final = _PerProcess(_build_logs)
 
 
 class Unit(StrEnum):
