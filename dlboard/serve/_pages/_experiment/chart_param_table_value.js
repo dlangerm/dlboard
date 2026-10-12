@@ -6,9 +6,9 @@ function chartParamTableValue(_rowsChanged, _cellEdited) {
     if (!api) {
         return window.dash_clientside.no_update;
     }
-    // The table's rows as the mapping the setting holds, as the JSON text its hidden field carries: a
-    // row's key names its entry, and a cell left blank is left out of it. Read from the grid itself,
-    // as `virtualRowData` doesn't follow a cell being edited.
+    // The table's rows as the mapping the setting holds: a row's key names its entry, and a cell left
+    // blank is left out of it. Read from the grid itself, as `virtualRowData` doesn't follow a cell
+    // being edited.
     const entries = {};
     api.forEachNode(({ data: { key, ...cells } }) => {
         if (key) {
@@ -19,5 +19,5 @@ function chartParamTableValue(_rowsChanged, _cellEdited) {
             );
         }
     });
-    return JSON.stringify(entries);
+    return entries;
 }

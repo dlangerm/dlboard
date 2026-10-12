@@ -77,6 +77,8 @@ def test_render_chart_preview_leaves_out_excluded_runs_like_the_real_panel(
         ["loss", "step"],
         [None, None],
         field_ids,
+        [],
+        [],
         store=store,
         ref=state.PageRef(experiment_id, view.id),
     )

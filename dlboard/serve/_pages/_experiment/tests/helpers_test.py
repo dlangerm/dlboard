@@ -84,18 +84,17 @@ def test_merge_chart_param_values_prefers_value_over_checked() -> None:
     }
 
 
-@pytest.mark.parametrize(
-    ("text", "expected"),
-    [('{"took": {"time_unit": "h"}}', {"took": {"time_unit": "h"}}), ("", None), ("{not json", "{not json")],
-    ids=["parsed", "blank-is-dropped", "invalid-is-left-for-validation"],
-)
-def test_merge_chart_param_values_parses_json_fields(text: str, expected: object) -> None:
+def test_merge_chart_param_values_takes_a_tables_rows_from_its_data() -> None:
+    entries = {"took": {"time_unit": "h"}}
     fields = {
         "tag_display": ParameterField(name="tag_display", type=ParameterFieldType.TABLE, required=False)
     }
-    merged = state.merge_chart_param_values([text], [None], [{"field": "tag_display"}], fields)
 
-    assert merged == ({"tag_display": expected} if expected is not None else {})
+    merged = state.merge_chart_param_values(
+        [], [], [], fields, table_ids=[{"field": "tag_display"}], table_values=[entries]
+    )
+
+    assert merged == {"tag_display": entries}
 
 
 def test_merge_chart_param_values_drops_cleared_optional_fields() -> None:

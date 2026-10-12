@@ -85,6 +85,8 @@ class _AddChartCtx(core.EditCtx):
     values: list[Any]
     checked_values: list[Any]
     field_ids: list[dict[str, str]]
+    table_ids: list[dict[str, str]]
+    table_values: list[Any]
     target: core.ChartTargetData | None
     experiment_id: int
 
@@ -170,6 +172,8 @@ def _register_add_chart(app: Dash) -> None:
             "chart_type_name": State(core.ADD_CHART_TYPE_SELECT_ID, "value"),
             "values": State({"type": core.CHART_PARAM_TYPE, "field": ALL}, "value"),
             "checked_values": State({"type": core.CHART_PARAM_TYPE, "field": ALL}, "checked"),
+            "table_ids": State({"type": core.CHART_PARAM_TABLE_DATA_TYPE, "field": ALL}, "id"),
+            "table_values": State({"type": core.CHART_PARAM_TABLE_DATA_TYPE, "field": ALL}, "data"),
             "field_ids": State({"type": core.CHART_PARAM_TYPE, "field": ALL}, "id"),
             "target": State(core.ADD_CHART_TARGET_ID, "data"),
             "experiment_id": State(constants.STATE_EXPERIMENT_ID, "data"),
@@ -185,7 +189,12 @@ def _register_add_chart(app: Dash) -> None:
 
         fields = ChartTypeRegistry.get_registered_chart_types().get(chart_type_name, {})
         parameters = core.merge_chart_param_values(
-            add_chart_ctx["values"], add_chart_ctx["checked_values"], add_chart_ctx["field_ids"], fields
+            add_chart_ctx["values"],
+            add_chart_ctx["checked_values"],
+            add_chart_ctx["field_ids"],
+            fields,
+            table_ids=add_chart_ctx["table_ids"],
+            table_values=add_chart_ctx["table_values"],
         )
         try:
             new_chart = core.build_validated_chart_instance(chart_type_name, parameters)

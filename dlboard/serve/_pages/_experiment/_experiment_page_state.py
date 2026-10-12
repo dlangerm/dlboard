@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import hashlib
 import itertools
-import json
 import typing
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypedDict, cast
@@ -217,12 +216,19 @@ ADD_CHART_CANCEL_ID: ButtonId[ExperimentPage] = ButtonId("add-chart-cancel")
 # submitted form back out in `add_chart`), so the "chart-param" type string lives here once.
 CHART_PARAM_TYPE: typing.Final = "chart-param"
 _CHART_PARAM_CLEAR_TYPE: typing.Final = "chart-param-clear"
+CHART_PARAM_TABLE_DATA_TYPE: typing.Final = "chart-param-table-data"
+"""A `TABLE` chart parameter's own value: a `Store` holding its rows as the mapping the setting takes. Kept apart
+from `CHART_PARAM_TYPE`, whose `data` is a Select's options."""
 CHART_PARAM_TABLE_TYPE: typing.Final = "chart-param-table"
 """The editable grid of a `TABLE` chart parameter; its `-add` / `-remove` buttons are `CHART_PARAM_TABLE_TYPE` + that."""
 
 
 def chart_param_id(field_name: str) -> dict[str, str]:
     return {"type": CHART_PARAM_TYPE, "field": field_name}
+
+
+def chart_param_table_data_id(field_name: str) -> dict[str, str]:
+    return {"type": CHART_PARAM_TABLE_DATA_TYPE, "field": field_name}
 
 
 def chart_param_table_id(field_name: str) -> dict[str, str]:
@@ -2137,37 +2143,32 @@ def move_chart_to_panel(  # noqa: PLR0913
     return [_insert(p) for p in without_chart]
 
 
-def _parsed_json(text: str) -> Any:  # noqa: ANN401
-    """`text` as JSON (`None` if blank), or unchanged if it isn't any."""
-    if not text.strip():
-        return None
-    try:
-        return json.loads(text)
-    except ValueError:
-        return text
-
-
-def merge_chart_param_values(
+def merge_chart_param_values(  # noqa: PLR0913
     values: list[Any],
     checked_values: list[Any],
     field_ids: list[dict[str, str]],
     fields: dict[str, models.ParameterField],
+    *,
+    table_ids: list[dict[str, str]] = [],  # noqa: B006 -- never mutated
+    table_values: list[Any] = [],  # noqa: B006
 ) -> dict[str, Any]:
     """
-    NumberInput/TextInput/Select report via `value`; Switch reports via `checked`. Merge them by field id.
+    Merge a form's reports by field id.
+
+    NumberInput/TextInput/Select report via `value` and Switch via `checked`; a table field is a separate
+    `Store` (`table_ids`, `table_values`) holding its rows.
 
     A cleared NumberInput reports `None`, which isn't a valid `int`/`float` -- for a field with its
     own default (`required=False`), that value is dropped entirely so validation falls back to the
-    field's default instead of failing with "not a valid integer". A table field's JSON text (written by its grid) is parsed here,
-    and left as it is if it doesn't parse, so validation reports it.
+    field's default instead of failing with "not a valid integer".
     """
     merged = [v if v is not None else c for v, c in zip(values, checked_values, strict=True)]
-    parameters: dict[str, Any] = {}
+    parameters: dict[str, Any] = {
+        fid["field"]: rows for fid, rows in zip(table_ids, table_values, strict=True)
+    }
     for fid, val in zip(field_ids, merged, strict=True):
         field_name = fid["field"]
         field = fields.get(field_name)
-        if field is not None and field.type == models.ParameterFieldType.TABLE and isinstance(val, str):
-            val = _parsed_json(val)
         if val is None and field is not None and not field.required:
             continue
         parameters[field_name] = val

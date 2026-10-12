@@ -10,13 +10,12 @@ there does.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import dash_ag_grid as dag
 import dash_mantine_components as dmc
-from dash import ALL, MATCH, Dash, Input, Output, State, html
+from dash import ALL, MATCH, Dash, Input, Output, State, dcc
 from dash.exceptions import PreventUpdate
 from pydantic import ValidationError
 from structlog.stdlib import get_logger
@@ -46,8 +45,8 @@ def _table_input(
     """
     A `TABLE` field as an editable grid, a row per entry with a cell for each field of its row model.
 
-    The grid is only what the person edits: `chart_param_table_value.js` writes its rows as JSON text into
-    the field's own (hidden) input, which is what the form reads back like any other field.
+    The grid is only what the person edits: `chart_param_table_value.js` writes its rows, as the mapping the
+    setting holds, into the field's own `Store`, which is what the form reads back like any other field.
     """
     columns: list[dict[str, Any]] = [
         {"field": "key", "headerName": "Name", "editable": True, "flex": 2, "checkboxSelection": True}
@@ -101,10 +100,7 @@ def _table_input(
                 ],
                 gap="xs",
             ),
-            html.Div(
-                dmc.TextInput(id=core.chart_param_id(field_name), value=json.dumps(entries)),
-                style={"display": "none"},
-            ),
+            dcc.Store(id=core.chart_param_table_data_id(field_name), data=entries),
         ],
         gap="xs",
     )
@@ -212,7 +208,7 @@ def _register_clear_button(app: Dash) -> None:
 def _register_table_inputs(app: Dash) -> None:
     app.clientside_callback(
         _TABLE_VALUE_JS.source,
-        Output({"type": core.CHART_PARAM_TYPE, "field": MATCH}, "value", allow_duplicate=True),
+        Output({"type": core.CHART_PARAM_TABLE_DATA_TYPE, "field": MATCH}, "data"),
         Input({"type": core.CHART_PARAM_TABLE_TYPE, "field": MATCH}, "virtualRowData"),
         Input({"type": core.CHART_PARAM_TABLE_TYPE, "field": MATCH}, "cellValueChanged"),
         prevent_initial_call=True,
@@ -312,6 +308,8 @@ def render_chart_preview(  # noqa: PLR0913
     values: list[Any],
     checked_values: list[Any],
     field_ids: list[dict[str, str]],
+    table_ids: list[dict[str, str]],
+    table_values: list[Any],
     *,
     store: DataStore[...],
     ref: core.PageRef,
@@ -326,7 +324,9 @@ def render_chart_preview(  # noqa: PLR0913
     if not chart_type_name:
         return None, ""
     fields = models.ChartTypeRegistry.get_registered_chart_types().get(chart_type_name, {})
-    parameters = core.merge_chart_param_values(values, checked_values, field_ids, fields)
+    parameters = core.merge_chart_param_values(
+        values, checked_values, field_ids, fields, table_ids=table_ids, table_values=table_values
+    )
     try:
         chart = core.build_validated_chart_instance(chart_type_name, parameters)
         page = core.load_page(store, ref)
@@ -360,7 +360,9 @@ def _register_form(app: Dash) -> None:
         Input(core.ADD_CHART_TYPE_SELECT_ID, "value"),
         Input({"type": core.CHART_PARAM_TYPE, "field": ALL}, "value"),
         Input({"type": core.CHART_PARAM_TYPE, "field": ALL}, "checked"),
+        Input({"type": core.CHART_PARAM_TABLE_DATA_TYPE, "field": ALL}, "data"),
         State({"type": core.CHART_PARAM_TYPE, "field": ALL}, "id"),
+        State({"type": core.CHART_PARAM_TABLE_DATA_TYPE, "field": ALL}, "id"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
         State(core.STATE_VIEW_ID, "data"),
         prevent_initial_call=True,
@@ -369,7 +371,9 @@ def _register_form(app: Dash) -> None:
         chart_type_name: str | None,
         values: list[Any],
         checked_values: list[Any],
+        table_values: list[Any],
         field_ids: list[dict[str, str]],
+        table_ids: list[dict[str, str]],
         experiment_id: int,
         view_id: int | None,
     ) -> tuple[Any, str]:
@@ -378,6 +382,8 @@ def _register_form(app: Dash) -> None:
             values,
             checked_values,
             field_ids,
+            table_ids,
+            table_values,
             store=get_data_store(),
             ref=core.PageRef(experiment_id, view_id),
         )
