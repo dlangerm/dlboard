@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
-from dlboard.models import DEFAULT_TAG_PRECISION, SizeUnit, TagValue, TimeUnit, format_tag_value
+from pydantic import TypeAdapter
+
+from dlboard.models import TagDisplay, TagValue, format_tag_value
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 HPARAM_COLUMN_PREFIX = "hparam__"
 """Hyperparameter columns are merged into the same wide dataframe as metrics/artifacts, prefixed
@@ -40,25 +45,35 @@ def infer_column_dtype[T](rows: list[dict[T, Any]], key: T) -> ColumnDType:
     return TEXT
 
 
+_TAGS_ADAPTER: TypeAdapter[dict[str, TagValue]] = TypeAdapter(dict[str, TagValue])
+
+
+def parse_tags(raw_tags: object) -> dict[str, TagValue]:
+    """
+    An artifact `<key>__tags` cell as typed tags.
+
+    `build_artifacts_dataframe` puts each artifact's tags in as plain JSON (a `Quantity` is a
+    `{"value": ..., "unit": ...}` dict by then), and a `float` (NaN) where pivoting left a gap for a
+    (run, step) with no tags logged -- the sole non-dict case, which has none.
+    """
+    return _TAGS_ADAPTER.validate_python(raw_tags) if isinstance(raw_tags, dict) else {}
+
+
 def format_tags_caption(
-    raw_tags: dict[str, TagValue] | float | None,
-    *,
-    precision: int = DEFAULT_TAG_PRECISION,
-    time_unit: TimeUnit | None = None,
-    size_unit: SizeUnit | None = None,
+    raw_tags: object,
+    display: TagDisplay = TagDisplay(),  # noqa: B008
+    by_key: Mapping[str, TagDisplay] | None = None,
 ) -> str:
     """
     Format an artifact `<key>__tags` cell into a caption.
 
-    `Artifact.tags` is a `dict[str, TagValue]`, and `build_artifacts_dataframe` pivots it straight into the
-    dataframe unchanged -- so a real row is always a dict. A `float` (NaN) shows up only when pivoting
-    left a gap for a (run, step) with no tags logged; that's the sole non-dict case to handle.
+    The cell is read with `parse_tags`.
+    Every tag is shown as `display`, except one named in `by_key`, which that overrides.
     """
-    if not isinstance(raw_tags, dict):
-        return ""
+    by_key = by_key or {}
     return ", ".join(
-        f"{k}: {format_tag_value(v, precision=precision, time_unit=time_unit, size_unit=size_unit)}"
-        for k, v in raw_tags.items()
+        f"{k}: {format_tag_value(v, display.overridden_by(by_key[k]) if k in by_key else display)}"
+        for k, v in parse_tags(raw_tags).items()
     )
 
 

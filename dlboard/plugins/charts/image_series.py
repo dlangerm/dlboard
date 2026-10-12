@@ -23,6 +23,7 @@ from dlboard.models import (
     ChartType,
     ColumnKind,
     SizeUnit,
+    TagDisplay,
     TimeUnit,
     is_inlineable_artifact,
 )
@@ -70,6 +71,18 @@ class ImageChartSettings(BaseModel, frozen=True, extra="forbid"):
         description="Show tags logged as a data size in this unit, whatever unit they were logged in. "
         "Leave blank to pick the largest unit that fits each one.",
     )
+    tag_display: dict[str, TagDisplay] = Field(
+        default_factory=dict,
+        description="Display settings for particular tags, a row per tag name, taking the place of the "
+        "three above for that tag. Leave a cell blank to keep the chart's own setting.",
+    )
+
+    @property
+    def tag_defaults(self) -> TagDisplay:
+        """How every tag is shown unless `tag_display` names it."""
+        return TagDisplay(
+            precision=self.tag_precision, time_unit=self.tag_time_unit, size_unit=self.tag_size_unit
+        )
 
 
 def _instance_id(parameters: ImageChartSettings) -> str:
@@ -151,12 +164,7 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
             per_run_urls[str(rid)] = dict(zip((str(s) for s in steps), g[col], strict=True))
             if has_tags:
                 per_run_captions[str(rid)] = {
-                    str(s): format_tags_caption(
-                        raw,
-                        precision=parameters.tag_precision,
-                        time_unit=parameters.tag_time_unit,
-                        size_unit=parameters.tag_size_unit,
-                    )
+                    str(s): format_tags_caption(raw, parameters.tag_defaults, parameters.tag_display)
                     for s, raw in zip(steps, g[tag_col], strict=True)
                 }
             if has_names:

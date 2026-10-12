@@ -18,7 +18,8 @@ pulls that section's body into the GitHub release notes and publishes both distr
   number was measured in (time `ns` to `d`, size `B` to `TB`, decimal); on the wire it is
   `{"value": 5400, "unit": "s"}`. The client never says how to show it: the image chart shows it in the
   largest unit that fits by default (`1.500 h`, `2.500 GB`, not `5400` or `2500000000`), or in the unit set
-  by its new `tag_time_unit` / `tag_size_unit` settings, to `tag_precision` significant digits. Plain
+  by its new `tag_time_unit` / `tag_size_unit` settings, to `tag_precision` significant digits, and
+  `tag_display` overrides those per tag name. Plain
   numbers are written with separators (`12,346`) instead of `1.235e+04`.
 
 ### Changed

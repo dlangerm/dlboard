@@ -24,17 +24,20 @@ import re
 import time
 from typing import TYPE_CHECKING, Any, cast
 
+import numpy as np
 import pendulum
 import pytest
 from playwright.sync_api import expect
 
 from dlboard import models
 from dlboard.client._rest_api import BasicDlboardAPI
+from dlboard.client.artifacts.image import Image
 from dlboard.models import PanelInstance
 from dlboard.serve import get_system_data_store
 from dlboard.serve._jump import JUMP_SELECT_ID
 from dlboard.serve._pages._experiment._chart_autogen import AUTO_OPEN_MAX_CHARTS
 from dlboard.serve._pages._experiment._experiment_page_state import (
+    ADD_CHART_SUBMIT_ID,
     LIVE_PAUSED_BADGE_ID,
     LIVE_STATUS_ID,
     LIVE_UPDATES_ENABLED_ID,
@@ -72,6 +75,7 @@ from dlboard.serve.app import PAGE_LOADING_CLASS
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
+    from pathlib import Path
 
     from playwright.sync_api import Page, Route
 
@@ -2066,3 +2070,50 @@ def test_a_panels_charts_are_paged_and_filtered_by_metric_name(
     chart_filter.fill("")
     expect(charts).to_have_count(12)
     assert console_errors == []
+
+
+def test_an_image_charts_per_tag_display_is_edited_as_table_rows_in_the_chart_editor(
+    page: Page, live_server_url: str, tmp_path: Path
+) -> None:
+    """A unit tag shows in the largest unit that fits, until the chart's editor maps that tag to another."""
+    _create_project_and_experiment(page, live_server_url, "Tag Display Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    api = BasicDlboardAPI(live_server_url)
+    run = api.create_run(models.NewRun(experiment_id=experiment_id))
+    api.log_artifact_batch(
+        [
+            Image(
+                key="samples/a",
+                image=np.zeros((8, 8, 3), dtype=np.uint8),
+                step=0,
+                tags={"took": models.Quantity(value=5400, unit=models.TimeUnit.SECONDS)},
+            ).to_artifact(tmp_path, run.id, experiment_id)
+        ]
+    )
+    page.reload()
+    _auto_generate_charts(page)
+
+    chart = page.locator(".dl-chart-item")
+    expect(chart).to_contain_text("took: 1.500 h")
+    chart.hover()
+    chart.get_by_role("button", name="Edit chart").click()
+
+    # A row per tag in a grid, not JSON: add one, name the tag, and give it a precision.
+    add_row = page.get_by_role("button", name="Add", exact=True)
+    editor = page.get_by_role("dialog")
+    rows = editor.locator(".ag-center-cols-container .ag-row")
+    add_row.click()
+    expect(rows).to_have_count(1)
+    rows.first.locator(".ag-checkbox-input-wrapper").click()
+    page.get_by_role("button", name="Remove checked").click()
+    expect(rows).to_have_count(0)
+    add_row.click()
+    editor.locator('.ag-cell[col-id="key"]').first.click()
+    page.keyboard.type("took")
+    page.keyboard.press("Tab")
+    page.keyboard.type("2")
+    page.keyboard.press("Enter")
+    page.locator(f"#{ADD_CHART_SUBMIT_ID}").click()
+
+    expect(chart).to_contain_text("took: 1.5 h")

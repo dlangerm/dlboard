@@ -75,6 +75,8 @@ class ParameterFieldType(StrEnum):
     FLOAT = "float"
     STR = "str"
     LIST_STR = "list[str]"
+    TABLE = "table"
+    """A `dict[str, Model]`, edited as a table with a row per entry: its key, then a cell per field of `Model`."""
 
 
 class ChartType(ABC, BaseModel, typing.Generic[_Parameters, _Dataframe, _Chart], frozen=True, extra="forbid"):
@@ -156,10 +158,12 @@ class ParameterField(BaseModel, frozen=True, extra="forbid"):
     name: str
     type: ParameterFieldType
     required: bool
-    default: bool | int | float | str | list[str] | None = None
+    default: bool | int | float | str | list[str] | dict[str, typing.Any] | None = None
     column_kind: ColumnKind | None = None
     choices: tuple[str, ...] | None = None
     """Fixed set of allowed values for a `Literal[...]`-typed field, rendered as a dropdown."""
+    columns: tuple[ParameterField, ...] | None = None
+    """For a `TABLE` field, a descriptor of each field of its row model: the cells of a row after its key."""
     description: str | None = None
     """Help text shown alongside the field's widget, sourced from the settings model's own
     `pydantic.Field(description=...)`."""
@@ -190,6 +194,37 @@ def _fixed_choices(annotation: object) -> tuple[str, ...] | None:
         enum_type: type[StrEnum] = annotation
         return tuple(str(member) for member in enum_type)
     return None
+
+
+_SCALAR_WIDGETS: typing.Final = {
+    bool: ParameterFieldType.BOOL,
+    float: ParameterFieldType.FLOAT,
+    int: ParameterFieldType.INT,
+    str: ParameterFieldType.STR,
+}
+
+
+def _widget_for(annotation: object) -> tuple[ParameterFieldType, tuple[str, ...] | None]:
+    """The widget a settings field is edited with, and its fixed choices (a dropdown) if it has any."""
+    if typing.get_origin(annotation) in (typing.Union, types.UnionType):
+        # Unwrap `X | None` (an optional field) down to the underlying `X` — the widget
+        # type is the same either way; only `required` (from `field.is_required()`) differs.
+        non_none_args = [a for a in typing.get_args(annotation) if a is not type(None)]
+        if len(non_none_args) == 1:
+            annotation = non_none_args[0]
+    if annotation in _SCALAR_WIDGETS:
+        return _SCALAR_WIDGETS[annotation], None
+    match annotation:
+        case _ if typing.get_origin(annotation) is list and typing.get_args(annotation) == (str,):
+            return ParameterFieldType.LIST_STR, None
+        case _ if typing.get_origin(annotation) is dict:
+            return ParameterFieldType.TABLE, None
+        case _ if (choices := _fixed_choices(annotation)) is not None:
+            # A fixed set of string choices — rendered as a dropdown rather than a free-text field.
+            return ParameterFieldType.STR, choices
+        case _:
+            msg = f"{annotation} unsupported"
+            raise TypeError(msg)
 
 
 class ChartTypeRegistry:
@@ -234,42 +269,26 @@ class ChartTypeRegistry:
         field_column_kinds: dict[str, ColumnKind],
     ) -> dict[str, ParameterField]:
         """Describe parameter fields for generic UI generation."""
-        field_column_kinds = field_column_kinds
         field_descriptors: dict[str, ParameterField] = {}
         for field_name, field in parameter_type.model_fields.items():
-            annotation = field.annotation
-            if typing.get_origin(annotation) in (typing.Union, types.UnionType):
-                # Unwrap `X | None` (an optional field) down to the underlying `X` — the widget
-                # type is the same either way; only `required` (from `field.is_required()`) differs.
-                non_none_args = [a for a in typing.get_args(annotation) if a is not type(None)]
-                if len(non_none_args) == 1:
-                    annotation = non_none_args[0]
-            choices: tuple[str, ...] | None = None
-            match annotation:
-                case _ if annotation is bool:
-                    field_type = ParameterFieldType.BOOL
-                case _ if annotation is float:
-                    field_type = ParameterFieldType.FLOAT
-                case _ if annotation is int:
-                    field_type = ParameterFieldType.INT
-                case _ if annotation is str:
-                    field_type = ParameterFieldType.STR
-                case _ if typing.get_origin(annotation) is list and typing.get_args(annotation) == (str,):
-                    field_type = ParameterFieldType.LIST_STR
-                case _ if (choices := _fixed_choices(annotation)) is not None:
-                    # A fixed set of string choices — rendered as a dropdown rather than a free-text field.
-                    field_type = ParameterFieldType.STR
-                case _:
-                    msg = f"{annotation} unsupported"
-                    raise TypeError(msg)
-
+            field_type, choices = _widget_for(field.annotation)
+            columns = (
+                tuple(
+                    ChartTypeRegistry._describe_parameter_fields(
+                        typing.get_args(field.annotation)[1], {}
+                    ).values()
+                )
+                if field_type == ParameterFieldType.TABLE
+                else None
+            )
             field_descriptors[field_name] = ParameterField(
                 name=field_name,
                 type=field_type,
                 required=field.is_required(),
-                default=field.default if not field.is_required() else None,
+                default=field.get_default(call_default_factory=True) if not field.is_required() else None,
                 column_kind=field_column_kinds.get(field_name),
                 choices=choices,
+                columns=columns,
                 description=field.description,
             )
         return field_descriptors

@@ -8,7 +8,14 @@ import pandas as pd
 import pytest
 
 from dlboard.conftest import props as _props
-from dlboard.models import RUN_NAME_COLUMN, Quantity, TimeUnit
+from dlboard.models import (
+    RUN_NAME_COLUMN,
+    ChartTypeRegistry,
+    ParameterFieldType,
+    Quantity,
+    TagDisplay,
+    TimeUnit,
+)
 from dlboard.plugins.charts._table_style import artifact_column, artifact_tags_column
 from dlboard.plugins.charts.image_series import (
     GRID_COLS,
@@ -102,6 +109,27 @@ def test_render_shows_quantity_tags_in_the_units_and_precision_the_chart_asks_fo
     settings = ImageChartSettings(key="img", tag_time_unit=TimeUnit.MINUTES, tag_precision=2)
 
     assert _captions_store_data(ImageChart.render(settings, df)) == {"1": {"0": "took: 90 min"}}
+
+
+def test_render_applies_the_per_tag_display_map_over_the_chart_wide_default() -> None:
+    took = Quantity(value=5400, unit=TimeUnit.SECONDS)
+    df = pd.DataFrame(
+        [
+            {
+                "run_id": 1,
+                "step": 0,
+                artifact_column("img"): "ref://1-0",
+                artifact_tags_column("img"): {"took": took, "wait": took},
+            }
+        ]
+    )
+    settings = ImageChartSettings(
+        key="img", tag_time_unit=TimeUnit.MINUTES, tag_display={"took": TagDisplay(time_unit=TimeUnit.HOURS)}
+    )
+
+    assert _captions_store_data(ImageChart.render(settings, df)) == {
+        "1": {"0": "took: 1.500 h, wait: 90.00 min"}
+    }
 
 
 def test_render_handles_missing_tags_for_some_rows_without_crashing() -> None:
@@ -249,3 +277,15 @@ def test_natural_width_derives_from_height_and_grid_cols() -> None:
 
 def test_natural_width_override() -> None:
     assert ImageChart.natural_width(ImageChartSettings(key="img", height=200, width=333)) == 333
+
+
+def test_the_per_tag_display_setting_is_described_as_a_table_of_its_display_fields() -> None:
+    field = ChartTypeRegistry.get_registered_chart_types()[ImageChart.name]["tag_display"]
+
+    assert field.type == ParameterFieldType.TABLE
+    assert [(c.name, c.type) for c in field.columns or ()] == [
+        ("precision", ParameterFieldType.INT),
+        ("time_unit", ParameterFieldType.STR),
+        ("size_unit", ParameterFieldType.STR),
+    ]
+    assert field.default == {}

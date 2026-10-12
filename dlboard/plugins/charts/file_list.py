@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import typing
 from pathlib import Path
-from typing import Any, Final, cast
+from typing import Any, Final
 
 import dash_ag_grid as dag
 import dash_mantine_components as dmc
@@ -28,6 +28,7 @@ from dlboard.plugins.charts._table_style import (
     TEXT,
     artifact_column,
     column_def,
+    parse_tags,
     themed_grid_kwargs,
 )
 from dlboard.serve import AssetKind, serve_asset
@@ -97,10 +98,7 @@ def _file_rows(parameters: FileListSettings, dataframe: pd.DataFrame) -> list[di
         tags_column = f"{column}__tags"
         key = column.removeprefix(ARTIFACT_COLUMN_PREFIX)
         for _, file in dataframe.loc[dataframe[column].notna()].iterrows():
-            raw_tags = file.get(tags_column)
-            tags: dict[str, TagValue] = (
-                cast("dict[str, TagValue]", raw_tags) if isinstance(raw_tags, dict) else {}
-            )
+            tags = parse_tags(file.get(tags_column))
             run_id = int(file[MetricColumn.RUN_ID])
             run_name = file.get(RUN_NAME_COLUMN)
             rows.append(

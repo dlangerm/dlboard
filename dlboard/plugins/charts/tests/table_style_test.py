@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from dlboard.models import Quantity, SizeUnit, TimeUnit
+from dlboard.models import Quantity, SizeUnit, TagDisplay, TimeUnit
 from dlboard.plugins.charts._table_style import format_tags_caption, infer_column_dtype, themed_grid_kwargs
 
 if TYPE_CHECKING:
@@ -103,4 +103,16 @@ def test_the_display_picks_the_unit_and_precision_not_the_client(
         "took": Quantity(value=5400, unit=TimeUnit.SECONDS),
         "mem": Quantity(value=2.5, unit=SizeUnit.GIGABYTES),
     }
-    assert format_tags_caption(tags, **display) == caption  # pyrefly: ignore [bad-argument-type]
+    assert format_tags_caption(tags, TagDisplay(**display)) == caption
+
+
+def test_a_tag_named_in_the_per_key_map_overrides_the_charts_default_display() -> None:
+    tags: dict[str, models.TagValue] = {
+        "took": Quantity(value=5400, unit=TimeUnit.SECONDS),
+        "wait": Quantity(value=5400, unit=TimeUnit.SECONDS),
+        "score": 0.140984,
+    }
+    default = TagDisplay(precision=2, time_unit=TimeUnit.MINUTES)
+    by_key = {"took": TagDisplay(time_unit=TimeUnit.HOURS), "score": TagDisplay(precision=6)}
+
+    assert format_tags_caption(tags, default, by_key) == "took: 1.5 h, wait: 90 min, score: 0.140984"

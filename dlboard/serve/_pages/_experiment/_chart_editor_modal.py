@@ -10,16 +10,19 @@ there does.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+import dash_ag_grid as dag
 import dash_mantine_components as dmc
-from dash import ALL, MATCH, Dash, Input, Output, State
+from dash import ALL, MATCH, Dash, Input, Output, State, html
 from dash.exceptions import PreventUpdate
 from pydantic import ValidationError
 from structlog.stdlib import get_logger
 
 from dlboard import models
+from dlboard.plugins.charts._table_style import themed_grid_kwargs
 from dlboard.serve import ClientsideScript, Icon, get_data_store, icon
 from dlboard.serve import _constants as constants
 from dlboard.serve._pages._experiment import _experiment_page_state as core
@@ -33,14 +36,86 @@ if TYPE_CHECKING:
 _log = get_logger(__name__)
 
 _CHART_PARAM_CLEAR_JS = ClientsideScript(Path(__file__).with_name("chart_param_clear.js"))
+_TABLE_VALUE_JS = ClientsideScript(Path(__file__).with_name("chart_param_table_value.js"))
+_TABLE_ROWS_JS = ClientsideScript(Path(__file__).with_name("chart_param_table_rows.js"))
 
 
-def _param_field_input(
+def _table_input(
+    field_name: str, field: models.ParameterField, label: str, entries: dict[str, dict[str, Any]]
+) -> Component:
+    """
+    A `TABLE` field as an editable grid, a row per entry with a cell for each field of its row model.
+
+    The grid is only what the person edits: `chart_param_table_value.js` writes its rows as JSON text into
+    the field's own (hidden) input, which is what the form reads back like any other field.
+    """
+    columns: list[dict[str, Any]] = [
+        {"field": "key", "headerName": "Name", "editable": True, "flex": 2, "checkboxSelection": True}
+    ]
+    for column in field.columns or ():
+        editor: dict[str, Any] = (
+            {"cellEditor": "agSelectCellEditor", "cellEditorParams": {"values": ["", *column.choices]}}
+            if column.choices
+            else {"cellEditor": "agNumberCellEditor"}
+        )
+        columns.append(
+            {
+                "field": column.name,
+                "headerName": column.name,
+                "headerTooltip": column.description,
+                "editable": True,
+                "flex": 1,
+                **editor,
+            }
+        )
+    return dmc.Stack(
+        [
+            dmc.Text(label, size="sm", fw=500),
+            dmc.Text(field.description, size="xs", c="dimmed"),
+            dag.AgGrid(
+                id=core.chart_param_table_id(field_name),
+                columnDefs=columns,
+                rowData=[{"key": key, **cells} for key, cells in entries.items()],
+                dashGridOptions={
+                    "domLayout": "autoHeight",
+                    "singleClickEdit": True,
+                    "stopEditingWhenCellsLoseFocus": True,
+                    "rowSelection": {"mode": "multiRow", "checkboxes": False, "enableClickSelection": False},
+                },
+                **themed_grid_kwargs(),
+            ),
+            dmc.Group(
+                [
+                    dmc.Button(
+                        "Add",
+                        id=core.chart_param_table_button_id("add", field_name),
+                        size="xs",
+                        variant="default",
+                    ),
+                    dmc.Button(
+                        "Remove checked",
+                        id=core.chart_param_table_button_id("remove", field_name),
+                        size="xs",
+                        variant="default",
+                    ),
+                ],
+                gap="xs",
+            ),
+            html.Div(
+                dmc.TextInput(id=core.chart_param_id(field_name), value=json.dumps(entries)),
+                style={"display": "none"},
+            ),
+        ],
+        gap="xs",
+    )
+
+
+def _param_field_input(  # noqa: PLR0911
     field_name: str,
     field: models.ParameterField,
     catalog: ColumnCatalog,
     *,
-    override: bool | int | float | str | list[str] | None = None,
+    override: bool | int | float | str | list[str] | dict[str, Any] | None = None,
 ) -> Component:
     input_id = core.chart_param_id(field_name)
     label = f"{field_name} *" if field.required else field_name
@@ -79,6 +154,8 @@ def _param_field_input(
                 ),
                 rightSectionPointerEvents="all",
             )
+        case models.ParameterFieldType.TABLE:
+            return _table_input(field_name, field, label, cast("dict[str, dict[str, Any]]", value or {}))
         case models.ParameterFieldType.STR | models.ParameterFieldType.LIST_STR:
             if field.choices is not None:
                 select_value = cast("str | None", value)
@@ -128,6 +205,24 @@ def _register_clear_button(app: Dash) -> None:
         _CHART_PARAM_CLEAR_JS.source,
         Output({"type": core.CHART_PARAM_TYPE, "field": MATCH}, "value"),
         Input({"type": "chart-param-clear", "field": MATCH}, "n_clicks"),
+        prevent_initial_call=True,
+    )
+
+
+def _register_table_inputs(app: Dash) -> None:
+    app.clientside_callback(
+        _TABLE_VALUE_JS.source,
+        Output({"type": core.CHART_PARAM_TYPE, "field": MATCH}, "value", allow_duplicate=True),
+        Input({"type": core.CHART_PARAM_TABLE_TYPE, "field": MATCH}, "virtualRowData"),
+        Input({"type": core.CHART_PARAM_TABLE_TYPE, "field": MATCH}, "cellValueChanged"),
+        prevent_initial_call=True,
+    )
+    app.clientside_callback(
+        _TABLE_ROWS_JS.source,
+        Output({"type": core.CHART_PARAM_TABLE_TYPE, "field": MATCH}, "rowTransaction"),
+        Output({"type": core.CHART_PARAM_TABLE_TYPE, "field": MATCH}, "deleteSelectedRows"),
+        Input({"type": f"{core.CHART_PARAM_TABLE_TYPE}-add", "field": MATCH}, "n_clicks"),
+        Input({"type": f"{core.CHART_PARAM_TABLE_TYPE}-remove", "field": MATCH}, "n_clicks"),
         prevent_initial_call=True,
     )
 
@@ -290,5 +385,6 @@ def _register_form(app: Dash) -> None:
 
 def register_chart_editor_callbacks(app: Dash) -> None:
     _register_clear_button(app)
+    _register_table_inputs(app)
     _register_open_close(app)
     _register_form(app)

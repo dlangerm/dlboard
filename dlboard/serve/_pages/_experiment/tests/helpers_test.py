@@ -84,6 +84,20 @@ def test_merge_chart_param_values_prefers_value_over_checked() -> None:
     }
 
 
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [('{"took": {"time_unit": "h"}}', {"took": {"time_unit": "h"}}), ("", None), ("{not json", "{not json")],
+    ids=["parsed", "blank-is-dropped", "invalid-is-left-for-validation"],
+)
+def test_merge_chart_param_values_parses_json_fields(text: str, expected: object) -> None:
+    fields = {
+        "tag_display": ParameterField(name="tag_display", type=ParameterFieldType.TABLE, required=False)
+    }
+    merged = state.merge_chart_param_values([text], [None], [{"field": "tag_display"}], fields)
+
+    assert merged == ({"tag_display": expected} if expected is not None else {})
+
+
 def test_merge_chart_param_values_drops_cleared_optional_fields() -> None:
     """A cleared NumberInput reports `None`, which isn't a valid `int` — for a field with its own
     default, that should be dropped so validation falls back to the field's default rather than
