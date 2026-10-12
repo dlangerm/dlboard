@@ -17,7 +17,8 @@ import queue
 import signal
 import tempfile
 import time
-from enum import Enum, auto
+from dataclasses import dataclass
+from enum import Enum, StrEnum, auto
 from multiprocessing import parent_process, util
 from pathlib import Path, PurePosixPath
 from threading import Thread
@@ -33,6 +34,16 @@ from dlboard._batching import BatchParams, ship_batches
 from dlboard._mp_context import SPAWN_CONTEXT
 from dlboard.serve import set_artifact_store, wait_for_data_store
 from dlboard.serve._logging import configure_logging
+from dlboard.serve.telemetry import (
+    AttributeKey,
+    Attributes,
+    Counter,
+    Histogram,
+    Outcome,
+    OutcomeAttributes,
+    Unit,
+    attribute,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -47,6 +58,27 @@ if TYPE_CHECKING:
 
 
 _log = get_logger(__name__)
+
+
+class _Rejection(StrEnum):
+    QUEUE_FULL = "queue_full"
+    WRITER_DOWN = "writer_down"
+    FAILED = "failed"
+
+
+@dataclass(frozen=True, slots=True)
+class _RejectionAttributes(Attributes):
+    reason: _Rejection = attribute(AttributeKey.REJECTION_REASON)
+
+
+_REJECTIONS = Counter[_RejectionAttributes](
+    "dlboard.artifact.write_queue.rejections",
+    Unit.UPLOADS,
+    "Uploads turned away with a 503 because the blob writer could not take them.",
+)
+_BLOB_WRITES = Histogram[OutcomeAttributes](
+    "dlboard.artifact.blob.write.duration", Unit.SECONDS, "How long the writer took to store one artifact."
+)
 
 _ENQUEUE_TIMEOUT_SEC: Final = 30
 """How long an upload waits for room in a full write queue before it's turned away with a 503."""
@@ -144,15 +176,20 @@ def _write_blobs(
         if item is None:
             return
         a, ref, staged = item
+        started = time.perf_counter()
+        outcome = Outcome.FAILURE
         try:
             backend.write(staged, ref)
             artifact = models.Artifact.model_validate(a.model_dump() | {"ref": str(ref)})
             if return_q.full():
                 _log.warning("Return queue is full, runtime will be impacted")
             return_q.put(artifact)
+            outcome = Outcome.SUCCESS
         except Exception:  # noqa: BLE001
             _log.exception("Failed to save artifacts")
             staged.unlink(missing_ok=True)
+        finally:
+            _BLOB_WRITES.record(time.perf_counter() - started, OutcomeAttributes(outcome=outcome))
 
 
 class BlobArtifactStore(models.ArtifactStore[BlobBackend, int]):
@@ -275,6 +312,7 @@ class BlobArtifactStore(models.ArtifactStore[BlobBackend, int]):
     def log_artifacts(self, artifacts: Iterable[tuple[NewArtifact, FileStorage]]) -> None:
         """Stage each uploaded file, then queue it for the write worker."""
         if not self._store_artifact_proc.is_alive():
+            _REJECTIONS.add(1, _RejectionAttributes(reason=_Rejection.WRITER_DOWN))
             msg = "the artifact write worker is not running"
             raise models.ArtifactStoreUnavailableError(msg)
         staging_path: Path | None = None
@@ -292,9 +330,11 @@ class BlobArtifactStore(models.ArtifactStore[BlobBackend, int]):
                 self._store_q.put((a, ref, staging_path), timeout=_ENQUEUE_TIMEOUT_SEC)
                 staging_path = None  # the write worker owns it now
         except queue.Full as exc:
+            _REJECTIONS.add(1, _RejectionAttributes(reason=_Rejection.QUEUE_FULL))
             msg = "the artifact write queue is full"
             raise models.ArtifactStoreUnavailableError(msg) from exc
         except Exception:
+            _REJECTIONS.add(1, _RejectionAttributes(reason=_Rejection.FAILED))
             _log.exception("failed to save artifact batch, reverting to allow client retry")
             raise
         finally:

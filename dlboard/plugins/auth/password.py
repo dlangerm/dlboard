@@ -50,6 +50,7 @@ from dlboard.serve import (
     sign_in,
     start_session,
 )
+from dlboard.serve.telemetry import AttributeKey, Attributes, Counter, Unit, attribute
 
 if TYPE_CHECKING:
     from dash import Dash
@@ -60,6 +61,25 @@ if TYPE_CHECKING:
 PASSWORD_ISSUER: Final = "password"
 
 _log = get_logger(__name__)
+
+
+class SignInOutcome(StrEnum):
+    """How an attempt at the sign-in form ended."""
+
+    SUCCESS = "success"
+    WRONG_CREDENTIALS = "wrong_credentials"
+    THROTTLED = "throttled"
+    DISABLED = "disabled"
+
+
+@dataclass(frozen=True, slots=True)
+class _SignInAttributes(Attributes):
+    outcome: SignInOutcome = attribute(AttributeKey.SIGN_IN_OUTCOME)
+
+
+_SIGN_INS = Counter[_SignInAttributes](
+    "dlboard.auth.sign_ins", Unit.ATTEMPTS, "Attempts at the password sign-in form."
+)
 
 
 class SignupPolicy(StrEnum):
@@ -256,6 +276,7 @@ def _login() -> str | Response:
     username, password = request.form.get("username", "").strip(), request.form.get("password", "")
     throttle = _THROTTLE.get()
     if throttle.locked(username):
+        _SIGN_INS.add(1, _SignInAttributes(outcome=SignInOutcome.THROTTLED))
         return form.render(error="Too many attempts. Try again later.")
     store = get_system_data_store()
     user = store.find_user(username)
@@ -263,12 +284,15 @@ def _login() -> str | Response:
     matches = verify_password(password, credential.password_hash if credential else _DECOY_HASH)
     if credential is None or not matches:
         throttle.fail(username)
+        _SIGN_INS.add(1, _SignInAttributes(outcome=SignInOutcome.WRONG_CREDENTIALS))
         return form.render(error="Wrong username or password.")
     signed_in = sign_in(store, _principal(username), get_auth_settings())
     if signed_in is None:
+        _SIGN_INS.add(1, _SignInAttributes(outcome=SignInOutcome.DISABLED))
         return form.render(error="This account is disabled, or waiting for an admin to approve it.")
     throttle.clear(username)
     start_session(signed_in)
+    _SIGN_INS.add(1, _SignInAttributes(outcome=SignInOutcome.SUCCESS))
     return redirect(safe_next_path(request.args.get("next")))
 
 

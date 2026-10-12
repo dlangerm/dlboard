@@ -5,12 +5,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Self
 
 from dlboard import models
-from dlboard.conftest import create_entity_chain
+from dlboard.conftest import create_entity_chain, scraped_total
 from dlboard.plugins.backend import artifact_purge_worker
+from dlboard.serve.telemetry._prometheus import serve_metrics
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
+    import pytest
     from flask import Response
     from pydantic import AnyUrl
     from werkzeug.datastructures import FileStorage
@@ -95,3 +97,16 @@ def test_drain_pending_is_a_noop_when_nothing_is_queued(store: SQLLiteStore) -> 
     artifact_purge_worker._drain_pending(store, artifact_store)
 
     assert artifact_store.deleted == []
+
+
+def test_the_store_counts_each_purge_by_whether_its_blob_was_deleted(
+    store: SQLLiteStore, telemetry: pytest.MonkeyPatch
+) -> None:
+    telemetry.setenv("DLBOARD_TELEMETRY_METRICS", "prometheus")
+    _queue_purge_tasks(store, 3)
+
+    artifact_purge_worker._drain_pending(store, _RaisingArtifactStore(bad_refs={"file:///a1.png"}))
+
+    scrape = serve_metrics().get_data(as_text=True)
+    assert scraped_total(scrape, "dlboard_artifact_purges_total", dlboard_outcome="success") == 2
+    assert scraped_total(scrape, "dlboard_artifact_purges_total", dlboard_outcome="failure") == 1

@@ -317,7 +317,10 @@ ignore_names = [
   "depends_on",
   "downgrade",
   "isolation_level",  # sqlite api is used internally
-  "PLUGINS"  # used when configuring custom dlboard plugins in the server
+  "PLUGINS",  # used when configuring custom dlboard plugins in the server
+  # `serve/telemetry` `Attributes` fields are only ever read through `dataclasses.fields()` (to name the label),
+  # never by a `.reason` vulture can see.
+  "reason"
 ]
 min_confidence = 60
 paths = ["dlboard/"]

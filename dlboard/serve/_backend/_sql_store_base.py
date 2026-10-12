@@ -18,6 +18,7 @@ from dlboard.serve._backend._app_state import APP_STATE_ROW_ID, AppState
 from dlboard.serve._backend._foreign_keys import ForeignKey, ForeignKeyKind
 from dlboard.serve._backend._metric_frame import MetricFrame, MetricKeySummary, MetricRow
 from dlboard.serve._backend._schema_upgrade import run_migrations
+from dlboard.serve.telemetry import Counter, Outcome, OutcomeAttributes, Unit
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Collection, Iterable, Iterator, Mapping
@@ -25,6 +26,12 @@ if TYPE_CHECKING:
 
 
 _log = get_logger(__name__)
+
+_PURGES = Counter[OutcomeAttributes](
+    "dlboard.artifact.purges",
+    Unit.ARTIFACTS,
+    "Purged artifacts' blobs deleted from the artifact store, or that could not be.",
+)
 
 SCHEMA_PREP_OPTION: Final = "dlboard_schema_prep"
 """
@@ -1286,8 +1293,10 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         """Record that a queued blob deletion succeeded by deleting its task row."""
         tasks = self._tables[models.ArtifactPurgeTask]
         self._execute(sa.delete(tasks).where(tasks.c.id == task_id))
+        _PURGES.add(1, OutcomeAttributes(outcome=Outcome.SUCCESS))
 
     def fail_artifact_purge(self, task_id: int, error: str) -> None:
         """Record that a queued blob deletion failed. The task stays pending and is retried later."""
         tasks = self._tables[models.ArtifactPurgeTask]
         self._execute(sa.update(tasks).where(tasks.c.id == task_id).values(last_error=error))
+        _PURGES.add(1, OutcomeAttributes(outcome=Outcome.FAILURE))

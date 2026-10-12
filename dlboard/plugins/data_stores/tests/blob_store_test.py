@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import io
 import os
+import queue
 import sqlite3
 import threading
 import time
@@ -22,10 +23,11 @@ from pydantic import AnyUrl
 from werkzeug.datastructures import FileStorage
 
 from dlboard import models
-from dlboard.conftest import EVERY_ARTIFACT_BACKEND, ArtifactBackend
+from dlboard.conftest import EVERY_ARTIFACT_BACKEND, ArtifactBackend, scraped_total
 from dlboard.plugins.data_stores._blob_store import BlobArtifactStore, blob_key
 from dlboard.plugins.data_stores.filesystem import FSBlobs
 from dlboard.serve import set_data_store
+from dlboard.serve.telemetry._prometheus import serve_metrics
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -235,15 +237,49 @@ def test_close_writes_every_queued_blob_and_records_its_ref_before_returning(
     assert len(list(store.fetch_artifacts(experiment_id))) == 20
 
 
-def test_uploads_are_turned_away_once_the_write_worker_is_gone(tmp_path: Path) -> None:
+def _rejections(reason: str) -> float:
+    scrape = serve_metrics().get_data(as_text=True)
+    return scraped_total(
+        scrape, "dlboard_artifact_write_queue_rejections_total", dlboard_rejection_reason=reason
+    )
+
+
+def test_uploads_are_turned_away_once_the_write_worker_is_gone(
+    tmp_path: Path, telemetry: pytest.MonkeyPatch
+) -> None:
+    telemetry.setenv("DLBOARD_TELEMETRY_METRICS", "prometheus")
     store = BlobArtifactStore.get_or_create(FSBlobs(tmp_path), 10)
     store.dispose()
 
     with pytest.raises(models.ArtifactStoreUnavailableError):
         _upload(store, models.Run.model_construct(id=1, experiment_id=1), "a.png")
 
+    assert _rejections("writer_down") == 1
 
-def test_a_failed_upload_leaves_nothing_in_the_staging_dir(tmp_path: Path) -> None:
+
+def test_uploads_are_turned_away_when_the_write_queue_is_full(
+    tmp_path: Path, telemetry: pytest.MonkeyPatch
+) -> None:
+    telemetry.setenv("DLBOARD_TELEMETRY_METRICS", "prometheus")
+    store = BlobArtifactStore.get_or_create(FSBlobs(tmp_path), 1)
+
+    def full(*_args: object, **_kwargs: object) -> None:
+        raise queue.Full
+
+    telemetry.setattr(store._store_q, "put", full)
+
+    with pytest.raises(models.ArtifactStoreUnavailableError):
+        _upload(store, models.Run.model_construct(id=1, experiment_id=1), "a.png")
+
+    assert _rejections("queue_full") == 1
+    store.dispose()
+
+
+def test_a_failed_upload_leaves_nothing_in_the_staging_dir(
+    tmp_path: Path, telemetry: pytest.MonkeyPatch
+) -> None:
+    telemetry.setenv("DLBOARD_TELEMETRY_METRICS", "prometheus")
+
     class _Broken(io.BytesIO):
         @override
         def read(self, *_args: object) -> bytes:
@@ -258,6 +294,7 @@ def test_a_failed_upload_leaves_nothing_in_the_staging_dir(tmp_path: Path) -> No
         store.log_artifacts([(new_artifact, FileStorage(_Broken(), filename="a.png"))])
 
     assert list(staging.iterdir()) == []
+    assert _rejections("failed") == 1
     store.dispose()
 
 

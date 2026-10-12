@@ -231,7 +231,9 @@ class Unit(StrEnum):
     REQUESTS = "{request}"
     VALUES = "{value}"
     ARTIFACTS = "{artifact}"
+    UPLOADS = "{upload}"
     RUNS = "{run}"
+    ATTEMPTS = "{attempt}"
 
 
 SECONDS_BUCKETS: Final = (0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10)
@@ -249,6 +251,9 @@ class AttributeKey(StrEnum):
     HTTP_ROUTE = "http.route"
     HTTP_RESPONSE_STATUS_CODE = "http.response.status_code"
     RUN_STATUS = "dlboard.run.status"
+    OUTCOME = "dlboard.outcome"
+    REJECTION_REASON = "dlboard.rejection.reason"
+    SIGN_IN_OUTCOME = "dlboard.auth.outcome"
 
 
 _KEY: Final = "attribute_key"
@@ -276,6 +281,20 @@ class Attributes:
 @dataclass(frozen=True, slots=True)
 class NoAttributes(Attributes):
     """The labels of an instrument with a single series."""
+
+
+class Outcome(StrEnum):
+    """Whether an operation worked."""
+
+    SUCCESS = "success"
+    FAILURE = "failure"
+
+
+@dataclass(frozen=True, slots=True)
+class OutcomeAttributes(Attributes):
+    """The labels of an instrument that counts or times something that can work or not."""
+
+    outcome: Outcome = attribute(AttributeKey.OUTCOME)  # noqa: RUF009 -- the immutable call is configured by its qualified name, which is not this module's
 
 
 class _Adder(Protocol):

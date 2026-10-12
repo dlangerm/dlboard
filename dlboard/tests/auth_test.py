@@ -18,7 +18,7 @@ from flask.testing import FlaskClient
 
 from dlboard import models
 from dlboard._wire import WHOAMI_PATH, Resource, create_path, get_or_create_path
-from dlboard.conftest import dispose_stores
+from dlboard.conftest import dispose_stores, scraped_total
 from dlboard.plugins import BUILTIN_BACKEND, PASSWORD_AUTH
 from dlboard.plugins.auth.password import (
     SignupPolicy,
@@ -30,6 +30,7 @@ from dlboard.plugins.auth.password import (
 from dlboard.plugins.data_stores import filesystem, sqlite
 from dlboard.serve import app as build_app
 from dlboard.serve import get_system_data_store, mint_api_token
+from dlboard.serve.telemetry._prometheus import serve_metrics
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -542,3 +543,18 @@ def test_a_session_signed_by_a_node_with_a_skewed_clock_is_honoured_within_the_l
         deployment.client.post("/login", data={"username": "alice", "password": _PASSWORD, "csrf": csrf})
 
     assert deployment.client.get(f"/{WHOAMI_PATH}").status_code == (200 if signed_in else 401)
+
+
+def test_sign_in_attempts_are_counted_by_outcome(
+    deployment: PasswordDeployment, telemetry: pytest.MonkeyPatch
+) -> None:
+    telemetry.setenv("DLBOARD_TELEMETRY_METRICS", "prometheus")
+
+    _sign_in(deployment.client, "bob")
+    for _ in range(5):
+        _sign_in(deployment.client, "alice", "not the password")
+    _sign_in(deployment.client, "alice")  # locked out by now, even with the right password
+
+    scrape = serve_metrics().get_data(as_text=True)
+    for outcome, attempts in {"success": 1, "wrong_credentials": 5, "throttled": 1}.items():
+        assert scraped_total(scrape, "dlboard_auth_sign_ins_total", dlboard_auth_outcome=outcome) == attempts
