@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import AnyUrl, BaseModel
 
-from dlboard.models import NewArtifact, TagValue, format_tags
+from dlboard.models import NewArtifact, TagValue
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -39,6 +39,6 @@ class Link(BaseModel, frozen=True, extra="forbid"):
             run_id=run_id,
             experiment_id=experiment_id,
             step=self.step,
-            tags=format_tags(self.tags),
+            tags=dict(self.tags),
         )
         return obj, self.ref

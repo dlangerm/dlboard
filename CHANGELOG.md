@@ -14,10 +14,12 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ### Changed
 
-* The server accepts artifact `tags` whose values are numbers or booleans as well as strings
-  (`NewArtifact.tags` is now `dict[str, TagValue]`), and the image-series and file-list charts format
-  them the way the client does. Clients still send text for now: this is the *expand* step of #179, so a
-  later release can start sending numbers without an older-server 400 (see `docs/compatibility.md`).
+* Artifact `tags` values are JSON scalars (`str | int | float | bool`) on the wire and in storage, not
+  text (#179): `NewArtifact.tags` is `dict[str, TagValue]`, clients send what the caller logged
+  (`tags={"score": 0.14}`), and the image-series and file-list charts format numbers the same way wherever
+  they come from. **A server older than this release rejects a numeric tag with a 400**, so upgrade the
+  server before the clients; existing string tags are unaffected. This replaces the text-only storage
+  described under 0.5.0.
 
 ## [0.5.0] - 2026-10-11
 

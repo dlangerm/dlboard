@@ -7,7 +7,7 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from dlboard.models import FILE_KIND_TAG, FileKind, NewArtifact, TagValue, format_tags
+from dlboard.models import FILE_KIND_TAG, FileKind, NewArtifact, TagValue
 
 
 class File(BaseModel, frozen=True, extra="forbid"):
@@ -37,6 +37,6 @@ class File(BaseModel, frozen=True, extra="forbid"):
             run_id=run_id,
             experiment_id=experiment_id,
             step=self.step,
-            tags=format_tags({**self.tags, FILE_KIND_TAG: self.kind}),
+            tags={**self.tags, FILE_KIND_TAG: self.kind.value},
         )
         return obj, self.path

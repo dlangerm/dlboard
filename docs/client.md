@@ -96,8 +96,7 @@ registers it as a *link* — no bytes move, the server just checks the ref is on
 `ArtifactStore` can actually serve (see [Storage](plugins/storage.md)) and records it. `tags` are shown as a
 caption next to the artifact and take strings, numbers or booleans: numbers are formatted the same way
 everywhere (floats to four significant digits, `0.1410`), so log `tags={"iou": iou}` rather than
-formatting it yourself. The client still sends them as text, so they can't yet be sorted or filtered as
-numbers; the server already accepts numbers, so that can change without breaking an older client.
+formatting it yourself. They are sent and stored as the numbers they are.
 There are four built-in kinds:
 
 - `dlboard.client.artifacts.image.Image` — uploads. Wraps a `torch.Tensor`/`np.ndarray`

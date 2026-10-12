@@ -37,11 +37,15 @@ def test_themed_grid_kwargs_has_expected_keys() -> None:
         ({"split": "val"}, "split: val"),
         ({"score": 0.140984, "epoch": 3, "best": True}, "score: 0.1410, epoch: 3, best: true"),
         ({"score": "0.1410"}, "score: 0.1410"),
+        (
+            {"a": 0.14377, "b": 5.0, "c": 1e-05, "d": False, "e": ""},
+            "a: 0.1438, b: 5.000, c: 1.000e-05, d: false, e: ",
+        ),
         (float("nan"), ""),
     ],
-    ids=["text", "scalars", "text-matches-scalar", "gap"],
+    ids=["text", "scalars", "text-matches-scalar", "float-formats", "gap"],
 )
-def test_format_tags_caption_formats_scalars_like_the_client_does(
+def test_format_tags_caption_formats_scalars_consistently(
     tags: dict[str, models.TagValue] | float, caption: str
 ) -> None:
     assert format_tags_caption(tags) == caption

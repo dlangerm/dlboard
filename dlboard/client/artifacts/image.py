@@ -11,7 +11,7 @@ import PIL
 import PIL.Image
 from pydantic import BaseModel, field_validator
 
-from dlboard.models import NewArtifact, TagValue, format_tags
+from dlboard.models import NewArtifact, TagValue
 
 if TYPE_CHECKING:
     # Pyrefly always sees the real `torch.Tensor` -- this repo's own dev/CI env always has torch
@@ -80,6 +80,6 @@ class Image(BaseModel, frozen=True, extra="forbid"):
             run_id=run_id,
             experiment_id=experiment_id,
             step=self.step,
-            tags=format_tags(self.tags),
+            tags=dict(self.tags),
         )
         return obj, target

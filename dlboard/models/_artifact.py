@@ -44,24 +44,14 @@ as `Content-Disposition: attachment` instead.
 
 
 TagValue: TypeAlias = str | int | float | bool
-"""What a caller may put in a tag. Clients still send text for now: see `format_tags`."""
+"""What a caller may put in a tag: a JSON scalar, shown by `format_tag_value`."""
 
 _TAG_FLOAT_FORMAT: Final = "#.4g"
 """Four significant digits, trailing zeros kept, so a column of scores lines up (`0.1410`, `0.1438`)."""
 
 
-def format_tags(tags: Mapping[str, TagValue]) -> dict[str, str]:
-    """
-    `tags` as the text they are stored and shown as, numbers and booleans formatted the same way everywhere.
-
-    Callers used to stringify numbers themselves, each their own way (`:.3f`, `:.6g`, ...), so one
-    panel's captions disagreed with each other. The wire and the stored value stay text: a numeric
-    tag would be rejected by an older server within the supported version skew.
-    """
-    return {key: format_tag_value(value) for key, value in tags.items()}
-
-
 def format_tag_value(value: TagValue) -> str:
+    """`value` as shown next to an artifact, formatted the same way whoever logged it."""
     match value:
         case bool():
             return "true" if value else "false"
@@ -89,7 +79,7 @@ class AnyArtifact(typing.Protocol):
 
     @property
     def tags(self) -> Mapping[str, TagValue]:
-        """Tags for this artifact; numbers and booleans are stored as text, see `format_tags`."""
+        """Tags for this artifact; numbers and booleans are sent and stored as they are."""
         ...
 
     @property
@@ -120,12 +110,7 @@ class NewArtifact(BaseModel, frozen=True, extra="ignore"):
     """The key of requests.files"""
 
     tags: dict[str, TagValue] = {}
-    """
-    Tags for this artifact for use by anything consuming or displaying it.
-
-    The server accepts numbers and booleans as well as text (expand), while clients keep sending text
-    (`format_tags`) until every supported server takes scalars (contract); see `docs/compatibility.md`.
-    """
+    """Tags for this artifact for use by anything consuming or displaying it."""
 
     run_id: int
     """Run ID for this artifact."""

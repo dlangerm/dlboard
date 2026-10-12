@@ -14,7 +14,6 @@ from dlboard.models._artifact import (
     TagValue,
     UnservableArtifactRefError,
     format_tag_value,
-    format_tags,
     is_inlineable_artifact,
 )
 from dlboard.models._artifact_purge_task import ArtifactPurgeTask, NewArtifactPurgeTask
@@ -122,7 +121,6 @@ __all__ = [
     "ValidJsonTypes",
     "ViewSummary",
     "format_tag_value",
-    "format_tags",
     "has_scope",
     "is_inlineable_artifact",
     "require_scope",
