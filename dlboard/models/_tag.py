@@ -16,6 +16,8 @@ class TimeUnit(StrEnum):
     What a client says its number is *measured in*; how it is shown is up to the display (`format_tag_value`).
     """
 
+    NANOSECONDS = "ns"
+    MICROSECONDS = "us"
     MILLISECONDS = "ms"
     SECONDS = "s"
     MINUTES = "min"
@@ -36,6 +38,8 @@ class SizeUnit(StrEnum):
 Unit: TypeAlias = TimeUnit | SizeUnit
 
 _BASE_PER_UNIT: Final[dict[Unit, float]] = {
+    TimeUnit.NANOSECONDS: 1e-9,
+    TimeUnit.MICROSECONDS: 1e-6,
     TimeUnit.MILLISECONDS: 1e-3,
     TimeUnit.SECONDS: 1.0,
     TimeUnit.MINUTES: 60.0,

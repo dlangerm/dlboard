@@ -54,7 +54,14 @@ def test_themed_grid_kwargs_has_expected_keys() -> None:
                 "short": Quantity(value=0.0003, unit=TimeUnit.SECONDS),
                 "none": Quantity(value=0, unit=SizeUnit.GIGABYTES),
             },
-            "short: 0.3000 ms, none: 0.000 GB",
+            "short: 300.0 us, none: 0.000 GB",
+        ),
+        (
+            {
+                "fast": Quantity(value=0.0000025, unit=TimeUnit.SECONDS),
+                "tiny": Quantity(value=0.4, unit=TimeUnit.MICROSECONDS),
+            },
+            "fast: 2.500 us, tiny: 400.0 ns",
         ),
         ({"big": 12345.678, "huge": 3e20}, "big: 12,346, huge: 3.000e+20"),
         (float("nan"), ""),
@@ -66,6 +73,7 @@ def test_themed_grid_kwargs_has_expected_keys() -> None:
         "float-formats",
         "quantities",
         "quantity-edges",
+        "sub-millisecond",
         "large",
         "gap",
     ],
