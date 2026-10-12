@@ -12,6 +12,14 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ## [Unreleased]
 
+### Added
+
+* A tag can carry a unit: `tags={"took": Quantity(value=5400, unit=Unit.SECONDS)}` is shown as `1.500 h`
+  and `Quantity(value=2.5e9, unit=Unit.BYTES)` as `2.500 GB`, instead of a raw `5400` or `2500000000`.
+  Time (`ms` to `d`) and size (`B` to `TB`, decimal) units for now; on the wire a quantity is
+  `{"value": 5400, "unit": "s"}`. Plain numbers of a thousand or more are shown with separators
+  (`12,346`) instead of `1.235e+04`.
+
 ### Changed
 
 * Artifact `tags` values are JSON scalars (`str | int | float | bool`) on the wire and in storage, not

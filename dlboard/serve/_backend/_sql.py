@@ -188,12 +188,10 @@ def table_for(
     )
 
 
-def construct[T: BaseModel](
-    model: type[T], row: Mapping[str, typing.Any] | sa.RowMapping, *, no_validate: bool = False
-) -> T:
+def construct[T: BaseModel](model: type[T], row: Mapping[str, typing.Any] | sa.RowMapping) -> T:
     """Build `model` from a result row, by column name; the column types already decoded every value."""
     values = {name: row[name] for name in model.model_fields if name in row}
-    return model.model_construct(**values) if no_validate else model(**values)
+    return model(**values)
 
 
 def row_values(model: BaseModel, *, exclude: frozenset[str] = frozenset[str]()) -> dict[str, typing.Any]:

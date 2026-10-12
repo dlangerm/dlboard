@@ -18,6 +18,7 @@ from dlboard.models import (
     ChartType,
     ColumnKind,
     MetricColumn,
+    Quantity,
     TagValue,
     format_tag_value,
 )
@@ -117,7 +118,8 @@ def _file_rows(parameters: FileListSettings, dataframe: pd.DataFrame) -> list[di
 
 def _score(tags: dict[str, TagValue]) -> float | None:
     try:
-        return float(tags[_SCORE_KEY])
+        score = tags[_SCORE_KEY]
+        return float(score.value if isinstance(score, Quantity) else score)
     except (KeyError, ValueError):
         return None
 

@@ -17,7 +17,7 @@ from dlboard.client._rest_api import BasicDlboardAPI
 from dlboard.client.artifacts import image
 from dlboard.client.dlboard_logger import DLBoardLogger
 from dlboard.conftest import EVERY_STORE_BACKEND, StoreBackend
-from dlboard.models import FILE_KIND_TAG, FileKind, NewArtifact, NewRun, RunStatus, TagValue
+from dlboard.models import FILE_KIND_TAG, FileKind, NewArtifact, NewRun, Quantity, RunStatus, TagValue, Unit
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -204,7 +204,7 @@ def test_the_finish_route_rejects_what_it_cannot_record(
     assert res.status_code == expected_status
 
 
-def test_the_server_accepts_scalar_tags_as_well_as_text(
+def test_scalar_and_unit_tags_reach_the_store_as_logged(
     backend_server: BackendServer, tmp_path: Path
 ) -> None:
     """Expand step of numeric tags: a client that sends numbers (a later release) must not get a 400."""
@@ -213,7 +213,13 @@ def test_the_server_accepts_scalar_tags_as_well_as_text(
     run = api.create_run(NewRun(experiment_id=experiment.id))
     path = tmp_path / "a.bin"
     path.write_bytes(b"hello")
-    tags: dict[str, TagValue] = {"score": 0.25, "epoch": 3, "best": True, "split": "val"}
+    tags: dict[str, TagValue] = {
+        "score": 0.25,
+        "epoch": 3,
+        "best": True,
+        "split": "val",
+        "mem": Quantity(value=2.5, unit=Unit.GIGABYTES),
+    }
 
     api.log_artifact_batch(
         [

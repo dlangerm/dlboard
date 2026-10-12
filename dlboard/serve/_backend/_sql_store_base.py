@@ -308,15 +308,10 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             result = conn.execute(statement)
             return list(result) if result.returns_rows else []
 
-    def _fetch[RowT: BaseModel](
-        self, model: type[RowT], statement: sa.Executable, *, no_validate: bool = False
-    ) -> list[RowT]:
+    def _fetch[RowT: BaseModel](self, model: type[RowT], statement: sa.Executable) -> list[RowT]:
         """Run one statement in its own transaction, building a `model` from each row by column name."""
         with self._engine.begin() as conn:
-            return [
-                sql.construct(model, row, no_validate=no_validate)
-                for row in conn.execute(statement).mappings()
-            ]
+            return [sql.construct(model, row) for row in conn.execute(statement).mappings()]
 
     def _transaction(self, statements: Iterable[sa.Executable]) -> list[list[AnyRow]]:
         """
@@ -973,7 +968,6 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
                     *key_filter,
                 )
                 .order_by(a.c.run_id, a.c.step),
-                no_validate=True,
             )
         )
 

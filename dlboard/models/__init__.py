@@ -11,9 +11,7 @@ from dlboard.models._artifact import (
     FileKind,
     NewArtifact,
     NewArtifactLink,
-    TagValue,
     UnservableArtifactRefError,
-    format_tag_value,
     is_inlineable_artifact,
 )
 from dlboard.models._artifact_purge_task import ArtifactPurgeTask, NewArtifactPurgeTask
@@ -29,6 +27,7 @@ from dlboard.models._plugin import InstalledPlugin, PluginProtocol
 from dlboard.models._project import NewProject, Project
 from dlboard.models._run import NewRun, Run, RunStatus
 from dlboard.models._scopes import Scope, has_scope, require_scope
+from dlboard.models._tag import Quantity, TagValue, Unit, format_tag_value
 from dlboard.models._theme import ColorScheme, SchemeColors, ThemeSpec
 from dlboard.models._user import UNVERIFIED_ISSUER, NewUser, Principal, User
 from dlboard.models._view import (
@@ -108,6 +107,7 @@ __all__ = [
     "ProjectGrant",
     "ProjectRole",
     "ProjectStats",
+    "Quantity",
     "Run",
     "RunStatus",
     "SchemeColors",
@@ -115,6 +115,7 @@ __all__ = [
     "TagValue",
     "ThemeSpec",
     "UnderlyingMetricTableEntry",
+    "Unit",
     "UnknownChartTypeError",
     "UnservableArtifactRefError",
     "User",

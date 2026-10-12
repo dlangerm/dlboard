@@ -96,7 +96,11 @@ registers it as a *link* — no bytes move, the server just checks the ref is on
 `ArtifactStore` can actually serve (see [Storage](plugins/storage.md)) and records it. `tags` are shown as a
 caption next to the artifact and take strings, numbers or booleans: numbers are formatted the same way
 everywhere (floats to four significant digits, `0.1410`), so log `tags={"iou": iou}` rather than
-formatting it yourself. They are sent and stored as the numbers they are.
+formatting it yourself. They are sent and stored as the numbers they are. A number with a unit is a
+`Quantity`: `tags={"took": Quantity(value=5400, unit=Unit.SECONDS)}` is shown as `1.500 h`, and
+`Quantity(value=2.5e9, unit=Unit.BYTES)` as `2.500 GB`, in the largest unit of its kind that fits. Plain
+numbers of a thousand or more are written with separators (`12,346`) rather than in exponent form. Units
+are time (`ms`, `s`, `min`, `h`, `d`) and size (`B` to `TB`, decimal).
 There are four built-in kinds:
 
 - `dlboard.client.artifacts.image.Image` — uploads. Wraps a `torch.Tensor`/`np.ndarray`

@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import mimetypes
 import typing
-from typing import Final, TypeAlias
+from typing import Final
 
 import pendulum
 from pydantic import AnyUrl, AwareDatetime, BaseModel, Field
 
 from dlboard._compat import StrEnum
+from dlboard.models._tag import TagValue
 
 if typing.TYPE_CHECKING:
     from collections.abc import Mapping
@@ -41,26 +42,6 @@ anything, including an HTML or SVG file (`image/svg+xml` can carry an embedded `
 to run script in this origin the moment someone else opens it. Everything not in this set is served
 as `Content-Disposition: attachment` instead.
 """
-
-
-TagValue: TypeAlias = str | int | float | bool
-"""What a caller may put in a tag: a JSON scalar, shown by `format_tag_value`."""
-
-_TAG_FLOAT_FORMAT: Final = "#.4g"
-"""Four significant digits, trailing zeros kept, so a column of scores lines up (`0.1410`, `0.1438`)."""
-
-
-def format_tag_value(value: TagValue) -> str:
-    """`value` as shown next to an artifact, formatted the same way whoever logged it."""
-    match value:
-        case bool():
-            return "true" if value else "false"
-        case int():
-            return str(value)
-        case float():
-            return format(value, _TAG_FLOAT_FORMAT)
-        case str():
-            return value
 
 
 def is_inlineable_artifact(fname: str) -> bool:
