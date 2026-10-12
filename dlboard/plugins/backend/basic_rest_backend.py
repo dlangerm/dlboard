@@ -1,5 +1,6 @@
 """Routes for doing general api things."""
 
+from dataclasses import dataclass
 from time import perf_counter
 from typing import Any, Callable, Iterable
 
@@ -27,8 +28,31 @@ from dlboard._wire import (
 )
 from dlboard.models import DataStore
 from dlboard.serve import get_artifact_store, get_current_user, get_data_store
+from dlboard.serve.telemetry import AttributeKey, Attributes, Counter, NoAttributes, Tally, Unit, attribute
 
 _log = get_logger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class _FinishedAttributes(Attributes):
+    status: models.RunStatus = attribute(AttributeKey.RUN_STATUS)
+
+
+_METRIC_VALUES = Counter[NoAttributes](
+    "dlboard.ingest.metric_values", Unit.VALUES, "Metric values accepted from training runs."
+)
+_ARTIFACTS = Counter[NoAttributes]("dlboard.ingest.artifacts", Unit.ARTIFACTS, "Artifacts uploaded.")
+_ARTIFACT_BYTES = Counter[NoAttributes](
+    "dlboard.ingest.artifact.size", Unit.BYTES, "Bytes of artifact uploads."
+)
+_RUNS_CREATED = Counter[NoAttributes]("dlboard.runs.created", Unit.RUNS, "Runs started.")
+_RUNS_FINISHED = Counter[_FinishedAttributes](
+    "dlboard.runs.finished", Unit.RUNS, "Runs reported done, by how they ended."
+)
+
+
+def _values_in(logged: models.LoggedMetrics) -> int:
+    return len(logged.metrics)
 
 
 # -- Route handlers -------------------------------------------------------------------------------
@@ -75,7 +99,9 @@ def handle_get_or_create_experiment(
 def handle_create_run(store: DataStore[...], body: dict[str, Any], actor: models.User) -> dict[str, Any]:
     """Create a run, attributed to `actor`."""
     run = models.NewRun.model_validate(body).model_copy(update={"created_by": actor.id})
-    return store.create_run(run).model_dump(mode="json")
+    created = store.create_run(run)
+    _RUNS_CREATED.add(1)
+    return created.model_dump(mode="json")
 
 
 def handle_finish_run(store: DataStore[...], run_id: int, body: dict[str, Any]) -> dict[str, Any]:
@@ -83,7 +109,9 @@ def handle_finish_run(store: DataStore[...], run_id: int, body: dict[str, Any]) 
     req = FinishRun.model_validate(body)
     if store.get_run(run_id) is None:
         raise NotFound
-    return store.finish_run(run_id, req.status, req.ended_at).model_dump(mode="json")
+    finished = store.finish_run(run_id, req.status, req.ended_at)
+    _RUNS_FINISHED.add(1, _FinishedAttributes(status=req.status))
+    return finished.model_dump(mode="json")
 
 
 def handle_get_run(store: DataStore[...], run_id: int) -> dict[str, Any]:
@@ -188,7 +216,11 @@ def log_batch() -> dict[str, str]:
     """Log a batch of metrics."""
     try:
         store = get_data_store()
-        store.log_metrics(models.LoggedMetrics.model_validate(metric) for metric in request.json)
+        batch = Tally(
+            (models.LoggedMetrics.model_validate(metric) for metric in request.json), weigh=_values_in
+        )
+        store.log_metrics(batch)
+        _METRIC_VALUES.add(batch.total)
     except Exception:
         _log.exception("Error logging metrics")
         raise
@@ -273,7 +305,7 @@ def log_artifact() -> dict[str, str]:
     try:
         _log.debug("log artifact batch")
         t0 = perf_counter()
-        pairs = (
+        pairs = Tally(
             (
                 models.NewArtifact.model_validate_json(part.stream.read().decode()),
                 request.files[name.removesuffix(METADATA_PART_SUFFIX)],
@@ -283,6 +315,8 @@ def log_artifact() -> dict[str, str]:
         )
         try:
             handle_log_artifacts(get_artifact_store(), pairs, get_current_user())
+            _ARTIFACTS.add(pairs.total)
+            _ARTIFACT_BYTES.add(request.content_length or 0)
         finally:
             _log.debug("logging artifacts took %.3f seconds", perf_counter() - t0)
     except Exception:

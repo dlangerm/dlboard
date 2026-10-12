@@ -45,7 +45,7 @@ from structlog.stdlib import get_logger
 from dlboard.serve._settings_env import set_setting_env
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Generator
+    from collections.abc import Callable, Generator, Iterable, Iterator
 
     from dash import Dash
     from opentelemetry.metrics import Meter
@@ -227,8 +227,11 @@ class Unit(StrEnum):
     """A metric's unit, in UCUM: annotations in braces count things."""
 
     SECONDS = "s"
+    BYTES = "By"
     REQUESTS = "{request}"
+    VALUES = "{value}"
     ARTIFACTS = "{artifact}"
+    RUNS = "{run}"
 
 
 SECONDS_BUCKETS: Final = (0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10)
@@ -245,6 +248,7 @@ class AttributeKey(StrEnum):
     HTTP_REQUEST_METHOD = "http.request.method"
     HTTP_ROUTE = "http.route"
     HTTP_RESPONSE_STATUS_CODE = "http.response.status_code"
+    RUN_STATUS = "dlboard.run.status"
 
 
 _KEY: Final = "attribute_key"
@@ -393,3 +397,37 @@ def register(app: Dash) -> None:
         from dlboard.serve.telemetry._prometheus import serve_metrics
 
         add_public_route(app, "metrics", serve_metrics, ["GET"])
+
+
+def _one(_item: object) -> int:
+    return 1
+
+
+class Tally[T]:
+    """
+    Counts what flows through an iterable as the handler consumes it: no second pass, nothing held on to.
+
+    Wrap an iterable that is passed along lazily, and read `total` once it has been consumed. Counting
+    happens on each item as it goes by, so it costs the handler nothing it was not doing, and, like
+    every other instrument, it cannot change the handler's behaviour: if `weigh` fails, counting
+    stops (with one warning) and the items keep flowing.
+    """
+
+    def __init__(self, items: Iterable[T], weigh: Callable[[T], int] = _one) -> None:
+        """Count the items of `items`, each as many as `weigh` says (one, by default)."""
+        self._items = items
+        self._weigh = weigh
+        self._broken = False
+        self.total = 0
+        """What has been counted so far."""
+
+    def __iter__(self) -> Iterator[T]:
+        """Pass the items on, counting each as it goes by."""
+        for item in self._items:
+            if not self._broken:
+                try:
+                    self.total += self._weigh(item)
+                except Exception:  # noqa: BLE001 -- see the class docstring
+                    self._broken = True
+                    _log.warning("could not count an item; counting stops", exc_info=True)
+            yield item

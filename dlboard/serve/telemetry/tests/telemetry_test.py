@@ -22,6 +22,7 @@ from dlboard.serve.telemetry import (
     METRICS,
     Counter,
     NoAttributes,
+    Tally,
     TelemetrySettings,
     Unit,
     _sdk,
@@ -29,6 +30,7 @@ from dlboard.serve.telemetry import (
 from dlboard.serve.telemetry._prometheus import serve_metrics
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from pathlib import Path
 
 _CALLS = Counter[NoAttributes]("test.calls", Unit.REQUESTS, "Calls made by a test.")
@@ -165,3 +167,36 @@ def test_a_failed_build_is_retried_after_a_back_off_and_the_process_recovers(
         assert time.monotonic() < deadline, "never recovered"
         time.sleep(0.01)
     assert len(attempts) == 2
+
+
+def _ten_times(n: int) -> int:
+    return n * 10
+
+
+def test_a_tally_counts_lazily_as_its_items_are_consumed() -> None:
+    consumed: list[int] = []
+
+    def numbers() -> Iterator[int]:
+        for n in (1, 2, 3):
+            consumed.append(n)
+            yield n
+
+    tally = Tally(numbers(), weigh=_ten_times)
+    stream = iter(tally)
+
+    assert (next(stream), tally.total, consumed) == (1, 10, [1])
+    assert list(stream) == [2, 3]
+    assert tally.total == 60
+
+
+def test_a_tally_whose_weighing_fails_stops_counting_but_keeps_the_items_flowing() -> None:
+    def weigh(n: int) -> int:
+        if n == 2:
+            msg = "cannot weigh 2"
+            raise ValueError(msg)
+        return 1
+
+    tally = Tally([1, 2, 3], weigh=weigh)
+
+    assert list(tally) == [1, 2, 3]
+    assert tally.total == 1
