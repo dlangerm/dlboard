@@ -14,11 +14,12 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ### Added
 
-* A tag can carry a unit: `tags={"took": Quantity(value=5400, unit=Unit.SECONDS)}` is shown as `1.500 h`
-  and `Quantity(value=2.5e9, unit=Unit.BYTES)` as `2.500 GB`, instead of a raw `5400` or `2500000000`.
-  Time (`ms` to `d`) and size (`B` to `TB`, decimal) units for now; on the wire a quantity is
-  `{"value": 5400, "unit": "s"}`. Plain numbers of a thousand or more are shown with separators
-  (`12,346`) instead of `1.235e+04`.
+* A tag can carry a unit: `tags={"took": Quantity(value=5400, unit=TimeUnit.SECONDS)}` records what the
+  number was measured in (time `ms` to `d`, size `B` to `TB`, decimal); on the wire it is
+  `{"value": 5400, "unit": "s"}`. The client never says how to show it: the image chart shows it in the
+  largest unit that fits by default (`1.500 h`, `2.500 GB`, not `5400` or `2500000000`), or in the unit set
+  by its new `tag_time_unit` / `tag_size_unit` settings, to `tag_precision` significant digits. Plain
+  numbers are written with separators (`12,346`) instead of `1.235e+04`.
 
 ### Changed
 

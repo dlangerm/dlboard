@@ -182,6 +182,16 @@ class UnknownChartTypeError(KeyError):
         )
 
 
+def _fixed_choices(annotation: object) -> tuple[str, ...] | None:
+    """The values a `Literal["number", "category"]` or a `StrEnum` allows, else `None`."""
+    if typing.get_origin(annotation) is typing.Literal:
+        return tuple(str(choice) for choice in typing.get_args(annotation))
+    if isinstance(annotation, type) and issubclass(annotation, StrEnum):
+        enum_type: type[StrEnum] = annotation
+        return tuple(str(member) for member in enum_type)
+    return None
+
+
 class ChartTypeRegistry:
     """Registry of all chart types."""
 
@@ -246,11 +256,9 @@ class ChartTypeRegistry:
                     field_type = ParameterFieldType.STR
                 case _ if typing.get_origin(annotation) is list and typing.get_args(annotation) == (str,):
                     field_type = ParameterFieldType.LIST_STR
-                case _ if typing.get_origin(annotation) is typing.Literal:
-                    # A fixed set of string choices, e.g. `Literal["number", "category"]` — rendered
-                    # as a dropdown rather than a free-text field.
+                case _ if (choices := _fixed_choices(annotation)) is not None:
+                    # A fixed set of string choices — rendered as a dropdown rather than a free-text field.
                     field_type = ParameterFieldType.STR
-                    choices = typing.get_args(annotation)
                 case _:
                     msg = f"{annotation} unsupported"
                     raise TypeError(msg)

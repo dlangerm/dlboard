@@ -27,7 +27,15 @@ from dlboard.models._plugin import InstalledPlugin, PluginProtocol
 from dlboard.models._project import NewProject, Project
 from dlboard.models._run import NewRun, Run, RunStatus
 from dlboard.models._scopes import Scope, has_scope, require_scope
-from dlboard.models._tag import Quantity, TagValue, Unit, format_tag_value
+from dlboard.models._tag import (
+    DEFAULT_TAG_PRECISION,
+    Quantity,
+    SizeUnit,
+    TagValue,
+    TimeUnit,
+    Unit,
+    format_tag_value,
+)
 from dlboard.models._theme import ColorScheme, SchemeColors, ThemeSpec
 from dlboard.models._user import UNVERIFIED_ISSUER, NewUser, Principal, User
 from dlboard.models._view import (
@@ -49,6 +57,7 @@ from dlboard.models._view import (
 )
 
 __all__ = [
+    "DEFAULT_TAG_PRECISION",
     "FILE_KIND_TAG",
     "INLINEABLE_ARTIFACT_CONTENT_TYPES",
     "MAX_GRID_COLUMNS",
@@ -112,8 +121,10 @@ __all__ = [
     "RunStatus",
     "SchemeColors",
     "Scope",
+    "SizeUnit",
     "TagValue",
     "ThemeSpec",
+    "TimeUnit",
     "UnderlyingMetricTableEntry",
     "Unit",
     "UnknownChartTypeError",

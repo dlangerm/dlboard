@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from dlboard.models import TagValue, format_tag_value
+from dlboard.models import DEFAULT_TAG_PRECISION, SizeUnit, TagValue, TimeUnit, format_tag_value
 
 HPARAM_COLUMN_PREFIX = "hparam__"
 """Hyperparameter columns are merged into the same wide dataframe as metrics/artifacts, prefixed
@@ -40,7 +40,13 @@ def infer_column_dtype[T](rows: list[dict[T, Any]], key: T) -> ColumnDType:
     return TEXT
 
 
-def format_tags_caption(raw_tags: dict[str, TagValue] | float | None) -> str:
+def format_tags_caption(
+    raw_tags: dict[str, TagValue] | float | None,
+    *,
+    precision: int = DEFAULT_TAG_PRECISION,
+    time_unit: TimeUnit | None = None,
+    size_unit: SizeUnit | None = None,
+) -> str:
     """
     Format an artifact `<key>__tags` cell into a caption.
 
@@ -50,7 +56,10 @@ def format_tags_caption(raw_tags: dict[str, TagValue] | float | None) -> str:
     """
     if not isinstance(raw_tags, dict):
         return ""
-    return ", ".join(f"{k}: {format_tag_value(v)}" for k, v in raw_tags.items())
+    return ", ".join(
+        f"{k}: {format_tag_value(v, precision=precision, time_unit=time_unit, size_unit=size_unit)}"
+        for k, v in raw_tags.items()
+    )
 
 
 def column_def(name: str, dtype: ColumnDType, **extra: Any) -> dict[str, Any]:  # noqa: ANN401

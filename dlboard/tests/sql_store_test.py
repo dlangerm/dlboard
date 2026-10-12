@@ -279,7 +279,7 @@ def test_summarize_metric_keys_excludes_deleted_runs_and_other_experiments(
     [
         {"split": "train"},
         {"score": 0.25, "epoch": 3, "best": True, "split": "val"},
-        {"mem": models.Quantity(value=2.5, unit=models.Unit.GIGABYTES)},
+        {"mem": models.Quantity(value=2.5, unit=models.SizeUnit.GIGABYTES)},
     ],
     ids=["text", "scalars", "quantity"],
 )

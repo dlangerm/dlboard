@@ -17,7 +17,16 @@ from dlboard.client._rest_api import BasicDlboardAPI
 from dlboard.client.artifacts import image
 from dlboard.client.dlboard_logger import DLBoardLogger
 from dlboard.conftest import EVERY_STORE_BACKEND, StoreBackend
-from dlboard.models import FILE_KIND_TAG, FileKind, NewArtifact, NewRun, Quantity, RunStatus, TagValue, Unit
+from dlboard.models import (
+    FILE_KIND_TAG,
+    FileKind,
+    NewArtifact,
+    NewRun,
+    Quantity,
+    RunStatus,
+    SizeUnit,
+    TagValue,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -218,7 +227,7 @@ def test_scalar_and_unit_tags_reach_the_store_as_logged(
         "epoch": 3,
         "best": True,
         "split": "val",
-        "mem": Quantity(value=2.5, unit=Unit.GIGABYTES),
+        "mem": Quantity(value=2.5, unit=SizeUnit.GIGABYTES),
     }
 
     api.log_artifact_batch(

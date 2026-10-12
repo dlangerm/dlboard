@@ -97,10 +97,11 @@ registers it as a *link* — no bytes move, the server just checks the ref is on
 caption next to the artifact and take strings, numbers or booleans: numbers are formatted the same way
 everywhere (floats to four significant digits, `0.1410`), so log `tags={"iou": iou}` rather than
 formatting it yourself. They are sent and stored as the numbers they are. A number with a unit is a
-`Quantity`: `tags={"took": Quantity(value=5400, unit=Unit.SECONDS)}` is shown as `1.500 h`, and
-`Quantity(value=2.5e9, unit=Unit.BYTES)` as `2.500 GB`, in the largest unit of its kind that fits. Plain
-numbers of a thousand or more are written with separators (`12,346`) rather than in exponent form. Units
-are time (`ms`, `s`, `min`, `h`, `d`) and size (`B` to `TB`, decimal).
+`Quantity`: `tags={"took": Quantity(value=5400, unit=TimeUnit.SECONDS)}` says what the number was measured
+in (time: `ms` to `d`; size: `B` to `TB`, decimal), and nothing about how it should look. The chart decides
+that: by default the largest unit that fits (`1.500 h`, `2.500 GB`), or the `tag_time_unit` /
+`tag_size_unit` it is set to (`5,400,000 ms`), with `tag_precision` significant digits (default 4). Plain
+numbers are written out with separators (`12,346`) rather than in exponent form.
 There are four built-in kinds:
 
 - `dlboard.client.artifacts.image.Image` — uploads. Wraps a `torch.Tensor`/`np.ndarray`

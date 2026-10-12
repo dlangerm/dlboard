@@ -16,7 +16,16 @@ from dash.exceptions import PreventUpdate
 from pydantic import BaseModel, Field
 from structlog.stdlib import get_logger
 
-from dlboard.models import RUN_NAME_COLUMN, Artifact, ChartType, ColumnKind, is_inlineable_artifact
+from dlboard.models import (
+    DEFAULT_TAG_PRECISION,
+    RUN_NAME_COLUMN,
+    Artifact,
+    ChartType,
+    ColumnKind,
+    SizeUnit,
+    TimeUnit,
+    is_inlineable_artifact,
+)
 from dlboard.plugins.charts._table_style import artifact_column, artifact_tags_column, format_tags_caption
 from dlboard.serve import ClientsideScript, series_swatch_class
 
@@ -44,6 +53,22 @@ class ImageChartSettings(BaseModel, frozen=True, extra="forbid"):
         description="Show each thumbnail at its logged resolution (capped by height, never "
         "upscaled) instead of stretching small images to fill the thumbnail box. Only affects "
         "individual thumbnails, not the chart's overall width above.",
+    )
+    tag_precision: int = Field(
+        default=DEFAULT_TAG_PRECISION,
+        ge=1,
+        le=15,
+        description="Significant digits the numbers in an image's caption (its tags) are shown with.",
+    )
+    tag_time_unit: TimeUnit | None = Field(
+        default=None,
+        description="Show tags logged as a duration in this unit, whatever unit they were logged in. "
+        "Leave blank to pick the largest unit that fits each one.",
+    )
+    tag_size_unit: SizeUnit | None = Field(
+        default=None,
+        description="Show tags logged as a data size in this unit, whatever unit they were logged in. "
+        "Leave blank to pick the largest unit that fits each one.",
     )
 
 
@@ -126,7 +151,13 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
             per_run_urls[str(rid)] = dict(zip((str(s) for s in steps), g[col], strict=True))
             if has_tags:
                 per_run_captions[str(rid)] = {
-                    str(s): format_tags_caption(raw) for s, raw in zip(steps, g[tag_col], strict=True)
+                    str(s): format_tags_caption(
+                        raw,
+                        precision=parameters.tag_precision,
+                        time_unit=parameters.tag_time_unit,
+                        size_unit=parameters.tag_size_unit,
+                    )
+                    for s, raw in zip(steps, g[tag_col], strict=True)
                 }
             if has_names:
                 per_run_names[str(rid)] = g[RUN_NAME_COLUMN].iloc[0]

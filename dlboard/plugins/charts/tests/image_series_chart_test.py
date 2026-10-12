@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 
 from dlboard.conftest import props as _props
-from dlboard.models import RUN_NAME_COLUMN
+from dlboard.models import RUN_NAME_COLUMN, Quantity, TimeUnit
 from dlboard.plugins.charts._table_style import artifact_column, artifact_tags_column
 from dlboard.plugins.charts.image_series import (
     GRID_COLS,
@@ -85,6 +85,23 @@ def test_render_formats_tags_dict_into_captions() -> None:
     stack = ImageChart.render(ImageChartSettings(key="img"), df)
 
     assert _captions_store_data(stack) == {"1": {"0": "run: 1"}}
+
+
+def test_render_shows_quantity_tags_in_the_units_and_precision_the_chart_asks_for() -> None:
+    took = Quantity(value=5400, unit=TimeUnit.SECONDS)
+    df = pd.DataFrame(
+        [
+            {
+                "run_id": 1,
+                "step": 0,
+                artifact_column("img"): "ref://1-0",
+                artifact_tags_column("img"): {"took": took},
+            }
+        ]
+    )
+    settings = ImageChartSettings(key="img", tag_time_unit=TimeUnit.MINUTES, tag_precision=2)
+
+    assert _captions_store_data(ImageChart.render(settings, df)) == {"1": {"0": "took: 90 min"}}
 
 
 def test_render_handles_missing_tags_for_some_rows_without_crashing() -> None:

@@ -12,7 +12,7 @@ from dlboard.client.artifacts.figure import Figure
 from dlboard.client.artifacts.file import File
 from dlboard.client.artifacts.image import Image
 from dlboard.client.artifacts.link import Link
-from dlboard.models import FileKind, Quantity, Unit
+from dlboard.models import FileKind, Quantity, SizeUnit
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -25,7 +25,7 @@ _TAGS: Mapping[str, TagValue] = {
     "epoch": 3,
     "best": True,
     "split": "val",
-    "mem": Quantity(value=2.5, unit=Unit.GIGABYTES),
+    "mem": Quantity(value=2.5, unit=SizeUnit.GIGABYTES),
 }
 
 

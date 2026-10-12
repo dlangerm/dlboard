@@ -87,7 +87,8 @@ def _param_field_input(
                     label=label,
                     data=list(field.choices),
                     value=select_value,
-                    allowDeselect=False,
+                    # An optional choice with no default (`None`: "pick for me") can be put back to blank.
+                    allowDeselect=not field.required and field.default is None,
                     description=field.description,
                 )
 
