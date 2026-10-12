@@ -30,7 +30,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=client/pyproject.toml,target=client/pyproject.toml \
     --mount=type=bind,source=server/pyproject.toml,target=server/pyproject.toml \
     uv sync --frozen --no-install-workspace --no-dev --no-editable \
-    --package dlboard --extra postgres --extra s3
+    --package dlboard --extra postgres --extra s3 --extra otel
 
 # Now the real source tree (both packages' code, since `dlboard` is built from a
 # `force_include` of `../dlboard`'s server-owned subset -- see `server/hatch_build.py`) and the
@@ -38,7 +38,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # `.pth` pointing back at this stage's `/app`.
 COPY . /app
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --no-dev --no-editable --package dlboard --extra postgres --extra s3
+    uv sync --locked --no-dev --no-editable --package dlboard --extra postgres --extra s3 --extra otel
 
 FROM python:3.12-slim-bookworm
 RUN groupadd --system dlboard && useradd --system --gid dlboard --create-home dlboard

@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, cast
 import pytest
 import sqlalchemy as sa
 from flask import Flask
+from prometheus_client.parser import text_string_to_metric_families
 from pydantic import AnyHttpUrl, SecretStr, TypeAdapter
 from werkzeug.serving import make_server
 
@@ -27,6 +28,7 @@ from dlboard.serve import SQLStoreBase, get_system_data_store
 from dlboard.serve import app as build_app
 from dlboard.serve._backend import _auth
 from dlboard.serve._backend._data_store import ARTIFACT_STORE
+from dlboard.serve.telemetry import METRICS
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -514,6 +516,29 @@ def backend_server(
         thread.join()
         store.dispose()
         dispose_stores(app)
+
+
+@pytest.fixture
+def telemetry(monkeypatch: pytest.MonkeyPatch) -> Iterator[pytest.MonkeyPatch]:
+    """
+    A test that switches telemetry on: set `DLBOARD_TELEMETRY_*` on the yielded `monkeypatch`.
+
+    The per-process singleton remembers what it found (including "off") for the life of the
+    process, so it is closed before and after to rebuild from the test's environment.
+    """
+    METRICS.close()
+    yield monkeypatch
+    METRICS.close()
+
+
+def scraped_total(scrape: str, name: str, **labels: str) -> float:
+    """The summed value of the samples called `name` in a Prometheus `scrape` whose labels include `labels`."""
+    return sum(
+        sample.value
+        for family in text_string_to_metric_families(scrape)
+        for sample in family.samples
+        if sample.name == name and labels.items() <= sample.labels.items()
+    )
 
 
 def props(component: object) -> dict[str, Any]:

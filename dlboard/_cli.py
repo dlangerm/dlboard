@@ -23,6 +23,7 @@ from dlboard.plugins.data_stores.sqlite import AppSettings as SqliteAppSettings
 from dlboard.serve import app as build_app
 from dlboard.serve import get_system_data_store, resolve_plugins, run_production_server, set_setting_env
 from dlboard.serve._logging import configure_logging as _configure_logging
+from dlboard.serve.telemetry import shared_prometheus_dir
 
 app = cyclopts.App(
     name="dlboard",
@@ -115,9 +116,10 @@ def _serve(plugins_target: str, runtime: ServerRuntimeOptions) -> None:
         # who explicitly wants Flask's dotenv loading can still opt back in.
         os.environ.setdefault("FLASK_SKIP_DOTENV", "1")
         plugins = resolve_plugins(plugins_target)
-        build_app(plugins, url_prefix=runtime.url_prefix).run(
-            host=runtime.host, port=runtime.port, debug=True
-        )
+        with shared_prometheus_dir():
+            build_app(plugins, url_prefix=runtime.url_prefix).run(
+                host=runtime.host, port=runtime.port, debug=True
+            )
         return
     run_production_server(
         plugins_target,

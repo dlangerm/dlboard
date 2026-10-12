@@ -71,3 +71,47 @@ print("ok")
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "ok"
+
+
+_OPENTELEMETRY_PACKAGES = ("opentelemetry", "prometheus_client")
+
+
+def test_a_server_with_telemetry_off_never_loads_the_opentelemetry_sdk() -> None:
+    script = """
+import os, sys, tempfile
+workdir = tempfile.mkdtemp()
+os.environ["DLBOARD_SQLITE_LOCATION"] = workdir + "/db.sqlite"
+os.environ["DLBOARD_ARTIFACT_STORE_LOCATION"] = workdir + "/artifacts"
+from dlboard.plugins import BUILTIN_BACKEND, LOCAL_AUTH
+from dlboard.plugins.data_stores import filesystem, sqlite
+from dlboard.serve import app
+from dlboard.serve._logging import configure_logging
+configure_logging()
+server = app([sqlite, filesystem, *LOCAL_AUTH, *BUILTIN_BACKEND]).server
+assert server.test_client().post("/api/v1/metrics", json=[]).status_code == 200  # records a (no-op) metric
+assert "/metrics" not in {rule.rule for rule in server.url_map.iter_rules()}
+assert not [name for name in sys.modules if name.split(".")[0] in ("opentelemetry", "prometheus_client")]
+print("ok")
+"""
+    result = _run_with_blocked_imports(_OPENTELEMETRY_PACKAGES, script)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip().splitlines()[-1] == "ok"
+    assert "telemetry" not in (result.stdout + result.stderr).lower()  # no setup, no log spew
+
+
+def test_turning_telemetry_on_without_the_otel_extra_is_a_startup_error() -> None:
+    script = """
+import os, sys
+sys.modules["opentelemetry"] = None  # what an uninstalled package looks like to `find_spec`
+os.environ["DLBOARD_TELEMETRY_METRICS"] = "prometheus"
+from dlboard.serve.telemetry import TelemetrySettings
+try:
+    TelemetrySettings()
+except ValueError as exc:
+    print("dlboard[otel]" in str(exc))
+"""
+    result = _run_with_blocked_imports(_OPENTELEMETRY_PACKAGES, script)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "True"

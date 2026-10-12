@@ -48,6 +48,20 @@ Worker and thread counts are `dlboard serve --workers` (default 2) and `--blocki
 | `DLBOARD_LOG_FORMAT` | `console` | `console` (human-readable) or `json` (one object per line, for a log collector). |
 | `DLBOARD_ACCESS_LOG` | `false` | Log every request's method, path, status and duration. Off since a proxy usually does this already. |
 
+## Telemetry
+
+Off unless you set one of these; a deployment that does not never loads the OpenTelemetry SDK. Needs the `otel`
+extra (`pip install 'dlboard[otel]'`; the Docker image has it). The exporters also read the standard
+`OTEL_*` variables (endpoint, headers, service name, resource attributes, export interval). See
+[telemetry.md](telemetry.md) for the metrics and how to point it at Prometheus, Mimir or Loki.
+
+| Variable | Default | |
+|---|---|---|
+| `OTEL_SERVICE_NAME` | `dlboard` | The standard OpenTelemetry variable: the `service.name` everything is reported under. |
+| `DLBOARD_TELEMETRY_METRICS` | none | Comma-separated exporters to send metrics to: `prometheus` (scrape `/metrics`), `otlp` (push to a collector), or both. |
+| `DLBOARD_TELEMETRY_PROMETHEUS_DIR` | system temp dir | Where `/metrics` keeps each process's snapshot. `dlboard serve` makes a fresh directory inside it per run and removes it on exit. Set it to put that on a tmpfs, say. |
+| `DLBOARD_TELEMETRY_PROMETHEUS_SNAPSHOT_S` | `15` | How often each process writes its snapshot, so how stale another worker's numbers on `/metrics` can be. |
+
 ## Authentication
 
 Only matter with an identity-verifying provider such as `PASSWORD_AUTH`. See [auth.md](plugins/auth.md).

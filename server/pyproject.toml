@@ -52,6 +52,11 @@ readme = "README.md"
 requires-python = ">=3.12"
 
 [project.optional-dependencies]
+otel = [
+  "opentelemetry-exporter-otlp-proto-http>=1.25",
+  "opentelemetry-exporter-prometheus>=0.46b0",
+  "opentelemetry-sdk>=1.25"
+]
 postgres = ["psycopg[binary]>=3.0.0"]
 s3 = ["boto3>=1.26.0"]
 

@@ -40,7 +40,7 @@ def _env_vars() -> list[str]:
     return sorted(found)
 
 
-_DOCUMENTED = set(re.findall(r"`(DLBOARD_[A-Z0-9_]+)`", _DOC.read_text()))
+_DOCUMENTED = set(re.findall(r"`((?:DLBOARD|OTEL)_[A-Z0-9_]+)`", _DOC.read_text()))
 
 
 @pytest.mark.parametrize("env_var", _env_vars())

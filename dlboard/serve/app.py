@@ -15,6 +15,7 @@ from structlog.stdlib import get_logger
 
 from dlboard.models import InstalledPlugin
 from dlboard.serve import _constants as constants
+from dlboard.serve import telemetry
 from dlboard.serve._assets import AssetKind, serve_asset
 from dlboard.serve._backend import _artifact_download, _health, _request_logging
 from dlboard.serve._backend._auth import (
@@ -103,10 +104,12 @@ def app(plugins: list[models.PluginProtocol], *, url_prefix: str = "") -> Dash:
     _artifact_download.register(_app)
     # `/healthz`/`/readyz` for a process manager or orchestrator -- public, like sign-out below.
     _health.register(_app)
+    # `/metrics`, only if a deployment asked for a Prometheus scrape -- see `telemetry`.
+    telemetry.register(_app)
     # Every route above (and every plugin route) sits behind this one gate -- see `_auth.py`.
     install_request_gate(_app, lambda: get_system_data_store(_app))
-    # A request id on every log line, for every route (auth included) -- after the gate, since it has to run
-    # ahead of it: see its own docstring.
+    # A request id on every log line, and the request metrics, for every route (auth included) -- after
+    # the gate, since it has to run ahead of it: see its own docstring.
     _request_logging.register(_app)
     # Opt-in (DLBOARD_TRUSTED_PROXIES): trust a reverse proxy's X-Forwarded-* headers for scheme/
     # host detection, so DLBOARD_SECURE_COOKIES sessions survive behind a TLS-terminating proxy.

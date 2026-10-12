@@ -21,6 +21,7 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from dlboard.models import PluginProtocol
 from dlboard.serve._settings_env import set_setting_env
+from dlboard.serve.telemetry import shared_prometheus_dir
 
 
 class WSGISettings(BaseSettings):
@@ -78,7 +79,7 @@ def run_production_server(  # noqa: PLR0913
     set_setting_env(WSGISettings, "dlboard_plugins", plugins_target)
     set_setting_env(WSGISettings, "dlboard_url_prefix", url_prefix)
     tuning = GranianSettings()
-    Granian(
+    granian = Granian(
         "dlboard.serve._wsgi:app",
         address=host,
         port=port,
@@ -92,4 +93,7 @@ def run_production_server(  # noqa: PLR0913
         http1_settings=HTTP1Settings(
             header_read_timeout=tuning.header_read_timeout_s * 1000, keep_alive=tuning.keep_alive
         ),
-    ).serve()
+    )
+    # The workers (and what they spawn) inherit the directory they leave their Prometheus snapshots in.
+    with shared_prometheus_dir():
+        granian.serve()
