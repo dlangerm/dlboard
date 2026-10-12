@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from types import NoneType, UnionType
 
 import sqlalchemy as sa
-from pydantic import AwareDatetime, BaseModel
+from pydantic import AwareDatetime, BaseModel, TypeAdapter
 from sqlalchemy.dialects.postgresql import JSONB
 
 from dlboard.serve._backend._foreign_keys import ForeignKeyKind
@@ -81,6 +81,28 @@ def _aware(value: datetime | str) -> datetime:
     return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
 
 
+class DecodedJSON(sa.TypeDecorator[typing.Any]):
+    """
+    A JSON column that reads back as the model field's own type, not as bare JSON.
+
+    A row is built without validating it (the database only holds what a validated model wrote), so the
+    column does the decoding that gives a value inside the JSON its type back: a `Quantity` tag
+    comes out as one, not as the `{"value": ..., "unit": ...}` dict it is stored as.
+    """
+
+    impl = _JSON
+    cache_ok = True
+
+    def __init__(self, annotation: object) -> None:
+        super().__init__()
+        self.annotation = annotation
+        self._adapter: TypeAdapter[typing.Any] = TypeAdapter(annotation)
+
+    @typing.override
+    def process_result_value(self, value: object, dialect: Dialect) -> object:
+        return None if value is None else self._adapter.validate_python(value)
+
+
 def _unwrap_optional(annotation: object) -> tuple[object, bool]:
     """`(inner type, nullable)` for `X | None`; `(annotation, False)` for anything else."""
     args = typing.get_args(annotation)
@@ -93,7 +115,7 @@ def _unwrap_optional(annotation: object) -> tuple[object, bool]:
 def column_type(annotation: object) -> sa.types.TypeEngine[typing.Any]:  # noqa: PLR0911 -- one return per SQL type is the clearest shape here
     """The SQL column type a model field's (already un-`Optional`ed) annotation is stored as."""
     if typing.get_origin(annotation) in (dict, list):
-        return _JSON
+        return DecodedJSON(annotation)
     if not isinstance(annotation, type):
         raise NotImplementedError(annotation)
     kind: type[object] = annotation
@@ -188,10 +210,12 @@ def table_for(
     )
 
 
-def construct[T: BaseModel](model: type[T], row: Mapping[str, typing.Any] | sa.RowMapping) -> T:
+def construct[T: BaseModel](
+    model: type[T], row: Mapping[str, typing.Any] | sa.RowMapping, *, no_validate: bool = False
+) -> T:
     """Build `model` from a result row, by column name; the column types already decoded every value."""
     values = {name: row[name] for name in model.model_fields if name in row}
-    return model(**values)
+    return model.model_construct(**values) if no_validate else model(**values)
 
 
 def row_values(model: BaseModel, *, exclude: frozenset[str] = frozenset[str]()) -> dict[str, typing.Any]:
