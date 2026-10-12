@@ -67,6 +67,20 @@ precisely rather than guessing at string prefixes.
 """
 
 
+class RenderContext(BaseModel, frozen=True, extra="forbid"):
+    """What the panel and the page around a chart say about how it is laid out, for a chart that follows them."""
+
+    columns: GridColumns = 3
+    """The panel's `grid_columns`: how many items a chart that lays out a grid of its own puts in a row."""
+
+    page_size: int = Field(default=12, ge=1)
+    """How many items a chart that pages its own contents shows at once: the viewer's charts-per-page size."""
+
+
+DEFAULT_RENDER_CONTEXT: typing.Final = RenderContext()
+"""For a chart rendered on its own, outside any panel or page (a test, a preview)."""
+
+
 class ParameterFieldType(StrEnum):
     """Widget type a chart parameter field should be rendered as."""
 
@@ -94,6 +108,11 @@ class ChartType(ABC, BaseModel, typing.Generic[_Parameters, _Dataframe, _Chart],
     @abstractmethod
     def render(cls, parameters: _Parameters, dataframe: _Dataframe) -> _Chart:
         """Render a chart given an instance."""
+
+    @classmethod
+    def render_in(cls, parameters: _Parameters, dataframe: _Dataframe, context: RenderContext) -> _Chart:  # noqa: ARG003
+        """Render a chart where `context` places it. A chart that does not follow its panel or page just renders."""
+        return cls.render(parameters, dataframe)
 
     @classmethod
     @abstractmethod
@@ -125,6 +144,11 @@ class ChartType(ABC, BaseModel, typing.Generic[_Parameters, _Dataframe, _Chart],
     @abstractmethod
     def natural_width(cls, parameters: _Parameters) -> int:
         """Preferred render width in px, derived from this chart's own settings (e.g. height + aspect ratio)."""
+
+    @classmethod
+    def natural_width_in(cls, parameters: _Parameters, context: RenderContext) -> int:  # noqa: ARG003
+        """`natural_width` where `context` places the chart, for one whose width depends on it."""
+        return cls.natural_width(parameters)
 
     @classmethod
     def register(cls, *, allow_override: bool = False) -> None:
@@ -302,9 +326,11 @@ class ChartTypeRegistry:
         return chart_type, chart_type.parameter_type().model_validate(chart.parameters)
 
     @classmethod
-    def render(cls, chart: ChartInstance[_Dataframe, _Chart], dataframe: object) -> _Chart:
+    def render(
+        cls, chart: ChartInstance[_Dataframe, _Chart], dataframe: object, context: RenderContext
+    ) -> _Chart:
         chart_type, parameters = cls._typed_chart(chart)
-        return chart_type.render(parameters, dataframe)
+        return chart_type.render_in(parameters, dataframe, context)
 
     @classmethod
     def hint_required_columns(cls, chart: ChartInstance[_Dataframe, _Chart]) -> set[str] | None:
@@ -327,9 +353,9 @@ class ChartTypeRegistry:
         return chart_type.hint_required_hparams(parameters)
 
     @classmethod
-    def natural_width(cls, chart: ChartInstance[_Dataframe, _Chart]) -> int:
+    def natural_width(cls, chart: ChartInstance[_Dataframe, _Chart], context: RenderContext) -> int:
         chart_type, parameters = cls._typed_chart(chart)
-        return chart_type.natural_width(parameters)
+        return chart_type.natural_width_in(parameters, context)
 
 
 class ChartInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, extra="forbid"):
@@ -364,9 +390,9 @@ class ChartInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, 
         )
         return {**fields, "id": hashlib.sha256(content.encode()).hexdigest()[:_CHART_ID_LENGTH]}
 
-    def render(self, dataframe: _Dataframe) -> _Chart:
+    def render(self, dataframe: _Dataframe, context: RenderContext = DEFAULT_RENDER_CONTEXT) -> _Chart:
         """Render the chart instance."""
-        return ChartTypeRegistry.render(self, dataframe)
+        return ChartTypeRegistry.render(self, dataframe, context)
 
     def hint_required_columns(self) -> set[str] | None:
         """
@@ -420,10 +446,10 @@ class ChartInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, 
             )
             return None
 
-    def natural_width(self) -> int:
+    def natural_width(self, context: RenderContext = DEFAULT_RENDER_CONTEXT) -> int:
         """Preferred render width in px for this chart instance. See `hint_required_columns`."""
         try:
-            return ChartTypeRegistry.natural_width(self)
+            return ChartTypeRegistry.natural_width(self, context)
         except (ValidationError, UnknownChartTypeError):
             _log.warning(
                 "chart has invalid parameters or an unregistered chart type, using fallback width",
@@ -454,9 +480,12 @@ class PanelInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, 
     grid_columns: GridColumns = 3
     """How many equal-width columns the `"grid"` layout has; unused by `"packed"`."""
 
-    def render(self, dataframes: _Dataframe) -> list[_Chart]:
+    def render(
+        self, dataframes: _Dataframe, page_size: int = DEFAULT_RENDER_CONTEXT.page_size
+    ) -> list[_Chart]:
         """Render a panel."""
-        return [c.render(dataframes) for c in self.charts]
+        context = RenderContext(columns=self.grid_columns, page_size=page_size)
+        return [c.render(dataframes, context) for c in self.charts]
 
     def hint_required_columns(self) -> set[str] | None:
         """

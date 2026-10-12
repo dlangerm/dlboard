@@ -567,11 +567,14 @@ def is_lightning_experiment(data_store: DataStore[...], experiment_id: int) -> b
 
 
 def _render_chart_safely(
-    chart: models.ChartInstance[Any, Any], dataframe: pd.DataFrame, panel_name: str
+    chart: models.ChartInstance[Any, Any],
+    dataframe: pd.DataFrame,
+    panel_name: str,
+    context: models.RenderContext,
 ) -> Component:
     """Render one chart, isolating failures so a broken chart doesn't take the rest of the panel down."""
     try:
-        return chart.render(dataframe)
+        return chart.render(dataframe, context)
     except Exception as exc:  # noqa: BLE001
         _log.exception("Failed to render %r chart in panel %r", chart.chart_type, panel_name)
         return dmc.Alert(
@@ -643,7 +646,10 @@ def live_status_badge(*, ok: bool) -> Component:
 
 
 def render_chart_item(
-    panel: models.PanelInstance[Any, Any], index: int, dataframe: pd.DataFrame
+    panel: models.PanelInstance[Any, Any],
+    index: int,
+    dataframe: pd.DataFrame,
+    page_size: int = models.DEFAULT_RENDER_CONTEXT.page_size,
 ) -> Component:
     """
     Render one chart in a panel (edit/delete controls above it, revealed on hover) as its own node.
@@ -656,8 +662,9 @@ def render_chart_item(
     -- and rebuilding the *panel* whenever *either* changes would pop the untouched one too.
     """
     chart = panel.charts[index]
+    context = models.RenderContext(columns=panel.grid_columns, page_size=page_size)
     rendered = _apply_panel_sync(
-        _render_chart_safely(chart, dataframe, panel.name), panel_name=panel.name, sync=panel.sync
+        _render_chart_safely(chart, dataframe, panel.name, context), panel_name=panel.name, sync=panel.sync
     )
     hover_controls = dmc.Group(
         [
@@ -706,7 +713,7 @@ def render_chart_item(
         [header_row, rendered],
         id=chart_content_id(panel.name, index),  # pyrefly: ignore [bad-argument-type]
         gap="xs",
-        w="100%" if panel.layout == "grid" else chart.natural_width(),
+        w="100%" if panel.layout == "grid" else chart.natural_width(context),
         maw="100%",
         p="xs",
         className="dl-chart-item",
@@ -715,21 +722,27 @@ def render_chart_item(
 
 
 def render_panel_charts(
-    panel: models.PanelInstance[Any, Any], dataframe: pd.DataFrame, indexes: Sequence[int] | None = None
+    panel: models.PanelInstance[Any, Any],
+    dataframe: pd.DataFrame,
+    indexes: Sequence[int] | None = None,
+    page_size: int = models.DEFAULT_RENDER_CONTEXT.page_size,
 ) -> list[Component]:
     """Render the charts of a panel at `indexes` (every chart, if not given) -- see `render_chart_item`."""
     return [
-        render_chart_item(panel, idx, dataframe)
+        render_chart_item(panel, idx, dataframe, page_size)
         for idx in range(len(panel.charts))
         if indexes is None or idx in indexes
     ]
 
 
 def render_panel_content_from_df(
-    panel: models.PanelInstance[Any, Any], df: pd.DataFrame, indexes: Sequence[int] | None = None
+    panel: models.PanelInstance[Any, Any],
+    df: pd.DataFrame,
+    indexes: Sequence[int] | None = None,
+    page_size: int = models.DEFAULT_RENDER_CONTEXT.page_size,
 ) -> Component:
     """Render a panel's charts at `indexes` from an already-fetched dataframe -- see `render_panel_content`."""
-    items = render_panel_charts(panel, df, indexes)
+    items = render_panel_charts(panel, df, indexes, page_size)
     # Read by the image series' slider lock (`image_series_lock.js`): which charts move together.
     sync_marker = cast("dict[str, Any]", {"data-dl-panel-sync": "1"} if panel.sync else {})
     return (
@@ -764,7 +777,7 @@ def render_panel_content(
         )
     shown = panel.model_copy(update={"charts": [panel.charts[i] for i in indexes]})
     df = fetch_panel_dataframe(store, experiment_id, shown, page_settings)
-    return render_panel_content_from_df(panel, df, indexes)
+    return render_panel_content_from_df(panel, df, indexes, paging.sizes.charts)
 
 
 def chart_data_fingerprint(chart: models.ChartInstance[Any, Any], df: pd.DataFrame) -> str:

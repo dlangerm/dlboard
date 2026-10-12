@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from dlboard.serve._component_ids import ButtonId
 
 _PANEL_GRID_COLUMNS_JS = ClientsideScript(Path(__file__).with_name("panel_grid_columns.js"))
+_PANEL_GRID_FOLLOWERS_JS = ClientsideScript(Path(__file__).with_name("panel_grid_followers.js"))
 
 
 def _busy_while_running(button: ButtonId[core.ExperimentPage]) -> list[tuple[Output, bool, bool]]:
@@ -453,6 +454,13 @@ def _register_toggle(app: Dash) -> None:
         _PANEL_GRID_COLUMNS_JS.source,
         Output({"type": core.PANEL_GRID_TYPE, "panel": MATCH}, "cols"),
         Input({"type": core.PANEL_GRID_COLUMNS_TYPE, "panel": MATCH}, "value"),
+        prevent_initial_call=True,
+    )
+
+    app.clientside_callback(
+        _PANEL_GRID_FOLLOWERS_JS.source,
+        Input({"type": core.PANEL_GRID_COLUMNS_TYPE, "panel": ALL}, "value"),
+        State({"type": core.PANEL_GRID_COLUMNS_TYPE, "panel": ALL}, "id"),
         prevent_initial_call=True,
     )
 

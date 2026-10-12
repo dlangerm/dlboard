@@ -40,6 +40,7 @@ from dlboard.models._tag import (
 from dlboard.models._theme import ColorScheme, SchemeColors, ThemeSpec
 from dlboard.models._user import UNVERIFIED_ISSUER, NewUser, Principal, User
 from dlboard.models._view import (
+    DEFAULT_RENDER_CONTEXT,
     MAX_GRID_COLUMNS,
     MIN_GRID_COLUMNS,
     RUN_NAME_COLUMN,
@@ -53,11 +54,13 @@ from dlboard.models._view import (
     PanelInstance,
     ParameterField,
     ParameterFieldType,
+    RenderContext,
     UnknownChartTypeError,
     ViewSummary,
 )
 
 __all__ = [
+    "DEFAULT_RENDER_CONTEXT",
     "DEFAULT_TAG_PRECISION",
     "FILE_KIND_TAG",
     "INLINEABLE_ARTIFACT_CONTENT_TYPES",
@@ -118,6 +121,7 @@ __all__ = [
     "ProjectRole",
     "ProjectStats",
     "Quantity",
+    "RenderContext",
     "Run",
     "RunStatus",
     "SchemeColors",

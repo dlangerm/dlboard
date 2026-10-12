@@ -6,7 +6,7 @@ import hashlib
 import json
 import typing
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import dash
 import dash_mantine_components as dmc
@@ -17,11 +17,13 @@ from pydantic import BaseModel, Field
 from structlog.stdlib import get_logger
 
 from dlboard.models import (
+    DEFAULT_RENDER_CONTEXT,
     DEFAULT_TAG_PRECISION,
     RUN_NAME_COLUMN,
     Artifact,
     ChartType,
     ColumnKind,
+    RenderContext,
     SizeUnit,
     TagDisplay,
     TimeUnit,
@@ -30,8 +32,6 @@ from dlboard.models import (
 from dlboard.plugins.charts._table_style import artifact_column, artifact_tags_column, format_tags_caption
 from dlboard.serve import ClientsideScript, series_swatch_class
 
-PAGE_SIZE = 6
-GRID_COLS = 3
 MAX_SLIDER_LABELS = 10
 
 _log = get_logger(__name__)
@@ -127,6 +127,13 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
     @classmethod
     @typing.override
     def render(cls, parameters: ImageChartSettings, dataframe: pd.DataFrame) -> dmc.Stack:
+        return cls.render_in(parameters, dataframe, DEFAULT_RENDER_CONTEXT)
+
+    @classmethod
+    @typing.override
+    def render_in(
+        cls, parameters: ImageChartSettings, dataframe: pd.DataFrame, context: RenderContext
+    ) -> dmc.Stack:
         col = artifact_column(parameters.key)
         x_col = parameters.x_axis
         if col not in dataframe.columns:
@@ -171,7 +178,7 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
                 per_run_names[str(rid)] = g[RUN_NAME_COLUMN].iloc[0]
 
         inst = _instance_id(parameters)
-        pages = [run_ids[i : i + PAGE_SIZE] for i in range(0, len(run_ids), PAGE_SIZE)]
+        pages = [run_ids[i : i + context.page_size] for i in range(0, len(run_ids), context.page_size)]
 
         # Small logged images (icons, tiny debug crops) get stretched to fill the thumbnail box
         # either way (`fit="contain"` upscales as well as downscales) -- "pixelated" keeps that
@@ -227,7 +234,10 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
             dmc.SimpleGrid(
                 id={"type": "image-series-page", "instance": inst, "page": page_idx},
                 # No more columns than runs, so a lone run's image gets the chart's whole width, not a third.
-                cols=min(GRID_COLS, len(page_runs)),
+                cols=min(context.columns, len(page_runs)),
+                # The panel's column count moving applies to this at once, like the panel's own grid
+                # (`panel_grid_followers.js`), rather than waiting for a rebuild.
+                **cast("dict[str, Any]", {"data-dl-follow-panel-columns": "1"}),
                 style={} if page_idx == 0 else {"display": "none"},
                 children=[_run_block(rid) for rid in page_runs],
             )
@@ -314,7 +324,12 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
     @classmethod
     @typing.override
     def natural_width(cls, parameters: ImageChartSettings) -> int:
-        return parameters.width or GRID_COLS * (parameters.height + 40)
+        return cls.natural_width_in(parameters, DEFAULT_RENDER_CONTEXT)
+
+    @classmethod
+    @typing.override
+    def natural_width_in(cls, parameters: ImageChartSettings, context: RenderContext) -> int:
+        return parameters.width or context.columns * (parameters.height + 40)
 
     @classmethod
     @typing.override

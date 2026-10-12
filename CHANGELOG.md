@@ -27,8 +27,10 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ### Changed
 
-* An image-series chart showing fewer runs than it has columns (three) no longer leaves the other columns
-  empty: one run's image fills the chart's width, so a large chart size now enlarges it.
+* An image-series chart lays its runs out by what its panel and page say: as many columns as the panel's
+  grid column count (following it the instant it changes) and as many runs per page as the viewer's
+  charts-per-page size, instead of a fixed three and six. It never uses more columns than it has runs, so one
+  run's image fills the chart's width and a large chart size now enlarges it.
 * Artifact `tags` values are JSON scalars (`str | int | float | bool`) on the wire and in storage, not
   text (#179): `NewArtifact.tags` is `dict[str, TagValue]`, clients send what the caller logged
   (`tags={"score": 0.14}`), and the image-series and file-list charts format numbers the same way wherever

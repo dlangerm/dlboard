@@ -9,18 +9,18 @@ import pytest
 
 from dlboard.conftest import props as _props
 from dlboard.models import (
+    DEFAULT_RENDER_CONTEXT,
     RUN_NAME_COLUMN,
     ChartTypeRegistry,
     ParameterFieldType,
     Quantity,
+    RenderContext,
     TagDisplay,
     TimeUnit,
 )
 from dlboard.plugins.charts._table_style import artifact_column, artifact_tags_column
 from dlboard.plugins.charts.image_series import (
-    GRID_COLS,
     MAX_SLIDER_LABELS,
-    PAGE_SIZE,
     ImageChart,
     ImageChartSettings,
     _slider_marks,
@@ -47,13 +47,14 @@ def test_render_reports_missing_key() -> None:
     assert "No artifacts logged" in text
 
 
-def test_render_paginates_runs_into_groups_of_page_size() -> None:
-    df = _artifacts_df(n_runs=PAGE_SIZE + 1)
-    stack = ImageChart.render(ImageChartSettings(key="img"), df)
+@pytest.mark.parametrize("page_size", [2, 5])
+def test_render_paginates_runs_into_groups_of_the_pages_size(page_size: int) -> None:
+    df = _artifacts_df(n_runs=page_size + 1)
+    stack = ImageChart.render_in(ImageChartSettings(key="img"), df, RenderContext(page_size=page_size))
     children = _props(stack)["children"]
     grids = [c for c in children if _props(c).get("cols") is not None]
     assert len(grids) == 2
-    assert len(_props(grids[0])["children"]) == PAGE_SIZE
+    assert len(_props(grids[0])["children"]) == page_size
     assert len(_props(grids[1])["children"]) == 1
 
 
@@ -272,7 +273,10 @@ def test_caption_is_not_dimmed() -> None:
 
 
 def test_natural_width_derives_from_height_and_grid_cols() -> None:
-    assert ImageChart.natural_width(ImageChartSettings(key="img", height=200)) == GRID_COLS * (200 + 40)
+    settings = ImageChartSettings(key="img", height=200)
+
+    assert ImageChart.natural_width(settings) == DEFAULT_RENDER_CONTEXT.columns * (200 + 40)
+    assert ImageChart.natural_width_in(settings, RenderContext(columns=5)) == 5 * (200 + 40)
 
 
 def test_natural_width_override() -> None:
@@ -292,13 +296,14 @@ def test_the_per_tag_display_setting_is_described_as_a_table_of_its_display_fiel
 
 
 @pytest.mark.parametrize(
-    ("n_runs", "columns"),
-    [(1, 1), (2, 2), (GRID_COLS, GRID_COLS), (GRID_COLS + 4, GRID_COLS)],
+    ("n_runs", "panel_columns", "columns"),
+    [(1, 3, 1), (2, 3, 2), (5, 3, 3), (5, 2, 2), (5, 4, 4)],
 )
-def test_render_titles_the_chart_with_its_key_and_uses_no_more_columns_than_runs(
-    n_runs: int, columns: int
+def test_render_titles_the_chart_with_its_key_and_follows_the_panels_columns_up_to_its_runs(
+    n_runs: int, panel_columns: int, columns: int
 ) -> None:
-    stack = ImageChart.render(ImageChartSettings(key="img"), _artifacts_df(n_runs=n_runs))
+    context = RenderContext(columns=panel_columns)
+    stack = ImageChart.render_in(ImageChartSettings(key="img"), _artifacts_df(n_runs=n_runs), context)
 
     children = _props(stack)["children"]
     assert _props(children[0])["children"] == "img"  # pyrefly: ignore [unknown-argument-type]

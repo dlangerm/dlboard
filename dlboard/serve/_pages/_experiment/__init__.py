@@ -43,6 +43,7 @@ from dlboard.serve._pages._experiment import _experiment_page_state as core
 from dlboard.serve._pages._experiment._chart_editor_modal import register_chart_editor_callbacks
 from dlboard.serve._pages._experiment._chart_suggestions import register_chart_suggestions_callbacks
 from dlboard.serve._pages._experiment._notes import STATE_NOTES_REVISION, register_notes_callbacks
+from dlboard.serve._pages._experiment._paging import Paging
 from dlboard.serve._pages._experiment._panel_controls import register_panel_controls_callbacks
 from dlboard.serve._pages._experiment._run_compare import register_run_compare_callbacks
 from dlboard.serve._pages._experiment._run_comparison_table import register_run_comparison_callbacks
@@ -56,7 +57,6 @@ if TYPE_CHECKING:
 
     from dlboard import models
     from dlboard.models import DataStore
-    from dlboard.serve._pages._experiment._paging import Paging
 
 _log = get_logger(__name__)
 
@@ -175,6 +175,7 @@ def _refresh_chart_contents(
     panels_by_name: dict[str, models.PanelInstance[Any, Any]],
     dataframes: dict[str, pd.DataFrame],
     prev_hashes: dict[str, str] | None,
+    page_size: int,
 ) -> tuple[list[Any], dict[str, str], bool]:
     """Re-render just the charts whose own `chart_data_fingerprint` moved since the last poll."""
     new_hashes = dict(prev_hashes or {})
@@ -194,7 +195,7 @@ def _refresh_chart_contents(
                 contents.append(no_update)
                 continue
             new_hashes[key] = fingerprint
-            contents.append(core.render_chart_item(panel, index, df))
+            contents.append(core.render_chart_item(panel, index, df, page_size))
         except Exception:  # noqa: BLE001 -- one bad chart must not break the whole poll tick
             _log.exception("Live-update poll failed to refresh chart %r", key)
             contents.append(no_update)
@@ -237,6 +238,7 @@ def register_render_callbacks(app: Dash) -> None:
         State(core.STATE_LAST_KNOWN_REVISION, "data"),
         State(core.STATE_CHART_CONTENT_HASHES, "data"),
         State(STATE_NOTES_REVISION, "data"),
+        State(core.PANEL_PAGING_ID, "data"),
         prevent_initial_call=True,
     )
     def poll_for_updates(  # noqa: PLR0913
@@ -247,6 +249,7 @@ def register_render_callbacks(app: Dash) -> None:
         last_known_revision: int | None,
         prev_hashes: dict[str, str] | None,
         last_notes_revision: int | None,
+        paging_json: str,
     ) -> tuple[list[Any], Any, Any, Any, Any, Component, Any]:
         store = get_data_store()
         ok = True
@@ -283,7 +286,11 @@ def register_render_callbacks(app: Dash) -> None:
         panels_by_name = {p.name: p for p in page.panels}
         dataframes, fetch_ok = _fetch_open_panel_dataframes(store, experiment_id, page, chart_ids)
         contents, new_hashes, render_ok = _refresh_chart_contents(
-            chart_ids, panels_by_name, dataframes, prev_hashes
+            chart_ids,
+            panels_by_name,
+            dataframes,
+            prev_hashes,
+            Paging.model_validate_json(paging_json).sizes.charts,
         )
         poll_ok = fetch_ok and render_ok
 

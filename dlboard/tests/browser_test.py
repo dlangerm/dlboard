@@ -107,6 +107,15 @@ def _create_panel(page: Page, name: str) -> None:
     expect(page.locator(".dl-panel-item-header", has_text=name)).to_be_visible()
 
 
+def _wait_for_artifacts(experiment_id: int, count: int) -> None:
+    """The server records an uploaded artifact asynchronously; a page loaded before it has would be live-patched."""
+    store = get_system_data_store()
+    deadline = time.monotonic() + 30
+    while len(list(store.fetch_artifacts(experiment_id))) < count:
+        assert time.monotonic() < deadline, "the artifacts were never recorded"
+        time.sleep(0.1)
+
+
 def _auto_generate_charts(page: Page) -> None:
     """Auto-generate an empty view's charts with the default grouping, confirming the preview."""
     page.get_by_role("button", name="Auto-generate charts").click()
@@ -2091,6 +2100,7 @@ def test_an_image_charts_per_tag_display_is_edited_as_table_rows_in_the_chart_ed
             ).to_artifact(tmp_path, run.id, experiment_id)
         ]
     )
+    _wait_for_artifacts(experiment_id, 1)
     page.reload()
     _auto_generate_charts(page)
 
@@ -2140,6 +2150,7 @@ def test_image_series_charts_are_titled_fill_their_chart_and_share_a_synced_pane
             for step in steps
         ]
     )
+    _wait_for_artifacts(experiment_id, 4)
     page.reload()
     _auto_generate_charts(page)
 
@@ -2160,7 +2171,39 @@ def test_image_series_charts_are_titled_fill_their_chart_and_share_a_synced_pane
 
     _open_panel_menu(page)
     page.get_by_role("switch", name="Sync crosshair and step across charts").click()
+    expect(page.locator("[data-dl-panel-sync]")).to_have_count(0)  # the panel is rebuilt, unsynced
     thumbs.nth(0).focus()
     page.keyboard.press("ArrowLeft")
     expect(thumbs.nth(0)).to_have_attribute("aria-valuenow", "0")
     expect(thumbs.nth(1)).to_have_attribute("aria-valuenow", "5")
+
+
+def test_an_image_charts_runs_follow_their_panels_grid_columns(
+    page: Page, live_server_url: str, tmp_path: Path
+) -> None:
+    """The columns an image chart puts its runs in are the panel's, at once when changed and when rebuilt."""
+    _create_project_and_experiment(page, live_server_url, "Image Columns Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    api = BasicDlboardAPI(live_server_url)
+    for _ in range(4):
+        run = api.create_run(models.NewRun(experiment_id=experiment_id))
+        image = Image(key="samples/a", image=np.zeros((8, 8, 3), dtype=np.uint8), step=0)
+        api.log_artifact_batch([image.to_artifact(tmp_path, run.id, experiment_id)])
+    _wait_for_artifacts(experiment_id, 4)
+    page.reload()
+    _auto_generate_charts(page)
+    runs = page.locator("[data-dl-follow-panel-columns]").first
+    expect(runs).to_have_css("grid-template-columns", re.compile(r"^\S+ \S+ \S+$"))
+
+    _open_panel_menu(page)
+    page.get_by_text("Grid", exact=True).first.click()
+    expect(page.locator(".dl-panel-body .mantine-SimpleGrid-root").first).to_be_visible()
+    _open_panel_menu(page)
+    columns = page.get_by_role("textbox", name="Grid columns")
+    columns.fill("2")
+    columns.press("Enter")
+    expect(runs).to_have_css("grid-template-columns", re.compile(r"^\S+ \S+$"))
+
+    page.reload()
+    expect(runs).to_have_css("grid-template-columns", re.compile(r"^\S+ \S+$"))
