@@ -170,15 +170,19 @@ def _fetch_open_panel_dataframes(
     return dataframes, ok
 
 
-def _refresh_chart_contents(
+def _refresh_chart_bodies(
     chart_ids: list[core.ChartID],
     panels_by_name: dict[str, models.PanelInstance[Any, Any]],
     dataframes: dict[str, pd.DataFrame],
-    prev_hashes: dict[str, str] | None,
+    shown: dict[tuple[str, int | None], str],
     page_size: int,
-) -> tuple[list[Any], dict[str, str], bool]:
-    """Re-render just the charts whose own `chart_data_fingerprint` moved since the last poll."""
-    new_hashes = dict(prev_hashes or {})
+) -> tuple[list[Any], bool]:
+    """
+    The new body of each chart whose data is no longer what its on-screen body was drawn from.
+
+    `shown` is the `chart_data_fingerprint` each chart's body carries (`chart_body`); one that still
+    matches what the data says now is left alone (`no_update`).
+    """
     contents: list[Any] = []
     ok = True
     for chart_id in chart_ids:
@@ -188,19 +192,16 @@ def _refresh_chart_contents(
         if panel is None or df is None or index is None or index >= len(panel.charts):
             contents.append(no_update)
             continue
-        key = f"{panel_name}:{index}"
         try:
-            fingerprint = core.chart_data_fingerprint(panel.charts[index], df)
-            if fingerprint == new_hashes.get(key):
+            if core.chart_data_fingerprint(panel.charts[index], df) == shown.get((panel_name, index)):
                 contents.append(no_update)
-                continue
-            new_hashes[key] = fingerprint
-            contents.append(core.render_chart_item(panel, index, df, page_size))
+            else:
+                contents.append(core.chart_body(panel, index, df, page_size))
         except Exception:  # noqa: BLE001 -- one bad chart must not break the whole poll tick
-            _log.exception("Live-update poll failed to refresh chart %r", key)
+            _log.exception("Live-update poll failed to refresh chart %r", f"{panel_name}:{index}")
             contents.append(no_update)
             ok = False
-    return contents, new_hashes, ok
+    return contents, ok
 
 
 def register_render_callbacks(app: Dash) -> None:
@@ -218,25 +219,26 @@ def register_render_callbacks(app: Dash) -> None:
     # panel, and fetching once per panel rather than once per chart keeps this poll's per-tick cost
     # proportional to how many panels are open, not how many charts they hold. Each chart's own
     # `chart_data_fingerprint` (scoped to just its own columns of that shared dataframe) is what
-    # decides whether *that* chart actually needs to re-render. ---
+    # decides whether *that* chart's body actually needs to be replaced -- compared with the one the body
+    # on screen carries, so a chart that was just mounted is not redrawn for nothing. ---
     @app.callback(
-        # `chart_content_id(...)` is typed `(str, int) -> ChartID` (every other call site passes a
+        # `chart_body_id(...)` is typed `(str, int) -> ChartID` (every other call site passes a
         # real panel name/index), so it can't be called with the `ALL` wildcard without breaking
         # that typing -- same reason `_panel_controls.py`'s own `ALL`-pattern callbacks spell their
         # pattern-matching ids out as literal dicts too, rather than routing through a helper.
-        Output({"type": "chart-content", "panel": ALL, "index": ALL}, "children"),
+        Output({"type": core.CHART_BODY_TYPE, "panel": ALL, "index": ALL}, "children"),
         Output(core.STATE_HPARAMS, "data", allow_duplicate=True),
         Output(core.STATE_LAST_KNOWN_REVISION, "data", allow_duplicate=True),
-        Output(core.STATE_CHART_CONTENT_HASHES, "data", allow_duplicate=True),
         Output(core.STATE_LAST_FETCH_AT, "data", allow_duplicate=True),
         Output(core.LIVE_STATUS_ID, "children"),
         Output(STATE_NOTES_REVISION, "data"),
         Input(core.LIVE_POLL_INTERVAL_ID, "n_intervals"),
-        State({"type": "chart-content", "panel": ALL, "index": ALL}, "id"),
+        State({"type": core.CHART_BODY_TYPE, "panel": ALL, "index": ALL}, "id"),
+        State({"type": core.CHART_FINGERPRINT_TYPE, "panel": ALL, "index": ALL}, "id"),
+        State({"type": core.CHART_FINGERPRINT_TYPE, "panel": ALL, "index": ALL}, "children"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
         State(core.STATE_VIEW_ID, "data"),
         State(core.STATE_LAST_KNOWN_REVISION, "data"),
-        State(core.STATE_CHART_CONTENT_HASHES, "data"),
         State(STATE_NOTES_REVISION, "data"),
         State(core.PANEL_PAGING_ID, "data"),
         prevent_initial_call=True,
@@ -244,13 +246,14 @@ def register_render_callbacks(app: Dash) -> None:
     def poll_for_updates(  # noqa: PLR0913
         _n_intervals: int,
         chart_ids: list[core.ChartID],
+        fingerprint_ids: list[core.ChartID],
+        fingerprints: list[str],
         experiment_id: int,
         view_id: int | None,
         last_known_revision: int | None,
-        prev_hashes: dict[str, str] | None,
         last_notes_revision: int | None,
         paging_json: str,
-    ) -> tuple[list[Any], Any, Any, Any, Any, Component, Any]:
+    ) -> tuple[list[Any], Any, Any, Any, Component, Any]:
         store = get_data_store()
         ok = True
         try:
@@ -276,7 +279,6 @@ def register_render_callbacks(app: Dash) -> None:
                 [no_update] * len(chart_ids),
                 no_update,
                 no_update,
-                no_update,
                 fetched_at,
                 core.live_status_badge(ok=ok),
                 notes_revision,
@@ -285,12 +287,12 @@ def register_render_callbacks(app: Dash) -> None:
         page = core.load_page(store, core.PageRef(experiment_id, view_id))
         panels_by_name = {p.name: p for p in page.panels}
         dataframes, fetch_ok = _fetch_open_panel_dataframes(store, experiment_id, page, chart_ids)
-        contents, new_hashes, render_ok = _refresh_chart_contents(
-            chart_ids,
-            panels_by_name,
-            dataframes,
-            prev_hashes,
-            Paging.model_validate_json(paging_json).sizes.charts,
+        shown = {
+            (i["panel"], i["index"]): fingerprint
+            for i, fingerprint in zip(fingerprint_ids, fingerprints, strict=True)
+        }
+        contents, render_ok = _refresh_chart_bodies(
+            chart_ids, panels_by_name, dataframes, shown, Paging.model_validate_json(paging_json).sizes.charts
         )
         poll_ok = fetch_ok and render_ok
 
@@ -306,7 +308,6 @@ def register_render_callbacks(app: Dash) -> None:
             contents,
             hparams_json,
             experiment.revision,
-            new_hashes,
             fetched_at,
             core.live_status_badge(ok=poll_ok),
             notes_revision,

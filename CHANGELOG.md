@@ -25,6 +25,13 @@ pulls that section's body into the GitHub release notes and publishes both distr
   `tag_display` overrides those per tag name. Plain
   numbers are written with separators (`12,346`) instead of `1.235e+04`.
 
+### Fixed
+
+* Live updates replaced a chart's whole item with a whole new item nested inside it (a second set of
+  controls and padding) the first time its data moved, and redrew *every* open chart on the first update
+  after a page loaded, including ones whose data had not changed. A chart now carries a fingerprint of the
+  data it was drawn from, so a poll replaces only the chart inside its item, and only when its data moved.
+
 ### Changed
 
 * An image-series chart lays its runs out by what its panel and page say: as many columns as the panel's

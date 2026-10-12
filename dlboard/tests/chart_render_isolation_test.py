@@ -23,6 +23,12 @@ from dlboard.serve._pages._experiment._experiment_page_state import (
 LineChart.register(allow_override=True)
 
 
+def _chart_in(item: Any) -> Any:  # noqa: ANN401
+    """The chart a rendered chart item shows: the first thing in its body, below the controls."""
+    body: Any = _props(item)["children"][1]
+    return _props(body)["children"][0]
+
+
 @pytest.mark.parametrize(
     ("broken", "named_in_alert"),
     [
@@ -51,7 +57,7 @@ def test_broken_chart_renders_as_error_alert_without_raising(
 
     [stack] = _render_panel_charts(panel, df)
 
-    rendered = _props(stack)["children"][1]  # pyrefly: ignore [unknown-variable-type]
+    rendered = _chart_in(stack)
     assert isinstance(rendered, dmc.Alert)
     assert _props(rendered)["color"] == "red"
     assert named_in_alert in str(_props(rendered)["children"])
@@ -68,7 +74,7 @@ def test_broken_chart_does_not_prevent_sibling_charts_from_rendering() -> None:
     stacks = _render_panel_charts(panel, df)
 
     assert len(stacks) == 2
-    broken_rendered = _props(stacks[0])["children"][1]  # pyrefly: ignore [unknown-variable-type]
-    working_rendered = _props(stacks[1])["children"][1]  # pyrefly: ignore [unknown-variable-type]
+    broken_rendered = _chart_in(stacks[0])
+    working_rendered = _chart_in(stacks[1])
     assert isinstance(broken_rendered, dmc.Alert)
     assert isinstance(working_rendered, dmc.LineChart)

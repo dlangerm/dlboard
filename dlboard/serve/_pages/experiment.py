@@ -180,7 +180,6 @@ def layout(
         # switched off.
         dcc.Interval(id=core.LIVE_TICK_INTERVAL_ID, interval=_LIVE_UPDATE_SETTINGS.tick_interval_ms),
         Store(id=core.STATE_LAST_KNOWN_REVISION, data=exp.revision),
-        Store(id=core.STATE_CHART_CONTENT_HASHES, data={}),
         Store(id=core.STATE_LAST_FETCH_AT, data=pendulum.now("UTC").isoformat()),
         Store(id=core.STATE_PAGE_STORAGE, data=page_json),
         Store(id=core.STATE_VIEW_ID, data=view_id),

@@ -1175,9 +1175,13 @@ def test_live_update_poll_patches_only_the_chart_whose_data_changed(
 
     chart_items = page.locator(".dl-chart-item")
     expect(chart_items).to_have_count(2)
+    # An item keeps its own node and its controls; what a poll replaces is the chart in its body.
     cold_item, hot_item = chart_items.nth(0), chart_items.nth(1)
-    cold_item.evaluate("el => el.setAttribute('data-marker', 'untouched')")
-    hot_item.evaluate("el => el.setAttribute('data-marker', 'untouched')")
+    cold_chart, hot_chart = (
+        item.locator(":scope > *").last.locator(":scope > *").first for item in (cold_item, hot_item)
+    )
+    for node in (cold_item, hot_item, cold_chart, hot_chart):
+        node.evaluate("el => el.setAttribute('data-marker', 'untouched')")
 
     # Only "hot_metric" gets new data from here on -- "cold_metric" is never touched again.
     api.log_metric_batch(
@@ -1193,8 +1197,13 @@ def test_live_update_poll_patches_only_the_chart_whose_data_changed(
     )
 
     # The poll interval is 2s in this test session -- give it comfortably more than one full cycle.
-    expect(hot_item).not_to_have_attribute("data-marker", "untouched", timeout=8000)
-    assert cold_item.get_attribute("data-marker") == "untouched"
+    expect(hot_chart).not_to_have_attribute("data-marker", "untouched", timeout=8000)
+    # The unchanged chart is not redrawn, not even by the first poll after the page loaded.
+    assert cold_chart.get_attribute("data-marker") == "untouched"
+    # And an item is patched in place, never a whole item nested inside another.
+    for item in (cold_item, hot_item):
+        assert item.get_attribute("data-marker") == "untouched"
+    expect(page.locator(".dl-chart-item .dl-chart-item")).to_have_count(0)
     assert console_errors == []
 
 

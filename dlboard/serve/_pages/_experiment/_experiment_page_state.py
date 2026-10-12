@@ -85,10 +85,6 @@ STATE_VIEW_ID: StoreId[ExperimentPage] = StoreId("view-id-state")
 # is healthy. See `poll_for_updates` in `__init__.py`. ---
 LIVE_POLL_INTERVAL_ID: IntervalId[ExperimentPage] = IntervalId("live-poll-interval")
 STATE_LAST_KNOWN_REVISION: StoreId[ExperimentPage] = StoreId("last-known-revision")
-STATE_CHART_CONTENT_HASHES: StoreId[ExperimentPage] = StoreId("chart-content-hashes")
-"""`dict["panel:index", chart_data_fingerprint(...)]` for whichever charts a poll tick last checked
--- keyed per chart, not per panel, since two charts sharing a panel (routinely, via "Auto-generate
-charts" grouping related metrics together) commonly have very different update cadences."""
 LIVE_STATUS_ID: DivId[ExperimentPage] = DivId("live-status")
 
 # --- enable/disable + "fetched Xs ago": both pure client-side concerns, deliberately kept off the
@@ -449,6 +445,20 @@ def chart_content_id(panel_name: str, index: int) -> ChartID:
     return {"type": "chart-content", "panel": panel_name, "index": index}
 
 
+CHART_BODY_TYPE: typing.Final = "chart-body"
+CHART_FINGERPRINT_TYPE: typing.Final = "chart-fingerprint"
+"""Pattern-matching id `type`s of a chart item's body (the chart itself, what a live update replaces) and of the
+hidden node inside it that carries the `chart_data_fingerprint` of the data that body was drawn from."""
+
+
+def chart_body_id(panel_name: str, index: int) -> ChartID:
+    return {"type": CHART_BODY_TYPE, "panel": panel_name, "index": index}
+
+
+def chart_fingerprint_id(panel_name: str, index: int) -> ChartID:
+    return {"type": CHART_FINGERPRINT_TYPE, "panel": panel_name, "index": index}
+
+
 def panel_content_id(panel_name: str) -> dict[str, str]:
     return {"type": "panel-content", "panel": panel_name}
 
@@ -645,6 +655,29 @@ def live_status_badge(*, ok: bool) -> Component:
     )
 
 
+def chart_body(
+    panel: models.PanelInstance[Any, Any], index: int, dataframe: pd.DataFrame, page_size: int
+) -> list[Component]:
+    """
+    What a chart item shows below its controls: the chart, and a hidden node holding the fingerprint it is drawn from.
+
+    The fingerprint travels with the DOM it describes (not in a store the page keeps beside it), so a
+    chart mounted any way at all -- first load, a panel opening, a page of charts, an edit -- says what
+    it was drawn from, and the poll redraws it only when that is no longer what the data says.
+    """
+    chart = panel.charts[index]
+    context = models.RenderContext(columns=panel.grid_columns, page_size=page_size)
+    rendered = _apply_panel_sync(
+        _render_chart_safely(chart, dataframe, panel.name, context), panel_name=panel.name, sync=panel.sync
+    )
+    fingerprint = html.Div(
+        chart_data_fingerprint(chart, dataframe),
+        id=chart_fingerprint_id(panel.name, index),  # pyrefly: ignore [bad-argument-type]
+        hidden=True,
+    )
+    return [rendered, fingerprint]
+
+
 def render_chart_item(
     panel: models.PanelInstance[Any, Any],
     index: int,
@@ -654,18 +687,16 @@ def render_chart_item(
     """
     Render one chart in a panel (edit/delete controls above it, revealed on hover) as its own node.
 
-    Individually addressable via `chart_content_id(panel.name, index)` -- a live-update poll
-    (`poll_for_updates` in `__init__.py`) patches exactly this node when this specific chart's own
-    data changes, instead of rebuilding `render_panel_charts`' whole shared-dataframe blob for the
-    panel: two charts sharing a panel (a common "Auto-generate charts" grouping) commonly have very
-    different update cadences -- an epoch-level validation chart next to a per-step training chart
-    -- and rebuilding the *panel* whenever *either* changes would pop the untouched one too.
+    Individually addressable via `chart_content_id(panel.name, index)`, and its chart (the body, below the
+    controls) via `chart_body_id`: a live-update poll (`poll_for_updates` in `__init__.py`) replaces
+    exactly the body of a chart whose own data changed, instead of rebuilding `render_panel_charts`' whole
+    shared-dataframe blob for the panel: two charts sharing a panel (a common "Auto-generate charts"
+    grouping) commonly have very different update cadences -- an epoch-level validation chart next to a
+    per-step training chart -- and rebuilding the *panel* whenever *either* changes would pop the
+    untouched one too.
     """
     chart = panel.charts[index]
     context = models.RenderContext(columns=panel.grid_columns, page_size=page_size)
-    rendered = _apply_panel_sync(
-        _render_chart_safely(chart, dataframe, panel.name, context), panel_name=panel.name, sync=panel.sync
-    )
     hover_controls = dmc.Group(
         [
             _drag_handle(
@@ -710,7 +741,13 @@ def render_chart_item(
         wrap="nowrap",
     )
     return dmc.Stack(
-        [header_row, rendered],
+        [
+            header_row,
+            html.Div(
+                chart_body(panel, index, dataframe, page_size),
+                id=chart_body_id(panel.name, index),  # pyrefly: ignore [bad-argument-type]
+            ),
+        ],
         id=chart_content_id(panel.name, index),  # pyrefly: ignore [bad-argument-type]
         gap="xs",
         w="100%" if panel.layout == "grid" else chart.natural_width(context),
