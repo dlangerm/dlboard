@@ -70,6 +70,7 @@ settings table).
 | `DLBOARD_SECRET_KEY` | yes | Signs session cookies for the password auth plugin this image runs. A missing one is a startup error, not a silent fall-through to anonymous access — generate one with `openssl rand -hex 32`. |
 | `DLBOARD_ADMIN_USERS` | no | Comma-separated usernames made admin whenever they sign in — the alternative to creating the first admin by hand (below). |
 | `DLBOARD_MAX_UPLOAD_MB` | no | Hard cap on any single request body, mainly artifact uploads. Defaults to 256. |
+| `DLBOARD_TELEMETRY_METRICS` | no | `prometheus` to serve `/metrics`, `otlp` to push to a collector, or both -- the image has the `otel` extra. See [telemetry.md](telemetry.md). |
 
 Serve it over HTTPS in front of a reverse proxy — session cookies are `Secure` by default, which
 most HTTP clients (browsers included, `localhost` sometimes excepted) silently refuse to send back

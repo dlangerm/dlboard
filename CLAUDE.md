@@ -209,6 +209,20 @@ without one.
 Constants for Dash component IDs live in `dlboard/serve/_constants.py`.
 Constants should only be added for globally-accessed values, not for per-plugin items that won't be used in other contexts.
 
+### Telemetry
+
+Operational metrics and OTLP logs are opt-in (`DLBOARD_TELEMETRY_*`, the `otel` extra) and live in
+`dlboard/serve/telemetry/`. Instrumented code only ever touches the facade in its `__init__.py`: define a
+`Counter`/`UpDownCounter`/`Histogram` at module level (free, import-safe, and a single pid comparison per call
+while telemetry is off) and call `.add()`/`.record()` with a frozen-dataclass `Attributes` of enum-valued labels (each named by an
+`AttributeKey`). Telemetry must never impact what it measures: instruments swallow their own failures, and counts
+are taken as a handler consumes its data (`Tally`), never by materialising or re-reading it. Never
+import `opentelemetry` at runtime outside `telemetry/_sdk.py` (and tests): a local deployment must not load it, and
+`client_import_isolation_test.py` enforces that. The SDK objects are built lazily, once per *process*
+(`_PerProcess`), because Granian forks its workers while the blob writer is spawned -- so never build a meter
+provider in a process that goes on to fork, and don't cache SDK objects in module globals. `/metrics` adds up
+every process through snapshot files; see `_prometheus.py` and `docs/telemetry.md`.
+
 ### Models
 
 `dlboard/models/` holds the Pydantic data models shared between client and server (`Experiment`, `Run`,

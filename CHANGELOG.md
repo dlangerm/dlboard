@@ -24,6 +24,16 @@ pulls that section's body into the GitHub release notes and publishes both distr
   by its new `tag_time_unit` / `tag_size_unit` settings, to `tag_precision` significant digits, and
   `tag_display` overrides those per tag name. Plain
   numbers are written with separators (`12,346`) instead of `1.235e+04`.
+* Opt-in OpenTelemetry for enterprise deployments. `DLBOARD_TELEMETRY_METRICS=prometheus,otlp` exports the
+  server's own metrics (HTTP requests and latency, metric and artifact ingest, the artifact write queue, run
+  lifecycle, sign-ins, artifact purges) either as a Prometheus scrape of `/metrics` -- added up across every
+  worker -- or pushed over OTLP to a collector, Mimir or Grafana Cloud, and `DLBOARD_TELEMETRY_LOGS` sends the
+  logs over OTLP too (Loki). It is the new `otel` extra (OpenTelemetry SDK 1.25 or later, 1.37 for logs),
+  installed in the Docker image; with none of it set nothing is imported or logged, and every process (each
+  Granian worker and its artifact writer) sets itself up on first use, so a collector that is down never stops
+  the server from starting. Telemetry never takes down what it measures: a failure to record is logged once and
+  skipped, and a setup that failed is retried with a back-off. The metrics API is public, as
+  `dlboard.serve.telemetry`, for plugins to record their own. See [docs/telemetry.md](docs/telemetry.md).
 
 ### Fixed
 
@@ -31,6 +41,8 @@ pulls that section's body into the GitHub release notes and publishes both distr
   controls and padding) the first time its data moved, and redrew *every* open chart on the first update
   after a page loaded, including ones whose data had not changed. A chart now carries a fingerprint of the
   data it was drawn from, so a poll replaces only the chart inside its item, and only when its data moved.
+* A request the sign-in gate turned away (a `401`, or the redirect to the sign-in page) had no request id, and
+  with `DLBOARD_ACCESS_LOG` on its response raised an error instead of being logged.
 
 ### Changed
 

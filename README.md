@@ -135,6 +135,7 @@ uv run prek run --all-files         # run pre-commit hooks manually
 - **Running it in production**
   - [Configuration](docs/configuration.md) — every environment variable
   - [Reverse proxy & TLS](docs/reverse-proxy.md) — Caddy and nginx examples
+  - [Telemetry](docs/telemetry.md) — Prometheus and OpenTelemetry metrics and logs, for Grafana, Mimir and Loki
   - [Upgrading](docs/upgrading.md) and [Backup & restore](docs/backup.md)
   - [Compatibility](docs/compatibility.md) — what's stable across releases and what may still change
 - **Plugins** — dlboard has no built-in opinions about storage, auth, charts, or theming; all of

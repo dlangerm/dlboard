@@ -25,6 +25,8 @@ Breaking any of these needs a migration path and a deprecation window of at leas
 - **Configuration.** Environment variable names ([configuration.md](configuration.md)), the CLI commands
   and flags (`dlboard serve local`, `dlboard serve custom --plugins module:attr`, `dlboard users`), and
   the plugin bundle names in `dlboard.plugins`.
+- **Telemetry.** The names and attributes of the exported metrics ([telemetry.md](telemetry.md)). New ones are
+  added freely; one is renamed or dropped only after a release that exports both.
 
 Enum values and chart type names are checked by a test, so removing or renaming one fails the build
 and points here.
