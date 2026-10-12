@@ -13,6 +13,7 @@ from dlboard.models._artifact import (
     NewArtifactLink,
     TagValue,
     UnservableArtifactRefError,
+    format_tag_value,
     format_tags,
     is_inlineable_artifact,
 )
@@ -120,6 +121,7 @@ __all__ = [
     "User",
     "ValidJsonTypes",
     "ViewSummary",
+    "format_tag_value",
     "format_tags",
     "has_scope",
     "is_inlineable_artifact",

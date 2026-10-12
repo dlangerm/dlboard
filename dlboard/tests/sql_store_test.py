@@ -274,7 +274,14 @@ def test_summarize_metric_keys_excludes_deleted_runs_and_other_experiments(
     assert store.summarize_metric_keys(experiment_id) == []
 
 
-def test_log_and_fetch_artifacts_decodes_tags(store: SQLLiteStore, experiment_id: int) -> None:
+@pytest.mark.parametrize(
+    "tags",
+    [{"split": "train"}, {"score": 0.25, "epoch": 3, "best": True, "split": "val"}],
+    ids=["text", "scalars"],
+)
+def test_log_and_fetch_artifacts_decodes_tags(
+    store: SQLLiteStore, experiment_id: int, tags: dict[str, models.TagValue]
+) -> None:
     run = store.create_run(models.NewRun(experiment_id=experiment_id))
     store.log_artifact_refs(
         [
@@ -285,7 +292,7 @@ def test_log_and_fetch_artifacts_decodes_tags(store: SQLLiteStore, experiment_id
                 experiment_id=experiment_id,
                 step=0,
                 ref="ref://a",
-                tags={"split": "train"},
+                tags=tags,
             ),
             models.Artifact(
                 key="other",
@@ -300,7 +307,7 @@ def test_log_and_fetch_artifacts_decodes_tags(store: SQLLiteStore, experiment_id
 
     fetched = list(store.fetch_artifacts(experiment_id=experiment_id, keys=frozenset({"img"})))
     assert len(fetched) == 1
-    assert fetched[0].tags == {"split": "train"}
+    assert fetched[0].tags == tags
     assert fetched[0].ref == "ref://a"
 
 

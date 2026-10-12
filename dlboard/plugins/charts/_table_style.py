@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
+from dlboard.models import TagValue, format_tag_value
+
 HPARAM_COLUMN_PREFIX = "hparam__"
 """Hyperparameter columns are merged into the same wide dataframe as metrics/artifacts, prefixed
 so a hparam key can never collide with a same-named metric or artifact column."""
@@ -38,17 +40,17 @@ def infer_column_dtype[T](rows: list[dict[T, Any]], key: T) -> ColumnDType:
     return TEXT
 
 
-def format_tags_caption(raw_tags: dict[str, str] | float | None) -> str:
+def format_tags_caption(raw_tags: dict[str, TagValue] | float | None) -> str:
     """
     Format an artifact `<key>__tags` cell into a caption.
 
-    `Artifact.tags` is a `dict[str, str]`, and `build_artifacts_dataframe` pivots it straight into the
+    `Artifact.tags` is a `dict[str, TagValue]`, and `build_artifacts_dataframe` pivots it straight into the
     dataframe unchanged -- so a real row is always a dict. A `float` (NaN) shows up only when pivoting
     left a gap for a (run, step) with no tags logged; that's the sole non-dict case to handle.
     """
     if not isinstance(raw_tags, dict):
         return ""
-    return ", ".join(f"{k}: {v}" for k, v in raw_tags.items())
+    return ", ".join(f"{k}: {format_tag_value(v)}" for k, v in raw_tags.items())
 
 
 def column_def(name: str, dtype: ColumnDType, **extra: Any) -> dict[str, Any]:  # noqa: ANN401

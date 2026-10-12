@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
-from dlboard.plugins.charts._table_style import infer_column_dtype, themed_grid_kwargs
+from dlboard.plugins.charts._table_style import format_tags_caption, infer_column_dtype, themed_grid_kwargs
+
+if TYPE_CHECKING:
+    from dlboard import models
 
 
 @pytest.mark.parametrize(
@@ -24,3 +29,19 @@ def test_infer_column_dtype(rows: list[dict[str, object]], expected: str) -> Non
 def test_themed_grid_kwargs_has_expected_keys() -> None:
     kwargs = themed_grid_kwargs()
     assert set(kwargs) == {"className", "style"}
+
+
+@pytest.mark.parametrize(
+    ("tags", "caption"),
+    [
+        ({"split": "val"}, "split: val"),
+        ({"score": 0.140984, "epoch": 3, "best": True}, "score: 0.1410, epoch: 3, best: true"),
+        ({"score": "0.1410"}, "score: 0.1410"),
+        (float("nan"), ""),
+    ],
+    ids=["text", "scalars", "text-matches-scalar", "gap"],
+)
+def test_format_tags_caption_formats_scalars_like_the_client_does(
+    tags: dict[str, models.TagValue] | float, caption: str
+) -> None:
+    assert format_tags_caption(tags) == caption

@@ -10,6 +10,15 @@ To cut a release: rename this section to `## [X.Y.Z] - YYYY-MM-DD`, start a fres
 pulls that section's body into the GitHub release notes and publishes both distributions from it.
 -->
 
+## [Unreleased]
+
+### Changed
+
+* The server accepts artifact `tags` whose values are numbers or booleans as well as strings
+  (`NewArtifact.tags` is now `dict[str, TagValue]`), and the image-series and file-list charts format
+  them the way the client does. Clients still send text for now: this is the *expand* step of #179, so a
+  later release can start sending numbers without an older-server 400 (see `docs/compatibility.md`).
+
 ## [0.5.0] - 2026-10-11
 
 ### Added

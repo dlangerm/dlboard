@@ -13,10 +13,11 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.demos.boring_classes import BoringModel
 
 from dlboard._wire import Resource, create_path, run_finish_path
+from dlboard.client._rest_api import BasicDlboardAPI
 from dlboard.client.artifacts import image
 from dlboard.client.dlboard_logger import DLBoardLogger
 from dlboard.conftest import EVERY_STORE_BACKEND, StoreBackend
-from dlboard.models import FILE_KIND_TAG, FileKind, RunStatus
+from dlboard.models import FILE_KIND_TAG, FileKind, NewArtifact, NewRun, RunStatus, TagValue
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -201,3 +202,32 @@ def test_the_finish_route_rejects_what_it_cannot_record(
     )
 
     assert res.status_code == expected_status
+
+
+def test_the_server_accepts_scalar_tags_as_well_as_text(
+    backend_server: BackendServer, tmp_path: Path
+) -> None:
+    """Expand step of numeric tags: a client that sends numbers (a later release) must not get a 400."""
+    api = BasicDlboardAPI(backend_server.url)
+    experiment = api.get_or_create_experiment(api.get_or_create_project("p").id, "e")
+    run = api.create_run(NewRun(experiment_id=experiment.id))
+    path = tmp_path / "a.bin"
+    path.write_bytes(b"hello")
+    tags: dict[str, TagValue] = {"score": 0.25, "epoch": 3, "best": True, "split": "val"}
+
+    api.log_artifact_batch(
+        [
+            (
+                NewArtifact(
+                    key="k", fname=path.name, run_id=run.id, experiment_id=experiment.id, step=0, tags=tags
+                ),
+                path,
+            )
+        ]
+    )
+
+    deadline = time.monotonic() + 10
+    while not (stored := list(backend_server.store.fetch_artifacts(experiment_id=experiment.id))):
+        assert time.monotonic() < deadline, "artifact was never recorded"
+        time.sleep(0.1)
+    assert stored[0].tags == tags

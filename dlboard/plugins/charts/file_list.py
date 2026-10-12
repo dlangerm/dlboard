@@ -11,7 +11,16 @@ import dash_mantine_components as dmc
 import pandas as pd
 from pydantic import BaseModel, Field, model_validator
 
-from dlboard.models import FILE_KIND_TAG, RUN_NAME_COLUMN, Artifact, ChartType, ColumnKind, MetricColumn
+from dlboard.models import (
+    FILE_KIND_TAG,
+    RUN_NAME_COLUMN,
+    Artifact,
+    ChartType,
+    ColumnKind,
+    MetricColumn,
+    TagValue,
+    format_tag_value,
+)
 from dlboard.plugins.charts._table_style import (
     ARTIFACT_COLUMN_PREFIX,
     NUMERIC,
@@ -88,7 +97,9 @@ def _file_rows(parameters: FileListSettings, dataframe: pd.DataFrame) -> list[di
         key = column.removeprefix(ARTIFACT_COLUMN_PREFIX)
         for _, file in dataframe.loc[dataframe[column].notna()].iterrows():
             raw_tags = file.get(tags_column)
-            tags: dict[str, str] = cast("dict[str, str]", raw_tags) if isinstance(raw_tags, dict) else {}
+            tags: dict[str, TagValue] = (
+                cast("dict[str, TagValue]", raw_tags) if isinstance(raw_tags, dict) else {}
+            )
             run_id = int(file[MetricColumn.RUN_ID])
             run_name = file.get(RUN_NAME_COLUMN)
             rows.append(
@@ -104,18 +115,19 @@ def _file_rows(parameters: FileListSettings, dataframe: pd.DataFrame) -> list[di
     return sorted(rows, key=lambda row: (row["run_id"], row["step"], row["file"]))
 
 
-def _score(tags: dict[str, str]) -> float | None:
+def _score(tags: dict[str, TagValue]) -> float | None:
     try:
         return float(tags[_SCORE_KEY])
     except (KeyError, ValueError):
         return None
 
 
-def _group_of(tags: dict[str, str]) -> str:
+def _group_of(tags: dict[str, TagValue]) -> str:
     """What kind of file this is, for grouping: a checkpoint's own tag, else the file kind it was logged as."""
     if tag := tags.get(_TAG_KEY):
+        tag = format_tag_value(tag)
         return _GROUP_LABELS.get(tag, tag.replace("_", " ").title())
-    return tags.get(FILE_KIND_TAG, "").title() or _UNTAGGED_GROUP
+    return format_tag_value(tags.get(FILE_KIND_TAG, "")).title() or _UNTAGGED_GROUP
 
 
 def _grid(rows: list[dict[str, Any]], *, page_size: int) -> dag.AgGrid:
