@@ -58,5 +58,5 @@ background work no user is behind uses `get_system_data_store()` instead. See
 **Shared models.** `dlboard/models/` holds the Pydantic models both client and server import
 (`Experiment`, `Run`, `Project`, `HyperParams`, `LoggedMetrics`, `Artifact`, and the chart/view
 models `Page`/`ChartType`). Most have a `New*` variant for creation payloads versus the
-persisted/read model. Dash component-id constants that are genuinely shared across plugins live in
-`dlboard/models/constants.py` — a plugin-local id has no business there.
+persisted/read model. Dash component-id constants that are genuinely shared across pages and plugins live in
+`dlboard/serve/_constants.py` — a plugin-local id has no business there.

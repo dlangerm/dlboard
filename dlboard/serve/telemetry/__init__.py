@@ -100,8 +100,8 @@ class TelemetrySettings(BaseSettings):
         return self
 
 
-_LOGS_MIN_SDK: Final = (1, 37)
-"""The first SDK whose `Logger.emit` takes the API's `LogRecord`; metrics work with far older ones."""
+_LOGS_MIN_SDK: Final = (1, 38)
+"""The first SDK whose `Logger.emit` takes a log record's fields as keyword arguments; metrics work with far older ones."""
 
 
 def _sdk_version() -> tuple[int, int]:

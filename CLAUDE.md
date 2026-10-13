@@ -39,8 +39,8 @@ uv run prek run --all-files         # run pre-commit hooks manually
 ```
 
 Tests live next to the code they test, not in one top-level directory: a `tests/` subfolder sits beside
-every source directory that has tests (e.g. `dlboard/plugins/charts/tests/line_chart_test.py` next to
-`dlboard/plugins/charts/line_chart.py`). A test that exercises multiple files across directories (an
+every source directory that has tests (e.g. `dlboard/plugins/charts/tests/table_chart_test.py` next to
+`dlboard/plugins/charts/table_chart.py`). A test that exercises multiple files across directories (an
 integration/end-to-end test, not a unit test that merely needs some object as fixture data) lives in the
 `tests/` dir of those files' lowest common parent directory instead — e.g. a test spanning `serve/_pages/`
 and `plugins/charts/` belongs in `dlboard/tests/` (see `chart_render_isolation_test.py`). Shared fixtures
@@ -128,8 +128,9 @@ class at all. Lives under `client/`, not `plugins/`, so a client install never n
 just to construct one.
 
 `dlboard/plugins/__init__.py` defines the bundles used for a local deployment:
-- `LOCAL_STORAGE` = `[sqlite, filesystem]` — the metadata DB and artifact blob storage
-- `BUILTIN_CHARTS` = image_series, line_chart, table_chart
+- `LOCAL_STORAGE` = `[sqlite, filesystem, artifact_purge_worker]` — the metadata DB, artifact blob storage, and the
+  worker that deletes purged artifacts' blobs
+- `BUILTIN_CHARTS` = image_series, file_list, line_chart, bar_chart, table_chart
 - `LOCAL_DEPLOYMENT` = all of the above, used by `dlboard serve local`
 - `POSTGRES_STORAGE` = `[postgres, filesystem, artifact_purge_worker]` — for a shared deployment, composed
   into a `dlboard serve custom --plugins` list; configured by `DLBOARD_POSTGRES_*` env vars (`PostgresSettings`)
@@ -159,11 +160,11 @@ logic is a narrow exception: it references concrete chart classes to decide what
 ### Data flow: client → server
 
 1. `dlboard.client.dlboard_logger.DLBoardLogger` is a `pytorch_lightning.loggers.Logger`. On init it creates
-   an experiment/run via `BasicDlboardAPI` (`dlboard/plugins/backend/basic_rest_backend.py`) and spawns two
-   daemon subprocesses (`process_metrics_async`, `process_artifacts_async`) that batch and flush metrics /
-   artifacts from multiprocessing queues to the REST backend on an interval, so training isn't blocked on
-   network I/O.
-2. `dlboard/serve/_backend/basic_rest_backend` (server side) exposes the REST API that ingests these batches.
+   an experiment/run via `BasicDlboardAPI` (`dlboard/client/_rest_api.py`) and spawns two daemon
+   subprocesses, one for metrics and one for artifacts (`_start_shipper`, each running `dlboard._batching.ship_batches`),
+   that batch and flush them from multiprocessing queues to the REST backend on an interval, so training isn't
+   blocked on network I/O.
+2. `dlboard/plugins/backend/basic_rest_backend.py` (server side) exposes the REST API that ingests these batches.
 3. Server-side storage is split into a `DataStore` (structured metadata: projects, experiments, runs, metrics,
    hparams) and an `ArtifactStore` (blob storage), both defined as generic protocols in
    `dlboard/models/_data_store.py`. `SQLStoreBase` (`dlboard/serve/_backend/_sql_store_base.py`) implements

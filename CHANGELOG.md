@@ -28,7 +28,7 @@ pulls that section's body into the GitHub release notes and publishes both distr
   server's own metrics (HTTP requests and latency, metric and artifact ingest, the artifact write queue, run
   lifecycle, sign-ins, artifact purges) either as a Prometheus scrape of `/metrics` -- added up across every
   worker -- or pushed over OTLP to a collector, Mimir or Grafana Cloud, and `DLBOARD_TELEMETRY_LOGS` sends the
-  logs over OTLP too (Loki). It is the new `otel` extra (OpenTelemetry SDK 1.25 or later, 1.37 for logs),
+  logs over OTLP too (Loki). It is the new `otel` extra (OpenTelemetry SDK 1.25 or later, 1.38 for logs),
   installed in the Docker image; with none of it set nothing is imported or logged, and every process (each
   Granian worker and its artifact writer) sets itself up on first use, so a collector that is down never stops
   the server from starting. Telemetry never takes down what it measures: a failure to record is logged once and
