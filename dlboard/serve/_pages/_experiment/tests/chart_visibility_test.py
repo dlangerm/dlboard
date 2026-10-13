@@ -10,10 +10,12 @@ import pytest
 from dlboard.conftest import find_props as _find_props
 from dlboard.conftest import props as _to_props
 from dlboard.models._view import ChartInstance, PanelInstance
+from dlboard.plugins.charts.bar_chart import BarChart
 from dlboard.plugins.charts.line_chart import LineChart
 from dlboard.plugins.charts.table_chart import TableChart
 from dlboard.serve._pages._experiment import _experiment_page_state as state
 
+BarChart.register(allow_override=True)
 LineChart.register(allow_override=True)
 TableChart.register(allow_override=True)
 
@@ -66,19 +68,32 @@ def test_panel_header_controls_add_button_is_always_enabled_and_hover_revealed()
 
 
 def _header_row(stack: Any) -> Any:  # noqa: ANN401
-    """The chart item's top row: the unscoped-fetch badge (if any) plus the hover-controls group."""
+    """The chart item's top row: the chart title and unscoped-fetch badge (if any) plus the hover-controls group."""
     return _to_props(stack)["children"][0]
 
 
-def test_render_panel_charts_no_badge_when_chart_hints_its_columns() -> None:
-    panel = _panel_with_chart()  # a line chart, always hints {column, x_axis}
-    df = pd.DataFrame({"run_id": [1], "step": [0], "loss": [0.5]})
+@pytest.mark.parametrize(
+    ("chart_type", "parameters"),
+    [
+        ("line", {"column": "DeviceStatsMonitor.on_test_batch_end/active.all.allocated", "x_axis": "step"}),
+        ("bar", {"column": "DeviceStatsMonitor.on_test_batch_end/active.all.allocated", "x_axis": "step"}),
+    ],
+)
+def test_render_panel_charts_titles_a_metric_chart_with_its_full_metric_name(
+    chart_type: str, parameters: dict[str, str]
+) -> None:
+    """The axis titles are shortened to fit; the header above the chart carries the whole name."""
+    panel = PanelInstance[Any, Any](
+        name="p", charts=[ChartInstance[Any, Any](chart_type=chart_type, parameters=parameters)]
+    )
+    df = pd.DataFrame({"run_id": [1], "step": [0], parameters["column"]: [0.5]})
 
     [stack] = state.render_panel_charts(panel, df)
     header_row = _to_props(_header_row(stack))
 
-    assert header_row["justify"] == "flex-end"
-    assert len(header_row["children"]) == 1  # just the hover-controls group, no badge
+    title, hover_controls = header_row["children"]  # no badge: a metric chart always hints its columns
+    assert _to_props(title)["children"] == parameters["column"]
+    assert _to_props(hover_controls)["className"] == "dl-chart-controls"
 
 
 def test_render_panel_charts_badge_when_chart_cannot_hint_its_columns() -> None:

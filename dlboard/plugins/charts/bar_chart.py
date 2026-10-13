@@ -231,6 +231,11 @@ class BarChart(ChartType[BarChartSettings, pd.DataFrame, dmc.BarChart], frozen=T
 
     @classmethod
     @typing.override
+    def title(cls, parameters: BarChartSettings) -> str:
+        return parameters.column
+
+    @classmethod
+    @typing.override
     def hint_required_columns(cls, parameters: BarChartSettings) -> set[str] | None:
         return {parameters.column, parameters.x_axis}
 

@@ -735,10 +735,16 @@ def render_chart_item(
     # `dl-chart-controls`'s opacity:0-until-hover applies to its whole subtree, and this badge
     # is the one thing here that's supposed to stay visible without hovering.
     badge = _unscoped_fetch_badge(chart)
+    title = chart.title()
+    leading = [
+        *([dmc.Text(title, fw=700, size="sm", style={"overflowWrap": "anywhere"}, flex=1)] if title else []),
+        *([badge] if badge else []),
+    ]
     header_row = dmc.Group(
-        [*([badge] if badge else []), hover_controls],
-        justify="space-between" if badge else "flex-end",
+        [*leading, hover_controls],
+        justify="space-between" if leading else "flex-end",
         wrap="nowrap",
+        align="flex-start",
     )
     return dmc.Stack(
         [

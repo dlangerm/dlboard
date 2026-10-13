@@ -12,6 +12,11 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ## [Unreleased]
 
+### Added
+
+* A line or bar chart is titled with its full metric name, above the chart. The y-axis title is still
+  shortened to fit, so a long name was hard to read.
+
 ## [0.6.0] 2026-10-13
 
 ### Added
