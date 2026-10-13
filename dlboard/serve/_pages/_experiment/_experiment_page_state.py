@@ -493,6 +493,25 @@ def add_suggestion_button_id(kind: str, key: str) -> dict[str, str]:
 # ============================================================
 
 
+def _splits_metric_and_artifact_charts(panel: models.PanelInstance[Any, Any]) -> bool:
+    """
+    Whether a chart of the panel needs only metrics and another only artifacts.
+
+    That is what makes fetching both for one panel wasteful. A chart that wants both (a table of runs with
+    an artifact column) asks for nothing the panel would not fetch for it anyway.
+    """
+    wants = [
+        (
+            (cols := chart.hint_required_columns()) is None or bool(cols),
+            bool(chart.hint_required_artifact_keys() or chart.hint_required_artifact_key_prefixes()),
+        )
+        for chart in panel.charts
+    ]
+    return any(metrics and not artifacts for metrics, artifacts in wants) and any(
+        artifacts and not metrics for metrics, artifacts in wants
+    )
+
+
 def fetch_panel_dataframe(
     store: DataStore[...],
     experiment_id: int,
@@ -505,7 +524,7 @@ def fetch_panel_dataframe(
     artifact_key_prefixes = frozenset(panel.hint_required_artifact_key_prefixes())
     has_artifacts = bool(artifact_keys or artifact_key_prefixes)
 
-    if (metric_cols is None or metric_cols) and has_artifacts:
+    if _splits_metric_and_artifact_charts(panel):
         _log.warning(
             "Panel %r mixes metric and artifact charts, fetching both is "
             "less efficient than a panel of one kind; consider splitting it.",

@@ -60,6 +60,16 @@ class Quantity(BaseModel, frozen=True):
     value: float
     unit: Unit
 
+    @property
+    def base_value(self) -> float:
+        """`value` in seconds (a duration) or bytes (a size), so quantities compare whatever unit each was logged in."""
+        return self.value * _BASE_PER_UNIT[self.unit]
+
+    @property
+    def base_unit(self) -> Unit:
+        """The unit `base_value` is in."""
+        return TimeUnit.SECONDS if isinstance(self.unit, TimeUnit) else SizeUnit.BYTES
+
 
 TagValue: TypeAlias = str | int | float | bool | Quantity
 """What a caller may put in a tag: a JSON scalar or a `Quantity`, shown by `format_tag_value`."""
@@ -124,7 +134,7 @@ def format_tag_value(value: TagValue, display: TagDisplay = TagDisplay()) -> str
         case str():
             return value
         case Quantity():
-            base = value.value * _BASE_PER_UNIT[value.unit]
+            base = value.base_value
             unit = (display.time_unit if isinstance(value.unit, TimeUnit) else display.size_unit) or max(
                 (u for u in type(value.unit) if abs(base) >= _BASE_PER_UNIT[u]),
                 key=_BASE_PER_UNIT.__getitem__,

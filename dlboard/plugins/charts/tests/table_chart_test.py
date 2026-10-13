@@ -14,6 +14,7 @@ from dlboard.plugins.charts._table_style import (
     DEFAULT_TABLE_FONT_SIZE,
     HPARAM_COLUMN_PREFIX,
     artifact_column,
+    artifact_fname_column,
     artifact_tags_column,
 )
 from dlboard.plugins.charts.table_chart import TableChart, TableChartSettings, TableMode
@@ -84,10 +85,6 @@ def test_hint_required_hparams_follows_the_settings(
     settings: TableChartSettings, expected: set[str] | None
 ) -> None:
     assert TableChart.hint_required_hparams(settings) == expected
-
-
-def test_hint_required_artifact_keys_always_empty() -> None:
-    assert TableChart.hint_required_artifact_keys(TableChartSettings()) == set()
 
 
 # ---- render: run mode ----
@@ -314,3 +311,133 @@ def test_a_grid_of_other_columns_starts_without_the_old_ones_state(
     after = _props(TableChart.render(other, df))["persistence"]
 
     assert (before == after) is same_state
+
+
+# ---- artifacts ----
+
+
+def _artifacts_df() -> pd.DataFrame:
+    """Two runs' artifacts: an image per run (run 1 logging two) with tags, and a text file."""
+    gap = float("nan")
+    return pd.DataFrame(
+        {
+            "run_id": [1, 1, 2],
+            "step": [0, 1, 0],
+            "loss": [0.5, 0.4, 0.9],
+            artifact_column("eval/a.png"): ["/artifact/1?v=a", "/artifact/2?v=b", "/artifact/3?v=c"],
+            artifact_fname_column("eval/a.png"): ["a.png", "a.png", "a.png"],
+            artifact_tags_column("eval/a.png"): [
+                {"split": "val", "score": 0.5},
+                {"split": "val", "score": 0.9},
+                {"split": "train", "took": {"value": 2, "unit": "min"}},
+            ],
+            artifact_column("eval/notes.txt"): [gap, gap, "/artifact/4?v=d"],
+            artifact_fname_column("eval/notes.txt"): [gap, gap, "notes.txt"],
+            artifact_tags_column("eval/notes.txt"): [gap, gap, {}],
+        }
+    )
+
+
+def _artifact_grid(settings: TableChartSettings) -> dict[str, Any]:
+    return _props(TableChart.render(settings, _artifacts_df()))
+
+
+_BY_KEY = TableChartSettings(mode=TableMode.ARTIFACTS, artifact_key="eval/a.png")
+_BY_PREFIX = TableChartSettings(mode=TableMode.ARTIFACTS, artifact_key="eval/", artifact_key_is_prefix=True)
+
+
+@pytest.mark.parametrize(
+    ("settings", "row_ids", "has_key_column"),
+    [
+        pytest.param(_BY_KEY, ["1/0/eval/a.png", "1/1/eval/a.png", "2/0/eval/a.png"], False, id="key"),
+        pytest.param(
+            _BY_PREFIX,
+            ["1/0/eval/a.png", "1/1/eval/a.png", "2/0/eval/a.png", "2/0/eval/notes.txt"],
+            True,
+            id="prefix",
+        ),
+    ],
+)
+def test_artifacts_mode_has_a_row_per_artifact_under_the_key_or_prefix(
+    settings: TableChartSettings, row_ids: list[str], *, has_key_column: bool
+) -> None:
+    table = TableChart.render(settings, _artifacts_df())
+
+    assert [row["_row_id"] for row in _props(table)["rowData"]] == row_ids
+    assert ("key" in {column["field"] for column in _leaf_columns(table)}) is has_key_column
+
+
+def test_artifacts_mode_links_a_file_and_shows_an_image_as_a_thumbnail() -> None:
+    rows = {row["_row_id"]: row for row in _props(TableChart.render(_BY_PREFIX, _artifacts_df()))["rowData"]}
+
+    assert rows["1/0/eval/a.png"]["artifact"] == "[![a.png](/artifact/1?v=a)](/artifact/1?v=a)"
+    assert rows["2/0/eval/notes.txt"]["artifact"] == "[notes.txt](/artifact/4?v=d)"
+
+
+def test_artifacts_mode_cannot_be_made_to_write_markdown_by_a_file_name() -> None:
+    df = _artifacts_df().assign(**{artifact_fname_column("eval/a.png"): "x](https://evil.example).png"})
+    row: dict[str, Any] = _props(TableChart.render(_BY_KEY, df))["rowData"][0]
+
+    assert row["artifact"].startswith(r"[![x\]\(https://evil.example\).png](/artifact/1?v=a)")
+
+
+def test_artifacts_mode_makes_each_tag_a_column_that_sorts_as_what_it_is() -> None:
+    table = TableChart.render(_BY_KEY, _artifacts_df())
+    columns = {column["headerName"]: column for column in _leaf_columns(table)}
+    rows = _props(table)["rowData"]
+
+    assert columns["score"]["filter"] == "agNumberColumnFilter"
+    assert columns["split"]["filter"] is True
+    assert [row["artifact__tag__score"] for row in rows[:2]] == [0.5, 0.9]  # not "0.5000"
+    # A duration is in its base unit whatever it was logged in, so two runs' are comparable.
+    assert rows[2]["artifact__tag__took"] == pytest.approx(120)
+    assert "took (s)" in columns
+
+
+def test_artifacts_mode_with_nothing_logged_says_so() -> None:
+    table = TableChart.render(_BY_KEY, _artifacts_df().drop(columns=[artifact_column("eval/a.png")]))
+    assert "No artifacts" in _props(table)["rowData"][0]["message"]
+
+
+def test_artifacts_mode_makes_room_for_thumbnails_only_when_there_are_some() -> None:
+    notes = TableChartSettings(mode=TableMode.ARTIFACTS, artifact_key="eval/notes.txt")
+
+    assert "rowHeight" in _artifact_grid(_BY_KEY)["dashGridOptions"]
+    assert "rowHeight" not in _artifact_grid(notes)["dashGridOptions"]
+
+
+def test_run_mode_adds_a_column_group_for_each_artifact_with_the_runs_latest() -> None:
+    settings = TableChartSettings(metrics=["loss"], artifacts=["eval/a.png"])
+    table = TableChart.render(settings, _artifacts_df())
+    rows = _rows_by_run(table)
+    group = next(g for g in _props(table)["columnDefs"] if g.get("headerName") == "eval/a.png")
+
+    assert rows[1][artifact_column("eval/a.png")] == "[![a.png](/artifact/2?v=b)](/artifact/2?v=b)"
+    assert rows[1][f"{artifact_column('eval/a.png')}__tag__score"] == pytest.approx(0.9)
+    assert "score" in [column["headerName"] for column in group["children"]]
+
+
+@pytest.mark.parametrize(
+    ("settings", "keys", "prefixes"),
+    [
+        pytest.param(TableChartSettings(), set(), set(), id="runs-none-by-default"),
+        pytest.param(TableChartSettings(artifacts=["a", "b"]), {"a", "b"}, set(), id="runs-columns"),
+        pytest.param(_BY_KEY, {"eval/a.png"}, set(), id="artifacts-key"),
+        pytest.param(_BY_PREFIX, set(), {"eval/"}, id="artifacts-prefix"),
+    ],
+)
+def test_the_artifact_keys_a_table_asks_the_panel_to_fetch(
+    settings: TableChartSettings, keys: set[str], prefixes: set[str]
+) -> None:
+    assert TableChart.hint_required_artifact_keys(settings) == keys
+    assert TableChart.hint_required_artifact_key_prefixes(settings) == prefixes
+
+
+def test_an_artifacts_table_fetches_no_metrics_or_hparams() -> None:
+    assert TableChart.hint_required_columns(_BY_KEY) == set()
+    assert TableChart.hint_required_hparams(_BY_KEY) == set()
+
+
+def test_an_artifacts_table_must_say_which_key() -> None:
+    with pytest.raises(ValidationError, match="artifact_key"):
+        TableChartSettings(mode=TableMode.ARTIFACTS)

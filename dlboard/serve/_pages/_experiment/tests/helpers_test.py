@@ -13,10 +13,11 @@ from pydantic import ValidationError
 from dlboard import models
 from dlboard.models import HyperParams, NewHyperParams, Run
 from dlboard.models._view import ChartInstance, ColumnKind, PanelInstance, ParameterField, ParameterFieldType
-from dlboard.plugins.charts._table_style import ARTIFACT_COLUMN_PREFIX
+from dlboard.plugins.charts._table_style import artifact_keys_in
 from dlboard.plugins.charts.file_list import FileListChart
 from dlboard.plugins.charts.image_series import ImageChart
 from dlboard.plugins.charts.line_chart import LineChart
+from dlboard.plugins.charts.table_chart import TableChart
 from dlboard.serve._pages._experiment import _experiment_page_state as state
 from dlboard.serve._pages._experiment import _run_comparison_table as run_table
 from dlboard.serve._pages._experiment._chart_editor_modal import _param_field_input
@@ -349,11 +350,7 @@ def test_a_file_list_of_a_key_prefix_fetches_every_key_under_it_including_later_
     later = state.fetch_panel_dataframe(store, experiment_id, panel, {})
 
     def files(df: pd.DataFrame) -> set[str]:
-        return {
-            c.removeprefix(ARTIFACT_COLUMN_PREFIX)
-            for c in df.columns
-            if c.startswith(ARTIFACT_COLUMN_PREFIX) and not c.endswith("__tags")
-        }
+        return set(artifact_keys_in(df.columns, "", prefix=True))
 
     assert files(first) == {"ckpt/a"}
     assert files(later) == {"ckpt/a", "ckpt/c"}
@@ -558,3 +555,25 @@ def test_a_chart_only_redraws_for_rows_where_it_has_data_of_its_own(
     changed = state.chart_data_fingerprint(chart, before) != state.chart_data_fingerprint(chart, after)
 
     assert changed is redraws
+
+
+_LINE = ChartInstance[Any, Any](chart_type="line", parameters={"column": "loss", "x_axis": "step"})
+_FILES = ChartInstance[Any, Any](chart_type="files", parameters={"key": "ckpt"})
+_TABLE_WITH_ARTIFACTS = ChartInstance[Any, Any](chart_type="table", parameters={"artifacts": ["img"]})
+
+
+@pytest.mark.parametrize(
+    ("charts", "splits"),
+    [
+        pytest.param([_LINE, _FILES], True, id="a-metric-chart-and-an-artifact-chart"),
+        pytest.param([_FILES], False, id="artifacts-only"),
+        pytest.param([_TABLE_WITH_ARTIFACTS], False, id="one-chart-wanting-both"),
+        pytest.param([_LINE, _TABLE_WITH_ARTIFACTS], False, id="the-artifacts-come-with-metrics-anyway"),
+    ],
+)
+def test_a_panel_is_split_only_when_different_charts_want_metrics_and_artifacts(
+    charts: list[ChartInstance[Any, Any]], *, splits: bool
+) -> None:
+    TableChart.register(allow_override=True)
+    panel = PanelInstance[Any, Any](name="p", charts=charts)
+    assert state._splits_metric_and_artifact_charts(panel) is splits

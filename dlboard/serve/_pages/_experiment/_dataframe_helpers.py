@@ -9,7 +9,12 @@ from typing import Any
 import pandas as pd
 
 from dlboard.models import RUN_NAME_COLUMN, Artifact, ColumnKind, HyperParams, MetricColumn
-from dlboard.plugins.charts._table_style import HPARAM_COLUMN_PREFIX, artifact_column, artifact_tags_column
+from dlboard.plugins.charts._table_style import (
+    HPARAM_COLUMN_PREFIX,
+    artifact_column,
+    artifact_fname_column,
+    artifact_tags_column,
+)
 from dlboard.serve._backend._artifact_download import artifact_url
 from dlboard.serve._pages._experiment._chart_autogen import default_artifact_chart
 
@@ -28,7 +33,7 @@ IDENTITY_COLUMNS: typing.Final = frozenset({MetricColumn.RUN_ID, RUN_NAME_COLUMN
 
 
 def build_artifacts_dataframe(artifacts: typing.Iterable[Artifact]) -> pd.DataFrame:
-    """Pivot artifact download URLs (and tags) into columns per key, indexed by (run_id, step)."""
+    """Pivot artifact download URLs (and tags and file names) into columns per key, indexed by (run_id, step)."""
     # A URL, not the underlying `ref` -- charts (and anything else consuming this dataframe) fetch
     # an artifact by id through `/artifact/<id>`, never by talking to the ref's backend directly.
     # One pass: each artifact is dumped and given its URL as it streams into the frame.
@@ -36,13 +41,17 @@ def build_artifacts_dataframe(artifacts: typing.Iterable[Artifact]) -> pd.DataFr
     if df.empty:
         return df
 
-    url_pivot = df.pivot_table(index=["run_id", "step"], columns="key", values="url", aggfunc="first")
-    tags_pivot = df.pivot_table(index=["run_id", "step"], columns="key", values="tags", aggfunc="first")
-    return (
-        url_pivot.rename(columns=artifact_column)
-        .join(tags_pivot.rename(columns=artifact_tags_column))
-        .reset_index()
-    )
+    pivots = [
+        df.pivot_table(index=["run_id", "step"], columns="key", values=value, aggfunc="first").rename(
+            columns=column_name
+        )
+        for value, column_name in (
+            ("url", artifact_column),
+            ("tags", artifact_tags_column),
+            ("fname", artifact_fname_column),
+        )
+    ]
+    return pd.concat(pivots, axis=1).reset_index()
 
 
 def build_hyperparams_dataframe(

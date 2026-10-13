@@ -1,0 +1,13 @@
+/* A table chart's artifact thumbnails: fit the image to its row (`_THUMBNAIL_ROW_HEIGHT` in `table_chart.py`). */
+.dl-table-chart .ag-cell img {
+  display: block;
+  max-width: 100%;
+  max-height: 56px;
+  margin: 4px 0;
+  object-fit: contain;
+}
+
+/* Links look like the links everywhere else, in a dark theme too. */
+.dl-table-chart .ag-cell a {
+  color: var(--mantine-color-anchor);
+}

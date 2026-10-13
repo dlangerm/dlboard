@@ -10,7 +10,7 @@ from pydantic import TypeAdapter
 from dlboard.models import TagDisplay, TagValue, format_tag_value
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Iterable, Mapping
 
 HPARAM_COLUMN_PREFIX = "hparam__"
 """Hyperparameter columns are merged into the same wide dataframe as metrics/artifacts, prefixed
@@ -20,6 +20,10 @@ ARTIFACT_COLUMN_PREFIX = "artifact__"
 """Artifact columns are prefixed for the same reason -- see `artifact_column`/`artifact_tags_column`."""
 
 
+_TAGS_SUFFIX: Final = "__tags"
+_FNAME_SUFFIX: Final = "__fname"
+
+
 def artifact_column(key: str) -> str:
     """The panel-dataframe column holding each step's download URL for artifact `key`."""
     return f"{ARTIFACT_COLUMN_PREFIX}{key}"
@@ -27,7 +31,27 @@ def artifact_column(key: str) -> str:
 
 def artifact_tags_column(key: str) -> str:
     """The panel-dataframe column holding each step's tags dict for artifact `key`."""
-    return f"{artifact_column(key)}__tags"
+    return f"{artifact_column(key)}{_TAGS_SUFFIX}"
+
+
+def artifact_fname_column(key: str) -> str:
+    """The panel-dataframe column holding each step's file name for artifact `key` (its URL carries none)."""
+    return f"{artifact_column(key)}{_FNAME_SUFFIX}"
+
+
+def artifact_keys_in(columns: Iterable[str], name: str, *, prefix: bool) -> list[str]:
+    """
+    The artifact keys among a panel dataframe's `columns` that `name` asks for, in column order.
+
+    `name` is a key, or with `prefix` every key that starts with it. A key has one column of URLs and
+    one each for its tags and file names, which are not keys of their own.
+    """
+    keys = [
+        column.removeprefix(ARTIFACT_COLUMN_PREFIX)
+        for column in columns
+        if column.startswith(ARTIFACT_COLUMN_PREFIX) and not column.endswith((_TAGS_SUFFIX, _FNAME_SUFFIX))
+    ]
+    return [key for key in keys if (key.startswith(name) if prefix else key == name)]
 
 
 ColumnDType = Literal["numeric", "text"]

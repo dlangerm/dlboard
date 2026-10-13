@@ -50,7 +50,7 @@ _FROZEN_ENUM_VALUES: dict[type[StrEnum], frozenset[str]] = {
     FileKind: frozenset({"checkpoint"}),
     RunStatus: frozenset({"running", "finished", "failed", "unknown"}),
     MetricColumn: frozenset({"run_id", "step", "timestamp_utc"}),
-    TableMode: frozenset({"runs", "pivot"}),
+    TableMode: frozenset({"runs", "pivot", "artifacts"}),
 }
 
 

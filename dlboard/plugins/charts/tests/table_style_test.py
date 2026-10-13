@@ -12,6 +12,10 @@ from dlboard.plugins.charts._table_style import (
     NUMERIC,
     TEXT,
     ColumnDType,
+    artifact_column,
+    artifact_fname_column,
+    artifact_keys_in,
+    artifact_tags_column,
     column_def,
     format_tags_caption,
     infer_column_dtype,
@@ -130,3 +134,22 @@ def test_a_tag_named_in_the_per_key_map_overrides_the_charts_default_display() -
     by_key = {"took": TagDisplay(time_unit=TimeUnit.HOURS), "score": TagDisplay(precision=6)}
 
     assert format_tags_caption(tags, default, by_key) == "took: 1.5 h, wait: 90 min, score: 0.140984"
+
+
+@pytest.mark.parametrize(
+    ("name", "prefix", "keys"),
+    [
+        pytest.param("eval/a", False, ["eval/a"], id="exact-key"),
+        pytest.param("eval/", True, ["eval/a", "eval/b"], id="prefix"),
+        pytest.param("", True, ["eval/a", "eval/b", "other"], id="everything"),
+        pytest.param("eval", False, [], id="a-prefix-is-not-a-key"),
+    ],
+)
+def test_artifact_keys_in_names_keys_not_their_tag_and_file_name_columns(
+    name: str, *, prefix: bool, keys: list[str]
+) -> None:
+    columns = ["run_id", "loss"]
+    for key in ("eval/a", "eval/b", "other"):
+        columns += [artifact_column(key), artifact_tags_column(key), artifact_fname_column(key)]
+
+    assert artifact_keys_in(columns, name, prefix=prefix) == keys

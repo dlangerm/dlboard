@@ -18,7 +18,12 @@ from dlboard.models import (
     ValidJsonTypes,
 )
 from dlboard.models._view import ColumnKind
-from dlboard.plugins.charts._table_style import HPARAM_COLUMN_PREFIX, artifact_column, artifact_tags_column
+from dlboard.plugins.charts._table_style import (
+    HPARAM_COLUMN_PREFIX,
+    artifact_column,
+    artifact_fname_column,
+    artifact_tags_column,
+)
 from dlboard.serve._backend._artifact_download import artifact_url
 from dlboard.serve._pages._experiment import _dataframe_helpers as dfh
 
@@ -190,3 +195,11 @@ def test_merge_hyperparams_empty_df_returns_hparams_df() -> None:
     hparams_df = dfh.build_hyperparams_dataframe([_hparams(1, run_id=1, lr=0.1)])
     merged = dfh.merge_hyperparams(pd.DataFrame(), hparams_df)
     pd.testing.assert_frame_equal(merged, hparams_df)
+
+
+@pytest.mark.usefixtures("_plain_artifact_urls")
+def test_build_artifacts_dataframe_carries_each_artifacts_file_name() -> None:
+    """The URL has no extension, so a chart tells an image from a file by this."""
+    artifact = _artifact(1, 0, "img", "ref://a").model_copy(update={"id": 1, "fname": "a.png"})
+    df = dfh.build_artifacts_dataframe([artifact])
+    assert df[artifact_fname_column("img")].iloc[0] == "a.png"

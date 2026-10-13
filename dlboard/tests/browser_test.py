@@ -2336,3 +2336,49 @@ def test_a_tables_sort_filter_and_page_survive_a_live_update_redrawing_it(
     expect(chart.locator(".ag-center-cols-container .ag-row")).to_have_count(2)
     expect(chart.locator(".ag-paging-description")).to_contain_text("2")
     assert console_errors == []
+
+
+def test_a_table_of_artifacts_shows_thumbnails_and_sorts_by_a_tag(
+    page: Page, live_server_url: str, tmp_path: Path, console_errors: list[str]
+) -> None:
+    """The thumbnails really load and are fitted to their rows, and a numeric tag column sorts as a number."""
+    _create_project_and_experiment(page, live_server_url, "Artifact Table Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    api = BasicDlboardAPI(live_server_url)
+    tall = np.zeros((400, 100, 3), dtype=np.uint8)
+    for score in (2.0, 10.0, 9.0):
+        run = api.create_run(models.NewRun(experiment_id=experiment_id))
+        image = Image(key="eval/sample", image=tall, step=0, tags={"score": score})
+        api.log_artifact_batch([image.to_artifact(tmp_path, run.id, experiment_id)])
+    _wait_for_artifacts(experiment_id, 3)
+
+    store = get_system_data_store()
+    shared = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
+    table = models.ChartInstance[Any, Any](
+        chart_type="table",
+        parameters={"mode": "artifacts", "artifact_key": "eval/", "artifact_key_is_prefix": True},
+    )
+    store.update_page(
+        shared.model_copy(update={"panels": [PanelInstance[Any, Any](name="Samples", charts=[table])]})
+    )
+    page.reload()
+
+    chart = page.locator(".dl-chart-item")
+    images = chart.locator(".ag-cell img")
+    expect(images).to_have_count(3)
+    for index in range(3):
+        box = images.nth(index).bounding_box()
+        assert box is not None
+        assert 0 < box["height"] <= 56  # fitted to the row, not the 400px it was logged at
+        assert images.nth(index).evaluate("img => img.naturalWidth") > 0
+
+    score = chart.get_by_role("columnheader", name="score")
+    score.locator(".ag-header-cell-label").click()
+    score.locator(".ag-header-cell-label").click()
+    expect(score).to_have_attribute("aria-sort", "descending")
+    # The DOM keeps rows in data order; `row-index` is where each is shown.
+    for row_index, expected in enumerate(["10", "9", "2"]):  # numbers, not text: 9 sorts after 10, before 2
+        shown = chart.locator(f".ag-center-cols-container .ag-row[row-index='{row_index}'] .ag-cell")
+        expect(shown.and_(page.locator("[col-id='artifact__tag__score']"))).to_have_text(expected)
+    assert console_errors == []

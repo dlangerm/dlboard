@@ -18,7 +18,7 @@ Breaking any of these needs a migration path and a deprecation window of at leas
 - **Stored data.**
   - View and panel JSON.
   - Chart type names (`line`, `bar`, `image`, `table`).
-  - The *values* of a table chart's `mode` (`runs`, `pivot`), as saved in a chart's parameters.
+  - The *values* of a table chart's `mode` (`runs`, `pivot`, `artifacts`), as saved in a chart's parameters.
   - The *values* of persisted enums (roles, scopes, audit actions, entity types, experiment sources, run
     statuses).
   - Artifact refs (`file:///...`, `s3://...`).

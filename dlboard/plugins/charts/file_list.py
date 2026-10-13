@@ -23,11 +23,12 @@ from dlboard.models import (
     format_tag_value,
 )
 from dlboard.plugins.charts._table_style import (
-    ARTIFACT_COLUMN_PREFIX,
     NUMERIC,
     SCORE_FORMATTER,
     TEXT,
     artifact_column,
+    artifact_keys_in,
+    artifact_tags_column,
     column_def,
     parse_tags,
     themed_grid_kwargs,
@@ -83,18 +84,12 @@ class FileListSettings(BaseModel, frozen=True, extra="forbid"):
 
 def _file_rows(parameters: FileListSettings, dataframe: pd.DataFrame) -> list[dict[str, Any]]:
     """One row per logged file, in run then step order, from the wide per-key columns of a panel dataframe."""
-    wanted = artifact_column(parameters.key or parameters.key_prefix)
-    file_columns = [
-        column
-        for column in dataframe.columns
-        if column.startswith(wanted)
-        and (column == wanted or parameters.key_prefix)
-        and not column.endswith("__tags")
-    ]
+    keys = artifact_keys_in(
+        dataframe.columns, parameters.key or parameters.key_prefix, prefix=bool(parameters.key_prefix)
+    )
     rows: list[dict[str, Any]] = []
-    for column in file_columns:
-        tags_column = f"{column}__tags"
-        key = column.removeprefix(ARTIFACT_COLUMN_PREFIX)
+    for key in keys:
+        column, tags_column = artifact_column(key), artifact_tags_column(key)
         for _, file in dataframe.loc[dataframe[column].notna()].iterrows():
             tags = parse_tags(file.get(tags_column))
             run_id = int(file[MetricColumn.RUN_ID])
