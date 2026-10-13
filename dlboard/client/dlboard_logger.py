@@ -7,6 +7,7 @@ import contextlib
 import functools
 import json
 import shutil
+import signal
 import tempfile
 import time
 import warnings
@@ -193,13 +194,33 @@ class _Shipper(Generic[T]):
             )
 
 
+def _ship_until_parent_says_stop(
+    q: Queue[T | None],
+    ship: Callable[[list[T]], None],
+    params: BatchParams,
+    *,
+    is_permanent: Callable[[Exception], bool],
+    is_oversized: Callable[[Exception], bool],
+) -> None:
+    """
+    `ship_batches` in a shipping process, which ignores Ctrl+C so the training process owns shutdown.
+
+    A terminal's Ctrl+C goes to the whole foreground process group, shipping processes included. Without
+    this, they'd die mid-batch with a KeyboardInterrupt, and the training process's final flush would have
+    nothing left to ship to. Ignoring SIGINT here lets the parent flush what's queued, then exit, which also
+    takes these daemons down.
+    """
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    ship_batches(q, ship, params, is_permanent=is_permanent, is_oversized=is_oversized)
+
+
 def _start_shipper(
     name: str, ship: Callable[[list[T]], None], *, q_size: int, flush_size: int
 ) -> _Shipper[T]:
     queue: Queue[T | None] = SPAWN_CONTEXT.Queue(maxsize=q_size)
     ready, flushed = SPAWN_CONTEXT.Event(), SPAWN_CONTEXT.Event()
     process = SPAWN_CONTEXT.Process(
-        target=ship_batches,
+        target=_ship_until_parent_says_stop,
         args=(queue, ship, BatchParams(flush_size, _SHIP_INTERVAL_SEC, ready, flushed)),
         kwargs={"is_permanent": is_rejection, "is_oversized": is_oversized},
         name=f"dlboard-{name}",
