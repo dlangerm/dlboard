@@ -9,9 +9,8 @@ whatever's gating auth (a down DB, under a verifying provider) is itself the pro
 from __future__ import annotations
 
 from http import HTTPStatus
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
-from dash import get_app
 from flask import jsonify
 from structlog.stdlib import get_logger
 
@@ -32,9 +31,8 @@ def _healthz() -> tuple[BaseResponse, int]:
 
 def _readyz() -> tuple[BaseResponse, int]:
     """The process is up *and* its data store actually answers a query."""
-    app = cast("Dash", get_app())
     try:
-        next(iter(get_system_data_store(app).get_projects()), None)
+        next(iter(get_system_data_store().get_projects()), None)
     except Exception:  # noqa: BLE001 -- a broken store must report 503, not crash the health route itself
         _log.exception("readiness check failed")
         return jsonify(status="unavailable"), HTTPStatus.SERVICE_UNAVAILABLE

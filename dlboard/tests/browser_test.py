@@ -77,9 +77,22 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
     from pathlib import Path
 
+    from dash import Dash
     from playwright.sync_api import Page, Route
 
 pytestmark = pytest.mark.browser
+
+
+@pytest.fixture(autouse=True)
+def _session_app_is_current(dlboard_app: Dash) -> Iterator[None]:
+    """
+    Read stores off `dlboard_app` in this module's helpers, not whichever app the process built last.
+
+    Off the request thread there is no request to say which app is meant, and other test modules build
+    apps of their own; with its Flask app context pushed, `get_system_data_store()` resolves this one.
+    """
+    with dlboard_app.server.app_context():
+        yield
 
 
 def _create_project_and_experiment(page: Page, live_server_url: str, name: str) -> None:
@@ -371,9 +384,8 @@ def _ungrouped_chart_columns(page: Page, experiment_id: int) -> list[str]:
     """
     The "Ungrouped" panel's charts' `column` params, in order -- reads the persisted page directly,
     since a chart's rendered `data-chart-index` alone can't distinguish *which* chart (they're
-    always contiguous 0..N-1 post-render) moved where. Safe to call off the request thread: unlike
-    a callback, `get_system_data_store()` falls back to Dash's module-global `APP` when there's no active
-    callback context, and `dlboard_app` is the only app this test session ever builds.
+    always contiguous 0..N-1 post-render) moved where. Safe to call off the request thread:
+    `_session_app_is_current` makes `get_system_data_store()` resolve `dlboard_app` here.
     """
     panel = next(p for p in _current_page_model(page, experiment_id).panels if p.name == "Ungrouped")
     return [str(c.parameters["column"]) for c in panel.charts]

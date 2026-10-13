@@ -18,6 +18,7 @@ from dlboard.serve import _constants as constants
 from dlboard.serve import telemetry
 from dlboard.serve._assets import AssetKind, serve_asset
 from dlboard.serve._backend import _artifact_download, _health, _request_logging
+from dlboard.serve._backend._app_slot import DASH_APP_EXTENSION
 from dlboard.serve._backend._auth import (
     SIGN_OUT_PATH,
     find_current_user,
@@ -91,6 +92,9 @@ def app(plugins: list[models.PluginProtocol], *, url_prefix: str = "") -> Dash:
         plugins=plugins,
         url_base_pathname=f"/{url_prefix.strip('/')}/" if url_prefix else None,
     )
+    # So a plain Flask route on this server (every REST route) resolves *this* app, not Dash's
+    # process-wide "last app built" -- see `current_dash_app`.
+    _app.server.extensions[DASH_APP_EXTENSION] = _app
     # The tab+accordion page layouts (home, project, admin, experiment, account) are opinionated,
     # non-optional dlboard behavior -- always wired into every app(), never part of a deployment's
     # own `plugins` list, and deliberately excluded from the `installed` snapshot above (which

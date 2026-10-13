@@ -9,18 +9,15 @@ request gate resolving who the caller is in the first place, and background work
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Final, cast
+from typing import TYPE_CHECKING, Final
 
-from dash import get_app
 from flask import g, has_request_context
 
-from dlboard.serve._backend._app_slot import AppSlot
+from dlboard.serve._backend._app_slot import AppSlot, current_dash_app
 from dlboard.serve._backend._auth import AUTH_SETTINGS, get_auth_provider, get_current_user
 from dlboard.serve._backend._authorization import AuthorizingArtifactStore, AuthorizingDataStore
 
 if TYPE_CHECKING:
-    from dash import Dash
-
     from dlboard.models import ArtifactStore, DataStore, ProjectRole
 
 DATA_STORE: AppSlot[DataStore[...]] = AppSlot("data store")
@@ -43,7 +40,7 @@ def _authorizer() -> AuthorizingDataStore:
         raise RuntimeError(msg)
     authorizer: AuthorizingDataStore | None = g.get(_AUTHORIZER_KEY)
     if authorizer is None:
-        app = cast("Dash", get_app())
+        app = current_dash_app()
         authorizer = AuthorizingDataStore(
             DATA_STORE.get(app),
             get_current_user(),
@@ -61,8 +58,7 @@ def get_data_store() -> DataStore[...]:
 
 def get_artifact_store() -> ArtifactStore[...]:
     """The artifact store, as the in-flight request's user is allowed to use it."""
-    app = cast("Dash", get_app())
-    return AuthorizingArtifactStore(ARTIFACT_STORE.get(app), _authorizer())
+    return AuthorizingArtifactStore(ARTIFACT_STORE.get(current_dash_app()), _authorizer())
 
 
 def get_project_role(project_id: int) -> ProjectRole | None:
