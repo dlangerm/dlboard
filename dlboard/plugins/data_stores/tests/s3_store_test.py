@@ -9,7 +9,7 @@ import requests
 from pydantic import AnyHttpUrl, AnyUrl
 
 from dlboard.plugins.data_stores import s3 as s3_module
-from dlboard.plugins.data_stores._blob_store import BlobArtifactStore, RefAccess, blob_key
+from dlboard.plugins.data_stores._blob_store import RefAccess, blob_key
 from dlboard.plugins.data_stores.s3 import S3Blobs, S3DownloadMode, S3Settings, _client
 
 if TYPE_CHECKING:
@@ -19,6 +19,8 @@ if TYPE_CHECKING:
     from dash import Dash
     from flask import Response
     from types_boto3_s3.client import S3Client
+
+    from dlboard.conftest import MakeBlobStore
 
 
 def _body(response: Response) -> bytes:
@@ -194,7 +196,9 @@ def test_presign_mode_does_not_force_an_inlineable_image_to_download(
 
 
 @pytest.mark.s3
-def test_a_read_only_allowlisted_bucket_is_downloadable_but_never_deleted(s3_settings: S3Settings) -> None:
+def test_a_read_only_allowlisted_bucket_is_downloadable_but_never_deleted(
+    s3_settings: S3Settings, make_blob_store: MakeBlobStore
+) -> None:
     """
     A ref outside this store's own bucket/prefix, but allowlisted, is `READ_ONLY`.
 
@@ -212,7 +216,7 @@ def test_a_read_only_allowlisted_bucket_is_downloadable_but_never_deleted(s3_set
     client.put_object(Bucket=foreign_bucket, Key="already-there.bin", Body=b"owned by someone else")
     ref = AnyUrl(f"s3://{foreign_bucket}/already-there.bin")
     backend = S3Blobs(s3_settings.model_copy(update={"extra_read_buckets": frozenset({foreign_bucket})}))
-    store = BlobArtifactStore.get_or_create(backend, 1)
+    store = make_blob_store(backend, 1)
 
     assert backend.access(ref) is RefAccess.READ_ONLY
     assert _body(store.download_artifact(ref)) == b"owned by someone else"

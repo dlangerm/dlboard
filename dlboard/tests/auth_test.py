@@ -442,8 +442,10 @@ def test_first_admin_setup_stays_closed_on_a_server_with_users_but_no_admin(
 
 @pytest.mark.usefixtures("deployment", "setup_enabled")
 def test_startup_fails_when_first_admin_setup_is_left_on() -> None:
+    # No artifact store: a build that fails returns no app to dispose, and its write worker would
+    # outlive the test.
     with pytest.raises(ValueError, match="DLBOARD_PASSWORD_FIRST_ADMIN_SETUP is on"):
-        build_app([sqlite, filesystem, *PASSWORD_AUTH, *BUILTIN_BACKEND])
+        build_app([sqlite, *PASSWORD_AUTH, *BUILTIN_BACKEND])
 
 
 def test_nobody_can_sign_up_unless_the_deployment_allows_it(deployment: PasswordDeployment) -> None:

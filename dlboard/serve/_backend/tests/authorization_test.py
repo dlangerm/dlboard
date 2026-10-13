@@ -12,7 +12,7 @@ from pydantic import AnyUrl
 from dlboard import models
 from dlboard.conftest import EVERY_STORE_BACKEND, StoreBackend, create_entity_chain
 from dlboard.models import ProjectRole, Scope
-from dlboard.plugins.data_stores._blob_store import BlobArtifactStore, blob_key
+from dlboard.plugins.data_stores._blob_store import blob_key
 from dlboard.plugins.data_stores.filesystem import FSBlobs
 from dlboard.serve._backend._authorization import AuthorizingArtifactStore, AuthorizingDataStore
 from dlboard.serve._pages._experiment._experiment_page_state import BasicExperimentPage
@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
+    from dlboard.conftest import MakeBlobStore
     from dlboard.plugins.data_stores.sqlite import SQLLiteStore
 
 
@@ -383,13 +384,8 @@ def test_a_stranger_cannot_see_a_shared_view_outside_the_project(store: SQLLiteS
 # -- Artifact linking -------------------------------------------------------------------------
 
 
-def _artifact_store(inner: AuthorizingDataStore, tmp_path: Path) -> AuthorizingArtifactStore:
-    blob_store = BlobArtifactStore.get_or_create(FSBlobs(tmp_path), 10)
-    return AuthorizingArtifactStore(blob_store, inner)
-
-
 def test_link_artifacts_refuses_a_ref_already_attached_to_another_artifact(
-    store: SQLLiteStore, tmp_path: Path
+    store: SQLLiteStore, tmp_path: Path, make_blob_store: MakeBlobStore
 ) -> None:
     """
     Regression: linking only checked that the caller could write to the *target* run, not whether
@@ -402,7 +398,9 @@ def test_link_artifacts_refuses_a_ref_already_attached_to_another_artifact(
     existing_ref = next(iter(store.fetch_artifacts(experiment_id=chain.experiment_id))).ref
     other_run = store.create_run(models.NewRun(experiment_id=chain.experiment_id))
     mallory = _user(store, "mallory")
-    artifact_store = _artifact_store(_as(store, mallory, enforce=False), tmp_path)
+    artifact_store = AuthorizingArtifactStore(
+        make_blob_store(FSBlobs(tmp_path), 10), _as(store, mallory, enforce=False)
+    )
     stolen = models.NewArtifact(
         key="stolen", fname="x.png", run_id=other_run.id, experiment_id=chain.experiment_id, step=0
     )
@@ -411,10 +409,14 @@ def test_link_artifacts_refuses_a_ref_already_attached_to_another_artifact(
         artifact_store.link_artifacts([(stolen, AnyUrl(existing_ref))])
 
 
-def test_link_artifacts_still_accepts_a_fresh_ref(store: SQLLiteStore, tmp_path: Path) -> None:
+def test_link_artifacts_still_accepts_a_fresh_ref(
+    store: SQLLiteStore, tmp_path: Path, make_blob_store: MakeBlobStore
+) -> None:
     chain = create_entity_chain(store)
     mallory = _user(store, "mallory")
-    artifact_store = _artifact_store(_as(store, mallory, enforce=False), tmp_path)
+    artifact_store = AuthorizingArtifactStore(
+        make_blob_store(FSBlobs(tmp_path), 10), _as(store, mallory, enforce=False)
+    )
     blob_backend = FSBlobs(tmp_path)
     ref = blob_backend.ref_for(blob_key(chain.experiment_id, chain.run_id, "img", 0, "a.png"))
     blob_backend.write(_staged(tmp_path, b"data"), ref)

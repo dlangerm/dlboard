@@ -321,6 +321,29 @@ def blob_backend(
             return s3.S3Blobs(request.getfixturevalue("s3_settings"))
 
 
+type MakeBlobStore = Callable[[BlobBackend, int], BlobArtifactStore]
+"""What `make_blob_store` yields: build a store on a backend with a write queue of the given size."""
+
+
+@pytest.fixture
+def make_blob_store() -> Iterator[MakeBlobStore]:
+    """
+    `BlobArtifactStore.get_or_create` for one test, disposing every store it made once the test ends.
+
+    Each store runs a write-worker process (about 115 MB). One a test forgets to dispose lives on for
+    the rest of the session, and enough of them slow a whole-suite run until browser tests time out.
+    """
+    made: list[BlobArtifactStore] = []
+
+    def make(backend: BlobBackend, store_q_size: int) -> BlobArtifactStore:
+        made.append(BlobArtifactStore.get_or_create(backend, store_q_size))
+        return made[-1]
+
+    yield make
+    for artifact_store in made:
+        artifact_store.dispose()
+
+
 @pytest.fixture
 def store(
     store_backend: StoreBackend, tmp_path: Path, request: pytest.FixtureRequest

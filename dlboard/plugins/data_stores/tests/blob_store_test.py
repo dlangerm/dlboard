@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
     from pathlib import Path
 
+    from dlboard.conftest import MakeBlobStore
     from dlboard.plugins.data_stores._blob_store import BlobBackend
     from dlboard.plugins.data_stores.sqlite import SQLLiteStore
 
@@ -52,8 +53,10 @@ def _write(backend: BlobBackend, key: str, content: bytes, tmp_path: Path) -> An
     return ref
 
 
-def test_delete_artifact_removes_an_existing_blob(blob_backend: BlobBackend, tmp_path: Path) -> None:
-    store = BlobArtifactStore.get_or_create(blob_backend, 1)
+def test_delete_artifact_removes_an_existing_blob(
+    blob_backend: BlobBackend, tmp_path: Path, make_blob_store: MakeBlobStore
+) -> None:
+    store = make_blob_store(blob_backend, 1)
     ref = _write(blob_backend, "a.png", b"data", tmp_path)
 
     store.delete_artifact(ref)
@@ -61,21 +64,25 @@ def test_delete_artifact_removes_an_existing_blob(blob_backend: BlobBackend, tmp
     assert not blob_backend.exists(ref)
 
 
-def test_delete_artifact_is_a_noop_for_a_blob_that_is_already_gone(blob_backend: BlobBackend) -> None:
-    store = BlobArtifactStore.get_or_create(blob_backend, 1)
+def test_delete_artifact_is_a_noop_for_a_blob_that_is_already_gone(
+    blob_backend: BlobBackend, make_blob_store: MakeBlobStore
+) -> None:
+    store = make_blob_store(blob_backend, 1)
     ref = blob_backend.ref_for(blob_key(1, 1, "img", 0, "never-existed.png"))
 
     store.delete_artifact(ref)  # must not raise
 
 
-def test_log_artifacts_rejects_a_duplicate_key_fname(blob_backend: BlobBackend, tmp_path: Path) -> None:
+def test_log_artifacts_rejects_a_duplicate_key_fname(
+    blob_backend: BlobBackend, tmp_path: Path, make_blob_store: MakeBlobStore
+) -> None:
     """
     The duplicate check must look at the same (suffixed) ref the write worker actually writes to.
 
     A blob already sitting at that ref -- placed directly here, not through the async write worker,
     so this doesn't race it -- must reject a second upload for the same key/fname synchronously.
     """
-    store = BlobArtifactStore.get_or_create(blob_backend, 10)
+    store = make_blob_store(blob_backend, 10)
     _write(blob_backend, "a.png", b"data", tmp_path)
     new_artifact = models.NewArtifact(key="img", fname="a.png", run_id=1, experiment_id=1, step=0)
 
@@ -84,9 +91,9 @@ def test_log_artifacts_rejects_a_duplicate_key_fname(blob_backend: BlobBackend, 
 
 
 def test_link_artifacts_accepts_a_ref_already_written_inside_the_stores_own_space(
-    blob_backend: BlobBackend, tmp_path: Path
+    blob_backend: BlobBackend, tmp_path: Path, make_blob_store: MakeBlobStore
 ) -> None:
-    store = BlobArtifactStore.get_or_create(blob_backend, 10)
+    store = make_blob_store(blob_backend, 10)
     ref = _write(blob_backend, "a.png", b"data", tmp_path)
     new_artifact = models.NewArtifact(key="img", fname="a.png", run_id=1, experiment_id=1, step=0)
 
@@ -95,9 +102,11 @@ def test_link_artifacts_accepts_a_ref_already_written_inside_the_stores_own_spac
     assert linked.ref == str(ref)
 
 
-def test_link_artifacts_rejects_a_ref_nothing_is_actually_stored_at(blob_backend: BlobBackend) -> None:
+def test_link_artifacts_rejects_a_ref_nothing_is_actually_stored_at(
+    blob_backend: BlobBackend, make_blob_store: MakeBlobStore
+) -> None:
     """A ref inside the store's own space that no blob was ever written to still isn't linkable."""
-    store = BlobArtifactStore.get_or_create(blob_backend, 10)
+    store = make_blob_store(blob_backend, 10)
     new_artifact = models.NewArtifact(key="img", fname="missing.png", run_id=1, experiment_id=1, step=0)
     ref = blob_backend.ref_for(blob_key(1, 1, "img", 0, "missing.png"))
 
@@ -113,19 +122,23 @@ def test_link_artifacts_rejects_a_ref_nothing_is_actually_stored_at(blob_backend
 # just happen to use `FSBlobs` as *a* backend to drive them.
 
 
-def test_delete_artifact_is_a_noop_for_a_ref_outside_the_stores_own_space(tmp_path: Path) -> None:
+def test_delete_artifact_is_a_noop_for_a_ref_outside_the_stores_own_space(
+    tmp_path: Path, make_blob_store: MakeBlobStore
+) -> None:
     """A backend must never delete (or serve) something outside its own space, even on request."""
     outside = tmp_path.parent / "outside.png"
     outside.write_bytes(b"data")
-    store = BlobArtifactStore.get_or_create(FSBlobs(tmp_path / "artifacts"), 1)
+    store = make_blob_store(FSBlobs(tmp_path / "artifacts"), 1)
 
     store.delete_artifact(AnyUrl(f"file:///../{outside.name}"))
 
     assert outside.exists()
 
 
-def test_link_artifacts_rejects_a_ref_outside_the_stores_own_space(tmp_path: Path) -> None:
-    store = BlobArtifactStore.get_or_create(FSBlobs(tmp_path), 10)
+def test_link_artifacts_rejects_a_ref_outside_the_stores_own_space(
+    tmp_path: Path, make_blob_store: MakeBlobStore
+) -> None:
+    store = make_blob_store(FSBlobs(tmp_path), 10)
     new_artifact = models.NewArtifact(key="img", fname="passwd", run_id=1, experiment_id=1, step=0)
 
     with pytest.raises(models.UnservableArtifactRefError):
@@ -178,13 +191,13 @@ def _artifact(run: models.Run, name: str) -> models.Artifact:
 
 
 def test_a_transient_store_failure_does_not_lose_the_batch(
-    store: SQLLiteStore, experiment_id: int, tmp_path: Path
+    store: SQLLiteStore, experiment_id: int, tmp_path: Path, make_blob_store: MakeBlobStore
 ) -> None:
     """The ingest loop used to clear its batch on *any* failure, so a locked db lost artifacts for good."""
     run = store.create_run(models.NewRun(experiment_id=experiment_id))
 
     _ingest(
-        BlobArtifactStore.get_or_create(FSBlobs(tmp_path), 10),
+        make_blob_store(FSBlobs(tmp_path), 10),
         _LockedOnceStore(store),
         [_artifact(run, "a.png")],
     )
@@ -193,7 +206,11 @@ def test_a_transient_store_failure_does_not_lose_the_batch(
 
 
 def test_a_rejected_artifact_is_dropped_alone_and_its_blob_deleted(
-    store: SQLLiteStore, experiment_id: int, admin: models.User, tmp_path: Path
+    store: SQLLiteStore,
+    experiment_id: int,
+    admin: models.User,
+    tmp_path: Path,
+    make_blob_store: MakeBlobStore,
 ) -> None:
     """One rejected artifact used to take its whole batch down with it, orphaning every blob in it."""
     kept_run, deleted_run = (store.create_run(models.NewRun(experiment_id=experiment_id)) for _ in range(2))
@@ -202,7 +219,7 @@ def test_a_rejected_artifact_is_dropped_alone_and_its_blob_deleted(
     orphan.write_bytes(b"data")
 
     _ingest(
-        BlobArtifactStore.get_or_create(FSBlobs(tmp_path), 10),
+        make_blob_store(FSBlobs(tmp_path), 10),
         store,
         [_artifact(kept_run, "kept.png"), _artifact(deleted_run, orphan.name)],
     )
@@ -222,11 +239,11 @@ def _upload(store: BlobArtifactStore, run: models.Run, name: str) -> None:
 
 
 def test_close_writes_every_queued_blob_and_records_its_ref_before_returning(
-    store: SQLLiteStore, experiment_id: int, tmp_path: Path
+    store: SQLLiteStore, experiment_id: int, tmp_path: Path, make_blob_store: MakeBlobStore
 ) -> None:
     run = store.create_run(models.NewRun(experiment_id=experiment_id))
     blobs = FSBlobs(tmp_path / "artifacts")
-    artifact_store = BlobArtifactStore.get_or_create(blobs, 50)
+    artifact_store = make_blob_store(blobs, 50)
     _ingest(artifact_store, store, [])
     _wait_until(artifact_store._ingest_ready.is_set)
 
@@ -245,10 +262,10 @@ def _rejections(reason: str) -> float:
 
 
 def test_uploads_are_turned_away_once_the_write_worker_is_gone(
-    tmp_path: Path, telemetry: pytest.MonkeyPatch
+    tmp_path: Path, telemetry: pytest.MonkeyPatch, make_blob_store: MakeBlobStore
 ) -> None:
     telemetry.setenv("DLBOARD_TELEMETRY_METRICS", "prometheus")
-    store = BlobArtifactStore.get_or_create(FSBlobs(tmp_path), 10)
+    store = make_blob_store(FSBlobs(tmp_path), 10)
     store.dispose()
 
     with pytest.raises(models.ArtifactStoreUnavailableError):
@@ -258,10 +275,10 @@ def test_uploads_are_turned_away_once_the_write_worker_is_gone(
 
 
 def test_uploads_are_turned_away_when_the_write_queue_is_full(
-    tmp_path: Path, telemetry: pytest.MonkeyPatch
+    tmp_path: Path, telemetry: pytest.MonkeyPatch, make_blob_store: MakeBlobStore
 ) -> None:
     telemetry.setenv("DLBOARD_TELEMETRY_METRICS", "prometheus")
-    store = BlobArtifactStore.get_or_create(FSBlobs(tmp_path), 1)
+    store = make_blob_store(FSBlobs(tmp_path), 1)
 
     def full(*_args: object, **_kwargs: object) -> None:
         raise queue.Full
@@ -272,7 +289,6 @@ def test_uploads_are_turned_away_when_the_write_queue_is_full(
         _upload(store, models.Run.model_construct(id=1, experiment_id=1), "a.png")
 
     assert _rejections("queue_full") == 1
-    store.dispose()
 
 
 def test_a_failed_upload_leaves_nothing_in_the_staging_dir(

@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from dlboard.conftest import dispose_stores
 from dlboard.models import ColorScheme, SchemeColors, ThemeSpec
 from dlboard.plugins import LOCAL_AUTH, LOCAL_STORAGE, themes
 from dlboard.serve import app as build_app
@@ -52,10 +53,12 @@ def test_the_theme_is_in_the_first_response(
 ) -> None:
     monkeypatch.setenv("DLBOARD_SQLITE_LOCATION", str(tmp_path / "test.sqlite"))
     monkeypatch.setenv("DLBOARD_ARTIFACT_STORE_LOCATION", str(tmp_path / "artifacts"))
-    client: FlaskClient = build_app([*LOCAL_STORAGE, *LOCAL_AUTH, *theme_plugins]).server.test_client()
+    app = build_app([*LOCAL_STORAGE, *LOCAL_AUTH, *theme_plugins])
+    client: FlaskClient = app.server.test_client()
 
     index = client.get("/").get_data(as_text=True)
     provider = client.get("/_dash-layout").get_json()["props"]  # pyrefly: ignore [unknown-variable-type]
+    dispose_stores(app)
 
     assert f'<script data-default-scheme="{scheme}">' in index
     assert provider["defaultColorScheme"] == scheme
