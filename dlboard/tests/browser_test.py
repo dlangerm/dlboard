@@ -1842,8 +1842,8 @@ def test_suggest_charts_filters_selects_and_adds_many_at_once(page: Page, live_s
     page.get_by_role("button", name="Select all").click()
     page.get_by_role("button", name="Add selected (2)").click()
 
-    # Both charts went into the "train" panel in the one update (the drawer closes with the rebuilt
-    # page); what is left to suggest is just the one that was filtered out.
+    # Both charts went into the "train" panel in the one update (adding closes the drawer, and opening
+    # it again starts unfiltered); what is left to suggest is just the one that was filtered out.
     expect(page.get_by_text("2 charts", exact=True)).to_be_visible()
     page.get_by_role("button", name="Suggest charts").first.click()
     expect(page.get_by_text("val/loss", exact=True)).to_be_visible()

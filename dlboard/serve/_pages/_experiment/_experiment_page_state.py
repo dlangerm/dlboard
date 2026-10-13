@@ -1380,9 +1380,9 @@ def _panel_accordion(  # noqa: PLR0913
 # ============================================================
 # static shells: add/edit-chart modal, suggest-charts drawer, rename/delete confirm modals
 #
-# These are always present in `accordion_view`'s output (opened=False until a controller callback
-# opens them), so they have to live where `accordion_view` can reach them without a cross-import
-# back into the controller modules that own their *behavior*.
+# Rendered once by the experiment page, beside the panel area (`modal_shells`), with opened=False
+# until a controller callback opens them -- here rather than in the controller modules that own
+# their *behavior*, so the page can reach them without a cross-import.
 # ============================================================
 
 
@@ -1817,11 +1817,31 @@ def ref_of(experiment_id: int, page: BasicExperimentPage) -> PageRef:
     return PageRef(experiment_id, page.id if page.owner_id is not None else None)
 
 
+def modal_shells() -> list[Component]:
+    """
+    Every modal/drawer the panel area can open, for the experiment page to render once, beside it.
+
+    Not part of `accordion_view`: that is re-rendered by every structural change (a layout toggle, an
+    added chart, a renamed panel, ...), and each re-mount of a shell set off its confirm button's
+    callback again -- a burst of server round trips that answered nothing but delayed the very render
+    they came with. So every confirm callback closes its own shell.
+    """
+    return [
+        _add_chart_modal(),
+        _suggest_charts_drawer(),
+        _rename_panel_modal(),
+        _new_tab_modal(),
+        _rename_tab_modal(),
+        _delete_panel_confirm_modal(),
+        _delete_chart_confirm_modal(),
+    ]
+
+
 def accordion_view(
     store: DataStore[...], page: BasicExperimentPage, paging: Paging, *, focus_chart: str | None = None
 ) -> html.Div:
     """
-    The full accordion/tabs view of `page`, plus every modal/drawer shell it can open.
+    The full accordion/tabs view of `page` (the modals it opens are `modal_shells`, rendered once).
 
     Takes the page itself rather than re-reading it: every caller already has the version it just
     loaded or saved, which is also the only way to be sure a view is rendered, not the shared page.
@@ -1844,13 +1864,6 @@ def accordion_view(
             page.render(store, experiment_id, paging),
             Store(id=LOADED_PANELS_STORE_ID, data=visible_open_panels(page, tab, paging)),
             Store(id=PANEL_PAGING_ID, data=paging.model_dump_json()),
-            _add_chart_modal(),
-            _suggest_charts_drawer(),
-            _rename_panel_modal(),
-            _new_tab_modal(),
-            _rename_tab_modal(),
-            _delete_panel_confirm_modal(),
-            _delete_chart_confirm_modal(),
         ],
     )
 

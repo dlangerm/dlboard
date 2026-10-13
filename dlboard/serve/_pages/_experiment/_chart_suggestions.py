@@ -361,7 +361,10 @@ def _register_suggestions(app: Dash) -> None:
         Output(core.SUGGEST_SUGGESTIONS_STORE_ID, "data", allow_duplicate=True),
         Output(core.SUGGEST_SCOPE_STORE_ID, "data", allow_duplicate=True),
         Output(core.SUGGEST_SELECTION_ID, "value", allow_duplicate=True),
-        Input(core.SUGGEST_CHARTS_BUTTON_ID, "n_clicks"),
+        Output(core.SUGGEST_FILTER_ID, "value", allow_duplicate=True),
+        # Optional: an empty view's toolbar offers "Auto-generate charts" instead, while the drawer
+        # (`modal_shells`) is always on the page.
+        Input(core.SUGGEST_CHARTS_BUTTON_ID, "n_clicks", allow_optional=True),
         Input({"type": "panel-suggest-charts", "panel": ALL}, "n_clicks"),
         {
             "delimiter": Input(core.SUGGEST_DELIMITER_ID, "value"),
@@ -375,13 +378,24 @@ def _register_suggestions(app: Dash) -> None:
     )
     def refresh_suggestions(
         n_clicks: int, _panel_clicks: list[int], suggest_ctx: _SuggestCtx
-    ) -> tuple[bool | NoUpdate, str | NoUpdate, Component, list[dict[str, Any]], str | None, list[str]]:
+    ) -> tuple[
+        bool | NoUpdate,
+        str | NoUpdate,
+        Component,
+        list[dict[str, Any]],
+        str | None,
+        list[str],
+        str | NoUpdate,
+    ]:
         # Either button mounting for the first time reports itself as "triggered" with `n_clicks`
         # still 0 -- each is rendered into its own container (the panel controls row / a panel's
         # own `panel_header_controls`), separate from the delimiter/mode inputs below, so
         # `ctx.triggered_id` unambiguously resolves to the button on that mount even though
         # nothing was clicked.
         scope, opened = _resolve_suggestion_trigger(n_clicks, suggest_ctx["current_scope"])
+        # The drawer outlives each opening, filter box included: a fresh opening starts unfiltered,
+        # while regrouping (delimiter/mode) keeps whatever filter is typed.
+        filter_text, filter_value = ("", "") if opened is True else (suggest_ctx["filter_text"], no_update)
 
         curr_page = core.BasicExperimentPage.model_validate_json(suggest_ctx["page_json"])
         store = get_data_store()
@@ -392,7 +406,15 @@ def _register_suggestions(app: Dash) -> None:
         )
         title = f"Suggested charts for {scope}" if scope else "Suggested charts"
         if not catalog.has_chartable_keys:
-            return opened, title, dmc.Text(_NO_KEYS_MESSAGE, c="dimmed", size="sm"), [], scope, []
+            return (
+                opened,
+                title,
+                dmc.Text(_NO_KEYS_MESSAGE, c="dimmed", size="sm"),
+                [],
+                scope,
+                [],
+                filter_value,
+            )
 
         split_mode: SplitMode = "suffix" if suggest_ctx["mode"] == "suffix" else "prefix"
         lightning = curr_page.experiment_id is not None and core.is_lightning_experiment(
@@ -413,10 +435,11 @@ def _register_suggestions(app: Dash) -> None:
         return (
             opened,
             title,
-            _render_list(stored, suggest_ctx["filter_text"], suggest_ctx["sort"]),
+            _render_list(stored, filter_text, suggest_ctx["sort"]),
             stored,
             scope,
             [],
+            filter_value,
         )
 
     @app.callback(
@@ -475,6 +498,7 @@ def _register_suggestion_adds(app: Dash) -> None:
         Output(core.SUGGEST_CONTENT_ID, "children", allow_duplicate=True),
         Output(core.SUGGEST_SUGGESTIONS_STORE_ID, "data", allow_duplicate=True),
         Output(core.SUGGEST_SELECTION_ID, "value", allow_duplicate=True),
+        Output(core.SUGGEST_DRAWER_ID, "opened", allow_duplicate=True),
         Input({"type": "add-suggestion", "kind": ALL, "key": ALL}, "n_clicks"),
         State(core.SUGGEST_SUGGESTIONS_STORE_ID, "data"),
         State(core.STATE_PAGE_STORAGE, "data"),
@@ -492,12 +516,20 @@ def _register_suggestion_adds(app: Dash) -> None:
         filter_text: str | None,
         sort: str | None,
         selected: list[str] | None,
-    ) -> tuple[Any, str, Component, list[dict[str, Any]], list[str]]:
+    ) -> tuple[Any, str, Component, list[dict[str, Any]], list[str], bool]:
         triggered_id = cast("dict[str, str]", core.require_triggered_id())
         picked = frozenset({(ColumnKind(triggered_id["kind"]), triggered_id["key"])})
         container, saved_page, remaining = _add_charts(page_json, paging_json, stored or [], picked)
         still_ticked = [v for v in selected or [] if parse_selection([v]) != picked]
-        return container, saved_page, _render_list(remaining, filter_text, sort), remaining, still_ticked
+        # Closes the drawer, so the chart just added is in view.
+        return (
+            container,
+            saved_page,
+            _render_list(remaining, filter_text, sort),
+            remaining,
+            still_ticked,
+            False,
+        )
 
     @app.callback(
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
@@ -505,6 +537,7 @@ def _register_suggestion_adds(app: Dash) -> None:
         Output(core.SUGGEST_CONTENT_ID, "children", allow_duplicate=True),
         Output(core.SUGGEST_SUGGESTIONS_STORE_ID, "data", allow_duplicate=True),
         Output(core.SUGGEST_SELECTION_ID, "value", allow_duplicate=True),
+        Output(core.SUGGEST_DRAWER_ID, "opened", allow_duplicate=True),
         Input(core.SUGGEST_ADD_SELECTED_ID, "n_clicks"),
         State(core.SUGGEST_SELECTION_ID, "value"),
         State(core.SUGGEST_SUGGESTIONS_STORE_ID, "data"),
@@ -522,14 +555,14 @@ def _register_suggestion_adds(app: Dash) -> None:
         paging_json: str,
         filter_text: str | None,
         sort: str | None,
-    ) -> tuple[Any, str, Component, list[dict[str, Any]], list[str]]:
+    ) -> tuple[Any, str, Component, list[dict[str, Any]], list[str], bool]:
         """Add every ticked suggestion's chart at once, wherever the current filter has scrolled them."""
         if not n_clicks:
             raise PreventUpdate
         container, saved_page, remaining = _add_charts(
             page_json, paging_json, stored or [], parse_selection(selected or [])
         )
-        return container, saved_page, _render_list(remaining, filter_text, sort), remaining, []
+        return container, saved_page, _render_list(remaining, filter_text, sort), remaining, [], False
 
 
 def register_chart_suggestions_callbacks(app: Dash) -> None:

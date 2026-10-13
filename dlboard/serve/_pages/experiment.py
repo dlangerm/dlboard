@@ -165,6 +165,8 @@ def layout(
                         target_components={str(core.METRIC_CONTENT_ID): "children"},
                         custom_spinner=dmc.Loader(size="lg"),
                     ),
+                    # Outside `METRIC_CONTENT_ID`, so rebuilding the panels doesn't re-mount them.
+                    *core.modal_shells(),
                 ],
                 gap="xs",
             ),
