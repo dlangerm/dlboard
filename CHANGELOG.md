@@ -46,6 +46,10 @@ pulls that section's body into the GitHub release notes and publishes both distr
   data it was drawn from, so a poll replaces only the chart inside its item, and only when its data moved.
 * A request the sign-in gate turned away (a `401`, or the redirect to the sign-in page) had no request id, and
   with `DLBOARD_ACCESS_LOG` on its response raised an error instead of being logged.
+* Pressing Ctrl+C during training left the process hung for a minute per unshipped queue, with "still hadn't
+  all been shipped" and "shipping process is dead" warnings. The terminal's Ctrl+C reached the logger's
+  background shipping processes too, so they died before the final flush could send what was queued. They now
+  ignore Ctrl+C, and the training process flushes and exits.
 
 ### Changed
 
