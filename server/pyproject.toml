@@ -13,11 +13,13 @@ classifiers = [
   "Intended Audience :: Developers",
   "Intended Audience :: Science/Research",
   "Operating System :: OS Independent",
-  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
-  "Topic :: Scientific/Engineering :: Artificial Intelligence",
   "Topic :: Internet :: WWW/HTTP :: WSGI :: Application",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Scientific/Engineering :: Visualization",
+  "Topic :: System :: Monitoring",
   "Typing :: Typed"
 ]
 dependencies = [
@@ -43,7 +45,11 @@ keywords = [
   "dashboard",
   "experiment-tracking",
   "machine-learning",
-  "mlops"
+  "metrics",
+  "mlops",
+  "pytorch-lightning",
+  "self-hosted",
+  "visualization"
 ]
 license = "Apache-2.0"
 license-files = ["LICENSE"]
@@ -65,7 +71,7 @@ dlboard = "dlboard._cli:main"
 
 [project.urls]
 Changelog = "https://github.com/dlangerm/dlboard/blob/main/CHANGELOG.md"
-Documentation = "https://github.com/dlangerm/dlboard#readme"
+Documentation = "https://dlangerm.github.io/dlboard/"
 Homepage = "https://github.com/dlangerm/dlboard"
 Issues = "https://github.com/dlangerm/dlboard/issues"
 Repository = "https://github.com/dlangerm/dlboard"
