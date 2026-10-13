@@ -52,7 +52,7 @@ from dlboard.serve._pages._experiment._paging import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Mapping, Sequence
 
     from dlboard.models import DataStore
 
@@ -2203,8 +2203,8 @@ def merge_chart_param_values(  # noqa: PLR0913
     field_ids: list[dict[str, str]],
     fields: dict[str, models.ParameterField],
     *,
-    table_ids: list[dict[str, str]] = [],  # noqa: B006 -- never mutated
-    table_values: list[Any] = [],  # noqa: B006
+    table_ids: Sequence[Mapping[str, str]] = (),
+    table_values: Sequence[Any] = (),
 ) -> dict[str, Any]:
     """
     Merge a form's reports by field id.

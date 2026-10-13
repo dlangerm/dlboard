@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Final
 from uuid import uuid4
 
 import pendulum
-from opentelemetry._logs import LogRecord, SeverityNumber
+from opentelemetry._logs import SeverityNumber
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
 from opentelemetry.exporter.prometheus import PrometheusMetricReader
@@ -169,8 +169,8 @@ def _severity(level: str) -> SeverityNumber:
 _NOT_ATTRIBUTES: Final = frozenset({"event", "level", "timestamp", "exc_info", "stack"})
 
 
-def _record(event_dict: dict[str, object]) -> LogRecord:
-    """The OpenTelemetry log record for one structlog event."""
+def _emit(logger: Logger, event_dict: dict[str, object]) -> None:
+    """Send one structlog event as an OpenTelemetry log record."""
     level = str(event_dict.get("level", ""))
     attributes: dict[str, AttributeValue] = {
         k: v if isinstance(v, str | bool | int | float) else str(v)
@@ -192,7 +192,7 @@ def _record(event_dict: dict[str, object]) -> LogRecord:
         attributes["exception.stacktrace"] = "".join(traceback.format_exception(exc))
     now = pendulum.now("UTC")
     nanoseconds = now.int_timestamp * 1_000_000_000 + now.microsecond * 1_000
-    return LogRecord(
+    logger.emit(
         timestamp=nanoseconds,
         observed_timestamp=nanoseconds,
         severity_text=level.upper(),
@@ -214,7 +214,7 @@ def forward_log(_logger: object, _method: str, event_dict: dict[str, object]) ->
     """
     try:
         if (logs := LOGS.get()) is not None:
-            logs.logger.emit(_record(event_dict))
+            _emit(logs.logger, event_dict)
     except Exception:
         if not _WARNED.is_set():
             _WARNED.set()

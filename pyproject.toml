@@ -87,7 +87,12 @@ filterwarnings = [
   # `LocalStackContainer.start()` (`s3_test_server`, `dlboard/conftest.py`) calls testcontainers'
   # own legacy `wait_for_logs(container, "<regex>")` internally -- nothing we call directly, and
   # not actionable from here.
-  "ignore:The wait_for_logs function with string or callable predicates is deprecated:DeprecationWarning"
+  "ignore:The wait_for_logs function with string or callable predicates is deprecated:DeprecationWarning",
+  # The many short-lived apps the suite builds each hold multiprocessing semaphores (their artifact store's
+  # queues and events), freed whenever the cyclic GC gets to them. When that lands inside another call into
+  # the resource tracker, Python 3.12+ declines the reentrant cleanup with this warning: harmless here (the
+  # tracker cleans up at exit), but under "error" it fails whichever test happens to be running.
+  "ignore:ResourceTracker called reentrantly for resource cleanup:UserWarning"
 ]
 markers = [
   # `short`/`medium`/`long`/`huge` are applied automatically from `test-durations.json` (see `dlboard/conftest.py`).

@@ -30,7 +30,7 @@ DLBOARD_TELEMETRY_LOGS=true                 # logs over OTLP
 Enabling telemetry without the extra installed is a startup error, not a silent no-op.
 
 The extra asks for OpenTelemetry SDK 1.25 or later, deliberately old so it does not force a newer `protobuf` (1.28 and later
-need `protobuf` 5 or later) on whatever else is installed. Logs need 1.37 or later, and say so at startup if the installed SDK
+need `protobuf` 5 or later) on whatever else is installed. Logs need 1.38 or later, and say so at startup if the installed SDK
 is older.
 
 Telemetry never takes down what it measures. A metric that cannot be recorded, a snapshot that cannot be written or read, a

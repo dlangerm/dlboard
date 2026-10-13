@@ -113,7 +113,7 @@ def test_forwarding_a_log_never_raises_so_logging_never_fails_because_telemetry_
     assert forward_log(None, "info", event) is event
 
 
-@pytest.mark.parametrize(("installed", "accepted"), [("1.36.0", False), ("1.37.0", True), ("1.45.1", True)])
+@pytest.mark.parametrize(("installed", "accepted"), [("1.37.0", False), ("1.38.0", True), ("1.45.1", True)])
 def test_logs_need_a_newer_sdk_than_metrics_do(
     telemetry: pytest.MonkeyPatch, installed: str, accepted: bool
 ) -> None:
@@ -126,5 +126,5 @@ def test_logs_need_a_newer_sdk_than_metrics_do(
     if accepted:
         assert TelemetrySettings().logs
     else:
-        with pytest.raises(ValueError, match=r"opentelemetry-sdk>=1\.37"):
+        with pytest.raises(ValueError, match=r"opentelemetry-sdk>=1\.38"):
             TelemetrySettings()

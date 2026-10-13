@@ -2,10 +2,10 @@
 
 ## What is this
 
-`dlboard.client.DLBoardLogger` (`dlboard/client/dlboard_logger.py`) is a
+`dlboard.client.dlboard_logger.DLBoardLogger` (`dlboard/client/dlboard_logger.py`) is a
 `pytorch_lightning.loggers.Logger` — drop it into a `Trainer` like any other PL logger. Under the
 hood it talks to a running dlboard server over REST via `BasicDlboardAPI`
-(`dlboard/plugins/backend/basic_rest_backend.py`), and spawns two daemon subprocesses that batch
+(`dlboard/client/_rest_api.py`), and spawns two daemon subprocesses that batch
 metrics and artifacts off multiprocessing queues and flush them on an interval, so training is
 never blocked on network I/O.
 
