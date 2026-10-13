@@ -11,13 +11,14 @@ classifiers = [
   "Intended Audience :: Developers",
   "Intended Audience :: Science/Research",
   "Operating System :: OS Independent",
-  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
   "Topic :: Software Development :: Libraries :: Python Modules",
+  "Topic :: System :: Logging",
   "Typing :: Typed"
 ]
 dependencies = [
@@ -43,8 +44,10 @@ keywords = [
   "experiment-tracking",
   "logging",
   "machine-learning",
+  "metrics",
   "mlops",
-  "pytorch-lightning"
+  "pytorch-lightning",
+  "self-hosted"
 ]
 license = "Apache-2.0"
 license-files = ["LICENSE"]
@@ -59,7 +62,7 @@ lightning = ["pytorch-lightning>=2.0.0"]
 
 [project.urls]
 Changelog = "https://github.com/dlangerm/dlboard/blob/main/CHANGELOG.md"
-Documentation = "https://github.com/dlangerm/dlboard#readme"
+Documentation = "https://dlangerm.github.io/dlboard/"
 Homepage = "https://github.com/dlangerm/dlboard"
 Issues = "https://github.com/dlangerm/dlboard/issues"
 Repository = "https://github.com/dlangerm/dlboard"
