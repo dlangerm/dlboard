@@ -49,7 +49,6 @@ _GROUP_ORDER: Final = tuple(_GROUP_LABELS.values())
 """The groups people look for first, in this order; any others follow alphabetically."""
 _UNTAGGED_GROUP: Final = "Files"
 
-_STEP_FORMATTER: Final = {"function": "params.value == null ? '' : String(params.value)"}
 _SCORE_FORMATTER: Final = {"function": "params.value == null ? '' : Number(params.value).toPrecision(4)"}
 
 
@@ -136,7 +135,7 @@ def _grid(rows: list[dict[str, Any]], *, page_size: int) -> dag.AgGrid:
         columnDefs=[
             column_def("run", TEXT, headerName="Run", flex=1),
             column_def("file", TEXT, headerName="File", cellRenderer="markdown", flex=2),
-            column_def("step", NUMERIC, headerName="Step", valueFormatter=_STEP_FORMATTER, width=90),
+            column_def("step", NUMERIC, headerName="Step", width=90),
             *(
                 [column_def("score", NUMERIC, headerName="Score", valueFormatter=_SCORE_FORMATTER, width=100)]
                 if has_scores

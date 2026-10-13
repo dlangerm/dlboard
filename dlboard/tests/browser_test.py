@@ -2228,3 +2228,46 @@ def test_an_image_charts_runs_follow_their_panels_grid_columns(
 
     page.reload()
     expect(runs).to_have_css("grid-template-columns", re.compile(r"^\S+ \S+$"))
+
+
+def test_a_tables_numbers_are_shown_by_what_they_are(page: Page, live_server_url: str) -> None:
+    """
+    Whole numbers as they are, small ones to four significant digits.
+
+    dash-ag-grid silently ignores a formatter its expression parser can't evaluate (it shows the raw
+    value), so only a real grid says the formatter works.
+    """
+    _create_project_and_experiment(page, live_server_url, "Table Numbers Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    api = BasicDlboardAPI(live_server_url)
+    run = api.create_run(models.NewRun(experiment_id=experiment_id))
+    shown = {  # metric: (logged, as shown)
+        "loss": (0.3509123, "0.3509"),
+        "big": (12.34567, "12.346"),
+        "whole": (7.0, "7"),
+        "tiny": (0.0001, "0.0001"),
+        "tinier": (1.5e-7, "1.5e-7"),
+        "negative": (-0.25, "-0.25"),
+    }
+    api.log_metric_batch(
+        [
+            models.LoggedMetrics(
+                experiment_id=experiment_id,
+                run_id=run.id,
+                step=0,
+                metrics={name: logged for name, (logged, _) in shown.items()},
+                timestamp_utc=pendulum.now("UTC"),
+            )
+        ]
+    )
+    store = get_system_data_store()
+    shared = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
+    table = models.ChartInstance[Any, Any](chart_type="table", parameters={})
+    store.update_page(
+        shared.model_copy(update={"panels": [PanelInstance[Any, Any](name="Numbers", charts=[table])]})
+    )
+    page.reload()
+
+    for name, (_, expected) in shown.items():
+        expect(page.locator(f".dl-chart-item .ag-cell[col-id='{name}']")).to_have_text(expected)

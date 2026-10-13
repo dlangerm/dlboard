@@ -18,7 +18,6 @@ import pandas as pd
 from pydantic import BaseModel, Field
 
 from dlboard.models import RUN_NAME_COLUMN, ChartType, ColumnKind, MetricColumn
-from dlboard.plugins.charts._grouping import last_row_per_run
 from dlboard.plugins.charts._table_style import (
     ARTIFACT_COLUMN_PREFIX,
     HPARAM_COLUMN_PREFIX,
@@ -30,7 +29,8 @@ from dlboard.plugins.charts._table_style import (
 if typing.TYPE_CHECKING:
     from dash import Dash
 
-_BOOKKEEPING_COLS = frozenset({MetricColumn.RUN_ID, MetricColumn.TIMESTAMP_UTC, RUN_NAME_COLUMN})
+_IDENTITY_COLS = frozenset({MetricColumn.RUN_ID, RUN_NAME_COLUMN})
+_BOOKKEEPING_COLS = frozenset({*MetricColumn, RUN_NAME_COLUMN})
 
 
 class TableChartSettings(BaseModel, frozen=True, extra="forbid"):
@@ -70,9 +70,18 @@ def _message_table(text: str, *, page_size: int, font_size: int | None) -> dag.A
 
 
 def _build_table(
-    rows: list[dict[str, Any]], columns: list[str], *, page_size: int, font_size: int | None
+    rows: list[dict[str, Any]],
+    columns: list[str],
+    *,
+    page_size: int,
+    font_size: int | None,
+    headers: dict[str, str] | None = None,
 ) -> dag.AgGrid:
-    column_defs = [column_def(col, infer_column_dtype(rows, col)) for col in columns]
+    """A grid of `rows`, one column per field in `columns`, titled by `headers` where it names the field."""
+    headers = headers or {}
+    column_defs = [
+        column_def(col, infer_column_dtype(rows, col), headerName=headers.get(col, col)) for col in columns
+    ]
     themed_kwargs = themed_grid_kwargs(font_size=f"{font_size}px") if font_size else themed_grid_kwargs()
     return dag.AgGrid(
         columnDefs=column_defs,
@@ -87,6 +96,8 @@ def _build_table(
             "paginationPageSize": page_size,
             "paginationPageSizeSelector": sorted({page_size, 20, 50, 100}),
             "domLayout": "autoHeight",
+            # A metric is free to be named `a.b`; ag-grid would otherwise read it as the field `b` of `a`.
+            "suppressFieldDotNotation": True,
         },
         **themed_kwargs,
     )
@@ -98,32 +109,38 @@ def _render_by_run(parameters: TableChartSettings, dataframe: pd.DataFrame) -> d
         wanted_hparams = {f"{HPARAM_COLUMN_PREFIX}{k}" for k in parameters.hparams}
         hparam_cols = [c for c in hparam_cols if c in wanted_hparams]
 
-    metric_cols = [
-        c
-        for c in dataframe.columns
-        if c not in _BOOKKEEPING_COLS
-        and not c.startswith(HPARAM_COLUMN_PREFIX)
-        and not c.startswith(ARTIFACT_COLUMN_PREFIX)
-    ]
+    metric_cols: list[str]
     if parameters.metrics:
-        wanted_metrics = set(parameters.metrics)
-        metric_cols = [c for c in metric_cols if c in wanted_metrics]
+        metric_cols = [c for c in parameters.metrics if c in dataframe.columns and c not in _IDENTITY_COLS]
+    elif parameters.hparams:
+        # Curating only hparams reads as "hparams only" (see `hint_required_columns`): the panel's
+        # dataframe still carries whatever metrics its sibling charts fetched, which are not ours.
+        metric_cols = []
+    else:
+        metric_cols = [
+            c
+            for c in dataframe.columns
+            if c not in _BOOKKEEPING_COLS
+            and not c.startswith(HPARAM_COLUMN_PREFIX)
+            and not c.startswith(ARTIFACT_COLUMN_PREFIX)
+        ]
 
-    last_rows = last_row_per_run(dataframe)
+    # Each column's own latest value, as the Runs table shows: the wide dataframe has a row per step
+    # logged by *any* metric, so a run's last row is blank for one logged less often (a per-epoch metric).
+    by_step = dataframe.sort_values(["run_id", "step"]) if "step" in dataframe.columns else dataframe
+    latest = by_step.groupby("run_id")[[*hparam_cols, *metric_cols]].last().reset_index()
+    rows = typing.cast(
+        "list[dict[str, Any]]", latest.astype(object).where(latest.notna(), None).to_dict(orient="records")
+    )
 
-    rows: list[dict[str, Any]] = []
-    for _, row in last_rows.iterrows():
-        record: dict[str, Any] = {"run_id": int(row["run_id"])}
-        for col in hparam_cols:
-            value = row[col]
-            record[col.removeprefix(HPARAM_COLUMN_PREFIX)] = None if pd.isna(value) else value
-        for col in metric_cols:
-            value = row[col]
-            record[col] = None if pd.isna(value) else value
-        rows.append(record)
-
-    columns = ["run_id", *(c.removeprefix(HPARAM_COLUMN_PREFIX) for c in hparam_cols), *metric_cols]
-    return _build_table(rows, columns, page_size=parameters.page_size, font_size=parameters.font_size)
+    headers = {c: c.removeprefix(HPARAM_COLUMN_PREFIX) for c in hparam_cols}
+    return _build_table(
+        rows,
+        ["run_id", *hparam_cols, *metric_cols],
+        page_size=parameters.page_size,
+        font_size=parameters.font_size,
+        headers=headers,
+    )
 
 
 def _render_pivoted(parameters: TableChartSettings, dataframe: pd.DataFrame) -> dag.AgGrid:

@@ -5,10 +5,13 @@ from __future__ import annotations
 from typing import Any
 
 import pandas as pd
+import pytest
 from dash import no_update
 
 from dlboard.conftest import props as _props
 from dlboard.models import ChartInstance, PanelInstance
+from dlboard.plugins.charts.line_chart import LineChart
+from dlboard.plugins.charts.table_chart import TableChart
 from dlboard.serve._pages._experiment import _experiment_page_state as state
 from dlboard.serve._pages._experiment import _refresh_chart_bodies
 
@@ -59,3 +62,41 @@ def test_a_chart_just_drawn_from_the_current_data_is_not_redrawn_by_the_next_pol
     )
 
     assert contents == [no_update, no_update]
+
+
+# ---- what a chart's fingerprint covers ----
+
+LineChart.register(allow_override=True)
+TableChart.register(allow_override=True)
+_TABLE = ChartInstance[Any, Any](chart_type="table", parameters={"metrics": ["loss"], "hparams": ["lr"]})
+_WIDE = pd.DataFrame(
+    {
+        "run_id": [1, 1, 2],
+        "step": [0, 1, 0],
+        "loss": [1.0, 0.5, 0.9],
+        "acc": [0.8, 0.9, 0.7],
+        "hparam__lr": [0.1, 0.1, 0.2],
+        "run_name": ["one", "one", "two"],
+    }
+)
+
+
+def test_a_new_row_for_another_metric_does_not_redraw_a_chart_that_shows_none_of_it() -> None:
+    """Rows of another metric, in an earlier run, renumber the index of every row after them."""
+    extra = pd.DataFrame({"run_id": [1], "step": [2], "acc": [0.95]})
+    grown = pd.concat([_WIDE.iloc[:2], extra, _WIDE.iloc[2:]], ignore_index=True)
+
+    assert state.chart_data_fingerprint(_TABLE, grown) == state.chart_data_fingerprint(_TABLE, _WIDE)
+
+
+@pytest.mark.parametrize(
+    ("column", "value"),
+    [("hparam__lr", 0.5), ("run_name", "renamed")],
+    ids=["hparam-edited", "run-renamed"],
+)
+def test_editing_a_hyperparameter_or_renaming_a_run_redraws_the_charts_that_show_it(
+    column: str, value: str | float
+) -> None:
+    edited = _WIDE.copy()
+    edited[column] = value
+    assert state.chart_data_fingerprint(_TABLE, edited) != state.chart_data_fingerprint(_TABLE, _WIDE)

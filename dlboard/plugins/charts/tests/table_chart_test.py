@@ -102,12 +102,43 @@ def test_render_run_mode_one_row_per_run_at_last_step() -> None:
     assert rows[2]["loss"] == pytest.approx(0.7)  # last step (1) for run 2
 
 
-def test_render_run_mode_strips_hparam_prefix_from_column_names() -> None:
-    table = TableChart.render(TableChartSettings(), _wide_df())
-    rows = _rows_by_run(table)
+def test_render_run_mode_shows_each_metrics_own_latest_value() -> None:
+    """A metric logged less often than the last step (a per-epoch one) is not blank for it."""
+    df = pd.DataFrame(
+        {"run_id": [1, 1, 1], "step": [0, 1, 2], "loss": [0.5, 0.4, 0.3], "val_acc": [0.6, None, None]}
+    )
+    rows = _rows_by_run(TableChart.render(TableChartSettings(), df))
 
-    assert rows[1]["lr"] == pytest.approx(0.1)
-    assert not any(col.startswith(HPARAM_COLUMN_PREFIX) for col in rows[1])
+    assert rows[1]["loss"] == pytest.approx(0.3)
+    assert rows[1]["val_acc"] == pytest.approx(0.6)
+
+
+def test_render_run_mode_does_not_show_bookkeeping_columns() -> None:
+    table = TableChart.render(TableChartSettings(), _wide_df().assign(timestamp_utc=pd.Timestamp(0)))
+    assert not {"step", "timestamp_utc"} & _rows_by_run(table)[1].keys()
+
+
+def test_render_run_mode_titles_hparam_columns_without_the_prefix() -> None:
+    props = _props(TableChart.render(TableChartSettings(), _wide_df()))
+    headers = {column["field"]: column["headerName"] for column in props["columnDefs"]}
+
+    assert headers[f"{HPARAM_COLUMN_PREFIX}lr"] == "lr"
+    assert _rows_by_run(TableChart.render(TableChartSettings(), _wide_df()))[1][
+        f"{HPARAM_COLUMN_PREFIX}lr"
+    ] == pytest.approx(0.1)
+
+
+def test_render_run_mode_keeps_an_hparam_and_a_metric_of_the_same_name_apart() -> None:
+    df = _wide_df().assign(lr=[0.01, 0.02, 0.03, 0.04])
+    rows = _rows_by_run(TableChart.render(TableChartSettings(), df))
+
+    assert rows[1]["lr"] == pytest.approx(0.02)
+    assert rows[1][f"{HPARAM_COLUMN_PREFIX}lr"] == pytest.approx(0.1)
+
+
+def test_render_never_reads_a_dotted_metric_name_as_a_nested_field() -> None:
+    props = _props(TableChart.render(TableChartSettings(), _wide_df().rename(columns={"loss": "val.loss"})))
+    assert props["dashGridOptions"]["suppressFieldDotNotation"] is True
 
 
 def test_render_run_mode_metrics_filter_narrows_columns() -> None:
@@ -125,8 +156,14 @@ def test_render_run_mode_hparams_filter_narrows_columns() -> None:
     table = TableChart.render(TableChartSettings(hparams=["lr"]), df)
     rows = _rows_by_run(table)
 
-    assert "lr" in rows[1]
-    assert "batch_size" not in rows[1]
+    assert f"{HPARAM_COLUMN_PREFIX}lr" in rows[1]
+    assert f"{HPARAM_COLUMN_PREFIX}batch_size" not in rows[1]
+
+
+def test_render_run_mode_with_only_hparams_curated_shows_no_metrics() -> None:
+    """The panel's dataframe carries its sibling charts' metrics too; "hparams only" must not show them."""
+    rows = _rows_by_run(TableChart.render(TableChartSettings(hparams=["lr"]), _wide_df()))
+    assert "loss" not in rows[1]
 
 
 def test_render_run_mode_excludes_artifact_columns() -> None:

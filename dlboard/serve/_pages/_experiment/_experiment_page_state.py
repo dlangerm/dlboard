@@ -30,6 +30,7 @@ from structlog.stdlib import get_logger
 
 from dlboard import models
 from dlboard.models import RUN_NAME_COLUMN
+from dlboard.plugins.charts._table_style import HPARAM_COLUMN_PREFIX, artifact_column
 from dlboard.serve import ClientsideScript, Icon, get_current_user, get_data_store, icon
 from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import ButtonId, DivId, IntervalId, ModalId, StoreId, ValueId
@@ -823,6 +824,31 @@ def render_panel_content(
     return render_panel_content_from_df(panel, df, indexes, paging.sizes.charts)
 
 
+def _chart_columns(chart: models.ChartInstance[Any, Any], df: pd.DataFrame) -> list[str]:
+    """The columns of a panel's shared dataframe one chart renders from, in the dataframe's own order."""
+    metrics = chart.hint_required_columns()
+    if metrics is None:
+        return list(df.columns)
+    hparams = chart.hint_required_hparams()
+    wanted_hparams = None if hparams is None else {f"{HPARAM_COLUMN_PREFIX}{key}" for key in hparams}
+    artifacts = tuple(
+        artifact_column(name)
+        for name in (
+            *(chart.hint_required_artifact_keys() or ()),
+            *chart.hint_required_artifact_key_prefixes(),
+        )
+    )
+
+    def renders_from(column: str) -> bool:
+        if column in dfh.IDENTITY_COLUMNS or column in metrics:
+            return True
+        if column.startswith(HPARAM_COLUMN_PREFIX):
+            return wanted_hparams is None or column in wanted_hparams
+        return column.startswith(artifacts)
+
+    return [column for column in df.columns if renders_from(column)]
+
+
 def chart_data_fingerprint(chart: models.ChartInstance[Any, Any], df: pd.DataFrame) -> str:
     """
     A cheap content hash of the slice of a panel's shared dataframe one chart actually renders from.
@@ -836,10 +862,12 @@ def chart_data_fingerprint(chart: models.ChartInstance[Any, Any], df: pd.DataFra
     grouped there by "Auto-generate charts" -- and a panel-wide fingerprint would pop every chart in
     it whenever *any one* of them changed.
 
-    Falls back to hashing the whole (already panel-scoped) dataframe when `hint_required_columns()`
-    is `None` -- a chart whose own columns aren't knowable upfront (e.g. a table chart with no
-    metrics filter, documented to mean "show every metric") can't be scoped any tighter than the
-    panel fetch already was.
+    The slice is the chart's metrics, the hyperparameters and artifact columns it asks for, and the
+    run names, so editing a hyperparameter or renaming a run redraws the charts that show it. Falls
+    back to hashing the whole (already panel-scoped) dataframe when `hint_required_columns()` is
+    `None` -- a chart whose own columns aren't knowable upfront (e.g. a table chart with no metrics
+    filter, documented to mean "show every metric") can't be scoped any tighter than the panel fetch
+    already was.
 
     Hashes the `to_json(orient="split", ...)` serialization the rest of this page relies on,
     not `pandas.util.hash_pandas_object` -- that hashes cell values
@@ -850,14 +878,19 @@ def chart_data_fingerprint(chart: models.ChartInstance[Any, Any], df: pd.DataFra
 
     Only rows where the chart has data of its own count: the dataframe is wide, so another metric
     logging a step the chart has nothing at adds a row to it -- which is not a change to the chart,
-    and must not redraw it.
+    and must not redraw it. (A hyperparameter is on every row of its run, so it never says a row is the
+    chart's.) The index is dropped for the same reason: it numbers the rows of the *whole* dataframe, so
+    another run's new row would renumber this chart's.
     """
-    cols = chart.hint_required_columns()
-    scoped = df if cols is None else df[[c for c in cols if c in df.columns]]
-    data_cols = [c for c in scoped.columns if c not in dfh.NO_DATA_COLUMNS]
+    scoped = df[_chart_columns(chart, df)]
+    data_cols = [
+        c for c in scoped.columns if c not in dfh.NO_DATA_COLUMNS and not c.startswith(HPARAM_COLUMN_PREFIX)
+    ]
     if data_cols:
         scoped = scoped.dropna(how="all", subset=data_cols)
-    return hashlib.sha1(scoped.to_json(orient="split", date_format="iso").encode()).hexdigest()
+    return hashlib.sha1(
+        scoped.reset_index(drop=True).to_json(orient="split", date_format="iso").encode()
+    ).hexdigest()
 
 
 def _panel_placeholder() -> dmc.Skeleton:

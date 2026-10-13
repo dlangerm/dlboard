@@ -7,7 +7,16 @@ from typing import TYPE_CHECKING
 import pytest
 
 from dlboard.models import Quantity, SizeUnit, TagDisplay, TimeUnit
-from dlboard.plugins.charts._table_style import format_tags_caption, infer_column_dtype, themed_grid_kwargs
+from dlboard.plugins.charts._table_style import (
+    NUMBER_FORMATTER,
+    NUMERIC,
+    TEXT,
+    ColumnDType,
+    column_def,
+    format_tags_caption,
+    infer_column_dtype,
+    themed_grid_kwargs,
+)
 
 if TYPE_CHECKING:
     from dlboard import models
@@ -25,6 +34,11 @@ if TYPE_CHECKING:
 )
 def test_infer_column_dtype(rows: list[dict[str, object]], expected: str) -> None:
     assert infer_column_dtype(rows, "k") == expected
+
+
+@pytest.mark.parametrize(("dtype", "formatter"), [(NUMERIC, NUMBER_FORMATTER), (TEXT, None)])
+def test_only_a_numeric_column_is_formatted_as_a_number(dtype: ColumnDType, formatter: object) -> None:
+    assert column_def("k", dtype).get("valueFormatter") == formatter
 
 
 def test_themed_grid_kwargs_has_expected_keys() -> None:

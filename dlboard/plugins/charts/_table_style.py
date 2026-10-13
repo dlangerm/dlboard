@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Final, Literal
 
 from pydantic import TypeAdapter
 
@@ -77,12 +77,25 @@ def format_tags_caption(
     )
 
 
+NUMBER_FORMATTER: Final = {
+    "function": "params.value == null ? '' : params.value % 1 === 0 ? params.value.toFixed(0)"
+    " : Math.abs(params.value) >= 1 ? params.value.toFixed(3) : params.value.toPrecision(4) * 1"
+}
+"""
+How a numeric cell is shown: whole numbers as they are, otherwise three decimals from 1 up and four
+significant digits below it (so a learning rate of 1e-4 is not `0.000`).
+
+Written with only what dash-ag-grid's own expression parser evaluates (`Number.isInteger(...)` or
+`String(...)` is silently ignored, leaving the raw value); `browser_test.py` checks it in a real grid.
+"""
+
+
 def column_def(name: str, dtype: ColumnDType, **extra: Any) -> dict[str, Any]:  # noqa: ANN401
     """Build one ag-grid `columnDefs` entry, `**extra` merged in last so callers can override any key."""
     base: dict[str, Any] = {"field": name, "headerName": name, "sortable": True, "filter": True}
     if dtype == NUMERIC:
         base["filter"] = "agNumberColumnFilter"
-        base["valueFormatter"] = {"function": "params.value == null ? '' : params.value.toFixed(3)"}
+        base["valueFormatter"] = NUMBER_FORMATTER
     return {**base, **extra}
 
 
