@@ -22,8 +22,9 @@ import dash
 import dash_ag_grid as dag
 import pandas as pd
 from dash import MATCH, Input, Output, State
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
+from dlboard._compat import StrEnum
 from dlboard.models import (
     DEFAULT_RENDER_CONTEXT,
     RUN_NAME_COLUMN,
@@ -55,28 +56,39 @@ _SWATCH_FIELD: typing.Final = "_swatch"
 _PAGE_JS = ClientsideScript(Path(__file__).with_name("table_chart_page.js"))
 
 
+class TableMode(StrEnum):
+    """What a table's rows are. Saved with a chart, so a value is never renamed (`persisted_enum_values_test`)."""
+
+    RUNS = "runs"
+    """One row per run: its hyperparameters beside the latest value of each metric."""
+    PIVOT = "pivot"
+    """One row per value of `pivot_on`, one column per run, comparing `pivot_metric` across runs."""
+
+
 class TableChartSettings(BaseModel, frozen=True, extra="forbid"):
     """Table chart settings."""
 
+    mode: TableMode = Field(
+        default=TableMode.RUNS,
+        description="What the rows are: one per run, or one per `pivot_on` value with a column per run.",
+    )
     metrics: list[str] = Field(
         default_factory=list,
-        description="Metric column names to show; empty shows every metric (run mode uses each "
-        "run's last-logged value) -- unless hparams is set without this, which is read as "
+        description="Runs mode: metric column names to show; empty shows every metric (each run's "
+        "latest value) -- unless hparams is set without this, which is read as "
         '"hparams only" rather than "every metric too".',
     )
     hparams: list[str] = Field(
-        default_factory=list, description="Hyperparameter keys to show; empty shows every hyperparameter."
+        default_factory=list,
+        description="Runs mode: hyperparameter keys to show; empty shows every hyperparameter.",
     )
     pivot_on: str = Field(
         default="",
-        description='A metric column (e.g. "step") to pivot rows around, comparing pivot_metric '
-        "across runs side by side. Leave empty for the default: one row per run.",
+        description='Pivot mode: a metric column (e.g. "step") to make the rows, comparing pivot_metric '
+        "across runs side by side.",
     )
-    pivot_metric: str = Field(
-        default="",
-        description="Which metric's values fill the table when pivot_on is set. Ignored otherwise.",
-    )
-    page_size: int = 20
+    pivot_metric: str = Field(default="", description="Pivot mode: which metric's values fill the table.")
+    page_size: int = Field(default=20, ge=1, description="How many rows each page of the table shows.")
     font_size: int | None = Field(
         default=None,
         description="Cell/header font size in pixels. Leave unset to use the same (smaller) "
@@ -85,6 +97,21 @@ class TableChartSettings(BaseModel, frozen=True, extra="forbid"):
     width: int | None = Field(
         default=None, description="Overall chart width in px. Leave blank to use the default flat width."
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _pivot_tables_saved_before_modes_existed(cls, data: object) -> object:
+        """A table saved with `pivot_on` set was a pivot table, whatever it says about `mode`."""
+        if isinstance(data, dict) and "mode" not in data and data.get("pivot_on"):
+            return {**data, "mode": TableMode.PIVOT}
+        return data
+
+    @model_validator(mode="after")
+    def _pivot_names_its_columns(self) -> typing.Self:
+        if self.mode is TableMode.PIVOT and not (self.pivot_on and self.pivot_metric):
+            msg = "pivot mode needs both `pivot_on` and `pivot_metric`"
+            raise ValueError(msg)
+        return self
 
 
 def _table(
@@ -230,8 +257,6 @@ def _render_by_run(
 def _render_pivoted(
     parameters: TableChartSettings, dataframe: pd.DataFrame, context: RenderContext
 ) -> dag.AgGrid:
-    if not parameters.pivot_metric:
-        return _message_table("Set pivot_metric to compare a metric across runs.", parameters, context)
     if parameters.pivot_on not in dataframe.columns or parameters.pivot_metric not in dataframe.columns:
         return _message_table("No data logged for the configured columns yet.", parameters, context)
 
@@ -284,23 +309,27 @@ class TableChart(ChartType[TableChartSettings, pd.DataFrame, dag.AgGrid], frozen
     ) -> dag.AgGrid:
         if dataframe.empty:
             return _message_table("No data logged yet.", parameters, context)
-        if parameters.pivot_on:
-            return _render_pivoted(parameters, dataframe, context)
-        return _render_by_run(parameters, dataframe, context)
+        match parameters.mode:
+            case TableMode.RUNS:
+                return _render_by_run(parameters, dataframe, context)
+            case TableMode.PIVOT:
+                return _render_pivoted(parameters, dataframe, context)
 
     @classmethod
     @typing.override
     def hint_required_columns(cls, parameters: TableChartSettings) -> set[str] | None:
-        if parameters.pivot_on:
-            return {c for c in (parameters.pivot_on, parameters.pivot_metric) if c}
-        if parameters.metrics:
-            return set(parameters.metrics) | {"step"}
-        if parameters.hparams:
-            # Metrics and hparams are fetched independently (see `hint_required_hparams`) -- having
-            # curated one but not the other reads as "I only want hparams here", not "fetch every
-            # metric in the experiment for a table that's not even configured to show them nicely".
-            return set()
-        return None
+        match parameters.mode:
+            case TableMode.PIVOT:
+                return {parameters.pivot_on, parameters.pivot_metric}
+            case TableMode.RUNS:
+                if parameters.metrics:
+                    return set(parameters.metrics) | {"step"}
+                if parameters.hparams:
+                    # Metrics and hparams are fetched independently (see `hint_required_hparams`) -- having
+                    # curated one but not the other reads as "I only want hparams here", not "fetch every
+                    # metric in the experiment for a table that's not even configured to show them nicely".
+                    return set()
+                return None
 
     @classmethod
     @typing.override
@@ -310,11 +339,11 @@ class TableChart(ChartType[TableChartSettings, pd.DataFrame, dag.AgGrid], frozen
     @classmethod
     @typing.override
     def hint_required_hparams(cls, parameters: TableChartSettings) -> set[str] | None:
-        if parameters.pivot_on:
-            return set()
-        if not parameters.hparams:
-            return None
-        return set(parameters.hparams)
+        match parameters.mode:
+            case TableMode.PIVOT:
+                return set()
+            case TableMode.RUNS:
+                return set(parameters.hparams) if parameters.hparams else None
 
     @classmethod
     @typing.override

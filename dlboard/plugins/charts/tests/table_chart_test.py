@@ -6,6 +6,7 @@ from typing import Any
 
 import pandas as pd
 import pytest
+from pydantic import ValidationError
 
 from dlboard.conftest import props as _props
 from dlboard.models import RUN_NAME_COLUMN, RenderContext
@@ -15,7 +16,7 @@ from dlboard.plugins.charts._table_style import (
     artifact_column,
     artifact_tags_column,
 )
-from dlboard.plugins.charts.table_chart import TableChart, TableChartSettings
+from dlboard.plugins.charts.table_chart import TableChart, TableChartSettings, TableMode
 from dlboard.serve import series_swatch_class
 
 
@@ -235,11 +236,27 @@ def test_render_pivot_mode_one_row_per_pivot_value_one_column_per_run() -> None:
     assert row_by_step[1]["2"] == pytest.approx(0.7)
 
 
-def test_render_pivot_mode_without_pivot_metric_shows_a_message() -> None:
-    table = TableChart.render(TableChartSettings(pivot_on="step"), _wide_df())
-    rows = _props(table)["rowData"]
-    assert len(rows) == 1
-    assert "pivot_metric" in rows[0]["message"]
+def test_a_table_saved_with_pivot_on_before_modes_existed_is_a_pivot_table() -> None:
+    legacy = TableChartSettings.model_validate({"pivot_on": "step", "pivot_metric": "loss"})
+    assert legacy.mode is TableMode.PIVOT
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        pytest.param({"mode": "pivot"}, id="neither"),
+        pytest.param({"mode": "pivot", "pivot_on": "step"}, id="no-metric"),
+        pytest.param({"pivot_on": "step"}, id="legacy-no-metric"),
+    ],
+)
+def test_a_pivot_table_must_say_what_it_pivots(settings: dict[str, str]) -> None:
+    with pytest.raises(ValidationError, match="pivot_metric"):
+        TableChartSettings.model_validate(settings)
+
+
+def test_pivot_settings_are_ignored_in_runs_mode() -> None:
+    settings = TableChartSettings(mode=TableMode.RUNS, pivot_on="step", pivot_metric="loss")
+    assert {row["run_id"] for row in _props(TableChart.render(settings, _wide_df()))["rowData"]} == {1, 2}
 
 
 def test_render_pivot_mode_missing_columns_shows_a_message() -> None:
