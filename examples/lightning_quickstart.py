@@ -10,6 +10,7 @@ come from the network, not dlboard) is asserted in `dlboard/client/tests/dlboard
 not here -- this script is just meant to look like something a real training run would log.
 """
 
+import os
 from pathlib import Path
 from random import random
 from typing import cast, override
@@ -222,6 +223,7 @@ def main() -> None:
         "character-classification",
         "mnist",
         "Classifying characters",
+        server_url=os.environ.get("DLBOARD_SERVER_URL", "http://localhost:8050"),
     )
     log_startup_mosaic(logger, data_dir="./.data")
 
