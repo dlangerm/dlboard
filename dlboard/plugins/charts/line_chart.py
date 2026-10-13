@@ -272,6 +272,11 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.LineChart], froze
 
     @classmethod
     @typing.override
+    def title(cls, parameters: LineChartSettings) -> str:
+        return parameters.column
+
+    @classmethod
+    @typing.override
     def hint_required_columns(cls, parameters: LineChartSettings) -> set[str] | None:
         return {
             parameters.column,
