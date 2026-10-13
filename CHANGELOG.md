@@ -12,6 +12,8 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ## [Unreleased]
 
+## [0.6.0] 2026-10-13
+
 ### Added
 
 * A panel's **Sync crosshair and step across charts** setting now also locks its image-series sliders
