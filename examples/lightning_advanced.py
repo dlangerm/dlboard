@@ -27,6 +27,7 @@ exists to produce. Where the script itself works around one, a `# DLBOARD GAP:` 
 """
 
 import math
+import os
 import random
 from dataclasses import dataclass
 from enum import IntEnum, StrEnum
@@ -508,6 +509,7 @@ def main() -> None:
         "unet-advanced",
         "Synthetic shapes, to exercise nested hyperparameters, checkpoints and rich previews",
         log_model="all",
+        server_url=os.environ.get("DLBOARD_SERVER_URL", "http://localhost:8050"),
     )
     data = ShapesDataModule(DataConfig(), AugmentConfig())
     model = ShapesSegmenter(
