@@ -122,3 +122,22 @@ jobs:
           push: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # Publishes the image once a change has landed on main and the test suite passed on it (this
+  # workflow only runs on push for main). `stable` and the version tags belong to release.yml.
+  # PRs only get `docker-build` above.
+  publish-image:
+    needs: [test]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/push-image
+        with:
+          tags: |
+            type=raw,value=latest
+            type=raw,value=beta
+            type=sha,prefix=sha-

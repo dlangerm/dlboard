@@ -34,6 +34,9 @@ pulls that section's body into the GitHub release notes and publishes both distr
   the server from starting. Telemetry never takes down what it measures: a failure to record is logged once and
   skipped, and a setup that failed is retried with a back-off. The metrics API is public, as
   `dlboard.serve.telemetry`, for plugins to record their own. See [docs/telemetry.md](docs/telemetry.md).
+* Docker images between releases: `ghcr.io/dlangerm/dlboard:beta` follows main (and `sha-<commit>` pins a
+  single landing), `:latest` is the same tested `main`, and `:stable` follows the newest release.
+  See [docs/docker.md](docs/docker.md).
 
 ### Fixed
 
@@ -46,6 +49,8 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ### Changed
 
+* **The `latest` Docker tag no longer means "the newest release"**: it now follows `main` (the same as
+  `:beta`). Pin `:stable` (or a version, `:0.5.0`) for releases only.
 * An image-series chart lays its runs out by what its panel and page say: as many columns as the panel's
   grid column count (following it the instant it changes) and as many runs per page as the viewer's
   charts-per-page size, instead of a fixed three and six. It never uses more columns than it has runs, so one
