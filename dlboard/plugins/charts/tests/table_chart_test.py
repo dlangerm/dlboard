@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 
 from dlboard.conftest import props as _props
-from dlboard.models import RUN_NAME_COLUMN
+from dlboard.models import RUN_NAME_COLUMN, RenderContext
 from dlboard.plugins.charts._table_style import (
     DEFAULT_TABLE_FONT_SIZE,
     HPARAM_COLUMN_PREFIX,
@@ -16,10 +16,16 @@ from dlboard.plugins.charts._table_style import (
     artifact_tags_column,
 )
 from dlboard.plugins.charts.table_chart import TableChart, TableChartSettings
+from dlboard.serve import series_swatch_class
 
 
 def _rows_by_run(component: object) -> dict[int, dict[str, Any]]:
     return {row["run_id"]: row for row in _props(component)["rowData"]}
+
+
+def _leaf_columns(component: object) -> list[dict[str, Any]]:
+    """The grid's columns, with any column groups flattened away."""
+    return [leaf for column in _props(component)["columnDefs"] for leaf in column.get("children", [column])]
 
 
 def _wide_df() -> pd.DataFrame:
@@ -119,13 +125,11 @@ def test_render_run_mode_does_not_show_bookkeeping_columns() -> None:
 
 
 def test_render_run_mode_titles_hparam_columns_without_the_prefix() -> None:
-    props = _props(TableChart.render(TableChartSettings(), _wide_df()))
-    headers = {column["field"]: column["headerName"] for column in props["columnDefs"]}
+    table = TableChart.render(TableChartSettings(), _wide_df())
+    headers = {column["field"]: column["headerName"] for column in _leaf_columns(table)}
 
     assert headers[f"{HPARAM_COLUMN_PREFIX}lr"] == "lr"
-    assert _rows_by_run(TableChart.render(TableChartSettings(), _wide_df()))[1][
-        f"{HPARAM_COLUMN_PREFIX}lr"
-    ] == pytest.approx(0.1)
+    assert _rows_by_run(table)[1][f"{HPARAM_COLUMN_PREFIX}lr"] == pytest.approx(0.1)
 
 
 def test_render_run_mode_keeps_an_hparam_and_a_metric_of_the_same_name_apart() -> None:
@@ -179,15 +183,26 @@ def test_render_run_mode_excludes_artifact_columns() -> None:
     assert not {artifact_column("img"), artifact_tags_column("img")} & rows[1].keys()
 
 
-def test_render_run_mode_excludes_the_run_name_column() -> None:
-    """A run's display name (merged in for charts that label by name, see `RUN_NAME_COLUMN`) isn't
-    a metric value either -- it shouldn't leak into the table as a bogus column."""
+def test_render_run_mode_names_each_run_and_colors_it_as_the_charts_do() -> None:
     df = _wide_df()
-    df[RUN_NAME_COLUMN] = ["one", "one", "two", "two"]
+    df[RUN_NAME_COLUMN] = ["one", "one", None, None]
     table = TableChart.render(TableChartSettings(), df)
     rows = _rows_by_run(table)
 
-    assert RUN_NAME_COLUMN not in rows[1]
+    assert rows[1][RUN_NAME_COLUMN] == "one"
+    assert rows[2][RUN_NAME_COLUMN] == "Run 2"  # unnamed: the id, as everywhere else
+    assert rows[2]["_swatch"] == series_swatch_class(2)
+    run_column = _leaf_columns(table)[0]
+    assert run_column["field"] == RUN_NAME_COLUMN
+    assert run_column["pinned"] == "left"
+    assert [column["field"] for column in _leaf_columns(table)].count(RUN_NAME_COLUMN) == 1
+
+
+def test_render_run_mode_groups_hparams_and_latest_metrics() -> None:
+    groups: list[dict[str, Any]] = _props(TableChart.render(TableChartSettings(), _wide_df()))["columnDefs"][
+        1:
+    ]
+    assert [group["headerName"] for group in groups] == ["Hyperparameters", "Metrics (latest)"]
 
 
 def test_render_defaults_to_the_shared_smaller_font_size() -> None:
@@ -243,3 +258,42 @@ def test_natural_width_defaults_to_a_flat_value() -> None:
 
 def test_natural_width_override() -> None:
     assert TableChart.natural_width(TableChartSettings(width=333)) == 333
+
+
+# ---- run identity, and the state a redraw keeps ----
+
+
+def test_pivot_mode_headers_each_run_by_name_and_color() -> None:
+    df = _wide_df()
+    df[RUN_NAME_COLUMN] = ["one", "one", "two", "two"]
+    table = TableChart.render(TableChartSettings(pivot_on="step", pivot_metric="loss"), df)
+    columns = {column["field"]: column for column in _props(table)["columnDefs"]}
+
+    assert columns["1"]["headerName"] == "one"
+    assert columns["2"]["headerClass"] == series_swatch_class(2)
+
+
+def test_the_grid_is_named_by_its_chart_so_it_keeps_its_state_across_a_redraw() -> None:
+    table = TableChart.render_in(TableChartSettings(), _wide_df(), RenderContext(chart_id="abc"))
+    props = _props(table)
+
+    assert props["id"] == {"type": "dl-table-chart", "chart": "abc"}
+    assert props["persisted_props"] == ["columnState", "filterModel"]
+    assert {row["_row_id"] for row in props["rowData"]} == {"1", "2"}
+
+
+@pytest.mark.parametrize(
+    ("other", "same_state"),
+    [
+        pytest.param(TableChartSettings(page_size=50), True, id="same-columns"),
+        pytest.param(TableChartSettings(metrics=["acc"]), False, id="other-columns"),
+    ],
+)
+def test_a_grid_of_other_columns_starts_without_the_old_ones_state(
+    other: TableChartSettings, *, same_state: bool
+) -> None:
+    df = _wide_df().assign(acc=[0.6, 0.7, 0.8, 0.9])
+    before = _props(TableChart.render(TableChartSettings(), df))["persistence"]
+    after = _props(TableChart.render(other, df))["persistence"]
+
+    assert (before == after) is same_state

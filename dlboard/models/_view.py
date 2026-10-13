@@ -76,6 +76,12 @@ class RenderContext(BaseModel, frozen=True, extra="forbid"):
     page_size: int = Field(default=12, ge=1)
     """How many items a chart that pages its own contents shows at once: the viewer's charts-per-page size."""
 
+    chart_id: str = ""
+    """
+    The chart's own `ChartInstance.id`: a stable handle for naming its components and keying UI state it keeps
+    (a grid's sort and filters) across redraws. Empty for a chart rendered on its own.
+    """
+
 
 DEFAULT_RENDER_CONTEXT: typing.Final = RenderContext()
 """For a chart rendered on its own, outside any panel or page (a test, a preview)."""

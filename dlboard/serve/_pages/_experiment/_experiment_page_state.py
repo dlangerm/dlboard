@@ -669,7 +669,7 @@ def chart_body(
     it was drawn from, and the poll redraws it only when that is no longer what the data says.
     """
     chart = panel.charts[index]
-    context = models.RenderContext(columns=panel.grid_columns, page_size=page_size)
+    context = models.RenderContext(columns=panel.grid_columns, page_size=page_size, chart_id=chart.id)
     rendered = _apply_panel_sync(
         _render_chart_safely(chart, dataframe, panel.name, context), panel_name=panel.name, sync=panel.sync
     )
@@ -699,7 +699,7 @@ def render_chart_item(
     untouched one too.
     """
     chart = panel.charts[index]
-    context = models.RenderContext(columns=panel.grid_columns, page_size=page_size)
+    context = models.RenderContext(columns=panel.grid_columns, page_size=page_size, chart_id=chart.id)
     hover_controls = dmc.Group(
         [
             _drag_handle(

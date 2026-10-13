@@ -2271,3 +2271,68 @@ def test_a_tables_numbers_are_shown_by_what_they_are(page: Page, live_server_url
 
     for name, (_, expected) in shown.items():
         expect(page.locator(f".dl-chart-item .ag-cell[col-id='{name}']")).to_have_text(expected)
+
+
+def test_a_tables_sort_filter_and_page_survive_a_live_update_redrawing_it(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """
+    A live update replaces a changed chart's whole body, which mounts a fresh AG Grid; the table's grid
+    is persisted (and put back on its page) so that what the viewer did to it is still there. Only a
+    browser shows whether Dash's persistence really restores an AG Grid's sort and filter on a remount.
+    """
+    _create_project_and_experiment(page, live_server_url, "Table State Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+
+    api = BasicDlboardAPI(live_server_url)
+    runs = [
+        api.create_run(models.NewRun(experiment_id=experiment_id, name=f"{kind}-{n}"))
+        for n, kind in enumerate(["keep"] * 5 + ["drop"] * 3)
+    ]
+
+    def log_loss(run: models.Run, step: int, loss: float) -> None:
+        api.log_metric_batch(
+            [
+                models.LoggedMetrics(
+                    experiment_id=experiment_id,
+                    run_id=run.id,
+                    step=step,
+                    metrics={"loss": loss},
+                    timestamp_utc=pendulum.now("UTC"),
+                )
+            ]
+        )
+
+    for n, run in enumerate(runs):
+        log_loss(run, 0, float(n))
+    store = get_system_data_store()
+    shared = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
+    table = models.ChartInstance[Any, Any](chart_type="table", parameters={"page_size": 3})
+    store.update_page(
+        shared.model_copy(update={"panels": [PanelInstance[Any, Any](name="Runs", charts=[table])]})
+    )
+    page.reload()
+
+    chart = page.locator(".dl-chart-item")
+    grid = chart.locator(".ag-root-wrapper")
+    expect(grid).to_be_visible()
+    # Filter to the five "keep" runs (two pages of three), sort by loss descending, and go to page 2.
+    chart.locator(".ag-floating-filter[col-id='run_name'] input").fill("keep")
+    loss_header = chart.get_by_role("columnheader", name="loss")
+    loss_header.locator(".ag-header-cell-label").click()
+    loss_header.locator(".ag-header-cell-label").click()
+    expect(loss_header).to_have_attribute("aria-sort", "descending")
+    chart.get_by_role("button", name="Next Page").click()
+    expect(chart.locator(".ag-paging-description")).to_contain_text("2")
+    expect(chart.locator(".ag-center-cols-container .ag-row")).to_have_count(2)
+
+    grid.evaluate("el => el.setAttribute('data-marker', 'before-the-poll')")
+    log_loss(runs[0], 1, 99.0)  # the poll redraws the table: its data moved
+
+    expect(grid).not_to_have_attribute("data-marker", "before-the-poll", timeout=8000)
+    expect(loss_header).to_have_attribute("aria-sort", "descending")
+    expect(chart.locator(".ag-floating-filter[col-id='run_name'] input")).to_have_value("keep")
+    expect(chart.locator(".ag-center-cols-container .ag-row")).to_have_count(2)
+    expect(chart.locator(".ag-paging-description")).to_contain_text("2")
+    assert console_errors == []
