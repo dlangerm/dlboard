@@ -179,14 +179,27 @@ See [plugins/overview.md](plugins/overview.md) for what a `PLUGINS` module needs
 
 ## CI and releases
 
-`.github/workflows/ci.yml`'s `docker-build` job builds this image on every PR as a sanity check — it
-never pushes it anywhere. Pushing a `vX.Y.Z` tag runs `.github/workflows/release.yml` instead, which
-publishes `dlboard-client`/`dlboard` to PyPI and this image as `ghcr.io/dlangerm/dlboard`,
-tagged `X.Y.Z`, `X.Y`, and `latest`:
+The image is published to `ghcr.io/dlangerm/dlboard` (amd64 and arm64) under tags that trade
+stability for freshness:
+
+| Tag | Moves when | Use it for |
+| --- | --- | --- |
+| `X.Y.Z`, `X.Y` | a `vX.Y.Z` tag is released (`X.Y` follows the newest patch) | pinning an exact release |
+| `stable` | a release is published | production: only ever a release |
+| `beta`, `latest` | a change lands on `main` and passes CI | trying bugfixes before they are released |
+| `sha-<commit>` | never; one per landing on `main` | rolling back a `beta` deployment |
 
 ```bash
-docker pull ghcr.io/dlangerm/dlboard:latest
+docker pull ghcr.io/dlangerm/dlboard:stable
 ```
+
+Because `beta` and `latest` track unreleased code, a database migration they carry has not had a
+release's worth of use; see [compatibility.md](compatibility.md) before pointing one at data you care about.
+
+`.github/workflows/ci.yml` pushes `latest`/`beta`/`sha-*` once its `test` job passes on `main` (a PR
+only gets the build-only `docker-build` check). Pushing a `vX.Y.Z`
+tag runs `.github/workflows/release.yml`, which publishes `dlboard-client`/`dlboard` to PyPI and then the
+release tags above.
 
 See [CHANGELOG.md](../CHANGELOG.md) for what each release contains, and the repo's GitHub Releases
 page for the full tag history.

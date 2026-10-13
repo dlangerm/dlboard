@@ -1,0 +1,35 @@
+name: Build and push the dlboard image
+description: Build the Dockerfile for amd64 and arm64, push it to ghcr.io
+
+inputs:
+  tags:
+    description: docker/metadata-action tag rules; the only tags pushed
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: docker/setup-qemu-action@v3
+    - uses: docker/setup-buildx-action@v3
+    - uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
+    - id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ghcr.io/${{ github.repository_owner }}/dlboard
+        # `latest=auto` would add `latest` to every semver tag; which builds own it is spelled out
+        # in the callers' `tags`, nowhere else.
+        flavor: latest=false
+        tags: ${{ inputs.tags }}
+    - uses: docker/build-push-action@v6
+      with:
+        context: .
+        platforms: linux/amd64,linux/arm64
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
