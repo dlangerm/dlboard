@@ -17,8 +17,9 @@ from dlboard.models import (
     RenderContext,
     TagDisplay,
     TimeUnit,
+    artifact_column,
+    artifact_tags_column,
 )
-from dlboard.plugins.charts._table_style import artifact_column, artifact_tags_column
 from dlboard.plugins.charts.image_series import (
     MAX_SLIDER_LABELS,
     ImageChart,

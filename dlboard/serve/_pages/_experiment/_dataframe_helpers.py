@@ -8,9 +8,12 @@ from typing import Any
 
 import pandas as pd
 
-from dlboard.models import RUN_NAME_COLUMN, Artifact, ColumnKind, HyperParams, MetricColumn
-from dlboard.plugins.charts._table_style import (
+from dlboard.models import (
     HPARAM_COLUMN_PREFIX,
+    Artifact,
+    ColumnKind,
+    HyperParams,
+    MetricColumn,
     artifact_column,
     artifact_fname_column,
     artifact_tags_column,
@@ -24,12 +27,6 @@ if typing.TYPE_CHECKING:
 EXCLUDED_RUNS_KEY: typing.Final = "excluded_runs"
 """A `Page.page_settings` key -- the run ids the run-comparison table has deselected, which
 `fetch_panel_dataframe` leaves out of every panel's fetch."""
-
-NO_DATA_COLUMNS: typing.Final = frozenset({*MetricColumn, RUN_NAME_COLUMN})
-"""Columns that say where a row is, not what a chart shows: present on every row whatever was logged."""
-
-IDENTITY_COLUMNS: typing.Final = frozenset({MetricColumn.RUN_ID, RUN_NAME_COLUMN})
-"""Which run a row belongs to, and what to call it: part of what every chart shows, though no chart asks for them."""
 
 
 def build_artifacts_dataframe(artifacts: typing.Iterable[Artifact]) -> pd.DataFrame:

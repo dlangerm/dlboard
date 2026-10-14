@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from dlboard.models import Artifact, Quantity, TagDisplay, TimeUnit
-from dlboard.plugins.charts._table_style import artifact_tags_column, format_tags_caption
+from dlboard.models import Artifact, Quantity, TagDisplay, TimeUnit, artifact_tags_column
+from dlboard.plugins.charts._artifact_tags import format_tags_caption
 from dlboard.serve._pages._experiment._dataframe_helpers import build_artifacts_dataframe
 
 

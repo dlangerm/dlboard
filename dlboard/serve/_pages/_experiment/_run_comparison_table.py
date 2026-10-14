@@ -21,7 +21,6 @@ from structlog.stdlib import get_logger
 
 from dlboard import models
 from dlboard.models import RUN_NAME_COLUMN, MetricColumn
-from dlboard.plugins.charts._table_style import column_def, infer_column_dtype, themed_grid_kwargs
 from dlboard.serve import (
     ClientsideScript,
     Icon,
@@ -33,6 +32,7 @@ from dlboard.serve import (
 from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import ButtonId, ModalId, StoreId, ValueId
 from dlboard.serve._format import format_duration
+from dlboard.serve._grid import column_def, infer_column_dtype, themed_grid_kwargs
 from dlboard.serve._pages._dash_helpers import section_label, tooltipped_action_icon
 from dlboard.serve._pages._dataframe_helpers import run_display_name
 from dlboard.serve._pages._experiment import _dataframe_helpers as dfh

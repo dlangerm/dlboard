@@ -26,7 +26,6 @@ import pendulum
 from dash import Dash, Input, Output, State, no_update
 from structlog.stdlib import get_logger
 
-from dlboard.plugins.charts._table_style import TABLE_STYLE_JS
 from dlboard.serve import AssetKind, get_current_user, get_data_store, serve_asset
 from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import ButtonId, ModalId
@@ -89,7 +88,6 @@ _ASSETS = [
     (AssetKind.SCRIPT, Path(__file__).with_name("_experiment_page_dragdrop.js")),
     (AssetKind.SCRIPT, Path(__file__).with_name("chart_submit_loading.js")),
     (AssetKind.SCRIPT, Path(__file__).with_name("chart_deep_link.js")),
-    (AssetKind.SCRIPT, TABLE_STYLE_JS),
 ]
 
 

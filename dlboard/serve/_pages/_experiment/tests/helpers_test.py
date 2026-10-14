@@ -11,9 +11,8 @@ import pytest
 from pydantic import ValidationError
 
 from dlboard import models
-from dlboard.models import HyperParams, NewHyperParams, Run
+from dlboard.models import HyperParams, NewHyperParams, Run, artifact_keys_in
 from dlboard.models._view import ChartInstance, ColumnKind, PanelInstance, ParameterField, ParameterFieldType
-from dlboard.plugins.charts._table_style import artifact_keys_in
 from dlboard.plugins.charts.file_list import FileListChart
 from dlboard.plugins.charts.image_series import ImageChart
 from dlboard.plugins.charts.line_chart import LineChart

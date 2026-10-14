@@ -27,9 +27,11 @@ from dlboard.models import (
     SizeUnit,
     TagDisplay,
     TimeUnit,
+    artifact_column,
+    artifact_tags_column,
     is_inlineable_artifact,
 )
-from dlboard.plugins.charts._table_style import artifact_column, artifact_tags_column, format_tags_caption
+from dlboard.plugins.charts._artifact_tags import format_tags_caption
 from dlboard.serve import ClientsideScript, series_swatch_class
 
 MAX_SLIDER_LABELS = 10

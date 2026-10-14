@@ -9,16 +9,17 @@ import pytest
 from pydantic import ValidationError
 
 from dlboard.conftest import props as _props
-from dlboard.models import RUN_NAME_COLUMN, RenderContext
-from dlboard.plugins.charts._table_style import (
-    DEFAULT_TABLE_FONT_SIZE,
+from dlboard.models import (
     HPARAM_COLUMN_PREFIX,
+    RUN_NAME_COLUMN,
+    RenderContext,
     artifact_column,
     artifact_fname_column,
     artifact_tags_column,
 )
 from dlboard.plugins.charts.table_chart import TableChart, TableChartSettings, TableMode
 from dlboard.serve import series_swatch_class
+from dlboard.serve._grid import DEFAULT_TABLE_FONT_SIZE
 
 
 def _rows_by_run(component: object) -> dict[int, dict[str, Any]]:

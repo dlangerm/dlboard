@@ -10,20 +10,18 @@ import pytest
 
 from dlboard.models import (
     FILE_KIND_TAG,
+    HPARAM_COLUMN_PREFIX,
     Artifact,
     HyperParams,
     LoggedMetrics,
     NewHyperParams,
     NewRun,
     ValidJsonTypes,
-)
-from dlboard.models._view import ColumnKind
-from dlboard.plugins.charts._table_style import (
-    HPARAM_COLUMN_PREFIX,
     artifact_column,
     artifact_fname_column,
     artifact_tags_column,
 )
+from dlboard.models._view import ColumnKind
 from dlboard.serve._backend._artifact_download import artifact_url
 from dlboard.serve._pages._experiment import _dataframe_helpers as dfh
 

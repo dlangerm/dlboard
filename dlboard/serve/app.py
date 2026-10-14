@@ -30,6 +30,7 @@ from dlboard.serve._backend._installed_plugins import set_installed_plugins
 from dlboard.serve._backend._startup_checks import run_startup_checks
 from dlboard.serve._backend._theme import get_theme
 from dlboard.serve._clientside_script import ClientsideScript
+from dlboard.serve._grid import GRID_FORMATTERS_JS
 from dlboard.serve._icons import Icon, icon, install_icons
 from dlboard.serve._jump import install_jump, jump_modal, jump_trigger
 from dlboard.serve._pages._dash_helpers import section_label
@@ -50,6 +51,8 @@ _ASSETS = [
     # The navbar drag-to-resize handle.
     (AssetKind.SCRIPT, Path(__file__).with_name("navbar_resize.js")),
     (AssetKind.STYLESHEET, Path(__file__).with_name("_shell.css")),
+    # The value formatters every ag-grid column def names (`serve/_grid.py`).
+    (AssetKind.SCRIPT, GRID_FORMATTERS_JS),
 ]
 _COLOR_SCHEME_PRELOAD_JS = Path(__file__).with_name("color_scheme_preload.js").read_text()
 _NAVBAR_STATE_JS = ClientsideScript(Path(__file__).with_name("navbar_state.js"))

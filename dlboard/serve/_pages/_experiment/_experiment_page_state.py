@@ -28,8 +28,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from structlog.stdlib import get_logger
 
 from dlboard import models
-from dlboard.models import RUN_NAME_COLUMN
-from dlboard.plugins.charts._table_style import ARTIFACT_COLUMN_PREFIX, HPARAM_COLUMN_PREFIX, artifact_column
+from dlboard.models import ARTIFACT_COLUMN_PREFIX, HPARAM_COLUMN_PREFIX, RUN_NAME_COLUMN, artifact_column
 from dlboard.serve import ClientsideScript, Icon, get_current_user, get_data_store, icon
 from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import ButtonId, DivId, IntervalId, PatternId, StoreId, ValueId
@@ -629,7 +628,7 @@ def _chart_columns(chart: models.ChartInstance[Any, Any], df: pd.DataFrame) -> l
     )
 
     def renders_from(column: str) -> bool:
-        if column in dfh.IDENTITY_COLUMNS:
+        if column in models.IDENTITY_COLUMNS:
             return True
         if column.startswith(HPARAM_COLUMN_PREFIX):
             return wanted_hparams is None or column in wanted_hparams
@@ -673,7 +672,9 @@ def chart_data_fingerprint(chart: models.ChartInstance[Any, Any], df: pd.DataFra
     """
     scoped = df[_chart_columns(chart, df)]
     data_cols = [
-        c for c in scoped.columns if c not in dfh.NO_DATA_COLUMNS and not c.startswith(HPARAM_COLUMN_PREFIX)
+        c
+        for c in scoped.columns
+        if c not in models.NO_DATA_COLUMNS and not c.startswith(HPARAM_COLUMN_PREFIX)
     ]
     if data_cols:
         scoped = scoped.dropna(how="all", subset=data_cols)

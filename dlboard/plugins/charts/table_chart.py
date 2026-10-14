@@ -30,7 +30,9 @@ from pydantic import BaseModel, Field, model_validator
 
 from dlboard._compat import StrEnum
 from dlboard.models import (
+    ARTIFACT_COLUMN_PREFIX,
     DEFAULT_RENDER_CONTEXT,
+    HPARAM_COLUMN_PREFIX,
     RUN_NAME_COLUMN,
     ChartType,
     ColumnKind,
@@ -38,24 +40,22 @@ from dlboard.models import (
     Quantity,
     RenderContext,
     TagValue,
-    is_inlineable_artifact,
-)
-from dlboard.plugins.charts._table_style import (
-    ARTIFACT_COLUMN_PREFIX,
-    DEFAULT_TABLE_FONT_SIZE,
-    HPARAM_COLUMN_PREFIX,
-    NUMERIC,
-    TEXT,
     artifact_column,
     artifact_fname_column,
     artifact_keys_in,
     artifact_tags_column,
+    is_inlineable_artifact,
+)
+from dlboard.plugins.charts._artifact_tags import parse_tags
+from dlboard.serve import AssetKind, ClientsideScript, series_swatch_class, serve_asset
+from dlboard.serve._grid import (
+    DEFAULT_TABLE_FONT_SIZE,
+    NUMERIC,
+    TEXT,
     column_def,
     infer_column_dtype,
-    parse_tags,
     themed_grid_kwargs,
 )
-from dlboard.serve import AssetKind, ClientsideScript, series_swatch_class, serve_asset
 
 _IDENTITY_COLS = frozenset({MetricColumn.RUN_ID, RUN_NAME_COLUMN})
 _BOOKKEEPING_COLS = frozenset({*MetricColumn, RUN_NAME_COLUMN})

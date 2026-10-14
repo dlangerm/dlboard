@@ -29,7 +29,7 @@ from pydantic import (
     computed_field,
 )
 
-from dlboard.serve._pages._experiment import _dataframe_helpers as dfh
+from dlboard.models import NO_DATA_COLUMNS
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -204,7 +204,7 @@ def chart_search_keys(chart: models.ChartInstance[Any, Any]) -> set[str]:
     columns = chart.hint_required_columns() or set()
     return {
         chart.chart_type,
-        *(column for column in columns if column not in dfh.NO_DATA_COLUMNS),
+        *(column for column in columns if column not in NO_DATA_COLUMNS),
         *(chart.hint_required_artifact_keys() or set()),
         *chart.hint_required_artifact_key_prefixes(),
     }

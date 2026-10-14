@@ -10,8 +10,7 @@ import pytest
 from dash._utils import to_json
 from pydantic import ValidationError
 
-from dlboard.models import RUN_NAME_COLUMN
-from dlboard.plugins.charts._table_style import artifact_column, artifact_tags_column
+from dlboard.models import RUN_NAME_COLUMN, artifact_column, artifact_tags_column
 from dlboard.plugins.charts.file_list import FileListChart, FileListSettings
 
 

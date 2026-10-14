@@ -10,7 +10,7 @@ import dash_mantine_components as dmc
 import pandas as pd
 from pydantic import BaseModel, Field
 
-from dlboard.models import ChartType, ColumnKind
+from dlboard.models import HPARAM_COLUMN_PREFIX, ChartType, ColumnKind
 from dlboard.plugins.charts._axis_label import (
     DEFAULT_MAX_AXIS_LABEL_CHARS,
     VALUE_AXIS_WIDTH,
@@ -19,7 +19,6 @@ from dlboard.plugins.charts._axis_label import (
 )
 from dlboard.plugins.charts._chart_title import titled
 from dlboard.plugins.charts._grouping import last_row_per_run
-from dlboard.plugins.charts._table_style import HPARAM_COLUMN_PREFIX
 from dlboard.serve import AssetKind, series_color, serve_asset
 
 if typing.TYPE_CHECKING:

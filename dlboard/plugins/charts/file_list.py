@@ -20,20 +20,14 @@ from dlboard.models import (
     MetricColumn,
     Quantity,
     TagValue,
-    format_tag_value,
-)
-from dlboard.plugins.charts._table_style import (
-    NUMERIC,
-    SCORE_FORMATTER,
-    TEXT,
     artifact_column,
     artifact_keys_in,
     artifact_tags_column,
-    column_def,
-    parse_tags,
-    themed_grid_kwargs,
+    format_tag_value,
 )
+from dlboard.plugins.charts._artifact_tags import parse_tags
 from dlboard.serve import AssetKind, serve_asset
+from dlboard.serve._grid import NUMERIC, SCORE_FORMATTER, TEXT, column_def, themed_grid_kwargs
 
 if typing.TYPE_CHECKING:
     import dash

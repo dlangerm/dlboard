@@ -19,10 +19,10 @@ from pydantic import ValidationError
 from structlog.stdlib import get_logger
 
 from dlboard import models
-from dlboard.plugins.charts._table_style import themed_grid_kwargs
 from dlboard.serve import ClientsideScript, Icon, get_data_store, icon
 from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import ButtonId, DivId, ModalId, PatternId, StoreId, ValueId
+from dlboard.serve._grid import themed_grid_kwargs
 from dlboard.serve._pages._dash_helpers import require_triggered_id
 from dlboard.serve._pages._experiment import _experiment_page_state as core
 from dlboard.serve._pages._experiment._dataframe_helpers import ColumnCatalog

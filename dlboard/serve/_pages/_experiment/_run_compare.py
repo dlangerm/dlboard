@@ -25,10 +25,10 @@ from dash.dcc import Store
 from dash.exceptions import PreventUpdate
 from pydantic import BaseModel, BeforeValidator, Field, ValidationError
 
-from dlboard.plugins.charts._table_style import themed_grid_kwargs
 from dlboard.serve import ClientsideScript, Icon, get_data_store, icon, series_swatch_class
 from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import ButtonId, ModalId, StoreId, ValueId
+from dlboard.serve._grid import themed_grid_kwargs
 from dlboard.serve._pages._dash_helpers import tooltipped_action_icon
 from dlboard.serve._pages._dataframe_helpers import run_display_name
 from dlboard.serve._pages._experiment import _dataframe_helpers as dfh
