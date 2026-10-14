@@ -36,8 +36,8 @@ from dlboard.models import PanelInstance
 from dlboard.serve import get_system_data_store
 from dlboard.serve._jump import JUMP_SELECT_ID
 from dlboard.serve._pages._experiment._chart_autogen import AUTO_OPEN_MAX_CHARTS
+from dlboard.serve._pages._experiment._chart_editor_modal import ADD_CHART_SUBMIT_ID
 from dlboard.serve._pages._experiment._experiment_page_state import (
-    ADD_CHART_SUBMIT_ID,
     LIVE_PAUSED_BADGE_ID,
     LIVE_STATUS_ID,
     LIVE_UPDATES_ENABLED_ID,
@@ -46,14 +46,12 @@ from dlboard.serve._pages._experiment._experiment_page_state import (
     NEW_PANEL_NAME_ID,
     NEW_PANEL_OPEN_ID,
     NEW_TAB_BUTTON_ID,
-    NEW_TAB_PANELS_SELECT_ID,
     OPEN_PANEL_KEY,
     PAGE_EXPERIMENT_ID,
     PANEL_AREA_ID,
     PANEL_FILTER_ID,
     PANEL_PAGE_SIZE_ID,
     RENAME_TAB_BUTTON_ID,
-    RENAME_TAB_NAME_INPUT_ID,
     BasicExperimentPage,
 )
 from dlboard.serve._pages._experiment._notes import NOTES_COUNT_ID, NOTES_THREAD_ID
@@ -69,6 +67,7 @@ from dlboard.serve._pages._experiment._run_comparison_table import (
     NAVBAR_HPARAM_CONFIRM_COLS_ID,
     NAVBAR_HPARAM_DATATABLE_ID,
 )
+from dlboard.serve._pages._experiment._tab_controls import NEW_TAB_PANELS_SELECT_ID, RENAME_TAB_NAME_INPUT_ID
 from dlboard.serve._pages._simple_homepage import NEW_PROJECT_BUTTON_ID, NEW_PROJECT_NAME_ID
 from dlboard.serve._pages._simple_project_page import NEW_EXP_BUTTON_ID, NEW_EXP_NAME_ID
 from dlboard.serve.app import PAGE_LOADING_CLASS

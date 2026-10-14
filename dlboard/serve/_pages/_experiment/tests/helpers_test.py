@@ -18,6 +18,7 @@ from dlboard.plugins.charts.file_list import FileListChart
 from dlboard.plugins.charts.image_series import ImageChart
 from dlboard.plugins.charts.line_chart import LineChart
 from dlboard.plugins.charts.table_chart import TableChart
+from dlboard.serve._pages._experiment import _chart_editor_modal as editor
 from dlboard.serve._pages._experiment import _experiment_page_state as state
 from dlboard.serve._pages._experiment import _run_comparison_table as run_table
 from dlboard.serve._pages._experiment._chart_editor_modal import _param_field_input
@@ -79,7 +80,7 @@ def test_merge_chart_param_values_prefers_value_over_checked() -> None:
     checked = [None, True]
     field_ids = [{"field": "column"}, {"field": "sample"}]
 
-    assert state.merge_chart_param_values(values, checked, field_ids, {}) == {
+    assert editor.merge_chart_param_values(values, checked, field_ids, {}) == {
         "column": "loss",
         "sample": True,
     }
@@ -91,7 +92,7 @@ def test_merge_chart_param_values_takes_a_tables_rows_from_its_data() -> None:
         "tag_display": ParameterField(name="tag_display", type=ParameterFieldType.TABLE, required=False)
     }
 
-    merged = state.merge_chart_param_values(
+    merged = editor.merge_chart_param_values(
         [], [], [], fields, table_ids=[{"field": "tag_display"}], table_values=[entries]
     )
 
@@ -113,14 +114,14 @@ def test_merge_chart_param_values_drops_cleared_optional_fields() -> None:
         "column": ParameterField(name="column", type=ParameterFieldType.STR, required=True),
     }
 
-    assert state.merge_chart_param_values(values, checked, field_ids, fields) == {"column": None}
+    assert editor.merge_chart_param_values(values, checked, field_ids, fields) == {"column": None}
 
 
 # ---- build_validated_chart_instance ----
 
 
 def test_build_validated_chart_instance_succeeds_for_valid_parameters() -> None:
-    chart = state.build_validated_chart_instance("line", {"column": "loss", "x_axis": "step"})
+    chart = editor.build_validated_chart_instance("line", {"column": "loss", "x_axis": "step"})
     assert chart.chart_type == "line"
 
 
@@ -128,7 +129,7 @@ def test_build_validated_chart_instance_succeeds_for_valid_parameters() -> None:
     "parameters",
     [
         # Regression: a bare `ChartInstance(...)` never validates its `parameters` (untyped dict), so a
-        # required field left `None` after `state.merge_chart_param_values` used to sail through and only
+        # required field left `None` after `editor.merge_chart_param_values` used to sail through and only
         # blow up later, unguarded, from `hint_required_columns`/`render` -- with no error in the UI.
         pytest.param({"column": None, "x_axis": "step"}, id="cleared-required-field"),
         # A cleared NumberInput isn't guaranteed to report `None`; `""` isn't dropped by
@@ -141,7 +142,7 @@ def test_build_validated_chart_instance_rejects_parameters_that_would_break_late
 ) -> None:
     """Raising here, where the add/edit-chart callback can catch it, lets it show "Invalid parameters: ..."."""
     with pytest.raises(ValidationError):
-        state.build_validated_chart_instance("line", parameters)
+        editor.build_validated_chart_instance("line", parameters)
 
 
 def _run(run_id: int, name: str | None = None) -> Run:

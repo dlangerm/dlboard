@@ -1,13 +1,12 @@
 """
 Core state/render layer for the basic experiment page.
 
-Owns the page's persisted model (`BasicExperimentPage`), its full static render tree
-(`accordion_view` -- the accordion itself plus every modal/drawer shell reachable from it), the
-mutation primitives every controller module below builds on, and every component id shared across
-more than one of those controller modules. Nothing in this module imports from
-`_panel_controls.py`, `_chart_editor_modal.py`, `_chart_suggestions.py`, or
-`_run_comparison_table.py` -- they all import from here instead, which is what keeps the split
-acyclic: this is the one module every other piece of the experiment page depends on.
+Owns the page's persisted model (`BasicExperimentPage`), the panel area's render tree
+(`accordion_view`), the mutation primitives the feature modules build on, and the ids the panel area
+renders or that more than one feature reads or writes. A feature's own modal or drawer, and the ids
+inside it, belong to that feature's module (`_chart_editor_modal.py`, `_chart_suggestions.py`,
+`_panel_controls.py`, `_tab_controls.py`), which the experiment page renders once beside the panel
+area -- not here.
 """
 
 from __future__ import annotations
@@ -33,11 +32,10 @@ from dlboard.models import RUN_NAME_COLUMN
 from dlboard.plugins.charts._table_style import ARTIFACT_COLUMN_PREFIX, HPARAM_COLUMN_PREFIX, artifact_column
 from dlboard.serve import ClientsideScript, Icon, get_current_user, get_data_store, icon
 from dlboard.serve import _constants as constants
-from dlboard.serve._component_ids import ButtonId, DivId, IntervalId, ModalId, StoreId, ValueId
+from dlboard.serve._component_ids import ButtonId, DivId, IntervalId, StoreId, ValueId
 from dlboard.serve._pages._dash_helpers import tooltipped_action_icon
 from dlboard.serve._pages._dataframe_helpers import run_display_name
 from dlboard.serve._pages._experiment import _dataframe_helpers as dfh
-from dlboard.serve._pages._experiment._chart_autogen import SuggestSort
 from dlboard.serve._pages._experiment._paging import (
     CHART_SIZES,
     PANEL_SIZES,
@@ -53,7 +51,7 @@ from dlboard.serve._pages._experiment._paging import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, Sequence
+    from collections.abc import Callable, Sequence
 
     from dlboard.models import DataStore
 
@@ -126,16 +124,6 @@ class LiveUpdateSettings(BaseSettings):
     frequent than `poll_interval_ms`."""
 
 
-# --- drag-and-drop reorder requests: a completed drag reports here (`_experiment_page_dragdrop.js`
-# calls `set_props` on drop), consumed by a callback in `_panel_controls.py`. Live in the static
-# page layout (`serve/_pages/experiment.py`), not `accordion_view`'s render tree, so the drop
-# target always exists regardless of what's currently rendered underneath it. ---
-PANEL_REORDER_STORE_ID: StoreId[ExperimentPage] = StoreId("panel-reorder-request")
-CHART_REORDER_STORE_ID: StoreId[ExperimentPage] = StoreId("chart-reorder-request")
-TAB_DROP_STORE_ID: StoreId[ExperimentPage] = StoreId("tab-drop-request")
-CHART_TAB_DROP_STORE_ID: StoreId[ExperimentPage] = StoreId("chart-tab-drop-request")
-CHART_PANEL_MOVE_STORE_ID: StoreId[ExperimentPage] = StoreId("chart-panel-move-request")
-
 # --- accordion / panel state ---
 # One `Accordion` per tab group, id'd via `panel_accordion_id` -- see `panel_accordion_id`/`BasicExperimentPage.render`.
 OPEN_PANEL_KEY: typing.Final = "open_panel"  # a page_settings dict key, not a component id
@@ -197,116 +185,12 @@ NEW_PANEL_OPEN_ID: ButtonId[ExperimentPage] = ButtonId("new-panel-open")
 NEW_PANEL_NAME_ID: ValueId[ExperimentPage] = ValueId("panel-name")
 NEW_PANEL_ID: ButtonId[ExperimentPage] = ButtonId("new-panel-button")
 
-# --- add/edit-chart modal shell (content is filled in by `_chart_editor_modal.py`'s callbacks) ---
-ADD_CHART_MODAL_ID: ModalId[ExperimentPage] = ModalId("add-chart-modal")
-ADD_CHART_TARGET_ID: StoreId[ExperimentPage] = StoreId("add-chart-target")
-ADD_CHART_INITIAL_PARAMS_ID: StoreId[ExperimentPage] = StoreId("add-chart-initial-params")
-ADD_CHART_TYPE_SELECT_ID: ValueId[ExperimentPage] = ValueId("add-chart-type-select")
-ADD_CHART_PARAMS_ID: DivId[ExperimentPage] = DivId("add-chart-params")
-ADD_CHART_PREVIEW_ID: DivId[ExperimentPage] = DivId("add-chart-preview")
-ADD_CHART_ERROR_ID: DivId[ExperimentPage] = DivId("add-chart-error")
-ADD_CHART_SUBMIT_ID: ButtonId[ExperimentPage] = ButtonId("add-chart-submit")
-ADD_CHART_CANCEL_ID: ButtonId[ExperimentPage] = ButtonId("add-chart-cancel")
-
-# A chart-parameter field's own id is a pattern-matched dict, not a scalar id -- shared between
-# `_chart_editor_modal.py` (builds the form / clears a field) and `_panel_controls.py` (reads the
-# submitted form back out in `add_chart`), so the "chart-param" type string lives here once.
-CHART_PARAM_TYPE: typing.Final = "chart-param"
-_CHART_PARAM_CLEAR_TYPE: typing.Final = "chart-param-clear"
-CHART_PARAM_TABLE_DATA_TYPE: typing.Final = "chart-param-table-data"
-"""A `TABLE` chart parameter's own value: a `Store` holding its rows as the mapping the setting takes. Kept apart
-from `CHART_PARAM_TYPE`, whose `data` is a Select's options."""
-CHART_PARAM_TABLE_TYPE: typing.Final = "chart-param-table"
-"""The editable grid of a `TABLE` chart parameter; its `-add` / `-remove` buttons are `CHART_PARAM_TABLE_TYPE` + that."""
-
-
-def chart_param_id(field_name: str) -> dict[str, str]:
-    return {"type": CHART_PARAM_TYPE, "field": field_name}
-
-
-def chart_param_table_data_id(field_name: str) -> dict[str, str]:
-    return {"type": CHART_PARAM_TABLE_DATA_TYPE, "field": field_name}
-
-
-def chart_param_table_id(field_name: str) -> dict[str, str]:
-    return {"type": CHART_PARAM_TABLE_TYPE, "field": field_name}
-
-
-def chart_param_table_button_id(action: typing.Literal["add", "remove"], field_name: str) -> dict[str, str]:
-    return {"type": f"{CHART_PARAM_TABLE_TYPE}-{action}", "field": field_name}
-
-
-def chart_param_clear_id(field_name: str) -> dict[str, str]:
-    return {"type": _CHART_PARAM_CLEAR_TYPE, "field": field_name}
-
-
-# --- suggest-charts drawer shell (content is filled in by `_chart_suggestions.py`'s callbacks) ---
+# --- buttons in the panel area that open a modal or drawer -- each rendered once, beside the panel
+# area, by the feature module that owns it (`_chart_suggestions.py`, `_tab_controls.py`). ---
 SUGGEST_CHARTS_BUTTON_ID: ButtonId[ExperimentPage] = ButtonId("suggest-charts-button")
-SUGGEST_DRAWER_ID: ModalId[ExperimentPage] = ModalId("suggest-charts-drawer")
-SUGGEST_DELIMITER_ID: ValueId[ExperimentPage] = ValueId("suggest-charts-delimiter")
-SUGGEST_MODE_ID: ValueId[ExperimentPage] = ValueId("suggest-charts-mode")
-SUGGEST_CONTENT_ID: DivId[ExperimentPage] = DivId("suggest-charts-content")
-SUGGEST_SUGGESTIONS_STORE_ID: StoreId[ExperimentPage] = StoreId("suggest-charts-store")
-SUGGEST_SCOPE_STORE_ID: StoreId[ExperimentPage] = StoreId("suggest-charts-scope")
-SUGGEST_FILTER_ID: ValueId[ExperimentPage] = ValueId("suggest-charts-filter")
-SUGGEST_SORT_ID: ValueId[ExperimentPage] = ValueId("suggest-charts-sort")
-SUGGEST_SELECTION_ID: ValueId[ExperimentPage] = ValueId("suggest-charts-selection")
-SUGGEST_SELECT_ALL_ID: ButtonId[ExperimentPage] = ButtonId("suggest-charts-select-all")
-SUGGEST_CLEAR_ID: ButtonId[ExperimentPage] = ButtonId("suggest-charts-clear")
-SUGGEST_ADD_SELECTED_ID: ButtonId[ExperimentPage] = ButtonId("suggest-charts-add-selected")
-
-# --- auto-generate modal, opened from an empty view (callbacks in `_chart_suggestions.py`) ---
 AUTO_POPULATE_OPEN_ID: ButtonId[ExperimentPage] = ButtonId("auto-populate-open")
-AUTO_POPULATE_MODAL_ID: ModalId[ExperimentPage] = ModalId("auto-populate-modal")
-AUTO_POPULATE_DELIMITER_ID: ValueId[ExperimentPage] = ValueId("auto-populate-delimiter")
-AUTO_POPULATE_MODE_ID: ValueId[ExperimentPage] = ValueId("auto-populate-mode")
-AUTO_POPULATE_PREVIEW_ID: DivId[ExperimentPage] = DivId("auto-populate-preview")
-AUTO_POPULATE_BUTTON_ID: ButtonId[ExperimentPage] = ButtonId("auto-populate-button")
-AUTO_POPULATE_CANCEL_ID: ButtonId[ExperimentPage] = ButtonId("auto-populate-cancel")
-
-_SPLIT_MODE_DATA = [{"label": "Prefix", "value": "prefix"}, {"label": "Suffix", "value": "suffix"}]
-DEFAULT_DELIMITER: typing.Final = "/"
-
-# --- rename-panel modal shell (callbacks in `_panel_controls.py`) ---
-RENAME_PANEL_MODAL_ID: ModalId[ExperimentPage] = ModalId("rename-panel-modal")
-RENAME_PANEL_TARGET_ID: StoreId[ExperimentPage] = StoreId("rename-panel-target")
-RENAME_PANEL_NAME_INPUT_ID: ValueId[ExperimentPage] = ValueId("rename-panel-name-input")
-RENAME_PANEL_ERROR_ID: DivId[ExperimentPage] = DivId("rename-panel-error")
-RENAME_PANEL_SAVE_ID: ButtonId[ExperimentPage] = ButtonId("rename-panel-save")
-RENAME_PANEL_CANCEL_ID: ButtonId[ExperimentPage] = ButtonId("rename-panel-cancel")
-
-
-# --- new-tab modal shell (callbacks in `_panel_controls.py`) -- the *only* place a brand-new tab
-# name can be typed; moving a panel to an already-existing tab is dragging it onto that tab in the
-# tab bar instead (`.dl-tab-target`, see `_experiment_page_dragdrop.js` and `TAB_DROP_STORE_ID`). ---
 NEW_TAB_BUTTON_ID: ButtonId[ExperimentPage] = ButtonId("new-tab-button")
-NEW_TAB_MODAL_ID: ModalId[ExperimentPage] = ModalId("new-tab-modal")
-NEW_TAB_NAME_INPUT_ID: ValueId[ExperimentPage] = ValueId("new-tab-name-input")
-NEW_TAB_PANELS_SELECT_ID: ValueId[ExperimentPage] = ValueId("new-tab-panels-select")
-NEW_TAB_ERROR_ID: DivId[ExperimentPage] = DivId("new-tab-error")
-NEW_TAB_SAVE_ID: ButtonId[ExperimentPage] = ButtonId("new-tab-save")
-NEW_TAB_CANCEL_ID: ButtonId[ExperimentPage] = ButtonId("new-tab-cancel")
-
-# --- rename-tab modal shell (callbacks in `_panel_controls.py`) -- renames whichever tab is
-# currently active (read off `PANEL_TABS_ID`'s own value), not a per-tab control. ---
 RENAME_TAB_BUTTON_ID: ButtonId[ExperimentPage] = ButtonId("rename-tab-button")
-RENAME_TAB_MODAL_ID: ModalId[ExperimentPage] = ModalId("rename-tab-modal")
-RENAME_TAB_TARGET_ID: StoreId[ExperimentPage] = StoreId("rename-tab-target")
-RENAME_TAB_NAME_INPUT_ID: ValueId[ExperimentPage] = ValueId("rename-tab-name-input")
-RENAME_TAB_ERROR_ID: DivId[ExperimentPage] = DivId("rename-tab-error")
-RENAME_TAB_SAVE_ID: ButtonId[ExperimentPage] = ButtonId("rename-tab-save")
-RENAME_TAB_CANCEL_ID: ButtonId[ExperimentPage] = ButtonId("rename-tab-cancel")
-
-# --- delete-panel / delete-chart confirm modal shells (callbacks in `_panel_controls.py`) ---
-DELETE_PANEL_MODAL_ID: ModalId[ExperimentPage] = ModalId("delete-panel-modal")
-DELETE_PANEL_TARGET_ID: StoreId[ExperimentPage] = StoreId("delete-panel-target")
-DELETE_PANEL_CONFIRM_ID: ButtonId[ExperimentPage] = ButtonId("delete-panel-confirm")
-DELETE_PANEL_CANCEL_ID: ButtonId[ExperimentPage] = ButtonId("delete-panel-cancel")
-
-DELETE_CHART_MODAL_ID: ModalId[ExperimentPage] = ModalId("delete-chart-modal")
-DELETE_CHART_TARGET_ID: StoreId[ExperimentPage] = StoreId("delete-chart-target")
-DELETE_CHART_CONFIRM_ID: ButtonId[ExperimentPage] = ButtonId("delete-chart-confirm")
-DELETE_CHART_CANCEL_ID: ButtonId[ExperimentPage] = ButtonId("delete-chart-cancel")
 
 
 class ChartTargetData(TypedDict):
@@ -316,68 +200,6 @@ class ChartTargetData(TypedDict):
 
 class ChartID(ChartTargetData):
     type: str
-
-
-class PanelReorderRequest(TypedDict):
-    """A completed panel drag: move `panel` to just before/after `target`."""
-
-    panel: str
-    target: str
-    after: bool
-
-
-class TabDropRequest(TypedDict):
-    """A panel dropped onto an existing tab: move `panel` to `tab` (`""` for the ungrouped tab)."""
-
-    panel: str
-    tab: str
-
-
-class ChartTabDropRequest(TypedDict):
-    """A chart dropped onto an existing tab: move the chart at `index` in `panel` to `tab`."""
-
-    panel: str
-    index: int
-    tab: str
-
-
-class ChartPanelMoveRequest(TypedDict):
-    """
-    A chart dropped into a *different* panel: move the chart at `index` in `panel` to `target_panel`.
-
-    `target_index` is `None` when the drop landed on the target panel's body generally (an empty
-    panel, or anywhere that isn't one of its existing charts) rather than on one of its charts --
-    the chart is appended there instead of inserted at a particular position.
-    """
-
-    panel: str
-    index: int
-    target_panel: str
-    target_index: int | None
-    after: bool
-
-
-class ChartReorderRequest(TypedDict):
-    """A completed chart drag: move the chart at `index` in `panel` to just before/after `target_index`."""
-
-    panel: str
-    index: int
-    target_index: int
-    after: bool
-
-
-def require_triggered_id() -> Any:  # noqa: ANN401
-    """
-    Return `ctx.triggered_id`, or raise `PreventUpdate` if nothing meaningfully triggered.
-
-    Dash still fires pattern-matched callbacks when a listened component is created with its
-    property at a falsy default (e.g. a freshly-rendered button's `n_clicks=0`); checking
-    `ctx.triggered[0]["value"]` distinguishes that no-op firing from an actual click/change.
-    Callers `cast(...)` the result to the triggered-id shape they expect.
-    """
-    if not ctx.triggered_id or not ctx.triggered[0]["value"]:  # pyrefly: ignore [unsupported-operation]
-        raise PreventUpdate
-    return ctx.triggered_id
 
 
 def open_chart_button_id(panel_name: str) -> dict[str, str]:
@@ -482,10 +304,6 @@ def panel_header_id(panel_name: str) -> dict[str, str]:
 
 def panel_accordion_id(tab: str) -> dict[str, str]:
     return {"type": "panel-accordion", "tab": tab}
-
-
-def add_suggestion_button_id(kind: str, key: str) -> dict[str, str]:
-    return {"type": "add-suggestion", "kind": kind, "key": key}
 
 
 # ============================================================
@@ -1438,19 +1256,6 @@ def _panel_accordion(  # noqa: PLR0913
     )
 
 
-# ============================================================
-# static shells: add/edit-chart modal, suggest-charts drawer, rename/delete confirm modals
-#
-# Rendered once by the experiment page, beside the panel area (`modal_shells`), with opened=False
-# until a controller callback opens them -- here rather than in the controller modules that own
-# their *behavior*, so the page can reach them without a cross-import.
-# ============================================================
-
-
-def split_mode_control(control_id: ValueId[ExperimentPage]) -> dmc.SegmentedControl:
-    return dmc.SegmentedControl(id=control_id, data=_SPLIT_MODE_DATA, value="prefix", size="sm")
-
-
 def _new_panel_popover() -> dmc.Popover:
     """
     The toolbar's "New panel" button, and the name form it opens right beneath it.
@@ -1504,7 +1309,7 @@ def _suggest_charts_button() -> dmc.Button:
 
 
 def _empty_view() -> Component:
-    """A view with no panels: offer to auto-generate them, behind a modal that previews the result first."""
+    """A view with no panels: offer to auto-generate them (behind `_chart_suggestions.py`'s modal, which previews the result first)."""
     return html.Div(
         [
             dmc.Paper(
@@ -1537,279 +1342,7 @@ def _empty_view() -> Component:
                 p="xl",
                 style={"borderStyle": "dashed"},
             ),
-            dmc.Modal(
-                id=AUTO_POPULATE_MODAL_ID,
-                title="Auto-generate charts",
-                size="lg",
-                opened=False,
-                children=dmc.Stack(
-                    [
-                        dmc.Text(
-                            "Each metric and artifact name is split on the delimiter, and grouped into a "
-                            "panel by its first part (prefix) or last part (suffix).",
-                            size="sm",
-                            c="dimmed",
-                        ),
-                        dmc.Group(
-                            [
-                                dmc.TextInput(
-                                    id=AUTO_POPULATE_DELIMITER_ID,
-                                    label="Delimiter",
-                                    value=DEFAULT_DELIMITER,
-                                    w=90,
-                                    size="sm",
-                                ),
-                                dmc.Stack(
-                                    [
-                                        dmc.Text("Group by", size="sm", fw=500),
-                                        split_mode_control(AUTO_POPULATE_MODE_ID),
-                                    ],
-                                    gap=4,
-                                ),
-                            ],
-                            align="flex-end",
-                        ),
-                        html.Div(id=AUTO_POPULATE_PREVIEW_ID),
-                        dmc.Group(
-                            [
-                                dmc.Button("Cancel", id=AUTO_POPULATE_CANCEL_ID, variant="default"),
-                                dmc.Button("Create charts", id=AUTO_POPULATE_BUTTON_ID, n_clicks=0),
-                            ],
-                            justify="flex-end",
-                        ),
-                    ]
-                ),
-            ),
         ]
-    )
-
-
-def _suggest_charts_drawer() -> dmc.Drawer:
-    return dmc.Drawer(
-        id=SUGGEST_DRAWER_ID,
-        title="Suggested charts",
-        position="right",
-        size="md",
-        opened=False,
-        children=[
-            Store(id=SUGGEST_SUGGESTIONS_STORE_ID, data=[]),
-            Store(id=SUGGEST_SCOPE_STORE_ID, data=None),
-            dmc.Group(
-                [
-                    dmc.TextInput(
-                        id=SUGGEST_DELIMITER_ID, label="Delimiter", value=DEFAULT_DELIMITER, w=90, size="sm"
-                    ),
-                    split_mode_control(SUGGEST_MODE_ID),
-                ],
-                gap="sm",
-                mb="sm",
-            ),
-            # Sticky, so "Add selected" stays in reach however far down a long list you have scrolled.
-            dmc.Stack(
-                [
-                    dmc.TextInput(
-                        id=SUGGEST_FILTER_ID, placeholder="Filter by name or panel", debounce=300, size="sm"
-                    ),
-                    dmc.Group(
-                        [
-                            dmc.SegmentedControl(
-                                id=SUGGEST_SORT_ID,
-                                data=[
-                                    {"value": sort.value, "label": f"By {sort.value}"} for sort in SuggestSort
-                                ],
-                                value=SuggestSort.NAME.value,
-                                size="xs",
-                            ),
-                            dmc.Button(
-                                "Select all",
-                                id=SUGGEST_SELECT_ALL_ID,
-                                variant="default",
-                                size="xs",
-                                n_clicks=0,
-                            ),
-                            dmc.Button(
-                                "Clear", id=SUGGEST_CLEAR_ID, variant="default", size="xs", n_clicks=0
-                            ),
-                            dmc.Button(
-                                "Add selected (0)",
-                                id=SUGGEST_ADD_SELECTED_ID,
-                                size="xs",
-                                disabled=True,
-                                n_clicks=0,
-                            ),
-                        ],
-                        gap="xs",
-                    ),
-                ],
-                gap="xs",
-                pb="sm",
-                style={
-                    "position": "sticky",
-                    "top": 0,
-                    "zIndex": 1,
-                    "background": "var(--mantine-color-body)",
-                },
-            ),
-            dmc.CheckboxGroup(id=SUGGEST_SELECTION_ID, value=[], children=html.Div(id=SUGGEST_CONTENT_ID)),
-        ],
-    )
-
-
-def _add_chart_modal() -> dmc.Modal:
-    chart_types = sorted(models.ChartTypeRegistry.get_registered_chart_types().keys())
-    return dmc.Modal(
-        id=ADD_CHART_MODAL_ID,
-        title="Add chart",
-        opened=False,
-        size="lg",
-        children=[
-            Store(id=ADD_CHART_TARGET_ID),
-            Store(id=ADD_CHART_INITIAL_PARAMS_ID),
-            dmc.Stack(
-                [
-                    dmc.Select(id=ADD_CHART_TYPE_SELECT_ID, label="Chart type", data=chart_types, value=None),
-                    html.Div(id=ADD_CHART_PARAMS_ID),
-                    dmc.Text("Preview", fw=600, mt="sm"),
-                    html.Div(id=ADD_CHART_PREVIEW_ID),
-                    dmc.Text(id=ADD_CHART_ERROR_ID, c="red", size="sm"),
-                    dmc.Group(
-                        [
-                            dmc.Button("Cancel", id=ADD_CHART_CANCEL_ID, variant="default"),
-                            dmc.Button("Add chart", id=ADD_CHART_SUBMIT_ID),
-                        ],
-                        justify="flex-end",
-                    ),
-                ],
-            ),
-        ],
-    )
-
-
-def _rename_panel_modal() -> dmc.Modal:
-    return dmc.Modal(
-        id=RENAME_PANEL_MODAL_ID,
-        title="Rename panel",
-        opened=False,
-        children=[
-            Store(id=RENAME_PANEL_TARGET_ID),
-            dmc.Stack(
-                [
-                    dmc.TextInput(id=RENAME_PANEL_NAME_INPUT_ID, label="Panel name"),
-                    dmc.Text(id=RENAME_PANEL_ERROR_ID, c="red", size="sm"),
-                    dmc.Group(
-                        [
-                            dmc.Button("Cancel", id=RENAME_PANEL_CANCEL_ID, variant="default"),
-                            dmc.Button("Save", id=RENAME_PANEL_SAVE_ID),
-                        ],
-                        justify="flex-end",
-                    ),
-                ],
-            ),
-        ],
-    )
-
-
-def _new_tab_modal() -> dmc.Modal:
-    """
-    The *only* place a brand-new tab gets created (see `NEW_TAB_BUTTON_ID`).
-
-    Name it and, optionally, pick existing panels to move into it -- leave the picker empty and the
-    tab starts with one fresh, empty panel instead. Moving one more panel in later, or moving a
-    single chart into an existing tab, is drag-and-drop (`.dl-tab-target`), not this modal, which
-    only ever creates a brand-new tab.
-    """
-    return dmc.Modal(
-        id=NEW_TAB_MODAL_ID,
-        title="New tab",
-        opened=False,
-        children=[
-            dmc.Stack(
-                [
-                    dmc.TextInput(id=NEW_TAB_NAME_INPUT_ID, label="Tab name"),
-                    dmc.MultiSelect(
-                        id=NEW_TAB_PANELS_SELECT_ID,
-                        label="Panels",
-                        description="Which panels should move into this tab (optional -- leave "
-                        "empty to start with a new, empty panel)",
-                        data=[],
-                        searchable=True,
-                    ),
-                    dmc.Text(id=NEW_TAB_ERROR_ID, c="red", size="sm"),
-                    dmc.Group(
-                        [
-                            dmc.Button("Cancel", id=NEW_TAB_CANCEL_ID, variant="default"),
-                            dmc.Button("Create", id=NEW_TAB_SAVE_ID),
-                        ],
-                        justify="flex-end",
-                    ),
-                ],
-            ),
-        ],
-    )
-
-
-def _rename_tab_modal() -> dmc.Modal:
-    """Renames whichever tab is active when `RENAME_TAB_BUTTON_ID` is clicked -- disabled on "General"."""
-    return dmc.Modal(
-        id=RENAME_TAB_MODAL_ID,
-        title="Rename tab",
-        opened=False,
-        children=[
-            Store(id=RENAME_TAB_TARGET_ID),
-            dmc.Stack(
-                [
-                    dmc.TextInput(id=RENAME_TAB_NAME_INPUT_ID, label="Tab name"),
-                    dmc.Text(id=RENAME_TAB_ERROR_ID, c="red", size="sm"),
-                    dmc.Group(
-                        [
-                            dmc.Button("Cancel", id=RENAME_TAB_CANCEL_ID, variant="default"),
-                            dmc.Button("Save", id=RENAME_TAB_SAVE_ID),
-                        ],
-                        justify="flex-end",
-                    ),
-                ],
-            ),
-        ],
-    )
-
-
-def _delete_panel_confirm_modal() -> dmc.Modal:
-    return dmc.Modal(
-        id=DELETE_PANEL_MODAL_ID,
-        title="Delete this panel?",
-        opened=False,
-        children=[
-            Store(id=DELETE_PANEL_TARGET_ID),
-            dmc.Text("This deletes the panel and every chart in it. This can't be undone."),
-            dmc.Group(
-                [
-                    dmc.Button("Cancel", id=DELETE_PANEL_CANCEL_ID, variant="default"),
-                    dmc.Button("Delete", id=DELETE_PANEL_CONFIRM_ID, color="red"),
-                ],
-                justify="flex-end",
-                mt="sm",
-            ),
-        ],
-    )
-
-
-def _delete_chart_confirm_modal() -> dmc.Modal:
-    return dmc.Modal(
-        id=DELETE_CHART_MODAL_ID,
-        title="Delete this chart?",
-        opened=False,
-        children=[
-            Store(id=DELETE_CHART_TARGET_ID),
-            dmc.Text("This can't be undone."),
-            dmc.Group(
-                [
-                    dmc.Button("Cancel", id=DELETE_CHART_CANCEL_ID, variant="default"),
-                    dmc.Button("Delete", id=DELETE_CHART_CONFIRM_ID, color="red"),
-                ],
-                justify="flex-end",
-                mt="sm",
-            ),
-        ],
     )
 
 
@@ -1878,31 +1411,11 @@ def ref_of(experiment_id: int, page: BasicExperimentPage) -> PageRef:
     return PageRef(experiment_id, page.id if page.owner_id is not None else None)
 
 
-def modal_shells() -> list[Component]:
-    """
-    Every modal/drawer the panel area can open, for the experiment page to render once, beside it.
-
-    Not part of `accordion_view`: that is re-rendered by every structural change (a layout toggle, an
-    added chart, a renamed panel, ...), and each re-mount of a shell set off its confirm button's
-    callback again -- a burst of server round trips that answered nothing but delayed the very render
-    they came with. So every confirm callback closes its own shell.
-    """
-    return [
-        _add_chart_modal(),
-        _suggest_charts_drawer(),
-        _rename_panel_modal(),
-        _new_tab_modal(),
-        _rename_tab_modal(),
-        _delete_panel_confirm_modal(),
-        _delete_chart_confirm_modal(),
-    ]
-
-
 def accordion_view(
     store: DataStore[...], page: BasicExperimentPage, paging: Paging, *, focus_chart: str | None = None
 ) -> html.Div:
     """
-    The full accordion/tabs view of `page` (the modals it opens are `modal_shells`, rendered once).
+    The full accordion/tabs view of `page` (the modals it opens belong to their features, rendered once).
 
     Takes the page itself rather than re-reading it: every caller already has the version it just
     loaded or saved, which is also the only way to be sure a view is rendered, not the shared page.
@@ -2269,54 +1782,6 @@ def move_chart_to_panel(  # noqa: PLR0913
         return p.model_copy(update={"charts": new_charts})
 
     return [_insert(p) for p in without_chart]
-
-
-def merge_chart_param_values(  # noqa: PLR0913
-    values: list[Any],
-    checked_values: list[Any],
-    field_ids: list[dict[str, str]],
-    fields: dict[str, models.ParameterField],
-    *,
-    table_ids: Sequence[Mapping[str, str]] = (),
-    table_values: Sequence[Any] = (),
-) -> dict[str, Any]:
-    """
-    Merge a form's reports by field id.
-
-    NumberInput/TextInput/Select report via `value` and Switch via `checked`; a table field is a separate
-    `Store` (`table_ids`, `table_values`) holding its rows.
-
-    A cleared NumberInput reports `None`, which isn't a valid `int`/`float` -- for a field with its
-    own default (`required=False`), that value is dropped entirely so validation falls back to the
-    field's default instead of failing with "not a valid integer".
-    """
-    merged = [v if v is not None else c for v, c in zip(values, checked_values, strict=True)]
-    parameters: dict[str, Any] = {
-        fid["field"]: rows for fid, rows in zip(table_ids, table_values, strict=True)
-    }
-    for fid, val in zip(field_ids, merged, strict=True):
-        field_name = fid["field"]
-        field = fields.get(field_name)
-        if val is None and field is not None and not field.required:
-            continue
-        parameters[field_name] = val
-    return parameters
-
-
-def build_validated_chart_instance(
-    chart_type_name: str, parameters: dict[str, Any]
-) -> models.ChartInstance[Any, Any]:
-    """
-    Build a `models.ChartInstance`, validating `parameters` against the chart type's own settings model.
-
-    `models.ChartInstance.parameters` is an untyped `dict[str, object]` -- constructing one directly never
-    raises even for garbage values (e.g. a cleared numeric field), so callers that need to surface a
-    validation error to the user (rather than have it surface later, unguarded, from
-    `hint_required_columns`/`render`) must validate through here instead.
-    """
-    chart_type = models.ChartTypeRegistry.get_chart_type(chart_type_name)
-    chart_type.parameter_type().model_validate(parameters)
-    return models.ChartInstance[Any, Any](chart_type=chart_type_name, parameters=parameters)
 
 
 class EditCtx(TypedDict):

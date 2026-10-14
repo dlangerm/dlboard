@@ -13,7 +13,11 @@ from flask import request
 from dlboard.serve import _constants as constants
 from dlboard.serve import get_current_user, get_data_store
 from dlboard.serve._pages._experiment import _experiment_page_state as core
+from dlboard.serve._pages._experiment import _panel_controls as panel_controls
+from dlboard.serve._pages._experiment import _tab_controls as tab_controls
 from dlboard.serve._pages._experiment import render_panel
+from dlboard.serve._pages._experiment._chart_editor_modal import add_chart_modal
+from dlboard.serve._pages._experiment._chart_suggestions import chart_suggestion_shells
 from dlboard.serve._pages._experiment._notes import STATE_NOTES_REVISION, notes_button, notes_drawer
 from dlboard.serve._pages._experiment._paging import SIZES_COOKIE, Paging
 from dlboard.serve._pages._experiment._run_compare import CompareQuery, compare_components
@@ -26,11 +30,11 @@ _LIVE_UPDATE_SETTINGS = core.LiveUpdateSettings()
 # via `set_props`) -- listed in the static layout below, not `accordion_view`'s render tree, so the
 # drop target always exists regardless of what's currently rendered underneath it.
 _DRAG_DROP_STORE_IDS = [
-    core.PANEL_REORDER_STORE_ID,
-    core.CHART_REORDER_STORE_ID,
-    core.TAB_DROP_STORE_ID,
-    core.CHART_TAB_DROP_STORE_ID,
-    core.CHART_PANEL_MOVE_STORE_ID,
+    panel_controls.PANEL_REORDER_STORE_ID,
+    panel_controls.CHART_REORDER_STORE_ID,
+    tab_controls.TAB_DROP_STORE_ID,
+    tab_controls.CHART_TAB_DROP_STORE_ID,
+    panel_controls.CHART_PANEL_MOVE_STORE_ID,
 ]
 
 
@@ -165,8 +169,14 @@ def layout(
                         target_components={str(core.METRIC_CONTENT_ID): "children"},
                         custom_spinner=dmc.Loader(size="lg"),
                     ),
-                    # Outside `METRIC_CONTENT_ID`, so rebuilding the panels doesn't re-mount them.
-                    *core.modal_shells(),
+                    # Every modal/drawer the panel area can open, each owned by its feature module. Rendered
+                    # once, outside `METRIC_CONTENT_ID`: every structural edit rebuilds that, and each re-mount
+                    # of a shell set its confirm button's callback off again -- a burst of round trips that
+                    # answered nothing but delayed the render they came with. So each confirm closes its own.
+                    add_chart_modal(),
+                    *chart_suggestion_shells(),
+                    *panel_controls.panel_control_modals(),
+                    *tab_controls.tab_control_modals(),
                 ],
                 gap="xs",
             ),

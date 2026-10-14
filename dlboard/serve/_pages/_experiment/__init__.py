@@ -4,10 +4,11 @@ The basic experiment page: hparam/run table + chart accordion, plus the experime
 This module's own job is just the page-level chrome (description editing, delete) and `register()`,
 which wires the CSS/JS routes and delegates every feature to its owning submodule:
 
-- `_experiment_page_state.py` -- the page model, its full render tree, and the mutation
+- `_experiment_page_state.py` -- the page model, the panel area's render tree, and the mutation
   primitives/ids every other submodule below (and `serve/_pages/experiment.py`) builds on.
-- `_panel_controls.py` -- create/rename/delete/move a panel; delete/move a chart; add a chart.
-- `_chart_editor_modal.py` -- the add/edit-chart modal's form-building and live preview.
+- `_panel_controls.py` -- create/rename/delete/move a panel; delete/move a chart; its modals.
+- `_tab_controls.py` -- create/rename a tab, drop a panel or chart onto one; its modals.
+- `_chart_editor_modal.py` -- the add/edit-chart modal: its form, live preview and submit.
 - `_chart_suggestions.py` -- auto-populate charts for an empty view; suggest un-charted keys.
 - `_run_comparison_table.py` -- the navbar's hparam/metric/run comparison table + run deletion.
 
@@ -48,6 +49,7 @@ from dlboard.serve._pages._experiment._paging import Paging
 from dlboard.serve._pages._experiment._panel_controls import register_panel_controls_callbacks
 from dlboard.serve._pages._experiment._run_compare import register_run_compare_callbacks
 from dlboard.serve._pages._experiment._run_comparison_table import register_run_comparison_callbacks
+from dlboard.serve._pages._experiment._tab_controls import register_tab_controls_callbacks
 from dlboard.serve._pages._experiment._views import register_view_callbacks
 from dlboard.serve._url import relative_path
 
@@ -368,6 +370,7 @@ def register(app: Dash) -> None:
 
     core.register_state_callbacks(app)
     register_panel_controls_callbacks(app)
+    register_tab_controls_callbacks(app)
     register_chart_editor_callbacks(app)
     register_chart_suggestions_callbacks(app)
     register_run_comparison_callbacks(app)

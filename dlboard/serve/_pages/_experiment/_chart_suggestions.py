@@ -1,9 +1,10 @@
 """
 Auto-populate charts for a brand-new (empty) view; suggest charts for un-charted keys otherwise.
 
-The empty-view controls and the suggest-charts drawer's static shell live in
-`_experiment_page_state.py` (needed by `accordion_view`'s static render tree); this module owns
-the dynamic suggestion list content and the callbacks that drive both flows.
+Owns the suggest-charts drawer and the auto-generate modal (both rendered once by the experiment page,
+beside the panel area -- see `chart_suggestion_shells`), their ids, and the callbacks that drive both
+flows. The buttons that open them ("Suggest charts", a panel's own "Suggest charts", an empty view's
+"Auto-generate charts") are part of the panel area's render tree.
 """
 
 from __future__ import annotations
@@ -13,12 +14,15 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, TypedDict, cast
 
 import dash_mantine_components as dmc
-from dash import ALL, Dash, Input, NoUpdate, Output, State, ctx, no_update
+from dash import ALL, Dash, Input, NoUpdate, Output, State, ctx, html, no_update
+from dash.dcc import Store
 from dash.exceptions import PreventUpdate
 
 from dlboard.models import ChartInstance, ColumnKind
 from dlboard.serve import ClientsideScript, Icon, get_data_store, icon
 from dlboard.serve import _constants as constants
+from dlboard.serve._component_ids import ButtonId, DivId, ModalId, StoreId, ValueId
+from dlboard.serve._pages._dash_helpers import require_triggered_id
 from dlboard.serve._pages._experiment import _experiment_page_state as core
 from dlboard.serve._pages._experiment._chart_autogen import (
     Suggestion,
@@ -44,6 +48,162 @@ if TYPE_CHECKING:
 _SUGGEST_SELECTION_JS = ClientsideScript(Path(__file__).with_name("suggest_selection.js"))
 
 _NO_KEYS_MESSAGE = "No metrics or artifacts logged for this experiment yet"
+
+# --- suggest-charts drawer ---
+SUGGEST_DRAWER_ID: ModalId[core.ExperimentPage] = ModalId("suggest-charts-drawer")
+SUGGEST_DELIMITER_ID: ValueId[core.ExperimentPage] = ValueId("suggest-charts-delimiter")
+SUGGEST_MODE_ID: ValueId[core.ExperimentPage] = ValueId("suggest-charts-mode")
+SUGGEST_CONTENT_ID: DivId[core.ExperimentPage] = DivId("suggest-charts-content")
+SUGGEST_SUGGESTIONS_STORE_ID: StoreId[core.ExperimentPage] = StoreId("suggest-charts-store")
+SUGGEST_SCOPE_STORE_ID: StoreId[core.ExperimentPage] = StoreId("suggest-charts-scope")
+SUGGEST_FILTER_ID: ValueId[core.ExperimentPage] = ValueId("suggest-charts-filter")
+SUGGEST_SORT_ID: ValueId[core.ExperimentPage] = ValueId("suggest-charts-sort")
+SUGGEST_SELECTION_ID: ValueId[core.ExperimentPage] = ValueId("suggest-charts-selection")
+SUGGEST_SELECT_ALL_ID: ButtonId[core.ExperimentPage] = ButtonId("suggest-charts-select-all")
+SUGGEST_CLEAR_ID: ButtonId[core.ExperimentPage] = ButtonId("suggest-charts-clear")
+SUGGEST_ADD_SELECTED_ID: ButtonId[core.ExperimentPage] = ButtonId("suggest-charts-add-selected")
+
+# --- auto-generate modal, opened from an empty view's `AUTO_POPULATE_OPEN_ID` ---
+AUTO_POPULATE_MODAL_ID: ModalId[core.ExperimentPage] = ModalId("auto-populate-modal")
+AUTO_POPULATE_DELIMITER_ID: ValueId[core.ExperimentPage] = ValueId("auto-populate-delimiter")
+AUTO_POPULATE_MODE_ID: ValueId[core.ExperimentPage] = ValueId("auto-populate-mode")
+AUTO_POPULATE_PREVIEW_ID: DivId[core.ExperimentPage] = DivId("auto-populate-preview")
+AUTO_POPULATE_BUTTON_ID: ButtonId[core.ExperimentPage] = ButtonId("auto-populate-button")
+AUTO_POPULATE_CANCEL_ID: ButtonId[core.ExperimentPage] = ButtonId("auto-populate-cancel")
+
+_SPLIT_MODE_DATA: Final = [{"label": "Prefix", "value": "prefix"}, {"label": "Suffix", "value": "suffix"}]
+_DEFAULT_DELIMITER: Final = "/"
+
+
+def _add_suggestion_button_id(kind: str, key: str) -> dict[str, str]:
+    return {"type": "add-suggestion", "kind": kind, "key": key}
+
+
+def _split_mode_control(control_id: ValueId[core.ExperimentPage]) -> dmc.SegmentedControl:
+    return dmc.SegmentedControl(id=control_id, data=_SPLIT_MODE_DATA, value="prefix", size="sm")
+
+
+def _suggest_charts_drawer() -> dmc.Drawer:
+    return dmc.Drawer(
+        id=SUGGEST_DRAWER_ID,
+        title="Suggested charts",
+        position="right",
+        size="md",
+        opened=False,
+        children=[
+            Store(id=SUGGEST_SUGGESTIONS_STORE_ID, data=[]),
+            Store(id=SUGGEST_SCOPE_STORE_ID, data=None),
+            dmc.Group(
+                [
+                    dmc.TextInput(
+                        id=SUGGEST_DELIMITER_ID, label="Delimiter", value=_DEFAULT_DELIMITER, w=90, size="sm"
+                    ),
+                    _split_mode_control(SUGGEST_MODE_ID),
+                ],
+                gap="sm",
+                mb="sm",
+            ),
+            # Sticky, so "Add selected" stays in reach however far down a long list you have scrolled.
+            dmc.Stack(
+                [
+                    dmc.TextInput(
+                        id=SUGGEST_FILTER_ID, placeholder="Filter by name or panel", debounce=300, size="sm"
+                    ),
+                    dmc.Group(
+                        [
+                            dmc.SegmentedControl(
+                                id=SUGGEST_SORT_ID,
+                                data=[
+                                    {"value": sort.value, "label": f"By {sort.value}"} for sort in SuggestSort
+                                ],
+                                value=SuggestSort.NAME.value,
+                                size="xs",
+                            ),
+                            dmc.Button(
+                                "Select all",
+                                id=SUGGEST_SELECT_ALL_ID,
+                                variant="default",
+                                size="xs",
+                                n_clicks=0,
+                            ),
+                            dmc.Button(
+                                "Clear", id=SUGGEST_CLEAR_ID, variant="default", size="xs", n_clicks=0
+                            ),
+                            dmc.Button(
+                                "Add selected (0)",
+                                id=SUGGEST_ADD_SELECTED_ID,
+                                size="xs",
+                                disabled=True,
+                                n_clicks=0,
+                            ),
+                        ],
+                        gap="xs",
+                    ),
+                ],
+                gap="xs",
+                pb="sm",
+                style={
+                    "position": "sticky",
+                    "top": 0,
+                    "zIndex": 1,
+                    "background": "var(--mantine-color-body)",
+                },
+            ),
+            dmc.CheckboxGroup(id=SUGGEST_SELECTION_ID, value=[], children=html.Div(id=SUGGEST_CONTENT_ID)),
+        ],
+    )
+
+
+def _auto_populate_modal() -> dmc.Modal:
+    """The confirm modal behind an empty view's "Auto-generate charts": a preview of the panels it would make."""
+    return dmc.Modal(
+        id=AUTO_POPULATE_MODAL_ID,
+        title="Auto-generate charts",
+        size="lg",
+        opened=False,
+        children=dmc.Stack(
+            [
+                dmc.Text(
+                    "Each metric and artifact name is split on the delimiter, and grouped into a "
+                    "panel by its first part (prefix) or last part (suffix).",
+                    size="sm",
+                    c="dimmed",
+                ),
+                dmc.Group(
+                    [
+                        dmc.TextInput(
+                            id=AUTO_POPULATE_DELIMITER_ID,
+                            label="Delimiter",
+                            value=_DEFAULT_DELIMITER,
+                            w=90,
+                            size="sm",
+                        ),
+                        dmc.Stack(
+                            [
+                                dmc.Text("Group by", size="sm", fw=500),
+                                _split_mode_control(AUTO_POPULATE_MODE_ID),
+                            ],
+                            gap=4,
+                        ),
+                    ],
+                    align="flex-end",
+                ),
+                html.Div(id=AUTO_POPULATE_PREVIEW_ID),
+                dmc.Group(
+                    [
+                        dmc.Button("Cancel", id=AUTO_POPULATE_CANCEL_ID, variant="default"),
+                        dmc.Button("Create charts", id=AUTO_POPULATE_BUTTON_ID, n_clicks=0),
+                    ],
+                    justify="flex-end",
+                ),
+            ]
+        ),
+    )
+
+
+def chart_suggestion_shells() -> list[Component]:
+    """The suggest-charts drawer and auto-generate modal, for the experiment page to render once, beside the panel area."""
+    return [_suggest_charts_drawer(), _auto_populate_modal()]
 
 
 class _AutoPopulateCtx(core.EditCtx):
@@ -75,7 +235,7 @@ def _render_suggestions(suggestions: Iterable[Suggestion], *, filtered_out_all: 
                 ),
                 dmc.ActionIcon(
                     icon(Icon.ADD),
-                    id=core.add_suggestion_button_id(s.kind.value, s.key),
+                    id=_add_suggestion_button_id(s.kind.value, s.key),
                     n_clicks=0,
                     variant="light",
                     size="sm",
@@ -207,13 +367,14 @@ def _render_auto_preview(groups: dict[str, list[tuple[str, ColumnKind]]]) -> Com
 
 def _register_auto_populate(app: Dash) -> None:
     @app.callback(
-        Output(core.AUTO_POPULATE_MODAL_ID, "opened"),
-        Output(core.AUTO_POPULATE_PREVIEW_ID, "children"),
-        Output(core.AUTO_POPULATE_BUTTON_ID, "disabled"),
-        Input(core.AUTO_POPULATE_OPEN_ID, "n_clicks"),
-        Input(core.AUTO_POPULATE_DELIMITER_ID, "value"),
-        Input(core.AUTO_POPULATE_MODE_ID, "value"),
-        State(core.AUTO_POPULATE_MODAL_ID, "opened"),
+        Output(AUTO_POPULATE_MODAL_ID, "opened"),
+        Output(AUTO_POPULATE_PREVIEW_ID, "children"),
+        Output(AUTO_POPULATE_BUTTON_ID, "disabled"),
+        # Optional: only an empty view offers it, while the modal is always on the page.
+        Input(core.AUTO_POPULATE_OPEN_ID, "n_clicks", allow_optional=True),
+        Input(AUTO_POPULATE_DELIMITER_ID, "value"),
+        Input(AUTO_POPULATE_MODE_ID, "value"),
+        State(AUTO_POPULATE_MODAL_ID, "opened"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
         prevent_initial_call=True,
     )
@@ -234,15 +395,15 @@ def _register_auto_populate(app: Dash) -> None:
             return True, dmc.Text(_NO_KEYS_MESSAGE, c="dimmed", size="sm"), True
         groups = group_keys_into_panels(
             catalog,
-            delimiter=delimiter or core.DEFAULT_DELIMITER,
+            delimiter=delimiter or _DEFAULT_DELIMITER,
             mode="suffix" if mode == "suffix" else "prefix",
             lightning=core.is_lightning_experiment(store, experiment_id),
         )
         return True if opening else no_update, _render_auto_preview(groups), False
 
     @app.callback(
-        Output(core.AUTO_POPULATE_MODAL_ID, "opened", allow_duplicate=True),
-        Input(core.AUTO_POPULATE_CANCEL_ID, "n_clicks"),
+        Output(AUTO_POPULATE_MODAL_ID, "opened", allow_duplicate=True),
+        Input(AUTO_POPULATE_CANCEL_ID, "n_clicks"),
         prevent_initial_call=True,
     )
     def cancel_auto_populate(n_clicks: int | None) -> bool:
@@ -250,20 +411,23 @@ def _register_auto_populate(app: Dash) -> None:
             raise PreventUpdate
         return False
 
+    # The modal is always on the page (`chart_suggestion_shells`), not inside the empty view this
+    # replaces, so creating the charts closes it here rather than by unmounting it.
     @app.callback(
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
-        Input(core.AUTO_POPULATE_BUTTON_ID, "n_clicks"),
+        Output(AUTO_POPULATE_MODAL_ID, "opened", allow_duplicate=True),
+        Input(AUTO_POPULATE_BUTTON_ID, "n_clicks"),
         {
-            "delimiter": State(core.AUTO_POPULATE_DELIMITER_ID, "value"),
-            "mode": State(core.AUTO_POPULATE_MODE_ID, "value"),
+            "delimiter": State(AUTO_POPULATE_DELIMITER_ID, "value"),
+            "mode": State(AUTO_POPULATE_MODE_ID, "value"),
             "experiment_id": State(constants.STATE_EXPERIMENT_ID, "data"),
             "page_json": State(core.STATE_PAGE_STORAGE, "data"),
             "paging_json": State(core.PANEL_PAGING_ID, "data"),
         },
         prevent_initial_call=True,
     )
-    def auto_populate_charts(n_clicks: int, auto_populate_ctx: _AutoPopulateCtx) -> tuple[Any, str]:
+    def auto_populate_charts(n_clicks: int, auto_populate_ctx: _AutoPopulateCtx) -> tuple[Any, str, bool]:
         if not n_clicks:
             raise PreventUpdate
         experiment_id = auto_populate_ctx["experiment_id"]
@@ -276,7 +440,7 @@ def _register_auto_populate(app: Dash) -> None:
 
         panels = build_auto_panels(
             catalog,
-            delimiter=auto_populate_ctx["delimiter"] or core.DEFAULT_DELIMITER,
+            delimiter=auto_populate_ctx["delimiter"] or _DEFAULT_DELIMITER,
             mode=split_mode,
             lightning=lightning,
         )
@@ -286,7 +450,7 @@ def _register_auto_populate(app: Dash) -> None:
             lambda _panels: panels,
             extra_settings={core.OPEN_PANEL_KEY: panel_to_open(panels)},
         )
-        return container, page.model_dump_json()
+        return container, page.model_dump_json(), False
 
 
 def _resolve_suggestion_trigger(
@@ -355,24 +519,24 @@ def _add_charts(
 
 def _register_suggestions(app: Dash) -> None:
     @app.callback(
-        Output(core.SUGGEST_DRAWER_ID, "opened", allow_duplicate=True),
-        Output(core.SUGGEST_DRAWER_ID, "title", allow_duplicate=True),
-        Output(core.SUGGEST_CONTENT_ID, "children", allow_duplicate=True),
-        Output(core.SUGGEST_SUGGESTIONS_STORE_ID, "data", allow_duplicate=True),
-        Output(core.SUGGEST_SCOPE_STORE_ID, "data", allow_duplicate=True),
-        Output(core.SUGGEST_SELECTION_ID, "value", allow_duplicate=True),
-        Output(core.SUGGEST_FILTER_ID, "value", allow_duplicate=True),
+        Output(SUGGEST_DRAWER_ID, "opened", allow_duplicate=True),
+        Output(SUGGEST_DRAWER_ID, "title", allow_duplicate=True),
+        Output(SUGGEST_CONTENT_ID, "children", allow_duplicate=True),
+        Output(SUGGEST_SUGGESTIONS_STORE_ID, "data", allow_duplicate=True),
+        Output(SUGGEST_SCOPE_STORE_ID, "data", allow_duplicate=True),
+        Output(SUGGEST_SELECTION_ID, "value", allow_duplicate=True),
+        Output(SUGGEST_FILTER_ID, "value", allow_duplicate=True),
         # Optional: an empty view's toolbar offers "Auto-generate charts" instead, while the drawer
-        # (`modal_shells`) is always on the page.
+        # (`chart_suggestion_shells`) is always on the page.
         Input(core.SUGGEST_CHARTS_BUTTON_ID, "n_clicks", allow_optional=True),
         Input({"type": "panel-suggest-charts", "panel": ALL}, "n_clicks"),
         {
-            "delimiter": Input(core.SUGGEST_DELIMITER_ID, "value"),
-            "mode": Input(core.SUGGEST_MODE_ID, "value"),
+            "delimiter": Input(SUGGEST_DELIMITER_ID, "value"),
+            "mode": Input(SUGGEST_MODE_ID, "value"),
             "page_json": State(core.STATE_PAGE_STORAGE, "data"),
-            "current_scope": State(core.SUGGEST_SCOPE_STORE_ID, "data"),
-            "filter_text": State(core.SUGGEST_FILTER_ID, "value"),
-            "sort": State(core.SUGGEST_SORT_ID, "value"),
+            "current_scope": State(SUGGEST_SCOPE_STORE_ID, "data"),
+            "filter_text": State(SUGGEST_FILTER_ID, "value"),
+            "sort": State(SUGGEST_SORT_ID, "value"),
         },
         prevent_initial_call=True,
     )
@@ -423,7 +587,7 @@ def _register_suggestions(app: Dash) -> None:
         suggestions = build_suggestions(
             find_uncharted_keys(curr_page.panels, catalog),
             catalog,
-            delimiter=suggest_ctx["delimiter"] or core.DEFAULT_DELIMITER,
+            delimiter=suggest_ctx["delimiter"] or _DEFAULT_DELIMITER,
             mode=split_mode,
             lightning=lightning,
         )
@@ -443,10 +607,10 @@ def _register_suggestions(app: Dash) -> None:
         )
 
     @app.callback(
-        Output(core.SUGGEST_CONTENT_ID, "children", allow_duplicate=True),
-        Input(core.SUGGEST_FILTER_ID, "value"),
-        Input(core.SUGGEST_SORT_ID, "value"),
-        State(core.SUGGEST_SUGGESTIONS_STORE_ID, "data"),
+        Output(SUGGEST_CONTENT_ID, "children", allow_duplicate=True),
+        Input(SUGGEST_FILTER_ID, "value"),
+        Input(SUGGEST_SORT_ID, "value"),
+        State(SUGGEST_SUGGESTIONS_STORE_ID, "data"),
         prevent_initial_call=True,
     )
     def filter_and_sort_suggestions(
@@ -456,13 +620,13 @@ def _register_suggestions(app: Dash) -> None:
         return _render_list(stored or [], filter_text, sort)
 
     @app.callback(
-        Output(core.SUGGEST_SELECTION_ID, "value", allow_duplicate=True),
-        Input(core.SUGGEST_SELECT_ALL_ID, "n_clicks"),
-        Input(core.SUGGEST_CLEAR_ID, "n_clicks"),
-        State(core.SUGGEST_FILTER_ID, "value"),
-        State(core.SUGGEST_SORT_ID, "value"),
-        State(core.SUGGEST_SUGGESTIONS_STORE_ID, "data"),
-        State(core.SUGGEST_SELECTION_ID, "value"),
+        Output(SUGGEST_SELECTION_ID, "value", allow_duplicate=True),
+        Input(SUGGEST_SELECT_ALL_ID, "n_clicks"),
+        Input(SUGGEST_CLEAR_ID, "n_clicks"),
+        State(SUGGEST_FILTER_ID, "value"),
+        State(SUGGEST_SORT_ID, "value"),
+        State(SUGGEST_SUGGESTIONS_STORE_ID, "data"),
+        State(SUGGEST_SELECTION_ID, "value"),
         prevent_initial_call=True,
     )
     def select_suggestions(  # noqa: PLR0913
@@ -474,7 +638,7 @@ def _register_suggestions(app: Dash) -> None:
         selected: list[str] | None,
     ) -> list[str]:
         """Tick every suggestion the filter shows (keeping what was already ticked), or untick everything."""
-        if cast("str | None", ctx.triggered_id) == core.SUGGEST_CLEAR_ID:
+        if cast("str | None", ctx.triggered_id) == SUGGEST_CLEAR_ID:
             if not clear_clicks:
                 raise PreventUpdate
             return []
@@ -485,9 +649,9 @@ def _register_suggestions(app: Dash) -> None:
 
     app.clientside_callback(
         _SUGGEST_SELECTION_JS.source,
-        Output(core.SUGGEST_ADD_SELECTED_ID, "children"),
-        Output(core.SUGGEST_ADD_SELECTED_ID, "disabled"),
-        Input(core.SUGGEST_SELECTION_ID, "value"),
+        Output(SUGGEST_ADD_SELECTED_ID, "children"),
+        Output(SUGGEST_ADD_SELECTED_ID, "disabled"),
+        Input(SUGGEST_SELECTION_ID, "value"),
     )
 
 
@@ -495,17 +659,17 @@ def _register_suggestion_adds(app: Dash) -> None:
     @app.callback(
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
-        Output(core.SUGGEST_CONTENT_ID, "children", allow_duplicate=True),
-        Output(core.SUGGEST_SUGGESTIONS_STORE_ID, "data", allow_duplicate=True),
-        Output(core.SUGGEST_SELECTION_ID, "value", allow_duplicate=True),
-        Output(core.SUGGEST_DRAWER_ID, "opened", allow_duplicate=True),
+        Output(SUGGEST_CONTENT_ID, "children", allow_duplicate=True),
+        Output(SUGGEST_SUGGESTIONS_STORE_ID, "data", allow_duplicate=True),
+        Output(SUGGEST_SELECTION_ID, "value", allow_duplicate=True),
+        Output(SUGGEST_DRAWER_ID, "opened", allow_duplicate=True),
         Input({"type": "add-suggestion", "kind": ALL, "key": ALL}, "n_clicks"),
-        State(core.SUGGEST_SUGGESTIONS_STORE_ID, "data"),
+        State(SUGGEST_SUGGESTIONS_STORE_ID, "data"),
         State(core.STATE_PAGE_STORAGE, "data"),
         State(core.PANEL_PAGING_ID, "data"),
-        State(core.SUGGEST_FILTER_ID, "value"),
-        State(core.SUGGEST_SORT_ID, "value"),
-        State(core.SUGGEST_SELECTION_ID, "value"),
+        State(SUGGEST_FILTER_ID, "value"),
+        State(SUGGEST_SORT_ID, "value"),
+        State(SUGGEST_SELECTION_ID, "value"),
         prevent_initial_call=True,
     )
     def add_suggested_chart(  # noqa: PLR0913
@@ -517,7 +681,7 @@ def _register_suggestion_adds(app: Dash) -> None:
         sort: str | None,
         selected: list[str] | None,
     ) -> tuple[Any, str, Component, list[dict[str, Any]], list[str], bool]:
-        triggered_id = cast("dict[str, str]", core.require_triggered_id())
+        triggered_id = cast("dict[str, str]", require_triggered_id())
         picked = frozenset({(ColumnKind(triggered_id["kind"]), triggered_id["key"])})
         container, saved_page, remaining = _add_charts(page_json, paging_json, stored or [], picked)
         still_ticked = [v for v in selected or [] if parse_selection([v]) != picked]
@@ -534,17 +698,17 @@ def _register_suggestion_adds(app: Dash) -> None:
     @app.callback(
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
-        Output(core.SUGGEST_CONTENT_ID, "children", allow_duplicate=True),
-        Output(core.SUGGEST_SUGGESTIONS_STORE_ID, "data", allow_duplicate=True),
-        Output(core.SUGGEST_SELECTION_ID, "value", allow_duplicate=True),
-        Output(core.SUGGEST_DRAWER_ID, "opened", allow_duplicate=True),
-        Input(core.SUGGEST_ADD_SELECTED_ID, "n_clicks"),
-        State(core.SUGGEST_SELECTION_ID, "value"),
-        State(core.SUGGEST_SUGGESTIONS_STORE_ID, "data"),
+        Output(SUGGEST_CONTENT_ID, "children", allow_duplicate=True),
+        Output(SUGGEST_SUGGESTIONS_STORE_ID, "data", allow_duplicate=True),
+        Output(SUGGEST_SELECTION_ID, "value", allow_duplicate=True),
+        Output(SUGGEST_DRAWER_ID, "opened", allow_duplicate=True),
+        Input(SUGGEST_ADD_SELECTED_ID, "n_clicks"),
+        State(SUGGEST_SELECTION_ID, "value"),
+        State(SUGGEST_SUGGESTIONS_STORE_ID, "data"),
         State(core.STATE_PAGE_STORAGE, "data"),
         State(core.PANEL_PAGING_ID, "data"),
-        State(core.SUGGEST_FILTER_ID, "value"),
-        State(core.SUGGEST_SORT_ID, "value"),
+        State(SUGGEST_FILTER_ID, "value"),
+        State(SUGGEST_SORT_ID, "value"),
         prevent_initial_call=True,
     )
     def add_selected_suggestions(  # noqa: PLR0913

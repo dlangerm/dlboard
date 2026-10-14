@@ -45,7 +45,7 @@ def test_accordion_view_offers_auto_populate_only_for_an_empty_view(
     )
 
     children = cast("list[Any]", container.children)
-    assert (_find_props(children, state.AUTO_POPULATE_BUTTON_ID) is not None) is auto_populate_offered
+    assert (_find_props(children, state.AUTO_POPULATE_OPEN_ID) is not None) is auto_populate_offered
     assert (_find_props(children, state.SUGGEST_CHARTS_BUTTON_ID) is not None) is not auto_populate_offered
 
 

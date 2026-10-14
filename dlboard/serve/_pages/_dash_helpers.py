@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import dash_mantine_components as dmc
 import pendulum
-from dash import ctx, html
+from dash import Output, ctx, html
 from dash.exceptions import PreventUpdate
 
 from dlboard import models
@@ -16,6 +16,8 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from dash.development.base_component import Component
+
+    from dlboard.serve._component_ids import ButtonId
 
 
 def tooltipped_action_icon(  # noqa: PLR0913
@@ -140,3 +142,14 @@ def require_triggered_id() -> Any:  # noqa: ANN401
     if not ctx.triggered_id or not ctx.triggered[0]["value"]:  # pyrefly: ignore [unsupported-operation]
         raise PreventUpdate
     return ctx.triggered_id
+
+
+def busy_while_running[P](button: ButtonId[P]) -> list[tuple[Output, bool, bool]]:
+    """
+    A callback's `running=` argument: `button` shows its spinner, and can't be clicked again, until it returns.
+
+    For a button whose callback can take a while (rebuilding a big experiment's panel area, say) and
+    that sits somewhere a page's own loading overlay can't be seen, such as under a modal -- without
+    this it sits there looking like it did nothing.
+    """
+    return [(Output(button, "loading"), True, False)]

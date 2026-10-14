@@ -2,8 +2,7 @@
 The navbar's run-comparison table: a Columns picker plus a run-selection/deletion data table.
 
 Fully self-contained -- it renders into `constants.NAVBAR_RUN_LIST_ID`, a different container from
-`accordion_view`'s `METRIC_CONTENT_ID` tree, so unlike the other controller modules it needs no
-static shell declared in `_experiment_page_state.py`.
+`accordion_view`'s `METRIC_CONTENT_ID` tree, and has no modal of its own to render beside it.
 """
 
 from __future__ import annotations

@@ -1,16 +1,17 @@
 """
-Panel/chart CRUD callbacks: create/rename/delete/move a panel; delete/move a chart; add a chart.
+Panel/chart CRUD: create/rename/delete/move a panel; delete/move a chart; toggle a panel's sync/layout.
 
-The add/edit-chart modal's own form-building/preview callbacks live in `_chart_editor_modal.py`;
-this module owns the "submit" mutation, plus toggling a panel's sync/layout.
+Owns its ids, the rename-panel and delete-panel/chart confirm modals (rendered once by the experiment
+page, beside the panel area -- see `panel_control_modals`), and the callbacks behind them. Adding or
+editing a chart is `_chart_editor_modal.py`'s; tabs are `_tab_controls.py`'s.
 
 Callbacks needing more than a couple of `State`s take them as one Dash "flexible callback
 signature" grouping -- a `dict` of `Input`/`State` objects that Dash flattens for dependency
 tracking but delivers back as a single dict argument (typed by a `core.EditCtx` subclass), which is
 what keeps them under ruff's `max-args`.
 
-Each feature (create, add-chart, delete-chart, delete-panel, move, toggle, rename) registers via
-its own small `_register_*` function -- mirroring `simple_admin_page.py`'s existing
+Each feature (create, delete-chart, delete-panel, move, toggle, rename) registers via its own small
+`_register_*` function -- mirroring `simple_admin_page.py`'s existing
 `_register_tab_callbacks`/`_register_restore_callback`/`_register_purge_callbacks` split -- so no
 single function accumulates enough nested callbacks to trip ruff's complexity/statement limits.
 """
@@ -18,33 +19,176 @@ single function accumulates enough nested callbacks to trip ruff's complexity/st
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, TypedDict, cast
 
+import dash_mantine_components as dmc
 from dash import ALL, MATCH, Dash, Input, NoUpdate, Output, State, ctx, html, no_update
+from dash.dcc import Store
 from dash.exceptions import PreventUpdate
 from pydantic import ValidationError
 
-from dlboard.models import ChartTypeRegistry, PanelInstance
+from dlboard.models import PanelInstance
 from dlboard.serve import ClientsideScript
 from dlboard.serve import _constants as constants
+from dlboard.serve._component_ids import ButtonId, DivId, ModalId, StoreId, ValueId
+from dlboard.serve._pages._dash_helpers import busy_while_running, require_triggered_id
 from dlboard.serve._pages._experiment import _experiment_page_state as core
 
 if TYPE_CHECKING:
-    from dlboard.serve._component_ids import ButtonId
+    from dash.development.base_component import Component
 
 _PANEL_GRID_COLUMNS_JS = ClientsideScript(Path(__file__).with_name("panel_grid_columns.js"))
 _PANEL_GRID_FOLLOWERS_JS = ClientsideScript(Path(__file__).with_name("panel_grid_followers.js"))
 
+# --- rename-panel modal ---
+RENAME_PANEL_MODAL_ID: ModalId[core.ExperimentPage] = ModalId("rename-panel-modal")
+RENAME_PANEL_TARGET_ID: StoreId[core.ExperimentPage] = StoreId("rename-panel-target")
+RENAME_PANEL_NAME_INPUT_ID: ValueId[core.ExperimentPage] = ValueId("rename-panel-name-input")
+RENAME_PANEL_ERROR_ID: DivId[core.ExperimentPage] = DivId("rename-panel-error")
+RENAME_PANEL_SAVE_ID: ButtonId[core.ExperimentPage] = ButtonId("rename-panel-save")
+RENAME_PANEL_CANCEL_ID: ButtonId[core.ExperimentPage] = ButtonId("rename-panel-cancel")
 
-def _busy_while_running(button: ButtonId[core.ExperimentPage]) -> list[tuple[Output, bool, bool]]:
-    """
-    A callback's `running=` argument: `button` shows its spinner, and can't be clicked again, until it returns.
+# --- delete-panel / delete-chart confirm modals ---
+DELETE_PANEL_MODAL_ID: ModalId[core.ExperimentPage] = ModalId("delete-panel-modal")
+DELETE_PANEL_TARGET_ID: StoreId[core.ExperimentPage] = StoreId("delete-panel-target")
+DELETE_PANEL_CONFIRM_ID: ButtonId[core.ExperimentPage] = ButtonId("delete-panel-confirm")
+DELETE_PANEL_CANCEL_ID: ButtonId[core.ExperimentPage] = ButtonId("delete-panel-cancel")
 
-    Everything that rebuilds the panel area (creating a tab, deleting a panel, ...) can take a while
-    on a big experiment, and its button -- under a modal, where the page's own loading overlay can't
-    be seen -- otherwise sits there looking like it did nothing.
+DELETE_CHART_MODAL_ID: ModalId[core.ExperimentPage] = ModalId("delete-chart-modal")
+DELETE_CHART_TARGET_ID: StoreId[core.ExperimentPage] = StoreId("delete-chart-target")
+DELETE_CHART_CONFIRM_ID: ButtonId[core.ExperimentPage] = ButtonId("delete-chart-confirm")
+DELETE_CHART_CANCEL_ID: ButtonId[core.ExperimentPage] = ButtonId("delete-chart-cancel")
+
+# --- drag-and-drop reorder requests: a completed drag reports here (`_experiment_page_dragdrop.js`
+# calls `set_props` on drop). Live in the static page layout (`serve/_pages/experiment.py`), not the
+# panel area's render tree, so the drop target always exists regardless of what's rendered underneath it. ---
+PANEL_REORDER_STORE_ID: StoreId[core.ExperimentPage] = StoreId("panel-reorder-request")
+CHART_REORDER_STORE_ID: StoreId[core.ExperimentPage] = StoreId("chart-reorder-request")
+CHART_PANEL_MOVE_STORE_ID: StoreId[core.ExperimentPage] = StoreId("chart-panel-move-request")
+
+
+class PanelReorderRequest(TypedDict):
+    """A completed panel drag: move `panel` to just before/after `target`."""
+
+    panel: str
+    target: str
+    after: bool
+
+
+class ChartReorderRequest(TypedDict):
+    """A completed chart drag: move the chart at `index` in `panel` to just before/after `target_index`."""
+
+    panel: str
+    index: int
+    target_index: int
+    after: bool
+
+
+class ChartPanelMoveRequest(TypedDict):
     """
-    return [(Output(button, "loading"), True, False)]
+    A chart dropped into a *different* panel: move the chart at `index` in `panel` to `target_panel`.
+
+    `target_index` is `None` when the drop landed on the target panel's body generally (an empty
+    panel, or anywhere that isn't one of its existing charts) rather than on one of its charts --
+    the chart is appended there instead of inserted at a particular position.
+    """
+
+    panel: str
+    index: int
+    target_panel: str
+    target_index: int | None
+    after: bool
+
+
+class _DeleteChartCtx(core.EditCtx):
+    target: core.ChartTargetData | None
+    experiment_id: int
+
+
+class _DeletePanelCtx(core.EditCtx):
+    target: str | None
+    experiment_id: int
+
+
+class _RenamePanelCtx(core.EditCtx):
+    old_name: str | None
+    new_name: str | None
+    experiment_id: int
+
+
+def _rename_panel_modal() -> dmc.Modal:
+    return dmc.Modal(
+        id=RENAME_PANEL_MODAL_ID,
+        title="Rename panel",
+        opened=False,
+        children=[
+            Store(id=RENAME_PANEL_TARGET_ID),
+            dmc.Stack(
+                [
+                    dmc.TextInput(id=RENAME_PANEL_NAME_INPUT_ID, label="Panel name"),
+                    dmc.Text(id=RENAME_PANEL_ERROR_ID, c="red", size="sm"),
+                    dmc.Group(
+                        [
+                            dmc.Button("Cancel", id=RENAME_PANEL_CANCEL_ID, variant="default"),
+                            dmc.Button("Save", id=RENAME_PANEL_SAVE_ID),
+                        ],
+                        justify="flex-end",
+                    ),
+                ],
+            ),
+        ],
+    )
+
+
+def _delete_confirm_modal(  # noqa: PLR0913
+    *,
+    modal_id: ModalId[core.ExperimentPage],
+    target_id: StoreId[core.ExperimentPage],
+    confirm_id: ButtonId[core.ExperimentPage],
+    cancel_id: ButtonId[core.ExperimentPage],
+    title: str,
+    body: str,
+) -> dmc.Modal:
+    return dmc.Modal(
+        id=modal_id,
+        title=title,
+        opened=False,
+        children=[
+            Store(id=target_id),
+            dmc.Text(body),
+            dmc.Group(
+                [
+                    dmc.Button("Cancel", id=cancel_id, variant="default"),
+                    dmc.Button("Delete", id=confirm_id, color="red"),
+                ],
+                justify="flex-end",
+                mt="sm",
+            ),
+        ],
+    )
+
+
+def panel_control_modals() -> list[Component]:
+    """The rename-panel and delete confirm modals, for the experiment page to render once, beside the panel area."""
+    return [
+        _rename_panel_modal(),
+        _delete_confirm_modal(
+            modal_id=DELETE_PANEL_MODAL_ID,
+            target_id=DELETE_PANEL_TARGET_ID,
+            confirm_id=DELETE_PANEL_CONFIRM_ID,
+            cancel_id=DELETE_PANEL_CANCEL_ID,
+            title="Delete this panel?",
+            body="This deletes the panel and every chart in it. This can't be undone.",
+        ),
+        _delete_confirm_modal(
+            modal_id=DELETE_CHART_MODAL_ID,
+            target_id=DELETE_CHART_TARGET_ID,
+            confirm_id=DELETE_CHART_CONFIRM_ID,
+            cancel_id=DELETE_CHART_CANCEL_ID,
+            title="Delete this chart?",
+            body="This can't be undone.",
+        ),
+    ]
 
 
 def _validated_layout_change(page_json: str) -> tuple[str, dict[str, Any]]:
@@ -81,45 +225,6 @@ def _validated_layout_change(page_json: str) -> tuple[str, dict[str, Any]]:
     return panel_name, changed.model_dump(include=set(edit))
 
 
-class _AddChartCtx(core.EditCtx):
-    chart_type_name: str | None
-    values: list[Any]
-    checked_values: list[Any]
-    field_ids: list[dict[str, str]]
-    table_ids: list[dict[str, str]]
-    table_values: list[Any]
-    target: core.ChartTargetData | None
-    experiment_id: int
-
-
-class _DeleteChartCtx(core.EditCtx):
-    target: core.ChartTargetData | None
-    experiment_id: int
-
-
-class _DeletePanelCtx(core.EditCtx):
-    target: str | None
-    experiment_id: int
-
-
-class _RenamePanelCtx(core.EditCtx):
-    old_name: str | None
-    new_name: str | None
-    experiment_id: int
-
-
-class _NewTabCtx(core.EditCtx):
-    name: str | None
-    panel_names: list[str] | None
-    experiment_id: int
-
-
-class _RenameTabCtx(core.EditCtx):
-    old_name: str | None
-    new_name: str | None
-    experiment_id: int
-
-
 def _register_create_panel(app: Dash) -> None:
     @app.callback(
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
@@ -131,7 +236,7 @@ def _register_create_panel(app: Dash) -> None:
         State(core.STATE_PAGE_STORAGE, "data"),
         State(core.PANEL_PAGING_ID, "data"),
         prevent_initial_call=True,
-        running=_busy_while_running(core.NEW_PANEL_ID),
+        running=busy_while_running(core.NEW_PANEL_ID),
     )
     def create_panel(
         n_clicks: int | None, n_submit: int | None, panel_name: str | None, page_json: str, paging_json: str
@@ -161,86 +266,31 @@ def _register_create_panel(app: Dash) -> None:
         return container, page.model_dump_json(), None
 
 
-def _register_add_chart(app: Dash) -> None:
-    @app.callback(
-        Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
-        Output(core.ADD_CHART_MODAL_ID, "opened", allow_duplicate=True),
-        Output(core.ADD_CHART_ERROR_ID, "children", allow_duplicate=True),
-        Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
-        Output(core.ADD_CHART_SUBMIT_ID, "loading", allow_duplicate=True),
-        Input(core.ADD_CHART_SUBMIT_ID, "n_clicks"),
-        {
-            "chart_type_name": State(core.ADD_CHART_TYPE_SELECT_ID, "value"),
-            "values": State({"type": core.CHART_PARAM_TYPE, "field": ALL}, "value"),
-            "checked_values": State({"type": core.CHART_PARAM_TYPE, "field": ALL}, "checked"),
-            "table_ids": State({"type": core.CHART_PARAM_TABLE_DATA_TYPE, "field": ALL}, "id"),
-            "table_values": State({"type": core.CHART_PARAM_TABLE_DATA_TYPE, "field": ALL}, "data"),
-            "field_ids": State({"type": core.CHART_PARAM_TYPE, "field": ALL}, "id"),
-            "target": State(core.ADD_CHART_TARGET_ID, "data"),
-            "experiment_id": State(constants.STATE_EXPERIMENT_ID, "data"),
-            "page_json": State(core.STATE_PAGE_STORAGE, "data"),
-            "paging_json": State(core.PANEL_PAGING_ID, "data"),
-        },
-        prevent_initial_call=True,
-    )
-    def add_chart(n_clicks: int, add_chart_ctx: _AddChartCtx) -> tuple[Any, bool, str, str | NoUpdate, bool]:
-        chart_type_name, target = add_chart_ctx["chart_type_name"], add_chart_ctx["target"]
-        if not n_clicks or not chart_type_name or not target:
-            raise PreventUpdate
-
-        fields = ChartTypeRegistry.get_registered_chart_types().get(chart_type_name, {})
-        parameters = core.merge_chart_param_values(
-            add_chart_ctx["values"],
-            add_chart_ctx["checked_values"],
-            add_chart_ctx["field_ids"],
-            fields,
-            table_ids=add_chart_ctx["table_ids"],
-            table_values=add_chart_ctx["table_values"],
-        )
-        try:
-            new_chart = core.build_validated_chart_instance(chart_type_name, parameters)
-        except (ValidationError, KeyError) as exc:
-            return no_update, True, f"Invalid parameters: {exc}", no_update, False
-
-        panel_name, index = target["panel"], target.get("index")
-
-        def apply_chart(panels: list[Any]) -> list[Any]:
-            return [core.upsert_chart(p, panel_name, index, new_chart) for p in panels]
-
-        page, container = core.mutate_panels_and_rerender(
-            add_chart_ctx["page_json"],
-            add_chart_ctx["paging_json"],
-            apply_chart,
-            reveal_chart=new_chart.id,
-        )
-        return container, False, "", page.model_dump_json(), False
-
-
 def _register_delete_chart(app: Dash) -> None:
     # --- delete chart: click opens a confirm modal, Delete in the modal does the actual mutation ---
     @app.callback(
-        Output(core.DELETE_CHART_MODAL_ID, "opened", allow_duplicate=True),
-        Output(core.DELETE_CHART_TARGET_ID, "data"),
+        Output(DELETE_CHART_MODAL_ID, "opened", allow_duplicate=True),
+        Output(DELETE_CHART_TARGET_ID, "data"),
         Input({"type": "delete-chart", "panel": ALL, "index": ALL}, "n_clicks"),
         prevent_initial_call=True,
     )
     def open_delete_chart_modal(_n_clicks_list: list[int]) -> tuple[bool, core.ChartTargetData]:
-        triggered_id = cast("core.ChartTargetData", core.require_triggered_id())
+        triggered_id = cast("core.ChartTargetData", require_triggered_id())
         return True, {"panel": triggered_id["panel"], "index": triggered_id["index"]}
 
     @app.callback(
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
-        Output(core.DELETE_CHART_MODAL_ID, "opened", allow_duplicate=True),
-        Input(core.DELETE_CHART_CONFIRM_ID, "n_clicks"),
+        Output(DELETE_CHART_MODAL_ID, "opened", allow_duplicate=True),
+        Input(DELETE_CHART_CONFIRM_ID, "n_clicks"),
         {
-            "target": State(core.DELETE_CHART_TARGET_ID, "data"),
+            "target": State(DELETE_CHART_TARGET_ID, "data"),
             "experiment_id": State(constants.STATE_EXPERIMENT_ID, "data"),
             "page_json": State(core.STATE_PAGE_STORAGE, "data"),
             "paging_json": State(core.PANEL_PAGING_ID, "data"),
         },
         prevent_initial_call=True,
-        running=_busy_while_running(core.DELETE_CHART_CONFIRM_ID),
+        running=busy_while_running(DELETE_CHART_CONFIRM_ID),
     )
     def delete_chart(
         n_clicks: int, delete_ctx: _DeleteChartCtx
@@ -266,8 +316,8 @@ def _register_delete_chart(app: Dash) -> None:
         return container, page.model_dump_json(), False
 
     @app.callback(
-        Output(core.DELETE_CHART_MODAL_ID, "opened", allow_duplicate=True),
-        Input(core.DELETE_CHART_CANCEL_ID, "n_clicks"),
+        Output(DELETE_CHART_MODAL_ID, "opened", allow_duplicate=True),
+        Input(DELETE_CHART_CANCEL_ID, "n_clicks"),
         prevent_initial_call=True,
     )
     def cancel_delete_chart(n_clicks: int) -> bool:
@@ -279,28 +329,28 @@ def _register_delete_chart(app: Dash) -> None:
 def _register_delete_panel(app: Dash) -> None:
     # --- delete panel: same shape as delete chart, above ---
     @app.callback(
-        Output(core.DELETE_PANEL_MODAL_ID, "opened", allow_duplicate=True),
-        Output(core.DELETE_PANEL_TARGET_ID, "data"),
+        Output(DELETE_PANEL_MODAL_ID, "opened", allow_duplicate=True),
+        Output(DELETE_PANEL_TARGET_ID, "data"),
         Input({"type": "delete-panel", "panel": ALL}, "n_clicks"),
         prevent_initial_call=True,
     )
     def open_delete_panel_modal(_n_clicks_list: list[int]) -> tuple[bool, str]:
-        triggered_id = cast("dict[str, str]", core.require_triggered_id())
+        triggered_id = cast("dict[str, str]", require_triggered_id())
         return True, triggered_id["panel"]
 
     @app.callback(
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
-        Output(core.DELETE_PANEL_MODAL_ID, "opened", allow_duplicate=True),
-        Input(core.DELETE_PANEL_CONFIRM_ID, "n_clicks"),
+        Output(DELETE_PANEL_MODAL_ID, "opened", allow_duplicate=True),
+        Input(DELETE_PANEL_CONFIRM_ID, "n_clicks"),
         {
-            "target": State(core.DELETE_PANEL_TARGET_ID, "data"),
+            "target": State(DELETE_PANEL_TARGET_ID, "data"),
             "experiment_id": State(constants.STATE_EXPERIMENT_ID, "data"),
             "page_json": State(core.STATE_PAGE_STORAGE, "data"),
             "paging_json": State(core.PANEL_PAGING_ID, "data"),
         },
         prevent_initial_call=True,
-        running=_busy_while_running(core.DELETE_PANEL_CONFIRM_ID),
+        running=busy_while_running(DELETE_PANEL_CONFIRM_ID),
     )
     def delete_panel(
         n_clicks: int, delete_ctx: _DeletePanelCtx
@@ -320,8 +370,8 @@ def _register_delete_panel(app: Dash) -> None:
         return container, page.model_dump_json(), False
 
     @app.callback(
-        Output(core.DELETE_PANEL_MODAL_ID, "opened", allow_duplicate=True),
-        Input(core.DELETE_PANEL_CANCEL_ID, "n_clicks"),
+        Output(DELETE_PANEL_MODAL_ID, "opened", allow_duplicate=True),
+        Input(DELETE_PANEL_CANCEL_ID, "n_clicks"),
         prevent_initial_call=True,
     )
     def cancel_delete_panel(n_clicks: int) -> bool:
@@ -342,13 +392,13 @@ def _register_reorder(app: Dash) -> None:
     @app.callback(
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
-        Input(core.PANEL_REORDER_STORE_ID, "data"),
+        Input(PANEL_REORDER_STORE_ID, "data"),
         State(core.STATE_PAGE_STORAGE, "data"),
         State(core.PANEL_PAGING_ID, "data"),
         prevent_initial_call=True,
     )
     def reorder_panel(
-        request: core.PanelReorderRequest | None, page_json: str, paging_json: str
+        request: PanelReorderRequest | None, page_json: str, paging_json: str
     ) -> tuple[html.Div, str]:
         if not request:
             raise PreventUpdate
@@ -365,13 +415,13 @@ def _register_reorder(app: Dash) -> None:
     @app.callback(
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
-        Input(core.CHART_REORDER_STORE_ID, "data"),
+        Input(CHART_REORDER_STORE_ID, "data"),
         State(core.STATE_PAGE_STORAGE, "data"),
         State(core.PANEL_PAGING_ID, "data"),
         prevent_initial_call=True,
     )
     def reorder_chart(
-        request: core.ChartReorderRequest | None, page_json: str, paging_json: str
+        request: ChartReorderRequest | None, page_json: str, paging_json: str
     ) -> tuple[html.Div, str]:
         if not request:
             raise PreventUpdate
@@ -477,81 +527,6 @@ def _register_toggle(app: Dash) -> None:
         return page.model_dump_json()
 
 
-def _register_tab_drop(app: Dash) -> None:
-    """
-    Move a panel (or a single chart) onto an *existing* tab -- see `_experiment_page_dragdrop.js`.
-
-    The only way to create a brand-new tab is `NEW_TAB_BUTTON_ID`; both callbacks below only ever
-    move something to a tab that already exists (whatever `.dl-tab-target` the drag landed on). Both
-    also switch the active tab to the destination -- otherwise the thing you just dragged would
-    vanish from view into a tab you're not looking at.
-    """
-
-    @app.callback(
-        Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
-        Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
-        Input(core.TAB_DROP_STORE_ID, "data"),
-        State(core.STATE_PAGE_STORAGE, "data"),
-        State(core.PANEL_PAGING_ID, "data"),
-        prevent_initial_call=True,
-    )
-    def drop_panel_on_tab(
-        request: core.TabDropRequest | None,
-        page_json: str,
-        paging_json: str,
-    ) -> tuple[html.Div, str]:
-        if not request:
-            raise PreventUpdate
-        panel_name, new_tab = request["panel"], request["tab"]
-
-        current_page = core.BasicExperimentPage.model_validate_json(page_json)
-        current_tab = next((p.tab for p in current_page.panels if p.name == panel_name), None)
-        if new_tab == current_tab:
-            raise PreventUpdate
-
-        def move(panels: list[Any]) -> list[Any]:
-            return [p.model_copy(update={"tab": new_tab}) if p.name == panel_name else p for p in panels]
-
-        page, container = core.mutate_panels_and_rerender(
-            page_json,
-            paging_json,
-            move,
-            extra_settings={core.ACTIVE_TAB_KEY: new_tab},
-            reveal_panel=panel_name,
-        )
-        return container, page.model_dump_json()
-
-    @app.callback(
-        Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
-        Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
-        Input(core.CHART_TAB_DROP_STORE_ID, "data"),
-        State(core.STATE_PAGE_STORAGE, "data"),
-        State(core.PANEL_PAGING_ID, "data"),
-        prevent_initial_call=True,
-    )
-    def drop_chart_on_tab(
-        request: core.ChartTabDropRequest | None,
-        page_json: str,
-        paging_json: str,
-    ) -> tuple[html.Div, str]:
-        """Move a single chart to an *existing* tab -- see `drop_panel_on_tab`, its panel-level twin."""
-        if not request:
-            raise PreventUpdate
-        panel_name, index, new_tab = request["panel"], request["index"], request["tab"]
-
-        def move(panels: list[Any]) -> list[Any]:
-            return core.move_chart_to_tab(panels, panel_name, index, new_tab)
-
-        page, container = core.mutate_panels_and_rerender(
-            page_json,
-            paging_json,
-            move,
-            extra_settings={core.ACTIVE_TAB_KEY: new_tab},
-            reveal_chart=core.chart_id_at(page_json, panel_name, index),
-        )
-        return container, page.model_dump_json()
-
-
 def _register_chart_panel_move(app: Dash) -> None:
     """
     Move a single chart into a *different* panel by dragging it there.
@@ -564,13 +539,13 @@ def _register_chart_panel_move(app: Dash) -> None:
     @app.callback(
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
-        Input(core.CHART_PANEL_MOVE_STORE_ID, "data"),
+        Input(CHART_PANEL_MOVE_STORE_ID, "data"),
         State(core.STATE_PAGE_STORAGE, "data"),
         State(core.PANEL_PAGING_ID, "data"),
         prevent_initial_call=True,
     )
     def drop_chart_on_panel(
-        request: core.ChartPanelMoveRequest | None,
+        request: ChartPanelMoveRequest | None,
         page_json: str,
         paging_json: str,
     ) -> tuple[html.Div, str]:
@@ -601,33 +576,33 @@ def _panels_with_renamed_panel(
 
 def _register_rename(app: Dash) -> None:
     @app.callback(
-        Output(core.RENAME_PANEL_MODAL_ID, "opened", allow_duplicate=True),
-        Output(core.RENAME_PANEL_TARGET_ID, "data"),
-        Output(core.RENAME_PANEL_NAME_INPUT_ID, "value"),
-        Output(core.RENAME_PANEL_ERROR_ID, "children", allow_duplicate=True),
+        Output(RENAME_PANEL_MODAL_ID, "opened", allow_duplicate=True),
+        Output(RENAME_PANEL_TARGET_ID, "data"),
+        Output(RENAME_PANEL_NAME_INPUT_ID, "value"),
+        Output(RENAME_PANEL_ERROR_ID, "children", allow_duplicate=True),
         Input({"type": "rename-panel", "panel": ALL}, "n_clicks"),
         prevent_initial_call=True,
     )
     def open_rename_panel_modal(_n_clicks_list: list[int]) -> tuple[bool, str, str, str]:
-        triggered_id = cast("dict[str, str]", core.require_triggered_id())
+        triggered_id = cast("dict[str, str]", require_triggered_id())
         panel_name = triggered_id["panel"]
         return True, panel_name, panel_name, ""
 
     @app.callback(
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
-        Output(core.RENAME_PANEL_MODAL_ID, "opened", allow_duplicate=True),
-        Output(core.RENAME_PANEL_ERROR_ID, "children", allow_duplicate=True),
-        Input(core.RENAME_PANEL_SAVE_ID, "n_clicks"),
+        Output(RENAME_PANEL_MODAL_ID, "opened", allow_duplicate=True),
+        Output(RENAME_PANEL_ERROR_ID, "children", allow_duplicate=True),
+        Input(RENAME_PANEL_SAVE_ID, "n_clicks"),
         {
-            "old_name": State(core.RENAME_PANEL_TARGET_ID, "data"),
-            "new_name": State(core.RENAME_PANEL_NAME_INPUT_ID, "value"),
+            "old_name": State(RENAME_PANEL_TARGET_ID, "data"),
+            "new_name": State(RENAME_PANEL_NAME_INPUT_ID, "value"),
             "experiment_id": State(constants.STATE_EXPERIMENT_ID, "data"),
             "page_json": State(core.STATE_PAGE_STORAGE, "data"),
             "paging_json": State(core.PANEL_PAGING_ID, "data"),
         },
         prevent_initial_call=True,
-        running=_busy_while_running(core.RENAME_PANEL_SAVE_ID),
+        running=busy_while_running(RENAME_PANEL_SAVE_ID),
     )
     def rename_panel(
         n_clicks: int, rename_ctx: _RenamePanelCtx
@@ -664,8 +639,8 @@ def _register_rename(app: Dash) -> None:
         return container, page.model_dump_json(), False, ""
 
     @app.callback(
-        Output(core.RENAME_PANEL_MODAL_ID, "opened", allow_duplicate=True),
-        Input(core.RENAME_PANEL_CANCEL_ID, "n_clicks"),
+        Output(RENAME_PANEL_MODAL_ID, "opened", allow_duplicate=True),
+        Input(RENAME_PANEL_CANCEL_ID, "n_clicks"),
         prevent_initial_call=True,
     )
     def cancel_rename_panel(n_clicks: int) -> bool:
@@ -674,200 +649,11 @@ def _register_rename(app: Dash) -> None:
         return False
 
 
-def _panels_with_new_tab(
-    panels: list[PanelInstance[Any, Any]], *, name: str, panel_names: set[str]
-) -> list[PanelInstance[Any, Any]]:
-    """
-    `panels`, moving each named in `panel_names` onto tab `name`.
-
-    If none were picked, adds a fresh empty panel on that tab instead, so there's always somewhere
-    to drop a chart right away.
-    """
-    new_panels = [p.model_copy(update={"tab": name}) if p.name in panel_names else p for p in panels]
-    if not panel_names:
-        new_panels.append(PanelInstance(name=core.unique_panel_name(panels, name), tab=name))
-    return new_panels
-
-
-def _panels_with_renamed_tab(
-    panels: list[PanelInstance[Any, Any]], *, old_name: str, new_name: str
-) -> list[PanelInstance[Any, Any]]:
-    return [p.model_copy(update={"tab": new_name}) if p.tab == old_name else p for p in panels]
-
-
-def _new_tab_error(name: str, panels: list[PanelInstance[Any, Any]]) -> str | None:
-    """Validate a new-tab submission, or `None` if it's good to create."""
-    if not name:
-        return "Tab name cannot be empty"
-    if name == "General":
-        return '"General" is reserved for the default tab'
-    if any(p.tab == name for p in panels):
-        return f"A tab named {name!r} already exists"
-    return None
-
-
-def _register_new_tab(app: Dash) -> None:
-    """
-    Create a brand-new tab: name it, optionally pick existing panels to move into it.
-
-    The *only* place a new tab name can be typed -- moving one more panel into an already-existing
-    tab is drag-and-drop (`drop_panel_on_tab`, above), which only ever targets tabs that already exist.
-    Picking no panels doesn't leave the tab empty -- it gets one fresh, empty panel (named after the
-    tab) instead, so there's always somewhere to drag or add a chart into right away.
-    """
-
-    @app.callback(
-        Output(core.NEW_TAB_MODAL_ID, "opened", allow_duplicate=True),
-        Output(core.NEW_TAB_NAME_INPUT_ID, "value"),
-        Output(core.NEW_TAB_PANELS_SELECT_ID, "data"),
-        Output(core.NEW_TAB_PANELS_SELECT_ID, "value"),
-        Output(core.NEW_TAB_ERROR_ID, "children", allow_duplicate=True),
-        Input(core.NEW_TAB_BUTTON_ID, "n_clicks"),
-        State(core.STATE_PAGE_STORAGE, "data"),
-        prevent_initial_call=True,
-    )
-    def open_new_tab_modal(n_clicks: int, page_json: str) -> tuple[bool, str, list[str], list[str], str]:
-        if not n_clicks:
-            raise PreventUpdate
-        page = core.BasicExperimentPage.model_validate_json(page_json)
-        return True, "", [p.name for p in page.panels], [], ""
-
-    @app.callback(
-        Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
-        Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
-        Output(core.NEW_TAB_MODAL_ID, "opened", allow_duplicate=True),
-        Output(core.NEW_TAB_ERROR_ID, "children", allow_duplicate=True),
-        Input(core.NEW_TAB_SAVE_ID, "n_clicks"),
-        {
-            "name": State(core.NEW_TAB_NAME_INPUT_ID, "value"),
-            "panel_names": State(core.NEW_TAB_PANELS_SELECT_ID, "value"),
-            "experiment_id": State(constants.STATE_EXPERIMENT_ID, "data"),
-            "page_json": State(core.STATE_PAGE_STORAGE, "data"),
-            "paging_json": State(core.PANEL_PAGING_ID, "data"),
-        },
-        prevent_initial_call=True,
-        running=_busy_while_running(core.NEW_TAB_SAVE_ID),
-    )
-    def create_new_tab(
-        n_clicks: int, new_tab_ctx: _NewTabCtx
-    ) -> tuple[Any, str | NoUpdate, bool | NoUpdate, str]:
-        if not n_clicks:
-            raise PreventUpdate
-        name = (new_tab_ctx["name"] or "").strip()
-        panel_names = new_tab_ctx["panel_names"] or []
-        curr_page = core.BasicExperimentPage.model_validate_json(new_tab_ctx["page_json"])
-        error = _new_tab_error(name, curr_page.panels)
-        if error:
-            return no_update, no_update, no_update, error
-
-        selected = set(panel_names)
-        page, container = core.mutate_panels_and_rerender(
-            new_tab_ctx["page_json"],
-            new_tab_ctx["paging_json"],
-            lambda panels: _panels_with_new_tab(panels, name=name, panel_names=selected),
-            extra_settings={core.ACTIVE_TAB_KEY: name},
-        )
-        return container, page.model_dump_json(), False, ""
-
-    @app.callback(
-        Output(core.NEW_TAB_MODAL_ID, "opened", allow_duplicate=True),
-        Input(core.NEW_TAB_CANCEL_ID, "n_clicks"),
-        prevent_initial_call=True,
-    )
-    def cancel_new_tab(n_clicks: int) -> bool:
-        if not n_clicks:
-            raise PreventUpdate
-        return False
-
-
-def _rename_tab_error(old_name: str, new_name: str, panels: list[PanelInstance[Any, Any]]) -> str | None:
-    """Validate a tab-rename submission, or `None` if it's good to save."""
-    if not new_name:
-        return "Tab name cannot be empty"
-    if new_name == "General":
-        return '"General" is reserved for the default tab'
-    if new_name != old_name and any(p.tab == new_name for p in panels):
-        return f"A tab named {new_name!r} already exists"
-    return None
-
-
-def _register_rename_tab(app: Dash) -> None:
-    """Rename whichever tab is currently active (read off `PANEL_TABS_ID`'s own value)."""
-
-    @app.callback(
-        Output(core.RENAME_TAB_MODAL_ID, "opened", allow_duplicate=True),
-        Output(core.RENAME_TAB_TARGET_ID, "data"),
-        Output(core.RENAME_TAB_NAME_INPUT_ID, "value"),
-        Output(core.RENAME_TAB_ERROR_ID, "children", allow_duplicate=True),
-        Input(core.RENAME_TAB_BUTTON_ID, "n_clicks"),
-        State(core.PANEL_TABS_ID, "value"),
-        prevent_initial_call=True,
-    )
-    def open_rename_tab_modal(n_clicks: int, active_tab_value: str | None) -> tuple[bool, str, str, str]:
-        active_tab = core.tab_from_component_value(active_tab_value or "")
-        if not n_clicks or not active_tab:
-            raise PreventUpdate
-        return True, active_tab, active_tab, ""
-
-    @app.callback(
-        Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
-        Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
-        Output(core.RENAME_TAB_MODAL_ID, "opened", allow_duplicate=True),
-        Output(core.RENAME_TAB_ERROR_ID, "children", allow_duplicate=True),
-        Input(core.RENAME_TAB_SAVE_ID, "n_clicks"),
-        {
-            "old_name": State(core.RENAME_TAB_TARGET_ID, "data"),
-            "new_name": State(core.RENAME_TAB_NAME_INPUT_ID, "value"),
-            "experiment_id": State(constants.STATE_EXPERIMENT_ID, "data"),
-            "page_json": State(core.STATE_PAGE_STORAGE, "data"),
-            "paging_json": State(core.PANEL_PAGING_ID, "data"),
-        },
-        prevent_initial_call=True,
-        running=_busy_while_running(core.RENAME_TAB_SAVE_ID),
-    )
-    def rename_tab(
-        n_clicks: int, rename_ctx: _RenameTabCtx
-    ) -> tuple[Any, str | NoUpdate, bool | NoUpdate, str]:
-        old_name = rename_ctx["old_name"]
-        if not n_clicks or not old_name:
-            raise PreventUpdate
-        new_name = (rename_ctx["new_name"] or "").strip()
-        curr_page = core.BasicExperimentPage.model_validate_json(rename_ctx["page_json"])
-        error = _rename_tab_error(old_name, new_name, curr_page.panels)
-        if error:
-            return no_update, no_update, no_update, error
-
-        active_tab = curr_page.page_settings.get(core.ACTIVE_TAB_KEY)
-        extra_settings: dict[str, str] = {core.ACTIVE_TAB_KEY: new_name} if active_tab == old_name else {}
-
-        page, container = core.mutate_panels_and_rerender(
-            rename_ctx["page_json"],
-            rename_ctx["paging_json"],
-            lambda panels: _panels_with_renamed_tab(panels, old_name=old_name, new_name=new_name),
-            extra_settings=extra_settings,
-        )
-        return container, page.model_dump_json(), False, ""
-
-    @app.callback(
-        Output(core.RENAME_TAB_MODAL_ID, "opened", allow_duplicate=True),
-        Input(core.RENAME_TAB_CANCEL_ID, "n_clicks"),
-        prevent_initial_call=True,
-    )
-    def cancel_rename_tab(n_clicks: int) -> bool:
-        if not n_clicks:
-            raise PreventUpdate
-        return False
-
-
 def register_panel_controls_callbacks(app: Dash) -> None:
     _register_create_panel(app)
-    _register_add_chart(app)
     _register_delete_chart(app)
     _register_delete_panel(app)
     _register_reorder(app)
     _register_toggle(app)
-    _register_tab_drop(app)
     _register_chart_panel_move(app)
     _register_rename(app)
-    _register_new_tab(app)
-    _register_rename_tab(app)
