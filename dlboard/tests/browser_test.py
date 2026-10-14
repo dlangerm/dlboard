@@ -1044,28 +1044,30 @@ def test_chart_tooltip_shows_every_series_at_every_hovered_x_position(
 
     svg = page.locator(".dl-panel-body svg").first
     expect(svg).to_be_visible()
-    box = svg.bounding_box()
-    assert box is not None
 
     # Auto-generated -- never actually None here, just typed that way.
     assert run_a.name is not None
     assert run_b.name is not None
-    expected_series = {run_a.name, run_b.name}
+    expected_series = sorted([run_a.name, run_b.name])
 
     # Both runs' data spans this entire x range (steps 0-9) -- every position across it must show
     # both series, not just whichever run happened to log that exact step.
     saw_a_source_annotation = False
     for frac in (0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8):
+        # Measured at each hover, not once up front: the chart may still be settling its size when it first
+        # becomes visible, which would put the cursor off the position this iteration means to test.
+        box = svg.bounding_box()
+        assert box is not None
         x = box["x"] + box["width"] * frac
         y = box["y"] + box["height"] * 0.5
         # Two moves, not one -- Recharts only recomputes the hovered index on a real position
         # change, and the cursor may already be sitting at this exact pixel from a previous frac.
         page.mouse.move(x - 1, y)
         page.mouse.move(x, y)
-        page.wait_for_timeout(150)
-        shown = set(page.locator(".dl-chart-tooltip-name").all_text_contents())
-        assert shown == expected_series, (
-            f"at x-fraction {frac}: tooltip showed {shown}, expected {expected_series}"
+        # Polled, not read after a fixed sleep: the tooltip is drawn a render after the pointer moves, which a
+        # slow runner can take longer than any sleep we would pick.
+        _wait_until(
+            lambda: sorted(page.locator(".dl-chart-tooltip-name").all_text_contents()), expected_series
         )
 
         # Run B only logged every third step, so most hovered positions show *its* value filled in
