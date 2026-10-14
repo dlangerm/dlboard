@@ -33,7 +33,7 @@ from dlboard.client.artifacts.figure import Figure
 from dlboard.conftest import ScreenshotMode
 from dlboard.serve import get_system_data_store
 from dlboard.serve._pages._experiment._chart_autogen import ARTIFACT_PANEL_SUFFIX
-from dlboard.serve._pages._experiment._experiment_page_state import PAGE_EXPERIMENT_ID
+from dlboard.serve._pages._experiment._experiment_page_state import PAGE_EXPERIMENT_ID, BasicExperimentPage
 from dlboard.serve._pages._experiment._notes import NOTES_THREAD_ID
 from dlboard.serve._pages._experiment._run_compare import COMPARE_OPEN_ID
 
@@ -87,6 +87,7 @@ class DocScreenshot(StrEnum):
     PERSONAL_VIEWS = "personal-views"
     NOTES = "notes"
     RUN_COMPARE = "run-compare"
+    TABLE_CHART = "table-chart"
 
     @property
     def path(self) -> Path:
@@ -277,7 +278,7 @@ def _open_charted_experiment(page: Page, demo: Demo) -> None:
         expect(page.locator(".mantine-Notification-root")).to_have_count(0)
 
 
-def _stage(shot: DocScreenshot, page: Page, demo: Demo, dlboard_app: Dash) -> Page | Locator:  # noqa: PLR0911, PLR0915 -- one case per screenshot, kept exhaustive
+def _stage(shot: DocScreenshot, page: Page, demo: Demo, dlboard_app: Dash) -> Page | Locator:  # noqa: C901, PLR0911, PLR0915 -- one case per screenshot, kept exhaustive
     """Drive the real UI to `shot`'s state, and return what to photograph."""
     match shot:
         case DocScreenshot.HOME:
@@ -367,6 +368,34 @@ def _stage(shot: DocScreenshot, page: Page, demo: Demo, dlboard_app: Dash) -> Pa
             )
             expect(thread.get_by_text("Grad norms spike")).to_be_visible(timeout=10_000)
             return drawer
+        case DocScreenshot.TABLE_CHART:
+            # A view of its own holding just the table, so no other scene's panels (or the personal view
+            # auto-generating charts branches into) change what this one photographs.
+            store = get_system_data_store(dlboard_app)
+            owner = store.get_or_create_user(models.Principal.unverified("demo"))
+            table = models.ChartInstance[Any, Any](
+                chart_type="table",
+                parameters={
+                    "hparams": ["lr", "batch_size"],
+                    "metrics": ["loss/val", "acc/val"],
+                    "artifacts": [_CONFUSION_KEY],
+                },
+            )
+            view = store.create_view(
+                BasicExperimentPage,
+                models.NewPage[Any, Any](
+                    experiment_id=demo.experiment_id,
+                    owner_id=owner.id,
+                    name="Run table",
+                    panels=[models.PanelInstance[Any, Any](name="Sweep", charts=[table])],
+                ),
+            )
+            page.goto(f"{demo.url}/experiment/{demo.experiment_id}?view={view.id}")
+            panel = page.locator(".dl-panel-body", has=page.locator(".ag-root-wrapper"))
+            expect(panel.locator(".ag-center-cols-container .ag-row")).to_have_count(len(_SWEEP))
+            expect(panel.locator(".ag-cell img")).to_have_count(len(_SWEEP))
+            page.wait_for_function("[...document.images].every(i => i.complete && i.naturalWidth > 0)")
+            return panel
         case DocScreenshot.RUN_COMPARE:
             page.goto(f"{demo.url}/experiment/{demo.experiment_id}")
             expect(page.locator(f"#{PAGE_EXPERIMENT_ID}")).to_be_visible()

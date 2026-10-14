@@ -16,6 +16,29 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 * A line or bar chart is titled with its full metric name, above the chart. The y-axis title is still
   shortened to fit, so a long name was hard to read.
+* A **table chart can show artifacts**. In its new `artifacts` mode it lists one row per logged artifact under a
+  key, or every key under a prefix (`eval/`, including keys logged later), with each tag as a column that
+  sorts and filters as the number or text it is -- images as thumbnails, other files as download links. In
+  `runs` mode its `artifacts` setting adds a column per key with each run's latest artifact. A tag measured in
+  a unit is shown in its base unit (seconds, bytes) in a table, so runs compare. See
+  [docs/plugins/charts.md](docs/plugins/charts.md).
+* A table chart's **`mode`** (`runs` or `pivot`, besides `artifacts`) is now a setting of its own instead of
+  being implied by `pivot_on`; a table saved with `pivot_on` and no `mode` still loads as a pivot, and a pivot
+  without `pivot_on` and `pivot_metric` is a form error in the chart editor.
+* A table chart names and colors its runs as the charts and the Runs table do (a pinned **Run** column, run
+  names as pivot headers), groups its columns, filters in place, and **keeps its sort, filters and page when a
+  live update redraws it** (it used to start over every time).
+
+### Fixed
+
+* A table chart showed each run's *last row* rather than each metric's own latest value, so a metric logged
+  less often than the last step (a per-epoch `val_acc` beside a per-step `loss`) was blank; it now agrees with
+  the Runs table. It also no longer shows `step` as a metric, shows only hyperparameters when only those are
+  chosen, keeps an hparam and a metric of the same name apart, and reads a metric named `a.b` as one column.
+* Numbers in tables: whole numbers are shown as they are (not `12.000`) and small ones to four significant
+  digits (a learning rate of `1e-4` was `0.000`).
+* A live update redrew charts it should not have (another run logging a step renumbered the rows a chart was
+  compared by) and missed ones it should have (a hyperparameter edited, a run renamed).
 
 ## [0.6.0] 2026-10-13
 

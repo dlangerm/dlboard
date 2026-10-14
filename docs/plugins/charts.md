@@ -13,11 +13,26 @@ and `Top-k`, read from the `tag` and `score` tags the logger records. Set `key_p
 `checkpoints/`) instead of `key` and one chart lists every key under it, so a run's hundreds of
 checkpoints (one key apiece) are one list, and Auto-generate makes exactly that.
 
+`table_chart.py` is a data table, in one of three `mode`s. **runs** (the default) is a row per run: its
+hyperparameters beside the latest value of each metric -- each metric's own latest, as in the Runs table, not
+whatever was logged at the run's last step -- and, for each key in `artifacts`, the run's latest artifact
+under it with its tags. **pivot** compares one metric across runs, a row per `pivot_on` value (`step`, say)
+and a column per run. **artifacts** is a row per logged artifact under `artifact_key` (every key under it
+with `artifact_key_is_prefix`, so keys logged later appear), with each tag a column that sorts and filters as
+the number or text it is: the way to find a sample among hundreds. An image is a thumbnail linking to the
+full one; any other file is a download link. Runs are named and colored as in the charts and the Runs
+table, every column filters in place, and a table keeps its sort, filters and page when a live update
+redraws it.
+
 The built-in line charts, and the image series that steps through logged images:
 
 ![Line charts of logged metrics](../images/experiment-charts.png)
 
 ![An image-series chart](../images/image-series.png)
+
+A table of runs, with an artifact column:
+
+![A table chart](../images/table-chart.png)
 
 ## When you'd need this
 
