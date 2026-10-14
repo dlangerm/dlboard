@@ -17,6 +17,7 @@ from dlboard.plugins.charts._axis_label import (
     MaxAxisLabelChars,
     fit_axis_label,
 )
+from dlboard.plugins.charts._chart_title import titled
 from dlboard.plugins.charts._grouping import last_row_per_run
 from dlboard.plugins.charts._table_style import HPARAM_COLUMN_PREFIX
 from dlboard.serve import AssetKind, series_color, serve_asset
@@ -89,7 +90,7 @@ def _sorted_groups(
             return grouped.sort_values(x_col, key=lambda s: s.astype(str))
 
 
-class BarChart(ChartType[BarChartSettings, pd.DataFrame, dmc.BarChart], frozen=True, extra="forbid"):
+class BarChart(ChartType[BarChartSettings, pd.DataFrame, dmc.Stack], frozen=True, extra="forbid"):
     """A bar chart comparing an aggregated metric across groups of a metric or hyperparameter."""
 
     name: typing.ClassVar[str] = "bar"
@@ -101,7 +102,7 @@ class BarChart(ChartType[BarChartSettings, pd.DataFrame, dmc.BarChart], frozen=T
 
     @classmethod
     @typing.override
-    def render(cls, parameters: BarChartSettings, dataframe: pd.DataFrame) -> dmc.BarChart:
+    def render(cls, parameters: BarChartSettings, dataframe: pd.DataFrame) -> dmc.Stack:
         # `render_panel_charts` shares one fetched dataframe across every chart in a panel, calling
         # this once per chart -- mutating the caller's `dataframe` in place (the coercion loop
         # below does) corrupts it for whichever chart renders next.
@@ -174,7 +175,7 @@ class BarChart(ChartType[BarChartSettings, pd.DataFrame, dmc.BarChart], frozen=T
             else fit_axis_label(parameters.x_axis, parameters.max_axis_label_chars)
         )
 
-        return dmc.BarChart(
+        plot = dmc.BarChart(
             h=parameters.height,
             data=data,  # pyrefly: ignore [bad-argument-type]
             dataKey=parameters.x_axis,
@@ -228,11 +229,7 @@ class BarChart(ChartType[BarChartSettings, pd.DataFrame, dmc.BarChart], frozen=T
                 "margin": {"left": 20, "right": 20, "top": 10, "bottom": 10},
             },
         )
-
-    @classmethod
-    @typing.override
-    def title(cls, parameters: BarChartSettings) -> str:
-        return parameters.column
+        return titled(parameters.column, plot)
 
     @classmethod
     @typing.override

@@ -115,16 +115,6 @@ class ChartType(ABC, BaseModel, typing.Generic[_Parameters, _Dataframe, _Chart],
         return cls.render(parameters, dataframe)
 
     @classmethod
-    def title(cls, parameters: _Parameters) -> str | None:  # noqa: ARG003
-        """
-        What to head this chart with, in full, or `None` for a chart that heads itself.
-
-        For a chart whose own axis titles have to be shortened to fit (a long metric name), so the
-        whole name can still be read.
-        """
-        return None
-
-    @classmethod
     @abstractmethod
     def hint_required_columns(cls, parameters: _Parameters) -> set[str] | None:
         """Hint at the columns required for this chart."""
@@ -343,11 +333,6 @@ class ChartTypeRegistry:
         return chart_type.render_in(parameters, dataframe, context)
 
     @classmethod
-    def title(cls, chart: ChartInstance[_Dataframe, _Chart]) -> str | None:
-        chart_type, parameters = cls._typed_chart(chart)
-        return chart_type.title(parameters)
-
-    @classmethod
     def hint_required_columns(cls, chart: ChartInstance[_Dataframe, _Chart]) -> set[str] | None:
         chart_type, parameters = cls._typed_chart(chart)
         return chart_type.hint_required_columns(parameters)
@@ -459,13 +444,6 @@ class ChartInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, 
                 "as a fallback",
                 chart_type=self.chart_type,
             )
-            return None
-
-    def title(self) -> str | None:
-        """The heading to show above this chart, if any. `render()` surfaces a broken chart, so this just has none."""
-        try:
-            return ChartTypeRegistry.title(self)
-        except (ValidationError, UnknownChartTypeError):
             return None
 
     def natural_width(self, context: RenderContext = DEFAULT_RENDER_CONTEXT) -> int:

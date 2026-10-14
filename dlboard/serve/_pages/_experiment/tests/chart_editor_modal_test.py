@@ -84,4 +84,5 @@ def test_render_chart_preview_leaves_out_excluded_runs_like_the_real_panel(
     )
 
     assert error == ""
-    assert [s["name"] for s in _to_props(preview)["series"]] == [str(kept.id)]
+    _title, plot = _to_props(preview)["children"]
+    assert [s["name"] for s in _to_props(plot)["series"]] == [str(kept.id)]
