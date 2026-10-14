@@ -63,7 +63,7 @@ def test_accordion_view_delete_panel_reachable_without_opening_a_panel(
     delete_button = _find_props(
         # pyrefly: ignore [unknown-argument-type]
         cast("Any", container).children,
-        state.delete_panel_button_id("p"),
+        state.DELETE_PANEL_BUTTON.of("p"),
     )
     assert delete_button is not None
     assert delete_button.get("disabled") is not True

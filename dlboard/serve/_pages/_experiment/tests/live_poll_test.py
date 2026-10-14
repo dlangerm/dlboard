@@ -27,7 +27,7 @@ def test_a_tick_fetches_only_the_charts_on_screen(
     page = store.get_or_create_page(state.BasicExperimentPage, experiment_id=experiment_id)
     store.update_page(page.model_copy(update={"panels": [PanelInstance[Any, Any](name="p", charts=charts)]}))
     page = state.load_page(store, state.PageRef(experiment_id, None))
-    on_screen = [state.chart_content_id("p", i) for i in range(6, 9)]
+    on_screen = [state.CHART_CONTENT.of("p", i) for i in range(6, 9)]
     fetched: list[frozenset[str] | None] = []
     fetch_metrics = store.fetch_metrics
 

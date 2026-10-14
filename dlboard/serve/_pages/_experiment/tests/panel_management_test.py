@@ -36,17 +36,17 @@ def test_panel_header_contains_accordion_control_and_hover_controls() -> None:
 
     rendered = state.panel_header(panel)
 
-    assert _find_props(rendered, state.delete_panel_button_id("train")) is not None
-    assert _find_props(rendered, state.panel_drag_handle_id("train")) is not None
-    assert _find_props(rendered, state.rename_panel_button_id("train")) is not None
-    assert _find_props(rendered, state.panel_sync_switch_id("train")) is not None
-    assert _find_props(rendered, state.panel_layout_control_id("train")) is not None
+    assert _find_props(rendered, state.DELETE_PANEL_BUTTON.of("train")) is not None
+    assert _find_props(rendered, state.PANEL_DRAG_HANDLE.of("train")) is not None
+    assert _find_props(rendered, state.RENAME_PANEL_BUTTON.of("train")) is not None
+    assert _find_props(rendered, state.PANEL_SYNC_SWITCH.of("train")) is not None
+    assert _find_props(rendered, state.PANEL_LAYOUT_CONTROL.of("train")) is not None
 
 
 def test_panel_header_controls_delete_is_always_enabled() -> None:
     controls = state.panel_header_controls(PanelInstance[Any, Any](name="train"))
 
-    delete_button = _find_props(controls, state.delete_panel_button_id("train"))
+    delete_button = _find_props(controls, state.DELETE_PANEL_BUTTON.of("train"))
     assert delete_button is not None
     assert delete_button.get("disabled") is not True
 
@@ -54,7 +54,7 @@ def test_panel_header_controls_delete_is_always_enabled() -> None:
 def test_panel_header_controls_drag_handle_carries_the_panel_name() -> None:
     controls = state.panel_header_controls(PanelInstance[Any, Any](name="train"))
 
-    handle = _find_props(controls, state.panel_drag_handle_id("train"))
+    handle = _find_props(controls, state.PANEL_DRAG_HANDLE.of("train"))
     assert handle is not None
     assert handle["draggable"] == "true"
     assert handle["data-panel-name"] == "train"
@@ -64,10 +64,10 @@ def test_panel_header_controls_shows_sync_and_layout_state() -> None:
     synced = state.panel_header_controls(PanelInstance[Any, Any](name="p", sync=True, layout="grid"))
     unsynced = state.panel_header_controls(PanelInstance[Any, Any](name="p", sync=False, layout="packed"))
 
-    synced_switch = _find_props(synced, state.panel_sync_switch_id("p"))
-    synced_layout = _find_props(synced, state.panel_layout_control_id("p"))
-    unsynced_switch = _find_props(unsynced, state.panel_sync_switch_id("p"))
-    unsynced_layout = _find_props(unsynced, state.panel_layout_control_id("p"))
+    synced_switch = _find_props(synced, state.PANEL_SYNC_SWITCH.of("p"))
+    synced_layout = _find_props(synced, state.PANEL_LAYOUT_CONTROL.of("p"))
+    unsynced_switch = _find_props(unsynced, state.PANEL_SYNC_SWITCH.of("p"))
+    unsynced_layout = _find_props(unsynced, state.PANEL_LAYOUT_CONTROL.of("p"))
     assert synced_switch is not None
     assert synced_switch["checked"] is True
     assert synced_layout is not None
@@ -162,7 +162,7 @@ def test_the_grid_column_input_is_only_offered_for_a_grid_panel(
 ) -> None:
     controls = state.panel_header_controls(PanelInstance[Any, Any](name="a", layout=layout, grid_columns=4))
 
-    columns = _find_props(controls, state.panel_grid_columns_id("a"))
+    columns = _find_props(controls, state.PANEL_GRID_COLUMNS.of("a"))
     assert (columns is not None) is shows_columns
     if columns is not None:
         assert columns["value"] == 4
@@ -288,7 +288,7 @@ def test_render_with_no_tabbed_panels_shows_no_tabs_chrome(store: SQLLiteStore, 
 
     rendered = page.render(store, experiment_id)
     assert not isinstance(rendered, dmc.Tabs)
-    assert _find_props(rendered, state.panel_accordion_id("")) is not None
+    assert _find_props(rendered, state.PANEL_ACCORDION.of("")) is not None
 
 
 def test_render_groups_panels_into_tabs_by_the_tab_field(store: SQLLiteStore, experiment_id: int) -> None:
@@ -320,8 +320,8 @@ def test_render_groups_panels_into_tabs_by_the_tab_field(store: SQLLiteStore, ex
 
 # ---- panel_name_taken / unique_panel_name ----
 #
-# Two panels sharing a name break every id keyed by panel name alone (`panel_content_id`,
-# `panel_accordion_id`, ...) -- most visibly as a pattern-matching `MATCH` collision on whatever
+# Two panels sharing a name break every id keyed by panel name alone (`PANEL_CONTENT`,
+# `PANEL_ACCORDION`, ...) -- most visibly as a pattern-matching `MATCH` collision on whatever
 # chart both panels happen to render identically. `create_panel`/`rename_panel` both guard against
 # it via `panel_name_taken`; `rename_panel` also ignores the panel being renamed against itself.
 # `unique_panel_name` is its counterpart for the "auto-create a panel" paths (a new tab created

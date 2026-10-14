@@ -15,11 +15,11 @@ import hashlib
 import itertools
 import typing
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypedDict, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Final, TypedDict, cast
 
 import dash_mantine_components as dmc
 import pandas as pd
-from dash import ALL, Dash, Input, Output, State, ctx, html, no_update
+from dash import Dash, Input, Output, State, ctx, html, no_update
 from dash.dcc import Store
 from dash.development.base_component import Component
 from dash.exceptions import PreventUpdate
@@ -32,7 +32,7 @@ from dlboard.models import RUN_NAME_COLUMN
 from dlboard.plugins.charts._table_style import ARTIFACT_COLUMN_PREFIX, HPARAM_COLUMN_PREFIX, artifact_column
 from dlboard.serve import ClientsideScript, Icon, get_current_user, get_data_store, icon
 from dlboard.serve import _constants as constants
-from dlboard.serve._component_ids import ButtonId, DivId, IntervalId, StoreId, ValueId
+from dlboard.serve._component_ids import ButtonId, DivId, IntervalId, PatternId, StoreId, ValueId
 from dlboard.serve._pages._dash_helpers import tooltipped_action_icon
 from dlboard.serve._pages._dataframe_helpers import run_display_name
 from dlboard.serve._pages._experiment import _dataframe_helpers as dfh
@@ -125,7 +125,6 @@ class LiveUpdateSettings(BaseSettings):
 
 
 # --- accordion / panel state ---
-# One `Accordion` per tab group, id'd via `panel_accordion_id` -- see `panel_accordion_id`/`BasicExperimentPage.render`.
 OPEN_PANEL_KEY: typing.Final = "open_panel"  # a page_settings dict key, not a component id
 ACTIVE_TAB_KEY: typing.Final = "active_tab"  # a page_settings dict key, not a component id
 PANEL_TABS_ID: ValueId[ExperimentPage] = ValueId("experiment-panel-tabs")
@@ -176,9 +175,6 @@ PANEL_FILTER_ID: ValueId[ExperimentPage] = ValueId("panel-filter")
 PANEL_PAGER_ID: ValueId[ExperimentPage] = ValueId("panel-pager")
 PANEL_PAGE_SIZE_ID: ValueId[ExperimentPage] = ValueId("panel-page-size")
 CHART_PAGE_SIZE_ID: ValueId[ExperimentPage] = ValueId("chart-page-size")
-CHART_FILTER_TYPE: typing.Final = "chart-filter"
-CHART_PAGER_TYPE: typing.Final = "chart-pager"
-CHART_PAGER_SLOT_TYPE: typing.Final = "chart-pager-slot"
 
 # --- new-panel popover, anchored to the toolbar's "New panel" button (callback in `_panel_controls.py`) ---
 NEW_PANEL_OPEN_ID: ButtonId[ExperimentPage] = ButtonId("new-panel-open")
@@ -202,108 +198,61 @@ class ChartID(ChartTargetData):
     type: str
 
 
-def open_chart_button_id(panel_name: str) -> dict[str, str]:
-    return {"type": "open-add-chart", "panel": panel_name}
+class PanelPattern(PatternId[ExperimentPage]):
+    """A family of components with one per panel, by its name."""
+
+    KEYS: ClassVar[tuple[str, ...]] = ("panel",)
+
+    def of(self, panel_name: str) -> dict[str, str]:
+        return {"type": self.type, "panel": panel_name}
 
 
-def edit_chart_button_id(panel_name: str, index: int) -> ChartID:
-    return {"type": "edit-chart", "panel": panel_name, "index": index}
+class ChartPattern(PatternId[ExperimentPage]):
+    """A family of components with one per chart, by its panel's name and its index in that panel."""
+
+    KEYS: ClassVar[tuple[str, ...]] = ("panel", "index")
+
+    def of(self, panel_name: str, index: int) -> ChartID:
+        return {"type": self.type, "panel": panel_name, "index": index}
 
 
-def copy_chart_link_button_id(panel_name: str, index: int) -> ChartID:
-    return {"type": "copy-chart-link", "panel": panel_name, "index": index}
+class TabPattern(PatternId[ExperimentPage]):
+    """A family of components with one per tab, by its name (`""` for the ungrouped tab)."""
+
+    KEYS: ClassVar[tuple[str, ...]] = ("tab",)
+
+    def of(self, tab: str) -> dict[str, str]:
+        return {"type": self.type, "tab": tab}
 
 
-def delete_chart_button_id(panel_name: str, index: int) -> ChartID:
-    return {"type": "delete-chart", "panel": panel_name, "index": index}
+# --- the panel area's own per-tab, per-panel and per-chart components ---
+PANEL_ACCORDION: Final = TabPattern("panel-accordion")
+"""One `Accordion` per tab group -- see `BasicExperimentPage.render`."""
+PANEL_HEADER: Final = PanelPattern("panel-header")
+PANEL_CONTENT: Final = PanelPattern("panel-content")
+PANEL_DRAG_HANDLE: Final = PanelPattern("panel-drag-handle")
+PANEL_SYNC_SWITCH: Final = PanelPattern("panel-sync")
+PANEL_LAYOUT_CONTROL: Final = PanelPattern("panel-layout")
+PANEL_GRID_COLUMNS: Final = PanelPattern("panel-grid-columns")
+PANEL_GRID: Final = PanelPattern("panel-grid")
+OPEN_CHART_BUTTON: Final = PanelPattern("open-add-chart")
+RENAME_PANEL_BUTTON: Final = PanelPattern("rename-panel")
+DELETE_PANEL_BUTTON: Final = PanelPattern("delete-panel")
+PANEL_SUGGEST_BUTTON: Final = PanelPattern("panel-suggest-charts")
+CHART_FILTER: Final = PanelPattern("chart-filter")
+CHART_PAGER: Final = PanelPattern("chart-pager")
+CHART_PAGER_SLOT: Final = PanelPattern("chart-pager-slot")
 
-
-def delete_panel_button_id(panel_name: str) -> dict[str, str]:
-    return {"type": "delete-panel", "panel": panel_name}
-
-
-def rename_panel_button_id(panel_name: str) -> dict[str, str]:
-    return {"type": "rename-panel", "panel": panel_name}
-
-
-PANEL_LAYOUT_TYPE: typing.Final = "panel-layout"
-PANEL_GRID_COLUMNS_TYPE: typing.Final = "panel-grid-columns"
-PANEL_GRID_TYPE: typing.Final = "panel-grid"
-"""Pattern-matching id `type`s of a panel's Packed/Grid control, its grid column count, and the grid itself."""
-
-
-def panel_sync_switch_id(panel_name: str) -> dict[str, str]:
-    return {"type": "panel-sync", "panel": panel_name}
-
-
-def panel_layout_control_id(panel_name: str) -> dict[str, str]:
-    return {"type": PANEL_LAYOUT_TYPE, "panel": panel_name}
-
-
-def panel_grid_columns_id(panel_name: str) -> dict[str, str]:
-    return {"type": PANEL_GRID_COLUMNS_TYPE, "panel": panel_name}
-
-
-def panel_grid_id(panel_name: str) -> dict[str, str]:
-    return {"type": PANEL_GRID_TYPE, "panel": panel_name}
-
-
-def panel_suggest_button_id(panel_name: str) -> dict[str, str]:
-    return {"type": "panel-suggest-charts", "panel": panel_name}
-
-
-def panel_drag_handle_id(panel_name: str) -> dict[str, str]:
-    return {"type": "panel-drag-handle", "panel": panel_name}
-
-
-def chart_drag_handle_id(panel_name: str, index: int) -> ChartID:
-    return {"type": "chart-drag-handle", "panel": panel_name, "index": index}
-
-
-def chart_controls_group_id(panel_name: str, index: int) -> ChartID:
-    return {"type": "chart-controls", "panel": panel_name, "index": index}
-
-
-def chart_content_id(panel_name: str, index: int) -> ChartID:
-    return {"type": "chart-content", "panel": panel_name, "index": index}
-
-
-CHART_BODY_TYPE: typing.Final = "chart-body"
-CHART_FINGERPRINT_TYPE: typing.Final = "chart-fingerprint"
-"""Pattern-matching id `type`s of a chart item's body (the chart itself, what a live update replaces) and of the
-hidden node inside it that carries the `chart_data_fingerprint` of the data that body was drawn from."""
-
-
-def chart_body_id(panel_name: str, index: int) -> ChartID:
-    return {"type": CHART_BODY_TYPE, "panel": panel_name, "index": index}
-
-
-def chart_fingerprint_id(panel_name: str, index: int) -> ChartID:
-    return {"type": CHART_FINGERPRINT_TYPE, "panel": panel_name, "index": index}
-
-
-def panel_content_id(panel_name: str) -> dict[str, str]:
-    return {"type": "panel-content", "panel": panel_name}
-
-
-def chart_filter_id(panel_name: str) -> dict[str, str]:
-    return {"type": CHART_FILTER_TYPE, "panel": panel_name}
-
-
-def chart_pager_id(panel_name: str) -> dict[str, str]:
-    return {"type": CHART_PAGER_TYPE, "panel": panel_name}
-
-
-def chart_pager_slot_id(panel_name: str) -> dict[str, str]:
-    return {"type": CHART_PAGER_SLOT_TYPE, "panel": panel_name}
-
-
-def panel_header_id(panel_name: str) -> dict[str, str]:
-    return {"type": "panel-header", "panel": panel_name}
-
-
-def panel_accordion_id(tab: str) -> dict[str, str]:
-    return {"type": "panel-accordion", "tab": tab}
+CHART_CONTENT: Final = ChartPattern("chart-content")
+CHART_CONTROLS_GROUP: Final = ChartPattern("chart-controls")
+CHART_DRAG_HANDLE: Final = ChartPattern("chart-drag-handle")
+EDIT_CHART_BUTTON: Final = ChartPattern("edit-chart")
+COPY_CHART_LINK_BUTTON: Final = ChartPattern("copy-chart-link")
+DELETE_CHART_BUTTON: Final = ChartPattern("delete-chart")
+CHART_BODY: Final = ChartPattern("chart-body")
+"""A chart item's body: the chart itself, what a live update replaces."""
+CHART_FINGERPRINT: Final = ChartPattern("chart-fingerprint")
+"""The hidden node inside a `CHART_BODY` that carries the `chart_data_fingerprint` of the data it was drawn from."""
 
 
 # ============================================================
@@ -512,7 +461,7 @@ def chart_body(
     )
     fingerprint = html.Div(
         chart_data_fingerprint(chart, dataframe),
-        id=chart_fingerprint_id(panel.name, index),  # pyrefly: ignore [bad-argument-type]
+        id=CHART_FINGERPRINT.of(panel.name, index),  # pyrefly: ignore [bad-argument-type]
         hidden=True,
     )
     return [rendered, fingerprint]
@@ -527,8 +476,8 @@ def render_chart_item(
     """
     Render one chart in a panel (edit/delete controls above it, revealed on hover) as its own node.
 
-    Individually addressable via `chart_content_id(panel.name, index)`, and its chart (the body, below the
-    controls) via `chart_body_id`: a live-update poll (`poll_for_updates` in `__init__.py`) replaces
+    Individually addressable via `CHART_CONTENT.of(panel.name, index)`, and its chart (the body, below the
+    controls) via `CHART_BODY`: a live-update poll (`poll_for_updates` in `__init__.py`) replaces
     exactly the body of a chart whose own data changed, instead of rebuilding `render_panel_charts`' whole
     shared-dataframe blob for the panel: two charts sharing a panel (a common "Auto-generate charts"
     grouping) commonly have very different update cadences -- an epoch-level validation chart next to a
@@ -541,32 +490,32 @@ def render_chart_item(
         [
             _drag_handle(
                 class_name="dl-chart-drag-handle",
-                component_id=chart_drag_handle_id(panel.name, index),  # pyrefly: ignore [bad-argument-type]
+                component_id=CHART_DRAG_HANDLE.of(panel.name, index),  # pyrefly: ignore [bad-argument-type]
                 data_attrs={"panel-name": panel.name, "chart-index": str(index)},
             ),
             tooltipped_action_icon(
                 Icon.EDIT,
-                component_id=edit_chart_button_id(panel.name, index),
+                component_id=EDIT_CHART_BUTTON.of(panel.name, index),
                 label="Edit chart",
                 size="xs",
             ),
             # Copied client-side by `chart_deep_link.js`, from the page's own URL -- no round trip.
             tooltipped_action_icon(
                 Icon.LINK,
-                component_id=copy_chart_link_button_id(panel.name, index),
+                component_id=COPY_CHART_LINK_BUTTON.of(panel.name, index),
                 label="Copy a link to this chart",
                 size="xs",
                 **cast("dict[str, Any]", {"data-dl-copy-chart-link": chart.id}),
             ),
             tooltipped_action_icon(
                 Icon.DELETE,
-                component_id=delete_chart_button_id(panel.name, index),
+                component_id=DELETE_CHART_BUTTON.of(panel.name, index),
                 label="Delete chart",
                 color="red",
                 size="xs",
             ),
         ],
-        id=chart_controls_group_id(panel.name, index),  # pyrefly: ignore [bad-argument-type]
+        id=CHART_CONTROLS_GROUP.of(panel.name, index),  # pyrefly: ignore [bad-argument-type]
         gap="xs",
         className="dl-chart-controls",
         # Laid over the chart's top-right corner rather than given a row of their own: a chart's
@@ -588,10 +537,10 @@ def render_chart_item(
             hover_controls,
             html.Div(
                 chart_body(panel, index, dataframe, page_size),
-                id=chart_body_id(panel.name, index),  # pyrefly: ignore [bad-argument-type]
+                id=CHART_BODY.of(panel.name, index),  # pyrefly: ignore [bad-argument-type]
             ),
         ],
-        id=chart_content_id(panel.name, index),  # pyrefly: ignore [bad-argument-type]
+        id=CHART_CONTENT.of(panel.name, index),  # pyrefly: ignore [bad-argument-type]
         gap="xs",
         w="100%" if panel.layout == "grid" else chart.natural_width(context),
         maw="100%",
@@ -628,7 +577,7 @@ def render_panel_content_from_df(
     sync_marker = cast("dict[str, Any]", {"data-dl-panel-sync": "1"} if panel.sync else {})
     return (
         dmc.SimpleGrid(
-            items, id=panel_grid_id(panel.name), cols=panel.grid_columns, spacing="lg", **sync_marker
+            items, id=PANEL_GRID.of(panel.name), cols=panel.grid_columns, spacing="lg", **sync_marker
         )
         if panel.layout == "grid"
         else dmc.Flex(items, justify="flex-start", gap="lg", wrap="wrap", **sync_marker)
@@ -774,13 +723,13 @@ def panel_header_controls(panel: models.PanelInstance[Any, Any]) -> Component:
         [
             _drag_handle(
                 class_name="dl-panel-drag-handle",
-                component_id=panel_drag_handle_id(panel_name),
+                component_id=PANEL_DRAG_HANDLE.of(panel_name),
                 data_attrs={"panel-name": panel_name},
             ),
             html.Span(
                 dmc.ActionIcon(
                     icon(Icon.ADD),
-                    id=open_chart_button_id(panel_name),
+                    id=OPEN_CHART_BUTTON.of(panel_name),
                     n_clicks=0,
                     variant="subtle",
                     size="sm",
@@ -806,17 +755,17 @@ def panel_header_controls(panel: models.PanelInstance[Any, Any]) -> Component:
                         [
                             dmc.MenuItem(
                                 "Suggest charts",
-                                id=panel_suggest_button_id(panel_name),
+                                id=PANEL_SUGGEST_BUTTON.of(panel_name),
                                 leftSection=icon(Icon.SUGGEST),
                             ),
                             dmc.MenuItem(
                                 "Rename panel…",
-                                id=rename_panel_button_id(panel_name),
+                                id=RENAME_PANEL_BUTTON.of(panel_name),
                                 leftSection=icon(Icon.EDIT),
                             ),
                             dmc.MenuDivider(),
                             dmc.Switch(
-                                id=panel_sync_switch_id(panel_name),
+                                id=PANEL_SYNC_SWITCH.of(panel_name),
                                 label="Sync crosshair and step across charts",
                                 checked=panel.sync,
                                 size="xs",
@@ -824,7 +773,7 @@ def panel_header_controls(panel: models.PanelInstance[Any, Any]) -> Component:
                                 py="xs",
                             ),
                             dmc.SegmentedControl(
-                                id=panel_layout_control_id(panel_name),
+                                id=PANEL_LAYOUT_CONTROL.of(panel_name),
                                 data=[
                                     {"value": "packed", "label": "Packed"},
                                     {"value": "grid", "label": "Grid"},
@@ -836,7 +785,7 @@ def panel_header_controls(panel: models.PanelInstance[Any, Any]) -> Component:
                             *(
                                 [
                                     dmc.NumberInput(
-                                        id=panel_grid_columns_id(panel_name),
+                                        id=PANEL_GRID_COLUMNS.of(panel_name),
                                         value=panel.grid_columns,
                                         min=models.MIN_GRID_COLUMNS,
                                         max=models.MAX_GRID_COLUMNS,
@@ -854,7 +803,7 @@ def panel_header_controls(panel: models.PanelInstance[Any, Any]) -> Component:
                             dmc.MenuDivider(),
                             dmc.MenuItem(
                                 "Delete panel…",
-                                id=delete_panel_button_id(panel_name),
+                                id=DELETE_PANEL_BUTTON.of(panel_name),
                                 leftSection=icon(Icon.DELETE),
                                 color="red",
                             ),
@@ -881,7 +830,7 @@ def _chart_filter_offered(panel: models.PanelInstance[Any, Any], chart_query: st
 def _chart_filter(panel: models.PanelInstance[Any, Any], chart_query: str) -> dmc.TextInput:
     """Fuzzy filter on the metric and artifact names a panel's charts show (see `chart_search_keys`)."""
     return dmc.TextInput(
-        id=chart_filter_id(panel.name),
+        id=CHART_FILTER.of(panel.name),
         value=chart_query,
         placeholder="Filter charts",
         leftSection=icon(Icon.SEARCH),
@@ -929,7 +878,7 @@ def panel_header(panel: models.PanelInstance[Any, Any], chart_query: str = "") -
             *([_chart_filter(panel, chart_query)] if _chart_filter_offered(panel, chart_query) else []),
             panel_header_controls(panel),
         ],
-        id=panel_header_id(panel.name),
+        id=PANEL_HEADER.of(panel.name),
         className="dl-panel-item-header",
         gap=0,
         wrap="nowrap",
@@ -1178,7 +1127,7 @@ def _chart_pager(panel: models.PanelInstance[Any, Any], shown: Slice[int]) -> Co
         return html.Div()
     return dmc.Group(
         dmc.Pagination(
-            id=chart_pager_id(panel.name), total=shown.total, value=shown.number, withEdges=True, size="xs"
+            id=CHART_PAGER.of(panel.name), total=shown.total, value=shown.number, withEdges=True, size="xs"
         ),
         justify="center",
         mt="sm",
@@ -1189,10 +1138,10 @@ def chart_pager_slot(panel: models.PanelInstance[Any, Any], paging: Paging) -> h
     """
     The pager under a panel's charts, in a slot of its own so a filter change can redraw it.
 
-    A sibling of `panel_content_id`'s div, not inside it: `poll_for_updates` patches into that one.
+    A sibling of `PANEL_CONTENT`'s div, not inside it: `poll_for_updates` patches into that one.
     """
     return html.Div(
-        _chart_pager(panel, visible_chart_indexes(panel, paging)), id=chart_pager_slot_id(panel.name)
+        _chart_pager(panel, visible_chart_indexes(panel, paging)), id=CHART_PAGER_SLOT.of(panel.name)
     )
 
 
@@ -1206,7 +1155,7 @@ def _panel_accordion(  # noqa: PLR0913
     paging: Paging,
 ) -> dmc.Accordion:
     return dmc.Accordion(
-        id=panel_accordion_id(tab),
+        id=PANEL_ACCORDION.of(tab),
         multiple=True,
         value=[p.name for p in panels if p.name in open_set],
         variant="separated",
@@ -1226,13 +1175,13 @@ def _panel_accordion(  # noqa: PLR0913
                             # This div's own children must stay exactly `render_panel_content(...)`'s
                             # output (or the placeholder) -- `poll_for_updates` (`_experiment/__init__.py`)
                             # patches live-update data straight into each individual chart's own
-                            # `chart_content_id(...)` node inside here, bypassing this whole
+                            # `CHART_CONTENT.of(...)` node inside here, bypassing this whole
                             # `_panel_accordion` tree. Any chrome added here later (e.g. a per-panel
                             # "last updated" badge) that isn't also part of `render_panel_content`'s
                             # output would vanish the next time a live-update poll patches an open panel.
                             # That's why the chart filter and pager above are siblings of it, not in it.
                             cast("Any", html.Div)(
-                                id=panel_content_id(p.name),
+                                id=PANEL_CONTENT.of(p.name),
                                 className="dl-panel-body",
                                 **{"data-panel-name": p.name},
                                 children=(
@@ -1834,7 +1783,7 @@ def _register_paging(app: Dash) -> None:
             "paging_json": State(PANEL_PAGING_ID, "data"),
             "page_json": State(STATE_PAGE_STORAGE, "data"),
             "experiment_id": State(constants.STATE_EXPERIMENT_ID, "data"),
-            "rendered_accordions": State({"type": "panel-accordion", "tab": ALL}, "id"),
+            "rendered_accordions": State(PANEL_ACCORDION.all(), "id"),
         },
         prevent_initial_call=True,
         running=[(Output(PANEL_AREA_ID, "style"), {"opacity": 0.5}, {"opacity": 1})],
@@ -1893,16 +1842,16 @@ def _register_paging(app: Dash) -> None:
         )
 
     @app.callback(
-        Output({"type": CHART_PAGER_SLOT_TYPE, "panel": ALL}, "children"),
-        Output({"type": "panel-content", "panel": ALL}, "children", allow_duplicate=True),
+        Output(CHART_PAGER_SLOT.all(), "children"),
+        Output(PANEL_CONTENT.all(), "children", allow_duplicate=True),
         Output(PANEL_PAGING_ID, "data", allow_duplicate=True),
-        Input({"type": CHART_FILTER_TYPE, "panel": ALL}, "value"),
-        Input({"type": CHART_PAGER_TYPE, "panel": ALL}, "value"),
+        Input(CHART_FILTER.all(), "value"),
+        Input(CHART_PAGER.all(), "value"),
         {
-            "filter_ids": State({"type": CHART_FILTER_TYPE, "panel": ALL}, "id"),
-            "pager_ids": State({"type": CHART_PAGER_TYPE, "panel": ALL}, "id"),
-            "slot_ids": State({"type": CHART_PAGER_SLOT_TYPE, "panel": ALL}, "id"),
-            "content_ids": State({"type": "panel-content", "panel": ALL}, "id"),
+            "filter_ids": State(CHART_FILTER.all(), "id"),
+            "pager_ids": State(CHART_PAGER.all(), "id"),
+            "slot_ids": State(CHART_PAGER_SLOT.all(), "id"),
+            "content_ids": State(PANEL_CONTENT.all(), "id"),
             "loaded": State(LOADED_PANELS_STORE_ID, "data"),
             "paging_json": State(PANEL_PAGING_ID, "data"),
             "page_json": State(STATE_PAGE_STORAGE, "data"),
@@ -1981,10 +1930,10 @@ def register_state_callbacks(app: Dash) -> None:
 
     @app.callback(
         Output(STATE_PAGE_STORAGE, "data", allow_duplicate=True),
-        Input({"type": "panel-accordion", "tab": ALL}, "value"),
+        Input(PANEL_ACCORDION.all(), "value"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
         State(STATE_PAGE_STORAGE, "data"),
-        State({"type": "panel-content", "panel": ALL}, "id"),
+        State(PANEL_CONTENT.all(), "id"),
         prevent_initial_call=True,
     )
     def persist_open_panel(
@@ -2027,10 +1976,10 @@ def register_state_callbacks(app: Dash) -> None:
         return page.model_dump_json()
 
     @app.callback(
-        Output({"type": "panel-content", "panel": ALL}, "children"),
+        Output(PANEL_CONTENT.all(), "children"),
         Output(LOADED_PANELS_STORE_ID, "data"),
-        Input({"type": "panel-accordion", "tab": ALL}, "value"),
-        State({"type": "panel-content", "panel": ALL}, "id"),
+        Input(PANEL_ACCORDION.all(), "value"),
+        State(PANEL_CONTENT.all(), "id"),
         State(LOADED_PANELS_STORE_ID, "data"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
         State(STATE_PAGE_STORAGE, "data"),

@@ -35,16 +35,16 @@ def test_render_panel_charts_controls_are_always_enabled_and_hover_revealed() ->
     [stack] = state.render_panel_charts(panel, df)
     assert _to_props(stack)["className"] == "dl-chart-item"
 
-    controls = _find_props(stack, state.chart_controls_group_id("p", 0))
+    controls = _find_props(stack, state.CHART_CONTROLS_GROUP.of("p", 0))
     assert controls is not None
     assert controls["className"] == "dl-chart-controls"
 
-    drag_handle = _find_props(controls["children"], state.chart_drag_handle_id("p", 0))
+    drag_handle = _find_props(controls["children"], state.CHART_DRAG_HANDLE.of("p", 0))
     assert drag_handle is not None
     assert drag_handle["draggable"] == "true"
 
-    edit_icon = _find_props(controls["children"], state.edit_chart_button_id("p", 0))
-    delete_icon = _find_props(controls["children"], state.delete_chart_button_id("p", 0))
+    edit_icon = _find_props(controls["children"], state.EDIT_CHART_BUTTON.of("p", 0))
+    delete_icon = _find_props(controls["children"], state.DELETE_CHART_BUTTON.of("p", 0))
     assert edit_icon is not None
     assert edit_icon.get("disabled") is not True
     assert delete_icon is not None
@@ -57,7 +57,7 @@ def test_panel_header_controls_add_button_is_always_enabled_and_hover_revealed()
     controls = state.panel_header_controls(panel)
     assert _to_props(controls)["className"] == "dl-panel-controls"
 
-    button = _find_props(controls, state.open_chart_button_id("p"))
+    button = _find_props(controls, state.OPEN_CHART_BUTTON.of("p"))
     assert button is not None
     assert button.get("disabled") is not True
 

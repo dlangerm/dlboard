@@ -15,6 +15,11 @@ declared for.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from typing import Any, ClassVar
+
+from dash import ALL, MATCH
+
 
 class AppShell:
     """Tag for ids owned by `serve/app.py` itself, not any single page."""
@@ -42,3 +47,26 @@ class IntervalId[P](str):
 
 class ValueId[P](str):
     """A `TextInput`/`Select`/`NumberInput`/`Switch`-style id -- `"value"` or `"checked"`."""
+
+
+@dataclass(frozen=True)
+class PatternId[P]:
+    """
+    A family of pattern-matching ids: every component of one `type`, told apart by the subclass's `KEYS`.
+
+    A subclass names its `KEYS` and gives `of` a typed signature filling them in, to render one component;
+    `all()`/`match()` are the same id with every key wildcarded, for a callback over the family. Both come
+    from one place, so a callback can't listen for an id the page never renders -- which a hand-written
+    `{"type": "...", "panel": ALL}` beside the factory that renders it could, silently, after a typo.
+    """
+
+    type: str
+    KEYS: ClassVar[tuple[str, ...]]
+
+    def all(self) -> dict[str, Any]:
+        """Every component of this family, for an `ALL` callback."""
+        return {"type": self.type, **dict.fromkeys(self.KEYS, ALL)}
+
+    def match(self) -> dict[str, Any]:
+        """Whichever component of this family triggered the callback, for a `MATCH` callback."""
+        return {"type": self.type, **dict.fromkeys(self.KEYS, MATCH)}

@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 import dash_mantine_components as dmc
-from dash import ALL, MATCH, Dash, Input, NoUpdate, Output, State, ctx, html, no_update
+from dash import Dash, Input, NoUpdate, Output, State, ctx, html, no_update
 from dash.dcc import Store
 from dash.exceptions import PreventUpdate
 from pydantic import ValidationError
@@ -205,9 +205,9 @@ def _validated_layout_change(page_json: str) -> tuple[str, dict[str, Any]]:
     panel_name = triggered_id["panel"]
     value = cast("Any", ctx.triggered[0]["value"])  # pyrefly: ignore [unsupported-operation]
     match triggered_id["type"]:
-        case core.PANEL_LAYOUT_TYPE:
+        case core.PANEL_LAYOUT_CONTROL.type:
             edit = {"layout": value}
-        case core.PANEL_GRID_COLUMNS_TYPE:
+        case core.PANEL_GRID_COLUMNS.type:
             edit = {"grid_columns": value}
         case _:
             raise PreventUpdate
@@ -271,7 +271,7 @@ def _register_delete_chart(app: Dash) -> None:
     @app.callback(
         Output(DELETE_CHART_MODAL_ID, "opened", allow_duplicate=True),
         Output(DELETE_CHART_TARGET_ID, "data"),
-        Input({"type": "delete-chart", "panel": ALL, "index": ALL}, "n_clicks"),
+        Input(core.DELETE_CHART_BUTTON.all(), "n_clicks"),
         prevent_initial_call=True,
     )
     def open_delete_chart_modal(_n_clicks_list: list[int]) -> tuple[bool, core.ChartTargetData]:
@@ -331,7 +331,7 @@ def _register_delete_panel(app: Dash) -> None:
     @app.callback(
         Output(DELETE_PANEL_MODAL_ID, "opened", allow_duplicate=True),
         Output(DELETE_PANEL_TARGET_ID, "data"),
-        Input({"type": "delete-panel", "panel": ALL}, "n_clicks"),
+        Input(core.DELETE_PANEL_BUTTON.all(), "n_clicks"),
         prevent_initial_call=True,
     )
     def open_delete_panel_modal(_n_clicks_list: list[int]) -> tuple[bool, str]:
@@ -441,7 +441,7 @@ def _register_toggle(app: Dash) -> None:
     @app.callback(
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
-        Input({"type": "panel-sync", "panel": ALL}, "checked"),
+        Input(core.PANEL_SYNC_SWITCH.all(), "checked"),
         State(core.STATE_PAGE_STORAGE, "data"),
         State(core.PANEL_PAGING_ID, "data"),
         prevent_initial_call=True,
@@ -484,7 +484,7 @@ def _register_toggle(app: Dash) -> None:
     @app.callback(
         Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
-        Input({"type": core.PANEL_LAYOUT_TYPE, "panel": ALL}, "value"),
+        Input(core.PANEL_LAYOUT_CONTROL.all(), "value"),
         State(core.STATE_PAGE_STORAGE, "data"),
         State(core.PANEL_PAGING_ID, "data"),
         prevent_initial_call=True,
@@ -502,21 +502,21 @@ def _register_toggle(app: Dash) -> None:
     # must) blanked the page for as long as that took, on every click of the counter.
     app.clientside_callback(
         _PANEL_GRID_COLUMNS_JS.source,
-        Output({"type": core.PANEL_GRID_TYPE, "panel": MATCH}, "cols"),
-        Input({"type": core.PANEL_GRID_COLUMNS_TYPE, "panel": MATCH}, "value"),
+        Output(core.PANEL_GRID.match(), "cols"),
+        Input(core.PANEL_GRID_COLUMNS.match(), "value"),
         prevent_initial_call=True,
     )
 
     app.clientside_callback(
         _PANEL_GRID_FOLLOWERS_JS.source,
-        Input({"type": core.PANEL_GRID_COLUMNS_TYPE, "panel": ALL}, "value"),
-        State({"type": core.PANEL_GRID_COLUMNS_TYPE, "panel": ALL}, "id"),
+        Input(core.PANEL_GRID_COLUMNS.all(), "value"),
+        State(core.PANEL_GRID_COLUMNS.all(), "id"),
         prevent_initial_call=True,
     )
 
     @app.callback(
         Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
-        Input({"type": core.PANEL_GRID_COLUMNS_TYPE, "panel": ALL}, "value"),
+        Input(core.PANEL_GRID_COLUMNS.all(), "value"),
         State(core.STATE_PAGE_STORAGE, "data"),
         prevent_initial_call=True,
     )
@@ -580,7 +580,7 @@ def _register_rename(app: Dash) -> None:
         Output(RENAME_PANEL_TARGET_ID, "data"),
         Output(RENAME_PANEL_NAME_INPUT_ID, "value"),
         Output(RENAME_PANEL_ERROR_ID, "children", allow_duplicate=True),
-        Input({"type": "rename-panel", "panel": ALL}, "n_clicks"),
+        Input(core.RENAME_PANEL_BUTTON.all(), "n_clicks"),
         prevent_initial_call=True,
     )
     def open_rename_panel_modal(_n_clicks_list: list[int]) -> tuple[bool, str, str, str]:

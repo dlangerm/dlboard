@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pendulum
-from dash import ALL, Dash, Input, Output, State, no_update
+from dash import Dash, Input, Output, State, no_update
 from structlog.stdlib import get_logger
 
 from dlboard.plugins.charts._table_style import TABLE_STYLE_JS
@@ -117,7 +117,7 @@ def render_panel(
     a later callback" from dash-renderer's perspective, which force-fires any pattern-matching
     `Input` watching it once on mount regardless of `prevent_initial_call` (see
     `_experiment_page_state.py`'s own docstring on this). That forced the accordion's
-    `Input({"type": "panel-accordion", ...}, "value")`-watching `persist_open_panel` callback to
+    `Input(core.PANEL_ACCORDION.all(), "value")`-watching `persist_open_panel` callback to
     run before any panel ever existed, persisting an explicit `open_panel: []` -- which silently
     defeated `BasicExperimentPage.render()`'s own "open the first panel by default" fallback for
     the rest of that experiment's life, since the fallback only applies when the setting is
@@ -226,20 +226,16 @@ def register_render_callbacks(app: Dash) -> None:
     # decides whether *that* chart's body actually needs to be replaced -- compared with the one the body
     # on screen carries, so a chart that was just mounted is not redrawn for nothing. ---
     @app.callback(
-        # `chart_body_id(...)` is typed `(str, int) -> ChartID` (every other call site passes a
-        # real panel name/index), so it can't be called with the `ALL` wildcard without breaking
-        # that typing -- same reason `_panel_controls.py`'s own `ALL`-pattern callbacks spell their
-        # pattern-matching ids out as literal dicts too, rather than routing through a helper.
-        Output({"type": core.CHART_BODY_TYPE, "panel": ALL, "index": ALL}, "children"),
+        Output(core.CHART_BODY.all(), "children"),
         Output(core.STATE_HPARAMS, "data", allow_duplicate=True),
         Output(core.STATE_LAST_KNOWN_REVISION, "data", allow_duplicate=True),
         Output(core.STATE_LAST_FETCH_AT, "data", allow_duplicate=True),
         Output(core.LIVE_STATUS_ID, "children"),
         Output(STATE_NOTES_REVISION, "data"),
         Input(core.LIVE_POLL_INTERVAL_ID, "n_intervals"),
-        State({"type": core.CHART_BODY_TYPE, "panel": ALL, "index": ALL}, "id"),
-        State({"type": core.CHART_FINGERPRINT_TYPE, "panel": ALL, "index": ALL}, "id"),
-        State({"type": core.CHART_FINGERPRINT_TYPE, "panel": ALL, "index": ALL}, "children"),
+        State(core.CHART_BODY.all(), "id"),
+        State(core.CHART_FINGERPRINT.all(), "id"),
+        State(core.CHART_FINGERPRINT.all(), "children"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
         State(core.STATE_VIEW_ID, "data"),
         State(core.STATE_LAST_KNOWN_REVISION, "data"),

@@ -47,7 +47,7 @@ def _render(  # noqa: PLR0913
 
 def _shown(container: html.Div, tab: str = "") -> list[str]:
     """Names of the panels in `tab`'s rendered accordion, in order."""
-    accordion = _find_props(container.children, state.panel_accordion_id(tab))
+    accordion = _find_props(container.children, state.PANEL_ACCORDION.of(tab))
     assert accordion is not None
     return [item.value for item in accordion["children"]]
 
@@ -77,7 +77,7 @@ def test_only_the_active_tabs_panels_are_rendered(store: SQLLiteStore, experimen
     container = _render(store, experiment_id, panels, Paging(), active_tab="Images")
 
     assert _shown(container, "Images") == ["panel 00", "panel 01"]
-    assert _find_props(container.children, state.panel_accordion_id("")) is None
+    assert _find_props(container.children, state.PANEL_ACCORDION.of("")) is None
 
 
 def test_the_emitted_paging_is_the_one_rendered(store: SQLLiteStore, experiment_id: int) -> None:
@@ -97,7 +97,7 @@ def test_a_chart_link_lands_on_the_page_of_panels_holding_it(store: SQLLiteStore
     container = _render(store, experiment_id, panels, FIVE_PER_PAGE, focus_chart=chart.id)
 
     assert "panel 07" in _shown(container)
-    accordion = cast("Any", _find_props(container.children, state.panel_accordion_id("")))
+    accordion = cast("Any", _find_props(container.children, state.PANEL_ACCORDION.of("")))
     assert accordion["value"] == ["panel 07"]
 
 
@@ -109,7 +109,7 @@ def _charts(count: int) -> list[ChartInstance[Any, Any]]:
 
 
 def _chart_indexes_shown(container: html.Div, panel: str, count: int) -> list[int]:
-    return [i for i in range(count) if _find_props(container.children, state.chart_content_id(panel, i))]
+    return [i for i in range(count) if _find_props(container.children, state.CHART_CONTENT.of(panel, i))]
 
 
 SIX_CHARTS = Paging(sizes=PageSizes(charts=6))
@@ -209,7 +209,7 @@ def test_a_page_size_choice_is_only_offered_once_something_is_big_enough_to_page
 
 
 def _panel_header_filter(container: html.Div, panel: str) -> dict[str, Any] | None:
-    return _find_props(container.children, state.chart_filter_id(panel))
+    return _find_props(container.children, state.CHART_FILTER.of(panel))
 
 
 def test_a_panel_with_enough_charts_has_its_chart_filter_in_its_header_and_its_pager_under_the_charts(
@@ -220,13 +220,13 @@ def test_a_panel_with_enough_charts_has_its_chart_filter_in_its_header_and_its_p
 
     container = _render(store, experiment_id, panels, paging, open_panels=["p"])
 
-    header = _find_props(container.children, state.panel_header_id("p"))
+    header = _find_props(container.children, state.PANEL_HEADER.of("p"))
     assert header is not None
-    assert _find_props(header["children"], state.chart_filter_id("p")) is not None
-    body = _find_props(container.children, state.panel_content_id("p"))
+    assert _find_props(header["children"], state.CHART_FILTER.of("p")) is not None
+    body = _find_props(container.children, state.PANEL_CONTENT.of("p"))
     assert body is not None
-    assert _find_props(body["children"], state.chart_filter_id("p")) is None
-    assert _find_props(container.children, state.chart_pager_slot_id("p")) is not None
+    assert _find_props(body["children"], state.CHART_FILTER.of("p")) is None
+    assert _find_props(container.children, state.CHART_PAGER_SLOT.of("p")) is not None
 
 
 @pytest.mark.parametrize(

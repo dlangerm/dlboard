@@ -7,13 +7,12 @@ The shell (`add_chart_modal`) is rendered once by the experiment page, beside th
 
 from __future__ import annotations
 
-import typing
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Final, cast
 
 import dash_ag_grid as dag
 import dash_mantine_components as dmc
-from dash import ALL, MATCH, Dash, Input, NoUpdate, Output, State, dcc, html, no_update
+from dash import Dash, Input, NoUpdate, Output, State, dcc, html, no_update
 from dash.dcc import Store
 from dash.exceptions import PreventUpdate
 from pydantic import ValidationError
@@ -23,7 +22,7 @@ from dlboard import models
 from dlboard.plugins.charts._table_style import themed_grid_kwargs
 from dlboard.serve import ClientsideScript, Icon, get_data_store, icon
 from dlboard.serve import _constants as constants
-from dlboard.serve._component_ids import ButtonId, DivId, ModalId, StoreId, ValueId
+from dlboard.serve._component_ids import ButtonId, DivId, ModalId, PatternId, StoreId, ValueId
 from dlboard.serve._pages._dash_helpers import require_triggered_id
 from dlboard.serve._pages._experiment import _experiment_page_state as core
 from dlboard.serve._pages._experiment._dataframe_helpers import ColumnCatalog
@@ -51,35 +50,26 @@ ADD_CHART_ERROR_ID: DivId[core.ExperimentPage] = DivId("add-chart-error")
 ADD_CHART_SUBMIT_ID: ButtonId[core.ExperimentPage] = ButtonId("add-chart-submit")
 ADD_CHART_CANCEL_ID: ButtonId[core.ExperimentPage] = ButtonId("add-chart-cancel")
 
-# A chart-parameter field's own id is a pattern-matched dict, not a scalar id: one per field of
-# whichever chart type the form is showing.
-CHART_PARAM_TYPE: typing.Final = "chart-param"
-_CHART_PARAM_CLEAR_TYPE: typing.Final = "chart-param-clear"
-CHART_PARAM_TABLE_DATA_TYPE: typing.Final = "chart-param-table-data"
+
+class _FieldPattern(PatternId[core.ExperimentPage]):
+    """A family of the form's components, with one per field of whichever chart type the form is showing."""
+
+    KEYS: ClassVar[tuple[str, ...]] = ("field",)
+
+    def of(self, field_name: str) -> dict[str, str]:
+        return {"type": self.type, "field": field_name}
+
+
+CHART_PARAM: Final = _FieldPattern("chart-param")
+"""A field's own input, which reports through `value` (or a Switch's `checked`)."""
+_CHART_PARAM_CLEAR: Final = _FieldPattern("chart-param-clear")
+CHART_PARAM_TABLE_DATA: Final = _FieldPattern("chart-param-table-data")
 """A `TABLE` chart parameter's own value: a `Store` holding its rows as the mapping the setting takes. Kept apart
-from `CHART_PARAM_TYPE`, whose `data` is a Select's options."""
-CHART_PARAM_TABLE_TYPE: typing.Final = "chart-param-table"
-"""The editable grid of a `TABLE` chart parameter; its `-add` / `-remove` buttons are `CHART_PARAM_TABLE_TYPE` + that."""
-
-
-def chart_param_id(field_name: str) -> dict[str, str]:
-    return {"type": CHART_PARAM_TYPE, "field": field_name}
-
-
-def chart_param_table_data_id(field_name: str) -> dict[str, str]:
-    return {"type": CHART_PARAM_TABLE_DATA_TYPE, "field": field_name}
-
-
-def chart_param_table_id(field_name: str) -> dict[str, str]:
-    return {"type": CHART_PARAM_TABLE_TYPE, "field": field_name}
-
-
-def chart_param_table_button_id(action: typing.Literal["add", "remove"], field_name: str) -> dict[str, str]:
-    return {"type": f"{CHART_PARAM_TABLE_TYPE}-{action}", "field": field_name}
-
-
-def chart_param_clear_id(field_name: str) -> dict[str, str]:
-    return {"type": _CHART_PARAM_CLEAR_TYPE, "field": field_name}
+from `CHART_PARAM`, whose `data` is a Select's options."""
+_CHART_PARAM_TABLE: Final = _FieldPattern("chart-param-table")
+"""The editable grid of a `TABLE` chart parameter."""
+_CHART_PARAM_TABLE_ADD: Final = _FieldPattern("chart-param-table-add")
+_CHART_PARAM_TABLE_REMOVE: Final = _FieldPattern("chart-param-table-remove")
 
 
 class _AddChartCtx(core.EditCtx):
@@ -205,7 +195,7 @@ def _table_input(
             dmc.Text(label, size="sm", fw=500),
             dmc.Text(field.description, size="xs", c="dimmed"),
             dag.AgGrid(
-                id=chart_param_table_id(field_name),
+                id=_CHART_PARAM_TABLE.of(field_name),
                 columnDefs=columns,
                 rowData=[{"key": key, **cells} for key, cells in entries.items()],
                 dashGridOptions={
@@ -220,20 +210,20 @@ def _table_input(
                 [
                     dmc.Button(
                         "Add",
-                        id=chart_param_table_button_id("add", field_name),
+                        id=_CHART_PARAM_TABLE_ADD.of(field_name),
                         size="xs",
                         variant="default",
                     ),
                     dmc.Button(
                         "Remove checked",
-                        id=chart_param_table_button_id("remove", field_name),
+                        id=_CHART_PARAM_TABLE_REMOVE.of(field_name),
                         size="xs",
                         variant="default",
                     ),
                 ],
                 gap="xs",
             ),
-            dcc.Store(id=chart_param_table_data_id(field_name), data=entries),
+            dcc.Store(id=CHART_PARAM_TABLE_DATA.of(field_name), data=entries),
         ],
         gap="xs",
     )
@@ -246,7 +236,7 @@ def _param_field_input(  # noqa: PLR0911
     *,
     override: bool | int | float | str | list[str] | dict[str, Any] | None = None,
 ) -> Component:
-    input_id = chart_param_id(field_name)
+    input_id = CHART_PARAM.of(field_name)
     label = f"{field_name} *" if field.required else field_name
     value = override if override is not None else field.default
 
@@ -271,7 +261,7 @@ def _param_field_input(  # noqa: PLR0911
                 rightSection=(
                     dmc.ActionIcon(
                         icon(Icon.CLOSE),
-                        id=chart_param_clear_id(field_name),
+                        id=_CHART_PARAM_CLEAR.of(field_name),
                         n_clicks=0,
                         variant="subtle",
                         color="gray",
@@ -332,8 +322,8 @@ def _register_clear_button(app: Dash) -> None:
     # already does, so no round trip needed.
     app.clientside_callback(
         _CHART_PARAM_CLEAR_JS.source,
-        Output({"type": CHART_PARAM_TYPE, "field": MATCH}, "value"),
-        Input({"type": _CHART_PARAM_CLEAR_TYPE, "field": MATCH}, "n_clicks"),
+        Output(CHART_PARAM.match(), "value"),
+        Input(_CHART_PARAM_CLEAR.match(), "n_clicks"),
         prevent_initial_call=True,
     )
 
@@ -341,17 +331,17 @@ def _register_clear_button(app: Dash) -> None:
 def _register_table_inputs(app: Dash) -> None:
     app.clientside_callback(
         _TABLE_VALUE_JS.source,
-        Output({"type": CHART_PARAM_TABLE_DATA_TYPE, "field": MATCH}, "data"),
-        Input({"type": CHART_PARAM_TABLE_TYPE, "field": MATCH}, "virtualRowData"),
-        Input({"type": CHART_PARAM_TABLE_TYPE, "field": MATCH}, "cellValueChanged"),
+        Output(CHART_PARAM_TABLE_DATA.match(), "data"),
+        Input(_CHART_PARAM_TABLE.match(), "virtualRowData"),
+        Input(_CHART_PARAM_TABLE.match(), "cellValueChanged"),
         prevent_initial_call=True,
     )
     app.clientside_callback(
         _TABLE_ROWS_JS.source,
-        Output({"type": CHART_PARAM_TABLE_TYPE, "field": MATCH}, "rowTransaction"),
-        Output({"type": CHART_PARAM_TABLE_TYPE, "field": MATCH}, "deleteSelectedRows"),
-        Input({"type": f"{CHART_PARAM_TABLE_TYPE}-add", "field": MATCH}, "n_clicks"),
-        Input({"type": f"{CHART_PARAM_TABLE_TYPE}-remove", "field": MATCH}, "n_clicks"),
+        Output(_CHART_PARAM_TABLE.match(), "rowTransaction"),
+        Output(_CHART_PARAM_TABLE.match(), "deleteSelectedRows"),
+        Input(_CHART_PARAM_TABLE_ADD.match(), "n_clicks"),
+        Input(_CHART_PARAM_TABLE_REMOVE.match(), "n_clicks"),
         prevent_initial_call=True,
     )
 
@@ -364,8 +354,8 @@ def _register_open_close(app: Dash) -> None:
         Output(ADD_CHART_TYPE_SELECT_ID, "value"),
         Output(ADD_CHART_INITIAL_PARAMS_ID, "data"),
         Output(ADD_CHART_SUBMIT_ID, "loading", allow_duplicate=True),
-        Input({"type": "open-add-chart", "panel": ALL}, "n_clicks"),
-        Input({"type": "edit-chart", "panel": ALL, "index": ALL}, "n_clicks"),
+        Input(core.OPEN_CHART_BUTTON.all(), "n_clicks"),
+        Input(core.EDIT_CHART_BUTTON.all(), "n_clicks"),
         State(core.STATE_PAGE_STORAGE, "data"),
         prevent_initial_call=True,
     )
@@ -374,7 +364,7 @@ def _register_open_close(app: Dash) -> None:
     ) -> tuple[bool, core.ChartTargetData, str | None, dict[str, Any], bool]:
         triggered_id = cast("core.ChartID", require_triggered_id())
 
-        if triggered_id["type"] == "open-add-chart":
+        if triggered_id["type"] == core.OPEN_CHART_BUTTON.type:
             return True, {"panel": triggered_id["panel"], "index": None}, None, {}, False
 
         curr_page = core.BasicExperimentPage.model_validate_json(page_json)
@@ -491,11 +481,11 @@ def _register_form(app: Dash) -> None:
         Output(ADD_CHART_PREVIEW_ID, "children"),
         Output(ADD_CHART_ERROR_ID, "children"),
         Input(ADD_CHART_TYPE_SELECT_ID, "value"),
-        Input({"type": CHART_PARAM_TYPE, "field": ALL}, "value"),
-        Input({"type": CHART_PARAM_TYPE, "field": ALL}, "checked"),
-        Input({"type": CHART_PARAM_TABLE_DATA_TYPE, "field": ALL}, "data"),
-        State({"type": CHART_PARAM_TYPE, "field": ALL}, "id"),
-        State({"type": CHART_PARAM_TABLE_DATA_TYPE, "field": ALL}, "id"),
+        Input(CHART_PARAM.all(), "value"),
+        Input(CHART_PARAM.all(), "checked"),
+        Input(CHART_PARAM_TABLE_DATA.all(), "data"),
+        State(CHART_PARAM.all(), "id"),
+        State(CHART_PARAM_TABLE_DATA.all(), "id"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
         State(core.STATE_VIEW_ID, "data"),
         prevent_initial_call=True,
@@ -532,11 +522,11 @@ def _register_submit(app: Dash) -> None:
         Input(ADD_CHART_SUBMIT_ID, "n_clicks"),
         {
             "chart_type_name": State(ADD_CHART_TYPE_SELECT_ID, "value"),
-            "values": State({"type": CHART_PARAM_TYPE, "field": ALL}, "value"),
-            "checked_values": State({"type": CHART_PARAM_TYPE, "field": ALL}, "checked"),
-            "table_ids": State({"type": CHART_PARAM_TABLE_DATA_TYPE, "field": ALL}, "id"),
-            "table_values": State({"type": CHART_PARAM_TABLE_DATA_TYPE, "field": ALL}, "data"),
-            "field_ids": State({"type": CHART_PARAM_TYPE, "field": ALL}, "id"),
+            "values": State(CHART_PARAM.all(), "value"),
+            "checked_values": State(CHART_PARAM.all(), "checked"),
+            "table_ids": State(CHART_PARAM_TABLE_DATA.all(), "id"),
+            "table_values": State(CHART_PARAM_TABLE_DATA.all(), "data"),
+            "field_ids": State(CHART_PARAM.all(), "id"),
             "target": State(ADD_CHART_TARGET_ID, "data"),
             "experiment_id": State(constants.STATE_EXPERIMENT_ID, "data"),
             "page_json": State(core.STATE_PAGE_STORAGE, "data"),

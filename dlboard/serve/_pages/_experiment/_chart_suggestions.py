@@ -11,17 +11,17 @@ from __future__ import annotations
 
 import itertools
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Final, TypedDict, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Final, TypedDict, cast
 
 import dash_mantine_components as dmc
-from dash import ALL, Dash, Input, NoUpdate, Output, State, ctx, html, no_update
+from dash import Dash, Input, NoUpdate, Output, State, ctx, html, no_update
 from dash.dcc import Store
 from dash.exceptions import PreventUpdate
 
 from dlboard.models import ChartInstance, ColumnKind
 from dlboard.serve import ClientsideScript, Icon, get_data_store, icon
 from dlboard.serve import _constants as constants
-from dlboard.serve._component_ids import ButtonId, DivId, ModalId, StoreId, ValueId
+from dlboard.serve._component_ids import ButtonId, DivId, ModalId, PatternId, StoreId, ValueId
 from dlboard.serve._pages._dash_helpers import require_triggered_id
 from dlboard.serve._pages._experiment import _experiment_page_state as core
 from dlboard.serve._pages._experiment._chart_autogen import (
@@ -75,8 +75,16 @@ _SPLIT_MODE_DATA: Final = [{"label": "Prefix", "value": "prefix"}, {"label": "Su
 _DEFAULT_DELIMITER: Final = "/"
 
 
-def _add_suggestion_button_id(kind: str, key: str) -> dict[str, str]:
-    return {"type": "add-suggestion", "kind": kind, "key": key}
+class _SuggestionPattern(PatternId[core.ExperimentPage]):
+    """A family of components with one per suggested chart, by the kind and key of what it would show."""
+
+    KEYS: ClassVar[tuple[str, ...]] = ("kind", "key")
+
+    def of(self, kind: ColumnKind, key: str) -> dict[str, str]:
+        return {"type": self.type, "kind": kind.value, "key": key}
+
+
+_ADD_SUGGESTION: Final = _SuggestionPattern("add-suggestion")
 
 
 def _split_mode_control(control_id: ValueId[core.ExperimentPage]) -> dmc.SegmentedControl:
@@ -235,7 +243,7 @@ def _render_suggestions(suggestions: Iterable[Suggestion], *, filtered_out_all: 
                 ),
                 dmc.ActionIcon(
                     icon(Icon.ADD),
-                    id=_add_suggestion_button_id(s.kind.value, s.key),
+                    id=_ADD_SUGGESTION.of(s.kind, s.key),
                     n_clicks=0,
                     variant="light",
                     size="sm",
@@ -473,7 +481,7 @@ def _resolve_suggestion_trigger(
         if not n_clicks:
             raise PreventUpdate
         return None, True
-    if isinstance(triggered_id, dict) and triggered_id.get("type") == "panel-suggest-charts":
+    if isinstance(triggered_id, dict) and triggered_id.get("type") == core.PANEL_SUGGEST_BUTTON.type:
         if not ctx.triggered[0]["value"]:  # pyrefly: ignore [unsupported-operation]
             raise PreventUpdate
         return triggered_id["panel"], True
@@ -529,7 +537,7 @@ def _register_suggestions(app: Dash) -> None:
         # Optional: an empty view's toolbar offers "Auto-generate charts" instead, while the drawer
         # (`chart_suggestion_shells`) is always on the page.
         Input(core.SUGGEST_CHARTS_BUTTON_ID, "n_clicks", allow_optional=True),
-        Input({"type": "panel-suggest-charts", "panel": ALL}, "n_clicks"),
+        Input(core.PANEL_SUGGEST_BUTTON.all(), "n_clicks"),
         {
             "delimiter": Input(SUGGEST_DELIMITER_ID, "value"),
             "mode": Input(SUGGEST_MODE_ID, "value"),
@@ -663,7 +671,7 @@ def _register_suggestion_adds(app: Dash) -> None:
         Output(SUGGEST_SUGGESTIONS_STORE_ID, "data", allow_duplicate=True),
         Output(SUGGEST_SELECTION_ID, "value", allow_duplicate=True),
         Output(SUGGEST_DRAWER_ID, "opened", allow_duplicate=True),
-        Input({"type": "add-suggestion", "kind": ALL, "key": ALL}, "n_clicks"),
+        Input(_ADD_SUGGESTION.all(), "n_clicks"),
         State(SUGGEST_SUGGESTIONS_STORE_ID, "data"),
         State(core.STATE_PAGE_STORAGE, "data"),
         State(core.PANEL_PAGING_ID, "data"),

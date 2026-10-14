@@ -1088,7 +1088,7 @@ def test_live_update_poll_shows_a_new_run_without_a_reload(
     dlboard, with the browser tab never touched -- must show up in the navbar run-comparison table
     on its own, with no `page.reload()`. It must also do so *without* remounting the panel: this
     tags the "Ungrouped" panel's own content node (`.dl-panel-body`, the same DOM node
-    `poll_for_updates` patches via individual `chart_content_id(...)` nodes inside it) before the
+    `poll_for_updates` patches via individual `CHART_CONTENT.of(...)` nodes inside it) before the
     second run exists, then proves that exact node -- not a freshly rendered lookalike -- is still
     there afterward, the same "still the same node" proof
     `test_switching_tabs_does_not_remount_the_navbar_run_table` uses for the sibling flicker

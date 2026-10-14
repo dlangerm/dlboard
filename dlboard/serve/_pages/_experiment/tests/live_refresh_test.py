@@ -38,12 +38,12 @@ def test_a_body_carries_the_fingerprint_of_the_data_it_was_drawn_from() -> None:
     body = state.chart_body(_PANEL, 0, _BEFORE, page_size=12)
 
     carried = _props(body[1])
-    assert carried["id"] == state.chart_fingerprint_id("p", 0)
+    assert carried["id"] == state.CHART_FINGERPRINT.of("p", 0)
     assert carried["children"] == state.chart_data_fingerprint(_PANEL.charts[0], _BEFORE)
 
 
 def test_only_a_chart_whose_data_moved_gets_a_new_body_and_the_rest_are_left_alone() -> None:
-    chart_ids = [state.chart_body_id("p", 0), state.chart_body_id("p", 1)]
+    chart_ids = [state.CHART_BODY.of("p", 0), state.CHART_BODY.of("p", 1)]
 
     contents, ok = _refresh_chart_bodies(
         chart_ids, {"p": _PANEL}, {"p": _AFTER}, _shown(_BEFORE), page_size=12
@@ -56,7 +56,7 @@ def test_only_a_chart_whose_data_moved_gets_a_new_body_and_the_rest_are_left_alo
 
 
 def test_a_chart_just_drawn_from_the_current_data_is_not_redrawn_by_the_next_poll() -> None:
-    chart_ids = [state.chart_body_id("p", 0), state.chart_body_id("p", 1)]
+    chart_ids = [state.CHART_BODY.of("p", 0), state.CHART_BODY.of("p", 1)]
 
     contents, _ok = _refresh_chart_bodies(
         chart_ids, {"p": _PANEL}, {"p": _AFTER}, _shown(_AFTER), page_size=12

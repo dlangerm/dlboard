@@ -155,7 +155,7 @@ def layout(
                     # `target_components` is required now that live updates poll in the
                     # background: without it, `dcc.Loading` shows its overlay for *any* in-flight
                     # callback touching a descendant, which includes `poll_for_updates`'s per-chart
-                    # patches (they live inside this subtree, at `chart_content_id(...)`) -- a
+                    # patches (they live inside this subtree, at `CHART_CONTENT.of(...)`) -- a
                     # stop-the-world flash on every poll tick, exactly what per-chart patching
                     # exists to avoid. Scoping it to just this div's own `children` means the
                     # spinner only ever covers a genuine full-panel rebuild; the poll's targeted
