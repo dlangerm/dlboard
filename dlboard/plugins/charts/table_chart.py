@@ -216,9 +216,10 @@ def _run_names(dataframe: pd.DataFrame) -> dict[int, str]:
     """Each run's display name, for the runs the dataframe carries one for."""
     if RUN_NAME_COLUMN not in dataframe.columns:
         return {}
-    named = dataframe.dropna(subset=[RUN_NAME_COLUMN]).drop_duplicates(subset=["run_id"])
+    named = dataframe.dropna(subset=[RUN_NAME_COLUMN]).drop_duplicates(subset=[MetricColumn.RUN_ID])
     return {
-        int(run_id): str(name) for run_id, name in zip(named["run_id"], named[RUN_NAME_COLUMN], strict=True)
+        int(run_id): str(name)
+        for run_id, name in zip(named[MetricColumn.RUN_ID], named[RUN_NAME_COLUMN], strict=True)
     }
 
 
@@ -246,7 +247,7 @@ def _run_column() -> dict[str, Any]:
 def _run_cells(run_id: int, names: dict[int, str]) -> dict[str, Any]:
     """What every row of a run carries: its name, swatch and row identity (the last is the caller's to refine)."""
     return {
-        "run_id": run_id,
+        MetricColumn.RUN_ID: run_id,
         RUN_NAME_COLUMN: names.get(run_id, f"Run {run_id}"),
         _SWATCH_FIELD: series_swatch_class(run_id),
     }
@@ -320,11 +321,11 @@ def _render_artifacts(
     for key in keys:
         for _, artifact in dataframe.loc[dataframe[artifact_column(key)].notna()].iterrows():
             found = _artifact_cells(_ARTIFACT_FIELD, artifact, key)
-            run_id, step = int(artifact["run_id"]), int(artifact["step"])
+            run_id, step = int(artifact[MetricColumn.RUN_ID]), int(artifact[MetricColumn.STEP])
             rows.append(
                 {
                     **_run_cells(run_id, names),
-                    "step": step,
+                    MetricColumn.STEP: step,
                     "key": key,
                     **found.cells,
                     _ROW_ID_FIELD: f"{run_id}/{step}/{key}",
@@ -335,10 +336,10 @@ def _render_artifacts(
     if not rows:
         return _message_table("No artifacts logged under this key yet.", parameters, context)
 
-    rows.sort(key=lambda row: (row["run_id"], row["step"], row["key"]))
+    rows.sort(key=lambda row: (row[MetricColumn.RUN_ID], row[MetricColumn.STEP], row["key"]))
     column_defs = [
         _run_column(),
-        column_def("step", NUMERIC, headerName="Step", maxWidth=110),
+        column_def(MetricColumn.STEP, NUMERIC, headerName="Step", maxWidth=110),
         *([column_def("key", TEXT, headerName="Key")] if parameters.artifact_key_is_prefix else []),
         *_artifact_columns(_ARTIFACT_FIELD, "Artifact", tag_titles, rows),
     ]
@@ -371,14 +372,22 @@ def _render_by_run(
 
     # Each column's own latest value, as the Runs table shows: the wide dataframe has a row per step
     # logged by *any* metric, so a run's last row is blank for one logged less often (a per-epoch metric).
-    by_step = dataframe.sort_values(["run_id", "step"]) if "step" in dataframe.columns else dataframe
-    latest = by_step.groupby("run_id")[[*hparam_cols, *metric_cols]].last().reset_index()
+    by_step = (
+        dataframe.sort_values([MetricColumn.RUN_ID, MetricColumn.STEP])
+        if MetricColumn.STEP in dataframe.columns
+        else dataframe
+    )
+    latest = by_step.groupby(MetricColumn.RUN_ID)[[*hparam_cols, *metric_cols]].last().reset_index()
     names = _run_names(dataframe)
     rows = [
-        {**record, **_run_cells(int(record["run_id"]), names), _ROW_ID_FIELD: str(record["run_id"])}
+        {
+            **record,
+            **_run_cells(int(record[MetricColumn.RUN_ID]), names),
+            _ROW_ID_FIELD: str(record[MetricColumn.RUN_ID]),
+        }
         for record in _records(latest)
     ]
-    row_of_run = {row["run_id"]: row for row in rows}
+    row_of_run = {row[MetricColumn.RUN_ID]: row for row in rows}
 
     def group(title: str, columns: list[dict[str, Any]]) -> list[dict[str, Any]]:
         return [{"headerName": title, "children": columns}] if columns else []
@@ -389,12 +398,12 @@ def _render_by_run(
         if artifact_column(key) not in dataframe.columns:
             continue
         # The run's latest artifact under the key: the last row of each run that has one.
-        logged = by_step.loc[by_step[artifact_column(key)].notna()].groupby("run_id").tail(1)
+        logged = by_step.loc[by_step[artifact_column(key)].notna()].groupby(MetricColumn.RUN_ID).tail(1)
         tag_titles: dict[str, str] = {}
         field = artifact_column(key)
         for _, artifact in logged.iterrows():
             found = _artifact_cells(field, artifact, key)
-            row_of_run[int(artifact["run_id"])].update(found.cells)
+            row_of_run[int(artifact[MetricColumn.RUN_ID])].update(found.cells)
             tag_titles |= found.tag_titles
             thumbnails |= found.thumbnail
         artifact_groups += group(key, _artifact_columns(field, "Latest", tag_titles, rows))
@@ -421,7 +430,7 @@ def _render_pivoted(
 
     df = dataframe.dropna(subset=[parameters.pivot_on, parameters.pivot_metric])
     pivoted = df.pivot_table(
-        index=parameters.pivot_on, columns="run_id", values=parameters.pivot_metric, aggfunc="mean"
+        index=parameters.pivot_on, columns=MetricColumn.RUN_ID, values=parameters.pivot_metric, aggfunc="mean"
     )
     names = _run_names(dataframe)
     run_ids = [int(run_id) for run_id in pivoted.columns]
@@ -486,7 +495,7 @@ class TableChart(ChartType[TableChartSettings, pd.DataFrame, dag.AgGrid], frozen
                 return set()
             case TableMode.RUNS:
                 if parameters.metrics:
-                    return set(parameters.metrics) | {"step"}
+                    return set(parameters.metrics) | {MetricColumn.STEP}
                 if parameters.hparams:
                     # Metrics and hparams are fetched independently (see `hint_required_hparams`) -- having
                     # curated one but not the other reads as "I only want hparams here", not "fetch every
