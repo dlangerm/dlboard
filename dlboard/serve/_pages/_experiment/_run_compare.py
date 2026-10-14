@@ -319,7 +319,7 @@ def register_run_compare_callbacks(app: Dash) -> None:
         runs = list(get_data_store().get_runs(experiment_id, limit=_RUNS_LIMIT))
         # Start from the runs the charts are showing, unless a link or an earlier open already chose.
         page = page_model.BasicExperimentPage.model_validate_json(page_json)
-        excluded = cast("list[int]", page.page_settings.get(page_model.EXCLUDED_RUNS_KEY, []))
+        excluded = page.document.excluded_runs
         charted = [run for run in runs if run.id not in excluded] or runs
         default = [str(run.id) for run in charted[:MAX_COMPARED_RUNS]]
         return _run_options(runs), picked or default

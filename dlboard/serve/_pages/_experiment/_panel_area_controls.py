@@ -24,14 +24,13 @@ from dlboard.serve._pages._experiment._ids import (
     STATE_PAGE_STORAGE,
 )
 from dlboard.serve._pages._experiment._page_model import (
-    ACTIVE_TAB_KEY,
-    OPEN_PANEL_KEY,
     BasicExperimentPage,
+    ViewerSettings,
 )
 from dlboard.serve._pages._experiment._page_repository import (
     load_page,
-    persist_settings,
     ref_of,
+    save_viewer_settings,
 )
 from dlboard.serve._pages._experiment._paging import (
     SIZES_COOKIE,
@@ -293,15 +292,15 @@ def register_panel_area_callbacks(app: Dash) -> None:
             raise PreventUpdate
         store = get_data_store()
         # Which panel is expanded is per-viewer browsing state, not part of what the view "is" --
-        # see `persist_settings`'s own docstring on why this one opts out of branching. Its ref
+        # see `save_viewer_settings` on why it never branches. Its ref
         # comes from the accordion's own page (`ref_of`), not `STATE_VIEW_ID` -- the accordion
         # remounting is itself often a *side effect* of a structural edit elsewhere on this same
         # page that just branched into a new view, and `STATE_VIEW_ID` only catches up to that a
         # separate round trip later. Reading it here would race that catch-up and, since this
         # write goes straight through regardless of ownership, land back on the view the edit had
         # already branched away from.
-        page = persist_settings(
-            store, ref_of(experiment_id, curr_page), {OPEN_PANEL_KEY: open_value}, branch_on_edit=False
+        page = save_viewer_settings(
+            store, ref_of(experiment_id, curr_page), ViewerSettings(open_panels=open_value)
         )
         return page.model_dump_json()
 
@@ -362,16 +361,15 @@ def register_panel_area_callbacks(app: Dash) -> None:
         # Same mount-echo guard as `persist_open_panel`, and for the same reason: `PANEL_TABS_ID`
         # mounting with whichever tab `accordion_view` already had active reports back here as if
         # the user had just switched tabs.
-        if curr_page.page_settings.get(ACTIVE_TAB_KEY) == tab_from_component_value(tab_value):
+        if curr_page.viewer.active_tab == tab_from_component_value(tab_value):
             raise PreventUpdate
         store = get_data_store()
         # Which tab is active is per-viewer browsing state -- same reasoning, including the ref,
         # as `persist_open_panel`.
-        page = persist_settings(
+        page = save_viewer_settings(
             store,
             ref_of(experiment_id, curr_page),
-            {ACTIVE_TAB_KEY: tab_from_component_value(tab_value)},
-            branch_on_edit=False,
+            ViewerSettings(active_tab=tab_from_component_value(tab_value)),
         )
         return page.model_dump_json()
 

@@ -255,17 +255,19 @@ def _register_create_panel(app: Dash) -> None:
         if page_model.panel_name_taken(curr_page.panels, panel_name):
             return no_update, no_update, f"A panel named {panel_name!r} already exists"
 
-        active_tab = curr_page.page_settings.get(page_model.ACTIVE_TAB_KEY)
+        active_tab = curr_page.viewer.active_tab
         tab = (
             active_tab
-            if isinstance(active_tab, str) and any(p.tab == active_tab for p in curr_page.panels)
+            if active_tab is not None and any(p.tab == active_tab for p in curr_page.panels)
             else ""
         )
-        page, container = edits.mutate_panels_and_rerender(
+        page, container = edits.commit(
             page_json,
             paging_json,
-            lambda panels: [*panels, PanelInstance(name=panel_name, tab=tab)],
-            reveal_panel=panel_name,
+            edits.PageEdit(
+                panels=lambda panels: [*panels, PanelInstance(name=panel_name, tab=tab)],
+                reveal=edits.RevealPanel(panel_name),
+            ),
         )
         return container, page.model_dump_json(), None
 
@@ -312,10 +314,8 @@ def _register_delete_chart(app: Dash) -> None:
                 for p in panels
             ]
 
-        page, container = edits.mutate_panels_and_rerender(
-            delete_ctx["page_json"],
-            delete_ctx["paging_json"],
-            remove_chart,
+        page, container = edits.commit(
+            delete_ctx["page_json"], delete_ctx["paging_json"], edits.PageEdit(panels=remove_chart)
         )
         return container, page.model_dump_json(), False
 
@@ -366,10 +366,8 @@ def _register_delete_panel(app: Dash) -> None:
         def remove_panel(panels: list[Any]) -> list[Any]:
             return [p for p in panels if p.name != panel_name]
 
-        page, container = edits.mutate_panels_and_rerender(
-            delete_ctx["page_json"],
-            delete_ctx["paging_json"],
-            remove_panel,
+        page, container = edits.commit(
+            delete_ctx["page_json"], delete_ctx["paging_json"], edits.PageEdit(panels=remove_panel)
         )
         return container, page.model_dump_json(), False
 
@@ -406,13 +404,15 @@ def _register_reorder(app: Dash) -> None:
     ) -> tuple[html.Div, str]:
         if not request:
             raise PreventUpdate
-        page, container = edits.mutate_panels_and_rerender(
+        page, container = edits.commit(
             page_json,
             paging_json,
-            lambda panels: page_model.reorder_panel(
-                panels, request["panel"], request["target"], after=request["after"]
+            edits.PageEdit(
+                panels=lambda panels: page_model.reorder_panel(
+                    panels, request["panel"], request["target"], after=request["after"]
+                ),
+                reveal=edits.RevealPanel(request["panel"]),
             ),
-            reveal_panel=request["panel"],
         )
         return container, page.model_dump_json()
 
@@ -430,13 +430,15 @@ def _register_reorder(app: Dash) -> None:
         if not request:
             raise PreventUpdate
         panel_name, index = request["panel"], request["index"]
-        page, container = edits.mutate_panels_and_rerender(
+        page, container = edits.commit(
             page_json,
             paging_json,
-            lambda panels: page_model.reorder_chart(
-                panels, panel_name, index, request["target_index"], after=request["after"]
+            edits.PageEdit(
+                panels=lambda panels: page_model.reorder_chart(
+                    panels, panel_name, index, request["target_index"], after=request["after"]
+                ),
+                reveal=edits.RevealChartAt(panel_name, index),
             ),
-            reveal_chart=edits.chart_id_at(page_json, panel_name, index),
         )
         return container, page.model_dump_json()
 
@@ -478,11 +480,7 @@ def _register_toggle(app: Dash) -> None:
         def toggle(panels: list[Any]) -> list[Any]:
             return page_model.set_panel_sync(panels, panel_name, sync=sync)
 
-        page, container = edits.mutate_panels_and_rerender(
-            page_json,
-            paging_json,
-            toggle,
-        )
+        page, container = edits.commit(page_json, paging_json, edits.PageEdit(panels=toggle))
         return container, page.model_dump_json()
 
     @app.callback(
@@ -496,8 +494,10 @@ def _register_toggle(app: Dash) -> None:
     def change_panel_layout(_layouts: list[str], page_json: str, paging_json: str) -> tuple[html.Div, str]:
         """Apply a panel's Packed/Grid toggle -- every chart's width changes with it, so the page is rebuilt."""
         panel_name, edit = _validated_layout_change(page_json)
-        page, container = edits.mutate_panels_and_rerender(
-            page_json, paging_json, lambda panels: page_model.update_panel(panels, panel_name, edit)
+        page, container = edits.commit(
+            page_json,
+            paging_json,
+            edits.PageEdit(panels=lambda panels: page_model.update_panel(panels, panel_name, edit)),
         )
         return container, page.model_dump_json()
 
@@ -527,8 +527,8 @@ def _register_toggle(app: Dash) -> None:
     def save_panel_grid_columns(_grid_columns: list[int], page_json: str) -> str:
         """Persist a column count the browser has already applied -- see `panel_grid_columns.js`."""
         panel_name, edit = _validated_layout_change(page_json)
-        page = edits.mutate_panels(
-            page_json, lambda panels: page_model.update_panel(panels, panel_name, edit)
+        page = edits.save_edit(
+            page_json, edits.PageEdit(panels=lambda panels: page_model.update_panel(panels, panel_name, edit))
         )
         return page.model_dump_json()
 
@@ -565,11 +565,8 @@ def _register_chart_panel_move(app: Dash) -> None:
                 panels, panel_name, index, target_panel, target_index, after=after
             )
 
-        page, container = edits.mutate_panels_and_rerender(
-            page_json,
-            paging_json,
-            move,
-            reveal_chart=edits.chart_id_at(page_json, panel_name, index),
+        page, container = edits.commit(
+            page_json, paging_json, edits.PageEdit(panels=move, reveal=edits.RevealChartAt(panel_name, index))
         )
         return container, page.model_dump_json()
 
@@ -624,23 +621,22 @@ def _register_rename(app: Dash) -> None:
         if page_model.panel_name_taken(curr_page.panels, new_name, ignore=old_name):
             return no_update, no_update, no_update, f"A panel named {new_name!r} already exists"
 
-        # Carry the rename into OPEN_PANEL_KEY too, so a currently-open panel doesn't appear to
+        # Carry the rename into the open panels too, so a currently-open panel doesn't appear to
         # collapse just because its name changed underneath it.
-        open_panel = curr_page.page_settings.get(page_model.OPEN_PANEL_KEY)
-        extra_settings: dict[str, Any] = {}
-        if isinstance(open_panel, list):
-            # Panel names (and so OPEN_PANEL_KEY) are always strings; page_settings' value type is
-            # broader (shared by every settings key), hence the cast.
-            open_panel = cast("list[str]", open_panel)
-            extra_settings[page_model.OPEN_PANEL_KEY] = [new_name if v == old_name else v for v in open_panel]
-        elif open_panel == old_name:
-            extra_settings[page_model.OPEN_PANEL_KEY] = new_name
-
-        page, container = edits.mutate_panels_and_rerender(
+        opened = curr_page.viewer.open_panels
+        page, container = edits.commit(
             rename_ctx["page_json"],
             rename_ctx["paging_json"],
-            lambda panels: _panels_with_renamed_panel(panels, old_name=old_name, new_name=new_name),
-            extra_settings=extra_settings,
+            edits.PageEdit(
+                panels=lambda panels: _panels_with_renamed_panel(
+                    panels, old_name=old_name, new_name=new_name
+                ),
+                settings=()
+                if opened is None
+                else (
+                    page_model.ViewerSettings(open_panels=[new_name if v == old_name else v for v in opened]),
+                ),
+            ),
         )
         return container, page.model_dump_json(), False, ""
 

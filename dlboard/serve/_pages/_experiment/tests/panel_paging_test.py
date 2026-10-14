@@ -42,10 +42,9 @@ def _render(  # noqa: PLR0913
         page.model_copy(
             update={
                 "panels": panels,
-                "page_settings": {
-                    page_model.OPEN_PANEL_KEY: open_panels or [],
-                    page_model.ACTIVE_TAB_KEY: active_tab,
-                },
+                "page_settings": page_model.ViewerSettings(
+                    open_panels=open_panels or [], active_tab=active_tab
+                ).merged_into({}),
             }
         )
     )

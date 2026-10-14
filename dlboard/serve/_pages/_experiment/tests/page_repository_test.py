@@ -15,10 +15,10 @@ if TYPE_CHECKING:
     from dlboard.plugins.data_stores.sqlite import SQLLiteStore
 
 
-def test_persist_settings_merges_into_page_settings_without_touching_panels(
+def test_saving_document_settings_writes_your_own_view_in_place(
     store: SQLLiteStore, experiment_id: int, sign_in_as: Callable[[str], None]
 ) -> None:
-    """Unlike `_persist_settings_and_rerender`, this must not need/trigger an accordion rebuild."""
+    """Written straight into the page `ref` names, under the key the setting has always been stored by."""
     sign_in_as("alice")
     view = store.create_view(
         page_model.BasicExperimentPage,
@@ -29,16 +29,18 @@ def test_persist_settings_merges_into_page_settings_without_touching_panels(
         ),
     )
 
-    page = repo.persist_settings(store, repo.PageRef(experiment_id, view.id), {"selected": ["lr"]})
+    page = repo.save_document_settings(
+        store, repo.PageRef(experiment_id, view.id), page_model.DocumentSettings(hparam_columns=["lr"])
+    )
 
-    assert page.page_settings["selected"] == ["lr"]
+    assert page.document.hparam_columns == ["lr"]
     assert page.id == view.id  # written in place -- alice already owns this one
     reloaded = store.get_view(page_model.BasicExperimentPage, view.id)
     assert reloaded is not None
-    assert reloaded.page_settings["selected"] == ["lr"]
+    assert reloaded.page_settings["hparam-table-selected"] == ["lr"]
 
 
-def test_persist_settings_branches_into_your_own_view_when_editing_the_shared_page(
+def test_saving_document_settings_branches_into_your_own_view_when_editing_the_shared_page(
     store: SQLLiteStore, experiment_id: int, sign_in_as: Callable[[str], None]
 ) -> None:
     """
@@ -48,16 +50,18 @@ def test_persist_settings_branches_into_your_own_view_when_editing_the_shared_pa
     """
     sign_in_as("alice")
 
-    page = repo.persist_settings(store, repo.PageRef(experiment_id, None), {"selected": ["lr"]})
+    page = repo.save_document_settings(
+        store, repo.PageRef(experiment_id, None), page_model.DocumentSettings(hparam_columns=["lr"])
+    )
 
-    assert page.page_settings["selected"] == ["lr"]
+    assert page.document.hparam_columns == ["lr"]
     assert page.owner_id == store.get_or_create_user(models.Principal.unverified("alice")).id
     shared = store.get_or_create_page(page_model.BasicExperimentPage, experiment_id=experiment_id)
     assert shared.id != page.id
     assert shared.page_settings == {}
 
 
-def test_persist_settings_branches_into_a_separate_view_when_editing_someone_elses(
+def test_saving_document_settings_branches_into_a_separate_view_when_editing_someone_elses(
     store: SQLLiteStore, experiment_id: int, sign_in_as: Callable[[str], None]
 ) -> None:
     """Bob editing alice's view must never change what alice sees -- it forks a view of bob's own."""
@@ -73,26 +77,28 @@ def test_persist_settings_branches_into_a_separate_view_when_editing_someone_els
     )
 
     sign_in_as("bob")
-    page = repo.persist_settings(store, repo.PageRef(experiment_id, alices_view.id), {"selected": ["lr"]})
+    page = repo.save_document_settings(
+        store, repo.PageRef(experiment_id, alices_view.id), page_model.DocumentSettings(hparam_columns=["lr"])
+    )
 
     assert page.id != alices_view.id
     assert page.owner_id == store.get_or_create_user(models.Principal.unverified("bob")).id
     assert page.panels == alices_view.panels  # seeded from what bob was looking at
-    assert page.page_settings["selected"] == ["lr"]
+    assert page.document.hparam_columns == ["lr"]
     untouched = store.get_view(page_model.BasicExperimentPage, alices_view.id)
     assert untouched is not None
     assert untouched.page_settings == {}
 
 
-def test_persist_settings_can_opt_out_of_branching_for_purely_personal_viewing_state(
+def test_saving_viewer_settings_never_branches(
     store: SQLLiteStore, experiment_id: int, sign_in_as: Callable[[str], None]
 ) -> None:
     """Which panel/tab is open is shared, last-write-wins state -- opening one never forks a view."""
     sign_in_as("alice")
     store.get_or_create_page(page_model.BasicExperimentPage, experiment_id=experiment_id)
 
-    page = repo.persist_settings(
-        store, repo.PageRef(experiment_id, None), {"open_panel": ["p"]}, branch_on_edit=False
+    page = repo.save_viewer_settings(
+        store, repo.PageRef(experiment_id, None), page_model.ViewerSettings(open_panels=["p"])
     )
 
     assert page.owner_id is None

@@ -27,10 +27,9 @@ from dlboard.models import (
 )
 from dlboard.serve._backend._artifact_download import artifact_url
 from dlboard.serve._pages._dataframe_helpers import run_display_name
-from dlboard.serve._pages._experiment._page_model import EXCLUDED_RUNS_KEY
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable
 
     from dlboard.models import DataStore
     from dlboard.serve._pages._experiment._page_model import BasicExperimentPage
@@ -43,8 +42,8 @@ type PanelFrames = Callable[[models.PanelInstance[Any, Any]], pd.DataFrame]
 
 def panel_frames(store: DataStore[...], page: BasicExperimentPage) -> PanelFrames:
     """Fetch for `page`'s experiment through `store`, leaving out the runs `page` excludes."""
-    experiment_id = cast("int", page.experiment_id)
-    return lambda panel: fetch_panel_dataframe(store, experiment_id, panel, page.page_settings)
+    experiment_id, excluded = cast("int", page.experiment_id), page.document.excluded_runs
+    return lambda panel: fetch_panel_dataframe(store, experiment_id, panel, excluded)
 
 
 def _splits_metric_and_artifact_charts(panel: models.PanelInstance[Any, Any]) -> bool:
@@ -70,9 +69,9 @@ def fetch_panel_dataframe(
     store: DataStore[...],
     experiment_id: int,
     panel: models.PanelInstance[Any, Any],
-    page_settings: dict[str, Any],
+    excluded_runs: Iterable[int] = (),
 ) -> pd.DataFrame:
-    """Fetch just the data one panel needs -- not the whole experiment."""
+    """Fetch just the data one panel needs -- not the whole experiment -- leaving out `excluded_runs`."""
     metric_cols = panel.hint_required_columns()
     artifact_keys = panel.hint_required_artifact_keys()
     artifact_key_prefixes = frozenset(panel.hint_required_artifact_key_prefixes())
@@ -89,7 +88,7 @@ def fetch_panel_dataframe(
     # default, flagged to the user by `_unscoped_fetch_badge`) or a set of keys, where empty means
     # "none of this kind at all".
     hparam_keys = panel.hint_required_hparams()
-    excluded = frozenset[int](page_settings.get(EXCLUDED_RUNS_KEY) or [])
+    excluded = frozenset(excluded_runs)
     metrics_df = (
         store.fetch_metrics(
             experiment_id,

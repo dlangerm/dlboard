@@ -130,7 +130,7 @@ def _fetch_open_panel_dataframes(
         shown = panel.model_copy(update={"charts": [c for i, c in enumerate(panel.charts) if i in indexes]})
         try:
             dataframes[panel_name] = panel_data.fetch_panel_dataframe(
-                store, experiment_id, shown, page.page_settings
+                store, experiment_id, shown, page.document.excluded_runs
             )
         except Exception:  # noqa: BLE001 -- one bad panel must not break the whole poll tick
             _log.exception("Live-update poll failed to fetch panel %r", panel_name)

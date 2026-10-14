@@ -456,11 +456,13 @@ def _register_auto_populate(app: Dash) -> None:
             mode=split_mode,
             lightning=lightning,
         )
-        page, container = edits.mutate_panels_and_rerender(
+        page, container = edits.commit(
             auto_populate_ctx["page_json"],
             auto_populate_ctx["paging_json"],
-            lambda _panels: panels,
-            extra_settings={page_model.OPEN_PANEL_KEY: panel_to_open(panels)},
+            edits.PageEdit(
+                panels=lambda _panels: panels,
+                settings=(page_model.ViewerSettings(open_panels=panel_to_open(panels)),),
+            ),
         )
         return container, page.model_dump_json(), False
 
@@ -524,7 +526,7 @@ def _add_charts(
             panels = page_model.add_chart_to_panel_by_name(panels, s.panel_name, s.chart)
         return panels
 
-    page, container = edits.mutate_panels_and_rerender(page_json, paging_json, add_all)
+    page, container = edits.commit(page_json, paging_json, edits.PageEdit(panels=add_all))
     remaining = [e for e in stored if (ColumnKind(e["kind"]), e["key"]) not in picked]
     return container, page.model_dump_json(), remaining
 

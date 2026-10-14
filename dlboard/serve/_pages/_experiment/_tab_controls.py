@@ -184,12 +184,14 @@ def _register_tab_drop(app: Dash) -> None:
         def move(panels: list[Any]) -> list[Any]:
             return [p.model_copy(update={"tab": new_tab}) if p.name == panel_name else p for p in panels]
 
-        page, container = edits.mutate_panels_and_rerender(
+        page, container = edits.commit(
             page_json,
             paging_json,
-            move,
-            extra_settings={page_model.ACTIVE_TAB_KEY: new_tab},
-            reveal_panel=panel_name,
+            edits.PageEdit(
+                panels=move,
+                settings=(page_model.ViewerSettings(active_tab=new_tab),),
+                reveal=edits.RevealPanel(panel_name),
+            ),
         )
         return container, page.model_dump_json()
 
@@ -214,12 +216,14 @@ def _register_tab_drop(app: Dash) -> None:
         def move(panels: list[Any]) -> list[Any]:
             return page_model.move_chart_to_tab(panels, panel_name, index, new_tab)
 
-        page, container = edits.mutate_panels_and_rerender(
+        page, container = edits.commit(
             page_json,
             paging_json,
-            move,
-            extra_settings={page_model.ACTIVE_TAB_KEY: new_tab},
-            reveal_chart=edits.chart_id_at(page_json, panel_name, index),
+            edits.PageEdit(
+                panels=move,
+                settings=(page_model.ViewerSettings(active_tab=new_tab),),
+                reveal=edits.RevealChartAt(panel_name, index),
+            ),
         )
         return container, page.model_dump_json()
 
@@ -311,11 +315,13 @@ def _register_new_tab(app: Dash) -> None:
             return no_update, no_update, no_update, error
 
         selected = set(panel_names)
-        page, container = edits.mutate_panels_and_rerender(
+        page, container = edits.commit(
             new_tab_ctx["page_json"],
             new_tab_ctx["paging_json"],
-            lambda panels: _panels_with_new_tab(panels, name=name, panel_names=selected),
-            extra_settings={page_model.ACTIVE_TAB_KEY: name},
+            edits.PageEdit(
+                panels=lambda panels: _panels_with_new_tab(panels, name=name, panel_names=selected),
+                settings=(page_model.ViewerSettings(active_tab=name),),
+            ),
         )
         return container, page.model_dump_json(), False, ""
 
@@ -387,16 +393,15 @@ def _register_rename_tab(app: Dash) -> None:
         if error:
             return no_update, no_update, no_update, error
 
-        active_tab = curr_page.page_settings.get(page_model.ACTIVE_TAB_KEY)
-        extra_settings: dict[str, str] = (
-            {page_model.ACTIVE_TAB_KEY: new_name} if active_tab == old_name else {}
-        )
-
-        page, container = edits.mutate_panels_and_rerender(
+        # Renaming the tab being shown keeps it the one shown.
+        follows = curr_page.viewer.active_tab == old_name
+        page, container = edits.commit(
             rename_ctx["page_json"],
             rename_ctx["paging_json"],
-            lambda panels: _panels_with_renamed_tab(panels, old_name=old_name, new_name=new_name),
-            extra_settings=extra_settings,
+            edits.PageEdit(
+                panels=lambda panels: _panels_with_renamed_tab(panels, old_name=old_name, new_name=new_name),
+                settings=(page_model.ViewerSettings(active_tab=new_name),) if follows else (),
+            ),
         )
         return container, page.model_dump_json(), False, ""
 

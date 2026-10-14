@@ -21,10 +21,9 @@ from dlboard.serve import Icon, icon
 from dlboard.serve._component_ids import ButtonId, DivId, PatternId, StoreId, ValueId
 from dlboard.serve._pages._dash_helpers import tooltipped_action_icon
 from dlboard.serve._pages._experiment._page_model import (
-    ACTIVE_TAB_KEY,
-    OPEN_PANEL_KEY,
     UNGROUPED_TAB,
     BasicExperimentPage,
+    ViewerSettings,
     group_panels_by_tab,
 )
 from dlboard.serve._pages._experiment._paging import (
@@ -68,7 +67,7 @@ Mantine's `Tabs` treats an empty-string `value` as "no value was set" and refuse
 tab/panel at all (a real, silent failure: the tab becomes unclickable, so there's no way back to
 the ungrouped panels once another tab exists) -- so component `value`s always go through
 `tab_component_value`/`tab_from_component_value` instead of using `PanelInstance.tab`/
-`ACTIVE_TAB_KEY`'s own `""` directly. A Private-Use-Area character prefix keeps this from
+`ViewerSettings.active_tab`'s own `""` directly. A Private-Use-Area character prefix keeps this from
 colliding with a tab name any user could actually type into the new-tab modal. Not underscored --
 `_panel_controls.py`'s per-panel tab-move dropdown needs the same mapping for its own `Select`.
 """
@@ -752,14 +751,8 @@ def _focus_on_chart(
     panel = next((p for p in page.panels if any(c.id == chart_id for c in p.charts)), None)
     if panel is None:
         return page, paging
-    focused = page.model_copy(
-        update={
-            "page_settings": {
-                **page.page_settings,
-                OPEN_PANEL_KEY: [*page.open_panels(), panel.name],
-                ACTIVE_TAB_KEY: panel.tab,
-            }
-        }
+    focused = page.with_settings(
+        ViewerSettings(open_panels=[*page.open_panels(), panel.name], active_tab=panel.tab)
     )
     return focused, reveal(page.panels, paging, panel_name=panel.name, chart_id=chart_id)
 

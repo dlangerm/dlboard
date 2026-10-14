@@ -461,7 +461,7 @@ def render_chart_preview(  # noqa: PLR0913
         page = repo.load_page(store, ref)
         panel = models.PanelInstance[Any, Any](name="preview", charts=[chart])
         return chart.render(
-            panel_data.fetch_panel_dataframe(store, ref.experiment_id, panel, page.page_settings)
+            panel_data.fetch_panel_dataframe(store, ref.experiment_id, panel, page.document.excluded_runs)
         ), ""
     except (ValidationError, KeyError, ValueError) as exc:
         _log.exception("error rendering preview")
@@ -564,11 +564,10 @@ def _register_submit(app: Dash) -> None:
         def apply_chart(panels: list[Any]) -> list[Any]:
             return [page_model.upsert_chart(p, panel_name, index, new_chart) for p in panels]
 
-        page, container = edits.mutate_panels_and_rerender(
+        page, container = edits.commit(
             add_chart_ctx["page_json"],
             add_chart_ctx["paging_json"],
-            apply_chart,
-            reveal_chart=new_chart.id,
+            edits.PageEdit(panels=apply_chart, reveal=edits.RevealChart(new_chart.id)),
         )
         return container, False, "", page.model_dump_json(), False
 

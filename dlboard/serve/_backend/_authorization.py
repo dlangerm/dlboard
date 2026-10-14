@@ -443,7 +443,7 @@ class AuthorizingDataStore(models.DataStore[...]):
         Write a page: one's own view freely, the shared page's layout only as an `EDITOR`.
 
         Shared viewing state (`page_settings` alone -- e.g. which panel is open, see
-        `persist_settings`'s `branch_on_edit`) is last-write-wins for anyone who can see the page.
+        `_page_repository.save_viewer_settings`) is last-write-wins for anyone who can see the page.
         """
         project_id = self._page_project(
             run_id=page.run_id, experiment_id=page.experiment_id, project_id=page.project_id

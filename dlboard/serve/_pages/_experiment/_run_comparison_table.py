@@ -408,11 +408,7 @@ def _load_hparam_panel_settings(
     just on a real settings change.
     """
     page = repo.load_page(store, ref)
-    excluded = page.page_settings.get(page_model.EXCLUDED_RUNS_KEY, [])
-    assert isinstance(excluded, list)
-    selected_setting = page.page_settings.get(page_model.SELECTED_HPARAM_COLS_KEY, [])
-    assert isinstance(selected_setting, list)
-    selected = [s for s in selected_setting if isinstance(s, str)]
+    excluded, selected = page.document.excluded_runs, page.document.hparam_columns
     runs = list(store.get_runs(ref.experiment_id, limit=_HPARAM_ROWS_LIMIT, offset=0))
     return runs, excluded, selected
 
@@ -537,10 +533,10 @@ def _register_hparam_table(app: Dash) -> None:
         store = get_data_store()
         # `ref_of`, not `STATE_VIEW_ID` -- see `render_navbar_hparams`'s own comment on why.
         curr_page = page_model.BasicExperimentPage.model_validate_json(page_json)
-        page = repo.persist_settings(
+        page = repo.save_document_settings(
             store,
             repo.ref_of(experiment_id, curr_page),
-            {page_model.SELECTED_HPARAM_COLS_KEY: selected or []},
+            page_model.DocumentSettings(hparam_columns=selected or []),
         )
         return page.model_dump_json()
 
@@ -585,15 +581,13 @@ def _register_hparam_table(app: Dash) -> None:
         # not `STATE_VIEW_ID` -- see `render_navbar_hparams`'s own comment on why.
         ref = repo.ref_of(experiment_id, page_model.BasicExperimentPage.model_validate_json(page_json))
         current_page = repo.load_page(store, ref)
-        currently_excluded = current_page.page_settings.get(page_model.EXCLUDED_RUNS_KEY, [])
-        if excluded == currently_excluded:
+        if excluded == current_page.document.excluded_runs:
             raise PreventUpdate
 
-        page, container = edits.persist_settings_and_rerender(
-            store,
-            ref,
+        page, container = edits.commit(
+            page_json,
             paging_json,
-            {page_model.EXCLUDED_RUNS_KEY: excluded},
+            edits.PageEdit(settings=(page_model.DocumentSettings(excluded_runs=excluded),)),
         )
         return page.model_dump_json(), container
 

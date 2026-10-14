@@ -44,7 +44,7 @@ from dlboard.serve._pages._experiment._live_updates import (
     LIVE_UPDATES_ENABLED_ID,
 )
 from dlboard.serve._pages._experiment._notes import NOTES_COUNT_ID, NOTES_THREAD_ID
-from dlboard.serve._pages._experiment._page_model import OPEN_PANEL_KEY, BasicExperimentPage
+from dlboard.serve._pages._experiment._page_model import BasicExperimentPage
 from dlboard.serve._pages._experiment._panel_view import (
     NEW_PANEL_ID,
     NEW_PANEL_NAME_ID,
@@ -1393,7 +1393,7 @@ def _open_panels(view_id: int) -> list[str]:
     store = get_system_data_store()
     view = store.get_view(BasicExperimentPage, view_id)
     assert view is not None
-    return list(cast("list[str]", view.page_settings.get(OPEN_PANEL_KEY, [])))
+    return list(cast("BasicExperimentPage", view).viewer.open_panels or [])
 
 
 def test_changes_in_a_saved_view_leave_the_shared_view_alone(

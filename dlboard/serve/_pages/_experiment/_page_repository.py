@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from dlboard import models
 from dlboard.serve import get_current_user
-from dlboard.serve._pages._experiment._page_model import BasicExperimentPage
+from dlboard.serve._pages._experiment._page_model import BasicExperimentPage, DocumentSettings, ViewerSettings
 
 if TYPE_CHECKING:
     from dlboard.models import DataStore
@@ -110,21 +110,18 @@ def save_page(store: DataStore[...], mutated: BasicExperimentPage) -> BasicExper
     )
 
 
-def persist_settings(
-    store: DataStore[...], ref: PageRef, updates: dict[str, Any], *, branch_on_edit: bool = True
-) -> BasicExperimentPage:
+def save_viewer_settings(store: DataStore[...], ref: PageRef, change: ViewerSettings) -> BasicExperimentPage:
     """
-    Merge `updates` into page_settings (server-authoritative) and persist -- no accordion rebuild.
+    Write how `ref`'s page is being browsed into it, in place -- never branching (see `ViewerSettings`).
 
-    `branch_on_edit` (on by default) branches into a view of your own first if `ref` doesn't already
-    point at one you own -- see `save_page`. The two call sites that pass `False` (which panel/tab
-    is open) are purely per-viewer browsing state: opening a panel isn't "editing the view" the way
-    deleting a chart or excluding a run is, so those two keep writing straight to whatever page
-    `ref` names, exactly as before this existed.
+    Opening a panel or switching tabs isn't editing the view the way deleting a chart or excluding a run
+    is, so it lands on whatever page `ref` names, yours or not.
     """
-    page = load_page(store, ref)
-    new_settings = {**page.page_settings, **updates}
-    mutated = page.model_copy(update={"page_settings": new_settings})
-    if not branch_on_edit:
-        return cast("BasicExperimentPage", store.update_page(mutated))
-    return save_page(store, mutated)
+    return cast("BasicExperimentPage", store.update_page(load_page(store, ref).with_settings(change)))
+
+
+def save_document_settings(
+    store: DataStore[...], ref: PageRef, change: DocumentSettings
+) -> BasicExperimentPage:
+    """Write `change` into `ref`'s page, branching into a view of your own first if it isn't yours (`save_page`)."""
+    return save_page(store, load_page(store, ref).with_settings(change))
