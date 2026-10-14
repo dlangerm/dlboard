@@ -12,14 +12,13 @@ from dlboard.serve._component_ids import PatternId
 from dlboard.serve._pages._experiment import _chart_editor_modal as editor
 from dlboard.serve._pages._experiment import _chart_suggestions as suggestions
 from dlboard.serve._pages._experiment import _chart_view as chart_view
-from dlboard.serve._pages._experiment import _experiment_page_state as state
 from dlboard.serve._pages._experiment import _ids as ids
 from dlboard.serve._pages._experiment import _panel_view as panel_view
 
 if TYPE_CHECKING:
     from types import ModuleType
 
-_MODULES: tuple[ModuleType, ...] = (state, editor, suggestions)
+_MODULES: tuple[ModuleType, ...] = (panel_view, chart_view, editor, suggestions)
 
 
 def _patterns() -> list[PatternId[ids.ExperimentPage]]:

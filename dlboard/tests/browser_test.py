@@ -37,12 +37,12 @@ from dlboard.serve import get_system_data_store
 from dlboard.serve._jump import JUMP_SELECT_ID
 from dlboard.serve._pages._experiment._chart_autogen import AUTO_OPEN_MAX_CHARTS
 from dlboard.serve._pages._experiment._chart_editor_modal import ADD_CHART_SUBMIT_ID
-from dlboard.serve._pages._experiment._experiment_page_state import (
+from dlboard.serve._pages._experiment._ids import METRIC_CONTENT_ID, PAGE_EXPERIMENT_ID
+from dlboard.serve._pages._experiment._live_updates import (
     LIVE_PAUSED_BADGE_ID,
     LIVE_STATUS_ID,
     LIVE_UPDATES_ENABLED_ID,
 )
-from dlboard.serve._pages._experiment._ids import METRIC_CONTENT_ID, PAGE_EXPERIMENT_ID
 from dlboard.serve._pages._experiment._notes import NOTES_COUNT_ID, NOTES_THREAD_ID
 from dlboard.serve._pages._experiment._page_model import OPEN_PANEL_KEY, BasicExperimentPage
 from dlboard.serve._pages._experiment._panel_view import (
@@ -361,7 +361,7 @@ def _current_page_model(page: Page, experiment_id: int) -> BasicExperimentPage:
     The page (shared, or whichever view the browser is currently on) the UI is actually showing.
 
     A structural edit branches into a view of the acting user's own the moment it happens (see
-    `_experiment_page_state.save_page`), so a helper that always reads the shared page stops
+    `_page_repository.save_page`), so a helper that always reads the shared page stops
     matching what's on screen the instant that first happens -- read `page`'s own `?view=` instead
     of assuming which one applies.
     """

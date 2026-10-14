@@ -35,8 +35,8 @@ from dlboard.serve._format import format_duration
 from dlboard.serve._grid import column_def, infer_column_dtype, themed_grid_kwargs
 from dlboard.serve._pages._dash_helpers import section_label, tooltipped_action_icon
 from dlboard.serve._pages._dataframe_helpers import run_display_name
-from dlboard.serve._pages._experiment import _experiment_page_state as core
 from dlboard.serve._pages._experiment import _ids as ids
+from dlboard.serve._pages._experiment import _page_edits as edits
 from dlboard.serve._pages._experiment import _page_model as page_model
 from dlboard.serve._pages._experiment import _page_repository as repo
 from dlboard.serve._pages._experiment._run_compare import compare_button
@@ -464,7 +464,7 @@ def _register_hparam_table(app: Dash) -> None:
         store = get_data_store()
         # `page_json` (this callback's own `STATE_PAGE_STORAGE` trigger) is the freshest known page,
         # ahead of `STATE_VIEW_ID` when a structural edit just branched into a new view of its own
-        # (`_experiment_page_state.save_page`) -- reading `view_id` instead here would still find
+        # (`_page_repository.save_page`) -- reading `view_id` instead here would still find
         # the page that edit branched *away* from, since `sync_view_after_edit` only catches
         # `STATE_VIEW_ID` up to it a separate, slightly later round trip.
         ref = (
@@ -589,7 +589,7 @@ def _register_hparam_table(app: Dash) -> None:
         if excluded == currently_excluded:
             raise PreventUpdate
 
-        page, container = core.persist_settings_and_rerender(
+        page, container = edits.persist_settings_and_rerender(
             store,
             ref,
             paging_json,

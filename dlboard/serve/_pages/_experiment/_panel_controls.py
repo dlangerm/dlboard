@@ -7,7 +7,7 @@ editing a chart is `_chart_editor_modal.py`'s; tabs are `_tab_controls.py`'s.
 
 Callbacks needing more than a couple of `State`s take them as one Dash "flexible callback
 signature" grouping -- a `dict` of `Input`/`State` objects that Dash flattens for dependency
-tracking but delivers back as a single dict argument (typed by a `core.EditCtx` subclass), which is
+tracking but delivers back as a single dict argument (typed by a `edits.EditCtx` subclass), which is
 what keeps them under ruff's `max-args`.
 
 Each feature (create, delete-chart, delete-panel, move, toggle, rename) registers via its own small
@@ -33,8 +33,8 @@ from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import ButtonId, DivId, ModalId, StoreId, ValueId
 from dlboard.serve._pages._dash_helpers import busy_while_running, require_triggered_id
 from dlboard.serve._pages._experiment import _chart_view as chart_view
-from dlboard.serve._pages._experiment import _experiment_page_state as core
 from dlboard.serve._pages._experiment import _ids as ids
+from dlboard.serve._pages._experiment import _page_edits as edits
 from dlboard.serve._pages._experiment import _page_model as page_model
 from dlboard.serve._pages._experiment import _panel_view as panel_view
 
@@ -104,17 +104,17 @@ class ChartPanelMoveRequest(TypedDict):
     after: bool
 
 
-class _DeleteChartCtx(core.EditCtx):
+class _DeleteChartCtx(edits.EditCtx):
     target: chart_view.ChartTargetData | None
     experiment_id: int
 
 
-class _DeletePanelCtx(core.EditCtx):
+class _DeletePanelCtx(edits.EditCtx):
     target: str | None
     experiment_id: int
 
 
-class _RenamePanelCtx(core.EditCtx):
+class _RenamePanelCtx(edits.EditCtx):
     old_name: str | None
     new_name: str | None
     experiment_id: int
@@ -261,7 +261,7 @@ def _register_create_panel(app: Dash) -> None:
             if isinstance(active_tab, str) and any(p.tab == active_tab for p in curr_page.panels)
             else ""
         )
-        page, container = core.mutate_panels_and_rerender(
+        page, container = edits.mutate_panels_and_rerender(
             page_json,
             paging_json,
             lambda panels: [*panels, PanelInstance(name=panel_name, tab=tab)],
@@ -312,7 +312,7 @@ def _register_delete_chart(app: Dash) -> None:
                 for p in panels
             ]
 
-        page, container = core.mutate_panels_and_rerender(
+        page, container = edits.mutate_panels_and_rerender(
             delete_ctx["page_json"],
             delete_ctx["paging_json"],
             remove_chart,
@@ -366,7 +366,7 @@ def _register_delete_panel(app: Dash) -> None:
         def remove_panel(panels: list[Any]) -> list[Any]:
             return [p for p in panels if p.name != panel_name]
 
-        page, container = core.mutate_panels_and_rerender(
+        page, container = edits.mutate_panels_and_rerender(
             delete_ctx["page_json"],
             delete_ctx["paging_json"],
             remove_panel,
@@ -406,7 +406,7 @@ def _register_reorder(app: Dash) -> None:
     ) -> tuple[html.Div, str]:
         if not request:
             raise PreventUpdate
-        page, container = core.mutate_panels_and_rerender(
+        page, container = edits.mutate_panels_and_rerender(
             page_json,
             paging_json,
             lambda panels: page_model.reorder_panel(
@@ -430,13 +430,13 @@ def _register_reorder(app: Dash) -> None:
         if not request:
             raise PreventUpdate
         panel_name, index = request["panel"], request["index"]
-        page, container = core.mutate_panels_and_rerender(
+        page, container = edits.mutate_panels_and_rerender(
             page_json,
             paging_json,
             lambda panels: page_model.reorder_chart(
                 panels, panel_name, index, request["target_index"], after=request["after"]
             ),
-            reveal_chart=core.chart_id_at(page_json, panel_name, index),
+            reveal_chart=edits.chart_id_at(page_json, panel_name, index),
         )
         return container, page.model_dump_json()
 
@@ -478,7 +478,7 @@ def _register_toggle(app: Dash) -> None:
         def toggle(panels: list[Any]) -> list[Any]:
             return page_model.set_panel_sync(panels, panel_name, sync=sync)
 
-        page, container = core.mutate_panels_and_rerender(
+        page, container = edits.mutate_panels_and_rerender(
             page_json,
             paging_json,
             toggle,
@@ -496,7 +496,7 @@ def _register_toggle(app: Dash) -> None:
     def change_panel_layout(_layouts: list[str], page_json: str, paging_json: str) -> tuple[html.Div, str]:
         """Apply a panel's Packed/Grid toggle -- every chart's width changes with it, so the page is rebuilt."""
         panel_name, edit = _validated_layout_change(page_json)
-        page, container = core.mutate_panels_and_rerender(
+        page, container = edits.mutate_panels_and_rerender(
             page_json, paging_json, lambda panels: page_model.update_panel(panels, panel_name, edit)
         )
         return container, page.model_dump_json()
@@ -527,7 +527,9 @@ def _register_toggle(app: Dash) -> None:
     def save_panel_grid_columns(_grid_columns: list[int], page_json: str) -> str:
         """Persist a column count the browser has already applied -- see `panel_grid_columns.js`."""
         panel_name, edit = _validated_layout_change(page_json)
-        page = core.mutate_panels(page_json, lambda panels: page_model.update_panel(panels, panel_name, edit))
+        page = edits.mutate_panels(
+            page_json, lambda panels: page_model.update_panel(panels, panel_name, edit)
+        )
         return page.model_dump_json()
 
 
@@ -563,11 +565,11 @@ def _register_chart_panel_move(app: Dash) -> None:
                 panels, panel_name, index, target_panel, target_index, after=after
             )
 
-        page, container = core.mutate_panels_and_rerender(
+        page, container = edits.mutate_panels_and_rerender(
             page_json,
             paging_json,
             move,
-            reveal_chart=core.chart_id_at(page_json, panel_name, index),
+            reveal_chart=edits.chart_id_at(page_json, panel_name, index),
         )
         return container, page.model_dump_json()
 
@@ -634,7 +636,7 @@ def _register_rename(app: Dash) -> None:
         elif open_panel == old_name:
             extra_settings[page_model.OPEN_PANEL_KEY] = new_name
 
-        page, container = core.mutate_panels_and_rerender(
+        page, container = edits.mutate_panels_and_rerender(
             rename_ctx["page_json"],
             rename_ctx["paging_json"],
             lambda panels: _panels_with_renamed_panel(panels, old_name=old_name, new_name=new_name),

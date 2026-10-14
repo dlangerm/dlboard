@@ -23,8 +23,8 @@ from dlboard.serve import ClientsideScript, Icon, get_data_store, icon
 from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import ButtonId, DivId, ModalId, PatternId, StoreId, ValueId
 from dlboard.serve._pages._dash_helpers import require_triggered_id
-from dlboard.serve._pages._experiment import _experiment_page_state as core
 from dlboard.serve._pages._experiment import _ids as ids
+from dlboard.serve._pages._experiment import _page_edits as edits
 from dlboard.serve._pages._experiment import _page_model as page_model
 from dlboard.serve._pages._experiment import _panel_data as panel_data
 from dlboard.serve._pages._experiment import _panel_view as panel_view
@@ -218,7 +218,7 @@ def chart_suggestion_shells() -> list[Component]:
     return [_suggest_charts_drawer(), _auto_populate_modal()]
 
 
-class _AutoPopulateCtx(core.EditCtx):
+class _AutoPopulateCtx(edits.EditCtx):
     delimiter: str | None
     mode: str | None
     experiment_id: int
@@ -456,7 +456,7 @@ def _register_auto_populate(app: Dash) -> None:
             mode=split_mode,
             lightning=lightning,
         )
-        page, container = core.mutate_panels_and_rerender(
+        page, container = edits.mutate_panels_and_rerender(
             auto_populate_ctx["page_json"],
             auto_populate_ctx["paging_json"],
             lambda _panels: panels,
@@ -524,7 +524,7 @@ def _add_charts(
             panels = page_model.add_chart_to_panel_by_name(panels, s.panel_name, s.chart)
         return panels
 
-    page, container = core.mutate_panels_and_rerender(page_json, paging_json, add_all)
+    page, container = edits.mutate_panels_and_rerender(page_json, paging_json, add_all)
     remaining = [e for e in stored if (ColumnKind(e["kind"]), e["key"]) not in picked]
     return container, page.model_dump_json(), remaining
 

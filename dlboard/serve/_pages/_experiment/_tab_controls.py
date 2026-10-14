@@ -19,8 +19,8 @@ from dlboard.models import PanelInstance
 from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import ButtonId, DivId, ModalId, StoreId, ValueId
 from dlboard.serve._pages._dash_helpers import busy_while_running
-from dlboard.serve._pages._experiment import _experiment_page_state as core
 from dlboard.serve._pages._experiment import _ids as ids
+from dlboard.serve._pages._experiment import _page_edits as edits
 from dlboard.serve._pages._experiment import _page_model as page_model
 from dlboard.serve._pages._experiment import _panel_view as panel_view
 
@@ -68,13 +68,13 @@ class ChartTabDropRequest(TypedDict):
     tab: str
 
 
-class _NewTabCtx(core.EditCtx):
+class _NewTabCtx(edits.EditCtx):
     name: str | None
     panel_names: list[str] | None
     experiment_id: int
 
 
-class _RenameTabCtx(core.EditCtx):
+class _RenameTabCtx(edits.EditCtx):
     old_name: str | None
     new_name: str | None
     experiment_id: int
@@ -184,7 +184,7 @@ def _register_tab_drop(app: Dash) -> None:
         def move(panels: list[Any]) -> list[Any]:
             return [p.model_copy(update={"tab": new_tab}) if p.name == panel_name else p for p in panels]
 
-        page, container = core.mutate_panels_and_rerender(
+        page, container = edits.mutate_panels_and_rerender(
             page_json,
             paging_json,
             move,
@@ -214,12 +214,12 @@ def _register_tab_drop(app: Dash) -> None:
         def move(panels: list[Any]) -> list[Any]:
             return page_model.move_chart_to_tab(panels, panel_name, index, new_tab)
 
-        page, container = core.mutate_panels_and_rerender(
+        page, container = edits.mutate_panels_and_rerender(
             page_json,
             paging_json,
             move,
             extra_settings={page_model.ACTIVE_TAB_KEY: new_tab},
-            reveal_chart=core.chart_id_at(page_json, panel_name, index),
+            reveal_chart=edits.chart_id_at(page_json, panel_name, index),
         )
         return container, page.model_dump_json()
 
@@ -311,7 +311,7 @@ def _register_new_tab(app: Dash) -> None:
             return no_update, no_update, no_update, error
 
         selected = set(panel_names)
-        page, container = core.mutate_panels_and_rerender(
+        page, container = edits.mutate_panels_and_rerender(
             new_tab_ctx["page_json"],
             new_tab_ctx["paging_json"],
             lambda panels: _panels_with_new_tab(panels, name=name, panel_names=selected),
@@ -392,7 +392,7 @@ def _register_rename_tab(app: Dash) -> None:
             {page_model.ACTIVE_TAB_KEY: new_name} if active_tab == old_name else {}
         )
 
-        page, container = core.mutate_panels_and_rerender(
+        page, container = edits.mutate_panels_and_rerender(
             rename_ctx["page_json"],
             rename_ctx["paging_json"],
             lambda panels: _panels_with_renamed_tab(panels, old_name=old_name, new_name=new_name),

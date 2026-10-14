@@ -4,7 +4,6 @@ from typing import Any, cast
 
 import dash
 import dash_mantine_components as dmc
-import pendulum
 from dash import dcc, html
 from dash.dcc import Store
 from dash.development.base_component import Component
@@ -12,8 +11,8 @@ from flask import request
 
 from dlboard.serve import _constants as constants
 from dlboard.serve import get_current_user, get_data_store
-from dlboard.serve._pages._experiment import _experiment_page_state as core
 from dlboard.serve._pages._experiment import _ids as ids
+from dlboard.serve._pages._experiment import _live_updates as live
 from dlboard.serve._pages._experiment import _page_model as page_model
 from dlboard.serve._pages._experiment import _page_repository as repo
 from dlboard.serve._pages._experiment import _panel_controls as panel_controls
@@ -27,7 +26,8 @@ from dlboard.serve._pages._experiment._run_compare import CompareQuery, compare_
 from dlboard.serve._pages._experiment._views import resolve_view_id, view_controls
 from dlboard.serve._pages._onboarding import first_run_snippet, onboarding_card
 
-_LIVE_UPDATE_SETTINGS = core.LiveUpdateSettings()
+# Built once, at this module's import -- inside `build_app` -- so the env it reads is the app's (see tests/conftest.py).
+_LIVE_UPDATE_SETTINGS = live.LiveUpdateSettings()
 
 # One dcc.Store per drag-drop gesture a completed drag can report (`_experiment_page_dragdrop.js`,
 # via `set_props`) -- listed in the static layout below, not `accordion_view`'s render tree, so the
@@ -42,7 +42,7 @@ _DRAG_DROP_STORE_IDS = [
 
 
 def _live_update_header(header: Component, notes: Component, views: Component) -> dmc.Group:
-    """The experiment header, its view picker, and the live-update status badge/switch/"fetched Xs ago" label."""
+    """The experiment header, its notes and view picker, and the live-update status (`live.live_controls`)."""
     return dmc.Group(
         [
             html.Div(header, id=ids.EXPERIMENT_HEADER_ID),
@@ -51,34 +51,7 @@ def _live_update_header(header: Component, notes: Component, views: Component) -
                     notes,
                     views,
                     dmc.Divider(orientation="vertical"),
-                    html.Div(core.live_status_badge(ok=True), id=core.LIVE_STATUS_ID),
-                    # Hidden until the switch below is unchecked -- a plain CSS visibility swap
-                    # with the div above (see `live_switch_state.js`), not a second callback
-                    # writing that div's `children`.
-                    html.Div(
-                        dmc.Badge("Paused", color="gray", variant="dot", size="sm", tt="none"),
-                        id=core.LIVE_PAUSED_BADGE_ID,
-                        style={"display": "none"},
-                    ),
-                    dmc.Text("Fetched just now", id=core.LIVE_LAST_FETCH_LABEL_ID, size="xs", c="dimmed"),
-                    dmc.Tooltip(
-                        # `persistence`/`persistence_type="local"` is the *entire* mechanism here --
-                        # Dash writes `checked` straight to the browser's own `localStorage` keyed
-                        # by this component's id, a per-browser viewing preference. No `dcc.Store`,
-                        # no server round trip, and nothing shared with other viewers of the same
-                        # experiment.
-                        dmc.Switch(
-                            id=core.LIVE_UPDATES_ENABLED_ID,
-                            checked=True,
-                            size="xs",
-                            persistence=True,
-                            persistence_type="local",
-                            persisted_props=["checked"],
-                        ),
-                        label="Live updates",
-                        position="top",
-                        withArrow=True,
-                    ),
+                    *live.live_controls(),
                 ],
                 gap="xs",
                 wrap="nowrap",
@@ -184,18 +157,7 @@ def layout(
                 gap="xs",
             ),
         ),
-        # Drives `poll_for_updates` (`_experiment/__init__.py`): each tick does one indexed PK read
-        # of `Experiment.revision`, only paying for a real refresh when it's actually changed since
-        # the last poll -- see `LiveUpdateSettings`. `disabled` is flipped client-side by
-        # `LIVE_UPDATES_ENABLED_ID` (`live_switch_state.js`) -- unchecking it genuinely stops this
-        # from firing at all, not just from being acted on.
-        dcc.Interval(id=core.LIVE_POLL_INTERVAL_ID, interval=_LIVE_UPDATE_SETTINGS.poll_interval_ms),
-        # Drives the "Fetched Xs ago" label (`live_last_fetch_label.js`) -- purely client-side, so
-        # this stays enabled (and ticking, showing growing staleness) even while the poll above is
-        # switched off.
-        dcc.Interval(id=core.LIVE_TICK_INTERVAL_ID, interval=_LIVE_UPDATE_SETTINGS.tick_interval_ms),
-        Store(id=core.STATE_LAST_KNOWN_REVISION, data=exp.revision),
-        Store(id=core.STATE_LAST_FETCH_AT, data=pendulum.now("UTC").isoformat()),
+        *live.live_timers(_LIVE_UPDATE_SETTINGS, exp.revision),
         Store(id=ids.STATE_PAGE_STORAGE, data=page_json),
         Store(id=ids.STATE_VIEW_ID, data=view_id),
         Store(id=STATE_NOTES_REVISION, data=exp.notes_revision),

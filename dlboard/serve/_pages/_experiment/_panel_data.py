@@ -27,9 +27,7 @@ from dlboard.models import (
 )
 from dlboard.serve._backend._artifact_download import artifact_url
 from dlboard.serve._pages._dataframe_helpers import run_display_name
-from dlboard.serve._pages._experiment._page_model import (
-    EXCLUDED_RUNS_KEY,
-)
+from dlboard.serve._pages._experiment._page_model import EXCLUDED_RUNS_KEY
 
 if TYPE_CHECKING:
     from collections.abc import Callable

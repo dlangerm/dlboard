@@ -19,12 +19,8 @@ if TYPE_CHECKING:
     import pandas as pd
     from dash.development.base_component import Component
 
-from dlboard.serve._pages._experiment._ids import (
-    ExperimentPage,
-)
-from dlboard.serve._pages._experiment._panel_data import (
-    chart_data_fingerprint,
-)
+from dlboard.serve._pages._experiment._ids import ExperimentPage
+from dlboard.serve._pages._experiment._panel_data import chart_data_fingerprint
 
 _log = get_logger(__name__)
 

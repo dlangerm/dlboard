@@ -1,4 +1,4 @@
-// Clientside body for `_experiment_page_state.py`'s one paging side-effect callback. Whenever the
+// Clientside body for `_panel_area_controls.py`'s one paging side-effect callback. Whenever the
 // serialized `Paging` (`data`) changes it does two things to the browser, neither of which has a Dash
 // prop to write:
 //

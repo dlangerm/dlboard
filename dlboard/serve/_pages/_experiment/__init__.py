@@ -2,7 +2,7 @@
 The basic experiment page: hparam/run table + chart accordion, plus the experiment header.
 
 This module's own job is just the page-level chrome (description editing, delete) and `register()`,
-which wires the CSS/JS routes and delegates every feature to its owning submodule:
+which wires the CSS/JS routes and delegates everything else to its submodules.
 
 Layers, each importing only from the ones above it:
 
@@ -11,8 +11,7 @@ Layers, each importing only from the ones above it:
 - `_panel_data.py` -- fetching a panel's data, and the fingerprint the live poll compares.
 - `_ids.py` -- the page tag and the few ids more than one feature reads or writes.
 - `_chart_view.py`, `_panel_view.py` -- the panel area's render tree, handed its data (never a store).
-- `_experiment_page_state.py` -- the panel area's own callbacks (paging, open panels, the active tab)
-  and the "edit, save, re-render" helpers the feature modules below build on.
+- `_page_edits.py` -- "edit, save, re-render", the step every feature's edit callback ends with.
 
 Features, each owning its ids, its modal or drawer, and its callbacks:
 
@@ -21,6 +20,8 @@ Features, each owning its ids, its modal or drawer, and its callbacks:
 - `_chart_editor_modal.py` -- the add/edit-chart modal: its form, live preview and submit.
 - `_chart_suggestions.py` -- auto-populate charts for an empty view; suggest un-charted keys.
 - `_run_comparison_table.py` -- the navbar's hparam/metric/run comparison table + run deletion.
+- `_panel_area_controls.py` -- paging and filtering the panel area, opening panels, switching tabs.
+- `_live_updates.py` -- the poll that redraws only charts whose data changed, and its status.
 
 Anything outside this package imports straight from the submodule that owns what it needs (the
 underscore is a "this is an implementation detail you're reaching into on purpose" signal, not an
@@ -30,10 +31,9 @@ access restriction) rather than through re-exports here.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-import pendulum
-from dash import Dash, Input, Output, State, no_update
+from dash import Dash, State
 from structlog.stdlib import get_logger
 
 from dlboard.serve import AssetKind, get_current_user, get_data_store, serve_asset
@@ -50,17 +50,15 @@ from dlboard.serve._pages._description_editor import (
     register_edit_callbacks,
     render_header,
 )
-from dlboard.serve._pages._experiment import _chart_view as chart_view
-from dlboard.serve._pages._experiment import _experiment_page_state as core
 from dlboard.serve._pages._experiment import _ids as ids
-from dlboard.serve._pages._experiment import _page_model as page_model
 from dlboard.serve._pages._experiment import _page_repository as repo
 from dlboard.serve._pages._experiment import _panel_data as panel_data
 from dlboard.serve._pages._experiment import _panel_view as panel_view
 from dlboard.serve._pages._experiment._chart_editor_modal import register_chart_editor_callbacks
 from dlboard.serve._pages._experiment._chart_suggestions import register_chart_suggestions_callbacks
-from dlboard.serve._pages._experiment._notes import STATE_NOTES_REVISION, register_notes_callbacks
-from dlboard.serve._pages._experiment._paging import Paging
+from dlboard.serve._pages._experiment._live_updates import register_live_update_callbacks
+from dlboard.serve._pages._experiment._notes import register_notes_callbacks
+from dlboard.serve._pages._experiment._panel_area_controls import register_panel_area_callbacks
 from dlboard.serve._pages._experiment._panel_controls import register_panel_controls_callbacks
 from dlboard.serve._pages._experiment._run_compare import register_run_compare_callbacks
 from dlboard.serve._pages._experiment._run_comparison_table import register_run_comparison_callbacks
@@ -69,12 +67,11 @@ from dlboard.serve._pages._experiment._views import register_view_callbacks
 from dlboard.serve._url import relative_path
 
 if TYPE_CHECKING:
-    import pandas as pd
     from dash import html
     from dash.development.base_component import Component
 
-    from dlboard import models
     from dlboard.models import DataStore
+    from dlboard.serve._pages._experiment._paging import Paging
 
 _log = get_logger(__name__)
 
@@ -153,188 +150,12 @@ def render_panel(
     return container, header, page.model_dump_json()
 
 
-def _fetch_open_panel_dataframes(
-    store: DataStore[...],
-    experiment_id: int,
-    page: page_model.BasicExperimentPage,
-    chart_ids: list[chart_view.ChartID],
-) -> tuple[dict[str, pd.DataFrame], bool]:
-    """
-    Fetch the dataframe of each panel with charts on screen, for just those charts -- once per panel.
-
-    Not once per chart: "Auto-generate charts" routinely groups several charts sharing a panel, so
-    fetching per panel (rather than per chart) keeps a poll tick's cost proportional to how many
-    panels are open. And not for the panel's other charts: only one page of them is on screen (see
-    `Paging`), so a tick costs what that page does, however many charts the panel holds.
-    """
-    panels_by_name = {p.name: p for p in page.panels}
-    mounted: dict[str, set[int]] = {}
-    for chart_id in chart_ids:
-        if chart_id["index"] is not None:
-            mounted.setdefault(chart_id["panel"], set()).add(chart_id["index"])
-    dataframes: dict[str, pd.DataFrame] = {}
-    ok = True
-    for panel_name, indexes in mounted.items():
-        panel = panels_by_name.get(panel_name)
-        if panel is None:
-            continue
-        shown = panel.model_copy(update={"charts": [c for i, c in enumerate(panel.charts) if i in indexes]})
-        try:
-            dataframes[panel_name] = panel_data.fetch_panel_dataframe(
-                store, experiment_id, shown, page.page_settings
-            )
-        except Exception:  # noqa: BLE001 -- one bad panel must not break the whole poll tick
-            _log.exception("Live-update poll failed to fetch panel %r", panel_name)
-            ok = False
-    return dataframes, ok
-
-
-def _refresh_chart_bodies(
-    chart_ids: list[chart_view.ChartID],
-    panels_by_name: dict[str, models.PanelInstance[Any, Any]],
-    dataframes: dict[str, pd.DataFrame],
-    shown: dict[tuple[str, int | None], str],
-    page_size: int,
-) -> tuple[list[Any], bool]:
-    """
-    The new body of each chart whose data is no longer what its on-screen body was drawn from.
-
-    `shown` is the `chart_data_fingerprint` each chart's body carries (`chart_body`); one that still
-    matches what the data says now is left alone (`no_update`).
-    """
-    contents: list[Any] = []
-    ok = True
-    for chart_id in chart_ids:
-        panel_name, index = chart_id["panel"], chart_id["index"]
-        panel = panels_by_name.get(panel_name)
-        df = dataframes.get(panel_name)
-        if panel is None or df is None or index is None or index >= len(panel.charts):
-            contents.append(no_update)
-            continue
-        try:
-            if panel_data.chart_data_fingerprint(panel.charts[index], df) == shown.get((panel_name, index)):
-                contents.append(no_update)
-            else:
-                contents.append(chart_view.chart_body(panel, index, df, page_size))
-        except Exception:  # noqa: BLE001 -- one bad chart must not break the whole poll tick
-            _log.exception("Live-update poll failed to refresh chart %r", f"{panel_name}:{index}")
-            contents.append(no_update)
-            ok = False
-    return contents, ok
-
-
-def register_render_callbacks(app: Dash) -> None:
-    """The live-update poll; the initial render itself happens synchronously in `layout()`."""
-
-    # --- live updates: a cheap poll of `Experiment.revision` re-renders only the individual open
-    # charts whose own data actually changed (never touching the accordion/tabs shell, closed
-    # panels, or sibling charts sharing a panel), so new data appears without any page/panel-level
-    # flash a coarser rebuild would cause. Also refreshes `STATE_HPARAMS`, since the navbar
-    # run-comparison table (`_run_comparison_table.py`) reads run/hparam data from it, not from a
-    # live store query of its own.
-    #
-    # Each open *panel* is still fetched only once per tick (`fetch_panel_dataframe`, the same call
-    # the initial render makes) -- "Auto-generate charts" routinely groups several charts sharing a
-    # panel, and fetching once per panel rather than once per chart keeps this poll's per-tick cost
-    # proportional to how many panels are open, not how many charts they hold. Each chart's own
-    # `chart_data_fingerprint` (scoped to just its own columns of that shared dataframe) is what
-    # decides whether *that* chart's body actually needs to be replaced -- compared with the one the body
-    # on screen carries, so a chart that was just mounted is not redrawn for nothing. ---
-    @app.callback(
-        Output(chart_view.CHART_BODY.all(), "children"),
-        Output(ids.STATE_HPARAMS, "data", allow_duplicate=True),
-        Output(core.STATE_LAST_KNOWN_REVISION, "data", allow_duplicate=True),
-        Output(core.STATE_LAST_FETCH_AT, "data", allow_duplicate=True),
-        Output(core.LIVE_STATUS_ID, "children"),
-        Output(STATE_NOTES_REVISION, "data"),
-        Input(core.LIVE_POLL_INTERVAL_ID, "n_intervals"),
-        State(chart_view.CHART_BODY.all(), "id"),
-        State(chart_view.CHART_FINGERPRINT.all(), "id"),
-        State(chart_view.CHART_FINGERPRINT.all(), "children"),
-        State(constants.STATE_EXPERIMENT_ID, "data"),
-        State(ids.STATE_VIEW_ID, "data"),
-        State(core.STATE_LAST_KNOWN_REVISION, "data"),
-        State(STATE_NOTES_REVISION, "data"),
-        State(ids.PANEL_PAGING_ID, "data"),
-        prevent_initial_call=True,
-    )
-    def poll_for_updates(  # noqa: PLR0913
-        _n_intervals: int,
-        chart_ids: list[chart_view.ChartID],
-        fingerprint_ids: list[chart_view.ChartID],
-        fingerprints: list[str],
-        experiment_id: int,
-        view_id: int | None,
-        last_known_revision: int | None,
-        last_notes_revision: int | None,
-        paging_json: str,
-    ) -> tuple[list[Any], Any, Any, Any, Component, Any]:
-        store = get_data_store()
-        ok = True
-        try:
-            experiment = store.get_experiment(experiment_id)
-        except Exception:  # noqa: BLE001 -- a poll failure is reported via the status badge, not raised
-            _log.exception("Live-update poll failed for experiment %s", experiment_id)
-            experiment, ok = None, False
-
-        # Set on every tick that actually reached the store, whether or not anything had changed --
-        # "how stale could this be" (`LIVE_LAST_FETCH_LABEL_ID`, ticked purely client-side) needs the
-        # time of the last real check, not the time of the last real change.
-        fetched_at = pendulum.now("UTC").isoformat() if ok else no_update
-        # Notes changed (posted/deleted) since the last tick: tells an open notes thread to refresh,
-        # from the same one-row read -- and independently of whether any chart data changed.
-        notes_revision = (
-            experiment.notes_revision
-            if experiment is not None and experiment.notes_revision != last_notes_revision
-            else no_update
-        )
-
-        if not ok or experiment is None or experiment.revision == last_known_revision:
-            return (
-                [no_update] * len(chart_ids),
-                no_update,
-                no_update,
-                fetched_at,
-                core.live_status_badge(ok=ok),
-                notes_revision,
-            )
-
-        page = repo.load_page(store, repo.PageRef(experiment_id, view_id))
-        panels_by_name = {p.name: p for p in page.panels}
-        dataframes, fetch_ok = _fetch_open_panel_dataframes(store, experiment_id, page, chart_ids)
-        shown = {
-            (i["panel"], i["index"]): fingerprint
-            for i, fingerprint in zip(fingerprint_ids, fingerprints, strict=True)
-        }
-        contents, render_ok = _refresh_chart_bodies(
-            chart_ids, panels_by_name, dataframes, shown, Paging.model_validate_json(paging_json).sizes.charts
-        )
-        poll_ok = fetch_ok and render_ok
-
-        try:
-            hparams_json: Any = [h.model_dump_json() for h in store.fetch_hyperparams(experiment_id)]
-        except Exception:  # noqa: BLE001 -- charts refreshed above still ship even if this fails
-            _log.exception(
-                "Live-update poll failed to refresh hyperparameters for experiment %s", experiment_id
-            )
-            hparams_json, poll_ok = no_update, False
-
-        return (
-            contents,
-            hparams_json,
-            experiment.revision,
-            fetched_at,
-            core.live_status_badge(ok=poll_ok),
-            notes_revision,
-        )
-
-
 def register(app: Dash) -> None:
     """Register the experiment page: hparam table + chart accordion + editor."""
     for kind, path in _ASSETS:
         serve_asset(app, kind, path.name, path.read_bytes())
 
-    register_render_callbacks(app)
+    register_live_update_callbacks(app)
 
     def _fetch_experiment_header(experiment_id: int) -> tuple[str, str]:
         store = get_data_store()
@@ -379,7 +200,7 @@ def register(app: Dash) -> None:
         on_confirm=_delete_experiment,
     )
 
-    core.register_state_callbacks(app)
+    register_panel_area_callbacks(app)
     register_panel_controls_callbacks(app)
     register_tab_controls_callbacks(app)
     register_chart_editor_callbacks(app)

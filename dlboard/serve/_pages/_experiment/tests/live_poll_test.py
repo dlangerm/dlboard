@@ -7,9 +7,9 @@ from typing import TYPE_CHECKING, Any
 from dlboard.models._view import ChartInstance, PanelInstance
 from dlboard.plugins.charts.line_chart import LineChart
 from dlboard.serve._pages._experiment import _chart_view as chart_view
-from dlboard.serve._pages._experiment import _fetch_open_panel_dataframes
 from dlboard.serve._pages._experiment import _page_model as page_model
 from dlboard.serve._pages._experiment import _page_repository as repo
+from dlboard.serve._pages._experiment._live_updates import _fetch_open_panel_dataframes
 
 if TYPE_CHECKING:
     import pytest

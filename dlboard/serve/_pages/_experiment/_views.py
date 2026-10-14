@@ -7,7 +7,7 @@ in a view never changes the shared page, nor anyone else's view. The active view
 URL (`?view=<id>`), so it survives a reload and can be bookmarked or sent to someone.
 
 A view doesn't have to be created up front, either: every edit anywhere on this page goes through
-`_experiment_page_state.save_page`, which branches into a new view of your own the moment you edit
+`_page_repository.save_page`, which branches into a new view of your own the moment you edit
 something you don't already own (the shared page, or someone else's view) -- so pruning the shared
 page down to "just one chart type" never touches what anyone else sees, even mid-experiment, with
 no separate "duplicate this view" step first. `sync_view_after_edit`/`sync_view_url.js`, below, are what
@@ -177,7 +177,7 @@ def view_controls(  # noqa: PLR0913
 
     `is_owner` is `False` for the shared page (nobody "owns" it) and for a view someone else's --
     editing either still works, it just branches you into a view of your own the moment you make a
-    change (see `_experiment_page_state.save_page`) rather than letting you rename or delete theirs.
+    change (see `_page_repository.save_page`) rather than letting you rename or delete theirs.
     `view_name` is the current page's own name, needed only to show a view that isn't yours (`not
     is_owner`, `view_id` not `None`) in the picker at all -- see `_options`'s `foreign_view`.
     `is_shared` is the current page's own `NewPage.shared` -- meaningless (and the toggle hidden)
@@ -573,7 +573,7 @@ def _register_sync_after_edit(app: Dash) -> None:
 
         Every persisting callback on this page writes its result to `STATE_PAGE_STORAGE` -- this is
         the one place that reacts to *any* of them, so an edit that branched into a new personal
-        view (`_experiment_page_state.save_page`) shows up here without every one of those callbacks
+        view (`_page_repository.save_page`) shows up here without every one of those callbacks
         needing to know views exist at all. Cheap on the (overwhelmingly common) no-branch tick: the
         comparison below is pure Python, so the `list_views` read only happens on an actual branch.
 

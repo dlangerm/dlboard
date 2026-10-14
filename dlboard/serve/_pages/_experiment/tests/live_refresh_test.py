@@ -15,7 +15,7 @@ from dlboard.models import ChartInstance, ChartType, ColumnKind, PanelInstance
 from dlboard.plugins.charts.line_chart import LineChart
 from dlboard.serve._pages._experiment import _chart_view as chart_view
 from dlboard.serve._pages._experiment import _panel_data as panel_data
-from dlboard.serve._pages._experiment import _refresh_chart_bodies
+from dlboard.serve._pages._experiment._live_updates import _refresh_chart_bodies
 
 _PANEL = PanelInstance[Any, Any](
     name="p",

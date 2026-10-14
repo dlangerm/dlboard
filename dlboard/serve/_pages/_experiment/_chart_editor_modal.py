@@ -25,8 +25,8 @@ from dlboard.serve._component_ids import ButtonId, DivId, ModalId, PatternId, St
 from dlboard.serve._grid import themed_grid_kwargs
 from dlboard.serve._pages._dash_helpers import require_triggered_id
 from dlboard.serve._pages._experiment import _chart_view as chart_view
-from dlboard.serve._pages._experiment import _experiment_page_state as core
 from dlboard.serve._pages._experiment import _ids as ids
+from dlboard.serve._pages._experiment import _page_edits as edits
 from dlboard.serve._pages._experiment import _page_model as page_model
 from dlboard.serve._pages._experiment import _page_repository as repo
 from dlboard.serve._pages._experiment import _panel_data as panel_data
@@ -78,7 +78,7 @@ _CHART_PARAM_TABLE_ADD: Final = _FieldPattern("chart-param-table-add")
 _CHART_PARAM_TABLE_REMOVE: Final = _FieldPattern("chart-param-table-remove")
 
 
-class _AddChartCtx(core.EditCtx):
+class _AddChartCtx(edits.EditCtx):
     chart_type_name: str | None
     values: list[Any]
     checked_values: list[Any]
@@ -564,7 +564,7 @@ def _register_submit(app: Dash) -> None:
         def apply_chart(panels: list[Any]) -> list[Any]:
             return [page_model.upsert_chart(p, panel_name, index, new_chart) for p in panels]
 
-        page, container = core.mutate_panels_and_rerender(
+        page, container = edits.mutate_panels_and_rerender(
             add_chart_ctx["page_json"],
             add_chart_ctx["paging_json"],
             apply_chart,
