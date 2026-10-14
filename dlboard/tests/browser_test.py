@@ -46,15 +46,14 @@ from dlboard.serve._pages._experiment._experiment_page_state import (
     NEW_PANEL_NAME_ID,
     NEW_PANEL_OPEN_ID,
     NEW_TAB_BUTTON_ID,
-    OPEN_PANEL_KEY,
     PAGE_EXPERIMENT_ID,
     PANEL_AREA_ID,
     PANEL_FILTER_ID,
     PANEL_PAGE_SIZE_ID,
     RENAME_TAB_BUTTON_ID,
-    BasicExperimentPage,
 )
 from dlboard.serve._pages._experiment._notes import NOTES_COUNT_ID, NOTES_THREAD_ID
+from dlboard.serve._pages._experiment._page_model import OPEN_PANEL_KEY, BasicExperimentPage
 from dlboard.serve._pages._experiment._run_compare import (
     COMPARE_GRID_ID,
     COMPARE_MODE_ID,

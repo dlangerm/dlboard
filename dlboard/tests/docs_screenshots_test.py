@@ -33,8 +33,9 @@ from dlboard.client.artifacts.figure import Figure
 from dlboard.conftest import ScreenshotMode
 from dlboard.serve import get_system_data_store
 from dlboard.serve._pages._experiment._chart_autogen import ARTIFACT_PANEL_SUFFIX
-from dlboard.serve._pages._experiment._experiment_page_state import PAGE_EXPERIMENT_ID, BasicExperimentPage
+from dlboard.serve._pages._experiment._experiment_page_state import PAGE_EXPERIMENT_ID
 from dlboard.serve._pages._experiment._notes import NOTES_THREAD_ID
+from dlboard.serve._pages._experiment._page_model import BasicExperimentPage
 from dlboard.serve._pages._experiment._run_compare import COMPARE_OPEN_ID
 
 if TYPE_CHECKING:

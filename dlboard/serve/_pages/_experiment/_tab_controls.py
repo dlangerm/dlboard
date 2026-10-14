@@ -20,6 +20,7 @@ from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import ButtonId, DivId, ModalId, StoreId, ValueId
 from dlboard.serve._pages._dash_helpers import busy_while_running
 from dlboard.serve._pages._experiment import _experiment_page_state as core
+from dlboard.serve._pages._experiment import _page_model as page_model
 
 if TYPE_CHECKING:
     from dash.development.base_component import Component
@@ -173,7 +174,7 @@ def _register_tab_drop(app: Dash) -> None:
             raise PreventUpdate
         panel_name, new_tab = request["panel"], request["tab"]
 
-        current_page = core.BasicExperimentPage.model_validate_json(page_json)
+        current_page = page_model.BasicExperimentPage.model_validate_json(page_json)
         current_tab = next((p.tab for p in current_page.panels if p.name == panel_name), None)
         if new_tab == current_tab:
             raise PreventUpdate
@@ -185,7 +186,7 @@ def _register_tab_drop(app: Dash) -> None:
             page_json,
             paging_json,
             move,
-            extra_settings={core.ACTIVE_TAB_KEY: new_tab},
+            extra_settings={page_model.ACTIVE_TAB_KEY: new_tab},
             reveal_panel=panel_name,
         )
         return container, page.model_dump_json()
@@ -209,13 +210,13 @@ def _register_tab_drop(app: Dash) -> None:
         panel_name, index, new_tab = request["panel"], request["index"], request["tab"]
 
         def move(panels: list[Any]) -> list[Any]:
-            return core.move_chart_to_tab(panels, panel_name, index, new_tab)
+            return page_model.move_chart_to_tab(panels, panel_name, index, new_tab)
 
         page, container = core.mutate_panels_and_rerender(
             page_json,
             paging_json,
             move,
-            extra_settings={core.ACTIVE_TAB_KEY: new_tab},
+            extra_settings={page_model.ACTIVE_TAB_KEY: new_tab},
             reveal_chart=core.chart_id_at(page_json, panel_name, index),
         )
         return container, page.model_dump_json()
@@ -232,7 +233,7 @@ def _panels_with_new_tab(
     """
     new_panels = [p.model_copy(update={"tab": name}) if p.name in panel_names else p for p in panels]
     if not panel_names:
-        new_panels.append(PanelInstance(name=core.unique_panel_name(panels, name), tab=name))
+        new_panels.append(PanelInstance(name=page_model.unique_panel_name(panels, name), tab=name))
     return new_panels
 
 
@@ -276,7 +277,7 @@ def _register_new_tab(app: Dash) -> None:
     def open_new_tab_modal(n_clicks: int, page_json: str) -> tuple[bool, str, list[str], list[str], str]:
         if not n_clicks:
             raise PreventUpdate
-        page = core.BasicExperimentPage.model_validate_json(page_json)
+        page = page_model.BasicExperimentPage.model_validate_json(page_json)
         return True, "", [p.name for p in page.panels], [], ""
 
     @app.callback(
@@ -302,7 +303,7 @@ def _register_new_tab(app: Dash) -> None:
             raise PreventUpdate
         name = (new_tab_ctx["name"] or "").strip()
         panel_names = new_tab_ctx["panel_names"] or []
-        curr_page = core.BasicExperimentPage.model_validate_json(new_tab_ctx["page_json"])
+        curr_page = page_model.BasicExperimentPage.model_validate_json(new_tab_ctx["page_json"])
         error = _new_tab_error(name, curr_page.panels)
         if error:
             return no_update, no_update, no_update, error
@@ -312,7 +313,7 @@ def _register_new_tab(app: Dash) -> None:
             new_tab_ctx["page_json"],
             new_tab_ctx["paging_json"],
             lambda panels: _panels_with_new_tab(panels, name=name, panel_names=selected),
-            extra_settings={core.ACTIVE_TAB_KEY: name},
+            extra_settings={page_model.ACTIVE_TAB_KEY: name},
         )
         return container, page.model_dump_json(), False, ""
 
@@ -379,13 +380,15 @@ def _register_rename_tab(app: Dash) -> None:
         if not n_clicks or not old_name:
             raise PreventUpdate
         new_name = (rename_ctx["new_name"] or "").strip()
-        curr_page = core.BasicExperimentPage.model_validate_json(rename_ctx["page_json"])
+        curr_page = page_model.BasicExperimentPage.model_validate_json(rename_ctx["page_json"])
         error = _rename_tab_error(old_name, new_name, curr_page.panels)
         if error:
             return no_update, no_update, no_update, error
 
-        active_tab = curr_page.page_settings.get(core.ACTIVE_TAB_KEY)
-        extra_settings: dict[str, str] = {core.ACTIVE_TAB_KEY: new_name} if active_tab == old_name else {}
+        active_tab = curr_page.page_settings.get(page_model.ACTIVE_TAB_KEY)
+        extra_settings: dict[str, str] = (
+            {page_model.ACTIVE_TAB_KEY: new_name} if active_tab == old_name else {}
+        )
 
         page, container = core.mutate_panels_and_rerender(
             rename_ctx["page_json"],

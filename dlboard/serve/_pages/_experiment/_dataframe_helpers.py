@@ -24,10 +24,6 @@ from dlboard.serve._pages._experiment._chart_autogen import default_artifact_cha
 if typing.TYPE_CHECKING:
     from dlboard.models import DataStore
 
-EXCLUDED_RUNS_KEY: typing.Final = "excluded_runs"
-"""A `Page.page_settings` key -- the run ids the run-comparison table has deselected, which
-`fetch_panel_dataframe` leaves out of every panel's fetch."""
-
 
 def build_artifacts_dataframe(artifacts: typing.Iterable[Artifact]) -> pd.DataFrame:
     """Pivot artifact download URLs (and tags and file names) into columns per key, indexed by (run_id, step)."""

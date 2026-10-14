@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Any
 
 from dlboard import models
 from dlboard.models import NewPage, PanelInstance
-from dlboard.serve._pages._experiment._experiment_page_state import BasicExperimentPage
+from dlboard.serve._pages._experiment._page_model import BasicExperimentPage
 
 if TYPE_CHECKING:
     from dlboard.plugins.data_stores.sqlite import SQLLiteStore

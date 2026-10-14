@@ -25,6 +25,8 @@ from dlboard.serve._component_ids import ButtonId, DivId, ModalId, PatternId, St
 from dlboard.serve._grid import themed_grid_kwargs
 from dlboard.serve._pages._dash_helpers import require_triggered_id
 from dlboard.serve._pages._experiment import _experiment_page_state as core
+from dlboard.serve._pages._experiment import _page_model as page_model
+from dlboard.serve._pages._experiment import _page_repository as repo
 from dlboard.serve._pages._experiment._dataframe_helpers import ColumnCatalog
 
 if TYPE_CHECKING:
@@ -367,7 +369,7 @@ def _register_open_close(app: Dash) -> None:
         if triggered_id["type"] == core.OPEN_CHART_BUTTON.type:
             return True, {"panel": triggered_id["panel"], "index": None}, None, {}, False
 
-        curr_page = core.BasicExperimentPage.model_validate_json(page_json)
+        curr_page = page_model.BasicExperimentPage.model_validate_json(page_json)
         panel = next(p for p in curr_page.panels if p.name == triggered_id["panel"])
         idx = triggered_id["index"]
         if idx is None:
@@ -435,7 +437,7 @@ def render_chart_preview(  # noqa: PLR0913
     table_values: list[Any],
     *,
     store: DataStore[...],
-    ref: core.PageRef,
+    ref: repo.PageRef,
 ) -> tuple[Any, str]:
     """
     Live-preview the chart exactly as it'd render in a panel of its own -- same fetch, same runs.
@@ -452,7 +454,7 @@ def render_chart_preview(  # noqa: PLR0913
     )
     try:
         chart = build_validated_chart_instance(chart_type_name, parameters)
-        page = core.load_page(store, ref)
+        page = repo.load_page(store, ref)
         panel = models.PanelInstance[Any, Any](name="preview", charts=[chart])
         return chart.render(
             core.fetch_panel_dataframe(store, ref.experiment_id, panel, page.page_settings)
@@ -508,7 +510,7 @@ def _register_form(app: Dash) -> None:
             table_ids,
             table_values,
             store=get_data_store(),
-            ref=core.PageRef(experiment_id, view_id),
+            ref=repo.PageRef(experiment_id, view_id),
         )
 
 
@@ -556,7 +558,7 @@ def _register_submit(app: Dash) -> None:
         panel_name, index = target["panel"], target.get("index")
 
         def apply_chart(panels: list[Any]) -> list[Any]:
-            return [core.upsert_chart(p, panel_name, index, new_chart) for p in panels]
+            return [page_model.upsert_chart(p, panel_name, index, new_chart) for p in panels]
 
         page, container = core.mutate_panels_and_rerender(
             add_chart_ctx["page_json"],

@@ -33,6 +33,7 @@ from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import ButtonId, DivId, ModalId, StoreId, ValueId
 from dlboard.serve._pages._dash_helpers import busy_while_running, require_triggered_id
 from dlboard.serve._pages._experiment import _experiment_page_state as core
+from dlboard.serve._pages._experiment import _page_model as page_model
 
 if TYPE_CHECKING:
     from dash.development.base_component import Component
@@ -212,7 +213,7 @@ def _validated_layout_change(page_json: str) -> tuple[str, dict[str, Any]]:
         case _:
             raise PreventUpdate
 
-    current_page = core.BasicExperimentPage.model_validate_json(page_json)
+    current_page = page_model.BasicExperimentPage.model_validate_json(page_json)
     panel = next((p for p in current_page.panels if p.name == panel_name), None)
     if panel is None:
         raise PreventUpdate
@@ -245,13 +246,13 @@ def _register_create_panel(app: Dash) -> None:
         if not n_clicks and not n_submit:
             raise PreventUpdate
         panel_name = (panel_name or "").strip()
-        curr_page = core.BasicExperimentPage.model_validate_json(page_json)
+        curr_page = page_model.BasicExperimentPage.model_validate_json(page_json)
         if not panel_name:
             return no_update, no_update, "Give the panel a name"
-        if core.panel_name_taken(curr_page.panels, panel_name):
+        if page_model.panel_name_taken(curr_page.panels, panel_name):
             return no_update, no_update, f"A panel named {panel_name!r} already exists"
 
-        active_tab = curr_page.page_settings.get(core.ACTIVE_TAB_KEY)
+        active_tab = curr_page.page_settings.get(page_model.ACTIVE_TAB_KEY)
         tab = (
             active_tab
             if isinstance(active_tab, str) and any(p.tab == active_tab for p in curr_page.panels)
@@ -405,7 +406,7 @@ def _register_reorder(app: Dash) -> None:
         page, container = core.mutate_panels_and_rerender(
             page_json,
             paging_json,
-            lambda panels: core.reorder_panel(
+            lambda panels: page_model.reorder_panel(
                 panels, request["panel"], request["target"], after=request["after"]
             ),
             reveal_panel=request["panel"],
@@ -429,7 +430,7 @@ def _register_reorder(app: Dash) -> None:
         page, container = core.mutate_panels_and_rerender(
             page_json,
             paging_json,
-            lambda panels: core.reorder_chart(
+            lambda panels: page_model.reorder_chart(
                 panels, panel_name, index, request["target_index"], after=request["after"]
             ),
             reveal_chart=core.chart_id_at(page_json, panel_name, index),
@@ -466,13 +467,13 @@ def _register_toggle(app: Dash) -> None:
         # a "change" even though nothing was actually toggled -- `prevent_initial_call` doesn't
         # catch it because this component isn't in the static layout. Skip the rebuild when
         # nothing really changed.
-        current_page = core.BasicExperimentPage.model_validate_json(page_json)
+        current_page = page_model.BasicExperimentPage.model_validate_json(page_json)
         current_sync = next((p.sync for p in current_page.panels if p.name == panel_name), None)
         if sync == current_sync:
             raise PreventUpdate
 
         def toggle(panels: list[Any]) -> list[Any]:
-            return core.set_panel_sync(panels, panel_name, sync=sync)
+            return page_model.set_panel_sync(panels, panel_name, sync=sync)
 
         page, container = core.mutate_panels_and_rerender(
             page_json,
@@ -493,7 +494,7 @@ def _register_toggle(app: Dash) -> None:
         """Apply a panel's Packed/Grid toggle -- every chart's width changes with it, so the page is rebuilt."""
         panel_name, edit = _validated_layout_change(page_json)
         page, container = core.mutate_panels_and_rerender(
-            page_json, paging_json, lambda panels: core.update_panel(panels, panel_name, edit)
+            page_json, paging_json, lambda panels: page_model.update_panel(panels, panel_name, edit)
         )
         return container, page.model_dump_json()
 
@@ -523,7 +524,7 @@ def _register_toggle(app: Dash) -> None:
     def save_panel_grid_columns(_grid_columns: list[int], page_json: str) -> str:
         """Persist a column count the browser has already applied -- see `panel_grid_columns.js`."""
         panel_name, edit = _validated_layout_change(page_json)
-        page = core.mutate_panels(page_json, lambda panels: core.update_panel(panels, panel_name, edit))
+        page = core.mutate_panels(page_json, lambda panels: page_model.update_panel(panels, panel_name, edit))
         return page.model_dump_json()
 
 
@@ -532,7 +533,7 @@ def _register_chart_panel_move(app: Dash) -> None:
     Move a single chart into a *different* panel by dragging it there.
 
     See `reorder_chart` for the same-panel case (a cheap client-side splice, since nothing about
-    what's fetched/shown changes), which this defers to via `core.move_chart_to_panel` if the drop
+    what's fetched/shown changes), which this defers to via `page_model.move_chart_to_panel` if the drop
     somehow targets its own panel.
     """
 
@@ -555,7 +556,7 @@ def _register_chart_panel_move(app: Dash) -> None:
         target_panel, target_index, after = request["target_panel"], request["target_index"], request["after"]
 
         def move(panels: list[Any]) -> list[Any]:
-            return core.move_chart_to_panel(
+            return page_model.move_chart_to_panel(
                 panels, panel_name, index, target_panel, target_index, after=after
             )
 
@@ -614,21 +615,21 @@ def _register_rename(app: Dash) -> None:
         if not new_name:
             return no_update, no_update, no_update, "Panel name cannot be empty"
 
-        curr_page = core.BasicExperimentPage.model_validate_json(rename_ctx["page_json"])
-        if core.panel_name_taken(curr_page.panels, new_name, ignore=old_name):
+        curr_page = page_model.BasicExperimentPage.model_validate_json(rename_ctx["page_json"])
+        if page_model.panel_name_taken(curr_page.panels, new_name, ignore=old_name):
             return no_update, no_update, no_update, f"A panel named {new_name!r} already exists"
 
         # Carry the rename into OPEN_PANEL_KEY too, so a currently-open panel doesn't appear to
         # collapse just because its name changed underneath it.
-        open_panel = curr_page.page_settings.get(core.OPEN_PANEL_KEY)
+        open_panel = curr_page.page_settings.get(page_model.OPEN_PANEL_KEY)
         extra_settings: dict[str, Any] = {}
         if isinstance(open_panel, list):
             # Panel names (and so OPEN_PANEL_KEY) are always strings; page_settings' value type is
             # broader (shared by every settings key), hence the cast.
             open_panel = cast("list[str]", open_panel)
-            extra_settings[core.OPEN_PANEL_KEY] = [new_name if v == old_name else v for v in open_panel]
+            extra_settings[page_model.OPEN_PANEL_KEY] = [new_name if v == old_name else v for v in open_panel]
         elif open_panel == old_name:
-            extra_settings[core.OPEN_PANEL_KEY] = new_name
+            extra_settings[page_model.OPEN_PANEL_KEY] = new_name
 
         page, container = core.mutate_panels_and_rerender(
             rename_ctx["page_json"],

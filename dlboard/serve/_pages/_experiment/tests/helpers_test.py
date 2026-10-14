@@ -24,8 +24,6 @@ from dlboard.serve._pages._experiment._chart_editor_modal import _param_field_in
 from dlboard.serve._pages._experiment._dataframe_helpers import ColumnCatalog
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from dlboard.plugins.data_stores.sqlite import SQLLiteStore
 
 _TS = datetime(2026, 1, 1, tzinfo=UTC)
@@ -33,45 +31,6 @@ _TS = datetime(2026, 1, 1, tzinfo=UTC)
 LineChart.register(allow_override=True)
 FileListChart.register(allow_override=True)
 ImageChart.register(allow_override=True)
-
-
-def _panel(name: str, n_charts: int) -> PanelInstance[pd.DataFrame, object]:
-    return PanelInstance[pd.DataFrame, object](
-        name=name,
-        charts=[
-            ChartInstance[pd.DataFrame, object](chart_type="line", parameters={"column": f"m{i}"})
-            for i in range(n_charts)
-        ],
-    )
-
-
-@pytest.mark.parametrize("index", [0, 1, 2])
-def test_upsert_chart_replaces_the_requested_index(index: int) -> None:
-    panel = _panel("p", 3)
-    new_chart = ChartInstance[pd.DataFrame, object](chart_type="line", parameters={"column": "new"})
-
-    result = state.upsert_chart(panel, "p", index, new_chart)
-
-    assert result.charts[index].parameters == {"column": "new"}
-    untouched = [i for i in range(3) if i != index]
-    assert [result.charts[i].parameters["column"] for i in untouched] == [f"m{i}" for i in untouched]
-
-
-def test_upsert_chart_appends_when_index_is_none() -> None:
-    panel = _panel("p", 1)
-    new_chart = ChartInstance[pd.DataFrame, object](chart_type="line", parameters={"column": "new"})
-
-    result = state.upsert_chart(panel, "p", None, new_chart)
-
-    assert len(result.charts) == 2
-    assert result.charts[-1].parameters == {"column": "new"}
-
-
-def test_upsert_chart_ignores_other_panels() -> None:
-    panel = _panel("other", 1)
-    new_chart = ChartInstance[pd.DataFrame, object](chart_type="line", parameters={"column": "new"})
-
-    assert state.upsert_chart(panel, "p", 0, new_chart) is panel
 
 
 def test_merge_chart_param_values_prefers_value_over_checked() -> None:
@@ -192,91 +151,6 @@ def test_build_hparam_rows_includes_runs_with_no_logged_hyperparameters() -> Non
         {"run_id": 1, "run_name": "baseline", **_RUNNING_FIELDS},
         {"run_id": 2, "run_name": "Run 2", **_RUNNING_FIELDS},
     ]
-
-
-def test_persist_settings_merges_into_page_settings_without_touching_panels(
-    store: SQLLiteStore, experiment_id: int, sign_in_as: Callable[[str], None]
-) -> None:
-    """Unlike `_persist_settings_and_rerender`, this must not need/trigger an accordion rebuild."""
-    sign_in_as("alice")
-    view = store.create_view(
-        state.BasicExperimentPage,
-        models.NewPage[Any, Any](
-            experiment_id=experiment_id,
-            owner_id=store.get_or_create_user(models.Principal.unverified("alice")).id,
-            name="mine",
-        ),
-    )
-
-    page = state.persist_settings(store, state.PageRef(experiment_id, view.id), {"selected": ["lr"]})
-
-    assert page.page_settings["selected"] == ["lr"]
-    assert page.id == view.id  # written in place -- alice already owns this one
-    reloaded = store.get_view(state.BasicExperimentPage, view.id)
-    assert reloaded is not None
-    assert reloaded.page_settings["selected"] == ["lr"]
-
-
-def test_persist_settings_branches_into_your_own_view_when_editing_the_shared_page(
-    store: SQLLiteStore, experiment_id: int, sign_in_as: Callable[[str], None]
-) -> None:
-    """
-    The shared page has no owner, so editing it while looking at it (`view_id=None`) can never
-    write in place -- otherwise the very first edit anyone made from the shared page would change
-    what everyone else sees.
-    """
-    sign_in_as("alice")
-
-    page = state.persist_settings(store, state.PageRef(experiment_id, None), {"selected": ["lr"]})
-
-    assert page.page_settings["selected"] == ["lr"]
-    assert page.owner_id == store.get_or_create_user(models.Principal.unverified("alice")).id
-    shared = store.get_or_create_page(state.BasicExperimentPage, experiment_id=experiment_id)
-    assert shared.id != page.id
-    assert shared.page_settings == {}
-
-
-def test_persist_settings_branches_into_a_separate_view_when_editing_someone_elses(
-    store: SQLLiteStore, experiment_id: int, sign_in_as: Callable[[str], None]
-) -> None:
-    """Bob editing alice's view must never change what alice sees -- it forks a view of bob's own."""
-    sign_in_as("alice")
-    alices_view = store.create_view(
-        state.BasicExperimentPage,
-        models.NewPage[Any, Any](
-            experiment_id=experiment_id,
-            owner_id=store.get_or_create_user(models.Principal.unverified("alice")).id,
-            name="alice's view",
-            panels=[PanelInstance[Any, Any](name="p")],
-        ),
-    )
-
-    sign_in_as("bob")
-    page = state.persist_settings(store, state.PageRef(experiment_id, alices_view.id), {"selected": ["lr"]})
-
-    assert page.id != alices_view.id
-    assert page.owner_id == store.get_or_create_user(models.Principal.unverified("bob")).id
-    assert page.panels == alices_view.panels  # seeded from what bob was looking at
-    assert page.page_settings["selected"] == ["lr"]
-    untouched = store.get_view(state.BasicExperimentPage, alices_view.id)
-    assert untouched is not None
-    assert untouched.page_settings == {}
-
-
-def test_persist_settings_can_opt_out_of_branching_for_purely_personal_viewing_state(
-    store: SQLLiteStore, experiment_id: int, sign_in_as: Callable[[str], None]
-) -> None:
-    """Which panel/tab is open is shared, last-write-wins state -- opening one never forks a view."""
-    sign_in_as("alice")
-    store.get_or_create_page(state.BasicExperimentPage, experiment_id=experiment_id)
-
-    page = state.persist_settings(
-        store, state.PageRef(experiment_id, None), {"open_panel": ["p"]}, branch_on_edit=False
-    )
-
-    assert page.owner_id is None
-    shared = store.get_or_create_page(state.BasicExperimentPage, experiment_id=experiment_id)
-    assert shared.page_settings["open_panel"] == ["p"]
 
 
 def _log_a_metric(store: SQLLiteStore, experiment_id: int, run_id: int, key: str, step: int = 0) -> None:

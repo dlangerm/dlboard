@@ -417,15 +417,15 @@ class AuthorizingDataStore(models.DataStore[...]):
 
     # -- Pages, views, and notes --------------------------------------------------------------------
 
-    def get_or_create_page[Dataframe, Panel, Chart](
+    def get_or_create_page[Dataframe, Chart](
         self,
-        page_type: type[models.Page[Dataframe, Panel, Chart]],
+        page_type: type[models.Page[Dataframe, Chart]],
         *,
         run_id: int | None = None,
         experiment_id: int | None = None,
         project_id: int | None = None,
         new_page_type: type[models.NewPage[Dataframe, Chart]] | None = None,
-    ) -> models.Page[Dataframe, Panel, Chart]:
+    ) -> models.Page[Dataframe, Chart]:
         owner = self._page_project(run_id=run_id, experiment_id=experiment_id, project_id=project_id)
         self._require(owner, ProjectRole.VIEWER)
         return self._inner.get_or_create_page(
@@ -436,9 +436,9 @@ class AuthorizingDataStore(models.DataStore[...]):
             new_page_type=new_page_type,
         )
 
-    def update_page[Dataframe, Panel, Chart](
-        self, page: models.Page[Dataframe, Panel, Chart]
-    ) -> models.Page[Dataframe, Panel, Chart]:
+    def update_page[Dataframe, Chart](
+        self, page: models.Page[Dataframe, Chart]
+    ) -> models.Page[Dataframe, Chart]:
         """
         Write a page: one's own view freely, the shared page's layout only as an `EDITOR`.
 
@@ -463,9 +463,9 @@ class AuthorizingDataStore(models.DataStore[...]):
         self._require(project_id, ProjectRole.VIEWER if layout_unchanged else ProjectRole.EDITOR)
         return self._inner.update_page(page)
 
-    def create_view[Dataframe, Panel, Chart](
-        self, page_type: type[models.Page[Dataframe, Panel, Chart]], view: models.NewPage[Dataframe, Chart]
-    ) -> models.Page[Dataframe, Panel, Chart]:
+    def create_view[Dataframe, Chart](
+        self, page_type: type[models.Page[Dataframe, Chart]], view: models.NewPage[Dataframe, Chart]
+    ) -> models.Page[Dataframe, Chart]:
         if view.owner_id != self._actor.id:
             _forbid("a view can only be saved as its own owner")
         owner = self._page_project(
@@ -474,9 +474,9 @@ class AuthorizingDataStore(models.DataStore[...]):
         self._require(owner, ProjectRole.VIEWER)
         return self._inner.create_view(page_type, view)
 
-    def get_view[Dataframe, Panel, Chart](
-        self, page_type: type[models.Page[Dataframe, Panel, Chart]], view_id: int
-    ) -> models.Page[Dataframe, Panel, Chart] | None:
+    def get_view[Dataframe, Chart](
+        self, page_type: type[models.Page[Dataframe, Chart]], view_id: int
+    ) -> models.Page[Dataframe, Chart] | None:
         """A view by id, if `self._actor` can see it: its owner, always; anyone else only if it's shared."""
         view = self._inner.get_view(page_type, view_id)
         if view is None:

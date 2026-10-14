@@ -10,6 +10,8 @@ from dlboard.conftest import find_props as _find_props
 from dlboard.models._view import ChartInstance, PanelInstance
 from dlboard.plugins.charts.line_chart import LineChart
 from dlboard.serve._pages._experiment import _experiment_page_state as state
+from dlboard.serve._pages._experiment import _page_model as page_model
+from dlboard.serve._pages._experiment import _page_repository as repo
 from dlboard.serve._pages._experiment._paging import ChartPaging, PageSizes, Paging
 
 if TYPE_CHECKING:
@@ -32,16 +34,19 @@ def _render(  # noqa: PLR0913
     open_panels: list[str] | None = None,
     focus_chart: str | None = None,
 ) -> html.Div:
-    page = store.get_or_create_page(state.BasicExperimentPage, experiment_id=experiment_id)
+    page = store.get_or_create_page(page_model.BasicExperimentPage, experiment_id=experiment_id)
     store.update_page(
         page.model_copy(
             update={
                 "panels": panels,
-                "page_settings": {state.OPEN_PANEL_KEY: open_panels or [], state.ACTIVE_TAB_KEY: active_tab},
+                "page_settings": {
+                    page_model.OPEN_PANEL_KEY: open_panels or [],
+                    page_model.ACTIVE_TAB_KEY: active_tab,
+                },
             }
         )
     )
-    loaded = state.load_page(store, state.PageRef(experiment_id, None))
+    loaded = repo.load_page(store, repo.PageRef(experiment_id, None))
     return state.accordion_view(store, loaded, paging, focus_chart=focus_chart)
 
 

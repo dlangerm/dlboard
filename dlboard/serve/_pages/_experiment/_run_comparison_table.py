@@ -35,8 +35,9 @@ from dlboard.serve._format import format_duration
 from dlboard.serve._grid import column_def, infer_column_dtype, themed_grid_kwargs
 from dlboard.serve._pages._dash_helpers import section_label, tooltipped_action_icon
 from dlboard.serve._pages._dataframe_helpers import run_display_name
-from dlboard.serve._pages._experiment import _dataframe_helpers as dfh
 from dlboard.serve._pages._experiment import _experiment_page_state as core
+from dlboard.serve._pages._experiment import _page_model as page_model
+from dlboard.serve._pages._experiment import _page_repository as repo
 from dlboard.serve._pages._experiment._run_compare import compare_button
 from dlboard.serve._url import relative_path
 
@@ -109,8 +110,6 @@ def _status_detail(run: Run) -> str:
         case models.RunStatus.UNKNOWN:
             return f"ended without saying how{after}"
 
-
-SELECTED_HPARAM_COLS_KEY: typing.Final = "hparam-table-selected"  # a page_settings dict key
 
 NAVBAR_HPARAM_SIGNATURE_ID: StoreId[core.ExperimentPage] = StoreId("navbar-hparam-signature")
 
@@ -397,7 +396,7 @@ def _render_hparam_panel(
 
 
 def _load_hparam_panel_settings(
-    store: DataStore[...], ref: core.PageRef
+    store: DataStore[...], ref: repo.PageRef
 ) -> tuple[list[Run], list[int] | list[str], list[str]]:
     """
     The cheap, always-needed inputs for the navbar table: its run list and its persisted settings.
@@ -407,10 +406,10 @@ def _load_hparam_panel_settings(
     happening before paying for that, since it's re-evaluated on every live-update poll tick, not
     just on a real settings change.
     """
-    page = core.load_page(store, ref)
-    excluded = page.page_settings.get(dfh.EXCLUDED_RUNS_KEY, [])
+    page = repo.load_page(store, ref)
+    excluded = page.page_settings.get(page_model.EXCLUDED_RUNS_KEY, [])
     assert isinstance(excluded, list)
-    selected_setting = page.page_settings.get(SELECTED_HPARAM_COLS_KEY, [])
+    selected_setting = page.page_settings.get(page_model.SELECTED_HPARAM_COLS_KEY, [])
     assert isinstance(selected_setting, list)
     selected = [s for s in selected_setting if isinstance(s, str)]
     runs = list(store.get_runs(ref.experiment_id, limit=_HPARAM_ROWS_LIMIT, offset=0))
@@ -468,9 +467,9 @@ def _register_hparam_table(app: Dash) -> None:
         # the page that edit branched *away* from, since `sync_view_after_edit` only catches
         # `STATE_VIEW_ID` up to it a separate, slightly later round trip.
         ref = (
-            core.ref_of(experiment_id, core.BasicExperimentPage.model_validate_json(page_json))
+            repo.ref_of(experiment_id, page_model.BasicExperimentPage.model_validate_json(page_json))
             if page_json is not None
-            else core.PageRef(experiment_id, view_id)
+            else repo.PageRef(experiment_id, view_id)
         )
         runs, excluded, selected = _load_hparam_panel_settings(store, ref)
         # `STATE_PAGE_STORAGE` changes on *every* page-settings write -- a tab switch, a panel
@@ -536,9 +535,11 @@ def _register_hparam_table(app: Dash) -> None:
             raise PreventUpdate
         store = get_data_store()
         # `ref_of`, not `STATE_VIEW_ID` -- see `render_navbar_hparams`'s own comment on why.
-        curr_page = core.BasicExperimentPage.model_validate_json(page_json)
-        page = core.persist_settings(
-            store, core.ref_of(experiment_id, curr_page), {SELECTED_HPARAM_COLS_KEY: selected or []}
+        curr_page = page_model.BasicExperimentPage.model_validate_json(page_json)
+        page = repo.persist_settings(
+            store,
+            repo.ref_of(experiment_id, curr_page),
+            {page_model.SELECTED_HPARAM_COLS_KEY: selected or []},
         )
         return page.model_dump_json()
 
@@ -581,9 +582,9 @@ def _register_hparam_table(app: Dash) -> None:
         # layout) mounting later with an already-computed value. Skip the (expensive, chart-
         # remounting) rebuild when the recomputed set matches what's already persisted. `ref_of`,
         # not `STATE_VIEW_ID` -- see `render_navbar_hparams`'s own comment on why.
-        ref = core.ref_of(experiment_id, core.BasicExperimentPage.model_validate_json(page_json))
-        current_page = core.load_page(store, ref)
-        currently_excluded = current_page.page_settings.get(dfh.EXCLUDED_RUNS_KEY, [])
+        ref = repo.ref_of(experiment_id, page_model.BasicExperimentPage.model_validate_json(page_json))
+        current_page = repo.load_page(store, ref)
+        currently_excluded = current_page.page_settings.get(page_model.EXCLUDED_RUNS_KEY, [])
         if excluded == currently_excluded:
             raise PreventUpdate
 
@@ -591,7 +592,7 @@ def _register_hparam_table(app: Dash) -> None:
             store,
             ref,
             paging_json,
-            {dfh.EXCLUDED_RUNS_KEY: excluded},
+            {page_model.EXCLUDED_RUNS_KEY: excluded},
         )
         return page.model_dump_json(), container
 

@@ -15,7 +15,7 @@ from dlboard.models import ProjectRole, Scope
 from dlboard.plugins.data_stores._blob_store import blob_key
 from dlboard.plugins.data_stores.filesystem import FSBlobs
 from dlboard.serve._backend._authorization import AuthorizingArtifactStore, AuthorizingDataStore
-from dlboard.serve._pages._experiment._experiment_page_state import BasicExperimentPage
+from dlboard.serve._pages._experiment._page_model import BasicExperimentPage
 
 if TYPE_CHECKING:
     from collections.abc import Callable

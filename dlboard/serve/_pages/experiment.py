@@ -13,6 +13,8 @@ from flask import request
 from dlboard.serve import _constants as constants
 from dlboard.serve import get_current_user, get_data_store
 from dlboard.serve._pages._experiment import _experiment_page_state as core
+from dlboard.serve._pages._experiment import _page_model as page_model
+from dlboard.serve._pages._experiment import _page_repository as repo
 from dlboard.serve._pages._experiment import _panel_controls as panel_controls
 from dlboard.serve._pages._experiment import _tab_controls as tab_controls
 from dlboard.serve._pages._experiment import render_panel
@@ -110,11 +112,11 @@ def layout(
     view_id = resolve_view_id(store, exp.id, view)
     container, header, page_json = render_panel(
         store,
-        core.PageRef(exp.id, view_id),
+        repo.PageRef(exp.id, view_id),
         Paging.from_request(query, request.cookies.get(SIZES_COOKIE)),
         focus_chart=chart,
     )
-    current_page = core.BasicExperimentPage.model_validate_json(page_json)
+    current_page = page_model.BasicExperimentPage.model_validate_json(page_json)
     is_owner = view_id is not None and current_page.owner_id == get_current_user().id
 
     return [

@@ -18,7 +18,7 @@ from dlboard import models
 from dlboard.conftest import EVERY_STORE_BACKEND, StoreBackend
 from dlboard.models._view import PanelInstance
 from dlboard.serve._backend._metric_frame import MetricKeySummary
-from dlboard.serve._pages._experiment._experiment_page_state import BasicExperimentPage
+from dlboard.serve._pages._experiment._page_model import BasicExperimentPage
 
 if TYPE_CHECKING:
     from collections.abc import Callable

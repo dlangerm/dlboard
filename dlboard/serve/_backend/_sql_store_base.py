@@ -811,15 +811,15 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             ),
         )
 
-    def get_or_create_page[D, P, C](
+    def get_or_create_page[D, C](
         self,
-        page_type: type[models.Page[D, P, C]],
+        page_type: type[models.Page[D, C]],
         *,
         run_id: int | None = None,
         experiment_id: int | None = None,
         project_id: int | None = None,
         new_page_type: type[models.NewPage[D, C]] | None = None,
-    ) -> models.Page[D, P, C]:
+    ) -> models.Page[D, C]:
         field, value = _resolve_page_scope(run_id=run_id, experiment_id=experiment_id, project_id=project_id)
         pages = self._tables[models.Page]
         # The shared page only: every named view of it (`owner_id` set) is its own `Page` row with
@@ -846,9 +846,9 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         (created,) = self._fetch(page_type, shared)
         return created
 
-    def create_view[D, P, C](
-        self, page_type: type[models.Page[D, P, C]], view: models.NewPage[D, C]
-    ) -> models.Page[D, P, C]:
+    def create_view[D, C](
+        self, page_type: type[models.Page[D, C]], view: models.NewPage[D, C]
+    ) -> models.Page[D, C]:
         """Save `view` -- a named, owned copy of a page's panels and settings -- as its own page."""
         if view.owner_id is None or not view.name:
             msg = "A view needs an owner and a name"
@@ -856,9 +856,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         (created,) = self._fetch(page_type, sql.insert(self._tables[models.Page], view))
         return created
 
-    def get_view[D, P, C](
-        self, page_type: type[models.Page[D, P, C]], view_id: int
-    ) -> models.Page[D, P, C] | None:
+    def get_view[D, C](self, page_type: type[models.Page[D, C]], view_id: int) -> models.Page[D, C] | None:
         """A named view by id, or `None` if there's no such view (a shared page's id doesn't count)."""
         pages = self._tables[models.Page]
         rows = self._fetch(
@@ -923,7 +921,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         users = self._tables[models.User]
         return self._fetch(models.User, sa.select(users).order_by(users.c.username))
 
-    def update_page[D, P, C](self, page: models.Page[D, P, C]) -> models.Page[D, P, C]:
+    def update_page[D, C](self, page: models.Page[D, C]) -> models.Page[D, C]:
         (updated,) = self._fetch(type(page), sql.update(self._tables[models.Page], page))
         return updated
 

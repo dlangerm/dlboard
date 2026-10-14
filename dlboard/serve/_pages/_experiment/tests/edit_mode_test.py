@@ -10,6 +10,8 @@ from dlboard.conftest import find_props as _find_props
 from dlboard.models._view import PanelInstance
 from dlboard.plugins.charts.line_chart import LineChart
 from dlboard.serve._pages._experiment import _experiment_page_state as state
+from dlboard.serve._pages._experiment import _page_model as page_model
+from dlboard.serve._pages._experiment import _page_repository as repo
 from dlboard.serve._pages._experiment._paging import Paging
 
 if TYPE_CHECKING:
@@ -37,11 +39,11 @@ def test_accordion_view_offers_auto_populate_only_for_an_empty_view(
     *,
     auto_populate_offered: bool,
 ) -> None:
-    page = store.get_or_create_page(state.BasicExperimentPage, experiment_id=experiment_id)
+    page = store.get_or_create_page(page_model.BasicExperimentPage, experiment_id=experiment_id)
     store.update_page(page.model_copy(update={"panels": panels}))
 
     container = state.accordion_view(
-        store, state.load_page(store, state.PageRef(experiment_id, None)), Paging()
+        store, repo.load_page(store, repo.PageRef(experiment_id, None)), Paging()
     )
 
     children = cast("list[Any]", container.children)
@@ -53,11 +55,11 @@ def test_accordion_view_delete_panel_reachable_without_opening_a_panel(
     store: SQLLiteStore, experiment_id: int
 ) -> None:
     """The whole point: delete/rename/reorder must be usable without opening (fetching) the panel."""
-    page = store.get_or_create_page(state.BasicExperimentPage, experiment_id=experiment_id)
+    page = store.get_or_create_page(page_model.BasicExperimentPage, experiment_id=experiment_id)
     store.update_page(page.model_copy(update={"panels": [PanelInstance[Any, Any](name="p")]}))
 
     container = state.accordion_view(
-        store, state.load_page(store, state.PageRef(experiment_id, None)), Paging()
+        store, repo.load_page(store, repo.PageRef(experiment_id, None)), Paging()
     )
 
     delete_button = _find_props(

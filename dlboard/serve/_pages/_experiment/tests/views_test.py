@@ -6,7 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from dlboard.models import ChartInstance, NewPage, PanelInstance
-from dlboard.serve._pages._experiment import _experiment_page_state as state
+from dlboard.serve._pages._experiment import _page_repository as repo
 from dlboard.serve._pages._experiment._views import ViewFile
 
 if TYPE_CHECKING:
@@ -50,14 +50,14 @@ def test_edits_that_branch_into_a_view_get_distinct_names_per_person(
     store: SQLLiteStore, experiment_id: int, sign_in_as: Callable[[str], User]
 ) -> None:
     """Never "Copy of Copy of ...": your first branch is "My view", the next "My view 2", and so on."""
-    shared = state.load_page(store, state.PageRef(experiment_id, None))
+    shared = repo.load_page(store, repo.PageRef(experiment_id, None))
 
     sign_in_as("alice")
-    first = state.save_page(store, shared)
-    second = state.save_page(store, shared)
-    edited_in_place = state.save_page(store, first.model_copy(update={"page_settings": {"seen": 1}}))
+    first = repo.save_page(store, shared)
+    second = repo.save_page(store, shared)
+    edited_in_place = repo.save_page(store, first.model_copy(update={"page_settings": {"seen": 1}}))
     sign_in_as("bob")
-    bobs = state.save_page(store, shared)
+    bobs = repo.save_page(store, shared)
 
     assert [first.name, second.name, bobs.name] == ["My view", "My view 2", "My view"]
     assert (edited_in_place.id, edited_in_place.name) == (first.id, "My view")

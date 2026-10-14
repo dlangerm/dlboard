@@ -24,6 +24,7 @@ from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import ButtonId, DivId, ModalId, PatternId, StoreId, ValueId
 from dlboard.serve._pages._dash_helpers import require_triggered_id
 from dlboard.serve._pages._experiment import _experiment_page_state as core
+from dlboard.serve._pages._experiment import _page_model as page_model
 from dlboard.serve._pages._experiment._chart_autogen import (
     Suggestion,
     SuggestSort,
@@ -456,7 +457,7 @@ def _register_auto_populate(app: Dash) -> None:
             auto_populate_ctx["page_json"],
             auto_populate_ctx["paging_json"],
             lambda _panels: panels,
-            extra_settings={core.OPEN_PANEL_KEY: panel_to_open(panels)},
+            extra_settings={page_model.OPEN_PANEL_KEY: panel_to_open(panels)},
         )
         return container, page.model_dump_json(), False
 
@@ -517,7 +518,7 @@ def _add_charts(
 
     def add_all(panels: list[Any]) -> list[Any]:
         for s in itertools.chain([first], chosen):
-            panels = core.add_chart_to_panel_by_name(panels, s.panel_name, s.chart)
+            panels = page_model.add_chart_to_panel_by_name(panels, s.panel_name, s.chart)
         return panels
 
     page, container = core.mutate_panels_and_rerender(page_json, paging_json, add_all)
@@ -569,7 +570,7 @@ def _register_suggestions(app: Dash) -> None:
         # while regrouping (delimiter/mode) keeps whatever filter is typed.
         filter_text, filter_value = ("", "") if opened is True else (suggest_ctx["filter_text"], no_update)
 
-        curr_page = core.BasicExperimentPage.model_validate_json(suggest_ctx["page_json"])
+        curr_page = page_model.BasicExperimentPage.model_validate_json(suggest_ctx["page_json"])
         store = get_data_store()
         catalog = (
             ColumnCatalog.load(store, curr_page.experiment_id)

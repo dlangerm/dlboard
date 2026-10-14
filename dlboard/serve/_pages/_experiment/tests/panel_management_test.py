@@ -22,6 +22,7 @@ from dlboard.models._view import ChartInstance, PanelInstance
 from dlboard.plugins.charts._chart_title import titled
 from dlboard.plugins.charts.line_chart import LineChart
 from dlboard.serve._pages._experiment import _experiment_page_state as state
+from dlboard.serve._pages._experiment import _page_model as page_model
 
 if TYPE_CHECKING:
     from dlboard.plugins.data_stores.sqlite import SQLLiteStore
@@ -92,19 +93,19 @@ def test_reorder_panel_moves_it_before_or_after_the_target(
     moved: str, target: str, *, after: bool, expected: list[str]
 ) -> None:
     panels = [PanelInstance[Any, Any](name=n) for n in ("a", "b", "c")]
-    result = state.reorder_panel(panels, moved, target, after=after)
+    result = page_model.reorder_panel(panels, moved, target, after=after)
     assert [p.name for p in result] == expected
 
 
 def test_reorder_panel_same_panel_is_a_noop() -> None:
     panels = [PanelInstance[Any, Any](name=n) for n in ("a", "b", "c")]
-    assert state.reorder_panel(panels, "a", "a", after=True) == panels
+    assert page_model.reorder_panel(panels, "a", "a", after=True) == panels
 
 
 def test_reorder_panel_unknown_panel_is_a_noop() -> None:
     panels = [PanelInstance[Any, Any](name=n) for n in ("a", "b")]
-    assert state.reorder_panel(panels, "missing", "a", after=True) == panels
-    assert state.reorder_panel(panels, "a", "missing", after=True) == panels
+    assert page_model.reorder_panel(panels, "missing", "a", after=True) == panels
+    assert page_model.reorder_panel(panels, "a", "missing", after=True) == panels
 
 
 # ---- panel sync: switch + set_panel_sync + _apply_panel_sync ----
@@ -113,7 +114,7 @@ def test_reorder_panel_unknown_panel_is_a_noop() -> None:
 def test_set_panel_sync_updates_only_the_named_panel() -> None:
     panels = [PanelInstance[Any, Any](name=n) for n in ("a", "b")]
 
-    result = state.set_panel_sync(panels, "a", sync=False)
+    result = page_model.set_panel_sync(panels, "a", sync=False)
 
     by_name = {p.name: p.sync for p in result}
     assert by_name == {"a": False, "b": True}
@@ -136,7 +137,7 @@ def test_apply_panel_sync_drops_sync_id_when_disabled() -> None:
 def test_update_panel_changes_only_the_named_panel() -> None:
     panels = [PanelInstance[Any, Any](name=n) for n in ("a", "b")]
 
-    result = state.update_panel(panels, "a", {"layout": "grid", "grid_columns": 2})
+    result = page_model.update_panel(panels, "a", {"layout": "grid", "grid_columns": 2})
 
     assert {p.name: (p.layout, p.grid_columns) for p in result} == {"a": ("grid", 2), "b": ("packed", 3)}
 
@@ -215,27 +216,27 @@ def test_reorder_chart_moves_it_before_or_after_the_target(
     index: int, target: int, *, after: bool, expected: list[str]
 ) -> None:
     panels = [_panel_with_charts("a", "b", "c", "d")]
-    result = state.reorder_chart(panels, "p", index, target, after=after)
+    result = page_model.reorder_chart(panels, "p", index, target, after=after)
     assert [c.parameters["column"] for c in result[0].charts] == expected
 
 
 def test_reorder_chart_same_index_is_a_noop() -> None:
     panels = [_panel_with_charts("a", "b", "c")]
-    result = state.reorder_chart(panels, "p", 1, 1, after=True)
+    result = page_model.reorder_chart(panels, "p", 1, 1, after=True)
     assert [c.parameters["column"] for c in result[0].charts] == ["a", "b", "c"]
 
 
 def test_reorder_chart_out_of_bounds_index_is_a_noop() -> None:
     panels = [_panel_with_charts("a", "b", "c")]
     assert [
-        c.parameters["column"] for c in state.reorder_chart(panels, "p", 5, 0, after=False)[0].charts
+        c.parameters["column"] for c in page_model.reorder_chart(panels, "p", 5, 0, after=False)[0].charts
     ] == [
         "a",
         "b",
         "c",
     ]
     assert [
-        c.parameters["column"] for c in state.reorder_chart(panels, "p", 0, 5, after=False)[0].charts
+        c.parameters["column"] for c in page_model.reorder_chart(panels, "p", 0, 5, after=False)[0].charts
     ] == [
         "a",
         "b",
@@ -245,7 +246,7 @@ def test_reorder_chart_out_of_bounds_index_is_a_noop() -> None:
 
 def test_reorder_chart_unknown_panel_is_a_noop() -> None:
     panels = [_panel_with_charts("a", "b")]
-    result = state.reorder_chart(panels, "missing", 0, 1, after=True)
+    result = page_model.reorder_chart(panels, "missing", 0, 1, after=True)
     assert [c.parameters["column"] for c in result[0].charts] == ["a", "b"]
 
 
@@ -255,7 +256,7 @@ def test_reorder_chart_unknown_panel_is_a_noop() -> None:
 def test_add_chart_to_panel_by_name_creates_panel_when_missing() -> None:
     chart = ChartInstance[Any, Any](chart_type="line", parameters={"column": "loss", "x_axis": "step"})
 
-    panels = state.add_chart_to_panel_by_name([], "train", chart)
+    panels = page_model.add_chart_to_panel_by_name([], "train", chart)
 
     assert [p.name for p in panels] == ["train"]
     assert panels[0].charts == [chart]
@@ -271,7 +272,7 @@ def test_add_chart_to_panel_by_name_appends_to_existing_panel() -> None:
         PanelInstance[Any, Any](name="val"),
     ]
 
-    result = state.add_chart_to_panel_by_name(panels, "train", new_chart)
+    result = page_model.add_chart_to_panel_by_name(panels, "train", new_chart)
 
     by_name = {p.name: p for p in result}
     assert by_name["train"].charts == [existing_chart, new_chart]
@@ -283,16 +284,18 @@ def test_add_chart_to_panel_by_name_appends_to_existing_panel() -> None:
 
 def test_render_with_no_tabbed_panels_shows_no_tabs_chrome(store: SQLLiteStore, experiment_id: int) -> None:
     """The common case (nobody has tabbed a panel) must look exactly like a plain accordion."""
-    page = store.get_or_create_page(state.BasicExperimentPage, experiment_id=experiment_id)
+    page = store.get_or_create_page(page_model.BasicExperimentPage, experiment_id=experiment_id)
     page = store.update_page(page.model_copy(update={"panels": [PanelInstance[Any, Any](name="a")]}))
 
-    rendered = page.render(store, experiment_id)
+    rendered = state._page_view(
+        store, experiment_id, cast("page_model.BasicExperimentPage", page), state.FIRST_PAGE
+    )
     assert not isinstance(rendered, dmc.Tabs)
     assert _find_props(rendered, state.PANEL_ACCORDION.of("")) is not None
 
 
 def test_render_groups_panels_into_tabs_by_the_tab_field(store: SQLLiteStore, experiment_id: int) -> None:
-    page = store.get_or_create_page(state.BasicExperimentPage, experiment_id=experiment_id)
+    page = store.get_or_create_page(page_model.BasicExperimentPage, experiment_id=experiment_id)
     page = store.update_page(
         page.model_copy(
             update={
@@ -305,7 +308,9 @@ def test_render_groups_panels_into_tabs_by_the_tab_field(store: SQLLiteStore, ex
         )
     )
 
-    rendered = page.render(store, experiment_id)
+    rendered = state._page_view(
+        store, experiment_id, cast("page_model.BasicExperimentPage", page), state.FIRST_PAGE
+    )
     assert isinstance(rendered, dmc.Tabs)
     tabs_row = rendered.children[0]  # pyrefly: ignore [unsupported-operation]
     tabs_and_buttons = tabs_row.children[0]
@@ -334,22 +339,22 @@ def test_render_groups_panels_into_tabs_by_the_tab_field(store: SQLLiteStore, ex
 )
 def test_panel_name_taken_only_for_a_name_already_in_use(name: str, *, taken: bool) -> None:
     panels = [PanelInstance[Any, Any](name=n) for n in ("a", "b")]
-    assert state.panel_name_taken(panels, name) is taken
+    assert page_model.panel_name_taken(panels, name) is taken
 
 
 def test_panel_name_taken_ignores_the_named_panel_itself() -> None:
     panels = [PanelInstance[Any, Any](name=n) for n in ("a", "b")]
-    assert state.panel_name_taken(panels, "a", ignore="a") is False
+    assert page_model.panel_name_taken(panels, "a", ignore="a") is False
 
 
 def test_unique_panel_name_returns_base_when_free() -> None:
     panels = [PanelInstance[Any, Any](name="a")]
-    assert state.unique_panel_name(panels, "b") == "b"
+    assert page_model.unique_panel_name(panels, "b") == "b"
 
 
 def test_unique_panel_name_suffixes_when_taken() -> None:
     panels = [PanelInstance[Any, Any](name=n) for n in ("a", "a (2)")]
-    assert state.unique_panel_name(panels, "a") == "a (3)"
+    assert page_model.unique_panel_name(panels, "a") == "a (3)"
 
 
 # ---- move_chart_to_tab ----
@@ -361,7 +366,7 @@ def test_move_chart_to_tab_appends_to_an_existing_panel_in_that_tab() -> None:
         PanelInstance[Any, Any](name="dst", tab="Images"),
     ]
 
-    result = state.move_chart_to_tab(panels, "src", 0, "Images")
+    result = page_model.move_chart_to_tab(panels, "src", 0, "Images")
 
     by_name = {p.name: [c.parameters["column"] for c in p.charts] for p in result}
     assert by_name == {"src": ["y"], "dst": ["x"]}
@@ -370,7 +375,7 @@ def test_move_chart_to_tab_appends_to_an_existing_panel_in_that_tab() -> None:
 def test_move_chart_to_tab_creates_a_panel_when_the_tab_is_empty() -> None:
     panels = [_panel_with_charts("x", "y").model_copy(update={"name": "src"})]
 
-    result = state.move_chart_to_tab(panels, "src", 0, "Images")
+    result = page_model.move_chart_to_tab(panels, "src", 0, "Images")
 
     new_panel = next(p for p in result if p.tab == "Images")
     assert [c.parameters["column"] for c in new_panel.charts] == ["x"]
@@ -379,7 +384,7 @@ def test_move_chart_to_tab_creates_a_panel_when_the_tab_is_empty() -> None:
 
 def test_move_chart_to_tab_is_a_noop_for_an_out_of_range_index() -> None:
     panels = [_panel_with_charts("x").model_copy(update={"name": "src"})]
-    assert state.move_chart_to_tab(panels, "src", 5, "Images") == panels
+    assert page_model.move_chart_to_tab(panels, "src", 5, "Images") == panels
 
 
 # ---- move_chart_to_panel ----
@@ -391,7 +396,7 @@ def test_move_chart_to_panel_inserts_at_a_specific_position() -> None:
         _panel_with_charts("a", "b").model_copy(update={"name": "dst"}),
     ]
 
-    result = state.move_chart_to_panel(panels, "src", 0, "dst", 0, after=False)
+    result = page_model.move_chart_to_panel(panels, "src", 0, "dst", 0, after=False)
 
     by_name = {p.name: [c.parameters["column"] for c in p.charts] for p in result}
     assert by_name == {"src": ["y"], "dst": ["x", "a", "b"]}
@@ -403,7 +408,7 @@ def test_move_chart_to_panel_inserts_after_the_target_index() -> None:
         _panel_with_charts("a", "b").model_copy(update={"name": "dst"}),
     ]
 
-    result = state.move_chart_to_panel(panels, "src", 0, "dst", 0, after=True)
+    result = page_model.move_chart_to_panel(panels, "src", 0, "dst", 0, after=True)
 
     dst = next(p for p in result if p.name == "dst")
     assert [c.parameters["column"] for c in dst.charts] == ["a", "x", "b"]
@@ -415,7 +420,7 @@ def test_move_chart_to_panel_appends_when_target_index_is_none() -> None:
         _panel_with_charts("a").model_copy(update={"name": "dst"}),
     ]
 
-    result = state.move_chart_to_panel(panels, "src", 0, "dst", None, after=True)
+    result = page_model.move_chart_to_panel(panels, "src", 0, "dst", None, after=True)
 
     dst = next(p for p in result if p.name == "dst")
     assert [c.parameters["column"] for c in dst.charts] == ["a", "x"]
@@ -427,7 +432,7 @@ def test_move_chart_to_panel_appends_into_an_empty_panel() -> None:
         PanelInstance[Any, Any](name="dst"),
     ]
 
-    result = state.move_chart_to_panel(panels, "src", 0, "dst", None, after=True)
+    result = page_model.move_chart_to_panel(panels, "src", 0, "dst", None, after=True)
 
     dst = next(p for p in result if p.name == "dst")
     assert [c.parameters["column"] for c in dst.charts] == ["x"]
@@ -439,12 +444,12 @@ def test_move_chart_to_panel_is_a_noop_for_an_out_of_range_index() -> None:
         _panel_with_charts("x").model_copy(update={"name": "src"}),
         PanelInstance[Any, Any](name="dst"),
     ]
-    assert state.move_chart_to_panel(panels, "src", 5, "dst", None, after=True) == panels
+    assert page_model.move_chart_to_panel(panels, "src", 5, "dst", None, after=True) == panels
 
 
 def test_move_chart_to_panel_is_a_noop_for_an_unknown_target_panel() -> None:
     panels = [_panel_with_charts("x").model_copy(update={"name": "src"})]
-    assert state.move_chart_to_panel(panels, "src", 0, "missing", None, after=True) == panels
+    assert page_model.move_chart_to_panel(panels, "src", 0, "missing", None, after=True) == panels
 
 
 def _badge_labels(node: Any) -> list[str]:  # noqa: ANN401

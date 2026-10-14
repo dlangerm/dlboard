@@ -31,8 +31,8 @@ from dlboard.serve._component_ids import ButtonId, ModalId, StoreId, ValueId
 from dlboard.serve._grid import themed_grid_kwargs
 from dlboard.serve._pages._dash_helpers import tooltipped_action_icon
 from dlboard.serve._pages._dataframe_helpers import run_display_name
-from dlboard.serve._pages._experiment import _dataframe_helpers as dfh
 from dlboard.serve._pages._experiment import _experiment_page_state as core
+from dlboard.serve._pages._experiment import _page_model as page_model
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -318,8 +318,8 @@ def register_run_compare_callbacks(app: Dash) -> None:
             raise PreventUpdate
         runs = list(get_data_store().get_runs(experiment_id, limit=_RUNS_LIMIT))
         # Start from the runs the charts are showing, unless a link or an earlier open already chose.
-        page = core.BasicExperimentPage.model_validate_json(page_json)
-        excluded = cast("list[int]", page.page_settings.get(dfh.EXCLUDED_RUNS_KEY, []))
+        page = page_model.BasicExperimentPage.model_validate_json(page_json)
+        excluded = cast("list[int]", page.page_settings.get(page_model.EXCLUDED_RUNS_KEY, []))
         charted = [run for run in runs if run.id not in excluded] or runs
         default = [str(run.id) for run in charted[:MAX_COMPARED_RUNS]]
         return _run_options(runs), picked or default

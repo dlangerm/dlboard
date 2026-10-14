@@ -41,6 +41,8 @@ from dlboard.serve._pages._description_editor import (
     render_header,
 )
 from dlboard.serve._pages._experiment import _experiment_page_state as core
+from dlboard.serve._pages._experiment import _page_model as page_model
+from dlboard.serve._pages._experiment import _page_repository as repo
 from dlboard.serve._pages._experiment._chart_editor_modal import register_chart_editor_callbacks
 from dlboard.serve._pages._experiment._chart_suggestions import register_chart_suggestions_callbacks
 from dlboard.serve._pages._experiment._notes import STATE_NOTES_REVISION, register_notes_callbacks
@@ -99,7 +101,7 @@ def _delete_experiment_action() -> list[Component]:
 
 
 def render_panel(
-    store: DataStore[...], ref: core.PageRef, paging: Paging, *, focus_chart: str | None = None
+    store: DataStore[...], ref: repo.PageRef, paging: Paging, *, focus_chart: str | None = None
 ) -> tuple[html.Div, Component, str]:
     """
     Build the whole experiment panel: accordion, header, and its persisted page storage.
@@ -123,7 +125,7 @@ def render_panel(
     means that forced fire no longer happens, so a brand-new experiment's first panel opens by
     default exactly as `render()`'s fallback already says it should.
     """
-    page = core.load_page(store, ref)
+    page = repo.load_page(store, ref)
     exp = store.get_experiment(ref.experiment_id)
     name, description = (experiment_display_name(exp), exp.description) if exp else ("", "")
     header = render_header(
@@ -139,7 +141,7 @@ def render_panel(
 def _fetch_open_panel_dataframes(
     store: DataStore[...],
     experiment_id: int,
-    page: core.BasicExperimentPage,
+    page: page_model.BasicExperimentPage,
     chart_ids: list[core.ChartID],
 ) -> tuple[dict[str, pd.DataFrame], bool]:
     """
@@ -282,7 +284,7 @@ def register_render_callbacks(app: Dash) -> None:
                 notes_revision,
             )
 
-        page = core.load_page(store, core.PageRef(experiment_id, view_id))
+        page = repo.load_page(store, repo.PageRef(experiment_id, view_id))
         panels_by_name = {p.name: p for p in page.panels}
         dataframes, fetch_ok = _fetch_open_panel_dataframes(store, experiment_id, page, chart_ids)
         shown = {

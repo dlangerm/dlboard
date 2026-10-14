@@ -8,6 +8,8 @@ from dlboard.models._view import ChartInstance, PanelInstance
 from dlboard.plugins.charts.line_chart import LineChart
 from dlboard.serve._pages._experiment import _experiment_page_state as state
 from dlboard.serve._pages._experiment import _fetch_open_panel_dataframes
+from dlboard.serve._pages._experiment import _page_model as page_model
+from dlboard.serve._pages._experiment import _page_repository as repo
 
 if TYPE_CHECKING:
     import pytest
@@ -24,9 +26,9 @@ def test_a_tick_fetches_only_the_charts_on_screen(
         ChartInstance[Any, Any](chart_type="line", parameters={"column": f"m{i}", "x_axis": "step"})
         for i in range(20)
     ]
-    page = store.get_or_create_page(state.BasicExperimentPage, experiment_id=experiment_id)
+    page = store.get_or_create_page(page_model.BasicExperimentPage, experiment_id=experiment_id)
     store.update_page(page.model_copy(update={"panels": [PanelInstance[Any, Any](name="p", charts=charts)]}))
-    page = state.load_page(store, state.PageRef(experiment_id, None))
+    page = repo.load_page(store, repo.PageRef(experiment_id, None))
     on_screen = [state.CHART_CONTENT.of("p", i) for i in range(6, 9)]
     fetched: list[frozenset[str] | None] = []
     fetch_metrics = store.fetch_metrics

@@ -39,6 +39,7 @@ from dlboard.serve._pages._delete_confirm import (
     register_delete_callbacks,
 )
 from dlboard.serve._pages._experiment import _experiment_page_state as core
+from dlboard.serve._pages._experiment import _page_model as page_model
 from dlboard.serve._url import relative_path
 
 if TYPE_CHECKING:
@@ -145,7 +146,7 @@ def resolve_view_id(store: DataStore[...], experiment_id: int, requested: str | 
     """The id of the view a `?view=` value names, if it's really a view of this experiment."""
     if not requested or not requested.isdigit():
         return None
-    view = store.get_view(core.BasicExperimentPage, int(requested))
+    view = store.get_view(page_model.BasicExperimentPage, int(requested))
     return view.id if view is not None and view.experiment_id == experiment_id else None
 
 
@@ -353,10 +354,10 @@ def _import_modal() -> dmc.Modal:
     )
 
 
-def _create_view(store: DataStore[...], experiment_id: int, view: ViewFile) -> models.Page[Any, Any, Any]:
+def _create_view(store: DataStore[...], experiment_id: int, view: ViewFile) -> models.Page[Any, Any]:
     """Save `view` as the current user's."""
     return store.create_view(
-        core.BasicExperimentPage,
+        page_model.BasicExperimentPage,
         models.NewPage[Any, Any](
             experiment_id=experiment_id,
             owner_id=get_current_user().id,
@@ -415,7 +416,7 @@ def _register_duplicate(app: Dash) -> None:
             raise PreventUpdate
         if not name or not name.strip():
             return no_update, no_update, "Give the view a name", no_update, no_update
-        page = core.BasicExperimentPage.model_validate_json(page_json)
+        page = page_model.BasicExperimentPage.model_validate_json(page_json)
         created = _create_view(get_data_store(), experiment_id, ViewFile.of(page, name=name.strip()))
         return created.model_dump_json(), False, None, "", True
 
@@ -458,7 +459,7 @@ def _register_rename(app: Dash) -> None:
         store = get_data_store()
         # Defensive, not just decorative -- `view_controls` only *shows* this to a view's owner,
         # but the callback itself is reachable regardless, so it checks again before writing.
-        view = store.get_view(core.BasicExperimentPage, view_id)
+        view = store.get_view(page_model.BasicExperimentPage, view_id)
         if view is None or view.owner_id != get_current_user().id:
             raise PreventUpdate
         store.update_page(view.model_copy(update={"name": name.strip()}))
@@ -478,7 +479,7 @@ def _register_share_toggle(app: Dash) -> None:
         store = get_data_store()
         # Defensive, not just decorative -- `view_controls` only *shows* this to a view's owner,
         # but the callback itself is reachable regardless, so it checks again before writing.
-        view = store.get_view(core.BasicExperimentPage, view_id)
+        view = store.get_view(page_model.BasicExperimentPage, view_id)
         if view is None or view.owner_id != get_current_user().id:
             raise PreventUpdate
         updated = store.update_page(view.model_copy(update={"shared": not view.shared}))
@@ -500,7 +501,7 @@ def _register_export_import(app: Dash) -> None:
     ) -> tuple[bool, Component]:
         if not n_clicks:
             raise PreventUpdate
-        page = core.BasicExperimentPage.model_validate_json(page_json)
+        page = page_model.BasicExperimentPage.model_validate_json(page_json)
         name = next((o["label"] for o in options if o["value"] == value), "Shared view")
         exported = ViewFile.of(page, name=name).model_dump_json(indent=2)
         return True, html.Div(
@@ -587,7 +588,7 @@ def _register_sync_after_edit(app: Dash) -> None:
         creates a brand-new, private view (see `save_page`), so it may no longer match whatever this
         menu item said about the page you branched *from* (if that one happened to be shared).
         """
-        page = core.BasicExperimentPage.model_validate_json(page_json)
+        page = page_model.BasicExperimentPage.model_validate_json(page_json)
         effective = page.id if page.owner_id is not None else None
         if effective == current_view_id:
             raise PreventUpdate
@@ -597,7 +598,9 @@ def _register_sync_after_edit(app: Dash) -> None:
         toast: list[dict[str, Any]] | NoUpdate = no_update
         if is_owner and not duplicated:
             previous = (
-                None if current_view_id is None else store.get_view(core.BasicExperimentPage, current_view_id)
+                None
+                if current_view_id is None
+                else store.get_view(page_model.BasicExperimentPage, current_view_id)
             )
             original = f"“{previous.name}”" if previous is not None else "The shared view"
             toast = [
@@ -636,7 +639,7 @@ def _register_sync_after_edit(app: Dash) -> None:
 def _register_delete(app: Dash) -> None:
     def _delete_view(view_id: int) -> str:
         store = get_data_store()
-        view = store.get_view(core.BasicExperimentPage, view_id)
+        view = store.get_view(page_model.BasicExperimentPage, view_id)
         store.delete_view(view_id, get_current_user().id)
         return relative_path(f"/experiment/{view.experiment_id}" if view is not None else "/")
 

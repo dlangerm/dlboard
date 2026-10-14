@@ -5,12 +5,11 @@ from __future__ import annotations
 import typing
 
 # Pre-3.12 `TypeVar`/`ParamSpec` style (the client's floor is 3.10) -- `P` is `get_or_create`'s
-# constructor signature; `Dataframe`/`Panel`/`Chart` are `Page`'s own three type parameters,
+# constructor signature; `Dataframe`/`Chart` are `Page`'s own two type parameters,
 # reused here rather than declared fresh per method (PEP 695's per-method `def foo[T](...)` needs
 # 3.12).
 _P = typing.ParamSpec("_P")
 _Dataframe = typing.TypeVar("_Dataframe")
-_Panel = typing.TypeVar("_Panel")
 _Chart = typing.TypeVar("_Chart")
 
 if typing.TYPE_CHECKING:
@@ -220,33 +219,31 @@ class DataStore(typing.Protocol[_P]):
 
     def get_or_create_page(
         self,
-        page_type: type[models.Page[_Dataframe, _Panel, _Chart]],
+        page_type: type[models.Page[_Dataframe, _Chart]],
         *,
         run_id: int | None = None,
         experiment_id: int | None = None,
         project_id: int | None = None,
         new_page_type: type[models.NewPage[_Dataframe, _Chart]] | None = None,
-    ) -> models.Page[_Dataframe, _Panel, _Chart]:
+    ) -> models.Page[_Dataframe, _Chart]:
         """Fetch the pages for a run, experiment, or project."""
         ...
 
-    def update_page(
-        self, page: models.Page[_Dataframe, _Panel, _Chart]
-    ) -> models.Page[_Dataframe, _Panel, _Chart]:
+    def update_page(self, page: models.Page[_Dataframe, _Chart]) -> models.Page[_Dataframe, _Chart]:
         """Update a page."""
         ...
 
     def create_view(
         self,
-        page_type: type[models.Page[_Dataframe, _Panel, _Chart]],
+        page_type: type[models.Page[_Dataframe, _Chart]],
         view: models.NewPage[_Dataframe, _Chart],
-    ) -> models.Page[_Dataframe, _Panel, _Chart]:
+    ) -> models.Page[_Dataframe, _Chart]:
         """Save a named, owned view of a page (see `NewPage.owner_id`) as its own page."""
         ...
 
     def get_view(
-        self, page_type: type[models.Page[_Dataframe, _Panel, _Chart]], view_id: int
-    ) -> models.Page[_Dataframe, _Panel, _Chart] | None:
+        self, page_type: type[models.Page[_Dataframe, _Chart]], view_id: int
+    ) -> models.Page[_Dataframe, _Chart] | None:
         """A named view by id, or `None` if there's no such view."""
         ...
 

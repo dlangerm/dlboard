@@ -9,9 +9,9 @@ from dlboard import models
 from dlboard.conftest import props as _to_props
 from dlboard.plugins.charts.line_chart import LineChart
 from dlboard.plugins.charts.table_chart import TableChart
-from dlboard.serve._pages._experiment import _experiment_page_state as state
+from dlboard.serve._pages._experiment import _page_repository as repo
 from dlboard.serve._pages._experiment._chart_editor_modal import build_chart_param_form, render_chart_preview
-from dlboard.serve._pages._experiment._dataframe_helpers import EXCLUDED_RUNS_KEY
+from dlboard.serve._pages._experiment._page_model import EXCLUDED_RUNS_KEY
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -67,9 +67,7 @@ def test_render_chart_preview_leaves_out_excluded_runs_like_the_real_panel(
     kept, excluded = _log_a_run(store, experiment_id), _log_a_run(store, experiment_id)
     # Excluding a run branches into a view of alice's own (see `save_page`) -- preview from that
     # same view, not the (untouched) shared page, to see the exclusion it just made.
-    view = state.persist_settings(
-        store, state.PageRef(experiment_id, None), {EXCLUDED_RUNS_KEY: [excluded.id]}
-    )
+    view = repo.persist_settings(store, repo.PageRef(experiment_id, None), {EXCLUDED_RUNS_KEY: [excluded.id]})
 
     field_ids = [{"type": "chart-param", "field": "column"}, {"type": "chart-param", "field": "x_axis"}]
     preview, error = render_chart_preview(
@@ -80,7 +78,7 @@ def test_render_chart_preview_leaves_out_excluded_runs_like_the_real_panel(
         [],
         [],
         store=store,
-        ref=state.PageRef(experiment_id, view.id),
+        ref=repo.PageRef(experiment_id, view.id),
     )
 
     assert error == ""

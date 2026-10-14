@@ -16,17 +16,14 @@ from dlboard._compat import StrEnum
 
 if typing.TYPE_CHECKING:
     from dlboard.models._artifact import Artifact
-    from dlboard.models._data_store import DataStore
 
 _log = get_logger(__name__)
 
 # Pre-3.12 `TypeVar` style (the client's floor is 3.10). `_Parameters` is a chart type's own
-# settings model; `_Dataframe`/`_Chart` are its input/output; `_Panel` is what a `Page` renders
-# a panel of charts into (named to match `DataStore.get_or_create_page`'s own `Panel`).
+# settings model; `_Dataframe`/`_Chart` are its input/output.
 _Parameters = typing.TypeVar("_Parameters", bound=BaseModel)
 _Dataframe = typing.TypeVar("_Dataframe")
 _Chart = typing.TypeVar("_Chart")
-_Panel = typing.TypeVar("_Panel")
 
 _CHART_ID_LENGTH = 10
 
@@ -561,17 +558,11 @@ class NewPage(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, extra=
         return raw_value
 
 
-class Page(
-    NewPage[_Dataframe, _Chart], typing.Generic[_Dataframe, _Panel, _Chart], frozen=True, extra="forbid"
-):
+class Page(NewPage[_Dataframe, _Chart], typing.Generic[_Dataframe, _Chart], frozen=True, extra="forbid"):
     """A page stored in sql."""
 
     id: int
-    """Page ID to be rendered."""
-
-    @abstractmethod
-    def render(self, data_store: DataStore[...], experiment_id: int) -> _Panel:
-        """Render the page."""
+    """The id the page is stored under."""
 
 
 class ViewSummary(BaseModel, frozen=True, extra="forbid"):
