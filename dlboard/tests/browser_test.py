@@ -41,19 +41,20 @@ from dlboard.serve._pages._experiment._experiment_page_state import (
     LIVE_PAUSED_BADGE_ID,
     LIVE_STATUS_ID,
     LIVE_UPDATES_ENABLED_ID,
-    METRIC_CONTENT_ID,
+)
+from dlboard.serve._pages._experiment._ids import METRIC_CONTENT_ID, PAGE_EXPERIMENT_ID
+from dlboard.serve._pages._experiment._notes import NOTES_COUNT_ID, NOTES_THREAD_ID
+from dlboard.serve._pages._experiment._page_model import OPEN_PANEL_KEY, BasicExperimentPage
+from dlboard.serve._pages._experiment._panel_view import (
     NEW_PANEL_ID,
     NEW_PANEL_NAME_ID,
     NEW_PANEL_OPEN_ID,
     NEW_TAB_BUTTON_ID,
-    PAGE_EXPERIMENT_ID,
     PANEL_AREA_ID,
     PANEL_FILTER_ID,
     PANEL_PAGE_SIZE_ID,
     RENAME_TAB_BUTTON_ID,
 )
-from dlboard.serve._pages._experiment._notes import NOTES_COUNT_ID, NOTES_THREAD_ID
-from dlboard.serve._pages._experiment._page_model import OPEN_PANEL_KEY, BasicExperimentPage
 from dlboard.serve._pages._experiment._run_compare import (
     COMPARE_GRID_ID,
     COMPARE_MODE_ID,
@@ -171,7 +172,7 @@ def test_logged_metrics_render_as_a_real_chart(
     page.reload()
     _auto_generate_charts(page)
     # No explicit `open_panel` setting exists yet for a brand new experiment, so
-    # `BasicExperimentPage.render()`'s own fallback opens the first (and here, only) panel by
+    # `BasicExperimentPage.open_panels()`'s own fallback opens the first (and here, only) panel by
     # default -- no click needed to see it render.
 
     # Scoped to the panel's own content area, not the whole page -- the panel header's own hover
@@ -225,7 +226,7 @@ def test_panel_header_hover_controls_toggle_and_delete_without_disturbing_siblin
         expect(page.get_by_role("button", name=panel_name)).to_be_visible()
 
     # "keep" (created first) starts open -- no explicit `open_panel` setting exists yet for a
-    # brand new experiment, so `BasicExperimentPage.render()`'s own fallback opens the first panel
+    # brand new experiment, so `BasicExperimentPage.open_panels()`'s own fallback opens the first panel
     # by default. "delete-me" (created second) isn't the fallback's pick, so it starts closed.
     # Round-trip "keep"'s control button itself: collapsing, re-expanding, then collapsing again
     # must all still work with the extra wrapping Group in place. Every panel header (open or
@@ -419,7 +420,7 @@ def test_drag_and_drop_reorders_charts_within_a_panel(
     page.reload()
     _auto_generate_charts(page)
     # No explicit `open_panel` setting exists yet for a brand new experiment, so
-    # `BasicExperimentPage.render()`'s own fallback opens the first (and here, only) panel by
+    # `BasicExperimentPage.open_panels()`'s own fallback opens the first (and here, only) panel by
     # default -- no click needed for its charts (and their drag handles) to render.
     expect(page.locator(".dl-chart-drag-handle")).to_have_count(3)
     # Auto-generating on the shared page branches into a view of your own (see `save_page`) --
@@ -483,7 +484,7 @@ def test_drag_and_drop_moves_a_chart_into_a_different_panel(
     # wait for that branch's `?view=` to land before anything below reads the page off it.
     expect(page).to_have_url(re.compile(r"\?view=\d+$"))
     # No explicit `open_panel` setting exists yet for a brand new experiment, so
-    # `BasicExperimentPage.render()`'s own fallback already opens the first panel ("train" --
+    # `BasicExperimentPage.open_panels()`'s own fallback already opens the first panel ("train" --
     # metrics dict insertion order is preserved through to panel-creation order) -- only "val"
     # needs a click.
     page.get_by_role("button", name="val", exact=True).click()
@@ -731,7 +732,7 @@ def test_new_tab_without_panels_gets_an_empty_panel_that_accepts_a_dragged_chart
     # Drag the "loss" chart (in "Ungrouped", on "General") onto the "Images" tab.
     general_tab.click()
     # "Ungrouped" is already open -- it was the first (and, at auto-generate time, only) panel, so
-    # `BasicExperimentPage.render()`'s fallback opened it by default; no click needed.
+    # `BasicExperimentPage.open_panels()`'s fallback opened it by default; no click needed.
     handle = page.locator('.dl-chart-drag-handle[data-panel-name="Ungrouped"][data-chart-index="0"]')
     handle.hover()
     page.wait_for_timeout(200)  # matches the other drag tests' wait for the hover-reveal transition
@@ -1037,7 +1038,7 @@ def test_chart_tooltip_shows_every_series_at_every_hovered_x_position(
     page.reload()
     _auto_generate_charts(page)
     # No explicit `open_panel` setting exists yet for a brand new experiment, so
-    # `BasicExperimentPage.render()`'s own fallback opens the first (and here, only) panel by
+    # `BasicExperimentPage.open_panels()`'s own fallback opens the first (and here, only) panel by
     # default -- no click needed to see it render.
 
     svg = page.locator(".dl-panel-body svg").first
@@ -1113,7 +1114,7 @@ def test_live_update_poll_shows_a_new_run_without_a_reload(
     page.reload()
     _auto_generate_charts(page)
     # No explicit `open_panel` setting exists yet for a brand new experiment, so
-    # `BasicExperimentPage.render()`'s own fallback already opened "Ungrouped" by default -- the
+    # `BasicExperimentPage.open_panels()`'s own fallback already opened "Ungrouped" by default -- the
     # poll only patches currently-open panels' charts, so it has one to patch without a click.
 
     grid = page.locator(f"#{NAVBAR_HPARAM_DATATABLE_ID}")

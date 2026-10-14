@@ -9,9 +9,10 @@ import pytest
 from dlboard.conftest import find_props as _find_props
 from dlboard.models._view import PanelInstance
 from dlboard.plugins.charts.line_chart import LineChart
-from dlboard.serve._pages._experiment import _experiment_page_state as state
 from dlboard.serve._pages._experiment import _page_model as page_model
 from dlboard.serve._pages._experiment import _page_repository as repo
+from dlboard.serve._pages._experiment import _panel_data as panel_data
+from dlboard.serve._pages._experiment import _panel_view as panel_view
 from dlboard.serve._pages._experiment._paging import Paging
 
 if TYPE_CHECKING:
@@ -42,13 +43,14 @@ def test_accordion_view_offers_auto_populate_only_for_an_empty_view(
     page = store.get_or_create_page(page_model.BasicExperimentPage, experiment_id=experiment_id)
     store.update_page(page.model_copy(update={"panels": panels}))
 
-    container = state.accordion_view(
-        store, repo.load_page(store, repo.PageRef(experiment_id, None)), Paging()
-    )
+    loaded = repo.load_page(store, repo.PageRef(experiment_id, None))
+    container = panel_view.accordion_view(panel_data.panel_frames(store, loaded), loaded, Paging())
 
     children = cast("list[Any]", container.children)
-    assert (_find_props(children, state.AUTO_POPULATE_OPEN_ID) is not None) is auto_populate_offered
-    assert (_find_props(children, state.SUGGEST_CHARTS_BUTTON_ID) is not None) is not auto_populate_offered
+    assert (_find_props(children, panel_view.AUTO_POPULATE_OPEN_ID) is not None) is auto_populate_offered
+    assert (
+        _find_props(children, panel_view.SUGGEST_CHARTS_BUTTON_ID) is not None
+    ) is not auto_populate_offered
 
 
 def test_accordion_view_delete_panel_reachable_without_opening_a_panel(
@@ -58,14 +60,13 @@ def test_accordion_view_delete_panel_reachable_without_opening_a_panel(
     page = store.get_or_create_page(page_model.BasicExperimentPage, experiment_id=experiment_id)
     store.update_page(page.model_copy(update={"panels": [PanelInstance[Any, Any](name="p")]}))
 
-    container = state.accordion_view(
-        store, repo.load_page(store, repo.PageRef(experiment_id, None)), Paging()
-    )
+    loaded = repo.load_page(store, repo.PageRef(experiment_id, None))
+    container = panel_view.accordion_view(panel_data.panel_frames(store, loaded), loaded, Paging())
 
     delete_button = _find_props(
         # pyrefly: ignore [unknown-argument-type]
         cast("Any", container).children,
-        state.DELETE_PANEL_BUTTON.of("p"),
+        panel_view.DELETE_PANEL_BUTTON.of("p"),
     )
     assert delete_button is not None
     assert delete_button.get("disabled") is not True

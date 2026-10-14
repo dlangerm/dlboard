@@ -66,7 +66,7 @@ def _resolve_column(dataframe: pd.DataFrame, name: str) -> str:
 
     It may name a metric column directly, or a hyperparameter key -- the latter only exists in
     the dataframe under its prefixed column name (see
-    `_dataframe_helpers.build_hyperparams_dataframe`).
+    `_panel_data.build_hyperparams_dataframe`).
     """
     hparam_column = f"{HPARAM_COLUMN_PREFIX}{name}"
     return hparam_column if hparam_column in dataframe.columns else name

@@ -32,8 +32,11 @@ from dlboard.serve import ClientsideScript
 from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import ButtonId, DivId, ModalId, StoreId, ValueId
 from dlboard.serve._pages._dash_helpers import busy_while_running, require_triggered_id
+from dlboard.serve._pages._experiment import _chart_view as chart_view
 from dlboard.serve._pages._experiment import _experiment_page_state as core
+from dlboard.serve._pages._experiment import _ids as ids
 from dlboard.serve._pages._experiment import _page_model as page_model
+from dlboard.serve._pages._experiment import _panel_view as panel_view
 
 if TYPE_CHECKING:
     from dash.development.base_component import Component
@@ -42,30 +45,30 @@ _PANEL_GRID_COLUMNS_JS = ClientsideScript(Path(__file__).with_name("panel_grid_c
 _PANEL_GRID_FOLLOWERS_JS = ClientsideScript(Path(__file__).with_name("panel_grid_followers.js"))
 
 # --- rename-panel modal ---
-RENAME_PANEL_MODAL_ID: ModalId[core.ExperimentPage] = ModalId("rename-panel-modal")
-RENAME_PANEL_TARGET_ID: StoreId[core.ExperimentPage] = StoreId("rename-panel-target")
-RENAME_PANEL_NAME_INPUT_ID: ValueId[core.ExperimentPage] = ValueId("rename-panel-name-input")
-RENAME_PANEL_ERROR_ID: DivId[core.ExperimentPage] = DivId("rename-panel-error")
-RENAME_PANEL_SAVE_ID: ButtonId[core.ExperimentPage] = ButtonId("rename-panel-save")
-RENAME_PANEL_CANCEL_ID: ButtonId[core.ExperimentPage] = ButtonId("rename-panel-cancel")
+RENAME_PANEL_MODAL_ID: ModalId[ids.ExperimentPage] = ModalId("rename-panel-modal")
+RENAME_PANEL_TARGET_ID: StoreId[ids.ExperimentPage] = StoreId("rename-panel-target")
+RENAME_PANEL_NAME_INPUT_ID: ValueId[ids.ExperimentPage] = ValueId("rename-panel-name-input")
+RENAME_PANEL_ERROR_ID: DivId[ids.ExperimentPage] = DivId("rename-panel-error")
+RENAME_PANEL_SAVE_ID: ButtonId[ids.ExperimentPage] = ButtonId("rename-panel-save")
+RENAME_PANEL_CANCEL_ID: ButtonId[ids.ExperimentPage] = ButtonId("rename-panel-cancel")
 
 # --- delete-panel / delete-chart confirm modals ---
-DELETE_PANEL_MODAL_ID: ModalId[core.ExperimentPage] = ModalId("delete-panel-modal")
-DELETE_PANEL_TARGET_ID: StoreId[core.ExperimentPage] = StoreId("delete-panel-target")
-DELETE_PANEL_CONFIRM_ID: ButtonId[core.ExperimentPage] = ButtonId("delete-panel-confirm")
-DELETE_PANEL_CANCEL_ID: ButtonId[core.ExperimentPage] = ButtonId("delete-panel-cancel")
+DELETE_PANEL_MODAL_ID: ModalId[ids.ExperimentPage] = ModalId("delete-panel-modal")
+DELETE_PANEL_TARGET_ID: StoreId[ids.ExperimentPage] = StoreId("delete-panel-target")
+DELETE_PANEL_CONFIRM_ID: ButtonId[ids.ExperimentPage] = ButtonId("delete-panel-confirm")
+DELETE_PANEL_CANCEL_ID: ButtonId[ids.ExperimentPage] = ButtonId("delete-panel-cancel")
 
-DELETE_CHART_MODAL_ID: ModalId[core.ExperimentPage] = ModalId("delete-chart-modal")
-DELETE_CHART_TARGET_ID: StoreId[core.ExperimentPage] = StoreId("delete-chart-target")
-DELETE_CHART_CONFIRM_ID: ButtonId[core.ExperimentPage] = ButtonId("delete-chart-confirm")
-DELETE_CHART_CANCEL_ID: ButtonId[core.ExperimentPage] = ButtonId("delete-chart-cancel")
+DELETE_CHART_MODAL_ID: ModalId[ids.ExperimentPage] = ModalId("delete-chart-modal")
+DELETE_CHART_TARGET_ID: StoreId[ids.ExperimentPage] = StoreId("delete-chart-target")
+DELETE_CHART_CONFIRM_ID: ButtonId[ids.ExperimentPage] = ButtonId("delete-chart-confirm")
+DELETE_CHART_CANCEL_ID: ButtonId[ids.ExperimentPage] = ButtonId("delete-chart-cancel")
 
 # --- drag-and-drop reorder requests: a completed drag reports here (`_experiment_page_dragdrop.js`
 # calls `set_props` on drop). Live in the static page layout (`serve/_pages/experiment.py`), not the
 # panel area's render tree, so the drop target always exists regardless of what's rendered underneath it. ---
-PANEL_REORDER_STORE_ID: StoreId[core.ExperimentPage] = StoreId("panel-reorder-request")
-CHART_REORDER_STORE_ID: StoreId[core.ExperimentPage] = StoreId("chart-reorder-request")
-CHART_PANEL_MOVE_STORE_ID: StoreId[core.ExperimentPage] = StoreId("chart-panel-move-request")
+PANEL_REORDER_STORE_ID: StoreId[ids.ExperimentPage] = StoreId("panel-reorder-request")
+CHART_REORDER_STORE_ID: StoreId[ids.ExperimentPage] = StoreId("chart-reorder-request")
+CHART_PANEL_MOVE_STORE_ID: StoreId[ids.ExperimentPage] = StoreId("chart-panel-move-request")
 
 
 class PanelReorderRequest(TypedDict):
@@ -102,7 +105,7 @@ class ChartPanelMoveRequest(TypedDict):
 
 
 class _DeleteChartCtx(core.EditCtx):
-    target: core.ChartTargetData | None
+    target: chart_view.ChartTargetData | None
     experiment_id: int
 
 
@@ -143,10 +146,10 @@ def _rename_panel_modal() -> dmc.Modal:
 
 def _delete_confirm_modal(  # noqa: PLR0913
     *,
-    modal_id: ModalId[core.ExperimentPage],
-    target_id: StoreId[core.ExperimentPage],
-    confirm_id: ButtonId[core.ExperimentPage],
-    cancel_id: ButtonId[core.ExperimentPage],
+    modal_id: ModalId[ids.ExperimentPage],
+    target_id: StoreId[ids.ExperimentPage],
+    confirm_id: ButtonId[ids.ExperimentPage],
+    cancel_id: ButtonId[ids.ExperimentPage],
     title: str,
     body: str,
 ) -> dmc.Modal:
@@ -206,9 +209,9 @@ def _validated_layout_change(page_json: str) -> tuple[str, dict[str, Any]]:
     panel_name = triggered_id["panel"]
     value = cast("Any", ctx.triggered[0]["value"])  # pyrefly: ignore [unsupported-operation]
     match triggered_id["type"]:
-        case core.PANEL_LAYOUT_CONTROL.type:
+        case panel_view.PANEL_LAYOUT_CONTROL.type:
             edit = {"layout": value}
-        case core.PANEL_GRID_COLUMNS.type:
+        case panel_view.PANEL_GRID_COLUMNS.type:
             edit = {"grid_columns": value}
         case _:
             raise PreventUpdate
@@ -228,16 +231,16 @@ def _validated_layout_change(page_json: str) -> tuple[str, dict[str, Any]]:
 
 def _register_create_panel(app: Dash) -> None:
     @app.callback(
-        Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
-        Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
-        Output(core.NEW_PANEL_NAME_ID, "error"),
-        Input(core.NEW_PANEL_ID, "n_clicks"),
-        Input(core.NEW_PANEL_NAME_ID, "n_submit"),
-        State(core.NEW_PANEL_NAME_ID, "value"),
-        State(core.STATE_PAGE_STORAGE, "data"),
-        State(core.PANEL_PAGING_ID, "data"),
+        Output(ids.METRIC_CONTENT_ID, "children", allow_duplicate=True),
+        Output(ids.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
+        Output(panel_view.NEW_PANEL_NAME_ID, "error"),
+        Input(panel_view.NEW_PANEL_ID, "n_clicks"),
+        Input(panel_view.NEW_PANEL_NAME_ID, "n_submit"),
+        State(panel_view.NEW_PANEL_NAME_ID, "value"),
+        State(ids.STATE_PAGE_STORAGE, "data"),
+        State(ids.PANEL_PAGING_ID, "data"),
         prevent_initial_call=True,
-        running=busy_while_running(core.NEW_PANEL_ID),
+        running=busy_while_running(panel_view.NEW_PANEL_ID),
     )
     def create_panel(
         n_clicks: int | None, n_submit: int | None, panel_name: str | None, page_json: str, paging_json: str
@@ -272,23 +275,23 @@ def _register_delete_chart(app: Dash) -> None:
     @app.callback(
         Output(DELETE_CHART_MODAL_ID, "opened", allow_duplicate=True),
         Output(DELETE_CHART_TARGET_ID, "data"),
-        Input(core.DELETE_CHART_BUTTON.all(), "n_clicks"),
+        Input(chart_view.DELETE_CHART_BUTTON.all(), "n_clicks"),
         prevent_initial_call=True,
     )
-    def open_delete_chart_modal(_n_clicks_list: list[int]) -> tuple[bool, core.ChartTargetData]:
-        triggered_id = cast("core.ChartTargetData", require_triggered_id())
+    def open_delete_chart_modal(_n_clicks_list: list[int]) -> tuple[bool, chart_view.ChartTargetData]:
+        triggered_id = cast("chart_view.ChartTargetData", require_triggered_id())
         return True, {"panel": triggered_id["panel"], "index": triggered_id["index"]}
 
     @app.callback(
-        Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
-        Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
+        Output(ids.METRIC_CONTENT_ID, "children", allow_duplicate=True),
+        Output(ids.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Output(DELETE_CHART_MODAL_ID, "opened", allow_duplicate=True),
         Input(DELETE_CHART_CONFIRM_ID, "n_clicks"),
         {
             "target": State(DELETE_CHART_TARGET_ID, "data"),
             "experiment_id": State(constants.STATE_EXPERIMENT_ID, "data"),
-            "page_json": State(core.STATE_PAGE_STORAGE, "data"),
-            "paging_json": State(core.PANEL_PAGING_ID, "data"),
+            "page_json": State(ids.STATE_PAGE_STORAGE, "data"),
+            "paging_json": State(ids.PANEL_PAGING_ID, "data"),
         },
         prevent_initial_call=True,
         running=busy_while_running(DELETE_CHART_CONFIRM_ID),
@@ -332,7 +335,7 @@ def _register_delete_panel(app: Dash) -> None:
     @app.callback(
         Output(DELETE_PANEL_MODAL_ID, "opened", allow_duplicate=True),
         Output(DELETE_PANEL_TARGET_ID, "data"),
-        Input(core.DELETE_PANEL_BUTTON.all(), "n_clicks"),
+        Input(panel_view.DELETE_PANEL_BUTTON.all(), "n_clicks"),
         prevent_initial_call=True,
     )
     def open_delete_panel_modal(_n_clicks_list: list[int]) -> tuple[bool, str]:
@@ -340,15 +343,15 @@ def _register_delete_panel(app: Dash) -> None:
         return True, triggered_id["panel"]
 
     @app.callback(
-        Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
-        Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
+        Output(ids.METRIC_CONTENT_ID, "children", allow_duplicate=True),
+        Output(ids.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Output(DELETE_PANEL_MODAL_ID, "opened", allow_duplicate=True),
         Input(DELETE_PANEL_CONFIRM_ID, "n_clicks"),
         {
             "target": State(DELETE_PANEL_TARGET_ID, "data"),
             "experiment_id": State(constants.STATE_EXPERIMENT_ID, "data"),
-            "page_json": State(core.STATE_PAGE_STORAGE, "data"),
-            "paging_json": State(core.PANEL_PAGING_ID, "data"),
+            "page_json": State(ids.STATE_PAGE_STORAGE, "data"),
+            "paging_json": State(ids.PANEL_PAGING_ID, "data"),
         },
         prevent_initial_call=True,
         running=busy_while_running(DELETE_PANEL_CONFIRM_ID),
@@ -391,11 +394,11 @@ def _register_reorder(app: Dash) -> None:
     """
 
     @app.callback(
-        Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
-        Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
+        Output(ids.METRIC_CONTENT_ID, "children", allow_duplicate=True),
+        Output(ids.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Input(PANEL_REORDER_STORE_ID, "data"),
-        State(core.STATE_PAGE_STORAGE, "data"),
-        State(core.PANEL_PAGING_ID, "data"),
+        State(ids.STATE_PAGE_STORAGE, "data"),
+        State(ids.PANEL_PAGING_ID, "data"),
         prevent_initial_call=True,
     )
     def reorder_panel(
@@ -414,11 +417,11 @@ def _register_reorder(app: Dash) -> None:
         return container, page.model_dump_json()
 
     @app.callback(
-        Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
-        Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
+        Output(ids.METRIC_CONTENT_ID, "children", allow_duplicate=True),
+        Output(ids.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Input(CHART_REORDER_STORE_ID, "data"),
-        State(core.STATE_PAGE_STORAGE, "data"),
-        State(core.PANEL_PAGING_ID, "data"),
+        State(ids.STATE_PAGE_STORAGE, "data"),
+        State(ids.PANEL_PAGING_ID, "data"),
         prevent_initial_call=True,
     )
     def reorder_chart(
@@ -440,11 +443,11 @@ def _register_reorder(app: Dash) -> None:
 
 def _register_toggle(app: Dash) -> None:
     @app.callback(
-        Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
-        Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
-        Input(core.PANEL_SYNC_SWITCH.all(), "checked"),
-        State(core.STATE_PAGE_STORAGE, "data"),
-        State(core.PANEL_PAGING_ID, "data"),
+        Output(ids.METRIC_CONTENT_ID, "children", allow_duplicate=True),
+        Output(ids.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
+        Input(panel_view.PANEL_SYNC_SWITCH.all(), "checked"),
+        State(ids.STATE_PAGE_STORAGE, "data"),
+        State(ids.PANEL_PAGING_ID, "data"),
         prevent_initial_call=True,
     )
     def toggle_panel_sync(
@@ -483,11 +486,11 @@ def _register_toggle(app: Dash) -> None:
         return container, page.model_dump_json()
 
     @app.callback(
-        Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
-        Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
-        Input(core.PANEL_LAYOUT_CONTROL.all(), "value"),
-        State(core.STATE_PAGE_STORAGE, "data"),
-        State(core.PANEL_PAGING_ID, "data"),
+        Output(ids.METRIC_CONTENT_ID, "children", allow_duplicate=True),
+        Output(ids.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
+        Input(panel_view.PANEL_LAYOUT_CONTROL.all(), "value"),
+        State(ids.STATE_PAGE_STORAGE, "data"),
+        State(ids.PANEL_PAGING_ID, "data"),
         prevent_initial_call=True,
     )
     def change_panel_layout(_layouts: list[str], page_json: str, paging_json: str) -> tuple[html.Div, str]:
@@ -503,22 +506,22 @@ def _register_toggle(app: Dash) -> None:
     # must) blanked the page for as long as that took, on every click of the counter.
     app.clientside_callback(
         _PANEL_GRID_COLUMNS_JS.source,
-        Output(core.PANEL_GRID.match(), "cols"),
-        Input(core.PANEL_GRID_COLUMNS.match(), "value"),
+        Output(panel_view.PANEL_GRID.match(), "cols"),
+        Input(panel_view.PANEL_GRID_COLUMNS.match(), "value"),
         prevent_initial_call=True,
     )
 
     app.clientside_callback(
         _PANEL_GRID_FOLLOWERS_JS.source,
-        Input(core.PANEL_GRID_COLUMNS.all(), "value"),
-        State(core.PANEL_GRID_COLUMNS.all(), "id"),
+        Input(panel_view.PANEL_GRID_COLUMNS.all(), "value"),
+        State(panel_view.PANEL_GRID_COLUMNS.all(), "id"),
         prevent_initial_call=True,
     )
 
     @app.callback(
-        Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
-        Input(core.PANEL_GRID_COLUMNS.all(), "value"),
-        State(core.STATE_PAGE_STORAGE, "data"),
+        Output(ids.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
+        Input(panel_view.PANEL_GRID_COLUMNS.all(), "value"),
+        State(ids.STATE_PAGE_STORAGE, "data"),
         prevent_initial_call=True,
     )
     def save_panel_grid_columns(_grid_columns: list[int], page_json: str) -> str:
@@ -538,11 +541,11 @@ def _register_chart_panel_move(app: Dash) -> None:
     """
 
     @app.callback(
-        Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
-        Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
+        Output(ids.METRIC_CONTENT_ID, "children", allow_duplicate=True),
+        Output(ids.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Input(CHART_PANEL_MOVE_STORE_ID, "data"),
-        State(core.STATE_PAGE_STORAGE, "data"),
-        State(core.PANEL_PAGING_ID, "data"),
+        State(ids.STATE_PAGE_STORAGE, "data"),
+        State(ids.PANEL_PAGING_ID, "data"),
         prevent_initial_call=True,
     )
     def drop_chart_on_panel(
@@ -581,7 +584,7 @@ def _register_rename(app: Dash) -> None:
         Output(RENAME_PANEL_TARGET_ID, "data"),
         Output(RENAME_PANEL_NAME_INPUT_ID, "value"),
         Output(RENAME_PANEL_ERROR_ID, "children", allow_duplicate=True),
-        Input(core.RENAME_PANEL_BUTTON.all(), "n_clicks"),
+        Input(panel_view.RENAME_PANEL_BUTTON.all(), "n_clicks"),
         prevent_initial_call=True,
     )
     def open_rename_panel_modal(_n_clicks_list: list[int]) -> tuple[bool, str, str, str]:
@@ -590,8 +593,8 @@ def _register_rename(app: Dash) -> None:
         return True, panel_name, panel_name, ""
 
     @app.callback(
-        Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
-        Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
+        Output(ids.METRIC_CONTENT_ID, "children", allow_duplicate=True),
+        Output(ids.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Output(RENAME_PANEL_MODAL_ID, "opened", allow_duplicate=True),
         Output(RENAME_PANEL_ERROR_ID, "children", allow_duplicate=True),
         Input(RENAME_PANEL_SAVE_ID, "n_clicks"),
@@ -599,8 +602,8 @@ def _register_rename(app: Dash) -> None:
             "old_name": State(RENAME_PANEL_TARGET_ID, "data"),
             "new_name": State(RENAME_PANEL_NAME_INPUT_ID, "value"),
             "experiment_id": State(constants.STATE_EXPERIMENT_ID, "data"),
-            "page_json": State(core.STATE_PAGE_STORAGE, "data"),
-            "paging_json": State(core.PANEL_PAGING_ID, "data"),
+            "page_json": State(ids.STATE_PAGE_STORAGE, "data"),
+            "paging_json": State(ids.PANEL_PAGING_ID, "data"),
         },
         prevent_initial_call=True,
         running=busy_while_running(RENAME_PANEL_SAVE_ID),

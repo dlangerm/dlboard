@@ -1,45 +1,35 @@
 """
-Core state/render layer for the basic experiment page.
+The panel area's own callbacks -- paging, which panels are open, the active tab -- and the live-update ids.
 
-Owns the page's persisted model (`BasicExperimentPage`), the panel area's render tree
-(`accordion_view`), the mutation primitives the feature modules build on, and the ids the panel area
-renders or that more than one feature reads or writes. A feature's own modal or drawer, and the ids
-inside it, belong to that feature's module (`_chart_editor_modal.py`, `_chart_suggestions.py`,
-`_panel_controls.py`, `_tab_controls.py`), which the experiment page renders once beside the panel
-area -- not here.
+Also the "edit the panels, save, re-render" helpers every feature module builds on. The page model, its
+persistence, its data and its render tree each have a module of their own (see the package docstring).
 """
 
 from __future__ import annotations
 
-import hashlib
 import typing
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Final, TypedDict, cast
+from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 import dash_mantine_components as dmc
-import pandas as pd
 from dash import Dash, Input, Output, State, ctx, html, no_update
-from dash.dcc import Store
 from dash.exceptions import PreventUpdate
 from pydantic import ValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from structlog.stdlib import get_logger
 
-from dlboard import models
-from dlboard.models import ARTIFACT_COLUMN_PREFIX, HPARAM_COLUMN_PREFIX, RUN_NAME_COLUMN, artifact_column
-from dlboard.serve import ClientsideScript, Icon, get_data_store, icon
+from dlboard.serve import ClientsideScript, get_data_store
 from dlboard.serve import _constants as constants
-from dlboard.serve._component_ids import ButtonId, DivId, IntervalId, PatternId, StoreId, ValueId
-from dlboard.serve._pages._dash_helpers import tooltipped_action_icon
-from dlboard.serve._pages._dataframe_helpers import run_display_name
-from dlboard.serve._pages._experiment import _dataframe_helpers as dfh
+from dlboard.serve._component_ids import DivId, IntervalId, StoreId, ValueId
+from dlboard.serve._pages._experiment._ids import (
+    PANEL_PAGING_ID,
+    STATE_PAGE_STORAGE,
+    ExperimentPage,
+)
 from dlboard.serve._pages._experiment._page_model import (
     ACTIVE_TAB_KEY,
-    EXCLUDED_RUNS_KEY,
     OPEN_PANEL_KEY,
-    UNGROUPED_TAB,
     BasicExperimentPage,
-    group_panels_by_tab,
 )
 from dlboard.serve._pages._experiment._page_repository import (
     PageRef,
@@ -49,24 +39,44 @@ from dlboard.serve._pages._experiment._page_repository import (
     save_page,
 )
 from dlboard.serve._pages._experiment._paging import (
-    CHART_SIZES,
-    PANEL_SIZES,
     SIZES_COOKIE,
     PageSizes,
     Paging,
-    Slice,
     next_chart_paging,
     next_panel_paging,
     reveal,
     visible_chart_indexes,
-    visible_panels,
+)
+from dlboard.serve._pages._experiment._panel_data import panel_frames
+from dlboard.serve._pages._experiment._panel_view import (
+    CHART_FILTER,
+    CHART_PAGE_SIZE_ID,
+    CHART_PAGER,
+    CHART_PAGER_SLOT,
+    LOADED_PANELS_STORE_ID,
+    PANEL_ACCORDION,
+    PANEL_AREA_ID,
+    PANEL_CONTENT,
+    PANEL_FILTER_ID,
+    PANEL_PAGE_SIZE_ID,
+    PANEL_PAGER_ID,
+    PANEL_TABS_ID,
+    RENAME_TAB_BUTTON_ID,
+    accordion_view,
+    chart_pager,
+    clamped_paging,
+    panel_area_children,
+    render_panel_content,
+    tab_from_component_value,
+    visible_open_panels,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable
 
     from dash.development.base_component import Component
 
+    from dlboard import models
     from dlboard.models import DataStore
 
 _log = get_logger(__name__)
@@ -78,20 +88,6 @@ _PAGING_SIDE_EFFECTS_JS = ClientsideScript(Path(__file__).with_name("paging_side
 
 _SIZES_COOKIE_MAX_AGE: typing.Final = 365 * 24 * 60 * 60
 
-
-class ExperimentPage:
-    """Page tag: marks a component id as belonging to the experiment page."""
-
-
-# --- route-skeleton ids: a two-file contract with `serve/_pages/experiment.py`, which imports
-# these from `_experiment/__init__.py` (this package's public façade) rather than from here. ---
-PAGE_EXPERIMENT_ID: DivId[ExperimentPage] = DivId("experiment-container")
-EXPERIMENT_HEADER_ID: DivId[ExperimentPage] = DivId("experiment-header")
-METRIC_CONTENT_ID: DivId[ExperimentPage] = DivId("metrics-view")
-STATE_HPARAMS: StoreId[ExperimentPage] = StoreId("hparams-state")
-STATE_PAGE_STORAGE: StoreId[ExperimentPage] = StoreId("current-page")
-STATE_VIEW_ID: StoreId[ExperimentPage] = StoreId("view-id-state")
-"""The named view (`Page.id`) this page is showing, from its `?view=` URL, or `None` for the shared page."""
 
 # --- live updates: a `dcc.Interval`-driven poll of `Experiment.revision` re-renders whichever open
 # charts have actually changed since the last poll; a small badge reports whether the poll itself
@@ -138,307 +134,6 @@ class LiveUpdateSettings(BaseSettings):
     frequent than `poll_interval_ms`."""
 
 
-# --- tabs ---
-PANEL_TABS_ID: ValueId[ExperimentPage] = ValueId("experiment-panel-tabs")
-
-_UNGROUPED_TAB_VALUE: typing.Final = "ungrouped"
-"""
-`dmc.Tabs`/`TabsTab`/`TabsPanel`'s own `value` prop, for `UNGROUPED_TAB` specifically.
-
-Mantine's `Tabs` treats an empty-string `value` as "no value was set" and refuses to render that
-tab/panel at all (a real, silent failure: the tab becomes unclickable, so there's no way back to
-the ungrouped panels once another tab exists) -- so component `value`s always go through
-`tab_component_value`/`tab_from_component_value` instead of using `PanelInstance.tab`/
-`ACTIVE_TAB_KEY`'s own `""` directly. A Private-Use-Area character prefix keeps this from
-colliding with a tab name any user could actually type into the new-tab modal. Not underscored --
-`_panel_controls.py`'s per-panel tab-move dropdown needs the same mapping for its own `Select`.
-"""
-
-
-def tab_component_value(tab: str) -> str:
-    """Map a real tab name (`""` for the ungrouped tab) to what a Mantine component accepts as `value`."""
-    return tab or _UNGROUPED_TAB_VALUE
-
-
-def tab_from_component_value(value: str) -> str:
-    """Invert `tab_component_value` -- what a component's `value`/`Input` reports back."""
-    return "" if value == _UNGROUPED_TAB_VALUE else value
-
-
-LOADED_PANELS_STORE_ID: StoreId[ExperimentPage] = StoreId("loaded-panels-store")
-
-PANEL_PAGING_ID: StoreId[ExperimentPage] = StoreId("panel-paging")
-"""
-The `Paging` (as JSON) of what the panel area is showing.
-
-Part of `accordion_view`'s output, so it is always the paging of the tree it sits in. Every callback that
-rebuilds that tree takes it as a `State` and hands it back to `accordion_view`, so a rebuild stays on the
-page the viewer was looking at.
-"""
-
-FIRST_PAGE: typing.Final = Paging()
-"""Every panel list's first page, unfiltered -- what a render with no particular paging shows."""
-
-PANEL_AREA_ID: DivId[ExperimentPage] = DivId("panel-area")
-"""What a page flip re-renders: the panel pagers and the active tab's accordion, and nothing else."""
-PANEL_FILTER_ID: ValueId[ExperimentPage] = ValueId("panel-filter")
-PANEL_PAGER_ID: ValueId[ExperimentPage] = ValueId("panel-pager")
-PANEL_PAGE_SIZE_ID: ValueId[ExperimentPage] = ValueId("panel-page-size")
-CHART_PAGE_SIZE_ID: ValueId[ExperimentPage] = ValueId("chart-page-size")
-
-# --- new-panel popover, anchored to the toolbar's "New panel" button (callback in `_panel_controls.py`) ---
-NEW_PANEL_OPEN_ID: ButtonId[ExperimentPage] = ButtonId("new-panel-open")
-NEW_PANEL_NAME_ID: ValueId[ExperimentPage] = ValueId("panel-name")
-NEW_PANEL_ID: ButtonId[ExperimentPage] = ButtonId("new-panel-button")
-
-# --- buttons in the panel area that open a modal or drawer -- each rendered once, beside the panel
-# area, by the feature module that owns it (`_chart_suggestions.py`, `_tab_controls.py`). ---
-SUGGEST_CHARTS_BUTTON_ID: ButtonId[ExperimentPage] = ButtonId("suggest-charts-button")
-AUTO_POPULATE_OPEN_ID: ButtonId[ExperimentPage] = ButtonId("auto-populate-open")
-NEW_TAB_BUTTON_ID: ButtonId[ExperimentPage] = ButtonId("new-tab-button")
-RENAME_TAB_BUTTON_ID: ButtonId[ExperimentPage] = ButtonId("rename-tab-button")
-
-
-class ChartTargetData(TypedDict):
-    panel: str
-    index: int | None
-
-
-class ChartID(ChartTargetData):
-    type: str
-
-
-class PanelPattern(PatternId[ExperimentPage]):
-    """A family of components with one per panel, by its name."""
-
-    KEYS: ClassVar[tuple[str, ...]] = ("panel",)
-
-    def of(self, panel_name: str) -> dict[str, str]:
-        return {"type": self.type, "panel": panel_name}
-
-
-class ChartPattern(PatternId[ExperimentPage]):
-    """A family of components with one per chart, by its panel's name and its index in that panel."""
-
-    KEYS: ClassVar[tuple[str, ...]] = ("panel", "index")
-
-    def of(self, panel_name: str, index: int) -> ChartID:
-        return {"type": self.type, "panel": panel_name, "index": index}
-
-
-class TabPattern(PatternId[ExperimentPage]):
-    """A family of components with one per tab, by its name (`""` for the ungrouped tab)."""
-
-    KEYS: ClassVar[tuple[str, ...]] = ("tab",)
-
-    def of(self, tab: str) -> dict[str, str]:
-        return {"type": self.type, "tab": tab}
-
-
-# --- the panel area's own per-tab, per-panel and per-chart components ---
-PANEL_ACCORDION: Final = TabPattern("panel-accordion")
-"""One `Accordion` per tab group -- see `BasicExperimentPage.render`."""
-PANEL_HEADER: Final = PanelPattern("panel-header")
-PANEL_CONTENT: Final = PanelPattern("panel-content")
-PANEL_DRAG_HANDLE: Final = PanelPattern("panel-drag-handle")
-PANEL_SYNC_SWITCH: Final = PanelPattern("panel-sync")
-PANEL_LAYOUT_CONTROL: Final = PanelPattern("panel-layout")
-PANEL_GRID_COLUMNS: Final = PanelPattern("panel-grid-columns")
-PANEL_GRID: Final = PanelPattern("panel-grid")
-OPEN_CHART_BUTTON: Final = PanelPattern("open-add-chart")
-RENAME_PANEL_BUTTON: Final = PanelPattern("rename-panel")
-DELETE_PANEL_BUTTON: Final = PanelPattern("delete-panel")
-PANEL_SUGGEST_BUTTON: Final = PanelPattern("panel-suggest-charts")
-CHART_FILTER: Final = PanelPattern("chart-filter")
-CHART_PAGER: Final = PanelPattern("chart-pager")
-CHART_PAGER_SLOT: Final = PanelPattern("chart-pager-slot")
-
-CHART_CONTENT: Final = ChartPattern("chart-content")
-CHART_CONTROLS_GROUP: Final = ChartPattern("chart-controls")
-CHART_DRAG_HANDLE: Final = ChartPattern("chart-drag-handle")
-EDIT_CHART_BUTTON: Final = ChartPattern("edit-chart")
-COPY_CHART_LINK_BUTTON: Final = ChartPattern("copy-chart-link")
-DELETE_CHART_BUTTON: Final = ChartPattern("delete-chart")
-CHART_BODY: Final = ChartPattern("chart-body")
-"""A chart item's body: the chart itself, what a live update replaces."""
-CHART_FINGERPRINT: Final = ChartPattern("chart-fingerprint")
-"""The hidden node inside a `CHART_BODY` that carries the `chart_data_fingerprint` of the data it was drawn from."""
-
-
-# ============================================================
-# dataframe fetching
-# ============================================================
-
-
-def _splits_metric_and_artifact_charts(panel: models.PanelInstance[Any, Any]) -> bool:
-    """
-    Whether a chart of the panel needs only metrics and another only artifacts.
-
-    That is what makes fetching both for one panel wasteful. A chart that wants both (a table of runs with
-    an artifact column) asks for nothing the panel would not fetch for it anyway.
-    """
-    wants = [
-        (
-            (cols := chart.hint_required_columns()) is None or bool(cols),
-            bool(chart.hint_required_artifact_keys() or chart.hint_required_artifact_key_prefixes()),
-        )
-        for chart in panel.charts
-    ]
-    return any(metrics and not artifacts for metrics, artifacts in wants) and any(
-        artifacts and not metrics for metrics, artifacts in wants
-    )
-
-
-def fetch_panel_dataframe(
-    store: DataStore[...],
-    experiment_id: int,
-    panel: models.PanelInstance[Any, Any],
-    page_settings: dict[str, Any],
-) -> pd.DataFrame:
-    """Fetch just the data one panel needs -- not the whole experiment."""
-    metric_cols = panel.hint_required_columns()
-    artifact_keys = panel.hint_required_artifact_keys()
-    artifact_key_prefixes = frozenset(panel.hint_required_artifact_key_prefixes())
-    has_artifacts = bool(artifact_keys or artifact_key_prefixes)
-
-    if _splits_metric_and_artifact_charts(panel):
-        _log.warning(
-            "Panel %r mixes metric and artifact charts, fetching both is "
-            "less efficient than a panel of one kind; consider splitting it.",
-            panel.name,
-        )
-
-    # Each hint is `None` for "everything" (e.g. a table chart with no `metrics` filter -- its normal
-    # default, flagged to the user by `_unscoped_fetch_badge`) or a set of keys, where empty means
-    # "none of this kind at all".
-    hparam_keys = panel.hint_required_hparams()
-    excluded = frozenset[int](page_settings.get(EXCLUDED_RUNS_KEY) or [])
-    metrics_df = (
-        store.fetch_metrics(
-            experiment_id,
-            keys=None if metric_cols is None else frozenset(metric_cols),
-            exclude_run_ids=excluded,
-        ).to_frame()
-        if metric_cols is None or metric_cols
-        else pd.DataFrame()
-    )
-    artifacts_df = (
-        dfh.build_artifacts_dataframe(
-            store.fetch_artifacts(
-                experiment_id,
-                keys=frozenset(k for k in artifact_keys if k is not None),
-                key_prefixes=artifact_key_prefixes,
-                exclude_run_ids=excluded,
-            )
-        )
-        if has_artifacts
-        else pd.DataFrame()
-    )
-    # fetch_hyperparams has no server-side key filter -- it's one small row per run either way.
-    hparams_df = (
-        dfh.build_hyperparams_dataframe(
-            store.fetch_hyperparams(experiment_id, exclude_run_ids=excluded), keys=hparam_keys
-        )
-        if hparam_keys is None or hparam_keys
-        else pd.DataFrame()
-    )
-    merged = dfh.merge_hyperparams(dfh.merge_metrics_and_artifacts(metrics_df, artifacts_df), hparams_df)
-    if merged.empty:
-        return merged
-    # Carried in alongside the metric/artifact/hparam data (not fetched separately by each chart
-    # that wants it) so `LineChart`/`ImageChart` can label a run by its name instead of its bare id
-    # -- `table_chart.py`'s default "runs" mode explicitly excludes this column, since it isn't a
-    # real metric/hparam. `store.get_runs`'s own default page size caps this at 1000 runs, same as
-    # every other `list_*` read on this page; a larger experiment just leaves the extra runs'
-    # `RUN_NAME_COLUMN` cell blank after the merge below.
-    run_names = pd.DataFrame.from_records(
-        [{"run_id": run.id, RUN_NAME_COLUMN: run_display_name(run)} for run in store.get_runs(experiment_id)]
-    )
-    return merged if run_names.empty else merged.merge(run_names, on="run_id", how="left")
-
-
-def is_lightning_experiment(data_store: DataStore[...], experiment_id: int) -> bool:
-    """
-    Whether `experiment_id`'s metrics were logged through `DLBoardLogger`.
-
-    Lightning-specific chart-autogen conventions (see `_chart_autogen.lightning_granularity`) only
-    apply to those.
-    """
-    experiment = data_store.get_experiment(experiment_id)
-    return experiment is not None and experiment.source == models.ExperimentSource.PYTORCH_LIGHTNING
-
-
-# ============================================================
-# panel/chart rendering
-# ============================================================
-
-
-def _render_chart_safely(
-    chart: models.ChartInstance[Any, Any],
-    dataframe: pd.DataFrame,
-    panel_name: str,
-    context: models.RenderContext,
-) -> Component:
-    """Render one chart, isolating failures so a broken chart doesn't take the rest of the panel down."""
-    try:
-        return chart.render(dataframe, context)
-    except Exception as exc:  # noqa: BLE001
-        _log.exception("Failed to render %r chart in panel %r", chart.chart_type, panel_name)
-        return dmc.Alert(
-            f"{type(exc).__name__}: {exc}",
-            title=f"Failed to render {chart.chart_type} chart",
-            color="red",
-            variant="light",
-        )
-
-
-def _apply_panel_sync(rendered: Component, *, panel_name: str, sync: bool) -> Component:
-    """
-    Scope a rendered line chart's crosshair sync to its own panel, or drop it if sync is off.
-
-    A chart's own `syncId` is just its x-axis column name (e.g. "step"), shared by every line
-    chart on the page with that x-axis -- not just the ones in the same panel. Two panels that
-    both use "step" (e.g. train vs. val, whose step ranges don't correspond to each other) would
-    otherwise wrongly sync their tooltips together.
-    """
-    # A line chart sits under its own title, so it is found anywhere in what the chart rendered.
-    for node in (rendered, *rendered._traverse()):  # noqa: SLF001
-        if not isinstance(node, dmc.LineChart):
-            continue
-        untyped = cast("Any", node)
-        props: dict[str, Any] = dict(untyped.lineChartProps or {})
-        sync_id = props.pop("syncId", None)
-        if sync and sync_id is not None:
-            props["syncId"] = f"{panel_name}:{sync_id}"
-        untyped.lineChartProps = props
-    return rendered
-
-
-def _unscoped_fetch_badge(chart: models.ChartInstance[Any, Any]) -> Component | None:
-    """
-    A small, always-visible warning badge for a chart whose data fetch can't be scoped.
-
-    `chart.hint_required_columns() is None` means this chart's settings don't name specific
-    metrics (e.g. a table chart with no `metrics` filter, left at its "show every metric" default)
-    -- rendering it means fetching every metric logged for the whole experiment, every time its
-    panel updates. That's a real, sometimes-significant cost the user has no other way to notice
-    (it only ever shows up as a backend debug log), so it gets a badge instead of hover-only
-    controls: this should be visible without having to go looking for it.
-    """
-    if chart.hint_required_columns() is not None:
-        return None
-    return dmc.Tooltip(
-        dmc.Badge("fetches all metrics", color="yellow", variant="light", size="xs", radius="sm"),
-        label="No metrics filter is set, so this chart fetches every metric in the experiment on "
-        'every update -- can be slow on a large experiment. Set specific metrics in "Edit chart" '
-        "to scope it down.",
-        position="top",
-        withArrow=True,
-        multiline=True,
-        w=260,
-    )
-
-
 def live_status_badge(*, ok: bool) -> Component:
     """
     Small colored chip reporting whether the live-update poll (`poll_for_updates`) is healthy.
@@ -454,884 +149,6 @@ def live_status_badge(*, ok: bool) -> Component:
     )
 
 
-def chart_body(
-    panel: models.PanelInstance[Any, Any], index: int, dataframe: pd.DataFrame, page_size: int
-) -> list[Component]:
-    """
-    What a chart item shows below its controls: the chart, and a hidden node holding the fingerprint it is drawn from.
-
-    The fingerprint travels with the DOM it describes (not in a store the page keeps beside it), so a
-    chart mounted any way at all -- first load, a panel opening, a page of charts, an edit -- says what
-    it was drawn from, and the poll redraws it only when that is no longer what the data says.
-    """
-    chart = panel.charts[index]
-    context = models.RenderContext(columns=panel.grid_columns, page_size=page_size, chart_id=chart.id)
-    rendered = _apply_panel_sync(
-        _render_chart_safely(chart, dataframe, panel.name, context), panel_name=panel.name, sync=panel.sync
-    )
-    fingerprint = html.Div(
-        chart_data_fingerprint(chart, dataframe),
-        id=CHART_FINGERPRINT.of(panel.name, index),  # pyrefly: ignore [bad-argument-type]
-        hidden=True,
-    )
-    return [rendered, fingerprint]
-
-
-def render_chart_item(
-    panel: models.PanelInstance[Any, Any],
-    index: int,
-    dataframe: pd.DataFrame,
-    page_size: int = models.DEFAULT_RENDER_CONTEXT.page_size,
-) -> Component:
-    """
-    Render one chart in a panel (edit/delete controls above it, revealed on hover) as its own node.
-
-    Individually addressable via `CHART_CONTENT.of(panel.name, index)`, and its chart (the body, below the
-    controls) via `CHART_BODY`: a live-update poll (`poll_for_updates` in `__init__.py`) replaces
-    exactly the body of a chart whose own data changed, instead of rebuilding `render_panel_charts`' whole
-    shared-dataframe blob for the panel: two charts sharing a panel (a common "Auto-generate charts"
-    grouping) commonly have very different update cadences -- an epoch-level validation chart next to a
-    per-step training chart -- and rebuilding the *panel* whenever *either* changes would pop the
-    untouched one too.
-    """
-    chart = panel.charts[index]
-    context = models.RenderContext(columns=panel.grid_columns, page_size=page_size, chart_id=chart.id)
-    hover_controls = dmc.Group(
-        [
-            _drag_handle(
-                class_name="dl-chart-drag-handle",
-                component_id=CHART_DRAG_HANDLE.of(panel.name, index),  # pyrefly: ignore [bad-argument-type]
-                data_attrs={"panel-name": panel.name, "chart-index": str(index)},
-            ),
-            tooltipped_action_icon(
-                Icon.EDIT,
-                component_id=EDIT_CHART_BUTTON.of(panel.name, index),
-                label="Edit chart",
-                size="xs",
-            ),
-            # Copied client-side by `chart_deep_link.js`, from the page's own URL -- no round trip.
-            tooltipped_action_icon(
-                Icon.LINK,
-                component_id=COPY_CHART_LINK_BUTTON.of(panel.name, index),
-                label="Copy a link to this chart",
-                size="xs",
-                **cast("dict[str, Any]", {"data-dl-copy-chart-link": chart.id}),
-            ),
-            tooltipped_action_icon(
-                Icon.DELETE,
-                component_id=DELETE_CHART_BUTTON.of(panel.name, index),
-                label="Delete chart",
-                color="red",
-                size="xs",
-            ),
-        ],
-        id=CHART_CONTROLS_GROUP.of(panel.name, index),  # pyrefly: ignore [bad-argument-type]
-        gap="xs",
-        className="dl-chart-controls",
-        # Laid over the chart's top-right corner rather than given a row of their own: a chart's
-        # height is precious, and these only show on hover anyway.
-        pos="absolute",
-        top=4,
-        right=4,
-        bg="var(--mantine-color-body)",
-        bdrs="sm",
-        style={"zIndex": 1},
-    )
-    # The badge (when present) must be a *sibling* of `hover_controls`, not nested inside it --
-    # `dl-chart-controls`'s opacity:0-until-hover applies to its whole subtree, and this badge
-    # is the one thing here that's supposed to stay visible without hovering.
-    badge = _unscoped_fetch_badge(chart)
-    return dmc.Stack(
-        [
-            *([dmc.Group([badge])] if badge else []),
-            hover_controls,
-            html.Div(
-                chart_body(panel, index, dataframe, page_size),
-                id=CHART_BODY.of(panel.name, index),  # pyrefly: ignore [bad-argument-type]
-            ),
-        ],
-        id=CHART_CONTENT.of(panel.name, index),  # pyrefly: ignore [bad-argument-type]
-        gap="xs",
-        w="100%" if panel.layout == "grid" else chart.natural_width(context),
-        maw="100%",
-        p="xs",
-        pos="relative",
-        className="dl-chart-item",
-        **cast("dict[str, Any]", {"data-chart-id": chart.id}),
-    )
-
-
-def render_panel_charts(
-    panel: models.PanelInstance[Any, Any],
-    dataframe: pd.DataFrame,
-    indexes: Sequence[int] | None = None,
-    page_size: int = models.DEFAULT_RENDER_CONTEXT.page_size,
-) -> list[Component]:
-    """Render the charts of a panel at `indexes` (every chart, if not given) -- see `render_chart_item`."""
-    return [
-        render_chart_item(panel, idx, dataframe, page_size)
-        for idx in range(len(panel.charts))
-        if indexes is None or idx in indexes
-    ]
-
-
-def render_panel_content_from_df(
-    panel: models.PanelInstance[Any, Any],
-    df: pd.DataFrame,
-    indexes: Sequence[int] | None = None,
-    page_size: int = models.DEFAULT_RENDER_CONTEXT.page_size,
-) -> Component:
-    """Render a panel's charts at `indexes` from an already-fetched dataframe -- see `render_panel_content`."""
-    items = render_panel_charts(panel, df, indexes, page_size)
-    # Read by the image series' slider lock (`image_series_lock.js`): which charts move together.
-    sync_marker = cast("dict[str, Any]", {"data-dl-panel-sync": "1"} if panel.sync else {})
-    return (
-        dmc.SimpleGrid(
-            items, id=PANEL_GRID.of(panel.name), cols=panel.grid_columns, spacing="lg", **sync_marker
-        )
-        if panel.layout == "grid"
-        else dmc.Flex(items, justify="flex-start", gap="lg", wrap="wrap", **sync_marker)
-    )
-
-
-def render_panel_content(
-    store: DataStore[...],
-    experiment_id: int,
-    panel: models.PanelInstance[Any, Any],
-    page_settings: dict[str, Any],
-    paging: Paging,
-) -> Component:
-    """
-    Fetch + render the page of one panel's charts `paging` shows. Only called for panels that are open.
-
-    Only that page's charts are fetched for -- a panel of a thousand charts costs what one page of them does.
-    """
-    indexes = visible_chart_indexes(panel, paging).items
-    if not indexes:
-        return dmc.Text(
-            f"No charts match {paging.chart_paging(panel.name).q!r}",
-            c="dimmed",
-            size="sm",
-            ta="center",
-            py="md",
-        )
-    shown = panel.model_copy(update={"charts": [panel.charts[i] for i in indexes]})
-    df = fetch_panel_dataframe(store, experiment_id, shown, page_settings)
-    return render_panel_content_from_df(panel, df, indexes, paging.sizes.charts)
-
-
-def _chart_columns(chart: models.ChartInstance[Any, Any], df: pd.DataFrame) -> list[str]:
-    """
-    The columns of a panel's shared dataframe one chart renders from, in the dataframe's own order.
-
-    Each kind of column is scoped by its own hint, `None` meaning every column of that kind -- so a chart
-    that shows every metric but only some hyperparameters is not redrawn by an unrelated hyperparameter.
-    """
-    metrics = chart.hint_required_columns()
-    hparams = chart.hint_required_hparams()
-    wanted_hparams = None if hparams is None else {f"{HPARAM_COLUMN_PREFIX}{key}" for key in hparams}
-    artifacts = tuple(
-        artifact_column(name)
-        for name in (
-            *(chart.hint_required_artifact_keys() or ()),
-            *chart.hint_required_artifact_key_prefixes(),
-        )
-    )
-
-    def renders_from(column: str) -> bool:
-        if column in models.IDENTITY_COLUMNS:
-            return True
-        if column.startswith(HPARAM_COLUMN_PREFIX):
-            return wanted_hparams is None or column in wanted_hparams
-        if column.startswith(ARTIFACT_COLUMN_PREFIX):
-            return column.startswith(artifacts)
-        return metrics is None or column in metrics
-
-    return [column for column in df.columns if renders_from(column)]
-
-
-def chart_data_fingerprint(chart: models.ChartInstance[Any, Any], df: pd.DataFrame) -> str:
-    """
-    A cheap content hash of the slice of a panel's shared dataframe one chart actually renders from.
-
-    Lets a live-update poll tell "this chart's underlying data hasn't actually changed" apart from
-    "the experiment changed *something*, somewhere" -- `Experiment.revision` is bumped by any write
-    anywhere in the experiment (a different run, a different metric, an epoch-level chart's data
-    between epochs), so without this every open chart would re-render on every poll tick regardless
-    of whether anything it actually shows moved. Scoped per *chart*, not per panel: a panel commonly
-    holds charts with very different update cadences -- an epoch-level chart next to a per-step one,
-    grouped there by "Auto-generate charts" -- and a panel-wide fingerprint would pop every chart in
-    it whenever *any one* of them changed.
-
-    The slice is the chart's metrics, the hyperparameters and artifact columns it asks for, and the
-    run names, so editing a hyperparameter or renaming a run redraws the charts that show it.
-    A hint of `None` (a table chart with no metrics filter, documented to mean "show every metric") means
-    every column of that kind, since such a chart can't be scoped any tighter than the panel fetch already was.
-
-    Hashes the `to_json(orient="split", ...)` serialization the rest of this page relies on,
-    not `pandas.util.hash_pandas_object` -- that hashes cell values
-    directly and raises `TypeError: unhashable type` the moment any column holds something like a
-    list (nothing in this dataframe's own columns does today, but a hash used purely to detect "did
-    this change" has no business being pickier about content than the JSON serialization the rest of
-    this page already ships to the browser).
-
-    Only rows where the chart has data of its own count: the dataframe is wide, so another metric
-    logging a step the chart has nothing at adds a row to it -- which is not a change to the chart,
-    and must not redraw it. (A hyperparameter is on every row of its run, so it never says a row is the
-    chart's.) The index is dropped for the same reason: it numbers the rows of the *whole* dataframe, so
-    another run's new row would renumber this chart's.
-    """
-    scoped = df[_chart_columns(chart, df)]
-    data_cols = [
-        c
-        for c in scoped.columns
-        if c not in models.NO_DATA_COLUMNS and not c.startswith(HPARAM_COLUMN_PREFIX)
-    ]
-    if data_cols:
-        scoped = scoped.dropna(how="all", subset=data_cols)
-    return hashlib.blake2b(
-        scoped.reset_index(drop=True).to_json(orient="split", date_format="iso").encode(), digest_size=16
-    ).hexdigest()
-
-
-def _panel_placeholder() -> dmc.Skeleton:
-    return dmc.Skeleton(height=60, radius="sm")
-
-
-def _drag_handle(*, class_name: str, component_id: dict[str, str], data_attrs: dict[str, str]) -> Component:
-    """
-    A grip glyph, draggable via `_experiment_page_dragdrop.js`.
-
-    Its hint is a native `title`, not a `dmc.Tooltip`: every chart and panel carries one of these,
-    and a mounted Mantine tooltip costs the browser several milliseconds apiece.
-    """
-    # `data-*` attrs are only known dynamically (dict keys, not literal kwargs), so pyrefly can't
-    # match them against `html.Div`'s typed signature -- `cast` to `Any` rather than fight that.
-    div = cast("Any", html.Div)
-    return div(
-        icon(Icon.DRAG),
-        id=component_id,
-        draggable="true",
-        className=class_name,
-        title="Drag to reorder",
-        **{f"data-{key}": value for key, value in data_attrs.items()},
-    )
-
-
-def panel_header_controls(panel: models.PanelInstance[Any, Any]) -> Component:
-    """
-    Drag, add and an actions menu for one panel, hover-revealed on the panel's own header.
-
-    The menu holds everything used less often (suggest, rename, sync, layout, delete): Mantine
-    mounts a menu's dropdown only once it opens, so a page of hundreds of panels pays for one
-    icon button apiece instead of ~30 components. The callbacks over those controls are
-    pattern-matched (`ALL`), so they simply see the controls appear when the menu opens.
-
-    Moving a panel to a tab is drag-and-drop (drag the same handle used to reorder panels onto a
-    tab in the tab bar, see `_experiment_page_dragdrop.js`), not a control here.
-    """
-    panel_name = panel.name
-    return dmc.Group(
-        [
-            _drag_handle(
-                class_name="dl-panel-drag-handle",
-                component_id=PANEL_DRAG_HANDLE.of(panel_name),
-                data_attrs={"panel-name": panel_name},
-            ),
-            html.Span(
-                dmc.ActionIcon(
-                    icon(Icon.ADD),
-                    id=OPEN_CHART_BUTTON.of(panel_name),
-                    n_clicks=0,
-                    variant="subtle",
-                    size="sm",
-                    color="gray",
-                    **cast("dict[str, Any]", {"aria-label": "Add chart to this panel"}),
-                ),
-                title="Add chart to this panel",
-            ),
-            dmc.Menu(
-                [
-                    dmc.MenuTarget(
-                        dmc.ActionIcon(
-                            # Not the three dots: next to the drag handle's grip (also dots) that
-                            # read as one more handle, not as a menu.
-                            icon(Icon.OPTIONS),
-                            variant="subtle",
-                            size="sm",
-                            color="gray",
-                            **cast("dict[str, Any]", {"aria-label": "Panel actions"}),
-                        )
-                    ),
-                    dmc.MenuDropdown(
-                        [
-                            dmc.MenuItem(
-                                "Suggest charts",
-                                id=PANEL_SUGGEST_BUTTON.of(panel_name),
-                                leftSection=icon(Icon.SUGGEST),
-                            ),
-                            dmc.MenuItem(
-                                "Rename panel…",
-                                id=RENAME_PANEL_BUTTON.of(panel_name),
-                                leftSection=icon(Icon.EDIT),
-                            ),
-                            dmc.MenuDivider(),
-                            dmc.Switch(
-                                id=PANEL_SYNC_SWITCH.of(panel_name),
-                                label="Sync crosshair and step across charts",
-                                checked=panel.sync,
-                                size="xs",
-                                px="sm",
-                                py="xs",
-                            ),
-                            dmc.SegmentedControl(
-                                id=PANEL_LAYOUT_CONTROL.of(panel_name),
-                                data=[
-                                    {"value": "packed", "label": "Packed"},
-                                    {"value": "grid", "label": "Grid"},
-                                ],
-                                value=panel.layout,
-                                size="xs",
-                                fullWidth=True,
-                            ),
-                            *(
-                                [
-                                    dmc.NumberInput(
-                                        id=PANEL_GRID_COLUMNS.of(panel_name),
-                                        value=panel.grid_columns,
-                                        min=models.MIN_GRID_COLUMNS,
-                                        max=models.MAX_GRID_COLUMNS,
-                                        allowDecimal=False,
-                                        allowNegative=False,
-                                        clampBehavior="strict",
-                                        size="xs",
-                                        mt="xs",
-                                        **cast("dict[str, Any]", {"aria-label": "Grid columns"}),
-                                    )
-                                ]
-                                if panel.layout == "grid"
-                                else []
-                            ),
-                            dmc.MenuDivider(),
-                            dmc.MenuItem(
-                                "Delete panel…",
-                                id=DELETE_PANEL_BUTTON.of(panel_name),
-                                leftSection=icon(Icon.DELETE),
-                                color="red",
-                            ),
-                        ],
-                        w=240,
-                    ),
-                ],
-                position="bottom-end",
-            ),
-        ],
-        className="dl-panel-controls",
-        gap="xs",
-        wrap="nowrap",
-        # The header runs to the panel's border; without this the menu sat right against it.
-        pr="sm",
-    )
-
-
-def _chart_filter_offered(panel: models.PanelInstance[Any, Any], chart_query: str) -> bool:
-    """Whether a panel gets a chart filter: it has more charts than the smallest page, or one is on."""
-    return len(panel.charts) > CHART_SIZES[0] or bool(chart_query)
-
-
-def _chart_filter(panel: models.PanelInstance[Any, Any], chart_query: str) -> dmc.TextInput:
-    """Fuzzy filter on the metric and artifact names a panel's charts show (see `chart_search_keys`)."""
-    return dmc.TextInput(
-        id=CHART_FILTER.of(panel.name),
-        value=chart_query,
-        placeholder="Filter charts",
-        leftSection=icon(Icon.SEARCH),
-        debounce=300,
-        size="xs",
-        w=200,
-    )
-
-
-def panel_header(panel: models.PanelInstance[Any, Any], chart_query: str = "") -> Component:
-    """
-    A panel's accordion header.
-
-    `AccordionControl`, a chart filter box (when there are enough charts to page) and hover-revealed
-    controls as true DOM siblings (all direct children of this wrapping `Group`) -- not nested inside
-    the control's own `<button>`, which native HTML doesn't allow another interactive element inside
-    anyway. The filter box sits in the header, not above the charts, so it costs no vertical space; it
-    isn't one of the hover-revealed controls, so a filter that is on stays in sight.
-    """
-    n_charts = len(panel.charts)
-    count_label = f"{n_charts} chart" if n_charts == 1 else f"{n_charts} charts"
-    return dmc.Group(
-        [
-            dmc.AccordionControl(
-                dmc.Group(
-                    [
-                        dmc.Text(panel.name, size="xs", fw=600),
-                        # How much is inside, before opening it -- a big panel can take a while to render.
-                        *(
-                            [dmc.Badge(count_label, variant="light", size="xs", tt="none")]
-                            if n_charts
-                            else []
-                        ),
-                    ],
-                    gap="xs",
-                    wrap="nowrap",
-                ),
-                py="xs",
-                px="xs",
-                style={"flex": 1},
-                # The badge stays out of the button's name (tests and screen readers look a panel up by it);
-                # the count is its description instead.
-                **cast("dict[str, Any]", {"aria-label": panel.name, "aria-description": count_label}),
-            ),
-            *([_chart_filter(panel, chart_query)] if _chart_filter_offered(panel, chart_query) else []),
-            panel_header_controls(panel),
-        ],
-        id=PANEL_HEADER.of(panel.name),
-        className="dl-panel-item-header",
-        gap=0,
-        wrap="nowrap",
-    )
-
-
-def _page_view(
-    data_store: DataStore[...], experiment_id: int, page: BasicExperimentPage, paging: Paging
-) -> Component:
-    """
-    Render the toolbar and the active tab's page of panels. Only open panels get real content.
-
-    Only the active tab's panels are rendered, and of those only the page `paging` is on (see
-    `panel_area`) -- a tab or an experiment with hundreds of panels costs the same as one with a
-    few. If every panel shares the (default) ungrouped tab -- the common case today -- no `Tabs`
-    chrome is shown at all, so this looks exactly like a plain accordion until a panel actually
-    gets tabbed. Above the panels sits one toolbar row: tabs on the left, followed by the labeled
-    "New tab" button, the *only* place a brand-new tab gets created (see `NEW_TAB_BUTTON_ID`) --
-    moving a panel to one that already exists is dragging its drag handle onto that tab
-    (`.dl-tab-target`, see `_experiment_page_dragdrop.js`), the same handle used to reorder
-    panels. The panel filter and panel actions sit on the right. A view with no panels at all
-    shows an empty state offering to auto-generate them.
-    """
-    new_tab_button = dmc.Button(
-        "New tab",
-        id=NEW_TAB_BUTTON_ID,
-        leftSection=icon(Icon.ADD),
-        variant="subtle",
-        color="gray",
-        size="xs",
-    )
-    if not page.panels:
-        return html.Div([_toolbar([new_tab_button], [_new_panel_popover()]), _empty_view()])
-
-    tabs = list(group_panels_by_tab(page.panels))
-    active_tab = page.active_tab()
-    area = panel_area(data_store, experiment_id, page, active_tab, paging)
-    panel_actions: list[Component] = [
-        _panel_filter(paging),
-        _new_panel_popover(),
-        _suggest_charts_button(),
-    ]
-    if len(tabs) <= 1:
-        return html.Div([_toolbar([new_tab_button], panel_actions), area])
-
-    rename_tab_button = tooltipped_action_icon(
-        Icon.EDIT,
-        component_id=RENAME_TAB_BUTTON_ID,
-        label="Rename the active tab",
-        size="xs",
-        disabled=active_tab == UNGROUPED_TAB,
-    )
-    return dmc.Tabs(
-        id=PANEL_TABS_ID,
-        value=tab_component_value(active_tab),
-        children=[
-            _toolbar(
-                [dmc.TabsList([_tab_tab(tab) for tab in tabs]), rename_tab_button, new_tab_button],
-                panel_actions,
-            ),
-            area,
-        ],
-    )
-
-
-def _panel_footer(shown: Slice[Any], size_controls: list[Component]) -> Component:
-    """
-    The row under the panels: the page selector centered, and the page-size choices at its right.
-
-    The selector has `withEdges` for first/last, and nothing is drawn when there is one page and no
-    size choice to offer. The two share a row, below what they page, so neither takes room above it.
-    """
-    if shown.total <= 1 and not size_controls:
-        return html.Div()
-    return dmc.Flex(
-        [
-            html.Div(style={"flex": 1}),
-            dmc.Pagination(
-                id=PANEL_PAGER_ID, total=shown.total, value=shown.number, withEdges=True, size="sm"
-            )
-            if shown.total > 1
-            else html.Div(),
-            html.Div(
-                dmc.Group(size_controls, gap="sm", wrap="nowrap"),
-                style={"flex": 1, "display": "flex", "justifyContent": "flex-end"},
-            ),
-        ],
-        align="center",
-        my="xs",
-    )
-
-
-def _page_size_controls(page: BasicExperimentPage, paging: Paging) -> list[Component]:
-    """
-    The panels-per-page and charts-per-page choices, each offered once something is big enough to page.
-
-    Judged over the whole page, not the active tab, so they don't come and go as you switch tabs.
-    """
-    return [
-        dmc.Group(
-            [
-                dmc.Select(
-                    id=select_id,
-                    data=[{"value": str(size), "label": str(size)} for size in sizes],
-                    value=str(current),
-                    allowDeselect=False,
-                    size="xs",
-                    w=64,
-                ),
-                dmc.Text(label, size="xs", c="dimmed"),
-            ],
-            gap=4,
-            wrap="nowrap",
-        )
-        for select_id, label, sizes, current, offered in (
-            (
-                PANEL_PAGE_SIZE_ID,
-                "panels/page",
-                PANEL_SIZES,
-                paging.sizes.panels,
-                len(page.panels) > PANEL_SIZES[0],
-            ),
-            (
-                CHART_PAGE_SIZE_ID,
-                "charts/page",
-                CHART_SIZES,
-                paging.sizes.charts,
-                any(len(p.charts) > CHART_SIZES[0] for p in page.panels),
-            ),
-        )
-        if offered
-    ]
-
-
-def _panel_filter(paging: Paging) -> dmc.TextInput:
-    """Fuzzy filter on the panel names of the active tab. Lives in the toolbar, outside `panel_area`, so typing never remounts it."""
-    return dmc.TextInput(
-        id=PANEL_FILTER_ID,
-        value=paging.panel_q,
-        placeholder="Filter panels",
-        leftSection=icon(Icon.SEARCH),
-        debounce=300,
-        size="xs",
-        w=200,
-    )
-
-
-def panel_area_children(
-    data_store: DataStore[...], experiment_id: int, page: BasicExperimentPage, tab: str, paging: Paging
-) -> list[Component]:
-    """The accordion and footer for the page of `tab`'s panels `paging` shows -- all that a page flip re-renders."""
-    shown = visible_panels(page.panels, tab, paging)
-    accordion = _panel_accordion(
-        data_store, experiment_id, tab, shown.items, set(page.open_panels()), page, paging
-    )
-    no_match = (
-        dmc.Text(f"No panels match {paging.panel_q!r}", c="dimmed", size="sm", ta="center", py="xl")
-        if paging.panel_q and not shown.items
-        else html.Div()
-    )
-    return [no_match, accordion, _panel_footer(shown, _page_size_controls(page, paging))]
-
-
-def panel_area(
-    data_store: DataStore[...], experiment_id: int, page: BasicExperimentPage, tab: str, paging: Paging
-) -> html.Div:
-    return html.Div(panel_area_children(data_store, experiment_id, page, tab, paging), id=PANEL_AREA_ID)
-
-
-def clamped_paging(page: BasicExperimentPage, tab: str, paging: Paging) -> Paging:
-    """`paging` with any page that no longer exists (panels or charts deleted, a stale link) moved to the last one."""
-    paging = paging.with_panels(page=visible_panels(page.panels, tab, paging).number)
-    for panel in visible_panels(page.panels, tab, paging).items:
-        chart_paging = paging.chart_paging(panel.name)
-        number = visible_chart_indexes(panel, paging).number
-        if number != chart_paging.page:
-            paging = paging.with_charts(panel.name, chart_paging.model_copy(update={"page": number}))
-    return paging
-
-
-def visible_open_panels(page: BasicExperimentPage, tab: str, paging: Paging) -> list[str]:
-    """The panels that are open and on the page `paging` shows -- the ones whose content gets rendered."""
-    opened = set(page.open_panels())
-    return [p.name for p in visible_panels(page.panels, tab, paging).items if p.name in opened]
-
-
-def _toolbar(tab_controls: list[Component], panel_actions: list[Component]) -> dmc.Group:
-    """
-    The row above the panels: tab controls on the left, panel actions on the right.
-
-    Part of the same full-width tree as the panels rather than a container off to the side, which
-    squeezed the panels into sharing a row with it.
-    """
-    return dmc.Group(
-        [dmc.Group(tab_controls, gap="xs", wrap="nowrap"), dmc.Group(panel_actions, gap="xs", wrap="nowrap")],
-        justify="space-between",
-        wrap="nowrap",
-        gap="xs",
-        mb="sm",
-    )
-
-
-def _tab_tab(tab: str) -> Component:
-    """One `TabsTab`, also a drag-and-drop target for moving a panel to this (existing) tab."""
-    # `data-*` attrs aren't in `TabsTab`'s typed signature -- `cast` to `Any` rather than fight that.
-    tabs_tab = cast("Any", dmc.TabsTab)
-    return tabs_tab(
-        tab or "General", value=tab_component_value(tab), className="dl-tab-target", **{"data-tab": tab}
-    )
-
-
-def _chart_pager(panel: models.PanelInstance[Any, Any], shown: Slice[int]) -> Component:
-    """A panel's centered chart pager, under its charts; nothing when there is one page."""
-    if shown.total <= 1:
-        return html.Div()
-    return dmc.Group(
-        dmc.Pagination(
-            id=CHART_PAGER.of(panel.name), total=shown.total, value=shown.number, withEdges=True, size="xs"
-        ),
-        justify="center",
-        mt="sm",
-    )
-
-
-def chart_pager_slot(panel: models.PanelInstance[Any, Any], paging: Paging) -> html.Div:
-    """
-    The pager under a panel's charts, in a slot of its own so a filter change can redraw it.
-
-    A sibling of `PANEL_CONTENT`'s div, not inside it: `poll_for_updates` patches into that one.
-    """
-    return html.Div(
-        _chart_pager(panel, visible_chart_indexes(panel, paging)), id=CHART_PAGER_SLOT.of(panel.name)
-    )
-
-
-def _panel_accordion(  # noqa: PLR0913
-    data_store: DataStore[...],
-    experiment_id: int,
-    tab: str,
-    panels: list[models.PanelInstance[Any, Any]],
-    open_set: set[str],
-    page: BasicExperimentPage,
-    paging: Paging,
-) -> dmc.Accordion:
-    return dmc.Accordion(
-        id=PANEL_ACCORDION.of(tab),
-        multiple=True,
-        value=[p.name for p in panels if p.name in open_set],
-        variant="separated",
-        className="dl-panels",
-        chevronPosition="left",
-        children=[
-            dmc.AccordionItem(
-                [
-                    panel_header(p, paging.chart_paging(p.name).q),
-                    dmc.AccordionPanel(
-                        [
-                            # `data-panel-name` isn't in `html.Div`'s typed signature -- `cast` to `Any`
-                            # rather than fight that (same as `_drag_handle`'s data attrs). Read by
-                            # `_experiment_page_dragdrop.js` to let a dragged chart be dropped anywhere
-                            # in a *different* panel's body, not only onto one of its existing charts.
-                            #
-                            # This div's own children must stay exactly `render_panel_content(...)`'s
-                            # output (or the placeholder) -- `poll_for_updates` (`_experiment/__init__.py`)
-                            # patches live-update data straight into each individual chart's own
-                            # `CHART_CONTENT.of(...)` node inside here, bypassing this whole
-                            # `_panel_accordion` tree. Any chrome added here later (e.g. a per-panel
-                            # "last updated" badge) that isn't also part of `render_panel_content`'s
-                            # output would vanish the next time a live-update poll patches an open panel.
-                            # That's why the chart filter and pager above are siblings of it, not in it.
-                            cast("Any", html.Div)(
-                                id=PANEL_CONTENT.of(p.name),
-                                className="dl-panel-body",
-                                **{"data-panel-name": p.name},
-                                children=(
-                                    render_panel_content(
-                                        data_store, experiment_id, p, page.page_settings, paging
-                                    )
-                                    if p.name in open_set
-                                    else _panel_placeholder()
-                                ),
-                            ),
-                            chart_pager_slot(p, paging),
-                        ],
-                        px="xs",
-                        py="xs",
-                    ),
-                ],
-                p.name,
-            )
-            for p in panels
-        ],
-    )
-
-
-def _new_panel_popover() -> dmc.Popover:
-    """
-    The toolbar's "New panel" button, and the name form it opens right beneath it.
-
-    Creating the panel re-renders the whole panel area, this popover included, which is what
-    closes it -- no open/close state to keep. A bad name leaves it open with the error inline.
-    """
-    return dmc.Popover(
-        [
-            dmc.PopoverTarget(
-                dmc.Button(
-                    "New panel", id=NEW_PANEL_OPEN_ID, leftSection=icon(Icon.ADD), variant="light", size="xs"
-                )
-            ),
-            dmc.PopoverDropdown(
-                dmc.Stack(
-                    [
-                        dmc.TextInput(
-                            id=NEW_PANEL_NAME_ID,
-                            label="Panel name",
-                            placeholder="e.g. Losses",
-                            size="xs",
-                            **cast("dict[str, Any]", {"data-autofocus": True}),
-                        ),
-                        dmc.Group(
-                            dmc.Button("Create panel", id=NEW_PANEL_ID, n_clicks=0, size="xs"),
-                            justify="flex-end",
-                        ),
-                    ],
-                    gap="xs",
-                )
-            ),
-        ],
-        position="bottom-end",
-        width=260,
-        withArrow=True,
-        shadow="md",
-        trapFocus=True,
-    )
-
-
-def _suggest_charts_button() -> dmc.Button:
-    return dmc.Button(
-        "Suggest charts",
-        id=SUGGEST_CHARTS_BUTTON_ID,
-        n_clicks=0,
-        leftSection=icon(Icon.SUGGEST),
-        variant="subtle",
-        size="xs",
-    )
-
-
-def _empty_view() -> Component:
-    """A view with no panels: offer to auto-generate them (behind `_chart_suggestions.py`'s modal, which previews the result first)."""
-    return html.Div(
-        [
-            dmc.Paper(
-                dmc.Stack(
-                    [
-                        dmc.ThemeIcon(icon(Icon.SUGGEST), size="xl", radius="xl", variant="light"),
-                        dmc.Text("No charts in this view yet", fw=600, size="lg"),
-                        dmc.Text(
-                            "Auto-generate a panel for each group of logged metrics and artifacts, "
-                            "or start from an empty panel with New panel.",
-                            c="dimmed",
-                            size="sm",
-                            ta="center",
-                            maw=440,
-                        ),
-                        dmc.Button(
-                            "Auto-generate charts",
-                            id=AUTO_POPULATE_OPEN_ID,
-                            n_clicks=0,
-                            leftSection=icon(Icon.SUGGEST),
-                            variant="gradient",
-                            mt="xs",
-                        ),
-                    ],
-                    align="center",
-                    gap="xs",
-                ),
-                withBorder=True,
-                radius="md",
-                p="xl",
-                style={"borderStyle": "dashed"},
-            ),
-        ]
-    )
-
-
-def _focus_on_chart(
-    page: BasicExperimentPage, paging: Paging, chart_id: str
-) -> tuple[BasicExperimentPage, Paging]:
-    """
-    `page` and `paging` as rendered for a `?chart=` deep link: that chart's panel open and on screen.
-
-    Its tab is made active and `paging` moved to the page of panels it is on, but only for this one
-    render, never persisted -- following a link someone shared mustn't change the experiment's layout
-    for everyone else. An id that matches no chart leaves both as they are.
-    """
-    panel = next((p for p in page.panels if any(c.id == chart_id for c in p.charts)), None)
-    if panel is None:
-        return page, paging
-    focused = page.model_copy(
-        update={
-            "page_settings": {
-                **page.page_settings,
-                OPEN_PANEL_KEY: [*page.open_panels(), panel.name],
-                ACTIVE_TAB_KEY: panel.tab,
-            }
-        }
-    )
-    return focused, reveal(page.panels, paging, panel_name=panel.name, chart_id=chart_id)
-
-
-def accordion_view(
-    store: DataStore[...], page: BasicExperimentPage, paging: Paging, *, focus_chart: str | None = None
-) -> html.Div:
-    """
-    The full accordion/tabs view of `page` (the modals it opens belong to their features, rendered once).
-
-    Takes the page itself rather than re-reading it: every caller already has the version it just
-    loaded or saved, which is also the only way to be sure a view is rendered, not the shared page.
-
-    `focus_chart` (a `ChartInstance.id`, from a `?chart=` deep link) opens that chart's panel and
-    tab for this render -- see `_focus_on_chart`.
-
-    `paging` is which page of panels to show; it is first moved onto the last page that exists, and the
-    store this emits (`PANEL_PAGING_ID`) always holds the paging actually rendered.
-    """
-    experiment_id = typing.cast("int", page.experiment_id)
-    _log.debug("rendering chart for experiment %s", experiment_id)
-    if focus_chart:
-        page, paging = _focus_on_chart(page, paging, focus_chart)
-    tab = page.active_tab()
-    paging = clamped_paging(page, tab, paging)
-
-    return html.Div(
-        [
-            _page_view(store, experiment_id, page, paging),
-            Store(id=LOADED_PANELS_STORE_ID, data=visible_open_panels(page, tab, paging)),
-            Store(id=PANEL_PAGING_ID, data=paging.model_dump_json()),
-        ],
-    )
-
-
 def persist_settings_and_rerender(
     store: DataStore[...],
     ref: PageRef,
@@ -1340,7 +157,7 @@ def persist_settings_and_rerender(
 ) -> tuple[BasicExperimentPage, html.Div]:
     """Merge `updates` into page_settings (server-authoritative), persist, and re-render the accordion."""
     page = persist_settings(store, ref, updates)
-    return page, accordion_view(store, page, Paging.model_validate_json(paging_json))
+    return page, accordion_view(panel_frames(store, page), page, Paging.model_validate_json(paging_json))
 
 
 def mutate_panels(
@@ -1401,7 +218,7 @@ def mutate_panels_and_rerender(  # noqa: PLR0913
         paging = reveal(saved.panels, paging, panel_name=holder, chart_id=reveal_chart)
     elif reveal_panel is not None:
         paging = reveal(saved.panels, paging, panel_name=reveal_panel)
-    return saved, accordion_view(get_data_store(), saved, paging)
+    return saved, accordion_view(panel_frames(get_data_store(), saved), saved, paging)
 
 
 class EditCtx(TypedDict):
@@ -1507,7 +324,7 @@ def _register_paging(app: Dash) -> None:
                 samesite="Lax",
             )
         return (
-            panel_area_children(store, panel_ctx["experiment_id"], page, tab, new_paging),
+            panel_area_children(panel_frames(store, page), page, tab, new_paging),
             new_paging.model_dump_json(),
             visible_open_panels(page, tab, new_paging),
         )
@@ -1553,6 +370,7 @@ def _register_paging(app: Dash) -> None:
             store, ref_of(experiment_id, BasicExperimentPage.model_validate_json(chart_ctx["page_json"]))
         )
         panel_by_name = {p.name: p for p in page.panels}
+        frames = panel_frames(store, page)
         changed = {
             name
             for name in requested.charts.keys() | paging.charts.keys()
@@ -1566,7 +384,7 @@ def _register_paging(app: Dash) -> None:
         loaded = set(chart_ctx["loaded"] or [])
         return (
             [
-                _chart_pager(
+                chart_pager(
                     panel_by_name[pid["panel"]], visible_chart_indexes(panel_by_name[pid["panel"]], requested)
                 )
                 if pid["panel"] in changed
@@ -1574,9 +392,7 @@ def _register_paging(app: Dash) -> None:
                 for pid in slot_ids
             ],
             [
-                render_panel_content(
-                    store, experiment_id, panel_by_name[pid["panel"]], page.page_settings, requested
-                )
+                render_panel_content(frames, panel_by_name[pid["panel"]], requested)
                 if pid["panel"] in changed and pid["panel"] in loaded
                 else no_update
                 for pid in content_ids
@@ -1678,6 +494,7 @@ def register_state_callbacks(app: Dash) -> None:
         curr_page = BasicExperimentPage.model_validate_json(page_json)
         page = load_page(store, ref_of(experiment_id, curr_page))
         panel_by_name = {p.name: p for p in page.panels}
+        frames = panel_frames(store, page)
 
         outputs: list[Any] = []
         for pid in panel_ids:
@@ -1685,9 +502,7 @@ def register_state_callbacks(app: Dash) -> None:
             if name not in newly_opened or name not in panel_by_name:
                 outputs.append(no_update)
                 continue
-            outputs.append(
-                render_panel_content(store, experiment_id, panel_by_name[name], page.page_settings, paging)
-            )
+            outputs.append(render_panel_content(frames, panel_by_name[name], paging))
         return outputs, sorted(loaded_set | newly_opened)
 
     @app.callback(

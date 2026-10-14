@@ -21,8 +21,10 @@ from dlboard.conftest import find_props as _find_props
 from dlboard.models._view import ChartInstance, PanelInstance
 from dlboard.plugins.charts._chart_title import titled
 from dlboard.plugins.charts.line_chart import LineChart
-from dlboard.serve._pages._experiment import _experiment_page_state as state
+from dlboard.serve._pages._experiment import _chart_view as chart_view
 from dlboard.serve._pages._experiment import _page_model as page_model
+from dlboard.serve._pages._experiment import _panel_data as panel_data
+from dlboard.serve._pages._experiment import _panel_view as panel_view
 
 if TYPE_CHECKING:
     from dlboard.plugins.data_stores.sqlite import SQLLiteStore
@@ -35,40 +37,42 @@ LineChart.register(allow_override=True)
 def test_panel_header_contains_accordion_control_and_hover_controls() -> None:
     panel = PanelInstance[Any, Any](name="train")
 
-    rendered = state.panel_header(panel)
+    rendered = panel_view.panel_header(panel)
 
-    assert _find_props(rendered, state.DELETE_PANEL_BUTTON.of("train")) is not None
-    assert _find_props(rendered, state.PANEL_DRAG_HANDLE.of("train")) is not None
-    assert _find_props(rendered, state.RENAME_PANEL_BUTTON.of("train")) is not None
-    assert _find_props(rendered, state.PANEL_SYNC_SWITCH.of("train")) is not None
-    assert _find_props(rendered, state.PANEL_LAYOUT_CONTROL.of("train")) is not None
+    assert _find_props(rendered, panel_view.DELETE_PANEL_BUTTON.of("train")) is not None
+    assert _find_props(rendered, panel_view.PANEL_DRAG_HANDLE.of("train")) is not None
+    assert _find_props(rendered, panel_view.RENAME_PANEL_BUTTON.of("train")) is not None
+    assert _find_props(rendered, panel_view.PANEL_SYNC_SWITCH.of("train")) is not None
+    assert _find_props(rendered, panel_view.PANEL_LAYOUT_CONTROL.of("train")) is not None
 
 
 def test_panel_header_controls_delete_is_always_enabled() -> None:
-    controls = state.panel_header_controls(PanelInstance[Any, Any](name="train"))
+    controls = panel_view.panel_header_controls(PanelInstance[Any, Any](name="train"))
 
-    delete_button = _find_props(controls, state.DELETE_PANEL_BUTTON.of("train"))
+    delete_button = _find_props(controls, panel_view.DELETE_PANEL_BUTTON.of("train"))
     assert delete_button is not None
     assert delete_button.get("disabled") is not True
 
 
 def test_panel_header_controls_drag_handle_carries_the_panel_name() -> None:
-    controls = state.panel_header_controls(PanelInstance[Any, Any](name="train"))
+    controls = panel_view.panel_header_controls(PanelInstance[Any, Any](name="train"))
 
-    handle = _find_props(controls, state.PANEL_DRAG_HANDLE.of("train"))
+    handle = _find_props(controls, panel_view.PANEL_DRAG_HANDLE.of("train"))
     assert handle is not None
     assert handle["draggable"] == "true"
     assert handle["data-panel-name"] == "train"
 
 
 def test_panel_header_controls_shows_sync_and_layout_state() -> None:
-    synced = state.panel_header_controls(PanelInstance[Any, Any](name="p", sync=True, layout="grid"))
-    unsynced = state.panel_header_controls(PanelInstance[Any, Any](name="p", sync=False, layout="packed"))
+    synced = panel_view.panel_header_controls(PanelInstance[Any, Any](name="p", sync=True, layout="grid"))
+    unsynced = panel_view.panel_header_controls(
+        PanelInstance[Any, Any](name="p", sync=False, layout="packed")
+    )
 
-    synced_switch = _find_props(synced, state.PANEL_SYNC_SWITCH.of("p"))
-    synced_layout = _find_props(synced, state.PANEL_LAYOUT_CONTROL.of("p"))
-    unsynced_switch = _find_props(unsynced, state.PANEL_SYNC_SWITCH.of("p"))
-    unsynced_layout = _find_props(unsynced, state.PANEL_LAYOUT_CONTROL.of("p"))
+    synced_switch = _find_props(synced, panel_view.PANEL_SYNC_SWITCH.of("p"))
+    synced_layout = _find_props(synced, panel_view.PANEL_LAYOUT_CONTROL.of("p"))
+    unsynced_switch = _find_props(unsynced, panel_view.PANEL_SYNC_SWITCH.of("p"))
+    unsynced_layout = _find_props(unsynced, panel_view.PANEL_LAYOUT_CONTROL.of("p"))
     assert synced_switch is not None
     assert synced_switch["checked"] is True
     assert synced_layout is not None
@@ -125,7 +129,7 @@ def test_apply_panel_sync_drops_sync_id_when_disabled() -> None:
         data=[], dataKey="step", series=[], lineChartProps={"syncId": "step", "syncMethod": "value"}
     )
 
-    result = state._apply_panel_sync(chart, panel_name="train", sync=False)
+    result = chart_view._apply_panel_sync(chart, panel_name="train", sync=False)
 
     assert "syncId" not in result.lineChartProps  # pyrefly: ignore [missing-attribute]
     assert result.lineChartProps["syncMethod"] == "value"  # pyrefly: ignore [bad-index]
@@ -151,7 +155,7 @@ def test_a_grid_column_count_outside_the_supported_range_is_rejected(columns: in
 def test_a_grid_panel_renders_with_its_own_column_count() -> None:
     panel = PanelInstance[Any, Any](name="a", layout="grid", grid_columns=2)
 
-    rendered = state.render_panel_content_from_df(panel, pd.DataFrame())
+    rendered = panel_view.render_panel_content_from_df(panel, pd.DataFrame())
 
     assert isinstance(rendered, dmc.SimpleGrid)
     assert rendered.cols == 2  # pyrefly: ignore [missing-attribute]
@@ -161,9 +165,11 @@ def test_a_grid_panel_renders_with_its_own_column_count() -> None:
 def test_the_grid_column_input_is_only_offered_for_a_grid_panel(
     layout: Literal["packed", "grid"], *, shows_columns: bool
 ) -> None:
-    controls = state.panel_header_controls(PanelInstance[Any, Any](name="a", layout=layout, grid_columns=4))
+    controls = panel_view.panel_header_controls(
+        PanelInstance[Any, Any](name="a", layout=layout, grid_columns=4)
+    )
 
-    columns = _find_props(controls, state.PANEL_GRID_COLUMNS.of("a"))
+    columns = _find_props(controls, panel_view.PANEL_GRID_COLUMNS.of("a"))
     assert (columns is not None) is shows_columns
     if columns is not None:
         assert columns["value"] == 4
@@ -172,7 +178,7 @@ def test_the_grid_column_input_is_only_offered_for_a_grid_panel(
 def test_apply_panel_sync_scopes_sync_id_to_the_panel_when_enabled() -> None:
     chart = dmc.LineChart(data=[], dataKey="step", series=[], lineChartProps={"syncId": "step"})
 
-    result = state._apply_panel_sync(chart, panel_name="train", sync=True)
+    result = chart_view._apply_panel_sync(chart, panel_name="train", sync=True)
 
     assert result.lineChartProps["syncId"] == "train:step"  # pyrefly: ignore [missing-attribute]
 
@@ -182,8 +188,8 @@ def test_apply_panel_sync_scoping_keeps_different_panels_apart() -> None:
     train_chart = dmc.LineChart(data=[], dataKey="step", series=[], lineChartProps={"syncId": "step"})
     val_chart = dmc.LineChart(data=[], dataKey="step", series=[], lineChartProps={"syncId": "step"})
 
-    train_result = state._apply_panel_sync(train_chart, panel_name="train", sync=True)
-    val_result = state._apply_panel_sync(val_chart, panel_name="val", sync=True)
+    train_result = chart_view._apply_panel_sync(train_chart, panel_name="train", sync=True)
+    val_result = chart_view._apply_panel_sync(val_chart, panel_name="val", sync=True)
 
     # pyrefly: ignore [missing-attribute]
     assert train_result.lineChartProps["syncId"] != val_result.lineChartProps["syncId"]
@@ -192,7 +198,7 @@ def test_apply_panel_sync_scoping_keeps_different_panels_apart() -> None:
 def test_apply_panel_sync_ignores_non_line_charts() -> None:
     other = dmc.Text("not a line chart")
 
-    assert state._apply_panel_sync(other, panel_name="train", sync=False) is other
+    assert chart_view._apply_panel_sync(other, panel_name="train", sync=False) is other
 
 
 # ---- reorder_chart ----
@@ -287,11 +293,10 @@ def test_render_with_no_tabbed_panels_shows_no_tabs_chrome(store: SQLLiteStore, 
     page = store.get_or_create_page(page_model.BasicExperimentPage, experiment_id=experiment_id)
     page = store.update_page(page.model_copy(update={"panels": [PanelInstance[Any, Any](name="a")]}))
 
-    rendered = state._page_view(
-        store, experiment_id, cast("page_model.BasicExperimentPage", page), state.FIRST_PAGE
-    )
+    typed = cast("page_model.BasicExperimentPage", page)
+    rendered = panel_view._page_view(panel_data.panel_frames(store, typed), typed, panel_view.FIRST_PAGE)
     assert not isinstance(rendered, dmc.Tabs)
-    assert _find_props(rendered, state.PANEL_ACCORDION.of("")) is not None
+    assert _find_props(rendered, panel_view.PANEL_ACCORDION.of("")) is not None
 
 
 def test_render_groups_panels_into_tabs_by_the_tab_field(store: SQLLiteStore, experiment_id: int) -> None:
@@ -308,9 +313,8 @@ def test_render_groups_panels_into_tabs_by_the_tab_field(store: SQLLiteStore, ex
         )
     )
 
-    rendered = state._page_view(
-        store, experiment_id, cast("page_model.BasicExperimentPage", page), state.FIRST_PAGE
-    )
+    typed = cast("page_model.BasicExperimentPage", page)
+    rendered = panel_view._page_view(panel_data.panel_frames(store, typed), typed, panel_view.FIRST_PAGE)
     assert isinstance(rendered, dmc.Tabs)
     tabs_row = rendered.children[0]  # pyrefly: ignore [unsupported-operation]
     tabs_and_buttons = tabs_row.children[0]
@@ -472,7 +476,7 @@ def test_panel_header_says_how_many_charts_are_inside(n_charts: int, badges: lis
         for i in range(n_charts)
     ]
 
-    rendered = state.panel_header(PanelInstance[Any, Any](name="train", charts=charts))
+    rendered = panel_view.panel_header(PanelInstance[Any, Any](name="train", charts=charts))
 
     assert _badge_labels(json.loads(cast("str", to_json(rendered)))) == badges
 
@@ -480,6 +484,6 @@ def test_panel_header_says_how_many_charts_are_inside(n_charts: int, badges: lis
 def test_apply_panel_sync_scopes_a_line_chart_under_its_title() -> None:
     plot = dmc.LineChart(data=[], dataKey="step", series=[], lineChartProps={"syncId": "step"})
 
-    state._apply_panel_sync(titled("loss", plot), panel_name="train", sync=True)
+    chart_view._apply_panel_sync(titled("loss", plot), panel_name="train", sync=True)
 
     assert plot.lineChartProps["syncId"] == "train:step"  # pyrefly: ignore [missing-attribute]

@@ -1,6 +1,6 @@
 // Clientside body for `_views.py`'s URL-sync callback: whenever `STATE_VIEW_ID` changes because an
 // edit branched into a new personal view (`sync_view_after_edit`, off the back of
-// `_experiment_page_state.py`'s `save_page`), reflect that in the address bar with a plain
+// `_page_repository.py`'s `save_page`), reflect that in the address bar with a plain
 // `pushState` -- not a full navigation the way `view_navigate.js` does for an explicit picker
 // switch: the edit that caused this already re-rendered everything there is to see, so there's
 // nothing left to reload for, and reloading would throw that just-rendered result away.

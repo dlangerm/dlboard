@@ -3,7 +3,7 @@ Tabs: create one, rename the active one, and drop a panel or chart onto one that
 
 Owns its ids, the new-tab and rename-tab modals (rendered once by the experiment page, beside the panel
 area -- see `tab_control_modals`), and the callbacks behind them. The tab bar itself, and its "New tab" and
-"Rename the active tab" buttons, are part of the panel area's render tree (`BasicExperimentPage.render`).
+"Rename the active tab" buttons, are part of the panel area's render tree (`_panel_view.py`).
 """
 
 from __future__ import annotations
@@ -20,7 +20,9 @@ from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import ButtonId, DivId, ModalId, StoreId, ValueId
 from dlboard.serve._pages._dash_helpers import busy_while_running
 from dlboard.serve._pages._experiment import _experiment_page_state as core
+from dlboard.serve._pages._experiment import _ids as ids
 from dlboard.serve._pages._experiment import _page_model as page_model
+from dlboard.serve._pages._experiment import _panel_view as panel_view
 
 if TYPE_CHECKING:
     from dash.development.base_component import Component
@@ -28,27 +30,27 @@ if TYPE_CHECKING:
 # --- new-tab modal -- the *only* place a brand-new tab name can be typed; moving a panel to an
 # already-existing tab is dragging it onto that tab in the tab bar instead (`.dl-tab-target`, see
 # `_experiment_page_dragdrop.js` and `TAB_DROP_STORE_ID`). ---
-NEW_TAB_MODAL_ID: ModalId[core.ExperimentPage] = ModalId("new-tab-modal")
-NEW_TAB_NAME_INPUT_ID: ValueId[core.ExperimentPage] = ValueId("new-tab-name-input")
-NEW_TAB_PANELS_SELECT_ID: ValueId[core.ExperimentPage] = ValueId("new-tab-panels-select")
-NEW_TAB_ERROR_ID: DivId[core.ExperimentPage] = DivId("new-tab-error")
-NEW_TAB_SAVE_ID: ButtonId[core.ExperimentPage] = ButtonId("new-tab-save")
-NEW_TAB_CANCEL_ID: ButtonId[core.ExperimentPage] = ButtonId("new-tab-cancel")
+NEW_TAB_MODAL_ID: ModalId[ids.ExperimentPage] = ModalId("new-tab-modal")
+NEW_TAB_NAME_INPUT_ID: ValueId[ids.ExperimentPage] = ValueId("new-tab-name-input")
+NEW_TAB_PANELS_SELECT_ID: ValueId[ids.ExperimentPage] = ValueId("new-tab-panels-select")
+NEW_TAB_ERROR_ID: DivId[ids.ExperimentPage] = DivId("new-tab-error")
+NEW_TAB_SAVE_ID: ButtonId[ids.ExperimentPage] = ButtonId("new-tab-save")
+NEW_TAB_CANCEL_ID: ButtonId[ids.ExperimentPage] = ButtonId("new-tab-cancel")
 
 # --- rename-tab modal -- renames whichever tab is currently active (read off `PANEL_TABS_ID`'s own
 # value), not a per-tab control. ---
-RENAME_TAB_MODAL_ID: ModalId[core.ExperimentPage] = ModalId("rename-tab-modal")
-RENAME_TAB_TARGET_ID: StoreId[core.ExperimentPage] = StoreId("rename-tab-target")
-RENAME_TAB_NAME_INPUT_ID: ValueId[core.ExperimentPage] = ValueId("rename-tab-name-input")
-RENAME_TAB_ERROR_ID: DivId[core.ExperimentPage] = DivId("rename-tab-error")
-RENAME_TAB_SAVE_ID: ButtonId[core.ExperimentPage] = ButtonId("rename-tab-save")
-RENAME_TAB_CANCEL_ID: ButtonId[core.ExperimentPage] = ButtonId("rename-tab-cancel")
+RENAME_TAB_MODAL_ID: ModalId[ids.ExperimentPage] = ModalId("rename-tab-modal")
+RENAME_TAB_TARGET_ID: StoreId[ids.ExperimentPage] = StoreId("rename-tab-target")
+RENAME_TAB_NAME_INPUT_ID: ValueId[ids.ExperimentPage] = ValueId("rename-tab-name-input")
+RENAME_TAB_ERROR_ID: DivId[ids.ExperimentPage] = DivId("rename-tab-error")
+RENAME_TAB_SAVE_ID: ButtonId[ids.ExperimentPage] = ButtonId("rename-tab-save")
+RENAME_TAB_CANCEL_ID: ButtonId[ids.ExperimentPage] = ButtonId("rename-tab-cancel")
 
 # --- drag-and-drop onto a tab: a completed drag reports here (`_experiment_page_dragdrop.js` calls
 # `set_props` on drop). Live in the static page layout (`serve/_pages/experiment.py`), not the panel
 # area's render tree, so the drop target always exists regardless of what's rendered underneath it. ---
-TAB_DROP_STORE_ID: StoreId[core.ExperimentPage] = StoreId("tab-drop-request")
-CHART_TAB_DROP_STORE_ID: StoreId[core.ExperimentPage] = StoreId("chart-tab-drop-request")
+TAB_DROP_STORE_ID: StoreId[ids.ExperimentPage] = StoreId("tab-drop-request")
+CHART_TAB_DROP_STORE_ID: StoreId[ids.ExperimentPage] = StoreId("chart-tab-drop-request")
 
 
 class TabDropRequest(TypedDict):
@@ -158,11 +160,11 @@ def _register_tab_drop(app: Dash) -> None:
     """
 
     @app.callback(
-        Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
-        Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
+        Output(ids.METRIC_CONTENT_ID, "children", allow_duplicate=True),
+        Output(ids.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Input(TAB_DROP_STORE_ID, "data"),
-        State(core.STATE_PAGE_STORAGE, "data"),
-        State(core.PANEL_PAGING_ID, "data"),
+        State(ids.STATE_PAGE_STORAGE, "data"),
+        State(ids.PANEL_PAGING_ID, "data"),
         prevent_initial_call=True,
     )
     def drop_panel_on_tab(
@@ -192,11 +194,11 @@ def _register_tab_drop(app: Dash) -> None:
         return container, page.model_dump_json()
 
     @app.callback(
-        Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
-        Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
+        Output(ids.METRIC_CONTENT_ID, "children", allow_duplicate=True),
+        Output(ids.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Input(CHART_TAB_DROP_STORE_ID, "data"),
-        State(core.STATE_PAGE_STORAGE, "data"),
-        State(core.PANEL_PAGING_ID, "data"),
+        State(ids.STATE_PAGE_STORAGE, "data"),
+        State(ids.PANEL_PAGING_ID, "data"),
         prevent_initial_call=True,
     )
     def drop_chart_on_tab(
@@ -270,8 +272,8 @@ def _register_new_tab(app: Dash) -> None:
         Output(NEW_TAB_PANELS_SELECT_ID, "data"),
         Output(NEW_TAB_PANELS_SELECT_ID, "value"),
         Output(NEW_TAB_ERROR_ID, "children", allow_duplicate=True),
-        Input(core.NEW_TAB_BUTTON_ID, "n_clicks"),
-        State(core.STATE_PAGE_STORAGE, "data"),
+        Input(panel_view.NEW_TAB_BUTTON_ID, "n_clicks"),
+        State(ids.STATE_PAGE_STORAGE, "data"),
         prevent_initial_call=True,
     )
     def open_new_tab_modal(n_clicks: int, page_json: str) -> tuple[bool, str, list[str], list[str], str]:
@@ -281,8 +283,8 @@ def _register_new_tab(app: Dash) -> None:
         return True, "", [p.name for p in page.panels], [], ""
 
     @app.callback(
-        Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
-        Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
+        Output(ids.METRIC_CONTENT_ID, "children", allow_duplicate=True),
+        Output(ids.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Output(NEW_TAB_MODAL_ID, "opened", allow_duplicate=True),
         Output(NEW_TAB_ERROR_ID, "children", allow_duplicate=True),
         Input(NEW_TAB_SAVE_ID, "n_clicks"),
@@ -290,8 +292,8 @@ def _register_new_tab(app: Dash) -> None:
             "name": State(NEW_TAB_NAME_INPUT_ID, "value"),
             "panel_names": State(NEW_TAB_PANELS_SELECT_ID, "value"),
             "experiment_id": State(constants.STATE_EXPERIMENT_ID, "data"),
-            "page_json": State(core.STATE_PAGE_STORAGE, "data"),
-            "paging_json": State(core.PANEL_PAGING_ID, "data"),
+            "page_json": State(ids.STATE_PAGE_STORAGE, "data"),
+            "paging_json": State(ids.PANEL_PAGING_ID, "data"),
         },
         prevent_initial_call=True,
         running=busy_while_running(NEW_TAB_SAVE_ID),
@@ -347,19 +349,19 @@ def _register_rename_tab(app: Dash) -> None:
         Output(RENAME_TAB_TARGET_ID, "data"),
         Output(RENAME_TAB_NAME_INPUT_ID, "value"),
         Output(RENAME_TAB_ERROR_ID, "children", allow_duplicate=True),
-        Input(core.RENAME_TAB_BUTTON_ID, "n_clicks"),
-        State(core.PANEL_TABS_ID, "value"),
+        Input(panel_view.RENAME_TAB_BUTTON_ID, "n_clicks"),
+        State(panel_view.PANEL_TABS_ID, "value"),
         prevent_initial_call=True,
     )
     def open_rename_tab_modal(n_clicks: int, active_tab_value: str | None) -> tuple[bool, str, str, str]:
-        active_tab = core.tab_from_component_value(active_tab_value or "")
+        active_tab = panel_view.tab_from_component_value(active_tab_value or "")
         if not n_clicks or not active_tab:
             raise PreventUpdate
         return True, active_tab, active_tab, ""
 
     @app.callback(
-        Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
-        Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
+        Output(ids.METRIC_CONTENT_ID, "children", allow_duplicate=True),
+        Output(ids.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Output(RENAME_TAB_MODAL_ID, "opened", allow_duplicate=True),
         Output(RENAME_TAB_ERROR_ID, "children", allow_duplicate=True),
         Input(RENAME_TAB_SAVE_ID, "n_clicks"),
@@ -367,8 +369,8 @@ def _register_rename_tab(app: Dash) -> None:
             "old_name": State(RENAME_TAB_TARGET_ID, "data"),
             "new_name": State(RENAME_TAB_NAME_INPUT_ID, "value"),
             "experiment_id": State(constants.STATE_EXPERIMENT_ID, "data"),
-            "page_json": State(core.STATE_PAGE_STORAGE, "data"),
-            "paging_json": State(core.PANEL_PAGING_ID, "data"),
+            "page_json": State(ids.STATE_PAGE_STORAGE, "data"),
+            "paging_json": State(ids.PANEL_PAGING_ID, "data"),
         },
         prevent_initial_call=True,
         running=busy_while_running(RENAME_TAB_SAVE_ID),

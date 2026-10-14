@@ -13,7 +13,7 @@ from dlboard.plugins.charts.file_list import FileListChart
 from dlboard.plugins.charts.image_series import ImageChart
 from dlboard.plugins.charts.line_chart import LineChart
 from dlboard.serve._pages._experiment import _chart_autogen as autogen
-from dlboard.serve._pages._experiment._dataframe_helpers import ColumnCatalog
+from dlboard.serve._pages._experiment._column_catalog import ColumnCatalog
 
 LineChart.register(allow_override=True)
 ImageChart.register(allow_override=True)

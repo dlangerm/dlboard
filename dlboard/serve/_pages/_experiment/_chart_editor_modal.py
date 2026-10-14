@@ -24,10 +24,14 @@ from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import ButtonId, DivId, ModalId, PatternId, StoreId, ValueId
 from dlboard.serve._grid import themed_grid_kwargs
 from dlboard.serve._pages._dash_helpers import require_triggered_id
+from dlboard.serve._pages._experiment import _chart_view as chart_view
 from dlboard.serve._pages._experiment import _experiment_page_state as core
+from dlboard.serve._pages._experiment import _ids as ids
 from dlboard.serve._pages._experiment import _page_model as page_model
 from dlboard.serve._pages._experiment import _page_repository as repo
-from dlboard.serve._pages._experiment._dataframe_helpers import ColumnCatalog
+from dlboard.serve._pages._experiment import _panel_data as panel_data
+from dlboard.serve._pages._experiment import _panel_view as panel_view
+from dlboard.serve._pages._experiment._column_catalog import ColumnCatalog
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -42,18 +46,18 @@ _CHART_PARAM_CLEAR_JS = ClientsideScript(Path(__file__).with_name("chart_param_c
 _TABLE_VALUE_JS = ClientsideScript(Path(__file__).with_name("chart_param_table_value.js"))
 _TABLE_ROWS_JS = ClientsideScript(Path(__file__).with_name("chart_param_table_rows.js"))
 
-ADD_CHART_MODAL_ID: ModalId[core.ExperimentPage] = ModalId("add-chart-modal")
-ADD_CHART_TARGET_ID: StoreId[core.ExperimentPage] = StoreId("add-chart-target")
-ADD_CHART_INITIAL_PARAMS_ID: StoreId[core.ExperimentPage] = StoreId("add-chart-initial-params")
-ADD_CHART_TYPE_SELECT_ID: ValueId[core.ExperimentPage] = ValueId("add-chart-type-select")
-ADD_CHART_PARAMS_ID: DivId[core.ExperimentPage] = DivId("add-chart-params")
-ADD_CHART_PREVIEW_ID: DivId[core.ExperimentPage] = DivId("add-chart-preview")
-ADD_CHART_ERROR_ID: DivId[core.ExperimentPage] = DivId("add-chart-error")
-ADD_CHART_SUBMIT_ID: ButtonId[core.ExperimentPage] = ButtonId("add-chart-submit")
-ADD_CHART_CANCEL_ID: ButtonId[core.ExperimentPage] = ButtonId("add-chart-cancel")
+ADD_CHART_MODAL_ID: ModalId[ids.ExperimentPage] = ModalId("add-chart-modal")
+ADD_CHART_TARGET_ID: StoreId[ids.ExperimentPage] = StoreId("add-chart-target")
+ADD_CHART_INITIAL_PARAMS_ID: StoreId[ids.ExperimentPage] = StoreId("add-chart-initial-params")
+ADD_CHART_TYPE_SELECT_ID: ValueId[ids.ExperimentPage] = ValueId("add-chart-type-select")
+ADD_CHART_PARAMS_ID: DivId[ids.ExperimentPage] = DivId("add-chart-params")
+ADD_CHART_PREVIEW_ID: DivId[ids.ExperimentPage] = DivId("add-chart-preview")
+ADD_CHART_ERROR_ID: DivId[ids.ExperimentPage] = DivId("add-chart-error")
+ADD_CHART_SUBMIT_ID: ButtonId[ids.ExperimentPage] = ButtonId("add-chart-submit")
+ADD_CHART_CANCEL_ID: ButtonId[ids.ExperimentPage] = ButtonId("add-chart-cancel")
 
 
-class _FieldPattern(PatternId[core.ExperimentPage]):
+class _FieldPattern(PatternId[ids.ExperimentPage]):
     """A family of the form's components, with one per field of whichever chart type the form is showing."""
 
     KEYS: ClassVar[tuple[str, ...]] = ("field",)
@@ -81,7 +85,7 @@ class _AddChartCtx(core.EditCtx):
     field_ids: list[dict[str, str]]
     table_ids: list[dict[str, str]]
     table_values: list[Any]
-    target: core.ChartTargetData | None
+    target: chart_view.ChartTargetData | None
     experiment_id: int
 
 
@@ -356,17 +360,17 @@ def _register_open_close(app: Dash) -> None:
         Output(ADD_CHART_TYPE_SELECT_ID, "value"),
         Output(ADD_CHART_INITIAL_PARAMS_ID, "data"),
         Output(ADD_CHART_SUBMIT_ID, "loading", allow_duplicate=True),
-        Input(core.OPEN_CHART_BUTTON.all(), "n_clicks"),
-        Input(core.EDIT_CHART_BUTTON.all(), "n_clicks"),
-        State(core.STATE_PAGE_STORAGE, "data"),
+        Input(panel_view.OPEN_CHART_BUTTON.all(), "n_clicks"),
+        Input(chart_view.EDIT_CHART_BUTTON.all(), "n_clicks"),
+        State(ids.STATE_PAGE_STORAGE, "data"),
         prevent_initial_call=True,
     )
     def open_chart_modal(
         _add_clicks: list[int], _edit_clicks: list[int], page_json: str
-    ) -> tuple[bool, core.ChartTargetData, str | None, dict[str, Any], bool]:
-        triggered_id = cast("core.ChartID", require_triggered_id())
+    ) -> tuple[bool, chart_view.ChartTargetData, str | None, dict[str, Any], bool]:
+        triggered_id = cast("chart_view.ChartID", require_triggered_id())
 
-        if triggered_id["type"] == core.OPEN_CHART_BUTTON.type:
+        if triggered_id["type"] == panel_view.OPEN_CHART_BUTTON.type:
             return True, {"panel": triggered_id["panel"], "index": None}, None, {}, False
 
         curr_page = page_model.BasicExperimentPage.model_validate_json(page_json)
@@ -457,7 +461,7 @@ def render_chart_preview(  # noqa: PLR0913
         page = repo.load_page(store, ref)
         panel = models.PanelInstance[Any, Any](name="preview", charts=[chart])
         return chart.render(
-            core.fetch_panel_dataframe(store, ref.experiment_id, panel, page.page_settings)
+            panel_data.fetch_panel_dataframe(store, ref.experiment_id, panel, page.page_settings)
         ), ""
     except (ValidationError, KeyError, ValueError) as exc:
         _log.exception("error rendering preview")
@@ -489,7 +493,7 @@ def _register_form(app: Dash) -> None:
         State(CHART_PARAM.all(), "id"),
         State(CHART_PARAM_TABLE_DATA.all(), "id"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
-        State(core.STATE_VIEW_ID, "data"),
+        State(ids.STATE_VIEW_ID, "data"),
         prevent_initial_call=True,
     )
     def render_preview(  # noqa: PLR0913
@@ -516,10 +520,10 @@ def _register_form(app: Dash) -> None:
 
 def _register_submit(app: Dash) -> None:
     @app.callback(
-        Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
+        Output(ids.METRIC_CONTENT_ID, "children", allow_duplicate=True),
         Output(ADD_CHART_MODAL_ID, "opened", allow_duplicate=True),
         Output(ADD_CHART_ERROR_ID, "children", allow_duplicate=True),
-        Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
+        Output(ids.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Output(ADD_CHART_SUBMIT_ID, "loading", allow_duplicate=True),
         Input(ADD_CHART_SUBMIT_ID, "n_clicks"),
         {
@@ -531,8 +535,8 @@ def _register_submit(app: Dash) -> None:
             "field_ids": State(CHART_PARAM.all(), "id"),
             "target": State(ADD_CHART_TARGET_ID, "data"),
             "experiment_id": State(constants.STATE_EXPERIMENT_ID, "data"),
-            "page_json": State(core.STATE_PAGE_STORAGE, "data"),
-            "paging_json": State(core.PANEL_PAGING_ID, "data"),
+            "page_json": State(ids.STATE_PAGE_STORAGE, "data"),
+            "paging_json": State(ids.PANEL_PAGING_ID, "data"),
         },
         prevent_initial_call=True,
     )

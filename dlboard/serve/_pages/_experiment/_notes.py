@@ -31,9 +31,9 @@ if TYPE_CHECKING:
     from dash.development.base_component import Component
 
     from dlboard.models import DataStore
-    from dlboard.serve._pages._experiment import _experiment_page_state as core
+    from dlboard.serve._pages._experiment import _ids as ids
 
-STATE_NOTES_REVISION: StoreId[core.ExperimentPage] = StoreId("notes-revision-state")
+STATE_NOTES_REVISION: StoreId[ids.ExperimentPage] = StoreId("notes-revision-state")
 """The `Experiment.notes_revision` this page last showed; the live poll updates it on a change."""
 
 NOTES_OPEN_ID: typing.Final = "notes-open"

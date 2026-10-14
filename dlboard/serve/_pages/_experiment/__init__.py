@@ -4,17 +4,27 @@ The basic experiment page: hparam/run table + chart accordion, plus the experime
 This module's own job is just the page-level chrome (description editing, delete) and `register()`,
 which wires the CSS/JS routes and delegates every feature to its owning submodule:
 
-- `_experiment_page_state.py` -- the page model, the panel area's render tree, and the mutation
-  primitives/ids every other submodule below (and `serve/_pages/experiment.py`) builds on.
-- `_panel_controls.py` -- create/rename/delete/move a panel; delete/move a chart; its modals.
-- `_tab_controls.py` -- create/rename a tab, drop a panel or chart onto one; its modals.
+Layers, each importing only from the ones above it:
+
+- `_page_model.py` -- the persisted page and every pure edit to its panels (no Dash, no store).
+- `_page_repository.py` -- loading and saving a page, branching into a view of your own on edit.
+- `_panel_data.py` -- fetching a panel's data, and the fingerprint the live poll compares.
+- `_ids.py` -- the page tag and the few ids more than one feature reads or writes.
+- `_chart_view.py`, `_panel_view.py` -- the panel area's render tree, handed its data (never a store).
+- `_experiment_page_state.py` -- the panel area's own callbacks (paging, open panels, the active tab)
+  and the "edit, save, re-render" helpers the feature modules below build on.
+
+Features, each owning its ids, its modal or drawer, and its callbacks:
+
+- `_panel_controls.py` -- create/rename/delete/move a panel; delete/move a chart.
+- `_tab_controls.py` -- create/rename a tab, drop a panel or chart onto one.
 - `_chart_editor_modal.py` -- the add/edit-chart modal: its form, live preview and submit.
 - `_chart_suggestions.py` -- auto-populate charts for an empty view; suggest un-charted keys.
 - `_run_comparison_table.py` -- the navbar's hparam/metric/run comparison table + run deletion.
 
-Anything outside this package that needs a container id, `BasicExperimentPage`, or similar imports
-straight from `_experiment_page_state` (the underscore is a "this is an implementation detail you're
-reaching into on purpose" signal, not an access restriction) rather than through re-exports here.
+Anything outside this package imports straight from the submodule that owns what it needs (the
+underscore is a "this is an implementation detail you're reaching into on purpose" signal, not an
+access restriction) rather than through re-exports here.
 """
 
 from __future__ import annotations
@@ -40,9 +50,13 @@ from dlboard.serve._pages._description_editor import (
     register_edit_callbacks,
     render_header,
 )
+from dlboard.serve._pages._experiment import _chart_view as chart_view
 from dlboard.serve._pages._experiment import _experiment_page_state as core
+from dlboard.serve._pages._experiment import _ids as ids
 from dlboard.serve._pages._experiment import _page_model as page_model
 from dlboard.serve._pages._experiment import _page_repository as repo
+from dlboard.serve._pages._experiment import _panel_data as panel_data
+from dlboard.serve._pages._experiment import _panel_view as panel_view
 from dlboard.serve._pages._experiment._chart_editor_modal import register_chart_editor_callbacks
 from dlboard.serve._pages._experiment._chart_suggestions import register_chart_suggestions_callbacks
 from dlboard.serve._pages._experiment._notes import STATE_NOTES_REVISION, register_notes_callbacks
@@ -64,13 +78,13 @@ if TYPE_CHECKING:
 
 _log = get_logger(__name__)
 
-DELETE_EXPERIMENT_BUTTON_ID: ButtonId[core.ExperimentPage] = ButtonId("delete-experiment-button")
-DELETE_EXPERIMENT_MODAL_ID: ModalId[core.ExperimentPage] = ModalId("delete-experiment-modal")
-DELETE_EXPERIMENT_CONFIRM_ID: ButtonId[core.ExperimentPage] = ButtonId("delete-experiment-confirm")
-DELETE_EXPERIMENT_CANCEL_ID: ButtonId[core.ExperimentPage] = ButtonId("delete-experiment-cancel")
+DELETE_EXPERIMENT_BUTTON_ID: ButtonId[ids.ExperimentPage] = ButtonId("delete-experiment-button")
+DELETE_EXPERIMENT_MODAL_ID: ModalId[ids.ExperimentPage] = ModalId("delete-experiment-modal")
+DELETE_EXPERIMENT_CONFIRM_ID: ButtonId[ids.ExperimentPage] = ButtonId("delete-experiment-confirm")
+DELETE_EXPERIMENT_CANCEL_ID: ButtonId[ids.ExperimentPage] = ButtonId("delete-experiment-cancel")
 
 EXPERIMENT_DESC_IDS = DescriptionEditorIds(
-    header=core.EXPERIMENT_HEADER_ID,
+    header=ids.EXPERIMENT_HEADER_ID,
     edit_button="experiment-edit-desc-button",
     modal="experiment-edit-desc-modal",
     textarea="experiment-edit-desc-textarea",
@@ -115,11 +129,10 @@ def render_panel(
 
     Side effect worth knowing about: `render_initial`'s accordion was always "a component added by
     a later callback" from dash-renderer's perspective, which force-fires any pattern-matching
-    `Input` watching it once on mount regardless of `prevent_initial_call` (see
-    `_experiment_page_state.py`'s own docstring on this). That forced the accordion's
-    `Input(core.PANEL_ACCORDION.all(), "value")`-watching `persist_open_panel` callback to
+    `Input` watching it once on mount regardless of `prevent_initial_call`. That forced the accordion's
+    `Input(panel_view.PANEL_ACCORDION.all(), "value")`-watching `persist_open_panel` callback to
     run before any panel ever existed, persisting an explicit `open_panel: []` -- which silently
-    defeated `BasicExperimentPage.render()`'s own "open the first panel by default" fallback for
+    defeated `BasicExperimentPage.open_panels()`'s own "open the first panel by default" fallback for
     the rest of that experiment's life, since the fallback only applies when the setting is
     *absent*, not merely empty. The accordion being part of the page's genuine first response now
     means that forced fire no longer happens, so a brand-new experiment's first panel opens by
@@ -134,7 +147,9 @@ def render_panel(
         description=description,
         extra_actions=_delete_experiment_action(),
     )
-    container = core.accordion_view(store, page, paging, focus_chart=focus_chart)
+    container = panel_view.accordion_view(
+        panel_data.panel_frames(store, page), page, paging, focus_chart=focus_chart
+    )
     return container, header, page.model_dump_json()
 
 
@@ -142,7 +157,7 @@ def _fetch_open_panel_dataframes(
     store: DataStore[...],
     experiment_id: int,
     page: page_model.BasicExperimentPage,
-    chart_ids: list[core.ChartID],
+    chart_ids: list[chart_view.ChartID],
 ) -> tuple[dict[str, pd.DataFrame], bool]:
     """
     Fetch the dataframe of each panel with charts on screen, for just those charts -- once per panel.
@@ -165,7 +180,7 @@ def _fetch_open_panel_dataframes(
             continue
         shown = panel.model_copy(update={"charts": [c for i, c in enumerate(panel.charts) if i in indexes]})
         try:
-            dataframes[panel_name] = core.fetch_panel_dataframe(
+            dataframes[panel_name] = panel_data.fetch_panel_dataframe(
                 store, experiment_id, shown, page.page_settings
             )
         except Exception:  # noqa: BLE001 -- one bad panel must not break the whole poll tick
@@ -175,7 +190,7 @@ def _fetch_open_panel_dataframes(
 
 
 def _refresh_chart_bodies(
-    chart_ids: list[core.ChartID],
+    chart_ids: list[chart_view.ChartID],
     panels_by_name: dict[str, models.PanelInstance[Any, Any]],
     dataframes: dict[str, pd.DataFrame],
     shown: dict[tuple[str, int | None], str],
@@ -197,10 +212,10 @@ def _refresh_chart_bodies(
             contents.append(no_update)
             continue
         try:
-            if core.chart_data_fingerprint(panel.charts[index], df) == shown.get((panel_name, index)):
+            if panel_data.chart_data_fingerprint(panel.charts[index], df) == shown.get((panel_name, index)):
                 contents.append(no_update)
             else:
-                contents.append(core.chart_body(panel, index, df, page_size))
+                contents.append(chart_view.chart_body(panel, index, df, page_size))
         except Exception:  # noqa: BLE001 -- one bad chart must not break the whole poll tick
             _log.exception("Live-update poll failed to refresh chart %r", f"{panel_name}:{index}")
             contents.append(no_update)
@@ -226,27 +241,27 @@ def register_render_callbacks(app: Dash) -> None:
     # decides whether *that* chart's body actually needs to be replaced -- compared with the one the body
     # on screen carries, so a chart that was just mounted is not redrawn for nothing. ---
     @app.callback(
-        Output(core.CHART_BODY.all(), "children"),
-        Output(core.STATE_HPARAMS, "data", allow_duplicate=True),
+        Output(chart_view.CHART_BODY.all(), "children"),
+        Output(ids.STATE_HPARAMS, "data", allow_duplicate=True),
         Output(core.STATE_LAST_KNOWN_REVISION, "data", allow_duplicate=True),
         Output(core.STATE_LAST_FETCH_AT, "data", allow_duplicate=True),
         Output(core.LIVE_STATUS_ID, "children"),
         Output(STATE_NOTES_REVISION, "data"),
         Input(core.LIVE_POLL_INTERVAL_ID, "n_intervals"),
-        State(core.CHART_BODY.all(), "id"),
-        State(core.CHART_FINGERPRINT.all(), "id"),
-        State(core.CHART_FINGERPRINT.all(), "children"),
+        State(chart_view.CHART_BODY.all(), "id"),
+        State(chart_view.CHART_FINGERPRINT.all(), "id"),
+        State(chart_view.CHART_FINGERPRINT.all(), "children"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
-        State(core.STATE_VIEW_ID, "data"),
+        State(ids.STATE_VIEW_ID, "data"),
         State(core.STATE_LAST_KNOWN_REVISION, "data"),
         State(STATE_NOTES_REVISION, "data"),
-        State(core.PANEL_PAGING_ID, "data"),
+        State(ids.PANEL_PAGING_ID, "data"),
         prevent_initial_call=True,
     )
     def poll_for_updates(  # noqa: PLR0913
         _n_intervals: int,
-        chart_ids: list[core.ChartID],
-        fingerprint_ids: list[core.ChartID],
+        chart_ids: list[chart_view.ChartID],
+        fingerprint_ids: list[chart_view.ChartID],
         fingerprints: list[str],
         experiment_id: int,
         view_id: int | None,

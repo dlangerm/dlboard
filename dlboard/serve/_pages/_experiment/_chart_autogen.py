@@ -20,7 +20,7 @@ from dlboard.plugins.charts.image_series import ImageChart
 from dlboard.plugins.charts.line_chart import LineChart
 
 if TYPE_CHECKING:
-    from dlboard.serve._pages._experiment._dataframe_helpers import ColumnCatalog
+    from dlboard.serve._pages._experiment._column_catalog import ColumnCatalog
 
 SplitMode = Literal["prefix", "suffix"]
 

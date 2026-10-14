@@ -38,7 +38,7 @@ from dlboard.serve._pages._delete_confirm import (
     delete_confirm_modal,
     register_delete_callbacks,
 )
-from dlboard.serve._pages._experiment import _experiment_page_state as core
+from dlboard.serve._pages._experiment import _ids as ids
 from dlboard.serve._pages._experiment import _page_model as page_model
 from dlboard.serve._url import relative_path
 
@@ -96,10 +96,10 @@ IMPORT_VIEW_JSON_ID: typing.Final = "import-view-json"
 IMPORT_VIEW_CONFIRM_ID: typing.Final = "import-view-confirm"
 
 DELETE_VIEW_IDS = DeleteConfirmIds(
-    button=ButtonId[core.ExperimentPage]("delete-view-button"),
-    modal=ModalId[core.ExperimentPage]("delete-view-modal"),
-    confirm=ButtonId[core.ExperimentPage]("delete-view-confirm"),
-    cancel=ButtonId[core.ExperimentPage]("delete-view-cancel"),
+    button=ButtonId[ids.ExperimentPage]("delete-view-button"),
+    modal=ModalId[ids.ExperimentPage]("delete-view-modal"),
+    confirm=ButtonId[ids.ExperimentPage]("delete-view-confirm"),
+    cancel=ButtonId[ids.ExperimentPage]("delete-view-cancel"),
 )
 
 _NAVIGATE_JS = ClientsideScript(Path(__file__).with_name("view_navigate.js"))
@@ -372,10 +372,10 @@ def _register_switching(app: Dash) -> None:
     # Switching views is a client-side navigation to `?view=` (or back to no view), like a link.
     app.clientside_callback(
         _NAVIGATE_JS.source,
-        Output(core.STATE_VIEW_ID, "data"),
+        Output(ids.STATE_VIEW_ID, "data"),
         Output(VIEW_NAV_SUPPRESS_ID, "data", allow_duplicate=True),
         Input(VIEW_SELECT_ID, "value"),
-        State(core.STATE_VIEW_ID, "data"),
+        State(ids.STATE_VIEW_ID, "data"),
         State(VIEW_NAV_SUPPRESS_ID, "data"),
         prevent_initial_call=True,
     )
@@ -397,7 +397,7 @@ def _register_duplicate(app: Dash) -> None:
     # it to `STATE_PAGE_STORAGE` hands off to `sync_view_after_edit`, the same as an edit branching
     # into a view of your own, which catches the picker, menu and URL up without a reload.
     @app.callback(
-        Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
+        Output(ids.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Output(DUPLICATE_VIEW_MODAL_ID, "opened", allow_duplicate=True),
         Output(DUPLICATE_VIEW_NAME_ID, "error"),
         Output(DUPLICATE_VIEW_NAME_ID, "value"),
@@ -405,7 +405,7 @@ def _register_duplicate(app: Dash) -> None:
         Input(DUPLICATE_VIEW_CONFIRM_ID, "n_clicks"),
         Input(DUPLICATE_VIEW_NAME_ID, "n_submit"),
         State(DUPLICATE_VIEW_NAME_ID, "value"),
-        State(core.STATE_PAGE_STORAGE, "data"),
+        State(ids.STATE_PAGE_STORAGE, "data"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
         prevent_initial_call=True,
     )
@@ -443,7 +443,7 @@ def _register_rename(app: Dash) -> None:
         Input(RENAME_VIEW_CONFIRM_ID, "n_clicks"),
         Input(RENAME_VIEW_NAME_ID, "n_submit"),
         State(RENAME_VIEW_NAME_ID, "value"),
-        State(core.STATE_VIEW_ID, "data"),
+        State(ids.STATE_VIEW_ID, "data"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
         prevent_initial_call=True,
     )
@@ -470,7 +470,7 @@ def _register_share_toggle(app: Dash) -> None:
     @app.callback(
         Output(SHARE_VIEW_TOGGLE_ID, "children"),
         Input(SHARE_VIEW_TOGGLE_ID, "n_clicks"),
-        State(core.STATE_VIEW_ID, "data"),
+        State(ids.STATE_VIEW_ID, "data"),
         prevent_initial_call=True,
     )
     def toggle_share(n_clicks: int | None, view_id: int | None) -> str:
@@ -491,7 +491,7 @@ def _register_export_import(app: Dash) -> None:
         Output(EXPORT_VIEW_MODAL_ID, "opened"),
         Output(EXPORT_VIEW_BODY_ID, "children"),
         Input(EXPORT_VIEW_OPEN_ID, "n_clicks"),
-        State(core.STATE_PAGE_STORAGE, "data"),
+        State(ids.STATE_PAGE_STORAGE, "data"),
         State(VIEW_SELECT_ID, "data"),
         State(VIEW_SELECT_ID, "value"),
         prevent_initial_call=True,
@@ -549,15 +549,15 @@ def _register_sync_after_edit(app: Dash) -> None:
     @app.callback(
         Output(VIEW_SELECT_ID, "data", allow_duplicate=True),
         Output(VIEW_SELECT_ID, "value", allow_duplicate=True),
-        Output(core.STATE_VIEW_ID, "data", allow_duplicate=True),
+        Output(ids.STATE_VIEW_ID, "data", allow_duplicate=True),
         Output(VIEW_NAV_SUPPRESS_ID, "data", allow_duplicate=True),
         Output(VIEW_MENU_ID, "className"),
         Output(VIEW_FORK_HINT_ID, "style"),
         Output(SHARE_VIEW_TOGGLE_ID, "children", allow_duplicate=True),
         Output(VIEW_NOTIFY_ID, "sendNotifications"),
         Output(VIEW_DUPLICATED_ID, "data", allow_duplicate=True),
-        Input(core.STATE_PAGE_STORAGE, "data"),
-        State(core.STATE_VIEW_ID, "data"),
+        Input(ids.STATE_PAGE_STORAGE, "data"),
+        State(ids.STATE_VIEW_ID, "data"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
         State(VIEW_DUPLICATED_ID, "data"),
         prevent_initial_call=True,
@@ -630,8 +630,8 @@ def _register_sync_after_edit(app: Dash) -> None:
     # catch up, so a bookmark or a refresh keeps landing on the same branch -- purely client-side.
     app.clientside_callback(
         _SYNC_VIEW_URL_JS.source,
-        Output(core.STATE_VIEW_ID, "data", allow_duplicate=True),
-        Input(core.STATE_VIEW_ID, "data"),
+        Output(ids.STATE_VIEW_ID, "data", allow_duplicate=True),
+        Input(ids.STATE_VIEW_ID, "data"),
         prevent_initial_call=True,
     )
 
@@ -643,9 +643,7 @@ def _register_delete(app: Dash) -> None:
         store.delete_view(view_id, get_current_user().id)
         return relative_path(f"/experiment/{view.experiment_id}" if view is not None else "/")
 
-    register_delete_callbacks(
-        app, DELETE_VIEW_IDS, State(core.STATE_VIEW_ID, "data"), on_confirm=_delete_view
-    )
+    register_delete_callbacks(app, DELETE_VIEW_IDS, State(ids.STATE_VIEW_ID, "data"), on_confirm=_delete_view)
 
 
 def register_view_callbacks(app: Dash) -> None:

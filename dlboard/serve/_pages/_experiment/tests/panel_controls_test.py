@@ -6,8 +6,8 @@ from typing import Any, cast
 
 from dash import Dash
 
-from dlboard.serve._pages._experiment import _experiment_page_state as state
 from dlboard.serve._pages._experiment import _panel_controls as panel_controls
+from dlboard.serve._pages._experiment import _panel_view as panel_view
 from dlboard.serve._pages._experiment import _tab_controls as tab_controls
 
 
@@ -28,7 +28,7 @@ def test_buttons_that_rebuild_the_panel_area_spin_until_their_callback_returns()
     assert spinning == {
         f"{button}.loading": (True, False)
         for button in (
-            state.NEW_PANEL_ID,
+            panel_view.NEW_PANEL_ID,
             tab_controls.NEW_TAB_SAVE_ID,
             panel_controls.RENAME_PANEL_SAVE_ID,
             tab_controls.RENAME_TAB_SAVE_ID,

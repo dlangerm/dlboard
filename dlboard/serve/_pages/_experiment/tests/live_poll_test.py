@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from dlboard.models._view import ChartInstance, PanelInstance
 from dlboard.plugins.charts.line_chart import LineChart
-from dlboard.serve._pages._experiment import _experiment_page_state as state
+from dlboard.serve._pages._experiment import _chart_view as chart_view
 from dlboard.serve._pages._experiment import _fetch_open_panel_dataframes
 from dlboard.serve._pages._experiment import _page_model as page_model
 from dlboard.serve._pages._experiment import _page_repository as repo
@@ -29,7 +29,7 @@ def test_a_tick_fetches_only_the_charts_on_screen(
     page = store.get_or_create_page(page_model.BasicExperimentPage, experiment_id=experiment_id)
     store.update_page(page.model_copy(update={"panels": [PanelInstance[Any, Any](name="p", charts=charts)]}))
     page = repo.load_page(store, repo.PageRef(experiment_id, None))
-    on_screen = [state.CHART_CONTENT.of("p", i) for i in range(6, 9)]
+    on_screen = [chart_view.CHART_CONTENT.of("p", i) for i in range(6, 9)]
     fetched: list[frozenset[str] | None] = []
     fetch_metrics = store.fetch_metrics
 

@@ -36,6 +36,7 @@ from dlboard.serve._grid import column_def, infer_column_dtype, themed_grid_kwar
 from dlboard.serve._pages._dash_helpers import section_label, tooltipped_action_icon
 from dlboard.serve._pages._dataframe_helpers import run_display_name
 from dlboard.serve._pages._experiment import _experiment_page_state as core
+from dlboard.serve._pages._experiment import _ids as ids
 from dlboard.serve._pages._experiment import _page_model as page_model
 from dlboard.serve._pages._experiment import _page_repository as repo
 from dlboard.serve._pages._experiment._run_compare import compare_button
@@ -48,12 +49,12 @@ if TYPE_CHECKING:
 
 _log = get_logger(__name__)
 
-NAVBAR_HPARAM_DATATABLE_ID: ValueId[core.ExperimentPage] = ValueId("navbar-hparam-datatable")
-NAVBAR_HPARAM_COL_SELECT_ID: ValueId[core.ExperimentPage] = ValueId("navbar-hparam-col-select")
+NAVBAR_HPARAM_DATATABLE_ID: ValueId[ids.ExperimentPage] = ValueId("navbar-hparam-datatable")
+NAVBAR_HPARAM_COL_SELECT_ID: ValueId[ids.ExperimentPage] = ValueId("navbar-hparam-col-select")
 NAVBAR_HPARAM_TABLE_BODY_ID: typing.Final = "navbar-hparam-table-body"
-NAVBAR_HPARAM_CONFIRM_COLS_ID: ButtonId[core.ExperimentPage] = ButtonId("navbar-hparam-confirm-cols")
-NAVBAR_HPARAM_COLUMNS_TOGGLE_ID: ButtonId[core.ExperimentPage] = ButtonId("navbar-hparam-columns-toggle")
-NAVBAR_HPARAM_APPLIED_COLS_ID: StoreId[core.ExperimentPage] = StoreId("navbar-hparam-applied-cols")
+NAVBAR_HPARAM_CONFIRM_COLS_ID: ButtonId[ids.ExperimentPage] = ButtonId("navbar-hparam-confirm-cols")
+NAVBAR_HPARAM_COLUMNS_TOGGLE_ID: ButtonId[ids.ExperimentPage] = ButtonId("navbar-hparam-columns-toggle")
+NAVBAR_HPARAM_APPLIED_COLS_ID: StoreId[ids.ExperimentPage] = StoreId("navbar-hparam-applied-cols")
 _ROW_HEIGHT = 34
 _MAX_TABLE_HEIGHT = "50vh"
 _DELETE_COLUMN_ID = "_delete"
@@ -111,12 +112,12 @@ def _status_detail(run: Run) -> str:
             return f"ended without saying how{after}"
 
 
-NAVBAR_HPARAM_SIGNATURE_ID: StoreId[core.ExperimentPage] = StoreId("navbar-hparam-signature")
+NAVBAR_HPARAM_SIGNATURE_ID: StoreId[ids.ExperimentPage] = StoreId("navbar-hparam-signature")
 
-DELETE_RUN_PENDING_STORE_ID: StoreId[core.ExperimentPage] = StoreId("delete-run-pending")
-DELETE_RUN_MODAL_ID: ModalId[core.ExperimentPage] = ModalId("delete-run-modal")
-DELETE_RUN_CONFIRM_ID: ButtonId[core.ExperimentPage] = ButtonId("delete-run-confirm")
-DELETE_RUN_CANCEL_ID: ButtonId[core.ExperimentPage] = ButtonId("delete-run-cancel")
+DELETE_RUN_PENDING_STORE_ID: StoreId[ids.ExperimentPage] = StoreId("delete-run-pending")
+DELETE_RUN_MODAL_ID: ModalId[ids.ExperimentPage] = ModalId("delete-run-modal")
+DELETE_RUN_CONFIRM_ID: ButtonId[ids.ExperimentPage] = ButtonId("delete-run-confirm")
+DELETE_RUN_CANCEL_ID: ButtonId[ids.ExperimentPage] = ButtonId("delete-run-cancel")
 
 _HPARAM_COLS_CHANGED_JS = ClientsideScript(Path(__file__).with_name("hparam_cols_changed.js"))
 
@@ -443,11 +444,11 @@ def _render_signature(
 def _register_hparam_table(app: Dash) -> None:
     @app.callback(
         Output(constants.NAVBAR_RUN_LIST_ID, "children"),
-        Input(core.STATE_HPARAMS, "data"),
+        Input(ids.STATE_HPARAMS, "data"),
         Input(constants.STATE_EXPERIMENT_ID, "data", allow_optional=True),
-        Input(core.STATE_PAGE_STORAGE, "data", allow_optional=True),
+        Input(ids.STATE_PAGE_STORAGE, "data", allow_optional=True),
         State(NAVBAR_HPARAM_SIGNATURE_ID, "data", allow_optional=True),
-        State(core.STATE_VIEW_ID, "data", allow_optional=True),
+        State(ids.STATE_VIEW_ID, "data", allow_optional=True),
         prevent_initial_call=True,
     )
     def render_navbar_hparams(
@@ -521,11 +522,11 @@ def _register_hparam_table(app: Dash) -> None:
     )
 
     @app.callback(
-        Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
+        Output(ids.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Input(NAVBAR_HPARAM_CONFIRM_COLS_ID, "n_clicks", allow_optional=True),
         State(NAVBAR_HPARAM_COL_SELECT_ID, "value", allow_optional=True),
         State(constants.STATE_EXPERIMENT_ID, "data"),
-        State(core.STATE_PAGE_STORAGE, "data"),
+        State(ids.STATE_PAGE_STORAGE, "data"),
         prevent_initial_call=True,
     )
     def persist_selected_hparam_cols(
@@ -544,13 +545,13 @@ def _register_hparam_table(app: Dash) -> None:
         return page.model_dump_json()
 
     @app.callback(
-        Output(core.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
-        Output(core.METRIC_CONTENT_ID, "children", allow_duplicate=True),
+        Output(ids.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
+        Output(ids.METRIC_CONTENT_ID, "children", allow_duplicate=True),
         Input(NAVBAR_HPARAM_DATATABLE_ID, "selectedRows", allow_optional=True),
         State(NAVBAR_HPARAM_DATATABLE_ID, "rowData", allow_optional=True),
         State(constants.STATE_EXPERIMENT_ID, "data"),
-        State(core.STATE_PAGE_STORAGE, "data"),
-        State(core.PANEL_PAGING_ID, "data"),
+        State(ids.STATE_PAGE_STORAGE, "data"),
+        State(ids.PANEL_PAGING_ID, "data"),
         prevent_initial_call=True,
     )
     def sync_run_selection(

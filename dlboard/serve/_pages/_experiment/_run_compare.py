@@ -31,7 +31,7 @@ from dlboard.serve._component_ids import ButtonId, ModalId, StoreId, ValueId
 from dlboard.serve._grid import themed_grid_kwargs
 from dlboard.serve._pages._dash_helpers import tooltipped_action_icon
 from dlboard.serve._pages._dataframe_helpers import run_display_name
-from dlboard.serve._pages._experiment import _experiment_page_state as core
+from dlboard.serve._pages._experiment import _ids as ids
 from dlboard.serve._pages._experiment import _page_model as page_model
 
 if TYPE_CHECKING:
@@ -43,14 +43,14 @@ if TYPE_CHECKING:
 
 MAX_COMPARED_RUNS: typing.Final = 5
 
-COMPARE_OPEN_ID: ButtonId[core.ExperimentPage] = ButtonId("compare-open")
-COMPARE_MODAL_ID: ModalId[core.ExperimentPage] = ModalId("compare-modal")
-COMPARE_RUNS_ID: ValueId[core.ExperimentPage] = ValueId("compare-runs")
-COMPARE_MODE_ID: ValueId[core.ExperimentPage] = ValueId("compare-mode")
-COMPARE_SEARCH_ID: ValueId[core.ExperimentPage] = ValueId("compare-search")
-COMPARE_GRID_ID: ValueId[core.ExperimentPage] = ValueId("compare-grid")
-COMPARE_COPY_LINK_ID: ButtonId[core.ExperimentPage] = ButtonId("compare-copy-link")
-COMPARE_ROWS_STORE_ID: StoreId[core.ExperimentPage] = StoreId("compare-rows")
+COMPARE_OPEN_ID: ButtonId[ids.ExperimentPage] = ButtonId("compare-open")
+COMPARE_MODAL_ID: ModalId[ids.ExperimentPage] = ModalId("compare-modal")
+COMPARE_RUNS_ID: ValueId[ids.ExperimentPage] = ValueId("compare-runs")
+COMPARE_MODE_ID: ValueId[ids.ExperimentPage] = ValueId("compare-mode")
+COMPARE_SEARCH_ID: ValueId[ids.ExperimentPage] = ValueId("compare-search")
+COMPARE_GRID_ID: ValueId[ids.ExperimentPage] = ValueId("compare-grid")
+COMPARE_COPY_LINK_ID: ButtonId[ids.ExperimentPage] = ButtonId("compare-copy-link")
+COMPARE_ROWS_STORE_ID: StoreId[ids.ExperimentPage] = StoreId("compare-rows")
 
 _RUNS_LIMIT = 1000
 """Cap on runs offered in the picker -- same discipline as the navbar table's `_HPARAM_ROWS_LIMIT`."""
@@ -305,7 +305,7 @@ def register_run_compare_callbacks(app: Dash) -> None:
         Input(COMPARE_MODAL_ID, "opened"),
         State(COMPARE_RUNS_ID, "value"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
-        State(core.STATE_PAGE_STORAGE, "data"),
+        State(ids.STATE_PAGE_STORAGE, "data"),
         prevent_initial_call=True,
     )
     def prepare_compare(

@@ -13,6 +13,7 @@ from flask import request
 from dlboard.serve import _constants as constants
 from dlboard.serve import get_current_user, get_data_store
 from dlboard.serve._pages._experiment import _experiment_page_state as core
+from dlboard.serve._pages._experiment import _ids as ids
 from dlboard.serve._pages._experiment import _page_model as page_model
 from dlboard.serve._pages._experiment import _page_repository as repo
 from dlboard.serve._pages._experiment import _panel_controls as panel_controls
@@ -44,7 +45,7 @@ def _live_update_header(header: Component, notes: Component, views: Component) -
     """The experiment header, its view picker, and the live-update status badge/switch/"fetched Xs ago" label."""
     return dmc.Group(
         [
-            html.Div(header, id=core.EXPERIMENT_HEADER_ID),
+            html.Div(header, id=ids.EXPERIMENT_HEADER_ID),
             dmc.Group(
                 [
                     notes,
@@ -121,7 +122,7 @@ def layout(
 
     return [
         html.Div(
-            id=core.PAGE_EXPERIMENT_ID,
+            id=ids.PAGE_EXPERIMENT_ID,
             children=dmc.Stack(
                 [
                     _live_update_header(
@@ -163,12 +164,12 @@ def layout(
                     # spinner only ever covers a genuine full-panel rebuild; the poll's targeted
                     # patches update their charts silently. Its generated type stub is an empty
                     # `TypedDict` (a known Dash codegen gap for this genuinely dynamic dict) --
-                    # `cast` to `Any` rather than fight that, same as `_experiment_page_state.py`'s
+                    # `cast` to `Any` rather than fight that, same as `_panel_view.py`'s
                     # `data-*`-attr casts.
                     cast("Any", dcc.Loading)(
-                        html.Div(container, id=core.METRIC_CONTENT_ID),
+                        html.Div(container, id=ids.METRIC_CONTENT_ID),
                         delay_show=250,
-                        target_components={str(core.METRIC_CONTENT_ID): "children"},
+                        target_components={str(ids.METRIC_CONTENT_ID): "children"},
                         custom_spinner=dmc.Loader(size="lg"),
                     ),
                     # Every modal/drawer the panel area can open, each owned by its feature module. Rendered
@@ -195,12 +196,12 @@ def layout(
         dcc.Interval(id=core.LIVE_TICK_INTERVAL_ID, interval=_LIVE_UPDATE_SETTINGS.tick_interval_ms),
         Store(id=core.STATE_LAST_KNOWN_REVISION, data=exp.revision),
         Store(id=core.STATE_LAST_FETCH_AT, data=pendulum.now("UTC").isoformat()),
-        Store(id=core.STATE_PAGE_STORAGE, data=page_json),
-        Store(id=core.STATE_VIEW_ID, data=view_id),
+        Store(id=ids.STATE_PAGE_STORAGE, data=page_json),
+        Store(id=ids.STATE_VIEW_ID, data=view_id),
         Store(id=STATE_NOTES_REVISION, data=exp.notes_revision),
         Store(id=constants.STATE_PROJECT_ID, data=exp.project_id),
         Store(id=constants.STATE_EXPERIMENT_ID, data=int(experiment_id)),
-        Store(id=core.STATE_HPARAMS, data=[h.model_dump_json() for h in hparams]),
+        Store(id=ids.STATE_HPARAMS, data=[h.model_dump_json() for h in hparams]),
         *(Store(id=store_id) for store_id in _DRAG_DROP_STORE_IDS),
     ]
 

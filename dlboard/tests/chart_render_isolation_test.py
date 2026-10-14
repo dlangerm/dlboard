@@ -16,7 +16,7 @@ import pytest
 from dlboard.conftest import props as _props
 from dlboard.models._view import ChartInstance, PanelInstance
 from dlboard.plugins.charts.line_chart import LineChart
-from dlboard.serve._pages._experiment._experiment_page_state import (
+from dlboard.serve._pages._experiment._chart_view import (
     render_panel_charts as _render_panel_charts,
 )
 
