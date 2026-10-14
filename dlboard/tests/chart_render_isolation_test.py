@@ -24,8 +24,8 @@ LineChart.register(allow_override=True)
 
 
 def _chart_in(item: Any) -> Any:  # noqa: ANN401
-    """The chart a rendered chart item shows: the first thing in its body, below the controls."""
-    body: Any = _props(item)["children"][1]
+    """The chart a rendered chart item shows: the first thing in its body, the last part of the item."""
+    body: Any = _props(item)["children"][-1]
     return _props(body)["children"][0]
 
 

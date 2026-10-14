@@ -729,22 +729,25 @@ def render_chart_item(
             ),
         ],
         id=chart_controls_group_id(panel.name, index),  # pyrefly: ignore [bad-argument-type]
-        justify="flex-end",
         gap="xs",
         className="dl-chart-controls",
+        # Laid over the chart's top-right corner rather than given a row of their own: a chart's
+        # height is precious, and these only show on hover anyway.
+        pos="absolute",
+        top=4,
+        right=4,
+        bg="var(--mantine-color-body)",
+        bdrs="sm",
+        style={"zIndex": 1},
     )
     # The badge (when present) must be a *sibling* of `hover_controls`, not nested inside it --
     # `dl-chart-controls`'s opacity:0-until-hover applies to its whole subtree, and this badge
     # is the one thing here that's supposed to stay visible without hovering.
     badge = _unscoped_fetch_badge(chart)
-    header_row = dmc.Group(
-        [*([badge] if badge else []), hover_controls],
-        justify="space-between" if badge else "flex-end",
-        wrap="nowrap",
-    )
     return dmc.Stack(
         [
-            header_row,
+            *([dmc.Group([badge])] if badge else []),
+            hover_controls,
             html.Div(
                 chart_body(panel, index, dataframe, page_size),
                 id=chart_body_id(panel.name, index),  # pyrefly: ignore [bad-argument-type]
@@ -755,6 +758,7 @@ def render_chart_item(
         w="100%" if panel.layout == "grid" else chart.natural_width(context),
         maw="100%",
         p="xs",
+        pos="relative",
         className="dl-chart-item",
         **cast("dict[str, Any]", {"data-chart-id": chart.id}),
     )

@@ -65,9 +65,9 @@ def test_panel_header_controls_add_button_is_always_enabled_and_hover_revealed()
 # ---- unscoped-fetch badge: visible (not hover-gated) when a chart can't hint its columns ----
 
 
-def _header_row(stack: Any) -> Any:  # noqa: ANN401
-    """The chart item's top row: the unscoped-fetch badge (if any) plus the hover-controls group."""
-    return _to_props(stack)["children"][0]
+def _chart_item_parts(stack: Any) -> list[Any]:  # noqa: ANN401
+    """A chart item's children: the unscoped-fetch badge row (if any), the hover controls, then the chart."""
+    return _to_props(stack)["children"]
 
 
 def test_render_panel_charts_no_badge_when_chart_hints_its_columns() -> None:
@@ -75,10 +75,10 @@ def test_render_panel_charts_no_badge_when_chart_hints_its_columns() -> None:
     df = pd.DataFrame({"run_id": [1], "step": [0], "loss": [0.5]})
 
     [stack] = state.render_panel_charts(panel, df)
-    header_row = _to_props(_header_row(stack))
+    hover_controls, _chart = _chart_item_parts(stack)  # no badge row above the controls
 
-    assert header_row["justify"] == "flex-end"
-    assert len(header_row["children"]) == 1  # just the hover-controls group, no badge
+    assert _to_props(hover_controls)["className"] == "dl-chart-controls"
+    assert _to_props(hover_controls)["pos"] == "absolute"  # laid over the chart, not a row of its own
 
 
 def test_render_panel_charts_badge_when_chart_cannot_hint_its_columns() -> None:
@@ -91,12 +91,10 @@ def test_render_panel_charts_badge_when_chart_cannot_hint_its_columns() -> None:
     df = pd.DataFrame({"run_id": [1], "step": [0], "loss": [0.5]})
 
     [stack] = state.render_panel_charts(panel, df)
-    header_row = _to_props(_header_row(stack))
+    badge_row, hover_controls, _chart = _chart_item_parts(stack)
 
-    assert header_row["justify"] == "space-between"
-    badge, hover_controls = header_row["children"]
     assert _to_props(hover_controls)["className"] == "dl-chart-controls"
-    assert "fetches all metrics" in str(_to_props(badge))
+    assert "fetches all metrics" in str(_to_props(badge_row))
 
 
 # ---- chart width: packed uses the chart's natural width, grid stretches to its cell ----
