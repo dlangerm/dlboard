@@ -77,4 +77,4 @@ def test_broken_chart_does_not_prevent_sibling_charts_from_rendering() -> None:
     broken_rendered = _chart_in(stacks[0])
     working_rendered = _chart_in(stacks[1])
     assert isinstance(broken_rendered, dmc.Alert)
-    assert isinstance(working_rendered, dmc.LineChart)
+    assert isinstance(working_rendered, dmc.Stack)

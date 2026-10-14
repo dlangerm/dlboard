@@ -17,6 +17,7 @@ from dlboard.plugins.charts._axis_label import (
     MaxAxisLabelChars,
     fit_axis_label,
 )
+from dlboard.plugins.charts._chart_title import titled
 from dlboard.plugins.charts._sampling import DEFAULT_MAX_POINTS, shared_sample_grid
 from dlboard.serve import AssetKind, series_color, serve_asset
 
@@ -124,7 +125,7 @@ class LineChartSettings(BaseModel, frozen=True, extra="forbid"):
     )
 
 
-class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.LineChart], frozen=True, extra="forbid"):
+class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.Stack], frozen=True, extra="forbid"):
     """a line chart."""
 
     name: typing.ClassVar[str] = "line"
@@ -136,7 +137,7 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.LineChart], froze
 
     @classmethod
     @typing.override
-    def render(cls, parameters: LineChartSettings, dataframe: pd.DataFrame) -> dmc.LineChart:
+    def render(cls, parameters: LineChartSettings, dataframe: pd.DataFrame) -> dmc.Stack:
         # `render_panel_charts` shares one fetched dataframe across every chart in a panel, calling
         # this once per chart, so this works on the few columns it needs and never writes to
         # `dataframe` -- a panel of hundreds of charts would otherwise copy, and scan every column
@@ -212,7 +213,7 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.LineChart], froze
             x_axis_props["domain"] = ["dataMin", "dataMax"]
         label_formatter = _TOOLTIP_LABEL_FORMATTER.get(parameters.x_axis_type, "lineChartTooltipLabel")
 
-        return dmc.LineChart(
+        plot = dmc.LineChart(
             h=parameters.height,
             data=data,  # pyrefly: ignore [bad-argument-type]
             dataKey=parameters.x_axis,
@@ -269,11 +270,7 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.LineChart], froze
                 "margin": {"left": 20, "right": 20, "top": 10, "bottom": 10},
             },
         )
-
-    @classmethod
-    @typing.override
-    def title(cls, parameters: LineChartSettings) -> str:
-        return parameters.column
+        return titled(parameters.column, plot)
 
     @classmethod
     @typing.override

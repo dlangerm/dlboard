@@ -19,6 +19,7 @@ from pydantic import ValidationError
 
 from dlboard.conftest import find_props as _find_props
 from dlboard.models._view import ChartInstance, PanelInstance
+from dlboard.plugins.charts._chart_title import titled
 from dlboard.plugins.charts.line_chart import LineChart
 from dlboard.serve._pages._experiment import _experiment_page_state as state
 
@@ -469,3 +470,11 @@ def test_panel_header_says_how_many_charts_are_inside(n_charts: int, badges: lis
     rendered = state.panel_header(PanelInstance[Any, Any](name="train", charts=charts))
 
     assert _badge_labels(json.loads(cast("str", to_json(rendered)))) == badges
+
+
+def test_apply_panel_sync_scopes_a_line_chart_under_its_title() -> None:
+    plot = dmc.LineChart(data=[], dataKey="step", series=[], lineChartProps={"syncId": "step"})
+
+    state._apply_panel_sync(titled("loss", plot), panel_name="train", sync=True)
+
+    assert plot.lineChartProps["syncId"] == "train:step"  # pyrefly: ignore [missing-attribute]

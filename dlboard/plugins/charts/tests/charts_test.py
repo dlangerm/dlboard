@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Any, Literal
 
+import dash_mantine_components as dmc
 import numpy as np
 import pandas as pd
 import pytest
 from pydantic import ValidationError
 
-from dlboard.conftest import props as _props
+from dlboard.conftest import props
 from dlboard.models import RUN_NAME_COLUMN
 from dlboard.plugins.charts import line_chart
 from dlboard.plugins.charts._axis_label import (
@@ -27,6 +28,20 @@ from dlboard.plugins.charts.line_chart import (
     LineChart,
     LineChartSettings,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from dash.development.base_component import Component
+
+
+def _plot(chart: dmc.Stack) -> Component:
+    """The plot a line or bar chart renders under its title."""
+    return next(node for node in chart._traverse() if isinstance(node, (dmc.LineChart, dmc.BarChart)))
+
+
+def _props(chart: dmc.Stack) -> dict[str, Any]:
+    return props(_plot(chart))
 
 
 def _series_df(n: int) -> pd.DataFrame:
@@ -610,3 +625,23 @@ def test_bar_chart_gives_its_value_axis_room_for_ticks_only_when_the_values_are_
     if gets_room_for_ticks:
         js_source = Path(line_chart.__file__).with_name("bar_chart_tooltip.js").read_text()
         assert f"window.dashMantineFunctions.{y_axis['tickFormatter']['function']} =" in js_source
+
+
+def _line(df: pd.DataFrame) -> dmc.Stack:
+    return LineChart.render(LineChartSettings(column=LONG_METRIC, x_axis="step"), df)
+
+
+def _bar(df: pd.DataFrame) -> dmc.Stack:
+    return BarChart.render(BarChartSettings(column=LONG_METRIC, x_axis="step"), df)
+
+
+@pytest.mark.parametrize("render", [_line, _bar], ids=["line", "bar"])
+def test_a_metric_chart_is_titled_with_its_full_metric_name(
+    render: Callable[[pd.DataFrame], dmc.Stack],
+) -> None:
+    """The axis titles are shortened to fit; the heading above the plot carries the whole name."""
+    df = _metrics_df(3, n_runs=1).rename(columns={"loss": LONG_METRIC})
+
+    title, _ = props(render(df))["children"]
+
+    assert props(title)["children"] == LONG_METRIC
