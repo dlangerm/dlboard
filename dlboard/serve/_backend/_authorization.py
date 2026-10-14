@@ -440,10 +440,11 @@ class AuthorizingDataStore(models.DataStore[...]):
         self, page: models.Page[Dataframe, Chart]
     ) -> models.Page[Dataframe, Chart]:
         """
-        Write a page: one's own view freely, the shared page's layout only as an `EDITOR`.
+        Write a page: one's own view freely, the shared page only as an `EDITOR`.
 
-        Shared viewing state (`page_settings` alone -- e.g. which panel is open, see
-        `_page_repository.save_viewer_settings`) is last-write-wins for anyone who can see the page.
+        Nothing about how a page is being browsed (which panel is open, which tab) is stored on it, so
+        a `VIEWER` has nothing of the shared page's to change -- not its panels, and not its settings
+        (which runs it leaves out, say), which are as much what everyone sees as its panels are.
         """
         project_id = self._page_project(
             run_id=page.run_id, experiment_id=page.experiment_id, project_id=page.project_id
@@ -454,13 +455,7 @@ class AuthorizingDataStore(models.DataStore[...]):
                 _forbid("only a view's owner can change it")
             self._require(project_id, ProjectRole.VIEWER)
             return self._inner.update_page(page)
-        shared = self._inner.get_or_create_page(
-            type(page), run_id=page.run_id, experiment_id=page.experiment_id, project_id=page.project_id
-        )
-        layout_unchanged = shared.model_dump(exclude={"page_settings"}) == page.model_dump(
-            exclude={"page_settings"}
-        )
-        self._require(project_id, ProjectRole.VIEWER if layout_unchanged else ProjectRole.EDITOR)
+        self._require(project_id, ProjectRole.EDITOR)
         return self._inner.update_page(page)
 
     def create_view[Dataframe, Chart](

@@ -587,7 +587,7 @@ def _register_hparam_table(app: Dash) -> None:
         page, container = edits.commit(
             page_json,
             paging_json,
-            edits.PageEdit(settings=(page_model.DocumentSettings(excluded_runs=excluded),)),
+            edits.PageEdit(document=page_model.DocumentSettings(excluded_runs=excluded)),
         )
         return page.model_dump_json(), container
 

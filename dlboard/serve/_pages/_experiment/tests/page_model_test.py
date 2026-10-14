@@ -49,12 +49,8 @@ def test_upsert_chart_ignores_other_panels() -> None:
 
 
 def test_a_settings_change_writes_only_what_it_sets_and_keeps_every_other_key() -> None:
-    stored = {"open_panel": ["a"], "excluded_runs": [3], "from-a-newer-version": True}
+    stored = {"hparam-table-selected": ["lr"], "open_panel": ["a"], "from-a-newer-version": True}
 
-    merged = page_model.ViewerSettings(active_tab="Images").merged_into(stored)
+    merged = page_model.DocumentSettings(excluded_runs=[3]).merged_into(stored)
 
-    assert merged == {**stored, "active_tab": "Images"}
-
-
-def test_a_page_saved_when_only_one_panel_could_be_open_reads_as_a_list() -> None:
-    assert page_model.ViewerSettings.model_validate({"open_panel": "Losses"}).open_panels == ["Losses"]
+    assert merged == {**stored, "excluded_runs": [3]}

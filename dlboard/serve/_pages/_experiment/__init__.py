@@ -123,17 +123,6 @@ def render_panel(
     as empty placeholders and fill them via a `render_initial` callback fired on mount; that meant
     every experiment-page load paid for two full round trips (the static shell, then this content)
     where one now does the job.
-
-    Side effect worth knowing about: `render_initial`'s accordion was always "a component added by
-    a later callback" from dash-renderer's perspective, which force-fires any pattern-matching
-    `Input` watching it once on mount regardless of `prevent_initial_call`. That forced the accordion's
-    `Input(panel_view.PANEL_ACCORDION.all(), "value")`-watching `persist_open_panel` callback to
-    run before any panel ever existed, persisting an explicit `open_panel: []` -- which silently
-    defeated `BasicExperimentPage.open_panels()`'s own "open the first panel by default" fallback for
-    the rest of that experiment's life, since the fallback only applies when the setting is
-    *absent*, not merely empty. The accordion being part of the page's genuine first response now
-    means that forced fire no longer happens, so a brand-new experiment's first panel opens by
-    default exactly as `render()`'s fallback already says it should.
     """
     page = repo.load_page(store, ref)
     exp = store.get_experiment(ref.experiment_id)

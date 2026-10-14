@@ -311,14 +311,26 @@ def test_user_manage_can_still_update_an_ordinary_user(store: SQLLiteStore) -> N
     assert updated.groups == ["ml-team"]
 
 
-def test_a_viewer_can_change_shared_viewing_state_but_not_the_layout(store: SQLLiteStore) -> None:
-    bob, (_project, experiment, _run) = _shared_chain(store, ProjectRole.VIEWER)
+@pytest.mark.parametrize(
+    "change",
+    [
+        pytest.param({"panels": [models.PanelInstance[Any, Any](name="p")]}, id="layout"),
+        pytest.param({"page_settings": {"excluded_runs": [1]}}, id="settings"),
+    ],
+)
+@pytest.mark.parametrize(("role", "allowed"), [(ProjectRole.VIEWER, False), (ProjectRole.EDITOR, True)])
+def test_only_an_editor_can_change_the_shared_page(
+    store: SQLLiteStore, change: dict[str, Any], role: ProjectRole, *, allowed: bool
+) -> None:
+    """Its settings are as much what everyone sees as its panels are; a viewer's edit branches instead."""
+    bob, (_project, experiment, _run) = _shared_chain(store, role)
     shared = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment.id)
-    as_bob = _as(store, bob)
 
-    as_bob.update_page(shared.model_copy(update={"page_settings": {"open_panel": ["p"]}}))
-    with pytest.raises(PermissionError):
-        as_bob.update_page(shared.model_copy(update={"panels": [models.PanelInstance[Any, Any](name="p")]}))
+    if allowed:
+        _as(store, bob).update_page(shared.model_copy(update=change))
+    else:
+        with pytest.raises(PermissionError):
+            _as(store, bob).update_page(shared.model_copy(update=change))
 
 
 def test_only_a_views_owner_can_change_it(store: SQLLiteStore) -> None:

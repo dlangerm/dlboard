@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from dlboard import models
 from dlboard.serve import get_current_user
-from dlboard.serve._pages._experiment._page_model import BasicExperimentPage, DocumentSettings, ViewerSettings
+from dlboard.serve._pages._experiment._page_model import BasicExperimentPage, DocumentSettings
 
 if TYPE_CHECKING:
     from dlboard.models import DataStore
@@ -108,16 +108,6 @@ def save_page(store: DataStore[...], mutated: BasicExperimentPage) -> BasicExper
             ),
         ),
     )
-
-
-def save_viewer_settings(store: DataStore[...], ref: PageRef, change: ViewerSettings) -> BasicExperimentPage:
-    """
-    Write how `ref`'s page is being browsed into it, in place -- never branching (see `ViewerSettings`).
-
-    Opening a panel or switching tabs isn't editing the view the way deleting a chart or excluding a run
-    is, so it lands on whatever page `ref` names, yours or not.
-    """
-    return cast("BasicExperimentPage", store.update_page(load_page(store, ref).with_settings(change)))
 
 
 def save_document_settings(

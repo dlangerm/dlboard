@@ -20,12 +20,12 @@ from dlboard.serve._pages._experiment._panel_data import panel_frames
 from dlboard.serve._pages._experiment._panel_view import accordion_view
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
     from dash import html
 
     from dlboard import models
-    from dlboard.serve._pages._experiment._page_model import DocumentSettings, ViewerSettings
+    from dlboard.serve._pages._experiment._page_model import DocumentSettings
 
 type PanelsEdit = Callable[[list[models.PanelInstance[Any, Any]]], list[models.PanelInstance[Any, Any]]]
 
@@ -57,10 +57,17 @@ type Reveal = RevealPanel | RevealChart | RevealChartAt
 
 @dataclass(frozen=True)
 class PageEdit:
-    """One edit to a page: to its panels, to its settings, or both -- and what must be on screen afterwards."""
+    """
+    One edit to a page -- to its panels, its settings, or both -- and how it should be shown afterwards.
+
+    `tab` and `open_panels` are not saved: they change only the `Paging` the panel area is re-rendered
+    with (and so the URL), like `reveal`.
+    """
 
     panels: PanelsEdit | None = None
-    settings: tuple[ViewerSettings | DocumentSettings, ...] = ()
+    document: DocumentSettings | None = None
+    tab: str | None = None
+    open_panels: Sequence[str] | None = None
     reveal: Reveal | None = None
 
 
@@ -72,8 +79,8 @@ def _apply(page_json: str, edit: PageEdit) -> tuple[BasicExperimentPage, BasicEx
     edited = (
         before if edit.panels is None else before.model_copy(update={"panels": edit.panels(before.panels)})
     )
-    for change in edit.settings:
-        edited = edited.with_settings(change)
+    if edit.document is not None:
+        edited = edited.with_settings(edit.document)
     return before, save_page(store, edited)
 
 
@@ -105,7 +112,7 @@ def _revealed(
 def commit(page_json: str, paging_json: str, edit: PageEdit) -> tuple[BasicExperimentPage, html.Div]:
     """Apply and save `edit`, then re-render the whole panel area from the saved page, with `edit.reveal` on screen."""
     before, saved = _apply(page_json, edit)
-    paging = Paging.model_validate_json(paging_json)
+    paging = Paging.model_validate_json(paging_json).viewing(tab=edit.tab, open_panels=edit.open_panels)
     if edit.reveal is not None:
         paging = _revealed(before, saved, paging, edit.reveal)
     return saved, accordion_view(panel_frames(get_data_store(), saved), saved, paging)

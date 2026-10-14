@@ -37,6 +37,7 @@ from dlboard.serve._pages._experiment import _ids as ids
 from dlboard.serve._pages._experiment import _page_edits as edits
 from dlboard.serve._pages._experiment import _page_model as page_model
 from dlboard.serve._pages._experiment import _panel_view as panel_view
+from dlboard.serve._pages._experiment._paging import Paging
 
 if TYPE_CHECKING:
     from dash.development.base_component import Component
@@ -255,12 +256,7 @@ def _register_create_panel(app: Dash) -> None:
         if page_model.panel_name_taken(curr_page.panels, panel_name):
             return no_update, no_update, f"A panel named {panel_name!r} already exists"
 
-        active_tab = curr_page.viewer.active_tab
-        tab = (
-            active_tab
-            if active_tab is not None and any(p.tab == active_tab for p in curr_page.panels)
-            else ""
-        )
+        tab = Paging.model_validate_json(paging_json).shown_tab(curr_page.panels)
         page, container = edits.commit(
             page_json,
             paging_json,
@@ -623,7 +619,7 @@ def _register_rename(app: Dash) -> None:
 
         # Carry the rename into the open panels too, so a currently-open panel doesn't appear to
         # collapse just because its name changed underneath it.
-        opened = curr_page.viewer.open_panels
+        opened = Paging.model_validate_json(rename_ctx["paging_json"]).open_panels
         page, container = edits.commit(
             rename_ctx["page_json"],
             rename_ctx["paging_json"],
@@ -631,11 +627,7 @@ def _register_rename(app: Dash) -> None:
                 panels=lambda panels: _panels_with_renamed_panel(
                     panels, old_name=old_name, new_name=new_name
                 ),
-                settings=()
-                if opened is None
-                else (
-                    page_model.ViewerSettings(open_panels=[new_name if v == old_name else v for v in opened]),
-                ),
+                open_panels=None if opened is None else [new_name if v == old_name else v for v in opened],
             ),
         )
         return container, page.model_dump_json(), False, ""

@@ -90,6 +90,8 @@ def test_chart_search_keys_cover_metrics_and_artifacts_but_not_axes() -> None:
         {"panels_q": "loss", "panels_page": "3"},
         {"charts": '{"p": {"q": "acc", "page": 2}}'},
         {"panels_page": "2", "charts": '{"p": {"page": 4}}', "panels_q": "x"},
+        {"tab": "Images", "open": '["a", "b"]'},
+        {"open": "[]"},
     ],
 )
 def test_query_round_trips(raw: dict[str, str]) -> None:
@@ -100,7 +102,13 @@ def test_query_round_trips(raw: dict[str, str]) -> None:
 
 @pytest.mark.parametrize(
     "raw",
-    [{"panels_page": "0"}, {"panels_page": "abc"}, {"charts": "not json"}, {"charts": '{"p": {"page": -1}}'}],
+    [
+        {"panels_page": "0"},
+        {"panels_page": "abc"},
+        {"charts": "not json"},
+        {"charts": '{"p": {"page": -1}}'},
+        {"open": "not json"},
+    ],
 )
 def test_malformed_query_shows_the_first_page(raw: dict[str, str]) -> None:
     assert paging.Paging.from_request(raw, None) == paging.Paging()
@@ -210,3 +218,14 @@ def test_a_new_charts_per_page_size_keeps_every_filter_but_returns_to_the_first_
 
 def test_a_panel_at_its_defaults_is_the_same_as_one_never_mentioned() -> None:
     assert paging.Paging().with_charts("a", paging.ChartPaging()) == paging.Paging()
+
+
+def test_only_a_tab_or_open_panels_the_viewer_chose_goes_in_the_url() -> None:
+    panels = [PanelInstance[Any, Any](name="a"), PanelInstance[Any, Any](name="b", tab="Images")]
+
+    defaults = paging.Paging().viewing(tab="", open_panels=["a"]).normalized(panels)
+    chosen = paging.Paging().viewing(tab="Images", open_panels=[]).normalized(panels)
+
+    assert defaults == paging.Paging()
+    assert (chosen.query["tab"], chosen.query["open"]) == ("Images", "[]")
+    assert (chosen.shown_tab(panels), chosen.opened(panels)) == ("Images", [])

@@ -38,19 +38,13 @@ def _render(  # noqa: PLR0913
     focus_chart: str | None = None,
 ) -> html.Div:
     page = store.get_or_create_page(page_model.BasicExperimentPage, experiment_id=experiment_id)
-    store.update_page(
-        page.model_copy(
-            update={
-                "panels": panels,
-                "page_settings": page_model.ViewerSettings(
-                    open_panels=open_panels or [], active_tab=active_tab
-                ).merged_into({}),
-            }
-        )
-    )
+    store.update_page(page.model_copy(update={"panels": panels}))
     loaded = repo.load_page(store, repo.PageRef(experiment_id, None))
     return panel_view.accordion_view(
-        panel_data.panel_frames(store, loaded), loaded, paging, focus_chart=focus_chart
+        panel_data.panel_frames(store, loaded),
+        loaded,
+        paging.viewing(tab=active_tab, open_panels=open_panels or []),
+        focus_chart=focus_chart,
     )
 
 

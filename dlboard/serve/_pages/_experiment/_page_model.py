@@ -1,20 +1,19 @@
 """
 The experiment page's persisted model: its panels, their tabs, and its settings.
 
-Pure: no Dash and no store. `BasicExperimentPage` is what a view or the shared page *is*; its settings split
-into how it is being browsed (`ViewerSettings`) and what it shows (`DocumentSettings`), and the functions below
-are every edit that can be made to its panels, as values in and values out, for the feature modules to apply and
-`_page_repository.py` to save.
+Pure: no Dash and no store. `BasicExperimentPage` is what a view or the shared page *is* -- its panels and its
+`DocumentSettings` -- and the functions below are every edit that can be made to its panels, as values in and
+values out, for the feature modules to apply and `_page_repository.py` to save.
 """
 
 from __future__ import annotations
 
 import typing
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 from dash.development.base_component import Component
-from pydantic import BaseModel, BeforeValidator, Field
+from pydantic import BaseModel, Field
 
 from dlboard import models
 
@@ -25,42 +24,24 @@ UNGROUPED_TAB: typing.Final = ""
 """`PanelInstance.tab`'s default -- panels with no explicit tab all share this one implicit group."""
 
 
-def _one_or_many(value: object) -> object:
-    """A page saved before more than one panel could be open holds a bare panel name."""
-    return [value] if isinstance(value, str) else value
-
-
-class _Settings(BaseModel, frozen=True, extra="ignore", populate_by_name=True):
+class DocumentSettings(BaseModel, frozen=True, extra="ignore", populate_by_name=True):
     """
-    A typed slice of `Page.page_settings`, under the very keys a page has always stored them by.
+    What a view *is*, beside its panels -- typed, under the very keys a page has always stored them by.
 
-    A change is constructed with just the fields it sets (`ViewerSettings(active_tab="Images")`), and
-    `merged_into` writes only those: every other key a page holds is left as it is.
+    Changing it is an edit, and branches into a view of your own. How the page is being browsed (its tab,
+    which panels are open) is not here: that is `Paging`, never saved to a view. A change is constructed
+    with just the fields it sets (`DocumentSettings(excluded_runs=[3])`), and `merged_into` writes only those:
+    every other key a page holds is left as it is.
     """
-
-    def merged_into(self, page_settings: Mapping[str, Any]) -> dict[str, Any]:
-        """`page_settings` with every field this was constructed with written in."""
-        return {**page_settings, **self.model_dump(mode="json", by_alias=True, exclude_unset=True)}
-
-
-class ViewerSettings(_Settings):
-    """How the page is being browsed. Changing it is not an edit: it never branches into a view of your own."""
-
-    open_panels: Annotated[list[str] | None, BeforeValidator(_one_or_many)] = Field(
-        default=None, alias="open_panel"
-    )
-    """Which panels are open, by name; never set, the first one is."""
-    active_tab: str | None = None
-    """The tab last selected (`UNGROUPED_TAB` for the ungrouped one); never set, the first tab is shown."""
-
-
-class DocumentSettings(_Settings):
-    """What a view *is*, beside its panels. Changing it is an edit, and branches into a view of your own."""
 
     excluded_runs: list[int] = Field(default_factory=list)
     """The run ids the run-comparison table has deselected, which every panel's fetch leaves out."""
     hparam_columns: list[str] = Field(default_factory=list, alias="hparam-table-selected")
     """Which hyperparameter columns the run-comparison table shows."""
+
+    def merged_into(self, page_settings: Mapping[str, Any]) -> dict[str, Any]:
+        """`page_settings` with every field this was constructed with written in."""
+        return {**page_settings, **self.model_dump(mode="json", by_alias=True, exclude_unset=True)}
 
 
 def group_panels_by_tab(
@@ -77,29 +58,12 @@ class BasicExperimentPage(models.Page[pd.DataFrame, Component], frozen=True, ext
     """Basic experiment page: per-panel charts, grouped into tabs."""
 
     @property
-    def viewer(self) -> ViewerSettings:
-        return ViewerSettings.model_validate(self.page_settings)
-
-    @property
     def document(self) -> DocumentSettings:
         return DocumentSettings.model_validate(self.page_settings)
 
-    def with_settings(self, change: ViewerSettings | DocumentSettings) -> BasicExperimentPage:
-        """A copy with `change` written into its settings (see `_Settings.merged_into`)."""
+    def with_settings(self, change: DocumentSettings) -> BasicExperimentPage:
+        """A copy with `change` written into its settings (see `DocumentSettings.merged_into`)."""
         return self.model_copy(update={"page_settings": change.merged_into(self.page_settings)})
-
-    def open_panels(self) -> list[str]:
-        """Names of the panels the viewer has open (the first panel's, until they open or close any)."""
-        opened = self.viewer.open_panels
-        if opened is not None:
-            return opened
-        return [self.panels[0].name] if self.panels else []
-
-    def active_tab(self) -> str:
-        """The tab being shown: the one last selected, if it still has a panel; otherwise the first."""
-        tabs = group_panels_by_tab(self.panels)
-        selected = self.viewer.active_tab
-        return selected if selected in tabs else next(iter(tabs))
 
 
 def upsert_chart(

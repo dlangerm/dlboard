@@ -40,6 +40,17 @@ pulls that section's body into the GitHub release notes and publishes both distr
 * A live update redrew charts it should not have (another run logging a step renumbered the rows a chart was
   compared by) and missed ones it should have (a hyperparameter edited, a run renamed).
 
+### Changed
+
+* **Which panels are open and which tab is shown are part of the page's address** (`?open=`, `?tab=`), like the
+  page of panels already was, instead of being saved on the experiment's page or view. Opening a panel used to
+  open it for everyone else looking at the same page; now a link you share shows what you were looking at, and
+  a fresh visit opens the first panel of the first tab. Pages saved before still load -- the open panels and
+  tab they recorded are just no longer read.
+* Changing anything about the shared page, its settings included (the runs it leaves out, its Runs-table
+  columns), now takes an editor, as changing its panels already did. A viewer's edit still branches into a view
+  of their own.
+
 ## [0.6.0] 2026-10-13
 
 ### Added

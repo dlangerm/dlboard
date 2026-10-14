@@ -88,19 +88,3 @@ def test_saving_document_settings_branches_into_a_separate_view_when_editing_som
     untouched = store.get_view(page_model.BasicExperimentPage, alices_view.id)
     assert untouched is not None
     assert untouched.page_settings == {}
-
-
-def test_saving_viewer_settings_never_branches(
-    store: SQLLiteStore, experiment_id: int, sign_in_as: Callable[[str], None]
-) -> None:
-    """Which panel/tab is open is shared, last-write-wins state -- opening one never forks a view."""
-    sign_in_as("alice")
-    store.get_or_create_page(page_model.BasicExperimentPage, experiment_id=experiment_id)
-
-    page = repo.save_viewer_settings(
-        store, repo.PageRef(experiment_id, None), page_model.ViewerSettings(open_panels=["p"])
-    )
-
-    assert page.owner_id is None
-    shared = store.get_or_create_page(page_model.BasicExperimentPage, experiment_id=experiment_id)
-    assert shared.page_settings["open_panel"] == ["p"]

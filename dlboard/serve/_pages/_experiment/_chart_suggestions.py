@@ -461,7 +461,7 @@ def _register_auto_populate(app: Dash) -> None:
             auto_populate_ctx["paging_json"],
             edits.PageEdit(
                 panels=lambda _panels: panels,
-                settings=(page_model.ViewerSettings(open_panels=panel_to_open(panels)),),
+                open_panels=panel_to_open(panels),
             ),
         )
         return container, page.model_dump_json(), False

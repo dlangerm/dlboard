@@ -25,12 +25,10 @@ from dlboard.serve._pages._experiment._ids import (
 )
 from dlboard.serve._pages._experiment._page_model import (
     BasicExperimentPage,
-    ViewerSettings,
 )
 from dlboard.serve._pages._experiment._page_repository import (
     load_page,
     ref_of,
-    save_viewer_settings,
 )
 from dlboard.serve._pages._experiment._paging import (
     SIZES_COOKIE,
@@ -153,7 +151,7 @@ def _register_paging(app: Dash) -> None:
                 panel_ctx["experiment_id"], BasicExperimentPage.model_validate_json(panel_ctx["page_json"])
             ),
         )
-        new_paging = clamped_paging(page, tab, requested)
+        new_paging = clamped_paging(page, tab, requested.viewing(tab=tab)).normalized(page.panels)
         # A control mounting reports its current value back as a "change" -- nothing to do for that.
         if new_paging == paging and tab == rendered_tab:
             raise PreventUpdate
@@ -258,51 +256,35 @@ def register_panel_area_callbacks(app: Dash) -> None:
     _register_paging(app)
 
     @app.callback(
-        Output(STATE_PAGE_STORAGE, "data", allow_duplicate=True),
+        Output(PANEL_PAGING_ID, "data", allow_duplicate=True),
         Input(PANEL_ACCORDION.all(), "value"),
-        State(constants.STATE_EXPERIMENT_ID, "data"),
+        State(PANEL_PAGING_ID, "data"),
         State(STATE_PAGE_STORAGE, "data"),
         State(PANEL_CONTENT.all(), "id"),
         prevent_initial_call=True,
     )
-    def persist_open_panel(
+    def remember_open_panels(
         open_values: list[list[str] | None],
-        experiment_id: int,
+        paging_json: str,
         page_json: str,
         shown_panels: list[dict[str, str]],
     ) -> str:
-        curr_page = BasicExperimentPage.model_validate_json(page_json)
+        """Record which panels are open in the paging -- and so the URL -- never in the page itself."""
+        paging = Paging.model_validate_json(paging_json)
+        panels = BasicExperimentPage.model_validate_json(page_json).panels
         # Only the panels on screen are in `open_values`; the open state of every other panel (on another
         # page or tab) is carried over untouched.
         shown = {pid["panel"] for pid in shown_panels}
-        stored_open = curr_page.open_panels()
-        open_value = [name for name in stored_open if name not in shown] + [
+        was_open = paging.opened(panels)
+        now_open = [name for name in was_open if name not in shown] + [
             name for group in open_values for name in (group or [])
         ]
-        # Mirrors `toggle_panel_layout`'s own "a mount can echo the current value back as a
-        # 'change'" check: the accordion's `value` prop mounting with whatever `accordion_view`
-        # just initialized it to (every render, including ones that aren't about panels being open
-        # at all) reports back here as if the user had just opened/closed something. Comparing
-        # against what's already stored catches that mount echo before it turns into a write --
-        # which matters beyond just the wasted round trip: unlike a real open/close, that write's
-        # own `page_json` can be arbitrarily stale (captured whenever the accordion was last built,
-        # not necessarily this instant), and writing it back can undo a *later* edit that branched
-        # into a view of its own in between.
-        if set(open_value) == set(stored_open):
+        # The accordion's `value` mounting with whatever `accordion_view` just initialized it to (every
+        # render, including ones that aren't about panels being open at all) reports back here as if the
+        # user had just opened/closed something -- nothing to record for that.
+        if set(now_open) == set(was_open):
             raise PreventUpdate
-        store = get_data_store()
-        # Which panel is expanded is per-viewer browsing state, not part of what the view "is" --
-        # see `save_viewer_settings` on why it never branches. Its ref
-        # comes from the accordion's own page (`ref_of`), not `STATE_VIEW_ID` -- the accordion
-        # remounting is itself often a *side effect* of a structural edit elsewhere on this same
-        # page that just branched into a new view, and `STATE_VIEW_ID` only catches up to that a
-        # separate round trip later. Reading it here would race that catch-up and, since this
-        # write goes straight through regardless of ownership, land back on the view the edit had
-        # already branched away from.
-        page = save_viewer_settings(
-            store, ref_of(experiment_id, curr_page), ViewerSettings(open_panels=open_value)
-        )
-        return page.model_dump_json()
+        return paging.viewing(open_panels=now_open).normalized(panels).model_dump_json()
 
     @app.callback(
         Output(PANEL_CONTENT.all(), "children"),
@@ -331,7 +313,7 @@ def register_panel_area_callbacks(app: Dash) -> None:
 
         paging = Paging.model_validate_json(paging_json)
         store = get_data_store()
-        # Same `ref_of`-over-`STATE_VIEW_ID` reasoning as `persist_open_panel` -- this accordion
+        # `ref_of`, not `STATE_VIEW_ID`: this accordion
         # remount can itself be the tail end of an edit that just branched into a new view.
         curr_page = BasicExperimentPage.model_validate_json(page_json)
         page = load_page(store, ref_of(experiment_id, curr_page))
@@ -346,32 +328,6 @@ def register_panel_area_callbacks(app: Dash) -> None:
                 continue
             outputs.append(render_panel_content(frames, panel_by_name[name], paging))
         return outputs, sorted(loaded_set | newly_opened)
-
-    @app.callback(
-        Output(STATE_PAGE_STORAGE, "data", allow_duplicate=True),
-        Input(PANEL_TABS_ID, "value"),
-        State(constants.STATE_EXPERIMENT_ID, "data"),
-        State(STATE_PAGE_STORAGE, "data"),
-        prevent_initial_call=True,
-    )
-    def persist_active_tab(tab_value: str | None, experiment_id: int, page_json: str) -> str:
-        if tab_value is None:
-            raise PreventUpdate
-        curr_page = BasicExperimentPage.model_validate_json(page_json)
-        # Same mount-echo guard as `persist_open_panel`, and for the same reason: `PANEL_TABS_ID`
-        # mounting with whichever tab `accordion_view` already had active reports back here as if
-        # the user had just switched tabs.
-        if curr_page.viewer.active_tab == tab_from_component_value(tab_value):
-            raise PreventUpdate
-        store = get_data_store()
-        # Which tab is active is per-viewer browsing state -- same reasoning, including the ref,
-        # as `persist_open_panel`.
-        page = save_viewer_settings(
-            store,
-            ref_of(experiment_id, curr_page),
-            ViewerSettings(active_tab=tab_from_component_value(tab_value)),
-        )
-        return page.model_dump_json()
 
     # Tab switching is entirely client-side (Mantine's own state, no server round trip) -- so
     # whether "Rename the active tab" should be disabled (on the ungrouped "General" tab) has to

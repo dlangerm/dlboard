@@ -23,6 +23,7 @@ from dlboard.serve._pages._experiment import _ids as ids
 from dlboard.serve._pages._experiment import _page_edits as edits
 from dlboard.serve._pages._experiment import _page_model as page_model
 from dlboard.serve._pages._experiment import _panel_view as panel_view
+from dlboard.serve._pages._experiment._paging import Paging
 
 if TYPE_CHECKING:
     from dash.development.base_component import Component
@@ -189,7 +190,7 @@ def _register_tab_drop(app: Dash) -> None:
             paging_json,
             edits.PageEdit(
                 panels=move,
-                settings=(page_model.ViewerSettings(active_tab=new_tab),),
+                tab=new_tab,
                 reveal=edits.RevealPanel(panel_name),
             ),
         )
@@ -221,7 +222,7 @@ def _register_tab_drop(app: Dash) -> None:
             paging_json,
             edits.PageEdit(
                 panels=move,
-                settings=(page_model.ViewerSettings(active_tab=new_tab),),
+                tab=new_tab,
                 reveal=edits.RevealChartAt(panel_name, index),
             ),
         )
@@ -320,7 +321,7 @@ def _register_new_tab(app: Dash) -> None:
             new_tab_ctx["paging_json"],
             edits.PageEdit(
                 panels=lambda panels: _panels_with_new_tab(panels, name=name, panel_names=selected),
-                settings=(page_model.ViewerSettings(active_tab=name),),
+                tab=name,
             ),
         )
         return container, page.model_dump_json(), False, ""
@@ -394,13 +395,15 @@ def _register_rename_tab(app: Dash) -> None:
             return no_update, no_update, no_update, error
 
         # Renaming the tab being shown keeps it the one shown.
-        follows = curr_page.viewer.active_tab == old_name
+        follows = (
+            Paging.model_validate_json(rename_ctx["paging_json"]).shown_tab(curr_page.panels) == old_name
+        )
         page, container = edits.commit(
             rename_ctx["page_json"],
             rename_ctx["paging_json"],
             edits.PageEdit(
                 panels=lambda panels: _panels_with_renamed_tab(panels, old_name=old_name, new_name=new_name),
-                settings=(page_model.ViewerSettings(active_tab=new_name),) if follows else (),
+                tab=new_name if follows else None,
             ),
         )
         return container, page.model_dump_json(), False, ""

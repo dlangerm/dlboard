@@ -23,6 +23,7 @@ import json
 import re
 import time
 from typing import TYPE_CHECKING, Any, cast
+from urllib.parse import parse_qs, urlparse
 
 import numpy as np
 import pendulum
@@ -171,8 +172,8 @@ def test_logged_metrics_render_as_a_real_chart(
 
     page.reload()
     _auto_generate_charts(page)
-    # No explicit `open_panel` setting exists yet for a brand new experiment, so
-    # `BasicExperimentPage.open_panels()`'s own fallback opens the first (and here, only) panel by
+    # Nothing in the URL says which panels are open yet for a brand new experiment, so
+    # `Paging.opened`'s own fallback opens the first (and here, only) panel by
     # default -- no click needed to see it render.
 
     # Scoped to the panel's own content area, not the whole page -- the panel header's own hover
@@ -225,8 +226,8 @@ def test_panel_header_hover_controls_toggle_and_delete_without_disturbing_siblin
         # request reads a stale (pre-mutation) snapshot and its response clobbers the first.
         expect(page.get_by_role("button", name=panel_name)).to_be_visible()
 
-    # "keep" (created first) starts open -- no explicit `open_panel` setting exists yet for a
-    # brand new experiment, so `BasicExperimentPage.open_panels()`'s own fallback opens the first panel
+    # "keep" (created first) starts open -- nothing in the URL says which panels are open yet for a
+    # brand new experiment, so `Paging.opened`'s own fallback opens the first panel
     # by default. "delete-me" (created second) isn't the fallback's pick, so it starts closed.
     # Round-trip "keep"'s control button itself: collapsing, re-expanding, then collapsing again
     # must all still work with the extra wrapping Group in place. Every panel header (open or
@@ -419,8 +420,8 @@ def test_drag_and_drop_reorders_charts_within_a_panel(
 
     page.reload()
     _auto_generate_charts(page)
-    # No explicit `open_panel` setting exists yet for a brand new experiment, so
-    # `BasicExperimentPage.open_panels()`'s own fallback opens the first (and here, only) panel by
+    # Nothing in the URL says which panels are open yet for a brand new experiment, so
+    # `Paging.opened`'s own fallback opens the first (and here, only) panel by
     # default -- no click needed for its charts (and their drag handles) to render.
     expect(page.locator(".dl-chart-drag-handle")).to_have_count(3)
     # Auto-generating on the shared page branches into a view of your own (see `save_page`) --
@@ -483,8 +484,8 @@ def test_drag_and_drop_moves_a_chart_into_a_different_panel(
     # Auto-generating on the shared page branches into a view of your own (see `save_page`) --
     # wait for that branch's `?view=` to land before anything below reads the page off it.
     expect(page).to_have_url(re.compile(r"\?view=\d+$"))
-    # No explicit `open_panel` setting exists yet for a brand new experiment, so
-    # `BasicExperimentPage.open_panels()`'s own fallback already opens the first panel ("train" --
+    # Nothing in the URL says which panels are open yet for a brand new experiment, so
+    # `Paging.opened`'s own fallback already opens the first panel ("train" --
     # metrics dict insertion order is preserved through to panel-creation order) -- only "val"
     # needs a click.
     page.get_by_role("button", name="val", exact=True).click()
@@ -732,7 +733,7 @@ def test_new_tab_without_panels_gets_an_empty_panel_that_accepts_a_dragged_chart
     # Drag the "loss" chart (in "Ungrouped", on "General") onto the "Images" tab.
     general_tab.click()
     # "Ungrouped" is already open -- it was the first (and, at auto-generate time, only) panel, so
-    # `BasicExperimentPage.open_panels()`'s fallback opened it by default; no click needed.
+    # `Paging.opened`'s fallback opened it by default; no click needed.
     handle = page.locator('.dl-chart-drag-handle[data-panel-name="Ungrouped"][data-chart-index="0"]')
     handle.hover()
     page.wait_for_timeout(200)  # matches the other drag tests' wait for the hover-reveal transition
@@ -1037,8 +1038,8 @@ def test_chart_tooltip_shows_every_series_at_every_hovered_x_position(
     )
     page.reload()
     _auto_generate_charts(page)
-    # No explicit `open_panel` setting exists yet for a brand new experiment, so
-    # `BasicExperimentPage.open_panels()`'s own fallback opens the first (and here, only) panel by
+    # Nothing in the URL says which panels are open yet for a brand new experiment, so
+    # `Paging.opened`'s own fallback opens the first (and here, only) panel by
     # default -- no click needed to see it render.
 
     svg = page.locator(".dl-panel-body svg").first
@@ -1113,8 +1114,8 @@ def test_live_update_poll_shows_a_new_run_without_a_reload(
     )
     page.reload()
     _auto_generate_charts(page)
-    # No explicit `open_panel` setting exists yet for a brand new experiment, so
-    # `BasicExperimentPage.open_panels()`'s own fallback already opened "Ungrouped" by default -- the
+    # Nothing in the URL says which panels are open yet for a brand new experiment, so
+    # `Paging.opened`'s own fallback already opened "Ungrouped" by default -- the
     # poll only patches currently-open panels' charts, so it has one to patch without a click.
 
     grid = page.locator(f"#{NAVBAR_HPARAM_DATATABLE_ID}")
@@ -1378,22 +1379,17 @@ def test_a_copied_chart_link_opens_that_chart_without_changing_the_shared_layout
     assert link == f"{page.url}&chart={chart_id}"
 
     page.get_by_role("button", name="train", exact=True).click()  # close its panel
-    view_id = int(page.url.rsplit("=", 1)[-1].split("&")[0])
-    _wait_until(lambda: _open_panels(view_id), [])
+    view_id = int(parse_qs(urlparse(page.url).query)["view"][0])
+    expect(page).to_have_url(re.compile(r"[?&]open=%5B%5D"))  # closed, in the URL -- not the view
 
     page.goto(link)
     linked = page.locator(f'[data-chart-id="{chart_id}"]')
     expect(linked).to_be_in_viewport()
     expect(linked).to_have_class(re.compile("dl-chart-focus"))
-    assert _open_panels(view_id) == []
-    assert console_errors == []
-
-
-def _open_panels(view_id: int) -> list[str]:
-    store = get_system_data_store()
-    view = store.get_view(BasicExperimentPage, view_id)
+    view = get_system_data_store().get_view(BasicExperimentPage, view_id)
     assert view is not None
-    return list(cast("BasicExperimentPage", view).viewer.open_panels or [])
+    assert {"open_panel", "active_tab"}.isdisjoint(view.page_settings)  # browsing is never saved to a view
+    assert console_errors == []
 
 
 def test_changes_in_a_saved_view_leave_the_shared_view_alone(

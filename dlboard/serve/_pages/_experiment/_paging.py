@@ -6,9 +6,10 @@ fetch and a render, so the page only ever shows one *page* of panels (of the act
 each panel, one page of its charts. Both levels take a fuzzy filter -- panels by name, charts by the
 metric or artifact keys they show -- so finding one doesn't mean paging through the rest.
 
-`Paging` is everything about "which slice is showing": it is the page URL's query (`?panels_q=`,
-`?panels_page=`, `?charts=`, see `Paging.to_query`) plus the viewer's page sizes (a cookie, since the
-server needs them for the very first render). Nothing here is ever saved to a view.
+`Paging` is everything about "which slice is showing" -- which tab, which panels are open, and which page
+of panels and charts: it is the page URL's query (`?tab=`, `?open=`, `?panels_q=`, `?panels_page=`, `?charts=`,
+see `Paging.query`) plus the viewer's page sizes (a cookie, since the server needs them for the very first
+render). Nothing here is ever saved to a view, so how one viewer browses a page never changes it for another.
 """
 
 from __future__ import annotations
@@ -30,6 +31,7 @@ from pydantic import (
 )
 
 from dlboard.models import NO_DATA_COLUMNS
+from dlboard.serve._pages._experiment._page_model import group_panels_by_tab
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -113,6 +115,14 @@ class Paging(BaseModel, frozen=True, extra="ignore", populate_by_name=True):
 
     sizes: PageSizes = Field(default_factory=PageSizes)
 
+    tab: str | None = None
+    """The tab being shown (`""` for the ungrouped one); `None`, or one with no panel left, shows the first."""
+
+    open_panels: Annotated[tuple[str, ...] | None, BeforeValidator(_load_json)] = Field(
+        default=None, alias="open"
+    )
+    """The panels open, by name; `None` until the viewer opens or closes one, which opens just the first."""
+
     @classmethod
     def from_request(cls, query: Mapping[str, str], sizes_cookie: str | None) -> Paging:
         """Parse a page request; a malformed link just shows the first page rather than breaking the page."""
@@ -132,6 +142,8 @@ class Paging(BaseModel, frozen=True, extra="ignore", populate_by_name=True):
         bar without knowing the URL's shape itself.
         """
         return {
+            "tab": self.tab or "",
+            "open": json.dumps(list(self.open_panels)) if self.open_panels is not None else "",
             "panels_q": self.panel_q,
             "panels_page": str(self.panel_page) if self.panel_page > 1 else "",
             "charts": _CHARTS_ADAPTER.dump_json(self.charts, exclude_defaults=True).decode()
@@ -141,6 +153,42 @@ class Paging(BaseModel, frozen=True, extra="ignore", populate_by_name=True):
 
     def chart_paging(self, panel_name: str) -> ChartPaging:
         return self.charts.get(panel_name, ChartPaging())
+
+    def shown_tab(self, panels: Sequence[models.PanelInstance[Any, Any]]) -> str:
+        """The tab being shown: `tab`, if it still has a panel; otherwise the first."""
+        tabs = group_panels_by_tab(list(panels))
+        return self.tab if self.tab in tabs else next(iter(tabs))
+
+    def opened(self, panels: Sequence[models.PanelInstance[Any, Any]]) -> list[str]:
+        """The panels open: `open_panels`, or just the first one until the viewer opens or closes any."""
+        if self.open_panels is not None:
+            return list(self.open_panels)
+        return [panels[0].name] if panels else []
+
+    def viewing(self, *, tab: str | None = None, open_panels: Sequence[str] | None = None) -> Paging:
+        """A copy showing `tab` and/or with `open_panels` open; either left out stays as it is."""
+        return self.model_copy(
+            update={
+                "tab": self.tab if tab is None else tab,
+                "open_panels": self.open_panels if open_panels is None else tuple(open_panels),
+            }
+        )
+
+    def normalized(self, panels: Sequence[models.PanelInstance[Any, Any]]) -> Paging:
+        """
+        A copy leaving out what is already the default -- the first tab, just the first panel open.
+
+        So the URL only ever carries a choice the viewer made, and two pagings that show the same thing
+        compare equal.
+        """
+        first_tab = next(iter(group_panels_by_tab(list(panels))))
+        default_open: list[str] = [panels[0].name] if panels else []
+        return self.model_copy(
+            update={
+                "tab": None if self.shown_tab(panels) == first_tab else self.tab,
+                "open_panels": None if self.opened(panels) == default_open else self.open_panels,
+            }
+        )
 
     def with_panels(self, *, q: str | None = None, page: int | None = None) -> Paging:
         """A copy with the panel filter and/or page replaced; a new filter goes back to the first page."""

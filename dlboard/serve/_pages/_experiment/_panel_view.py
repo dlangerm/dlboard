@@ -23,7 +23,6 @@ from dlboard.serve._pages._dash_helpers import tooltipped_action_icon
 from dlboard.serve._pages._experiment._page_model import (
     UNGROUPED_TAB,
     BasicExperimentPage,
-    ViewerSettings,
     group_panels_by_tab,
 )
 from dlboard.serve._pages._experiment._paging import (
@@ -67,7 +66,7 @@ Mantine's `Tabs` treats an empty-string `value` as "no value was set" and refuse
 tab/panel at all (a real, silent failure: the tab becomes unclickable, so there's no way back to
 the ungrouped panels once another tab exists) -- so component `value`s always go through
 `tab_component_value`/`tab_from_component_value` instead of using `PanelInstance.tab`/
-`ViewerSettings.active_tab`'s own `""` directly. A Private-Use-Area character prefix keeps this from
+`Paging.tab`'s own `""` directly. A Private-Use-Area character prefix keeps this from
 colliding with a tab name any user could actually type into the new-tab modal. Not underscored --
 `_panel_controls.py`'s per-panel tab-move dropdown needs the same mapping for its own `Select`.
 """
@@ -396,7 +395,7 @@ def _page_view(frames: PanelFrames, page: BasicExperimentPage, paging: Paging) -
         return html.Div([_toolbar([new_tab_button], [_new_panel_popover()]), _empty_view()])
 
     tabs = list(group_panels_by_tab(page.panels))
-    active_tab = page.active_tab()
+    active_tab = paging.shown_tab(page.panels)
     area = panel_area(frames, page, active_tab, paging)
     panel_actions: list[Component] = [
         _panel_filter(paging),
@@ -513,7 +512,7 @@ def panel_area_children(
 ) -> list[Component]:
     """The accordion and footer for the page of `tab`'s panels `paging` shows -- all that a page flip re-renders."""
     shown = visible_panels(page.panels, tab, paging)
-    accordion = _panel_accordion(frames, tab, shown.items, set(page.open_panels()), paging)
+    accordion = _panel_accordion(frames, tab, shown.items, set(paging.opened(page.panels)), paging)
     no_match = (
         dmc.Text(f"No panels match {paging.panel_q!r}", c="dimmed", size="sm", ta="center", py="xl")
         if paging.panel_q and not shown.items
@@ -539,7 +538,7 @@ def clamped_paging(page: BasicExperimentPage, tab: str, paging: Paging) -> Pagin
 
 def visible_open_panels(page: BasicExperimentPage, tab: str, paging: Paging) -> list[str]:
     """The panels that are open and on the page `paging` shows -- the ones whose content gets rendered."""
-    opened = set(page.open_panels())
+    opened = set(paging.opened(page.panels))
     return [p.name for p in visible_panels(page.panels, tab, paging).items if p.name in opened]
 
 
@@ -738,23 +737,18 @@ def _empty_view() -> Component:
     )
 
 
-def _focus_on_chart(
-    page: BasicExperimentPage, paging: Paging, chart_id: str
-) -> tuple[BasicExperimentPage, Paging]:
+def _focus_on_chart(page: BasicExperimentPage, paging: Paging, chart_id: str) -> Paging:
     """
-    `page` and `paging` as rendered for a `?chart=` deep link: that chart's panel open and on screen.
+    `paging` as rendered for a `?chart=` deep link: that chart's tab shown, its panel open and on screen.
 
-    Its tab is made active and `paging` moved to the page of panels it is on, but only for this one
-    render, never persisted -- following a link someone shared mustn't change the experiment's layout
-    for everyone else. An id that matches no chart leaves both as they are.
+    Only `Paging` changes -- the URL, never the page -- so following a link someone shared changes
+    nothing for anyone else. An id that matches no chart leaves `paging` as it is.
     """
     panel = next((p for p in page.panels if any(c.id == chart_id for c in p.charts)), None)
     if panel is None:
-        return page, paging
-    focused = page.with_settings(
-        ViewerSettings(open_panels=[*page.open_panels(), panel.name], active_tab=panel.tab)
-    )
-    return focused, reveal(page.panels, paging, panel_name=panel.name, chart_id=chart_id)
+        return paging
+    focused = paging.viewing(tab=panel.tab, open_panels=[*paging.opened(page.panels), panel.name])
+    return reveal(page.panels, focused, panel_name=panel.name, chart_id=chart_id)
 
 
 def accordion_view(
@@ -769,14 +763,15 @@ def accordion_view(
     `focus_chart` (a `ChartInstance.id`, from a `?chart=` deep link) opens that chart's panel and
     tab for this render -- see `_focus_on_chart`.
 
-    `paging` is which page of panels to show; it is first moved onto the last page that exists, and the
-    store this emits (`PANEL_PAGING_ID`) always holds the paging actually rendered.
+    `paging` is which tab, open panels and page of panels to show; it is first moved onto the last page that
+    exists, and the store this emits (`PANEL_PAGING_ID`) always holds the paging actually rendered, with its
+    defaults left out (`Paging.normalized`).
     """
     _log.debug("rendering chart for experiment %s", page.experiment_id)
     if focus_chart:
-        page, paging = _focus_on_chart(page, paging, focus_chart)
-    tab = page.active_tab()
-    paging = clamped_paging(page, tab, paging)
+        paging = _focus_on_chart(page, paging, focus_chart)
+    tab = paging.shown_tab(page.panels)
+    paging = clamped_paging(page, tab, paging).normalized(page.panels)
 
     return html.Div(
         [
