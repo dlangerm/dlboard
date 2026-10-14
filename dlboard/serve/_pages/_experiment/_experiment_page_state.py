@@ -30,7 +30,7 @@ from structlog.stdlib import get_logger
 
 from dlboard import models
 from dlboard.models import RUN_NAME_COLUMN
-from dlboard.plugins.charts._table_style import HPARAM_COLUMN_PREFIX, artifact_column
+from dlboard.plugins.charts._table_style import ARTIFACT_COLUMN_PREFIX, HPARAM_COLUMN_PREFIX, artifact_column
 from dlboard.serve import ClientsideScript, Icon, get_current_user, get_data_store, icon
 from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import ButtonId, DivId, IntervalId, ModalId, StoreId, ValueId
@@ -825,10 +825,13 @@ def render_panel_content(
 
 
 def _chart_columns(chart: models.ChartInstance[Any, Any], df: pd.DataFrame) -> list[str]:
-    """The columns of a panel's shared dataframe one chart renders from, in the dataframe's own order."""
+    """
+    The columns of a panel's shared dataframe one chart renders from, in the dataframe's own order.
+
+    Each kind of column is scoped by its own hint, `None` meaning every column of that kind -- so a chart
+    that shows every metric but only some hyperparameters is not redrawn by an unrelated hyperparameter.
+    """
     metrics = chart.hint_required_columns()
-    if metrics is None:
-        return list(df.columns)
     hparams = chart.hint_required_hparams()
     wanted_hparams = None if hparams is None else {f"{HPARAM_COLUMN_PREFIX}{key}" for key in hparams}
     artifacts = tuple(
@@ -840,11 +843,13 @@ def _chart_columns(chart: models.ChartInstance[Any, Any], df: pd.DataFrame) -> l
     )
 
     def renders_from(column: str) -> bool:
-        if column in dfh.IDENTITY_COLUMNS or column in metrics:
+        if column in dfh.IDENTITY_COLUMNS:
             return True
         if column.startswith(HPARAM_COLUMN_PREFIX):
             return wanted_hparams is None or column in wanted_hparams
-        return column.startswith(artifacts)
+        if column.startswith(ARTIFACT_COLUMN_PREFIX):
+            return column.startswith(artifacts)
+        return metrics is None or column in metrics
 
     return [column for column in df.columns if renders_from(column)]
 
@@ -863,11 +868,9 @@ def chart_data_fingerprint(chart: models.ChartInstance[Any, Any], df: pd.DataFra
     it whenever *any one* of them changed.
 
     The slice is the chart's metrics, the hyperparameters and artifact columns it asks for, and the
-    run names, so editing a hyperparameter or renaming a run redraws the charts that show it. Falls
-    back to hashing the whole (already panel-scoped) dataframe when `hint_required_columns()` is
-    `None` -- a chart whose own columns aren't knowable upfront (e.g. a table chart with no metrics
-    filter, documented to mean "show every metric") can't be scoped any tighter than the panel fetch
-    already was.
+    run names, so editing a hyperparameter or renaming a run redraws the charts that show it.
+    A hint of `None` (a table chart with no metrics filter, documented to mean "show every metric") means
+    every column of that kind, since such a chart can't be scoped any tighter than the panel fetch already was.
 
     Hashes the `to_json(orient="split", ...)` serialization the rest of this page relies on,
     not `pandas.util.hash_pandas_object` -- that hashes cell values

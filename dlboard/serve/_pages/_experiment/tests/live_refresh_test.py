@@ -69,7 +69,7 @@ def test_a_chart_just_drawn_from_the_current_data_is_not_redrawn_by_the_next_pol
 
 
 class _ThirdPartyParams(BaseModel, frozen=True, extra="forbid"):
-    metrics: list[str]
+    metrics: list[str] | None
     hparams: list[str]
 
 
@@ -91,7 +91,7 @@ class _ThirdPartyChart(ChartType[_ThirdPartyParams, pd.DataFrame, None], frozen=
     @classmethod
     @typing.override
     def hint_required_columns(cls, parameters: _ThirdPartyParams) -> set[str] | None:
-        return set(parameters.metrics)
+        return None if parameters.metrics is None else set(parameters.metrics)
 
     @classmethod
     @typing.override
@@ -150,3 +150,27 @@ def test_editing_a_hyperparameter_or_renaming_a_run_redraws_the_charts_that_show
     edited = _WIDE.copy()
     edited[column] = value
     assert state.chart_data_fingerprint(_CUSTOM, edited) != state.chart_data_fingerprint(_CUSTOM, _WIDE)
+
+
+_ALL_METRICS_ONE_HPARAM = ChartInstance[Any, Any](
+    chart_type="third-party", parameters={"metrics": None, "hparams": ["lr"]}
+)
+_WITH_OTHER_HPARAM = _WIDE.assign(hparam__momentum=[0.9, 0.9, 0.8])
+
+
+@pytest.mark.parametrize(
+    ("column", "value", "redraws"),
+    [
+        ("acc", 0.1, True),  # every metric is shown, so any of them moving redraws it
+        ("hparam__lr", 0.5, True),
+        ("hparam__momentum", 0.5, False),  # a hyperparameter it was not asked to show
+    ],
+    ids=["a-metric", "its-hparam", "another-hparam"],
+)
+def test_a_chart_showing_every_metric_but_some_hparams_is_scoped_by_each_hint_alone(
+    column: str, value: float, *, redraws: bool
+) -> None:
+    edited = _WITH_OTHER_HPARAM.assign(**{column: value})
+    before = state.chart_data_fingerprint(_ALL_METRICS_ONE_HPARAM, _WITH_OTHER_HPARAM)
+
+    assert (state.chart_data_fingerprint(_ALL_METRICS_ONE_HPARAM, edited) != before) is redraws
