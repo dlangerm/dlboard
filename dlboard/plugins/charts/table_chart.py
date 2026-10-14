@@ -87,10 +87,6 @@ def _build_table(
         columnDefs=column_defs,
         rowData=rows,
         columnSize="responsiveSizeToFit",
-        # `column_def`'s numeric `valueFormatter` is a JS expression string -- dash-ag-grid silently
-        # no-ops any string-valued JS prop unless this is set. Safe here: every such string is
-        # static and written by us, never derived from user/request data.
-        dangerously_allow_code=True,
         dashGridOptions={
             "pagination": True,
             "paginationPageSize": page_size,

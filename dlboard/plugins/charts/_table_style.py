@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, Literal
 
 from pydantic import TypeAdapter
@@ -77,17 +78,17 @@ def format_tags_caption(
     )
 
 
-NUMBER_FORMATTER: Final = {
-    "function": "params.value == null ? '' : params.value % 1 === 0 ? params.value.toFixed(0)"
-    " : Math.abs(params.value) >= 1 ? params.value.toFixed(3) : params.value.toPrecision(4) * 1"
-}
+TABLE_STYLE_JS: Final = Path(__file__).with_name("table_style.js")
 """
-How a numeric cell is shown: whole numbers as they are, otherwise three decimals from 1 up and four
-significant digits below it (so a learning rate of 1e-4 is not `0.000`).
+The grid formatters `NUMBER_FORMATTER` and `SCORE_FORMATTER` name. A script is loaded once per app, so
+the experiment page serves it (via `serve_asset`) rather than each chart that builds a grid.
+"""
 
-Written with only what dash-ag-grid's own expression parser evaluates (`Number.isInteger(...)` or
-`String(...)` is silently ignored, leaving the raw value); `browser_test.py` checks it in a real grid.
-"""
+NUMBER_FORMATTER: Final = {"function": "dlboardNumber(params)"}
+"""How a numeric cell is shown: whole numbers as they are, small ones to four significant digits."""
+
+SCORE_FORMATTER: Final = {"function": "dlboardScore(params)"}
+"""How a file's score is shown: four significant digits."""
 
 
 def column_def(name: str, dtype: ColumnDType, **extra: Any) -> dict[str, Any]:  # noqa: ANN401

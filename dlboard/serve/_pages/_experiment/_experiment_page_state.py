@@ -888,8 +888,8 @@ def chart_data_fingerprint(chart: models.ChartInstance[Any, Any], df: pd.DataFra
     ]
     if data_cols:
         scoped = scoped.dropna(how="all", subset=data_cols)
-    return hashlib.sha1(
-        scoped.reset_index(drop=True).to_json(orient="split", date_format="iso").encode()
+    return hashlib.blake2b(
+        scoped.reset_index(drop=True).to_json(orient="split", date_format="iso").encode(), digest_size=16
     ).hexdigest()
 
 

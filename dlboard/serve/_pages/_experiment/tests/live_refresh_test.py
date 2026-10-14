@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
-from typing import Any
+import typing
+from typing import Any, ClassVar
 
 import pandas as pd
 import pytest
 from dash import no_update
+from pydantic import BaseModel
 
 from dlboard.conftest import props as _props
-from dlboard.models import ChartInstance, PanelInstance
+from dlboard.models import ChartInstance, ChartType, ColumnKind, PanelInstance
 from dlboard.plugins.charts.line_chart import LineChart
-from dlboard.plugins.charts.table_chart import TableChart
 from dlboard.serve._pages._experiment import _experiment_page_state as state
 from dlboard.serve._pages._experiment import _refresh_chart_bodies
 
@@ -66,9 +67,58 @@ def test_a_chart_just_drawn_from_the_current_data_is_not_redrawn_by_the_next_pol
 
 # ---- what a chart's fingerprint covers ----
 
+
+class _ThirdPartyParams(BaseModel, frozen=True, extra="forbid"):
+    metrics: list[str]
+    hparams: list[str]
+
+
+class _ThirdPartyChart(ChartType[_ThirdPartyParams, pd.DataFrame, None], frozen=True, extra="forbid"):
+    """A chart type dlboard knows nothing about, declaring its columns only through the `hint_*` hooks."""
+
+    name: ClassVar[str] = "third-party"
+
+    @classmethod
+    @typing.override
+    def parameter_type(cls) -> type[_ThirdPartyParams]:
+        return _ThirdPartyParams
+
+    @classmethod
+    @typing.override
+    def render(cls, parameters: _ThirdPartyParams, dataframe: pd.DataFrame) -> None:
+        return None
+
+    @classmethod
+    @typing.override
+    def hint_required_columns(cls, parameters: _ThirdPartyParams) -> set[str] | None:
+        return set(parameters.metrics)
+
+    @classmethod
+    @typing.override
+    def hint_required_artifact_keys(cls, parameters: _ThirdPartyParams) -> set[str] | None:
+        return set()
+
+    @classmethod
+    @typing.override
+    def hint_required_hparams(cls, parameters: _ThirdPartyParams) -> set[str] | None:
+        return set(parameters.hparams)
+
+    @classmethod
+    @typing.override
+    def natural_width(cls, parameters: _ThirdPartyParams) -> int:
+        return 400
+
+    @classmethod
+    @typing.override
+    def field_column_kinds(cls) -> dict[str, ColumnKind]:
+        return {"metrics": ColumnKind.METRIC, "hparams": ColumnKind.HPARAM}
+
+
 LineChart.register(allow_override=True)
-TableChart.register(allow_override=True)
-_TABLE = ChartInstance[Any, Any](chart_type="table", parameters={"metrics": ["loss"], "hparams": ["lr"]})
+_ThirdPartyChart.register(allow_override=True)
+_CUSTOM = ChartInstance[Any, Any](
+    chart_type="third-party", parameters={"metrics": ["loss"], "hparams": ["lr"]}
+)
 _WIDE = pd.DataFrame(
     {
         "run_id": [1, 1, 2],
@@ -86,7 +136,7 @@ def test_a_new_row_for_another_metric_does_not_redraw_a_chart_that_shows_none_of
     extra = pd.DataFrame({"run_id": [1], "step": [2], "acc": [0.95]})
     grown = pd.concat([_WIDE.iloc[:2], extra, _WIDE.iloc[2:]], ignore_index=True)
 
-    assert state.chart_data_fingerprint(_TABLE, grown) == state.chart_data_fingerprint(_TABLE, _WIDE)
+    assert state.chart_data_fingerprint(_CUSTOM, grown) == state.chart_data_fingerprint(_CUSTOM, _WIDE)
 
 
 @pytest.mark.parametrize(
@@ -99,4 +149,4 @@ def test_editing_a_hyperparameter_or_renaming_a_run_redraws_the_charts_that_show
 ) -> None:
     edited = _WIDE.copy()
     edited[column] = value
-    assert state.chart_data_fingerprint(_TABLE, edited) != state.chart_data_fingerprint(_TABLE, _WIDE)
+    assert state.chart_data_fingerprint(_CUSTOM, edited) != state.chart_data_fingerprint(_CUSTOM, _WIDE)

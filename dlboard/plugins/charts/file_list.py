@@ -25,6 +25,7 @@ from dlboard.models import (
 from dlboard.plugins.charts._table_style import (
     ARTIFACT_COLUMN_PREFIX,
     NUMERIC,
+    SCORE_FORMATTER,
     TEXT,
     artifact_column,
     column_def,
@@ -48,8 +49,6 @@ _GROUP_LABELS: Final = {"latest": "Latest", "best": "Best", "best_k": "Top-k"}
 _GROUP_ORDER: Final = tuple(_GROUP_LABELS.values())
 """The groups people look for first, in this order; any others follow alphabetically."""
 _UNTAGGED_GROUP: Final = "Files"
-
-_SCORE_FORMATTER: Final = {"function": "params.value == null ? '' : Number(params.value).toPrecision(4)"}
 
 
 class FileListSettings(BaseModel, frozen=True, extra="forbid"):
@@ -137,15 +136,13 @@ def _grid(rows: list[dict[str, Any]], *, page_size: int) -> dag.AgGrid:
             column_def("file", TEXT, headerName="File", cellRenderer="markdown", flex=2),
             column_def("step", NUMERIC, headerName="Step", width=90),
             *(
-                [column_def("score", NUMERIC, headerName="Score", valueFormatter=_SCORE_FORMATTER, width=100)]
+                [column_def("score", NUMERIC, headerName="Score", valueFormatter=SCORE_FORMATTER, width=100)]
                 if has_scores
                 else []
             ),
         ],
         rowData=rows,
         columnSize="responsiveSizeToFit",
-        # `valueFormatter`s above are static JS written here, never derived from request data.
-        dangerously_allow_code=True,
         dashGridOptions={
             "pagination": True,
             "paginationPageSize": page_size,
