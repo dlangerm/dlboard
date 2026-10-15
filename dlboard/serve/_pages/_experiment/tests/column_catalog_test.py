@@ -10,6 +10,7 @@ import pytest
 from dlboard.models import (
     FILE_KIND_TAG,
     Artifact,
+    Histogram,
     LoggedMetrics,
     NewHyperParams,
     NewRun,
@@ -22,7 +23,9 @@ if TYPE_CHECKING:
 
 _TS = pendulum.datetime(2026, 1, 1, tz="UTC")
 
-_CATALOG = ColumnCatalog(metrics=("loss", "shared"), artifacts=("shared",), hparams=("lr",))
+_CATALOG = ColumnCatalog(
+    metrics=("loss", "shared"), artifacts=("shared",), histograms=("grad",), hparams=("lr",)
+)
 
 
 @pytest.mark.parametrize(
@@ -32,6 +35,7 @@ _CATALOG = ColumnCatalog(metrics=("loss", "shared"), artifacts=("shared",), hpar
         # A metric and an artifact sharing a name are each offered under their own kind -- the old
         # `{name: kind}` dict could only hold one of them.
         (ColumnKind.ARTIFACT, ["shared"]),
+        (ColumnKind.HISTOGRAM, ["grad"]),
         (ColumnKind.HPARAM, ["lr"]),
         (ColumnKind.GROUPING, ["loss", "lr", "run_id", "shared", "step", "timestamp_utc"]),
     ],
@@ -44,6 +48,10 @@ def test_column_catalog_offers_no_metric_axes_without_metrics() -> None:
     assert ColumnCatalog(artifacts=("img",)).options(ColumnKind.METRIC) == []
 
 
+def test_a_histogram_alone_is_something_to_chart() -> None:
+    assert ColumnCatalog(histograms=("grad",)).has_chartable_keys
+
+
 def test_column_catalog_load_summarizes_keys_without_their_values(
     store: SQLLiteStore, experiment_id: int
 ) -> None:
@@ -52,7 +60,12 @@ def test_column_catalog_load_summarizes_keys_without_their_values(
     for run in runs:
         store.log_metrics(
             LoggedMetrics(
-                metrics=metrics, step=step, experiment_id=experiment_id, run_id=run.id, timestamp_utc=_TS
+                metrics=metrics,
+                histograms={"grad": Histogram(edges=[0.0, 1.0], counts=[step + 1])},
+                step=step,
+                experiment_id=experiment_id,
+                run_id=run.id,
+                timestamp_utc=_TS,
             )
             for step, metrics in enumerate(steps)
         )
@@ -89,5 +102,6 @@ def test_column_catalog_load_summarizes_keys_without_their_values(
         single_value_metrics=frozenset({"final_acc"}),
         artifacts=("ckpt", "grads", "img"),
         artifact_chart_types={"ckpt": "files", "img": "image"},  # nothing displays the grads
+        histograms=("grad",),
         hparams=("lr",),
     )

@@ -243,7 +243,7 @@ def page_slice[T](items: Sequence[T], number: int, per_page: int) -> Slice[T]:
 
 def chart_search_keys(chart: models.ChartInstance[Any, Any]) -> set[str]:
     """
-    What a chart's filter matches against: the metric and artifact keys it shows, and its chart type.
+    What a chart's filter matches against: the metric, artifact and histogram keys it shows, and its chart type.
 
     Taken from the chart's `hint_required_*` methods rather than any one chart type's own settings,
     so it works for every chart plugin. A chart whose hint is `None` ("everything", like a table
@@ -255,6 +255,7 @@ def chart_search_keys(chart: models.ChartInstance[Any, Any]) -> set[str]:
         *(column for column in columns if column not in NO_DATA_COLUMNS),
         *(chart.hint_required_artifact_keys() or set()),
         *chart.hint_required_artifact_key_prefixes(),
+        *chart.hint_required_histogram_keys(),
     }
 
 

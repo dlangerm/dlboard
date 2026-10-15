@@ -23,6 +23,7 @@ version line without a deprecation window.
 | `DLBOARD_TRUSTED_PROXIES` | `0` | How many reverse-proxy hops in front of dlboard to trust `X-Forwarded-*` from. Must be `1` or more behind a proxy, or HTTPS looks like HTTP and secure cookies break. |
 | `DLBOARD_MAX_UPLOAD_MB` | `256` | Hard cap on any single request body, mainly artifact uploads. Over it, the request gets a 413. |
 | `DLBOARD_MAX_HISTOGRAM_BUCKETS` | `1024` | The most buckets one logged histogram may have. Over it, the server rejects the batch; a client checks its own histograms against the same setting in its own environment, so one that bins finer needs it raised there too. |
+| `DLBOARD_MAX_HISTOGRAM_STEPS` | `256` | Steps per run a panel reads of each histogram it shows, however many were logged: a longer run is thinned to every 2ⁿ-th step, so the steps shown stay put as it trains. Raise it for a finer picture of a long run, lower it to make a panel of many histograms cheaper. |
 | `DLBOARD_POLL_INTERVAL_MS` | `30000` | How often an open experiment page checks for new data. |
 | `DLBOARD_TICK_INTERVAL_MS` | `10000` | How often the "fetched Xs ago" label re-renders. Browser-only; never touches the server. |
 

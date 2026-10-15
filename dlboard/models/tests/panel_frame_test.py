@@ -4,7 +4,16 @@ from __future__ import annotations
 
 import pytest
 
-from dlboard.models import artifact_column, artifact_fname_column, artifact_keys_in, artifact_tags_column
+from dlboard.models import (
+    ColumnKind,
+    artifact_column,
+    artifact_fname_column,
+    artifact_keys_in,
+    artifact_tags_column,
+    column_kind,
+    histogram_column,
+    hparam_column,
+)
 
 
 @pytest.mark.parametrize(
@@ -24,3 +33,18 @@ def test_artifact_keys_in_names_keys_not_their_tag_and_file_name_columns(
         columns += [artifact_column(key), artifact_tags_column(key), artifact_fname_column(key)]
 
     assert artifact_keys_in(columns, name, prefix=prefix) == keys
+
+
+@pytest.mark.parametrize(
+    ("column", "kind"),
+    [
+        (hparam_column("lr"), ColumnKind.HPARAM),
+        (artifact_column("eval/a"), ColumnKind.ARTIFACT),
+        (artifact_tags_column("eval/a"), ColumnKind.ARTIFACT),
+        (histogram_column("grad"), ColumnKind.HISTOGRAM),
+        ("loss", ColumnKind.METRIC),
+        ("run_id", ColumnKind.METRIC),
+    ],
+)
+def test_a_column_kind_is_read_back_from_the_name_its_helper_made(column: str, kind: ColumnKind) -> None:
+    assert column_kind(column) is kind

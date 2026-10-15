@@ -31,6 +31,7 @@ class ColumnCatalog:
     artifacts: tuple[str, ...] = ()
     artifact_chart_types: dict[str, str] = field(default_factory=dict[str, str])
     """The chart type that displays each artifact key by default, by name. A key no chart type can display is absent."""
+    histograms: tuple[str, ...] = ()
     hparams: tuple[str, ...] = ()
 
     @classmethod
@@ -44,6 +45,7 @@ class ColumnCatalog:
             artifact_chart_types={
                 a.key: chart_type for a in artifacts if (chart_type := default_artifact_chart(a)) is not None
             },
+            histograms=tuple(store.summarize_histogram_keys(experiment_id)),
             hparams=tuple(
                 sorted({k for h in store.fetch_hyperparams(experiment_id) for k in h.hparams_dict})
             ),
@@ -51,7 +53,7 @@ class ColumnCatalog:
 
     @property
     def has_chartable_keys(self) -> bool:
-        return bool(self.metrics or self.artifact_chart_types)
+        return bool(self.metrics or self.artifact_chart_types or self.histograms)
 
     def options(self, kind: ColumnKind) -> list[str]:
         """The choices for a chart field of `kind` -- `step`/`timestamp_utc` being common metric x-axes."""
@@ -60,6 +62,8 @@ class ColumnCatalog:
                 return [*self.metrics, MetricColumn.STEP, MetricColumn.TIMESTAMP_UTC] if self.metrics else []
             case ColumnKind.ARTIFACT:
                 return list(self.artifacts)
+            case ColumnKind.HISTOGRAM:
+                return list(self.histograms)
             case ColumnKind.HPARAM:
                 return list(self.hparams)
             case ColumnKind.GROUPING:

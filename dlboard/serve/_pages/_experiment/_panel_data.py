@@ -7,23 +7,30 @@ never see a store, and the live poll compares `chart_data_fingerprint`s to decid
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import typing
 from typing import TYPE_CHECKING, Any, cast
 
 import pandas as pd
+from pydantic import PositiveInt
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from structlog.stdlib import get_logger
 
 from dlboard import models
 from dlboard.models import (
-    ARTIFACT_COLUMN_PREFIX,
-    HPARAM_COLUMN_PREFIX,
     RUN_NAME_COLUMN,
     Artifact,
+    ColumnKind,
+    Histogram,
     HyperParams,
+    MetricColumn,
     artifact_column,
     artifact_fname_column,
     artifact_tags_column,
+    column_kind,
+    histogram_column,
+    hparam_column,
 )
 from dlboard.serve._backend._artifact_download import artifact_url
 from dlboard.serve._pages._dataframe_helpers import run_display_name
@@ -37,6 +44,26 @@ if TYPE_CHECKING:
     from dlboard.serve._pages._experiment._paging import Paging
 
 _log = get_logger(__name__)
+
+_ROW_KEY: typing.Final = [MetricColumn.RUN_ID, MetricColumn.STEP]
+"""What identifies a row of a panel's dataframe: the run and the step."""
+
+
+class HistogramFetchSettings(BaseSettings):
+    """`DLBOARD_*` environment variables bounding what a panel reads of its histograms."""
+
+    model_config = SettingsConfigDict(env_prefix="DLBOARD_")
+
+    max_histogram_steps: PositiveInt = 256
+    """
+    Steps per run and key a panel fetches of a histogram, however many were logged.
+
+    What bounds a histogram chart's cost: it draws at most this many columns per run. A run that logged more is
+    thinned in the database to every 2ⁿ-th step from its first (keeping its latest too), so the steps shown stay put
+    as it trains. Raise it for a finer picture of a long run, at the cost of reading and drawing that much more;
+    lower it to make a panel of many histograms cheaper.
+    """
+
 
 type PanelFrames = Mapping[str, pd.DataFrame]
 """The data of the charts `Paging` shows in each open panel, by panel name; a panel with no chart showing has none."""
@@ -133,7 +160,20 @@ def fetch_panel_dataframe(
         if hparam_keys is None or hparam_keys
         else pd.DataFrame()
     )
-    merged = merge_hyperparams(merge_metrics_and_artifacts(metrics_df, artifacts_df), hparams_df)
+    histogram_keys = panel.hint_required_histogram_keys()
+    histograms_df = (
+        build_histograms_dataframe(
+            store.fetch_histograms(
+                experiment_id,
+                keys=frozenset(histogram_keys),
+                max_steps=HistogramFetchSettings().max_histogram_steps,
+                exclude_run_ids=excluded,
+            )
+        )
+        if histogram_keys
+        else pd.DataFrame()
+    )
+    merged = merge_hyperparams(merge_by_step(metrics_df, artifacts_df, histograms_df), hparams_df)
     if merged.empty:
         return merged
     # Carried in alongside the metric/artifact/hparam data (not fetched separately by each chart
@@ -168,7 +208,7 @@ def _chart_columns(chart: models.ChartInstance[Any, Any], df: pd.DataFrame) -> l
     """
     metrics = chart.hint_required_columns()
     hparams = chart.hint_required_hparams()
-    wanted_hparams = None if hparams is None else {f"{HPARAM_COLUMN_PREFIX}{key}" for key in hparams}
+    wanted_hparams = None if hparams is None else {hparam_column(key) for key in hparams}
     artifacts = tuple(
         artifact_column(name)
         for name in (
@@ -176,17 +216,30 @@ def _chart_columns(chart: models.ChartInstance[Any, Any], df: pd.DataFrame) -> l
             *chart.hint_required_artifact_key_prefixes(),
         )
     )
+    histograms = {histogram_column(key) for key in chart.hint_required_histogram_keys()}
 
     def renders_from(column: str) -> bool:
         if column in models.IDENTITY_COLUMNS:
             return True
-        if column.startswith(HPARAM_COLUMN_PREFIX):
-            return wanted_hparams is None or column in wanted_hparams
-        if column.startswith(ARTIFACT_COLUMN_PREFIX):
-            return column.startswith(artifacts)
-        return metrics is None or column in metrics
+        match column_kind(column):
+            case ColumnKind.HPARAM:
+                return wanted_hparams is None or column in wanted_hparams
+            case ColumnKind.ARTIFACT:
+                return column.startswith(artifacts)
+            case ColumnKind.HISTOGRAM:
+                return column in histograms
+            case ColumnKind.METRIC:
+                return metrics is None or column in metrics
+            case ColumnKind.GROUPING:
+                msg = f"no dataframe column is of kind {ColumnKind.GROUPING}"
+                raise ValueError(msg)
 
     return [column for column in df.columns if renders_from(column)]
+
+
+def _histogram_contents(cell: object) -> dict[str, Any] | None:
+    """What a histogram column's cell holds, as plain data (`None` where the key was not logged at the step)."""
+    return cell.model_dump() if isinstance(cell, Histogram) else None
 
 
 def chart_data_fingerprint(chart: models.ChartInstance[Any, Any], df: pd.DataFrame) -> str:
@@ -224,10 +277,18 @@ def chart_data_fingerprint(chart: models.ChartInstance[Any, Any], df: pd.DataFra
     data_cols = [
         c
         for c in scoped.columns
-        if c not in models.NO_DATA_COLUMNS and not c.startswith(HPARAM_COLUMN_PREFIX)
+        if c not in models.NO_DATA_COLUMNS and column_kind(c) is not ColumnKind.HPARAM
     ]
     if data_cols:
         scoped = scoped.dropna(how="all", subset=data_cols)
+    # A histogram cell is a model, which `to_json` cannot be trusted to serialize: hash what it holds instead.
+    scoped = scoped.assign(
+        **{
+            column: scoped[column].map(_histogram_contents)
+            for column in scoped.columns
+            if column_kind(column) is ColumnKind.HISTOGRAM
+        }
+    )
     return hashlib.blake2b(
         scoped.reset_index(drop=True).to_json(orient="split", date_format="iso").encode(), digest_size=16
     ).hexdigest()
@@ -270,7 +331,7 @@ def build_hyperparams_dataframe(
         values = h.hparams_dict
         if wanted is not None:
             values = {k: v for k, v in values.items() if k in wanted}
-        rows.append({"run_id": h.run_id, **{f"{HPARAM_COLUMN_PREFIX}{k}": v for k, v in values.items()}})
+        rows.append({"run_id": h.run_id, **{hparam_column(k): v for k, v in values.items()}})
     if not rows:
         return pd.DataFrame()
     return pd.DataFrame.from_records(rows)
@@ -285,7 +346,22 @@ def merge_hyperparams(df: pd.DataFrame, hparams_df: pd.DataFrame) -> pd.DataFram
     return df.merge(hparams_df, on="run_id", how="left")
 
 
-def merge_metrics_and_artifacts(metrics_df: pd.DataFrame, artifacts_df: pd.DataFrame) -> pd.DataFrame:
-    if not metrics_df.empty and not artifacts_df.empty:
-        return metrics_df.merge(artifacts_df, on=["run_id", "step"], how="outer")
-    return metrics_df if not metrics_df.empty else artifacts_df
+def build_histograms_dataframe(
+    histograms: typing.Iterable[models.UnderlyingHistogramTableEntry],
+) -> pd.DataFrame:
+    """One row per (run_id, step), a `histogram_column(key)` per key holding its `Histogram` at that step."""
+    df = pd.DataFrame.from_records(
+        {MetricColumn.RUN_ID: h.run_id, MetricColumn.STEP: h.step, histogram_column(h.key): h.histogram}
+        for h in histograms
+    )
+    return df if df.empty else df.groupby(_ROW_KEY, as_index=False).first()
+
+
+def merge_by_step(*frames: pd.DataFrame) -> pd.DataFrame:
+    """Outer-join the non-empty `frames` on (run_id, step): a row wherever any of them has one."""
+    present = [frame for frame in frames if not frame.empty]
+    return (
+        functools.reduce(lambda left, right: left.merge(right, on=_ROW_KEY, how="outer"), present)
+        if present
+        else pd.DataFrame()
+    )

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+import typing
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import pandas as pd
 import pendulum
 import pytest
+from pydantic import BaseModel
 
 from dlboard import models
 from dlboard.models import (
@@ -19,8 +21,9 @@ from dlboard.models import (
     artifact_fname_column,
     artifact_keys_in,
     artifact_tags_column,
+    histogram_column,
 )
-from dlboard.models._view import ChartInstance, PanelInstance
+from dlboard.models._view import ChartInstance, ChartType, ChartTypeRegistry, ColumnKind, PanelInstance
 from dlboard.plugins.charts.file_list import FileListChart
 from dlboard.plugins.charts.image_series import ImageChart
 from dlboard.plugins.charts.line_chart import LineChart
@@ -29,6 +32,8 @@ from dlboard.serve._backend._artifact_download import artifact_url
 from dlboard.serve._pages._experiment import _panel_data as panel_data
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from dlboard.plugins.data_stores.sqlite import SQLLiteStore
 
 
@@ -80,18 +85,148 @@ def test_build_artifacts_dataframe_empty() -> None:
         pytest.param(True, True, set(), id="neither"),
     ],
 )
-def test_merge_metrics_and_artifacts(
-    *, metrics_empty: bool, artifacts_empty: bool, expected_columns: set[str]
-) -> None:
+def test_merge_by_step(*, metrics_empty: bool, artifacts_empty: bool, expected_columns: set[str]) -> None:
     metrics_df = (
         pd.DataFrame() if metrics_empty else pd.DataFrame({"run_id": [1], "step": [0], "loss": [0.1]})
     )
     artifacts_df = (
         pd.DataFrame() if artifacts_empty else pd.DataFrame({"run_id": [1], "step": [0], "img": ["ref://a"]})
     )
-    merged = panel_data.merge_metrics_and_artifacts(metrics_df, artifacts_df)
+    merged = panel_data.merge_by_step(metrics_df, artifacts_df)
 
     assert set(merged.columns) == expected_columns
+
+
+def _histogram_entry(run_id: int, step: int, key: str, count: int) -> models.UnderlyingHistogramTableEntry:
+    return models.UnderlyingHistogramTableEntry(
+        id=1,
+        key=key,
+        experiment_id=1,
+        run_id=run_id,
+        step=step,
+        timestamp_utc=_TS,
+        edges=[0.0, 1.0],
+        counts=[count],
+        nonfinite=0,
+    )
+
+
+def test_histograms_are_pivoted_to_a_column_per_key_and_merged_by_step() -> None:
+    histograms_df = panel_data.build_histograms_dataframe(
+        [
+            _histogram_entry(1, 0, "grad", 5),
+            _histogram_entry(1, 0, "weights", 6),
+            _histogram_entry(1, 2, "grad", 7),
+        ]
+    )
+    metrics_df = pd.DataFrame({"run_id": [1, 1], "step": [0, 1], "loss": [0.5, 0.4]})
+
+    merged = panel_data.merge_by_step(metrics_df, histograms_df).sort_values("step")
+
+    assert list(merged["step"]) == [0, 1, 2]
+    grad = merged[histogram_column("grad")]
+    assert [h.counts if isinstance(h, models.Histogram) else None for h in grad] == [[5], None, [7]]
+    assert merged[histogram_column("weights")].iloc[0].counts == [6]
+    assert panel_data.build_histograms_dataframe([]).empty
+
+
+class _KeyParams(BaseModel, frozen=True, extra="forbid"):
+    key: str
+
+
+class _HistogramHintChart(ChartType[_KeyParams, pd.DataFrame, None], frozen=True, extra="forbid"):
+    """Stands in for a chart that shows a histogram: all a panel's data ever asks of one is its hints."""
+
+    name: ClassVar[str] = "histogram-hint"
+
+    @classmethod
+    @typing.override
+    def parameter_type(cls) -> type[_KeyParams]:
+        return _KeyParams
+
+    @classmethod
+    @typing.override
+    def render(cls, parameters: _KeyParams, dataframe: pd.DataFrame) -> None:
+        return None
+
+    @classmethod
+    @typing.override
+    def hint_required_columns(cls, parameters: _KeyParams) -> set[str] | None:
+        return set()
+
+    @classmethod
+    @typing.override
+    def hint_required_artifact_keys(cls, parameters: _KeyParams) -> set[str] | None:
+        return set()
+
+    @classmethod
+    @typing.override
+    def hint_required_hparams(cls, parameters: _KeyParams) -> set[str] | None:
+        return set()
+
+    @classmethod
+    @typing.override
+    def hint_required_histogram_keys(cls, parameters: _KeyParams) -> set[str]:
+        return {parameters.key}
+
+    @classmethod
+    @typing.override
+    def natural_width(cls, parameters: _KeyParams) -> int:
+        return 400
+
+    @classmethod
+    @typing.override
+    def field_column_kinds(cls) -> dict[str, ColumnKind]:
+        return {"key": ColumnKind.HISTOGRAM}
+
+
+@pytest.fixture
+def _histogram_hint_chart() -> Iterator[None]:
+    original = dict(ChartTypeRegistry._all_charts)
+    _HistogramHintChart.register()
+    yield
+    ChartTypeRegistry._all_charts = original
+
+
+@pytest.mark.usefixtures("_histogram_hint_chart")
+def test_a_panel_fetches_only_the_histograms_its_charts_show_thinned_to_the_cap(
+    store: SQLLiteStore, experiment_id: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("DLBOARD_MAX_HISTOGRAM_STEPS", "4")
+    run = store.create_run(models.NewRun(experiment_id=experiment_id))
+    store.log_metrics(
+        models.LoggedMetrics(
+            metrics={"loss": 1.0},
+            histograms={key: models.Histogram(edges=[0.0, 1.0], counts=[1]) for key in ("grad", "weights")},
+            step=step,
+            experiment_id=experiment_id,
+            run_id=run.id,
+            timestamp_utc=_TS,
+        )
+        for step in range(8)
+    )
+    panel = PanelInstance[pd.DataFrame, object](
+        charts=[ChartInstance(chart_type=_HistogramHintChart.name, parameters={"key": "grad"})]
+    )
+
+    df = panel_data.fetch_panel_dataframe(store, experiment_id, panel)
+
+    assert set(df.columns) == {"run_id", "step", histogram_column("grad"), models.RUN_NAME_COLUMN}
+    assert list(df["step"]) == [0, 2, 4, 6, 7]
+
+
+@pytest.mark.usefixtures("_histogram_hint_chart")
+def test_a_charts_fingerprint_follows_only_the_histograms_it_shows() -> None:
+    def frame(grad_count: int, weights_count: int) -> pd.DataFrame:
+        return panel_data.build_histograms_dataframe(
+            [_histogram_entry(1, 0, "grad", grad_count), _histogram_entry(1, 0, "weights", weights_count)]
+        )
+
+    grad_chart = ChartInstance[Any, Any](chart_type=_HistogramHintChart.name, parameters={"key": "grad"})
+    fingerprint = panel_data.chart_data_fingerprint(grad_chart, frame(1, 1))
+
+    assert panel_data.chart_data_fingerprint(grad_chart, frame(1, 99)) == fingerprint
+    assert panel_data.chart_data_fingerprint(grad_chart, frame(2, 1)) != fingerprint
 
 
 def test_build_hyperparams_dataframe_prefixes_columns() -> None:

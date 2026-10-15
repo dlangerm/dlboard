@@ -12,6 +12,7 @@ from __future__ import annotations
 import typing
 
 from dlboard.models._metric import MetricColumn
+from dlboard.models._view import ColumnKind
 
 if typing.TYPE_CHECKING:
     from collections.abc import Iterable
@@ -40,8 +41,16 @@ so a hparam key can never collide with a same-named metric or artifact column.""
 ARTIFACT_COLUMN_PREFIX: typing.Final = "artifact__"
 """Artifact columns are prefixed for the same reason -- see `artifact_column`/`artifact_tags_column`."""
 
+HISTOGRAM_COLUMN_PREFIX: typing.Final = "histogram__"
+"""Histogram columns are prefixed for the same reason; each cell holds a `Histogram`, or NaN where the key was not logged."""
+
 _TAGS_SUFFIX: typing.Final = "__tags"
 _FNAME_SUFFIX: typing.Final = "__fname"
+
+
+def histogram_column(key: str) -> str:
+    """The panel-dataframe column holding each step's `Histogram` for histogram `key`."""
+    return f"{HISTOGRAM_COLUMN_PREFIX}{key}"
 
 
 def artifact_column(key: str) -> str:
@@ -72,3 +81,24 @@ def artifact_keys_in(columns: Iterable[str], name: str, *, prefix: bool) -> list
         if column.startswith(ARTIFACT_COLUMN_PREFIX) and not column.endswith((_TAGS_SUFFIX, _FNAME_SUFFIX))
     ]
     return [key for key in keys if (key.startswith(name) if prefix else key == name)]
+
+
+def hparam_column(key: str) -> str:
+    """The panel-dataframe column holding each run's value of hyperparameter `key`."""
+    return f"{HPARAM_COLUMN_PREFIX}{key}"
+
+
+def column_kind(column: str) -> ColumnKind:
+    """
+    What a panel dataframe's `column` holds, from its prefix: an unprefixed one is a metric (or a fixed column).
+
+    The inverse of the `*_column` helpers above, so a caller that has to treat each kind differently
+    `match`es on this instead of testing prefixes itself.
+    """
+    if column.startswith(HPARAM_COLUMN_PREFIX):
+        return ColumnKind.HPARAM
+    if column.startswith(ARTIFACT_COLUMN_PREFIX):
+        return ColumnKind.ARTIFACT
+    if column.startswith(HISTOGRAM_COLUMN_PREFIX):
+        return ColumnKind.HISTOGRAM
+    return ColumnKind.METRIC

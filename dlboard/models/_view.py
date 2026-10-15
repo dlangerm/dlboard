@@ -45,6 +45,7 @@ class ColumnKind(StrEnum):
 
     METRIC = "metric"
     ARTIFACT = "artifact"
+    HISTOGRAM = "histogram"
     HPARAM = "hparam"
     GROUPING = "grouping"
     """Synthetic kind for fields that group/split by any metric or hparam column, plus `run_id` --
@@ -138,6 +139,17 @@ class ChartType(ABC, BaseModel, typing.Generic[_Parameters, _Dataframe, _Chart],
         For a chart that lists a whole family of artifacts (every `checkpoints/...` file) rather
         than one named key, so keys logged later are included without editing the chart.
         Defaults to none, so a chart type that only ever names its keys need not say anything.
+        """
+        return set()
+
+    @classmethod
+    def hint_required_histogram_keys(cls, parameters: _Parameters) -> set[str]:  # noqa: ARG003
+        """
+        Hint at the logged histogram keys this chart shows.
+
+        Defaults to none, so a chart type that does not show histograms need not say anything. Unlike
+        the metric hint there is no "everything": a histogram is the most expensive thing a panel fetches,
+        so a chart always names the ones it draws.
         """
         return set()
 
@@ -369,6 +381,11 @@ class ChartTypeRegistry:
         return chart_type.hint_required_artifact_key_prefixes(parameters)
 
     @classmethod
+    def hint_required_histogram_keys(cls, chart: ChartInstance[_Dataframe, _Chart]) -> set[str]:
+        chart_type, parameters = cls._typed_chart(chart)
+        return chart_type.hint_required_histogram_keys(parameters)
+
+    @classmethod
     def hint_required_hparams(cls, chart: ChartInstance[_Dataframe, _Chart]) -> set[str] | None:
         chart_type, parameters = cls._typed_chart(chart)
         return chart_type.hint_required_hparams(parameters)
@@ -455,6 +472,16 @@ class ChartInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, 
             )
             return set()
 
+    def hint_required_histogram_keys(self) -> set[str]:
+        try:
+            return ChartTypeRegistry.hint_required_histogram_keys(self)
+        except (ValidationError, UnknownChartTypeError):
+            _log.warning(
+                "chart has invalid parameters or an unregistered chart type, no histogram-key hint available",
+                chart_type=self.chart_type,
+            )
+            return set()
+
     def hint_required_hparams(self) -> set[str] | None:
         """Hint the required hyperparameter keys for this chart to render. See `hint_required_columns`."""
         try:
@@ -531,6 +558,9 @@ class PanelInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, 
         return set(
             itertools.chain.from_iterable(c.hint_required_artifact_key_prefixes() for c in self.charts)
         )
+
+    def hint_required_histogram_keys(self) -> set[str]:
+        return set(itertools.chain.from_iterable(c.hint_required_histogram_keys() for c in self.charts))
 
     def hint_required_hparams(self) -> set[str] | None:
         """Hint the required hyperparameter keys for the panel; `None` means "fetch every one"."""

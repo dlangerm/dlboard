@@ -31,6 +31,7 @@ from dlboard.models._hparams import FlatHparamDict, HyperParams, NewHyperParams,
 from dlboard.models._metric import LoggedMetrics, MetricColumn, UnderlyingMetricTableEntry
 from dlboard.models._panel_frame import (
     ARTIFACT_COLUMN_PREFIX,
+    HISTOGRAM_COLUMN_PREFIX,
     HPARAM_COLUMN_PREFIX,
     IDENTITY_COLUMNS,
     NO_DATA_COLUMNS,
@@ -39,6 +40,9 @@ from dlboard.models._panel_frame import (
     artifact_fname_column,
     artifact_keys_in,
     artifact_tags_column,
+    column_kind,
+    histogram_column,
+    hparam_column,
 )
 from dlboard.models._plugin import InstalledPlugin, PluginProtocol
 from dlboard.models._project import NewProject, Project
@@ -81,6 +85,7 @@ __all__ = [
     "DEFAULT_RENDER_CONTEXT",
     "DEFAULT_TAG_PRECISION",
     "FILE_KIND_TAG",
+    "HISTOGRAM_COLUMN_PREFIX",
     "HPARAM_COLUMN_PREFIX",
     "IDENTITY_COLUMNS",
     "INLINEABLE_ARTIFACT_CONTENT_TYPES",
@@ -167,8 +172,11 @@ __all__ = [
     "artifact_fname_column",
     "artifact_keys_in",
     "artifact_tags_column",
+    "column_kind",
     "format_tag_value",
     "has_scope",
+    "histogram_column",
+    "hparam_column",
     "is_inlineable_artifact",
     "max_histogram_buckets",
     "require_scope",
