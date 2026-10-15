@@ -58,6 +58,7 @@ from dlboard.serve._pages._experiment._chart_editor_modal import register_chart_
 from dlboard.serve._pages._experiment._chart_suggestions import register_chart_suggestions_callbacks
 from dlboard.serve._pages._experiment._live_updates import register_live_update_callbacks
 from dlboard.serve._pages._experiment._notes import register_notes_callbacks
+from dlboard.serve._pages._experiment._paging import visible_open_panels
 from dlboard.serve._pages._experiment._panel_area_controls import register_panel_area_callbacks
 from dlboard.serve._pages._experiment._panel_controls import register_panel_controls_callbacks
 from dlboard.serve._pages._experiment._run_compare import register_run_compare_callbacks
@@ -133,8 +134,10 @@ def render_panel(
         description=description,
         extra_actions=_delete_experiment_action(),
     )
+    paging = panel_view.resolved_paging(page, paging, focus_chart=focus_chart)
+    open_panels = visible_open_panels(page.panels, paging.shown_tab(page.panels), paging)
     container = panel_view.accordion_view(
-        panel_data.panel_frames(store, page), page, paging, focus_chart=focus_chart
+        panel_data.panel_frames(store, page, paging, open_panels), page, paging
     )
     return container, header, page.model_dump_json()
 

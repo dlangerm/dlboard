@@ -1,8 +1,8 @@
 """
 A panel's data: what the page fetches for the charts on screen, and the fingerprint that says when it changed.
 
-No Dash. The views are handed a `PanelFrames` to fetch through rather than a store, and the live poll compares
-`chart_data_fingerprint`s to decide which charts to redraw.
+No Dash. The callbacks fetch the `PanelFrames` of the panels on screen here and hand them to the views, which
+never see a store, and the live poll compares `chart_data_fingerprint`s to decide which charts to redraw.
 """
 
 from __future__ import annotations
@@ -27,23 +27,38 @@ from dlboard.models import (
 )
 from dlboard.serve._backend._artifact_download import artifact_url
 from dlboard.serve._pages._dataframe_helpers import run_display_name
+from dlboard.serve._pages._experiment._paging import visible_chart_indexes
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
+    from collections.abc import Iterable, Mapping
 
     from dlboard.models import DataStore
     from dlboard.serve._pages._experiment._page_model import BasicExperimentPage
+    from dlboard.serve._pages._experiment._paging import Paging
 
 _log = get_logger(__name__)
 
-type PanelFrames = Callable[[models.PanelInstance[Any, Any]], pd.DataFrame]
-"""How a view gets the data for the charts of a panel it shows: handed the panel with just those charts in it."""
+type PanelFrames = Mapping[str, pd.DataFrame]
+"""The data of the charts `Paging` shows in each open panel, by panel name; a panel with no chart showing has none."""
 
 
-def panel_frames(store: DataStore[...], page: BasicExperimentPage) -> PanelFrames:
-    """Fetch for `page`'s experiment through `store`, leaving out the runs `page` excludes."""
+def panel_frames(
+    store: DataStore[...], page: BasicExperimentPage, paging: Paging, names: Iterable[str]
+) -> PanelFrames:
+    """
+    Fetch the charts `paging` shows in the panels called `names`, leaving out the runs `page` excludes.
+
+    Only the page of charts shown is fetched for -- a panel of a thousand charts costs what one page of them does.
+    """
     experiment_id, excluded = cast("int", page.experiment_id), page.document.excluded_runs
-    return lambda panel: fetch_panel_dataframe(store, experiment_id, panel, excluded)
+    wanted = frozenset(names)
+    frames: dict[str, pd.DataFrame] = {}
+    for panel in page.panels:
+        indexes = visible_chart_indexes(panel, paging).items
+        if panel.name in wanted and indexes:
+            shown = panel.model_copy(update={"charts": [panel.charts[i] for i in indexes]})
+            frames[panel.name] = fetch_panel_dataframe(store, experiment_id, shown, excluded)
+    return frames
 
 
 def _splits_metric_and_artifact_charts(panel: models.PanelInstance[Any, Any]) -> bool:

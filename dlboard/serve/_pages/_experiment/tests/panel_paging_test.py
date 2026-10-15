@@ -15,7 +15,7 @@ from dlboard.serve._pages._experiment import _page_model as page_model
 from dlboard.serve._pages._experiment import _page_repository as repo
 from dlboard.serve._pages._experiment import _panel_data as panel_data
 from dlboard.serve._pages._experiment import _panel_view as panel_view
-from dlboard.serve._pages._experiment._paging import ChartPaging, PageSizes, Paging
+from dlboard.serve._pages._experiment._paging import ChartPaging, PageSizes, Paging, visible_open_panels
 
 if TYPE_CHECKING:
     from dash import html
@@ -40,11 +40,12 @@ def _render(  # noqa: PLR0913
     page = store.get_or_create_page(page_model.BasicExperimentPage, experiment_id=experiment_id)
     store.update_page(page.model_copy(update={"panels": panels}))
     loaded = repo.load_page(store, repo.PageRef(experiment_id, None))
+    resolved = panel_view.resolved_paging(
+        loaded, paging.viewing(tab=active_tab, open_panels=open_panels or []), focus_chart=focus_chart
+    )
+    shown = visible_open_panels(loaded.panels, resolved.shown_tab(loaded.panels), resolved)
     return panel_view.accordion_view(
-        panel_data.panel_frames(store, loaded),
-        loaded,
-        paging.viewing(tab=active_tab, open_panels=open_panels or []),
-        focus_chart=focus_chart,
+        panel_data.panel_frames(store, loaded, resolved, shown), loaded, resolved
     )
 
 

@@ -37,6 +37,7 @@ from dlboard.serve._pages._experiment._paging import (
     next_chart_paging,
     next_panel_paging,
     visible_chart_indexes,
+    visible_open_panels,
 )
 from dlboard.serve._pages._experiment._panel_data import panel_frames
 from dlboard.serve._pages._experiment._panel_view import (
@@ -58,7 +59,6 @@ from dlboard.serve._pages._experiment._panel_view import (
     panel_area_children,
     render_panel_content,
     tab_from_component_value,
-    visible_open_panels,
 )
 
 if TYPE_CHECKING:
@@ -163,10 +163,11 @@ def _register_paging(app: Dash) -> None:
                 max_age=_SIZES_COOKIE_MAX_AGE,
                 samesite="Lax",
             )
+        open_panels = visible_open_panels(page.panels, tab, new_paging)
         return (
-            panel_area_children(panel_frames(store, page), page, tab, new_paging),
+            panel_area_children(panel_frames(store, page, new_paging, open_panels), page, tab, new_paging),
             new_paging.model_dump_json(),
-            visible_open_panels(page, tab, new_paging),
+            open_panels,
         )
 
     @app.callback(
@@ -210,7 +211,6 @@ def _register_paging(app: Dash) -> None:
             store, ref_of(experiment_id, BasicExperimentPage.model_validate_json(chart_ctx["page_json"]))
         )
         panel_by_name = {p.name: p for p in page.panels}
-        frames = panel_frames(store, page)
         changed = {
             name
             for name in requested.charts.keys() | paging.charts.keys()
@@ -221,7 +221,8 @@ def _register_paging(app: Dash) -> None:
             number = visible_chart_indexes(panel_by_name[name], requested).number
             requested = requested.with_charts(name, chart_paging.model_copy(update={"page": number}))
 
-        loaded = set(chart_ctx["loaded"] or [])
+        redrawn = changed & set(chart_ctx["loaded"] or [])
+        frames = panel_frames(store, page, requested, redrawn)
         return (
             [
                 chart_pager(
@@ -233,7 +234,7 @@ def _register_paging(app: Dash) -> None:
             ],
             [
                 render_panel_content(frames, panel_by_name[pid["panel"]], requested)
-                if pid["panel"] in changed and pid["panel"] in loaded
+                if pid["panel"] in redrawn
                 else no_update
                 for pid in content_ids
             ],
@@ -318,15 +319,14 @@ def register_panel_area_callbacks(app: Dash) -> None:
         curr_page = BasicExperimentPage.model_validate_json(page_json)
         page = load_page(store, ref_of(experiment_id, curr_page))
         panel_by_name = {p.name: p for p in page.panels}
-        frames = panel_frames(store, page)
-
-        outputs: list[Any] = []
-        for pid in panel_ids:
-            name = pid["panel"]
-            if name not in newly_opened or name not in panel_by_name:
-                outputs.append(no_update)
-                continue
-            outputs.append(render_panel_content(frames, panel_by_name[name], paging))
+        rendered = newly_opened & panel_by_name.keys()
+        frames = panel_frames(store, page, paging, rendered)
+        outputs = [
+            render_panel_content(frames, panel_by_name[pid["panel"]], paging)
+            if pid["panel"] in rendered
+            else no_update
+            for pid in panel_ids
+        ]
         return outputs, sorted(loaded_set | newly_opened)
 
     # Tab switching is entirely client-side (Mantine's own state, no server round trip) -- so
