@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
+import pendulum
 import pytest
 from flask import Response
 
@@ -121,7 +122,7 @@ def test_a_presigned_redirect_is_never_given_the_immutable_cache_control_header(
     assert "Content-Disposition" not in response.headers
 
 
-_LOGGED_AT = datetime(2026, 1, 1, tzinfo=UTC)
+_LOGGED_AT = pendulum.datetime(2026, 1, 1, tz="UTC")
 
 
 def _artifact_with(ref: str = "file:///blobs/a.png", logged_at: datetime = _LOGGED_AT) -> models.Artifact:

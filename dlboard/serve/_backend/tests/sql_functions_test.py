@@ -7,9 +7,9 @@ Compiling `CREATE TABLE` against a dialect object is enough to prove the dialect
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+import pendulum
 import pytest
 import sqlalchemy as sa
 from pydantic import AwareDatetime, BaseModel
@@ -19,6 +19,8 @@ from dlboard.serve._backend import _sql
 from dlboard.serve._backend._foreign_keys import ForeignKey, ForeignKeyKind
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from sqlalchemy.engine.interfaces import Dialect
 
 
@@ -123,11 +125,11 @@ def test_column_type_unsupported_annotation_raises() -> None:
     ("dialect", "bound"),
     [
         (sqlite.dialect(), "2026-01-01T00:00:00+00:00"),
-        (postgresql.dialect(), datetime(2026, 1, 1, tzinfo=UTC)),
+        (postgresql.dialect(), pendulum.datetime(2026, 1, 1, tz="UTC")),
     ],
     ids=["sqlite", "postgres"],
 )
-@pytest.mark.parametrize("value", [datetime(2026, 1, 1, tzinfo=UTC), "2026-01-01T00:00:00Z"])
+@pytest.mark.parametrize("value", [pendulum.datetime(2026, 1, 1, tz="UTC"), "2026-01-01T00:00:00Z"])
 def test_utc_datetime_binds_text_on_sqlite_and_a_datetime_elsewhere(
     dialect: Dialect, bound: object, value: datetime | str
 ) -> None:
@@ -139,12 +141,12 @@ def test_utc_datetime_binds_text_on_sqlite_and_a_datetime_elsewhere(
     [
         "2026-01-01T00:00:00Z",
         "2026-01-01T00:00:00+00:00",
-        datetime(2026, 1, 1),
+        pendulum.naive(2026, 1, 1),
     ],  # a naive value is taken to be UTC
 )
 def test_utc_datetime_reads_back_aware(stored: datetime | str) -> None:
-    assert _sql.UTCDateTime().process_result_value(stored, sqlite.dialect()) == datetime(
-        2026, 1, 1, tzinfo=UTC
+    assert _sql.UTCDateTime().process_result_value(stored, sqlite.dialect()) == pendulum.datetime(
+        2026, 1, 1, tz="UTC"
     )
 
 

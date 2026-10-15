@@ -168,6 +168,21 @@ select = ["E4", "E7", "E9", "F"]
 # `attribute()` is a dataclass `field()` with a label name, so it is as safe in a dataclass default as `field` is.
 extend-immutable-calls = ["dlboard.serve.telemetry.attribute"]
 
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+# Reading the clock and building or converting times goes through pendulum. `datetime.datetime` itself stays
+# allowed as a type (pydantic's `AwareDatetime` is one, and pendulum's `DateTime` subclasses it), and so does
+# `timedelta`.
+"datetime.UTC".msg = "Use pendulum: `pendulum.UTC`, or `tz=\"UTC\"` on a pendulum constructor."
+"datetime.date.today".msg = "Use `pendulum.today(...)`."
+"datetime.datetime.fromisoformat".msg = "Use `pendulum.parse(...)`."
+"datetime.datetime.fromtimestamp".msg = "Use `pendulum.from_timestamp(...)`."
+"datetime.datetime.now".msg = "Use `pendulum.now(...)`."
+"datetime.datetime.strptime".msg = "Use `pendulum.from_format(...)`."
+"datetime.datetime.today".msg = "Use `pendulum.today(...)`."
+"datetime.datetime.utcfromtimestamp".msg = "Use `pendulum.from_timestamp(..., tz=\"UTC\")`."
+"datetime.datetime.utcnow".msg = "Use `pendulum.now(\"UTC\")`."
+"datetime.timezone".msg = "Use a pendulum timezone: `pendulum.UTC`, `pendulum.timezone(...)`."
+
 [tool.ruff.lint.flake8-type-checking]
 # Pydantic resolves these classes' field annotations at runtime, so what they annotate with has to
 # be importable at runtime too -- never moved into a `TYPE_CHECKING` block.

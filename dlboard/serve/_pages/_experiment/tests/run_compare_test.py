@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+import pendulum
 import pytest
 
 from dlboard import models
@@ -95,7 +95,7 @@ def test_load_comparison_reads_the_picked_runs_latest_values_and_ignores_foreign
                     step=step,
                     experiment_id=experiment_id,
                     run_id=runs[0].id,
-                    timestamp_utc=datetime(2026, 1, 1, tzinfo=UTC),
+                    timestamp_utc=pendulum.datetime(2026, 1, 1, tz="UTC"),
                 )
             ]
         )

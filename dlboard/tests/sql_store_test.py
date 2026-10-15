@@ -7,9 +7,10 @@ real databases rather than mocks -- the `store` fixture is sqlite and Postgres i
 from __future__ import annotations
 
 import threading
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
+import pendulum
 import pytest
 import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
@@ -27,7 +28,7 @@ if TYPE_CHECKING:
 
     from dlboard.plugins.data_stores.sqlite import SQLLiteStore
 
-_TS = datetime(2026, 1, 1, tzinfo=UTC)
+_TS = pendulum.datetime(2026, 1, 1, tz="UTC")
 
 
 @pytest.fixture(params=EVERY_STORE_BACKEND)
@@ -113,7 +114,7 @@ def test_a_new_run_is_running_and_finishing_it_records_how_and_when(
 ) -> None:
     created = store.create_run(models.NewRun(experiment_id=experiment_id))
     assert (created.status, created.ended_at) == (models.RunStatus.RUNNING, None)
-    ended_at = datetime(2026, 1, 1, 12, tzinfo=UTC)
+    ended_at = pendulum.datetime(2026, 1, 1, 12, tz="UTC")
 
     finished = store.finish_run(created.id, models.RunStatus.FAILED, ended_at)
 
@@ -124,7 +125,7 @@ def test_a_new_run_is_running_and_finishing_it_records_how_and_when(
 def test_finishing_a_run_again_keeps_the_newest_report(store: SQLLiteStore, experiment_id: int) -> None:
     """Lightning finalizes after `fit` and again after `test`."""
     run = store.create_run(models.NewRun(experiment_id=experiment_id))
-    first = datetime(2026, 1, 1, 12, tzinfo=UTC)
+    first = pendulum.datetime(2026, 1, 1, 12, tz="UTC")
     store.finish_run(run.id, models.RunStatus.FINISHED, first)
 
     store.finish_run(run.id, models.RunStatus.FAILED, first + timedelta(minutes=5))
@@ -153,7 +154,7 @@ def test_finishing_a_missing_or_deleted_run_raises(store: SQLLiteStore, experime
 
     for run_id in (deleted.id, 999_999):
         with pytest.raises(ValueError, match=r"deleted|does not exist"):
-            store.finish_run(run_id, models.RunStatus.FINISHED, datetime(2026, 1, 1, tzinfo=UTC))
+            store.finish_run(run_id, models.RunStatus.FINISHED, pendulum.datetime(2026, 1, 1, tz="UTC"))
 
 
 def test_a_run_created_without_a_name_gets_a_generated_one_that_survives_persistence(

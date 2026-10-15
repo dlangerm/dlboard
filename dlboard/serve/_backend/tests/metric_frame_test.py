@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import pendulum
 
 from dlboard.models import MetricColumn
 from dlboard.serve._backend._metric_frame import MetricFrame, MetricRow
 
-_TS = datetime(2026, 1, 1, tzinfo=UTC)
+_TS = pendulum.datetime(2026, 1, 1, tz="UTC")
 
 
 def test_metric_frame_has_fixed_dtypes_even_for_all_null_metrics() -> None:

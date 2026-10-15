@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
+import pendulum
 import pytest
 from pydantic import ValidationError
 
 from dlboard.models import LoggedMetrics, MetricColumn
 
-_TS = datetime(2026, 1, 1, tzinfo=UTC)
+_TS = pendulum.datetime(2026, 1, 1, tz="UTC")
 
 
 @pytest.mark.parametrize("reserved", list(MetricColumn))
