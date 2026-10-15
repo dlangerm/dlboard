@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+import pendulum
 import pytest
 
 from dlboard.models import (
@@ -20,7 +20,7 @@ from dlboard.serve._pages._experiment._column_catalog import ColumnCatalog
 if TYPE_CHECKING:
     from dlboard.plugins.data_stores.sqlite import SQLLiteStore
 
-_TS = datetime(2026, 1, 1, tzinfo=UTC)
+_TS = pendulum.datetime(2026, 1, 1, tz="UTC")
 
 _CATALOG = ColumnCatalog(metrics=("loss", "shared"), artifacts=("shared",), hparams=("lr",))
 

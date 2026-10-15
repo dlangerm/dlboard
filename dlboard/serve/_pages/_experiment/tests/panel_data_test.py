@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 import pandas as pd
+import pendulum
 import pytest
 
 from dlboard import models
@@ -37,7 +37,7 @@ FileListChart.register(allow_override=True)
 ImageChart.register(allow_override=True)
 
 
-_TS = datetime(2026, 1, 1, tzinfo=UTC)
+_TS = pendulum.datetime(2026, 1, 1, tz="UTC")
 
 
 def _artifact(run_id: int, step: int, key: str, ref: str, tags: dict[str, str] | None = None) -> Artifact:
@@ -72,10 +72,17 @@ def test_build_artifacts_dataframe_empty() -> None:
 
 
 @pytest.mark.parametrize(
-    ("metrics_empty", "artifacts_empty"),
-    [(False, False), (True, False), (False, True)],
+    ("metrics_empty", "artifacts_empty", "expected_columns"),
+    [
+        pytest.param(False, False, {"run_id", "step", "loss", "img"}, id="metrics-and-artifacts"),
+        pytest.param(True, False, {"run_id", "step", "img"}, id="artifacts-only"),
+        pytest.param(False, True, {"run_id", "step", "loss"}, id="metrics-only"),
+        pytest.param(True, True, set(), id="neither"),
+    ],
 )
-def test_merge_metrics_and_artifacts(*, metrics_empty: bool, artifacts_empty: bool) -> None:
+def test_merge_metrics_and_artifacts(
+    *, metrics_empty: bool, artifacts_empty: bool, expected_columns: set[str]
+) -> None:
     metrics_df = (
         pd.DataFrame() if metrics_empty else pd.DataFrame({"run_id": [1], "step": [0], "loss": [0.1]})
     )
@@ -84,14 +91,7 @@ def test_merge_metrics_and_artifacts(*, metrics_empty: bool, artifacts_empty: bo
     )
     merged = panel_data.merge_metrics_and_artifacts(metrics_df, artifacts_df)
 
-    if metrics_empty and artifacts_empty:
-        assert merged.empty
-    elif metrics_empty:
-        assert list(merged.columns) == ["run_id", "step", "img"]
-    elif artifacts_empty:
-        assert list(merged.columns) == ["run_id", "step", "loss"]
-    else:
-        assert set(merged.columns) == {"run_id", "step", "loss", "img"}
+    assert set(merged.columns) == expected_columns
 
 
 def test_build_hyperparams_dataframe_prefixes_columns() -> None:

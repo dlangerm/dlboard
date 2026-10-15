@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
+import pendulum
 import pytest
 
 from dlboard import models
@@ -17,7 +17,7 @@ from dlboard.serve._pages._experiment import _run_comparison_table as run_table
 if TYPE_CHECKING:
     from dlboard.plugins.data_stores.sqlite import SQLLiteStore
 
-_TS = datetime(2026, 1, 1, tzinfo=UTC)
+_TS = pendulum.datetime(2026, 1, 1, tz="UTC")
 
 LineChart.register(allow_override=True)
 FileListChart.register(allow_override=True)
@@ -149,7 +149,7 @@ def test_load_hparam_view_data_reports_available_metric_keys_without_fetching_va
 def test_build_hparam_rows_shows_how_a_run_ended_and_how_long_it_took(
     status: models.RunStatus | None, ran_for_s: int | None, expected: tuple[str | None, int | None, str, str]
 ) -> None:
-    ended_at = None if ran_for_s is None else _TS + timedelta(seconds=ran_for_s)
+    ended_at = None if ran_for_s is None else _TS.add(seconds=ran_for_s)
     run = _run(1).model_copy(update={"status": status, "ended_at": ended_at})
 
     (row,) = run_table._build_hparam_rows([run], hparams_by_run={}, latest_metrics={})
@@ -161,7 +161,7 @@ def test_the_runs_table_redraws_when_a_run_finishes() -> None:
     """Its signature is what gates a redraw, so a status or end time has to be part of it."""
     running = _run(1)
     finished = running.model_copy(
-        update={"status": models.RunStatus.FINISHED, "ended_at": _TS + timedelta(minutes=1)}
+        update={"status": models.RunStatus.FINISHED, "ended_at": _TS.add(minutes=1)}
     )
 
     def signature(run: Run) -> list[Any]:
