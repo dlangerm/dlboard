@@ -84,10 +84,34 @@ _TIER_THRESHOLDS: tuple[tuple[float, DurationTier], ...] = (
 _MEASURED = pytest.StashKey[dict[str, float]]()
 """This run's per-test wall time, summed over setup, call and teardown -- what `--record-durations` saves."""
 
+COLLECTED_TESTS = pytest.StashKey[frozenset[str] | None]()
+"""
+Every test this run collected, before `-k`/`-m` deselect any -- or `None` if it collected only part of the suite.
+
+Only a run that collected everything can tell a deleted test from one it just didn't look at, so only that run
+prunes `test-durations.json` and checks it against the suite (`durations_test.py`).
+"""
+
 _DURATIONS = TypeAdapter(dict[str, float])
 
 
-def _load_durations() -> dict[str, float]:
+def _collected_whole_suite(session: pytest.Session) -> bool:
+    """
+    Whether this run collected every test: no paths of its own, nothing ignored, no `--lf`, no collection errors.
+
+    `-k` and `-m` only deselect after collection, so a run filtered by them still collected everything.
+    """
+    config = session.config
+    return (
+        config.args_source is pytest.Config.ArgsSource.TESTPATHS
+        and not config.getoption("ignore")
+        and not config.getoption("ignore_glob")
+        and not config.getoption("lf", default=False)
+        and session.testsfailed == 0
+    )
+
+
+def load_durations() -> dict[str, float]:
     """The recorded durations, or nothing if no run has recorded any yet."""
     if not DURATIONS_PATH.exists():
         return {}
@@ -105,7 +129,7 @@ def _order_by_tier(items: list[pytest.Item]) -> None:
     A test with no recorded duration counts as short, so a new test runs early until a
     `--record-durations` run has measured it.
     """
-    durations = _load_durations()
+    durations = load_durations()
     tiers = {item.nodeid: _tier_for(durations.get(item.nodeid, 0.0)) for item in items}
     for item in items:
         item.add_marker(tiers[item.nodeid].marker)
@@ -147,20 +171,34 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) ->
 
 
 def pytest_sessionfinish(session: pytest.Session) -> None:
-    """Merge this run's durations into `DURATIONS_PATH`, keeping tests this run didn't touch."""
+    """
+    Merge this run's durations into `DURATIONS_PATH`, keeping tests this run didn't run.
+
+    A run that collected the whole suite also drops the tests that no longer exist.
+    """
     if not session.config.getoption("--record-durations"):
         return
-    durations = _load_durations() | session.config.stash[_MEASURED]
+    durations = load_durations() | session.config.stash[_MEASURED]
+    collected = session.config.stash.get(COLLECTED_TESTS, None)
+    if collected is not None:
+        durations = {nodeid: seconds for nodeid, seconds in durations.items() if nodeid in collected}
     DURATIONS_PATH.write_bytes(_DURATIONS.dump_json(dict(sorted(durations.items())), indent=2) + b"\n")
 
 
-def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+@pytest.hookimpl(tryfirst=True)
+def pytest_collection_modifyitems(
+    session: pytest.Session, config: pytest.Config, items: list[pytest.Item]
+) -> None:
     """
-    Keep the docs-screenshot tests out of ordinary runs, and out of everything else in their own.
+    Note what was collected, then keep the docs-screenshot tests in runs of their own, and out of every other run.
 
-    Their images depend on the whole database (the home page lists every project), so a run that
-    asks for screenshots renders them in a process that ran nothing else.
+    `tryfirst` so `COLLECTED_TESTS` is taken before `-k`/`-m` deselect anything. The screenshots' images depend on the
+    whole database (the home page lists every project), so a run that asks for screenshots renders them in a process
+    that ran nothing else.
     """
+    config.stash[COLLECTED_TESTS] = (
+        frozenset(item.nodeid for item in items) if _collected_whole_suite(session) else None
+    )
     _order_by_tier(items)
     screenshots_requested: bool = config.getoption("--screenshots") is not None
     if screenshots_requested:

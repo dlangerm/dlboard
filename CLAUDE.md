@@ -31,7 +31,8 @@ uv run pytest -m s3                 # run the S3 artifact store against a real S
 uv run pytest -m "not browser and not postgres and not s3"  # everything that needs neither a browser nor Docker
 uv run pytest --screenshots=check   # re-render the docs screenshots and fail if docs/images is stale
 uv run pytest --screenshots=update  # rewrite docs/images (dlboard serves its own font, so a local render matches CI's -- commit it)
-uv run pytest --record-durations    # re-measure test-durations.json after adding/changing slow tests (run the full suite, then commit it)
+uv run pytest --record-durations    # re-measure test-durations.json and drop deleted tests (run the full suite, then commit it)
+uv run pytest path/to/new_test.py --record-durations  # add just new tests' durations; durations_test.py fails until every test has one
 uv run ruff check                   # lint
 uv run ruff format                  # format
 uv run pyrefly check              # type check (strict mode)
