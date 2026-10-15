@@ -103,3 +103,12 @@ repos:
         entry: uv run --no-project python tools/tag_guard.py --install
         always_run: true
         pass_filenames: false
+      - id: forbid-strings
+        # Checks Python files for forbidden strings, like the builtin `print` or `pdb` breakpoints. It also removes
+        # ignore comments that excuse nothing, as ruff does for `noqa`. See the script.
+        name: forbid certain strings in code
+        language: system
+        entry: uv run --no-project python tools/forbid_strings.py
+        args: [--fix]
+        types_or: [python, pyi]
+        pass_filenames: true

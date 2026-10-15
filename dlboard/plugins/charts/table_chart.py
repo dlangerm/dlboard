@@ -88,51 +88,31 @@ class TableMode(StrEnum):
     """One row per logged artifact under `artifact_key`, with its tags as columns."""
 
 
-class TableChartSettings(BaseModel, frozen=True, extra="forbid"):
+class TableChartSettings(BaseModel, frozen=True, extra="forbid", use_attribute_docstrings=True):
     """Table chart settings."""
 
-    mode: TableMode = Field(
-        default=TableMode.RUNS,
-        description="What the rows are: one per run, one per `pivot_on` value with a column per run, or one per artifact.",
-    )
-    metrics: list[str] = Field(
-        default_factory=list,
-        description="Runs mode: metric column names to show; empty shows every metric (each run's "
-        "latest value) -- unless hparams is set without this, which is read as "
-        '"hparams only" rather than "every metric too".',
-    )
-    hparams: list[str] = Field(
-        default_factory=list,
-        description="Runs mode: hyperparameter keys to show; empty shows every hyperparameter.",
-    )
-    pivot_on: str = Field(
-        default="",
-        description='Pivot mode: a metric column (e.g. "step") to make the rows, comparing pivot_metric '
-        "across runs side by side.",
-    )
-    pivot_metric: str = Field(default="", description="Pivot mode: which metric's values fill the table.")
-    artifacts: list[str] = Field(
-        default_factory=list,
-        description="Runs mode: artifact keys to add as columns, each showing the run's latest artifact "
-        "under that key (an image as a thumbnail) and its tags.",
-    )
-    artifact_key: str = Field(
-        default="",
-        description="Artifacts mode: the artifact key to list. With `artifact_key_is_prefix`, every key "
-        "that starts with it (say `eval/`), including any logged later.",
-    )
-    artifact_key_is_prefix: bool = Field(
-        default=False, description="Artifacts mode: list every key under `artifact_key`, not just that one."
-    )
-    page_size: int = Field(default=20, ge=1, description="How many rows each page of the table shows.")
-    font_size: int | None = Field(
-        default=None,
-        description="Cell/header font size in pixels. Leave unset to use the same (smaller) "
-        "default as the rest of the charts; set this to size the table up.",
-    )
-    width: int | None = Field(
-        default=None, description="Overall chart width in px. Leave blank to use the default flat width."
-    )
+    mode: TableMode = Field(default=TableMode.RUNS)
+    """What the rows are: one per run, one per `pivot_on` value with a column per run, or one per artifact."""
+    metrics: list[str] = Field(default_factory=list)
+    """Runs mode: metric column names to show; empty shows every metric (each run's latest value) -- unless hparams is set without this, which is read as "hparams only" rather than "every metric too"."""
+    hparams: list[str] = Field(default_factory=list)
+    """Runs mode: hyperparameter keys to show; empty shows every hyperparameter."""
+    pivot_on: str = Field(default="")
+    """Pivot mode: a metric column (e.g. "step") to make the rows, comparing pivot_metric across runs side by side."""
+    pivot_metric: str = Field(default="")
+    """Pivot mode: which metric's values fill the table."""
+    artifacts: list[str] = Field(default_factory=list)
+    """Runs mode: artifact keys to add as columns, each showing the run's latest artifact under that key (an image as a thumbnail) and its tags."""
+    artifact_key: str = Field(default="")
+    """Artifacts mode: the artifact key to list. With `artifact_key_is_prefix`, every key that starts with it (say `eval/`), including any logged later."""
+    artifact_key_is_prefix: bool = Field(default=False)
+    """Artifacts mode: list every key under `artifact_key`, not just that one."""
+    page_size: int = Field(default=20, ge=1)
+    """How many rows each page of the table shows."""
+    font_size: int | None = Field(default=None)
+    """Cell/header font size in pixels. Leave unset to use the same (smaller) default as the rest of the charts; set this to size the table up."""
+    width: int | None = Field(default=None)
+    """Overall chart width in px. Leave blank to use the default flat width."""
 
     @model_validator(mode="before")
     @classmethod

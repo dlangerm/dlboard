@@ -299,7 +299,7 @@ def _is_rank_zero() -> bool:
     Lightning sets `.rank` on it from the launcher's env vars at import, but doesn't declare it for
     type checkers.
     """
-    return getattr(rank_zero_only, "rank", 0) == 0
+    return getattr(rank_zero_only, "rank", 0) == 0  # dlboard-ignore[forbid-string-ignore]
 
 
 def _done_status(lightning_status: str, *, already_reported: bool) -> models.RunStatus | None:
@@ -464,7 +464,7 @@ class DLBoardLogger(Logger):
     @property
     def run_id(self) -> int | None:
         """The run this logger writes to -- hand it to other processes' `run_id=` to share the run."""
-        return getattr(self, "_run_id", None)
+        return self._run_id if hasattr(self, "_run_id") else None
 
     @property
     @override

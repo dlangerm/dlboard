@@ -56,18 +56,18 @@ class AppSlot[T]:
             msg = f"Refusing to overwrite the already-set {self.label}."
             raise AttributeError(msg)
         _log.info("set %s to %s", self.label, type(value).__name__)
-        setattr(app, self._attribute, value)
+        setattr(app, self._attribute, value)  # dlboard-ignore[forbid-string-ignore]
 
     def get(self, app: Dash | None = None) -> T:
         app = app or current_dash_app()
         if not hasattr(app, self._attribute):
             msg = f"The {self.label} was not set for this app"
             raise AttributeError(msg)
-        return cast("T", getattr(app, self._attribute))
+        return cast("T", getattr(app, self._attribute))  # dlboard-ignore[forbid-string-ignore]
 
     def find(self, app: Dash) -> T | None:
         """Like `get`, but `None` when nothing set it -- for state that's optional to install."""
-        return cast("T | None", getattr(app, self._attribute, None))
+        return cast("T | None", getattr(app, self._attribute, None))  # dlboard-ignore[forbid-string-ignore]
 
     def wait(self, app: Dash) -> T:
         """Like `get`, but blocks until some plugin's `plug()` sets it -- plugin order isn't guaranteed."""

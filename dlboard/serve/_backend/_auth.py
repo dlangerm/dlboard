@@ -49,9 +49,6 @@ set_auth_provider = AUTH_PROVIDER.set
 get_auth_provider = AUTH_PROVIDER.get
 get_auth_settings = AUTH_SETTINGS.get
 
-_USER_KEY: Final = "dlboard_user"
-"""Where the request's resolved `User` lives on `flask.g`."""
-
 
 class UnauthenticatedRequestError(RuntimeError):
     """`get_current_user()` ran outside a request, or on one that never went through the request gate."""
@@ -170,13 +167,13 @@ def safe_next_path(next_path: str | None) -> str:
 
 
 def bind_current_user(user: User) -> None:
-    """Make `user` who `get_current_user()` resolves to for the rest of the in-flight request."""
-    setattr(g, _USER_KEY, user)
+    """Make `user` who `get_current_user()` resolves to for the rest of the in-flight request, on `flask.g`."""
+    g.dlboard_user = user
 
 
 def find_current_user() -> User | None:
     """The user the in-flight request was authenticated as, or `None` outside one (or on a public route)."""
-    return g.get(_USER_KEY) if has_request_context() else None
+    return g.dlboard_user if has_request_context() and hasattr(g, "dlboard_user") else None
 
 
 def get_current_user() -> User:

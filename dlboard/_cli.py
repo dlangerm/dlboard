@@ -114,7 +114,7 @@ def _serve(plugins_target: str, runtime: ServerRuntimeOptions) -> None:
         # (`sqlite_location`, say) would otherwise silently outrank an explicit `--sqlite-location`
         # once pydantic-settings' case-insensitive env matching saw both. `setdefault` so a caller
         # who explicitly wants Flask's dotenv loading can still opt back in.
-        os.environ.setdefault("FLASK_SKIP_DOTENV", "1")
+        os.environ.setdefault("FLASK_SKIP_DOTENV", "1")  # dlboard-ignore[forbid-string-ignore]
         plugins = resolve_plugins(plugins_target)
         with shared_prometheus_dir():
             build_app(plugins, url_prefix=runtime.url_prefix).run(
@@ -231,7 +231,7 @@ def set_password(
         raise SystemExit(problem)
     store = get_system_data_store(build_app(resolve_plugins(plugins)))
     user = create_or_reset_user(store, username, password, admin=admin)
-    print(f"Saved {user.username}" + (" (admin)" if admin else ""))  # noqa: T201 -- this is a CLI
+    _log.warning(f"Saved {user.username}" + (" (admin)" if admin else ""))
 
 
 def main() -> None:

@@ -106,6 +106,10 @@ def register(app: Dash) -> None:
         if not name or not name.strip():
             return no_update, no_update, no_update, "Give the project a name"
         store = get_data_store()
-        store.create_project(models.NewProject(name=name.strip(), description=""))
+        new_project = models.NewProject(
+            name=name.strip(),
+            description="",
+        )
+        store.create_project(new_project)
         grid, count = _project_grid(store)
         return grid, _project_count(count), "", None

@@ -509,7 +509,9 @@ def main() -> None:
         "unet-advanced",
         "Synthetic shapes, to exercise nested hyperparameters, checkpoints and rich previews",
         log_model="all",
-        server_url=os.environ.get("DLBOARD_SERVER_URL", "http://localhost:8050"),
+        server_url=os.environ.get(  # dlboard-ignore[forbid-string-ignore]
+            "DLBOARD_SERVER_URL", "http://localhost:8050"
+        ),
     )
     data = ShapesDataModule(DataConfig(), AugmentConfig())
     model = ShapesSegmenter(

@@ -100,7 +100,7 @@ def install() -> int:
         sys.stderr.write(f"error: {link} is already a different hook; remove it to use {script.name}\n")
         return 1
     link.parent.mkdir(parents=True, exist_ok=True)
-    link.symlink_to(os.path.relpath(script, link.parent))
+    link.symlink_to(script.relative_to(link.parent, walk_up=True))
     sys.stdout.write(f"installed {link} -> {script}\n")
     return 0
 
