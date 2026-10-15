@@ -11,12 +11,13 @@ from __future__ import annotations
 
 import itertools
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Final, TypedDict, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Final, TypedDict, cast, get_args
 
 import dash_mantine_components as dmc
 from dash import Dash, Input, NoUpdate, Output, State, ctx, html, no_update
 from dash.dcc import Store
 from dash.exceptions import PreventUpdate
+from pydantic import TypeAdapter
 
 from dlboard.models import ChartInstance, ColumnKind
 from dlboard.serve import ClientsideScript, Icon, get_data_store, icon
@@ -29,6 +30,7 @@ from dlboard.serve._pages._experiment import _page_model as page_model
 from dlboard.serve._pages._experiment import _panel_data as panel_data
 from dlboard.serve._pages._experiment import _panel_view as panel_view
 from dlboard.serve._pages._experiment._chart_autogen import (
+    SplitMode,
     Suggestion,
     SuggestSort,
     build_auto_panels,
@@ -45,8 +47,6 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
 
     from dash.development.base_component import Component
-
-    from dlboard.serve._pages._experiment._chart_autogen import SplitMode
 
 
 _SUGGEST_SELECTION_JS = ClientsideScript(Path(__file__).with_name("suggest_selection.js"))
@@ -75,7 +75,10 @@ AUTO_POPULATE_PREVIEW_ID: DivId[ids.ExperimentPage] = DivId("auto-populate-previ
 AUTO_POPULATE_BUTTON_ID: ButtonId[ids.ExperimentPage] = ButtonId("auto-populate-button")
 AUTO_POPULATE_CANCEL_ID: ButtonId[ids.ExperimentPage] = ButtonId("auto-populate-cancel")
 
-_SPLIT_MODE_DATA: Final = [{"label": "Prefix", "value": "prefix"}, {"label": "Suffix", "value": "suffix"}]
+_SPLIT_MODES: Final = get_args(SplitMode)
+_SPLIT_MODE_DATA: Final = [{"label": mode.title(), "value": mode} for mode in _SPLIT_MODES]
+_SPLIT_MODE: Final = TypeAdapter(SplitMode)
+"""Checks a mode the browser sent is one the control offers, instead of quietly falling back to the first."""
 _DEFAULT_DELIMITER: Final = "/"
 
 
@@ -92,7 +95,7 @@ _ADD_SUGGESTION: Final = _SuggestionPattern("add-suggestion")
 
 
 def _split_mode_control(control_id: ValueId[ids.ExperimentPage]) -> dmc.SegmentedControl:
-    return dmc.SegmentedControl(id=control_id, data=_SPLIT_MODE_DATA, value="prefix", size="sm")
+    return dmc.SegmentedControl(id=control_id, data=_SPLIT_MODE_DATA, value=_SPLIT_MODES[0], size="sm")
 
 
 def _suggest_charts_drawer() -> dmc.Drawer:
@@ -408,7 +411,7 @@ def _register_auto_populate(app: Dash) -> None:
         groups = group_keys_into_panels(
             catalog,
             delimiter=delimiter or _DEFAULT_DELIMITER,
-            mode="suffix" if mode == "suffix" else "prefix",
+            mode=_SPLIT_MODE.validate_python(mode),
             lightning=panel_data.is_lightning_experiment(store, experiment_id),
         )
         return True if opening else no_update, _render_auto_preview(groups), False
@@ -447,7 +450,7 @@ def _register_auto_populate(app: Dash) -> None:
         catalog = ColumnCatalog.load(store, experiment_id)
         if not catalog.has_chartable_keys:
             raise ValueError(_NO_KEYS_MESSAGE)
-        split_mode: SplitMode = "suffix" if auto_populate_ctx["mode"] == "suffix" else "prefix"
+        split_mode = _SPLIT_MODE.validate_python(auto_populate_ctx["mode"])
         lightning = panel_data.is_lightning_experiment(store, experiment_id)
 
         panels = build_auto_panels(
@@ -594,7 +597,7 @@ def _register_suggestions(app: Dash) -> None:
                 filter_value,
             )
 
-        split_mode: SplitMode = "suffix" if suggest_ctx["mode"] == "suffix" else "prefix"
+        split_mode = _SPLIT_MODE.validate_python(suggest_ctx["mode"])
         lightning = curr_page.experiment_id is not None and panel_data.is_lightning_experiment(
             store, curr_page.experiment_id
         )

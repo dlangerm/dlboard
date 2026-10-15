@@ -22,6 +22,7 @@ from dlboard.serve._component_ids import ButtonId, DivId, PatternId, StoreId, Va
 from dlboard.serve._pages._dash_helpers import tooltipped_action_icon
 from dlboard.serve._pages._experiment._page_model import (
     UNGROUPED_TAB,
+    UNGROUPED_TAB_LABEL,
     BasicExperimentPage,
     group_panels_by_tab,
 )
@@ -563,7 +564,10 @@ def _tab_tab(tab: str) -> Component:
     # `data-*` attrs aren't in `TabsTab`'s typed signature -- `cast` to `Any` rather than fight that.
     tabs_tab = cast("Any", dmc.TabsTab)
     return tabs_tab(
-        tab or "General", value=tab_component_value(tab), className="dl-tab-target", **{"data-tab": tab}
+        tab or UNGROUPED_TAB_LABEL,
+        value=tab_component_value(tab),
+        className="dl-tab-target",
+        **{"data-tab": tab},
     )
 
 
