@@ -262,21 +262,26 @@ def _render_suggestions(suggestions: Iterable[Suggestion], *, filtered_out_all: 
         )
 
     # One pass, straight into the sections it will be rendered in.
-    sections: dict[ColumnKind, list[Component]] = {ColumnKind.METRIC: [], ColumnKind.ARTIFACT: []}
+    titles = {
+        ColumnKind.METRIC: "Metrics",
+        ColumnKind.ARTIFACT: "Artifacts",
+        ColumnKind.HISTOGRAM: "Histograms",
+    }
+    sections: dict[ColumnKind, list[Component]] = {kind: [] for kind in titles}
     for s in suggestions:
         sections[s.kind].append(_row(s))
     if not any(sections.values()):
         return dmc.Text(
             "No suggestion matches that filter."
             if filtered_out_all
-            else "Every metric and artifact already has a chart.",
+            else "Every metric, artifact and histogram already has a chart.",
             c="dimmed",
             size="sm",
         )
     return dmc.Stack(
         [
             part
-            for kind, title in ((ColumnKind.METRIC, "Metrics"), (ColumnKind.ARTIFACT, "Artifacts"))
+            for kind, title in titles.items()
             if sections[kind]
             for part in (dmc.Text(title, fw=600, size="sm", mt="sm"), *sections[kind])
         ],

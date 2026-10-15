@@ -5,13 +5,32 @@
 A chart plugin defines one `ChartType` — a way to turn parameters and a dataframe of logged data
 into a rendered Dash component. `ChartType[P, D, C]` (`dlboard/models/_view.py`) is generic over
 its parameter model `P`, the data shape it renders from `D`, and the rendered component type `C`.
-Built-ins: `line_chart.py`, `bar_chart.py`, `table_chart.py`, `image_series.py`, `file_list.py`
-(`dlboard/plugins/charts/`). `file_list.py` is what an artifact a browser can't show inline gets (a
+Built-ins: `line_chart.py`, `bar_chart.py`, `table_chart.py`, `image_series.py`, `file_list.py`,
+`histogram.py` (`dlboard/plugins/charts/`). `file_list.py` is what an artifact a browser can't show inline gets (a
 checkpoint, say): its files by run and step, each with a download link. It is paged and sortable, and
 splits files into tabs by what they are -- for the checkpoints `DLBoardLogger` uploads, `Latest`, `Best`
 and `Top-k`, read from the `tag` and `score` tags the logger records. Set `key_prefix` (say
 `checkpoints/`) instead of `key` and one chart lists every key under it, so a run's hundreds of
 checkpoints (one key apiece) are one list, and Auto-generate makes exactly that.
+
+`histogram.py` charts a logged histogram (see [Client & logging](../client.md): values binned in your training
+process, so only buckets are sent) as it changes over steps -- per-layer gradient norms or weights, a distribution
+of per-sample losses -- without averaging it away. A `display` setting picks the view: **heatmap** (the default;
+step across, value bucket up, shaded by the share of that step's values in the bucket, in a `colorscale` of your
+choice), **bands** (the median with the middle `band_share` of the values -- 0.68 by default -- and the min-max
+around it, per step) or **step** (the distribution at one step as bars, with a slider to move through the steps).
+Each is one figure with a row per run, labelled by run name, and a panel's charts-per-page limits how many rows:
+the most recent runs are shown. `normalize` (on by default) shades each step as a share of its own values so steps
+that logged different numbers of values compare; turn it off for raw counts.
+
+Whatever was logged, a chart is cheap to open, and each bound is a setting. It reads about
+`DLBOARD_MAX_HISTOGRAM_STEPS` (256) steps per run: the store thins a longer run to every 2ⁿ-th step from its first
+(keeping its latest too) before anything is read back, so a run that trained for a million steps costs the same to
+open as one that trained for a thousand, and the steps shown stay put as it trains rather than shifting on every
+refresh. It draws at most `max_rows` (128) value buckets per run, merging a finer lattice, and the step view's
+slider moves through at most `max_slider_steps` (300) of them. The accent color of the bands and bars, the space
+between rows, the ticks named on a value axis and the default shape are `DLBOARD_HISTOGRAM_*` settings, listed in
+[Configuration](../configuration.md). Auto-generate makes a heatmap for each histogram key.
 
 `table_chart.py` is a data table. Two settings shape it: what a **row** is (`rows`), and which **columns** it
 shows (`show_metrics`, `show_hparams`, `show_artifacts`).
@@ -46,10 +65,15 @@ A table of runs, with an artifact column:
 
 ![A table chart](../images/table-chart.png)
 
+A histogram chart's heatmap, one row per run (here the gradient norms of a layer shrinking and tightening as
+four runs converge):
+
+![A histogram chart](../images/histogram-chart.png)
+
 ## When you'd need this
 
-You want a new way to visualize logged metrics/artifacts that the built-in line/bar/table/image
-charts don't cover — a histogram, a scatter plot, a confusion matrix, anything with its own
+You want a new way to visualize logged metrics/artifacts that the built-in line/bar/table/image/histogram
+charts don't cover — a scatter plot, a confusion matrix, anything with its own
 parameter shape and rendering.
 
 ## How do I build one
@@ -65,6 +89,9 @@ Subclass `ChartType` and implement its abstract methods:
 - `hint_required_artifact_key_prefixes` (optional, none by default) — for a chart that lists a whole
   family of artifacts (every `checkpoints/...` key) rather than named ones: every key starting with one of
   these is fetched, including keys logged later.
+- `hint_required_histogram_keys` (optional, none by default) — the logged histogram keys the chart shows. A
+  chart always names them: there is no "every histogram", because a histogram is the most expensive thing a panel
+  fetches. A field naming one is a `ColumnKind.HISTOGRAM` in `field_column_kinds()`.
 
 The same hints bound what the experiment page fetches: a panel shows one page of its charts, and only
 those charts' columns and keys are requested. They are also what the panel's chart filter matches

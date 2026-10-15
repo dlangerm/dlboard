@@ -10,11 +10,13 @@ from dlboard.models import FILE_KIND_TAG, Artifact
 from dlboard.models._view import ChartInstance, ColumnKind, PanelInstance
 from dlboard.plugins.charts.bar_chart import BarChart
 from dlboard.plugins.charts.file_list import FileListChart
+from dlboard.plugins.charts.histogram import HistogramChart
 from dlboard.plugins.charts.image_series import ImageChart
 from dlboard.plugins.charts.line_chart import LineChart
 from dlboard.serve._pages._experiment import _chart_autogen as autogen
 from dlboard.serve._pages._experiment._column_catalog import ColumnCatalog
 
+HistogramChart.register(allow_override=True)
 LineChart.register(allow_override=True)
 ImageChart.register(allow_override=True)
 BarChart.register(allow_override=True)
@@ -379,6 +381,40 @@ def test_each_artifact_key_is_charted_as_the_catalog_says() -> None:
     }
 
     assert auto == suggested == {"ckpt": "files", "img": "image"}
+
+
+def test_each_histogram_key_gets_a_heatmap_in_a_panel_of_its_own_kind_whether_generated_or_suggested() -> (
+    None
+):
+    keys = ["grad/weights", "grad/bias"]
+    catalog = ColumnCatalog(metrics=("grad/norm",), histograms=tuple(keys))
+    heatmaps = [
+        ChartInstance[typing.Any, typing.Any](chart_type="histogram", parameters={"key": key}) for key in keys
+    ]
+
+    panels = {p.name: p for p in autogen.build_auto_panels(catalog, delimiter="/", mode="prefix")}
+    suggestions = autogen.build_suggestions(
+        autogen.UnchartedKeys(metrics=[], artifacts=[], histograms=keys),
+        catalog,
+        delimiter="/",
+        mode="prefix",
+    )
+
+    # Apart from the metric panel of the same group, as artifacts are.
+    assert set(panels) == {"grad", "grad (histograms)"}
+    assert panels["grad (histograms)"].charts == heatmaps
+    assert [(s.kind, s.panel_name, s.chart) for s in suggestions] == [
+        (ColumnKind.HISTOGRAM, "grad (histograms)", chart) for chart in heatmaps
+    ]
+
+
+def test_a_histogram_with_a_chart_is_not_suggested_again() -> None:
+    catalog = ColumnCatalog(histograms=("a", "b"))
+    charted = ChartInstance[object, object](chart_type="histogram", parameters={"key": "a"})
+
+    assert autogen.find_uncharted_keys([_panel("p", charted)], catalog) == autogen.UnchartedKeys(
+        metrics=[], artifacts=[], histograms=["b"]
+    )
 
 
 def _panel_of(name: str, n_charts: int) -> PanelInstance[typing.Any, typing.Any]:

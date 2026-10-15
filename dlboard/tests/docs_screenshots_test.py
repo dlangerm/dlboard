@@ -14,11 +14,12 @@ Run with `--screenshots=check` (compare) or `--screenshots=update` (overwrite `d
 from __future__ import annotations
 
 import io
+import math
 import re
 import time
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
 import numpy as np
 import pendulum
@@ -30,6 +31,7 @@ from playwright.sync_api import expect
 from dlboard import models
 from dlboard.client._rest_api import BasicDlboardAPI
 from dlboard.client.artifacts.figure import Figure
+from dlboard.client.histograms import ExponentialBinning
 from dlboard.conftest import ScreenshotMode
 from dlboard.serve import get_system_data_store
 from dlboard.serve._pages._experiment._chart_autogen import ARTIFACT_PANEL_SUFFIX
@@ -43,6 +45,8 @@ if TYPE_CHECKING:
 
     from dash import Dash
     from playwright.sync_api import Locator, Page
+
+    from dlboard.models import Histogram
 
 REPO_ROOT = Path(__file__).parents[2]
 IMAGES_DIR = REPO_ROOT / "docs" / "images"
@@ -68,6 +72,7 @@ _IMAGE_STEPS = (0, 20, 40, 59)
 _PROJECT_NAME = "image-classification"
 _EXPERIMENT_NAME = "lr-sweep"
 _CONFUSION_KEY = "samples/confusion_matrix"
+_GRAD_KEY = "grad_norm/layer1"
 _NOW = _T0.add(days=1)
 
 
@@ -89,6 +94,7 @@ class DocScreenshot(StrEnum):
     NOTES = "notes"
     RUN_COMPARE = "run-compare"
     TABLE_CHART = "table-chart"
+    HISTOGRAM_CHART = "histogram-chart"
 
     @property
     def path(self) -> Path:
@@ -120,6 +126,13 @@ class Demo(NamedTuple):
     baseline_experiment_id: int
     n_projects: int
     n_experiments: int
+
+
+def _gradient_norms(step: int, convergence_rate: float, rng: np.random.Generator) -> Histogram:
+    """A layer's per-sample gradient norms, binned like a real run's: they shrink and tighten as the loss converges."""
+    progress = 1 - math.exp(-step * convergence_rate)
+    norms = np.exp(rng.normal(-0.5 - 3.0 * progress, 0.9 - 0.4 * progress, 4000))
+    return ExponentialBinning().histogram(cast("list[float]", norms.tolist()))
 
 
 def _confusion_matrix(step: int, rng: np.random.Generator) -> MplFigure:
@@ -180,6 +193,8 @@ def demo(live_server_url: str, dlboard_app: Dash, tmp_path_factory: pytest.TempP
         train_loss = 0.15 + 2.0 * np.exp(-steps * config.convergence_rate) + rng.normal(0, 0.02, _N_STEPS)
         val_loss = 0.3 + 1.9 * np.exp(-steps * config.convergence_rate * 0.9) + rng.normal(0, 0.03, _N_STEPS)
         val_acc = 0.93 - 0.6 * np.exp(-steps * config.convergence_rate) + rng.normal(0, 0.01, _N_STEPS)
+        # Its own generator, so adding histograms leaves every other number (and so every other screenshot) as it was.
+        grad_rng = np.random.default_rng(index)
         api.log_metric_batch(
             [
                 models.LoggedMetrics(
@@ -191,6 +206,7 @@ def demo(live_server_url: str, dlboard_app: Dash, tmp_path_factory: pytest.TempP
                         "loss/val": float(val_loss[step]),
                         "acc/val": float(val_acc[step]),
                     },
+                    histograms={_GRAD_KEY: _gradient_norms(step, config.convergence_rate, grad_rng)},
                     timestamp_utc=_T0.add(hours=index, minutes=step),
                 )
                 for step in range(_N_STEPS)
@@ -307,6 +323,9 @@ def _stage(shot: DocScreenshot, page: Page, demo: Demo, dlboard_app: Dash) -> Pa
         case DocScreenshot.EXPERIMENT_CHARTS:
             _open_charted_experiment(page, demo)
             expect(page.locator(".dl-panel-body svg").first).to_be_visible()
+            page.mouse.move(
+                0, _VIEWPORT["height"] - 1
+            )  # off the last panel, so its hover controls aren't shown
             return page
         case DocScreenshot.IMAGE_SERIES:
             _open_charted_experiment(page, demo)
@@ -396,6 +415,27 @@ def _stage(shot: DocScreenshot, page: Page, demo: Demo, dlboard_app: Dash) -> Pa
             expect(panel.locator(".ag-center-cols-container .ag-row")).to_have_count(len(_SWEEP))
             expect(panel.locator(".ag-cell img")).to_have_count(len(_SWEEP))
             page.wait_for_function("[...document.images].every(i => i.complete && i.naturalWidth > 0)")
+            return panel
+        case DocScreenshot.HISTOGRAM_CHART:
+            # A view of its own holding just the heatmap, for the same reason as the table's.
+            store = get_system_data_store(dlboard_app)
+            owner = store.get_or_create_user(models.Principal.unverified("demo"))
+            heatmap = models.ChartInstance[Any, Any](
+                chart_type="histogram",
+                parameters={"key": _GRAD_KEY, "display": "heatmap", "height": 130, "width": 760},
+            )
+            view = store.create_view(
+                BasicExperimentPage,
+                models.NewPage[Any, Any](
+                    experiment_id=demo.experiment_id,
+                    owner_id=owner.id,
+                    name="Gradients",
+                    panels=[models.PanelInstance[Any, Any](name="Sweep", charts=[heatmap])],
+                ),
+            )
+            page.goto(f"{demo.url}/experiment/{demo.experiment_id}?view={view.id}")
+            panel = page.locator(".dl-panel-body", has=page.locator(".dl-histogram"))
+            expect(panel.locator(".heatmaplayer image")).to_have_count(len(_SWEEP))
             return panel
         case DocScreenshot.RUN_COMPARE:
             page.goto(f"{demo.url}/experiment/{demo.experiment_id}")

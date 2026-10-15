@@ -22,6 +22,22 @@ pulls that section's body into the GitHub release notes and publishes both distr
 * A table's metrics, hyperparameters and artifacts take **names or a prefix and `*`** (`eval/*`, or `*` for all).
   In the chart editor you can type a prefix instead of picking from the keys logged so far, and a prefix also
   matches keys logged later.
+* **Histograms.** `DLBoardLogger.log_histograms({"grad_norm/layer1": tensor}, step=...)` logs the distribution of
+  any array, tensor or list of numbers at a step -- per-layer gradient norms, weights, per-sample losses --
+  instead of averaging it into a scalar. The values are binned **in your training process, at the call**, so only
+  bucket edges and counts (at most `DLBOARD_MAX_HISTOGRAM_BUCKETS`, 1024 by default) are sent and a bad binning slows
+  down only the script that chose it. `ExponentialBinning` (the default) puts a fixed number of buckets per power of ten on a lattice that does
+  not depend on the data, so steps and runs line up bucket for bucket; `ExplicitBinning` takes the edges you
+  give. See [docs/client.md](docs/client.md).
+* A **histogram chart** shows them as a heatmap over steps, as percentile bands, or one step at a time with a
+  slider, a row per run. A chart reads about `DLBOARD_MAX_HISTOGRAM_STEPS` (256) steps per run however long it
+  trained, thinned in the database by a power-of-two stride, so it costs the same to open after a million steps as
+  after a thousand. Its colorscale, the share of values its bands hold, and how many rows and slider steps it draws
+  are chart settings, and its accent color and spacing are `DLBOARD_HISTOGRAM_*` settings
+  ([docs/configuration.md](docs/configuration.md)). Auto-generate and Suggest charts make a heatmap for each
+  histogram key. See [docs/plugins/charts.md](docs/plugins/charts.md).
+* A database migration (`0003`) adds the histogram table. A server older than this ignores the histograms a newer
+  client sends, so upgrade the server first.
 
 ### Changed
 

@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Literal
 from dlboard.models import Artifact, ChartInstance, ChartType, ColumnKind, PanelInstance
 from dlboard.plugins.charts.bar_chart import BarChart
 from dlboard.plugins.charts.file_list import FileListChart
+from dlboard.plugins.charts.histogram import HistogramChart
 from dlboard.plugins.charts.image_series import ImageChart
 from dlboard.plugins.charts.line_chart import LineChart
 
@@ -27,6 +28,8 @@ SplitMode = Literal["prefix", "suffix"]
 # Artifact-derived panels always get this suffix, so they can never collide with a same-named
 # metric panel even when the prefix/suffix grouping produces the same group name for both.
 ARTIFACT_PANEL_SUFFIX = " (artifacts)"
+HISTOGRAM_PANEL_SUFFIX = " (histograms)"
+"""The same, for histograms."""
 
 # Keys the delimiter doesn't actually split (no delimiter configured, or the key doesn't contain
 # it) all land together in this one shared panel, rather than each getting its own single-chart
@@ -73,13 +76,19 @@ def split_group_name(key: str, delimiter: str, mode: SplitMode) -> str:
 
 def panel_name_for_group(group: str, kind: ColumnKind, *, granularity: str | None = None) -> str:
     """
-    The target panel name for a group, disambiguated by kind so metric/artifact panels never collide.
+    The target panel name for a group, disambiguated by kind so metric/artifact/histogram panels never collide.
 
     `granularity` (a lightning step/epoch tag from `lightning_granularity`) further splits the
     group's panel in two, so step-logged and epoch-logged variants of the same metric land in
     adjacent but distinct panels instead of competing for one.
     """
-    name = f"{group}{ARTIFACT_PANEL_SUFFIX}" if kind == ColumnKind.ARTIFACT else group
+    match kind:
+        case ColumnKind.ARTIFACT:
+            name = f"{group}{ARTIFACT_PANEL_SUFFIX}"
+        case ColumnKind.HISTOGRAM:
+            name = f"{group}{HISTOGRAM_PANEL_SUFFIX}"
+        case ColumnKind.METRIC | ColumnKind.HPARAM | ColumnKind.GROUPING:
+            name = group
     return f"{name} ({granularity})" if granularity else name
 
 
@@ -96,6 +105,11 @@ def default_chart_for_metric(
     if single_value:
         return ChartInstance(chart_type=BarChart.name, parameters={"column": column, "x_axis": "run_id"})
     return ChartInstance(chart_type=LineChart.name, parameters={"column": column, "x_axis": "step"})
+
+
+def default_chart_for_histogram(key: str) -> ChartInstance[typing.Any, typing.Any]:
+    """The default chart for a histogram key: its heatmap, the view that shows the whole distribution over steps."""
+    return ChartInstance(chart_type=HistogramChart.name, parameters={"key": key})
 
 
 ARTIFACT_CHART_TYPES: typing.Final[tuple[type[ChartType[typing.Any, typing.Any, typing.Any]], ...]] = (
@@ -185,6 +199,11 @@ def group_keys_into_panels(
         panels.setdefault(panel_name_for_group(group, ColumnKind.ARTIFACT), []).append(
             (artifact.label, ColumnKind.ARTIFACT)
         )
+    for key in catalog.histograms:
+        group = split_group_name(key, delimiter, mode)
+        panels.setdefault(panel_name_for_group(group, ColumnKind.HISTOGRAM), []).append(
+            (key, ColumnKind.HISTOGRAM)
+        )
     return panels
 
 
@@ -204,15 +223,23 @@ def build_auto_panels(
     artifact_charts = {
         a.label: a.chart for a in default_artifact_charts(catalog.artifact_chart_types, catalog)
     }
+
+    def chart_for(key: str, kind: ColumnKind) -> ChartInstance[typing.Any, typing.Any]:
+        match kind:
+            case ColumnKind.METRIC:
+                return default_chart_for_metric(key, single_value=key in catalog.single_value_metrics)
+            case ColumnKind.ARTIFACT:
+                return artifact_charts[key]
+            case ColumnKind.HISTOGRAM:
+                return default_chart_for_histogram(key)
+            case ColumnKind.HPARAM | ColumnKind.GROUPING:
+                msg = f"no chart is generated for a {kind} key"
+                raise ValueError(msg)
+
     return [
         PanelInstance(
             name=panel_name,
-            charts=[
-                default_chart_for_metric(key, single_value=key in catalog.single_value_metrics)
-                if kind == ColumnKind.METRIC
-                else artifact_charts[key]
-                for key, kind in keys
-            ],
+            charts=[chart_for(key, kind) for key, kind in keys],
         )
         for panel_name, keys in group_keys_into_panels(
             catalog, delimiter=delimiter, mode=mode, lightning=lightning
@@ -221,10 +248,11 @@ def build_auto_panels(
 
 
 class UnchartedKeys(typing.NamedTuple):
-    """Metric columns and artifact keys not yet referenced by any chart on the page."""
+    """Metric columns, artifact keys and histogram keys not yet referenced by any chart on the page."""
 
     metrics: list[str]
     artifacts: list[str]
+    histograms: list[str] = []  # noqa: RUF012 -- a NamedTuple field default; never mutated
 
 
 def find_uncharted_keys(
@@ -234,12 +262,14 @@ def find_uncharted_keys(
     charted_metrics: set[str] = set()
     charted_artifacts: set[str] = set()
     charted_prefixes: set[str] = set()
+    charted_histograms: set[str] = set()
     for panel in panels:
         hinted_columns = panel.hint_required_columns()
         if hinted_columns is not None:
             charted_metrics |= hinted_columns
         charted_artifacts |= {k for k in panel.hint_required_artifact_keys() if k is not None}
         charted_prefixes |= panel.hint_required_artifact_key_prefixes()
+        charted_histograms |= panel.hint_required_histogram_keys()
 
     return UnchartedKeys(
         metrics=[c for c in catalog.metrics if c not in charted_metrics],
@@ -248,6 +278,7 @@ def find_uncharted_keys(
             for k in catalog.artifact_chart_types
             if k not in charted_artifacts and not k.startswith(tuple(charted_prefixes))
         ],
+        histograms=[k for k in catalog.histograms if k not in charted_histograms],
     )
 
 
@@ -327,5 +358,14 @@ def build_suggestions(
             chart=artifact.chart,
         )
         for artifact in default_artifact_charts(uncharted.artifacts, catalog)
+    )
+    suggestions.extend(
+        Suggestion(
+            key=key,
+            kind=ColumnKind.HISTOGRAM,
+            panel_name=panel_name_for_group(split_group_name(key, delimiter, mode), ColumnKind.HISTOGRAM),
+            chart=default_chart_for_histogram(key),
+        )
+        for key in uncharted.histograms
     )
     return suggestions

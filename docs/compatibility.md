@@ -20,8 +20,9 @@ Breaking any of these needs a migration path and a deprecation window of at leas
     columns), not how it's being browsed: which panels are open and which tab is shown live in the page's
     address (`?open=`, `?tab=`). Views saved before that change may still hold `open_panel` and `active_tab`
     keys; they still load, and those keys are ignored.
-  - Chart type names (`line`, `bar`, `image`, `table`).
-  - The *values* of a table chart's `mode` (`runs`, `pivot`, `artifacts`), as saved in a chart's parameters.
+  - Chart type names (`line`, `bar`, `image`, `table`, `histogram`).
+  - The *values* of a table chart's `mode` (`runs`, `pivot`, `artifacts`), and of a histogram chart's `display`
+    (`heatmap`, `bands`, `step`), as saved in a chart's parameters.
   - The *values* of persisted enums (roles, scopes, audit actions, entity types, experiment sources, run
     statuses).
   - Artifact refs (`file:///...`, `s3://...`).
@@ -45,6 +46,10 @@ change, which this policy says won't happen within `0.x` without a deprecation w
 `dlboard` requires a `dlboard-client` of its own minor version (`~=0.4.0`, say, so patch releases mix freely), so
 any install that has both stays matched. A client in a training environment can still be any version with the
 same API major, but fixes and new features land in both, so keep them close.
+
+A client that logs histograms against a server that predates them still works: the server ignores the
+`histograms` field of a metrics batch (the REST API only ever adds optional fields), so the histograms are
+dropped and everything else is stored. Upgrade the server first to keep them.
 
 An older server can't open a database a newer version has upgraded. Upgrade servers before you
 upgrade clients, and never point an older server at a database a newer one has touched.

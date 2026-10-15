@@ -8,6 +8,7 @@ exercises, all through ordinary Lightning/dlboard calls:
 - nested hyperparameters: pydantic models, a pydantic dataclass, a stdlib dataclass and plain args,
   flattened by the logger to `model/base_channels`, `optim/schedule/kind`, ...
 - 25 epochs with step- and epoch-level metrics, per-class IoU, and ~dozens of per-parameter gradient norms
+- a histogram of every weight tensor's gradient, so how they spread over training shows without averaging
 - Lightning's `LearningRateMonitor`, `ThroughputMonitor` and `DeviceStatsMonitor`
 - `ModelCheckpoint` with `log_model="all"`, so every checkpoint is uploaded as it is saved
 - per-epoch prediction previews of segmentation masks and bounding boxes, plus a matplotlib figure
@@ -382,6 +383,16 @@ class ShapesSegmenter(pl.LightningModule):
         # One `grad_2.0_norm/<param name>` key per parameter: a lot of series, grouped by their prefix.
         if self.global_step % GRAD_NORM_EVERY_N_STEPS == 0:
             self.log_dict(grad_norm(self, norm_type=2))
+            # The gradients themselves, not a norm of them: binned right here (one pass over each tensor), and only
+            # the buckets are sent. `rank_zero_only`, so the other ranks of a multi-GPU run skip it entirely.
+            cast("DLBoardLogger", self.trainer.logger).log_histograms(
+                {
+                    f"grad/{name}": param.grad
+                    for name, param in self.named_parameters()
+                    if param.grad is not None and param.ndim > 1
+                },
+                step=self.global_step,
+            )
 
     @override
     def on_validation_epoch_start(self) -> None:

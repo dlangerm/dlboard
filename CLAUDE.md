@@ -131,7 +131,7 @@ just to construct one.
 `dlboard/plugins/__init__.py` defines the bundles used for a local deployment:
 - `LOCAL_STORAGE` = `[sqlite, filesystem, artifact_purge_worker]` — the metadata DB, artifact blob storage, and the
   worker that deletes purged artifacts' blobs
-- `BUILTIN_CHARTS` = image_series, file_list, line_chart, bar_chart, table_chart
+- `BUILTIN_CHARTS` = image_series, file_list, line_chart, bar_chart, table_chart, histogram
 - `LOCAL_DEPLOYMENT` = all of the above, used by `dlboard serve local`
 - `POSTGRES_STORAGE` = `[postgres, filesystem, artifact_purge_worker]` — for a shared deployment, composed
   into a `dlboard serve custom --plugins` list; configured by `DLBOARD_POSTGRES_*` env vars (`PostgresSettings`)

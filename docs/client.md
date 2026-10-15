@@ -93,7 +93,8 @@ of any array, tensor or list of numbers at a step -- per-layer gradient norms, w
 losses -- instead of averaging it into one scalar. The values are binned **in your training process, at the call**,
 in one pass, and only the bucket edges and counts are queued and sent: the server never sees (or computes
 over) the raw values, so a huge tensor or a fine binning slows down only the script that chose it. A histogram
-has at most 1024 buckets; a binning that needs more raises at the call rather than being rejected later.
+has at most 1024 buckets (`DLBOARD_MAX_HISTOGRAM_BUCKETS`, set on the server and, for a finer binning, in your
+training environment too); a binning that needs more raises at the call rather than being rejected later.
 
 How values are bucketed is the `binning=` argument:
 
