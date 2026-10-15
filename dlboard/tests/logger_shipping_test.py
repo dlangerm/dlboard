@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import atexit
 import time
 from typing import TYPE_CHECKING, Literal
 
@@ -29,7 +30,7 @@ from dlboard.models import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
     from pathlib import Path
 
     from dlboard.conftest import BackendServer
@@ -39,12 +40,44 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.filterwarnings("ignore:dlboard's logging worker processes took")
 
 
+@pytest.fixture(autouse=True)
+def _no_logger_left_for_interpreter_exit(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """
+    Fail a test that leaves its logger's `atexit` flush registered.
+
+    That flush runs after the whole session, when this test's server is long gone: it can only
+    fail then, with a connection error nobody is positioned to attribute to a test.
+    """
+    armed: set[Callable[[], None]] = set()
+    register, unregister = atexit.register, atexit.unregister
+
+    def track(func: Callable[[], None]) -> Callable[[], None]:
+        if isinstance(getattr(func, "__self__", None), DLBoardLogger):
+            armed.add(func)
+        return register(func)
+
+    def untrack(func: Callable[[], None]) -> None:
+        armed.discard(func)
+        unregister(func)
+
+    monkeypatch.setattr(atexit, "register", track)
+    monkeypatch.setattr(atexit, "unregister", untrack)
+    yield
+    assert not armed, "a DLBoardLogger was never `_abandon`ed, so it would flush to a dead server at exit"
+
+
+def _abandon(logger: DLBoardLogger) -> None:
+    """End a test's logger without flushing: stop its shippers and its exit-time flush."""
+    atexit.unregister(logger._finalize_at_exit)
+    for shipper in (logger._metrics, logger._artifacts):
+        shipper.process.kill()
+
+
 @pytest.fixture
 def logger(backend_server: BackendServer) -> Iterator[DLBoardLogger]:
     logger = DLBoardLogger.from_names("shipping", server_url=backend_server.url)
     yield logger
-    for shipper in (logger._metrics, logger._artifacts):
-        shipper.process.kill()
+    _abandon(logger)
 
 
 def _image(step: int) -> image.Image:
@@ -85,8 +118,7 @@ def test_a_second_logger_given_the_run_id_logs_into_the_same_run(
         second.log_metrics({"loss": 1.0}, step=0)
         second.finalize("success")
     finally:
-        for shipper in (second._metrics, second._artifacts):
-            shipper.process.kill()
+        _abandon(second)
 
     assert second.run_id == logger.run_id
     assert [run.id for run in backend_server.store.get_runs(logger._experiment_id)] == [logger.run_id]
@@ -152,8 +184,7 @@ def test_log_model_uploads_the_checkpoints_a_real_fit_saves(
     try:
         trainer.fit(BoringModel())
     finally:
-        for shipper in (logger._metrics, logger._artifacts):
-            shipper.process.kill()
+        _abandon(logger)
 
     assert not logger._unflushed, "the kept checkpoints were queued after the last flush"
 

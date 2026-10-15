@@ -33,6 +33,7 @@ from typing_extensions import override
 
 from dlboard import models
 from dlboard._batching import BatchParams, ship_batches
+from dlboard._logging import configure_client_logging
 from dlboard._mp_context import SPAWN_CONTEXT
 from dlboard.client._rest_api import DEFAULT_SERVER_URL, BasicDlboardAPI
 from dlboard.client.artifacts.figure import Figure
@@ -211,6 +212,7 @@ def _ship_until_parent_says_stop(
     takes these daemons down.
     """
     signal.signal(signal.SIGINT, signal.SIG_IGN)
+    configure_client_logging()
     ship_batches(q, ship, params, is_permanent=is_permanent, is_oversized=is_oversized)
 
 
@@ -366,6 +368,7 @@ class DLBoardLogger(Logger):
                 self._run_id = run_id
             return
         settings = settings or DLBoardLoggerSettings()
+        configure_client_logging()
         self._api = BasicDlboardAPI(base_url=server_url)
         # Up front, before any worker starts: the workers treat every 4xx as "drop this batch" (see
         # `is_rejection`), so bad credentials would otherwise only show up as silently lost metrics.

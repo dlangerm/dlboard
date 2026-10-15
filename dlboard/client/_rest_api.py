@@ -123,18 +123,14 @@ class BasicDlboardAPI:
         self._timeout = (timeouts.connect_timeout_s, timeouts.read_timeout_s)
 
     def _post(self, path: str, body: BaseModel, return_model: type[R]) -> R:
-        try:
-            res = self._session.post(
-                f"{self.base_url}/{path}",
-                json=body.model_dump(mode="json"),
-                headers=self._headers,
-                timeout=self._timeout,
-            )
-            res.raise_for_status()
-            return return_model.model_validate(res.json())
-        except Exception:
-            _log.exception("Failed to post %s", body)
-            raise
+        res = self._session.post(
+            f"{self.base_url}/{path}",
+            json=body.model_dump(mode="json"),
+            headers=self._headers,
+            timeout=self._timeout,
+        )
+        res.raise_for_status()
+        return return_model.model_validate(res.json())
 
     def whoami(self) -> Identity:
         """
