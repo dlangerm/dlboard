@@ -43,8 +43,15 @@ def test_a_body_carries_the_fingerprint_of_the_data_it_was_drawn_from() -> None:
     assert carried["children"] == panel_data.chart_data_fingerprint(_PANEL.charts[0], _BEFORE)
 
 
+def _body_ids() -> list[chart_view.ChartID]:
+    """The ids the browser reports back for the two charts' bodies -- JSON a callback reads as `ChartID`s."""
+    return typing.cast(
+        "list[chart_view.ChartID]", [chart_view.CHART_BODY.of("p", 0), chart_view.CHART_BODY.of("p", 1)]
+    )
+
+
 def test_only_a_chart_whose_data_moved_gets_a_new_body_and_the_rest_are_left_alone() -> None:
-    chart_ids = [chart_view.CHART_BODY.of("p", 0), chart_view.CHART_BODY.of("p", 1)]
+    chart_ids = _body_ids()
 
     contents, ok = _refresh_chart_bodies(
         chart_ids, {"p": _PANEL}, {"p": _AFTER}, _shown(_BEFORE), page_size=12
@@ -57,7 +64,7 @@ def test_only_a_chart_whose_data_moved_gets_a_new_body_and_the_rest_are_left_alo
 
 
 def test_a_chart_just_drawn_from_the_current_data_is_not_redrawn_by_the_next_poll() -> None:
-    chart_ids = [chart_view.CHART_BODY.of("p", 0), chart_view.CHART_BODY.of("p", 1)]
+    chart_ids = _body_ids()
 
     contents, _ok = _refresh_chart_bodies(
         chart_ids, {"p": _PANEL}, {"p": _AFTER}, _shown(_AFTER), page_size=12

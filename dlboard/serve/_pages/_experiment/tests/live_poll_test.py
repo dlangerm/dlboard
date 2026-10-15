@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from dlboard.models._view import ChartInstance, PanelInstance
 from dlboard.plugins.charts.line_chart import LineChart
@@ -29,7 +29,8 @@ def test_a_tick_fetches_only_the_charts_on_screen(
     page = store.get_or_create_page(page_model.BasicExperimentPage, experiment_id=experiment_id)
     store.update_page(page.model_copy(update={"panels": [PanelInstance[Any, Any](name="p", charts=charts)]}))
     page = repo.load_page(store, repo.PageRef(experiment_id, None))
-    on_screen = [chart_view.CHART_CONTENT.of("p", i) for i in range(6, 9)]
+    # The ids the browser reports back for the charts it shows -- JSON a callback reads as `ChartID`s.
+    on_screen = cast("list[chart_view.ChartID]", [chart_view.CHART_CONTENT.of("p", i) for i in range(6, 9)])
     fetched: list[frozenset[str] | None] = []
     fetch_metrics = store.fetch_metrics
 
