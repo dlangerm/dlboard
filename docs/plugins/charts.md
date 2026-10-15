@@ -13,16 +13,28 @@ and `Top-k`, read from the `tag` and `score` tags the logger records. Set `key_p
 `checkpoints/`) instead of `key` and one chart lists every key under it, so a run's hundreds of
 checkpoints (one key apiece) are one list, and Auto-generate makes exactly that.
 
-`table_chart.py` is a data table, in one of three `mode`s. **runs** (the default) is a row per run: its
-hyperparameters beside the latest value of each metric -- each metric's own latest, as in the Runs table, not
-whatever was logged at the run's last step -- and, for each key in `artifacts`, the run's latest artifact
-under it with its tags. **pivot** compares one metric across runs, a row per `pivot_on` value (`step`, say)
-and a column per run. **artifacts** is a row per logged artifact under `artifact_key` (every key under it
-with `artifact_key_is_prefix`, so keys logged later appear), with each tag a column that sorts and filters as
-the number or text it is: the way to find a sample among hundreds. An image is a thumbnail linking to the
-full one; any other file is a download link. Runs are named and colored as in the charts and the Runs
+`table_chart.py` is a data table. Two settings shape it: what a **row** is (`rows`), and which **columns** it
+shows (`show_metrics`, `show_hparams`, `show_artifacts`).
+
+- `rows: run` (the default) is a row per run: its hyperparameters beside the latest value of each metric --
+  each metric's own latest, as in the Runs table, not whatever was logged at the run's last step -- and its
+  latest artifact under each key shown, with the tags. `aggregate` swaps "latest" for the first, minimum,
+  maximum or mean of a metric.
+- `rows: field` is a row for each value of a metric, `row_field` (`step`, `epoch`, ...). By default each run
+  has its own rows; with `spread_by_run` the runs sit side by side, a column group each, which is how to
+  compare a metric across runs. Anything a run logged between two values of the row field belongs to the
+  earlier, so `rows: field`, `row_field: epoch`, `spread_by_run` and `show_artifacts: [samples/*]` is a row per
+  epoch with each run's latest image of that epoch.
+- `rows: artifact` is a row per logged artifact, beside what its run logged at that step, with each tag a
+  column that sorts and filters as the number or text it is: the way to find a sample among hundreds.
+
+Each `show_*` list takes names, or a prefix and a `*` for everything under it: `eval/*` is a column for every
+key starting `eval/`, including ones logged later, and `*` alone is all of them. The metrics and hyperparameters
+start at `*`; an empty list shows none, so a table of only artifacts is one. An image is a thumbnail linking to
+the full one; any other file is a download link. Runs are named and colored as in the charts and the Runs
 table, every column filters in place, and a table keeps its sort, filters and page when a live update
-redraws it.
+redraws it. A table saved with the earlier `mode` settings (`runs`, `pivot`, `artifacts`) opens as the rows
+and columns that show the same table.
 
 The built-in line charts, and the image series that steps through logged images:
 

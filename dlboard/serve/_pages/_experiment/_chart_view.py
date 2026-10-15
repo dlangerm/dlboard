@@ -202,7 +202,8 @@ def render_chart_item(
         right=4,
         bg="var(--mantine-color-body)",
         bdrs="sm",
-        style={"zIndex": 1},
+        # Above a table's header, which the grid stacks over anything at 1 -- or Edit can't be clicked.
+        style={"zIndex": 10},
     )
     # The badge (when present) must be a *sibling* of `hover_controls`, not nested inside it --
     # `dl-chart-controls`'s opacity:0-until-hover applies to its whole subtree, and this badge

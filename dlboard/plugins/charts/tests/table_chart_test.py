@@ -1,4 +1,4 @@
-"""Tests for the table chart type: run-mode rows, pivot mode, and its column hints."""
+"""Tests for what the table chart renders: a row per run, per value of a metric, or per artifact."""
 
 from __future__ import annotations
 
@@ -6,7 +6,6 @@ from typing import Any
 
 import pandas as pd
 import pytest
-from pydantic import ValidationError
 
 from dlboard.conftest import props as _props
 from dlboard.models import (
@@ -17,9 +16,18 @@ from dlboard.models import (
     artifact_fname_column,
     artifact_tags_column,
 )
-from dlboard.plugins.charts.table_chart import TableChart, TableChartSettings, TableMode
+from dlboard.plugins.charts._table_settings import Aggregate, TableChartSettings, TableRows
+from dlboard.plugins.charts.table_chart import TableChart
 from dlboard.serve import series_swatch_class
 from dlboard.serve._grid import DEFAULT_TABLE_FONT_SIZE
+
+GAP = float("nan")
+LR = f"{HPARAM_COLUMN_PREFIX}lr"
+BATCH_SIZE = f"{HPARAM_COLUMN_PREFIX}batch_size"
+
+
+def _render(settings: TableChartSettings, dataframe: pd.DataFrame) -> dict[str, Any]:
+    return _props(TableChart.render(settings, dataframe))
 
 
 def _rows_by_run(component: object) -> dict[int, dict[str, Any]]:
@@ -34,292 +42,12 @@ def _leaf_columns(component: object) -> list[dict[str, Any]]:
 def _wide_df() -> pd.DataFrame:
     """Two runs, two steps each, with a metric and a broadcast hparam column."""
     return pd.DataFrame(
-        {
-            "run_id": [1, 1, 2, 2],
-            "step": [0, 1, 0, 1],
-            "loss": [0.5, 0.4, 0.9, 0.7],
-            f"{HPARAM_COLUMN_PREFIX}lr": [0.1, 0.1, 0.2, 0.2],
-        }
+        {"run_id": [1, 1, 2, 2], "step": [0, 1, 0, 1], "loss": [0.5, 0.4, 0.9, 0.7], LR: [0.1, 0.1, 0.2, 0.2]}
     )
-
-
-# ---- hint_required_columns / hint_required_hparams / hint_required_artifact_keys ----
-
-
-@pytest.mark.parametrize(
-    ("settings", "expected"),
-    [
-        pytest.param(TableChartSettings(), None, id="unbounded-by-default"),
-        pytest.param(
-            TableChartSettings(metrics=["loss", "acc"]), {"loss", "acc", "step"}, id="metrics-filter"
-        ),
-        pytest.param(
-            TableChartSettings(pivot_on="step", pivot_metric="loss"),
-            {"step", "loss"},
-            id="pivot-wants-its-columns",
-        ),
-        # Metrics and hparams are fetched independently -- curating one but leaving the other at its
-        # default shouldn't force a full "every metric in the experiment" fetch for a table that isn't
-        # even set up to show any.
-        pytest.param(TableChartSettings(hparams=["lr"]), set(), id="only-hparams-curated"),
-    ],
-)
-def test_hint_required_columns_follows_the_settings(
-    settings: TableChartSettings, expected: set[str] | None
-) -> None:
-    assert TableChart.hint_required_columns(settings) == expected
-
-
-@pytest.mark.parametrize(
-    ("settings", "expected"),
-    [
-        pytest.param(TableChartSettings(), None, id="unbounded-by-default"),
-        pytest.param(
-            TableChartSettings(hparams=["lr", "batch_size"]), {"lr", "batch_size"}, id="hparams-filter"
-        ),
-        pytest.param(
-            TableChartSettings(pivot_on="step", pivot_metric="loss"), set(), id="empty-in-pivot-mode"
-        ),
-    ],
-)
-def test_hint_required_hparams_follows_the_settings(
-    settings: TableChartSettings, expected: set[str] | None
-) -> None:
-    assert TableChart.hint_required_hparams(settings) == expected
-
-
-# ---- render: run mode ----
-
-
-def test_render_empty_dataframe_shows_a_message() -> None:
-    table = TableChart.render(TableChartSettings(), pd.DataFrame())
-    rows = _props(table)["rowData"]
-    assert len(rows) == 1
-    assert "No data" in rows[0]["message"]
-
-
-def test_render_run_mode_one_row_per_run_at_last_step() -> None:
-    table = TableChart.render(TableChartSettings(), _wide_df())
-    rows = _rows_by_run(table)
-
-    assert set(rows) == {1, 2}
-    assert rows[1]["loss"] == pytest.approx(0.4)  # last step (1) for run 1
-    assert rows[2]["loss"] == pytest.approx(0.7)  # last step (1) for run 2
-
-
-def test_render_run_mode_shows_each_metrics_own_latest_value() -> None:
-    """A metric logged less often than the last step (a per-epoch one) is not blank for it."""
-    df = pd.DataFrame(
-        {"run_id": [1, 1, 1], "step": [0, 1, 2], "loss": [0.5, 0.4, 0.3], "val_acc": [0.6, None, None]}
-    )
-    rows = _rows_by_run(TableChart.render(TableChartSettings(), df))
-
-    assert rows[1]["loss"] == pytest.approx(0.3)
-    assert rows[1]["val_acc"] == pytest.approx(0.6)
-
-
-def test_render_run_mode_does_not_show_bookkeeping_columns() -> None:
-    table = TableChart.render(TableChartSettings(), _wide_df().assign(timestamp_utc=pd.Timestamp(0)))
-    assert not {"step", "timestamp_utc"} & _rows_by_run(table)[1].keys()
-
-
-def test_render_run_mode_titles_hparam_columns_without_the_prefix() -> None:
-    table = TableChart.render(TableChartSettings(), _wide_df())
-    headers = {column["field"]: column["headerName"] for column in _leaf_columns(table)}
-
-    assert headers[f"{HPARAM_COLUMN_PREFIX}lr"] == "lr"
-    assert _rows_by_run(table)[1][f"{HPARAM_COLUMN_PREFIX}lr"] == pytest.approx(0.1)
-
-
-def test_render_run_mode_keeps_an_hparam_and_a_metric_of_the_same_name_apart() -> None:
-    df = _wide_df().assign(lr=[0.01, 0.02, 0.03, 0.04])
-    rows = _rows_by_run(TableChart.render(TableChartSettings(), df))
-
-    assert rows[1]["lr"] == pytest.approx(0.02)
-    assert rows[1][f"{HPARAM_COLUMN_PREFIX}lr"] == pytest.approx(0.1)
-
-
-def test_render_never_reads_a_dotted_metric_name_as_a_nested_field() -> None:
-    props = _props(TableChart.render(TableChartSettings(), _wide_df().rename(columns={"loss": "val.loss"})))
-    assert props["dashGridOptions"]["suppressFieldDotNotation"] is True
-
-
-def test_render_run_mode_metrics_filter_narrows_columns() -> None:
-    df = _wide_df().assign(acc=[0.6, 0.7, 0.8, 0.9])
-    table = TableChart.render(TableChartSettings(metrics=["acc"]), df)
-    rows = _rows_by_run(table)
-
-    assert "loss" not in rows[1]
-    assert rows[1]["acc"] == pytest.approx(0.7)
-
-
-def test_render_run_mode_hparams_filter_narrows_columns() -> None:
-    df = _wide_df()
-    df[f"{HPARAM_COLUMN_PREFIX}batch_size"] = [32, 32, 64, 64]
-    table = TableChart.render(TableChartSettings(hparams=["lr"]), df)
-    rows = _rows_by_run(table)
-
-    assert f"{HPARAM_COLUMN_PREFIX}lr" in rows[1]
-    assert f"{HPARAM_COLUMN_PREFIX}batch_size" not in rows[1]
-
-
-def test_render_run_mode_with_only_hparams_curated_shows_no_metrics() -> None:
-    """The panel's dataframe carries its sibling charts' metrics too; "hparams only" must not show them."""
-    rows = _rows_by_run(TableChart.render(TableChartSettings(hparams=["lr"]), _wide_df()))
-    assert "loss" not in rows[1]
-
-
-def test_render_run_mode_excludes_artifact_columns() -> None:
-    """An artifact's ref (a storage URL) and tags (a dict) aren't metric values -- neither is a table column."""
-    df = _wide_df()
-    df[artifact_column("img")] = ["ref://1-0", "ref://1-1", "ref://2-0", "ref://2-1"]
-    df[artifact_tags_column("img")] = pd.Series(
-        [{"split": "train"}, {"split": "train"}, None, None], dtype=object
-    )
-    table = TableChart.render(TableChartSettings(), df)
-    rows = _rows_by_run(table)
-
-    assert not {artifact_column("img"), artifact_tags_column("img")} & rows[1].keys()
-
-
-def test_render_run_mode_names_each_run_and_colors_it_as_the_charts_do() -> None:
-    df = _wide_df()
-    df[RUN_NAME_COLUMN] = ["one", "one", None, None]
-    table = TableChart.render(TableChartSettings(), df)
-    rows = _rows_by_run(table)
-
-    assert rows[1][RUN_NAME_COLUMN] == "one"
-    assert rows[2][RUN_NAME_COLUMN] == "Run 2"  # unnamed: the id, as everywhere else
-    assert rows[2]["_swatch"] == series_swatch_class(2)
-    run_column = _leaf_columns(table)[0]
-    assert run_column["field"] == RUN_NAME_COLUMN
-    assert run_column["pinned"] == "left"
-    assert [column["field"] for column in _leaf_columns(table)].count(RUN_NAME_COLUMN) == 1
-
-
-def test_render_run_mode_groups_hparams_and_latest_metrics() -> None:
-    groups: list[dict[str, Any]] = _props(TableChart.render(TableChartSettings(), _wide_df()))["columnDefs"][
-        1:
-    ]
-    assert [group["headerName"] for group in groups] == ["Hyperparameters", "Metrics (latest)"]
-
-
-def test_render_defaults_to_the_shared_smaller_font_size() -> None:
-    table = TableChart.render(TableChartSettings(), _wide_df())
-    assert _props(table)["style"]["--ag-font-size"] == DEFAULT_TABLE_FONT_SIZE
-
-
-def test_render_font_size_override_applies_in_pixels() -> None:
-    table = TableChart.render(TableChartSettings(font_size=20), _wide_df())
-    assert _props(table)["style"]["--ag-font-size"] == "20px"
-
-
-def test_render_run_mode_without_step_column_dedupes_by_run() -> None:
-    df = pd.DataFrame({"run_id": [1, 1], f"{HPARAM_COLUMN_PREFIX}lr": [0.1, 0.1]})
-    table = TableChart.render(TableChartSettings(), df)
-    rows = _props(table)["rowData"]
-    assert len(rows) == 1
-
-
-# ---- render: pivot mode ----
-
-
-def test_render_pivot_mode_one_row_per_pivot_value_one_column_per_run() -> None:
-    table = TableChart.render(TableChartSettings(pivot_on="step", pivot_metric="loss"), _wide_df())
-    props = _props(table)
-
-    assert {c["field"] for c in props["columnDefs"]} == {"step", "1", "2"}
-    row_by_step = {row["step"]: row for row in props["rowData"]}
-    assert row_by_step[0]["1"] == pytest.approx(0.5)
-    assert row_by_step[1]["2"] == pytest.approx(0.7)
-
-
-def test_a_table_saved_with_pivot_on_before_modes_existed_is_a_pivot_table() -> None:
-    legacy = TableChartSettings.model_validate({"pivot_on": "step", "pivot_metric": "loss"})
-    assert legacy.mode is TableMode.PIVOT
-
-
-@pytest.mark.parametrize(
-    "settings",
-    [
-        pytest.param({"mode": "pivot"}, id="neither"),
-        pytest.param({"mode": "pivot", "pivot_on": "step"}, id="no-metric"),
-        pytest.param({"pivot_on": "step"}, id="legacy-no-metric"),
-    ],
-)
-def test_a_pivot_table_must_say_what_it_pivots(settings: dict[str, str]) -> None:
-    with pytest.raises(ValidationError, match="pivot_metric"):
-        TableChartSettings.model_validate(settings)
-
-
-def test_pivot_settings_are_ignored_in_runs_mode() -> None:
-    settings = TableChartSettings(mode=TableMode.RUNS, pivot_on="step", pivot_metric="loss")
-    assert {row["run_id"] for row in _props(TableChart.render(settings, _wide_df()))["rowData"]} == {1, 2}
-
-
-def test_render_pivot_mode_missing_columns_shows_a_message() -> None:
-    table = TableChart.render(TableChartSettings(pivot_on="epoch", pivot_metric="loss"), _wide_df())
-    rows = _props(table)["rowData"]
-    assert len(rows) == 1
-    assert "message" in rows[0]
-
-
-# ---- natural_width ----
-
-
-def test_natural_width_defaults_to_a_flat_value() -> None:
-    assert TableChart.natural_width(TableChartSettings()) == 700
-
-
-def test_natural_width_override() -> None:
-    assert TableChart.natural_width(TableChartSettings(width=333)) == 333
-
-
-# ---- run identity, and the state a redraw keeps ----
-
-
-def test_pivot_mode_headers_each_run_by_name_and_color() -> None:
-    df = _wide_df()
-    df[RUN_NAME_COLUMN] = ["one", "one", "two", "two"]
-    table = TableChart.render(TableChartSettings(pivot_on="step", pivot_metric="loss"), df)
-    columns = {column["field"]: column for column in _props(table)["columnDefs"]}
-
-    assert columns["1"]["headerName"] == "one"
-    assert columns["2"]["headerClass"] == series_swatch_class(2)
-
-
-def test_the_grid_is_named_by_its_chart_so_it_keeps_its_state_across_a_redraw() -> None:
-    table = TableChart.render_in(TableChartSettings(), _wide_df(), RenderContext(chart_id="abc"))
-    props = _props(table)
-
-    assert props["id"] == {"type": "dl-table-chart", "chart": "abc"}
-    assert props["persisted_props"] == ["columnState", "filterModel"]
-    assert {row["_row_id"] for row in props["rowData"]} == {"1", "2"}
-
-
-@pytest.mark.parametrize(
-    ("other", "same_state"),
-    [
-        pytest.param(TableChartSettings(page_size=50), True, id="same-columns"),
-        pytest.param(TableChartSettings(metrics=["acc"]), False, id="other-columns"),
-    ],
-)
-def test_a_grid_of_other_columns_starts_without_the_old_ones_state(
-    other: TableChartSettings, *, same_state: bool
-) -> None:
-    df = _wide_df().assign(acc=[0.6, 0.7, 0.8, 0.9])
-    before = _props(TableChart.render(TableChartSettings(), df))["persistence"]
-    after = _props(TableChart.render(other, df))["persistence"]
-
-    assert (before == after) is same_state
-
-
-# ---- artifacts ----
 
 
 def _artifacts_df() -> pd.DataFrame:
     """Two runs' artifacts: an image per run (run 1 logging two) with tags, and a text file."""
-    gap = float("nan")
     return pd.DataFrame(
         {
             "run_id": [1, 1, 2],
@@ -332,19 +60,285 @@ def _artifacts_df() -> pd.DataFrame:
                 {"split": "val", "score": 0.9},
                 {"split": "train", "took": {"value": 2, "unit": "min"}},
             ],
-            artifact_column("eval/notes.txt"): [gap, gap, "/artifact/4?v=d"],
-            artifact_fname_column("eval/notes.txt"): [gap, gap, "notes.txt"],
-            artifact_tags_column("eval/notes.txt"): [gap, gap, {}],
+            artifact_column("eval/notes.txt"): [GAP, GAP, "/artifact/4?v=d"],
+            artifact_fname_column("eval/notes.txt"): [GAP, GAP, "notes.txt"],
+            artifact_tags_column("eval/notes.txt"): [GAP, GAP, {}],
         }
     )
 
 
-def _artifact_grid(settings: TableChartSettings) -> dict[str, Any]:
-    return _props(TableChart.render(settings, _artifacts_df()))
+def _epochs_df() -> pd.DataFrame:
+    """Two runs of four steps. `epoch` is logged on the first step of each epoch, an image on the last."""
+    return pd.DataFrame(
+        {
+            "run_id": [1] * 4 + [2] * 4,
+            "step": [0, 1, 2, 3] * 2,
+            "epoch": [0, GAP, 1, GAP] * 2,
+            "loss": [0.8, 0.6, 0.4, 0.2, 0.9, 0.7, 0.5, 0.3],
+            artifact_column("img"): [GAP, "/a/1", GAP, "/a/2", GAP, "/a/3", GAP, "/a/4"],
+            artifact_fname_column("img"): [GAP, "a.png", GAP, "b.png", GAP, "c.png", GAP, "d.png"],
+        }
+    )
 
 
-_BY_KEY = TableChartSettings(mode=TableMode.ARTIFACTS, artifact_key="eval/a.png")
-_BY_PREFIX = TableChartSettings(mode=TableMode.ARTIFACTS, artifact_key="eval/", artifact_key_is_prefix=True)
+def _image(url: str, name: str) -> str:
+    return f"[![{name}]({url})]({url})"
+
+
+# ---- one row per run ----
+
+
+def test_render_empty_dataframe_shows_a_message() -> None:
+    [row] = _render(TableChartSettings(), pd.DataFrame())["rowData"]
+    assert "No data" in row["message"]
+
+
+def test_a_run_row_shows_each_metrics_own_latest_value() -> None:
+    """A metric logged less often than the last step (a per-epoch one) is not blank for it."""
+    df = pd.DataFrame(
+        {"run_id": [1, 1, 1], "step": [0, 1, 2], "loss": [0.5, 0.4, 0.3], "val_acc": [0.6, GAP, GAP]}
+    )
+    [row] = _render(TableChartSettings(), df)["rowData"]
+
+    assert row["loss"] == pytest.approx(0.3)
+    assert row["val_acc"] == pytest.approx(0.6)
+
+
+def test_a_run_row_does_not_show_bookkeeping_columns() -> None:
+    row = _rows_by_run(
+        TableChart.render(TableChartSettings(), _wide_df().assign(timestamp_utc=pd.Timestamp(0)))
+    )[1]
+    assert not {"step", "timestamp_utc"} & row.keys()
+
+
+def test_a_metric_can_be_asked_for_by_name_even_when_it_is_bookkeeping() -> None:
+    row = _rows_by_run(TableChart.render(TableChartSettings(show_metrics=["step"]), _wide_df()))[1]
+    assert row["step"] == 1
+
+
+def test_hparam_columns_are_titled_without_the_prefix_and_apart_from_a_metric_of_the_same_name() -> None:
+    table = TableChart.render(TableChartSettings(), _wide_df().assign(lr=[0.01, 0.02, 0.03, 0.04]))
+    headers = {column["field"]: column["headerName"] for column in _leaf_columns(table)}
+    row = _rows_by_run(table)[1]
+
+    assert headers[LR] == "lr"
+    assert (row[LR], row["lr"]) == (pytest.approx(0.1), pytest.approx(0.02))
+
+
+def test_a_dotted_metric_name_is_never_read_as_a_nested_field() -> None:
+    props = _render(TableChartSettings(), _wide_df().rename(columns={"loss": "val.loss"}))
+    assert props["dashGridOptions"]["suppressFieldDotNotation"] is True
+
+
+@pytest.mark.parametrize(
+    ("settings", "shown", "hidden"),
+    [
+        pytest.param(
+            TableChartSettings(show_metrics=["acc"]), {"acc"}, {"loss", "lr_decay"}, id="metric-name"
+        ),
+        pytest.param(
+            TableChartSettings(show_metrics=["l*"]), {"loss", "lr_decay"}, {"acc"}, id="metric-prefix"
+        ),
+        pytest.param(
+            TableChartSettings(show_metrics=["acc", "l*"]), {"acc", "loss", "lr_decay"}, set(), id="both"
+        ),
+        pytest.param(
+            TableChartSettings(show_metrics=[]), set(), {"loss", "acc", "lr_decay"}, id="no-metrics"
+        ),
+        pytest.param(TableChartSettings(show_hparams=["lr"]), {LR}, {BATCH_SIZE}, id="hparam"),
+        pytest.param(TableChartSettings(show_hparams=[]), set(), {LR, BATCH_SIZE}, id="no-hparams"),
+    ],
+)
+def test_a_run_row_shows_the_metrics_and_hparams_the_settings_pick(
+    settings: TableChartSettings, shown: set[str], hidden: set[str]
+) -> None:
+    df = _wide_df().assign(acc=0.6, lr_decay=0.9, **{BATCH_SIZE: 8})
+    row = _rows_by_run(TableChart.render(settings, df))[1]
+
+    assert shown <= row.keys()
+    assert not hidden & row.keys()
+
+
+def test_picking_an_artifact_does_not_bring_every_hyperparameter_along() -> None:
+    """Showing no hyperparameters is a choice a table can make, artifacts or not."""
+    settings = TableChartSettings(show_metrics=[], show_hparams=[], show_artifacts=["eval/a.png"])
+    table = TableChart.render(settings, _artifacts_df().assign(**{LR: 0.1}))
+
+    assert [column["field"] for column in _leaf_columns(table)][:2] == [
+        RUN_NAME_COLUMN,
+        artifact_column("eval/a.png"),
+    ]
+    assert not any(column["field"] in {LR, "loss"} for column in _leaf_columns(table))
+
+
+def test_a_run_row_leaves_out_artifacts_that_are_not_picked() -> None:
+    row = _rows_by_run(TableChart.render(TableChartSettings(), _artifacts_df()))[1]
+    assert not any(field.startswith("artifact__") for field in row)
+
+
+def test_a_run_row_names_the_run_and_colors_it_as_the_charts_do() -> None:
+    df = _wide_df().assign(**{RUN_NAME_COLUMN: pd.Series(["one", "one", None, None], dtype=object)})
+    table = TableChart.render(TableChartSettings(), df)
+    rows = _rows_by_run(table)
+    run_column = _leaf_columns(table)[0]
+
+    assert rows[1][RUN_NAME_COLUMN] == "one"
+    assert rows[2][RUN_NAME_COLUMN] == "Run 2"  # unnamed: the id, as everywhere else
+    assert rows[2]["_swatch"] == series_swatch_class(2)
+    assert (run_column["field"], run_column["pinned"]) == (RUN_NAME_COLUMN, "left")
+    assert [column["field"] for column in _leaf_columns(table)].count(RUN_NAME_COLUMN) == 1
+
+
+def test_a_run_row_groups_hparams_and_metrics_under_their_headers() -> None:
+    groups: list[dict[str, Any]] = _render(TableChartSettings(aggregate=Aggregate.MAX), _wide_df())[
+        "columnDefs"
+    ][1:]
+    assert [group["headerName"] for group in groups] == ["Hyperparameters", "Metrics (max)"]
+
+
+@pytest.mark.parametrize(
+    ("aggregate", "run_1_loss"),
+    [
+        pytest.param(Aggregate.LATEST, 0.4),
+        pytest.param(Aggregate.FIRST, 0.5),
+        pytest.param(Aggregate.MIN, 0.4),
+        pytest.param(Aggregate.MAX, 0.5),
+        pytest.param(Aggregate.MEAN, 0.45),
+    ],
+)
+def test_a_run_row_reduces_a_metric_as_the_aggregate_says(aggregate: Aggregate, run_1_loss: float) -> None:
+    table = TableChart.render(TableChartSettings(aggregate=aggregate), _wide_df())
+    assert _rows_by_run(table)[1]["loss"] == pytest.approx(run_1_loss)
+
+
+def test_a_metric_that_is_not_a_number_is_never_averaged() -> None:
+    df = _wide_df().assign(timestamp_utc=["2026-01-01", "2026-01-02", "2026-01-03", "2026-01-04"])
+    settings = TableChartSettings(show_metrics=["timestamp_utc"], aggregate=Aggregate.MEAN)
+    assert _rows_by_run(TableChart.render(settings, df))[1]["timestamp_utc"] == "2026-01-02"
+
+
+def test_a_run_row_without_a_step_column_dedupes_by_run() -> None:
+    df = pd.DataFrame({"run_id": [1, 1], LR: [0.1, 0.1]})
+    assert len(_render(TableChartSettings(), df)["rowData"]) == 1
+
+
+def test_font_size_defaults_to_the_shared_smaller_one_and_can_be_set_in_pixels() -> None:
+    assert _render(TableChartSettings(), _wide_df())["style"]["--ag-font-size"] == DEFAULT_TABLE_FONT_SIZE
+    assert _render(TableChartSettings(font_size=20), _wide_df())["style"]["--ag-font-size"] == "20px"
+
+
+def test_natural_width_is_flat_unless_set() -> None:
+    assert TableChart.natural_width(TableChartSettings()) == 700
+    assert TableChart.natural_width(TableChartSettings(width=333)) == 333
+
+
+# ---- one row per value of a metric ----
+
+
+def test_rows_of_a_field_have_a_row_per_run_and_value() -> None:
+    settings = TableChartSettings(rows=TableRows.FIELD, row_field="step", show_hparams=[])
+    props = _render(settings, _wide_df())
+
+    assert [row["_row_id"] for row in props["rowData"]] == ["1/0", "1/1", "2/0", "2/1"]
+    assert [column["field"] for column in _leaf_columns(TableChart.render(settings, _wide_df()))] == [
+        RUN_NAME_COLUMN,
+        "step",
+        "loss",
+    ]
+
+
+def test_runs_spread_side_by_side_are_a_column_each_headed_by_the_runs_name_and_color() -> None:
+    df = _wide_df().assign(**{RUN_NAME_COLUMN: ["one", "one", "two", "two"]})
+    settings = TableChartSettings(
+        rows=TableRows.FIELD, row_field="step", spread_by_run=True, show_metrics=["loss"]
+    )
+    props = _render(settings, df)
+    columns = {column["field"]: column for column in props["columnDefs"]}
+    row_by_step = {row["step"]: row for row in props["rowData"]}
+
+    assert set(columns) == {"step", "1::loss", "2::loss"}
+    assert columns["1::loss"]["headerName"] == "one"
+    assert columns["2::loss"]["headerClass"] == series_swatch_class(2)
+    assert row_by_step[0]["1::loss"] == pytest.approx(0.5)
+    assert row_by_step[1]["2::loss"] == pytest.approx(0.7)
+
+
+def test_runs_spread_side_by_side_group_several_values_under_each_run() -> None:
+    settings = TableChartSettings(
+        rows=TableRows.FIELD, row_field="step", spread_by_run=True, show_metrics=["loss", "acc"]
+    )
+    columns = _render(settings, _wide_df().assign(acc=0.5))["columnDefs"]
+
+    [group_1, group_2] = columns[1:]
+    assert [leaf["headerName"] for leaf in group_1["children"]] == ["loss", "acc"]
+    assert group_2["headerName"] == "Run 2"
+
+
+def test_runs_spread_side_by_side_leave_out_hparams() -> None:
+    settings = TableChartSettings(rows=TableRows.FIELD, row_field="step", spread_by_run=True)
+    assert LR not in str(_render(settings, _wide_df())["columnDefs"])
+
+
+def test_a_run_with_nothing_at_a_value_leaves_its_cell_empty() -> None:
+    df = _wide_df().iloc[[0, 1, 2]]
+    settings = TableChartSettings(
+        rows=TableRows.FIELD, row_field="step", spread_by_run=True, show_metrics=["loss"]
+    )
+    row_by_step = {row["step"]: row for row in _render(settings, df)["rowData"]}
+
+    assert row_by_step[1].get("2::loss") is None
+
+
+def test_rows_of_a_field_reduce_what_a_run_logged_for_each_value_as_the_aggregate_says() -> None:
+    settings = TableChartSettings(
+        rows=TableRows.FIELD,
+        row_field="epoch",
+        show_metrics=["loss"],
+        show_hparams=[],
+        aggregate=Aggregate.MEAN,
+    )
+    rows = {(row["run_id"], row["epoch"]): row for row in _render(settings, _epochs_df())["rowData"]}
+
+    assert rows[(1, 0)]["loss"] == pytest.approx(0.7)  # steps 0 and 1
+    assert rows[(2, 1)]["loss"] == pytest.approx(0.4)  # steps 2 and 3
+
+
+def test_each_epoch_shows_the_latest_artifact_of_that_epoch_from_each_run() -> None:
+    """A row an epoch, a column a run -- though the image was logged on a step `epoch` was not."""
+    settings = TableChartSettings(
+        rows=TableRows.FIELD, row_field="epoch", spread_by_run=True, show_metrics=[], show_artifacts=["img"]
+    )
+    props = _render(settings, _epochs_df())
+    row_by_epoch = {row["epoch"]: row for row in props["rowData"]}
+
+    assert row_by_epoch[0]["1::artifact__img"] == _image("/a/1", "a.png")
+    assert row_by_epoch[1]["1::artifact__img"] == _image("/a/2", "b.png")
+    assert row_by_epoch[1]["2::artifact__img"] == _image("/a/4", "d.png")
+    assert [column["headerName"] for column in props["columnDefs"]] == ["epoch", "Run 1", "Run 2"]
+
+
+def test_a_value_of_the_row_field_that_nothing_shown_was_logged_under_is_no_row() -> None:
+    df = _epochs_df().assign(step=[0, 1, 2, 3, 0, 1, 2, 3])
+    df.loc[len(df)] = {"run_id": 1, "step": 9, "epoch": 7, "loss": GAP}
+    settings = TableChartSettings(
+        rows=TableRows.FIELD, row_field="epoch", show_metrics=["loss"], show_hparams=[]
+    )
+
+    assert 7 not in {row["epoch"] for row in _render(settings, df)["rowData"]}
+
+
+def test_rows_of_a_field_nobody_logged_say_so() -> None:
+    settings = TableChartSettings(rows=TableRows.FIELD, row_field="nope")
+    [row] = _render(settings, _wide_df())["rowData"]
+    assert "'nope'" in row["message"]
+
+
+# ---- one row per artifact ----
+
+_BY_KEY = TableChartSettings(
+    rows=TableRows.ARTIFACT, show_artifacts=["eval/a.png"], show_metrics=[], show_hparams=[]
+)
+_BY_PREFIX = _BY_KEY.model_copy(update={"show_artifacts": ["eval/*"]})
 
 
 @pytest.mark.parametrize(
@@ -359,7 +353,7 @@ _BY_PREFIX = TableChartSettings(mode=TableMode.ARTIFACTS, artifact_key="eval/", 
         ),
     ],
 )
-def test_artifacts_mode_has_a_row_per_artifact_under_the_key_or_prefix(
+def test_rows_of_artifacts_have_a_row_per_artifact_under_the_key_or_prefix(
     settings: TableChartSettings, row_ids: list[str], *, has_key_column: bool
 ) -> None:
     table = TableChart.render(settings, _artifacts_df())
@@ -368,21 +362,21 @@ def test_artifacts_mode_has_a_row_per_artifact_under_the_key_or_prefix(
     assert ("key" in {column["field"] for column in _leaf_columns(table)}) is has_key_column
 
 
-def test_artifacts_mode_links_a_file_and_shows_an_image_as_a_thumbnail() -> None:
-    rows = {row["_row_id"]: row for row in _props(TableChart.render(_BY_PREFIX, _artifacts_df()))["rowData"]}
+def test_rows_of_artifacts_link_a_file_and_show_an_image_as_a_thumbnail() -> None:
+    rows = {row["_row_id"]: row for row in _render(_BY_PREFIX, _artifacts_df())["rowData"]}
 
-    assert rows["1/0/eval/a.png"]["artifact"] == "[![a.png](/artifact/1?v=a)](/artifact/1?v=a)"
+    assert rows["1/0/eval/a.png"]["artifact"] == _image("/artifact/1?v=a", "a.png")
     assert rows["2/0/eval/notes.txt"]["artifact"] == "[notes.txt](/artifact/4?v=d)"
 
 
-def test_artifacts_mode_cannot_be_made_to_write_markdown_by_a_file_name() -> None:
+def test_a_file_name_cannot_make_an_artifact_cell_write_markdown() -> None:
     df = _artifacts_df().assign(**{artifact_fname_column("eval/a.png"): "x](https://evil.example).png"})
-    row: dict[str, Any] = _props(TableChart.render(_BY_KEY, df))["rowData"][0]
+    row: dict[str, Any] = _render(_BY_KEY, df)["rowData"][0]
 
     assert row["artifact"].startswith(r"[![x\]\(https://evil.example\).png](/artifact/1?v=a)")
 
 
-def test_artifacts_mode_makes_each_tag_a_column_that_sorts_as_what_it_is() -> None:
+def test_rows_of_artifacts_make_each_tag_a_column_that_sorts_as_what_it_is() -> None:
     table = TableChart.render(_BY_KEY, _artifacts_df())
     columns = {column["headerName"]: column for column in _leaf_columns(table)}
     rows = _props(table)["rowData"]
@@ -395,50 +389,68 @@ def test_artifacts_mode_makes_each_tag_a_column_that_sorts_as_what_it_is() -> No
     assert "took (s)" in columns
 
 
-def test_artifacts_mode_with_nothing_logged_says_so() -> None:
+def test_rows_of_artifacts_show_what_their_run_logged_at_the_same_step() -> None:
+    settings = _BY_KEY.model_copy(update={"show_metrics": ["loss"], "show_hparams": ["lr"]})
+    table = TableChart.render(settings, _artifacts_df().assign(**{LR: [0.1, 0.1, 0.2]}))
+    rows = _props(table)["rowData"]
+
+    assert [(row["loss"], row[LR]) for row in rows] == [(0.5, 0.1), (0.4, 0.1), (0.9, 0.2)]
+
+
+def test_rows_of_artifacts_with_nothing_logged_say_so() -> None:
     table = TableChart.render(_BY_KEY, _artifacts_df().drop(columns=[artifact_column("eval/a.png")]))
     assert "No artifacts" in _props(table)["rowData"][0]["message"]
 
 
-def test_artifacts_mode_makes_room_for_thumbnails_only_when_there_are_some() -> None:
-    notes = TableChartSettings(mode=TableMode.ARTIFACTS, artifact_key="eval/notes.txt")
+def test_a_table_makes_room_for_thumbnails_only_when_it_has_some() -> None:
+    notes = _BY_KEY.model_copy(update={"show_artifacts": ["eval/notes.txt"]})
 
-    assert "rowHeight" in _artifact_grid(_BY_KEY)["dashGridOptions"]
-    assert "rowHeight" not in _artifact_grid(notes)["dashGridOptions"]
+    assert "rowHeight" in _render(_BY_KEY, _artifacts_df())["dashGridOptions"]
+    assert "rowHeight" not in _render(notes, _artifacts_df())["dashGridOptions"]
 
 
-def test_run_mode_adds_a_column_group_for_each_artifact_with_the_runs_latest() -> None:
-    settings = TableChartSettings(metrics=["loss"], artifacts=["eval/a.png"])
+# ---- artifacts beside a run ----
+
+
+def test_a_run_row_adds_a_column_group_for_each_artifact_with_the_runs_latest() -> None:
+    settings = TableChartSettings(show_metrics=["loss"], show_hparams=[], show_artifacts=["eval/a.png"])
     table = TableChart.render(settings, _artifacts_df())
-    rows = _rows_by_run(table)
     group = next(g for g in _props(table)["columnDefs"] if g.get("headerName") == "eval/a.png")
 
-    assert rows[1][artifact_column("eval/a.png")] == "[![a.png](/artifact/2?v=b)](/artifact/2?v=b)"
-    assert rows[1][f"{artifact_column('eval/a.png')}__tag__score"] == pytest.approx(0.9)
+    assert _rows_by_run(table)[1][artifact_column("eval/a.png")] == _image("/artifact/2?v=b", "a.png")
+    assert _rows_by_run(table)[1][f"{artifact_column('eval/a.png')}__tag__score"] == pytest.approx(0.9)
     assert "score" in [column["headerName"] for column in group["children"]]
 
 
+def test_a_prefix_of_artifacts_is_a_column_group_for_each_key_under_it() -> None:
+    settings = TableChartSettings(show_metrics=[], show_hparams=[], show_artifacts=["eval/*"])
+    groups: list[dict[str, Any]] = _render(settings, _artifacts_df())["columnDefs"][1:]
+
+    assert [group["headerName"] for group in groups] == ["eval/a.png", "eval/notes.txt"]
+
+
+# ---- the state a redraw keeps ----
+
+
+def test_the_grid_is_named_by_its_chart_so_it_keeps_its_state_across_a_redraw() -> None:
+    props = _props(TableChart.render_in(TableChartSettings(), _wide_df(), RenderContext(chart_id="abc")))
+
+    assert props["id"] == {"type": "dl-table-chart", "chart": "abc"}
+    assert props["persisted_props"] == ["columnState", "filterModel"]
+    assert {row["_row_id"] for row in props["rowData"]} == {"1", "2"}
+
+
 @pytest.mark.parametrize(
-    ("settings", "keys", "prefixes"),
+    ("other", "same_state"),
     [
-        pytest.param(TableChartSettings(), set(), set(), id="runs-none-by-default"),
-        pytest.param(TableChartSettings(artifacts=["a", "b"]), {"a", "b"}, set(), id="runs-columns"),
-        pytest.param(_BY_KEY, {"eval/a.png"}, set(), id="artifacts-key"),
-        pytest.param(_BY_PREFIX, set(), {"eval/"}, id="artifacts-prefix"),
+        pytest.param(TableChartSettings(page_size=50), True, id="same-columns"),
+        pytest.param(TableChartSettings(show_metrics=["acc"]), False, id="other-columns"),
     ],
 )
-def test_the_artifact_keys_a_table_asks_the_panel_to_fetch(
-    settings: TableChartSettings, keys: set[str], prefixes: set[str]
+def test_a_grid_of_other_columns_starts_without_the_old_ones_state(
+    other: TableChartSettings, *, same_state: bool
 ) -> None:
-    assert TableChart.hint_required_artifact_keys(settings) == keys
-    assert TableChart.hint_required_artifact_key_prefixes(settings) == prefixes
+    df = _wide_df().assign(acc=[0.6, 0.7, 0.8, 0.9])
+    before = _render(TableChartSettings(), df)["persistence"]
 
-
-def test_an_artifacts_table_fetches_no_metrics_or_hparams() -> None:
-    assert TableChart.hint_required_columns(_BY_KEY) == set()
-    assert TableChart.hint_required_hparams(_BY_KEY) == set()
-
-
-def test_an_artifacts_table_must_say_which_key() -> None:
-    with pytest.raises(ValidationError, match="artifact_key"):
-        TableChartSettings(mode=TableMode.ARTIFACTS)
+    assert (before == _render(other, df)["persistence"]) is same_state
