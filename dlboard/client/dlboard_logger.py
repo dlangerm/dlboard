@@ -38,7 +38,8 @@ from dlboard._mp_context import SPAWN_CONTEXT
 from dlboard.client._rest_api import DEFAULT_SERVER_URL, BasicDlboardAPI
 from dlboard.client.artifacts.figure import Figure
 from dlboard.client.artifacts.file import File
-from dlboard.models import FileKind
+from dlboard.client.histograms import DEFAULT_BINNING
+from dlboard.models import FileKind, Histogram
 
 DEFAULT_EXPERIMENT_NAME = "default"
 
@@ -50,7 +51,9 @@ if TYPE_CHECKING:
 
     from pytorch_lightning.callbacks import ModelCheckpoint
 
+    from dlboard.client._arrays import ArrayLike
     from dlboard.client.artifacts.figure import SavesFigure
+    from dlboard.client.histograms import Binning
     from dlboard.models import TagValue
     from dlboard.models._artifact import AnyArtifact
 
@@ -511,6 +514,35 @@ class DLBoardLogger(Logger):
         self._metrics.put(
             models.LoggedMetrics(
                 metrics=metrics,
+                step=step,
+                experiment_id=self._experiment_id,
+                run_id=self._run_id,
+                timestamp_utc=pendulum.now(pendulum.UTC),
+            )
+        )
+        self._unflushed = True
+
+    @rank_zero_only
+    def log_histograms(
+        self,
+        histograms: Mapping[str, ArrayLike | Histogram],
+        step: int,
+        *,
+        binning: Binning = DEFAULT_BINNING,
+    ) -> None:
+        """
+        Bin each of `histograms`' values right here, at the call site, then queue the buckets for shipping.
+
+        Only edges and counts ever leave this process, so the cost of a big tensor or a fine binning is paid
+        by the script that chose it -- once, in one pass over the values -- and a binning that cannot fit
+        (too many buckets) raises at this line. A `Histogram` you already binned is sent as it is.
+        """
+        self._metrics.put(
+            models.LoggedMetrics(
+                histograms={
+                    key: values if isinstance(values, Histogram) else binning.histogram(values)
+                    for key, values in histograms.items()
+                },
                 step=step,
                 experiment_id=self._experiment_id,
                 run_id=self._run_id,

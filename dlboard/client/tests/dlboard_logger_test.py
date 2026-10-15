@@ -39,6 +39,7 @@ from dlboard.client.dlboard_logger import (
     is_rejection,
     warn_if_startup_was_slow,
 )
+from dlboard.client.histograms import ExplicitBinning, ExponentialBinning
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -236,6 +237,45 @@ def test_log_figure_queues_a_png_rendered_at_the_call_site(monkeypatch: pytest.M
     assert (figure.key, figure.step, figure.tags) == ("loss_curve", 4, {"split": "val"})
     assert figure.format == "png"
     assert PIL.Image.open(io.BytesIO(figure.data)).size == (320, 240)
+    logger.finalize("success")
+
+
+def test_log_histograms_queues_buckets_not_values(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_api(monkeypatch, _FakeRunAPI("http://x"))
+    started = _stub_shippers(monkeypatch)
+    logger = DLBoardLogger(project_id=1, experiment_id=None)
+    metrics, _artifacts = started
+    prebinned = models.Histogram(edges=[0.0, 1.0], counts=[7])
+    values = np.array([0.5, 1.5, 100.0])
+
+    logger.log_histograms(
+        {"grad": values, "ready": prebinned}, step=4, binning=ExplicitBinning(edges=[0.0, 1.0, 2.0])
+    )
+    values[:] = 0  # callers reuse the buffer right after logging -- what was queued must not change
+
+    (queued,) = metrics.items
+    assert (queued.step, queued.run_id, queued.metrics) == (4, 99, {})
+    assert queued.histograms["grad"] == models.Histogram(edges=[0.0, 1.0, 2.0, 100.0], counts=[1, 1, 1])
+    assert queued.histograms["ready"] is prebinned
+    logger.finalize("success")
+
+
+def test_log_histograms_raises_at_the_call_when_the_binning_cannot_fit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_api(monkeypatch, _FakeRunAPI("http://x"))
+    started = _stub_shippers(monkeypatch)
+    logger = DLBoardLogger(project_id=1, experiment_id=None)
+    metrics, _artifacts = started
+
+    with pytest.raises(pydantic.ValidationError, match="at most"):
+        logger.log_histograms(
+            {"grad": 10.0 ** np.linspace(-30, 30, 5000)},
+            step=0,
+            binning=ExponentialBinning(buckets_per_decade=500),
+        )
+
+    assert metrics.items == []
     logger.finalize("success")
 
 

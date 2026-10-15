@@ -88,6 +88,27 @@ with `DLBoardLoggerSettings` (`metrics_q_size`, `artifact_q_size`, ...) if your 
 enough that this matters; `DLBOARD_CONNECT_TIMEOUT_S`/`DLBOARD_READ_TIMEOUT_S` (defaults 10s/60s)
 cap how long any one request waits before it's treated as failed.
 
+**Histograms.** `logger.log_histograms({"grad_norm/layer1": tensor}, step=global_step)` logs the distribution
+of any array, tensor or list of numbers at a step -- per-layer gradient norms, weights, activations, per-sample
+losses -- instead of averaging it into one scalar. The values are binned **in your training process, at the call**,
+in one pass, and only the bucket edges and counts are queued and sent: the server never sees (or computes
+over) the raw values, so a huge tensor or a fine binning slows down only the script that chose it. A histogram
+has at most 1024 buckets; a binning that needs more raises at the call rather than being rejected later.
+
+How values are bucketed is the `binning=` argument:
+
+- `ExponentialBinning(buckets_per_decade=10, zero_threshold=1e-12)` (the default) has a fixed number of buckets
+  per power of ten, mirrored for negative values, with one bucket around zero. It suits values spread over many
+  orders of magnitude. Its edges depend only on those two settings, never on the data, so every step and run lines
+  up bucket for bucket, and a stretch with no values costs one empty bucket.
+- `ExplicitBinning(edges=[...])` is buckets exactly where you say. Values outside the edges are not dropped: an
+  extra bucket reaching the smallest or largest value seen holds them.
+
+NaN and infinite values are counted aside, not binned. Pass a `dlboard.models.Histogram` you already binned
+(its `edges` and `counts`) instead of values to send it as it is. Histograms ride the same queue and
+shipping process as metrics, so the backpressure notes below apply to them too. A server older than the
+version that added histograms ignores them, so upgrade the server first.
+
 **Logging artifacts.** Call `logger.log_artifact([...])` with anything implementing `AnyArtifact`
 (`dlboard/models/_artifact.py`): a `key`, `tags`, a `step`, and a
 `to_artifact(local_temp, run_id, experiment_id) -> tuple[NewArtifact, Path | AnyUrl]` method.
