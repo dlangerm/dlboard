@@ -23,7 +23,6 @@ from dlboard.plugins.charts._chart_title import titled
 from dlboard.plugins.charts.line_chart import LineChart
 from dlboard.serve._pages._experiment import _chart_view as chart_view
 from dlboard.serve._pages._experiment import _page_model as page_model
-from dlboard.serve._pages._experiment import _panel_data as panel_data
 from dlboard.serve._pages._experiment import _panel_view as panel_view
 
 if TYPE_CHECKING:
@@ -294,7 +293,7 @@ def test_render_with_no_tabbed_panels_shows_no_tabs_chrome(store: SQLLiteStore, 
     page = store.update_page(page.model_copy(update={"panels": [PanelInstance[Any, Any](name="a")]}))
 
     typed = cast("page_model.BasicExperimentPage", page)
-    rendered = panel_view._page_view(panel_data.panel_frames(store, typed), typed, panel_view.FIRST_PAGE)
+    rendered = panel_view._page_view({}, typed, panel_view.FIRST_PAGE)
     assert not isinstance(rendered, dmc.Tabs)
     assert _find_props(rendered, panel_view.PANEL_ACCORDION.of("")) is not None
 
@@ -314,7 +313,7 @@ def test_render_groups_panels_into_tabs_by_the_tab_field(store: SQLLiteStore, ex
     )
 
     typed = cast("page_model.BasicExperimentPage", page)
-    rendered = panel_view._page_view(panel_data.panel_frames(store, typed), typed, panel_view.FIRST_PAGE)
+    rendered = panel_view._page_view({}, typed, panel_view.FIRST_PAGE)
     assert isinstance(rendered, dmc.Tabs)
     tabs_row = rendered.children[0]  # pyrefly: ignore [unsupported-operation]
     tabs_and_buttons = tabs_row.children[0]

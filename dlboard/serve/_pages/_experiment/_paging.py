@@ -312,6 +312,14 @@ def visible_panels[P: models.PanelInstance[Any, Any]](
     return page_slice(matching, paging.panel_page, paging.sizes.panels)
 
 
+def visible_open_panels(
+    panels: Sequence[models.PanelInstance[Any, Any]], tab: str, paging: Paging
+) -> list[str]:
+    """The panels that are open and on the page `paging` shows -- the ones whose content gets rendered."""
+    opened = set(paging.opened(panels))
+    return [p.name for p in visible_panels(panels, tab, paging).items if p.name in opened]
+
+
 def visible_chart_indexes(panel: models.PanelInstance[Any, Any], paging: Paging) -> Slice[int]:
     """
     The page of `panel`'s charts `paging` shows, after its filter, as indexes into `panel.charts`.

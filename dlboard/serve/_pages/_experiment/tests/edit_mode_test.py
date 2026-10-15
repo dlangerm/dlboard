@@ -11,7 +11,6 @@ from dlboard.models._view import PanelInstance
 from dlboard.plugins.charts.line_chart import LineChart
 from dlboard.serve._pages._experiment import _page_model as page_model
 from dlboard.serve._pages._experiment import _page_repository as repo
-from dlboard.serve._pages._experiment import _panel_data as panel_data
 from dlboard.serve._pages._experiment import _panel_view as panel_view
 from dlboard.serve._pages._experiment._paging import Paging
 
@@ -44,7 +43,7 @@ def test_accordion_view_offers_auto_populate_only_for_an_empty_view(
     store.update_page(page.model_copy(update={"panels": panels}))
 
     loaded = repo.load_page(store, repo.PageRef(experiment_id, None))
-    container = panel_view.accordion_view(panel_data.panel_frames(store, loaded), loaded, Paging())
+    container = panel_view.accordion_view({}, loaded, Paging())
 
     children = cast("list[Any]", container.children)
     assert (_find_props(children, panel_view.AUTO_POPULATE_OPEN_ID) is not None) is auto_populate_offered
@@ -61,7 +60,7 @@ def test_accordion_view_delete_panel_reachable_without_opening_a_panel(
     store.update_page(page.model_copy(update={"panels": [PanelInstance[Any, Any](name="p")]}))
 
     loaded = repo.load_page(store, repo.PageRef(experiment_id, None))
-    container = panel_view.accordion_view(panel_data.panel_frames(store, loaded), loaded, Paging())
+    container = panel_view.accordion_view({}, loaded, Paging())
 
     delete_button = _find_props(
         # pyrefly: ignore [unknown-argument-type]

@@ -1,7 +1,7 @@
 """
 The panel area: the tab bar and toolbar, the active tab's page of panels, and every id they render.
 
-Pure -- handed the page, the paging, and a `PanelFrames` to fetch an open panel's data through, never a store.
+Pure -- handed the page, the paging, and the `PanelFrames` already fetched for its open panels, never a store.
 The modals and drawers its buttons open belong to the feature modules, which the experiment page renders once
 beside it.
 """
@@ -33,6 +33,7 @@ from dlboard.serve._pages._experiment._paging import (
     Slice,
     reveal,
     visible_chart_indexes,
+    visible_open_panels,
     visible_panels,
 )
 
@@ -168,9 +169,9 @@ def render_panel_content(
     frames: PanelFrames, panel: models.PanelInstance[Any, Any], paging: Paging
 ) -> Component:
     """
-    Fetch + render the page of one panel's charts `paging` shows. Only called for panels that are open.
+    Render the page of one panel's charts `paging` shows, from `frames`. Only called for panels that are open.
 
-    Only that page's charts are fetched for -- a panel of a thousand charts costs what one page of them does.
+    `frames` must hold the panel's data whenever `paging` shows a chart of it (see `panel_frames`).
     """
     indexes = visible_chart_indexes(panel, paging).items
     if not indexes:
@@ -181,9 +182,7 @@ def render_panel_content(
             ta="center",
             py="md",
         )
-    shown = panel.model_copy(update={"charts": [panel.charts[i] for i in indexes]})
-    df = frames(shown)
-    return render_panel_content_from_df(panel, df, indexes, paging.sizes.charts)
+    return render_panel_content_from_df(panel, frames[panel.name], indexes, paging.sizes.charts)
 
 
 def _panel_placeholder() -> dmc.Skeleton:
@@ -537,12 +536,6 @@ def clamped_paging(page: BasicExperimentPage, tab: str, paging: Paging) -> Pagin
     return paging
 
 
-def visible_open_panels(page: BasicExperimentPage, tab: str, paging: Paging) -> list[str]:
-    """The panels that are open and on the page `paging` shows -- the ones whose content gets rendered."""
-    opened = set(paging.opened(page.panels))
-    return [p.name for p in visible_panels(page.panels, tab, paging).items if p.name in opened]
-
-
 def _toolbar(tab_controls: list[Component], panel_actions: list[Component]) -> dmc.Group:
     """
     The row above the panels: tab controls on the left, panel actions on the right.
@@ -755,32 +748,37 @@ def _focus_on_chart(page: BasicExperimentPage, paging: Paging, chart_id: str) ->
     return reveal(page.panels, focused, panel_name=panel.name, chart_id=chart_id)
 
 
-def accordion_view(
-    frames: PanelFrames, page: BasicExperimentPage, paging: Paging, *, focus_chart: str | None = None
-) -> html.Div:
+def resolved_paging(page: BasicExperimentPage, paging: Paging, *, focus_chart: str | None = None) -> Paging:
+    """
+    The `paging` `accordion_view` renders `page` with, which is also what its `PanelFrames` must be fetched for.
+
+    `focus_chart` (a `ChartInstance.id`, from a `?chart=` deep link) opens that chart's panel and
+    tab -- see `_focus_on_chart`. Any page that no longer exists is moved onto the last one that does, and the
+    defaults are left out (`Paging.normalized`).
+    """
+    if focus_chart:
+        paging = _focus_on_chart(page, paging, focus_chart)
+    return clamped_paging(page, paging.shown_tab(page.panels), paging).normalized(page.panels)
+
+
+def accordion_view(frames: PanelFrames, page: BasicExperimentPage, paging: Paging) -> html.Div:
     """
     The full accordion/tabs view of `page` (the modals it opens belong to their features, rendered once).
 
     Takes the page itself rather than re-reading it: every caller already has the version it just
     loaded or saved, which is also the only way to be sure a view is rendered, not the shared page.
 
-    `focus_chart` (a `ChartInstance.id`, from a `?chart=` deep link) opens that chart's panel and
-    tab for this render -- see `_focus_on_chart`.
-
-    `paging` is which tab, open panels and page of panels to show; it is first moved onto the last page that
-    exists, and the store this emits (`PANEL_PAGING_ID`) always holds the paging actually rendered, with its
-    defaults left out (`Paging.normalized`).
+    `paging` is which tab, open panels and page of panels to show, as `resolved_paging` left it, and `frames`
+    the data of the open panels on it (`panel_frames`). The store this emits (`PANEL_PAGING_ID`) holds that
+    paging.
     """
     _log.debug("rendering chart for experiment %s", page.experiment_id)
-    if focus_chart:
-        paging = _focus_on_chart(page, paging, focus_chart)
     tab = paging.shown_tab(page.panels)
-    paging = clamped_paging(page, tab, paging).normalized(page.panels)
 
     return html.Div(
         [
             _page_view(frames, page, paging),
-            Store(id=LOADED_PANELS_STORE_ID, data=visible_open_panels(page, tab, paging)),
+            Store(id=LOADED_PANELS_STORE_ID, data=visible_open_panels(page.panels, tab, paging)),
             Store(id=PANEL_PAGING_ID, data=paging.model_dump_json()),
         ],
     )

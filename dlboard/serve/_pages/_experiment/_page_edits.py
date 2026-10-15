@@ -15,9 +15,9 @@ from typing import TYPE_CHECKING, Any, TypedDict, cast
 from dlboard.serve import get_data_store
 from dlboard.serve._pages._experiment._page_model import BasicExperimentPage
 from dlboard.serve._pages._experiment._page_repository import load_page, ref_of, save_page
-from dlboard.serve._pages._experiment._paging import Paging, reveal
+from dlboard.serve._pages._experiment._paging import Paging, reveal, visible_open_panels
 from dlboard.serve._pages._experiment._panel_data import panel_frames
-from dlboard.serve._pages._experiment._panel_view import accordion_view
+from dlboard.serve._pages._experiment._panel_view import accordion_view, resolved_paging
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -115,7 +115,9 @@ def commit(page_json: str, paging_json: str, edit: PageEdit) -> tuple[BasicExper
     paging = Paging.model_validate_json(paging_json).viewing(tab=edit.tab, open_panels=edit.open_panels)
     if edit.reveal is not None:
         paging = _revealed(before, saved, paging, edit.reveal)
-    return saved, accordion_view(panel_frames(get_data_store(), saved), saved, paging)
+    paging = resolved_paging(saved, paging)
+    open_panels = visible_open_panels(saved.panels, paging.shown_tab(saved.panels), paging)
+    return saved, accordion_view(panel_frames(get_data_store(), saved, paging, open_panels), saved, paging)
 
 
 class EditCtx(TypedDict):
