@@ -378,6 +378,23 @@ class AuthorizingDataStore(models.DataStore[...]):
         self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
         return self._inner.summarize_metric_keys(experiment_id)
 
+    def fetch_histograms(
+        self,
+        experiment_id: int,
+        *,
+        keys: frozenset[str],
+        max_steps: int,
+        exclude_run_ids: frozenset[int] = frozenset(),
+    ) -> list[models.UnderlyingHistogramTableEntry]:
+        self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
+        return self._inner.fetch_histograms(
+            experiment_id, keys=keys, max_steps=max_steps, exclude_run_ids=exclude_run_ids
+        )
+
+    def summarize_histogram_keys(self, experiment_id: int) -> list[str]:
+        self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
+        return self._inner.summarize_histogram_keys(experiment_id)
+
     def log_hyperparams(self, hyperparams: models.NewHyperParams) -> models.HyperParams:
         self.require_run_write(hyperparams.run_id, hyperparams.experiment_id)
         return self._inner.log_hyperparams(hyperparams)

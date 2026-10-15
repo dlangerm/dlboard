@@ -48,6 +48,9 @@ type AnyRow = sa.Row[*tuple[Any, ...]]
 
 _OWNS = ForeignKeyKind.OWNERSHIP
 
+_STRIDE_DOUBLINGS: Final = 32
+"""How many powers of two `fetch_histograms` can thin by: far more steps than any run will ever log."""
+
 # Declares every column's foreign key relationship: what it references, and whether it's OWNERSHIP
 # (the parent in the delete/restore/purge hierarchy -- gets a real `ON DELETE CASCADE`, and is what
 # `_cascade_targets` walks) or plain ATTRIBUTION (e.g. `created_by`, never cascades). This is the
@@ -71,6 +74,10 @@ FOREIGN_KEYS: dict[type[BaseModel], dict[str, ForeignKey]] = {
     },
     models.UnderlyingMetricTableEntry: {
         "experiment_id": ForeignKey(models.Experiment),  # denormalized convenience, not an ownership edge
+        "run_id": ForeignKey(models.Run, _OWNS),
+    },
+    models.UnderlyingHistogramTableEntry: {
+        "experiment_id": ForeignKey(models.Experiment),
         "run_id": ForeignKey(models.Run, _OWNS),
     },
     models.HyperParams: {
@@ -122,6 +129,7 @@ TABLES: tuple[type[BaseModel], ...] = (
     models.Experiment,
     models.Run,
     models.UnderlyingMetricTableEntry,
+    models.UnderlyingHistogramTableEntry,
     models.HyperParams,
     models.Artifact,
     models.Page,
@@ -222,12 +230,26 @@ def build_metadata(schema: str | None = None) -> tuple[sa.MetaData, dict[type[Ba
         tables[model] = sql.table_for(
             model, metadata, tables, FOREIGN_KEYS.get(model), UNIQUE_COLUMNS.get(model)
         )
-    metrics, artifacts, pages = (
-        tables[m] for m in (models.UnderlyingMetricTableEntry, models.Artifact, models.Page)
+    metrics, histograms, artifacts, pages = (
+        tables[m]
+        for m in (
+            models.UnderlyingMetricTableEntry,
+            models.UnderlyingHistogramTableEntry,
+            models.Artifact,
+            models.Page,
+        )
     )
     # `sa.Index(...)` registers itself onto its columns' table/metadata on construction, so building
     # these is enough to make them part of `metadata` -- nothing further needs to reference them.
     sa.Index("idx_metric_lookup", *(c for c in metrics.c if c.name not in ("id", "value")))
+    # What `fetch_histograms` walks: one experiment's keys, then each run's steps in order.
+    sa.Index(
+        "idx_histogram_lookup",
+        histograms.c.experiment_id,
+        histograms.c.key,
+        histograms.c.run_id,
+        histograms.c.step,
+    )
     sa.Index("idx_artifact_lookup", *(c for c in artifacts.c if c.name not in ("id", "tags")))
     for field in PAGE_SCOPE_FIELDS:
         # At most one *shared* page (owner_id NULL) per scope -- exactly what `get_or_create_page`
@@ -730,6 +752,10 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             models.UnderlyingMetricTableEntry,
             itertools.chain.from_iterable(m.to_underlying() for m in metric),
         )
+        self._insert_rows(
+            models.UnderlyingHistogramTableEntry,
+            itertools.chain.from_iterable(m.to_underlying_histograms() for m in metric),
+        )
         for experiment_id in {m.experiment_id for m in metric}:
             self._touch_experiment(experiment_id)
 
@@ -776,6 +802,82 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             .order_by(per_run.c.key)
         )
         return [MetricKeySummary(key, steps) for key, steps in rows]
+
+    def fetch_histograms(
+        self,
+        experiment_id: int,
+        *,
+        keys: frozenset[str],
+        max_steps: int,
+        exclude_run_ids: frozenset[int] = frozenset(),
+    ) -> list[models.UnderlyingHistogramTableEntry]:
+        """
+        An experiment's (non-deleted runs') histograms under `keys`, thinned to about `max_steps` steps per run and key.
+
+        What bounds a render's cost however long a run has trained: the thinning is done here, in the database,
+        and only the histograms that survive it are read back -- the payloads of the rest never leave the table.
+        A run and key with at most `max_steps` steps keep all of them. A longer one keeps every `stride`-th step
+        (counting from its first) and always its latest, where `stride` is the smallest power of two that fits:
+        a power of two, so the steps kept stay put while a run trains, until the stride doubles, instead of every
+        poll picking a different set.
+        """
+        h, r = self._tables[models.UnderlyingHistogramTableEntry], self._tables[models.Run]
+        # A batch the client re-sent after a failure holds a step twice: the newest write wins, as it does for metrics.
+        latest = (
+            sa.select(sa.func.max(h.c.id).label("id"))
+            .select_from(h)
+            .join(r, h.c.run_id == r.c.id)
+            .where(
+                h.c.experiment_id == experiment_id,
+                r.c.deleted_at.is_(None),
+                h.c.run_id.not_in(exclude_run_ids),
+                h.c.key.in_(keys),
+            )
+            .group_by(h.c.run_id, h.c.key, h.c.step)
+            .subquery("latest")
+        )
+        series = (h.c.run_id, h.c.key)
+        ranked = (
+            sa.select(
+                h.c.id,
+                sa.func.row_number().over(partition_by=series, order_by=h.c.step).label("position"),
+                sa.func.count().over(partition_by=series).label("total"),
+            )
+            .join(latest, h.c.id == latest.c.id)
+            .subquery("ranked")
+        )
+        # Explicitly 64-bit: Postgres' driver casts an integer bound against `total` to `INTEGER`, which `max_steps << k`
+        # outgrows (sqlite has no such limit, so only Postgres can tell).
+        stride = sa.case(
+            *(
+                (
+                    ranked.c.total <= sa.literal(max_steps << k, sa.BigInteger),
+                    sa.literal(1 << k, sa.BigInteger),
+                )
+                for k in range(_STRIDE_DOUBLINGS)
+            ),
+            else_=sa.literal(1 << _STRIDE_DOUBLINGS, sa.BigInteger),
+        )
+        kept = sa.select(ranked.c.id).where(
+            sa.or_((ranked.c.position - 1) % stride == 0, ranked.c.position == ranked.c.total)
+        )
+        return self._fetch(
+            models.UnderlyingHistogramTableEntry,
+            sa.select(h).where(h.c.id.in_(kept)).order_by(h.c.run_id, h.c.key, h.c.step),
+            no_validate=True,
+        )
+
+    def summarize_histogram_keys(self, experiment_id: int) -> list[str]:
+        """Every histogram key logged in an experiment (non-deleted runs), sorted, without fetching any."""
+        h, r = self._tables[models.UnderlyingHistogramTableEntry], self._tables[models.Run]
+        rows = self._execute(
+            sa.select(h.c.key)
+            .distinct()
+            .join(r, h.c.run_id == r.c.id)
+            .where(h.c.experiment_id == experiment_id, r.c.deleted_at.is_(None))
+            .order_by(h.c.key)
+        )
+        return [key for (key,) in rows]
 
     def log_hyperparams(self, hyperparams: models.NewHyperParams) -> models.HyperParams:
         """Log hyperparameters to the data store."""

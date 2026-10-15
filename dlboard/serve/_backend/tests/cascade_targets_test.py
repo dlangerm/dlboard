@@ -23,6 +23,7 @@ def test_cascade_targets_from_project_unfiltered_includes_every_owned_descendant
     assert names.count("Experiment") == 1
     assert names.count("Run") == 1
     assert names.count("UnderlyingMetricTableEntry") == 1
+    assert names.count("UnderlyingHistogramTableEntry") == 1
     assert names.count("HyperParams") == 1
     assert names.count("Artifact") == 1
     # Page is reachable from Project via three separate ownership edges (project_id directly,

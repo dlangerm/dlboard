@@ -149,6 +149,11 @@ def _metric(experiment_id: int, run_id: int) -> models.LoggedMetrics:
 _OPERATIONS: dict[str, tuple[ProjectRole, Callable[[AuthorizingDataStore, _Chain], object]]] = {
     "list experiments": (ProjectRole.VIEWER, lambda s, c: list(s.get_experiments(c[0].id))),
     "read metrics": (ProjectRole.VIEWER, lambda s, c: s.fetch_metrics(c[1].id)),
+    "read histograms": (
+        ProjectRole.VIEWER,
+        lambda s, c: s.fetch_histograms(c[1].id, keys=frozenset({"grad"}), max_steps=10),
+    ),
+    "list histogram keys": (ProjectRole.VIEWER, lambda s, c: s.summarize_histogram_keys(c[1].id)),
     "create a run": (ProjectRole.EDITOR, lambda s, c: s.create_run(models.NewRun(experiment_id=c[1].id))),
     "log metrics": (ProjectRole.EDITOR, lambda s, c: s.log_metrics([_metric(c[1].id, c[2].id)])),
     "finish a run": (

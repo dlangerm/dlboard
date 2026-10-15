@@ -207,6 +207,26 @@ class DataStore(typing.Protocol[_P]):
         """
         ...
 
+    def fetch_histograms(
+        self,
+        experiment_id: int,
+        *,
+        keys: frozenset[str],
+        max_steps: int,
+        exclude_run_ids: frozenset[int] = frozenset(),
+    ) -> list[models.UnderlyingHistogramTableEntry]:
+        """
+        An experiment's (non-deleted runs') histograms under `keys`, thinned to about `max_steps` steps per run and key.
+
+        Histograms are logged through `log_metrics`. Thinning happens in the store, before anything is read
+        back, so what a chart costs does not grow with how long a run has trained.
+        """
+        ...
+
+    def summarize_histogram_keys(self, experiment_id: int) -> list[str]:
+        """Every histogram key logged in an experiment (non-deleted runs), sorted, without fetching any."""
+        ...
+
     def log_hyperparams(self, hyperparams: models.NewHyperParams) -> models.HyperParams:
         """Log hyperparameters to the data store."""
         ...
