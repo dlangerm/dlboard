@@ -14,7 +14,7 @@ from dlboard.serve._component_ids import PatternId
 from dlboard.serve._pages._dash_helpers import tooltipped_action_icon
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
 
     import pandas as pd
     from dash.development.base_component import Component
@@ -39,7 +39,7 @@ class ChartPattern(PatternId[ExperimentPage]):
 
     KEYS: ClassVar[tuple[str, ...]] = ("panel", "index")
 
-    def of(self, panel_name: str, index: int) -> ChartID:
+    def of(self, panel_name: str, index: int) -> dict[str, str | int]:
         return {"type": self.type, "panel": panel_name, "index": index}
 
 
@@ -138,7 +138,7 @@ def chart_body(
     )
     fingerprint = html.Div(
         chart_data_fingerprint(chart, dataframe),
-        id=CHART_FINGERPRINT.of(panel.name, index),  # pyrefly: ignore [bad-argument-type]
+        id=CHART_FINGERPRINT.of(panel.name, index),
         hidden=True,
     )
     return [rendered, fingerprint]
@@ -167,7 +167,7 @@ def render_chart_item(
         [
             drag_handle(
                 class_name="dl-chart-drag-handle",
-                component_id=CHART_DRAG_HANDLE.of(panel.name, index),  # pyrefly: ignore [bad-argument-type]
+                component_id=CHART_DRAG_HANDLE.of(panel.name, index),
                 data_attrs={"panel-name": panel.name, "chart-index": str(index)},
             ),
             tooltipped_action_icon(
@@ -192,7 +192,7 @@ def render_chart_item(
                 size="xs",
             ),
         ],
-        id=CHART_CONTROLS_GROUP.of(panel.name, index),  # pyrefly: ignore [bad-argument-type]
+        id=CHART_CONTROLS_GROUP.of(panel.name, index),
         gap="xs",
         className="dl-chart-controls",
         # Laid over the chart's top-right corner rather than given a row of their own: a chart's
@@ -214,10 +214,10 @@ def render_chart_item(
             hover_controls,
             html.Div(
                 chart_body(panel, index, dataframe, page_size),
-                id=CHART_BODY.of(panel.name, index),  # pyrefly: ignore [bad-argument-type]
+                id=CHART_BODY.of(panel.name, index),
             ),
         ],
-        id=CHART_CONTENT.of(panel.name, index),  # pyrefly: ignore [bad-argument-type]
+        id=CHART_CONTENT.of(panel.name, index),
         gap="xs",
         w="100%" if panel.layout == "grid" else chart.natural_width(context),
         maw="100%",
@@ -242,7 +242,9 @@ def render_panel_charts(
     ]
 
 
-def drag_handle(*, class_name: str, component_id: dict[str, str], data_attrs: dict[str, str]) -> Component:
+def drag_handle(
+    *, class_name: str, component_id: Mapping[str, str | int], data_attrs: dict[str, str]
+) -> Component:
     """
     A grip glyph, draggable via `_experiment_page_dragdrop.js`.
 
