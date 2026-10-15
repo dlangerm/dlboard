@@ -9,7 +9,7 @@ request gate resolving who the caller is in the first place, and background work
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING
 
 from flask import g, has_request_context
 
@@ -30,25 +30,21 @@ set_artifact_store = ARTIFACT_STORE.set
 get_system_artifact_store = ARTIFACT_STORE.get
 wait_for_artifact_store = ARTIFACT_STORE.wait
 
-_AUTHORIZER_KEY: Final = "dlboard_authorizer"
-
 
 def _authorizer() -> AuthorizingDataStore:
     """The in-flight request's authorizing store, built once per request."""
     if not has_request_context():
         msg = "get_data_store() is per-request; work no user is behind uses get_system_data_store()"
         raise RuntimeError(msg)
-    authorizer: AuthorizingDataStore | None = g.get(_AUTHORIZER_KEY)
-    if authorizer is None:
+    if not hasattr(g, "dlboard_authorizer"):
         app = current_dash_app()
-        authorizer = AuthorizingDataStore(
+        g.dlboard_authorizer = AuthorizingDataStore(
             DATA_STORE.get(app),
             get_current_user(),
             enforce_grants=get_auth_provider(app).verifies_identity,
             new_project_access=AUTH_SETTINGS.get(app).new_project_access,
         )
-        setattr(g, _AUTHORIZER_KEY, authorizer)
-    return authorizer
+    return g.dlboard_authorizer
 
 
 def get_data_store() -> DataStore[...]:

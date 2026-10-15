@@ -78,7 +78,7 @@ DEFAULT_TAG_PRECISION: Final = 4
 """Significant digits a number is shown with unless the display says otherwise."""
 
 
-class TagDisplay(BaseModel, frozen=True, extra="forbid"):
+class TagDisplay(BaseModel, frozen=True, extra="forbid", use_attribute_docstrings=True):
     """
     How a tag's number is shown, which is up to the display and never the client. `None` leaves it as it is.
 
@@ -86,13 +86,12 @@ class TagDisplay(BaseModel, frozen=True, extra="forbid"):
     (`overridden_by`).
     """
 
-    precision: int | None = Field(default=None, ge=1, le=15, description="Significant digits.")
-    time_unit: TimeUnit | None = Field(
-        default=None, description="Unit to show a duration in, whatever it was logged in."
-    )
-    size_unit: SizeUnit | None = Field(
-        default=None, description="Unit to show a data size in, whatever it was logged in."
-    )
+    precision: int | None = Field(default=None, ge=1, le=15)
+    """Significant digits."""
+    time_unit: TimeUnit | None = Field(default=None)
+    """Unit to show a duration in, whatever it was logged in."""
+    size_unit: SizeUnit | None = Field(default=None)
+    """Unit to show a data size in, whatever it was logged in."""
 
     def overridden_by(self, other: TagDisplay) -> TagDisplay:
         """A copy of this with every field `other` sets taking its value."""

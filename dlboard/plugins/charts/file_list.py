@@ -46,22 +46,19 @@ _GROUP_ORDER: Final = tuple(_GROUP_LABELS.values())
 _UNTAGGED_GROUP: Final = "Files"
 
 
-class FileListSettings(BaseModel, frozen=True, extra="forbid"):
+class FileListSettings(BaseModel, frozen=True, extra="forbid", use_attribute_docstrings=True):
     """File list settings: set `key` for one artifact key, or `key_prefix` for every key under it."""
 
-    key: str = Field(default="", description="One artifact key, e.g. `model.onnx`.")
-    key_prefix: str = Field(
-        default="",
-        description="Every artifact key that starts with this, e.g. `checkpoints/` for all of a run's "
-        "checkpoints -- including any logged later. Use instead of `key`.",
-    )
-    page_size: int = Field(default=10, ge=1, description="How many files each page of the list shows.")
-    height: int = Field(
-        default=300,
-        description="Unused: the list is paged, so it grows to fit its page instead of scrolling. "
-        "Kept so charts saved with a height still load.",
-    )
-    width: int = Field(default=560, description="Overall chart width in px.")
+    key: str = Field(default="")
+    """One artifact key, e.g. `model.onnx`."""
+    key_prefix: str = Field(default="")
+    """Every artifact key that starts with this, e.g. `checkpoints/` for all of a run's checkpoints -- including any logged later. Use instead of `key`."""
+    page_size: int = Field(default=10, ge=1)
+    """How many files each page of the list shows."""
+    height: int = Field(default=300)
+    """Unused: the list is paged, so it grows to fit its page instead of scrolling. Kept so charts saved with a height still load."""
+    width: int = Field(default=560)
+    """Overall chart width in px."""
 
     @model_validator(mode="after")
     def _exactly_one_of_key_and_prefix(self) -> typing.Self:

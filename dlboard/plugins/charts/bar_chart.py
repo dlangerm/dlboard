@@ -27,37 +27,26 @@ if typing.TYPE_CHECKING:
 _TOOLTIP_JS_PATH = Path(__file__).with_name("bar_chart_tooltip.js")
 
 
-class BarChartSettings(BaseModel, frozen=True, extra="forbid"):
+class BarChartSettings(BaseModel, frozen=True, extra="forbid", use_attribute_docstrings=True):
     """Bar chart settings."""
 
-    column: str = Field(description="The metric to aggregate onto each bar.")
-    x_axis: str = Field(description='The metric or hyperparameter key to group runs by, e.g. "hidden_size".')
-    aggregation: typing.Literal["mean", "median", "min", "max", "sum", "count"] = Field(
-        default="mean", description="How to combine runs that share the same x_axis value into one bar."
-    )
-    orientation: typing.Literal["horizontal", "vertical"] = Field(
-        default="horizontal",
-        description="horizontal draws upright bars with groups along the x-axis (the default); "
-        "vertical draws sideways bars with groups along the y-axis.",
-    )
-    sort: typing.Literal["none", "ascending", "descending"] = Field(
-        default="ascending",
-        description="Order bars by x_axis value -- numerically if every group parses as a number, "
-        "alphabetically otherwise. 'none' keeps groups in first-seen order.",
-    )
-    x_axis_type: typing.Literal["auto", "number", "category", "date"] = Field(
-        default="auto",
-        description='How to interpret x_axis values for sorting/parsing: "auto" detects numbers vs '
-        'text (the previous behavior); "number" and "date" force numeric/timestamp parsing even when '
-        'values look like text; "category" always sorts/groups them as plain text, e.g. to keep '
-        '"v2" before "v10" instead of numeric order.',
-    )
+    column: str
+    """The metric to aggregate onto each bar."""
+    x_axis: str
+    """The metric or hyperparameter key to group runs by, e.g. "hidden_size"."""
+    aggregation: typing.Literal["mean", "median", "min", "max", "sum", "count"] = Field(default="mean")
+    """How to combine runs that share the same x_axis value into one bar."""
+    orientation: typing.Literal["horizontal", "vertical"] = Field(default="horizontal")
+    """horizontal draws upright bars with groups along the x-axis (the default); vertical draws sideways bars with groups along the y-axis."""
+    sort: typing.Literal["none", "ascending", "descending"] = Field(default="ascending")
+    """Order bars by x_axis value -- numerically if every group parses as a number, alphabetically otherwise. 'none' keeps groups in first-seen order."""
+    x_axis_type: typing.Literal["auto", "number", "category", "date"] = Field(default="auto")
+    """How to interpret x_axis values for sorting/parsing: "auto" detects numbers vs text (the previous behavior); "number" and "date" force numeric/timestamp parsing even when values look like text; "category" always sorts/groups them as plain text, e.g. to keep "v2" before "v10" instead of numeric order."""
     height: int = 300
-    width: int | None = Field(
-        default=None,
-        description="Overall chart width in px. Leave blank to size it automatically from height.",
-    )
+    width: int | None = Field(default=None)
+    """Overall chart width in px. Leave blank to size it automatically from height."""
     max_axis_label_chars: MaxAxisLabelChars = DEFAULT_MAX_AXIS_LABEL_CHARS
+    """Longest axis title, in characters. A longer metric name is shortened to its last characters behind an ellipsis, so it stays inside the chart; raise it for a taller or wider chart."""
 
 
 def _resolve_column(dataframe: pd.DataFrame, name: str) -> str:

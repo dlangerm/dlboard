@@ -223,7 +223,9 @@ def main() -> None:
         "character-classification",
         "mnist",
         "Classifying characters",
-        server_url=os.environ.get("DLBOARD_SERVER_URL", "http://localhost:8050"),
+        server_url=os.environ.get(  # dlboard-ignore[forbid-string-ignore]
+            "DLBOARD_SERVER_URL", "http://localhost:8050"
+        ),
     )
     log_startup_mosaic(logger, data_dir="./.data")
 

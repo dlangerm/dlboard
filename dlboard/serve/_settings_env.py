@@ -23,4 +23,4 @@ def set_setting_env(settings_cls: type[BaseSettings], field_name: str, value: ob
         msg = f"{settings_cls.__qualname__} has no field {field_name!r}"
         raise AttributeError(msg)
     prefix = settings_cls.model_config.get("env_prefix", "")
-    os.environ[f"{prefix}{field_name}".upper()] = str(value)
+    os.environ[f"{prefix}{field_name}".upper()] = str(value)  # dlboard-ignore[forbid-string-ignore]

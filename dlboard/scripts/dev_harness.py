@@ -100,7 +100,9 @@ def start(
     directory.mkdir(parents=True, exist_ok=True)
     if _state_path(directory).exists():
         existing = _load_state(directory)
-        print(f"Already running at {existing.base_url} (pid {existing.pid}) -- stop it first.")
+        print(  # dlboard-ignore[forbid-string-ignore]
+            f"Already running at {existing.base_url} (pid {existing.pid}) -- stop it first."
+        )
         raise SystemExit(1)
 
     resolved_port = port or _free_port()
@@ -127,10 +129,14 @@ def start(
     state = HarnessState(pid=process.pid, host=host, port=resolved_port, directory=str(directory))
     _wait_until_serving(state.base_url)
     _state_path(directory).write_text(json.dumps(asdict(state), indent=2))
-    print(f"Serving at {state.base_url}")
-    print(f"Scratch dir: {directory}")
-    print(f"Seed with:   uv run python dlboard/scripts/dev_harness.py seed --dir {directory}")
-    print(f"Stop with:   uv run python dlboard/scripts/dev_harness.py stop --dir {directory}")
+    print(f"Serving at {state.base_url}")  # dlboard-ignore[forbid-string-ignore]
+    print(f"Scratch dir: {directory}")  # dlboard-ignore[forbid-string-ignore]
+    print(  # dlboard-ignore[forbid-string-ignore]
+        f"Seed with:   uv run python dlboard/scripts/dev_harness.py seed --dir {directory}"
+    )
+    print(  # dlboard-ignore[forbid-string-ignore]
+        f"Stop with:   uv run python dlboard/scripts/dev_harness.py stop --dir {directory}"
+    )
 
 
 @app.command
@@ -143,7 +149,7 @@ def stop(*, directory: Annotated[Path, cyclopts.Parameter(name="--dir")]) -> Non
     with contextlib.suppress(ProcessLookupError):
         os.killpg(state.pid, signal.SIGTERM)
     shutil.rmtree(directory, ignore_errors=True)
-    print(f"Stopped process group {state.pid}, removed {directory}")
+    print(f"Stopped process group {state.pid}, removed {directory}")  # dlboard-ignore[forbid-string-ignore]
 
 
 @dataclass(frozen=True)
@@ -213,8 +219,10 @@ def seed(  # noqa: PLR0913
                 ]
             )
 
-    print(json.dumps(asdict(SeedResult(project_id=proj.id, experiment_id=exp.id, run_ids=run_ids)), indent=2))
-    print(f"{resolved_base_url}/experiment/{exp.id}")
+    print(  # dlboard-ignore[forbid-string-ignore]
+        json.dumps(asdict(SeedResult(project_id=proj.id, experiment_id=exp.id, run_ids=run_ids)), indent=2)
+    )
+    print(f"{resolved_base_url}/experiment/{exp.id}")  # dlboard-ignore[forbid-string-ignore]
 
 
 def main() -> None:

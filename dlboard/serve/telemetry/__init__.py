@@ -275,7 +275,10 @@ class Attributes:
 
     def as_otel(self) -> dict[str, AttributeValue]:
         """The labels, under the names `attribute` gave them."""
-        return {str(f.metadata[_KEY]): getattr(self, f.name) for f in fields(self)}
+        return {
+            str(f.metadata[_KEY]): getattr(self, f.name)  # dlboard-ignore[forbid-string-ignore]
+            for f in fields(self)
+        }
 
 
 @dataclass(frozen=True, slots=True)

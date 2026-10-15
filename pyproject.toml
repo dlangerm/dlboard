@@ -263,7 +263,9 @@ ignore_decorators = [
   # an `@override` method changes the class's contract regardless of whether *this* codebase
   # happens to call it today, so it isn't "dead" in the disposal sense even when flagged.
   "@override",
-  "@typing.override"
+  "@typing.override",
+  # Flasks g. object -- a request-scoped namespace Flask itself reads/writes, never called by name from our own code.
+  "g.*"
 ]
 ignore_names = [
   # `plugins/auth/password.py`'s `_Field`/`_Footer` NamedTuple members -- read by `password_form.html` (Jinja attribute

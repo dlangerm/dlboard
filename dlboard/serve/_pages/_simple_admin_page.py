@@ -30,6 +30,8 @@ from dlboard.serve._pages._dash_helpers import require_triggered_id
 from dlboard.serve._url import relative_path
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from dash.development.base_component import Component
 
     from dlboard.models import AuditLogEntry, DataStore, InstalledPlugin, User
@@ -69,24 +71,41 @@ _TRASH_KINDS: tuple[tuple[str, models.EntityType], ...] = (
     ("Artifact", models.EntityType.ARTIFACT),
 )
 
-_LISTERS: dict[models.EntityType, str] = {
-    models.EntityType.PROJECT: "list_deleted_projects",
-    models.EntityType.EXPERIMENT: "list_deleted_experiments",
-    models.EntityType.RUN: "list_deleted_runs",
-    models.EntityType.ARTIFACT: "list_deleted_artifacts",
-}
-_RESTORERS: dict[models.EntityType, str] = {
-    models.EntityType.PROJECT: "restore_project",
-    models.EntityType.EXPERIMENT: "restore_experiment",
-    models.EntityType.RUN: "restore_run",
-    models.EntityType.ARTIFACT: "restore_artifact",
-}
-_PURGERS: dict[models.EntityType, str] = {
-    models.EntityType.PROJECT: "purge_project",
-    models.EntityType.EXPERIMENT: "purge_experiment",
-    models.EntityType.RUN: "purge_run",
-    models.EntityType.ARTIFACT: "purge_artifact",
-}
+
+def _list_deleted(store: DataStore[...], entity_type: models.EntityType, limit: int) -> Iterable[Any]:
+    match entity_type:
+        case models.EntityType.PROJECT:
+            return store.list_deleted_projects(limit=limit)
+        case models.EntityType.EXPERIMENT:
+            return store.list_deleted_experiments(limit=limit)
+        case models.EntityType.RUN:
+            return store.list_deleted_runs(limit=limit)
+        case models.EntityType.ARTIFACT:
+            return store.list_deleted_artifacts(limit=limit)
+
+
+def _restore(store: DataStore[...], entity_type: models.EntityType, entity_id: int, actor: User) -> None:
+    match entity_type:
+        case models.EntityType.PROJECT:
+            store.restore_project(entity_id, actor)
+        case models.EntityType.EXPERIMENT:
+            store.restore_experiment(entity_id, actor)
+        case models.EntityType.RUN:
+            store.restore_run(entity_id, actor)
+        case models.EntityType.ARTIFACT:
+            store.restore_artifact(entity_id, actor)
+
+
+def _purge(store: DataStore[...], entity_type: models.EntityType, entity_id: int, actor: User) -> None:
+    match entity_type:
+        case models.EntityType.PROJECT:
+            store.purge_project(entity_id, actor)
+        case models.EntityType.EXPERIMENT:
+            store.purge_experiment(entity_id, actor)
+        case models.EntityType.RUN:
+            store.purge_run(entity_id, actor)
+        case models.EntityType.ARTIFACT:
+            store.purge_artifact(entity_id, actor)
 
 
 def _trash_row(label: str, entity_type: models.EntityType, item: Any) -> Component:  # noqa: ANN401
@@ -207,10 +226,7 @@ def _render_trash(store: DataStore[...]) -> Component:
     if banner is not None:
         sections.append(banner)
     for label, entity_type in _TRASH_KINDS:
-        items = list(
-            # pyrefly: ignore [unknown-argument-type]
-            getattr(store, _LISTERS[entity_type])(limit=_TRASH_PAGE_SIZE_PER_KIND)
-        )
+        items = list(_list_deleted(store, entity_type, limit=_TRASH_PAGE_SIZE_PER_KIND))
         if items:
             sections.append(_render_trash_kind(label, entity_type, items))
     if not sections:
@@ -426,7 +442,9 @@ def _render_about(
                             [
                                 dmc.Text("Storage backend", size="sm"),
                                 dmc.Badge(
-                                    getattr(store, "backend_name", store.__class__.__name__),
+                                    getattr(  # dlboard-ignore[forbid-string-ignore]
+                                        store, "backend_name", store.__class__.__name__
+                                    ),
                                     variant="light",
                                     color="gray",
                                     size="sm",
@@ -564,7 +582,7 @@ def _register_restore_callback(app: Dash) -> None:
         store = get_data_store()
         actor = get_current_user()
         try:
-            getattr(store, _RESTORERS[entity_type])(entity_id, actor)
+            _restore(store, entity_type, entity_id, actor)
         except (ValueError, PermissionError):
             _log.exception("Failed to restore %s %s", entity_type, entity_id)
         return relative_path("/admin"), True
@@ -611,7 +629,7 @@ def _register_purge_callbacks(app: Dash) -> None:
         store = get_data_store()
         actor = get_current_user()
         try:
-            getattr(store, _PURGERS[entity_type])(entity_id, actor)
+            _purge(store, entity_type, entity_id, actor)
         except (ValueError, PermissionError):
             _log.exception("Failed to purge %s %s", entity_type, entity_id)
         else:

@@ -178,8 +178,7 @@ class ParameterField(BaseModel, frozen=True, extra="forbid"):
     columns: tuple[ParameterField, ...] | None = None
     """For a `TABLE` field, a descriptor of each field of its row model: the cells of a row after its key."""
     description: str | None = None
-    """Help text shown alongside the field's widget, sourced from the settings model's own
-    `pydantic.Field(description=...)`."""
+    """Help text shown alongside the field's widget: the field's attribute docstring on the settings model."""
 
 
 class UnknownChartTypeError(KeyError):

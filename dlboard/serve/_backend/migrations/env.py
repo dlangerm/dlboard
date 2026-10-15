@@ -32,11 +32,11 @@ Postgres, where that's exactly how a past mistake here was actually found).
 
 from __future__ import annotations
 
-import os
 from typing import TYPE_CHECKING, Literal
 
 import sqlalchemy as sa
 from alembic import context  # pyrefly: ignore [implicit-reexport]
+from pydantic_settings import BaseSettings
 
 from dlboard.serve import sql
 from dlboard.serve._backend._sql_store_base import build_metadata
@@ -67,6 +67,13 @@ def _render_item(type_: str, obj: object, autogen_context: AutogenContext) -> st
     return False
 
 
+class _MigrationsEnv(BaseSettings):
+    """Env vars the `alembic` CLI reads when there's no live connection -- see the module docstring."""
+
+    dlboard_migrations_url: str
+    """SQLAlchemy URL of the throwaway database to generate revisions against."""
+
+
 def run_migrations_online() -> None:
     """Run migrations against whichever connection this invocation was given (see module docstring)."""
     connection = config.attributes.get("connection")
@@ -82,7 +89,7 @@ def run_migrations_online() -> None:
             context.run_migrations()
         return
 
-    engine = sa.create_engine(os.environ["DLBOARD_MIGRATIONS_URL"])
+    engine = sa.create_engine(_MigrationsEnv().dlboard_migrations_url)
     try:
         with engine.connect() as cli_connection:
             context.configure(

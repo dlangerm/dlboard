@@ -21,13 +21,11 @@ Recharts' default is narrower than a long tick and the title together, so they w
 MIN_MAX_AXIS_LABEL_CHARS: Final = 12
 """Room for a bar chart's `median(...)` wrapper around at least a few characters of the name."""
 
+# Its help text is an attribute docstring on each settings class that uses this alias: pydantic reads docstrings
+# from class bodies, not from an alias.
 MaxAxisLabelChars = Annotated[
     int,
-    Field(
-        ge=MIN_MAX_AXIS_LABEL_CHARS,
-        description="Longest axis title, in characters. A longer metric name is shortened to its last "
-        "characters behind an ellipsis, so it stays inside the chart; raise it for a taller or wider chart.",
-    ),
+    Field(ge=MIN_MAX_AXIS_LABEL_CHARS),
 ]
 """A chart setting: how long an axis title may be before it is shortened by `fit_axis_label`."""
 

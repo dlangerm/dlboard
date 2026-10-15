@@ -39,45 +39,24 @@ MAX_SLIDER_LABELS = 10
 _log = get_logger(__name__)
 
 
-class ImageChartSettings(BaseModel, frozen=True, extra="forbid"):
+class ImageChartSettings(BaseModel, frozen=True, extra="forbid", use_attribute_docstrings=True):
     """Image chart settings."""
 
     key: str
     x_axis: str = "step"
     height: int = 220
-    width: int | None = Field(
-        default=None,
-        description="Overall chart width in px. Leave blank to size it automatically from "
-        "height (the default). Unrelated to native_size below, which only affects individual "
-        "thumbnails.",
-    )
-    native_size: bool = Field(
-        default=False,
-        description="Show each thumbnail at its logged resolution (capped by height, never "
-        "upscaled) instead of stretching small images to fill the thumbnail box. Only affects "
-        "individual thumbnails, not the chart's overall width above.",
-    )
-    tag_precision: int = Field(
-        default=DEFAULT_TAG_PRECISION,
-        ge=1,
-        le=15,
-        description="Significant digits the numbers in an image's caption (its tags) are shown with.",
-    )
-    tag_time_unit: TimeUnit | None = Field(
-        default=None,
-        description="Show tags logged as a duration in this unit, whatever unit they were logged in. "
-        "Leave blank to pick the largest unit that fits each one.",
-    )
-    tag_size_unit: SizeUnit | None = Field(
-        default=None,
-        description="Show tags logged as a data size in this unit, whatever unit they were logged in. "
-        "Leave blank to pick the largest unit that fits each one.",
-    )
-    tag_display: dict[str, TagDisplay] = Field(
-        default_factory=dict,
-        description="Display settings for particular tags, a row per tag name, taking the place of the "
-        "three above for that tag. Leave a cell blank to keep the chart's own setting.",
-    )
+    width: int | None = Field(default=None)
+    """Overall chart width in px. Leave blank to size it automatically from height (the default). Unrelated to native_size below, which only affects individual thumbnails."""
+    native_size: bool = Field(default=False)
+    """Show each thumbnail at its logged resolution (capped by height, never upscaled) instead of stretching small images to fill the thumbnail box. Only affects individual thumbnails, not the chart's overall width above."""
+    tag_precision: int = Field(default=DEFAULT_TAG_PRECISION, ge=1, le=15)
+    """Significant digits the numbers in an image's caption (its tags) are shown with."""
+    tag_time_unit: TimeUnit | None = Field(default=None)
+    """Show tags logged as a duration in this unit, whatever unit they were logged in. Leave blank to pick the largest unit that fits each one."""
+    tag_size_unit: SizeUnit | None = Field(default=None)
+    """Show tags logged as a data size in this unit, whatever unit they were logged in. Leave blank to pick the largest unit that fits each one."""
+    tag_display: dict[str, TagDisplay] = Field(default_factory=dict)
+    """Display settings for particular tags, a row per tag name, taking the place of the three above for that tag. Leave a cell blank to keep the chart's own setting."""
 
     @property
     def tag_defaults(self) -> TagDisplay:

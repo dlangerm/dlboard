@@ -240,15 +240,14 @@ def insert(table: sa.Table, model: BaseModel) -> sa.Insert:
     Only `model`'s own fields are written: a `New*` model doesn't declare server-managed columns
     (`id`, `deleted_at`, ...), which are left to the database's identity/default/NULL instead.
     """
-    exclude = frozenset[str]({ID_KEY}) if getattr(model, ID_KEY, None) is None else frozenset[str]()
-    return sa.insert(table).values(row_values(model, exclude=exclude)).returning(table)
+    values = row_values(model)
+    if values.get(ID_KEY) is None:
+        values.pop(ID_KEY, None)
+    return sa.insert(table).values(values).returning(table)
 
 
 def update(table: sa.Table, model: BaseModel) -> sa.Update:
     """Update the row `model` was read from. Never writes a `_NEVER_UPDATE_FIELDS` column -- see its docstring."""
-    return (
-        sa.update(table)
-        .where(table.c[ID_KEY] == getattr(model, ID_KEY))  # pyrefly: ignore [unknown-argument-type]
-        .values(row_values(model, exclude=frozenset({ID_KEY, *_NEVER_UPDATE_FIELDS})))
-        .returning(table)
-    )
+    values = row_values(model, exclude=_NEVER_UPDATE_FIELDS)
+    row_id: int = values.pop(ID_KEY)
+    return sa.update(table).where(table.c[ID_KEY] == row_id).values(values).returning(table)
