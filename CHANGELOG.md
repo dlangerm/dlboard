@@ -12,6 +12,28 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ## [Unreleased]
 
+### Added
+
+* A **table chart's rows are a setting you choose**: a run, each value of a metric (`step`, `epoch`, ...), or each
+  logged artifact. With rows of a metric, `spread_by_run` puts the runs side by side, so "a row per epoch, each
+  run's latest image of that epoch" is one table. What a run logged between two values of the metric belongs to
+  the earlier one. A metric can also be reduced to its first, minimum, maximum or mean (`aggregate`) instead of
+  its latest. See [docs/plugins/charts.md](docs/plugins/charts.md).
+* A table's metrics, hyperparameters and artifacts take **names or a prefix and `*`** (`eval/*`, or `*` for all).
+  In the chart editor you can type a prefix instead of picking from the keys logged so far, and a prefix also
+  matches keys logged later.
+
+### Changed
+
+* A table chart's `mode` (`runs`, `pivot`, `artifacts`) is replaced by `rows`, `row_field`, `spread_by_run`,
+  `show_metrics`, `show_hparams` and `show_artifacts`. A table saved with the old settings opens as the new ones that
+  show the same table, in the chart editor too.
+
+### Fixed
+
+* A table chart can show **no hyperparameters** (or no metrics): an empty list used to mean "all", so choosing
+  only an artifact brought every hyperparameter and metric along. New tables still start with all of both.
+
 ## [0.7.0] - 2026-10-14
 
 ### Added

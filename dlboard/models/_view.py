@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import itertools
 import json
@@ -78,8 +79,24 @@ class ParameterFieldType(StrEnum):
     FLOAT = "float"
     STR = "str"
     LIST_STR = "list[str]"
+    LIST_PATTERN = "list[pattern]"
+    """A `list[str]` of names, each of which may instead be a prefix ending in `*` (see `NamePatterns`)."""
     TABLE = "table"
     """A `dict[str, Model]`, edited as a table with a row per entry: its key, then a cell per field of `Model`."""
+
+
+@dataclasses.dataclass(frozen=True)
+class NamePatterns:
+    """
+    Marks a `list[str]` setting as taking names or `prefix*` patterns, not only names that exist.
+
+    The editor offers the experiment's names as suggestions but lets anything be typed, which is how a
+    setting can ask for every key under a prefix, including ones logged later.
+    """
+
+
+NamePatternList = typing.Annotated[list[str], NamePatterns()]
+"""The type of a setting marked `NamePatterns`."""
 
 
 class ChartType(ABC, BaseModel, typing.Generic[_Parameters, _Dataframe, _Chart], frozen=True, extra="forbid"):
@@ -284,6 +301,8 @@ class ChartTypeRegistry:
         field_descriptors: dict[str, ParameterField] = {}
         for field_name, field in parameter_type.model_fields.items():
             field_type, choices = _widget_for(field.annotation)
+            if field_type == ParameterFieldType.LIST_STR and NamePatterns() in field.metadata:
+                field_type = ParameterFieldType.LIST_PATTERN
             columns = (
                 tuple(
                     ChartTypeRegistry._describe_parameter_fields(
@@ -312,6 +331,20 @@ class ChartTypeRegistry:
         """The registered chart type for `chart`, plus its parameters validated against that type's own model."""
         chart_type = cls.get_chart_type(chart.chart_type)
         return chart_type, chart_type.parameter_type().model_validate(chart.parameters)
+
+    @classmethod
+    def current_parameters(cls, chart: ChartInstance[_Dataframe, _Chart]) -> dict[str, object]:
+        """
+        `chart`'s settings as its chart type reads them now: what a form for editing it starts from.
+
+        A chart saved before a setting was renamed or reshaped still loads (its type translates it), so
+        a form built from the saved dict alone would show the new settings' defaults over it. A chart
+        that no longer validates, or whose type is not installed, is edited as it was saved.
+        """
+        try:
+            return cls._typed_chart(chart)[1].model_dump(mode="json")
+        except (ValidationError, UnknownChartTypeError):
+            return chart.parameters
 
     @classmethod
     def render(

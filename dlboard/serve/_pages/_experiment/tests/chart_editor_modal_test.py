@@ -66,8 +66,36 @@ def test_build_chart_param_form_offers_the_experiments_columns(
 
     assert set(line["column"]["data"]) >= {"loss", "acc"}
     assert "step" in line["x_axis"]["data"]
-    assert set(table["metrics"]["data"]) >= {"loss", "acc"}
-    assert table["hparams"]["data"] == ["lr"]
+    assert set(table["show_metrics"]["data"]) >= {"loss", "acc"}
+    assert set(table["show_hparams"]["data"]) == {"*", "lr"}
+
+
+def test_a_table_takes_typed_names_and_prefixes_not_only_those_that_exist(
+    store: SQLLiteStore, experiment_id: int
+) -> None:
+    _log_a_run(store, experiment_id)
+    table = _props_by_field(build_chart_param_form("table", None, store=store, experiment_id=experiment_id))
+
+    assert table["show_metrics"]["value"] == ["*"]
+    assert table["show_artifacts"]["value"] == []
+
+
+@pytest.mark.parametrize(
+    ("names", "suggestions"),
+    [
+        pytest.param([], ["*"], id="nothing-logged"),
+        pytest.param(["loss", "acc"], ["*", "acc", "loss"], id="no-folders"),
+        pytest.param(
+            ["eval/a", "eval/deep/b", "z"],
+            ["*", "eval/*", "eval/deep/*", "eval/a", "eval/deep/b", "z"],
+            id="a-prefix-for-every-folder",
+        ),
+    ],
+)
+def test_the_names_to_show_are_suggested_with_a_prefix_for_each_folder(
+    names: list[str], suggestions: list[str]
+) -> None:
+    assert editor._pattern_suggestions(names) == suggestions
 
 
 def test_render_chart_preview_leaves_out_excluded_runs_like_the_real_panel(

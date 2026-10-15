@@ -2379,3 +2379,49 @@ def test_a_table_of_artifacts_shows_thumbnails_and_sorts_by_a_tag(
         shown = chart.locator(f".ag-center-cols-container .ag-row[row-index='{row_index}'] .ag-cell")
         expect(shown.and_(page.locator("[col-id='artifact__tag__score']"))).to_have_text(expected)
     assert console_errors == []
+
+
+def test_a_tables_editor_opens_an_old_table_as_its_new_settings_and_takes_a_typed_prefix(
+    page: Page, live_server_url: str, tmp_path: Path
+) -> None:
+    """A table saved with the old `mode` settings is edited as the ones that replaced them, and a prefix can be typed."""
+    _create_project_and_experiment(page, live_server_url, "Table Editor Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    api = BasicDlboardAPI(live_server_url)
+    run = api.create_run(models.NewRun(experiment_id=experiment_id))
+    pixels = np.zeros((8, 8, 3), dtype=np.uint8)
+    api.log_artifact_batch(
+        [
+            Image(key=key, image=pixels, step=0).to_artifact(tmp_path, run.id, experiment_id)
+            for key in ("eval/a", "eval/b", "other/c")
+        ]
+    )
+    _wait_for_artifacts(experiment_id, 3)
+
+    store = get_system_data_store()
+    shared = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
+    table = models.ChartInstance[Any, Any](
+        chart_type="table",
+        parameters={"mode": "artifacts", "artifact_key": "eval/", "artifact_key_is_prefix": True},
+    )
+    store.update_page(
+        shared.model_copy(update={"panels": [PanelInstance[Any, Any](name="Samples", charts=[table])]})
+    )
+    page.reload()
+
+    chart = page.locator(".dl-chart-item")
+    images = chart.locator(".ag-cell img")
+    expect(images).to_have_count(2)
+    chart.hover()
+    chart.get_by_role("button", name="Edit chart").click()
+
+    editor = page.get_by_role("dialog")
+    shown = editor.locator(".mantine-Pill-root", has_text="eval/*")
+    expect(shown).to_have_count(1)  # the old `artifact_key` and `artifact_key_is_prefix`, as one prefix
+    shown.locator(".mantine-Pill-remove").click()
+    editor.get_by_label("show_artifacts").fill("other/*")  # not a key: a prefix, typed
+    page.keyboard.press("Enter")
+    page.locator(f"#{ADD_CHART_SUBMIT_ID}").click()
+
+    expect(images).to_have_count(1)

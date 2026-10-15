@@ -235,6 +235,12 @@ def _table_input(
     )
 
 
+def _pattern_suggestions(names: list[str]) -> list[str]:
+    """`names` and the `prefix*` of each folder they sit in (`eval/a`, `eval/b` suggest `eval/*`), and `*` for all."""
+    folders = {name[: i + 1] for name in names for i, char in enumerate(name) if char == "/"}
+    return ["*", *sorted(f"{folder}*" for folder in folders), *sorted(names)]
+
+
 def _param_field_input(  # noqa: PLR0911
     field_name: str,
     field: models.ParameterField,
@@ -281,6 +287,17 @@ def _param_field_input(  # noqa: PLR0911
             )
         case models.ParameterFieldType.TABLE:
             return _table_input(field_name, field, label, cast("dict[str, dict[str, Any]]", value or {}))
+        case models.ParameterFieldType.LIST_PATTERN:
+            names = catalog.options(field.column_kind) if field.column_kind is not None else list[str]()
+            return dmc.TagsInput(
+                id=input_id,
+                label=label,
+                data=_pattern_suggestions(names),
+                value=cast("list[str]", value or []),
+                description=field.description,
+                placeholder="Pick a name, or type one or a prefix ending in *",
+                clearable=True,
+            )
         case models.ParameterFieldType.STR | models.ParameterFieldType.LIST_STR:
             if field.choices is not None:
                 select_value = cast("str | None", value)
@@ -384,7 +401,7 @@ def _register_open_close(app: Dash) -> None:
             True,
             {"panel": triggered_id["panel"], "index": idx},
             chart.chart_type,
-            chart.parameters,
+            models.ChartTypeRegistry.current_parameters(chart),
             False,
         )
 

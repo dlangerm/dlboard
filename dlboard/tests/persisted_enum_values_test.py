@@ -20,10 +20,11 @@ import pytest
 
 from dlboard.models import AuditAction, EntityType, ExperimentSource, FileKind, ProjectRole, RunStatus, Scope
 from dlboard.models._metric import MetricColumn
+from dlboard.plugins.charts._table_settings import Aggregate, TableMode, TableRows
 from dlboard.plugins.charts.bar_chart import BarChart
 from dlboard.plugins.charts.image_series import ImageChart
 from dlboard.plugins.charts.line_chart import LineChart
-from dlboard.plugins.charts.table_chart import TableChart, TableMode
+from dlboard.plugins.charts.table_chart import TableChart
 
 if typing.TYPE_CHECKING:
     from dlboard._compat import StrEnum
@@ -51,6 +52,8 @@ _FROZEN_ENUM_VALUES: dict[type[StrEnum], frozenset[str]] = {
     RunStatus: frozenset({"running", "finished", "failed", "unknown"}),
     MetricColumn: frozenset({"run_id", "step", "timestamp_utc"}),
     TableMode: frozenset({"runs", "pivot", "artifacts"}),
+    TableRows: frozenset({"run", "field", "artifact"}),
+    Aggregate: frozenset({"latest", "first", "min", "max", "mean"}),
 }
 
 

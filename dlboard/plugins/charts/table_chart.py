@@ -1,17 +1,17 @@
 """
-A plain data table: metrics and hyperparameters side by side.
+A data table over a panel's metrics, hyperparameters and artifacts.
 
-Three modes (`TableMode`):
-- "runs" (the default): one row per run, showing each run's hyperparameters alongside its latest-logged
-  value for each metric — the same shape as the experiment page's Runs table — and, for each key in
-  `artifacts`, its latest artifact under that key with the artifact's tags.
-- "pivot": compare a single metric across runs side by side, one row per `pivot_on` value (e.g. "step"),
-  one column per run.
-- "artifacts": one row per logged artifact under `artifact_key` (or every key under it as a prefix), with
-  its tags as columns to sort and filter by -- for finding a sample among hundreds.
+What a row is (`TableRows`) and what the columns show (`show_metrics`, `show_hparams`, `show_artifacts`) are
+settings of their own, so one table can be any of the shapes people ask for:
+- one row per run (the default): each run's hyperparameters beside its latest value of each metric -- the same
+  shape as the experiment page's Runs table -- and its latest artifact under each key shown, with the tags.
+- one row per value of a metric (`row_field`: `step`, `epoch`, ...): of each run in turn, or with the runs
+  side by side (`spread_by_run`), a column group each. A metric logged less often than the row field belongs to
+  the latest value before it, so an artifact logged mid-epoch is in that epoch's row.
+- one row per logged artifact, with its tags as columns to sort and filter by -- for finding a sample among hundreds.
 
-Either way a run is named and colored as it is in the charts and the Runs table, and the grid keeps its
-sort and filters (and page) when a live update redraws it: see `_table`.
+A run is named and colored as it is in the charts and the Runs table, and the grid keeps its sort and filters
+(and page) when a live update redraws it: see `_table`.
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import re
 import typing
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -26,9 +27,7 @@ import dash
 import dash_ag_grid as dag
 import pandas as pd
 from dash import MATCH, Input, Output, State
-from pydantic import BaseModel, Field, model_validator
 
-from dlboard._compat import StrEnum
 from dlboard.models import (
     ARTIFACT_COLUMN_PREFIX,
     DEFAULT_RENDER_CONTEXT,
@@ -47,6 +46,8 @@ from dlboard.models import (
     is_inlineable_artifact,
 )
 from dlboard.plugins.charts._artifact_tags import parse_tags
+from dlboard.plugins.charts._key_patterns import KeyPatterns
+from dlboard.plugins.charts._table_settings import Aggregate, TableChartSettings, TableRows
 from dlboard.serve import AssetKind, ClientsideScript, series_swatch_class, serve_asset
 from dlboard.serve._grid import (
     DEFAULT_TABLE_FONT_SIZE,
@@ -59,6 +60,7 @@ from dlboard.serve._grid import (
 
 _IDENTITY_COLS = frozenset({MetricColumn.RUN_ID, RUN_NAME_COLUMN})
 _BOOKKEEPING_COLS = frozenset({*MetricColumn, RUN_NAME_COLUMN})
+_NOT_METRIC_PREFIXES: typing.Final = (HPARAM_COLUMN_PREFIX, ARTIFACT_COLUMN_PREFIX)
 
 _GRID_TYPE: typing.Final = "dl-table-chart"
 """The `type` of a table chart's grid id (`{"type": ..., "chart": <chart id>}`), for its page-restoring callback."""
@@ -75,64 +77,6 @@ _CSS_PATH = Path(__file__).with_name("table_chart.css")
 
 _THUMBNAIL_ROW_HEIGHT: typing.Final = 64
 """A row tall enough for an image thumbnail (`table_chart.css` fits the image to it), when the table has any."""
-
-
-class TableMode(StrEnum):
-    """What a table's rows are. Saved with a chart, so a value is never renamed (`persisted_enum_values_test`)."""
-
-    RUNS = "runs"
-    """One row per run: its hyperparameters beside the latest value of each metric, and of each of `artifacts`."""
-    PIVOT = "pivot"
-    """One row per value of `pivot_on`, one column per run, comparing `pivot_metric` across runs."""
-    ARTIFACTS = "artifacts"
-    """One row per logged artifact under `artifact_key`, with its tags as columns."""
-
-
-class TableChartSettings(BaseModel, frozen=True, extra="forbid", use_attribute_docstrings=True):
-    """Table chart settings."""
-
-    mode: TableMode = Field(default=TableMode.RUNS)
-    """What the rows are: one per run, one per `pivot_on` value with a column per run, or one per artifact."""
-    metrics: list[str] = Field(default_factory=list)
-    """Runs mode: metric column names to show; empty shows every metric (each run's latest value) -- unless hparams is set without this, which is read as "hparams only" rather than "every metric too"."""
-    hparams: list[str] = Field(default_factory=list)
-    """Runs mode: hyperparameter keys to show; empty shows every hyperparameter."""
-    pivot_on: str = Field(default="")
-    """Pivot mode: a metric column (e.g. "step") to make the rows, comparing pivot_metric across runs side by side."""
-    pivot_metric: str = Field(default="")
-    """Pivot mode: which metric's values fill the table."""
-    artifacts: list[str] = Field(default_factory=list)
-    """Runs mode: artifact keys to add as columns, each showing the run's latest artifact under that key (an image as a thumbnail) and its tags."""
-    artifact_key: str = Field(default="")
-    """Artifacts mode: the artifact key to list. With `artifact_key_is_prefix`, every key that starts with it (say `eval/`), including any logged later."""
-    artifact_key_is_prefix: bool = Field(default=False)
-    """Artifacts mode: list every key under `artifact_key`, not just that one."""
-    page_size: int = Field(default=20, ge=1)
-    """How many rows each page of the table shows."""
-    font_size: int | None = Field(default=None)
-    """Cell/header font size in pixels. Leave unset to use the same (smaller) default as the rest of the charts; set this to size the table up."""
-    width: int | None = Field(default=None)
-    """Overall chart width in px. Leave blank to use the default flat width."""
-
-    @model_validator(mode="before")
-    @classmethod
-    def _pivot_tables_saved_before_modes_existed(cls, data: object) -> object:
-        """A table saved with `pivot_on` set was a pivot table, whatever it says about `mode`."""
-        if isinstance(data, dict) and "mode" not in data and data.get("pivot_on"):
-            return {**data, "mode": TableMode.PIVOT}
-        return data
-
-    @model_validator(mode="after")
-    def _mode_has_what_it_needs(self) -> typing.Self:
-        match self.mode:
-            case TableMode.PIVOT if not (self.pivot_on and self.pivot_metric):
-                msg = "pivot mode needs both `pivot_on` and `pivot_metric`"
-                raise ValueError(msg)
-            case TableMode.ARTIFACTS if not self.artifact_key:
-                msg = "artifacts mode needs an `artifact_key`"
-                raise ValueError(msg)
-            case TableMode.RUNS | TableMode.PIVOT | TableMode.ARTIFACTS:
-                return self
 
 
 def _table(
@@ -233,6 +177,11 @@ def _run_cells(run_id: int, names: dict[int, str]) -> dict[str, Any]:
     }
 
 
+def _column_group(title: str, columns: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """`columns` under a `title` header, or nothing at all if there are none."""
+    return [{"headerName": title, "children": columns}] if columns else []
+
+
 def _markdown_text(text: str) -> str:
     """`text` as a literal in a Markdown link label: a file name is whatever the client logged it as."""
     return re.sub(r"([\\\[\]()*_`<>!])", r"\\\1", text)
@@ -288,23 +237,249 @@ def _artifact_columns(
     ]
 
 
-def _render_artifacts(
-    parameters: TableChartSettings, dataframe: pd.DataFrame, context: RenderContext
-) -> dag.AgGrid:
-    keys = artifact_keys_in(
-        dataframe.columns, parameters.artifact_key, prefix=parameters.artifact_key_is_prefix
+class _Columns(typing.NamedTuple):
+    """What a table shows, as names in the panel's dataframe (the artifacts by key)."""
+
+    metrics: list[str]
+    hparams: list[str]
+    artifacts: list[str]
+
+
+@dataclass(frozen=True)
+class _Source:
+    """What a table is drawn from: the panel's dataframe, in step order, and what of it the settings pick out."""
+
+    parameters: TableChartSettings
+    context: RenderContext
+    ordered: pd.DataFrame
+    columns: _Columns
+    names: dict[int, str]
+
+    def latest_artifacts(self, key: str, by: list[str]) -> pd.DataFrame:
+        """The last row logging an artifact under `key` of each group `by` names."""
+        return self.ordered.loc[self.ordered[artifact_column(key)].notna()].groupby(by).tail(1)
+
+
+def _selected_columns(parameters: TableChartSettings, dataframe: pd.DataFrame) -> _Columns:
+    """The metrics, hyperparameters and artifact keys the settings pick out of what `dataframe` has."""
+    columns = list(dataframe.columns)
+    hparam_keys = [
+        c.removeprefix(HPARAM_COLUMN_PREFIX) for c in columns if c.startswith(HPARAM_COLUMN_PREFIX)
+    ]
+    metric_cols = [
+        c for c in columns if c not in _BOOKKEEPING_COLS and not c.startswith(_NOT_METRIC_PREFIXES)
+    ]
+    # `step` and the like are a metric to ask for by name, never what `*` stands for.
+    bookkeeping = [c for c in MetricColumn if c in columns and c not in _IDENTITY_COLS]
+    match parameters.rows:
+        case TableRows.RUN:
+            has_a_column_of_its_own = set[str]()
+        case TableRows.FIELD:
+            has_a_column_of_its_own = {parameters.row_field}
+        case TableRows.ARTIFACT:
+            has_a_column_of_its_own = {MetricColumn.STEP}
+    metrics = KeyPatterns(tuple(parameters.show_metrics)).select(
+        [*metric_cols, *bookkeeping], reserved=bookkeeping
     )
-    names = _run_names(dataframe)
+    return _Columns(
+        metrics=[m for m in metrics if m not in has_a_column_of_its_own],
+        hparams=[
+            f"{HPARAM_COLUMN_PREFIX}{k}"
+            for k in KeyPatterns(tuple(parameters.show_hparams)).select(hparam_keys)
+        ],
+        artifacts=KeyPatterns(tuple(parameters.show_artifacts)).select(
+            artifact_keys_in(columns, "", prefix=True)
+        ),
+    )
+
+
+def _pandas_aggregate(aggregate: Aggregate) -> str:
+    match aggregate:
+        case Aggregate.LATEST:
+            return "last"
+        case Aggregate.FIRST:
+            return "first"
+        case Aggregate.MIN:
+            return "min"
+        case Aggregate.MAX:
+            return "max"
+        case Aggregate.MEAN:
+            return "mean"
+
+
+def _reduce(source: _Source, by: list[str], columns: _Columns) -> pd.DataFrame:
+    """
+    One row per distinct `by`, in that order: each of `columns`' metrics reduced as the settings say, each hyperparameter as is.
+
+    A reduction skips gaps, so a metric logged less often than the others (a per-epoch one) is its own latest
+    value in a run's row, not blank because the run's last step did not log it.
+    """
+    reduce = _pandas_aggregate(source.parameters.aggregate)
+    reducers = {
+        # A metric that is not a number (a timestamp, say) has no mean or minimum worth showing.
+        **{
+            c: reduce if pd.api.types.is_numeric_dtype(source.ordered[c]) else "last" for c in columns.metrics
+        },
+        **dict.fromkeys(columns.hparams, "last"),
+    }
+    grouped = source.ordered.groupby(by)
+    return grouped.agg(reducers).reset_index() if reducers else grouped.size().reset_index()[by]
+
+
+def _render_by_group(source: _Source) -> dag.AgGrid:
+    """A row per run, or per value of the row field of each run: the reduction of what the run logged for it."""
+    parameters, columns = source.parameters, source.columns
+    by = [MetricColumn.RUN_ID, *([parameters.row_field] if parameters.rows is TableRows.FIELD else [])]
+    rows: dict[tuple[Any, ...], dict[str, Any]] = {}
+    for record in _records(_reduce(source, by, columns)):
+        group = tuple(record[c] for c in by)
+        rows[group] = {
+            **record,
+            **_run_cells(int(record[MetricColumn.RUN_ID]), source.names),
+            _ROW_ID_FIELD: "/".join(map(str, group)),
+        }
+
+    artifacts: list[tuple[str, dict[str, str]]] = []
+    thumbnails = False
+    for key in columns.artifacts:
+        field = artifact_column(key)
+        tag_titles: dict[str, str] = {}
+        for _, artifact in source.latest_artifacts(key, by).iterrows():
+            found = _artifact_cells(field, artifact, key)
+            if (row := rows.get(tuple(artifact[c] for c in by))) is not None:
+                row.update(found.cells)
+            tag_titles |= found.tag_titles
+            thumbnails |= found.thumbnail
+        artifacts.append((key, tag_titles))
+
+    shown = [*columns.metrics, *(artifact_column(key) for key, _ in artifacts)]
+    if parameters.rows is TableRows.FIELD and shown:
+        # A value of the row field that none of what is shown was logged under (another chart's metric) is no row.
+        rows = {
+            group: row for group, row in rows.items() if any(row.get(field) is not None for field in shown)
+        }
+    records = list(rows.values())
+
+    artifact_title = "Latest" if parameters.rows is TableRows.RUN else "Artifact"
+    column_defs = [
+        _run_column(),
+        *(
+            [
+                column_def(
+                    parameters.row_field, infer_column_dtype(records, parameters.row_field), pinned="left"
+                )
+            ]
+            if parameters.rows is TableRows.FIELD
+            else []
+        ),
+        *_column_group(
+            "Hyperparameters",
+            [
+                column_def(c, infer_column_dtype(records, c), headerName=c.removeprefix(HPARAM_COLUMN_PREFIX))
+                for c in columns.hparams
+            ],
+        ),
+        *_column_group(
+            f"Metrics ({parameters.aggregate.value})",
+            [column_def(c, infer_column_dtype(records, c)) for c in columns.metrics],
+        ),
+        *(
+            group
+            for key, tag_titles in artifacts
+            for group in _column_group(
+                key, _artifact_columns(artifact_column(key), artifact_title, tag_titles, records)
+            )
+        ),
+    ]
+    return _table(column_defs, records, parameters=parameters, context=source.context, thumbnails=thumbnails)
+
+
+def _render_spread_by_run(source: _Source) -> dag.AgGrid:
+    """A row per value of the row field, with a column group for each run: what that run logged for it."""
+    parameters, columns = source.parameters, source.columns
+    by = [parameters.row_field, MetricColumn.RUN_ID]
+
+    def cell(run_id: int, field: str) -> str:
+        return f"{run_id}::{field}"
+
+    rows: dict[Any, dict[str, Any]] = {}
+    for record in _records(_reduce(source, by, columns._replace(hparams=[]))):
+        value = record[parameters.row_field]
+        row = rows.setdefault(value, {parameters.row_field: value, _ROW_ID_FIELD: str(value)})
+        for metric in columns.metrics:
+            row[cell(int(record[MetricColumn.RUN_ID]), metric)] = record[metric]
+
+    thumbnails = False
+    for key in columns.artifacts:
+        field = artifact_column(key)
+        for _, artifact in source.latest_artifacts(key, by).iterrows():
+            # A run's value of the row field is not an artifact's tags to compare: only its link is shown.
+            found = _artifact_cells(field, artifact, key)
+            if (row := rows.get(artifact[parameters.row_field])) is not None:
+                row[cell(int(artifact[MetricColumn.RUN_ID]), field)] = found.cells[field]
+            thumbnails |= found.thumbnail
+
+    # A value of the row field that nothing shown was logged under (another chart's metric) is no row.
+    records = [
+        row
+        for row in rows.values()
+        if any(
+            value is not None
+            for field, value in row.items()
+            if field not in {parameters.row_field, _ROW_ID_FIELD}
+        )
+    ]
+    column_defs: list[dict[str, Any]] = [
+        column_def(
+            parameters.row_field,
+            infer_column_dtype(records, parameters.row_field),
+            pinned="left",
+            minWidth=100,
+        )
+    ]
+    for run_id in sorted({int(run_id) for run_id in source.ordered[MetricColumn.RUN_ID]}):
+        leaves = [
+            column_def(
+                cell(run_id, metric), infer_column_dtype(records, cell(run_id, metric)), headerName=metric
+            )
+            for metric in columns.metrics
+        ] + [
+            column_def(
+                cell(run_id, artifact_column(key)),
+                TEXT,
+                headerName=key,
+                cellRenderer="markdown",
+                minWidth=160,
+            )
+            for key in columns.artifacts
+        ]
+        header = {
+            "headerName": source.names.get(run_id, f"Run {run_id}"),
+            "headerClass": series_swatch_class(run_id),
+        }
+        # One value per run is the run's own column; more are grouped under it.
+        column_defs.append({**leaves[0], **header} if len(leaves) == 1 else {**header, "children": leaves})
+    return _table(column_defs, records, parameters=parameters, context=source.context, thumbnails=thumbnails)
+
+
+def _render_artifact_rows(source: _Source) -> dag.AgGrid:
+    """A row per logged artifact, beside what its run logged at the same step."""
+    parameters, columns = source.parameters, source.columns
     rows: list[dict[str, Any]] = []
     tag_titles: dict[str, str] = {}
     thumbnails = False
-    for key in keys:
-        for _, artifact in dataframe.loc[dataframe[artifact_column(key)].notna()].iterrows():
+    for key in columns.artifacts:
+        logged = source.ordered.loc[source.ordered[artifact_column(key)].notna()]
+        beside_cols = [*columns.metrics, *columns.hparams]
+        # (A frame with no columns has no records, not an empty one per row.)
+        beside: list[dict[str, Any]] = _records(logged[beside_cols]) if beside_cols else [{}] * len(logged)
+        for (_, artifact), values in zip(logged.iterrows(), beside, strict=True):
             found = _artifact_cells(_ARTIFACT_FIELD, artifact, key)
             run_id, step = int(artifact[MetricColumn.RUN_ID]), int(artifact[MetricColumn.STEP])
             rows.append(
                 {
-                    **_run_cells(run_id, names),
+                    **values,
+                    **_run_cells(run_id, source.names),
                     MetricColumn.STEP: step,
                     "key": key,
                     **found.cells,
@@ -314,129 +489,28 @@ def _render_artifacts(
             tag_titles |= found.tag_titles
             thumbnails |= found.thumbnail
     if not rows:
-        return _message_table("No artifacts logged under this key yet.", parameters, context)
+        return _message_table("No artifacts logged under these keys yet.", parameters, source.context)
 
     rows.sort(key=lambda row: (row[MetricColumn.RUN_ID], row[MetricColumn.STEP], row["key"]))
     column_defs = [
         _run_column(),
         column_def(MetricColumn.STEP, NUMERIC, headerName="Step", maxWidth=110),
-        *([column_def("key", TEXT, headerName="Key")] if parameters.artifact_key_is_prefix else []),
+        *([column_def("key", TEXT, headerName="Key")] if len(columns.artifacts) > 1 else []),
         *_artifact_columns(_ARTIFACT_FIELD, "Artifact", tag_titles, rows),
-    ]
-    return _table(column_defs, rows, parameters=parameters, context=context, thumbnails=thumbnails)
-
-
-def _render_by_run(
-    parameters: TableChartSettings, dataframe: pd.DataFrame, context: RenderContext
-) -> dag.AgGrid:
-    hparam_cols = [c for c in dataframe.columns if c.startswith(HPARAM_COLUMN_PREFIX)]
-    if parameters.hparams:
-        wanted_hparams = {f"{HPARAM_COLUMN_PREFIX}{k}" for k in parameters.hparams}
-        hparam_cols = [c for c in hparam_cols if c in wanted_hparams]
-
-    metric_cols: list[str]
-    if parameters.metrics:
-        metric_cols = [c for c in parameters.metrics if c in dataframe.columns and c not in _IDENTITY_COLS]
-    elif parameters.hparams:
-        # Curating only hparams reads as "hparams only" (see `hint_required_columns`): the panel's
-        # dataframe still carries whatever metrics its sibling charts fetched, which are not ours.
-        metric_cols = []
-    else:
-        metric_cols = [
-            c
-            for c in dataframe.columns
-            if c not in _BOOKKEEPING_COLS
-            and not c.startswith(HPARAM_COLUMN_PREFIX)
-            and not c.startswith(ARTIFACT_COLUMN_PREFIX)
-        ]
-
-    # Each column's own latest value, as the Runs table shows: the wide dataframe has a row per step
-    # logged by *any* metric, so a run's last row is blank for one logged less often (a per-epoch metric).
-    by_step = (
-        dataframe.sort_values([MetricColumn.RUN_ID, MetricColumn.STEP])
-        if MetricColumn.STEP in dataframe.columns
-        else dataframe
-    )
-    latest = by_step.groupby(MetricColumn.RUN_ID)[[*hparam_cols, *metric_cols]].last().reset_index()
-    names = _run_names(dataframe)
-    rows = [
-        {
-            **record,
-            **_run_cells(int(record[MetricColumn.RUN_ID]), names),
-            _ROW_ID_FIELD: str(record[MetricColumn.RUN_ID]),
-        }
-        for record in _records(latest)
-    ]
-    row_of_run = {row[MetricColumn.RUN_ID]: row for row in rows}
-
-    def group(title: str, columns: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        return [{"headerName": title, "children": columns}] if columns else []
-
-    artifact_groups: list[dict[str, Any]] = []
-    thumbnails = False
-    for key in parameters.artifacts:
-        if artifact_column(key) not in dataframe.columns:
-            continue
-        # The run's latest artifact under the key: the last row of each run that has one.
-        logged = by_step.loc[by_step[artifact_column(key)].notna()].groupby(MetricColumn.RUN_ID).tail(1)
-        tag_titles: dict[str, str] = {}
-        field = artifact_column(key)
-        for _, artifact in logged.iterrows():
-            found = _artifact_cells(field, artifact, key)
-            row_of_run[int(artifact[MetricColumn.RUN_ID])].update(found.cells)
-            tag_titles |= found.tag_titles
-            thumbnails |= found.thumbnail
-        artifact_groups += group(key, _artifact_columns(field, "Latest", tag_titles, rows))
-
-    hparam_defs = [
-        column_def(col, infer_column_dtype(rows, col), headerName=col.removeprefix(HPARAM_COLUMN_PREFIX))
-        for col in hparam_cols
-    ]
-    metric_defs = [column_def(col, infer_column_dtype(rows, col)) for col in metric_cols]
-    column_defs = [
-        _run_column(),
-        *group("Hyperparameters", hparam_defs),
-        *group("Metrics (latest)", metric_defs),
-        *artifact_groups,
-    ]
-    return _table(column_defs, rows, parameters=parameters, context=context, thumbnails=thumbnails)
-
-
-def _render_pivoted(
-    parameters: TableChartSettings, dataframe: pd.DataFrame, context: RenderContext
-) -> dag.AgGrid:
-    if parameters.pivot_on not in dataframe.columns or parameters.pivot_metric not in dataframe.columns:
-        return _message_table("No data logged for the configured columns yet.", parameters, context)
-
-    df = dataframe.dropna(subset=[parameters.pivot_on, parameters.pivot_metric])
-    pivoted = df.pivot_table(
-        index=parameters.pivot_on, columns=MetricColumn.RUN_ID, values=parameters.pivot_metric, aggfunc="mean"
-    )
-    names = _run_names(dataframe)
-    run_ids = [int(run_id) for run_id in pivoted.columns]
-    pivoted.columns = [str(run_id) for run_id in run_ids]
-    pivoted = pivoted.reset_index()
-
-    rows = [{**record, _ROW_ID_FIELD: str(record[parameters.pivot_on])} for record in _records(pivoted)]
-    column_defs = [
-        column_def(
-            parameters.pivot_on, infer_column_dtype(rows, parameters.pivot_on), pinned="left", minWidth=100
+        *_column_group(
+            "Hyperparameters",
+            [
+                column_def(c, infer_column_dtype(rows, c), headerName=c.removeprefix(HPARAM_COLUMN_PREFIX))
+                for c in columns.hparams
+            ],
         ),
-        *(
-            column_def(
-                str(run_id),
-                infer_column_dtype(rows, str(run_id)),
-                headerName=names.get(run_id, f"Run {run_id}"),
-                headerClass=series_swatch_class(run_id),
-            )
-            for run_id in run_ids
-        ),
+        *_column_group("Metrics", [column_def(c, infer_column_dtype(rows, c)) for c in columns.metrics]),
     ]
-    return _table(column_defs, rows, parameters=parameters, context=context)
+    return _table(column_defs, rows, parameters=parameters, context=source.context, thumbnails=thumbnails)
 
 
 class TableChart(ChartType[TableChartSettings, pd.DataFrame, dag.AgGrid], frozen=True, extra="forbid"):
-    """A plain data table: metrics and hyperparameters side by side."""
+    """A data table over metrics, hyperparameters and artifacts."""
 
     name: typing.ClassVar[str] = "table"
 
@@ -457,58 +531,57 @@ class TableChart(ChartType[TableChartSettings, pd.DataFrame, dag.AgGrid], frozen
     ) -> dag.AgGrid:
         if dataframe.empty:
             return _message_table("No data logged yet.", parameters, context)
-        match parameters.mode:
-            case TableMode.RUNS:
-                return _render_by_run(parameters, dataframe, context)
-            case TableMode.PIVOT:
-                return _render_pivoted(parameters, dataframe, context)
-            case TableMode.ARTIFACTS:
-                return _render_artifacts(parameters, dataframe, context)
+        ordered = (
+            dataframe.sort_values([MetricColumn.RUN_ID, MetricColumn.STEP])
+            if MetricColumn.STEP in dataframe.columns
+            else dataframe
+        )
+        if parameters.rows is TableRows.FIELD:
+            if parameters.row_field not in dataframe.columns:
+                return _message_table(f"No {parameters.row_field!r} logged yet.", parameters, context)
+            # What a run logged between two values of the row field (an artifact mid-epoch) belongs to the earlier.
+            ordered = ordered.assign(
+                **{parameters.row_field: ordered.groupby(MetricColumn.RUN_ID)[parameters.row_field].ffill()}
+            )
+        source = _Source(
+            parameters, context, ordered, _selected_columns(parameters, dataframe), _run_names(dataframe)
+        )
+        match parameters.rows:
+            case TableRows.RUN:
+                return _render_by_group(source)
+            case TableRows.FIELD:
+                return _render_spread_by_run(source) if parameters.spread_by_run else _render_by_group(source)
+            case TableRows.ARTIFACT:
+                return _render_artifact_rows(source)
 
     @classmethod
     @typing.override
     def hint_required_columns(cls, parameters: TableChartSettings) -> set[str] | None:
-        match parameters.mode:
-            case TableMode.PIVOT:
-                return {parameters.pivot_on, parameters.pivot_metric}
-            case TableMode.ARTIFACTS:
-                return set()
-            case TableMode.RUNS:
-                if parameters.metrics:
-                    return set(parameters.metrics) | {MetricColumn.STEP}
-                if parameters.hparams:
-                    # Metrics and hparams are fetched independently (see `hint_required_hparams`) -- having
-                    # curated one but not the other reads as "I only want hparams here", not "fetch every
-                    # metric in the experiment for a table that's not even configured to show them nicely".
-                    return set()
-                return None
+        metrics = KeyPatterns(tuple(parameters.show_metrics))
+        if metrics.prefixes:
+            return None
+        wanted = set(metrics.exact) | (
+            {parameters.row_field} if parameters.rows is TableRows.FIELD else set()
+        )
+        # Metrics and hparams are fetched independently: a table that shows none of the former
+        # (only hyperparameters, or artifacts) must not fetch every metric of the experiment.
+        return wanted | {MetricColumn.STEP} if wanted else set()
 
     @classmethod
     @typing.override
     def hint_required_artifact_keys(cls, parameters: TableChartSettings) -> set[str]:
-        match parameters.mode:
-            case TableMode.RUNS:
-                return set(parameters.artifacts)
-            case TableMode.ARTIFACTS:
-                return set() if parameters.artifact_key_is_prefix else {parameters.artifact_key}
-            case TableMode.PIVOT:
-                return set()
+        return set(KeyPatterns(tuple(parameters.show_artifacts)).exact)
 
     @classmethod
     @typing.override
     def hint_required_artifact_key_prefixes(cls, parameters: TableChartSettings) -> set[str]:
-        if parameters.mode is TableMode.ARTIFACTS and parameters.artifact_key_is_prefix:
-            return {parameters.artifact_key}
-        return set()
+        return set(KeyPatterns(tuple(parameters.show_artifacts)).prefixes)
 
     @classmethod
     @typing.override
     def hint_required_hparams(cls, parameters: TableChartSettings) -> set[str] | None:
-        match parameters.mode:
-            case TableMode.PIVOT | TableMode.ARTIFACTS:
-                return set()
-            case TableMode.RUNS:
-                return set(parameters.hparams) if parameters.hparams else None
+        hparams = KeyPatterns(tuple(parameters.show_hparams))
+        return None if hparams.prefixes else set(hparams.exact)
 
     @classmethod
     @typing.override
@@ -519,12 +592,10 @@ class TableChart(ChartType[TableChartSettings, pd.DataFrame, dag.AgGrid], frozen
     @typing.override
     def field_column_kinds(cls) -> dict[str, ColumnKind]:
         return {
-            "pivot_on": ColumnKind.METRIC,
-            "pivot_metric": ColumnKind.METRIC,
-            "metrics": ColumnKind.METRIC,
-            "hparams": ColumnKind.HPARAM,
-            "artifacts": ColumnKind.ARTIFACT,
-            "artifact_key": ColumnKind.ARTIFACT,
+            "row_field": ColumnKind.METRIC,
+            "show_metrics": ColumnKind.METRIC,
+            "show_hparams": ColumnKind.HPARAM,
+            "show_artifacts": ColumnKind.ARTIFACT,
         }
 
 

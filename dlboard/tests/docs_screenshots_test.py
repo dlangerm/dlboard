@@ -377,9 +377,9 @@ def _stage(shot: DocScreenshot, page: Page, demo: Demo, dlboard_app: Dash) -> Pa
             table = models.ChartInstance[Any, Any](
                 chart_type="table",
                 parameters={
-                    "hparams": ["lr", "batch_size"],
-                    "metrics": ["loss/val", "acc/val"],
-                    "artifacts": [_CONFUSION_KEY],
+                    "show_hparams": ["lr", "batch_size"],
+                    "show_metrics": ["loss/val", "acc/val"],
+                    "show_artifacts": [_CONFUSION_KEY],
                 },
             )
             view = store.create_view(
