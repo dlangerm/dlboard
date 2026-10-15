@@ -1,0 +1,25 @@
+/*
+ * The histogram chart's Plotly figure, in the page's theme.
+ *
+ * Plotly paints its text, grid and slider with inline colors it was handed at render time, and the server cannot
+ * know whether the viewer is in light or dark mode, so the figure is drawn with transparent backgrounds and
+ * these rules (which win over inline styles only because they are `!important`) take over the rest.
+ */
+.dl-histogram .main-svg text {
+  fill: var(--mantine-color-text) !important;
+}
+
+.dl-histogram .gridlayer path,
+.dl-histogram .zerolinelayer path,
+.dl-histogram .xtick path,
+.dl-histogram .ytick path {
+  stroke: var(--mantine-color-default-border) !important;
+}
+
+.dl-histogram .slider-rail-rect {
+  fill: var(--mantine-color-default-border) !important;
+}
+
+.dl-histogram .slider-grip-rect {
+  fill: var(--mantine-color-dimmed) !important;
+}

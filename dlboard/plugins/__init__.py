@@ -25,6 +25,7 @@ BUILTIN_CHARTS: list[PluginProtocol] = [
     charts.line_chart,
     charts.bar_chart,
     charts.table_chart,
+    charts.histogram,
 ]
 
 # Built-in pages (home, project, admin, experiment, account) aren't listed here -- their tab+accordion

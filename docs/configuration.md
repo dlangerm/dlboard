@@ -24,6 +24,10 @@ version line without a deprecation window.
 | `DLBOARD_MAX_UPLOAD_MB` | `256` | Hard cap on any single request body, mainly artifact uploads. Over it, the request gets a 413. |
 | `DLBOARD_MAX_HISTOGRAM_BUCKETS` | `1024` | The most buckets one logged histogram may have. Over it, the server rejects the batch; a client checks its own histograms against the same setting in its own environment, so one that bins finer needs it raised there too. |
 | `DLBOARD_MAX_HISTOGRAM_STEPS` | `256` | Steps per run a panel reads of each histogram it shows, however many were logged: a longer run is thinned to every 2ⁿ-th step, so the steps shown stay put as it trains. Raise it for a finer picture of a long run, lower it to make a panel of many histograms cheaper. |
+| `DLBOARD_HISTOGRAM_ACCENT_COLOR` | `#3b82f6` | The one color (`#rrggbb`) a histogram chart draws its bands and bars in; a Plotly figure cannot use the theme's CSS variables. |
+| `DLBOARD_HISTOGRAM_ROW_GAP_PX` | `52` | Space between one run's row and the next in a histogram chart, with room for the run's name and the x axis. |
+| `DLBOARD_HISTOGRAM_MAX_TICKS` | `6` | How many buckets a histogram chart's value axis names (by lower edge). |
+| `DLBOARD_HISTOGRAM_ASPECT` | `2.5` | How much wider than tall a histogram chart is by default. |
 | `DLBOARD_POLL_INTERVAL_MS` | `30000` | How often an open experiment page checks for new data. |
 | `DLBOARD_TICK_INTERVAL_MS` | `10000` | How often the "fetched Xs ago" label re-renders. Browser-only; never touches the server. |
 

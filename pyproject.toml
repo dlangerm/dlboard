@@ -326,6 +326,22 @@ ignore_names = [
   "cache_ok",
   # Pydantic's class-level config attribute (`postgres.PostgresSettings`) -- read by pydantic itself.
   "model_config",
+  # `plugins/charts/histogram.py`'s `_CategoryAxis` and `_Trace` keys -- Plotly property names, handed to Plotly as plain data
+  # rather than read by attribute.
+  "categoryorder",
+  "categoryarray",
+  "tickmode",
+  "tickvals",
+  "ticktext",
+  "xaxis",
+  "yaxis",
+  "zmin",
+  "zmax",
+  "showscale",
+  "colorbar",
+  "hoverinfo",
+  "fillcolor",
+  "hovertemplate",
   # `plugins/backend/tests/rest_backend_test.py`'s `_FakeServer.add_url_rule` -- a keyword-only
   # parameter that has to keep this exact name to stand in for the real `Flask.add_url_rule`
   # signature, even though the fake's body never reads it.

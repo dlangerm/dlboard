@@ -33,6 +33,7 @@ from playwright.sync_api import expect
 from dlboard import models
 from dlboard.client._rest_api import BasicDlboardAPI
 from dlboard.client.artifacts.image import Image
+from dlboard.client.histograms import ExponentialBinning
 from dlboard.models import PanelInstance
 from dlboard.serve import get_system_data_store
 from dlboard.serve._jump import JUMP_SELECT_ID
@@ -2425,3 +2426,59 @@ def test_a_tables_editor_opens_an_old_table_as_its_new_settings_and_takes_a_type
     page.locator(f"#{ADD_CHART_SUBMIT_ID}").click()
 
     expect(images).to_have_count(1)
+
+
+def test_logged_histograms_render_in_each_display_and_the_step_slider_moves(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """
+    Histograms binned on the client, shipped over REST and drawn by Plotly in a browser.
+
+    What a Python test can't see: that Plotly accepts the figures each display builds, draws them, and that the
+    step view's slider (frames, not a callback) moves the figure on without a server round trip.
+    """
+    _create_project_and_experiment(page, live_server_url, "Histogram Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    api = BasicDlboardAPI(live_server_url)
+    rng = np.random.default_rng(0)
+    binning = ExponentialBinning()
+    steps = 12
+    for _ in range(2):
+        run = api.create_run(models.NewRun(experiment_id=experiment_id))
+        api.log_metric_batch(
+            [
+                models.LoggedMetrics(
+                    experiment_id=experiment_id,
+                    run_id=run.id,
+                    step=step,
+                    # Shrinking over the steps, as gradients do.
+                    histograms={
+                        "grad": binning.histogram(
+                            cast("list[float]", (rng.standard_normal(2000) * 10.0 ** (-step / 6)).tolist())
+                        )
+                    },
+                    timestamp_utc=pendulum.now("UTC"),
+                )
+                for step in range(steps)
+            ]
+        )
+    store = get_system_data_store()
+    shared = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
+    charts = [
+        models.ChartInstance[Any, Any](chart_type="histogram", parameters={"key": "grad", "display": display})
+        for display in ("heatmap", "bands", "step")
+    ]
+    store.update_page(
+        shared.model_copy(update={"panels": [PanelInstance[Any, Any](name="Gradients", charts=charts)]})
+    )
+    page.reload()
+
+    heatmap, bands, step = (page.locator(".dl-histogram").nth(i) for i in range(3))
+    expect(heatmap.locator(".heatmaplayer image")).to_have_count(2)  # a row per run
+    expect(bands.locator(".scatterlayer .trace")).to_have_count(2 * 5)
+    expect(step.locator(".barlayer .trace")).to_have_count(2)
+    expect(step.locator(".annotation-text", has_text=f"step {steps - 1}")).to_be_visible()
+    step.locator(".slider-rail-touch-rect").click(position={"x": 9, "y": 16})
+    expect(step.locator(".annotation-text", has_text="step 0")).to_be_visible()
+    assert console_errors == []
