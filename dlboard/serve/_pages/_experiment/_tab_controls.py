@@ -254,8 +254,8 @@ def _new_tab_error(name: str, panels: list[PanelInstance[Any, Any]]) -> str | No
     """Validate a new-tab submission, or `None` if it's good to create."""
     if not name:
         return "Tab name cannot be empty"
-    if name == "General":
-        return '"General" is reserved for the default tab'
+    if name == page_model.UNGROUPED_TAB_LABEL:
+        return f'"{page_model.UNGROUPED_TAB_LABEL}" is reserved for the default tab'
     if any(p.tab == name for p in panels):
         return f"A tab named {name!r} already exists"
     return None
@@ -341,8 +341,8 @@ def _rename_tab_error(old_name: str, new_name: str, panels: list[PanelInstance[A
     """Validate a tab-rename submission, or `None` if it's good to save."""
     if not new_name:
         return "Tab name cannot be empty"
-    if new_name == "General":
-        return '"General" is reserved for the default tab'
+    if new_name == page_model.UNGROUPED_TAB_LABEL:
+        return f'"{page_model.UNGROUPED_TAB_LABEL}" is reserved for the default tab'
     if new_name != old_name and any(p.tab == new_name for p in panels):
         return f"A tab named {new_name!r} already exists"
     return None

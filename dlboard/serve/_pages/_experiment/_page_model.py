@@ -23,6 +23,9 @@ if TYPE_CHECKING:
 UNGROUPED_TAB: typing.Final = ""
 """`PanelInstance.tab`'s default -- panels with no explicit tab all share this one implicit group."""
 
+UNGROUPED_TAB_LABEL: typing.Final = "General"
+"""What the ungrouped tab is called on screen -- and so a name no other tab can take."""
+
 
 class DocumentSettings(BaseModel, frozen=True, extra="ignore", populate_by_name=True):
     """
@@ -216,7 +219,7 @@ def move_chart_to_tab(
             for p in without_chart
         ]
     new_panel = models.PanelInstance(
-        name=unique_panel_name(without_chart, tab or "General"), tab=tab, charts=[chart]
+        name=unique_panel_name(without_chart, tab or UNGROUPED_TAB_LABEL), tab=tab, charts=[chart]
     )
     return [*without_chart, new_panel]
 
