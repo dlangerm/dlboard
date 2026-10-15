@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
 import dash_mantine_components as dmc
+import pendulum
 import pytest
 from pydantic import ValidationError
 
@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 
     from dlboard.plugins.data_stores.sqlite import SQLLiteStore
 
-_TS = datetime(2026, 1, 1, tzinfo=UTC)
+_TS = pendulum.datetime(2026, 1, 1, tz="UTC")
 
 LineChart.register(allow_override=True)
 TableChart.register(allow_override=True)

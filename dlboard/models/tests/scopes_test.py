@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import pendulum
 
 from dlboard import models
 
@@ -14,7 +14,7 @@ def _user(scopes: list[models.Scope]) -> models.User:
         issuer="test",
         subject="u",
         scopes=scopes,
-        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+        created_at=pendulum.datetime(2026, 1, 1, tz="UTC"),
     )
 
 

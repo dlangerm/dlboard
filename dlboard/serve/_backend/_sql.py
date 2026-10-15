@@ -11,9 +11,10 @@ from __future__ import annotations
 
 import enum
 import typing
-from datetime import UTC, datetime
+from datetime import datetime
 from types import NoneType, UnionType
 
+import pendulum
 import sqlalchemy as sa
 from pydantic import AwareDatetime, BaseModel, TypeAdapter
 from sqlalchemy.dialects.postgresql import JSONB
@@ -76,9 +77,18 @@ class UTCDateTime(sa.TypeDecorator[datetime]):
         return None if value is None else _aware(value)
 
 
+_DATETIME_PARSER = TypeAdapter(datetime)
+
+
 def _aware(value: datetime | str) -> datetime:
-    parsed = datetime.fromisoformat(value) if isinstance(value, str) else value
-    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+    """
+    `value` as an aware datetime, a naive one taken to be UTC.
+
+    Runs for every timestamp a query reads (a metrics fetch reads one per row), so it stays a plain
+    pydantic parse plus a `tzinfo`, not a pendulum `DateTime` built per value -- that is 10-30x slower.
+    """
+    parsed = _DATETIME_PARSER.validate_python(value)
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=pendulum.UTC)
 
 
 class DecodedJSON(sa.TypeDecorator[typing.Any]):

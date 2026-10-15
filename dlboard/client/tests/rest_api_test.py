@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import contextlib
 import warnings
-from datetime import UTC, datetime
 from typing import Any, cast
 
+import pendulum
 import pytest
 import requests
 from pydantic import SecretStr
@@ -179,6 +179,6 @@ def test_finish_run_sends_the_end_time_it_is_given(monkeypatch: pytest.MonkeyPat
 
     monkeypatch.setattr(api._session, "post", _post)
 
-    api.finish_run(7, models.RunStatus.FINISHED, ended_at=datetime(2026, 1, 1, 12, 30, tzinfo=UTC))
+    api.finish_run(7, models.RunStatus.FINISHED, ended_at=pendulum.datetime(2026, 1, 1, 12, 30, tz="UTC"))
 
     assert sent["json"] == {"status": "finished", "ended_at": "2026-01-01T12:30:00Z"}
