@@ -1158,6 +1158,8 @@
   "dlboard/tests/client_import_isolation_test.py::test_importing_the_client_never_needs_the_server_stack": 7.730421492997266,
   "dlboard/tests/client_import_isolation_test.py::test_importing_the_server_never_needs_torch": 1.9240264699910767,
   "dlboard/tests/client_import_isolation_test.py::test_turning_telemetry_on_without_the_otel_extra_is_a_startup_error": 1.7657465170050273,
+  "dlboard/tests/client_logging_test.py::test_a_host_applications_own_structlog_setup_is_left_alone": 0.0008707020024303347,
+  "dlboard/tests/client_logging_test.py::test_a_logged_client_failure_is_short_and_keeps_secrets_out": 0.049626350999460556,
   "dlboard/tests/configuration_docs_test.py::test_every_setting_is_documented[DLBOARD_ACCESS_LOG]": 0.0012039829962304793,
   "dlboard/tests/configuration_docs_test.py::test_every_setting_is_documented[DLBOARD_ADMIN_GROUPS]": 0.0010089839997817762,
   "dlboard/tests/configuration_docs_test.py::test_every_setting_is_documented[DLBOARD_ADMIN_USERS]": 0.0008771599968895316,

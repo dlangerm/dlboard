@@ -17,6 +17,7 @@ from enum import StrEnum
 import structlog
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from dlboard._logging import SAFE_TRACEBACK
 from dlboard.serve.telemetry import TelemetrySettings
 
 
@@ -47,8 +48,8 @@ def configure_logging() -> None:
     """
     Log at `DLBOARD_LOG_LEVEL` (default `INFO`), in `DLBOARD_LOG_FORMAT` (default `console`).
 
-    Always renders tracebacks without local variables, in either format: structlog's own
-    `RichTracebackFormatter` (console) takes `show_locals` explicitly, and plain
+    Always renders tracebacks without local variables, in either format: the console's
+    `SAFE_TRACEBACK` (also capped in length) takes `show_locals` explicitly, and plain
     `traceback.format_exception` (what `format_exc_info` uses for JSON) never includes locals to
     begin with. Otherwise a password, an API token, or (inside a blob-store worker process) cloud
     storage credentials held by a function that then raised would end up in the log.
@@ -76,7 +77,7 @@ def configure_logging() -> None:
                 *defaults,
                 structlog.dev.ConsoleRenderer(
                     colors=sys.stdout.isatty(),
-                    exception_formatter=structlog.dev.RichTracebackFormatter(show_locals=False),
+                    exception_formatter=SAFE_TRACEBACK,
                 ),
             ]
     structlog.configure_once(
