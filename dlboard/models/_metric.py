@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeVar
 
 from pydantic import AwareDatetime, BaseModel, field_validator
 
 from dlboard._compat import StrEnum
+from dlboard.models._histogram import Histogram, UnderlyingHistogramTableEntry
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+
+# Pre-3.12 `TypeVar` style: the client's floor is 3.10.
+_Logged = TypeVar("_Logged")
 
 
 class MetricColumn(StrEnum):
@@ -44,6 +48,8 @@ class LoggedMetrics(BaseModel, frozen=True, extra="ignore"):
 
     metrics: dict[str, float | None] = {}
     """The k/v pairs of metric values."""
+    histograms: dict[str, Histogram] = {}
+    """The distributions logged at this step, by key. They ride the metrics batch; a server that predates them ignores the field."""
     step: int
     """The step these metrics were logged at."""
     experiment_id: int
@@ -53,13 +59,13 @@ class LoggedMetrics(BaseModel, frozen=True, extra="ignore"):
     timestamp_utc: AwareDatetime
     """Timestamp of the metric."""
 
-    @field_validator("metrics")
+    @field_validator("metrics", "histograms")
     @classmethod
-    def _reject_reserved_keys(cls, metrics: dict[str, float | None]) -> dict[str, float | None]:
-        if reserved := sorted(metrics.keys() & set(MetricColumn)):
+    def _reject_reserved_keys(cls, logged: dict[str, _Logged]) -> dict[str, _Logged]:
+        if reserved := sorted(logged.keys() & set(MetricColumn)):
             msg = f"{reserved} are reserved column names and can't be logged as metrics"
             raise ValueError(msg)
-        return metrics
+        return logged
 
     def to_underlying(self) -> Iterator[UnderlyingMetricTableEntry]:
         """Convert a bulk metrics set into a table entry."""
@@ -71,4 +77,18 @@ class LoggedMetrics(BaseModel, frozen=True, extra="ignore"):
                 run_id=self.run_id,
                 step=self.step,
                 timestamp_utc=self.timestamp_utc,
+            )
+
+    def to_underlying_histograms(self) -> Iterator[UnderlyingHistogramTableEntry]:
+        """Convert this step's histograms into table entries."""
+        for key, histogram in self.histograms.items():
+            yield UnderlyingHistogramTableEntry.model_construct(
+                key=key,
+                experiment_id=self.experiment_id,
+                run_id=self.run_id,
+                step=self.step,
+                timestamp_utc=self.timestamp_utc,
+                edges=histogram.edges,
+                counts=histogram.counts,
+                nonfinite=histogram.nonfinite,
             )

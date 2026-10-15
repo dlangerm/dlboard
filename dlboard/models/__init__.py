@@ -21,6 +21,12 @@ from dlboard.models._comment import Comment, NewComment
 from dlboard.models._credentials import ApiToken, NewApiToken, PasswordCredential
 from dlboard.models._data_store import ArtifactStore, DataStore
 from dlboard.models._experiment import Experiment, ExperimentSource, NewExperiment
+from dlboard.models._histogram import (
+    Histogram,
+    HistogramEdges,
+    UnderlyingHistogramTableEntry,
+    max_histogram_buckets,
+)
 from dlboard.models._hparams import FlatHparamDict, HyperParams, NewHyperParams, ValidJsonTypes
 from dlboard.models._metric import LoggedMetrics, MetricColumn, UnderlyingMetricTableEntry
 from dlboard.models._panel_frame import (
@@ -107,6 +113,8 @@ __all__ = [
     "FileKind",
     "FlatHparamDict",
     "GridColumns",
+    "Histogram",
+    "HistogramEdges",
     "HyperParams",
     "InstalledPlugin",
     "LoggedMetrics",
@@ -147,6 +155,7 @@ __all__ = [
     "TagValue",
     "ThemeSpec",
     "TimeUnit",
+    "UnderlyingHistogramTableEntry",
     "UnderlyingMetricTableEntry",
     "Unit",
     "UnknownChartTypeError",
@@ -161,5 +170,6 @@ __all__ = [
     "format_tag_value",
     "has_scope",
     "is_inlineable_artifact",
+    "max_histogram_buckets",
     "require_scope",
 ]

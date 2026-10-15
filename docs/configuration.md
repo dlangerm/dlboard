@@ -22,6 +22,7 @@ version line without a deprecation window.
 | `DLBOARD_URL_PREFIX` | none | Serve under a path prefix (`dlboard` for `https://host/dlboard/`) when a [reverse proxy](reverse-proxy.md) forwards the full path unchanged. |
 | `DLBOARD_TRUSTED_PROXIES` | `0` | How many reverse-proxy hops in front of dlboard to trust `X-Forwarded-*` from. Must be `1` or more behind a proxy, or HTTPS looks like HTTP and secure cookies break. |
 | `DLBOARD_MAX_UPLOAD_MB` | `256` | Hard cap on any single request body, mainly artifact uploads. Over it, the request gets a 413. |
+| `DLBOARD_MAX_HISTOGRAM_BUCKETS` | `1024` | The most buckets one logged histogram may have. Over it, the server rejects the batch; a client checks its own histograms against the same setting in its own environment, so one that bins finer needs it raised there too. |
 | `DLBOARD_POLL_INTERVAL_MS` | `30000` | How often an open experiment page checks for new data. |
 | `DLBOARD_TICK_INTERVAL_MS` | `10000` | How often the "fetched Xs ago" label re-renders. Browser-only; never touches the server. |
 
