@@ -1,0 +1,37 @@
+/* A thumbnail whose picture for the slider's step is still downloading: the old picture is dimmed, with a spinner on top. */
+
+.dl-image-series-thumb {
+    position: relative;
+}
+
+.dl-image-series-thumb[data-dl-loading] img {
+    opacity: 0.4;
+    transition: opacity 0.15s ease;
+}
+
+.dl-image-series-thumb[data-dl-loading]::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 1.75rem;
+    height: 1.75rem;
+    margin: -0.875rem 0 0 -0.875rem;
+    border: 3px solid var(--mantine-color-default-border);
+    border-top-color: var(--mantine-primary-color-filled);
+    border-radius: 50%;
+    animation: dl-image-series-spin 0.8s linear infinite;
+    pointer-events: none;
+}
+
+@keyframes dl-image-series-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .dl-image-series-thumb[data-dl-loading]::after {
+        animation-duration: 2.4s;
+    }
+}

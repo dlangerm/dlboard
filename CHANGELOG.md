@@ -12,6 +12,12 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ## [Unreleased]
 
+### Changed
+
+* An image chart's thumbnail shows a **spinner** while the picture for the slider's step is still downloading. The old
+  picture is dimmed under it, rather than shown as if it were that step's, and the spinner goes once the new picture
+  has arrived.
+
 ### Fixed
 
 * A run's default name is no longer the same for every run a **seeded training script** starts. Names were drawn from the
