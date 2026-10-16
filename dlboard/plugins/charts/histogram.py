@@ -1,8 +1,9 @@
 """
 A chart of logged histograms: how a distribution of values (gradient norms, weights, per-sample losses) moves over steps.
 
-Three views of the same data, each a row per run in one Plotly figure (a run's name labels its row; Plotly cannot
-use the app's per-run theme colors, so a run is told apart by its row, not its color):
+Three views of the same data, each a row per run in one Plotly figure. A run's name labels its row, with the run's
+color beside it: Plotly cannot use the app's theme colors (CSS variables) in a figure, so the labels are HTML laid
+over the rows rather than part of it.
 
 - **heatmap**: step across, value bucket up, color the share of that step's values in the bucket. The "3D" view.
 - **bands**: the median and the spread around it (min-max, and the middle `band_share`) per step.
@@ -25,7 +26,7 @@ import dash_mantine_components as dmc
 import numpy as np
 import pandas as pd
 import plotly.colors
-from dash import dcc
+from dash import dcc, html
 from plotly.subplots import make_subplots
 from pydantic import BaseModel, Field, PositiveFloat, PositiveInt
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -42,7 +43,7 @@ from dlboard.models import (
 )
 from dlboard.plugins.charts._chart_title import titled
 from dlboard.plugins.charts._histogram_math import common_edges, regrid, spread
-from dlboard.serve import AssetKind, serve_asset
+from dlboard.serve import AssetKind, series_swatch_class, serve_asset
 
 if typing.TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -65,6 +66,8 @@ class _Margin(typing.NamedTuple):
 _MARGIN: typing.Final = _Margin(left=64, right=16, top=26, bottom=40)
 _SLIDER_PX: typing.Final = 56
 """Room below the last row for the step view's slider."""
+_LABEL_PX: typing.Final = 22
+"""How far above its row a run's label sits: its own height, and a little air."""
 _FADED_ALPHA: typing.Final = 0.18
 _BAND_ALPHA: typing.Final = 0.4
 
@@ -134,6 +137,7 @@ class HistogramChartLayout(BaseSettings):
 class _Run(typing.NamedTuple):
     """One run's histograms of the charted key, in step order."""
 
+    run_id: int
     name: str
     steps: list[int]
     histograms: list[Histogram]
@@ -196,6 +200,7 @@ def _runs(dataframe: pd.DataFrame, key: str, limit: int) -> tuple[list[_Run], in
         names = group.get(RUN_NAME_COLUMN, pd.Series(dtype=object)).dropna()
         runs.append(
             _Run(
+                run_id=typing.cast("int", run_id),
                 name=str(names.iloc[0]) if len(names) else f"Run {run_id}",
                 steps=group[MetricColumn.STEP].tolist(),
                 histograms=group[column].tolist(),
@@ -239,6 +244,23 @@ def _figure_height(runs: int, settings: HistogramChartSettings, layout: Histogra
     return rows + _MARGIN.top + _MARGIN.bottom + slider
 
 
+def _run_labels(
+    runs: list[_Run], settings: HistogramChartSettings, layout: HistogramChartLayout
+) -> list[Component]:
+    """Each run's name and color, above its row: HTML at the row's position in the figure (see the module docstring)."""
+    return [
+        html.Div(
+            run.name,
+            className=f"dl-histogram-run {series_swatch_class(run.run_id)}",
+            style={
+                "left": f"{_MARGIN.left}px",
+                "top": f"{_MARGIN.top + row * (settings.height + layout.row_gap_px) - _LABEL_PX}px",
+            },
+        )
+        for row, run in enumerate(runs)
+    ]
+
+
 def _axis_id(letter: typing.Literal["x", "y"], row: int) -> str:
     """The name Plotly gives the `letter` axis of row `row`: `x`, `x2`, `x3`, ..."""
     return f"{letter}{row if row > 1 else ''}"
@@ -252,7 +274,7 @@ def _plot(
     axes: Sequence[tuple[Mapping[str, object], Mapping[str, object]]],
 ) -> dict[str, typing.Any]:
     """
-    The figure Plotly draws: a row per run, named above it and with its axes as given, around `traces`.
+    The figure Plotly draws: a row per run, each with its axes as given, around `traces`.
 
     The traces and axes are plain data, not Plotly's own objects: those validate every property on the way in,
     which costs thousands of times a dict for a figure with a trace per run and a frame per step. Plotly only
@@ -265,7 +287,6 @@ def _plot(
     rows = make_subplots(
         rows=len(runs),
         cols=1,
-        subplot_titles=[run.name for run in runs],
         vertical_spacing=layout.row_gap_px / rows_px,
     )
     figure: dict[str, typing.Any] = rows.to_plotly_json()["layout"]
@@ -276,8 +297,6 @@ def _plot(
         for row in range(2, len(runs) + 1):
             figure[f"xaxis{row}"]["matches"] = "x"
         figure[f"xaxis{len(runs) if len(runs) > 1 else ''}"]["title"] = {"text": "step"}
-    for title in figure["annotations"]:
-        title |= {"x": 0, "xanchor": "left", "yanchor": "bottom", "yshift": 4, "showarrow": False}
     figure |= {
         "height": height,
         "margin": {
@@ -426,10 +445,19 @@ def _slider_figure(
         axes.append((_category_axis(grid, labels, layout.max_ticks), y_axis))
     figure = _plot(runs, settings, layout, traces, axes)
 
-    # Each frame replaces the annotations whole, so it carries the run names along with the step it is at.
-    names: list[dict[str, typing.Any]] = figure["layout"]["annotations"]
-    stepper = names[0] | {"x": 1, "xanchor": "right", "font": {"size": 12}}
-    annotations = [[*names, stepper | {"text": f"step {step}"}] for step in steps]
+    # The step each frame is at, top right above the first row (a run's name is top left, in `_run_labels`).
+    stepper = {
+        "xref": "paper",
+        "yref": "paper",
+        "x": 1,
+        "y": figure["layout"]["yaxis"]["domain"][1],
+        "xanchor": "right",
+        "yanchor": "bottom",
+        "yshift": 4,
+        "showarrow": False,
+        "font": {"size": 12},
+    }
+    annotations = [[stepper | {"text": f"step {step}"}] for step in steps]
     animate = {"mode": "immediate", "frame": {"duration": 0, "redraw": True}, "transition": {"duration": 0}}
     figure["layout"].update(
         {
@@ -492,14 +520,19 @@ class HistogramChart(ChartType[HistogramChartSettings, pd.DataFrame, dmc.Stack],
                 figure = _bands(runs, parameters, layout)
             case HistogramDisplay.STEP:
                 figure = _slider_figure(runs, parameters, layout)
-        parts: list[Component] = [
-            dcc.Graph(
-                figure=figure,
-                config={"displayModeBar": False, "responsive": True},
-                style={"height": f"{_figure_height(len(runs), parameters, layout)}px", "width": "100%"},
-                className="dl-histogram",
-            )
-        ]
+        plot = html.Div(
+            [
+                dcc.Graph(
+                    figure=figure,
+                    config={"displayModeBar": False, "responsive": True},
+                    style={"height": f"{_figure_height(len(runs), parameters, layout)}px", "width": "100%"},
+                    className="dl-histogram",
+                ),
+                *_run_labels(runs, parameters, layout),
+            ],
+            className="dl-histogram-plot",
+        )
+        parts: list[Component] = [plot]
         if total_runs > len(runs):
             parts.append(
                 dmc.Text(f"Showing the {len(runs)} most recent of {total_runs} runs", c="dimmed", size="xs")

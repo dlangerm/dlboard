@@ -7,7 +7,7 @@ import typing
 import numpy as np
 import pandas as pd
 import pytest
-from dash import dcc
+from dash import dcc, html
 
 from dlboard.conftest import props
 from dlboard.models import RUN_NAME_COLUMN, ChartTypeRegistry, Histogram, RenderContext, histogram_column
@@ -46,6 +46,13 @@ def _frame(steps_by_run: dict[int, list[int]]) -> pd.DataFrame:
 def _figure(chart: typing.Any) -> dict[str, typing.Any]:  # noqa: ANN401
     graph = next(node for node in chart._traverse() if isinstance(node, dcc.Graph))
     return props(graph)["figure"]
+
+
+def _run_labels(chart: typing.Any) -> list[tuple[str, str]]:  # noqa: ANN401
+    """The (name, color class) of each run label over the figure, in row order."""
+    divs = [props(node) for node in chart._traverse() if isinstance(node, html.Div)]
+    labels = [div for div in divs if "dl-histogram-run" in str(div.get("className"))]
+    return [(str(label["children"]), str(label["className"]).split()[-1]) for label in labels]
 
 
 def _values(figure: dict[str, typing.Any], trace: int, field: str) -> np.ndarray:
@@ -93,11 +100,12 @@ def test_every_display_is_one_figure_with_a_row_per_run_and_leaves_the_input_alo
     df = _frame({1: [0, 1, 2], 2: [0, 2]})
     before = df.copy()
 
-    figure = _figure(HistogramChart.render(_SETTINGS.model_copy(update={"display": display}), df))
+    chart = HistogramChart.render(_SETTINGS.model_copy(update={"display": display}), df)
+    figure = _figure(chart)
 
     pd.testing.assert_frame_equal(df, before)
     assert {"xaxis", "xaxis2", "yaxis", "yaxis2"} <= figure["layout"].keys()
-    assert [a["text"] for a in figure["layout"]["annotations"][:2]] == ["run-1", "run-2"]
+    assert _run_labels(chart) == [("run-1", "dl-swatch-2"), ("run-2", "dl-swatch-3")]
     domains = [figure["layout"][axis]["domain"] for axis in ("yaxis", "yaxis2")]
     assert 0 <= domains[1][0] < domains[1][1] < domains[0][0] < domains[0][1] <= 1
 
@@ -152,7 +160,7 @@ def test_the_step_view_has_a_frame_for_every_step_and_starts_on_the_latest() -> 
 def test_only_the_most_recent_runs_that_fit_the_page_are_drawn() -> None:
     chart = HistogramChart.render_in(_SETTINGS, _frame({1: [0], 2: [0], 3: [0]}), RenderContext(page_size=2))
 
-    assert [a["text"] for a in _figure(chart)["layout"]["annotations"]] == ["run-2", "run-3"]
+    assert _run_labels(chart) == [("run-2", "dl-swatch-3"), ("run-3", "dl-swatch-4")]
     assert "Showing the 2 most recent of 3 runs" in str(props(chart)["children"])
 
 

@@ -19,9 +19,10 @@ of per-sample losses -- without averaging it away. A `display` setting picks the
 step across, value bucket up, shaded by the share of that step's values in the bucket, in a `colorscale` of your
 choice), **bands** (the median with the middle `band_share` of the values -- 0.68 by default -- and the min-max
 around it, per step) or **step** (the distribution at one step as bars, with a slider to move through the steps).
-Each is one figure with a row per run, labelled by run name, and a panel's charts-per-page limits how many rows:
-the most recent runs are shown. `normalize` (on by default) shades each step as a share of its own values so steps
-that logged different numbers of values compare; turn it off for raw counts.
+Each is one figure with a row per run, labelled with the run's name and the color it has everywhere else, and a
+panel's charts-per-page limits how many rows: the most recent runs are shown. `normalize` (on by default) shades
+each step as a share of its own values so steps that logged different numbers of values compare; turn it off for raw
+counts.
 
 Whatever was logged, a chart is cheap to open, and each bound is a setting. It reads about
 `DLBOARD_MAX_HISTOGRAM_STEPS` (256) steps per run: the store thins a longer run to every 2ⁿ-th step from its first

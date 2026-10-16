@@ -30,7 +30,7 @@ pulls that section's body into the GitHub release notes and publishes both distr
   not depend on the data, so steps and runs line up bucket for bucket; `ExplicitBinning` takes the edges you
   give. See [docs/client.md](docs/client.md).
 * A **histogram chart** shows them as a heatmap over steps, as percentile bands, or one step at a time with a
-  slider, a row per run. A chart reads about `DLBOARD_MAX_HISTOGRAM_STEPS` (256) steps per run however long it
+  slider, a row per run in that run's color. A chart reads about `DLBOARD_MAX_HISTOGRAM_STEPS` (256) steps per run however long it
   trained, thinned in the database by a power-of-two stride, so it costs the same to open after a million steps as
   after a thousand. Its colorscale, the share of values its bands hold, and how many rows and slider steps it draws
   are chart settings, and its accent color and spacing are `DLBOARD_HISTOGRAM_*` settings

@@ -23,3 +23,20 @@
 .dl-histogram .slider-grip-rect {
   fill: var(--mantine-color-dimmed) !important;
 }
+
+/*
+ * A run's name and color above its row. HTML laid over the figure because a Plotly figure cannot use the theme's
+ * CSS variables for the color (see `histogram.py`); `top` and `left` come from the figure's own row layout.
+ */
+.dl-histogram-plot {
+  position: relative;
+}
+
+.dl-histogram-run {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  font-size: var(--mantine-font-size-sm);
+  line-height: 1;
+  pointer-events: none;
+}
