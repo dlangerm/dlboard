@@ -13,11 +13,11 @@ import typing
 from enum import StrEnum
 from typing import TYPE_CHECKING, Literal
 
-from dlboard.models import Artifact, ChartInstance, ChartType, ColumnKind, PanelInstance
+from dlboard.models import OVERLAY_KEY_SUFFIX, Artifact, ChartInstance, ChartType, ColumnKind, PanelInstance
 from dlboard.plugins.charts.bar_chart import BarChart
 from dlboard.plugins.charts.file_list import FileListChart
 from dlboard.plugins.charts.histogram import HistogramChart
-from dlboard.plugins.charts.image_series import ImageChart
+from dlboard.plugins.charts.image_series import ImageChart, OverlayLayer
 from dlboard.plugins.charts.line_chart import LineChart
 
 if TYPE_CHECKING:
@@ -132,9 +132,18 @@ def default_artifact_chart(artifact: Artifact) -> str | None:
     return next((c.name for c in ARTIFACT_CHART_TYPES if c.can_display_artifact(artifact)), None)
 
 
-def default_chart_for_artifact(key: str, chart_type: str) -> ChartInstance[typing.Any, typing.Any]:
-    """The default chart for an artifact key, of the chart type `default_artifact_chart` chose for it."""
-    return ChartInstance(chart_type=chart_type, parameters={"key": key})
+def default_chart_for_artifact(
+    key: str, chart_type: str, overlay_keys: typing.Sequence[str] = ()
+) -> ChartInstance[typing.Any, typing.Any]:
+    """
+    The default chart for an artifact key, of the chart type `default_artifact_chart` chose for it.
+
+    An image chart draws each of `overlay_keys` over its pictures, at full opacity.
+    """
+    parameters: dict[str, typing.Any] = {"key": key}
+    if overlay_keys:
+        parameters["overlays"] = {k: OverlayLayer().model_dump() for k in overlay_keys}
+    return ChartInstance(chart_type=chart_type, parameters=parameters)
 
 
 class ArtifactChart(typing.NamedTuple):
@@ -154,14 +163,28 @@ def default_artifact_charts(keys: typing.Iterable[str], catalog: ColumnCatalog) 
     Files are logged one key apiece (`checkpoints/epoch=3-step=300.ckpt`), so a long run gives hundreds
     of keys that are really one list. A single chart over the directory (`checkpoints/`) shows them
     together, grouped and paged, and includes any logged later.
+
+    An image's `OVERLAY_KEY_SUFFIX` artifact, if there is one, is drawn over it by its chart rather than charted on
+    its own.
     """
+    keys = list(keys)
+    overlay_of = {
+        key: overlay
+        for key in keys
+        if catalog.artifact_chart_types[key] == ImageChart.name
+        and (overlay := f"{key}{OVERLAY_KEY_SUFFIX}") in catalog.artifacts
+    }
+    drawn_over_images = set(overlay_of.values())
     charts: list[ArtifactChart] = []
     directories: set[str] = set()
     for key in keys:
+        if key in drawn_over_images:
+            continue
         chart_type = catalog.artifact_chart_types[key]
         directory = key.rpartition("/")[0]
         if chart_type != FileListChart.name or not directory:
-            charts.append(ArtifactChart(key, key, default_chart_for_artifact(key, chart_type)))
+            overlays: list[str] = [overlay_of[key]] if key in overlay_of else []
+            charts.append(ArtifactChart(key, key, default_chart_for_artifact(key, chart_type, overlays)))
         elif (prefix := f"{directory}/") not in directories:
             directories.add(prefix)
             charts.append(

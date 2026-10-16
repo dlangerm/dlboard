@@ -6,6 +6,7 @@ from typing import Any
 
 import pandas as pd
 import pytest
+from pydantic import ValidationError
 
 from dlboard.conftest import props as _props
 from dlboard.models import (
@@ -18,12 +19,15 @@ from dlboard.models import (
     TagDisplay,
     TimeUnit,
     artifact_column,
+    artifact_fname_column,
     artifact_tags_column,
 )
 from dlboard.plugins.charts.image_series import (
     MAX_SLIDER_LABELS,
     ImageChart,
     ImageChartSettings,
+    LayerKind,
+    OverlayLayer,
     _slider_marks,
 )
 
@@ -259,7 +263,7 @@ def test_native_size_caps_thumbnail_height_without_upscaling() -> None:
     stack = ImageChart.render(ImageChartSettings(key="img", height=150, native_size=True), df)
 
     run_block = _first_run_block(stack)
-    thumb = _props(_props(run_block["children"][1])["children"])  # pyrefly: ignore [unknown-argument-type]
+    thumb = _props(_props(run_block["children"][1])["children"][0])  # pyrefly: ignore [unknown-argument-type]
     assert thumb["h"] is None
     assert thumb["style"]["maxHeight"] == "150px"
 
@@ -311,3 +315,72 @@ def test_render_titles_the_chart_with_its_key_and_follows_the_panels_columns_up_
     first_page = _props(children[3])  # pyrefly: ignore [unknown-argument-type]
     assert first_page["id"]["page"] == 0
     assert first_page["cols"] == columns
+
+
+def _store_data(stack: Any) -> dict[str, Any]:  # noqa: ANN401 -- a rendered Dash component
+    store = next(c for c in _props(stack)["children"] if "per_run_steps" in (_props(c).get("data") or {}))
+    return _props(store)["data"]
+
+
+def test_layers_are_paired_with_the_picture_logged_at_the_same_run_and_step_in_the_order_listed() -> None:
+    df = _artifacts_df(n_runs=2, steps_per_run=2)
+    at_step_0 = [s == 0 for s in df["step"]]
+    df[artifact_column("boxes")] = [
+        f"ov://{r}-0" if at else None for r, at in zip(df["run_id"], at_step_0, strict=True)
+    ]
+    df[artifact_fname_column("boxes")] = ["boxes.json" if at else None for at in at_step_0]
+    df[artifact_column("mask")] = [
+        f"mask://{r}-0" if at else None for r, at in zip(df["run_id"], at_step_0, strict=True)
+    ]
+    df[artifact_fname_column("mask")] = ["mask.png" if at else None for at in at_step_0]
+    settings = ImageChartSettings(
+        key="img", overlays={"mask": OverlayLayer(opacity=0.5), "boxes": OverlayLayer()}
+    )
+
+    overlays = _store_data(ImageChart.render(settings, df))["overlays"]
+
+    assert overlays == {
+        f"ref://{run}-0": [
+            {"url": f"mask://{run}-0", "kind": "picture", "opacity": 0.5},
+            {"url": f"ov://{run}-0", "kind": "shapes", "opacity": 1.0},
+        ]
+        for run in (1, 2)
+    }  # step 1 logged no layers, so its pictures are not listed
+
+
+def test_an_image_chart_without_layers_draws_nothing_over_its_pictures() -> None:
+    df = _artifacts_df(n_runs=1)
+    df[artifact_column("boxes")] = "ov://1-0"
+    df[artifact_fname_column("boxes")] = "boxes.json"
+
+    assert _store_data(ImageChart.render(ImageChartSettings(key="img"), df))["overlays"] == {}
+
+
+@pytest.mark.parametrize(
+    ("fname", "kind"),
+    [
+        ("boxes.json", LayerKind.SHAPES),
+        ("mask.png", LayerKind.PICTURE),
+        ("mask.jpg", LayerKind.PICTURE),
+        ("model.ckpt", None),
+        ("notes.txt", None),
+    ],
+)
+def test_a_layers_file_decides_how_it_is_drawn(fname: str, kind: LayerKind | None) -> None:
+    assert LayerKind.of_file(fname) is kind
+
+
+def test_the_layers_are_charted_with_the_image_and_edited_as_a_table() -> None:
+    settings = ImageChartSettings(
+        key="img", overlays={"boxes": OverlayLayer(), "mask": OverlayLayer(opacity=0.3)}
+    )
+
+    assert ImageChart.hint_required_artifact_keys(settings) == {"img", "boxes", "mask"}
+    field = ChartTypeRegistry.get_registered_chart_types()[ImageChart.name]["overlays"]
+    assert field.type is ParameterFieldType.TABLE
+    assert [column.name for column in field.columns or ()] == ["opacity"]
+
+
+def test_a_layers_opacity_is_a_fraction() -> None:
+    with pytest.raises(ValidationError):
+        OverlayLayer.model_validate({"opacity": 1.5})

@@ -12,6 +12,17 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ## [Unreleased]
 
+### Added
+
+* **Image overlays.** `dlboard.client.artifacts.overlay.Overlay` logs the shapes drawn over a picture -- boxes and
+  polygons, each with an optional label and color -- as a small JSON file, at the same step as the picture, so an
+  annotated photo can be a small JPEG rather than a large PNG with the boxes drawn in. `Overlay.over("sample", ...)`
+  logs it under `sample_overlay`, and the image chart auto-generate makes for `sample` draws it over each picture, in its
+  thumbnail and its enlarged view, with no chart of its own for the overlay. See [docs/client.md](docs/client.md).
+* **Layers over an image chart's pictures.** Its new `overlays` setting is a row per artifact key, bottom layer first,
+  each with an `opacity`. A layer is an overlay of shapes or any image, such as a segmentation mask, logged at the
+  picture's own step. An older server stores an overlay without drawing it, so upgrade the server to see them.
+
 ### Changed
 
 * An image chart's thumbnail shows a **spinner** while the picture for the slider's step is still downloading. The old

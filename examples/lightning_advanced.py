@@ -11,14 +11,14 @@ exercises, all through ordinary Lightning/dlboard calls:
 - a histogram of every weight tensor's gradient, so how they spread over training shows without averaging
 - Lightning's `LearningRateMonitor`, `ThroughputMonitor` and `DeviceStatsMonitor`
 - `ModelCheckpoint` with `log_model="all"`, so every checkpoint is uploaded as it is saved
-- per-epoch prediction previews of segmentation masks and bounding boxes, plus a matplotlib figure
+- per-epoch prediction previews: segmentation masks, bounding boxes (an `Overlay` over each picture), and a matplotlib figure
 
 Run it a few times: each run samples fresh hyperparameters, so the run-comparison views have something
 to compare. What follows is what dlboard can't do yet, found by running this -- the backlog this example
 exists to produce. Where the script itself works around one, a `# DLBOARD GAP:` comment says so:
 
-1. No mask/box artifact. Overlays and boxes are composited into a plain image client-side, so the UI can't
-   toggle classes, change opacity or compare ground truth against prediction.
+1. No mask artifact. Masks are composited into a plain image client-side, so the UI can't toggle classes or
+   compare ground truth against prediction. (Boxes are an `Overlay`, drawn over their picture by its chart.)
 2. One artifact per (run, key, step), so N previews need N keys (`sample_0`, `sample_1`, ...) rather than
    one batch rendered as a gallery.
 3. Nothing to skip or collapse a noisy group: `DeviceStatsMonitor` alone adds ~500 series, so auto-generate
@@ -36,8 +36,6 @@ from pathlib import Path
 from typing import cast, override
 
 import numpy as np
-import PIL.Image
-import PIL.ImageDraw
 import pydantic
 import pydantic.dataclasses
 import pytorch_lightning as pl
@@ -59,6 +57,7 @@ from torch.utils.data import DataLoader, Dataset
 from torchvision.ops import masks_to_boxes
 
 from dlboard.client.artifacts.image import Image
+from dlboard.client.artifacts.overlay import Box, Overlay
 from dlboard.client.dlboard_logger import DLBoardLogger
 
 LOGDIR = Path("./lightning-logs")
@@ -293,21 +292,21 @@ def class_boxes(mask: torch.Tensor) -> list[tuple[ShapeClass, list[float]]]:
     return [(c, cast("list[float]", box.tolist())) for c, box in zip(present, boxes, strict=True)]
 
 
-def draw_boxes(image: np.ndarray, truth: torch.Tensor, pred: torch.Tensor) -> np.ndarray:
-    """`image` (HxWx3 uint8) enlarged, with ground-truth boxes in green and predicted ones in red."""
-    canvas = PIL.Image.fromarray(image).resize(
-        (image.shape[1] * PREVIEW_SCALE, image.shape[0] * PREVIEW_SCALE)
-    )
-    draw = PIL.ImageDraw.Draw(canvas)
-    for color, mask in (("lime", truth), ("red", pred)):
-        for shape, (x0, y0, x1, y1) in class_boxes(mask):
-            draw.rectangle(
-                (x0 * PREVIEW_SCALE, y0 * PREVIEW_SCALE, x1 * PREVIEW_SCALE, y1 * PREVIEW_SCALE),
-                outline=color,
-                width=2,
-            )
-            draw.text((x0 * PREVIEW_SCALE + 3, y0 * PREVIEW_SCALE + 3), shape.name.lower(), fill=color)
-    return np.asarray(canvas)
+def box_shapes(truth: torch.Tensor, pred: torch.Tensor) -> list[Box]:
+    """Ground-truth boxes in green and predicted ones in red, as fractions of the picture they go over."""
+    height, width = truth.shape
+    return [
+        Box(
+            x=x0 / width,
+            y=y0 / height,
+            width=(x1 - x0) / width,
+            height=(y1 - y0) / height,
+            label=shape.name.lower(),
+            color=color,
+        )
+        for color, mask in (("#00c853", truth), ("#ff3b30", pred))
+        for shape, (x0, y0, x1, y1) in class_boxes(mask)
+    ]
 
 
 def sample_iou(truth: torch.Tensor, pred: torch.Tensor) -> float:
@@ -429,12 +428,12 @@ class ShapesSegmenter(pl.LightningModule):
         logger = cast("DLBoardLogger", self.trainer.logger)
         step, epoch = self.trainer.global_step, self.trainer.current_epoch
         images, masks, preds = self._preview
-        artifacts: list[Image] = []
+        artifacts: list[Image | Overlay] = []
         for i in range(len(images)):
             rgb = (images[i].permute(1, 2, 0).numpy() * 255).astype(np.uint8)
             truth, pred = masks[i], preds[i]
-            # DLBOARD GAP: no mask/box artifact (see the module docstring) -- composite them into a
-            # picture ourselves. Tags are how numbers ride along with it.
+            # DLBOARD GAP: masks are still composited into a picture ourselves (see the module docstring).
+            # Tags are how numbers ride along with it.
             side_by_side = np.concatenate(
                 [rgb, overlay(rgb, truth.numpy()), overlay(rgb, pred.numpy())], axis=1
             )
@@ -446,16 +445,19 @@ class ShapesSegmenter(pl.LightningModule):
                     step=step,
                     tags={"epoch": epoch, "iou": sample_iou(truth, pred)},
                 ),
+                # The boxes are an overlay, drawn over the picture by the chart, not part of its pixels.
                 Image(
                     key=f"val/detection/sample_{i}",
-                    image=draw_boxes(rgb, truth, pred),
+                    image=rgb,
                     step=step,
+                    format="jpg",
                     tags={
                         "epoch": epoch,
                         "true_boxes": len(class_boxes(truth)),
                         "predicted_boxes": len(class_boxes(pred)),
                     },
                 ),
+                Overlay.over(f"val/detection/sample_{i}", shapes=box_shapes(truth, pred), step=step),
             ]
         logger.log_artifact(artifacts)
         logger.log_figure(plot_class_iou(per_class), "val/iou_per_class", step=step)

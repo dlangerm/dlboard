@@ -19,6 +19,14 @@ if typing.TYPE_CHECKING:
 FILE_KIND_TAG: Final = "file_kind"
 """The tag a file artifact records its `FileKind` under, for anything consuming or displaying it."""
 
+OVERLAY_KEY_SUFFIX: Final = "_overlay"
+"""
+What an image's default overlay is logged under, after the image's own key (`samples/a`, `samples/a_overlay`).
+
+An image chart auto-generated for an image draws the artifact under its key plus this suffix over it, if there is one.
+Any other artifact can still be drawn over a picture by naming it in the chart's `overlays` setting.
+"""
+
 
 class FileKind(StrEnum):
     """

@@ -6,7 +6,7 @@ import typing
 
 import pytest
 
-from dlboard.models import FILE_KIND_TAG, Artifact
+from dlboard.models import FILE_KIND_TAG, OVERLAY_KEY_SUFFIX, Artifact
 from dlboard.models._view import ChartInstance, ColumnKind, PanelInstance
 from dlboard.plugins.charts.bar_chart import BarChart
 from dlboard.plugins.charts.file_list import FileListChart
@@ -164,6 +164,37 @@ def test_build_auto_panels_default_chart_params() -> None:
 
     artifact_chart = next(c for p in panels for c in p.charts if c.chart_type == "image")
     assert artifact_chart.parameters == {"key": "img"}
+
+
+@pytest.mark.parametrize(
+    "overlay_chart_types",
+    [
+        pytest.param({}, id="shapes-no-chart-type-displays"),
+        pytest.param({f"img{OVERLAY_KEY_SUFFIX}": "image"}, id="a-mask-image-has-a-chart-type-of-its-own"),
+    ],
+)
+def test_an_images_overlay_is_drawn_over_it_by_its_chart_instead_of_charted_on_its_own(
+    overlay_chart_types: dict[str, str],
+) -> None:
+    catalog = ColumnCatalog(
+        artifacts=("img", f"img{OVERLAY_KEY_SUFFIX}"),
+        artifact_chart_types={"img": "image", **overlay_chart_types},
+    )
+
+    charts = [c for p in autogen.build_auto_panels(catalog, delimiter="/", mode="prefix") for c in p.charts]
+
+    assert [c.parameters for c in charts] == [
+        {"key": "img", "overlays": {f"img{OVERLAY_KEY_SUFFIX}": {"opacity": 1.0}}}
+    ]
+
+
+def test_an_overlay_named_artifact_with_no_image_to_go_over_is_charted_as_any_other() -> None:
+    key = f"lonely{OVERLAY_KEY_SUFFIX}"
+    catalog = ColumnCatalog(artifacts=(key,), artifact_chart_types={key: "image"})
+
+    charts = [c for p in autogen.build_auto_panels(catalog, delimiter="/", mode="prefix") for c in p.charts]
+
+    assert [c.parameters for c in charts] == [{"key": key}]
 
 
 def test_build_auto_panels_lightning_splits_step_and_epoch_variants_into_adjacent_panels() -> None:

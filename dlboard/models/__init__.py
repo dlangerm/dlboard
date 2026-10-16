@@ -5,6 +5,7 @@ from dlboard.models._activity import ActivityStats, ProjectStats
 from dlboard.models._artifact import (
     FILE_KIND_TAG,
     INLINEABLE_ARTIFACT_CONTENT_TYPES,
+    OVERLAY_KEY_SUFFIX,
     AnyArtifact,
     Artifact,
     ArtifactStoreUnavailableError,
@@ -94,6 +95,7 @@ __all__ = [
     "MAX_GRID_COLUMNS",
     "MIN_GRID_COLUMNS",
     "NO_DATA_COLUMNS",
+    "OVERLAY_KEY_SUFFIX",
     "RUN_NAME_COLUMN",
     "UNVERIFIED_ISSUER",
     "ActivityStats",

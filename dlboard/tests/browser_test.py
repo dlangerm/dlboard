@@ -33,8 +33,9 @@ from playwright.sync_api import expect
 from dlboard import models
 from dlboard.client._rest_api import BasicDlboardAPI
 from dlboard.client.artifacts.image import Image
+from dlboard.client.artifacts.overlay import Box, Overlay, Point, Polygon
 from dlboard.client.histograms import ExponentialBinning
-from dlboard.models import PanelInstance
+from dlboard.models import OVERLAY_KEY_SUFFIX, PanelInstance
 from dlboard.serve import get_system_data_store
 from dlboard.serve._jump import JUMP_SELECT_ID
 from dlboard.serve._pages._experiment._chart_autogen import AUTO_OPEN_MAX_CHARTS
@@ -2129,13 +2130,14 @@ def test_an_image_charts_per_tag_display_is_edited_as_table_rows_in_the_chart_ed
     chart.get_by_role("button", name="Edit chart").click()
 
     # A row per tag in a grid, not JSON: add one, name the tag, and give it a precision.
-    add_row = page.get_by_role("button", name="Add", exact=True)
+    # The chart has another table now (its `overlays`), with buttons of its own: this is the tag display's.
+    add_row = page.locator('button[id*="tag_display"][id*="table-add"]')
     editor = page.get_by_role("dialog")
     rows = editor.locator(".ag-center-cols-container .ag-row")
     add_row.click()
     expect(rows).to_have_count(1)
     rows.first.locator(".ag-checkbox-input-wrapper").click()
-    page.get_by_role("button", name="Remove checked").click()
+    page.locator('button[id*="tag_display"][id*="table-remove"]').click()
     expect(rows).to_have_count(0)
     add_row.click()
     editor.locator('.ag-cell[col-id="key"]').first.click()
@@ -2241,6 +2243,110 @@ def test_a_scrubbed_thumbnail_shows_a_spinner_until_its_new_step_has_loaded(
     for route in held:
         route.continue_()
     expect(thumb).not_to_have_attribute("data-dl-loading", "")
+
+
+_OVERLAY_COVERS_PICTURE_JS = """(layer) => {
+    const picture = layer.parentElement?.querySelector("img")?.getBoundingClientRect();
+    const drawn = layer.querySelector("svg, img")?.getBoundingClientRect();
+    return Boolean(
+        picture && drawn && picture.width > 0 &&
+        Math.abs(picture.x - drawn.x) < 1 && Math.abs(picture.y - drawn.y) < 1 &&
+        Math.abs(picture.width - drawn.width) < 1 && Math.abs(picture.height - drawn.height) < 1
+    );
+}"""
+
+
+def test_an_image_chart_draws_the_overlay_logged_at_each_pictures_step_over_it(
+    page: Page, live_server_url: str, tmp_path: Path
+) -> None:
+    """
+    An auto-generated image chart draws the overlay logged beside its pictures (`Overlay.over`) at each picture's own
+    step over it, in the thumbnail and in the enlarged view. A step with no overlay shows its picture alone, and each
+    drawing covers its picture.
+    """
+    _create_project_and_experiment(page, live_server_url, "Overlay Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    api = BasicDlboardAPI(live_server_url)
+    run = api.create_run(models.NewRun(experiment_id=experiment_id))
+    picture = np.full((48, 64, 3), 128, dtype=np.uint8)
+    shapes = [
+        # Fractions of a 64 by 48 picture: pixel (8, 12), 24 wide and 12 tall; and a triangle through (40, 12), (56, 12), (48, 42).
+        Box(x=0.125, y=0.25, width=0.375, height=0.25, label="cat"),
+        Polygon(points=[Point(0.625, 0.25), Point(0.875, 0.25), Point(0.75, 0.875)], color="#00ff00"),
+    ]
+    api.log_artifact_batch(
+        [
+            Image(key="samples/a", image=picture, step=0, format="jpg").to_artifact(
+                tmp_path, run.id, experiment_id
+            ),
+            Overlay.over("samples/a", shapes=shapes, step=0).to_artifact(tmp_path, run.id, experiment_id),
+            Image(key="samples/a", image=picture, step=10, format="jpg").to_artifact(
+                tmp_path, run.id, experiment_id
+            ),
+        ]
+    )
+    _wait_for_artifacts(experiment_id, 3)
+    page.reload()
+    _auto_generate_charts(page)
+
+    # The overlay is drawn by its picture's chart, so auto-generate gives it no chart of its own.
+    chart = page.locator(".dl-chart-item")
+    expect(chart).to_have_count(1)
+    thumb = chart.locator(".dl-image-series-thumb")
+    layer = thumb.locator(".dl-image-series-overlay")
+    expect(layer.locator("rect")).to_have_count(1)
+    expect(layer.locator("polygon")).to_have_count(1)
+    expect(layer.locator("svg")).to_have_attribute("viewBox", "0 0 64 48")  # the picture's own pixel size
+    rect = layer.locator("rect")
+    assert [rect.get_attribute(a) for a in ("x", "y", "width", "height")] == ["8", "12", "24", "12"]
+    page.wait_for_function(_OVERLAY_COVERS_PICTURE_JS, arg=layer.element_handle())
+
+    # Step 10 logged no overlay, so its picture is shown alone; back at step 0 the shapes come back.
+    page.get_by_role("slider").focus()
+    page.keyboard.press("ArrowRight")
+    expect(layer.locator("svg")).to_have_count(0)
+    page.keyboard.press("ArrowLeft")
+    expect(layer.locator("rect")).to_have_count(1)
+
+    thumb.click()
+    dialog = page.get_by_role("dialog")
+    expect(dialog).to_be_visible()
+    modal_layer = dialog.locator(".dl-image-series-overlay")
+    expect(modal_layer.locator("rect")).to_have_count(1)
+    page.wait_for_function(_OVERLAY_COVERS_PICTURE_JS, arg=modal_layer.element_handle())
+
+
+def test_an_image_chart_draws_an_image_logged_beside_its_pictures_over_them_as_a_layer(
+    page: Page, live_server_url: str, tmp_path: Path
+) -> None:
+    """Any artifact can be a layer: an image logged beside a picture (a mask, say) is drawn over it, scaled with it."""
+    _create_project_and_experiment(page, live_server_url, "Mask Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    api = BasicDlboardAPI(live_server_url)
+    run = api.create_run(models.NewRun(experiment_id=experiment_id))
+    mask = np.zeros((12, 16, 3), dtype=np.uint8)
+    mask[3:9, 4:12] = (255, 0, 0)
+    api.log_artifact_batch(
+        [
+            Image(
+                key="samples/a", image=np.full((48, 64, 3), 128, dtype=np.uint8), step=0, format="jpg"
+            ).to_artifact(tmp_path, run.id, experiment_id),
+            Image(key=f"samples/a{OVERLAY_KEY_SUFFIX}", image=mask, step=0).to_artifact(
+                tmp_path, run.id, experiment_id
+            ),
+        ]
+    )
+    _wait_for_artifacts(experiment_id, 2)
+    page.reload()
+    _auto_generate_charts(page)
+
+    chart = page.locator(".dl-chart-item")
+    expect(chart).to_have_count(1)  # the mask is a layer of its picture's chart, not a chart of its own
+    layer = chart.locator(".dl-image-series-thumb .dl-image-series-overlay")
+    expect(layer.locator(".dl-image-series-layer img")).to_have_count(1)
+    page.wait_for_function(_OVERLAY_COVERS_PICTURE_JS, arg=layer.element_handle())
 
 
 def test_an_image_charts_runs_follow_their_panels_grid_columns(
