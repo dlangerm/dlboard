@@ -50,8 +50,8 @@ Worker and thread counts are `dlboard serve --workers` (default 2) and `--blocki
 
 | Variable | Default | |
 |---|---|---|
-| `DLBOARD_LOG_LEVEL` | `INFO` | A standard level name: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`. |
-| `DLBOARD_LOG_FORMAT` | `console` | `console` (human-readable) or `json` (one object per line, for a log collector). |
+| `DLBOARD_LOG_LEVEL` | `INFO` | A standard level name: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`. Governs dlboard's own logs and Granian's; any other library that logs speaks only from `WARNING`. |
+| `DLBOARD_LOG_FORMAT` | `console` | `console` (human-readable) or `json` (one object per line, for a log collector). Applies to everything the server prints, Granian's own lines and Flask's errors included. |
 | `DLBOARD_ACCESS_LOG` | `false` | Log every request's method, path, status and duration. Off since a proxy usually does this already. |
 
 ## Telemetry

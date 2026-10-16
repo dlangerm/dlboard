@@ -28,6 +28,7 @@ from dlboard._wire import (
     DLBOARD_CLIENT_VERSION_HEADER,
     DLBOARD_USER_HEADER,
     METADATA_PART_SUFFIX,
+    REQUEST_ID_HEADER,
     WHOAMI_PATH,
     FinishRun,
     GetOrCreateExperiment,
@@ -51,6 +52,23 @@ R = TypeVar("R", bound=BaseModel)
 
 DEFAULT_SERVER_URL: Final = "http://localhost:8050"
 """Matches `dlboard serve local`'s own default host/port (see `ServerRuntimeOptions` in `_cli.py`)."""
+
+
+def _raise_for_status(res: requests.Response) -> None:
+    """
+    `res.raise_for_status()`, with the server's request id in the message when it sent one.
+
+    A bare "500 Server Error" says nothing about *which* request failed; the id is what finds that request's
+    line (and traceback) in the server's log. The response stays on the error, for `is_rejection` and friends.
+    """
+    try:
+        res.raise_for_status()
+    except requests.HTTPError as exc:
+        request_id = res.headers.get(REQUEST_ID_HEADER)
+        if not request_id:
+            raise
+        msg = f"{exc} (server request id {request_id})"
+        raise requests.HTTPError(msg, response=res) from exc
 
 
 class ClientAuthSettings(BaseSettings):
@@ -129,7 +147,7 @@ class BasicDlboardAPI:
             headers=self._headers,
             timeout=self._timeout,
         )
-        res.raise_for_status()
+        _raise_for_status(res)
         return return_model.model_validate(res.json())
 
     def whoami(self) -> Identity:
@@ -150,7 +168,7 @@ class BasicDlboardAPI:
                 "token from your Account page and set it as DLBOARD_API_KEY (or pass `api_key`)."
             )
             raise AuthenticationFailedError(msg)
-        res.raise_for_status()
+        _raise_for_status(res)
         identity = Identity.model_validate(res.json())
         if identity.api_version != API_VERSION:
             msg = (
@@ -198,7 +216,7 @@ class BasicDlboardAPI:
             headers=self._headers,
             timeout=self._timeout,
         )
-        res.raise_for_status()
+        _raise_for_status(res)
         return models.Run.model_validate(res.json())
 
     def finish_run(
@@ -229,7 +247,7 @@ class BasicDlboardAPI:
             headers=self._headers,
             timeout=self._timeout,
         )
-        res.raise_for_status()
+        _raise_for_status(res)
 
     def log_artifact_batch(self, artifacts: Iterable[tuple[models.NewArtifact, Path | AnyUrl]]) -> None:
         """
@@ -282,7 +300,7 @@ class BasicDlboardAPI:
                 headers=self._headers,
                 timeout=self._timeout,
             )
-            res.raise_for_status()
+            _raise_for_status(res)
         except Exception:
             _log.exception("Failed to upload %d artifact(s)", len(uploads))
             raise
@@ -303,7 +321,7 @@ class BasicDlboardAPI:
                 headers=self._headers,
                 timeout=self._timeout,
             )
-            res.raise_for_status()
+            _raise_for_status(res)
         except Exception:
             _log.exception("Failed to link %d artifact(s)", len(links))
             raise

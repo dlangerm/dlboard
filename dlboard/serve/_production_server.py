@@ -16,10 +16,12 @@ from typing import Annotated
 from granian import Granian
 from granian.constants import Interfaces
 from granian.http import HTTP1Settings
+from granian.log import LogLevels
 from pydantic import ImportString, NonNegativeInt, PositiveInt
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from dlboard.models import PluginProtocol
+from dlboard.serve._logging import LoggingSettings, logging_config
 from dlboard.serve._settings_env import set_setting_env
 from dlboard.serve.telemetry import shared_prometheus_dir
 
@@ -87,6 +89,9 @@ def run_production_server(  # noqa: PLR0913
         workers=workers,
         blocking_threads=blocking_threads,
         respawn_failed_workers=True,
+        # Granian's own lines (and, in each worker, every standard-library logger) in the format everything else uses.
+        log_level=LogLevels(LoggingSettings().log_level.lower()),
+        log_dictconfig=logging_config(),
         workers_kill_timeout=tuning.workers_kill_timeout_s,
         workers_max_rss=tuning.workers_max_rss_mb or None,
         backpressure=tuning.backpressure or None,

@@ -45,6 +45,13 @@ actually is who the header claims. Read server-side by `dlboard.plugins.auth.ano
 provider that doesn't verify identity another way.
 """
 
+REQUEST_ID_HEADER: Final = "X-Request-Id"
+"""
+Names one request in the server's logs. A caller may supply it; the server otherwise makes one up. Every response
+carries it, so a client that gets an error back can say which request failed, and the server's log line for it can be
+found -- see `dlboard.client._rest_api`.
+"""
+
 DLBOARD_CLIENT_VERSION_HEADER: Final = "X-Dlboard-Client-Version"
 """The installed `dlboard` client distribution's version -- attribution only, like `DLBOARD_USER_HEADER`;
 the server doesn't gate on it. See `Identity.server_version`/`api_version` for the direction a

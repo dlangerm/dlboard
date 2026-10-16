@@ -127,10 +127,11 @@ def test_client_sends_a_timeout_on_every_request(monkeypatch: pytest.MonkeyPatch
 
 
 class _Reply:
-    """A bare `requests.Response` stand-in: a status, and `raise_for_status` for 4xx/5xx."""
+    """A bare `requests.Response` stand-in: a status, headers, and `raise_for_status` for 4xx/5xx."""
 
-    def __init__(self, status_code: int) -> None:
+    def __init__(self, status_code: int, headers: dict[str, str] | None = None) -> None:
         self.status_code = status_code
+        self.headers = headers or {}
 
     def raise_for_status(self) -> None:
         if self.status_code >= 400:
@@ -182,3 +183,28 @@ def test_finish_run_sends_the_end_time_it_is_given(monkeypatch: pytest.MonkeyPat
     api.finish_run(7, models.RunStatus.FINISHED, ended_at=pendulum.datetime(2026, 1, 1, 12, 30, tz="UTC"))
 
     assert sent["json"] == {"status": "finished", "ended_at": "2026-01-01T12:30:00Z"}
+
+
+@pytest.mark.parametrize(
+    ("headers", "expected"),
+    [
+        pytest.param({backend.REQUEST_ID_HEADER: "abc-123"}, "500 (server request id abc-123)", id="named"),
+        pytest.param({}, "500", id="not-named"),
+    ],
+)
+def test_a_failed_request_names_the_servers_request_id_so_its_log_line_can_be_found(
+    monkeypatch: pytest.MonkeyPatch, headers: dict[str, str], expected: str
+) -> None:
+    api = backend.BasicDlboardAPI(base_url="http://host:1")
+    reply = _Reply(500, headers)
+
+    def _post(_url: str, **_kwargs: Any) -> _Reply:  # noqa: ANN401
+        return reply
+
+    monkeypatch.setattr(api._session, "post", _post)
+
+    with pytest.raises(requests.HTTPError) as caught:
+        api.finish_run(7, models.RunStatus.FAILED)
+
+    assert str(caught.value) == expected
+    assert caught.value.response is reply  # what `is_rejection` reads

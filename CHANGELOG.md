@@ -44,11 +44,20 @@ pulls that section's body into the GitHub release notes and publishes both distr
 * A table chart's `mode` (`runs`, `pivot`, `artifacts`) is replaced by `rows`, `row_field`, `spread_by_run`,
   `show_metrics`, `show_hparams` and `show_artifacts`. A table saved with the old settings opens as the new ones that
   show the same table, in the chart editor too.
+* **Everything the server prints now goes through one logging setup.** Granian's own lines, and any library that
+  uses the standard `logging` (Flask, Werkzeug, SQLAlchemy, ...), are rendered like dlboard's own, so
+  `DLBOARD_LOG_FORMAT=json` is JSON throughout, `DLBOARD_LOG_LEVEL` governs Granian's too, and
+  `DLBOARD_TELEMETRY_LOGS` forwards them. A library's records appear from `WARNING` up.
 
 ### Fixed
 
 * A table chart can show **no hyperparameters** (or no metrics): an empty list used to mean "all", so choosing
   only an artifact brought every hyperparameter and metric along. New tables still start with all of both.
+* **An error the server didn't handle is logged where you will see it.** It used to be left to Flask's own logger:
+  unstructured, with no request id, and absent from JSON and OTLP logs. It is now one event, with the method, path
+  and `request_id`, and the client's error for that request names the same id (`server request id ...`), so a
+  failed batch points at its log line.
+* Starting the server no longer prints `RuntimeWarning: Repeated configuration attempted` once per worker.
 
 ## [0.7.0] - 2026-10-14
 
