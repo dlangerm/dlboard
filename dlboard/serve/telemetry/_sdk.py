@@ -16,7 +16,7 @@ import traceback
 from dataclasses import dataclass
 from enum import StrEnum
 from functools import cache
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Any, Final
 from uuid import uuid4
 
 import pendulum
@@ -36,6 +36,8 @@ from dlboard._version import __version__
 from dlboard.serve.telemetry import LOGS, SECONDS_BUCKETS, MetricsExporter, TelemetrySettings, Unit
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping, MutableMapping
+
     from opentelemetry._logs import Logger
     from opentelemetry.metrics import Meter
     from opentelemetry.util.types import AttributeValue
@@ -169,7 +171,7 @@ def _severity(level: str) -> SeverityNumber:
 _NOT_ATTRIBUTES: Final = frozenset({"event", "level", "timestamp", "exc_info", "stack"})
 
 
-def _emit(logger: Logger, event_dict: dict[str, object]) -> None:
+def _emit(logger: Logger, event_dict: Mapping[str, object]) -> None:
     """Send one structlog event as an OpenTelemetry log record."""
     level = str(event_dict.get("level", ""))
     attributes: dict[str, AttributeValue] = {
@@ -206,7 +208,9 @@ _WARNED: Final = threading.Event()
 """Set once a failure to forward has been reported, so a persistent one is not reported per log line."""
 
 
-def forward_log(_logger: object, _method: str, event_dict: dict[str, object]) -> dict[str, object]:
+def forward_log(
+    _logger: object, _method: str, event_dict: MutableMapping[str, Any]
+) -> MutableMapping[str, Any]:
     """
     A structlog processor: send each event over OTLP, and pass it on to the console/JSON renderer unchanged.
 

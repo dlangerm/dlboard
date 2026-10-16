@@ -12,6 +12,7 @@ from http import HTTPStatus
 from typing import TYPE_CHECKING, NamedTuple
 
 import pytest
+from flask import abort
 
 from dlboard._wire import Resource, create_path
 from dlboard.conftest import dispose_stores
@@ -97,3 +98,48 @@ def test_a_request_the_sign_in_gate_turns_away_is_still_logged_with_its_request_
     assert response.status_code == HTTPStatus.UNAUTHORIZED
     assert response.headers["X-Request-Id"]
     assert "401" in capsys.readouterr().out
+
+
+def _boom() -> str:
+    msg = "the route failed"
+    raise RuntimeError(msg)
+
+
+def _gone() -> str:
+    abort(HTTPStatus.NOT_FOUND)
+
+
+def test_an_unhandled_error_is_logged_with_its_request_id_and_answered_with_a_500(
+    deployment: _Deployment, capsys: pytest.CaptureFixture[str]
+) -> None:
+    deployment.app.server.add_url_rule("/boom", "boom", _boom)
+
+    response = deployment.client.get("/boom", headers={"X-Request-Id": "the-failing-request"})
+
+    assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+    assert response.headers["X-Request-Id"] == "the-failing-request"
+    output = capsys.readouterr().out
+    assert output.count("unhandled error") == 1  # ours, not Flask's own as well
+    assert "the-failing-request" in output
+    assert "the route failed" in output
+    assert "/boom" in output
+
+
+def test_a_deliberate_error_response_is_not_logged_as_a_failure(
+    deployment: _Deployment, capsys: pytest.CaptureFixture[str]
+) -> None:
+    deployment.app.server.add_url_rule("/gone", "gone", _gone)
+
+    response = deployment.client.get("/gone")
+
+    assert response.status_code == HTTPStatus.NOT_FOUND
+    assert "unhandled error" not in capsys.readouterr().out
+
+
+def test_in_debug_mode_an_unhandled_error_keeps_propagating_to_the_debugger(deployment: _Deployment) -> None:
+    deployment.app.server.add_url_rule("/boom", "boom", _boom)
+    deployment.app.server.debug = True
+    deployment.app.server.config["PROPAGATE_EXCEPTIONS"] = True
+
+    with pytest.raises(RuntimeError, match="the route failed"):
+        deployment.client.get("/boom")

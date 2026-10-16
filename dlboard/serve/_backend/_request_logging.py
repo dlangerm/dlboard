@@ -1,5 +1,5 @@
 """
-A request id on every log line for the life of a request, the HTTP request metrics, and an opt-in access log.
+A request id on every log line for the life of a request, the HTTP request metrics, an opt-in access log, and a log line for every error nobody handled.
 
 Independent of auth (see `_auth.py` for the request gate and its own security-header
 `after_request`) -- this runs for every request, public routes included, since correlating a
@@ -17,9 +17,11 @@ from typing import TYPE_CHECKING, Literal, cast
 from uuid import uuid4
 
 import structlog
-from flask import g, request
+from flask import current_app, g, request
 from structlog.stdlib import get_logger
+from werkzeug.exceptions import HTTPException, InternalServerError
 
+from dlboard._wire import REQUEST_ID_HEADER
 from dlboard.serve._logging import LoggingSettings
 from dlboard.serve.telemetry import AttributeKey, Attributes, Histogram, Unit, UpDownCounter, attribute
 
@@ -28,7 +30,7 @@ if TYPE_CHECKING:
     from werkzeug.wrappers import Response as BaseResponse
 
 _log = get_logger(__name__)
-_REQUEST_ID_HEADER = "X-Request-Id"
+
 
 _Method = HTTPMethod | Literal["_OTHER"]
 
@@ -65,7 +67,7 @@ def register(app: Dash) -> None:
     access_log = LoggingSettings().access_log
 
     def _start_request() -> None:
-        request_id = request.headers.get(_REQUEST_ID_HEADER) or str(uuid4())
+        request_id = request.headers.get(REQUEST_ID_HEADER) or str(uuid4())
         structlog.contextvars.bind_contextvars(request_id=request_id)
         g.dlboard_request_started_at = time.perf_counter()
         _ACTIVE.add(1, _ActiveAttributes(method=_method()))
@@ -74,7 +76,7 @@ def register(app: Dash) -> None:
 
     @app.server.after_request
     def _finish_request(response: BaseResponse) -> BaseResponse:
-        response.headers[_REQUEST_ID_HEADER] = structlog.contextvars.get_contextvars().get("request_id", "")
+        response.headers[REQUEST_ID_HEADER] = structlog.contextvars.get_contextvars().get("request_id", "")
         duration = time.perf_counter() - cast("float", g.dlboard_request_started_at)
         route = request.url_rule.rule if request.url_rule else ""
         _DURATION.record(
@@ -96,3 +98,20 @@ def register(app: Dash) -> None:
         if "dlboard_request_started_at" in g:
             _ACTIVE.add(-1, _ActiveAttributes(method=_method()))
         structlog.contextvars.clear_contextvars()
+
+    def _log_unhandled_error(exc: Exception) -> HTTPException:
+        """
+        Log an exception no route handled, through structlog, then answer with the usual 500.
+
+        Left to Flask it would be logged by the standard library's own logger instead: in no configured format, with
+        no request id. A deliberate error response (a 404, a 400 a route aborted with) is not a failure of ours, and in
+        debug mode the exception has to keep propagating, to the interactive debugger and Dash's in-browser traceback.
+        """
+        if isinstance(exc, HTTPException):
+            return exc
+        if current_app.debug:
+            raise exc
+        _log.exception("unhandled error", method=request.method, path=request.path)
+        return InternalServerError()
+
+    app.server.errorhandler(Exception)(_log_unhandled_error)
