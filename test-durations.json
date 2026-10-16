@@ -1280,6 +1280,7 @@
   "dlboard/tests/browser_test.py::test_a_copied_chart_link_opens_that_chart_without_changing_the_shared_layout[chromium]": 4.13994730100967,
   "dlboard/tests/browser_test.py::test_a_page_from_an_older_version_offers_a_reload[chromium]": 0.8311597959691426,
   "dlboard/tests/browser_test.py::test_a_panels_charts_are_paged_and_filtered_by_metric_name[chromium]": 6.416961584996898,
+  "dlboard/tests/browser_test.py::test_a_scrubbed_thumbnail_shows_a_spinner_until_its_new_step_has_loaded[chromium]": 5.570561617000067,
   "dlboard/tests/browser_test.py::test_a_table_of_artifacts_shows_thumbnails_and_sorts_by_a_tag[chromium]": 3.9488977060100297,
   "dlboard/tests/browser_test.py::test_a_tables_editor_opens_an_old_table_as_its_new_settings_and_takes_a_typed_prefix[chromium]": 4.775448364991462,
   "dlboard/tests/browser_test.py::test_a_tables_numbers_are_shown_by_what_they_are[chromium]": 2.579720207999344,

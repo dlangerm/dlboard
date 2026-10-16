@@ -32,7 +32,7 @@ from dlboard.models import (
     is_inlineable_artifact,
 )
 from dlboard.plugins.charts._artifact_tags import format_tags_caption
-from dlboard.serve import ClientsideScript, series_swatch_class
+from dlboard.serve import AssetKind, ClientsideScript, series_swatch_class, serve_asset
 
 MAX_SLIDER_LABELS = 10
 
@@ -197,6 +197,7 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
                 html.Div(
                     image,
                     id={"type": "image-series-thumb", "instance": inst, "run": str(rid)},
+                    className="dl-image-series-thumb",
                     n_clicks=0,
                     style={"cursor": "zoom-in"},
                 ),
@@ -324,10 +325,12 @@ ImageChart.register(allow_override=True)
 _SCRUB_JS = ClientsideScript(Path(__file__).with_name("image_series_scrub.js"))
 _PAGE_JS = ClientsideScript(Path(__file__).with_name("image_series_page.js"))
 _LOCK_JS = ClientsideScript(Path(__file__).with_name("image_series_lock.js"))
+_CSS_PATH = Path(__file__).with_name("image_series.css")
 
 
 def plug(app: dash.Dash) -> None:
     """Register clientside callbacks for image-series scrubbing, captions, and pagination."""
+    serve_asset(app, AssetKind.STYLESHEET, _CSS_PATH.name, _CSS_PATH.read_bytes())
     app.clientside_callback(
         _SCRUB_JS.source,
         [

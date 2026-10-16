@@ -2197,6 +2197,52 @@ def test_image_series_charts_are_titled_fill_their_chart_and_share_a_synced_pane
     expect(thumbs.nth(1)).to_have_attribute("aria-valuenow", "5")
 
 
+def test_a_scrubbed_thumbnail_shows_a_spinner_until_its_new_step_has_loaded(
+    page: Page, live_server_url: str, tmp_path: Path
+) -> None:
+    """
+    Moving an image chart's slider to a step whose picture is still downloading dims the old picture under a
+    spinner rather than presenting it as that step's, and the spinner goes once the new picture has arrived.
+    """
+    _create_project_and_experiment(page, live_server_url, "Image Loader Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    api = BasicDlboardAPI(live_server_url)
+    run = api.create_run(models.NewRun(experiment_id=experiment_id))
+    picture = np.zeros((32, 32, 3), dtype=np.uint8)
+    api.log_artifact_batch(
+        [
+            Image(key="samples/a", image=picture, step=step).to_artifact(tmp_path, run.id, experiment_id)
+            for step in (0, 10)
+        ]
+    )
+    _wait_for_artifacts(experiment_id, 2)
+    page.reload()
+    _auto_generate_charts(page)
+
+    thumb = page.locator(".dl-image-series-thumb")
+    expect(thumb).to_have_count(1)
+    page.wait_for_function(
+        "() => [...document.querySelectorAll('.dl-image-series-thumb img')].every((img) => img.complete)"
+    )
+
+    # Hold back every picture the thumbnail asks for from here on: the one for step 10 stays in flight.
+    held: list[Route] = []
+
+    def hold(route: Route) -> None:
+        held.append(route)
+
+    page.route(re.compile(r"/artifact/\d+"), hold)
+    page.get_by_role("slider").focus()
+    page.keyboard.press("ArrowRight")
+    expect(thumb).to_have_attribute("data-dl-loading", "")
+    # The spinner is the thumbnail's `::after`, animated only by the chart's stylesheet.
+    assert thumb.evaluate("el => getComputedStyle(el, '::after').animationName") == "dl-image-series-spin"
+    for route in held:
+        route.continue_()
+    expect(thumb).not_to_have_attribute("data-dl-loading", "")
+
+
 def test_an_image_charts_runs_follow_their_panels_grid_columns(
     page: Page, live_server_url: str, tmp_path: Path
 ) -> None:
