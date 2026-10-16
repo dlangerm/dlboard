@@ -12,6 +12,8 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-16
+
 ### Added
 
 * A **table chart's rows are a setting you choose**: a run, each value of a metric (`step`, `epoch`, ...), or each
