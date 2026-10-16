@@ -1,10 +1,17 @@
 """A run of an experiment."""
 
+import random
+
 import coolname
 import pendulum
 from pydantic import AwareDatetime, BaseModel, Field
 
 from dlboard._compat import StrEnum
+
+# coolname draws from the global `random` module by default. A script that seeds `random` (as
+# `pytorch_lightning.seed_everything` does) would then get the same run names every time, and naming a
+# run would advance that script's own random sequence. Drawing from the OS keeps both off the user's RNG.
+coolname.replace_random(random.SystemRandom())
 
 
 class RunStatus(StrEnum):
