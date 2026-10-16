@@ -14,15 +14,17 @@ import typing
 from datetime import datetime
 from types import NoneType, UnionType
 
+import numpy as np
 import pendulum
 import sqlalchemy as sa
 from pydantic import AwareDatetime, BaseModel, TypeAdapter
 from sqlalchemy.dialects.postgresql import JSONB
 
+from dlboard import models
 from dlboard.serve._backend._foreign_keys import ForeignKeyKind
 
 if typing.TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
     from sqlalchemy.engine.interfaces import Dialect
 
@@ -113,6 +115,61 @@ class DecodedJSON(sa.TypeDecorator[typing.Any]):
         return None if value is None else self._adapter.validate_python(value)
 
 
+class PackedFloatArray(sa.TypeDecorator[list[float]]):
+    """
+    A list of floats stored as the packed little-endian 64-bit array it is: 8 bytes each, read back bit for bit.
+
+    The same bytes on every database. JSON text spells each float out in about 22 characters, is parsed again
+    on every read, and (on sqlite, which does not compress) is what makes a row of a few hundred of them cost
+    several times its worth.
+    """
+
+    impl = sa.LargeBinary
+    cache_ok = True
+
+    @typing.override
+    def process_bind_param(self, value: Sequence[float] | None, dialect: Dialect) -> bytes | None:
+        return None if value is None else np.asarray(value, dtype="<f8").tobytes()
+
+    @typing.override
+    def process_result_value(self, value: bytes | None, dialect: Dialect) -> list[float] | None:
+        return None if value is None else np.frombuffer(value, dtype="<f8").tolist()
+
+
+class PackedCountArray(sa.TypeDecorator[list[int]]):
+    """
+    A list of non-negative integers stored as a packed little-endian array of the narrowest unsigned width that fits.
+
+    One byte says how wide (1, 2, 4 or 8), so a histogram of a few thousand values costs a byte or two per bucket,
+    and one of a tensor with billions of values in a bucket still fits: there is no ceiling to validate against.
+    """
+
+    impl = sa.LargeBinary
+    cache_ok = True
+
+    @typing.override
+    def process_bind_param(self, value: Sequence[int] | None, dialect: Dialect) -> bytes | None:
+        if value is None:
+            return None
+        counts = np.asarray(value, dtype=np.uint64)
+        width = np.min_scalar_type(int(counts.max(initial=0))).itemsize
+        return bytes([width]) + counts.astype(f"<u{width}").tobytes()
+
+    @typing.override
+    def process_result_value(self, value: bytes | None, dialect: Dialect) -> list[int] | None:
+        if value is None:
+            return None
+        packed = memoryview(value)
+        return np.frombuffer(packed[1:], dtype=f"<u{packed[0]}").tolist()
+
+
+_PACKED_COLUMNS: typing.Final[Mapping[type[object], type[sa.types.TypeEngine[typing.Any]]]] = {
+    models.PackedFloats: PackedFloatArray,
+    models.PackedCounts: PackedCountArray,
+}
+"""The column a field marked with each kind of `Annotated` marker is stored in, instead of the one its type implies."""
+
+
 def _unwrap_optional(annotation: object) -> tuple[object, bool]:
     """`(inner type, nullable)` for `X | None`; `(annotation, False)` for anything else."""
     args = typing.get_args(annotation)
@@ -122,8 +179,17 @@ def _unwrap_optional(annotation: object) -> tuple[object, bool]:
     return annotation, False
 
 
-def column_type(annotation: object) -> sa.types.TypeEngine[typing.Any]:  # noqa: PLR0911 -- one return per SQL type is the clearest shape here
-    """The SQL column type a model field's (already un-`Optional`ed) annotation is stored as."""
+def _marked_type(metadata: Sequence[object]) -> sa.types.TypeEngine[typing.Any] | None:
+    """The column the first `_PACKED_COLUMNS` marker among `metadata` asks for, if there is one."""
+    return next((_PACKED_COLUMNS[type(m)]() for m in metadata if type(m) in _PACKED_COLUMNS), None)
+
+
+def column_type(  # noqa: PLR0911 -- one return per SQL type is the clearest shape here
+    annotation: object, metadata: Sequence[object] = ()
+) -> sa.types.TypeEngine[typing.Any]:
+    """The SQL column type a model field (its already un-`Optional`ed annotation, and any `Annotated` markers) is stored as."""
+    if (marked := _marked_type(metadata)) is not None:
+        return marked
     if typing.get_origin(annotation) in (dict, list):
         return DecodedJSON(annotation)
     if not isinstance(annotation, type):
@@ -205,7 +271,7 @@ def table_for(
                     fk_args.append(sa.ForeignKey(target, deferrable=True, initially="DEFERRED"))
         return sa.Column(
             name,
-            column_type(annotation),
+            column_type(annotation, fields[name].metadata),
             *fk_args,
             nullable=nullable,
             server_default=_server_default(fields[name].default),

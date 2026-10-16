@@ -36,8 +36,10 @@ pulls that section's body into the GitHub release notes and publishes both distr
   are chart settings, and its accent color and spacing are `DLBOARD_HISTOGRAM_*` settings
   ([docs/configuration.md](docs/configuration.md)). Auto-generate and Suggest charts make a heatmap for each
   histogram key. See [docs/plugins/charts.md](docs/plugins/charts.md).
-* A database migration (`0003`) adds the histogram table. A server older than this ignores the histograms a newer
-  client sends, so upgrade the server first.
+* A database migration (`0003`) adds the histogram table. A histogram's bucket edges and counts are stored as packed
+  binary arrays (8 bytes an edge, and a count in as few bytes as it fits), not as JSON text: about a third of the
+  space on SQLite, and none of the cost of printing and parsing every float. A server older than this ignores the
+  histograms a newer client sends, so upgrade the server first.
 
 ### Changed
 

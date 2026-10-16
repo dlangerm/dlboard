@@ -8,6 +8,7 @@ this: bucket edges and counts, never the raw values, and never more than `DLBOAR
 
 from __future__ import annotations
 
+import dataclasses
 import functools
 import itertools
 import typing
@@ -87,6 +88,16 @@ class Histogram(BaseModel, frozen=True, extra="ignore"):
         return self
 
 
+@dataclasses.dataclass(frozen=True)
+class PackedFloats:
+    """Marks a `list[float]` field a table stores as a packed array of 64-bit floats, not as JSON text."""
+
+
+@dataclasses.dataclass(frozen=True)
+class PackedCounts:
+    """Marks a `list[int]` field of counts a table stores as a packed array of the narrowest unsigned integers that fit."""
+
+
 class UnderlyingHistogramTableEntry(BaseModel, frozen=True, extra="forbid"):
     """The underlying table schema of individual histograms: a `Histogram` logged under `key` at `step`."""
 
@@ -102,9 +113,9 @@ class UnderlyingHistogramTableEntry(BaseModel, frozen=True, extra="forbid"):
     """Step the histogram was taken at."""
     timestamp_utc: AwareDatetime
     """Time recorded from the client."""
-    edges: list[float]
+    edges: typing.Annotated[list[float], PackedFloats()]
     """See `Histogram.edges`."""
-    counts: list[int]
+    counts: typing.Annotated[list[int], PackedCounts()]
     """See `Histogram.counts`."""
     nonfinite: int
     """See `Histogram.nonfinite`."""

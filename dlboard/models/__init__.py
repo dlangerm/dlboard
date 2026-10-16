@@ -24,6 +24,8 @@ from dlboard.models._experiment import Experiment, ExperimentSource, NewExperime
 from dlboard.models._histogram import (
     Histogram,
     HistogramEdges,
+    PackedCounts,
+    PackedFloats,
     UnderlyingHistogramTableEntry,
     max_histogram_buckets,
 )
@@ -138,6 +140,8 @@ __all__ = [
     "NewProjectGrant",
     "NewRun",
     "NewUser",
+    "PackedCounts",
+    "PackedFloats",
     "Page",
     "PanelInstance",
     "ParameterField",

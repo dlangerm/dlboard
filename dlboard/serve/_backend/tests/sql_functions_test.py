@@ -165,3 +165,47 @@ def test_update_never_writes_revision() -> None:
 def test_construct_builds_model_from_row_by_column_name() -> None:
     row = {"created": None, "tags": {"env": "prod"}, "id": 1, "name": "run-1", "score": 0.5, "active": True}
     assert _sql.construct(User, row) == User(id=1, name="run-1", score=0.5, tags={"env": "prod"})
+
+
+@pytest.mark.parametrize("dialect", [sqlite.dialect(), postgresql.dialect()], ids=["sqlite", "postgresql"])
+def test_packed_floats_are_eight_bytes_each_and_read_back_bit_for_bit(dialect: Dialect) -> None:
+    floats = [-0.0, 5e-324, 1.2589254117941673e-06, -3.5, 1.7976931348623157e308]
+    column = _sql.PackedFloatArray()
+
+    packed = column.process_bind_param(floats, dialect)
+
+    assert packed is not None
+    assert len(packed) == 8 * len(floats)
+    # Compared through `repr`, which tells `-0.0` from `0.0`, as `==` does not.
+    assert [repr(x) for x in column.process_result_value(packed, dialect) or []] == [repr(x) for x in floats]
+
+
+@pytest.mark.parametrize(
+    ("counts", "width"),
+    [
+        pytest.param([0, 255], 1, id="one-byte"),
+        pytest.param([3, 256], 2, id="two-bytes"),
+        pytest.param([65_535, 65_536], 4, id="four-bytes"),
+        pytest.param([7, 2**32], 8, id="eight-bytes-beyond-32-bits"),
+        pytest.param([2**64 - 1], 8, id="the-largest-it-can-hold"),
+    ],
+)
+def test_packed_counts_use_the_narrowest_width_that_fits_the_largest_and_read_back_exactly(
+    counts: list[int], width: int
+) -> None:
+    column = _sql.PackedCountArray()
+    dialect = sqlite.dialect()
+
+    packed = column.process_bind_param(counts, dialect)
+
+    assert packed is not None
+    assert len(packed) == 1 + width * len(counts)  # the width, then the counts
+    assert column.process_result_value(packed, dialect) == counts
+
+
+@pytest.mark.parametrize("column", [_sql.PackedFloatArray(), _sql.PackedCountArray()])
+def test_a_packed_column_passes_a_null_through(column: _sql.PackedFloatArray | _sql.PackedCountArray) -> None:
+    dialect = sqlite.dialect()
+
+    assert column.process_bind_param(None, dialect) is None
+    assert column.process_result_value(None, dialect) is None

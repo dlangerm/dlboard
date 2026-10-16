@@ -70,6 +70,16 @@ def test_a_histogram_reads_back_as_it_was_logged(store: SQLLiteStore, experiment
     assert store.fetch_metrics(experiment_id).keys == {"loss"}
 
 
+def test_a_count_beyond_32_bits_is_stored_exactly(store: SQLLiteStore, experiment_id: int) -> None:
+    """A bucket of a tensor with billions of values: the counts are packed by width, with no ceiling."""
+    run = store.create_run(models.NewRun(experiment_id=experiment_id))
+    _log(store, run, [0], count=2**40 + 1)
+
+    (entry,) = store.fetch_histograms(experiment_id, keys=_KEY, max_steps=10)
+
+    assert entry.counts == [2**40 + 1]
+
+
 @pytest.mark.parametrize(
     ("total", "kept"),
     [
