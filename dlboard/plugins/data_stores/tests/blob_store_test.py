@@ -171,7 +171,7 @@ class _LockedOnceStore:
 def _ingest(store: BlobArtifactStore, data_store: object, artifacts: list[models.Artifact]) -> None:
     """Queue `artifacts` as though `_write_blobs` just wrote their blobs, then start ingesting them."""
     for artifact in artifacts:
-        store._saved_artifact_q.put(artifact)
+        store._saved_artifact_q.put((artifact, {}))
     app = _FakeApp()
     set_data_store(app, data_store)  # pyrefly: ignore [bad-argument-type]
     threading.Thread(target=store.ingest_stored_artifacts, args=(app,), daemon=True).start()
