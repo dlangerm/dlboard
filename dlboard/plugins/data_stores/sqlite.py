@@ -40,6 +40,7 @@ def _engine(location: Path, busy_timeout_ms: int) -> sa.Engine:
     engine = sa.create_engine(
         f"sqlite:///{location}",
         poolclass=NullPool,
+        hide_parameters=True,  # a failing statement's error text must not carry the values bound into it
         connect_args={"timeout": busy_timeout_ms / 1000, "check_same_thread": False},
     )
 

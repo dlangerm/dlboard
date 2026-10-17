@@ -513,6 +513,8 @@
   "dlboard/plugins/data_stores/tests/blob_store_test.py::test_uploads_are_turned_away_once_the_write_worker_is_gone": 0.006055835008737631,
   "dlboard/plugins/data_stores/tests/blob_store_test.py::test_uploads_are_turned_away_when_the_write_queue_is_full": 0.006526769997435622,
   "dlboard/plugins/data_stores/tests/blob_traces_test.py::test_an_uploads_trace_follows_it_through_the_writer_and_into_the_recording_of_its_ref": 3.337463695999986,
+  "dlboard/plugins/data_stores/tests/engine_secrecy_test.py::test_a_failing_statement_does_not_carry_the_values_bound_into_it[postgres]": 3.3437164899996787,
+  "dlboard/plugins/data_stores/tests/engine_secrecy_test.py::test_a_failing_statement_does_not_carry_the_values_bound_into_it[sqlite]": 0.15227316999971663,
   "dlboard/plugins/data_stores/tests/postgres_store_test.py::test_settings_are_read_from_postgres_env_vars": 0.0021057460107840598,
   "dlboard/plugins/data_stores/tests/postgres_store_test.py::test_settings_become_libpq_connect_args": 0.002296527993166819,
   "dlboard/plugins/data_stores/tests/postgres_store_test.py::test_store_lives_in_its_schema_with_utc_sessions_and_no_password_in_the_engine": 2.834687144990312,
