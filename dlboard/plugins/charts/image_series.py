@@ -65,7 +65,7 @@ class ImageChartSettings(BaseModel, frozen=True, extra="forbid", use_attribute_d
     key: str
     overlays: dict[str, OverlayLayer] = Field(default_factory=dict)
     """
-    The artifacts drawn over each picture, a row per artifact key, first row at the bottom. Each is the one the run logged at the picture's own step: an Overlay of shapes (see `dlboard.client.artifacts.overlay`), or an image such as a mask. A picture a row has nothing for is shown without it.
+    The artifacts drawn over each picture, a row per artifact key, first row at the bottom. Each is the one the run logged at the picture's own step: an Overlay of shapes (see `dlboard.client.artifacts.overlay`), or an image such as a mask. A picture a row has nothing for is shown without it. Auto-generate adds the key's `_$overlay` artifacts, if there are any.
     """
     x_axis: str = "step"
     height: int = 220

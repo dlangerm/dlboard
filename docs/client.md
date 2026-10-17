@@ -141,12 +141,10 @@ There are five built-in kinds:
   photograph, log an `Overlay` beside it rather than drawing into its pixels.
 
 - `dlboard.client.artifacts.overlay.Overlay` — uploads the shapes drawn over a picture: `Box`es
-  (`x`, `y`, `width`, `height`, from the top-left corner, as fractions of the picture's size) and
-  `Polyline`s and `Polygon`s (`points`, a polygon being a polyline that is closed), each with an
-  optional `label` and `color` (`"#rrggbb"`). Log it at the same
-  step as its picture, under a key of its own. The picture can stay a small JPEG, and the shapes stay
-  sharp at any size, because the image chart draws them over it in the browser, once its `overlays`
-  setting names that key:
+  (`x`, `y`, `width`, `height`, from the top-left corner), `Polyline`s and `Polygon`s (`points`; a
+  polygon is a polyline that is closed), each with an optional `label` and `color` (`"#rrggbb"`).
+  Log it at the same step as its picture. The picture can stay a small JPEG, and the shapes stay
+  sharp at any size, because the image chart draws them over it in the browser:
 
   ```python
   from dlboard.client.artifacts import image, overlay
@@ -155,8 +153,8 @@ There are five built-in kinds:
   logger.log_artifact(
       [
           image.Image(key="sample", image=tensor, step=global_step, format="jpg"),
-          overlay.Overlay(
-              key="sample_boxes",
+          overlay.Overlay.over(
+              "sample",
               shapes=[Box(x=0.2, y=0.15, width=0.4, height=0.3, label="cat", color="#00c853")],
               step=global_step,
           ),
@@ -164,11 +162,25 @@ There are five built-in kinds:
   )
   ```
 
+  `Overlay.over` logs it under the image's key plus `_$overlay` (`sample_$overlay`), which is where
+  auto-generate looks: the chart it makes for `sample` draws that artifact over it, and gives it no
+  chart of its own. An image logged under that key (a segmentation mask with transparent
+  background, say) is drawn over the picture the same way, and `models.overlay_key("sample")`
+  builds the key for it. Under any other key (`Overlay(key=...)`), add it to the chart's
+  `overlays` setting yourself.
+
+  An image can have several overlays (predicted and ground-truth boxes, say). Only one artifact
+  per key and step is shown, so give each its own `name`, which goes after the suffix
+  (`Overlay.over("sample", name="truth", ...)` logs `sample_$overlay/truth`); auto-generate draws
+  all of them, bottom layer first in key order. The logger warns when one call logs an overlay
+  without its image, or a key twice at the same step, and the client warns once when an artifact
+  that is not an overlay is logged under a key that holds the suffix.
+
   Shapes are stored as fractions of the picture's size, from 0 to 1, so they need no knowledge of
   the picture's own size to be drawn: divide a pixel coordinate by the picture's width (for `x`) or
   height (for `y`). The origin is the top-left corner and `y` grows downward, the way image
-  libraries index pixels. A `Polygon`'s points are `Point(x, y)` tuples. An overlay takes at most
-  1000 shapes, and a label up to 1000 characters. A picture with nothing logged at its step is shown
+  libraries index pixels. A line's points are `Point(x, y)` tuples. An overlay takes at most 1000
+  shapes, and a label up to 1000 characters. A picture with nothing logged at its step is shown
   alone. An older server stores the overlay without drawing it, so upgrade the server to see the
   shapes.
 

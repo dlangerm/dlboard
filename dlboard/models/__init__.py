@@ -6,6 +6,7 @@ from dlboard.models._artifact import (
     FILE_KIND_TAG,
     INLINEABLE_ARTIFACT_CONTENT_TYPES,
     LAYER_KIND_TAG,
+    OVERLAY_KEY_SUFFIX,
     AnyArtifact,
     Artifact,
     ArtifactStoreUnavailableError,
@@ -15,6 +16,8 @@ from dlboard.models._artifact import (
     NewArtifactLink,
     UnservableArtifactRefError,
     is_inlineable_artifact,
+    overlay_image_key,
+    overlay_key,
 )
 from dlboard.models._artifact_purge_task import ArtifactPurgeTask, NewArtifactPurgeTask
 from dlboard.models._audit_log import AuditAction, AuditLogEntry, EntityType, NewAuditLogEntry
@@ -97,6 +100,7 @@ __all__ = [
     "MAX_GRID_COLUMNS",
     "MIN_GRID_COLUMNS",
     "NO_DATA_COLUMNS",
+    "OVERLAY_KEY_SUFFIX",
     "RUN_NAME_COLUMN",
     "UNVERIFIED_ISSUER",
     "ActivityStats",
@@ -187,5 +191,7 @@ __all__ = [
     "hparam_column",
     "is_inlineable_artifact",
     "max_histogram_buckets",
+    "overlay_image_key",
+    "overlay_key",
     "require_scope",
 ]

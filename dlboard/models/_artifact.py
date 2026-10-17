@@ -19,6 +19,30 @@ if typing.TYPE_CHECKING:
 FILE_KIND_TAG: Final = "file_kind"
 """The tag a file artifact records its `FileKind` under, for anything consuming or displaying it."""
 
+OVERLAY_KEY_SUFFIX: Final = "_$overlay"
+"""
+What an image's default overlays are logged under, after the image's own key (`samples/a`, `samples/a_$overlay`).
+
+An image chart auto-generated for an image draws the artifacts under its key plus this suffix over it. An image can
+have several, each told apart by a name after the suffix (`samples/a_$overlay/truth`, `samples/a_$overlay/prediction`);
+`overlay_key` and `overlay_image_key` build and read these keys. Any other artifact can still be drawn over a picture by
+naming it in the chart's `overlays` setting.
+
+The `$` keeps a key from ending in it by accident; one that does without being logged through `Overlay` or `Image`
+as a layer is warned about by the client (`BasicDlboardAPI.log_artifact_batch`).
+"""
+
+
+def overlay_key(image_key: str, name: str | None = None) -> str:
+    """The key an overlay of the image under `image_key` is logged under; `name` tells several of them apart."""
+    return f"{image_key}{OVERLAY_KEY_SUFFIX}" + (f"/{name}" if name else "")
+
+
+def overlay_image_key(key: str) -> str | None:
+    """The key of the image `key` is an overlay of (see `overlay_key`), or `None` if it is not an overlay's key."""
+    image_key, suffix, name = key.partition(OVERLAY_KEY_SUFFIX)
+    return image_key if image_key and suffix and (not name or name.startswith("/")) else None
+
 
 class FileKind(StrEnum):
     """

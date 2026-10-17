@@ -9,7 +9,7 @@ import pytest
 from pydantic import ValidationError
 
 from dlboard.client.artifacts.overlay import Box, Overlay, Point, Polygon, Polyline
-from dlboard.models import LAYER_KIND_TAG, LayerKind
+from dlboard.models import LAYER_KIND_TAG, OVERLAY_KEY_SUFFIX, LayerKind
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -96,3 +96,23 @@ def test_a_polygon_is_a_closed_polyline_and_each_reads_back_as_its_own_kind() ->
     assert issubclass(Polygon, Polyline)
     with pytest.raises(ValidationError):
         Polygon(points=line)  # two points outline no area
+
+
+@pytest.mark.parametrize(
+    ("name", "key"),
+    [
+        pytest.param(None, f"samples/a{OVERLAY_KEY_SUFFIX}", id="unnamed"),
+        pytest.param("truth", f"samples/a{OVERLAY_KEY_SUFFIX}/truth", id="named-so-several-fit-one-image"),
+    ],
+)
+def test_an_overlay_over_an_image_is_logged_under_the_key_an_auto_generated_chart_looks_for(
+    tmp_path: Path, name: str | None, key: str
+) -> None:
+    overlay = Overlay.over(
+        "samples/a", name=name, shapes=[Box(x=0, y=0, width=1, height=1)], step=4, tags={"n": 1}
+    )
+
+    artifact, _ = overlay.to_artifact(tmp_path, run_id=1, experiment_id=1)
+
+    assert (artifact.key, artifact.step) == (key, 4)
+    assert artifact.tags["n"] == 1

@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Annotated, Final, Literal, NamedTuple
 
 from pydantic import BaseModel, Field, StringConstraints
 
-from dlboard.models import LAYER_KIND_TAG, LayerKind, NewArtifact, TagValue
+from dlboard.models import LAYER_KIND_TAG, LayerKind, NewArtifact, TagValue, overlay_key
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -87,7 +87,8 @@ class Overlay(BaseModel, frozen=True, extra="forbid"):
 
     The image chart pairs the two by run and step, and lays the shapes over the picture in the browser, so the
     picture itself stays untouched and can be a compact JPEG. Shapes are fractions of its size (`Fraction`, `Point`).
-    The chart's `overlays` setting names the key it is logged under.
+    Logged under `OVERLAY_KEY_SUFFIX` after the picture's key (`Overlay.over`), an auto-generated image chart draws
+    it with no setup; under any other key, the chart's `overlays` setting names it.
     """
 
     key: str
@@ -98,6 +99,24 @@ class Overlay(BaseModel, frozen=True, extra="forbid"):
     """The global step of the trainer; the picture it annotates is logged at the same step."""
     tags: Mapping[str, TagValue] = {}
     """Tags for the overlay, for use by plugins."""
+
+    @classmethod
+    def over(
+        cls,
+        image_key: str,
+        *,
+        shapes: list[Shape],
+        step: int,
+        name: str | None = None,
+        tags: Mapping[str, TagValue] | None = None,
+    ) -> Overlay:
+        """
+        The overlay of the image logged under `image_key`, under the key an auto-generated chart looks for.
+
+        An image can have several overlays (predicted and ground-truth boxes, say): give each its own `name`, since
+        two logged under one key at one step would be saved to the same place. They are drawn in key order.
+        """
+        return cls(key=overlay_key(image_key, name), shapes=shapes, step=step, tags=tags or {})
 
     def to_artifact(self, local_temp: Path, run_id: int, experiment_id: int) -> tuple[NewArtifact, Path]:
         """Write the shapes as JSON, and describe the file."""

@@ -11,14 +11,15 @@ exercises, all through ordinary Lightning/dlboard calls:
 - a histogram of every weight tensor's gradient, so how they spread over training shows without averaging
 - Lightning's `LearningRateMonitor`, `ThroughputMonitor` and `DeviceStatsMonitor`
 - `ModelCheckpoint` with `log_model="all"`, so every checkpoint is uploaded as it is saved
-- per-epoch prediction previews of segmentation masks and bounding boxes, plus a matplotlib figure
+- per-epoch prediction previews: segmentation masks and bounding boxes (an image and the `Overlay`s or mask layers a chart draws over
+  it), and a matplotlib figure
 
 Run it a few times: each run samples fresh hyperparameters, so the run-comparison views have something
 to compare. What follows is what dlboard can't do yet, found by running this -- the backlog this example
 exists to produce. Where the script itself works around one, a `# DLBOARD GAP:` comment says so:
 
-1. No mask/box artifact. Overlays and boxes are composited into a plain image client-side, so the UI can't
-   toggle classes, change opacity or compare ground truth against prediction.
+1. A layer can't be toggled from the chart, only given an opacity in its settings, so the ground-truth and predicted
+   masks (each class in its color, so one would hide the other) are layers of separate pictures to compare by eye.
 2. One artifact per (run, key, step), so N previews need N keys (`sample_0`, `sample_1`, ...) rather than
    one batch rendered as a gallery.
 3. Nothing to skip or collapse a noisy group: `DeviceStatsMonitor` alone adds ~500 series, so auto-generate
@@ -36,8 +37,6 @@ from pathlib import Path
 from typing import cast, override
 
 import numpy as np
-import PIL.Image
-import PIL.ImageDraw
 import pydantic
 import pydantic.dataclasses
 import pytorch_lightning as pl
@@ -59,14 +58,17 @@ from torch.utils.data import DataLoader, Dataset
 from torchvision.ops import masks_to_boxes
 
 from dlboard.client.artifacts.image import Image
+from dlboard.client.artifacts.overlay import Box, Overlay, Shape
 from dlboard.client.dlboard_logger import DLBoardLogger
+from dlboard.models import overlay_key
 
 LOGDIR = Path("./lightning-logs")
 MAX_EPOCHS = 25
 GRAD_NORM_EVERY_N_STEPS = 10
 PREVIEW_SAMPLES = 4
-PREVIEW_SCALE = 3
-"""How many fixed validation images get a segmentation and a detection preview each epoch, and how much they're enlarged."""
+"""How many fixed validation images get a segmentation and a detection preview each epoch."""
+MASK_ALPHA = 140
+"""How opaque (of 255) a segmentation mask is drawn over its picture."""
 CLASS_COLORS = np.array([[0, 0, 0], [230, 60, 60], [60, 200, 90], [70, 110, 240]], dtype=np.uint8)
 """RGB per `ShapeClass`, indexed by class id."""
 
@@ -278,10 +280,10 @@ class UNet(nn.Module):
         return self.head(x)
 
 
-def overlay(image: np.ndarray, mask: np.ndarray, alpha: float = 0.55) -> np.ndarray:
-    """Blend each foreground class's color over `image` (HxWx3 uint8)."""
-    blended = (image * (1 - alpha) + CLASS_COLORS[mask] * alpha).astype(np.uint8)
-    return np.where((mask > 0)[..., None], blended, image)
+def mask_layer(mask: torch.Tensor) -> np.ndarray:
+    """A class mask as an RGBA picture: each foreground class in its color, translucent, and the background clear."""
+    alpha = np.where((mask > 0).numpy(), MASK_ALPHA, 0).astype(np.uint8)
+    return np.dstack([CLASS_COLORS[mask.numpy()], alpha])
 
 
 def class_boxes(mask: torch.Tensor) -> list[tuple[ShapeClass, list[float]]]:
@@ -293,21 +295,20 @@ def class_boxes(mask: torch.Tensor) -> list[tuple[ShapeClass, list[float]]]:
     return [(c, cast("list[float]", box.tolist())) for c, box in zip(present, boxes, strict=True)]
 
 
-def draw_boxes(image: np.ndarray, truth: torch.Tensor, pred: torch.Tensor) -> np.ndarray:
-    """`image` (HxWx3 uint8) enlarged, with ground-truth boxes in green and predicted ones in red."""
-    canvas = PIL.Image.fromarray(image).resize(
-        (image.shape[1] * PREVIEW_SCALE, image.shape[0] * PREVIEW_SCALE)
-    )
-    draw = PIL.ImageDraw.Draw(canvas)
-    for color, mask in (("lime", truth), ("red", pred)):
-        for shape, (x0, y0, x1, y1) in class_boxes(mask):
-            draw.rectangle(
-                (x0 * PREVIEW_SCALE, y0 * PREVIEW_SCALE, x1 * PREVIEW_SCALE, y1 * PREVIEW_SCALE),
-                outline=color,
-                width=2,
-            )
-            draw.text((x0 * PREVIEW_SCALE + 3, y0 * PREVIEW_SCALE + 3), shape.name.lower(), fill=color)
-    return np.asarray(canvas)
+def box_shapes(mask: torch.Tensor, color: str) -> list[Shape]:
+    """One box per foreground class in `mask`, in `color`, as fractions of the picture they go over."""
+    height, width = mask.shape
+    return [
+        Box(
+            x=x0 / width,
+            y=y0 / height,
+            width=(x1 - x0) / width,
+            height=(y1 - y0) / height,
+            label=shape.name.lower(),
+            color=color,
+        )
+        for shape, (x0, y0, x1, y1) in class_boxes(mask)
+    ]
 
 
 def sample_iou(truth: torch.Tensor, pred: torch.Tensor) -> float:
@@ -429,32 +430,47 @@ class ShapesSegmenter(pl.LightningModule):
         logger = cast("DLBoardLogger", self.trainer.logger)
         step, epoch = self.trainer.global_step, self.trainer.current_epoch
         images, masks, preds = self._preview
-        artifacts: list[Image] = []
+        artifacts: list[Image | Overlay] = []
         for i in range(len(images)):
             rgb = (images[i].permute(1, 2, 0).numpy() * 255).astype(np.uint8)
             truth, pred = masks[i], preds[i]
-            # DLBOARD GAP: no mask/box artifact (see the module docstring) -- composite them into a
-            # picture ourselves. Tags are how numbers ride along with it.
-            side_by_side = np.concatenate(
-                [rgb, overlay(rgb, truth.numpy()), overlay(rgb, pred.numpy())], axis=1
-            )
             # DLBOARD GAP: one artifact per (key, step), so every preview image needs its own key.
+            # The picture is plain; each mask is a translucent layer the chart draws over it, so the picture
+            # stays a small JPEG and the mask stays exact. Tags are how numbers ride along with it.
+            for name, mask in (("truth", truth), ("prediction", pred)):
+                key = f"val/segmentation/{name}_{i}"
+                artifacts += [
+                    Image(
+                        key=key,
+                        image=rgb,
+                        step=step,
+                        format="jpg",
+                        tags={"epoch": epoch, "iou": sample_iou(truth, pred)},
+                    ),
+                    Image(key=overlay_key(key), image=mask_layer(mask), step=step),
+                ]
             artifacts += [
                 Image(
-                    key=f"val/segmentation/sample_{i}",
-                    image=side_by_side.repeat(PREVIEW_SCALE, axis=0).repeat(PREVIEW_SCALE, axis=1),
-                    step=step,
-                    tags={"epoch": epoch, "iou": sample_iou(truth, pred)},
-                ),
-                Image(
                     key=f"val/detection/sample_{i}",
-                    image=draw_boxes(rgb, truth, pred),
+                    image=rgb,
                     step=step,
+                    format="jpg",
                     tags={
                         "epoch": epoch,
                         "true_boxes": len(class_boxes(truth)),
                         "predicted_boxes": len(class_boxes(pred)),
                     },
+                ),
+                # The boxes are overlays, drawn over the picture by the chart, not part of its pixels. There are two
+                # of them over one picture, so each is named.
+                Overlay.over(
+                    f"val/detection/sample_{i}", name="truth", shapes=box_shapes(truth, "#00c853"), step=step
+                ),
+                Overlay.over(
+                    f"val/detection/sample_{i}",
+                    name="prediction",
+                    shapes=box_shapes(pred, "#ff3b30"),
+                    step=step,
                 ),
             ]
         logger.log_artifact(artifacts)

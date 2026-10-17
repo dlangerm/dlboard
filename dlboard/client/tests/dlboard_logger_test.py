@@ -31,6 +31,8 @@ from dlboard._wire import Identity
 from dlboard.client import dlboard_logger
 from dlboard.client.artifacts.figure import Figure
 from dlboard.client.artifacts.file import File
+from dlboard.client.artifacts.image import Image
+from dlboard.client.artifacts.overlay import Overlay
 from dlboard.client.dlboard_logger import (
     DLBoardLogger,
     DLBoardLoggerSettings,
@@ -237,6 +239,52 @@ def test_log_figure_queues_a_png_rendered_at_the_call_site(monkeypatch: pytest.M
     assert (figure.key, figure.step, figure.tags) == ("loss_curve", 4, {"split": "val"})
     assert figure.format == "png"
     assert PIL.Image.open(io.BytesIO(figure.data)).size == (320, 240)
+    logger.finalize("success")
+
+
+_PICTURE = np.zeros((4, 4, 3), dtype=np.uint8)
+
+
+def _picture(key: str, step: int = 0) -> Image:
+    return Image(key=key, image=_PICTURE, step=step)
+
+
+def _overlay(image_key: str, step: int = 0, name: str | None = None) -> Overlay:
+    return Overlay.over(image_key, name=name, shapes=[], step=step)
+
+
+@pytest.mark.parametrize(
+    ("batches", "warning"),
+    [
+        pytest.param(
+            [[_picture("a"), _overlay("a", name="truth"), _overlay("a", name="pred")]], None, id="named"
+        ),
+        pytest.param(
+            [[_overlay("a")]], "nothing is logged under that key in this call", id="overlay-of-no-image"
+        ),
+        pytest.param(
+            [[_picture("a"), _overlay("a"), _overlay("a")]],
+            "is logged twice at step 0",
+            id="unnamed-twice",
+        ),
+        pytest.param([[_picture("a", 1)], [_picture("a", 2)]], None, id="same-key-at-other-steps"),
+    ],
+)
+def test_a_call_that_logs_an_overlay_without_its_image_or_a_key_twice_at_a_step_warns(
+    monkeypatch: pytest.MonkeyPatch, batches: list[list[Image | Overlay]], warning: str | None
+) -> None:
+    _stub_api(monkeypatch, _FakeRunAPI("http://x"))
+    _stub_shippers(monkeypatch)
+    logger = DLBoardLogger(project_id=1, experiment_id=None)
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        for batch in batches:
+            logger.log_artifact(batch)
+
+    messages = [str(w.message) for w in caught]
+    assert len(messages) == (warning is not None)
+    assert all((warning or "") in message for message in messages)
     logger.finalize("success")
 
 

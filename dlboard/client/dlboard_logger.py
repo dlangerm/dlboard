@@ -553,7 +553,28 @@ class DLBoardLogger(Logger):
 
     @rank_zero_only
     def log_artifact(self, artifacts: Sequence[AnyArtifact]) -> None:
-        """Queue `artifacts` for encoding and upload."""
+        """
+        Queue `artifacts` for encoding and upload.
+
+        Warns about what is wrong within this call: an overlay (`Overlay.over`) of an image it does not also log, and
+        a key logged twice at one step (a chart shows one per step, so two overlays of one image need a `name` each).
+        """
+        keys = {artifact.key for artifact in artifacts}
+        slots: set[tuple[str, int]] = set()
+        for artifact in artifacts:
+            if (image := models.overlay_image_key(artifact.key)) and image not in keys:
+                warnings.warn(
+                    f"{artifact.key!r} is an overlay of {image!r}, but nothing is logged under that key in this call, so no image "
+                    "chart will draw it unless that image is logged some other way.",
+                    stacklevel=3,
+                )
+            if (slot := (artifact.key, artifact.step)) in slots:
+                warnings.warn(
+                    f"{artifact.key!r} is logged twice at step {artifact.step}, and a chart shows only one of them. "
+                    "Log it under another key (for an overlay, give it a `name`).",
+                    stacklevel=3,
+                )
+            slots.add(slot)
         self._artifacts.put(artifacts)
         self._unflushed = True
 

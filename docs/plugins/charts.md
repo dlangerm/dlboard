@@ -65,8 +65,10 @@ The built-in line charts, and the image series that steps through logged images:
 An image series can draw layers over each picture. Its `overlays` setting is a row per artifact key, bottom layer first,
 each with an `opacity` from 0 to 1. A layer is an `Overlay` of shapes (see [docs/client.md](../client.md)) or any image,
 such as a segmentation mask, and the one the run logged at each picture's own step is laid over it, in its thumbnail and
-in its enlarged view. A picture a layer has nothing for at its step is shown without it. While the picture for the
-slider's step is still downloading, its thumbnail shows a spinner over the previous picture.
+in its enlarged view. A picture a layer has nothing for at its step is shown without it. Auto-generate adds the
+`_$overlay` artifacts of an image (`sample_$overlay`, or one per `name` after it: `sample_$overlay/truth`), if it
+has any, and gives them no chart of their own. While the picture for the slider's
+step is still downloading, its thumbnail shows a spinner over the previous picture.
 
 A table of runs, with an artifact column:
 

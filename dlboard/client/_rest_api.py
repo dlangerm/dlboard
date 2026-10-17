@@ -256,10 +256,25 @@ class BasicDlboardAPI:
         Each artifact is paired with either a local file to upload (written by its own
         `to_artifact`, e.g. `client.artifacts.image.Image`) or an already-stored ref to link
         (`client.artifacts.link.Link`) -- see `AnyArtifact.to_artifact`.
+
+        An artifact under an overlay key (`overlay_key`) that is neither a layer (`LAYER_KIND_TAG`) nor an image would be
+        taken by the image chart for an overlay of the image it names, but cannot be drawn; that is warned about
+        (once per key, as `warnings` shows a message once).
         """
         uploads: list[tuple[models.NewArtifact, Path]] = []
         links: list[tuple[models.NewArtifact, AnyUrl]] = []
         for artifact, source in artifacts:
+            if (
+                models.overlay_image_key(artifact.key) is not None
+                and models.LAYER_KIND_TAG not in artifact.tags
+                and not models.is_inlineable_artifact(artifact.fname)
+            ):
+                warnings.warn(
+                    f"The artifact key {artifact.key!r} contains {models.OVERLAY_KEY_SUFFIX!r}, which an image chart "
+                    "reads as an overlay of the image logged under the key before it, but this artifact is neither "
+                    "an Overlay nor an image, so it cannot be drawn over one. Log it under another key.",
+                    stacklevel=2,
+                )
             match source:
                 case Path():
                     uploads.append((artifact, source))

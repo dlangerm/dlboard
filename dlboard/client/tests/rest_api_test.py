@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import contextlib
 import warnings
+from pathlib import Path
 from typing import Any, cast
+from unittest.mock import MagicMock
 
 import pendulum
 import pytest
@@ -208,3 +210,42 @@ def test_a_failed_request_names_the_servers_request_id_so_its_log_line_can_be_fo
 
     assert str(caught.value) == expected
     assert caught.value.response is reply  # what `is_rejection` reads
+
+
+def _layer_artifact(key: str, fname: str, **tags: models.TagValue) -> models.NewArtifact:
+    return models.NewArtifact(key=key, fname=fname, tags=tags, run_id=1, experiment_id=1, step=0)
+
+
+@pytest.mark.parametrize(
+    ("artifact", "warned"),
+    [
+        pytest.param(
+            _layer_artifact(f"a{models.OVERLAY_KEY_SUFFIX}", "x.bin"),
+            True,
+            id="a-file-no-layer-is-drawn-from",
+        ),
+        pytest.param(
+            _layer_artifact(f"a{models.OVERLAY_KEY_SUFFIX}", "x.png"), False, id="an-image-is-a-picture-layer"
+        ),
+        pytest.param(
+            _layer_artifact(f"a{models.OVERLAY_KEY_SUFFIX}", "x.json", **{models.LAYER_KIND_TAG: "shapes"}),
+            False,
+            id="a-tagged-layer",
+        ),
+        pytest.param(_layer_artifact("a_overlay", "x.bin"), False, id="another-key"),
+        pytest.param(
+            _layer_artifact(f"a{models.OVERLAY_KEY_SUFFIX}/truth", "x.bin"), True, id="a-named-overlay-key"
+        ),
+    ],
+)
+def test_an_artifact_that_takes_the_overlay_key_suffix_but_cannot_be_a_layer_is_warned_about(
+    monkeypatch: pytest.MonkeyPatch, artifact: models.NewArtifact, warned: bool
+) -> None:
+    api = backend.BasicDlboardAPI()
+    monkeypatch.setattr(api, "_upload_artifacts", MagicMock())
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        api.log_artifact_batch([(artifact, Path(artifact.fname))])
+
+    assert [artifact.key in str(w.message) for w in caught] == ([True] if warned else [])
