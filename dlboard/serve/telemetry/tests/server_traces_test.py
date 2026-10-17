@@ -40,6 +40,9 @@ def test_a_request_continues_its_callers_trace_and_its_sql_hangs_off_it(
     sql = [s for s in spans if s.attributes and "db.system" in s.attributes]
     assert server.attributes is not None
     assert server.attributes[TraceKey.REQUEST_ID] == "req-1"
+    # The client writes the stable HTTP names; one trace must not speak two vocabularies.
+    assert server.attributes["http.request.method"] == "POST"
+    assert "http.method" not in server.attributes
     assert sql, "the request ran SQL, which should be traced"
     assert all(_SECRET_NAME not in str(s.attributes) for s in spans), "bound parameters must not reach a span"
 

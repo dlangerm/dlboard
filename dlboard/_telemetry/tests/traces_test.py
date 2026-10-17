@@ -7,6 +7,7 @@ tested where they are made.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import pickle
 import time
@@ -24,6 +25,7 @@ from dlboard._telemetry.traces import (
     TRACES,
     SpanKind,
     TraceKey,
+    TraceSettings,
     annotate_current,
     carrier,
     fail_current,
@@ -236,3 +238,41 @@ def test_a_span_something_else_opened_can_be_annotated_and_failed(exported: InMe
     assert finished.attributes[TraceKey.RUN_ID] == 1
     assert finished.status.status_code == StatusCode.ERROR
     assert [e.name for e in finished.events] == ["exception"]
+
+
+def test_reading_the_open_span_never_builds_a_tracer(exported: InMemorySpanExporter) -> None:
+    """Asking for ids or a carrier happens in places (a log line, the main process) that must not start one."""
+    assert trace_ids() is None
+    assert carrier() == {}
+    flush()
+
+    assert TRACES.peek() is None
+    assert not exported.get_finished_spans()
+
+
+@pytest.mark.parametrize(
+    ("env", "traces_on", "message"),
+    [
+        pytest.param({"OTEL_EXPORTER_OTLP_PROTOCOL": "grpc"}, True, "4318", id="grpc-for-everything"),
+        pytest.param({"OTEL_EXPORTER_OTLP_TRACES_PROTOCOL": "grpc"}, True, "4318", id="grpc-for-traces"),
+        pytest.param({"OTEL_EXPORTER_OTLP_PROTOCOL": "http/json"}, True, "protobuf", id="http-json"),
+        pytest.param(
+            {"OTEL_EXPORTER_OTLP_PROTOCOL": "grpc", "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL": "http/protobuf"},
+            True,
+            None,
+            id="the-traces-setting-wins",
+        ),
+        pytest.param({"OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf"}, True, None, id="http-protobuf"),
+        pytest.param({}, True, None, id="unset"),
+        pytest.param({"OTEL_EXPORTER_OTLP_PROTOCOL": "grpc"}, False, None, id="not-asked-to-trace"),
+    ],
+)
+def test_a_protocol_the_exporter_cannot_speak_stops_startup_instead_of_losing_every_span(
+    telemetry: pytest.MonkeyPatch, env: dict[str, str], *, traces_on: bool, message: str | None
+) -> None:
+    telemetry.setenv("DLBOARD_TELEMETRY_TRACES", str(traces_on).lower())
+    for name, value in env.items():
+        telemetry.setenv(name, value)
+
+    with pytest.raises(ValueError, match=message) if message else contextlib.nullcontext():
+        TraceSettings()

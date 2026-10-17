@@ -28,7 +28,7 @@ from opentelemetry.sdk.metrics import Histogram, MeterProvider
 from opentelemetry.sdk.metrics.export import MetricReader, PeriodicExportingMetricReader
 from opentelemetry.sdk.metrics.view import ExplicitBucketHistogramAggregation, View
 
-from dlboard._telemetry._sdk import resource
+from dlboard._telemetry._sdk import quiet_exporter_retries, resource
 from dlboard._version import __version__
 from dlboard.serve.telemetry import LOGS, SECONDS_BUCKETS, MetricsExporter, TelemetrySettings, Unit
 
@@ -75,6 +75,7 @@ class Logs:
 
 def build_metrics(settings: TelemetrySettings) -> Metrics:
     """The meter provider with one reader per exporter in `settings.metrics`."""
+    quiet_exporter_retries()
     readers: list[MetricReader] = []
     for exporter in sorted(settings.metrics):
         match exporter:
@@ -105,6 +106,7 @@ def build_metrics(settings: TelemetrySettings) -> Metrics:
 
 def build_logs(_settings: TelemetrySettings) -> Logs:
     """The logger provider that batches log records and pushes them over OTLP."""
+    quiet_exporter_retries()
     provider = LoggerProvider(resource=resource(os.getpid(), _SERVICE_NAME), shutdown_on_exit=False)
     provider.add_log_record_processor(BatchLogRecordProcessor(OTLPLogExporter()))
     return Logs(provider, provider.get_logger(_SERVICE_NAME, __version__))
@@ -137,7 +139,10 @@ def _severity(level: str) -> SeverityNumber:
         return SeverityNumber.UNSPECIFIED
 
 
-_NOT_ATTRIBUTES: Final = frozenset({"event", "level", "timestamp", "exc_info", "stack"})
+_NOT_ATTRIBUTES: Final = frozenset(
+    {"event", "level", "timestamp", "exc_info", "stack", "trace_id", "span_id"}
+)
+"""What an event carries that is not an attribute of its log record. A span's ids are the record's own fields, filled from the open span."""
 
 
 def _emit(logger: Logger, event_dict: Mapping[str, object]) -> None:

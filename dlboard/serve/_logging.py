@@ -73,8 +73,11 @@ def _shared_processors() -> list[Processor]:
         structlog.dev.set_exc_info,
         structlog.processors.TimeStamper(fmt="%Y-%m-%d %H:%M:%S", utc=False),
     ]
-    if TraceSettings().traces:
-        processors.append(_add_trace_ids)
+    # Read here so that a misconfiguration (gRPC, a missing extra) stops startup, not the first span. The ids are added
+    # whether or not `DLBOARD_TELEMETRY_TRACES` is on: a platform's own tracing makes spans too, and with none open
+    # (or no tracer) this is one pid comparison.
+    TraceSettings()
+    processors.append(_add_trace_ids)
     if TelemetrySettings().logs:
         from dlboard.serve.telemetry._sdk import (
             forward_log,

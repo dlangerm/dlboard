@@ -42,6 +42,8 @@ _log = get_logger(__name__)
 
 _ENTRY_POINT_GROUP: Final = "opentelemetry_instrumentor"
 _PER_APP: Final = "flask"
+_FLASK_INSTRUMENTATION: Final = "opentelemetry.instrumentation.flask"
+"""The module the request hook Flask's instrumentation registers comes from."""
 """Instrumented by `instrument_flask`, not by the process-wide pass."""
 _ANY_VERSION: Final = frozenset({"sqlalchemy"})
 """
@@ -98,6 +100,39 @@ _ALWAYS_SANITIZED: Final = "Authorization,Cookie,Set-Cookie"
 """What `sanitize_fields` is, unless the user says otherwise: the headers a credential travels in."""
 
 
+class SemconvSettings(BaseSettings):
+    """The standard variable that picks which generation of HTTP attribute names the instrumentation writes."""
+
+    model_config = SettingsConfigDict(env_prefix="OTEL_SEMCONV_STABILITY_")
+
+    opt_in: str | None = None
+    """Comma-separated opt-ins (`http`, `database`, ...). Unset, Flask's instrumentation writes the pre-stable names."""
+
+
+_STABLE_HTTP: Final = "http"
+"""
+What `opt_in` is, unless the user says otherwise: the stable HTTP names (`http.request.method`, ...).
+
+The client writes the stable names. With Flask's instrumentation on the old ones (`http.method`) one trace would speak
+two vocabularies, and a query or a span-metrics dimension on either would find only half of it.
+"""
+
+
+def _set_env_defaults() -> None:
+    """
+    Fill in the standard variables dlboard wants a different default for, unless the user set them.
+
+    Read by the instrumentation the first time it is used in the process (the semantic conventions one only once),
+    so this runs before the first instrumentor does.
+    """
+    # Headers are not recorded unless the user asks (`OTEL_INSTRUMENTATION_HTTP_CAPTURE_HEADERS_*`); if they do, a
+    # credential in one must not leave the server.
+    if HeaderCaptureSettings().sanitize_fields is None:
+        set_setting_env(HeaderCaptureSettings, "sanitize_fields", _ALWAYS_SANITIZED)
+    if SemconvSettings().opt_in is None:
+        set_setting_env(SemconvSettings, "opt_in", _STABLE_HTTP)
+
+
 class _Instrumentor(Protocol):
     """What every `BaseInstrumentor` offers that is used here."""
 
@@ -116,6 +151,7 @@ def _process_wide() -> list[EntryPoint]:
 
 def instrument_libraries(traces: Traces) -> None:
     """Instrument every installed library that has an instrumentor, once per process."""
+    _set_env_defaults()
     disabled = InstrumentationSettings().disabled_instrumentations
     for entry_point in _process_wide():
         if entry_point.name in disabled:
@@ -147,12 +183,7 @@ def instrument_flask(server: Flask, traces: Traces, url_prefix: str) -> None:
     """
     root = rf"^https?://[^/]+{re.escape(url_prefix.rstrip('/'))}/"
     excluded = InstrumentationSettings().flask_excluded_urls
-    # Headers are not recorded unless the user asks (`OTEL_INSTRUMENTATION_HTTP_CAPTURE_HEADERS_*`); if they do, a
-    # credential in one must not leave the server. Read when the app is instrumented, so set before that.
-    if HeaderCaptureSettings().sanitize_fields is None:
-        set_setting_env(HeaderCaptureSettings, "sanitize_fields", _ALWAYS_SANITIZED)
-    hooks = server.before_request_funcs.setdefault(None, [])
-    already_registered = len(hooks)
+    _set_env_defaults()
     FlaskInstrumentor().instrument_app(
         server,
         tracer_provider=traces.provider,
@@ -166,5 +197,8 @@ def instrument_flask(server: Flask, traces: Traces, url_prefix: str) -> None:
     )
     # The request's span has to be open before anything else looks at the request. The auth gate runs ahead of the
     # hooks registered before it, so a request it turns away would have no span at all, and the database lookups it
-    # makes to find out who is asking would be traces of their own.
-    hooks[:] = [*hooks[already_registered:], *hooks[:already_registered]]
+    # makes to find out who is asking would be traces of their own. Flask's instrumentation keeps its hook on the app,
+    # whether it was just added or the app's class was already instrumented (a platform's auto-instrumentation), and is found by the module it comes from.
+    hooks = server.before_request_funcs.setdefault(None, [])
+    opens_the_span = [h for h in hooks if h.__module__.startswith(_FLASK_INSTRUMENTATION)]
+    hooks[:] = [*opens_the_span, *(h for h in hooks if h not in opens_the_span)]

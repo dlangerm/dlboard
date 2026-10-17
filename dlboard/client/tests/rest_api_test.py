@@ -51,6 +51,7 @@ def test_create_project_sends_the_user_header(monkeypatch: pytest.MonkeyPatch) -
 
     class _FakeResponse:
         status_code = 200
+        ok = True
 
         def raise_for_status(self) -> None:
             return
@@ -110,6 +111,7 @@ def test_client_sends_a_timeout_on_every_request(monkeypatch: pytest.MonkeyPatch
 
     class _FakeResponse:
         status_code = 200
+        ok = True
 
         def raise_for_status(self) -> None:
             return
@@ -144,6 +146,8 @@ class _Reply:
 
     def __init__(self, status_code: int, headers: dict[str, str] | None = None) -> None:
         self.status_code = status_code
+        self.ok = status_code < 400
+        self.reason = "reason"
         self.headers = headers or {}
 
     def raise_for_status(self) -> None:

@@ -107,6 +107,10 @@ class PerProcess(Generic[T]):
                 util.Finalize(None, self.close, exitpriority=50)
             return self._value
 
+    def peek(self) -> T | None:
+        """The `T` this process has already built, if any. Never builds one: for what only matters once something has."""
+        return self._value if self._pid == os.getpid() else None
+
     def close(self) -> None:
         """Flush and shut down what this process built (a no-op in any other process), then forget it."""
         value = self._value if self._pid == os.getpid() else None

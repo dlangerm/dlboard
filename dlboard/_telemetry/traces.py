@@ -20,6 +20,7 @@ and the traced code runs exactly as it would have.
 from __future__ import annotations
 
 import importlib.util
+import sys
 import threading
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Final, TypeAlias, TypeVar
@@ -67,10 +68,30 @@ class TraceKey(StrEnum):
     ITEMS = "dlboard.batch.items"
     SHIP_KIND = "dlboard.ship.kind"
     HTTP_METHOD = "http.request.method"
-    HTTP_ROUTE = "http.route"
+    URL_TEMPLATE = "url.template"
+    SERVER_ADDRESS = "server.address"
+    SERVER_PORT = "server.port"
     HTTP_STATUS_CODE = "http.response.status_code"
     EXPERIMENT_ID = "dlboard.experiment.id"
     REQUEST_ID = "dlboard.request_id"
+
+
+class OtlpProtocol(StrEnum):
+    """The values of the standard `OTEL_EXPORTER_OTLP_PROTOCOL`."""
+
+    GRPC = "grpc"
+    HTTP_PROTOBUF = "http/protobuf"
+    HTTP_JSON = "http/json"
+
+
+class OtlpExportSettings(BaseSettings):
+    """The standard variables that choose the OTLP wire protocol, which the exporter dlboard uses does not honour."""
+
+    model_config = SettingsConfigDict(env_prefix="OTEL_EXPORTER_OTLP_")
+
+    protocol: OtlpProtocol | None = None
+    """For every signal, unless `traces_protocol` says otherwise."""
+    traces_protocol: OtlpProtocol | None = None
 
 
 class TraceSettings(BaseSettings):
@@ -90,6 +111,27 @@ class TraceSettings(BaseSettings):
             )
             raise ValueError(msg)
         return self
+
+    @model_validator(mode="after")
+    def _require_http_protobuf(self) -> TraceSettings:
+        """Spans sent to a gRPC port would all fail; say so at startup rather than only in an export error later."""
+        export = OtlpExportSettings()
+        match export.traces_protocol or export.protocol:
+            case OtlpProtocol.GRPC if self.traces:
+                msg = (
+                    "DLBOARD_TELEMETRY_TRACES exports OTLP over HTTP, not gRPC: unset OTEL_EXPORTER_OTLP_PROTOCOL "
+                    "(or set it to http/protobuf) and point OTEL_EXPORTER_OTLP_ENDPOINT at the collector's HTTP "
+                    "port, usually 4318"
+                )
+                raise ValueError(msg)
+            case OtlpProtocol.HTTP_JSON if self.traces:
+                msg = (
+                    "DLBOARD_TELEMETRY_TRACES exports OTLP with protobuf encoding, not JSON: unset "
+                    "OTEL_EXPORTER_OTLP_PROTOCOL or set it to http/protobuf"
+                )
+                raise ValueError(msg)
+            case OtlpProtocol.GRPC | OtlpProtocol.HTTP_JSON | OtlpProtocol.HTTP_PROTOBUF | None:
+                return self
 
 
 def sdk_installed() -> bool:
@@ -117,17 +159,34 @@ def name_service(name: str) -> None:
     _service = name
 
 
+_owns_process = False
+
+
+def own_process() -> None:
+    """
+    Say that this process is dlboard's alone -- the server and its blob writer, never a training process -- before its first span.
+
+    Its tracer then joins the process's OpenTelemetry instead of staying private: it uses the SDK provider a platform
+    (`opentelemetry-instrument`, the Kubernetes Operator) already set up, whether or not
+    `DLBOARD_TELEMETRY_TRACES` is on, and otherwise, when it is, becomes the global one.
+    """
+    global _owns_process
+    _owns_process = True
+
+
 def _build_traces() -> Traces | None:
-    if not TraceSettings().traces:
+    enabled = TraceSettings().traces
+    # Asked without importing anything: a platform that set up OpenTelemetry has already imported its SDK.
+    if not enabled and not (_owns_process and "opentelemetry.sdk.trace" in sys.modules):
         return None
     # Deferred: the SDK is only imported once tracing is on.
     from dlboard._telemetry._sdk import build_traces
 
-    return build_traces(_service)
+    return build_traces(_service, enabled=enabled, owns_process=_owns_process)
 
 
 TRACES: Final = PerProcess(_build_traces)
-"""This process's tracer, built on first use (`None` while tracing is off)."""
+"""This process's tracer, built on first use (`None` while tracing is off and no platform has set one up)."""
 
 _warned = threading.Event()
 
@@ -220,8 +279,9 @@ def _start(
 
 
 def _traced(call: Callable[[Traces], R], default: R) -> R:
+    """Run `call` on this process's tracer if it has one -- never building it: all of these need a span already open."""
     try:
-        traces = TRACES.get()
+        traces = TRACES.peek()
         return default if traces is None else call(traces)
     except Exception:  # noqa: BLE001 -- see the module docstring
         _swallowed()

@@ -44,6 +44,9 @@ pulls that section's body into the GitHub release notes and publishes both distr
   page was reloaded, because the chart editor's preview rendered the chart under the very ids the saved chart got, and
   Dash cannot resolve a callback with two components under one id. A chart's ids now include its own id, so the preview,
   the saved chart, and two charts of one config no longer collide.
+* A failing SQL statement's **error text no longer carries the values bound into it**, so a password, a token or a run's
+  name that was a parameter of the statement is no longer in the server's log lines (or a trace's spans) when the
+  database rejects it.
 * A run's default name is no longer the same for every run a **seeded training script** starts. Names were drawn from the
   global `random` module, so `seed_everything` gave each run the same name, and naming a run also shifted the script's
   own random draws. Names are now drawn from the OS.
