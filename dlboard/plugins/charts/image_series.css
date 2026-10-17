@@ -4,24 +4,28 @@
     position: relative;
 }
 
-/* The layers drawn over an image's picture (see `image_series_overlay.js`), in the same box, so clicks reach the picture
-   underneath. Each is scaled `contain` as the picture is, and stacks in the order the layers are listed. */
+/* An image's overlay (see `image_series_overlay.js`): an SVG laid over its picture, in the same box, so clicks reach
+   the picture underneath. Its viewBox is the picture's pixel size and it is scaled `contain` as the picture is. */
 .dl-image-series-overlay {
     position: absolute;
     inset: 0;
     pointer-events: none;
 }
 
-/* One layer, at its own opacity (set inline). */
+/* One layer of an overlay, at its own opacity (set inline); layers stack in the order they are listed. */
 .dl-image-series-layer {
     position: absolute;
     inset: 0;
 }
 
+.dl-image-series-layer > svg,
 .dl-image-series-layer > img {
     display: block;
     width: 100%;
     height: 100%;
+}
+
+.dl-image-series-layer > img {
     object-fit: contain;
     image-rendering: pixelated; /* as the picture itself is, so a small mask lines up with it block for block */
 }

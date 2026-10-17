@@ -125,7 +125,7 @@ that: by default the largest unit that fits (`1.500 h`, `2.500 GB`), or the `tag
 `tag_size_unit` it is set to (`5,400,000 ms`), with `tag_precision` significant digits (default 4); the chart's
 `tag_display` table (in its editor, a row per tag name) overrides those for a particular tag. Plain
 numbers are written out with separators (`12,346`) rather than in exponent form.
-There are four built-in kinds:
+There are five built-in kinds:
 
 - `dlboard.client.artifacts.image.Image` — uploads. Wraps a `torch.Tensor`/`np.ndarray`
   (validated CHW `uint8` via `dlbype`), used like:
@@ -136,8 +136,41 @@ There are four built-in kinds:
   logger.log_artifact([image.Image(key="sample", image=tensor, step=global_step)])
   ```
 
-  It is encoded as a lossless PNG by default, so masks, label images and annotated overlays stay
-  pixel-exact. Pass `format="jpg"` for a much smaller (lossy) file when it is a large photograph.
+  It is encoded as a lossless PNG by default, so masks and label images stay pixel-exact. Pass
+  `format="jpg"` for a much smaller (lossy) file when it is a large photograph. To annotate a
+  photograph, log an `Overlay` beside it rather than drawing into its pixels.
+
+- `dlboard.client.artifacts.overlay.Overlay` — uploads the shapes drawn over a picture: `Box`es
+  (`x`, `y`, `width`, `height`, from the top-left corner, as fractions of the picture's size) and
+  `Polyline`s and `Polygon`s (`points`, a polygon being a polyline that is closed), each with an
+  optional `label` and `color` (`"#rrggbb"`). Log it at the same
+  step as its picture, under a key of its own. The picture can stay a small JPEG, and the shapes stay
+  sharp at any size, because the image chart draws them over it in the browser, once its `overlays`
+  setting names that key:
+
+  ```python
+  from dlboard.client.artifacts import image, overlay
+  from dlboard.client.artifacts.overlay import Box
+
+  logger.log_artifact(
+      [
+          image.Image(key="sample", image=tensor, step=global_step, format="jpg"),
+          overlay.Overlay(
+              key="sample_boxes",
+              shapes=[Box(x=0.2, y=0.15, width=0.4, height=0.3, label="cat", color="#00c853")],
+              step=global_step,
+          ),
+      ]
+  )
+  ```
+
+  Shapes are stored as fractions of the picture's size, from 0 to 1, so they need no knowledge of
+  the picture's own size to be drawn: divide a pixel coordinate by the picture's width (for `x`) or
+  height (for `y`). The origin is the top-left corner and `y` grows downward, the way image
+  libraries index pixels. A `Polygon`'s points are `Point(x, y)` tuples. An overlay takes at most
+  1000 shapes, and a label up to 1000 characters. A picture with nothing logged at its step is shown
+  alone. An older server stores the overlay without drawing it, so upgrade the server to see the
+  shapes.
 
 - `dlboard.client.artifacts.figure.Figure` — uploads a matplotlib figure as an image. You
   rarely build one yourself: `logger.log_figure` mirrors `mlflow.log_figure`, with the one

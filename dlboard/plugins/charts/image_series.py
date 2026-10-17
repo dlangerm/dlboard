@@ -19,10 +19,12 @@ from structlog.stdlib import get_logger
 from dlboard.models import (
     DEFAULT_RENDER_CONTEXT,
     DEFAULT_TAG_PRECISION,
+    LAYER_KIND_TAG,
     RUN_NAME_COLUMN,
     Artifact,
     ChartType,
     ColumnKind,
+    LayerKind,
     RenderContext,
     SizeUnit,
     TagDisplay,
@@ -32,7 +34,7 @@ from dlboard.models import (
     artifact_tags_column,
     is_inlineable_artifact,
 )
-from dlboard.plugins.charts._artifact_tags import format_tags_caption
+from dlboard.plugins.charts._artifact_tags import format_tags_caption, parse_tags
 from dlboard.serve import AssetKind, ClientsideScript, series_swatch_class, serve_asset
 
 if typing.TYPE_CHECKING:
@@ -51,9 +53,10 @@ class OverlayLayer(BaseModel, frozen=True, extra="forbid", use_attribute_docstri
 
 
 class DrawnLayer(OverlayLayer):
-    """A layer to draw over one picture, as the browser is told it: how to draw it, and which file it is."""
+    """A layer to draw over one picture, as the browser is told it: which file it is, and how to draw it."""
 
     url: str
+    kind: LayerKind
 
 
 class ImageChartSettings(BaseModel, frozen=True, extra="forbid", use_attribute_docstrings=True):
@@ -62,7 +65,7 @@ class ImageChartSettings(BaseModel, frozen=True, extra="forbid", use_attribute_d
     key: str
     overlays: dict[str, OverlayLayer] = Field(default_factory=dict)
     """
-    The images drawn over each picture, such as a segmentation mask: a row per artifact key, first row at the bottom. Each is the one the run logged at the picture's own step, and a picture a row has nothing for is shown without it.
+    The artifacts drawn over each picture, a row per artifact key, first row at the bottom. Each is the one the run logged at the picture's own step: an Overlay of shapes (see `dlboard.client.artifacts.overlay`), or an image such as a mask. A picture a row has nothing for is shown without it.
     """
     x_axis: str = "step"
     height: int = 220
@@ -127,9 +130,24 @@ def _drawn_layers(row: dict[Hashable, Any], layers: dict[str, OverlayLayer]) -> 
     for key, layer in layers.items():
         url, fname = row.get(artifact_column(key)), row.get(artifact_fname_column(key))
         # A layer the run did not log at this step holds NaN, which is no string.
-        if isinstance(url, str) and isinstance(fname, str) and is_inlineable_artifact(fname):
-            drawn.append(DrawnLayer(url=url, opacity=layer.opacity))
+        if isinstance(url, str) and isinstance(fname, str):
+            kind = _layer_kind(row.get(artifact_tags_column(key)), fname)
+            if kind is not None:
+                drawn.append(DrawnLayer(url=url, kind=kind, opacity=layer.opacity))
     return drawn
+
+
+def _layer_kind(tags: object, fname: str) -> LayerKind | None:
+    """How a layer is drawn: the kind its artifact says it is (`LAYER_KIND_TAG`), else as a picture if it is an image."""
+    stored = parse_tags(tags).get(LAYER_KIND_TAG)
+    if stored is None:
+        return LayerKind.PICTURE if is_inlineable_artifact(fname) else None
+    try:
+        return LayerKind(stored)
+    except ValueError:
+        # A kind a newer client logged: leave the layer out, and say why.
+        _log.warning("a layer of an unknown kind is not drawn", kind=stored)
+        return None
 
 
 def _layers_by_picture(
@@ -178,7 +196,7 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
         layer_cols = [
             c
             for key in parameters.overlays
-            for c in (artifact_column(key), artifact_fname_column(key))
+            for c in (artifact_column(key), artifact_fname_column(key), artifact_tags_column(key))
             if c in dataframe.columns
         ]
         has_names = RUN_NAME_COLUMN in dataframe.columns
@@ -338,7 +356,7 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
                     size="90%",
                     padding=0,
                     centered=True,
-                    # Kept in the page while closed, so the browser can draw the picture's layers into it at once.
+                    # Kept in the page while closed, so the browser can draw the picture's overlay into it at once.
                     keepMounted=True,
                     children=html.Div(
                         [
@@ -404,7 +422,7 @@ _LOCK_JS = ClientsideScript(Path(__file__).with_name("image_series_lock.js"))
 _MODAL_OVERLAY_JS = ClientsideScript(Path(__file__).with_name("image_series_modal_overlay.js"))
 _CSS_PATH = Path(__file__).with_name("image_series.css")
 _OVERLAY_HELPER_PATH = Path(__file__).with_name("image_series_overlay.js")
-"""Draws layers over a picture; both the scrub and the modal call it, so it is a shared script."""
+"""Draws an overlay into a picture's layer; both the scrub and the modal call it, so it is a shared script."""
 
 
 def plug(app: dash.Dash) -> None:

@@ -1,26 +1,173 @@
-// Draws the layers of an image chart over its picture: each an image (a segmentation mask, say) at its own opacity,
-// scaled `contain` as the picture is, so a layer lines up with it at any size.
+// Draws the layers of an image chart over its picture, each at its own opacity: an overlay of shapes (a
+// `dlboard.client.artifacts.overlay.Overlay`, logged as JSON) as an SVG, or an image (a mask, say) as it is. Both are
+// scaled `contain`, as the picture is, and the shapes are fractions of the picture's size that are scaled by its pixel
+// size here, so the layers line up with it at any size. Every element is built with DOM calls, never by parsing
+// markup, so a label is only text.
+//
+// The data was checked where it was made, so none of it is checked again here. What can still go wrong (a layer that
+// will not load, a kind this script does not know, a shape that cannot be drawn) is logged with `console.error`, which
+// the browser tests fail on, and never stops the rest of the page or the other layers from drawing.
 //
 // A plain script, not a clientside callback: the image-series scrub and the modal both draw through `show`.
 window.dlImageSeriesOverlay = (() => {
-    // Draws `layers` (each `{url, opacity}`, bottom first) into `layer`. No layers clears it. A layer element
-    // remembers what it was last given, so the same layers are not drawn again.
-    const show = (layer, layers) => {
-        const request = JSON.stringify(layers);
+    const SVG_NS = "http://www.w3.org/2000/svg";
+    const MIN_LABEL_SIZE = 8;
+    const LABEL_SIZE_DIVISOR = 32;
+
+    const element = (name, attributes) => {
+        const el = document.createElementNS(SVG_NS, name);
+        for (const [key, value] of Object.entries(attributes)) {
+            el.setAttribute(key, String(value));
+        }
+        return el;
+    };
+
+    // `points` (fractions) as pixels in a picture `width` by `height`.
+    const toPixels = (points, { width, height }) => points.map(([x, y]) => [x * width, y * height]);
+
+    // A line through `points`, closed or not: an SVG `name` (`polyline`, `polygon`), labelled at its first point.
+    const throughPoints = (name) => (shape, size, style) => {
+        const points = toPixels(shape.points, size);
+        const outline = element(name, { points: points.map(([x, y]) => `${x},${y}`).join(" "), ...style });
+        return { outline, anchor: points[0] };
+    };
+
+    // How each kind of shape is outlined: its SVG element, and the point its label goes at.
+    const SHAPE_OUTLINES = {
+        box: (shape, { width, height }, style) => ({
+            outline: element("rect", {
+                x: shape.x * width,
+                y: shape.y * height,
+                width: shape.width * width,
+                height: shape.height * height,
+                ...style,
+            }),
+            anchor: [shape.x * width, shape.y * height],
+        }),
+        polyline: throughPoints("polyline"),
+        polygon: throughPoints("polygon"),
+    };
+
+    const shapeGroup = (shape, size, labelSize) => {
+        const outlineOf = SHAPE_OUTLINES[shape.kind];
+        if (!outlineOf) {
+            throw new Error(`no outline for a shape of kind "${shape.kind}"`);
+        }
+        const style = {
+            fill: "none",
+            stroke: shape.color,
+            "stroke-width": 2,
+            "vector-effect": "non-scaling-stroke",
+        };
+        const { outline, anchor } = outlineOf(shape, size, style);
+        const group = element("g", {});
+        group.append(outline);
+        if (shape.label) {
+            const label = element("text", {
+                x: anchor[0] + 2,
+                y: anchor[1] + labelSize,
+                "font-size": labelSize,
+                fill: shape.color,
+                stroke: "#000000",
+                "stroke-width": labelSize / 8,
+                "paint-order": "stroke",
+            });
+            label.textContent = shape.label;
+            group.append(label);
+        }
+        return group;
+    };
+
+    const overlaySvg = (overlay, size) => {
+        const labelSize = Math.max(MIN_LABEL_SIZE, size.height / LABEL_SIZE_DIVISOR);
+        const svg = element("svg", {
+            viewBox: `0 0 ${size.width} ${size.height}`,
+            preserveAspectRatio: "xMidYMid meet",
+        });
+        for (const shape of overlay.shapes) {
+            try {
+                svg.append(shapeGroup(shape, size, labelSize));
+            } catch (error) {
+                // One shape that cannot be drawn does not hide the rest.
+                console.error("image overlay: a shape was not drawn:", shape, error);
+            }
+        }
+        return svg;
+    };
+
+    // How each kind of layer is drawn into its `holder`, given the layer (`{url, kind, opacity}`) and what the drawing
+    // needs of the picture it goes over (`context`: its element and URL, and whether this request is still the latest).
+    const LAYER_DRAWERS = {
+        picture: (holder, { url }) => {
+            const img = document.createElement("img");
+            img.alt = "";
+            img.src = url;
+            img.onerror = () => console.error("image overlay: a picture layer did not load:", url);
+            holder.append(img);
+        },
+        shapes: (holder, { url }, { picture, pictureUrl, isCurrent }) => {
+            const isShown = () =>
+                picture.getAttribute("src") === pictureUrl && picture.complete && picture.naturalWidth > 0;
+            const size = () => ({ width: picture.naturalWidth, height: picture.naturalHeight });
+            // Draw once the picture is on screen, unless the request is overtaken first.
+            const draw = (overlay) => {
+                if (isShown()) {
+                    holder.replaceChildren(overlaySvg(overlay, size()));
+                    return;
+                }
+                const onLoad = () => {
+                    if (!isCurrent()) {
+                        picture.removeEventListener("load", onLoad);
+                    } else if (isShown()) {
+                        picture.removeEventListener("load", onLoad);
+                        holder.replaceChildren(overlaySvg(overlay, size()));
+                    }
+                };
+                picture.addEventListener("load", onLoad);
+            };
+            fetch(url)
+                .then((response) => {
+                    if (!response.ok) {
+                        throw new Error(`answered ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then((overlay) => {
+                    if (isCurrent()) {
+                        draw(overlay);
+                    }
+                })
+                .catch((error) => console.error("image overlay: a shapes layer was not drawn:", url, error));
+        },
+    };
+
+    // Draws `layers` (bottom first) over `picture`, which is showing `pictureUrl`, into `layer`. No layers clears it. A
+    // layer element remembers the request it was last given, so a request that the slider (or another modal open) has
+    // overtaken draws nothing, and the same one is not drawn twice.
+    const show = (layer, picture, pictureUrl, layers) => {
+        const request = `${pictureUrl} ${JSON.stringify(layers)}`;
         if (layer.dataset.request === request) {
             return;
         }
         layer.dataset.request = request;
         layer.replaceChildren();
-        for (const { url, opacity } of layers) {
+        const context = { picture, pictureUrl, isCurrent: () => layer.dataset.request === request };
+        for (const spec of layers) {
+            // Made in order, before anything has loaded, so the layers stack as they are listed.
             const holder = document.createElement("div");
             holder.className = "dl-image-series-layer";
-            holder.style.opacity = String(Number.isFinite(opacity) ? Math.min(1, Math.max(0, opacity)) : 1);
-            const img = document.createElement("img");
-            img.alt = "";
-            img.src = url;
-            holder.append(img);
+            holder.style.opacity = String(spec.opacity);
             layer.append(holder);
+            const draw = LAYER_DRAWERS[spec.kind];
+            if (!draw) {
+                console.error(`image overlay: no way to draw a layer of kind "${spec.kind}":`, spec.url);
+                continue;
+            }
+            try {
+                draw(holder, spec, context);
+            } catch (error) {
+                console.error("image overlay: a layer was not drawn:", spec.url, error);
+            }
         }
     };
 

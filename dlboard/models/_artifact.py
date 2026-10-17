@@ -31,6 +31,24 @@ class FileKind(StrEnum):
     """A model checkpoint, e.g. one `ModelCheckpoint` saved."""
 
 
+LAYER_KIND_TAG: Final = "layer_kind"
+"""The tag an artifact records its `LayerKind` under, when a browser has to be told how to draw it as a layer."""
+
+
+class LayerKind(StrEnum):
+    """
+    How a browser draws an artifact as a layer over a picture, for what a file's extension cannot say.
+
+    Stored as the value of the `LAYER_KIND_TAG` tag, so a value is never renamed or removed. An artifact with no such
+    tag is a layer only if it is an image, drawn as the picture it is (a segmentation mask, say).
+    """
+
+    SHAPES = "shapes"
+    """An `Overlay`: shapes as JSON, drawn as an SVG."""
+    PICTURE = "picture"
+    """An image, drawn as it is."""
+
+
 INLINEABLE_ARTIFACT_CONTENT_TYPES: Final = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
 """
 Content types safe for a browser to render inline, rather than only download, when serving an

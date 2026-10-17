@@ -11,8 +11,10 @@ from pydantic import ValidationError
 from dlboard.conftest import props as _props
 from dlboard.models import (
     DEFAULT_RENDER_CONTEXT,
+    LAYER_KIND_TAG,
     RUN_NAME_COLUMN,
     ChartTypeRegistry,
+    LayerKind,
     ParameterFieldType,
     Quantity,
     RenderContext,
@@ -27,6 +29,7 @@ from dlboard.plugins.charts.image_series import (
     ImageChart,
     ImageChartSettings,
     OverlayLayer,
+    _layer_kind,
     _slider_marks,
 )
 
@@ -321,29 +324,33 @@ def _store_data(stack: Any) -> dict[str, Any]:  # noqa: ANN401 -- a rendered Das
     return _props(store)["data"]
 
 
-def _log_layer(df: pd.DataFrame, key: str, fname: str, *, at_step: int = 0) -> None:
-    """Log `key` at every run's `at_step` as an artifact called `fname`, and at no other step."""
-    here = [s == at_step for s in df["step"]]
+def _log_layer(df: pd.DataFrame, key: str, fname: str, *, kind: LayerKind | None = None) -> None:
+    """Log `key` at every run's step 0 as an artifact called `fname` (tagged as a layer of `kind`, if given)."""
+    here = [s == 0 for s in df["step"]]
     df[artifact_column(key)] = [
         f"{key}://{r}" if at else None for r, at in zip(df["run_id"], here, strict=True)
     ]
     df[artifact_fname_column(key)] = [fname if at else None for at in here]
+    tags: dict[str, str] = {LAYER_KIND_TAG: kind.value} if kind else {}
+    df[artifact_tags_column(key)] = pd.Series(
+        [tags if at else None for at in here], index=df.index, dtype=object
+    )
 
 
 def test_layers_are_paired_with_the_picture_logged_at_the_same_run_and_step_in_the_order_listed() -> None:
     df = _artifacts_df(n_runs=2, steps_per_run=2)
+    _log_layer(df, "boxes", "boxes.json", kind=LayerKind.SHAPES)
     _log_layer(df, "mask", "mask.png")
-    _log_layer(df, "outline", "outline.jpg")
     settings = ImageChartSettings(
-        key="img", overlays={"outline": OverlayLayer(), "mask": OverlayLayer(opacity=0.5)}
+        key="img", overlays={"mask": OverlayLayer(opacity=0.5), "boxes": OverlayLayer()}
     )
 
     overlays = _store_data(ImageChart.render(settings, df))["overlays"]
 
     assert overlays == {
         f"ref://{run}-0": [
-            {"url": f"outline://{run}", "opacity": 1.0},
-            {"url": f"mask://{run}", "opacity": 0.5},
+            {"url": f"mask://{run}", "kind": "picture", "opacity": 0.5},
+            {"url": f"boxes://{run}", "kind": "shapes", "opacity": 1.0},
         ]
         for run in (1, 2)
     }  # step 1 logged no layers, so its pictures are not listed
@@ -351,19 +358,26 @@ def test_layers_are_paired_with_the_picture_logged_at_the_same_run_and_step_in_t
 
 def test_an_image_chart_without_layers_draws_nothing_over_its_pictures() -> None:
     df = _artifacts_df(n_runs=1)
-    _log_layer(df, "mask", "mask.png")
+    _log_layer(df, "boxes", "boxes.json", kind=LayerKind.SHAPES)
 
     assert _store_data(ImageChart.render(ImageChartSettings(key="img"), df))["overlays"] == {}
 
 
-@pytest.mark.parametrize("fname", ["model.ckpt", "notes.txt", "boxes.json"])
-def test_a_file_that_is_no_image_is_not_drawn_as_a_layer(fname: str) -> None:
-    df = _artifacts_df(n_runs=1)
-    _log_layer(df, "file", fname)
-
-    stack = ImageChart.render(ImageChartSettings(key="img", overlays={"file": OverlayLayer()}), df)
-
-    assert _store_data(stack)["overlays"] == {}
+@pytest.mark.parametrize(
+    ("tags", "fname", "kind"),
+    [
+        pytest.param({LAYER_KIND_TAG: "shapes"}, "boxes.json", LayerKind.SHAPES, id="the-tag-says-shapes"),
+        pytest.param({LAYER_KIND_TAG: "shapes"}, "boxes.bin", LayerKind.SHAPES, id="not-the-extension"),
+        pytest.param({LAYER_KIND_TAG: "picture"}, "mask.png", LayerKind.PICTURE, id="the-tag-says-picture"),
+        pytest.param({}, "mask.png", LayerKind.PICTURE, id="an-image-with-no-tag-is-a-picture"),
+        pytest.param({}, "model.ckpt", None, id="a-file-with-no-tag-is-no-layer"),
+        pytest.param({LAYER_KIND_TAG: "rle-mask"}, "mask.npz", None, id="a-kind-this-server-lacks"),
+    ],
+)
+def test_a_layers_kind_comes_from_its_tag_and_an_image_defaults_to_a_picture(
+    tags: dict[str, str], fname: str, kind: LayerKind | None
+) -> None:
+    assert _layer_kind(tags, fname) is kind
 
 
 def test_the_layers_are_charted_with_the_image_and_edited_as_a_table() -> None:

@@ -45,6 +45,8 @@ function imageSeriesScrub(step, data) {
         }
         window.dlImageSeriesOverlay.show(
             thumb.querySelector(".dl-image-series-overlay"),
+            img,
+            srcs[i],
             data.overlays?.[srcs[i]] ?? [],
         );
     });

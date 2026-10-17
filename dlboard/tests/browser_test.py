@@ -33,6 +33,7 @@ from playwright.sync_api import expect
 from dlboard import models
 from dlboard.client._rest_api import BasicDlboardAPI
 from dlboard.client.artifacts.image import Image
+from dlboard.client.artifacts.overlay import Box, Overlay, Point, Polygon
 from dlboard.client.histograms import ExponentialBinning
 from dlboard.models import PanelInstance
 from dlboard.serve import get_system_data_store
@@ -2283,8 +2284,88 @@ def test_an_edited_image_chart_still_scrubs_and_opens_its_enlarged_view(
     expect(page.get_by_role("dialog")).to_be_visible()
 
 
+_OVERLAY_COVERS_PICTURE_JS = """(layer) => {
+    const picture = layer.parentElement?.querySelector("img")?.getBoundingClientRect();
+    const drawn = layer.querySelector("svg, img")?.getBoundingClientRect();
+    return Boolean(
+        picture && drawn && picture.width > 0 &&
+        Math.abs(picture.x - drawn.x) < 1 && Math.abs(picture.y - drawn.y) < 1 &&
+        Math.abs(picture.width - drawn.width) < 1 && Math.abs(picture.height - drawn.height) < 1
+    );
+}"""
+
+
+def test_an_image_chart_draws_the_overlay_logged_at_each_pictures_step_over_it(
+    page: Page, live_server_url: str, tmp_path: Path, console_errors: list[str]
+) -> None:
+    """
+    An image chart given an overlay as a layer draws the overlay logged at each picture's own
+    step over it, in the thumbnail and in the enlarged view. A step with no overlay shows its picture alone, and each
+    drawing covers its picture.
+    """
+    _create_project_and_experiment(page, live_server_url, "Overlay Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    api = BasicDlboardAPI(live_server_url)
+    run = api.create_run(models.NewRun(experiment_id=experiment_id))
+    picture = np.full((48, 64, 3), 128, dtype=np.uint8)
+    shapes = [
+        # Fractions of a 64 by 48 picture: pixel (8, 12), 24 wide and 12 tall; and a triangle through (40, 12), (56, 12), (48, 42).
+        Box(x=0.125, y=0.25, width=0.375, height=0.25, label="cat"),
+        Polygon(points=[Point(0.625, 0.25), Point(0.875, 0.25), Point(0.75, 0.875)], color="#00ff00"),
+    ]
+    api.log_artifact_batch(
+        [
+            Image(key="samples/a", image=picture, step=0, format="jpg").to_artifact(
+                tmp_path, run.id, experiment_id
+            ),
+            Overlay(key="samples/boxes", shapes=shapes, step=0).to_artifact(tmp_path, run.id, experiment_id),
+            Image(key="samples/a", image=picture, step=10, format="jpg").to_artifact(
+                tmp_path, run.id, experiment_id
+            ),
+        ]
+    )
+    _wait_for_artifacts(experiment_id, 3)
+    page.reload()
+    _auto_generate_charts(page)
+
+    # Only the picture has a chart: nothing displays the JSON overlay, so it is drawn by naming it as a layer.
+    chart = page.locator(".dl-chart-item")
+    expect(chart).to_have_count(1)
+    chart.hover()
+    chart.get_by_role("button", name="Edit chart").click()
+    page.locator('button[id*="overlays"][id*="table-add"]').click()
+    page.get_by_role("dialog").locator('.ag-cell[col-id="key"]').first.click()
+    page.keyboard.type("samples/boxes")
+    page.keyboard.press("Enter")
+    page.locator(f"#{ADD_CHART_SUBMIT_ID}").click()
+    thumb = chart.locator(".dl-image-series-thumb")
+    layer = thumb.locator(".dl-image-series-overlay")
+    expect(layer.locator("rect")).to_have_count(1)
+    expect(layer.locator("polygon")).to_have_count(1)
+    expect(layer.locator("svg")).to_have_attribute("viewBox", "0 0 64 48")  # the picture's own pixel size
+    rect = layer.locator("rect")
+    assert [rect.get_attribute(a) for a in ("x", "y", "width", "height")] == ["8", "12", "24", "12"]
+    page.wait_for_function(_OVERLAY_COVERS_PICTURE_JS, arg=layer.element_handle())
+
+    # Step 10 logged no overlay, so its picture is shown alone; back at step 0 the shapes come back.
+    page.get_by_role("slider").focus()
+    page.keyboard.press("ArrowRight")
+    expect(layer.locator("svg")).to_have_count(0)
+    page.keyboard.press("ArrowLeft")
+    expect(layer.locator("rect")).to_have_count(1)
+
+    thumb.click()
+    dialog = page.get_by_role("dialog")
+    expect(dialog).to_be_visible()
+    modal_layer = dialog.locator(".dl-image-series-overlay")
+    expect(modal_layer.locator("rect")).to_have_count(1)
+    page.wait_for_function(_OVERLAY_COVERS_PICTURE_JS, arg=modal_layer.element_handle())
+    assert console_errors == []  # a layer or shape that could not be drawn is logged, and fails here
+
+
 def test_a_layer_added_in_the_chart_editor_is_drawn_over_the_pictures_at_its_opacity(
-    page: Page, live_server_url: str, tmp_path: Path
+    page: Page, live_server_url: str, tmp_path: Path, console_errors: list[str]
 ) -> None:
     """The `overlays` setting is a table: any artifact key can be added as a layer, with an opacity of its own."""
     _create_project_and_experiment(page, live_server_url, "Layer Editor Experiment")
@@ -2321,6 +2402,7 @@ def test_a_layer_added_in_the_chart_editor_is_drawn_over_the_pictures_at_its_opa
     layer = chart.locator(".dl-image-series-thumb .dl-image-series-layer")
     expect(layer.locator("img")).to_have_count(1)
     expect(layer).to_have_css("opacity", "0.5")
+    assert console_errors == []  # a layer that could not be drawn is logged, and fails here
 
 
 def test_an_image_charts_runs_follow_their_panels_grid_columns(
