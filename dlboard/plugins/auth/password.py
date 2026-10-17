@@ -36,6 +36,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from structlog.stdlib import get_logger
 
 from dlboard import models
+from dlboard._telemetry import Attributes, attribute
 from dlboard.serve import (
     AppSlot,
     AuthSettings,
@@ -50,7 +51,7 @@ from dlboard.serve import (
     sign_in,
     start_session,
 )
-from dlboard.serve.telemetry import AttributeKey, Attributes, Counter, Unit, attribute
+from dlboard.serve.telemetry import AttributeKey, Counter, Unit
 
 if TYPE_CHECKING:
     from dash import Dash

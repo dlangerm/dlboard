@@ -32,17 +32,16 @@ from structlog.stdlib import get_logger
 from dlboard import models
 from dlboard._batching import BatchParams, ship_batches
 from dlboard._mp_context import SPAWN_CONTEXT
+from dlboard._telemetry import Attributes, attribute
 from dlboard.serve import set_artifact_store, wait_for_data_store
 from dlboard.serve._logging import configure_logging
 from dlboard.serve.telemetry import (
     AttributeKey,
-    Attributes,
     Counter,
     Histogram,
     Outcome,
     OutcomeAttributes,
     Unit,
-    attribute,
 )
 
 if TYPE_CHECKING:

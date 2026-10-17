@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 import pytest
 import structlog
 
-import dlboard.serve.telemetry as facade
+import dlboard._telemetry as shared
 from dlboard.conftest import scraped_total
 from dlboard.serve.telemetry import (
     METRICS,
@@ -156,7 +156,7 @@ def test_a_failed_build_is_retried_after_a_back_off_and_the_process_recovers(
 
     telemetry.setenv("DLBOARD_TELEMETRY_METRICS", "otlp")
     telemetry.setattr(_sdk, "build_metrics", flaky)
-    telemetry.setattr(facade, "_RETRY_FIRST_S", 0.5)
+    telemetry.setattr(shared, "_RETRY_FIRST_S", 0.5)
     METRICS.close()  # starts the back-off over, at the shortened first step
 
     assert METRICS.get() is None
