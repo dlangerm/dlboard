@@ -65,6 +65,7 @@ class TraceKey(StrEnum):
 
     RUN_ID = "dlboard.run.id"
     EXPERIMENT_ID = "dlboard.experiment.id"
+    REQUEST_ID = "dlboard.request_id"
 
 
 class TraceSettings(BaseSettings):
@@ -233,3 +234,13 @@ def trace_ids() -> tuple[str, str] | None:
 def flush() -> None:
     """Export every finished span now, before the process might be killed (a daemon shipping process, a worker)."""
     _traced(lambda traces: traces.flush(), None)
+
+
+def annotate_current(attributes: Attributes) -> None:
+    """Add `attributes` to the span open here, which something else (an instrumented library) opened."""
+    _traced(lambda traces: traces.annotate(attributes.as_otel()), None)
+
+
+def fail_current(exc: BaseException) -> None:
+    """Record `exc` on the span open here, for an error a handler turns into a response, so no block ever sees it."""
+    _traced(lambda traces: traces.fail(exc), None)

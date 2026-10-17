@@ -15,6 +15,10 @@ dev = [
   # Test-only: the `otel` extra of `dlboard` (`server/pyproject.toml`), installed so the telemetry tests run.
   "opentelemetry-exporter-otlp-proto-http>=1.25",
   "opentelemetry-exporter-prometheus>=0.46b0",
+  "opentelemetry-instrumentation-botocore>=0.46b0",
+  "opentelemetry-instrumentation-flask>=0.46b0",
+  "opentelemetry-instrumentation-psycopg>=0.46b0",
+  "opentelemetry-instrumentation-sqlalchemy>=0.46b0",
   "opentelemetry-sdk>=1.25",
   "pandas-stubs>=3.0.5.260730",
   "prek>=0.4.10",

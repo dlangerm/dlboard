@@ -18,7 +18,10 @@ from typing import TYPE_CHECKING
 
 import pytest
 import structlog
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
+from dlboard._telemetry import _sdk
+from dlboard._telemetry.traces import SpanKind, span, trace_ids
 from dlboard.serve._logging import LogFormat, configure_logging
 
 if TYPE_CHECKING:
@@ -162,3 +165,23 @@ def test_a_library_that_sets_its_own_level_still_speaks_only_from_warning(
 
     (line,) = capsys.readouterr().out.strip().splitlines()
     assert json.loads(line)["event"] == "a problem"
+
+
+@pytest.mark.usefixtures("_reset_structlog")
+def test_a_line_logged_inside_a_span_carries_its_trace_and_span_ids(
+    capsys: pytest.CaptureFixture[str], telemetry: pytest.MonkeyPatch
+) -> None:
+    telemetry.setenv("DLBOARD_TELEMETRY_TRACES", "true")
+    telemetry.setenv("DLBOARD_LOG_FORMAT", "json")
+    telemetry.setattr(_sdk, "make_exporter", InMemorySpanExporter)
+    configure_logging()
+
+    with span("work", SpanKind.INTERNAL):
+        structlog.get_logger().info("inside")
+        ids = trace_ids()
+    structlog.get_logger().info("outside")
+
+    inside, outside = (json.loads(line) for line in capsys.readouterr().out.strip().splitlines())
+    assert ids is not None
+    assert (inside["trace_id"], inside["span_id"]) == ids
+    assert "trace_id" not in outside
