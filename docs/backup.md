@@ -36,7 +36,7 @@ pg_restore --clean --if-exists --dbname="$DATABASE_URL" dlboard-2026-10-07.dump 
 ```
 
 If you set `DLBOARD_POSTGRES_DB_SCHEMA`, add `--schema=<name>` to the dump. Managed Postgres services
-(RDS, Cloud SQL, ...) have point-in-time recovery; turn it on and it covers this.
+(RDS, <!-- vale Google.WordList = NO -->Google Cloud SQL<!-- vale Google.WordList = YES -->, ...) have point-in-time recovery; turn it on and it covers this.
 
 ## Filesystem artifacts
 

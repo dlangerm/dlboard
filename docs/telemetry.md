@@ -2,10 +2,10 @@
 
 ## What is this
 
-dlboard can export its own operational metrics (requests, ingest volume, database and artifact-store
+dlboard can export its own operational metrics (requests, upload volume, database and artifact-store
 latency, sign-ins, ...) for Prometheus to scrape or an OpenTelemetry collector to receive, and can send
 its logs over OTLP as well. It is built on OpenTelemetry, so anything that speaks OTLP works:
-Prometheus 3, an OpenTelemetry Collector, Grafana Mimir and Loki, Grafana Cloud, Datadog, ...
+Prometheus 3, an OpenTelemetry Collector, Grafana Mimir and Loki, <!-- vale Google.WordList = NO -->Grafana Cloud<!-- vale Google.WordList = YES -->, Datadog, ...
 
 This is about the *server*. The metrics your training runs log are a different thing and live in the
 database.
@@ -80,7 +80,7 @@ answered.
 your data, but block it at the [reverse proxy](reverse-proxy.md) or scrape the pod port directly if that
 matters to you.
 
-### OTLP
+### Pushing to a collector
 
 Metrics and logs are pushed over OTLP/HTTP (protobuf; gRPC is not supported). The endpoint, headers, timeouts
 and push interval all come from the standard variables:
@@ -144,7 +144,7 @@ _SAVED.add(1)
 
 Labels are a frozen dataclass, so a wrong label or type is caught by the type checker and the set of series stays
 bounded. Name each label with `attribute(key)`, where `key` is a member of a `StrEnum` of label names (dlboard's own are
-`AttributeKey`; a plugin defines its own, ideally using OpenTelemetry semantic-convention names), and use enums or ints
+`AttributeKey`; a plugin defines its own, ideally using OpenTelemetry semantic-convention names), and use enums or integers
 for the values:
 
 ```python

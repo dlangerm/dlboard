@@ -1,4 +1,4 @@
-# Reverse proxy and TLS
+# Using a reverse proxy with TLS
 
 ## What is this
 

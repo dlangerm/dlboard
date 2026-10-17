@@ -95,7 +95,7 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ### Added
 
-* A line or bar chart is titled with its full metric name, above the chart. The y-axis title is still
+* A line or bar chart is titled with its full metric name, at the top of the chart. The y-axis title is still
   shortened to fit, so a long name was hard to read.
 * A **table chart can show artifacts**. In its new `artifacts` mode it lists one row per logged artifact under a
   key, or every key under a prefix (`eval/`, including keys logged later), with each tag as a column that
@@ -147,9 +147,9 @@ pulls that section's body into the GitHub release notes and publishes both distr
   `tag_display` overrides those per tag name. Plain
   numbers are written with separators (`12,346`) instead of `1.235e+04`.
 * Opt-in OpenTelemetry for enterprise deployments. `DLBOARD_TELEMETRY_METRICS=prometheus,otlp` exports the
-  server's own metrics (HTTP requests and latency, metric and artifact ingest, the artifact write queue, run
+  server's own metrics (HTTP requests and latency, metric and artifact uploads, the artifact write queue, run
   lifecycle, sign-ins, artifact purges) either as a Prometheus scrape of `/metrics` -- added up across every
-  worker -- or pushed over OTLP to a collector, Mimir or Grafana Cloud, and `DLBOARD_TELEMETRY_LOGS` sends the
+  worker -- or pushed over OTLP to a collector, Mimir or <!-- vale Google.WordList = NO -->Grafana Cloud<!-- vale Google.WordList = YES -->, and `DLBOARD_TELEMETRY_LOGS` sends the
   logs over OTLP too (Loki). It is the new `otel` extra (OpenTelemetry SDK 1.25 or later, 1.38 for logs),
   installed in the Docker image; with none of it set nothing is imported or logged, and every process (each
   Granian worker and its artifact writer) sets itself up on first use, so a collector that is down never stops
@@ -249,8 +249,8 @@ pulls that section's body into the GitHub release notes and publishes both distr
   numbers and booleans as well as strings, and format them identically wherever they come from (floats to
   four significant digits). Callers no longer stringify, and so no longer disagree. Tags are still stored
   as text -- a numeric tag would be rejected by an older server, which the supported version skew allows.
-* `DLBoardLogger` flattens nested hyperparameters, like Lightning's own loggers do: a pydantic model,
-  a pydantic or stdlib dataclass, a `Namespace` or a plain dict, nested however deeply, is logged as
+* `DLBoardLogger` flattens nested hyperparameters, like Lightning's own loggers do: a Pydantic model,
+  a Pydantic or stdlib dataclass, a `Namespace` or a plain dict, nested however deeply, is logged as
   `parent/child` keys instead of being rejected. Pydantic does the serializing, so a model's own
   aliases and field serializers apply. Lists are stored as a JSON string. See `flatten_hparams`.
 * `DLBoardLogger(log_model=...)` uploads `ModelCheckpoint` checkpoints, like the MLflow and W&B
@@ -287,7 +287,7 @@ pulls that section's body into the GitHub release notes and publishes both distr
   the browser about 3 s to draw; it takes about 0.1 s now).
 * Changing a Grid panel's charts-per-row no longer rebuilds every chart in the panel. The browser applies the
   new column count itself and the server only saves it, so a panel with over a hundred charts freezes the
-  page for about a quarter of the time (0.8s instead of 3s per click, measured on 126 charts).
+  page for about a quarter of the time (0.8 seconds instead of 3 seconds per click, measured on 126 charts).
 * A chart could show the wrong image when the browser had visited another dlboard database at the same
   address (a wiped or restored database, or a different `--sqlite-location`). Artifact URLs are keyed by
   id, ids start over in a new database, and the browser was told to cache them for a year; so artifact
@@ -312,7 +312,7 @@ pulls that section's body into the GitHub release notes and publishes both distr
   matplotlib figure (a lossless PNG by default, or whatever supported extension the key ends in) and
   logs it as an image-series artifact. Backed by the new
   `dlboard.client.artifacts.figure.Figure` artifact kind.
-* Run compare: a **Compare** button above the experiment's run table opens a modal that diffs up to
+* Run compare: a **Compare** button at the top of the experiment's run table opens a modal that diffs up to
   five runs' hyperparameters and latest metric values, as differences only or every key, with a
   search box over keys and values. Differing cells are highlighted against the first run picked.
   The picked runs, mode and search are kept in the URL, so copying the address (or the modal's link
@@ -332,11 +332,11 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 * Lower version requirements to enable broader install base
 * Fix Dash in tab title
-* Adjust readme
+* Adjust README
 
 ## [0.2.0] - 2026-10-07
 
-* Change dlboard to install the full fat server+client and dlboard-client to install only the pytorch lightning logger to make it more straightforward to install for tensorboard-like use cases.
+* Change dlboard to install the full fat server+client and dlboard-client to install only the PyTorch lightning logger to make it more straightforward to install for TensorBoard-like use cases.
 
 ## [0.1.3] - 2026-10-07
 
@@ -344,8 +344,8 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 - First public release candidate
   * Builtin charts: bar chart, line chart, table, image series
-  * Custom plugins for extensible charts, backend functionality, logging, theme, and more, all powered by Dash/Plotly
+  * Custom plugins for extensible charts, backend capabilities, logging, theme, and more, all powered by Dash/Plotly
   * Asynchronous hyperparameter and metric logging
-  * Pytorch lightning logger support out of the box
-  * Local serve/client experience like tensorboard
-  * Production ready, s3 and postgres backing file and data stores built in
+  * PyTorch lightning logger support out of the box
+  * Local serve/client experience like TensorBoard
+  * Production ready, s3 and Postgres backing file and data stores built in

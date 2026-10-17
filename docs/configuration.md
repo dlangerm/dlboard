@@ -18,7 +18,7 @@ version line without a deprecation window.
 
 | Variable | Default | |
 |---|---|---|
-| `DLBOARD_PLUGINS` | | Import path to the `list[PluginProtocol]` to serve, e.g. `myapp.deployment:PLUGINS`. Set by `dlboard serve`; the same as `serve custom --plugins`. |
+| `DLBOARD_PLUGINS` | | Import path to the `list[PluginProtocol]` to serve, for example `myapp.deployment:PLUGINS`. Set by `dlboard serve`; the same as `serve custom --plugins`. |
 | `DLBOARD_URL_PREFIX` | none | Serve under a path prefix (`dlboard` for `https://host/dlboard/`) when a [reverse proxy](reverse-proxy.md) forwards the full path unchanged. |
 | `DLBOARD_TRUSTED_PROXIES` | `0` | How many reverse-proxy hops in front of dlboard to trust `X-Forwarded-*` from. Must be `1` or more behind a proxy, or HTTPS looks like HTTP and secure cookies break. |
 | `DLBOARD_MAX_UPLOAD_MB` | `256` | Hard cap on any single request body, mainly artifact uploads. Over it, the request gets a 413. |
@@ -29,7 +29,7 @@ version line without a deprecation window.
 | `DLBOARD_HISTOGRAM_MAX_TICKS` | `6` | How many buckets a histogram chart's value axis names (by lower edge). |
 | `DLBOARD_HISTOGRAM_ASPECT` | `2.5` | How much wider than tall a histogram chart is by default. |
 | `DLBOARD_POLL_INTERVAL_MS` | `30000` | How often an open experiment page checks for new data. |
-| `DLBOARD_TICK_INTERVAL_MS` | `10000` | How often the "fetched Xs ago" label re-renders. Browser-only; never touches the server. |
+| `DLBOARD_TICK_INTERVAL_MS` | `10000` | How often the `fetched Xs ago` label re-renders. Browser-only; never touches the server. |
 
 ## Production server (Granian)
 
@@ -79,12 +79,12 @@ Only matter with an identity-verifying provider such as `PASSWORD_AUTH`. See [au
 | `DLBOARD_SESSION_LIFETIME_HOURS` | `336` | How long a browser stays signed in. |
 | `DLBOARD_SESSION_CLOCK_SKEW_SECONDS` | `120` | How far ahead of a replica's own clock a session cookie may be dated (by whichever replica last renewed it) and still be accepted. Replicas never agree to the second, so too little signs people out at random. Keep your nodes on NTP regardless. |
 | `DLBOARD_SECURE_COOKIES` | `true` | Send the session cookie over HTTPS only. Turn off only for plain-HTTP local testing. |
-| `DLBOARD_ADMIN_USERS` | none | Comma-separated usernames granted admin whenever they sign in. How the first admin is made. |
+| `DLBOARD_ADMIN_USERS` | none | Comma-separated usernames granted administrator whenever they sign in. How the first administrator is made. |
 | `DLBOARD_ADMIN_GROUPS` | none | Comma-separated identity-provider groups whose members are admins. |
 | `DLBOARD_NEW_PROJECT_ACCESS` | none (private) | The role (`viewer`, `editor`, `owner`) everyone gets on a newly created project. |
-| `DLBOARD_PASSWORD_SIGNUP` | `admin_creates` | Who may create an account: `admin_creates`, `approval` (signs up disabled until an admin enables it) or `open`. |
+| `DLBOARD_PASSWORD_SIGNUP` | `admin_creates` | Who may create an account: `admin_creates`, `approval` (sign-ups stay off until an administrator enables them) or `open`. |
 | `DLBOARD_PASSWORD_MIN_LENGTH` | `12` | Minimum password length. |
-| `DLBOARD_PASSWORD_FIRST_ADMIN_SETUP` | `false` | Serve `/setup`, which creates the first admin on an empty database using a token from the server log. Turn it on for first setup, then off again: startup fails if it's on and the database already has users. |
+| `DLBOARD_PASSWORD_FIRST_ADMIN_SETUP` | `false` | Serve `/setup`, which creates the first administrator on an empty database using a token from the server log. Turn it on for first setup, then off again: startup fails if it's on and the database already has users. |
 
 ## SQLite storage
 
@@ -119,7 +119,7 @@ Only matter with an identity-verifying provider such as `PASSWORD_AUTH`. See [au
 | `DLBOARD_POSTGRES_SSLROOTCERT` | none | CA certificate file. |
 | `DLBOARD_POSTGRES_SSLCERT` | none | Client certificate file. |
 | `DLBOARD_POSTGRES_SSLKEY` | none | Client key file. |
-| `DLBOARD_POSTGRES_TARGET_SESSION_ATTRS` | none | E.g. `read-write` with several hosts, to always reach the primary. |
+| `DLBOARD_POSTGRES_TARGET_SESSION_ATTRS` | none | For example `read-write` with several hosts, to always reach the primary. |
 | `DLBOARD_POSTGRES_CONNECT_TIMEOUT_S` | `10` | |
 | `DLBOARD_POSTGRES_STATEMENT_TIMEOUT_MS` | none | Server-side cap on any one statement. |
 | `DLBOARD_POSTGRES_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS` | none | |

@@ -46,7 +46,7 @@ own CSS has loaded. Register your theme instead of `default` in the plugin list 
 only one theme plugin can be active at a time — a second `set_theme` on the same app raises.
 
 Beyond the Mantine theme, the core app exposes a few `--dl-*` CSS variables of its own, with
-neutral defaults in `dlboard/serve/_shell.css`. A theme overrides them from a stylesheet it serves
+neutral defaults in `dlboard/serve/_shell.css`. A theme overrides them from a style sheet it serves
 itself via `dlboard.serve.serve_asset` (see `dlboard/plugins/themes/default.css`), scoped per
 scheme with `:root[data-mantine-color-scheme="dark"]`:
 

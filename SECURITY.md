@@ -1,4 +1,4 @@
-# Security Policy
+# Security policy
 
 ## Reporting a vulnerability
 
@@ -13,7 +13,7 @@ If you'd rather not use GitHub for the report, email dev.onyxzerosoftware@gmail.
 
 Please include:
 
-- What the vulnerability is and its likely impact (e.g. which auth provider or storage plugin it
+- What the vulnerability is and its likely impact (for example, which auth provider or storage plugin it
   affects).
 - Steps to reproduce it, or a minimal proof of concept.
 - The dlboard version (or commit) you tested against.

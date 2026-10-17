@@ -43,6 +43,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-env
+      # The `vale` pre-commit hook needs the binary, which isn't a Python package: install the pinned release, after
+      # checking it against the checksums Vale publishes with it. Keep this version in step with CONTRIBUTING.md.
+      - name: Install Vale
+        env:
+          VALE_VERSION: 3.24.0
+        run: |
+          base="https://github.com/vale-cli/vale/releases/download/v${VALE_VERSION}"
+          archive="vale_${VALE_VERSION}_Linux_64-bit.tar.gz"
+          curl -sSfLO "$base/$archive"
+          curl -sSfLO "$base/vale_${VALE_VERSION}_checksums.txt"
+          grep " $archive\$" "vale_${VALE_VERSION}_checksums.txt" | sha256sum -c -
+          tar -xzf "$archive" -C "$RUNNER_TEMP" vale
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
       - run: uv run prek run --all-files --skip no-commit-to-branch
       - run: uv run pyrefly check
 

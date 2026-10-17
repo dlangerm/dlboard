@@ -27,7 +27,7 @@ Breaking any of these needs a migration path and a deprecation window of at leas
     statuses).
   - Artifact refs (`file:///...`, `s3://...`).
   - The API token format, `dlb_<id>_<secret>`.
-- **Configuration.** Environment variable names ([configuration.md](configuration.md)), the CLI commands
+- **Configuration.** Environment variable names ([configuration.md](configuration.md)), the `dlboard` commands
   and flags (`dlboard serve local`, `dlboard serve custom --plugins module:attr`, `dlboard users`), and
   the plugin bundle names in `dlboard.plugins`.
 - **Telemetry.** The names and attributes of the exported metrics ([telemetry.md](telemetry.md)). New ones are
@@ -67,7 +67,7 @@ Documented as able to change in any minor release:
 
 ## Schema changes: expand, then contract
 
-How migrations are written, which is what makes the promises above possible:
+How migrations are written, which is what makes the promises made earlier possible:
 
 - Migrations are additive and preserve data.
 - A destructive step (dropping a column, say) lands one minor release after the code stopped using it.

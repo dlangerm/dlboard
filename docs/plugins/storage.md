@@ -10,20 +10,20 @@ Storage is split into two protocols, both in `dlboard/models/_data_store.py`:
   `download_artifact`, `delete_artifact`.
 
 They're separate on purpose — metadata and blob storage scale and fail independently, and a
-deployment might reasonably want e.g. Postgres for metadata and S3 for blobs without those being
+deployment might reasonably want for example Postgres for metadata and S3 for blobs without those being
 the same plugin.
 
 ## When you'd need this
 
-You're deploying somewhere the built-in backends don't fit — e.g. a shared Postgres instead of
-sqlite, or S3 (or any other S3-protocol store: MinIO, VAST, ...) instead of local disk for
+You're deploying somewhere the built-in backends don't fit — for example a shared Postgres instead of
+SQLite, or S3 (or any other S3-protocol store: MinIO, VAST, ...) instead of local disk for
 artifacts. The built-ins are `dlboard/plugins/data_stores/sqlite.py`, `filesystem.py` (what
 `LOCAL_DEPLOYMENT` uses), `postgres.py`, and `s3.py`, below.
 
 ## Postgres
 
 `dlboard.plugins.POSTGRES_STORAGE` (`postgres` + `filesystem` + the artifact purge worker) swaps
-sqlite for a shared Postgres. Install the driver with the `postgres` extra
+SQLite for a shared Postgres. Install the driver with the `postgres` extra
 (`pip install 'dlboard[postgres]'`), put `POSTGRES_STORAGE` in your own plugin list, and run it with
 `dlboard serve custom --plugins yourmodule:PLUGINS`:
 
@@ -38,12 +38,12 @@ Every setting is a `DLBOARD_POSTGRES_*` environment variable. The full list, wit
 
 | Concern | Variables |
 |---|---|
-| Connection | `DLBOARD_POSTGRES_HOST` (a comma-separated list fails over between hosts), `_PORT`, `_DATABASE`, `_USER`, `_PASSWORD`, `_DB_SCHEMA` (created if missing), `_APPLICATION_NAME`, `_TARGET_SESSION_ATTRS` (e.g. `read-write`) |
+| Connection | `DLBOARD_POSTGRES_HOST` (a comma-separated list fails over between hosts), `_PORT`, `_DATABASE`, `_USER`, `_PASSWORD`, `_DB_SCHEMA` (created if missing), `_APPLICATION_NAME`, `_TARGET_SESSION_ATTRS` (for example `read-write`) |
 | TLS | `DLBOARD_POSTGRES_SSLMODE` (default `prefer`; use `verify-full` in production), `_SSLROOTCERT`, `_SSLCERT`, `_SSLKEY` |
 | Timeouts | `DLBOARD_POSTGRES_CONNECT_TIMEOUT_S`, `_STATEMENT_TIMEOUT_MS`, `_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS`, `_KEEPALIVES_IDLE_S` |
 | Pooling | `DLBOARD_POSTGRES_POOL_SIZE`, `_MAX_OVERFLOW`, `_POOL_TIMEOUT_S`, `_POOL_RECYCLE_S`, `_POOL_PRE_PING` |
 | PgBouncer | `DLBOARD_POSTGRES_PREPARE_THRESHOLD=null` disables server-side prepared statements for transaction pooling |
-| Anything else | `DLBOARD_POSTGRES_CONNECT_ARGS` — a JSON object of extra libpq parameters, e.g. `{"sslcrl": "..."}` |
+| Anything else | `DLBOARD_POSTGRES_CONNECT_ARGS` — a JSON object of extra libpq parameters, for example `{"sslcrl": "..."}` |
 
 The driver is libpq-based, so libpq's own environment (`PGPASSFILE`, `PGSERVICE`, ...) still works
 underneath these. Each server worker process has its own pool, so keep
@@ -104,7 +104,7 @@ def plug(app: Dash) -> None:
 You don't have to implement `DataStore` from scratch — `SQLStoreBase`
 (`dlboard/serve/_backend/_sql_store_base.py`) already implements the full `DataStore` contract
 (CRUD, cascading soft-delete, audit log, scopes) on SQLAlchemy Core. It generates every table from
-its pydantic model and writes every query as a Core expression, so column types, identity columns,
+its Pydantic model and writes every query as a Core expression, so column types, identity columns,
 quoting and bind style all come from SQLAlchemy's dialect for your database. A new SQL-backed store
 only needs to subclass `SQLStoreBase`, pass `super().__init__()` an `sqlalchemy.Engine` (your
 connection settings and pooling live there), and implement `_insert_ignoring_conflicts` — an
@@ -117,8 +117,8 @@ with its own, different storage model entirely), you don't have to implement the
 scratch either — `BlobArtifactStore` (`plugins/data_stores/_blob_store.py`) already implements it
 on top of a much smaller `BlobBackend` protocol: `ref_for` (the ref a freshly written blob gets),
 `access` (whether a ref is servable at all, and whether this backend owns it or merely allowlists
-it — see "Linking" above), `exists`, `write`, `download`, and `delete`. `BlobArtifactStore` handles
-staging an upload, batching writes off to a worker process, async ref-ingest back into the
+it — see "Linking" earlier), `exists`, `write`, `download`, and `delete`. `BlobArtifactStore` handles
+staging an upload, batching writes off to a worker process, async ref recording back into the
 `DataStore`, and the generic parts of `log_artifacts`/`link_artifacts`/`download_artifact`/
 `delete_artifact` — a new backend only has to say how one blob is actually read, written, and
 deleted. `filesystem.py`'s `FSBlobs` (local disk) and `s3.py`'s `S3Blobs` (any S3-protocol store)

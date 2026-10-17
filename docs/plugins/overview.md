@@ -21,11 +21,11 @@ the extension points are and how a plugin gets composed into a running app. Read
 specific category you're building — [storage](storage.md), [charts](charts.md), [auth](auth.md),
 [themes](themes.md) — this page is about the plugin mechanism itself, not any one category.
 
-Page layout (home, project, admin, experiment, account) is deliberately **not** a plugin category — these
+Page layout (home, project, `admin`, experiment, account) is deliberately **not** a plugin category — these
 modules don't implement `PluginProtocol` at all, since nobody swaps out the experiment page's
-tab+accordion layout the way they might swap sqlite for postgres. `dlboard.serve.app.app()` calls
+tab+accordion layout the way they might swap SQLite for Postgres. `dlboard.serve.app.app()` calls
 `register(app)` on each of the built-in pages directly and unconditionally — they're never
-part of the `plugins` list a deployment passes in, and never touch the `plug(app)` mechanism this
+part of the `plugins` list a deployment passes in, and never change the `plug(app)` mechanism this
 page describes. See [architecture.md](../architecture.md) for where their code lives
 (`dlboard/serve/_pages/`).
 
@@ -42,7 +42,7 @@ registration step; a plugin not in that list is never loaded.
 
 **Identity, not state.** Once plugged, a plugin is snapshotted as an `InstalledPlugin`
 (`name` + first docstring line — see `InstalledPlugin.describe` in `dlboard/models/_plugin.py`)
-for introspection (the admin page's About tab lists installed plugins this way). Deliberately no
+for introspection (the administrator page's About tab lists installed plugins this way). Deliberately no
 reference to the plugin module/object itself is kept, so that introspection can't reach back into
 a plugin's internal state from an arbitrary callback thread.
 

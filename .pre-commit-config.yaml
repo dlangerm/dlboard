@@ -112,3 +112,12 @@ repos:
         args: [--fix]
         types_or: [python, pyi]
         pass_filenames: true
+      - id: vale
+        # Lints the prose of the Markdown files against `.vale.ini` (the Google style and this repo's vocabulary, both
+        # checked in under `.vale/styles`). It runs the Vale binary, which isn't a Python package: see CONTRIBUTING.md.
+        # CLAUDE.md is instructions for agents, and CODE_OF_CONDUCT.md is upstream text, so neither is linted.
+        name: vale (prose in the Markdown)
+        language: system
+        entry: vale --output=line
+        types: [markdown]
+        exclude: ^(CLAUDE|CODE_OF_CONDUCT)\.md$

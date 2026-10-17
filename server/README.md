@@ -1,7 +1,7 @@
 # dlboard
 
 The full [dlboard](https://github.com/dlangerm/dlboard) installation: a free, self-hosted Dash web app
-for browsing ML training runs, plus the `dlboard` CLI that runs it. Installing this (it depends on
+for browsing ML training runs, plus the `dlboard` command-line tool that runs it. Installing this (it depends on
 the `dlboard-client` package for the shared data models) gives you a `dlboard` command, the same
 idea as `tensorboard`:
 

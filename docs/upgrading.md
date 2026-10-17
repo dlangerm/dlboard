@@ -49,6 +49,6 @@ version against it. Anything logged after the backup is lost, so decide quickly.
 
 ## Plugins you wrote
 
-The Python plugin APIs are not covered by the stability promise before 1.0. Read the changelog's
-"Changed" entries before upgrading a deployment with custom plugins, and run your plugins' tests against
+The Python plugin APIs are not covered by the stability promise before 1.0. Read the
+"Changed" entries in the changelog before upgrading a deployment with custom plugins, and run your plugins' tests against
 the new version in a staging copy first.
