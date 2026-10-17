@@ -4,8 +4,9 @@
 
 dlboard can export its own operational metrics (requests, ingest volume, database and artifact-store
 latency, sign-ins, ...) for Prometheus to scrape or an OpenTelemetry collector to receive, and can send
-its logs over OTLP as well. It is built on OpenTelemetry, so anything that speaks OTLP works:
-Prometheus 3, an OpenTelemetry Collector, Grafana Mimir and Loki, Grafana Cloud, Datadog, ...
+its logs over OTLP as well. It can also trace a request from a training script through the server, its database and its
+artifact storage. It is built on OpenTelemetry, so anything that speaks OTLP works:
+Prometheus 3, an OpenTelemetry Collector, Grafana Mimir, Loki and Tempo, Jaeger, Grafana Cloud, Datadog, ...
 
 This is about the *server*. The metrics your training runs log are a different thing and live in the
 database.
@@ -25,6 +26,7 @@ what you want with environment variables ([configuration.md](configuration.md#te
 ```bash
 DLBOARD_TELEMETRY_METRICS=prometheus,otlp   # either, or both
 DLBOARD_TELEMETRY_LOGS=true                 # logs over OTLP
+DLBOARD_TELEMETRY_TRACES=true               # traces over OTLP, see Traces below
 ```
 
 Enabling telemetry without the extra installed is a startup error, not a silent no-op.
@@ -128,6 +130,73 @@ Every attribute has a small, fixed set of values. The names and attributes are c
 | `dlboard.runs.created` | counter | | Runs started. |
 | `dlboard.runs.finished` | counter | `dlboard.run.status` | Runs reported done, by how they ended. |
 | `dlboard.auth.sign_ins` | counter | `dlboard.auth.outcome` (`success`, `wrong_credentials`, `throttled`, `disabled`) | Attempts at the password sign-in form. |
+
+## Traces
+
+A trace shows where the time of one request went. With `DLBOARD_TELEMETRY_TRACES=true` on the server, and in the
+training environment too, a batch your script ships is **one trace** from the shipping process to the database and the
+blob writer:
+
+```
+dlboard.ship                              (client shipping process, one per batch)
+└─ POST /api/v1/artifacts                 (client: the HTTP request)
+   └─ POST /api/v1/artifacts              (server: the Flask request)
+      ├─ SELECT, INSERT, ...              (the database, driver and pool included)
+      └─ dlboard.blob.write               (the spawned writer process; S3.PutObject is a trace of its own, see below)
+dlboard.blob.ingest                       (a trace of its own: records the refs of a batch of writes, and links to each)
+```
+
+The client sends the trace in a standard W3C `traceparent` header, so the server's span continues it; any other
+service that speaks OpenTelemetry can join the same way. Each request also carries an `X-Request-Id`, recorded as the
+`dlboard.request_id` attribute and printed on the server's log lines for it, so a log line and its trace find each other
+(with tracing on, log lines also carry `trace_id` and `span_id`).
+
+Turn it on the same way on both sides. The training environment needs the client's extra
+(`pip install 'dlboard-client[otel]'`), the server its own (`dlboard[otel]`):
+
+```bash
+DLBOARD_TELEMETRY_TRACES=true
+OTEL_EXPORTER_OTLP_ENDPOINT=http://collector:4318
+```
+
+The endpoint, headers and timeouts are the standard `OTEL_EXPORTER_OTLP_*` ones, and the sampler is `OTEL_TRACES_SAMPLER`
+(default: `parentbased_always_on`, so the server follows whatever the client decided). `OTEL_SERVICE_NAME` defaults to
+`dlboard` on the server and `dlboard-client` in your training process. To look at traces locally:
+`docker run -p 4318:4318 -p 16686:16686 jaegertracing/all-in-one`, point `OTEL_EXPORTER_OTLP_ENDPOINT` at
+`http://localhost:4318` and open `localhost:16686`.
+
+**What the server instruments.** The server process is dlboard's alone, so it uses OpenTelemetry's own instrumentation,
+which keeps up with the libraries and conventions better than anything written here. Flask (every route, Dash callbacks
+included) is instrumented per app. Everything else installed is found through the standard `opentelemetry_instrumentor`
+entry points, the mechanism `opentelemetry-instrument` uses: SQLAlchemy, `psycopg` and `botocore` come with
+`dlboard[otel]`, and **installing `opentelemetry-instrumentation-<library>` is all it takes to also trace a plugin's own
+storage or auth client**. `OTEL_PYTHON_DISABLED_INSTRUMENTATIONS=sqlalchemy,psycopg` switches any of them off, and
+`OTEL_PYTHON_FLASK_EXCLUDED_URLS` adds URLs (regular expressions) not to trace. Health probes, `/metrics` and static
+files never are. dlboard asks SQLAlchemy's instrumentation to run on SQLAlchemy releases newer than the ones it has been
+tested with, since it only listens for statements, which don't change between them.
+
+**What the client instruments.** Only dlboard's own requests, written by hand: the client never patches `requests` or
+installs a global tracer provider in your training process, so your own OpenTelemetry setup (or lack of one) is not
+touched. Its OpenTelemetry packages are the standard `opentelemetry-sdk` and OTLP exporter alone, from release 1.16 on,
+with no upper bound (and no contrib packages, which pin an exact SDK release), so a training environment's own versions
+stay as they are. The calls the training process makes itself (`whoami`, creating the run, finishing it) are spans too,
+in traces of their own.
+
+**What is never recorded.** The values bound into a SQL statement (the statement has placeholders), request and response bodies,
+and the `Authorization` header. HTTP headers are not recorded at all unless you ask with
+`OTEL_INSTRUMENTATION_HTTP_CAPTURE_HEADERS_SERVER_REQUEST` and the like, and then `Authorization`, `Cookie` and
+`Set-Cookie` are redacted unless you set `OTEL_INSTRUMENTATION_HTTP_CAPTURE_HEADERS_SANITIZE_FIELDS` yourself. An
+exception is recorded with its type, message and traceback, never its local variables.
+
+**It never gets in the way.** Spans are exported in batches in the background, and the queue is bounded: a collector that
+is down or slow costs spans, never a request, never a training step. Setup happens the first time something is
+traced, nothing connects at startup, and a tracing failure is logged once and otherwise ignored. A shipping process
+exports its last spans when it is told to flush, before `finalize()` returns.
+
+Two things to know about what you will see. On S3 storage the upload's requests (`S3.PutObject`) are traces of their own,
+not children of `dlboard.blob.write`: boto uploads from threads of its own, which do not carry the trace, and dlboard
+leaves how an upload runs alone rather than change it for the sake of the trace. And a batch the client could not ship
+(the server was down) is retried, each attempt a trace of its own.
 
 ## How do I add one
 
