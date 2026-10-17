@@ -66,6 +66,7 @@ extra (`pip install 'dlboard[otel]'`; the Docker image has it). The exporters al
 | `OTEL_SERVICE_NAME` | `dlboard` | The standard OpenTelemetry variable: the `service.name` everything is reported under. |
 | `DLBOARD_TELEMETRY_METRICS` | none | Comma-separated exporters to send metrics to: `prometheus` (scrape `/metrics`), `otlp` (push to a collector), or both. |
 | `DLBOARD_TELEMETRY_LOGS` | `false` | Also send every log event over OTLP. Independent of `DLBOARD_LOG_FORMAT`, which still controls what goes to stdout. |
+| `DLBOARD_TELEMETRY_TRACES` | `false` | Send distributed traces over OTLP, from the server and from the client's shipping processes. Needs the `otel` extra (`dlboard[otel]` on the server, `dlboard-client[otel]` in a training environment). The exporter reads the standard `OTEL_EXPORTER_OTLP_*` variables. |
 | `DLBOARD_TELEMETRY_PROMETHEUS_DIR` | system temp dir | Where `/metrics` keeps each process's snapshot. `dlboard serve` and `run_production_server` make a fresh directory inside it per run and remove it on exit; set it to put that on a tmpfs, say. If you start the workers some other way, point them all at one directory here (it is used as it is, and not cleaned up). |
 | `DLBOARD_TELEMETRY_PROMETHEUS_SNAPSHOT_S` | `15` | How often each process writes its snapshot, so how stale another worker's numbers on `/metrics` can be. |
 

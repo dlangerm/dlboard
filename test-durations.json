@@ -1473,6 +1473,7 @@
   "dlboard/tests/configuration_docs_test.py::test_every_setting_is_documented[DLBOARD_TELEMETRY_METRICS]": 0.0010618790256557986,
   "dlboard/tests/configuration_docs_test.py::test_every_setting_is_documented[DLBOARD_TELEMETRY_PROMETHEUS_DIR]": 0.001019296993035823,
   "dlboard/tests/configuration_docs_test.py::test_every_setting_is_documented[DLBOARD_TELEMETRY_PROMETHEUS_SNAPSHOT_S]": 0.0010595889907563105,
+  "dlboard/tests/configuration_docs_test.py::test_every_setting_is_documented[DLBOARD_TELEMETRY_TRACES]": 0.0018964249999271487,
   "dlboard/tests/configuration_docs_test.py::test_every_setting_is_documented[DLBOARD_TICK_INTERVAL_MS]": 0.0010597630171105266,
   "dlboard/tests/configuration_docs_test.py::test_every_setting_is_documented[DLBOARD_TRUSTED_PROXIES]": 0.0011816769983852282,
   "dlboard/tests/configuration_docs_test.py::test_every_setting_is_documented[DLBOARD_URL_PREFIX]": 0.0010353969992138445,
