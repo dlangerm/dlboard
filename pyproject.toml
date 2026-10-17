@@ -166,7 +166,7 @@ select = ["E4", "E7", "E9", "F"]
 
 [tool.ruff.lint.flake8-bugbear]
 # `attribute()` is a dataclass `field()` with a label name, so it is as safe in a dataclass default as `field` is.
-extend-immutable-calls = ["dlboard.serve.telemetry.attribute"]
+extend-immutable-calls = ["dlboard._telemetry.attribute"]
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 # Reading the clock and building or converting times goes through pendulum. `datetime.datetime` itself stays

@@ -21,9 +21,10 @@ from flask import current_app, g, request
 from structlog.stdlib import get_logger
 from werkzeug.exceptions import HTTPException, InternalServerError
 
+from dlboard._telemetry import Attributes, attribute
 from dlboard._wire import REQUEST_ID_HEADER
 from dlboard.serve._logging import LoggingSettings
-from dlboard.serve.telemetry import AttributeKey, Attributes, Histogram, Unit, UpDownCounter, attribute
+from dlboard.serve.telemetry import AttributeKey, Histogram, Unit, UpDownCounter
 
 if TYPE_CHECKING:
     from dash import Dash

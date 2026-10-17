@@ -12,6 +12,7 @@ from werkzeug.datastructures import FileStorage
 from werkzeug.exceptions import NotFound
 
 from dlboard import models
+from dlboard._telemetry import Attributes, attribute
 from dlboard._version import __version__
 from dlboard._wire import (
     METADATA_PART_SUFFIX,
@@ -28,7 +29,7 @@ from dlboard._wire import (
 )
 from dlboard.models import DataStore
 from dlboard.serve import get_artifact_store, get_current_user, get_data_store
-from dlboard.serve.telemetry import AttributeKey, Attributes, Counter, NoAttributes, Tally, Unit, attribute
+from dlboard.serve.telemetry import AttributeKey, Counter, NoAttributes, Tally, Unit
 
 _log = get_logger(__name__)
 

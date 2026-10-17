@@ -124,7 +124,7 @@ def build_metrics(settings: TelemetrySettings) -> Metrics:
                 aggregation=ExplicitBucketHistogramAggregation(SECONDS_BUCKETS),
             )
         ],
-        shutdown_on_exit=False,  # `_PerProcess` closes it, where a Granian worker's exit actually runs
+        shutdown_on_exit=False,  # `PerProcess` closes it, where a Granian worker's exit actually runs
     )
     snapshots = None
     if MetricsExporter.PROMETHEUS in settings.metrics and settings.prometheus_dir is not None:
