@@ -6,11 +6,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import pytest
 import requests
 from opentelemetry.trace import SpanKind
 
 from dlboard._telemetry.traces import TraceKey, flush
-from dlboard._wire import REQUEST_ID_HEADER, Resource, get_or_create_path
+from dlboard._wire import REQUEST_ID_HEADER, WHOAMI_PATH, Resource, create_path, get_or_create_path
 
 if TYPE_CHECKING:
     from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
@@ -43,10 +44,43 @@ def test_a_request_continues_its_callers_trace_and_its_sql_hangs_off_it(
     assert all(_SECRET_NAME not in str(s.attributes) for s in spans), "bound parameters must not reach a span"
 
 
-def test_a_request_to_a_health_probe_is_not_traced(
-    span_exporter: InMemorySpanExporter, backend_server: BackendServer
+@pytest.mark.parametrize(
+    ("path", "traced"),
+    [
+        pytest.param("healthz", False, id="a-health-probe"),
+        pytest.param("metrics", False, id="the-prometheus-scrape"),
+        pytest.param(create_path(Resource.METRICS), True, id="the-metric-ingest-route-that-shares-its-name"),
+    ],
+)
+def test_only_the_requests_somebody_looks_at_are_traced(
+    span_exporter: InMemorySpanExporter, backend_server: BackendServer, path: str, *, traced: bool
 ) -> None:
-    requests.get(f"{backend_server.url}/healthz", headers={"traceparent": _TRACEPARENT}, timeout=10)
+    requests.request("POST" if traced else "GET", f"{backend_server.url}/{path}", json=[], timeout=10)
     flush()
 
-    assert [s for s in span_exporter.get_finished_spans() if s.kind == SpanKind.SERVER] == []
+    assert bool([s for s in span_exporter.get_finished_spans() if s.kind == SpanKind.SERVER]) is traced
+
+
+@pytest.fixture
+def _records_the_authorization_header(telemetry: pytest.MonkeyPatch) -> None:
+    """What a user does to record a header: set before the app is built, which is when dlboard adds its redactions."""
+    telemetry.setenv("OTEL_INSTRUMENTATION_HTTP_CAPTURE_HEADERS_SERVER_REQUEST", "authorization")
+    # dlboard sets the sanitize list in the process environment itself: have it put back as it was afterwards.
+    telemetry.setenv("OTEL_INSTRUMENTATION_HTTP_CAPTURE_HEADERS_SANITIZE_FIELDS", "")
+    telemetry.delenv("OTEL_INSTRUMENTATION_HTTP_CAPTURE_HEADERS_SANITIZE_FIELDS")
+
+
+@pytest.mark.usefixtures("_records_the_authorization_header")
+def test_a_credential_in_a_header_a_user_chose_to_record_is_redacted(
+    span_exporter: InMemorySpanExporter, backend_server: BackendServer
+) -> None:
+    """Headers are never recorded unless asked for -- and then not the ones a credential travels in."""
+    requests.get(
+        f"{backend_server.url}/{WHOAMI_PATH}", headers={"Authorization": "Bearer dlb_a-secret"}, timeout=10
+    )
+    flush()
+
+    (server,) = (s for s in span_exporter.get_finished_spans() if s.kind == SpanKind.SERVER)
+    assert server.attributes is not None
+    assert server.attributes["http.request.header.authorization"] == ("[REDACTED]",)
+    assert "dlb_a-secret" not in str(server.attributes)

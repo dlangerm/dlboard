@@ -115,13 +115,14 @@ def app(plugins: list[models.PluginProtocol], *, url_prefix: str = "") -> Dash:
     _health.register(_app)
     # `/metrics`, only if a deployment asked for a Prometheus scrape -- see `telemetry`.
     telemetry.register(_app)
-    # Each request continues the trace of whoever sent it, with the SQL it runs as child spans.
-    telemetry.instrument_app(_app)
     # Every route above (and every plugin route) sits behind this one gate -- see `_auth.py`.
     install_request_gate(_app, lambda: get_system_data_store(_app))
     # A request id on every log line, and the request metrics, for every route (auth included) -- after
     # the gate, since it has to run ahead of it: see its own docstring.
     _request_logging.register(_app)
+    # Each request continues the trace of whoever sent it, with the SQL it runs as child spans. Last, so that it
+    # sees every other request hook (the gate's included) and can put its own ahead of them all.
+    telemetry.instrument_app(_app)
     # Opt-in (DLBOARD_TRUSTED_PROXIES): trust a reverse proxy's X-Forwarded-* headers for scheme/
     # host detection, so DLBOARD_SECURE_COOKIES sessions survive behind a TLS-terminating proxy.
     apply_proxy_fix(_app)
