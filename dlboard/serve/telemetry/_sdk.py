@@ -15,9 +15,7 @@ import threading
 import traceback
 from dataclasses import dataclass
 from enum import StrEnum
-from functools import cache
 from typing import TYPE_CHECKING, Any, Final
-from uuid import uuid4
 
 import pendulum
 from opentelemetry._logs import SeverityNumber
@@ -29,9 +27,8 @@ from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
 from opentelemetry.sdk.metrics import Histogram, MeterProvider
 from opentelemetry.sdk.metrics.export import MetricReader, PeriodicExportingMetricReader
 from opentelemetry.sdk.metrics.view import ExplicitBucketHistogramAggregation, View
-from opentelemetry.sdk.resources import Resource
-from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from dlboard._telemetry._sdk import resource
 from dlboard._version import __version__
 from dlboard.serve.telemetry import LOGS, SECONDS_BUCKETS, MetricsExporter, TelemetrySettings, Unit
 
@@ -45,34 +42,6 @@ if TYPE_CHECKING:
     from dlboard.serve.telemetry._prometheus import Snapshots
 
 _SERVICE_NAME: Final = "dlboard"
-
-
-class OtelResourceSettings(BaseSettings):
-    """The standard `OTEL_SERVICE_NAME`, which names the service in everything dlboard exports."""
-
-    model_config = SettingsConfigDict(env_prefix="OTEL_")
-
-    service_name: str = _SERVICE_NAME
-    """The `service.name` every metric and log is reported under."""
-
-
-@cache
-def _resource(pid: int) -> Resource:  # noqa: ARG001 -- the pid is the cache key: one identity per process, shared by metrics and logs
-    """
-    Who is exporting: a `service.instance.id` unique to this process.
-
-    Every worker pushes its own cumulative counts, so they must not share an identity or a collector
-    would see one series jumping around. Set in code, so it overrides `OTEL_RESOURCE_ATTRIBUTES`.
-    """
-    # A down collector retries quietly; only the final "failed to export" error is worth a line.
-    logging.getLogger("opentelemetry").setLevel(logging.ERROR)
-    return Resource.create(
-        {
-            "service.name": OtelResourceSettings().service_name,
-            "service.instance.id": uuid4().hex,
-            "service.version": __version__,
-        }
-    )
 
 
 @dataclass(frozen=True)
@@ -114,7 +83,7 @@ def build_metrics(settings: TelemetrySettings) -> Metrics:
             case MetricsExporter.PROMETHEUS:
                 readers.append(PrometheusMetricReader())
     provider = MeterProvider(
-        resource=_resource(os.getpid()),
+        resource=resource(os.getpid(), _SERVICE_NAME),
         metric_readers=readers,
         # The SDK's default buckets are sized for milliseconds; every duration here is in seconds.
         views=[
@@ -136,7 +105,7 @@ def build_metrics(settings: TelemetrySettings) -> Metrics:
 
 def build_logs(_settings: TelemetrySettings) -> Logs:
     """The logger provider that batches log records and pushes them over OTLP."""
-    provider = LoggerProvider(resource=_resource(os.getpid()), shutdown_on_exit=False)
+    provider = LoggerProvider(resource=resource(os.getpid(), _SERVICE_NAME), shutdown_on_exit=False)
     provider.add_log_record_processor(BatchLogRecordProcessor(OTLPLogExporter()))
     return Logs(provider, provider.get_logger(_SERVICE_NAME, __version__))
 

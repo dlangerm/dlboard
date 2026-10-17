@@ -38,6 +38,7 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from structlog.stdlib import get_logger
 
 from dlboard._telemetry import Attributes, PerProcess, attribute
+from dlboard._telemetry.traces import sdk_installed
 from dlboard.serve._settings_env import set_setting_env
 
 if TYPE_CHECKING:
@@ -86,7 +87,7 @@ class TelemetrySettings(BaseSettings):
 
     @model_validator(mode="after")
     def _require_extra(self) -> Self:
-        if (self.metrics or self.logs) and not _sdk_installed():
+        if (self.metrics or self.logs) and not sdk_installed():
             msg = "DLBOARD_TELEMETRY_* is set, but the OpenTelemetry SDK is missing: pip install 'dlboard[otel]'"
             raise ValueError(msg)
         if self.logs and _sdk_version() < _LOGS_MIN_SDK:
@@ -107,13 +108,6 @@ def _sdk_version() -> tuple[int, int]:
     ):  # importable but not installed as a distribution: take it as new enough
         return _LOGS_MIN_SDK
     return int(major), int(minor)
-
-
-def _sdk_installed() -> bool:
-    try:
-        return importlib.util.find_spec("opentelemetry.sdk") is not None
-    except (ImportError, ValueError):  # `opentelemetry` itself absent (or blocked)
-        return False
 
 
 def _build_metrics() -> Metrics | None:
