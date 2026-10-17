@@ -2129,13 +2129,14 @@ def test_an_image_charts_per_tag_display_is_edited_as_table_rows_in_the_chart_ed
     chart.get_by_role("button", name="Edit chart").click()
 
     # A row per tag in a grid, not JSON: add one, name the tag, and give it a precision.
-    add_row = page.get_by_role("button", name="Add", exact=True)
+    # The chart has another table now (its `overlays`), with buttons of its own: this is the tag display's.
+    add_row = page.locator('button[id*="tag_display"][id*="table-add"]')
     editor = page.get_by_role("dialog")
     rows = editor.locator(".ag-center-cols-container .ag-row")
     add_row.click()
     expect(rows).to_have_count(1)
     rows.first.locator(".ag-checkbox-input-wrapper").click()
-    page.get_by_role("button", name="Remove checked").click()
+    page.locator('button[id*="tag_display"][id*="table-remove"]').click()
     expect(rows).to_have_count(0)
     add_row.click()
     editor.locator('.ag-cell[col-id="key"]').first.click()
@@ -2280,6 +2281,46 @@ def test_an_edited_image_chart_still_scrubs_and_opens_its_enlarged_view(
     expect(picture).not_to_have_attribute("src", before or "")
     chart.locator(".dl-image-series-thumb").click()
     expect(page.get_by_role("dialog")).to_be_visible()
+
+
+def test_a_layer_added_in_the_chart_editor_is_drawn_over_the_pictures_at_its_opacity(
+    page: Page, live_server_url: str, tmp_path: Path
+) -> None:
+    """The `overlays` setting is a table: any artifact key can be added as a layer, with an opacity of its own."""
+    _create_project_and_experiment(page, live_server_url, "Layer Editor Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    api = BasicDlboardAPI(live_server_url)
+    run = api.create_run(models.NewRun(experiment_id=experiment_id))
+    mask = np.zeros((12, 16, 3), dtype=np.uint8)
+    mask[3:9, 4:12] = (255, 0, 0)
+    api.log_artifact_batch(
+        [
+            Image(
+                key="samples/a", image=np.full((48, 64, 3), 128, dtype=np.uint8), step=0, format="jpg"
+            ).to_artifact(tmp_path, run.id, experiment_id),
+            Image(key="samples/mask", image=mask, step=0).to_artifact(tmp_path, run.id, experiment_id),
+        ]
+    )
+    _wait_for_artifacts(experiment_id, 2)
+    page.reload()
+    _auto_generate_charts(page)
+
+    chart = page.locator(".dl-chart-item").filter(has_text="samples/a")  # not the mask's own chart
+    expect(chart.locator(".dl-image-series-layer")).to_have_count(0)
+    chart.hover()
+    chart.get_by_role("button", name="Edit chart").click()
+    page.locator('button[id*="overlays"][id*="table-add"]').click()
+    page.get_by_role("dialog").locator('.ag-cell[col-id="key"]').first.click()
+    page.keyboard.type("samples/mask")
+    page.keyboard.press("Tab")
+    page.keyboard.type("0.5")
+    page.keyboard.press("Enter")
+    page.locator(f"#{ADD_CHART_SUBMIT_ID}").click()
+
+    layer = chart.locator(".dl-image-series-thumb .dl-image-series-layer")
+    expect(layer.locator("img")).to_have_count(1)
+    expect(layer).to_have_css("opacity", "0.5")
 
 
 def test_an_image_charts_runs_follow_their_panels_grid_columns(

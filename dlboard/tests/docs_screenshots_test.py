@@ -332,7 +332,10 @@ def _stage(shot: DocScreenshot, page: Page, demo: Demo, dlboard_app: Dash) -> Pa
             page.get_by_text(f"samples{ARTIFACT_PANEL_SUFFIX}").click()
             panel = page.locator(".dl-panel-body", has=page.locator("img"))
             expect(panel).to_be_visible()
-            page.wait_for_function("[...document.images].every(i => i.complete && i.naturalWidth > 0)")
+            # Only pictures that have a source: an image chart's enlarged view is kept in the page with no picture yet.
+            page.wait_for_function(
+                "[...document.images].filter((i) => i.getAttribute('src')).every((i) => i.complete && i.naturalWidth > 0)"
+            )
             return panel
         case DocScreenshot.PERSONAL_VIEWS:
             # A dedicated experiment, untouched by any other scene, so this view picker only ever

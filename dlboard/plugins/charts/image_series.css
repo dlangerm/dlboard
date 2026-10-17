@@ -4,6 +4,28 @@
     position: relative;
 }
 
+/* The layers drawn over an image's picture (see `image_series_overlay.js`), in the same box, so clicks reach the picture
+   underneath. Each is scaled `contain` as the picture is, and stacks in the order the layers are listed. */
+.dl-image-series-overlay {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+}
+
+/* One layer, at its own opacity (set inline). */
+.dl-image-series-layer {
+    position: absolute;
+    inset: 0;
+}
+
+.dl-image-series-layer > img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    image-rendering: pixelated; /* as the picture itself is, so a small mask lines up with it block for block */
+}
+
 .dl-image-series-thumb[data-dl-loading] img {
     opacity: 0.4;
     transition: opacity 0.15s ease;

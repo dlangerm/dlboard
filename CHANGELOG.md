@@ -12,6 +12,13 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ## [Unreleased]
 
+### Added
+
+* **Layers over an image chart's pictures.** Its new `overlays` setting is a table, a row per artifact key, bottom layer
+  first, each with an `opacity` from 0 to 1. A layer is any image logged at the picture's own step, such as a
+  segmentation mask, and it is drawn over the picture in its thumbnail and its enlarged view, scaled with it. A picture a
+  layer has nothing for at its step is shown without it.
+
 ### Changed
 
 * An image chart's thumbnail shows a **spinner** while the picture for the slider's step is still downloading. The old

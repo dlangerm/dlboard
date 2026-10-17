@@ -28,21 +28,42 @@ from dlboard.models import (
     TagDisplay,
     TimeUnit,
     artifact_column,
+    artifact_fname_column,
     artifact_tags_column,
     is_inlineable_artifact,
 )
 from dlboard.plugins.charts._artifact_tags import format_tags_caption
 from dlboard.serve import AssetKind, ClientsideScript, series_swatch_class, serve_asset
 
+if typing.TYPE_CHECKING:
+    from collections.abc import Hashable
+
 MAX_SLIDER_LABELS = 10
 
 _log = get_logger(__name__)
+
+
+class OverlayLayer(BaseModel, frozen=True, extra="forbid", use_attribute_docstrings=True):
+    """How one layer is drawn over each picture."""
+
+    opacity: float = Field(default=1.0, ge=0, le=1)
+    """How opaque the layer is, from 0 (invisible) to 1 (the default)."""
+
+
+class DrawnLayer(OverlayLayer):
+    """A layer to draw over one picture, as the browser is told it: how to draw it, and which file it is."""
+
+    url: str
 
 
 class ImageChartSettings(BaseModel, frozen=True, extra="forbid", use_attribute_docstrings=True):
     """Image chart settings."""
 
     key: str
+    overlays: dict[str, OverlayLayer] = Field(default_factory=dict)
+    """
+    The images drawn over each picture, such as a segmentation mask: a row per artifact key, first row at the bottom. Each is the one the run logged at the picture's own step, and a picture a row has nothing for is shown without it.
+    """
     x_axis: str = "step"
     height: int = 220
     width: int | None = Field(default=None)
@@ -95,6 +116,32 @@ def _slider_marks(all_steps: list[int], max_labels: int = MAX_SLIDER_LABELS) -> 
     return [{"value": s, "label": str(s)} if s in labeled else {"value": s} for s in all_steps]
 
 
+def _layers_element(element_id: dict[str, str]) -> html.Div:
+    """The element over a picture that the browser draws its layers into (`image_series_overlay.js`)."""
+    return html.Div(id=element_id, className="dl-image-series-overlay")
+
+
+def _drawn_layers(row: dict[Hashable, Any], layers: dict[str, OverlayLayer]) -> list[DrawnLayer]:
+    """The layers a picture's `row` of the panel dataframe has a file for, in the settings' order."""
+    drawn: list[DrawnLayer] = []
+    for key, layer in layers.items():
+        url, fname = row.get(artifact_column(key)), row.get(artifact_fname_column(key))
+        # A layer the run did not log at this step holds NaN, which is no string.
+        if isinstance(url, str) and isinstance(fname, str) and is_inlineable_artifact(fname):
+            drawn.append(DrawnLayer(url=url, opacity=layer.opacity))
+    return drawn
+
+
+def _layers_by_picture(
+    pictures: pd.DataFrame, picture_col: str, layers: dict[str, OverlayLayer]
+) -> dict[str, list[DrawnLayer]]:
+    """Each picture's layers, by its URL: only the pictures with a layer at their own step, the rest are left out."""
+    if not layers:
+        return {}
+    drawn = ((row[picture_col], _drawn_layers(row, layers)) for row in pictures.to_dict("records"))
+    return {url: layers_of for url, layers_of in drawn if layers_of}
+
+
 class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=True, extra="forbid"):
     """Scroll through images logged at each step, one column per run, paginated."""
 
@@ -128,12 +175,19 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
 
         tag_col = artifact_tags_column(parameters.key)
         has_tags = tag_col in dataframe.columns
+        layer_cols = [
+            c
+            for key in parameters.overlays
+            for c in (artifact_column(key), artifact_fname_column(key))
+            if c in dataframe.columns
+        ]
         has_names = RUN_NAME_COLUMN in dataframe.columns
         select_cols = [
             "run_id",
             x_col,
             col,
             *([tag_col] if has_tags else []),
+            *layer_cols,
             *([RUN_NAME_COLUMN] if has_names else []),
         ]
 
@@ -152,6 +206,8 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
         per_run_urls: dict[str, dict[str, str]] = {}
         per_run_captions: dict[str, dict[str, str]] = {}
         per_run_names: dict[str, str] = {}
+        # Each picture's layers, by the picture's URL: the modal only knows the URL it was opened on.
+        overlays: dict[str, list[DrawnLayer]] = {}
         for rid, g in df.groupby("run_id"):
             steps = g[x_col].tolist()
             per_run_steps[str(rid)] = steps
@@ -161,6 +217,7 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
                     str(s): format_tags_caption(raw, parameters.tag_defaults, parameters.tag_display)
                     for s, raw in zip(steps, g[tag_col], strict=True)
                 }
+            overlays.update(_layers_by_picture(g, col, parameters.overlays))
             if has_names:
                 per_run_names[str(rid)] = g[RUN_NAME_COLUMN].iloc[0]
 
@@ -201,7 +258,10 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
                     className=series_swatch_class(int(rid)),  # pyrefly: ignore [unnecessary-type-conversion]
                 ),
                 html.Div(
-                    image,
+                    [
+                        image,
+                        _layers_element({"type": "image-series-overlay", "instance": inst, "run": str(rid)}),
+                    ],
                     id={"type": "image-series-thumb", "instance": inst, "run": str(rid)},
                     className="dl-image-series-thumb",
                     n_clicks=0,
@@ -252,6 +312,10 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
                         "per_run_steps": per_run_steps,
                         "per_run_urls": per_run_urls,
                         "per_run_captions": per_run_captions,
+                        "overlays": {
+                            url: [layer.model_dump(mode="json") for layer in drawn]
+                            for url, drawn in overlays.items()
+                        },
                     },
                 ),
                 dmc.Slider(
@@ -274,20 +338,25 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
                     size="90%",
                     padding=0,
                     centered=True,
+                    # Kept in the page while closed, so the browser can draw the picture's layers into it at once.
+                    keepMounted=True,
                     children=html.Div(
-                        dmc.Image(
-                            id={"type": "image-series-modal-img", "instance": inst},
-                            # fit="contain" within a fixed box scales a small image up (rather
-                            # than showing it as a speck in an otherwise-empty modal) and a large
-                            # one down to fit -- either way, the browser's own pinch/ctrl-scroll
-                            # zoom still reveals further detail on top of this, no custom +/-
-                            # control needed.
-                            fit="contain",
-                            h="80vh",
-                            w="100%",
-                            style={"imageRendering": "pixelated"},
-                        ),
-                        style={"display": "flex", "justifyContent": "center"},
+                        [
+                            dmc.Image(
+                                id={"type": "image-series-modal-img", "instance": inst},
+                                # fit="contain" within a fixed box scales a small image up (rather
+                                # than showing it as a speck in an otherwise-empty modal) and a large
+                                # one down to fit -- either way, the browser's own pinch/ctrl-scroll
+                                # zoom still reveals further detail on top of this, no custom +/-
+                                # control needed.
+                                fit="contain",
+                                h="80vh",
+                                w="100%",
+                                style={"imageRendering": "pixelated"},
+                            ),
+                            _layers_element({"type": "image-series-modal-overlay", "instance": inst}),
+                        ],
+                        style={"display": "flex", "justifyContent": "center", "position": "relative"},
                     ),
                 ),
             ],
@@ -302,7 +371,8 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
     @classmethod
     @typing.override
     def hint_required_artifact_keys(cls, parameters: ImageChartSettings) -> set[str]:
-        return {parameters.key}
+        # The layers' keys too: they are charted here, so auto-generate does not give them charts of their own.
+        return {parameters.key, *parameters.overlays}
 
     @classmethod
     @typing.override
@@ -331,12 +401,24 @@ ImageChart.register(allow_override=True)
 _SCRUB_JS = ClientsideScript(Path(__file__).with_name("image_series_scrub.js"))
 _PAGE_JS = ClientsideScript(Path(__file__).with_name("image_series_page.js"))
 _LOCK_JS = ClientsideScript(Path(__file__).with_name("image_series_lock.js"))
+_MODAL_OVERLAY_JS = ClientsideScript(Path(__file__).with_name("image_series_modal_overlay.js"))
 _CSS_PATH = Path(__file__).with_name("image_series.css")
+_OVERLAY_HELPER_PATH = Path(__file__).with_name("image_series_overlay.js")
+"""Draws layers over a picture; both the scrub and the modal call it, so it is a shared script."""
 
 
 def plug(app: dash.Dash) -> None:
-    """Register clientside callbacks for image-series scrubbing, captions, and pagination."""
+    """Register clientside callbacks for image-series scrubbing, captions, pagination and overlays."""
     serve_asset(app, AssetKind.STYLESHEET, _CSS_PATH.name, _CSS_PATH.read_bytes())
+    serve_asset(app, AssetKind.SCRIPT, _OVERLAY_HELPER_PATH.name, _OVERLAY_HELPER_PATH.read_bytes())
+    app.clientside_callback(
+        _MODAL_OVERLAY_JS.source,
+        dash.Output({"type": "image-series-modal-overlay", "instance": dash.MATCH}, "style"),
+        dash.Input({"type": "image-series-modal", "instance": dash.MATCH}, "opened"),
+        dash.State({"type": "image-series-modal-img", "instance": dash.MATCH}, "src"),
+        dash.State({"type": "image-series-data", "instance": dash.MATCH}, "data"),
+        prevent_initial_call=True,
+    )
     app.clientside_callback(
         _SCRUB_JS.source,
         [
