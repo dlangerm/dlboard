@@ -331,7 +331,8 @@ def instrument_app(app: Dash) -> None:
         try:
             from dlboard.serve.telemetry import _instrument
 
-            _instrument.instrument_flask(app.server, traces)
+            prefix = str(app.config.routes_pathname_prefix)  # pyrefly: ignore [unknown-argument-type]
+            _instrument.instrument_flask(app.server, traces, prefix)
         except Exception:  # noqa: BLE001 -- as above
             _log.warning("could not trace this server's requests; going on without", exc_info=True)
 

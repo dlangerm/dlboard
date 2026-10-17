@@ -43,7 +43,7 @@ def test_a_request_is_one_trace_across_the_client_and_the_server(
     assert client.attributes[TraceKey.REQUEST_ID] == server.attributes[TraceKey.REQUEST_ID]
 
 
-def test_a_rejected_request_is_an_errored_span_and_never_holds_the_credential(
+def test_a_rejected_request_is_traced_on_both_sides_and_never_holds_the_credential(
     span_exporter: InMemorySpanExporter, backend_server: BackendServer
 ) -> None:
     """The anonymous test server turns away any API key, so this request is refused with a 401."""
@@ -56,6 +56,9 @@ def test_a_rejected_request_is_an_errored_span_and_never_holds_the_credential(
     spans = span_exporter.get_finished_spans()
     (client,) = (s for s in spans if s.kind == SpanKind.CLIENT and s.name.startswith("POST"))
     assert client.status.status_code == StatusCode.ERROR
+    assert [s for s in spans if s.kind == SpanKind.SERVER], (
+        "the auth gate turns the request away, but the server still traces it"
+    )
     assert all("dlb_a-credential" not in f"{s.attributes} {s.events}" for s in spans)
 
 

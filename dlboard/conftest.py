@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 import typing
 import uuid
+from dataclasses import dataclass, field
 from enum import IntEnum, StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -12,6 +13,7 @@ from typing import TYPE_CHECKING, Any, cast
 import pytest
 import sqlalchemy as sa
 from flask import Flask
+from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from prometheus_client.parser import text_string_to_metric_families
 from pydantic import AnyHttpUrl, SecretStr, TypeAdapter
@@ -35,8 +37,10 @@ from dlboard.serve.telemetry import LOGS, METRICS, _instrument
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
+    from wsgiref.types import InputStream, StartResponse, WSGIEnvironment
 
     from dash import Dash
+    from opentelemetry.proto.trace.v1.trace_pb2 import Span as WireSpan
 
     from dlboard.models import PluginProtocol
     from dlboard.plugins.data_stores._blob_store import BlobBackend
@@ -612,6 +616,45 @@ def span_exporter(telemetry: pytest.MonkeyPatch) -> Iterator[InMemorySpanExporte
     telemetry.setattr(_sdk, "make_exporter", lambda: exporter)
     _sdk.resource.cache_clear()  # one identity per process, remembered: a test starts over
     yield exporter
+    _instrument.uninstrument_libraries()
+
+
+@dataclass
+class OtlpTraces:
+    """An OTLP collector's view of traces: every span any process exported to it, as the wire format has them."""
+
+    spans: list[WireSpan] = field(default_factory=list)
+
+    def __call__(self, environ: WSGIEnvironment, start_response: StartResponse) -> list[bytes]:
+        """Serve one export request: keep its spans, answer 200 to everything."""
+        stream: InputStream = environ["wsgi.input"]
+        body = stream.read(int(environ["CONTENT_LENGTH"]))
+        if environ["PATH_INFO"] == "/v1/traces":
+            for resource_spans in ExportTraceServiceRequest.FromString(body).resource_spans:
+                for scope_spans in resource_spans.scope_spans:
+                    self.spans.extend(scope_spans.spans)
+        start_response("200 OK", [("Content-Type", "application/x-protobuf")])
+        return [b""]
+
+
+@pytest.fixture
+def otlp_traces(telemetry: pytest.MonkeyPatch) -> Iterator[OtlpTraces]:
+    """
+    Tracing on, in this process and every one it spawns, exporting to a collector listening here.
+
+    For a test that needs a spawned process's spans, which `span_exporter` cannot collect. Spans are exported every
+    0.2s (the standard `OTEL_BSP_SCHEDULE_DELAY`), so a test polls for what it expects instead of waiting on a flush.
+    """
+    collector = OtlpTraces()
+    server = make_server("127.0.0.1", 0, collector)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    telemetry.setenv("DLBOARD_TELEMETRY_TRACES", "true")
+    telemetry.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", f"http://127.0.0.1:{server.server_port}")
+    telemetry.setenv("OTEL_BSP_SCHEDULE_DELAY", "200")
+    yield collector
+    server.shutdown()
+    thread.join()
     _instrument.uninstrument_libraries()
 
 

@@ -20,12 +20,15 @@ Every instrumentor is handed this process's private tracer provider, never a glo
 from __future__ import annotations
 
 import importlib.metadata
+import re
 from typing import TYPE_CHECKING, Annotated, Final, Protocol
 
 from opentelemetry.instrumentation.flask import FlaskInstrumentor
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from structlog.stdlib import get_logger
+
+from dlboard.serve._settings_env import set_setting_env
 
 if TYPE_CHECKING:
     from importlib.metadata import EntryPoint
@@ -49,16 +52,21 @@ which would silently switch off every SQL span. It only listens to Core's cursor
 `server_traces_test.py` fails if a SQLAlchemy release ever breaks that.
 """
 
-_UNTRACED_URLS: Final = (
-    "healthz",
-    "readyz",
-    "metrics",
+
+_PROBE_ROUTES: Final = ("healthz", "readyz", "metrics")
+"""
+Routes at the root of the app that nobody looks at in a trace: health probes and the Prometheus scrape.
+
+Matched as whole paths: the name alone would also match the metric ingest route, `api/v1/metrics`.
+"""
+
+_STATIC_URLS: Final = (
     "_dash-component-suites",
     "_favicon.ico",
     "_reload-hash",
     r"\.[0-9a-f]{8}\.(?:css|js|woff2)$",  # an asset `serve_asset` serves under a content-hashed name
 )
-"""Requests nobody looks at in a trace: health probes, scrapes, and static files."""
+"""Static files, which would drown every page load in spans."""
 
 
 class InstrumentationSettings(BaseSettings):
@@ -75,6 +83,19 @@ class InstrumentationSettings(BaseSettings):
     @classmethod
     def _split_commas(cls, value: Any) -> Any:  # noqa: ANN401 -- a `mode="before"` validator sees the raw input
         return [v.strip() for v in value.split(",") if v.strip()] if isinstance(value, str) else value
+
+
+class HeaderCaptureSettings(BaseSettings):
+    """The standard variables for recording HTTP headers on spans -- which dlboard never does unless asked."""
+
+    model_config = SettingsConfigDict(env_prefix="OTEL_INSTRUMENTATION_HTTP_CAPTURE_HEADERS_")
+
+    sanitize_fields: str | None = None
+    """Comma-separated header names whose values are replaced with `[REDACTED]` if a user records headers."""
+
+
+_ALWAYS_SANITIZED: Final = "Authorization,Cookie,Set-Cookie"
+"""What `sanitize_fields` is, unless the user says otherwise: the headers a credential travels in."""
 
 
 class _Instrumentor(Protocol):
@@ -117,11 +138,33 @@ def uninstrument_libraries() -> None:
             instrumentor.uninstrument()
 
 
-def instrument_flask(server: Flask, traces: Traces) -> None:
-    """Trace `server`'s requests: continue an incoming `traceparent`, name the span by route, record status and errors."""
+def instrument_flask(server: Flask, traces: Traces, url_prefix: str) -> None:
+    """
+    Trace `server`'s requests, served under `url_prefix`: continue an incoming `traceparent`, name the span by route.
+
+    Status and errors are recorded too. A URL is excluded if it matches one of the (comma-separated) regular
+    expressions Flask's instrumentation is given, searched for anywhere in the full URL, so each is anchored here.
+    """
+    root = rf"^https?://[^/]+{re.escape(url_prefix.rstrip('/'))}/"
     excluded = InstrumentationSettings().flask_excluded_urls
+    # Headers are not recorded unless the user asks (`OTEL_INSTRUMENTATION_HTTP_CAPTURE_HEADERS_*`); if they do, a
+    # credential in one must not leave the server. Read when the app is instrumented, so set before that.
+    if HeaderCaptureSettings().sanitize_fields is None:
+        set_setting_env(HeaderCaptureSettings, "sanitize_fields", _ALWAYS_SANITIZED)
+    hooks = server.before_request_funcs.setdefault(None, [])
+    already_registered = len(hooks)
     FlaskInstrumentor().instrument_app(
         server,
         tracer_provider=traces.provider,
-        excluded_urls=",".join([*_UNTRACED_URLS, *([excluded] if excluded else [])]),
+        excluded_urls=",".join(
+            [
+                *(rf"{root}{route}(?:\?.*)?$" for route in _PROBE_ROUTES),
+                *_STATIC_URLS,
+                *([excluded] if excluded else []),
+            ]
+        ),
     )
+    # The request's span has to be open before anything else looks at the request. The auth gate runs ahead of the
+    # hooks registered before it, so a request it turns away would have no span at all, and the database lookups it
+    # makes to find out who is asking would be traces of their own.
+    hooks[:] = [*hooks[already_registered:], *hooks[:already_registered]]
