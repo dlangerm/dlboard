@@ -64,6 +64,7 @@ class TraceKey(StrEnum):
     """The names a span's attributes are reported under: OpenTelemetry's semantic conventions where one exists."""
 
     RUN_ID = "dlboard.run.id"
+    ITEMS = "dlboard.batch.items"
     EXPERIMENT_ID = "dlboard.experiment.id"
     REQUEST_ID = "dlboard.request_id"
 

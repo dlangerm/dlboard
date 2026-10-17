@@ -33,6 +33,7 @@ from dlboard import models
 from dlboard._batching import BatchParams, ship_batches
 from dlboard._mp_context import SPAWN_CONTEXT
 from dlboard._telemetry import Attributes, attribute
+from dlboard._telemetry.traces import SpanKind, TraceKey, carrier, flush, span
 from dlboard.serve import set_artifact_store, wait_for_data_store
 from dlboard.serve._logging import configure_logging
 from dlboard.serve.telemetry import (
@@ -42,6 +43,7 @@ from dlboard.serve.telemetry import (
     Outcome,
     OutcomeAttributes,
     Unit,
+    instrument_libraries,
 )
 
 if TYPE_CHECKING:
@@ -52,8 +54,14 @@ if TYPE_CHECKING:
     from flask import Response
     from werkzeug.datastructures import FileStorage
 
+    from dlboard._telemetry.traces import Carrier
     from dlboard.models import DataStore
     from dlboard.models._artifact import Artifact, NewArtifact
+
+    _Upload = tuple[NewArtifact, AnyUrl, Path, Carrier]
+    """What the server hands the writer: the upload, where it goes, where it is staged, and the request's trace."""
+    _Saved = tuple[Artifact, Carrier]
+    """What the writer hands back to be recorded: the artifact, and the write's trace."""
 
 
 _log = get_logger(__name__)
@@ -75,6 +83,19 @@ _REJECTIONS = Counter[_RejectionAttributes](
     Unit.UPLOADS,
     "Uploads turned away with a 503 because the blob writer could not take them.",
 )
+
+
+@dataclass(frozen=True, slots=True)
+class _WriteTrace(Attributes):
+    experiment_id: int = attribute(TraceKey.EXPERIMENT_ID)
+    run_id: int = attribute(TraceKey.RUN_ID)
+
+
+@dataclass(frozen=True, slots=True)
+class _IngestTrace(Attributes):
+    items: int = attribute(TraceKey.ITEMS)
+
+
 _BLOB_WRITES = Histogram[OutcomeAttributes](
     "dlboard.artifact.blob.write.duration", Unit.SECONDS, "How long the writer took to store one artifact."
 )
@@ -153,14 +174,16 @@ def blob_key(experiment_id: int, run_id: int, key: str, step: int | None, fname:
 
 def _write_blobs(
     backend: BlobBackend,
-    input_q: Queue[tuple[NewArtifact, AnyUrl, Path] | None],
-    return_q: Queue[Artifact | None],
+    input_q: Queue[_Upload | None],
+    return_q: Queue[_Saved | None],
 ) -> None:
     # This runs in its own `SPAWN_CONTEXT`-spawned process (see `BlobArtifactStore.__init__`), a
     # fresh interpreter with none of the parent's structlog setup -- without this, a write failure
     # here (an S3 signing error, say) would log with structlog's own default traceback renderer,
     # which prints every frame's locals, including whatever credentials `backend.write` was holding.
     configure_logging()
+    # Likewise a fresh interpreter for tracing: this process is dlboard's alone, so it patches boto here.
+    instrument_libraries()
     # A Ctrl-C reaches this process too (same process group); it must keep writing until the server
     # process tells it to stop with a `None`, or the blobs still queued would be lost on shutdown.
     signal.signal(signal.SIGINT, signal.SIG_IGN)
@@ -170,19 +193,29 @@ def _write_blobs(
             item = input_q.get(timeout=_WRITER_POLL_SEC)
         except queue.Empty:
             if parent is not None and not parent.is_alive():
+                flush()
                 return  # the server died without asking us to stop; nothing will record our refs
             continue
         if item is None:
+            flush()
             return
-        a, ref, staged = item
+        a, ref, staged, request_trace = item
         started = time.perf_counter()
         outcome = Outcome.FAILURE
         try:
-            backend.write(staged, ref)
+            # The request that uploaded this is long gone: the trace crossed the queue as `request_trace`.
+            with span(
+                "dlboard.blob.write",
+                SpanKind.CONSUMER,
+                _WriteTrace(experiment_id=a.experiment_id, run_id=a.run_id),
+                parent=request_trace,
+            ):
+                backend.write(staged, ref)
+                write_trace = carrier()
             artifact = models.Artifact.model_validate(a.model_dump() | {"ref": str(ref)})
             if return_q.full():
                 _log.warning("Return queue is full, runtime will be impacted")
-            return_q.put(artifact)
+            return_q.put((artifact, write_trace))
             outcome = Outcome.SUCCESS
         except Exception:  # noqa: BLE001
             _log.exception("Failed to save artifacts")
@@ -203,8 +236,8 @@ class BlobArtifactStore(models.ArtifactStore[BlobBackend, int]):
         its leftovers somewhere the operator already provisions and monitors. Defaults to the system temp dir.
         """
         self._backend = backend
-        self._store_q: Queue[tuple[NewArtifact, AnyUrl, Path] | None] = SPAWN_CONTEXT.Queue(store_q_size)
-        self._saved_artifact_q: Queue[Artifact | None] = SPAWN_CONTEXT.Queue(store_q_size)
+        self._store_q: Queue[_Upload | None] = SPAWN_CONTEXT.Queue(store_q_size)
+        self._saved_artifact_q: Queue[_Saved | None] = SPAWN_CONTEXT.Queue(store_q_size)
         self._store_artifact_proc = SPAWN_CONTEXT.Process(
             target=_write_blobs,
             args=(backend, self._store_q, self._saved_artifact_q),
@@ -277,12 +310,22 @@ class BlobArtifactStore(models.ArtifactStore[BlobBackend, int]):
         """Forever record the refs of blobs the write worker has finished writing into `app`'s data store."""
         ship_batches(
             self._saved_artifact_q,
-            functools.partial(self._record_refs, wait_for_data_store(app)),
+            functools.partial(self._record_saved, wait_for_data_store(app)),
             BatchParams(flush_size=10, wait_sec=1, ready=self._ingest_ready, flushed=self._ingest_flushed),
             # `_record_refs` already drops (and cleans up after) anything the store rejects outright,
             # so whatever still escapes it -- a locked database, say -- is worth retrying.
             is_permanent=lambda _exc: False,
         )
+
+    def _record_saved(self, store: DataStore[...], saved: list[_Saved]) -> None:
+        """Record a batch of written artifacts' refs, in one span linked to the write of each (it serves them all)."""
+        with span(
+            "dlboard.blob.ingest",
+            SpanKind.CONSUMER,
+            _IngestTrace(items=len(saved)),
+            links=[write_trace for _, write_trace in saved],
+        ):
+            self._record_refs(store, [artifact for artifact, _ in saved])
 
     def _record_refs(self, store: DataStore[...], artifacts: list[Artifact]) -> None:
         """
@@ -326,7 +369,7 @@ class BlobArtifactStore(models.ArtifactStore[BlobBackend, int]):
                     _log.warning("Store queue is full, runtime will be impacted")
                 staging_path = self._file_staging_dir / str(uuid4())
                 file.save(staging_path, buffer_size=int(1e6))
-                self._store_q.put((a, ref, staging_path), timeout=_ENQUEUE_TIMEOUT_SEC)
+                self._store_q.put((a, ref, staging_path, carrier()), timeout=_ENQUEUE_TIMEOUT_SEC)
                 staging_path = None  # the write worker owns it now
         except queue.Full as exc:
             _REJECTIONS.add(1, _RejectionAttributes(reason=_Rejection.QUEUE_FULL))

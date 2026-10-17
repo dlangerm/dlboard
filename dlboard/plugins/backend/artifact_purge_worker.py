@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 from pydantic import AnyUrl
 from structlog.stdlib import get_logger
 
+from dlboard._telemetry.traces import SpanKind, span
 from dlboard.serve import wait_for_artifact_store, wait_for_data_store
 
 if TYPE_CHECKING:
@@ -78,7 +79,9 @@ def _run(app: Dash) -> None:
     while True:
         _wake_event.wait()
         _wake_event.clear()
-        _drain_pending(store, artifact_store)
+        # Nobody's request: its own trace, with the storage client's calls (S3 deletes) under it.
+        with span("dlboard.artifact.purge", SpanKind.INTERNAL):
+            _drain_pending(store, artifact_store)
 
 
 def plug(app: Dash) -> None:
