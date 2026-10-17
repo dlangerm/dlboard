@@ -107,6 +107,36 @@ jobs:
           client-venv/bin/python -c
           "import dlboard, dlboard.client, dlboard.client.artifacts.image, dlboard.models"
 
+  # The client's `otel` extra promises a floor and no ceiling, so a user's own OpenTelemetry is never forced to move
+  # for dlboard. This installs the extra three ways -- every direct requirement at its floor, the newest releases,
+  # and an old protobuf (torch/TensorFlow environments) -- and runs the client's real tracing against a collector.
+  # Installed from `pyproject.toml`'s own requirements: `--resolution lowest-direct` only floors *direct* ones, and
+  # through the wheel's extra they would be transitive and resolve to the newest.
+  client-otel:
+    if: needs.check_doc_only.outputs.skip-tests != 'true'
+    needs: [check_doc_only, typecheck-precommit]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {python-version: '3.10', resolution: lowest-direct, pin: ''}
+          - {python-version: '3.10', resolution: highest, pin: protobuf==3.20.*}
+          - {python-version: '3.13', resolution: highest, pin: ''}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv build --package dlboard-client --wheel --out-dir dist
+      - run: uv venv --python ${{ matrix.python-version }} client-venv
+      - run: >
+          uv pip install --python client-venv/bin/python --resolution ${{ matrix.resolution
+          }}
+          -r client/pyproject.toml --extra otel ${{ matrix.pin }}
+      - run: uv pip install --python client-venv/bin/python --no-deps dist/*.whl
+      - run: client-venv/bin/python tools/check_client_tracing.py
+
   # Build-only: proves the root `Dockerfile`'s multi-stage build still produces a working
   # dlboard image. Not pushed anywhere -- just a build sanity check on every PR.
   docker-build:

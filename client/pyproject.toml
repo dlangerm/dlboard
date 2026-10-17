@@ -59,6 +59,16 @@ requires-python = ">=3.10"
 # Needed by `dlboard.client.dlboard_logger.DLBoardLogger`, the `pytorch_lightning.loggers.Logger`
 # adapter. Nothing else under `dlboard.client`/`dlboard.models` needs it.
 lightning = ["pytorch-lightning>=2.0.0"]
+# Distributed traces (`DLBOARD_TELEMETRY_TRACES`). Only the stable 1.x core packages -- never the 0.x contrib
+# instrumentation, which pins its exact core release and would dictate a user's whole OpenTelemetry stack -- and
+# no upper bound, so the resolver picks the series that matches the user's own protobuf (1.16-1.25 need protobuf<5,
+# 1.26+ need protobuf>=5; torch and TensorFlow environments are on either). 1.16 is the oldest release that works in a
+# clean environment (1.15 and older import `pkg_resources`, which a fresh venv does not have), and the client's
+# tracing calls only API that exists there: `client-compat` in CI installs exactly these floors and runs them.
+otel = [
+  "opentelemetry-exporter-otlp-proto-http>=1.16",
+  "opentelemetry-sdk>=1.16"
+]
 
 [project.urls]
 Changelog = "https://github.com/dlangerm/dlboard/blob/main/CHANGELOG.md"

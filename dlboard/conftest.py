@@ -17,6 +17,7 @@ from pydantic import AnyHttpUrl, SecretStr, TypeAdapter
 from werkzeug.serving import make_server
 
 from dlboard import models
+from dlboard._telemetry.traces import TRACES
 from dlboard.plugins import BUILTIN_BACKEND, LOCAL_AUTH
 from dlboard.plugins.backend import artifact_purge_worker
 from dlboard.plugins.data_stores import filesystem, postgres, s3, sqlite
@@ -589,9 +590,11 @@ def telemetry(monkeypatch: pytest.MonkeyPatch) -> Iterator[pytest.MonkeyPatch]:
     """
     METRICS.close()
     LOGS.close()
+    TRACES.close()
     yield monkeypatch
     METRICS.close()
     LOGS.close()
+    TRACES.close()
 
 
 def scraped_total(scrape: str, name: str, **labels: str) -> float:

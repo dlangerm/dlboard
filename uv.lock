@@ -817,12 +817,18 @@ dependencies = [
 lightning = [
     { name = "pytorch-lightning" },
 ]
+otel = [
+    { name = "opentelemetry-exporter-otlp-proto-http" },
+    { name = "opentelemetry-sdk" },
+]
 
 [package.metadata]
 requires-dist = [
     { name = "coolname", specifier = ">=5.0.0" },
     { name = "dltype", specifier = ">=0.16.0" },
     { name = "numpy", specifier = ">=1.26.0" },
+    { name = "opentelemetry-exporter-otlp-proto-http", marker = "extra == 'otel'", specifier = ">=1.16" },
+    { name = "opentelemetry-sdk", marker = "extra == 'otel'", specifier = ">=1.16" },
     { name = "pendulum", specifier = ">=3.0.0" },
     { name = "pillow", specifier = ">=10.0.0" },
     { name = "pydantic", specifier = ">=2.5.0" },
@@ -832,7 +838,7 @@ requires-dist = [
     { name = "structlog", specifier = ">=23.1.0" },
     { name = "typing-extensions", specifier = ">=4.5.0" },
 ]
-provides-extras = ["lightning"]
+provides-extras = ["lightning", "otel"]
 
 [[package]]
 name = "dltype"

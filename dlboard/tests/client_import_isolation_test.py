@@ -115,3 +115,37 @@ except ValueError as exc:
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "True"
+
+
+def test_a_client_with_tracing_off_never_loads_opentelemetry() -> None:
+    script = """
+import sys
+from dlboard._telemetry.traces import SpanKind, carrier, flush, span, trace_ids
+with span("work", SpanKind.INTERNAL):
+    assert carrier() == {} and trace_ids() is None
+flush()
+assert not [name for name in sys.modules if name.split(".")[0] == "opentelemetry"]
+print("ok")
+"""
+    result = _run_with_blocked_imports((*_SERVER_ONLY_PACKAGES, *_OPENTELEMETRY_PACKAGES), script)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "ok"
+    assert "telemetry" not in (result.stdout + result.stderr).lower()  # no setup, no log spew
+
+
+def test_turning_tracing_on_without_the_otel_extra_names_the_client_extra() -> None:
+    script = """
+import os, sys
+sys.modules["opentelemetry"] = None  # what an uninstalled package looks like to `find_spec`
+os.environ["DLBOARD_TELEMETRY_TRACES"] = "true"
+from dlboard._telemetry.traces import TraceSettings
+try:
+    TraceSettings()
+except ValueError as exc:
+    print("dlboard-client[otel]" in str(exc))
+"""
+    result = _run_with_blocked_imports(_OPENTELEMETRY_PACKAGES, script)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "True"
