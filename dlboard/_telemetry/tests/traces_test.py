@@ -265,6 +265,16 @@ def test_reading_the_open_span_never_builds_a_tracer(exported: InMemorySpanExpor
         pytest.param({"OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf"}, True, None, id="http-protobuf"),
         pytest.param({}, True, None, id="unset"),
         pytest.param({"OTEL_EXPORTER_OTLP_PROTOCOL": "grpc"}, False, None, id="not-asked-to-trace"),
+        pytest.param({"OTEL_TRACES_EXPORTER": "otlp_proto_grpc"}, True, "4318", id="the-grpc-exporter"),
+        pytest.param(
+            {"OTEL_TRACES_EXPORTER": "console", "OTEL_EXPORTER_OTLP_PROTOCOL": "grpc"},
+            True,
+            None,
+            id="no-otlp-so-its-protocol-does-not-matter",
+        ),
+        pytest.param({"OTEL_TRACES_EXPORTER": "OTLP, console"}, True, None, id="several-in-any-case"),
+        pytest.param({"OTEL_TRACES_EXPORTER": "zipkin"}, True, "zipkin", id="one-dlboard-cannot-send-to"),
+        pytest.param({"OTEL_TRACES_EXPORTER": "zipkin"}, False, None, id="not-asked-to-trace-so-not-checked"),
     ],
 )
 def test_a_protocol_the_exporter_cannot_speak_stops_startup_instead_of_losing_every_span(

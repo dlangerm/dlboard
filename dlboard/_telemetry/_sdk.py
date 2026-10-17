@@ -24,11 +24,11 @@ from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExport
 from opentelemetry.propagate import extract, inject
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
 from opentelemetry.trace import Link, Status, StatusCode
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from dlboard._telemetry.traces import SpanKind
+from dlboard._telemetry.traces import SpanKind, TracesExporter, TracesExporterSettings
 from dlboard._version import __version__
 
 if TYPE_CHECKING:
@@ -227,7 +227,12 @@ def build_traces(default_service_name: str, *, enabled: bool, owns_process: bool
         resource=resource(os.getpid(), default_service_name),
         shutdown_on_exit=False,  # `PerProcess` closes it, where a worker's exit actually runs
     )
-    provider.add_span_processor(BatchSpanProcessor(make_exporter()))
+    exporters = TracesExporterSettings().traces_exporter
+    if TracesExporter.NONE not in exporters:
+        if not exporters.isdisjoint({TracesExporter.OTLP, TracesExporter.OTLP_PROTO_HTTP}):
+            provider.add_span_processor(BatchSpanProcessor(make_exporter()))
+        if TracesExporter.CONSOLE in exporters:
+            provider.add_span_processor(BatchSpanProcessor(ConsoleSpanExporter()))
     if owns_process and not isinstance(current, TracerProvider):
         trace.set_tracer_provider(provider)
         _installed_here = provider

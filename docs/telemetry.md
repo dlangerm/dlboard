@@ -165,6 +165,10 @@ The endpoint, headers and timeouts are the standard `OTEL_EXPORTER_OTLP_*` ones,
 `docker run -p 4318:4318 -p 16686:16686 jaegertracing/all-in-one`, point `OTEL_EXPORTER_OTLP_ENDPOINT` at
 `http://localhost:4318` and open `localhost:16686`.
 
+`OTEL_TRACES_EXPORTER` chooses where spans go: `otlp` (the default), `console` (written to stdout, handy for a look
+without a collector), both (`otlp,console`), or `none`, which exports nothing while the trace still crosses from client to
+server. Any other exporter is a startup error that lists the ones that work.
+
 Spans are exported over **OTLP/HTTP with protobuf only**, to the collector's HTTP port (usually 4318), as metrics and logs
 are. gRPC (usually port 4317) is not supported, and an `OTEL_EXPORTER_OTLP_PROTOCOL` (or `_TRACES_PROTOCOL`) of `grpc`
 stops startup with a message that says so, rather than losing every span to an export error. A shared environment that
@@ -179,9 +183,16 @@ which keeps up with the libraries and conventions better than anything written h
 included) is instrumented per app. Everything else installed is found through the standard `opentelemetry_instrumentor`
 entry points, the mechanism `opentelemetry-instrument` uses: SQLAlchemy, `psycopg` and `botocore` come with
 `dlboard[otel]`, and **installing `opentelemetry-instrumentation-<library>` is all it takes to also trace a plugin's own
-storage or auth client**. `OTEL_PYTHON_DISABLED_INSTRUMENTATIONS=sqlalchemy,psycopg` switches any of them off, and
-`OTEL_PYTHON_FLASK_EXCLUDED_URLS` adds URLs (regular expressions) not to trace. Health probes, `/metrics` and static
-files never are. dlboard asks SQLAlchemy's instrumentation to run on SQLAlchemy releases newer than the ones it has been
+storage or auth client**. `OTEL_PYTHON_DISABLED_INSTRUMENTATIONS=botocore` switches any of them off.
+`OTEL_PYTHON_EXCLUDED_URLS` (or `OTEL_PYTHON_FLASK_EXCLUDED_URLS`, which replaces it for Flask when set) adds URLs
+(regular expressions) not to trace. Health probes, `/metrics` and static files never are.
+
+Every statement dlboard runs goes through SQLAlchemy, whose instrumentation traces it, on SQLite and on Postgres alike.
+A database driver's instrumentation (`psycopg`) would trace each of them a second time, so it is left off while
+SQLAlchemy's is on. `OTEL_PYTHON_DISABLED_INSTRUMENTATIONS=sqlalchemy` swaps them: SQLAlchemy's off, the driver's on, for
+spans at the driver (its connections and cursors) instead.
+
+dlboard asks SQLAlchemy's instrumentation to run on SQLAlchemy releases newer than the ones it has been
 tested with, since it only listens for statements, which don't change between them. HTTP attributes use the stable
 names (`http.request.method`, `http.response.status_code`), the same as the client's, unless you set
 `OTEL_SEMCONV_STABILITY_OPT_IN` yourself.

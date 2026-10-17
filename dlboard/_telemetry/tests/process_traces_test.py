@@ -7,6 +7,7 @@ The state under test is process-wide (the global provider is set once, ever), so
 
 from __future__ import annotations
 
+import io
 import logging
 import time
 from typing import TYPE_CHECKING, override
@@ -22,7 +23,7 @@ from opentelemetry.propagators.textmap import (
     default_setter,
 )
 from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export import ConsoleSpanExporter, SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.trace import NonRecordingSpan, SpanContext, TraceFlags
 from opentelemetry.util._once import Once
@@ -180,3 +181,31 @@ def test_exit_waits_no_longer_than_a_bound_for_a_collector_that_will_not_let_go(
     TRACES.close()
 
     assert time.monotonic() - started < 3
+
+
+def test_with_the_exporter_none_spans_still_exist_and_travel_but_nothing_is_exported(
+    span_exporter: InMemorySpanExporter, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OTEL_TRACES_EXPORTER", "none")
+
+    with span("work", SpanKind.INTERNAL):
+        headers = carrier()
+    flush()
+
+    assert headers, "the trace still crosses to whoever receives it"
+    assert not span_exporter.get_finished_spans()
+
+
+def test_with_the_exporter_console_spans_are_written_out_instead_of_sent(
+    span_exporter: InMemorySpanExporter, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    written = io.StringIO()
+    monkeypatch.setenv("OTEL_TRACES_EXPORTER", "console")
+    monkeypatch.setattr(sdk, "ConsoleSpanExporter", lambda: ConsoleSpanExporter(out=written))
+
+    with span("work", SpanKind.INTERNAL):
+        pass
+    flush()
+
+    assert '"name": "work"' in written.getvalue()
+    assert not span_exporter.get_finished_spans(), "nothing was sent to OTLP"

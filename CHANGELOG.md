@@ -26,7 +26,7 @@ pulls that section's body into the GitHub release notes and publishes both distr
 * **Distributed traces** (`DLBOARD_TELEMETRY_TRACES=true`, with the `otel` extra on the server and `dlboard-client[otel]`
   in the training environment). A batch your script ships is one trace, from the shipping process through the server,
   its database queries and the blob writer, joined by a W3C `traceparent` header (calls to S3 are traced too, as traces of their own).
-  The server uses OpenTelemetry's own instrumentation for Flask, SQLAlchemy, psycopg and botocore, and picks up any other
+  The server uses OpenTelemetry's own instrumentation for Flask, SQLAlchemy and botocore, and picks up any other
   `opentelemetry-instrumentation-*` package you install, so a plugin's own client is traced too. Requests carry an
   `X-Request-Id`, recorded on the span and the log lines (which also gain `trace_id` and `span_id`). The client needs only
   the standard OpenTelemetry SDK and OTLP exporter (1.16 or later, no upper bound) and patches nothing in your training

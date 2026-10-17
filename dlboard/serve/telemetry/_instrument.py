@@ -41,6 +41,15 @@ if TYPE_CHECKING:
 _log = get_logger(__name__)
 
 _ENTRY_POINT_GROUP: Final = "opentelemetry_instrumentor"
+_DRIVERS: Final = frozenset({"psycopg", "psycopg2"})
+"""
+Database drivers whose instrumentation traces every statement a second time.
+
+Every statement dlboard runs goes through SQLAlchemy, whose instrumentation already traces it, on SQLite as on Postgres.
+A driver's would add a second span for the same statement under the first. So they are left off while SQLAlchemy's runs;
+`OTEL_PYTHON_DISABLED_INSTRUMENTATIONS=sqlalchemy` turns SQLAlchemy's off and the driver's on, for traces at the driver
+(its connections and cursors) instead.
+"""
 _PER_APP: Final = "flask"
 _FLASK_INSTRUMENTATION: Final = "opentelemetry.instrumentation.flask"
 """The module the request hook Flask's instrumentation registers comes from."""
@@ -78,8 +87,10 @@ class InstrumentationSettings(BaseSettings):
 
     disabled_instrumentations: Annotated[frozenset[str], NoDecode] = frozenset()
     """Comma-separated instrumentor names (`sqlalchemy`, `psycopg`, `botocore`, ...) not to run."""
-    flask_excluded_urls: str = ""
+    excluded_urls: str = ""
     """Comma-separated regular expressions of request URLs not to trace, besides dlboard's own."""
+    flask_excluded_urls: str = ""
+    """For Flask alone; when set it replaces `excluded_urls`, as OpenTelemetry's own instrumentation reads the two."""
 
     @field_validator("disabled_instrumentations", mode="before")
     @classmethod
@@ -153,8 +164,10 @@ def instrument_libraries(traces: Traces) -> None:
     """Instrument every installed library that has an instrumentor, once per process."""
     _set_env_defaults()
     disabled = InstrumentationSettings().disabled_instrumentations
-    for entry_point in _process_wide():
-        if entry_point.name in disabled:
+    entry_points = _process_wide()
+    covered = _DRIVERS if "sqlalchemy" in {e.name for e in entry_points} - disabled else frozenset()
+    for entry_point in entry_points:
+        if entry_point.name in disabled | covered:
             continue
         try:
             instrumentor: _Instrumentor = entry_point.load()()
@@ -182,7 +195,8 @@ def instrument_flask(server: Flask, traces: Traces, url_prefix: str) -> None:
     expressions Flask's instrumentation is given, searched for anywhere in the full URL, so each is anchored here.
     """
     root = rf"^https?://[^/]+{re.escape(url_prefix.rstrip('/'))}/"
-    excluded = InstrumentationSettings().flask_excluded_urls
+    settings = InstrumentationSettings()
+    excluded = settings.flask_excluded_urls or settings.excluded_urls
     _set_env_defaults()
     FlaskInstrumentor().instrument_app(
         server,

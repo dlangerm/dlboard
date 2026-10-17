@@ -23,10 +23,10 @@ import importlib.util
 import sys
 import threading
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Final, TypeAlias, TypeVar
+from typing import TYPE_CHECKING, Annotated, Any, Final, TypeAlias, TypeVar
 
-from pydantic import model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import field_validator, model_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from structlog.stdlib import get_logger
 
 from dlboard._compat import StrEnum
@@ -94,6 +94,37 @@ class OtlpExportSettings(BaseSettings):
     traces_protocol: OtlpProtocol | None = None
 
 
+class TracesExporter(StrEnum):
+    """The values of the standard `OTEL_TRACES_EXPORTER` that dlboard can honour."""
+
+    OTLP = "otlp"
+    OTLP_PROTO_HTTP = "otlp_proto_http"
+    OTLP_PROTO_GRPC = "otlp_proto_grpc"
+    CONSOLE = "console"
+    NONE = "none"
+
+
+class TracesExporterSettings(BaseSettings):
+    """The standard variable that says where spans go: OTLP, the console, or nowhere (spans still carry a trace)."""
+
+    model_config = SettingsConfigDict(env_prefix="OTEL_")
+
+    traces_exporter: Annotated[frozenset[TracesExporter], NoDecode] = frozenset({TracesExporter.OTLP})
+    """Comma-separated. `none` exports nothing, though the traces still cross processes."""
+
+    @field_validator("traces_exporter", mode="before")
+    @classmethod
+    def _split_commas(cls, value: Any) -> Any:  # noqa: ANN401 -- a `mode="before"` validator sees the raw input
+        return [v.strip().lower() for v in value.split(",") if v.strip()] if isinstance(value, str) else value
+
+
+_GRPC_UNSUPPORTED: Final = (
+    "DLBOARD_TELEMETRY_TRACES exports OTLP over HTTP, not gRPC: unset OTEL_EXPORTER_OTLP_PROTOCOL (or set it to "
+    "http/protobuf), use OTEL_TRACES_EXPORTER=otlp, and point OTEL_EXPORTER_OTLP_ENDPOINT at the collector's HTTP "
+    "port, usually 4318"
+)
+
+
 class TraceSettings(BaseSettings):
     """`DLBOARD_TELEMETRY_TRACES`, read the same way by the client and the server. Off, nothing here runs."""
 
@@ -113,24 +144,26 @@ class TraceSettings(BaseSettings):
         return self
 
     @model_validator(mode="after")
-    def _require_http_protobuf(self) -> TraceSettings:
-        """Spans sent to a gRPC port would all fail; say so at startup rather than only in an export error later."""
+    def _require_a_supported_export(self) -> TraceSettings:
+        """Spans sent where they cannot go would all fail; say so at startup rather than in an export error later."""
+        if not self.traces:
+            return self
+        exporters = TracesExporterSettings().traces_exporter
+        if TracesExporter.OTLP_PROTO_GRPC in exporters:
+            raise ValueError(_GRPC_UNSUPPORTED)
+        if exporters.isdisjoint({TracesExporter.OTLP, TracesExporter.OTLP_PROTO_HTTP}):
+            return self  # the console, or nowhere: no OTLP protocol is in play
         export = OtlpExportSettings()
         match export.traces_protocol or export.protocol:
-            case OtlpProtocol.GRPC if self.traces:
-                msg = (
-                    "DLBOARD_TELEMETRY_TRACES exports OTLP over HTTP, not gRPC: unset OTEL_EXPORTER_OTLP_PROTOCOL "
-                    "(or set it to http/protobuf) and point OTEL_EXPORTER_OTLP_ENDPOINT at the collector's HTTP "
-                    "port, usually 4318"
-                )
-                raise ValueError(msg)
-            case OtlpProtocol.HTTP_JSON if self.traces:
+            case OtlpProtocol.GRPC:
+                raise ValueError(_GRPC_UNSUPPORTED)
+            case OtlpProtocol.HTTP_JSON:
                 msg = (
                     "DLBOARD_TELEMETRY_TRACES exports OTLP with protobuf encoding, not JSON: unset "
                     "OTEL_EXPORTER_OTLP_PROTOCOL or set it to http/protobuf"
                 )
                 raise ValueError(msg)
-            case OtlpProtocol.GRPC | OtlpProtocol.HTTP_JSON | OtlpProtocol.HTTP_PROTOBUF | None:
+            case OtlpProtocol.HTTP_PROTOBUF | None:
                 return self
 
 

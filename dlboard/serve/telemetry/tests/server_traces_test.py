@@ -8,10 +8,14 @@ from typing import TYPE_CHECKING
 
 import pytest
 import requests
+from opentelemetry.instrumentation.psycopg import PsycopgInstrumentor
+from opentelemetry.instrumentation.sqlalchemy import SQLAlchemyInstrumentor
 from opentelemetry.trace import SpanKind
 
-from dlboard._telemetry.traces import TraceKey, flush
+from dlboard._telemetry.traces import TRACES, TraceKey, flush
 from dlboard._wire import REQUEST_ID_HEADER, WHOAMI_PATH, Resource, create_path, get_or_create_path
+from dlboard.conftest import EVERY_STORE_BACKEND, StoreBackend
+from dlboard.serve.telemetry._instrument import instrument_libraries
 
 if TYPE_CHECKING:
     from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
@@ -87,3 +91,77 @@ def test_a_credential_in_a_header_a_user_chose_to_record_is_redacted(
     assert server.attributes is not None
     assert server.attributes["http.request.header.authorization"] == ("[REDACTED]",)
     assert "dlb_a-secret" not in str(server.attributes)
+
+
+@pytest.fixture
+def excluded_urls(request: pytest.FixtureRequest, telemetry: pytest.MonkeyPatch) -> None:
+    """The user's URL exclusions, set before the app is built, which is when they are read."""
+    parameters: dict[str, str] = request.param
+    for name, value in parameters.items():
+        telemetry.setenv(name, value)
+
+
+@pytest.mark.parametrize(
+    ("excluded_urls", "traced"),
+    [
+        pytest.param({"OTEL_PYTHON_EXCLUDED_URLS": "whoami"}, False, id="the-generic-variable"),
+        pytest.param({"OTEL_PYTHON_FLASK_EXCLUDED_URLS": "whoami"}, False, id="the-flask-variable"),
+        pytest.param(
+            {"OTEL_PYTHON_EXCLUDED_URLS": "whoami", "OTEL_PYTHON_FLASK_EXCLUDED_URLS": "nothing-matches"},
+            True,
+            id="the-flask-variable-replaces-the-generic-one",
+        ),
+        pytest.param({}, True, id="neither"),
+    ],
+    indirect=["excluded_urls"],
+)
+def test_a_user_can_keep_urls_out_of_the_traces_with_either_standard_variable(
+    excluded_urls: None, span_exporter: InMemorySpanExporter, backend_server: BackendServer, *, traced: bool
+) -> None:
+    del excluded_urls
+    requests.get(f"{backend_server.url}/{WHOAMI_PATH}", timeout=10)
+    flush()
+
+    assert bool([s for s in span_exporter.get_finished_spans() if s.kind == SpanKind.SERVER]) is traced
+
+
+@pytest.mark.parametrize("store_backend", EVERY_STORE_BACKEND)
+def test_a_statement_is_one_span_whichever_database_runs_it(
+    span_exporter: InMemorySpanExporter, backend_server: BackendServer, store_backend: StoreBackend
+) -> None:
+    """On Postgres the driver's instrumentation would trace each statement again, beside SQLAlchemy's span for it."""
+    del store_backend  # only selects which database `backend_server` runs on
+    requests.post(
+        f"{backend_server.url}/{get_or_create_path(Resource.PROJECTS)}",
+        json={"name": "once", "description": ""},
+        timeout=10,
+    )
+    flush()
+
+    traced_by = {
+        s.instrumentation_scope.name
+        for s in span_exporter.get_finished_spans()
+        if s.instrumentation_scope and s.attributes and "db.statement" in s.attributes
+    }
+    assert traced_by == {"opentelemetry.instrumentation.sqlalchemy"}
+
+
+@pytest.mark.parametrize(
+    ("disabled", "driver_traced"),
+    [
+        pytest.param("", False, id="sqlalchemy-already-traces-every-statement"),
+        pytest.param("sqlalchemy", True, id="the-driver-instead-when-sqlalchemys-is-off"),
+    ],
+)
+def test_the_database_driver_is_traced_only_where_sqlalchemy_is_not(
+    span_exporter: InMemorySpanExporter, telemetry: pytest.MonkeyPatch, disabled: str, *, driver_traced: bool
+) -> None:
+    del span_exporter  # only so there is a tracer
+    telemetry.setenv("OTEL_PYTHON_DISABLED_INSTRUMENTATIONS", disabled)
+    traces = TRACES.get()
+    assert traces is not None
+
+    instrument_libraries(traces)
+
+    assert PsycopgInstrumentor().is_instrumented_by_opentelemetry is driver_traced
+    assert SQLAlchemyInstrumentor().is_instrumented_by_opentelemetry is not bool(disabled)
