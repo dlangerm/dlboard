@@ -82,7 +82,9 @@ _Method = Literal["GET", "POST"]
 @dataclass(frozen=True, slots=True)
 class _RequestTrace(Attributes):
     method: _Method = attribute(TraceKey.HTTP_METHOD)
-    route: str = attribute(TraceKey.HTTP_ROUTE)
+    route: str = attribute(TraceKey.URL_TEMPLATE)
+    host: str = attribute(TraceKey.SERVER_ADDRESS)
+    port: int = attribute(TraceKey.SERVER_PORT)
     request_id: str = attribute(TraceKey.REQUEST_ID)
 
 
@@ -178,7 +180,11 @@ class BasicDlboardAPI:
         trace context on its way to the server. Never a credential: `Authorization` is not an attribute.
         """
         request_id = uuid4().hex
-        with span(f"{method} /{route}", SpanKind.CLIENT, _RequestTrace(method, route, request_id)) as active:
+        server = urlsplit(self.base_url)
+        host = server.hostname or ""
+        port = server.port or (443 if server.scheme == "https" else 80)
+        attributes = _RequestTrace(method=method, route=route, request_id=request_id, host=host, port=port)
+        with span(f"{method} /{route}", SpanKind.CLIENT, attributes) as active:
             res = self._session.request(
                 method,
                 f"{self.base_url}/{path or route}",
@@ -188,12 +194,8 @@ class BasicDlboardAPI:
                 timeout=self._timeout,
             )
             active.set(_ResponseTrace(status_code=res.status_code))
-            try:
-                res.raise_for_status()
-            except requests.HTTPError as exc:
-                active.failed(
-                    exc
-                )  # the caller decides whether this status is an error; the span records that it was
+            if not res.ok:  # the caller decides whether this status is an error; the span records that it was
+                active.failed(requests.HTTPError(f"{res.status_code} {res.reason}", response=res))
         return res
 
     def _post(self, route: str, body: BaseModel, return_model: type[R], *, path: str | None = None) -> R:

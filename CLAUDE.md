@@ -233,7 +233,11 @@ library or installs a global provider -- it is the user's process -- and makes i
 `BasicDlboardAPI._send`; the server, which dlboard owns, instruments Flask per app and everything else through
 the `opentelemetry_instrumentor` entry points (`serve/telemetry/_instrument.py`). No instrumentation covers a
 `multiprocessing` queue, so a `Carrier` rides in the queued item (`_blob_store.py`) and the consumer continues it with
-`span(..., parent=carrier)`. Never record a bound value, a header or a local variable on a span.
+`span(..., parent=carrier)`. Never record a bound value, a header or a local variable on a span (engines set
+`hide_parameters=True` for that reason). A dlboard-only process (the server, its writer) calls `own_process()` first, which
+makes its tracer join the process's OpenTelemetry -- a platform's provider if there is one, else it becomes the global
+one; a training process never does. Read-only accessors (`carrier`, `trace_ids`, `flush`) use `TRACES.peek()`, never
+`get()`, so a log line cannot build a tracer before the process has said what it is.
 
 ### Models
 

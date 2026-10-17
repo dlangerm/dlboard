@@ -165,6 +165,15 @@ The endpoint, headers and timeouts are the standard `OTEL_EXPORTER_OTLP_*` ones,
 `docker run -p 4318:4318 -p 16686:16686 jaegertracing/all-in-one`, point `OTEL_EXPORTER_OTLP_ENDPOINT` at
 `http://localhost:4318` and open `localhost:16686`.
 
+Spans are exported over **OTLP/HTTP with protobuf only**, to the collector's HTTP port (usually 4318), as metrics and logs
+are. gRPC (usually port 4317) is not supported, and an `OTEL_EXPORTER_OTLP_PROTOCOL` (or `_TRACES_PROTOCOL`) of `grpc`
+stops startup with a message that says so, rather than losing every span to an export error. A shared environment that
+points other services at a gRPC endpoint needs a separate endpoint for dlboard.
+
+The wire format that carries a trace between client and server is the standard `OTEL_PROPAGATORS`, by default W3C
+`traceparent` (and `baggage`), on both sides. A mesh that standardises on `b3` or `xray` sets it there, and the two halves
+still join.
+
 **What the server instruments.** The server process is dlboard's alone, so it uses OpenTelemetry's own instrumentation,
 which keeps up with the libraries and conventions better than anything written here. Flask (every route, Dash callbacks
 included) is instrumented per app. Everything else installed is found through the standard `opentelemetry_instrumentor`
@@ -173,7 +182,16 @@ entry points, the mechanism `opentelemetry-instrument` uses: SQLAlchemy, `psycop
 storage or auth client**. `OTEL_PYTHON_DISABLED_INSTRUMENTATIONS=sqlalchemy,psycopg` switches any of them off, and
 `OTEL_PYTHON_FLASK_EXCLUDED_URLS` adds URLs (regular expressions) not to trace. Health probes, `/metrics` and static
 files never are. dlboard asks SQLAlchemy's instrumentation to run on SQLAlchemy releases newer than the ones it has been
-tested with, since it only listens for statements, which don't change between them.
+tested with, since it only listens for statements, which don't change between them. HTTP attributes use the stable
+names (`http.request.method`, `http.response.status_code`), the same as the client's, unless you set
+`OTEL_SEMCONV_STABILITY_OPT_IN` yourself.
+
+**Running under `opentelemetry-instrument` or the Kubernetes Operator.** A platform that sets OpenTelemetry up for you
+gets one pipeline, not two. If the process already has an SDK tracer provider when dlboard starts, dlboard's own spans
+(`dlboard.blob.write`, `dlboard.blob.ingest`, `dlboard.artifact.purge`) go through it, with or without
+`DLBOARD_TELEMETRY_TRACES`, and the libraries the platform already instrumented are left as it set them up. Without one,
+and with `DLBOARD_TELEMETRY_TRACES` on, dlboard's provider becomes the process's global one, so a plugin that calls
+`trace.get_tracer(...)` reaches it. This is the server only: the client never replaces a provider in your training process.
 
 **What the client instruments.** Only dlboard's own requests, written by hand: the client never patches `requests` or
 installs a global tracer provider in your training process, so your own OpenTelemetry setup (or lack of one) is not
@@ -186,17 +204,27 @@ in traces of their own.
 and the `Authorization` header. HTTP headers are not recorded at all unless you ask with
 `OTEL_INSTRUMENTATION_HTTP_CAPTURE_HEADERS_SERVER_REQUEST` and the like, and then `Authorization`, `Cookie` and
 `Set-Cookie` are redacted unless you set `OTEL_INSTRUMENTATION_HTTP_CAPTURE_HEADERS_SANITIZE_FIELDS` yourself. An
-exception is recorded with its type, message and traceback, never its local variables.
+exception is recorded with its type, message and traceback, never its local variables. The message is the library's own,
+so a database error is recorded as the database wrote it, the same text as in the server's log: Postgres's `DETAIL` line
+can name a value from the row it rejected (`Key (name)=(...) already exists`). The values bound into the statement are not
+in it.
 
 **It never gets in the way.** Spans are exported in batches in the background, and the queue is bounded: a collector that
 is down or slow costs spans, never a request, never a training step. Setup happens the first time something is
 traced, nothing connects at startup, and a tracing failure is logged once and otherwise ignored. A shipping process
-exports its last spans when it is told to flush, before `finalize()` returns.
+exports its last spans when it is told to flush, before `finalize()` returns, and a process that is exiting waits at most about
+ten seconds for a collector that will not let go (a rate-limiting gateway can ask an exporter to back off for a minute).
 
-Two things to know about what you will see. On S3 storage the upload's requests (`S3.PutObject`) are traces of their own,
-not children of `dlboard.blob.write`: boto uploads from threads of its own, which do not carry the trace, and dlboard
-leaves how an upload runs alone rather than change it for the sake of the trace. And a batch the client could not ship
-(the server was down) is retried, each attempt a trace of its own.
+Three things to know about what you will see.
+
+- Every Dash callback is a request, so each is a span named `POST /_dash-update-component`, with the sign-in check's queries
+  under it. On a busy server that is most of the volume, and it says little about which callback it was. Sample it down with
+  `OTEL_TRACES_SAMPLER=parentbased_traceidratio` and `OTEL_TRACES_SAMPLER_ARG=0.1` on the server. A batch the client ships
+  keeps the client's decision, whatever the server's ratio.
+- On S3 storage the upload's requests (`S3.PutObject`) are traces of their own, not children of `dlboard.blob.write`: boto
+  uploads from threads of its own, which do not carry the trace, and dlboard leaves how an upload runs alone rather than
+  change it for the sake of the trace.
+- A batch the client could not ship (the server was down) is retried, each attempt a trace of its own.
 
 ## How do I add one
 

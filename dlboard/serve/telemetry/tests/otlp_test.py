@@ -14,6 +14,7 @@ from opentelemetry.proto.collector.metrics.v1.metrics_service_pb2 import ExportM
 from opentelemetry.proto.logs.v1.logs_pb2 import SeverityNumber as WireSeverity
 from werkzeug.serving import make_server
 
+from dlboard._telemetry.traces import SpanKind, span, trace_ids
 from dlboard.serve._logging import configure_logging
 from dlboard.serve.telemetry import LOGS, METRICS, Counter, NoAttributes, TelemetrySettings, Unit
 from dlboard.serve.telemetry._sdk import _severity, forward_log
@@ -21,6 +22,8 @@ from dlboard.serve.telemetry._sdk import _severity, forward_log
 if TYPE_CHECKING:
     from collections.abc import Iterator
     from wsgiref.types import InputStream, StartResponse, WSGIEnvironment
+
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 _ACCEPTED = Counter[NoAttributes]("test.accepted", Unit.ARTIFACTS, "Counted by a test.")
 
@@ -128,3 +131,26 @@ def test_logs_need_a_newer_sdk_than_metrics_do(
     else:
         with pytest.raises(ValueError, match=r"opentelemetry-sdk>=1\.38"):
             TelemetrySettings()
+
+
+def test_a_log_record_carries_its_spans_ids_in_its_own_fields_and_not_again_as_attributes(
+    collector: _Sink, span_exporter: InMemorySpanExporter
+) -> None:
+    """A collector turns attributes into structured metadata: ids there as well would be stored twice."""
+    del span_exporter  # only so there is a tracer, and so a span to be inside
+    configure_logging()
+
+    with span("work", SpanKind.INTERNAL):
+        structlog.get_logger().info("inside")
+        ids = trace_ids()
+    LOGS.close()
+
+    (record,) = (
+        ExportLogsServiceRequest.FromString(collector.bodies["/v1/logs"])
+        .resource_logs[0]
+        .scope_logs[0]
+        .log_records
+    )
+    assert ids is not None
+    assert (record.trace_id.hex(), record.span_id.hex()) == ids
+    assert {"trace_id", "span_id"}.isdisjoint(a.key for a in record.attributes)

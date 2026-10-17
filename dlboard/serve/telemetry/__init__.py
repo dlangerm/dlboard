@@ -38,7 +38,7 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from structlog.stdlib import get_logger
 
 from dlboard._telemetry import Attributes, PerProcess, attribute
-from dlboard._telemetry.traces import TRACES, sdk_installed
+from dlboard._telemetry.traces import TRACES, own_process, sdk_installed
 from dlboard.serve._settings_env import set_setting_env
 
 if TYPE_CHECKING:
@@ -312,9 +312,13 @@ def instrument_libraries() -> None:
     """
     Trace what this server process's libraries do (the database, S3, a plugin's clients), when tracing is on.
 
+    This is where a dlboard-only process (the server, its blob writer) says so: its tracer joins the process's
+    OpenTelemetry, a platform's included, rather than being private as a training process's is (`own_process`).
+
     Call it once per process, before any store creates its database engine: that is what lets one pass cover every
     engine. See `_instrument`.
     """
+    own_process()
     if (traces := TRACES.get()) is not None:
         try:
             # Deferred: it imports the instrumentation packages, which only the `otel` extra installs.
