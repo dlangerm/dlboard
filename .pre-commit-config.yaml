@@ -124,3 +124,11 @@ repos:
         entry: vale --output=line
         types: [markdown]
         exclude: ^(CLAUDE|CODE_OF_CONDUCT)\.md$
+      - id: one-sentence-per-line
+        # Keeps each sentence of Markdown prose on its own line (see tools/one_sentence_per_line.awk for what counts).
+        # Vale has no such rule in its built-in style, so this is a small awk check instead.
+        name: one sentence per line in the Markdown
+        language: system
+        entry: awk -v mode=check -f tools/one_sentence_per_line.awk
+        types: [markdown]
+        exclude: ^(CLAUDE|CODE_OF_CONDUCT)\.md$

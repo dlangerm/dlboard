@@ -16,9 +16,7 @@ What you expected to happen instead.
 
 ## Steps to reproduce
 
-1.
-2.
-3.
+1. 2. 3.
 
 ## Environment
 

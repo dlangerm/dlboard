@@ -2,17 +2,15 @@
 
 ## What is this
 
-Every dlboard setting is an environment variable. This page lists all of them, grouped by what they
-configure. A test (`dlboard/tests/configuration_docs_test.py`) fails if a setting exists in the code
-but not here, so this list can't fall behind.
+Every dlboard setting is an environment variable.
+This page lists all of them, grouped by what they configure.
+A test (`dlboard/tests/configuration_docs_test.py`) fails if a setting exists in the code but not here, so this list can't fall behind.
 
-The command line only covers how to *run* the server (`--host`, `--port`, `--workers`, ...; see
-`dlboard serve --help`). Everything about a deployment's behavior is an environment variable, which is
-what a container or process manager passes anyway. `uv run --env-file .env dlboard serve ...` reads a
-file of them; [`.env.example`](../.env.example) is a starting point.
+The command line only covers how to *run* the server (`--host`, `--port`, `--workers`, ...; see `dlboard serve --help`).
+Everything about a deployment's behavior is an environment variable, which is what a container or process manager passes anyway.
+`uv run --env-file .env dlboard serve ...` reads a file of them; [`.env.example`](../.env.example) is a starting point.
 
-Names are part of the [compatibility promise](compatibility.md): they don't change within a major
-version line without a deprecation window.
+Names are part of the [compatibility promise](compatibility.md): they don't change within a major version line without a deprecation window.
 
 ## Server
 
@@ -43,8 +41,7 @@ These tune the process that `dlboard serve` runs under (not used by `--debug`).
 | `DLBOARD_HEADER_READ_TIMEOUT_S` | `30` | How long a client may take to send its request headers. Guards against slow-connection attacks. |
 | `DLBOARD_KEEP_ALIVE` | `true` | Keep HTTP/1 connections open between requests. |
 
-Worker and thread counts are `dlboard serve --workers` (default 2) and `--blocking-threads`
-(default 16), not environment variables.
+Worker and thread counts are `dlboard serve --workers` (default 2) and `--blocking-threads` (default 16), not environment variables.
 
 ## Logging
 
@@ -56,10 +53,10 @@ Worker and thread counts are `dlboard serve --workers` (default 2) and `--blocki
 
 ## Telemetry
 
-Off unless you set one of these; a deployment that does not never loads the OpenTelemetry SDK. Needs the `otel`
-extra (`pip install 'dlboard[otel]'`; the Docker image has it). The exporters also read the standard
-`OTEL_*` variables (endpoint, headers, service name, resource attributes, export interval). See
-[telemetry.md](telemetry.md) for the metrics and how to point it at Prometheus, Mimir or Loki.
+Off unless you set one of these; a deployment that does not never loads the OpenTelemetry SDK.
+Needs the `otel` extra (`pip install 'dlboard[otel]'`; the Docker image has it).
+The exporters also read the standard `OTEL_*` variables (endpoint, headers, service name, resource attributes, export interval).
+See [telemetry.md](telemetry.md) for the metrics and how to point it at Prometheus, Mimir or Loki.
 
 | Variable | Default | |
 |---|---|---|
@@ -71,7 +68,8 @@ extra (`pip install 'dlboard[otel]'`; the Docker image has it). The exporters al
 
 ## Authentication
 
-Only matter with an identity-verifying provider such as `PASSWORD_AUTH`. See [auth.md](plugins/auth.md).
+Only matter with an identity-verifying provider such as `PASSWORD_AUTH`.
+See [auth.md](plugins/auth.md).
 
 | Variable | Default | |
 |---|---|---|
@@ -88,7 +86,8 @@ Only matter with an identity-verifying provider such as `PASSWORD_AUTH`. See [au
 
 ## SQLite storage
 
-`LOCAL_STORAGE`, used by `dlboard serve local`. See [storage.md](plugins/storage.md).
+`LOCAL_STORAGE`, used by `dlboard serve local`.
+See [storage.md](plugins/storage.md).
 
 | Variable | Default | |
 |---|---|---|
@@ -104,7 +103,8 @@ Only matter with an identity-verifying provider such as `PASSWORD_AUTH`. See [au
 
 ## Postgres storage
 
-`POSTGRES_STORAGE` and `POSTGRES_S3_STORAGE`. See [storage.md](plugins/storage.md).
+`POSTGRES_STORAGE` and `POSTGRES_S3_STORAGE`.
+See [storage.md](plugins/storage.md).
 
 | Variable | Default | |
 |---|---|---|
@@ -134,7 +134,8 @@ Only matter with an identity-verifying provider such as `PASSWORD_AUTH`. See [au
 
 ## S3 artifact storage
 
-`POSTGRES_S3_STORAGE`; needs the `s3` extra. See [storage.md](plugins/storage.md).
+`POSTGRES_S3_STORAGE`; needs the `s3` extra.
+See [storage.md](plugins/storage.md).
 
 | Variable | Default | |
 |---|---|---|
@@ -155,7 +156,8 @@ Only matter with an identity-verifying provider such as `PASSWORD_AUTH`. See [au
 
 ## Client (training scripts)
 
-Read by `DLBoardLogger` and the REST client in the training process. See [client.md](client.md).
+Read by `DLBoardLogger` and the REST client in the training process.
+See [client.md](client.md).
 
 | Variable | Default | |
 |---|---|---|
@@ -167,13 +169,9 @@ Read by `DLBoardLogger` and the REST client in the training process. See [client
 
 ## Shutting down
 
-On SIGTERM (a deploy, `docker stop`, `systemctl stop`), each worker stops accepting requests, finishes
-the ones in flight, writes every queued artifact blob and records its reference in the database, then
-exits. All of that has to fit in `DLBOARD_WORKERS_KILL_TIMEOUT_S`; whatever doesn't is abandoned with a
-warning, and the client's retry of that upload recovers it.
+On SIGTERM (a deploy, `docker stop`, `systemctl stop`), each worker stops accepting requests, finishes the ones in flight, writes every queued artifact blob and records its reference in the database, then exits.
+All of that has to fit in `DLBOARD_WORKERS_KILL_TIMEOUT_S`; whatever doesn't is abandoned with a warning, and the client's retry of that upload recovers it.
 
-The orchestrator must wait at least that long before it sends SIGKILL. Docker's default is 10 seconds,
-shorter than the default here, so set `docker stop --time` / `stop_grace_period` (the bundled
-`docker-compose.yml` already does) or Kubernetes' `terminationGracePeriodSeconds` to about 5 seconds
-more than `DLBOARD_WORKERS_KILL_TIMEOUT_S`. A server whose artifact writer has died answers uploads with
-`503` and `Retry-After`, which the client treats as temporary.
+The orchestrator must wait at least that long before it sends SIGKILL.
+Docker's default is 10 seconds, shorter than the default here, so set `docker stop --time` / `stop_grace_period` (the bundled `docker-compose.yml` already does) or Kubernetes' `terminationGracePeriodSeconds` to about 5 seconds more than `DLBOARD_WORKERS_KILL_TIMEOUT_S`.
+A server whose artifact writer has died answers uploads with `503` and `Retry-After`, which the client treats as temporary.

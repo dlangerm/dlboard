@@ -16,41 +16,36 @@ uv run pyrefly check                      # type check (strict mode)
 uv run prek run --all-files         # run pre-commit hooks manually
 ```
 
-Run `uv run prek install` once after cloning. Besides the commit checks it links a `reference-transaction` git hook
-(`tools/tag_guard.py`) the first time a commit runs them, which refuses to create a `vX.Y.Z` tag that disagrees with
-`dlboard/_version.py` at the tagged commit -- a pushed release tag is painful to move, so it is caught before one
-exists. It only judges tags you make (`git tag`, `git update-ref`); tags that arrive via `git fetch` or `pull` are never refused. Delete tags rather than moving them; `git tag -d` is always allowed.
+Run `uv run prek install` once after cloning.
+Besides the commit checks it links a `reference-transaction` git hook (`tools/tag_guard.py`) the first time a commit runs them, which refuses to create a `vX.Y.Z` tag that disagrees with `dlboard/_version.py` at the tagged commit -- a pushed release tag is painful to move, so it is caught before one exists.
+It only judges tags you make (`git tag`, `git update-ref`); tags that arrive via `git fetch` or `pull` are never refused.
+Delete tags rather than moving them; `git tag -d` is always allowed.
 
-The pre-commit hooks also run [Vale](https://vale.sh/) over the Markdown files, and it is not a Python package, so
-install the binary yourself, at the version CI pins (3.24.0), and put it on your `PATH`: `vale --version` should
-print `vale version 3.24.0`. CI installs and checksum-verifies the same release. Vale's rules and this repo's
-vocabulary are checked in under `.vale/styles`, so Vale needs no network access once it is installed.
+The pre-commit hooks also run [Vale](https://vale.sh/) over the Markdown files, and it is not a Python package, so install the binary yourself, at the version CI pins (3.24.0), and put it on your `PATH`: `vale --version` should print `vale version 3.24.0`.
+CI installs and checksum-verifies the same release.
+Vale's rules and this repo's vocabulary are checked in under `.vale/styles`, so Vale needs no network access once it is installed.
 
-See [CLAUDE.md](CLAUDE.md) for the fuller set of architecture notes and code-style conventions this
-repo follows -- file layout, the plugin system, test placement, and the rest.
+See [CLAUDE.md](CLAUDE.md) for the fuller set of architecture notes and code-style conventions this repo follows -- file layout, the plugin system, test placement, and the rest.
 
 ## Before you open a PR
 
-- Run the commands above locally first. CI runs the same lint, type-check, and test suites (see
-  `.github/workflows/ci.yml`) and will fail on anything they would have caught.
-- Keep PRs small and focused on one change. A PR that bundles several unrelated things is harder
-  to review and more likely to get bounced back for a split.
-- If a change is naturally a sequence of dependent steps, submit it as a stack of small PRs rather
-  than one large one -- [`gh stack`](https://github.com/gregoryclarkwitten/gh-stack) is a good way
-  to manage that locally.
-- Add tests for new behavior. Favor an end-to-end test that asserts behavior over one that pins
-  implementation details, and don't duplicate coverage another test already provides.
+- Run the commands above locally first.
+  CI runs the same lint, type-check, and test suites (see `.github/workflows/ci.yml`) and will fail on anything they would have caught.
+- Keep PRs small and focused on one change.
+- Write Markdown with one sentence per line.
+  The `one-sentence-per-line` hook checks it.
+  A PR that bundles several unrelated things is harder to review and more likely to get bounced back for a split.
+- If a change is naturally a sequence of dependent steps, submit it as a stack of small PRs rather than one large one -- [`gh stack`](https://github.com/gregoryclarkwitten/gh-stack) is a good way to manage that locally.
+- Add tests for new behavior.
+  Favor an end-to-end test that asserts behavior over one that pins implementation details, and don't duplicate coverage another test already provides.
 
 ## AI-assisted contributions
 
-dlboard's own history includes a fair amount of AI-assisted code (see the README's "AI Usage"
-section) -- so a PR being AI-assisted is not by itself a reason it won't be considered. It does need
-to meet the same bar as a PR you wrote by hand: you understand what it does and why, you can defend
-it in review, and it follows this repo's conventions rather than generic defaults. A PR too large
-for a human reviewer to reasonably follow will be asked to split into a stack, same as any other
-contribution.
+dlboard's own history includes a fair amount of AI-assisted code (see the README's "AI Usage" section) -- so a PR being AI-assisted is not by itself a reason it won't be considered.
+It does need to meet the same bar as a PR you wrote by hand: you understand what it does and why, you can defend it in review, and it follows this repo's conventions rather than generic defaults.
+A PR too large for a human reviewer to reasonably follow will be asked to split into a stack, same as any other contribution.
 
 ## Reporting a bug or requesting a feature
 
-Open an issue using the templates under `.github/ISSUE_TEMPLATE/`. For a security issue, see
-[SECURITY.md](SECURITY.md) instead -- please don't open a public issue for those.
+Open an issue using the templates under `.github/ISSUE_TEMPLATE/`.
+For a security issue, see [SECURITY.md](SECURITY.md) instead -- please don't open a public issue for those.
