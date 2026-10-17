@@ -110,5 +110,9 @@ def test_a_username_taken_by_another_identity_is_refused(store: SQLLiteStore) ->
         (None, "/"),
     ],
 )
-def test_safe_next_path_only_allows_same_site_paths(next_path: str | None, expected: str) -> None:
+def test_safe_next_path_only_allows_same_site_paths(
+    next_path: str | None, expected: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # `relative_path` reads Dash's process-global config, which only exists once some test has built a Dash app.
+    monkeypatch.setattr(_auth, "relative_path", str)
     assert _auth.safe_next_path(next_path) == expected
