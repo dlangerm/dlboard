@@ -132,9 +132,16 @@ def _wait_for_artifacts(experiment_id: int, count: int) -> None:
 
 
 def _auto_generate_charts(page: Page) -> None:
-    """Auto-generate an empty view's charts with the default grouping, confirming the preview."""
+    """
+    Auto-generate an empty view's charts with the default grouping, confirming the preview.
+
+    Returns once the preview modal has closed. The charts appear as the modal starts to fade out, and its
+    backdrop stays over the page until the fade ends -- a pointer that moves onto the chart before then
+    lands on the backdrop, never reaching the chart, so the tests that hover it need the modal gone first.
+    """
     page.get_by_role("button", name="Auto-generate charts").click()
     page.get_by_role("button", name="Create charts").click()
+    expect(page.get_by_role("dialog")).to_have_count(0)
 
 
 def _open_panel_menu(page: Page, index: int = 0) -> None:
