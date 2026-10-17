@@ -4,6 +4,7 @@ A traced server, against the real SDK: a request continues its caller's trace, a
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 import pytest
@@ -165,3 +166,16 @@ def test_the_database_driver_is_traced_only_where_sqlalchemy_is_not(
 
     assert PsycopgInstrumentor().is_instrumented_by_opentelemetry is driver_traced
     assert SQLAlchemyInstrumentor().is_instrumented_by_opentelemetry is not bool(disabled)
+
+
+def test_an_instrumentor_for_a_library_that_is_not_installed_is_skipped_without_an_error_in_the_log(
+    span_exporter: InMemorySpanExporter, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Left to `instrument()`, each of them logs an error, in every worker, for a library nobody was going to use."""
+    del span_exporter  # only so there is a tracer
+    traces = TRACES.get()
+    assert traces is not None
+
+    instrument_libraries(traces)
+
+    assert [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING] == []

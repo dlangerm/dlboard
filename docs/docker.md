@@ -51,6 +51,37 @@ confirming a project and an uploaded artifact were both still there afterward, n
 "it's a volume." It's still a local trial, not a deployment you'd run as-is: `docker compose down
 -v` throws both volumes away on purpose.
 
+### Watching it in Grafana
+
+The same file starts Grafana's all-in-one [`otel-lgtm`](https://github.com/grafana/docker-otel-lgtm) image (an
+OpenTelemetry collector in front of Loki, Grafana, Tempo and Prometheus) and has dlboard send its metrics, logs and traces
+there, so you can see what [telemetry.md](telemetry.md) describes without setting anything up. Open
+<http://localhost:3000> (no sign-in) and use **Explore**: Prometheus for metrics (`http_server_request_duration_seconds`,
+`dlboard_ingest_metric_values_total`), Loki for logs (`{service_name="dlboard"}`), Tempo for traces. A log line's
+`trace_id` takes you to its trace. Metrics are pushed every 60 seconds, so give a new request a minute to show up as one.
+
+The image is large (about 2.7 GB) and keeps nothing across `docker compose down`. It is all four lines of environment on
+the `dlboard` service plus the `lgtm` service itself; delete both to go without:
+
+```yaml
+dlboard:
+  environment:
+    DLBOARD_TELEMETRY_METRICS: otlp          # push metrics (`prometheus` instead serves /metrics to scrape)
+    DLBOARD_TELEMETRY_LOGS: 'true'           # log events over OTLP
+    DLBOARD_TELEMETRY_TRACES: 'true'         # a trace per request, with its SQL and S3 calls
+    OTEL_EXPORTER_OTLP_ENDPOINT: http://lgtm:4318   # the collector's OTLP/HTTP port, not gRPC's 4317
+```
+
+The compose file also publishes the collector's port, so a training script on your machine can send its own half of the
+trace, and the server's spans join it (`pip install 'dlboard-client[otel]'` first):
+
+```bash
+export DLBOARD_TELEMETRY_TRACES=true OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+python train.py
+```
+
+The service name in Tempo is `dlboard` for the server and `dlboard-client` for the script.
+
 Pointed at your own Postgres instead, override that same file's environment (or write your own
 `docker-compose.yml`/Kubernetes manifest): point `DLBOARD_POSTGRES_HOST` at your real database, set a real
 `DLBOARD_SECRET_KEY` (`openssl rand -hex 32`), and either keep mounting a volume at `/data` for

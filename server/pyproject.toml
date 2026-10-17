@@ -61,6 +61,8 @@ requires-python = ">=3.12"
 otel = [
   "opentelemetry-exporter-otlp-proto-http>=1.25",
   "opentelemetry-exporter-prometheus>=0.46b0",
+  # SQLAlchemy's instrumentation imports its asyncio support, which needs greenlet; a slim image has no other reason to have it.
+  "greenlet>=3",
   # Traces (`DLBOARD_TELEMETRY_TRACES`): the server owns its environment, so it uses the contrib instrumentation the
   # client cannot (it pins its exact core release). Each does nothing when its library is not installed.
   "opentelemetry-instrumentation-botocore>=0.46b0",

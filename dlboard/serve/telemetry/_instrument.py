@@ -23,6 +23,7 @@ import importlib.metadata
 import re
 from typing import TYPE_CHECKING, Annotated, Final, Protocol
 
+from opentelemetry.instrumentation.dependencies import get_dependency_conflicts
 from opentelemetry.instrumentation.flask import FlaskInstrumentor
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -31,6 +32,7 @@ from structlog.stdlib import get_logger
 from dlboard.serve._settings_env import set_setting_env
 
 if TYPE_CHECKING:
+    from collections.abc import Collection
     from importlib.metadata import EntryPoint
     from typing import Any
 
@@ -41,6 +43,7 @@ if TYPE_CHECKING:
 _log = get_logger(__name__)
 
 _ENTRY_POINT_GROUP: Final = "opentelemetry_instrumentor"
+_SQLALCHEMY: Final = "sqlalchemy"
 _DRIVERS: Final = frozenset({"psycopg", "psycopg2"})
 """
 Database drivers whose instrumentation traces every statement a second time.
@@ -150,6 +153,8 @@ class _Instrumentor(Protocol):
     @property
     def is_instrumented_by_opentelemetry(self) -> bool: ...
 
+    def instrumentation_dependencies(self) -> Collection[str]: ...
+
     def instrument(self, **kwargs: object) -> None: ...
 
     def uninstrument(self, **kwargs: object) -> None: ...
@@ -160,21 +165,39 @@ def _process_wide() -> list[EntryPoint]:
     return [e for e in importlib.metadata.entry_points(group=_ENTRY_POINT_GROUP) if e.name != _PER_APP]
 
 
+def _library_is_usable(name: str, instrumentor: _Instrumentor) -> bool:
+    """
+    Whether the library `instrumentor` is for is installed, and in a version it supports (or any, for `_ANY_VERSION`).
+
+    Asked here, as `opentelemetry-instrument` does, rather than leaving it to `instrument()`: that logs an error for
+    every instrumentor whose library is not installed, which is most of them, in every worker. Asked of the
+    instrumentor, not its distribution: one distribution can hold several (botocore's holds aiobotocore's too).
+    """
+    conflict = get_dependency_conflicts(instrumentor.instrumentation_dependencies())
+    if conflict is None:
+        return True
+    _log.debug("not instrumenting %s: %s", name, conflict)
+    return conflict.found is not None and name in _ANY_VERSION
+
+
 def instrument_libraries(traces: Traces) -> None:
     """Instrument every installed library that has an instrumentor, once per process."""
     _set_env_defaults()
     disabled = InstrumentationSettings().disabled_instrumentations
-    entry_points = _process_wide()
-    covered = _DRIVERS if "sqlalchemy" in {e.name for e in entry_points} - disabled else frozenset()
-    for entry_point in entry_points:
-        if entry_point.name in disabled | covered:
+    wanted = [e for e in _process_wide() if e.name not in disabled]
+    sqlalchemy_traces = False
+    for entry_point in sorted(
+        wanted, key=lambda e: e.name in _DRIVERS
+    ):  # SQLAlchemy first: drivers depend on it
+        if entry_point.name in _DRIVERS and sqlalchemy_traces:
             continue
         try:
             instrumentor: _Instrumentor = entry_point.load()()
+            if not _library_is_usable(entry_point.name, instrumentor):
+                continue
             if not instrumentor.is_instrumented_by_opentelemetry:
-                instrumentor.instrument(
-                    tracer_provider=traces.provider, skip_dep_check=entry_point.name in _ANY_VERSION
-                )
+                instrumentor.instrument(tracer_provider=traces.provider, skip_dep_check=True)  # checked above
+            sqlalchemy_traces = sqlalchemy_traces or entry_point.name == _SQLALCHEMY
         except Exception:  # noqa: BLE001 -- one library's broken instrumentation must not cost the others, or the server
             _log.warning("could not instrument %s; going on without it", entry_point.name, exc_info=True)
 

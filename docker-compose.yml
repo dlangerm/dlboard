@@ -10,6 +10,15 @@
 #
 # Swap `dlboard-postgres`/`dlboard-artifacts` for your own infrastructure before using this
 # anywhere real. See docs/docker.md -- including "Using an S3 artifact store instead" if you want one.
+#
+# It also runs Grafana's all-in-one `otel-lgtm` image (Loki, Grafana, Tempo and Prometheus behind an
+# OpenTelemetry collector) and has dlboard send its metrics, logs and traces there, so the stack shows what
+# docs/telemetry.md describes: open http://localhost:3000 (no sign-in) and use Explore. The image is large
+# (about 2.7 GB) and its data is not kept across `docker compose down`. To go without it, delete the `lgtm`
+# service, its `depends_on` entry, and the DLBOARD_TELEMETRY_* / OTEL_* variables on `dlboard`.
+# A training script on your machine joins the same traces with:
+#
+#   export DLBOARD_TELEMETRY_TRACES=true OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
 
 services:
   dlboard:
@@ -33,11 +42,39 @@ services:
       # clients on a non-HTTPS origin, which breaks sign-in outright. Never set this to false behind
       # real infrastructure; serve that over HTTPS instead (see docs/docker.md).
       DLBOARD_SECURE_COOKIES: 'false'
+      # Telemetry, all opt-in (docs/telemetry.md): requests, ingest and database metrics, log events, and a
+      # trace per request that continues a training script's. The image already has the `otel` extra.
+      DLBOARD_TELEMETRY_METRICS: otlp
+      DLBOARD_TELEMETRY_LOGS: 'true'
+      DLBOARD_TELEMETRY_TRACES: 'true'
+      # Where all three go: the collector inside `lgtm`, over OTLP/HTTP (4318; dlboard does not speak gRPC, 4317).
+      # The standard OpenTelemetry variable adds /v1/traces, /v1/metrics and /v1/logs itself.
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://lgtm:4318
     volumes:
       - dlboard-artifacts:/data
     depends_on:
       postgres:
         condition: service_healthy
+      # Not needed to run, but dlboard's first exports would otherwise race the collector's startup.
+      lgtm:
+        condition: service_healthy
+
+  lgtm:
+    image: grafana/otel-lgtm:latest
+    ports:
+      - 3000:3000 # Grafana: Explore -> Tempo (traces), Prometheus (metrics), Loki (logs)
+      - 4318:4318 # OTLP/HTTP, for a training script on your machine
+    healthcheck:
+      # The image writes this file once the collector and every backend are up.
+      test: [CMD-SHELL, test -f /tmp/ready]
+      interval: 3s
+      timeout: 3s
+      retries: 60
+    environment:
+      GF_ANALYTICS_REPORTING_ENABLED: false
+      GF_ANALYTICS_CHECK_FOR_UPDATES: false
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: false
+      GF_NEWS_NEWS_FEED_ENABLED: false
 
   postgres:
     image: postgres:16-alpine

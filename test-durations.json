@@ -1239,6 +1239,7 @@
   "dlboard/serve/telemetry/tests/server_traces_test.py::test_a_user_can_keep_urls_out_of_the_traces_with_either_standard_variable[the-flask-variable-replaces-the-generic-one]": 0.6652715620020899,
   "dlboard/serve/telemetry/tests/server_traces_test.py::test_a_user_can_keep_urls_out_of_the_traces_with_either_standard_variable[the-flask-variable]": 0.7619568999998592,
   "dlboard/serve/telemetry/tests/server_traces_test.py::test_a_user_can_keep_urls_out_of_the_traces_with_either_standard_variable[the-generic-variable]": 0.8309470949989191,
+  "dlboard/serve/telemetry/tests/server_traces_test.py::test_an_instrumentor_for_a_library_that_is_not_installed_is_skipped_without_an_error_in_the_log": 0.1374253989997669,
   "dlboard/serve/telemetry/tests/server_traces_test.py::test_only_the_requests_somebody_looks_at_are_traced[a-health-probe]": 0.6659862849996898,
   "dlboard/serve/telemetry/tests/server_traces_test.py::test_only_the_requests_somebody_looks_at_are_traced[the-metric-ingest-route-that-shares-its-name]": 0.7005632319996948,
   "dlboard/serve/telemetry/tests/server_traces_test.py::test_only_the_requests_somebody_looks_at_are_traced[the-prometheus-scrape]": 0.684754439999324,

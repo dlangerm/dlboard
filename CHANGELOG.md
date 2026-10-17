@@ -31,6 +31,9 @@ pulls that section's body into the GitHub release notes and publishes both distr
   `X-Request-Id`, recorded on the span and the log lines (which also gain `trace_id` and `span_id`). The client needs only
   the standard OpenTelemetry SDK and OTLP exporter (1.16 or later, no upper bound) and patches nothing in your training
   process. Bound SQL values and credentials are never recorded. See [docs/telemetry.md](docs/telemetry.md#traces).
+* The **`docker compose` trial now also runs Grafana's `otel-lgtm` image** and sends dlboard's metrics, logs and traces to
+  it, so Grafana at <http://localhost:3000> shows them with no setup. The environment it takes is in
+  [docs/docker.md](docs/docker.md#watching-it-in-grafana).
 
 ### Changed
 
