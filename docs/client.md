@@ -88,6 +88,13 @@ with `DLBoardLoggerSettings` (`metrics_q_size`, `artifact_q_size`, ...) if your 
 enough that this matters; `DLBOARD_CONNECT_TIMEOUT_S`/`DLBOARD_READ_TIMEOUT_S` (defaults 10s/60s)
 cap how long any one request waits before it's treated as failed.
 
+**Tracing.** To see where a slow batch spent its time, install `dlboard-client[otel]` and set
+`DLBOARD_TELEMETRY_TRACES=true` (with the standard `OTEL_EXPORTER_OTLP_ENDPOINT`) in your training environment. Each
+batch the shipping processes send becomes one trace, and a server with tracing on (see [telemetry](telemetry.md#traces))
+continues it through its database and artifact storage. It asks little of the rest of your environment: only the
+standard OpenTelemetry SDK and OTLP exporter, release 1.16 or later with no upper bound, and nothing is patched or made
+the global tracer in your training process. A collector that is down costs spans, never a training step.
+
 **Histograms.** `logger.log_histograms({"grad_norm/layer1": tensor}, step=global_step)` logs the distribution
 of any array, tensor or list of numbers at a step -- per-layer gradient norms, weights, activations, per-sample
 losses -- instead of averaging it into one scalar. The values are binned **in your training process, at the call**,

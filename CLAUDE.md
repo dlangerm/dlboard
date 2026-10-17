@@ -225,6 +225,16 @@ import `opentelemetry` at runtime outside `telemetry/_sdk.py` (and tests): a loc
 provider in a process that goes on to fork, and don't cache SDK objects in module globals. `/metrics` adds up
 every process through snapshot files; see `_prometheus.py` and `docs/telemetry.md`.
 
+Traces (`DLBOARD_TELEMETRY_TRACES`) are the same discipline, in `dlboard/_telemetry/` -- shared with the client, so Python
+3.10 and OpenTelemetry API from the client `otel` extra's floor (1.16) only, enforced by `tools/check_client_tracing.py`
+in CI. `traces.py` is the facade (`span`, `carrier`, `flush`, ...) and, with `_sdk.py`, the only code that may import
+`opentelemetry` there (plus `serve/telemetry/_sdk.py` and `serve/telemetry/_instrument.py`). The client never patches a
+library or installs a global provider -- it is the user's process -- and makes its HTTP spans by hand in
+`BasicDlboardAPI._send`; the server, which dlboard owns, instruments Flask per app and everything else through
+the `opentelemetry_instrumentor` entry points (`serve/telemetry/_instrument.py`). No instrumentation covers a
+`multiprocessing` queue, so a `Carrier` rides in the queued item (`_blob_store.py`) and the consumer continues it with
+`span(..., parent=carrier)`. Never record a bound value, a header or a local variable on a span.
+
 ### Models
 
 `dlboard/models/` holds the Pydantic data models shared between client and server (`Experiment`, `Run`,
