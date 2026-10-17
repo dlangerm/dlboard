@@ -38,7 +38,7 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from structlog.stdlib import get_logger
 
 from dlboard._telemetry import Attributes, PerProcess, attribute
-from dlboard._telemetry.traces import sdk_installed
+from dlboard._telemetry.traces import TRACES, sdk_installed
 from dlboard.serve._settings_env import set_setting_env
 
 if TYPE_CHECKING:
@@ -306,6 +306,34 @@ def register(app: Dash) -> None:
         from dlboard.serve.telemetry._prometheus import serve_metrics
 
         add_public_route(app, "metrics", serve_metrics, ["GET"])
+
+
+def instrument_libraries() -> None:
+    """
+    Trace what this server process's libraries do (the database, S3, a plugin's clients), when tracing is on.
+
+    Call it once per process, before any store creates its database engine: that is what lets one pass cover every
+    engine. See `_instrument`.
+    """
+    if (traces := TRACES.get()) is not None:
+        try:
+            # Deferred: it imports the instrumentation packages, which only the `otel` extra installs.
+            from dlboard.serve.telemetry import _instrument
+
+            _instrument.instrument_libraries(traces)
+        except Exception:  # noqa: BLE001 -- a missing instrumentation package must cost traces, never the server
+            _log.warning("could not instrument the server's libraries; going on without", exc_info=True)
+
+
+def instrument_app(app: Dash) -> None:
+    """Trace the requests `app` serves, when tracing is on: each one continues the caller's trace, if it sent one."""
+    if (traces := TRACES.get()) is not None:
+        try:
+            from dlboard.serve.telemetry import _instrument
+
+            _instrument.instrument_flask(app.server, traces)
+        except Exception:  # noqa: BLE001 -- as above
+            _log.warning("could not trace this server's requests; going on without", exc_info=True)
 
 
 def _one(_item: object) -> int:

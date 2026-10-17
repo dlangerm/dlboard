@@ -158,6 +158,16 @@ class Traces:
             return None
         return trace.format_trace_id(span_context.trace_id), trace.format_span_id(span_context.span_id)
 
+    def annotate(self, attributes: Mapping[str, AttributeValue]) -> None:
+        """Add `attributes` to the span open here."""
+        trace.get_current_span().set_attributes(dict(attributes))
+
+    def fail(self, exc: BaseException) -> None:
+        """Record `exc` on the span open here, and mark it failed."""
+        span = trace.get_current_span()
+        span.record_exception(exc)
+        span.set_status(Status(StatusCode.ERROR, type(exc).__name__))
+
     def flush(self) -> None:
         """Export what has finished, waiting no longer than `_FLUSH_TIMEOUT_MS`."""
         self.provider.force_flush(_FLUSH_TIMEOUT_MS)

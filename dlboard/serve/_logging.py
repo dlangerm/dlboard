@@ -27,10 +27,11 @@ import structlog
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from dlboard._logging import SAFE_TRACEBACK
+from dlboard._telemetry.traces import TraceSettings, trace_ids
 from dlboard.serve.telemetry import TelemetrySettings
 
 if typing.TYPE_CHECKING:
-    from structlog.typing import Processor
+    from structlog.typing import EventDict, Processor
 
 
 class LogFormat(StrEnum):
@@ -56,6 +57,13 @@ class LoggingSettings(BaseSettings):
     proxy or load balancer usually already logs this."""
 
 
+def _add_trace_ids(_logger: object, _method: str, event_dict: EventDict) -> EventDict:
+    """Put the open span's ids on the line, so a log line and the trace of its request find each other."""
+    if (ids := trace_ids()) is not None:
+        event_dict["trace_id"], event_dict["span_id"] = ids
+    return event_dict
+
+
 def _shared_processors() -> list[Processor]:
     """What every event goes through before it is rendered: structlog's own defaults, plus OTLP if it is on."""
     processors: list[Processor] = [
@@ -65,6 +73,8 @@ def _shared_processors() -> list[Processor]:
         structlog.dev.set_exc_info,
         structlog.processors.TimeStamper(fmt="%Y-%m-%d %H:%M:%S", utc=False),
     ]
+    if TraceSettings().traces:
+        processors.append(_add_trace_ids)
     if TelemetrySettings().logs:
         from dlboard.serve.telemetry._sdk import (
             forward_log,

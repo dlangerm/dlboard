@@ -24,7 +24,9 @@ from dlboard._telemetry.traces import (
     TRACES,
     SpanKind,
     TraceKey,
+    annotate_current,
     carrier,
+    fail_current,
     flush,
     name_service,
     span,
@@ -222,3 +224,15 @@ def test_a_process_is_named_in_its_traces_unless_the_user_names_it(
         pass
 
     assert _finished(exported)["work"].resource.attributes["service.name"] == expected
+
+
+def test_a_span_something_else_opened_can_be_annotated_and_failed(exported: InMemorySpanExporter) -> None:
+    with span("library", SpanKind.SERVER):
+        annotate_current(_Where(run=1, experiment=2))
+        fail_current(ValueError("answered with a 500"))
+
+    finished = _finished(exported)["library"]
+    assert finished.attributes is not None
+    assert finished.attributes[TraceKey.RUN_ID] == 1
+    assert finished.status.status_code == StatusCode.ERROR
+    assert [e.name for e in finished.events] == ["exception"]

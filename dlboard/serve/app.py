@@ -82,6 +82,8 @@ def app(plugins: list[models.PluginProtocol], *, url_prefix: str = "") -> Dash:
     from dlboard.serve._pages import _account_page, _simple_admin_page, _simple_homepage, _simple_project_page
     from dlboard.serve._pages import _experiment as _experiment_page
 
+    # Before `Dash(...)` below, whose `plugins` create the stores (and their database engines) -- see `telemetry`.
+    telemetry.instrument_libraries()
     installed = [InstalledPlugin.describe(p) for p in plugins]
     _log.info("DLBoard creating dash app with plugins:")
     for p in installed:
@@ -113,6 +115,8 @@ def app(plugins: list[models.PluginProtocol], *, url_prefix: str = "") -> Dash:
     _health.register(_app)
     # `/metrics`, only if a deployment asked for a Prometheus scrape -- see `telemetry`.
     telemetry.register(_app)
+    # Each request continues the trace of whoever sent it, with the SQL it runs as child spans.
+    telemetry.instrument_app(_app)
     # Every route above (and every plugin route) sits behind this one gate -- see `_auth.py`.
     install_request_gate(_app, lambda: get_system_data_store(_app))
     # A request id on every log line, and the request metrics, for every route (auth included) -- after

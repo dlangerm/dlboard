@@ -22,6 +22,7 @@ from structlog.stdlib import get_logger
 from werkzeug.exceptions import HTTPException, InternalServerError
 
 from dlboard._telemetry import Attributes, attribute
+from dlboard._telemetry.traces import TraceKey, annotate_current, fail_current
 from dlboard._wire import REQUEST_ID_HEADER
 from dlboard.serve._logging import LoggingSettings
 from dlboard.serve.telemetry import AttributeKey, Histogram, Unit, UpDownCounter
@@ -45,6 +46,11 @@ class _ActiveAttributes(Attributes):
 class _RequestAttributes(_ActiveAttributes):
     route: str = attribute(AttributeKey.HTTP_ROUTE)
     status_code: int = attribute(AttributeKey.HTTP_RESPONSE_STATUS_CODE)
+
+
+@dataclass(frozen=True, slots=True)
+class _TracedRequest(Attributes):
+    request_id: str = attribute(TraceKey.REQUEST_ID)
 
 
 _ACTIVE = UpDownCounter[_ActiveAttributes](
@@ -77,7 +83,10 @@ def register(app: Dash) -> None:
 
     @app.server.after_request
     def _finish_request(response: BaseResponse) -> BaseResponse:
-        response.headers[REQUEST_ID_HEADER] = structlog.contextvars.get_contextvars().get("request_id", "")
+        request_id = structlog.contextvars.get_contextvars().get("request_id", "")
+        response.headers[REQUEST_ID_HEADER] = request_id
+        # Here, not in `_start_request`: the request's span is only the current one once Flask's own hooks have run.
+        annotate_current(_TracedRequest(request_id=request_id))
         duration = time.perf_counter() - cast("float", g.dlboard_request_started_at)
         route = request.url_rule.rule if request.url_rule else ""
         _DURATION.record(
@@ -113,6 +122,7 @@ def register(app: Dash) -> None:
         if current_app.debug:
             raise exc
         _log.exception("unhandled error", method=request.method, path=request.path)
+        fail_current(exc)  # answered with a 500 below, so the request's span would never see it
         return InternalServerError()
 
     app.server.errorhandler(Exception)(_log_unhandled_error)
