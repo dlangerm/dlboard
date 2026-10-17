@@ -66,9 +66,15 @@ class ImageChartSettings(BaseModel, frozen=True, extra="forbid", use_attribute_d
         )
 
 
-def _instance_id(parameters: ImageChartSettings) -> str:
-    """Stable id for pattern-matching Dash IDs. See earlier caveat re: collisions on identical configs."""
-    raw = json.dumps(parameters.model_dump(), sort_keys=True)
+def _instance_id(parameters: ImageChartSettings, chart_id: str) -> str:
+    """
+    Stable id for pattern-matching Dash IDs, one per chart *and* per settings.
+
+    The chart's own id is part of it, not just its settings: the editor's preview renders the chart with the very
+    settings it is about to be saved with, and two charts of one config are otherwise the same ids twice. Dash
+    cannot resolve a `MATCH` callback with two components under one id, so each would stop responding.
+    """
+    raw = json.dumps([chart_id, parameters.model_dump()], sort_keys=True)
     return hashlib.shake_256(raw.encode()).hexdigest(8)
 
 
@@ -158,7 +164,7 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
             if has_names:
                 per_run_names[str(rid)] = g[RUN_NAME_COLUMN].iloc[0]
 
-        inst = _instance_id(parameters)
+        inst = _instance_id(parameters, context.chart_id)
         pages = [run_ids[i : i + context.page_size] for i in range(0, len(run_ids), context.page_size)]
 
         # Small logged images (icons, tiny debug crops) get stretched to fill the thumbnail box

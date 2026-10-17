@@ -311,3 +311,16 @@ def test_render_titles_the_chart_with_its_key_and_follows_the_panels_columns_up_
     first_page = _props(children[3])  # pyrefly: ignore [unknown-argument-type]
     assert first_page["id"]["page"] == 0
     assert first_page["cols"] == columns
+
+
+def test_the_same_settings_under_different_chart_ids_get_different_component_ids() -> None:
+    """The editor's preview and the saved chart have the same settings; sharing ids broke the saved chart's callbacks."""
+    settings = ImageChartSettings(key="img")
+
+    def store_instance(chart_id: str) -> str:
+        stack = ImageChart.render_in(settings, _artifacts_df(n_runs=1), RenderContext(chart_id=chart_id))
+        store = next(c for c in _props(stack)["children"] if "per_run_steps" in (_props(c).get("data") or {}))
+        return _props(store)["id"]["instance"]
+
+    assert store_instance("preview") != store_instance("saved")
+    assert store_instance("saved") == store_instance("saved")
