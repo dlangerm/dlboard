@@ -33,7 +33,7 @@ See [CLAUDE.md](CLAUDE.md) for the fuller set of architecture notes and code-sty
   CI runs the same lint, type-check, and test suites (see `.github/workflows/ci.yml`) and will fail on anything they would have caught.
 - Keep PRs small and focused on one change.
 - Write Markdown with one sentence per line.
-  The `one-sentence-per-line` hook checks it.
+  The `markdownlint-cli2` hook checks it.
   A PR that bundles several unrelated things is harder to review and more likely to get bounced back for a split.
 - If a change is naturally a sequence of dependent steps, submit it as a stack of small PRs rather than one large one -- [`gh stack`](https://github.com/gregoryclarkwitten/gh-stack) is a good way to manage that locally.
 - Add tests for new behavior.

@@ -1,0 +1,9 @@
+{
+  // Only the sentence rule is on. The other markdownlint rules would flag how the existing prose and tables are written,
+  // which is not what this check is for.
+  "config": {
+    "default": false,
+    "markdownlint-sentences-per-line": true
+  },
+  "customRules": ["markdownlint-sentences-per-line"]
+}

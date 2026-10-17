@@ -34,7 +34,8 @@ docker compose exec dlboard \
 ```
 
 It builds the image and brings up a Postgres container alongside it — nothing else to configure first.
-Both of its volumes (`dlboard-postgres`, `dlboard-artifacts`) genuinely persist across `docker compose down`/`up` (no `-v`); that was checked by actually restarting the stack and confirming a project and an uploaded artifact were both still there afterward, not assumed from "it's a volume." It's still a local trial, not a deployment you'd run as-is: `docker compose down -v` throws both volumes away on purpose.
+Both of its volumes (`dlboard-postgres`, `dlboard-artifacts`) genuinely persist across `docker compose down`/`up` (no `-v`); that was checked by actually restarting the stack and confirming a project and an uploaded artifact were both still there afterward, not assumed from "it's a volume."
+It's still a local trial, not a deployment you'd run as-is: `docker compose down -v` throws both volumes away on purpose.
 
 Pointed at your own Postgres instead, override that same file's environment (or write your own `docker-compose.yml`/Kubernetes manifest): point `DLBOARD_POSTGRES_HOST` at your real database, set a real `DLBOARD_SECRET_KEY` (`openssl rand -hex 32`), and either keep mounting a volume at `/data` for artifacts or switch to S3 (below).
 

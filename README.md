@@ -136,7 +136,8 @@ uv run prek run --all-files         # run pre-commit hooks manually
   - [Upgrading](docs/upgrading.md) and [Backup & restore](docs/backup.md)
   - [Compatibility](docs/compatibility.md) — what's stable across releases and what may still change
 - **Plugins** — dlboard has no built-in opinions about storage, auth, charts, or theming; all of it is plugins.
-  (Page layout is the one deliberate exception — see [architecture.md](docs/architecture.md).) Start with the [overview](docs/plugins/overview.md), then the category you need:
+  (Page layout is the one deliberate exception — see [architecture.md](docs/architecture.md).)
+Start with the [overview](docs/plugins/overview.md), then the category you need:
   - [Storage](docs/plugins/storage.md) — where projects/runs/metrics and artifact blobs live
   - [Charts](docs/plugins/charts.md) — how a metric/artifact gets turned into a rendered chart
   - [Auth](docs/plugins/auth.md) — signing people in, API tokens, and who can see which projects
