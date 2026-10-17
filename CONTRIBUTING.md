@@ -21,17 +21,17 @@ Run `uv run prek install` once after cloning. Besides the commit checks it links
 `dlboard/_version.py` at the tagged commit -- a pushed release tag is painful to move, so it is caught before one
 exists. It only judges tags you make (`git tag`, `git update-ref`); tags that arrive via `git fetch` or `pull` are never refused. Delete tags rather than moving them; `git tag -d` is always allowed.
 
-The pre-commit hooks also run [Vale](https://vale.sh/) over the Markdown docs, and it is not a Python package, so
+The pre-commit hooks also run [Vale](https://vale.sh/) over the Markdown files, and it is not a Python package, so
 install the binary yourself, at the version CI pins (3.24.0), and put it on your `PATH`: `vale --version` should
-print `vale version 3.24.0`. CI installs and checksum-verifies the same release. The styles are checked in under
-`.vale/styles`, so Vale needs no network access once it is installed.
+print `vale version 3.24.0`. CI installs and checksum-verifies the same release. Vale's rules and this repo's
+vocabulary are checked in under `.vale/styles`, so Vale needs no network access once it is installed.
 
 See [CLAUDE.md](CLAUDE.md) for the fuller set of architecture notes and code-style conventions this
 repo follows -- file layout, the plugin system, test placement, and the rest.
 
 ## Before you open a PR
 
-- Run the commands in this guide locally first. CI runs the same lint, type-check, and test suites (see
+- Run the commands above locally first. CI runs the same lint, type-check, and test suites (see
   `.github/workflows/ci.yml`) and will fail on anything they would have caught.
 - Keep PRs small and focused on one change. A PR that bundles several unrelated things is harder
   to review and more likely to get bounced back for a split.
@@ -43,7 +43,7 @@ repo follows -- file layout, the plugin system, test placement, and the rest.
 
 ## AI-assisted contributions
 
-dlboard's own history includes a fair amount of AI-assisted code (see the README's "AI usage"
+dlboard's own history includes a fair amount of AI-assisted code (see the README's "AI Usage"
 section) -- so a PR being AI-assisted is not by itself a reason it won't be considered. It does need
 to meet the same bar as a PR you wrote by hand: you understand what it does and why, you can defend
 it in review, and it follows this repo's conventions rather than generic defaults. A PR too large

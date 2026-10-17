@@ -4,7 +4,7 @@
 
 dlboard is a single Dash web app assembled at startup from a flat list of **plugins** — storage,
 charts, auth, theming, backend routes. The core app just gives plugins a few places to hook into a
-running `Dash` instance. Page layout (home, project, `admin`, experiment, account) is the one deliberate
+running `Dash` instance. Page layout (home, project, admin, experiment, account) is the one deliberate
 exception: it's opinionated, non-optional dlboard behavior, not a plugin category — see
 [plugins/overview.md](plugins/overview.md) for why.
 
@@ -29,7 +29,7 @@ plus a theme.
 **Where plugins reach shared state.** A plugin's `plug(app)` registers whatever it needs — routes,
 a chart renderer, the data store — directly on the `Dash` app instance. Anything another
 plugin needs to read back (the data store, the artifact store, the auth provider, the current
-user) goes through small accessor functions in `dlboard/serve/_backend/` (for example
+user) goes through small accessor functions in `dlboard/serve/_backend/` (e.g.
 `get_data_store()`, `get_auth_provider()`, `get_current_user()`) rather than plugins reaching into
 each other directly. See [plugins/overview.md](plugins/overview.md) for the plugin contract itself.
 
@@ -45,7 +45,7 @@ background work no user is behind uses `get_system_data_store()` instead. See
    (`dlboard/plugins/backend/basic_rest_backend.py`) and spawns two daemon subprocesses that batch
    metrics/artifacts off multiprocessing queues and flush them to the REST API on an interval, so
    training never blocks on network I/O.
-2. The server-side half of `basic_rest_backend` exposes the upload routes those batches land on.
+2. The server-side half of `basic_rest_backend` exposes the ingest routes those batches land on.
 3. Storage is split into a `DataStore` (structured metadata — projects, experiments, runs, metrics,
    hparams) and an `ArtifactStore` (blob storage), both defined as generic protocols in
    `dlboard/models/_data_store.py`. `SQLStoreBase` (`dlboard/serve/_backend/_sql_store_base.py`)

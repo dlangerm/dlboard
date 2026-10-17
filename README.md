@@ -9,7 +9,7 @@
 
 Browse experiments side-by-side, compare metrics across runs, track hyperparameters, and log artifacts — all without leaving your infrastructure. dlboard is a modern web UI built on Dash/Dash-Mantine, with a PyTorch Lightning logger client that ships metrics and artifacts to your server over a REST API.
 
-## Quick start
+## Quick Start
 
 ### 1. Install
 
@@ -63,7 +63,7 @@ Every metric, hyperparameter, and artifact you log gets synced to dlboard in the
 - **Light & dark mode** — built with Dash-Mantine for a modern UI
 - **Lightweight client** — the Python client has minimal dependencies (no torch required unless you use Lightning)
 
-## See it in action
+## See It In Action
 
 **Compare runs side-by-side** — Filter, sort, and compare runs without losing context:
 
@@ -124,7 +124,7 @@ uv run pyrefly check                      # type check
 uv run prek run --all-files         # run pre-commit hooks manually
 ```
 
-## Learn more
+## Learn More
 
 - [Architecture](docs/architecture.md) — how the app is put together: the plugin system, and the
   request flow from a training script to the browser.
@@ -156,11 +156,11 @@ The project follows these principles:
 - **AI-generated code is welcome** — but hold it to the same standard as hand-written code
 - **Keep it small** — large features are split into reviewable stacks
 
-## AI usage
+## AI Usage
 
 I started dlboard as a personal project coded by yours truly. As I went down the rabbit hole of implementation I realized
 I was spending a _ton_ of time twiddling with webdev instead of actually doing useful work. At some level, experiment
-tracker libraries live and die by their browser experience and their offered feature set. I set out to make a free, open source
+tracker libraries live and die by their browser experience and their offered feature set. I set out to make a free, open-source
 tool that I actually wanted to use for my own projects. Making something I actually wanted to use became a behemoth of
 wiring up dash app components in ways that were efficient and made sense. So, I decided that it'd be better to get an app
 out the door into hands of users than it would be to do everything by hand.
@@ -170,6 +170,6 @@ down the line? Yeah, it does. However, I remain a healthy skeptic of AI generate
 can review and understand. That means contributors to this library need to hold their tools to a high standard and follow
 best practices for submitting PRs and features just like you would if you had coded it yourself.
 
-**In short**
+tl;dr
 Can I submit AI vibe-coded-PRs for plugins I want that I think are useful to the community? Yes you can.
 Will I give serious reviews and (if they're too big) ask you to split features up into a stack up so I can review them properly? Also yes.

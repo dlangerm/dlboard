@@ -65,7 +65,7 @@ not something specific to dlboard.
 
 **How a run ends.** Lightning finalizes the logger when a stage finishes: `"success"` records the run as
 *finished* and `"failed"` as *failed*, with the time it ended (stamped by your machine, like the run's start,
- so the duration never mixes two clocks). The runs table shows it as "running", `3m 23s`, `2d 3h` or `✕ 1h 2m` next to
+ so the duration never mixes two clocks). The runs table shows it as "running", "3m 23s", "2d 3h" or "✕ 1h 2m" next to
 the run. A later stage (`trainer.test` after `fit`) moves the end time later. A script that exits without Lightning
 finalizing the logger (an exception outside the trainer, say) is recorded as *unknown* -- ended, but not known how.
 A process that is killed outright (`kill -9`, the OOM killer) can't say anything, so its run stays *running*. A
@@ -85,7 +85,7 @@ a failure with exponential backoff rather than hammering a server that's still d
 fills faster than it can drain, the oldest-queued item is dropped (not blocked on), with a
 rate-limited warning while it keeps happening and a final count at `finalize()`. Size the buffers
 with `DLBoardLoggerSettings` (`metrics_q_size`, `artifact_q_size`, ...) if your logging rate is high
-enough that this matters; `DLBOARD_CONNECT_TIMEOUT_S`/`DLBOARD_READ_TIMEOUT_S` (defaults 10 seconds and 60 seconds)
+enough that this matters; `DLBOARD_CONNECT_TIMEOUT_S`/`DLBOARD_READ_TIMEOUT_S` (defaults 10s/60s)
 cap how long any one request waits before it's treated as failed.
 
 **Histograms.** `logger.log_histograms({"grad_norm/layer1": tensor}, step=global_step)` logs the distribution
@@ -214,7 +214,7 @@ There are five built-in kinds:
   ```
 
 - `dlboard.client.artifacts.link.Link` — links. For a blob a training job already wrote
-  somewhere dlboard's `ArtifactStore` can serve (for example the same S3 bucket), without shipping the
+  somewhere dlboard's `ArtifactStore` can serve (e.g. the same S3 bucket), without shipping the
   bytes through dlboard a second time:
 
   ```python
@@ -226,7 +226,7 @@ There are five built-in kinds:
 
 **Adding a new artifact kind.** Note this is a *client-side* protocol, not a `PluginProtocol`
 plugin — there's no `plug()`, and it's never passed into `app()`. Implement `AnyArtifact`
-(the four members listed earlier) for whatever you're logging — a plot, a model checkpoint, a text blob —
+(the four members above) for whatever you're logging — a plot, a model checkpoint, a text blob —
 and pass instances of it to `log_artifact` the same way. The server stores it as an opaque blob
 plus whatever metadata `to_artifact` put in the `NewArtifact`; if you also want a dedicated way to
 *render* that kind of artifact, pair it with a [chart plugin](plugins/charts.md) — see

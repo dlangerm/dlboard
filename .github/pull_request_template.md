@@ -13,5 +13,5 @@ Please select all that apply.
 
 ## Test instructions
 
-- Please add relevant commands required to reproduce the testing described earlier
+- Please add relevant commands required to reproduce the testing described above
 - Please add relevant test outputs (screenshots, logs, etc.)

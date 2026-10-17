@@ -68,7 +68,7 @@ settings table).
 | `DLBOARD_POSTGRES_HOST` | yes | Also `_PORT` (5432), `_DATABASE` (`dlboard`), `_USER` (`dlboard`), `_PASSWORD`. |
 | `DLBOARD_ARTIFACT_STORE_LOCATION` | no | Where artifact blobs land inside the container. Defaults to `/data/artifacts` — mount a volume at `/data` to persist them. |
 | `DLBOARD_SECRET_KEY` | yes | Signs session cookies for the password auth plugin this image runs. A missing one is a startup error, not a silent fall-through to anonymous access — generate one with `openssl rand -hex 32`. |
-| `DLBOARD_ADMIN_USERS` | no | Comma-separated usernames made administrator whenever they sign in — the alternative to creating the first administrator by hand (below). |
+| `DLBOARD_ADMIN_USERS` | no | Comma-separated usernames made admin whenever they sign in — the alternative to creating the first admin by hand (below). |
 | `DLBOARD_MAX_UPLOAD_MB` | no | Hard cap on any single request body, mainly artifact uploads. Defaults to 256. |
 | `DLBOARD_TELEMETRY_METRICS` | no | `prometheus` to serve `/metrics`, `otlp` to push to a collector, or both -- the image has the `otel` extra. See [telemetry.md](telemetry.md). |
 
@@ -79,24 +79,24 @@ sets `DLBOARD_SECURE_COOKIES=false` for exactly this reason, since it's plain HT
 it at its default (`true`) everywhere else (see [auth.md](plugins/auth.md) for rate-limiting
 `/login` too).
 
-## Creating the first administrator
+## Creating the first admin
 
 Without a shell (a NAS or hosting UI that only shows you logs):
 
 1. Start the container with `DLBOARD_PASSWORD_FIRST_ADMIN_SETUP=true`.
 2. Open `/setup` on your server, for example `https://dlboard.example.com/setup`. Opening it writes a
    setup token to the container log (`First-admin setup is open. Setup token: ...`).
-3. Enter that token along with a username and password. You're signed in as an administrator.
+3. Enter that token along with a username and password. You're signed in as an admin.
 4. Remove `DLBOARD_PASSWORD_FIRST_ADMIN_SETUP` (or set it to `false`). The container won't start again
    with it still on, since the database now has users.
 
 `/setup` is off unless you set that variable, and even then it only works while the database has no users
-at all. Once anyone exists it returns 404 for good, even if every administrator is later demoted. Create the administrator
+at all. Once anyone exists it returns 404 for good, even if every admin is later demoted. Create the admin
 before you share the address: anyone who can read the container log in that window could do it first. If
 `DLBOARD_PASSWORD_SIGNUP` lets people sign up, the first sign-up also closes `/setup`, and you'd use the
 command below instead.
 
-From a shell, you can also create the administrator directly:
+From a shell, you can also create the admin directly:
 
 ```bash
 docker run --rm -it --env-file .env dlboard \
@@ -104,7 +104,7 @@ docker run --rm -it --env-file .env dlboard \
 ```
 
 `--env-file .env` needs the same `DLBOARD_POSTGRES_*` variables as the running container, since this writes
-to the same database. After that, administrators can add more users and reset passwords from the Users tab of the administrator page
+to the same database. After that, admins can add more users and reset passwords from Admin → Users
 in the app itself — see [auth.md](plugins/auth.md).
 
 ## Authenticating a training script
@@ -113,7 +113,7 @@ Password sign-in means `dlboard serve local`'s "no key needed" shortcut doesn't 
 training script is a separate caller from your browser session, and it authenticates the way
 [client.md](client.md) describes for any signed-in deployment:
 
-1. Sign in at `http://localhost:8050` (or wherever you exposed it) with the user you created earlier.
+1. Sign in at `http://localhost:8050` (or wherever you exposed it) with the user you created above.
 2. Create an API token on that user's Account page.
 3. Wherever `DLBoardLogger` runs, set `DLBOARD_API_KEY` to that token and point it at the server:
 
@@ -165,7 +165,7 @@ sidesteps both and is just as real a storage choice for a small deployment.
 
 More generally, the image's `ENTRYPOINT`/`CMD` just runs `dlboard serve custom --plugins
 dlboard.scripts.docker_deployment:PLUGINS --host 0.0.0.0` — override either to run your own
-`PLUGINS` module (a different auth provider, a different theme, S3 as described earlier) the same way:
+`PLUGINS` module (a different auth provider, a different theme, S3 as above) the same way:
 
 ```dockerfile
 FROM dlboard
@@ -199,7 +199,7 @@ release's worth of use; see [compatibility.md](compatibility.md) before pointing
 `.github/workflows/ci.yml` pushes `latest`/`beta`/`sha-*` once its `test` job passes on `main` (a PR
 only gets the build-only `docker-build` check). Pushing a `vX.Y.Z`
 tag runs `.github/workflows/release.yml`, which publishes `dlboard-client`/`dlboard` to PyPI and then the
-release tags listed earlier.
+release tags above.
 
 See [CHANGELOG.md](../CHANGELOG.md) for what each release contains, and the repo's GitHub Releases
 page for the full tag history.

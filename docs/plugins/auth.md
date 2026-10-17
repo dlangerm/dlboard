@@ -26,7 +26,7 @@ Built-in providers:
   team's) projects: deploy with `PASSWORD_AUTH` (below).
 - Your organization already has an identity provider (Okta, Entra ID, Google, Keycloak, ...):
   write a provider for it (below). An OIDC provider and a "trusted reverse-proxy header" provider
-  (for <!-- vale Google.WordListCase = NO -->oauth2-proxy<!-- vale Google.WordListCase = YES -->, Pomerium, an AWS ALB, Cloudflare Access) are the planned next built-ins; the
+  (for oauth2-proxy, Pomerium, an AWS ALB, Cloudflare Access) are the planned next built-ins; the
   pieces they need (`Principal.groups`, group grants, `DLBOARD_ADMIN_GROUPS`) are already in place.
 
 ## How it works
@@ -61,12 +61,12 @@ their project:
 A role comes from a grant to a user, a grant to an IdP group, or the project's `everyone_role`
 ("everyone signed in can view/edit"). Whoever creates a project owns it. Something you can't see
 reads as missing, exactly like something that doesn't exist. Site-wide powers are `Scope`s on the
-user: restore, purge, the audit log, and `user:manage`. An administrator (`Scope.ALL`) is an owner
+user: restore, purge, the audit log, and `user:manage`. An admin (`Scope.ALL`) is an owner
 everywhere.
 
 Under `anonymous`, grants aren't enforced: everyone is an editor everywhere, and deleting still
-takes the scope it always has. The first user `anonymous` ever sees becomes the administrator. A provider
-that verifies identity never does that; its administrators come from configuration instead.
+takes the scope it always has. The first user `anonymous` ever sees becomes the admin. A provider
+that verifies identity never does that; its admins come from configuration instead.
 
 ## Hosting dlboard for other people (`PASSWORD_AUTH`)
 
@@ -88,30 +88,30 @@ rate-limits `/login`. The provider's own throttle is per username, per worker pr
 
 Without a shell, set `DLBOARD_PASSWORD_FIRST_ADMIN_SETUP=true` for the first start instead. Then open
 `/setup`, which logs a setup token derived from `DLBOARD_SECRET_KEY` so every worker agrees on it, and
-enter that token to create the administrator. Turn the setting back off afterwards. If it's still on once the
+enter that token to create the admin. Turn the setting back off afterwards. If it's still on once the
 database has users, the server refuses to start until you turn it off.
 
 The setting is off by default, and even when it's on, `/setup` only works while the database has no users
-at all. Once any user exists, `/setup` returns 404 for good. Demoting every administrator doesn't reopen it, and
+at all. Once any user exists, `/setup` returns 404 for good. Demoting every admin doesn't reopen it, and
 neither does relying on `DLBOARD_ADMIN_USERS`. Anyone who can read the server log during that first window
-could create the administrator first, so do it before sharing the address.
+could create the admin first, so do it before sharing the address.
 
 | Setting | Default | |
 |---|---|---|
 | `DLBOARD_SECRET_KEY` | — (required) | Signs session cookies. Startup fails without it. |
-| `DLBOARD_ADMIN_USERS` | none | Comma-separated usernames made administrator whenever they sign in. |
-| `DLBOARD_ADMIN_GROUPS` | none | Comma-separated IdP groups whose members are made administrators. |
+| `DLBOARD_ADMIN_USERS` | none | Comma-separated usernames made admin whenever they sign in. |
+| `DLBOARD_ADMIN_GROUPS` | none | Comma-separated IdP groups whose members are made admin. |
 | `DLBOARD_NEW_PROJECT_ACCESS` | unset (private) | `viewer`/`editor`: what everyone signed in gets on a new project. |
 | `DLBOARD_SESSION_LIFETIME_HOURS` | 336 | How long a browser stays signed in. |
 | `DLBOARD_SECURE_COOKIES` | `true` | Turn off only for plain-HTTP testing. |
-| `DLBOARD_PASSWORD_SIGNUP` | `admin_creates` | `approval` (sign up, then an administrator enables you) or `open`. |
+| `DLBOARD_PASSWORD_SIGNUP` | `admin_creates` | `approval` (sign up, then an admin enables you) or `open`. |
 | `DLBOARD_PASSWORD_MIN_LENGTH` | 12 | |
-| `DLBOARD_PASSWORD_FIRST_ADMIN_SETUP` | `false` | Serve `/setup` for the first administrator (described earlier). Startup fails if it's on and the database already has users. |
+| `DLBOARD_PASSWORD_FIRST_ADMIN_SETUP` | `false` | Serve `/setup` for the first admin (above). Startup fails if it's on and the database already has users. |
 
 The rest happens in the app:
 
-- Administrators add users and reset passwords from the Users tab of the administrator page. They can also turn users off and grant
-  administrator there.
+- Admins add users and reset passwords from Admin → Users. They can also disable users and grant
+  admin there.
 - Project owners share a project from its page's Sharing section.
 - Everyone creates API tokens for their training scripts on their Account page, then sets
   `DLBOARD_API_KEY` wherever `DLBoardLogger` runs (see [client.md](../client.md)).
