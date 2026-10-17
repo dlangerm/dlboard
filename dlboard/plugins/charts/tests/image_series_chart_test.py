@@ -384,3 +384,16 @@ def test_the_layers_are_charted_with_the_image_and_edited_as_a_table() -> None:
 def test_a_layers_opacity_is_a_fraction() -> None:
     with pytest.raises(ValidationError):
         OverlayLayer.model_validate({"opacity": 1.5})
+
+
+def test_the_same_settings_under_different_chart_ids_get_different_component_ids() -> None:
+    """The editor's preview and the saved chart have the same settings; sharing ids broke the saved chart's callbacks."""
+    settings = ImageChartSettings(key="img")
+
+    def store_instance(chart_id: str) -> str:
+        stack = ImageChart.render_in(settings, _artifacts_df(n_runs=1), RenderContext(chart_id=chart_id))
+        store = next(c for c in _props(stack)["children"] if "per_run_steps" in (_props(c).get("data") or {}))
+        return _props(store)["id"]["instance"]
+
+    assert store_instance("preview") != store_instance("saved")
+    assert store_instance("saved") == store_instance("saved")

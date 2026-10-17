@@ -31,6 +31,10 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ### Fixed
 
+* **An image chart keeps working after you edit it.** Its slider and enlarged view used to stop responding until the
+  page was reloaded, because the chart editor's preview rendered the chart under the very ids the saved chart got, and
+  Dash cannot resolve a callback with two components under one id. A chart's ids now include its own id, so the preview,
+  the saved chart, and two charts of one config no longer collide.
 * A run's default name is no longer the same for every run a **seeded training script** starts. Names were drawn from the
   global `random` module, so `seed_everything` gave each run the same name, and naming a run also shifted the script's
   own random draws. Names are now drawn from the OS.

@@ -2245,6 +2245,45 @@ def test_a_scrubbed_thumbnail_shows_a_spinner_until_its_new_step_has_loaded(
     expect(thumb).not_to_have_attribute("data-dl-loading", "")
 
 
+def test_an_edited_image_chart_still_scrubs_and_opens_its_enlarged_view(
+    page: Page, live_server_url: str, tmp_path: Path
+) -> None:
+    """
+    The editor's preview renders the chart under the very ids the saved chart gets. Left in the page, it made Dash
+    unable to resolve the saved chart's callbacks, so its slider and enlarged view died until the page was reloaded.
+    """
+    _create_project_and_experiment(page, live_server_url, "Edited Image Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    api = BasicDlboardAPI(live_server_url)
+    run = api.create_run(models.NewRun(experiment_id=experiment_id))
+    api.log_artifact_batch(
+        [
+            Image(key="samples/a", image=np.zeros((8, 8, 3), dtype=np.uint8), step=step).to_artifact(
+                tmp_path, run.id, experiment_id
+            )
+            for step in (0, 10)
+        ]
+    )
+    _wait_for_artifacts(experiment_id, 2)
+    page.reload()
+    _auto_generate_charts(page)
+
+    chart = page.locator(".dl-chart-item")
+    chart.hover()
+    chart.get_by_role("button", name="Edit chart").click()
+    page.locator(f"#{ADD_CHART_SUBMIT_ID}").click()
+    expect(page.get_by_role("dialog")).to_be_hidden()
+
+    picture = chart.locator(".dl-image-series-thumb img")
+    before = picture.get_attribute("src")
+    page.get_by_role("slider").focus()
+    page.keyboard.press("ArrowRight")
+    expect(picture).not_to_have_attribute("src", before or "")
+    chart.locator(".dl-image-series-thumb").click()
+    expect(page.get_by_role("dialog")).to_be_visible()
+
+
 _OVERLAY_COVERS_PICTURE_JS = """(layer) => {
     const picture = layer.parentElement?.querySelector("img")?.getBoundingClientRect();
     const drawn = layer.querySelector("svg, img")?.getBoundingClientRect();
