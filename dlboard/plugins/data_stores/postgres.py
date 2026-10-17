@@ -120,6 +120,7 @@ class PostgresStore(SQLStoreBase[PostgresSettings]):
             # Every connection parameter goes through `connect_args` -- never into the URL, which
             # would put the password in every `repr` of the engine.
             "postgresql+psycopg://",
+            hide_parameters=True,  # a failing statement's error text must not carry the values bound into it
             connect_args=settings.libpq_connect_args(),
             pool_size=settings.pool_size,
             max_overflow=settings.max_overflow,
