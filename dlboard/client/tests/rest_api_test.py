@@ -50,6 +50,8 @@ def test_create_project_sends_the_user_header(monkeypatch: pytest.MonkeyPatch) -
     captured: dict[str, Any] = {}
 
     class _FakeResponse:
+        status_code = 200
+
         def raise_for_status(self) -> None:
             return
 
@@ -64,19 +66,21 @@ def test_create_project_sends_the_user_header(monkeypatch: pytest.MonkeyPatch) -
                 "deleted_at": None,
             }
 
-    def fake_post(
+    def fake_request(
+        _method: str,
         _url: str,
         *,
         json: dict[str, Any],
+        files: object = None,
         headers: dict[str, str] | None = None,
         timeout: tuple[float, float] | None = None,
     ) -> _FakeResponse:
-        del timeout
+        del timeout, files
         captured["headers"] = headers
         return _FakeResponse()
 
     api = backend.BasicDlboardAPI()
-    monkeypatch.setattr(api._session, "post", fake_post)
+    monkeypatch.setattr(api._session, "request", fake_request)
 
     api.create_project(models.NewProject(name="p", description="d"))
 
@@ -113,12 +117,19 @@ def test_client_sends_a_timeout_on_every_request(monkeypatch: pytest.MonkeyPatch
         def json(self) -> dict[str, Any]:
             return {"id": 1, "username": "me", "server_version": "0.0.0", "api_version": backend.API_VERSION}
 
-    def fake_get(_url: str, *, headers: dict[str, str] | None = None, timeout: Any = None) -> _FakeResponse:  # noqa: ANN401
+    def fake_request(
+        _method: str,
+        _url: str,
+        *,
+        headers: dict[str, str] | None = None,
+        timeout: Any = None,  # noqa: ANN401
+        **_kwargs: Any,  # noqa: ANN401
+    ) -> _FakeResponse:
         captured["timeout"] = timeout
         return _FakeResponse()
 
     api = backend.BasicDlboardAPI()
-    monkeypatch.setattr(api._session, "get", fake_get)
+    monkeypatch.setattr(api._session, "request", fake_request)
 
     api.whoami()
 
@@ -157,11 +168,11 @@ def test_finish_run_reports_how_a_run_ended_and_tolerates_a_server_that_cannot_r
     api = backend.BasicDlboardAPI(base_url="http://host:1")
     sent: dict[str, Any] = {}
 
-    def _post(url: str, **kwargs: Any) -> _Reply:  # noqa: ANN401
+    def _request(_method: str, url: str, **kwargs: Any) -> _Reply:  # noqa: ANN401
         sent.update(url=url, json=kwargs["json"])
         return _Reply(status_code)
 
-    monkeypatch.setattr(api._session, "post", _post)
+    monkeypatch.setattr(api._session, "request", _request)
 
     with pytest.raises(requests.HTTPError) if raises else contextlib.nullcontext():
         api.finish_run(7, models.RunStatus.FAILED)
@@ -176,11 +187,11 @@ def test_finish_run_sends_the_end_time_it_is_given(monkeypatch: pytest.MonkeyPat
     api = backend.BasicDlboardAPI(base_url="http://host:1")
     sent: dict[str, Any] = {}
 
-    def _post(url: str, **kwargs: Any) -> _Reply:  # noqa: ANN401
+    def _request(_method: str, url: str, **kwargs: Any) -> _Reply:  # noqa: ANN401
         sent.update(url=url, json=kwargs["json"])
         return _Reply(200)
 
-    monkeypatch.setattr(api._session, "post", _post)
+    monkeypatch.setattr(api._session, "request", _request)
 
     api.finish_run(7, models.RunStatus.FINISHED, ended_at=pendulum.datetime(2026, 1, 1, 12, 30, tz="UTC"))
 
@@ -200,10 +211,10 @@ def test_a_failed_request_names_the_servers_request_id_so_its_log_line_can_be_fo
     api = backend.BasicDlboardAPI(base_url="http://host:1")
     reply = _Reply(500, headers)
 
-    def _post(_url: str, **_kwargs: Any) -> _Reply:  # noqa: ANN401
+    def _request(_method: str, _url: str, **_kwargs: Any) -> _Reply:  # noqa: ANN401
         return reply
 
-    monkeypatch.setattr(api._session, "post", _post)
+    monkeypatch.setattr(api._session, "request", _request)
 
     with pytest.raises(requests.HTTPError) as caught:
         api.finish_run(7, models.RunStatus.FAILED)

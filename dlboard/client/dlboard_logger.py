@@ -33,8 +33,11 @@ from typing_extensions import override
 
 from dlboard import models
 from dlboard._batching import BatchParams, ship_batches
+from dlboard._compat import StrEnum
 from dlboard._logging import configure_client_logging
 from dlboard._mp_context import SPAWN_CONTEXT
+from dlboard._telemetry import Attributes, attribute
+from dlboard._telemetry.traces import CLIENT_SERVICE_NAME, SpanKind, TraceKey, flush, name_service, span
 from dlboard.client._rest_api import DEFAULT_SERVER_URL, BasicDlboardAPI
 from dlboard.client.artifacts.figure import Figure
 from dlboard.client.artifacts.file import File
@@ -216,23 +219,60 @@ def _ship_until_parent_says_stop(
     """
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     configure_client_logging()
-    ship_batches(q, ship, params, is_permanent=is_permanent, is_oversized=is_oversized)
+    name_service(CLIENT_SERVICE_NAME)
+    # Daemons are killed at exit with whatever spans they had not exported yet: a flush is where they go out.
+    ship_batches(q, ship, params, is_permanent=is_permanent, is_oversized=is_oversized, on_flush=flush)
 
 
-def _start_shipper(
-    name: str, ship: Callable[[list[T]], None], *, q_size: int, flush_size: int
+class _ShipKind(StrEnum):
+    METRICS = "metrics"
+    ARTIFACTS = "artifacts"
+
+
+@dataclass(frozen=True, slots=True)
+class _ShipTrace(Attributes):
+    kind: _ShipKind = attribute(TraceKey.SHIP_KIND)
+    items: int = attribute(TraceKey.ITEMS)
+    run_id: int = attribute(TraceKey.RUN_ID)
+    experiment_id: int = attribute(TraceKey.EXPERIMENT_ID)
+
+
+def _ship_in_span(
+    kind: _ShipKind, experiment_id: int, run_id: int, ship: Callable[[list[T]], None], batch: list[T]
+) -> None:
+    """Ship `batch` as one trace of its own: the requests it takes are children, and the server joins them."""
+    with span(
+        "dlboard.ship",
+        SpanKind.INTERNAL,
+        _ShipTrace(kind=kind, items=len(batch), run_id=run_id, experiment_id=experiment_id),
+    ):
+        ship(batch)
+
+
+def _start_shipper(  # noqa: PLR0913 -- one shipper, fully described
+    kind: _ShipKind,
+    ship: Callable[[list[T]], None],
+    *,
+    experiment_id: int,
+    run_id: int,
+    q_size: int,
+    flush_size: int,
 ) -> _Shipper[T]:
     queue: Queue[T | None] = SPAWN_CONTEXT.Queue(maxsize=q_size)
     ready, flushed = SPAWN_CONTEXT.Event(), SPAWN_CONTEXT.Event()
     process = SPAWN_CONTEXT.Process(
         target=_ship_until_parent_says_stop,
-        args=(queue, ship, BatchParams(flush_size, _SHIP_INTERVAL_SEC, ready, flushed)),
+        args=(
+            queue,
+            functools.partial(_ship_in_span, kind, experiment_id, run_id, ship),
+            BatchParams(flush_size, _SHIP_INTERVAL_SEC, ready, flushed),
+        ),
         kwargs={"is_permanent": is_rejection, "is_oversized": is_oversized},
-        name=f"dlboard-{name}",
+        name=f"dlboard-{kind}",
         daemon=True,
     )
     process.start()
-    return _Shipper(name, queue, process, ready, flushed)
+    return _Shipper(kind, queue, process, ready, flushed)
 
 
 class DLBoardLoggerSettings(BaseModel, frozen=True, extra="forbid"):
@@ -372,6 +412,7 @@ class DLBoardLogger(Logger):
             return
         settings = settings or DLBoardLoggerSettings()
         configure_client_logging()
+        name_service(CLIENT_SERVICE_NAME)
         self._api = BasicDlboardAPI(base_url=server_url)
         # Up front, before any worker starts: the workers treat every 4xx as "drop this batch" (see
         # `is_rejection`), so bad credentials would otherwise only show up as silently lost metrics.
@@ -394,14 +435,18 @@ class DLBoardLogger(Logger):
         )
         startup_start = time.perf_counter()
         self._metrics = _start_shipper(
-            "metrics",
+            _ShipKind.METRICS,
             self._api.log_metric_batch,
+            experiment_id=self._experiment_id,
+            run_id=self._run_id,
             q_size=settings.metrics_q_size,
             flush_size=settings.metrics_q_flush_size,
         )
         self._artifacts = _start_shipper(
-            "artifacts",
+            _ShipKind.ARTIFACTS,
             functools.partial(_ship_artifacts, self._api, self._experiment_id, self._run_id),
+            experiment_id=self._experiment_id,
+            run_id=self._run_id,
             q_size=settings.artifact_q_size,
             flush_size=settings.artifact_q_flush_size,
         )
