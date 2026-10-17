@@ -65,6 +65,10 @@ class TraceKey(StrEnum):
 
     RUN_ID = "dlboard.run.id"
     ITEMS = "dlboard.batch.items"
+    SHIP_KIND = "dlboard.ship.kind"
+    HTTP_METHOD = "http.request.method"
+    HTTP_ROUTE = "http.route"
+    HTTP_STATUS_CODE = "http.response.status_code"
     EXPERIMENT_ID = "dlboard.experiment.id"
     REQUEST_ID = "dlboard.request_id"
 
@@ -96,6 +100,8 @@ def sdk_installed() -> bool:
         return False
 
 
+CLIENT_SERVICE_NAME: Final = "dlboard-client"
+"""What a training process and its shipping processes call themselves in a trace."""
 _DEFAULT_SERVICE: Final = "dlboard"
 _service = _DEFAULT_SERVICE
 

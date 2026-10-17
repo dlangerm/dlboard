@@ -165,3 +165,25 @@ def test_ship_batches_drops_a_single_item_still_too_large_to_split(monkeypatch: 
         )
 
     assert successes == [["fine"]]
+
+
+def test_ship_batches_runs_on_flush_after_the_shipping_and_before_the_flush_is_acknowledged() -> None:
+    """What a process holds that dies with it (unexported spans) is pushed out before the parent is told it's safe."""
+    flushed = SPAWN_CONTEXT.Event()
+    events: list[str] = []
+
+    def on_flush() -> None:
+        events.append(f"on_flush (acknowledged: {flushed.is_set()})")
+
+    params = BatchParams(flush_size=100, wait_sec=0, ready=SPAWN_CONTEXT.Event(), flushed=flushed)
+    with pytest.raises(_ScriptDone):
+        ship_batches(
+            _ScriptedQueue(["a", None]),
+            lambda batch: events.append(f"ship {batch}"),
+            params,
+            is_permanent=lambda _exc: False,
+            on_flush=on_flush,
+        )
+
+    assert events == ["ship ['a']", "on_flush (acknowledged: False)"]
+    assert flushed.is_set()

@@ -12,11 +12,13 @@ from typing import TYPE_CHECKING, Any, cast
 import pytest
 import sqlalchemy as sa
 from flask import Flask
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from prometheus_client.parser import text_string_to_metric_families
 from pydantic import AnyHttpUrl, SecretStr, TypeAdapter
 from werkzeug.serving import make_server
 
 from dlboard import models
+from dlboard._telemetry import _sdk
 from dlboard._telemetry.traces import TRACES
 from dlboard.plugins import BUILTIN_BACKEND, LOCAL_AUTH
 from dlboard.plugins.backend import artifact_purge_worker
@@ -29,7 +31,7 @@ from dlboard.serve import SQLStoreBase, get_system_data_store
 from dlboard.serve import app as build_app
 from dlboard.serve._backend import _auth
 from dlboard.serve._backend._data_store import ARTIFACT_STORE
-from dlboard.serve.telemetry import LOGS, METRICS
+from dlboard.serve.telemetry import LOGS, METRICS, _instrument
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -595,6 +597,22 @@ def telemetry(monkeypatch: pytest.MonkeyPatch) -> Iterator[pytest.MonkeyPatch]:
     METRICS.close()
     LOGS.close()
     TRACES.close()
+
+
+@pytest.fixture
+def span_exporter(telemetry: pytest.MonkeyPatch) -> Iterator[InMemorySpanExporter]:
+    """
+    Tracing on in this process, with every finished span collected in memory (`flush()` makes sure it has been).
+
+    Only this process's: a spawned one exports over OTLP to wherever `OTEL_EXPORTER_OTLP_ENDPOINT` says. Libraries
+    a server instruments are un-instrumented afterwards, since that is process-wide.
+    """
+    exporter = InMemorySpanExporter()
+    telemetry.setenv("DLBOARD_TELEMETRY_TRACES", "true")
+    telemetry.setattr(_sdk, "make_exporter", lambda: exporter)
+    _sdk.resource.cache_clear()  # one identity per process, remembered: a test starts over
+    yield exporter
+    _instrument.uninstrument_libraries()
 
 
 def scraped_total(scrape: str, name: str, **labels: str) -> float:

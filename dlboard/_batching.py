@@ -85,13 +85,14 @@ def _split_oversized(
     return leftover
 
 
-def ship_batches(
+def ship_batches(  # noqa: PLR0913 -- each is a distinct knob of one loop
     q: Receiver[T | None],
     ship: Callable[[list[T]], None],
     params: BatchParams,
     *,
     is_permanent: Callable[[Exception], bool],
     is_oversized: Callable[[Exception], bool] = lambda _exc: False,
+    on_flush: Callable[[], None] = lambda: None,
 ) -> None:
     """
     Forever drain `q` into batches, shipping one once it's full, `wait_sec` old, or a flush asks for it.
@@ -105,8 +106,9 @@ def ship_batches(
     with whatever arrives meanwhile, and is retried after an exponentially growing backoff (reset
     the moment a batch ships successfully) rather than hammering a server that's still down. A
     `None` queued in place of an item requests a flush, acknowledged (`params.flushed`) only once
-    everything queued before it is gone. Returns once `q` itself is closed (e.g. at interpreter
-    shutdown) -- nothing more can ever arrive through it.
+    everything queued before it is gone and `on_flush` (which must not raise) has run: whatever else the process
+    holds that dies with it, such as spans not yet exported, can be pushed out first. Returns once `q` itself is
+    closed (e.g. at interpreter shutdown) -- nothing more can ever arrive through it.
     """
     params.ready.set()
     batch: list[T] = []
@@ -151,4 +153,5 @@ def ship_batches(
             last_attempt = time.perf_counter()
         if flush_requested and not batch:
             flush_requested = False
+            on_flush()
             params.flushed.set()

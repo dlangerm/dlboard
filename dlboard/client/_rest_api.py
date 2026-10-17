@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import itertools
 import warnings
+from dataclasses import dataclass
 from http import HTTPStatus
 from pathlib import Path
-from typing import TYPE_CHECKING, Final, TypeVar
+from typing import TYPE_CHECKING, Final, Literal, TypeVar
 from urllib.parse import urlsplit
+from uuid import uuid4
 
 import pendulum
 import requests
@@ -22,6 +24,8 @@ from structlog.stdlib import get_logger
 
 from dlboard import models
 from dlboard._identity import resolve_username
+from dlboard._telemetry import Attributes, attribute
+from dlboard._telemetry.traces import SpanKind, TraceKey, carrier, span
 from dlboard._version import __version__
 from dlboard._wire import (
     API_VERSION,
@@ -43,6 +47,7 @@ from dlboard._wire import (
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
+    from typing import IO
 
 
 _log = get_logger(__name__)
@@ -69,6 +74,21 @@ def _raise_for_status(res: requests.Response) -> None:
             raise
         msg = f"{exc} (server request id {request_id})"
         raise requests.HTTPError(msg, response=res) from exc
+
+
+_Method = Literal["GET", "POST"]
+
+
+@dataclass(frozen=True, slots=True)
+class _RequestTrace(Attributes):
+    method: _Method = attribute(TraceKey.HTTP_METHOD)
+    route: str = attribute(TraceKey.HTTP_ROUTE)
+    request_id: str = attribute(TraceKey.REQUEST_ID)
+
+
+@dataclass(frozen=True, slots=True)
+class _ResponseTrace(Attributes):
+    status_code: int = attribute(TraceKey.HTTP_STATUS_CODE)
 
 
 class ClientAuthSettings(BaseSettings):
@@ -140,13 +160,44 @@ class BasicDlboardAPI:
         timeouts = ClientTimeoutSettings()
         self._timeout = (timeouts.connect_timeout_s, timeouts.read_timeout_s)
 
-    def _post(self, path: str, body: BaseModel, return_model: type[R]) -> R:
-        res = self._session.post(
-            f"{self.base_url}/{path}",
-            json=body.model_dump(mode="json"),
-            headers=self._headers,
-            timeout=self._timeout,
-        )
+    def _send(
+        self,
+        method: _Method,
+        route: str,
+        *,
+        path: str | None = None,
+        json: object = None,
+        files: Iterable[tuple[str, tuple[str, IO[bytes] | str, str]]] | None = None,
+    ) -> requests.Response:
+        """
+        Send one request, as a client span that the server's span for it continues.
+
+        `route` is the path as a template (`api/v1/runs/<int:entity_id>`), which names the span -- a name with an
+        id in it would be one of a million. `path` is the concrete one to request, when it differs. Every request
+        carries an `X-Request-Id` of its own, known here even if no response ever comes back to say it, and the
+        trace context on its way to the server. Never a credential: `Authorization` is not an attribute.
+        """
+        request_id = uuid4().hex
+        with span(f"{method} /{route}", SpanKind.CLIENT, _RequestTrace(method, route, request_id)) as active:
+            res = self._session.request(
+                method,
+                f"{self.base_url}/{path or route}",
+                json=json,
+                files=files,
+                headers={**self._headers, REQUEST_ID_HEADER: request_id, **carrier()},
+                timeout=self._timeout,
+            )
+            active.set(_ResponseTrace(status_code=res.status_code))
+            try:
+                res.raise_for_status()
+            except requests.HTTPError as exc:
+                active.failed(
+                    exc
+                )  # the caller decides whether this status is an error; the span records that it was
+        return res
+
+    def _post(self, route: str, body: BaseModel, return_model: type[R], *, path: str | None = None) -> R:
+        res = self._send("POST", route, path=path, json=body.model_dump(mode="json"))
         _raise_for_status(res)
         return return_model.model_validate(res.json())
 
@@ -159,9 +210,7 @@ class BasicDlboardAPI:
         fail fast, before `DLBoardLogger.__init__` spawns the shipping processes that would
         otherwise just silently drop every batch against a server like that.
         """
-        res = self._session.get(
-            f"{self.base_url}/{WHOAMI_PATH}", headers=self._headers, timeout=self._timeout
-        )
+        res = self._send("GET", WHOAMI_PATH)
         if res.status_code == HTTPStatus.UNAUTHORIZED:
             msg = (
                 f"The dlboard server at {self.base_url} rejected this client's credentials. Create an API "
@@ -211,11 +260,7 @@ class BasicDlboardAPI:
 
     def get_run(self, run_id: int) -> models.Run:
         """The existing run `run_id`. Raises `requests.HTTPError` (404) if it's missing, deleted, or not yours to see."""
-        res = self._session.get(
-            f"{self.base_url}/{entity_path(Resource.RUNS, str(run_id))}",
-            headers=self._headers,
-            timeout=self._timeout,
-        )
+        res = self._send("GET", entity_path(Resource.RUNS), path=entity_path(Resource.RUNS, str(run_id)))
         _raise_for_status(res)
         return models.Run.model_validate(res.json())
 
@@ -230,7 +275,7 @@ class BasicDlboardAPI:
         """
         body = FinishRun(status=status, ended_at=ended_at or pendulum.now(pendulum.UTC))
         try:
-            self._post(run_finish_path(str(run_id)), body, models.Run)
+            self._post(run_finish_path(), body, models.Run, path=run_finish_path(str(run_id)))
         except requests.HTTPError as exc:
             if exc.response is None or exc.response.status_code != HTTPStatus.NOT_FOUND:
                 raise
@@ -241,11 +286,8 @@ class BasicDlboardAPI:
 
     def log_metric_batch(self, metrics: list[models.LoggedMetrics]) -> None:
         """Log a batch of metrics."""
-        res = self._session.post(
-            f"{self.base_url}/{create_path(Resource.METRICS)}",
-            json=[m.model_dump(mode="json") for m in metrics],
-            headers=self._headers,
-            timeout=self._timeout,
+        res = self._send(
+            "POST", create_path(Resource.METRICS), json=[m.model_dump(mode="json") for m in metrics]
         )
         _raise_for_status(res)
 
@@ -298,8 +340,9 @@ class BasicDlboardAPI:
         # whether the request succeeds, rather than leaking a descriptor per artifact.
         opened = [path.open("rb") for _, path in uploads]
         try:
-            res = self._session.post(
-                f"{self.base_url}/{create_path(Resource.ARTIFACTS)}",
+            res = self._send(
+                "POST",
+                create_path(Resource.ARTIFACTS),
                 files=itertools.chain(
                     *(
                         (
@@ -312,8 +355,6 @@ class BasicDlboardAPI:
                         for i, ((a, _path), fh) in enumerate(zip(uploads, opened, strict=True))
                     )
                 ),
-                headers=self._headers,
-                timeout=self._timeout,
             )
             _raise_for_status(res)
         except Exception:
@@ -330,12 +371,7 @@ class BasicDlboardAPI:
             for a, ref in links
         ]
         try:
-            res = self._session.post(
-                f"{self.base_url}/{create_path(Resource.ARTIFACT_LINKS)}",
-                json=body,
-                headers=self._headers,
-                timeout=self._timeout,
-            )
+            res = self._send("POST", create_path(Resource.ARTIFACT_LINKS), json=body)
             _raise_for_status(res)
         except Exception:
             _log.exception("Failed to link %d artifact(s)", len(links))
