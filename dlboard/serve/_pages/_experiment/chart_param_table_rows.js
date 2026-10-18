@@ -5,6 +5,18 @@ function chartParamTableRows(_add, _remove) {
     if (!clicked) {
         return [noUpdate, noUpdate];
     }
-    // The grid takes an added row as a transaction, and deletes its checked rows when told to.
-    return clicked.type === "chart-param-table-add" ? [{ add: [{}] }, noUpdate] : [noUpdate, true];
+    if (clicked.type !== "chart-param-table-add") {
+        // The grid deletes its checked rows when told to.
+        return [noUpdate, true];
+    }
+    // A pattern-matching id is the component's id string as JSON with its keys sorted.
+    const grid = { field: clicked.field, type: "chart-param-table" };
+    const api = window.dash_ag_grid.getApi(JSON.stringify(grid, Object.keys(grid).sort()));
+    if (!api) {
+        return [noUpdate, noUpdate];
+    }
+    // The new row's name is what is wanted next, so its cell opens for it at once.
+    const [added] = api.applyTransaction({ add: [{}] }).add;
+    api.startEditingCell({ rowIndex: added.rowIndex, colKey: "key" });
+    return [noUpdate, noUpdate];
 }

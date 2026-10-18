@@ -8,6 +8,7 @@ from typing import Final
 
 import pendulum
 from pydantic import AnyUrl, AwareDatetime, BaseModel, Field
+from structlog.stdlib import get_logger
 
 from dlboard._compat import StrEnum
 from dlboard.models._tag import TagValue
@@ -15,6 +16,8 @@ from dlboard.models._tag import TagValue
 if typing.TYPE_CHECKING:
     from collections.abc import Mapping
     from pathlib import Path
+
+_log = get_logger(__name__)
 
 FILE_KIND_TAG: Final = "file_kind"
 """The tag a file artifact records its `FileKind` under, for anything consuming or displaying it."""
@@ -89,6 +92,19 @@ as `Content-Disposition: attachment` instead.
 def is_inlineable_artifact(fname: str) -> bool:
     """Whether a browser shows an artifact named `fname` inline (an image), rather than only offering it as a download."""
     return mimetypes.guess_type(fname)[0] in INLINEABLE_ARTIFACT_CONTENT_TYPES
+
+
+def layer_kind(tags: Mapping[str, TagValue], fname: str) -> LayerKind | None:
+    """How an artifact is drawn as a layer over a picture, or `None` if it cannot be: the kind it says it is (`LAYER_KIND_TAG`), else a picture if it is an image."""
+    stored = tags.get(LAYER_KIND_TAG)
+    if stored is None:
+        return LayerKind.PICTURE if is_inlineable_artifact(fname) else None
+    try:
+        return LayerKind(stored)
+    except ValueError:
+        # A kind a newer client logged: it is no layer here, and say why.
+        _log.warning("a layer of an unknown kind is not drawn", kind=stored)
+        return None
 
 
 @typing.runtime_checkable

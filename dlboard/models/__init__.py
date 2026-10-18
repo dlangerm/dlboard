@@ -16,6 +16,7 @@ from dlboard.models._artifact import (
     NewArtifactLink,
     UnservableArtifactRefError,
     is_inlineable_artifact,
+    layer_kind,
     overlay_image_key,
     overlay_key,
 )
@@ -190,6 +191,7 @@ __all__ = [
     "histogram_column",
     "hparam_column",
     "is_inlineable_artifact",
+    "layer_kind",
     "max_histogram_buckets",
     "overlay_image_key",
     "overlay_key",

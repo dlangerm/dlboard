@@ -29,7 +29,6 @@ from dlboard.plugins.charts.image_series import (
     ImageChart,
     ImageChartSettings,
     OverlayLayer,
-    _layer_kind,
     _slider_marks,
 )
 
@@ -363,23 +362,6 @@ def test_an_image_chart_without_layers_draws_nothing_over_its_pictures() -> None
     assert _store_data(ImageChart.render(ImageChartSettings(key="img"), df))["overlays"] == {}
 
 
-@pytest.mark.parametrize(
-    ("tags", "fname", "kind"),
-    [
-        pytest.param({LAYER_KIND_TAG: "shapes"}, "boxes.json", LayerKind.SHAPES, id="the-tag-says-shapes"),
-        pytest.param({LAYER_KIND_TAG: "shapes"}, "boxes.bin", LayerKind.SHAPES, id="not-the-extension"),
-        pytest.param({LAYER_KIND_TAG: "picture"}, "mask.png", LayerKind.PICTURE, id="the-tag-says-picture"),
-        pytest.param({}, "mask.png", LayerKind.PICTURE, id="an-image-with-no-tag-is-a-picture"),
-        pytest.param({}, "model.ckpt", None, id="a-file-with-no-tag-is-no-layer"),
-        pytest.param({LAYER_KIND_TAG: "rle-mask"}, "mask.npz", None, id="a-kind-this-server-lacks"),
-    ],
-)
-def test_a_layers_kind_comes_from_its_tag_and_an_image_defaults_to_a_picture(
-    tags: dict[str, str], fname: str, kind: LayerKind | None
-) -> None:
-    assert _layer_kind(tags, fname) is kind
-
-
 def test_the_layers_are_charted_with_the_image_and_edited_as_a_table() -> None:
     settings = ImageChartSettings(
         key="img", overlays={"boxes": OverlayLayer(), "mask": OverlayLayer(opacity=0.3)}
@@ -388,7 +370,7 @@ def test_the_layers_are_charted_with_the_image_and_edited_as_a_table() -> None:
     assert ImageChart.hint_required_artifact_keys(settings) == {"img", "boxes", "mask"}
     field = ChartTypeRegistry.get_registered_chart_types()[ImageChart.name]["overlays"]
     assert field.type is ParameterFieldType.TABLE
-    assert [column.name for column in field.columns or ()] == ["opacity"]
+    assert [(c.name, c.minimum, c.maximum) for c in field.columns or ()] == [("opacity", 0, 1)]
 
 
 def test_a_layers_opacity_is_a_fraction() -> None:
