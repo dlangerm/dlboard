@@ -63,7 +63,8 @@ The built-in line charts, and the image series that steps through logged images:
 ![An image-series chart](../images/image-series.png)
 
 An image series can draw layers over each picture. Its `overlays` setting is a row per artifact key, bottom layer first,
-each with an `opacity` from 0 to 1. A layer is an `Overlay` of shapes (see [docs/client.md](../client.md)) or any image,
+each with an `opacity` from 0 to 1, a slider in the chart editor. Typing a row's name there suggests the artifact keys the
+experiment logged that can be a layer. A layer is an `Overlay` of shapes (see [docs/client.md](../client.md)) or any image,
 such as a segmentation mask, and the one the run logged at each picture's own step is laid over it, in its thumbnail and
 in its enlarged view. A picture a layer has nothing for at its step is shown without it. Auto-generate adds the
 `_$overlay` artifacts of an image (`sample_$overlay`, or one per `name` after it: `sample_$overlay/truth`), if it

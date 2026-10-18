@@ -10,10 +10,12 @@ import pytest
 from pydantic import ValidationError
 
 from dlboard import models
+from dlboard.conftest import find_props
 from dlboard.conftest import props as _to_props
 from dlboard.models._view import ColumnKind, ParameterField, ParameterFieldType
 from dlboard.plugins.charts.line_chart import LineChart
 from dlboard.plugins.charts.table_chart import TableChart
+from dlboard.serve._grid import SLIDER_RENDERER
 from dlboard.serve._pages._experiment import _chart_editor_modal as editor
 from dlboard.serve._pages._experiment import _page_repository as repo
 from dlboard.serve._pages._experiment._chart_editor_modal import (
@@ -287,3 +289,39 @@ def test_param_field_input_renders_fixed_choices_as_a_select() -> None:
     props = cast("Any", component).to_plotly_json()["props"]  # pyrefly: ignore [unknown-variable-type]
     assert props["data"] == ["number", "category"]
     assert props["value"] == "category"
+
+
+@pytest.mark.parametrize(
+    ("kind", "suggested"),
+    [
+        pytest.param(ColumnKind.LAYER, ["boxes", "mask"], id="a-key-that-can-be-a-layer"),
+        pytest.param(None, None, id="free-names"),
+    ],
+)
+def test_a_tables_names_are_suggested_as_they_are_typed_in_the_grid(
+    kind: ColumnKind | None, suggested: list[str] | None
+) -> None:
+    field = ParameterField(name="overlays", type=ParameterFieldType.TABLE, required=False, column_kind=kind)
+    catalog = ColumnCatalog(artifacts=("boxes", "ckpt", "mask"), layers=("boxes", "mask"))
+
+    grid = find_props(
+        _param_field_input(field.name, field, catalog), editor._CHART_PARAM_TABLE.of("overlays")
+    )
+
+    name_column: dict[str, Any] = (grid or {})["columnDefs"][0]
+    assert name_column.get("cellEditorParams", {}).get("options") == suggested
+
+
+def test_a_number_with_a_range_is_a_slider_in_its_cell() -> None:
+    opacity = ParameterField(
+        name="opacity", type=ParameterFieldType.FLOAT, required=False, default=1.0, minimum=0, maximum=1
+    )
+    field = ParameterField(name="overlays", type=ParameterFieldType.TABLE, required=False, columns=(opacity,))
+
+    grid = find_props(
+        _param_field_input(field.name, field, ColumnCatalog()), editor._CHART_PARAM_TABLE.of("overlays")
+    )
+
+    column: dict[str, Any] = (grid or {})["columnDefs"][1]
+    assert column["cellRenderer"] == SLIDER_RENDERER
+    assert column["cellRendererParams"] == {"min": 0, "max": 1, "step": 0.01, "fallback": 1.0}

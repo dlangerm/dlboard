@@ -29,6 +29,18 @@ def infer_column_dtype[T](rows: list[dict[T, Any]], key: T) -> ColumnDType:
 GRID_FORMATTERS_JS: Final = Path(__file__).with_name("grid_formatters.js")
 """The grid formatters `NUMBER_FORMATTER` and `SCORE_FORMATTER` name, served once by `app()`."""
 
+GRID_CELL_COMPONENTS_JS: Final = Path(__file__).with_name("grid_cell_components.js")
+"""The cell components `SLIDER_RENDERER` and `KEY_PICKER_EDITOR` name, served once by `app()`."""
+
+GRID_CELL_COMPONENTS_CSS: Final = Path(__file__).with_name("grid_cell_components.css")
+"""How `KEY_PICKER_EDITOR` looks, served once by `app()` beside its script."""
+
+SLIDER_RENDERER: Final = "DlboardSlider"
+"""How a number with a range is shown in a cell: a slider across it, always there. Takes `cellRendererParams` of `min`, `max`, `step` and `fallback`."""
+
+KEY_PICKER_EDITOR: Final = "DlboardKeyPicker"
+"""How a name is edited in a cell: typed in, with the names it can be (`options` of `cellEditorParams`) suggested."""
+
 NUMBER_FORMATTER: Final = {"function": "dlboardNumber(params)"}
 """How a numeric cell is shown: whole numbers as they are, small ones to four significant digits."""
 

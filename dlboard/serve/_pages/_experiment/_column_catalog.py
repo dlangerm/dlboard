@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from dlboard.models import (
     ColumnKind,
     MetricColumn,
+    layer_kind,
 )
 from dlboard.serve._pages._experiment._chart_autogen import default_artifact_chart
 
@@ -31,6 +32,8 @@ class ColumnCatalog:
     artifacts: tuple[str, ...] = ()
     artifact_chart_types: dict[str, str] = field(default_factory=dict[str, str])
     """The chart type that displays each artifact key by default, by name. A key no chart type can display is absent."""
+    layers: tuple[str, ...] = ()
+    """Artifact keys an image chart can draw over a picture: those of `Overlay`s, and of images."""
     histograms: tuple[str, ...] = ()
     hparams: tuple[str, ...] = ()
 
@@ -45,6 +48,7 @@ class ColumnCatalog:
             artifact_chart_types={
                 a.key: chart_type for a in artifacts if (chart_type := default_artifact_chart(a)) is not None
             },
+            layers=tuple(sorted({a.key for a in artifacts if layer_kind(a.tags, a.fname) is not None})),
             histograms=tuple(store.summarize_histogram_keys(experiment_id)),
             hparams=tuple(
                 sorted({k for h in store.fetch_hyperparams(experiment_id) for k in h.hparams_dict})
@@ -62,6 +66,8 @@ class ColumnCatalog:
                 return [*self.metrics, MetricColumn.STEP, MetricColumn.TIMESTAMP_UTC] if self.metrics else []
             case ColumnKind.ARTIFACT:
                 return list(self.artifacts)
+            case ColumnKind.LAYER:
+                return list(self.layers)
             case ColumnKind.HISTOGRAM:
                 return list(self.histograms)
             case ColumnKind.HPARAM:

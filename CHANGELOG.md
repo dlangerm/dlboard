@@ -22,7 +22,7 @@ pulls that section's body into the GitHub release notes and publishes both distr
   overlays. See [docs/client.md](docs/client.md).
 * **Layers over an image chart's pictures.** Its new `overlays` setting is a row per artifact key, bottom layer first,
   each with an `opacity`. A layer is an overlay of shapes or any image, such as a segmentation mask, logged at the
-  picture's own step. An older server stores an overlay without drawing it, so upgrade the server to see them.
+  picture's own step; the chart editor suggests the keys the experiment logged that can be one as a row's name is typed, and sets the opacity with a slider. An older server stores an overlay without drawing it, so upgrade the server to see them.
 * **Distributed traces** (`DLBOARD_TELEMETRY_TRACES=true`, with the `otel` extra on the server and `dlboard-client[otel]`
   in the training environment). A batch your script ships is one trace, from the shipping process through the server,
   its database queries and the blob writer, joined by a W3C `traceparent` header (calls to S3 are traced too, as traces of their own).

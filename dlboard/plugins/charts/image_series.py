@@ -14,12 +14,10 @@ import pandas as pd
 from dash import ALL, MATCH, Input, Output, State, ctx, dcc, html
 from dash.exceptions import PreventUpdate
 from pydantic import BaseModel, Field
-from structlog.stdlib import get_logger
 
 from dlboard.models import (
     DEFAULT_RENDER_CONTEXT,
     DEFAULT_TAG_PRECISION,
-    LAYER_KIND_TAG,
     RUN_NAME_COLUMN,
     Artifact,
     ChartType,
@@ -33,6 +31,7 @@ from dlboard.models import (
     artifact_fname_column,
     artifact_tags_column,
     is_inlineable_artifact,
+    layer_kind,
 )
 from dlboard.plugins.charts._artifact_tags import format_tags_caption, parse_tags
 from dlboard.serve import AssetKind, ClientsideScript, series_swatch_class, serve_asset
@@ -41,8 +40,6 @@ if typing.TYPE_CHECKING:
     from collections.abc import Hashable
 
 MAX_SLIDER_LABELS = 10
-
-_log = get_logger(__name__)
 
 
 class OverlayLayer(BaseModel, frozen=True, extra="forbid", use_attribute_docstrings=True):
@@ -63,10 +60,6 @@ class ImageChartSettings(BaseModel, frozen=True, extra="forbid", use_attribute_d
     """Image chart settings."""
 
     key: str
-    overlays: dict[str, OverlayLayer] = Field(default_factory=dict)
-    """
-    The artifacts drawn over each picture, a row per artifact key, first row at the bottom. Each is the one the run logged at the picture's own step: an Overlay of shapes (see `dlboard.client.artifacts.overlay`), or an image such as a mask. A picture a row has nothing for is shown without it. Auto-generate adds the key's `_$overlay` artifacts, if there are any.
-    """
     x_axis: str = "step"
     height: int = 220
     width: int | None = Field(default=None)
@@ -79,8 +72,13 @@ class ImageChartSettings(BaseModel, frozen=True, extra="forbid", use_attribute_d
     """Show tags logged as a duration in this unit, whatever unit they were logged in. Leave blank to pick the largest unit that fits each one."""
     tag_size_unit: SizeUnit | None = Field(default=None)
     """Show tags logged as a data size in this unit, whatever unit they were logged in. Leave blank to pick the largest unit that fits each one."""
+    # The two tables come last: in the chart editor each takes a whole row, so the small settings above share theirs.
+    overlays: dict[str, OverlayLayer] = Field(default_factory=dict)
+    """
+    The artifacts drawn over each picture, a row per artifact key, first row at the bottom. Each is the one the run logged at the picture's own step: an Overlay of shapes (see `dlboard.client.artifacts.overlay`), or an image such as a mask. A picture a row has nothing for is shown without it. Auto-generate adds the key's `_$overlay` artifacts, if there are any.
+    """
     tag_display: dict[str, TagDisplay] = Field(default_factory=dict)
-    """Display settings for particular tags, a row per tag name, taking the place of the three above for that tag. Leave a cell blank to keep the chart's own setting."""
+    """Display settings for particular tags, a row per tag name, taking the place of the chart's tag precision and unit settings for that tag. Leave a cell blank to keep the chart's own setting."""
 
     @property
     def tag_defaults(self) -> TagDisplay:
@@ -131,23 +129,10 @@ def _drawn_layers(row: dict[Hashable, Any], layers: dict[str, OverlayLayer]) -> 
         url, fname = row.get(artifact_column(key)), row.get(artifact_fname_column(key))
         # A layer the run did not log at this step holds NaN, which is no string.
         if isinstance(url, str) and isinstance(fname, str):
-            kind = _layer_kind(row.get(artifact_tags_column(key)), fname)
+            kind = layer_kind(parse_tags(row.get(artifact_tags_column(key))), fname)
             if kind is not None:
                 drawn.append(DrawnLayer(url=url, kind=kind, opacity=layer.opacity))
     return drawn
-
-
-def _layer_kind(tags: object, fname: str) -> LayerKind | None:
-    """How a layer is drawn: the kind its artifact says it is (`LAYER_KIND_TAG`), else as a picture if it is an image."""
-    stored = parse_tags(tags).get(LAYER_KIND_TAG)
-    if stored is None:
-        return LayerKind.PICTURE if is_inlineable_artifact(fname) else None
-    try:
-        return LayerKind(stored)
-    except ValueError:
-        # A kind a newer client logged: leave the layer out, and say why.
-        _log.warning("a layer of an unknown kind is not drawn", kind=stored)
-        return None
 
 
 def _layers_by_picture(
@@ -410,7 +395,7 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
     @classmethod
     @typing.override
     def field_column_kinds(cls) -> dict[str, ColumnKind]:
-        return {"key": ColumnKind.ARTIFACT, "x_axis": ColumnKind.METRIC}
+        return {"key": ColumnKind.ARTIFACT, "overlays": ColumnKind.LAYER, "x_axis": ColumnKind.METRIC}
 
 
 ImageChart.register(allow_override=True)

@@ -9,6 +9,7 @@ import pytest
 
 from dlboard.models import (
     FILE_KIND_TAG,
+    LAYER_KIND_TAG,
     Artifact,
     Histogram,
     LoggedMetrics,
@@ -24,7 +25,11 @@ if TYPE_CHECKING:
 _TS = pendulum.datetime(2026, 1, 1, tz="UTC")
 
 _CATALOG = ColumnCatalog(
-    metrics=("loss", "shared"), artifacts=("shared",), histograms=("grad",), hparams=("lr",)
+    metrics=("loss", "shared"),
+    artifacts=("shared",),
+    layers=("mask",),
+    histograms=("grad",),
+    hparams=("lr",),
 )
 
 
@@ -35,6 +40,7 @@ _CATALOG = ColumnCatalog(
         # A metric and an artifact sharing a name are each offered under their own kind -- the old
         # `{name: kind}` dict could only hold one of them.
         (ColumnKind.ARTIFACT, ["shared"]),
+        (ColumnKind.LAYER, ["mask"]),
         (ColumnKind.HISTOGRAM, ["grad"]),
         (ColumnKind.HPARAM, ["lr"]),
         (ColumnKind.GROUPING, ["loss", "lr", "run_id", "shared", "step", "timestamp_utc"]),
@@ -85,6 +91,15 @@ def test_column_catalog_load_summarizes_keys_without_their_values(
                 tags={FILE_KIND_TAG: "checkpoint"},
             ),
             Artifact(
+                key="boxes",
+                fname="boxes.json",
+                run_id=runs[0].id,
+                experiment_id=experiment_id,
+                step=0,
+                ref="r://d",
+                tags={LAYER_KIND_TAG: "shapes"},
+            ),
+            Artifact(
                 key="grads",
                 fname="grads.npy",
                 run_id=runs[0].id,
@@ -100,8 +115,9 @@ def test_column_catalog_load_summarizes_keys_without_their_values(
     assert catalog == ColumnCatalog(
         metrics=("final_acc", "loss"),
         single_value_metrics=frozenset({"final_acc"}),
-        artifacts=("ckpt", "grads", "img"),
+        artifacts=("boxes", "ckpt", "grads", "img"),
         artifact_chart_types={"ckpt": "files", "img": "image"},  # nothing displays the grads
+        layers=("boxes", "img"),  # the shapes say so; the image is drawn as it is; no one draws a checkpoint
         histograms=("grad",),
         hparams=("lr",),
     )

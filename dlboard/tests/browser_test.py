@@ -2141,13 +2141,13 @@ def test_an_image_charts_per_tag_display_is_edited_as_table_rows_in_the_chart_ed
     add_row = page.locator('button[id*="tag_display"][id*="table-add"]')
     editor = page.get_by_role("dialog")
     rows = editor.locator(".ag-center-cols-container .ag-row")
-    add_row.click()
+    add_row.click()  # opens the new row's name for typing; clicking away leaves it blank
+    editor.get_by_text("Preview").click()
     expect(rows).to_have_count(1)
     rows.first.locator(".ag-checkbox-input-wrapper").click()
     page.locator('button[id*="tag_display"][id*="table-remove"]').click()
     expect(rows).to_have_count(0)
-    add_row.click()
-    editor.locator('.ag-cell[col-id="key"]').first.click()
+    add_row.click()  # the new row's name is already open for typing
     page.keyboard.type("took")
     page.keyboard.press("Tab")
     page.keyboard.type("2")
@@ -2318,12 +2318,13 @@ def test_a_layer_added_in_the_chart_editor_is_drawn_over_the_pictures_at_its_opa
     expect(chart.locator(".dl-image-series-layer")).to_have_count(0)
     chart.hover()
     chart.get_by_role("button", name="Edit chart").click()
-    page.locator('button[id*="overlays"][id*="table-add"]').click()
-    page.get_by_role("dialog").locator('.ag-cell[col-id="key"]').first.click()
-    page.keyboard.type("samples/mask")
-    page.keyboard.press("Tab")
-    page.keyboard.type("0.5")
-    page.keyboard.press("Enter")
+    dialog = page.get_by_role("dialog")
+    dialog.locator('button[id*="overlays"][id*="table-add"]').click()  # opens the new row's name for typing
+    page.keyboard.type("mask")  # the keys that can be layers are suggested
+    page.locator(".ag-popup").get_by_text("samples/mask").click()
+    dialog.locator('.ag-cell[col-id="opacity"] input[type=range]').fill(
+        "0.5"
+    )  # always a slider, never a text box
     page.locator(f"#{ADD_CHART_SUBMIT_ID}").click()
 
     layer = chart.locator(".dl-image-series-thumb .dl-image-series-layer")

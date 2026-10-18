@@ -87,7 +87,7 @@ def panel_name_for_group(group: str, kind: ColumnKind, *, granularity: str | Non
             name = f"{group}{ARTIFACT_PANEL_SUFFIX}"
         case ColumnKind.HISTOGRAM:
             name = f"{group}{HISTOGRAM_PANEL_SUFFIX}"
-        case ColumnKind.METRIC | ColumnKind.HPARAM | ColumnKind.GROUPING:
+        case ColumnKind.METRIC | ColumnKind.HPARAM | ColumnKind.GROUPING | ColumnKind.LAYER:
             name = group
     return f"{name} ({granularity})" if granularity else name
 
@@ -255,7 +255,7 @@ def build_auto_panels(
                 return artifact_charts[key]
             case ColumnKind.HISTOGRAM:
                 return default_chart_for_histogram(key)
-            case ColumnKind.HPARAM | ColumnKind.GROUPING:
+            case ColumnKind.HPARAM | ColumnKind.GROUPING | ColumnKind.LAYER:
                 msg = f"no chart is generated for a {kind} key"
                 raise ValueError(msg)
 

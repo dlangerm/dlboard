@@ -10,6 +10,7 @@ import types
 import typing
 from abc import ABC, abstractmethod
 
+from annotated_types import Ge, Le
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 from structlog.stdlib import get_logger
 
@@ -47,6 +48,8 @@ class ColumnKind(StrEnum):
     ARTIFACT = "artifact"
     HISTOGRAM = "histogram"
     HPARAM = "hparam"
+    LAYER = "layer"
+    """Artifact keys an image chart can draw over a picture: an `Overlay`, or an image. No dataframe column is ever tagged with this kind directly."""
     GROUPING = "grouping"
     """Synthetic kind for fields that group/split by any metric or hparam column, plus `run_id` --
     see `group_columns_by_kind`. No dataframe column is ever tagged with this kind directly."""
@@ -206,6 +209,10 @@ class ParameterField(BaseModel, frozen=True, extra="forbid"):
     """Fixed set of allowed values for a `Literal[...]`-typed field, rendered as a dropdown."""
     columns: tuple[ParameterField, ...] | None = None
     """For a `TABLE` field, a descriptor of each field of its row model: the cells of a row after its key."""
+    minimum: float | None = None
+    """The least a number field may be (its `ge`), if the settings model says."""
+    maximum: float | None = None
+    """The most a number field may be (its `le`), if the settings model says."""
     description: str | None = None
     """Help text shown alongside the field's widget: the field's attribute docstring on the settings model."""
 
@@ -332,6 +339,8 @@ class ChartTypeRegistry:
                 column_kind=field_column_kinds.get(field_name),
                 choices=choices,
                 columns=columns,
+                minimum=next((typing.cast("float", m.ge) for m in field.metadata if isinstance(m, Ge)), None),
+                maximum=next((typing.cast("float", m.le) for m in field.metadata if isinstance(m, Le)), None),
                 description=field.description,
             )
         return field_descriptors

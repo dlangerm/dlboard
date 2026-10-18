@@ -22,7 +22,7 @@ from dlboard import models
 from dlboard.serve import ClientsideScript, Icon, get_data_store, icon
 from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import ButtonId, DivId, ModalId, PatternId, StoreId, ValueId
-from dlboard.serve._grid import themed_grid_kwargs
+from dlboard.serve._grid import KEY_PICKER_EDITOR, SLIDER_RENDERER, themed_grid_kwargs
 from dlboard.serve._pages._dash_helpers import require_triggered_id
 from dlboard.serve._pages._experiment import _chart_view as chart_view
 from dlboard.serve._pages._experiment import _ids as ids
@@ -45,6 +45,17 @@ _log = get_logger(__name__)
 _CHART_PARAM_CLEAR_JS = ClientsideScript(Path(__file__).with_name("chart_param_clear.js"))
 _TABLE_VALUE_JS = ClientsideScript(Path(__file__).with_name("chart_param_table_value.js"))
 _TABLE_ROWS_JS = ClientsideScript(Path(__file__).with_name("chart_param_table_rows.js"))
+
+_SMALL_FIELD: Final = {"flex": "1 1 11rem"}
+_MEDIUM_FIELD: Final = {"flex": "1 1 16rem"}
+_WIDE_FIELD: Final = {"flex": "1 1 100%"}
+"""
+How much of a row a setting's input asks for. The form is a wrapping row, so several of the small ones (a switch, a
+number, a short list of choices) share a line, a pair of column pickers too, and a list or a table has a line to itself.
+"""
+
+SLIDER_STEPS: Final = 100
+"""How many notches a slider has across its range."""
 
 ADD_CHART_MODAL_ID: ModalId[ids.ExperimentPage] = ModalId("add-chart-modal")
 ADD_CHART_TARGET_ID: StoreId[ids.ExperimentPage] = StoreId("add-chart-target")
@@ -103,7 +114,15 @@ def add_chart_modal() -> dmc.Modal:
             dmc.Stack(
                 [
                     dmc.Select(id=ADD_CHART_TYPE_SELECT_ID, label="Chart type", data=chart_types, value=None),
-                    html.Div(id=ADD_CHART_PARAMS_ID),
+                    html.Div(
+                        id=ADD_CHART_PARAMS_ID,
+                        style={
+                            "display": "flex",
+                            "flexWrap": "wrap",
+                            "alignItems": "flex-start",
+                            "gap": "0.5rem 1rem",
+                        },
+                    ),
                     dmc.Text("Preview", fw=600, mt="sm"),
                     html.Div(id=ADD_CHART_PREVIEW_ID),
                     dmc.Text(id=ADD_CHART_ERROR_ID, c="red", size="sm"),
@@ -169,31 +188,62 @@ def build_validated_chart_instance(
 
 
 def _table_input(
-    field_name: str, field: models.ParameterField, label: str, entries: dict[str, dict[str, Any]]
+    field_name: str,
+    field: models.ParameterField,
+    label: str,
+    entries: dict[str, dict[str, Any]],
+    key_options: list[str],
 ) -> Component:
     """
     A `TABLE` field as an editable grid, a row per entry with a cell for each field of its row model.
 
     The grid is only what the person edits: `chart_param_table_value.js` writes its rows, as the mapping the
-    setting holds, into the field's own `Store`, which is what the form reads back like any other field.
+    setting holds, into the field's own `Store`, which is what the form reads back like any other field. A field
+    with `key_options` (the names its rows can be) suggests them as a row's name is typed.
     """
-    columns: list[dict[str, Any]] = [
-        {"field": "key", "headerName": "Name", "editable": True, "flex": 2, "checkboxSelection": True}
-    ]
+    key_column: dict[str, Any] = {
+        "field": "key",
+        "headerName": "Name",
+        "editable": True,
+        "flex": 2,
+        "checkboxSelection": True,
+    }
+    if key_options:
+        key_column |= {
+            "cellEditor": KEY_PICKER_EDITOR,
+            "cellEditorPopup": True,
+            "cellEditorParams": {"options": key_options},
+        }
+    columns = [key_column]
     for column in field.columns or ():
-        editor: dict[str, Any] = (
-            {"cellEditor": "agSelectCellEditor", "cellEditorParams": {"values": ["", *column.choices]}}
-            if column.choices
-            else {"cellEditor": "agNumberCellEditor"}
-        )
+        cell: dict[str, Any] = {"editable": True, "cellEditor": "agNumberCellEditor"}
+        if column.choices:
+            cell = cell | {
+                "cellEditor": "agSelectCellEditor",
+                "cellEditorParams": {"values": ["", *column.choices]},
+            }
+        elif (
+            column.type == models.ParameterFieldType.FLOAT
+            and column.minimum is not None
+            and column.maximum is not None
+        ):
+            cell = {
+                "editable": False,
+                "cellRenderer": SLIDER_RENDERER,
+                "cellRendererParams": {
+                    "min": column.minimum,
+                    "max": column.maximum,
+                    "step": (column.maximum - column.minimum) / SLIDER_STEPS,
+                    "fallback": column.default,
+                },
+            }
         columns.append(
             {
                 "field": column.name,
                 "headerName": column.name,
                 "headerTooltip": column.description,
-                "editable": True,
                 "flex": 1,
-                **editor,
+                **cell,
             }
         )
     return dmc.Stack(
@@ -232,6 +282,7 @@ def _table_input(
             dcc.Store(id=CHART_PARAM_TABLE_DATA.of(field_name), data=entries),
         ],
         gap="xs",
+        style=_WIDE_FIELD,
     )
 
 
@@ -259,6 +310,7 @@ def _param_field_input(  # noqa: PLR0911
                 label=label,
                 checked=bool(value) if value is not None else False,
                 description=field.description,
+                style=_SMALL_FIELD,
             )
         case models.ParameterFieldType.INT | models.ParameterFieldType.FLOAT:
             number_value = cast("int | float | None", value)
@@ -284,9 +336,13 @@ def _param_field_input(  # noqa: PLR0911
                     else None
                 ),
                 rightSectionPointerEvents="all",
+                style=_SMALL_FIELD,
             )
         case models.ParameterFieldType.TABLE:
-            return _table_input(field_name, field, label, cast("dict[str, dict[str, Any]]", value or {}))
+            key_options = catalog.options(field.column_kind) if field.column_kind is not None else list[str]()
+            return _table_input(
+                field_name, field, label, cast("dict[str, dict[str, Any]]", value or {}), key_options
+            )
         case models.ParameterFieldType.LIST_PATTERN:
             names = catalog.options(field.column_kind) if field.column_kind is not None else list[str]()
             return dmc.TagsInput(
@@ -297,6 +353,7 @@ def _param_field_input(  # noqa: PLR0911
                 description=field.description,
                 placeholder="Pick a name, or type one or a prefix ending in *",
                 clearable=True,
+                style=_WIDE_FIELD,
             )
         case models.ParameterFieldType.STR | models.ParameterFieldType.LIST_STR:
             if field.choices is not None:
@@ -309,6 +366,7 @@ def _param_field_input(  # noqa: PLR0911
                     # An optional choice with no default (`None`: "pick for me") can be put back to blank.
                     allowDeselect=not field.required and field.default is None,
                     description=field.description,
+                    style=_SMALL_FIELD,
                 )
 
             options = catalog.options(field.column_kind) if field.column_kind is not None else None
@@ -321,6 +379,7 @@ def _param_field_input(  # noqa: PLR0911
                     value=multiselect_value or [],
                     searchable=True,
                     description=field.description,
+                    style=_WIDE_FIELD,
                 )
             if options:
                 return dmc.Select(
@@ -330,12 +389,14 @@ def _param_field_input(  # noqa: PLR0911
                     value=value,  # pyrefly: ignore [bad-argument-type]
                     searchable=True,
                     description=field.description,
+                    style=_MEDIUM_FIELD,
                 )
             return dmc.TextInput(
                 id=input_id,
                 label=label,
                 value=value or "",  # pyrefly: ignore [bad-argument-type]
                 description=field.description,
+                style=_MEDIUM_FIELD,
             )
 
 
