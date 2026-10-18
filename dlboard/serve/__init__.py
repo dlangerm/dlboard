@@ -37,6 +37,7 @@ from dlboard.serve._icons import Icon, icon, icon_cell_class
 from dlboard.serve._production_server import resolve_plugins, run_production_server
 from dlboard.serve._series import series_color, series_swatch_class
 from dlboard.serve._settings_env import set_setting_env
+from dlboard.serve._startup import Dependency, wait_for
 from dlboard.serve._url import relative_path
 from dlboard.serve.app import app
 
@@ -47,6 +48,7 @@ __all__ = [
     "AuthSettings",
     "AuthorizingDataStore",
     "ClientsideScript",
+    "Dependency",
     "Icon",
     "SQLStoreBase",
     "add_public_route",
@@ -82,6 +84,7 @@ __all__ = [
     "sign_in",
     "sql",
     "start_session",
+    "wait_for",
     "wait_for_artifact_store",
     "wait_for_data_store",
 ]

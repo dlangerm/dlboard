@@ -22,6 +22,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from dlboard.models import INLINEABLE_ARTIFACT_CONTENT_TYPES
 from dlboard.plugins.data_stores._blob_store import RefAccess, plug_blob_store
+from dlboard.serve import Dependency, wait_for
 
 if TYPE_CHECKING:
     from dash import Dash
@@ -222,9 +223,26 @@ class S3Blobs:
         _client(self._settings).delete_object(Bucket=bucket, Key=key)  # pyrefly: ignore [bad-argument-type]
 
 
+def _unreachable(exc: Exception) -> bool:
+    """
+    Whether `exc` means the endpoint can't be reached *yet* (no DNS entry, refused, timed out, closed mid-request).
+
+    An answer from the endpoint (a 403, a bucket that doesn't exist) is a `ClientError`, which retrying only delays.
+    """
+    from botocore.exceptions import ConnectionError as BotoConnectionError
+    from botocore.exceptions import HTTPClientError
+
+    return isinstance(exc, BotoConnectionError | HTTPClientError)
+
+
 def plug(app: Dash) -> None:
     """Plugin content."""
     settings = S3Settings()
-    # Fail fast on a bad bucket/endpoint/credential instead of only discovering it on the first upload.
-    _client(settings).head_bucket(Bucket=settings.bucket)  # pyrefly: ignore [bad-argument-type]
+    # Fail fast on a bad bucket/credential instead of only discovering it on the first upload; an endpoint that
+    # is still coming up (a host that has just rebooted) is waited for instead.
+    wait_for(
+        Dependency.OBJECT_STORE,
+        lambda: _client(settings).head_bucket(Bucket=settings.bucket),  # pyrefly: ignore [bad-argument-type]
+        transient=_unreachable,
+    )
     plug_blob_store(app, S3Blobs(settings), settings.queue_size)
