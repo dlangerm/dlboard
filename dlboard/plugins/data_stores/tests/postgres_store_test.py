@@ -8,12 +8,15 @@ from __future__ import annotations
 import threading
 from pathlib import Path
 
+import psycopg
 import pytest
 import sqlalchemy as sa
 from pydantic import SecretStr
+from sqlalchemy.exc import OperationalError
+from structlog.testing import capture_logs
 
 from dlboard import models
-from dlboard.plugins.data_stores.postgres import PostgresSettings, PostgresStore
+from dlboard.plugins.data_stores.postgres import PostgresSettings, PostgresStore, _unreachable
 
 
 def test_settings_become_libpq_connect_args() -> None:
@@ -107,3 +110,67 @@ def test_workers_starting_at_once_against_a_fresh_schema_all_come_up(
     finally:
         for store in stores:
             store.dispose()
+
+
+@pytest.mark.parametrize(
+    ("message", "waiting_can_fix_it"),
+    [
+        ("failed to resolve host 'postgres': [Errno -2] Name or service not known", True),
+        (
+            'connection failed: connection to server at "127.0.0.1", port 5432 failed: Connection refused',
+            True,
+        ),
+        (
+            'connection failed: connection to server at "172.23.0.4", port 5432 failed: server closed the connection',
+            True,
+        ),
+        (
+            'connection failed: connection to server at "172.23.0.4", port 5432 failed: FATAL:  the database system is starting up',
+            True,
+        ),
+        (
+            'connection failed: connection to server at "172.23.0.4", port 5432 failed: FATAL:  the database system is shutting down',
+            True,
+        ),
+        (
+            'connection failed: connection to server at "127.0.0.1", port 5432 failed: FATAL:  password authentication failed for user "dlboard"',
+            False,
+        ),
+        (
+            'connection failed: connection to server at "127.0.0.1", port 5432 failed: FATAL:  database "nodb" does not exist',
+            False,
+        ),
+    ],
+)
+def test_only_a_server_that_is_not_there_yet_is_worth_waiting_for(
+    message: str, waiting_can_fix_it: bool
+) -> None:
+    error = OperationalError("connect", {}, psycopg.OperationalError(message))
+
+    assert _unreachable(error) is waiting_can_fix_it
+
+
+def test_a_server_that_cannot_be_reached_is_retried_for_the_startup_wait_and_then_raised(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DLBOARD_STARTUP_WAIT_S", "0.5")
+
+    with capture_logs() as logs, pytest.raises(OperationalError, match="failed to resolve host"):
+        PostgresStore(PostgresSettings(host="postgres.invalid", connect_timeout_s=1))
+
+    assert [event["event"] for event in logs if event["log_level"] == "warning"] == [
+        "database not reachable yet; retrying"
+    ]
+
+
+@pytest.mark.postgres
+def test_a_wrong_password_is_raised_at_once_however_long_the_startup_wait(
+    postgres_settings: PostgresSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("DLBOARD_STARTUP_WAIT_S", "600")
+    wrong = postgres_settings.model_copy(update={"password": SecretStr("not-the-password")})
+
+    with capture_logs() as logs, pytest.raises(OperationalError, match="password authentication failed"):
+        PostgresStore(wrong)
+
+    assert [event for event in logs if event["log_level"] == "warning"] == []

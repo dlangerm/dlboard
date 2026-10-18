@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from functools import partial
+from functools import partial, wraps
 from html import escape
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -13,6 +13,7 @@ from dash import Dash, Input, Output, State, callback, dcc, html
 from dash.dcc import Store
 from structlog.stdlib import get_logger
 
+from dlboard._telemetry.traces import SpanKind, span
 from dlboard.models import InstalledPlugin
 from dlboard.serve import _constants as constants
 from dlboard.serve import telemetry
@@ -39,6 +40,8 @@ from dlboard.serve._stale_page import install_stale_page_guard
 from dlboard.serve._url import relative_path
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from dash.development.base_component import Component
 
     from dlboard import models
@@ -61,6 +64,30 @@ _DEFAULT_NAVBAR_WIDTH = 300
 PAGE_LOADING_CLASS = "dl-page-loading"
 
 
+def _reported_when_it_fails[**P](build: Callable[P, Dash]) -> Callable[P, Dash]:
+    """
+    Run `build` as the `dlboard.startup` span, and log a failure of it as one structured error.
+
+    A server that can't start otherwise dies with the interpreter's raw traceback on stderr: outside the log format,
+    out of reach of `DLBOARD_TELEMETRY_LOGS`, and tied to no trace. Logged here it is one record with its exception,
+    on the span that failed, which the platform's alerting can see.
+    """
+
+    @wraps(build)
+    def wrapped(*args: P.args, **kwargs: P.kwargs) -> Dash:
+        # Before the span, and before any store creates its database engine -- see `telemetry`.
+        telemetry.instrument_libraries()
+        with span("dlboard.startup", SpanKind.INTERNAL):
+            try:
+                return build(*args, **kwargs)
+            except Exception:
+                _log.exception("dlboard could not start")
+                raise
+
+    return wrapped
+
+
+@_reported_when_it_fails
 def app(plugins: list[models.PluginProtocol], *, url_prefix: str = "") -> Dash:
     """
     Get the app initialized with a set of plugins.
@@ -82,8 +109,6 @@ def app(plugins: list[models.PluginProtocol], *, url_prefix: str = "") -> Dash:
     from dlboard.serve._pages import _account_page, _simple_admin_page, _simple_homepage, _simple_project_page
     from dlboard.serve._pages import _experiment as _experiment_page
 
-    # Before `Dash(...)` below, whose `plugins` create the stores (and their database engines) -- see `telemetry`.
-    telemetry.instrument_libraries()
     installed = [InstalledPlugin.describe(p) for p in plugins]
     _log.info("DLBoard creating dash app with plugins:")
     for p in installed:

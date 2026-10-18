@@ -19,8 +19,9 @@ import sqlalchemy as sa
 from pydantic import NonNegativeInt, PositiveFloat, PositiveInt, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.exc import OperationalError
 
-from dlboard.serve import SQLStoreBase, set_data_store
+from dlboard.serve import Dependency, SQLStoreBase, set_data_store, wait_for
 
 if TYPE_CHECKING:
     from dash import Dash
@@ -111,6 +112,32 @@ class PostgresSettings(BaseSettings):
         }
 
 
+_STILL_STARTING: Final = (
+    "the database system is starting up",
+    "the database system is not yet accepting connections",
+    "the database system is in recovery mode",
+    "the database system is shutting down",
+)
+"""What a server that is reachable but not ready says in its `FATAL:` reply (SQLSTATE `57P03`, `cannot_connect_now`)."""
+
+
+def _unreachable(exc: Exception) -> bool:
+    """
+    Whether `exc` means the server can't be reached *yet*, which waiting can fix.
+
+    psycopg gives a failed connection no SQLSTATE, whatever the reason, so the only way to tell is libpq's message. A
+    connection that never got an answer (no DNS entry, refused, closed mid-handshake) has no `FATAL:` in it, and
+    neither has an answer that says the server is still starting. Any other `FATAL:` is a real answer (a wrong
+    password, a database that doesn't exist), and retrying it only delays the error.
+    """
+    match exc:
+        case OperationalError(orig=BaseException() as orig):
+            message = str(orig)
+            return "FATAL:" not in message or any(starting in message for starting in _STILL_STARTING)
+        case _:
+            return False
+
+
 class PostgresStore(SQLStoreBase[PostgresSettings]):
     """Use a Postgres database as the data store."""
 
@@ -128,6 +155,8 @@ class PostgresStore(SQLStoreBase[PostgresSettings]):
             pool_recycle=settings.pool_recycle_s,
             pool_pre_ping=settings.pool_pre_ping,
         )
+        # The database may still be coming up (a host that has just rebooted): see `wait_for`.
+        wait_for(Dependency.DATABASE, lambda: engine.connect().close(), transient=_unreachable)
         super().__init__(engine, schema=settings.db_schema)
 
     @override

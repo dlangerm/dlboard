@@ -53,6 +53,15 @@ pulls that section's body into the GitHub release notes and publishes both distr
 * A run's default name is no longer the same for every run a **seeded training script** starts. Names were drawn from the
   global `random` module, so `seed_everything` gave each run the same name, and naming a run also shifted the script's
   own random draws. Names are now drawn from the OS.
+* **The server survives starting before its database is up**, as every container does after a host reboot (Compose's
+  `depends_on` only orders `docker compose up`). It used to give up on the first refused connection, and Granian took
+  the second quick death for a crash loop and exited, leaving a stopped server that nothing restarted. The Postgres and
+  S3 plugins now retry an endpoint that is not reachable *yet* for `DLBOARD_STARTUP_WAIT_S` (120 seconds), with a log
+  line and a trace event per attempt; a wrong password or a missing bucket still fails at once. The compose file also
+  sets `restart: unless-stopped`.
+* **A server that cannot start now says why** as one `dlboard could not start` error, with its exception, on a failed
+  `dlboard.startup` span, instead of two interleaved tracebacks on stderr that no log collector saw. The new
+  `dlboard.server.workers` metric disappearing is what to alert on: see [docs/telemetry.md](docs/telemetry.md#alerting-that-its-down).
 
 ## [0.8.0] - 2026-10-16
 

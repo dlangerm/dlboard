@@ -18,11 +18,22 @@ from __future__ import annotations
 from dlboard.serve import app as build_app
 from dlboard.serve._logging import configure_logging
 from dlboard.serve._production_server import WSGISettings
+from dlboard.serve.telemetry import NoAttributes, Unit, UpDownCounter
 
 # Granian can start its workers with the `spawn` method (always on Python 3.14+, see its own
 # `spawn-ctx-methods`), which re-imports this module from scratch in each one with none of the
 # parent process's structlog setup -- so this has to run again here, not just once in `_cli.py`.
 configure_logging()
 
+_WORKERS = UpDownCounter[NoAttributes](
+    "dlboard.server.workers", Unit.WORKERS, "Server worker processes that have started and are serving."
+)
+
 _settings = WSGISettings()
-app = build_app(_settings.dlboard_plugins, url_prefix=_settings.dlboard_url_prefix).server
+try:
+    app = build_app(_settings.dlboard_plugins, url_prefix=_settings.dlboard_url_prefix).server
+except Exception:  # noqa: BLE001 -- see below: only the exit code matters here
+    # `build_app` has already logged why, as one structured error. Exiting here (still non-zero, so Granian counts
+    # it a crashed worker) keeps the interpreter from printing the same traceback again, raw, on stderr.
+    raise SystemExit(1) from None
+_WORKERS.add(1)

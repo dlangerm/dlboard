@@ -131,6 +131,35 @@ def test_plug_fails_fast_on_an_unreachable_bucket(monkeypatch: pytest.MonkeyPatc
         s3_module.plug(cast("Dash", object()))
 
 
+class _UnreachableEndpointClient:
+    """A fake `S3Client` whose endpoint never answers, as when MinIO is still starting on a rebooted host."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def head_bucket(self, **_: object) -> None:
+        from botocore.exceptions import EndpointConnectionError
+
+        self.calls += 1
+        raise EndpointConnectionError(endpoint_url="http://minio:9000")
+
+
+def test_plug_waits_for_an_endpoint_that_is_not_reachable_yet_and_then_gives_up(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from botocore.exceptions import EndpointConnectionError
+
+    monkeypatch.setenv("DLBOARD_S3_BUCKET", "b")
+    monkeypatch.setenv("DLBOARD_STARTUP_WAIT_S", "0.5")
+    client = _UnreachableEndpointClient()
+    monkeypatch.setattr(s3_module, "_client", _fake_client(client))
+
+    with pytest.raises(EndpointConnectionError):
+        s3_module.plug(cast("Dash", object()))
+
+    assert client.calls == 2
+
+
 def _write(backend: S3Blobs, key: str, content: bytes, tmp_path: Path) -> AnyUrl:
     staged = tmp_path / key
     staged.write_bytes(content)

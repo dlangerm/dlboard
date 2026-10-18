@@ -74,6 +74,8 @@ class TraceKey(StrEnum):
     HTTP_STATUS_CODE = "http.response.status_code"
     EXPERIMENT_ID = "dlboard.experiment.id"
     REQUEST_ID = "dlboard.request_id"
+    STARTUP_DEPENDENCY = "dlboard.startup.dependency"
+    STARTUP_ATTEMPT = "dlboard.startup.attempt"
 
 
 class OtlpProtocol(StrEnum):

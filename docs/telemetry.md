@@ -130,6 +130,21 @@ Every attribute has a small, fixed set of values. The names and attributes are c
 | `dlboard.runs.created` | counter | | Runs started. |
 | `dlboard.runs.finished` | counter | `dlboard.run.status` | Runs reported done, by how they ended. |
 | `dlboard.auth.sign_ins` | counter | `dlboard.auth.outcome` (`success`, `wrong_credentials`, `throttled`, `disabled`) | Attempts at the password sign-in form. |
+| `dlboard.server.workers` | up/down counter | | Server worker processes that started and are serving. One series per process, so it stops arriving when the server is down. |
+
+### Alerting that it's down
+
+A server that never started sends nothing, so its absence is what to alert on, not a value:
+
+- **No worker is reporting.** In Prometheus (or Grafana alerting), `absent_over_time(dlboard_server_workers[5m])`.
+  Workers push every `OTEL_METRIC_EXPORT_INTERVAL`, so keep the window several times longer than it.
+- **It tried to start and could not.** An error-level log at startup, `dlboard could not start`, carries the
+  exception; in Loki, `{service_name="dlboard"} | level="error"`. The same failure is a `dlboard.startup` span marked
+  as failed. Waiting for the database or the object store shows as `dlboard.startup.wait` spans with a `retry` event
+  per attempt (see `DLBOARD_STARTUP_WAIT_S` in [docker.md](docker.md)).
+
+Neither helps if the collector is down with the server -- a collector on the same host is, after a reboot, for
+a while. Only a probe from outside, hitting `/readyz`, covers a whole host being down.
 
 ## Traces
 

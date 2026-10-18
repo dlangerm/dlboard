@@ -102,6 +102,7 @@ settings table).
 | `DLBOARD_ADMIN_USERS` | no | Comma-separated usernames made admin whenever they sign in — the alternative to creating the first admin by hand (below). |
 | `DLBOARD_MAX_UPLOAD_MB` | no | Hard cap on any single request body, mainly artifact uploads. Defaults to 256. |
 | `DLBOARD_TELEMETRY_METRICS` | no | `prometheus` to serve `/metrics`, `otlp` to push to a collector, or both -- the image has the `otel` extra. See [telemetry.md](telemetry.md). |
+| `DLBOARD_STARTUP_WAIT_S` | no | How long to keep retrying a database or object store that isn't reachable yet before giving up. Defaults to 120; `0` fails on the first error. |
 
 Serve it over HTTPS in front of a reverse proxy — session cookies are `Secure` by default, which
 most HTTP clients (browsers included, `localhost` sometimes excepted) silently refuse to send back
@@ -109,6 +110,18 @@ over a plain-HTTP connection, breaking sign-in rather than just weakening it. `d
 sets `DLBOARD_SECURE_COOKIES=false` for exactly this reason, since it's plain HTTP by design — leave
 it at its default (`true`) everywhere else (see [auth.md](plugins/auth.md) for rate-limiting
 `/login` too).
+
+### After a reboot
+
+When the host comes back, Docker starts every container at once. Compose's `depends_on: condition: service_healthy`
+only orders `docker compose up`; it is not applied to containers restarting by themselves, so dlboard can start before
+its database accepts connections. It waits for it: for up to `DLBOARD_STARTUP_WAIT_S` (120 seconds) it retries a
+database or object store that can't be reached yet, logging each attempt, and fails at once on anything waiting
+can't fix, such as a wrong password.
+
+Give every service `restart: unless-stopped` (the `docker-compose.yml` here does), so that one that does give up, or
+crashes later, comes back by itself instead of staying down until someone notices. See
+[telemetry.md](telemetry.md#alerting-that-its-down) for noticing.
 
 ## Creating the first admin
 

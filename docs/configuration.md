@@ -42,6 +42,7 @@ These tune the process that `dlboard serve` runs under (not used by `--debug`).
 | `DLBOARD_BACKPRESSURE` | `0` (Granian decides) | Requests a worker accepts at once; more wait in the socket backlog. |
 | `DLBOARD_HEADER_READ_TIMEOUT_S` | `30` | How long a client may take to send its request headers. Guards against slow-connection attacks. |
 | `DLBOARD_KEEP_ALIVE` | `true` | Keep HTTP/1 connections open between requests. |
+| `DLBOARD_STARTUP_WAIT_S` | `120` | How long to keep retrying a database or object store that cannot be reached yet before the server gives up starting. `0` fails on the first error. A wrong password or a missing bucket always fails at once. See [After a reboot](docker.md#after-a-reboot). |
 
 Worker and thread counts are `dlboard serve --workers` (default 2) and `--blocking-threads`
 (default 16), not environment variables.

@@ -23,6 +23,9 @@
 services:
   dlboard:
     build: .
+    # After a reboot Docker starts every container at once: `depends_on` below only orders `docker compose up`, not
+    # that. dlboard waits for its database itself (DLBOARD_STARTUP_WAIT_S), and this brings it back if it dies anyway.
+    restart: unless-stopped
     # On `docker compose stop`/`down`, give the server time to write queued artifact blobs and
     # record them (DLBOARD_WORKERS_KILL_TIMEOUT_S, 30 by default) -- Docker's own 10s default would SIGKILL it first.
     stop_grace_period: 35s
@@ -61,6 +64,7 @@ services:
 
   lgtm:
     image: grafana/otel-lgtm:latest
+    restart: unless-stopped
     ports:
       - 3000:3000 # Grafana: Explore -> Tempo (traces), Prometheus (metrics), Loki (logs)
       - 4318:4318 # OTLP/HTTP, for a training script on your machine
@@ -78,6 +82,7 @@ services:
 
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_USER: dlboard
       POSTGRES_PASSWORD: dlboard
