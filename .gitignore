@@ -19,3 +19,4 @@ screenshot-diffs/
 
 # Claude Code's own local settings/session state -- developer-machine-local, not project config.
 .claude/
+.dlboard/

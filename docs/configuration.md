@@ -101,14 +101,14 @@ Only matter with an identity-verifying provider such as `PASSWORD_AUTH`. See [au
 
 | Variable | Default | |
 |---|---|---|
-| `DLBOARD_SQLITE_LOCATION` | `~/.dlboard.sqlite` | The metadata database file. |
+| `DLBOARD_SQLITE_LOCATION` | `.dlboard/db.sqlite` | The metadata database file. |
 | `DLBOARD_SQLITE_BUSY_TIMEOUT_MS` | `30000` | How long SQLite retries a locked database before failing. |
 
 ## Filesystem artifact storage
 
 | Variable | Default | |
 |---|---|---|
-| `DLBOARD_ARTIFACT_STORE_LOCATION` | `~/.dlboard_artifacts` | Where artifact blobs live. Uploads are staged in `.staging/` inside it, so give it enough room and keep it on one volume. |
+| `DLBOARD_ARTIFACT_STORE_LOCATION` | `.dlboard/artifacts` | Where artifact blobs live. Uploads are staged in `.staging/` inside it, so give it enough room and keep it on one volume. |
 | `DLBOARD_FILESYSTEM_STORE_QUEUE_SIZE` | `100` | Uploads that can wait for the writer. When full, new uploads wait up to 30 seconds, then get a 503 the client retries. |
 
 ## Postgres storage

@@ -11,7 +11,7 @@ blobs without the database are unnamed files.
 
 | Deployment | Metadata | Artifacts |
 |---|---|---|
-| `dlboard serve local` | `DLBOARD_SQLITE_LOCATION` (`~/.dlboard.sqlite`) | `DLBOARD_ARTIFACT_STORE_LOCATION` (`~/.dlboard_artifacts`) |
+| `dlboard serve local` | `DLBOARD_SQLITE_LOCATION` (`.dlboard/db.sqlite`) | `DLBOARD_ARTIFACT_STORE_LOCATION` (`.dlboard/artifacts`) |
 | Postgres + filesystem | the Postgres database | `DLBOARD_ARTIFACT_STORE_LOCATION` volume |
 | Postgres + S3 | the Postgres database | the S3 bucket and prefix |
 
@@ -22,7 +22,7 @@ next to it, and a copy taken mid-write can be corrupt. Use SQLite's own backup, 
 database:
 
 ```bash
-sqlite3 ~/.dlboard.sqlite ".backup '/backups/dlboard-$(date +%F).sqlite'"
+sqlite3 .dlboard/db.sqlite ".backup '/backups/dlboard-$(date +%F).sqlite'"
 ```
 
 To restore, stop the server, put the backup at `DLBOARD_SQLITE_LOCATION` (delete any `-wal` and `-shm`
