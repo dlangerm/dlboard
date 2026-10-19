@@ -12,6 +12,8 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-19
+
 ### Added
 
 * **Image overlays.** `dlboard.client.artifacts.overlay.Overlay` logs the shapes drawn over a picture -- boxes and
