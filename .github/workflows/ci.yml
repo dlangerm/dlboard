@@ -46,8 +46,29 @@ jobs:
       - run: uv run prek run --all-files --skip no-commit-to-branch
       - run: uv run pyrefly check
 
-  test:
+  # Runs first, ahead of the suite: a random sample of the suite's tests, each run three times in a row. A test
+  # that passes some runs and fails others is flaky, so this job fails, files an issue for it, and the suite
+  # below is skipped. A test that fails every run is not flaky, and the suite reports it as it always has.
+  flaky-tests:
     needs: [check_doc_only, typecheck-precommit]
+    runs-on: ubuntu-latest
+    if: needs.check_doc_only.outputs.skip-tests != 'true'
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-env
+      - run: uv run playwright install --with-deps chromium
+      - run: uv run python tools/flaky_check.py --file-issues --run-url 
+          "$RUN_URL"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository 
+            }}/actions/runs/${{ github.run_id }}
+
+  test:
+    needs: [check_doc_only, typecheck-precommit, flaky-tests]
     runs-on: ubuntu-latest
     if: needs.check_doc_only.outputs.skip-tests != 'true'
     steps:
@@ -69,7 +90,7 @@ jobs:
   # same way `uv run pytest -m postgres` does locally.
   test-postgres:
     if: needs.check_doc_only.outputs.skip-tests != 'true'
-    needs: [check_doc_only, typecheck-precommit]
+    needs: [check_doc_only, typecheck-precommit, flaky-tests]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -80,7 +101,7 @@ jobs:
   # way `uv run pytest -m s3` does locally. See `dlboard/conftest.py`'s `s3_test_server`.
   test-s3:
     if: needs.check_doc_only.outputs.skip-tests != 'true'
-    needs: [check_doc_only, typecheck-precommit]
+    needs: [check_doc_only, typecheck-precommit, flaky-tests]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
