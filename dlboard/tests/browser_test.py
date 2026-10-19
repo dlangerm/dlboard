@@ -2147,7 +2147,8 @@ def test_an_image_charts_per_tag_display_is_edited_as_table_rows_in_the_chart_ed
     rows.first.locator(".ag-checkbox-input-wrapper").click()
     page.locator('button[id*="tag_display"][id*="table-remove"]').click()
     expect(rows).to_have_count(0)
-    add_row.click()  # the new row's name is already open for typing
+    add_row.click()  # the new row's name opens for typing, a moment after the click
+    expect(editor.locator('.ag-cell[col-id="key"] input')).to_be_focused()
     page.keyboard.type("took")
     page.keyboard.press("Tab")
     page.keyboard.type("2")
