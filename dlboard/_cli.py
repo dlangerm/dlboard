@@ -40,8 +40,8 @@ app.command(users_app)
 _log = structlog.stdlib.get_logger(__name__)
 
 
-_DEFAULT_SQLITE_LOCATION = Path.home() / ".dlboard.sqlite"
-_DEFAULT_ARTIFACT_STORE_LOCATION = Path.home() / ".dlboard_artifacts"
+_DEFAULT_SQLITE_LOCATION = Path.cwd() / ".dlboard/db.sqlite"
+_DEFAULT_ARTIFACT_STORE_LOCATION = Path.cwd() / ".dlboard/artifacts"
 
 # `dlboard serve local` is just `custom` pointed at dlboard's own built-in plugin list -- resolved
 # through the exact same import mechanism as a caller-supplied `--plugins module:attr` target.

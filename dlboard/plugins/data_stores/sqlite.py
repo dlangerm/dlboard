@@ -12,11 +12,14 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import event
 from sqlalchemy.dialects import sqlite
 from sqlalchemy.pool import NullPool
+from structlog.stdlib import get_logger
 
 from dlboard.serve import SCHEMA_PREP_OPTION, SQLStoreBase, set_data_store
 
 if TYPE_CHECKING:
     from dash import Dash
+
+_logger = get_logger(__name__)
 
 
 DEFAULT_BUSY_TIMEOUT_MS: int = 30_000
@@ -123,6 +126,7 @@ class SQLLiteStore(SQLStoreBase[Path]):
         self._busy_timeout_ms = busy_timeout_ms
         location.parent.mkdir(parents=True, exist_ok=True)
         super().__init__(_engine(location, busy_timeout_ms))
+        _logger.info("Using sqlite data store", location=str(location), busy_timeout_ms=busy_timeout_ms)
 
     @override
     def _insert_ignoring_conflicts(self, table: sa.Table) -> sa.Insert:
@@ -154,7 +158,7 @@ class AppSettings(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="DLBOARD_")
 
-    sqlite_location: Path = Path.home() / ".dlboard.sqlite"
+    sqlite_location: Path = Path.cwd() / ".dlboard/db.sqlite"
     sqlite_busy_timeout_ms: int = DEFAULT_BUSY_TIMEOUT_MS
     """How long sqlite's own busy handler retries a locked database before raising `OperationalError`."""
 

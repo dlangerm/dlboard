@@ -40,6 +40,8 @@ pulls that section's body into the GitHub release notes and publishes both distr
 * An image chart's thumbnail shows a **spinner** while the picture for the slider's step is still downloading. The old
   picture is dimmed under it, rather than shown as if it were that step's, and the spinner goes once the new picture
   has arrived.
+* Changed default location for logged data to the current directory for sqlite instead of the home directory to better
+mirror tensorboard behavior.
 
 ### Fixed
 

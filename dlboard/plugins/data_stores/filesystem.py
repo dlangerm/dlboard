@@ -9,12 +9,16 @@ from typing import TYPE_CHECKING
 from flask import send_from_directory
 from pydantic import AnyUrl
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from structlog.stdlib import get_logger
 
 from dlboard.plugins.data_stores._blob_store import RefAccess, plug_blob_store
 
 if TYPE_CHECKING:
     from dash import Dash
     from flask import Response
+
+
+_logger = get_logger(__name__)
 
 
 STAGING_DIRNAME = ".staging"
@@ -28,6 +32,7 @@ class FSBlobs:
         """Initialize the backend, creating `root` if it doesn't exist yet."""
         root.mkdir(parents=True, exist_ok=True)
         self._root = root.resolve()
+        _logger.info("Using filesystem artifact store", root=str(self._root))
 
     def _resolve(self, ref: AnyUrl) -> Path | None:
         """The local path `ref` names, or `None` if it's not a `file:` ref inside `self._root`."""
@@ -74,7 +79,7 @@ class AppSettings(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="DLBOARD_")
 
-    artifact_store_location: Path = Path.home() / ".dlboard_artifacts"
+    artifact_store_location: Path = Path.cwd() / ".dlboard/artifacts"
     filesystem_store_queue_size: int = 100
 
 
