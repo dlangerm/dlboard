@@ -9,7 +9,7 @@ from dash import ALL, MATCH
 
 from dlboard.models import ColumnKind
 from dlboard.serve._component_ids import PatternId
-from dlboard.serve._pages._experiment import _chart_editor_modal as editor
+from dlboard.serve._pages._experiment import _chart_settings_form as editor
 from dlboard.serve._pages._experiment import _chart_suggestions as suggestions
 from dlboard.serve._pages._experiment import _chart_view as chart_view
 from dlboard.serve._pages._experiment import _ids as ids
