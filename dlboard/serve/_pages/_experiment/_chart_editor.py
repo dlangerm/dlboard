@@ -13,6 +13,7 @@ The settings form is `_chart_settings_form.py`'s.
 
 from __future__ import annotations
 
+import json
 import secrets
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Final, Literal, cast
@@ -57,9 +58,12 @@ _log = get_logger(__name__)
 
 _CANCEL_JS = ClientsideScript(Path(__file__).with_name("chart_editor_cancel.js"))
 _REMOUNT_JS = ClientsideScript(Path(__file__).with_name("chart_editor_remount.js"))
+_MARK_JS = ClientsideScript(Path(__file__).with_name("chart_editor_mark.js"))
 
 CHART_EDITOR_DOCK_ID: PaneId[ids.ExperimentPage] = PaneId("chart-editor-dock")
 CHART_EDITOR_TARGET_ID: StoreId[ids.ExperimentPage] = StoreId("chart-editor-target")
+CHART_EDITOR_FORM_FOR_ID: StoreId[ids.ExperimentPage] = StoreId("chart-editor-form-for")
+"""What the form on screen was built for (`_form_key`): the person's choice of type rebuilds the form, but opening the editor already has."""
 CHART_EDITOR_REMOUNT_ID: StoreId[ids.ExperimentPage] = StoreId("chart-editor-remount")
 """Changes when the cards were drawn again while the editor is open, so it draws its draft again."""
 CHART_EDITOR_TITLE_ID: DivId[ids.ExperimentPage] = DivId("chart-editor-title")
@@ -122,6 +126,7 @@ def chart_editor_dock() -> html.Aside:
     return aside(
         [
             Store(id=CHART_EDITOR_TARGET_ID),
+            Store(id=CHART_EDITOR_FORM_FOR_ID),
             Store(id=CHART_EDITOR_REMOUNT_ID),
             dmc.Stack(
                 [
@@ -151,6 +156,28 @@ def chart_editor_dock() -> html.Aside:
 
 def _target_of(data: dict[str, Any] | None) -> EditCharts | AddChart | None:
     return _TARGET.validate_python(data) if data else None
+
+
+def _form_key(target: dict[str, Any] | None, chart_type_name: str | None) -> str:
+    """What a settings form is for: what the editor is open on, and the chart type the form is of. The same is the same form."""
+    return json.dumps([target, chart_type_name], sort_keys=True)
+
+
+def _settings_form(
+    target_data: dict[str, Any] | None, chart_type_name: str | None, page_json: str, experiment_id: int
+) -> list[Component]:
+    """The form for `chart_type_name`, starting from the chart being edited if it is of that type."""
+    edited: EditedChart | None = None
+    if isinstance(target := _target_of(target_data), EditCharts):
+        panels = page_model.BasicExperimentPage.model_validate_json(page_json).panels
+        if location := page_model.locate_chart(panels, target.charts[0].chart_id):
+            edited = EditedChart(
+                chart_type=location.chart.chart_type,
+                parameters=models.ChartTypeRegistry.current_parameters(location.chart),
+            )
+    return build_chart_param_form(
+        chart_type_name, edited, store=get_data_store(), experiment_id=experiment_id
+    )
 
 
 def render_chart_preview(  # noqa: PLR0913
@@ -201,6 +228,10 @@ def render_card_drafts(
     The `CHART_DRAFT` of each card, with the edited chart drawn as the form has it in its own and the rest empty.
 
     A form that does not (yet) make a valid chart leaves the draft as it was and says why.
+
+    It is drawn even while the form says what the saved chart says. The first draw of a card's draft is a heavy one, and
+    is better done as the editor opens than later, when the person is typing in the form: it can reorder their keystrokes
+    in a table cell that is open (the chart editor's tag display test caught exactly that).
     """
     chart_type_name = values["chart_type_name"]
     if not chart_type_name:
@@ -240,18 +271,31 @@ def _register_open_and_cancel(app: Dash) -> None:
         Output(CHART_EDITOR_TYPE_ID, "value"),
         Output(CHART_EDITOR_TITLE_ID, "children"),
         Output(CHART_EDITOR_SAVE_ID, "children"),
+        Output(CHART_EDITOR_PARAMS_ID, "children", allow_duplicate=True),
+        Output(CHART_EDITOR_FORM_FOR_ID, "data", allow_duplicate=True),
         Input(panel_view.OPEN_CHART_BUTTON.all(), "n_clicks"),
         Input(chart_view.EDIT_CHART_BUTTON.all(), "n_clicks"),
         State(ids.STATE_PAGE_STORAGE, "data"),
+        State(constants.STATE_EXPERIMENT_ID, "data"),
         prevent_initial_call=True,
     )
     def open_chart_editor(
-        _add_clicks: list[int], _edit_clicks: list[int], page_json: str
-    ) -> tuple[bool, dict[str, Any], str | None, str, str]:
+        _add_clicks: list[int], _edit_clicks: list[int], page_json: str, experiment_id: int
+    ) -> tuple[bool, dict[str, Any], str | None, str, str, list[Component], str]:
+        """Opens the editor, with its form built in this same round trip: it is what the person is waiting for."""
         triggered_id = cast("chart_view.ChartID", require_triggered_id())
 
         if triggered_id["type"] == panel_view.OPEN_CHART_BUTTON.type:
-            return False, AddChart(panel=triggered_id["panel"]).model_dump(), None, "Add chart", "Add chart"
+            adding = AddChart(panel=triggered_id["panel"]).model_dump()
+            return (
+                False,
+                adding,
+                None,
+                "Add chart",
+                "Add chart",
+                [],
+                _form_key(adding, None),
+            )
 
         panel = next(
             p
@@ -262,8 +306,16 @@ def _register_open_and_cancel(app: Dash) -> None:
             msg = f"Malformed edit-chart id: {triggered_id}"
             raise ValueError(msg)
         chart = panel.charts[triggered_id["index"]]
-        target = EditCharts(charts=(ChartRef(chart_id=chart.id),))
-        return False, target.model_dump(), chart.chart_type, "Edit chart", "Save changes"
+        editing = EditCharts(charts=(ChartRef(chart_id=chart.id),)).model_dump()
+        return (
+            False,
+            editing,
+            chart.chart_type,
+            "Edit chart",
+            "Save changes",
+            _settings_form(editing, chart.chart_type, page_json, experiment_id),
+            _form_key(editing, chart.chart_type),
+        )
 
     app.clientside_callback(
         _CANCEL_JS.source,
@@ -274,6 +326,13 @@ def _register_open_and_cancel(app: Dash) -> None:
         Output(CHART_EDITOR_ERROR_ID, "children", allow_duplicate=True),
         Input(CHART_EDITOR_CANCEL_ID, "n_clicks"),
         State(chart_view.CHART_DRAFT.all(), "id"),
+        prevent_initial_call=True,
+    )
+    app.clientside_callback(
+        _MARK_JS.source,
+        Output(CHART_EDITOR_DOCK_ID, "data-chart-id"),
+        Input(CHART_EDITOR_TARGET_ID, "data"),
+        Input(chart_view.CHART_DRAFT.all(), "id"),
         prevent_initial_call=True,
     )
     app.clientside_callback(
@@ -288,37 +347,37 @@ def _register_open_and_cancel(app: Dash) -> None:
 def _register_form_and_draft(app: Dash) -> None:
     @app.callback(
         Output(CHART_EDITOR_PARAMS_ID, "children"),
+        Output(CHART_EDITOR_FORM_FOR_ID, "data"),
         Input(CHART_EDITOR_TYPE_ID, "value"),
         State(CHART_EDITOR_TARGET_ID, "data"),
+        State(CHART_EDITOR_FORM_FOR_ID, "data"),
         State(ids.STATE_PAGE_STORAGE, "data"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
         prevent_initial_call=True,
     )
     def build_settings_form(
-        chart_type_name: str | None, target_data: dict[str, Any] | None, page_json: str, experiment_id: int
-    ) -> list[Component]:
-        edited: EditedChart | None = None
-        if isinstance(target := _target_of(target_data), EditCharts):
-            panels = page_model.BasicExperimentPage.model_validate_json(page_json).panels
-            if location := page_model.locate_chart(panels, target.charts[0].chart_id):
-                edited = EditedChart(
-                    chart_type=location.chart.chart_type,
-                    parameters=models.ChartTypeRegistry.current_parameters(location.chart),
-                )
-        return build_chart_param_form(
-            chart_type_name, edited, store=get_data_store(), experiment_id=experiment_id
-        )
+        chart_type_name: str | None,
+        target_data: dict[str, Any] | None,
+        built_for: str | None,
+        page_json: str,
+        experiment_id: int,
+    ) -> tuple[list[Component], str]:
+        """Rebuilds the form for the type the person chose; opening the editor has built it already."""
+        key = _form_key(target_data, chart_type_name)
+        if key == built_for:
+            raise PreventUpdate
+        return _settings_form(target_data, chart_type_name, page_json, experiment_id), key
 
     @app.callback(
         Output(chart_view.CHART_DRAFT.all(), "children"),
         Output(CHART_EDITOR_PREVIEW_ID, "children"),
         Output(CHART_EDITOR_ERROR_ID, "children"),
-        Input(CHART_EDITOR_TYPE_ID, "value"),
         Input(CHART_PARAM.all(), "value"),
         Input(CHART_PARAM.all(), "checked"),
         Input(CHART_PARAM_TABLE_DATA.all(), "data"),
         Input(CHART_EDITOR_REMOUNT_ID, "data"),
         {
+            "chart_type_name": State(CHART_EDITOR_TYPE_ID, "value"),
             "target": State(CHART_EDITOR_TARGET_ID, "data"),
             "field_ids": State(CHART_PARAM.all(), "id"),
             "table_ids": State(CHART_PARAM_TABLE_DATA.all(), "id"),
@@ -331,13 +390,15 @@ def _register_form_and_draft(app: Dash) -> None:
         prevent_initial_call=True,
     )
     def render_draft(
-        chart_type_name: str | None,
         values: list[Any],
         checked_values: list[Any],
         table_values: list[Any],
         _remounted: int | None,
         state: dict[str, Any],
     ) -> tuple[list[Any], Any, str]:
+        # Not listening to the chart type: a type chosen rebuilds the form, and the form's own fields then say so. Listening
+        # to both drew the chart once with the previous form's values (the wrong chart) before the right one.
+        chart_type_name = state["chart_type_name"]
         target = _target_of(state["target"])
         no_drafts: list[Any] = [None] * len(state["draft_ids"])
         form = _FormValues(

@@ -108,8 +108,9 @@
   scroll-margin-top: 72px;
 }
 
-/* A chart being edited is drawn in its own card (`CHART_DRAFT`), in place of the chart itself, which stays under it. */
-.dl-chart-item:has(> .dl-chart-draft:not(:empty)) {
+/* The card of the chart the editor is open on is outlined (`chart_editor_mark.js`). Once the form makes it a different chart,
+   that chart is drawn in the card (`CHART_DRAFT`) in place of the saved one, which stays under it. */
+.dl-chart-item[data-dl-editing] {
   outline: 2px solid var(--mantine-color-blue-filled);
   outline-offset: 2px;
   border-radius: var(--mantine-radius-sm);
