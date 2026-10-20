@@ -13,6 +13,7 @@ from dlboard import models
 from dlboard.conftest import find_props
 from dlboard.conftest import props as _to_props
 from dlboard.models._view import ColumnKind, ParameterField, ParameterFieldType
+from dlboard.plugins.charts.bar_chart import BarChart
 from dlboard.plugins.charts.line_chart import LineChart
 from dlboard.plugins.charts.table_chart import TableChart
 from dlboard.serve._grid import SLIDER_RENDERER
@@ -33,6 +34,7 @@ if TYPE_CHECKING:
 
 _TS = pendulum.datetime(2026, 1, 1, tz="UTC")
 
+BarChart.register(allow_override=True)
 LineChart.register(allow_override=True)
 TableChart.register(allow_override=True)
 
@@ -177,6 +179,44 @@ def test_merge_chart_param_values_drops_cleared_optional_fields() -> None:
 def test_build_validated_chart_instance_succeeds_for_valid_parameters() -> None:
     chart = editor.build_validated_chart_instance("line", {"column": "loss", "x_axis": "step"})
     assert chart.chart_type == "line"
+
+
+def test_an_edited_chart_keeps_its_id_so_a_link_to_it_still_opens_it() -> None:
+    parameters = {"column": "loss", "x_axis": "step"}
+
+    kept = editor.build_validated_chart_instance("line", {**parameters, "height": 500}, "abc123")
+
+    assert kept.id == "abc123"
+    assert (
+        editor.build_validated_chart_instance("line", parameters).id != kept.id
+    )  # no id given: from the settings
+
+
+@pytest.mark.parametrize(
+    ("form_for", "height"),
+    [
+        pytest.param("line", 500, id="the-edited-charts-own-type"),
+        pytest.param("bar", 300, id="another-type-starts-from-its-defaults"),
+    ],
+)
+def test_the_form_is_filled_from_the_edited_chart_only_for_its_own_type(
+    store: SQLLiteStore, experiment_id: int, form_for: str, height: int
+) -> None:
+    edited = editor.EditedChart(chart_type="line", parameters={"column": "loss", "height": 500})
+
+    form = _props_by_field(build_chart_param_form(form_for, edited, store=store, experiment_id=experiment_id))
+
+    assert form["height"]["value"] == height
+
+
+def test_a_numbers_range_bounds_its_input() -> None:
+    field = ParameterField(
+        name="tag_precision", type=ParameterFieldType.INT, required=False, default=4, minimum=1, maximum=15
+    )
+
+    props = _to_props(_param_field_input(field.name, field, ColumnCatalog()))
+
+    assert (props["min"], props["max"]) == (1, 15)
 
 
 @pytest.mark.parametrize(

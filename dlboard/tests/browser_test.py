@@ -2280,9 +2280,13 @@ def test_an_edited_image_chart_still_scrubs_and_opens_its_enlarged_view(
 
     chart = page.locator(".dl-chart-item")
     chart.hover()
+    chart_id = chart.get_attribute("data-chart-id")
     chart.get_by_role("button", name="Edit chart").click()
     page.locator(f"#{ADD_CHART_SUBMIT_ID}").click()
     expect(page.get_by_role("dialog")).to_be_hidden()
+    expect(chart).to_have_attribute(
+        "data-chart-id", chart_id or ""
+    )  # an edit keeps the chart, and so its links
 
     picture = chart.locator(".dl-image-series-thumb img")
     before = picture.get_attribute("src")

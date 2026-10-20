@@ -7,6 +7,7 @@ The shell (`add_chart_modal`) is rendered once by the experiment page, beside th
 
 from __future__ import annotations
 
+import secrets
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Final, cast
 
@@ -15,7 +16,7 @@ import dash_mantine_components as dmc
 from dash import Dash, Input, NoUpdate, Output, State, dcc, html, no_update
 from dash.dcc import Store
 from dash.exceptions import PreventUpdate
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 from structlog.stdlib import get_logger
 
 from dlboard import models
@@ -87,6 +88,17 @@ _CHART_PARAM_TABLE: Final = _FieldPattern("chart-param-table")
 """The editable grid of a `TABLE` chart parameter."""
 _CHART_PARAM_TABLE_ADD: Final = _FieldPattern("chart-param-table-add")
 _CHART_PARAM_TABLE_REMOVE: Final = _FieldPattern("chart-param-table-remove")
+
+
+class EditedChart(BaseModel, frozen=True):
+    """The chart the editor was opened on: its type and settings, which only a form of that same type is filled from."""
+
+    chart_type: str
+    parameters: dict[str, Any]
+
+
+NEW_CHART_ID_BYTES: Final = 5
+"""How many random bytes a new chart's id is made of (twice as many hex characters), enough that two never collide."""
 
 
 class _AddChartCtx(edits.EditCtx):
@@ -172,7 +184,7 @@ def merge_chart_param_values(  # noqa: PLR0913
 
 
 def build_validated_chart_instance(
-    chart_type_name: str, parameters: dict[str, Any]
+    chart_type_name: str, parameters: dict[str, Any], chart_id: str | None = None
 ) -> models.ChartInstance[Any, Any]:
     """
     Build a `models.ChartInstance`, validating `parameters` against the chart type's own settings model.
@@ -181,10 +193,15 @@ def build_validated_chart_instance(
     raises even for garbage values (e.g. a cleared numeric field), so callers that need to surface a
     validation error to the user (rather than have it surface later, unguarded, from
     `hint_required_columns`/`render`) must validate through here instead.
+
+    `chart_id` is the id of the chart being edited, which an edit keeps (a `?chart=` link to it still opens it); `None`
+    for a new chart, whose id is derived from its settings.
     """
     chart_type = models.ChartTypeRegistry.get_chart_type(chart_type_name)
     chart_type.parameter_type().model_validate(parameters)
-    return models.ChartInstance[Any, Any](chart_type=chart_type_name, parameters=parameters)
+    if chart_id is None:
+        return models.ChartInstance[Any, Any](chart_type=chart_type_name, parameters=parameters)
+    return models.ChartInstance[Any, Any](chart_type=chart_type_name, parameters=parameters, id=chart_id)
 
 
 def _table_input(
@@ -318,6 +335,8 @@ def _param_field_input(  # noqa: PLR0911
                 id=input_id,
                 label=label,
                 value=number_value,
+                min=field.minimum,
+                max=field.maximum,
                 step=1 if field.type == models.ParameterFieldType.INT else 0.1,
                 description=field.description,
                 # Optional fields (a default, not required) get a visible clear button that resets
@@ -445,11 +464,11 @@ def _register_open_close(app: Dash) -> None:
     )
     def open_chart_modal(
         _add_clicks: list[int], _edit_clicks: list[int], page_json: str
-    ) -> tuple[bool, chart_view.ChartTargetData, str | None, dict[str, Any], bool]:
+    ) -> tuple[bool, chart_view.ChartTargetData, str | None, dict[str, Any] | None, bool]:
         triggered_id = cast("chart_view.ChartID", require_triggered_id())
 
         if triggered_id["type"] == panel_view.OPEN_CHART_BUTTON.type:
-            return True, {"panel": triggered_id["panel"], "index": None}, None, {}, False
+            return True, {"panel": triggered_id["panel"], "index": None}, None, None, False
 
         curr_page = page_model.BasicExperimentPage.model_validate_json(page_json)
         panel = next(p for p in curr_page.panels if p.name == triggered_id["panel"])
@@ -462,7 +481,9 @@ def _register_open_close(app: Dash) -> None:
             True,
             {"panel": triggered_id["panel"], "index": idx},
             chart.chart_type,
-            models.ChartTypeRegistry.current_parameters(chart),
+            EditedChart(
+                chart_type=chart.chart_type, parameters=models.ChartTypeRegistry.current_parameters(chart)
+            ).model_dump(),
             False,
         )
 
@@ -493,17 +514,24 @@ def _register_open_close(app: Dash) -> None:
 
 def build_chart_param_form(
     chart_type_name: str | None,
-    initial_params: dict[str, Any] | None,
+    edited: EditedChart | None,
     *,
     store: DataStore[...],
     experiment_id: int,
 ) -> list[Component]:
-    """Build the add/edit-chart form's fields, offering the experiment's real columns as choices."""
+    """
+    Build the add/edit-chart form's fields, offering the experiment's real columns as choices.
+
+    The fields start from the `edited` chart's settings only while the form is for its own type: a different
+    type's settings are not this one's, even where a name (`height`) happens to match.
+    """
     if not chart_type_name:
         return []
     catalog = ColumnCatalog.load(store, experiment_id)
     fields = models.ChartTypeRegistry.get_registered_chart_types()[chart_type_name]
-    initial_params = initial_params or {}
+    initial_params = (
+        edited.parameters if edited and edited.chart_type == chart_type_name else dict[str, Any]()
+    )
     return [
         _param_field_input(name, field, catalog, override=initial_params.get(name))
         for name, field in fields.items()
@@ -555,10 +583,13 @@ def _register_form(app: Dash) -> None:
         prevent_initial_call=True,
     )
     def build_param_form(
-        chart_type_name: str | None, initial_params: dict[str, Any] | None, experiment_id: int
+        chart_type_name: str | None, edited: dict[str, Any] | None, experiment_id: int
     ) -> list[Component]:
         return build_chart_param_form(
-            chart_type_name, initial_params, store=get_data_store(), experiment_id=experiment_id
+            chart_type_name,
+            EditedChart.model_validate(edited) if edited else None,
+            store=get_data_store(),
+            experiment_id=experiment_id,
         )
 
     @app.callback(
@@ -632,12 +663,19 @@ def _register_submit(app: Dash) -> None:
             table_ids=add_chart_ctx["table_ids"],
             table_values=add_chart_ctx["table_values"],
         )
+        panel_name, index = target["panel"], target.get("index")
+        # An edit keeps the chart's id, so a link to it still opens it; a new chart gets one of its own, so two charts
+        # of one config are not one chart to a link or to anything keyed by id.
+        panels = page_model.BasicExperimentPage.model_validate_json(add_chart_ctx["page_json"]).panels
+        chart_id = (
+            next(p for p in panels if p.name == panel_name).charts[index].id
+            if index is not None
+            else secrets.token_hex(NEW_CHART_ID_BYTES)
+        )
         try:
-            new_chart = build_validated_chart_instance(chart_type_name, parameters)
+            new_chart = build_validated_chart_instance(chart_type_name, parameters, chart_id)
         except (ValidationError, KeyError) as exc:
             return no_update, True, f"Invalid parameters: {exc}", no_update, False
-
-        panel_name, index = target["panel"], target.get("index")
 
         def apply_chart(panels: list[Any]) -> list[Any]:
             return [page_model.upsert_chart(p, panel_name, index, new_chart) for p in panels]
