@@ -15,6 +15,7 @@ from dlboard.models import (
     LoggedMetrics,
     NewHyperParams,
     NewRun,
+    overlay_key,
 )
 from dlboard.models._view import ColumnKind
 from dlboard.serve._pages._experiment._column_catalog import ColumnCatalog
@@ -48,6 +49,15 @@ _CATALOG = ColumnCatalog(
 )
 def test_column_catalog_options_by_kind(kind: ColumnKind, expected: list[str]) -> None:
     assert _CATALOG.options(kind) == expected
+
+
+def test_an_overlay_is_no_choice_of_artifact_when_the_image_it_goes_over_is_logged() -> None:
+    drawn = overlay_key("samples/a", "truth")
+    orphan = overlay_key("samples/b")  # no "samples/b" is logged
+    catalog = ColumnCatalog(artifacts=("samples/a", drawn, "samples/c", orphan))
+
+    # The image's chart draws `drawn`; the orphan has no image to draw it, so it can only be charted as itself.
+    assert catalog.options(ColumnKind.ARTIFACT) == ["samples/a", "samples/c", orphan]
 
 
 def test_column_catalog_offers_no_metric_axes_without_metrics() -> None:

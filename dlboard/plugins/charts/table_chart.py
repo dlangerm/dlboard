@@ -40,6 +40,7 @@ from dlboard.models import (
     RenderContext,
     TagValue,
     artifact_column,
+    artifact_display_name,
     artifact_fname_column,
     artifact_keys_in,
     artifact_tags_column,
@@ -387,7 +388,8 @@ def _render_by_group(source: _Source) -> dag.AgGrid:
             group
             for key, tag_titles in artifacts
             for group in _column_group(
-                key, _artifact_columns(artifact_column(key), artifact_title, tag_titles, records)
+                artifact_display_name(key),
+                _artifact_columns(artifact_column(key), artifact_title, tag_titles, records),
             )
         ),
     ]
@@ -447,7 +449,7 @@ def _render_spread_by_run(source: _Source) -> dag.AgGrid:
             column_def(
                 cell(run_id, artifact_column(key)),
                 TEXT,
-                headerName=key,
+                headerName=artifact_display_name(key),
                 cellRenderer="markdown",
                 minWidth=160,
             )

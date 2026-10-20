@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import functools
 import typing
 from dataclasses import dataclass, field
 
 from dlboard.models import (
     ColumnKind,
     MetricColumn,
+    OverlayKey,
     layer_kind,
 )
 from dlboard.serve._pages._experiment._chart_autogen import default_artifact_chart
@@ -59,13 +61,19 @@ class ColumnCatalog:
     def has_chartable_keys(self) -> bool:
         return bool(self.metrics or self.artifact_chart_types or self.histograms)
 
+    @functools.cached_property
+    def _drawn_over_images(self) -> frozenset[str]:
+        """The artifact keys that are an overlay of an image that is logged too: its chart draws them, so they are no choice."""
+        keys = frozenset(self.artifacts)
+        return frozenset(k for k in keys if (overlay := OverlayKey.parse(k)) and overlay.image_key in keys)
+
     def options(self, kind: ColumnKind) -> list[str]:
         """The choices for a chart field of `kind` -- `step`/`timestamp_utc` being common metric x-axes."""
         match kind:
             case ColumnKind.METRIC:
                 return [*self.metrics, MetricColumn.STEP, MetricColumn.TIMESTAMP_UTC] if self.metrics else []
             case ColumnKind.ARTIFACT:
-                return list(self.artifacts)
+                return [key for key in self.artifacts if key not in self._drawn_over_images]
             case ColumnKind.LAYER:
                 return list(self.layers)
             case ColumnKind.HISTOGRAM:
