@@ -36,7 +36,7 @@ as a layer is warned about by the client (`BasicDlboardAPI.log_artifact_batch`).
 """
 
 
-UNNAMED_OVERLAY: Final = "overlay"
+UNNAMED_OVERLAY: Final = "unnamed overlay"
 """What an overlay logged with no name (`samples/a_$overlay`) is called wherever a name is shown."""
 
 

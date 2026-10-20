@@ -200,7 +200,7 @@ def _table_input(
         columns.append(
             {
                 "field": column.name,
-                "headerName": column.name,
+                "headerName": column.label,
                 "headerTooltip": column.description,
                 "flex": 1,
                 **cell,
@@ -260,7 +260,7 @@ def _param_field_input(  # noqa: PLR0911
     override: bool | int | float | str | list[str] | dict[str, Any] | None = None,
 ) -> Component:
     input_id = CHART_PARAM.of(field_name)
-    label = f"{field_name} *" if field.required else field_name
+    label = f"{field.label} *" if field.required else field.label
     value = override if override is not None else field.default
 
     match field.type:

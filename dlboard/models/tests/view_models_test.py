@@ -19,6 +19,8 @@ from dlboard.models._view import (
     ChartTypeRegistry,
     ColumnKind,
     PanelInstance,
+    ParameterField,
+    ParameterFieldType,
     SettingsSection,
     UnknownChartTypeError,
 )
@@ -375,3 +377,11 @@ def test_a_saved_chart_keeps_its_id_when_its_parameters_change() -> None:
 def test_only_raster_images_are_shown_inline(fname: str, *, inline: bool) -> None:
     """Matches what the download route serves without forcing a download (SVG can carry script)."""
     assert is_inlineable_artifact(fname) is inline
+
+
+@pytest.mark.parametrize(
+    ("name", "label"),
+    [("height", "Height"), ("tag_precision", "Tag precision"), ("x_axis", "X axis")],
+)
+def test_the_editor_calls_a_setting_by_its_name_as_a_sentence(name: str, label: str) -> None:
+    assert ParameterField(name=name, type=ParameterFieldType.STR, required=False).label == label

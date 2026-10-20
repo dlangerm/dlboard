@@ -83,13 +83,15 @@ overlay's row does not leave it out: set its row to `off` to do that, since the 
 picture. A chart saved with the earlier `overlays` setting opens as the `layers` rows that draw the same. While the
 picture for the slider's step is still downloading, its thumbnail shows a spinner over the previous picture.
 
-Over the top-left of each picture, a legend says what is drawn on it. Each layer is a row: tick or untick it to show or
+Over the top-left of each picture, a legend says what is drawn on it. It starts folded to its title, "Layers" (so the picture
+is clear); click that to open it. Each layer is a row: tick or untick it to show or
 hide that layer on every picture of the chart, at once and without loading anything again, and shift-click one to show it
 alone (again to bring the rest back), which is how a truth and a prediction are compared. What each layer holds is
 listed on its row in its colors, so a class of one layer is never mistaken for a class of another. The eye hides every
 layer, and holding it (or a picture) shows the picture without them for as long as it is held; "Layers" folds the legend
-down to its title, and a picture too small for a list shows the eye alone. A layer the picture on show has nothing for is
-dimmed. What a viewer changes this way is theirs alone: it is kept for the browser tab and never changes the saved chart.
+away again, and a picture too small for a list shows the eye alone. A layer the picture on show has nothing for is
+dimmed. What a viewer changes this way is theirs alone: it is kept for the browser tab and never changes the saved chart
+(opening the legend is only a way of looking, and is not a change).
 The chart's card says so ("View changed") and offers to **Save as default**, which writes which layers are shown into
 the chart's `layers` setting (into a view of your own, if the page is not yours), or to **Reset** it.
 

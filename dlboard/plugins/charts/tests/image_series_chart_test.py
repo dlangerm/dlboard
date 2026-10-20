@@ -15,6 +15,7 @@ from dlboard.models import (
     LAYER_KIND_TAG,
     OVERLAY_KEY_SUFFIX,
     RUN_NAME_COLUMN,
+    UNNAMED_OVERLAY,
     ChartInstance,
     ChartTypeRegistry,
     ColumnKind,
@@ -341,7 +342,7 @@ def test_an_overlays_chart_is_titled_with_its_image_and_name_not_its_key() -> No
     stack = ImageChart.render(ImageChartSettings(key=key), df)
 
     title = _props(_props(stack)["children"][0])["children"]  # pyrefly: ignore [unknown-argument-type]
-    assert title == "lonely · overlay"
+    assert title == f"lonely · {UNNAMED_OVERLAY}"
 
 
 def _store_data(stack: Any) -> dict[str, Any]:  # noqa: ANN401 -- a rendered Dash component

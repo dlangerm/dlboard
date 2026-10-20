@@ -299,6 +299,11 @@ class ParameterField(BaseModel, frozen=True, extra="forbid"):
     section: SettingsSection = DATA_SECTION
     """The group of settings the editor shows the field in."""
 
+    @property
+    def label(self) -> str:
+        """What the editor calls the field: its name as a sentence (`tag_precision` is "Tag precision")."""
+        return self.name.replace("_", " ").capitalize()
+
 
 class UnknownChartTypeError(KeyError):
     """

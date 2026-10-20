@@ -2809,7 +2809,7 @@ def test_a_tables_editor_opens_an_old_table_as_its_new_settings_and_takes_a_type
     shown = editor.locator(".mantine-Pill-root", has_text="eval/*")
     expect(shown).to_have_count(1)  # the old `artifact_key` and `artifact_key_is_prefix`, as one prefix
     shown.locator(".mantine-Pill-remove").click()
-    editor.get_by_label("show_artifacts").fill("other/*")  # not a key: a prefix, typed
+    editor.get_by_label("Show artifacts").fill("other/*")  # not a key: a prefix, typed
     page.keyboard.press("Enter")
     page.locator(f"#{CHART_EDITOR_SAVE_ID}").click()
 
@@ -2915,7 +2915,7 @@ def test_a_chart_being_edited_is_drawn_in_its_own_card_beside_the_page_and_cance
     edited.get_by_role("button", name="Edit chart").click()
     expect(edited).to_have_attribute("data-dl-editing", "")  # outlined as it opens
     dock.get_by_role("button", name="Display").click()
-    dock.get_by_label("height").fill("500")
+    dock.get_by_label("Height").fill("500")
 
     expect(drawn).to_have_css("height", "500px")  # the card shows the draft...
     expect(saved).to_be_hidden()  # ...and not the saved chart, which is still there under it
@@ -2960,7 +2960,7 @@ def test_switching_the_editor_to_a_chart_in_another_panel_moves_the_outline_and_
     first.hover()
     first.get_by_role("button", name="Edit chart").click()
     dock.get_by_role("button", name="Display").click()
-    dock.get_by_label("height").fill("500")
+    dock.get_by_label("Height").fill("500")
     expect(first.locator(".dl-chart-draft .mantine-LineChart-root")).to_have_css("height", "500px")
 
     second.hover()
@@ -2970,7 +2970,7 @@ def test_switching_the_editor_to_a_chart_in_another_panel_moves_the_outline_and_
     expect(first).not_to_have_attribute("data-dl-editing", "")
     expect(first.locator(".dl-chart-draft")).to_be_empty()  # the first chart is as it was saved
     expect(first.locator(".dl-chart-body .mantine-LineChart-root")).to_have_css("height", "300px")
-    expect(dock.get_by_label("column *")).to_have_value("b/loss")
+    expect(dock.get_by_label("Column *")).to_have_value("b/loss")
     # The second is drawn from its own form, not the first's (which had a height of 500).
     expect(second.locator(".dl-chart-draft .mantine-LineChart-root")).to_have_css("height", "300px")
     assert console_errors == []
@@ -2994,9 +2994,9 @@ def test_a_chart_is_added_from_the_dock_with_its_preview_there_and_lands_at_the_
     expect(dock.locator("#chart-editor-title")).to_have_text("Add chart")
     dock.get_by_label("Chart type").click()
     page.get_by_role("option", name="line", exact=True).click()
-    dock.get_by_label("column *").click()
+    dock.get_by_label("Column *").click()
     page.get_by_role("option", name="train/acc").click()
-    dock.get_by_label("x_axis *").click()
+    dock.get_by_label("X axis *").click()
     page.get_by_role("option", name="step", exact=True).click()
 
     expect(dock.locator(".mantine-LineChart-root")).to_be_visible()  # the preview is in the dock
@@ -3119,6 +3119,11 @@ def test_a_layer_is_hidden_and_shown_from_the_legend_without_fetching_and_the_ch
     layer = chart.locator(".dl-image-series-thumb .dl-image-series-overlay")
     boxes_chip = chart.get_by_role("button", name="boxes", exact=True)
     height = _height_of(chart)
+    legend = chart.locator(".dl-layer-legend").first
+    expect(
+        legend.locator(".dl-layer-rows")
+    ).to_be_hidden()  # starts folded to its title: the picture is clear
+    legend.get_by_role("button", name="Layers").click()
     expect(chart.locator(".dl-layer-toggle")).to_have_count(2)  # a row for each layer, over the picture
     expect(boxes_chip).to_have_attribute("aria-pressed", "true")
     expect(layer.locator("rect")).to_be_visible()
@@ -3150,6 +3155,9 @@ def test_a_layer_is_hidden_and_shown_from_the_legend_without_fetching_and_the_ch
     expect(bar).to_be_hidden()
     page.evaluate("window.sessionStorage.clear()")
     page.reload()
+    legend.get_by_role(
+        "button", name="Layers"
+    ).click()  # the session was cleared, so the legend is folded again
     expect(boxes_chip).to_have_attribute("aria-pressed", "false")
     expect(layer.locator("rect")).to_be_hidden()
 
@@ -3212,6 +3220,10 @@ def test_the_legend_over_a_picture_lists_what_each_layer_holds_and_hides_peeks_a
     chart = page.locator(".dl-chart-item")
     thumb = chart.locator(".dl-image-series-thumb")
     legend = thumb.locator(".dl-layer-legend")
+    expect(
+        legend.locator(".dl-layer-rows")
+    ).to_be_hidden()  # starts folded to its title: the picture is clear
+    legend.get_by_role("button", name="Layers").click()
     expect(_layer_row(legend, "truth").locator(".dl-class")).to_have_text(["cat"])
     expect(_layer_row(legend, "prediction").locator(".dl-class")).to_have_text(
         ["cat"]

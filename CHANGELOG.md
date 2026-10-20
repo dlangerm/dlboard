@@ -24,7 +24,7 @@ pulls that section's body into the GitHub release notes and publishes both distr
   show or hide it on every picture at once, without loading anything again, or shift-click it to show it alone, to
   compare a truth with a prediction. Each row lists what its layer holds (the classes of a mask, the labels of shapes) in
   their colors, so a class of one layer is not mistaken for another's. The eye hides every layer, and holding it or a
-  picture shows the picture without them while held; "Layers" folds the legend down, and a layer the picture has nothing
+  picture shows the picture without them while held; the legend starts folded to "Layers" and opens on a click, and a layer the picture has nothing
   for is dimmed. What a viewer changes is their own, kept for the browser tab: the chart's card says "View changed" and
   offers **Save as default**, which writes which layers are shown into the chart's settings (into a view of your own, if
   the page is not yours), or **Reset**.
@@ -48,9 +48,11 @@ pulls that section's body into the GitHub release notes and publishes both distr
   a chart saved with `overlays` opens as the rows that draw the same layers. One that left out an overlay of its image
   now draws it (set it `off`), and an image's own overlays are drawn in key order. **The chart editor's Layers table lists
   every layer the chart draws**, rather than only what was saved, so a layer can be hidden, turned off or added there.
-* Overlays are shown by their image and name (`samples/a · truth`; `overlay` when unnamed) in an image chart's title, a
+* Overlays are shown by their image and name (`samples/a · truth`; `unnamed overlay` when it has none) in an image chart's title, a
   table's column headers and the chart editor, never by the `_$overlay` suffix they are logged under. The editor's key
   pickers no longer offer an overlay whose image is logged, since that image's chart draws it.
+* The chart editor labels each setting as a sentence ("Tag precision", "X axis"), not by its field name; a chart type's
+  `ParameterField.label` is derived from the name, so plugins get it with no change.
 
 ### Deprecated
 

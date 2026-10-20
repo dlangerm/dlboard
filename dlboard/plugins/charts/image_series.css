@@ -118,11 +118,11 @@
     transform: translateY(-1px) rotate(45deg);
 }
 
-.dl-layer-legend[data-dl-collapsed] .dl-layer-title::after {
+.dl-layer-legend:not([data-dl-open]) .dl-layer-title::after {
     transform: translateX(-1px) rotate(-45deg);
 }
 
-.dl-layer-legend[data-dl-collapsed] .dl-layer-rows {
+.dl-layer-legend:not([data-dl-open]) .dl-layer-rows {
     display: none;
 }
 

@@ -353,8 +353,10 @@ def _stage(shot: DocScreenshot, page: Page, demo: Demo, dlboard_app: Dash) -> Pa
             page.wait_for_function(
                 "[...document.images].filter((i) => i.getAttribute('src')).every((i) => i.complete && i.naturalWidth > 0)"
             )
+            legend = panel.locator(".dl-layer-legend").first
+            legend.get_by_role("button", name="Layers").click()  # it starts folded to its title
             expect(
-                panel.locator(".dl-layer-classes .dl-class").first
+                legend.locator(".dl-layer-classes .dl-class").first
             ).to_be_visible()  # the layers are drawn, and the legend lists what they hold
             page.mouse.move(0, _VIEWPORT["height"] - 1)
             return panel

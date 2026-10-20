@@ -96,8 +96,6 @@ class ImageViewerState(ViewerState, frozen=True, extra="forbid"):
 
     layers: dict[str, ViewedLayer] = Field(default_factory=dict)
     """Which layers they showed or hid, by name."""
-    legend_collapsed: bool = False
-    """Only the legend's title is shown, to see more of the picture: the viewer's own, never saved either."""
 
     @typing.override
     def applied_to(self, parameters: Any) -> ImageChartSettings:

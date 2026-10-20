@@ -231,6 +231,25 @@ window.dlImageSeriesOverlay = (() => {
         }
     };
 
+    // Whether a chart's legend lists its layers. It starts folded to its title, to leave the picture clear. Opening it is a way
+    // of looking, not a change to the chart, so it is kept apart from the viewer's state: it never says "View changed".
+    const legendKey = (root) => `dl-legend-open:${window.location.pathname}:${viewKey(root)}`;
+    const legendOpen = (root) => {
+        try {
+            return window.sessionStorage.getItem(legendKey(root)) === "1";
+        } catch (_error) {
+            return false;
+        }
+    };
+    const toggleLegend = (root) => {
+        try {
+            window.sessionStorage.setItem(legendKey(root), legendOpen(root) ? "0" : "1");
+        } catch (_error) {
+            // A browser that keeps nothing keeps nothing: the legend stays as it was drawn.
+        }
+        restyle(root.dataset.dlInstance);
+    };
+
     // The keys of a chart's layers, bottom first: what their styles, and a viewer's changes to them, are kept under.
     const layerNames = (root) => Object.keys(JSON.parse(root.dataset.dlDefaults || "{}"));
     // What a layer is called in the legend.
@@ -383,7 +402,7 @@ window.dlImageSeriesOverlay = (() => {
             }
         }
         legend.querySelector(".dl-layer-eye").setAttribute("aria-pressed", String(!overlaysHidden(root)));
-        legend.toggleAttribute("data-dl-collapsed", Boolean(viewerState(root).legend_collapsed));
+        legend.toggleAttribute("data-dl-open", legendOpen(root));
         fitLegend(overlay, legend);
         const holders = new Map(
             [...overlay.querySelectorAll(":scope > .dl-image-series-layer")].map((h) => [
@@ -532,9 +551,7 @@ window.dlImageSeriesOverlay = (() => {
                 return;
             }
             if (button.classList.contains("dl-layer-title")) {
-                changeViewerState(root, (state) => {
-                    state.legend_collapsed = !state.legend_collapsed;
-                });
+                toggleLegend(root);
                 return;
             }
             const name = button.closest(".dl-layer-row").dataset.dlLayer;
