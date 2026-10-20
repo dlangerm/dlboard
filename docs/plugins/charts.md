@@ -67,7 +67,7 @@ The built-in line charts, and the image series that steps through logged images:
 
 ![Line charts of logged metrics](../images/experiment-charts.png)
 
-![An image-series chart](../images/image-series.png)
+![An image-series chart with a legend of its layers and what they hold, drawn over each picture](../images/image-series.png)
 
 An image series draws layers over each picture. A layer is an `Overlay` of shapes (see [docs/client.md](../client.md))
 or any image, such as a segmentation mask, and the one the run logged at each picture's own step is laid over it, in its

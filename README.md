@@ -80,7 +80,7 @@ Every metric, hyperparameter, and artifact you log gets synced to dlboard in the
 
 **Step through artifacts** — View confusion matrices, learning curves, or any images logged during training:
 
-![A confusion matrix logged at each step, one image per run](docs/images/image-series.png)
+![A confusion matrix logged at each step, one image per run, with overlays drawn over it that a legend shows and hides](docs/images/image-series.png)
 
 **Personal views** — Customize layouts per-user without affecting what others see (or share it with them with a click of a button):
 

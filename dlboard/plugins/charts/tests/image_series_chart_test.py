@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, cast
 
 import pandas as pd
 import pytest
@@ -417,11 +417,23 @@ def test_the_legend_has_a_chip_for_each_layer_and_none_without_layers() -> None:
     assert _legend_names(ImageChart.render(ImageChartSettings(key="img"), df)) == ["overlay", "truth"]
 
 
-def _legend_names(stack: Any) -> list[str]:  # noqa: ANN401 -- a rendered Dash component
-    legend = next(
-        (c for c in _props(stack)["children"] if _props(c).get("className") == "dl-layer-legend"), None
+def _chips(node: Any) -> list[dict[str, Any]]:  # noqa: ANN401 -- a rendered Dash component tree
+    """The props of every layer chip (a button with a `data-dl-layer`) under `node`, in order."""
+    if isinstance(node, list):
+        return [chip for item in cast("list[Any]", node) for chip in _chips(item)]
+    if not hasattr(node, "to_plotly_json"):
+        return []
+    props = _props(node)
+    own = (
+        [props]
+        if "data-dl-layer" in props and "dl-layer-chip" in props.get("className", "")
+        else list[dict[str, Any]]()
     )
-    return [] if legend is None else [_props(chip)["children"] for chip in _props(legend)["children"]]
+    return [*own, *_chips(props.get("children"))]
+
+
+def _legend_names(stack: Any) -> list[str]:  # noqa: ANN401 -- a rendered Dash component
+    return [chip["children"] for chip in _chips(_props(stack)["children"])]
 
 
 def test_what_a_viewer_changed_is_made_the_charts_own_keeping_only_what_differs_from_a_layer_in_full() -> (
@@ -557,3 +569,11 @@ def test_the_same_settings_under_different_chart_ids_get_different_component_ids
 
     assert store_instance("preview") != store_instance("saved")
     assert store_instance("saved") == store_instance("saved")
+
+
+def test_hiding_every_overlay_is_the_viewers_own_and_never_saved_as_the_charts() -> None:
+    settings = ImageChartSettings(key="img")
+    state = ImageViewerState(overlays_hidden=True)
+
+    assert state.overlays_hidden
+    assert ImageChart.with_viewer_state(settings, state) == settings

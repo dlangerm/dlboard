@@ -74,9 +74,11 @@ class ViewedLayer(BaseModel, frozen=True, extra="forbid"):
 
 
 class ImageViewerState(BaseModel, frozen=True, extra="forbid"):
-    """What a viewer changed in an image chart without editing it: its layers, by name."""
+    """What a viewer changed in an image chart without editing it: its layers, by name, and whether all are hidden."""
 
     layers: dict[str, ViewedLayer] = Field(default_factory=dict)
+    overlays_hidden: bool = False
+    """Every overlay is hidden (or peeked past): the viewer's own, never saved as the chart's."""
 
 
 class _LegacyOverlays(BaseModel, frozen=True):
@@ -227,27 +229,71 @@ def _layer_keys(parameters: ImageChartSettings, columns: Iterable[str]) -> dict[
     return overlays | {key: key for key in parameters.extra_layers if key not in overlays}
 
 
-def _legend(names: list[str]) -> html.Div | None:
+def _legend(layers: dict[str, LayerStyle]) -> html.Div | None:
     """
-    What is drawn over the pictures, a chip for each layer that shows or hides it; none if there are no layers.
+    What is drawn over the pictures, by layer name, for the viewer to change; none if there are no layers.
 
-    The browser says which are shown (`image_series_overlay.js`): a plain button a layer, since a chart has many.
+    A chip for each layer shows or hides it, and one for all of them (hold it to peek at the picture without them); the
+    classes and labels the layers hold are listed beneath, and an opacity slider for each layer is a click away. The
+    browser fills in and keeps them current (`image_series_overlay.js`): plain elements, since a chart has many.
     """
-    if not names:
+    if not layers:
         return None
     button = cast("Any", html.Button)
+    field = cast("Any", dcc.Input)
     return html.Div(
         [
-            button(
-                name,
-                type="button",
-                className="dl-layer-chip",
-                title=f"Show or hide {name}",
-                **{"data-dl-layer": name},
-            )
-            for name in names
-        ],
-        className="dl-layer-legend",
+            html.Div(
+                [
+                    button(
+                        "overlays",
+                        type="button",
+                        className="dl-layer-chip dl-layer-master",
+                        title="Hide or show every overlay. Hold to peek at the picture without them.",
+                    ),
+                    *(
+                        button(
+                            name,
+                            type="button",
+                            className="dl-layer-chip",
+                            title=f"Show or hide {name}",
+                            **{"data-dl-layer": name},
+                        )
+                        for name in layers
+                    ),
+                    button(
+                        "opacity",
+                        type="button",
+                        className="dl-layer-chip dl-layer-opacity-toggle",
+                        title="Set how opaque each layer is",
+                        **{"aria-pressed": "false"},
+                    ),
+                ],
+                className="dl-layer-legend",
+            ),
+            html.Div(className="dl-class-legend"),
+            html.Div(
+                [
+                    html.Label(
+                        [
+                            html.Span(name),
+                            field(
+                                type="range",
+                                min=0,
+                                max=1,
+                                step=0.05,
+                                value=style.opacity,
+                                className="dl-layer-opacity",
+                                name=name,
+                            ),
+                        ]
+                    )
+                    for name, style in layers.items()
+                ],
+                className="dl-layer-opacities",
+                hidden=True,
+            ),
+        ]
     )
 
 
@@ -424,15 +470,12 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
         )
 
         # What each layer is when the viewer has changed nothing, by its name: the browser applies the viewer's changes over it.
-        defaults = {
-            name: {"hidden": style.hidden, "opacity": style.opacity}
-            for name in layers
-            if (style := parameters.layers.get(name, LayerStyle()))
-        }
+        styles = {name: parameters.layers.get(name, LayerStyle()) for name in layers}
+        defaults = {name: {"hidden": s.hidden, "opacity": s.opacity} for name, s in styles.items()}
         return dmc.Stack(
             [
                 dmc.Text(artifact_display_name(parameters.key), fw=700, style={"overflowWrap": "anywhere"}),
-                *([legend] if (legend := _legend(list(layers))) else []),
+                *([legend] if (legend := _legend(styles)) else []),
                 dcc.Store(
                     id={"type": "image-series-data", "instance": inst},
                     data={

@@ -2409,7 +2409,7 @@ def test_an_image_chart_draws_the_overlay_logged_at_each_pictures_step_over_it(
     page.wait_for_function(_OVERLAY_COVERS_PICTURE_JS, arg=layer.element_handle())
 
     # Step 10 logged no overlay, so its picture is shown alone; back at step 0 the shapes come back.
-    page.get_by_role("slider").focus()
+    page.locator(".mantine-Slider-thumb").focus()  # not the layers' opacity sliders
     page.keyboard.press("ArrowRight")
     expect(layer.locator("svg")).to_have_count(0)
     page.keyboard.press("ArrowLeft")
@@ -2987,7 +2987,7 @@ def test_a_layer_is_hidden_and_shown_from_the_legend_without_fetching_and_the_ch
     chart = page.locator(".dl-chart-item")
     layer = chart.locator(".dl-image-series-thumb .dl-image-series-overlay")
     boxes_chip = chart.get_by_role("button", name="boxes", exact=True)
-    expect(chart.locator(".dl-layer-chip")).to_have_count(2)
+    expect(chart.locator(".dl-layer-chip[data-dl-layer]")).to_have_count(2)  # a chip for each layer
     expect(boxes_chip).to_have_attribute("aria-pressed", "true")
     expect(layer.locator("rect")).to_be_visible()
     bar = chart.locator(".dl-chart-view-bar")
@@ -3025,4 +3025,79 @@ def test_a_layer_is_hidden_and_shown_from_the_legend_without_fetching_and_the_ch
     expect(boxes_chip).to_have_attribute("aria-pressed", "false")
     expect(layer.locator("rect")).to_be_hidden()
     expect(bar).to_be_hidden()
+    assert console_errors == []
+
+
+def test_the_legend_lists_what_the_layers_hold_dims_what_a_picture_lacks_and_sets_opacity_and_peeks(
+    page: Page, live_server_url: str, tmp_path: Path, console_errors: list[str]
+) -> None:
+    """
+    Beneath the layer chips the legend lists the classes of a mask and the labels of shapes, in their colors. A layer
+    the picture on show has nothing for is dimmed. "overlays" hides every layer, "opacity" opens a slider for each, and
+    holding a picture shows it without its layers for as long as it is held, without opening it.
+    """
+    _create_project_and_experiment(page, live_server_url, "Legend Details Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    api = BasicDlboardAPI(live_server_url)
+    run = api.create_run(models.NewRun(experiment_id=experiment_id))
+    picture = np.full((48, 64, 3), 128, dtype=np.uint8)
+    labels = np.zeros((1, 48, 64), dtype=np.int64)
+    labels[:, :, :32] = 1
+    mask = rle.run_length_encode(labels, colors={1: "#ff0000"}, classnames={1: "cat"})
+    boxes: list[Shape] = [Box(x=0.125, y=0.25, width=0.375, height=0.25, label="dog")]
+    api.log_artifact_batch(
+        [
+            Image(key="samples/a", image=picture, step=0, format="jpg").to_artifact(
+                tmp_path, run.id, experiment_id
+            ),
+            Overlay.over("samples/a", name="truth", shapes=[mask], step=0).to_artifact(
+                tmp_path, run.id, experiment_id
+            ),
+            Overlay.over("samples/a", name="boxes", shapes=boxes, step=0).to_artifact(
+                tmp_path, run.id, experiment_id
+            ),
+            Image(key="samples/a", image=picture, step=10, format="jpg").to_artifact(
+                tmp_path, run.id, experiment_id
+            ),
+        ]
+    )
+    _wait_for_artifacts(experiment_id, 4)
+    page.reload()
+    _auto_generate_charts(page)
+
+    chart = page.locator(".dl-chart-item")
+    thumb = chart.locator(".dl-image-series-thumb")
+    layers = thumb.locator(".dl-image-series-layer")
+    classes = chart.locator(".dl-class-chip")
+    expect(classes).to_have_text(
+        ["dog", "cat"]
+    )  # in layer order: a shape by its label, a mask's class by its name
+
+    master = chart.get_by_role("button", name="overlays", exact=True)
+    master.click()
+    expect(layers.first).to_be_hidden()
+    expect(classes).to_have_count(0)  # nothing shown, nothing listed
+    expect(master).to_have_attribute("aria-pressed", "false")
+    master.click()
+    expect(classes).to_have_count(2)
+
+    chart.get_by_role("button", name="opacity", exact=True).click()
+    chart.locator('.dl-layer-opacity input[name="boxes"]').fill("0.5")
+    expect(thumb.locator('.dl-image-series-layer[data-dl-layer="boxes"]')).to_have_css("opacity", "0.5")
+
+    box = thumb.bounding_box()
+    assert box is not None
+    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    page.mouse.down()  # held: the picture shows without its layers
+    expect(chart.locator(".dl-image-series")).to_have_attribute("data-dl-peek", "")
+    expect(thumb.locator(".dl-image-series-overlay")).to_have_css("visibility", "hidden")
+    page.mouse.up()
+    expect(chart.locator(".dl-image-series")).not_to_have_attribute("data-dl-peek", "")
+    expect(thumb.locator(".dl-image-series-overlay")).to_have_css("visibility", "visible")
+    expect(page.get_by_role("dialog")).to_be_hidden()  # a hold is not a click: the picture was not opened
+
+    page.locator(".mantine-Slider-thumb").focus()  # not the layers' opacity sliders
+    page.keyboard.press("ArrowRight")  # step 10 logged no layers
+    expect(chart.get_by_role("button", name="truth", exact=True)).to_have_attribute("data-dl-absent", "")
     assert console_errors == []

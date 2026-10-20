@@ -31,6 +31,7 @@ from playwright.sync_api import expect
 from dlboard import models
 from dlboard.client._rest_api import BasicDlboardAPI
 from dlboard.client.artifacts.figure import Figure
+from dlboard.client.artifacts.overlay import Box, Overlay, Point, Polyline, Shape
 from dlboard.client.histograms import ExponentialBinning
 from dlboard.conftest import ScreenshotMode
 from dlboard.serve import get_system_data_store
@@ -74,6 +75,14 @@ _EXPERIMENT_NAME = "lr-sweep"
 _CONFUSION_KEY = "samples/confusion_matrix"
 _GRAD_KEY = "grad_norm/layer1"
 _NOW = _T0.add(days=1)
+_CONFUSION_OVERLAYS: dict[str, list[Shape]] = {
+    "confused": [
+        Box(x=0.52, y=0.32, width=0.1, height=0.1, label="3 vs 5", color="#ff3b30"),
+        Box(x=0.82, y=0.62, width=0.1, height=0.1, label="8 vs 9", color="#ff9500"),
+    ],
+    "correct": [Polyline(points=[Point(0.2, 0.14), Point(0.92, 0.8)], label="diagonal", color="#34c759")],
+}
+"""Overlays of the confusion matrix, by name: the cells it mixes up, and the diagonal it should be."""
 
 
 def _frozen_now(tz: str | None = None) -> pendulum.DateTime:
@@ -224,7 +233,14 @@ def demo(live_server_url: str, dlboard_app: Dash, tmp_path_factory: pytest.TempP
             )
             for step in _IMAGE_STEPS
         ]
-        api.log_artifact_batch(converted)
+        overlays = [
+            Overlay.over(_CONFUSION_KEY, name=name, shapes=shapes, step=step).to_artifact(
+                artifact_dir, run.id, sweep.id
+            )
+            for step in _IMAGE_STEPS
+            for name, shapes in _CONFUSION_OVERLAYS.items()
+        ]
+        api.log_artifact_batch([*converted, *overlays])
 
     # Kept separate from `sweep` (which every other scene charts and forks personal views off of) so
     # the PERSONAL_VIEWS scene's own view picker only ever shows what it creates itself. Named
@@ -249,7 +265,7 @@ def demo(live_server_url: str, dlboard_app: Dash, tmp_path_factory: pytest.TempP
     # The server records uploaded artifacts on a background batch (see `BlobArtifactStore`), so
     # they land shortly after the uploads above return.
     store = get_system_data_store(dlboard_app)
-    expected = len(_SWEEP) * len(_IMAGE_STEPS)
+    expected = len(_SWEEP) * len(_IMAGE_STEPS) * (1 + len(_CONFUSION_OVERLAYS))
     deadline = time.monotonic() + _ARTIFACT_INGEST_TIMEOUT_S
     while len(list(store.fetch_artifacts(experiment_id=sweep.id))) < expected:
         assert time.monotonic() < deadline, "the demo artifacts were never recorded"
@@ -337,6 +353,10 @@ def _stage(shot: DocScreenshot, page: Page, demo: Demo, dlboard_app: Dash) -> Pa
             page.wait_for_function(
                 "[...document.images].filter((i) => i.getAttribute('src')).every((i) => i.complete && i.naturalWidth > 0)"
             )
+            expect(
+                panel.locator(".dl-class-chip").first
+            ).to_be_visible()  # the layers are drawn, and the legend lists what they hold
+            page.mouse.move(0, _VIEWPORT["height"] - 1)
             return panel
         case DocScreenshot.CHART_EDITOR:
             _open_charted_experiment(page, demo)

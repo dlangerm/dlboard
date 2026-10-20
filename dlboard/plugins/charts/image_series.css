@@ -90,3 +90,64 @@
     background: var(--mantine-color-default-hover);
     border-color: var(--mantine-primary-color-filled);
 }
+
+/* One chip for every layer says what is drawn; a layer the pictures on show have nothing for is dimmed. */
+.dl-layer-chip[data-dl-absent] {
+    opacity: 0.45;
+    border-style: dashed;
+}
+
+.dl-layer-chip.dl-layer-master {
+    font-weight: 600;
+}
+
+/* The classes and labels the shown layers hold, each in its color. */
+.dl-class-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.25rem;
+    font-size: var(--mantine-font-size-xs);
+    color: var(--mantine-color-dimmed);
+}
+
+.dl-class-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.dl-class-swatch {
+    width: 0.625rem;
+    height: 0.625rem;
+    border-radius: 2px;
+    border: 1px solid var(--mantine-color-default-border);
+}
+
+.dl-layer-opacities {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-top: 0.375rem;
+    font-size: var(--mantine-font-size-xs);
+}
+
+.dl-layer-opacities[hidden] {
+    display: none;
+}
+
+.dl-layer-opacities label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+}
+
+/* Peeking (holding a picture): the pictures are shown without their layers, until it is let go. */
+.dl-image-series[data-dl-peek] .dl-image-series-overlay {
+    visibility: hidden;
+}
+
+.dl-image-series-thumb {
+    -webkit-touch-callout: none;
+    user-select: none;
+}
