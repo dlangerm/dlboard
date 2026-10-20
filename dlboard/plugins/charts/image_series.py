@@ -28,6 +28,7 @@ from dlboard.models import (
     TagDisplay,
     TimeUnit,
     artifact_column,
+    artifact_display_name,
     artifact_fname_column,
     artifact_tags_column,
     is_inlineable_artifact,
@@ -75,7 +76,7 @@ class ImageChartSettings(BaseModel, frozen=True, extra="forbid", use_attribute_d
     # The two tables come last: in the chart editor each takes a whole row, so the small settings above share theirs.
     overlays: dict[str, OverlayLayer] = Field(default_factory=dict)
     """
-    The artifacts drawn over each picture, a row per artifact key, first row at the bottom. Each is the one the run logged at the picture's own step: an Overlay of shapes (see `dlboard.client.artifacts.overlay`), or an image such as a mask. A picture a row has nothing for is shown without it. Auto-generate adds the key's `_$overlay` artifacts, if there are any.
+    The artifacts drawn over each picture, a row per artifact key, first row at the bottom. Each is the one the run logged at the picture's own step: an Overlay of shapes (see `dlboard.client.artifacts.overlay`), or an image such as a mask. A picture a row has nothing for is shown without it. Auto-generate adds the picture's own overlays, if there are any.
     """
     tag_display: dict[str, TagDisplay] = Field(default_factory=dict)
     """Display settings for particular tags, a row per tag name, taking the place of the chart's tag precision and unit settings for that tag. Leave a cell blank to keep the chart's own setting."""
@@ -308,7 +309,7 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
 
         return dmc.Stack(
             [
-                dmc.Text(parameters.key, fw=700, style={"overflowWrap": "anywhere"}),
+                dmc.Text(artifact_display_name(parameters.key), fw=700, style={"overflowWrap": "anywhere"}),
                 dcc.Store(
                     id={"type": "image-series-data", "instance": inst},
                     data={

@@ -309,7 +309,7 @@ class BasicDlboardAPI:
         links: list[tuple[models.NewArtifact, AnyUrl]] = []
         for artifact, source in artifacts:
             if (
-                models.overlay_image_key(artifact.key) is not None
+                models.OverlayKey.parse(artifact.key) is not None
                 and models.LAYER_KIND_TAG not in artifact.tags
                 and not models.is_inlineable_artifact(artifact.fname)
             ):

@@ -15,6 +15,7 @@ from dlboard.models import (
     artifact_column,
     artifact_fname_column,
     artifact_tags_column,
+    overlay_key,
 )
 from dlboard.plugins.charts._table_settings import Aggregate, TableChartSettings, TableRows
 from dlboard.plugins.charts.table_chart import TableChart
@@ -427,6 +428,21 @@ def test_a_prefix_of_artifacts_is_a_column_group_for_each_key_under_it() -> None
     groups: list[dict[str, Any]] = _render(settings, _artifacts_df())["columnDefs"][1:]
 
     assert [group["headerName"] for group in groups] == ["eval/a.png", "eval/notes.txt"]
+
+
+def test_an_overlays_column_group_is_headed_by_its_image_and_name_not_its_key() -> None:
+    key = overlay_key("eval/a.png", "truth")
+    renamed = {
+        column("eval/a.png"): column(key)
+        for column in (artifact_column, artifact_fname_column, artifact_tags_column)
+    }
+    settings = TableChartSettings(show_metrics=[], show_hparams=[], show_artifacts=[key])
+
+    groups: list[dict[str, Any]] = _render(settings, _artifacts_df().rename(columns=renamed))["columnDefs"][
+        1:
+    ]
+
+    assert [group["headerName"] for group in groups] == ["eval/a.png · truth"]
 
 
 # ---- the state a redraw keeps ----

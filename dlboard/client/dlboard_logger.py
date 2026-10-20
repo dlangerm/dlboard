@@ -607,7 +607,7 @@ class DLBoardLogger(Logger):
         keys = {artifact.key for artifact in artifacts}
         slots: set[tuple[str, int]] = set()
         for artifact in artifacts:
-            if (image := models.overlay_image_key(artifact.key)) and image not in keys:
+            if (parsed := models.OverlayKey.parse(artifact.key)) and (image := parsed.image_key) not in keys:
                 warnings.warn(
                     f"{artifact.key!r} is an overlay of {image!r}, but nothing is logged under that key in this call, so no image "
                     "chart will draw it unless that image is logged some other way.",

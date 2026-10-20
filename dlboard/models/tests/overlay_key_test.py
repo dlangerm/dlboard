@@ -1,22 +1,46 @@
-"""An overlay's key is its image's key plus a suffix and an optional name, and reads back to the image's."""
+"""An overlay's key is its image's key plus a suffix and an optional name, and reads back to both."""
 
 from __future__ import annotations
 
 import pytest
 
-from dlboard.models import OVERLAY_KEY_SUFFIX, overlay_image_key, overlay_key
+from dlboard.models import (
+    OVERLAY_KEY_SUFFIX,
+    UNNAMED_OVERLAY,
+    OverlayKey,
+    artifact_display_name,
+    overlay_key,
+)
 
 
 @pytest.mark.parametrize(
-    ("image_key", "name", "key"),
+    ("image_key", "name", "key", "label", "display"),
     [
-        pytest.param("samples/a", None, f"samples/a{OVERLAY_KEY_SUFFIX}", id="unnamed"),
-        pytest.param("samples/a", "truth", f"samples/a{OVERLAY_KEY_SUFFIX}/truth", id="named"),
+        pytest.param(
+            "samples/a",
+            None,
+            f"samples/a{OVERLAY_KEY_SUFFIX}",
+            UNNAMED_OVERLAY,
+            f"samples/a · {UNNAMED_OVERLAY}",
+            id="unnamed",
+        ),
+        pytest.param(
+            "samples/a",
+            "truth",
+            f"samples/a{OVERLAY_KEY_SUFFIX}/truth",
+            "truth",
+            "samples/a · truth",
+            id="named",
+        ),
     ],
 )
-def test_an_overlay_key_reads_back_to_its_image_key(image_key: str, name: str | None, key: str) -> None:
+def test_an_overlay_key_reads_back_to_its_image_key_and_name(
+    image_key: str, name: str | None, key: str, label: str, display: str
+) -> None:
     assert overlay_key(image_key, name) == key
-    assert overlay_image_key(key) == image_key
+    assert OverlayKey.parse(key) == OverlayKey(image_key, name)
+    assert OverlayKey(image_key, name).label == label
+    assert artifact_display_name(key) == display
 
 
 @pytest.mark.parametrize(
@@ -27,5 +51,6 @@ def test_an_overlay_key_reads_back_to_its_image_key(image_key: str, name: str | 
         pytest.param(OVERLAY_KEY_SUFFIX, id="no-image"),
     ],
 )
-def test_a_key_that_is_not_an_overlays_has_no_image_key(key: str) -> None:
-    assert overlay_image_key(key) is None
+def test_a_key_that_is_not_an_overlays_is_shown_as_it_is(key: str) -> None:
+    assert OverlayKey.parse(key) is None
+    assert artifact_display_name(key) == key

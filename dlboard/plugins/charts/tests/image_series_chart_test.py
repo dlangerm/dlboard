@@ -23,6 +23,7 @@ from dlboard.models import (
     artifact_column,
     artifact_fname_column,
     artifact_tags_column,
+    overlay_key,
 )
 from dlboard.plugins.charts.image_series import (
     MAX_SLIDER_LABELS,
@@ -316,6 +317,21 @@ def test_render_titles_the_chart_with_its_key_and_follows_the_panels_columns_up_
     first_page = _props(children[3])  # pyrefly: ignore [unknown-argument-type]
     assert first_page["id"]["page"] == 0
     assert first_page["cols"] == columns
+
+
+def test_an_overlays_chart_is_titled_with_its_image_and_name_not_its_key() -> None:
+    key = overlay_key("lonely")  # an overlay with no image logged: charted as any other image
+    df = _artifacts_df(n_runs=1).rename(
+        columns={
+            artifact_column("img"): artifact_column(key),
+            artifact_tags_column("img"): artifact_tags_column(key),
+        }
+    )
+
+    stack = ImageChart.render(ImageChartSettings(key=key), df)
+
+    title = _props(_props(stack)["children"][0])["children"]  # pyrefly: ignore [unknown-argument-type]
+    assert title == "lonely · overlay"
 
 
 def _store_data(stack: Any) -> dict[str, Any]:  # noqa: ANN401 -- a rendered Dash component

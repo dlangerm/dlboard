@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import mimetypes
 import typing
-from typing import Final
+from typing import Final, NamedTuple
 
 import pendulum
 from pydantic import AnyUrl, AwareDatetime, BaseModel, Field
@@ -28,7 +28,7 @@ What an image's default overlays are logged under, after the image's own key (`s
 
 An image chart auto-generated for an image draws the artifacts under its key plus this suffix over it. An image can
 have several, each told apart by a name after the suffix (`samples/a_$overlay/truth`, `samples/a_$overlay/prediction`);
-`overlay_key` and `overlay_image_key` build and read these keys. Any other artifact can still be drawn over a picture by
+`overlay_key` and `OverlayKey.parse` build and read these keys. Any other artifact can still be drawn over a picture by
 naming it in the chart's `overlays` setting.
 
 The `$` keeps a key from ending in it by accident; one that does without being logged through `Overlay` or `Image`
@@ -36,15 +36,39 @@ as a layer is warned about by the client (`BasicDlboardAPI.log_artifact_batch`).
 """
 
 
+UNNAMED_OVERLAY: Final = "overlay"
+"""What an overlay logged with no name (`samples/a_$overlay`) is called wherever a name is shown."""
+
+
 def overlay_key(image_key: str, name: str | None = None) -> str:
     """The key an overlay of the image under `image_key` is logged under; `name` tells several of them apart."""
     return f"{image_key}{OVERLAY_KEY_SUFFIX}" + (f"/{name}" if name else "")
 
 
-def overlay_image_key(key: str) -> str | None:
-    """The key of the image `key` is an overlay of (see `overlay_key`), or `None` if it is not an overlay's key."""
-    image_key, suffix, name = key.partition(OVERLAY_KEY_SUFFIX)
-    return image_key if image_key and suffix and (not name or name.startswith("/")) else None
+class OverlayKey(NamedTuple):
+    """An overlay's key read back (see `overlay_key`): the image it is drawn over, and its name if it has one."""
+
+    image_key: str
+    name: str | None
+
+    @classmethod
+    def parse(cls, key: str) -> OverlayKey | None:
+        """The image and name `key` holds, or `None` if it is not an overlay's key."""
+        image_key, suffix, name = key.partition(OVERLAY_KEY_SUFFIX)
+        if not (image_key and suffix) or (name and not name.startswith("/")):
+            return None
+        return cls(image_key, name.removeprefix("/") or None)
+
+    @property
+    def label(self) -> str:
+        """What to call the overlay where it is shown: its name, or `UNNAMED_OVERLAY`."""
+        return self.name or UNNAMED_OVERLAY
+
+
+def artifact_display_name(key: str) -> str:
+    """What to call the artifact under `key` where it is shown: an overlay by its image and name, the rest as they are."""
+    overlay = OverlayKey.parse(key)
+    return key if overlay is None else f"{overlay.image_key} · {overlay.label}"
 
 
 class FileKind(StrEnum):

@@ -13,7 +13,7 @@ import typing
 from enum import StrEnum
 from typing import TYPE_CHECKING, Literal
 
-from dlboard.models import Artifact, ChartInstance, ChartType, ColumnKind, PanelInstance, overlay_image_key
+from dlboard.models import Artifact, ChartInstance, ChartType, ColumnKind, OverlayKey, PanelInstance
 from dlboard.plugins.charts.bar_chart import BarChart
 from dlboard.plugins.charts.file_list import FileListChart
 from dlboard.plugins.charts.histogram import HistogramChart
@@ -171,7 +171,7 @@ def default_artifact_charts(keys: typing.Iterable[str], catalog: ColumnCatalog) 
     images = {key for key in keys if catalog.artifact_chart_types[key] == ImageChart.name}
     overlays_of: dict[str, list[str]] = {}
     for key in sorted(catalog.artifacts):
-        if (image := overlay_image_key(key)) in images:
+        if (parsed := OverlayKey.parse(key)) and (image := parsed.image_key) in images:
             overlays_of.setdefault(image, []).append(key)
     drawn_over_images = {overlay for overlays in overlays_of.values() for overlay in overlays}
     charts: list[ArtifactChart] = []
