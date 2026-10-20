@@ -54,6 +54,9 @@ _WIDE_FIELD: Final = {"flex": "1 1 100%"}
 How much of a row a setting's input asks for. The form is a wrapping row, so several of the small ones (a switch, a
 number, a short list of choices) share a line, a pair of column pickers too, and a list or a table has a line to itself.
 """
+_FIELDS_ROW: Final = {"display": "flex", "flexWrap": "wrap", "alignItems": "flex-start", "gap": "0.5rem 1rem"}
+"""A wrapping row of settings inputs, each asking for the width of its own `_*_FIELD`."""
+
 
 SLIDER_STEPS: Final = 100
 """How many notches a slider has across its range."""
@@ -128,12 +131,7 @@ def add_chart_modal() -> dmc.Modal:
                     dmc.Select(id=ADD_CHART_TYPE_SELECT_ID, label="Chart type", data=chart_types, value=None),
                     html.Div(
                         id=ADD_CHART_PARAMS_ID,
-                        style={
-                            "display": "flex",
-                            "flexWrap": "wrap",
-                            "alignItems": "flex-start",
-                            "gap": "0.5rem 1rem",
-                        },
+                        style=_FIELDS_ROW,
                     ),
                     dmc.Text("Preview", fw=600, mt="sm"),
                     html.Div(id=ADD_CHART_PREVIEW_ID),
@@ -532,9 +530,29 @@ def build_chart_param_form(
     initial_params = (
         edited.parameters if edited and edited.chart_type == chart_type_name else dict[str, Any]()
     )
+    by_section: dict[models.SettingsSection, list[Component]] = {}
+    for name, field in fields.items():
+        by_section.setdefault(field.section, []).append(
+            _param_field_input(name, field, catalog, override=initial_params.get(name))
+        )
+    if len(by_section) <= 1:
+        return [field for section_fields in by_section.values() for field in section_fields]
     return [
-        _param_field_input(name, field, catalog, override=initial_params.get(name))
-        for name, field in fields.items()
+        dmc.Accordion(
+            [
+                dmc.AccordionItem(
+                    [
+                        dmc.AccordionControl(section.title),
+                        dmc.AccordionPanel(html.Div(section_fields, style=_FIELDS_ROW)),
+                    ],
+                    value=section.title,
+                )
+                for section, section_fields in by_section.items()
+            ],
+            multiple=True,
+            value=[section.title for section in by_section if section.opened],
+            style=_WIDE_FIELD,
+        )
     ]
 
 

@@ -11,11 +11,15 @@ from pydantic import BaseModel, Field, ValidationError
 
 from dlboard.models import is_inlineable_artifact
 from dlboard.models._view import (
+    ADVANCED_SECTION,
+    DATA_SECTION,
+    DISPLAY_SECTION,
     ChartInstance,
     ChartType,
     ChartTypeRegistry,
     ColumnKind,
     PanelInstance,
+    SettingsSection,
     UnknownChartTypeError,
 )
 
@@ -173,6 +177,39 @@ def test_get_registered_chart_types_describes_optional_int_field() -> None:
     assert fields["font_size"].type == "int"
     assert fields["font_size"].required is False
     assert fields["font_size"].default is None
+
+
+_CUSTOM_SECTION = SettingsSection("Custom", opened=True)
+
+
+class _FakeParamsWithSections(BaseModel, frozen=True, extra="forbid"):
+    metric: str = ""
+    height: typing.Annotated[int, DISPLAY_SECTION] = 300
+    limit: typing.Annotated[int, ADVANCED_SECTION, _CUSTOM_SECTION] = 5
+    width: typing.Annotated[int | None, DISPLAY_SECTION] = None
+
+
+def test_a_setting_is_in_the_section_it_is_marked_with_and_the_data_section_if_unmarked() -> None:
+    _make_fake_chart("fake-sectioned", _FakeParamsWithSections).register()
+
+    fields = ChartTypeRegistry.get_registered_chart_types()["fake-sectioned"]
+
+    assert {name: field.section for name, field in fields.items()} == {
+        "metric": DATA_SECTION,
+        "height": DISPLAY_SECTION,
+        "limit": ADVANCED_SECTION,  # the first mark wins
+        "width": DISPLAY_SECTION,
+    }
+
+
+class _FakeParamsWithTwoSectionsOfOneTitle(BaseModel, frozen=True, extra="forbid"):
+    height: typing.Annotated[int, SettingsSection("Display", opened=True)] = 300
+    width: typing.Annotated[int, DISPLAY_SECTION] = 400
+
+
+def test_two_different_sections_may_not_share_a_title() -> None:
+    with pytest.raises(ValueError, match="two different settings sections"):
+        ChartTypeRegistry._describe_parameter_fields(_FakeParamsWithTwoSectionsOfOneTitle, {})
 
 
 def test_chart_instance_delegates_through_registry() -> None:

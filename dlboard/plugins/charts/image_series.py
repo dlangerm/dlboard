@@ -6,7 +6,7 @@ import hashlib
 import json
 import typing
 from pathlib import Path
-from typing import Any, cast
+from typing import Annotated, Any, cast
 
 import dash
 import dash_mantine_components as dmc
@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field, model_validator
 from dlboard.models import (
     DEFAULT_RENDER_CONTEXT,
     DEFAULT_TAG_PRECISION,
+    DISPLAY_SECTION,
     RUN_NAME_COLUMN,
     Artifact,
     ChartType,
@@ -25,6 +26,7 @@ from dlboard.models import (
     LayerKind,
     OverlayKey,
     RenderContext,
+    SettingsSection,
     SizeUnit,
     TagDisplay,
     TimeUnit,
@@ -89,28 +91,33 @@ class _LegacyOverlays(BaseModel, frozen=True):
         return {"extra_layers": extra_layers, "layers": layers}
 
 
+LAYERS_SECTION = SettingsSection("Layers")
+"""What is drawn over each picture."""
+CAPTIONS_SECTION = SettingsSection("Captions")
+"""How the tags under each picture are shown."""
+
+
 class ImageChartSettings(BaseModel, frozen=True, extra="forbid", use_attribute_docstrings=True):
     """Image chart settings."""
 
     key: str
     x_axis: str = "step"
-    height: int = 220
-    width: int | None = Field(default=None)
+    height: Annotated[int, DISPLAY_SECTION] = 220
+    width: Annotated[int | None, DISPLAY_SECTION] = Field(default=None)
     """Overall chart width in px. Leave blank to size it automatically from height (the default). Unrelated to native_size below, which only affects individual thumbnails."""
-    native_size: bool = Field(default=False)
+    native_size: Annotated[bool, DISPLAY_SECTION] = Field(default=False)
     """Show each thumbnail at its logged resolution (capped by height, never upscaled) instead of stretching small images to fill the thumbnail box. Only affects individual thumbnails, not the chart's overall width above."""
-    tag_precision: int = Field(default=DEFAULT_TAG_PRECISION, ge=1, le=15)
-    """Significant digits the numbers in an image's caption (its tags) are shown with."""
-    tag_time_unit: TimeUnit | None = Field(default=None)
-    """Show tags logged as a duration in this unit, whatever unit they were logged in. Leave blank to pick the largest unit that fits each one."""
-    tag_size_unit: SizeUnit | None = Field(default=None)
-    """Show tags logged as a data size in this unit, whatever unit they were logged in. Leave blank to pick the largest unit that fits each one."""
-    extra_layers: list[str] = Field(default_factory=list)
+    extra_layers: Annotated[list[str], LAYERS_SECTION] = Field(default_factory=list)
     """Other artifacts to draw over each picture, above its overlays and first at the bottom: an Overlay of shapes (see `dlboard.client.artifacts.overlay`) logged under a key of its own, or an image such as a mask. Each is the one the run logged at the picture's own step."""
-    # The tables come last: in the chart editor each takes a whole row, so the small settings above share theirs.
-    layers: dict[str, LayerStyle] = Field(default_factory=dict)
+    layers: Annotated[dict[str, LayerStyle], LAYERS_SECTION] = Field(default_factory=dict)
     """How particular layers are drawn, a row per layer: an overlay's name, or the key of an extra layer. A layer with no row is drawn in full. Every overlay logged over the picture is drawn, including ones logged later."""
-    tag_display: dict[str, TagDisplay] = Field(default_factory=dict)
+    tag_precision: Annotated[int, CAPTIONS_SECTION] = Field(default=DEFAULT_TAG_PRECISION, ge=1, le=15)
+    """Significant digits the numbers in an image's caption (its tags) are shown with."""
+    tag_time_unit: Annotated[TimeUnit | None, CAPTIONS_SECTION] = Field(default=None)
+    """Show tags logged as a duration in this unit, whatever unit they were logged in. Leave blank to pick the largest unit that fits each one."""
+    tag_size_unit: Annotated[SizeUnit | None, CAPTIONS_SECTION] = Field(default=None)
+    """Show tags logged as a data size in this unit, whatever unit they were logged in. Leave blank to pick the largest unit that fits each one."""
+    tag_display: Annotated[dict[str, TagDisplay], CAPTIONS_SECTION] = Field(default_factory=dict)
     """Display settings for particular tags, a row per tag name, taking the place of the chart's tag precision and unit settings for that tag. Leave a cell blank to keep the chart's own setting."""
 
     @model_validator(mode="before")

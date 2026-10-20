@@ -71,7 +71,10 @@ from dlboard.models._tag import (
 from dlboard.models._theme import ColorScheme, SchemeColors, ThemeSpec
 from dlboard.models._user import UNVERIFIED_ISSUER, NewUser, Principal, User
 from dlboard.models._view import (
+    ADVANCED_SECTION,
+    DATA_SECTION,
     DEFAULT_RENDER_CONTEXT,
+    DISPLAY_SECTION,
     MAX_GRID_COLUMNS,
     MIN_GRID_COLUMNS,
     ChartInstance,
@@ -86,14 +89,18 @@ from dlboard.models._view import (
     ParameterField,
     ParameterFieldType,
     RenderContext,
+    SettingsSection,
     UnknownChartTypeError,
     ViewSummary,
 )
 
 __all__ = [
+    "ADVANCED_SECTION",
     "ARTIFACT_COLUMN_PREFIX",
+    "DATA_SECTION",
     "DEFAULT_RENDER_CONTEXT",
     "DEFAULT_TAG_PRECISION",
+    "DISPLAY_SECTION",
     "FILE_KIND_TAG",
     "HISTOGRAM_COLUMN_PREFIX",
     "HPARAM_COLUMN_PREFIX",
@@ -172,6 +179,7 @@ __all__ = [
     "RunStatus",
     "SchemeColors",
     "Scope",
+    "SettingsSection",
     "SizeUnit",
     "TagDisplay",
     "TagValue",

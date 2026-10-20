@@ -32,7 +32,9 @@ from pydantic import BaseModel, Field, PositiveFloat, PositiveInt
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from dlboard.models import (
+    ADVANCED_SECTION,
     DEFAULT_RENDER_CONTEXT,
+    DISPLAY_SECTION,
     RUN_NAME_COLUMN,
     ChartType,
     ColumnKind,
@@ -96,21 +98,21 @@ class HistogramChartSettings(BaseModel, frozen=True, extra="forbid", use_attribu
 
     key: str
     """The logged histogram to chart."""
-    display: HistogramDisplay = HistogramDisplay.HEATMAP
+    display: typing.Annotated[HistogramDisplay, DISPLAY_SECTION] = HistogramDisplay.HEATMAP
     """`heatmap`: value buckets against step, shaded by how much of the step's values fall in each. `bands`: the median and its spread per step. `step`: the distribution at one step, with a slider to move between steps."""
-    normalize: bool = True
+    normalize: typing.Annotated[bool, DISPLAY_SECTION] = True
     """Show each step as a share of its own values, so steps that logged different numbers of values compare. Turn off to show raw counts. Does not affect `bands`."""
-    colorscale: Colorscale = Colorscale.VIRIDIS
+    colorscale: typing.Annotated[Colorscale, DISPLAY_SECTION] = Colorscale.VIRIDIS
     """`heatmap`: the colors from the fewest values in a bucket to the most."""
-    band_share: float = Field(default=0.68, gt=0, lt=1)
+    band_share: typing.Annotated[float, DISPLAY_SECTION] = Field(default=0.68, gt=0, lt=1)
     """`bands`: the share of a step's values the darker band holds around the median. 0.68 is where a normal distribution's mean plus and minus one standard deviation lie."""
-    max_rows: PositiveInt = 128
+    max_rows: typing.Annotated[PositiveInt, ADVANCED_SECTION] = 128
     """The most value buckets drawn for a run: a finer lattice is merged by keeping every n-th edge. More than a chart is tall in pixels shows nothing, and what bounds the arithmetic."""
-    max_slider_steps: PositiveInt = 300
+    max_slider_steps: typing.Annotated[PositiveInt, ADVANCED_SECTION] = 300
     """`step`: the most steps the slider moves through, spread evenly over the run. A figure carries every step's data with it."""
-    height: int = Field(default=220, ge=80)
+    height: typing.Annotated[int, DISPLAY_SECTION] = Field(default=220, ge=80)
     """Height in px of each run's row."""
-    width: int | None = None
+    width: typing.Annotated[int | None, DISPLAY_SECTION] = None
     """Overall chart width in px. Leave blank to size it automatically from height (the default)."""
 
 

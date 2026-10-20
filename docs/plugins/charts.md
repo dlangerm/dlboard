@@ -116,6 +116,15 @@ its chart type alone.
   chart type can display. Auto-generating and suggesting charts give an artifact key the first built-in
   chart type that says yes; an artifact no chart type claims simply gets no generated chart.
 
+The chart editor builds its form from the settings model, so a setting needs no code of its own to be
+editable. To keep a form with many settings readable, group them: mark a setting with a `SettingsSection` in its
+`Annotated` metadata, as `height: Annotated[int, DISPLAY_SECTION] = 300`. `DATA_SECTION` (what the chart draws, and
+where a setting with no mark goes), `DISPLAY_SECTION` and `ADVANCED_SECTION` come with `dlboard.models`, and a chart
+type may declare sections of its own, such as `SettingsSection("Captions")`. The editor shows each section as a
+collapsible group, in the order its first setting is declared, with only the ones marked `opened` (just
+`DATA_SECTION`) expanded. A chart type whose settings are all in one section gets no groups at all, so a plugin that
+marks nothing looks the way it always did.
+
 `plug(app)` registers the class and, if the chart needs its own clientside JS (a tooltip
 formatter, say), serves it from a route this plugin owns:
 

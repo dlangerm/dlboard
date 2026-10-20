@@ -7,7 +7,7 @@ import typing
 from pydantic import BaseModel, Field, model_validator
 
 from dlboard._compat import StrEnum
-from dlboard.models import NamePatternList
+from dlboard.models import DISPLAY_SECTION, NamePatternList
 
 
 class TableRows(StrEnum):
@@ -106,11 +106,11 @@ class TableChartSettings(BaseModel, frozen=True, extra="forbid", use_attribute_d
     """Artifacts to show as columns: keys, or a prefix and `*` (`samples/*`), which is a column for every key under it, including ones logged later."""
     aggregate: Aggregate = Field(default=Aggregate.LATEST)
     """How a metric with several values in one row is reduced: its latest, first, min, max or mean. An artifact is always its latest."""
-    page_size: int = Field(default=20, ge=1)
+    page_size: typing.Annotated[int, DISPLAY_SECTION] = Field(default=20, ge=1)
     """How many rows each page of the table shows."""
-    font_size: int | None = Field(default=None)
+    font_size: typing.Annotated[int | None, DISPLAY_SECTION] = Field(default=None)
     """Cell/header font size in pixels. Leave unset to use the same (smaller) default as the rest of the charts; set this to size the table up."""
-    width: int | None = Field(default=None)
+    width: typing.Annotated[int | None, DISPLAY_SECTION] = Field(default=None)
     """Overall chart width in px. Leave blank to use the default flat width."""
 
     @model_validator(mode="before")

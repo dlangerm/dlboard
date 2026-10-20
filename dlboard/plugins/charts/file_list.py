@@ -12,6 +12,7 @@ import pandas as pd
 from pydantic import BaseModel, Field, model_validator
 
 from dlboard.models import (
+    DISPLAY_SECTION,
     FILE_KIND_TAG,
     RUN_NAME_COLUMN,
     Artifact,
@@ -53,11 +54,11 @@ class FileListSettings(BaseModel, frozen=True, extra="forbid", use_attribute_doc
     """One artifact key, e.g. `model.onnx`."""
     key_prefix: str = Field(default="")
     """Every artifact key that starts with this, e.g. `checkpoints/` for all of a run's checkpoints -- including any logged later. Use instead of `key`."""
-    page_size: int = Field(default=10, ge=1)
+    page_size: typing.Annotated[int, DISPLAY_SECTION] = Field(default=10, ge=1)
     """How many files each page of the list shows."""
-    height: int = Field(default=300)
+    height: typing.Annotated[int, DISPLAY_SECTION] = Field(default=300)
     """Unused: the list is paged, so it grows to fit its page instead of scrolling. Kept so charts saved with a height still load."""
-    width: int = Field(default=560)
+    width: typing.Annotated[int, DISPLAY_SECTION] = Field(default=560)
     """Overall chart width in px."""
 
     @model_validator(mode="after")

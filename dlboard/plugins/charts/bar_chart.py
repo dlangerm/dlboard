@@ -10,7 +10,7 @@ import dash_mantine_components as dmc
 import pandas as pd
 from pydantic import BaseModel, Field
 
-from dlboard.models import HPARAM_COLUMN_PREFIX, ChartType, ColumnKind
+from dlboard.models import DISPLAY_SECTION, HPARAM_COLUMN_PREFIX, ChartType, ColumnKind
 from dlboard.plugins.charts._axis_label import (
     DEFAULT_MAX_AXIS_LABEL_CHARS,
     VALUE_AXIS_WIDTH,
@@ -36,16 +36,22 @@ class BarChartSettings(BaseModel, frozen=True, extra="forbid", use_attribute_doc
     """The metric or hyperparameter key to group runs by, e.g. "hidden_size"."""
     aggregation: typing.Literal["mean", "median", "min", "max", "sum", "count"] = Field(default="mean")
     """How to combine runs that share the same x_axis value into one bar."""
-    orientation: typing.Literal["horizontal", "vertical"] = Field(default="horizontal")
+    orientation: typing.Annotated[typing.Literal["horizontal", "vertical"], DISPLAY_SECTION] = Field(
+        default="horizontal"
+    )
     """horizontal draws upright bars with groups along the x-axis (the default); vertical draws sideways bars with groups along the y-axis."""
-    sort: typing.Literal["none", "ascending", "descending"] = Field(default="ascending")
+    sort: typing.Annotated[typing.Literal["none", "ascending", "descending"], DISPLAY_SECTION] = Field(
+        default="ascending"
+    )
     """Order bars by x_axis value -- numerically if every group parses as a number, alphabetically otherwise. 'none' keeps groups in first-seen order."""
-    x_axis_type: typing.Literal["auto", "number", "category", "date"] = Field(default="auto")
+    x_axis_type: typing.Annotated[typing.Literal["auto", "number", "category", "date"], DISPLAY_SECTION] = (
+        Field(default="auto")
+    )
     """How to interpret x_axis values for sorting/parsing: "auto" detects numbers vs text (the previous behavior); "number" and "date" force numeric/timestamp parsing even when values look like text; "category" always sorts/groups them as plain text, e.g. to keep "v2" before "v10" instead of numeric order."""
-    height: int = 300
-    width: int | None = Field(default=None)
+    height: typing.Annotated[int, DISPLAY_SECTION] = 300
+    width: typing.Annotated[int | None, DISPLAY_SECTION] = Field(default=None)
     """Overall chart width in px. Leave blank to size it automatically from height."""
-    max_axis_label_chars: MaxAxisLabelChars = DEFAULT_MAX_AXIS_LABEL_CHARS
+    max_axis_label_chars: typing.Annotated[MaxAxisLabelChars, DISPLAY_SECTION] = DEFAULT_MAX_AXIS_LABEL_CHARS
     """Longest axis title, in characters. A longer metric name is shortened to its last characters behind an ellipsis, so it stays inside the chart; raise it for a taller or wider chart."""
 
 

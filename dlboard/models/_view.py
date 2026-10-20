@@ -105,6 +105,29 @@ NamePatternList = typing.Annotated[list[str], NamePatterns()]
 """The type of a setting marked `NamePatterns`."""
 
 
+@dataclasses.dataclass(frozen=True)
+class SettingsSection:
+    """
+    A titled group of a chart type's settings in the chart editor.
+
+    Mark a setting with one in its `Annotated` metadata (`height: Annotated[int, DISPLAY_SECTION] = 300`); a setting
+    with none is in `DATA_SECTION`. The sections show in the order their first setting is declared, and a chart type
+    whose settings are all in one section shows them with no heading. A chart type may declare sections of its own.
+    """
+
+    title: str
+    opened: bool = False
+    """Whether the editor shows the section expanded; the rest start collapsed."""
+
+
+DATA_SECTION: typing.Final = SettingsSection("Data", opened=True)
+"""What a chart draws: the metrics, keys and columns it is of. The default section."""
+DISPLAY_SECTION: typing.Final = SettingsSection("Display")
+"""How it looks: sizes, orientation, axes."""
+ADVANCED_SECTION: typing.Final = SettingsSection("Advanced")
+"""Settings that rarely need changing, like limits that keep a chart fast."""
+
+
 class ChartType(ABC, BaseModel, typing.Generic[_Parameters, _Dataframe, _Chart], frozen=True, extra="forbid"):
     """A type of chart."""
 
@@ -217,6 +240,8 @@ class ParameterField(BaseModel, frozen=True, extra="forbid"):
     """The most a number field may be (its `le`), if the settings model says."""
     description: str | None = None
     """Help text shown alongside the field's widget: the field's attribute docstring on the settings model."""
+    section: SettingsSection = DATA_SECTION
+    """The group of settings the editor shows the field in."""
 
 
 class UnknownChartTypeError(KeyError):
@@ -320,7 +345,14 @@ class ChartTypeRegistry:
     ) -> dict[str, ParameterField]:
         """Describe parameter fields for generic UI generation."""
         field_descriptors: dict[str, ParameterField] = {}
+        sections: dict[str, SettingsSection] = {}
         for field_name, field in parameter_type.model_fields.items():
+            section = next((m for m in field.metadata if isinstance(m, SettingsSection)), DATA_SECTION)
+            if sections.setdefault(section.title, section) != section:
+                msg = (
+                    f"{parameter_type.__name__} has two different settings sections titled {section.title!r}"
+                )
+                raise ValueError(msg)
             field_type, choices = _widget_for(field.annotation)
             if field_type == ParameterFieldType.LIST_STR and NamePatterns() in field.metadata:
                 field_type = ParameterFieldType.LIST_PATTERN
@@ -344,6 +376,7 @@ class ChartTypeRegistry:
                 minimum=next((typing.cast("float", m.ge) for m in field.metadata if isinstance(m, Ge)), None),
                 maximum=next((typing.cast("float", m.le) for m in field.metadata if isinstance(m, Le)), None),
                 description=field.description,
+                section=section,
             )
         return field_descriptors
 
