@@ -237,6 +237,8 @@ def _table_input(
                 "cellEditor": "agSelectCellEditor",
                 "cellEditorParams": {"values": ["", *column.choices]},
             }
+        elif column.type == models.ParameterFieldType.BOOL:
+            cell = {"editable": True, "cellDataType": "boolean"}  # a checkbox, in the cell and to edit it
         elif (
             column.type == models.ParameterFieldType.FLOAT
             and column.minimum is not None

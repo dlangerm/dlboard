@@ -145,7 +145,7 @@ class Overlay(BaseModel, frozen=True, extra="forbid"):
     The image chart pairs the two by run and step, and lays the shapes over the picture in the browser, so the
     picture itself stays untouched and can be a compact JPEG. Shapes are fractions of its size (`Fraction`, `Point`).
     Logged under `OVERLAY_KEY_SUFFIX` after the picture's key (`Overlay.over`), an auto-generated image chart draws
-    it with no setup; under any other key, the chart's `overlays` setting names it.
+    it with no setup; under any other key, the chart's `extra_layers` setting names it.
     """
 
     key: str

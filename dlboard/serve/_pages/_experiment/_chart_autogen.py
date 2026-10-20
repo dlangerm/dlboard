@@ -17,7 +17,7 @@ from dlboard.models import Artifact, ChartInstance, ChartType, ColumnKind, Overl
 from dlboard.plugins.charts.bar_chart import BarChart
 from dlboard.plugins.charts.file_list import FileListChart
 from dlboard.plugins.charts.histogram import HistogramChart
-from dlboard.plugins.charts.image_series import ImageChart, OverlayLayer
+from dlboard.plugins.charts.image_series import ImageChart
 from dlboard.plugins.charts.line_chart import LineChart
 
 if TYPE_CHECKING:
@@ -87,7 +87,13 @@ def panel_name_for_group(group: str, kind: ColumnKind, *, granularity: str | Non
             name = f"{group}{ARTIFACT_PANEL_SUFFIX}"
         case ColumnKind.HISTOGRAM:
             name = f"{group}{HISTOGRAM_PANEL_SUFFIX}"
-        case ColumnKind.METRIC | ColumnKind.HPARAM | ColumnKind.GROUPING | ColumnKind.LAYER:
+        case (
+            ColumnKind.METRIC
+            | ColumnKind.HPARAM
+            | ColumnKind.GROUPING
+            | ColumnKind.LAYER
+            | ColumnKind.LAYER_NAME
+        ):
             name = group
     return f"{name} ({granularity})" if granularity else name
 
@@ -132,20 +138,6 @@ def default_artifact_chart(artifact: Artifact) -> str | None:
     return next((c.name for c in ARTIFACT_CHART_TYPES if c.can_display_artifact(artifact)), None)
 
 
-def default_chart_for_artifact(
-    key: str, chart_type: str, overlay_keys: typing.Sequence[str] = ()
-) -> ChartInstance[typing.Any, typing.Any]:
-    """
-    The default chart for an artifact key, of the chart type `default_artifact_chart` chose for it.
-
-    An image chart draws each of `overlay_keys` over its pictures, at full opacity.
-    """
-    parameters: dict[str, typing.Any] = {"key": key}
-    if overlay_keys:
-        parameters["overlays"] = {k: OverlayLayer().model_dump() for k in overlay_keys}
-    return ChartInstance(chart_type=chart_type, parameters=parameters)
-
-
 class ArtifactChart(typing.NamedTuple):
     """A default chart for some artifact keys, and what to call it."""
 
@@ -169,11 +161,9 @@ def default_artifact_charts(keys: typing.Iterable[str], catalog: ColumnCatalog) 
     """
     keys = list(keys)
     images = {key for key in keys if catalog.artifact_chart_types[key] == ImageChart.name}
-    overlays_of: dict[str, list[str]] = {}
-    for key in sorted(catalog.artifacts):
-        if (parsed := OverlayKey.parse(key)) and (image := parsed.image_key) in images:
-            overlays_of.setdefault(image, []).append(key)
-    drawn_over_images = {overlay for overlays in overlays_of.values() for overlay in overlays}
+    drawn_over_images = {
+        key for key in catalog.artifacts if (parsed := OverlayKey.parse(key)) and parsed.image_key in images
+    }
     charts: list[ArtifactChart] = []
     directories: set[str] = set()
     for key in keys:
@@ -183,7 +173,7 @@ def default_artifact_charts(keys: typing.Iterable[str], catalog: ColumnCatalog) 
         directory = key.rpartition("/")[0]
         if chart_type != FileListChart.name or not directory:
             charts.append(
-                ArtifactChart(key, key, default_chart_for_artifact(key, chart_type, overlays_of.get(key, [])))
+                ArtifactChart(key, key, ChartInstance(chart_type=chart_type, parameters={"key": key}))
             )
         elif (prefix := f"{directory}/") not in directories:
             directories.add(prefix)
@@ -255,7 +245,7 @@ def build_auto_panels(
                 return artifact_charts[key]
             case ColumnKind.HISTOGRAM:
                 return default_chart_for_histogram(key)
-            case ColumnKind.HPARAM | ColumnKind.GROUPING | ColumnKind.LAYER:
+            case ColumnKind.HPARAM | ColumnKind.GROUPING | ColumnKind.LAYER | ColumnKind.LAYER_NAME:
                 msg = f"no chart is generated for a {kind} key"
                 raise ValueError(msg)
 

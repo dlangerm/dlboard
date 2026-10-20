@@ -61,12 +61,18 @@ class ColumnCatalog:
         return bool(self.metrics or self.artifact_chart_types or self.histograms)
 
     @property
+    def _layer_names(self) -> list[str]:
+        """The names a layer can go by in a chart's `layers`: an overlay's (`OverlayKey.label`), or any other layer's key."""
+        parsed = {key: OverlayKey.parse(key) for key in self.layers}
+        return sorted({overlay.label if overlay else key for key, overlay in parsed.items()})
+
+    @property
     def _drawn_over_images(self) -> frozenset[str]:
         """The artifact keys that are an overlay of an image that is logged too: its chart draws them, so they are no choice."""
         keys = frozenset(self.artifacts)
         return frozenset(k for k in keys if (overlay := OverlayKey.parse(k)) and overlay.image_key in keys)
 
-    def options(self, kind: ColumnKind) -> list[str]:
+    def options(self, kind: ColumnKind) -> list[str]:  # noqa: PLR0911 -- a choice of names per kind of column
         """The choices for a chart field of `kind` -- `step`/`timestamp_utc` being common metric x-axes."""
         match kind:
             case ColumnKind.METRIC:
@@ -74,7 +80,9 @@ class ColumnCatalog:
             case ColumnKind.ARTIFACT:
                 return [key for key in self.artifacts if key not in self._drawn_over_images]
             case ColumnKind.LAYER:
-                return list(self.layers)
+                return [key for key in self.layers if OverlayKey.parse(key) is None]
+            case ColumnKind.LAYER_NAME:
+                return self._layer_names
             case ColumnKind.HISTOGRAM:
                 return list(self.histograms)
             case ColumnKind.HPARAM:

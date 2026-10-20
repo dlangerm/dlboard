@@ -230,7 +230,7 @@ def _chart_columns(chart: models.ChartInstance[Any, Any], df: pd.DataFrame) -> l
                 return column in histograms
             case ColumnKind.METRIC:
                 return metrics is None or column in metrics
-            case (ColumnKind.GROUPING | ColumnKind.LAYER) as kind:
+            case (ColumnKind.GROUPING | ColumnKind.LAYER | ColumnKind.LAYER_NAME) as kind:
                 msg = f"no dataframe column is of kind {kind}"
                 raise ValueError(msg)
 

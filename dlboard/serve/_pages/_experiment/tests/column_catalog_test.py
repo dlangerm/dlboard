@@ -42,6 +42,7 @@ _CATALOG = ColumnCatalog(
         # `{name: kind}` dict could only hold one of them.
         (ColumnKind.ARTIFACT, ["shared"]),
         (ColumnKind.LAYER, ["mask"]),
+        (ColumnKind.LAYER_NAME, ["mask"]),
         (ColumnKind.HISTOGRAM, ["grad"]),
         (ColumnKind.HPARAM, ["lr"]),
         (ColumnKind.GROUPING, ["loss", "lr", "run_id", "shared", "step", "timestamp_utc"]),
@@ -58,6 +59,15 @@ def test_an_overlay_is_no_choice_of_artifact_when_the_image_it_goes_over_is_logg
 
     # The image's chart draws `drawn`; the orphan has no image to draw it, so it can only be charted as itself.
     assert catalog.options(ColumnKind.ARTIFACT) == ["samples/a", "samples/c", orphan]
+
+
+def test_an_overlay_is_named_by_its_label_and_is_no_extra_layer_but_any_other_layer_is_both() -> None:
+    truth, unnamed = overlay_key("img", "truth"), overlay_key("img")
+    catalog = ColumnCatalog(layers=(truth, unnamed, "mask"))
+
+    # An overlay is drawn over its picture without being listed; a `layers` row names it by its label.
+    assert catalog.options(ColumnKind.LAYER) == ["mask"]
+    assert catalog.options(ColumnKind.LAYER_NAME) == ["mask", "overlay", "truth"]
 
 
 def test_column_catalog_offers_no_metric_axes_without_metrics() -> None:

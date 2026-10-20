@@ -365,3 +365,15 @@ def test_a_number_with_a_range_is_a_slider_in_its_cell() -> None:
     column: dict[str, Any] = (grid or {})["columnDefs"][1]
     assert column["cellRenderer"] == SLIDER_RENDERER
     assert column["cellRendererParams"] == {"min": 0, "max": 1, "step": 0.01, "fallback": 1.0}
+
+
+def test_a_flag_is_a_checkbox_in_its_cell() -> None:
+    hidden = ParameterField(name="hidden", type=ParameterFieldType.BOOL, required=False, default=False)
+    field = ParameterField(name="layers", type=ParameterFieldType.TABLE, required=False, columns=(hidden,))
+
+    grid = find_props(
+        _param_field_input(field.name, field, ColumnCatalog()), editor._CHART_PARAM_TABLE.of("layers")
+    )
+
+    column: dict[str, Any] = (grid or {})["columnDefs"][1]
+    assert (column["editable"], column["cellDataType"]) == (True, "boolean")

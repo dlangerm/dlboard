@@ -2138,7 +2138,7 @@ def test_an_image_charts_per_tag_display_is_edited_as_table_rows_in_the_chart_ed
     chart.get_by_role("button", name="Edit chart").click()
 
     # A row per tag in a grid, not JSON: add one, name the tag, and give it a precision.
-    # The chart has another table now (its `overlays`), with buttons of its own: this is the tag display's.
+    # The chart has another table now (its `layers`), with buttons of its own: this is the tag display's.
     add_row = page.locator('button[id*="tag_display"][id*="table-add"]')
     editor = page.get_by_role("dialog")
     rows = editor.locator(".ag-center-cols-container .ag-row")
@@ -2297,10 +2297,10 @@ def test_an_edited_image_chart_still_scrubs_and_opens_its_enlarged_view(
     expect(page.get_by_role("dialog")).to_be_visible()
 
 
-def test_a_layer_added_in_the_chart_editor_is_drawn_over_the_pictures_at_its_opacity(
+def test_an_extra_layer_added_in_the_chart_editor_is_drawn_over_the_pictures_at_its_opacity(
     page: Page, live_server_url: str, tmp_path: Path, console_errors: list[str]
 ) -> None:
-    """The `overlays` setting is a table: any artifact key can be added as a layer, with an opacity of its own."""
+    """Any artifact key can be added as an extra layer, and the `layers` table gives it an opacity of its own."""
     _create_project_and_experiment(page, live_server_url, "Layer Editor Experiment")
     page.locator(".experiment-card").click()
     experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
@@ -2325,8 +2325,10 @@ def test_a_layer_added_in_the_chart_editor_is_drawn_over_the_pictures_at_its_opa
     chart.hover()
     chart.get_by_role("button", name="Edit chart").click()
     dialog = page.get_by_role("dialog")
-    dialog.locator('button[id*="overlays"][id*="table-add"]').click()  # opens the new row's name for typing
-    page.keyboard.type("mask")  # the keys that can be layers are suggested
+    dialog.get_by_role("textbox", name="extra_layers").click()  # the keys that can be layers are offered
+    page.get_by_role("option", name="samples/mask").click()
+    dialog.locator('button[id*="layers"][id*="table-add"]').click()  # opens the new row's name for typing
+    page.keyboard.type("mask")  # the layers that can be styled are suggested
     page.locator(".ag-popup").get_by_text("samples/mask").click()
     dialog.locator('.ag-cell[col-id="opacity"] input[type=range]').fill(
         "0.5"

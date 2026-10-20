@@ -62,14 +62,16 @@ The built-in line charts, and the image series that steps through logged images:
 
 ![An image-series chart](../images/image-series.png)
 
-An image series can draw layers over each picture. Its `overlays` setting is a row per artifact key, bottom layer first,
-each with an `opacity` from 0 to 1, a slider in the chart editor. Typing a row's name there suggests the artifact keys the
-experiment logged that can be a layer. A layer is an `Overlay` of shapes (see [docs/client.md](../client.md)) or any image,
-such as a segmentation mask, and the one the run logged at each picture's own step is laid over it, in its thumbnail and
-in its enlarged view. A picture a layer has nothing for at its step is shown without it. Auto-generate adds the
-`_$overlay` artifacts of an image (`sample_$overlay`, or one per `name` after it: `sample_$overlay/truth`), if it
-has any, and gives them no chart of their own. While the picture for the slider's
-step is still downloading, its thumbnail shows a spinner over the previous picture.
+An image series draws layers over each picture. A layer is an `Overlay` of shapes (see [docs/client.md](../client.md))
+or any image, such as a segmentation mask, and the one the run logged at each picture's own step is laid over it, in its
+thumbnail and in its enlarged view. A picture a layer has nothing for at its step is shown without it. Every overlay
+logged over an image (`sample_$overlay`, or one per `name` after it: `sample_$overlay/truth`) is drawn over it, including
+ones logged after the chart was made, and none of them gets a chart of its own. Its `extra_layers` setting adds other
+artifacts above those, and its `layers` setting is a row per layer, named by the overlay's name (`truth`; `overlay` when
+it has none) or the extra layer's key, with `hidden` and an `opacity` from 0 to 1, a slider in the chart editor. A
+layer with no row is drawn in full. A chart saved with the earlier `overlays` setting opens as the `extra_layers` and
+`layers` that draw the same. While the picture for the slider's step is still downloading, its thumbnail shows a
+spinner over the previous picture.
 
 A table of runs, with an artifact column:
 

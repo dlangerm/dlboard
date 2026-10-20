@@ -183,26 +183,16 @@ def test_an_images_overlay_is_drawn_over_it_by_its_chart_instead_of_charted_on_i
 
     charts = [c for p in autogen.build_auto_panels(catalog, delimiter="/", mode="prefix") for c in p.charts]
 
-    assert [c.parameters for c in charts] == [
-        {"key": "img", "overlays": {f"img{OVERLAY_KEY_SUFFIX}": {"opacity": 1.0}}}
-    ]
+    assert [c.parameters for c in charts] == [{"key": "img"}]  # the chart draws every overlay logged over it
 
 
-def test_every_overlay_of_an_image_is_drawn_over_it_in_key_order() -> None:
+def test_every_overlay_of_an_image_is_left_to_its_chart_not_charted_on_its_own() -> None:
     truth, pred = overlay_key("img", "truth"), overlay_key("img", "prediction")
     catalog = ColumnCatalog(artifacts=("img", truth, pred), artifact_chart_types={"img": "image"})
 
     charts = [c for p in autogen.build_auto_panels(catalog, delimiter="/", mode="prefix") for c in p.charts]
 
-    assert [c.parameters for c in charts] == [
-        {"key": "img", "overlays": {pred: {"opacity": 1.0}, truth: {"opacity": 1.0}}}
-    ]
-    overlays = charts[0].parameters["overlays"]
-    assert isinstance(overlays, dict)
-    assert list(overlays) == [
-        pred,
-        truth,
-    ]  # a dict compares equal in any order, a chart draws them in this one
+    assert [c.parameters for c in charts] == [{"key": "img"}]
 
 
 def test_an_overlay_named_artifact_with_no_image_to_go_over_is_charted_as_any_other() -> None:

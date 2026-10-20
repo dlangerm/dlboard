@@ -49,7 +49,9 @@ class ColumnKind(StrEnum):
     HISTOGRAM = "histogram"
     HPARAM = "hparam"
     LAYER = "layer"
-    """Artifact keys an image chart can draw over a picture: an `Overlay`, or an image. No dataframe column is ever tagged with this kind directly."""
+    """Artifact keys an image chart can draw over a picture besides its own overlays: an `Overlay`, or an image. No dataframe column is ever tagged with this kind directly."""
+    LAYER_NAME = "layer_name"
+    """The names a chart can give a layer's style: an overlay's name, or the key of any other layer. No dataframe column is ever tagged with this kind directly."""
     GROUPING = "grouping"
     """Synthetic kind for fields that group/split by any metric or hparam column, plus `run_id` --
     see `group_columns_by_kind`. No dataframe column is ever tagged with this kind directly."""

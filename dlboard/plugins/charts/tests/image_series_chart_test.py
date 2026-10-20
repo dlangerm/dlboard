@@ -12,6 +12,7 @@ from dlboard.conftest import props as _props
 from dlboard.models import (
     DEFAULT_RENDER_CONTEXT,
     LAYER_KIND_TAG,
+    OVERLAY_KEY_SUFFIX,
     RUN_NAME_COLUMN,
     ChartTypeRegistry,
     LayerKind,
@@ -29,7 +30,7 @@ from dlboard.plugins.charts.image_series import (
     MAX_SLIDER_LABELS,
     ImageChart,
     ImageChartSettings,
-    OverlayLayer,
+    LayerStyle,
     _slider_marks,
 )
 
@@ -352,46 +353,120 @@ def _log_layer(df: pd.DataFrame, key: str, fname: str, *, kind: LayerKind | None
     )
 
 
-def test_layers_are_paired_with_the_picture_logged_at_the_same_run_and_step_in_the_order_listed() -> None:
+def test_every_overlay_logged_over_a_picture_is_drawn_below_the_extra_layers_in_key_order() -> None:
     df = _artifacts_df(n_runs=2, steps_per_run=2)
-    _log_layer(df, "boxes", "boxes.json", kind=LayerKind.SHAPES)
+    truth, unnamed = overlay_key("img", "truth"), overlay_key("img")
+    _log_layer(df, truth, "truth.png")
+    _log_layer(df, unnamed, "boxes.json", kind=LayerKind.SHAPES)
     _log_layer(df, "mask", "mask.png")
+    _log_layer(df, overlay_key("other"), "other.json", kind=LayerKind.SHAPES)  # an overlay of another picture
     settings = ImageChartSettings(
-        key="img", overlays={"mask": OverlayLayer(opacity=0.5), "boxes": OverlayLayer()}
+        key="img",
+        extra_layers=["mask"],
+        layers={"truth": LayerStyle(opacity=0.5), "mask": LayerStyle(opacity=0.2)},
     )
 
     overlays = _store_data(ImageChart.render(settings, df))["overlays"]
 
     assert overlays == {
         f"ref://{run}-0": [
-            {"url": f"mask://{run}", "kind": "picture", "opacity": 0.5},
-            {"url": f"boxes://{run}", "kind": "shapes", "opacity": 1.0},
+            {"url": f"{unnamed}://{run}", "kind": "shapes", "opacity": 1.0},
+            {"url": f"{truth}://{run}", "kind": "picture", "opacity": 0.5},
+            {"url": f"mask://{run}", "kind": "picture", "opacity": 0.2},
         ]
         for run in (1, 2)
     }  # step 1 logged no layers, so its pictures are not listed
 
 
-def test_an_image_chart_without_layers_draws_nothing_over_its_pictures() -> None:
+def test_a_hidden_layer_is_not_drawn() -> None:
     df = _artifacts_df(n_runs=1)
-    _log_layer(df, "boxes", "boxes.json", kind=LayerKind.SHAPES)
+    _log_layer(df, overlay_key("img", "truth"), "truth.png")
+    _log_layer(df, overlay_key("img", "pred"), "pred.png")
+    settings = ImageChartSettings(key="img", layers={"truth": LayerStyle(hidden=True)})
+
+    overlays = _store_data(ImageChart.render(settings, df))["overlays"]
+
+    assert [layer["url"] for layer in overlays["ref://1-0"]] == [f"{overlay_key('img', 'pred')}://1"]
+
+
+@pytest.mark.parametrize(
+    "layer_key",
+    [
+        pytest.param("boxes", id="an-artifact-not-listed-as-a-layer"),
+        pytest.param(f"img{OVERLAY_KEY_SUFFIX}x", id="a-key-that-only-starts-like-an-overlay"),
+        pytest.param(overlay_key("img2"), id="an-overlay-of-another-picture"),
+    ],
+)
+def test_an_image_chart_draws_nothing_over_its_pictures_that_is_not_its_own_overlay(layer_key: str) -> None:
+    df = _artifacts_df(n_runs=1)
+    _log_layer(df, layer_key, "layer.json", kind=LayerKind.SHAPES)
 
     assert _store_data(ImageChart.render(ImageChartSettings(key="img"), df))["overlays"] == {}
 
 
-def test_the_layers_are_charted_with_the_image_and_edited_as_a_table() -> None:
-    settings = ImageChartSettings(
-        key="img", overlays={"boxes": OverlayLayer(), "mask": OverlayLayer(opacity=0.3)}
-    )
+def test_the_overlays_and_extra_layers_are_charted_with_the_image_and_styled_in_a_table() -> None:
+    settings = ImageChartSettings(key="img", extra_layers=["boxes", "mask"])
+    fields = ChartTypeRegistry.get_registered_chart_types()[ImageChart.name]
 
     assert ImageChart.hint_required_artifact_keys(settings) == {"img", "boxes", "mask"}
-    field = ChartTypeRegistry.get_registered_chart_types()[ImageChart.name]["overlays"]
-    assert field.type is ParameterFieldType.TABLE
-    assert [(c.name, c.minimum, c.maximum) for c in field.columns or ()] == [("opacity", 0, 1)]
+    assert ImageChart.hint_required_artifact_key_prefixes(settings) == {overlay_key("img")}
+    assert fields["extra_layers"].type is ParameterFieldType.LIST_STR
+    assert fields["layers"].type is ParameterFieldType.TABLE
+    assert [(c.name, c.type) for c in fields["layers"].columns or ()] == [
+        ("hidden", ParameterFieldType.BOOL),
+        ("opacity", ParameterFieldType.FLOAT),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("legacy", "extra_layers", "layers"),
+    [
+        pytest.param({}, [], {}, id="none"),
+        pytest.param({overlay_key("img"): {}}, [], {}, id="an-own-overlay-in-full-is-drawn-anyway"),
+        pytest.param(
+            {overlay_key("img", "truth"): {"opacity": 0.5}},
+            [],
+            {"truth": LayerStyle(opacity=0.5)},
+            id="an-own-overlay-keeps-its-opacity-under-its-name",
+        ),
+        pytest.param(
+            {overlay_key("img"): {"opacity": 0.5}},
+            [],
+            {"overlay": LayerStyle(opacity=0.5)},
+            id="the-unnamed-overlay",
+        ),
+        pytest.param(
+            {"mask": {"opacity": 0.3}, "boxes": {}},
+            ["mask", "boxes"],
+            {"mask": LayerStyle(opacity=0.3)},
+            id="any-other-artifact-is-an-extra-layer-in-order",
+        ),
+        pytest.param(
+            {overlay_key("other"): {}},
+            [overlay_key("other")],
+            {},
+            id="an-overlay-of-another-picture-is-extra",
+        ),
+    ],
+)
+def test_a_chart_saved_with_an_overlays_row_per_layer_draws_the_same_layers(
+    legacy: dict[str, dict[str, float]], extra_layers: list[str], layers: dict[str, LayerStyle]
+) -> None:
+    settings = ImageChartSettings.model_validate({"key": "img", "overlays": legacy})
+
+    assert settings == ImageChartSettings(key="img", extra_layers=extra_layers, layers=layers)
+
+
+def test_settings_cannot_set_the_overlays_a_chart_was_saved_with_beside_the_layers_that_replace_them() -> (
+    None
+):
+    with pytest.raises(ValidationError):
+        ImageChartSettings.model_validate({"key": "img", "overlays": {}, "layers": {}})
 
 
 def test_a_layers_opacity_is_a_fraction() -> None:
     with pytest.raises(ValidationError):
-        OverlayLayer.model_validate({"opacity": 1.5})
+        LayerStyle.model_validate({"opacity": 1.5})
 
 
 def test_the_same_settings_under_different_chart_ids_get_different_component_ids() -> None:
