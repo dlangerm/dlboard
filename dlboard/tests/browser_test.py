@@ -2139,8 +2139,9 @@ def test_an_image_charts_per_tag_display_is_edited_as_table_rows_in_the_chart_ed
 
     # A row per tag in a grid, not JSON: add one, name the tag, and give it a precision.
     # The chart has another table now (its `overlays`), with buttons of its own: this is the tag display's.
-    add_row = page.locator('button[id*="tag_display"][id*="table-add"]')
     editor = page.get_by_role("dialog")
+    editor.get_by_role("button", name="Tags").click()  # the settings are in collapsed sections
+    add_row = page.locator('button[id*="tag_display"][id*="table-add"]')
     rows = editor.locator(".ag-center-cols-container .ag-row")
     add_row.click()  # opens the new row's name for typing; clicking away leaves it blank
     editor.get_by_text("Preview").click()

@@ -56,8 +56,22 @@ def _log_a_run(store: SQLLiteStore, experiment_id: int) -> models.Run:
     return run
 
 
-def _props_by_field(fields: list[Any]) -> dict[str, dict[str, Any]]:
-    return {_to_props(f)["id"]["field"]: _to_props(f) for f in fields}
+def _props_by_field(form: Any) -> dict[str, dict[str, Any]]:  # noqa: ANN401 -- a Dash component tree
+    """The props of every settings field in `form` by its name, wherever sections nest it."""
+    if isinstance(form, list):
+        return {
+            name: found for item in cast("list[Any]", form) for name, found in _props_by_field(item).items()
+        }
+    if not hasattr(form, "to_plotly_json"):
+        return {}
+    props = _to_props(form)
+    own = props["id"]["field"] if _is_field_id(props.get("id")) else None
+    children = _props_by_field(props.get("children"))
+    return {**children, **({own: props} if own else {})}
+
+
+def _is_field_id(component_id: object) -> bool:
+    return isinstance(component_id, dict) and component_id.get("type") == editor.CHART_PARAM.type
 
 
 def test_build_chart_param_form_offers_the_experiments_columns(
@@ -72,6 +86,33 @@ def test_build_chart_param_form_offers_the_experiments_columns(
     assert "step" in line["x_axis"]["data"]
     assert set(table["show_metrics"]["data"]) >= {"loss", "acc"}
     assert set(table["show_hparams"]["data"]) == {"*", "lr"}
+
+
+def test_a_form_of_several_sections_is_one_accordion_that_opens_only_the_data_section(
+    store: SQLLiteStore, experiment_id: int
+) -> None:
+    [accordion] = build_chart_param_form("line", None, store=store, experiment_id=experiment_id)
+
+    props = _to_props(accordion)
+    items = [_to_props(item) for item in props["children"]]
+    assert [item["value"] for item in items] == ["Data", "Display", "Advanced"]
+    assert props["value"] == ["Data"]
+    assert set(_props_by_field([accordion])) >= {"column", "x_axis", "height", "sample"}
+
+
+def test_a_form_of_one_section_has_no_accordion(
+    monkeypatch: pytest.MonkeyPatch, store: SQLLiteStore, experiment_id: int
+) -> None:
+    field = ParameterField(name="note", type=ParameterFieldType.STR, required=False)
+    monkeypatch.setattr(
+        models.ChartTypeRegistry,
+        "get_registered_chart_types",
+        classmethod(lambda _cls: {"flat": {"note": field}}),  # pyrefly: ignore [implicit-any-lambda]
+    )
+
+    form = build_chart_param_form("flat", None, store=store, experiment_id=experiment_id)
+
+    assert [_to_props(item)["id"]["field"] for item in form] == ["note"]
 
 
 def test_a_table_takes_typed_names_and_prefixes_not_only_those_that_exist(

@@ -6,7 +6,7 @@ import hashlib
 import json
 import typing
 from pathlib import Path
-from typing import Any, cast
+from typing import Annotated, Any, cast
 
 import dash
 import dash_mantine_components as dmc
@@ -19,12 +19,14 @@ from dlboard.client.artifacts.overlay import DEFAULT_CLASS_COLORS, DEFAULT_MASK_
 from dlboard.models import (
     DEFAULT_RENDER_CONTEXT,
     DEFAULT_TAG_PRECISION,
+    DISPLAY_SECTION,
     RUN_NAME_COLUMN,
     Artifact,
     ChartType,
     ColumnKind,
     LayerKind,
     RenderContext,
+    SettingsSection,
     SizeUnit,
     TagDisplay,
     TimeUnit,
@@ -58,28 +60,34 @@ class DrawnLayer(OverlayLayer):
     kind: LayerKind
 
 
+LAYERS_SECTION = SettingsSection("Layers", opened=True)
+"""What is drawn over each picture."""
+TAGS_SECTION = SettingsSection("Tags")
+"""How the tags under each picture are shown."""
+
+
 class ImageChartSettings(BaseModel, frozen=True, extra="forbid", use_attribute_docstrings=True):
     """Image chart settings."""
 
     key: str
     x_axis: str = "step"
-    height: int = 220
-    width: int | None = Field(default=None)
+    height: Annotated[int, DISPLAY_SECTION] = 220
+    width: Annotated[int | None, DISPLAY_SECTION] = Field(default=None)
     """Overall chart width in px. Leave blank to size it automatically from height (the default). Unrelated to native_size below, which only affects individual thumbnails."""
-    native_size: bool = Field(default=False)
+    native_size: Annotated[bool, DISPLAY_SECTION] = Field(default=False)
     """Show each thumbnail at its logged resolution (capped by height, never upscaled) instead of stretching small images to fill the thumbnail box. Only affects individual thumbnails, not the chart's overall width above."""
-    tag_precision: int = Field(default=DEFAULT_TAG_PRECISION, ge=1, le=15)
+    tag_precision: Annotated[int, TAGS_SECTION] = Field(default=DEFAULT_TAG_PRECISION, ge=1, le=15)
     """Significant digits the numbers in an image's caption (its tags) are shown with."""
-    tag_time_unit: TimeUnit | None = Field(default=None)
+    tag_time_unit: Annotated[TimeUnit | None, TAGS_SECTION] = Field(default=None)
     """Show tags logged as a duration in this unit, whatever unit they were logged in. Leave blank to pick the largest unit that fits each one."""
-    tag_size_unit: SizeUnit | None = Field(default=None)
+    tag_size_unit: Annotated[SizeUnit | None, TAGS_SECTION] = Field(default=None)
     """Show tags logged as a data size in this unit, whatever unit they were logged in. Leave blank to pick the largest unit that fits each one."""
     # The two tables come last: in the chart editor each takes a whole row, so the small settings above share theirs.
-    overlays: dict[str, OverlayLayer] = Field(default_factory=dict)
+    overlays: Annotated[dict[str, OverlayLayer], LAYERS_SECTION] = Field(default_factory=dict)
     """
     The artifacts drawn over each picture, a row per artifact key, first row at the bottom. Each is the one the run logged at the picture's own step: an Overlay of shapes (see `dlboard.client.artifacts.overlay`), or an image such as a mask. A picture a row has nothing for is shown without it. Auto-generate adds the picture's own overlays, if there are any.
     """
-    tag_display: dict[str, TagDisplay] = Field(default_factory=dict)
+    tag_display: Annotated[dict[str, TagDisplay], TAGS_SECTION] = Field(default_factory=dict)
     """Display settings for particular tags, a row per tag name, taking the place of the chart's tag precision and unit settings for that tag. Leave a cell blank to keep the chart's own setting."""
 
     @property

@@ -10,7 +10,14 @@ import dash_mantine_components as dmc
 import pandas as pd
 from pydantic import BaseModel, Field
 
-from dlboard.models import RUN_NAME_COLUMN, ChartType, ColumnKind, MetricColumn
+from dlboard.models import (
+    ADVANCED_SECTION,
+    DISPLAY_SECTION,
+    RUN_NAME_COLUMN,
+    ChartType,
+    ColumnKind,
+    MetricColumn,
+)
 from dlboard.plugins.charts._axis_label import (
     DEFAULT_MAX_AXIS_LABEL_CHARS,
     VALUE_AXIS_WIDTH,
@@ -104,16 +111,18 @@ class LineChartSettings(BaseModel, frozen=True, extra="forbid", use_attribute_do
 
     column: str
     x_axis: str
-    height: int = 300
-    width: int | None = Field(default=None)
+    height: typing.Annotated[int, DISPLAY_SECTION] = 300
+    width: typing.Annotated[int | None, DISPLAY_SECTION] = Field(default=None)
     """Overall chart width in px. Leave blank to size it automatically from height."""
-    sample: bool = Field(default=True)
+    sample: typing.Annotated[bool, ADVANCED_SECTION] = Field(default=True)
     """Downsample each run's series (LTTB) so huge series stay smooth to render."""
-    max_points: int = Field(default=DEFAULT_MAX_POINTS)
+    max_points: typing.Annotated[int, ADVANCED_SECTION] = Field(default=DEFAULT_MAX_POINTS)
     """Target point count per run when sample is enabled."""
-    max_axis_label_chars: MaxAxisLabelChars = DEFAULT_MAX_AXIS_LABEL_CHARS
+    max_axis_label_chars: typing.Annotated[MaxAxisLabelChars, DISPLAY_SECTION] = DEFAULT_MAX_AXIS_LABEL_CHARS
     """Longest axis title, in characters. A longer metric name is shortened to its last characters behind an ellipsis, so it stays inside the chart; raise it for a taller or wider chart."""
-    x_axis_type: typing.Literal["number", "category", "date", "time"] = Field(default="number")
+    x_axis_type: typing.Annotated[typing.Literal["number", "category", "date", "time"], DISPLAY_SECTION] = (
+        Field(default="number")
+    )
     """"number" spaces points by their actual value (step 10 sits 10x as far from 0 as step 1); "category" gives every distinct x value equal spacing regardless of its size; "date" treats the axis as a timestamp (e.g. timestamp_utc), showing real calendar dates; "time" treats it as an elapsed duration in seconds, showing it as h:mm:ss."""
 
 
