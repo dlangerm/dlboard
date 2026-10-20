@@ -1476,6 +1476,7 @@
   "dlboard/tests/browser_test.py::test_slow_page_render_shows_a_loading_indicator[chromium]": 3.8073274409980513,
   "dlboard/tests/browser_test.py::test_suggest_charts_filters_selects_and_adds_many_at_once[chromium]": 4.400085163011681,
   "dlboard/tests/browser_test.py::test_switching_tabs_does_not_remount_the_navbar_run_table[chromium]": 3.437194924990763,
+  "dlboard/tests/browser_test.py::test_switching_the_editor_to_a_chart_in_another_panel_moves_the_outline_and_drops_the_old_draft[chromium]": 5.766199171994231,
   "dlboard/tests/browser_test.py::test_the_runs_table_shows_how_each_run_ended_and_for_how_long[chromium]": 2.4862577530147973,
   "dlboard/tests/chart_render_isolation_test.py::test_broken_chart_does_not_prevent_sibling_charts_from_rendering": 1.7483622320141876,
   "dlboard/tests/chart_render_isolation_test.py::test_broken_chart_renders_as_error_alert_without_raising[missing-column]": 0.9029262120020576,

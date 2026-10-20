@@ -2847,6 +2847,7 @@ def test_a_chart_being_edited_is_drawn_in_its_own_card_beside_the_page_and_cance
 
     edited.hover()
     edited.get_by_role("button", name="Edit chart").click()
+    expect(edited).to_have_attribute("data-dl-editing", "")  # outlined as it opens
     dock.get_by_role("button", name="Display").click()
     dock.get_by_label("height").fill("500")
 
@@ -2859,6 +2860,53 @@ def test_a_chart_being_edited_is_drawn_in_its_own_card_beside_the_page_and_cance
     expect(dock).to_be_hidden()
     expect(edited.locator(".dl-chart-draft")).to_be_empty()
     expect(saved).to_have_css("height", "300px")
+    assert console_errors == []
+
+
+def test_switching_the_editor_to_a_chart_in_another_panel_moves_the_outline_and_drops_the_old_draft(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """Opening an edit on another chart is quick and clean: no chart is drawn from the previous form's values."""
+    _create_project_and_experiment(page, live_server_url, "Dock Switch Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    run = BasicDlboardAPI(live_server_url).create_run(models.NewRun(experiment_id=experiment_id))
+    BasicDlboardAPI(live_server_url).log_metric_batch(
+        [
+            models.LoggedMetrics(
+                experiment_id=experiment_id,
+                run_id=run.id,
+                step=step,
+                metrics={"a/loss": 1.0 / (step + 1), "b/loss": 2.0 / (step + 1)},
+                timestamp_utc=pendulum.now("UTC"),
+            )
+            for step in range(3)
+        ]
+    )
+    page.reload()
+    _auto_generate_charts(page)
+    page.get_by_role("button", name="b", exact=True).click()  # open the second panel
+    charts = page.locator(".dl-chart-item")
+    expect(charts).to_have_count(2)
+    first, second = charts.nth(0), charts.nth(1)
+    dock = page.get_by_role("complementary", name="Chart settings")
+
+    first.hover()
+    first.get_by_role("button", name="Edit chart").click()
+    dock.get_by_role("button", name="Display").click()
+    dock.get_by_label("height").fill("500")
+    expect(first.locator(".dl-chart-draft .mantine-LineChart-root")).to_have_css("height", "500px")
+
+    second.hover()
+    second.get_by_role("button", name="Edit chart").click()
+
+    expect(second).to_have_attribute("data-dl-editing", "")
+    expect(first).not_to_have_attribute("data-dl-editing", "")
+    expect(first.locator(".dl-chart-draft")).to_be_empty()  # the first chart is as it was saved
+    expect(first.locator(".dl-chart-body .mantine-LineChart-root")).to_have_css("height", "300px")
+    expect(dock.get_by_label("column *")).to_have_value("b/loss")
+    # The second is drawn from its own form, not the first's (which had a height of 500).
+    expect(second.locator(".dl-chart-draft .mantine-LineChart-root")).to_have_css("height", "300px")
     assert console_errors == []
 
 
