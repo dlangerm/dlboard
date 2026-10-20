@@ -8,12 +8,13 @@ values out, for the feature modules to apply and `_page_repository.py` to save.
 
 from __future__ import annotations
 
+import hashlib
 import typing
 from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 from dash.development.base_component import Component
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from dlboard import models
 
@@ -57,8 +58,39 @@ def group_panels_by_tab(
     return groups
 
 
+def _with_unique_chart_ids(
+    panels: list[models.PanelInstance[Any, Any]],
+) -> list[models.PanelInstance[Any, Any]]:
+    """
+    The panels with no two charts sharing an id.
+
+    A chart saved without an id has one derived from its settings, so two of one config share it, and the editor and
+    a `?chart=` link find a chart by its id. A repeat takes an id derived from its own, the same on every load, which
+    the next save keeps.
+    """
+    seen: set[str] = set()
+    unique: list[models.PanelInstance[Any, Any]] = []
+    for panel in panels:
+        charts: list[models.ChartInstance[Any, Any]] = []
+        for chart in panel.charts:
+            chart_id = chart.id
+            while chart_id in seen:
+                chart_id = hashlib.sha256(chart_id.encode()).hexdigest()[: len(chart.id)]
+            seen.add(chart_id)
+            charts.append(chart if chart_id == chart.id else chart.model_copy(update={"id": chart_id}))
+        unique.append(panel.model_copy(update={"charts": charts}))
+    return unique
+
+
 class BasicExperimentPage(models.Page[pd.DataFrame, Component], frozen=True, extra="forbid"):
     """Basic experiment page: per-panel charts, grouped into tabs."""
+
+    @field_validator("panels", mode="after")
+    @classmethod
+    def _charts_have_unique_ids(
+        cls, panels: list[models.PanelInstance[Any, Any]]
+    ) -> list[models.PanelInstance[Any, Any]]:
+        return _with_unique_chart_ids(panels)
 
     @property
     def document(self) -> DocumentSettings:
@@ -67,6 +99,27 @@ class BasicExperimentPage(models.Page[pd.DataFrame, Component], frozen=True, ext
     def with_settings(self, change: DocumentSettings) -> BasicExperimentPage:
         """A copy with `change` written into its settings (see `DocumentSettings.merged_into`)."""
         return self.model_copy(update={"page_settings": change.merged_into(self.page_settings)})
+
+
+class ChartLocation(typing.NamedTuple):
+    """Where a chart sits on the page: the panel that holds it, and its place in that panel."""
+
+    panel: models.PanelInstance[Any, Any]
+    index: int
+    chart: models.ChartInstance[Any, Any]
+
+
+def locate_chart(panels: list[models.PanelInstance[Any, Any]], chart_id: str) -> ChartLocation | None:
+    """Where the chart with `chart_id` is (the first, if charts of one config share an id), or `None` if it is gone."""
+    return next(
+        (
+            ChartLocation(panel, index, chart)
+            for panel in panels
+            for index, chart in enumerate(panel.charts)
+            if chart.id == chart_id
+        ),
+        None,
+    )
 
 
 def upsert_chart(

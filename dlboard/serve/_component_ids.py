@@ -33,6 +33,10 @@ class DivId[P](str):
     """An `html.Div`/`dmc` container id -- only `"children"` is a meaningful prop."""
 
 
+class PaneId[P](str):
+    """An `html.Aside`/`html.Div` id for a pane that is shown or hidden -- only `"hidden"` is a meaningful prop."""
+
+
 class ModalId[P](str):
     """A `dmc.Modal`/`dmc.Drawer` id -- only `"opened"` is a meaningful prop."""
 

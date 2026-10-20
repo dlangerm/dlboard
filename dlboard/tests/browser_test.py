@@ -40,7 +40,7 @@ from dlboard.models import OVERLAY_KEY_SUFFIX, PanelInstance
 from dlboard.serve import get_system_data_store
 from dlboard.serve._jump import JUMP_SELECT_ID
 from dlboard.serve._pages._experiment._chart_autogen import AUTO_OPEN_MAX_CHARTS
-from dlboard.serve._pages._experiment._chart_editor_modal import ADD_CHART_SUBMIT_ID
+from dlboard.serve._pages._experiment._chart_editor import CHART_EDITOR_SAVE_ID
 from dlboard.serve._pages._experiment._ids import METRIC_CONTENT_ID, PAGE_EXPERIMENT_ID
 from dlboard.serve._pages._experiment._live_updates import (
     LIVE_PAUSED_BADGE_ID,
@@ -1202,7 +1202,7 @@ def test_live_update_poll_patches_only_the_chart_whose_data_changed(
     # An item keeps its own node and its controls; what a poll replaces is the chart in its body.
     cold_item, hot_item = chart_items.nth(0), chart_items.nth(1)
     cold_chart, hot_chart = (
-        item.locator(":scope > *").last.locator(":scope > *").first for item in (cold_item, hot_item)
+        item.locator(":scope > .dl-chart-body > *").first for item in (cold_item, hot_item)
     )
     for node in (cold_item, hot_item, cold_chart, hot_chart):
         node.evaluate("el => el.setAttribute('data-marker', 'untouched')")
@@ -2139,12 +2139,12 @@ def test_an_image_charts_per_tag_display_is_edited_as_table_rows_in_the_chart_ed
 
     # A row per tag in a grid, not JSON: add one, name the tag, and give it a precision.
     # The chart has another table now (its `overlays`), with buttons of its own: this is the tag display's.
-    editor = page.get_by_role("dialog")
+    editor = page.get_by_role("complementary", name="Chart settings")
     editor.get_by_role("button", name="Tags").click()  # the settings are in collapsed sections
     add_row = page.locator('button[id*="tag_display"][id*="table-add"]')
     rows = editor.locator(".ag-center-cols-container .ag-row")
     add_row.click()  # opens the new row's name for typing; clicking away leaves it blank
-    editor.get_by_text("Preview").click()
+    editor.get_by_text("Chart type").click()  # away from the cell, which commits its edit
     expect(rows).to_have_count(1)
     rows.first.locator(".ag-checkbox-input-wrapper").click()
     page.locator('button[id*="tag_display"][id*="table-remove"]').click()
@@ -2155,7 +2155,7 @@ def test_an_image_charts_per_tag_display_is_edited_as_table_rows_in_the_chart_ed
     page.keyboard.press("Tab")
     page.keyboard.type("2")
     page.keyboard.press("Enter")
-    page.locator(f"#{ADD_CHART_SUBMIT_ID}").click()
+    page.locator(f"#{CHART_EDITOR_SAVE_ID}").click()
 
     expect(chart).to_contain_text("took: 1.5 h")
 
@@ -2283,8 +2283,8 @@ def test_an_edited_image_chart_still_scrubs_and_opens_its_enlarged_view(
     chart.hover()
     chart_id = chart.get_attribute("data-chart-id")
     chart.get_by_role("button", name="Edit chart").click()
-    page.locator(f"#{ADD_CHART_SUBMIT_ID}").click()
-    expect(page.get_by_role("dialog")).to_be_hidden()
+    page.locator(f"#{CHART_EDITOR_SAVE_ID}").click()
+    expect(page.get_by_role("complementary", name="Chart settings")).to_be_hidden()
     expect(chart).to_have_attribute(
         "data-chart-id", chart_id or ""
     )  # an edit keeps the chart, and so its links
@@ -2325,14 +2325,14 @@ def test_a_layer_added_in_the_chart_editor_is_drawn_over_the_pictures_at_its_opa
     expect(chart.locator(".dl-image-series-layer")).to_have_count(0)
     chart.hover()
     chart.get_by_role("button", name="Edit chart").click()
-    dialog = page.get_by_role("dialog")
+    dialog = page.get_by_role("complementary", name="Chart settings")
     dialog.locator('button[id*="overlays"][id*="table-add"]').click()  # opens the new row's name for typing
     page.keyboard.type("mask")  # the keys that can be layers are suggested
     page.locator(".ag-popup").get_by_text("samples/mask").click()
     dialog.locator('.ag-cell[col-id="opacity"] input[type=range]').fill(
         "0.5"
     )  # always a slider, never a text box
-    page.locator(f"#{ADD_CHART_SUBMIT_ID}").click()
+    page.locator(f"#{CHART_EDITOR_SAVE_ID}").click()
 
     layer = chart.locator(".dl-image-series-thumb .dl-image-series-layer")
     expect(layer.locator("img")).to_have_count(1)
@@ -2739,13 +2739,13 @@ def test_a_tables_editor_opens_an_old_table_as_its_new_settings_and_takes_a_type
     chart.hover()
     chart.get_by_role("button", name="Edit chart").click()
 
-    editor = page.get_by_role("dialog")
+    editor = page.get_by_role("complementary", name="Chart settings")
     shown = editor.locator(".mantine-Pill-root", has_text="eval/*")
     expect(shown).to_have_count(1)  # the old `artifact_key` and `artifact_key_is_prefix`, as one prefix
     shown.locator(".mantine-Pill-remove").click()
     editor.get_by_label("show_artifacts").fill("other/*")  # not a key: a prefix, typed
     page.keyboard.press("Enter")
-    page.locator(f"#{ADD_CHART_SUBMIT_ID}").click()
+    page.locator(f"#{CHART_EDITOR_SAVE_ID}").click()
 
     expect(images).to_have_count(1)
 
@@ -2803,4 +2803,142 @@ def test_logged_histograms_render_in_each_display_and_the_step_slider_moves(
     expect(step.locator(".annotation-text", has_text=f"step {steps - 1}")).to_be_visible()
     step.locator(".slider-rail-touch-rect").click(position={"x": 9, "y": 16})
     expect(step.locator(".annotation-text", has_text="step 0")).to_be_visible()
+    assert console_errors == []
+
+
+def _log_two_metrics(live_server_url: str, experiment_id: int) -> None:
+    run = BasicDlboardAPI(live_server_url).create_run(models.NewRun(experiment_id=experiment_id))
+    BasicDlboardAPI(live_server_url).log_metric_batch(
+        [
+            models.LoggedMetrics(
+                experiment_id=experiment_id,
+                run_id=run.id,
+                step=step,
+                metrics={"train/loss": 1.0 / (step + 1), "train/acc": step / 3},
+                timestamp_utc=pendulum.now("UTC"),
+            )
+            for step in range(3)
+        ]
+    )
+
+
+def test_a_chart_being_edited_is_drawn_in_its_own_card_beside_the_page_and_cancelling_restores_it(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """
+    The editor is docked beside the panels, so the page stays in view. The chart being edited is drawn as the form has
+    it in its own card, in place of the saved chart, which stays under it; cancelling puts the saved chart back as it was.
+    """
+    _create_project_and_experiment(page, live_server_url, "Docked Editor Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    _log_two_metrics(live_server_url, experiment_id)
+    page.reload()
+    _auto_generate_charts(page)
+
+    charts = page.locator(".dl-chart-item")
+    expect(charts).to_have_count(2)
+    edited, other = charts.nth(0), charts.nth(1)
+    saved = edited.locator(".dl-chart-body .mantine-LineChart-root")
+    drawn = edited.locator(".dl-chart-draft .mantine-LineChart-root")
+    expect(saved).to_have_css("height", "300px")
+    dock = page.get_by_role("complementary", name="Chart settings")
+    expect(dock).to_be_hidden()
+
+    edited.hover()
+    edited.get_by_role("button", name="Edit chart").click()
+    dock.get_by_role("button", name="Display").click()
+    dock.get_by_label("height").fill("500")
+
+    expect(drawn).to_have_css("height", "500px")  # the card shows the draft...
+    expect(saved).to_be_hidden()  # ...and not the saved chart, which is still there under it
+    expect(other).to_be_visible()  # the rest of the page stays in view
+
+    dock.get_by_role("button", name="Cancel").click()
+
+    expect(dock).to_be_hidden()
+    expect(edited.locator(".dl-chart-draft")).to_be_empty()
+    expect(saved).to_have_css("height", "300px")
+    assert console_errors == []
+
+
+def test_a_chart_is_added_from_the_dock_with_its_preview_there_and_lands_at_the_end_of_its_panel(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """A chart being added has no card yet, so the dock previews it; saving adds it, and closes the dock."""
+    _create_project_and_experiment(page, live_server_url, "Dock Add Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    _log_two_metrics(live_server_url, experiment_id)
+    page.reload()
+    _auto_generate_charts(page)
+    charts = page.locator(".dl-chart-item")
+    expect(charts).to_have_count(2)
+
+    page.get_by_role("button", name="Add chart to this panel").first.click()
+    dock = page.get_by_role("complementary", name="Chart settings")
+    expect(dock.locator("#chart-editor-title")).to_have_text("Add chart")
+    dock.get_by_label("Chart type").click()
+    page.get_by_role("option", name="line", exact=True).click()
+    dock.get_by_label("column *").click()
+    page.get_by_role("option", name="train/acc").click()
+    dock.get_by_label("x_axis *").click()
+    page.get_by_role("option", name="step", exact=True).click()
+
+    expect(dock.locator(".mantine-LineChart-root")).to_be_visible()  # the preview is in the dock
+    dock.get_by_role("button", name="Add chart").click()
+
+    expect(dock).to_be_hidden()
+    expect(charts).to_have_count(3)
+    assert console_errors == []
+
+
+def test_a_live_update_while_a_chart_is_being_edited_redraws_the_chart_under_its_draft_not_the_draft(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """The poll replaces a chart's body, never its draft, so what is being edited is not clobbered by new data."""
+    _create_project_and_experiment(page, live_server_url, "Draft Poll Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    api = BasicDlboardAPI(live_server_url)
+    run = api.create_run(models.NewRun(experiment_id=experiment_id))
+    api.log_metric_batch(
+        [
+            models.LoggedMetrics(
+                experiment_id=experiment_id,
+                run_id=run.id,
+                step=0,
+                metrics={"hot_metric": 1.0},
+                timestamp_utc=pendulum.now("UTC"),
+            )
+        ]
+    )
+    page.reload()
+    _auto_generate_charts(page)
+
+    item = page.locator(".dl-chart-item")
+    item.hover()
+    item.get_by_role("button", name="Edit chart").click()
+    draft = item.locator(":scope > .dl-chart-draft > *").first
+    expect(draft).to_be_attached()
+    body_chart = item.locator(":scope > .dl-chart-body > *").first
+    for node in (draft, body_chart):
+        node.evaluate("el => el.setAttribute('data-marker', 'untouched')")
+
+    api.log_metric_batch(
+        [
+            models.LoggedMetrics(
+                experiment_id=experiment_id,
+                run_id=run.id,
+                step=1,
+                metrics={"hot_metric": 2.0},
+                timestamp_utc=pendulum.now("UTC"),
+            )
+        ]
+    )
+
+    expect(body_chart).not_to_have_attribute(
+        "data-marker", "untouched", timeout=8000
+    )  # the chart underneath is redrawn
+    assert draft.get_attribute("data-marker") == "untouched"  # the draft is not
     assert console_errors == []

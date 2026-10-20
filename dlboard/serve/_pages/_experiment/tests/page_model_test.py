@@ -54,3 +54,33 @@ def test_a_settings_change_writes_only_what_it_sets_and_keeps_every_other_key() 
     merged = page_model.DocumentSettings(excluded_runs=[3]).merged_into(stored)
 
     assert merged == {**stored, "excluded_runs": [3]}
+
+
+def test_a_chart_is_found_by_its_id_wherever_it_now_sits_and_none_if_it_is_gone() -> None:
+    panels = [_panel("a", 2), _panel("b", 3)]
+    chart = panels[1].charts[2]
+
+    location = page_model.locate_chart(panels, chart.id)
+
+    assert location is not None
+    assert (location.panel.name, location.index, location.chart) == ("b", 2, chart)
+    assert page_model.locate_chart(panels, "gone") is None
+
+
+def test_charts_saved_with_one_config_each_keep_an_id_of_their_own_and_are_found_by_it() -> None:
+    chart = ChartInstance[pd.DataFrame, object](chart_type="line", parameters={"column": "loss"})
+    page = page_model.BasicExperimentPage(
+        id=0,
+        experiment_id=0,
+        owner_id=None,
+        name="",
+        panels=[PanelInstance(name="a", charts=[chart]), PanelInstance(name="b", charts=[chart])],
+    )
+    ids = [panel.charts[0].id for panel in page.panels]
+
+    assert len(set(ids)) == 2
+    reloaded = page_model.BasicExperimentPage.model_validate_json(page.model_dump_json())
+    assert [panel.charts[0].id for panel in reloaded.panels] == ids  # the same on every load
+    location = page_model.locate_chart(page.panels, ids[1])
+    assert location is not None
+    assert location.panel.name == "b"

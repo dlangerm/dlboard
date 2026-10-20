@@ -56,6 +56,13 @@ table, every column filters in place, and a table keeps its sort, filters and pa
 redraws it. A table saved with the earlier `mode` settings (`runs`, `pivot`, `artifacts`) opens as the rows
 and columns that show the same table.
 
+A chart is added or edited in a pane docked beside the panels, so the rest of the page stays in view. Editing a chart
+draws it, as the form has it, in its own card in place of the saved chart; the saved chart is left under it, so
+Cancel puts it back exactly as it was and a live update never overwrites the draft. A chart being added is previewed
+in the pane. Settings are grouped into collapsible sections (Data, Display, and a chart type's own).
+
+![The chart editor docked beside the panels, with the chart being edited drawn in its own card](../images/chart-editor.png)
+
 The built-in line charts, and the image series that steps through logged images:
 
 ![Line charts of logged metrics](../images/experiment-charts.png)

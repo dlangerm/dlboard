@@ -17,7 +17,7 @@ Features, each owning its ids, its modal or drawer, and its callbacks:
 
 - `_panel_controls.py` -- create/rename/delete/move a panel; delete/move a chart.
 - `_tab_controls.py` -- create/rename a tab, drop a panel or chart onto one.
-- `_chart_editor_modal.py` -- the add/edit-chart modal: its shell, live preview and submit.
+- `_chart_editor.py` -- the chart editor docked beside the panel area: a chart is added or edited with the page in view.
 - `_chart_settings_form.py` -- the form of a chart type's settings, and reading its values back.
 - `_chart_suggestions.py` -- auto-populate charts for an empty view; suggest un-charted keys.
 - `_run_comparison_table.py` -- the navbar's hparam/metric/run comparison table + run deletion.
@@ -55,7 +55,7 @@ from dlboard.serve._pages._experiment import _ids as ids
 from dlboard.serve._pages._experiment import _page_repository as repo
 from dlboard.serve._pages._experiment import _panel_data as panel_data
 from dlboard.serve._pages._experiment import _panel_view as panel_view
-from dlboard.serve._pages._experiment._chart_editor_modal import register_chart_editor_callbacks
+from dlboard.serve._pages._experiment._chart_editor import register_chart_editor_callbacks
 from dlboard.serve._pages._experiment._chart_suggestions import register_chart_suggestions_callbacks
 from dlboard.serve._pages._experiment._live_updates import register_live_update_callbacks
 from dlboard.serve._pages._experiment._notes import register_notes_callbacks
@@ -101,7 +101,6 @@ EXPERIMENT_DELETE_IDS = DeleteConfirmIds(
 _ASSETS = [
     (AssetKind.STYLESHEET, Path(__file__).with_name("_experiment_page_hover.css")),
     (AssetKind.SCRIPT, Path(__file__).with_name("_experiment_page_dragdrop.js")),
-    (AssetKind.SCRIPT, Path(__file__).with_name("chart_submit_loading.js")),
     (AssetKind.SCRIPT, Path(__file__).with_name("chart_deep_link.js")),
 ]
 

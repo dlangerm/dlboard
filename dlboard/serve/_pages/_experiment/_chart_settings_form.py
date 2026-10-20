@@ -47,6 +47,8 @@ FIELDS_ROW: Final = {"display": "flex", "flexWrap": "wrap", "alignItems": "flex-
 
 SLIDER_STEPS: Final = 100
 """How many notches a slider has across its range."""
+NUMBER_DEBOUNCE_MS: Final = 400
+"""How long a number input waits after the last keystroke before the chart is redrawn from it."""
 
 
 class _FieldPattern(PatternId[ids.ExperimentPage]):
@@ -172,6 +174,7 @@ def _table_input(
         ):
             cell = {
                 "editable": False,
+                "minWidth": 150,  # room for the slider as well as its value
                 "cellRenderer": SLIDER_RENDERER,
                 "cellRendererParams": {
                     "min": column.minimum,
@@ -264,6 +267,8 @@ def _param_field_input(  # noqa: PLR0911
                 min=field.minimum,
                 max=field.maximum,
                 step=1 if field.type == models.ParameterFieldType.INT else 0.1,
+                # Typing a number redraws the chart only once it pauses, not on every digit (each redraw is a fetch).
+                debounce=NUMBER_DEBOUNCE_MS,
                 description=field.description,
                 # Optional fields (a default, not required) get a visible clear button that resets
                 # to that default -- clearing via backspace alone works too, but isn't discoverable.

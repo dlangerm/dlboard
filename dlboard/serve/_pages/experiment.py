@@ -18,7 +18,7 @@ from dlboard.serve._pages._experiment import _page_repository as repo
 from dlboard.serve._pages._experiment import _panel_controls as panel_controls
 from dlboard.serve._pages._experiment import _tab_controls as tab_controls
 from dlboard.serve._pages._experiment import render_panel
-from dlboard.serve._pages._experiment._chart_editor_modal import add_chart_modal
+from dlboard.serve._pages._experiment._chart_editor import chart_editor_dock
 from dlboard.serve._pages._experiment._chart_suggestions import chart_suggestion_shells
 from dlboard.serve._pages._experiment._notes import STATE_NOTES_REVISION, notes_button, notes_drawer
 from dlboard.serve._pages._experiment._paging import SIZES_COOKIE, Paging
@@ -139,17 +139,28 @@ def layout(
                     # `TypedDict` (a known Dash codegen gap for this genuinely dynamic dict) --
                     # `cast` to `Any` rather than fight that, same as `_panel_view.py`'s
                     # `data-*`-attr casts.
-                    cast("Any", dcc.Loading)(
-                        html.Div(container, id=ids.METRIC_CONTENT_ID),
-                        delay_show=250,
-                        target_components={str(ids.METRIC_CONTENT_ID): "children"},
-                        custom_spinner=dmc.Loader(size="lg"),
+                    # The panel area and the chart editor docked beside it, so the charts stay in view while one is
+                    # edited (`_experiment_page_hover.css`). The dock is rendered here once, outside `METRIC_CONTENT_ID`:
+                    # every structural edit rebuilds that.
+                    html.Div(
+                        [
+                            html.Div(
+                                cast("Any", dcc.Loading)(  # pyrefly: ignore [unknown-argument-type]
+                                    html.Div(container, id=ids.METRIC_CONTENT_ID),
+                                    delay_show=250,
+                                    target_components={str(ids.METRIC_CONTENT_ID): "children"},
+                                    custom_spinner=dmc.Loader(size="lg"),
+                                ),
+                                className="dl-experiment-main",
+                            ),
+                            chart_editor_dock(),
+                        ],
+                        className="dl-experiment-body",
                     ),
-                    # Every modal/drawer the panel area can open, each owned by its feature module. Rendered
+                    # Every modal the panel area can open, each owned by its feature module. Rendered
                     # once, outside `METRIC_CONTENT_ID`: every structural edit rebuilds that, and each re-mount
                     # of a shell set its confirm button's callback off again -- a burst of round trips that
                     # answered nothing but delayed the render they came with. So each confirm closes its own.
-                    add_chart_modal(),
                     *chart_suggestion_shells(),
                     *panel_controls.panel_control_modals(),
                     *tab_controls.tab_control_modals(),
