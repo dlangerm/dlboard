@@ -3,7 +3,7 @@ Panel/chart CRUD: create/rename/delete/move a panel; delete/move a chart; toggle
 
 Owns its ids, the rename-panel and delete-panel/chart confirm modals (rendered once by the experiment
 page, beside the panel area -- see `panel_control_modals`), and the callbacks behind them. Adding or
-editing a chart is `_chart_editor_modal.py`'s; tabs are `_tab_controls.py`'s.
+editing a chart is `_chart_editor.py`'s; tabs are `_tab_controls.py`'s.
 
 Callbacks needing more than a couple of `State`s take them as one Dash "flexible callback
 signature" grouping -- a `dict` of `Input`/`State` objects that Dash flattens for dependency

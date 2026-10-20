@@ -90,6 +90,7 @@ class DocScreenshot(StrEnum):
     JUMP_PALETTE = "jump-palette"
     EXPERIMENT_CHARTS = "experiment-charts"
     IMAGE_SERIES = "image-series"
+    CHART_EDITOR = "chart-editor"
     PERSONAL_VIEWS = "personal-views"
     NOTES = "notes"
     RUN_COMPARE = "run-compare"
@@ -337,6 +338,19 @@ def _stage(shot: DocScreenshot, page: Page, demo: Demo, dlboard_app: Dash) -> Pa
                 "[...document.images].filter((i) => i.getAttribute('src')).every((i) => i.complete && i.naturalWidth > 0)"
             )
             return panel
+        case DocScreenshot.CHART_EDITOR:
+            _open_charted_experiment(page, demo)
+            chart = page.locator(".dl-chart-item").first
+            chart.hover()
+            chart.get_by_role("button", name="Edit chart").click()
+            expect(page.get_by_role("complementary", name="Chart settings")).to_be_visible()
+            expect(
+                chart.locator(".dl-chart-draft svg").first
+            ).to_be_visible()  # drawn in its own card, as it would be saved
+            page.mouse.move(0, _VIEWPORT["height"] - 1)  # off the chart, so its hover controls aren't shown
+            return page.locator(
+                ".dl-experiment-body"
+            )  # not the header, whose view picker is named for the scenes before this
         case DocScreenshot.PERSONAL_VIEWS:
             # A dedicated experiment, untouched by any other scene, so this view picker only ever
             # shows what this scene itself creates. Saved as a view *before* generating any charts

@@ -53,6 +53,14 @@ CHART_BODY: Final = ChartPattern("chart-body")
 """A chart item's body: the chart itself, what a live update replaces."""
 CHART_FINGERPRINT: Final = ChartPattern("chart-fingerprint")
 """The hidden node inside a `CHART_BODY` that carries the `chart_data_fingerprint` of the data it was drawn from."""
+CHART_DRAFT: Final = ChartPattern("chart-draft")
+"""
+Where the chart editor draws the chart being edited, in its own card: while it holds something, the card shows it in
+place of its `CHART_BODY` (`_experiment_page_hover.css`). The body is left alone under it, so a live update still has
+a chart to replace and cancelling the edit is just emptying this.
+"""
+DRAFT_SUFFIX: Final = "~draft"
+"""Added to a draft's chart id for the ids it renders under: the chart it replaces is still in the page, and two charts cannot share Dash ids."""
 
 
 def _render_chart_safely(
@@ -132,16 +140,41 @@ def chart_body(
     it was drawn from, and the poll redraws it only when that is no longer what the data says.
     """
     chart = panel.charts[index]
-    context = models.RenderContext(columns=panel.grid_columns, page_size=page_size, chart_id=chart.id)
-    rendered = _apply_panel_sync(
-        _render_chart_safely(chart, dataframe, panel.name, context), panel_name=panel.name, sync=panel.sync
-    )
     fingerprint = html.Div(
         chart_data_fingerprint(chart, dataframe),
         id=CHART_FINGERPRINT.of(panel.name, index),
         hidden=True,
     )
-    return [rendered, fingerprint]
+    return [_draw_chart(panel, chart, chart.id, dataframe, page_size), fingerprint]
+
+
+def draft_view(
+    panel: models.PanelInstance[Any, Any],
+    draft: models.ChartInstance[Any, Any],
+    dataframe: pd.DataFrame,
+    page_size: int,
+) -> Component:
+    """
+    A chart being edited, drawn as it would be in `panel`: what the chart editor puts in a card's `CHART_DRAFT`.
+
+    Under ids of its own (`DRAFT_SUFFIX`), and with no fingerprint: it is not a chart of the page, so a live update never
+    looks at it, and the chart it stands in for keeps its ids and keeps updating beneath it.
+    """
+    return _draw_chart(panel, draft, f"{draft.id}{DRAFT_SUFFIX}", dataframe, page_size)
+
+
+def _draw_chart(
+    panel: models.PanelInstance[Any, Any],
+    chart: models.ChartInstance[Any, Any],
+    chart_id: str,
+    dataframe: pd.DataFrame,
+    page_size: int,
+) -> Component:
+    """`chart`, rendered for `panel`'s layout under the ids that `chart_id` names, and with the panel's sync applied."""
+    context = models.RenderContext(columns=panel.grid_columns, page_size=page_size, chart_id=chart_id)
+    return _apply_panel_sync(
+        _render_chart_safely(chart, dataframe, panel.name, context), panel_name=panel.name, sync=panel.sync
+    )
 
 
 def render_chart_item(
@@ -216,7 +249,9 @@ def render_chart_item(
             html.Div(
                 chart_body(panel, index, dataframe, page_size),
                 id=CHART_BODY.of(panel.name, index),
+                className="dl-chart-body",
             ),
+            html.Div(id=CHART_DRAFT.of(panel.name, index), className="dl-chart-draft"),
         ],
         id=CHART_CONTENT.of(panel.name, index),
         gap="xs",

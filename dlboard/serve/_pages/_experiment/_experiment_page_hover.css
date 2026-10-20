@@ -107,3 +107,61 @@
 .dl-panel-body {
   scroll-margin-top: 72px;
 }
+
+/* A chart being edited is drawn in its own card (`CHART_DRAFT`), in place of the chart itself, which stays under it. */
+.dl-chart-item:has(> .dl-chart-draft:not(:empty)) {
+  outline: 2px solid var(--mantine-color-blue-filled);
+  outline-offset: 2px;
+  border-radius: var(--mantine-radius-sm);
+}
+.dl-chart-item:has(> .dl-chart-draft:not(:empty)) > .dl-chart-body {
+  display: none;
+}
+
+/* The panel area and the chart editor docked beside it: the charts stay in view, and narrow to make room. */
+.dl-experiment-body {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--mantine-spacing-md);
+}
+.dl-experiment-main {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.dl-chart-editor {
+  flex: 0 0 min(30rem, 40vw);
+  position: sticky;
+  top: calc(var(--app-shell-header-height, 4rem) + var(--mantine-spacing-xs));
+  max-height: calc(100dvh - var(--app-shell-header-height, 4rem) - 2 * var(--mantine-spacing-xs));
+  overflow-y: auto;
+  padding: var(--mantine-spacing-md);
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-md);
+  background: var(--mantine-color-body);
+}
+.dl-chart-editor[hidden] {
+  display: none;
+}
+.dl-chart-editor-preview {
+  overflow-x: auto;
+}
+.dl-chart-editor-actions {
+  position: sticky;
+  bottom: calc(-1 * var(--mantine-spacing-md));
+  padding: var(--mantine-spacing-xs) 0;
+  background: var(--mantine-color-body);
+}
+@media (max-width: 48em) {
+  .dl-experiment-body {
+    flex-direction: column;
+  }
+  .dl-chart-editor {
+    flex-basis: auto;
+    width: 100%;
+    position: static;
+    max-height: none;
+  }
+}
+.dl-chart-draft:empty {
+  display: none; /* an empty slot is no flex item, so it adds no gap under the chart */
+}

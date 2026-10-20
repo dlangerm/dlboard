@@ -54,3 +54,14 @@ def test_a_settings_change_writes_only_what_it_sets_and_keeps_every_other_key() 
     merged = page_model.DocumentSettings(excluded_runs=[3]).merged_into(stored)
 
     assert merged == {**stored, "excluded_runs": [3]}
+
+
+def test_a_chart_is_found_by_its_id_wherever_it_now_sits_and_none_if_it_is_gone() -> None:
+    panels = [_panel("a", 2), _panel("b", 3)]
+    chart = panels[1].charts[2]
+
+    location = page_model.locate_chart(panels, chart.id)
+
+    assert location is not None
+    assert (location.panel.name, location.index, location.chart) == ("b", 2, chart)
+    assert page_model.locate_chart(panels, "gone") is None

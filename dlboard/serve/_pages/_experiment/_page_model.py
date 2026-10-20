@@ -69,6 +69,27 @@ class BasicExperimentPage(models.Page[pd.DataFrame, Component], frozen=True, ext
         return self.model_copy(update={"page_settings": change.merged_into(self.page_settings)})
 
 
+class ChartLocation(typing.NamedTuple):
+    """Where a chart sits on the page: the panel that holds it, and its place in that panel."""
+
+    panel: models.PanelInstance[Any, Any]
+    index: int
+    chart: models.ChartInstance[Any, Any]
+
+
+def locate_chart(panels: list[models.PanelInstance[Any, Any]], chart_id: str) -> ChartLocation | None:
+    """Where the chart with `chart_id` is (the first, if charts of one config share an id), or `None` if it is gone."""
+    return next(
+        (
+            ChartLocation(panel, index, chart)
+            for panel in panels
+            for index, chart in enumerate(panel.charts)
+            if chart.id == chart_id
+        ),
+        None,
+    )
+
+
 def upsert_chart(
     panel: models.PanelInstance[Any, Any],
     panel_name: str,

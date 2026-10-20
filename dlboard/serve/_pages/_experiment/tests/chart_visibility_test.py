@@ -67,7 +67,7 @@ def test_panel_header_controls_add_button_is_always_enabled_and_hover_revealed()
 
 
 def _chart_item_parts(stack: Any) -> list[Any]:  # noqa: ANN401
-    """A chart item's children: the unscoped-fetch badge row (if any), the hover controls, then the chart."""
+    """A chart item's children: the unscoped-fetch badge row (if any), the hover controls, the chart, then its draft slot."""
     return _to_props(stack)["children"]
 
 
@@ -76,7 +76,7 @@ def test_render_panel_charts_no_badge_when_chart_hints_its_columns() -> None:
     df = pd.DataFrame({"run_id": [1], "step": [0], "loss": [0.5]})
 
     [stack] = chart_view.render_panel_charts(panel, df)
-    hover_controls, _chart = _chart_item_parts(stack)  # no badge row above the controls
+    hover_controls, _chart, _draft = _chart_item_parts(stack)  # no badge row above the controls
 
     assert _to_props(hover_controls)["className"] == "dl-chart-controls"
     assert _to_props(hover_controls)["pos"] == "absolute"  # laid over the chart, not a row of its own
@@ -92,7 +92,7 @@ def test_render_panel_charts_badge_when_chart_cannot_hint_its_columns() -> None:
     df = pd.DataFrame({"run_id": [1], "step": [0], "loss": [0.5]})
 
     [stack] = chart_view.render_panel_charts(panel, df)
-    badge_row, hover_controls, _chart = _chart_item_parts(stack)
+    badge_row, hover_controls, _chart, _draft = _chart_item_parts(stack)
 
     assert _to_props(hover_controls)["className"] == "dl-chart-controls"
     assert "fetches all metrics" in str(_to_props(badge_row))

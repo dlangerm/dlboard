@@ -164,7 +164,12 @@ def _table_input(
                 "cellEditorParams": {"values": ["", *column.choices]},
             }
         elif column.type == models.ParameterFieldType.BOOL:
-            cell = {"editable": True, "cellDataType": "boolean"}  # a checkbox, in the cell and to edit it
+            cell = {
+                "editable": True,
+                "cellDataType": "boolean",
+                "flex": 0,
+                "width": 90,
+            }  # a checkbox, in the cell and to edit it
         elif (
             column.type == models.ParameterFieldType.FLOAT
             and column.minimum is not None
@@ -172,6 +177,7 @@ def _table_input(
         ):
             cell = {
                 "editable": False,
+                "minWidth": 150,  # room for the slider as well as its value
                 "cellRenderer": SLIDER_RENDERER,
                 "cellRendererParams": {
                     "min": column.minimum,
