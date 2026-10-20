@@ -181,7 +181,7 @@ class ChartType(ABC, BaseModel, typing.Generic[_Parameters, _Dataframe, _Chart],
         """
         Map string parameter field names to the column kind that populates them.
 
-        Fields left unlisted default to ColumnKind.METRIC.
+        Fields left unlisted are not drawn from the experiment's columns: the chart editor gives them a plain text input.
         """
 
     @classmethod
