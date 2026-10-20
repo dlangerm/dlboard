@@ -11,16 +11,16 @@ from dlboard.client.artifacts.overlay import HexColor, ImageMask
 @dltype.dltyped()
 def _rle(arr: Annotated[np.ndarray, dltype.IntTensor["*batch classes height width"]]) -> list[int]:
     """Flatten the mask in C order and emit alternating `N, I` pairs: a run of `N` elements all of ID `I`."""
-    _flat_arr: np.ndarray = np.ravel(arr)
-    if _flat_arr.size == 0:
+    flat: np.ndarray = np.ravel(arr)
+    if flat.size == 0:
         return []
 
     # vectorized: a run starts wherever an element differs from the one before it
-    _run_starts = np.concatenate(([0], np.flatnonzero(_flat_arr[1:] != _flat_arr[:-1]) + 1))
-    _run_lengths = np.diff(np.append(_run_starts, _flat_arr.size))
-    _run_ids = _flat_arr[_run_starts]
+    starts = np.concatenate(([0], np.flatnonzero(flat[1:] != flat[:-1]) + 1))
+    lengths = np.diff(np.append(starts, flat.size))
+    ids = flat[starts]
 
-    return np.column_stack((_run_lengths, _run_ids)).ravel().tolist()
+    return np.column_stack((lengths, ids)).ravel().tolist()
 
 
 @dltype.dltyped()
@@ -54,10 +54,9 @@ def run_length_decode(
     mask: ImageMask,
 ) -> Annotated[np.ndarray, dltype.IntTensor["*batch classes height width"]]:
     """Decode an rle `ImageMask` back to an integer array of the shape it was encoded from."""
-    if mask.encoding != "rle":
-        msg = f"Invalid encoding {mask.encoding} expected rle"
-        raise ValueError(msg)
-    return _rle_decode(mask.data, tuple(mask.shape))
+    match mask.encoding:
+        case "rle":
+            return _rle_decode(mask.data, tuple(mask.shape))
 
 
 @dltype.dltyped()
@@ -69,6 +68,9 @@ def run_length_render(
 
     An ID with a color in `colors` is drawn opaque in that color; an ID without one is transparent, so a background
     class (usually `0`) stays out of the picture it is laid over.
+
+    This is the reference for what the browser draws (`image_series_overlay.js`'s `maskPicture`), and is what the
+    Python tests check that drawing rule against. Nothing on the server calls it.
     """
     ids = run_length_decode(mask)
     rgba = np.zeros((*ids.shape, 4), dtype=np.uint8)

@@ -46,6 +46,7 @@ window.dlImageSeriesOverlay = (() => {
         canvas.height = height;
         const context = canvas.getContext("2d");
         const picture = context.createImageData(width, height);
+        const bytes = picture.data;
         let pixel = 0;
         for (let i = 0; i < mask.data.length; i += 2) {
             const run = mask.data[i];
@@ -53,8 +54,12 @@ window.dlImageSeriesOverlay = (() => {
             const color = mask.colors?.[mask.data[i + 1]];
             if (color) {
                 const [r, g, b] = [1, 3, 5].map((offset) => parseInt(color.slice(offset, offset + 2), 16));
-                for (let p = pixel; p < pixel + run; p++) {
-                    picture.data.set([r, g, b, 255], p * 4);
+                // Written byte by byte: a small array per pixel was the cost of drawing a mask on a large picture.
+                for (let at = pixel * 4; at < (pixel + run) * 4; at += 4) {
+                    bytes[at] = r;
+                    bytes[at + 1] = g;
+                    bytes[at + 2] = b;
+                    bytes[at + 3] = 255;
                 }
             }
             pixel += run;

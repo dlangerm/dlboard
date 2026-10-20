@@ -7,7 +7,7 @@ import uuid
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Annotated, Final, Literal, NamedTuple
 
-from pydantic import BaseModel, Field, StringConstraints, model_validator
+from pydantic import BaseModel, Field, NonNegativeInt, StringConstraints, model_validator
 
 from dlboard.models import LAYER_KIND_TAG, LayerKind, NewArtifact, TagValue, overlay_key
 
@@ -82,15 +82,23 @@ class ImageMask(BaseModel, frozen=True, extra="forbid", use_attribute_docstrings
     """A mask drawn over a picture: each pixel's class ID, run-length encoded, and the color of each class."""
 
     kind: Literal["mask"] = "mask"
-    encoding: Literal["rle"]
+    encoding: Literal["rle"] = "rle"
     shape: list[int] = Field(min_length=2)
-    """The mask's shape in C order. Its last two dimensions are the picture's height and width."""
-    data: list[int]
+    """The mask's shape in C order: `1` in every dimension but the last two, which are the picture's height and width."""
+    data: list[NonNegativeInt]
     """List of alternating N,I where N is the number of elements and I is the ID common to them."""
     colors: dict[int, HexColor] | None = None
     """Corresponding to N indicate the colors each ID should correspond to in the data."""
     classnames: dict[int, str] | None = None
     """Corresponding to colors, indicate the name for the class for use in a legend."""
+
+    @model_validator(mode="after")
+    def _is_one_picture(self) -> ImageMask:
+        # The browser draws a mask one picture at a time, so a shape with more than one picture in it is not drawable.
+        if any(n != 1 for n in self.shape[:-2]):
+            msg = f"a mask is one picture, so every dimension but its last two must be 1, not shape {self.shape}"
+            raise ValueError(msg)
+        return self
 
     @model_validator(mode="after")
     def _runs_cover_the_shape(self) -> ImageMask:

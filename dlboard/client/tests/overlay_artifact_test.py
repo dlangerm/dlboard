@@ -75,6 +75,13 @@ def test_shapes_are_written_as_json_at_the_overlays_key_and_step(tmp_path: Path)
             {"kind": "mask", "encoding": "rle", "shape": [2, 2], "data": [3, 0]}, id="runs-short-of-the-shape"
         ),
         pytest.param({"kind": "mask", "encoding": "rle", "shape": [2, 2], "data": [4]}, id="odd-run-pairs"),
+        pytest.param(
+            {"kind": "mask", "encoding": "rle", "shape": [2, 1, 2, 2], "data": [8, 0]},
+            id="more-than-one-picture",
+        ),
+        pytest.param(
+            {"kind": "mask", "encoding": "rle", "shape": [2, 2], "data": [-1, 0, 5, 1]}, id="negative-run"
+        ),
     ],
 )
 def test_a_malformed_shape_is_rejected(shape: dict[str, Any]) -> None:

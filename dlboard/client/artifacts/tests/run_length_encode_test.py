@@ -20,8 +20,8 @@ def test_rle_pairs_count_and_id(mask: np.ndarray, expected: list[int]) -> None:
 
 
 def test_rle_round_trips_random_masks() -> None:
-    rng = np.random.default_rng()
-    arr = rng.integers(0, 4, (2, 3, 20, 10))
+    rng = np.random.default_rng(seed=0)
+    arr = rng.integers(0, 4, (1, 1, 20, 10))
 
     ret = rle.run_length_encode(arr, colors={}, classnames={})
 
