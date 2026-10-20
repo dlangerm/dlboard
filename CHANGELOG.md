@@ -12,6 +12,13 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ## [Unreleased]
 
+### Added
+
+* **Segmentation masks as overlay layers.** `dlboard.client.artifacts.rle.run_length_encode` turns a per-pixel class
+  array into an `ImageMask`, run-length encoded with the mask's shape and each class's color. Logged in an `Overlay`, an
+  image chart paints it over its picture: a class with a color is drawn opaque in it, and a class without one is left
+  see-through. An older server stores it without drawing it, so upgrade the server to see masks.
+
 ## [0.9.0] - 2026-10-19
 
 ### Added

@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from pydantic import ValidationError
 
-from dlboard.client.artifacts.overlay import Box, Overlay, Point, Polygon, Polyline
+from dlboard.client.artifacts.overlay import Box, ImageMask, Overlay, Point, Polygon, Polyline
 from dlboard.models import LAYER_KIND_TAG, OVERLAY_KEY_SUFFIX, LayerKind
 
 if TYPE_CHECKING:
@@ -71,11 +71,36 @@ def test_shapes_are_written_as_json_at_the_overlays_key_and_step(tmp_path: Path)
         ),
         pytest.param({"kind": "polygon", "points": [[0, 0], [1, 1]]}, id="polygon-under-three-points"),
         pytest.param({"kind": "circle", "x": 0, "y": 0, "r": 1}, id="unknown-kind"),
+        pytest.param(
+            {"kind": "mask", "encoding": "rle", "shape": [2, 2], "data": [3, 0]}, id="runs-short-of-the-shape"
+        ),
+        pytest.param({"kind": "mask", "encoding": "rle", "shape": [2, 2], "data": [4]}, id="odd-run-pairs"),
     ],
 )
 def test_a_malformed_shape_is_rejected(shape: dict[str, Any]) -> None:
     with pytest.raises(ValidationError):
         Overlay.model_validate({"key": "samples/boxes", "step": 0, "shapes": [shape]})
+
+
+def test_a_mask_is_written_in_the_shapes_file_with_its_shape_runs_and_colors(tmp_path: Path) -> None:
+    mask = ImageMask(encoding="rle", shape=[1, 2, 2], data=[1, 1, 3, 0], colors={1: "#ff0000"})
+    overlay = Overlay(key="samples/mask", step=2, shapes=[mask])
+
+    artifact, target = overlay.to_artifact(tmp_path, run_id=1, experiment_id=1)
+
+    assert artifact.tags[LAYER_KIND_TAG] == LayerKind.SHAPES.value
+    shapes: list[dict[str, Any]] = json.loads(target.read_text())["shapes"]
+    assert shapes == [
+        {
+            "kind": "mask",
+            "encoding": "rle",
+            "shape": [1, 2, 2],
+            "data": [1, 1, 3, 0],
+            "colors": {"1": "#ff0000"},
+            "classnames": None,
+        }
+    ]
+    assert ImageMask.model_validate(shapes[0]) == mask
 
 
 def test_the_file_is_tagged_as_shapes_so_a_chart_knows_how_to_draw_it(tmp_path: Path) -> None:

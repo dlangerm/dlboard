@@ -32,6 +32,7 @@ from playwright.sync_api import expect
 
 from dlboard import models
 from dlboard.client._rest_api import BasicDlboardAPI
+from dlboard.client.artifacts import rle
 from dlboard.client.artifacts.image import Image
 from dlboard.client.artifacts.overlay import Box, Overlay, Point, Polygon, Shape
 from dlboard.client.histograms import ExponentialBinning
@@ -2413,6 +2414,57 @@ def test_an_image_chart_draws_the_overlay_logged_at_each_pictures_step_over_it(
     expect(modal_layer.locator("rect")).to_have_count(1)
     page.wait_for_function(_OVERLAY_COVERS_PICTURE_JS, arg=modal_layer.element_handle())
     assert console_errors == []  # a layer or shape that could not be drawn is logged, and fails here
+
+
+def test_an_image_chart_draws_a_mask_in_an_overlay_with_its_classes_in_their_colors(
+    page: Page, live_server_url: str, tmp_path: Path, console_errors: list[str]
+) -> None:
+    """A run-length encoded mask in an `Overlay` is painted over its picture: its colored class opaque, the rest see-through."""
+    _create_project_and_experiment(page, live_server_url, "Mask Overlay Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    api = BasicDlboardAPI(live_server_url)
+    run = api.create_run(models.NewRun(experiment_id=experiment_id))
+    picture = np.full((48, 64, 3), 128, dtype=np.uint8)
+    # The left half of the 48 by 64 picture is class 1, drawn red; the right half is class 0, which has no color.
+    labels = np.zeros((1, 48, 64), dtype=np.int64)  # one class-dimension of the picture's height and width
+    labels[:, :, :32] = 1
+    mask = rle.run_length_encode(labels, colors={1: "#ff0000"}, classnames={1: "cat"})
+    api.log_artifact_batch(
+        [
+            Image(key="samples/a", image=picture, step=0, format="jpg").to_artifact(
+                tmp_path, run.id, experiment_id
+            ),
+            Overlay.over("samples/a", name="mask", shapes=[mask], step=0).to_artifact(
+                tmp_path, run.id, experiment_id
+            ),
+        ]
+    )
+    _wait_for_artifacts(experiment_id, 2)
+    page.reload()
+    _auto_generate_charts(page)
+
+    layer = page.locator(".dl-chart-item .dl-image-series-thumb .dl-image-series-overlay")
+    expect(layer.locator("image")).to_have_count(1)
+    href = layer.locator("image").get_attribute("href")
+    # Sample the drawn mask's pixels: the left (class 1) is red and opaque, the right (no color) is see-through.
+    pixels = page.evaluate(
+        """async (href) => {
+            const img = new Image();
+            img.src = href;
+            await img.decode();
+            const canvas = document.createElement("canvas");
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const context = canvas.getContext("2d");
+            context.drawImage(img, 0, 0);
+            const at = (x, y) => Array.from(context.getImageData(x, y, 1, 1).data);
+            return [at(4, 4), at(60, 44)];
+        }""",
+        href,
+    )
+    assert pixels == [[255, 0, 0, 255], [0, 0, 0, 0]]
+    assert console_errors == []  # a mask that could not be drawn is logged, and fails here
 
 
 def test_an_image_chart_draws_an_image_logged_beside_its_pictures_over_them_as_a_layer(

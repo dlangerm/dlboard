@@ -11,8 +11,8 @@ exercises, all through ordinary Lightning/dlboard calls:
 - a histogram of every weight tensor's gradient, so how they spread over training shows without averaging
 - Lightning's `LearningRateMonitor`, `ThroughputMonitor` and `DeviceStatsMonitor`
 - `ModelCheckpoint` with `log_model="all"`, so every checkpoint is uploaded as it is saved
-- per-epoch prediction previews: segmentation masks and bounding boxes (an image and the `Overlay`s or mask layers a chart draws over
-  it), and a matplotlib figure
+- per-epoch prediction previews: segmentation masks and bounding boxes (an image and the `Overlay`s, run-length
+  encoded masks included, a chart draws over it), and a matplotlib figure
 
 Run it a few times: each run samples fresh hyperparameters, so the run-comparison views have something
 to compare. What follows is what dlboard can't do yet, found by running this -- the backlog this example
@@ -58,19 +58,15 @@ from torch.utils.data import DataLoader, Dataset
 from torchvision.ops import masks_to_boxes
 
 from dlboard.client.artifacts.image import Image
-from dlboard.client.artifacts.overlay import Box, Overlay, Shape
+from dlboard.client.artifacts.overlay import Box, ImageMask, Overlay, Shape
+from dlboard.client.artifacts.rle import run_length_encode
 from dlboard.client.dlboard_logger import DLBoardLogger
-from dlboard.models import overlay_key
 
 LOGDIR = Path("./lightning-logs")
 MAX_EPOCHS = 25
 GRAD_NORM_EVERY_N_STEPS = 10
 PREVIEW_SAMPLES = 4
 """How many fixed validation images get a segmentation and a detection preview each epoch."""
-MASK_ALPHA = 140
-"""How opaque (of 255) a segmentation mask is drawn over its picture."""
-CLASS_COLORS = np.array([[0, 0, 0], [230, 60, 60], [60, 200, 90], [70, 110, 240]], dtype=np.uint8)
-"""RGB per `ShapeClass`, indexed by class id."""
 
 
 class ShapeClass(IntEnum):
@@ -84,6 +80,14 @@ class ShapeClass(IntEnum):
 
 FOREGROUND = tuple(c for c in ShapeClass if c is not ShapeClass.BACKGROUND)
 NUM_CLASSES = len(ShapeClass)
+CLASS_COLORS = {
+    int(ShapeClass.CIRCLE): "#e63c3c",
+    int(ShapeClass.SQUARE): "#3cc85a",
+    int(ShapeClass.TRIANGLE): "#466ef0",
+}
+"""The color a mask draws each foreground class in, by class id; the background has none, so it stays clear."""
+CLASS_NAMES = {int(c): c.name.lower() for c in FOREGROUND}
+"""The name of each foreground class, for a mask's legend."""
 
 
 class Stage(StrEnum):
@@ -280,10 +284,9 @@ class UNet(nn.Module):
         return self.head(x)
 
 
-def mask_layer(mask: torch.Tensor) -> np.ndarray:
-    """A class mask as an RGBA picture: each foreground class in its color, translucent, and the background clear."""
-    alpha = np.where((mask > 0).numpy(), MASK_ALPHA, 0).astype(np.uint8)
-    return np.dstack([CLASS_COLORS[mask.numpy()], alpha])
+def mask_layer(mask: torch.Tensor) -> ImageMask:
+    """A class mask, run-length encoded; the background has no color, so it is left clear."""
+    return run_length_encode(mask.numpy()[None], colors=CLASS_COLORS, classnames=CLASS_NAMES)
 
 
 def class_boxes(mask: torch.Tensor) -> list[tuple[ShapeClass, list[float]]]:
@@ -435,8 +438,8 @@ class ShapesSegmenter(pl.LightningModule):
             rgb = (images[i].permute(1, 2, 0).numpy() * 255).astype(np.uint8)
             truth, pred = masks[i], preds[i]
             # DLBOARD GAP: one artifact per (key, step), so every preview image needs its own key.
-            # The picture is plain; each mask is a translucent layer the chart draws over it, so the picture
-            # stays a small JPEG and the mask stays exact. Tags are how numbers ride along with it.
+            # The picture is plain; each mask is an `Overlay` the chart draws over it, so the picture stays a
+            # small JPEG and the mask stays exact (run-length encoded). Tags are how numbers ride along with it.
             for name, mask in (("truth", truth), ("prediction", pred)):
                 key = f"val/segmentation/{name}_{i}"
                 artifacts += [
@@ -447,7 +450,7 @@ class ShapesSegmenter(pl.LightningModule):
                         format="jpg",
                         tags={"epoch": epoch, "iou": sample_iou(truth, pred)},
                     ),
-                    Image(key=overlay_key(key), image=mask_layer(mask), step=step),
+                    Overlay.over(key, shapes=[mask_layer(mask)], step=step),
                 ]
             artifacts += [
                 Image(

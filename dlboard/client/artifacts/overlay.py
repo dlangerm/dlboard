@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import math
 import uuid
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Annotated, Final, Literal, NamedTuple
 
-from pydantic import BaseModel, Field, StringConstraints
+from pydantic import BaseModel, Field, StringConstraints, model_validator
 
 from dlboard.models import LAYER_KIND_TAG, LayerKind, NewArtifact, TagValue, overlay_key
 
@@ -77,7 +78,33 @@ class Polygon(Polyline):
     points: list[Point] = Field(min_length=3)
 
 
-Shape = Annotated[Box | Polyline | Polygon, Field(discriminator="kind")]
+class ImageMask(BaseModel, frozen=True, extra="forbid", use_attribute_docstrings=True):
+    """A mask drawn over a picture: each pixel's class ID, run-length encoded, and the color of each class."""
+
+    kind: Literal["mask"] = "mask"
+    encoding: Literal["rle"]
+    shape: list[int] = Field(min_length=2)
+    """The mask's shape in C order. Its last two dimensions are the picture's height and width."""
+    data: list[int]
+    """List of alternating N,I where N is the number of elements and I is the ID common to them."""
+    colors: dict[int, HexColor] | None = None
+    """Corresponding to N indicate the colors each ID should correspond to in the data."""
+    classnames: dict[int, str] | None = None
+    """Corresponding to colors, indicate the name for the class for use in a legend."""
+
+    @model_validator(mode="after")
+    def _runs_cover_the_shape(self) -> ImageMask:
+        if len(self.data) % 2 != 0:
+            msg = "rle data is alternating N,I pairs, so it has an even length"
+            raise ValueError(msg)
+        elements = math.prod(self.shape)
+        if sum(self.data[::2]) != elements:
+            msg = f"rle runs cover {sum(self.data[::2])} elements, not the {elements} of shape {self.shape}"
+            raise ValueError(msg)
+        return self
+
+
+Shape = Annotated[Box | Polyline | Polygon | ImageMask, Field(discriminator="kind")]
 """Any shape an overlay can hold."""
 
 

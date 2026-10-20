@@ -1,5 +1,5 @@
 // Draws the layers of an image chart over its picture, each at its own opacity: an overlay of shapes (a
-// `dlboard.client.artifacts.overlay.Overlay`, logged as JSON) as an SVG, or an image (a mask, say) as it is. Both are
+// `dlboard.client.artifacts.overlay.Overlay`, logged as JSON, masks included) as an SVG, or an image as it is. Both are
 // scaled `contain`, as the picture is, and the shapes are fractions of the picture's size that are scaled by its pixel
 // size here, so the layers line up with it at any size. Every element is built with DOM calls, never by parsing
 // markup, so a label is only text.
@@ -32,6 +32,37 @@ window.dlImageSeriesOverlay = (() => {
         return { outline, anchor: points[0] };
     };
 
+    // A mask (`ImageMask`, `rle`) as a PNG data URL the size of the picture: alternating `N, I` pairs, `N` pixels of
+    // class `I` each, in row-major order over `shape`, whose last two dimensions are the picture's height and width.
+    // A class without a color is left transparent.
+    const maskPicture = (mask, { width, height }) => {
+        const [rows, cols] = mask.shape.slice(-2);
+        const elements = mask.shape.reduce((product, n) => product * n, 1);
+        if (rows !== height || cols !== width || elements !== width * height) {
+            throw new Error(`a mask of shape ${mask.shape} does not cover a ${width} by ${height} picture`);
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const context = canvas.getContext("2d");
+        const picture = context.createImageData(width, height);
+        let pixel = 0;
+        for (let i = 0; i < mask.data.length; i += 2) {
+            const run = mask.data[i];
+            // The colors are keyed by ID, which JSON keeps as a string key: indexing by the number finds it the same.
+            const color = mask.colors?.[mask.data[i + 1]];
+            if (color) {
+                const [r, g, b] = [1, 3, 5].map((offset) => parseInt(color.slice(offset, offset + 2), 16));
+                for (let p = pixel; p < pixel + run; p++) {
+                    picture.data.set([r, g, b, 255], p * 4);
+                }
+            }
+            pixel += run;
+        }
+        context.putImageData(picture, 0, 0);
+        return canvas.toDataURL("image/png");
+    };
+
     // How each kind of shape is outlined: its SVG element, and the point its label goes at.
     const SHAPE_OUTLINES = {
         box: (shape, { width, height }, style) => ({
@@ -46,6 +77,17 @@ window.dlImageSeriesOverlay = (() => {
         }),
         polyline: throughPoints("polyline"),
         polygon: throughPoints("polygon"),
+        mask: (shape, size) => ({
+            outline: element("image", {
+                href: maskPicture(shape, size),
+                x: 0,
+                y: 0,
+                width: size.width,
+                height: size.height,
+                preserveAspectRatio: "none",
+            }),
+            anchor: [0, 0],
+        }),
     };
 
     const shapeGroup = (shape, size, labelSize) => {
