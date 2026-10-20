@@ -67,7 +67,7 @@ The built-in line charts, and the image series that steps through logged images:
 
 ![Line charts of logged metrics](../images/experiment-charts.png)
 
-![An image-series chart](../images/image-series.png)
+![An image-series chart with a legend of its layers and what they hold, drawn over each picture](../images/image-series.png)
 
 An image series draws layers over each picture. A layer is an `Overlay` of shapes (see [docs/client.md](../client.md))
 or any image, such as a segmentation mask, and the one the run logged at each picture's own step is laid over it, in its
@@ -77,10 +77,27 @@ ones logged after the chart was made, and none of them gets a chart of its own.
 
 The chart editor's **Layers** table has a row for every layer the chart draws, whether or not the chart saved one: the
 overlays of the picture, then any other artifact you add by its key, which the table suggests as you type. Each row says
-whether the layer is `shown` or `off` (not drawn), and how opaque it is, a slider from 0 to 1. An overlay with no row is
-drawn in full, and removing an overlay's row does not leave it out: set its row to `off` to do that, since the chart draws
-every overlay logged over its picture. A chart saved with the earlier `overlays` setting opens as the `layers` rows that draw the same. While the
+whether the layer is `shown`, `hidden` (in the legend, and drawn only when a viewer shows it) or `off` (not drawn, and not
+in the legend), and how opaque it is, a slider from 0 to 1. An overlay with no row is drawn in full, and removing an
+overlay's row does not leave it out: set its row to `off` to do that, since the chart draws every overlay logged over its
+picture. A chart saved with the earlier `overlays` setting opens as the `layers` rows that draw the same. While the
 picture for the slider's step is still downloading, its thumbnail shows a spinner over the previous picture.
+
+Over the top-left of each picture, a legend says what is drawn on it. Each layer is a row: tick or untick it to show or
+hide that layer on every picture of the chart, at once and without loading anything again, and shift-click one to show it
+alone (again to bring the rest back), which is how a truth and a prediction are compared. What each layer holds is
+listed on its row in its colors, so a class of one layer is never mistaken for a class of another. The eye hides every
+layer, and holding it (or a picture) shows the picture without them for as long as it is held; "Layers" folds the legend
+down to its title, and a picture too small for a list shows the eye alone. A layer the picture on show has nothing for is
+dimmed. What a viewer changes this way is theirs alone: it is kept for the browser tab and never changes the saved chart.
+The chart's card says so ("View changed") and offers to **Save as default**, which writes which layers are shown into
+the chart's `layers` setting (into a view of your own, if the page is not yours), or to **Reset** it.
+
+A chart type of your own can keep such state too. `ChartType.viewer_state_type()` returns a Pydantic model of what a
+viewer may change, its `applied_to(parameters)` method returns the settings with that state made their own, and
+`RenderContext.viewer_state_key` is what the chart names that state by in the browser. The page handles the "View
+changed" bar and the saving; the chart reads and writes the state through `window.dlChartViewState`
+(`serve/_pages/_experiment/chart_view_state.js`). `image_series.py` is the reference.
 
 A table of runs, with an artifact column:
 

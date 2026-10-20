@@ -93,6 +93,7 @@ from dlboard.models._view import (
     RenderContext,
     SettingsSection,
     UnknownChartTypeError,
+    ViewerState,
     ViewSummary,
 )
 
@@ -196,6 +197,7 @@ __all__ = [
     "User",
     "ValidJsonTypes",
     "ViewSummary",
+    "ViewerState",
     "artifact_column",
     "artifact_display_name",
     "artifact_fname_column",

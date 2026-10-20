@@ -18,13 +18,11 @@ Run it a few times: each run samples fresh hyperparameters, so the run-compariso
 to compare. What follows is what dlboard can't do yet, found by running this -- the backlog this example
 exists to produce. Where the script itself works around one, a `# DLBOARD GAP:` comment says so:
 
-1. A layer can't be toggled from the chart, only given an opacity in its settings, so the ground-truth and predicted
-   masks (each class in its color, so one would hide the other) are layers of separate pictures to compare by eye.
-2. One artifact per (run, key, step), so N previews need N keys (`sample_0`, `sample_1`, ...) rather than
+1. One artifact per (run, key, step), so N previews need N keys (`sample_0`, `sample_1`, ...) rather than
    one batch rendered as a gallery.
-3. Nothing to skip or collapse a noisy group: `DeviceStatsMonitor` alone adds ~500 series, so auto-generate
+2. Nothing to skip or collapse a noisy group: `DeviceStatsMonitor` alone adds ~500 series, so auto-generate
    offers 886 charts, and its panels sort first, ahead of `train` and `val`.
-4. A panel header carries about 30 Mantine components (8 tooltips), so a view with hundreds of panels is slow
+3. A panel header carries about 30 Mantine components (8 tooltips), so a view with hundreds of panels is slow
    to draw: 239 panels, which grouping this run by suffix makes, take about 14 s (#192).
 """
 
@@ -440,18 +438,21 @@ class ShapesSegmenter(pl.LightningModule):
             # DLBOARD GAP: one artifact per (key, step), so every preview image needs its own key.
             # The picture is plain; each mask is an `Overlay` the chart draws over it, so the picture stays a
             # small JPEG and the mask stays exact (run-length encoded). Tags are how numbers ride along with it.
-            for name, mask in (("truth", truth), ("prediction", pred)):
-                key = f"val/segmentation/{name}_{i}"
-                artifacts += [
-                    Image(
-                        key=key,
-                        image=rgb,
-                        step=step,
-                        format="jpg",
-                        tags={"epoch": epoch, "iou": sample_iou(truth, pred)},
-                    ),
-                    Overlay.over(key, shapes=[mask_layer(mask)], step=step),
-                ]
+            # Both masks are over the one picture, each named: the chart's legend shows and hides each, to compare.
+            key = f"val/segmentation/sample_{i}"
+            artifacts += [
+                Image(
+                    key=key,
+                    image=rgb,
+                    step=step,
+                    format="jpg",
+                    tags={"epoch": epoch, "iou": sample_iou(truth, pred)},
+                ),
+                *(
+                    Overlay.over(key, name=name, shapes=[mask_layer(mask)], step=step)
+                    for name, mask in (("truth", truth), ("prediction", pred))
+                ),
+            ]
             artifacts += [
                 Image(
                     key=f"val/detection/sample_{i}",

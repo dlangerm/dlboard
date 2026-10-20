@@ -33,6 +33,7 @@ from dlboard.models import (
     SizeUnit,
     TagDisplay,
     TimeUnit,
+    ViewerState,
     artifact_column,
     artifact_display_name,
     artifact_fname_column,
@@ -52,29 +53,63 @@ MAX_SLIDER_LABELS = 10
 
 
 class LayerVisibility(StrEnum):
-    """Whether a layer is drawn. Saved with a chart, so a value is never renamed (`persisted_enum_values_test`)."""
+    """
+    Whether a layer is drawn. Saved with a chart, so a value is never renamed (`persisted_enum_values_test`).
+
+    A viewer can switch a layer between shown and hidden from the legend; one that is off is not theirs to bring back.
+    """
 
     SHOWN = "shown"
     """Drawn over the pictures."""
+    HIDDEN = "hidden"
+    """Listed in the legend but not drawn until a viewer shows it."""
     OFF = "off"
-    """Not drawn, and not fetched."""
+    """Not drawn, not listed in the legend, and not fetched."""
 
 
 class LayerStyle(BaseModel, frozen=True, extra="forbid", use_attribute_docstrings=True):
     """How one layer is drawn over each picture."""
 
     visibility: LayerVisibility = LayerVisibility.SHOWN
-    """`shown`, or `off` (not drawn)."""
+    """`shown`; `hidden` (in the legend, drawn only when a viewer shows it); or `off` (not drawn, and not in the legend)."""
     opacity: float = Field(default=1.0, ge=0, le=1)
     """How opaque the layer is, from 0 (invisible) to 1 (the default)."""
 
 
 class DrawnLayer(BaseModel, frozen=True):
-    """A layer to draw over one picture, as the browser is told it: which file it is, and how to draw it."""
+    """A layer to draw over one picture, as the browser is told it: which file it is, and what kind of layer."""
 
     url: str
     kind: LayerKind
-    opacity: float
+    layer: str
+    """The artifact key of the layer (`_layer_keys`), which its style, and a viewer's change, is looked up by."""
+
+
+class ViewedLayer(BaseModel, frozen=True, extra="forbid"):
+    """What a viewer changed about one layer."""
+
+    hidden: bool
+
+
+class ImageViewerState(ViewerState, frozen=True, extra="forbid"):
+    """What a viewer changed in an image chart without editing it: which layers they showed or hid."""
+
+    layers: dict[str, ViewedLayer] = Field(default_factory=dict)
+    """Which layers they showed or hid, by name."""
+    legend_collapsed: bool = False
+    """Only the legend's title is shown, to see more of the picture: the viewer's own, never saved either."""
+
+    @typing.override
+    def applied_to(self, parameters: Any) -> ImageChartSettings:
+        """The chart with each layer the viewer showed or hid set that way. A layer that is off is not theirs to change."""
+        settings = ImageChartSettings.model_validate(parameters)
+        layers = dict(settings.layers)
+        for name, viewed in self.layers.items():
+            style = layers.get(name, LayerStyle())
+            if style.visibility is not LayerVisibility.OFF:
+                visibility = LayerVisibility.HIDDEN if viewed.hidden else LayerVisibility.SHOWN
+                layers[name] = style.model_copy(update={"visibility": visibility})
+        return settings.model_copy(update={"layers": layers})
 
 
 class _LegacyOverlays(BaseModel, frozen=True):
@@ -101,6 +136,12 @@ def _is_overlay_of(key: str, image_key: object) -> bool:
     return overlay is not None and overlay.image_key == image_key
 
 
+def _layer_label(key: str, image_key: str) -> str:
+    """What a layer is called where it is shown: an overlay of the picture by its name, any other artifact by its key."""
+    overlay = OverlayKey.parse(key)
+    return overlay.label if overlay is not None and overlay.image_key == image_key else key
+
+
 LAYERS_SECTION = SettingsSection("Layers", opened=True)
 """What is drawn over each picture."""
 TAGS_SECTION = SettingsSection("Tags")
@@ -119,7 +160,7 @@ class ImageChartSettings(BaseModel, frozen=True, extra="forbid", use_attribute_d
     """Show each thumbnail at its logged resolution (capped by height, never upscaled) instead of stretching small images to fill the thumbnail box. Only affects individual thumbnails, not the chart's overall width above."""
     layers: Annotated[dict[str, LayerStyle], LAYERS_SECTION] = Field(default_factory=dict)
     """
-    Every layer drawn over each picture, bottom first, a row per artifact key: the overlays logged over it, then any other artifact added by its key. An off layer is not drawn. Overlays logged later are drawn too.
+    Every layer drawn over each picture, bottom first, a row per artifact key: the overlays logged over it, then any other artifact added by its key. A hidden layer is in the legend but drawn only when a viewer shows it; an off layer is neither. Overlays logged later are drawn too.
     """
     tag_precision: Annotated[int, TAGS_SECTION] = Field(default=DEFAULT_TAG_PRECISION, ge=1, le=15)
     """Significant digits the numbers in an image's caption (its tags) are shown with."""
@@ -189,13 +230,15 @@ def _slider_marks(all_steps: list[int], max_labels: int = MAX_SLIDER_LABELS) -> 
 
 def _layers_element(element_id: dict[str, str]) -> html.Div:
     """The element over a picture that the browser draws its layers into (`image_series_overlay.js`)."""
-    return html.Div(id=element_id, className="dl-image-series-overlay")
+    return html.Div(
+        id=element_id,
+        className="dl-image-series-overlay",
+        **cast("dict[str, Any]", {"data-dl-instance": element_id["instance"]}),
+    )
 
 
-def _drawn_layers(
-    row: dict[Hashable, Any], layers: list[str], styles: dict[str, LayerStyle]
-) -> list[DrawnLayer]:
-    """The layers a picture's `row` of the panel dataframe has a file for, in the order of `layers`, each drawn as `styles` say."""
+def _drawn_layers(row: dict[Hashable, Any], layers: list[str]) -> list[DrawnLayer]:
+    """The layers a picture's `row` of the panel dataframe has a file for, in the order of `layers`."""
     drawn: list[DrawnLayer] = []
     for key in layers:
         url, fname = row.get(artifact_column(key)), row.get(artifact_fname_column(key))
@@ -203,7 +246,7 @@ def _drawn_layers(
         if isinstance(url, str) and isinstance(fname, str):
             kind = layer_kind(parse_tags(row.get(artifact_tags_column(key))), fname)
             if kind is not None:
-                drawn.append(DrawnLayer(url=url, kind=kind, opacity=styles.get(key, LayerStyle()).opacity))
+                drawn.append(DrawnLayer(url=url, kind=kind, layer=key))
     return drawn
 
 
@@ -228,13 +271,26 @@ def _layer_keys(parameters: ImageChartSettings, columns: Iterable[str]) -> list[
     ]
 
 
+def _legend_element(instance: str) -> html.Div:
+    """
+    The legend over one picture: its layers and what each holds, for the viewer to show and hide.
+
+    Empty here. The browser fills it in (`image_series_overlay.js`) from this picture's own layers, since only it knows
+    what the files hold (the classes of a mask, the labels of shapes) and which layers the picture has.
+    """
+    return html.Div(
+        className="dl-layer-legend",
+        **cast("dict[str, Any]", {"data-dl-instance": instance}),
+    )
+
+
 def _layers_by_picture(
-    pictures: pd.DataFrame, picture_col: str, layers: list[str], styles: dict[str, LayerStyle]
+    pictures: pd.DataFrame, picture_col: str, layers: list[str]
 ) -> dict[str, list[DrawnLayer]]:
     """Each picture's layers, by its URL: only the pictures with a layer at their own step, the rest are left out."""
     if not layers:
         return {}
-    drawn = ((row[picture_col], _drawn_layers(row, layers, styles)) for row in pictures.to_dict("records"))
+    drawn = ((row[picture_col], _drawn_layers(row, layers)) for row in pictures.to_dict("records"))
     return {url: layers_of for url, layers_of in drawn if layers_of}
 
 
@@ -314,7 +370,7 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
                     str(s): format_tags_caption(raw, parameters.tag_defaults, parameters.tag_display)
                     for s, raw in zip(steps, g[tag_col], strict=True)
                 }
-            overlays.update(_layers_by_picture(g, col, layers, parameters.layers))
+            overlays.update(_layers_by_picture(g, col, layers))
             if has_names:
                 per_run_names[str(rid)] = g[RUN_NAME_COLUMN].iloc[0]
 
@@ -358,6 +414,7 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
                     [
                         image,
                         _layers_element({"type": "image-series-overlay", "instance": inst, "run": str(rid)}),
+                        *([_legend_element(inst)] if layers else []),
                     ],
                     id={"type": "image-series-thumb", "instance": inst, "run": str(rid)},
                     className="dl-image-series-thumb",
@@ -400,6 +457,17 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
             else html.Div()
         )
 
+        # What each layer is when the viewer has changed nothing, by its key, with the name the legend shows for it: the
+        # browser applies the viewer's changes over it.
+        defaults = {
+            key: {
+                "hidden": style.visibility is LayerVisibility.HIDDEN,
+                "opacity": style.opacity,
+                "label": _layer_label(key, parameters.key),
+            }
+            for key in layers
+            if (style := parameters.layers.get(key, LayerStyle()))
+        }
         return dmc.Stack(
             [
                 dmc.Text(artifact_display_name(parameters.key), fw=700, style={"overflowWrap": "anywhere"}),
@@ -458,7 +526,21 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
                 ),
             ],
             gap="sm",
+            className="dl-image-series",
+            **cast(
+                "dict[str, Any]",
+                {
+                    "data-dl-instance": inst,
+                    "data-dl-view-key": context.viewer_state_key,
+                    "data-dl-defaults": json.dumps(defaults),
+                },
+            ),
         )
+
+    @classmethod
+    @typing.override
+    def viewer_state_type(cls) -> type[ImageViewerState]:
+        return ImageViewerState
 
     @classmethod
     @typing.override

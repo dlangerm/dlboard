@@ -57,7 +57,7 @@ _FROZEN_ENUM_VALUES: dict[type[StrEnum], frozenset[str]] = {
     Aggregate: frozenset({"latest", "first", "min", "max", "mean"}),
     HistogramDisplay: frozenset({"heatmap", "bands", "step"}),
     Colorscale: frozenset({"Viridis", "Cividis", "Plasma", "Inferno", "Magma", "Blues"}),
-    LayerVisibility: frozenset({"shown", "off"}),
+    LayerVisibility: frozenset({"shown", "hidden", "off"}),
 }
 
 

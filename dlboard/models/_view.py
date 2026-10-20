@@ -70,6 +70,12 @@ class RenderContext(BaseModel, frozen=True, extra="forbid"):
     (a grid's sort and filters) across redraws. Empty for a chart rendered on its own.
     """
 
+    viewer_state_key: str = ""
+    """
+    What a chart that keeps viewer state (`ChartType.viewer_state_type`) names that state by in the browser, so the
+    page and the chart agree on where it is kept. Empty for a chart whose viewer state is not kept.
+    """
+
 
 DEFAULT_RENDER_CONTEXT: typing.Final = RenderContext()
 """For a chart rendered on its own, outside any panel or page (a test, a preview)."""
@@ -140,6 +146,19 @@ DISPLAY_SECTION: typing.Final = SettingsSection("Display")
 """How it looks: sizes, orientation, axes."""
 ADVANCED_SECTION: typing.Final = SettingsSection("Advanced")
 """Settings that rarely need changing, like limits that keep a chart fast."""
+
+
+class ViewerState(BaseModel, frozen=True):
+    """
+    What a viewer changed in a chart without editing it: which layers they showed, a series they hid.
+
+    A chart type with viewer state returns its model from `ChartType.viewer_state_type()`. The state is kept in the
+    browser, and "Save as default" makes it the chart's own settings through `applied_to`.
+    """
+
+    @abstractmethod
+    def applied_to(self, parameters: typing.Any) -> typing.Any:  # noqa: ANN401 -- the chart's own settings model
+        """`parameters` (the chart's settings) with this state made its own: what "Save as default" saves."""
 
 
 class ChartType(ABC, BaseModel, typing.Generic[_Parameters, _Dataframe, _Chart], frozen=True, extra="forbid"):
@@ -246,6 +265,17 @@ class ChartType(ABC, BaseModel, typing.Generic[_Parameters, _Dataframe, _Chart],
         change what the chart shows. Defaults to the settings as they are.
         """
         return parameters
+
+    @classmethod
+    def viewer_state_type(cls) -> type[ViewerState] | None:
+        """
+        The model of what a viewer changes in this chart without editing it: which layers are shown, a series hidden.
+
+        Such state is the viewer's own and instant, kept in the browser (`RenderContext.viewer_state_key`), and never
+        changes the saved chart. "Save as default" on the chart's card makes it the chart's own settings
+        (`ViewerState.applied_to`). `None` (the default) means the chart keeps none.
+        """
+        return None
 
 
 class ParameterField(BaseModel, frozen=True, extra="forbid"):
@@ -475,6 +505,31 @@ class ChartTypeRegistry:
     def natural_width(cls, chart: ChartInstance[_Dataframe, _Chart], context: RenderContext) -> int:
         chart_type, parameters = cls._typed_chart(chart)
         return chart_type.natural_width_in(parameters, context)
+
+    @classmethod
+    def keeps_viewer_state(cls, chart: ChartInstance[_Dataframe, _Chart]) -> bool:
+        """Whether a viewer can change `chart` without editing it (see `ChartType.viewer_state_type`)."""
+        try:
+            return cls.get_chart_type(chart.chart_type).viewer_state_type() is not None
+        except UnknownChartTypeError:
+            return False
+
+    @classmethod
+    def saved_with_viewer_state(
+        cls, chart: ChartInstance[_Dataframe, _Chart], state: object
+    ) -> ChartInstance[_Dataframe, _Chart]:
+        """
+        `chart` with a viewer's `state` (as the browser kept it) made its own settings, under the same id.
+
+        Validated by the chart type's own state model, so whatever the browser sent is checked before it is saved.
+        """
+        chart_type, parameters = cls._typed_chart(chart)
+        state_type = chart_type.viewer_state_type()
+        if state_type is None:
+            msg = f"{chart.chart_type} keeps no viewer state"
+            raise ValueError(msg)
+        saved: BaseModel = state_type.model_validate(state).applied_to(parameters)
+        return chart.model_copy(update={"parameters": saved.model_dump(mode="json")})
 
 
 class ChartInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, extra="forbid"):

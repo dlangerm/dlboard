@@ -20,6 +20,7 @@ from dlboard.serve._pages._experiment import _tab_controls as tab_controls
 from dlboard.serve._pages._experiment import render_panel
 from dlboard.serve._pages._experiment._chart_editor import chart_editor_dock
 from dlboard.serve._pages._experiment._chart_suggestions import chart_suggestion_shells
+from dlboard.serve._pages._experiment._chart_view_state import chart_view_state_stores
 from dlboard.serve._pages._experiment._notes import STATE_NOTES_REVISION, notes_button, notes_drawer
 from dlboard.serve._pages._experiment._paging import SIZES_COOKIE, Paging
 from dlboard.serve._pages._experiment._run_compare import CompareQuery, compare_components
@@ -64,7 +65,7 @@ def _live_update_header(header: Component, notes: Component, views: Component) -
 
 def layout(
     experiment_id: str, chart: str | None = None, view: str | None = None, **query: str
-) -> list[html.Div | dcc.Store | dcc.Interval]:
+) -> list[Component]:
     """
     The experiment page, with its URL's query parameters passed in as keyword arguments by Dash.
 
@@ -176,6 +177,7 @@ def layout(
         Store(id=constants.STATE_EXPERIMENT_ID, data=int(experiment_id)),
         Store(id=ids.STATE_HPARAMS, data=[h.model_dump_json() for h in hparams]),
         *(Store(id=store_id) for store_id in _DRAG_DROP_STORE_IDS),
+        *chart_view_state_stores(),
     ]
 
 

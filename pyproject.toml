@@ -277,6 +277,9 @@ ignore_names = [
   "input_type",
   "autocomplete",
   "link_text",
+  # `ImageViewerState.legend_collapsed` -- the viewer's folded legend, read and written by `image_series_overlay.js`
+  # through the viewer state, never by a Python `.legend_collapsed` vulture can see.
+  "legend_collapsed",
   # `PluginProtocol.plug(app: Dash) -> None` -- every plugin module's install hook, called
   # structurally as `plugin.plug(app)` off whatever module a deployment's plugin list supplies
   # (see `dlboard.serve.resolve_plugins`/`dlboard.serve.app.app`), never by a literal `.plug(`

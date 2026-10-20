@@ -179,7 +179,7 @@ There are five built-in kinds:
 
   An image can have several overlays (predicted and ground-truth boxes, say). Only one artifact
   per key and step is shown, so give each its own `name`, which goes after the suffix
-  (`Overlay.over("sample", name="truth", ...)` logs `sample_$overlay/truth`). A name is what the chart calls the layer,
+  (`Overlay.over("sample", name="truth", ...)` logs `sample_$overlay/truth`). A name is what the chart's legend calls the layer,
   so choose one that says what it is (`truth`, `prediction`, `detections`): an overlay with no name is called "overlay". Auto-generate draws
   all of them, bottom layer first in key order, including ones logged later. The logger warns when one call logs an overlay
   without its image, or a key twice at the same step, and the client warns once when an artifact

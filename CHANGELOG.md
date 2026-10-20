@@ -16,8 +16,54 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 * **Segmentation masks as overlay layers.** `dlboard.client.artifacts.rle.run_length_encode` turns a per-pixel class
   array into an `ImageMask`, run-length encoded with the mask's shape and each class's color. Logged in an `Overlay`, an
-  image chart paints it over its picture: a class with a color is drawn opaque in it, and a class without one is left
-  see-through. An older server stores it without drawing it, so upgrade the server to see masks.
+  image chart paints it over its picture, at the mask's `opacity` (0.5 by default, so the picture shows through): a class
+  with a color is drawn in it, and a class without one is left see-through. With no `colors` at all, a mask draws class 0
+  clear and every other class in a built-in palette. An older server stores it without drawing it, so upgrade the
+  server to see masks.
+* **A legend over each of an image chart's pictures.** It lists the layers drawn on the picture, a row each: tick one to
+  show or hide it on every picture at once, without loading anything again, or shift-click it to show it alone, to
+  compare a truth with a prediction. Each row lists what its layer holds (the classes of a mask, the labels of shapes) in
+  their colors, so a class of one layer is not mistaken for another's. The eye hides every layer, and holding it or a
+  picture shows the picture without them while held; "Layers" folds the legend down, and a layer the picture has nothing
+  for is dimmed. What a viewer changes is their own, kept for the browser tab: the chart's card says "View changed" and
+  offers **Save as default**, which writes which layers are shown into the chart's settings (into a view of your own, if
+  the page is not yours), or **Reset**.
+* **The chart editor is docked beside the panels**, not a modal over them, so the rest of the page stays in view. An
+  edited chart is drawn as the form has it in its own card, in place of the saved chart; Cancel puts it back exactly as
+  it was, and a live update never overwrites the draft. A chart being added is previewed in the pane. Its settings are
+  grouped into collapsible sections (Data, Display, and a chart type's own, such as Layers and Tags on an image chart).
+* For chart plugin authors: **`ChartType.parameters_to_edit`** shows in the editor what a chart draws by default but does
+  not save, **`SettingsSection`** (with `DATA_SECTION`, `DISPLAY_SECTION` and `ADVANCED_SECTION`) groups
+  a chart type's settings in the editor, and **`ChartType.viewer_state_type`** (a `ViewerState` with `applied_to`) /
+  **`RenderContext.viewer_state_key`** let a chart type keep what a viewer changes without editing it, with the card's
+  "Save as default" and "Reset" handled for it. See [docs/plugins/charts.md](docs/plugins/charts.md).
+
+### Changed
+
+* **Upgrade every server before editing an image chart.** A chart saved with `layers` does not load on an older server,
+  which shows it as an error, and an edit made there would drop its layers.
+* **An image chart draws every overlay logged over its image**, including ones logged after the chart was made, rather
+  than only the keys listed in its `overlays` setting. The setting is replaced by `layers`, a row per layer (an
+  overlay by its name, any other artifact by its key) with a `visibility` (`shown`, `hidden` or `off`) and an `opacity`;
+  a chart saved with `overlays` opens as the rows that draw the same layers. One that left out an overlay of its image
+  now draws it (set it `off`), and an image's own overlays are drawn in key order. **The chart editor's Layers table lists
+  every layer the chart draws**, rather than only what was saved, so a layer can be hidden, turned off or added there.
+* Overlays are shown by their image and name (`samples/a · truth`; `overlay` when unnamed) in an image chart's title, a
+  table's column headers and the chart editor, never by the `_$overlay` suffix they are logged under. The editor's key
+  pickers no longer offer an overlay whose image is logged, since that image's chart draws it.
+
+### Deprecated
+
+* `dlboard.models.overlay_image_key` is kept for one release, as the image an overlay key is of. Use `OverlayKey.parse`,
+  which also gives the overlay's name.
+
+### Fixed
+
+* **Editing a chart keeps its id**, so a `?chart=` link to it still opens it. It used to be derived from the new
+  settings again on every edit. A new chart now gets an id of its own, so two charts of one config are not one chart to
+  a link.
+* Switching the chart type in the editor no longer fills the new form from the old type's settings where a name
+  (`height`) happens to match, and a number input in the editor is bounded by what its setting allows.
 
 ## [0.9.0] - 2026-10-19
 
