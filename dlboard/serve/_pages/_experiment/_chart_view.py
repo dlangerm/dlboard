@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     import pandas as pd
     from dash.development.base_component import Component
 
-from dlboard.serve._pages._experiment._ids import ExperimentPage
+from dlboard.serve._pages._experiment._ids import CHART_VIEW_SAVE_REQUEST_ID, ExperimentPage
 from dlboard.serve._pages._experiment._panel_data import chart_data_fingerprint
 
 _log = get_logger(__name__)
@@ -171,9 +171,41 @@ def _draw_chart(
     page_size: int,
 ) -> Component:
     """`chart`, rendered for `panel`'s layout under the ids that `chart_id` names, and with the panel's sync applied."""
-    context = models.RenderContext(columns=panel.grid_columns, page_size=page_size, chart_id=chart_id)
+    context = models.RenderContext(
+        columns=panel.grid_columns,
+        page_size=page_size,
+        chart_id=chart_id,
+        viewer_state_key=chart_id if models.ChartTypeRegistry.keeps_viewer_state(chart) else "",
+    )
     return _apply_panel_sync(
         _render_chart_safely(chart, dataframe, panel.name, context), panel_name=panel.name, sync=panel.sync
+    )
+
+
+def _view_bar() -> Component:
+    """
+    What a card of a chart that keeps viewer state shows while the viewer has changed it (`chart_view_state.js`).
+
+    The browser shows and handles it: "Save as default" asks `CHART_VIEW_SAVE_REQUEST_ID` to make the change the
+    chart's own settings, and "Reset" drops it.
+    """
+    div = cast("Any", html.Div)
+    button = cast("Any", html.Button)
+    return div(
+        [
+            html.Span("View changed"),
+            button(
+                "Save as default",
+                type="button",
+                className="dl-chart-view-save",
+                title="Make this the chart's own settings, for everyone who opens the page",
+            ),
+            button(
+                "Reset", type="button", className="dl-chart-view-reset", title="Go back to the saved chart"
+            ),
+        ],
+        className="dl-chart-view-bar",
+        **{"data-dl-save-store": CHART_VIEW_SAVE_REQUEST_ID},
     )
 
 
@@ -242,10 +274,12 @@ def render_chart_item(
     # `dl-chart-controls`'s opacity:0-until-hover applies to its whole subtree, and this badge
     # is the one thing here that's supposed to stay visible without hovering.
     badge = _unscoped_fetch_badge(chart)
+    keeps_view = models.ChartTypeRegistry.keeps_viewer_state(chart)
     return dmc.Stack(
         [
             *([dmc.Group([badge])] if badge else []),
             hover_controls,
+            *([_view_bar()] if keeps_view else []),
             html.Div(
                 chart_body(panel, index, dataframe, page_size),
                 id=CHART_BODY.of(panel.name, index),
@@ -260,7 +294,10 @@ def render_chart_item(
         p="xs",
         pos="relative",
         className="dl-chart-item",
-        **cast("dict[str, Any]", {"data-chart-id": chart.id}),
+        **cast(
+            "dict[str, Any]",
+            {"data-chart-id": chart.id, **({"data-dl-view-key": chart.id} if keeps_view else {})},
+        ),
     )
 
 

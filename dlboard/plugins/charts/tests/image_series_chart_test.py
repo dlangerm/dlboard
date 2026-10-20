@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import pandas as pd
@@ -14,6 +15,7 @@ from dlboard.models import (
     LAYER_KIND_TAG,
     OVERLAY_KEY_SUFFIX,
     RUN_NAME_COLUMN,
+    ChartInstance,
     ChartTypeRegistry,
     LayerKind,
     ParameterFieldType,
@@ -30,9 +32,14 @@ from dlboard.plugins.charts.image_series import (
     MAX_SLIDER_LABELS,
     ImageChart,
     ImageChartSettings,
+    ImageViewerState,
     LayerStyle,
+    ViewedLayer,
     _slider_marks,
 )
+from dlboard.plugins.charts.line_chart import LineChart
+
+LineChart.register(allow_override=True)  # a chart type that keeps no viewer state
 
 
 def _artifacts_df(n_runs: int, steps_per_run: int = 1) -> pd.DataFrame:
@@ -360,33 +367,103 @@ def test_every_overlay_logged_over_a_picture_is_drawn_below_the_extra_layers_in_
     _log_layer(df, unnamed, "boxes.json", kind=LayerKind.SHAPES)
     _log_layer(df, "mask", "mask.png")
     _log_layer(df, overlay_key("other"), "other.json", kind=LayerKind.SHAPES)  # an overlay of another picture
-    settings = ImageChartSettings(
-        key="img",
-        extra_layers=["mask"],
-        layers={"truth": LayerStyle(opacity=0.5), "mask": LayerStyle(opacity=0.2)},
-    )
+    settings = ImageChartSettings(key="img", extra_layers=["mask"])
 
     overlays = _store_data(ImageChart.render(settings, df))["overlays"]
 
     assert overlays == {
         f"ref://{run}-0": [
-            {"url": f"{unnamed}://{run}", "kind": "shapes", "opacity": 1.0},
-            {"url": f"{truth}://{run}", "kind": "picture", "opacity": 0.5},
-            {"url": f"mask://{run}", "kind": "picture", "opacity": 0.2},
+            {"url": f"{unnamed}://{run}", "kind": "shapes", "layer": "overlay"},
+            {"url": f"{truth}://{run}", "kind": "picture", "layer": "truth"},
+            {"url": f"mask://{run}", "kind": "picture", "layer": "mask"},
         ]
         for run in (1, 2)
     }  # step 1 logged no layers, so its pictures are not listed
 
 
-def test_a_hidden_layer_is_not_drawn() -> None:
+def test_the_chart_says_how_each_layer_is_by_default_for_the_browser_to_apply_a_viewers_changes_over() -> (
+    None
+):
     df = _artifacts_df(n_runs=1)
     _log_layer(df, overlay_key("img", "truth"), "truth.png")
     _log_layer(df, overlay_key("img", "pred"), "pred.png")
-    settings = ImageChartSettings(key="img", layers={"truth": LayerStyle(hidden=True)})
+    settings = ImageChartSettings(
+        key="img", layers={"truth": LayerStyle(hidden=True), "pred": LayerStyle(opacity=0.5)}
+    )
 
-    overlays = _store_data(ImageChart.render(settings, df))["overlays"]
+    root = _props(ImageChart.render_in(settings, df, RenderContext(viewer_state_key="abc")))
 
-    assert [layer["url"] for layer in overlays["ref://1-0"]] == [f"{overlay_key('img', 'pred')}://1"]
+    assert json.loads(root["data-dl-defaults"]) == {
+        "pred": {"hidden": False, "opacity": 0.5},
+        "truth": {"hidden": True, "opacity": 1.0},
+    }
+    assert root["data-dl-view-key"] == "abc"
+    # A hidden layer is still listed with its picture, for a viewer to show.
+    assert [
+        layer["layer"] for layer in _store_data(ImageChart.render(settings, df))["overlays"]["ref://1-0"]
+    ] == [
+        "pred",
+        "truth",
+    ]
+
+
+def test_the_legend_has_a_chip_for_each_layer_and_none_without_layers() -> None:
+    df = _artifacts_df(n_runs=1)
+    assert _legend_names(ImageChart.render(ImageChartSettings(key="img"), df)) == []
+
+    _log_layer(df, overlay_key("img", "truth"), "truth.png")
+    _log_layer(df, overlay_key("img"), "boxes.json", kind=LayerKind.SHAPES)
+
+    assert _legend_names(ImageChart.render(ImageChartSettings(key="img"), df)) == ["overlay", "truth"]
+
+
+def _legend_names(stack: Any) -> list[str]:  # noqa: ANN401 -- a rendered Dash component
+    legend = next(
+        (c for c in _props(stack)["children"] if _props(c).get("className") == "dl-layer-legend"), None
+    )
+    return [] if legend is None else [_props(chip)["children"] for chip in _props(legend)["children"]]
+
+
+def test_what_a_viewer_changed_is_made_the_charts_own_keeping_only_what_differs_from_a_layer_in_full() -> (
+    None
+):
+    settings = ImageChartSettings(key="img", layers={"truth": LayerStyle(opacity=0.5)})
+    state = ImageViewerState(
+        layers={
+            "truth": ViewedLayer(opacity=1.0),  # back to full: no row needed
+            "pred": ViewedLayer(hidden=True),
+            "mask": ViewedLayer(),  # nothing changed
+        }
+    )
+
+    saved = ImageChart.with_viewer_state(settings, state)
+
+    assert saved.layers == {"pred": LayerStyle(hidden=True)}
+
+
+def test_the_registry_saves_a_viewers_state_under_the_charts_own_id() -> None:
+    chart = ChartInstance(chart_type=ImageChart.name, parameters={"key": "img"})
+
+    saved = ChartTypeRegistry.saved_with_viewer_state(chart, {"layers": {"truth": {"hidden": True}}})
+
+    assert saved.id == chart.id
+    assert ChartTypeRegistry.keeps_viewer_state(chart)
+    assert ImageChartSettings.model_validate(saved.parameters).layers == {"truth": LayerStyle(hidden=True)}
+
+
+def test_a_chart_that_keeps_no_viewer_state_says_so_and_cannot_be_saved_with_any() -> None:
+    chart = ChartInstance(chart_type="line", parameters={"column": "loss", "x_axis": "step"})
+
+    assert not ChartTypeRegistry.keeps_viewer_state(chart)
+    with pytest.raises(ValueError, match="keeps no viewer state"):
+        ChartTypeRegistry.saved_with_viewer_state(chart, {})
+
+
+def test_a_viewers_change_must_be_a_change_to_a_layer() -> None:
+    chart = ChartInstance(chart_type=ImageChart.name, parameters={"key": "img"})
+
+    with pytest.raises(ValidationError):
+        ChartTypeRegistry.saved_with_viewer_state(chart, {"layers": {"truth": {"opacity": 3}}})
 
 
 @pytest.mark.parametrize(

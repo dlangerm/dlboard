@@ -72,6 +72,12 @@ class RenderContext(BaseModel, frozen=True, extra="forbid"):
     (a grid's sort and filters) across redraws. Empty for a chart rendered on its own.
     """
 
+    viewer_state_key: str = ""
+    """
+    What a chart that keeps viewer state (`ChartType.viewer_state_type`) names that state by in the browser, so the
+    page and the chart agree on where it is kept. Empty for a chart whose viewer state is not kept.
+    """
+
 
 DEFAULT_RENDER_CONTEXT: typing.Final = RenderContext()
 """For a chart rendered on its own, outside any panel or page (a test, a preview)."""
@@ -220,6 +226,23 @@ class ChartType(ABC, BaseModel, typing.Generic[_Parameters, _Dataframe, _Chart],
         Defaults to `False`, so a chart type that does not display artifacts need not say anything.
         """
         return False
+
+    @classmethod
+    def viewer_state_type(cls) -> type[BaseModel] | None:
+        """
+        The model of what a viewer changes in this chart without editing it: which layers are shown, a series hidden.
+
+        Such state is the viewer's own and instant, kept in the browser (`RenderContext.viewer_state_key`), and never
+        changes the saved chart. "Save as default" on the chart's card makes it the chart's own settings, through
+        `with_viewer_state`. `None` (the default) means the chart keeps none.
+        """
+        return None
+
+    @classmethod
+    def with_viewer_state(cls, parameters: _Parameters, state: typing.Any) -> _Parameters:  # noqa: ANN401
+        """`parameters` with a viewer's `state` (a `viewer_state_type()`) made the chart's own; what a chart that keeps any says."""
+        msg = f"{cls.name} keeps no viewer state"
+        raise NotImplementedError(msg)
 
 
 class ParameterField(BaseModel, frozen=True, extra="forbid"):
@@ -438,6 +461,31 @@ class ChartTypeRegistry:
     def natural_width(cls, chart: ChartInstance[_Dataframe, _Chart], context: RenderContext) -> int:
         chart_type, parameters = cls._typed_chart(chart)
         return chart_type.natural_width_in(parameters, context)
+
+    @classmethod
+    def keeps_viewer_state(cls, chart: ChartInstance[_Dataframe, _Chart]) -> bool:
+        """Whether a viewer can change `chart` without editing it (see `ChartType.viewer_state_type`)."""
+        try:
+            return cls.get_chart_type(chart.chart_type).viewer_state_type() is not None
+        except UnknownChartTypeError:
+            return False
+
+    @classmethod
+    def saved_with_viewer_state(
+        cls, chart: ChartInstance[_Dataframe, _Chart], state: object
+    ) -> ChartInstance[_Dataframe, _Chart]:
+        """
+        `chart` with a viewer's `state` (as the browser kept it) made its own settings, under the same id.
+
+        Validated by the chart type's own state model, so whatever the browser sent is checked before it is saved.
+        """
+        chart_type, parameters = cls._typed_chart(chart)
+        state_type = chart_type.viewer_state_type()
+        if state_type is None:
+            msg = f"{chart.chart_type} keeps no viewer state"
+            raise ValueError(msg)
+        saved = chart_type.with_viewer_state(parameters, state_type.model_validate(state))
+        return chart.model_copy(update={"parameters": saved.model_dump(mode="json")})
 
 
 class ChartInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, extra="forbid"):

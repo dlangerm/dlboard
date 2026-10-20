@@ -2947,3 +2947,82 @@ def test_a_live_update_while_a_chart_is_being_edited_redraws_the_chart_under_its
     )  # the chart underneath is redrawn
     assert draft.get_attribute("data-marker") == "untouched"  # the draft is not
     assert console_errors == []
+
+
+def test_a_layer_is_hidden_and_shown_from_the_legend_without_fetching_and_the_change_can_be_saved_or_reset(
+    page: Page, live_server_url: str, tmp_path: Path, console_errors: list[str]
+) -> None:
+    """
+    Each layer has a chip in the chart's legend: clicking it shows or hides the layer at once, drawn already so with no
+    request, and the change is the viewer's own (kept for the tab, it survives a reload). The card offers to save it as
+    the chart's own settings, or to reset it.
+    """
+    _create_project_and_experiment(page, live_server_url, "Legend Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    api = BasicDlboardAPI(live_server_url)
+    run = api.create_run(models.NewRun(experiment_id=experiment_id))
+    picture = np.full((48, 64, 3), 128, dtype=np.uint8)
+    boxes: list[Shape] = [Box(x=0.125, y=0.25, width=0.375, height=0.25, label="cat")]
+    triangles: list[Shape] = [
+        Polygon(points=[Point(0.625, 0.25), Point(0.875, 0.25), Point(0.75, 0.875)], color="#00ff00")
+    ]
+    api.log_artifact_batch(
+        [
+            Image(key="samples/a", image=picture, step=0, format="jpg").to_artifact(
+                tmp_path, run.id, experiment_id
+            ),
+            Overlay.over("samples/a", name="boxes", shapes=boxes, step=0).to_artifact(
+                tmp_path, run.id, experiment_id
+            ),
+            Overlay.over("samples/a", name="triangles", shapes=triangles, step=0).to_artifact(
+                tmp_path, run.id, experiment_id
+            ),
+        ]
+    )
+    _wait_for_artifacts(experiment_id, 3)
+    page.reload()
+    _auto_generate_charts(page)
+
+    chart = page.locator(".dl-chart-item")
+    layer = chart.locator(".dl-image-series-thumb .dl-image-series-overlay")
+    boxes_chip = chart.get_by_role("button", name="boxes", exact=True)
+    expect(chart.locator(".dl-layer-chip")).to_have_count(2)
+    expect(boxes_chip).to_have_attribute("aria-pressed", "true")
+    expect(layer.locator("rect")).to_be_visible()
+    bar = chart.locator(".dl-chart-view-bar")
+    expect(bar).to_be_hidden()
+
+    requested: list[str] = []
+    page.on("request", lambda request: requested.append(request.url))
+    boxes_chip.click()
+    expect(layer.locator("rect")).to_be_hidden()
+    expect(layer.locator("polygon")).to_be_visible()  # the other layer is as it was
+    boxes_chip.click()
+    expect(layer.locator("rect")).to_be_visible()
+    boxes_chip.click()
+    expect(boxes_chip).to_have_attribute("aria-pressed", "false")
+    assert not [
+        url for url in requested if "/artifact/" in url
+    ]  # drawn already: showing it again fetches nothing
+
+    expect(bar).to_be_visible()
+    page.reload()  # the viewer's own change is kept for the tab
+    expect(boxes_chip).to_have_attribute("aria-pressed", "false")
+    expect(layer.locator("rect")).to_be_hidden()
+
+    bar.get_by_role("button", name="Save as default").click()  # now it is the chart's own settings
+    expect(bar).to_be_hidden()
+    page.evaluate("window.sessionStorage.clear()")
+    page.reload()
+    expect(boxes_chip).to_have_attribute("aria-pressed", "false")
+    expect(layer.locator("rect")).to_be_hidden()
+
+    boxes_chip.click()  # showing it is a change from what is saved: reset goes back to the saved chart
+    expect(layer.locator("rect")).to_be_visible()
+    expect(bar).to_be_visible()
+    bar.get_by_role("button", name="Reset").click()
+    expect(boxes_chip).to_have_attribute("aria-pressed", "false")
+    expect(layer.locator("rect")).to_be_hidden()
+    expect(bar).to_be_hidden()
+    assert console_errors == []

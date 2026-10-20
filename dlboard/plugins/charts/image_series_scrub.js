@@ -50,5 +50,7 @@ function imageSeriesScrub(step, data) {
             data.overlays?.[srcs[i]] ?? [],
         );
     });
+    // The legend says what each layer is doing, which the viewer may have changed before this chart was drawn.
+    window.dlImageSeriesOverlay.restyle(instance);
     return [srcs, captions];
 }

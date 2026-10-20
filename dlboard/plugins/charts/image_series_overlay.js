@@ -161,7 +161,7 @@ window.dlImageSeriesOverlay = (() => {
         return svg;
     };
 
-    // How each kind of layer is drawn into its `holder`, given the layer (`{url, kind, opacity}`) and what the drawing
+    // How each kind of layer is drawn into its `holder`, given the layer (`{url, kind, layer}`) and what the drawing
     // needs of the picture it goes over (`context`: its element and URL, and whether this request is still the latest).
     const LAYER_DRAWERS = {
         picture: (holder, { url }) => {
@@ -207,9 +207,65 @@ window.dlImageSeriesOverlay = (() => {
         },
     };
 
+    // A chart's own element, which holds what its layers are by default (`data-dl-defaults`, by the layer's name) and the
+    // key its viewer's changes are kept under (`data-dl-view-key`). Found by the chart's instance, since its enlarged view
+    // is not inside it.
+    const chartRoot = (instance) =>
+        document.querySelector(`.dl-image-series[data-dl-instance="${CSS.escape(instance)}"]`);
+
+    // What a chart's viewer changes are kept under: its card's key, or for a chart with none (a preview) this one drawing.
+    const viewKey = (root) => root.dataset.dlViewKey || `instance:${root.dataset.dlInstance}`;
+
+    // How layer `name` of the chart `root` is drawn now: as the chart has it, over which the viewer's change.
+    const effectiveStyle = (root, name) => {
+        const defaults = JSON.parse(root.dataset.dlDefaults || "{}")[name] ?? { hidden: false, opacity: 1 };
+        const viewed = window.dlChartViewState?.read(viewKey(root))?.layers?.[name] ?? {};
+        return { ...defaults, ...viewed };
+    };
+
+    // Shows or hides a layer's holder and sets its opacity. A layer that has never been shown is drawn when it first is, so
+    // a hidden layer costs nothing until someone wants it.
+    const applyStyle = (holder, style) => {
+        holder.hidden = style.hidden;
+        holder.style.opacity = String(style.opacity);
+        if (!style.hidden && holder.dlDraw) {
+            const draw = holder.dlDraw;
+            holder.dlDraw = null;
+            draw();
+        }
+    };
+
+    // Applies the chart's styles to every layer of one overlay element (a thumbnail's, or the enlarged view's).
+    const restyleOverlay = (overlay) => {
+        const root = chartRoot(overlay.dataset.dlInstance);
+        if (!root) {
+            return;
+        }
+        for (const holder of overlay.querySelectorAll(":scope > .dl-image-series-layer")) {
+            applyStyle(holder, effectiveStyle(root, holder.dataset.dlLayer));
+        }
+    };
+
+    // Applies them to a whole chart: its thumbnails, its enlarged view, and the legend that says what each layer is doing.
+    const restyle = (instance) => {
+        const root = chartRoot(instance);
+        if (!root) {
+            return;
+        }
+        for (const overlay of document.querySelectorAll(
+            `.dl-image-series-overlay[data-dl-instance="${CSS.escape(instance)}"]`,
+        )) {
+            restyleOverlay(overlay);
+        }
+        for (const chip of root.querySelectorAll(".dl-layer-chip")) {
+            chip.setAttribute("aria-pressed", String(!effectiveStyle(root, chip.dataset.dlLayer).hidden));
+        }
+    };
+
     // Draws `layers` (bottom first) over `picture`, which is showing `pictureUrl`, into `layer`. No layers clears it. A
     // layer element remembers the request it was last given, so a request that the slider (or another modal open) has
-    // overtaken draws nothing, and the same one is not drawn twice.
+    // overtaken draws nothing, and the same one is not drawn twice. How each is drawn (hidden, opacity) is not part of
+    // the request: it is applied after, and changing it never draws anything again.
     const show = (layer, picture, pictureUrl, layers) => {
         const request = `${pictureUrl} ${JSON.stringify(layers)}`;
         if (layer.dataset.request === request) {
@@ -222,20 +278,48 @@ window.dlImageSeriesOverlay = (() => {
             // Made in order, before anything has loaded, so the layers stack as they are listed.
             const holder = document.createElement("div");
             holder.className = "dl-image-series-layer";
-            holder.style.opacity = String(spec.opacity);
+            holder.dataset.dlLayer = spec.layer;
             layer.append(holder);
             const draw = LAYER_DRAWERS[spec.kind];
             if (!draw) {
                 console.error(`image overlay: no way to draw a layer of kind "${spec.kind}":`, spec.url);
                 continue;
             }
-            try {
-                draw(holder, spec, context);
-            } catch (error) {
-                console.error("image overlay: a layer was not drawn:", spec.url, error);
-            }
+            holder.dlDraw = () => {
+                try {
+                    draw(holder, spec, context);
+                } catch (error) {
+                    console.error("image overlay: a layer was not drawn:", spec.url, error);
+                }
+            };
         }
+        restyleOverlay(layer);
     };
 
-    return { show };
+    // A click on a layer's chip in the legend shows or hides that layer, for this viewer: kept in the browser, and saved
+    // as the chart's own only if the viewer asks to.
+    document.addEventListener("click", (event) => {
+        const chip = event.target.closest(".dl-layer-chip");
+        const root = chip?.closest(".dl-image-series");
+        if (!root) {
+            return;
+        }
+        const name = chip.dataset.dlLayer;
+        const key = viewKey(root);
+        const state = window.dlChartViewState.read(key) ?? { layers: {} };
+        state.layers[name] = { ...state.layers[name], hidden: effectiveStyle(root, name).hidden === false };
+        window.dlChartViewState.write(key, state);
+        restyle(root.dataset.dlInstance);
+    });
+
+    // The viewer's changes were dropped (Reset) or saved: every chart of that key draws what it has now.
+    document.addEventListener("dl-chart-view-state", ({ detail: { key } }) => {
+        for (const root of document.querySelectorAll(".dl-image-series")) {
+            if (viewKey(root) === key) {
+                restyle(root.dataset.dlInstance);
+            }
+        }
+    });
+
+    return { show, restyle };
 })();

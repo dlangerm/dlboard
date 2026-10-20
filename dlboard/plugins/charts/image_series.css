@@ -61,3 +61,32 @@
         animation-duration: 2.4s;
     }
 }
+
+/* A layer the viewer (or the chart) has hidden takes no space and draws nothing. */
+.dl-image-series-layer[hidden] {
+    display: none;
+}
+
+/* What is drawn over the pictures, one chip a layer: pressed means shown. A plain button, as a chart has many of them. */
+.dl-layer-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.375rem;
+}
+
+.dl-layer-chip {
+    font: inherit;
+    font-size: var(--mantine-font-size-xs);
+    padding: 0.125rem 0.625rem;
+    color: var(--mantine-color-dimmed);
+    background: transparent;
+    border: 1px solid var(--mantine-color-default-border);
+    border-radius: 1rem;
+    cursor: pointer;
+}
+
+.dl-layer-chip[aria-pressed="true"] {
+    color: var(--mantine-color-text);
+    background: var(--mantine-color-default-hover);
+    border-color: var(--mantine-primary-color-filled);
+}

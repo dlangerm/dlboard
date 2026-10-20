@@ -165,3 +165,27 @@
 .dl-chart-draft:empty {
   display: none; /* an empty slot is no flex item, so it adds no gap under the chart */
 }
+
+/* What a viewer changed in a chart without editing it (`chart_view_state.js`): the card offers to keep it, or drop it. */
+.dl-chart-view-bar {
+  display: none;
+  align-items: center;
+  gap: var(--mantine-spacing-xs);
+  font-size: var(--mantine-font-size-xs);
+  color: var(--mantine-color-dimmed);
+}
+.dl-chart-item[data-dl-view-changed] > .dl-chart-view-bar {
+  display: flex;
+}
+.dl-chart-view-bar button {
+  font: inherit;
+  padding: 0 var(--mantine-spacing-xs);
+  color: var(--mantine-color-text);
+  background: var(--mantine-color-default);
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-sm);
+  cursor: pointer;
+}
+.dl-chart-view-bar button:hover {
+  background: var(--mantine-color-default-hover);
+}

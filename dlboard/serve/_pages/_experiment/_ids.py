@@ -32,3 +32,11 @@ Part of `accordion_view`'s output, so it is always the paging of the tree it sit
 rebuilds that tree takes it as a `State` and hands it back to `accordion_view`, so a rebuild stays on the
 page the viewer was looking at.
 """
+
+CHART_VIEW_SAVE_REQUEST_ID: StoreId[ExperimentPage] = StoreId("chart-view-save-request")
+"""
+What a card's "Save as default" asks the server to save: the chart's id and the viewer state (`chart_view_state.js`).
+
+Written by the browser, with no callback of its own -- the card's bar names this store, which is why the card (`_chart_view.py`)
+and the feature that saves it (`_chart_view_state.py`) share it.
+"""

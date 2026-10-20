@@ -80,6 +80,18 @@ layer with no row is drawn in full. A chart saved with the earlier `overlays` se
 `layers` that draw the same. While the picture for the slider's step is still downloading, its thumbnail shows a
 spinner over the previous picture.
 
+Under the chart's title, a legend has a chip for each layer: click one to hide or show that layer on every picture of the
+chart, at once and without loading anything again. What a viewer changes this way is theirs alone: it is kept for the
+browser tab, never changes the saved chart, and the chart's card says so ("View changed") and offers to **Save as
+default**, which writes it into the chart's `layers` setting (into a view of your own, if the page is not yours), or to
+**Reset** it.
+
+A chart type of your own can keep such state too. `ChartType.viewer_state_type()` returns a Pydantic model of what a
+viewer may change, `with_viewer_state(parameters, state)` returns the settings with a saved `state` made their own, and
+`RenderContext.viewer_state_key` is what the chart names that state by in the browser. The page handles the "View
+changed" bar and the saving; the chart reads and writes the state through `window.dlChartViewState`
+(`serve/_pages/_experiment/chart_view_state.js`). `image_series.py` is the reference.
+
 A table of runs, with an artifact column:
 
 ![A table chart](../images/table-chart.png)
