@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import os
 import subprocess
-import time
 from typing import TYPE_CHECKING
 
 import pytest
@@ -141,11 +140,21 @@ def test_a_snapshot_already_folded_before_a_crash_is_not_counted_twice(prometheu
     assert [p.name for p in prometheus_dir.glob("*.prom")] == ["retired.prom"]
 
 
+class _Clock:
+    """A clock the test winds on by hand: the back-off is measured against it, not against how slow the machine is."""
+
+    now = 1000.0
+
+    def monotonic(self) -> float:
+        return self.now
+
+
 def test_a_failed_build_is_retried_after_a_back_off_and_the_process_recovers(
     telemetry: pytest.MonkeyPatch,
 ) -> None:
     attempts: list[int] = []
     real_build = _sdk.build_metrics
+    clock = _Clock()
 
     def flaky(settings: TelemetrySettings) -> _sdk.Metrics:
         attempts.append(1)
@@ -156,16 +165,17 @@ def test_a_failed_build_is_retried_after_a_back_off_and_the_process_recovers(
 
     telemetry.setenv("DLBOARD_TELEMETRY_METRICS", "otlp")
     telemetry.setattr(_sdk, "build_metrics", flaky)
-    telemetry.setattr(shared, "_RETRY_FIRST_S", 0.5)
-    METRICS.close()  # starts the back-off over, at the shortened first step
+    # Not `time.sleep`: logging the failure (a traceback with its locals) can take longer than a short back-off on a
+    # busy machine, which would end it before the test looked.
+    telemetry.setattr(shared, "time", clock)
+    METRICS.close()  # starts the back-off over
 
     assert METRICS.get() is None
+    clock.now += shared._RETRY_FIRST_S - 0.1
     assert METRICS.get() is None  # still backing off: no second attempt yet
     assert len(attempts) == 1
-    deadline = time.monotonic() + 5
-    while METRICS.get() is None:
-        assert time.monotonic() < deadline, "never recovered"
-        time.sleep(0.01)
+    clock.now += 0.2  # the back-off is over
+    assert METRICS.get() is not None
     assert len(attempts) == 2
 
 
