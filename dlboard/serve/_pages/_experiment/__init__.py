@@ -17,7 +17,8 @@ Features, each owning its ids, its modal or drawer, and its callbacks:
 
 - `_panel_controls.py` -- create/rename/delete/move a panel; delete/move a chart.
 - `_tab_controls.py` -- create/rename a tab, drop a panel or chart onto one.
-- `_chart_editor_modal.py` -- the add/edit-chart modal: its form, live preview and submit.
+- `_chart_editor_modal.py` -- the add/edit-chart modal: its shell, live preview and submit.
+- `_chart_settings_form.py` -- the form of a chart type's settings, and reading its values back.
 - `_chart_suggestions.py` -- auto-populate charts for an empty view; suggest un-charted keys.
 - `_run_comparison_table.py` -- the navbar's hparam/metric/run comparison table + run deletion.
 - `_panel_area_controls.py` -- paging and filtering the panel area, opening panels, switching tabs.
