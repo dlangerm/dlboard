@@ -26,6 +26,25 @@ picture's own: divide a pixel coordinate by the picture's width (for `x`) or hei
 """
 
 DEFAULT_SHAPE_COLOR: Final = "#ff3b30"
+DEFAULT_CLASS_COLORS: Final[tuple[HexColor, ...]] = (
+    "#e6194b",
+    "#3cb44b",
+    "#4363d8",
+    "#f58231",
+    "#911eb4",
+    "#42d4f4",
+    "#f032e6",
+    "#bfef45",
+    "#fabed4",
+    "#469990",
+)
+"""
+The colors a mask with no `colors` draws its classes in: class 1 takes the first, class 2 the second, and so on, around.
+
+A palette of its own, not the run palette: a class drawn in run 1's color would read as run 1. `image_series_overlay.js`
+holds the same list; a test keeps the two equal.
+"""
+DEFAULT_MASK_OPACITY: Final = 0.5
 MAX_OVERLAY_SHAPES: Final = 1000
 MAX_SHAPE_LABEL_LENGTH: Final = 1000
 """Long enough for a custom chart to keep more than a name in a label (a line of text, a small JSON document)."""
@@ -88,9 +107,20 @@ class ImageMask(BaseModel, frozen=True, extra="forbid", use_attribute_docstrings
     data: list[int]
     """List of alternating N,I where N is the number of elements and I is the ID common to them."""
     colors: dict[int, HexColor] | None = None
-    """Corresponding to N indicate the colors each ID should correspond to in the data."""
+    """
+    The color each class ID is drawn in. An ID with none is left see-through, so a background class stays clear.
+    Leave this out for the default: ID 0 is clear and every other ID takes a color of `DEFAULT_CLASS_COLORS`.
+    """
     classnames: dict[int, str] | None = None
-    """Corresponding to colors, indicate the name for the class for use in a legend."""
+    """The name of each class ID, for a legend."""
+    opacity: Fraction = DEFAULT_MASK_OPACITY
+    """How opaque the colored classes are, from 0 (invisible) to 1, so the picture shows through them."""
+
+    def class_color(self, class_id: int) -> HexColor | None:
+        """The color class `class_id` is drawn in, or `None` if it is left see-through."""
+        if self.colors is not None:
+            return self.colors.get(class_id)
+        return DEFAULT_CLASS_COLORS[(class_id - 1) % len(DEFAULT_CLASS_COLORS)] if class_id > 0 else None
 
     @model_validator(mode="after")
     def _runs_cover_the_shape(self) -> ImageMask:

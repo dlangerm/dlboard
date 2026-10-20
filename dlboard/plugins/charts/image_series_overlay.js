@@ -13,6 +13,30 @@ window.dlImageSeriesOverlay = (() => {
     const SVG_NS = "http://www.w3.org/2000/svg";
     const MIN_LABEL_SIZE = 8;
     const LABEL_SIZE_DIVISOR = 32;
+    const DEFAULT_MASK_OPACITY = 0.5;
+    // What a mask with no `colors` draws its classes in: class 1 the first, class 2 the second, and so on, around.
+    // `overlay.DEFAULT_CLASS_COLORS`, which a test keeps equal to this.
+    const DEFAULT_CLASS_COLORS = [
+        "#e6194b",
+        "#3cb44b",
+        "#4363d8",
+        "#f58231",
+        "#911eb4",
+        "#42d4f4",
+        "#f032e6",
+        "#bfef45",
+        "#fabed4",
+        "#469990",
+    ];
+
+    // The color class `id` of `mask` is drawn in, or nothing if it is left see-through (`ImageMask.class_color`).
+    const classColor = (mask, id) => {
+        if (mask.colors) {
+            // The colors are keyed by ID, which JSON keeps as a string key: indexing by the number finds it the same.
+            return mask.colors[id];
+        }
+        return id > 0 ? DEFAULT_CLASS_COLORS[(id - 1) % DEFAULT_CLASS_COLORS.length] : undefined;
+    };
 
     const element = (name, attributes) => {
         const el = document.createElementNS(SVG_NS, name);
@@ -34,7 +58,7 @@ window.dlImageSeriesOverlay = (() => {
 
     // A mask (`ImageMask`, `rle`) as a PNG data URL the size of the picture: alternating `N, I` pairs, `N` pixels of
     // class `I` each, in row-major order over `shape`, whose last two dimensions are the picture's height and width.
-    // A class without a color is left transparent.
+    // A class without a color is left transparent, and the rest are drawn at the mask's opacity.
     const maskPicture = (mask, { width, height }) => {
         const [rows, cols] = mask.shape.slice(-2);
         const elements = mask.shape.reduce((product, n) => product * n, 1);
@@ -46,15 +70,15 @@ window.dlImageSeriesOverlay = (() => {
         canvas.height = height;
         const context = canvas.getContext("2d");
         const picture = context.createImageData(width, height);
+        const alpha = Math.round((mask.opacity ?? DEFAULT_MASK_OPACITY) * 255);
         let pixel = 0;
         for (let i = 0; i < mask.data.length; i += 2) {
             const run = mask.data[i];
-            // The colors are keyed by ID, which JSON keeps as a string key: indexing by the number finds it the same.
-            const color = mask.colors?.[mask.data[i + 1]];
+            const color = classColor(mask, mask.data[i + 1]);
             if (color) {
                 const [r, g, b] = [1, 3, 5].map((offset) => parseInt(color.slice(offset, offset + 2), 16));
                 for (let p = pixel; p < pixel + run; p++) {
-                    picture.data.set([r, g, b, 255], p * 4);
+                    picture.data.set([r, g, b, alpha], p * 4);
                 }
             }
             pixel += run;

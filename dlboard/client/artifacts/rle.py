@@ -67,11 +67,13 @@ def run_length_render(
     """
     Draw an rle `ImageMask` as RGBA pixels, one per element of its shape.
 
-    An ID with a color in `colors` is drawn opaque in that color; an ID without one is transparent, so a background
-    class (usually `0`) stays out of the picture it is laid over.
+    An ID with a color (`ImageMask.class_color`) is drawn in it at the mask's opacity; an ID without one is transparent,
+    so a background class (usually `0`) stays out of the picture it is laid over. The browser draws it the same way.
     """
-    ids = run_length_decode(mask)
+    ids: np.ndarray = run_length_decode(mask)
     rgba = np.zeros((*ids.shape, 4), dtype=np.uint8)
-    for class_id, color in (mask.colors or {}).items():
-        rgba[ids == class_id] = (*bytes.fromhex(color[1:]), 255)
+    alpha = int(mask.opacity * 255 + 0.5)
+    for class_id in map(int, np.unique(ids)):
+        if (color := mask.class_color(class_id)) is not None:
+            rgba[ids == class_id] = (*bytes.fromhex(color[1:]), alpha)
     return rgba

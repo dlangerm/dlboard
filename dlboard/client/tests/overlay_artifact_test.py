@@ -98,6 +98,7 @@ def test_a_mask_is_written_in_the_shapes_file_with_its_shape_runs_and_colors(tmp
             "data": [1, 1, 3, 0],
             "colors": {"1": "#ff0000"},
             "classnames": None,
+            "opacity": 0.5,
         }
     ]
     assert ImageMask.model_validate(shapes[0]) == mask
