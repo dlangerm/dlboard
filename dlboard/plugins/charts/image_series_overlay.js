@@ -202,10 +202,7 @@ window.dlImageSeriesOverlay = (() => {
                     if (isCurrent()) {
                         holder.dlClasses = classesOf(overlay);
                         draw(overlay);
-                        const root = chartRoot(holder.parentElement.dataset.dlInstance);
-                        if (root) {
-                            refreshClasses(root);
-                        }
+                        updateLegend(holder.parentElement);
                     }
                 })
                 .catch((error) => console.error("image overlay: a shapes layer was not drawn:", url, error));
@@ -222,6 +219,9 @@ window.dlImageSeriesOverlay = (() => {
     const viewKey = (root) => root.dataset.dlViewKey || `instance:${root.dataset.dlInstance}`;
 
     const viewerState = (root) => window.dlChartViewState?.read(viewKey(root)) ?? {};
+
+    // The names of a chart's layers, bottom first.
+    const layerNames = (root) => Object.keys(JSON.parse(root.dataset.dlDefaults || "{}"));
 
     // Changes what a chart's viewer has changed, and draws it.
     const changeViewerState = (root, change) => {
@@ -244,7 +244,7 @@ window.dlImageSeriesOverlay = (() => {
     };
 
     // What the layers in a file hold, for the legend: each class of a mask (named if it was, else "class N") and each
-    // labelled shape, in its color.
+    // labelled shape, in its color. Kept apart by layer: a class of the same name in two layers is two classes.
     const classesOf = ({ shapes }) => {
         const found = new Map();
         for (const shape of shapes) {
@@ -263,31 +263,144 @@ window.dlImageSeriesOverlay = (() => {
         return [...found].map(([label, color]) => ({ label, color }));
     };
 
-    // Lists, under the layer chips, the classes and labels of the layers that are shown on the thumbnails.
-    const refreshClasses = (root) => {
-        const target = root.querySelector(".dl-class-legend");
-        if (!target) {
+    // The icons are drawn with DOM calls like everything else here, never by parsing markup.
+    const icon = (paths) => {
+        const svg = element("svg", {
+            viewBox: "0 0 24 24",
+            width: 15,
+            height: 15,
+            fill: "none",
+            stroke: "currentColor",
+            "stroke-width": 2,
+            "stroke-linecap": "round",
+            "stroke-linejoin": "round",
+            "aria-hidden": "true",
+        });
+        for (const d of paths) {
+            svg.append(element("path", { d }));
+        }
+        return svg;
+    };
+    const EYE = [
+        "M10 12a2 2 0 1 0 4 0a2 2 0 0 0 -4 0",
+        "M21 12c-2.4 4 -5.4 6 -9 6c-3.6 0 -6.6 -2 -9 -6c2.4 -4 5.4 -6 9 -6c3.6 0 6.6 2 9 6",
+    ];
+    const EYE_OFF = [
+        "M10.585 10.587a2 2 0 0 0 2.829 2.828",
+        "M16.681 16.673a8.717 8.717 0 0 1 -4.681 1.327c-3.6 0 -6.6 -2 -9 -6c1.272 -2.12 2.712 -3.678 4.32 -4.674m2.86 -1.146a9.055 9.055 0 0 1 1.82 -.18c3.6 0 6.6 2 9 6c-.666 1.11 -1.379 2.067 -2.138 2.87",
+        "M3 3l18 18",
+    ];
+
+    const make = (tag, className, text) => {
+        const el = document.createElement(tag);
+        el.className = className;
+        if (text !== undefined) {
+            el.textContent = text;
+        }
+        return el;
+    };
+
+    // The legend of one picture, built once for its layers: the eye (every overlay, and peek), then a row for each layer with
+    // a toggle and, beneath, the classes it holds. After that it is only updated, so a click is never on an element that
+    // has been replaced since the press.
+    const buildLegend = (legend, names) => {
+        const eye = make("button", "dl-layer-eye");
+        eye.type = "button";
+        eye.title = "Hide or show every overlay. Hold to peek at the picture without them.";
+        eye.setAttribute("aria-label", "Overlays");
+        const shown = icon(EYE);
+        shown.classList.add("dl-eye-shown");
+        const hidden = icon(EYE_OFF);
+        hidden.classList.add("dl-eye-hidden");
+        eye.append(shown, hidden);
+        const rows = make("div", "dl-layer-rows");
+        for (const name of names) {
+            const row = make("div", "dl-layer-row");
+            row.dataset.dlLayer = name;
+            const toggle = make("button", "dl-layer-toggle");
+            toggle.type = "button";
+            toggle.title = `Show or hide ${name}. Shift-click to show only ${name}.`;
+            toggle.append(make("span", "dl-layer-box"), make("span", "dl-layer-name", name));
+            row.append(toggle, make("span", "dl-layer-classes"));
+            rows.append(row);
+        }
+        const title = make("button", "dl-layer-title", "Layers");
+        title.type = "button";
+        title.title = "Show or hide the list of layers";
+        legend.replaceChildren(make("div", "dl-layer-head"), rows);
+        legend.firstChild.append(eye, title);
+    };
+
+    // Anchors the legend to the top-left of the picture itself, which is letterboxed (`contain`) inside its box, and keeps it
+    // inside the picture. On a picture too small for a list it shrinks to the eye alone.
+    const LEGEND_INSET = 6;
+    const COMPACT_BELOW = 152;
+    const fitLegend = (overlay, legend) => {
+        const picture = overlay.parentElement?.querySelector("img");
+        if (!picture?.naturalWidth) {
             return;
         }
-        const found = new Map();
-        for (const holder of root.querySelectorAll(
-            ".dl-image-series-thumb .dl-image-series-layer:not([hidden])",
-        )) {
-            for (const { label, color } of holder.dlClasses ?? []) {
-                found.set(label, color);
+        const thumb = overlay.parentElement.getBoundingClientRect();
+        const box = picture.getBoundingClientRect();
+        const scale = Math.min(box.width / picture.naturalWidth, box.height / picture.naturalHeight);
+        const [width, height] = [picture.naturalWidth * scale, picture.naturalHeight * scale];
+        legend.style.left = `${box.left - thumb.left + (box.width - width) / 2 + LEGEND_INSET}px`;
+        legend.style.top = `${box.top - thumb.top + (box.height - height) / 2 + LEGEND_INSET}px`;
+        legend.style.maxWidth = `${Math.max(0, width - 2 * LEGEND_INSET)}px`;
+        legend.style.maxHeight = `${Math.max(0, height - 2 * LEGEND_INSET)}px`;
+        legend.toggleAttribute("data-dl-compact", width < COMPACT_BELOW);
+    };
+
+    // Brings the legend over one picture up to date: what is shown, what this picture has nothing for, what each layer holds.
+    const updateLegend = (overlay) => {
+        const legend = overlay.parentElement?.querySelector(":scope > .dl-layer-legend");
+        const root = chartRoot(overlay.dataset.dlInstance);
+        if (!legend || !root) {
+            return;
+        }
+        const names = layerNames(root);
+        if (legend.dataset.layers !== names.join("\n")) {
+            buildLegend(legend, names);
+            legend.dataset.layers = names.join("\n");
+            // The picture's box changes with the window and with the panel's columns.
+            new ResizeObserver(() => updateLegend(overlay)).observe(overlay.parentElement);
+        }
+        legend
+            .querySelector(".dl-layer-eye")
+            .setAttribute("aria-pressed", String(!viewerState(root).overlays_hidden));
+        legend.toggleAttribute("data-dl-collapsed", Boolean(viewerState(root).legend_collapsed));
+        fitLegend(overlay, legend);
+        const holders = new Map(
+            [...overlay.querySelectorAll(":scope > .dl-image-series-layer")].map((h) => [
+                h.dataset.dlLayer,
+                h,
+            ]),
+        );
+        for (const row of legend.querySelectorAll(".dl-layer-row")) {
+            const name = row.dataset.dlLayer;
+            const holder = holders.get(name);
+            row.querySelector(".dl-layer-toggle").setAttribute(
+                "aria-pressed",
+                String(!layerStyle(root, name).hidden),
+            );
+            row.toggleAttribute("data-dl-absent", !holder);
+            // The classes of a layer that is not shown are not on the picture, so they are not listed.
+            const classes = holder && !holder.hidden ? (holder.dlClasses ?? []) : [];
+            const target = row.querySelector(".dl-layer-classes");
+            const signature = JSON.stringify(classes);
+            if (target.dataset.classes !== signature) {
+                target.dataset.classes = signature;
+                target.replaceChildren(
+                    ...classes.map(({ label, color }) => {
+                        const entry = make("span", "dl-class");
+                        const swatch = make("span", "dl-class-swatch");
+                        swatch.style.background = color;
+                        entry.append(swatch, label);
+                        return entry;
+                    }),
+                );
             }
         }
-        target.replaceChildren(
-            ...[...found].map(([label, color]) => {
-                const chip = document.createElement("span");
-                chip.className = "dl-class-chip";
-                const swatch = document.createElement("span");
-                swatch.className = "dl-class-swatch";
-                swatch.style.background = color;
-                chip.append(swatch, label);
-                return chip;
-            }),
-        );
     };
 
     // Shows or hides a layer's holder and sets its opacity. A layer that has never been shown is drawn when it first is, so
@@ -302,7 +415,8 @@ window.dlImageSeriesOverlay = (() => {
         }
     };
 
-    // Applies the chart's styles to every layer of one overlay element (a thumbnail's, or the enlarged view's).
+    // Applies the chart's styles to every layer of one overlay element (a thumbnail's, or the enlarged view's), and brings
+    // the legend over it up to date.
     const restyleOverlay = (overlay) => {
         const root = chartRoot(overlay.dataset.dlInstance);
         if (!root) {
@@ -311,41 +425,16 @@ window.dlImageSeriesOverlay = (() => {
         for (const holder of overlay.querySelectorAll(":scope > .dl-image-series-layer")) {
             applyStyle(holder, effectiveStyle(root, holder.dataset.dlLayer));
         }
+        updateLegend(overlay);
     };
 
-    // Applies them to a whole chart: its thumbnails, its enlarged view, and the legend that says what each layer is doing,
-    // which of them the pictures on show have nothing for, and what they hold.
+    // Applies them to a whole chart: its thumbnails and its enlarged view.
     const restyle = (instance) => {
-        const root = chartRoot(instance);
-        if (!root) {
-            return;
-        }
         for (const overlay of document.querySelectorAll(
             `.dl-image-series-overlay[data-dl-instance="${CSS.escape(instance)}"]`,
         )) {
             restyleOverlay(overlay);
         }
-        const onShow = new Set(
-            [...root.querySelectorAll(".dl-image-series-thumb .dl-image-series-layer")].map(
-                (h) => h.dataset.dlLayer,
-            ),
-        );
-        root.querySelector(".dl-layer-master")?.setAttribute(
-            "aria-pressed",
-            String(!viewerState(root).overlays_hidden),
-        );
-        for (const chip of root.querySelectorAll(".dl-layer-chip[data-dl-layer]")) {
-            const name = chip.dataset.dlLayer;
-            chip.setAttribute("aria-pressed", String(!layerStyle(root, name).hidden));
-            chip.toggleAttribute("data-dl-absent", !onShow.has(name));
-        }
-        for (const slider of root.querySelectorAll(".dl-layer-opacity input")) {
-            const opacity = String(layerStyle(root, slider.name).opacity);
-            if (slider.value !== opacity && document.activeElement !== slider) {
-                slider.value = opacity;
-            }
-        }
-        refreshClasses(root);
     };
 
     // Draws `layers` (bottom first) over `picture`, which is showing `pictureUrl`, into `layer`. No layers clears it. A
@@ -380,55 +469,82 @@ window.dlImageSeriesOverlay = (() => {
             };
         }
         restyleOverlay(layer);
+        // A picture's size is known once it has loaded, and the legend is anchored to it.
+        picture.addEventListener("load", () => updateLegend(layer), { once: true });
     };
 
-    // The legend. A click on a layer's chip shows or hides that layer, for this viewer: kept in the browser, and saved as
-    // the chart's own only if the viewer asks to. The "overlays" chip hides every layer (or shows them again), "opacity"
-    // opens a slider for each.
-    document.addEventListener("click", (event) => {
-        const chip = event.target.closest(".dl-layer-chip");
-        const root = chip?.closest(".dl-image-series");
-        if (!root) {
-            return;
-        }
-        if (chip.classList.contains("dl-layer-master")) {
-            changeViewerState(root, (state) => {
-                state.overlays_hidden = !state.overlays_hidden;
-            });
-        } else if (chip.classList.contains("dl-layer-opacity-toggle")) {
-            const sliders = root.querySelector(".dl-layer-opacities");
-            sliders.hidden = !sliders.hidden;
-            chip.setAttribute("aria-pressed", String(!sliders.hidden));
-        } else {
-            const name = chip.dataset.dlLayer;
-            const hidden = !layerStyle(root, name).hidden;
-            changeViewerState(root, (state) => {
-                state.layers[name] = { ...state.layers[name], hidden };
-            });
-        }
-    });
+    // Shows `name` alone, or if it is the only one shown already, every layer again: for comparing one layer with the rest.
+    const solo = (root, name) => {
+        const names = layerNames(root);
+        const alone = names.every((other) => (other === name) === !layerStyle(root, other).hidden);
+        changeViewerState(root, (state) => {
+            state.overlays_hidden = false;
+            for (const other of names) {
+                state.layers[other] = { hidden: alone ? false : other !== name };
+            }
+        });
+    };
 
-    document.addEventListener("input", (event) => {
-        const slider = event.target.matches?.(".dl-layer-opacity input") ? event.target : null;
-        const root = slider?.closest(".dl-image-series");
-        if (root) {
-            changeViewerState(root, (state) => {
-                state.layers[slider.name] = {
-                    ...state.layers[slider.name],
-                    opacity: Number(slider.value),
-                };
-            });
-        }
-    });
-
-    // Peek: holding a picture (or the "overlays" chip) for a moment shows it without its layers until it is let go, to see
-    // what is under them. The click that ends a hold is not a click (it would open the picture, or toggle the chip).
+    // Peek: holding a picture (or the eye) for a moment shows the picture without its layers until it is let go, to see
+    // what is under them. The click that ends a hold is not a click: it would open the picture, or toggle the eye.
     const PEEK_MS = 250;
     const SWALLOW_MS = 400;
     let peek = null;
     let swallowing = false;
+
+    // The legend. A click on a layer's row shows or hides that layer, for this viewer: kept in the browser, and saved as the
+    // chart's own only if the viewer asks to. The eye hides every layer, or shows them again. It is handled before the
+    // picture sees it, as a click on the legend is not a click on the picture (which opens it).
+    document.addEventListener(
+        "click",
+        (event) => {
+            const held = event.target.closest?.(".dl-layer-eye, .dl-image-series-thumb");
+            if (swallowing && held) {
+                swallowing = false;
+                event.stopPropagation();
+                event.preventDefault();
+                return;
+            }
+            const button = event.target.closest?.(".dl-layer-legend button");
+            const root = button?.closest(".dl-image-series");
+            if (!root) {
+                return;
+            }
+            event.stopPropagation();
+            if (button.classList.contains("dl-layer-eye")) {
+                changeViewerState(root, (state) => {
+                    state.overlays_hidden = !state.overlays_hidden;
+                });
+                return;
+            }
+            if (button.classList.contains("dl-layer-title")) {
+                changeViewerState(root, (state) => {
+                    state.legend_collapsed = !state.legend_collapsed;
+                });
+                return;
+            }
+            const name = button.closest(".dl-layer-row").dataset.dlLayer;
+            if (event.shiftKey) {
+                solo(root, name);
+                return;
+            }
+            const hidden = !layerStyle(root, name).hidden;
+            changeViewerState(root, (state) => {
+                state.layers[name] = { hidden };
+                if (!hidden) {
+                    state.overlays_hidden = false; // showing a layer means seeing it
+                }
+            });
+        },
+        true,
+    );
+
     document.addEventListener("pointerdown", (event) => {
-        const held = event.target.closest(".dl-image-series-thumb, .dl-layer-master");
+        const eye = event.target.closest?.(".dl-layer-eye");
+        if (!eye && event.target.closest?.(".dl-layer-legend")) {
+            return; // pressing a layer's row is not holding the picture
+        }
+        const held = eye ?? event.target.closest?.(".dl-image-series-thumb");
         const root = held?.closest(".dl-image-series");
         if (!root) {
             return;
@@ -455,17 +571,6 @@ window.dlImageSeriesOverlay = (() => {
     };
     document.addEventListener("pointerup", endPeek);
     document.addEventListener("pointercancel", endPeek);
-    document.addEventListener(
-        "click",
-        (event) => {
-            if (swallowing && event.target.closest(".dl-image-series-thumb, .dl-layer-master")) {
-                event.stopPropagation();
-                event.preventDefault();
-                swallowing = false;
-            }
-        },
-        true,
-    );
     // A long press on a touch screen opens a menu, which a peek must not.
     document.addEventListener("contextmenu", (event) => {
         if (peek?.active) {

@@ -20,17 +20,18 @@ pulls that section's body into the GitHub release notes and publishes both distr
   with a color is drawn in it, and a class without one is left see-through. With no `colors` at all, a mask draws class 0
   clear and every other class in a built-in palette. An older server stores it without drawing it, so upgrade the
   server to see masks.
-* **A legend over an image chart's layers.** Under the chart's title, a chip for each layer shows or hides it on every
-  picture at once, without loading anything again; "overlays" hides them all, and holding a picture (or that chip) shows
-  it without its layers for as long as it is held. A slider for each layer sets its opacity, a layer the picture on
-  show has nothing for is dimmed, and the classes of a mask and the labels of shapes are listed in their colors. What a
-  viewer changes is their own, kept for the browser tab: the chart's card says "View changed" and offers **Save as
-  default**, which writes it into the chart's settings (into a view of your own, if the page is not yours), or
-  **Reset**.
+* **A legend over each of an image chart's pictures.** It lists the layers drawn on the picture, a row each: tick one to
+  show or hide it on every picture at once, without loading anything again, or shift-click it to show it alone, to
+  compare a truth with a prediction. Each row lists what its layer holds (the classes of a mask, the labels of shapes) in
+  their colors, so a class of one layer is not mistaken for another's. The eye hides every layer, and holding it or a
+  picture shows the picture without them while held; "Layers" folds the legend down, and a layer the picture has nothing
+  for is dimmed. What a viewer changes is their own, kept for the browser tab: the chart's card says "View changed" and
+  offers **Save as default**, which writes which layers are shown into the chart's settings (into a view of your own, if
+  the page is not yours), or **Reset**.
 * **The chart editor is docked beside the panels**, not a modal over them, so the rest of the page stays in view. An
   edited chart is drawn as the form has it in its own card, in place of the saved chart; Cancel puts it back exactly as
   it was, and a live update never overwrites the draft. A chart being added is previewed in the pane. Its settings are
-  grouped into collapsible sections (Data, Display, and a chart type's own, such as Layers and Captions on an image chart).
+  grouped into collapsible sections (Data, Display, and a chart type's own, such as Layers and Tags on an image chart).
 * For chart plugin authors: **`SettingsSection`** (with `DATA_SECTION`, `DISPLAY_SECTION` and `ADVANCED_SECTION`) groups
   a chart type's settings in the editor, and **`ChartType.viewer_state_type`** / **`with_viewer_state`** /
   **`RenderContext.viewer_state_key`** let a chart type keep what a viewer changes without editing it, with the card's

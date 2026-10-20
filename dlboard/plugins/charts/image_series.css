@@ -67,87 +67,195 @@
     display: none;
 }
 
-/* What is drawn over the pictures, one chip a layer: pressed means shown. A plain button, as a chart has many of them. */
+.dl-image-series-thumb {
+    -webkit-touch-callout: none;
+    user-select: none;
+}
+
+/* The legend, over the top-left of the picture it is about: what is drawn on it, one row a layer, and what each layer
+   holds. Over the picture (not in the page's flow) so showing and hiding things never moves the chart. */
 .dl-layer-legend {
+    position: absolute;
+    top: 0.375rem;
+    left: 0.375rem;
+    z-index: 3;
+    max-width: calc(100% - 0.75rem);
+    max-height: calc(100% - 0.75rem);
+    overflow: auto;
+    padding: 0.25rem 0.5rem 0.3rem 0.375rem;
+    color: #f2f2f5;
+    background: rgb(18 18 24 / 0.74);
+    border: 1px solid rgb(255 255 255 / 0.16);
+    border-radius: 0.5rem;
+    font-size: 0.6875rem;
+    line-height: 1.25;
+    cursor: default;
+    backdrop-filter: blur(3px);
+}
+
+.dl-layer-head {
     display: flex;
-    flex-wrap: wrap;
+    align-items: center;
     gap: 0.375rem;
 }
 
-.dl-layer-chip {
+/* The title is a button: it folds the legend down to its title, for more of the picture. */
+.dl-layer-legend button.dl-layer-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    opacity: 0.85;
+}
+
+.dl-layer-title::after {
+    content: "";
+    width: 0.3rem;
+    height: 0.3rem;
+    border: solid currentColor;
+    border-width: 0 1.5px 1.5px 0;
+    transform: translateY(-1px) rotate(45deg);
+}
+
+.dl-layer-legend[data-dl-collapsed] .dl-layer-title::after {
+    transform: translateX(-1px) rotate(-45deg);
+}
+
+.dl-layer-legend[data-dl-collapsed] .dl-layer-rows {
+    display: none;
+}
+
+.dl-layer-legend button {
     font: inherit;
-    font-size: var(--mantine-font-size-xs);
-    padding: 0.125rem 0.625rem;
-    color: var(--mantine-color-dimmed);
-    background: transparent;
-    border: 1px solid var(--mantine-color-default-border);
-    border-radius: 1rem;
+    color: inherit;
+    background: none;
+    border: 0;
+    padding: 0;
     cursor: pointer;
 }
 
-.dl-layer-chip[aria-pressed="true"] {
-    color: var(--mantine-color-text);
-    background: var(--mantine-color-default-hover);
-    border-color: var(--mantine-primary-color-filled);
+.dl-layer-eye {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.5rem;
+    height: 1.5rem;
+    border-radius: 0.375rem;
 }
 
-/* One chip for every layer says what is drawn; a layer the pictures on show have nothing for is dimmed. */
-.dl-layer-chip[data-dl-absent] {
-    opacity: 0.45;
-    border-style: dashed;
+.dl-layer-eye:hover {
+    background: rgb(255 255 255 / 0.16);
 }
 
-.dl-layer-chip.dl-layer-master {
-    font-weight: 600;
+.dl-layer-eye[aria-pressed="true"] .dl-eye-hidden,
+.dl-layer-eye[aria-pressed="false"] .dl-eye-shown {
+    display: none;
 }
 
-/* The classes and labels the shown layers hold, each in its color. */
-.dl-class-legend {
+.dl-layer-eye[aria-pressed="false"] {
+    opacity: 0.7;
+}
+
+.dl-layer-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1875rem;
+    margin-top: 0.1875rem;
+}
+
+/* A layer: its toggle, then what it holds on the same line, wrapping under it when the picture is narrow. */
+.dl-layer-row {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.5rem;
-    margin-top: 0.25rem;
-    font-size: var(--mantine-font-size-xs);
-    color: var(--mantine-color-dimmed);
+    align-items: center;
+    gap: 0.0625rem 0.75rem;
 }
 
-.dl-class-chip {
+.dl-layer-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    max-width: 100%;
+    text-align: left;
+}
+
+.dl-layer-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* A box that is ticked while its layer is shown. */
+.dl-layer-box {
+    flex: none;
+    position: relative;
+    width: 0.8125rem;
+    height: 0.8125rem;
+    border: 1.5px solid rgb(255 255 255 / 0.7);
+    border-radius: 0.25rem;
+}
+
+.dl-layer-toggle[aria-pressed="true"] .dl-layer-box {
+    background: #4c6ef5;
+    border-color: #4c6ef5;
+}
+
+.dl-layer-toggle[aria-pressed="true"] .dl-layer-box::after {
+    content: "";
+    position: absolute;
+    left: 0.2rem;
+    top: 0.0625rem;
+    width: 0.2rem;
+    height: 0.45rem;
+    border: solid #fff;
+    border-width: 0 1.5px 1.5px 0;
+    transform: rotate(45deg);
+}
+
+/* A layer that is hidden, or that this picture has nothing for, is dimmed. */
+.dl-layer-row:has(.dl-layer-toggle[aria-pressed="false"]),
+.dl-layer-row[data-dl-absent] {
+    opacity: 0.5;
+}
+
+.dl-layer-row[data-dl-absent] .dl-layer-name {
+    font-style: italic;
+}
+
+/* What a layer holds, beneath its name, each in its color. */
+.dl-layer-classes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.0625rem 0.625rem;
+    color: rgb(242 242 245 / 0.85);
+}
+
+.dl-layer-classes:empty {
+    display: none;
+}
+
+.dl-class {
     display: inline-flex;
     align-items: center;
     gap: 0.25rem;
 }
 
 .dl-class-swatch {
+    flex: none;
     width: 0.625rem;
     height: 0.625rem;
-    border-radius: 2px;
-    border: 1px solid var(--mantine-color-default-border);
+    border: 1px solid rgb(255 255 255 / 0.55);
+    border-radius: 0.1875rem;
 }
 
-.dl-layer-opacities {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.75rem;
-    margin-top: 0.375rem;
-    font-size: var(--mantine-font-size-xs);
-}
-
-.dl-layer-opacities[hidden] {
+/* A small picture has room for the eye alone. */
+.dl-layer-legend[data-dl-compact] .dl-layer-rows,
+.dl-layer-legend[data-dl-compact] .dl-layer-title {
     display: none;
-}
-
-.dl-layer-opacities label {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.375rem;
 }
 
 /* Peeking (holding a picture): the pictures are shown without their layers, until it is let go. */
 .dl-image-series[data-dl-peek] .dl-image-series-overlay {
     visibility: hidden;
-}
-
-.dl-image-series-thumb {
-    -webkit-touch-callout: none;
-    user-select: none;
 }

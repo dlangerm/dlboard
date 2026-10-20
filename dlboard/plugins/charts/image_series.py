@@ -67,18 +67,20 @@ class DrawnLayer(BaseModel, frozen=True):
 
 
 class ViewedLayer(BaseModel, frozen=True, extra="forbid"):
-    """What a viewer changed about one layer; what is left out is as the chart has it."""
+    """What a viewer changed about one layer."""
 
-    hidden: bool | None = None
-    opacity: float | None = Field(default=None, ge=0, le=1)
+    hidden: bool
 
 
 class ImageViewerState(BaseModel, frozen=True, extra="forbid"):
-    """What a viewer changed in an image chart without editing it: its layers, by name, and whether all are hidden."""
+    """What a viewer changed in an image chart without editing it."""
 
     layers: dict[str, ViewedLayer] = Field(default_factory=dict)
+    """Which layers they showed or hid, by name: the only part that can be saved as the chart's own."""
     overlays_hidden: bool = False
     """Every overlay is hidden (or peeked past): the viewer's own, never saved as the chart's."""
+    legend_collapsed: bool = False
+    """Only the legend's title is shown, to see more of the picture: the viewer's own, never saved either."""
 
 
 class _LegacyOverlays(BaseModel, frozen=True):
@@ -109,7 +111,7 @@ class _LegacyOverlays(BaseModel, frozen=True):
 
 LAYERS_SECTION = SettingsSection("Layers")
 """What is drawn over each picture."""
-CAPTIONS_SECTION = SettingsSection("Captions")
+TAGS_SECTION = SettingsSection("Tags")
 """How the tags under each picture are shown."""
 
 
@@ -127,13 +129,13 @@ class ImageChartSettings(BaseModel, frozen=True, extra="forbid", use_attribute_d
     """Other artifacts to draw over each picture, above its overlays and first at the bottom: an Overlay of shapes (see `dlboard.client.artifacts.overlay`) logged under a key of its own, or an image such as a mask. Each is the one the run logged at the picture's own step."""
     layers: Annotated[dict[str, LayerStyle], LAYERS_SECTION] = Field(default_factory=dict)
     """How particular layers are drawn, a row per layer: an overlay's name, or the key of an extra layer. A layer with no row is drawn in full. Every overlay logged over the picture is drawn, including ones logged later."""
-    tag_precision: Annotated[int, CAPTIONS_SECTION] = Field(default=DEFAULT_TAG_PRECISION, ge=1, le=15)
+    tag_precision: Annotated[int, TAGS_SECTION] = Field(default=DEFAULT_TAG_PRECISION, ge=1, le=15)
     """Significant digits the numbers in an image's caption (its tags) are shown with."""
-    tag_time_unit: Annotated[TimeUnit | None, CAPTIONS_SECTION] = Field(default=None)
+    tag_time_unit: Annotated[TimeUnit | None, TAGS_SECTION] = Field(default=None)
     """Show tags logged as a duration in this unit, whatever unit they were logged in. Leave blank to pick the largest unit that fits each one."""
-    tag_size_unit: Annotated[SizeUnit | None, CAPTIONS_SECTION] = Field(default=None)
+    tag_size_unit: Annotated[SizeUnit | None, TAGS_SECTION] = Field(default=None)
     """Show tags logged as a data size in this unit, whatever unit they were logged in. Leave blank to pick the largest unit that fits each one."""
-    tag_display: Annotated[dict[str, TagDisplay], CAPTIONS_SECTION] = Field(default_factory=dict)
+    tag_display: Annotated[dict[str, TagDisplay], TAGS_SECTION] = Field(default_factory=dict)
     """Display settings for particular tags, a row per tag name, taking the place of the chart's tag precision and unit settings for that tag. Leave a cell blank to keep the chart's own setting."""
 
     @model_validator(mode="before")
@@ -229,71 +231,16 @@ def _layer_keys(parameters: ImageChartSettings, columns: Iterable[str]) -> dict[
     return overlays | {key: key for key in parameters.extra_layers if key not in overlays}
 
 
-def _legend(layers: dict[str, LayerStyle]) -> html.Div | None:
+def _legend_element(instance: str) -> html.Div:
     """
-    What is drawn over the pictures, by layer name, for the viewer to change; none if there are no layers.
+    The legend over one picture: its layers and what each holds, for the viewer to show and hide.
 
-    A chip for each layer shows or hides it, and one for all of them (hold it to peek at the picture without them); the
-    classes and labels the layers hold are listed beneath, and an opacity slider for each layer is a click away. The
-    browser fills in and keeps them current (`image_series_overlay.js`): plain elements, since a chart has many.
+    Empty here. The browser fills it in (`image_series_overlay.js`) from this picture's own layers, since only it knows
+    what the files hold (the classes of a mask, the labels of shapes) and which layers the picture has.
     """
-    if not layers:
-        return None
-    button = cast("Any", html.Button)
-    field = cast("Any", dcc.Input)
     return html.Div(
-        [
-            html.Div(
-                [
-                    button(
-                        "overlays",
-                        type="button",
-                        className="dl-layer-chip dl-layer-master",
-                        title="Hide or show every overlay. Hold to peek at the picture without them.",
-                    ),
-                    *(
-                        button(
-                            name,
-                            type="button",
-                            className="dl-layer-chip",
-                            title=f"Show or hide {name}",
-                            **{"data-dl-layer": name},
-                        )
-                        for name in layers
-                    ),
-                    button(
-                        "opacity",
-                        type="button",
-                        className="dl-layer-chip dl-layer-opacity-toggle",
-                        title="Set how opaque each layer is",
-                        **{"aria-pressed": "false"},
-                    ),
-                ],
-                className="dl-layer-legend",
-            ),
-            html.Div(className="dl-class-legend"),
-            html.Div(
-                [
-                    html.Label(
-                        [
-                            html.Span(name),
-                            field(
-                                type="range",
-                                min=0,
-                                max=1,
-                                step=0.05,
-                                value=style.opacity,
-                                className="dl-layer-opacity",
-                                name=name,
-                            ),
-                        ]
-                    )
-                    for name, style in layers.items()
-                ],
-                className="dl-layer-opacities",
-                hidden=True,
-            ),
-        ]
+        className="dl-layer-legend",
+        **cast("dict[str, Any]", {"data-dl-instance": instance}),
     )
 
 
@@ -427,6 +374,7 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
                     [
                         image,
                         _layers_element({"type": "image-series-overlay", "instance": inst, "run": str(rid)}),
+                        *([_legend_element(inst)] if layers else []),
                     ],
                     id={"type": "image-series-thumb", "instance": inst, "run": str(rid)},
                     className="dl-image-series-thumb",
@@ -470,12 +418,14 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
         )
 
         # What each layer is when the viewer has changed nothing, by its name: the browser applies the viewer's changes over it.
-        styles = {name: parameters.layers.get(name, LayerStyle()) for name in layers}
-        defaults = {name: {"hidden": s.hidden, "opacity": s.opacity} for name, s in styles.items()}
+        defaults = {
+            name: {"hidden": style.hidden, "opacity": style.opacity}
+            for name in layers
+            if (style := parameters.layers.get(name, LayerStyle()))
+        }
         return dmc.Stack(
             [
                 dmc.Text(artifact_display_name(parameters.key), fw=700, style={"overflowWrap": "anywhere"}),
-                *([legend] if (legend := _legend(styles)) else []),
                 dcc.Store(
                     id={"type": "image-series-data", "instance": inst},
                     data={
@@ -553,9 +503,7 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
         """The chart with what the viewer changed about each layer made its own, keeping only what differs from a layer in full."""
         layers = dict(parameters.layers)
         for name, viewed in state.layers.items():
-            layers[name] = layers.get(name, LayerStyle()).model_copy(
-                update=viewed.model_dump(exclude_none=True)
-            )
+            layers[name] = layers.get(name, LayerStyle()).model_copy(update={"hidden": viewed.hidden})
         return parameters.model_copy(
             update={"layers": {n: s for n, s in layers.items() if s != LayerStyle()}}
         )

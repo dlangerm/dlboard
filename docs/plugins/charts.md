@@ -80,11 +80,15 @@ layer with no row is drawn in full. A chart saved with the earlier `overlays` se
 `layers` that draw the same. While the picture for the slider's step is still downloading, its thumbnail shows a
 spinner over the previous picture.
 
-Under the chart's title, a legend has a chip for each layer: click one to hide or show that layer on every picture of the
-chart, at once and without loading anything again. What a viewer changes this way is theirs alone: it is kept for the
-browser tab, never changes the saved chart, and the chart's card says so ("View changed") and offers to **Save as
-default**, which writes it into the chart's `layers` setting (into a view of your own, if the page is not yours), or to
-**Reset** it.
+Over the top-left of each picture, a legend says what is drawn on it. Each layer is a row: tick or untick it to show or
+hide that layer on every picture of the chart, at once and without loading anything again, and shift-click one to show it
+alone (again to bring the rest back), which is how a truth and a prediction are compared. What each layer holds is
+listed on its row in its colors, so a class of one layer is never mistaken for a class of another. The eye hides every
+layer, and holding it (or a picture) shows the picture without them for as long as it is held; "Layers" folds the legend
+down to its title, and a picture too small for a list shows the eye alone. A layer the picture on show has nothing for is
+dimmed. What a viewer changes this way is theirs alone: it is kept for the browser tab and never changes the saved chart.
+The chart's card says so ("View changed") and offers to **Save as default**, which writes which layers are shown into
+the chart's `layers` setting (into a view of your own, if the page is not yours), or to **Reset** it.
 
 A chart type of your own can keep such state too. `ChartType.viewer_state_type()` returns a Pydantic model of what a
 viewer may change, `with_viewer_state(parameters, state)` returns the settings with a saved `state` made their own, and
@@ -139,7 +143,7 @@ The chart editor builds its form from the settings model, so a setting needs no 
 editable. To keep a form with many settings readable, group them: mark a setting with a `SettingsSection` in its
 `Annotated` metadata, as `height: Annotated[int, DISPLAY_SECTION] = 300`. `DATA_SECTION` (what the chart draws, and
 where a setting with no mark goes), `DISPLAY_SECTION` and `ADVANCED_SECTION` come with `dlboard.models`, and a chart
-type may declare sections of its own, such as `SettingsSection("Captions")`. The editor shows each section as a
+type may declare sections of its own, such as `SettingsSection("Tags")`. The editor shows each section as a
 collapsible group, in the order its first setting is declared, with only the ones marked `opened` (just
 `DATA_SECTION`) expanded. A chart type whose settings are all in one section gets no groups at all, so a plugin that
 marks nothing looks the way it always did.

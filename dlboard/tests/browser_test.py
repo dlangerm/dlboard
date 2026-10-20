@@ -81,7 +81,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from dash import Dash
-    from playwright.sync_api import Page, Route
+    from playwright.sync_api import Locator, Page, Route
 
 pytestmark = pytest.mark.browser
 
@@ -2140,7 +2140,7 @@ def test_an_image_charts_per_tag_display_is_edited_as_table_rows_in_the_chart_ed
     # A row per tag in a grid, not JSON: add one, name the tag, and give it a precision.
     # The chart has another table now (its `layers`), with buttons of its own: this is the tag display's.
     editor = page.get_by_role("complementary", name="Chart settings")
-    editor.get_by_role("button", name="Captions").click()  # the settings are in collapsed sections
+    editor.get_by_role("button", name="Tags").click()  # the settings are in collapsed sections
     add_row = page.locator('button[id*="tag_display"][id*="table-add"]')
     rows = editor.locator(".ag-center-cols-container .ag-row")
     add_row.click()  # opens the new row's name for typing; clicking away leaves it blank
@@ -2997,7 +2997,24 @@ def test_a_live_update_while_a_chart_is_being_edited_redraws_the_chart_under_its
     assert console_errors == []
 
 
-def test_a_layer_is_hidden_and_shown_from_the_legend_without_fetching_and_the_change_can_be_saved_or_reset(
+def _height_of(locator: Locator) -> float:
+    """How tall the element is on screen."""
+    box = locator.bounding_box()
+    assert box is not None
+    return box["height"]
+
+
+def _layer_row(legend: Locator, name: str) -> Locator:
+    """The row of layer `name` in a picture's legend."""
+    return legend.locator(f'.dl-layer-row[data-dl-layer="{name}"]')
+
+
+def _layer_holder(thumb: Locator, name: str) -> Locator:
+    """The element layer `name` is drawn in over a picture."""
+    return thumb.locator(f'.dl-image-series-layer[data-dl-layer="{name}"]')
+
+
+def test_a_layer_is_hidden_and_shown_from_the_legend_without_fetching_and_the_change_can_be_saved_or_reset(  # noqa: PLR0915 -- one flow
     page: Page, live_server_url: str, tmp_path: Path, console_errors: list[str]
 ) -> None:
     """
@@ -3035,7 +3052,8 @@ def test_a_layer_is_hidden_and_shown_from_the_legend_without_fetching_and_the_ch
     chart = page.locator(".dl-chart-item")
     layer = chart.locator(".dl-image-series-thumb .dl-image-series-overlay")
     boxes_chip = chart.get_by_role("button", name="boxes", exact=True)
-    expect(chart.locator(".dl-layer-chip[data-dl-layer]")).to_have_count(2)  # a chip for each layer
+    height = _height_of(chart)
+    expect(chart.locator(".dl-layer-toggle")).to_have_count(2)  # a row for each layer, over the picture
     expect(boxes_chip).to_have_attribute("aria-pressed", "true")
     expect(layer.locator("rect")).to_be_visible()
     bar = chart.locator(".dl-chart-view-bar")
@@ -3055,6 +3073,9 @@ def test_a_layer_is_hidden_and_shown_from_the_legend_without_fetching_and_the_ch
     ]  # drawn already: showing it again fetches nothing
 
     expect(bar).to_be_visible()
+    assert (chart.bounding_box() or {})[
+        "height"
+    ] == height  # nothing moved: the legend and the bar are over the chart
     page.reload()  # the viewer's own change is kept for the tab
     expect(boxes_chip).to_have_attribute("aria-pressed", "false")
     expect(layer.locator("rect")).to_be_hidden()
@@ -3069,6 +3090,9 @@ def test_a_layer_is_hidden_and_shown_from_the_legend_without_fetching_and_the_ch
     boxes_chip.click()  # showing it is a change from what is saved: reset goes back to the saved chart
     expect(layer.locator("rect")).to_be_visible()
     expect(bar).to_be_visible()
+    assert (chart.bounding_box() or {})[
+        "height"
+    ] == height  # nothing moved: the legend and the bar are over the chart
     bar.get_by_role("button", name="Reset").click()
     expect(boxes_chip).to_have_attribute("aria-pressed", "false")
     expect(layer.locator("rect")).to_be_hidden()
@@ -3076,13 +3100,13 @@ def test_a_layer_is_hidden_and_shown_from_the_legend_without_fetching_and_the_ch
     assert console_errors == []
 
 
-def test_the_legend_lists_what_the_layers_hold_dims_what_a_picture_lacks_and_sets_opacity_and_peeks(
+def test_the_legend_over_a_picture_lists_what_each_layer_holds_and_hides_peeks_and_solos_them(  # noqa: PLR0915 -- one flow
     page: Page, live_server_url: str, tmp_path: Path, console_errors: list[str]
 ) -> None:
     """
-    Beneath the layer chips the legend lists the classes of a mask and the labels of shapes, in their colors. A layer
-    the picture on show has nothing for is dimmed. "overlays" hides every layer, "opacity" opens a slider for each, and
-    holding a picture shows it without its layers for as long as it is held, without opening it.
+    The legend is over the picture it is about, and lists what each layer holds -- a class of one layer is not a class of
+    another, however alike. An eye hides every layer and holding a picture peeks without them; shift-clicking a layer shows
+    it alone; a layer the picture on show lacks is dimmed; and the legend folds down to its title.
     """
     _create_project_and_experiment(page, live_server_url, "Legend Details Experiment")
     page.locator(".experiment-card").click()
@@ -3092,14 +3116,19 @@ def test_the_legend_lists_what_the_layers_hold_dims_what_a_picture_lacks_and_set
     picture = np.full((48, 64, 3), 128, dtype=np.uint8)
     labels = np.zeros((1, 48, 64), dtype=np.int64)
     labels[:, :, :32] = 1
-    mask = rle.run_length_encode(labels, colors={1: "#ff0000"}, classnames={1: "cat"})
+    # The same class in the same color in two layers, as a truth and a prediction have.
+    truth = rle.run_length_encode(labels, colors={1: "#ff0000"}, classnames={1: "cat"})
+    prediction = rle.run_length_encode(labels, colors={1: "#ff0000"}, classnames={1: "cat"})
     boxes: list[Shape] = [Box(x=0.125, y=0.25, width=0.375, height=0.25, label="dog")]
     api.log_artifact_batch(
         [
             Image(key="samples/a", image=picture, step=0, format="jpg").to_artifact(
                 tmp_path, run.id, experiment_id
             ),
-            Overlay.over("samples/a", name="truth", shapes=[mask], step=0).to_artifact(
+            Overlay.over("samples/a", name="truth", shapes=[truth], step=0).to_artifact(
+                tmp_path, run.id, experiment_id
+            ),
+            Overlay.over("samples/a", name="prediction", shapes=[prediction], step=0).to_artifact(
                 tmp_path, run.id, experiment_id
             ),
             Overlay.over("samples/a", name="boxes", shapes=boxes, step=0).to_artifact(
@@ -3110,42 +3139,64 @@ def test_the_legend_lists_what_the_layers_hold_dims_what_a_picture_lacks_and_set
             ),
         ]
     )
-    _wait_for_artifacts(experiment_id, 4)
+    _wait_for_artifacts(experiment_id, 5)
     page.reload()
     _auto_generate_charts(page)
 
     chart = page.locator(".dl-chart-item")
     thumb = chart.locator(".dl-image-series-thumb")
-    layers = thumb.locator(".dl-image-series-layer")
-    classes = chart.locator(".dl-class-chip")
-    expect(classes).to_have_text(
-        ["dog", "cat"]
-    )  # in layer order: a shape by its label, a mask's class by its name
+    legend = thumb.locator(".dl-layer-legend")
+    expect(_layer_row(legend, "truth").locator(".dl-class")).to_have_text(["cat"])
+    expect(_layer_row(legend, "prediction").locator(".dl-class")).to_have_text(
+        ["cat"]
+    )  # its own cat, not truth's
+    expect(_layer_row(legend, "boxes").locator(".dl-class")).to_have_text(["dog"])
 
-    master = chart.get_by_role("button", name="overlays", exact=True)
-    master.click()
-    expect(layers.first).to_be_hidden()
-    expect(classes).to_have_count(0)  # nothing shown, nothing listed
-    expect(master).to_have_attribute("aria-pressed", "false")
-    master.click()
-    expect(classes).to_have_count(2)
+    # Over the picture, not beside it or above the chart: inside the picture's own corner.
+    shown, over = thumb.locator("img").bounding_box(), legend.bounding_box()
+    assert shown is not None
+    assert over is not None
+    assert shown["x"] <= over["x"]
+    assert shown["y"] <= over["y"]
+    assert over["x"] + over["width"] <= shown["x"] + shown["width"]
+    assert over["y"] + over["height"] <= shown["y"] + shown["height"]
 
-    chart.get_by_role("button", name="opacity", exact=True).click()
-    chart.locator('.dl-layer-opacity input[name="boxes"]').fill("0.5")
-    expect(thumb.locator('.dl-image-series-layer[data-dl-layer="boxes"]')).to_have_css("opacity", "0.5")
+    eye = legend.get_by_role("button", name="Overlays")
+    eye.click()
+    expect(_layer_holder(thumb, "truth")).to_be_hidden()
+    expect(legend.locator(".dl-layer-classes .dl-class")).to_have_count(0)  # nothing shown, nothing listed
+    expect(eye).to_have_attribute("aria-pressed", "false")
+    eye.click()
+    expect(legend.locator(".dl-layer-classes .dl-class")).to_have_count(3)
+
+    _layer_row(legend, "prediction").get_by_role("button").click(
+        modifiers=["Shift"]
+    )  # compare one with the rest: show it alone
+    expect(_layer_holder(thumb, "prediction")).to_be_visible()
+    expect(_layer_holder(thumb, "truth")).to_be_hidden()
+    expect(_layer_holder(thumb, "boxes")).to_be_hidden()
+    _layer_row(legend, "prediction").get_by_role("button").click(
+        modifiers=["Shift"]
+    )  # and again: every layer is back
+    expect(_layer_holder(thumb, "truth")).to_be_visible()
+    expect(_layer_holder(thumb, "boxes")).to_be_visible()
 
     box = thumb.bounding_box()
     assert box is not None
-    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    page.mouse.move(box["x"] + box["width"] - 4, box["y"] + box["height"] - 4)
     page.mouse.down()  # held: the picture shows without its layers
     expect(chart.locator(".dl-image-series")).to_have_attribute("data-dl-peek", "")
     expect(thumb.locator(".dl-image-series-overlay")).to_have_css("visibility", "hidden")
     page.mouse.up()
     expect(chart.locator(".dl-image-series")).not_to_have_attribute("data-dl-peek", "")
-    expect(thumb.locator(".dl-image-series-overlay")).to_have_css("visibility", "visible")
     expect(page.get_by_role("dialog")).to_be_hidden()  # a hold is not a click: the picture was not opened
 
-    page.locator(".mantine-Slider-thumb").focus()  # not the layers' opacity sliders
-    page.keyboard.press("ArrowRight")  # step 10 logged no layers
-    expect(chart.get_by_role("button", name="truth", exact=True)).to_have_attribute("data-dl-absent", "")
+    legend.get_by_role("button", name="Layers").click()  # fold it down to its title
+    expect(_layer_row(legend, "truth")).to_be_hidden()
+    legend.get_by_role("button", name="Layers").click()
+    expect(_layer_row(legend, "truth")).to_be_visible()
+
+    page.locator(".mantine-Slider-thumb").focus()  # not the picture: step 10 logged no layers
+    page.keyboard.press("ArrowRight")
+    expect(_layer_row(legend, "truth")).to_have_attribute("data-dl-absent", "")
     assert console_errors == []

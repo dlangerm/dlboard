@@ -407,33 +407,24 @@ def test_the_chart_says_how_each_layer_is_by_default_for_the_browser_to_apply_a_
     ]
 
 
-def test_the_legend_has_a_chip_for_each_layer_and_none_without_layers() -> None:
-    df = _artifacts_df(n_runs=1)
-    assert _legend_names(ImageChart.render(ImageChartSettings(key="img"), df)) == []
+def test_each_picture_has_a_legend_to_be_filled_in_only_when_the_chart_has_layers() -> None:
+    df = _artifacts_df(n_runs=3)
+
+    assert _legends(ImageChart.render(ImageChartSettings(key="img"), df)) == 0
 
     _log_layer(df, overlay_key("img", "truth"), "truth.png")
-    _log_layer(df, overlay_key("img"), "boxes.json", kind=LayerKind.SHAPES)
 
-    assert _legend_names(ImageChart.render(ImageChartSettings(key="img"), df)) == ["overlay", "truth"]
+    assert _legends(ImageChart.render(ImageChartSettings(key="img"), df)) == 3  # one over each run's picture
 
 
-def _chips(node: Any) -> list[dict[str, Any]]:  # noqa: ANN401 -- a rendered Dash component tree
-    """The props of every layer chip (a button with a `data-dl-layer`) under `node`, in order."""
+def _legends(node: Any) -> int:  # noqa: ANN401 -- a rendered Dash component tree
+    """How many legends (`dl-layer-legend`) there are under `node`."""
     if isinstance(node, list):
-        return [chip for item in cast("list[Any]", node) for chip in _chips(item)]
+        return sum(_legends(item) for item in cast("list[Any]", node))
     if not hasattr(node, "to_plotly_json"):
-        return []
+        return 0
     props = _props(node)
-    own = (
-        [props]
-        if "data-dl-layer" in props and "dl-layer-chip" in props.get("className", "")
-        else list[dict[str, Any]]()
-    )
-    return [*own, *_chips(props.get("children"))]
-
-
-def _legend_names(stack: Any) -> list[str]:  # noqa: ANN401 -- a rendered Dash component
-    return [chip["children"] for chip in _chips(_props(stack)["children"])]
+    return int(props.get("className") == "dl-layer-legend") + _legends(props.get("children"))
 
 
 def test_what_a_viewer_changed_is_made_the_charts_own_keeping_only_what_differs_from_a_layer_in_full() -> (
@@ -442,15 +433,15 @@ def test_what_a_viewer_changed_is_made_the_charts_own_keeping_only_what_differs_
     settings = ImageChartSettings(key="img", layers={"truth": LayerStyle(opacity=0.5)})
     state = ImageViewerState(
         layers={
-            "truth": ViewedLayer(opacity=1.0),  # back to full: no row needed
+            "truth": ViewedLayer(hidden=False),  # still shown: its opacity is the chart's own, and stays
             "pred": ViewedLayer(hidden=True),
-            "mask": ViewedLayer(),  # nothing changed
+            "mask": ViewedLayer(hidden=False),  # shown, as every layer is: nothing to keep
         }
     )
 
     saved = ImageChart.with_viewer_state(settings, state)
 
-    assert saved.layers == {"pred": LayerStyle(hidden=True)}
+    assert saved.layers == {"truth": LayerStyle(opacity=0.5), "pred": LayerStyle(hidden=True)}
 
 
 def test_the_registry_saves_a_viewers_state_under_the_charts_own_id() -> None:
@@ -571,9 +562,12 @@ def test_the_same_settings_under_different_chart_ids_get_different_component_ids
     assert store_instance("saved") == store_instance("saved")
 
 
-def test_hiding_every_overlay_is_the_viewers_own_and_never_saved_as_the_charts() -> None:
+def test_hiding_every_overlay_or_folding_the_legend_is_the_viewers_own_and_never_saved_as_the_charts() -> (
+    None
+):
     settings = ImageChartSettings(key="img")
-    state = ImageViewerState(overlays_hidden=True)
+    state = ImageViewerState(overlays_hidden=True, legend_collapsed=True)
 
     assert state.overlays_hidden
+    assert state.legend_collapsed
     assert ImageChart.with_viewer_state(settings, state) == settings

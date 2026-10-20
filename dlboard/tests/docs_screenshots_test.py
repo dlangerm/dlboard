@@ -354,7 +354,7 @@ def _stage(shot: DocScreenshot, page: Page, demo: Demo, dlboard_app: Dash) -> Pa
                 "[...document.images].filter((i) => i.getAttribute('src')).every((i) => i.complete && i.naturalWidth > 0)"
             )
             expect(
-                panel.locator(".dl-class-chip").first
+                panel.locator(".dl-layer-classes .dl-class").first
             ).to_be_visible()  # the layers are drawn, and the legend lists what they hold
             page.mouse.move(0, _VIEWPORT["height"] - 1)
             return panel
