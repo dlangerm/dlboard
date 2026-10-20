@@ -46,6 +46,7 @@ from dlboard.serve._pages._experiment._chart_settings_form import (
     merge_chart_param_values,
     register_settings_form_callbacks,
 )
+from dlboard.serve._pages._experiment._column_catalog import ColumnCatalog
 from dlboard.serve._pages._experiment._paging import Paging
 
 if TYPE_CHECKING:
@@ -157,18 +158,22 @@ def _form_key(target: dict[str, Any] | None, chart_type_name: str | None) -> str
 def _settings_form(
     target_data: dict[str, Any] | None, chart_type_name: str | None, page_json: str, experiment_id: int
 ) -> list[Component]:
-    """The form for `chart_type_name`, starting from the chart being edited if it is of that type."""
+    """
+    The form for `chart_type_name`, starting from the chart being edited if it is of that type.
+
+    It starts from the chart as the chart type says it is shown (`ChartType.parameters_to_edit`), not as it was saved: an
+    image chart draws every overlay logged over its picture, and its form lists each, though only some may be saved.
+    """
+    catalog = ColumnCatalog.load(get_data_store(), experiment_id)
     edited: EditedChart | None = None
     if isinstance(target := _target_of(target_data), EditChart):
         panels = page_model.BasicExperimentPage.model_validate_json(page_json).panels
         if location := page_model.locate_chart(panels, target.chart_id):
             edited = EditedChart(
                 chart_type=location.chart.chart_type,
-                parameters=models.ChartTypeRegistry.current_parameters(location.chart),
+                parameters=models.ChartTypeRegistry.parameters_to_edit(location.chart, catalog),
             )
-    return build_chart_param_form(
-        chart_type_name, edited, store=get_data_store(), experiment_id=experiment_id
-    )
+    return build_chart_param_form(chart_type_name, edited, catalog=catalog)
 
 
 def render_chart_preview(  # noqa: PLR0913

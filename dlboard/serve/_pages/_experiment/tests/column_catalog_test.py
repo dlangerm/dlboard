@@ -60,6 +60,21 @@ def test_an_overlay_is_no_choice_of_artifact_when_the_image_it_goes_over_is_logg
     assert catalog.options(ColumnKind.ARTIFACT) == ["samples/a", "samples/c", orphan]
 
 
+def test_only_an_artifact_that_is_not_a_picture_of_its_own_is_offered_as_a_layer_to_add() -> None:
+    truth = overlay_key("img", "truth")
+    catalog = ColumnCatalog(layers=(truth, "img", "mask", "other-image"), artifacts=("img", truth, "mask"))
+
+    # An overlay is drawn over its picture without being added, and a picture with overlays is what a chart is *of*.
+    assert catalog.options(ColumnKind.LAYER) == ["mask", "other-image"]
+
+
+def test_the_artifact_keys_are_every_key_logged_in_key_order() -> None:
+    artifacts = ("img", overlay_key("img", "truth"), overlay_key("img"), "img_$overlayx")
+    catalog = ColumnCatalog(artifacts=artifacts)
+
+    assert catalog.artifact_keys() == sorted(artifacts)
+
+
 def test_column_catalog_offers_no_metric_axes_without_metrics() -> None:
     assert ColumnCatalog(artifacts=("img",)).options(ColumnKind.METRIC) == []
 

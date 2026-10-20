@@ -52,3 +52,30 @@
   padding: 6px var(--mantine-spacing-sm);
   color: var(--mantine-color-dimmed);
 }
+
+/* `DlboardChoice`: the choices side by side, the current one filled. */
+.dl-choice {
+    display: flex;
+    align-items: center;
+    height: 100%;
+    gap: 2px;
+}
+
+.dl-choice-option {
+    flex: 1 1 0;
+    min-width: 0;
+    font: inherit;
+    font-size: 0.6875rem;
+    padding: 0.125rem 0;
+    color: var(--mantine-color-dimmed);
+    background: transparent;
+    border: 1px solid var(--mantine-color-default-border);
+    border-radius: var(--mantine-radius-sm);
+    cursor: pointer;
+}
+
+.dl-choice-option[aria-checked="true"] {
+    color: var(--mantine-color-white);
+    background: var(--mantine-primary-color-filled);
+    border-color: var(--mantine-primary-color-filled);
+}

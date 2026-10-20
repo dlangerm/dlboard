@@ -162,6 +162,7 @@ There are five built-in kinds:
           image.Image(key="sample", image=tensor, step=global_step, format="jpg"),
           overlay.Overlay.over(
               "sample",
+              name="detections",
               shapes=[Box(x=0.2, y=0.15, width=0.4, height=0.3, label="cat", color="#00c853")],
               step=global_step,
           ),
@@ -169,17 +170,18 @@ There are five built-in kinds:
   )
   ```
 
-  `Overlay.over` logs it under the image's key plus `_$overlay` (`sample_$overlay`), which is where
+  `Overlay.over` logs it under the image's key plus `_$overlay` and its `name` (`sample_$overlay/detections`), which is where
   auto-generate looks: the chart it makes for `sample` draws that artifact over it, and gives it no
   chart of its own. An image logged under that key (a segmentation mask with transparent
   background, say) is drawn over the picture the same way, and `models.overlay_key("sample")`
   builds the key for it. Under any other key (`Overlay(key=...)`), add it to the chart's
-  `overlays` setting yourself.
+  Layers table (`layers` setting) yourself.
 
   An image can have several overlays (predicted and ground-truth boxes, say). Only one artifact
   per key and step is shown, so give each its own `name`, which goes after the suffix
-  (`Overlay.over("sample", name="truth", ...)` logs `sample_$overlay/truth`); auto-generate draws
-  all of them, bottom layer first in key order. The logger warns when one call logs an overlay
+  (`Overlay.over("sample", name="truth", ...)` logs `sample_$overlay/truth`). A name is what the chart calls the layer,
+  so choose one that says what it is (`truth`, `prediction`, `detections`): an overlay with no name is called "overlay". Auto-generate draws
+  all of them, bottom layer first in key order, including ones logged later. The logger warns when one call logs an overlay
   without its image, or a key twice at the same step, and the client warns once when an artifact
   that is not an overlay is logged under a key that holds the suffix.
 

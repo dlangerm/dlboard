@@ -13,8 +13,9 @@ import dash_mantine_components as dmc
 import pandas as pd
 from dash import ALL, MATCH, Input, Output, State, ctx, dcc, html
 from dash.exceptions import PreventUpdate
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
+from dlboard._compat import StrEnum
 from dlboard.client.artifacts.overlay import DEFAULT_CLASS_COLORS, DEFAULT_MASK_OPACITY
 from dlboard.models import (
     DEFAULT_RENDER_CONTEXT,
@@ -23,8 +24,10 @@ from dlboard.models import (
     RUN_NAME_COLUMN,
     Artifact,
     ChartType,
+    ColumnChoices,
     ColumnKind,
     LayerKind,
+    OverlayKey,
     RenderContext,
     SettingsSection,
     SizeUnit,
@@ -33,31 +36,69 @@ from dlboard.models import (
     artifact_column,
     artifact_display_name,
     artifact_fname_column,
+    artifact_keys_in,
     artifact_tags_column,
     is_inlineable_artifact,
     layer_kind,
+    overlay_key,
 )
 from dlboard.plugins.charts._artifact_tags import format_tags_caption, parse_tags
 from dlboard.serve import AssetKind, ClientsideScript, series_swatch_class, serve_asset
 
 if typing.TYPE_CHECKING:
-    from collections.abc import Hashable
+    from collections.abc import Hashable, Iterable
 
 MAX_SLIDER_LABELS = 10
 
 
-class OverlayLayer(BaseModel, frozen=True, extra="forbid", use_attribute_docstrings=True):
+class LayerVisibility(StrEnum):
+    """Whether a layer is drawn. Saved with a chart, so a value is never renamed (`persisted_enum_values_test`)."""
+
+    SHOWN = "shown"
+    """Drawn over the pictures."""
+    OFF = "off"
+    """Not drawn, and not fetched."""
+
+
+class LayerStyle(BaseModel, frozen=True, extra="forbid", use_attribute_docstrings=True):
     """How one layer is drawn over each picture."""
 
+    visibility: LayerVisibility = LayerVisibility.SHOWN
+    """`shown`, or `off` (not drawn)."""
     opacity: float = Field(default=1.0, ge=0, le=1)
     """How opaque the layer is, from 0 (invisible) to 1 (the default)."""
 
 
-class DrawnLayer(OverlayLayer):
+class DrawnLayer(BaseModel, frozen=True):
     """A layer to draw over one picture, as the browser is told it: which file it is, and how to draw it."""
 
     url: str
     kind: LayerKind
+    opacity: float
+
+
+class _LegacyOverlays(BaseModel, frozen=True):
+    """The `overlays` setting a chart was saved with before every layer logged over a picture was drawn."""
+
+    overlays: dict[str, LayerStyle]
+
+    def as_layers(self, image_key: object) -> dict[str, LayerStyle]:
+        """
+        The `layers` rows that draw the same layers. Rows keep the artifact key they were saved under.
+
+        The picture's own overlays are drawn anyway, so only one with a style of its own gets a row.
+        """
+        return {
+            key: style
+            for key, style in self.overlays.items()
+            if not _is_overlay_of(key, image_key) or style != LayerStyle()
+        }
+
+
+def _is_overlay_of(key: str, image_key: object) -> bool:
+    """Whether `key` is an overlay of the picture under `image_key`."""
+    overlay = OverlayKey.parse(key)
+    return overlay is not None and overlay.image_key == image_key
 
 
 LAYERS_SECTION = SettingsSection("Layers", opened=True)
@@ -76,19 +117,38 @@ class ImageChartSettings(BaseModel, frozen=True, extra="forbid", use_attribute_d
     """Overall chart width in px. Leave blank to size it automatically from height (the default). Unrelated to native_size below, which only affects individual thumbnails."""
     native_size: Annotated[bool, DISPLAY_SECTION] = Field(default=False)
     """Show each thumbnail at its logged resolution (capped by height, never upscaled) instead of stretching small images to fill the thumbnail box. Only affects individual thumbnails, not the chart's overall width above."""
+    layers: Annotated[dict[str, LayerStyle], LAYERS_SECTION] = Field(default_factory=dict)
+    """
+    Every layer drawn over each picture, bottom first, a row per artifact key: the overlays logged over it, then any other artifact added by its key. An off layer is not drawn. Overlays logged later are drawn too.
+    """
     tag_precision: Annotated[int, TAGS_SECTION] = Field(default=DEFAULT_TAG_PRECISION, ge=1, le=15)
     """Significant digits the numbers in an image's caption (its tags) are shown with."""
     tag_time_unit: Annotated[TimeUnit | None, TAGS_SECTION] = Field(default=None)
     """Show tags logged as a duration in this unit, whatever unit they were logged in. Leave blank to pick the largest unit that fits each one."""
     tag_size_unit: Annotated[SizeUnit | None, TAGS_SECTION] = Field(default=None)
     """Show tags logged as a data size in this unit, whatever unit they were logged in. Leave blank to pick the largest unit that fits each one."""
-    # The two tables come last: in the chart editor each takes a whole row, so the small settings above share theirs.
-    overlays: Annotated[dict[str, OverlayLayer], LAYERS_SECTION] = Field(default_factory=dict)
-    """
-    The artifacts drawn over each picture, a row per artifact key, first row at the bottom. Each is the one the run logged at the picture's own step: an Overlay of shapes (see `dlboard.client.artifacts.overlay`), or an image such as a mask. A picture a row has nothing for is shown without it. Auto-generate adds the picture's own overlays, if there are any.
-    """
     tag_display: Annotated[dict[str, TagDisplay], TAGS_SECTION] = Field(default_factory=dict)
     """Display settings for particular tags, a row per tag name, taking the place of the chart's tag precision and unit settings for that tag. Leave a cell blank to keep the chart's own setting."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _from_overlays(cls, data: object) -> object:
+        """
+        A chart saved with an `overlays` row per layer loads as the `layers` that draw the same.
+
+        Rows saved in `layers` itself win over what is carried across.
+        """
+        if not isinstance(data, dict) or "overlays" not in data:
+            return data
+        fields = typing.cast("dict[str, object]", data)
+        current = {key: value for key, value in fields.items() if key != "overlays"}
+        carried = _LegacyOverlays.model_validate({"overlays": fields["overlays"]}).as_layers(
+            fields.get("key")
+        )
+        return {
+            **current,
+            "layers": {**carried, **typing.cast("dict[str, object]", current.get("layers", {}))},
+        }
 
     @property
     def tag_defaults(self) -> TagDisplay:
@@ -132,26 +192,49 @@ def _layers_element(element_id: dict[str, str]) -> html.Div:
     return html.Div(id=element_id, className="dl-image-series-overlay")
 
 
-def _drawn_layers(row: dict[Hashable, Any], layers: dict[str, OverlayLayer]) -> list[DrawnLayer]:
-    """The layers a picture's `row` of the panel dataframe has a file for, in the settings' order."""
+def _drawn_layers(
+    row: dict[Hashable, Any], layers: list[str], styles: dict[str, LayerStyle]
+) -> list[DrawnLayer]:
+    """The layers a picture's `row` of the panel dataframe has a file for, in the order of `layers`, each drawn as `styles` say."""
     drawn: list[DrawnLayer] = []
-    for key, layer in layers.items():
+    for key in layers:
         url, fname = row.get(artifact_column(key)), row.get(artifact_fname_column(key))
         # A layer the run did not log at this step holds NaN, which is no string.
         if isinstance(url, str) and isinstance(fname, str):
             kind = layer_kind(parse_tags(row.get(artifact_tags_column(key))), fname)
             if kind is not None:
-                drawn.append(DrawnLayer(url=url, kind=kind, opacity=layer.opacity))
+                drawn.append(DrawnLayer(url=url, kind=kind, opacity=styles.get(key, LayerStyle()).opacity))
     return drawn
 
 
+def _layer_keys(parameters: ImageChartSettings, columns: Iterable[str]) -> list[str]:
+    """
+    The artifact key of each layer drawn over the pictures, bottom first.
+
+    The layers are every overlay logged over the picture (`overlay_key`; one logged after the chart was made is a layer
+    too), in key order, then the other artifacts the `layers` rows name, in row order. An off layer is none of them.
+    """
+    present = set(columns)
+    overlays = [
+        key
+        for key in sorted(artifact_keys_in(present, overlay_key(parameters.key), prefix=True))
+        if _is_overlay_of(key, parameters.key)
+    ]
+    others = [key for key in parameters.layers if key not in overlays and artifact_column(key) in present]
+    return [
+        key
+        for key in (*overlays, *others)
+        if parameters.layers.get(key, LayerStyle()).visibility is not LayerVisibility.OFF
+    ]
+
+
 def _layers_by_picture(
-    pictures: pd.DataFrame, picture_col: str, layers: dict[str, OverlayLayer]
+    pictures: pd.DataFrame, picture_col: str, layers: list[str], styles: dict[str, LayerStyle]
 ) -> dict[str, list[DrawnLayer]]:
     """Each picture's layers, by its URL: only the pictures with a layer at their own step, the rest are left out."""
     if not layers:
         return {}
-    drawn = ((row[picture_col], _drawn_layers(row, layers)) for row in pictures.to_dict("records"))
+    drawn = ((row[picture_col], _drawn_layers(row, layers, styles)) for row in pictures.to_dict("records"))
     return {url: layers_of for url, layers_of in drawn if layers_of}
 
 
@@ -188,9 +271,10 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
 
         tag_col = artifact_tags_column(parameters.key)
         has_tags = tag_col in dataframe.columns
+        layers = _layer_keys(parameters, dataframe.columns)
         layer_cols = [
             c
-            for key in parameters.overlays
+            for key in layers
             for c in (artifact_column(key), artifact_fname_column(key), artifact_tags_column(key))
             if c in dataframe.columns
         ]
@@ -230,7 +314,7 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
                     str(s): format_tags_caption(raw, parameters.tag_defaults, parameters.tag_display)
                     for s, raw in zip(steps, g[tag_col], strict=True)
                 }
-            overlays.update(_layers_by_picture(g, col, parameters.overlays))
+            overlays.update(_layers_by_picture(g, col, layers, parameters.layers))
             if has_names:
                 per_run_names[str(rid)] = g[RUN_NAME_COLUMN].iloc[0]
 
@@ -378,14 +462,29 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
 
     @classmethod
     @typing.override
+    def parameters_to_edit(cls, parameters: ImageChartSettings, choices: ColumnChoices) -> ImageChartSettings:
+        """Every overlay logged over the picture is a row, as it is drawn though the settings may not say so."""
+        overlays = sorted(key for key in choices.artifact_keys() if _is_overlay_of(key, parameters.key))
+        rows = {key: parameters.layers.get(key, LayerStyle()) for key in overlays}
+        rows |= {key: style for key, style in parameters.layers.items() if key not in rows}
+        return parameters.model_copy(update={"layers": rows})
+
+    @classmethod
+    @typing.override
     def hint_required_columns(cls, parameters: ImageChartSettings) -> set[str]:
         return set() if parameters.x_axis == "step" else {parameters.x_axis}
 
     @classmethod
     @typing.override
     def hint_required_artifact_keys(cls, parameters: ImageChartSettings) -> set[str]:
-        # The layers' keys too: they are charted here, so auto-generate does not give them charts of their own.
-        return {parameters.key, *parameters.overlays}
+        # The keys the layers name too: they are charted here, so auto-generate does not give them charts of their own.
+        return {parameters.key, *parameters.layers}
+
+    @classmethod
+    @typing.override
+    def hint_required_artifact_key_prefixes(cls, parameters: ImageChartSettings) -> set[str]:
+        # Every overlay logged over the picture, including ones logged after the chart was made.
+        return {overlay_key(parameters.key)}
 
     @classmethod
     @typing.override
@@ -405,7 +504,11 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
     @classmethod
     @typing.override
     def field_column_kinds(cls) -> dict[str, ColumnKind]:
-        return {"key": ColumnKind.ARTIFACT, "overlays": ColumnKind.LAYER, "x_axis": ColumnKind.METRIC}
+        return {
+            "key": ColumnKind.ARTIFACT,
+            "layers": ColumnKind.LAYER,
+            "x_axis": ColumnKind.METRIC,
+        }
 
 
 ImageChart.register(allow_override=True)

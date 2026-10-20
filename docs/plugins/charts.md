@@ -69,14 +69,18 @@ The built-in line charts, and the image series that steps through logged images:
 
 ![An image-series chart](../images/image-series.png)
 
-An image series can draw layers over each picture. Its `overlays` setting is a row per artifact key, bottom layer first,
-each with an `opacity` from 0 to 1, a slider in the chart editor. Typing a row's name there suggests the artifact keys the
-experiment logged that can be a layer. A layer is an `Overlay` of shapes (see [docs/client.md](../client.md)) or any image,
-such as a segmentation mask, and the one the run logged at each picture's own step is laid over it, in its thumbnail and
-in its enlarged view. A picture a layer has nothing for at its step is shown without it. Auto-generate adds the
-`_$overlay` artifacts of an image (`sample_$overlay`, or one per `name` after it: `sample_$overlay/truth`), if it
-has any, and gives them no chart of their own. While the picture for the slider's
-step is still downloading, its thumbnail shows a spinner over the previous picture.
+An image series draws layers over each picture. A layer is an `Overlay` of shapes (see [docs/client.md](../client.md))
+or any image, such as a segmentation mask, and the one the run logged at each picture's own step is laid over it, in its
+thumbnail and in its enlarged view. A picture a layer has nothing for at its step is shown without it. Every overlay
+logged over an image (`sample_$overlay`, or one per `name` after it: `sample_$overlay/truth`) is drawn over it, including
+ones logged after the chart was made, and none of them gets a chart of its own.
+
+The chart editor's **Layers** table has a row for every layer the chart draws, whether or not the chart saved one: the
+overlays of the picture, then any other artifact you add by its key, which the table suggests as you type. Each row says
+whether the layer is `shown` or `off` (not drawn), and how opaque it is, a slider from 0 to 1. An overlay with no row is
+drawn in full, and removing an overlay's row does not leave it out: set its row to `off` to do that, since the chart draws
+every overlay logged over its picture. A chart saved with the earlier `overlays` setting opens as the `layers` rows that draw the same. While the
+picture for the slider's step is still downloading, its thumbnail shows a spinner over the previous picture.
 
 A table of runs, with an artifact column:
 
@@ -120,6 +124,12 @@ its chart type alone.
 - `can_display_artifact(artifact) -> bool` (optional, `False` by default) — say which logged artifacts this
   chart type can display. Auto-generating and suggesting charts give an artifact key the first built-in
   chart type that says yes; an artifact no chart type claims simply gets no generated chart.
+- `parameters_to_edit(parameters, choices)` (optional, the settings as they are by default) — spell out in the chart
+  editor's form what the chart shows by default but its saved settings leave unsaid. The image chart draws every
+  overlay logged over its picture and saves only the ones it was told to treat differently, so it lists each as a row;
+  without this the editor would show an empty table for a chart that draws two layers. `choices` says what the
+  experiment has (`ColumnChoices`), and the form that comes back is what is saved, so it must not change what the chart
+  shows.
 
 The chart editor builds its form from the settings model, so a setting needs no code of its own to be
 editable. To keep a form with many settings readable, group them: mark a setting with a `SettingsSection` in its

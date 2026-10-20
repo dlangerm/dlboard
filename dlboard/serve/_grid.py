@@ -38,6 +38,9 @@ GRID_CELL_COMPONENTS_CSS: Final = Path(__file__).with_name("grid_cell_components
 SLIDER_RENDERER: Final = "DlboardSlider"
 """How a number with a range is shown in a cell: a slider across it, always there. Takes `cellRendererParams` of `min`, `max`, `step` and `fallback`."""
 
+CHOICE_RENDERER: Final = "DlboardChoice"
+"""How one of a few choices is picked in a cell: side by side, the current one marked, one click to change it. Takes `cellRendererParams` of `choices` and `fallback`."""
+
 KEY_PICKER_EDITOR: Final = "DlboardKeyPicker"
 """How a name is edited in a cell: typed in, with the names it can be (`options` of `cellEditorParams`) suggested."""
 

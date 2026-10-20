@@ -23,7 +23,7 @@ from dlboard.models._metric import MetricColumn
 from dlboard.plugins.charts._table_settings import Aggregate, TableMode, TableRows
 from dlboard.plugins.charts.bar_chart import BarChart
 from dlboard.plugins.charts.histogram import Colorscale, HistogramChart, HistogramDisplay
-from dlboard.plugins.charts.image_series import ImageChart
+from dlboard.plugins.charts.image_series import ImageChart, LayerVisibility
 from dlboard.plugins.charts.line_chart import LineChart
 from dlboard.plugins.charts.table_chart import TableChart
 
@@ -57,6 +57,7 @@ _FROZEN_ENUM_VALUES: dict[type[StrEnum], frozenset[str]] = {
     Aggregate: frozenset({"latest", "first", "min", "max", "mean"}),
     HistogramDisplay: frozenset({"heatmap", "bands", "step"}),
     Colorscale: frozenset({"Viridis", "Cividis", "Plasma", "Inferno", "Magma", "Blues"}),
+    LayerVisibility: frozenset({"shown", "off"}),
 }
 
 

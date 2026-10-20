@@ -81,7 +81,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from dash import Dash
-    from playwright.sync_api import Page, Route
+    from playwright.sync_api import Locator, Page, Route
 
 pytestmark = pytest.mark.browser
 
@@ -2138,7 +2138,7 @@ def test_an_image_charts_per_tag_display_is_edited_as_table_rows_in_the_chart_ed
     chart.get_by_role("button", name="Edit chart").click()
 
     # A row per tag in a grid, not JSON: add one, name the tag, and give it a precision.
-    # The chart has another table now (its `overlays`), with buttons of its own: this is the tag display's.
+    # The chart has another table now (its `layers`), with buttons of its own: this is the tag display's.
     editor = page.get_by_role("complementary", name="Chart settings")
     editor.get_by_role("button", name="Tags").click()  # the settings are in collapsed sections
     add_row = page.locator('button[id*="tag_display"][id*="table-add"]')
@@ -2298,46 +2298,101 @@ def test_an_edited_image_chart_still_scrubs_and_opens_its_enlarged_view(
     expect(page.get_by_role("dialog")).to_be_visible()
 
 
-def test_a_layer_added_in_the_chart_editor_is_drawn_over_the_pictures_at_its_opacity(
+def _log_masks_over_a_picture(
+    live_server_url: str, tmp_path: Path, experiment_id: int, *, extra_layer: bool = False
+) -> None:
+    """A picture with a `truth` and a `prediction` overlay, and (if asked) a mask image under a key of its own."""
+    api = BasicDlboardAPI(live_server_url)
+    run = api.create_run(models.NewRun(experiment_id=experiment_id))
+    labels = np.zeros((1, 48, 64), dtype=np.int64)
+    labels[:, 10:30, 10:40] = 1
+    mask = rle.run_length_encode(labels, colors={1: "#ff0000"}, classnames={1: "cat"})
+    artifacts = [
+        Image(
+            key="samples/a", image=np.full((48, 64, 3), 128, dtype=np.uint8), step=0, format="jpg"
+        ).to_artifact(tmp_path, run.id, experiment_id),
+        Overlay.over("samples/a", name="truth", shapes=[mask], step=0).to_artifact(
+            tmp_path, run.id, experiment_id
+        ),
+        Overlay.over("samples/a", name="prediction", shapes=[mask], step=0).to_artifact(
+            tmp_path, run.id, experiment_id
+        ),
+    ]
+    if extra_layer:
+        extra = np.zeros((12, 16, 3), dtype=np.uint8)
+        extra[3:9, 4:12] = (0, 255, 0)
+        artifacts.append(
+            Image(key="samples/mask", image=extra, step=0).to_artifact(tmp_path, run.id, experiment_id)
+        )
+    api.log_artifact_batch(artifacts)
+    _wait_for_artifacts(experiment_id, len(artifacts))
+
+
+def _open_layers_editor(page: Page, chart: Locator) -> Locator:
+    """Open the chart editor on `chart` and its Layers section; the editor's pane."""
+    chart.hover()
+    chart.get_by_role("button", name="Edit chart").click()
+    return page.get_by_role("complementary", name="Chart settings")
+
+
+def test_the_chart_editor_lists_the_layers_a_chart_draws_and_turns_them_off_fades_and_adds_them(
     page: Page, live_server_url: str, tmp_path: Path, console_errors: list[str]
 ) -> None:
-    """The `overlays` setting is a table: any artifact key can be added as a layer, with an opacity of its own."""
+    """
+    The editor's Layers table has a row for every layer the chart draws, though the chart saved none: turn one off, fade
+    another, add an artifact as a third, and what the chart draws follows.
+    """
     _create_project_and_experiment(page, live_server_url, "Layer Editor Experiment")
     page.locator(".experiment-card").click()
     experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
-    api = BasicDlboardAPI(live_server_url)
-    run = api.create_run(models.NewRun(experiment_id=experiment_id))
-    mask = np.zeros((12, 16, 3), dtype=np.uint8)
-    mask[3:9, 4:12] = (255, 0, 0)
-    api.log_artifact_batch(
-        [
-            Image(
-                key="samples/a", image=np.full((48, 64, 3), 128, dtype=np.uint8), step=0, format="jpg"
-            ).to_artifact(tmp_path, run.id, experiment_id),
-            Image(key="samples/mask", image=mask, step=0).to_artifact(tmp_path, run.id, experiment_id),
-        ]
-    )
-    _wait_for_artifacts(experiment_id, 2)
+    _log_masks_over_a_picture(live_server_url, tmp_path, experiment_id, extra_layer=True)
     page.reload()
     _auto_generate_charts(page)
 
     chart = page.locator(".dl-chart-item").filter(has_text="samples/a")  # not the mask's own chart
-    expect(chart.locator(".dl-image-series-layer")).to_have_count(0)
-    chart.hover()
-    chart.get_by_role("button", name="Edit chart").click()
-    dialog = page.get_by_role("complementary", name="Chart settings")
-    dialog.locator('button[id*="overlays"][id*="table-add"]').click()  # opens the new row's name for typing
-    page.keyboard.type("mask")  # the keys that can be layers are suggested
+    layers = chart.locator(".dl-image-series-thumb .dl-image-series-layer")
+    expect(layers).to_have_count(2)  # prediction and truth: drawn though the chart saved no setting for them
+
+    dock = _open_layers_editor(page, chart)
+    rows = dock.locator(".ag-center-cols-container .ag-row")
+    expect(rows).to_have_count(2)
+    rows.filter(has_text="truth").get_by_role(
+        "radio", name="off", exact=True
+    ).click()  # one click: it is in the cell
+    rows.filter(has_text="prediction").locator('.ag-cell[col-id="opacity"] input[type=range]').fill("0.5")
+    dock.locator('button[id*="layers"][id*="table-add"]').click()
+    expect(page.locator(".dl-key-picker-input")).to_be_focused()
+    page.keyboard.type("mask")  # the artifacts that can be layers are suggested, not the picture itself
+    expect(page.locator(".ag-popup").get_by_text("samples/a", exact=True)).to_have_count(0)
     page.locator(".ag-popup").get_by_text("samples/mask").click()
-    dialog.locator('.ag-cell[col-id="opacity"] input[type=range]').fill(
-        "0.5"
-    )  # always a slider, never a text box
     page.locator(f"#{CHART_EDITOR_SAVE_ID}").click()
 
-    layer = chart.locator(".dl-image-series-thumb .dl-image-series-layer")
-    expect(layer.locator("img")).to_have_count(1)
-    expect(layer).to_have_css("opacity", "0.5")
+    expect(layers).to_have_count(2)  # truth is off, the mask is added
+    expect(layers.first).to_have_css("opacity", "0.5")
+    expect(layers.last.locator("img")).to_have_count(1)
     assert console_errors == []  # a layer that could not be drawn is logged, and fails here
+
+
+def test_a_layer_typed_into_a_new_row_is_kept_when_save_is_pressed(
+    page: Page, live_server_url: str, tmp_path: Path, console_errors: list[str]
+) -> None:
+    """A layer typed into a new row and never confirmed (no Enter, no click away) is still there once Save is pressed."""
+    _create_project_and_experiment(page, live_server_url, "Typed Layer Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    _log_masks_over_a_picture(live_server_url, tmp_path, experiment_id, extra_layer=True)
+    page.reload()
+    _auto_generate_charts(page)
+
+    chart = page.locator(".dl-chart-item").filter(has_text="samples/a")
+    dock = _open_layers_editor(page, chart)
+    dock.locator('button[id*="layers"][id*="table-add"]').click()
+    expect(page.locator(".dl-key-picker-input")).to_be_focused()
+    page.keyboard.type("samples/mask")  # typed in full, never committed with Enter or a click away
+    page.locator(f"#{CHART_EDITOR_SAVE_ID}").click(delay=100)  # a press that lasts, as a person's does
+
+    expect(chart.locator(".dl-image-series-thumb .dl-image-series-layer")).to_have_count(3)
+    assert console_errors == []
 
 
 _OVERLAY_COVERS_PICTURE_JS = """(layer) => {

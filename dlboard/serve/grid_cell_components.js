@@ -30,6 +30,34 @@ window.dashAgGridComponentFunctions.DlboardSlider = (props) => {
     );
 };
 
+// A few choices shown side by side in the cell, the current one marked, always there: one click on another sets it, so there
+// is no editing mode to enter and no list to open (`choices`, and the `fallback` a blank cell stands for).
+window.dashAgGridComponentFunctions.DlboardChoice = (props) => {
+    const { choices, fallback } = props;
+    const [value, setValue] = React.useState(props.value ?? fallback);
+    return h(
+        "div",
+        { className: "dl-choice", role: "radiogroup" },
+        choices.map((choice) =>
+            h(
+                "button",
+                {
+                    key: choice,
+                    type: "button",
+                    role: "radio",
+                    "aria-checked": String(choice === value),
+                    className: "dl-choice-option",
+                    onClick: () => {
+                        setValue(choice);
+                        props.node.setDataValue(props.column.getColId(), choice);
+                    },
+                },
+                choice,
+            ),
+        ),
+    );
+};
+
 // A text cell that suggests as it is typed in (`options`): the names that contain what is typed, to pick with the mouse or
 // the arrow keys. Anything can still be typed, as a name that is not there yet is a name too.
 window.dashAgGridComponentFunctions.DlboardKeyPicker = React.forwardRef((props, ref) => {

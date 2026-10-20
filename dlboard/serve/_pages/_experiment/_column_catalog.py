@@ -61,11 +61,20 @@ class ColumnCatalog:
     def has_chartable_keys(self) -> bool:
         return bool(self.metrics or self.artifact_chart_types or self.histograms)
 
+    def artifact_keys(self) -> list[str]:
+        return sorted(self.artifacts)
+
     @functools.cached_property
     def _drawn_over_images(self) -> frozenset[str]:
         """The artifact keys that are an overlay of an image that is logged too: its chart draws them, so they are no choice."""
         keys = frozenset(self.artifacts)
         return frozenset(k for k in keys if (overlay := OverlayKey.parse(k)) and overlay.image_key in keys)
+
+    @property
+    def _pictures_with_overlays(self) -> frozenset[str]:
+        """The keys of pictures that have overlays logged over them: a picture the chart is of, not a layer to add to it."""
+        overlays = (OverlayKey.parse(key) for key in self.artifacts)
+        return frozenset(overlay.image_key for overlay in overlays if overlay is not None)
 
     def options(self, kind: ColumnKind) -> list[str]:
         """The choices for a chart field of `kind` -- `step`/`timestamp_utc` being common metric x-axes."""
@@ -75,7 +84,11 @@ class ColumnCatalog:
             case ColumnKind.ARTIFACT:
                 return [key for key in self.artifacts if key not in self._drawn_over_images]
             case ColumnKind.LAYER:
-                return list(self.layers)
+                return [
+                    key
+                    for key in self.layers
+                    if OverlayKey.parse(key) is None and key not in self._pictures_with_overlays
+                ]
             case ColumnKind.HISTOGRAM:
                 return list(self.histograms)
             case ColumnKind.HPARAM:

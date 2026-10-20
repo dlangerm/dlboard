@@ -19,16 +19,16 @@ from pydantic import BaseModel
 from dlboard import models
 from dlboard.serve import ClientsideScript, Icon, icon
 from dlboard.serve._component_ids import PatternId
-from dlboard.serve._grid import KEY_PICKER_EDITOR, SLIDER_RENDERER, themed_grid_kwargs
+from dlboard.serve._grid import CHOICE_RENDERER, KEY_PICKER_EDITOR, SLIDER_RENDERER, themed_grid_kwargs
 from dlboard.serve._pages._experiment import _ids as ids
-from dlboard.serve._pages._experiment._column_catalog import ColumnCatalog
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
     from dash.development.base_component import Component
 
-    from dlboard.models import DataStore
+    from dlboard.serve._pages._experiment._column_catalog import ColumnCatalog
+
 
 _CHART_PARAM_CLEAR_JS = ClientsideScript(Path(__file__).with_name("chart_param_clear.js"))
 _TABLE_VALUE_JS = ClientsideScript(Path(__file__).with_name("chart_param_table_value.js"))
@@ -44,6 +44,11 @@ number, a short list of choices) share a line, a pair of column pickers too, and
 FIELDS_ROW: Final = {"display": "flex", "flexWrap": "wrap", "alignItems": "flex-start", "gap": "0.5rem 1rem"}
 """A wrapping row of settings inputs, each asking for the width of its own `_*_FIELD`."""
 
+
+MAX_CHOICES_SIDE_BY_SIDE: Final = 4
+"""How many choices a table cell shows side by side (`CHOICE_RENDERER`); more are picked from a list."""
+CHOICE_WIDTH_PX: Final = 58
+"""How wide each of a cell's side-by-side choices is."""
 
 SLIDER_STEPS: Final = 100
 """How many notches a slider has across its range."""
@@ -151,6 +156,7 @@ def _table_input(
         "headerName": "Name",
         "editable": True,
         "flex": 2,
+        "minWidth": 120,
         "checkboxSelection": True,
     }
     if key_options:
@@ -162,7 +168,15 @@ def _table_input(
     columns = [key_column]
     for column in field.columns or ():
         cell: dict[str, Any] = {"editable": True, "cellEditor": "agNumberCellEditor"}
-        if column.choices:
+        if column.choices and len(column.choices) <= MAX_CHOICES_SIDE_BY_SIDE:
+            cell = {
+                "editable": False,
+                "width": CHOICE_WIDTH_PX * len(column.choices),
+                "flex": 0,  # as wide as its choices need, so a name keeps the rest
+                "cellRenderer": CHOICE_RENDERER,
+                "cellRendererParams": {"choices": list(column.choices), "fallback": column.default},
+            }
+        elif column.choices:
             cell = cell | {
                 "cellEditor": "agSelectCellEditor",
                 "cellEditorParams": {"values": ["", *column.choices]},
@@ -174,7 +188,7 @@ def _table_input(
         ):
             cell = {
                 "editable": False,
-                "minWidth": 150,  # room for the slider as well as its value
+                "minWidth": 110,  # room for the slider as well as its value
                 "cellRenderer": SLIDER_RENDERER,
                 "cellRendererParams": {
                     "min": column.minimum,
@@ -384,18 +398,16 @@ def build_chart_param_form(
     chart_type_name: str | None,
     edited: EditedChart | None,
     *,
-    store: DataStore[...],
-    experiment_id: int,
+    catalog: ColumnCatalog,
 ) -> list[Component]:
     """
-    Build the add/edit-chart form's fields, offering the experiment's real columns as choices.
+    Build the add/edit-chart form's fields, offering the experiment's real columns (`catalog`) as choices.
 
     The fields start from the `edited` chart's settings only while the form is for its own type: a different
     type's settings are not this one's, even where a name (`height`) happens to match.
     """
     if not chart_type_name:
         return []
-    catalog = ColumnCatalog.load(store, experiment_id)
     fields = models.ChartTypeRegistry.get_registered_chart_types()[chart_type_name]
     initial_params = (
         edited.parameters if edited and edited.chart_type == chart_type_name else dict[str, Any]()

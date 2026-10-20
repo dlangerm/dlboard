@@ -16,7 +16,7 @@ from dlboard.models._view import ColumnKind, ParameterField, ParameterFieldType
 from dlboard.plugins.charts.bar_chart import BarChart
 from dlboard.plugins.charts.line_chart import LineChart
 from dlboard.plugins.charts.table_chart import TableChart
-from dlboard.serve._grid import SLIDER_RENDERER
+from dlboard.serve._grid import CHOICE_RENDERER, SLIDER_RENDERER
 from dlboard.serve._pages._experiment import _chart_settings_form as settings_form
 from dlboard.serve._pages._experiment._chart_settings_form import _param_field_input, build_chart_param_form
 from dlboard.serve._pages._experiment._column_catalog import ColumnCatalog
@@ -71,8 +71,12 @@ def test_build_chart_param_form_offers_the_experiments_columns(
 ) -> None:
     _log_a_run(store, experiment_id)
 
-    line = _props_by_field(build_chart_param_form("line", None, store=store, experiment_id=experiment_id))
-    table = _props_by_field(build_chart_param_form("table", None, store=store, experiment_id=experiment_id))
+    line = _props_by_field(
+        build_chart_param_form("line", None, catalog=ColumnCatalog.load(store, experiment_id))
+    )
+    table = _props_by_field(
+        build_chart_param_form("table", None, catalog=ColumnCatalog.load(store, experiment_id))
+    )
 
     assert set(line["column"]["data"]) >= {"loss", "acc"}
     assert "step" in line["x_axis"]["data"]
@@ -83,7 +87,7 @@ def test_build_chart_param_form_offers_the_experiments_columns(
 def test_a_form_of_several_sections_is_one_accordion_that_opens_only_the_data_section(
     store: SQLLiteStore, experiment_id: int
 ) -> None:
-    [accordion] = build_chart_param_form("line", None, store=store, experiment_id=experiment_id)
+    [accordion] = build_chart_param_form("line", None, catalog=ColumnCatalog.load(store, experiment_id))
 
     props = _to_props(accordion)
     items = [_to_props(item) for item in props["children"]]
@@ -102,7 +106,7 @@ def test_a_form_of_one_section_has_no_accordion(
         classmethod(lambda _cls: {"flat": {"note": field}}),  # pyrefly: ignore [implicit-any-lambda]
     )
 
-    form = build_chart_param_form("flat", None, store=store, experiment_id=experiment_id)
+    form = build_chart_param_form("flat", None, catalog=ColumnCatalog.load(store, experiment_id))
 
     assert [_to_props(item)["id"]["field"] for item in form] == ["note"]
 
@@ -111,7 +115,9 @@ def test_a_table_takes_typed_names_and_prefixes_not_only_those_that_exist(
     store: SQLLiteStore, experiment_id: int
 ) -> None:
     _log_a_run(store, experiment_id)
-    table = _props_by_field(build_chart_param_form("table", None, store=store, experiment_id=experiment_id))
+    table = _props_by_field(
+        build_chart_param_form("table", None, catalog=ColumnCatalog.load(store, experiment_id))
+    )
 
     assert table["show_metrics"]["value"] == ["*"]
     assert table["show_artifacts"]["value"] == []
@@ -208,7 +214,9 @@ def test_the_form_is_filled_from_the_edited_chart_only_for_its_own_type(
 ) -> None:
     edited = settings_form.EditedChart(chart_type="line", parameters={"column": "loss", "height": 500})
 
-    form = _props_by_field(build_chart_param_form(form_for, edited, store=store, experiment_id=experiment_id))
+    form = _props_by_field(
+        build_chart_param_form(form_for, edited, catalog=ColumnCatalog.load(store, experiment_id))
+    )
 
     assert form["height"]["value"] == height
 
@@ -370,3 +378,27 @@ def test_a_number_with_a_range_is_a_slider_in_its_cell() -> None:
     column: dict[str, Any] = (grid or {})["columnDefs"][1]
     assert column["cellRenderer"] == SLIDER_RENDERER
     assert column["cellRendererParams"] == {"min": 0, "max": 1, "step": 0.01, "fallback": 1.0}
+
+
+def test_a_few_choices_are_side_by_side_in_their_cell_and_many_are_picked_from_a_list() -> None:
+    few = ParameterField(
+        name="visibility",
+        type=ParameterFieldType.STR,
+        required=False,
+        default="shown",
+        choices=("shown", "hidden", "off"),
+    )
+    many = ParameterField(name="unit", type=ParameterFieldType.STR, required=False, choices=tuple("abcdefg"))
+    field = ParameterField(name="layers", type=ParameterFieldType.TABLE, required=False, columns=(few, many))
+
+    grid = find_props(
+        _param_field_input(field.name, field, ColumnCatalog()), settings_form._CHART_PARAM_TABLE.of("layers")
+    )
+
+    columns: list[dict[str, Any]] = (grid or {})["columnDefs"]
+    assert columns[1]["cellRenderer"] == CHOICE_RENDERER
+    assert columns[1]["cellRendererParams"] == {
+        "choices": ["shown", "hidden", "off"],
+        "fallback": "shown",
+    }
+    assert columns[2]["cellEditor"] == "agSelectCellEditor"

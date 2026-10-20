@@ -29,7 +29,7 @@ What an image's default overlays are logged under, after the image's own key (`s
 An image chart auto-generated for an image draws the artifacts under its key plus this suffix over it. An image can
 have several, each told apart by a name after the suffix (`samples/a_$overlay/truth`, `samples/a_$overlay/prediction`);
 `overlay_key` and `OverlayKey.parse` build and read these keys. Any other artifact can still be drawn over a picture by
-naming it in the chart's `overlays` setting.
+adding it to the chart's Layers table (`layers` setting).
 
 The `$` keeps a key from ending in it by accident; one that does without being logged through `Overlay` or `Image`
 as a layer is warned about by the client (`BasicDlboardAPI.log_artifact_batch`).

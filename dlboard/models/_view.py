@@ -49,7 +49,7 @@ class ColumnKind(StrEnum):
     HISTOGRAM = "histogram"
     HPARAM = "hparam"
     LAYER = "layer"
-    """Artifact keys an image chart can draw over a picture: an `Overlay`, or an image. No dataframe column is ever tagged with this kind directly."""
+    """Artifact keys an image chart can draw over a picture besides its own overlays: an `Overlay` logged under a key of its own, or an image. No dataframe column is ever tagged with this kind directly."""
     GROUPING = "grouping"
     """Synthetic kind for fields that group/split by any metric or hparam column, plus `run_id` --
     see `group_columns_by_kind`. No dataframe column is ever tagged with this kind directly."""
@@ -73,6 +73,22 @@ class RenderContext(BaseModel, frozen=True, extra="forbid"):
 
 DEFAULT_RENDER_CONTEXT: typing.Final = RenderContext()
 """For a chart rendered on its own, outside any panel or page (a test, a preview)."""
+
+
+class ColumnChoices(typing.Protocol):
+    """
+    What an experiment has that a chart's settings can name, as a chart type needs to know it to show its settings.
+
+    The chart editor's `ColumnCatalog` is one; it lives with the page, so a chart type sees it only through this.
+    """
+
+    def options(self, kind: ColumnKind) -> list[str]:
+        """The names a setting of `kind` can take."""
+        ...
+
+    def artifact_keys(self) -> list[str]:
+        """Every artifact key the experiment has logged, in key order."""
+        ...
 
 
 class ParameterFieldType(StrEnum):
@@ -218,6 +234,18 @@ class ChartType(ABC, BaseModel, typing.Generic[_Parameters, _Dataframe, _Chart],
         Defaults to `False`, so a chart type that does not display artifacts need not say anything.
         """
         return False
+
+    @classmethod
+    def parameters_to_edit(cls, parameters: _Parameters, choices: ColumnChoices) -> _Parameters:  # noqa: ARG003
+        """
+        `parameters` as the chart editor should show them: with whatever the chart shows by default spelled out.
+
+        A chart may show more than its saved settings say (an image chart draws every overlay logged over its picture, and
+        saves only the ones it was told to treat differently), and an editor that shows only what was saved shows
+        nothing to change. `choices` says what the experiment has. The edited form is what is saved, so this must not
+        change what the chart shows. Defaults to the settings as they are.
+        """
+        return parameters
 
 
 class ParameterField(BaseModel, frozen=True, extra="forbid"):
@@ -397,6 +425,17 @@ class ChartTypeRegistry:
         """
         try:
             return cls._typed_chart(chart)[1].model_dump(mode="json")
+        except (ValidationError, UnknownChartTypeError):
+            return chart.parameters
+
+    @classmethod
+    def parameters_to_edit(
+        cls, chart: ChartInstance[_Dataframe, _Chart], choices: ColumnChoices
+    ) -> dict[str, object]:
+        """`current_parameters`, with what the chart shows by default spelled out (`ChartType.parameters_to_edit`)."""
+        try:
+            chart_type, parameters = cls._typed_chart(chart)
+            return chart_type.parameters_to_edit(parameters, choices).model_dump(mode="json")
         except (ValidationError, UnknownChartTypeError):
             return chart.parameters
 
