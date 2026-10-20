@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from dlboard.client.artifacts import rle
-from dlboard.client.artifacts.overlay import ImageMask
+from dlboard.client.artifacts.overlay import DEFAULT_CLASS_COLORS, ImageMask
 
 
 @pytest.mark.parametrize(
@@ -44,11 +44,30 @@ def test_rle_decode_expands_pairs_into_shape(
     assert np.array_equal(rle.run_length_decode(mask), expected)
 
 
-def test_rle_render_draws_colored_ids_and_leaves_others_transparent() -> None:
-    mask = rle.run_length_encode(np.array([[[[0, 1, 2]]]]), colors={1: "#ff0000"}, classnames={})
+def _rgb(color: str) -> list[int]:
+    return list(bytes.fromhex(color[1:]))
+
+
+@pytest.mark.parametrize(
+    ("colors", "opacity", "class_one", "class_two"),
+    [
+        pytest.param({1: "#ff0000"}, 1.0, [255, 0, 0, 255], [0, 0, 0, 0], id="only-colored-ids-are-drawn"),
+        pytest.param({1: "#ff0000"}, 0.5, [255, 0, 0, 128], [0, 0, 0, 0], id="translucent"),
+        pytest.param(
+            None,
+            1.0,
+            [*_rgb(DEFAULT_CLASS_COLORS[0]), 255],
+            [*_rgb(DEFAULT_CLASS_COLORS[1]), 255],
+            id="default-palette",
+        ),
+    ],
+)
+def test_rle_render_draws_colored_ids_at_the_masks_opacity_and_leaves_others_transparent(
+    colors: dict[int, str] | None, opacity: float, class_one: list[int], class_two: list[int]
+) -> None:
+    mask = rle.run_length_encode(np.array([[[[0, 1, 2]]]]), colors=colors, opacity=opacity)
 
     rendered = rle.run_length_render(mask)
 
-    expected = np.array([[0, 0, 0, 0], [255, 0, 0, 255], [0, 0, 0, 0]], dtype=np.uint8).reshape(1, 1, 1, 3, 4)
     assert rendered.dtype == np.uint8
-    assert np.array_equal(rendered, expected)
+    assert rendered.reshape(3, 4).tolist() == [[0, 0, 0, 0], class_one, class_two]

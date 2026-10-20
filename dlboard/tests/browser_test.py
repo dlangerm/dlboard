@@ -34,7 +34,7 @@ from dlboard import models
 from dlboard.client._rest_api import BasicDlboardAPI
 from dlboard.client.artifacts import rle
 from dlboard.client.artifacts.image import Image
-from dlboard.client.artifacts.overlay import Box, Overlay, Point, Polygon, Shape
+from dlboard.client.artifacts.overlay import DEFAULT_CLASS_COLORS, Box, Overlay, Point, Polygon, Shape
 from dlboard.client.histograms import ExponentialBinning
 from dlboard.models import OVERLAY_KEY_SUFFIX, PanelInstance
 from dlboard.serve import get_system_data_store
@@ -2416,11 +2416,26 @@ def test_an_image_chart_draws_the_overlay_logged_at_each_pictures_step_over_it(
     assert console_errors == []  # a layer or shape that could not be drawn is logged, and fails here
 
 
-def test_an_image_chart_draws_a_mask_in_an_overlay_with_its_classes_in_their_colors(
-    page: Page, live_server_url: str, tmp_path: Path, console_errors: list[str]
+@pytest.mark.parametrize(
+    ("colors", "opacity", "left_pixel"),
+    [
+        pytest.param({1: "#ff0000"}, 0.5, [255, 0, 0, 128], id="colors-at-the-default-opacity"),
+        pytest.param(
+            None, 1.0, [*bytes.fromhex(DEFAULT_CLASS_COLORS[0][1:]), 255], id="default-palette-opaque"
+        ),
+    ],
+)
+def test_an_image_chart_draws_a_mask_in_an_overlay_with_its_classes_in_their_colors(  # noqa: PLR0913 -- a browser test takes its fixtures and its parametrized case
+    page: Page,
+    live_server_url: str,
+    tmp_path: Path,
+    console_errors: list[str],
+    colors: dict[int, str] | None,
+    opacity: float,
+    left_pixel: list[int],
 ) -> None:
-    """A run-length encoded mask in an `Overlay` is painted over its picture: its colored class opaque, the rest see-through."""
-    _create_project_and_experiment(page, live_server_url, "Mask Overlay Experiment")
+    """A run-length encoded mask in an `Overlay` is painted over its picture: its colored class at its opacity, the rest see-through."""
+    _create_project_and_experiment(page, live_server_url, f"Mask Overlay Experiment {left_pixel}")
     page.locator(".experiment-card").click()
     experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
     api = BasicDlboardAPI(live_server_url)
@@ -2429,7 +2444,7 @@ def test_an_image_chart_draws_a_mask_in_an_overlay_with_its_classes_in_their_col
     # The left half of the 48 by 64 picture is class 1, drawn red; the right half is class 0, which has no color.
     labels = np.zeros((1, 48, 64), dtype=np.int64)  # one class-dimension of the picture's height and width
     labels[:, :, :32] = 1
-    mask = rle.run_length_encode(labels, colors={1: "#ff0000"}, classnames={1: "cat"})
+    mask = rle.run_length_encode(labels, colors=colors, classnames={1: "cat"}, opacity=opacity)
     api.log_artifact_batch(
         [
             Image(key="samples/a", image=picture, step=0, format="jpg").to_artifact(
@@ -2447,7 +2462,7 @@ def test_an_image_chart_draws_a_mask_in_an_overlay_with_its_classes_in_their_col
     layer = page.locator(".dl-chart-item .dl-image-series-thumb .dl-image-series-overlay")
     expect(layer.locator("image")).to_have_count(1)
     href = layer.locator("image").get_attribute("href")
-    # Sample the drawn mask's pixels: the left (class 1) is red and opaque, the right (no color) is see-through.
+    # Sample the drawn mask's pixels: the left (class 1) is in its color at the mask's opacity, the right (class 0) is see-through.
     pixels = page.evaluate(
         """async (href) => {
             const img = new Image();
@@ -2463,7 +2478,7 @@ def test_an_image_chart_draws_a_mask_in_an_overlay_with_its_classes_in_their_col
         }""",
         href,
     )
-    assert pixels == [[255, 0, 0, 255], [0, 0, 0, 0]]
+    assert pixels == [left_pixel, [0, 0, 0, 0]]
     assert console_errors == []  # a mask that could not be drawn is logged, and fails here
 
 

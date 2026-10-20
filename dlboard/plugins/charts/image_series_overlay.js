@@ -13,6 +13,18 @@ window.dlImageSeriesOverlay = (() => {
     const SVG_NS = "http://www.w3.org/2000/svg";
     const MIN_LABEL_SIZE = 8;
     const LABEL_SIZE_DIVISOR = 32;
+    // The mask defaults (`DEFAULT_CLASS_COLORS`, `DEFAULT_MASK_OPACITY` in `overlay.py`), which the server writes ahead of
+    // this script, so a mask with no `colors` is drawn in the same palette as the Python that made it.
+    const { DEFAULT_CLASS_COLORS, DEFAULT_MASK_OPACITY } = window.dlMaskDefaults;
+
+    // The color class `id` of `mask` is drawn in, or nothing if it is left see-through (`ImageMask.class_color`).
+    const classColor = (mask, id) => {
+        if (mask.colors) {
+            // The colors are keyed by ID, which JSON keeps as a string key: indexing by the number finds it the same.
+            return mask.colors[id];
+        }
+        return id > 0 ? DEFAULT_CLASS_COLORS[(id - 1) % DEFAULT_CLASS_COLORS.length] : undefined;
+    };
 
     const element = (name, attributes) => {
         const el = document.createElementNS(SVG_NS, name);
@@ -34,7 +46,7 @@ window.dlImageSeriesOverlay = (() => {
 
     // A mask (`ImageMask`, `rle`) as a PNG data URL the size of the picture: alternating `N, I` pairs, `N` pixels of
     // class `I` each, in row-major order over `shape`, whose last two dimensions are the picture's height and width.
-    // A class without a color is left transparent.
+    // A class without a color is left transparent, and the rest are drawn at the mask's opacity.
     const maskPicture = (mask, { width, height }) => {
         const [rows, cols] = mask.shape.slice(-2);
         const elements = mask.shape.reduce((product, n) => product * n, 1);
@@ -47,11 +59,11 @@ window.dlImageSeriesOverlay = (() => {
         const context = canvas.getContext("2d");
         const picture = context.createImageData(width, height);
         const bytes = picture.data;
+        const alpha = Math.round((mask.opacity ?? DEFAULT_MASK_OPACITY) * 255);
         let pixel = 0;
         for (let i = 0; i < mask.data.length; i += 2) {
             const run = mask.data[i];
-            // The colors are keyed by ID, which JSON keeps as a string key: indexing by the number finds it the same.
-            const color = mask.colors?.[mask.data[i + 1]];
+            const color = classColor(mask, mask.data[i + 1]);
             if (color) {
                 const [r, g, b] = [1, 3, 5].map((offset) => parseInt(color.slice(offset, offset + 2), 16));
                 // Written byte by byte: a small array per pixel was the cost of drawing a mask on a large picture.
@@ -59,7 +71,7 @@ window.dlImageSeriesOverlay = (() => {
                     bytes[at] = r;
                     bytes[at + 1] = g;
                     bytes[at + 2] = b;
-                    bytes[at + 3] = 255;
+                    bytes[at + 3] = alpha;
                 }
             }
             pixel += run;

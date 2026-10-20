@@ -15,6 +15,7 @@ from dash import ALL, MATCH, Input, Output, State, ctx, dcc, html
 from dash.exceptions import PreventUpdate
 from pydantic import BaseModel, Field
 
+from dlboard.client.artifacts.overlay import DEFAULT_CLASS_COLORS, DEFAULT_MASK_OPACITY
 from dlboard.models import (
     DEFAULT_RENDER_CONTEXT,
     DEFAULT_TAG_PRECISION,
@@ -410,10 +411,19 @@ _OVERLAY_HELPER_PATH = Path(__file__).with_name("image_series_overlay.js")
 """Draws an overlay into a picture's layer; both the scrub and the modal call it, so it is a shared script."""
 
 
+def _overlay_helper_script() -> bytes:
+    """`image_series_overlay.js`, after the mask defaults the server has, so a mask is drawn in the palette Python uses."""
+    defaults = {
+        "DEFAULT_CLASS_COLORS": list(DEFAULT_CLASS_COLORS),
+        "DEFAULT_MASK_OPACITY": DEFAULT_MASK_OPACITY,
+    }
+    return f"window.dlMaskDefaults = {json.dumps(defaults)};\n".encode() + _OVERLAY_HELPER_PATH.read_bytes()
+
+
 def plug(app: dash.Dash) -> None:
     """Register clientside callbacks for image-series scrubbing, captions, pagination and overlays."""
     serve_asset(app, AssetKind.STYLESHEET, _CSS_PATH.name, _CSS_PATH.read_bytes())
-    serve_asset(app, AssetKind.SCRIPT, _OVERLAY_HELPER_PATH.name, _OVERLAY_HELPER_PATH.read_bytes())
+    serve_asset(app, AssetKind.SCRIPT, _OVERLAY_HELPER_PATH.name, _overlay_helper_script())
     app.clientside_callback(
         _MODAL_OVERLAY_JS.source,
         dash.Output({"type": "image-series-modal-overlay", "instance": dash.MATCH}, "style"),
