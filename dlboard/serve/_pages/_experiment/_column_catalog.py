@@ -70,7 +70,7 @@ class ColumnCatalog:
         keys = frozenset(self.artifacts)
         return frozenset(k for k in keys if (overlay := OverlayKey.parse(k)) and overlay.image_key in keys)
 
-    @property
+    @functools.cached_property
     def _pictures_with_overlays(self) -> frozenset[str]:
         """The keys of pictures that have overlays logged over them: a picture the chart is of, not a layer to add to it."""
         overlays = (OverlayKey.parse(key) for key in self.artifacts)

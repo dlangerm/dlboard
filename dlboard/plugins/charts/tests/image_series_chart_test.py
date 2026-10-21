@@ -503,17 +503,11 @@ def test_an_image_chart_draws_nothing_over_its_pictures_that_is_not_its_own_over
     assert _store_data(ImageChart.render(ImageChartSettings(key="img"), df))["overlays"] == {}
 
 
-def test_the_layers_are_charted_with_the_image_and_edited_as_a_table_of_visibility_and_opacity() -> None:
+def test_the_layers_are_charted_with_the_image() -> None:
     settings = ImageChartSettings(key="img", layers={"boxes": LayerStyle(), "mask": LayerStyle()})
-    fields = ChartTypeRegistry.get_registered_chart_types()[ImageChart.name]
 
     assert ImageChart.hint_required_artifact_keys(settings) == {"img", "boxes", "mask"}
     assert ImageChart.hint_required_artifact_key_prefixes(settings) == {overlay_key("img")}
-    assert fields["layers"].type is ParameterFieldType.TABLE
-    assert [(c.name, c.type, c.choices) for c in fields["layers"].columns or ()] == [
-        ("visibility", ParameterFieldType.STR, ("shown", "hidden", "off")),
-        ("opacity", ParameterFieldType.FLOAT, None),
-    ]
 
 
 def test_a_removed_layer_is_not_drawn_listed_or_left_for_a_viewer_to_bring_back() -> None:
@@ -547,43 +541,44 @@ class _Choices:
         return self._keys
 
 
-def test_the_editor_is_shown_a_row_for_every_overlay_the_chart_draws_by_default() -> None:
+def test_every_overlay_of_the_picture_is_a_fixed_row_of_the_layers_table_by_its_name() -> None:
     truth, pred = overlay_key("img", "truth"), overlay_key("img", "pred")
-    settings = ImageChartSettings(
-        key="img",
-        layers={"mask": LayerStyle(opacity=0.3), truth: LayerStyle(visibility=LayerVisibility.HIDDEN)},
-    )
 
-    shown = ImageChart.parameters_to_edit(
-        settings, _Choices([pred, truth, overlay_key("other", "x"), "mask"])
+    fixed = ImageChart.fixed_table_rows(
+        ImageChartSettings(key="img"),
+        _Choices([truth, overlay_key("img"), overlay_key("other", "x"), pred, "mask"]),
     )
 
     assert (
-        shown.layers
-        == {  # the overlays of this picture (not another's), as they are drawn, then the other rows
-            pred: LayerStyle(),
-            truth: LayerStyle(visibility=LayerVisibility.HIDDEN),
-            "mask": LayerStyle(opacity=0.3),
+        fixed
+        == {  # this picture's overlays, in key order, by their names; not another's, nor a plain artifact
+            "layers": {overlay_key("img"): UNNAMED_OVERLAY, pred: "pred", truth: "truth"}
         }
     )
-    assert ImageChart.hint_required_artifact_keys(shown) == {"img", pred, truth, "mask"}
 
 
-def test_what_the_editor_is_shown_does_not_change_what_the_chart_draws() -> None:
+def test_what_the_editor_saves_for_a_fixed_row_is_what_the_chart_draws_without_one() -> None:
+    """The editor lists a blank row for every overlay and saves what it lists: that must be no change to the chart."""
     df = _artifacts_df(n_runs=1)
     truth, pred = overlay_key("img", "truth"), overlay_key("img", "pred")
     _log_layer(df, truth, "truth.png")
     _log_layer(df, pred, "pred.png")
     settings = ImageChartSettings(key="img", layers={truth: LayerStyle(visibility=LayerVisibility.HIDDEN)})
-    shown = ImageChart.parameters_to_edit(settings, _Choices([pred, truth]))
 
-    assert _store_data(ImageChart.render(shown, df)) == _store_data(ImageChart.render(settings, df))
+    saved = ImageChartSettings.model_validate(
+        {"key": "img", "layers": {pred: {}, truth: {"visibility": "hidden"}, "mask": {"opacity": 0.3}}}
+    )
+
+    assert saved == settings.model_copy(
+        update={"layers": {**settings.layers, "mask": LayerStyle(opacity=0.3)}}
+    )
+    assert _store_data(ImageChart.render(saved, df)) == _store_data(ImageChart.render(settings, df))
 
 
-def test_the_registry_shows_a_chart_that_will_not_validate_as_it_was_saved() -> None:
+def test_a_chart_that_will_not_validate_has_no_fixed_rows() -> None:
     chart = ChartInstance(chart_type=ImageChart.name, parameters={"key": "img", "height": "tall"})
 
-    assert ChartTypeRegistry.parameters_to_edit(chart, _Choices([])) == chart.parameters
+    assert ChartTypeRegistry.fixed_table_rows(chart, _Choices([overlay_key("img", "truth")])) == {}
 
 
 @pytest.mark.parametrize(
@@ -619,6 +614,30 @@ def test_a_chart_saved_with_an_overlays_row_per_layer_draws_the_same_layers(
     settings = ImageChartSettings.model_validate({"key": "img", "overlays": saved})
 
     assert settings == ImageChartSettings(key="img", layers=layers)
+
+
+@pytest.mark.parametrize(
+    ("layers", "saved"),
+    [
+        pytest.param({overlay_key("img", "a"): {}}, {}, id="an-overlay-as-it-is-drawn-anyway-is-not-saved"),
+        pytest.param({overlay_key("img"): {}}, {}, id="nor-is-the-unnamed-one"),
+        pytest.param(
+            {overlay_key("img", "a"): {"opacity": 0.5}},
+            {overlay_key("img", "a"): LayerStyle(opacity=0.5)},
+            id="an-overlay-treated-differently-is",
+        ),
+        pytest.param(
+            {overlay_key("other", "a"): {}},
+            {overlay_key("other", "a"): LayerStyle()},
+            id="another-pictures-overlay-is-a-layer-of-its-own",
+        ),
+        pytest.param({"mask": {}}, {"mask": LayerStyle()}, id="any-other-artifact-is"),
+    ],
+)
+def test_only_the_layers_that_are_not_drawn_anyway_are_saved(
+    layers: dict[str, dict[str, float]], saved: dict[str, LayerStyle]
+) -> None:
+    assert ImageChartSettings.model_validate({"key": "img", "layers": layers}).layers == saved
 
 
 def test_a_layers_opacity_is_a_fraction() -> None:

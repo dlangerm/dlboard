@@ -97,6 +97,10 @@ class ColumnChoices(typing.Protocol):
         ...
 
 
+FixedRows = dict[str, dict[str, str]]
+"""The rows a chart draws without saving them (`ChartType.fixed_table_rows`): for each table setting, a row's key and its label."""
+
+
 class ParameterFieldType(StrEnum):
     """Widget type a chart parameter field should be rendered as."""
 
@@ -255,16 +259,16 @@ class ChartType(ABC, BaseModel, typing.Generic[_Parameters, _Dataframe, _Chart],
         return False
 
     @classmethod
-    def parameters_to_edit(cls, parameters: _Parameters, choices: ColumnChoices) -> _Parameters:  # noqa: ARG003
+    def fixed_table_rows(cls, parameters: _Parameters, choices: ColumnChoices) -> FixedRows:  # noqa: ARG003
         """
-        `parameters` as the chart editor should show them: with whatever the chart shows by default spelled out.
+        The rows of the chart's table settings that the chart draws whether or not they are saved, by setting name.
 
-        A chart may show more than its saved settings say (an image chart draws every overlay logged over its picture, and
-        saves only the ones it was told to treat differently), and an editor that shows only what was saved shows
-        nothing to change. `choices` says what the experiment has. The edited form is what is saved, so this must not
-        change what the chart shows. Defaults to the settings as they are.
+        An image chart draws every overlay logged over its picture, and saves a row only for one it was told to treat
+        differently. A table setting lists these rows in the editor anyway, to restyle: each is shown by its label,
+        starting as the chart draws it (a blank row stands for every default), and cannot be renamed or removed, since
+        removing it would change nothing. `choices` says what the experiment has. Defaults to none.
         """
-        return parameters
+        return FixedRows()
 
     @classmethod
     def viewer_state_type(cls) -> type[ViewerState] | None:
@@ -464,15 +468,13 @@ class ChartTypeRegistry:
             return chart.parameters
 
     @classmethod
-    def parameters_to_edit(
-        cls, chart: ChartInstance[_Dataframe, _Chart], choices: ColumnChoices
-    ) -> dict[str, object]:
-        """`current_parameters`, with what the chart shows by default spelled out (`ChartType.parameters_to_edit`)."""
+    def fixed_table_rows(cls, chart: ChartInstance[_Dataframe, _Chart], choices: ColumnChoices) -> FixedRows:
+        """The rows `chart` draws without saving them (`ChartType.fixed_table_rows`); none if it cannot be read."""
         try:
             chart_type, parameters = cls._typed_chart(chart)
-            return chart_type.parameters_to_edit(parameters, choices).model_dump(mode="json")
         except (ValidationError, UnknownChartTypeError):
-            return chart.parameters
+            return {}
+        return chart_type.fixed_table_rows(parameters, choices)
 
     @classmethod
     def render(

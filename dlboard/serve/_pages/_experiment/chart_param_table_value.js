@@ -8,9 +8,10 @@ function chartParamTableValue(_rowsChanged, _cellEdited) {
     }
     // The table's rows as the mapping the setting holds: a row's key names its entry, and a cell left
     // blank is left out of it. Read from the grid itself, as `virtualRowData` doesn't follow a cell
-    // being edited.
+    // being edited. `label` and `fixed` are the grid's own (how a row the chart supplies is shown and held in
+    // place), not cells of the setting.
     const entries = {};
-    api.forEachNode(({ data: { key, ...cells } }) => {
+    api.forEachNode(({ data: { key, label: _label, fixed: _fixed, ...cells } }) => {
         if (key) {
             entries[key] = Object.fromEntries(
                 Object.entries(cells).filter(

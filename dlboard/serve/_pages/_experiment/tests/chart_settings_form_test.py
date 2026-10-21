@@ -402,3 +402,36 @@ def test_a_few_choices_are_side_by_side_in_their_cell_and_many_are_picked_from_a
         "fallback": "shown",
     }
     assert columns[2]["cellEditor"] == "agSelectCellEditor"
+
+
+def test_a_row_the_chart_supplies_comes_first_by_its_label_and_is_not_the_persons_to_rename_or_remove() -> (
+    None
+):
+    field = ParameterField(name="layers", type=ParameterFieldType.TABLE, required=False)
+    saved = {"samples/mask": {"opacity": 0.3}, "truth": {"visibility": "hidden"}}
+
+    grid = find_props(
+        _param_field_input(
+            field.name,
+            field,
+            ColumnCatalog(),
+            override=saved,
+            fixed_rows={"truth": "the truth", "pred": "pred"},
+        ),
+        settings_form._CHART_PARAM_TABLE.of("layers"),
+    )
+
+    rows: list[dict[str, Any]] = (grid or {})["rowData"]
+    assert (
+        rows
+        == [  # the fixed rows in the order given, a blank one where nothing was saved, then the person's own
+            {"key": "truth", "label": "the truth", "fixed": True, "visibility": "hidden"},
+            {"key": "pred", "label": "pred", "fixed": True},
+            {"key": "samples/mask", "opacity": 0.3},
+        ]
+    )
+    name_column: dict[str, Any] = (grid or {})["columnDefs"][0]
+    assert name_column["editable"] == {"function": settings_form._NOT_FIXED}
+    assert (grid or {})["dashGridOptions"]["rowClassRules"] == {
+        settings_form.FIXED_ROW_CLASS: settings_form._IS_FIXED
+    }

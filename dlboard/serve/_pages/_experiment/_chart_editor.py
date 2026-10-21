@@ -161,8 +161,8 @@ def _settings_form(
     """
     The form for `chart_type_name`, starting from the chart being edited if it is of that type.
 
-    It starts from the chart as the chart type says it is shown (`ChartType.parameters_to_edit`), not as it was saved: an
-    image chart draws every overlay logged over its picture, and its form lists each, though only some may be saved.
+    Its tables also list the rows the chart type draws without saving (`ChartType.fixed_table_rows`): an image chart
+    draws every overlay logged over its picture, and its Layers table lists each, though only some may be saved.
     """
     catalog = ColumnCatalog.load(get_data_store(), experiment_id)
     edited: EditedChart | None = None
@@ -171,7 +171,8 @@ def _settings_form(
         if location := page_model.locate_chart(panels, target.chart_id):
             edited = EditedChart(
                 chart_type=location.chart.chart_type,
-                parameters=models.ChartTypeRegistry.parameters_to_edit(location.chart, catalog),
+                parameters=models.ChartTypeRegistry.current_parameters(location.chart),
+                fixed_rows=models.ChartTypeRegistry.fixed_table_rows(location.chart, catalog),
             )
     return build_chart_param_form(chart_type_name, edited, catalog=catalog)
 

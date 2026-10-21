@@ -76,11 +76,12 @@ logged over an image (`sample_$overlay`, or one per `name` after it: `sample_$ov
 ones logged after the chart was made, and none of them gets a chart of its own.
 
 The chart editor's **Layers** table has a row for every layer the chart draws, whether or not the chart saved one: the
-overlays of the picture, then any other artifact you add by its key, which the table suggests as you type. Each row says
-whether the layer is `shown`, `hidden` (in the legend, and drawn only when a viewer shows it) or `off` (not drawn, and not
-in the legend), and how opaque it is, a slider from 0 to 1. An overlay with no row is drawn in full, and removing an
-overlay's row does not leave it out: set its row to `off` to do that, since the chart draws every overlay logged over its
-picture. A chart saved with the earlier `overlays` setting opens as the `layers` rows that draw the same. While the
+overlays of the picture, shown by their names, then any other artifact you add by its key, which the table suggests as you
+type. Each row says whether the layer is `shown`, `hidden` (in the legend, and drawn only when a viewer shows it) or `off`
+(not drawn, and not in the legend), and how opaque it is, a slider from 0 to 1. An overlay's row is the chart's to keep: it
+can be restyled but not renamed or removed, and set to `off` to leave the overlay out, since the chart draws every overlay
+logged over its picture. A row left as it is by default is not saved, so a later change to those defaults reaches it. A
+chart saved with the earlier `overlays` setting opens as the `layers` rows that draw the same. While the
 picture for the slider's step is still downloading, its thumbnail shows a spinner over the previous picture.
 
 Over the top-left of each picture, a legend says what is drawn on it. It starts folded to its title, "Layers" (so the picture
@@ -143,12 +144,13 @@ its chart type alone.
 - `can_display_artifact(artifact) -> bool` (optional, `False` by default) — say which logged artifacts this
   chart type can display. Auto-generating and suggesting charts give an artifact key the first built-in
   chart type that says yes; an artifact no chart type claims simply gets no generated chart.
-- `parameters_to_edit(parameters, choices)` (optional, the settings as they are by default) — spell out in the chart
-  editor's form what the chart shows by default but its saved settings leave unsaid. The image chart draws every
-  overlay logged over its picture and saves only the ones it was told to treat differently, so it lists each as a row;
-  without this the editor would show an empty table for a chart that draws two layers. `choices` says what the
-  experiment has (`ColumnChoices`), and the form that comes back is what is saved, so it must not change what the chart
-  shows.
+- `fixed_table_rows(parameters, choices)` (optional, none by default) — the rows of a table setting that the chart draws
+  whether or not they are saved, by setting name and then each row's key and the label it is shown by. The image chart
+  draws every overlay logged over its picture and saves only the ones it was told to treat differently, so its Layers
+  table would be empty for a chart that draws two layers; this lists each as a row. A fixed row can be restyled but not
+  renamed or removed, since removing it would change nothing, and it starts blank, which stands for every default:
+  make the settings model leave out a row that is all defaults, so that saving what the editor lists changes nothing.
+  `choices` says what the experiment has (`ColumnChoices`).
 
 The chart editor builds its form from the settings model, so a setting needs no code of its own to be
 editable. To keep a form with many settings readable, group them: mark a setting with a `SettingsSection` in its

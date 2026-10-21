@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Final, cast
 import dash_ag_grid as dag
 import dash_mantine_components as dmc
 from dash import Dash, Input, Output, dcc, html
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from dlboard import models
 from dlboard.serve import ClientsideScript, Icon, icon
@@ -55,6 +55,12 @@ SLIDER_STEPS: Final = 100
 NUMBER_DEBOUNCE_MS: Final = 400
 """How long a number input waits after the last keystroke before the chart is redrawn from it."""
 
+_IS_FIXED: Final = "!!(params.data && params.data.fixed)"
+"""A grid cell's JS: true on a row the chart supplies (`fixed` in its data), false on one the person made."""
+_NOT_FIXED: Final = f"!{_IS_FIXED}"
+FIXED_ROW_CLASS: Final = "dl-fixed-row"
+"""The class of a row the chart supplies in a settings table."""
+
 
 class _FieldPattern(PatternId[ids.ExperimentPage]):
     """A family of the form's components, with one per field of whichever chart type the form is showing."""
@@ -82,6 +88,8 @@ class EditedChart(BaseModel, frozen=True):
 
     chart_type: str
     parameters: dict[str, Any]
+    fixed_rows: models.FixedRows = Field(default_factory=dict)
+    """The rows the chart draws whether or not they are saved (`ChartType.fixed_table_rows`), listed in its tables."""
 
 
 def merge_chart_param_values(  # noqa: PLR0913
@@ -137,12 +145,13 @@ def build_validated_chart_instance(
     return models.ChartInstance[Any, Any](chart_type=chart_type_name, parameters=parameters, id=chart_id)
 
 
-def _table_input(
+def _table_input(  # noqa: PLR0913
     field_name: str,
     field: models.ParameterField,
     label: str,
     entries: dict[str, dict[str, Any]],
     key_options: list[str],
+    fixed: dict[str, str],
 ) -> Component:
     """
     A `TABLE` field as an editable grid, a row per entry with a cell for each field of its row model.
@@ -150,11 +159,16 @@ def _table_input(
     The grid is only what the person edits: `chart_param_table_value.js` writes its rows, as the mapping the
     setting holds, into the field's own `Store`, which is what the form reads back like any other field. A field
     with `key_options` (the names its rows can be) suggests them as a row's name is typed.
+
+    `fixed` are rows the chart draws whether or not they are saved (key to the label it is shown by): they come
+    first, as a blank row if the entries have none, and can be restyled but not renamed or removed.
     """
+    entries = {**{key: {} for key in fixed}, **entries}
     key_column: dict[str, Any] = {
         "field": "key",
         "headerName": "Name",
-        "editable": True,
+        "editable": {"function": _NOT_FIXED},
+        "valueFormatter": {"function": "params.data.label || params.value"},
         "flex": 2,
         "minWidth": 120,
         "checkboxSelection": True,
@@ -213,12 +227,23 @@ def _table_input(
             dag.AgGrid(
                 id=_CHART_PARAM_TABLE.of(field_name),
                 columnDefs=columns,
-                rowData=[{"key": key, **cells} for key, cells in entries.items()],
+                rowData=[
+                    {"key": key, **({"label": fixed[key], "fixed": True} if key in fixed else {}), **cells}
+                    for key, cells in entries.items()
+                ],
+                # The code strings are written here, never taken from a request.
+                dangerously_allow_code=True,
                 dashGridOptions={
                     "domLayout": "autoHeight",
                     "singleClickEdit": True,
                     "stopEditingWhenCellsLoseFocus": True,
-                    "rowSelection": {"mode": "multiRow", "checkboxes": False, "enableClickSelection": False},
+                    "rowSelection": {
+                        "mode": "multiRow",
+                        "checkboxes": False,
+                        "enableClickSelection": False,
+                    },
+                    # A row the chart supplies has no checkbox to tick (`grid_cell_components.css`).
+                    "rowClassRules": {FIXED_ROW_CLASS: _IS_FIXED},
                 },
                 **themed_grid_kwargs(),
             ),
@@ -258,6 +283,7 @@ def _param_field_input(  # noqa: PLR0911
     catalog: ColumnCatalog,
     *,
     override: bool | int | float | str | list[str] | dict[str, Any] | None = None,
+    fixed_rows: dict[str, str] | None = None,
 ) -> Component:
     input_id = CHART_PARAM.of(field_name)
     label = f"{field.label} *" if field.required else field.label
@@ -305,7 +331,12 @@ def _param_field_input(  # noqa: PLR0911
         case models.ParameterFieldType.TABLE:
             key_options = catalog.options(field.column_kind) if field.column_kind is not None else list[str]()
             return _table_input(
-                field_name, field, label, cast("dict[str, dict[str, Any]]", value or {}), key_options
+                field_name,
+                field,
+                label,
+                cast("dict[str, dict[str, Any]]", value or {}),
+                key_options,
+                fixed_rows or {},
             )
         case models.ParameterFieldType.LIST_PATTERN:
             names = catalog.options(field.column_kind) if field.column_kind is not None else list[str]()
@@ -409,13 +440,15 @@ def build_chart_param_form(
     if not chart_type_name:
         return []
     fields = models.ChartTypeRegistry.get_registered_chart_types()[chart_type_name]
-    initial_params = (
-        edited.parameters if edited and edited.chart_type == chart_type_name else dict[str, Any]()
-    )
+    of_edited = edited if edited and edited.chart_type == chart_type_name else None
+    initial_params = of_edited.parameters if of_edited else dict[str, Any]()
+    fixed_rows = of_edited.fixed_rows if of_edited else models.FixedRows()
     by_section: dict[models.SettingsSection, list[Component]] = {}
     for name, field in fields.items():
         by_section.setdefault(field.section, []).append(
-            _param_field_input(name, field, catalog, override=initial_params.get(name))
+            _param_field_input(
+                name, field, catalog, override=initial_params.get(name), fixed_rows=fixed_rows.get(name)
+            )
         )
     if len(by_section) <= 1:
         return [field for section_fields in by_section.values() for field in section_fields]

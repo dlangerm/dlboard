@@ -79,3 +79,8 @@
     background: var(--mantine-primary-color-filled);
     border-color: var(--mantine-primary-color-filled);
 }
+
+/* A row the chart supplies (drawn whether or not it is saved) is not the person's to remove, so it has no checkbox to tick. */
+.dl-fixed-row .ag-selection-checkbox {
+  visibility: hidden;
+}

@@ -2348,7 +2348,8 @@ def test_the_chart_editor_lists_the_layers_a_chart_draws_and_hides_removes_and_a
 ) -> None:
     """
     The editor's Layers table has a row for every layer the chart draws, though the chart saved none: set one hidden or
-    removed, add an artifact as another, and the chart (its legend, and what is drawn) follows.
+    off, add an artifact as another, and the chart (its legend, and what is drawn) follows. An overlay's row is shown
+    by its name, and is the chart's to keep: it cannot be renamed, checked or removed, only restyled.
     """
     _create_project_and_experiment(page, live_server_url, "Layer Editor Experiment")
     page.locator(".experiment-card").click()
@@ -2368,6 +2369,13 @@ def test_the_chart_editor_lists_the_layers_a_chart_draws_and_hides_removes_and_a
     )
     expect(dock.locator(".ag-center-cols-container .ag-row")).to_have_count(2)  # saved none, drawn two
     expect(rows).to_have_count(1)
+    expect(dock.locator(".ag-row").filter(has_text="$overlay")).to_have_count(0)  # by name, not by key
+    for checkbox in dock.locator(".ag-row").locator(".ag-selection-checkbox").all():
+        expect(checkbox).to_be_hidden()  # a row the chart keeps has nothing to check, so nothing to remove
+    rows.locator('[col-id="key"]').click()  # a click opens the name of a row of the person's own to edit
+    expect(page.locator(".dl-key-picker-input")).to_have_count(0)
+    dock.get_by_role("button", name="Remove checked").click()
+    expect(dock.locator(".ag-center-cols-container .ag-row")).to_have_count(2)
 
     def set_visibility(layer: str, value: str) -> None:
         row = dock.locator(".ag-center-cols-container .ag-row").filter(has_text=layer)

@@ -13,7 +13,7 @@ import dash_mantine_components as dmc
 import pandas as pd
 from dash import ALL, MATCH, Input, Output, State, ctx, dcc, html
 from dash.exceptions import PreventUpdate
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
 from dlboard._compat import StrEnum
 from dlboard.client.artifacts.overlay import DEFAULT_CLASS_COLORS, DEFAULT_MASK_OPACITY
@@ -26,6 +26,7 @@ from dlboard.models import (
     ChartType,
     ColumnChoices,
     ColumnKind,
+    FixedRows,
     LayerKind,
     OverlayKey,
     RenderContext,
@@ -110,24 +111,6 @@ class ImageViewerState(ViewerState, frozen=True, extra="forbid"):
         return settings.model_copy(update={"layers": layers})
 
 
-class _LegacyOverlays(BaseModel, frozen=True):
-    """The `overlays` setting a chart was saved with before every layer logged over a picture was drawn."""
-
-    overlays: dict[str, LayerStyle]
-
-    def as_layers(self, image_key: object) -> dict[str, LayerStyle]:
-        """
-        The `layers` rows that draw the same layers. Rows keep the artifact key they were saved under.
-
-        The picture's own overlays are drawn anyway, so only one with a style of its own gets a row.
-        """
-        return {
-            key: style
-            for key, style in self.overlays.items()
-            if not _is_overlay_of(key, image_key) or style != LayerStyle()
-        }
-
-
 def _is_overlay_of(key: str, image_key: object) -> bool:
     """Whether `key` is an overlay of the picture under `image_key`."""
     overlay = OverlayKey.parse(key)
@@ -181,12 +164,27 @@ class ImageChartSettings(BaseModel, frozen=True, extra="forbid", use_attribute_d
             return data
         fields = typing.cast("dict[str, object]", data)
         current = {key: value for key, value in fields.items() if key != "overlays"}
-        carried = _LegacyOverlays.model_validate({"overlays": fields["overlays"]}).as_layers(
-            fields.get("key")
-        )
+        carried = typing.cast("dict[str, object]", fields["overlays"])
         return {
             **current,
             "layers": {**carried, **typing.cast("dict[str, object]", current.get("layers", {}))},
+        }
+
+    @field_validator("layers")
+    @classmethod
+    def _without_overlays_drawn_anyway(
+        cls, layers: dict[str, LayerStyle], info: ValidationInfo
+    ) -> dict[str, LayerStyle]:
+        """
+        Leaves out a row for an overlay of the picture that is in every way as it would be drawn without one.
+
+        Every overlay logged over the picture is drawn, so the editor lists them all, and saving what it lists would
+        write a row per overlay; this keeps what is saved to the layers that are treated differently.
+        """
+        return {
+            key: style
+            for key, style in layers.items()
+            if not _is_overlay_of(key, info.data.get("key")) or style != LayerStyle()
         }
 
     @property
@@ -542,12 +540,10 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
 
     @classmethod
     @typing.override
-    def parameters_to_edit(cls, parameters: ImageChartSettings, choices: ColumnChoices) -> ImageChartSettings:
-        """Every overlay logged over the picture is a row, as it is drawn though the settings may not say so."""
+    def fixed_table_rows(cls, parameters: ImageChartSettings, choices: ColumnChoices) -> FixedRows:
+        """Every overlay logged over the picture is a row of the Layers table, by its name: it is drawn whether or not it is saved."""
         overlays = sorted(key for key in choices.artifact_keys() if _is_overlay_of(key, parameters.key))
-        rows = {key: parameters.layers.get(key, LayerStyle()) for key in overlays}
-        rows |= {key: style for key, style in parameters.layers.items() if key not in rows}
-        return parameters.model_copy(update={"layers": rows})
+        return {"layers": {key: _layer_label(key, parameters.key) for key in overlays}}
 
     @classmethod
     @typing.override
