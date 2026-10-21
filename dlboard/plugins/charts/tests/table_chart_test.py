@@ -10,7 +10,9 @@ import pytest
 from dlboard.conftest import props as _props
 from dlboard.models import (
     HPARAM_COLUMN_PREFIX,
+    LAYER_KIND_TAG,
     RUN_NAME_COLUMN,
+    LayerKind,
     RenderContext,
     artifact_column,
     artifact_fname_column,
@@ -470,3 +472,86 @@ def test_a_grid_of_other_columns_starts_without_the_old_ones_state(
     before = _render(TableChartSettings(), df)["persistence"]
 
     assert (before == _render(other, df)["persistence"]) is same_state
+
+
+# ---- images with the layers logged over them ----
+
+_PICTURE = "eval/a.png"
+_BOXES = overlay_key(_PICTURE, "boxes")
+
+
+def _picture_with_boxes_df() -> pd.DataFrame:
+    """Run 1's picture at steps 0 and 1, with an overlay of shapes logged beside the first one only."""
+    return pd.DataFrame(
+        {
+            "run_id": [1, 1],
+            "step": [0, 1],
+            artifact_column(_PICTURE): ["/artifact/1?v=a", "/artifact/2?v=b"],
+            artifact_fname_column(_PICTURE): ["a.png", "a.png"],
+            artifact_tags_column(_PICTURE): [{}, {}],
+            artifact_column(_BOXES): ["/artifact/3?v=c", GAP],
+            artifact_fname_column(_BOXES): ["boxes.json", GAP],
+            artifact_tags_column(_BOXES): [{LAYER_KIND_TAG: LayerKind.SHAPES.value}, GAP],
+        }
+    )
+
+
+def _link_of(row: dict[str, Any], field: str) -> dict[str, Any]:
+    return row[f"{field}__link"]
+
+
+@pytest.mark.parametrize(
+    ("settings", "row_id", "field", "layers"),
+    [
+        pytest.param(
+            TableChartSettings(rows=TableRows.ARTIFACT, show_artifacts=[_PICTURE], show_metrics=[]),
+            f"1/0/{_PICTURE}",
+            "artifact",
+            [{"url": "/artifact/3?v=c", "kind": "shapes", "layer": _BOXES}],
+            id="a-row-per-artifact-draws-the-overlay-logged-at-its-step",
+        ),
+        pytest.param(
+            TableChartSettings(rows=TableRows.ARTIFACT, show_artifacts=[_PICTURE], show_metrics=[]),
+            f"1/1/{_PICTURE}",
+            "artifact",
+            [],
+            id="a-picture-the-overlay-was-not-logged-beside-has-none",
+        ),
+        pytest.param(
+            TableChartSettings(rows=TableRows.RUN, show_artifacts=["eval/*"], show_metrics=[]),
+            "1",
+            artifact_column(_PICTURE),
+            [],
+            id="a-row-per-run-shows-its-latest-picture-and-what-was-logged-beside-it",
+        ),
+    ],
+)
+def test_a_picture_in_a_table_carries_the_layers_logged_beside_it_at_its_step(
+    settings: TableChartSettings, row_id: str, field: str, layers: list[dict[str, str]]
+) -> None:
+    rows = {row["_row_id"]: row for row in _render(settings, _picture_with_boxes_df())["rowData"]}
+
+    link = _link_of(rows[row_id], field)
+    assert (link["image"], link["layers"]) == (True, layers)
+
+
+def test_an_overlay_of_a_picture_that_is_shown_is_drawn_over_it_and_not_a_column_of_its_own() -> None:
+    settings = TableChartSettings(rows=TableRows.ARTIFACT, show_artifacts=["eval/*"], show_metrics=[])
+
+    rows = _render(settings, _picture_with_boxes_df())["rowData"]
+
+    assert {row["key"] for row in rows} == {_PICTURE}  # not the overlay's JSON, as a row of its own
+
+
+def test_an_overlay_chosen_without_its_picture_is_a_file_to_open() -> None:
+    settings = TableChartSettings(rows=TableRows.ARTIFACT, show_artifacts=[_BOXES], show_metrics=[])
+
+    [row] = _render(settings, _picture_with_boxes_df())["rowData"]
+
+    assert _link_of(row, "artifact")["image"] is False
+
+
+def test_a_picture_shown_by_its_key_has_its_overlays_fetched_with_it() -> None:
+    settings = TableChartSettings(show_artifacts=[_PICTURE])
+
+    assert TableChart.hint_required_artifact_key_prefixes(settings) == {overlay_key(_PICTURE)}

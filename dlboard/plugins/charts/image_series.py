@@ -16,7 +16,6 @@ from dash.exceptions import PreventUpdate
 from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
 from dlboard._compat import StrEnum
-from dlboard.client.artifacts.overlay import DEFAULT_CLASS_COLORS, DEFAULT_MASK_OPACITY
 from dlboard.models import (
     DEFAULT_RENDER_CONTEXT,
     DEFAULT_TAG_PRECISION,
@@ -27,7 +26,6 @@ from dlboard.models import (
     ColumnChoices,
     ColumnKind,
     FixedRows,
-    LayerKind,
     OverlayKey,
     RenderContext,
     SettingsSection,
@@ -38,17 +36,22 @@ from dlboard.models import (
     artifact_column,
     artifact_display_name,
     artifact_fname_column,
-    artifact_keys_in,
     artifact_tags_column,
     is_inlineable_artifact,
-    layer_kind,
     overlay_key,
 )
-from dlboard.plugins.charts._artifact_tags import format_tags_caption, parse_tags
+from dlboard.plugins.charts._artifact_tags import format_tags_caption
+from dlboard.plugins.charts._layers import (
+    DrawnLayer,
+    drawn_layers,
+    is_overlay_of,
+    overlay_keys_of,
+    serve_layered_picture,
+)
 from dlboard.serve import AssetKind, ClientsideScript, series_swatch_class, serve_asset
 
 if typing.TYPE_CHECKING:
-    from collections.abc import Hashable, Iterable
+    from collections.abc import Iterable
 
 MAX_SLIDER_LABELS = 10
 
@@ -75,21 +78,6 @@ class LayerStyle(BaseModel, frozen=True, extra="forbid", use_attribute_docstring
     """`shown`; `hidden` (in the legend, drawn only when a viewer shows it); or `off` (not drawn, and not in the legend)."""
     opacity: float = Field(default=1.0, ge=0, le=1)
     """How opaque the layer is, from 0 (invisible) to 1 (the default)."""
-
-
-class DrawnLayer(BaseModel, frozen=True):
-    """A layer to draw over one picture, as the browser is told it: which file it is, and what kind of layer."""
-
-    url: str
-    kind: LayerKind
-    layer: str
-    """The artifact key of the layer (`_layer_keys`), which its style, and a viewer's change, is looked up by."""
-
-
-def _is_overlay_of(key: str, image_key: object) -> bool:
-    """Whether `key` is an overlay of the picture under `image_key`."""
-    overlay = OverlayKey.parse(key)
-    return overlay is not None and overlay.image_key == image_key
 
 
 def _layer_label(key: str, image_key: str) -> str:
@@ -159,7 +147,7 @@ class ImageChartSettings(BaseModel, frozen=True, extra="forbid", use_attribute_d
         return {
             key: style
             for key, style in layers.items()
-            if not _is_overlay_of(key, info.data.get("key")) or style != LayerStyle()
+            if not is_overlay_of(key, info.data.get("key")) or style != LayerStyle()
         }
 
     @property
@@ -232,19 +220,6 @@ def _layers_element(element_id: dict[str, str]) -> html.Div:
     )
 
 
-def _drawn_layers(row: dict[Hashable, Any], layers: list[str]) -> list[DrawnLayer]:
-    """The layers a picture's `row` of the panel dataframe has a file for, in the order of `layers`."""
-    drawn: list[DrawnLayer] = []
-    for key in layers:
-        url, fname = row.get(artifact_column(key)), row.get(artifact_fname_column(key))
-        # A layer the run did not log at this step holds NaN, which is no string.
-        if isinstance(url, str) and isinstance(fname, str):
-            kind = layer_kind(parse_tags(row.get(artifact_tags_column(key))), fname)
-            if kind is not None:
-                drawn.append(DrawnLayer(url=url, kind=kind, layer=key))
-    return drawn
-
-
 def _layer_keys(parameters: ImageChartSettings, columns: Iterable[str]) -> list[str]:
     """
     The artifact key of each layer drawn over the pictures, bottom first.
@@ -253,11 +228,7 @@ def _layer_keys(parameters: ImageChartSettings, columns: Iterable[str]) -> list[
     too), in key order, then the other artifacts the `layers` rows name, in row order. An off layer is none of them.
     """
     present = set(columns)
-    overlays = [
-        key
-        for key in sorted(artifact_keys_in(present, overlay_key(parameters.key), prefix=True))
-        if _is_overlay_of(key, parameters.key)
-    ]
+    overlays = overlay_keys_of(parameters.key, present)
     others = [key for key in parameters.layers if key not in overlays and artifact_column(key) in present]
     return [
         key
@@ -285,7 +256,7 @@ def _layers_by_picture(
     """Each picture's layers, by its URL: only the pictures with a layer at their own step, the rest are left out."""
     if not layers:
         return {}
-    drawn = ((row[picture_col], _drawn_layers(row, layers)) for row in pictures.to_dict("records"))
+    drawn = ((row[picture_col], drawn_layers(row, layers)) for row in pictures.to_dict("records"))
     return {url: layers_of for url, layers_of in drawn if layers_of}
 
 
@@ -541,7 +512,7 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
     @typing.override
     def fixed_table_rows(cls, parameters: ImageChartSettings, choices: ColumnChoices) -> FixedRows:
         """Every overlay logged over the picture is a row of the Layers table, by its name: it is drawn whether or not it is saved."""
-        overlays = sorted(key for key in choices.artifact_keys() if _is_overlay_of(key, parameters.key))
+        overlays = sorted(key for key in choices.artifact_keys() if is_overlay_of(key, parameters.key))
         return {"layers": {key: _layer_label(key, parameters.key) for key in overlays}}
 
     @classmethod
@@ -595,22 +566,14 @@ _LOCK_JS = ClientsideScript(Path(__file__).with_name("image_series_lock.js"))
 _MODAL_OVERLAY_JS = ClientsideScript(Path(__file__).with_name("image_series_modal_overlay.js"))
 _CSS_PATH = Path(__file__).with_name("image_series.css")
 _OVERLAY_HELPER_PATH = Path(__file__).with_name("image_series_overlay.js")
-"""Draws an overlay into a picture's layer; both the scrub and the modal call it, so it is a shared script."""
-
-
-def _overlay_helper_script() -> bytes:
-    """`image_series_overlay.js`, after the mask defaults the server has, so a mask is drawn in the palette Python uses."""
-    defaults = {
-        "DEFAULT_CLASS_COLORS": list(DEFAULT_CLASS_COLORS),
-        "DEFAULT_MASK_OPACITY": DEFAULT_MASK_OPACITY,
-    }
-    return f"window.dlMaskDefaults = {json.dumps(defaults)};\n".encode() + _OVERLAY_HELPER_PATH.read_bytes()
+"""Draws an image chart's legend over its pictures; both the scrub and the modal call it, so it is a shared script."""
 
 
 def plug(app: dash.Dash) -> None:
     """Register clientside callbacks for image-series scrubbing, captions, pagination and overlays."""
+    serve_layered_picture(app)
     serve_asset(app, AssetKind.STYLESHEET, _CSS_PATH.name, _CSS_PATH.read_bytes())
-    serve_asset(app, AssetKind.SCRIPT, _OVERLAY_HELPER_PATH.name, _overlay_helper_script())
+    serve_asset(app, AssetKind.SCRIPT, _OVERLAY_HELPER_PATH.name, _OVERLAY_HELPER_PATH.read_bytes())
     app.clientside_callback(
         _MODAL_OVERLAY_JS.source,
         dash.Output({"type": "image-series-modal-overlay", "instance": dash.MATCH}, "style"),

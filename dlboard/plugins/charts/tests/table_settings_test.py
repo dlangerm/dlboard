@@ -9,7 +9,7 @@ import pytest
 from pydantic import ValidationError
 
 from dlboard.conftest import props as _props
-from dlboard.models import ChartInstance, ChartTypeRegistry
+from dlboard.models import ChartInstance, ChartTypeRegistry, overlay_key
 from dlboard.plugins.charts._key_patterns import KeyPatterns
 from dlboard.plugins.charts._table_settings import Aggregate, TableChartSettings, TableMode, TableRows
 from dlboard.plugins.charts.table_chart import TableChart
@@ -59,9 +59,11 @@ def test_the_metrics_and_hparams_a_table_asks_the_panel_to_fetch(
     ("show_artifacts", "keys", "prefixes"),
     [
         pytest.param([], set(), set(), id="none-by-default"),
-        pytest.param(["a", "b"], {"a", "b"}, set(), id="keys"),
+        pytest.param(
+            ["a", "b"], {"a", "b"}, {overlay_key("a"), overlay_key("b")}, id="keys-and-their-overlays"
+        ),
         pytest.param(["eval/*"], set(), {"eval/"}, id="prefix"),
-        pytest.param(["a", "eval/*", "*"], {"a"}, {"eval/", ""}, id="both-and-all"),
+        pytest.param(["a", "eval/*", "*"], {"a"}, {overlay_key("a"), "eval/", ""}, id="both-and-all"),
     ],
 )
 def test_the_artifact_keys_a_table_asks_the_panel_to_fetch(

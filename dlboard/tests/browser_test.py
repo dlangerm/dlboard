@@ -2788,6 +2788,44 @@ def test_a_table_of_artifacts_shows_thumbnails_and_sorts_by_a_tag(
     assert console_errors == []
 
 
+def test_a_table_of_artifacts_draws_the_overlays_logged_over_a_picture_on_its_thumbnail(
+    page: Page, live_server_url: str, tmp_path: Path, console_errors: list[str]
+) -> None:
+    """A picture in a table cell has its overlays drawn over it, as an image chart draws them, and they are no rows of their own."""
+    _create_project_and_experiment(page, live_server_url, "Table Overlay Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    _log_masks_over_a_picture(live_server_url, tmp_path, experiment_id)
+
+    store = get_system_data_store()
+    shared = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
+    table = models.ChartInstance[Any, Any](
+        chart_type="table",
+        parameters={
+            "rows": "artifact",
+            "show_artifacts": ["samples/*"],
+            "show_metrics": [],
+            "show_hparams": [],
+        },
+    )
+    store.update_page(
+        shared.model_copy(update={"panels": [PanelInstance[Any, Any](name="Samples", charts=[table])]})
+    )
+    page.reload()
+
+    chart = page.locator(".dl-chart-item")
+    expect(chart.locator(".ag-center-cols-container .ag-row")).to_have_count(
+        1
+    )  # the picture, not its overlays
+    picture = chart.locator(".ag-cell .dl-layered-picture")
+    expect(picture.locator("> img")).to_have_count(1)
+    expect(picture.locator(".dl-image-series-layer svg image")).to_have_count(
+        2
+    )  # truth and prediction, both masks
+    assert picture.locator(".dl-image-series-overlay").evaluate(_OVERLAY_COVERS_PICTURE_JS)
+    assert console_errors == []
+
+
 def test_a_tables_editor_opens_an_old_table_as_its_new_settings_and_takes_a_typed_prefix(
     page: Page, live_server_url: str, tmp_path: Path
 ) -> None:

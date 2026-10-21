@@ -36,6 +36,7 @@ from dlboard.models import (
     ChartType,
     ColumnKind,
     MetricColumn,
+    OverlayKey,
     Quantity,
     RenderContext,
     TagValue,
@@ -45,9 +46,11 @@ from dlboard.models import (
     artifact_keys_in,
     artifact_tags_column,
     is_inlineable_artifact,
+    overlay_key,
 )
 from dlboard.plugins.charts._artifact_tags import parse_tags
 from dlboard.plugins.charts._key_patterns import KeyPatterns
+from dlboard.plugins.charts._layers import drawn_layers, overlay_keys_of, serve_layered_picture
 from dlboard.plugins.charts._table_settings import Aggregate, TableChartSettings, TableRows
 from dlboard.serve import AssetKind, ClientsideScript, series_swatch_class, serve_asset
 from dlboard.serve._grid import (
@@ -69,12 +72,18 @@ _GRID_TYPE: typing.Final = "dl-table-chart"
 _ARTIFACT_FIELD: typing.Final = "artifact"
 """The field of an artifact's link in a table of artifacts; a tag's is this and `__tag__` and its name."""
 
+ARTIFACT_RENDERER: typing.Final = "DlboardArtifactLink"
+"""The cell renderer of an artifact's link (`table_chart_cells.js`): a thumbnail with its layers drawn over it, or a file's name."""
+_LINK_SUFFIX: typing.Final = "__link"
+"""What a link's field is followed by for the field that holds what the renderer draws it from."""
+
 _ROW_ID_FIELD: typing.Final = "_row_id"
 _SWATCH_FIELD: typing.Final = "_swatch"
 """A row's identity and a run's swatch class, as fields of its own: dash-ag-grid's JS-string parser has no `String(...)`."""
 
 _PAGE_JS = ClientsideScript(Path(__file__).with_name("table_chart_page.js"))
 _CSS_PATH = Path(__file__).with_name("table_chart.css")
+_CELLS_PATH = Path(__file__).with_name("table_chart_cells.js")
 
 _THUMBNAIL_ROW_HEIGHT: typing.Final = 64
 """A row tall enough for an image thumbnail (`table_chart.css` fits the image to it), when the table has any."""
@@ -189,7 +198,7 @@ def _markdown_text(text: str) -> str:
 
 
 class _ArtifactCells(typing.NamedTuple):
-    """The cells one artifact adds to a row: its link, then one per tag."""
+    """The cells one artifact adds to a row: its link (as text, and as what the browser draws it from), then one per tag."""
 
     cells: dict[str, Any]
     tag_titles: dict[str, str]
@@ -204,19 +213,30 @@ def _tag_cell(value: TagValue) -> tuple[bool | float | str, str]:
     return value, ""
 
 
-def _artifact_cells(field: str, row: pd.Series[Any], key: str) -> _ArtifactCells:
+def _artifact_cells(field: str, row: pd.Series[Any], key: str, layer_keys: list[str]) -> _ArtifactCells:
     """
     The cells the artifact under `key` in a panel-dataframe `row` adds, its link in `field` and each tag in its own.
 
-    An image a browser shows inline is a thumbnail linking to the full image; any other file is a link
-    to download it, named by the file name it was logged with.
+    An image a browser shows inline is a thumbnail linking to the full image, with the layers `layer_keys` names that were
+    logged beside it at the same step drawn over it; any other file is a link to download it, named by the file name it
+    was logged with. The link is a Markdown text, which is what the column sorts and filters by, and `_LINK_SUFFIX`'s
+    field beside it, which is what `ARTIFACT_RENDERER` draws it from.
     """
     url = row[artifact_column(key)]
     logged_name = row.get(artifact_fname_column(key))
     name = logged_name if isinstance(logged_name, str) else key.rpartition("/")[2]
     thumbnail = is_inlineable_artifact(name)
     label = _markdown_text(name)
-    cells: dict[str, Any] = {field: f"[![{label}]({url})]({url})" if thumbnail else f"[{label}]({url})"}
+    layers = drawn_layers(row.to_dict(), layer_keys)
+    cells: dict[str, Any] = {
+        field: f"[![{label}]({url})]({url})" if thumbnail else f"[{label}]({url})",
+        f"{field}{_LINK_SUFFIX}": {
+            "href": url,
+            "name": name,
+            "image": thumbnail,
+            "layers": [layer.model_dump(mode="json") for layer in layers],
+        },
+    }
     tag_titles: dict[str, str] = {}
     for tag, value in parse_tags(row.get(artifact_tags_column(key))).items():
         tag_field = f"{field}__tag__{tag}"
@@ -230,7 +250,7 @@ def _artifact_columns(
 ) -> list[dict[str, Any]]:
     """The columns for an artifact's link, `title`d, and its tags (those `tag_titles` names, in order)."""
     return [
-        column_def(field, TEXT, headerName=title, cellRenderer="markdown", minWidth=160),
+        column_def(field, TEXT, headerName=title, cellRenderer=ARTIFACT_RENDERER, minWidth=160),
         *(
             column_def(tag_field, infer_column_dtype(rows, tag_field), headerName=tag_title)
             for tag_field, tag_title in tag_titles.items()
@@ -255,6 +275,10 @@ class _Source:
     ordered: pd.DataFrame
     columns: _Columns
     names: dict[int, str]
+
+    def layer_keys(self, key: str) -> list[str]:
+        """The overlays the dataframe has for the picture under `key`: the layers drawn over it wherever it is shown."""
+        return overlay_keys_of(key, self.ordered.columns)
 
     def latest_artifacts(self, key: str, by: list[str]) -> pd.DataFrame:
         """The last row logging an artifact under `key` of each group `by` names."""
@@ -282,15 +306,21 @@ def _selected_columns(parameters: TableChartSettings, dataframe: pd.DataFrame) -
     metrics = KeyPatterns(tuple(parameters.show_metrics)).select(
         [*metric_cols, *bookkeeping], reserved=bookkeeping
     )
+    artifacts = KeyPatterns(tuple(parameters.show_artifacts)).select(
+        artifact_keys_in(columns, "", prefix=True)
+    )
     return _Columns(
         metrics=[m for m in metrics if m not in has_a_column_of_its_own],
         hparams=[
             f"{HPARAM_COLUMN_PREFIX}{k}"
             for k in KeyPatterns(tuple(parameters.show_hparams)).select(hparam_keys)
         ],
-        artifacts=KeyPatterns(tuple(parameters.show_artifacts)).select(
-            artifact_keys_in(columns, "", prefix=True)
-        ),
+        # An overlay of a picture that is shown is drawn over it, not a column of its own.
+        artifacts=[
+            key
+            for key in artifacts
+            if (overlay := OverlayKey.parse(key)) is None or overlay.image_key not in artifacts
+        ],
     )
 
 
@@ -346,7 +376,7 @@ def _render_by_group(source: _Source) -> dag.AgGrid:
         field = artifact_column(key)
         tag_titles: dict[str, str] = {}
         for _, artifact in source.latest_artifacts(key, by).iterrows():
-            found = _artifact_cells(field, artifact, key)
+            found = _artifact_cells(field, artifact, key, source.layer_keys(key))
             if (row := rows.get(tuple(artifact[c] for c in by))) is not None:
                 row.update(found.cells)
             tag_titles |= found.tag_titles
@@ -416,9 +446,11 @@ def _render_spread_by_run(source: _Source) -> dag.AgGrid:
         field = artifact_column(key)
         for _, artifact in source.latest_artifacts(key, by).iterrows():
             # A run's value of the row field is not an artifact's tags to compare: only its link is shown.
-            found = _artifact_cells(field, artifact, key)
+            found = _artifact_cells(field, artifact, key, source.layer_keys(key))
             if (row := rows.get(artifact[parameters.row_field])) is not None:
-                row[cell(int(artifact[MetricColumn.RUN_ID]), field)] = found.cells[field]
+                run_field = cell(int(artifact[MetricColumn.RUN_ID]), field)
+                row[run_field] = found.cells[field]
+                row[f"{run_field}{_LINK_SUFFIX}"] = found.cells[f"{field}{_LINK_SUFFIX}"]
             thumbnails |= found.thumbnail
 
     # A value of the row field that nothing shown was logged under (another chart's metric) is no row.
@@ -450,7 +482,7 @@ def _render_spread_by_run(source: _Source) -> dag.AgGrid:
                 cell(run_id, artifact_column(key)),
                 TEXT,
                 headerName=artifact_display_name(key),
-                cellRenderer="markdown",
+                cellRenderer=ARTIFACT_RENDERER,
                 minWidth=160,
             )
             for key in columns.artifacts
@@ -476,7 +508,7 @@ def _render_artifact_rows(source: _Source) -> dag.AgGrid:
         # (A frame with no columns has no records, not an empty one per row.)
         beside: list[dict[str, Any]] = _records(logged[beside_cols]) if beside_cols else [{}] * len(logged)
         for (_, artifact), values in zip(logged.iterrows(), beside, strict=True):
-            found = _artifact_cells(_ARTIFACT_FIELD, artifact, key)
+            found = _artifact_cells(_ARTIFACT_FIELD, artifact, key, source.layer_keys(key))
             run_id, step = int(artifact[MetricColumn.RUN_ID]), int(artifact[MetricColumn.STEP])
             rows.append(
                 {
@@ -577,7 +609,9 @@ class TableChart(ChartType[TableChartSettings, pd.DataFrame, dag.AgGrid], frozen
     @classmethod
     @typing.override
     def hint_required_artifact_key_prefixes(cls, parameters: TableChartSettings) -> set[str]:
-        return set(KeyPatterns(tuple(parameters.show_artifacts)).prefixes)
+        artifacts = KeyPatterns(tuple(parameters.show_artifacts))
+        # The overlays of a picture shown by its key are drawn over it, so they are fetched with it.
+        return set(artifacts.prefixes) | {overlay_key(key) for key in artifacts.exact}
 
     @classmethod
     @typing.override
@@ -602,9 +636,11 @@ class TableChart(ChartType[TableChartSettings, pd.DataFrame, dag.AgGrid], frozen
 
 
 def plug(app: dash.Dash) -> None:
-    """Plugin: registers the chart type, the callback that puts a redrawn grid back on its page, and its stylesheet."""
+    """Plugin: registers the chart type, the callback that puts a redrawn grid back on its page, and its cells and stylesheet."""
     TableChart.register(allow_override=True)
+    serve_layered_picture(app)
     serve_asset(app, AssetKind.STYLESHEET, _CSS_PATH.name, _CSS_PATH.read_bytes())
+    serve_asset(app, AssetKind.SCRIPT, _CELLS_PATH.name, _CELLS_PATH.read_bytes())
     app.clientside_callback(
         _PAGE_JS.source,
         Output({"type": _GRID_TYPE, "chart": MATCH}, "paginationGoTo"),

@@ -51,7 +51,9 @@ shows (`show_metrics`, `show_hparams`, `show_artifacts`).
 Each `show_*` list takes names, or a prefix and a `*` for everything under it: `eval/*` is a column for every
 key starting `eval/`, including ones logged later, and `*` alone is all of them. The metrics and hyperparameters
 start at `*`; an empty list shows none, so a table of only artifacts is one. An image is a thumbnail linking to
-the full one; any other file is a download link. Runs are named and colored as in the charts and the Runs
+the full one, with the overlays logged over it at the same step drawn on it as an image chart draws them (an overlay of
+a picture the table shows is not a column or a row of its own; one chosen without its picture is a file like any other);
+any other file is a download link. Runs are named and colored as in the charts and the Runs
 table, every column filters in place, and a table keeps its sort, filters and page when a live update
 redraws it. A table saved with the earlier `mode` settings (`runs`, `pivot`, `artifacts`) opens as the rows
 and columns that show the same table.

@@ -1,9 +1,15 @@
-/* A table chart's artifact thumbnails: fit the image to its row (`_THUMBNAIL_ROW_HEIGHT` in `table_chart.py`). */
-.dl-table-chart .ag-cell img {
+/* A table chart's artifact thumbnails: fit the image to its row (`_THUMBNAIL_ROW_HEIGHT` in `table_chart.py`), with the
+   layers over it (`_layered_picture.css`) in the same box. */
+.dl-table-chart .dl-layered-picture {
+  max-width: 100%;
+  margin: 4px 0;
+  vertical-align: top;
+}
+
+.dl-table-chart .dl-layered-picture > img {
   display: block;
   max-width: 100%;
   max-height: 56px;
-  margin: 4px 0;
   object-fit: contain;
 }
 

@@ -4,32 +4,6 @@
     position: relative;
 }
 
-/* An image's overlay (see `image_series_overlay.js`): an SVG laid over its picture, in the same box, so clicks reach
-   the picture underneath. Its viewBox is the picture's pixel size and it is scaled `contain` as the picture is. */
-.dl-image-series-overlay {
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-}
-
-/* One layer of an overlay, at its own opacity (set inline); layers stack in the order they are listed. */
-.dl-image-series-layer {
-    position: absolute;
-    inset: 0;
-}
-
-.dl-image-series-layer > svg,
-.dl-image-series-layer > img {
-    display: block;
-    width: 100%;
-    height: 100%;
-}
-
-.dl-image-series-layer > img {
-    object-fit: contain;
-    image-rendering: pixelated; /* as the picture itself is, so a small mask lines up with it block for block */
-}
-
 .dl-image-series-thumb[data-dl-loading] img {
     opacity: 0.4;
     transition: opacity 0.15s ease;
@@ -60,11 +34,6 @@
     .dl-image-series-thumb[data-dl-loading]::after {
         animation-duration: 2.4s;
     }
-}
-
-/* A layer the viewer (or the chart) has hidden takes no space and draws nothing. */
-.dl-image-series-layer[hidden] {
-    display: none;
 }
 
 .dl-image-series-thumb {
