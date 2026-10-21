@@ -1329,7 +1329,8 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         log = self._tables[models.AuditLogEntry]
         yield from self._fetch(
             models.AuditLogEntry,
-            sa.select(log).order_by(log.c.timestamp_utc.desc()).limit(limit).offset(offset),
+            # Entries made in one clock tick share a timestamp: the later id is the later entry.
+            sa.select(log).order_by(log.c.timestamp_utc.desc(), log.c.id.desc()).limit(limit).offset(offset),
         )
 
     def _list_deleted[RowT: BaseModel](self, model: type[RowT], *, limit: int, offset: int) -> Iterator[RowT]:
