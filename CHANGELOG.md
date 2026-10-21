@@ -14,29 +14,33 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ### Added
 
-* **Segmentation masks as overlay layers.** `dlboard.client.artifacts.rle.run_length_encode` turns a per-pixel class
-  array into an `ImageMask`, run-length encoded with the mask's shape and each class's color. Logged in an `Overlay`, an
+* **Segmentation masks as overlay layers.** `dlboard.client.artifacts.rle.run_length_encode` turns the class of each pixel
+  of one picture (an integer array of `height width`) into an `ImageMask`, run-length encoded with the mask's shape and
+  each class's color. Logged in an `Overlay`, an
   image chart paints it over its picture, at the mask's `opacity` (0.5 by default, so the picture shows through): a class
   with a color is drawn in it, and a class without one is left see-through. With no `colors` at all, a mask draws class 0
-  clear and every other class in a built-in palette. An older server stores it without drawing it, so upgrade the
-  server to see masks.
+  clear and every other class in a built-in palette (an empty `colors={}` draws nothing). An older server stores it
+  without drawing it, so upgrade the server to see masks.
+* **A table chart draws the overlays logged over a picture on its thumbnail**, as an image chart does, in a table of
+  runs, of a metric's values or of artifacts. An overlay of a picture the table shows is no column or row of its own.
 * **A legend over each of an image chart's pictures.** It lists the layers drawn on the picture, a row each: tick one to
   show or hide it on every picture at once, without loading anything again, or shift-click it to show it alone, to
   compare a truth with a prediction. Each row lists what its layer holds (the classes of a mask, the labels of shapes) in
   their colors, so a class of one layer is not mistaken for another's. The eye hides every layer, and holding it or a
   picture shows the picture without them while held; the legend starts folded to "Layers" and opens on a click, and a layer the picture has nothing
-  for is dimmed. What a viewer changes is their own, kept for the browser tab: the chart's card says "View changed" and
+  for is dimmed. What a viewer changes is their own, kept for the browser tab and for the view of the experiment they
+  are looking at: the chart's card says "View changed" and
   offers **Save as default**, which writes which layers are shown into the chart's settings (into a view of your own, if
   the page is not yours), or **Reset**.
 * **The chart editor is docked beside the panels**, not a modal over them, so the rest of the page stays in view. An
   edited chart is drawn as the form has it in its own card, in place of the saved chart; Cancel puts it back exactly as
   it was, and a live update never overwrites the draft. A chart being added is previewed in the pane. Its settings are
   grouped into collapsible sections (Data, Display, and a chart type's own, such as Layers and Tags on an image chart).
-* For chart plugin authors: **`ChartType.parameters_to_edit`** shows in the editor what a chart draws by default but does
-  not save, **`SettingsSection`** (with `DATA_SECTION`, `DISPLAY_SECTION` and `ADVANCED_SECTION`) groups
-  a chart type's settings in the editor, and **`ChartType.viewer_state_type`** (a `ViewerState` with `applied_to`) /
-  **`RenderContext.viewer_state_key`** let a chart type keep what a viewer changes without editing it, with the card's
-  "Save as default" and "Reset" handled for it. See [docs/plugins/charts.md](docs/plugins/charts.md).
+* For chart plugin authors: **`ChartType.fixed_table_rows`** lists in the editor's table settings the rows a chart draws
+  whether or not they are saved (restyleable, but not renamed or removed), **`SettingsSection`** (with `DATA_SECTION`,
+  `DISPLAY_SECTION` and `ADVANCED_SECTION`) groups a chart type's settings in the editor, and a setting's
+  `Field(title=...)` is what the editor calls it when its name as a sentence is not ("Show hyperparameters", not "Show
+  hparams"). See [docs/plugins/charts.md](docs/plugins/charts.md).
 
 ### Changed
 
@@ -48,6 +52,8 @@ pulls that section's body into the GitHub release notes and publishes both distr
   a chart saved with `overlays` opens as the rows that draw the same layers. One that left out an overlay of its image
   now draws it (set it `off`), and an image's own overlays are drawn in key order. **The chart editor's Layers table lists
   every layer the chart draws**, rather than only what was saved, so a layer can be hidden, turned off or added there.
+  An overlay's row is the chart's to keep: it can be restyled, but not renamed or removed (set it `off` to leave the
+  overlay out), and one left as it is by default is not saved.
 * Overlays are shown by their image and name (`samples/a · truth`; `unnamed overlay` when it has none) in an image chart's title, a
   table's column headers and the chart editor, never by the `_$overlay` suffix they are logged under. The editor's key
   pickers no longer offer an overlay whose image is logged, since that image's chart draws it.

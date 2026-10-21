@@ -33,6 +33,13 @@ restarts or is scaled up mid-rollout fails until it's replaced by the new versio
 rolling deploy does anyway. A release that can't promise even this says so in the changelog and needs
 all servers stopped together.
 
+## Charts saved by a newer version
+
+A chart's settings are checked strictly, so a server shows a chart saved with settings it does not know as an error, and
+an edit made there drops them. That matters during a rolling upgrade, or after a rollback: **upgrade every server before
+editing a chart whose type the new version changed** (the changelog says which, as it did for the image chart's
+`layers`), and don't edit one on an old server in the meantime.
+
 ## Going back
 
 Don't downgrade the software against an upgraded database: an older server can't open a database
