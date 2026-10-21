@@ -146,9 +146,17 @@ def _auto_generate_charts(page: Page) -> None:
 
 
 def _open_panel_menu(page: Page, index: int = 0) -> None:
-    """Open the actions menu on the `index`th panel header (its controls only mount once it opens)."""
+    """
+    Open the actions menu on the `index`th panel header (its controls only mount once it opens).
+
+    Waits for a menu that is still closing (picking an item closes it, with a fade) to be gone first: a click on its
+    button while it fades would toggle it shut again, and the control the test reaches for would never appear.
+    """
+    menu = page.get_by_role("menu")
+    expect(menu).to_have_count(0)
     page.locator(".dl-panel-item-header").nth(index).hover()
     page.get_by_role("button", name="Panel actions").nth(index).click()
+    expect(menu).to_be_visible()
 
 
 def test_logged_metrics_render_as_a_real_chart(

@@ -167,7 +167,7 @@ def test_a_failed_build_is_retried_after_a_back_off_and_the_process_recovers(
     telemetry.setattr(_sdk, "build_metrics", flaky)
     # Not `time.sleep`: logging the failure (a traceback with its locals) can take longer than a short back-off on a
     # busy machine, which would end it before the test looked.
-    telemetry.setattr(shared, "time", clock)
+    telemetry.setattr(shared, "_monotonic", clock.monotonic)
     METRICS.close()  # starts the back-off over
 
     assert METRICS.get() is None

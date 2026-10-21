@@ -35,6 +35,9 @@ if TYPE_CHECKING:
 
 _log = get_logger(__name__)
 
+_monotonic = time.monotonic
+"""The clock a failed build's back-off is measured against; a test winds its own on by hand."""
+
 
 class _Closeable(Protocol):
     def close(self) -> None: ...
@@ -77,19 +80,19 @@ class PerProcess(Generic[T]):
         """The `T` for the current process, built on first use; `None` when switched off or not (yet) built."""
         if self._pid == os.getpid():
             return self._value
-        if time.monotonic() < self._retry_at:
+        if _monotonic() < self._retry_at:
             return None
         with self._lock:
             if self._pid == os.getpid():
                 return self._value
-            if time.monotonic() < self._retry_at:  # another thread has just failed
+            if _monotonic() < self._retry_at:  # another thread has just failed
                 return None
             self._pid = os.getpid()
             try:
                 self._value = self._build()
             except Exception:  # noqa: BLE001 -- a down collector or bad endpoint must not take a request or startup with it
                 self._pid = None  # not built: ask again once the back-off is over
-                self._retry_at = time.monotonic() + self._backoff_s
+                self._retry_at = _monotonic() + self._backoff_s
                 _log.warning(
                     "telemetry is not available in this process; trying again in %.0f s",
                     self._backoff_s,
