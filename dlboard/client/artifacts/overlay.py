@@ -7,7 +7,7 @@ import uuid
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Annotated, Final, Literal, NamedTuple
 
-from pydantic import BaseModel, Field, NonNegativeInt, StringConstraints, model_validator
+from pydantic import BaseModel, Field, NonNegativeInt, PositiveInt, StringConstraints, model_validator
 
 from dlboard.models import LAYER_KIND_TAG, LayerKind, NewArtifact, TagValue, overlay_key
 
@@ -102,8 +102,8 @@ class ImageMask(BaseModel, frozen=True, extra="forbid", use_attribute_docstrings
 
     kind: Literal["mask"] = "mask"
     encoding: Literal["rle"] = "rle"
-    shape: list[int] = Field(min_length=2)
-    """The mask's shape in C order: `1` in every dimension but the last two, which are the picture's height and width."""
+    shape: tuple[PositiveInt, PositiveInt]
+    """The picture's height and width, which the mask covers pixel for pixel in C order (row by row)."""
     data: list[NonNegativeInt]
     """List of alternating N,I where N is the number of elements and I is the ID common to them."""
     colors: dict[int, HexColor] | None = None
@@ -115,20 +115,6 @@ class ImageMask(BaseModel, frozen=True, extra="forbid", use_attribute_docstrings
     """The name of each class ID, for a legend."""
     opacity: Fraction = DEFAULT_MASK_OPACITY
     """How opaque the colored classes are, from 0 (invisible) to 1, so the picture shows through them."""
-
-    def class_color(self, class_id: int) -> HexColor | None:
-        """The color class `class_id` is drawn in, or `None` if it is left see-through."""
-        if self.colors is not None:
-            return self.colors.get(class_id)
-        return DEFAULT_CLASS_COLORS[(class_id - 1) % len(DEFAULT_CLASS_COLORS)] if class_id > 0 else None
-
-    @model_validator(mode="after")
-    def _is_one_picture(self) -> ImageMask:
-        # The browser draws a mask one picture at a time, so a shape with more than one picture in it is not drawable.
-        if any(n != 1 for n in self.shape[:-2]):
-            msg = f"a mask is one picture, so every dimension but its last two must be 1, not shape {self.shape}"
-            raise ValueError(msg)
-        return self
 
     @model_validator(mode="after")
     def _runs_cover_the_shape(self) -> ImageMask:

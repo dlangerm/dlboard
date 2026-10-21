@@ -90,7 +90,7 @@ def test_a_malformed_shape_is_rejected(shape: dict[str, Any]) -> None:
 
 
 def test_a_mask_is_written_in_the_shapes_file_with_its_shape_runs_and_colors(tmp_path: Path) -> None:
-    mask = ImageMask(encoding="rle", shape=[1, 2, 2], data=[1, 1, 3, 0], colors={1: "#ff0000"})
+    mask = ImageMask(encoding="rle", shape=[2, 2], data=[1, 1, 3, 0], colors={1: "#ff0000"})
     overlay = Overlay(key="samples/mask", step=2, shapes=[mask])
 
     artifact, target = overlay.to_artifact(tmp_path, run_id=1, experiment_id=1)
@@ -101,7 +101,7 @@ def test_a_mask_is_written_in_the_shapes_file_with_its_shape_runs_and_colors(tmp
         {
             "kind": "mask",
             "encoding": "rle",
-            "shape": [1, 2, 2],
+            "shape": [2, 2],
             "data": [1, 1, 3, 0],
             "colors": {"1": "#ff0000"},
             "classnames": None,

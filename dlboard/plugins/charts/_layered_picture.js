@@ -18,7 +18,7 @@ window.dlLayeredPicture = (() => {
     // this script, so a mask with no `colors` is drawn in the same palette as the Python that made it.
     const { DEFAULT_CLASS_COLORS, DEFAULT_MASK_OPACITY } = window.dlMaskDefaults;
 
-    // The color class `id` of `mask` is drawn in, or nothing if it is left see-through (`ImageMask.class_color`).
+    // The color class `id` of `mask` is drawn in, or nothing if it is left see-through (`colors`, else the default palette of `overlay.py`).
     const classColor = (mask, id) => {
         if (mask.colors) {
             // The colors are keyed by ID, which JSON keeps as a string key: indexing by the number finds it the same.
@@ -45,13 +45,14 @@ window.dlLayeredPicture = (() => {
         return { outline, anchor: points[0] };
     };
 
-    // A mask (`ImageMask`, `rle`) as a PNG data URL the size of the picture: alternating `N, I` pairs, `N` pixels of
-    // class `I` each, in row-major order over `shape`, whose last two dimensions are the picture's height and width.
-    // A class without a color is left transparent, and the rest are drawn at the mask's opacity.
-    const maskPicture = (mask, { width, height }) => {
-        const [rows, cols] = mask.shape.slice(-2);
-        const elements = mask.shape.reduce((product, n) => product * n, 1);
-        if (rows !== height || cols !== width || elements !== width * height) {
+    // A mask (`ImageMask`, `rle`) as a picture the size of the picture it is over, shown by `image` (an SVG `<image>`) once
+    // the browser has encoded it: alternating `N, I` pairs, `N` pixels of class `I` each, in row-major order over the
+    // picture's `[height, width]`. A class without a color is left transparent, and the rest are drawn at the mask's
+    // opacity. The encoding is done off the main thread, so a page of masks never stops it, and the picture is a blob that
+    // lives as long as its layer does (`revokeMasks`).
+    const maskPicture = (mask, { width, height }, image) => {
+        const [rows, cols] = mask.shape;
+        if (rows !== height || cols !== width) {
             throw new Error(`a mask of shape ${mask.shape} does not cover a ${width} by ${height} picture`);
         }
         const canvas = document.createElement("canvas");
@@ -78,7 +79,24 @@ window.dlLayeredPicture = (() => {
             pixel += run;
         }
         context.putImageData(picture, 0, 0);
-        return canvas.toDataURL("image/png");
+        canvas.toBlob((blob) => {
+            if (!blob) {
+                console.error("image overlay: a mask could not be encoded as a picture");
+            } else if (image.isConnected) {
+                image.dlObjectUrl = URL.createObjectURL(blob);
+                image.setAttribute("href", image.dlObjectUrl);
+            }
+            // Otherwise its layer was drawn again while this was being encoded, and nothing wants it.
+        });
+    };
+
+    // Frees the picture of every mask drawn under `root`, which is about to be drawn again.
+    const revokeMasks = (root) => {
+        for (const image of root.querySelectorAll("image")) {
+            if (image.dlObjectUrl) {
+                URL.revokeObjectURL(image.dlObjectUrl);
+            }
+        }
     };
 
     // How each kind of shape is outlined: its SVG element, and the point its label goes at.
@@ -95,17 +113,17 @@ window.dlLayeredPicture = (() => {
         }),
         polyline: throughPoints("polyline"),
         polygon: throughPoints("polygon"),
-        mask: (shape, size) => ({
-            outline: element("image", {
-                href: maskPicture(shape, size),
+        mask: (shape, size) => {
+            const outline = element("image", {
                 x: 0,
                 y: 0,
                 width: size.width,
                 height: size.height,
                 preserveAspectRatio: "none",
-            }),
-            anchor: [0, 0],
-        }),
+            });
+            maskPicture(shape, size, outline);
+            return { outline, anchor: [0, 0] };
+        },
     };
 
     const shapeGroup = (shape, size, labelSize) => {
@@ -245,6 +263,7 @@ window.dlLayeredPicture = (() => {
             return;
         }
         layer.dataset.request = request;
+        revokeMasks(layer);
         layer.replaceChildren();
         const context = { picture, pictureUrl, isCurrent: () => layer.dataset.request === request };
         for (const spec of layers) {

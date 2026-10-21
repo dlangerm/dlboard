@@ -284,7 +284,7 @@ class UNet(nn.Module):
 
 def mask_layer(mask: torch.Tensor) -> ImageMask:
     """A class mask, run-length encoded; the background has no color, so it is left clear."""
-    return run_length_encode(mask.numpy()[None], colors=CLASS_COLORS, classnames=CLASS_NAMES)
+    return run_length_encode(mask.numpy(), colors=CLASS_COLORS, classnames=CLASS_NAMES)
 
 
 def class_boxes(mask: torch.Tensor) -> list[tuple[ShapeClass, list[float]]]:

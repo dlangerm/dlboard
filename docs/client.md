@@ -193,20 +193,21 @@ There are five built-in kinds:
   alone. An older server stores the overlay without drawing it, so upgrade the server to see the
   shapes.
 
-  A segmentation mask is a shape too. `dlboard.client.artifacts.rle.run_length_encode` turns a
-  per-pixel class array (`*batch classes height width` of integer IDs, the last two being the
-  picture's height and width) into an `ImageMask`, run-length encoded so it stays exact and small:
+  A segmentation mask is a shape too. `dlboard.client.artifacts.rle.run_length_encode` turns the class of
+  each pixel of one picture (an integer array of `height width`; take one out of a batch, and argmax a one-hot
+  `classes height width` over its classes) into an `ImageMask`, run-length encoded so it stays exact and small:
 
   ```python
   from dlboard.client.artifacts.rle import run_length_encode
 
-  mask = run_length_encode(class_ids[None], colors={1: "#e63c3c"}, classnames={1: "cat"})
+  mask = run_length_encode(class_ids, colors={1: "#e63c3c"}, classnames={1: "cat"})
   overlay.Overlay.over("sample", name="truth", shapes=[mask], step=global_step)
   ```
 
   A class with a color in `colors` is drawn in it at the mask's `opacity` (0.5 by default, so the
   picture shows through); a class with none is left see-through, which keeps a background class
-  clear. Leave `colors` out to draw ID 0 clear and every other ID in a color of a built-in palette.
+  clear. Leave `colors` out to draw ID 0 clear and every other ID in a color of a built-in palette;
+  an empty `colors={}` is not the same, and draws nothing.
 
 - `dlboard.client.artifacts.figure.Figure` — uploads a matplotlib figure as an image. You
   rarely build one yourself: `logger.log_figure` mirrors `mlflow.log_figure`, with the one

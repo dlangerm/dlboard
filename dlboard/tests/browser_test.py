@@ -2312,8 +2312,8 @@ def _log_masks_over_a_picture(
     """A picture with a `truth` and a `prediction` overlay, and (if asked) a mask image under a key of its own."""
     api = BasicDlboardAPI(live_server_url)
     run = api.create_run(models.NewRun(experiment_id=experiment_id))
-    labels = np.zeros((1, 48, 64), dtype=np.int64)
-    labels[:, 10:30, 10:40] = 1
+    labels = np.zeros((48, 64), dtype=np.int64)
+    labels[10:30, 10:40] = 1
     mask = rle.run_length_encode(labels, colors={1: "#ff0000"}, classnames={1: "cat"})
     artifacts = [
         Image(
@@ -2531,8 +2531,8 @@ def test_an_image_chart_draws_a_mask_in_an_overlay_with_its_classes_in_their_col
     run = api.create_run(models.NewRun(experiment_id=experiment_id))
     picture = np.full((48, 64, 3), 128, dtype=np.uint8)
     # The left half of the 48 by 64 picture is class 1, drawn red; the right half is class 0, which has no color.
-    labels = np.zeros((1, 48, 64), dtype=np.int64)  # one class-dimension of the picture's height and width
-    labels[:, :, :32] = 1
+    labels = np.zeros((48, 64), dtype=np.int64)  # the class of each pixel: the picture's height and width
+    labels[:, :32] = 1
     mask = rle.run_length_encode(labels, colors=colors, classnames={1: "cat"}, opacity=opacity)
     api.log_artifact_batch(
         [
@@ -2550,6 +2550,9 @@ def test_an_image_chart_draws_a_mask_in_an_overlay_with_its_classes_in_their_col
 
     layer = page.locator(".dl-chart-item .dl-image-series-thumb .dl-image-series-overlay")
     expect(layer.locator("image")).to_have_count(1)
+    expect(layer.locator("image")).to_have_attribute(
+        "href", re.compile(r"^blob:")
+    )  # encoded off the main thread
     href = layer.locator("image").get_attribute("href")
     # Sample the drawn mask's pixels: the left (class 1) is in its color at the mask's opacity, the right (class 0) is see-through.
     pixels = page.evaluate(
@@ -3298,8 +3301,8 @@ def test_the_legend_over_a_picture_lists_what_each_layer_holds_and_hides_peeks_a
     api = BasicDlboardAPI(live_server_url)
     run = api.create_run(models.NewRun(experiment_id=experiment_id))
     picture = np.full((48, 64, 3), 128, dtype=np.uint8)
-    labels = np.zeros((1, 48, 64), dtype=np.int64)
-    labels[:, :, :32] = 1
+    labels = np.zeros((48, 64), dtype=np.int64)
+    labels[:, :32] = 1
     # The same class in the same color in two layers, as a truth and a prediction have.
     truth = rle.run_length_encode(labels, colors={1: "#ff0000"}, classnames={1: "cat"})
     prediction = rle.run_length_encode(labels, colors={1: "#ff0000"}, classnames={1: "cat"})
