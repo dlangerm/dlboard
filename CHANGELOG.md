@@ -12,6 +12,8 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-21
+
 ### Added
 
 * **Segmentation masks as overlay layers.** `dlboard.client.artifacts.rle.run_length_encode` turns the class of each pixel
