@@ -152,7 +152,7 @@ ADVANCED_SECTION: typing.Final = SettingsSection("Advanced")
 """Settings that rarely need changing, like limits that keep a chart fast."""
 
 
-class ViewerState(BaseModel, frozen=True):
+class ViewerState(BaseModel, typing.Generic[_Parameters], frozen=True):
     """
     What a viewer changed in a chart without editing it: which layers they showed, a series they hid.
 
@@ -161,7 +161,7 @@ class ViewerState(BaseModel, frozen=True):
     """
 
     @abstractmethod
-    def applied_to(self, parameters: typing.Any) -> typing.Any:  # noqa: ANN401 -- the chart's own settings model
+    def applied_to(self, parameters: _Parameters) -> _Parameters:
         """`parameters` (the chart's settings) with this state made its own: what "Save as default" saves."""
 
 
@@ -271,7 +271,7 @@ class ChartType(ABC, BaseModel, typing.Generic[_Parameters, _Dataframe, _Chart],
         return FixedRows()
 
     @classmethod
-    def viewer_state_type(cls) -> type[ViewerState] | None:
+    def viewer_state_type(cls) -> type[ViewerState[_Parameters]] | None:
         """
         The model of what a viewer changes in this chart without editing it: which layers are shown, a series hidden.
 

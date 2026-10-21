@@ -211,49 +211,35 @@ window.dlImageSeriesOverlay = (() => {
     // What a chart's viewer changes are kept under: its card's key, or for a chart with none (a preview) this one drawing.
     const viewKey = (root) => root.dataset.dlViewKey || `instance:${root.dataset.dlInstance}`;
 
-    const viewerState = (root) => window.dlChartViewState?.read(viewKey(root)) ?? {};
+    const viewerState = (root) => window.dlChartViewState.read(viewKey(root)) ?? {};
 
-    // Whether every overlay is hidden (or peeked past) on a chart. It is the viewer's own, kept for this tab, and it is not a
-    // change to the chart's layers: it never says "View changed", and it is not saved with "Save as default".
-    const overlaysKey = (root) => `dl-overlays-hidden:${window.location.pathname}:${viewKey(root)}`;
-    const overlaysHidden = (root) => {
-        try {
-            return window.sessionStorage.getItem(overlaysKey(root)) === "1";
-        } catch (_error) {
-            return false;
-        }
-    };
-    const setOverlaysHidden = (root, hidden) => {
-        try {
-            window.sessionStorage.setItem(overlaysKey(root), hidden ? "1" : "0");
-        } catch (_error) {
-            // A browser that keeps nothing keeps nothing: the overlays are drawn as the chart has them.
-        }
-    };
-
-    // Whether a chart's legend lists its layers. It starts folded to its title, to leave the picture clear. Opening it is a way
-    // of looking, not a change to the chart, so it is kept apart from the viewer's state: it never says "View changed".
-    const legendKey = (root) => `dl-legend-open:${window.location.pathname}:${viewKey(root)}`;
-    const legendOpen = (root) => {
-        try {
-            return window.sessionStorage.getItem(legendKey(root)) === "1";
-        } catch (_error) {
-            return false;
-        }
-    };
+    // How the viewer has chosen to look at a chart, which is no change to it: it never says "View changed", and it is not
+    // saved with "Save as default". Whether every overlay is hidden (or peeked past), and whether the legend lists its
+    // layers: it starts folded to its title, to leave the picture clear.
+    const looking = (root) => window.dlChartViewState.local(viewKey(root));
+    const overlaysHidden = (root) => looking(root).overlaysHidden === true;
+    const setOverlaysHidden = (root, hidden) =>
+        window.dlChartViewState.setLocal(viewKey(root), { overlaysHidden: hidden });
+    const legendOpen = (root) => looking(root).legendOpen === true;
     const toggleLegend = (root) => {
-        try {
-            window.sessionStorage.setItem(legendKey(root), legendOpen(root) ? "0" : "1");
-        } catch (_error) {
-            // A browser that keeps nothing keeps nothing: the legend stays as it was drawn.
-        }
+        window.dlChartViewState.setLocal(viewKey(root), { legendOpen: !legendOpen(root) });
         restyle(root.dataset.dlInstance);
     };
 
+    // What a chart's layers are by default, parsed once for as long as the chart keeps the same `data-dl-defaults`.
+    const parsedDefaults = new WeakMap();
+    const layerDefaults = (root) => {
+        const raw = root.dataset.dlDefaults || "{}";
+        if (parsedDefaults.get(root)?.raw !== raw) {
+            parsedDefaults.set(root, { raw, parsed: JSON.parse(raw) });
+        }
+        return parsedDefaults.get(root).parsed;
+    };
+
     // The keys of a chart's layers, bottom first: what their styles, and a viewer's changes to them, are kept under.
-    const layerNames = (root) => Object.keys(JSON.parse(root.dataset.dlDefaults || "{}"));
+    const layerNames = (root) => Object.keys(layerDefaults(root));
     // What a layer is called in the legend.
-    const layerLabel = (root, key) => JSON.parse(root.dataset.dlDefaults || "{}")[key]?.label ?? key;
+    const layerLabel = (root, key) => layerDefaults(root)[key]?.label ?? key;
 
     // Changes what a chart's viewer has changed, and draws it.
     const changeViewerState = (root, change) => {
@@ -265,7 +251,7 @@ window.dlImageSeriesOverlay = (() => {
 
     // How layer `name` of the chart `root` is by itself: as the chart has it, over which the viewer's change.
     const layerStyle = (root, name) => {
-        const defaults = JSON.parse(root.dataset.dlDefaults || "{}")[name] ?? { hidden: false, opacity: 1 };
+        const defaults = layerDefaults(root)[name] ?? { hidden: false, opacity: 1 };
         return { ...defaults, ...viewerState(root).layers?.[name] };
     };
 
@@ -462,8 +448,13 @@ window.dlImageSeriesOverlay = (() => {
         updateLegend(overlay);
     };
 
-    // Applies them to a whole chart: its thumbnails and its enlarged view.
+    // Applies them to a whole chart: its thumbnails and its enlarged view. A chart that draws marks its card, which shows its
+    // "View changed" bar if the viewer has changed it.
     const restyle = (instance) => {
+        const root = chartRoot(instance);
+        if (root?.dataset.dlViewKey) {
+            window.dlChartViewState.mark(root.dataset.dlViewKey);
+        }
         for (const overlay of document.querySelectorAll(
             `.dl-image-series-overlay[data-dl-instance="${CSS.escape(instance)}"]`,
         )) {

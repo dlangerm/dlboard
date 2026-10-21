@@ -1461,6 +1461,7 @@
   "dlboard/tests/browser_test.py::test_a_chart_is_added_from_the_dock_with_its_preview_there_and_lands_at_the_end_of_its_panel[chromium]": 14.53010921398527,
   "dlboard/tests/browser_test.py::test_a_copied_chart_link_opens_that_chart_without_changing_the_shared_layout[chromium]": 4.640443230979145,
   "dlboard/tests/browser_test.py::test_a_layer_is_hidden_and_shown_from_the_legend_without_fetching_and_the_change_can_be_saved_or_reset[chromium]": 7.6753134509781376,
+  "dlboard/tests/browser_test.py::test_a_layer_shown_or_hidden_in_one_view_of_an_experiment_is_not_so_in_another[chromium]": 7.977551874995697,
   "dlboard/tests/browser_test.py::test_a_layer_typed_into_a_new_row_is_kept_when_save_is_pressed[chromium]": 16.38024059199961,
   "dlboard/tests/browser_test.py::test_a_live_update_while_a_chart_is_being_edited_redraws_the_chart_under_its_draft_not_the_draft[chromium]": 6.892142899043392,
   "dlboard/tests/browser_test.py::test_a_page_from_an_older_version_offers_a_reload[chromium]": 0.9168588070315309,

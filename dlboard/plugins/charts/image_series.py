@@ -86,31 +86,6 @@ class DrawnLayer(BaseModel, frozen=True):
     """The artifact key of the layer (`_layer_keys`), which its style, and a viewer's change, is looked up by."""
 
 
-class ViewedLayer(BaseModel, frozen=True, extra="forbid"):
-    """What a viewer changed about one layer."""
-
-    hidden: bool
-
-
-class ImageViewerState(ViewerState, frozen=True, extra="forbid"):
-    """What a viewer changed in an image chart without editing it: which layers they showed or hid."""
-
-    layers: dict[str, ViewedLayer] = Field(default_factory=dict)
-    """Which layers they showed or hid, by name."""
-
-    @typing.override
-    def applied_to(self, parameters: Any) -> ImageChartSettings:
-        """The chart with each layer the viewer showed or hid set that way. A layer that is off is not theirs to change."""
-        settings = ImageChartSettings.model_validate(parameters)
-        layers = dict(settings.layers)
-        for name, viewed in self.layers.items():
-            style = layers.get(name, LayerStyle())
-            if style.visibility is not LayerVisibility.OFF:
-                visibility = LayerVisibility.HIDDEN if viewed.hidden else LayerVisibility.SHOWN
-                layers[name] = style.model_copy(update={"visibility": visibility})
-        return settings.model_copy(update={"layers": layers})
-
-
 def _is_overlay_of(key: str, image_key: object) -> bool:
     """Whether `key` is an overlay of the picture under `image_key`."""
     overlay = OverlayKey.parse(key)
@@ -193,6 +168,30 @@ class ImageChartSettings(BaseModel, frozen=True, extra="forbid", use_attribute_d
         return TagDisplay(
             precision=self.tag_precision, time_unit=self.tag_time_unit, size_unit=self.tag_size_unit
         )
+
+
+class ViewedLayer(BaseModel, frozen=True, extra="forbid"):
+    """What a viewer changed about one layer."""
+
+    hidden: bool
+
+
+class ImageViewerState(ViewerState[ImageChartSettings], frozen=True, extra="forbid"):
+    """What a viewer changed in an image chart without editing it: which layers they showed or hid."""
+
+    layers: dict[str, ViewedLayer] = Field(default_factory=dict)
+    """Which layers they showed or hid, by name."""
+
+    @typing.override
+    def applied_to(self, parameters: ImageChartSettings) -> ImageChartSettings:
+        """The chart with each layer the viewer showed or hid set that way. A layer that is off is not theirs to change."""
+        layers = dict(parameters.layers)
+        for name, viewed in self.layers.items():
+            style = layers.get(name, LayerStyle())
+            if style.visibility is not LayerVisibility.OFF:
+                visibility = LayerVisibility.HIDDEN if viewed.hidden else LayerVisibility.SHOWN
+                layers[name] = style.model_copy(update={"visibility": visibility})
+        return parameters.model_copy(update={"layers": layers})
 
 
 def _instance_id(parameters: ImageChartSettings, chart_id: str) -> str:

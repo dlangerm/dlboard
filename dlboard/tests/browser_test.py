@@ -3192,6 +3192,60 @@ def test_a_layer_is_hidden_and_shown_from_the_legend_without_fetching_and_the_ch
     assert console_errors == []
 
 
+def test_a_layer_shown_or_hidden_in_one_view_of_an_experiment_is_not_so_in_another(
+    page: Page, live_server_url: str, tmp_path: Path, console_errors: list[str]
+) -> None:
+    """The same chart in two views of one experiment keeps the viewer's changes to its layers apart."""
+    _create_project_and_experiment(page, live_server_url, "Two Views Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    _log_masks_over_a_picture(live_server_url, tmp_path, experiment_id)
+    page.reload()
+    _auto_generate_charts(page)
+
+    chart = page.locator(".dl-chart-item").filter(has_text="samples/a")
+    legend = chart.locator(".dl-layer-legend").first
+    legend.get_by_role("button", name="Layers").click()
+    truth = _layer_row(legend, "truth").locator("button")
+    bar = chart.locator(".dl-chart-view-bar")
+    truth.click()
+    expect(truth).to_have_attribute("aria-pressed", "false")
+    expect(bar).to_be_visible()
+
+    # A second view, of the very charts this one has (same ids), as someone else's link would open it.
+    here = parse_qs(urlparse(page.url).query).get("view")
+    store = get_system_data_store()
+    current = (
+        store.get_view(BasicExperimentPage, int(here[0]))
+        if here
+        else store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
+    )
+    assert current is not None
+    other = store.create_view(
+        BasicExperimentPage,
+        models.NewPage[Any, Any](
+            experiment_id=experiment_id,
+            owner_id=store.get_or_create_user(models.Principal.unverified("second-view")).id,
+            name="second view",
+            panels=current.panels,
+        ),
+    )
+    first_url = page.url
+
+    page.goto(f"{live_server_url}/experiment/{experiment_id}?view={other.id}")
+    legend.get_by_role("button", name="Layers").click()
+    expect(truth).to_have_attribute("aria-pressed", "true")  # the first view's change is not this view's
+    expect(bar).to_be_hidden()
+    _layer_row(legend, "prediction").locator("button").click()
+    expect(bar).to_be_visible()
+
+    page.goto(first_url)  # each view still has its own
+    legend.get_by_role("button", name="Layers").click()
+    expect(truth).to_have_attribute("aria-pressed", "false")
+    expect(_layer_row(legend, "prediction").locator("button")).to_have_attribute("aria-pressed", "true")
+    assert console_errors == []
+
+
 def test_the_legend_over_a_picture_lists_what_each_layer_holds_and_hides_peeks_and_solos_them(  # noqa: PLR0915 -- one flow
     page: Page, live_server_url: str, tmp_path: Path, console_errors: list[str]
 ) -> None:

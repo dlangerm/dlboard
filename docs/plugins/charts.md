@@ -96,11 +96,10 @@ dimmed. What a viewer changes this way is theirs alone: it is kept for the brows
 The chart's card says so ("View changed") and offers to **Save as default**, which writes which layers are shown into
 the chart's `layers` setting (into a view of your own, if the page is not yours), or to **Reset** it.
 
-A chart type of your own can keep such state too. `ChartType.viewer_state_type()` returns a Pydantic model of what a
-viewer may change, its `applied_to(parameters)` method returns the settings with that state made their own, and
-`RenderContext.viewer_state_key` is what the chart names that state by in the browser. The page handles the "View
-changed" bar and the saving; the chart reads and writes the state through `window.dlChartViewState`
-(`serve/_pages/_experiment/chart_view_state.js`). `image_series.py` is the reference.
+Viewer state is kept per experiment *and view*, so the same chart in two views of one experiment has a state of its own
+in each. It is an internal mechanism of dlboard's own charts for now (`ChartType.viewer_state_type()` and
+`ViewerState.applied_to(parameters)` are the Python side, and the image chart is the only one that uses them): the
+browser-side store is not a plugin interface yet, so a chart type of your own has no way to keep viewer state.
 
 A table of runs, with an artifact column:
 
