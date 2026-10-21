@@ -7,10 +7,10 @@ from typing import TYPE_CHECKING, Any, cast
 import dash_mantine_components as dmc
 import pendulum
 import pytest
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from dlboard import models
-from dlboard.conftest import find_props
+from dlboard.conftest import find_all_props, find_props, make_fake_chart
 from dlboard.conftest import props as _to_props
 from dlboard.models._view import ColumnKind, ParameterField, ParameterFieldType
 from dlboard.plugins.charts.bar_chart import BarChart
@@ -50,19 +50,11 @@ def _log_a_run(store: SQLLiteStore, experiment_id: int) -> models.Run:
 
 def _props_by_field(form: Any) -> dict[str, dict[str, Any]]:  # noqa: ANN401 -- a Dash component tree
     """The props of every settings field in `form` by its name, wherever sections nest it."""
-    if isinstance(form, list):
-        return {
-            name: found for item in cast("list[Any]", form) for name, found in _props_by_field(item).items()
-        }
-    if not hasattr(form, "to_plotly_json"):
-        return {}
-    props = _to_props(form)
-    own = props["id"]["field"] if _is_field_id(props.get("id")) else None
-    children = _props_by_field(props.get("children"))
-    return {**children, **({own: props} if own else {})}
+    return {props["id"]["field"]: props for props in find_all_props(form, _is_field)}
 
 
-def _is_field_id(component_id: object) -> bool:
+def _is_field(props: dict[str, Any]) -> bool:
+    component_id = props.get("id")
     return isinstance(component_id, dict) and component_id.get("type") == settings_form.CHART_PARAM.type
 
 
@@ -96,15 +88,12 @@ def test_a_form_of_several_sections_is_one_accordion_that_opens_only_the_data_se
     assert set(_props_by_field([accordion])) >= {"column", "x_axis", "height", "sample"}
 
 
-def test_a_form_of_one_section_has_no_accordion(
-    monkeypatch: pytest.MonkeyPatch, store: SQLLiteStore, experiment_id: int
-) -> None:
-    field = ParameterField(name="note", type=ParameterFieldType.STR, required=False)
-    monkeypatch.setattr(
-        models.ChartTypeRegistry,
-        "get_registered_chart_types",
-        classmethod(lambda _cls: {"flat": {"note": field}}),  # pyrefly: ignore [implicit-any-lambda]
-    )
+class _FlatParams(BaseModel, frozen=True, extra="forbid"):
+    note: str = ""
+
+
+def test_a_form_of_one_section_has_no_accordion(store: SQLLiteStore, experiment_id: int) -> None:
+    make_fake_chart("flat", _FlatParams).register(allow_override=True)
 
     form = build_chart_param_form("flat", None, catalog=ColumnCatalog.load(store, experiment_id))
 
@@ -435,3 +424,14 @@ def test_a_row_the_chart_supplies_comes_first_by_its_label_and_is_not_the_person
     assert (grid or {})["dashGridOptions"]["rowClassRules"] == {
         settings_form.FIXED_ROW_CLASS: settings_form._IS_FIXED
     }
+
+
+@pytest.mark.parametrize("field_type", [ParameterFieldType.INT, ParameterFieldType.STR])
+def test_a_number_or_a_name_typed_in_redraws_the_chart_only_once_the_typing_pauses(
+    field_type: ParameterFieldType,
+) -> None:
+    field = ParameterField(name="setting", type=field_type, required=False)
+
+    props = _to_props(_param_field_input(field.name, field, ColumnCatalog()))
+
+    assert props["debounce"] == settings_form.INPUT_DEBOUNCE_MS

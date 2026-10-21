@@ -10,13 +10,14 @@ from enum import IntEnum, StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+import pandas as pd
 import pytest
 import sqlalchemy as sa
 from flask import Flask
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from prometheus_client.parser import text_string_to_metric_families
-from pydantic import AnyHttpUrl, SecretStr, TypeAdapter
+from pydantic import AnyHttpUrl, BaseModel, SecretStr, TypeAdapter
 from werkzeug.serving import make_server
 
 from dlboard import models
@@ -693,3 +694,68 @@ def find_props(component: Any, target_id: object) -> dict[str, Any] | None:  # n
         return component_props
     children = component_props.get("children")
     return find_props(children, target_id) if children is not None else None
+
+
+def find_all_props(component: Any, matches: Callable[[dict[str, Any]], bool]) -> list[dict[str, Any]]:  # noqa: ANN401
+    """The props of every node in a dash component tree whose props `matches`, depth-first and parents first."""
+    if isinstance(component, list):
+        return [found for item in cast("list[Any]", component) for found in find_all_props(item, matches)]
+    if not hasattr(component, "to_plotly_json"):
+        return []
+    component_props = props(component)
+    return [
+        *([component_props] if matches(component_props) else []),
+        *find_all_props(component_props.get("children"), matches),
+    ]
+
+
+def make_fake_chart(
+    chart_name: str, params_type: type[BaseModel]
+) -> type[models.ChartType[typing.Any, pd.DataFrame, dict[str, object]]]:
+    """
+    Build a minimal registrable `ChartType` around `params_type`.
+
+    Only the description of the settings is under test wherever this is
+    used, so `render` and the `hint_required_*` methods are no-ops: just enough to satisfy
+    `ChartType`'s abstract interface.
+    """
+
+    class _Fake(models.ChartType[typing.Any, pd.DataFrame, dict[str, object]], frozen=True, extra="forbid"):
+        name: typing.ClassVar[str] = chart_name
+
+        @classmethod
+        @typing.override
+        def parameter_type(cls) -> type[BaseModel]:
+            return params_type
+
+        @classmethod
+        @typing.override
+        def render(cls, parameters: BaseModel, dataframe: pd.DataFrame) -> dict[str, object]:
+            return {}
+
+        @classmethod
+        @typing.override
+        def hint_required_columns(cls, parameters: BaseModel) -> set[str] | None:
+            return set()
+
+        @classmethod
+        @typing.override
+        def hint_required_artifact_keys(cls, parameters: BaseModel) -> set[str] | None:
+            return set()
+
+        @classmethod
+        @typing.override
+        def hint_required_hparams(cls, parameters: BaseModel) -> set[str] | None:
+            return set()
+
+        @classmethod
+        @typing.override
+        def natural_width(cls, parameters: BaseModel) -> int:
+            return 400
+
+        @classmethod
+        @typing.override
+        def field_column_kinds(cls) -> dict[str, models.ColumnKind]:
+            return {}
+
+    return _Fake

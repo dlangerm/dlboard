@@ -100,7 +100,7 @@ class TableChartSettings(BaseModel, frozen=True, extra="forbid", use_attribute_d
     """Rows of a field: put the runs side by side, a column group each, rather than a row for every run and value. Hyperparameters are left out, a run having one value of each."""
     show_metrics: NamePatternList = Field(default_factory=lambda: ["*"])
     """Metrics to show as columns: names, or a prefix and `*` (`train/*`), `*` alone being every metric. Empty shows none."""
-    show_hparams: NamePatternList = Field(default_factory=lambda: ["*"])
+    show_hparams: NamePatternList = Field(default_factory=lambda: ["*"], title="Show hyperparameters")
     """Hyperparameters to show as columns: names, or a prefix and `*` (`model.*`), `*` alone being every one. Empty shows none."""
     show_artifacts: NamePatternList = Field(default_factory=list)
     """Artifacts to show as columns: keys, or a prefix and `*` (`samples/*`), which is a column for every key under it, including ones logged later."""

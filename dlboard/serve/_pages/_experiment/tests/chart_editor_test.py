@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import pendulum
 from dash import no_update
+from structlog.testing import capture_logs
 
 from dlboard import models
 from dlboard.conftest import props as _to_props
@@ -60,18 +61,11 @@ def test_render_chart_preview_leaves_out_excluded_runs_like_the_real_panel(
         store, repo.PageRef(experiment_id, None), DocumentSettings(excluded_runs=[excluded.id])
     )
 
-    field_ids = [{"type": "chart-param", "field": "column"}, {"type": "chart-param", "field": "x_axis"}]
-    preview, error = render_chart_preview(
-        "line",
-        ["loss", "step"],
-        [None, None],
-        field_ids,
-        [],
-        [],
-        store=store,
+    form = _form(
         experiment_id=experiment_id,
         page_json=repo.load_page(store, repo.PageRef(experiment_id, view.id)).model_dump_json(),
     )
+    preview, error = render_chart_preview(cast("Any", form), store=store)
 
     assert error == ""
     _title, plot = _to_props(preview)["children"]
@@ -126,9 +120,7 @@ def test_an_edited_chart_is_drawn_in_its_own_card_under_ids_of_its_own_and_the_o
     assert error == ""
     assert drafts[1] is None
     _title, plot = _to_props(drafts[0])["children"]
-    assert [s["name"] for s in _to_props(plot)["series"]] == [
-        "1"
-    ]  # the form's `loss`, not the saved chart's `acc`
+    assert _to_props(plot)["data"][0]["1"] == 0.5  # the form's loss, not the saved chart's acc (0.9)
 
 
 def test_a_form_that_makes_no_valid_chart_leaves_the_draft_as_it_was_and_says_why(
@@ -141,13 +133,16 @@ def test_a_form_that_makes_no_valid_chart_leaves_the_draft_as_it_was_and_says_wh
     )  # the column is required
     draft_ids = [{"type": "chart-draft", "panel": "train", "index": 0}]
 
-    drafts, error = render_card_drafts(
-        cast("Any", form),
-        location,
-        models.DEFAULT_RENDER_CONTEXT.page_size,
-        cast("Any", draft_ids),
-        store=store,
-    )
+    with capture_logs() as logs:
+        drafts, error = render_card_drafts(
+            cast("Any", form),
+            location,
+            models.DEFAULT_RENDER_CONTEXT.page_size,
+            cast("Any", draft_ids),
+            store=store,
+        )
 
     assert drafts == [no_update]
     assert "Fill in required fields" in error
+    # An incomplete form is expected while someone types: a debug line, not a traceback on every keystroke.
+    assert [(entry["log_level"], "exc_info" in entry) for entry in logs] == [("debug", False)]

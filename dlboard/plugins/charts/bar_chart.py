@@ -51,7 +51,9 @@ class BarChartSettings(BaseModel, frozen=True, extra="forbid", use_attribute_doc
     height: typing.Annotated[int, DISPLAY_SECTION] = 300
     width: typing.Annotated[int | None, DISPLAY_SECTION] = Field(default=None)
     """Overall chart width in px. Leave blank to size it automatically from height."""
-    max_axis_label_chars: typing.Annotated[MaxAxisLabelChars, DISPLAY_SECTION] = DEFAULT_MAX_AXIS_LABEL_CHARS
+    max_axis_label_chars: typing.Annotated[
+        MaxAxisLabelChars, DISPLAY_SECTION, Field(title="Max axis label characters")
+    ] = DEFAULT_MAX_AXIS_LABEL_CHARS
     """Longest axis title, in characters. A longer metric name is shortened to its last characters behind an ellipsis, so it stays inside the chart; raise it for a taller or wider chart."""
 
 

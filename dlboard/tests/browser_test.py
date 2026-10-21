@@ -2379,7 +2379,9 @@ def test_the_chart_editor_lists_the_layers_a_chart_draws_and_hides_removes_and_a
 
     def set_visibility(layer: str, value: str) -> None:
         row = dock.locator(".ag-center-cols-container .ag-row").filter(has_text=layer)
-        row.get_by_role("radio", name=value, exact=True).click()  # one click: the choices are in the cell
+        radio = row.get_by_role("radio", name=value, exact=True)
+        radio.click()  # one click: the choices are in the cell
+        expect(radio).to_have_attribute("aria-checked", "true")  # the cell shows what the row now holds
 
     set_visibility("prediction", "hidden")
     set_visibility("truth", "off")

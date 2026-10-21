@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import json
-from typing import Any, cast
+from typing import Any
 
 import pandas as pd
 import pytest
 from pydantic import ValidationError
 
+from dlboard.conftest import find_all_props
 from dlboard.conftest import props as _props
 from dlboard.models import (
     DEFAULT_RENDER_CONTEXT,
@@ -426,14 +427,13 @@ def test_each_picture_has_a_legend_to_be_filled_in_only_when_the_chart_has_layer
     assert _legends(ImageChart.render(ImageChartSettings(key="img"), df)) == 3  # one over each run's picture
 
 
+def _is_legend(props: dict[str, Any]) -> bool:
+    return props.get("className") == "dl-layer-legend"
+
+
 def _legends(node: Any) -> int:  # noqa: ANN401 -- a rendered Dash component tree
     """How many legends (`dl-layer-legend`) there are under `node`."""
-    if isinstance(node, list):
-        return sum(_legends(item) for item in cast("list[Any]", node))
-    if not hasattr(node, "to_plotly_json"):
-        return 0
-    props = _props(node)
-    return int(props.get("className") == "dl-layer-legend") + _legends(props.get("children"))
+    return len(find_all_props(node, _is_legend))
 
 
 def test_what_a_viewer_showed_or_hid_is_made_the_charts_own_except_for_a_removed_layer() -> None:

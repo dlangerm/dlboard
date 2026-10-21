@@ -302,11 +302,13 @@ class ParameterField(BaseModel, frozen=True, extra="forbid"):
     """Help text shown alongside the field's widget: the field's attribute docstring on the settings model."""
     section: SettingsSection = DATA_SECTION
     """The group of settings the editor shows the field in."""
+    title: str | None = None
+    """What the editor calls the field, if the settings model says (`Field(title=...)`); else its name as a sentence."""
 
     @property
     def label(self) -> str:
-        """What the editor calls the field: its name as a sentence (`tag_precision` is "Tag precision")."""
-        return self.name.replace("_", " ").capitalize()
+        """What the editor calls the field: its `title`, or its name as a sentence (`tag_precision` is "Tag precision")."""
+        return self.title or self.name.replace("_", " ").capitalize()
 
 
 class UnknownChartTypeError(KeyError):
@@ -442,6 +444,7 @@ class ChartTypeRegistry:
                 maximum=next((typing.cast("float", m.le) for m in field.metadata if isinstance(m, Le)), None),
                 description=field.description,
                 section=section,
+                title=field.title,
             )
         return field_descriptors
 

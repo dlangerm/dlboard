@@ -52,8 +52,8 @@ CHOICE_WIDTH_PX: Final = 58
 
 SLIDER_STEPS: Final = 100
 """How many notches a slider has across its range."""
-NUMBER_DEBOUNCE_MS: Final = 400
-"""How long a number input waits after the last keystroke before the chart is redrawn from it."""
+INPUT_DEBOUNCE_MS: Final = 400
+"""How long a number or text input waits after the last keystroke before the chart is redrawn from it."""
 
 _IS_FIXED: Final = "!!(params.data && params.data.fixed)"
 """A grid cell's JS: true on a row the chart supplies (`fixed` in its data), false on one the person made."""
@@ -307,8 +307,8 @@ def _param_field_input(  # noqa: PLR0911
                 min=field.minimum,
                 max=field.maximum,
                 step=1 if field.type == models.ParameterFieldType.INT else 0.1,
-                # Typing a number redraws the chart only once it pauses, not on every digit (each redraw is a fetch).
-                debounce=NUMBER_DEBOUNCE_MS,
+                # Typing redraws the chart only once it pauses, not on every digit (each redraw is a fetch).
+                debounce=INPUT_DEBOUNCE_MS,
                 description=field.description,
                 # Optional fields (a default, not required) get a visible clear button that resets
                 # to that default -- clearing via backspace alone works too, but isn't discoverable.
@@ -389,6 +389,8 @@ def _param_field_input(  # noqa: PLR0911
             return dmc.TextInput(
                 id=input_id,
                 label=label,
+                # Typing a name redraws the chart only once it pauses, as a number does.
+                debounce=INPUT_DEBOUNCE_MS,
                 value=value or "",  # pyrefly: ignore [bad-argument-type]
                 description=field.description,
                 style=_MEDIUM_FIELD,

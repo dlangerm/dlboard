@@ -118,7 +118,9 @@ class LineChartSettings(BaseModel, frozen=True, extra="forbid", use_attribute_do
     """Downsample each run's series (LTTB) so huge series stay smooth to render."""
     max_points: typing.Annotated[int, ADVANCED_SECTION] = Field(default=DEFAULT_MAX_POINTS)
     """Target point count per run when sample is enabled."""
-    max_axis_label_chars: typing.Annotated[MaxAxisLabelChars, DISPLAY_SECTION] = DEFAULT_MAX_AXIS_LABEL_CHARS
+    max_axis_label_chars: typing.Annotated[
+        MaxAxisLabelChars, DISPLAY_SECTION, Field(title="Max axis label characters")
+    ] = DEFAULT_MAX_AXIS_LABEL_CHARS
     """Longest axis title, in characters. A longer metric name is shortened to its last characters behind an ellipsis, so it stays inside the chart; raise it for a taller or wider chart."""
     x_axis_type: typing.Annotated[typing.Literal["number", "category", "date", "time"], DISPLAY_SECTION] = (
         Field(default="number")

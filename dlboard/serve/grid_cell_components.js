@@ -1,5 +1,5 @@
 // Cell components for the ag-grid tables a chart's settings are edited in
-// (`serve/_pages/_experiment/_chart_editor_modal.py`), registered through dash-ag-grid's component functions: a column def
+// (`serve/_pages/_experiment/_chart_settings_form.py`), registered through dash-ag-grid's component functions: a column def
 // names one as `"cellRenderer"` or `"cellEditor"` and gives it its `cellRendererParams` / `cellEditorParams`.
 window.dashAgGridComponentFunctions = window.dashAgGridComponentFunctions || {};
 
@@ -9,7 +9,12 @@ const h = React.createElement;
 // stands for): dragging it sets the cell's value, so there is no editing mode to enter.
 window.dashAgGridComponentFunctions.DlboardSlider = (props) => {
     const { min, max, step, fallback } = props;
-    const [value, setValue] = React.useState(props.value ?? fallback);
+    const stored = props.value ?? fallback;
+    // Where the thumb is while it is dragged, which leads the stored value by a render. Dropped once that catches up or
+    // changes under the cell (a reused cell is handed another row's value), so the thumb is never left where it was.
+    const [dragged, setDragged] = React.useState(null);
+    React.useEffect(() => setDragged(null), [stored]);
+    const value = dragged ?? stored;
     return h(
         "div",
         { style: { display: "flex", alignItems: "center", gap: "0.5rem", height: "100%" } },
@@ -22,7 +27,7 @@ window.dashAgGridComponentFunctions.DlboardSlider = (props) => {
             style: { flex: 1, minWidth: 0 },
             onChange: (event) => {
                 const next = Number(event.target.value);
-                setValue(next);
+                setDragged(next);
                 props.node.setDataValue(props.column.getColId(), next);
             },
         }),
@@ -34,7 +39,7 @@ window.dashAgGridComponentFunctions.DlboardSlider = (props) => {
 // is no editing mode to enter and no list to open (`choices`, and the `fallback` a blank cell stands for).
 window.dashAgGridComponentFunctions.DlboardChoice = (props) => {
     const { choices, fallback } = props;
-    const [value, setValue] = React.useState(props.value ?? fallback);
+    const value = props.value ?? fallback;
     return h(
         "div",
         { className: "dl-choice", role: "radiogroup" },
@@ -47,10 +52,7 @@ window.dashAgGridComponentFunctions.DlboardChoice = (props) => {
                     role: "radio",
                     "aria-checked": String(choice === value),
                     className: "dl-choice-option",
-                    onClick: () => {
-                        setValue(choice);
-                        props.node.setDataValue(props.column.getColId(), choice);
-                    },
+                    onClick: () => props.node.setDataValue(props.column.getColId(), choice),
                 },
                 choice,
             ),

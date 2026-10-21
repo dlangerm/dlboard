@@ -13,7 +13,6 @@ The settings form is `_chart_settings_form.py`'s.
 
 from __future__ import annotations
 
-import json
 import secrets
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Final, Literal, cast
@@ -50,6 +49,9 @@ from dlboard.serve._pages._experiment._column_catalog import ColumnCatalog
 from dlboard.serve._pages._experiment._paging import Paging
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    import pandas as pd
     from dash.development.base_component import Component
 
     from dlboard.models import DataStore
@@ -150,9 +152,16 @@ def _target_of(data: dict[str, Any] | None) -> EditChart | AddChart | None:
     return _TARGET.validate_python(data) if data else None
 
 
-def _form_key(target: dict[str, Any] | None, chart_type_name: str | None) -> str:
+class FormFor(BaseModel, frozen=True):
     """What a settings form is for: what the editor is open on, and the chart type the form is of. The same is the same form."""
-    return json.dumps([target, chart_type_name], sort_keys=True)
+
+    target: EditorTarget | None
+    chart_type: str | None
+
+
+def _form_for(target_data: dict[str, Any] | None, chart_type_name: str | None) -> dict[str, Any]:
+    """`FormFor` as `CHART_EDITOR_FORM_FOR_ID` keeps it."""
+    return FormFor(target=_target_of(target_data), chart_type=chart_type_name).model_dump(mode="json")
 
 
 def _settings_form(
@@ -177,41 +186,60 @@ def _settings_form(
     return build_chart_param_form(chart_type_name, edited, catalog=catalog)
 
 
-def render_chart_preview(  # noqa: PLR0913
-    chart_type_name: str | None,
-    values: list[Any],
-    checked_values: list[Any],
-    field_ids: list[dict[str, str]],
-    table_ids: list[dict[str, str]],
-    table_values: list[Any],
+def _draw_form(
+    values: _FormValues,
+    panel_name: str,
+    chart_id: str | None,
+    draw: Callable[[models.ChartInstance[Any, Any], pd.DataFrame], Component],
     *,
     store: DataStore[...],
-    experiment_id: int,
-    page_json: str,
-) -> tuple[Any, str]:
+) -> tuple[Component | None, str]:
     """
-    Live-preview a chart that is being added exactly as it'd render in a panel of its own -- same fetch, same runs.
+    The chart the form makes, drawn by `draw` from what a panel named `panel_name` would fetch for it.
 
-    Goes through `fetch_panel_dataframe` rather than any whole-experiment dataframe, so the preview
-    only ever fetches what this one chart needs and honors the page's excluded runs (`page_json`, the page the
-    browser has), like the real panel will.
+    That is the drawing and "", or nothing and why not.
+
+    Goes through `fetch_panel_dataframe` rather than any whole-experiment dataframe, so only what this one chart needs is
+    fetched, and the page's excluded runs (`page_json`, the page the browser has) are left out, like the real panel will.
+
+    A form that does not (yet) make a valid chart is an expected state while someone types, not an error: it says what
+    is missing, and is logged at debug level with no traceback. Anything else that goes wrong is logged in full.
     """
+    chart_type_name = values["chart_type_name"]
     if not chart_type_name:
         return None, ""
     fields = models.ChartTypeRegistry.get_registered_chart_types().get(chart_type_name, {})
     parameters = merge_chart_param_values(
-        values, checked_values, field_ids, fields, table_ids=table_ids, table_values=table_values
+        values["values"],
+        values["checked_values"],
+        values["field_ids"],
+        fields,
+        table_ids=values["table_ids"],
+        table_values=values["table_values"],
     )
     try:
-        chart = build_validated_chart_instance(chart_type_name, parameters)
-        page = page_model.BasicExperimentPage.model_validate_json(page_json)
-        panel = models.PanelInstance[Any, Any](name="preview", charts=[chart])
-        return chart.render(
-            panel_data.fetch_panel_dataframe(store, experiment_id, panel, page.document.excluded_runs)
-        ), ""
-    except (ValidationError, KeyError, ValueError) as exc:
-        _log.exception("error rendering preview")
+        chart = build_validated_chart_instance(chart_type_name, parameters, chart_id)
+        excluded = page_model.BasicExperimentPage.model_validate_json(
+            values["page_json"]
+        ).document.excluded_runs
+        panel = models.PanelInstance[Any, Any](name=panel_name, charts=[chart])
+        dataframe = panel_data.fetch_panel_dataframe(store, values["experiment_id"], panel, excluded)
+        return draw(chart, dataframe), ""
+    except ValidationError as exc:
+        _log.debug("the chart editor's form makes no chart yet", error=str(exc))
         return None, f"Fill in required fields to see a preview ({exc})"
+    except (KeyError, ValueError) as exc:
+        _log.exception("error drawing the chart being edited")
+        return None, f"The chart could not be drawn ({exc})"
+
+
+def render_chart_preview(values: _FormValues, *, store: DataStore[...]) -> tuple[Component | None, str]:
+    """Live-preview a chart that is being added exactly as it'd render in a panel of its own -- same fetch, same runs."""
+
+    def draw(chart: models.ChartInstance[Any, Any], dataframe: pd.DataFrame) -> Component:
+        return chart.render(dataframe)
+
+    return _draw_form(values, "preview", None, draw, store=store)
 
 
 def render_card_drafts(
@@ -231,33 +259,13 @@ def render_card_drafts(
     is better done as the editor opens than later, when the person is typing in the form: it can reorder their keystrokes
     in a table cell that is open (the chart editor's tag display test caught exactly that).
     """
-    chart_type_name = values["chart_type_name"]
-    if not chart_type_name:
-        return [None] * len(draft_ids), ""
-    fields = models.ChartTypeRegistry.get_registered_chart_types().get(chart_type_name, {})
-    parameters = merge_chart_param_values(
-        values["values"],
-        values["checked_values"],
-        values["field_ids"],
-        fields,
-        table_ids=values["table_ids"],
-        table_values=values["table_values"],
-    )
-    try:
-        draft = build_validated_chart_instance(chart_type_name, parameters, location.chart.id)
-        excluded = page_model.BasicExperimentPage.model_validate_json(
-            values["page_json"]
-        ).document.excluded_runs
-        dataframe = panel_data.fetch_panel_dataframe(
-            store,
-            values["experiment_id"],
-            models.PanelInstance[Any, Any](name=location.panel.name, charts=[draft]),
-            excluded,
-        )
-        drawn = chart_view.draft_view(location.panel, draft, dataframe, page_size)
-    except (ValidationError, KeyError, ValueError) as exc:
-        _log.exception("error rendering the chart being edited")
-        return [no_update] * len(draft_ids), f"Fill in required fields to see a preview ({exc})"
+
+    def draw(chart: models.ChartInstance[Any, Any], dataframe: pd.DataFrame) -> Component:
+        return chart_view.draft_view(location.panel, chart, dataframe, page_size)
+
+    drawn, error = _draw_form(values, location.panel.name, location.chart.id, draw, store=store)
+    if drawn is None:
+        return [no_update if error else None] * len(draft_ids), error
     here = (location.panel.name, location.index)
     return [drawn if (i["panel"], i["index"]) == here else None for i in draft_ids], ""
 
@@ -279,7 +287,7 @@ def _register_open_and_cancel(app: Dash) -> None:
     )
     def open_chart_editor(
         _add_clicks: list[int], _edit_clicks: list[int], page_json: str, experiment_id: int
-    ) -> tuple[bool, dict[str, Any], str | None, str, str, list[Component], str]:
+    ) -> tuple[bool, dict[str, Any], str | None, str, str, list[Component], dict[str, Any]]:
         """Opens the editor, with its form built in this same round trip: it is what the person is waiting for."""
         triggered_id = cast("chart_view.ChartID", require_triggered_id())
 
@@ -292,17 +300,22 @@ def _register_open_and_cancel(app: Dash) -> None:
                 "Add chart",
                 "Add chart",
                 [],
-                _form_key(adding, None),
+                _form_for(adding, None),
             )
 
-        panel = next(
-            p
-            for p in page_model.BasicExperimentPage.model_validate_json(page_json).panels
-            if p.name == triggered_id["panel"]
-        )
         if triggered_id["index"] is None:
             msg = f"Malformed edit-chart id: {triggered_id}"
             raise ValueError(msg)
+        panel = next(
+            (
+                p
+                for p in page_model.BasicExperimentPage.model_validate_json(page_json).panels
+                if p.name == triggered_id["panel"]
+            ),
+            None,
+        )
+        if panel is None or triggered_id["index"] >= len(panel.charts):
+            raise PreventUpdate  # the chart went from another tab since its button was drawn: there is nothing to open on
         chart = panel.charts[triggered_id["index"]]
         editing = EditChart(chart_id=chart.id).model_dump()
         return (
@@ -312,7 +325,7 @@ def _register_open_and_cancel(app: Dash) -> None:
             "Edit chart",
             "Save changes",
             _settings_form(editing, chart.chart_type, page_json, experiment_id),
-            _form_key(editing, chart.chart_type),
+            _form_for(editing, chart.chart_type),
         )
 
     app.clientside_callback(
@@ -356,15 +369,15 @@ def _register_form_and_draft(app: Dash) -> None:
     def build_settings_form(
         chart_type_name: str | None,
         target_data: dict[str, Any] | None,
-        built_for: str | None,
+        built_for: dict[str, Any] | None,
         page_json: str,
         experiment_id: int,
-    ) -> tuple[list[Component], str]:
+    ) -> tuple[list[Component], dict[str, Any]]:
         """Rebuilds the form for the type the person chose; opening the editor has built it already."""
-        key = _form_key(target_data, chart_type_name)
-        if key == built_for:
+        form_for = _form_for(target_data, chart_type_name)
+        if form_for == built_for:
             raise PreventUpdate
-        return _settings_form(target_data, chart_type_name, page_json, experiment_id), key
+        return _settings_form(target_data, chart_type_name, page_json, experiment_id), form_for
 
     @app.callback(
         Output(chart_view.CHART_DRAFT.all(), "children"),
@@ -415,17 +428,7 @@ def _register_form_and_draft(app: Dash) -> None:
             case None:
                 raise PreventUpdate
             case AddChart():
-                preview, error = render_chart_preview(
-                    chart_type_name,
-                    values,
-                    checked_values,
-                    state["field_ids"],
-                    state["table_ids"],
-                    table_values,
-                    store=get_data_store(),
-                    experiment_id=state["experiment_id"],
-                    page_json=state["page_json"],
-                )
+                preview, error = render_chart_preview(form, store=get_data_store())
                 shown = dmc.Stack([dmc.Text("Preview", fw=600), preview]) if preview is not None else None
                 return no_drafts, shown, error
             case EditChart():

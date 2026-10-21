@@ -9,6 +9,7 @@ import pandas as pd
 import pytest
 from pydantic import BaseModel, Field, ValidationError
 
+from dlboard.conftest import make_fake_chart
 from dlboard.models import is_inlineable_artifact
 from dlboard.models._view import (
     ADVANCED_SECTION,
@@ -98,58 +99,6 @@ def test_get_registered_chart_types_describes_fields() -> None:
     assert fields["flag"].description is None
 
 
-def _make_fake_chart(
-    chart_name: str, params_type: type[BaseModel]
-) -> type[ChartType[typing.Any, pd.DataFrame, dict[str, object]]]:
-    """
-    Build a minimal registrable `ChartType` around `params_type`.
-
-    Only `_describe_parameter_fields`'s field-type inference is under test wherever this is
-    used, so `render`/the `hint_required_*` methods are no-ops — just enough to satisfy
-    `ChartType`'s abstract interface.
-    """
-
-    class _Fake(ChartType[typing.Any, pd.DataFrame, dict[str, object]], frozen=True, extra="forbid"):
-        name: ClassVar[str] = chart_name
-
-        @classmethod
-        @typing.override
-        def parameter_type(cls) -> type[BaseModel]:
-            return params_type
-
-        @classmethod
-        @typing.override
-        def render(cls, parameters: BaseModel, dataframe: pd.DataFrame) -> dict[str, object]:
-            return {}
-
-        @classmethod
-        @typing.override
-        def hint_required_columns(cls, parameters: BaseModel) -> set[str] | None:
-            return set()
-
-        @classmethod
-        @typing.override
-        def hint_required_artifact_keys(cls, parameters: BaseModel) -> set[str] | None:
-            return set()
-
-        @classmethod
-        @typing.override
-        def hint_required_hparams(cls, parameters: BaseModel) -> set[str] | None:
-            return set()
-
-        @classmethod
-        @typing.override
-        def natural_width(cls, parameters: BaseModel) -> int:
-            return 400
-
-        @classmethod
-        @typing.override
-        def field_column_kinds(cls) -> dict[str, ColumnKind]:
-            return {}
-
-    return _Fake
-
-
 class _FakeParamsWithChoices(BaseModel, frozen=True, extra="forbid"):
     mode: typing.Literal["prefix", "suffix"] = "prefix"
 
@@ -158,7 +107,7 @@ def test_get_registered_chart_types_describes_literal_field_as_str_with_choices(
     """A `Literal[...]`-typed field (e.g. line chart's `x_axis_type`) must describe as a plain
     `str` field with its fixed `choices` populated — the UI renders those as a dropdown.
     """
-    _make_fake_chart("fake-choices", _FakeParamsWithChoices).register()
+    make_fake_chart("fake-choices", _FakeParamsWithChoices).register()
     fields = ChartTypeRegistry.get_registered_chart_types()["fake-choices"]
     assert fields["mode"].type == "str"
     assert fields["mode"].choices == ("prefix", "suffix")
@@ -174,7 +123,7 @@ def test_get_registered_chart_types_describes_optional_int_field() -> None:
     """`int | None`-typed fields (e.g. table chart's `font_size`) must unwrap to plain `int` rather
     than raising `TypeError` — regression test for a crash when opening the add-chart modal.
     """
-    _make_fake_chart("fake-optional-int", _FakeParamsWithOptionalInt).register()
+    make_fake_chart("fake-optional-int", _FakeParamsWithOptionalInt).register()
     fields = ChartTypeRegistry.get_registered_chart_types()["fake-optional-int"]
     assert fields["font_size"].type == "int"
     assert fields["font_size"].required is False
@@ -192,7 +141,7 @@ class _FakeParamsWithSections(BaseModel, frozen=True, extra="forbid"):
 
 
 def test_a_setting_is_in_the_section_it_is_marked_with_and_the_data_section_if_unmarked() -> None:
-    _make_fake_chart("fake-sectioned", _FakeParamsWithSections).register()
+    make_fake_chart("fake-sectioned", _FakeParamsWithSections).register()
 
     fields = ChartTypeRegistry.get_registered_chart_types()["fake-sectioned"]
 
@@ -209,9 +158,33 @@ class _FakeParamsWithTwoSectionsOfOneTitle(BaseModel, frozen=True, extra="forbid
     width: typing.Annotated[int, DISPLAY_SECTION] = 400
 
 
-def test_two_different_sections_may_not_share_a_title() -> None:
+def test_two_different_sections_may_not_share_a_title(monkeypatch: pytest.MonkeyPatch) -> None:
+    clashing = make_fake_chart("fake-clashing", _FakeParamsWithTwoSectionsOfOneTitle)
+    # Registered for this test only: a chart type that cannot be described would fail every later listing of them.
+    monkeypatch.setitem(ChartTypeRegistry._all_charts, clashing.name, clashing)
+
     with pytest.raises(ValueError, match="two different settings sections"):
-        ChartTypeRegistry._describe_parameter_fields(_FakeParamsWithTwoSectionsOfOneTitle, {})
+        ChartTypeRegistry.get_registered_chart_types()
+
+
+class _FakeParamsWithTitles(BaseModel, frozen=True, extra="forbid"):
+    max_points: int = 100
+    lr: typing.Annotated[float, Field(title="LR")] = 0.1
+    native_size: bool = Field(default=False, title="Logged resolution")
+
+
+@pytest.mark.parametrize(
+    ("name", "label"),
+    [
+        pytest.param("max_points", "Max points", id="a-name-is-a-sentence-by-default"),
+        pytest.param("lr", "LR", id="a-title-is-what-the-setting-is-called"),
+        pytest.param("native_size", "Logged resolution", id="a-title-wins-over-the-sentence"),
+    ],
+)
+def test_a_setting_is_called_by_its_title_or_else_its_name_as_a_sentence(name: str, label: str) -> None:
+    make_fake_chart("fake-titled", _FakeParamsWithTitles).register(allow_override=True)
+
+    assert ChartTypeRegistry.get_registered_chart_types()["fake-titled"][name].label == label
 
 
 def test_chart_instance_delegates_through_registry() -> None:
