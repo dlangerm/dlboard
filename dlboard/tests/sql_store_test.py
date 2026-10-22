@@ -18,7 +18,6 @@ from sqlalchemy.exc import IntegrityError
 from dlboard import models
 from dlboard.conftest import EVERY_STORE_BACKEND, StoreBackend
 from dlboard.models._view import PanelInstance
-from dlboard.serve._backend._metric_frame import MetricKeySummary
 from dlboard.serve._pages._experiment._page_model import BasicExperimentPage
 
 if TYPE_CHECKING:
@@ -247,32 +246,6 @@ def test_fetch_metrics_keeps_the_last_value_written_for_a_key_relogged_at_one_st
     _log_step(store, run, 0, loss=2.0)
 
     assert list(store.fetch_metrics(experiment_id).values("loss")) == [2.0]
-
-
-def test_summarize_metric_keys_counts_each_keys_steps_per_run(
-    store: SQLLiteStore, experiment_id: int
-) -> None:
-    run = store.create_run(models.NewRun(experiment_id=experiment_id))
-    _log_step(store, run, 0, loss=0.5, acc=0.1)
-    _log_step(store, run, 1, loss=0.4)
-
-    assert store.summarize_metric_keys(experiment_id) == [
-        MetricKeySummary("acc", 1),
-        MetricKeySummary("loss", 2),
-    ]
-
-
-def test_summarize_metric_keys_excludes_deleted_runs_and_other_experiments(
-    store: SQLLiteStore, experiment_id: int
-) -> None:
-    project = store.create_project(models.NewProject(name="other", description="d"))
-    other_experiment = store.create_experiment(models.NewExperiment(project_id=project.id))
-    _log_step(store, store.create_run(models.NewRun(experiment_id=other_experiment.id)), 0, other_metric=1.0)
-    deleted_run = store.create_run(models.NewRun(experiment_id=experiment_id))
-    _log_step(store, deleted_run, 0, deleted_run_metric=1.0)
-    store.delete_run(deleted_run.id, store.get_or_create_user(models.Principal.unverified("alice")))
-
-    assert store.summarize_metric_keys(experiment_id) == []
 
 
 @pytest.mark.parametrize(

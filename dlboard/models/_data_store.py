@@ -327,6 +327,15 @@ class DataStore(typing.Protocol[_P]):
         """
         ...
 
+    def summarize_artifact_keys(self, experiment_id: int) -> list[models.Artifact]:
+        """
+        An experiment's latest (non-deleted) artifact under each key, sorted by key.
+
+        For callers that need only what's *available* -- which keys, and what kind of thing each holds --
+        where `fetch_artifacts` would read an artifact for every step an experiment logged.
+        """
+        ...
+
     def delete_project(self, project_id: int, actor: models.User) -> None:
         """Soft-delete a project and cascade to its experiments, runs, and artifacts. Requires `Scope.PROJECT_DELETE`."""
         ...

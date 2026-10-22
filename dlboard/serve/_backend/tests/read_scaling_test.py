@@ -1,0 +1,142 @@
+"""
+The antipattern this guards against: a read whose cost grows with how much was logged.
+
+It has two forms, and a page that was instant in a run's first hour is slow on its tenth with either:
+
+- It reads a row per step trained: a history fetched to reduce in Python, a `SELECT DISTINCT` over every row.
+- It reads the whole table to find one experiment's rows: an index that does not lead with the experiment, so
+  every experiment ever logged is read to show one.
+
+`query_plans_test.py` checks *how* a read reaches a table; this checks the outcome, whatever the query. Each
+load below runs over an experiment that differs only in how long it trained, and over one whose neighbours
+grew, and must cost about the same.
+
+A new page-level load that reads an experiment's metrics, artifacts or histograms belongs in `_LOADS`. If it
+fails, it reads what was logged rather than what is shown: reduce it in the query (see CLAUDE.md, "Data flow").
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any, NamedTuple
+
+import pendulum
+import pytest
+import sqlalchemy as sa
+
+from dlboard import models
+from dlboard.conftest import StoreBackend
+from dlboard.serve._pages._experiment._column_catalog import ColumnCatalog
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from dlboard.plugins.data_stores.postgres import PostgresStore
+
+pytestmark = pytest.mark.postgres
+
+_SHORT, _LONG, _NEIGHBOUR = 10, 200, 1000
+_RUNS = 3
+_LOADS: dict[str, Callable[[PostgresStore, int], object]] = {
+    "the column catalog": lambda s, e: ColumnCatalog.load(s, e),
+    "metric keys": lambda s, e: s.summarize_metric_keys(e),
+    "histogram keys": lambda s, e: s.summarize_histogram_keys(e),
+    "artifact keys": lambda s, e: s.summarize_artifact_keys(e),
+}
+
+
+class _Work(NamedTuple):
+    rows: int
+    """What the database sent back."""
+    pages: int
+    """What it read to do so."""
+
+
+@pytest.fixture
+def store_backend() -> StoreBackend:
+    return StoreBackend.POSTGRES
+
+
+def _train(store: PostgresStore, project_id: int, steps: int) -> int:
+    """A new experiment whose runs logged two metrics, a histogram and an image at each of `steps` steps."""
+    experiment = store.create_experiment(models.NewExperiment(project_id=project_id))
+    for _ in range(_RUNS):
+        run = store.create_run(models.NewRun(experiment_id=experiment.id))
+        store.log_metrics(
+            models.LoggedMetrics(
+                metrics={"loss": 1.0 / (step + 1), "acc": float(step)},
+                histograms={"grad": models.Histogram(edges=[0.0, 1.0], counts=[step])},
+                step=step,
+                experiment_id=experiment.id,
+                run_id=run.id,
+                timestamp_utc=pendulum.now(),
+            )
+            for step in range(steps)
+        )
+        store.log_artifact_refs(
+            models.Artifact(
+                key="img",
+                fname="img.png",
+                run_id=run.id,
+                experiment_id=experiment.id,
+                step=step,
+                ref=f"ref://{run.id}/{step}",
+            )
+            for step in range(steps)
+        )
+    with store._engine.begin() as conn:
+        # What the planner chooses between a scan and an index on, as autovacuum would have it by the time anyone looks.
+        for table in store.tables.values():
+            conn.exec_driver_sql(f'ANALYZE "{table.schema}"."{table.name}"')
+    return experiment.id
+
+
+def _work(store: PostgresStore, load: Callable[[], object]) -> _Work:
+    """What running `load` cost: the rows its queries returned, and the pages they read, rerun under `EXPLAIN`."""
+    selects: list[tuple[str, Any, int]] = []
+
+    def record(_conn: sa.Connection, cursor: Any, statement: str, parameters: Any, *_: object) -> None:  # noqa: ANN401
+        if statement.lstrip().upper().startswith(("SELECT", "WITH")):
+            selects.append((statement, parameters, cursor.rowcount))
+
+    sa.event.listen(store._engine, "after_cursor_execute", record)
+    try:
+        load()
+    finally:
+        sa.event.remove(store._engine, "after_cursor_execute", record)
+    pages = 0
+    with store._engine.connect() as conn:
+        for statement, parameters, _ in selects:
+            ((document,),) = conn.exec_driver_sql(
+                "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) " + statement, parameters
+            )
+            root: dict[str, int] = document[0]["Plan"]
+            pages += root["Shared Hit Blocks"] + root["Shared Read Blocks"]
+    return _Work(sum(rows for _, _, rows in selects), pages)
+
+
+@pytest.mark.parametrize("name", _LOADS)
+def test_a_load_reads_no_more_rows_for_an_experiment_that_trained_longer(
+    store: PostgresStore, name: str
+) -> None:
+    project_id = store.create_project(models.NewProject(name="p", description="d")).id
+    short, long = _train(store, project_id, _SHORT), _train(store, project_id, _LONG)
+
+    read_short = _work(store, lambda: _LOADS[name](store, short)).rows
+    read_long = _work(store, lambda: _LOADS[name](store, long)).rows
+
+    assert read_short > 0
+    assert read_long <= 2 * read_short, f"{read_long} rows for {_LONG} steps, {read_short} for {_SHORT}"
+
+
+@pytest.mark.parametrize("name", _LOADS)
+def test_a_load_reads_no_more_pages_when_another_experiment_grows(store: PostgresStore, name: str) -> None:
+    project_id = store.create_project(models.NewProject(name="p", description="d")).id
+    experiment = _train(store, project_id, _SHORT)
+    alone = _work(store, lambda: _LOADS[name](store, experiment)).pages
+
+    _train(store, project_id, _NEIGHBOUR)
+    beside_it = _work(store, lambda: _LOADS[name](store, experiment)).pages
+
+    assert beside_it <= 2 * alone + 10, (
+        f"{beside_it} pages beside a {_NEIGHBOUR}-step experiment, {alone} alone"
+    )

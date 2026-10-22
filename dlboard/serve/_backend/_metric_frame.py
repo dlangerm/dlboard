@@ -23,8 +23,8 @@ class MetricKeySummary(NamedTuple):
     """One metric key logged in an experiment, summarized without fetching its values."""
 
     key: str
-    max_steps_per_run: int
-    """The most distinct steps any one run logged this key at -- 1 means "a single value per run"."""
+    single_value: bool
+    """Whether no run logged this key at more than one step -- one value per run, a natural fit for a bar chart."""
 
 
 class MetricRow(NamedTuple):

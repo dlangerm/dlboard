@@ -432,6 +432,10 @@ class AuthorizingDataStore(models.DataStore[...]):
             experiment_id, keys=keys, key_prefixes=key_prefixes, exclude_run_ids=exclude_run_ids
         )
 
+    def summarize_artifact_keys(self, experiment_id: int) -> list[models.Artifact]:
+        self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
+        return self._inner.summarize_artifact_keys(experiment_id)
+
     # -- Pages, views, and notes --------------------------------------------------------------------
 
     def get_or_create_page[Dataframe, Chart](

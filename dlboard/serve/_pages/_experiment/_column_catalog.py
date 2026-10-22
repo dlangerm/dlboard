@@ -42,10 +42,10 @@ class ColumnCatalog:
     @classmethod
     def load(cls, store: DataStore[...], experiment_id: int) -> ColumnCatalog:
         metrics = store.summarize_metric_keys(experiment_id)
-        artifacts = list(store.fetch_artifacts(experiment_id))
+        artifacts = store.summarize_artifact_keys(experiment_id)
         return cls(
             metrics=tuple(m.key for m in metrics),
-            single_value_metrics=frozenset(m.key for m in metrics if m.max_steps_per_run <= 1),
+            single_value_metrics=frozenset(m.key for m in metrics if m.single_value),
             artifacts=tuple(sorted({a.key for a in artifacts})),
             artifact_chart_types={
                 a.key: chart_type for a in artifacts if (chart_type := default_artifact_chart(a)) is not None

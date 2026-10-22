@@ -230,9 +230,10 @@ def build_metadata(schema: str | None = None) -> tuple[sa.MetaData, dict[type[Ba
         tables[model] = sql.table_for(
             model, metadata, tables, FOREIGN_KEYS.get(model), UNIQUE_COLUMNS.get(model)
         )
-    metrics, histograms, artifacts, pages = (
+    runs, metrics, histograms, artifacts, pages = (
         tables[m]
         for m in (
+            models.Run,
             models.UnderlyingMetricTableEntry,
             models.UnderlyingHistogramTableEntry,
             models.Artifact,
@@ -241,16 +242,17 @@ def build_metadata(schema: str | None = None) -> tuple[sa.MetaData, dict[type[Ba
     )
     # `sa.Index(...)` registers itself onto its columns' table/metadata on construction, so building
     # these is enough to make them part of `metadata` -- nothing further needs to reference them.
-    sa.Index("idx_metric_lookup", *(c for c in metrics.c if c.name not in ("id", "value")))
-    # What `fetch_histograms` walks: one experiment's keys, then each run's steps in order.
-    sa.Index(
-        "idx_histogram_lookup",
-        histograms.c.experiment_id,
-        histograms.c.key,
-        histograms.c.run_id,
-        histograms.c.step,
-    )
-    sa.Index("idx_artifact_lookup", *(c for c in artifacts.c if c.name not in ("id", "tags")))
+    #
+    # Every read of a per-step table is one experiment's (`fetch_*`, `summarize_*`), so each leads with
+    # `experiment_id`, then walks one key's runs and their steps in order -- an index that leads with
+    # anything else is one Postgres can only scan whole.
+    for name, per_step in (
+        ("idx_metric_lookup", metrics),
+        ("idx_histogram_lookup", histograms),
+        ("idx_artifact_lookup", artifacts),
+    ):
+        sa.Index(name, per_step.c.experiment_id, per_step.c.key, per_step.c.run_id, per_step.c.step)
+    sa.Index("idx_run_experiment", runs.c.experiment_id)
     for field in PAGE_SCOPE_FIELDS:
         # At most one *shared* page (owner_id NULL) per scope -- exactly what `get_or_create_page`
         # relies on to make its own check-then-insert race-safe.
@@ -262,6 +264,60 @@ def build_metadata(schema: str | None = None) -> tuple[sa.MetaData, dict[type[Ba
             postgresql_where=pages.c.owner_id.is_(None),
         )
     return metadata, tables
+
+
+def _live_runs(runs: sa.Table, experiment_id: int) -> list[sa.ColumnElement[bool]]:
+    """What selects an experiment's runs that are not soft-deleted."""
+    return [runs.c.experiment_id == experiment_id, runs.c.deleted_at.is_(None)]
+
+
+def _series(
+    table: sa.Table, experiment_id: int, key: sa.ColumnElement[str], run_id: sa.ColumnElement[int]
+) -> list[sa.ColumnElement[bool]]:
+    """What selects one run's rows under `key` in a per-step `table`: a prefix of its `(experiment_id, key, run_id, step)` index."""
+    return [table.c.experiment_id == experiment_id, table.c.key == key, table.c.run_id == run_id]
+
+
+def _distinct_keys(table: sa.Table, experiment_id: int) -> sa.CTE:
+    """
+    Every key a per-step `table` holds for an experiment, ascending, found by one index probe per key.
+
+    A loose index scan: a recursive query that hops from each key to the next one in the table's
+    `(experiment_id, key, ...)` index, so the work depends on how many keys there are, never on how many
+    rows each one has. `SELECT DISTINCT key` reads (and sorts) every row. The last row is a `NULL` key,
+    the hop past the final one.
+    """
+    in_experiment = table.c.experiment_id == experiment_id
+    keys = sa.select(sa.func.min(table.c.key).label("key")).where(in_experiment).cte("keys", recursive=True)
+    next_key = (
+        sa.select(sa.func.min(table.c.key)).where(in_experiment, table.c.key > keys.c.key).scalar_subquery()
+    )
+    return keys.union_all(sa.select(next_key).where(keys.c.key.is_not(None)))
+
+
+def _logged_keys(table: sa.Table, runs: sa.Table, experiment_id: int) -> sa.Subquery:
+    """
+    The keys a per-step `table` holds for a run of the experiment that is not soft-deleted, as a `key` column.
+
+    The keys come from `_distinct_keys`; each is then kept for the first live run found to have logged it,
+    which for a key logged by the experiment's runs is the first run probed.
+    """
+    keys = _distinct_keys(table, experiment_id)
+    # Explicit, because a subquery auto-correlates only to the select directly around it, not the one around that.
+    logged_by_live_run = sa.exists(
+        sa.select(sa.literal(1))
+        .select_from(runs)
+        .where(
+            *_live_runs(runs, experiment_id),
+            sa.exists(
+                sa.select(sa.literal(1))
+                .where(*_series(table, experiment_id, keys.c.key, runs.c.id))
+                .correlate(keys, runs)
+            ),
+        )
+        .correlate(keys)
+    )
+    return sa.select(keys.c.key).where(keys.c.key.is_not(None), logged_by_live_run).subquery("logged_keys")
 
 
 class SQLStoreBase[T](ABC, models.DataStore[T]):
@@ -789,19 +845,23 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
     def summarize_metric_keys(self, experiment_id: int) -> list[MetricKeySummary]:
         """Every metric key logged in an experiment (non-deleted runs), sorted, without fetching values."""
         m, r = self._tables[models.UnderlyingMetricTableEntry], self._tables[models.Run]
-        per_run = (
-            sa.select(m.c.key, sa.func.count(sa.distinct(m.c.step)).label("steps"))
-            .join(r, m.c.run_id == r.c.id)
-            .where(m.c.experiment_id == experiment_id, r.c.deleted_at.is_(None))
-            .group_by(m.c.key, m.c.run_id)
-            .subquery("per_run")
+        keys = _logged_keys(m, r, experiment_id)
+        # A run that logged a key at two steps settles it, so only a key every run logged once is searched to the end.
+        first_step, last_step = (
+            sa.select(extent(m.c.step))
+            .where(*_series(m, experiment_id, keys.c.key, r.c.id))
+            .correlate(keys, r)
+            .scalar_subquery()
+            for extent in (sa.func.min, sa.func.max)
         )
-        rows = self._execute(
-            sa.select(per_run.c.key, sa.func.max(per_run.c.steps))
-            .group_by(per_run.c.key)
-            .order_by(per_run.c.key)
+        multi_step = sa.exists(
+            sa.select(sa.literal(1))
+            .select_from(r)
+            .where(*_live_runs(r, experiment_id), last_step > first_step)
+            .correlate(keys)
         )
-        return [MetricKeySummary(key, steps) for key, steps in rows]
+        rows = self._execute(sa.select(keys.c.key, ~multi_step).order_by(keys.c.key))
+        return [MetricKeySummary(key, single_value) for key, single_value in rows]
 
     def fetch_histograms(
         self,
@@ -869,15 +929,10 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
 
     def summarize_histogram_keys(self, experiment_id: int) -> list[str]:
         """Every histogram key logged in an experiment (non-deleted runs), sorted, without fetching any."""
-        h, r = self._tables[models.UnderlyingHistogramTableEntry], self._tables[models.Run]
-        rows = self._execute(
-            sa.select(h.c.key)
-            .distinct()
-            .join(r, h.c.run_id == r.c.id)
-            .where(h.c.experiment_id == experiment_id, r.c.deleted_at.is_(None))
-            .order_by(h.c.key)
+        keys = _logged_keys(
+            self._tables[models.UnderlyingHistogramTableEntry], self._tables[models.Run], experiment_id
         )
-        return [key for (key,) in rows]
+        return [key for (key,) in self._execute(sa.select(keys.c.key).order_by(keys.c.key))]
 
     def log_hyperparams(self, hyperparams: models.NewHyperParams) -> models.HyperParams:
         """Log hyperparameters to the data store."""
@@ -1082,6 +1137,28 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
                 .order_by(a.c.run_id, a.c.step),
                 no_validate=True,
             )
+        )
+
+    def summarize_artifact_keys(self, experiment_id: int) -> list[models.Artifact]:
+        """An experiment's latest (non-deleted) artifact under each key, sorted by key -- not every artifact logged under it."""
+        a = self._tables[models.Artifact]
+        keys = _distinct_keys(a, experiment_id)
+        latest = (
+            sa.select(a.c.id)
+            .where(a.c.experiment_id == experiment_id, a.c.key == keys.c.key, a.c.deleted_at.is_(None))
+            .order_by(a.c.run_id.desc(), a.c.step.desc(), a.c.id.desc())
+            .limit(1)
+            .correlate(keys)
+            .scalar_subquery()
+        )
+        # Two statements, not a join of the rows to their ids: Postgres plans that join as a scan of the whole table.
+        ids = [
+            id_
+            for (id_,) in self._execute(sa.select(latest).where(keys.c.key.is_not(None)))
+            if id_ is not None
+        ]
+        return self._fetch(
+            models.Artifact, sa.select(a).where(a.c.id.in_(ids)).order_by(a.c.key), no_validate=True
         )
 
     # -- Soft-delete / restore / purge -----------------------------------------------------------
