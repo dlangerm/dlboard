@@ -1,7 +1,7 @@
 // biome-ignore lint/correctness/noUnusedVariables: read as the body of a Dash clientside_callback
-function imageSeriesModalOverlay(opened, src, data) {
+function imageSeriesModalOverlay(src, data) {
     const noUpdate = window.dash_clientside.no_update;
-    if (!opened || !src) {
+    if (!src) {
         return noUpdate;
     }
     // The modal's instance, shared by its picture and its layer. The modal is kept mounted (`keepMounted`), so both
@@ -18,5 +18,6 @@ function imageSeriesModalOverlay(opened, src, data) {
         return noUpdate;
     }
     window.dlImageSeriesOverlay.show(layer, img, src, data.overlays?.[src] ?? []);
+    window.dlImageSeriesViewer.shown(instance);
     return noUpdate;
 }

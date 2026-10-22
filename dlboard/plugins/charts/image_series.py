@@ -11,7 +11,7 @@ from typing import Annotated, Any, cast
 import dash
 import dash_mantine_components as dmc
 import pandas as pd
-from dash import ALL, MATCH, Input, Output, State, ctx, dcc, html
+from dash import ALL, MATCH, Input, Output, ctx, dcc, html
 from dash.exceptions import PreventUpdate
 from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
@@ -40,7 +40,7 @@ from dlboard.models import (
     is_inlineable_artifact,
     overlay_key,
 )
-from dlboard.plugins.charts._artifact_tags import format_tags_caption
+from dlboard.plugins.charts._artifact_tags import format_tags, format_tags_caption
 from dlboard.plugins.charts._layers import (
     DrawnLayer,
     drawn_layers,
@@ -250,6 +250,133 @@ def _legend_element(instance: str) -> html.Div:
     )
 
 
+class DownloadSize(StrEnum):
+    """How big the enlarged view's download is; the value is what the browser is told (`image_series_viewer.js`)."""
+
+    ORIGINAL = "1"
+    TWICE = "2"
+    FOUR_TIMES = "4"
+    EIGHT_TIMES = "8"
+    VIEW = "view"
+    """What is on screen: the zoomed and panned area, at the screen's resolution."""
+
+    @property
+    def label(self) -> str:
+        """What the button for it says."""
+        return {self.ORIGINAL: "Original", self.VIEW: "View"}.get(self, f"{self.value}x")
+
+    @property
+    def description(self) -> str:
+        """What the button for it does, for its tooltip."""
+        match self:
+            case DownloadSize.ORIGINAL:
+                return "Download the picture at its own size"
+            case DownloadSize.TWICE | DownloadSize.FOUR_TIMES | DownloadSize.EIGHT_TIMES:
+                return f"Download the picture magnified {self.value} times"
+            case DownloadSize.VIEW:
+                return "Download what is on screen: the area zoomed and panned to"
+
+
+def _view_button(class_name: str, text: str, title: str, **attributes: str) -> html.Button:
+    """A button of the enlarged view, which the browser handles (`image_series_viewer.js`)."""
+    return html.Button(
+        text,
+        className=class_name,
+        title=title,
+        type="button",
+        **cast("dict[str, Any]", {"aria-label": title, **attributes}),
+    )
+
+
+def _download_choices() -> html.Span:
+    """
+    Download, which offers its sizes on being pointed at: the choice is the click, with no menu to open first.
+
+    Each button downloads the picture with the layers shown and their legend, as a PNG.
+    """
+    return html.Span(
+        [
+            html.Span(
+                [
+                    _view_button(
+                        "dl-view-download-choice", size.label, size.description, **{"data-dl-download": size}
+                    )
+                    for size in DownloadSize
+                ],
+                className="dl-view-download-choices",
+            ),
+            html.Span("Download", className="dl-view-download-label", tabIndex=0),
+        ],
+        className="dl-view-download",
+    )
+
+
+def _enlarged_view(instance: str, key: str, *, has_legend: bool) -> dmc.Modal:
+    """
+    The enlarged view of a picture, opened by clicking a thumbnail.
+
+    The title (the chart's, the run with its color, the step) and a download button are the modal's header; the body is the
+    picture's tags as a table beside the picture, which is zoomed and panned, and a timeline to scrub along. The browser fills
+    in what is particular to the picture on show, as it does the legend (`image_series_viewer.js`).
+    """
+    at = cast("dict[str, Any]", {"data-dl-instance": instance})
+    return dmc.Modal(
+        id={"type": "image-series-modal", "instance": instance},
+        opened=False,
+        size="90%",
+        centered=True,
+        # Kept in the page while closed, so the browser can draw the picture's overlay into it at once.
+        keepMounted=True,
+        title=html.Span(
+            [
+                html.Span(artifact_display_name(key), className="dl-view-chart"),
+                html.Span(className="dl-view-run"),
+                html.Span(className="dl-view-step"),
+                _download_choices(),
+            ],
+            className="dl-view-title",
+            **at,
+        ),
+        children=[
+            html.Div(
+                [
+                    html.Div(className="dl-view-tags", **at),
+                    html.Div(
+                        [
+                            # The picture and its layers, which the browser moves and scales together to zoom and pan.
+                            # fit="contain" in a box of the viewer's size scales a small image up (rather than showing it
+                            # as a speck) and a large one down to fit.
+                            html.Div(
+                                [
+                                    dmc.Image(
+                                        id={"type": "image-series-modal-img", "instance": instance},
+                                        fit="contain",
+                                        h="100%",
+                                        w="100%",
+                                        style={"imageRendering": "pixelated"},
+                                    ),
+                                    _layers_element(
+                                        {"type": "image-series-modal-overlay", "instance": instance}
+                                    ),
+                                ],
+                                className="dl-zoom-content",
+                            ),
+                            *([_legend_element(instance)] if has_legend else []),
+                            html.Div(className="dl-zoom-controls"),
+                            _view_button("dl-view-nav dl-view-prev", "<", "Previous step (left arrow)"),
+                            _view_button("dl-view-nav dl-view-next", ">", "Next step (right arrow)"),
+                        ],
+                        className="dl-image-series-viewer",
+                        **at,
+                    ),
+                ],
+                className="dl-view-main",
+            ),
+            html.Div(className="dl-view-timeline", **at),
+        ],
+    )
+
+
 def _layers_by_picture(
     pictures: pd.DataFrame, picture_col: str, layers: list[str]
 ) -> dict[str, list[DrawnLayer]]:
@@ -324,6 +451,7 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
         per_run_steps: dict[str, list[int]] = {}
         per_run_urls: dict[str, dict[str, str]] = {}
         per_run_captions: dict[str, dict[str, str]] = {}
+        per_run_tags: dict[str, dict[str, dict[str, str]]] = {}
         per_run_names: dict[str, str] = {}
         # Each picture's layers, by the picture's URL: the modal only knows the URL it was opened on.
         overlays: dict[str, list[DrawnLayer]] = {}
@@ -334,6 +462,11 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
             if has_tags:
                 per_run_captions[str(rid)] = {
                     str(s): format_tags_caption(raw, parameters.tag_defaults, parameters.tag_display)
+                    for s, raw in zip(steps, g[tag_col], strict=True)
+                }
+                # The same tags a name and a value each, for the enlarged view's table.
+                per_run_tags[str(rid)] = {
+                    str(s): format_tags(raw, parameters.tag_defaults, parameters.tag_display)
                     for s, raw in zip(steps, g[tag_col], strict=True)
                 }
             overlays.update(_layers_by_picture(g, col, layers))
@@ -443,6 +576,11 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
                         "per_run_steps": per_run_steps,
                         "per_run_urls": per_run_urls,
                         "per_run_captions": per_run_captions,
+                        "per_run_tags": per_run_tags,
+                        "per_run_names": per_run_names,
+                        # How the enlarged view marks each run with its color, as its thumbnail's name is.
+                        "per_run_swatches": {str(rid): series_swatch_class(int(rid)) for rid in run_ids},
+                        "x_axis": x_col,
                         "overlays": {
                             url: [layer.model_dump(mode="json") for layer in drawn]
                             for url, drawn in overlays.items()
@@ -463,33 +601,9 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
                 ),
                 *page_grids,
                 pager,
-                dmc.Modal(
-                    id={"type": "image-series-modal", "instance": inst},
-                    opened=False,
-                    size="90%",
-                    padding=0,
-                    centered=True,
-                    # Kept in the page while closed, so the browser can draw the picture's overlay into it at once.
-                    keepMounted=True,
-                    children=html.Div(
-                        [
-                            dmc.Image(
-                                id={"type": "image-series-modal-img", "instance": inst},
-                                # fit="contain" within a fixed box scales a small image up (rather
-                                # than showing it as a speck in an otherwise-empty modal) and a large
-                                # one down to fit -- either way, the browser's own pinch/ctrl-scroll
-                                # zoom still reveals further detail on top of this, no custom +/-
-                                # control needed.
-                                fit="contain",
-                                h="80vh",
-                                w="100%",
-                                style={"imageRendering": "pixelated"},
-                            ),
-                            _layers_element({"type": "image-series-modal-overlay", "instance": inst}),
-                        ],
-                        style={"display": "flex", "justifyContent": "center", "position": "relative"},
-                    ),
-                ),
+                # Which run the enlarged view is on, set by the thumbnail clicked and by the keyboard.
+                dcc.Store(id={"type": "image-series-modal-run", "instance": inst}, data=None),
+                _enlarged_view(inst, parameters.key, has_legend=bool(layers)),
             ],
             gap="sm",
             className="dl-image-series",
@@ -563,10 +677,13 @@ ImageChart.register(allow_override=True)
 _SCRUB_JS = ClientsideScript(Path(__file__).with_name("image_series_scrub.js"))
 _PAGE_JS = ClientsideScript(Path(__file__).with_name("image_series_page.js"))
 _LOCK_JS = ClientsideScript(Path(__file__).with_name("image_series_lock.js"))
+_MODAL_PICTURE_JS = ClientsideScript(Path(__file__).with_name("image_series_modal_picture.js"))
 _MODAL_OVERLAY_JS = ClientsideScript(Path(__file__).with_name("image_series_modal_overlay.js"))
 _CSS_PATH = Path(__file__).with_name("image_series.css")
 _OVERLAY_HELPER_PATH = Path(__file__).with_name("image_series_overlay.js")
 """Draws an image chart's legend over its pictures; both the scrub and the modal call it, so it is a shared script."""
+_VIEWER_HELPER_PATH = Path(__file__).with_name("image_series_viewer.js")
+"""Zooms and pans the enlarged view and moves it with the keyboard; also finds a run's step, which the scrub shares."""
 
 
 def plug(app: dash.Dash) -> None:
@@ -574,11 +691,22 @@ def plug(app: dash.Dash) -> None:
     serve_layered_picture(app)
     serve_asset(app, AssetKind.STYLESHEET, _CSS_PATH.name, _CSS_PATH.read_bytes())
     serve_asset(app, AssetKind.SCRIPT, _OVERLAY_HELPER_PATH.name, _OVERLAY_HELPER_PATH.read_bytes())
+    serve_asset(app, AssetKind.SCRIPT, _VIEWER_HELPER_PATH.name, _VIEWER_HELPER_PATH.read_bytes())
+    # The enlarged view shows the run's picture at the slider's step, with its title, tags and timeline, while it is open. It sets
+    # the picture's `src` itself, from the browser, once the picture has loaded (`image_series_viewer.js`).
+    app.clientside_callback(
+        _MODAL_PICTURE_JS.source,
+        dash.Output({"type": "image-series-modal-img", "instance": dash.MATCH}, "src"),
+        dash.Input({"type": "image-series-modal", "instance": dash.MATCH}, "opened"),
+        dash.Input({"type": "image-series-modal-run", "instance": dash.MATCH}, "data"),
+        dash.Input({"type": "image-series-slider", "instance": dash.MATCH}, "value"),
+        dash.State({"type": "image-series-data", "instance": dash.MATCH}, "data"),
+        prevent_initial_call=True,
+    )
     app.clientside_callback(
         _MODAL_OVERLAY_JS.source,
         dash.Output({"type": "image-series-modal-overlay", "instance": dash.MATCH}, "style"),
-        dash.Input({"type": "image-series-modal", "instance": dash.MATCH}, "opened"),
-        dash.State({"type": "image-series-modal-img", "instance": dash.MATCH}, "src"),
+        dash.Input({"type": "image-series-modal-img", "instance": dash.MATCH}, "src"),
         dash.State({"type": "image-series-data", "instance": dash.MATCH}, "data"),
         prevent_initial_call=True,
     )
@@ -612,20 +740,12 @@ def plug(app: dash.Dash) -> None:
 
     @app.callback(
         Output({"type": "image-series-modal", "instance": MATCH}, "opened"),
-        Output({"type": "image-series-modal-img", "instance": MATCH}, "src"),
+        Output({"type": "image-series-modal-run", "instance": MATCH}, "data"),
         Input({"type": "image-series-thumb", "instance": MATCH, "run": ALL}, "n_clicks"),
-        State({"type": "image-series-img", "instance": MATCH, "run": ALL}, "src"),
-        State({"type": "image-series-img", "instance": MATCH, "run": ALL}, "id"),
         prevent_initial_call=True,
     )
-    def open_image_modal(
-        n_clicks_list: list[int], srcs: list[str], ids: list[dict[str, str]]
-    ) -> tuple[bool, str]:
+    def open_image_modal(n_clicks_list: list[int]) -> tuple[bool, str]:
         triggered_id = cast("dict[str, str] | None", ctx.triggered_id)
         if not triggered_id or not any(n_clicks_list):
             raise PreventUpdate
-        triggered_run = triggered_id["run"]
-        for src, img_id in zip(srcs, ids, strict=True):
-            if img_id["run"] == triggered_run:
-                return True, src
-        raise PreventUpdate
+        return True, triggered_id["run"]

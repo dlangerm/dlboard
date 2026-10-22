@@ -92,11 +92,26 @@ hide that layer on every picture of the chart, at once and without loading anyth
 alone (again to bring the rest back), which is how a truth and a prediction are compared. What each layer holds is
 listed on its row in its colors, so a class of one layer is never mistaken for a class of another. The eye hides every
 layer, and holding it (or a picture) shows the picture without them for as long as it is held; "Layers" folds the legend
-away again, and a picture too small for a list shows the eye alone. A layer the picture on show has nothing for is
+away again, and a thumbnail too narrow for a list shows the eye alone (the legend sits in the corner of the thumbnail or of the enlarged view, whatever the size of the picture in it, or its zoom). A layer the picture on show has nothing for is
 dimmed. What a viewer changes this way is theirs alone: it is kept for the browser tab and never changes the saved chart
 (opening the legend is only a way of looking, and is not a change).
 The chart's card says so ("View changed") and offers to **Save as default**, which writes which layers are shown into
 the chart's `layers` setting (into a view of your own, if the page is not yours), or to **Reset** it.
+
+Click a picture to open it enlarged. Its header names the chart, the run (in its color) and the step, with **Download**:
+point at it and it offers its sizes (**Original**, **2x**, **4x**, **8x**, or **View**, which is what is on screen, the
+area you have zoomed and panned to), and one click on one saves a PNG at that size. Every one has the layers shown drawn
+over the picture, and a legend of what they hold in its corner (a layer you have hidden is left out of both); a size that
+would be too big for a browser to draw is brought down to what it can. While the next picture is still downloading, the
+one on show is dimmed with a spinner over it, and the pictures a step either side are fetched ahead.
+The picture's tags are a table on its left, formatted as the chart's `tag_*` settings say. The enlarged view has the same
+legend as the thumbnails, sharing the chart's state (a layer hidden there is hidden on the thumbnails too, and holding the
+eye peeks past the layers). Scroll to zoom towards the pointer, drag to pan, and double-click to fit the picture to the
+view again; the controls over the picture have a slider, the zoom level (100% is one pixel of the picture to one of the
+screen, up to 6400%), and **Fit** and **100%** shortcuts. The layers move with the picture, and a small picture or mask is
+magnified in blocks. The `<` and `>` buttons beside the picture, the timeline under it and the left and right arrow keys
+move it through the chart's steps, moving the chart's own slider with it; the up and down arrow keys move through the
+runs. Moving keeps the zoom, to compare the same place.
 
 Viewer state is kept per experiment *and view*, so the same chart in two views of one experiment has a state of its own
 in each. It is an internal mechanism of dlboard's own charts for now (`ChartType.viewer_state_type()` and

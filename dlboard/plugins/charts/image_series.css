@@ -48,8 +48,9 @@
     top: 0.375rem;
     left: 0.375rem;
     z-index: 3;
-    max-width: calc(100% - 0.75rem);
-    max-height: calc(100% - 0.75rem);
+    /* Not less than a list needs, which a frame as small as a tiny picture shown at its own size is not. */
+    max-width: max(calc(100% - 0.75rem), 12rem);
+    max-height: max(calc(100% - 0.75rem), 9rem);
     overflow: auto;
     padding: 0.25rem 0.5rem 0.3rem 0.375rem;
     color: #f2f2f5;
@@ -218,13 +219,332 @@
     border-radius: 0.1875rem;
 }
 
-/* A small picture has room for the eye alone. */
-.dl-layer-legend[data-dl-compact] .dl-layer-rows,
-.dl-layer-legend[data-dl-compact] .dl-layer-title {
-    display: none;
+/* A frame too narrow for a list (a thumbnail in a panel of many columns) has room for the eye alone. It is the frame that is
+   measured, not the picture in it, so a tiny picture, or one zoomed out to its own size, leaves the legend as it is. */
+@container (max-width: 152px) {
+    .dl-layer-legend .dl-layer-rows,
+    .dl-layer-legend .dl-layer-title {
+        display: none;
+    }
 }
 
 /* Peeking (holding a picture): the pictures are shown without their layers, until it is let go. */
 .dl-image-series[data-dl-peek] .dl-image-series-overlay {
     visibility: hidden;
+}
+
+/* The enlarged view (`image_series_viewer.js`): a window onto the picture, which is zoomed and panned inside it. The
+   picture and its layers are one box that is moved and scaled together; the legend and the controls are not in it. */
+.dl-image-series-viewer {
+    position: relative;
+    height: 68vh;
+    overflow: hidden;
+    touch-action: none;
+    user-select: none;
+    cursor: default;
+}
+
+.dl-image-series-viewer[data-dl-zoomed] {
+    cursor: grab;
+}
+
+.dl-image-series-viewer[data-dl-panning] {
+    cursor: grabbing;
+}
+
+.dl-zoom-content {
+    position: absolute;
+    inset: 0;
+    transform-origin: 0 0;
+}
+
+.dl-zoom-content img {
+    -webkit-user-drag: none;
+}
+
+/* A mask is magnified block for block, as the picture under it is. */
+.dl-image-series-viewer .dl-image-series-layer svg image {
+    image-rendering: pixelated;
+}
+
+.dl-image-series-viewer[data-dl-peek] .dl-image-series-overlay {
+    visibility: hidden;
+}
+
+/* The zoom controls, over the bottom of the picture, in the legend's colors. */
+.dl-zoom-controls {
+    position: absolute;
+    bottom: 0.5rem;
+    left: 50%;
+    z-index: 4;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.25rem 0.625rem;
+    transform: translateX(-50%);
+    color: #f2f2f5;
+    background: rgb(18 18 24 / 0.74);
+    border: 1px solid rgb(255 255 255 / 0.16);
+    border-radius: 0.5rem;
+    font-size: 0.75rem;
+    cursor: default;
+    backdrop-filter: blur(3px);
+}
+
+.dl-zoom-controls button {
+    font: inherit;
+    color: inherit;
+    background: none;
+    border: 0;
+    padding: 0.125rem 0.375rem;
+    border-radius: 0.375rem;
+    cursor: pointer;
+}
+
+.dl-zoom-controls button:hover {
+    background: rgb(255 255 255 / 0.16);
+}
+
+.dl-zoom-slider {
+    width: 10rem;
+    accent-color: #4c6ef5;
+}
+
+.dl-zoom-level {
+    min-width: 3.25rem;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+/* The enlarged view's header: what the chart is, which run (in its color) and where, and the download. It is the modal's
+   title, so it sits beside the close button. */
+.dl-view-title {
+    display: flex;
+    flex: 1;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.25rem 0.875rem;
+    padding-right: 0.75rem;
+}
+
+.dl-view-chart {
+    font-weight: 700;
+    font-size: var(--mantine-font-size-lg);
+    overflow-wrap: anywhere;
+}
+
+.dl-view-run {
+    font-weight: 600;
+}
+
+.dl-view-step {
+    font-weight: 400;
+    color: var(--mantine-color-dimmed);
+    font-variant-numeric: tabular-nums;
+}
+
+/* Download: the label, and on pointing at it (or focusing it, on a touch screen) the sizes to download at, in front of it. */
+.dl-view-download {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    margin-left: auto;
+    padding: 0.125rem;
+    font-size: var(--mantine-font-size-sm);
+    border: 1px solid var(--mantine-color-default-border);
+    border-radius: var(--mantine-radius-sm);
+}
+
+.dl-view-download-label {
+    padding: 0.125rem 0.625rem;
+    font-weight: 500;
+    cursor: default;
+}
+
+.dl-view-download-choices {
+    display: none;
+    gap: 0.125rem;
+}
+
+.dl-view-download:hover .dl-view-download-choices,
+.dl-view-download:focus-within .dl-view-download-choices {
+    display: inline-flex;
+}
+
+.dl-view-download-choice {
+    padding: 0.125rem 0.625rem;
+    font: inherit;
+    font-weight: 500;
+    color: var(--mantine-color-text);
+    background: var(--mantine-color-default-hover);
+    border: 0;
+    border-radius: var(--mantine-radius-sm);
+    cursor: pointer;
+}
+
+.dl-view-download-choice:hover {
+    background: var(--mantine-primary-color-filled);
+    color: var(--mantine-primary-color-contrast);
+}
+
+/* The body: the tags as a table beside the picture. */
+.dl-view-main {
+    display: flex;
+    gap: 1rem;
+    align-items: stretch;
+}
+
+.dl-image-series-viewer {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.dl-view-tags {
+    flex: 0 0 15rem;
+    max-height: 68vh;
+    overflow: auto;
+}
+
+.dl-view-tags:empty {
+    display: none;
+}
+
+.dl-view-tags-title {
+    margin-bottom: 0.375rem;
+    font-size: var(--mantine-font-size-xs);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--mantine-color-dimmed);
+}
+
+.dl-view-tag-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--mantine-font-size-sm);
+}
+
+.dl-view-tag-table th,
+.dl-view-tag-table td {
+    padding: 0.375rem 0.5rem;
+    text-align: left;
+    vertical-align: top;
+    overflow-wrap: anywhere;
+    border-top: 1px solid var(--mantine-color-default-border);
+}
+
+.dl-view-tag-name {
+    width: 45%;
+    font-weight: 500;
+    color: var(--mantine-color-dimmed);
+}
+
+.dl-view-tag-value {
+    font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 48em) {
+    .dl-view-main {
+        flex-direction: column;
+    }
+
+    .dl-view-tags {
+        flex-basis: auto;
+        max-height: 12rem;
+    }
+}
+
+/* The buttons on either side of the picture, that step it back and forward. */
+.dl-view-nav {
+    position: absolute;
+    top: 50%;
+    z-index: 4;
+    width: 2.25rem;
+    height: 3.5rem;
+    transform: translateY(-50%);
+    font-size: 1.75rem;
+    line-height: 1;
+    color: #f2f2f5;
+    background: rgb(18 18 24 / 0.6);
+    border: 1px solid rgb(255 255 255 / 0.16);
+    border-radius: 0.5rem;
+    cursor: pointer;
+    backdrop-filter: blur(3px);
+}
+
+.dl-view-nav:hover:not(:disabled) {
+    background: rgb(18 18 24 / 0.85);
+}
+
+.dl-view-nav:disabled {
+    opacity: 0.3;
+    cursor: default;
+}
+
+.dl-view-prev {
+    left: 0.5rem;
+}
+
+.dl-view-next {
+    right: 0.5rem;
+}
+
+/* The timeline under the picture. */
+.dl-view-timeline {
+    display: flex;
+    align-items: center;
+    gap: 0.875rem;
+    margin-top: 0.75rem;
+}
+
+.dl-timeline-slider {
+    flex: 1;
+    accent-color: var(--mantine-primary-color-filled);
+}
+
+.dl-timeline-label {
+    min-width: 6rem;
+    text-align: right;
+    font-size: var(--mantine-font-size-sm);
+    font-variant-numeric: tabular-nums;
+    color: var(--mantine-color-dimmed);
+}
+
+/* Mantine sizes a modal's title to its text: this one spreads across the header, to put the download at its end. */
+.mantine-Modal-title:has(> .dl-view-title) {
+    flex: 1;
+}
+
+/* A picture that is still downloading: the one on show is dimmed, with a spinner over it, as a thumbnail has. */
+.dl-image-series-viewer[data-dl-loading] .dl-zoom-content {
+    opacity: 0.4;
+    transition: opacity 0.15s ease;
+}
+
+.dl-image-series-viewer[data-dl-loading]::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    z-index: 5;
+    width: 2.5rem;
+    height: 2.5rem;
+    margin: -1.25rem 0 0 -1.25rem;
+    border: 3px solid var(--mantine-color-default-border);
+    border-top-color: var(--mantine-primary-color-filled);
+    border-radius: 50%;
+    animation: dl-image-series-spin 0.8s linear infinite;
+    pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .dl-image-series-viewer[data-dl-loading]::after {
+        animation-duration: 2.4s;
+    }
+}
+
+/* The frames the legend is laid out in, measured for when it has room for more than the eye (`@container` above). */
+.dl-image-series-thumb,
+.dl-image-series-viewer {
+    container-type: inline-size;
 }

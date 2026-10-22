@@ -7,7 +7,7 @@ exercises, all through ordinary Lightning/dlboard calls:
 
 - nested hyperparameters: pydantic models, a pydantic dataclass, a stdlib dataclass and plain args,
   flattened by the logger to `model/base_channels`, `optim/schedule/kind`, ...
-- 25 epochs with step- and epoch-level metrics, per-class IoU, and ~dozens of per-parameter gradient norms
+- 25 epochs with step- and epoch-level metrics, and per-class IoU
 - a histogram of every weight tensor's gradient, so how they spread over training shows without averaging
 - Lightning's `LearningRateMonitor`, `ThroughputMonitor` and `DeviceStatsMonitor`
 - `ModelCheckpoint` with `log_model="all"`, so every checkpoint is uploaded as it is saved
@@ -47,7 +47,6 @@ from pytorch_lightning.callbacks import (
     ModelCheckpoint,
     ThroughputMonitor,
 )
-from pytorch_lightning.utilities import grad_norm
 from pytorch_lightning.utilities.types import OptimizerLRScheduler
 from torch import nn
 from torch.optim import AdamW, Optimizer
@@ -61,8 +60,8 @@ from dlboard.client.artifacts.rle import run_length_encode
 from dlboard.client.dlboard_logger import DLBoardLogger
 
 LOGDIR = Path("./lightning-logs")
-MAX_EPOCHS = 25
-GRAD_NORM_EVERY_N_STEPS = 10
+MAX_EPOCHS = 250
+GRAD_HISTOGRAM_EVERY_N_STEPS = 10
 PREVIEW_SAMPLES = 4
 """How many fixed validation images get a segmentation and a detection preview each epoch."""
 
@@ -382,11 +381,9 @@ class ShapesSegmenter(pl.LightningModule):
 
     @override
     def on_before_optimizer_step(self, optimizer: Optimizer) -> None:
-        # One `grad_2.0_norm/<param name>` key per parameter: a lot of series, grouped by their prefix.
-        if self.global_step % GRAD_NORM_EVERY_N_STEPS == 0:
-            self.log_dict(grad_norm(self, norm_type=2))
-            # The gradients themselves, not a norm of them: binned right here (one pass over each tensor), and only
-            # the buckets are sent. `rank_zero_only`, so the other ranks of a multi-GPU run skip it entirely.
+        # The gradients themselves, not a norm of them: binned right here (one pass over each tensor), and only
+        # the buckets are sent. `rank_zero_only`, so the other ranks of a multi-GPU run skip it entirely.
+        if self.global_step % GRAD_HISTOGRAM_EVERY_N_STEPS == 0:
             cast("DLBoardLogger", self.trainer.logger).log_histograms(
                 {
                     f"grad/{name}": param.grad
