@@ -24,4 +24,3 @@ def test_metric_frame_from_no_rows_is_empty_but_keeps_its_fixed_columns() -> Non
 
     assert frame.keys == frozenset()
     assert set(frame.to_frame().columns) == set(MetricColumn)
-    assert frame.latest_per_run() == {}

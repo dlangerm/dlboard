@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import itertools
 import json
+import math
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, Final, Literal, cast
 
@@ -276,6 +277,15 @@ def _series(
 ) -> list[sa.ColumnElement[bool]]:
     """What selects one run's rows under `key` in a per-step `table`: a prefix of its `(experiment_id, key, run_id, step)` index."""
     return [table.c.experiment_id == experiment_id, table.c.key == key, table.c.run_id == run_id]
+
+
+def _is_number(value: sa.ColumnElement[float | None]) -> sa.ColumnElement[bool]:
+    """
+    Whether `value` is a number: not `NULL`, and not `NaN`.
+
+    Postgres sorts `NaN` above every number, `+inf` included. (SQLite stores a `NaN` as `NULL` to begin with.)
+    """
+    return value <= math.inf
 
 
 def _distinct_keys(table: sa.Table, experiment_id: int) -> sa.CTE:
@@ -841,6 +851,47 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             .order_by(m.c.id)
         )
         return MetricFrame.from_rows(MetricRow._make(row) for row in rows)
+
+    def fetch_latest_metrics(
+        self,
+        experiment_id: int,
+        *,
+        keys: frozenset[str] | None = None,
+        exclude_run_ids: frozenset[int] = frozenset(),
+    ) -> dict[int, dict[str, float]]:
+        """
+        Each (non-deleted) run's most recently logged value of each key -- only `keys`, if given, else every metric.
+
+        One probe backwards through the index per run and key, so what is read depends on how many runs and keys
+        there are, not on how many steps they logged. A value that is `NULL` or `NaN` is no value: a run whose
+        last step diverged shows its last finite one.
+        """
+        m, r = self._tables[models.UnderlyingMetricTableEntry], self._tables[models.Run]
+        logged = _distinct_keys(m, experiment_id)
+        latest = (
+            sa.select(m.c.value)
+            .where(*_series(m, experiment_id, logged.c.key, r.c.id), _is_number(m.c.value))
+            .order_by(m.c.step.desc(), m.c.id.desc())
+            .limit(1)
+            .correlate(logged, r)
+            .scalar_subquery()
+        )
+        key_filter: list[sa.ColumnElement[bool]] = [logged.c.key.in_(keys)] if keys is not None else []
+        pairs = (
+            sa.select(r.c.id.label("run_id"), logged.c.key, latest.label("value"))
+            .select_from(logged.join(r, sa.true()))
+            .where(
+                logged.c.key.is_not(None),
+                *key_filter,
+                *_live_runs(r, experiment_id),
+                r.c.id.not_in(exclude_run_ids),
+            )
+            .subquery("pairs")
+        )
+        by_run: dict[int, dict[str, float]] = {}
+        for run_id, key, value in self._execute(sa.select(pairs).where(pairs.c.value.is_not(None))):
+            by_run.setdefault(run_id, {})[key] = value
+        return by_run
 
     def summarize_metric_keys(self, experiment_id: int) -> list[MetricKeySummary]:
         """Every metric key logged in an experiment (non-deleted runs), sorted, without fetching values."""

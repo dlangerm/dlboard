@@ -197,6 +197,21 @@ class DataStore(typing.Protocol[_P]):
         """An experiment's (non-deleted runs') metrics -- only `keys`, if given, else every metric."""
         ...
 
+    def fetch_latest_metrics(
+        self,
+        experiment_id: int,
+        *,
+        keys: frozenset[str] | None = None,
+        exclude_run_ids: frozenset[int] = frozenset(),
+    ) -> dict[int, dict[str, float]]:
+        """
+        Each (non-deleted) run's most recently logged value of each key, by run id -- only `keys`, if given, else every metric.
+
+        For callers that show where each run ended up (a comparison, a table of runs): `fetch_metrics`
+        would read every step each run logged to find it.
+        """
+        ...
+
     def summarize_metric_keys(self, experiment_id: int) -> list[MetricKeySummary]:
         """
         Every metric key logged in an experiment (non-deleted runs), sorted, without fetching values.

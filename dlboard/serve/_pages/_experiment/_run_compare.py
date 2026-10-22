@@ -190,7 +190,7 @@ def load_comparison(
     hparams = {
         h.run_id: h.hparams_dict for h in store.fetch_hyperparams(experiment_id, exclude_run_ids=others)
     }
-    metrics = store.fetch_metrics(experiment_id, exclude_run_ids=others).latest_per_run()
+    metrics = store.fetch_latest_metrics(experiment_id, exclude_run_ids=others)
     return runs, comparison_rows([run.id for run in runs], hparams, metrics)
 
 

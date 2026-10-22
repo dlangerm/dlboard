@@ -9,7 +9,7 @@ in wide form).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, NamedTuple, cast
+from typing import TYPE_CHECKING, NamedTuple
 
 import pandas as pd
 
@@ -101,14 +101,6 @@ class MetricFrame:
         if key not in self.keys:
             raise KeyError(key)
         return self._frame[key]
-
-    def latest_per_run(self) -> dict[int, dict[str, float]]:
-        """Each run's most recently logged (highest-step) value of every key it has logged at all."""
-        latest = self._frame.groupby(MetricColumn.RUN_ID)[sorted(self.keys)].last()
-        return {
-            cast("int", run_id): {cast("str", key): value for key, value in row.items() if pd.notna(value)}
-            for run_id, row in latest.to_dict(orient="index").items()
-        }
 
     def to_frame(self) -> pd.DataFrame:
         """A copy of the underlying dataframe, for the (untyped) chart layer."""

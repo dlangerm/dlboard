@@ -173,7 +173,7 @@ def _load_hparam_view_data(
     metric_keys = [s.key for s in store.summarize_metric_keys(experiment_id)]
     wanted = frozenset(selected_metrics & set(metric_keys))
     latest: dict[int, dict[str, float]] = (
-        store.fetch_metrics(experiment_id, keys=wanted).latest_per_run() if wanted else {}
+        store.fetch_latest_metrics(experiment_id, keys=wanted) if wanted else {}
     )
     rows = _build_hparam_rows(runs, hparams_by_run, latest)
     return hparam_keys, metric_keys, rows

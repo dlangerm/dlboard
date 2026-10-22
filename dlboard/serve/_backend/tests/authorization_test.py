@@ -156,6 +156,7 @@ _OPERATIONS: dict[str, tuple[ProjectRole, Callable[[AuthorizingDataStore, _Chain
     "list histogram keys": (ProjectRole.VIEWER, lambda s, c: s.summarize_histogram_keys(c[1].id)),
     "list metric keys": (ProjectRole.VIEWER, lambda s, c: s.summarize_metric_keys(c[1].id)),
     "list artifact keys": (ProjectRole.VIEWER, lambda s, c: s.summarize_artifact_keys(c[1].id)),
+    "read latest metrics": (ProjectRole.VIEWER, lambda s, c: s.fetch_latest_metrics(c[1].id)),
     "create a run": (ProjectRole.EDITOR, lambda s, c: s.create_run(models.NewRun(experiment_id=c[1].id))),
     "log metrics": (ProjectRole.EDITOR, lambda s, c: s.log_metrics([_metric(c[1].id, c[2].id)])),
     "finish a run": (

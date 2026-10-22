@@ -374,6 +374,16 @@ class AuthorizingDataStore(models.DataStore[...]):
         self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
         return self._inner.fetch_metrics(experiment_id, keys=keys, exclude_run_ids=exclude_run_ids)
 
+    def fetch_latest_metrics(
+        self,
+        experiment_id: int,
+        *,
+        keys: frozenset[str] | None = None,
+        exclude_run_ids: frozenset[int] = frozenset(),
+    ) -> dict[int, dict[str, float]]:
+        self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
+        return self._inner.fetch_latest_metrics(experiment_id, keys=keys, exclude_run_ids=exclude_run_ids)
+
     def summarize_metric_keys(self, experiment_id: int) -> list[MetricKeySummary]:
         self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
         return self._inner.summarize_metric_keys(experiment_id)

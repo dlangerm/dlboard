@@ -26,6 +26,7 @@ import sqlalchemy as sa
 from dlboard import models
 from dlboard.conftest import StoreBackend
 from dlboard.serve._pages._experiment._column_catalog import ColumnCatalog
+from dlboard.serve._pages._experiment._run_compare import load_comparison
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -41,6 +42,8 @@ _LOADS: dict[str, Callable[[PostgresStore, int], object]] = {
     "metric keys": lambda s, e: s.summarize_metric_keys(e),
     "histogram keys": lambda s, e: s.summarize_histogram_keys(e),
     "artifact keys": lambda s, e: s.summarize_artifact_keys(e),
+    "latest metrics": lambda s, e: s.fetch_latest_metrics(e),
+    "the run comparison": lambda s, e: load_comparison(s, e, [run.id for run in s.get_runs(e)]),
 }
 
 
