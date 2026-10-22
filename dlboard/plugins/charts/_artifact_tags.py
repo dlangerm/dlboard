@@ -25,19 +25,28 @@ def parse_tags(raw_tags: object) -> dict[str, TagValue]:
     return _TAGS_ADAPTER.validate_python(raw_tags) if isinstance(raw_tags, dict) else {}
 
 
-def format_tags_caption(
+def format_tags(
     raw_tags: object,
     display: TagDisplay = TagDisplay(),  # noqa: B008
     by_key: Mapping[str, TagDisplay] | None = None,
-) -> str:
+) -> dict[str, str]:
     """
-    Format an artifact `<key>__tags` cell into a caption.
+    Format an artifact `<key>__tags` cell into each tag's name and its value as shown.
 
     The cell is read with `parse_tags`.
     Every tag is shown as `display`, except one named in `by_key`, which that overrides.
     """
     by_key = by_key or {}
-    return ", ".join(
-        f"{k}: {format_tag_value(v, display.overridden_by(by_key[k]) if k in by_key else display)}"
+    return {
+        k: format_tag_value(v, display.overridden_by(by_key[k]) if k in by_key else display)
         for k, v in parse_tags(raw_tags).items()
-    )
+    }
+
+
+def format_tags_caption(
+    raw_tags: object,
+    display: TagDisplay = TagDisplay(),  # noqa: B008
+    by_key: Mapping[str, TagDisplay] | None = None,
+) -> str:
+    """Format an artifact `<key>__tags` cell into a caption: `format_tags` on one line."""
+    return ", ".join(f"{k}: {v}" for k, v in format_tags(raw_tags, display, by_key).items())

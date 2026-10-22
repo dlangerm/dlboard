@@ -26,8 +26,10 @@ from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import parse_qs, urlparse
 
 import numpy as np
+import numpy.typing as npt
 import pendulum
 import pytest
+from PIL import Image as PILImage
 from playwright.sync_api import expect
 
 from dlboard import models
@@ -3390,4 +3392,603 @@ def test_the_legend_over_a_picture_lists_what_each_layer_holds_and_hides_peeks_a
     page.locator(".mantine-Slider-thumb").focus()  # not the picture: step 10 logged no layers
     page.keyboard.press("ArrowRight")
     expect(_layer_row(legend, "truth")).to_have_attribute("data-dl-absent", "")
+    assert console_errors == []
+
+
+def _log_tagged_pictures_with_a_mask(
+    live_server_url: str, tmp_path: Path, experiment_id: int, *, runs: int = 1
+) -> None:
+    """Per run, a picture at steps 0 and 10, each tagged with its step and run, and a `truth` mask and `boxes` over step 0."""
+    api = BasicDlboardAPI(live_server_url)
+    labels = np.zeros((48, 64), dtype=np.int64)
+    labels[10:30, 10:40] = 1
+    mask = rle.run_length_encode(labels, colors={1: "#ff0000"}, classnames={1: "cat"})
+    boxes: list[Shape] = [Box(x=0.125, y=0.25, width=0.375, height=0.25, label="dog")]
+    count = 0
+    for index in range(runs):
+        run = api.create_run(models.NewRun(experiment_id=experiment_id))
+        pictures = [
+            Image(
+                key="samples/a",
+                image=np.full((48, 64, 3), 128, dtype=np.uint8),
+                step=step,
+                format="jpg",
+                tags={"run_index": index, "at": step},
+            ).to_artifact(tmp_path, run.id, experiment_id)
+            for step in (0, 10)
+        ]
+        overlays = [
+            Overlay.over("samples/a", name="truth", shapes=[mask], step=0).to_artifact(
+                tmp_path, run.id, experiment_id
+            ),
+            Overlay.over("samples/a", name="boxes", shapes=boxes, step=0).to_artifact(
+                tmp_path, run.id, experiment_id
+            ),
+        ]
+        api.log_artifact_batch([*pictures, *overlays])
+        count += len(pictures) + len(overlays)
+    _wait_for_artifacts(experiment_id, count)
+
+
+_TRANSFORM_SCALE_JS = "(el) => new DOMMatrix(getComputedStyle(el).transform).a"
+
+
+def _wait_for_scale(content: Locator, condition: str) -> None:
+    """Wait until the zoom of the enlarged view's picture (`scale`) satisfies the JS expression `condition`."""
+    page = content.page
+    page.wait_for_function(
+        f"(el) => {{ const scale = new DOMMatrix(getComputedStyle(el).transform).a; return {condition}; }}",
+        arg=content.element_handle(),
+    )
+
+
+def test_the_enlarged_view_zooms_and_pans_its_picture_with_its_layers_and_keeps_the_legend_and_tags(  # noqa: PLR0915 -- one flow
+    page: Page, live_server_url: str, tmp_path: Path, console_errors: list[str]
+) -> None:
+    """
+    The enlarged view has the thumbnail's tags and layer legend, sharing its state. Scrolling zooms towards the pointer,
+    dragging pans, double-clicking fits, and the controls zoom too; the layers stay on the picture throughout, a mask is
+    magnified in blocks, and holding the eye peeks past the layers.
+    """
+    _create_project_and_experiment(page, live_server_url, "Enlarged View Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    _log_tagged_pictures_with_a_mask(live_server_url, tmp_path, experiment_id)
+    page.reload()
+    _auto_generate_charts(page)
+
+    chart = page.locator(".dl-chart-item")
+    thumb = chart.locator(".dl-image-series-thumb")
+    expect(_layer_holder(thumb, "truth")).to_be_visible()
+    thumb.click()
+    dialog = page.get_by_role("dialog")
+    viewer = dialog.locator(".dl-image-series-viewer")
+    content = viewer.locator(".dl-zoom-content")
+    layer = viewer.locator(".dl-image-series-overlay")
+    expect(viewer).to_be_visible()
+
+    # The tags, as the thumbnail has them.
+    expect(dialog.locator(".dl-view-tag-name")).to_have_text(["run_index", "at"])
+    expect(dialog.locator(".dl-view-tag-value")).to_have_text(["0", "0"])
+    expect(dialog.locator(".dl-view-step")).to_have_text("step 0")
+    # Laid out as a whole: the title above the picture, with the run's color, and the tags beside it on its left.
+    head, tag_panel, shown = (
+        dialog.locator(selector).bounding_box()
+        for selector in (".dl-view-title", ".dl-view-tags", ".dl-image-series-viewer")
+    )
+    assert head is not None
+    assert tag_panel is not None
+    assert shown is not None
+    assert head["y"] + head["height"] <= shown["y"]
+    assert tag_panel["x"] + tag_panel["width"] <= shown["x"]
+    expect(dialog.locator(".dl-view-run")).to_have_class(re.compile(r"\bdl-swatch\b"))
+
+    # The legend is the chart's: a layer hidden in one is hidden in the other.
+    legend = viewer.locator(".dl-layer-legend")
+    legend.get_by_role("button", name="Layers").click()
+    expect(_layer_row(legend, "truth").locator(".dl-class")).to_have_text(["cat"])
+    _layer_row(legend, "truth").get_by_role("button").click()
+    expect(_layer_holder(viewer, "truth")).to_be_hidden()
+    expect(_layer_holder(thumb, "truth")).to_be_hidden()
+    _layer_row(legend, "truth").get_by_role("button").click()
+    expect(_layer_holder(viewer, "truth")).to_be_visible()
+
+    # Fitted to start with; scrolling zooms towards the pointer, so the picture under it stays under it.
+    assert content.evaluate(_TRANSFORM_SCALE_JS) == 1
+    picture = viewer.locator("img").first
+    box = picture.bounding_box()
+    assert box is not None
+    pointer = (box["x"] + box["width"] * 0.25, box["y"] + box["height"] * 0.5)
+    page.mouse.move(*pointer)
+    page.mouse.wheel(0, -600)
+    _wait_for_scale(content, "scale > 1.5")
+    zoomed = picture.bounding_box()
+    assert zoomed is not None
+    assert abs((pointer[0] - zoomed["x"]) / zoomed["width"] - 0.25) < 0.02
+    assert abs((pointer[1] - zoomed["y"]) / zoomed["height"] - 0.5) < 0.02
+    expect(viewer.locator(".dl-zoom-level")).to_have_text(re.compile(r"^\d+%$"))
+    page.wait_for_function(
+        _OVERLAY_COVERS_PICTURE_JS, arg=layer.element_handle()
+    )  # the layers stay on the picture
+    expect(viewer.locator(".dl-image-series-layer svg image").first).to_have_css(
+        "image-rendering", "pixelated"
+    )
+
+    # Dragging pans, by as far as it is dragged, and letting go does not close the view.
+    page.mouse.down()
+    page.mouse.move(pointer[0] + 40, pointer[1] + 10, steps=4)
+    page.mouse.up()
+    panned = picture.bounding_box()
+    assert panned is not None
+    assert abs(panned["x"] - zoomed["x"] - 40) < 1
+    assert abs(panned["y"] - zoomed["y"] - 10) < 1
+    expect(dialog).to_be_visible()
+    page.wait_for_function(_OVERLAY_COVERS_PICTURE_JS, arg=layer.element_handle())
+
+    # The controls: a pixel of the picture to a pixel of the screen, the slider, and fitting.
+    viewer.get_by_role("button", name="100%").click()
+    expect(viewer.locator(".dl-zoom-level")).to_have_text("100%")
+    viewer.locator(".dl-zoom-slider").evaluate(
+        "(el) => { el.value = el.max; el.dispatchEvent(new Event('input', { bubbles: true })); }"
+    )
+    assert content.evaluate(_TRANSFORM_SCALE_JS) > 1
+    viewer.get_by_role("button", name="Fit").click()
+    assert content.evaluate(_TRANSFORM_SCALE_JS) == 1
+    page.mouse.move(*pointer)  # the controls are not the picture: scrolling over them does not zoom it
+    page.mouse.wheel(0, -600)
+    _wait_for_scale(content, "scale > 1.5")
+    viewer.dblclick(position={"x": 200, "y": 200})  # double-click fits too
+    _wait_for_scale(content, "scale === 1")
+
+    # Holding the eye peeks at the picture without its layers, here as on a thumbnail.
+    eye = legend.get_by_role("button", name="Overlays").bounding_box()
+    assert eye is not None
+    page.mouse.move(eye["x"] + eye["width"] / 2, eye["y"] + eye["height"] / 2)
+    page.mouse.down()
+    expect(viewer).to_have_attribute("data-dl-peek", "")
+    expect(layer).to_have_css("visibility", "hidden")
+    page.mouse.up()
+    expect(viewer).not_to_have_attribute("data-dl-peek", "")
+    assert console_errors == []
+
+
+def test_the_arrow_keys_move_the_enlarged_view_through_steps_and_runs_and_keep_its_zoom(
+    page: Page, live_server_url: str, tmp_path: Path, console_errors: list[str]
+) -> None:
+    """Left and right move along the steps (as the slider does), up and down along the runs; its title and tags follow."""
+    _create_project_and_experiment(page, live_server_url, "Enlarged View Keys Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    _log_tagged_pictures_with_a_mask(live_server_url, tmp_path, experiment_id, runs=2)
+    page.reload()
+    _auto_generate_charts(page)
+
+    thumb = page.locator(".dl-chart-item .dl-image-series-thumb").first
+    thumb.click()
+    dialog = page.get_by_role("dialog")
+    viewer = dialog.locator(".dl-image-series-viewer")
+    run = dialog.locator(".dl-view-run")
+    tags = dialog.locator(".dl-view-tag-value")
+    expect(tags).to_have_text(["0", "0"])
+    first_run = run.inner_text()
+
+    box = viewer.bounding_box()
+    assert box is not None
+    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    page.mouse.wheel(0, -600)
+    content = viewer.locator(".dl-zoom-content")
+    _wait_for_scale(content, "scale > 1.5")
+    zoom = viewer.locator(".dl-zoom-level")
+    level = zoom.inner_text()
+
+    page.keyboard.press("ArrowRight")
+    expect(tags).to_have_text(["0", "10"])
+    expect(dialog.locator(".dl-view-step")).to_have_text("step 10")
+    expect(page.locator(".mantine-Slider-thumb").first).to_have_attribute("aria-valuenow", "10")
+    page.keyboard.press("ArrowDown")
+    expect(tags).to_have_text(["1", "10"])
+    expect(run).not_to_have_text(first_run)
+    page.keyboard.press("ArrowLeft")
+    expect(tags).to_have_text(["1", "0"])
+    expect(viewer.locator(".dl-image-series-layer svg image")).to_have_count(1)  # step 0 has its layers back
+    page.keyboard.press("ArrowUp")
+    expect(tags).to_have_text(["0", "0"])
+    expect(zoom).to_have_text(level)  # moving through the pictures keeps the place looked at
+
+    page.keyboard.press("Escape")
+    expect(dialog).to_be_hidden()
+    thumb.click()
+    expect(tags).to_have_text(["0", "0"])  # the slider is where the arrows left it
+    _wait_for_scale(content, "scale === 1")  # opened afresh, it is fitted again
+    assert console_errors == []
+
+
+def test_the_enlarged_view_steps_with_its_buttons_and_timeline(
+    page: Page, live_server_url: str, tmp_path: Path, console_errors: list[str]
+) -> None:
+    """
+    The buttons beside the picture step it back and forward and give out at the ends, the timeline scrubs along the steps
+    (the chart's slider follows), and Download gives the picture at its own size with the layers shown drawn over it.
+    """
+    _create_project_and_experiment(page, live_server_url, "Enlarged View Timeline Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    _log_tagged_pictures_with_a_mask(live_server_url, tmp_path, experiment_id)
+    page.reload()
+    _auto_generate_charts(page)
+
+    chart = page.locator(".dl-chart-item")
+    slider_thumb = chart.locator(".mantine-Slider-thumb")
+    chart.locator(".dl-image-series-thumb").click()
+    dialog = page.get_by_role("dialog")
+    viewer = dialog.locator(".dl-image-series-viewer")
+    previous, following = (
+        viewer.get_by_role("button", name="Previous step"),
+        viewer.get_by_role("button", name="Next step"),
+    )
+    tags = dialog.locator(".dl-view-tag-value")
+    label = dialog.locator(".dl-timeline-label")
+
+    expect(previous).to_be_disabled()
+    expect(label).to_have_text("step 0")
+    following.click()
+    expect(tags).to_have_text(["0", "10"])
+    expect(slider_thumb).to_have_attribute("aria-valuenow", "10")  # the chart's own slider moved with it
+    expect(following).to_be_disabled()
+    previous.click()
+    expect(tags).to_have_text(["0", "0"])
+
+    timeline = dialog.locator(".dl-timeline-slider")
+    timeline.evaluate(
+        "(el) => { el.value = el.max; el.dispatchEvent(new Event('input', { bubbles: true })); }"
+    )
+    expect(label).to_have_text("step 10")
+    expect(slider_thumb).to_have_attribute("aria-valuenow", "10")
+    timeline.evaluate("(el) => { el.value = 0; el.dispatchEvent(new Event('input', { bubbles: true })); }")
+    expect(tags).to_have_text(["0", "0"])
+    expect(_layer_holder(viewer, "truth")).to_be_visible()
+
+    assert console_errors == []
+
+
+def test_the_enlarged_view_shows_a_loader_over_the_picture_until_the_next_one_has_arrived(
+    page: Page, live_server_url: str, tmp_path: Path, console_errors: list[str]
+) -> None:
+    """Stepping on dims the picture on show with a spinner, which goes when the new picture has loaded."""
+    _create_project_and_experiment(page, live_server_url, "Enlarged View Loader Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    _log_tagged_pictures_with_a_mask(live_server_url, tmp_path, experiment_id)
+    page.reload()
+    _auto_generate_charts(page)
+    page.locator(".dl-chart-item .dl-image-series-thumb").click()
+    dialog = page.get_by_role("dialog")
+    viewer = dialog.locator(".dl-image-series-viewer")
+    expect(dialog.locator(".dl-view-step")).to_have_text("step 0")
+    page.wait_for_function(
+        "(img) => img.complete && img.naturalWidth > 0", arg=viewer.locator("img").first.element_handle()
+    )
+    expect(viewer).not_to_have_attribute("data-dl-loading", "")
+
+    held: list[Route] = []
+
+    def hold_pictures(route: Route) -> None:
+        """Keep every picture request waiting, so the picture is still on its way."""
+        if route.request.resource_type == "image":
+            held.append(route)
+        else:
+            route.continue_()
+
+    page.route("**/*", hold_pictures)
+    dialog.get_by_role("button", name="Next step").click()
+    expect(dialog.locator(".dl-view-step")).to_have_text("step 10")  # the rest of the view has moved on
+    expect(viewer).to_have_attribute("data-dl-loading", "")
+    assert viewer.evaluate("(el) => getComputedStyle(el, '::after').animationName") == "dl-image-series-spin"
+
+    for route in held:
+        route.continue_()
+    page.unroute_all()
+    expect(viewer).not_to_have_attribute("data-dl-loading", "")
+    assert console_errors == []
+
+
+def _legend_panel_share(pixels: npt.NDArray[np.uint8]) -> float:
+    """How much of a download's top-left corner (where the legend goes) is dark: the legend's panel, over the picture."""
+    corner = pixels[: pixels.shape[0] // 2, : pixels.shape[1] * 2 // 5]
+    return float((corner.max(axis=2) < 80).mean())
+
+
+@pytest.mark.parametrize(
+    ("choice", "size"),
+    [
+        pytest.param("1", (48, 64), id="original"),
+        pytest.param("4", (192, 256), id="four-times"),
+        pytest.param("view", None, id="the-view"),
+    ],
+)
+def test_the_enlarged_view_downloads_at_the_size_chosen_with_the_layers_shown_and_their_legend(  # noqa: PLR0913 -- a browser test takes its fixtures and its parametrized case
+    page: Page,
+    live_server_url: str,
+    tmp_path: Path,
+    console_errors: list[str],
+    choice: str,
+    size: tuple[int, int] | None,
+) -> None:
+    """
+    Pointing at Download offers the sizes, and one click on one downloads at it: the picture's own size, magnified by a
+    whole number, or what is on screen (zoomed and panned to). Each has the layers that are shown drawn over the
+    picture, and their legend, which a layer hidden is left out of.
+    """
+    _create_project_and_experiment(page, live_server_url, f"Enlarged View Download {choice} Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    _log_tagged_pictures_with_a_mask(live_server_url, tmp_path, experiment_id)
+    page.reload()
+    _auto_generate_charts(page)
+    page.locator(".dl-chart-item .dl-image-series-thumb").click()
+    dialog = page.get_by_role("dialog")
+    viewer = dialog.locator(".dl-image-series-viewer")
+    content = viewer.locator(".dl-zoom-content")
+    page.wait_for_function(
+        _OVERLAY_COVERS_PICTURE_JS, arg=viewer.locator(".dl-image-series-overlay").element_handle()
+    )
+    box = viewer.bounding_box()
+    assert box is not None
+    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    page.mouse.wheel(0, -300)  # zoomed in: only the view's download follows it
+    _wait_for_scale(content, "scale > 1.5")
+    choices = dialog.locator(".dl-view-download-choices")
+    expect(choices).to_be_hidden()  # offered on pointing at Download, not before
+
+    def download(name: str) -> PILImage.Image:
+        dialog.locator(".dl-view-download-label").hover()
+        with page.expect_download() as taken:
+            dialog.locator(f'[data-dl-download="{choice}"]').click()
+        saved = tmp_path / name
+        taken.value.save_as(saved)
+        return PILImage.open(saved)
+
+    downloaded = download("layers.png")
+    pixels = np.asarray(downloaded.convert("RGB"))
+    height, width = size or tuple(viewer.evaluate("(el) => [el.clientHeight, el.clientWidth]"))
+    assert pixels.shape == (height, width, 3)
+    assert _legend_panel_share(pixels) > 0.01  # the legend, in the corner
+    if size is None:
+        red, green, _ = pixels[height // 2, width // 2]  # the middle of the picture is the middle of the mask
+        assert red > 140
+        assert green < 115
+    else:
+        scale = width // 64
+        assert tuple(pixels[40 * scale, 60 * scale]) == (128, 128, 128)  # the picture, away from the mask
+        inside, outside = pixels[28 * scale, 40 * scale - 6], pixels[28 * scale, 40 * scale + 6]
+        assert tuple(outside) == (128, 128, 128)
+        assert inside[0] > 140
+        assert inside[1] < 115  # the mask's class, in red at its opacity, over it
+
+    # With every layer hidden there is nothing to draw and nothing to say.
+    legend = viewer.locator(".dl-layer-legend")
+    legend.get_by_role("button", name="Layers").click()
+    for name in ("truth", "boxes"):
+        _layer_row(legend, name).get_by_role("button").click()
+    bare = np.asarray(download("bare.png").convert("RGB"))
+    assert _legend_panel_share(bare) == 0
+    assert console_errors == []
+
+
+def _log_a_picture_of_size(
+    live_server_url: str, tmp_path: Path, experiment_id: int, width: int, height: int
+) -> None:
+    """One picture of `width` by `height` with a `boxes` overlay over it (fractions of it, so any size does)."""
+    api = BasicDlboardAPI(live_server_url)
+    run = api.create_run(models.NewRun(experiment_id=experiment_id))
+    boxes: list[Shape] = [Box(x=0.125, y=0.25, width=0.375, height=0.25, label="dog")]
+    artifacts = [
+        Image(
+            key="samples/a", image=np.full((height, width, 3), 128, dtype=np.uint8), step=0, format="jpg"
+        ).to_artifact(tmp_path, run.id, experiment_id),
+        Overlay.over("samples/a", name="boxes", shapes=boxes, step=0).to_artifact(
+            tmp_path, run.id, experiment_id
+        ),
+    ]
+    api.log_artifact_batch(artifacts)
+    _wait_for_artifacts(experiment_id, len(artifacts))
+
+
+def _offset_within(inner: Locator, outer: Locator) -> tuple[int, int, int, int]:
+    """Where `inner` is in `outer`, and how big, to the pixel: the same whatever `outer` is doing on the page (opening, say)."""
+    inside, around = inner.bounding_box(), outer.bounding_box()
+    assert inside is not None
+    assert around is not None
+    return (
+        round(inside["x"] - around["x"]),
+        round(inside["y"] - around["y"]),
+        round(inside["width"]),
+        round(inside["height"]),
+    )
+
+
+def _is_inside(inner: Locator, outer: Locator) -> bool:
+    """Whether `inner` is drawn within `outer`'s box."""
+    inside, around = inner.bounding_box(), outer.bounding_box()
+    assert inside is not None
+    assert around is not None
+    return (
+        around["x"] <= inside["x"]
+        and around["y"] <= inside["y"]
+        and inside["x"] + inside["width"] <= around["x"] + around["width"] + 0.5
+        and inside["y"] + inside["height"] <= around["y"] + around["height"] + 0.5
+    )
+
+
+@pytest.mark.parametrize(
+    ("width", "height"),
+    [
+        pytest.param(16, 12, id="tiny"),
+        pytest.param(64, 48, id="small"),
+        pytest.param(2400, 1800, id="large"),
+        pytest.param(24, 1200, id="tall-and-thin"),
+        pytest.param(1600, 20, id="wide-and-flat"),
+    ],
+)
+def test_a_thumbnails_picture_and_legend_behave_the_same_whatever_the_size_of_the_picture(  # noqa: PLR0913 -- a browser test takes its fixtures and its parametrized case
+    page: Page,
+    live_server_url: str,
+    tmp_path: Path,
+    console_errors: list[str],
+    width: int,
+    height: int,
+) -> None:
+    """
+    A picture is fitted in its thumbnail, its layers cover it, and its legend is in the thumbnail's corner as a list that
+    works -- none of it depending on how big or small, or how long and thin, the picture is.
+    """
+    _create_project_and_experiment(page, live_server_url, f"Thumbnail Sizes {width}x{height} Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    _log_a_picture_of_size(live_server_url, tmp_path, experiment_id, width, height)
+    page.reload()
+    _auto_generate_charts(page)
+
+    thumb = page.locator(".dl-chart-item .dl-image-series-thumb")
+    layer = thumb.locator(".dl-image-series-overlay")
+    legend = thumb.locator(".dl-layer-legend")
+    expect(layer.locator("rect")).to_have_count(1)
+    page.wait_for_function(
+        "(img) => img.complete && img.naturalWidth > 0", arg=thumb.locator("img").first.element_handle()
+    )
+    assert _is_inside(thumb.locator("img").first, thumb)  # fitted in the thumbnail, never spilling out of it
+    page.wait_for_function(
+        _OVERLAY_COVERS_PICTURE_JS, arg=layer.element_handle()
+    )  # the layers cover the picture
+
+    # The legend is in the thumbnail's corner, however little of it the picture takes up, and is a list that works.
+    frame, corner = thumb.bounding_box(), legend.bounding_box()
+    assert frame is not None
+    assert corner is not None
+    assert 0 <= corner["x"] - frame["x"] <= 12
+    assert 0 <= corner["y"] - frame["y"] <= 12
+    legend.get_by_role("button", name="Layers").click()
+    row = _layer_row(legend, "boxes")
+    expect(row).to_be_visible()
+    assert _is_inside(legend, thumb)
+    opened = legend.bounding_box()
+    assert opened is not None
+    assert opened["width"] > 60
+    row.get_by_role("button").click()
+    expect(_layer_holder(thumb, "boxes")).to_be_hidden()
+    row.get_by_role("button").click()
+    expect(_layer_holder(thumb, "boxes")).to_be_visible()
+    assert console_errors == []
+
+
+def test_the_enlarged_views_legend_and_controls_stay_usable_on_a_tiny_picture_at_its_own_size(
+    page: Page, live_server_url: str, tmp_path: Path, console_errors: list[str]
+) -> None:
+    """The legend is in the view's corner and the controls at its foot, not fitted to a picture shown at 100% that is a speck."""
+    _create_project_and_experiment(page, live_server_url, "Tiny Enlarged Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    _log_a_picture_of_size(live_server_url, tmp_path, experiment_id, 16, 12)
+    page.reload()
+    _auto_generate_charts(page)
+
+    page.locator(".dl-chart-item .dl-image-series-thumb").click()
+    dialog = page.get_by_role("dialog")
+    viewer = dialog.locator(".dl-image-series-viewer")
+    legend = viewer.locator(".dl-layer-legend")
+    legend.get_by_role("button", name="Layers").click()
+    row = _layer_row(legend, "boxes")
+    expect(row).to_be_visible()
+    fitted = _offset_within(legend, viewer)
+
+    viewer.get_by_role("button", name="100%").click()
+    expect(viewer.locator(".dl-zoom-level")).to_have_text("100%")
+    picture = viewer.locator("img").first.bounding_box()
+    assert picture is not None
+    assert picture["width"] < 40  # a speck in the middle of the view
+    assert _offset_within(legend, viewer) == fitted  # which the legend does not follow
+    expect(row).to_be_visible()
+    row.get_by_role("button").click()
+    expect(_layer_holder(viewer, "boxes")).to_be_hidden()
+    for control in (
+        viewer.locator(".dl-zoom-controls"),
+        legend,
+        viewer.get_by_role("button", name="Next step"),
+    ):
+        assert _is_inside(control, viewer)
+    assert console_errors == []
+
+
+def test_scrubbing_the_enlarged_views_timeline_puts_in_only_the_pictures_it_stops_at_without_a_flashing_loader(
+    page: Page, live_server_url: str, tmp_path: Path, console_errors: list[str]
+) -> None:
+    """
+    A drag through twelve steps in one go is not twelve pictures drawn one after another: the chart's slider is moved a few
+    times, the picture on show is replaced only by a picture that has loaded, and it ends on the step let go at. Pictures
+    that arrive at once leave no spinner behind.
+    """
+    _create_project_and_experiment(page, live_server_url, "Scrubbing Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    api = BasicDlboardAPI(live_server_url)
+    run = api.create_run(models.NewRun(experiment_id=experiment_id))
+    api.log_artifact_batch(
+        [
+            Image(
+                key="samples/a",
+                image=np.full((48, 64, 3), step * 10, dtype=np.uint8),
+                step=step,
+                format="png",
+            ).to_artifact(tmp_path, run.id, experiment_id)
+            for step in range(12)
+        ]
+    )
+    _wait_for_artifacts(experiment_id, 12)
+    page.reload()
+    _auto_generate_charts(page)
+
+    page.locator(".dl-chart-item .dl-image-series-thumb").click()
+    dialog = page.get_by_role("dialog")
+    viewer = dialog.locator(".dl-image-series-viewer")
+    expect(dialog.locator(".dl-timeline-slider")).to_have_count(1)
+    expect(dialog.locator(".dl-view-step")).to_have_text("step 0")
+    page.wait_for_function(
+        "(img) => img.complete && img.naturalWidth > 0", arg=viewer.locator("img").first.element_handle()
+    )
+    # What the picture is set to, and whether a spinner is ever shown, from now on.
+    viewer.evaluate(
+        """(el) => {
+            const picture = el.querySelector("img");
+            window.dlSeen = { pictures: [], spinner: false };
+            new MutationObserver((records) => {
+                for (const record of records) {
+                    if (record.attributeName === "src" && record.target === picture) {
+                        window.dlSeen.pictures.push(picture.getAttribute("src"));
+                    }
+                    if (record.attributeName === "data-dl-loading" && el.hasAttribute("data-dl-loading")) {
+                        window.dlSeen.spinner = true;
+                    }
+                }
+            }).observe(el.ownerDocument.body, { attributes: true, subtree: true, attributeFilter: ["src", "data-dl-loading"] });
+        }"""
+    )
+    dialog.locator(".dl-timeline-slider").evaluate(
+        """(el) => {
+            for (let at = 1; at <= 11; at++) {
+                el.value = at;
+                el.dispatchEvent(new Event("input", { bubbles: true }));
+            }
+        }"""
+    )
+    expect(dialog.locator(".dl-timeline-label")).to_have_text("step 11")  # the label follows the hand at once
+    expect(dialog.locator(".dl-view-step")).to_have_text("step 11")
+    expect(page.locator(".dl-chart-item .mantine-Slider-thumb")).to_have_attribute("aria-valuenow", "11")
+    page.wait_for_function(
+        "(el) => el.querySelector('img').getAttribute('src') === window.dlSeen.pictures.at(-1) && el.querySelector('img').complete",
+        arg=viewer.element_handle(),
+    )
+    seen = cast("dict[str, Any]", page.evaluate("window.dlSeen"))
+    assert len(seen["pictures"]) < 6  # not a picture a step
+    assert seen["spinner"] is False
+    expect(viewer).not_to_have_attribute("data-dl-loading", "")
     assert console_errors == []
