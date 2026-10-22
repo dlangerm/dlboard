@@ -36,7 +36,7 @@ from dlboard.client.artifacts import rle
 from dlboard.client.artifacts.image import Image
 from dlboard.client.artifacts.overlay import DEFAULT_CLASS_COLORS, Box, Overlay, Point, Polygon, Shape
 from dlboard.client.histograms import ExponentialBinning
-from dlboard.models import OVERLAY_KEY_SUFFIX, PanelInstance, overlay_key
+from dlboard.models import OVERLAY_KEY_SUFFIX, RUN_NAME_COLUMN, PanelInstance, overlay_key
 from dlboard.serve import get_system_data_store
 from dlboard.serve._jump import JUMP_SELECT_ID
 from dlboard.serve._pages._experiment._chart_autogen import AUTO_OPEN_MAX_CHARTS
@@ -962,6 +962,54 @@ def test_each_run_is_drawn_in_its_own_palette_color_matching_its_run_table_swatc
         "cells => cells.map(c => getComputedStyle(c, '::before').backgroundColor)"
     )
     assert sorted(swatches) == sorted(strokes)
+    assert console_errors == []
+
+
+def test_the_charts_draw_the_newest_runs_until_the_run_table_selects_others(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """
+    An experiment of many runs draws only the newest 20 until told otherwise, and its table still lists, filters
+    and selects any run: find the oldest one by name, tick it and it is drawn too; "Newest 20" puts it back.
+    """
+    _create_project_and_experiment(page, live_server_url, "Many Runs Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    api = BasicDlboardAPI(live_server_url)
+    runs = [api.create_run(models.NewRun(experiment_id=experiment_id)) for _ in range(24)]
+    api.log_metric_batch(
+        [
+            models.LoggedMetrics(
+                experiment_id=experiment_id,
+                run_id=run.id,
+                step=step,
+                metrics={"loss": 1.0 / (step + 1)},
+                timestamp_utc=pendulum.now("UTC"),
+            )
+            for run in runs
+            for step in range(3)
+        ]
+    )
+    page.reload()
+    _auto_generate_charts(page)
+
+    curves = page.locator(".dl-panel-body .recharts-line-curve")
+    expect(curves).to_have_count(20)
+
+    oldest = runs[0].name or f"Run {runs[0].id}"
+    grid = page.locator(f"#{NAVBAR_HPARAM_DATATABLE_ID}")
+    grid.locator(f'.ag-header-cell[col-id="{RUN_NAME_COLUMN}"]').hover()
+    grid.locator(f'.ag-header-cell[col-id="{RUN_NAME_COLUMN}"] .ag-header-cell-filter-button').click()
+    page.locator(".ag-filter-body input").first.fill(oldest)
+    row = grid.locator(".ag-center-cols-container .ag-row")
+    expect(row).to_have_count(1)
+    expect(row).to_contain_text(oldest)
+    page.keyboard.press("Escape")
+    row.locator(".ag-selection-checkbox input").check()
+    expect(curves).to_have_count(21)
+
+    page.get_by_role("button", name="Newest 20").click()
+    expect(curves).to_have_count(20)
     assert console_errors == []
 
 

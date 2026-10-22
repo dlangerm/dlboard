@@ -40,6 +40,7 @@ from dlboard.serve._pages._experiment import _page_edits as edits
 from dlboard.serve._pages._experiment import _page_model as page_model
 from dlboard.serve._pages._experiment import _page_repository as repo
 from dlboard.serve._pages._experiment._run_compare import compare_button
+from dlboard.serve._pages._experiment._shown_runs import ShownRunsSettings, shown_run_ids
 from dlboard.serve._url import relative_path
 
 if TYPE_CHECKING:
@@ -54,6 +55,7 @@ NAVBAR_HPARAM_COL_SELECT_ID: ValueId[ids.ExperimentPage] = ValueId("navbar-hpara
 NAVBAR_HPARAM_TABLE_BODY_ID: typing.Final = "navbar-hparam-table-body"
 NAVBAR_HPARAM_CONFIRM_COLS_ID: ButtonId[ids.ExperimentPage] = ButtonId("navbar-hparam-confirm-cols")
 NAVBAR_HPARAM_COLUMNS_TOGGLE_ID: ButtonId[ids.ExperimentPage] = ButtonId("navbar-hparam-columns-toggle")
+NAVBAR_NEWEST_RUNS_ID: ButtonId[ids.ExperimentPage] = ButtonId("navbar-newest-runs")
 NAVBAR_HPARAM_APPLIED_COLS_ID: StoreId[ids.ExperimentPage] = StoreId("navbar-hparam-applied-cols")
 _ROW_HEIGHT = 34
 _MAX_TABLE_HEIGHT = "50vh"
@@ -146,11 +148,6 @@ def _build_hparam_rows(
     return rows
 
 
-_HPARAM_ROWS_LIMIT = 1000
-"""Cap on runs loaded into the hparam/metric comparison table -- a page, not every row, matching
-the discipline every other `list_*` `DataStore` method already follows."""
-
-
 def _load_hparam_view_data(
     store: DataStore[...], experiment_id: int, hparams: list[str], selected_metrics: set[str], runs: list[Run]
 ) -> tuple[list[str], list[str], list[dict[str, Any]]]:
@@ -212,7 +209,7 @@ def _delete_run_modal() -> Component:
 def _build_hparam_datatable(
     rows: list[dict[str, Any]],
     selected: list[str] | list[int],
-    excluded: list[int] | list[str],
+    shown: frozenset[int],
     *,
     table_id: str,
 ) -> dag.AgGrid:
@@ -221,6 +218,7 @@ def _build_hparam_datatable(
             "field": RUN_NAME_COLUMN,
             "headerName": "Run",
             "sortable": True,
+            "filter": True,
             # Each run's chart color as a dot before its name, so this table doubles as the legend.
             "cellClass": {"function": f"params.data.{_SWATCH_FIELD}"},
         },
@@ -261,7 +259,7 @@ def _build_hparam_datatable(
         }
     )
 
-    selected_ids = [str(row[MetricColumn.RUN_ID]) for row in rows if row[MetricColumn.RUN_ID] not in excluded]
+    selected_ids = [str(row[MetricColumn.RUN_ID]) for row in rows if row[MetricColumn.RUN_ID] in shown]
     data = [
         {
             **row,
@@ -300,7 +298,14 @@ def _build_hparam_datatable(
         dashGridOptions={
             "rowHeight": _ROW_HEIGHT,
             "headerHeight": _ROW_HEIGHT,
-            "rowSelection": {"mode": "multiRow", "checkboxes": True, "headerCheckbox": True},
+            "rowSelection": {
+                "mode": "multiRow",
+                "checkboxes": True,
+                "headerCheckbox": True,
+                # With a filter on, the header checkbox is the runs it matches: every run of a long experiment is
+                # one click from being drawn, and so should never be what that click means.
+                "selectAll": "filtered",
+            },
         },
         **grid,
     )
@@ -311,7 +316,7 @@ def _render_hparam_panel(
     hparam_keys: list[str],
     metric_keys: list[str],
     selected: list[str],
-    excluded: list[int] | list[str],
+    shown: frozenset[int],
 ) -> Component:
     """
     The comparison table, plus a Columns picker collapsed behind an icon so it doesn't permanently eat a row above the table it configures.
@@ -329,6 +334,18 @@ def _render_hparam_panel(
                 [
                     section_label("Runs"),
                     compare_button(),
+                    dmc.Tooltip(
+                        dmc.Button(
+                            f"Newest {ShownRunsSettings().default_shown_runs}",
+                            id=NAVBAR_NEWEST_RUNS_ID,
+                            n_clicks=0,
+                            variant="subtle",
+                            size="compact-xs",
+                        ),
+                        label="Draw only the newest runs again, rather than the ones selected",
+                        position="bottom",
+                        withArrow=True,
+                    ),
                     dmc.Popover(
                         [
                             dmc.PopoverTarget(
@@ -388,7 +405,7 @@ def _render_hparam_panel(
                 children=_build_hparam_datatable(
                     rows,
                     selected,
-                    excluded,
+                    shown,
                     table_id=NAVBAR_HPARAM_DATATABLE_ID,
                 ),
             ),
@@ -398,7 +415,7 @@ def _render_hparam_panel(
 
 def _load_hparam_panel_settings(
     store: DataStore[...], ref: repo.PageRef
-) -> tuple[list[Run], list[int] | list[str], list[str]]:
+) -> tuple[list[Run], frozenset[int], list[str]]:
     """
     The cheap, always-needed inputs for the navbar table: its run list and its persisted settings.
 
@@ -408,15 +425,15 @@ def _load_hparam_panel_settings(
     just on a real settings change.
     """
     page = repo.load_page(store, ref)
-    excluded, selected = page.document.excluded_runs, page.document.hparam_columns
-    runs = list(store.get_runs(ref.experiment_id, limit=_HPARAM_ROWS_LIMIT, offset=0))
-    return runs, excluded, selected
+    shown, columns = shown_run_ids(store, ref.experiment_id, page.document), page.document.hparam_columns
+    runs = list(store.get_runs(ref.experiment_id, limit=None))
+    return runs, shown, columns
 
 
 def _render_signature(
     experiment_id: int,
     hparams: list[str],
-    excluded: list[int] | list[str],
+    shown: frozenset[int],
     selected: list[str],
     runs: list[Run],
 ) -> list[Any]:
@@ -434,7 +451,7 @@ def _render_signature(
     and so must each one's status and end time, or a run finishing would never redraw its row.
     """
     run_states = [[run.id, run.status, run.ended_at.isoformat() if run.ended_at else None] for run in runs]
-    return [experiment_id, hparams, sorted(excluded), selected, run_states]
+    return [experiment_id, hparams, sorted(shown), selected, run_states]
 
 
 def _register_hparam_table(app: Dash) -> None:
@@ -468,7 +485,7 @@ def _register_hparam_table(app: Dash) -> None:
             if page_json is not None
             else repo.PageRef(experiment_id, view_id)
         )
-        runs, excluded, selected = _load_hparam_panel_settings(store, ref)
+        runs, shown, selected = _load_hparam_panel_settings(store, ref)
         # `STATE_PAGE_STORAGE` changes on *every* page-settings write -- a tab switch, a panel
         # rename, a drag-reorder, none of which this table cares about -- so rebuilding on it
         # unconditionally (tearing down and remounting the ag-grid) flickered on every one of
@@ -487,7 +504,7 @@ def _register_hparam_table(app: Dash) -> None:
         # metric-column feature. `runs` (from `_load_hparam_panel_settings`, already cheap/bounded)
         # is enough to detect every case this table needs to react to, so the expensive part only
         # runs on the (comparatively rare) ticks that actually need a re-render.
-        signature = _render_signature(experiment_id, hparams, excluded, selected, runs)
+        signature = _render_signature(experiment_id, hparams, shown, selected, runs)
         if signature == prev_signature:
             raise PreventUpdate
 
@@ -497,7 +514,7 @@ def _register_hparam_table(app: Dash) -> None:
 
         return dmc.Stack(
             [
-                _render_hparam_panel(rows, hparam_keys, metric_keys, selected, excluded),
+                _render_hparam_panel(rows, hparam_keys, metric_keys, selected, shown),
                 _delete_run_modal(),
                 Store(id=DELETE_RUN_PENDING_STORE_ID),
                 Store(id=NAVBAR_HPARAM_SIGNATURE_ID, data=signature),
@@ -567,27 +584,52 @@ def _register_hparam_table(app: Dash) -> None:
             if isinstance(selected_rows, dict)
             else {row[MetricColumn.RUN_ID] for row in selected_rows}
         )
-        all_ids = {row[MetricColumn.RUN_ID] for row in table_data}
-        excluded = sorted(all_ids - selected_ids)
 
         store = get_data_store()
-        # The table's `selectedRows` is *computed from* the currently-persisted `excluded` set
+        # The table's `selectedRows` is *computed from* the runs the page currently shows
         # (see `_build_hparam_datatable`), so it mounting for the first time reports a "change"
         # here even though nothing the user did actually changed anything -- Dash fires this even
         # with `prevent_initial_call=True`, because that only suppresses the very first page
         # render, not a dynamically-created component (this navbar table isn't in the static
         # layout) mounting later with an already-computed value. Skip the (expensive, chart-
-        # remounting) rebuild when the recomputed set matches what's already persisted. `ref_of`,
+        # remounting) rebuild when the table says the runs the page already shows. `ref_of`,
         # not `STATE_VIEW_ID` -- see `render_navbar_hparams`'s own comment on why.
         ref = repo.ref_of(experiment_id, page_model.BasicExperimentPage.model_validate_json(page_json))
         current_page = repo.load_page(store, ref)
-        if excluded == current_page.document.excluded_runs:
+        listed = {row[MetricColumn.RUN_ID] for row in table_data}
+        if selected_ids == shown_run_ids(store, experiment_id, current_page.document) & listed:
             raise PreventUpdate
 
         page, container = edits.commit(
             page_json,
             paging_json,
-            edits.PageEdit(document=page_model.DocumentSettings(excluded_runs=excluded)),
+            edits.PageEdit(document=page_model.DocumentSettings(selected_runs=sorted(selected_ids))),
+        )
+        return page.model_dump_json(), container
+
+
+def _register_newest_runs(app: Dash) -> None:
+    @app.callback(
+        Output(ids.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
+        Output(ids.METRIC_CONTENT_ID, "children", allow_duplicate=True),
+        Input(NAVBAR_NEWEST_RUNS_ID, "n_clicks", allow_optional=True),
+        State(constants.STATE_EXPERIMENT_ID, "data"),
+        State(ids.STATE_PAGE_STORAGE, "data"),
+        State(ids.PANEL_PAGING_ID, "data"),
+        prevent_initial_call=True,
+    )
+    def show_newest_runs(
+        n_clicks: int | None, experiment_id: int, page_json: str, paging_json: str
+    ) -> tuple[str, html.Div]:
+        if not n_clicks:
+            raise PreventUpdate
+        ref = repo.ref_of(experiment_id, page_model.BasicExperimentPage.model_validate_json(page_json))
+        if repo.load_page(get_data_store(), ref).document.selected_runs is None:
+            raise PreventUpdate
+        page, container = edits.commit(
+            page_json,
+            paging_json,
+            edits.PageEdit(document=page_model.DocumentSettings(selected_runs=None)),
         )
         return page.model_dump_json(), container
 
@@ -633,4 +675,5 @@ def _register_delete_run(app: Dash) -> None:
 
 def register_run_comparison_callbacks(app: Dash) -> None:
     _register_hparam_table(app)
+    _register_newest_runs(app)
     _register_delete_run(app)

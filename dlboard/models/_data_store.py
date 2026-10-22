@@ -180,9 +180,19 @@ class DataStore(typing.Protocol[_P]):
         ...
 
     def get_runs(
-        self, experiment_id: int, *, limit: int = 1000, offset: int = 0
+        self,
+        experiment_id: int,
+        *,
+        limit: int | None = 1000,
+        offset: int = 0,
+        run_ids: frozenset[int] | None = None,
     ) -> typing.Iterator[models.Run]:
-        """Get a page of an experiment's (non-deleted) runs, most recently created first."""
+        """
+        A page of an experiment's (non-deleted) runs, most recently created first.
+
+        A `limit` of `None` is every run, and `run_ids` limits it to those, as it does every read of what runs logged:
+        `None` is all of the experiment's, an empty set none.
+        """
         ...
 
     def log_metrics(self, metric: Iterable[models.LoggedMetrics]) -> None:
@@ -194,7 +204,7 @@ class DataStore(typing.Protocol[_P]):
         experiment_id: int,
         *,
         keys: frozenset[str] | None = None,
-        exclude_run_ids: frozenset[int] = frozenset(),
+        run_ids: frozenset[int] | None = None,
         reduction: MetricReduction = MetricReduction.HISTORY,
     ) -> MetricFrame:
         """
@@ -209,7 +219,7 @@ class DataStore(typing.Protocol[_P]):
         experiment_id: int,
         *,
         keys: frozenset[str] | None = None,
-        exclude_run_ids: frozenset[int] = frozenset(),
+        run_ids: frozenset[int] | None = None,
     ) -> dict[int, dict[str, float]]:
         """
         Each (non-deleted) run's most recently logged value of each key, by run id -- only `keys`, if given, else every metric.
@@ -235,7 +245,7 @@ class DataStore(typing.Protocol[_P]):
         *,
         keys: frozenset[str],
         max_steps: int,
-        exclude_run_ids: frozenset[int] = frozenset(),
+        run_ids: frozenset[int] | None = None,
     ) -> list[models.UnderlyingHistogramTableEntry]:
         """
         An experiment's (non-deleted runs') histograms under `keys`, thinned to about `max_steps` steps per run and key.
@@ -254,7 +264,7 @@ class DataStore(typing.Protocol[_P]):
         ...
 
     def fetch_hyperparams(
-        self, experiment_id: int, *, exclude_run_ids: frozenset[int] = frozenset()
+        self, experiment_id: int, *, run_ids: frozenset[int] | None = None
     ) -> typing.Iterator[models.HyperParams]:
         """Every (non-deleted) run's hyperparameters for an experiment."""
         ...
@@ -339,7 +349,7 @@ class DataStore(typing.Protocol[_P]):
         *,
         keys: frozenset[str] | None = None,
         key_prefixes: frozenset[str] = frozenset(),
-        exclude_run_ids: frozenset[int] = frozenset(),
+        run_ids: frozenset[int] | None = None,
     ) -> typing.Iterator[models.Artifact]:
         """
         An experiment's (non-deleted) artifact metadata, not bytes.

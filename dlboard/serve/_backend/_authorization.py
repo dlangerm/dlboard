@@ -355,9 +355,16 @@ class AuthorizingDataStore(models.DataStore[...]):
         self._require(self._run_project(run_id), ProjectRole.EDITOR)
         return self._inner.finish_run(run_id, status, ended_at)
 
-    def get_runs(self, experiment_id: int, *, limit: int = 1000, offset: int = 0) -> Iterator[models.Run]:
+    def get_runs(
+        self,
+        experiment_id: int,
+        *,
+        limit: int | None = 1000,
+        offset: int = 0,
+        run_ids: frozenset[int] | None = None,
+    ) -> Iterator[models.Run]:
         self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
-        return self._inner.get_runs(experiment_id, limit=limit, offset=offset)
+        return self._inner.get_runs(experiment_id, limit=limit, offset=offset, run_ids=run_ids)
 
     def log_metrics(self, metric: Iterable[models.LoggedMetrics]) -> None:
         metric = list(metric)
@@ -369,23 +376,21 @@ class AuthorizingDataStore(models.DataStore[...]):
         experiment_id: int,
         *,
         keys: frozenset[str] | None = None,
-        exclude_run_ids: frozenset[int] = frozenset(),
+        run_ids: frozenset[int] | None = None,
         reduction: models.MetricReduction = models.MetricReduction.HISTORY,
     ) -> MetricFrame:
         self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
-        return self._inner.fetch_metrics(
-            experiment_id, keys=keys, exclude_run_ids=exclude_run_ids, reduction=reduction
-        )
+        return self._inner.fetch_metrics(experiment_id, keys=keys, run_ids=run_ids, reduction=reduction)
 
     def fetch_latest_metrics(
         self,
         experiment_id: int,
         *,
         keys: frozenset[str] | None = None,
-        exclude_run_ids: frozenset[int] = frozenset(),
+        run_ids: frozenset[int] | None = None,
     ) -> dict[int, dict[str, float]]:
         self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
-        return self._inner.fetch_latest_metrics(experiment_id, keys=keys, exclude_run_ids=exclude_run_ids)
+        return self._inner.fetch_latest_metrics(experiment_id, keys=keys, run_ids=run_ids)
 
     def summarize_metric_keys(self, experiment_id: int) -> list[MetricKeySummary]:
         self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
@@ -397,12 +402,10 @@ class AuthorizingDataStore(models.DataStore[...]):
         *,
         keys: frozenset[str],
         max_steps: int,
-        exclude_run_ids: frozenset[int] = frozenset(),
+        run_ids: frozenset[int] | None = None,
     ) -> list[models.UnderlyingHistogramTableEntry]:
         self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
-        return self._inner.fetch_histograms(
-            experiment_id, keys=keys, max_steps=max_steps, exclude_run_ids=exclude_run_ids
-        )
+        return self._inner.fetch_histograms(experiment_id, keys=keys, max_steps=max_steps, run_ids=run_ids)
 
     def summarize_histogram_keys(self, experiment_id: int) -> list[str]:
         self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
@@ -413,10 +416,10 @@ class AuthorizingDataStore(models.DataStore[...]):
         return self._inner.log_hyperparams(hyperparams)
 
     def fetch_hyperparams(
-        self, experiment_id: int, *, exclude_run_ids: frozenset[int] = frozenset()
+        self, experiment_id: int, *, run_ids: frozenset[int] | None = None
     ) -> Iterator[models.HyperParams]:
         self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
-        return self._inner.fetch_hyperparams(experiment_id, exclude_run_ids=exclude_run_ids)
+        return self._inner.fetch_hyperparams(experiment_id, run_ids=run_ids)
 
     def log_artifact_refs(self, artifacts: Iterable[models.Artifact]) -> None:
         artifacts = list(artifacts)
@@ -438,11 +441,11 @@ class AuthorizingDataStore(models.DataStore[...]):
         *,
         keys: frozenset[str] | None = None,
         key_prefixes: frozenset[str] = frozenset(),
-        exclude_run_ids: frozenset[int] = frozenset(),
+        run_ids: frozenset[int] | None = None,
     ) -> Iterator[models.Artifact]:
         self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
         return self._inner.fetch_artifacts(
-            experiment_id, keys=keys, key_prefixes=key_prefixes, exclude_run_ids=exclude_run_ids
+            experiment_id, keys=keys, key_prefixes=key_prefixes, run_ids=run_ids
         )
 
     def summarize_artifact_keys(self, experiment_id: int) -> list[models.Artifact]:

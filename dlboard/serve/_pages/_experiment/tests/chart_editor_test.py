@@ -49,16 +49,16 @@ def _log_a_run(store: SQLLiteStore, experiment_id: int) -> models.Run:
     return run
 
 
-def test_render_chart_preview_leaves_out_excluded_runs_like_the_real_panel(
+def test_render_chart_preview_draws_the_selected_runs_like_the_real_panel(
     store: SQLLiteStore, experiment_id: int, sign_in_as: Callable[[str], None]
 ) -> None:
-    """It used to render from the whole experiment, so it showed runs the panel itself hides."""
+    """It used to render from the whole experiment, so it showed runs the panel itself leaves out."""
     sign_in_as("alice")
-    kept, excluded = _log_a_run(store, experiment_id), _log_a_run(store, experiment_id)
-    # Excluding a run branches into a view of alice's own (see `save_page`) -- preview from that
-    # same view, not the (untouched) shared page, to see the exclusion it just made.
+    kept, _unselected = _log_a_run(store, experiment_id), _log_a_run(store, experiment_id)
+    # Selecting runs branches into a view of alice's own (see `save_page`) -- preview from that
+    # same view, not the (untouched) shared page, to see the selection it just made.
     view = repo.save_document_settings(
-        store, repo.PageRef(experiment_id, None), DocumentSettings(excluded_runs=[excluded.id])
+        store, repo.PageRef(experiment_id, None), DocumentSettings(selected_runs=[kept.id])
     )
 
     form = _form(

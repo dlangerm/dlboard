@@ -16,10 +16,12 @@ Breaking any of these needs a migration path and a deprecation window of at leas
   additive changes: a new optional field or a new path. The client ignores response fields it doesn't
   know, and the server ignores request fields it doesn't know.
 - **Stored data.**
-  - View and panel JSON. A view saves what it shows (its panels, the runs it leaves out, its Runs-table
+  - View and panel JSON. A view saves what it shows (its panels, the runs it selected, its Runs-table
     columns), not how it's being browsed: which panels are open and which tab is shown live in the page's
     address (`?open=`, `?tab=`). Views saved before that change may still hold `open_panel` and `active_tab`
     keys; they still load, and those keys are ignored.
+    A view with no `selected_runs` draws the newest runs (20 by default, `DLBOARD_DEFAULT_SHOWN_RUNS`); one saved
+    before they existed has `excluded_runs` instead, which it still leaves out of those.
   - Chart type names (`line`, `bar`, `image`, `table`, `histogram`).
   - The *values* of a table chart's `mode` (`runs`, `pivot`, `artifacts`), and of a histogram chart's `display`
     (`heatmap`, `bands`, `step`), as saved in a chart's parameters.

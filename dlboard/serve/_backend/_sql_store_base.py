@@ -276,6 +276,13 @@ def build_metadata(schema: str | None = None) -> tuple[sa.MetaData, dict[type[Ba
     return metadata, tables
 
 
+def _runs_among(
+    column: sa.ColumnElement[int], run_ids: frozenset[int] | None
+) -> list[sa.ColumnElement[bool]]:
+    """What limits a query to the runs `run_ids` names, if it is limited to any: `None` is every run of the experiment."""
+    return [] if run_ids is None else [column.in_(run_ids)]
+
+
 def _live_runs(runs: sa.Table, experiment_id: int) -> list[sa.ColumnElement[bool]]:
     """What selects an experiment's runs that are not soft-deleted."""
     return [runs.c.experiment_id == experiment_id, runs.c.deleted_at.is_(None)]
@@ -803,14 +810,25 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         self._touch_experiment(finished.experiment_id)
         return finished
 
-    def get_runs(self, experiment_id: int, *, limit: int = 1000, offset: int = 0) -> Iterator[models.Run]:
-        """Get a page of an experiment's (non-deleted) runs, most recently created first."""
+    def get_runs(
+        self,
+        experiment_id: int,
+        *,
+        limit: int | None = 1000,
+        offset: int = 0,
+        run_ids: frozenset[int] | None = None,
+    ) -> Iterator[models.Run]:
+        """A page (`limit` of `None` being every one) of an experiment's (non-deleted) runs, most recently created first; only `run_ids`, if given."""
         runs = self._tables[models.Run]
         return iter(
             self._fetch(
                 models.Run,
                 sa.select(runs)
-                .where(runs.c.experiment_id == experiment_id, runs.c.deleted_at.is_(None))
+                .where(
+                    runs.c.experiment_id == experiment_id,
+                    runs.c.deleted_at.is_(None),
+                    *_runs_among(runs.c.id, run_ids),
+                )
                 .order_by(runs.c.created_at.desc())
                 .limit(limit)
                 .offset(offset),
@@ -839,7 +857,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         experiment_id: int,
         *,
         keys: frozenset[str] | None = None,
-        exclude_run_ids: frozenset[int] = frozenset(),
+        run_ids: frozenset[int] | None = None,
         reduction: models.MetricReduction = models.MetricReduction.HISTORY,
     ) -> MetricFrame:
         """
@@ -849,13 +867,13 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         """
         match reduction:
             case models.MetricReduction.HISTORY:
-                rows = self._metric_history(experiment_id, keys, exclude_run_ids)
+                rows = self._metric_history(experiment_id, keys, run_ids)
             case models.MetricReduction.LATEST:
-                rows = self._metric_ends(experiment_id, keys, exclude_run_ids, latest=True)
+                rows = self._metric_ends(experiment_id, keys, run_ids, latest=True)
             case models.MetricReduction.FIRST:
-                rows = self._metric_ends(experiment_id, keys, exclude_run_ids, latest=False)
+                rows = self._metric_ends(experiment_id, keys, run_ids, latest=False)
             case models.MetricReduction.MIN | models.MetricReduction.MAX | models.MetricReduction.MEAN:
-                rows = self._metric_summaries(experiment_id, keys, exclude_run_ids, _SUMMARIES[reduction])
+                rows = self._metric_summaries(experiment_id, keys, run_ids, _SUMMARIES[reduction])
         return MetricFrame.from_rows(rows)
 
     def fetch_latest_metrics(
@@ -863,7 +881,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         experiment_id: int,
         *,
         keys: frozenset[str] | None = None,
-        exclude_run_ids: frozenset[int] = frozenset(),
+        run_ids: frozenset[int] | None = None,
     ) -> dict[int, dict[str, float]]:
         """
         Each (non-deleted) run's most recently logged value of each key -- only `keys`, if given, else every metric.
@@ -871,12 +889,15 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         A value that is `NULL` or `NaN` is no value: a run whose last step diverged shows its last finite one.
         """
         by_run: dict[int, dict[str, float]] = {}
-        for row in self._metric_ends(experiment_id, keys, exclude_run_ids, latest=True):
+        for row in self._metric_ends(experiment_id, keys, run_ids, latest=True):
             by_run.setdefault(row.run_id, {})[row.key] = cast("float", row.value)
         return by_run
 
     def _metric_history(
-        self, experiment_id: int, keys: frozenset[str] | None, exclude_run_ids: frozenset[int]
+        self,
+        experiment_id: int,
+        keys: frozenset[str] | None,
+        run_ids: frozenset[int] | None,
     ) -> Sequence[AnyRow]:
         # `UnderlyingMetricTableEntry` has no `deleted_at` of its own -- visibility is inherited
         # transitively through its run, which is always soft-deleted in the same cascade as its
@@ -893,7 +914,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             .where(
                 m.c.experiment_id == experiment_id,
                 r.c.deleted_at.is_(None),
-                m.c.run_id.not_in(exclude_run_ids),
+                *_runs_among(m.c.run_id, run_ids),
                 *key_filter,
             )
             .order_by(m.c.id)
@@ -903,7 +924,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         self,
         experiment_id: int,
         keys: frozenset[str] | None,
-        exclude_run_ids: frozenset[int],
+        run_ids: frozenset[int] | None,
         *,
         latest: bool,
     ) -> list[MetricRow]:
@@ -948,7 +969,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
                 logged.c.key.is_not(None),
                 *key_filter,
                 *_live_runs(r, experiment_id),
-                r.c.id.not_in(exclude_run_ids),
+                *_runs_among(r.c.id, run_ids),
             )
             .subquery("ends")
         )
@@ -961,7 +982,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         self,
         experiment_id: int,
         keys: frozenset[str] | None,
-        exclude_run_ids: frozenset[int],
+        run_ids: frozenset[int] | None,
         summarize: Callable[[sa.ColumnElement[Any]], sa.ColumnElement[Any]],
     ) -> list[MetricRow]:
         """
@@ -987,7 +1008,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             .where(
                 m.c.experiment_id == experiment_id,
                 r.c.deleted_at.is_(None),
-                m.c.run_id.not_in(exclude_run_ids),
+                *_runs_among(m.c.run_id, run_ids),
                 *key_filter,
             )
             .subquery("written")
@@ -1032,7 +1053,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         *,
         keys: frozenset[str],
         max_steps: int,
-        exclude_run_ids: frozenset[int] = frozenset(),
+        run_ids: frozenset[int] | None = None,
     ) -> list[models.UnderlyingHistogramTableEntry]:
         """
         An experiment's (non-deleted runs') histograms under `keys`, thinned to about `max_steps` steps per run and key.
@@ -1053,7 +1074,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             .where(
                 h.c.experiment_id == experiment_id,
                 r.c.deleted_at.is_(None),
-                h.c.run_id.not_in(exclude_run_ids),
+                *_runs_among(h.c.run_id, run_ids),
                 h.c.key.in_(keys),
             )
             .group_by(h.c.run_id, h.c.key, h.c.step)
@@ -1116,7 +1137,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         return created
 
     def fetch_hyperparams(
-        self, experiment_id: int, *, exclude_run_ids: frozenset[int] = frozenset()
+        self, experiment_id: int, *, run_ids: frozenset[int] | None = None
     ) -> Iterator[models.HyperParams]:
         """Every (non-deleted) run's hyperparameters for an experiment."""
         h, r = self._tables[models.HyperParams], self._tables[models.Run]
@@ -1127,7 +1148,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             .where(
                 h.c.experiment_id == experiment_id,
                 r.c.deleted_at.is_(None),
-                h.c.run_id.not_in(exclude_run_ids),
+                *_runs_among(h.c.run_id, run_ids),
             ),
         )
 
@@ -1268,7 +1289,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         *,
         keys: frozenset[str] | None = None,
         key_prefixes: frozenset[str] = frozenset(),
-        exclude_run_ids: frozenset[int] = frozenset(),
+        run_ids: frozenset[int] | None = None,
     ) -> Iterator[models.Artifact]:
         """
         An experiment's (non-deleted) artifact metadata, not bytes.
@@ -1294,7 +1315,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
                 .where(
                     a.c.experiment_id == experiment_id,
                     a.c.deleted_at.is_(None),
-                    a.c.run_id.not_in(exclude_run_ids),
+                    *_runs_among(a.c.run_id, run_ids),
                     *key_filter,
                 )
                 .order_by(a.c.run_id, a.c.step),

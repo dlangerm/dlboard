@@ -81,7 +81,7 @@ def test_a_key_no_run_has_a_value_for_is_absent(store: SQLLiteStore, experiment_
     assert store.fetch_latest_metrics(experiment_id) == {run.id: {"loss": 1.0}}
 
 
-def test_it_leaves_out_other_keys_other_experiments_deleted_and_excluded_runs(
+def test_it_leaves_out_other_keys_other_experiments_deleted_and_unasked_runs(
     store: SQLLiteStore, experiment_id: int
 ) -> None:
     kept, excluded, deleted = _runs(store, experiment_id, 3)
@@ -92,7 +92,7 @@ def test_it_leaves_out_other_keys_other_experiments_deleted_and_excluded_runs(
     store.delete_run(deleted.id, store.get_or_create_user(models.Principal.unverified("alice")))
 
     assert store.fetch_latest_metrics(
-        experiment_id, keys=frozenset({"loss"}), exclude_run_ids=frozenset({excluded.id})
+        experiment_id, keys=frozenset({"loss"}), run_ids=frozenset({kept.id, deleted.id})
     ) == {kept.id: {"loss": 1.0}}
 
 

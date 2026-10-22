@@ -166,7 +166,7 @@ def _thread(
     """The rendered thread, how many notes it has, and the runs and users it (and the pickers) name."""
     comments = store.list_comments(experiment_id)
     users = store.list_users()
-    runs = list(store.get_runs(experiment_id))
+    runs = list(store.get_runs(experiment_id, limit=None))
     me = get_current_user()
     users_by_id, runs_by_id = {u.id: u for u in users}, {r.id: r for r in runs}
     thread = (

@@ -33,6 +33,7 @@ from dlboard.serve._pages._dash_helpers import tooltipped_action_icon
 from dlboard.serve._pages._dataframe_helpers import run_display_name
 from dlboard.serve._pages._experiment import _ids as ids
 from dlboard.serve._pages._experiment import _page_model as page_model
+from dlboard.serve._pages._experiment._shown_runs import shown_run_ids
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -51,9 +52,6 @@ COMPARE_SEARCH_ID: ValueId[ids.ExperimentPage] = ValueId("compare-search")
 COMPARE_GRID_ID: ValueId[ids.ExperimentPage] = ValueId("compare-grid")
 COMPARE_COPY_LINK_ID: ButtonId[ids.ExperimentPage] = ButtonId("compare-copy-link")
 COMPARE_ROWS_STORE_ID: StoreId[ids.ExperimentPage] = StoreId("compare-rows")
-
-_RUNS_LIMIT = 1000
-"""Cap on runs offered in the picker -- same discipline as the navbar table's `_HPARAM_ROWS_LIMIT`."""
 
 _CHANGED_CLASS = "dl-compare-changed"
 _CHANGED_FIELD = "_changed"
@@ -184,13 +182,11 @@ def load_comparison(
     """
     if not run_ids:
         return [], []
-    by_id = {run.id: run for run in store.get_runs(experiment_id, limit=_RUNS_LIMIT)}
+    by_id = {run.id: run for run in store.get_runs(experiment_id, limit=None, run_ids=frozenset(run_ids))}
     runs = [by_id[run_id] for run_id in dict.fromkeys(run_ids) if run_id in by_id]
-    others = frozenset(by_id) - {run.id for run in runs}
-    hparams = {
-        h.run_id: h.hparams_dict for h in store.fetch_hyperparams(experiment_id, exclude_run_ids=others)
-    }
-    metrics = store.fetch_latest_metrics(experiment_id, exclude_run_ids=others)
+    compared = frozenset(by_id)
+    hparams = {h.run_id: h.hparams_dict for h in store.fetch_hyperparams(experiment_id, run_ids=compared)}
+    metrics = store.fetch_latest_metrics(experiment_id, run_ids=compared)
     return runs, comparison_rows([run.id for run in runs], hparams, metrics)
 
 
@@ -220,7 +216,7 @@ def compare_components(store: DataStore[...], experiment_id: int, query: Compare
     """
     runs, rows = load_comparison(store, experiment_id, query.runs)
     options: list[dict[str, str]] = (
-        _run_options(list(store.get_runs(experiment_id, limit=_RUNS_LIMIT))) if query.runs else []
+        _run_options(list(store.get_runs(experiment_id, limit=None))) if query.runs else []
     )
     grid = themed_grid_kwargs()
     modal = dmc.Modal(
@@ -316,11 +312,12 @@ def register_run_compare_callbacks(app: Dash) -> None:
     ) -> tuple[list[dict[str, str]], list[str]]:
         if not opened:
             raise PreventUpdate
-        runs = list(get_data_store().get_runs(experiment_id, limit=_RUNS_LIMIT))
+        store = get_data_store()
+        runs = list(store.get_runs(experiment_id, limit=None))
         # Start from the runs the charts are showing, unless a link or an earlier open already chose.
         page = page_model.BasicExperimentPage.model_validate_json(page_json)
-        excluded = page.document.excluded_runs
-        charted = [run for run in runs if run.id not in excluded] or runs
+        shown = shown_run_ids(store, experiment_id, page.document)
+        charted = [run for run in runs if run.id in shown] or runs
         default = [str(run.id) for run in charted[:MAX_COMPARED_RUNS]]
         return _run_options(runs), picked or default
 

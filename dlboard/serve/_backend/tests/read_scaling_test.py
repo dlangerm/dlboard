@@ -30,6 +30,7 @@ from dlboard import models
 from dlboard.conftest import StoreBackend
 from dlboard.models import ChartInstance, PanelInstance
 from dlboard.plugins.charts.bar_chart import BarChart
+from dlboard.plugins.charts.line_chart import LineChart
 from dlboard.plugins.charts.table_chart import TableChart
 from dlboard.serve._pages._experiment._column_catalog import ColumnCatalog
 from dlboard.serve._pages._experiment._panel_data import fetch_panel_dataframe
@@ -43,11 +44,16 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.postgres
 
 BarChart.register(allow_override=True)
+LineChart.register(allow_override=True)
 TableChart.register(allow_override=True)
 
 _SHORT, _LONG, _NEIGHBOUR = 10, 200, 1000
 _RUNS = 3
 
+_LINES = PanelInstance[pd.DataFrame, object](
+    name="lines",
+    charts=[ChartInstance(chart_type=LineChart.name, parameters={"column": "loss", "x_axis": "step"})],
+)
 _RUN_SUMMARIES = [
     PanelInstance[pd.DataFrame, object](
         name="bars",
@@ -75,6 +81,21 @@ _LOADS: dict[str, Callable[[PostgresStore, int], object]] = {
 }
 
 
+_SHOWN = 3
+"""How many of an experiment's newest runs a page is drawing."""
+_SHOWN_LOADS: dict[str, Callable[[PostgresStore, int, frozenset[int]], object]] = {
+    "latest metrics": lambda s, e, shown: s.fetch_latest_metrics(e, run_ids=shown),
+    "the run comparison": lambda s, e, shown: load_comparison(s, e, sorted(shown)),
+    "a panel of bars of the latest": lambda s, e, shown: fetch_panel_dataframe(
+        s, e, _RUN_SUMMARIES[0], shown
+    ),
+    "a table of every metric's mean": lambda s, e, shown: fetch_panel_dataframe(
+        s, e, _RUN_SUMMARIES[1], shown
+    ),
+    "a panel of lines": lambda s, e, shown: fetch_panel_dataframe(s, e, _LINES, shown),
+}
+
+
 class _Work(NamedTuple):
     rows: int
     """What the database sent back."""
@@ -87,10 +108,10 @@ def store_backend() -> StoreBackend:
     return StoreBackend.POSTGRES
 
 
-def _train(store: PostgresStore, project_id: int, steps: int) -> int:
-    """A new experiment whose runs logged two metrics, a histogram and an image at each of `steps` steps."""
+def _train(store: PostgresStore, project_id: int, steps: int, runs: int = _RUNS) -> int:
+    """A new experiment whose `runs` runs logged two metrics, a histogram and an image at each of `steps` steps."""
     experiment = store.create_experiment(models.NewExperiment(project_id=project_id))
-    for _ in range(_RUNS):
+    for _ in range(runs):
         run = store.create_run(models.NewRun(experiment_id=experiment.id))
         store.log_metrics(
             models.LoggedMetrics(
@@ -171,3 +192,24 @@ def test_a_load_reads_no_more_pages_when_another_experiment_grows(store: Postgre
     assert beside_it <= 2 * alone + 10, (
         f"{beside_it} pages beside a {_NEIGHBOUR}-step experiment, {alone} alone"
     )
+
+
+@pytest.mark.parametrize("name", _SHOWN_LOADS)
+def test_a_load_of_the_runs_shown_reads_no_more_for_an_experiment_of_more_runs(
+    store: PostgresStore, name: str
+) -> None:
+    """Runs are what an experiment can have thousands of, and a page draws only the few it is told to."""
+    project_id = store.create_project(models.NewProject(name="p", description="d")).id
+    few, many = _train(store, project_id, _SHORT, runs=_SHOWN), _train(store, project_id, _SHORT, runs=60)
+
+    def of_the_newest(experiment_id: int) -> _Work:
+        shown = frozenset(run.id for run in store.get_runs(experiment_id, limit=_SHOWN))
+        return _work(store, lambda: _SHOWN_LOADS[name](store, experiment_id, shown))
+
+    alone, among_many = of_the_newest(few), of_the_newest(many)
+
+    assert alone.rows > 0
+    assert among_many.rows <= 2 * alone.rows, (
+        f"{among_many.rows} rows beside 60 runs, {alone.rows} for {_SHOWN}"
+    )
+    assert among_many.pages <= 2 * alone.pages + 10, f"{among_many.pages} pages beside 60 runs, {alone.pages}"

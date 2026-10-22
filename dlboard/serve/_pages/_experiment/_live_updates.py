@@ -29,6 +29,7 @@ from dlboard.serve._pages._experiment import _page_repository as repo
 from dlboard.serve._pages._experiment import _panel_data as panel_data
 from dlboard.serve._pages._experiment._notes import STATE_NOTES_REVISION
 from dlboard.serve._pages._experiment._paging import Paging
+from dlboard.serve._pages._experiment._shown_runs import shown_run_ids
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -116,6 +117,7 @@ def _fetch_open_panel_dataframes(
     panels are open. And not for the panel's other charts: only one page of them is on screen (see
     `Paging`), so a tick costs what that page does, however many charts the panel holds.
     """
+    run_ids = shown_run_ids(store, experiment_id, page.document)
     panels_by_name = {p.name: p for p in page.panels}
     mounted: dict[str, set[int]] = {}
     for chart_id in chart_ids:
@@ -129,9 +131,7 @@ def _fetch_open_panel_dataframes(
             continue
         shown = panel.model_copy(update={"charts": [c for i, c in enumerate(panel.charts) if i in indexes]})
         try:
-            dataframes[panel_name] = panel_data.fetch_panel_dataframe(
-                store, experiment_id, shown, page.document.excluded_runs
-            )
+            dataframes[panel_name] = panel_data.fetch_panel_dataframe(store, experiment_id, shown, run_ids)
         except Exception:  # noqa: BLE001 -- one bad panel must not break the whole poll tick
             _log.exception("Live-update poll failed to fetch panel %r", panel_name)
             ok = False

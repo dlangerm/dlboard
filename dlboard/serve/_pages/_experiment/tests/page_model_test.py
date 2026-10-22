@@ -56,6 +56,25 @@ def test_a_settings_change_writes_only_what_it_sets_and_keeps_every_other_key() 
     assert merged == {**stored, "excluded_runs": [3]}
 
 
+def test_selecting_the_newest_runs_again_is_written_as_no_selection_not_left_out() -> None:
+    stored = {"selected_runs": [3, 4], "excluded_runs": [9]}
+
+    assert page_model.DocumentSettings(selected_runs=None).merged_into(stored) == {
+        "selected_runs": None,
+        "excluded_runs": [9],
+    }
+    assert page_model.DocumentSettings(hparam_columns=["lr"]).merged_into(stored) == {
+        **stored,
+        "hparam-table-selected": ["lr"],
+    }
+
+
+def test_a_view_saved_before_selections_loads_with_none_and_keeps_its_exclusions() -> None:
+    document = page_model.DocumentSettings.model_validate({"excluded_runs": [3]})
+
+    assert (document.selected_runs, document.excluded_runs) == (None, [3])
+
+
 def test_a_chart_is_found_by_its_id_wherever_it_now_sits_and_none_if_it_is_gone() -> None:
     panels = [_panel("a", 2), _panel("b", 3)]
     chart = panels[1].charts[2]

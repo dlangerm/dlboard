@@ -47,6 +47,7 @@ from dlboard.serve._pages._experiment._chart_settings_form import (
 )
 from dlboard.serve._pages._experiment._column_catalog import ColumnCatalog
 from dlboard.serve._pages._experiment._paging import Paging
+from dlboard.serve._pages._experiment._shown_runs import shown_run_ids
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -219,11 +220,11 @@ def _draw_form(
     )
     try:
         chart = build_validated_chart_instance(chart_type_name, parameters, chart_id)
-        excluded = page_model.BasicExperimentPage.model_validate_json(
-            values["page_json"]
-        ).document.excluded_runs
+        document = page_model.BasicExperimentPage.model_validate_json(values["page_json"]).document
         panel = models.PanelInstance[Any, Any](name=panel_name, charts=[chart])
-        dataframe = panel_data.fetch_panel_dataframe(store, values["experiment_id"], panel, excluded)
+        dataframe = panel_data.fetch_panel_dataframe(
+            store, values["experiment_id"], panel, shown_run_ids(store, values["experiment_id"], document)
+        )
         return draw(chart, dataframe), ""
     except ValidationError as exc:
         _log.debug("the chart editor's form makes no chart yet", error=str(exc))

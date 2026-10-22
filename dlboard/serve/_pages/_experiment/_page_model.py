@@ -34,12 +34,14 @@ class DocumentSettings(BaseModel, frozen=True, extra="ignore", populate_by_name=
 
     Changing it is an edit, and branches into a view of your own. How the page is being browsed (its tab,
     which panels are open) is not here: that is `Paging`, never saved to a view. A change is constructed
-    with just the fields it sets (`DocumentSettings(excluded_runs=[3])`), and `merged_into` writes only those:
+    with just the fields it sets (`DocumentSettings(selected_runs=[3])`), and `merged_into` writes only those:
     every other key a page holds is left as it is.
     """
 
+    selected_runs: list[int] | None = None
+    """The run ids the run-comparison table has selected, which every panel fetches. `None` is the newest few (`shown_run_ids`)."""
     excluded_runs: list[int] = Field(default_factory=list)
-    """The run ids the run-comparison table has deselected, which every panel's fetch leaves out."""
+    """The run ids a view saved before `selected_runs` left out, which still leaves them out of the newest few."""
     hparam_columns: list[str] = Field(default_factory=list, alias="hparam-table-selected")
     """Which hyperparameter columns the run-comparison table shows."""
 

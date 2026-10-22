@@ -322,9 +322,11 @@ def test_fetch_artifacts_by_key_and_key_prefix(
     assert {a.key for a in fetched} == expected
 
 
-def test_fetches_leave_out_excluded_runs(store: SQLLiteStore, experiment_id: int) -> None:
-    kept, excluded = (store.create_run(models.NewRun(experiment_id=experiment_id)) for _ in range(2))
-    for run in (kept, excluded):
+def test_fetches_are_of_the_runs_asked_for_and_of_every_run_when_none_are(
+    store: SQLLiteStore, experiment_id: int
+) -> None:
+    kept, other = (store.create_run(models.NewRun(experiment_id=experiment_id)) for _ in range(2))
+    for run in (kept, other):
         _log_step(store, run, 0, loss=1.0)
         store.log_hyperparams(models.NewHyperParams.from_raw(run.id, experiment_id, {"lr": 0.1}))
         store.log_artifact_refs(
@@ -339,11 +341,15 @@ def test_fetches_leave_out_excluded_runs(store: SQLLiteStore, experiment_id: int
                 )
             ]
         )
-    skip = frozenset({excluded.id})
+    only = frozenset({kept.id})
 
-    assert set(store.fetch_metrics(experiment_id, exclude_run_ids=skip).run_id) == {kept.id}
-    assert {h.run_id for h in store.fetch_hyperparams(experiment_id, exclude_run_ids=skip)} == {kept.id}
-    assert {a.run_id for a in store.fetch_artifacts(experiment_id, exclude_run_ids=skip)} == {kept.id}
+    assert set(store.fetch_metrics(experiment_id, run_ids=only).run_id) == {kept.id}
+    assert {h.run_id for h in store.fetch_hyperparams(experiment_id, run_ids=only)} == {kept.id}
+    assert {a.run_id for a in store.fetch_artifacts(experiment_id, run_ids=only)} == {kept.id}
+    assert [r.id for r in store.get_runs(experiment_id, run_ids=only)] == [kept.id]
+    assert set(store.fetch_metrics(experiment_id).run_id) == {kept.id, other.id}
+    assert store.fetch_metrics(experiment_id, run_ids=frozenset()).keys == frozenset()
+    assert {r.id for r in store.get_runs(experiment_id, limit=None)} == {kept.id, other.id}
 
 
 @pytest.mark.parametrize(

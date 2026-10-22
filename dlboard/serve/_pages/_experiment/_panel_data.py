@@ -36,6 +36,7 @@ from dlboard.serve._backend._artifact_download import artifact_url
 from dlboard.serve._backend._metric_frame import MetricFrame
 from dlboard.serve._pages._dataframe_helpers import run_display_name
 from dlboard.serve._pages._experiment._paging import visible_chart_indexes
+from dlboard.serve._pages._experiment._shown_runs import shown_run_ids
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
@@ -74,18 +75,19 @@ def panel_frames(
     store: DataStore[...], page: BasicExperimentPage, paging: Paging, names: Iterable[str]
 ) -> PanelFrames:
     """
-    Fetch the charts `paging` shows in the panels called `names`, leaving out the runs `page` excludes.
+    Fetch the charts `paging` shows in the panels called `names`, of the runs `page` shows (the newest few, or its selection).
 
     Only the page of charts shown is fetched for -- a panel of a thousand charts costs what one page of them does.
     """
-    experiment_id, excluded = cast("int", page.experiment_id), page.document.excluded_runs
+    experiment_id = cast("int", page.experiment_id)
+    run_ids = shown_run_ids(store, experiment_id, page.document)
     wanted = frozenset(names)
     frames: dict[str, pd.DataFrame] = {}
     for panel in page.panels:
         indexes = visible_chart_indexes(panel, paging).items
         if panel.name in wanted and indexes:
             shown = panel.model_copy(update={"charts": [panel.charts[i] for i in indexes]})
-            frames[panel.name] = fetch_panel_dataframe(store, experiment_id, shown, excluded)
+            frames[panel.name] = fetch_panel_dataframe(store, experiment_id, shown, run_ids)
     return frames
 
 
@@ -112,9 +114,9 @@ def fetch_panel_dataframe(
     store: DataStore[...],
     experiment_id: int,
     panel: models.PanelInstance[Any, Any],
-    excluded_runs: Iterable[int] = (),
+    run_ids: frozenset[int] | None = None,
 ) -> pd.DataFrame:
-    """Fetch just the data one panel needs -- not the whole experiment -- leaving out `excluded_runs`."""
+    """Fetch just the data one panel needs -- not the whole experiment -- of `run_ids` (every run, if `None`)."""
     artifact_keys = panel.hint_required_artifact_keys()
     artifact_key_prefixes = frozenset(panel.hint_required_artifact_key_prefixes())
     has_artifacts = bool(artifact_keys or artifact_key_prefixes)
@@ -130,14 +132,13 @@ def fetch_panel_dataframe(
     # default, flagged to the user by `_unscoped_fetch_badge`) or a set of keys, where empty means
     # "none of this kind at all".
     hparam_keys = panel.hint_required_hparams()
-    excluded = frozenset(excluded_runs)
     metric_reductions = panel.metric_reductions()
     metrics_df = (
         MetricFrame.merged(
             store.fetch_metrics(
                 experiment_id,
                 keys=None if columns is None else frozenset(columns),
-                exclude_run_ids=excluded,
+                run_ids=run_ids,
                 reduction=reduction,
             )
             for reduction, columns in metric_reductions.items()
@@ -151,7 +152,7 @@ def fetch_panel_dataframe(
                 experiment_id,
                 keys=frozenset(k for k in artifact_keys if k is not None),
                 key_prefixes=artifact_key_prefixes,
-                exclude_run_ids=excluded,
+                run_ids=run_ids,
             )
         )
         if has_artifacts
@@ -159,9 +160,7 @@ def fetch_panel_dataframe(
     )
     # fetch_hyperparams has no server-side key filter -- it's one small row per run either way.
     hparams_df = (
-        build_hyperparams_dataframe(
-            store.fetch_hyperparams(experiment_id, exclude_run_ids=excluded), keys=hparam_keys
-        )
+        build_hyperparams_dataframe(store.fetch_hyperparams(experiment_id, run_ids=run_ids), keys=hparam_keys)
         if hparam_keys is None or hparam_keys
         else pd.DataFrame()
     )
@@ -172,7 +171,7 @@ def fetch_panel_dataframe(
                 experiment_id,
                 keys=frozenset(histogram_keys),
                 max_steps=HistogramFetchSettings().max_histogram_steps,
-                exclude_run_ids=excluded,
+                run_ids=run_ids,
             )
         )
         if histogram_keys
@@ -184,11 +183,12 @@ def fetch_panel_dataframe(
     # Carried in alongside the metric/artifact/hparam data (not fetched separately by each chart
     # that wants it) so `LineChart`/`ImageChart` can label a run by its name instead of its bare id
     # -- `table_chart.py`'s default "runs" mode explicitly excludes this column, since it isn't a
-    # real metric/hparam. `store.get_runs`'s own default page size caps this at 1000 runs, same as
-    # every other `list_*` read on this page; a larger experiment just leaves the extra runs'
-    # `RUN_NAME_COLUMN` cell blank after the merge below.
+    # real metric/hparam. Only the runs fetched need a name.
     run_names = pd.DataFrame.from_records(
-        [{"run_id": run.id, RUN_NAME_COLUMN: run_display_name(run)} for run in store.get_runs(experiment_id)]
+        [
+            {"run_id": run.id, RUN_NAME_COLUMN: run_display_name(run)}
+            for run in store.get_runs(experiment_id, limit=None, run_ids=run_ids)
+        ]
     )
     return merged if run_names.empty else merged.merge(run_names, on="run_id", how="left")
 

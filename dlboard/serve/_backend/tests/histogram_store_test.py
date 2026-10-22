@@ -147,7 +147,7 @@ def test_reads_leave_out_other_keys_other_experiments_excluded_and_deleted_runs(
     store.delete_run(deleted.id, store.get_or_create_user(models.Principal.unverified("alice")))
 
     histograms = store.fetch_histograms(
-        experiment_id, keys=_KEY, max_steps=10, exclude_run_ids=frozenset({excluded.id})
+        experiment_id, keys=_KEY, max_steps=10, run_ids=frozenset({kept.id, deleted.id})
     )
 
     assert [(h.run_id, h.key) for h in histograms] == [(kept.id, "grad")]
