@@ -183,16 +183,18 @@ logic is a narrow exception: it references concrete chart classes to decide what
    a destructive step only lands one minor release after the code stopped using it, and a released
    migration is never edited.
 
-   A read is bounded by what the UI shows (keys, runs, a chart's `max_points`), never by what was logged.
-   The per-step tables (metrics, histograms, artifacts) are indexed by their access path,
+   A read that summarizes what was logged (which keys, where each run ended up, a mean per run) must not cost more
+   because more was logged. The per-step tables (metrics, histograms, artifacts) are indexed by their access path,
    `(experiment_id, key, run_id, step)`, so a read seeks into one experiment instead of scanning every
    experiment's rows -- an index that leads with anything else is one Postgres can only read whole. A read
    that describes the *shape* of what was logged (which keys, whether each has one step per run, a series'
    latest value) asks the index for endpoints: `_distinct_keys` hops from key to key and `min`/`max`/`ORDER BY
    ... LIMIT 1` probe each series, rather than counting or `DISTINCT`-ing rows. A read that reduces (a mean
-   per run, a thinned line) reduces in SQL, as `fetch_histograms` does. Fetching a history to reduce it in
-   pandas is a bug, not a follow-up -- its time and memory grow with every step trained. `query_plans_test.py`
-   fails a read that can only scan; add yours to it.
+   per run) reduces in SQL, as `fetch_histograms` does, not by fetching a history to reduce in pandas.
+   `query_plans_test.py` fails a read that can only scan, and `read_scaling_test.py` one that reads more because
+   more was logged; add yours to them. A chart that draws a series reads it, and that is allowed to grow with what
+   was logged: don't trade a common case for a worst one (thinning a history in the database made a typical line
+   chart slower), and tell people how to log less in `docs/client.md` instead.
 
 ### Server-side app (Dash)
 

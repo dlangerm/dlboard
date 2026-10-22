@@ -22,7 +22,7 @@ from dlboard.serve._backend._schema_upgrade import run_migrations
 from dlboard.serve.telemetry import Counter, Outcome, OutcomeAttributes, Unit
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Collection, Iterable, Iterator, Mapping
+    from collections.abc import Callable, Collection, Iterable, Iterator, Mapping, Sequence
     from datetime import datetime
 
 
@@ -410,7 +410,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         """Run one statement in its own transaction, returning its rows (if it has any)."""
         with self._engine.begin() as conn:
             result = conn.execute(statement)
-            return list(result) if result.returns_rows else []
+            return list(result.all()) if result.returns_rows else []
 
     def _fetch[RowT: BaseModel](
         self, model: type[RowT], statement: sa.Executable, *, no_validate: bool = False
@@ -433,7 +433,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         with self._engine.begin() as conn:
             for statement in statements:
                 result = conn.execute(statement)
-                results.append(list(result) if result.returns_rows else [])
+                results.append(list(result.all()) if result.returns_rows else [])
         return results
 
     def _insert_rows(self, model: type[BaseModel], rows: Iterable[BaseModel]) -> None:
@@ -877,15 +877,18 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
 
     def _metric_history(
         self, experiment_id: int, keys: frozenset[str] | None, exclude_run_ids: frozenset[int]
-    ) -> list[MetricRow]:
+    ) -> Sequence[AnyRow]:
         # `UnderlyingMetricTableEntry` has no `deleted_at` of its own -- visibility is inherited
         # transitively through its run, which is always soft-deleted in the same cascade as its
         # metrics' logical owner (see `_soft_delete`), so a join against `Run` is sufficient.
         m, r = self._tables[models.UnderlyingMetricTableEntry], self._tables[models.Run]
         key_filter: list[sa.ColumnElement[bool]] = [m.c.key.in_(keys)] if keys is not None else []
+        # The timestamp is left as stored: `MetricFrame.from_rows` has to read it as a column of timestamps anyway, and
+        # parsing each one here as well (the column type does) was a third of what this cost.
+        stored = sa.type_coerce(m.c.timestamp_utc, sa.types.NullType()).label("timestamp_utc")
         # `ORDER BY m.id` is insertion order, which is what `MetricFrame.from_rows`' last-write-wins needs.
-        rows = self._execute(
-            sa.select(*(m.c[f] for f in MetricRow._fields))
+        return self._execute(
+            sa.select(*(stored if f == "timestamp_utc" else m.c[f] for f in MetricRow._fields))
             .join(r, m.c.run_id == r.c.id)
             .where(
                 m.c.experiment_id == experiment_id,
@@ -895,7 +898,6 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             )
             .order_by(m.c.id)
         )
-        return [MetricRow._make(row) for row in rows]
 
     def _metric_ends(
         self,

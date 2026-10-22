@@ -17,7 +17,7 @@ import pandas as pd
 from dlboard.models._metric import MetricColumn
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Sequence
 
 
 class MetricKeySummary(NamedTuple):
@@ -58,14 +58,16 @@ class MetricFrame:
     _frame: pd.DataFrame = field(repr=False)
 
     @classmethod
-    def from_rows(cls, rows: Iterable[MetricRow]) -> MetricFrame:
+    def from_rows(cls, rows: Iterable[Sequence[object]]) -> MetricFrame:
         """
-        Pivot stored rows, in the order they were written, into wide form.
+        Pivot stored rows (a `MetricRow` each, as a tuple of its fields), in the order they were written, into wide form.
+
+        A timestamp is an ISO-8601 string or an aware datetime.
 
         A key logged more than once at the same `(run_id, step)` keeps the value written *last*; a
         row's timestamp is the earliest of those logged at its `(run_id, step)`.
         """
-        long = pd.DataFrame.from_records(list(rows), columns=MetricRow._fields)
+        long = pd.DataFrame(list(rows), columns=list(MetricRow._fields))
         long = long.drop_duplicates(subset=[*_INDEX, _KEY], keep="last")
         long[MetricColumn.TIMESTAMP_UTC] = pd.to_datetime(
             long[MetricColumn.TIMESTAMP_UTC], utc=True, format="ISO8601"

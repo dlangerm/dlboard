@@ -1,7 +1,6 @@
 """
-The antipattern this guards against: a read whose cost grows with how much was logged.
-
-It has two forms, and a page that was instant in a run's first hour is slow on its tenth with either:
+Reads that describe what was logged (which keys, where each run ended up, a summary of a series) must not cost more
+because more was logged. A page that was instant in a run's first hour is slow on its tenth with either form of this:
 
 - It reads a row per step trained: a history fetched to reduce in Python, a `SELECT DISTINCT` over every row.
 - It reads the whole table to find one experiment's rows: an index that does not lead with the experiment, so
@@ -11,7 +10,10 @@ It has two forms, and a page that was instant in a run's first hour is slow on i
 load below runs over an experiment that differs only in how long it trained, and over one whose neighbours
 grew, and must cost about the same.
 
-A new page-level load that reads an experiment's metrics, artifacts or histograms belongs in `_LOADS`. If it
+A chart that draws a series (a line chart) reads it, and that cost does grow with what was logged: it is not here.
+That one is the logger's to bound, and `docs/client.md` says how.
+
+A new page-level load that summarizes an experiment's metrics, artifacts or histograms belongs in `_LOADS`. If it
 fails, it reads what was logged rather than what is shown: reduce it in the query (see CLAUDE.md, "Data flow").
 """
 
