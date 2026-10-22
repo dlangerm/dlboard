@@ -17,6 +17,7 @@ from dlboard.models import (
     ChartType,
     ColumnKind,
     MetricColumn,
+    MetricFetch,
 )
 from dlboard.plugins.charts._axis_label import (
     DEFAULT_MAX_AXIS_LABEL_CHARS,
@@ -282,6 +283,14 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.Stack], frozen=Tr
             parameters.column,
             parameters.x_axis,
         }
+
+    @classmethod
+    @typing.override
+    def metric_fetch(cls, parameters: LineChartSettings) -> MetricFetch:
+        # Drawn by step or by time, which every point of a series carries, so each series can be thinned on its
+        # own. Against another metric the two have to meet at the same steps, so every one is needed.
+        by_row = parameters.x_axis in (MetricColumn.STEP, MetricColumn.TIMESTAMP_UTC)
+        return MetricFetch(max_points=parameters.max_points if parameters.sample and by_row else None)
 
     @classmethod
     @typing.override

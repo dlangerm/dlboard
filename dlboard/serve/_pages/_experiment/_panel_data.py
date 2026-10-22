@@ -131,18 +131,19 @@ def fetch_panel_dataframe(
     # "none of this kind at all".
     hparam_keys = panel.hint_required_hparams()
     excluded = frozenset(excluded_runs)
-    metric_reductions = panel.metric_reductions()
+    metric_fetches = panel.metric_fetches()
     metrics_df = (
         MetricFrame.merged(
             store.fetch_metrics(
                 experiment_id,
                 keys=None if columns is None else frozenset(columns),
                 exclude_run_ids=excluded,
-                reduction=reduction,
+                reduction=fetch.reduction,
+                max_points=fetch.max_points,
             )
-            for reduction, columns in metric_reductions.items()
+            for fetch, columns in metric_fetches.items()
         ).to_frame()
-        if metric_reductions
+        if metric_fetches
         else pd.DataFrame()
     )
     artifacts_df = (

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from typing import TYPE_CHECKING, TypeVar
 
 from pydantic import AwareDatetime, BaseModel, field_validator
@@ -39,6 +40,21 @@ class MetricReduction(StrEnum):
     MIN = "min"
     MAX = "max"
     MEAN = "mean"
+
+
+@dataclasses.dataclass(frozen=True)
+class MetricFetch:
+    """How a reader wants some metrics fetched: how much of each series, and for all of it, at most how many points."""
+
+    reduction: MetricReduction = MetricReduction.HISTORY
+    max_points: int | None = None
+    """
+    `HISTORY` only: the most points a run's series is thinned to, `None` being every step.
+
+    The thinning keeps the first, last, lowest and highest point of every stretch of steps, so the line's
+    shape, its peaks and its latest point survive, and a series with no more points than this is untouched.
+    A chart that draws a line downsamples further itself, which this gives it room to do.
+    """
 
 
 class UnderlyingMetricTableEntry(BaseModel, frozen=True, extra="forbid"):

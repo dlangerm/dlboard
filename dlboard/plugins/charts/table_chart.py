@@ -36,6 +36,7 @@ from dlboard.models import (
     ChartType,
     ColumnKind,
     MetricColumn,
+    MetricFetch,
     MetricReduction,
     OverlayKey,
     Quantity,
@@ -604,22 +605,22 @@ class TableChart(ChartType[TableChartSettings, pd.DataFrame, dag.AgGrid], frozen
 
     @classmethod
     @typing.override
-    def metric_reduction(cls, parameters: TableChartSettings) -> MetricReduction:
+    def metric_fetch(cls, parameters: TableChartSettings) -> MetricFetch:
         # A row per run shows one value of each metric, so the series need not be read to the end (or at all).
         # Rows of a field are the steps themselves.
         if parameters.rows is not TableRows.RUN:
-            return MetricReduction.HISTORY
+            return MetricFetch()
         match parameters.aggregate:
             case Aggregate.LATEST:
-                return MetricReduction.LATEST
+                return MetricFetch(MetricReduction.LATEST)
             case Aggregate.FIRST:
-                return MetricReduction.FIRST
+                return MetricFetch(MetricReduction.FIRST)
             case Aggregate.MIN:
-                return MetricReduction.MIN
+                return MetricFetch(MetricReduction.MIN)
             case Aggregate.MAX:
-                return MetricReduction.MAX
+                return MetricFetch(MetricReduction.MAX)
             case Aggregate.MEAN:
-                return MetricReduction.MEAN
+                return MetricFetch(MetricReduction.MEAN)
 
     @classmethod
     @typing.override

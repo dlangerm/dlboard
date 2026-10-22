@@ -196,13 +196,16 @@ class DataStore(typing.Protocol[_P]):
         keys: frozenset[str] | None = None,
         exclude_run_ids: frozenset[int] = frozenset(),
         reduction: MetricReduction = MetricReduction.HISTORY,
+        max_points: int | None = None,
     ) -> MetricFrame:
         """
         An experiment's (non-deleted runs') metrics -- only `keys`, if given, else every metric.
 
         Every step, unless a `reduction` asks for less (`MetricReduction`): then a row per run and key, found
-        without reading the rest, so what it costs does not grow with how long the runs trained.
+        without reading the rest. Or, of the history, no more than `max_points` of each run's series (see
+        `MetricFetch`). Either way what it sends back does not grow with how long the runs trained.
         """
+        ...
 
     def fetch_latest_metrics(
         self,

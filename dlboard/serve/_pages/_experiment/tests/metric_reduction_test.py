@@ -13,7 +13,7 @@ from dash._utils import to_json
 
 from dlboard import models
 from dlboard.conftest import EVERY_STORE_BACKEND, StoreBackend
-from dlboard.models import ChartInstance, MetricReduction, PanelInstance
+from dlboard.models import ChartInstance, MetricFetch, MetricReduction, PanelInstance
 from dlboard.plugins.charts._table_settings import Aggregate
 from dlboard.plugins.charts.bar_chart import BarChart
 from dlboard.plugins.charts.line_chart import LineChart
@@ -58,8 +58,8 @@ def _train(store: SQLLiteStore, experiment_id: int) -> None:
         store.log_metrics([steps[5]])  # the newest write of step 5 is the original one
 
 
-def _whole(_chart: ChartInstance[Any, Any]) -> MetricReduction:
-    return MetricReduction.HISTORY
+def _whole(_chart: ChartInstance[Any, Any]) -> MetricFetch:
+    return MetricFetch()
 
 
 def _drawn(chart: ChartInstance[Any, Any], frame: pd.DataFrame) -> object:
@@ -102,10 +102,10 @@ def test_a_chart_is_drawn_the_same_from_one_row_per_run_as_from_every_step(
 ) -> None:
     _train(store, experiment_id)
     panel = PanelInstance[pd.DataFrame, object](name="p", charts=[chart])
-    assert chart.metric_reduction() is not MetricReduction.HISTORY
+    assert chart.metric_fetch() != MetricFetch()
 
     reduced = panel_data.fetch_panel_dataframe(store, experiment_id, panel)
-    monkeypatch.setattr(ChartInstance, "metric_reduction", _whole)
+    monkeypatch.setattr(ChartInstance, "metric_fetch", _whole)
     whole = panel_data.fetch_panel_dataframe(store, experiment_id, panel)
 
     assert len(reduced) < len(whole)
@@ -118,35 +118,57 @@ def _chart(chart_type: str, **parameters: Any) -> ChartInstance[Any, Any]:  # no
 
 _LINE = _chart("line", column="loss", x_axis="step")
 _BAR = _chart("bar", column="loss", x_axis="lr")
+_LATEST = MetricFetch(MetricReduction.LATEST)
+_THINNED = MetricFetch(max_points=500)
+_WHOLE = MetricFetch()
 
 
 @pytest.mark.parametrize(
     ("charts", "expected"),
     [
-        pytest.param([_BAR], {MetricReduction.LATEST: {"loss", "lr"}}, id="one-chart"),
+        pytest.param([_BAR], {_LATEST: {"loss", "lr"}}, id="one-chart"),
         pytest.param(
             [_BAR, _chart("line", column="acc", x_axis="step")],
-            {MetricReduction.LATEST: {"loss", "lr"}, MetricReduction.HISTORY: {"acc", "step"}},
+            {_LATEST: {"loss", "lr"}, _THINNED: {"acc", "step"}},
             id="different-metrics-each-as-asked",
         ),
         pytest.param(
             [_BAR, _LINE],
-            {MetricReduction.LATEST: {"lr"}, MetricReduction.HISTORY: {"loss", "step"}},
-            id="a-metric-they-disagree-on-is-fetched-whole",
-        ),
-        pytest.param([_chart("table")], {MetricReduction.LATEST: None}, id="every-metric-as-asked"),
-        pytest.param(
-            [_chart("table"), _BAR], {MetricReduction.LATEST: None}, id="every-metric-when-all-ask-the-same"
+            {_LATEST: {"lr"}, _THINNED: {"loss", "step"}},
+            id="a-line-serves-the-latest-too",
         ),
         pytest.param(
-            [_chart("table"), _LINE],
-            {MetricReduction.HISTORY: None},
-            id="every-metric-whole-when-they-disagree",
+            [_chart("table", aggregate="mean", show_metrics=["loss"]), _LINE],
+            {_WHOLE: {"loss", "step"}},
+            id="a-mean-needs-every-step",
+        ),
+        pytest.param(
+            [_chart("line", column="loss", x_axis="epoch"), _LINE],
+            {_WHOLE: {"loss", "epoch"}, _THINNED: {"step"}},
+            id="a-line-against-another-metric-needs-every-step",
+        ),
+        pytest.param(
+            [_chart("line", column="loss", x_axis="step", sample=False)],
+            {_WHOLE: {"loss", "step"}},
+            id="unsampled",
+        ),
+        pytest.param(
+            [_chart("line", column="loss", x_axis="step", max_points=100), _LINE],
+            {MetricFetch(max_points=500): {"loss", "step"}},
+            id="the-most-points-any-line-draws",
+        ),
+        pytest.param([_chart("table")], {_LATEST: None}, id="every-metric-as-asked"),
+        pytest.param([_chart("table"), _BAR], {_LATEST: None}, id="every-metric-when-all-ask-the-same"),
+        pytest.param([_chart("table"), _LINE], {_THINNED: None}, id="every-metric-thinned-when-they-differ"),
+        pytest.param(
+            [_chart("table", aggregate="mean"), _LINE, _BAR],
+            {_WHOLE: None},
+            id="every-metric-whole-for-a-mean",
         ),
         pytest.param([_chart("table", show_metrics=[])], {}, id="no-metrics"),
     ],
 )
 def test_a_panel_fetches_each_metric_as_little_as_every_chart_of_it_allows(
-    charts: list[ChartInstance[Any, Any]], expected: dict[MetricReduction, set[str] | None]
+    charts: list[ChartInstance[Any, Any]], expected: dict[MetricFetch, set[str] | None]
 ) -> None:
-    assert PanelInstance[Any, Any](charts=charts).metric_reductions() == expected
+    assert PanelInstance[Any, Any](charts=charts).metric_fetches() == expected

@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field, ValidationError, field_validator, model_v
 from structlog.stdlib import get_logger
 
 from dlboard._compat import StrEnum
-from dlboard.models._metric import MetricReduction
+from dlboard.models._metric import MetricFetch, MetricReduction
 
 if typing.TYPE_CHECKING:
     from collections.abc import Mapping
@@ -195,15 +195,16 @@ class ChartType(ABC, BaseModel, typing.Generic[_Parameters, _Dataframe, _Chart],
         """Hint at the columns required for this chart."""
 
     @classmethod
-    def metric_reduction(cls, parameters: _Parameters) -> MetricReduction:  # noqa: ARG003
+    def metric_fetch(cls, parameters: _Parameters) -> MetricFetch:  # noqa: ARG003
         """
         How much of each metric in `hint_required_columns` this chart draws from.
 
         A chart that shows where each run ended up, or a summary of its series, says so, and is then handed
-        a row per run instead of a row per step -- what keeps its cost from growing with training. Defaults to
-        every step, so a chart type that draws the series itself need not say anything.
+        a row per run instead of a row per step; one that draws the series says how many points it has use for.
+        That is what keeps what a chart costs from growing with training. Defaults to every step, so a chart
+        type that has not said otherwise gets all of them.
         """
-        return MetricReduction.HISTORY
+        return MetricFetch()
 
     @classmethod
     @abstractmethod
@@ -506,9 +507,9 @@ class ChartTypeRegistry:
         return chart_type.hint_required_columns(parameters)
 
     @classmethod
-    def metric_reduction(cls, chart: ChartInstance[_Dataframe, _Chart]) -> MetricReduction:
+    def metric_fetch(cls, chart: ChartInstance[_Dataframe, _Chart]) -> MetricFetch:
         chart_type, parameters = cls._typed_chart(chart)
-        return chart_type.metric_reduction(parameters)
+        return chart_type.metric_fetch(parameters)
 
     @classmethod
     def hint_required_artifact_keys(cls, chart: ChartInstance[_Dataframe, _Chart]) -> set[str] | None:
@@ -617,12 +618,12 @@ class ChartInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, 
             )
             return None
 
-    def metric_reduction(self) -> MetricReduction:
+    def metric_fetch(self) -> MetricFetch:
         """How much of each metric this chart draws from. Every step, if it cannot be asked. See `hint_required_columns`."""
         try:
-            return ChartTypeRegistry.metric_reduction(self)
+            return ChartTypeRegistry.metric_fetch(self)
         except (ValidationError, UnknownChartTypeError):
-            return MetricReduction.HISTORY
+            return MetricFetch()
 
     def hint_required_artifact_keys(self) -> set[str] | None:
         try:
@@ -678,6 +679,29 @@ class ChartInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, 
             return _FALLBACK_NATURAL_WIDTH
 
 
+_MIXED_POINTS: typing.Final = 500
+"""The points a metric is thinned to when charts want different single values of it and none of them its line."""
+
+
+def _reconciled(fetches: set[MetricFetch]) -> MetricFetch:
+    """
+    The one way of fetching a metric that serves every way in `fetches`.
+
+    Thinning keeps the first, last, lowest and highest point of every stretch of steps, so a bounded history
+    holds what a latest, first, min or max asks for, and the most points any chart draws serves them all.
+    Only a mean needs every step, and so does a chart that draws them all.
+    """
+    if len(fetches) == 1:
+        return next(iter(fetches))
+    if any(fetch.reduction is MetricReduction.MEAN for fetch in fetches):
+        return MetricFetch()
+    wanted = [fetch.max_points for fetch in fetches if fetch.reduction is MetricReduction.HISTORY]
+    bounded = [points for points in wanted if points is not None]
+    if len(bounded) < len(wanted):
+        return MetricFetch()
+    return MetricFetch(MetricReduction.HISTORY, max(bounded, default=_MIXED_POINTS))
+
+
 class PanelInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, extra="forbid"):
     """A panel containing one or more charts."""
 
@@ -723,28 +747,26 @@ class PanelInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, 
             columns |= hint
         return columns
 
-    def metric_reductions(self) -> Mapping[MetricReduction, set[str] | None]:
+    def metric_fetches(self) -> Mapping[MetricFetch, set[str] | None]:
         """
-        The metrics the panel fetches under each `MetricReduction`; `None` meaning every metric.
+        The metrics the panel fetches in each way; `None` meaning every metric.
 
-        What each chart wants is its own `hint_required_columns` read as its own `metric_reduction`. A metric
-        the charts disagree on is fetched whole, which serves them all; and so is every metric when a chart
-        has no list of them and the charts disagree.
+        What each chart wants is its own `hint_required_columns` read as its own `metric_fetch`. A metric
+        charts want fetched differently is fetched in the one way that serves them all (`_reconciled`),
+        and so is every metric when a chart has no list of them and the charts differ.
         """
-        wants = [(chart.hint_required_columns(), chart.metric_reduction()) for chart in self.charts]
-        wants = [(columns, reduction) for columns, reduction in wants if columns is None or columns]
+        wants = [(chart.hint_required_columns(), chart.metric_fetch()) for chart in self.charts]
+        wants = [(columns, fetch) for columns, fetch in wants if columns is None or columns]
         if any(columns is None for columns, _ in wants):
-            reductions = {reduction for _, reduction in wants}
-            return {reductions.pop() if len(reductions) == 1 else MetricReduction.HISTORY: None}
-        wanted: dict[str, set[MetricReduction]] = {}
-        for columns, reduction in wants:
+            return {_reconciled({fetch for _, fetch in wants}): None}
+        wanted: dict[str, set[MetricFetch]] = {}
+        for columns, fetch in wants:
             for column in columns or ():
-                wanted.setdefault(column, set()).add(reduction)
-        by_reduction: dict[MetricReduction, set[str]] = {}
-        for column, reductions in wanted.items():
-            reduction = next(iter(reductions)) if len(reductions) == 1 else MetricReduction.HISTORY
-            by_reduction.setdefault(reduction, set()).add(column)
-        return by_reduction
+                wanted.setdefault(column, set()).add(fetch)
+        by_fetch: dict[MetricFetch, set[str]] = {}
+        for column, fetches in wanted.items():
+            by_fetch.setdefault(_reconciled(fetches), set()).add(column)
+        return by_fetch
 
     def hint_required_artifact_keys(self) -> set[str | None]:
         return set(itertools.chain(*[c.hint_required_artifact_keys() or set() for c in self.charts]))

@@ -10,7 +10,14 @@ import dash_mantine_components as dmc
 import pandas as pd
 from pydantic import BaseModel, Field
 
-from dlboard.models import DISPLAY_SECTION, HPARAM_COLUMN_PREFIX, ChartType, ColumnKind, MetricReduction
+from dlboard.models import (
+    DISPLAY_SECTION,
+    HPARAM_COLUMN_PREFIX,
+    ChartType,
+    ColumnKind,
+    MetricFetch,
+    MetricReduction,
+)
 from dlboard.plugins.charts._axis_label import (
     DEFAULT_MAX_AXIS_LABEL_CHARS,
     VALUE_AXIS_WIDTH,
@@ -234,9 +241,9 @@ class BarChart(ChartType[BarChartSettings, pd.DataFrame, dmc.Stack], frozen=True
 
     @classmethod
     @typing.override
-    def metric_reduction(cls, parameters: BarChartSettings) -> MetricReduction:
+    def metric_fetch(cls, parameters: BarChartSettings) -> MetricFetch:
         # A bar is a run's latest value: the chart takes that from each run's series itself, so it needs no more.
-        return MetricReduction.LATEST
+        return MetricFetch(MetricReduction.LATEST)
 
     @classmethod
     @typing.override

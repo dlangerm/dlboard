@@ -134,6 +134,14 @@ Subclass `ChartType` and implement its abstract methods:
 - `hint_required_histogram_keys` (optional, none by default) — the logged histogram keys the chart shows. A
   chart always names them: there is no "every histogram", because a histogram is the most expensive thing a panel
   fetches. A field naming one is a `ColumnKind.HISTOGRAM` in `field_column_kinds()`.
+- `metric_fetch(parameters) -> MetricFetch` (optional, every step by default) — how much of each metric in
+  `hint_required_columns` the chart draws from. What a chart costs should not grow with how long its runs
+  trained, so say so if you can: `MetricFetch(MetricReduction.LATEST)` is handed a row per run holding the value
+  each ended on (`FIRST`, `MIN`, `MAX` and `MEAN` likewise), and `MetricFetch(max_points=500)` a series thinned to
+  about that many points, keeping the first, last, lowest and highest of every stretch of steps, so a line keeps
+  its peaks and its latest point. A chart that draws a line against another metric rather than the step needs the
+  two to meet at the same steps, and so every one. When charts of one panel ask for different things of a metric,
+  it is fetched in the one way that serves them all, a mean being the only thing that needs every step.
 
 The same hints bound what the experiment page fetches: a panel shows one page of its charts, and only
 those charts' columns and keys are requested. They are also what the panel's chart filter matches

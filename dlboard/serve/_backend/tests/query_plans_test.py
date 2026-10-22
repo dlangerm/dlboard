@@ -26,6 +26,7 @@ _READS: dict[str, Callable[[PostgresStore, int], object]] = {
     "fetch_latest_metrics": lambda s, e: s.fetch_latest_metrics(e),
     "fetch_metrics, first": lambda s, e: s.fetch_metrics(e, reduction=MetricReduction.FIRST),
     "fetch_metrics, mean": lambda s, e: s.fetch_metrics(e, reduction=MetricReduction.MEAN),
+    "fetch_metrics, thinned": lambda s, e: s.fetch_metrics(e, max_points=50),
     "fetch_metrics": lambda s, e: s.fetch_metrics(e),
     "fetch_metrics, some keys": lambda s, e: s.fetch_metrics(e, keys=frozenset({"loss"})),
     "fetch_histograms": lambda s, e: s.fetch_histograms(e, keys=frozenset({"grad"}), max_steps=10),

@@ -12,6 +12,10 @@ from dlboard import models
 from dlboard.conftest import EVERY_STORE_BACKEND, StoreBackend
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    import pandas as pd
+
     from dlboard.plugins.data_stores.sqlite import SQLLiteStore
 
 _TS = pendulum.datetime(2026, 1, 1, tz="UTC")
@@ -107,3 +111,104 @@ def test_a_reduction_is_a_row_per_run_and_key_of_the_steps_newest_writes(
     frame = store.fetch_metrics(experiment_id, keys=frozenset({"loss"}), reduction=reduction)
 
     assert (list(frame.run_id), list(frame.step), list(frame.values("loss"))) == ([run.id], [step], [value])
+
+
+def _log_series(
+    store: SQLLiteStore, run: models.Run, values: Sequence[float | None], key: str = "loss"
+) -> None:
+    store.log_metrics(
+        models.LoggedMetrics(
+            metrics={key: value},
+            step=step,
+            experiment_id=run.experiment_id,
+            run_id=run.id,
+            timestamp_utc=_TS,
+        )
+        for step, value in enumerate(values)
+    )
+
+
+def _wave(steps: int) -> list[float]:
+    return [math.sin(step / 40) + step % 7 / 50 for step in range(steps)]
+
+
+def _thinned(store: SQLLiteStore, experiment_id: int, max_points: int) -> pd.DataFrame:
+    return store.fetch_metrics(experiment_id, max_points=max_points).to_frame()
+
+
+def test_a_series_within_the_budget_is_whole(store: SQLLiteStore, experiment_id: int) -> None:
+    (run,) = _runs(store, experiment_id, 1)
+    _log_series(store, run, _wave(80))
+
+    assert list(_thinned(store, experiment_id, 100).step) == list(range(80))
+
+
+def test_a_long_series_is_thinned_to_its_stretches_first_last_lowest_and_highest(
+    store: SQLLiteStore, experiment_id: int
+) -> None:
+    (run,) = _runs(store, experiment_id, 1)
+    values = _wave(2000)
+    _log_series(store, run, values)
+
+    thinned = _thinned(store, experiment_id, 50)
+
+    assert len(thinned) <= 4 * 50
+    assert {0, 1999} <= set(thinned.step)
+    assert (thinned.loss.min(), thinned.loss.max()) == (min(values), max(values))
+    assert [values[int(step)] for step in thinned.step] == list(thinned.loss)
+
+
+def test_a_spike_survives_thinning(store: SQLLiteStore, experiment_id: int) -> None:
+    (run,) = _runs(store, experiment_id, 1)
+    values: list[float | None] = [0.0] * 5000
+    values[1777] = 100.0
+    _log_series(store, run, values)
+
+    thinned = _thinned(store, experiment_id, 20)
+
+    assert 1777 in set(thinned.step)
+    assert len(thinned) <= 4 * 20
+
+
+def test_a_series_that_never_changes_is_still_bounded(store: SQLLiteStore, experiment_id: int) -> None:
+    (run,) = _runs(store, experiment_id, 1)
+    _log_series(store, run, [0.5] * 5000)
+
+    assert len(_thinned(store, experiment_id, 20)) <= 4 * 20
+
+
+def test_the_points_kept_stay_put_as_a_run_trains(store: SQLLiteStore, experiment_id: int) -> None:
+    """Until the stretches double, only the newest stretch changes: a poll does not pick others for the rest."""
+    (run,) = _runs(store, experiment_id, 1)
+    values = _wave(2000)
+    _log_series(store, run, values)
+    before = set(_thinned(store, experiment_id, 50).step)
+
+    store.log_metrics(
+        models.LoggedMetrics(
+            metrics={"loss": 3.0}, step=step, experiment_id=experiment_id, run_id=run.id, timestamp_utc=_TS
+        )
+        for step in range(2000, 2010)
+    )
+    after = set(_thinned(store, experiment_id, 50).step)
+
+    # 2000 steps in at most 50 stretches is 64 a stretch; the last one starts at 1984.
+    assert {step for step in before if step < 1984} == {step for step in after if step < 1984}
+
+
+def test_thinning_leaves_out_what_a_fetch_leaves_out(store: SQLLiteStore, experiment_id: int) -> None:
+    kept, excluded, deleted = _runs(store, experiment_id, 3)
+    project = store.create_project(models.NewProject(name="other", description="d"))
+    (elsewhere,) = _runs(store, store.create_experiment(models.NewExperiment(project_id=project.id)).id, 1)
+    for run in (kept, excluded, deleted, elsewhere):
+        _log_series(store, run, [None if step % 100 == 0 else 1.0 + step for step in range(300)])
+        _log_series(store, run, [0.0] * 300, key="other")
+    store.delete_run(deleted.id, store.get_or_create_user(models.Principal.unverified("alice")))
+
+    thinned = store.fetch_metrics(
+        experiment_id, keys=frozenset({"loss"}), exclude_run_ids=frozenset({excluded.id}), max_points=50
+    ).to_frame()
+
+    assert set(thinned.run_id) == {kept.id}
+    assert set(thinned.columns) == {"run_id", "step", "timestamp_utc", "loss"}
+    assert 0 not in set(thinned.step)  # logged as `None`: no value, so no point

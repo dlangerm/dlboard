@@ -28,6 +28,7 @@ from dlboard import models
 from dlboard.conftest import StoreBackend
 from dlboard.models import ChartInstance, PanelInstance
 from dlboard.plugins.charts.bar_chart import BarChart
+from dlboard.plugins.charts.line_chart import LineChart
 from dlboard.plugins.charts.table_chart import TableChart
 from dlboard.serve._pages._experiment._column_catalog import ColumnCatalog
 from dlboard.serve._pages._experiment._panel_data import fetch_panel_dataframe
@@ -41,10 +42,20 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.postgres
 
 BarChart.register(allow_override=True)
+LineChart.register(allow_override=True)
 TableChart.register(allow_override=True)
 
 _SHORT, _LONG, _NEIGHBOUR = 10, 200, 1000
 _RUNS = 3
+
+_LINES = PanelInstance[pd.DataFrame, object](
+    name="lines",
+    charts=[
+        ChartInstance(
+            chart_type=LineChart.name, parameters={"column": "loss", "x_axis": "step", "max_points": 4}
+        )
+    ],
+)
 
 _RUN_SUMMARIES = [
     PanelInstance[pd.DataFrame, object](
@@ -69,6 +80,7 @@ _LOADS: dict[str, Callable[[PostgresStore, int], object]] = {
     "latest metrics": lambda s, e: s.fetch_latest_metrics(e),
     "the run comparison": lambda s, e: load_comparison(s, e, [run.id for run in s.get_runs(e)]),
     "a panel of bars of the latest": lambda s, e: fetch_panel_dataframe(s, e, _RUN_SUMMARIES[0]),
+    "a panel of lines": lambda s, e: fetch_panel_dataframe(s, e, _LINES),
     "a table of every metric's mean": lambda s, e: fetch_panel_dataframe(s, e, _RUN_SUMMARIES[1]),
 }
 

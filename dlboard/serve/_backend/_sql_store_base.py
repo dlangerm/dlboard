@@ -841,15 +841,21 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         keys: frozenset[str] | None = None,
         exclude_run_ids: frozenset[int] = frozenset(),
         reduction: models.MetricReduction = models.MetricReduction.HISTORY,
+        max_points: int | None = None,
     ) -> MetricFrame:
         """
         An experiment's (non-deleted runs') metrics -- only `keys`, if given, else every metric.
 
         Every step, unless a `reduction` asks for less: then a row per run and key, found without reading the rest.
+        Or, of the history, no more than `max_points` of each run's series (see `models.MetricFetch`).
         """
         match reduction:
             case models.MetricReduction.HISTORY:
-                rows = self._metric_history(experiment_id, keys, exclude_run_ids)
+                rows = (
+                    self._metric_history(experiment_id, keys, exclude_run_ids)
+                    if max_points is None
+                    else self._metric_thinned(experiment_id, keys, exclude_run_ids, max_points)
+                )
             case models.MetricReduction.LATEST:
                 rows = self._metric_ends(experiment_id, keys, exclude_run_ids, latest=True)
             case models.MetricReduction.FIRST:
@@ -893,6 +899,134 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
                 m.c.run_id.not_in(exclude_run_ids),
                 *key_filter,
             )
+            .order_by(m.c.id)
+        )
+        return [MetricRow._make(row) for row in rows]
+
+    def _metric_thinned(
+        self,
+        experiment_id: int,
+        keys: frozenset[str] | None,
+        exclude_run_ids: frozenset[int],
+        max_points: int,
+    ) -> list[MetricRow]:
+        """
+        Each live run's history of each key, kept to the first, last, lowest and highest point of every stretch of steps.
+
+        A series' steps are cut into stretches of 2ⁿ steps from its first, n being the smallest that leaves at most
+        `max_points` of them. So the stretches, and what is kept of them, stay put as a run trains until n goes up,
+        rather than every poll picking others; and a series that spans no more than `max_points` steps is whole.
+
+        The database reads each series once, in an aggregate of what every stretch holds, and sends back at most four
+        points of each. The step of a stretch's lowest and highest (the earliest, on a tie, so a series that never
+        changes is still four points a stretch) is a probe of just that stretch through the index.
+        """
+        m, r = self._tables[models.UnderlyingMetricTableEntry], self._tables[models.Run]
+        logged = _distinct_keys(m, experiment_id)
+
+        def edge(extent: Callable[[sa.ColumnElement[Any]], sa.ColumnElement[Any]]) -> sa.ScalarSelect[Any]:
+            return (
+                sa.select(extent(m.c.step))
+                .where(*_series(m, experiment_id, logged.c.key, r.c.id))
+                .correlate(logged, r)
+                .scalar_subquery()
+            )
+
+        key_filter: list[sa.ColumnElement[bool]] = [logged.c.key.in_(keys)] if keys is not None else []
+        # Materialized: left to itself Postgres inlines a CTE used once, and so runs these probes for every row of the series.
+        edges = (
+            sa.select(
+                r.c.id.label("run_id"),
+                logged.c.key.label("key"),
+                edge(sa.func.min).label("first_step"),
+                edge(sa.func.max).label("last_step"),
+            )
+            .select_from(logged.join(r, sa.true()))
+            .where(
+                logged.c.key.is_not(None),
+                *key_filter,
+                *_live_runs(r, experiment_id),
+                r.c.id.not_in(exclude_run_ids),
+            )
+            .cte("edges")
+            .prefix_with("MATERIALIZED")
+        )
+        stride = sa.case(
+            *(
+                (
+                    edges.c.last_step - edges.c.first_step < sa.literal(max_points << k, sa.BigInteger),
+                    sa.literal(1 << k, sa.BigInteger),
+                )
+                for k in range(_STRIDE_DOUBLINGS)
+            ),
+            else_=sa.literal(1 << _STRIDE_DOUBLINGS, sa.BigInteger),
+        )
+        spans = (
+            sa.select(edges.c.run_id, edges.c.key, edges.c.first_step, stride.label("stride"))
+            .cte("spans")
+            .prefix_with("MATERIALIZED")
+        )
+        stretched = (
+            sa.select(
+                m.c.run_id,
+                m.c.key,
+                m.c.step,
+                m.c.value,
+                ((m.c.step - spans.c.first_step) // spans.c.stride).label("stretch"),
+            )
+            .join(spans, sa.and_(m.c.run_id == spans.c.run_id, m.c.key == spans.c.key))
+            .where(m.c.experiment_id == experiment_id, _is_number(m.c.value))
+            .subquery("stretched")
+        )
+        held = (
+            sa.select(
+                stretched.c.run_id,
+                stretched.c.key,
+                sa.func.min(stretched.c.step).label("earliest"),
+                sa.func.max(stretched.c.step).label("latest"),
+                sa.func.min(stretched.c.value).label("lowest"),
+                sa.func.max(stretched.c.value).label("highest"),
+            )
+            .group_by(stretched.c.run_id, stretched.c.key, stretched.c.stretch)
+            .cte("held")
+        )
+
+        def step_of(value: sa.ColumnElement[float]) -> sa.ScalarSelect[Any]:
+            """The first step of the stretch `held` describes that logged `value`."""
+            return (
+                sa.select(sa.func.min(m.c.step))
+                .where(
+                    m.c.experiment_id == experiment_id,
+                    m.c.run_id == held.c.run_id,
+                    m.c.key == held.c.key,
+                    m.c.step.between(held.c.earliest, held.c.latest),
+                    m.c.value == value,
+                )
+                .correlate(held)
+                .scalar_subquery()
+            )
+
+        settled = sa.select(
+            held.c.run_id,
+            held.c.key,
+            held.c.earliest,
+            held.c.latest,
+            step_of(held.c.lowest).label("lowest_at"),
+            step_of(held.c.highest).label("highest_at"),
+        ).cte("settled")
+        points = sa.union(
+            *(
+                sa.select(settled.c.run_id, settled.c.key, settled.c[step].label("step"))
+                for step in ("earliest", "latest", "lowest_at", "highest_at")
+            )
+        ).subquery("points")
+        rows = self._execute(
+            sa.select(*(m.c[f] for f in MetricRow._fields))
+            .join(
+                points,
+                sa.and_(m.c.run_id == points.c.run_id, m.c.key == points.c.key, m.c.step == points.c.step),
+            )
+            .where(m.c.experiment_id == experiment_id)
             .order_by(m.c.id)
         )
         return [MetricRow._make(row) for row in rows]

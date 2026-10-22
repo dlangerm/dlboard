@@ -110,16 +110,13 @@ def _unscoped_fetch_badge(chart: models.ChartInstance[Any, Any]) -> Component | 
 
     `chart.hint_required_columns() is None` means this chart's settings don't name specific
     metrics (e.g. a table chart with no `metrics` filter, left at its "show every metric" default)
-    -- and if it draws from every step (see `metric_reduction`), rendering it means fetching every step
+    -- and if it draws from every step (see `metric_fetch`), rendering it means fetching every step
     of every metric logged for the whole experiment, every time its panel updates. That's a real,
     sometimes-significant cost the user has no other way to notice (it only ever shows up as a backend
     debug log), so it gets a badge instead of hover-only controls: this should be visible without having
     to go looking for it.
     """
-    if (
-        chart.hint_required_columns() is not None
-        or chart.metric_reduction() is not models.MetricReduction.HISTORY
-    ):
+    if chart.hint_required_columns() is not None or chart.metric_fetch() != models.MetricFetch():
         return None
     return dmc.Tooltip(
         dmc.Badge("fetches all metrics", color="yellow", variant="light", size="xs", radius="sm"),
