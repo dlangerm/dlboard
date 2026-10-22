@@ -8,8 +8,9 @@ seek into either: it read the whole table, every experiment's rows, on each call
 database gets smaller -- and `Run` gets one on `experiment_id`, which the live-run checks of the key summaries
 look runs up by.
 
-No column or row changes, so an older server keeps working against the upgraded database: an index is only
-ever a faster way to the same rows. It just reads the rows the way it did before.
+No column or row changes: an index is only ever a faster way to the same rows. So a server still running the old
+version keeps working against the upgraded database during a rolling upgrade, reading the rows the way it did
+before (an older server cannot be started against it, as after any migration).
 """
 
 from __future__ import annotations
