@@ -15,8 +15,11 @@ from pydantic import BaseModel, Field, ValidationError, field_validator, model_v
 from structlog.stdlib import get_logger
 
 from dlboard._compat import StrEnum
+from dlboard.models._metric import MetricReduction
 
 if typing.TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from dlboard.models._artifact import Artifact
 
 _log = get_logger(__name__)
@@ -190,6 +193,17 @@ class ChartType(ABC, BaseModel, typing.Generic[_Parameters, _Dataframe, _Chart],
     @abstractmethod
     def hint_required_columns(cls, parameters: _Parameters) -> set[str] | None:
         """Hint at the columns required for this chart."""
+
+    @classmethod
+    def metric_reduction(cls, parameters: _Parameters) -> MetricReduction:  # noqa: ARG003
+        """
+        How much of each metric in `hint_required_columns` this chart draws from.
+
+        A chart that shows where each run ended up, or a summary of its series, says so, and is then handed
+        a row per run instead of a row per step -- what keeps its cost from growing with training. Defaults to
+        every step, so a chart type that draws the series itself need not say anything.
+        """
+        return MetricReduction.HISTORY
 
     @classmethod
     @abstractmethod
@@ -492,6 +506,11 @@ class ChartTypeRegistry:
         return chart_type.hint_required_columns(parameters)
 
     @classmethod
+    def metric_reduction(cls, chart: ChartInstance[_Dataframe, _Chart]) -> MetricReduction:
+        chart_type, parameters = cls._typed_chart(chart)
+        return chart_type.metric_reduction(parameters)
+
+    @classmethod
     def hint_required_artifact_keys(cls, chart: ChartInstance[_Dataframe, _Chart]) -> set[str] | None:
         chart_type, parameters = cls._typed_chart(chart)
         return chart_type.hint_required_artifact_keys(parameters)
@@ -598,6 +617,13 @@ class ChartInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, 
             )
             return None
 
+    def metric_reduction(self) -> MetricReduction:
+        """How much of each metric this chart draws from. Every step, if it cannot be asked. See `hint_required_columns`."""
+        try:
+            return ChartTypeRegistry.metric_reduction(self)
+        except (ValidationError, UnknownChartTypeError):
+            return MetricReduction.HISTORY
+
     def hint_required_artifact_keys(self) -> set[str] | None:
         try:
             return ChartTypeRegistry.hint_required_artifact_keys(self)
@@ -696,6 +722,29 @@ class PanelInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, 
                 return None
             columns |= hint
         return columns
+
+    def metric_reductions(self) -> Mapping[MetricReduction, set[str] | None]:
+        """
+        The metrics the panel fetches under each `MetricReduction`; `None` meaning every metric.
+
+        What each chart wants is its own `hint_required_columns` read as its own `metric_reduction`. A metric
+        the charts disagree on is fetched whole, which serves them all; and so is every metric when a chart
+        has no list of them and the charts disagree.
+        """
+        wants = [(chart.hint_required_columns(), chart.metric_reduction()) for chart in self.charts]
+        wants = [(columns, reduction) for columns, reduction in wants if columns is None or columns]
+        if any(columns is None for columns, _ in wants):
+            reductions = {reduction for _, reduction in wants}
+            return {reductions.pop() if len(reductions) == 1 else MetricReduction.HISTORY: None}
+        wanted: dict[str, set[MetricReduction]] = {}
+        for columns, reduction in wants:
+            for column in columns or ():
+                wanted.setdefault(column, set()).add(reduction)
+        by_reduction: dict[MetricReduction, set[str]] = {}
+        for column, reductions in wanted.items():
+            reduction = next(iter(reductions)) if len(reductions) == 1 else MetricReduction.HISTORY
+            by_reduction.setdefault(reduction, set()).add(column)
+        return by_reduction
 
     def hint_required_artifact_keys(self) -> set[str | None]:
         return set(itertools.chain(*[c.hint_required_artifact_keys() or set() for c in self.charts]))

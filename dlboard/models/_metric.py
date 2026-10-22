@@ -24,6 +24,23 @@ class MetricColumn(StrEnum):
     TIMESTAMP_UTC = "timestamp_utc"
 
 
+class MetricReduction(StrEnum):
+    """
+    How much of a metric's series a reader needs: what a store has to read to answer, and so what it costs.
+
+    Anything but `HISTORY` is answered with a row per run and key (at the series' latest step for the
+    ones that have no step of their own), however many steps were logged -- see `DataStore.fetch_metrics`.
+    """
+
+    HISTORY = "history"
+    """Every step. A chart that draws the series itself, or one that has not said otherwise."""
+    LATEST = "latest"
+    FIRST = "first"
+    MIN = "min"
+    MAX = "max"
+    MEAN = "mean"
+
+
 class UnderlyingMetricTableEntry(BaseModel, frozen=True, extra="forbid"):
     """The underlying table schema of individual metrics."""
 

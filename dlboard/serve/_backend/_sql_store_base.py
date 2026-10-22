@@ -52,6 +52,15 @@ _OWNS = ForeignKeyKind.OWNERSHIP
 _STRIDE_DOUBLINGS: Final = 32
 """How many powers of two `fetch_histograms` can thin by: far more steps than any run will ever log."""
 
+_SUMMARIES: Final[
+    Mapping[models.MetricReduction, Callable[[sa.ColumnElement[Any]], sa.ColumnElement[Any]]]
+] = {
+    models.MetricReduction.MIN: sa.func.min,
+    models.MetricReduction.MAX: sa.func.max,
+    models.MetricReduction.MEAN: sa.func.avg,
+}
+"""What each `MetricReduction` that summarizes a whole series is, in SQL."""
+
 # Declares every column's foreign key relationship: what it references, and whether it's OWNERSHIP
 # (the parent in the delete/restore/purge hierarchy -- gets a real `ON DELETE CASCADE`, and is what
 # `_cascade_targets` walks) or plain ATTRIBUTION (e.g. `created_by`, never cascades). This is the
@@ -831,8 +840,44 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         *,
         keys: frozenset[str] | None = None,
         exclude_run_ids: frozenset[int] = frozenset(),
+        reduction: models.MetricReduction = models.MetricReduction.HISTORY,
     ) -> MetricFrame:
-        """An experiment's (non-deleted runs') metrics -- only `keys`, if given, else every metric."""
+        """
+        An experiment's (non-deleted runs') metrics -- only `keys`, if given, else every metric.
+
+        Every step, unless a `reduction` asks for less: then a row per run and key, found without reading the rest.
+        """
+        match reduction:
+            case models.MetricReduction.HISTORY:
+                rows = self._metric_history(experiment_id, keys, exclude_run_ids)
+            case models.MetricReduction.LATEST:
+                rows = self._metric_ends(experiment_id, keys, exclude_run_ids, latest=True)
+            case models.MetricReduction.FIRST:
+                rows = self._metric_ends(experiment_id, keys, exclude_run_ids, latest=False)
+            case models.MetricReduction.MIN | models.MetricReduction.MAX | models.MetricReduction.MEAN:
+                rows = self._metric_summaries(experiment_id, keys, exclude_run_ids, _SUMMARIES[reduction])
+        return MetricFrame.from_rows(rows)
+
+    def fetch_latest_metrics(
+        self,
+        experiment_id: int,
+        *,
+        keys: frozenset[str] | None = None,
+        exclude_run_ids: frozenset[int] = frozenset(),
+    ) -> dict[int, dict[str, float]]:
+        """
+        Each (non-deleted) run's most recently logged value of each key -- only `keys`, if given, else every metric.
+
+        A value that is `NULL` or `NaN` is no value: a run whose last step diverged shows its last finite one.
+        """
+        by_run: dict[int, dict[str, float]] = {}
+        for row in self._metric_ends(experiment_id, keys, exclude_run_ids, latest=True):
+            by_run.setdefault(row.run_id, {})[row.key] = cast("float", row.value)
+        return by_run
+
+    def _metric_history(
+        self, experiment_id: int, keys: frozenset[str] | None, exclude_run_ids: frozenset[int]
+    ) -> list[MetricRow]:
         # `UnderlyingMetricTableEntry` has no `deleted_at` of its own -- visibility is inherited
         # transitively through its run, which is always soft-deleted in the same cascade as its
         # metrics' logical owner (see `_soft_delete`), so a join against `Run` is sufficient.
@@ -850,35 +895,45 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             )
             .order_by(m.c.id)
         )
-        return MetricFrame.from_rows(MetricRow._make(row) for row in rows)
+        return [MetricRow._make(row) for row in rows]
 
-    def fetch_latest_metrics(
+    def _metric_ends(
         self,
         experiment_id: int,
+        keys: frozenset[str] | None,
+        exclude_run_ids: frozenset[int],
         *,
-        keys: frozenset[str] | None = None,
-        exclude_run_ids: frozenset[int] = frozenset(),
-    ) -> dict[int, dict[str, float]]:
+        latest: bool,
+    ) -> list[MetricRow]:
         """
-        Each (non-deleted) run's most recently logged value of each key -- only `keys`, if given, else every metric.
+        Each live run's last (or first) row of each key, by one probe through the index per run and key.
 
-        One probe backwards through the index per run and key, so what is read depends on how many runs and keys
-        there are, not on how many steps they logged. A value that is `NULL` or `NaN` is no value: a run whose
-        last step diverged shows its last finite one.
+        What is read depends on how many runs and keys there are, not on how many steps they logged. A step
+        logged twice (a re-sent batch) counts as its newest write, as in `MetricFrame.from_rows`.
         """
         m, r = self._tables[models.UnderlyingMetricTableEntry], self._tables[models.Run]
         logged = _distinct_keys(m, experiment_id)
-        latest = (
-            sa.select(m.c.value)
-            .where(*_series(m, experiment_id, logged.c.key, r.c.id), _is_number(m.c.value))
-            .order_by(m.c.step.desc(), m.c.id.desc())
-            .limit(1)
-            .correlate(logged, r)
-            .scalar_subquery()
-        )
+        end = (m.c.step.desc() if latest else m.c.step.asc(), m.c.id.desc())
+
+        def at_the_end(column: sa.ColumnElement[Any]) -> sa.ScalarSelect[Any]:
+            return (
+                sa.select(column)
+                .where(*_series(m, experiment_id, logged.c.key, r.c.id), _is_number(m.c.value))
+                .order_by(*end)
+                .limit(1)
+                .correlate(logged, r)
+                .scalar_subquery()
+            )
+
         key_filter: list[sa.ColumnElement[bool]] = [logged.c.key.in_(keys)] if keys is not None else []
-        pairs = (
-            sa.select(r.c.id.label("run_id"), logged.c.key, latest.label("value"))
+        ends = (
+            sa.select(
+                r.c.id.label("run_id"),
+                at_the_end(m.c.step).label("step"),
+                logged.c.key.label("key"),
+                at_the_end(m.c.value).label("value"),
+                at_the_end(m.c.timestamp_utc).label("timestamp_utc"),
+            )
             .select_from(logged.join(r, sa.true()))
             .where(
                 logged.c.key.is_not(None),
@@ -886,12 +941,61 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
                 *_live_runs(r, experiment_id),
                 r.c.id.not_in(exclude_run_ids),
             )
-            .subquery("pairs")
+            .subquery("ends")
         )
-        by_run: dict[int, dict[str, float]] = {}
-        for run_id, key, value in self._execute(sa.select(pairs).where(pairs.c.value.is_not(None))):
-            by_run.setdefault(run_id, {})[key] = value
-        return by_run
+        rows = self._execute(
+            sa.select(*(ends.c[f] for f in MetricRow._fields)).where(ends.c.value.is_not(None))
+        )
+        return [MetricRow._make(row) for row in rows]
+
+    def _metric_summaries(
+        self,
+        experiment_id: int,
+        keys: frozenset[str] | None,
+        exclude_run_ids: frozenset[int],
+        summarize: Callable[[sa.ColumnElement[Any]], sa.ColumnElement[Any]],
+    ) -> list[MetricRow]:
+        """
+        One row per live run and key: `summarize` of its values, at its last step.
+
+        The database reads every step of the keys asked for and sends back a row per run and key.
+        A step logged twice (a re-sent batch) counts as its newest write, as in `MetricFrame.from_rows`.
+        """
+        m, r = self._tables[models.UnderlyingMetricTableEntry], self._tables[models.Run]
+        key_filter: list[sa.ColumnElement[bool]] = [m.c.key.in_(keys)] if keys is not None else []
+        written = (
+            sa.select(
+                m.c.run_id,
+                m.c.key,
+                m.c.step,
+                m.c.value,
+                m.c.timestamp_utc,
+                sa.func.row_number()
+                .over(partition_by=(m.c.run_id, m.c.key, m.c.step), order_by=m.c.id.desc())
+                .label("newest"),
+            )
+            .join(r, m.c.run_id == r.c.id)
+            .where(
+                m.c.experiment_id == experiment_id,
+                r.c.deleted_at.is_(None),
+                m.c.run_id.not_in(exclude_run_ids),
+                _is_number(m.c.value),
+                *key_filter,
+            )
+            .subquery("written")
+        )
+        rows = self._execute(
+            sa.select(
+                written.c.run_id,
+                sa.func.max(written.c.step).label("step"),
+                written.c.key,
+                summarize(written.c.value).label("value"),
+                sa.func.max(written.c.timestamp_utc).label("timestamp_utc"),
+            )
+            .where(written.c.newest == 1)
+            .group_by(written.c.run_id, written.c.key)
+        )
+        return [MetricRow._make(row) for row in rows]
 
     def summarize_metric_keys(self, experiment_id: int) -> list[MetricKeySummary]:
         """Every metric key logged in an experiment (non-deleted runs), sorted, without fetching values."""

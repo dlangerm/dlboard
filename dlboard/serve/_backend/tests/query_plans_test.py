@@ -9,6 +9,7 @@ import pytest
 import sqlalchemy as sa
 
 from dlboard.conftest import StoreBackend
+from dlboard.models import MetricReduction
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -23,6 +24,8 @@ _READS: dict[str, Callable[[PostgresStore, int], object]] = {
     "summarize_histogram_keys": lambda s, e: s.summarize_histogram_keys(e),
     "summarize_artifact_keys": lambda s, e: s.summarize_artifact_keys(e),
     "fetch_latest_metrics": lambda s, e: s.fetch_latest_metrics(e),
+    "fetch_metrics, first": lambda s, e: s.fetch_metrics(e, reduction=MetricReduction.FIRST),
+    "fetch_metrics, mean": lambda s, e: s.fetch_metrics(e, reduction=MetricReduction.MEAN),
     "fetch_metrics": lambda s, e: s.fetch_metrics(e),
     "fetch_metrics, some keys": lambda s, e: s.fetch_metrics(e, keys=frozenset({"loss"})),
     "fetch_histograms": lambda s, e: s.fetch_histograms(e, keys=frozenset({"grad"}), max_steps=10),

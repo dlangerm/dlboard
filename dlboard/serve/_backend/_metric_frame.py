@@ -85,6 +85,22 @@ class MetricFrame:
         frame.columns.name = None
         return cls(keys, frame)
 
+    @classmethod
+    def merged(cls, frames: Iterable[MetricFrame]) -> MetricFrame:
+        """
+        One frame with every row and key of `frames`, whose keys must differ: a row is wherever any of them has one.
+
+        For a panel whose charts need different `MetricReduction`s of different keys.
+        """
+        frames = list(frames)
+        keys = frozenset().union(*(frame.keys for frame in frames))
+        wide = (
+            pd.concat([frame._frame for frame in frames], ignore_index=True)  # noqa: SLF001
+            .groupby(_INDEX, as_index=False)
+            .agg(dict.fromkeys(keys, "first") | {MetricColumn.TIMESTAMP_UTC: "min"})
+        )
+        return cls(keys, wide)
+
     @property
     def run_id(self) -> pd.Series[int]:
         return self._frame[MetricColumn.RUN_ID]

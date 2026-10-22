@@ -19,13 +19,18 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, NamedTuple
 
+import pandas as pd
 import pendulum
 import pytest
 import sqlalchemy as sa
 
 from dlboard import models
 from dlboard.conftest import StoreBackend
+from dlboard.models import ChartInstance, PanelInstance
+from dlboard.plugins.charts.bar_chart import BarChart
+from dlboard.plugins.charts.table_chart import TableChart
 from dlboard.serve._pages._experiment._column_catalog import ColumnCatalog
+from dlboard.serve._pages._experiment._panel_data import fetch_panel_dataframe
 from dlboard.serve._pages._experiment._run_compare import load_comparison
 
 if TYPE_CHECKING:
@@ -35,8 +40,27 @@ if TYPE_CHECKING:
 
 pytestmark = pytest.mark.postgres
 
+BarChart.register(allow_override=True)
+TableChart.register(allow_override=True)
+
 _SHORT, _LONG, _NEIGHBOUR = 10, 200, 1000
 _RUNS = 3
+
+_RUN_SUMMARIES = [
+    PanelInstance[pd.DataFrame, object](
+        name="bars",
+        charts=[ChartInstance(chart_type=BarChart.name, parameters={"column": "loss", "x_axis": "acc"})],
+    ),
+    PanelInstance[pd.DataFrame, object](
+        name="table",
+        charts=[
+            ChartInstance(
+                chart_type=TableChart.name,
+                parameters={"show_metrics": ["*"], "show_hparams": [], "aggregate": "mean"},
+            )
+        ],
+    ),
+]
 _LOADS: dict[str, Callable[[PostgresStore, int], object]] = {
     "the column catalog": lambda s, e: ColumnCatalog.load(s, e),
     "metric keys": lambda s, e: s.summarize_metric_keys(e),
@@ -44,6 +68,8 @@ _LOADS: dict[str, Callable[[PostgresStore, int], object]] = {
     "artifact keys": lambda s, e: s.summarize_artifact_keys(e),
     "latest metrics": lambda s, e: s.fetch_latest_metrics(e),
     "the run comparison": lambda s, e: load_comparison(s, e, [run.id for run in s.get_runs(e)]),
+    "a panel of bars of the latest": lambda s, e: fetch_panel_dataframe(s, e, _RUN_SUMMARIES[0]),
+    "a table of every metric's mean": lambda s, e: fetch_panel_dataframe(s, e, _RUN_SUMMARIES[1]),
 }
 
 

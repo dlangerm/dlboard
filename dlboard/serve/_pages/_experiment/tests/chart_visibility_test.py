@@ -82,20 +82,29 @@ def test_render_panel_charts_no_badge_when_chart_hints_its_columns() -> None:
     assert _to_props(hover_controls)["pos"] == "absolute"  # laid over the chart, not a row of its own
 
 
-def test_render_panel_charts_badge_when_chart_cannot_hint_its_columns() -> None:
-    """A table chart with no `metrics` filter set (its documented "show everything" default)
-    can't name specific columns to fetch -- this is exactly the case that logs `fetch_panel_
-    dataframe`'s "fetching every metric" debug trace, so the UI should surface it too."""
+@pytest.mark.parametrize(
+    ("parameters", "badged"),
+    [
+        pytest.param({"rows": "field", "row_field": "step"}, True, id="every-step-of-every-metric"),
+        pytest.param({}, False, id="one-value-per-run"),
+    ],
+)
+def test_render_panel_charts_badge_only_when_an_unscoped_chart_reads_every_step(
+    parameters: dict[str, str], *, badged: bool
+) -> None:
+    """A table chart with no `metrics` filter set (its documented "show everything" default) can't name the
+    columns to fetch, which only costs what the badge warns of if it reads every step of them."""
     panel = PanelInstance[Any, Any](
-        name="p", charts=[ChartInstance[Any, Any](chart_type="table", parameters={})]
+        name="p", charts=[ChartInstance[Any, Any](chart_type="table", parameters=parameters)]
     )
     df = pd.DataFrame({"run_id": [1], "step": [0], "loss": [0.5]})
 
     [stack] = chart_view.render_panel_charts(panel, df)
-    badge_row, hover_controls, _chart, _draft = _chart_item_parts(stack)
+    parts = _chart_item_parts(stack)
 
-    assert _to_props(hover_controls)["className"] == "dl-chart-controls"
-    assert "fetches all metrics" in str(_to_props(badge_row))
+    assert len(parts) == (4 if badged else 3)
+    if badged:
+        assert "fetches all metrics" in str(_to_props(parts[0]))
 
 
 # ---- chart width: packed uses the chart's natural width, grid stretches to its cell ----

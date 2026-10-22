@@ -10,7 +10,7 @@ import dash_mantine_components as dmc
 import pandas as pd
 from pydantic import BaseModel, Field
 
-from dlboard.models import DISPLAY_SECTION, HPARAM_COLUMN_PREFIX, ChartType, ColumnKind
+from dlboard.models import DISPLAY_SECTION, HPARAM_COLUMN_PREFIX, ChartType, ColumnKind, MetricReduction
 from dlboard.plugins.charts._axis_label import (
     DEFAULT_MAX_AXIS_LABEL_CHARS,
     VALUE_AXIS_WIDTH,
@@ -18,7 +18,7 @@ from dlboard.plugins.charts._axis_label import (
     fit_axis_label,
 )
 from dlboard.plugins.charts._chart_title import titled
-from dlboard.plugins.charts._grouping import last_row_per_run
+from dlboard.plugins.charts._grouping import latest_per_run
 from dlboard.serve import AssetKind, series_color, serve_asset
 
 if typing.TYPE_CHECKING:
@@ -127,7 +127,7 @@ class BarChart(ChartType[BarChartSettings, pd.DataFrame, dmc.Stack], frozen=True
         # Collapse each run down to its last-logged value before grouping, so a run that logs
         # `column` at every step doesn't outweigh a run that only logs it once -- every run
         # contributes exactly one value to its group's aggregation.
-        per_run = last_row_per_run(dataframe.dropna(subset=[x_col, parameters.column]))
+        per_run = latest_per_run(dataframe, [x_col, parameters.column])
         grouped = per_run.groupby(x_col, as_index=False, sort=False).agg(
             **{parameters.column: (parameters.column, parameters.aggregation)}
         )
@@ -231,6 +231,12 @@ class BarChart(ChartType[BarChartSettings, pd.DataFrame, dmc.Stack], frozen=True
     @typing.override
     def hint_required_columns(cls, parameters: BarChartSettings) -> set[str] | None:
         return {parameters.column, parameters.x_axis}
+
+    @classmethod
+    @typing.override
+    def metric_reduction(cls, parameters: BarChartSettings) -> MetricReduction:
+        # A bar is a run's latest value: the chart takes that from each run's series itself, so it needs no more.
+        return MetricReduction.LATEST
 
     @classmethod
     @typing.override

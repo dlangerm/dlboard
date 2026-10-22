@@ -370,9 +370,12 @@ class AuthorizingDataStore(models.DataStore[...]):
         *,
         keys: frozenset[str] | None = None,
         exclude_run_ids: frozenset[int] = frozenset(),
+        reduction: models.MetricReduction = models.MetricReduction.HISTORY,
     ) -> MetricFrame:
         self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
-        return self._inner.fetch_metrics(experiment_id, keys=keys, exclude_run_ids=exclude_run_ids)
+        return self._inner.fetch_metrics(
+            experiment_id, keys=keys, exclude_run_ids=exclude_run_ids, reduction=reduction
+        )
 
     def fetch_latest_metrics(
         self,

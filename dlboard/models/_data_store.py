@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import typing
 
+from dlboard.models._metric import MetricReduction
+
 # Pre-3.12 `TypeVar`/`ParamSpec` style (the client's floor is 3.10) -- `P` is `get_or_create`'s
 # constructor signature; `Dataframe`/`Chart` are `Page`'s own two type parameters,
 # reused here rather than declared fresh per method (PEP 695's per-method `def foo[T](...)` needs
@@ -193,9 +195,14 @@ class DataStore(typing.Protocol[_P]):
         *,
         keys: frozenset[str] | None = None,
         exclude_run_ids: frozenset[int] = frozenset(),
+        reduction: MetricReduction = MetricReduction.HISTORY,
     ) -> MetricFrame:
-        """An experiment's (non-deleted runs') metrics -- only `keys`, if given, else every metric."""
-        ...
+        """
+        An experiment's (non-deleted runs') metrics -- only `keys`, if given, else every metric.
+
+        Every step, unless a `reduction` asks for less (`MetricReduction`): then a row per run and key, found
+        without reading the rest, so what it costs does not grow with how long the runs trained.
+        """
 
     def fetch_latest_metrics(
         self,

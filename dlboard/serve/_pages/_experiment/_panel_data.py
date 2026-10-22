@@ -33,6 +33,7 @@ from dlboard.models import (
     hparam_column,
 )
 from dlboard.serve._backend._artifact_download import artifact_url
+from dlboard.serve._backend._metric_frame import MetricFrame
 from dlboard.serve._pages._dataframe_helpers import run_display_name
 from dlboard.serve._pages._experiment._paging import visible_chart_indexes
 
@@ -114,7 +115,6 @@ def fetch_panel_dataframe(
     excluded_runs: Iterable[int] = (),
 ) -> pd.DataFrame:
     """Fetch just the data one panel needs -- not the whole experiment -- leaving out `excluded_runs`."""
-    metric_cols = panel.hint_required_columns()
     artifact_keys = panel.hint_required_artifact_keys()
     artifact_key_prefixes = frozenset(panel.hint_required_artifact_key_prefixes())
     has_artifacts = bool(artifact_keys or artifact_key_prefixes)
@@ -131,13 +131,18 @@ def fetch_panel_dataframe(
     # "none of this kind at all".
     hparam_keys = panel.hint_required_hparams()
     excluded = frozenset(excluded_runs)
+    metric_reductions = panel.metric_reductions()
     metrics_df = (
-        store.fetch_metrics(
-            experiment_id,
-            keys=None if metric_cols is None else frozenset(metric_cols),
-            exclude_run_ids=excluded,
+        MetricFrame.merged(
+            store.fetch_metrics(
+                experiment_id,
+                keys=None if columns is None else frozenset(columns),
+                exclude_run_ids=excluded,
+                reduction=reduction,
+            )
+            for reduction, columns in metric_reductions.items()
         ).to_frame()
-        if metric_cols is None or metric_cols
+        if metric_reductions
         else pd.DataFrame()
     )
     artifacts_df = (

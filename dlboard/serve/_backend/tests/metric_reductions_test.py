@@ -1,4 +1,4 @@
-"""`fetch_latest_metrics`: where each run ended up, found without reading how it got there."""
+"""`fetch_metrics` by reduction, and `fetch_latest_metrics`: a row per run and key, found without reading the steps."""
 
 from __future__ import annotations
 
@@ -83,3 +83,27 @@ def test_it_leaves_out_other_keys_other_experiments_deleted_and_excluded_runs(
     assert store.fetch_latest_metrics(
         experiment_id, keys=frozenset({"loss"}), exclude_run_ids=frozenset({excluded.id})
     ) == {kept.id: {"loss": 1.0}}
+
+
+@pytest.mark.parametrize(
+    ("reduction", "value", "step"),
+    [
+        (models.MetricReduction.LATEST, 2.0, 4),
+        (models.MetricReduction.FIRST, 5.0, 0),
+        (models.MetricReduction.MIN, 1.0, 4),
+        (models.MetricReduction.MAX, 5.0, 4),
+        (models.MetricReduction.MEAN, 3.0, 4),
+    ],
+)
+def test_a_reduction_is_a_row_per_run_and_key_of_the_steps_newest_writes(
+    store: SQLLiteStore, experiment_id: int, reduction: models.MetricReduction, value: float, step: int
+) -> None:
+    run, empty_handed = _runs(store, experiment_id, 2)
+    for at, loss in enumerate([5.0, 3.0, 9.0, 1.0, 2.0]):
+        _log(store, run, at, loss=loss)
+    _log(store, run, 2, loss=4.0)  # step 2 re-sent: only this one counts, so the 9 is no maximum
+    _log(store, empty_handed, 0, other=1.0)
+
+    frame = store.fetch_metrics(experiment_id, keys=frozenset({"loss"}), reduction=reduction)
+
+    assert (list(frame.run_id), list(frame.step), list(frame.values("loss"))) == ([run.id], [step], [value])
