@@ -165,7 +165,7 @@ def test_the_runs_table_redraws_when_a_run_finishes() -> None:
     )
 
     def signature(run: Run) -> list[Any]:
-        return run_table._render_signature(1, [], frozenset(), [], [run])
+        return run_table._render_signature(1, [], run_table._Selection(frozenset(), chosen=False), [], [run])
 
     assert signature(running) != signature(finished)
     assert signature(finished) == signature(finished.model_copy())

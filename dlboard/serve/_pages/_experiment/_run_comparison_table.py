@@ -316,7 +316,7 @@ def _render_hparam_panel(
     hparam_keys: list[str],
     metric_keys: list[str],
     selected: list[str],
-    shown: frozenset[int],
+    selection: _Selection,
 ) -> Component:
     """
     The comparison table, plus a Columns picker collapsed behind an icon so it doesn't permanently eat a row above the table it configures.
@@ -334,18 +334,6 @@ def _render_hparam_panel(
                 [
                     section_label("Runs"),
                     compare_button(),
-                    dmc.Tooltip(
-                        dmc.Button(
-                            f"Newest {ShownRunsSettings().default_shown_runs}",
-                            id=NAVBAR_NEWEST_RUNS_ID,
-                            n_clicks=0,
-                            variant="subtle",
-                            size="compact-xs",
-                        ),
-                        label="Draw only the newest runs again, rather than the ones selected",
-                        position="bottom",
-                        withArrow=True,
-                    ),
                     dmc.Popover(
                         [
                             dmc.PopoverTarget(
@@ -400,12 +388,33 @@ def _render_hparam_panel(
                 gap="xs",
                 wrap="nowrap",
             ),
+            *(
+                [
+                    dmc.Group(
+                        [
+                            dmc.Text("Runs selected in the table", size="xs", c="dimmed"),
+                            dmc.Button(
+                                f"Newest {ShownRunsSettings().default_shown_runs}",
+                                id=NAVBAR_NEWEST_RUNS_ID,
+                                n_clicks=0,
+                                variant="subtle",
+                                size="compact-xs",
+                            ),
+                        ],
+                        justify="space-between",
+                        gap="xs",
+                        wrap="nowrap",
+                    )
+                ]
+                if selection.chosen
+                else []
+            ),
             html.Div(
                 id=NAVBAR_HPARAM_TABLE_BODY_ID,
                 children=_build_hparam_datatable(
                     rows,
                     selected,
-                    shown,
+                    selection.shown,
                     table_id=NAVBAR_HPARAM_DATATABLE_ID,
                 ),
             ),
@@ -413,9 +422,16 @@ def _render_hparam_panel(
     )
 
 
+class _Selection(typing.NamedTuple):
+    """The runs the charts draw, and whether a view selected them (rather than their being the newest)."""
+
+    shown: frozenset[int]
+    chosen: bool
+
+
 def _load_hparam_panel_settings(
     store: DataStore[...], ref: repo.PageRef
-) -> tuple[list[Run], frozenset[int], list[str]]:
+) -> tuple[list[Run], _Selection, list[str]]:
     """
     The cheap, always-needed inputs for the navbar table: its run list and its persisted settings.
 
@@ -427,13 +443,13 @@ def _load_hparam_panel_settings(
     page = repo.load_page(store, ref)
     shown, columns = shown_run_ids(store, ref.experiment_id, page.document), page.document.hparam_columns
     runs = list(store.get_runs(ref.experiment_id, limit=None))
-    return runs, shown, columns
+    return runs, _Selection(shown, chosen=page.document.selected_runs is not None), columns
 
 
 def _render_signature(
     experiment_id: int,
     hparams: list[str],
-    shown: frozenset[int],
+    selection: _Selection,
     selected: list[str],
     runs: list[Run],
 ) -> list[Any]:
@@ -451,7 +467,7 @@ def _render_signature(
     and so must each one's status and end time, or a run finishing would never redraw its row.
     """
     run_states = [[run.id, run.status, run.ended_at.isoformat() if run.ended_at else None] for run in runs]
-    return [experiment_id, hparams, sorted(shown), selected, run_states]
+    return [experiment_id, hparams, sorted(selection.shown), selection.chosen, selected, run_states]
 
 
 def _register_hparam_table(app: Dash) -> None:
@@ -485,7 +501,7 @@ def _register_hparam_table(app: Dash) -> None:
             if page_json is not None
             else repo.PageRef(experiment_id, view_id)
         )
-        runs, shown, selected = _load_hparam_panel_settings(store, ref)
+        runs, selection, selected = _load_hparam_panel_settings(store, ref)
         # `STATE_PAGE_STORAGE` changes on *every* page-settings write -- a tab switch, a panel
         # rename, a drag-reorder, none of which this table cares about -- so rebuilding on it
         # unconditionally (tearing down and remounting the ag-grid) flickered on every one of
@@ -504,7 +520,7 @@ def _register_hparam_table(app: Dash) -> None:
         # metric-column feature. `runs` (from `_load_hparam_panel_settings`, already cheap/bounded)
         # is enough to detect every case this table needs to react to, so the expensive part only
         # runs on the (comparatively rare) ticks that actually need a re-render.
-        signature = _render_signature(experiment_id, hparams, shown, selected, runs)
+        signature = _render_signature(experiment_id, hparams, selection, selected, runs)
         if signature == prev_signature:
             raise PreventUpdate
 
@@ -514,7 +530,7 @@ def _register_hparam_table(app: Dash) -> None:
 
         return dmc.Stack(
             [
-                _render_hparam_panel(rows, hparam_keys, metric_keys, selected, shown),
+                _render_hparam_panel(rows, hparam_keys, metric_keys, selected, selection),
                 _delete_run_modal(),
                 Store(id=DELETE_RUN_PENDING_STORE_ID),
                 Store(id=NAVBAR_HPARAM_SIGNATURE_ID, data=signature),
