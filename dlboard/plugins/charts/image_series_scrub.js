@@ -10,15 +10,7 @@ function imageSeriesScrub(step, data) {
     const srcs = [];
     const captions = [];
     runIds.forEach((rid) => {
-        const steps = data.per_run_steps[rid];
-        let chosen = steps[0];
-        for (let i = 0; i < steps.length; i++) {
-            if (steps[i] <= step) {
-                chosen = steps[i];
-            } else {
-                break;
-            }
-        }
+        const chosen = window.dlImageSeriesViewer.stepOf(data, rid, step);
         srcs.push(data.per_run_urls[rid][String(chosen)]);
         const runCaptions = data.per_run_captions ? data.per_run_captions[rid] : null;
         captions.push(runCaptions ? runCaptions[String(chosen)] || "" : "");

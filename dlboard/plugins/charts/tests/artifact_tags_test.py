@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from dlboard.models import Quantity, SizeUnit, TagDisplay, TimeUnit
-from dlboard.plugins.charts._artifact_tags import format_tags_caption
+from dlboard.plugins.charts._artifact_tags import format_tags, format_tags_caption
 
 if TYPE_CHECKING:
     from dlboard import models
@@ -97,3 +97,4 @@ def test_a_tag_named_in_the_per_key_map_overrides_the_charts_default_display() -
     by_key = {"took": TagDisplay(time_unit=TimeUnit.HOURS), "score": TagDisplay(precision=6)}
 
     assert format_tags_caption(tags, default, by_key) == "took: 1.5 h, wait: 90 min, score: 0.140984"
+    assert format_tags(tags, default, by_key) == {"took": "1.5 h", "wait": "90 min", "score": "0.140984"}

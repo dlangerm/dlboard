@@ -1,5 +1,6 @@
-// The legend and the viewer's changes over an image chart's pictures: which layers are shown, hidden or soloed from a legend
-// on each picture, what each layer holds, and holding a picture to peek at it without them. The layers themselves are
+// The legend and the viewer's changes over an image chart's pictures (its thumbnails, and its enlarged view): which layers
+// are shown, hidden or soloed from a legend on each picture, what each layer holds, and holding a picture to peek at it
+// without them. The layers themselves are
 // drawn by `_layered_picture.js` (`window.dlLayeredPicture`), which this styles from the chart's defaults and what the
 // viewer has changed (`window.dlChartViewState`).
 //
@@ -162,10 +163,13 @@ window.dlImageSeriesOverlay = (() => {
         legend.style.maxHeight = `${Math.max(0, height - 2 * LEGEND_INSET)}px`;
         legend.toggleAttribute("data-dl-compact", width < COMPACT_BELOW);
     };
+    // The box a picture and its legend are laid out in: a thumbnail, or the enlarged view. The legend is anchored to the
+    // corner of it (see the CSS), whatever the picture in it, which may be tiny, or zoomed out to its own size.
+    const frameOf = (overlay) => overlay.closest(".dl-image-series-thumb, .dl-image-series-viewer");
 
     // Brings the legend over one picture up to date: what is shown, what this picture has nothing for, what each layer holds.
     const updateLegend = (overlay) => {
-        const legend = overlay.parentElement?.querySelector(":scope > .dl-layer-legend");
+        const legend = frameOf(overlay)?.querySelector(":scope > .dl-layer-legend");
         const root = chartRoot(overlay.dataset.dlInstance);
         if (!legend || !root) {
             return;
@@ -174,15 +178,9 @@ window.dlImageSeriesOverlay = (() => {
         if (legend.dataset.layers !== names.join("\n")) {
             buildLegend(legend, root, names);
             legend.dataset.layers = names.join("\n");
-            // The picture's box changes with the window and with the panel's columns.
-            if (!legend.dlResize) {
-                legend.dlResize = new ResizeObserver(() => updateLegend(overlay));
-                legend.dlResize.observe(overlay.parentElement);
-            }
         }
         legend.querySelector(".dl-layer-eye").setAttribute("aria-pressed", String(!overlaysHidden(root)));
         legend.toggleAttribute("data-dl-open", legendOpen(root));
-        fitLegend(overlay, legend);
         const holders = new Map(
             [...overlay.querySelectorAll(":scope > .dl-image-series-layer")].map((h) => [
                 h.dataset.dlLayer,
@@ -252,8 +250,6 @@ window.dlImageSeriesOverlay = (() => {
             root ? effectiveStyle(root, name) : { hidden: false, opacity: 1 },
         );
         updateLegend(layer);
-        // A picture's size is known once it has loaded, and the legend is anchored to it.
-        picture.addEventListener("load", () => updateLegend(layer), { once: true });
     };
 
     // A shapes layer has been drawn: what it holds is now known to the legend.
@@ -283,6 +279,12 @@ window.dlImageSeriesOverlay = (() => {
     let peek = null;
     let swallowing = false;
 
+    // The chart a legend is about, which the enlarged view's is not inside: it says which by its instance.
+    const rootOfLegend = (element) => {
+        const legend = element.closest(".dl-layer-legend");
+        return legend && chartRoot(legend.dataset.dlInstance);
+    };
+
     // The legend. A click on a layer's row shows or hides that layer, for this viewer: kept in the browser, and saved as the
     // chart's own only if the viewer asks to. The eye hides every layer, or shows them again. It is handled before the
     // picture sees it, as a click on the legend is not a click on the picture (which opens it).
@@ -297,7 +299,7 @@ window.dlImageSeriesOverlay = (() => {
                 return;
             }
             const button = event.target.closest?.(".dl-layer-legend button");
-            const root = button?.closest(".dl-image-series");
+            const root = button && rootOfLegend(button);
             if (!root) {
                 return;
             }
@@ -333,14 +335,22 @@ window.dlImageSeriesOverlay = (() => {
             return; // pressing a layer's row is not holding the picture
         }
         const held = eye ?? event.target.closest?.(".dl-image-series-thumb");
-        const root = held?.closest(".dl-image-series");
+        const root = eye ? rootOfLegend(eye) : held?.closest(".dl-image-series");
         if (!root) {
             return;
         }
-        peek = { root, active: false };
+        // The chart, and its enlarged view if it is open: the view is not inside the chart.
+        const instance = CSS.escape(root.dataset.dlInstance);
+        const targets = [
+            root,
+            ...document.querySelectorAll(`.dl-image-series-viewer[data-dl-instance="${instance}"]`),
+        ];
+        peek = { targets, active: false };
         peek.timer = setTimeout(() => {
             peek.active = true;
-            root.setAttribute("data-dl-peek", "");
+            for (const target of targets) {
+                target.setAttribute("data-dl-peek", "");
+            }
         }, PEEK_MS);
     });
     const endPeek = () => {
@@ -349,7 +359,9 @@ window.dlImageSeriesOverlay = (() => {
         }
         clearTimeout(peek.timer);
         if (peek.active) {
-            peek.root.removeAttribute("data-dl-peek");
+            for (const target of peek.targets) {
+                target.removeAttribute("data-dl-peek");
+            }
             swallowing = true;
             setTimeout(() => {
                 swallowing = false;

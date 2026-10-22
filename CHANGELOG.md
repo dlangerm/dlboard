@@ -32,6 +32,17 @@ pulls that section's body into the GitHub release notes and publishes both distr
   `SeriesBand` per run, group and step: the minimum, quartiles, median, maximum and mean of the values its patterns
   match, the metrics at the extremes, and how many logged a value, read on a bounded grid of steps.
   `KeyPatterns.captures` says what each wildcard of a pattern stood for in a key, to group by.
+* **An image chart's enlarged view zooms and pans, and keeps the legend and tags.** Scroll to zoom towards the pointer,
+  drag to pan and double-click to fit; a slider with the zoom level and **Fit** and **100%** shortcuts sit over the
+  picture, and its layers stay registered to it at any zoom. The view shows the same layer legend as the thumbnails
+  (sharing the chart's state, so a layer hidden in one is hidden in the other), the chart, run (in its color) and step
+  in its header, and the picture's tags as a table beside it, in the chart's tag formats. `<` and `>` beside the picture,
+  a timeline under it and the left and right arrow keys move through the steps, and the up and down arrow keys through
+  the runs, with a spinner over the picture while the next one loads. **Download** offers its sizes on being pointed at (the
+  original size, 2x, 4x, 8x, or the view as it is zoomed and panned to) and saves a PNG at the one clicked, with the layers
+  shown over the picture and their legend. Scrubbing along the timeline or holding an arrow key moves the chart's slider a
+  few times a second, not on every pixel, and puts in only pictures that have loaded, so it stays as smooth as the
+  thumbnails. The legend sits in the corner of its thumbnail or of the view whatever the size of the picture, or its zoom.
 
 ### Changed
 

@@ -114,6 +114,15 @@ def test_render_formats_tags_dict_into_captions() -> None:
     assert _captions_store_data(stack) == {"1": {"0": "run: 1"}}
 
 
+def test_the_enlarged_views_tags_and_run_marks_come_with_the_chart_in_the_formats_its_caption_has() -> None:
+    df = _artifacts_df(n_runs=2)
+    data = _store_data(ImageChart.render(ImageChartSettings(key="img"), df))
+
+    assert data["per_run_tags"] == {"1": {"0": {"run": "1"}}, "2": {"0": {"run": "2"}}}
+    assert data["per_run_swatches"].keys() == {"1", "2"}
+    assert data["x_axis"] == "step"
+
+
 def test_render_shows_quantity_tags_in_the_units_and_precision_the_chart_asks_for() -> None:
     took = Quantity(value=5400, unit=TimeUnit.SECONDS)
     df = pd.DataFrame(
@@ -424,7 +433,8 @@ def test_each_picture_has_a_legend_to_be_filled_in_only_when_the_chart_has_layer
 
     _log_layer(df, overlay_key("img", "truth"), "truth.png")
 
-    assert _legends(ImageChart.render(ImageChartSettings(key="img"), df)) == 3  # one over each run's picture
+    # One over each run's picture, and one over the enlarged view's.
+    assert _legends(ImageChart.render(ImageChartSettings(key="img"), df)) == 3 + 1
 
 
 def _is_legend(props: dict[str, Any]) -> bool:
