@@ -240,10 +240,11 @@ def build_metadata(schema: str | None = None) -> tuple[sa.MetaData, dict[type[Ba
         tables[model] = sql.table_for(
             model, metadata, tables, FOREIGN_KEYS.get(model), UNIQUE_COLUMNS.get(model)
         )
-    runs, metrics, histograms, artifacts, pages = (
+    runs, hyperparams, metrics, histograms, artifacts, pages = (
         tables[m]
         for m in (
             models.Run,
+            models.HyperParams,
             models.UnderlyingMetricTableEntry,
             models.UnderlyingHistogramTableEntry,
             models.Artifact,
@@ -262,7 +263,8 @@ def build_metadata(schema: str | None = None) -> tuple[sa.MetaData, dict[type[Ba
         ("idx_artifact_lookup", artifacts),
     ):
         sa.Index(name, per_step.c.experiment_id, per_step.c.key, per_step.c.run_id, per_step.c.step)
-    sa.Index("idx_run_experiment", runs.c.experiment_id)
+    sa.Index("idx_run_experiment", runs.c.experiment_id, runs.c.created_at)
+    sa.Index("idx_hyperparams_experiment", hyperparams.c.experiment_id, hyperparams.c.run_id)
     for field in PAGE_SCOPE_FIELDS:
         # At most one *shared* page (owner_id NULL) per scope -- exactly what `get_or_create_page`
         # relies on to make its own check-then-insert race-safe.

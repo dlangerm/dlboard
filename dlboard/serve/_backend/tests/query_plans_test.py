@@ -1,4 +1,4 @@
-"""Every experiment-scoped read of a per-step table is answered by seeking into an index, not by scanning."""
+"""Every experiment-scoped read of a table is answered by seeking into an index, not by scanning."""
 
 from __future__ import annotations
 
@@ -18,7 +18,14 @@ if TYPE_CHECKING:
 
 pytestmark = pytest.mark.postgres
 
-_PER_STEP_TABLES = frozenset({"UnderlyingMetricTableEntry", "UnderlyingHistogramTableEntry", "Artifact"})
+_SEEKS = {
+    "UnderlyingMetricTableEntry": "(experiment_id, key, run_id, step)",
+    "UnderlyingHistogramTableEntry": "(experiment_id, key, run_id, step)",
+    "Artifact": "(experiment_id, key, run_id, step)",
+    "HyperParams": "(experiment_id, run_id)",
+    "Run": "(experiment_id, created_at)",
+}
+"""What each table an experiment page reads is sought by: the index that leads with the experiment (or the key, `id`)."""
 _READS: dict[str, Callable[[PostgresStore, int], object]] = {
     "summarize_metric_keys": lambda s, e: s.summarize_metric_keys(e),
     "summarize_histogram_keys": lambda s, e: s.summarize_histogram_keys(e),
@@ -30,6 +37,10 @@ _READS: dict[str, Callable[[PostgresStore, int], object]] = {
     "fetch_metrics, some keys": lambda s, e: s.fetch_metrics(e, keys=frozenset({"loss"})),
     "fetch_histograms": lambda s, e: s.fetch_histograms(e, keys=frozenset({"grad"}), max_steps=10),
     "fetch_artifacts": lambda s, e: list(s.fetch_artifacts(e)),
+    "get_runs, the newest": lambda s, e: list(s.get_runs(e, limit=20)),
+    "get_runs, every one": lambda s, e: list(s.get_runs(e, limit=None)),
+    "fetch_hyperparams": lambda s, e: list(s.fetch_hyperparams(e)),
+    "fetch_hyperparams, some runs": lambda s, e: list(s.fetch_hyperparams(e, run_ids=frozenset({1, 2}))),
 }
 
 
@@ -45,7 +56,7 @@ def _nodes(plan: dict[str, Any]) -> Iterator[dict[str, Any]]:
 
 
 @pytest.mark.parametrize("read", _READS)
-def test_a_read_seeks_a_per_step_table_by_experiment(
+def test_a_read_seeks_a_table_by_experiment(
     store: PostgresStore, postgres_settings: PostgresSettings, experiment_id: int, read: str
 ) -> None:
     statements: list[tuple[str, dict[str, object]]] = []
@@ -76,10 +87,11 @@ def test_a_read_seeks_a_per_step_table_by_experiment(
     plan: dict[str, Any] = (json.loads(document) if isinstance(document, str) else document)[0]["Plan"]
     nodes = list(_nodes(plan))
 
-    scanned = {n["Relation Name"] for n in nodes if n["Node Type"] == "Seq Scan"} & _PER_STEP_TABLES
+    scanned = {n["Relation Name"] for n in nodes if n["Node Type"] == "Seq Scan"} & _SEEKS.keys()
     assert not scanned
     # Postgres can run a condition on an index's later column too, but it reads the whole index to: the lead column is the seek.
     # Fetching chosen rows by `id` is a seek as well.
     for index in {n["Index Name"] for n in nodes if "Index Name" in n}:
-        if any(f'"{table}"' in indexes[index] for table in _PER_STEP_TABLES):
-            assert indexes[index].endswith(("(experiment_id, key, run_id, step)", "(id)")), index
+        for table, seek in _SEEKS.items():
+            if f'"{table}"' in indexes[index]:
+                assert indexes[index].endswith((seek, "(id)")), index
