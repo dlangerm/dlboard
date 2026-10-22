@@ -8,6 +8,7 @@ in wide form).
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, NamedTuple
 
@@ -88,12 +89,19 @@ class MetricFrame:
     @classmethod
     def merged(cls, frames: Iterable[MetricFrame]) -> MetricFrame:
         """
-        One frame with every row and key of `frames`, whose keys must differ: a row is wherever any of them has one.
+        One frame with every row and key of `frames`: a row is wherever any of them has one.
 
-        For a panel whose charts need different `MetricReduction`s of different keys.
+        For a panel whose charts need different `MetricReduction`s of different keys, which is why no key may be
+        in two frames: whichever came first would silently win.
         """
         frames = list(frames)
-        keys = frozenset().union(*(frame.keys for frame in frames))
+        if len(frames) <= 1:
+            return frames[0] if frames else cls.from_rows([])
+        counted = Counter(key for frame in frames for key in frame.keys)
+        if shared := sorted(key for key, count in counted.items() if count > 1):
+            msg = f"Metrics fetched more than once cannot be merged: {shared}"
+            raise ValueError(msg)
+        keys = frozenset(counted)
         wide = (
             pd.concat([frame._frame for frame in frames], ignore_index=True)  # noqa: SLF001
             .groupby(_INDEX, as_index=False)

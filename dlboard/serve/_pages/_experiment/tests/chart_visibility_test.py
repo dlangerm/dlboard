@@ -86,6 +86,7 @@ def test_render_panel_charts_no_badge_when_chart_hints_its_columns() -> None:
     ("parameters", "badged"),
     [
         pytest.param({"rows": "field", "row_field": "step"}, True, id="every-step-of-every-metric"),
+        pytest.param({"aggregate": "mean"}, True, id="a-mean-reads-every-step"),
         pytest.param({}, False, id="one-value-per-run"),
     ],
 )

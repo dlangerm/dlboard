@@ -678,6 +678,11 @@ class ChartInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, 
             return _FALLBACK_NATURAL_WIDTH
 
 
+def _agreed(reductions: set[MetricReduction]) -> MetricReduction:
+    """The one way of fetching a metric that serves every reduction in `reductions`: theirs if they are one, else every step."""
+    return next(iter(reductions)) if len(reductions) == 1 else MetricReduction.HISTORY
+
+
 class PanelInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, extra="forbid"):
     """A panel containing one or more charts."""
 
@@ -734,16 +739,14 @@ class PanelInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, 
         wants = [(chart.hint_required_columns(), chart.metric_reduction()) for chart in self.charts]
         wants = [(columns, reduction) for columns, reduction in wants if columns is None or columns]
         if any(columns is None for columns, _ in wants):
-            reductions = {reduction for _, reduction in wants}
-            return {reductions.pop() if len(reductions) == 1 else MetricReduction.HISTORY: None}
+            return {_agreed({reduction for _, reduction in wants}): None}
         wanted: dict[str, set[MetricReduction]] = {}
         for columns, reduction in wants:
             for column in columns or ():
                 wanted.setdefault(column, set()).add(reduction)
         by_reduction: dict[MetricReduction, set[str]] = {}
         for column, reductions in wanted.items():
-            reduction = next(iter(reductions)) if len(reductions) == 1 else MetricReduction.HISTORY
-            by_reduction.setdefault(reduction, set()).add(column)
+            by_reduction.setdefault(_agreed(reductions), set()).add(column)
         return by_reduction
 
     def hint_required_artifact_keys(self) -> set[str | None]:

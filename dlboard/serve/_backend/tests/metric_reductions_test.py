@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pendulum
 import pytest
@@ -12,6 +12,10 @@ from dlboard import models
 from dlboard.conftest import EVERY_STORE_BACKEND, StoreBackend
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    import pandas as pd
+
     from dlboard.plugins.data_stores.sqlite import SQLLiteStore
 
 _TS = pendulum.datetime(2026, 1, 1, tz="UTC")
@@ -30,6 +34,13 @@ def _log(store: SQLLiteStore, run: models.Run, step: int, **metrics: float | Non
             )
         ]
     )
+
+
+def _log_series(
+    store: SQLLiteStore, run: models.Run, values: Sequence[float | None], key: str = "loss"
+) -> None:
+    for step, value in enumerate(values):
+        _log(store, run, step, **{key: value})
 
 
 def _runs(store: SQLLiteStore, experiment_id: int, count: int) -> list[models.Run]:
@@ -107,3 +118,67 @@ def test_a_reduction_is_a_row_per_run_and_key_of_the_steps_newest_writes(
     frame = store.fetch_metrics(experiment_id, keys=frozenset({"loss"}), reduction=reduction)
 
     assert (list(frame.run_id), list(frame.step), list(frame.values("loss"))) == ([run.id], [step], [value])
+
+
+def _reduced(series: pd.Series[float], reduction: models.MetricReduction) -> float:
+    match reduction:
+        case models.MetricReduction.LATEST:
+            return float(series.iloc[-1])
+        case models.MetricReduction.FIRST:
+            return float(series.iloc[0])
+        case models.MetricReduction.MIN:
+            return float(series.min())
+        case models.MetricReduction.MAX:
+            return float(series.max())
+        case models.MetricReduction.MEAN:
+            return float(series.mean())
+        case models.MetricReduction.HISTORY:
+            raise NotImplementedError
+
+
+def _from_the_history(
+    store: SQLLiteStore, experiment_id: int, reduction: models.MetricReduction
+) -> dict[tuple[int, str], float]:
+    """What `reduction` of each run's series is, worked out from every step in pandas: what it must agree with."""
+    wide = store.fetch_metrics(experiment_id).to_frame().sort_values(["run_id", "step"])
+    return {
+        (cast("int", run_id), key): _reduced(series, reduction)
+        for run_id, run in wide.groupby("run_id")
+        for key in (column for column in wide.columns if column not in models.MetricColumn)
+        if len(series := run[key].dropna()) > 0
+    }
+
+
+@pytest.mark.parametrize(
+    "reduction",
+    [
+        models.MetricReduction.LATEST,
+        models.MetricReduction.FIRST,
+        models.MetricReduction.MIN,
+        models.MetricReduction.MAX,
+        models.MetricReduction.MEAN,
+    ],
+)
+def test_a_reduction_is_what_the_whole_history_reduces_to_however_steps_were_re_sent(
+    store: SQLLiteStore, experiment_id: int, reduction: models.MetricReduction
+) -> None:
+    first, second = _runs(store, experiment_id, 2)
+    _log_series(store, first, [5.0, 3.0, 4.0, 1.0, 2.0, 8.0, 6.0, 7.0, 9.0, 0.5], key="loss")
+    _log_series(store, second, [2.0, None, 4.0, math.nan, 6.0], key="loss")
+    _log(store, first, 9, loss=None)  # the newest write of the last step has no value: that step has none
+    _log(store, first, 0, loss=math.nan)  # nor the first
+    _log(store, first, 5, loss=99.0)  # the newest write of a step wins, whatever it was
+    _log(store, second, 4, loss=-3.0)
+    _log(store, second, 4, other=1.0)  # a different key at the same step is no re-send of this one
+
+    reduced = store.fetch_metrics(experiment_id, reduction=reduction).to_frame()
+
+    got = {
+        (cast("int", run_id), key): float(series.iloc[-1])
+        for run_id, run in reduced.groupby("run_id")
+        for key in ("loss", "other")
+        if len(series := run[key].dropna()) > 0
+    }
+    expected = _from_the_history(store, experiment_id, reduction)
+    assert got.keys() == expected.keys()
+    assert got == pytest.approx(expected)

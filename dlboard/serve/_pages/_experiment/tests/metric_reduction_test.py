@@ -150,3 +150,21 @@ def test_a_panel_fetches_each_metric_as_little_as_every_chart_of_it_allows(
     charts: list[ChartInstance[Any, Any]], expected: dict[MetricReduction, set[str] | None]
 ) -> None:
     assert PanelInstance[Any, Any](charts=charts).metric_reductions() == expected
+
+
+def test_a_panel_whose_charts_need_different_fetches_draws_each_from_its_own(
+    store: SQLLiteStore, experiment_id: int
+) -> None:
+    _train(store, experiment_id)
+    bar = _chart("bar", column="loss", x_axis="lr")
+    line = _chart("line", column="acc", x_axis="step")
+    panel = PanelInstance[pd.DataFrame, object](name="p", charts=[bar, line])
+
+    frame = panel_data.fetch_panel_dataframe(store, experiment_id, panel)
+
+    runs = frame.groupby("run_id")
+    assert set(frame.columns) >= {"loss", "acc", "step"}
+    # `acc` is every step the run logged it at; `loss`, which only the bar chart wants, is each run's last.
+    assert runs.acc.count().tolist() == [2, 2, 2]  # step 29 diverged: it logged only a loss
+    assert runs.loss.count().tolist() == [1, 1, 1]
+    assert _drawn(bar, frame) == _drawn(bar, panel_data.fetch_panel_dataframe(store, experiment_id, panel))

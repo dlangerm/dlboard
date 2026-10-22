@@ -282,7 +282,7 @@ def _live_runs(runs: sa.Table, experiment_id: int) -> list[sa.ColumnElement[bool
 
 
 def _series(
-    table: sa.Table, experiment_id: int, key: sa.ColumnElement[str], run_id: sa.ColumnElement[int]
+    table: sa.FromClause, experiment_id: int, key: sa.ColumnElement[str], run_id: sa.ColumnElement[int]
 ) -> list[sa.ColumnElement[bool]]:
     """What selects one run's rows under `key` in a per-step `table`: a prefix of its `(experiment_id, key, run_id, step)` index."""
     return [table.c.experiment_id == experiment_id, table.c.key == key, table.c.run_id == run_id]
@@ -914,11 +914,18 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         m, r = self._tables[models.UnderlyingMetricTableEntry], self._tables[models.Run]
         logged = _distinct_keys(m, experiment_id)
         end = (m.c.step.desc() if latest else m.c.step.asc(), m.c.id.desc())
+        rewritten = m.alias("rewritten")
+        # The newest write of a step is the one that counts, a missing value included: that step then has none.
+        newest_write = ~sa.exists().where(
+            *_series(rewritten, experiment_id, m.c.key, m.c.run_id),
+            rewritten.c.step == m.c.step,
+            rewritten.c.id > m.c.id,
+        )
 
         def at_the_end(column: sa.ColumnElement[Any]) -> sa.ScalarSelect[Any]:
             return (
                 sa.select(column)
-                .where(*_series(m, experiment_id, logged.c.key, r.c.id), _is_number(m.c.value))
+                .where(*_series(m, experiment_id, logged.c.key, r.c.id), _is_number(m.c.value), newest_write)
                 .order_by(*end)
                 .limit(1)
                 .correlate(logged, r)
@@ -979,7 +986,6 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
                 m.c.experiment_id == experiment_id,
                 r.c.deleted_at.is_(None),
                 m.c.run_id.not_in(exclude_run_ids),
-                _is_number(m.c.value),
                 *key_filter,
             )
             .subquery("written")
@@ -992,7 +998,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
                 summarize(written.c.value).label("value"),
                 sa.func.max(written.c.timestamp_utc).label("timestamp_utc"),
             )
-            .where(written.c.newest == 1)
+            .where(written.c.newest == 1, _is_number(written.c.value))
             .group_by(written.c.run_id, written.c.key)
         )
         return [MetricRow._make(row) for row in rows]

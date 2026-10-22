@@ -116,10 +116,7 @@ def _unscoped_fetch_badge(chart: models.ChartInstance[Any, Any]) -> Component | 
     debug log), so it gets a badge instead of hover-only controls: this should be visible without having
     to go looking for it.
     """
-    if (
-        chart.hint_required_columns() is not None
-        or chart.metric_reduction() is not models.MetricReduction.HISTORY
-    ):
+    if chart.hint_required_columns() is not None or not chart.metric_reduction().reads_every_step:
         return None
     return dmc.Tooltip(
         dmc.Badge("fetches all metrics", color="yellow", variant="light", size="xs", radius="sm"),

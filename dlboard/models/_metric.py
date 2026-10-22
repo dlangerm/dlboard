@@ -40,6 +40,11 @@ class MetricReduction(StrEnum):
     MAX = "max"
     MEAN = "mean"
 
+    @property
+    def reads_every_step(self) -> bool:
+        """Whether answering reads every step of a series: all but the latest and the first, which are probes."""
+        return self not in (MetricReduction.LATEST, MetricReduction.FIRST)
+
 
 class UnderlyingMetricTableEntry(BaseModel, frozen=True, extra="forbid"):
     """The underlying table schema of individual metrics."""
