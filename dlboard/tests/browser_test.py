@@ -127,7 +127,7 @@ def _wait_for_artifacts(experiment_id: int, count: int) -> None:
     """The server records an uploaded artifact asynchronously; a page loaded before it has would be live-patched."""
     store = get_system_data_store()
     deadline = time.monotonic() + 30
-    while len(list(store.fetch_artifacts(experiment_id))) < count:
+    while len(list(store.fetch_artifacts(experiment_id, run_ids=None))) < count:
         assert time.monotonic() < deadline, "the artifacts were never recorded"
         time.sleep(0.1)
 

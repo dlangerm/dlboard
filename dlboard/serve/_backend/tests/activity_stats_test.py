@@ -22,7 +22,7 @@ def test_stats_count_only_what_is_not_deleted(store: SQLLiteStore, admin: models
     kept = _experiment(store, project.id, runs=3)
     deleted = _experiment(store, project.id, runs=2)
     store.delete_experiment(deleted, admin)
-    store.delete_run(next(store.get_runs(kept)).id, admin)
+    store.delete_run(next(store.get_runs(kept, run_ids=None)).id, admin)
     empty = store.create_project(models.NewProject(name="empty", description=""))
     gone = store.create_project(models.NewProject(name="gone", description=""))
     _experiment(store, gone.id, runs=1)

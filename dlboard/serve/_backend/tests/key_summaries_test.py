@@ -46,30 +46,43 @@ def test_summarize_metric_keys_says_which_keys_every_run_logged_once(
     _log(store, run, 1, loss=0.4)
 
     assert store.summarize_metric_keys(experiment_id) == [
-        MetricKeySummary("acc", single_value=True),
-        MetricKeySummary("loss", single_value=False),
+        MetricKeySummary("acc", max_steps_per_run=1),
+        MetricKeySummary("loss", max_steps_per_run=2),
     ]
 
 
 @pytest.mark.parametrize(
-    ("logged", "single_value"),
+    ("logged", "max_steps_per_run"),
     [
-        ([(0, 0), (1, 0)], True),
-        ([(0, 0), (1, 7)], True),
-        ([(0, 3), (0, 3)], True),
-        ([(0, 0), (0, 1)], False),
-        ([(0, 0), (1, 0), (1, 1)], False),
+        ([(0, 0), (1, 0)], 1),
+        ([(0, 0), (1, 7)], 1),
+        ([(0, 3), (0, 3)], 1),
+        ([(0, 0), (0, 1)], 2),
+        ([(0, 0), (1, 0), (1, 1)], 2),
     ],
     ids=["same step", "different steps", "re-sent step", "two steps in a run", "two steps in a later run"],
 )
-def test_summarize_metric_keys_is_single_valued_only_if_no_run_logged_two_steps(
-    store: SQLLiteStore, experiment_id: int, logged: list[tuple[int, int]], single_value: bool
+def test_summarize_metric_keys_is_one_step_per_run_only_if_no_run_logged_two_steps(
+    store: SQLLiteStore, experiment_id: int, logged: list[tuple[int, int]], max_steps_per_run: int
 ) -> None:
     runs = [store.create_run(models.NewRun(experiment_id=experiment_id)) for _ in range(2)]
     for run, step in logged:
         _log(store, runs[run], step, m=1.0)
 
-    assert store.summarize_metric_keys(experiment_id) == [MetricKeySummary("m", single_value)]
+    assert store.summarize_metric_keys(experiment_id) == [MetricKeySummary("m", max_steps_per_run)]
+
+
+def test_summarize_metric_keys_judges_a_key_on_the_newest_runs_only(
+    store: SQLLiteStore, experiment_id: int
+) -> None:
+    """The oldest run logged two steps, but it is older than the newest runs a summary looks at, so it does not count."""
+    oldest = store.create_run(models.NewRun(experiment_id=experiment_id))
+    _log(store, oldest, 0, m=1.0)
+    _log(store, oldest, 1, m=1.0)
+    for _ in range(100):
+        _log(store, store.create_run(models.NewRun(experiment_id=experiment_id)), 0, m=1.0)
+
+    assert store.summarize_metric_keys(experiment_id) == [MetricKeySummary("m", max_steps_per_run=1)]
 
 
 def test_summarize_metric_keys_excludes_deleted_runs_and_other_experiments(
@@ -85,7 +98,7 @@ def test_summarize_metric_keys_excludes_deleted_runs_and_other_experiments(
     store.delete_run(deleted.id, store.get_or_create_user(_ALICE))
 
     # `shared` has two steps, but only in the deleted run: it is still a key every live run logged once.
-    assert store.summarize_metric_keys(experiment_id) == [MetricKeySummary("shared", single_value=True)]
+    assert store.summarize_metric_keys(experiment_id) == [MetricKeySummary("shared", max_steps_per_run=1)]
 
 
 def _artifact(run: models.Run, key: str, step: int) -> models.Artifact:
@@ -113,7 +126,7 @@ def test_summarize_artifact_keys_returns_the_latest_live_artifact_of_each_key(
             _artifact(other, "elsewhere", 0),
         ]
     )
-    ids = {a.ref: a.id for a in store.fetch_artifacts(experiment_id) if a.id is not None}
+    ids = {a.ref: a.id for a in store.fetch_artifacts(experiment_id, run_ids=None) if a.id is not None}
     actor = store.get_or_create_user(_ALICE)
     store.delete_artifact(ids[f"ref://img/{second.id}/0"], actor)
     for step in range(2):

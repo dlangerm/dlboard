@@ -45,7 +45,9 @@ def test_a_batch_of_same_key_artifacts_is_stored_with_each_ones_own_bytes(
 
     # The server records an uploaded artifact's ref asynchronously (see `BlobArtifactStore`).
     deadline = time.monotonic() + _INGEST_TIMEOUT_S
-    while len(stored := list(backend_server.store.fetch_artifacts(experiment_id=experiment.id))) < len(blobs):
+    while len(
+        stored := list(backend_server.store.fetch_artifacts(experiment_id=experiment.id, run_ids=None))
+    ) < len(blobs):
         assert time.monotonic() < deadline, f"only {len(stored)} of {len(blobs)} artifacts were recorded"
         time.sleep(0.1)
     stored_blobs = {
@@ -76,7 +78,7 @@ def test_a_link_into_the_stores_own_space_round_trips(backend_server: BackendSer
         ]
     )
 
-    (stored,) = backend_server.store.fetch_artifacts(experiment_id=experiment.id)
+    (stored,) = backend_server.store.fetch_artifacts(experiment_id=experiment.id, run_ids=None)
     assert stored.ref == str(ref)
 
 
@@ -103,4 +105,4 @@ def test_linking_a_ref_outside_the_stores_own_space_is_rejected(
 
     assert exc_info.value.response is not None
     assert exc_info.value.response.status_code == 400
-    assert list(backend_server.store.fetch_artifacts(experiment_id=experiment.id)) == []
+    assert list(backend_server.store.fetch_artifacts(experiment_id=experiment.id, run_ids=None)) == []

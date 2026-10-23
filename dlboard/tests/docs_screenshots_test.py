@@ -267,7 +267,7 @@ def demo(live_server_url: str, dlboard_app: Dash, tmp_path_factory: pytest.TempP
     store = get_system_data_store(dlboard_app)
     expected = len(_SWEEP) * len(_IMAGE_STEPS) * (1 + len(_CONFUSION_OVERLAYS))
     deadline = time.monotonic() + _ARTIFACT_INGEST_TIMEOUT_S
-    while len(list(store.fetch_artifacts(experiment_id=sweep.id))) < expected:
+    while len(list(store.fetch_artifacts(experiment_id=sweep.id, run_ids=None))) < expected:
         assert time.monotonic() < deadline, "the demo artifacts were never recorded"
         time.sleep(0.2)
     try:

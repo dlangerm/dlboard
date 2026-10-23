@@ -209,7 +209,7 @@ def test_a_panel_fetches_only_the_histograms_its_charts_show_thinned_to_the_cap(
         charts=[ChartInstance(chart_type=_HistogramHintChart.name, parameters={"key": "grad"})]
     )
 
-    df = panel_data.fetch_panel_dataframe(store, experiment_id, panel)
+    df = panel_data.fetch_panel_dataframe(store, experiment_id, panel, run_ids=None)
 
     assert set(df.columns) == {"run_id", "step", histogram_column("grad"), models.RUN_NAME_COLUMN}
     assert list(df["step"]) == [0, 2, 4, 6, 7]
@@ -308,7 +308,7 @@ def test_a_metric_and_an_artifact_sharing_a_key_both_render(store: SQLLiteStore,
         ],
     )
 
-    df = panel_data.fetch_panel_dataframe(store, experiment_id, panel)
+    df = panel_data.fetch_panel_dataframe(store, experiment_id, panel, run_ids=None)
 
     for chart in panel.charts:
         chart.render(df)
@@ -342,9 +342,9 @@ def test_a_file_list_of_a_key_prefix_fetches_every_key_under_it_including_later_
     log_file("ckpt/a", 0)
     log_file("elsewhere/b", 0)
 
-    first = panel_data.fetch_panel_dataframe(store, experiment_id, panel)
+    first = panel_data.fetch_panel_dataframe(store, experiment_id, panel, run_ids=None)
     log_file("ckpt/c", 1)
-    later = panel_data.fetch_panel_dataframe(store, experiment_id, panel)
+    later = panel_data.fetch_panel_dataframe(store, experiment_id, panel, run_ids=None)
 
     def files(df: pd.DataFrame) -> set[str]:
         return set(artifact_keys_in(df.columns, "", prefix=True))

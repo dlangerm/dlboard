@@ -100,11 +100,11 @@ def test_finalize_ships_everything_logged_before_it(
 
     logger.finalize("success")
 
-    assert list(backend_server.store.fetch_metrics(logger._experiment_id).step) == [0, 1, 2]
+    assert list(backend_server.store.fetch_metrics(logger._experiment_id, run_ids=None).step) == [0, 1, 2]
     # The server itself records an uploaded artifact's ref asynchronously (see `BlobArtifactStore`),
     # a second or so after accepting the upload -- `finalize`'s guarantee ends at "accepted".
     deadline = time.monotonic() + 10
-    while not list(backend_server.store.fetch_artifacts(experiment_id=logger._experiment_id)):
+    while not list(backend_server.store.fetch_artifacts(experiment_id=logger._experiment_id, run_ids=None)):
         assert time.monotonic() < deadline, "the uploaded artifact never showed up"
         time.sleep(0.1)
 
@@ -121,8 +121,10 @@ def test_a_second_logger_given_the_run_id_logs_into_the_same_run(
         _abandon(second)
 
     assert second.run_id == logger.run_id
-    assert [run.id for run in backend_server.store.get_runs(logger._experiment_id)] == [logger.run_id]
-    assert list(backend_server.store.fetch_metrics(logger._experiment_id).step) == [0]
+    assert [run.id for run in backend_server.store.get_runs(logger._experiment_id, run_ids=None)] == [
+        logger.run_id
+    ]
+    assert list(backend_server.store.fetch_metrics(logger._experiment_id, run_ids=None).step) == [0]
 
 
 def test_a_metric_without_a_step_is_rejected_where_it_was_logged(logger: DLBoardLogger) -> None:
@@ -190,7 +192,9 @@ def test_log_model_uploads_the_checkpoints_a_real_fit_saves(
 
     deadline = time.monotonic() + 10
     while True:
-        artifacts = list(backend_server.store.fetch_artifacts(experiment_id=logger._experiment_id))
+        artifacts = list(
+            backend_server.store.fetch_artifacts(experiment_id=logger._experiment_id, run_ids=None)
+        )
         if {a.key for a in artifacts} >= expected_keys or time.monotonic() > deadline:
             break
         time.sleep(0.1)
@@ -273,7 +277,9 @@ def test_scalar_and_unit_tags_reach_the_store_as_logged(
     )
 
     deadline = time.monotonic() + 10
-    while not (stored := list(backend_server.store.fetch_artifacts(experiment_id=experiment.id))):
+    while not (
+        stored := list(backend_server.store.fetch_artifacts(experiment_id=experiment.id, run_ids=None))
+    ):
         assert time.monotonic() < deadline, "artifact was never recorded"
         time.sleep(0.1)
     assert stored[0].tags == tags

@@ -44,7 +44,9 @@ def _log(
 
 
 def _steps(store: SQLLiteStore, experiment_id: int, max_steps: int) -> list[int]:
-    return [h.step for h in store.fetch_histograms(experiment_id, keys=_KEY, max_steps=max_steps)]
+    return [
+        h.step for h in store.fetch_histograms(experiment_id, keys=_KEY, max_steps=max_steps, run_ids=None)
+    ]
 
 
 def test_a_histogram_reads_back_as_it_was_logged(store: SQLLiteStore, experiment_id: int) -> None:
@@ -63,11 +65,11 @@ def test_a_histogram_reads_back_as_it_was_logged(store: SQLLiteStore, experiment
         ]
     )
 
-    (entry,) = store.fetch_histograms(experiment_id, keys=_KEY, max_steps=10)
+    (entry,) = store.fetch_histograms(experiment_id, keys=_KEY, max_steps=10, run_ids=None)
 
     assert (entry.run_id, entry.key, entry.step, entry.timestamp_utc) == (run.id, "grad", 3, _TS)
     assert entry.histogram == histogram
-    assert store.fetch_metrics(experiment_id).keys == {"loss"}
+    assert store.fetch_metrics(experiment_id, run_ids=None).keys == {"loss"}
 
 
 def test_a_count_beyond_32_bits_is_stored_exactly(store: SQLLiteStore, experiment_id: int) -> None:
@@ -75,7 +77,7 @@ def test_a_count_beyond_32_bits_is_stored_exactly(store: SQLLiteStore, experimen
     run = store.create_run(models.NewRun(experiment_id=experiment_id))
     _log(store, run, [0], count=2**40 + 1)
 
-    (entry,) = store.fetch_histograms(experiment_id, keys=_KEY, max_steps=10)
+    (entry,) = store.fetch_histograms(experiment_id, keys=_KEY, max_steps=10, run_ids=None)
 
     assert entry.counts == [2**40 + 1]
 
@@ -115,7 +117,7 @@ def test_each_run_is_thinned_by_its_own_length(store: SQLLiteStore, experiment_i
     _log(store, long_run, range(100))
     _log(store, short_run, range(5))
 
-    histograms = store.fetch_histograms(experiment_id, keys=_KEY, max_steps=10)
+    histograms = store.fetch_histograms(experiment_id, keys=_KEY, max_steps=10, run_ids=None)
 
     assert [h.step for h in histograms if h.run_id == short_run.id] == list(range(5))
     assert len([h for h in histograms if h.run_id == long_run.id]) == 8
@@ -127,7 +129,7 @@ def test_a_step_logged_twice_reads_back_as_the_latest_write(store: SQLLiteStore,
     _log(store, run, range(10), count=1)
     _log(store, run, range(10), count=2)
 
-    histograms = store.fetch_histograms(experiment_id, keys=_KEY, max_steps=10)
+    histograms = store.fetch_histograms(experiment_id, keys=_KEY, max_steps=10, run_ids=None)
 
     assert [h.step for h in histograms] == list(range(10))
     assert {h.counts[0] for h in histograms} == {2}

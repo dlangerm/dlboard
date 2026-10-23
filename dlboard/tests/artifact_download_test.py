@@ -48,7 +48,7 @@ def _log_one_artifact(api: BasicDlboardAPI, run: models.Run, experiment_id: int,
 def _wait_for_artifact(store: SQLStoreBase[Any], experiment_id: int) -> models.Artifact:
     """The server records an uploaded artifact's ref asynchronously (see `BlobArtifactStore`)."""
     deadline = time.monotonic() + _INGEST_TIMEOUT_S
-    while not (stored := list(store.fetch_artifacts(experiment_id=experiment_id))):
+    while not (stored := list(store.fetch_artifacts(experiment_id=experiment_id, run_ids=None))):
         assert time.monotonic() < deadline, "artifact was never recorded"
         time.sleep(0.1)
     return stored[0]

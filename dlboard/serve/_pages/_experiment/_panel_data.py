@@ -114,7 +114,7 @@ def fetch_panel_dataframe(
     store: DataStore[...],
     experiment_id: int,
     panel: models.PanelInstance[Any, Any],
-    run_ids: frozenset[int] | None = None,
+    run_ids: frozenset[int] | None,
 ) -> pd.DataFrame:
     """Fetch just the data one panel needs -- not the whole experiment -- of `run_ids` (every run, if `None`)."""
     artifact_keys = panel.hint_required_artifact_keys()

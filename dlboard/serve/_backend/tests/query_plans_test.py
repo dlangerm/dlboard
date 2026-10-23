@@ -30,16 +30,18 @@ _READS: dict[str, Callable[[PostgresStore, int], object]] = {
     "summarize_metric_keys": lambda s, e: s.summarize_metric_keys(e),
     "summarize_histogram_keys": lambda s, e: s.summarize_histogram_keys(e),
     "summarize_artifact_keys": lambda s, e: s.summarize_artifact_keys(e),
-    "fetch_latest_metrics": lambda s, e: s.fetch_latest_metrics(e),
-    "fetch_metrics, first": lambda s, e: s.fetch_metrics(e, reduction=MetricReduction.FIRST),
-    "fetch_metrics, mean": lambda s, e: s.fetch_metrics(e, reduction=MetricReduction.MEAN),
-    "fetch_metrics": lambda s, e: s.fetch_metrics(e),
-    "fetch_metrics, some keys": lambda s, e: s.fetch_metrics(e, keys=frozenset({"loss"})),
-    "fetch_histograms": lambda s, e: s.fetch_histograms(e, keys=frozenset({"grad"}), max_steps=10),
-    "fetch_artifacts": lambda s, e: list(s.fetch_artifacts(e)),
-    "get_runs, the newest": lambda s, e: list(s.get_runs(e, limit=20)),
-    "get_runs, every one": lambda s, e: list(s.get_runs(e, limit=None)),
-    "fetch_hyperparams": lambda s, e: list(s.fetch_hyperparams(e)),
+    "fetch_metrics, latest": lambda s, e: s.fetch_metrics(e, reduction=MetricReduction.LATEST, run_ids=None),
+    "fetch_metrics, first": lambda s, e: s.fetch_metrics(e, reduction=MetricReduction.FIRST, run_ids=None),
+    "fetch_metrics, mean": lambda s, e: s.fetch_metrics(e, reduction=MetricReduction.MEAN, run_ids=None),
+    "fetch_metrics": lambda s, e: s.fetch_metrics(e, run_ids=None),
+    "fetch_metrics, some keys": lambda s, e: s.fetch_metrics(e, keys=frozenset({"loss"}), run_ids=None),
+    "fetch_histograms": lambda s, e: s.fetch_histograms(
+        e, keys=frozenset({"grad"}), max_steps=10, run_ids=None
+    ),
+    "fetch_artifacts": lambda s, e: list(s.fetch_artifacts(e, run_ids=None)),
+    "get_runs, the newest": lambda s, e: list(s.get_runs(e, limit=20, run_ids=None)),
+    "get_runs, every one": lambda s, e: list(s.get_runs(e, limit=None, run_ids=None)),
+    "fetch_hyperparams": lambda s, e: list(s.fetch_hyperparams(e, run_ids=None)),
     "fetch_hyperparams, some runs": lambda s, e: list(s.fetch_hyperparams(e, run_ids=frozenset({1, 2}))),
 }
 

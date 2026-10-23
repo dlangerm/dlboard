@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import dash_ag_grid as dag
 import dash_mantine_components as dmc
-from dash import Dash, Input, Output, State, html
+from dash import Dash, Input, Output, State, html, no_update
 from dash.dcc import Store
 from dash.exceptions import PreventUpdate
 from structlog.stdlib import get_logger
@@ -51,6 +51,8 @@ if TYPE_CHECKING:
 _log = get_logger(__name__)
 
 NAVBAR_HPARAM_DATATABLE_ID: ValueId[ids.ExperimentPage] = ValueId("navbar-hparam-datatable")
+RUN_CAP_NOTIFY_ID: typing.Final = "run-cap-notify"
+"""Where a selection past `DLBOARD_MAX_SHOWN_RUNS` is refused, with a notice."""
 NAVBAR_HPARAM_COL_SELECT_ID: ValueId[ids.ExperimentPage] = ValueId("navbar-hparam-col-select")
 NAVBAR_HPARAM_TABLE_BODY_ID: typing.Final = "navbar-hparam-table-body"
 NAVBAR_HPARAM_CONFIRM_COLS_ID: ButtonId[ids.ExperimentPage] = ButtonId("navbar-hparam-confirm-cols")
@@ -170,7 +172,11 @@ def _load_hparam_view_data(
     metric_keys = [s.key for s in store.summarize_metric_keys(experiment_id)]
     wanted = frozenset(selected_metrics & set(metric_keys))
     latest: dict[int, dict[str, float]] = (
-        store.fetch_latest_metrics(experiment_id, keys=wanted) if wanted else {}
+        store.fetch_metrics(
+            experiment_id, keys=wanted, reduction=models.MetricReduction.LATEST, run_ids=None
+        ).latest_per_run()
+        if wanted
+        else {}
     )
     rows = _build_hparam_rows(runs, hparams_by_run, latest)
     return hparam_keys, metric_keys, rows
@@ -409,6 +415,7 @@ def _render_hparam_panel(
                 if selection.chosen
                 else []
             ),
+            dmc.NotificationContainer(id=RUN_CAP_NOTIFY_ID),
             html.Div(
                 id=NAVBAR_HPARAM_TABLE_BODY_ID,
                 children=_build_hparam_datatable(
@@ -442,7 +449,7 @@ def _load_hparam_panel_settings(
     """
     page = repo.load_page(store, ref)
     shown, columns = shown_run_ids(store, ref.experiment_id, page.document), page.document.hparam_columns
-    runs = list(store.get_runs(ref.experiment_id, limit=None))
+    runs = list(store.get_runs(ref.experiment_id, limit=None, run_ids=None))
     return runs, _Selection(shown, chosen=page.document.selected_runs is not None), columns
 
 
@@ -576,6 +583,7 @@ def _register_hparam_table(app: Dash) -> None:
     @app.callback(
         Output(ids.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Output(ids.METRIC_CONTENT_ID, "children", allow_duplicate=True),
+        Output(RUN_CAP_NOTIFY_ID, "sendNotifications"),
         Input(NAVBAR_HPARAM_DATATABLE_ID, "selectedRows", allow_optional=True),
         State(NAVBAR_HPARAM_DATATABLE_ID, "rowData", allow_optional=True),
         State(constants.STATE_EXPERIMENT_ID, "data"),
@@ -589,7 +597,7 @@ def _register_hparam_table(app: Dash) -> None:
         experiment_id: int,
         page_json: str,
         paging_json: str,
-    ) -> tuple[str, html.Div]:
+    ) -> tuple[Any, ...]:
         if selected_rows is None or table_data is None:
             raise PreventUpdate
         # `_build_hparam_datatable` seeds `selectedRows` with the `{"ids": [...]}` shorthand --
@@ -616,12 +624,28 @@ def _register_hparam_table(app: Dash) -> None:
         if selected_ids == shown_run_ids(store, experiment_id, current_page.document) & listed:
             raise PreventUpdate
 
+        cap = ShownRunsSettings().max_shown_runs
+        if len(selected_ids) > cap:
+            # Refused: the page keeps the runs it drew. The table still shows the larger selection, so the notice says so.
+            notice = {
+                "action": "show",
+                "id": f"run-cap-{len(selected_ids)}",
+                "title": "Too many runs to draw",
+                "message": f"A view draws at most {cap} runs. Deselect some to change what the charts draw.",
+                "color": "yellow",
+                "autoClose": 8_000,
+            }
+            return no_update, no_update, [notice]
+
         page, container = edits.commit(
             page_json,
             paging_json,
-            edits.PageEdit(document=page_model.DocumentSettings(selected_runs=sorted(selected_ids))),
+            # A selection replaces what a view left out before selections existed, so that is cleared with it.
+            edits.PageEdit(
+                document=page_model.DocumentSettings(selected_runs=sorted(selected_ids), excluded_runs=[]),
+            ),
         )
-        return page.model_dump_json(), container
+        return page.model_dump_json(), container, no_update
 
 
 def _register_newest_runs(app: Dash) -> None:
@@ -645,7 +669,7 @@ def _register_newest_runs(app: Dash) -> None:
         page, container = edits.commit(
             page_json,
             paging_json,
-            edits.PageEdit(document=page_model.DocumentSettings(selected_runs=None)),
+            edits.PageEdit(document=page_model.DocumentSettings(selected_runs=None, excluded_runs=[])),
         )
         return page.model_dump_json(), container
 

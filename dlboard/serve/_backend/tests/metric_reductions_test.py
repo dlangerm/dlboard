@@ -1,4 +1,4 @@
-"""`fetch_metrics` by reduction, and `fetch_latest_metrics`: a row per run and key, found without reading the steps."""
+"""`fetch_metrics` by reduction: a row per run and key, found without reading the steps."""
 
 from __future__ import annotations
 
@@ -57,7 +57,9 @@ def test_the_latest_value_is_the_one_at_the_highest_step_however_it_was_logged(
     _log(store, ahead, 4, loss=0.75)  # a re-sent batch: the newest write wins
     _log(store, behind, 1, loss=0.5, epoch=3.0)
 
-    assert store.fetch_latest_metrics(experiment_id) == {
+    assert store.fetch_metrics(
+        experiment_id, run_ids=None, reduction=models.MetricReduction.LATEST
+    ).latest_per_run() == {
         ahead.id: {"loss": 0.75, "acc": 0.1},
         behind.id: {"loss": 0.5, "epoch": 3.0},
     }
@@ -71,14 +73,18 @@ def test_a_missing_value_is_no_value_so_the_last_real_one_stands(
     _log(store, run, 0, loss=0.5)
     _log(store, run, 1, loss=missing)
 
-    assert store.fetch_latest_metrics(experiment_id) == {run.id: {"loss": 0.5}}
+    assert store.fetch_metrics(
+        experiment_id, run_ids=None, reduction=models.MetricReduction.LATEST
+    ).latest_per_run() == {run.id: {"loss": 0.5}}
 
 
 def test_a_key_no_run_has_a_value_for_is_absent(store: SQLLiteStore, experiment_id: int) -> None:
     (run,) = _runs(store, experiment_id, 1)
     _log(store, run, 0, diverged=math.nan, loss=1.0)
 
-    assert store.fetch_latest_metrics(experiment_id) == {run.id: {"loss": 1.0}}
+    assert store.fetch_metrics(
+        experiment_id, run_ids=None, reduction=models.MetricReduction.LATEST
+    ).latest_per_run() == {run.id: {"loss": 1.0}}
 
 
 def test_it_leaves_out_other_keys_other_experiments_deleted_and_unasked_runs(
@@ -91,9 +97,12 @@ def test_it_leaves_out_other_keys_other_experiments_deleted_and_unasked_runs(
         _log(store, run, 0, loss=1.0, acc=0.5)
     store.delete_run(deleted.id, store.get_or_create_user(models.Principal.unverified("alice")))
 
-    assert store.fetch_latest_metrics(
-        experiment_id, keys=frozenset({"loss"}), run_ids=frozenset({kept.id, deleted.id})
-    ) == {kept.id: {"loss": 1.0}}
+    assert store.fetch_metrics(
+        experiment_id,
+        keys=frozenset({"loss"}),
+        run_ids=frozenset({kept.id, deleted.id}),
+        reduction=models.MetricReduction.LATEST,
+    ).latest_per_run() == {kept.id: {"loss": 1.0}}
 
 
 @pytest.mark.parametrize(
@@ -115,7 +124,7 @@ def test_a_reduction_is_a_row_per_run_and_key_of_the_steps_newest_writes(
     _log(store, run, 2, loss=4.0)  # step 2 re-sent: only this one counts, so the 9 is no maximum
     _log(store, empty_handed, 0, other=1.0)
 
-    frame = store.fetch_metrics(experiment_id, keys=frozenset({"loss"}), reduction=reduction)
+    frame = store.fetch_metrics(experiment_id, keys=frozenset({"loss"}), reduction=reduction, run_ids=None)
 
     assert (list(frame.run_id), list(frame.step), list(frame.values("loss"))) == ([run.id], [step], [value])
 
@@ -140,7 +149,7 @@ def _from_the_history(
     store: SQLLiteStore, experiment_id: int, reduction: models.MetricReduction
 ) -> dict[tuple[int, str], float]:
     """What `reduction` of each run's series is, worked out from every step in pandas: what it must agree with."""
-    wide = store.fetch_metrics(experiment_id).to_frame().sort_values(["run_id", "step"])
+    wide = store.fetch_metrics(experiment_id, run_ids=None).to_frame().sort_values(["run_id", "step"])
     return {
         (cast("int", run_id), key): _reduced(series, reduction)
         for run_id, run in wide.groupby("run_id")
@@ -171,7 +180,7 @@ def test_a_reduction_is_what_the_whole_history_reduces_to_however_steps_were_re_
     _log(store, second, 4, loss=-3.0)
     _log(store, second, 4, other=1.0)  # a different key at the same step is no re-send of this one
 
-    reduced = store.fetch_metrics(experiment_id, reduction=reduction).to_frame()
+    reduced = store.fetch_metrics(experiment_id, reduction=reduction, run_ids=None).to_frame()
 
     got = {
         (cast("int", run_id), key): float(series.iloc[-1])

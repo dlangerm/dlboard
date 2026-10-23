@@ -63,7 +63,7 @@ def test_render_trash_caps_each_kind_and_notes_the_overflow(store: SQLLiteStore)
                 )
             ]
         )
-    for artifact in store.fetch_artifacts(experiment_id=experiment.id):
+    for artifact in store.fetch_artifacts(experiment_id=experiment.id, run_ids=None):
         assert artifact.id is not None
         store.delete_artifact(artifact.id, admin_user)
 

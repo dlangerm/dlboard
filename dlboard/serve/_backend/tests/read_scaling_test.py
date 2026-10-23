@@ -74,19 +74,27 @@ _LOADS: dict[str, Callable[[PostgresStore, int], object]] = {
     "metric keys": lambda s, e: s.summarize_metric_keys(e),
     "histogram keys": lambda s, e: s.summarize_histogram_keys(e),
     "artifact keys": lambda s, e: s.summarize_artifact_keys(e),
-    "latest metrics": lambda s, e: s.fetch_latest_metrics(e),
-    "the newest runs": lambda s, e: list(s.get_runs(e, limit=_SHOWN)),
-    "hyperparameters of every run": lambda s, e: list(s.fetch_hyperparams(e)),
-    "the run comparison": lambda s, e: load_comparison(s, e, [run.id for run in s.get_runs(e)]),
-    "a panel of bars of the latest": lambda s, e: fetch_panel_dataframe(s, e, _RUN_SUMMARIES[0]),
-    "a table of every metric's mean": lambda s, e: fetch_panel_dataframe(s, e, _RUN_SUMMARIES[1]),
+    "latest metrics": lambda s, e: s.fetch_metrics(
+        e, reduction=models.MetricReduction.LATEST, run_ids=None
+    ).latest_per_run(),
+    "the newest runs": lambda s, e: list(s.get_runs(e, limit=_SHOWN, run_ids=None)),
+    "hyperparameters of every run": lambda s, e: list(s.fetch_hyperparams(e, run_ids=None)),
+    "the run comparison": lambda s, e: load_comparison(s, e, [run.id for run in s.get_runs(e, run_ids=None)]),
+    "a panel of bars of the latest": lambda s, e: fetch_panel_dataframe(
+        s, e, _RUN_SUMMARIES[0], run_ids=None
+    ),
+    "a table of every metric's mean": lambda s, e: fetch_panel_dataframe(
+        s, e, _RUN_SUMMARIES[1], run_ids=None
+    ),
 }
 
 
 _SHOWN = 3
 """How many of an experiment's newest runs a page is drawing."""
 _SHOWN_LOADS: dict[str, Callable[[PostgresStore, int, frozenset[int]], object]] = {
-    "latest metrics": lambda s, e, shown: s.fetch_latest_metrics(e, run_ids=shown),
+    "latest metrics": lambda s, e, shown: s.fetch_metrics(
+        e, run_ids=shown, reduction=models.MetricReduction.LATEST
+    ).latest_per_run(),
     "hyperparameters of the shown runs": lambda s, e, shown: list(s.fetch_hyperparams(e, run_ids=shown)),
     "the run comparison": lambda s, e, shown: load_comparison(s, e, sorted(shown)),
     "a panel of bars of the latest": lambda s, e, shown: fetch_panel_dataframe(
@@ -207,7 +215,7 @@ def test_a_load_of_the_runs_shown_reads_no_more_for_an_experiment_of_more_runs(
     few, many = _train(store, project_id, _SHORT, runs=_SHOWN), _train(store, project_id, _SHORT, runs=60)
 
     def of_the_newest(experiment_id: int) -> _Work:
-        shown = frozenset(run.id for run in store.get_runs(experiment_id, limit=_SHOWN))
+        shown = frozenset(run.id for run in store.get_runs(experiment_id, limit=_SHOWN, run_ids=None))
         return _work(store, lambda: _SHOWN_LOADS[name](store, experiment_id, shown))
 
     alone, among_many = of_the_newest(few), of_the_newest(many)
@@ -217,3 +225,27 @@ def test_a_load_of_the_runs_shown_reads_no_more_for_an_experiment_of_more_runs(
         f"{among_many.rows} rows beside 60 runs, {alone.rows} for {_SHOWN}"
     )
     assert among_many.pages <= 2 * alone.pages + 10, f"{among_many.pages} pages beside 60 runs, {alone.pages}"
+
+
+_KEY_SUMMARIES: dict[str, Callable[[PostgresStore, int], object]] = {
+    "metric keys": lambda s, e: s.summarize_metric_keys(e),
+    "the column catalog": lambda s, e: ColumnCatalog.load(s, e),
+}
+
+
+@pytest.mark.parametrize("name", _KEY_SUMMARIES)
+def test_a_key_summary_reads_no_more_once_it_judges_only_the_newest_runs(
+    store: PostgresStore, name: str
+) -> None:
+    """A key summary judges each key on the newest runs (`SUMMARY_RUNS`), so past that many runs it reads the same."""
+    project_id = store.create_project(models.NewProject(name="p", description="d")).id
+    few, many = _train(store, project_id, _SHORT, runs=120), _train(store, project_id, _SHORT, runs=300)
+
+    alone = _work(store, lambda: _KEY_SUMMARIES[name](store, few))
+    among_many = _work(store, lambda: _KEY_SUMMARIES[name](store, many))
+
+    assert alone.rows > 0
+    assert among_many.rows <= 2 * alone.rows, f"{among_many.rows} rows for 300 runs, {alone.rows} for 120"
+    assert among_many.pages <= 2 * alone.pages + 10, (
+        f"{among_many.pages} pages for 300 runs, {alone.pages} for 120"
+    )

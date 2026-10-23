@@ -25,6 +25,7 @@ from dash.dcc import Store
 from dash.exceptions import PreventUpdate
 from pydantic import BaseModel, BeforeValidator, Field, ValidationError
 
+from dlboard.models import MetricReduction
 from dlboard.serve import ClientsideScript, Icon, get_data_store, icon, series_swatch_class
 from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import ButtonId, ModalId, StoreId, ValueId
@@ -186,7 +187,9 @@ def load_comparison(
     runs = [by_id[run_id] for run_id in dict.fromkeys(run_ids) if run_id in by_id]
     compared = frozenset(by_id)
     hparams = {h.run_id: h.hparams_dict for h in store.fetch_hyperparams(experiment_id, run_ids=compared)}
-    metrics = store.fetch_latest_metrics(experiment_id, run_ids=compared)
+    metrics = store.fetch_metrics(
+        experiment_id, run_ids=compared, reduction=MetricReduction.LATEST
+    ).latest_per_run()
     return runs, comparison_rows([run.id for run in runs], hparams, metrics)
 
 
@@ -216,7 +219,7 @@ def compare_components(store: DataStore[...], experiment_id: int, query: Compare
     """
     runs, rows = load_comparison(store, experiment_id, query.runs)
     options: list[dict[str, str]] = (
-        _run_options(list(store.get_runs(experiment_id, limit=None))) if query.runs else []
+        _run_options(list(store.get_runs(experiment_id, limit=None, run_ids=None))) if query.runs else []
     )
     grid = themed_grid_kwargs()
     modal = dmc.Modal(
@@ -313,7 +316,7 @@ def register_run_compare_callbacks(app: Dash) -> None:
         if not opened:
             raise PreventUpdate
         store = get_data_store()
-        runs = list(store.get_runs(experiment_id, limit=None))
+        runs = list(store.get_runs(experiment_id, limit=None, run_ids=None))
         # Start from the runs the charts are showing, unless a link or an earlier open already chose.
         page = page_model.BasicExperimentPage.model_validate_json(page_json)
         shown = shown_run_ids(store, experiment_id, page.document)

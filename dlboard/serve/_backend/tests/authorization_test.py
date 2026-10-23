@@ -148,15 +148,18 @@ def _metric(experiment_id: int, run_id: int) -> models.LoggedMetrics:
 
 _OPERATIONS: dict[str, tuple[ProjectRole, Callable[[AuthorizingDataStore, _Chain], object]]] = {
     "list experiments": (ProjectRole.VIEWER, lambda s, c: list(s.get_experiments(c[0].id))),
-    "read metrics": (ProjectRole.VIEWER, lambda s, c: s.fetch_metrics(c[1].id)),
+    "read metrics": (ProjectRole.VIEWER, lambda s, c: s.fetch_metrics(c[1].id, run_ids=None)),
     "read histograms": (
         ProjectRole.VIEWER,
-        lambda s, c: s.fetch_histograms(c[1].id, keys=frozenset({"grad"}), max_steps=10),
+        lambda s, c: s.fetch_histograms(c[1].id, keys=frozenset({"grad"}), max_steps=10, run_ids=None),
     ),
     "list histogram keys": (ProjectRole.VIEWER, lambda s, c: s.summarize_histogram_keys(c[1].id)),
     "list metric keys": (ProjectRole.VIEWER, lambda s, c: s.summarize_metric_keys(c[1].id)),
     "list artifact keys": (ProjectRole.VIEWER, lambda s, c: s.summarize_artifact_keys(c[1].id)),
-    "read latest metrics": (ProjectRole.VIEWER, lambda s, c: s.fetch_latest_metrics(c[1].id)),
+    "read latest metrics": (
+        ProjectRole.VIEWER,
+        lambda s, c: s.fetch_metrics(c[1].id, run_ids=None, reduction=models.MetricReduction.LATEST),
+    ),
     "create a run": (ProjectRole.EDITOR, lambda s, c: s.create_run(models.NewRun(experiment_id=c[1].id))),
     "log metrics": (ProjectRole.EDITOR, lambda s, c: s.log_metrics([_metric(c[1].id, c[2].id)])),
     "finish a run": (
@@ -415,7 +418,7 @@ def test_link_artifacts_refuses_a_ref_already_attached_to_another_artifact(
     *other* check (project role) turned off, this is the one thing left refusing the link.
     """
     chain = create_entity_chain(store, artifact=True)
-    existing_ref = next(iter(store.fetch_artifacts(experiment_id=chain.experiment_id))).ref
+    existing_ref = next(iter(store.fetch_artifacts(experiment_id=chain.experiment_id, run_ids=None))).ref
     other_run = store.create_run(models.NewRun(experiment_id=chain.experiment_id))
     mallory = _user(store, "mallory")
     artifact_store = AuthorizingArtifactStore(

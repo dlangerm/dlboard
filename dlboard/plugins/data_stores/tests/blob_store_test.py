@@ -202,7 +202,7 @@ def test_a_transient_store_failure_does_not_lose_the_batch(
         [_artifact(run, "a.png")],
     )
 
-    _wait_until(lambda: len(list(store.fetch_artifacts(experiment_id))) == 1)
+    _wait_until(lambda: len(list(store.fetch_artifacts(experiment_id, run_ids=None))) == 1)
 
 
 def test_a_rejected_artifact_is_dropped_alone_and_its_blob_deleted(
@@ -225,7 +225,7 @@ def test_a_rejected_artifact_is_dropped_alone_and_its_blob_deleted(
     )
 
     _wait_until(lambda: not orphan.exists())
-    assert [a.run_id for a in store.fetch_artifacts(experiment_id)] == [kept_run.id]
+    assert [a.run_id for a in store.fetch_artifacts(experiment_id, run_ids=None)] == [kept_run.id]
 
 
 # -- Shutdown and staging -------------------------------------------------------------------------
@@ -251,7 +251,7 @@ def test_close_writes_every_queued_blob_and_records_its_ref_before_returning(
         _upload(artifact_store, run, f"{i}.png")
     artifact_store.close()
 
-    assert len(list(store.fetch_artifacts(experiment_id))) == 20
+    assert len(list(store.fetch_artifacts(experiment_id, run_ids=None))) == 20
 
 
 def _rejections(reason: str) -> float:

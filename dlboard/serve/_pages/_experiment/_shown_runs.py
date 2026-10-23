@@ -26,14 +26,24 @@ class ShownRunsSettings(BaseSettings):
     many runs' metrics for every chart on every page load and live update.
     """
 
+    max_shown_runs: PositiveInt = 100
+    """
+    The most runs a view may select in the Runs table to draw. A selection past this is refused, with a notice, so no
+    view can ask for every run of an experiment of thousands: each one reads that run's metrics for every chart.
+    """
+
 
 def shown_run_ids(store: DataStore[...], experiment_id: int, document: DocumentSettings) -> frozenset[int]:
     """
     The runs `document` draws on the page: its selection if it has one, else the newest few.
 
-    A view saved before selections left runs out; it keeps leaving them out of the newest few.
+    A view saved before selections left runs out: it draws the newest few it did not leave out.
     """
     if document.selected_runs is not None:
         return frozenset(document.selected_runs)
-    newest = store.get_runs(experiment_id, limit=ShownRunsSettings().default_shown_runs)
-    return frozenset(run.id for run in newest) - frozenset(document.excluded_runs)
+    shown = ShownRunsSettings().default_shown_runs
+    excluded = frozenset(document.excluded_runs)
+    # Read as many extra runs as are left out, so that the newest `shown` that remain are among them.
+    newest = store.get_runs(experiment_id, limit=shown + len(excluded), run_ids=None)
+    remaining = [run.id for run in newest if run.id not in excluded]
+    return frozenset(remaining[:shown])

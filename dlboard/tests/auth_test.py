@@ -364,7 +364,7 @@ def test_an_artifact_you_cannot_see_is_not_found(deployment: PasswordDeployment)
             )
         ]
     )
-    (artifact,) = store.fetch_artifacts(experiment.id)
+    (artifact,) = store.fetch_artifacts(experiment.id, run_ids=None)
 
     assert deployment.client.get(f"/artifact/{artifact.id}", headers=_bearer(store, "bob")).status_code == 404
 

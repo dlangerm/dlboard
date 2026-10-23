@@ -68,13 +68,21 @@ def test_a_selection_is_drawn_whatever_its_age_and_an_empty_one_draws_nothing(
     assert shown_run_ids(store, experiment_id, DocumentSettings(selected_runs=[])) == frozenset()
 
 
-def test_a_view_saved_with_excluded_runs_keeps_leaving_them_out_of_the_newest(
+def test_a_view_saved_with_excluded_runs_draws_the_newest_it_did_not_leave_out(
     store: SQLLiteStore, experiment_id: int
 ) -> None:
     runs = _runs(store, experiment_id, 25)
     document = DocumentSettings(excluded_runs=[runs[-1].id, runs[0].id])
 
-    assert shown_run_ids(store, experiment_id, document) == {run.id for run in runs[-20:-1]}
+    assert shown_run_ids(store, experiment_id, document) == {run.id for run in runs[-21:-1]}
+
+
+def test_a_view_that_kept_a_few_runs_still_draws_them(store: SQLLiteStore, experiment_id: int) -> None:
+    """Saved as "all runs but these two": leaving out every newer run must not blank the page."""
+    runs = _runs(store, experiment_id, 50)
+    document = DocumentSettings(excluded_runs=[run.id for run in runs[2:]])
+
+    assert shown_run_ids(store, experiment_id, document) == {runs[0].id, runs[1].id}
 
 
 def test_a_deleted_run_is_not_one_of_the_newest(store: SQLLiteStore, experiment_id: int) -> None:

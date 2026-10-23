@@ -185,7 +185,7 @@ def test_handle_link_artifacts_stamps_created_by_and_records_refs(store: SQLLite
 
     backend.handle_link_artifacts(store, artifact_store, links, actor=actor)
 
-    (stored,) = store.fetch_artifacts(experiment_id=experiment.id)
+    (stored,) = store.fetch_artifacts(experiment_id=experiment.id, run_ids=None)
     assert stored.ref == "s3://bucket/a.png"
     assert stored.created_by == actor.id
 
@@ -248,16 +248,16 @@ def test_handle_delete_and_restore_artifact_attribute_the_actor(
             )
         ]
     )
-    (artifact,) = list(store.fetch_artifacts(experiment_id=experiment_id))
+    (artifact,) = list(store.fetch_artifacts(experiment_id=experiment_id, run_ids=None))
     assert artifact.id is not None
     actor = store.get_or_create_user(models.Principal.unverified("hank"))
 
     backend.handle_delete_artifact(store, artifact.id, actor)
-    assert list(store.fetch_artifacts(experiment_id=experiment_id)) == []
+    assert list(store.fetch_artifacts(experiment_id=experiment_id, run_ids=None)) == []
     (delete_entry,) = list(store.list_audit_log(actor))
     assert (delete_entry.user_id, delete_entry.entity_type) == (actor.id, models.EntityType.ARTIFACT)
 
     backend.handle_restore_artifact(store, artifact.id, actor)
-    assert len(list(store.fetch_artifacts(experiment_id=experiment_id))) == 1
+    assert len(list(store.fetch_artifacts(experiment_id=experiment_id, run_ids=None))) == 1
     restore_entry = next(e for e in store.list_audit_log(actor) if e.action == models.AuditAction.RESTORE)
     assert (restore_entry.user_id, restore_entry.entity_type) == (actor.id, models.EntityType.ARTIFACT)

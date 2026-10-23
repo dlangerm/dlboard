@@ -80,7 +80,7 @@ def layout(
     if not exp:
         return [html.Div(f"Experiment {experiment_id} not found")]
 
-    hparams = store.fetch_hyperparams(int(experiment_id))
+    hparams = store.fetch_hyperparams(int(experiment_id), run_ids=None)
     # Rendered synchronously, here, rather than by a `render_initial`-style callback fired after
     # this static shell mounts -- see `render_panel`'s own docstring for why that's the one thing
     # that actually eliminates the page's extra round trip, not just hides it behind a spinner.
@@ -118,7 +118,7 @@ def layout(
                         title="No runs yet — log your first one",
                         snippet=first_run_snippet(exp.project_id, exp.id),
                     )
-                    if next(store.get_runs(exp.id, limit=1), None) is None
+                    if next(store.get_runs(exp.id, limit=1, run_ids=None), None) is None
                     else None,
                     # `container` (from `render_panel`, above) is real content from the very first
                     # response now, not a `dmc.Loader()` placeholder -- `dcc.Loading` still wraps it

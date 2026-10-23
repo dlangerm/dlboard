@@ -52,6 +52,7 @@ _OWNS = ForeignKeyKind.OWNERSHIP
 _STRIDE_DOUBLINGS: Final = 32
 """How many powers of two `fetch_histograms` can thin by: far more steps than any run will ever log."""
 
+
 _SUMMARIES: Final[
     Mapping[models.MetricReduction, Callable[[sa.ColumnElement[Any]], sa.ColumnElement[Any]]]
 ] = {
@@ -818,7 +819,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         *,
         limit: int | None = 1000,
         offset: int = 0,
-        run_ids: frozenset[int] | None = None,
+        run_ids: frozenset[int] | None,
     ) -> Iterator[models.Run]:
         """A page (`limit` of `None` being every one) of an experiment's (non-deleted) runs, most recently created first; only `run_ids`, if given."""
         runs = self._tables[models.Run]
@@ -859,7 +860,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         experiment_id: int,
         *,
         keys: frozenset[str] | None = None,
-        run_ids: frozenset[int] | None = None,
+        run_ids: frozenset[int] | None,
         reduction: models.MetricReduction = models.MetricReduction.HISTORY,
     ) -> MetricFrame:
         """
@@ -877,23 +878,6 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             case models.MetricReduction.MIN | models.MetricReduction.MAX | models.MetricReduction.MEAN:
                 rows = self._metric_summaries(experiment_id, keys, run_ids, _SUMMARIES[reduction])
         return MetricFrame.from_rows(rows)
-
-    def fetch_latest_metrics(
-        self,
-        experiment_id: int,
-        *,
-        keys: frozenset[str] | None = None,
-        run_ids: frozenset[int] | None = None,
-    ) -> dict[int, dict[str, float]]:
-        """
-        Each (non-deleted) run's most recently logged value of each key -- only `keys`, if given, else every metric.
-
-        A value that is `NULL` or `NaN` is no value: a run whose last step diverged shows its last finite one.
-        """
-        by_run: dict[int, dict[str, float]] = {}
-        for row in self._metric_ends(experiment_id, keys, run_ids, latest=True):
-            by_run.setdefault(row.run_id, {})[row.key] = cast("float", row.value)
-        return by_run
 
     def _metric_history(
         self,
@@ -1032,22 +1016,33 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         """Every metric key logged in an experiment (non-deleted runs), sorted, without fetching values."""
         m, r = self._tables[models.UnderlyingMetricTableEntry], self._tables[models.Run]
         keys = _logged_keys(m, r, experiment_id)
-        # A run that logged a key at two steps settles it, so only a key every run logged once is searched to the end.
+        # Judged on the newest runs only, so what it reads is bounded by `SUMMARY_RUNS`, not by how many runs there are.
+        newest = (
+            sa.select(r.c.id.label("run_id"))
+            .where(*_live_runs(r, experiment_id))
+            .order_by(r.c.created_at.desc())
+            .limit(models.SUMMARY_RUNS)
+            .subquery("newest")
+        )
         first_step, last_step = (
             sa.select(extent(m.c.step))
-            .where(*_series(m, experiment_id, keys.c.key, r.c.id))
-            .correlate(keys, r)
+            .where(*_series(m, experiment_id, keys.c.key, newest.c.run_id))
+            .correlate(keys, newest)
             .scalar_subquery()
             for extent in (sa.func.min, sa.func.max)
         )
-        multi_step = sa.exists(
-            sa.select(sa.literal(1))
-            .select_from(r)
-            .where(*_live_runs(r, experiment_id), last_step > first_step)
+        longest = (
+            sa.select(sa.func.max(last_step - first_step + 1))
+            .select_from(newest)
             .correlate(keys)
+            .scalar_subquery()
         )
-        rows = self._execute(sa.select(keys.c.key, ~multi_step).order_by(keys.c.key))
-        return [MetricKeySummary(key, single_value) for key, single_value in rows]
+        rows = self._execute(
+            sa.select(keys.c.key, sa.func.coalesce(longest, 0))
+            .where(keys.c.key.is_not(None))
+            .order_by(keys.c.key)
+        )
+        return [MetricKeySummary(key, max_steps_per_run) for key, max_steps_per_run in rows]
 
     def fetch_histograms(
         self,
@@ -1055,7 +1050,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         *,
         keys: frozenset[str],
         max_steps: int,
-        run_ids: frozenset[int] | None = None,
+        run_ids: frozenset[int] | None,
     ) -> list[models.UnderlyingHistogramTableEntry]:
         """
         An experiment's (non-deleted runs') histograms under `keys`, thinned to about `max_steps` steps per run and key.
@@ -1139,7 +1134,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         return created
 
     def fetch_hyperparams(
-        self, experiment_id: int, *, run_ids: frozenset[int] | None = None
+        self, experiment_id: int, *, run_ids: frozenset[int] | None
     ) -> Iterator[models.HyperParams]:
         """Every (non-deleted) run's hyperparameters for an experiment."""
         h, r = self._tables[models.HyperParams], self._tables[models.Run]
@@ -1291,7 +1286,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         *,
         keys: frozenset[str] | None = None,
         key_prefixes: frozenset[str] = frozenset(),
-        run_ids: frozenset[int] | None = None,
+        run_ids: frozenset[int] | None,
     ) -> Iterator[models.Artifact]:
         """
         An experiment's (non-deleted) artifact metadata, not bytes.

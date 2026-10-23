@@ -7,6 +7,7 @@ import typing
 from dataclasses import dataclass, field
 
 from dlboard.models import (
+    SUMMARY_RUNS,
     ColumnKind,
     MetricColumn,
     OverlayKey,
@@ -43,9 +44,11 @@ class ColumnCatalog:
     def load(cls, store: DataStore[...], experiment_id: int) -> ColumnCatalog:
         metrics = store.summarize_metric_keys(experiment_id)
         artifacts = store.summarize_artifact_keys(experiment_id)
+        # Hyperparameter keys are read from the newest runs, the same bound as the metric keys' (`SUMMARY_RUNS`).
+        newest = frozenset(run.id for run in store.get_runs(experiment_id, limit=SUMMARY_RUNS, run_ids=None))
         return cls(
             metrics=tuple(m.key for m in metrics),
-            single_value_metrics=frozenset(m.key for m in metrics if m.single_value),
+            single_value_metrics=frozenset(m.key for m in metrics if m.max_steps_per_run == 1),
             artifacts=tuple(sorted({a.key for a in artifacts})),
             artifact_chart_types={
                 a.key: chart_type for a in artifacts if (chart_type := default_artifact_chart(a)) is not None
@@ -53,7 +56,13 @@ class ColumnCatalog:
             layers=tuple(sorted({a.key for a in artifacts if layer_kind(a.tags, a.fname) is not None})),
             histograms=tuple(store.summarize_histogram_keys(experiment_id)),
             hparams=tuple(
-                sorted({k for h in store.fetch_hyperparams(experiment_id) for k in h.hparams_dict})
+                sorted(
+                    {
+                        k
+                        for h in store.fetch_hyperparams(experiment_id, run_ids=newest)
+                        for k in h.hparams_dict
+                    }
+                )
             ),
         )
 

@@ -261,7 +261,9 @@ def register_live_update_callbacks(app: Dash) -> None:
         poll_ok = fetch_ok and render_ok
 
         try:
-            hparams_json: Any = [h.model_dump_json() for h in store.fetch_hyperparams(experiment_id)]
+            hparams_json: Any = [
+                h.model_dump_json() for h in store.fetch_hyperparams(experiment_id, run_ids=None)
+            ]
         except Exception:  # noqa: BLE001 -- charts refreshed above still ship even if this fails
             _log.exception(
                 "Live-update poll failed to refresh hyperparameters for experiment %s", experiment_id

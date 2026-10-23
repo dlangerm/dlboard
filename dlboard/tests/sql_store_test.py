@@ -101,8 +101,8 @@ def test_update_experiment_persists_name_and_description_change(
 def test_get_runs_paginates_most_recently_created_first(store: SQLLiteStore, experiment_id: int) -> None:
     runs = [store.create_run(models.NewRun(experiment_id=experiment_id, name=f"run-{i}")) for i in range(3)]
 
-    first_page = list(store.get_runs(experiment_id, limit=2, offset=0))
-    second_page = list(store.get_runs(experiment_id, limit=2, offset=2))
+    first_page = list(store.get_runs(experiment_id, limit=2, offset=0, run_ids=None))
+    second_page = list(store.get_runs(experiment_id, limit=2, offset=2, run_ids=None))
 
     assert [r.id for r in first_page] == [runs[2].id, runs[1].id]
     assert [r.id for r in second_page] == [runs[0].id]
@@ -172,7 +172,7 @@ def test_get_runs_defaults_to_a_generous_page_covering_typical_use(
 ) -> None:
     run = store.create_run(models.NewRun(experiment_id=experiment_id))
 
-    assert list(store.get_runs(experiment_id)) == [run]
+    assert list(store.get_runs(experiment_id, run_ids=None)) == [run]
 
 
 def test_get_runs_excludes_deleted_and_other_experiments(store: SQLLiteStore, experiment_id: int) -> None:
@@ -185,7 +185,7 @@ def test_get_runs_excludes_deleted_and_other_experiments(store: SQLLiteStore, ex
     deleted = store.create_run(models.NewRun(experiment_id=experiment_id))
     store.delete_run(deleted.id, actor)
 
-    runs = list(store.get_runs(experiment_id, limit=100, offset=0))
+    runs = list(store.get_runs(experiment_id, limit=100, offset=0, run_ids=None))
 
     assert [r.id for r in runs] == [kept.id]
 
@@ -196,7 +196,7 @@ def test_log_hyperparams_skips_duplicate_run(store: SQLLiteStore, experiment_id:
     second = store.log_hyperparams(models.NewHyperParams.from_raw(run.id, experiment_id, {"lr": 0.2}))
 
     assert second.id == first.id
-    assert [h.id for h in store.fetch_hyperparams(experiment_id)] == [first.id]
+    assert [h.id for h in store.fetch_hyperparams(experiment_id, run_ids=None)] == [first.id]
 
 
 def _log_step(
@@ -216,13 +216,13 @@ def test_fetch_metrics_pivots_to_one_row_per_run_and_step(store: SQLLiteStore, e
     _log_step(store, run, 0, loss=0.5)
     _log_step(store, run, 1, loss=0.4, acc=0.9)
 
-    frame = store.fetch_metrics(experiment_id)
+    frame = store.fetch_metrics(experiment_id, run_ids=None)
 
     assert frame.keys == {"loss", "acc"}
     assert list(frame.step) == [0, 1]
     assert list(frame.values("loss")) == [0.5, 0.4]
     assert frame.values("acc").isna().tolist() == [True, False]
-    assert store.fetch_metrics(experiment_id, keys=frozenset({"acc"})).keys == {"acc"}
+    assert store.fetch_metrics(experiment_id, keys=frozenset({"acc"}), run_ids=None).keys == {"acc"}
 
 
 def test_fetch_metrics_stamps_each_step_with_its_own_timestamp(
@@ -234,7 +234,7 @@ def test_fetch_metrics_stamps_each_step_with_its_own_timestamp(
     _log_step(store, run, 0, _TS, loss=0.5)
     _log_step(store, run, 1, later, loss=0.4)
 
-    assert list(store.fetch_metrics(experiment_id).timestamp_utc) == [_TS, later]
+    assert list(store.fetch_metrics(experiment_id, run_ids=None).timestamp_utc) == [_TS, later]
 
 
 def test_fetch_metrics_keeps_the_last_value_written_for_a_key_relogged_at_one_step(
@@ -245,7 +245,7 @@ def test_fetch_metrics_keeps_the_last_value_written_for_a_key_relogged_at_one_st
     _log_step(store, run, 0, loss=1.0)
     _log_step(store, run, 0, loss=2.0)
 
-    assert list(store.fetch_metrics(experiment_id).values("loss")) == [2.0]
+    assert list(store.fetch_metrics(experiment_id, run_ids=None).values("loss")) == [2.0]
 
 
 @pytest.mark.parametrize(
@@ -283,7 +283,7 @@ def test_log_and_fetch_artifacts_decodes_tags(
         ]
     )
 
-    fetched = list(store.fetch_artifacts(experiment_id=experiment_id, keys=frozenset({"img"})))
+    fetched = list(store.fetch_artifacts(experiment_id=experiment_id, keys=frozenset({"img"}), run_ids=None))
     assert len(fetched) == 1
     assert fetched[0].tags == tags
     assert fetched[0].ref == "ref://a"
@@ -317,7 +317,7 @@ def test_fetch_artifacts_by_key_and_key_prefix(
         ]
     )
 
-    fetched = store.fetch_artifacts(experiment_id, keys=keys, key_prefixes=key_prefixes)
+    fetched = store.fetch_artifacts(experiment_id, keys=keys, key_prefixes=key_prefixes, run_ids=None)
 
     assert {a.key for a in fetched} == expected
 
@@ -347,9 +347,9 @@ def test_fetches_are_of_the_runs_asked_for_and_of_every_run_when_none_are(
     assert {h.run_id for h in store.fetch_hyperparams(experiment_id, run_ids=only)} == {kept.id}
     assert {a.run_id for a in store.fetch_artifacts(experiment_id, run_ids=only)} == {kept.id}
     assert [r.id for r in store.get_runs(experiment_id, run_ids=only)] == [kept.id]
-    assert set(store.fetch_metrics(experiment_id).run_id) == {kept.id, other.id}
+    assert set(store.fetch_metrics(experiment_id, run_ids=None).run_id) == {kept.id, other.id}
     assert store.fetch_metrics(experiment_id, run_ids=frozenset()).keys == frozenset()
-    assert {r.id for r in store.get_runs(experiment_id, limit=None)} == {kept.id, other.id}
+    assert {r.id for r in store.get_runs(experiment_id, limit=None, run_ids=None)} == {kept.id, other.id}
 
 
 @pytest.mark.parametrize(

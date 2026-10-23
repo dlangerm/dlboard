@@ -361,7 +361,7 @@ class AuthorizingDataStore(models.DataStore[...]):
         *,
         limit: int | None = 1000,
         offset: int = 0,
-        run_ids: frozenset[int] | None = None,
+        run_ids: frozenset[int] | None,
     ) -> Iterator[models.Run]:
         self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
         return self._inner.get_runs(experiment_id, limit=limit, offset=offset, run_ids=run_ids)
@@ -376,21 +376,11 @@ class AuthorizingDataStore(models.DataStore[...]):
         experiment_id: int,
         *,
         keys: frozenset[str] | None = None,
-        run_ids: frozenset[int] | None = None,
+        run_ids: frozenset[int] | None,
         reduction: models.MetricReduction = models.MetricReduction.HISTORY,
     ) -> MetricFrame:
         self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
         return self._inner.fetch_metrics(experiment_id, keys=keys, run_ids=run_ids, reduction=reduction)
-
-    def fetch_latest_metrics(
-        self,
-        experiment_id: int,
-        *,
-        keys: frozenset[str] | None = None,
-        run_ids: frozenset[int] | None = None,
-    ) -> dict[int, dict[str, float]]:
-        self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
-        return self._inner.fetch_latest_metrics(experiment_id, keys=keys, run_ids=run_ids)
 
     def summarize_metric_keys(self, experiment_id: int) -> list[MetricKeySummary]:
         self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
@@ -402,7 +392,7 @@ class AuthorizingDataStore(models.DataStore[...]):
         *,
         keys: frozenset[str],
         max_steps: int,
-        run_ids: frozenset[int] | None = None,
+        run_ids: frozenset[int] | None,
     ) -> list[models.UnderlyingHistogramTableEntry]:
         self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
         return self._inner.fetch_histograms(experiment_id, keys=keys, max_steps=max_steps, run_ids=run_ids)
@@ -416,7 +406,7 @@ class AuthorizingDataStore(models.DataStore[...]):
         return self._inner.log_hyperparams(hyperparams)
 
     def fetch_hyperparams(
-        self, experiment_id: int, *, run_ids: frozenset[int] | None = None
+        self, experiment_id: int, *, run_ids: frozenset[int] | None
     ) -> Iterator[models.HyperParams]:
         self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
         return self._inner.fetch_hyperparams(experiment_id, run_ids=run_ids)
@@ -441,7 +431,7 @@ class AuthorizingDataStore(models.DataStore[...]):
         *,
         keys: frozenset[str] | None = None,
         key_prefixes: frozenset[str] = frozenset(),
-        run_ids: frozenset[int] | None = None,
+        run_ids: frozenset[int] | None,
     ) -> Iterator[models.Artifact]:
         self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
         return self._inner.fetch_artifacts(

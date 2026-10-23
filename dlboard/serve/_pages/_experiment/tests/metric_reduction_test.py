@@ -104,9 +104,9 @@ def test_a_chart_is_drawn_the_same_from_one_row_per_run_as_from_every_step(
     panel = PanelInstance[pd.DataFrame, object](name="p", charts=[chart])
     assert chart.metric_reduction() is not MetricReduction.HISTORY
 
-    reduced = panel_data.fetch_panel_dataframe(store, experiment_id, panel)
+    reduced = panel_data.fetch_panel_dataframe(store, experiment_id, panel, run_ids=None)
     monkeypatch.setattr(ChartInstance, "metric_reduction", _whole)
-    whole = panel_data.fetch_panel_dataframe(store, experiment_id, panel)
+    whole = panel_data.fetch_panel_dataframe(store, experiment_id, panel, run_ids=None)
 
     assert len(reduced) < len(whole)
     assert _drawn(chart, reduced) == _drawn(chart, whole)
@@ -160,11 +160,13 @@ def test_a_panel_whose_charts_need_different_fetches_draws_each_from_its_own(
     line = _chart("line", column="acc", x_axis="step")
     panel = PanelInstance[pd.DataFrame, object](name="p", charts=[bar, line])
 
-    frame = panel_data.fetch_panel_dataframe(store, experiment_id, panel)
+    frame = panel_data.fetch_panel_dataframe(store, experiment_id, panel, run_ids=None)
 
     runs = frame.groupby("run_id")
     assert set(frame.columns) >= {"loss", "acc", "step"}
     # `acc` is every step the run logged it at; `loss`, which only the bar chart wants, is each run's last.
     assert runs.acc.count().tolist() == [2, 2, 2]  # step 29 diverged: it logged only a loss
     assert runs.loss.count().tolist() == [1, 1, 1]
-    assert _drawn(bar, frame) == _drawn(bar, panel_data.fetch_panel_dataframe(store, experiment_id, panel))
+    assert _drawn(bar, frame) == _drawn(
+        bar, panel_data.fetch_panel_dataframe(store, experiment_id, panel, run_ids=None)
+    )

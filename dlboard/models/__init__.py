@@ -28,7 +28,7 @@ from dlboard.models._audit_log import AuditAction, AuditLogEntry, EntityType, Ne
 from dlboard.models._auth import AuthProvider
 from dlboard.models._comment import Comment, NewComment
 from dlboard.models._credentials import ApiToken, NewApiToken, PasswordCredential
-from dlboard.models._data_store import ArtifactStore, DataStore
+from dlboard.models._data_store import SUMMARY_RUNS, ArtifactStore, DataStore
 from dlboard.models._experiment import Experiment, ExperimentSource, NewExperiment
 from dlboard.models._histogram import (
     Histogram,
@@ -116,6 +116,7 @@ __all__ = [
     "NO_DATA_COLUMNS",
     "OVERLAY_KEY_SUFFIX",
     "RUN_NAME_COLUMN",
+    "SUMMARY_RUNS",
     "UNNAMED_OVERLAY",
     "UNVERIFIED_ISSUER",
     "ActivityStats",

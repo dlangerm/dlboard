@@ -6,6 +6,12 @@ import typing
 
 from dlboard.models._metric import MetricReduction
 
+SUMMARY_RUNS: typing.Final = 100
+"""
+How many of an experiment's newest runs a summary judges by: the key summaries and the column catalog read no more than
+these, so what they cost does not grow with how many runs an experiment has.
+"""
+
 # Pre-3.12 `TypeVar`/`ParamSpec` style (the client's floor is 3.10) -- `P` is `get_or_create`'s
 # constructor signature; `Dataframe`/`Chart` are `Page`'s own two type parameters,
 # reused here rather than declared fresh per method (PEP 695's per-method `def foo[T](...)` needs
@@ -185,7 +191,7 @@ class DataStore(typing.Protocol[_P]):
         *,
         limit: int | None = 1000,
         offset: int = 0,
-        run_ids: frozenset[int] | None = None,
+        run_ids: frozenset[int] | None,
     ) -> typing.Iterator[models.Run]:
         """
         A page of an experiment's (non-deleted) runs, most recently created first.
@@ -204,7 +210,7 @@ class DataStore(typing.Protocol[_P]):
         experiment_id: int,
         *,
         keys: frozenset[str] | None = None,
-        run_ids: frozenset[int] | None = None,
+        run_ids: frozenset[int] | None,
         reduction: MetricReduction = MetricReduction.HISTORY,
     ) -> MetricFrame:
         """
@@ -214,28 +220,14 @@ class DataStore(typing.Protocol[_P]):
         without reading the rest, so what it costs does not grow with how long the runs trained.
         """
 
-    def fetch_latest_metrics(
-        self,
-        experiment_id: int,
-        *,
-        keys: frozenset[str] | None = None,
-        run_ids: frozenset[int] | None = None,
-    ) -> dict[int, dict[str, float]]:
-        """
-        Each (non-deleted) run's most recently logged value of each key, by run id -- only `keys`, if given, else every metric.
-
-        For callers that show where each run ended up (a comparison, a table of runs): `fetch_metrics`
-        would read every step each run logged to find it.
-        """
-        ...
-
     def summarize_metric_keys(self, experiment_id: int) -> list[MetricKeySummary]:
         """
         Every metric key logged in an experiment (non-deleted runs), sorted, without fetching values.
 
         For callers (a column picker, chart suggestions) that only need to know what's *available*
         -- fetching every metric row via `fetch_metrics` for that is needlessly expensive once an
-        experiment has any real volume of logged steps.
+        experiment has any real volume of logged steps. Each key's `max_steps_per_run` is judged on the newest
+        runs only (see `MetricKeySummary`), so this does not cost more as an experiment gains runs.
         """
         ...
 
@@ -245,7 +237,7 @@ class DataStore(typing.Protocol[_P]):
         *,
         keys: frozenset[str],
         max_steps: int,
-        run_ids: frozenset[int] | None = None,
+        run_ids: frozenset[int] | None,
     ) -> list[models.UnderlyingHistogramTableEntry]:
         """
         An experiment's (non-deleted runs') histograms under `keys`, thinned to about `max_steps` steps per run and key.
@@ -264,7 +256,7 @@ class DataStore(typing.Protocol[_P]):
         ...
 
     def fetch_hyperparams(
-        self, experiment_id: int, *, run_ids: frozenset[int] | None = None
+        self, experiment_id: int, *, run_ids: frozenset[int] | None
     ) -> typing.Iterator[models.HyperParams]:
         """Every (non-deleted) run's hyperparameters for an experiment."""
         ...
@@ -349,7 +341,7 @@ class DataStore(typing.Protocol[_P]):
         *,
         keys: frozenset[str] | None = None,
         key_prefixes: frozenset[str] = frozenset(),
-        run_ids: frozenset[int] | None = None,
+        run_ids: frozenset[int] | None,
     ) -> typing.Iterator[models.Artifact]:
         """
         An experiment's (non-deleted) artifact metadata, not bytes.

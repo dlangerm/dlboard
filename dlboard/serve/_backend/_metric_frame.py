@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING, NamedTuple, cast
 
 import pandas as pd
 
@@ -24,8 +24,12 @@ class MetricKeySummary(NamedTuple):
     """One metric key logged in an experiment, summarized without fetching its values."""
 
     key: str
-    single_value: bool
-    """Whether no run logged this key at more than one step -- one value per run, a natural fit for a bar chart."""
+    max_steps_per_run: int
+    """
+    The longest span, in steps, that one of the newest runs logged this key over (its last step less its first, plus
+    one), or 0 if none of them logged it. An upper bound on the most steps a run logged, but exactly 1 when no such run
+    logged more than one step -- one value per run, a natural fit for a bar chart.
+    """
 
 
 class MetricRow(NamedTuple):
@@ -127,6 +131,18 @@ class MetricFrame:
         if key not in self.keys:
             raise KeyError(key)
         return self._frame[key]
+
+    def latest_per_run(self) -> dict[int, dict[str, float]]:
+        """
+        Each run's latest value of every key it has logged, for a frame of `MetricReduction.LATEST` rows.
+
+        Each key has one row per run there, so `last` is that value, and a `NaN` (no value) is left out.
+        """
+        latest = self._frame.groupby(MetricColumn.RUN_ID)[sorted(self.keys)].last()
+        return {
+            cast("int", run_id): {cast("str", key): value for key, value in row.items() if pd.notna(value)}
+            for run_id, row in latest.to_dict(orient="index").items()
+        }
 
     def to_frame(self) -> pd.DataFrame:
         """A copy of the underlying dataframe, for the (untyped) chart layer."""

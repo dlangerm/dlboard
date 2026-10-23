@@ -481,7 +481,7 @@ def create_entity_chain(store: SQLStoreBase[Any], *, artifact: bool = False) -> 
                 )
             ]
         )
-        (logged,) = list(store.fetch_artifacts(experiment_id=experiment.id))
+        (logged,) = list(store.fetch_artifacts(experiment_id=experiment.id, run_ids=None))
         assert logged.id is not None
         artifact_id = logged.id
     return EntityChain(project.id, experiment.id, run.id, artifact_id)

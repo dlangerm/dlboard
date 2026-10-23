@@ -28,7 +28,7 @@ def test_delete_project_cascades_to_experiments_runs_and_artifacts(
 
     assert project_id not in {p.id for p in store.get_projects()}
     assert list(store.get_experiments(project_id)) == []
-    assert list(store.fetch_artifacts(experiment_id=experiment_id)) == []
+    assert list(store.fetch_artifacts(experiment_id=experiment_id, run_ids=None)) == []
     assert experiment_id in {e.id for e in store.list_deleted_experiments()}
 
 
@@ -53,7 +53,7 @@ def test_restore_project_restores_cascaded_children(store: SQLLiteStore, admin: 
 
     assert project_id in {p.id for p in store.get_projects()}
     assert experiment_id in {e.id for e in store.get_experiments(project_id)}
-    assert artifact_id in {a.id for a in store.fetch_artifacts(experiment_id=experiment_id)}
+    assert artifact_id in {a.id for a in store.fetch_artifacts(experiment_id=experiment_id, run_ids=None)}
 
 
 def test_restore_project_does_not_resurrect_an_independently_deleted_experiment(
@@ -112,7 +112,7 @@ def test_delete_artifact_has_no_cascade(store: SQLLiteStore, admin: models.User)
 
     store.delete_artifact(artifact_id, admin)
 
-    assert list(store.fetch_artifacts(experiment_id=experiment_id)) == []
+    assert list(store.fetch_artifacts(experiment_id=experiment_id, run_ids=None)) == []
     # the run it belonged to is untouched
     assert store._fetch_deleted_at(models.Run, run_id) is None
 
@@ -297,5 +297,5 @@ def test_fetch_metrics_excludes_metrics_from_a_deleted_run(
 
     store.delete_run(deleted_run.id, admin)
 
-    fetched = store.fetch_metrics(experiment_id)
+    fetched = store.fetch_metrics(experiment_id, run_ids=None)
     assert set(fetched.run_id) == {kept_run.id}
