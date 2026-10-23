@@ -12,6 +12,8 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-23
+
 ### Changed
 
 * **A line or bar chart no longer has a y-axis label**: its heading already names the metric, so the axis shows only its
