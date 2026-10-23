@@ -43,6 +43,12 @@ pulls that section's body into the GitHub release notes and publishes both distr
   * **A line chart's history is cheaper per point** (a panel of 50 lines on that same data, 592 to 265 ms). It still
     reads every point logged of its metrics, so how often you log decides how fast it draws:
     [docs/client.md](docs/client.md) says how to log less.
+* **Logging metrics is faster, and an ingest's time shows in its trace.** A batch's metric and histogram rows are written
+  in one transaction (one commit, not three), and on Postgres with COPY, not one round trip per row. On a local Postgres (WSL2),
+  a batch of 10,000 steps of four metrics went from 4.7 s to 3.1 s; what is left is the database
+  writing each row and its index entries to its log, which a batch cannot avoid. The ingest's trace now has spans for
+  parsing the batch (`dlboard.metrics.parse`), building its rows (`dlboard.store.rows`) and writing them
+  (`dlboard.store.insert`), so the time that is not a SQL statement is visible too.
 * **An experiment page draws its newest 20 runs until told otherwise, and the Runs table lists every run.** Runs are the
   one thing an experiment can have thousands of, and a user does not control how many. The charts used to fetch every
   run but the few a view left out, and the table stopped at 1,000 runs, so run 1,001 could not be reached. Now a page

@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from structlog.stdlib import get_logger
 
 from dlboard import models
+from dlboard._telemetry.traces import SpanKind, span
 from dlboard.serve import sql
 from dlboard.serve._backend._app_state import APP_STATE_ROW_ID, AppState
 from dlboard.serve._backend._foreign_keys import ForeignKey, ForeignKeyKind
@@ -455,11 +456,26 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         return results
 
     def _insert_rows(self, model: type[BaseModel], rows: Iterable[BaseModel]) -> None:
-        """Bulk-insert `rows` into `model`'s table in one transaction, as a single executemany."""
-        values = [sql.row_values(row, exclude=frozenset({sql.ID_KEY})) for row in rows]
-        if values:
-            with self._engine.begin() as conn:
-                conn.execute(sa.insert(self._tables[model]), values)
+        """Bulk-insert `rows` into `model`'s table in one transaction."""
+        self._insert_into([(model, rows)])
+
+    def _insert_into(self, tables: Iterable[tuple[type[BaseModel], Iterable[BaseModel]]]) -> None:
+        """Bulk-insert each table's rows, all in one transaction (one commit, however many tables)."""
+        with span("dlboard.store.rows", SpanKind.INTERNAL):
+            pending = [
+                (self._tables[model], [sql.row_values(row, exclude=frozenset({sql.ID_KEY})) for row in rows])
+                for model, rows in tables
+            ]
+        pending = [(table, values) for table, values in pending if values]
+        if not pending:
+            return
+        with self._engine.begin() as conn, span("dlboard.store.insert", SpanKind.INTERNAL):
+            for table, values in pending:
+                self._bulk_insert(conn, table, values)
+
+    def _bulk_insert(self, conn: sa.Connection, table: sa.Table, rows: list[dict[str, Any]]) -> None:
+        """Insert `rows` (each keyed by column) into `table` on `conn`. A dialect may load them faster than this does."""
+        conn.execute(sa.insert(table), rows)
 
     def _by_id[RowT: BaseModel](self, model: type[RowT], entity_id: int) -> list[RowT]:
         """`model`'s row with `entity_id`, if it exists and isn't soft-deleted."""
@@ -849,16 +865,21 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
     def log_metrics(self, metric: Iterable[models.LoggedMetrics]) -> None:
         """Log a batch of metrics to the data store."""
         _log.debug("Logging metrics batch")
-        metric = list(metric)
+        with span("dlboard.metrics.parse", SpanKind.INTERNAL):
+            metric = list(metric)
         for run_id in {m.run_id for m in metric}:
             self._ensure_not_deleted(models.Run, run_id)
-        self._insert_rows(
-            models.UnderlyingMetricTableEntry,
-            itertools.chain.from_iterable(m.to_underlying() for m in metric),
-        )
-        self._insert_rows(
-            models.UnderlyingHistogramTableEntry,
-            itertools.chain.from_iterable(m.to_underlying_histograms() for m in metric),
+        self._insert_into(
+            [
+                (
+                    models.UnderlyingMetricTableEntry,
+                    itertools.chain.from_iterable(m.to_underlying() for m in metric),
+                ),
+                (
+                    models.UnderlyingHistogramTableEntry,
+                    itertools.chain.from_iterable(m.to_underlying_histograms() for m in metric),
+                ),
+            ]
         )
         for experiment_id in {m.experiment_id for m in metric}:
             self._touch_experiment(experiment_id)

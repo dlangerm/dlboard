@@ -12,8 +12,9 @@ PgBouncer in front, and see `prepare_threshold`).
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Final, Literal, override
+from typing import TYPE_CHECKING, Any, Final, Literal, cast, override
 
 import sqlalchemy as sa
 from pydantic import NonNegativeInt, PositiveFloat, PositiveInt, SecretStr
@@ -24,6 +25,8 @@ from sqlalchemy.exc import OperationalError
 from dlboard.serve import Dependency, SQLStoreBase, set_data_store, wait_for
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from dash import Dash
 
 
@@ -138,6 +141,20 @@ def _unreachable(exc: Exception) -> bool:
             return False
 
 
+def _bind_for_copy(column_type: sa.types.TypeEngine[Any], dialect: sa.Dialect) -> Callable[[Any], Any] | None:
+    """
+    How a value of `column_type` is written as the text COPY takes, as an INSERT would write it.
+
+    A JSON column's value is serialized by the driver for an INSERT, so COPY has to serialize it itself. Anything else
+    goes through the column type's own bind processing, which is what an INSERT applies too.
+    """
+    impl = column_type.dialect_impl(dialect)
+    inner = impl.impl_instance if isinstance(impl, sa.TypeDecorator) else impl
+    if isinstance(inner, sa.JSON):
+        return lambda value: None if value is None else json.dumps(value)
+    return column_type.bind_processor(dialect)
+
+
 class PostgresStore(SQLStoreBase[PostgresSettings]):
     """Use a Postgres database as the data store."""
 
@@ -162,6 +179,30 @@ class PostgresStore(SQLStoreBase[PostgresSettings]):
     @override
     def _insert_ignoring_conflicts(self, table: sa.Table) -> sa.Insert:
         return postgresql.insert(table).on_conflict_do_nothing()
+
+    @override
+    def _bulk_insert(self, conn: sa.Connection, table: sa.Table, rows: list[dict[str, Any]]) -> None:
+        """
+        Load the rows with COPY, not an executemany.
+
+        An executemany is a round trip per row, which for a batch of tens of thousands of metric rows was most of an
+        ingest. COPY is one statement and a stream of rows. Each value is written as an INSERT would write it.
+        """
+        columns = list(rows[0])
+        dialect = self._engine.dialect
+        processors = [_bind_for_copy(table.c[column].type, dialect) for column in columns]
+        names = ", ".join(dialect.identifier_preparer.quote(column) for column in columns)
+        target = dialect.identifier_preparer.format_table(table)
+        # The DBAPI connection is psycopg's: SQLAlchemy types it loosely, and COPY is psycopg's own API.
+        raw = cast("Any", conn.connection.dbapi_connection)
+        with raw.cursor() as cursor, cursor.copy(f"COPY {target} ({names}) FROM STDIN") as copy:
+            for row in rows:
+                copy.write_row(
+                    [
+                        process(row[c]) if process else row[c]
+                        for process, c in zip(processors, columns, strict=True)
+                    ]
+                )
 
     @override
     def _prepare_schema(self, conn: sa.Connection) -> None:
