@@ -156,8 +156,8 @@ window.dlImageSeriesOverlay = (() => {
         const box = picture.getBoundingClientRect();
         const scale = Math.min(box.width / picture.naturalWidth, box.height / picture.naturalHeight);
         const [width, height] = [picture.naturalWidth * scale, picture.naturalHeight * scale];
-        legend.style.left = `${box.left - thumb.left + (box.width - width) / 2 + LEGEND_INSET}px`;
-        legend.style.top = `${box.top - thumb.top + (box.height - height) / 2 + LEGEND_INSET}px`;
+        legend.style.left = `${Math.round(box.left - thumb.left + (box.width - width) / 2 + LEGEND_INSET)}px`;
+        legend.style.top = `${Math.round(box.top - thumb.top + (box.height - height) / 2 + LEGEND_INSET)}px`;
         legend.style.maxWidth = `${Math.max(0, width - 2 * LEGEND_INSET)}px`;
         legend.style.maxHeight = `${Math.max(0, height - 2 * LEGEND_INSET)}px`;
         legend.toggleAttribute("data-dl-compact", width < COMPACT_BELOW);
