@@ -41,6 +41,7 @@ from dlboard.serve._pages._experiment import _page_model as page_model
 from dlboard.serve._pages._experiment import _page_repository as repo
 from dlboard.serve._pages._experiment._run_compare import compare_button
 from dlboard.serve._pages._experiment._shown_runs import ShownRunsSettings, shown_run_ids
+from dlboard.serve._pages._experiment._views import VIEW_NOTIFY_ID
 from dlboard.serve._url import relative_path
 
 if TYPE_CHECKING:
@@ -51,8 +52,6 @@ if TYPE_CHECKING:
 _log = get_logger(__name__)
 
 NAVBAR_HPARAM_DATATABLE_ID: ValueId[ids.ExperimentPage] = ValueId("navbar-hparam-datatable")
-RUN_CAP_NOTIFY_ID: typing.Final = "run-cap-notify"
-"""Where a selection past `DLBOARD_MAX_SHOWN_RUNS` is refused, with a notice."""
 NAVBAR_HPARAM_COL_SELECT_ID: ValueId[ids.ExperimentPage] = ValueId("navbar-hparam-col-select")
 NAVBAR_HPARAM_TABLE_BODY_ID: typing.Final = "navbar-hparam-table-body"
 NAVBAR_HPARAM_CONFIRM_COLS_ID: ButtonId[ids.ExperimentPage] = ButtonId("navbar-hparam-confirm-cols")
@@ -420,7 +419,6 @@ def _render_hparam_panel(
                 if selection.chosen
                 else []
             ),
-            dmc.NotificationContainer(id=RUN_CAP_NOTIFY_ID),
             html.Div(
                 id=NAVBAR_HPARAM_TABLE_BODY_ID,
                 children=_build_hparam_datatable(
@@ -609,7 +607,7 @@ def _register_hparam_table(app: Dash) -> None:
     @app.callback(
         Output(ids.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Output(ids.METRIC_CONTENT_ID, "children", allow_duplicate=True),
-        Output(RUN_CAP_NOTIFY_ID, "sendNotifications"),
+        Output(VIEW_NOTIFY_ID, "sendNotifications", allow_duplicate=True),
         Input(NAVBAR_HPARAM_DATATABLE_ID, "selectedRows", allow_optional=True),
         State(NAVBAR_HPARAM_DATATABLE_ID, "rowData", allow_optional=True),
         State(constants.STATE_EXPERIMENT_ID, "data"),
