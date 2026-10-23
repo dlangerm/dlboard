@@ -46,6 +46,7 @@ class Outcome(StrEnum):
 
     PASS = "pass"
     FAIL = "fail"
+    SKIP = "skip"
 
 
 class Verdict(StrEnum):
@@ -53,10 +54,18 @@ class Verdict(StrEnum):
 
     STABLE_FAIL = "stable fail"
     FLAKY = "flaky"
+    NOT_RERUNNABLE = "not rerunnable"
 
 
 def verdict(outcomes: list[Outcome]) -> Verdict:
-    """A test the suite failed is flaky when any rerun passes; one that fails every run is failing, not flaky."""
+    """
+    What a test the suite failed and its reruns add up to.
+
+    Flaky when any rerun passes; a test that fails every run is failing, not flaky; and one that is skipped on its own
+    (a check that needs the whole suite collected) says nothing either way.
+    """
+    if Outcome.SKIP in outcomes:
+        return Verdict.NOT_RERUNNABLE
     return Verdict.FLAKY if Outcome.PASS in outcomes else Verdict.STABLE_FAIL
 
 
@@ -72,9 +81,7 @@ def run_once(node_id: str) -> Outcome:
     if result.returncode == NO_TESTS_SELECTED:
         sys.exit(f"error: pytest selected no test for {node_id}")
     if result.returncode == 0:
-        if " passed" not in result.stdout:
-            sys.exit(f"error: {node_id} was skipped, so it says nothing about the failure")
-        return Outcome.PASS
+        return Outcome.PASS if " passed" in result.stdout else Outcome.SKIP
     tail = (result.stdout + result.stderr)[-OUTPUT_TAIL:]
     sys.stdout.write(f"--- {node_id} failed; end of its output:\n{tail}\n")
     return Outcome.FAIL
@@ -132,7 +139,7 @@ def main() -> int:
     results = {node_id: [Outcome.FAIL, *(run_once(node_id) for _ in range(REPEATS))] for node_id in rechecked}
     for node_id, outcomes in results.items():
         runs = " ".join(outcome.value for outcome in outcomes)
-        sys.stdout.write(f"{verdict(outcomes).value:12} {runs:19} {node_id}\n")
+        sys.stdout.write(f"{verdict(outcomes).value:14} {runs:19} {node_id}\n")
 
     flaky = [node_id for node_id, outcomes in results.items() if verdict(outcomes) is Verdict.FLAKY]
     if args.file_issues:
