@@ -46,30 +46,13 @@ jobs:
       - run: uv run prek run --all-files --skip no-commit-to-branch
       - run: uv run pyrefly check
 
-  # Runs first, ahead of the suite: a random sample of the suite's tests, each run three times in a row. A test
-  # that passes some runs and fails others is flaky, so this job fails, files an issue for it, and the suite
-  # below is skipped. A test that fails every run is not flaky, and the suite reports it as it always has.
-  flaky-tests:
+  test:
     needs: [check_doc_only, typecheck-precommit]
     runs-on: ubuntu-latest
-    if: needs.check_doc_only.outputs.skip-tests != 'true'
+    # Reruns the tests this job's suite failed, and files an issue for each flaky one.
     permissions:
       contents: read
       issues: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-env
-      - run: uv run playwright install --with-deps chromium
-      - run: uv run python tools/flaky_check.py --file-issues --run-url 
-          "$RUN_URL"
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository 
-            }}/actions/runs/${{ github.run_id }}
-
-  test:
-    needs: [check_doc_only, typecheck-precommit, flaky-tests]
-    runs-on: ubuntu-latest
     if: needs.check_doc_only.outputs.skip-tests != 'true'
     steps:
       - uses: actions/checkout@v4
@@ -78,6 +61,8 @@ jobs:
       - run: uv run playwright install --with-deps chromium
       - run: uv run pytest -m browser
       - run: uv run pytest --screenshots=check
+      - if: failure()
+        uses: ./.github/actions/recheck-failures
       - if: failure()
         uses: actions/upload-artifact@v4
         with:
@@ -90,23 +75,35 @@ jobs:
   # same way `uv run pytest -m postgres` does locally.
   test-postgres:
     if: needs.check_doc_only.outputs.skip-tests != 'true'
-    needs: [check_doc_only, typecheck-precommit, flaky-tests]
+    needs: [check_doc_only, typecheck-precommit]
     runs-on: ubuntu-latest
+    # Reruns the tests this job's suite failed, and files an issue for each flaky one.
+    permissions:
+      contents: read
+      issues: write
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-env
       - run: uv run pytest -m postgres
+      - if: failure()
+        uses: ./.github/actions/recheck-failures
 
   # The S3 artifact store, against a real S3-protocol endpoint (LocalStack, in Docker) -- the same
   # way `uv run pytest -m s3` does locally. See `dlboard/conftest.py`'s `s3_test_server`.
   test-s3:
     if: needs.check_doc_only.outputs.skip-tests != 'true'
-    needs: [check_doc_only, typecheck-precommit, flaky-tests]
+    needs: [check_doc_only, typecheck-precommit]
     runs-on: ubuntu-latest
+    # Reruns the tests this job's suite failed, and files an issue for each flaky one.
+    permissions:
+      contents: read
+      issues: write
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-env
       - run: uv run pytest -m s3
+      - if: failure()
+        uses: ./.github/actions/recheck-failures
 
   # Confirms the client actually installs and imports on every Python version
   # `client/pyproject.toml`'s `requires-python = ">=3.10"` claims -- nothing else does: the repo's

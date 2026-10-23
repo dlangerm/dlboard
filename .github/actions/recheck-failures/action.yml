@@ -1,0 +1,13 @@
+name: Recheck the failed tests
+description: Rerun the suite's failed tests alone; file an issue for flaky ones.
+
+runs:
+  using: composite
+  steps:
+    # Run only on failure, after the suite's steps; the calling job needs `issues: write`.
+    - shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        uv run python tools/flaky_check.py --file-issues \
+          --run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
