@@ -14,6 +14,12 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ### Changed
 
+* **A line or bar chart no longer has a y-axis label**: its heading already names the metric, so the axis shows only its
+  values and the plot gets the room the label took. A bar chart's heading now says how its values are grouped
+  (`median(loss)`), which the label used to.
+* **The experiment page makes two fewer requests when it loads.** The run table reported its own mount as a change of
+  selection to the server, twice, and the server answered that nothing had changed; the browser now compares the
+  selection with the runs drawn and asks only when they differ.
 * **The experiment page no longer reads everything that was logged to show what it summarizes.** The lists of
   metrics and artifacts, where each run ended up, and a bar chart or a table with a row per run used to cost more with
   every step a run trained (and the lists, with every experiment in the database). In a Postgres with 3.6M metric rows
@@ -24,12 +30,13 @@ pulls that section's body into the GitHub release notes and publishes both distr
     as the histogram table already was; the old ones led with `key`, so every read of one experiment scanned every
     experiment's rows. The new ones are narrower than the old, so the database gets smaller. Runs and
     hyperparameters are indexed by experiment too (hyperparameters had no index, so every page scanned every
-    experiment's). **Starting the server after upgrading rebuilds them** (migration 0004): rebuilding the metric and
-    artifact indexes holds a lock that blocks reads and writes of those tables until it commits, and creating the run
-    and hyperparameter indexes blocks writes to theirs. On a database with many millions of metric rows that takes a
-    while, so upgrade at a quiet moment. A server still running the old version keeps working against the upgraded
-    database during a rolling upgrade, only reading as slowly as it did (as with every migration, one that is stopped
-    cannot be started again on it).
+    experiment's), and each per-step table is indexed by run too, so deleting or purging a run no longer scans them.
+    **Starting the server after upgrading builds them** (migration 0004): on Postgres it builds each new index before
+    dropping the one it replaces, so reads of the metric and artifact tables wait only for the swap at the end, but
+    writes to a table (a run logging metrics) wait while its indexes are built. On a database with many millions of
+    metric rows the builds take a while, so upgrade at a quiet moment. A server still running the old version keeps
+    working against the upgraded database during a rolling upgrade, only reading as slowly as it did (as with every
+    migration, one that is stopped cannot be started again on it).
   * **Which keys an experiment logged**, whether a metric is logged once per run, and the latest artifact of each key are
     found by hopping through the index from key to key, not by counting and sorting every row. Whether a metric is
     logged once per run is judged on the newest 100 runs, and the column catalog's hyperparameter keys are read from

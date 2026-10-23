@@ -172,11 +172,6 @@ class BarChart(ChartType[BarChartSettings, pd.DataFrame, dmc.Stack], frozen=True
             if parameters.orientation == "horizontal"
             else value_label
         )
-        y_axis_label = (
-            value_label
-            if parameters.orientation == "horizontal"
-            else fit_axis_label(parameters.x_axis, parameters.max_axis_label_chars)
-        )
 
         plot = dmc.BarChart(
             h=parameters.height,
@@ -192,7 +187,6 @@ class BarChart(ChartType[BarChartSettings, pd.DataFrame, dmc.Stack], frozen=True
             ],
             orientation=parameters.orientation,
             xAxisLabel=x_axis_label,
-            yAxisLabel=y_axis_label,
             xAxisProps=x_axis_props,
             yAxisProps=y_axis_props,
             withLegend=False,
@@ -223,16 +217,15 @@ class BarChart(ChartType[BarChartSettings, pd.DataFrame, dmc.Stack], frozen=True
             # loss-by-hidden-size) by x-axis value rather than array index, so their tooltips
             # line up even if one chart is missing a group the other has.
             #
-            # Recharts' default left margin is too tight for a rotated y-axis label plus its
-            # ticks, so the label crowds the plot area (and the next chart over, once several sit
-            # side by side); widen it and give the other edges matching breathing room.
+            # Recharts' default margins are too tight for the ticks at the edges, which crowd the plot area
+            # (and the next chart over, once several sit side by side); give every edge breathing room.
             barChartProps={
                 "syncId": parameters.x_axis,
                 "syncMethod": "value",
-                "margin": {"left": 20, "right": 20, "top": 10, "bottom": 10},
+                "margin": {"left": 10, "right": 20, "top": 10, "bottom": 10},
             },
         )
-        return titled(parameters.column, plot)
+        return titled(f"{parameters.aggregation}({parameters.column})", plot)
 
     @classmethod
     @typing.override

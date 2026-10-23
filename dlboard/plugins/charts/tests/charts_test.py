@@ -496,7 +496,7 @@ def test_bar_chart_series_and_labels() -> None:
     chart = BarChart.render(BarChartSettings(column="accuracy", x_axis="hidden_size"), df)
     props = _props(chart)
     assert props["series"] == [{"name": "accuracy", "label": "accuracy", "color": "var(--dl-series-1)"}]
-    assert props["yAxisLabel"] == "mean(accuracy)"
+    assert "yAxisLabel" not in props
 
 
 def test_bar_chart_x_axis_is_categorical() -> None:
@@ -516,7 +516,7 @@ def test_bar_chart_vertical_orientation_flips_category_axis_and_labels() -> None
     assert props["xAxisProps"] == {}
     assert props["yAxisProps"] == {"type": "category"}
     assert props["xAxisLabel"] == "mean(accuracy)"
-    assert props["yAxisLabel"] == "hidden_size"
+    assert "yAxisLabel" not in props
 
 
 def test_bar_chart_syncs_by_value_not_index() -> None:
@@ -552,14 +552,15 @@ LONG_METRIC = "DeviceStatsMonitor.on_test_batch_end/active.all.allocated"
 
 
 @pytest.mark.parametrize("limit", [MIN_MAX_AXIS_LABEL_CHARS, 20, DEFAULT_MAX_AXIS_LABEL_CHARS])
-def test_line_chart_shortens_a_long_metric_name_to_the_chosen_axis_title_length(limit: int) -> None:
-    df = _metrics_df(20, n_runs=1).rename(columns={"loss": LONG_METRIC})
+def test_line_chart_shortens_a_long_x_axis_name_to_the_chosen_axis_title_length(limit: int) -> None:
+    df = _metrics_df(20, n_runs=1)
+    df[LONG_METRIC] = df["step"]
 
     chart = LineChart.render(
-        LineChartSettings(column=LONG_METRIC, x_axis="step", max_axis_label_chars=limit), df
+        LineChartSettings(column="loss", x_axis=LONG_METRIC, max_axis_label_chars=limit), df
     )
 
-    label = _props(chart)["yAxisLabel"]
+    label = _props(chart)["xAxisLabel"]
     assert label.startswith("…")
     assert len(label) == limit
     assert LONG_METRIC.endswith(label.removeprefix("…"))  # pyrefly: ignore [unknown-argument-type]
@@ -570,10 +571,13 @@ def test_bar_chart_shortens_a_long_metric_name_inside_its_aggregation_label(limi
     df = _hparam_grouped_df({1: 128}, {1: [0.8]}).rename(columns={"accuracy": LONG_METRIC})
 
     chart = BarChart.render(
-        BarChartSettings(column=LONG_METRIC, x_axis="hidden_size", max_axis_label_chars=limit), df
+        BarChartSettings(
+            column=LONG_METRIC, x_axis="hidden_size", orientation="vertical", max_axis_label_chars=limit
+        ),
+        df,
     )
 
-    label = _props(chart)["yAxisLabel"]
+    label = _props(chart)["xAxisLabel"]
     assert label.startswith("mean(…")
     assert label.endswith(")")
     assert len(label) == limit
@@ -587,27 +591,22 @@ def test_an_axis_title_limit_too_small_to_keep_a_name_recognizable_is_rejected(
         settings(column="loss", x_axis="step", max_axis_label_chars=MIN_MAX_AXIS_LABEL_CHARS - 1)
 
 
-def test_line_chart_gives_its_value_axis_room_for_ticks_beside_the_title() -> None:
+def test_line_chart_gives_its_value_axis_room_for_ticks_and_no_title_of_its_own() -> None:
     chart = LineChart.render(LineChartSettings(column="loss", x_axis="step"), _metrics_df(5))
 
+    assert "yAxisLabel" not in _props(chart)
     y_axis = _props(chart)["yAxisProps"]
     assert y_axis["width"] == VALUE_AXIS_WIDTH
     js_source = Path(line_chart.__file__).with_name("line_chart_tooltip.js").read_text()
     assert f"window.dashMantineFunctions.{y_axis['tickFormatter']['function']} =" in js_source
 
 
-def test_line_chart_tooltip_is_titled_with_the_whole_metric_name_even_when_its_axis_title_is_shortened() -> (
-    None
-):
+def test_line_chart_tooltip_is_titled_with_the_whole_metric_name() -> None:
     df = _metrics_df(20, n_runs=1).rename(columns={"loss": LONG_METRIC})
 
-    chart = LineChart.render(
-        LineChartSettings(column=LONG_METRIC, x_axis="step", max_axis_label_chars=MIN_MAX_AXIS_LABEL_CHARS),
-        df,
-    )
+    chart = LineChart.render(LineChartSettings(column=LONG_METRIC, x_axis="step"), df)
 
     assert _props(chart)["tooltipProps"]["chartTitle"] == LONG_METRIC
-    assert _props(chart)["yAxisLabel"] != LONG_METRIC
 
 
 @pytest.mark.parametrize(("orientation", "gets_room_for_ticks"), [("horizontal", True), ("vertical", False)])
@@ -635,13 +634,17 @@ def _bar(df: pd.DataFrame) -> dmc.Stack:
     return BarChart.render(BarChartSettings(column=LONG_METRIC, x_axis="step"), df)
 
 
-@pytest.mark.parametrize("render", [_line, _bar], ids=["line", "bar"])
+@pytest.mark.parametrize(
+    ("render", "expected"),
+    [(_line, LONG_METRIC), (_bar, f"mean({LONG_METRIC})")],
+    ids=["line", "bar"],
+)
 def test_a_metric_chart_is_titled_with_its_full_metric_name(
-    render: Callable[[pd.DataFrame], dmc.Stack],
+    render: Callable[[pd.DataFrame], dmc.Stack], expected: str
 ) -> None:
-    """The axis titles are shortened to fit; the heading above the plot carries the whole name."""
+    """The value axis has no title of its own: the heading above the plot names the whole metric (and a bar's aggregation)."""
     df = _metrics_df(3, n_runs=1).rename(columns={"loss": LONG_METRIC})
 
     title, _ = props(render(df))["children"]
 
-    assert props(title)["children"] == LONG_METRIC
+    assert props(title)["children"] == expected

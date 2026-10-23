@@ -102,7 +102,7 @@ window.dashMantineFunctions.lineChartDateTick = (value) => new Date(value).toLoc
 window.dashMantineFunctions.lineChartTimeTick = (value) => dlboardFormatDuration(value);
 
 // A y-axis tick: four significant digits at most (float noise like 0.30000000000000004 is what
-// pushed ticks into the rotated axis title), exponent form for the very small and very large.
+// made ticks wider than the axis), exponent form for the very small and very large.
 window.dashMantineFunctions.lineChartValueTick = (value) => {
     if (typeof value !== "number" || !Number.isFinite(value)) {
         return String(value);

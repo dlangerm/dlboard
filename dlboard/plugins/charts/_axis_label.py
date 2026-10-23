@@ -8,14 +8,14 @@ from pydantic import Field
 
 DEFAULT_MAX_AXIS_LABEL_CHARS: Final = 36
 """
-Roughly what fits along a default-height (300px) chart's rotated y-axis title -- the one that can
-run out of room. A longer one is drawn past the chart's own area, over whatever is next to it.
+Roughly what fits along a default-width chart's x-axis title. A longer one is drawn past the chart's own area,
+over whatever is next to it.
 """
 
-VALUE_AXIS_WIDTH: Final = 72
+VALUE_AXIS_WIDTH: Final = 56
 """
-Width in px of a chart's value (y) axis: room for its tick labels *and* the rotated title beside them.
-Recharts' default is narrower than a long tick and the title together, so they were drawn over each other.
+Width in px of a chart's value (y) axis: room for its tick labels, which the chart's title names.
+Recharts' default is narrower than a long tick (`-1.2e-5`), so it was drawn over the plot.
 """
 
 MIN_MAX_AXIS_LABEL_CHARS: Final = 12

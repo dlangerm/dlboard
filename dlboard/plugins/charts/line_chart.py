@@ -222,7 +222,6 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.Stack], frozen=Tr
             dataKey=parameters.x_axis,
             series=series,  # pyrefly: ignore [bad-argument-type]
             xAxisLabel=fit_axis_label(parameters.x_axis, parameters.max_axis_label_chars),
-            yAxisLabel=fit_axis_label(parameters.column, parameters.max_axis_label_chars),
             xAxisProps=x_axis_props,
             yAxisProps={"width": VALUE_AXIS_WIDTH, "tickFormatter": {"function": "lineChartValueTick"}},
             withLegend=True,
@@ -264,13 +263,12 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.Stack], frozen=Tr
             # sampled at different rates) don't share row counts, so index-based
             # sync (Recharts' default) lines up the wrong points across charts.
             #
-            # Recharts' default left margin is too tight for a rotated y-axis label plus its
-            # ticks, so the label crowds the plot area (and the next chart over, once several
-            # sit side by side); widen it and give the other edges matching breathing room.
+            # Recharts' default margins are too tight for the ticks at the edges, which crowd the plot area
+            # (and the next chart over, once several sit side by side); give every edge breathing room.
             lineChartProps={
                 "syncId": parameters.x_axis,
                 "syncMethod": "value",
-                "margin": {"left": 20, "right": 20, "top": 10, "bottom": 10},
+                "margin": {"left": 10, "right": 20, "top": 10, "bottom": 10},
             },
         )
         return titled(parameters.column, plot)
