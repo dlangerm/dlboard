@@ -4,8 +4,7 @@
 // reports the final width back to Dash (via `set_props`, Dash 4.4+) once the drag ends, which is
 // what persists it to the `navbar-width-store` `dcc.Store` server-side.
 (() => {
-    var MIN_WIDTH = 260;
-    var MAX_WIDTH = 640;
+    var { min: MIN_WIDTH, max: MAX_WIDTH } = window.dlNavbarWidth;
 
     function clamp(width) {
         return Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, width));

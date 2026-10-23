@@ -132,8 +132,8 @@
 .dl-chart-editor {
   flex: 0 0 min(34rem, 42vw);
   position: sticky;
-  top: calc(var(--app-shell-header-height, 4rem) + var(--mantine-spacing-xs));
-  max-height: calc(100dvh - var(--app-shell-header-height, 4rem) - 2 * var(--mantine-spacing-xs));
+  top: calc(var(--app-shell-header-height) + var(--mantine-spacing-xs));
+  max-height: calc(100dvh - var(--app-shell-header-height) - 2 * var(--mantine-spacing-xs));
   overflow-y: auto;
   padding: var(--mantine-spacing-md);
   border: 1px solid var(--mantine-color-default-border);

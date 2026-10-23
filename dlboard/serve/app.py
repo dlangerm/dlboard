@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import json
 from functools import partial, wraps
 from html import escape
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
 import dash
 import dash_mantine_components as dmc
@@ -51,8 +52,6 @@ if TYPE_CHECKING:
 _log = get_logger(__name__)
 
 _ASSETS = [
-    # The navbar drag-to-resize handle.
-    (AssetKind.SCRIPT, Path(__file__).with_name("navbar_resize.js")),
     (AssetKind.STYLESHEET, Path(__file__).with_name("_shell.css")),
     # The value formatters every ag-grid column def names (`serve/_grid.py`).
     (AssetKind.SCRIPT, GRID_FORMATTERS_JS),
@@ -63,7 +62,18 @@ _ASSETS = [
 _COLOR_SCHEME_PRELOAD_JS = Path(__file__).with_name("color_scheme_preload.js").read_text()
 _NAVBAR_STATE_JS = ClientsideScript(Path(__file__).with_name("navbar_state.js"))
 _NAVBAR_TOGGLE_JS = ClientsideScript(Path(__file__).with_name("navbar_toggle.js"))
-_DEFAULT_NAVBAR_WIDTH = 300
+_NAVBAR_RESIZE_JS = Path(__file__).with_name("navbar_resize.js")
+
+
+class _NavbarWidth(NamedTuple):
+    """The navbar's width in pixels: what a drag may reach, and what it starts at."""
+
+    min: int
+    max: int
+    default: int
+
+
+_NAVBAR_WIDTH = _NavbarWidth(min=260, max=640, default=300)
 PAGE_LOADING_CLASS = "dl-page-loading"
 
 
@@ -158,6 +168,14 @@ def app(plugins: list[models.PluginProtocol], *, url_prefix: str = "") -> Dash:
     # modules/objects themselves, so introspecting this later (the admin page's About tab) can't
     # reach back into a plugin's own state.
     set_installed_plugins(_app, installed)
+    # The navbar drag-to-resize handle, served with the width bounds `navbar_state.js` clamps to as well.
+    serve_asset(
+        _app,
+        AssetKind.SCRIPT,
+        _NAVBAR_RESIZE_JS.name,
+        f"window.dlNavbarWidth = {json.dumps(_NAVBAR_WIDTH._asdict())};\n".encode()
+        + _NAVBAR_RESIZE_JS.read_bytes(),
+    )
     for kind, path in _ASSETS:
         serve_asset(_app, kind, path.name, path.read_bytes())
     install_icons(_app)
@@ -311,11 +329,11 @@ def _layout(theme: ThemeSpec) -> dmc.MantineProvider:
             dcc.Location(id=constants.LOCATION_ID, refresh=False),
             jump_modal(),
             Store(id=constants.NAVBAR_COLLAPSED_STORE_ID, data=False, storage_type="local"),
-            Store(id=constants.NAVBAR_WIDTH_STORE_ID, data=_DEFAULT_NAVBAR_WIDTH, storage_type="local"),
+            Store(id=constants.NAVBAR_WIDTH_STORE_ID, data=_NAVBAR_WIDTH.default, storage_type="local"),
         ],
         header={"height": 52},
         padding="md",
-        navbar={"width": _DEFAULT_NAVBAR_WIDTH, "breakpoint": "sm", "collapsed": {"mobile": True}},
+        navbar={"width": _NAVBAR_WIDTH.default, "breakpoint": "sm", "collapsed": {"mobile": True}},
         # Collapsing/expanding snaps instead of sliding: the navbar's state is applied as each page
         # mounts (see `navbar_state.js`), where a 200ms slide would read as the page jumping.
         transitionDuration=0,
