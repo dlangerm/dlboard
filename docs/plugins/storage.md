@@ -101,6 +101,11 @@ def plug(app: Dash) -> None:
     set_artifact_store(app, MyArtifactStore.get_or_create(...))
 ```
 
+Two things a `DataStore` read takes are hints a store may ignore. A `MetricReduction` (`fetch_metrics`) asks for
+a row per run and key rather than every step, but a store that cannot answer that cheaply may return every step
+instead: the reader reduces it itself. The `run_ids` of a read is not a hint: it limits which runs the rows are
+of, and `None` means every run, which a caller passes explicitly.
+
 You don't have to implement `DataStore` from scratch — `SQLStoreBase`
 (`dlboard/serve/_backend/_sql_store_base.py`) already implements the full `DataStore` contract
 (CRUD, cascading soft-delete, audit log, scopes) on SQLAlchemy Core. It generates every table from

@@ -13,8 +13,8 @@ from dash._utils import to_json
 
 from dlboard import models
 from dlboard.conftest import EVERY_STORE_BACKEND, StoreBackend
-from dlboard.models import ChartInstance, MetricReduction, PanelInstance
-from dlboard.plugins.charts._table_settings import Aggregate
+from dlboard.models import ChartInstance, MetricReduction, MetricReductions, PanelInstance
+from dlboard.plugins.charts._table_settings import Aggregate, TableRows
 from dlboard.plugins.charts.bar_chart import BarChart
 from dlboard.plugins.charts.line_chart import LineChart
 from dlboard.plugins.charts.table_chart import TableChart
@@ -58,8 +58,8 @@ def _train(store: SQLLiteStore, experiment_id: int) -> None:
         store.log_metrics([steps[5]])  # the newest write of step 5 is the original one
 
 
-def _whole(_chart: ChartInstance[Any, Any]) -> MetricReduction:
-    return MetricReduction.HISTORY
+def _whole(_chart: ChartInstance[Any, Any]) -> MetricReductions:
+    return MetricReductions()
 
 
 def _drawn(chart: ChartInstance[Any, Any], frame: pd.DataFrame) -> object:
@@ -102,10 +102,10 @@ def test_a_chart_is_drawn_the_same_from_one_row_per_run_as_from_every_step(
 ) -> None:
     _train(store, experiment_id)
     panel = PanelInstance[pd.DataFrame, object](name="p", charts=[chart])
-    assert chart.metric_reduction() is not MetricReduction.HISTORY
+    assert chart.metric_reductions().default is not MetricReduction.HISTORY
 
     reduced = panel_data.fetch_panel_dataframe(store, experiment_id, panel, run_ids=None)
-    monkeypatch.setattr(ChartInstance, "metric_reduction", _whole)
+    monkeypatch.setattr(ChartInstance, "metric_reductions", _whole)
     whole = panel_data.fetch_panel_dataframe(store, experiment_id, panel, run_ids=None)
 
     assert len(reduced) < len(whole)
@@ -170,3 +170,12 @@ def test_a_panel_whose_charts_need_different_fetches_draws_each_from_its_own(
     assert _drawn(bar, frame) == _drawn(
         bar, panel_data.fetch_panel_dataframe(store, experiment_id, panel, run_ids=None)
     )
+
+
+@pytest.mark.parametrize("aggregate", list(Aggregate))
+def test_a_table_of_runs_reads_each_metric_as_the_reduction_of_its_aggregate(aggregate: Aggregate) -> None:
+    """`Aggregate` and `MetricReduction` name the same reductions by the same values, so a table needs no mapping."""
+    chart = _chart("table", rows=TableRows.RUN, aggregate=aggregate)
+
+    assert chart.metric_reductions().default.value == aggregate.value
+    assert chart.metric_reductions().of("loss") is MetricReduction(aggregate.value)

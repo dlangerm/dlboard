@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field, ValidationError, field_validator, model_v
 from structlog.stdlib import get_logger
 
 from dlboard._compat import StrEnum
-from dlboard.models._metric import MetricReduction
+from dlboard.models._metric import MetricReduction, MetricReductions
 
 if typing.TYPE_CHECKING:
     from collections.abc import Mapping
@@ -195,15 +195,15 @@ class ChartType(ABC, BaseModel, typing.Generic[_Parameters, _Dataframe, _Chart],
         """Hint at the columns required for this chart."""
 
     @classmethod
-    def metric_reduction(cls, parameters: _Parameters) -> MetricReduction:  # noqa: ARG003
+    def metric_reductions(cls, parameters: _Parameters) -> MetricReductions:  # noqa: ARG003
         """
-        How much of each metric in `hint_required_columns` this chart draws from.
+        How much of each metric in `hint_required_columns` this chart draws from, by column (`MetricReductions`).
 
         A chart that shows where each run ended up, or a summary of its series, says so, and is then handed
         a row per run instead of a row per step -- what keeps its cost from growing with training. Defaults to
         every step, so a chart type that draws the series itself need not say anything.
         """
-        return MetricReduction.HISTORY
+        return MetricReductions()
 
     @classmethod
     @abstractmethod
@@ -506,9 +506,9 @@ class ChartTypeRegistry:
         return chart_type.hint_required_columns(parameters)
 
     @classmethod
-    def metric_reduction(cls, chart: ChartInstance[_Dataframe, _Chart]) -> MetricReduction:
+    def metric_reductions(cls, chart: ChartInstance[_Dataframe, _Chart]) -> MetricReductions:
         chart_type, parameters = cls._typed_chart(chart)
-        return chart_type.metric_reduction(parameters)
+        return chart_type.metric_reductions(parameters)
 
     @classmethod
     def hint_required_artifact_keys(cls, chart: ChartInstance[_Dataframe, _Chart]) -> set[str] | None:
@@ -617,12 +617,12 @@ class ChartInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, 
             )
             return None
 
-    def metric_reduction(self) -> MetricReduction:
-        """How much of each metric this chart draws from. Every step, if it cannot be asked. See `hint_required_columns`."""
+    def metric_reductions(self) -> MetricReductions:
+        """How much of each metric this chart draws from, by column. Every step, if it cannot be asked. See `hint_required_columns`."""
         try:
-            return ChartTypeRegistry.metric_reduction(self)
+            return ChartTypeRegistry.metric_reductions(self)
         except (ValidationError, UnknownChartTypeError):
-            return MetricReduction.HISTORY
+            return MetricReductions()
 
     def hint_required_artifact_keys(self) -> set[str] | None:
         try:
@@ -732,18 +732,19 @@ class PanelInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, 
         """
         The metrics the panel fetches under each `MetricReduction`; `None` meaning every metric.
 
-        What each chart wants is its own `hint_required_columns` read as its own `metric_reduction`. A metric
-        the charts disagree on is fetched whole, which serves them all; and so is every metric when a chart
-        has no list of them and the charts disagree.
+        What each chart wants is its own `hint_required_columns`, each read as its own `metric_reductions` says
+        for that column. A metric the charts disagree on is fetched whole, which serves them all. A chart with no
+        list of its metrics draws every metric as its default says, and so the default of every such chart is
+        what every metric is fetched as, when they disagree.
         """
-        wants = [(chart.hint_required_columns(), chart.metric_reduction()) for chart in self.charts]
-        wants = [(columns, reduction) for columns, reduction in wants if columns is None or columns]
+        wants = [(chart.hint_required_columns(), chart.metric_reductions()) for chart in self.charts]
+        wants = [(columns, reductions) for columns, reductions in wants if columns is None or columns]
         if any(columns is None for columns, _ in wants):
-            return {_agreed({reduction for _, reduction in wants}): None}
+            return {_agreed({reductions.default for _, reductions in wants}): None}
         wanted: dict[str, set[MetricReduction]] = {}
-        for columns, reduction in wants:
+        for columns, reductions in wants:
             for column in columns or ():
-                wanted.setdefault(column, set()).add(reduction)
+                wanted.setdefault(column, set()).add(reductions.of(column))
         by_reduction: dict[MetricReduction, set[str]] = {}
         for column, reductions in wanted.items():
             by_reduction.setdefault(_agreed(reductions), set()).add(column)

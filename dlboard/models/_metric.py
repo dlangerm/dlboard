@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, TypeVar
 
-from pydantic import AwareDatetime, BaseModel, field_validator
+from pydantic import AwareDatetime, BaseModel, Field, field_validator
 
 from dlboard._compat import StrEnum
 from dlboard.models._histogram import Histogram, UnderlyingHistogramTableEntry
@@ -44,6 +44,22 @@ class MetricReduction(StrEnum):
     def reads_every_step(self) -> bool:
         """Whether answering reads every step of a series: all but the latest and the first, which are probes."""
         return self not in (MetricReduction.LATEST, MetricReduction.FIRST)
+
+
+class MetricReductions(BaseModel, frozen=True, extra="forbid"):
+    """
+    How a chart reads each metric it draws from: `default` for every metric, unless `by_column` names it.
+
+    A chart that reads one metric's latest value and another's whole series says so per column. A chart that reads
+    every metric the same way need only set `default`.
+    """
+
+    default: MetricReduction = MetricReduction.HISTORY
+    by_column: dict[str, MetricReduction] = Field(default_factory=dict)
+
+    def of(self, column: str) -> MetricReduction:
+        """How the metric called `column` is read."""
+        return self.by_column.get(column, self.default)
 
 
 class UnderlyingMetricTableEntry(BaseModel, frozen=True, extra="forbid"):

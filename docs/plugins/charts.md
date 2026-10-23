@@ -134,12 +134,14 @@ Subclass `ChartType` and implement its abstract methods:
 - `hint_required_histogram_keys` (optional, none by default) — the logged histogram keys the chart shows. A
   chart always names them: there is no "every histogram", because a histogram is the most expensive thing a panel
   fetches. A field naming one is a `ColumnKind.HISTOGRAM` in `field_column_kinds()`.
-- `metric_reduction(parameters) -> MetricReduction` (optional, `HISTORY` by default) — how much of each metric in
-  `hint_required_columns` the chart draws from. A chart that shows where each run ended up, or a summary of its
-  series, says so (`LATEST`, `FIRST`, `MIN`, `MAX` or `MEAN`) and is handed a row per run and metric instead of a
-  row per step, which is what keeps it cheap on a long run: `LATEST` and `FIRST` are probes of the index, the others
-  are computed by the database. A chart that draws the series itself keeps the default. When the charts of one panel
-  ask for different things of a metric, it is fetched whole, which serves them all.
+- `metric_reductions(parameters) -> MetricReductions` (optional, every step by default) — how much of each metric in
+  `hint_required_columns` the chart draws from, by column. `MetricReductions(default=..., by_column={...})` names a
+  `MetricReduction` for every column, or for the ones in `by_column`. A chart that shows where each run ended up, or
+  a summary of its series, says so (`LATEST`, `FIRST`, `MIN`, `MAX` or `MEAN`) and is handed a row per run and metric
+  instead of a row per step, which is what keeps it cheap on a long run: `LATEST` and `FIRST` are probes of the index,
+  the others are computed by the database. A chart that draws the series itself keeps the default. When the charts of
+  one panel ask for different things of a metric, it is fetched whole, which serves them all. A chart with no list of
+  its metrics (every metric) takes its `default` for all of them.
 
 The same hints bound what the experiment page fetches: a panel shows one page of its charts, and only
 those charts' columns and keys are requested. They are also what the panel's chart filter matches

@@ -399,6 +399,11 @@ def _render_hparam_panel(
                     dmc.Group(
                         [
                             dmc.Text("Runs selected in the table", size="xs", c="dimmed"),
+                            *(
+                                [dmc.Text(f"{selection.newer_hidden} newer not drawn", size="xs", c="orange")]
+                                if selection.newer_hidden
+                                else []
+                            ),
                             dmc.Button(
                                 f"Newest {ShownRunsSettings().default_shown_runs}",
                                 id=NAVBAR_NEWEST_RUNS_ID,
@@ -434,6 +439,17 @@ class _Selection(typing.NamedTuple):
 
     shown: frozenset[int]
     chosen: bool
+    newer_hidden: int
+    """Runs logged after the newest run a selection draws, which that selection leaves out. Zero without a selection."""
+
+
+def _newer_hidden(runs: list[Run], shown: frozenset[int]) -> int:
+    """How many runs were logged after the newest one drawn, and are not drawn: a selection made earlier leaves them out."""
+    drawn = [run.created_at for run in runs if run.id in shown]
+    if not drawn:
+        return 0
+    newest_drawn = max(drawn)
+    return sum(1 for run in runs if run.id not in shown and run.created_at > newest_drawn)
 
 
 def _load_hparam_panel_settings(
@@ -450,7 +466,9 @@ def _load_hparam_panel_settings(
     page = repo.load_page(store, ref)
     shown, columns = shown_run_ids(store, ref.experiment_id, page.document), page.document.hparam_columns
     runs = list(store.get_runs(ref.experiment_id, limit=None, run_ids=None))
-    return runs, _Selection(shown, chosen=page.document.selected_runs is not None), columns
+    chosen = page.document.selected_runs is not None
+    selection = _Selection(shown, chosen=chosen, newer_hidden=_newer_hidden(runs, shown) if chosen else 0)
+    return runs, selection, columns
 
 
 def _render_signature(
@@ -474,7 +492,15 @@ def _render_signature(
     and so must each one's status and end time, or a run finishing would never redraw its row.
     """
     run_states = [[run.id, run.status, run.ended_at.isoformat() if run.ended_at else None] for run in runs]
-    return [experiment_id, hparams, sorted(selection.shown), selection.chosen, selected, run_states]
+    return [
+        experiment_id,
+        hparams,
+        sorted(selection.shown),
+        selection.chosen,
+        selection.newer_hidden,
+        selected,
+        run_states,
+    ]
 
 
 def _register_hparam_table(app: Dash) -> None:

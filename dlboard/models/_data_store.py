@@ -218,6 +218,10 @@ class DataStore(typing.Protocol[_P]):
 
         Every step, unless a `reduction` asks for less (`MetricReduction`): then a row per run and key, found
         without reading the rest, so what it costs does not grow with how long the runs trained.
+
+        A `reduction` is a hint, not a contract: a store may always return every step instead, and the reader
+        reduces it itself (a chart's own reduction of the rows it is handed gives the same answer). So a store that
+        cannot reduce cheaply need not, and a `MetricReduction` added later does not break one that predates it.
         """
 
     def summarize_metric_keys(self, experiment_id: int) -> list[MetricKeySummary]:

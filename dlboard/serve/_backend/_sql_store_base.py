@@ -324,6 +324,14 @@ def _distinct_keys(table: sa.Table, experiment_id: int) -> sa.CTE:
     return keys.union_all(sa.select(next_key).where(keys.c.key.is_not(None)))
 
 
+def _named_keys(keys: frozenset[str]) -> sa.Subquery:
+    """`keys` as a `key` column, to probe each by its index rather than hop through every key a table holds."""
+    # A UNION ALL of literals rather than VALUES: SQLite cannot name the columns of a VALUES list.
+    return sa.union_all(
+        *(sa.select(sa.literal(key, sa.String).label("key")) for key in sorted(keys))
+    ).subquery("logged")
+
+
 def _logged_keys(table: sa.Table, runs: sa.Table, experiment_id: int) -> sa.Subquery:
     """
     The keys a per-step `table` holds for a run of the experiment that is not soft-deleted, as a `key` column.
@@ -351,7 +359,7 @@ def _logged_keys(table: sa.Table, runs: sa.Table, experiment_id: int) -> sa.Subq
 
 class SQLStoreBase[T](ABC, models.DataStore[T]):
     """
-    The full `DataStore` contract over any database SQLAlchemy has a dialect for.
+    The full `DataStore` contract over a database SQLAlchemy has a dialect for. Tested on SQLite and Postgres only.
 
     A concrete store supplies only an `Engine` (connection handling, pooling, per-connection
     setup) and `_insert_ignoring_conflicts` -- the one statement SQLAlchemy spells per dialect.
@@ -920,8 +928,11 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         What is read depends on how many runs and keys there are, not on how many steps they logged. A step
         logged twice (a re-sent batch) counts as its newest write, as in `MetricFrame.from_rows`.
         """
+        if keys is not None and not keys:
+            return []
         m, r = self._tables[models.UnderlyingMetricTableEntry], self._tables[models.Run]
-        logged = _distinct_keys(m, experiment_id)
+        # Asked for by name, the keys are probed directly; only "every metric" has to find out which keys there are.
+        logged = _distinct_keys(m, experiment_id) if keys is None else _named_keys(keys)
         end = (m.c.step.desc() if latest else m.c.step.asc(), m.c.id.desc())
         rewritten = m.alias("rewritten")
         # The newest write of a step is the one that counts, a missing value included: that step then has none.
@@ -941,7 +952,6 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
                 .scalar_subquery()
             )
 
-        key_filter: list[sa.ColumnElement[bool]] = [logged.c.key.in_(keys)] if keys is not None else []
         ends = (
             sa.select(
                 r.c.id.label("run_id"),
@@ -953,7 +963,6 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             .select_from(logged.join(r, sa.true()))
             .where(
                 logged.c.key.is_not(None),
-                *key_filter,
                 *_live_runs(r, experiment_id),
                 *_runs_among(r.c.id, run_ids),
             )

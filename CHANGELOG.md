@@ -24,13 +24,16 @@ pulls that section's body into the GitHub release notes and publishes both distr
     as the histogram table already was; the old ones led with `key`, so every read of one experiment scanned every
     experiment's rows. The new ones are narrower than the old, so the database gets smaller. Runs and
     hyperparameters are indexed by experiment too (hyperparameters had no index, so every page scanned every
-    experiment's). **Starting the server
-    after upgrading rebuilds them** (migrations 0004 and 0005): on a database with many millions of metric rows that takes
-    a while, and writes to those tables wait for it, so upgrade at a quiet moment. A server still running the old
-    version keeps working against the upgraded database during a rolling upgrade, only reading as slowly as it did
-    (as with every migration, one that is stopped cannot be started again on it).
+    experiment's). **Starting the server after upgrading rebuilds them** (migration 0004): rebuilding the metric and
+    artifact indexes holds a lock that blocks reads and writes of those tables until it commits, and creating the run
+    and hyperparameter indexes blocks writes to theirs. On a database with many millions of metric rows that takes a
+    while, so upgrade at a quiet moment. A server still running the old version keeps working against the upgraded
+    database during a rolling upgrade, only reading as slowly as it did (as with every migration, one that is stopped
+    cannot be started again on it).
   * **Which keys an experiment logged**, whether a metric is logged once per run, and the latest artifact of each key are
-    found by hopping through the index from key to key, not by counting and sorting every row.
+    found by hopping through the index from key to key, not by counting and sorting every row. Whether a metric is
+    logged once per run is judged on the newest 100 runs, and the column catalog's hyperparameter keys are read from
+    those runs too, so these do not cost more as an experiment gains runs.
   * **Where each run ended up**, in the run comparison and the Runs table's metric columns, is one probe of the index
     per run and metric, and **a bar chart, and a table with a row per run,** are handed a row per run (the latest,
     first, minimum, maximum or mean of each metric, as the table's aggregate says) instead of every step to reduce in
@@ -45,17 +48,20 @@ pulls that section's body into the GitHub release notes and publishes both distr
   run but the few a view left out, and the table stopped at 1,000 runs, so run 1,001 could not be reached. Now a page
   reads only the runs it draws: the newest 20 (`DLBOARD_DEFAULT_SHOWN_RUNS`), or the ones selected in the Runs table,
   whose checkboxes decide what the charts draw. The table filters by name as well as by status and hyperparameter, and
-  its header checkbox selects only the runs a filter matches, and once runs are selected a **Newest 20** button above it
-  returns the view to the default. A view saved
-  before this, with runs left out, still loads and leaves them out of the newest 20. With 2,000 runs (800k rows, SQLite)
-  three line charts take 38 ms (44 ms at 100 runs) and run compare 10 ms.
-* For chart plugin authors: **`ChartType.metric_reduction`** says how much of each metric a chart draws from, a row
-  per run (`MetricReduction.LATEST`, `FIRST`, `MIN`, `MAX` or `MEAN`) or every step. It defaults to every step, so a
-  chart type that does not say is unchanged. See [docs/plugins/charts.md](docs/plugins/charts.md). For storage plugin
-  authors: reads of what runs logged take the runs to include, `run_ids`, instead of the runs to exclude, `fetch_metrics`
-  takes a `reduction`, and `fetch_latest_metrics` and `summarize_artifact_keys` are
-  new (the key summaries' `MetricKeySummary.max_steps_per_run` is now `single_value`); `SQLStoreBase` implements them
-  for any database SQLAlchemy has a dialect for.
+  its header checkbox selects only the runs a filter matches. A selection of more than `DLBOARD_MAX_SHOWN_RUNS` (100)
+  runs is refused with a notice, so no view can read every run of an experiment of thousands. A saved selection
+  leaves out the runs logged after its newest run, and the table says how many. Once runs are selected a **Newest 20**
+  button above the table returns the view to the default. A view saved before selections, with runs left out, still
+  loads and draws the newest 20 of the runs it did not leave out; Newest 20 clears its exclusions. With 2,000 runs
+  (800k rows, SQLite) three line charts take 38 ms (44 ms at 100 runs) and run compare 10 ms.
+* For chart plugin authors: **`ChartType.metric_reductions`** says how much of each metric a chart draws from, by
+  column (`MetricReductions`: a `default`, and a `by_column` for the metrics that differ), each a row per run
+  (`MetricReduction.LATEST`, `FIRST`, `MIN`, `MAX` or `MEAN`) or every step. It defaults to every step, so a chart
+  type that does not say is unchanged. See [docs/plugins/charts.md](docs/plugins/charts.md). For storage plugin
+  authors: reads of what runs logged take the runs to include, `run_ids`, instead of the runs to exclude, and it is
+  required; `fetch_metrics` takes a `reduction`, which is a hint a store may ignore; `summarize_artifact_keys` is new;
+  and the key summaries' `MetricKeySummary.max_steps_per_run` is an upper bound on the steps a run logged, exactly 1
+  when no run logged two. `SQLStoreBase` implements them for SQLite and Postgres, the two dialects it is tested on.
 
 ## [0.10.0] - 2026-10-21
 

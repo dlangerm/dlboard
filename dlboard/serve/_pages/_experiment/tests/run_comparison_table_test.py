@@ -165,7 +165,22 @@ def test_the_runs_table_redraws_when_a_run_finishes() -> None:
     )
 
     def signature(run: Run) -> list[Any]:
-        return run_table._render_signature(1, [], run_table._Selection(frozenset(), chosen=False), [], [run])
+        return run_table._render_signature(
+            1, [], run_table._Selection(frozenset(), chosen=False, newer_hidden=0), [], [run]
+        )
 
     assert signature(running) != signature(finished)
     assert signature(finished) == signature(finished.model_copy())
+
+
+def test_newer_hidden_counts_the_runs_logged_after_the_newest_one_a_selection_draws() -> None:
+    """A selection made earlier leaves out every run logged after the newest it drew, and no others."""
+    runs = [
+        _run(1).model_copy(update={"created_at": _TS.subtract(hours=3)}),
+        _run(2).model_copy(update={"created_at": _TS.subtract(hours=2)}),
+        _run(3).model_copy(update={"created_at": _TS.subtract(hours=1)}),
+        _run(4).model_copy(update={"created_at": _TS}),
+    ]
+
+    assert run_table._newer_hidden(runs, frozenset({1, 2})) == 2
+    assert run_table._newer_hidden(runs, frozenset()) == 0

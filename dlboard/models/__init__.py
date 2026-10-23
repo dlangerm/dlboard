@@ -39,7 +39,13 @@ from dlboard.models._histogram import (
     max_histogram_buckets,
 )
 from dlboard.models._hparams import FlatHparamDict, HyperParams, NewHyperParams, ValidJsonTypes
-from dlboard.models._metric import LoggedMetrics, MetricColumn, MetricReduction, UnderlyingMetricTableEntry
+from dlboard.models._metric import (
+    LoggedMetrics,
+    MetricColumn,
+    MetricReduction,
+    MetricReductions,
+    UnderlyingMetricTableEntry,
+)
 from dlboard.models._panel_frame import (
     ARTIFACT_COLUMN_PREFIX,
     HISTOGRAM_COLUMN_PREFIX,
@@ -153,6 +159,7 @@ __all__ = [
     "LoggedMetrics",
     "MetricColumn",
     "MetricReduction",
+    "MetricReductions",
     "NamePatternList",
     "NewApiToken",
     "NewArtifact",

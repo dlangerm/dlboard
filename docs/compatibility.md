@@ -21,7 +21,7 @@ Breaking any of these needs a migration path and a deprecation window of at leas
     address (`?open=`, `?tab=`). Views saved before that change may still hold `open_panel` and `active_tab`
     keys; they still load, and those keys are ignored.
     A view with no `selected_runs` draws the newest runs (20 by default, `DLBOARD_DEFAULT_SHOWN_RUNS`); one saved
-    before they existed has `excluded_runs` instead, which it still leaves out of those.
+    before they existed has `excluded_runs` instead: it draws the newest of the runs it does not leave out.
   - Chart type names (`line`, `bar`, `image`, `table`, `histogram`).
   - The *values* of a table chart's `mode` (`runs`, `pivot`, `artifacts`), and of a histogram chart's `display`
     (`heatmap`, `bands`, `step`), as saved in a chart's parameters.
