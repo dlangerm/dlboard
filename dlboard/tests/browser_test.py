@@ -1013,6 +1013,78 @@ def test_the_charts_draw_the_newest_runs_until_the_run_table_selects_others(
     assert console_errors == []
 
 
+def _log_runs(api: BasicDlboardAPI, experiment_id: int, count: int) -> list[models.Run]:
+    """`count` runs, oldest first, each logged a loss at three steps (a line needs more than one point)."""
+    runs = [api.create_run(models.NewRun(experiment_id=experiment_id)) for _ in range(count)]
+    api.log_metric_batch(
+        [
+            models.LoggedMetrics(
+                experiment_id=experiment_id,
+                run_id=run.id,
+                step=step,
+                metrics={"loss": 1.0 / (step + 1)},
+                timestamp_utc=pendulum.now("UTC"),
+            )
+            for run in runs
+            for step in range(3)
+        ]
+    )
+    return runs
+
+
+def test_a_selection_past_the_run_cap_is_refused_and_the_charts_keep_the_last_one(
+    page: Page, live_server_url: str, console_errors: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With a cap of two, a third run ticked is refused with a notice, and the charts still draw the two before it."""
+    monkeypatch.setenv("DLBOARD_MAX_SHOWN_RUNS", "2")
+    _create_project_and_experiment(page, live_server_url, "Capped Runs Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    _log_runs(BasicDlboardAPI(live_server_url), experiment_id, 3)
+    page.reload()
+    _auto_generate_charts(page)
+
+    curves = page.locator(".dl-panel-body .recharts-line-curve")
+    expect(curves).to_have_count(3)
+    rows = page.locator(f"#{NAVBAR_HPARAM_DATATABLE_ID} .ag-center-cols-container .ag-row")
+    expect(rows).to_have_count(3)
+    # Every run is drawn (and so ticked) until told otherwise: untick the oldest, so two are selected, within the cap.
+    rows.nth(2).locator(".ag-selection-checkbox input").uncheck()
+    expect(curves).to_have_count(2)
+    # Ticking it back makes three, past the cap: refused, so the two drawn stay drawn.
+    rows.nth(2).locator(".ag-selection-checkbox input").check()
+
+    expect(page.get_by_text("Too many runs to draw")).to_be_visible()
+    expect(curves).to_have_count(2)
+    assert console_errors == []
+
+
+def test_runs_logged_after_a_selection_are_counted_as_not_drawn(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """Selecting the newest run and logging one more leaves that run out of the charts, and the table says so."""
+    _create_project_and_experiment(page, live_server_url, "Selected Runs Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    api = BasicDlboardAPI(live_server_url)
+    _log_runs(api, experiment_id, 3)
+    page.reload()
+    _auto_generate_charts(page)
+
+    rows = page.locator(f"#{NAVBAR_HPARAM_DATATABLE_ID} .ag-center-cols-container .ag-row")
+    expect(rows).to_have_count(3)
+    # Every run is drawn (and so ticked) until told otherwise: untick the two oldest, leaving the newest selected.
+    rows.nth(1).locator(".ag-selection-checkbox input").uncheck()
+    rows.nth(2).locator(".ag-selection-checkbox input").uncheck()
+    expect(page.get_by_text("Runs selected in the table")).to_be_visible()
+    _log_runs(api, experiment_id, 1)
+    page.reload()
+
+    expect(page.get_by_text("Runs selected in the table")).to_be_visible()
+    expect(page.get_by_text("1 newer not drawn")).to_be_visible()
+    assert console_errors == []
+
+
 def test_chart_legend_labels_each_run_by_name_matching_its_run_table_row(
     page: Page, live_server_url: str, console_errors: list[str]
 ) -> None:
