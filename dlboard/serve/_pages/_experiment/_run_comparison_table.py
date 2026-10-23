@@ -122,7 +122,17 @@ DELETE_RUN_MODAL_ID: ModalId[ids.ExperimentPage] = ModalId("delete-run-modal")
 DELETE_RUN_CONFIRM_ID: ButtonId[ids.ExperimentPage] = ButtonId("delete-run-confirm")
 DELETE_RUN_CANCEL_ID: ButtonId[ids.ExperimentPage] = ButtonId("delete-run-cancel")
 
+NAVBAR_HPARAM_DRAWN_RUNS_ID: StoreId[ids.ExperimentPage] = StoreId("navbar-hparam-drawn-runs")
+NAVBAR_RUN_SELECTION_ID: StoreId[ids.ExperimentPage] = StoreId("navbar-run-selection")
+"""
+The run ids the table's selection holds once it differs from `NAVBAR_HPARAM_DRAWN_RUNS_ID`: what the user chose.
+
+In the experiment page's static layout, not the table's own render tree: a store that mounted with the table would
+set `sync_run_selection` off itself, which is the round trip this store exists to avoid.
+"""
+
 _HPARAM_COLS_CHANGED_JS = ClientsideScript(Path(__file__).with_name("hparam_cols_changed.js"))
+_RUN_SELECTION_GATE_JS = ClientsideScript(Path(__file__).with_name("run_selection_gate.js"))
 
 
 def _build_hparam_rows(
@@ -565,6 +575,7 @@ def _register_hparam_table(app: Dash) -> None:
                 _delete_run_modal(),
                 Store(id=DELETE_RUN_PENDING_STORE_ID),
                 Store(id=NAVBAR_HPARAM_SIGNATURE_ID, data=signature),
+                Store(id=NAVBAR_HPARAM_DRAWN_RUNS_ID, data=sorted(selection.shown)),
             ],
             gap="xs",
             p="xs",
@@ -604,11 +615,25 @@ def _register_hparam_table(app: Dash) -> None:
         )
         return page.model_dump_json()
 
+    # The table's `selectedRows` is *computed from* the runs the page currently shows (see
+    # `_build_hparam_datatable`), so ag-grid reports it on mount -- twice -- though nobody chose
+    # anything. Dash fires a callback on a dynamically-created component mounting with a value even
+    # with `prevent_initial_call=True` (that only suppresses the very first page render), and each
+    # one would be a server round trip that ends in `PreventUpdate`. So the browser compares the
+    # selection with the runs drawn first, and only a real change reaches `sync_run_selection`.
+    app.clientside_callback(
+        _RUN_SELECTION_GATE_JS.source,
+        Output(NAVBAR_RUN_SELECTION_ID, "data"),
+        Input(NAVBAR_HPARAM_DATATABLE_ID, "selectedRows", allow_optional=True),
+        State(NAVBAR_HPARAM_DRAWN_RUNS_ID, "data"),
+        prevent_initial_call=True,
+    )
+
     @app.callback(
         Output(ids.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Output(ids.METRIC_CONTENT_ID, "children", allow_duplicate=True),
         Output(VIEW_NOTIFY_ID, "sendNotifications", allow_duplicate=True),
-        Input(NAVBAR_HPARAM_DATATABLE_ID, "selectedRows", allow_optional=True),
+        Input(NAVBAR_RUN_SELECTION_ID, "data", allow_optional=True),
         State(NAVBAR_HPARAM_DATATABLE_ID, "rowData", allow_optional=True),
         State(constants.STATE_EXPERIMENT_ID, "data"),
         State(ids.STATE_PAGE_STORAGE, "data"),
@@ -616,32 +641,20 @@ def _register_hparam_table(app: Dash) -> None:
         prevent_initial_call=True,
     )
     def sync_run_selection(
-        selected_rows: list[dict[str, Any]] | dict[str, Any] | None,
+        selection: list[int] | None,
         table_data: list[dict[str, Any]] | None,
         experiment_id: int,
         page_json: str,
         paging_json: str,
     ) -> tuple[Any, ...]:
-        if selected_rows is None or table_data is None:
+        if selection is None or table_data is None:
             raise PreventUpdate
-        # `_build_hparam_datatable` seeds `selectedRows` with the `{"ids": [...]}` shorthand --
-        # ag-grid echoes that same shorthand back on mount (before any real user selection), only
-        # switching to a list of full row objects once the user actually (de)selects a row.
-        selected_ids = (
-            {int(i) for i in selected_rows["ids"]}
-            if isinstance(selected_rows, dict)
-            else {row[MetricColumn.RUN_ID] for row in selected_rows}
-        )
+        selected_ids = set(selection)
 
         store = get_data_store()
-        # The table's `selectedRows` is *computed from* the runs the page currently shows
-        # (see `_build_hparam_datatable`), so it mounting for the first time reports a "change"
-        # here even though nothing the user did actually changed anything -- Dash fires this even
-        # with `prevent_initial_call=True`, because that only suppresses the very first page
-        # render, not a dynamically-created component (this navbar table isn't in the static
-        # layout) mounting later with an already-computed value. Skip the (expensive, chart-
-        # remounting) rebuild when the table says the runs the page already shows. `ref_of`,
-        # not `STATE_VIEW_ID` -- see `render_navbar_hparams`'s own comment on why.
+        # Still checked here: the browser compared against the runs drawn when the table was built, and
+        # the page may have changed since. `ref_of`, not `STATE_VIEW_ID` -- see `render_navbar_hparams`'s
+        # own comment on why.
         ref = repo.ref_of(experiment_id, page_model.BasicExperimentPage.model_validate_json(page_json))
         current_page = repo.load_page(store, ref)
         listed = {row[MetricColumn.RUN_ID] for row in table_data}
