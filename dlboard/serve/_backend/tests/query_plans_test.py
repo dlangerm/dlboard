@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 import sqlalchemy as sa
 
+from dlboard import models
 from dlboard.conftest import StoreBackend
 from dlboard.models import MetricReduction
 
@@ -26,6 +27,8 @@ _SEEKS = {
     "Run": "(experiment_id, created_at)",
 }
 """What each table an experiment page reads is sought by: the index that leads with the experiment (or the key, `id`)."""
+_BY_RUN = frozenset({"UnderlyingMetricTableEntry", "UnderlyingHistogramTableEntry", "Artifact"})
+"""The per-step tables, which deleting a run reaches by its `run_id`."""
 _READS: dict[str, Callable[[PostgresStore, int], object]] = {
     "summarize_metric_keys": lambda s, e: s.summarize_metric_keys(e),
     "summarize_histogram_keys": lambda s, e: s.summarize_histogram_keys(e),
@@ -57,10 +60,8 @@ def _nodes(plan: dict[str, Any]) -> Iterator[dict[str, Any]]:
         yield from _nodes(child)
 
 
-@pytest.mark.parametrize("read", _READS)
-def test_a_read_seeks_a_table_by_experiment(
-    store: PostgresStore, postgres_settings: PostgresSettings, experiment_id: int, read: str
-) -> None:
+def _recorded(store: PostgresStore, action: Callable[[], object]) -> list[tuple[str, dict[str, object]]]:
+    """The statements (and their parameters) `action` sent to the database."""
     statements: list[tuple[str, dict[str, object]]] = []
 
     def record(
@@ -74,20 +75,33 @@ def test_a_read_seeks_a_table_by_experiment(
         statements.append((statement, parameters))
 
     sa.event.listen(store._engine, "before_cursor_execute", record)
-    _READS[read](store, experiment_id)
+    action()
+    sa.event.remove(store._engine, "before_cursor_execute", record)
+    return statements
 
-    statement, parameters = statements[-1]
+
+def _plan(
+    store: PostgresStore, settings: PostgresSettings, statement: str, parameters: dict[str, object]
+) -> tuple[list[dict[str, Any]], dict[str, str]]:
+    """The plan nodes of `statement` when scanning a table is forbidden, and the definitions of the schema's indexes."""
     with store._engine.connect() as conn:
         # A table this small is always cheaper to scan, so forbid scans: what is left is whether an index can serve the read.
         conn.exec_driver_sql("SET enable_seqscan = off")
         document: Any = conn.exec_driver_sql("EXPLAIN (FORMAT JSON) " + statement, parameters).scalar_one()
         definitions = conn.execute(
             sa.text("SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = :schema"),
-            {"schema": postgres_settings.db_schema},
+            {"schema": settings.db_schema},
         ).all()
-    indexes = {str(name): str(definition) for name, definition in definitions}
     plan: dict[str, Any] = (json.loads(document) if isinstance(document, str) else document)[0]["Plan"]
-    nodes = list(_nodes(plan))
+    return list(_nodes(plan)), {str(name): str(definition) for name, definition in definitions}
+
+
+@pytest.mark.parametrize("read", _READS)
+def test_a_read_seeks_a_table_by_experiment(
+    store: PostgresStore, postgres_settings: PostgresSettings, experiment_id: int, read: str
+) -> None:
+    statement, parameters = _recorded(store, lambda: _READS[read](store, experiment_id))[-1]
+    nodes, indexes = _plan(store, postgres_settings, statement, parameters)
 
     scanned = {n["Relation Name"] for n in nodes if n["Node Type"] == "Seq Scan"} & _SEEKS.keys()
     assert not scanned
@@ -97,3 +111,36 @@ def test_a_read_seeks_a_table_by_experiment(
         for table, seek in _SEEKS.items():
             if f'"{table}"' in indexes[index]:
                 assert indexes[index].endswith((seek, "(id)")), index
+
+
+def test_deleting_and_purging_a_run_seek_the_per_step_tables_by_run(
+    store: PostgresStore,
+    postgres_settings: PostgresSettings,
+    experiment_id: int,
+    admin: models.User,
+) -> None:
+    run = store.create_run(models.NewRun(experiment_id=experiment_id))
+
+    def delete_and_purge() -> None:
+        store.delete_run(run.id, admin)
+        store.purge_run(run.id, admin)
+
+    statements = _recorded(store, delete_and_purge)
+    # The database deletes the run's rows itself (`ON DELETE CASCADE`), by a statement of its own that no hook sees.
+    cascade: list[tuple[str, dict[str, object]]] = [
+        (f'DELETE FROM "{table}" WHERE run_id = %(run_id)s', {"run_id": run.id}) for table in _BY_RUN
+    ]
+
+    reached = [
+        (statement, parameters)
+        for statement, parameters in [*statements, *cascade]
+        if any(f'"{table}"' in statement for table in _BY_RUN) and not statement.startswith("INSERT")
+    ]
+    assert len(reached) > len(_BY_RUN)
+    for statement, parameters in reached:
+        nodes, indexes = _plan(store, postgres_settings, statement, parameters)
+        assert not {n["Relation Name"] for n in nodes if n["Node Type"] == "Seq Scan"} & _BY_RUN, statement
+        # With scans forbidden Postgres reads a whole index it can only filter by `run_id`, so the seek is the index's lead.
+        for index in {n["Index Name"] for n in nodes if "Index Name" in n}:
+            if any(f'"{table}"' in indexes[index] for table in _BY_RUN):
+                assert indexes[index].endswith(("(run_id)", "(id)")), (statement, index)

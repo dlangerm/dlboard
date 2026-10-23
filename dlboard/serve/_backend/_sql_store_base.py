@@ -265,6 +265,13 @@ def build_metadata(schema: str | None = None) -> tuple[sa.MetaData, dict[type[Ba
         ("idx_artifact_lookup", artifacts),
     ):
         sa.Index(name, per_step.c.experiment_id, per_step.c.key, per_step.c.run_id, per_step.c.step)
+    # Deleting or purging a run finds its rows by `run_id`, which nothing above leads with.
+    for name, per_step in (
+        ("idx_metric_run", metrics),
+        ("idx_histogram_run", histograms),
+        ("idx_artifact_run", artifacts),
+    ):
+        sa.Index(name, per_step.c.run_id)
     sa.Index("idx_run_experiment", runs.c.experiment_id, runs.c.created_at)
     sa.Index("idx_hyperparams_experiment", hyperparams.c.experiment_id, hyperparams.c.run_id)
     for field in PAGE_SCOPE_FIELDS:
