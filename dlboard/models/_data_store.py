@@ -224,14 +224,22 @@ class DataStore(typing.Protocol[_P]):
         cannot reduce cheaply need not, and a `MetricReduction` added later does not break one that predates it.
         """
 
-    def summarize_metric_keys(self, experiment_id: int) -> list[MetricKeySummary]:
+    def summarize_metric_keys(self, experiment_id: int) -> list[str]:
         """
         Every metric key logged in an experiment (non-deleted runs), sorted, without fetching values.
 
         For callers (a column picker, chart suggestions) that only need to know what's *available*
         -- fetching every metric row via `fetch_metrics` for that is needlessly expensive once an
-        experiment has any real volume of logged steps. Each key's `max_steps_per_run` is judged on the newest
-        runs only (see `MetricKeySummary`), so this does not cost more as an experiment gains runs.
+        experiment has any real volume of logged steps. Judging a key's shape is a probe per key, so that is
+        `summarize_metric_steps`, for the keys a caller is about to chart and no others.
+        """
+        ...
+
+    def summarize_metric_steps(self, experiment_id: int, keys: frozenset[str]) -> list[MetricKeySummary]:
+        """
+        How many steps each of `keys` logged in a run, at most (see `MetricKeySummary`), judged on the newest runs.
+
+        A key no live run logged comes back with 0. Probes only `keys`, so it costs what asking for them costs.
         """
         ...
 

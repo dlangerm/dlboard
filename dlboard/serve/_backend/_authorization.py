@@ -382,9 +382,13 @@ class AuthorizingDataStore(models.DataStore[...]):
         self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
         return self._inner.fetch_metrics(experiment_id, keys=keys, run_ids=run_ids, reduction=reduction)
 
-    def summarize_metric_keys(self, experiment_id: int) -> list[MetricKeySummary]:
+    def summarize_metric_keys(self, experiment_id: int) -> list[str]:
         self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
         return self._inner.summarize_metric_keys(experiment_id)
+
+    def summarize_metric_steps(self, experiment_id: int, keys: frozenset[str]) -> list[MetricKeySummary]:
+        self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
+        return self._inner.summarize_metric_steps(experiment_id, keys)
 
     def fetch_histograms(
         self,

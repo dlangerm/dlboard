@@ -41,7 +41,7 @@ from dlboard.serve._pages._experiment._chart_autogen import (
     parse_selection,
     visible_suggestions,
 )
-from dlboard.serve._pages._experiment._column_catalog import ColumnCatalog
+from dlboard.serve._pages._experiment._column_catalog import ColumnCatalog, single_value_metrics
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
@@ -463,6 +463,7 @@ def _register_auto_populate(app: Dash) -> None:
             delimiter=auto_populate_ctx["delimiter"] or _DEFAULT_DELIMITER,
             mode=split_mode,
             lightning=lightning,
+            single_value=single_value_metrics(store, experiment_id, catalog.metrics),
         )
         page, container = edits.commit(
             auto_populate_ctx["page_json"],
@@ -606,9 +607,15 @@ def _register_suggestions(app: Dash) -> None:
         lightning = curr_page.experiment_id is not None and panel_data.is_lightning_experiment(
             store, curr_page.experiment_id
         )
+        uncharted = find_uncharted_keys(curr_page.panels, catalog)
         suggestions = build_suggestions(
-            find_uncharted_keys(curr_page.panels, catalog),
+            uncharted,
             catalog,
+            single_value=(
+                single_value_metrics(store, curr_page.experiment_id, uncharted.metrics)
+                if curr_page.experiment_id is not None
+                else frozenset()
+            ),
             delimiter=suggest_ctx["delimiter"] or _DEFAULT_DELIMITER,
             mode=split_mode,
             lightning=lightning,

@@ -31,6 +31,7 @@ _BY_RUN = frozenset({"UnderlyingMetricTableEntry", "UnderlyingHistogramTableEntr
 """The per-step tables, which deleting a run reaches by its `run_id`."""
 _READS: dict[str, Callable[[PostgresStore, int], object]] = {
     "summarize_metric_keys": lambda s, e: s.summarize_metric_keys(e),
+    "summarize_metric_steps": lambda s, e: s.summarize_metric_steps(e, frozenset({"loss"})),
     "summarize_histogram_keys": lambda s, e: s.summarize_histogram_keys(e),
     "summarize_artifact_keys": lambda s, e: s.summarize_artifact_keys(e),
     "fetch_metrics, latest": lambda s, e: s.fetch_metrics(e, reduction=MetricReduction.LATEST, run_ids=None),

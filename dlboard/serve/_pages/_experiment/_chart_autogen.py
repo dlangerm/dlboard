@@ -99,7 +99,7 @@ def default_chart_for_metric(
     The sensible default chart for a metric column: a line chart against `step`.
 
     `single_value` (every run logs this metric at most once, per
-    `ColumnCatalog.single_value_metrics`) switches that to a bar chart comparing the
+    `single_value_metrics`) switches that to a bar chart comparing the
     value across runs instead -- a line chart of a single point per run isn't a chart at all.
     """
     if single_value:
@@ -225,6 +225,7 @@ def build_auto_panels(
     delimiter: str,
     mode: SplitMode,
     lightning: bool = False,
+    single_value: frozenset[str] = frozenset(),
 ) -> list[PanelInstance[typing.Any, typing.Any]]:
     """A full set of panels for a brand-new (empty) view: one default chart per key, grouped as `group_keys_into_panels`."""
     artifact_charts = {
@@ -234,7 +235,7 @@ def build_auto_panels(
     def chart_for(key: str, kind: ColumnKind) -> ChartInstance[typing.Any, typing.Any]:
         match kind:
             case ColumnKind.METRIC:
-                return default_chart_for_metric(key, single_value=key in catalog.single_value_metrics)
+                return default_chart_for_metric(key, single_value=key in single_value)
             case ColumnKind.ARTIFACT:
                 return artifact_charts[key]
             case ColumnKind.HISTOGRAM:
@@ -328,19 +329,20 @@ def visible_suggestions(
             return sorted(matching, key=lambda s: (s.panel_name, s.key))
 
 
-def build_suggestions(
+def build_suggestions(  # noqa: PLR0913
     uncharted: UnchartedKeys,
     catalog: ColumnCatalog,
     *,
     delimiter: str,
     mode: SplitMode,
     lightning: bool = False,
+    single_value: frozenset[str] = frozenset(),
 ) -> list[Suggestion]:
     """
     Turn uncharted keys into ready-to-add `Suggestion`s, grouped the same way as auto-populate.
 
-    `catalog` says which metrics are single-valued (a bar chart) and which chart type displays each
-    artifact key, exactly as it does for `build_auto_panels`.
+    `single_value` says which metrics are single-valued (a bar chart), and `catalog` which chart type displays each
+    artifact key, exactly as they do for `build_auto_panels`.
     """
     suggestions = [
         Suggestion(
@@ -351,7 +353,7 @@ def build_suggestions(
                 ColumnKind.METRIC,
                 granularity=lightning_granularity(column) if lightning else None,
             ),
-            chart=default_chart_for_metric(column, single_value=column in catalog.single_value_metrics),
+            chart=default_chart_for_metric(column, single_value=column in single_value),
         )
         for column in uncharted.metrics
     ]
