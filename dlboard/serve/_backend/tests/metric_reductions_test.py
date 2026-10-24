@@ -191,3 +191,22 @@ def test_a_reduction_is_what_the_whole_history_reduces_to_however_steps_were_re_
     expected = _from_the_history(store, experiment_id, reduction)
     assert got.keys() == expected.keys()
     assert got == pytest.approx(expected)
+
+
+@pytest.mark.parametrize(
+    ("reduction", "step"),
+    [(models.MetricReduction.LATEST, 1), (models.MetricReduction.FIRST, 0)],
+    ids=["latest", "first"],
+)
+def test_a_list_of_more_keys_than_sqlite_compounds_takes_in_one_query_reads_every_one(
+    store: SQLLiteStore, experiment_id: int, reduction: models.MetricReduction, step: int
+) -> None:
+    """SQLite caps a UNION ALL at 500 SELECTs, so a list of keys longer than that must still be read in full."""
+    (run,) = _runs(store, experiment_id, 1)
+    keys = [f"metric_{i:04d}" for i in range(600)]
+    for at in (0, 1):
+        _log(store, run, at, **{key: float(i + 10 * at) for i, key in enumerate(keys)})
+
+    assert store.fetch_metrics(
+        experiment_id, keys=frozenset(keys), run_ids=None, reduction=reduction
+    ).latest_per_run() == {run.id: {key: float(i + 10 * step) for i, key in enumerate(keys)}}

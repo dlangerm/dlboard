@@ -332,12 +332,22 @@ def _distinct_keys(table: sa.Table, experiment_id: int) -> sa.CTE:
     return keys.union_all(sa.select(next_key).where(keys.c.key.is_not(None)))
 
 
+_COMPOUND_SELECT_TERMS: Final = 500
+"""How many SELECTs one `UNION ALL` may chain: SQLite's `SQLITE_LIMIT_COMPOUND_SELECT`, 500 by default."""
+
+
 def _named_keys(keys: frozenset[str]) -> sa.Subquery:
-    """`keys` as a `key` column, to probe each by its index rather than hop through every key a table holds."""
-    # A UNION ALL of literals rather than VALUES: SQLite cannot name the columns of a VALUES list.
-    return sa.union_all(
-        *(sa.select(sa.literal(key, sa.String).label("key")) for key in sorted(keys))
-    ).subquery("logged")
+    """
+    `keys` as a `key` column, to probe each by its index rather than hop through every key a table holds.
+
+    A UNION ALL of literals rather than VALUES: SQLite cannot name the columns of a VALUES list. Its cap on a
+    compound SELECT is why the literals are unioned in blocks under that cap, and the blocks unioned in turn.
+    """
+    blocks = [
+        sa.union_all(*(sa.select(sa.literal(key, sa.String).label("key")) for key in block)).subquery()
+        for block in itertools.batched(sorted(keys), _COMPOUND_SELECT_TERMS)
+    ]
+    return sa.union_all(*(sa.select(block.c.key) for block in blocks)).subquery("logged")
 
 
 def _logged_keys(table: sa.Table, runs: sa.Table, experiment_id: int) -> sa.Subquery:

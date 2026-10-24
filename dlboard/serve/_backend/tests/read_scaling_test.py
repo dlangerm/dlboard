@@ -119,15 +119,21 @@ def store_backend() -> StoreBackend:
     return StoreBackend.POSTGRES
 
 
-def _train(store: PostgresStore, project_id: int, steps: int, runs: int = _RUNS) -> int:
-    """A new experiment whose `runs` runs logged two metrics, a histogram and an image at each of `steps` steps."""
+def _train(store: PostgresStore, project_id: int, steps: int, runs: int = _RUNS, keys: int = 0) -> int:
+    """
+    A new experiment whose `runs` runs logged two metrics (and `keys` more), a histogram and an image at each step.
+    """
     experiment = store.create_experiment(models.NewExperiment(project_id=project_id))
     for _ in range(runs):
         run = store.create_run(models.NewRun(experiment_id=experiment.id))
         store.log_hyperparams(models.NewHyperParams.from_raw(run.id, experiment.id, {"lr": 0.1}))
         store.log_metrics(
             models.LoggedMetrics(
-                metrics={"loss": 1.0 / (step + 1), "acc": float(step)},
+                metrics={
+                    "loss": 1.0 / (step + 1),
+                    "acc": float(step),
+                    **{f"metric_{i:04d}": float(step + i) for i in range(keys)},
+                },
                 histograms={"grad": models.Histogram(edges=[0.0, 1.0], counts=[step])},
                 step=step,
                 experiment_id=experiment.id,
@@ -248,4 +254,47 @@ def test_a_key_summary_reads_no_more_once_it_judges_only_the_newest_runs(
     assert among_many.rows <= 2 * alone.rows, f"{among_many.rows} rows for 300 runs, {alone.rows} for 120"
     assert among_many.pages <= 2 * alone.pages + 10, (
         f"{among_many.pages} pages for 300 runs, {alone.pages} for 120"
+    )
+
+
+_WIDE_KEYS = 600
+"""More keys than SQLite caps a compound SELECT at, so a load that reads key by key is also measured past that cap."""
+_WIDE_LONG = 50
+"""The steps the long experiment trains when it has `_WIDE_KEYS` keys: its rows grow with the keys and the steps."""
+_ENDS_OF_A_SERIES = "#373: a run's last value reads the whole series of the key it probes"
+_KNOWN_GROWTH: dict[str, str] = {
+    "latest metrics": _ENDS_OF_A_SERIES,
+    "the run comparison": _ENDS_OF_A_SERIES,
+    "a panel of bars of the latest": _ENDS_OF_A_SERIES,
+    "a table of every metric's mean": "#393: a MIN, MAX or MEAN reads every step of every key it reduces",
+}
+"""
+Loads that read more as a run trains, each an expected failure until its issue is fixed. Fixing one must remove its
+entry: the strict xfail then reports it.
+"""
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        pytest.param(name, marks=pytest.mark.xfail(strict=True, reason=_KNOWN_GROWTH[name]))
+        if name in _KNOWN_GROWTH
+        else name
+        for name in _LOADS
+    ],
+)
+def test_a_load_over_many_keys_reads_no_more_pages_for_an_experiment_that_trained_longer(
+    store: PostgresStore, name: str
+) -> None:
+    """Past many keys, a load must still read by the key and by the run, not by each step a run trained."""
+    project_id = store.create_project(models.NewProject(name="p", description="d")).id
+    short = _train(store, project_id, _SHORT, keys=_WIDE_KEYS)
+    long = _train(store, project_id, _WIDE_LONG, keys=_WIDE_KEYS)
+
+    read_short = _work(store, lambda: _LOADS[name](store, short))
+    read_long = _work(store, lambda: _LOADS[name](store, long))
+
+    assert read_short.rows > 0
+    assert read_long.pages <= 2 * read_short.pages + 10, (
+        f"{read_long.pages} pages for {_WIDE_LONG} steps, {read_short.pages} for {_SHORT}, with {_WIDE_KEYS} keys"
     )
