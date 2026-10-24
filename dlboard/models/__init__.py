@@ -39,7 +39,7 @@ from dlboard.models._histogram import (
     max_histogram_buckets,
 )
 from dlboard.models._hparams import FlatHparamDict, HyperParams, NewHyperParams, ValidJsonTypes
-from dlboard.models._key_patterns import KeyPatterns
+from dlboard.models._key_patterns import KeyPatterns, family_template, literal_prefix
 from dlboard.models._metric import (
     LoggedMetrics,
     MetricColumn,
@@ -223,12 +223,14 @@ __all__ = [
     "artifact_keys_in",
     "artifact_tags_column",
     "column_kind",
+    "family_template",
     "format_tag_value",
     "has_scope",
     "histogram_column",
     "hparam_column",
     "is_inlineable_artifact",
     "layer_kind",
+    "literal_prefix",
     "max_histogram_buckets",
     "overlay_image_key",
     "overlay_key",

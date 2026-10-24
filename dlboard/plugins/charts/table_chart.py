@@ -49,6 +49,7 @@ from dlboard.models import (
     artifact_keys_in,
     artifact_tags_column,
     is_inlineable_artifact,
+    literal_prefix,
     overlay_key,
 )
 from dlboard.plugins.charts._artifact_tags import parse_tags
@@ -628,9 +629,9 @@ class TableChart(ChartType[TableChartSettings, pd.DataFrame, dag.AgGrid], frozen
     @typing.override
     def hint_required_artifact_key_prefixes(cls, parameters: TableChartSettings) -> set[str]:
         artifacts = KeyPatterns(tuple(parameters.show_artifacts))
-        # A pattern is fetched by the prefix before its first `*`, a superset that the chart then narrows to the pattern.
+        # A pattern is fetched by the text before its first wildcard, a superset that the chart then narrows to the pattern.
         # The overlays of a picture shown by its key are drawn over it, so they are fetched with it.
-        prefixes = {pattern.split("*", 1)[0] for pattern in artifacts.wildcards}
+        prefixes = {literal_prefix(pattern) for pattern in artifacts.wildcards}
         return prefixes | {overlay_key(key) for key in artifacts.exact}
 
     @classmethod

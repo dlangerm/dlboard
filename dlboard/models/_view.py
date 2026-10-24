@@ -117,7 +117,7 @@ class ParameterFieldType(StrEnum):
     STR = "str"
     LIST_STR = "list[str]"
     LIST_PATTERN = "list[pattern]"
-    """A `list[str]` of names, each of which may instead be a prefix ending in `*` (see `NamePatterns`)."""
+    """A `list[str]` of names, each of which may instead be a pattern with a `*` or `#` in it (see `KeyPatterns`)."""
     TABLE = "table"
     """A `dict[str, Model]`, edited as a table with a row per entry: its key, then a cell per field of `Model`."""
 

@@ -122,9 +122,14 @@ def test_a_table_takes_typed_names_and_prefixes_not_only_those_that_exist(
             ["*", "eval/*", "eval/deep/*", "eval/a", "eval/deep/b", "z"],
             id="a-prefix-for-every-folder",
         ),
+        pytest.param(
+            ["layer_1/g", "layer_2/g", "layer_x/g"],
+            ["*", "layer_1/*", "layer_2/*", "layer_x/*", "layer_#/g", "layer_1/g", "layer_2/g", "layer_x/g"],
+            id="a-digit-pattern-for-every-family-of-numbered-names",
+        ),
     ],
 )
-def test_the_names_to_show_are_suggested_with_a_prefix_for_each_folder(
+def test_the_names_to_show_are_suggested_with_a_pattern_for_each_folder_and_family(
     names: list[str], suggestions: list[str]
 ) -> None:
     assert settings_form._pattern_suggestions(names) == suggestions

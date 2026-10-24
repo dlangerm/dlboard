@@ -48,8 +48,9 @@ shows (`show_metrics`, `show_hparams`, `show_artifacts`).
 - `rows: artifact` is a row per logged artifact, beside what its run logged at that step, with each tag a
   column that sorts and filters as the number or text it is: the way to find a sample among hundreds.
 
-Each `show_*` list takes names, or patterns in which a `*` stands for any run of characters: `eval/*` is a column for every
-key starting `eval/`, including ones logged later (`layer_*/grad_norm` is one such pattern), and `*` alone is all of them. The metrics and hyperparameters
+Each `show_*` list takes names, or patterns in which a `*` stands for any run of characters and a `#` for a run of
+digits: `eval/*` is a column for every key starting `eval/`, including ones logged later, `layer_*/grad_norm` is one such
+pattern, `layer_#/grad_norm` names the numbered layers and nothing else, and `*` alone is all of them. The metrics and hyperparameters
 start at `*`; an empty list shows none, so a table of only artifacts is one. An image is a thumbnail linking to
 the full one, with the overlays logged over it at the same step drawn on it as an image chart draws them (an overlay of
 a picture the table shows is not a column or a row of its own; one chosen without its picture is a file like any other);
@@ -133,7 +134,13 @@ Subclass `ChartType` and implement its abstract methods:
   these is fetched, including keys logged later.
 - `hint_required_column_patterns` (optional, none by default) — metric patterns (`layer_*/grad_norm`) the chart
   draws from: every metric whose name matches one, including metrics logged later. A pattern is matched against the
-  names logged when the panel is drawn, so a chart of many metrics asks for them this way, not by listing each.
+  names logged when the panel is drawn, so a chart of many metrics asks for them this way, not by listing each. In a
+  pattern a `*` stands for any run of characters (`/` included) and a `#` for a run of digits, so `accuracy/#,#/*` is
+  the cells of a grid and a class, and not `accuracy/3,7/aux/dog`. `KeyPatterns.captures(pattern, key)` hands back what
+  each wildcard stood for (`("3", "7", "dog")`), with the matcher the server used, so a chart can group keys by their
+  parts without a regular expression of its own. A pattern over thousands of metrics must not ask for their whole
+  history (that is a column for each metric and a row for each step): read their last value (`metric_reductions`) or
+  their spread (`hint_required_series`).
 - `hint_required_series` (optional, none by default) — the spread of many metrics' values, as a `SeriesBandRequest`
   (their patterns, a grid of at most `grid` steps, and the newest `runs` runs). The panel reads the spread for the chart
   (a `SeriesBand` per run and step: the nearest-rank minimum, quartiles, median and maximum, and the mean) instead of

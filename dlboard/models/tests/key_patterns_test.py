@@ -1,11 +1,11 @@
-"""`*` patterns: which names each one matches, a `*` standing for any run of characters."""
+"""Patterns: which names each one matches, a `*` standing for any run of characters and a `#` for a run of digits."""
 
 from __future__ import annotations
 
 import pytest
 
 from dlboard.models import KeyPatterns
-from dlboard.models._key_patterns import matches
+from dlboard.models._key_patterns import captures, literal_prefix, matches
 
 
 @pytest.mark.parametrize(
@@ -29,6 +29,17 @@ from dlboard.models._key_patterns import matches
         pytest.param("ab*ab", "abab", True, id="parts-may-meet"),
         pytest.param("a*", "A", False, id="case-counts"),
         pytest.param("a[?]*", "a?x", False, id="brackets-and-question-marks-are-plain"),
+        pytest.param("layer_#/grad_norm", "layer_17/grad_norm", True, id="a-hash-is-a-run-of-digits"),
+        pytest.param("layer_#/grad_norm", "layer_x/grad_norm", False, id="a-hash-is-not-a-letter"),
+        pytest.param("layer_#/grad_norm", "layer_/grad_norm", False, id="a-hash-is-at-least-one-digit"),
+        pytest.param("layer_#/grad_norm", "layer_3/attn/grad_norm", False, id="a-hash-does-not-span-slashes"),
+        pytest.param("accuracy/#,#/*", "accuracy/3,7/dog", True, id="a-grid-cell-and-a-class"),
+        pytest.param(
+            "accuracy/#,#/*", "accuracy/3,7/aux/dog", True, id="a-star-after-the-grid-spans-slashes"
+        ),
+        pytest.param("accuracy/#,#/dog", "accuracy/3,7/aux/dog", False, id="a-grid-names-no-deeper-key"),
+        pytest.param("a#1", "a#1", True, id="a-name-with-a-hash-is-still-itself"),
+        pytest.param("a#1", "a21", True, id="and-also-the-keys-the-hash-stands-for"),
     ],
 )
 def test_a_pattern_matches_the_keys_its_stars_stand_for(pattern: str, key: str, matched: bool) -> None:
@@ -45,3 +56,35 @@ def test_a_list_of_patterns_matches_a_key_any_of_them_matches() -> None:
     assert asked.wildcards == {"layer_*/grad_norm"}
     assert not asked.everything
     assert KeyPatterns(("*",)).everything
+
+
+@pytest.mark.parametrize(
+    ("pattern", "key", "got"),
+    [
+        pytest.param("accuracy/#,#/*", "accuracy/3,7/dog", ("3", "7", "dog"), id="each-wildcard-in-order"),
+        pytest.param("loss", "loss", (), id="a-name-has-none"),
+        pytest.param("a*b*c", "axbxc", ("x", "x"), id="stars-take-as-little-as-they-can"),
+        pytest.param("a**b", "axb", ("x",), id="adjacent-stars-are-one"),
+        pytest.param("accuracy/#,#/*", "loss", None, id="no-match-is-none"),
+    ],
+)
+def test_the_captures_are_what_each_wildcard_stood_for(
+    pattern: str, key: str, got: tuple[str, ...] | None
+) -> None:
+    assert captures(pattern, key) == got
+
+
+def test_the_first_pattern_that_names_a_key_gives_its_captures() -> None:
+    asked = KeyPatterns(("loss/#", "accuracy/#,#/*"))
+
+    assert asked.capture("accuracy/3,7/dog") == ("3", "7", "dog")
+    assert asked.capture("loss/4") == ("4",)
+    assert asked.capture("acc") is None
+
+
+@pytest.mark.parametrize(
+    ("pattern", "prefix"),
+    [("eval/*", "eval/"), ("layer_#/x", "layer_"), ("*", ""), ("plain", "plain")],
+)
+def test_a_pattern_starts_with_the_text_before_its_first_wildcard(pattern: str, prefix: str) -> None:
+    assert literal_prefix(pattern) == prefix

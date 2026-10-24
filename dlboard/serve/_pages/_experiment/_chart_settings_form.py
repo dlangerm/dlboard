@@ -8,6 +8,7 @@ the chart it is for and the experiment's columns, and `merge_chart_param_values`
 
 from __future__ import annotations
 
+from collections import Counter
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Final, cast
 
@@ -17,6 +18,7 @@ from dash import Dash, Input, Output, dcc, html
 from pydantic import BaseModel, Field
 
 from dlboard import models
+from dlboard.models import family_template
 from dlboard.serve import ClientsideScript, Icon, icon
 from dlboard.serve._component_ids import PatternId
 from dlboard.serve._grid import CHOICE_RENDERER, KEY_PICKER_EDITOR, SLIDER_RENDERER, themed_grid_kwargs
@@ -273,9 +275,16 @@ def _table_input(  # noqa: PLR0913
 
 
 def _pattern_suggestions(names: list[str]) -> list[str]:
-    """`names` and the `prefix*` of each folder they sit in (`eval/a`, `eval/b` suggest `eval/*`), and `*` for all."""
+    """
+    The patterns a picker offers for `names`, and the names.
+
+    A `prefix*` for each folder they sit in (`eval/a`, `eval/b` suggest `eval/*`), a `#` pattern for each family of
+    them that differ only in their numbers (`layer_1/x`, `layer_2/x` suggest `layer_#/x`), and `*` for all.
+    """
     folders = {name[: i + 1] for name in names for i, char in enumerate(name) if char == "/"}
-    return ["*", *sorted(f"{folder}*" for folder in folders), *sorted(names)]
+    families = Counter(family_template(name) for name in names)
+    shared = {template for template, size in families.items() if size > 1}
+    return ["*", *sorted(f"{folder}*" for folder in folders), *sorted(shared), *sorted(names)]
 
 
 def _param_field_input(  # noqa: PLR0911
@@ -348,7 +357,7 @@ def _param_field_input(  # noqa: PLR0911
                 limit=KEY_PICKER_LIMIT,
                 value=cast("list[str]", value or []),
                 description=field.description,
-                placeholder="Pick a name, or type one or a prefix ending in *",
+                placeholder="Pick a name, or type a pattern: * is any text, # is digits",
                 clearable=True,
                 style=_WIDE_FIELD,
             )
