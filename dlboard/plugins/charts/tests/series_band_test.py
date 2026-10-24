@@ -44,8 +44,12 @@ def test_the_band_bounds_its_grid_and_its_runs(kwargs: dict[str, Any]) -> None:
 def test_a_band_draws_a_median_between_its_quartiles_inside_its_extremes_per_run() -> None:
     request = SeriesBandRequest(patterns=frozenset({"m*"}), grid=8, runs=1)
     bands = [
-        SeriesBand(run_id=1, step=0, keys=4, minimum=1.0, lower=2.0, median=3.0, upper=4.0, maximum=5.0),
-        SeriesBand(run_id=1, step=2, keys=4, minimum=0.5, lower=1.5, median=2.5, upper=3.5, maximum=4.5),
+        SeriesBand(
+            run_id=1, step=0, keys=4, minimum=1.0, lower=2.0, median=3.0, upper=4.0, maximum=5.0, mean=3.0
+        ),
+        SeriesBand(
+            run_id=1, step=2, keys=4, minimum=0.5, lower=1.5, median=2.5, upper=3.5, maximum=4.5, mean=2.5
+        ),
     ]
     frame = build_series_band_dataframe(request, bands)
 
