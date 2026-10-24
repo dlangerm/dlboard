@@ -70,7 +70,22 @@ _FLUSH_TIMEOUT_SEC = 60.0
 """Cap on how long `finalize` waits for a worker to ship everything queued, so a dead server can't hang it."""
 _SHIP_INTERVAL_SEC = 5.0
 """How long a worker lets a partial batch sit before shipping it anyway."""
+_KEYS_PER_QUEUED_METRICS: Final = 1000
+"""
+How many keys one queued `LoggedMetrics` carries. A wider call is queued as several, so a batch of
+`metrics_q_flush_size` items stays a bounded upload however many keys each step logged.
+"""
 _TRANSIENT_CLIENT_ERRORS: Final = frozenset({HTTPStatus.REQUEST_TIMEOUT, HTTPStatus.TOO_MANY_REQUESTS})
+
+
+def _split_keys(metrics: dict[str, float]) -> list[dict[str, float]]:
+    """`metrics` in chunks of at most `_KEYS_PER_QUEUED_METRICS` keys, in order; one chunk if it is empty."""
+    items = list(metrics.items())
+    chunks = [
+        dict(items[start : start + _KEYS_PER_QUEUED_METRICS])
+        for start in range(0, len(items), _KEYS_PER_QUEUED_METRICS)
+    ]
+    return chunks or [metrics]
 
 
 def warn_if_startup_was_slow(elapsed_sec: float) -> None:
@@ -556,15 +571,17 @@ class DLBoardLogger(Logger):
         if step is None:
             msg = "dlboard needs an explicit step for every metric (Lightning always passes one)"
             raise ValueError(msg)
-        self._metrics.put(
-            models.LoggedMetrics(
-                metrics=metrics,
-                step=step,
-                experiment_id=self._experiment_id,
-                run_id=self._run_id,
-                timestamp_utc=pendulum.now(pendulum.UTC),
+        timestamp_utc = pendulum.now(pendulum.UTC)
+        for chunk in _split_keys(metrics):
+            self._metrics.put(
+                models.LoggedMetrics(
+                    metrics=chunk,
+                    step=step,
+                    experiment_id=self._experiment_id,
+                    run_id=self._run_id,
+                    timestamp_utc=timestamp_utc,
+                )
             )
-        )
         self._unflushed = True
 
     @rank_zero_only
