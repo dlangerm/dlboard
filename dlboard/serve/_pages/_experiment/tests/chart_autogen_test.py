@@ -331,9 +331,10 @@ def test_build_suggestions_single_value_metric_gets_a_bar_chart_across_runs() ->
 
     suggestions = autogen.build_suggestions(
         uncharted,
-        ColumnCatalog(single_value_metrics=frozenset({"final_accuracy"})),
+        ColumnCatalog(),
         delimiter="/",
         mode="prefix",
+        single_value=frozenset({"final_accuracy"}),
     )
 
     assert suggestions == [
@@ -349,8 +350,10 @@ def test_build_suggestions_single_value_metric_gets_a_bar_chart_across_runs() ->
 
 
 def test_build_auto_panels_single_value_metric_gets_a_bar_chart() -> None:
-    catalog = ColumnCatalog(metrics=("final_accuracy",), single_value_metrics=frozenset({"final_accuracy"}))
-    panels = autogen.build_auto_panels(catalog, delimiter="/", mode="prefix")
+    catalog = ColumnCatalog(metrics=("final_accuracy",))
+    panels = autogen.build_auto_panels(
+        catalog, delimiter="/", mode="prefix", single_value=frozenset({"final_accuracy"})
+    )
     assert panels[0].charts[0].chart_type == "bar"
 
 

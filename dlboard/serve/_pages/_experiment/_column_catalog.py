@@ -30,8 +30,6 @@ class ColumnCatalog:
     """
 
     metrics: tuple[str, ...] = ()
-    single_value_metrics: frozenset[str] = frozenset()
-    """Metrics every run logged at most once -- a natural fit for a bar chart, not a line chart."""
     artifacts: tuple[str, ...] = ()
     artifact_chart_types: dict[str, str] = field(default_factory=dict[str, str])
     """The chart type that displays each artifact key by default, by name. A key no chart type can display is absent."""
@@ -42,13 +40,11 @@ class ColumnCatalog:
 
     @classmethod
     def load(cls, store: DataStore[...], experiment_id: int) -> ColumnCatalog:
-        metrics = store.summarize_metric_keys(experiment_id)
         artifacts = store.summarize_artifact_keys(experiment_id)
         # Hyperparameter keys are read from the newest runs, the same bound as the metric keys' (`SUMMARY_RUNS`).
         newest = frozenset(run.id for run in store.get_runs(experiment_id, limit=SUMMARY_RUNS, run_ids=None))
         return cls(
-            metrics=tuple(m.key for m in metrics),
-            single_value_metrics=frozenset(m.key for m in metrics if m.max_steps_per_run == 1),
+            metrics=tuple(store.summarize_metric_keys(experiment_id)),
             artifacts=tuple(sorted({a.key for a in artifacts})),
             artifact_chart_types={
                 a.key: chart_type for a in artifacts if (chart_type := default_artifact_chart(a)) is not None
@@ -104,3 +100,15 @@ class ColumnCatalog:
                 return list(self.hparams)
             case ColumnKind.GROUPING:
                 return sorted({MetricColumn.RUN_ID, *self.options(ColumnKind.METRIC), *self.hparams})
+
+
+def single_value_metrics(
+    store: DataStore[...], experiment_id: int, keys: typing.Iterable[str]
+) -> frozenset[str]:
+    """
+    The `keys` every run logged at most once: a natural fit for a bar chart, not a line chart.
+
+    Judged by a probe per key, so a caller passes the keys it is about to chart and no others.
+    """
+    steps = store.summarize_metric_steps(experiment_id, frozenset(keys))
+    return frozenset(s.key for s in steps if s.max_steps_per_run == 1)

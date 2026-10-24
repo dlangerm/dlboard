@@ -139,7 +139,6 @@ def test_column_catalog_load_summarizes_keys_without_their_values(
 
     assert catalog == ColumnCatalog(
         metrics=("final_acc", "loss"),
-        single_value_metrics=frozenset({"final_acc"}),
         artifacts=("boxes", "ckpt", "grads", "img"),
         artifact_chart_types={"ckpt": "files", "img": "image"},  # nothing displays the grads
         layers=("boxes", "img"),  # the shapes say so; the image is drawn as it is; no one draws a checkpoint

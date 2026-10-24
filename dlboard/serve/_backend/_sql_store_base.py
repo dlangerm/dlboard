@@ -1059,10 +1059,23 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         )
         return [MetricRow._make(row) for row in rows]
 
-    def summarize_metric_keys(self, experiment_id: int) -> list[MetricKeySummary]:
-        """Every metric key logged in an experiment (non-deleted runs), sorted, without fetching values."""
+    def summarize_metric_keys(self, experiment_id: int) -> list[str]:
+        """Every metric key logged in an experiment (non-deleted runs), sorted, without judging or fetching any."""
         m, r = self._tables[models.UnderlyingMetricTableEntry], self._tables[models.Run]
         keys = _logged_keys(m, r, experiment_id)
+        return [key for (key,) in self._execute(sa.select(keys.c.key).order_by(keys.c.key))]
+
+    def summarize_metric_steps(self, experiment_id: int, keys: frozenset[str]) -> list[MetricKeySummary]:
+        """
+        How many steps each of `keys` logged in a run, at most: the longest span of steps, judged on the newest runs.
+
+        Only `keys` are probed, so the reads are bounded by how many keys are asked for and by `SUMMARY_RUNS`. A key
+        no live run logged comes back with 0.
+        """
+        if not keys:
+            return []
+        m, r = self._tables[models.UnderlyingMetricTableEntry], self._tables[models.Run]
+        named = _named_keys(keys)
         # Judged on the newest runs only, so what it reads is bounded by `SUMMARY_RUNS`, not by how many runs there are.
         newest = (
             sa.select(r.c.id.label("run_id"))
@@ -1073,22 +1086,18 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         )
         first_step, last_step = (
             sa.select(extent(m.c.step))
-            .where(*_series(m, experiment_id, keys.c.key, newest.c.run_id))
-            .correlate(keys, newest)
+            .where(*_series(m, experiment_id, named.c.key, newest.c.run_id))
+            .correlate(named, newest)
             .scalar_subquery()
             for extent in (sa.func.min, sa.func.max)
         )
         longest = (
             sa.select(sa.func.max(last_step - first_step + 1))
             .select_from(newest)
-            .correlate(keys)
+            .correlate(named)
             .scalar_subquery()
         )
-        rows = self._execute(
-            sa.select(keys.c.key, sa.func.coalesce(longest, 0))
-            .where(keys.c.key.is_not(None))
-            .order_by(keys.c.key)
-        )
+        rows = self._execute(sa.select(named.c.key, sa.func.coalesce(longest, 0)).order_by(named.c.key))
         return [MetricKeySummary(key, max_steps_per_run) for key, max_steps_per_run in rows]
 
     def fetch_histograms(

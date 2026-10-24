@@ -178,7 +178,7 @@ def _load_hparam_view_data(
     hydrated = [models.HyperParams.model_validate_json(run) for run in hparams]
     hparams_by_run = {h.run_id: h for h in hydrated}
     hparam_keys = sorted(set(itertools.chain(*[list(k.hparams_dict.keys()) for k in hydrated])))
-    metric_keys = [s.key for s in store.summarize_metric_keys(experiment_id)]
+    metric_keys = store.summarize_metric_keys(experiment_id)
     wanted = frozenset(selected_metrics & set(metric_keys))
     latest: dict[int, dict[str, float]] = (
         store.fetch_metrics(

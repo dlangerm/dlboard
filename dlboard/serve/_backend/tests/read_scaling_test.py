@@ -234,7 +234,7 @@ def test_a_load_of_the_runs_shown_reads_no_more_for_an_experiment_of_more_runs(
 
 
 _KEY_SUMMARIES: dict[str, Callable[[PostgresStore, int], object]] = {
-    "metric keys": lambda s, e: s.summarize_metric_keys(e),
+    "metric steps": lambda s, e: s.summarize_metric_steps(e, frozenset(s.summarize_metric_keys(e))),
     "the column catalog": lambda s, e: ColumnCatalog.load(s, e),
 }
 
