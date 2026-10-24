@@ -12,6 +12,43 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ## [Unreleased]
 
+### Added
+
+* **A chart can show how many metrics' values spread, as a band.** The series band chart draws, for the metrics its names
+  and patterns match, the median of their values at each step between their quartiles, inside their extremes, for the
+  newest run (up to three). It reads a grid of at most 64 steps (32 by default), so a band over thousands of metrics costs
+  one read per metric, run and grid step, not one per step a run trained.
+* **A metric pattern can have its `*` anywhere.** `layer_*/grad_norm` names every metric of that shape, including ones
+  logged later. A pattern used to end in `*`.
+* **`dev_harness.py seed` can log many metric keys, and times the upload.** `--metric-keys`, `--key-template` and
+  `--steps-per-batch` shape the upload, and the output reports the rows, the ingest rate, the size of the first request
+  and the size of the database.
+
+### Changed
+
+* **Auto-generate charts a family of metrics as one band.** Metrics whose names differ only in their numbers
+  (`layer_0/grad_norm` to `layer_99/grad_norm`) are charted as one band once there are at least 12 of them, rather than a
+  chart each. A family of 11,000 metrics is one chart.
+* **A table of a metric pattern reads only the metrics it shows.** A table of `train/*` used to read every metric in the
+  experiment.
+* **Listing an experiment's metric keys no longer judges each key's shape.** The chart editor, the auto-populate preview,
+  the suggestions drawer and the run table list names only, and a key's shape is judged only for the keys a chart is made
+  from. On an experiment of 11,000 keys and 20 runs (SQLite) the listing took 346 ms and now takes 35 ms.
+* **The suggest-charts drawer lists the first 50 suggestions, and says how many the filter leaves.** It no longer keeps
+  every suggestion's chart in the browser, which froze with thousands of metrics, and builds a chart only when it is added.
+  "Select all" still ticks every suggestion the filter leaves.
+* **The key pickers list the first 100 names that match what is typed.** They still search every name.
+* **A step that logged thousands of keys is uploaded in pieces of at most 1,000 keys.** Each queued item carries at most
+  1,000 keys, so a batch of items is a bounded upload however wide the steps are.
+
+### Fixed
+
+* **Reading the latest or first value of more than 500 named metric keys no longer fails on SQLite.** The read unioned one
+  SELECT per key, and SQLite refuses a union of more than 500.
+* **A run's latest value no longer costs more as the run trains, on Postgres.** The check that a value was the newest
+  logged at its step read the key's whole series for every run, so the run comparison and the latest-value panels read
+  more pages the longer a run trained.
+
 ## [0.11.0] - 2026-10-23
 
 ### Changed
