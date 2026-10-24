@@ -132,7 +132,11 @@ def fetch_panel_dataframe(
     # default, flagged to the user by `_unscoped_fetch_badge`) or a set of keys, where empty means
     # "none of this kind at all".
     hparam_keys = panel.hint_required_hparams()
-    metric_reductions = panel.metric_reductions()
+    # A metric pattern names the metrics it matches among the ones logged, so the names are listed for it alone.
+    known_keys = (
+        store.summarize_metric_keys(experiment_id) if panel.hint_required_column_patterns() else list[str]()
+    )
+    metric_reductions = panel.metric_reductions(known_keys)
     metrics_df = (
         MetricFrame.merged(
             store.fetch_metrics(
@@ -222,6 +226,7 @@ def _chart_columns(chart: models.ChartInstance[Any, Any], df: pd.DataFrame) -> l
         )
     )
     histograms = {histogram_column(key) for key in chart.hint_required_histogram_keys()}
+    patterns = models.KeyPatterns(tuple(chart.hint_required_column_patterns()))
 
     def renders_from(column: str) -> bool:
         if column in models.IDENTITY_COLUMNS:
@@ -234,7 +239,7 @@ def _chart_columns(chart: models.ChartInstance[Any, Any], df: pd.DataFrame) -> l
             case ColumnKind.HISTOGRAM:
                 return column in histograms
             case ColumnKind.METRIC:
-                return metrics is None or column in metrics
+                return metrics is None or column in metrics or patterns.matches(column)
             case (ColumnKind.GROUPING | ColumnKind.LAYER) as kind:
                 msg = f"no dataframe column is of kind {kind}"
                 raise ValueError(msg)

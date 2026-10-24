@@ -15,10 +15,11 @@ from pydantic import BaseModel, Field, ValidationError, field_validator, model_v
 from structlog.stdlib import get_logger
 
 from dlboard._compat import StrEnum
+from dlboard.models._key_patterns import KeyPatterns
 from dlboard.models._metric import MetricReduction, MetricReductions
 
 if typing.TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Collection, Mapping
 
     from dlboard.models._artifact import Artifact
 
@@ -218,6 +219,16 @@ class ChartType(ABC, BaseModel, typing.Generic[_Parameters, _Dataframe, _Chart],
         For a chart that lists a whole family of artifacts (every `checkpoints/...` file) rather
         than one named key, so keys logged later are included without editing the chart.
         Defaults to none, so a chart type that only ever names its keys need not say anything.
+        """
+        return set()
+
+    @classmethod
+    def hint_required_column_patterns(cls, parameters: _Parameters) -> set[str]:  # noqa: ARG003
+        """
+        Hint at the metric patterns this chart needs: every metric whose name matches one (`layer_*/grad_norm`).
+
+        For a chart that shows a family of metrics rather than naming each, so metrics logged later are included
+        without editing the chart. Defaults to none, so a chart type that names its metrics need not say anything.
         """
         return set()
 
@@ -521,6 +532,11 @@ class ChartTypeRegistry:
         return chart_type.hint_required_artifact_key_prefixes(parameters)
 
     @classmethod
+    def hint_required_column_patterns(cls, chart: ChartInstance[_Dataframe, _Chart]) -> set[str]:
+        chart_type, parameters = cls._typed_chart(chart)
+        return chart_type.hint_required_column_patterns(parameters)
+
+    @classmethod
     def hint_required_histogram_keys(cls, chart: ChartInstance[_Dataframe, _Chart]) -> set[str]:
         chart_type, parameters = cls._typed_chart(chart)
         return chart_type.hint_required_histogram_keys(parameters)
@@ -644,6 +660,16 @@ class ChartInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, 
             )
             return set()
 
+    def hint_required_column_patterns(self) -> set[str]:
+        try:
+            return ChartTypeRegistry.hint_required_column_patterns(self)
+        except (ValidationError, UnknownChartTypeError):
+            _log.warning(
+                "chart has invalid parameters or an unregistered chart type, no metric-pattern hint available",
+                chart_type=self.chart_type,
+            )
+            return set()
+
     def hint_required_histogram_keys(self) -> set[str]:
         try:
             return ChartTypeRegistry.hint_required_histogram_keys(self)
@@ -728,16 +754,35 @@ class PanelInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, 
             columns |= hint
         return columns
 
-    def metric_reductions(self) -> Mapping[MetricReduction, set[str] | None]:
+    def hint_required_column_patterns(self) -> set[str]:
+        return set(itertools.chain.from_iterable(c.hint_required_column_patterns() for c in self.charts))
+
+    @staticmethod
+    def _metric_columns(
+        chart: ChartInstance[typing.Any, typing.Any], known_keys: Collection[str]
+    ) -> set[str] | None:
+        """The metrics a chart draws: its named ones, and those of `known_keys` its patterns match. `None` for every."""
+        columns = chart.hint_required_columns()
+        patterns = KeyPatterns(tuple(chart.hint_required_column_patterns()))
+        if columns is None or not patterns.patterns:
+            return columns
+        return columns | {key for key in known_keys if patterns.matches(key)}
+
+    def metric_reductions(
+        self, known_keys: Collection[str] = ()
+    ) -> Mapping[MetricReduction, set[str] | None]:
         """
         The metrics the panel fetches under each `MetricReduction`; `None` meaning every metric.
 
-        What each chart wants is its own `hint_required_columns`, each read as its own `metric_reductions` says
-        for that column. A metric the charts disagree on is fetched whole, which serves them all. A chart with no
-        list of its metrics draws every metric as its default says, and so the default of every such chart is
-        what every metric is fetched as, when they disagree.
+        What each chart wants is its own metrics (`hint_required_columns`, and those of `known_keys` its
+        `hint_required_column_patterns` match), each read as its own `metric_reductions` says for that column. A metric
+        the charts disagree on is fetched whole, which serves them all. A chart with no list of its metrics draws every
+        metric as its default says, and so the default of every such chart is what every metric is fetched as, when they
+        disagree.
         """
-        wants = [(chart.hint_required_columns(), chart.metric_reductions()) for chart in self.charts]
+        wants = [
+            (self._metric_columns(chart, known_keys), chart.metric_reductions()) for chart in self.charts
+        ]
         wants = [(columns, reductions) for columns, reductions in wants if columns is None or columns]
         if any(columns is None for columns, _ in wants):
             return {_agreed({reductions.default for _, reductions in wants}): None}

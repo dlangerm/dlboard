@@ -69,7 +69,17 @@ _RUN_SUMMARIES = [
         ],
     ),
 ]
+_PATTERN_TABLE = PanelInstance[pd.DataFrame, object](
+    name="pattern table",
+    charts=[
+        ChartInstance(
+            chart_type=TableChart.name,
+            parameters={"show_metrics": ["metric_*"], "show_hparams": [], "aggregate": "latest"},
+        )
+    ],
+)
 _LOADS: dict[str, Callable[[PostgresStore, int], object]] = {
+    "the latest of a metric pattern": lambda s, e: fetch_panel_dataframe(s, e, _PATTERN_TABLE, run_ids=None),
     "the column catalog": lambda s, e: ColumnCatalog.load(s, e),
     "metric keys": lambda s, e: s.summarize_metric_keys(e),
     "histogram keys": lambda s, e: s.summarize_histogram_keys(e),

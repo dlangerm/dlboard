@@ -40,6 +40,7 @@ if TYPE_CHECKING:
 LineChart.register(allow_override=True)
 FileListChart.register(allow_override=True)
 ImageChart.register(allow_override=True)
+TableChart.register(allow_override=True)
 
 
 _TS = pendulum.datetime(2026, 1, 1, tz="UTC")
@@ -397,3 +398,29 @@ def test_a_panel_is_split_only_when_different_charts_want_metrics_and_artifacts(
     TableChart.register(allow_override=True)
     panel = PanelInstance[Any, Any](name="p", charts=charts)
     assert panel_data._splits_metric_and_artifact_charts(panel) is splits
+
+
+def test_a_table_of_a_metric_pattern_fetches_the_metrics_it_matches_including_later_ones(
+    store: SQLLiteStore, experiment_id: int
+) -> None:
+    """A pattern is not a list of names, so the metrics it matches are those logged when the panel is drawn."""
+    run = store.create_run(models.NewRun(experiment_id=experiment_id))
+    for key in ("layer_1/grad_norm", "layer_2/grad_norm", "layer_2/acc", "loss"):
+        _log_a_metric(store, experiment_id, run.id, key)
+    panel = PanelInstance[pd.DataFrame, object](
+        name="p",
+        charts=[
+            ChartInstance[pd.DataFrame, object](
+                chart_type=TableChart.name,
+                parameters={"show_metrics": ["layer_*/grad_norm"], "show_hparams": [], "aggregate": "mean"},
+            )
+        ],
+    )
+
+    first = panel_data.fetch_panel_dataframe(store, experiment_id, panel, run_ids=None)
+    _log_a_metric(store, experiment_id, run.id, "layer_3/grad_norm")
+    later = panel_data.fetch_panel_dataframe(store, experiment_id, panel, run_ids=None)
+
+    assert {"layer_1/grad_norm", "layer_2/grad_norm"} <= set(first.columns)
+    assert not {"layer_2/acc", "loss"} & set(first.columns)
+    assert "layer_3/grad_norm" in later.columns
