@@ -159,6 +159,27 @@ class SeedResult:
     project_id: int
     experiment_id: int
     run_ids: list[int]
+    metric_rows: int
+    ingest_seconds: float
+    rows_per_second: int
+    upload_bytes: int
+    database_bytes: int | None
+
+
+def _metric_batch(
+    *, experiment_id: int, run_id: int, keys: list[str], steps: range
+) -> list[models.LoggedMetrics]:
+    """`steps` of one run, every key of `keys` logged at each one, as one upload."""
+    return [
+        models.LoggedMetrics(
+            metrics={key: (j + 1) / (step + 1) for j, key in enumerate(keys)},
+            step=step,
+            experiment_id=experiment_id,
+            run_id=run_id,
+            timestamp_utc=pendulum.now(pendulum.UTC),
+        )
+        for step in steps
+    ]
 
 
 @app.command
@@ -181,6 +202,19 @@ def seed(  # noqa: PLR0913
             help="Steps to log per run, e.g. a large value to reproduce volume-sensitive perf issues."
         ),
     ] = 5,
+    metric_keys: Annotated[
+        int,
+        cyclopts.Parameter(help="Distinct metric keys logged at every step, each named by --key-template."),
+    ] = 1,
+    key_template: Annotated[
+        str, cyclopts.Parameter(help="Name of each metric key, formatted with its index as `i`.")
+    ] = "metric_{i:05d}",
+    steps_per_batch: Annotated[
+        int,
+        cyclopts.Parameter(
+            help="Steps per upload request. With many keys, each step is a large part of one."
+        ),
+    ] = 100,
 ) -> None:
     """Seed a running dlboard server with a project/experiment/runs via the real client API."""
     if directory is not None:
@@ -194,8 +228,12 @@ def seed(  # noqa: PLR0913
     api = BasicDlboardAPI(base_url=resolved_base_url)
     proj = api.get_or_create_project(project)
     exp = api.get_or_create_experiment(proj.id, name=experiment)
+    keys = [key_template.format(i=i) for i in range(metric_keys)]
 
     run_ids: list[int] = []
+    metric_rows = 0
+    ingest_seconds = 0.0
+    upload_bytes = 0
     for i in range(runs):
         run = api.create_run(models.NewRun(experiment_id=exp.id, name=f"run-{i + 1}"))
         run_ids.append(run.id)
@@ -206,22 +244,35 @@ def seed(  # noqa: PLR0913
                 )
             )
         if with_metrics:
-            api.log_metric_batch(
-                [
-                    models.LoggedMetrics(
-                        metrics={"loss": 1.0 / (step + 1)},
-                        step=step,
-                        experiment_id=exp.id,
-                        run_id=run.id,
-                        timestamp_utc=pendulum.now(pendulum.UTC),
-                    )
-                    for step in range(metric_steps)
-                ]
-            )
+            for first_step in range(0, metric_steps, steps_per_batch):
+                batch = _metric_batch(
+                    experiment_id=exp.id,
+                    run_id=run.id,
+                    keys=keys,
+                    steps=range(first_step, min(first_step + steps_per_batch, metric_steps)),
+                )
+                if not upload_bytes:
+                    upload_bytes = len(json.dumps([m.model_dump(mode="json") for m in batch]))
+                started = time.perf_counter()
+                api.log_metric_batch(batch)
+                ingest_seconds += time.perf_counter() - started
+            metric_rows += metric_steps * metric_keys
 
-    print(  # dlboard-ignore[forbid-string-ignore]
-        json.dumps(asdict(SeedResult(project_id=proj.id, experiment_id=exp.id, run_ids=run_ids)), indent=2)
+    rows_per_second = round(metric_rows / ingest_seconds) if ingest_seconds else 0
+    database_bytes = (
+        sum(path.stat().st_size for path in directory.glob("dev.sqlite*")) if directory is not None else None
     )
+    result = SeedResult(
+        project_id=proj.id,
+        experiment_id=exp.id,
+        run_ids=run_ids,
+        metric_rows=metric_rows,
+        ingest_seconds=round(ingest_seconds, 3),
+        rows_per_second=rows_per_second,
+        upload_bytes=upload_bytes,
+        database_bytes=database_bytes,
+    )
+    print(json.dumps(asdict(result), indent=2))  # dlboard-ignore[forbid-string-ignore]
     print(f"{resolved_base_url}/experiment/{exp.id}")  # dlboard-ignore[forbid-string-ignore]
 
 
