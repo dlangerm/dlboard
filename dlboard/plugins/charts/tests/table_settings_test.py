@@ -9,8 +9,7 @@ import pytest
 from pydantic import ValidationError
 
 from dlboard.conftest import props as _props
-from dlboard.models import ChartInstance, ChartTypeRegistry, overlay_key
-from dlboard.plugins.charts._key_patterns import KeyPatterns
+from dlboard.models import ChartInstance, ChartTypeRegistry, KeyPatterns, overlay_key
 from dlboard.plugins.charts._table_settings import Aggregate, TableChartSettings, TableMode, TableRows
 from dlboard.plugins.charts.table_chart import TableChart
 
@@ -28,7 +27,7 @@ from dlboard.plugins.charts.table_chart import TableChart
             id="names",
         ),
         pytest.param(
-            TableChartSettings(show_metrics=["train/*"], show_hparams=["m.*"]), None, None, id="prefixes"
+            TableChartSettings(show_metrics=["train/*"], show_hparams=["m.*"]), {"step"}, None, id="patterns"
         ),
         # Metrics and hparams are fetched independently: a table showing none of one kind fetches none of it.
         pytest.param(
@@ -86,6 +85,7 @@ def test_the_artifact_keys_a_table_asks_the_panel_to_fetch(
         pytest.param(["eval/*"], ["eval/a", "eval/b"], id="prefix-in-key-order"),
         pytest.param(["eval/b", "eval/*"], ["eval/b", "eval/a"], id="never-twice"),
         pytest.param(["*"], ["a", "b", "eval/a", "eval/b"], id="all"),
+        pytest.param(["*/a"], ["eval/a"], id="a-star-in-the-middle"),
         pytest.param(["step", "*"], ["step", "a", "b", "eval/a", "eval/b"], id="reserved-by-name-only"),
     ],
 )
@@ -222,3 +222,17 @@ def test_a_table_saved_with_old_settings_renders_as_it_did() -> None:
     props = _props(TableChart.render(settings, df))
 
     assert {row["step"]: row["1::loss"] for row in props["rowData"]} == {0: 0.5, 1: 0.4}
+
+
+@pytest.mark.parametrize(
+    ("show_metrics", "patterns"),
+    [
+        pytest.param(["*"], set(), id="every-metric-is-not-a-pattern"),
+        pytest.param(["loss", "train/*"], {"train/*"}, id="a-name-is-not-a-pattern"),
+        pytest.param(["layer_*/grad_norm"], {"layer_*/grad_norm"}, id="a-star-in-the-middle"),
+    ],
+)
+def test_the_metric_patterns_a_table_asks_the_panel_to_fetch(
+    show_metrics: list[str], patterns: set[str]
+) -> None:
+    assert TableChart.hint_required_column_patterns(TableChartSettings(show_metrics=show_metrics)) == patterns

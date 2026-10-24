@@ -39,6 +39,7 @@ from dlboard.models._histogram import (
     max_histogram_buckets,
 )
 from dlboard.models._hparams import FlatHparamDict, HyperParams, NewHyperParams, ValidJsonTypes
+from dlboard.models._key_patterns import KeyPatterns
 from dlboard.models._metric import (
     LoggedMetrics,
     MetricColumn,
@@ -155,6 +156,7 @@ __all__ = [
     "HistogramEdges",
     "HyperParams",
     "InstalledPlugin",
+    "KeyPatterns",
     "LayerKind",
     "LoggedMetrics",
     "MetricColumn",

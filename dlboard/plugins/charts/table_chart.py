@@ -35,6 +35,7 @@ from dlboard.models import (
     RUN_NAME_COLUMN,
     ChartType,
     ColumnKind,
+    KeyPatterns,
     MetricColumn,
     MetricReduction,
     MetricReductions,
@@ -51,7 +52,6 @@ from dlboard.models import (
     overlay_key,
 )
 from dlboard.plugins.charts._artifact_tags import parse_tags
-from dlboard.plugins.charts._key_patterns import KeyPatterns
 from dlboard.plugins.charts._layers import drawn_layers, overlay_keys_of, serve_layered_picture
 from dlboard.plugins.charts._table_settings import Aggregate, TableChartSettings, TableRows
 from dlboard.serve import AssetKind, ClientsideScript, series_swatch_class, serve_asset
@@ -594,14 +594,21 @@ class TableChart(ChartType[TableChartSettings, pd.DataFrame, dag.AgGrid], frozen
     @typing.override
     def hint_required_columns(cls, parameters: TableChartSettings) -> set[str] | None:
         metrics = KeyPatterns(tuple(parameters.show_metrics))
-        if metrics.prefixes:
+        if metrics.everything:
             return None
         wanted = set(metrics.exact) | (
             {parameters.row_field} if parameters.rows is TableRows.FIELD else set()
         )
         # Metrics and hparams are fetched independently: a table that shows none of the former
-        # (only hyperparameters, or artifacts) must not fetch every metric of the experiment.
-        return wanted | {MetricColumn.STEP} if wanted else set()
+        # (only hyperparameters, or artifacts) must not fetch every metric of the experiment. A pattern's metrics
+        # are read by name, from the names logged, and need their step like any other.
+        return wanted | {MetricColumn.STEP} if (wanted or metrics.wildcards) else set()
+
+    @classmethod
+    @typing.override
+    def hint_required_column_patterns(cls, parameters: TableChartSettings) -> set[str]:
+        metrics = KeyPatterns(tuple(parameters.show_metrics))
+        return set() if metrics.everything else set(metrics.wildcards)
 
     @classmethod
     @typing.override
@@ -621,14 +628,16 @@ class TableChart(ChartType[TableChartSettings, pd.DataFrame, dag.AgGrid], frozen
     @typing.override
     def hint_required_artifact_key_prefixes(cls, parameters: TableChartSettings) -> set[str]:
         artifacts = KeyPatterns(tuple(parameters.show_artifacts))
+        # A pattern is fetched by the prefix before its first `*`, a superset that the chart then narrows to the pattern.
         # The overlays of a picture shown by its key are drawn over it, so they are fetched with it.
-        return set(artifacts.prefixes) | {overlay_key(key) for key in artifacts.exact}
+        prefixes = {pattern.split("*", 1)[0] for pattern in artifacts.wildcards}
+        return prefixes | {overlay_key(key) for key in artifacts.exact}
 
     @classmethod
     @typing.override
     def hint_required_hparams(cls, parameters: TableChartSettings) -> set[str] | None:
         hparams = KeyPatterns(tuple(parameters.show_hparams))
-        return None if hparams.prefixes else set(hparams.exact)
+        return None if hparams.wildcards else set(hparams.exact)
 
     @classmethod
     @typing.override
