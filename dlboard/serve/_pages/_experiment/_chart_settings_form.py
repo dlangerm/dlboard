@@ -21,6 +21,7 @@ from dlboard.serve import ClientsideScript, Icon, icon
 from dlboard.serve._component_ids import PatternId
 from dlboard.serve._grid import CHOICE_RENDERER, KEY_PICKER_EDITOR, SLIDER_RENDERER, themed_grid_kwargs
 from dlboard.serve._pages._experiment import _ids as ids
+from dlboard.serve._pages._experiment._column_catalog import KEY_PICKER_LIMIT
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -344,6 +345,7 @@ def _param_field_input(  # noqa: PLR0911
                 id=input_id,
                 label=label,
                 data=_pattern_suggestions(names),
+                limit=KEY_PICKER_LIMIT,
                 value=cast("list[str]", value or []),
                 description=field.description,
                 placeholder="Pick a name, or type one or a prefix ending in *",
@@ -371,6 +373,7 @@ def _param_field_input(  # noqa: PLR0911
                     id=input_id,
                     label=label,
                     data=sorted(options) if options else [],
+                    limit=KEY_PICKER_LIMIT,
                     value=multiselect_value or [],
                     searchable=True,
                     description=field.description,
@@ -381,6 +384,7 @@ def _param_field_input(  # noqa: PLR0911
                     id=input_id,
                     label=label,
                     data=sorted(options),
+                    limit=KEY_PICKER_LIMIT,
                     value=value,  # pyrefly: ignore [bad-argument-type]
                     searchable=True,
                     description=field.description,
