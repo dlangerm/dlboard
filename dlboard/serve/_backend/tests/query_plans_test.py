@@ -32,6 +32,7 @@ _BY_RUN = frozenset({"UnderlyingMetricTableEntry", "UnderlyingHistogramTableEntr
 _READS: dict[str, Callable[[PostgresStore, int], object]] = {
     "summarize_metric_keys": lambda s, e: s.summarize_metric_keys(e),
     "summarize_metric_steps": lambda s, e: s.summarize_metric_steps(e, frozenset({"loss"})),
+    "fetch_series_band": lambda s, e: s.fetch_series_band(e, keys=frozenset({"loss"}), run_ids=None, grid=4),
     "summarize_histogram_keys": lambda s, e: s.summarize_histogram_keys(e),
     "summarize_artifact_keys": lambda s, e: s.summarize_artifact_keys(e),
     "fetch_metrics, latest": lambda s, e: s.fetch_metrics(e, reduction=MetricReduction.LATEST, run_ids=None),

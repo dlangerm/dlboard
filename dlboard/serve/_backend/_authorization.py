@@ -390,6 +390,17 @@ class AuthorizingDataStore(models.DataStore[...]):
         self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
         return self._inner.summarize_metric_steps(experiment_id, keys)
 
+    def fetch_series_band(
+        self,
+        experiment_id: int,
+        *,
+        keys: frozenset[str],
+        run_ids: frozenset[int] | None,
+        grid: int,
+    ) -> list[models.SeriesBand]:
+        self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
+        return self._inner.fetch_series_band(experiment_id, keys=keys, run_ids=run_ids, grid=grid)
+
     def fetch_histograms(
         self,
         experiment_id: int,

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING, NamedTuple, TypeVar
 
 from pydantic import AwareDatetime, BaseModel, Field, field_validator
 
@@ -130,3 +130,21 @@ class LoggedMetrics(BaseModel, frozen=True, extra="ignore"):
                 counts=histogram.counts,
                 nonfinite=histogram.nonfinite,
             )
+
+
+class SeriesBand(NamedTuple):
+    """
+    The spread of a set of keys' values at one step of one run.
+
+    `keys` is how many of them logged a number there, and the rest are the nearest-rank minimum, 25th percentile,
+    median, 75th percentile and maximum of those numbers.
+    """
+
+    run_id: int
+    step: int
+    keys: int
+    minimum: float
+    lower: float
+    median: float
+    upper: float
+    maximum: float
