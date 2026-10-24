@@ -37,6 +37,7 @@ from dlboard.serve._pages._experiment._chart_autogen import (
     build_suggestions,
     find_uncharted_keys,
     group_keys_into_panels,
+    limit_panel_groups,
     panel_to_open,
     parse_selection,
     visible_suggestions,
@@ -372,8 +373,12 @@ list that long can't be read anyway. The heading still counts every panel and ch
 """
 
 
-def _render_auto_preview(groups: dict[str, list[tuple[str, ColumnKind]]]) -> Component:
-    """What "Create charts" would add: each panel (the first `_PREVIEW_MAX_PANELS`), and the keys charted in it."""
+def _render_auto_preview(groups: dict[str, list[tuple[str, ColumnKind]]], *, left_out: int = 0) -> Component:
+    """
+    What "Create charts" would add: each panel (the first `_PREVIEW_MAX_PANELS`), and the keys charted in it.
+
+    `left_out` counts the charts past the limit, which "Create charts" leaves for "Suggest charts" to add.
+    """
     n_charts = sum(len(keys) for keys in groups.values())
     shown = list(groups.items())[:_PREVIEW_MAX_PANELS]
     hidden = len(groups) - len(shown)
@@ -414,7 +419,18 @@ def _render_auto_preview(groups: dict[str, list[tuple[str, ColumnKind]]]) -> Com
                 mah=320,
                 type="auto",
             ),
-        ],
+        ]
+        + (
+            [
+                dmc.Text(
+                    f"{_plural(left_out, 'more chart')} not made here: Suggest charts can add them.",
+                    size="xs",
+                    c="dimmed",
+                )
+            ]
+            if left_out
+            else []
+        ),
         gap="xs",
     )
 
@@ -447,13 +463,15 @@ def _register_auto_populate(app: Dash) -> None:
         catalog = ColumnCatalog.load(store, experiment_id)
         if not catalog.has_chartable_keys:
             return True, dmc.Text(_NO_KEYS_MESSAGE, c="dimmed", size="sm"), True
-        groups = group_keys_into_panels(
-            catalog,
-            delimiter=delimiter or _DEFAULT_DELIMITER,
-            mode=_SPLIT_MODE.validate_python(mode),
-            lightning=panel_data.is_lightning_experiment(store, experiment_id),
+        groups, left_out = limit_panel_groups(
+            group_keys_into_panels(
+                catalog,
+                delimiter=delimiter or _DEFAULT_DELIMITER,
+                mode=_SPLIT_MODE.validate_python(mode),
+                lightning=panel_data.is_lightning_experiment(store, experiment_id),
+            )
         )
-        return True if opening else no_update, _render_auto_preview(groups), False
+        return True if opening else no_update, _render_auto_preview(groups, left_out=left_out), False
 
     @app.callback(
         Output(AUTO_POPULATE_MODAL_ID, "opened", allow_duplicate=True),
