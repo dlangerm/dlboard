@@ -961,6 +961,74 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         latest: bool,
     ) -> list[MetricRow]:
         """
+        Each live run's last (or first) row of each key, found by one probe through the index per run and key.
+
+        The probe is only an ordered read of the key's series: the first row in step order is the newest write of
+        its step, so it is the answer unless its value is missing. A key whose last value is missing (a NaN, the
+        last step of a diverged run) is settled by `_settled_ends`, which walks back to the last value there is.
+        """
+        if keys is not None and not keys:
+            return []
+        m, r = self._tables[models.UnderlyingMetricTableEntry], self._tables[models.Run]
+        # Asked for by name, the keys are probed directly; only "every metric" has to find out which keys there are.
+        logged = _distinct_keys(m, experiment_id) if keys is None else _named_keys(keys)
+        end = (m.c.step.desc() if latest else m.c.step.asc(), m.c.id.desc())
+        end_id = (
+            sa.select(m.c.id)
+            .where(*_series(m, experiment_id, logged.c.key, r.c.id))
+            .order_by(*end)
+            .limit(1)
+            .correlate(logged, r)
+            .scalar_subquery()
+        )
+        # Found once, as a CTE: each run and key is probed once, however many columns are read from its row.
+        ends = (
+            sa.select(r.c.id.label("run_id"), logged.c.key.label("key"), end_id.label("end_id"))
+            .select_from(logged.join(r, sa.true()))
+            .where(logged.c.key.is_not(None), *_live_runs(r, experiment_id), *_runs_among(r.c.id, run_ids))
+            .cte("ends")
+        )
+        found = m.alias("found")
+
+        def of_the_end(column: sa.ColumnElement[Any]) -> sa.ScalarSelect[Any]:
+            return sa.select(column).where(found.c.id == ends.c.end_id).correlate(ends).scalar_subquery()
+
+        rows = [
+            MetricRow._make(row)
+            for row in self._execute(
+                sa.select(
+                    ends.c.run_id,
+                    of_the_end(found.c.step).label("step"),
+                    ends.c.key,
+                    of_the_end(found.c.value).label("value"),
+                    of_the_end(found.c.timestamp_utc).label("timestamp_utc"),
+                ).where(ends.c.end_id.is_not(None))
+            )
+        ]
+        unsettled = {(row.run_id, row.key) for row in rows if row.value is None or math.isnan(row.value)}
+        if not unsettled:
+            return [row for row in rows if row.value is not None]
+        settled = {
+            (row.run_id, row.key): row
+            for row in self._settled_ends(
+                experiment_id,
+                frozenset(key for _, key in unsettled),
+                frozenset(run_id for run_id, _ in unsettled),
+                latest=latest,
+            )
+        }
+        kept = [row for row in rows if (row.run_id, row.key) not in unsettled and row.value is not None]
+        return kept + [settled[pair] for pair in unsettled if pair in settled]
+
+    def _settled_ends(
+        self,
+        experiment_id: int,
+        keys: frozenset[str] | None,
+        run_ids: frozenset[int] | None,
+        *,
+        latest: bool,
+    ) -> list[MetricRow]:
+        """
         Each live run's last (or first) row of each key, by one probe through the index per run and key.
 
         What is read depends on how many runs and keys there are, not on how many steps they logged. A step

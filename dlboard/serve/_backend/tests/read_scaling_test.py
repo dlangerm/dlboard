@@ -261,11 +261,7 @@ _WIDE_KEYS = 600
 """More keys than SQLite caps a compound SELECT at, so a load that reads key by key is also measured past that cap."""
 _WIDE_LONG = 50
 """The steps the long experiment trains when it has `_WIDE_KEYS` keys: its rows grow with the keys and the steps."""
-_ENDS_OF_A_SERIES = "#373: a run's last value reads the whole series of the key it probes"
 _KNOWN_GROWTH: dict[str, str] = {
-    "latest metrics": _ENDS_OF_A_SERIES,
-    "the run comparison": _ENDS_OF_A_SERIES,
-    "a panel of bars of the latest": _ENDS_OF_A_SERIES,
     "a table of every metric's mean": "#393: a MIN, MAX or MEAN reads every step of every key it reduces",
 }
 """
