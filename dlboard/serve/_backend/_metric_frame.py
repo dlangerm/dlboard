@@ -12,6 +12,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, NamedTuple, cast
 
+import numpy as np
 import pandas as pd
 
 from dlboard.models._metric import MetricColumn
@@ -41,6 +42,14 @@ class MetricRow(NamedTuple):
     value: float | None
     timestamp_utc: str
     """ISO-8601, as stored."""
+
+
+def _last_valid(values: np.ndarray) -> np.ndarray:
+    """Per column, the last value that is not NaN, and NaN where a column has none: `groupby(...).last()` in numpy."""
+    valid = ~np.isnan(values)
+    from_the_end = np.argmax(valid[::-1], axis=0)
+    last = values[values.shape[0] - 1 - from_the_end, np.arange(values.shape[1])]
+    return np.where(valid.any(axis=0), last, np.nan)
 
 
 _KEY, _VALUE = MetricRow._fields[2], MetricRow._fields[3]
@@ -80,15 +89,11 @@ class MetricFrame:
         if reserved := sorted(keys & set(MetricColumn)):
             msg = f"Stored metrics use reserved column names {reserved}"
             raise ValueError(msg)
+        # Typed before the pivot: a cast of the wide frame afterwards visits every key column, and that is slow.
+        long = long.astype({MetricColumn.RUN_ID: "int64", MetricColumn.STEP: "int64", _VALUE: "float64"})
         values = long.pivot(index=_INDEX, columns=_KEY, values=_VALUE)
         timestamps = long.groupby(_INDEX)[MetricColumn.TIMESTAMP_UTC].min()
-        frame = (
-            values.join(timestamps)
-            .reset_index()
-            .astype(
-                {MetricColumn.RUN_ID: "int64", MetricColumn.STEP: "int64"} | dict.fromkeys(keys, "float64")
-            )
-        )
+        frame = values.join(timestamps).reset_index()
         frame.columns.name = None
         return cls(keys, frame)
 
@@ -136,13 +141,22 @@ class MetricFrame:
         """
         Each run's latest value of every key it has logged, for a frame of `MetricReduction.LATEST` rows.
 
-        Each key has one row per run there, so `last` is that value, and a `NaN` (no value) is left out.
+        Each key has one row per run there, so the last value of a key in a run is that value, and a `NaN` (no value)
+        is left out. Done in numpy: a pandas groupby over thousands of columns is what made this slow.
         """
-        latest = self._frame.groupby(MetricColumn.RUN_ID)[sorted(self.keys)].last()
-        return {
-            cast("int", run_id): {cast("str", key): value for key, value in row.items() if pd.notna(value)}
-            for run_id, row in latest.to_dict(orient="index").items()
-        }
+        keys = sorted(self.keys)
+        runs = np.asarray(self._frame[MetricColumn.RUN_ID], dtype="int64")
+        values = np.asarray(self._frame[keys], dtype="float64")
+        latest: dict[int, dict[str, float]] = {}
+        for run_id in dict.fromkeys(runs.tolist()):
+            in_run: np.ndarray = runs == run_id
+            column_values = _last_valid(values[in_run])
+            latest[cast("int", run_id)] = {
+                key: float(value)
+                for key, value in zip(keys, column_values, strict=True)
+                if not np.isnan(value)
+            }
+        return latest
 
     def to_frame(self) -> pd.DataFrame:
         """A copy of the underlying dataframe, for the (untyped) chart layer."""

@@ -963,6 +963,7 @@
   "dlboard/serve/_backend/tests/key_summaries_test.py::test_summarize_metric_steps_is_one_step_per_run_only_if_no_run_logged_two_steps[sqlite-two steps in a run]": 0.15534613601630554,
   "dlboard/serve/_backend/tests/key_summaries_test.py::test_summarize_metric_steps_judges_a_key_on_the_newest_runs_only[postgres]": 2.1873296779813245,
   "dlboard/serve/_backend/tests/key_summaries_test.py::test_summarize_metric_steps_judges_a_key_on_the_newest_runs_only[sqlite]": 2.9641698459745385,
+  "dlboard/serve/_backend/tests/metric_frame_test.py::test_latest_per_run_is_each_keys_last_number_in_the_run": 0.0071940969792194664,
   "dlboard/serve/_backend/tests/metric_frame_test.py::test_merged_frames_have_a_row_wherever_any_has_one_and_each_keeps_its_own_key": 0.01751640997827053,
   "dlboard/serve/_backend/tests/metric_frame_test.py::test_merging_frames_that_share_a_key_is_an_error_not_a_silent_pick": 0.014871194987790659,
   "dlboard/serve/_backend/tests/metric_frame_test.py::test_merging_one_frame_is_that_frame": 0.011579754966078326,

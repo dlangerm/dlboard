@@ -65,3 +65,17 @@ def test_merging_one_frame_is_that_frame() -> None:
 
     assert MetricFrame.merged([frame]) is frame
     assert MetricFrame.merged([]).keys == frozenset()
+
+
+def test_latest_per_run_is_each_keys_last_number_in_the_run() -> None:
+    frame = MetricFrame.from_rows(
+        [
+            MetricRow(1, 0, "loss", 3.0, "2026-01-01T00:00:00Z"),
+            MetricRow(1, 1, "loss", 2.0, "2026-01-01T00:00:01Z"),
+            MetricRow(1, 2, "loss", None, "2026-01-01T00:00:02Z"),
+            MetricRow(1, 0, "acc", None, "2026-01-01T00:00:00Z"),
+            MetricRow(2, 0, "loss", 9.0, "2026-01-01T00:00:00Z"),
+        ]
+    )
+
+    assert frame.latest_per_run() == {1: {"loss": 2.0}, 2: {"loss": 9.0}}
