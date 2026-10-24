@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import typing
 
-from dlboard.models._metric import MetricReduction
+from dlboard.models._metric import MetricReduction, SeriesBand
 
 SUMMARY_RUNS: typing.Final = 100
 """
@@ -240,6 +240,23 @@ class DataStore(typing.Protocol[_P]):
         How many steps each of `keys` logged in a run, at most (see `MetricKeySummary`), judged on the newest runs.
 
         A key no live run logged comes back with 0. Probes only `keys`, so it costs what asking for them costs.
+        """
+        ...
+
+    def fetch_series_band(
+        self,
+        experiment_id: int,
+        *,
+        keys: frozenset[str],
+        run_ids: frozenset[int] | None,
+        grid: int,
+    ) -> list[SeriesBand]:
+        """
+        Per run, the spread of the values of `keys` at each step of a grid of at most `grid` steps.
+
+        The grid runs from the first step to the last, which is always in it, and is as fine as `grid` allows. A key
+        counts at a step only if it logged a number there, and a step logged twice counts its newest write. What is read
+        is what the grid needs, not every step a run trained.
         """
         ...
 

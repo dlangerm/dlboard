@@ -336,18 +336,47 @@ _COMPOUND_SELECT_TERMS: Final = 500
 """How many SELECTs one `UNION ALL` may chain: SQLite's `SQLITE_LIMIT_COMPOUND_SELECT`, 500 by default."""
 
 
-def _named_keys(keys: frozenset[str]) -> sa.Subquery:
+def _named(
+    values: list[Any], column: str, sql_type: type[sa.types.TypeEngine[Any]], name: str
+) -> sa.Subquery:
     """
-    `keys` as a `key` column, to probe each by its index rather than hop through every key a table holds.
+    `values` as one `column`, to probe each by its index rather than hop through every value a table holds.
 
     A UNION ALL of literals rather than VALUES: SQLite cannot name the columns of a VALUES list. Its cap on a
     compound SELECT is why the literals are unioned in blocks under that cap, and the blocks unioned in turn.
     """
     blocks = [
-        sa.union_all(*(sa.select(sa.literal(key, sa.String).label("key")) for key in block)).subquery()
-        for block in itertools.batched(sorted(keys), _COMPOUND_SELECT_TERMS)
+        sa.union_all(*(sa.select(sa.literal(value, sql_type).label(column)) for value in block)).subquery()
+        for block in itertools.batched(values, _COMPOUND_SELECT_TERMS)
     ]
-    return sa.union_all(*(sa.select(block.c.key) for block in blocks)).subquery("logged")
+    return sa.union_all(*(sa.select(block.c[column]) for block in blocks)).subquery(name)
+
+
+def _named_keys(keys: frozenset[str]) -> sa.Subquery:
+    """`keys` as a `key` column, to probe each by its index rather than hop through every key a table holds."""
+    return _named(sorted(keys), "key", sa.String, "logged")
+
+
+def _named_steps(steps: list[int]) -> sa.Subquery:
+    """`steps` as a `step` column, to probe each by its index."""
+    return _named(steps, "step", sa.Integer, "grid")
+
+
+def _grid_steps(last: int, grid: int) -> list[int]:
+    """
+    The steps of a grid: at most `grid` of them, from 0 to `last`, with `last` always among them.
+
+    Every `stride`-th step, where `stride` is the smallest power of two that keeps them that few. A power of two, so a
+    grid's steps stay put while a run trains, until its stride doubles.
+    """
+    stride = 1
+    while True:
+        steps = list(range(0, last + 1, stride))
+        if steps[-1] != last:
+            steps.append(last)
+        if len(steps) <= grid:
+            return steps
+        stride *= 2
 
 
 def _logged_keys(table: sa.Table, runs: sa.Table, experiment_id: int) -> sa.Subquery:
@@ -1167,6 +1196,88 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         )
         rows = self._execute(sa.select(named.c.key, sa.func.coalesce(longest, 0)).order_by(named.c.key))
         return [MetricKeySummary(key, max_steps_per_run) for key, max_steps_per_run in rows]
+
+    def fetch_series_band(
+        self,
+        experiment_id: int,
+        *,
+        keys: frozenset[str],
+        run_ids: frozenset[int] | None,
+        grid: int,
+    ) -> list[models.SeriesBand]:
+        """
+        Per live run, the spread of the values of `keys` at each step of a grid of at most `grid` steps.
+
+        A key counts at a step only if it logged a number there, and a step logged twice counts its newest write, as in
+        `MetricFrame.from_rows`. The quantiles are nearest-rank. Reads one probe per run, key and grid step, and one pass
+        over those values, so what it reads does not grow with the steps a run trained.
+        """
+        if not keys:
+            return []
+        ends = self._metric_ends(experiment_id, keys, run_ids, latest=True)
+        if not ends:
+            return []
+        steps = _grid_steps(max(row.step for row in ends), grid)
+        m, r = self._tables[models.UnderlyingMetricTableEntry], self._tables[models.Run]
+        logged, at_grid = _named_keys(keys), _named_steps(steps)
+        runs = (
+            sa.select(r.c.id.label("run_id"))
+            .where(*_live_runs(r, experiment_id), *_runs_among(r.c.id, run_ids))
+            .subquery("runs")
+        )
+        # The newest write of each run's key at each grid step: one probe of the index per combination.
+        probe = sa.and_(
+            m.c.experiment_id == experiment_id,
+            m.c.key == logged.c.key,
+            m.c.run_id == runs.c.run_id,
+            m.c.step == at_grid.c.step,
+        )
+        newest = (
+            sa.select(runs.c.run_id, at_grid.c.step, logged.c.key, sa.func.max(m.c.id).label("id"))
+            .select_from(logged.join(runs, sa.true()).join(at_grid, sa.true()).join(m, probe))
+            .group_by(runs.c.run_id, at_grid.c.step, logged.c.key)
+            .subquery("newest")
+        )
+        written = (
+            sa.select(newest.c.run_id, newest.c.step, m.c.value)
+            .select_from(newest.join(m, m.c.id == newest.c.id))
+            .where(_is_number(m.c.value))
+            .subquery("written")
+        )
+        ranked = sa.select(
+            written.c.run_id,
+            written.c.step,
+            written.c.value,
+            sa.func.row_number()
+            .over(partition_by=(written.c.run_id, written.c.step), order_by=written.c.value)
+            .label("rank"),
+            sa.func.count().over(partition_by=(written.c.run_id, written.c.step)).label("n"),
+        ).subquery("ranked")
+
+        def at_rank(position: sa.ColumnElement[Any]) -> sa.ColumnElement[Any]:
+            return sa.func.min(sa.case((ranked.c.rank == position, ranked.c.value)))
+
+        def nearest_rank(percent: int) -> sa.ColumnElement[Any]:
+            # ceil(n * percent / 100) is (x - x % 100) / 100 for x = n * percent + 99: the division then comes out whole on
+            # every database, where dividing a non-whole number by 100 is done as a float on one and rounded on another.
+            total = ranked.c.n * percent + 99
+            return sa.cast((total - total % 100) / 100, sa.Integer)
+
+        rows = self._execute(
+            sa.select(
+                ranked.c.run_id,
+                ranked.c.step,
+                sa.func.max(ranked.c.n),
+                at_rank(sa.literal(1)),
+                at_rank(nearest_rank(25)),
+                at_rank(nearest_rank(50)),
+                at_rank(nearest_rank(75)),
+                at_rank(ranked.c.n),
+            )
+            .group_by(ranked.c.run_id, ranked.c.step)
+            .order_by(ranked.c.run_id, ranked.c.step)
+        )
+        return [models.SeriesBand._make(row) for row in rows]
 
     def fetch_histograms(
         self,

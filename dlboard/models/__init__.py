@@ -45,6 +45,7 @@ from dlboard.models._metric import (
     MetricColumn,
     MetricReduction,
     MetricReductions,
+    SeriesBand,
     UnderlyingMetricTableEntry,
 )
 from dlboard.models._panel_frame import (
@@ -196,6 +197,7 @@ __all__ = [
     "RunStatus",
     "SchemeColors",
     "Scope",
+    "SeriesBand",
     "SettingsSection",
     "SizeUnit",
     "TagDisplay",

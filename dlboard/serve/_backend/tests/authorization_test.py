@@ -155,6 +155,10 @@ _OPERATIONS: dict[str, tuple[ProjectRole, Callable[[AuthorizingDataStore, _Chain
     ),
     "list histogram keys": (ProjectRole.VIEWER, lambda s, c: s.summarize_histogram_keys(c[1].id)),
     "list metric keys": (ProjectRole.VIEWER, lambda s, c: s.summarize_metric_keys(c[1].id)),
+    "read series band": (
+        ProjectRole.VIEWER,
+        lambda s, c: s.fetch_series_band(c[1].id, keys=frozenset({"loss"}), run_ids=None, grid=4),
+    ),
     "list metric steps": (
         ProjectRole.VIEWER,
         lambda s, c: s.summarize_metric_steps(c[1].id, frozenset({"loss"})),
