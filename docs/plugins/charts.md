@@ -48,8 +48,8 @@ shows (`show_metrics`, `show_hparams`, `show_artifacts`).
 - `rows: artifact` is a row per logged artifact, beside what its run logged at that step, with each tag a
   column that sorts and filters as the number or text it is: the way to find a sample among hundreds.
 
-Each `show_*` list takes names, or a prefix and a `*` for everything under it: `eval/*` is a column for every
-key starting `eval/`, including ones logged later, and `*` alone is all of them. The metrics and hyperparameters
+Each `show_*` list takes names, or patterns in which a `*` stands for any run of characters: `eval/*` is a column for every
+key starting `eval/`, including ones logged later (`layer_*/grad_norm` is one such pattern), and `*` alone is all of them. The metrics and hyperparameters
 start at `*`; an empty list shows none, so a table of only artifacts is one. An image is a thumbnail linking to
 the full one, with the overlays logged over it at the same step drawn on it as an image chart draws them (an overlay of
 a picture the table shows is not a column or a row of its own; one chosen without its picture is a file like any other);
@@ -131,6 +131,14 @@ Subclass `ChartType` and implement its abstract methods:
 - `hint_required_artifact_key_prefixes` (optional, none by default) — for a chart that lists a whole
   family of artifacts (every `checkpoints/...` key) rather than named ones: every key starting with one of
   these is fetched, including keys logged later.
+- `hint_required_column_patterns` (optional, none by default) — metric patterns (`layer_*/grad_norm`) the chart
+  draws from: every metric whose name matches one, including metrics logged later. A pattern is matched against the
+  names logged when the panel is drawn, so a chart of many metrics asks for them this way, not by listing each.
+- `hint_required_series` (optional, none by default) — the spread of many metrics' values, as a `SeriesBandRequest`
+  (their patterns, a grid of at most `grid` steps, and the newest `runs` runs). The panel reads the spread for the chart
+  (a `SeriesBand` per run and step: the nearest-rank minimum, quartiles and maximum) instead of each metric. The
+  series band chart (`series_band`) draws its metrics this way, and autogen uses it for a family of keys that share a
+  template (`layer_0/grad_norm` to `layer_99/grad_norm`, once there are at least 12 of them).
 - `hint_required_histogram_keys` (optional, none by default) — the logged histogram keys the chart shows. A
   chart always names them: there is no "every histogram", because a histogram is the most expensive thing a panel
   fetches. A field naming one is a `ColumnKind.HISTOGRAM` in `field_column_kinds()`.

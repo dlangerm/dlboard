@@ -1921,7 +1921,8 @@ def test_auto_generate_leaves_a_huge_panel_closed_and_opens_a_small_one(
     experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
     api = BasicDlboardAPI(live_server_url)
     run = api.create_run(models.NewRun(experiment_id=experiment_id))
-    many = {f"big/m{i}": 1.0 for i in range(AUTO_OPEN_MAX_CHARTS + 1)}
+    # Letters, not numbers: keys that differ only in digits are one family, which auto-generate charts as one band.
+    many = {f"big/{chr(ord('a') + i)}": 1.0 for i in range(AUTO_OPEN_MAX_CHARTS + 1)}
     api.log_metric_batch(
         [
             models.LoggedMetrics(
