@@ -92,7 +92,8 @@ grow with the steps logged. For a long run, log less often rather than expecting
 - Many keys are fine, one series each: a step's keys are shipped in pieces of at most 1,000, and a family of keys
   that share a name (`layer_0/grad_norm` to `layer_99/grad_norm`) is charted as one band of its spread, not a chart
   each, once there are at least 12 of them. A band costs one read per key, run and grid step, so its grid is at most
-  64 steps and it reads the newest run by default.
+  64 steps and it reads the newest run by default. Auto-generate makes at most 200 charts at once: the keys past that
+  stay uncharted, and Suggest charts can add them.
 
 **If the server (or your network) is down.** Logging never blocks training: `log_metrics`/
 `log_artifact` queue onto a bounded buffer the shipping processes drain in the background, retrying

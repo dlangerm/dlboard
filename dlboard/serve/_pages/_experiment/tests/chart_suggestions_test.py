@@ -78,3 +78,10 @@ def test_the_drawer_mounts_one_page_of_suggestions_and_says_how_many_the_filter_
     assert [t for t in texts if t.startswith("Showing")] == (
         [f"Showing {shown} of {total}. Filter to narrow."] if total > shown else []
     )
+
+
+def test_the_preview_says_how_many_charts_auto_generate_left_out() -> None:
+    preview = suggestions._render_auto_preview({"p": [("a", ColumnKind.METRIC)]}, left_out=7)
+    texts = [n["props"]["children"] for n in _nodes(json.loads(cast("str", to_json(preview))))]
+
+    assert "7 more charts not made here: Suggest charts can add them." in texts

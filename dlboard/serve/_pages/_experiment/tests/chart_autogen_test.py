@@ -570,3 +570,25 @@ def test_keys_a_band_covers_are_not_suggested_again() -> None:
 )
 def test_a_key_template_replaces_each_run_of_digits(key: str, template: str) -> None:
     assert autogen.key_template(key) == template
+
+
+# ---- a catalog of thousands of unrelated keys is bounded ----
+
+
+def _letters(i: int) -> str:
+    """A distinct three-letter name per index, so no two keys share a template (and none folds into a band)."""
+    letters = ""
+    for _ in range(3):
+        i, digit = divmod(i, 26)
+        letters += chr(ord("a") + digit)
+    return letters
+
+
+def test_auto_generate_charts_at_most_the_limit_and_leaves_the_rest_uncharted() -> None:
+    """Thousands of keys that are not one family must not become thousands of charts; the rest stay for suggestions."""
+    catalog = ColumnCatalog(metrics=tuple(f"m{_letters(i)}" for i in range(11_000)))
+
+    panels = autogen.build_auto_panels(catalog, delimiter="/", mode="prefix")
+
+    assert sum(len(panel.charts) for panel in panels) == autogen.AUTO_MAX_CHARTS
+    assert len(autogen.find_uncharted_keys(panels, catalog).metrics) == 11_000 - autogen.AUTO_MAX_CHARTS

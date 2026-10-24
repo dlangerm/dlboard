@@ -266,6 +266,27 @@ def panel_to_open(panels: typing.Sequence[PanelInstance[typing.Any, typing.Any]]
     return [p.name for p in panels if len(p.charts) <= AUTO_OPEN_MAX_CHARTS][:1]
 
 
+AUTO_MAX_CHARTS: Final = 200
+"""
+Most charts auto-generate makes at once. Keys that are not one family, so cannot fold into a band, would otherwise make a
+chart each, and a page of thousands of charts. The keys left out stay uncharted, so "Suggest charts" still reaches them.
+"""
+
+
+def limit_panel_groups(
+    groups: dict[str, list[tuple[str, ColumnKind]]], limit: int = AUTO_MAX_CHARTS
+) -> tuple[dict[str, list[tuple[str, ColumnKind]]], int]:
+    """The first `limit` charts of `groups`, in their order, and how many charts were left out."""
+    kept: dict[str, list[tuple[str, ColumnKind]]] = {}
+    remaining = limit
+    for panel_name, keys in groups.items():
+        if remaining <= 0:
+            break
+        kept[panel_name] = keys[:remaining]
+        remaining -= len(kept[panel_name])
+    return kept, sum(len(keys) for keys in groups.values()) - sum(len(keys) for keys in kept.values())
+
+
 def build_auto_panels(
     catalog: ColumnCatalog,
     *,
@@ -293,14 +314,12 @@ def build_auto_panels(
                 msg = f"no chart is generated for a {kind} key"
                 raise ValueError(msg)
 
+    groups, _ = limit_panel_groups(
+        group_keys_into_panels(catalog, delimiter=delimiter, mode=mode, lightning=lightning)
+    )
     return [
-        PanelInstance(
-            name=panel_name,
-            charts=[chart_for(key, kind) for key, kind in keys],
-        )
-        for panel_name, keys in group_keys_into_panels(
-            catalog, delimiter=delimiter, mode=mode, lightning=lightning
-        ).items()
+        PanelInstance(name=panel_name, charts=[chart_for(key, kind) for key, kind in keys])
+        for panel_name, keys in groups.items()
     ]
 
 
