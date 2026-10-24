@@ -23,6 +23,9 @@ pulls that section's body into the GitHub release notes and publishes both distr
 * **`dev_harness.py seed` can log many metric keys, and times the upload.** `--metric-keys`, `--key-template` and
   `--steps-per-batch` shape the upload, and the output reports the rows, the ingest rate, the size of the first request
   and the size of the database.
+* **A chart plugin can ask for the spread of many metrics' values.** `hint_required_series` hands the chart a
+  `SeriesBand` per run and step: the minimum, quartiles, median, maximum and mean of the values its patterns match,
+  read on a bounded grid of steps. The series band chart is built on it.
 
 ### Changed
 
@@ -40,6 +43,12 @@ pulls that section's body into the GitHub release notes and publishes both distr
 * **The key pickers list the first 100 names that match what is typed.** They still search every name.
 * **A step that logged thousands of keys is uploaded in pieces of at most 1,000 keys.** Each queued item carries at most
   1,000 keys, so a batch of items is a bounded upload however wide the steps are.
+* **Auto-generate makes at most 200 charts at once.** Keys that share no name used to make a chart each, so a catalog
+  of thousands made a page of thousands of charts. The keys past the limit stay uncharted, so Suggest charts can still
+  add them, and the auto-populate preview says how many it leaves out.
+* **Reading many metric keys at once is faster.** The latest value of each key, and a run's whole history, used to cost
+  a pandas pass over every key column. For one run of 32 steps in an experiment of 11,000 keys (SQLite), the latest
+  values took 1.6 s and now take 0.14 s, and the history 2.5 s and 1.1 s. An experiment of 20 keys is unchanged.
 
 ### Fixed
 
