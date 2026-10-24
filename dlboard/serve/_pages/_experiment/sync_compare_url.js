@@ -2,16 +2,18 @@
 // the address bar so the link can be shared (`CompareQuery` is the server-side reader of these
 // params). A plain `replaceState` -- not `pushState` -- so typing in the search box doesn't flood
 // the back button, and it doesn't re-run the page's `layout()`: the modal already shows this state.
-// Only non-default state is written (`compare_mode` when "all", `compare_q` when non-empty), and
-// every param goes away with the modal; other params (`view`, `chart`) are left alone.
+// Only non-default state is written (`compare_mode` when "all", `compare_q` when non-empty,
+// `compare_page` past the first page), and every param goes away with the modal; other params
+// (`view`, `chart`) are left alone.
 // Returns `no_update` always -- side-effect only, the same pattern as `sync_view_url.js`.
 // biome-ignore lint/correctness/noUnusedVariables: read as the body of a Dash clientside_callback
-function syncCompareUrl(opened, runs, mode, search) {
+function syncCompareUrl(opened, runs, mode, search, page) {
     const open = opened && runs && runs.length > 0;
     const params = {
         compare: open ? runs.join(",") : null,
         compare_mode: open && mode === "all" ? mode : null,
         compare_q: open && search ? search : null,
+        compare_page: open && page > 1 ? String(page) : null,
     };
     const url = new URL(window.location.href);
     for (const [name, value] of Object.entries(params)) {

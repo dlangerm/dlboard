@@ -1,11 +1,16 @@
 """
-The run-compare modal: an A/B view of up to `MAX_COMPARED_RUNS` runs' hyperparameters and latest metrics.
+The run-compare modal: an A/B view of up to `MAX_COMPARED_RUNS` runs' hyperparameters and latest metrics, a page of keys at a time.
 
 Opened by the "Compare" button above the navbar's run table. Everything the modal shows -- which
-runs, a diff or the full list, the search text -- is mirrored into the page URL (`CompareQuery`),
+runs, a diff or the full list, the search text, the page -- is mirrored into the page URL (`CompareQuery`),
 so copying the address bar shares exactly what the viewer sees, and landing on such a link opens
 the modal already filled in. The first picked run is the baseline: every other run's cell that
 differs from it is highlighted.
+
+Reading a comparison has two costs, and each is paid where it belongs. Which keys there are, and whether
+each one's values differ across the runs (`comparison_index`), needs every key's latest value: that is read
+when the picked runs change, and the browser keeps only the keys and those flags. Each page then reads only
+its own keys' values (`comparison_page`), so paging and filtering never read the rest.
 
 Fully self-contained like `_run_comparison_table.py`; the one hook into the page is `compare_components`,
 which the experiment layout places beside the notes drawer.
@@ -14,13 +19,14 @@ which the experiment layout places beside the notes drawer.
 from __future__ import annotations
 
 import typing
+from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, cast
 
 import dash_ag_grid as dag
 import dash_mantine_components as dmc
-from dash import Dash, Input, Output, State
+from dash import Dash, Input, Output, State, ctx
 from dash.dcc import Store
 from dash.exceptions import PreventUpdate
 from pydantic import BaseModel, BeforeValidator, Field, ValidationError
@@ -28,12 +34,13 @@ from pydantic import BaseModel, BeforeValidator, Field, ValidationError
 from dlboard.models import MetricReduction
 from dlboard.serve import ClientsideScript, Icon, get_data_store, icon, series_swatch_class
 from dlboard.serve import _constants as constants
-from dlboard.serve._component_ids import ButtonId, ModalId, StoreId, ValueId
+from dlboard.serve._component_ids import ButtonId, DivId, ModalId, StoreId, ValueId
 from dlboard.serve._grid import themed_grid_kwargs
 from dlboard.serve._pages._dash_helpers import tooltipped_action_icon
 from dlboard.serve._pages._dataframe_helpers import run_display_name
 from dlboard.serve._pages._experiment import _ids as ids
 from dlboard.serve._pages._experiment import _page_model as page_model
+from dlboard.serve._pages._experiment._paging import page_slice
 from dlboard.serve._pages._experiment._shown_runs import shown_run_ids
 
 if TYPE_CHECKING:
@@ -45,14 +52,19 @@ if TYPE_CHECKING:
 
 MAX_COMPARED_RUNS: typing.Final = 5
 
+COMPARE_PAGE_SIZE: typing.Final = 50
+"""How many keys the comparison lists at once. A page reads only its own keys' values."""
+
 COMPARE_OPEN_ID: ButtonId[ids.ExperimentPage] = ButtonId("compare-open")
 COMPARE_MODAL_ID: ModalId[ids.ExperimentPage] = ModalId("compare-modal")
 COMPARE_RUNS_ID: ValueId[ids.ExperimentPage] = ValueId("compare-runs")
 COMPARE_MODE_ID: ValueId[ids.ExperimentPage] = ValueId("compare-mode")
 COMPARE_SEARCH_ID: ValueId[ids.ExperimentPage] = ValueId("compare-search")
+COMPARE_PAGER_ID: ValueId[ids.ExperimentPage] = ValueId("compare-pager")
+COMPARE_PAGE_SLOT_ID: DivId[ids.ExperimentPage] = DivId("compare-page-slot")
 COMPARE_GRID_ID: ValueId[ids.ExperimentPage] = ValueId("compare-grid")
 COMPARE_COPY_LINK_ID: ButtonId[ids.ExperimentPage] = ButtonId("compare-copy-link")
-COMPARE_ROWS_STORE_ID: StoreId[ids.ExperimentPage] = StoreId("compare-rows")
+COMPARE_KEYS_STORE_ID: StoreId[ids.ExperimentPage] = StoreId("compare-keys")
 
 _CHANGED_CLASS = "dl-compare-changed"
 _CHANGED_FIELD = "_changed"
@@ -84,7 +96,11 @@ def _split_ids(value: object) -> object:
 
 
 class CompareQuery(BaseModel, frozen=True, extra="ignore", populate_by_name=True):
-    """The compare modal's state as it appears in the page URL (`?compare=3,7&compare_mode=all&compare_q=lr`)."""
+    """
+    The compare modal's state as it appears in the page URL.
+
+    For example `?compare=3,7&compare_mode=all&compare_q=lr`, with `&compare_page=2` past the first page.
+    """
 
     runs: Annotated[list[int], BeforeValidator(_split_ids)] = Field(
         default_factory=list[int], alias="compare", max_length=MAX_COMPARED_RUNS
@@ -94,6 +110,9 @@ class CompareQuery(BaseModel, frozen=True, extra="ignore", populate_by_name=True
     mode: CompareMode = Field(default=CompareMode.DIFF, alias="compare_mode")
 
     search: str = Field(default="", alias="compare_q")
+
+    page: int = Field(default=1, alias="compare_page")
+    """The page of keys shown, from 1. Past the last page, the last one is shown."""
 
     @classmethod
     def from_query(cls, query: Mapping[str, str]) -> CompareQuery:
@@ -134,18 +153,37 @@ def comparison_rows(
     return rows
 
 
-def visible_rows(rows: list[dict[str, Any]], mode: CompareMode, search: str) -> list[dict[str, Any]]:
-    """`rows` narrowed to `mode`, and to those whose key or any run's value contains `search` (case-insensitive)."""
-    needle = search.strip().lower()
+def comparison_index(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The keys of a comparison, in order, each with whether its values differ: all the browser holds to page through them."""
+    return [{"key": row["key"], "kind": row["kind"], _DIFFERS_FIELD: row[_DIFFERS_FIELD]} for row in rows]
 
-    def matches(row: dict[str, Any]) -> bool:
-        cells = (row["key"], *(value for field, value in row.items() if field.startswith("run_")))
-        return any(needle in str(cell).lower() for cell in cells if cell is not None)
+
+def filtered_index(
+    index: list[dict[str, Any]], mode: CompareMode, search: str, hparams: Mapping[int, FlatHparamDict]
+) -> list[dict[str, Any]]:
+    """
+    The entries of `index` that `mode` and `search` leave, in order.
+
+    A search matches a key's name, and a hyperparameter's values across the runs. A metric's values are not
+    searched: that would need every metric's latest value on each keystroke, which the index does not hold.
+    """
+    needle = search.strip().lower()
+    values: dict[str, list[object]] = {}
+    for logged in hparams.values():
+        for key, value in logged.items():
+            values.setdefault(key, []).append(value)
+
+    def matches(entry: dict[str, Any]) -> bool:
+        if needle in entry["key"].lower():
+            return True
+        return entry["kind"] == RowKind.HPARAM.value and any(
+            value is not None and needle in str(value).lower() for value in values.get(entry["key"], [])
+        )
 
     return [
-        row
-        for row in rows
-        if (mode is CompareMode.ALL or row[_DIFFERS_FIELD]) and (not needle or matches(row))
+        entry
+        for entry in index
+        if (mode is CompareMode.ALL or entry[_DIFFERS_FIELD]) and (not needle or matches(entry))
     ]
 
 
@@ -172,6 +210,14 @@ def comparison_columns(runs: list[Run]) -> list[dict[str, Any]]:
     ]
 
 
+def _compared_runs(store: DataStore[...], experiment_id: int, run_ids: list[int]) -> list[Run]:
+    """The picked runs that belong to this experiment, in the order picked (the first is the baseline)."""
+    if not run_ids:
+        return []
+    by_id = {run.id: run for run in store.get_runs(experiment_id, limit=None, run_ids=frozenset(run_ids))}
+    return [by_id[run_id] for run_id in dict.fromkeys(run_ids) if run_id in by_id]
+
+
 def load_comparison(
     store: DataStore[...], experiment_id: int, run_ids: list[int]
 ) -> tuple[list[Run], list[dict[str, Any]]]:
@@ -181,16 +227,86 @@ def load_comparison(
     Reads only through existing store calls, scoped to the picked runs: anything else in `run_ids`
     (a stale or hand-edited link) is dropped here, so a link can't reach another experiment's runs.
     """
-    if not run_ids:
+    runs = _compared_runs(store, experiment_id, run_ids)
+    if not runs:
         return [], []
-    by_id = {run.id: run for run in store.get_runs(experiment_id, limit=None, run_ids=frozenset(run_ids))}
-    runs = [by_id[run_id] for run_id in dict.fromkeys(run_ids) if run_id in by_id]
-    compared = frozenset(by_id)
+    compared = frozenset(run.id for run in runs)
     hparams = {h.run_id: h.hparams_dict for h in store.fetch_hyperparams(experiment_id, run_ids=compared)}
     metrics = store.fetch_metrics(
         experiment_id, run_ids=compared, reduction=MetricReduction.LATEST
     ).latest_per_run()
     return runs, comparison_rows([run.id for run in runs], hparams, metrics)
+
+
+def _only[V](by_run: Mapping[int, Mapping[str, V]], keys: frozenset[str]) -> dict[int, dict[str, V]]:
+    return {
+        run_id: {key: value for key, value in logged.items() if key in keys}
+        for run_id, logged in by_run.items()
+    }
+
+
+@dataclass(frozen=True)
+class ComparePage:
+    """One page of a comparison: its rows, the runs they are valued for, and where the page sits among the keys."""
+
+    runs: list[Run]
+    rows: list[dict[str, Any]]
+    matching: int
+    """How many keys the filter leaves, over every page."""
+    number: int
+    """The (clamped) page shown, from 1."""
+    total: int
+    """How many pages there are."""
+
+
+def comparison_page(  # noqa: PLR0913 -- the store and the picked runs, then what the page is of
+    store: DataStore[...],
+    experiment_id: int,
+    run_ids: list[int],
+    index: list[dict[str, Any]],
+    mode: CompareMode,
+    search: str,
+    number: int,
+) -> ComparePage:
+    """
+    Page `number` of the comparison `index` describes, for the picked runs: those keys' values, and no other key's.
+
+    The runs' hyperparameters are read whole (a few per run) and the page's metrics by key, one probe per run and key
+    on the page. The index already says which keys are listed, so a page never reads the others.
+    """
+    runs = _compared_runs(store, experiment_id, run_ids)
+    if not runs:
+        return ComparePage(runs=[], rows=[], matching=0, number=1, total=1)
+    compared = frozenset(run.id for run in runs)
+    hparams = {h.run_id: h.hparams_dict for h in store.fetch_hyperparams(experiment_id, run_ids=compared)}
+    matching = filtered_index(index, mode, search, hparams)
+    shown = page_slice(matching, number, COMPARE_PAGE_SIZE)
+    hparam_keys = frozenset(entry["key"] for entry in shown.items if entry["kind"] == RowKind.HPARAM.value)
+    metric_keys = frozenset(entry["key"] for entry in shown.items if entry["kind"] == RowKind.METRIC.value)
+    metrics: dict[int, dict[str, float]] = (
+        store.fetch_metrics(
+            experiment_id, keys=metric_keys, run_ids=compared, reduction=MetricReduction.LATEST
+        ).latest_per_run()
+        if metric_keys
+        else {}
+    )
+    rows = comparison_rows([run.id for run in runs], _only(hparams, hparam_keys), _only(metrics, metric_keys))
+    return ComparePage(runs=runs, rows=rows, matching=len(matching), number=shown.number, total=shown.total)
+
+
+def _count_text(page: ComparePage) -> str:
+    if not page.matching:
+        return "No keys to show"
+    first = (page.number - 1) * COMPARE_PAGE_SIZE + 1
+    return f"Showing {first}-{min(first + COMPARE_PAGE_SIZE - 1, page.matching)} of {page.matching} keys"
+
+
+def page_controls(page: ComparePage) -> list[Component]:
+    """The count and pager under the grid. Always both, so the pager's callback input exists on every page."""
+    return [
+        dmc.Text(_count_text(page), size="sm", c="dimmed"),
+        dmc.Pagination(id=COMPARE_PAGER_ID, total=page.total, value=page.number, withEdges=True, size="sm"),
+    ]
 
 
 def _run_options(runs: list[Run]) -> list[dict[str, str]]:
@@ -211,13 +327,15 @@ def compare_button() -> Component:
 
 def compare_components(store: DataStore[...], experiment_id: int, query: CompareQuery) -> list[Component]:
     """
-    The modal and the store its rows live in: closed -- or, for a link carrying compare state, already open on it.
+    The modal and the store its keys live in: closed -- or, for a link carrying compare state, already open on it.
 
     A link's table is rendered right here, in the page's first response, rather than by a callback
     after it: `page_load_budget_test.py` caps the callbacks a page load may cost. Otherwise the
     modal starts empty and the button's callbacks fill it in.
     """
-    runs, rows = load_comparison(store, experiment_id, query.runs)
+    _, rows = load_comparison(store, experiment_id, query.runs)
+    index = comparison_index(rows)
+    page = comparison_page(store, experiment_id, query.runs, index, query.mode, query.search, query.page)
     options: list[dict[str, str]] = (
         _run_options(list(store.get_runs(experiment_id, limit=None, run_ids=None))) if query.runs else []
     )
@@ -250,7 +368,7 @@ def compare_components(store: DataStore[...], experiment_id: int, query: Compare
                         ),
                         dmc.TextInput(
                             id=COMPARE_SEARCH_ID,
-                            placeholder="Search keys and values…",
+                            placeholder="Search keys and hyperparams…",
                             leftSection=icon(Icon.SEARCH),
                             value=query.search,
                             debounce=300,
@@ -268,8 +386,8 @@ def compare_components(store: DataStore[...], experiment_id: int, query: Compare
                 ),
                 dag.AgGrid(
                     id=COMPARE_GRID_ID,
-                    columnDefs=comparison_columns(runs),
-                    rowData=visible_rows(rows, query.mode, query.search),
+                    columnDefs=comparison_columns(page.runs),
+                    rowData=page.rows,
                     # `cellClassRules` are JS expression strings -- see `_build_hparam_datatable`.
                     dangerously_allow_code=True,
                     columnSize="responsiveSizeToFit",
@@ -277,15 +395,21 @@ def compare_components(store: DataStore[...], experiment_id: int, query: Compare
                     className=f"{grid['className']} dl-compare-grid",
                     style=grid["style"],
                 ),
+                dmc.Group(
+                    page_controls(page),
+                    id=COMPARE_PAGE_SLOT_ID,
+                    justify="space-between",
+                    align="center",
+                ),
             ]
         ),
     )
-    return [modal, Store(id=COMPARE_ROWS_STORE_ID, data=rows)]
+    return [modal, Store(id=COMPARE_KEYS_STORE_ID, data=index)]
 
 
 def register_run_compare_callbacks(app: Dash) -> None:
     """
-    Wire the compare modal: open from the button, load the picked runs, filter, mirror state into the URL.
+    Wire the compare modal: open from the button, load the picked runs' keys, page and filter them, mirror state into the URL.
 
     Every server callback here is `prevent_initial_call` and listens only to the modal's own
     controls (all in the page's static layout), so none of them costs a request on page load; the
@@ -325,29 +449,47 @@ def register_run_compare_callbacks(app: Dash) -> None:
         return _run_options(runs), picked or default
 
     @app.callback(
-        Output(COMPARE_ROWS_STORE_ID, "data"),
-        Output(COMPARE_GRID_ID, "columnDefs"),
+        Output(COMPARE_KEYS_STORE_ID, "data"),
         Input(COMPARE_RUNS_ID, "value"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
         prevent_initial_call=True,
     )
-    def load_compared_runs(
-        picked: list[str], experiment_id: int
-    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-        runs, rows = load_comparison(get_data_store(), experiment_id, [int(run_id) for run_id in picked])
-        return rows, comparison_columns(runs)
+    def load_compared_keys(picked: list[str], experiment_id: int) -> list[dict[str, Any]]:
+        _, rows = load_comparison(get_data_store(), experiment_id, [int(run_id) for run_id in picked])
+        return comparison_index(rows)
 
     @app.callback(
+        Output(COMPARE_GRID_ID, "columnDefs"),
         Output(COMPARE_GRID_ID, "rowData"),
-        Input(COMPARE_ROWS_STORE_ID, "data"),
+        Output(COMPARE_PAGE_SLOT_ID, "children"),
+        Input(COMPARE_KEYS_STORE_ID, "data"),
         Input(COMPARE_MODE_ID, "value"),
         Input(COMPARE_SEARCH_ID, "value"),
+        Input(COMPARE_PAGER_ID, "value", allow_optional=True),
+        State(COMPARE_RUNS_ID, "value"),
+        State(constants.STATE_EXPERIMENT_ID, "data"),
         prevent_initial_call=True,
     )
-    def filter_compared_rows(
-        rows: list[dict[str, Any]] | None, mode: str, search: str | None
-    ) -> list[dict[str, Any]]:
-        return visible_rows(rows or [], CompareMode(mode), search or "")
+    def page_compared_keys(  # noqa: PLR0913 -- one input per control the page depends on
+        index: list[dict[str, Any]] | None,
+        mode: str,
+        search: str | None,
+        number: int | None,
+        picked: list[str],
+        experiment_id: int,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[Component]]:
+        # A new filter or key list starts again from the first page; only the pager itself keeps its place.
+        page_number = (number or 1) if ctx.triggered_id == COMPARE_PAGER_ID else 1
+        page = comparison_page(
+            get_data_store(),
+            experiment_id,
+            [int(run_id) for run_id in picked],
+            index or [],
+            CompareMode(mode),
+            search or "",
+            page_number,
+        )
+        return comparison_columns(page.runs), page.rows, page_controls(page)
 
     # Side-effect only (it writes `history.replaceState`, never the prop): declared as both Input and
     # Output of `opened` for the same reason `sync_view_url.js` is -- Dash has no prop for the address bar.
@@ -358,5 +500,6 @@ def register_run_compare_callbacks(app: Dash) -> None:
         Input(COMPARE_RUNS_ID, "value"),
         Input(COMPARE_MODE_ID, "value"),
         Input(COMPARE_SEARCH_ID, "value"),
+        Input(COMPARE_PAGER_ID, "value", allow_optional=True),
         prevent_initial_call=True,
     )

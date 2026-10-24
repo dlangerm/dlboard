@@ -63,6 +63,9 @@ from dlboard.serve._pages._experiment._run_compare import (
     COMPARE_GRID_ID,
     COMPARE_MODE_ID,
     COMPARE_OPEN_ID,
+    COMPARE_PAGE_SIZE,
+    COMPARE_PAGE_SLOT_ID,
+    COMPARE_PAGER_ID,
     COMPARE_SEARCH_ID,
 )
 from dlboard.serve._pages._experiment._run_comparison_table import (
@@ -1854,6 +1857,62 @@ def test_run_compare_modal_diffs_runs_and_its_state_is_a_shareable_link(
 
     page.keyboard.press("Escape")
     expect(page).not_to_have_url(re.compile(r"compare"))
+    assert console_errors == []
+
+
+def test_run_compare_lists_its_keys_a_page_at_a_time_and_its_page_is_a_shareable_link(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """
+    The compare modal lists its keys a page at a time, with a count and a pager. A new search goes back to the
+    first page, and the page in the address bar reopens that page.
+    """
+    _create_project_and_experiment(page, live_server_url, "Compare Paging Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+
+    api = BasicDlboardAPI(live_server_url)
+    names = [f"metric_{i:03d}" for i in range(COMPARE_PAGE_SIZE + 10)]
+    for offset in (0.0, 1.0):
+        run = api.create_run(models.NewRun(experiment_id=experiment_id))
+        api.log_metric_batch(
+            [
+                models.LoggedMetrics(
+                    experiment_id=experiment_id,
+                    run_id=run.id,
+                    step=0,
+                    metrics={name: i + offset for i, name in enumerate(names)},
+                    timestamp_utc=pendulum.now("UTC"),
+                )
+            ]
+        )
+    page.reload()
+
+    page.locator(f"#{COMPARE_OPEN_ID}").click()
+    rows = page.locator(f"#{COMPARE_GRID_ID} .ag-center-cols-container .ag-row")
+    controls = page.locator(f"#{COMPARE_PAGE_SLOT_ID}")
+    expect(rows).to_have_count(COMPARE_PAGE_SIZE)
+    expect(controls.get_by_text(f"Showing 1-{COMPARE_PAGE_SIZE} of {len(names)} keys")).to_be_visible()
+
+    page.locator(f"#{COMPARE_PAGER_ID}").get_by_role("button", name="2", exact=True).click()
+    expect(rows).to_have_count(len(names) - COMPARE_PAGE_SIZE)
+    expect(
+        controls.get_by_text(f"Showing {COMPARE_PAGE_SIZE + 1}-{len(names)} of {len(names)} keys")
+    ).to_be_visible()
+    expect(page).to_have_url(re.compile(r"compare_page=2"))
+
+    # The address bar reopens the page it shows.
+    page.goto(page.url)
+    expect(rows).to_have_count(len(names) - COMPARE_PAGE_SIZE)
+    expect(
+        controls.get_by_text(f"Showing {COMPARE_PAGE_SIZE + 1}-{len(names)} of {len(names)} keys")
+    ).to_be_visible()
+
+    # A new search starts again from the first page, and takes the page out of the address bar.
+    page.locator(f"#{COMPARE_SEARCH_ID}").fill("metric_05")
+    expect(rows).to_have_count(10)
+    expect(controls.get_by_text("Showing 1-10 of 10 keys")).to_be_visible()
+    expect(page).not_to_have_url(re.compile(r"compare_page="))
     assert console_errors == []
 
 
