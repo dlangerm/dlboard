@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import typing
+from collections import Counter
 
 import pytest
 
@@ -354,7 +355,7 @@ def test_build_suggestions_single_value_metric_gets_a_bar_chart_across_runs() ->
 def test_build_auto_panels_single_value_metric_gets_a_bar_chart() -> None:
     catalog = ColumnCatalog(metrics=("final_accuracy",))
     panels = autogen.build_auto_panels(
-        catalog, delimiter="/", mode="prefix", single_value=frozenset({"final_accuracy"})
+        catalog, delimiter="/", mode="prefix", single_value=lambda _keys: frozenset({"final_accuracy"})
     )
     assert panels[0].charts[0].chart_type == "bar"
 
@@ -540,7 +541,7 @@ def test_a_family_of_keys_is_one_band_however_many_members_it_has(members: int) 
     panels = autogen.build_auto_panels(catalog, delimiter="/", mode="prefix")
 
     charts = [(chart.chart_type, chart.parameters) for panel in panels for chart in panel.charts]
-    assert charts == [("series_band", {"metrics": ["layer_*/grad_norm"]})]
+    assert charts == [("series_band", {"metrics": ["layer_#/grad_norm"]})]
 
 
 def test_a_family_too_small_to_fold_keeps_a_chart_per_key() -> None:
@@ -560,16 +561,35 @@ def test_keys_a_band_covers_are_not_suggested_again() -> None:
     assert autogen.find_uncharted_keys(band_only, catalog).metrics == ["loss"]
 
 
-@pytest.mark.parametrize(
-    ("key", "template"),
-    [
-        pytest.param("layer_3/grad_norm", "layer_*/grad_norm", id="one-run-of-digits"),
-        pytest.param("block_12_conv_4", "block_*_conv_*", id="each-run-of-digits"),
-        pytest.param("loss", "loss", id="no-digits-is-its-own-template"),
-    ],
-)
-def test_a_key_template_replaces_each_run_of_digits(key: str, template: str) -> None:
-    assert autogen.key_template(key) == template
+def test_a_band_spreads_over_its_family_only_and_keys_that_only_look_like_it_are_charted_alone() -> None:
+    family = tuple(f"layer_{i}/grad_norm" for i in range(autogen.FOLD_AT_KEYS))
+    strays = ("layer_3/attn/grad_norm", "layer_x/grad_norm")
+    catalog = ColumnCatalog(metrics=(*family, *strays))
+
+    panels = autogen.build_auto_panels(catalog, delimiter="/", mode="prefix")
+
+    charts = [
+        (chart.chart_type, chart.parameters.get("column")) for panel in panels for chart in panel.charts
+    ]
+    assert sorted(charts, key=str) == [
+        ("line", "layer_3/attn/grad_norm"),
+        ("line", "layer_x/grad_norm"),
+        ("series_band", None),
+    ]
+    assert autogen.find_uncharted_keys(panels, catalog).metrics == []
+
+
+def test_a_family_that_is_uncharted_is_suggested_as_one_band() -> None:
+    family = tuple(f"layer_{i}/grad_norm" for i in range(autogen.FOLD_AT_KEYS))
+    catalog = ColumnCatalog(metrics=(*family, "loss"))
+    uncharted = autogen.find_uncharted_keys([], catalog)
+
+    suggestions = autogen.build_suggestions(uncharted, catalog, delimiter="/", mode="prefix")
+
+    assert [(s.kind, s.key, s.chart.chart_type) for s in suggestions] == [
+        (ColumnKind.METRIC, "loss", "line"),
+        (ColumnKind.SERIES_BAND, "layer_#/grad_norm", "series_band"),
+    ]
 
 
 # ---- a catalog of thousands of unrelated keys is bounded ----
@@ -592,3 +612,27 @@ def test_auto_generate_charts_at_most_the_limit_and_leaves_the_rest_uncharted() 
 
     assert sum(len(panel.charts) for panel in panels) == autogen.AUTO_MAX_CHARTS
     assert len(autogen.find_uncharted_keys(panels, catalog).metrics) == 11_000 - autogen.AUTO_MAX_CHARTS
+
+
+def test_the_limit_is_spent_on_bands_and_histograms_before_metrics_that_each_make_a_chart() -> None:
+    family = tuple(f"layer_{i}/grad_norm" for i in range(autogen.FOLD_AT_KEYS))
+    metrics = tuple(f"m{_letters(i)}" for i in range(250))
+    catalog = ColumnCatalog(metrics=(*metrics, *family), histograms=("weights",))
+
+    panels = autogen.build_auto_panels(catalog, delimiter="/", mode="prefix")
+
+    kinds = Counter(chart.chart_type for panel in panels for chart in panel.charts)
+    assert kinds == {"line": autogen.AUTO_MAX_CHARTS - 2, "series_band": 1, "histogram": 1}
+
+
+def test_a_metrics_shape_is_judged_only_if_the_limit_leaves_its_chart() -> None:
+    catalog = ColumnCatalog(metrics=tuple(f"m{_letters(i)}" for i in range(11_000)))
+    judged: list[list[str]] = []
+
+    def single_value(keys: list[str]) -> frozenset[str]:
+        judged.append(keys)
+        return frozenset()
+
+    autogen.build_auto_panels(catalog, delimiter="/", mode="prefix", single_value=single_value)
+
+    assert [len(keys) for keys in judged] == [autogen.AUTO_MAX_CHARTS]

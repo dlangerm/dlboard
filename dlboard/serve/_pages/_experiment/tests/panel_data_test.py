@@ -469,7 +469,7 @@ def test_a_series_band_panel_reads_the_spread_of_the_matched_metrics_on_the_newe
     later = panel_data.fetch_panel_dataframe(store, experiment_id, panel, run_ids=None)
 
     column = models.SeriesBandRequest(frozenset({"layer_*/grad_norm"}), grid=8, runs=1).column
-    bands = list(df[column].dropna())
+    bands = [band for cell in df[column].dropna() for band in cell]
     assert {band.run_id for band in bands} == {newer.id}
     assert [band.step for band in bands] == [0, 1, 2]
     assert bands[1] == models.SeriesBand(
@@ -477,3 +477,34 @@ def test_a_series_band_panel_reads_the_spread_of_the_matched_metrics_on_the_newe
     )
     assert isinstance(chart.render(df), dcc.Graph)
     assert panel_data.chart_data_fingerprint(chart, later) != before
+
+
+def test_a_series_band_panel_reads_a_band_for_each_group_of_a_family_in_one_read(
+    store: SQLLiteStore, experiment_id: int
+) -> None:
+    run = store.create_run(models.NewRun(experiment_id=experiment_id))
+    store.log_metrics(
+        [
+            models.LoggedMetrics(
+                metrics={"acc/1/dog": 1.0, "acc/2/dog": 3.0, "acc/1/cat": 10.0, "loss": 9.0},
+                step=0,
+                experiment_id=experiment_id,
+                run_id=run.id,
+                timestamp_utc=_TS,
+            )
+        ]
+    )
+    panel = PanelInstance[pd.DataFrame, object](
+        name="p",
+        charts=[
+            ChartInstance[pd.DataFrame, object](
+                chart_type=SeriesBandChart.name, parameters={"metrics": ["acc/#/*"], "group_by": 1}
+            )
+        ],
+    )
+
+    df = panel_data.fetch_panel_dataframe(store, experiment_id, panel, run_ids=None)
+
+    (request,) = panel.charts[0].hint_required_series()
+    ((cell,),) = [df[request.column].dropna().tolist()]
+    assert [(band.group, band.count, band.mean) for band in cell] == [("cat", 1, 10.0), ("dog", 2, 2.0)]

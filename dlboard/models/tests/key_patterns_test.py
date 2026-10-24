@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from dlboard.models import KeyPatterns
-from dlboard.models._key_patterns import captures, literal_prefix, matches
+from dlboard.models._key_patterns import captures, family_template, literal_prefix, matches
 
 
 @pytest.mark.parametrize(
@@ -88,3 +88,24 @@ def test_the_first_pattern_that_names_a_key_gives_its_captures() -> None:
 )
 def test_a_pattern_starts_with_the_text_before_its_first_wildcard(pattern: str, prefix: str) -> None:
     assert literal_prefix(pattern) == prefix
+
+
+@pytest.mark.parametrize(
+    ("key", "template"),
+    [
+        pytest.param("layer_3/grad_norm", "layer_#/grad_norm", id="one-run-of-digits"),
+        pytest.param("block_12_conv_4", "block_#_conv_#", id="each-run-of-digits"),
+        pytest.param("loss", "loss", id="no-digits-is-its-own-template"),
+        pytest.param("a*1", "a*1", id="a-key-with-a-wildcard-in-it-is-its-own-family"),
+    ],
+)
+def test_a_family_template_replaces_each_run_of_digits(key: str, template: str) -> None:
+    assert family_template(key) == template
+
+
+def test_a_family_template_names_the_keys_of_the_family_and_no_others() -> None:
+    template = family_template("layer_3/grad_norm")
+
+    assert matches(template, "layer_17/grad_norm")
+    assert not matches(template, "layer_x/grad_norm")
+    assert not matches(template, "layer_3/attn/grad_norm")

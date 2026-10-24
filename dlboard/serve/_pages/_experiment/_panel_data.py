@@ -205,12 +205,13 @@ def fetch_panel_dataframe(
 def build_series_band_dataframe(
     request: models.SeriesBandRequest, bands: typing.Iterable[models.SeriesBand]
 ) -> pd.DataFrame:
-    """One row per (run_id, step), with `request.column` holding that step's `SeriesBand`."""
+    """One row per (run_id, step), with `request.column` holding that step's `SeriesBand`s, one per group."""
+    by_row: dict[tuple[int, int], list[models.SeriesBand]] = {}
+    for band in bands:
+        by_row.setdefault((band.run_id, band.step), []).append(band)
     return pd.DataFrame.from_records(
-        [
-            {MetricColumn.RUN_ID: band.run_id, MetricColumn.STEP: band.step, request.column: band}
-            for band in bands
-        ]
+        {MetricColumn.RUN_ID: run_id, MetricColumn.STEP: step, request.column: tuple(grouped)}
+        for (run_id, step), grouped in by_row.items()
     )
 
 
@@ -222,13 +223,11 @@ def _series_band_frame(
     run_ids: frozenset[int] | None,
 ) -> pd.DataFrame:
     """The spread of the metrics `request` asks for, over the newest `request.runs` of `run_ids` (every run if `None`)."""
-    keys = models.KeyPatterns(tuple(request.patterns)).select(known_keys)
+    groups = request.groups(known_keys)
     newest = frozenset(run.id for run in store.get_runs(experiment_id, limit=request.runs, run_ids=run_ids))
-    if not keys or not newest:
+    if not groups or not newest:
         return pd.DataFrame()
-    bands = store.fetch_series_band(
-        experiment_id, groups=dict.fromkeys(keys, ""), run_ids=newest, grid=request.grid
-    )
+    bands = store.fetch_series_band(experiment_id, groups=groups, run_ids=newest, grid=request.grid)
     return build_series_band_dataframe(request, bands)
 
 
@@ -262,8 +261,7 @@ def _chart_columns(chart: models.ChartInstance[Any, Any], df: pd.DataFrame) -> l
     )
     histograms = {histogram_column(key) for key in chart.hint_required_histogram_keys()}
     patterns = models.KeyPatterns(tuple(chart.hint_required_column_patterns()))
-    request = chart.hint_required_series()
-    bands = {request.column} if request is not None else set()
+    bands = {request.column for request in chart.hint_required_series()}
 
     def renders_from(column: str) -> bool:
         if column in models.IDENTITY_COLUMNS:

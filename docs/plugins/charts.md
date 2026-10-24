@@ -141,12 +141,23 @@ Subclass `ChartType` and implement its abstract methods:
   parts without a regular expression of its own. A pattern over thousands of metrics must not ask for their whole
   history (that is a column for each metric and a row for each step): read their last value (`metric_reductions`) or
   their spread (`hint_required_series`).
-- `hint_required_series` (optional, none by default) — the spread of many metrics' values, as a `SeriesBandRequest`
-  (their patterns, a grid of at most `grid` steps, and the newest `runs` runs). The panel reads the spread for the chart
-  (a `SeriesBand` per run and step: the nearest-rank minimum, quartiles, median and maximum, and the mean) instead of
-  each metric. The read takes a probe per matched metric, run and grid step, so its cost does not grow with the steps
-  a run trained. The series band chart (`series_band`) draws its metrics this way, and autogen uses it for a family of
-  keys that share a template (`layer_0/grad_norm` to `layer_99/grad_norm`, once there are at least 12 of them).
+- `hint_required_series` (optional, none by default) — the spread of many metrics' values, as a set of
+  `SeriesBandRequest`s: the patterns they match, a grid of at most `grid` cells of steps, the newest `runs` runs, and
+  optionally `group_by`, which wildcards of the pattern name a metric's group. The panel reads each spread for the chart
+  instead of each metric, as a `SeriesBand` per run, group and step in the column `request.column`, whose cell for a
+  step is a tuple with a band for each group. A `SeriesBand` is the nearest-rank minimum, quartiles (`p25`, `p75`),
+  median and maximum of the group's values in the cell, their `mean`, how many metrics logged one (`count`), and which
+  metric was the lowest and the highest (`minimum_key`, `maximum_key`), so a chart can name the ones to look at.
+
+  This is how to aggregate a family of thousands of metrics, such as `accuracy/{row},{col}/{class}`: ask for
+  `accuracy/#,#/*` with `group_by=(2,)` for a band per class, or `group_by=(0, 1)` for one per cell (at most
+  `max_groups`, 12 by default, are read), and draw the bands. Never ask for the history of the pattern. The read is an
+  ordered probe of the index for each metric, run and grid cell, so it costs the metrics matched, not the steps a run
+  trained, and a run that logs every 50 steps is covered as well as one that logs every step. Each cell is a stretch of
+  steps ending at the one shown (the grid's cells run end to end), and a metric counts in it with its newest write
+  there. `plugins/charts/series_band.py` is the reference chart (`_band_traces.nested_band` draws the five traces
+  of a spread, as the histogram chart's bands view does), and autogen uses it for a family of metrics that share a
+  template (`layer_0/grad_norm` to `layer_99/grad_norm`, once there are at least 12 of them).
 - `hint_required_histogram_keys` (optional, none by default) — the logged histogram keys the chart shows. A
   chart always names them: there is no "every histogram", because a histogram is the most expensive thing a panel
   fetches. A field naming one is a `ColumnKind.HISTOGRAM` in `field_column_kinds()`.

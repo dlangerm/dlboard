@@ -9,7 +9,6 @@ decent default panel layout for a brand-new experiment, and the same grouping lo
 
 from __future__ import annotations
 
-import re
 import typing
 from enum import StrEnum
 from typing import TYPE_CHECKING, Final, Literal
@@ -22,6 +21,7 @@ from dlboard.models import (
     KeyPatterns,
     OverlayKey,
     PanelInstance,
+    family_template,
 )
 from dlboard.plugins.charts.bar_chart import BarChart
 from dlboard.plugins.charts.file_list import FileListChart
@@ -31,6 +31,8 @@ from dlboard.plugins.charts.line_chart import LineChart
 from dlboard.plugins.charts.series_band import SeriesBandChart
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from dlboard.serve._pages._experiment._column_catalog import ColumnCatalog
 
 SplitMode = Literal["prefix", "suffix"]
@@ -199,16 +201,16 @@ FOLD_AT_KEYS: Final = 12
 """How many keys must share a template before autogen charts them as one band, not a chart each."""
 
 
-def key_template(key: str) -> str:
-    """The key with each run of digits replaced by `*`: `layer_3/grad_norm` and `layer_17/grad_norm` share `layer_*/grad_norm`."""
-    return re.sub(r"\d+", "*", key)
-
-
 def folded_templates(keys: typing.Iterable[str]) -> dict[str, list[str]]:
-    """The templates that at least `FOLD_AT_KEYS` of `keys` share, with the keys each covers."""
+    """
+    The templates that at least `FOLD_AT_KEYS` of `keys` share, with the keys each covers.
+
+    A template (`layer_#/grad_norm`, see `family_template`) names those keys and no others, so the band it makes
+    spreads over the family and charts nothing else.
+    """
     by_template: dict[str, list[str]] = {}
     for key in keys:
-        by_template.setdefault(key_template(key), []).append(key)
+        by_template.setdefault(family_template(key), []).append(key)
     return {template: members for template, members in by_template.items() if len(members) >= FOLD_AT_KEYS}
 
 
@@ -276,15 +278,20 @@ chart each, and a page of thousands of charts. The keys left out stay uncharted,
 def limit_panel_groups(
     groups: dict[str, list[tuple[str, ColumnKind]]], limit: int = AUTO_MAX_CHARTS
 ) -> tuple[dict[str, list[tuple[str, ColumnKind]]], int]:
-    """The first `limit` charts of `groups`, in their order, and how many charts were left out."""
+    """
+    At most `limit` charts of `groups`, and how many charts were left out.
+
+    A band, an artifact or a histogram is one chart for a whole family or a whole key, so they are kept first and the
+    metrics, a chart each, take what is left. What is kept stays in its order.
+    """
+    entries = [(panel, entry) for panel, entries in groups.items() for entry in entries]
+    spend_first = sorted(range(len(entries)), key=lambda at: entries[at][1][1] is ColumnKind.METRIC)
+    kept_at = set(spend_first[:limit])
     kept: dict[str, list[tuple[str, ColumnKind]]] = {}
-    remaining = limit
-    for panel_name, keys in groups.items():
-        if remaining <= 0:
-            break
-        kept[panel_name] = keys[:remaining]
-        remaining -= len(kept[panel_name])
-    return kept, sum(len(keys) for keys in groups.values()) - sum(len(keys) for keys in kept.values())
+    for at, (panel, entry) in enumerate(entries):
+        if at in kept_at:
+            kept.setdefault(panel, []).append(entry)
+    return kept, len(entries) - len(kept_at)
 
 
 def build_auto_panels(
@@ -293,17 +300,28 @@ def build_auto_panels(
     delimiter: str,
     mode: SplitMode,
     lightning: bool = False,
-    single_value: frozenset[str] = frozenset(),
+    single_value: Callable[[list[str]], frozenset[str]] = lambda _keys: frozenset(),
 ) -> list[PanelInstance[typing.Any, typing.Any]]:
-    """A full set of panels for a brand-new (empty) view: one default chart per key, grouped as `group_keys_into_panels`."""
+    """
+    A full set of panels for a brand-new (empty) view: one default chart per key, grouped as `group_keys_into_panels`.
+
+    `single_value` says which of the metrics given to it are single-valued (a bar chart). It is asked about the metrics
+    that are charted, after `AUTO_MAX_CHARTS` has left the rest out, so judging a key's shape costs what the page shows.
+    """
+    groups, _ = limit_panel_groups(
+        group_keys_into_panels(catalog, delimiter=delimiter, mode=mode, lightning=lightning)
+    )
     artifact_charts = {
         a.label: a.chart for a in default_artifact_charts(catalog.artifact_chart_types, catalog)
     }
+    single = single_value(
+        [key for entries in groups.values() for key, kind in entries if kind is ColumnKind.METRIC]
+    )
 
     def chart_for(key: str, kind: ColumnKind) -> ChartInstance[typing.Any, typing.Any]:
         match kind:
             case ColumnKind.METRIC:
-                return default_chart_for_metric(key, single_value=key in single_value)
+                return default_chart_for_metric(key, single_value=key in single)
             case ColumnKind.ARTIFACT:
                 return artifact_charts[key]
             case ColumnKind.HISTOGRAM:
@@ -314,9 +332,6 @@ def build_auto_panels(
                 msg = f"no chart is generated for a {kind} key"
                 raise ValueError(msg)
 
-    groups, _ = limit_panel_groups(
-        group_keys_into_panels(catalog, delimiter=delimiter, mode=mode, lightning=lightning)
-    )
     return [
         PanelInstance(name=panel_name, charts=[chart_for(key, kind) for key, kind in keys])
         for panel_name, keys in groups.items()
@@ -402,6 +417,16 @@ def visible_suggestions(
             return sorted(matching, key=lambda s: (s.panel_name, s.key))
 
 
+def band_suggestion(template: str, delimiter: str, mode: SplitMode) -> Suggestion:
+    """The suggestion of one band for the family `template` names (see `folded_templates`)."""
+    return Suggestion(
+        key=template,
+        kind=ColumnKind.SERIES_BAND,
+        panel_name=panel_name_for_group(split_group_name(template, delimiter, mode), ColumnKind.SERIES_BAND),
+        chart=series_band_chart(template),
+    )
+
+
 def build_suggestions(  # noqa: PLR0913
     uncharted: UnchartedKeys,
     catalog: ColumnCatalog,
@@ -415,8 +440,11 @@ def build_suggestions(  # noqa: PLR0913
     Turn uncharted keys into ready-to-add `Suggestion`s, grouped the same way as auto-populate.
 
     `single_value` says which metrics are single-valued (a bar chart), and `catalog` which chart type displays each
-    artifact key, exactly as they do for `build_auto_panels`.
+    artifact key, exactly as they do for `build_auto_panels`. A family of at least `FOLD_AT_KEYS` metrics is one band
+    suggested for all of them (the key of a `SERIES_BAND` suggestion is its template), not a line chart for each.
     """
+    families = folded_templates(uncharted.metrics)
+    folded = {key for members in families.values() for key in members}
     suggestions = [
         Suggestion(
             key=column,
@@ -429,7 +457,9 @@ def build_suggestions(  # noqa: PLR0913
             chart=default_chart_for_metric(column, single_value=column in single_value),
         )
         for column in uncharted.metrics
+        if column not in folded
     ]
+    suggestions.extend(band_suggestion(template, delimiter, mode) for template in families)
     suggestions.extend(
         Suggestion(
             key=artifact.label,

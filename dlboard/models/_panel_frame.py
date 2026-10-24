@@ -14,11 +14,12 @@ import hashlib
 import json
 import typing
 
+from dlboard.models._key_patterns import KeyPatterns
 from dlboard.models._metric import MetricColumn
 from dlboard.models._view import ColumnKind
 
 if typing.TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Collection, Iterable
 
 RUN_NAME_COLUMN: typing.Final = "run_name"
 """
@@ -53,21 +54,48 @@ SERIES_BAND_COLUMN_PREFIX: typing.Final = "series_band__"
 
 @dataclasses.dataclass(frozen=True)
 class SeriesBandRequest:
-    """What a chart asks for, as the spread of the values of the metrics its `patterns` match, on a grid of `grid` steps."""
+    """
+    What a chart asks for, as the spread of the values of the metrics its `patterns` match, on a grid of `grid` steps.
+
+    The metrics can be grouped by part of their names, so a family like `accuracy/{row},{col}/{class}` is read once
+    for a band per class (`patterns={"accuracy/#,#/*"}`, `group_by=(2,)`), or per grid cell (`group_by=(0, 1)`).
+    """
 
     patterns: frozenset[str]
     """The metric names and patterns (see `KeyPatterns`) whose values are spread."""
     grid: int
-    """At most this many steps, see `_grid_steps` in the store."""
+    """At most this many cells of steps, see `_grid_cells` in the store."""
     runs: int
     """How many of the panel's newest runs are spread, each costing a read of every metric the patterns match."""
+    group_by: tuple[int, ...] = ()
+    """
+    Which wildcards of a pattern (counted from 0, see `KeyPatterns.capture`) name a metric's group; none puts every
+    metric in one. A metric whose pattern has fewer wildcards is grouped by the ones it has.
+    """
+    max_groups: int = 12
+    """The most groups read: the first this many by label. Each is a band per run and cell for a chart to draw."""
 
     @property
     def column(self) -> str:
-        """The column its band is carried under: a digest of what it asks for, so charts that ask alike share it."""
-        asked = json.dumps([sorted(self.patterns), self.grid, self.runs])
+        """The column its bands are carried under: a digest of what it asks for, so charts that ask alike share it."""
+        asked = json.dumps([sorted(self.patterns), self.grid, self.runs, self.group_by, self.max_groups])
         digest = hashlib.sha1(asked.encode(), usedforsecurity=False).hexdigest()[:12]
         return f"{SERIES_BAND_COLUMN_PREFIX}{digest}"
+
+    def groups(self, known_keys: Collection[str]) -> dict[str, str]:
+        """
+        The metrics among `known_keys` that `patterns` match, each with the label of its group.
+
+        A label is the text of the wildcards `group_by` names, joined by `", "` (`""` without `group_by`), and only the
+        first `max_groups` labels, in order, are kept.
+        """
+        asked = KeyPatterns(tuple(self.patterns))
+        labelled: dict[str, str] = {}
+        for key in asked.select(known_keys):
+            captured = asked.capture(key) or ()
+            labelled[key] = ", ".join(captured[at] for at in self.group_by if at < len(captured))
+        kept = set(sorted(set(labelled.values()))[: self.max_groups])
+        return {key: label for key, label in labelled.items() if label in kept}
 
 
 _TAGS_SUFFIX: typing.Final = "__tags"

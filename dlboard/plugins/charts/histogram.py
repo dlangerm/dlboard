@@ -16,7 +16,6 @@ data reaches the chart, and the chart caps its rows. The values themselves were 
 from __future__ import annotations
 
 import bisect
-import functools
 import itertools
 import typing
 from enum import StrEnum
@@ -43,6 +42,7 @@ from dlboard.models import (
     RenderContext,
     histogram_column,
 )
+from dlboard.plugins.charts._band_traces import nested_band
 from dlboard.plugins.charts._chart_title import titled
 from dlboard.plugins.charts._histogram_math import common_edges, regrid, spread
 from dlboard.serve import AssetKind, series_swatch_class, serve_asset
@@ -371,34 +371,23 @@ def _bands(
             )
         ]
 
-        invisible = functools.partial(
-            _Trace,
-            type="scatter",
-            xaxis=_axis_id("x", row),
-            yaxis=_axis_id("y", row),
-            x=run.steps,
-            mode="lines",
-            line={"width": 0},
-            hoverinfo="skip",
-        )
-        # Each `tonexty` fill reaches back to the trace before it, so the order is what nests the bands.
-        traces += [
-            invisible(y=highs),
-            invisible(y=lows, fill="tonexty", fillcolor=layout.rgba(_FADED_ALPHA)),
-            invisible(y=near_highs),
-            invisible(y=near_lows, fill="tonexty", fillcolor=layout.rgba(_BAND_ALPHA)),
-            _Trace(
-                type="scatter",
-                xaxis=_axis_id("x", row),
-                yaxis=_axis_id("y", row),
-                x=run.steps,
-                y=medians,
-                mode="lines",
-                line={"width": 2, "color": layout.rgba(1)},
-                text=hover,
-                hovertemplate="step %{x}<br>%{text}<extra></extra>",
+        on_row = {"xaxis": _axis_id("x", row), "yaxis": _axis_id("y", row)}
+        traces += typing.cast(
+            "list[_Trace]",
+            nested_band(
+                run.steps,
+                highs=highs,
+                near_highs=near_highs,
+                medians=medians,
+                near_lows=near_lows,
+                lows=lows,
+                outer_fill=layout.rgba(_FADED_ALPHA),
+                inner_fill=layout.rgba(_BAND_ALPHA),
+                median_line={"width": 2, "color": layout.rgba(1)},
+                shared=on_row,
+                median_extra={"text": hover, "hovertemplate": "step %{x}<br>%{text}<extra></extra>"},
             ),
-        ]
+        )
     flat = {"zeroline": False}
     return _plot(runs, settings, layout, traces, [(flat, flat)] * len(runs))
 

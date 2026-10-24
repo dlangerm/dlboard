@@ -29,10 +29,12 @@ from dlboard.serve._pages._experiment import _page_model as page_model
 from dlboard.serve._pages._experiment import _panel_data as panel_data
 from dlboard.serve._pages._experiment import _panel_view as panel_view
 from dlboard.serve._pages._experiment._chart_autogen import (
+    AUTO_MAX_CHARTS,
     SplitMode,
     Suggestion,
     SuggestSort,
     UnchartedKeys,
+    band_suggestion,
     build_auto_panels,
     build_suggestions,
     find_uncharted_keys,
@@ -134,7 +136,7 @@ def _suggest_charts_drawer() -> dmc.Drawer:
                                 size="xs",
                             ),
                             dmc.Button(
-                                "Select all",
+                                f"Select all (up to {AUTO_MAX_CHARTS})",
                                 id=SUGGEST_SELECT_ALL_ID,
                                 variant="default",
                                 size="xs",
@@ -294,10 +296,16 @@ def _render_suggestions(
 
 
 def _listed(
-    page_json: str, delimiter: str | None, mode: str | None, scope: str | None
+    page_json: str,
+    delimiter: str | None,
+    mode: str | None,
+    scope: str | None,
+    catalog: ColumnCatalog | None = None,
 ) -> tuple[ColumnCatalog, list[Suggestion]]:
     """
     Every suggestion the page leaves uncharted, in `scope` if there is one, with the catalog they came from.
+
+    `catalog` is the one already loaded for this request, if there is one: adding a chart changes the page, not the keys.
 
     Built for each request rather than kept in the browser, which would otherwise hold a list that grows with every
     metric. A listed suggestion needs only its key and its panel, so its chart is built without judging each key's
@@ -306,7 +314,8 @@ def _listed(
     curr_page = page_model.BasicExperimentPage.model_validate_json(page_json)
     store = get_data_store()
     experiment_id = curr_page.experiment_id
-    catalog = ColumnCatalog.load(store, experiment_id) if experiment_id is not None else ColumnCatalog()
+    if catalog is None:
+        catalog = ColumnCatalog.load(store, experiment_id) if experiment_id is not None else ColumnCatalog()
     suggestions = build_suggestions(
         find_uncharted_keys(curr_page.panels, catalog),
         catalog,
@@ -335,30 +344,35 @@ def _listing(suggestions: list[Suggestion], text: str | None, sort: str | None) 
 
 def _suggestions_to_add(
     page_json: str, delimiter: str | None, mode: str | None, picked: frozenset[tuple[ColumnKind, str]]
-) -> list[Suggestion]:
+) -> tuple[ColumnCatalog, list[Suggestion]]:
     """
-    The suggestions `picked` names, with the charts they would be added as.
+    The suggestions `picked` names, with the charts they would be added as, and the catalog they were made from.
 
     A metric's chart depends on its shape, so only the picked metrics are judged. Artifacts and histograms are built
-    for every uncharted one, since an artifact's chart depends on the artifacts beside it.
+    for every uncharted one, since an artifact's chart depends on the artifacts beside it. A band is the chart of the
+    family its key (a template) names.
     """
     curr_page = page_model.BasicExperimentPage.model_validate_json(page_json)
     experiment_id = curr_page.experiment_id
     if experiment_id is None:
-        return []
+        return ColumnCatalog(), []
     store = get_data_store()
     catalog = ColumnCatalog.load(store, experiment_id)
     uncharted = find_uncharted_keys(curr_page.panels, catalog)
     metrics = [key for kind, key in picked if kind is ColumnKind.METRIC]
+    delimiter, split_mode = delimiter or _DEFAULT_DELIMITER, _SPLIT_MODE.validate_python(mode)
     suggestions = build_suggestions(
         UnchartedKeys(metrics=metrics, artifacts=uncharted.artifacts, histograms=uncharted.histograms),
         catalog,
         single_value=single_value_metrics(store, experiment_id, metrics),
-        delimiter=delimiter or _DEFAULT_DELIMITER,
-        mode=_SPLIT_MODE.validate_python(mode),
+        delimiter=delimiter,
+        mode=split_mode,
         lightning=panel_data.is_lightning_experiment(store, experiment_id),
     )
-    return [s for s in suggestions if (s.kind, s.key) in picked]
+    bands = [
+        band_suggestion(key, delimiter, split_mode) for kind, key in picked if kind is ColumnKind.SERIES_BAND
+    ]
+    return catalog, [*bands, *(s for s in suggestions if (s.kind, s.key) in picked)]
 
 
 def _plural(n: int, noun: str) -> str:
@@ -515,7 +529,7 @@ def _register_auto_populate(app: Dash) -> None:
             delimiter=auto_populate_ctx["delimiter"] or _DEFAULT_DELIMITER,
             mode=split_mode,
             lightning=lightning,
-            single_value=single_value_metrics(store, experiment_id, catalog.metrics),
+            single_value=lambda keys: single_value_metrics(store, experiment_id, keys),
         )
         page, container = edits.commit(
             auto_populate_ctx["page_json"],
@@ -674,7 +688,12 @@ def _register_suggestions(app: Dash) -> None:
         scope: str | None,
         selected: list[str] | None,
     ) -> list[str]:
-        """Tick every suggestion the filter leaves (not only the page shown), keeping what was ticked; or untick all."""
+        """
+        Tick every suggestion the filter leaves (not only the page shown), keeping what was ticked; or untick all.
+
+        At most `AUTO_MAX_CHARTS` are ticked at once, as many as auto-generate makes: adding thousands of charts to a
+        page is not something a click should do, and a filter narrows the rest.
+        """
         if cast("str | None", ctx.triggered_id) == SUGGEST_CLEAR_ID:
             if not clear_clicks:
                 raise PreventUpdate
@@ -683,7 +702,7 @@ def _register_suggestions(app: Dash) -> None:
             raise PreventUpdate
         _catalog, suggestions = _listed(page_json, delimiter, mode, scope)
         shown = [s.selection_value for s in _matching(suggestions, filter_text, sort)]
-        return [*dict.fromkeys([*(selected or []), *shown])]
+        return [*dict.fromkeys([*(selected or []), *shown])][:AUTO_MAX_CHARTS]
 
     app.clientside_callback(
         _SUGGEST_SELECTION_JS.source,
@@ -724,10 +743,9 @@ def _register_suggestion_adds(app: Dash) -> None:
     ) -> tuple[Any, str, Component, list[str], bool]:
         triggered_id = cast("dict[str, str]", require_triggered_id())
         picked = frozenset({(ColumnKind(triggered_id["kind"]), triggered_id["key"])})
-        container, saved_page = _add_charts(
-            page_json, paging_json, _suggestions_to_add(page_json, delimiter, mode, picked)
-        )
-        _catalog, suggestions = _listed(saved_page, delimiter, mode, scope)
+        catalog, chosen = _suggestions_to_add(page_json, delimiter, mode, picked)
+        container, saved_page = _add_charts(page_json, paging_json, chosen)
+        _catalog, suggestions = _listed(saved_page, delimiter, mode, scope, catalog)
         still_ticked = [v for v in selected or [] if parse_selection([v]) != picked]
         # Closes the drawer, so the chart just added is in view.
         return container, saved_page, _listing(suggestions, filter_text, sort), still_ticked, False
@@ -764,10 +782,9 @@ def _register_suggestion_adds(app: Dash) -> None:
         if not n_clicks:
             raise PreventUpdate
         picked = parse_selection(selected or [])
-        container, saved_page = _add_charts(
-            page_json, paging_json, _suggestions_to_add(page_json, delimiter, mode, picked)
-        )
-        _catalog, suggestions = _listed(saved_page, delimiter, mode, scope)
+        catalog, chosen = _suggestions_to_add(page_json, delimiter, mode, picked)
+        container, saved_page = _add_charts(page_json, paging_json, chosen)
+        _catalog, suggestions = _listed(saved_page, delimiter, mode, scope, catalog)
         return container, saved_page, _listing(suggestions, filter_text, sort), [], False
 
 

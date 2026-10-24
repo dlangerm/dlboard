@@ -236,14 +236,14 @@ class ChartType(ABC, BaseModel, typing.Generic[_Parameters, _Dataframe, _Chart],
         return set()
 
     @classmethod
-    def hint_required_series(cls, parameters: _Parameters) -> SeriesBandRequest | None:  # noqa: ARG003
+    def hint_required_series(cls, parameters: _Parameters) -> frozenset[SeriesBandRequest]:  # noqa: ARG003
         """
-        Hint at the spread of metric values this chart draws, or `None` for none.
+        Hint at the spreads of metric values this chart draws, none by default.
 
-        For a chart that summarises many metrics at once rather than drawing each: the panel reads the spread for it
+        For a chart that summarises many metrics at once rather than drawing each: the panel reads each spread for it
         (see `SeriesBandRequest`), in place of reading the metrics themselves.
         """
-        return None
+        return frozenset()
 
     @classmethod
     def hint_required_histogram_keys(cls, parameters: _Parameters) -> set[str]:  # noqa: ARG003
@@ -550,7 +550,7 @@ class ChartTypeRegistry:
         return chart_type.hint_required_column_patterns(parameters)
 
     @classmethod
-    def hint_required_series(cls, chart: ChartInstance[_Dataframe, _Chart]) -> SeriesBandRequest | None:
+    def hint_required_series(cls, chart: ChartInstance[_Dataframe, _Chart]) -> frozenset[SeriesBandRequest]:
         chart_type, parameters = cls._typed_chart(chart)
         return chart_type.hint_required_series(parameters)
 
@@ -688,7 +688,7 @@ class ChartInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, 
             )
             return set()
 
-    def hint_required_series(self) -> SeriesBandRequest | None:
+    def hint_required_series(self) -> frozenset[SeriesBandRequest]:
         try:
             return ChartTypeRegistry.hint_required_series(self)
         except (ValidationError, UnknownChartTypeError):
@@ -696,7 +696,7 @@ class ChartInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, 
                 "chart has invalid parameters or an unregistered chart type, no series hint available",
                 chart_type=self.chart_type,
             )
-            return None
+            return frozenset()
 
     def hint_required_histogram_keys(self) -> set[str]:
         try:
@@ -786,7 +786,7 @@ class PanelInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, 
         return set(itertools.chain.from_iterable(c.hint_required_column_patterns() for c in self.charts))
 
     def hint_required_series(self) -> set[SeriesBandRequest]:
-        return {request for chart in self.charts if (request := chart.hint_required_series()) is not None}
+        return set(itertools.chain.from_iterable(c.hint_required_series() for c in self.charts))
 
     @staticmethod
     def _metric_columns(
