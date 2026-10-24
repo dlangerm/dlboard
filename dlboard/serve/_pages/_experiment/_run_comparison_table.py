@@ -39,6 +39,7 @@ from dlboard.serve._pages._experiment import _ids as ids
 from dlboard.serve._pages._experiment import _page_edits as edits
 from dlboard.serve._pages._experiment import _page_model as page_model
 from dlboard.serve._pages._experiment import _page_repository as repo
+from dlboard.serve._pages._experiment._column_catalog import KEY_PICKER_LIMIT
 from dlboard.serve._pages._experiment._run_compare import compare_button
 from dlboard.serve._pages._experiment._shown_runs import ShownRunsSettings, shown_run_ids
 from dlboard.serve._pages._experiment._views import VIEW_NOTIFY_ID
@@ -368,6 +369,7 @@ def _render_hparam_panel(
                                                 {"group": "Metrics (latest)", "items": metric_keys},
                                             ],
                                             value=applied,
+                                            limit=KEY_PICKER_LIMIT,
                                             searchable=True,
                                             clearable=True,
                                             size="xs",

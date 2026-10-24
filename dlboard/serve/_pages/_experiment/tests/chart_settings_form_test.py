@@ -19,7 +19,7 @@ from dlboard.plugins.charts.table_chart import TableChart
 from dlboard.serve._grid import CHOICE_RENDERER, SLIDER_RENDERER
 from dlboard.serve._pages._experiment import _chart_settings_form as settings_form
 from dlboard.serve._pages._experiment._chart_settings_form import _param_field_input, build_chart_param_form
-from dlboard.serve._pages._experiment._column_catalog import ColumnCatalog
+from dlboard.serve._pages._experiment._column_catalog import KEY_PICKER_LIMIT, ColumnCatalog
 
 if TYPE_CHECKING:
     from dlboard.plugins.data_stores.sqlite import SQLLiteStore
@@ -435,3 +435,44 @@ def test_a_number_or_a_name_typed_in_redraws_the_chart_only_once_the_typing_paus
     props = _to_props(_param_field_input(field.name, field, ColumnCatalog()))
 
     assert props["debounce"] == settings_form.INPUT_DEBOUNCE_MS
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        pytest.param(
+            ParameterField(
+                name="column", type=ParameterFieldType.STR, required=True, column_kind=ColumnKind.METRIC
+            ),
+            id="one-metric",
+        ),
+        pytest.param(
+            ParameterField(
+                name="metrics",
+                type=ParameterFieldType.LIST_STR,
+                required=False,
+                column_kind=ColumnKind.METRIC,
+            ),
+            id="many-metrics",
+        ),
+        pytest.param(
+            ParameterField(
+                name="show",
+                type=ParameterFieldType.LIST_PATTERN,
+                required=False,
+                column_kind=ColumnKind.METRIC,
+            ),
+            id="patterns",
+        ),
+    ],
+)
+def test_a_key_picker_lists_a_bounded_number_of_names_however_many_are_logged(field: ParameterField) -> None:
+    """The picker searches every name, but lists only this many of them at once, so a thousand keys cannot freeze it."""
+    names = 20 * KEY_PICKER_LIMIT
+    catalog = ColumnCatalog(metrics=tuple(f"metric_{i:05}" for i in range(names)))
+
+    component = cast("Any", _param_field_input(field.name, field, catalog))
+    props: dict[str, Any] = component.to_plotly_json()["props"]
+
+    assert props["limit"] == KEY_PICKER_LIMIT
+    assert len(props["data"]) >= names

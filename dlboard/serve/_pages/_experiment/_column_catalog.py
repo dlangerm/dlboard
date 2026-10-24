@@ -19,6 +19,12 @@ if typing.TYPE_CHECKING:
     from dlboard.models import DataStore
 
 
+KEY_PICKER_LIMIT: typing.Final = 100
+"""
+How many names a key picker lists at once. It searches every name, and lists the first this many that match.
+"""
+
+
 @dataclass(frozen=True)
 class ColumnCatalog:
     """
