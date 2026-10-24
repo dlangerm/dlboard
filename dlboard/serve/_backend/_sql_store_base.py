@@ -294,6 +294,20 @@ def _runs_among(
     return [] if run_ids is None else [column.in_(run_ids)]
 
 
+def _among_keys(column: sa.ColumnElement[str], keys: frozenset[str] | None) -> list[sa.ColumnElement[bool]]:
+    """
+    What limits a query to the `keys` named, if it is limited to any: `None` is every key.
+
+    The names are written into the statement rather than bound: thousands of them would pass the number of
+    parameters one statement may bind (32,766 on some SQLite builds, 65,535 on Postgres).
+    """
+    if keys is None:
+        return []
+    return [
+        column.in_(sa.bindparam(None, sorted(keys), type_=sa.String, expanding=True, literal_execute=True))
+    ]
+
+
 def _live_runs(runs: sa.Table, experiment_id: int) -> list[sa.ColumnElement[bool]]:
     """What selects an experiment's runs that are not soft-deleted."""
     return [runs.c.experiment_id == experiment_id, runs.c.deleted_at.is_(None)]
@@ -337,45 +351,53 @@ _COMPOUND_SELECT_TERMS: Final = 500
 
 
 def _named(
-    values: list[Any], column: str, sql_type: type[sa.types.TypeEngine[Any]], name: str
+    rows: Sequence[tuple[Any, ...]], columns: Sequence[tuple[str, type[sa.types.TypeEngine[Any]]]], name: str
 ) -> sa.Subquery:
     """
-    `values` as one `column`, to probe each by its index rather than hop through every value a table holds.
+    `rows` as a table of `columns`, to probe each by its index rather than hop through every value a table holds.
 
     A UNION ALL of literals rather than VALUES: SQLite cannot name the columns of a VALUES list. Its cap on a
-    compound SELECT is why the literals are unioned in blocks under that cap, and the blocks unioned in turn.
+    compound SELECT is why the literals are unioned in blocks under that cap, and the blocks unioned in turn. The
+    values are written into the statement rather than bound: thousands of them would pass the number of parameters
+    one statement may bind (32,766 on some SQLite builds).
     """
     blocks = [
-        sa.union_all(*(sa.select(sa.literal(value, sql_type).label(column)) for value in block)).subquery()
-        for block in itertools.batched(values, _COMPOUND_SELECT_TERMS)
+        sa.union_all(
+            *(
+                sa.select(
+                    *(
+                        sa.literal(value, sql_type).render_literal_execute().label(column)
+                        for value, (column, sql_type) in zip(row, columns, strict=True)
+                    )
+                )
+                for row in block
+            )
+        ).subquery()
+        for block in itertools.batched(rows, _COMPOUND_SELECT_TERMS)
     ]
-    return sa.union_all(*(sa.select(block.c[column]) for block in blocks)).subquery(name)
+    return sa.union_all(*(sa.select(*block.c) for block in blocks)).subquery(name)
 
 
 def _named_keys(keys: frozenset[str]) -> sa.Subquery:
     """`keys` as a `key` column, to probe each by its index rather than hop through every key a table holds."""
-    return _named(sorted(keys), "key", sa.String, "logged")
+    return _named([(key,) for key in sorted(keys)], [("key", sa.String)], "logged")
 
 
-def _named_steps(steps: list[int]) -> sa.Subquery:
-    """`steps` as a `step` column, to probe each by its index."""
-    return _named(steps, "step", sa.Integer, "grid")
-
-
-def _grid_steps(last: int, grid: int) -> list[int]:
+def _grid_cells(first: int, last: int, grid: int) -> list[tuple[int, int]]:
     """
-    The steps of a grid: at most `grid` of them, from 0 to `last`, with `last` always among them.
+    The cells of a grid over the steps `first` to `last`: at most `grid` of them, as (after, up to and including).
 
-    Every `stride`-th step, where `stride` is the smallest power of two that keeps them that few. A power of two, so a
-    grid's steps stay put while a run trains, until its stride doubles.
+    The cells run end to end, so every step is in exactly one, and the last ends on `last`. Their ends are every
+    `stride`-th step from `first`, where `stride` is the smallest power of two that keeps them that few. A power of
+    two, so a grid's cells stay put while a run trains, until its stride doubles.
     """
     stride = 1
     while True:
-        steps = list(range(0, last + 1, stride))
-        if steps[-1] != last:
-            steps.append(last)
-        if len(steps) <= grid:
-            return steps
+        ends = list(range(first, last + 1, stride))
+        if ends[-1] != last:
+            ends.append(last)
+        if len(ends) <= grid:
+            return list(itertools.pairwise([first - 1, *ends]))
         stride *= 2
 
 
@@ -964,7 +986,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         # transitively through its run, which is always soft-deleted in the same cascade as its
         # metrics' logical owner (see `_soft_delete`), so a join against `Run` is sufficient.
         m, r = self._tables[models.UnderlyingMetricTableEntry], self._tables[models.Run]
-        key_filter: list[sa.ColumnElement[bool]] = [m.c.key.in_(keys)] if keys is not None else []
+        key_filter = _among_keys(m.c.key, keys)
         # The timestamp is left as stored: `MetricFrame.from_rows` has to read it as a column of timestamps anyway, and
         # parsing each one here as well (the column type does) was a third of what this cost.
         stored = sa.type_coerce(m.c.timestamp_utc, sa.types.NullType()).label("timestamp_utc")
@@ -1122,7 +1144,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         A step logged twice (a re-sent batch) counts as its newest write, as in `MetricFrame.from_rows`.
         """
         m, r = self._tables[models.UnderlyingMetricTableEntry], self._tables[models.Run]
-        key_filter: list[sa.ColumnElement[bool]] = [m.c.key.in_(keys)] if keys is not None else []
+        key_filter = _among_keys(m.c.key, keys)
         written = (
             sa.select(
                 m.c.run_id,
@@ -1201,61 +1223,105 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         self,
         experiment_id: int,
         *,
-        keys: frozenset[str],
+        groups: Mapping[str, str],
         run_ids: frozenset[int] | None,
         grid: int,
     ) -> list[models.SeriesBand]:
         """
-        Per live run, the spread of the values of `keys` at each step of a grid of at most `grid` steps.
+        Per live run and group, the spread of its keys' values over the cells of a grid of at most `grid` steps.
 
-        A key counts at a step only if it logged a number there, and a step logged twice counts its newest write, as in
-        `MetricFrame.from_rows`. The quantiles are nearest-rank. Reads one probe per run, key and grid step, and one pass
-        over those values, so what it reads does not grow with the steps a run trained.
+        A key counts in a cell if its newest write there is a number, a step logged twice counting its newest write as
+        in `MetricFrame.from_rows`. The quantiles are nearest-rank. What it reads is an ordered probe of the index for
+        each key, run and cell (the key's newest write in the cell), and one pass over those values, so it does not
+        grow with the steps a run trained, and a run that logs every 50 steps is as well covered as one that logs every
+        step.
         """
-        if not keys:
+        if not groups:
             return []
-        ends = self._metric_ends(experiment_id, keys, run_ids, latest=True)
-        if not ends:
-            return []
-        steps = _grid_steps(max(row.step for row in ends), grid)
         m, r = self._tables[models.UnderlyingMetricTableEntry], self._tables[models.Run]
-        logged, at_grid = _named_keys(keys), _named_steps(steps)
+        labels = sorted(set(groups.values()))
+        label_ids = {label: at for at, label in enumerate(labels)}
+        logged = _named(
+            [(key, label_ids[label]) for key, label in sorted(groups.items())],
+            [("key", sa.String), ("grp", sa.Integer)],
+            "logged",
+        )
         runs = (
             sa.select(r.c.id.label("run_id"))
             .where(*_live_runs(r, experiment_id), *_runs_among(r.c.id, run_ids))
             .subquery("runs")
         )
-        # The newest write of each run's key at each grid step: one probe of the index per combination.
-        probe = sa.and_(
-            m.c.experiment_id == experiment_id,
-            m.c.key == logged.c.key,
-            m.c.run_id == runs.c.run_id,
-            m.c.step == at_grid.c.step,
+
+        def an_end_of_the_series(order: sa.UnaryExpression[int]) -> sa.ScalarSelect[Any]:
+            return (
+                sa.select(m.c.step)
+                .where(*_series(m, experiment_id, logged.c.key, runs.c.run_id))
+                .order_by(order)
+                .limit(1)
+                .correlate(logged, runs)
+                .scalar_subquery()
+            )
+
+        ends = (
+            sa.select(
+                an_end_of_the_series(m.c.step.asc()).label("first"),
+                an_end_of_the_series(m.c.step.desc()).label("last"),
+            )
+            .select_from(logged.join(runs, sa.true()))
+            .subquery("ends")
         )
-        newest = (
-            sa.select(runs.c.run_id, at_grid.c.step, logged.c.key, sa.func.max(m.c.id).label("id"))
-            .select_from(logged.join(runs, sa.true()).join(at_grid, sa.true()).join(m, probe))
-            .group_by(runs.c.run_id, at_grid.c.step, logged.c.key)
-            .subquery("newest")
+        first, last = self._execute(sa.select(sa.func.min(ends.c.first), sa.func.max(ends.c.last)))[0]
+        if first is None or last is None:
+            return []
+        at_cell = _named(
+            _grid_cells(first, last, grid), [("after", sa.Integer), ("until", sa.Integer)], "cells"
         )
+        # The newest write of each key in each run's cell: one ordered probe of the index per combination, with
+        # nothing in it but the cell's bounds, so the planner has no other plan to choose.
+        newest_value = (
+            sa.select(m.c.value)
+            .where(
+                *_series(m, experiment_id, logged.c.key, runs.c.run_id),
+                m.c.step > at_cell.c.after,
+                m.c.step <= at_cell.c.until,
+            )
+            .order_by(m.c.step.desc(), m.c.id.desc())
+            .limit(1)
+            .correlate(logged, runs, at_cell)
+            .scalar_subquery()
+        )
+        # `OFFSET 0` keeps the databases from folding the probe into each place its value is used, which would run it
+        # again for each; and the value is read by the probe itself, since a join back to the table is one Postgres
+        # may plan as a scan of every experiment's rows.
         written = (
-            sa.select(newest.c.run_id, newest.c.step, m.c.value)
-            .select_from(newest.join(m, m.c.id == newest.c.id))
-            .where(_is_number(m.c.value))
+            sa.select(
+                runs.c.run_id,
+                logged.c.grp,
+                at_cell.c.until.label("step"),
+                logged.c.key,
+                newest_value.label("value"),
+            )
+            .select_from(logged.join(runs, sa.true()).join(at_cell, sa.true()))
+            .offset(0)
             .subquery("written")
         )
-        ranked = sa.select(
-            written.c.run_id,
-            written.c.step,
-            written.c.value,
-            sa.func.row_number()
-            .over(partition_by=(written.c.run_id, written.c.step), order_by=written.c.value)
-            .label("rank"),
-            sa.func.count().over(partition_by=(written.c.run_id, written.c.step)).label("n"),
-        ).subquery("ranked")
+        cell = (written.c.run_id, written.c.grp, written.c.step)
+        ranked = (
+            sa.select(
+                *written.c,
+                sa.func.row_number()
+                .over(partition_by=cell, order_by=(written.c.value, written.c.key))
+                .label("rank"),
+                sa.func.count().over(partition_by=cell).label("n"),
+            )
+            .where(_is_number(written.c.value))
+            .subquery("ranked")
+        )
 
-        def at_rank(position: sa.ColumnElement[Any]) -> sa.ColumnElement[Any]:
-            return sa.func.min(sa.case((ranked.c.rank == position, ranked.c.value)))
+        def at_rank(
+            position: sa.ColumnElement[Any], column: sa.ColumnElement[Any] = ranked.c.value
+        ) -> sa.ColumnElement[Any]:
+            return sa.func.min(sa.case((ranked.c.rank == position, column)))
 
         def nearest_rank(percent: int) -> sa.ColumnElement[Any]:
             # ceil(n * percent / 100) is (x - x % 100) / 100 for x = n * percent + 99: the division then comes out whole on
@@ -1266,6 +1332,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         rows = self._execute(
             sa.select(
                 ranked.c.run_id,
+                ranked.c.grp,
                 ranked.c.step,
                 sa.func.max(ranked.c.n),
                 at_rank(sa.literal(1)),
@@ -1274,11 +1341,13 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
                 at_rank(nearest_rank(75)),
                 at_rank(ranked.c.n),
                 sa.func.avg(ranked.c.value),
+                at_rank(sa.literal(1), ranked.c.key),
+                at_rank(ranked.c.n, ranked.c.key),
             )
-            .group_by(ranked.c.run_id, ranked.c.step)
-            .order_by(ranked.c.run_id, ranked.c.step)
+            .group_by(ranked.c.run_id, ranked.c.grp, ranked.c.step)
+            .order_by(ranked.c.run_id, ranked.c.grp, ranked.c.step)
         )
-        return [models.SeriesBand._make(row) for row in rows]
+        return [models.SeriesBand._make((run_id, labels[grp], *rest)) for run_id, grp, *rest in rows]
 
     def fetch_histograms(
         self,

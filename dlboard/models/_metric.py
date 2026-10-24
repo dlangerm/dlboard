@@ -134,18 +134,23 @@ class LoggedMetrics(BaseModel, frozen=True, extra="ignore"):
 
 class SeriesBand(NamedTuple):
     """
-    The spread of a set of keys' values at one step of one run.
+    The spread of a group of keys' values over one cell of steps of one run.
 
-    `keys` is how many of them logged a number there. The other fields are the nearest-rank minimum, 25th
-    percentile, median, 75th percentile and maximum of those numbers, and their mean.
+    `count` is how many of the group's keys logged a number in the cell (each key's newest write in it). The other
+    statistics are of those numbers: the nearest-rank minimum, 25th percentile, median, 75th percentile and maximum,
+    and their mean, with the key that logged the minimum and the one that logged the maximum. `step` is the last
+    step of the cell. `group` is the label the keys were grouped under (`""` for keys grouped as one).
     """
 
     run_id: int
+    group: str
     step: int
-    keys: int
+    count: int
     minimum: float
-    lower: float
+    p25: float
     median: float
-    upper: float
+    p75: float
     maximum: float
     mean: float
+    minimum_key: str
+    maximum_key: str

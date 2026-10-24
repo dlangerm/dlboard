@@ -21,7 +21,7 @@ _Dataframe = typing.TypeVar("_Dataframe")
 _Chart = typing.TypeVar("_Chart")
 
 if typing.TYPE_CHECKING:
-    from collections.abc import Collection, Iterable
+    from collections.abc import Collection, Iterable, Mapping
     from datetime import datetime
 
     from flask import Response
@@ -247,16 +247,19 @@ class DataStore(typing.Protocol[_P]):
         self,
         experiment_id: int,
         *,
-        keys: frozenset[str],
+        groups: Mapping[str, str],
         run_ids: frozenset[int] | None,
         grid: int,
     ) -> list[SeriesBand]:
         """
-        Per run, the spread of the values of `keys` at each step of a grid of at most `grid` steps.
+        Per live run and group, the spread of its keys' values over the cells of a grid of at most `grid` steps.
 
-        The grid runs from the first step to the last, which is always in it, and is as fine as `grid` allows. A key
-        counts at a step only if it logged a number there, and a step logged twice counts its newest write. What is read
-        is what the grid needs, not every step a run trained.
+        `groups` maps each key to the label it is grouped under, so one read gives a band for each class of a family
+        of keys (`""` throughout for a single band). The grid runs from the first step any key logged to the last,
+        which ends the last cell, and is as fine as `grid` allows. A key counts in a cell if its newest write there is
+        a number, however its steps are spaced (a run logged every 50 steps still has a value in each cell that
+        holds one of them), and a cell nothing was logged in has no band. What is read is what the grid needs, not
+        every step a run trained.
         """
         ...
 

@@ -472,6 +472,8 @@ def test_a_series_band_panel_reads_the_spread_of_the_matched_metrics_on_the_newe
     bands = list(df[column].dropna())
     assert {band.run_id for band in bands} == {newer.id}
     assert [band.step for band in bands] == [0, 1, 2]
-    assert bands[1] == models.SeriesBand(newer.id, 1, 2, 1.0, 1.0, 1.0, 3.0, 3.0, 2.0)
+    assert bands[1] == models.SeriesBand(
+        newer.id, "", 1, 2, 1.0, 1.0, 1.0, 3.0, 3.0, 2.0, "layer_1/grad_norm", "layer_2/grad_norm"
+    )
     assert isinstance(chart.render(df), dcc.Graph)
     assert panel_data.chart_data_fingerprint(chart, later) != before

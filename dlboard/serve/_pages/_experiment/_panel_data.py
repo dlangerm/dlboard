@@ -226,7 +226,9 @@ def _series_band_frame(
     newest = frozenset(run.id for run in store.get_runs(experiment_id, limit=request.runs, run_ids=run_ids))
     if not keys or not newest:
         return pd.DataFrame()
-    bands = store.fetch_series_band(experiment_id, keys=frozenset(keys), run_ids=newest, grid=request.grid)
+    bands = store.fetch_series_band(
+        experiment_id, groups=dict.fromkeys(keys, ""), run_ids=newest, grid=request.grid
+    )
     return build_series_band_dataframe(request, bands)
 
 

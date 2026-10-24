@@ -29,7 +29,7 @@ from dlboard import models
 from dlboard.models import ProjectRole, Scope, has_scope, require_scope
 
 if TYPE_CHECKING:
-    from collections.abc import Collection, Iterable, Iterator
+    from collections.abc import Collection, Iterable, Iterator, Mapping
     from datetime import datetime
 
     from flask import Response
@@ -394,12 +394,12 @@ class AuthorizingDataStore(models.DataStore[...]):
         self,
         experiment_id: int,
         *,
-        keys: frozenset[str],
+        groups: Mapping[str, str],
         run_ids: frozenset[int] | None,
         grid: int,
     ) -> list[models.SeriesBand]:
         self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
-        return self._inner.fetch_series_band(experiment_id, keys=keys, run_ids=run_ids, grid=grid)
+        return self._inner.fetch_series_band(experiment_id, groups=groups, run_ids=run_ids, grid=grid)
 
     def fetch_histograms(
         self,

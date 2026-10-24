@@ -31,6 +31,7 @@ from dlboard.conftest import StoreBackend
 from dlboard.models import ChartInstance, PanelInstance
 from dlboard.plugins.charts.bar_chart import BarChart
 from dlboard.plugins.charts.line_chart import LineChart
+from dlboard.plugins.charts.series_band import SeriesBandChart
 from dlboard.plugins.charts.table_chart import TableChart
 from dlboard.serve._pages._experiment._column_catalog import ColumnCatalog
 from dlboard.serve._pages._experiment._panel_data import fetch_panel_dataframe
@@ -45,6 +46,7 @@ pytestmark = pytest.mark.postgres
 
 BarChart.register(allow_override=True)
 LineChart.register(allow_override=True)
+SeriesBandChart.register(allow_override=True)
 TableChart.register(allow_override=True)
 
 _SHORT, _LONG, _NEIGHBOUR = 10, 200, 1000
@@ -78,7 +80,16 @@ _PATTERN_TABLE = PanelInstance[pd.DataFrame, object](
         )
     ],
 )
+_BAND = PanelInstance[pd.DataFrame, object](
+    name="band",
+    # A band is a probe of the index for each key, run and cell, and a probe costs the depth of the index, which a
+    # neighbour of thousands of rows deepens a little. A few probes keep that under this test's slack, as a scan is not.
+    charts=[
+        ChartInstance(chart_type=SeriesBandChart.name, parameters={"metrics": ["*"], "grid": 4, "runs": 1})
+    ],
+)
 _LOADS: dict[str, Callable[[PostgresStore, int], object]] = {
+    "the band of every metric": lambda s, e: fetch_panel_dataframe(s, e, _BAND, run_ids=None),
     "the latest of a metric pattern": lambda s, e: fetch_panel_dataframe(s, e, _PATTERN_TABLE, run_ids=None),
     "the column catalog": lambda s, e: ColumnCatalog.load(s, e),
     "metric keys": lambda s, e: s.summarize_metric_keys(e),

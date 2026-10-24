@@ -3,20 +3,22 @@
 from __future__ import annotations
 
 import math
+import sqlite3
 from typing import TYPE_CHECKING, cast
 
 import pendulum
 import pytest
+import sqlalchemy as sa
 
 from dlboard import models
 from dlboard.conftest import EVERY_STORE_BACKEND, StoreBackend
+from dlboard.plugins.data_stores.sqlite import SQLLiteStore
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from pathlib import Path
 
     import pandas as pd
-
-    from dlboard.plugins.data_stores.sqlite import SQLLiteStore
 
 _TS = pendulum.datetime(2026, 1, 1, tz="UTC")
 
@@ -210,3 +212,28 @@ def test_a_list_of_more_keys_than_sqlite_compounds_takes_in_one_query_reads_ever
     assert store.fetch_metrics(
         experiment_id, keys=frozenset(keys), run_ids=None, reduction=reduction
     ).latest_per_run() == {run.id: {key: float(i + 10 * step) for i, key in enumerate(keys)}}
+
+
+@pytest.mark.parametrize(
+    "reduction", [models.MetricReduction.HISTORY, models.MetricReduction.LATEST, models.MetricReduction.MEAN]
+)
+def test_more_named_keys_than_a_statement_may_bind_are_read_in_full(
+    tmp_path: Path, reduction: models.MetricReduction
+) -> None:
+    """A stock SQLite build binds at most 32,766 parameters in a statement; the names are written into it instead."""
+    store = SQLLiteStore(tmp_path / "wide.sqlite")
+
+    def a_stock_build(connection: sqlite3.Connection, _record: object) -> None:
+        connection.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, 32_766)
+
+    sa.event.listen(store._engine, "connect", a_stock_build)
+    store._engine.dispose()  # a connection made before the listener would keep the build's own limit
+    project = store.create_project(models.NewProject(name="p", description="d"))
+    experiment = store.create_experiment(models.NewExperiment(project_id=project.id))
+    (run,) = _runs(store, experiment.id, 1)
+    keys = [f"metric_{i:05d}" for i in range(33_000)]
+    _log(store, run, 0, **dict.fromkeys(keys, 1.0))
+
+    frame = store.fetch_metrics(experiment.id, keys=frozenset(keys), run_ids=None, reduction=reduction)
+
+    assert frame.keys == frozenset(keys)

@@ -80,10 +80,10 @@ def _traces(bands: list[SeriesBand], names: dict[int, str]) -> list[dict[str, ty
                 "fillcolor": fill,
             }
         )
-        traces.append(common | {"y": [band.lower for band in rows], "line": {"width": 0}})
+        traces.append(common | {"y": [band.p25 for band in rows], "line": {"width": 0}})
         traces.append(
             common
-            | {"y": [band.upper for band in rows], "line": {"width": 0}, "fill": "tonexty", "fillcolor": fill}
+            | {"y": [band.p75 for band in rows], "line": {"width": 0}, "fill": "tonexty", "fillcolor": fill}
         )
         traces.append(
             common
