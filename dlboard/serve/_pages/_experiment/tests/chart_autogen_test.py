@@ -13,11 +13,13 @@ from dlboard.plugins.charts.file_list import FileListChart
 from dlboard.plugins.charts.histogram import HistogramChart
 from dlboard.plugins.charts.image_series import ImageChart
 from dlboard.plugins.charts.line_chart import LineChart
+from dlboard.plugins.charts.series_band import SeriesBandChart
 from dlboard.serve._pages._experiment import _chart_autogen as autogen
 from dlboard.serve._pages._experiment._column_catalog import ColumnCatalog
 
 HistogramChart.register(allow_override=True)
 LineChart.register(allow_override=True)
+SeriesBandChart.register(allow_override=True)
 ImageChart.register(allow_override=True)
 BarChart.register(allow_override=True)
 FileListChart.register(allow_override=True)
@@ -526,3 +528,45 @@ def test_a_suggestions_checkbox_value_round_trips_even_when_the_key_has_a_colon(
         (ColumnKind.METRIC, "val/loss"),
         (ColumnKind.ARTIFACT, "a:b"),
     }
+
+
+# ---- a family of keys is one band, not a chart each ----
+
+
+@pytest.mark.parametrize("members", [autogen.FOLD_AT_KEYS, 11_000], ids=["fold-threshold", "eleven-thousand"])
+def test_a_family_of_keys_is_one_band_however_many_members_it_has(members: int) -> None:
+    catalog = ColumnCatalog(metrics=tuple(f"layer_{i}/grad_norm" for i in range(members)))
+
+    panels = autogen.build_auto_panels(catalog, delimiter="/", mode="prefix")
+
+    charts = [(chart.chart_type, chart.parameters) for panel in panels for chart in panel.charts]
+    assert charts == [("series_band", {"metrics": ["layer_*/grad_norm"]})]
+
+
+def test_a_family_too_small_to_fold_keeps_a_chart_per_key() -> None:
+    catalog = ColumnCatalog(metrics=("layer_0/grad_norm", "layer_1/grad_norm"))
+
+    panels = autogen.build_auto_panels(catalog, delimiter="/", mode="prefix")
+
+    assert [chart.chart_type for panel in panels for chart in panel.charts] == ["line", "line"]
+
+
+def test_keys_a_band_covers_are_not_suggested_again() -> None:
+    """A layer logged after the band was made is in the band already, while `loss` is not in any chart."""
+    family = tuple(f"layer_{i}/grad_norm" for i in range(autogen.FOLD_AT_KEYS))
+    band_only = autogen.build_auto_panels(ColumnCatalog(metrics=family), delimiter="/", mode="prefix")
+    catalog = ColumnCatalog(metrics=(*family, "layer_40/grad_norm", "loss"))
+
+    assert autogen.find_uncharted_keys(band_only, catalog).metrics == ["loss"]
+
+
+@pytest.mark.parametrize(
+    ("key", "template"),
+    [
+        pytest.param("layer_3/grad_norm", "layer_*/grad_norm", id="one-run-of-digits"),
+        pytest.param("block_12_conv_4", "block_*_conv_*", id="each-run-of-digits"),
+        pytest.param("loss", "loss", id="no-digits-is-its-own-template"),
+    ],
+)
+def test_a_key_template_replaces_each_run_of_digits(key: str, template: str) -> None:
+    assert autogen.key_template(key) == template

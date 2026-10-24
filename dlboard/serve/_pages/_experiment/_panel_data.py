@@ -133,9 +133,9 @@ def fetch_panel_dataframe(
     # "none of this kind at all".
     hparam_keys = panel.hint_required_hparams()
     # A metric pattern names the metrics it matches among the ones logged, so the names are listed for it alone.
-    known_keys = (
-        store.summarize_metric_keys(experiment_id) if panel.hint_required_column_patterns() else list[str]()
-    )
+    series_requests = sorted(panel.hint_required_series(), key=lambda request: request.column)
+    needs_names = bool(panel.hint_required_column_patterns() or series_requests)
+    known_keys = store.summarize_metric_keys(experiment_id) if needs_names else list[str]()
     metric_reductions = panel.metric_reductions(known_keys)
     metrics_df = (
         MetricFrame.merged(
@@ -181,7 +181,12 @@ def fetch_panel_dataframe(
         if histogram_keys
         else pd.DataFrame()
     )
-    merged = merge_hyperparams(merge_by_step(metrics_df, artifacts_df, histograms_df), hparams_df)
+    series_dfs = [
+        _series_band_frame(store, experiment_id, request, known_keys, run_ids) for request in series_requests
+    ]
+    merged = merge_hyperparams(
+        merge_by_step(metrics_df, artifacts_df, histograms_df, *series_dfs), hparams_df
+    )
     if merged.empty:
         return merged
     # Carried in alongside the metric/artifact/hparam data (not fetched separately by each chart
@@ -195,6 +200,34 @@ def fetch_panel_dataframe(
         ]
     )
     return merged if run_names.empty else merged.merge(run_names, on="run_id", how="left")
+
+
+def build_series_band_dataframe(
+    request: models.SeriesBandRequest, bands: typing.Iterable[models.SeriesBand]
+) -> pd.DataFrame:
+    """One row per (run_id, step), with `request.column` holding that step's `SeriesBand`."""
+    return pd.DataFrame.from_records(
+        [
+            {MetricColumn.RUN_ID: band.run_id, MetricColumn.STEP: band.step, request.column: band}
+            for band in bands
+        ]
+    )
+
+
+def _series_band_frame(
+    store: DataStore[...],
+    experiment_id: int,
+    request: models.SeriesBandRequest,
+    known_keys: typing.Sequence[str],
+    run_ids: frozenset[int] | None,
+) -> pd.DataFrame:
+    """The spread of the metrics `request` asks for, over the newest `request.runs` of `run_ids` (every run if `None`)."""
+    keys = models.KeyPatterns(tuple(request.patterns)).select(known_keys)
+    newest = frozenset(run.id for run in store.get_runs(experiment_id, limit=request.runs, run_ids=run_ids))
+    if not keys or not newest:
+        return pd.DataFrame()
+    bands = store.fetch_series_band(experiment_id, keys=frozenset(keys), run_ids=newest, grid=request.grid)
+    return build_series_band_dataframe(request, bands)
 
 
 def is_lightning_experiment(data_store: DataStore[...], experiment_id: int) -> bool:
@@ -227,6 +260,8 @@ def _chart_columns(chart: models.ChartInstance[Any, Any], df: pd.DataFrame) -> l
     )
     histograms = {histogram_column(key) for key in chart.hint_required_histogram_keys()}
     patterns = models.KeyPatterns(tuple(chart.hint_required_column_patterns()))
+    request = chart.hint_required_series()
+    bands = {request.column} if request is not None else set()
 
     def renders_from(column: str) -> bool:
         if column in models.IDENTITY_COLUMNS:
@@ -240,6 +275,8 @@ def _chart_columns(chart: models.ChartInstance[Any, Any], df: pd.DataFrame) -> l
                 return column in histograms
             case ColumnKind.METRIC:
                 return metrics is None or column in metrics or patterns.matches(column)
+            case ColumnKind.SERIES_BAND:
+                return column in bands
             case (ColumnKind.GROUPING | ColumnKind.LAYER) as kind:
                 msg = f"no dataframe column is of kind {kind}"
                 raise ValueError(msg)

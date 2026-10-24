@@ -104,6 +104,9 @@ class ColumnCatalog:
                 return list(self.histograms)
             case ColumnKind.HPARAM:
                 return list(self.hparams)
+            case ColumnKind.SERIES_BAND:
+                msg = f"no field is populated from a {kind} column"
+                raise ValueError(msg)
             case ColumnKind.GROUPING:
                 return sorted({MetricColumn.RUN_ID, *self.options(ColumnKind.METRIC), *self.hparams})
 
