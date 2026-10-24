@@ -22,6 +22,7 @@ if typing.TYPE_CHECKING:
     from collections.abc import Collection, Mapping
 
     from dlboard.models._artifact import Artifact
+    from dlboard.models._panel_frame import SeriesBandRequest
 
 _log = get_logger(__name__)
 
@@ -51,6 +52,8 @@ class ColumnKind(StrEnum):
     METRIC = "metric"
     ARTIFACT = "artifact"
     HISTOGRAM = "histogram"
+    SERIES_BAND = "series_band"
+    """The spread of several metrics' values at each step of a grid. No chart field is populated from one."""
     HPARAM = "hparam"
     LAYER = "layer"
     """Artifact keys an image chart can draw over a picture besides its own overlays: an `Overlay` logged under a key of its own, or an image. No dataframe column is ever tagged with this kind directly."""
@@ -231,6 +234,16 @@ class ChartType(ABC, BaseModel, typing.Generic[_Parameters, _Dataframe, _Chart],
         without editing the chart. Defaults to none, so a chart type that names its metrics need not say anything.
         """
         return set()
+
+    @classmethod
+    def hint_required_series(cls, parameters: _Parameters) -> SeriesBandRequest | None:  # noqa: ARG003
+        """
+        Hint at the spread of metric values this chart draws, or `None` for none.
+
+        For a chart that summarises many metrics at once rather than drawing each: the panel reads the spread for it
+        (see `SeriesBandRequest`), in place of reading the metrics themselves.
+        """
+        return None
 
     @classmethod
     def hint_required_histogram_keys(cls, parameters: _Parameters) -> set[str]:  # noqa: ARG003
@@ -537,6 +550,11 @@ class ChartTypeRegistry:
         return chart_type.hint_required_column_patterns(parameters)
 
     @classmethod
+    def hint_required_series(cls, chart: ChartInstance[_Dataframe, _Chart]) -> SeriesBandRequest | None:
+        chart_type, parameters = cls._typed_chart(chart)
+        return chart_type.hint_required_series(parameters)
+
+    @classmethod
     def hint_required_histogram_keys(cls, chart: ChartInstance[_Dataframe, _Chart]) -> set[str]:
         chart_type, parameters = cls._typed_chart(chart)
         return chart_type.hint_required_histogram_keys(parameters)
@@ -670,6 +688,16 @@ class ChartInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, 
             )
             return set()
 
+    def hint_required_series(self) -> SeriesBandRequest | None:
+        try:
+            return ChartTypeRegistry.hint_required_series(self)
+        except (ValidationError, UnknownChartTypeError):
+            _log.warning(
+                "chart has invalid parameters or an unregistered chart type, no series hint available",
+                chart_type=self.chart_type,
+            )
+            return None
+
     def hint_required_histogram_keys(self) -> set[str]:
         try:
             return ChartTypeRegistry.hint_required_histogram_keys(self)
@@ -756,6 +784,9 @@ class PanelInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, 
 
     def hint_required_column_patterns(self) -> set[str]:
         return set(itertools.chain.from_iterable(c.hint_required_column_patterns() for c in self.charts))
+
+    def hint_required_series(self) -> set[SeriesBandRequest]:
+        return {request for chart in self.charts if (request := chart.hint_required_series()) is not None}
 
     @staticmethod
     def _metric_columns(

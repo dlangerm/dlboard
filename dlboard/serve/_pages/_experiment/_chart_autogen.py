@@ -9,16 +9,26 @@ decent default panel layout for a brand-new experiment, and the same grouping lo
 
 from __future__ import annotations
 
+import re
 import typing
 from enum import StrEnum
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Final, Literal
 
-from dlboard.models import Artifact, ChartInstance, ChartType, ColumnKind, OverlayKey, PanelInstance
+from dlboard.models import (
+    Artifact,
+    ChartInstance,
+    ChartType,
+    ColumnKind,
+    KeyPatterns,
+    OverlayKey,
+    PanelInstance,
+)
 from dlboard.plugins.charts.bar_chart import BarChart
 from dlboard.plugins.charts.file_list import FileListChart
 from dlboard.plugins.charts.histogram import HistogramChart
 from dlboard.plugins.charts.image_series import ImageChart
 from dlboard.plugins.charts.line_chart import LineChart
+from dlboard.plugins.charts.series_band import SeriesBandChart
 
 if TYPE_CHECKING:
     from dlboard.serve._pages._experiment._column_catalog import ColumnCatalog
@@ -87,7 +97,13 @@ def panel_name_for_group(group: str, kind: ColumnKind, *, granularity: str | Non
             name = f"{group}{ARTIFACT_PANEL_SUFFIX}"
         case ColumnKind.HISTOGRAM:
             name = f"{group}{HISTOGRAM_PANEL_SUFFIX}"
-        case ColumnKind.METRIC | ColumnKind.HPARAM | ColumnKind.GROUPING | ColumnKind.LAYER:
+        case (
+            ColumnKind.METRIC
+            | ColumnKind.HPARAM
+            | ColumnKind.GROUPING
+            | ColumnKind.LAYER
+            | ColumnKind.SERIES_BAND
+        ):
             name = group
     return f"{name} ({granularity})" if granularity else name
 
@@ -179,6 +195,28 @@ def default_artifact_charts(keys: typing.Iterable[str], catalog: ColumnCatalog) 
     return charts
 
 
+FOLD_AT_KEYS: Final = 12
+"""How many keys must share a template before autogen charts them as one band, not a chart each."""
+
+
+def key_template(key: str) -> str:
+    """The key with each run of digits replaced by `*`: `layer_3/grad_norm` and `layer_17/grad_norm` share `layer_*/grad_norm`."""
+    return re.sub(r"\d+", "*", key)
+
+
+def folded_templates(keys: typing.Iterable[str]) -> dict[str, list[str]]:
+    """The templates that at least `FOLD_AT_KEYS` of `keys` share, with the keys each covers."""
+    by_template: dict[str, list[str]] = {}
+    for key in keys:
+        by_template.setdefault(key_template(key), []).append(key)
+    return {template: members for template, members in by_template.items() if len(members) >= FOLD_AT_KEYS}
+
+
+def series_band_chart(pattern: str) -> ChartInstance[typing.Any, typing.Any]:
+    """The band of every metric `pattern` matches, in place of a chart of each of them."""
+    return ChartInstance(chart_type=SeriesBandChart.name, parameters={"metrics": [pattern]})
+
+
 def group_keys_into_panels(
     catalog: ColumnCatalog,
     *,
@@ -196,11 +234,20 @@ def group_keys_into_panels(
     callers should gate it on `ExperimentSource.PYTORCH_LIGHTNING`.
     """
     panels: dict[str, list[tuple[str, ColumnKind]]] = {}
+    folded = folded_templates(catalog.metrics)
+    folded_keys = {key for members in folded.values() for key in members}
     for column in catalog.metrics:
+        if column in folded_keys:
+            continue
         granularity = lightning_granularity(column) if lightning else None
         group = split_group_name(column, delimiter, mode)
         panel_name = panel_name_for_group(group, ColumnKind.METRIC, granularity=granularity)
         panels.setdefault(panel_name, []).append((column, ColumnKind.METRIC))
+    for template in folded:
+        group = split_group_name(template, delimiter, mode)
+        panels.setdefault(panel_name_for_group(group, ColumnKind.SERIES_BAND), []).append(
+            (template, ColumnKind.SERIES_BAND)
+        )
     for artifact in default_artifact_charts(catalog.artifact_chart_types, catalog):
         group = split_group_name(artifact.group_key, delimiter, mode)
         panels.setdefault(panel_name_for_group(group, ColumnKind.ARTIFACT), []).append(
@@ -240,6 +287,8 @@ def build_auto_panels(
                 return artifact_charts[key]
             case ColumnKind.HISTOGRAM:
                 return default_chart_for_histogram(key)
+            case ColumnKind.SERIES_BAND:
+                return series_band_chart(key)
             case ColumnKind.HPARAM | ColumnKind.GROUPING | ColumnKind.LAYER:
                 msg = f"no chart is generated for a {kind} key"
                 raise ValueError(msg)
@@ -271,16 +320,21 @@ def find_uncharted_keys(
     charted_artifacts: set[str] = set()
     charted_prefixes: set[str] = set()
     charted_histograms: set[str] = set()
+    charted_patterns: set[str] = set()
     for panel in panels:
         hinted_columns = panel.hint_required_columns()
         if hinted_columns is not None:
             charted_metrics |= hinted_columns
+        charted_patterns |= {
+            pattern for request in panel.hint_required_series() for pattern in request.patterns
+        }
         charted_artifacts |= {k for k in panel.hint_required_artifact_keys() if k is not None}
         charted_prefixes |= panel.hint_required_artifact_key_prefixes()
         charted_histograms |= panel.hint_required_histogram_keys()
 
+    covered = KeyPatterns(tuple(charted_patterns))
     return UnchartedKeys(
-        metrics=[c for c in catalog.metrics if c not in charted_metrics],
+        metrics=[c for c in catalog.metrics if c not in charted_metrics and not covered.matches(c)],
         artifacts=[
             k
             for k in catalog.artifact_chart_types

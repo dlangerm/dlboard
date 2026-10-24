@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 import pandas as pd
 import pendulum
 import pytest
+from dash import dcc
 from pydantic import BaseModel
 
 from dlboard import models
@@ -27,6 +28,7 @@ from dlboard.models._view import ChartInstance, ChartType, ChartTypeRegistry, Co
 from dlboard.plugins.charts.file_list import FileListChart
 from dlboard.plugins.charts.image_series import ImageChart
 from dlboard.plugins.charts.line_chart import LineChart
+from dlboard.plugins.charts.series_band import SeriesBandChart
 from dlboard.plugins.charts.table_chart import TableChart
 from dlboard.serve._backend._artifact_download import artifact_url
 from dlboard.serve._pages._experiment import _panel_data as panel_data
@@ -41,6 +43,7 @@ LineChart.register(allow_override=True)
 FileListChart.register(allow_override=True)
 ImageChart.register(allow_override=True)
 TableChart.register(allow_override=True)
+SeriesBandChart.register(allow_override=True)
 
 
 _TS = pendulum.datetime(2026, 1, 1, tz="UTC")
@@ -424,3 +427,51 @@ def test_a_table_of_a_metric_pattern_fetches_the_metrics_it_matches_including_la
     assert {"layer_1/grad_norm", "layer_2/grad_norm"} <= set(first.columns)
     assert not {"layer_2/acc", "loss"} & set(first.columns)
     assert "layer_3/grad_norm" in later.columns
+
+
+def test_a_series_band_panel_reads_the_spread_of_the_matched_metrics_on_the_newest_run(
+    store: SQLLiteStore, experiment_id: int
+) -> None:
+    """The band reads only the grid steps of the newest run, and a metric matching the pattern logged later moves it."""
+    older = store.create_run(models.NewRun(experiment_id=experiment_id))
+    newer = store.create_run(models.NewRun(experiment_id=experiment_id))
+
+    def log(run: models.Run, step: int, metrics: dict[str, float]) -> None:
+        store.log_metrics(
+            [
+                models.LoggedMetrics(
+                    metrics=metrics, step=step, experiment_id=experiment_id, run_id=run.id, timestamp_utc=_TS
+                )
+            ]
+        )
+
+    for run in (older, newer):
+        for step in range(3):
+            log(
+                run,
+                step,
+                {"layer_1/grad_norm": float(step), "layer_2/grad_norm": float(step) + 2, "loss": 9.0},
+            )
+    panel = PanelInstance[pd.DataFrame, object](
+        name="p",
+        charts=[
+            ChartInstance[pd.DataFrame, object](
+                chart_type=SeriesBandChart.name,
+                parameters={"metrics": ["layer_*/grad_norm"], "grid": 8, "runs": 1},
+            )
+        ],
+    )
+    (chart,) = panel.charts
+
+    df = panel_data.fetch_panel_dataframe(store, experiment_id, panel, run_ids=None)
+    before = panel_data.chart_data_fingerprint(chart, df)
+    log(newer, 1, {"layer_3/grad_norm": 7.0})
+    later = panel_data.fetch_panel_dataframe(store, experiment_id, panel, run_ids=None)
+
+    column = models.SeriesBandRequest(frozenset({"layer_*/grad_norm"}), grid=8, runs=1).column
+    bands = list(df[column].dropna())
+    assert {band.run_id for band in bands} == {newer.id}
+    assert [band.step for band in bands] == [0, 1, 2]
+    assert bands[1] == models.SeriesBand(newer.id, 1, 2, 1.0, 1.0, 1.0, 3.0, 3.0)
+    assert isinstance(chart.render(df), dcc.Graph)
+    assert panel_data.chart_data_fingerprint(chart, later) != before

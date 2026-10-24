@@ -1921,7 +1921,8 @@ def test_auto_generate_leaves_a_huge_panel_closed_and_opens_a_small_one(
     experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
     api = BasicDlboardAPI(live_server_url)
     run = api.create_run(models.NewRun(experiment_id=experiment_id))
-    many = {f"big/m{i}": 1.0 for i in range(AUTO_OPEN_MAX_CHARTS + 1)}
+    # Letters, not numbers: keys that differ only in digits are one family, which auto-generate charts as one band.
+    many = {f"big/{chr(ord('a') + i)}": 1.0 for i in range(AUTO_OPEN_MAX_CHARTS + 1)}
     api.log_metric_batch(
         [
             models.LoggedMetrics(
@@ -2112,7 +2113,8 @@ def test_panels_are_paged_and_filtered_and_the_page_is_a_shareable_link(
                 experiment_id=experiment_id,
                 run_id=run.id,
                 step=step,
-                metrics={f"p{i:02}/loss": 1.0 for i in range(13)},
+                # Letters, not numbers: keys that differ only in digits are one family, which auto-generate charts as one band.
+                metrics={f"p{name}/loss": 1.0 for name in "abcdefghijklm"},
                 timestamp_utc=pendulum.now("UTC"),
             )
             for step in range(2)
@@ -2128,19 +2130,19 @@ def test_panels_are_paged_and_filtered_and_the_page_is_a_shareable_link(
 
     area.get_by_role("button", name="2", exact=True).first.click()
     expect(headers).to_have_count(3)
-    expect(headers.first).to_contain_text("p10")
+    expect(headers.first).to_contain_text("pk")
     expect(page).to_have_url(re.compile(r"panels_page=2"))
 
-    page.locator(f"#{PANEL_FILTER_ID}").fill("p07")
+    page.locator(f"#{PANEL_FILTER_ID}").fill("pg")
     expect(headers).to_have_count(1)
-    expect(headers.first).to_contain_text("p07")
-    expect(page).to_have_url(re.compile(r"panels_q=p07"))
+    expect(headers.first).to_contain_text("pg")
+    expect(page).to_have_url(re.compile(r"panels_q=pg"))
     expect(page).not_to_have_url(re.compile(r"panels_page"))
 
     link = page.url
     page.goto(link)
     expect(headers).to_have_count(1)
-    expect(page.locator(f"#{PANEL_FILTER_ID}")).to_have_value("p07")
+    expect(page.locator(f"#{PANEL_FILTER_ID}")).to_have_value("pg")
 
     page.locator(f"#{PANEL_FILTER_ID}").fill("")
     expect(headers).to_have_count(10)
@@ -2182,7 +2184,8 @@ def test_a_panels_charts_are_paged_and_filtered_by_metric_name(
                 experiment_id=experiment_id,
                 run_id=run.id,
                 step=step,
-                metrics={f"g/m{i:02}": float(i) for i in range(14)},
+                # Letters, not numbers, for the same reason: see the paged-panels test above.
+                metrics={f"g/m{name}": float(i) for i, name in enumerate("abcdefghijklmn")},
                 timestamp_utc=pendulum.now("UTC"),
             )
             for step in range(2)
@@ -2224,13 +2227,13 @@ def test_a_panels_charts_are_paged_and_filtered_by_metric_name(
     expect(charts).to_have_count(2)
     expect(page).to_have_url(re.compile(r"charts="))
 
-    chart_filter.fill("m03")
+    chart_filter.fill("md")
     expect(charts).to_have_count(1)
-    expect(charts.first).to_contain_text("m03")
+    expect(charts.first).to_contain_text("md")
 
     page.reload()
     expect(charts).to_have_count(1)
-    expect(chart_filter).to_have_value("m03")
+    expect(chart_filter).to_have_value("md")
 
     chart_filter.fill("")
     expect(charts).to_have_count(12)

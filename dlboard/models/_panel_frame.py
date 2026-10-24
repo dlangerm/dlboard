@@ -9,6 +9,9 @@ repeating the strings.
 
 from __future__ import annotations
 
+import dataclasses
+import hashlib
+import json
 import typing
 
 from dlboard.models._metric import MetricColumn
@@ -43,6 +46,29 @@ ARTIFACT_COLUMN_PREFIX: typing.Final = "artifact__"
 
 HISTOGRAM_COLUMN_PREFIX: typing.Final = "histogram__"
 """Histogram columns are prefixed for the same reason; each cell holds a `Histogram`, or NaN where the key was not logged."""
+
+SERIES_BAND_COLUMN_PREFIX: typing.Final = "series_band__"
+"""Series-band columns are prefixed for the same reason; each cell holds a `SeriesBand`, or NaN where the grid has no step."""
+
+
+@dataclasses.dataclass(frozen=True)
+class SeriesBandRequest:
+    """What a chart asks for, as the spread of the values of the metrics its `patterns` match, on a grid of `grid` steps."""
+
+    patterns: frozenset[str]
+    """The metric names and patterns (see `KeyPatterns`) whose values are spread."""
+    grid: int
+    """At most this many steps, see `_grid_steps` in the store."""
+    runs: int
+    """How many of the panel's newest runs are spread, each costing a read of every metric the patterns match."""
+
+    @property
+    def column(self) -> str:
+        """The column its band is carried under: a digest of what it asks for, so charts that ask alike share it."""
+        asked = json.dumps([sorted(self.patterns), self.grid, self.runs])
+        digest = hashlib.sha1(asked.encode(), usedforsecurity=False).hexdigest()[:12]
+        return f"{SERIES_BAND_COLUMN_PREFIX}{digest}"
+
 
 _TAGS_SUFFIX: typing.Final = "__tags"
 _FNAME_SUFFIX: typing.Final = "__fname"
@@ -101,4 +127,6 @@ def column_kind(column: str) -> ColumnKind:
         return ColumnKind.ARTIFACT
     if column.startswith(HISTOGRAM_COLUMN_PREFIX):
         return ColumnKind.HISTOGRAM
+    if column.startswith(SERIES_BAND_COLUMN_PREFIX):
+        return ColumnKind.SERIES_BAND
     return ColumnKind.METRIC
