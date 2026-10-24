@@ -295,12 +295,25 @@ def _render_suggestions(
     )
 
 
+class _Listing(TypedDict):
+    """How the drawer groups and narrows its suggestions: the delimiter and mode of the grouping, and the panel in scope."""
+
+    delimiter: str | None
+    mode: str | None
+    scope: str | None
+
+
+def _listing_states() -> dict[str, State]:
+    """The drawer's `_Listing`, as the States a callback reads it from."""
+    return {
+        "delimiter": State(SUGGEST_DELIMITER_ID, "value"),
+        "mode": State(SUGGEST_MODE_ID, "value"),
+        "scope": State(SUGGEST_SCOPE_STORE_ID, "data"),
+    }
+
+
 def _listed(
-    page_json: str,
-    delimiter: str | None,
-    mode: str | None,
-    scope: str | None,
-    catalog: ColumnCatalog | None = None,
+    page_json: str, listing: _Listing, catalog: ColumnCatalog | None = None
 ) -> tuple[ColumnCatalog, list[Suggestion]]:
     """
     Every suggestion the page leaves uncharted, in `scope` if there is one, with the catalog they came from.
@@ -319,12 +332,12 @@ def _listed(
     suggestions = build_suggestions(
         find_uncharted_keys(curr_page.panels, catalog),
         catalog,
-        delimiter=delimiter or _DEFAULT_DELIMITER,
-        mode=_SPLIT_MODE.validate_python(mode),
+        delimiter=listing["delimiter"] or _DEFAULT_DELIMITER,
+        mode=_SPLIT_MODE.validate_python(listing["mode"]),
         lightning=experiment_id is not None and panel_data.is_lightning_experiment(store, experiment_id),
     )
-    if scope is not None:
-        suggestions = [s for s in suggestions if s.panel_name == scope]
+    if listing["scope"] is not None:
+        suggestions = [s for s in suggestions if s.panel_name == listing["scope"]]
     return catalog, suggestions
 
 
@@ -343,7 +356,7 @@ def _listing(suggestions: list[Suggestion], text: str | None, sort: str | None) 
 
 
 def _suggestions_to_add(
-    page_json: str, delimiter: str | None, mode: str | None, picked: frozenset[tuple[ColumnKind, str]]
+    page_json: str, listing: _Listing, picked: frozenset[tuple[ColumnKind, str]]
 ) -> tuple[ColumnCatalog, list[Suggestion]]:
     """
     The suggestions `picked` names, with the charts they would be added as, and the catalog they were made from.
@@ -360,7 +373,10 @@ def _suggestions_to_add(
     catalog = ColumnCatalog.load(store, experiment_id)
     uncharted = find_uncharted_keys(curr_page.panels, catalog)
     metrics = [key for kind, key in picked if kind is ColumnKind.METRIC]
-    delimiter, split_mode = delimiter or _DEFAULT_DELIMITER, _SPLIT_MODE.validate_python(mode)
+    delimiter, split_mode = (
+        listing["delimiter"] or _DEFAULT_DELIMITER,
+        _SPLIT_MODE.validate_python(listing["mode"]),
+    )
     suggestions = build_suggestions(
         UnchartedKeys(metrics=metrics, artifacts=uncharted.artifacts, histograms=uncharted.histograms),
         catalog,
@@ -632,7 +648,8 @@ def _register_suggestions(app: Dash) -> None:
 
         title = f"Suggested charts for {scope}" if scope else "Suggested charts"
         catalog, suggestions = _listed(
-            suggest_ctx["page_json"], suggest_ctx["delimiter"], suggest_ctx["mode"], scope
+            suggest_ctx["page_json"],
+            _Listing(delimiter=suggest_ctx["delimiter"], mode=suggest_ctx["mode"], scope=scope),
         )
         content: Component = (
             _listing(suggestions, filter_text, suggest_ctx["sort"])
@@ -647,21 +664,14 @@ def _register_suggestions(app: Dash) -> None:
         Input(SUGGEST_FILTER_ID, "value"),
         Input(SUGGEST_SORT_ID, "value"),
         State(ids.STATE_PAGE_STORAGE, "data"),
-        State(SUGGEST_DELIMITER_ID, "value"),
-        State(SUGGEST_MODE_ID, "value"),
-        State(SUGGEST_SCOPE_STORE_ID, "data"),
+        _listing_states(),
         prevent_initial_call=True,
     )
-    def filter_and_sort_suggestions(  # noqa: PLR0913
-        filter_text: str | None,
-        sort: str | None,
-        page_json: str,
-        delimiter: str | None,
-        mode: str | None,
-        scope: str | None,
+    def filter_and_sort_suggestions(
+        filter_text: str | None, sort: str | None, page_json: str, listing: _Listing
     ) -> Component:
         """Re-list the uncharted keys the filter leaves; the ticked boxes live in the checkbox group, so they survive."""
-        _catalog, suggestions = _listed(page_json, delimiter, mode, scope)
+        _catalog, suggestions = _listed(page_json, listing)
         return _listing(suggestions, filter_text, sort)
 
     @app.callback(
@@ -671,10 +681,8 @@ def _register_suggestions(app: Dash) -> None:
         State(SUGGEST_FILTER_ID, "value"),
         State(SUGGEST_SORT_ID, "value"),
         State(ids.STATE_PAGE_STORAGE, "data"),
-        State(SUGGEST_DELIMITER_ID, "value"),
-        State(SUGGEST_MODE_ID, "value"),
-        State(SUGGEST_SCOPE_STORE_ID, "data"),
         State(SUGGEST_SELECTION_ID, "value"),
+        _listing_states(),
         prevent_initial_call=True,
     )
     def select_suggestions(  # noqa: PLR0913
@@ -683,10 +691,8 @@ def _register_suggestions(app: Dash) -> None:
         filter_text: str | None,
         sort: str | None,
         page_json: str,
-        delimiter: str | None,
-        mode: str | None,
-        scope: str | None,
         selected: list[str] | None,
+        listing: _Listing,
     ) -> list[str]:
         """
         Tick every suggestion the filter leaves (not only the page shown), keeping what was ticked; or untick all.
@@ -700,7 +706,7 @@ def _register_suggestions(app: Dash) -> None:
             return []
         if not select_all_clicks:
             raise PreventUpdate
-        _catalog, suggestions = _listed(page_json, delimiter, mode, scope)
+        _catalog, suggestions = _listed(page_json, listing)
         shown = [s.selection_value for s in _matching(suggestions, filter_text, sort)]
         return [*dict.fromkeys([*(selected or []), *shown])][:AUTO_MAX_CHARTS]
 
@@ -722,30 +728,26 @@ def _register_suggestion_adds(app: Dash) -> None:
         Input(_ADD_SUGGESTION.all(), "n_clicks"),
         State(ids.STATE_PAGE_STORAGE, "data"),
         State(ids.PANEL_PAGING_ID, "data"),
-        State(SUGGEST_DELIMITER_ID, "value"),
-        State(SUGGEST_MODE_ID, "value"),
-        State(SUGGEST_SCOPE_STORE_ID, "data"),
         State(SUGGEST_FILTER_ID, "value"),
         State(SUGGEST_SORT_ID, "value"),
         State(SUGGEST_SELECTION_ID, "value"),
+        _listing_states(),
         prevent_initial_call=True,
     )
     def add_suggested_chart(  # noqa: PLR0913
         _n_clicks_list: list[int],
         page_json: str,
         paging_json: str,
-        delimiter: str | None,
-        mode: str | None,
-        scope: str | None,
         filter_text: str | None,
         sort: str | None,
         selected: list[str] | None,
+        listing: _Listing,
     ) -> tuple[Any, str, Component, list[str], bool]:
         triggered_id = cast("dict[str, str]", require_triggered_id())
         picked = frozenset({(ColumnKind(triggered_id["kind"]), triggered_id["key"])})
-        catalog, chosen = _suggestions_to_add(page_json, delimiter, mode, picked)
+        catalog, chosen = _suggestions_to_add(page_json, listing, picked)
         container, saved_page = _add_charts(page_json, paging_json, chosen)
-        _catalog, suggestions = _listed(saved_page, delimiter, mode, scope, catalog)
+        _catalog, suggestions = _listed(saved_page, listing, catalog)
         still_ticked = [v for v in selected or [] if parse_selection([v]) != picked]
         # Closes the drawer, so the chart just added is in view.
         return container, saved_page, _listing(suggestions, filter_text, sort), still_ticked, False
@@ -760,11 +762,9 @@ def _register_suggestion_adds(app: Dash) -> None:
         State(SUGGEST_SELECTION_ID, "value"),
         State(ids.STATE_PAGE_STORAGE, "data"),
         State(ids.PANEL_PAGING_ID, "data"),
-        State(SUGGEST_DELIMITER_ID, "value"),
-        State(SUGGEST_MODE_ID, "value"),
-        State(SUGGEST_SCOPE_STORE_ID, "data"),
         State(SUGGEST_FILTER_ID, "value"),
         State(SUGGEST_SORT_ID, "value"),
+        _listing_states(),
         prevent_initial_call=True,
     )
     def add_selected_suggestions(  # noqa: PLR0913
@@ -772,19 +772,17 @@ def _register_suggestion_adds(app: Dash) -> None:
         selected: list[str] | None,
         page_json: str,
         paging_json: str,
-        delimiter: str | None,
-        mode: str | None,
-        scope: str | None,
         filter_text: str | None,
         sort: str | None,
+        listing: _Listing,
     ) -> tuple[Any, str, Component, list[str], bool]:
         """Add every ticked suggestion's chart at once, wherever the current filter has scrolled them."""
         if not n_clicks:
             raise PreventUpdate
         picked = parse_selection(selected or [])
-        catalog, chosen = _suggestions_to_add(page_json, delimiter, mode, picked)
+        catalog, chosen = _suggestions_to_add(page_json, listing, picked)
         container, saved_page = _add_charts(page_json, paging_json, chosen)
-        _catalog, suggestions = _listed(saved_page, delimiter, mode, scope, catalog)
+        _catalog, suggestions = _listed(saved_page, listing, catalog)
         return container, saved_page, _listing(suggestions, filter_text, sort), [], False
 
 

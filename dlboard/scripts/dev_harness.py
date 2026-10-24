@@ -212,7 +212,7 @@ def seed(  # noqa: PLR0913
     steps_per_batch: Annotated[
         int,
         cyclopts.Parameter(
-            help="Steps per upload request. With many keys, each step is a large part of one."
+            help="Steps per upload request, sent straight to the REST API: a training process sends a step of many keys as items of at most 1,000 (see `DLBoardLogger.log_metrics`), so size this to the request you want to time."
         ),
     ] = 100,
 ) -> None:

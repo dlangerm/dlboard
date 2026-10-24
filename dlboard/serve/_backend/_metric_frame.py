@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, NamedTuple, cast
+from typing import TYPE_CHECKING, NamedTuple
 
 import numpy as np
 import pandas as pd
@@ -146,12 +146,17 @@ class MetricFrame:
         """
         keys = sorted(self.keys)
         runs = np.asarray(self._frame[MetricColumn.RUN_ID], dtype="int64")
+        if not runs.size:
+            return {}
         values = np.asarray(self._frame[keys], dtype="float64")
+        # One stable sort groups the runs' rows and keeps each run's rows in the frame's order, which is step order; a mask
+        # per run would read every row once for each run, and a comparison can have thousands of them.
+        by_run = np.argsort(runs, kind="stable")
+        first_of_each = np.flatnonzero(np.diff(runs[by_run], prepend=runs[by_run][:1] - 1))
         latest: dict[int, dict[str, float]] = {}
-        for run_id in dict.fromkeys(runs.tolist()):
-            in_run: np.ndarray = runs == run_id
-            column_values = _last_valid(values[in_run])
-            latest[cast("int", run_id)] = {
+        for rows in np.split(by_run, first_of_each[1:]):
+            column_values = _last_valid(values[rows])
+            latest[int(runs[rows[0]])] = {
                 key: float(value)
                 for key, value in zip(keys, column_values, strict=True)
                 if not np.isnan(value)

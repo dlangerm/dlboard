@@ -361,6 +361,9 @@ def _named(
     values are written into the statement rather than bound: thousands of them would pass the number of parameters
     one statement may bind (32,766 on some SQLite builds).
     """
+    if not rows:
+        msg = f"cannot name no rows as table {name!r}: a UNION ALL needs a SELECT"
+        raise ValueError(msg)
     blocks = [
         sa.union_all(
             *(
@@ -1061,35 +1064,24 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             return [row for row in rows if row.value is not None]
         settled = {
             (row.run_id, row.key): row
-            for row in self._settled_ends(
-                experiment_id,
-                frozenset(key for _, key in unsettled),
-                frozenset(run_id for run_id, _ in unsettled),
-                latest=latest,
-            )
+            for row in self._settled_ends(experiment_id, sorted(unsettled), latest=latest)
         }
         kept = [row for row in rows if (row.run_id, row.key) not in unsettled and row.value is not None]
         return kept + [settled[pair] for pair in unsettled if pair in settled]
 
     def _settled_ends(
-        self,
-        experiment_id: int,
-        keys: frozenset[str] | None,
-        run_ids: frozenset[int] | None,
-        *,
-        latest: bool,
+        self, experiment_id: int, pairs: Sequence[tuple[int, str]], *, latest: bool
     ) -> list[MetricRow]:
         """
-        Each live run's last (or first) row of each key, by one probe through the index per run and key.
+        For each of `pairs` (a run and a key), its last (or first) row that is a number, by a probe through the index.
 
-        What is read depends on how many runs and keys there are, not on how many steps they logged. A step
-        logged twice (a re-sent batch) counts as its newest write, as in `MetricFrame.from_rows`.
+        Only for the pairs whose last row is missing (a NaN, the last step of a diverged run), so that is all it reads,
+        however many runs and keys were asked for. The probe walks back over the series to the last value there is: a
+        series that ends in a long stretch of missing values reads that stretch. A step logged twice (a re-sent batch)
+        counts as its newest write, as in `MetricFrame.from_rows`.
         """
-        if keys is not None and not keys:
-            return []
-        m, r = self._tables[models.UnderlyingMetricTableEntry], self._tables[models.Run]
-        # Asked for by name, the keys are probed directly; only "every metric" has to find out which keys there are.
-        logged = _distinct_keys(m, experiment_id) if keys is None else _named_keys(keys)
+        m = self._tables[models.UnderlyingMetricTableEntry]
+        named = _named(pairs, [("run_id", sa.Integer), ("key", sa.String)], "unsettled")
         end = (m.c.step.desc() if latest else m.c.step.asc(), m.c.id.desc())
         rewritten = m.alias("rewritten")
         # The newest write of a step is the one that counts, a missing value included: that step then has none.
@@ -1102,29 +1094,24 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         def at_the_end(column: sa.ColumnElement[Any]) -> sa.ScalarSelect[Any]:
             return (
                 sa.select(column)
-                .where(*_series(m, experiment_id, logged.c.key, r.c.id), _is_number(m.c.value), newest_write)
+                .where(
+                    *_series(m, experiment_id, named.c.key, named.c.run_id),
+                    _is_number(m.c.value),
+                    newest_write,
+                )
                 .order_by(*end)
                 .limit(1)
-                .correlate(logged, r)
+                .correlate(named)
                 .scalar_subquery()
             )
 
-        ends = (
-            sa.select(
-                r.c.id.label("run_id"),
-                at_the_end(m.c.step).label("step"),
-                logged.c.key.label("key"),
-                at_the_end(m.c.value).label("value"),
-                at_the_end(m.c.timestamp_utc).label("timestamp_utc"),
-            )
-            .select_from(logged.join(r, sa.true()))
-            .where(
-                logged.c.key.is_not(None),
-                *_live_runs(r, experiment_id),
-                *_runs_among(r.c.id, run_ids),
-            )
-            .subquery("ends")
-        )
+        ends = sa.select(
+            named.c.run_id,
+            at_the_end(m.c.step).label("step"),
+            named.c.key,
+            at_the_end(m.c.value).label("value"),
+            at_the_end(m.c.timestamp_utc).label("timestamp_utc"),
+        ).subquery("ends")
         rows = self._execute(
             sa.select(*(ends.c[f] for f in MetricRow._fields)).where(ends.c.value.is_not(None))
         )

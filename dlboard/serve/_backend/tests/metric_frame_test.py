@@ -79,3 +79,18 @@ def test_latest_per_run_is_each_keys_last_number_in_the_run() -> None:
     )
 
     assert frame.latest_per_run() == {1: {"loss": 2.0}, 2: {"loss": 9.0}}
+
+
+def test_latest_per_run_reads_every_run_of_a_frame_and_nothing_of_an_empty_one() -> None:
+    rows = [
+        MetricRow(run, step, "loss", float(run * 10 + step), "2026-01-01T00:00:00Z")
+        for run in (7, 3, 11)
+        for step in range(3)
+    ]
+
+    assert MetricFrame.from_rows(rows).latest_per_run() == {
+        3: {"loss": 32.0},
+        7: {"loss": 72.0},
+        11: {"loss": 112.0},
+    }
+    assert MetricFrame.from_rows([]).latest_per_run() == {}

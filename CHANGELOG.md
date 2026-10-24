@@ -16,21 +16,26 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 * **A chart can show how many metrics' values spread, as a band.** The series band chart draws, for the metrics its names
   and patterns match, the median of their values at each step between their quartiles, inside their extremes, for the
-  newest run (up to three). It reads a grid of at most 64 steps (32 by default), so a band over thousands of metrics costs
-  one read per metric, run and grid step, not one per step a run trained.
-* **A metric pattern can have its `*` anywhere.** `layer_*/grad_norm` names every metric of that shape, including ones
-  logged later. A pattern used to end in `*`.
+  newest run (up to three). Hovering a step says how many metrics logged a value and which ones were the lowest and the
+  highest, and the mean can be drawn beside the median. A pattern's wildcards can name groups (`accuracy/#,#/*` grouped
+  by 2 is a band for each class), read together. It reads a grid of at most 64 cells of steps (32 by default, and fewer
+  over thousands of metrics, to keep a read to about a second), one read per metric, run and cell and not one per step
+  a run trained, so a run that logs every 50 steps is banded as well as one that logs every step.
+* **A metric pattern can have its `*` anywhere, and a `#` for a run of digits.** `layer_*/grad_norm` names every metric
+  of that shape, including ones logged later, and `layer_#/grad_norm` names the numbered layers and no other key. A
+  pattern used to end in `*`.
 * **`dev_harness.py seed` can log many metric keys, and times the upload.** `--metric-keys`, `--key-template` and
   `--steps-per-batch` shape the upload, and the output reports the rows, the ingest rate, the size of the first request
   and the size of the database.
-* **A chart plugin can ask for the spread of many metrics' values.** `hint_required_series` hands the chart a
-  `SeriesBand` per run and step: the minimum, quartiles, median, maximum and mean of the values its patterns match,
-  read on a bounded grid of steps. The series band chart is built on it.
+* **A chart plugin can ask for the spread of many metrics' values, in groups.** `hint_required_series` hands the chart a
+  `SeriesBand` per run, group and step: the minimum, quartiles, median, maximum and mean of the values its patterns
+  match, the metrics at the extremes, and how many logged a value, read on a bounded grid of steps.
+  `KeyPatterns.captures` says what each wildcard of a pattern stood for in a key, to group by.
 
 ### Changed
 
-* **Auto-generate charts a family of metrics as one band.** Metrics whose names differ only in their numbers
-  (`layer_0/grad_norm` to `layer_99/grad_norm`) are charted as one band once there are at least 12 of them, rather than a
+* **Auto-generate and Suggest charts offer a family of metrics as one band.** Metrics whose names differ only in their
+  numbers (`layer_0/grad_norm` to `layer_99/grad_norm`) are one band once there are at least 12 of them, rather than a
   chart each. A family of 11,000 metrics is one chart.
 * **A table of a metric pattern reads only the metrics it shows.** A table of `train/*` used to read every metric in the
   experiment.
@@ -39,13 +44,14 @@ pulls that section's body into the GitHub release notes and publishes both distr
   from. On an experiment of 11,000 keys and 20 runs (SQLite) the listing took 346 ms and now takes 35 ms.
 * **The suggest-charts drawer lists the first 50 suggestions, and says how many the filter leaves.** It no longer keeps
   every suggestion's chart in the browser, which froze with thousands of metrics, and builds a chart only when it is added.
-  "Select all" still ticks every suggestion the filter leaves.
+  "Select all" ticks the suggestions the filter leaves, up to 200.
 * **The key pickers list the first 100 names that match what is typed.** They still search every name.
 * **A step that logged thousands of keys is uploaded in pieces of at most 1,000 keys.** Each queued item carries at most
   1,000 keys, so a batch of items is a bounded upload however wide the steps are.
 * **Auto-generate makes at most 200 charts at once.** Keys that share no name used to make a chart each, so a catalog
-  of thousands made a page of thousands of charts. The keys past the limit stay uncharted, so Suggest charts can still
-  add them, and the auto-populate preview says how many it leaves out.
+  of thousands made a page of thousands of charts. Bands, images and histograms are made first, and the metrics take
+  what is left. The keys past the limit stay uncharted, so Suggest charts can still add them, and the auto-populate
+  preview says how many it leaves out.
 * **Reading many metric keys at once is faster.** The latest value of each key, and a run's whole history, used to cost
   a pandas pass over every key column. For one run of 32 steps in an experiment of 11,000 keys (SQLite), the latest
   values took 1.6 s and now take 0.14 s, and the history 2.5 s and 1.1 s. An experiment of 20 keys is unchanged.
@@ -56,8 +62,9 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ### Fixed
 
-* **Reading the latest or first value of more than 500 named metric keys no longer fails on SQLite.** The read unioned one
-  SELECT per key, and SQLite refuses a union of more than 500.
+* **Reading more than 500 named metric keys no longer fails on SQLite.** The latest or first value unioned one SELECT per
+  key, and SQLite refuses a union of more than 500. A read of more than 32,766 names (a pattern can name that many) also
+  failed on a stock SQLite build, which binds no more parameters than that to a statement.
 * **A run's latest value no longer costs more as the run trains, on Postgres.** The check that a value was the newest
   logged at its step read the key's whole series for every run, so the run comparison and the latest-value panels read
   more pages the longer a run trained.

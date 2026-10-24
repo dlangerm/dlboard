@@ -20,6 +20,8 @@ if TYPE_CHECKING:
 
     import pandas as pd
 
+    from dlboard.serve._backend._metric_frame import MetricRow
+
 _TS = pendulum.datetime(2026, 1, 1, tz="UTC")
 
 
@@ -237,3 +239,28 @@ def test_more_named_keys_than_a_statement_may_bind_are_read_in_full(
     frame = store.fetch_metrics(experiment.id, keys=frozenset(keys), run_ids=None, reduction=reduction)
 
     assert frame.keys == frozenset(keys)
+
+
+def test_a_missing_last_value_is_looked_for_only_in_the_runs_and_keys_that_miss_it(
+    store: SQLLiteStore, experiment_id: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One run's NaN in `x` and another's in `y` must not send `x` and `y` back through the series of both runs."""
+    first, second = _runs(store, experiment_id, 2)
+    for run in (first, second):
+        _log(store, run, 0, x=1.0, y=2.0)
+        _log(store, run, 1, x=3.0, y=4.0)
+    _log(store, first, 2, x=math.nan, y=5.0)
+    _log(store, second, 2, x=6.0, y=math.nan)
+    asked: list[Sequence[tuple[int, str]]] = []
+    settle = store._settled_ends
+
+    def spy(experiment: int, pairs: Sequence[tuple[int, str]], *, latest: bool) -> list[MetricRow]:
+        asked.append(pairs)
+        return settle(experiment, pairs, latest=latest)
+
+    monkeypatch.setattr(store, "_settled_ends", spy)
+
+    frame = store.fetch_metrics(experiment_id, run_ids=None, reduction=models.MetricReduction.LATEST)
+
+    assert frame.latest_per_run() == {first.id: {"x": 3.0, "y": 5.0}, second.id: {"x": 6.0, "y": 4.0}}
+    assert asked == [[(first.id, "x"), (second.id, "y")]]

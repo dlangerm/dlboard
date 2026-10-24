@@ -91,8 +91,10 @@ grow with the steps logged. For a long run, log less often rather than expecting
 - Leave out the runs you are not comparing (a view remembers which), or open fewer panels at once, when looking at many long runs.
 - Many keys are fine, one series each: a step's keys are shipped in pieces of at most 1,000, and a family of keys
   that share a name (`layer_0/grad_norm` to `layer_99/grad_norm`) is charted as one band of its spread, not a chart
-  each, once there are at least 12 of them. A band costs one read per key, run and grid step, so its grid is at most
-  64 steps and it reads the newest run by default. Auto-generate makes at most 200 charts at once: the keys past that
+  each, once there are at least 12 of them. A band costs one read per key, run and grid cell, so its grid is at most
+  64 cells (fewer over thousands of keys, to keep a read to about a second) and it reads the newest run by default. To
+  see a family's parts, group the band by the part of the name that tells them apart (`accuracy/#,#/*` by 2 is a band per
+  class). Auto-generate makes at most 200 charts at once: the keys past that
   stay uncharted, and Suggest charts can add them.
 
 **If the server (or your network) is down.** Logging never blocks training: `log_metrics`/

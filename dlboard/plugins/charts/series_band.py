@@ -45,7 +45,7 @@ class SeriesBandSettings(BaseModel, frozen=True, extra="forbid", use_attribute_d
     group_by: typing.Annotated[int | None, DISPLAY_SECTION] = Field(default=None, ge=0)
     """Which `*` or `#` of the pattern (0 for the first) names the group a metric is in, so `accuracy/#,#/*` grouped by 2 is a band for each class. Leave blank for one band over every metric."""
     grid: typing.Annotated[int, DISPLAY_SECTION] = Field(default=32, ge=2, le=64)
-    """At most this many steps are drawn. The grid is as fine as that allows, and always ends on a run's last step."""
+    """At most this many steps are drawn, fewer over thousands of metrics, which cost a read each. The grid is as fine as that allows, and always ends on a run's last step."""
     runs: typing.Annotated[int, DISPLAY_SECTION] = Field(default=1, ge=1, le=3)
     """How many of the panel's newest runs are drawn. Each one costs a read of every metric the band spreads over."""
     show_mean: typing.Annotated[bool, DISPLAY_SECTION] = False

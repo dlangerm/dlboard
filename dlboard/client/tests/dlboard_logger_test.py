@@ -558,6 +558,26 @@ def test_every_finalize_flushes_what_was_logged_since_the_last_one(monkeypatch: 
     assert all(shipper.flushed for shipper in started)
 
 
+@pytest.mark.parametrize("keys", [1, 1_000, 1_001, 2_500])
+def test_a_wide_call_is_queued_as_items_of_bounded_width_that_together_hold_every_key_in_order(
+    monkeypatch: pytest.MonkeyPatch, keys: int
+) -> None:
+    """A shipped batch is a fixed number of items, so each must be of bounded width however many keys a step logs."""
+    _stub_api(monkeypatch, _FakeRunAPI("http://x"))
+    started = _stub_shippers(monkeypatch)
+    logger = DLBoardLogger(project_id=1, experiment_id=None)
+    metrics = {f"metric_{i:05}": float(i) for i in range(keys)}
+
+    logger.log_metrics(metrics, step=7)
+
+    queued: list[models.LoggedMetrics] = started[0].items
+    assert [len(item.metrics) for item in queued] == [min(1_000, keys - at) for at in range(0, keys, 1_000)]
+    assert {(item.step, item.timestamp_utc) for item in queued} == {(7, queued[0].timestamp_utc)}
+    assert {key: value for item in queued for key, value in item.metrics.items()} == metrics
+    assert [key for item in queued for key in item.metrics] == list(metrics)
+    logger.finalize("success")
+
+
 def _fit_with(logger: DLBoardLogger, tmp_path: Path, *checkpoints: ModelCheckpoint) -> None:
     """Three epochs of two steps each, on CPU, with nothing logged -- so no metric step to borrow."""
     pl.Trainer(

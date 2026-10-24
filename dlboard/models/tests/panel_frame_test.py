@@ -95,3 +95,14 @@ def test_a_request_column_is_named_by_how_it_groups_too() -> None:
 
     assert plain.column != SeriesBandRequest(frozenset({"a/#/*"}), grid=8, runs=1, group_by=(1,)).column
     assert plain.column != SeriesBandRequest(frozenset({"a/#/*"}), grid=8, runs=1, max_groups=3).column
+
+
+@pytest.mark.parametrize(
+    ("metrics", "runs", "cells"),
+    [(10, 1, 32), (1_000, 3, 32), (11_000, 1, 9), (11_000, 3, 4), (0, 1, 32)],
+    ids=["few", "a-thousand-over-three-runs", "eleven-thousand", "the-fewest-cells", "no-metrics"],
+)
+def test_a_band_over_many_metrics_gets_fewer_cells_to_stay_in_its_probe_budget(
+    metrics: int, runs: int, cells: int
+) -> None:
+    assert SeriesBandRequest(frozenset({"m*"}), grid=32, runs=runs).cells_for(metrics, runs) == cells

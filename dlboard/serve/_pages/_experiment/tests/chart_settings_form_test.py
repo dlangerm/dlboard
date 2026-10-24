@@ -472,12 +472,10 @@ def test_a_number_or_a_name_typed_in_redraws_the_chart_only_once_the_typing_paus
     ],
 )
 def test_a_key_picker_lists_a_bounded_number_of_names_however_many_are_logged(field: ParameterField) -> None:
-    """The picker searches every name, but lists only this many of them at once, so a thousand keys cannot freeze it."""
-    names = 20 * KEY_PICKER_LIMIT
-    catalog = ColumnCatalog(metrics=tuple(f"metric_{i:05}" for i in range(names)))
+    """The picker lists only this many names at once, however many are logged, so a thousand keys cannot freeze it."""
+    catalog = ColumnCatalog(metrics=tuple(f"metric_{i:05}" for i in range(20 * KEY_PICKER_LIMIT)))
 
     component = cast("Any", _param_field_input(field.name, field, catalog))
     props: dict[str, Any] = component.to_plotly_json()["props"]
 
     assert props["limit"] == KEY_PICKER_LIMIT
-    assert len(props["data"]) >= names

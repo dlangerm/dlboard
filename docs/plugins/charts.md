@@ -151,7 +151,8 @@ Subclass `ChartType` and implement its abstract methods:
 
   This is how to aggregate a family of thousands of metrics, such as `accuracy/{row},{col}/{class}`: ask for
   `accuracy/#,#/*` with `group_by=(2,)` for a band per class, or `group_by=(0, 1)` for one per cell (at most
-  `max_groups`, 12 by default, are read), and draw the bands. Never ask for the history of the pattern. The read is an
+  `max_groups`, 12 by default, are read), and draw the bands. Never ask for the history of the pattern. The grid
+  has fewer cells over many metrics, to keep the read to `BAND_PROBE_BUDGET` probes (`request.cells_for`). The read is an
   ordered probe of the index for each metric, run and grid cell, so it costs the metrics matched, not the steps a run
   trained, and a run that logs every 50 steps is covered as well as one that logs every step. Each cell is a stretch of
   steps ending at the one shown (the grid's cells run end to end), and a metric counts in it with its newest write

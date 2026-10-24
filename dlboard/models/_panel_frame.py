@@ -52,6 +52,16 @@ SERIES_BAND_COLUMN_PREFIX: typing.Final = "series_band__"
 """Series-band columns are prefixed for the same reason; each cell holds a `SeriesBand`, or NaN where the grid has no step."""
 
 
+BAND_PROBE_BUDGET: typing.Final = 100_000
+"""
+Most index probes one band read makes: one for each metric, run and cell. About a second on SQLite, and a live page
+repeats it every poll while a run trains, so a band over thousands of metrics gets fewer cells rather than a slower read.
+"""
+
+MIN_BAND_CELLS: typing.Final = 4
+"""The fewest cells a band has, however many metrics it spreads over."""
+
+
 @dataclasses.dataclass(frozen=True)
 class SeriesBandRequest:
     """
@@ -64,7 +74,7 @@ class SeriesBandRequest:
     patterns: frozenset[str]
     """The metric names and patterns (see `KeyPatterns`) whose values are spread."""
     grid: int
-    """At most this many cells of steps, see `_grid_cells` in the store."""
+    """At most this many cells of steps, see `_grid_cells` in the store, and fewer over many metrics (`cells_for`)."""
     runs: int
     """How many of the panel's newest runs are spread, each costing a read of every metric the patterns match."""
     group_by: tuple[int, ...] = ()
@@ -81,6 +91,14 @@ class SeriesBandRequest:
         asked = json.dumps([sorted(self.patterns), self.grid, self.runs, self.group_by, self.max_groups])
         digest = hashlib.sha1(asked.encode(), usedforsecurity=False).hexdigest()[:12]
         return f"{SERIES_BAND_COLUMN_PREFIX}{digest}"
+
+    def cells_for(self, metrics: int, runs: int) -> int:
+        """
+        How many cells the grid has when `metrics` are read for `runs`: `grid`, or fewer to stay in `BAND_PROBE_BUDGET`.
+
+        The read costs a probe for each metric, run and cell, so it is the cells that give way as the metrics grow.
+        """
+        return max(MIN_BAND_CELLS, min(self.grid, BAND_PROBE_BUDGET // max(1, metrics * runs)))
 
     def groups(self, known_keys: Collection[str]) -> dict[str, str]:
         """
