@@ -49,6 +49,10 @@ pulls that section's body into the GitHub release notes and publishes both distr
 * **Reading many metric keys at once is faster.** The latest value of each key, and a run's whole history, used to cost
   a pandas pass over every key column. For one run of 32 steps in an experiment of 11,000 keys (SQLite), the latest
   values took 1.6 s and now take 0.14 s, and the history 2.5 s and 1.1 s. An experiment of 20 keys is unchanged.
+* **The run comparison lists its keys 50 at a time.** Each page reads only its own keys' values: for five runs of 11,000
+  keys (SQLite) a page takes about 20 ms, where every change of the runs read every key (0.8 s) and sent every row to the
+  browser (1.9 MB). The search matches key names and hyperparameter values; a metric's values are no longer searched,
+  since that needed every key's latest value on each keystroke.
 
 ### Fixed
 
