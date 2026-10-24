@@ -47,7 +47,7 @@ def test_the_band_of_five_keys_is_their_nearest_ranks(store: SQLLiteStore, exper
     _log(store, run, 0, {f"k{value}": float(value) for value in range(1, 6)})
 
     assert _band(store, experiment_id, {f"k{value}" for value in range(1, 6)}, grid=8) == [
-        models.SeriesBand(run.id, 0, 5, 1.0, 2.0, 3.0, 4.0, 5.0)
+        models.SeriesBand(run.id, 0, 5, 1.0, 2.0, 3.0, 4.0, 5.0, 3.0)
     ]
 
 
@@ -61,8 +61,8 @@ def test_a_step_counts_only_the_keys_that_logged_a_number_there(
     band = _band(store, experiment_id, {"a", "b", "c", "d"}, grid=8)
 
     assert band == [
-        models.SeriesBand(run.id, 0, 2, 1.0, 1.0, 1.0, 3.0, 3.0),
-        models.SeriesBand(run.id, 1, 1, 7.0, 7.0, 7.0, 7.0, 7.0),
+        models.SeriesBand(run.id, 0, 2, 1.0, 1.0, 1.0, 3.0, 3.0, 2.0),
+        models.SeriesBand(run.id, 1, 1, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0),
     ]
 
 
@@ -72,7 +72,7 @@ def test_a_step_logged_twice_counts_its_newest_write(store: SQLLiteStore, experi
     _log(store, run, 0, {"a": 20.0})
 
     assert _band(store, experiment_id, {"a", "b"}, grid=8) == [
-        models.SeriesBand(run.id, 0, 2, 5.0, 5.0, 5.0, 20.0, 20.0)
+        models.SeriesBand(run.id, 0, 2, 5.0, 5.0, 5.0, 20.0, 20.0, 12.5)
     ]
 
 
@@ -84,7 +84,7 @@ def test_a_newest_write_that_is_not_a_number_leaves_that_key_with_no_value_there
     _log(store, run, 0, {"a": math.nan})
 
     assert _band(store, experiment_id, {"a", "b"}, grid=8) == [
-        models.SeriesBand(run.id, 0, 1, 4.0, 4.0, 4.0, 4.0, 4.0)
+        models.SeriesBand(run.id, 0, 1, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0)
     ]
 
 
@@ -112,6 +112,6 @@ def test_each_run_is_banded_apart(store: SQLLiteStore, experiment_id: int) -> No
     _log(store, second, 0, {"a": 9.0})
 
     assert _band(store, experiment_id, {"a"}, grid=8) == [
-        models.SeriesBand(first.id, 0, 1, 1.0, 1.0, 1.0, 1.0, 1.0),
-        models.SeriesBand(second.id, 0, 1, 9.0, 9.0, 9.0, 9.0, 9.0),
+        models.SeriesBand(first.id, 0, 1, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0),
+        models.SeriesBand(second.id, 0, 1, 9.0, 9.0, 9.0, 9.0, 9.0, 9.0),
     ]

@@ -136,8 +136,8 @@ class SeriesBand(NamedTuple):
     """
     The spread of a set of keys' values at one step of one run.
 
-    `keys` is how many of them logged a number there, and the rest are the nearest-rank minimum, 25th percentile,
-    median, 75th percentile and maximum of those numbers.
+    `keys` is how many of them logged a number there. The other fields are the nearest-rank minimum, 25th
+    percentile, median, 75th percentile and maximum of those numbers, and their mean.
     """
 
     run_id: int
@@ -148,3 +148,4 @@ class SeriesBand(NamedTuple):
     median: float
     upper: float
     maximum: float
+    mean: float

@@ -136,9 +136,10 @@ Subclass `ChartType` and implement its abstract methods:
   names logged when the panel is drawn, so a chart of many metrics asks for them this way, not by listing each.
 - `hint_required_series` (optional, none by default) — the spread of many metrics' values, as a `SeriesBandRequest`
   (their patterns, a grid of at most `grid` steps, and the newest `runs` runs). The panel reads the spread for the chart
-  (a `SeriesBand` per run and step: the nearest-rank minimum, quartiles and maximum) instead of each metric. The
-  series band chart (`series_band`) draws its metrics this way, and autogen uses it for a family of keys that share a
-  template (`layer_0/grad_norm` to `layer_99/grad_norm`, once there are at least 12 of them).
+  (a `SeriesBand` per run and step: the nearest-rank minimum, quartiles, median and maximum, and the mean) instead of
+  each metric. The read takes a probe per matched metric, run and grid step, so its cost does not grow with the steps
+  a run trained. The series band chart (`series_band`) draws its metrics this way, and autogen uses it for a family of
+  keys that share a template (`layer_0/grad_norm` to `layer_99/grad_norm`, once there are at least 12 of them).
 - `hint_required_histogram_keys` (optional, none by default) — the logged histogram keys the chart shows. A
   chart always names them: there is no "every histogram", because a histogram is the most expensive thing a panel
   fetches. A field naming one is a `ColumnKind.HISTOGRAM` in `field_column_kinds()`.

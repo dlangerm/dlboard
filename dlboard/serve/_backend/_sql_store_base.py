@@ -1273,6 +1273,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
                 at_rank(nearest_rank(50)),
                 at_rank(nearest_rank(75)),
                 at_rank(ranked.c.n),
+                sa.func.avg(ranked.c.value),
             )
             .group_by(ranked.c.run_id, ranked.c.step)
             .order_by(ranked.c.run_id, ranked.c.step)
