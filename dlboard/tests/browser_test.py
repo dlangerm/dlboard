@@ -3113,6 +3113,72 @@ def test_logged_histograms_render_in_each_display_and_the_step_slider_moves(
     assert console_errors == []
 
 
+def test_a_series_band_is_drawn_in_its_runs_palette_colors_in_either_color_scheme(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """
+    Plotly cannot read the CSS variables the palette is made of, so the band chart's figure names them and the browser
+    resolves them (`series_band_colors.js`): this checks the part a Python test can't, that each run's band is drawn in
+    the very color the run table's swatch and the other charts give it, and that it follows a change of color scheme.
+    """
+    _create_project_and_experiment(page, live_server_url, "Band Palette Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    api = BasicDlboardAPI(live_server_url)
+    for _ in range(2):
+        run = api.create_run(models.NewRun(experiment_id=experiment_id))
+        api.log_metric_batch(
+            [
+                models.LoggedMetrics(
+                    experiment_id=experiment_id,
+                    run_id=run.id,
+                    step=step,
+                    metrics={f"layer_{layer}/grad_norm": float(layer + step) for layer in range(12)},
+                    timestamp_utc=pendulum.now("UTC"),
+                )
+                for step in range(4)
+            ]
+        )
+    store = get_system_data_store()
+    shared = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
+    band = models.ChartInstance[Any, Any](
+        chart_type="series_band", parameters={"metrics": ["layer_#/grad_norm"], "runs": 2}
+    )
+    store.update_page(
+        shared.model_copy(update={"panels": [PanelInstance[Any, Any](name="Grads", charts=[band])]})
+    )
+    page.reload()
+
+    # A band's median is the thick line; the extremes and the quartiles are hairlines or none.
+    medians = page.locator(".js-plotly-plot .scatterlayer .js-line").filter(
+        has=page.locator("xpath=self::*[contains(@style, 'stroke-width: 2px')]")
+    )
+    swatches = page.locator(f"#{NAVBAR_HPARAM_DATATABLE_ID} .dl-swatch")
+    expect(medians).to_have_count(2)
+    expect(swatches).to_have_count(2)
+
+    def drawn() -> tuple[list[str], list[str]]:
+        strokes = medians.evaluate_all("paths => paths.map(p => getComputedStyle(p).stroke)")
+        colors = swatches.evaluate_all(
+            "cells => cells.map(c => getComputedStyle(c, '::before').backgroundColor)"
+        )
+        return sorted(strokes), sorted(colors)
+
+    light_strokes, light_swatches = drawn()
+    assert light_strokes == light_swatches
+    assert all(stroke.startswith("rgb(") for stroke in light_strokes), light_strokes
+
+    scheme = page.locator("html")
+    before = scheme.get_attribute("data-mantine-color-scheme")
+    page.get_by_role("button", name="Toggle light/dark mode").click()
+    expect(scheme).not_to_have_attribute("data-mantine-color-scheme", before or "")
+    # The palette's two schemes agree on some slots, so what must hold is that the band follows the swatches.
+    dark_swatches = drawn()[1]
+    _wait_until(lambda: drawn()[0], dark_swatches)
+    assert (dark_swatches == light_swatches) == (drawn()[0] == light_strokes)
+    assert console_errors == []
+
+
 def _log_two_metrics(live_server_url: str, experiment_id: int) -> None:
     run = BasicDlboardAPI(live_server_url).create_run(models.NewRun(experiment_id=experiment_id))
     BasicDlboardAPI(live_server_url).log_metric_batch(

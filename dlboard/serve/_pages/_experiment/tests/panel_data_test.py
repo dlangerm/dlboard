@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 import pandas as pd
 import pendulum
 import pytest
-from dash import dcc
+from dash import html
 from pydantic import BaseModel
 
 from dlboard import models
@@ -475,7 +475,7 @@ def test_a_series_band_panel_reads_the_spread_of_the_matched_metrics_on_the_newe
     assert bands[1] == models.SeriesBand(
         newer.id, "", 1, 2, 1.0, 1.0, 1.0, 3.0, 3.0, 2.0, "layer_1/grad_norm", "layer_2/grad_norm"
     )
-    assert isinstance(chart.render(df), dcc.Graph)
+    assert isinstance(chart.render(df), html.Div)
     assert panel_data.chart_data_fingerprint(chart, later) != before
 
 

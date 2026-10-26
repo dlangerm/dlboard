@@ -8,33 +8,49 @@ at the ones to look at.
 
 from __future__ import annotations
 
-import html
+import hashlib
+import json
 import typing
+from html import escape
+from pathlib import Path
 
 import pandas as pd
-import plotly.colors
-from dash import dcc
+from dash import MATCH, Input, Output, dcc, html
 from dash.development.base_component import Component
 from pydantic import BaseModel, Field
 
 from dlboard.models import (
     ADVANCED_SECTION,
+    DEFAULT_RENDER_CONTEXT,
     DISPLAY_SECTION,
     RUN_NAME_COLUMN,
     ChartType,
     ColumnKind,
     MetricColumn,
     NamePatternList,
+    RenderContext,
     SeriesBand,
     SeriesBandRequest,
 )
 from dlboard.plugins.charts._band_traces import nested_band
+from dlboard.serve import ClientsideScript, series_color
 
 if typing.TYPE_CHECKING:
     from dash import Dash
 
+_COLORS_JS: typing.Final = ClientsideScript(Path(__file__).with_name("series_band_colors.js"))
+_FIGURE_TYPE: typing.Final = "series-band-figure"
+_GRAPH_TYPE: typing.Final = "series-band-graph"
+_RUN_DASHES: typing.Final = ("solid", "dash", "dot")
+"""How a run is told from the others when the groups, not the runs, are what the colors are for."""
+
 _FILL_ALPHA: typing.Final = 0.12
 """How opaque the band of extremes is, against the median line drawn over it (the quartiles' band is twice that)."""
+
+
+def _opaque_to(color: str, opacity: float) -> str:
+    """A theme color (`series_color`) at `opacity`, in the form `series_band_colors.js` resolves in the browser."""
+    return f"{color}/{opacity}"
 
 
 class SeriesBandSettings(BaseModel, frozen=True, extra="forbid", use_attribute_docstrings=True):
@@ -49,7 +65,7 @@ class SeriesBandSettings(BaseModel, frozen=True, extra="forbid", use_attribute_d
     runs: typing.Annotated[int, DISPLAY_SECTION] = Field(default=1, ge=1, le=3)
     """How many of the panel's newest runs are drawn. Each one costs a read of every metric the band spreads over."""
     show_mean: typing.Annotated[bool, DISPLAY_SECTION] = False
-    """Draw the mean as a dashed line beside the median. Across metrics of different scales it follows the largest."""
+    """Draw the mean as a thinner dotted line beside the median. Across metrics of different scales it follows the largest."""
     max_groups: typing.Annotated[int, ADVANCED_SECTION] = Field(default=12, ge=1, le=24)
     """The most groups drawn, by their names in order: each is a band for each run, and more are unreadable."""
     height: typing.Annotated[int, DISPLAY_SECTION] = 300
@@ -81,12 +97,12 @@ def _hover(label: str, band: SeriesBand, *, mean: bool) -> str:
     """What a step says: how many metrics logged a value, and the spread of them with the extremes named."""
     return "<br>".join(
         [
-            f"<b>{html.escape(label)}</b>: {band.count} metrics",
-            f"max {band.maximum:.4g} ({html.escape(band.maximum_key)})",
+            f"<b>{escape(label)}</b>: {band.count} metrics",
+            f"max {band.maximum:.4g} ({escape(band.maximum_key)})",
             f"75% {band.p75:.4g}",
             f"median {band.median:.4g}",
             f"25% {band.p25:.4g}",
-            f"min {band.minimum:.4g} ({html.escape(band.minimum_key)})",
+            f"min {band.minimum:.4g} ({escape(band.minimum_key)})",
             *([f"mean {band.mean:.4g}"] if mean else []),
         ]
     )
@@ -95,19 +111,22 @@ def _hover(label: str, band: SeriesBand, *, mean: bool) -> str:
 def _traces(
     bands: list[SeriesBand], names: dict[int, str], *, show_mean: bool
 ) -> list[dict[str, typing.Any]]:
-    """Per run and group: the extremes, the quartiles and the median, each a trace over its grid steps."""
+    """
+    Per run and group: the extremes, the quartiles and the median, each a trace over its grid steps.
+
+    The colors are the theme's own (`series_color`, which Plotly cannot read: the browser resolves them), so a run is
+    the color it is in every other chart. With several groups it is the groups that get the colors, and the runs are
+    told apart by how their lines are dashed.
+    """
     series: dict[tuple[int, str], list[SeriesBand]] = {}
     for band in bands:
         series.setdefault((band.run_id, band.group), []).append(band)
     runs = list(dict.fromkeys(run_id for run_id, _ in series))
     groups = sorted({group for _, group in series})
-    # Plotly cannot read the theme's series colors (CSS variables), so it draws from its own palette: a color for each
-    # group if there are several, else for each run.
-    palette = plotly.colors.qualitative.Plotly
     traces: list[dict[str, typing.Any]] = []
     for (run_id, group), rows in series.items():
-        index = groups.index(group) if len(groups) > 1 else runs.index(run_id)
-        red, green, blue = plotly.colors.hex_to_rgb(palette[index % len(palette)])
+        color = series_color(groups.index(group) if len(groups) > 1 else run_id)
+        dash = _RUN_DASHES[runs.index(run_id) % len(_RUN_DASHES)] if len(groups) > 1 else "solid"
         run_label = names.get(run_id, f"Run {run_id}")
         label = " · ".join(part for part in (run_label if len(runs) > 1 or not group else "", group) if part)
         steps = [band.step for band in rows]
@@ -118,9 +137,9 @@ def _traces(
             medians=[band.median for band in rows],
             near_lows=[band.p25 for band in rows],
             lows=[band.minimum for band in rows],
-            outer_fill=f"rgba({red},{green},{blue},{_FILL_ALPHA})",
-            inner_fill=f"rgba({red},{green},{blue},{_FILL_ALPHA * 2})",
-            median_line={"width": 2, "color": f"rgb({red},{green},{blue})"},
+            outer_fill=_opaque_to(color, _FILL_ALPHA),
+            inner_fill=_opaque_to(color, _FILL_ALPHA * 2),
+            median_line={"width": 2, "color": color, "dash": dash},
             shared={"legendgroup": label, "showlegend": False},
             median_extra={
                 "name": label,
@@ -136,13 +155,25 @@ def _traces(
                     "mode": "lines",
                     "x": steps,
                     "y": [band.mean for band in rows],
-                    "line": {"width": 1.5, "dash": "dash", "color": f"rgb({red},{green},{blue})"},
+                    "line": {"width": 1.5, "dash": "dot", "color": color},
                     "legendgroup": label,
                     "showlegend": False,
                     "hoverinfo": "skip",
                 }
             )
     return traces
+
+
+def _instance(parameters: SeriesBandSettings, chart_id: str) -> str:
+    """
+    One id per chart and per settings, for the ids the browser-side colors are found by.
+
+    The chart's own id is part of it, as for an image chart: the editor's preview renders a chart with the very
+    settings it is about to be saved with, and a callback cannot resolve two components under one id.
+    """
+    return hashlib.shake_256(
+        json.dumps([chart_id, parameters.model_dump()], sort_keys=True).encode()
+    ).hexdigest(8)
 
 
 class SeriesBandChart(ChartType[SeriesBandSettings, pd.DataFrame, Component], frozen=True, extra="forbid"):
@@ -158,6 +189,13 @@ class SeriesBandChart(ChartType[SeriesBandSettings, pd.DataFrame, Component], fr
     @classmethod
     @typing.override
     def render(cls, parameters: SeriesBandSettings, dataframe: pd.DataFrame) -> Component:
+        return cls.render_in(parameters, dataframe, DEFAULT_RENDER_CONTEXT)
+
+    @classmethod
+    @typing.override
+    def render_in(
+        cls, parameters: SeriesBandSettings, dataframe: pd.DataFrame, context: RenderContext
+    ) -> Component:
         bands = _bands(dataframe, _request(parameters).column)
         if not bands:
             return dcc.Graph(
@@ -167,23 +205,34 @@ class SeriesBandChart(ChartType[SeriesBandSettings, pd.DataFrame, Component], fr
         if RUN_NAME_COLUMN in dataframe.columns and MetricColumn.RUN_ID in dataframe.columns:
             named = dataframe.dropna(subset=[RUN_NAME_COLUMN]).drop_duplicates(subset=[MetricColumn.RUN_ID])
             names = dict(zip(named[MetricColumn.RUN_ID], named[RUN_NAME_COLUMN], strict=True))
+        text, grid = "var(--mantine-color-text)", "var(--mantine-color-default-border)"
         figure = {
             "data": _traces(bands, names, show_mean=parameters.show_mean),
             "layout": {
                 "height": parameters.height,
                 "margin": {"l": 50, "r": 20, "t": 20, "b": 40},
-                "xaxis": {"title": {"text": "step"}},
-                "yaxis": {"zeroline": False},
+                "font": {"color": text},
+                "xaxis": {"title": {"text": "step"}, "gridcolor": grid, "linecolor": grid},
+                "yaxis": {"zeroline": False, "gridcolor": grid, "linecolor": grid},
                 "hovermode": "x",
                 "legend": {"orientation": "h", "y": -0.2},
                 "paper_bgcolor": "rgba(0,0,0,0)",
                 "plot_bgcolor": "rgba(0,0,0,0)",
             },
         }
-        return dcc.Graph(
-            figure=figure,
-            config={"displayModeBar": False, "responsive": True},
-            style={"height": f"{parameters.height}px", "width": "100%"},
+        instance = _instance(parameters, context.chart_id)
+        # The graph starts empty and the figure waits in a store: Plotly drops a color it cannot parse (a CSS
+        # variable), so `series_band_colors.js` hands it the figure with the theme's colors in place of them.
+        return html.Div(
+            [
+                dcc.Store(id={"type": _FIGURE_TYPE, "instance": instance}, data=figure),
+                dcc.Graph(
+                    id={"type": _GRAPH_TYPE, "instance": instance},
+                    figure={"data": [], "layout": {"height": parameters.height}},
+                    config={"displayModeBar": False, "responsive": True},
+                    style={"height": f"{parameters.height}px", "width": "100%"},
+                ),
+            ]
         )
 
     @classmethod
@@ -218,6 +267,11 @@ class SeriesBandChart(ChartType[SeriesBandSettings, pd.DataFrame, Component], fr
         return {"metrics": ColumnKind.METRIC}
 
 
-def plug(app: Dash) -> None:  # noqa: ARG001 -- a chart type needs nothing served beside it
-    """Plugin: registers this chart type. It draws from the panel's band data, which the panel fetches for it."""
+def plug(app: Dash) -> None:
+    """Plugin: registers this chart type, and the browser-side step that gives its figures the theme's colors."""
     SeriesBandChart.register(allow_override=True)
+    app.clientside_callback(
+        _COLORS_JS.source,
+        Output({"type": _GRAPH_TYPE, "instance": MATCH}, "figure"),
+        Input({"type": _FIGURE_TYPE, "instance": MATCH}, "data"),
+    )

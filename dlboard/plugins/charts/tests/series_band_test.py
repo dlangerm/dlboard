@@ -2,24 +2,33 @@
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Any, cast
 
 import pandas as pd
 import pytest
 from dash import dcc
+from dash._utils import to_json
 from pydantic import ValidationError
 
 from dlboard.models import MetricColumn, SeriesBand, SeriesBandRequest
 from dlboard.models._panel_frame import SERIES_BAND_COLUMN_PREFIX
 from dlboard.plugins.charts.series_band import SeriesBandChart, SeriesBandSettings
+from dlboard.serve import series_color
 from dlboard.serve._pages._experiment._panel_data import build_series_band_dataframe
 
 if TYPE_CHECKING:
     from dash.development.base_component import Component
 
 
-def _figure(graph: dcc.Graph) -> dict[str, Any]:
-    return cast("dict[str, Any]", graph.to_plotly_json()["props"]["figure"])
+_MEAN_WIDTH = 1.5
+
+
+def _figure(chart: Component) -> dict[str, Any]:
+    """The figure a chart sends the browser, in the store its colors are resolved from."""
+    children: list[dict[str, Any]] = json.loads(cast("str", to_json(chart)))["props"]["children"]
+    (store,) = [child for child in children if child["type"] == "Store"]
+    return cast("dict[str, Any]", store["props"]["data"])
 
 
 def test_the_band_asks_the_panel_for_the_patterns_it_spreads_on_its_grid_in_the_groups_it_names() -> None:
@@ -47,9 +56,7 @@ def test_the_band_bounds_its_grid_its_runs_and_its_groups(kwargs: dict[str, Any]
 
 def _render(settings: SeriesBandSettings, bands: list[SeriesBand]) -> list[dict[str, Any]]:
     frame = build_series_band_dataframe(_request(settings), bands)
-    graph = SeriesBandChart.render(settings, frame)
-    assert isinstance(graph, dcc.Graph)
-    return _figure(graph)["data"]
+    return _figure(SeriesBandChart.render(settings, frame))["data"]
 
 
 def _request(settings: SeriesBandSettings) -> SeriesBandRequest:
@@ -103,14 +110,75 @@ def test_each_group_is_a_band_of_its_own_in_a_color_of_its_own() -> None:
     assert [trace["y"] for trace in medians] == [[1.0], [5.0]]
 
 
-def test_the_mean_is_a_dashed_line_only_if_asked_for() -> None:
+def test_a_run_is_drawn_in_the_color_every_other_chart_draws_it_in() -> None:
+    """The theme's own `series_color` for its run id, which the browser resolves; Plotly's palette never appears."""
+    traces = _render(
+        SeriesBandSettings(metrics=["m*"], runs=2),
+        [
+            SeriesBand(3, "", 0, 2, 1.0, 1.0, 1.0, 3.0, 3.0, 2.0, "a", "b"),
+            SeriesBand(12, "", 0, 2, 1.0, 1.0, 1.0, 3.0, 3.0, 2.0, "a", "b"),
+        ],
+    )
+    medians = [trace for trace in traces if trace.get("name")]
+
+    assert [trace["line"]["color"] for trace in medians] == [series_color(3), series_color(12)]
+    assert series_color(3) != series_color(12)
+    fills = [trace["fillcolor"] for trace in traces if "fillcolor" in trace]
+    assert fills == [f"{series_color(3)}/0.12", f"{series_color(3)}/0.24"] * 1 + [
+        f"{series_color(12)}/0.12",
+        f"{series_color(12)}/0.24",
+    ]
+
+
+def test_with_several_groups_the_groups_take_the_colors_and_the_runs_are_told_apart_by_their_dashes() -> None:
+    traces = _render(
+        SeriesBandSettings(metrics=["acc/#/*"], group_by=1, runs=2),
+        [
+            SeriesBand(run, group, 0, 2, 1.0, 1.0, 1.0, 3.0, 3.0, 2.0, "a", "b")
+            for run in (3, 12)
+            for group in ("cat", "dog")
+        ],
+    )
+    lines = {trace["name"]: trace["line"] for trace in traces if trace.get("name")}
+
+    assert lines["Run 3 · cat"]["color"] == lines["Run 12 · cat"]["color"] == series_color(0)
+    assert lines["Run 3 · dog"]["color"] == series_color(1)
+    assert lines["Run 3 · cat"]["dash"] != lines["Run 12 · cat"]["dash"]
+
+
+def test_every_color_the_figure_names_is_a_theme_variable_for_the_browser_to_resolve() -> None:
+    settings = SeriesBandSettings(metrics=["m*"], show_mean=True)
+    frame = build_series_band_dataframe(
+        _request(settings), [SeriesBand(5, "", 0, 2, 1.0, 1.0, 1.0, 3.0, 3.0, 2.0, "a", "b")]
+    )
+
+    figure = _figure(SeriesBandChart.render(settings, frame))
+
+    colors: list[str] = []
+
+    def collect(node: object, key: str = "") -> None:
+        if isinstance(node, dict):
+            for name, value in cast("dict[str, object]", node).items():
+                collect(value, name)
+        elif isinstance(node, list):
+            for item in cast("list[object]", node):
+                collect(item, key)
+        elif isinstance(node, str) and key in {"color", "fillcolor", "gridcolor", "linecolor"}:
+            colors.append(node)
+
+    collect(figure)
+    assert colors
+    assert all(color.startswith("var(--") for color in colors), colors
+
+
+def test_the_mean_is_a_thinner_dotted_line_only_if_asked_for() -> None:
     bands = [SeriesBand(1, "", 0, 2, 1.0, 1.0, 1.0, 3.0, 3.0, 2.0, "a", "b")]
 
     plain = _render(SeriesBandSettings(metrics=["m*"]), bands)
     with_mean = _render(SeriesBandSettings(metrics=["m*"], show_mean=True), bands)
 
-    assert not [trace for trace in plain if trace["line"].get("dash")]
-    (mean,) = [trace for trace in with_mean if trace["line"].get("dash")]
+    assert not [trace for trace in plain if trace["line"].get("width") == _MEAN_WIDTH]
+    (mean,) = [trace for trace in with_mean if trace["line"].get("width") == _MEAN_WIDTH]
     assert mean["y"] == [2.0]
 
 
@@ -120,7 +188,7 @@ def test_a_band_with_nothing_read_draws_no_traces() -> None:
     graph: Component = SeriesBandChart.render(SeriesBandSettings(metrics=["m*"]), frame)
 
     assert isinstance(graph, dcc.Graph)
-    assert _figure(graph)["data"] == []
+    assert graph.figure["data"] == []  # pyrefly: ignore [missing-attribute]
 
 
 def test_a_band_column_is_named_by_what_it_asks_so_alike_charts_share_it() -> None:

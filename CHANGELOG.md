@@ -21,6 +21,7 @@ pulls that section's body into the GitHub release notes and publishes both distr
   by 2 is a band for each class), read together. It reads a grid of at most 64 cells of steps (32 by default, and fewer
   over thousands of metrics, to keep a read to about a second), one read per metric, run and cell and not one per step
   a run trained, so a run that logs every 50 steps is banded as well as one that logs every step.
+  Its runs are the colors they are in every other chart, in either color scheme.
 * **A metric pattern can have its `*` anywhere, and a `#` for a run of digits.** `layer_*/grad_norm` names every metric
   of that shape, including ones logged later, and `layer_#/grad_norm` names the numbered layers and no other key. A
   pattern used to end in `*`.

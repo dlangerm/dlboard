@@ -159,6 +159,13 @@ Subclass `ChartType` and implement its abstract methods:
   there. `plugins/charts/series_band.py` is the reference chart (`_band_traces.nested_band` draws the five traces
   of a spread, as the histogram chart's bands view does), and autogen uses it for a family of metrics that share a
   template (`layer_0/grad_norm` to `layer_99/grad_norm`, once there are at least 12 of them).
+
+  A chart drawn with Plotly cannot use the theme's colors as they are (`series_color` is a CSS variable, which Plotly
+  drops). Name them in the figure as `series_color(...)`, or `series_color(...)/0.12` for one at an opacity, and the
+  figure's colors (any `color`, `fillcolor`, `gridcolor` or `linecolor`, which may also be a variable such as
+  `var(--mantine-color-text)`) are resolved in the browser, in the theme's current color scheme and again when it
+  changes, so a run is the color it is in every other chart. `series_band_colors.js` does it for the reference chart,
+  which keeps its figure in a `dcc.Store` that a clientside callback turns into the graph's.
 - `hint_required_histogram_keys` (optional, none by default) — the logged histogram keys the chart shows. A
   chart always names them: there is no "every histogram", because a histogram is the most expensive thing a panel
   fetches. A field naming one is a `ColumnKind.HISTOGRAM` in `field_column_kinds()`.
