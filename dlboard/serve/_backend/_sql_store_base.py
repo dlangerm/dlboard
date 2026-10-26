@@ -6,6 +6,7 @@ import itertools
 import json
 import math
 from abc import ABC, abstractmethod
+from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, Final, Literal, cast
 
 import pendulum
@@ -23,7 +24,7 @@ from dlboard.serve._backend._schema_upgrade import run_migrations
 from dlboard.serve.telemetry import Counter, Outcome, OutcomeAttributes, Unit
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Collection, Iterable, Iterator, Mapping, Sequence
+    from collections.abc import Callable, Collection, Generator, Iterable, Iterator, Mapping, Sequence
     from datetime import datetime
 
 
@@ -514,6 +515,19 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         migrations run with foreign key enforcement off.
         """
 
+    @contextmanager
+    def _begin(self) -> Generator[sa.Connection]:
+        """
+        A transaction on a connection of its own: committed once the block is done, rolled back if it raises.
+
+        `Engine.begin()`, but with its commit in a span. A commit is a round trip (on Postgres, a wait for the WAL to
+        reach disk) that the SQL instrumentation, which only sees statements, leaves out of every trace.
+        """
+        with self._engine.connect() as conn, conn.begin() as transaction:
+            yield conn
+            with span("dlboard.store.commit", SpanKind.INTERNAL):
+                transaction.commit()
+
     def _execute(self, statement: sa.Executable, *, uncached: bool = False) -> list[AnyRow]:
         """
         Run one statement in its own transaction, returning its rows (if it has any).
@@ -521,7 +535,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         `uncached` keeps the compiled statement out of the engine's cache, for one built on `_named`: its text, thousands
         of names long, is what the cache would be keyed by.
         """
-        with self._engine.begin() as conn:
+        with self._begin() as conn:
             if uncached:
                 conn = conn.execution_options(compiled_cache=None)
             result = conn.execute(statement)
@@ -531,7 +545,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         self, model: type[RowT], statement: sa.Executable, *, no_validate: bool = False
     ) -> list[RowT]:
         """Run one statement in its own transaction, building a `model` from each row by column name."""
-        with self._engine.begin() as conn:
+        with self._begin() as conn:
             return [
                 sql.construct(model, row, no_validate=no_validate)
                 for row in conn.execute(statement).mappings()
@@ -545,7 +559,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         a failure partway through must not leave e.g. a project deleted but its experiments intact.
         """
         results: list[list[AnyRow]] = []
-        with self._engine.begin() as conn:
+        with self._begin() as conn:
             for statement in statements:
                 result = conn.execute(statement)
                 results.append(list(result.all()) if result.returns_rows else [])
@@ -565,7 +579,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         pending = [(table, values) for table, values in pending if values]
         if not pending:
             return
-        with self._engine.begin() as conn, span("dlboard.store.insert", SpanKind.INTERNAL):
+        with self._begin() as conn, span("dlboard.store.insert", SpanKind.INTERNAL):
             for table, values in pending:
                 self._bulk_insert(conn, table, values)
 

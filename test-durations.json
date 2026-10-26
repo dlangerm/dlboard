@@ -1681,6 +1681,8 @@
   "dlboard/serve/telemetry/tests/server_traces_test.py::test_a_user_can_keep_urls_out_of_the_traces_with_either_standard_variable[the-flask-variable-replaces-the-generic-one]": 0.742204512032913,
   "dlboard/serve/telemetry/tests/server_traces_test.py::test_a_user_can_keep_urls_out_of_the_traces_with_either_standard_variable[the-flask-variable]": 0.7119579449936282,
   "dlboard/serve/telemetry/tests/server_traces_test.py::test_a_user_can_keep_urls_out_of_the_traces_with_either_standard_variable[the-generic-variable]": 0.7159505259769503,
+  "dlboard/serve/telemetry/tests/server_traces_test.py::test_a_writes_commit_is_traced_after_its_statement_in_the_same_request[postgres]": 6.74179774899676,
+  "dlboard/serve/telemetry/tests/server_traces_test.py::test_a_writes_commit_is_traced_after_its_statement_in_the_same_request[sqlite]": 1.6824382139893714,
   "dlboard/serve/telemetry/tests/server_traces_test.py::test_an_instrumentor_for_a_library_that_is_not_installed_is_skipped_without_an_error_in_the_log": 0.022967717988649383,
   "dlboard/serve/telemetry/tests/server_traces_test.py::test_only_the_requests_somebody_looks_at_are_traced[a-health-probe]": 0.1889772689610254,
   "dlboard/serve/telemetry/tests/server_traces_test.py::test_only_the_requests_somebody_looks_at_are_traced[the-metric-ingest-route-that-shares-its-name]": 0.7232125969894696,

@@ -147,6 +147,34 @@ def test_a_statement_is_one_span_whichever_database_runs_it(
     assert traced_by == {"opentelemetry.instrumentation.sqlalchemy"}
 
 
+@pytest.mark.parametrize("store_backend", EVERY_STORE_BACKEND)
+def test_a_writes_commit_is_traced_after_its_statement_in_the_same_request(
+    span_exporter: InMemorySpanExporter, backend_server: BackendServer, store_backend: StoreBackend
+) -> None:
+    """The SQL instrumentation only sees statements: a commit's round trip is a span of dlboard's own."""
+    del store_backend  # only selects which database `backend_server` runs on
+    requests.post(
+        f"{backend_server.url}/{get_or_create_path(Resource.PROJECTS)}",
+        json={"name": "committed", "description": ""},
+        timeout=10,
+    )
+    flush()
+
+    spans = span_exporter.get_finished_spans()
+    (request,) = [s for s in spans if s.kind == SpanKind.SERVER]
+    assert request.context is not None
+    in_request = [
+        s for s in spans if s.context is not None and s.context.trace_id == request.context.trace_id
+    ]
+    insert = next(
+        s for s in in_request if str((s.attributes or {}).get("db.statement", "")).startswith("INSERT")
+    )
+    assert insert.end_time is not None
+    assert any(
+        s.name == "dlboard.store.commit" and (s.start_time or 0) >= insert.end_time for s in in_request
+    )
+
+
 @pytest.mark.parametrize(
     ("disabled", "driver_traced"),
     [
