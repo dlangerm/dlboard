@@ -99,6 +99,7 @@ class DocScreenshot(StrEnum):
     JUMP_PALETTE = "jump-palette"
     EXPERIMENT_CHARTS = "experiment-charts"
     IMAGE_SERIES = "image-series"
+    IMAGE_VIEWER = "image-viewer"
     CHART_EDITOR = "chart-editor"
     PERSONAL_VIEWS = "personal-views"
     NOTES = "notes"
@@ -312,7 +313,7 @@ def _open_charted_experiment(page: Page, demo: Demo) -> None:
         expect(page.locator(".mantine-Notification-root")).to_have_count(0)
 
 
-def _stage(shot: DocScreenshot, page: Page, demo: Demo, dlboard_app: Dash) -> Page | Locator:  # noqa: C901, PLR0911, PLR0915 -- one case per screenshot, kept exhaustive
+def _stage(shot: DocScreenshot, page: Page, demo: Demo, dlboard_app: Dash) -> Page | Locator:  # noqa: C901, PLR0911, PLR0912, PLR0915 -- one case per screenshot, kept exhaustive
     """Drive the real UI to `shot`'s state, and return what to photograph."""
     match shot:
         case DocScreenshot.HOME:
@@ -360,6 +361,22 @@ def _stage(shot: DocScreenshot, page: Page, demo: Demo, dlboard_app: Dash) -> Pa
             ).to_be_visible()  # the layers are drawn, and the legend lists what they hold
             page.mouse.move(0, _VIEWPORT["height"] - 1)
             return panel
+        case DocScreenshot.IMAGE_VIEWER:
+            _open_charted_experiment(page, demo)
+            page.get_by_text(f"samples{ARTIFACT_PANEL_SUFFIX}").click()
+            page.locator(".dl-image-series-thumb").first.click()
+            dialog = page.get_by_role("dialog")
+            viewer = dialog.locator(".dl-image-series-viewer")
+            expect(viewer).to_be_visible()
+            page.wait_for_function(
+                "[...document.querySelectorAll('[role=dialog] img')].filter((i) => i.getAttribute('src')).every((i) => i.complete && i.naturalWidth > 0)"
+            )
+            viewer.get_by_role("button", name="Layers").click()  # it starts folded to its title
+            expect(viewer.locator(".dl-layer-classes .dl-class").first).to_be_visible()
+            page.mouse.move(
+                0, _VIEWPORT["height"] - 1
+            )  # off the picture, so its controls aren't shown hovered
+            return dialog  # not the page, whose backdrop shows whatever the earlier scenes left behind it
         case DocScreenshot.CHART_EDITOR:
             _open_charted_experiment(page, demo)
             chart = page.locator(".dl-chart-item").first

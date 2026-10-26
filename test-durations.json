@@ -2013,6 +2013,7 @@
   "dlboard/tests/docs_screenshots_test.py::test_doc_screenshot[chromium-home-light]": 0.0009312659967690706,
   "dlboard/tests/docs_screenshots_test.py::test_doc_screenshot[chromium-home]": 0.0010747289925348014,
   "dlboard/tests/docs_screenshots_test.py::test_doc_screenshot[chromium-image-series]": 0.0006410090136341751,
+  "dlboard/tests/docs_screenshots_test.py::test_doc_screenshot[chromium-image-viewer]": 0.0006410090136341751,
   "dlboard/tests/docs_screenshots_test.py::test_doc_screenshot[chromium-jump-palette]": 0.0006945450149942189,
   "dlboard/tests/docs_screenshots_test.py::test_doc_screenshot[chromium-notes]": 0.0006754280184395611,
   "dlboard/tests/docs_screenshots_test.py::test_doc_screenshot[chromium-personal-views]": 0.0006397870020009577,

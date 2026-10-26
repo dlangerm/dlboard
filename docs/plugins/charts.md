@@ -114,6 +114,8 @@ magnified in blocks. The `<` and `>` buttons beside the picture, the timeline un
 move it through the chart's steps, moving the chart's own slider with it; the up and down arrow keys move through the
 runs. Moving keeps the zoom, to compare the same place.
 
+![An image series' enlarged view, with its layers and their legend over the picture, the zoom controls, and the step timeline](../images/image-viewer.png)
+
 Viewer state is kept per experiment *and view*, so the same chart in two views of one experiment has a state of its own
 in each. It is an internal mechanism of dlboard's own charts for now (`ChartType.viewer_state_type()` and
 `ViewerState.applied_to(parameters)` are the Python side, and the image chart is the only one that uses them): the
