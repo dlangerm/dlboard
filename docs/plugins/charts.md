@@ -100,8 +100,10 @@ The chart's card says so ("View changed") and offers to **Save as default**, whi
 the chart's `layers` setting (into a view of your own, if the page is not yours), or to **Reset** it.
 
 Click a picture to open it enlarged. Its header names the chart, the run (in its color) and the step, with **Download**:
-point at it and it offers its sizes (**Original**, **2x**, **4x**, **8x**, or **View**, which is what is on screen, the
-area you have zoomed and panned to), and one click on one saves a PNG at that size. Every one has the layers shown drawn
+point at it and it offers its sizes (**Original**, **2x**, **4x**, **8x**, **Fit to** a number of pixels you type, 1920 to
+begin with, for the picture's longest side with the other in proportion, or **View**, which is what is on screen, the
+area you have zoomed and panned to), and one click on one saves a PNG at that size (Enter in the number does the same
+for **Fit to**). Every one has the layers shown drawn
 over the picture, and a legend of what they hold in its corner (a layer you have hidden is left out of both); a size that
 would be too big for a browser to draw is brought down to what it can. While the next picture is still downloading, the
 one on show is dimmed with a spinner over it, and the pictures a step either side are fetched ahead.

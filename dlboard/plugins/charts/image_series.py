@@ -54,6 +54,8 @@ if typing.TYPE_CHECKING:
     from collections.abc import Iterable
 
 MAX_SLIDER_LABELS = 10
+DEFAULT_FIT_PIXELS = 1920
+"""The longest side, in pixels, the enlarged view's "Fit to" download starts at: a full-HD frame's width."""
 
 
 class LayerVisibility(StrEnum):
@@ -257,13 +259,15 @@ class DownloadSize(StrEnum):
     TWICE = "2"
     FOUR_TIMES = "4"
     EIGHT_TIMES = "8"
+    FIT = "fit"
+    """The picture's longest side at a number of pixels the viewer types (`DEFAULT_FIT_PIXELS` to begin with)."""
     VIEW = "view"
     """What is on screen: the zoomed and panned area, at the screen's resolution."""
 
     @property
     def label(self) -> str:
         """What the button for it says."""
-        return {self.ORIGINAL: "Original", self.VIEW: "View"}.get(self, f"{self.value}x")
+        return {self.ORIGINAL: "Original", self.FIT: "Fit to", self.VIEW: "View"}.get(self, f"{self.value}x")
 
     @property
     def description(self) -> str:
@@ -273,6 +277,8 @@ class DownloadSize(StrEnum):
                 return "Download the picture at its own size"
             case DownloadSize.TWICE | DownloadSize.FOUR_TIMES | DownloadSize.EIGHT_TIMES:
                 return f"Download the picture magnified {self.value} times"
+            case DownloadSize.FIT:
+                return "Download the picture with its longest side at the number of pixels beside this"
             case DownloadSize.VIEW:
                 return "Download what is on screen: the area zoomed and panned to"
 
@@ -292,17 +298,39 @@ def _download_choices() -> html.Span:
     """
     Download, which offers its sizes on being pointed at: the choice is the click, with no menu to open first.
 
-    Each button downloads the picture with the layers shown and their legend, as a PNG.
+    Each button downloads the picture with the layers shown and their legend, as a PNG. "Fit to" is followed by the
+    number of pixels for the picture's longest side, which the viewer can type.
     """
+    buttons = {
+        size: _view_button(
+            "dl-view-download-choice", size.label, size.description, **{"data-dl-download": size}
+        )
+        for size in DownloadSize
+    }
+    fit_to = html.Span(
+        [
+            buttons[DownloadSize.FIT],
+            dmc.NumberInput(
+                value=DEFAULT_FIT_PIXELS,
+                min=1,
+                step=1,
+                allowDecimal=False,
+                allowNegative=False,
+                clampBehavior="strict",
+                hideControls=True,
+                size="xs",
+                w=72,
+                classNames={"input": "dl-view-download-pixels"},
+                **{"aria-label": "Pixels along the picture's longest side"},
+            ),
+            "px",
+        ],
+        className="dl-view-download-fit",
+    )
     return html.Span(
         [
             html.Span(
-                [
-                    _view_button(
-                        "dl-view-download-choice", size.label, size.description, **{"data-dl-download": size}
-                    )
-                    for size in DownloadSize
-                ],
+                [fit_to if size is DownloadSize.FIT else button for size, button in buttons.items()],
                 className="dl-view-download-choices",
             ),
             html.Span("Download", className="dl-view-download-label", tabIndex=0),

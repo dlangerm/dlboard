@@ -520,13 +520,15 @@ window.dlImageSeriesViewer = (() => {
 
     // Downloading the picture on show as a PNG, drawn onto a canvas: the picture, each layer that is shown over it as it is
     // on screen, and the legend of what they hold. The viewer chooses how big: the picture's own size, or magnified by 2, 4
-    // or 8 (a whole number, so its pixels stay as sharp as on screen and a label or an outline can be read), or the view
-    // itself: the area that is zoomed and panned to, at the screen's resolution.
+    // or 8 (a whole number, so its pixels stay as sharp as on screen and a label or an outline can be read), or its longest
+    // side at a number of pixels they type (whatever that makes of the scale), or the view itself: the area that is zoomed
+    // and panned to, at the screen's resolution.
     const SVG_NS = "http://www.w3.org/2000/svg";
     // The largest a canvas is made, along a side and in pixels: browsers stop drawing on one beyond that.
     const MAX_CANVAS_SIDE = 16384;
     const MAX_CANVAS_PIXELS = 1e8;
     const VIEW_CHOICE = "view";
+    const FIT_CHOICE = "fit";
 
     const loaded = (src) =>
         new Promise((resolve, reject) => {
@@ -671,12 +673,20 @@ window.dlImageSeriesViewer = (() => {
         });
     };
 
-    // `choice` is "view", or the number of times the picture's own size.
+    // `choice` is "view", "fit" (to the number of pixels typed beside it), or the number of times the picture's own size.
     const download = async (instance, choice) => {
         const viewer = viewerOf(instance);
         const picture = viewer && pictureOf(viewer);
         const geo = viewer && geometry(viewer);
         if (!geo) {
+            return;
+        }
+        const pixels = document.querySelector(
+            `.dl-view-title[data-dl-instance="${CSS.escape(instance)}"] .dl-view-download-pixels`,
+        );
+        // The field only takes whole numbers of one or more, so what it can be without is an empty one: back to it.
+        if (choice === FIT_CHOICE && !(Number(pixels.value) >= 1)) {
+            pixels.focus();
             return;
         }
         const [natural, view] = [[picture.naturalWidth, picture.naturalHeight], viewOf(viewer)];
@@ -690,24 +700,26 @@ window.dlImageSeriesViewer = (() => {
             size = [Math.round(geo.width * dpr), Math.round(geo.height * dpr)];
             outline = dpr;
         } else {
-            const [most, long] = [Number(choice), Math.max(...natural)];
-            k = Math.max(
-                1,
-                Math.floor(
-                    Math.min(
-                        most,
-                        MAX_CANVAS_SIDE / long,
-                        Math.sqrt(MAX_CANVAS_PIXELS / (natural[0] * natural[1])),
-                    ),
-                ),
+            const long = Math.max(...natural);
+            const largest = Math.min(
+                MAX_CANVAS_SIDE / long,
+                Math.sqrt(MAX_CANVAS_PIXELS / (natural[0] * natural[1])),
             );
-            size = natural.map((side) => side * k);
+            if (choice === FIT_CHOICE) {
+                // The longest side is the number of pixels asked for (or the most a canvas can be), the other in proportion.
+                k = Math.max(1, Math.round(Math.min(Number(pixels.value), largest * long))) / long;
+            } else {
+                k = Math.max(1, Math.floor(Math.min(Number(choice), largest)));
+            }
+            size = natural.map((side) => Math.max(1, Math.round(side * k)));
             outline = k / geo.base;
         }
         const canvas = document.createElement("canvas");
         [canvas.width, canvas.height] = size;
         const context = canvas.getContext("2d");
-        context.imageSmoothingEnabled = false;
+        // Blocks when a picture is magnified, so a mask's pixels stay as they are; smoothed when it is shrunk, or it aliases.
+        context.imageSmoothingEnabled = k < 1;
+        context.imageSmoothingQuality = "high";
         // The part of the picture that is on the canvas, in its own pixels: all of it, or what the view shows.
         const left = Math.max(0, -origin[0] / k);
         const top = Math.max(0, -origin[1] / k);
@@ -753,7 +765,7 @@ window.dlImageSeriesViewer = (() => {
             ...["dl-view-chart", "dl-view-run", "dl-view-step"].map(
                 (className) => title.querySelector(`.${className}`).textContent,
             ),
-            choice === VIEW_CHOICE ? "view" : `${k}x`,
+            { [VIEW_CHOICE]: "view", [FIT_CHOICE]: `${Math.max(...size)}px` }[choice] ?? `${k}x`,
         ]
             .join("_")
             .replace(/[^\w.-]+/g, "_");
@@ -765,13 +777,22 @@ window.dlImageSeriesViewer = (() => {
         setTimeout(() => URL.revokeObjectURL(link.href), 1000);
     };
 
-    // Pointing at "Download" offers the sizes (see the CSS); a click on one downloads at it.
+    // Pointing at "Download" offers the sizes (see the CSS); a click on one downloads at it, and Enter in the pixels' field
+    // downloads at those.
+    const downloadAt = (title, choice) =>
+        download(title.dataset.dlInstance, choice).catch((error) =>
+            console.error("image viewer: the picture could not be downloaded:", error),
+        );
     document.addEventListener("click", (event) => {
         const choice = event.target.closest?.(".dl-view-download [data-dl-download]");
         if (choice) {
-            download(choice.closest(".dl-view-title").dataset.dlInstance, choice.dataset.dlDownload).catch(
-                (error) => console.error("image viewer: the picture could not be downloaded:", error),
-            );
+            downloadAt(choice.closest(".dl-view-title"), choice.dataset.dlDownload);
+        }
+    });
+    document.addEventListener("keydown", (event) => {
+        const pixels = event.key === "Enter" && event.target.closest?.(".dl-view-download-pixels");
+        if (pixels) {
+            downloadAt(pixels.closest(".dl-view-title"), FIT_CHOICE);
         }
     });
 

@@ -387,6 +387,17 @@
     color: var(--mantine-primary-color-contrast);
 }
 
+/* "Fit to", the number of pixels beside it, and their unit, as one choice. */
+.dl-view-download-fit {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.dl-view-download-pixels {
+    text-align: right;
+}
+
 /* The body: the tags as a table beside the picture. */
 .dl-view-main {
     display: flex;

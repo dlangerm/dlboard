@@ -3946,6 +3946,68 @@ def _legend_panel_share(pixels: npt.NDArray[np.uint8]) -> float:
     return float((corner.max(axis=2) < 80).mean())
 
 
+def _open_the_enlarged_view(page: Page, live_server_url: str, tmp_path: Path, name: str) -> Locator:
+    """An experiment of tagged pictures with a mask (64 by 48), charted, and its first picture opened enlarged; the dialog."""
+    _create_project_and_experiment(page, live_server_url, name)
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    _log_tagged_pictures_with_a_mask(live_server_url, tmp_path, experiment_id)
+    page.reload()
+    _auto_generate_charts(page)
+    page.locator(".dl-chart-item .dl-image-series-thumb").click()
+    dialog = page.get_by_role("dialog")
+    page.wait_for_function(
+        _OVERLAY_COVERS_PICTURE_JS,
+        arg=dialog.locator(".dl-image-series-viewer .dl-image-series-overlay").element_handle(),
+    )
+    return dialog
+
+
+def _download_from(page: Page, dialog: Locator, choice: str, saved: Path) -> PILImage.Image:
+    """Point at Download, click the size `choice` (a `DownloadSize`), and open what was saved."""
+    dialog.locator(".dl-view-download-label").hover()
+    with page.expect_download() as taken:
+        dialog.locator(f'[data-dl-download="{choice}"]').click()
+    taken.value.save_as(saved)
+    return PILImage.open(saved)
+
+
+@pytest.mark.parametrize(
+    ("typed", "size"),
+    [
+        pytest.param(None, (1440, 1920), id="the-default-is-full-hd-wide"),
+        pytest.param("32", (24, 32), id="shrunk"),
+        pytest.param("96", (72, 96), id="a-scale-that-is-not-a-whole-number"),
+    ],
+)
+def test_the_enlarged_view_downloads_with_its_longest_side_at_the_pixels_typed(  # noqa: PLR0913 -- a browser test takes its fixtures and its parametrized case
+    page: Page,
+    live_server_url: str,
+    tmp_path: Path,
+    console_errors: list[str],
+    typed: str | None,
+    size: tuple[int, int],
+) -> None:
+    """
+    "Fit to" downloads the picture with its longest side at the number of pixels beside it, 1920 to begin with and the
+    other side in proportion; with no number there is nothing to fit to, and the click returns to the field instead.
+    """
+    dialog = _open_the_enlarged_view(page, live_server_url, tmp_path, f"Enlarged View Fit {typed} Experiment")
+    pixels = dialog.locator(".dl-view-download-pixels")
+    dialog.locator(".dl-view-download-label").hover()
+    expect(pixels).to_have_value("1920")
+    if typed is not None:
+        pixels.fill(typed)
+    downloaded = _download_from(page, dialog, "fit", tmp_path / "fit.png")
+    assert downloaded.size == (size[1], size[0])
+    assert _legend_panel_share(np.asarray(downloaded.convert("RGB"))) > 0.01
+
+    pixels.fill("")
+    dialog.locator('[data-dl-download="fit"]').click()
+    expect(pixels).to_be_focused()  # nothing to fit to: the click sends them back to the field
+    assert console_errors == []
+
+
 @pytest.mark.parametrize(
     ("choice", "size"),
     [
@@ -3967,19 +4029,11 @@ def test_the_enlarged_view_downloads_at_the_size_chosen_with_the_layers_shown_an
     whole number, or what is on screen (zoomed and panned to). Each has the layers that are shown drawn over the
     picture, and their legend, which a layer hidden is left out of.
     """
-    _create_project_and_experiment(page, live_server_url, f"Enlarged View Download {choice} Experiment")
-    page.locator(".experiment-card").click()
-    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
-    _log_tagged_pictures_with_a_mask(live_server_url, tmp_path, experiment_id)
-    page.reload()
-    _auto_generate_charts(page)
-    page.locator(".dl-chart-item .dl-image-series-thumb").click()
-    dialog = page.get_by_role("dialog")
+    dialog = _open_the_enlarged_view(
+        page, live_server_url, tmp_path, f"Enlarged View Download {choice} Experiment"
+    )
     viewer = dialog.locator(".dl-image-series-viewer")
     content = viewer.locator(".dl-zoom-content")
-    page.wait_for_function(
-        _OVERLAY_COVERS_PICTURE_JS, arg=viewer.locator(".dl-image-series-overlay").element_handle()
-    )
     box = viewer.bounding_box()
     assert box is not None
     page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
@@ -3989,12 +4043,7 @@ def test_the_enlarged_view_downloads_at_the_size_chosen_with_the_layers_shown_an
     expect(choices).to_be_hidden()  # offered on pointing at Download, not before
 
     def download(name: str) -> PILImage.Image:
-        dialog.locator(".dl-view-download-label").hover()
-        with page.expect_download() as taken:
-            dialog.locator(f'[data-dl-download="{choice}"]').click()
-        saved = tmp_path / name
-        taken.value.save_as(saved)
-        return PILImage.open(saved)
+        return _download_from(page, dialog, choice, tmp_path / name)
 
     downloaded = download("layers.png")
     pixels = np.asarray(downloaded.convert("RGB"))
