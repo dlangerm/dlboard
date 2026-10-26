@@ -113,6 +113,10 @@ class DocScreenshot(StrEnum):
         return IMAGES_DIR / f"{self.value}.png"
 
 
+_DIALOG_SHOTS = frozenset({DocScreenshot.RUN_COMPARE, DocScreenshot.IMAGE_VIEWER})
+"""The shots of a modal's dialog (`_stage` returns it), photographed within its whole pixels."""
+
+
 class _Sweep(NamedTuple):
     name: str
     lr: float
@@ -504,16 +508,31 @@ def _stage(shot: DocScreenshot, page: Page, demo: Demo, dlboard_app: Dash) -> Pa
             return dialog
 
 
-def _stable_screenshot(target: Page | Locator) -> bytes:
+def _stable_screenshot(target: Page | Locator, *, whole_pixels_inside: bool = False) -> bytes:
     """
     Photograph `target` until two consecutive captures are byte-identical.
 
     Chart animations and live-update re-renders are JavaScript, so `animations="disabled"` can't
     stop them; waiting for a fixed point does.
+
+    A dialog's edge falls between pixels, and the column it only partly covers shows through to the blurred page behind
+    it, whatever that page is drawing: `whole_pixels_inside` photographs only the pixels the dialog covers entirely.
     """
     previous: bytes | None = None
     for _ in range(_STABLE_ATTEMPTS):
-        current = target.screenshot(animations="disabled", caret="hide")
+        if whole_pixels_inside:
+            box = cast("Locator", target).bounding_box()
+            assert box is not None
+            left, top = math.ceil(box["x"]), math.ceil(box["y"])
+            clip = {
+                "x": left,
+                "y": top,
+                "width": math.floor(box["x"] + box["width"]) - left,
+                "height": math.floor(box["y"] + box["height"]) - top,
+            }
+            current = cast("Locator", target).page.screenshot(clip=clip, animations="disabled", caret="hide")
+        else:
+            current = target.screenshot(animations="disabled", caret="hide")
         if current == previous:
             return current
         previous = current
@@ -566,7 +585,7 @@ def test_doc_screenshot(  # noqa: PLR0913 -- one fixture per thing the render ne
     )
     target = _stage(shot, page, demo, dlboard_app)
     page.evaluate("document.fonts.ready")  # a late-swapping web font would otherwise reflow mid-capture
-    png = _stable_screenshot(target)
+    png = _stable_screenshot(target, whole_pixels_inside=shot in _DIALOG_SHOTS)
     assert console_errors == []
     match screenshot_mode:
         case ScreenshotMode.UPDATE:
