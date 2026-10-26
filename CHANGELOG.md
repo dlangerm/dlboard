@@ -12,6 +12,24 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ## [Unreleased]
 
+### Added
+
+* **Traces and metrics say where an artifact upload's time goes.** Each step from the request to the recorded ref is
+  timed: staging the file, waiting for the writer, writing it, waiting for the batch that records its ref, and recording
+  it (`dlboard.artifact.stage.duration`, `.write_queue.wait`, `.ingest_queue.wait`, `.ingest.duration`, beside the
+  existing `.blob.write.duration`). The write and ingest spans carry their queue wait, and each store transaction's
+  commit is a span of its own (`dlboard.store.commit`); most of what an ingest span used to leave unaccounted for was
+  commits. Every span dlboard makes records the CPU time its thread spent in it (`dlboard.thread.cpu_time`), so a slow
+  span that was waiting (on the database, a lock, the GIL) can be told from one that computed. (#392)
+* **Traces say which Dash callback a request ran, and what the experiment page spent it on.** A
+  `POST /_dash-update-component` span names the outputs it updates (`dlboard.dash.outputs`; a pattern-matching id by its
+  `type` alone, never a panel or chart name), each kind of data a panel reads is a `dlboard.panel.read` span (a metric
+  read with its reduction and whether it read every metric), with `dlboard.panel.read.duration` by kind, and drawing
+  each chart is a `dlboard.chart.render` span. See "Where the time went" in [docs/telemetry.md](docs/telemetry.md).
+* **`tools/ingest_load.py` reproduces an artifact upload load and reports where the ingest spent it.** Against a
+  Postgres and a traced server it starts itself, or a deployment of yours, optionally with headless browsers holding
+  the experiment page open and a metric history seeded, and under py-spy.
+
 ## [0.12.0] - 2026-10-26
 
 ### Added

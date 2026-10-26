@@ -125,7 +125,12 @@ Every attribute has a small, fixed set of values. The names and attributes are c
 | `dlboard.ingest.artifacts` | counter | | Artifacts uploaded. |
 | `dlboard.ingest.artifact.size` | counter, By | | Bytes of artifact uploads. |
 | `dlboard.artifact.write_queue.rejections` | counter | `dlboard.rejection.reason` (`queue_full`, `writer_down`, `failed`) | Uploads turned away: the write queue was full, the writer was down, or the batch could not be staged. |
+| `dlboard.artifact.stage.duration` | histogram, s | | How long a request took to stage one uploaded file before queueing it for the writer. |
+| `dlboard.artifact.write_queue.wait` | histogram, s | | How long a staged upload waited for the writer to take it. |
 | `dlboard.artifact.blob.write.duration` | histogram, s | `dlboard.outcome` | How long the writer took to store one artifact. |
+| `dlboard.artifact.ingest_queue.wait` | histogram, s | | How long a written artifact waited for the batch that recorded its ref. Includes the batching itself, up to a second by design. |
+| `dlboard.artifact.ingest.duration` | histogram, s | `dlboard.outcome` | How long recording one batch of written artifacts' refs took. |
+| `dlboard.panel.read.duration` | histogram, s | `dlboard.panel.read` (`key_names`, `metrics`, `artifacts`, `hyperparams`, `histograms`, `series_bands`, `run_names`) | One of an experiment page panel's reads from the store, building its dataframe included. |
 | `dlboard.artifact.purges` | counter | `dlboard.outcome` | Purged artifacts' blobs deleted from the artifact store, or that couldn't be. |
 | `dlboard.runs.created` | counter | | Runs started. |
 | `dlboard.runs.finished` | counter | `dlboard.run.status` | Runs reported done, by how they ended. |
@@ -157,6 +162,8 @@ dlboard.ship                              (client shipping process, one per batc
 └─ POST /api/v1/artifacts                 (client: the HTTP request)
    └─ POST /api/v1/artifacts              (server: the Flask request)
       ├─ SELECT, INSERT, ...              (the database, driver and pool included)
+      ├─ dlboard.store.commit             (each transaction's commit)
+      ├─ dlboard.blob.stage               (each uploaded file, staged for the writer)
       └─ dlboard.blob.write               (the spawned writer process; S3.PutObject is a trace of its own, see below)
 dlboard.blob.ingest                       (a trace of its own: records the refs of a batch of writes, and links to each)
 ```
@@ -241,12 +248,39 @@ traced, nothing connects at startup, and a tracing failure is logged once and ot
 exports its last spans when it is told to flush, before `finalize()` returns, and a process that is exiting waits at most about
 ten seconds for a collector that will not let go (a rate-limiting gateway can ask an exporter to back off for a minute).
 
+### Where the time went
+
+Every span dlboard makes records `dlboard.thread.cpu_time`: the CPU time its thread spent in it. A span's duration minus
+that is time its thread waited, on the database, the network, a lock, or another thread holding the GIL. A slow span
+with a small CPU time and no children to account for it was waiting.
+
+**An upload** is staged by the request (`dlboard.blob.stage`), waits for the writer, is written (`dlboard.blob.write`),
+waits for the batch that records its ref, and is recorded (`dlboard.blob.ingest`). The five `dlboard.artifact.*`
+histograms above time each of these steps, across every upload. On a single trace, the write and ingest spans carry how
+long their item waited in the queue before them (`dlboard.queue.wait`; the ingest's is its batch's longest), so the time
+between the request and the recorded ref can be read without following the ingest span's links. Each store
+transaction's commit is a span of its own (`dlboard.store.commit`): the SQL instrumentation only sees statements, and a
+commit is a round trip, on Postgres a wait for the write-ahead log too. An ingest that had to retry its batch one artifact
+at a time, because the store rejected one of them, has a `split` event.
+
+**A page** is all Dash callbacks, so each callback is a `POST /_dash-update-component` span. Its `dlboard.dash.outputs`
+says which callback it was, by the components it updates. A pattern-matching id is shown by its `type` alone, never by
+the panel or chart name in it. Under it, each kind of data a panel reads is a `dlboard.panel.read` span
+(`dlboard.panel.read` says the kind). A metric read also says its `dlboard.metric.reduction` and, as
+`dlboard.read.unscoped`, whether it read every metric the experiment logged, which a table that names no metrics does.
+Drawing each chart is a `dlboard.chart.render` span with the chart's `dlboard.chart.type`.
+
+`tools/ingest_load.py` in the repository reproduces an upload load, with headless browsers holding the experiment page
+open if asked, against a local Postgres or a deployment of yours, and reports where `dlboard.blob.ingest` spent its time.
+
+### What you will see
+
 Three things to know about what you will see.
 
-- Every Dash callback is a request, so each is a span named `POST /_dash-update-component`, with the sign-in check's queries
-  under it. On a busy server that is most of the volume, and it says little about which callback it was. Sample it down with
-  `OTEL_TRACES_SAMPLER=parentbased_traceidratio` and `OTEL_TRACES_SAMPLER_ARG=0.1` on the server. A batch the client ships
-  keeps the client's decision, whatever the server's ratio.
+- Every Dash callback is a request, so on a busy server `POST /_dash-update-component` spans, with the sign-in check's
+  queries under them, are most of the volume. Sample them down with `OTEL_TRACES_SAMPLER=parentbased_traceidratio` and
+  `OTEL_TRACES_SAMPLER_ARG=0.1` on the server. A batch the client ships keeps the client's decision, whatever the
+  server's ratio.
 - On S3 storage the upload's requests (`S3.PutObject`) are traces of their own, not children of `dlboard.blob.write`: boto
   uploads from threads of its own, which do not carry the trace, and dlboard leaves how an upload runs alone rather than
   change it for the sake of the trace.
