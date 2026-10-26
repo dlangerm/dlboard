@@ -216,29 +216,84 @@ def test_a_list_of_more_keys_than_sqlite_compounds_takes_in_one_query_reads_ever
     ).latest_per_run() == {run.id: {key: float(i + 10 * step) for i, key in enumerate(keys)}}
 
 
-@pytest.mark.parametrize(
-    "reduction", [models.MetricReduction.HISTORY, models.MetricReduction.LATEST, models.MetricReduction.MEAN]
-)
-def test_more_named_keys_than_a_statement_may_bind_are_read_in_full(
-    tmp_path: Path, reduction: models.MetricReduction
-) -> None:
-    """A stock SQLite build binds at most 32,766 parameters in a statement; the names are written into it instead."""
+def _a_stock_sqlite(tmp_path: Path) -> tuple[SQLLiteStore, int, models.Run]:
+    """
+    A store whose SQLite has the limits a stock build does, not the larger ones of a distribution's.
+
+    A statement binds at most 32,766 parameters and is at most 1,000,000 bytes long.
+    """
     store = SQLLiteStore(tmp_path / "wide.sqlite")
 
     def a_stock_build(connection: sqlite3.Connection, _record: object) -> None:
         connection.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, 32_766)
+        connection.setlimit(sqlite3.SQLITE_LIMIT_SQL_LENGTH, 1_000_000)
 
     sa.event.listen(store._engine, "connect", a_stock_build)
-    store._engine.dispose()  # a connection made before the listener would keep the build's own limit
+    store._engine.dispose()  # a connection made before the listener would keep the build's own limits
     project = store.create_project(models.NewProject(name="p", description="d"))
     experiment = store.create_experiment(models.NewExperiment(project_id=project.id))
     (run,) = _runs(store, experiment.id, 1)
-    keys = [f"metric_{i:05d}" for i in range(33_000)]
+    return store, experiment.id, run
+
+
+@pytest.mark.parametrize(
+    "reduction",
+    [
+        models.MetricReduction.HISTORY,
+        models.MetricReduction.LATEST,
+        models.MetricReduction.FIRST,
+        models.MetricReduction.MEAN,
+    ],
+)
+def test_eleven_thousand_named_keys_are_read_within_the_limits_of_a_stock_sqlite(
+    tmp_path: Path, reduction: models.MetricReduction
+) -> None:
+    store, experiment_id, run = _a_stock_sqlite(tmp_path)
+    keys = [f"layer_{i:05d}/grad_norm/an_unusually_long_name" for i in range(11_000)]
     _log(store, run, 0, **dict.fromkeys(keys, 1.0))
 
-    frame = store.fetch_metrics(experiment.id, keys=frozenset(keys), run_ids=None, reduction=reduction)
+    frame = store.fetch_metrics(experiment_id, keys=frozenset(keys), run_ids=None, reduction=reduction)
 
     assert frame.keys == frozenset(keys)
+    assert len(store.summarize_metric_steps(experiment_id, frozenset(keys))) == len(keys)
+
+
+@pytest.mark.parametrize("reduction", [models.MetricReduction.HISTORY, models.MetricReduction.MEAN])
+def test_more_named_keys_than_a_statement_may_bind_are_read_in_full(
+    tmp_path: Path, reduction: models.MetricReduction
+) -> None:
+    """The names of a list are written into the statement: past 32,766 of them they could not be bound."""
+    store, experiment_id, run = _a_stock_sqlite(tmp_path)
+    keys = [f"m{i:05d}" for i in range(33_000)]
+    _log(store, run, 0, **dict.fromkeys(keys, 1.0))
+
+    frame = store.fetch_metrics(experiment_id, keys=frozenset(keys), run_ids=None, reduction=reduction)
+
+    assert frame.keys == frozenset(keys)
+
+
+_AWKWARD = 'it\'s 100%: \\:x \\ "done" ? %s :named'
+
+
+def test_a_key_with_quotes_percents_colons_and_backslashes_is_read_by_every_read_that_names_keys(
+    store: SQLLiteStore, experiment_id: int
+) -> None:
+    """The names of a read are written into its statement, so each character a statement means something by is tried."""
+    first, second = _runs(store, experiment_id, 2)
+    for run in (first, second):
+        _log(store, run, 0, **{_AWKWARD: 1.0})
+        _log(store, run, 1, **{_AWKWARD: 2.0})
+    _log(store, second, 2, **{_AWKWARD: math.nan})
+    keys = frozenset({_AWKWARD})
+
+    def read(reduction: models.MetricReduction) -> dict[int, dict[str, float]]:
+        return store.fetch_metrics(
+            experiment_id, keys=keys, run_ids=None, reduction=reduction
+        ).latest_per_run()
+
+    assert read(models.MetricReduction.LATEST) == {first.id: {_AWKWARD: 2.0}, second.id: {_AWKWARD: 2.0}}
+    assert read(models.MetricReduction.FIRST) == {first.id: {_AWKWARD: 1.0}, second.id: {_AWKWARD: 1.0}}
+    assert [s.key for s in store.summarize_metric_steps(experiment_id, keys)] == [_AWKWARD]
 
 
 def test_a_missing_last_value_is_looked_for_only_in_the_runs_and_keys_that_miss_it(

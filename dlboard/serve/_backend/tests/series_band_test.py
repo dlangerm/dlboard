@@ -183,7 +183,7 @@ def test_a_key_with_quotes_and_percents_in_its_name_is_read_like_any_other(
     store: SQLLiteStore, experiment_id: int
 ) -> None:
     run = _run(store, experiment_id)
-    awkward = 'it\'s 100%\\ "done" ?'
+    awkward = 'it\'s 100%: \\:x \\ "done" ? %s :named'
     _log(store, run, 0, {awkward: 2.0})
 
     assert [(b.minimum_key, b.maximum_key) for b in _band(store, experiment_id, {awkward}, grid=8)] == [

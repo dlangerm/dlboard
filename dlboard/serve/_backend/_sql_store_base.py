@@ -351,39 +351,57 @@ _COMPOUND_SELECT_TERMS: Final = 500
 
 
 def _named(
-    rows: Sequence[tuple[Any, ...]], columns: Sequence[tuple[str, type[sa.types.TypeEngine[Any]]]], name: str
+    rows: Sequence[tuple[Any, ...]],
+    columns: Sequence[tuple[str, type[sa.types.TypeEngine[Any]]]],
+    name: str,
+    dialect: sa.Dialect,
 ) -> sa.Subquery:
     """
     `rows` as a table of `columns`, to probe each by its index rather than hop through every value a table holds.
 
     A UNION ALL of literals rather than VALUES: SQLite cannot name the columns of a VALUES list. Its cap on a
-    compound SELECT is why the literals are unioned in blocks under that cap, and the blocks unioned in turn. The
-    values are written into the statement rather than bound: thousands of them would pass the number of parameters
-    one statement may bind (32,766 on some SQLite builds).
+    compound SELECT is why the literals are unioned in blocks under that cap, and the blocks unioned in turn.
+
+    The values are written into the statement rather than bound, by the dialect's own escaping of a literal: thousands
+    of them would pass the number of parameters one statement may bind (32,766 on some SQLite builds). And the
+    statement is written as one text, not built as a SELECT object for each row, which took seconds to build and
+    compile for 11,000 rows (0.7 s for the whole read now, and the same the first time). So a statement built on it
+    must be executed `uncached` (see `_execute`), as its text is its cache key. What bounds it is the length of a statement
+    (SQLite's default is 1,000,000 bytes: about 20,000 names of 30 characters).
     """
     if not rows:
         msg = f"cannot name no rows as table {name!r}: a UNION ALL needs a SELECT"
         raise ValueError(msg)
-    blocks = [
-        sa.union_all(
-            *(
-                sa.select(
-                    *(
-                        sa.literal(value, sql_type).render_literal_execute().label(column)
-                        for value, (column, sql_type) in zip(row, columns, strict=True)
-                    )
-                )
-                for row in block
-            )
-        ).subquery()
-        for block in itertools.batched(rows, _COMPOUND_SELECT_TERMS)
+    # A driver that takes `%s` parameters has its dialect write a `%` in a literal twice, and so does `text` for the
+    # whole statement: it is written once here, for `text` to do it.
+    percent = "%" if dialect.paramstyle in {"format", "pyformat"} else "%%"
+    escapes = [
+        cast("Callable[[object], str]", sql_type().literal_processor(dialect=dialect))
+        for _, sql_type in columns
     ]
-    return sa.union_all(*(sa.select(*block.c) for block in blocks)).subquery(name)
+    blocks = [
+        "SELECT * FROM ("
+        + " UNION ALL ".join(
+            "SELECT "
+            + ", ".join(
+                f"{escape(value).replace('%%', percent)} AS {column}"
+                for value, escape, (column, _) in zip(row, escapes, columns, strict=True)
+            )
+            for row in block
+        )
+        + f") AS block_{at}"
+        for at, block in enumerate(itertools.batched(rows, _COMPOUND_SELECT_TERMS))
+    ]
+    # A `:` is how `text` marks a parameter of its own, and `\:` is how it is told there is none.
+    text = " UNION ALL ".join(blocks).replace(":", "\\:")
+    return (
+        sa.text(text).columns(*(sa.column(column, sql_type()) for column, sql_type in columns)).subquery(name)
+    )
 
 
-def _named_keys(keys: frozenset[str]) -> sa.Subquery:
+def _named_keys(keys: frozenset[str], dialect: sa.Dialect) -> sa.Subquery:
     """`keys` as a `key` column, to probe each by its index rather than hop through every key a table holds."""
-    return _named([(key,) for key in sorted(keys)], [("key", sa.String)], "logged")
+    return _named([(key,) for key in sorted(keys)], [("key", sa.String)], "logged", dialect)
 
 
 def _grid_cells(first: int, last: int, grid: int) -> list[tuple[int, int]]:
@@ -496,9 +514,16 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         migrations run with foreign key enforcement off.
         """
 
-    def _execute(self, statement: sa.Executable) -> list[AnyRow]:
-        """Run one statement in its own transaction, returning its rows (if it has any)."""
+    def _execute(self, statement: sa.Executable, *, uncached: bool = False) -> list[AnyRow]:
+        """
+        Run one statement in its own transaction, returning its rows (if it has any).
+
+        `uncached` keeps the compiled statement out of the engine's cache, for one built on `_named`: its text, thousands
+        of names long, is what the cache would be keyed by.
+        """
         with self._engine.begin() as conn:
+            if uncached:
+                conn = conn.execution_options(compiled_cache=None)
             result = conn.execute(statement)
             return list(result.all()) if result.returns_rows else []
 
@@ -1025,7 +1050,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             return []
         m, r = self._tables[models.UnderlyingMetricTableEntry], self._tables[models.Run]
         # Asked for by name, the keys are probed directly; only "every metric" has to find out which keys there are.
-        logged = _distinct_keys(m, experiment_id) if keys is None else _named_keys(keys)
+        logged = _distinct_keys(m, experiment_id) if keys is None else _named_keys(keys, self._engine.dialect)
         end = (m.c.step.desc() if latest else m.c.step.asc(), m.c.id.desc())
         end_id = (
             sa.select(m.c.id)
@@ -1047,18 +1072,14 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         def of_the_end(column: sa.ColumnElement[Any]) -> sa.ScalarSelect[Any]:
             return sa.select(column).where(found.c.id == ends.c.end_id).correlate(ends).scalar_subquery()
 
-        rows = [
-            MetricRow._make(row)
-            for row in self._execute(
-                sa.select(
-                    ends.c.run_id,
-                    of_the_end(found.c.step).label("step"),
-                    ends.c.key,
-                    of_the_end(found.c.value).label("value"),
-                    of_the_end(found.c.timestamp_utc).label("timestamp_utc"),
-                ).where(ends.c.end_id.is_not(None))
-            )
-        ]
+        ends_of = sa.select(
+            ends.c.run_id,
+            of_the_end(found.c.step).label("step"),
+            ends.c.key,
+            of_the_end(found.c.value).label("value"),
+            of_the_end(found.c.timestamp_utc).label("timestamp_utc"),
+        ).where(ends.c.end_id.is_not(None))
+        rows = [MetricRow._make(row) for row in self._execute(ends_of, uncached=keys is not None)]
         unsettled = {(row.run_id, row.key) for row in rows if row.value is None or math.isnan(row.value)}
         if not unsettled:
             return [row for row in rows if row.value is not None]
@@ -1081,7 +1102,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         counts as its newest write, as in `MetricFrame.from_rows`.
         """
         m = self._tables[models.UnderlyingMetricTableEntry]
-        named = _named(pairs, [("run_id", sa.Integer), ("key", sa.String)], "unsettled")
+        named = _named(pairs, [("run_id", sa.Integer), ("key", sa.String)], "unsettled", self._engine.dialect)
         end = (m.c.step.desc() if latest else m.c.step.asc(), m.c.id.desc())
         rewritten = m.alias("rewritten")
         # The newest write of a step is the one that counts, a missing value included: that step then has none.
@@ -1113,7 +1134,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             at_the_end(m.c.timestamp_utc).label("timestamp_utc"),
         ).subquery("ends")
         rows = self._execute(
-            sa.select(*(ends.c[f] for f in MetricRow._fields)).where(ends.c.value.is_not(None))
+            sa.select(*(ends.c[f] for f in MetricRow._fields)).where(ends.c.value.is_not(None)), uncached=True
         )
         return [MetricRow._make(row) for row in rows]
 
@@ -1181,7 +1202,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         if not keys:
             return []
         m, r = self._tables[models.UnderlyingMetricTableEntry], self._tables[models.Run]
-        named = _named_keys(keys)
+        named = _named_keys(keys, self._engine.dialect)
         # Judged on the newest runs only, so what it reads is bounded by `SUMMARY_RUNS`, not by how many runs there are.
         newest = (
             sa.select(r.c.id.label("run_id"))
@@ -1203,7 +1224,9 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             .correlate(named)
             .scalar_subquery()
         )
-        rows = self._execute(sa.select(named.c.key, sa.func.coalesce(longest, 0)).order_by(named.c.key))
+        rows = self._execute(
+            sa.select(named.c.key, sa.func.coalesce(longest, 0)).order_by(named.c.key), uncached=True
+        )
         return [MetricKeySummary(key, max_steps_per_run) for key, max_steps_per_run in rows]
 
     def fetch_series_band(
@@ -1232,6 +1255,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             [(key, label_ids[label]) for key, label in sorted(groups.items())],
             [("key", sa.String), ("grp", sa.Integer)],
             "logged",
+            self._engine.dialect,
         )
         runs = (
             sa.select(r.c.id.label("run_id"))
@@ -1257,11 +1281,16 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             .select_from(logged.join(runs, sa.true()))
             .subquery("ends")
         )
-        first, last = self._execute(sa.select(sa.func.min(ends.c.first), sa.func.max(ends.c.last)))[0]
+        first, last = self._execute(
+            sa.select(sa.func.min(ends.c.first), sa.func.max(ends.c.last)), uncached=True
+        )[0]
         if first is None or last is None:
             return []
         at_cell = _named(
-            _grid_cells(first, last, grid), [("after", sa.Integer), ("until", sa.Integer)], "cells"
+            _grid_cells(first, last, grid),
+            [("after", sa.Integer), ("until", sa.Integer)],
+            "cells",
+            self._engine.dialect,
         )
         # The newest write of each key in each run's cell: one ordered probe of the index per combination, with
         # nothing in it but the cell's bounds, so the planner has no other plan to choose.
@@ -1332,7 +1361,8 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
                 at_rank(ranked.c.n, ranked.c.key),
             )
             .group_by(ranked.c.run_id, ranked.c.grp, ranked.c.step)
-            .order_by(ranked.c.run_id, ranked.c.grp, ranked.c.step)
+            .order_by(ranked.c.run_id, ranked.c.grp, ranked.c.step),
+            uncached=True,
         )
         return [models.SeriesBand._make((run_id, labels[grp], *rest)) for run_id, grp, *rest in rows]
 
