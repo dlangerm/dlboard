@@ -167,6 +167,7 @@ class AttributeKey(StrEnum):
     OUTCOME = "dlboard.outcome"
     REJECTION_REASON = "dlboard.rejection.reason"
     SIGN_IN_OUTCOME = "dlboard.auth.outcome"
+    PANEL_READ = "dlboard.panel.read"
 
 
 @dataclass(frozen=True, slots=True)

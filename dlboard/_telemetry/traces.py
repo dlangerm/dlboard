@@ -79,6 +79,10 @@ class TraceKey(StrEnum):
     STARTUP_ATTEMPT = "dlboard.startup.attempt"
     THREAD_CPU_TIME = "dlboard.thread.cpu_time"
     QUEUE_WAIT = "dlboard.queue.wait"
+    DASH_OUTPUTS = "dlboard.dash.outputs"
+    CHART_TYPE = "dlboard.chart.type"
+    METRIC_REDUCTION = "dlboard.metric.reduction"
+    UNSCOPED = "dlboard.read.unscoped"
 
 
 @dataclass(frozen=True, slots=True)

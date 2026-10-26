@@ -52,6 +52,31 @@ def test_a_request_continues_its_callers_trace_and_its_sql_hangs_off_it(
     assert all(_SECRET_NAME not in str(s.attributes) for s in spans), "bound parameters must not reach a span"
 
 
+def test_a_callbacks_request_names_its_outputs_but_never_what_a_user_named(
+    span_exporter: InMemorySpanExporter, backend_server: BackendServer
+) -> None:
+    """Every callback is one route: its trace says which ran, a pattern-matching output by its `type` alone."""
+    requests.post(
+        f"{backend_server.url}/_dash-update-component",
+        json={
+            "output": "unused",
+            "outputs": [
+                [{"id": {"type": "panel-body", "panel": _SECRET_NAME}, "property": "children"}] * 2,
+                {"id": "live-status", "property": "children"},
+            ],
+            "inputs": [],
+            "changedPropIds": [],
+        },
+        timeout=10,
+    )
+    flush()
+
+    (server,) = (s for s in span_exporter.get_finished_spans() if s.kind == SpanKind.SERVER)
+    assert server.attributes is not None
+    assert server.attributes[TraceKey.DASH_OUTPUTS] == "panel-body.children live-status.children"
+    assert _SECRET_NAME not in str(server.attributes)
+
+
 @pytest.mark.parametrize(
     ("path", "traced"),
     [

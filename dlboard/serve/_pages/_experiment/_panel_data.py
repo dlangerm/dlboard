@@ -9,7 +9,10 @@ from __future__ import annotations
 
 import functools
 import hashlib
+import time
 import typing
+from dataclasses import dataclass
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any, cast
 
 import pandas as pd
@@ -18,6 +21,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from structlog.stdlib import get_logger
 
 from dlboard import models
+from dlboard._telemetry import Attributes, attribute
+from dlboard._telemetry.traces import SpanKind, TraceKey, span
 from dlboard.models import (
     RUN_NAME_COLUMN,
     Artifact,
@@ -32,6 +37,7 @@ from dlboard.models import (
     histogram_column,
     hparam_column,
 )
+from dlboard.serve import telemetry
 from dlboard.serve._backend._artifact_download import artifact_url
 from dlboard.serve._backend._metric_frame import MetricFrame
 from dlboard.serve._pages._dataframe_helpers import run_display_name
@@ -39,7 +45,7 @@ from dlboard.serve._pages._experiment._paging import visible_chart_indexes
 from dlboard.serve._pages._experiment._shown_runs import shown_run_ids
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping
+    from collections.abc import Callable, Iterable, Mapping
 
     from dlboard.models import DataStore
     from dlboard.serve._pages._experiment._page_model import BasicExperimentPage
@@ -65,6 +71,46 @@ class HistogramFetchSettings(BaseSettings):
     as it trains. Raise it for a finer picture of a long run, at the cost of reading and drawing that much more;
     lower it to make a panel of many histograms cheaper.
     """
+
+
+class PanelRead(StrEnum):
+    """What one of a panel's reads from the store is for: how its span and its `_READS` series are told apart."""
+
+    KEY_NAMES = "key_names"
+    METRICS = "metrics"
+    ARTIFACTS = "artifacts"
+    HYPERPARAMS = "hyperparams"
+    HISTOGRAMS = "histograms"
+    SERIES_BANDS = "series_bands"
+    RUN_NAMES = "run_names"
+
+
+@dataclass(frozen=True, slots=True)
+class _Read(Attributes):
+    kind: PanelRead = attribute(telemetry.AttributeKey.PANEL_READ)
+
+
+@dataclass(frozen=True, slots=True)
+class _MetricRead(_Read):
+    reduction: models.MetricReduction = attribute(TraceKey.METRIC_REDUCTION)
+    unscoped: bool = attribute(TraceKey.UNSCOPED)
+    """Whether it read every metric (a chart that names none, `_unscoped_fetch_badge`): what grows with the experiment."""
+
+
+_READS = telemetry.Histogram[_Read](
+    "dlboard.panel.read.duration",
+    telemetry.Unit.SECONDS,
+    "How long one of a panel's reads from the store took, building its dataframe included.",
+)
+
+
+def _read[T](read: _Read, fetch: Callable[[], T]) -> T:
+    """Run one of a panel's reads in a span of its own, and time it by its kind."""
+    started = time.perf_counter()
+    with span("dlboard.panel.read", SpanKind.INTERNAL, read):
+        result = fetch()
+    _READS.record(time.perf_counter() - started, _Read(read.kind))
+    return result
 
 
 type PanelFrames = Mapping[str, pd.DataFrame]
@@ -135,15 +181,23 @@ def fetch_panel_dataframe(
     # A metric pattern names the metrics it matches among the ones logged, so the names are listed for it alone.
     series_requests = sorted(panel.hint_required_series(), key=lambda request: request.column)
     needs_names = bool(panel.hint_required_column_patterns() or series_requests)
-    known_keys = store.summarize_metric_keys(experiment_id) if needs_names else list[str]()
+    known_keys = (
+        _read(_Read(PanelRead.KEY_NAMES), lambda: store.summarize_metric_keys(experiment_id))
+        if needs_names
+        else list[str]()
+    )
     metric_reductions = panel.metric_reductions(known_keys)
     metrics_df = (
         MetricFrame.merged(
-            store.fetch_metrics(
-                experiment_id,
-                keys=None if columns is None else frozenset(columns),
-                run_ids=run_ids,
-                reduction=reduction,
+            _read(
+                _MetricRead(PanelRead.METRICS, reduction, unscoped=columns is None),
+                functools.partial(
+                    store.fetch_metrics,
+                    experiment_id,
+                    keys=None if columns is None else frozenset(columns),
+                    run_ids=run_ids,
+                    reduction=reduction,
+                ),
             )
             for reduction, columns in metric_reductions.items()
         ).to_frame()
@@ -151,38 +205,53 @@ def fetch_panel_dataframe(
         else pd.DataFrame()
     )
     artifacts_df = (
-        build_artifacts_dataframe(
-            store.fetch_artifacts(
-                experiment_id,
-                keys=frozenset(k for k in artifact_keys if k is not None),
-                key_prefixes=artifact_key_prefixes,
-                run_ids=run_ids,
-            )
+        _read(
+            _Read(PanelRead.ARTIFACTS),
+            lambda: build_artifacts_dataframe(
+                store.fetch_artifacts(
+                    experiment_id,
+                    keys=frozenset(k for k in artifact_keys if k is not None),
+                    key_prefixes=artifact_key_prefixes,
+                    run_ids=run_ids,
+                )
+            ),
         )
         if has_artifacts
         else pd.DataFrame()
     )
     # fetch_hyperparams has no server-side key filter -- it's one small row per run either way.
     hparams_df = (
-        build_hyperparams_dataframe(store.fetch_hyperparams(experiment_id, run_ids=run_ids), keys=hparam_keys)
+        _read(
+            _Read(PanelRead.HYPERPARAMS),
+            lambda: build_hyperparams_dataframe(
+                store.fetch_hyperparams(experiment_id, run_ids=run_ids), keys=hparam_keys
+            ),
+        )
         if hparam_keys is None or hparam_keys
         else pd.DataFrame()
     )
     histogram_keys = panel.hint_required_histogram_keys()
     histograms_df = (
-        build_histograms_dataframe(
-            store.fetch_histograms(
-                experiment_id,
-                keys=frozenset(histogram_keys),
-                max_steps=HistogramFetchSettings().max_histogram_steps,
-                run_ids=run_ids,
-            )
+        _read(
+            _Read(PanelRead.HISTOGRAMS),
+            lambda: build_histograms_dataframe(
+                store.fetch_histograms(
+                    experiment_id,
+                    keys=frozenset(histogram_keys),
+                    max_steps=HistogramFetchSettings().max_histogram_steps,
+                    run_ids=run_ids,
+                )
+            ),
         )
         if histogram_keys
         else pd.DataFrame()
     )
     series_dfs = [
-        _series_band_frame(store, experiment_id, request, known_keys, run_ids) for request in series_requests
+        _read(
+            _Read(PanelRead.SERIES_BANDS),
+            functools.partial(_series_band_frame, store, experiment_id, request, known_keys, run_ids),
+        )
+        for request in series_requests
     ]
     merged = merge_hyperparams(
         merge_by_step(metrics_df, artifacts_df, histograms_df, *series_dfs), hparams_df
@@ -193,11 +262,14 @@ def fetch_panel_dataframe(
     # that wants it) so `LineChart`/`ImageChart` can label a run by its name instead of its bare id
     # -- `table_chart.py`'s default "runs" mode explicitly excludes this column, since it isn't a
     # real metric/hparam. Only the runs fetched need a name.
-    run_names = pd.DataFrame.from_records(
-        [
-            {"run_id": run.id, RUN_NAME_COLUMN: run_display_name(run)}
-            for run in store.get_runs(experiment_id, limit=None, run_ids=run_ids)
-        ]
+    run_names = _read(
+        _Read(PanelRead.RUN_NAMES),
+        lambda: pd.DataFrame.from_records(
+            [
+                {"run_id": run.id, RUN_NAME_COLUMN: run_display_name(run)}
+                for run in store.get_runs(experiment_id, limit=None, run_ids=run_ids)
+            ]
+        ),
     )
     return merged if run_names.empty else merged.merge(run_names, on="run_id", how="left")
 

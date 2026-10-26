@@ -15,6 +15,8 @@ from pydantic import BaseModel, Field, ValidationError, field_validator, model_v
 from structlog.stdlib import get_logger
 
 from dlboard._compat import StrEnum
+from dlboard._telemetry import Attributes, attribute
+from dlboard._telemetry.traces import SpanKind, TraceKey, span
 from dlboard.models._key_patterns import KeyPatterns
 from dlboard.models._metric import MetricReduction, MetricReductions
 
@@ -33,6 +35,12 @@ _Dataframe = typing.TypeVar("_Dataframe")
 _Chart = typing.TypeVar("_Chart")
 
 _CHART_ID_LENGTH = 10
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class _RenderTrace(Attributes):
+    chart_type: str = attribute(TraceKey.CHART_TYPE)
+
 
 _FALLBACK_NATURAL_WIDTH: typing.Final = 400
 """Width used for a chart whose persisted `parameters` no longer validate (e.g. after a schema
@@ -628,8 +636,9 @@ class ChartInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, 
         return {**fields, "id": hashlib.sha256(content.encode()).hexdigest()[:_CHART_ID_LENGTH]}
 
     def render(self, dataframe: _Dataframe, context: RenderContext = DEFAULT_RENDER_CONTEXT) -> _Chart:
-        """Render the chart instance."""
-        return ChartTypeRegistry.render(self, dataframe, context)
+        """Render the chart instance, in a span: every way a chart is drawn comes through here."""
+        with span("dlboard.chart.render", SpanKind.INTERNAL, _RenderTrace(chart_type=self.chart_type)):
+            return ChartTypeRegistry.render(self, dataframe, context)
 
     def hint_required_columns(self) -> set[str] | None:
         """

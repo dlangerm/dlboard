@@ -10,6 +10,7 @@ so a request the gate turns away (a 401, a redirect to sign in) still has a requ
 
 from __future__ import annotations
 
+import itertools
 import time
 from dataclasses import dataclass
 from http import HTTPMethod
@@ -18,11 +19,12 @@ from uuid import uuid4
 
 import structlog
 from flask import current_app, g, request
+from pydantic import BaseModel, ValidationError
 from structlog.stdlib import get_logger
 from werkzeug.exceptions import HTTPException, InternalServerError
 
 from dlboard._telemetry import Attributes, attribute
-from dlboard._telemetry.traces import TraceKey, annotate_current, fail_current
+from dlboard._telemetry.traces import TraceKey, annotate_current, fail_current, trace_ids
 from dlboard._wire import REQUEST_ID_HEADER
 from dlboard.serve._logging import LoggingSettings
 from dlboard.serve.telemetry import AttributeKey, Histogram, Unit, UpDownCounter
@@ -53,6 +55,53 @@ class _TracedRequest(Attributes):
     request_id: str = attribute(TraceKey.REQUEST_ID)
 
 
+@dataclass(frozen=True, slots=True)
+class _TracedCallback(Attributes):
+    outputs: str = attribute(TraceKey.DASH_OUTPUTS)
+
+
+class _CallbackOutput(BaseModel, frozen=True, extra="ignore"):
+    """One output of a Dash callback, as the browser's request to run it names it."""
+
+    id: str | dict[str, object]
+    property: str
+
+    @property
+    def label(self) -> str:
+        """
+        The output by its component's id: a pattern-matching id by its `type` alone.
+
+        Its other keys hold what a user named (a panel, a chart), which has no place in a trace.
+        """
+        match self.id:
+            case str():
+                component = self.id
+            case dict():
+                component = str(self.id.get("type", "{pattern}"))
+        return f"{component}.{self.property}"
+
+
+class _CallbackRequest(BaseModel, frozen=True, extra="ignore"):
+    """The part of a `_dash-update-component` request that says which callback it runs."""
+
+    outputs: _CallbackOutput | list[_CallbackOutput | list[_CallbackOutput]]
+    """One output, several, or (for a pattern-matching `ALL` output) a list of what it matched."""
+
+    @property
+    def label(self) -> str:
+        outputs = self.outputs if isinstance(self.outputs, list) else [self.outputs]
+        flat = itertools.chain.from_iterable(o if isinstance(o, list) else [o] for o in outputs)
+        return " ".join(dict.fromkeys(o.label for o in flat))
+
+
+def _callback_label() -> str | None:
+    """Which callback this request runs, by its outputs; `None` for a body that is not a callback's."""
+    try:
+        return _CallbackRequest.model_validate(request.get_json(silent=True)).label
+    except ValidationError:
+        return None
+
+
 _ACTIVE = UpDownCounter[_ActiveAttributes](
     "http.server.active_requests", Unit.REQUESTS, "HTTP requests being handled right now."
 )
@@ -72,6 +121,7 @@ def _method() -> _Method:
 def register(app: Dash) -> None:
     """Bind a request id to every log line for the life of each request; record and (if enabled) log a summary."""
     access_log = LoggingSettings().access_log
+    callback_path = f"{app.config.routes_pathname_prefix}_dash-update-component"
 
     def _start_request() -> None:
         request_id = request.headers.get(REQUEST_ID_HEADER) or str(uuid4())
@@ -87,6 +137,13 @@ def register(app: Dash) -> None:
         response.headers[REQUEST_ID_HEADER] = request_id
         # Here, not in `_start_request`: the request's span is only the current one once Flask's own hooks have run.
         annotate_current(_TracedRequest(request_id=request_id))
+        # Every callback is the same route: name the one this was, but only for a trace (it parses the body again).
+        if (
+            request.path == callback_path
+            and trace_ids() is not None
+            and (label := _callback_label()) is not None
+        ):
+            annotate_current(_TracedCallback(outputs=label))
         duration = time.perf_counter() - cast("float", g.dlboard_request_started_at)
         route = request.url_rule.rule if request.url_rule else ""
         _DURATION.record(
