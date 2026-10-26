@@ -530,6 +530,7 @@
   "dlboard/plugins/charts/tests/image_series_chart_test.py::test_slider_marks_has_a_mark_for_every_step_even_when_many": 0.0005093870277050883,
   "dlboard/plugins/charts/tests/image_series_chart_test.py::test_slider_marks_labels_every_step_when_few": 0.0004619759856723249,
   "dlboard/plugins/charts/tests/image_series_chart_test.py::test_the_chart_says_how_each_layer_is_by_default_for_the_browser_to_apply_a_viewers_changes_over": 0.008792424021521583,
+  "dlboard/plugins/charts/tests/image_series_chart_test.py::test_the_enlarged_views_tags_and_run_marks_come_with_the_chart_in_the_formats_its_caption_has": 0.004841571000724798,
   "dlboard/plugins/charts/tests/image_series_chart_test.py::test_the_layers_are_charted_with_the_image": 0.00047383998753502965,
   "dlboard/plugins/charts/tests/image_series_chart_test.py::test_the_per_tag_display_setting_is_described_as_a_table_of_its_display_fields": 0.001487443980295211,
   "dlboard/plugins/charts/tests/image_series_chart_test.py::test_the_registry_saves_a_viewers_state_under_the_charts_own_id": 0.0005941440176684409,
