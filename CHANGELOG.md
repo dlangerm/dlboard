@@ -12,6 +12,8 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-26
+
 ### Added
 
 * **A chart can show how many metrics' values spread, as a band.** The series band chart draws, for the metrics its names
