@@ -39,6 +39,7 @@ from dlboard.client.artifacts.image import Image
 from dlboard.client.artifacts.overlay import DEFAULT_CLASS_COLORS, Box, Overlay, Point, Polygon, Shape
 from dlboard.client.histograms import ExponentialBinning
 from dlboard.models import OVERLAY_KEY_SUFFIX, RUN_NAME_COLUMN, PanelInstance, overlay_key
+from dlboard.plugins.charts.line_chart import LEGEND_MAX_HEIGHT
 from dlboard.serve import get_system_data_store
 from dlboard.serve._jump import JUMP_SELECT_ID
 from dlboard.serve._pages._experiment._chart_autogen import AUTO_OPEN_MAX_CHARTS
@@ -1035,6 +1036,30 @@ def _log_runs(api: BasicDlboardAPI, experiment_id: int, count: int) -> list[mode
         ]
     )
     return runs
+
+
+def test_a_line_charts_legend_of_many_runs_leaves_its_plot_a_usable_height(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """Twelve runs' legend wraps over many rows: it is capped, and scrolls to the rest, instead of squashing the plot."""
+    _create_project_and_experiment(page, live_server_url, "Many Runs Legend Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    _log_runs(BasicDlboardAPI(live_server_url), experiment_id, 12)
+    page.reload()
+    _auto_generate_charts(page)
+
+    chart = page.locator(".dl-chart-item").first
+    legend = chart.locator(".recharts-legend-wrapper")
+    expect(legend.locator(".mantine-ChartLegend-legendItem")).to_have_count(12)
+    expect(legend).to_have_js_property("clientHeight", LEGEND_MAX_HEIGHT)
+    assert legend.evaluate(
+        "(el) => el.scrollHeight > el.clientHeight"
+    )  # every run is still there to scroll to
+    plot = chart.locator(".recharts-cartesian-grid").bounding_box()
+    assert plot is not None
+    assert plot["height"] > 150  # of the chart's 300, the rest being its title, legend and axis
+    assert console_errors == []
 
 
 def test_a_selection_past_the_run_cap_is_refused_and_the_charts_keep_the_last_one(

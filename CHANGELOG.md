@@ -74,6 +74,12 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ### Fixed
 
+* **A line chart's legend of many runs no longer squashes its plot.** The legend is held to two rows and scrolls to
+  the rest, so the plot keeps its height whatever the number of runs (the tooltip still lists every run).
+* **A line chart draws a run that has one point as a dot.** A run whose x-axis value never changes (a constant learning
+  rate against the gradient norm) is a single point, which has no line, so it was not drawn at all.
+* **A bar chart of runs labels each bar with its run's name,** as every other chart names its runs, not its id. Two runs
+  with one name stay two bars, told apart by their ids.
 * **Reading more than 500 named metric keys no longer fails on SQLite.** The latest or first value unioned one SELECT per
   key, and SQLite refuses a union of more than 500. A read of more than 32,766 names (a pattern can name that many) also
   failed on a stock SQLite build, which binds no more parameters than that to a statement.

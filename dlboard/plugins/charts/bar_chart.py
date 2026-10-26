@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import typing
+from collections import Counter
 from pathlib import Path
 
 import dash_mantine_components as dmc
@@ -13,8 +14,10 @@ from pydantic import BaseModel, Field
 from dlboard.models import (
     DISPLAY_SECTION,
     HPARAM_COLUMN_PREFIX,
+    RUN_NAME_COLUMN,
     ChartType,
     ColumnKind,
+    MetricColumn,
     MetricReduction,
     MetricReductions,
 )
@@ -93,6 +96,39 @@ def _sorted_groups(
             return grouped.sort_values(x_col, key=lambda s: s.astype(str))
 
 
+def _is_named_run_axis(x_col: str, dataframe: pd.DataFrame) -> bool:
+    """Whether the bars are the runs, which `dataframe` has the names of."""
+    return x_col == MetricColumn.RUN_ID and RUN_NAME_COLUMN in dataframe.columns
+
+
+def _named_runs(grouped: pd.DataFrame, x_col: str, dataframe: pd.DataFrame) -> pd.DataFrame:
+    """
+    `grouped` with its runs (if they are its bars) by their names, as every other chart names its runs.
+
+    A run with none is "Run <id>". Two runs with one name stay two bars: each is told apart by its id, or they would
+    share a tick.
+    """
+    if not _is_named_run_axis(x_col, dataframe):
+        return grouped
+    run_ids = grouped[x_col]
+    named = dataframe.drop_duplicates(MetricColumn.RUN_ID)
+    # By text, since a chart whose x-axis type is "category" has its ids as text.
+    names = dict(zip(named[MetricColumn.RUN_ID].astype(str), named[RUN_NAME_COLUMN], strict=True))
+    labels = [
+        name if isinstance(name := names.get(str(run_id)), str) and name else f"Run {run_id}"
+        for run_id in run_ids
+    ]
+    taken = Counter(labels)
+    return grouped.assign(
+        **{
+            x_col: [
+                f"{label} ({run_id})" if taken[label] > 1 else label
+                for label, run_id in zip(labels, run_ids, strict=True)
+            ]
+        }
+    )
+
+
 class BarChart(ChartType[BarChartSettings, pd.DataFrame, dmc.Stack], frozen=True, extra="forbid"):
     """A bar chart comparing an aggregated metric across groups of a metric or hyperparameter."""
 
@@ -142,14 +178,16 @@ class BarChart(ChartType[BarChartSettings, pd.DataFrame, dmc.Stack], frozen=True
             grouped = _sorted_groups(grouped, x_col, parameters.x_axis_type)
             if parameters.sort == "descending":
                 grouped = grouped.iloc[::-1]
-        grouped = grouped.rename(columns={x_col: parameters.x_axis})
+        # A bar per run says which run it is by its name, not its id.
+        x_title = "run" if _is_named_run_axis(x_col, dataframe) else parameters.x_axis
+        grouped = _named_runs(grouped, x_col, dataframe).rename(columns={x_col: parameters.x_axis})
 
         data = grouped.to_dict(orient="records")
         # Carried on each row (not a real plotted column) so the tooltip's labelFormatter --
         # `bar_chart_tooltip.js` -- can prefix the hovered x-value with what it actually is,
         # e.g. "hidden_size: 128" instead of a bare "128".
         for row in data:
-            row["__x_axis_name__"] = parameters.x_axis
+            row["__x_axis_name__"] = x_title
 
         # Recharts' `layout` (what mantine's `orientation` controls) decides which axis is the
         # category axis -- x for the default `horizontal` orientation, y for `vertical` -- so the
@@ -168,7 +206,7 @@ class BarChart(ChartType[BarChartSettings, pd.DataFrame, dmc.Stack], frozen=True
             else {"width": VALUE_AXIS_WIDTH, "tickFormatter": {"function": "barChartValueTick"}}
         )
         x_axis_label = (
-            fit_axis_label(parameters.x_axis, parameters.max_axis_label_chars)
+            fit_axis_label(x_title, parameters.max_axis_label_chars)
             if parameters.orientation == "horizontal"
             else value_label
         )

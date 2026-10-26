@@ -33,6 +33,9 @@ if typing.TYPE_CHECKING:
 
 _BOOKKEEPING_COLS = frozenset({MetricColumn.RUN_ID, MetricColumn.TIMESTAMP_UTC})
 
+LEGEND_MAX_HEIGHT: typing.Final = 64
+"""The most of a line chart's height, in px, its legend of runs takes: two rows of it, scrolling past them."""
+
 _TOOLTIP_JS_PATH = Path(__file__).with_name("line_chart_tooltip.js")
 _TOOLTIP_CSS_PATH = Path(__file__).with_name("line_chart_tooltip.css")
 
@@ -192,6 +195,9 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.Stack], frozen=Tr
             )
             df = df.merge(grid, on=["run_id", parameters.x_axis], how="inner")
         run_ids = sorted(df["run_id"].unique())
+        # A run with one point (an x-axis its values share, like a learning rate that never changes) has no line to
+        # draw, so it is drawn as the dot it is.
+        has_single_point_run = bool((df.groupby("run_id").size() == 1).any())
         df = _nearest_fill_pivot(df, x_axis=parameters.x_axis, column=parameters.column)
         data = df.to_dict(orient="records")
         series = [
@@ -225,9 +231,13 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.Stack], frozen=Tr
             xAxisProps=x_axis_props,
             yAxisProps={"width": VALUE_AXIS_WIDTH, "tickFormatter": {"function": "lineChartValueTick"}},
             withLegend=True,
+            # A legend of many runs wraps to many rows, which Recharts takes from the plot: capped at a couple of
+            # rows (and scrolled past them), the plot keeps its height whatever the number of runs. The tooltip
+            # still lists every run.
+            legendProps={"wrapperStyle": {"maxHeight": LEGEND_MAX_HEIGHT, "overflowY": "auto"}},
             withXAxis=True,
             withYAxis=True,
-            withDots=False,
+            withDots=has_single_point_run,
             tickLine="xy",
             # Recharts animates a `<Line>`'s enter transition by default -- redrawing the whole
             # curve from scratch -- on *every* data-prop change, not just the first render. That

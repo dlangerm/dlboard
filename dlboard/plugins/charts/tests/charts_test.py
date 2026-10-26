@@ -235,6 +235,41 @@ def test_line_chart_syncs_by_value_not_index() -> None:
     assert props["lineChartProps"]["syncId"] == "step"
 
 
+@pytest.mark.parametrize(
+    ("lrs", "dots"),
+    [
+        pytest.param({1: [0.1] * 3, 2: [0.1] * 3, 3: [0.01] * 3}, True, id="every-run-keeps-one-lr"),
+        pytest.param(
+            {1: [0.1, 0.05, 0.01], 2: [0.1, 0.05, 0.01]}, False, id="runs-sharing-an-lr-at-every-step"
+        ),
+        pytest.param({1: [0.1, 0.05, 0.01], 2: [0.1] * 3}, True, id="one-run-keeps-its-lr"),
+    ],
+)
+def test_line_chart_over_a_shared_x_value_keeps_every_run_and_draws_a_run_of_one_point_as_a_dot(
+    lrs: dict[int, list[float]], dots: bool
+) -> None:
+    """
+    Runs with the same x (a learning rate) at the same step each have their own value there, and a run whose x never
+    changes is one point, which has no line, so is drawn as a dot.
+    """
+    df = pd.DataFrame(
+        [
+            {"run_id": run_id, "step": step, "lr": lr, "grad_norm": 1.0 / (step + 1) + run_id}
+            for run_id, run_lrs in lrs.items()
+            for step, lr in enumerate(run_lrs)
+        ]
+    )
+    chart = LineChart.render(LineChartSettings(column="grad_norm", x_axis="lr"), df)
+    plot = _props(chart)
+    assert [series["name"] for series in plot["series"]] == [str(run_id) for run_id in lrs]
+    for run_id, run_lrs in lrs.items():
+        mine = [row[str(run_id)] for row in plot["data"] if row[str(run_id)] == row[str(run_id)]]  # not NaN
+        assert len(mine) == len(
+            set(run_lrs)
+        )  # a value for each of the x's it logged, whoever else logged them
+    assert plot["withDots"] is dots
+
+
 def test_line_chart_x_axis_defaults_to_numeric_scale() -> None:
     """Regression: Recharts' default XAxis type is "category" (equal pixel spacing per distinct
     x value, regardless of its numeric size), which makes irregularly-spaced steps look like
@@ -407,6 +442,53 @@ def test_bar_chart_aggregates_runs_sharing_an_x_value() -> None:
     chart = BarChart.render(BarChartSettings(column="accuracy", x_axis="hidden_size"), df)
     data = {row["hidden_size"]: row["accuracy"] for row in _props(chart)["data"]}
     assert data == {128: pytest.approx(0.85), 256: pytest.approx(0.7)}
+
+
+@pytest.mark.parametrize(
+    ("names", "x_axis_type", "labels"),
+    [
+        pytest.param(
+            {1: "uptight-yak", 2: "abstract-goldfish"},
+            "auto",
+            ["uptight-yak", "abstract-goldfish"],
+            id="named",
+        ),
+        pytest.param(
+            {1: "uptight-yak", 2: None}, "auto", ["uptight-yak", "Run 2"], id="a-run-without-a-name"
+        ),
+        pytest.param({1: "same", 2: "same"}, "auto", ["same (1)", "same (2)"], id="two-runs-with-one-name"),
+        pytest.param(
+            {1: "uptight-yak", 2: "abstract-goldfish"},
+            "category",
+            ["uptight-yak", "abstract-goldfish"],
+            id="ids-as-text",
+        ),
+    ],
+)
+def test_bar_chart_of_runs_labels_each_bar_with_its_run_name(
+    names: dict[int, str | None], x_axis_type: Literal["auto", "category"], labels: list[str]
+) -> None:
+    """A bar per run (the x-axis being the run) is told apart by name -- a bare run id says little about it."""
+    df = pd.DataFrame(
+        {
+            "run_id": [1, 1, 2],
+            "step": [0, 1, 0],
+            "accuracy": [0.1, 0.8, 0.6],
+            RUN_NAME_COLUMN: [names[1], names[1], names[2]],
+        }
+    )
+    chart = BarChart.render(BarChartSettings(column="accuracy", x_axis="run_id", x_axis_type=x_axis_type), df)
+    props = _props(chart)
+    assert [row["run_id"] for row in props["data"]] == labels
+    assert [row["accuracy"] for row in props["data"]] == [pytest.approx(0.8), pytest.approx(0.6)]
+    assert {row["__x_axis_name__"] for row in props["data"]} == {"run"}  # what the tooltip prefixes it with
+    assert props["xAxisLabel"] == "run"
+
+
+def test_bar_chart_of_runs_without_names_keeps_the_run_ids() -> None:
+    df = pd.DataFrame({"run_id": [1, 2], "step": [0, 0], "accuracy": [0.1, 0.6]})
+    chart = BarChart.render(BarChartSettings(column="accuracy", x_axis="run_id"), df)
+    assert [row["run_id"] for row in _props(chart)["data"]] == [1, 2]
 
 
 def test_bar_chart_render_does_not_mutate_input_dataframe() -> None:
