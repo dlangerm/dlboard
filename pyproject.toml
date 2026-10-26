@@ -330,6 +330,9 @@ ignore_names = [
   "cache_ok",
   # Pydantic's class-level config attribute (`postgres.PostgresSettings`) -- read by pydantic itself.
   "model_config",
+  # Telemetry `Attributes` fields (`_blob_store.py`'s span attributes) -- read by `Attributes.as_otel()` through
+  # `dataclasses.fields`, never by attribute.
+  "queue_wait",
   # `plugins/charts/histogram.py`'s `_CategoryAxis` and `_Trace` keys -- Plotly property names, handed to Plotly as plain data
   # rather than read by attribute.
   "categoryorder",

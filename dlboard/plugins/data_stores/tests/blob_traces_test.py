@@ -50,13 +50,17 @@ def test_an_uploads_trace_follows_it_through_the_writer_and_into_the_recording_o
     time.sleep(0.5)  # the ingest span ends just after the ref is recorded
 
     by_name = {s.name: s for s in otlp_traces.spans}
-    write, ingest = by_name["dlboard.blob.write"], by_name["dlboard.blob.ingest"]
+    stage, write, ingest = (by_name[f"dlboard.blob.{hop}"] for hop in ("stage", "write", "ingest"))
+    assert stage.parent_span_id.hex() == write.parent_span_id.hex() == request_span
     assert write.trace_id.hex() == request_trace
-    assert write.parent_span_id.hex() == request_span
     assert [link.span_id for link in ingest.links] == [write.span_id]
     assert {("dlboard.experiment.id", 2), ("dlboard.run.id", 1)} <= {
         (a.key, a.value.int_value) for a in write.attributes
     }
+    # How long each queue held it, on the span that took it off: a trace shows it without following the link.
+    for consumer in (write, ingest):
+        (wait,) = (a.value.double_value for a in consumer.attributes if a.key == "dlboard.queue.wait")
+        assert 0 <= wait < 10
 
 
 class _RecordingStore:

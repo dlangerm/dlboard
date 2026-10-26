@@ -40,6 +40,7 @@ from dlboard.serve.telemetry import (
     AttributeKey,
     Counter,
     Histogram,
+    NoAttributes,
     Outcome,
     OutcomeAttributes,
     Unit,
@@ -54,17 +55,34 @@ if TYPE_CHECKING:
     from flask import Response
     from werkzeug.datastructures import FileStorage
 
-    from dlboard._telemetry.traces import Carrier
+    from dlboard._telemetry.traces import ActiveSpan, Carrier
     from dlboard.models import DataStore
     from dlboard.models._artifact import Artifact, NewArtifact
 
-    _Upload = tuple[NewArtifact, AnyUrl, Path, Carrier]
-    """What the server hands the writer: the upload, where it goes, where it is staged, and the request's trace."""
-    _Saved = tuple[Artifact, Carrier]
-    """What the writer hands back to be recorded: the artifact, and the write's trace."""
-
 
 _log = get_logger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class _Upload:
+    """What the server hands the writer: the upload, where it goes, where it is staged, and the request's trace."""
+
+    artifact: NewArtifact
+    ref: AnyUrl
+    staged: Path
+    trace: Carrier
+    accepted_at: float
+    """When the server queued it, by `time.time()`: the writer is another process, with no monotonic clock in common."""
+
+
+@dataclass(frozen=True, slots=True)
+class _Saved:
+    """What the writer hands back to be recorded: the artifact, and the write's trace."""
+
+    artifact: Artifact
+    trace: Carrier
+    written_at: float
+    """When the writer finished it, by `time.time()`, as `_Upload.accepted_at`."""
 
 
 class _Rejection(StrEnum):
@@ -89,15 +107,37 @@ _REJECTIONS = Counter[_RejectionAttributes](
 class _WriteTrace(Attributes):
     experiment_id: int = attribute(TraceKey.EXPERIMENT_ID)
     run_id: int = attribute(TraceKey.RUN_ID)
+    queue_wait: float = attribute(TraceKey.QUEUE_WAIT)
 
 
 @dataclass(frozen=True, slots=True)
 class _IngestTrace(Attributes):
     items: int = attribute(TraceKey.ITEMS)
+    queue_wait: float = attribute(TraceKey.QUEUE_WAIT)
+    """The longest any of the batch waited."""
 
 
+# With `_BLOB_WRITES`, these cover an upload's whole way from the request that staged it to its ref being recorded.
+_STAGING = Histogram[NoAttributes](
+    "dlboard.artifact.stage.duration", Unit.SECONDS, "How long a request took to stage one uploaded file."
+)
+_WRITE_QUEUE_WAIT = Histogram[NoAttributes](
+    "dlboard.artifact.write_queue.wait",
+    Unit.SECONDS,
+    "How long a staged upload waited for the writer to take it.",
+)
 _BLOB_WRITES = Histogram[OutcomeAttributes](
     "dlboard.artifact.blob.write.duration", Unit.SECONDS, "How long the writer took to store one artifact."
+)
+_INGEST_QUEUE_WAIT = Histogram[NoAttributes](
+    "dlboard.artifact.ingest_queue.wait",
+    Unit.SECONDS,
+    "How long a written artifact waited for the batch that recorded its ref, the batching itself included.",
+)
+_INGESTS = Histogram[OutcomeAttributes](
+    "dlboard.artifact.ingest.duration",
+    Unit.SECONDS,
+    "How long recording one batch of written artifacts' refs took.",
 )
 
 _ENQUEUE_TIMEOUT_SEC: Final = 30
@@ -199,27 +239,29 @@ def _write_blobs(
         if item is None:
             flush()
             return
-        a, ref, staged, request_trace = item
+        waited = time.time() - item.accepted_at
+        _WRITE_QUEUE_WAIT.record(waited)
+        a = item.artifact
         started = time.perf_counter()
         outcome = Outcome.FAILURE
         try:
-            # The request that uploaded this is long gone: the trace crossed the queue as `request_trace`.
+            # The request that uploaded this is long gone: the trace crossed the queue in the item.
             with span(
                 "dlboard.blob.write",
                 SpanKind.CONSUMER,
-                _WriteTrace(experiment_id=a.experiment_id, run_id=a.run_id),
-                parent=request_trace,
+                _WriteTrace(experiment_id=a.experiment_id, run_id=a.run_id, queue_wait=waited),
+                parent=item.trace,
             ):
-                backend.write(staged, ref)
+                backend.write(item.staged, item.ref)
                 write_trace = carrier()
-            artifact = models.Artifact.model_validate(a.model_dump() | {"ref": str(ref)})
+            artifact = models.Artifact.model_validate(a.model_dump() | {"ref": str(item.ref)})
             if return_q.full():
                 _log.warning("Return queue is full, runtime will be impacted")
-            return_q.put((artifact, write_trace))
+            return_q.put(_Saved(artifact, write_trace, written_at=time.time()))
             outcome = Outcome.SUCCESS
         except Exception:  # noqa: BLE001
             _log.exception("Failed to save artifacts")
-            staged.unlink(missing_ok=True)
+            item.staged.unlink(missing_ok=True)
         finally:
             _BLOB_WRITES.record(time.perf_counter() - started, OutcomeAttributes(outcome=outcome))
 
@@ -319,15 +361,25 @@ class BlobArtifactStore(models.ArtifactStore[BlobBackend, int]):
 
     def _record_saved(self, store: DataStore[...], saved: list[_Saved]) -> None:
         """Record a batch of written artifacts' refs, in one span linked to the write of each (it serves them all)."""
-        with span(
-            "dlboard.blob.ingest",
-            SpanKind.CONSUMER,
-            _IngestTrace(items=len(saved)),
-            links=[write_trace for _, write_trace in saved],
-        ):
-            self._record_refs(store, [artifact for artifact, _ in saved])
+        waited = [time.time() - item.written_at for item in saved]
+        started = time.perf_counter()
+        outcome = Outcome.FAILURE
+        try:
+            with span(
+                "dlboard.blob.ingest",
+                SpanKind.CONSUMER,
+                _IngestTrace(items=len(saved), queue_wait=max(waited, default=0.0)),
+                links=[item.trace for item in saved],
+            ) as active:
+                self._record_refs(store, [item.artifact for item in saved], active)
+            outcome = Outcome.SUCCESS
+        finally:
+            _INGESTS.record(time.perf_counter() - started, OutcomeAttributes(outcome=outcome))
+        # Only once recorded: `ship_batches` retries a batch that failed, and each artifact waited once.
+        for wait in waited:
+            _INGEST_QUEUE_WAIT.record(wait)
 
-    def _record_refs(self, store: DataStore[...], artifacts: list[Artifact]) -> None:
+    def _record_refs(self, store: DataStore[...], artifacts: list[Artifact], active: ActiveSpan) -> None:
         """
         Record `artifacts`' refs; one the store rejects outright is dropped alone, its blob deleted.
 
@@ -340,8 +392,9 @@ class BlobArtifactStore(models.ArtifactStore[BlobBackend, int]):
             store.log_artifact_refs(artifacts)
         except ValueError:
             if len(artifacts) > 1:
+                active.event("split")
                 for artifact in artifacts:
-                    self._record_refs(store, [artifact])
+                    self._record_refs(store, [artifact], active)
                 return
             _log.exception("The data store rejected artifact %s, deleting its blob", artifacts[0].ref)
             self.delete_artifact(AnyUrl(artifacts[0].ref))
@@ -368,8 +421,14 @@ class BlobArtifactStore(models.ArtifactStore[BlobBackend, int]):
                 if self._store_q.full():
                     _log.warning("Store queue is full, runtime will be impacted")
                 staging_path = self._file_staging_dir / str(uuid4())
-                file.save(staging_path, buffer_size=int(1e6))
-                self._store_q.put((a, ref, staging_path, carrier()), timeout=_ENQUEUE_TIMEOUT_SEC)
+                started = time.perf_counter()
+                with span("dlboard.blob.stage", SpanKind.INTERNAL):
+                    file.save(staging_path, buffer_size=int(1e6))
+                _STAGING.record(time.perf_counter() - started)
+                self._store_q.put(
+                    _Upload(a, ref, staging_path, carrier(), accepted_at=time.time()),
+                    timeout=_ENQUEUE_TIMEOUT_SEC,
+                )
                 staging_path = None  # the write worker owns it now
         except queue.Full as exc:
             _REJECTIONS.add(1, _RejectionAttributes(reason=_Rejection.QUEUE_FULL))

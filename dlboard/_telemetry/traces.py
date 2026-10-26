@@ -78,6 +78,7 @@ class TraceKey(StrEnum):
     STARTUP_DEPENDENCY = "dlboard.startup.dependency"
     STARTUP_ATTEMPT = "dlboard.startup.attempt"
     THREAD_CPU_TIME = "dlboard.thread.cpu_time"
+    QUEUE_WAIT = "dlboard.queue.wait"
 
 
 @dataclass(frozen=True, slots=True)

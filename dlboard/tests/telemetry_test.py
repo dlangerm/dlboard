@@ -65,12 +65,21 @@ def test_a_scrape_reports_what_a_run_just_did_including_the_artifact_writer_proc
     api.log_artifact_batch([(artifact, blob)])
     api.finish_run(run.id, models.RunStatus.FINISHED)
 
-    # The writer is another process that reports on its own timer, so wait for it to show up.
-    writes = "dlboard_artifact_blob_write_duration_seconds_count"
+    # The writer is another process that reports on its own timer, and the ref is recorded after it, so wait for both.
+    finished = (
+        "dlboard_artifact_blob_write_duration_seconds_count",
+        "dlboard_artifact_ingest_duration_seconds_count",
+    )
     deadline = time.monotonic() + _SCRAPE_TIMEOUT_S
-    while scraped_total(scrape := _scrape(backend_server), writes, dlboard_outcome="success") < 1:
-        assert time.monotonic() < deadline, f"the writer's numbers never arrived:\n{scrape}"
+    scrape = _scrape(backend_server)
+    while not all(scraped_total(scrape, f, dlboard_outcome="success") for f in finished):
+        assert time.monotonic() < deadline, f"the upload's numbers never arrived:\n{scrape}"
         time.sleep(0.1)
+        scrape = _scrape(backend_server)
+
+    # Every hop of the upload's way, from the request that staged it to the recording of its ref.
+    for hop in ("stage_duration", "write_queue_wait", "ingest_queue_wait"):
+        assert scraped_total(scrape, f"dlboard_artifact_{hop}_seconds_count") == 1
 
     assert scraped_total(scrape, "dlboard_ingest_metric_values_total") == 2
     assert scraped_total(scrape, "dlboard_ingest_artifacts_total") == 1

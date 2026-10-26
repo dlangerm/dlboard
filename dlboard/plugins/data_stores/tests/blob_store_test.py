@@ -24,7 +24,7 @@ from werkzeug.datastructures import FileStorage
 
 from dlboard import models
 from dlboard.conftest import EVERY_ARTIFACT_BACKEND, ArtifactBackend, scraped_total
-from dlboard.plugins.data_stores._blob_store import BlobArtifactStore, blob_key
+from dlboard.plugins.data_stores._blob_store import BlobArtifactStore, _Saved, blob_key
 from dlboard.plugins.data_stores.filesystem import FSBlobs
 from dlboard.serve import set_data_store
 from dlboard.serve.telemetry._prometheus import serve_metrics
@@ -171,7 +171,7 @@ class _LockedOnceStore:
 def _ingest(store: BlobArtifactStore, data_store: object, artifacts: list[models.Artifact]) -> None:
     """Queue `artifacts` as though `_write_blobs` just wrote their blobs, then start ingesting them."""
     for artifact in artifacts:
-        store._saved_artifact_q.put((artifact, {}))
+        store._saved_artifact_q.put(_Saved(artifact, {}, written_at=time.time()))
     app = _FakeApp()
     set_data_store(app, data_store)  # pyrefly: ignore [bad-argument-type]
     threading.Thread(target=store.ingest_stored_artifacts, args=(app,), daemon=True).start()
