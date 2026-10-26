@@ -36,6 +36,8 @@ from dlboard._telemetry.traces import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from opentelemetry.sdk.trace import ReadableSpan
     from opentelemetry.trace import SpanContext
 
@@ -92,12 +94,33 @@ def test_nested_spans_are_one_trace_with_their_attributes_and_events(exported: I
     assert child.parent.span_id == _context(outer).span_id
     assert _context(child).trace_id == _context(outer).trace_id
     assert (outer.kind.name, child.kind.name) == ("SERVER", "CLIENT")
-    assert dict(outer.attributes or {}) == {"dlboard.run.id": 1, "dlboard.experiment.id": 2}
-    assert dict(child.attributes or {}) == {"dlboard.run.id": 7, "dlboard.experiment.id": 8}
+    assert {"dlboard.run.id": 1, "dlboard.experiment.id": 2}.items() <= dict(outer.attributes or {}).items()
+    assert {"dlboard.run.id": 7, "dlboard.experiment.id": 8}.items() <= dict(child.attributes or {}).items()
     assert [(e.name, dict(e.attributes or {})) for e in child.events] == [
         ("retry", {"dlboard.run.id": 7, "dlboard.experiment.id": 9})
     ]
     assert ids == (f"{_context(child).trace_id:032x}", f"{_context(child).span_id:016x}")
+
+
+def _spin(seconds: float) -> None:
+    deadline = time.perf_counter() + seconds
+    while time.perf_counter() < deadline:
+        pass
+
+
+@pytest.mark.parametrize(("block", "computed"), [(_spin, True), (time.sleep, False)])
+def test_a_span_tells_a_block_that_computed_from_one_that_waited(
+    exported: InMemorySpanExporter, block: Callable[[float], None], *, computed: bool
+) -> None:
+    with span("work", SpanKind.INTERNAL):
+        block(0.2)
+
+    work = _finished(exported)["work"]
+    assert work.start_time is not None
+    assert work.end_time is not None
+    cpu_time = dict(work.attributes or {})["dlboard.thread.cpu_time"]
+    assert isinstance(cpu_time, float)
+    assert (cpu_time > (work.end_time - work.start_time) / 1e9 / 2) is computed
 
 
 def test_a_carrier_continues_a_trace_where_no_library_could(exported: InMemorySpanExporter) -> None:

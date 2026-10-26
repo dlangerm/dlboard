@@ -22,7 +22,9 @@ from __future__ import annotations
 import importlib.util
 import sys
 import threading
+import time
 from contextlib import contextmanager
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Annotated, Any, Final, TypeAlias, TypeVar
 
 from pydantic import field_validator, model_validator
@@ -30,12 +32,11 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from structlog.stdlib import get_logger
 
 from dlboard._compat import StrEnum
-from dlboard._telemetry import PerProcess
+from dlboard._telemetry import Attributes, PerProcess, attribute
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator, Sequence
 
-    from dlboard._telemetry import Attributes
     from dlboard._telemetry._sdk import Opened, Traces
 
 _log = get_logger(__name__)
@@ -76,6 +77,19 @@ class TraceKey(StrEnum):
     REQUEST_ID = "dlboard.request_id"
     STARTUP_DEPENDENCY = "dlboard.startup.dependency"
     STARTUP_ATTEMPT = "dlboard.startup.attempt"
+    THREAD_CPU_TIME = "dlboard.thread.cpu_time"
+
+
+@dataclass(frozen=True, slots=True)
+class _ThreadTime(Attributes):
+    """
+    The CPU time, in seconds, the thread that ran a span's block spent running it.
+
+    What the span's duration has on top of it the thread spent waiting: on the database, the network, a lock, or the
+    GIL while other threads ran.
+    """
+
+    cpu_time: float = attribute(TraceKey.THREAD_CPU_TIME)
 
 
 class OtlpProtocol(StrEnum):
@@ -278,18 +292,22 @@ def span(
 
     An exception that leaves the block is recorded on the span (its type, message and traceback, never local
     variables) and propagates unchanged. `links` relate the span to others, for work that serves many requests at once.
+    The span also records the CPU time its thread spent in the block (`TraceKey.THREAD_CPU_TIME`), which tells a slow
+    block that computed from one that waited.
     """
     opened = _start(name, kind, attributes, parent, links)
     if opened is None:
         yield _OFF
         return
     active = ActiveSpan(opened)
+    cpu_started = time.thread_time()
     try:
         yield active
     except Exception as exc:
         active.failed(exc)
         raise
     finally:
+        active.set(_ThreadTime(cpu_time=time.thread_time() - cpu_started))
         try:
             opened.end()
         except Exception:  # noqa: BLE001 -- see the module docstring

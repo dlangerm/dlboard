@@ -97,7 +97,7 @@ def test_each_retry_is_an_event_on_the_wait_span(clock: _Clock, span_exporter: I
 
     (wait,) = span_exporter.get_finished_spans()
     assert wait.name == "dlboard.startup.wait"
-    assert dict(wait.attributes or {}) == {"dlboard.startup.dependency": "object store"}
+    assert dict(wait.attributes or {})["dlboard.startup.dependency"] == "object store"
     assert [(e.name, dict(e.attributes or {})["dlboard.startup.attempt"]) for e in wait.events] == [
         ("retry", 1),
         ("retry", 2),

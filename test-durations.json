@@ -26,6 +26,8 @@
   "dlboard/_telemetry/tests/traces_test.py::test_a_protocol_the_exporter_cannot_speak_stops_startup_instead_of_losing_every_span[the-traces-setting-wins]": 0.00193653698079288,
   "dlboard/_telemetry/tests/traces_test.py::test_a_protocol_the_exporter_cannot_speak_stops_startup_instead_of_losing_every_span[unset]": 0.0018850139749702066,
   "dlboard/_telemetry/tests/traces_test.py::test_a_span_something_else_opened_can_be_annotated_and_failed": 0.004217590001644567,
+  "dlboard/_telemetry/tests/traces_test.py::test_a_span_tells_a_block_that_computed_from_one_that_waited[_spin-True]": 0.20631912799581187,
+  "dlboard/_telemetry/tests/traces_test.py::test_a_span_tells_a_block_that_computed_from_one_that_waited[sleep-False]": 0.20479737400455633,
   "dlboard/_telemetry/tests/traces_test.py::test_nested_spans_are_one_trace_with_their_attributes_and_events": 0.005565403029322624,
   "dlboard/_telemetry/tests/traces_test.py::test_reading_the_open_span_never_builds_a_tracer": 0.0011837529891636223,
   "dlboard/_telemetry/tests/traces_test.py::test_tracing_failing_warns_once_and_never_reaches_the_traced_code": 0.0042487830214668065,

@@ -54,10 +54,9 @@ def test_an_uploads_trace_follows_it_through_the_writer_and_into_the_recording_o
     assert write.trace_id.hex() == request_trace
     assert write.parent_span_id.hex() == request_span
     assert [link.span_id for link in ingest.links] == [write.span_id]
-    assert [(a.key, a.value.int_value) for a in write.attributes] == [
-        ("dlboard.experiment.id", 2),
-        ("dlboard.run.id", 1),
-    ]
+    assert {("dlboard.experiment.id", 2), ("dlboard.run.id", 1)} <= {
+        (a.key, a.value.int_value) for a in write.attributes
+    }
 
 
 class _RecordingStore:
