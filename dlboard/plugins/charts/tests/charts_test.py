@@ -572,10 +572,14 @@ def test_bar_chart_x_axis_type_category_forces_text_sort_over_numeric() -> None:
         {"run_id": [1, 2, 3], "step": [0, 0, 0], "version": ["v2", "v10", "v1"], "accuracy": [0.1, 0.2, 0.3]}
     )
     chart = BarChart.render(BarChartSettings(column="accuracy", x_axis="version", x_axis_type="category"), df)
-    assert [row["version"] for row in _props(chart)["data"]] == ["v1", "v10", "v2"]
+    assert [row["__x_detail__"] for row in _props(chart)["data"]] == [
+        "version: v1",
+        "version: v10",
+        "version: v2",
+    ]
 
 
-def test_bar_chart_groups_by_metric_column_when_no_hparam_matches() -> None:
+def test_bar_chart_over_a_metric_draws_each_run_at_its_own_latest_value() -> None:
     """x_axis falls back to a plain metric column (its own last-logged step per run) when no
     hparam column matches it -- e.g. comparing final loss across runs by their final step."""
     df = pd.concat(
@@ -588,8 +592,28 @@ def test_bar_chart_groups_by_metric_column_when_no_hparam_matches() -> None:
     chart = BarChart.render(BarChartSettings(column="loss", x_axis="step"), df)
     props = _props(chart)
     assert props["dataKey"] == "step"
-    data = {row["step"]: row["loss"] for row in props["data"]}
-    assert data == {1: pytest.approx(0.3), 2: pytest.approx(0.1)}
+    data = {row["step"]: (row["loss"], row["__x_detail__"]) for row in props["data"]}
+    assert data == {"Run 2": (pytest.approx(0.3), "step: 1"), "Run 1": (pytest.approx(0.1), "step: 2")}
+
+
+def test_bar_chart_over_a_metric_keeps_runs_that_end_on_one_value_apart() -> None:
+    """A learning rate that decays to the same value in every run drew a single bar, saying nothing of the runs (#422)."""
+    df = pd.DataFrame(
+        {
+            "run_id": [1, 1, 2, 2],
+            "step": [0, 1, 0, 1],
+            "lr": [0.1, 0.001, 0.2, 0.001],
+            "grad_norm": [1.0, 0.5, 2.0, 0.7],
+            RUN_NAME_COLUMN: ["one", "one", "two", "two"],
+        }
+    )
+    chart = BarChart.render(BarChartSettings(column="grad_norm", x_axis="lr"), df)
+
+    rows = _props(chart)["data"]
+    assert [(row["lr"], row["grad_norm"], row["__x_detail__"]) for row in rows] == [
+        ("one", 0.5, "lr: 0.001"),
+        ("two", 0.7, "lr: 0.001"),
+    ]
 
 
 def test_bar_chart_series_and_labels() -> None:

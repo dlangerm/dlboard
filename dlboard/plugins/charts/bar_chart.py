@@ -97,6 +97,22 @@ def _sorted_groups(
             return grouped.sort_values(x_col, key=lambda s: s.astype(str))
 
 
+def _bars(per_run: pd.DataFrame, x_col: str, parameters: BarChartSettings, *, by_run: bool) -> pd.DataFrame:
+    """The bars, sorted as `parameters` say: a run's own each (`by_run`), else the runs that share an x value, aggregated."""
+    bars = (
+        per_run
+        if by_run
+        else per_run.groupby(x_col, as_index=False, sort=False).agg(
+            **{parameters.column: (parameters.column, parameters.aggregation)}
+        )
+    )
+    if parameters.sort != "none":
+        bars = _sorted_groups(bars, x_col, parameters.x_axis_type)
+        if parameters.sort == "descending":
+            bars = bars.iloc[::-1]
+    return bars
+
+
 def _is_named_run_axis(x_col: str, dataframe: pd.DataFrame) -> bool:
     """Whether the bars are the runs, which `dataframe` has the names of."""
     return x_col == MetricColumn.RUN_ID and RUN_NAME_COLUMN in dataframe.columns
@@ -111,23 +127,25 @@ def _named_runs(grouped: pd.DataFrame, x_col: str, dataframe: pd.DataFrame) -> p
     """
     if not _is_named_run_axis(x_col, dataframe):
         return grouped
-    run_ids = grouped[x_col]
-    named = dataframe.drop_duplicates(MetricColumn.RUN_ID)
-    # By text, since a chart whose x-axis type is "category" has its ids as text.
-    names = dict(zip(named[MetricColumn.RUN_ID].astype(str), named[RUN_NAME_COLUMN], strict=True))
+    return grouped.assign(**{x_col: _run_labels(grouped[x_col], dataframe)})
+
+
+def _run_labels(run_ids: pd.Series[typing.Any], dataframe: pd.DataFrame) -> list[str]:
+    """Each of `run_ids` by its name in `dataframe` (else "Run <id>"), by name and id where two share a name."""
+    names: dict[str, typing.Any] = {}
+    if RUN_NAME_COLUMN in dataframe.columns:
+        named = dataframe.drop_duplicates(MetricColumn.RUN_ID)
+        # By text, since a chart whose x-axis type is "category" has its ids as text.
+        names = dict(zip(named[MetricColumn.RUN_ID].astype(str), named[RUN_NAME_COLUMN], strict=True))
     labels = [
         name if isinstance(name := names.get(str(run_id)), str) and name else f"Run {run_id}"
         for run_id in run_ids
     ]
     taken = Counter(labels)
-    return grouped.assign(
-        **{
-            x_col: [
-                f"{label} ({run_id})" if taken[label] > 1 else label
-                for label, run_id in zip(labels, run_ids, strict=True)
-            ]
-        }
-    )
+    return [
+        f"{label} ({run_id})" if taken[label] > 1 else label
+        for label, run_id in zip(labels, run_ids, strict=True)
+    ]
 
 
 class BarChart(ChartType[BarChartSettings, pd.DataFrame, dmc.Stack], frozen=True, extra="forbid"):
@@ -171,23 +189,26 @@ class BarChart(ChartType[BarChartSettings, pd.DataFrame, dmc.Stack], frozen=True
         # `column` at every step doesn't outweigh a run that only logs it once -- every run
         # contributes exactly one value to its group's aggregation.
         per_run = latest_per_run(dataframe, [x_col, parameters.column])
-        grouped = per_run.groupby(x_col, as_index=False, sort=False).agg(
-            **{parameters.column: (parameters.column, parameters.aggregation)}
-        )
-        if parameters.sort != "none":
-            grouped = _sorted_groups(grouped, x_col, parameters.x_axis_type)
-            if parameters.sort == "descending":
-                grouped = grouped.iloc[::-1]
+        # Runs are grouped by a hyperparameter's value ("accuracy by hidden size"). Over a metric, two runs often end on
+        # one value (a schedule that decays to the same learning rate), and grouping them would collapse the chart to a
+        # bar or two: each run has its own bar there, at its own value, which its tooltip says (#422).
+        by_run = x_col == parameters.x_axis and x_col != MetricColumn.RUN_ID
+        grouped = _bars(per_run, x_col, parameters, by_run=by_run)
+        details = [f"{parameters.x_axis}: {value}" for value in grouped[x_col]] if by_run else None
+        if by_run:
+            grouped = grouped.assign(**{x_col: _run_labels(grouped[MetricColumn.RUN_ID], dataframe)})
         # A bar per run says which run it is by its name, not its id.
-        x_title = "run" if _is_named_run_axis(x_col, dataframe) else parameters.x_axis
+        x_title = "run" if by_run or _is_named_run_axis(x_col, dataframe) else parameters.x_axis
         grouped = _named_runs(grouped, x_col, dataframe).rename(columns={x_col: parameters.x_axis})
 
-        data = grouped.to_dict(orient="records")
+        data = grouped[[parameters.x_axis, parameters.column]].to_dict(orient="records")
         # Carried on each row (not a real plotted column) so the tooltip's labelFormatter --
         # `bar_chart_tooltip.js` -- can prefix the hovered x-value with what it actually is,
-        # e.g. "hidden_size: 128" instead of a bare "128".
-        for row in data:
+        # e.g. "hidden_size: 128" instead of a bare "128", and a run's bar with its own x value.
+        for i, row in enumerate(data):
             row["__x_axis_name__"] = x_title
+            if details is not None:
+                row["__x_detail__"] = details[i]
 
         # Recharts' `layout` (what mantine's `orientation` controls) decides which axis is the
         # category axis -- x for the default `horizontal` orientation, y for `vertical` -- so the

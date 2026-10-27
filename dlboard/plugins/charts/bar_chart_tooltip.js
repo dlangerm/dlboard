@@ -4,10 +4,12 @@
 // prefixes it with the axis name (e.g. "step: 5"), reading that name off a `__x_axis_name__`
 // marker each chart's data rows carry alongside the real plotted columns.
 window.dashMantineFunctions = window.dashMantineFunctions || {};
+// A bar of one run over a metric x-axis also carries its own x value, `__x_detail__` (e.g. "lr: 0.001").
 window.dashMantineFunctions.barChartTooltipLabel = (label, payload) => {
     var row = payload && payload.length ? payload[0].payload : null;
     var axisName = row ? row.__x_axis_name__ : null;
-    return axisName ? axisName + ": " + label : label;
+    var named = axisName ? axisName + ": " + label : label;
+    return row && row.__x_detail__ ? named + " (" + row.__x_detail__ + ")" : named;
 };
 
 // A value-axis tick: see `lineChartValueTick` in `line_chart_tooltip.js`.
