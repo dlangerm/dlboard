@@ -282,10 +282,13 @@ Whenever you finish an instruction, make sure to at least run `uv run ruff check
 
 Always rely on pydantic validation instead of performing your own, use `pendulum` instead of `datetime` and use `pydantic_settings` for environment variables.
 
-What a Dash callback receives from the browser is validated where it arrives, never read through a `TypedDict`: a
-payload the browser sends (a `set_props` drop request, a pattern-matched id) is a frozen pydantic model with
-`extra="forbid"`, and the callback's first line is its `model_validate`. A callback that would take more arguments
-than ruff's `max-args` groups them in a `CallbackStates` (`serve/_pages/_dash_helpers.py`): each field is
-`Annotated` with the `State` (or `Input`) it is read from, the decorator lists `Model.states()`, and the callback
-validates the one dict Dash hands back (as keyword arguments, `**states`, when the grouping is all it reads). Not
-`# noqa: PLR0913` on a callback.
+What a Dash callback receives from the browser is validated where it arrives, never read through a `TypedDict` or a
+cast `dict`: a payload dlboard's own code sends (a `set_props` drop request, a store's data) is a frozen pydantic model
+with `extra="forbid"`, and the callback's first line is its `model_validate`. A pattern-matched id is a `TriggeredId`
+subclass, read with `require_triggered_id(Model)`. A third-party component's event (ag-grid's `cellClicked`) carries
+keys dlboard does not read, so its model ignores extras rather than forbidding them.
+
+A callback that would take more arguments than ruff's `max-args` groups them in a `CallbackStates`
+(`serve/_pages/_dash_helpers.py`): each field is `Annotated` with the `State` (or `Input`) it is read from, the
+decorator lists `Model.states()`, and the callback validates the one dict Dash hands back (as keyword arguments,
+`**states`, when the grouping is all it reads). Not `# noqa: PLR0913` on a callback.

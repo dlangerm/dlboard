@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+import itertools
 import typing
 from dataclasses import dataclass, field
 
@@ -16,6 +17,8 @@ from dlboard.models import (
 from dlboard.serve._pages._experiment._chart_autogen import default_artifact_chart
 
 if typing.TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from dlboard.models import DataStore
 
 
@@ -23,6 +26,12 @@ KEY_PICKER_LIMIT: typing.Final = 100
 """
 How many names a key picker lists at once. It searches every name, and lists the first this many that match.
 """
+
+
+def first_matches(names: Iterable[str], search: str, limit: int = KEY_PICKER_LIMIT) -> list[str]:
+    """The first `limit` of `names` that have `search` in them, ignoring case: the page of them a key picker lists."""
+    needle = search.lower()
+    return list(itertools.islice((name for name in names if needle in name.lower()), max(limit, 0)))
 
 
 @dataclass(frozen=True)

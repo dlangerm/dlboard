@@ -27,7 +27,7 @@ from dlboard.serve import (
 )
 from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import ButtonId, DivId, ModalId, StoreId, ValueId
-from dlboard.serve._pages._dash_helpers import busy_while_running, require_triggered_id
+from dlboard.serve._pages._dash_helpers import TriggeredId, busy_while_running, require_triggered_id
 from dlboard.serve._url import relative_path
 
 if TYPE_CHECKING:
@@ -119,10 +119,11 @@ def _purge(store: DataStore[...], entity_type: models.EntityType, entity_id: int
                 store.purge_run(entity_id, actor)
             case models.EntityType.ARTIFACT:
                 store.purge_artifact(entity_id, actor)
-    except (ValueError, PermissionError):
+    except Exception:  # noqa: BLE001 -- a thread of its own: anything it does not log here goes unseen
         _log.exception("Failed to purge %s %s", entity_type, entity_id)
-    # Cleaned up, or not started: the worker clears the running stamp once there is nothing left to clean.
-    artifact_purge_worker.wake()
+    finally:
+        # Cleaned up, or not started: the worker clears the running stamp once there is nothing left to clean.
+        artifact_purge_worker.wake()
 
 
 def _trash_row(label: str, entity_type: models.EntityType, item: Any) -> Component:  # noqa: ANN401
@@ -326,6 +327,18 @@ class UserAction(StrEnum):
     DISABLE = "disable"
     GRANT_ADMIN = "grant-admin"
     REVOKE_ADMIN = "revoke-admin"
+
+
+class _UserButton(TriggeredId):
+    action: UserAction
+    user: int
+
+
+class _TrashItem(TriggeredId):
+    """A trash row's Restore or Purge button, and the purge it asks to confirm."""
+
+    entity_type: models.EntityType
+    id: int
 
 
 def apply_user_action(store: DataStore[...], user: User, action: UserAction) -> User:
@@ -603,9 +616,8 @@ def _register_restore_callback(app: Dash) -> None:
         prevent_initial_call=True,
     )
     def restore_entity(_n_clicks_list: list[int]) -> tuple[str, bool]:
-        triggered_id = cast("dict[str, str]", require_triggered_id())
-        entity_type = models.EntityType(triggered_id["entity_type"])
-        entity_id = int(triggered_id["id"])
+        item = require_triggered_id(_TrashItem)
+        entity_type, entity_id = item.entity_type, item.id
 
         store = get_data_store()
         actor = get_current_user()
@@ -624,8 +636,7 @@ def _register_purge_callbacks(app: Dash) -> None:
         prevent_initial_call=True,
     )
     def open_purge_modal(_n_clicks_list: list[int]) -> tuple[bool, dict[str, Any]]:
-        triggered_id = cast("dict[str, str]", require_triggered_id())
-        return True, dict(triggered_id)
+        return True, require_triggered_id(_TrashItem).model_dump(mode="json")
 
     @app.callback(
         Output(ADMIN_PURGE_MODAL_ID, "opened", allow_duplicate=True),
@@ -652,8 +663,8 @@ def _register_purge_callbacks(app: Dash) -> None:
     def confirm_purge(n_clicks: int, pending: dict[str, Any] | None) -> tuple[bool, str, bool]:
         if not n_clicks or not pending:
             raise PreventUpdate
-        entity_type = models.EntityType(pending["entity_type"])
-        entity_id = int(pending["id"])
+        item = _TrashItem.model_validate(pending)
+        entity_type, entity_id = item.entity_type, item.id
 
         store = get_data_store()
         actor = get_current_user()
@@ -690,9 +701,9 @@ def _register_user_action_callback(app: Dash) -> None:
         prevent_initial_call=True,
     )
     def act_on_user(_n_clicks_list: list[int]) -> tuple[str, bool]:
-        triggered_id = cast("dict[str, Any]", require_triggered_id())
+        clicked = require_triggered_id(_UserButton)
         store = get_data_store()
-        user, action = store.get_user(int(triggered_id["user"])), UserAction(triggered_id["action"])
+        user, action = store.get_user(clicked.user), clicked.action
         locks_self_out = (
             action in (UserAction.DISABLE, UserAction.REVOKE_ADMIN) and user == get_current_user()
         )

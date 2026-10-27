@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
 import dash
 import dash_mantine_components as dmc
-from dash import Dash, Input, Output, State, callback, dcc, html
+from dash import Dash, Input, Output, State, dcc, html
 from dash.dcc import Store
 from structlog.stdlib import get_logger
 
@@ -199,6 +199,19 @@ def app(plugins: list[models.PluginProtocol], *, url_prefix: str = "") -> Dash:
         State(constants.NAVBAR_COLLAPSED_STORE_ID, "data"),
         prevent_initial_call=True,
     )
+    # On this app, never through Dash's global `callback`: Dash moves those into whichever app in the process serves
+    # first, so a second app (a test's) left the first with no breadcrumbs and an empty navbar (#449).
+    _app.callback(
+        Output(constants.PAGE_BREADCRUMB_ID, "children"),
+        Input(constants.LOCATION_ID, "pathname"),
+        Input(constants.STATE_PROJECT_ID, "data", allow_optional=True),
+        Input(constants.STATE_EXPERIMENT_ID, "data", allow_optional=True),
+    )(_breadcrumbs)
+    _app.callback(
+        Output(constants.NAVBAR_CONTENT_ID, "children"),
+        Input(constants.STATE_PROJECT_ID, "data", allow_optional=True),
+        Input(constants.STATE_EXPERIMENT_ID, "data", allow_optional=True),
+    )(_render_navbar)
     # A theme plugin's `plug()` has already run by now (inside `Dash(...)` above), so its theme
     # goes straight into the first response -- no callback, no flash of an unthemed page.
     theme = get_theme(_app)
@@ -347,14 +360,7 @@ def _layout(theme: ThemeSpec) -> dmc.MantineProvider:
     )
 
 
-# show breadcrumbs to get back to the project list
-@callback(
-    Output(constants.PAGE_BREADCRUMB_ID, component_property="children"),
-    Input(constants.LOCATION_ID, component_property="pathname"),
-    Input(constants.STATE_PROJECT_ID, component_property="data", allow_optional=True),
-    Input(constants.STATE_EXPERIMENT_ID, component_property="data", allow_optional=True),
-)
-def breadcrumbs(_: str, project_id: int | None, experiment_id: int | None) -> list[Component]:
+def _breadcrumbs(_: str, project_id: int | None, experiment_id: int | None) -> list[Component]:
     """Where the current page sits: Projects > project > experiment, the last one emphasized."""
     trail = [("Projects", relative_path("/"))]
     store = get_data_store()
@@ -438,12 +444,7 @@ def _user_menu() -> Component:
     )
 
 
-@callback(
-    Output(constants.NAVBAR_CONTENT_ID, "children"),
-    Input(constants.STATE_PROJECT_ID, component_property="data", allow_optional=True),
-    Input(constants.STATE_EXPERIMENT_ID, component_property="data", allow_optional=True),
-)
-def render_navbar(project_id: int | None, experiment_id: int | None) -> Component:
+def _render_navbar(project_id: int | None, experiment_id: int | None) -> Component:
     """The current project's experiments. Empty outside a project, where the navbar is hidden."""
     store = get_data_store()
     project = store.get_project(project_id) if project_id is not None else None

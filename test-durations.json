@@ -1764,6 +1764,7 @@
   "dlboard/serve/tests/settings_env_test.py::test_set_setting_env_is_picked_up_by_the_real_app_settings[filesystem]": 0.0019220520043745637,
   "dlboard/serve/tests/settings_env_test.py::test_set_setting_env_is_picked_up_by_the_real_app_settings[sqlite]": 0.0017947470187209547,
   "dlboard/serve/tests/settings_env_test.py::test_set_setting_env_rejects_a_field_that_does_not_exist": 0.0013455819862429053,
+  "dlboard/serve/tests/shell_callbacks_test.py::test_a_second_app_in_the_process_still_draws_the_navbar_and_breadcrumbs": 0.27254925000306685,
   "dlboard/serve/tests/stale_page_test.py::test_a_malformed_request_is_left_to_dash": 0.1518542199919466,
   "dlboard/serve/tests/stale_page_test.py::test_a_request_from_an_older_page_is_answered_with_a_conflict[callback-no-longer-exists]": 0.16048309998586774,
   "dlboard/serve/tests/stale_page_test.py::test_a_request_from_an_older_page_is_answered_with_a_conflict[extra-state]": 0.1759692509949673,

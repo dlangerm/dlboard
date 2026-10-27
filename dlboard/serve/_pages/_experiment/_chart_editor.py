@@ -31,7 +31,7 @@ from dlboard import models
 from dlboard.serve import ClientsideScript, get_data_store
 from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import ButtonId, DivId, PaneId, StoreId, ValueId
-from dlboard.serve._pages._dash_helpers import busy_while_running, require_triggered_id
+from dlboard.serve._pages._dash_helpers import TriggeredId, busy_while_running, require_triggered_id
 from dlboard.serve._pages._experiment import _chart_view as chart_view
 from dlboard.serve._pages._experiment import _ids as ids
 from dlboard.serve._pages._experiment import _page_edits as edits
@@ -43,6 +43,7 @@ from dlboard.serve._pages._experiment._chart_settings_form import (
     CHART_PARAM_TABLE_DATA,
     FIELDS_ROW,
     EditedChart,
+    FieldID,
     build_chart_param_form,
     build_validated_chart_instance,
     key_picker_options,
@@ -101,6 +102,14 @@ class AddChart(BaseModel, frozen=True):
 
 EditorTarget = Annotated[EditChart | AddChart, Field(discriminator="kind")]
 """What the editor is open on, as it is kept in `CHART_EDITOR_TARGET_ID`."""
+
+
+class _OpenedFrom(TriggeredId):
+    """The button that opened the editor: a panel's "Add chart" (no `index`), or a chart's own edit button."""
+
+    panel: str
+    index: int | None = None
+
 
 _TARGET: Final[TypeAdapter[EditChart | AddChart]] = TypeAdapter(EditorTarget)
 
@@ -370,10 +379,10 @@ def _register_open_and_cancel(app: Dash) -> None:
         _add_clicks: list[int], _edit_clicks: list[int], page_json: str, experiment_id: int
     ) -> tuple[bool, dict[str, Any], str | None, str, str, list[Component], dict[str, Any]]:
         """Opens the editor, with its form built in this same round trip: it is what the person is waiting for."""
-        triggered_id = cast("dict[str, Any]", require_triggered_id())
+        opened = require_triggered_id(_OpenedFrom)
 
-        if triggered_id["type"] == panel_view.OPEN_CHART_BUTTON.type:
-            adding = AddChart(panel=triggered_id["panel"]).model_dump()
+        if opened.type == panel_view.OPEN_CHART_BUTTON.type:
+            adding = AddChart(panel=opened.panel).model_dump()
             return (
                 False,
                 adding,
@@ -384,21 +393,20 @@ def _register_open_and_cancel(app: Dash) -> None:
                 _form_for(adding, None),
             )
 
-        edited = chart_view.ChartID.model_validate(triggered_id)
-        if edited.index is None:
-            msg = f"Malformed edit-chart id: {triggered_id}"
+        if opened.index is None:
+            msg = f"Malformed edit-chart id: {opened}"
             raise ValueError(msg)
         panel = next(
             (
                 p
                 for p in page_model.BasicExperimentPage.model_validate_json(page_json).panels
-                if p.name == edited.panel
+                if p.name == opened.panel
             ),
             None,
         )
-        if panel is None or edited.index >= len(panel.charts):
+        if panel is None or opened.index >= len(panel.charts):
             raise PreventUpdate  # the chart went from another tab since its button was drawn: there is nothing to open on
-        chart = panel.charts[edited.index]
+        chart = panel.charts[opened.index]
         editing = EditChart(chart_id=chart.id).model_dump()
         return (
             False,
@@ -577,7 +585,7 @@ def _register_key_search(app: Dash) -> None:
         search: str | None, value: str | list[str] | None, chart_type_name: str | None, experiment_id: int
     ) -> list[str]:
         """A key picker's options for what is typed in it, searched on the server: it lists a page of them (#416)."""
-        field_name = cast("dict[str, str]", require_triggered_id())["field"]
+        field_name = require_triggered_id(FieldID).field
         field = (
             models.ChartTypeRegistry.get_registered_chart_types()
             .get(chart_type_name or "", {})

@@ -10,13 +10,14 @@ from __future__ import annotations
 import itertools
 import typing
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 import dash_ag_grid as dag
 import dash_mantine_components as dmc
 from dash import Dash, Input, Output, State, html, no_update
 from dash.dcc import Store
 from dash.exceptions import PreventUpdate
+from pydantic import BaseModel, Field
 from structlog.stdlib import get_logger
 
 from dlboard import models
@@ -39,7 +40,7 @@ from dlboard.serve._pages._experiment import _ids as ids
 from dlboard.serve._pages._experiment import _page_edits as edits
 from dlboard.serve._pages._experiment import _page_model as page_model
 from dlboard.serve._pages._experiment import _page_repository as repo
-from dlboard.serve._pages._experiment._column_catalog import KEY_PICKER_LIMIT
+from dlboard.serve._pages._experiment._column_catalog import KEY_PICKER_LIMIT, first_matches
 from dlboard.serve._pages._experiment._run_compare import compare_button
 from dlboard.serve._pages._experiment._shown_runs import ShownRunsSettings, shown_run_ids
 from dlboard.serve._pages._experiment._views import VIEW_NOTIFY_ID
@@ -711,6 +712,13 @@ def _register_newest_runs(app: Dash) -> None:
         return page.model_dump_json(), container
 
 
+class _CellClicked(BaseModel, frozen=True, extra="ignore"):
+    """The cell of the run table ag-grid says was clicked: its column, and its row (a run id). It says more, unread."""
+
+    column: str = Field(alias="colId")
+    row: int = Field(alias="rowId")
+
+
 def _register_delete_run(app: Dash) -> None:
     @app.callback(
         Output(DELETE_RUN_MODAL_ID, "opened", allow_duplicate=True),
@@ -719,9 +727,12 @@ def _register_delete_run(app: Dash) -> None:
         prevent_initial_call=True,
     )
     def open_delete_run_modal(cell_clicked: dict[str, Any] | None) -> tuple[bool, int]:
-        if not cell_clicked or cell_clicked["colId"] != _DELETE_COLUMN_ID:
+        if not cell_clicked:
             raise PreventUpdate
-        return True, int(cast("str", cell_clicked["rowId"]))
+        clicked = _CellClicked.model_validate(cell_clicked)
+        if clicked.column != _DELETE_COLUMN_ID:
+            raise PreventUpdate
+        return True, clicked.row
 
     @app.callback(
         Output(DELETE_RUN_MODAL_ID, "opened", allow_duplicate=True),
@@ -759,9 +770,8 @@ def _column_options(
     Never every name: an experiment of 11,000 metrics would send each of them to the browser (#416); the rest are a
     search away (`search_columns`, as someone types). `keep` is what the picker holds, so it keeps its picks.
     """
-    needle = search.lower()
-    hparams = [key for key in hparam_keys if needle in key.lower()][:KEY_PICKER_LIMIT]
-    metrics = [key for key in metric_keys if needle in key.lower()][: KEY_PICKER_LIMIT - len(hparams)]
+    hparams = first_matches(hparam_keys, search)
+    metrics = first_matches(metric_keys, search, KEY_PICKER_LIMIT - len(hparams))
     kept_hparams = [key for key in keep if key in hparam_keys and key not in hparams]
     kept_metrics = [key for key in keep if key not in hparam_keys and key not in metrics]
     return [

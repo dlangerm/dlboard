@@ -11,7 +11,7 @@ from dash.exceptions import PreventUpdate
 from dlboard.serve import Icon, get_auth_provider, get_current_user, get_data_store, icon, mint_api_token
 from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import ButtonId, DivId, ValueId
-from dlboard.serve._pages._dash_helpers import require_triggered_id, section_label
+from dlboard.serve._pages._dash_helpers import TriggeredId, require_triggered_id, section_label
 from dlboard.serve._url import relative_path
 
 if TYPE_CHECKING:
@@ -30,6 +30,10 @@ CREATE_TOKEN_ID: ButtonId[_AccountPage] = ButtonId("account-create-token")
 NEW_TOKEN_ID: DivId[_AccountPage] = DivId("account-new-token")
 # Pattern-matched "type" discriminator, not a standalone component id -- a plain string.
 REVOKE_TOKEN_TYPE: Final = "account-revoke-token"
+
+
+class _TokenButton(TriggeredId):
+    token: int
 
 
 def _when(token_time: object) -> str:
@@ -166,6 +170,6 @@ def register(app: Dash) -> None:
         prevent_initial_call=True,
     )
     def revoke_token(_clicks: list[int]) -> tuple[str, bool]:
-        token_id = cast("dict[str, int]", require_triggered_id())["token"]
+        token_id = require_triggered_id(_TokenButton).token
         get_data_store().revoke_api_token(token_id, get_current_user().id)
         return relative_path("/account"), True

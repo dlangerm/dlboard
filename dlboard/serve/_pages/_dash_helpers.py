@@ -131,18 +131,23 @@ def section_label(text: str) -> dmc.Text:
     return dmc.Text(text, size="xs", fw=600, c="dimmed", tt="uppercase", className="dl-section-label")
 
 
-def require_triggered_id() -> Any:  # noqa: ANN401
+class TriggeredId(BaseModel, frozen=True, extra="forbid"):
+    """A pattern-matched component's id, as the browser sends it back: its `type`, and each key a subclass adds."""
+
+    type: str
+
+
+def require_triggered_id[M: BaseModel](shape: type[M]) -> M:
     """
-    Return `ctx.triggered_id`, or raise `PreventUpdate` if nothing meaningfully triggered.
+    `ctx.triggered_id` validated as `shape`, or `PreventUpdate` if nothing meaningfully triggered.
 
     Dash still fires pattern-matched callbacks when a listened component is created with its
     property at a falsy default (e.g. a freshly-rendered button's `n_clicks=0`); checking
     `ctx.triggered[0]["value"]` distinguishes that no-op firing from an actual click/change.
-    Callers `cast(...)` the result to the triggered-id shape they expect.
     """
     if not ctx.triggered_id or not ctx.triggered[0]["value"]:  # pyrefly: ignore [unsupported-operation]
         raise PreventUpdate
-    return ctx.triggered_id
+    return shape.model_validate(ctx.triggered_id)
 
 
 def busy_while_running[P](button: ButtonId[P]) -> list[tuple[Output, bool, bool]]:

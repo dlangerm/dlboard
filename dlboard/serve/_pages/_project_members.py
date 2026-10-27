@@ -19,7 +19,12 @@ from dlboard.models import NewProjectGrant, ProjectGrant, ProjectRole
 from dlboard.serve import Icon, get_auth_provider, get_data_store, get_project_role, icon
 from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import ButtonId, DivId, ValueId
-from dlboard.serve._pages._dash_helpers import require_triggered_id, section_label, tooltipped_action_icon
+from dlboard.serve._pages._dash_helpers import (
+    TriggeredId,
+    require_triggered_id,
+    section_label,
+    tooltipped_action_icon,
+)
 from dlboard.serve._url import relative_path
 
 if TYPE_CHECKING:
@@ -40,6 +45,11 @@ MEMBERS_ERROR_ID: DivId[_MembersSection] = DivId("project-members-error")
 # Pattern-matched "type" discriminators, not standalone component ids -- plain strings.
 MEMBER_ROLE_TYPE: Final = "project-member-role"
 MEMBER_REMOVE_TYPE: Final = "project-member-remove"
+
+
+class _GrantControl(TriggeredId):
+    grant: int
+
 
 GROUP_PREFIX: Final = "group:"
 """Typed before a name in the add field to grant an IdP group instead of a user, e.g. `group:ml-team`."""
@@ -181,7 +191,7 @@ def register_members_callbacks(app: Dash) -> None:
         prevent_initial_call=True,
     )
     def change_role(_values: list[str], project_id: int) -> str:
-        grant_id = cast("dict[str, int]", require_triggered_id())["grant"]
+        grant_id = require_triggered_id(_GrantControl).grant
         store = get_data_store()
         grant = next((g for g in store.list_project_grants([project_id]) if g.id == grant_id), None)
         if grant is None:
@@ -199,7 +209,7 @@ def register_members_callbacks(app: Dash) -> None:
         prevent_initial_call=True,
     )
     def remove_member(_clicks: list[int], project_id: int) -> tuple[str, bool]:
-        grant_id = cast("dict[str, int]", require_triggered_id())["grant"]
+        grant_id = require_triggered_id(_GrantControl).grant
         get_data_store().delete_project_grant(project_id, grant_id)
         return relative_path(f"/project/{project_id}"), True
 

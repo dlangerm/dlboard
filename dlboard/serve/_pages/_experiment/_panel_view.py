@@ -19,7 +19,7 @@ from structlog.stdlib import get_logger
 from dlboard import models
 from dlboard.serve import Icon, icon
 from dlboard.serve._component_ids import ButtonId, DivId, PatternId, StoreId, ValueId
-from dlboard.serve._pages._dash_helpers import tooltipped_action_icon
+from dlboard.serve._pages._dash_helpers import TriggeredId, tooltipped_action_icon
 from dlboard.serve._pages._experiment._page_model import (
     UNGROUPED_TAB,
     UNGROUPED_TAB_LABEL,
@@ -115,6 +115,12 @@ class PanelPattern(PatternId[ExperimentPage]):
 
     def of(self, panel_name: str) -> dict[str, str]:
         return {"type": self.type, "panel": panel_name}
+
+
+class PanelID(TriggeredId):
+    """The id of one of a `PanelPattern`'s components, as the browser sends it back."""
+
+    panel: str
 
 
 class TabPattern(PatternId[ExperimentPage]):

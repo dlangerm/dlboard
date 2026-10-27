@@ -199,10 +199,10 @@ def _validated_layout_change(page_json: str) -> tuple[str, dict[str, Any]]:
     """
     if not ctx.triggered_id:
         raise PreventUpdate
-    triggered_id = cast("dict[str, str]", ctx.triggered_id)
-    panel_name = triggered_id["panel"]
+    triggered = panel_view.PanelID.model_validate(ctx.triggered_id)
+    panel_name = triggered.panel
     value = cast("Any", ctx.triggered[0]["value"])  # pyrefly: ignore [unsupported-operation]
-    match triggered_id["type"]:
+    match triggered.type:
         case panel_view.PANEL_LAYOUT_CONTROL.type:
             edit = {"layout": value}
         case panel_view.PANEL_GRID_COLUMNS.type:
@@ -270,7 +270,7 @@ def _register_delete_chart(app: Dash) -> None:
         prevent_initial_call=True,
     )
     def open_delete_chart_modal(_n_clicks_list: list[int]) -> tuple[bool, dict[str, Any]]:
-        triggered = chart_view.ChartID.model_validate(require_triggered_id())
+        triggered = require_triggered_id(chart_view.ChartID)
         return True, chart_view.ChartTargetData(panel=triggered.panel, index=triggered.index).model_dump()
 
     @app.callback(
@@ -324,8 +324,7 @@ def _register_delete_panel(app: Dash) -> None:
         prevent_initial_call=True,
     )
     def open_delete_panel_modal(_n_clicks_list: list[int]) -> tuple[bool, str]:
-        triggered_id = cast("dict[str, str]", require_triggered_id())
-        return True, triggered_id["panel"]
+        return True, require_triggered_id(panel_view.PanelID).panel
 
     @app.callback(
         Output(ids.METRIC_CONTENT_ID, "children", allow_duplicate=True),
@@ -441,8 +440,7 @@ def _register_toggle(app: Dash) -> None:
         # trigger" check.
         if not ctx.triggered_id:
             raise PreventUpdate
-        triggered_id = cast("dict[str, str]", ctx.triggered_id)
-        panel_name = triggered_id["panel"]
+        panel_name = panel_view.PanelID.model_validate(ctx.triggered_id).panel
         sync = bool(cast("Any", ctx.triggered[0]["value"]))  # pyrefly: ignore [unsupported-operation]
 
         # Like `sync_run_selection` (`_run_comparison_table.py`): this Switch's `checked` is *set
@@ -567,8 +565,7 @@ def _register_rename(app: Dash) -> None:
         prevent_initial_call=True,
     )
     def open_rename_panel_modal(_n_clicks_list: list[int]) -> tuple[bool, str, str, str]:
-        triggered_id = cast("dict[str, str]", require_triggered_id())
-        panel_name = triggered_id["panel"]
+        panel_name = require_triggered_id(panel_view.PanelID).panel
         return True, panel_name, panel_name, ""
 
     @app.callback(

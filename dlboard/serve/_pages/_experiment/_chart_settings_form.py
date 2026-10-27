@@ -22,8 +22,9 @@ from dlboard.models import family_template
 from dlboard.serve import ClientsideScript, Icon, icon
 from dlboard.serve._component_ids import PatternId
 from dlboard.serve._grid import CHOICE_RENDERER, KEY_PICKER_EDITOR, SLIDER_RENDERER, themed_grid_kwargs
+from dlboard.serve._pages._dash_helpers import TriggeredId
 from dlboard.serve._pages._experiment import _ids as ids
-from dlboard.serve._pages._experiment._column_catalog import KEY_PICKER_LIMIT
+from dlboard.serve._pages._experiment._column_catalog import KEY_PICKER_LIMIT, first_matches
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -72,6 +73,12 @@ class _FieldPattern(PatternId[ids.ExperimentPage]):
 
     def of(self, field_name: str) -> dict[str, str]:
         return {"type": self.type, "field": field_name}
+
+
+class FieldID(TriggeredId):
+    """The id of one of the form's field components, as the browser sends it back."""
+
+    field: str
 
 
 CHART_PARAM: Final = _FieldPattern("chart-param")
@@ -136,7 +143,7 @@ def build_validated_chart_instance(
     `models.ChartInstance.parameters` is an untyped `dict[str, object]` -- constructing one directly never
     raises even for garbage values (e.g. a cleared numeric field), so callers that need to surface a
     validation error to the user (rather than have it surface later, unguarded, from
-    `hint_required_columns`/`render`) must validate through here instead.
+    `data_request`/`render`) must validate through here instead.
 
     `chart_id` is the id of the chart being edited, which an edit keeps (a `?chart=` link to it still opens it); `None`
     for a new chart, whose id is derived from its settings.
@@ -300,9 +307,7 @@ def key_picker_options(
     choices = (
         _pattern_suggestions(names) if field.type is models.ParameterFieldType.LIST_PATTERN else sorted(names)
     )
-    needle = search.lower()
-    found = [choice for choice in choices if needle in choice.lower()][:KEY_PICKER_LIMIT]
-    return list(dict.fromkeys([*keep, *found]))
+    return list(dict.fromkeys([*keep, *first_matches(choices, search)]))
 
 
 def _param_field_input(  # noqa: PLR0911

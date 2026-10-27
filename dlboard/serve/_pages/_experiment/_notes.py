@@ -23,7 +23,7 @@ from dlboard import models
 from dlboard.serve import ClientsideScript, Icon, get_current_user, get_data_store, icon, series_swatch_class
 from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import StoreId
-from dlboard.serve._pages._dash_helpers import require_triggered_id, tooltipped_action_icon
+from dlboard.serve._pages._dash_helpers import TriggeredId, require_triggered_id, tooltipped_action_icon
 from dlboard.serve._pages._dataframe_helpers import run_display_name
 from dlboard.serve._pages._experiment._run_picker import register_run_search, run_options
 
@@ -46,6 +46,11 @@ NOTES_RUNS_ID: typing.Final = "notes-runs"
 NOTES_MENTIONS_ID: typing.Final = "notes-mentions"
 NOTES_POST_ID: typing.Final = "notes-post"
 _DELETE_NOTE_TYPE: typing.Final = "delete-note"
+
+
+class _NoteButton(TriggeredId):
+    note: int
+
 
 _OPEN_ON_CLICK_JS = ClientsideScript(Path(__file__).with_name("open_on_click.js"))
 
@@ -255,7 +260,7 @@ def register_notes_callbacks(app: Dash) -> None:
         prevent_initial_call=True,
     )
     def delete_note(_n_clicks: list[int | None], experiment_id: int) -> tuple[Any, str]:
-        note_id = cast("dict[str, int]", require_triggered_id())["note"]
+        note_id = require_triggered_id(_NoteButton).note
         store = get_data_store()
         store.delete_comment(note_id, get_current_user().id)
         thread, count, _users = _thread(store, experiment_id)

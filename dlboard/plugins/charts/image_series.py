@@ -704,6 +704,14 @@ _VIEWER_HELPER_PATH = Path(__file__).with_name("image_series_viewer.js")
 """Zooms and pans the enlarged view and moves it with the keyboard; also finds a run's step, which the scrub shares."""
 
 
+class _Thumbnail(BaseModel, frozen=True, extra="forbid"):
+    """A thumbnail's id, as the browser sends it back when it is clicked."""
+
+    type: str
+    instance: str
+    run: str
+
+
 def plug(app: dash.Dash) -> None:
     """Register clientside callbacks for image-series scrubbing, captions, pagination and overlays."""
     serve_layered_picture(app)
@@ -763,7 +771,6 @@ def plug(app: dash.Dash) -> None:
         prevent_initial_call=True,
     )
     def open_image_modal(n_clicks_list: list[int]) -> tuple[bool, str]:
-        triggered_id = cast("dict[str, str] | None", ctx.triggered_id)
-        if not triggered_id or not any(n_clicks_list):
+        if not ctx.triggered_id or not any(n_clicks_list):
             raise PreventUpdate
-        return True, triggered_id["run"]
+        return True, _Thumbnail.model_validate(ctx.triggered_id).run

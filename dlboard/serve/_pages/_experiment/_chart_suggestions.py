@@ -22,7 +22,7 @@ from dlboard.models import ColumnKind
 from dlboard.serve import ClientsideScript, Icon, get_data_store, icon
 from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import ButtonId, DivId, ModalId, PatternId, StoreId, ValueId
-from dlboard.serve._pages._dash_helpers import CallbackStates, require_triggered_id
+from dlboard.serve._pages._dash_helpers import CallbackStates, TriggeredId, require_triggered_id
 from dlboard.serve._pages._experiment import _ids as ids
 from dlboard.serve._pages._experiment import _page_edits as edits
 from dlboard.serve._pages._experiment import _page_model as page_model
@@ -94,6 +94,11 @@ class _SuggestionPattern(PatternId[ids.ExperimentPage]):
 
 
 _ADD_SUGGESTION: Final = _SuggestionPattern("add-suggestion")
+
+
+class _SuggestionID(TriggeredId):
+    kind: ColumnKind
+    key: str
 
 
 def _split_mode_control(control_id: ValueId[ids.ExperimentPage]) -> dmc.SegmentedControl:
@@ -582,7 +587,7 @@ def _resolve_suggestion_trigger(
     if isinstance(triggered_id, dict) and triggered_id.get("type") == panel_view.PANEL_SUGGEST_BUTTON.type:
         if not ctx.triggered[0]["value"]:  # pyrefly: ignore [unsupported-operation]
             raise PreventUpdate
-        return triggered_id["panel"], True
+        return panel_view.PanelID.model_validate(triggered_id).panel, True
     return current_scope, no_update
 
 
@@ -721,8 +726,8 @@ def _register_suggestion_adds(app: Dash) -> None:
         _n_clicks_list: list[int], states: dict[str, Any]
     ) -> tuple[Any, str, Component, list[str], bool]:
         drawer = _DrawerEdit.model_validate(states)
-        triggered_id = cast("dict[str, str]", require_triggered_id())
-        picked = frozenset({(ColumnKind(triggered_id["kind"]), triggered_id["key"])})
+        clicked = require_triggered_id(_SuggestionID)
+        picked = frozenset({(clicked.kind, clicked.key)})
         catalog, chosen = _suggestions_to_add(drawer.page_json, drawer, picked)
         container, saved_page = _add_charts(drawer.page_json, drawer.paging_json, chosen)
         _catalog, suggestions = _listed(saved_page, drawer, catalog)
