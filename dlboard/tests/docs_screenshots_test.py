@@ -13,6 +13,7 @@ Run with `--screenshots=check` (compare) or `--screenshots=update` (overwrite `d
 
 from __future__ import annotations
 
+import functools
 import io
 import math
 import re
@@ -42,10 +43,10 @@ from dlboard.serve._pages._experiment._page_model import BasicExperimentPage
 from dlboard.serve._pages._experiment._run_compare import COMPARE_OPEN_ID
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
 
     from dash import Dash
-    from playwright.sync_api import Locator, Page
+    from playwright.sync_api import FloatRect, Locator, Page
 
     from dlboard.models import Histogram
 
@@ -508,29 +509,36 @@ def _stage(shot: DocScreenshot, page: Page, demo: Demo, dlboard_app: Dash) -> Pa
             return dialog
 
 
-def _stable_screenshot(target: Page | Locator, *, whole_pixels_inside: bool = False) -> bytes:
+def _dialog_window(dialog: Locator, size: tuple[int, int] | None) -> FloatRect:
     """
-    Photograph `target` until two consecutive captures are byte-identical.
+    A window of whole pixels inside `dialog`, centred on it: `size`, or as much as is sure to fit inside it.
+
+    A dialog's edges fall between pixels, and the column it only partly covers shows through to the blurred page behind
+    it, whatever that page is drawing. Where they fall depends on the machine: a CI runner drew the image viewer a
+    fraction of a pixel wider at each edge, centred on the same point, and so a clip of the pixels it covered was a pixel
+    bigger all round (#426). A window of a fixed size centred on the dialog is the same picture either way.
+    """
+    box = dialog.bounding_box()
+    assert box is not None
+    width, height = size or (math.floor(box["width"]) - 2, math.floor(box["height"]) - 2)
+    left = round(box["x"] + box["width"] / 2 - width / 2)
+    top = round(box["y"] + box["height"] / 2 - height / 2)
+    return {"x": left, "y": top, "width": width, "height": height}
+
+
+def _stable_screenshot(target: Page | Locator, *, window: Callable[[], FloatRect] | None = None) -> bytes:
+    """
+    Photograph `target` (just `window` of it, if given) until two consecutive captures are byte-identical.
 
     Chart animations and live-update re-renders are JavaScript, so `animations="disabled"` can't
     stop them; waiting for a fixed point does.
-
-    A dialog's edge falls between pixels, and the column it only partly covers shows through to the blurred page behind
-    it, whatever that page is drawing: `whole_pixels_inside` photographs only the pixels the dialog covers entirely.
     """
     previous: bytes | None = None
     for _ in range(_STABLE_ATTEMPTS):
-        if whole_pixels_inside:
-            box = cast("Locator", target).bounding_box()
-            assert box is not None
-            left, top = math.ceil(box["x"]), math.ceil(box["y"])
-            clip = {
-                "x": left,
-                "y": top,
-                "width": math.floor(box["x"] + box["width"]) - left,
-                "height": math.floor(box["y"] + box["height"]) - top,
-            }
-            current = cast("Locator", target).page.screenshot(clip=clip, animations="disabled", caret="hide")
+        if window is not None:
+            current = cast("Locator", target).page.screenshot(
+                clip=window(), animations="disabled", caret="hide"
+            )
         else:
             current = target.screenshot(animations="disabled", caret="hide")
         if current == previous:
@@ -585,7 +593,17 @@ def test_doc_screenshot(  # noqa: PLR0913 -- one fixture per thing the render ne
     )
     target = _stage(shot, page, demo, dlboard_app)
     page.evaluate("document.fonts.ready")  # a late-swapping web font would otherwise reflow mid-capture
-    png = _stable_screenshot(target, whole_pixels_inside=shot in _DIALOG_SHOTS)
+    # Checked, a dialog is photographed at the size it was committed at, so a dialog drawn a little wider still matches.
+    committed: tuple[int, int] | None = None
+    if shot.path.exists() and screenshot_mode is ScreenshotMode.CHECK:
+        with PILImage.open(shot.path) as image:
+            committed = image.size
+    window = (
+        functools.partial(_dialog_window, cast("Locator", target), committed)
+        if shot in _DIALOG_SHOTS
+        else None
+    )
+    png = _stable_screenshot(target, window=window)
     assert console_errors == []
     match screenshot_mode:
         case ScreenshotMode.UPDATE:
