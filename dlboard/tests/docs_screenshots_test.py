@@ -584,12 +584,12 @@ def test_doc_screenshot(  # noqa: PLR0913 -- one fixture per thing the render ne
     screenshot_mode: ScreenshotMode,
 ) -> None:
     """The committed docs image for `shot` is what the app renders today (or is rewritten to be)."""
-    # Shift the browser's `Date.now` to start at the server's frozen `_NOW`, so client-side relative
-    # times ("Fetched just now") agree with it. Shifted rather than frozen, and no fake timers
-    # (Playwright's `page.clock` stalls the page's own rendering): time still flows from there.
+    # Freeze the browser's `Date.now` at the server's frozen `_NOW`, so client-side relative times agree with it: the
+    # live poll stamps each fetch with that time, and a label reading it against a clock that kept running said "Fetched
+    # 2s ago" whenever a shot came late (#456). Timers are untouched (no fake timers: Playwright's `page.clock` stalls
+    # the page's own rendering), and nothing a shot shows reads `Date.now` to move.
     page.add_init_script(
-        f"(() => {{ const realNow = Date.now; const offset = {int(_NOW.timestamp() * 1000)} - realNow();"
-        " Date.now = () => realNow() + offset; })()"
+        f"(() => {{ const frozen = {int(_NOW.timestamp() * 1000)}; Date.now = () => frozen; }})()"
     )
     target = _stage(shot, page, demo, dlboard_app)
     page.evaluate("document.fonts.ready")  # a late-swapping web font would otherwise reflow mid-capture
