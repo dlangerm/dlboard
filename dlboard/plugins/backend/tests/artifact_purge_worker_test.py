@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+import time
 import typing
 from typing import TYPE_CHECKING, Self
 
@@ -14,6 +16,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
     import pytest
+    from dash import Dash
     from flask import Response
     from pydantic import AnyUrl
     from werkzeug.datastructures import FileStorage
@@ -151,3 +154,36 @@ def test_a_drain_says_a_purge_is_running_until_it_is_done(store: SQLLiteStore) -
 
     assert artifact_store.running == [True, True, True]
     assert store.artifact_purge_progress_at() is None
+
+
+def test_a_failed_drain_is_logged_and_the_worker_still_runs_the_next_purge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One drain that raised used to end the worker thread, so no later purge ran until a restart (CI, #455's tests)."""
+    drains: list[int] = []
+
+    def drain(_store: object, _artifact_store: object) -> None:
+        drains.append(len(drains))
+        if len(drains) == 1:
+            msg = "the database is gone"
+            raise RuntimeError(msg)
+        if len(drains) == 3:
+            raise SystemExit  # ends the worker, which a test cannot otherwise stop
+
+    def no_store(_app: Dash) -> None:
+        """The worker's store waits, which a test's stores need not."""
+
+    monkeypatch.setattr(artifact_purge_worker, "_drain_pending", drain)
+    monkeypatch.setattr(artifact_purge_worker, "wait_for_data_store", no_store)
+    monkeypatch.setattr(artifact_purge_worker, "wait_for_artifact_store", no_store)
+    worker = threading.Thread(target=artifact_purge_worker._run, args=(None,), daemon=True)
+    worker.start()
+
+    for _ in range(500):
+        if len(drains) >= 2:
+            break
+        artifact_purge_worker.wake()
+        time.sleep(0.01)
+
+    assert len(drains) >= 2
+    worker.join(timeout=5)

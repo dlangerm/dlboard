@@ -88,9 +88,12 @@ def _run(app: Dash) -> None:
     while True:
         _wake_event.wait()
         _wake_event.clear()
-        # Nobody's request: its own trace, with the storage client's calls (S3 deletes) under it.
-        with span("dlboard.artifact.purge", SpanKind.INTERNAL):
-            _drain_pending(store, artifact_store)
+        try:
+            # Nobody's request: its own trace, with the storage client's calls (S3 deletes) under it.
+            with span("dlboard.artifact.purge", SpanKind.INTERNAL):
+                _drain_pending(store, artifact_store)
+        except Exception:  # noqa: BLE001 -- the worker outlives a failed drain: an uncaught one stops every later purge
+            _log.exception("Draining purged artifact blobs failed; the next purge will try again")
 
 
 def plug(app: Dash) -> None:
