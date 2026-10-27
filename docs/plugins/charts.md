@@ -145,63 +145,78 @@ Subclass `ChartType` and implement its abstract methods:
 - `name: ClassVar[str]` — the registry key. Must be unique (see below).
 - `parameter_type() -> type[P]` — the Pydantic model describing this chart's settings.
 - `render(parameters, dataframe) -> C` — turn one instance into a Dash component.
-- `hint_required_columns` / `hint_required_artifact_keys` / `hint_required_hparams` — tell the
-  chart-autogen logic (`dlboard/serve/_pages/_experiment/_chart_autogen.py`) what a logged run
-  needs before this chart type is even offered.
-- `hint_required_artifact_key_prefixes` (optional, none by default) — for a chart that lists a whole
-  family of artifacts (every `checkpoints/...` key) rather than named ones: every key starting with one of
-  these is fetched, including keys logged later.
-- `hint_required_column_patterns` (optional, none by default) — metric patterns (`layer_*/grad_norm`) the chart
-  draws from: every metric whose name matches one, including metrics logged later. A pattern is matched against the
-  names logged when the panel is drawn, so a chart of many metrics asks for them this way, not by listing each. In a
-  pattern a `*` stands for any run of characters (`/` included) and a `#` for a run of digits, so `accuracy/#,#/*` is
-  the cells of a grid and a class, and not `accuracy/3,7/aux/dog`. `KeyPatterns.captures(pattern, key)` hands back what
-  each wildcard stood for (`("3", "7", "dog")`), with the matcher the server used, so a chart can group keys by their
-  parts without a regular expression of its own. A pattern over thousands of metrics must not ask for their whole
-  history (that is a column for each metric and a row for each step): read their last value (`metric_reductions`) or
-  their spread (`hint_required_series`).
-- `hint_required_series` (optional, none by default) — the spread of many metrics' values, as a set of
-  `SeriesBandRequest`s: the patterns they match, a grid of at most `grid` cells of steps, the newest `runs` runs, and
-  optionally `group_by`, which wildcards of the pattern name a metric's group. The panel reads each spread for the chart
-  instead of each metric, as a `SeriesBand` per run, group and step in the column `request.column`, whose cell for a
-  step is a tuple with a band for each group. A `SeriesBand` is the nearest-rank minimum, quartiles (`p25`, `p75`),
-  median and maximum of the group's values in the cell, their `mean`, how many metrics logged one (`count`), and which
-  metric was the lowest and the highest (`minimum_key`, `maximum_key`), so a chart can name the ones to look at.
+- `data_request(parameters) -> DataRequest` — everything a chart with these settings reads. The panel reads what its
+  charts on screen ask for, once for all of them, and hands each chart a frame of only what it asked for: a row per run
+  and step (or a row per run, for a reduced metric), a column for each metric, `hparam__`, `artifact__` and histogram
+  column it asked for, and the run's name. A kind of data the request leaves out is not read for it at all. A line chart
+  is one line:
 
-  This is how to aggregate a family of thousands of metrics, such as `accuracy/{row},{col}/{class}`: ask for
-  `accuracy/#,#/*` with `group_by=(2,)` for a band per class, or `group_by=(0, 1)` for one per cell (at most
-  `max_groups`, 12 by default, are read), and draw the bands. Never ask for the history of the pattern. The grid
-  has fewer cells over many metrics, to keep the read to `BAND_PROBE_BUDGET` probes (`request.cells_for`). The read is an
-  ordered probe of the index for each metric, run and grid cell, so it costs the metrics matched, not the steps a run
-  trained, and a run that logs every 50 steps is covered as well as one that logs every step. Each cell is a stretch of
-  steps ending at the one shown (the grid's cells run end to end), and a metric counts in it with its newest write
-  there. `plugins/charts/series_band.py` is the reference chart (`_band_traces.nested_band` draws the five traces
-  of a spread, as the histogram chart's bands view does), and autogen uses it for a family of metrics that share a
-  template (`layer_0/grad_norm` to `layer_99/grad_norm`, once there are at least 12 of them).
+  ```python
+  @classmethod
+  def data_request(cls, parameters: LineChartSettings) -> DataRequest:
+      return DataRequest(metrics=frozenset({parameters.column, parameters.x_axis}))
+  ```
 
-  A chart drawn with Plotly cannot use the theme's colors as they are (`series_color` is a CSS variable, which Plotly
-  drops). Name them in the figure as `series_color(...)`, or `series_color(...)/0.12` for one at an opacity, and the
-  figure's colors (any `color`, `fillcolor`, `gridcolor` or `linecolor`, which may also be a variable such as
-  `var(--mantine-color-text)`) are resolved in the browser, in the theme's current color scheme and again when it
-  changes, so a run is the color it is in every other chart. `series_band_colors.js` does it for the reference chart,
-  which keeps its figure in a `dcc.Store` that a clientside callback turns into the graph's.
-- `hint_required_histogram_keys` (optional, none by default) — the logged histogram keys the chart shows. A
-  chart always names them: there is no "every histogram", because a histogram is the most expensive thing a panel
-  fetches. A field naming one is a `ColumnKind.HISTOGRAM` in `field_column_kinds()`.
-- `metric_reductions(parameters) -> MetricReductions` (optional, every step by default) — how much of each metric in
-  `hint_required_columns` the chart draws from, by column. `MetricReductions(default=..., by_column={...})` names a
-  `MetricReduction` for every column, or for the ones in `by_column`. A chart that shows where each run ended up, or
-  a summary of its series, says so (`LATEST`, `FIRST`, `MIN`, `MAX` or `MEAN`) and is handed a row per run and metric
-  instead of a row per step, which is what keeps it cheap on a long run: `LATEST` and `FIRST` are probes of the index,
-  the others are computed by the database. A chart that draws the series itself keeps the default. When the charts of
-  one panel ask for different things of a metric, it is fetched whole, which serves them all. A chart with no list of
-  its metrics (every metric) takes its `default` for all of them.
+  Its fields, all empty by default:
 
-The same hints bound what the experiment page fetches: a panel shows one page of its charts, and only
-those charts' columns and keys are requested. They are also what the panel's chart filter matches
-against (a fuzzy match on each metric and artifact key, and on the chart type), so a chart type that hints
-accurately is both cheap to page and easy to find. A chart whose hint is `None` ("everything") is found by
-its chart type alone.
+  - `metrics` and `metric_patterns` — the metrics drawn, by name (`loss`, and `step` or `timestamp_utc` for an x-axis)
+    and by pattern (`layer_*/grad_norm`), or `metric_patterns=EVERY_KEY` for every metric. A name is literal, so a
+    metric called `top#1` is named, not matched. A pattern is matched against the names logged when the panel is drawn,
+    so a chart of many metrics asks for them this way, not by listing each, and metrics logged later are included. In a
+    pattern a `*` stands for any run of characters (`/` included) and a `#` for a run of digits, so `accuracy/#,#/*` is
+    the cells of a grid and a class, and not `accuracy/3,7/aux/dog`. `KeyPatterns.captures(pattern, key)` hands back what
+    each wildcard stood for (`("3", "7", "dog")`), with the matcher the server used, so a chart can group keys by their
+    parts without a regular expression of its own. A pattern over thousands of metrics must not ask for their whole
+    history (that is a column for each metric and a row for each step): read their last value (`reductions`) or their
+    spread (`series`). A chart that draws every step of more than `DLBOARD_WIDE_HISTORY_METRICS` (200) metrics shows a
+    badge saying how many, and one over `DLBOARD_MAX_HISTORY_METRICS` (5,000) is not drawn, and their history not read.
+  - `reductions` — how much of each metric the chart draws from, by column. `MetricReductions(default=...,
+    by_column={...})` names a `MetricReduction` for every column, or for the ones in `by_column`. A chart that shows
+    where each run ended up, or a summary of its series, says so (`LATEST`, `FIRST`, `MIN`, `MAX` or `MEAN`) and is
+    handed a row per run and metric instead of a row per step, which is what keeps it cheap on a long run: `LATEST` and
+    `FIRST` are probes of the index, the others are computed by the database. A chart that draws the series itself keeps
+    the default. Two charts of one panel that read a metric differently each get it as they asked: a mean beside a line
+    chart of the same metric is the database's to compute, not a history to fetch. A chart of every metric takes its
+    `default` for all of them, except the ones `by_column` names.
+  - `hparams` and `hparam_patterns` — the hyperparameters drawn, by name and by pattern (`EVERY_KEY` for every one). A
+    pattern is read whole, one small row per run, and the chart narrows it itself.
+  - `artifacts` and `artifact_prefixes` — the artifact keys drawn, by name, and every artifact whose key starts with one
+    of the prefixes, for a chart that lists a whole family (every `checkpoints/...` key) including keys logged later. A
+    prefix is literal: a `*` or `#` in it is part of the key.
+  - `histograms` — the logged histogram keys the chart shows. A chart always names them: there is no "every histogram",
+    because a histogram is the most expensive thing a panel reads. A field naming one is a `ColumnKind.HISTOGRAM` in
+    `field_column_kinds()`.
+  - `series` — the spread of many metrics' values, as a set of `SeriesBandRequest`s: the patterns they match, a grid of
+    at most `grid` cells of steps, the newest `runs` runs, and optionally `group_by`, which wildcards of the pattern name
+    a metric's group. The panel reads each spread for the chart instead of each metric, as a `SeriesBand` per run, group
+    and step in the column `request.column`, whose cell for a step is a tuple with a band for each group. A `SeriesBand`
+    is the nearest-rank minimum, quartiles (`p25`, `p75`), median and maximum of the group's values in the cell, their
+    `mean`, how many metrics logged one (`count`), and which metric was the lowest and the highest (`minimum_key`,
+    `maximum_key`), so a chart can name the ones to look at.
+
+    This is how to aggregate a family of thousands of metrics, such as `accuracy/{row},{col}/{class}`: ask for
+    `accuracy/#,#/*` with `group_by=(2,)` for a band per class, or `group_by=(0, 1)` for one per cell (at most
+    `max_groups`, 12 by default, are read), and draw the bands. Never ask for the history of the pattern. The grid
+    has fewer cells over many metrics, to keep the read to `BAND_PROBE_BUDGET` probes (`request.cells_for`). The read is an
+    ordered probe of the index for each metric, run and grid cell, so it costs the metrics matched, not the steps a run
+    trained, and a run that logs every 50 steps is covered as well as one that logs every step. Each cell is a stretch of
+    steps ending at the one shown (the grid's cells run end to end), and a metric counts in it with its newest write
+    there. `plugins/charts/series_band.py` is the reference chart (`_band_traces.nested_band` draws the five traces
+    of a spread, as the histogram chart's bands view does), and autogen uses it for a family of metrics that share a
+    template (`layer_0/grad_norm` to `layer_99/grad_norm`, once there are at least 12 of them).
+
+    A chart drawn with Plotly cannot use the theme's colors as they are (`series_color` is a CSS variable, which Plotly
+    drops). Name them in the figure as `series_color(...)`, or `series_color(...)/0.12` for one at an opacity, and the
+    figure's colors (any `color`, `fillcolor`, `gridcolor` or `linecolor`, which may also be a variable such as
+    `var(--mantine-color-text)`) are resolved in the browser, in the theme's current color scheme and again when it
+    changes, so a run is the color it is in every other chart. `series_band_colors.js` does it for the reference chart,
+    which keeps its figure in a `dcc.Store` that a clientside callback turns into the graph's.
+
+  The request also says which keys are charted already (so auto-generate does not chart them again) and is what the
+  panel's chart filter matches against (a fuzzy match on each metric and artifact key, and on the chart type), so a
+  chart type that asks for exactly what it draws is cheap to page and easy to find. A chart of every metric is found by
+  its chart type alone. Asking for the same data makes the same request, so the chart editor redraws a display-only
+  edit (a chart's height, its colors) without reading again.
 - `field_column_kinds()` — map each parameter field to the `ColumnKind` (metric/artifact/hparam)
   that populates it, so the settings UI knows what to offer as choices.
 - `can_display_artifact(artifact) -> bool` (optional, `False` by default) — say which logged artifacts this

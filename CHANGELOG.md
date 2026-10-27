@@ -29,6 +29,36 @@ pulls that section's body into the GitHub release notes and publishes both distr
 * **`tools/ingest_load.py` reproduces an artifact upload load and reports where the ingest spent it.** Against a
   Postgres and a traced server it starts itself, or a deployment of yours, optionally with headless browsers holding
   the experiment page open and a metric history seeded, and under py-spy.
+* **A chart says when it draws every step of many metrics, and past a limit is not drawn.** A chart over a pattern
+  that matches more than `DLBOARD_WIDE_HISTORY_METRICS` (200) metrics, drawing each whole (a table of a row per step,
+  say), has a badge saying how many; past `DLBOARD_MAX_HISTORY_METRICS` (5,000) their history is not read, and the
+  chart says to show their last value or their spread instead. (#417)
+* **A line chart says when it read far more points than it draws**, with how many, and that logging less often draws
+  it faster. (#364)
+
+### Changed
+
+* **A chart type says what it reads with one method, `data_request`, in place of nine.** It returns a `DataRequest`,
+  a frozen value of what the chart draws, and each chart is now handed a frame of only that, not the panel's shared
+  one. Two charts of one panel that read a metric differently each get it their way, so a mean beside a line chart of
+  the same metric is computed by the database instead of read whole (#364), and drawing a page of line charts is
+  quicker: about 2.4 times on a typical experiment. A chart plugin moves its hints into the request:
+
+  | Before | `DataRequest` field |
+  |---|---|
+  | `hint_required_columns` (`None` for every metric) | `metrics` (`metric_patterns=EVERY_KEY` for every metric) |
+  | `hint_required_column_patterns` | `metric_patterns` |
+  | `metric_reductions` | `reductions` |
+  | `hint_required_hparams` (`None` for every one) | `hparams`, `hparam_patterns` (`EVERY_KEY` for every one) |
+  | `hint_required_artifact_keys` | `artifacts` |
+  | `hint_required_artifact_key_prefixes` | `artifact_prefixes` |
+  | `hint_required_histogram_keys` | `histograms` |
+  | `hint_required_series` | `series` |
+
+  A chart whose saved settings no longer validate, or whose type is not installed, reads nothing for itself rather
+  than every metric: it shows its own error either way. (#395)
+* **The chart editor draws an edit that asks for the same data without reading it again**, such as a change of a
+  chart's height or colors, and opening the editor on a chart. A write to the experiment reads it afresh. (#335)
 
 ## [0.12.0] - 2026-10-26
 
