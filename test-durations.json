@@ -1761,6 +1761,7 @@
   "dlboard/serve/tests/startup_test.py::test_an_error_waiting_cannot_fix_is_raised_at_once": 0.0016627460136078298,
   "dlboard/serve/tests/startup_test.py::test_each_retry_is_an_event_on_the_wait_span": 0.01516518899006769,
   "dlboard/tests/app_resolution_test.py::test_a_rest_request_uses_its_own_apps_store_even_after_another_app_is_built": 1.22589134296868,
+  "dlboard/tests/artifact_download_test.py::test_a_download_the_browser_hangs_up_on_leaves_no_file_open[filesystem]": 3.4378611560005083,
   "dlboard/tests/artifact_download_test.py::test_a_presigned_downloads_redirect_is_never_cached_as_long_as_the_bytes_it_points_to[presign-s3]": 2.666705432027811,
   "dlboard/tests/artifact_download_test.py::test_a_soft_deleted_artifacts_id_404s[filesystem]": 2.4284837990126107,
   "dlboard/tests/artifact_download_test.py::test_a_soft_deleted_artifacts_id_404s[s3]": 2.733298911014572,

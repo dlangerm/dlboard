@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 import pytest
 from werkzeug.serving import make_server
 
+from dlboard.conftest import closing_responses
 from dlboard.plugins import LOCAL_DEPLOYMENT_DEFAULT
 from dlboard.serve import app as build_app
 
@@ -61,7 +62,7 @@ def dlboard_app(tmp_path_factory: pytest.TempPathFactory) -> Dash:
 @pytest.fixture(scope="session")
 def live_server_url(dlboard_app: Dash) -> Iterator[str]:
     """Serve `dlboard_app` on a background thread for the duration of the test session."""
-    server = make_server("127.0.0.1", 0, dlboard_app.server)
+    server = make_server("127.0.0.1", 0, closing_responses(dlboard_app.server))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:

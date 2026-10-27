@@ -7,7 +7,11 @@ route's behavior must be identical whichever `BlobBackend` is doing the actual s
 
 from __future__ import annotations
 
+import gc
+import socket
+import struct
 import time
+import warnings
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -114,3 +118,44 @@ def test_a_soft_deleted_artifacts_id_404s(backend_server: BackendServer, tmp_pat
     response = requests.get(f"{backend_server.url}/artifact/{artifact.id}", timeout=5)
 
     assert response.status_code == 404
+
+
+@pytest.mark.parametrize("artifact_backend", [ArtifactBackend.FILESYSTEM], indirect=True)
+def test_a_download_the_browser_hangs_up_on_leaves_no_file_open(
+    backend_server: BackendServer, tmp_path: Path
+) -> None:
+    """
+    A browser aborts an image's download when the page moves on (#425).
+
+    The test servers are werkzeug's, which skips closing the response when reading the reset socket fails, leaving the
+    artifact's file open until the collector finds it -- in whichever test runs then, as a `ResourceWarning`.
+    """
+    api = BasicDlboardAPI(backend_server.url)
+    experiment = api.get_or_create_experiment(api.get_or_create_project("p").id, "e")
+    run = api.create_run(models.NewRun(experiment_id=experiment.id))
+    # Small enough to sit whole in the socket's buffer: the server has written all of it when the reset arrives.
+    small = tmp_path / "small.bin"
+    small.write_bytes(b"x" * 1000)
+    api.log_artifact_batch(
+        [
+            (
+                models.NewArtifact(
+                    key="img", fname=small.name, run_id=run.id, experiment_id=experiment.id, step=0
+                ),
+                small,
+            )
+        ]
+    )
+    artifact = _wait_for_artifact(backend_server.store, experiment.id)
+
+    host, port = backend_server.url.removeprefix("http://").split(":")
+    with socket.create_connection((host, int(port))) as sock:
+        sock.sendall(f"GET /artifact/{artifact.id} HTTP/1.1\r\nHost: {host}\r\n\r\n".encode())
+        assert sock.recv(1)  # the download has started
+        # Closed with a reset, as a browser's aborted request is.
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+    time.sleep(1)  # the server finds out as it writes
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        gc.collect()

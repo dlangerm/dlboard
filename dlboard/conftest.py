@@ -40,13 +40,34 @@ from dlboard.serve.telemetry import LOGS, METRICS, _instrument
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
-    from wsgiref.types import InputStream, StartResponse, WSGIEnvironment
+    from wsgiref.types import InputStream, StartResponse, WSGIApplication, WSGIEnvironment
 
     from dash import Dash
     from opentelemetry.proto.trace.v1.trace_pb2 import Span as WireSpan
 
     from dlboard.models import PluginProtocol
     from dlboard.plugins.data_stores._blob_store import BlobBackend
+
+
+def closing_responses(app: WSGIApplication) -> WSGIApplication:
+    """
+    `app`, with each response closed once it is done with, for a test to serve on werkzeug's own server.
+
+    That server closes a response last, after draining what the client sent: if the client has already hung up (a
+    browser abandoning an image's download as its page moves on), the drain fails first and the response, an artifact's
+    open file, is left for the collector -- which reports it, as a `ResourceWarning`, in whichever test runs then (#425).
+    Closed here as soon as it is all sent, or when the server lets go of it half-sent.
+    """
+
+    def serve(environ: WSGIEnvironment, start_response: StartResponse) -> Iterator[bytes]:
+        response = app(environ, start_response)
+        try:
+            yield from response
+        finally:
+            if (close := getattr(response, "close", None)) is not None:
+                close()
+
+    return serve
 
 
 class ScreenshotMode(StrEnum):
@@ -577,7 +598,7 @@ def backend_server(
         )
     finally:
         monkeypatch.undo()
-    server = make_server("127.0.0.1", 0, app.server)
+    server = make_server("127.0.0.1", 0, closing_responses(app.server))
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
