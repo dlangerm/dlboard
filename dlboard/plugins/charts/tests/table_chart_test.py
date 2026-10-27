@@ -554,4 +554,4 @@ def test_an_overlay_chosen_without_its_picture_is_a_file_to_open() -> None:
 def test_a_picture_shown_by_its_key_has_its_overlays_fetched_with_it() -> None:
     settings = TableChartSettings(show_artifacts=[_PICTURE])
 
-    assert TableChart.hint_required_artifact_key_prefixes(settings) == {overlay_key(_PICTURE)}
+    assert TableChart.data_request(settings).artifact_prefixes == {overlay_key(_PICTURE)}

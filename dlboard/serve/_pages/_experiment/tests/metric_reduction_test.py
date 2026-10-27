@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import math
 from typing import TYPE_CHECKING, Any
@@ -13,7 +14,7 @@ from dash._utils import to_json
 
 from dlboard import models
 from dlboard.conftest import EVERY_STORE_BACKEND, StoreBackend
-from dlboard.models import ChartInstance, MetricReduction, MetricReductions, PanelInstance
+from dlboard.models import ChartInstance, DataRequest, MetricReduction, MetricReductions, PanelInstance
 from dlboard.plugins.charts._table_settings import Aggregate, TableRows
 from dlboard.plugins.charts.bar_chart import BarChart
 from dlboard.plugins.charts.line_chart import LineChart
@@ -58,8 +59,12 @@ def _train(store: SQLLiteStore, experiment_id: int) -> None:
         store.log_metrics([steps[5]])  # the newest write of step 5 is the original one
 
 
-def _whole(_chart: ChartInstance[Any, Any]) -> MetricReductions:
-    return MetricReductions()
+_ASKED = ChartInstance.data_request
+
+
+def _whole(chart: ChartInstance[Any, Any]) -> DataRequest:
+    """What `chart` asks for, but every metric of it whole."""
+    return dataclasses.replace(_ASKED(chart), reductions=MetricReductions())
 
 
 def _drawn(chart: ChartInstance[Any, Any], frame: pd.DataFrame) -> object:
@@ -102,10 +107,10 @@ def test_a_chart_is_drawn_the_same_from_one_row_per_run_as_from_every_step(
 ) -> None:
     _train(store, experiment_id)
     panel = PanelInstance[pd.DataFrame, object](name="p", charts=[chart])
-    assert chart.metric_reductions().default is not MetricReduction.HISTORY
+    assert chart.data_request().reductions.default is not MetricReduction.HISTORY
 
     reduced = panel_data.fetch_panel_dataframe(store, experiment_id, panel, run_ids=None)
-    monkeypatch.setattr(ChartInstance, "metric_reductions", _whole)
+    monkeypatch.setattr(ChartInstance, "data_request", _whole)
     whole = panel_data.fetch_panel_dataframe(store, experiment_id, panel, run_ids=None)
 
     assert len(reduced) < len(whole)
@@ -149,7 +154,7 @@ _BAR = _chart("bar", column="loss", x_axis="lr")
 def test_a_panel_fetches_each_metric_as_little_as_every_chart_of_it_allows(
     charts: list[ChartInstance[Any, Any]], expected: dict[MetricReduction, set[str] | None]
 ) -> None:
-    assert PanelInstance[Any, Any](charts=charts).metric_reductions() == expected
+    assert panel_data.metrics_by_reduction([chart.data_request() for chart in charts]) == expected
 
 
 def test_a_panel_whose_charts_need_different_fetches_draws_each_from_its_own(
@@ -177,5 +182,5 @@ def test_a_table_of_runs_reads_each_metric_as_the_reduction_of_its_aggregate(agg
     """`Aggregate` and `MetricReduction` name the same reductions by the same values, so a table needs no mapping."""
     chart = _chart("table", rows=TableRows.RUN, aggregate=aggregate)
 
-    assert chart.metric_reductions().default.value == aggregate.value
-    assert chart.metric_reductions().of("loss") is MetricReduction(aggregate.value)
+    assert chart.data_request().reductions.default.value == aggregate.value
+    assert chart.data_request().reductions.of("loss") is MetricReduction(aggregate.value)

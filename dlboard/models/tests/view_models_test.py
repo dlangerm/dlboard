@@ -10,7 +10,7 @@ import pytest
 from pydantic import BaseModel, Field, ValidationError
 
 from dlboard.conftest import make_fake_chart
-from dlboard.models import is_inlineable_artifact
+from dlboard.models import DataRequest, is_inlineable_artifact
 from dlboard.models._view import (
     ADVANCED_SECTION,
     DATA_SECTION,
@@ -19,7 +19,6 @@ from dlboard.models._view import (
     ChartType,
     ChartTypeRegistry,
     ColumnKind,
-    PanelInstance,
     ParameterField,
     ParameterFieldType,
     SettingsSection,
@@ -48,18 +47,10 @@ class _FakeChart(ChartType[_FakeParams, pd.DataFrame, dict[str, object]], frozen
 
     @classmethod
     @typing.override
-    def hint_required_columns(cls, parameters: _FakeParams) -> set[str] | None:
-        return None if parameters.metric == "all" else {parameters.metric}
-
-    @classmethod
-    @typing.override
-    def hint_required_artifact_keys(cls, parameters: _FakeParams) -> set[str] | None:
-        return {"img"} if parameters.flag else set()
-
-    @classmethod
-    @typing.override
-    def hint_required_hparams(cls, parameters: _FakeParams) -> set[str] | None:
-        return None if parameters.hparam == "all" else ({parameters.hparam} if parameters.hparam else set())
+    def data_request(cls, parameters: _FakeParams) -> DataRequest:
+        return DataRequest(
+            metrics=frozenset({parameters.metric}), artifacts=frozenset({"img"} if parameters.flag else ())
+        )
 
     @classmethod
     @typing.override
@@ -191,7 +182,7 @@ def test_chart_instance_delegates_through_registry() -> None:
     _FakeChart.register()
     chart = ChartInstance[pd.DataFrame, dict[str, object]](chart_type="fake", parameters={"metric": "loss"})
     assert chart.render(pd.DataFrame({"loss": [1, 2, 3]})) == {"metric": "loss", "rows": 3}
-    assert chart.hint_required_columns() == {"loss"}
+    assert chart.data_request() == DataRequest(metrics=frozenset({"loss"}))
 
 
 # ---- a chart whose persisted parameters no longer validate must not crash the whole page ----
@@ -206,114 +197,25 @@ def test_chart_instance_delegates_through_registry() -> None:
         pytest.param("not-installed", {}, UnknownChartTypeError, id="unregistered-chart-type"),
     ],
 )
-def test_hint_and_width_methods_fall_back_instead_of_raising_for_a_broken_chart(
+def test_a_broken_chart_reads_nothing_and_has_a_width_instead_of_raising(
     chart_type: str, parameters: dict[str, object], render_error: type[Exception]
 ) -> None:
     """
     Regression: parameters are validated against the chart type's settings model lazily, on every
     call -- a chart saved before a schema change (or otherwise malformed) used to raise straight out
-    of `hint_required_columns`/`natural_width`, called unguarded while just laying out the page, and
+    of what it reads and `natural_width`, called unguarded while just laying out the page, and
     take the whole page down with an unhandled 500. The same went for a chart type no installed
     plugin provides. These must degrade gracefully instead; only `render()` (already isolated
-    per-chart by the page layer) is allowed to still raise.
+    per-chart by the page layer) is allowed to still raise, so nothing is read for a chart that cannot use it.
     """
     _FakeChart.register()
     chart = ChartInstance[pd.DataFrame, dict[str, object]](chart_type=chart_type, parameters=parameters)
 
-    assert chart.hint_required_columns() is None
-    assert chart.hint_required_artifact_keys() is None
-    assert chart.hint_required_hparams() is None
+    assert chart.data_request() == DataRequest()
     assert chart.natural_width() == 400
 
     with pytest.raises(render_error):
         chart.render(pd.DataFrame())
-
-
-@pytest.mark.parametrize(
-    ("broken_chart_type", "broken_parameters"),
-    [
-        pytest.param("fake", {}, id="invalid-parameters"),
-        pytest.param("not-installed", {}, id="unregistered-chart-type"),
-    ],
-)
-def test_panel_hint_required_columns_short_circuits_when_one_chart_is_broken(
-    broken_chart_type: str, broken_parameters: dict[str, object]
-) -> None:
-    """A broken chart's `None` hint must widen the whole panel's fetch to "everything" (the existing
-    short-circuit semantics for `None`), not crash the aggregation.
-    """
-    _FakeChart.register()
-    panel = PanelInstance[pd.DataFrame, dict[str, object]](
-        name="p",
-        charts=[
-            ChartInstance[pd.DataFrame, dict[str, object]](chart_type="fake", parameters={"metric": "loss"}),
-            ChartInstance[pd.DataFrame, dict[str, object]](
-                chart_type=broken_chart_type, parameters=broken_parameters
-            ),
-        ],
-    )
-    assert panel.hint_required_columns() is None
-
-
-@pytest.mark.parametrize(
-    ("metrics", "expected"),
-    [
-        (["loss", "acc"], {"loss", "acc"}),
-        (["loss", "all"], None),
-    ],
-)
-def test_panel_hint_required_columns_aggregates_and_short_circuits(
-    metrics: list[str], expected: set[str] | None
-) -> None:
-    _FakeChart.register()
-    panel = PanelInstance[pd.DataFrame, dict[str, object]](
-        name="p",
-        charts=[
-            ChartInstance[pd.DataFrame, dict[str, object]](chart_type="fake", parameters={"metric": m})
-            for m in metrics
-        ],
-    )
-    assert panel.hint_required_columns() == expected
-
-
-def test_panel_hint_required_artifact_keys_aggregates() -> None:
-    _FakeChart.register()
-    panel = PanelInstance[pd.DataFrame, dict[str, object]](
-        name="p",
-        charts=[
-            ChartInstance[pd.DataFrame, dict[str, object]](
-                chart_type="fake", parameters={"metric": "loss", "flag": True}
-            ),
-            ChartInstance[pd.DataFrame, dict[str, object]](
-                chart_type="fake", parameters={"metric": "acc", "flag": False}
-            ),
-        ],
-    )
-    assert panel.hint_required_artifact_keys() == {"img"}
-
-
-@pytest.mark.parametrize(
-    ("hparams", "expected"),
-    [
-        (["lr", "batch_size"], {"lr", "batch_size"}),
-        (["lr", "all"], None),
-        (["", ""], set[str]()),
-    ],
-)
-def test_panel_hint_required_hparams_aggregates_and_short_circuits(
-    hparams: list[str], expected: set[str] | None
-) -> None:
-    _FakeChart.register()
-    panel = PanelInstance[pd.DataFrame, dict[str, object]](
-        name="p",
-        charts=[
-            ChartInstance[pd.DataFrame, dict[str, object]](
-                chart_type="fake", parameters={"metric": "loss", "hparam": h}
-            )
-            for h in hparams
-        ],
-    )
-    assert panel.hint_required_hparams() == expected
 
 
 def test_a_chart_without_an_id_gets_a_stable_one_from_its_content() -> None:

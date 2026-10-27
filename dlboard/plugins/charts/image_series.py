@@ -25,6 +25,7 @@ from dlboard.models import (
     ChartType,
     ColumnChoices,
     ColumnKind,
+    DataRequest,
     FixedRows,
     OverlayKey,
     RenderContext,
@@ -659,25 +660,14 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
 
     @classmethod
     @typing.override
-    def hint_required_columns(cls, parameters: ImageChartSettings) -> set[str]:
-        return set() if parameters.x_axis == "step" else {parameters.x_axis}
-
-    @classmethod
-    @typing.override
-    def hint_required_artifact_keys(cls, parameters: ImageChartSettings) -> set[str]:
-        # The keys the layers name too: they are charted here, so auto-generate does not give them charts of their own.
-        return {parameters.key, *parameters.layers}
-
-    @classmethod
-    @typing.override
-    def hint_required_artifact_key_prefixes(cls, parameters: ImageChartSettings) -> set[str]:
-        # Every overlay logged over the picture, including ones logged after the chart was made.
-        return {overlay_key(parameters.key)}
-
-    @classmethod
-    @typing.override
-    def hint_required_hparams(cls, parameters: ImageChartSettings) -> set[str]:
-        return set()
+    def data_request(cls, parameters: ImageChartSettings) -> DataRequest:
+        return DataRequest(
+            metrics=frozenset() if parameters.x_axis == "step" else frozenset({parameters.x_axis}),
+            # The keys the layers name too: they are charted here, so auto-generate does not give them charts of their own.
+            artifacts=frozenset({parameters.key, *parameters.layers}),
+            # Every overlay logged over the picture, including ones logged after the chart was made.
+            artifact_prefixes=frozenset({overlay_key(parameters.key)}),
+        )
 
     @classmethod
     @typing.override

@@ -155,23 +155,8 @@ class _HistogramHintChart(ChartType[_KeyParams, pd.DataFrame, None], frozen=True
 
     @classmethod
     @typing.override
-    def hint_required_columns(cls, parameters: _KeyParams) -> set[str] | None:
-        return set()
-
-    @classmethod
-    @typing.override
-    def hint_required_artifact_keys(cls, parameters: _KeyParams) -> set[str] | None:
-        return set()
-
-    @classmethod
-    @typing.override
-    def hint_required_hparams(cls, parameters: _KeyParams) -> set[str] | None:
-        return set()
-
-    @classmethod
-    @typing.override
-    def hint_required_histogram_keys(cls, parameters: _KeyParams) -> set[str]:
-        return {parameters.key}
+    def data_request(cls, parameters: _KeyParams) -> models.DataRequest:
+        return models.DataRequest(histograms=frozenset({parameters.key}))
 
     @classmethod
     @typing.override
@@ -399,8 +384,7 @@ def test_a_panel_is_split_only_when_different_charts_want_metrics_and_artifacts(
     charts: list[ChartInstance[Any, Any]], *, splits: bool
 ) -> None:
     TableChart.register(allow_override=True)
-    panel = PanelInstance[Any, Any](name="p", charts=charts)
-    assert panel_data._splits_metric_and_artifact_charts(panel) is splits
+    assert panel_data._splits_metric_and_artifact_charts([chart.data_request() for chart in charts]) is splits
 
 
 def test_a_table_of_a_metric_pattern_fetches_the_metrics_it_matches_including_later_ones(
@@ -505,6 +489,6 @@ def test_a_series_band_panel_reads_a_band_for_each_group_of_a_family_in_one_read
 
     df = panel_data.fetch_panel_dataframe(store, experiment_id, panel, run_ids=None)
 
-    (request,) = panel.charts[0].hint_required_series()
+    (request,) = panel.charts[0].data_request().series
     ((cell,),) = [df[request.column].dropna().tolist()]
     assert [(band.group, band.count, band.mean) for band in cell] == [("cat", 1, 10.0), ("dog", 2, 2.0)]

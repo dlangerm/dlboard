@@ -11,7 +11,7 @@ from dash import no_update
 from pydantic import BaseModel
 
 from dlboard.conftest import props as _props
-from dlboard.models import ChartInstance, ChartType, ColumnKind, PanelInstance
+from dlboard.models import EVERY_KEY, ChartInstance, ChartType, ColumnKind, DataRequest, PanelInstance
 from dlboard.plugins.charts.line_chart import LineChart
 from dlboard.serve._pages._experiment import _chart_view as chart_view
 from dlboard.serve._pages._experiment import _panel_data as panel_data
@@ -82,7 +82,7 @@ class _ThirdPartyParams(BaseModel, frozen=True, extra="forbid"):
 
 
 class _ThirdPartyChart(ChartType[_ThirdPartyParams, pd.DataFrame, None], frozen=True, extra="forbid"):
-    """A chart type dlboard knows nothing about, declaring its columns only through the `hint_*` hooks."""
+    """A chart type dlboard knows nothing about, declaring its columns only through its `data_request`."""
 
     name: ClassVar[str] = "third-party"
 
@@ -98,18 +98,10 @@ class _ThirdPartyChart(ChartType[_ThirdPartyParams, pd.DataFrame, None], frozen=
 
     @classmethod
     @typing.override
-    def hint_required_columns(cls, parameters: _ThirdPartyParams) -> set[str] | None:
-        return None if parameters.metrics is None else set(parameters.metrics)
-
-    @classmethod
-    @typing.override
-    def hint_required_artifact_keys(cls, parameters: _ThirdPartyParams) -> set[str] | None:
-        return set()
-
-    @classmethod
-    @typing.override
-    def hint_required_hparams(cls, parameters: _ThirdPartyParams) -> set[str] | None:
-        return set(parameters.hparams)
+    def data_request(cls, parameters: _ThirdPartyParams) -> DataRequest:
+        if parameters.metrics is None:
+            return DataRequest(metric_patterns=EVERY_KEY, hparams=frozenset(parameters.hparams))
+        return DataRequest(metrics=frozenset(parameters.metrics), hparams=frozenset(parameters.hparams))
 
     @classmethod
     @typing.override

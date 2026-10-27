@@ -245,17 +245,16 @@ def chart_search_keys(chart: models.ChartInstance[Any, Any]) -> set[str]:
     """
     What a chart's filter matches against: the metric, artifact and histogram keys it shows, and its chart type.
 
-    Taken from the chart's `hint_required_*` methods rather than any one chart type's own settings,
-    so it works for every chart plugin. A chart whose hint is `None` ("everything", like a table
-    chart with no metric filter) is findable by its chart type alone.
+    Taken from the chart's `data_request` rather than any one chart type's own settings, so it works for every chart
+    plugin. A chart of every metric (a table chart with no metric filter) is findable by its chart type alone.
     """
-    columns = chart.hint_required_columns() or set()
+    request = chart.data_request()
     return {
         chart.chart_type,
-        *(column for column in columns if column not in NO_DATA_COLUMNS),
-        *(chart.hint_required_artifact_keys() or set()),
-        *chart.hint_required_artifact_key_prefixes(),
-        *chart.hint_required_histogram_keys(),
+        *(column for column in request.metrics if column not in NO_DATA_COLUMNS),
+        *request.artifacts,
+        *request.artifact_prefixes,
+        *request.histograms,
     }
 
 

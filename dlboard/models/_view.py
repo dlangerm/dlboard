@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
-import itertools
 import json
 import types
 import typing
@@ -17,14 +16,10 @@ from structlog.stdlib import get_logger
 from dlboard._compat import StrEnum
 from dlboard._telemetry import Attributes, attribute
 from dlboard._telemetry.traces import SpanKind, TraceKey, span
-from dlboard.models._key_patterns import KeyPatterns
-from dlboard.models._metric import MetricReduction, MetricReductions
+from dlboard.models._data_request import DataRequest
 
 if typing.TYPE_CHECKING:
-    from collections.abc import Collection, Mapping
-
     from dlboard.models._artifact import Artifact
-    from dlboard.models._panel_frame import SeriesBandRequest
 
 _log = get_logger(__name__)
 
@@ -203,71 +198,13 @@ class ChartType(ABC, BaseModel, typing.Generic[_Parameters, _Dataframe, _Chart],
 
     @classmethod
     @abstractmethod
-    def hint_required_columns(cls, parameters: _Parameters) -> set[str] | None:
-        """Hint at the columns required for this chart."""
-
-    @classmethod
-    def metric_reductions(cls, parameters: _Parameters) -> MetricReductions:  # noqa: ARG003
+    def data_request(cls, parameters: _Parameters) -> DataRequest:
         """
-        How much of each metric in `hint_required_columns` this chart draws from, by column (`MetricReductions`).
+        Everything a chart with these settings reads (`DataRequest`): what its panel fetches for it.
 
-        A chart that shows where each run ended up, or a summary of its series, says so, and is then handed
-        a row per run instead of a row per step -- what keeps its cost from growing with training. Defaults to
-        every step, so a chart type that draws the series itself need not say anything.
+        It is also what auto-generate goes by to know which keys are charted already, and what the panel's chart filter
+        matches against, so a chart that asks for exactly what it draws is cheap to page and easy to find.
         """
-        return MetricReductions()
-
-    @classmethod
-    @abstractmethod
-    def hint_required_artifact_keys(cls, parameters: _Parameters) -> set[str] | None:
-        """Hint at the columns required for this chart."""
-
-    @classmethod
-    def hint_required_artifact_key_prefixes(cls, parameters: _Parameters) -> set[str]:  # noqa: ARG003
-        """
-        Hint at artifact key prefixes this chart needs: every key that starts with one of them.
-
-        For a chart that lists a whole family of artifacts (every `checkpoints/...` file) rather
-        than one named key, so keys logged later are included without editing the chart.
-        Defaults to none, so a chart type that only ever names its keys need not say anything.
-        """
-        return set()
-
-    @classmethod
-    def hint_required_column_patterns(cls, parameters: _Parameters) -> set[str]:  # noqa: ARG003
-        """
-        Hint at the metric patterns this chart needs: every metric whose name matches one (`layer_*/grad_norm`).
-
-        For a chart that shows a family of metrics rather than naming each, so metrics logged later are included
-        without editing the chart. Defaults to none, so a chart type that names its metrics need not say anything.
-        """
-        return set()
-
-    @classmethod
-    def hint_required_series(cls, parameters: _Parameters) -> frozenset[SeriesBandRequest]:  # noqa: ARG003
-        """
-        Hint at the spreads of metric values this chart draws, none by default.
-
-        For a chart that summarises many metrics at once rather than drawing each: the panel reads each spread for it
-        (see `SeriesBandRequest`), in place of reading the metrics themselves.
-        """
-        return frozenset()
-
-    @classmethod
-    def hint_required_histogram_keys(cls, parameters: _Parameters) -> set[str]:  # noqa: ARG003
-        """
-        Hint at the logged histogram keys this chart shows.
-
-        Defaults to none, so a chart type that does not show histograms need not say anything. Unlike
-        the metric hint there is no "everything": a histogram is the most expensive thing a panel fetches,
-        so a chart always names the ones it draws.
-        """
-        return set()
-
-    @classmethod
-    @abstractmethod
-    def hint_required_hparams(cls, parameters: _Parameters) -> set[str] | None:
-        """Hint at the hyperparameter keys required for this chart."""
 
     @classmethod
     @abstractmethod
@@ -533,44 +470,9 @@ class ChartTypeRegistry:
         return chart_type.render_in(parameters, dataframe, context)
 
     @classmethod
-    def hint_required_columns(cls, chart: ChartInstance[_Dataframe, _Chart]) -> set[str] | None:
+    def data_request(cls, chart: ChartInstance[_Dataframe, _Chart]) -> DataRequest:
         chart_type, parameters = cls._typed_chart(chart)
-        return chart_type.hint_required_columns(parameters)
-
-    @classmethod
-    def metric_reductions(cls, chart: ChartInstance[_Dataframe, _Chart]) -> MetricReductions:
-        chart_type, parameters = cls._typed_chart(chart)
-        return chart_type.metric_reductions(parameters)
-
-    @classmethod
-    def hint_required_artifact_keys(cls, chart: ChartInstance[_Dataframe, _Chart]) -> set[str] | None:
-        chart_type, parameters = cls._typed_chart(chart)
-        return chart_type.hint_required_artifact_keys(parameters)
-
-    @classmethod
-    def hint_required_artifact_key_prefixes(cls, chart: ChartInstance[_Dataframe, _Chart]) -> set[str]:
-        chart_type, parameters = cls._typed_chart(chart)
-        return chart_type.hint_required_artifact_key_prefixes(parameters)
-
-    @classmethod
-    def hint_required_column_patterns(cls, chart: ChartInstance[_Dataframe, _Chart]) -> set[str]:
-        chart_type, parameters = cls._typed_chart(chart)
-        return chart_type.hint_required_column_patterns(parameters)
-
-    @classmethod
-    def hint_required_series(cls, chart: ChartInstance[_Dataframe, _Chart]) -> frozenset[SeriesBandRequest]:
-        chart_type, parameters = cls._typed_chart(chart)
-        return chart_type.hint_required_series(parameters)
-
-    @classmethod
-    def hint_required_histogram_keys(cls, chart: ChartInstance[_Dataframe, _Chart]) -> set[str]:
-        chart_type, parameters = cls._typed_chart(chart)
-        return chart_type.hint_required_histogram_keys(parameters)
-
-    @classmethod
-    def hint_required_hparams(cls, chart: ChartInstance[_Dataframe, _Chart]) -> set[str] | None:
-        chart_type, parameters = cls._typed_chart(chart)
-        return chart_type.hint_required_hparams(parameters)
+        return chart_type.data_request(parameters)
 
     @classmethod
     def natural_width(cls, chart: ChartInstance[_Dataframe, _Chart], context: RenderContext) -> int:
@@ -640,97 +542,25 @@ class ChartInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, 
         with span("dlboard.chart.render", SpanKind.INTERNAL, _RenderTrace(chart_type=self.chart_type)):
             return ChartTypeRegistry.render(self, dataframe, context)
 
-    def hint_required_columns(self) -> set[str] | None:
+    def data_request(self) -> DataRequest:
         """
-        Hint the required columns for this chart to render.
+        What this chart reads (`ChartType.data_request`): nothing, if its type cannot say.
 
-        Falls back to `None` ("fetch everything") if `parameters` no longer validates against this
-        chart type's settings model (e.g. stale data from before a schema change) or if no chart
-        plugin is registered for `chart_type` at all (e.g. one that was uninstalled) -- rather than
-        raising and taking the rest of the panel's data-fetching down with it. `render()` still
-        raises for the same cases, so the broken chart itself still surfaces as its own inline error.
+        A chart whose `parameters` no longer validate against its type's settings (saved before a schema change) or
+        whose type is not installed reads nothing, rather than taking the rest of its panel's fetch down with it:
+        `render()` raises for the same chart, so it shows its own inline error, and data read for it would go unused.
         """
         try:
-            return ChartTypeRegistry.hint_required_columns(self)
+            return ChartTypeRegistry.data_request(self)
         except (ValidationError, UnknownChartTypeError):
             _log.warning(
-                "chart has invalid parameters or an unregistered chart type, fetching every column "
-                "as a fallback",
+                "chart has invalid parameters or an unregistered chart type, reading nothing for it",
                 chart_type=self.chart_type,
             )
-            return None
-
-    def metric_reductions(self) -> MetricReductions:
-        """How much of each metric this chart draws from, by column. Every step, if it cannot be asked. See `hint_required_columns`."""
-        try:
-            return ChartTypeRegistry.metric_reductions(self)
-        except (ValidationError, UnknownChartTypeError):
-            return MetricReductions()
-
-    def hint_required_artifact_keys(self) -> set[str] | None:
-        try:
-            return ChartTypeRegistry.hint_required_artifact_keys(self)
-        except (ValidationError, UnknownChartTypeError):
-            _log.warning(
-                "chart has invalid parameters or an unregistered chart type, no artifact-key hint available",
-                chart_type=self.chart_type,
-            )
-            return None
-
-    def hint_required_artifact_key_prefixes(self) -> set[str]:
-        try:
-            return ChartTypeRegistry.hint_required_artifact_key_prefixes(self)
-        except (ValidationError, UnknownChartTypeError):
-            _log.warning(
-                "chart has invalid parameters or an unregistered chart type, no artifact-key prefix hint available",
-                chart_type=self.chart_type,
-            )
-            return set()
-
-    def hint_required_column_patterns(self) -> set[str]:
-        try:
-            return ChartTypeRegistry.hint_required_column_patterns(self)
-        except (ValidationError, UnknownChartTypeError):
-            _log.warning(
-                "chart has invalid parameters or an unregistered chart type, no metric-pattern hint available",
-                chart_type=self.chart_type,
-            )
-            return set()
-
-    def hint_required_series(self) -> frozenset[SeriesBandRequest]:
-        try:
-            return ChartTypeRegistry.hint_required_series(self)
-        except (ValidationError, UnknownChartTypeError):
-            _log.warning(
-                "chart has invalid parameters or an unregistered chart type, no series hint available",
-                chart_type=self.chart_type,
-            )
-            return frozenset()
-
-    def hint_required_histogram_keys(self) -> set[str]:
-        try:
-            return ChartTypeRegistry.hint_required_histogram_keys(self)
-        except (ValidationError, UnknownChartTypeError):
-            _log.warning(
-                "chart has invalid parameters or an unregistered chart type, no histogram-key hint available",
-                chart_type=self.chart_type,
-            )
-            return set()
-
-    def hint_required_hparams(self) -> set[str] | None:
-        """Hint the required hyperparameter keys for this chart to render. See `hint_required_columns`."""
-        try:
-            return ChartTypeRegistry.hint_required_hparams(self)
-        except (ValidationError, UnknownChartTypeError):
-            _log.warning(
-                "chart has invalid parameters or an unregistered chart type, fetching every hparam "
-                "as a fallback",
-                chart_type=self.chart_type,
-            )
-            return None
+            return DataRequest()
 
     def natural_width(self, context: RenderContext = DEFAULT_RENDER_CONTEXT) -> int:
-        """Preferred render width in px for this chart instance. See `hint_required_columns`."""
+        """Preferred render width in px; a fallback for a chart whose type cannot say (see `data_request`)."""
         try:
             return ChartTypeRegistry.natural_width(self, context)
         except (ValidationError, UnknownChartTypeError):
@@ -739,11 +569,6 @@ class ChartInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, 
                 chart_type=self.chart_type,
             )
             return _FALLBACK_NATURAL_WIDTH
-
-
-def _agreed(reductions: set[MetricReduction]) -> MetricReduction:
-    """The one way of fetching a metric that serves every reduction in `reductions`: theirs if they are one, else every step."""
-    return next(iter(reductions)) if len(reductions) == 1 else MetricReduction.HISTORY
 
 
 class PanelInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, extra="forbid"):
@@ -774,87 +599,6 @@ class PanelInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, 
         """Render a panel."""
         context = RenderContext(columns=self.grid_columns, page_size=page_size)
         return [c.render(dataframes, context) for c in self.charts]
-
-    def hint_required_columns(self) -> set[str] | None:
-        """
-        Hint the required columns for the panel.
-
-        ## Performance!
-        If all charts in a panel hint their required columns:
-        A page should only fetch the required columns for the panel.
-        """
-        columns: set[str] = set()
-        for chart in self.charts:
-            hint = chart.hint_required_columns()
-            if hint is None:
-                return None
-            columns |= hint
-        return columns
-
-    def hint_required_column_patterns(self) -> set[str]:
-        return set(itertools.chain.from_iterable(c.hint_required_column_patterns() for c in self.charts))
-
-    def hint_required_series(self) -> set[SeriesBandRequest]:
-        return set(itertools.chain.from_iterable(c.hint_required_series() for c in self.charts))
-
-    @staticmethod
-    def _metric_columns(
-        chart: ChartInstance[typing.Any, typing.Any], known_keys: Collection[str]
-    ) -> set[str] | None:
-        """The metrics a chart draws: its named ones, and those of `known_keys` its patterns match. `None` for every."""
-        columns = chart.hint_required_columns()
-        patterns = KeyPatterns(tuple(chart.hint_required_column_patterns()))
-        if columns is None or not patterns.patterns:
-            return columns
-        return columns | {key for key in known_keys if patterns.matches(key)}
-
-    def metric_reductions(
-        self, known_keys: Collection[str] = ()
-    ) -> Mapping[MetricReduction, set[str] | None]:
-        """
-        The metrics the panel fetches under each `MetricReduction`; `None` meaning every metric.
-
-        What each chart wants is its own metrics (`hint_required_columns`, and those of `known_keys` its
-        `hint_required_column_patterns` match), each read as its own `metric_reductions` says for that column. A metric
-        the charts disagree on is fetched whole, which serves them all. A chart with no list of its metrics draws every
-        metric as its default says, and so the default of every such chart is what every metric is fetched as, when they
-        disagree.
-        """
-        wants = [
-            (self._metric_columns(chart, known_keys), chart.metric_reductions()) for chart in self.charts
-        ]
-        wants = [(columns, reductions) for columns, reductions in wants if columns is None or columns]
-        if any(columns is None for columns, _ in wants):
-            return {_agreed({reductions.default for _, reductions in wants}): None}
-        wanted: dict[str, set[MetricReduction]] = {}
-        for columns, reductions in wants:
-            for column in columns or ():
-                wanted.setdefault(column, set()).add(reductions.of(column))
-        by_reduction: dict[MetricReduction, set[str]] = {}
-        for column, reductions in wanted.items():
-            by_reduction.setdefault(_agreed(reductions), set()).add(column)
-        return by_reduction
-
-    def hint_required_artifact_keys(self) -> set[str | None]:
-        return set(itertools.chain(*[c.hint_required_artifact_keys() or set() for c in self.charts]))
-
-    def hint_required_artifact_key_prefixes(self) -> set[str]:
-        return set(
-            itertools.chain.from_iterable(c.hint_required_artifact_key_prefixes() for c in self.charts)
-        )
-
-    def hint_required_histogram_keys(self) -> set[str]:
-        return set(itertools.chain.from_iterable(c.hint_required_histogram_keys() for c in self.charts))
-
-    def hint_required_hparams(self) -> set[str] | None:
-        """Hint the required hyperparameter keys for the panel; `None` means "fetch every one"."""
-        hparams: set[str] = set()
-        for chart in self.charts:
-            hint = chart.hint_required_hparams()
-            if hint is None:
-                return None
-            hparams |= hint
-        return hparams
 
 
 class NewPage(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, extra="forbid"):

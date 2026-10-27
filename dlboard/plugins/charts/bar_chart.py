@@ -17,6 +17,7 @@ from dlboard.models import (
     RUN_NAME_COLUMN,
     ChartType,
     ColumnKind,
+    DataRequest,
     MetricColumn,
     MetricReduction,
     MetricReductions,
@@ -267,26 +268,15 @@ class BarChart(ChartType[BarChartSettings, pd.DataFrame, dmc.Stack], frozen=True
 
     @classmethod
     @typing.override
-    def hint_required_columns(cls, parameters: BarChartSettings) -> set[str] | None:
-        return {parameters.column, parameters.x_axis}
-
-    @classmethod
-    @typing.override
-    def metric_reductions(cls, parameters: BarChartSettings) -> MetricReductions:
+    def data_request(cls, parameters: BarChartSettings) -> DataRequest:
         # A bar is a run's latest value: the chart takes that from each run's series itself, so it needs no more.
-        return MetricReductions(default=MetricReduction.LATEST)
-
-    @classmethod
-    @typing.override
-    def hint_required_artifact_keys(cls, parameters: BarChartSettings) -> set[str]:
-        return set()
-
-    @classmethod
-    @typing.override
-    def hint_required_hparams(cls, parameters: BarChartSettings) -> set[str]:
-        # x_axis may be a metric column or a hyperparameter key -- we don't know which until the
-        # data comes back, so hint both; fetching a key that isn't a real hyperparameter is a no-op.
-        return {parameters.x_axis}
+        # x_axis may be a metric or a hyperparameter -- which, the data says when it comes back, so it is asked for as
+        # both; asking for a key that isn't a real hyperparameter reads nothing.
+        return DataRequest(
+            metrics=frozenset({parameters.column, parameters.x_axis}),
+            reductions=MetricReductions(default=MetricReduction.LATEST),
+            hparams=frozenset({parameters.x_axis}),
+        )
 
     @classmethod
     @typing.override

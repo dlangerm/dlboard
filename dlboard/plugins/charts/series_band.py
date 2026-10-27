@@ -26,6 +26,7 @@ from dlboard.models import (
     RUN_NAME_COLUMN,
     ChartType,
     ColumnKind,
+    DataRequest,
     MetricColumn,
     NamePatternList,
     RenderContext,
@@ -237,24 +238,9 @@ class SeriesBandChart(ChartType[SeriesBandSettings, pd.DataFrame, Component], fr
 
     @classmethod
     @typing.override
-    def hint_required_columns(cls, parameters: SeriesBandSettings) -> set[str] | None:
-        # The band reads its own metrics (see `hint_required_series`), so the panel fetches none for this chart.
-        return set()
-
-    @classmethod
-    @typing.override
-    def hint_required_series(cls, parameters: SeriesBandSettings) -> frozenset[SeriesBandRequest]:
-        return frozenset({_request(parameters)}) if parameters.metrics else frozenset()
-
-    @classmethod
-    @typing.override
-    def hint_required_artifact_keys(cls, parameters: SeriesBandSettings) -> set[str]:
-        return set()
-
-    @classmethod
-    @typing.override
-    def hint_required_hparams(cls, parameters: SeriesBandSettings) -> set[str]:
-        return set()
+    def data_request(cls, parameters: SeriesBandSettings) -> DataRequest:
+        # The spread is read in place of the metrics themselves, so the panel reads none of them for this chart.
+        return DataRequest(series=frozenset({_request(parameters)} if parameters.metrics else ()))
 
     @classmethod
     @typing.override

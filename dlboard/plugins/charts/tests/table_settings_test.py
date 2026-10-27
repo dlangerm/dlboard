@@ -16,42 +16,53 @@ from dlboard.plugins.charts.table_chart import TableChart
 # ---- what the table asks the panel to fetch ----
 
 
+_Asked = tuple[set[str], set[str], set[str], set[str]]
+"""What a table asks for: metrics by name and by pattern, then hyperparameters by name and by pattern."""
+
+
 @pytest.mark.parametrize(
-    ("settings", "columns", "hparams"),
+    ("settings", "asked"),
     [
-        pytest.param(TableChartSettings(), None, None, id="everything-by-default"),
+        pytest.param(TableChartSettings(), ({"step"}, {"*"}, set(), {"*"}), id="everything-by-default"),
         pytest.param(
             TableChartSettings(show_metrics=["loss", "acc"], show_hparams=["lr"]),
-            {"loss", "acc", "step"},
-            {"lr"},
+            ({"loss", "acc", "step"}, set(), {"lr"}, set()),
             id="names",
         ),
         pytest.param(
-            TableChartSettings(show_metrics=["train/*"], show_hparams=["m.*"]), {"step"}, None, id="patterns"
+            TableChartSettings(show_metrics=["loss", "train/*"], show_hparams=["m.*"]),
+            ({"loss", "step"}, {"train/*"}, set(), {"m.*"}),
+            id="a-name-is-not-a-pattern",
+        ),
+        pytest.param(
+            TableChartSettings(show_metrics=["layer_*/grad_norm"], show_hparams=[]),
+            ({"step"}, {"layer_*/grad_norm"}, set(), set()),
+            id="a-star-in-the-middle",
         ),
         # Metrics and hparams are fetched independently: a table showing none of one kind fetches none of it.
         pytest.param(
-            TableChartSettings(show_metrics=[], show_hparams=["lr"]), set(), {"lr"}, id="only-hparams"
+            TableChartSettings(show_metrics=[], show_hparams=["lr"]),
+            (set(), set(), {"lr"}, set()),
+            id="only-hparams",
         ),
         pytest.param(
             TableChartSettings(show_metrics=["loss"], show_hparams=[]),
-            {"loss", "step"},
-            set(),
+            ({"loss", "step"}, set(), set(), set()),
             id="no-hparams",
         ),
         pytest.param(
             TableChartSettings(rows=TableRows.FIELD, row_field="epoch", show_metrics=[], show_hparams=[]),
-            {"epoch", "step"},
-            set(),
+            ({"epoch", "step"}, set(), set(), set()),
             id="the-row-field-is-fetched",
         ),
     ],
 )
 def test_the_metrics_and_hparams_a_table_asks_the_panel_to_fetch(
-    settings: TableChartSettings, columns: set[str] | None, hparams: set[str] | None
+    settings: TableChartSettings, asked: _Asked
 ) -> None:
-    assert TableChart.hint_required_columns(settings) == columns
-    assert TableChart.hint_required_hparams(settings) == hparams
+    request = TableChart.data_request(settings)
+
+    assert (request.metrics, request.metric_patterns, request.hparams, request.hparam_patterns) == asked
 
 
 @pytest.mark.parametrize(
@@ -68,10 +79,9 @@ def test_the_metrics_and_hparams_a_table_asks_the_panel_to_fetch(
 def test_the_artifact_keys_a_table_asks_the_panel_to_fetch(
     show_artifacts: list[str], keys: set[str], prefixes: set[str]
 ) -> None:
-    settings = TableChartSettings(show_artifacts=show_artifacts)
+    request = TableChart.data_request(TableChartSettings(show_artifacts=show_artifacts))
 
-    assert TableChart.hint_required_artifact_keys(settings) == keys
-    assert TableChart.hint_required_artifact_key_prefixes(settings) == prefixes
+    assert (request.artifacts, request.artifact_prefixes) == (keys, prefixes)
 
 
 # ---- patterns ----
@@ -222,17 +232,3 @@ def test_a_table_saved_with_old_settings_renders_as_it_did() -> None:
     props = _props(TableChart.render(settings, df))
 
     assert {row["step"]: row["1::loss"] for row in props["rowData"]} == {0: 0.5, 1: 0.4}
-
-
-@pytest.mark.parametrize(
-    ("show_metrics", "patterns"),
-    [
-        pytest.param(["*"], set(), id="every-metric-is-not-a-pattern"),
-        pytest.param(["loss", "train/*"], {"train/*"}, id="a-name-is-not-a-pattern"),
-        pytest.param(["layer_*/grad_norm"], {"layer_*/grad_norm"}, id="a-star-in-the-middle"),
-    ],
-)
-def test_the_metric_patterns_a_table_asks_the_panel_to_fetch(
-    show_metrics: list[str], patterns: set[str]
-) -> None:
-    assert TableChart.hint_required_column_patterns(TableChartSettings(show_metrics=show_metrics)) == patterns

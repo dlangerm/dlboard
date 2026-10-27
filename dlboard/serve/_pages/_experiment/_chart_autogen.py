@@ -355,16 +355,12 @@ def find_uncharted_keys(
     charted_prefixes: set[str] = set()
     charted_histograms: set[str] = set()
     charted_patterns: set[str] = set()
-    for panel in panels:
-        hinted_columns = panel.hint_required_columns()
-        if hinted_columns is not None:
-            charted_metrics |= hinted_columns
-        charted_patterns |= {
-            pattern for request in panel.hint_required_series() for pattern in request.patterns
-        }
-        charted_artifacts |= {k for k in panel.hint_required_artifact_keys() if k is not None}
-        charted_prefixes |= panel.hint_required_artifact_key_prefixes()
-        charted_histograms |= panel.hint_required_histogram_keys()
+    for request in (chart.data_request() for panel in panels for chart in panel.charts):
+        charted_metrics |= request.metrics
+        charted_patterns |= {pattern for series in request.series for pattern in series.patterns}
+        charted_artifacts |= request.artifacts
+        charted_prefixes |= request.artifact_prefixes
+        charted_histograms |= request.histograms
 
     covered = KeyPatterns(tuple(charted_patterns))
     return UnchartedKeys(

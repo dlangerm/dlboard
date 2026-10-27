@@ -37,6 +37,7 @@ from dlboard.models import (
     RUN_NAME_COLUMN,
     ChartType,
     ColumnKind,
+    DataRequest,
     Histogram,
     MetricColumn,
     RenderContext,
@@ -532,23 +533,8 @@ class HistogramChart(ChartType[HistogramChartSettings, pd.DataFrame, dmc.Stack],
 
     @classmethod
     @typing.override
-    def hint_required_columns(cls, parameters: HistogramChartSettings) -> set[str] | None:
-        return set()
-
-    @classmethod
-    @typing.override
-    def hint_required_artifact_keys(cls, parameters: HistogramChartSettings) -> set[str] | None:
-        return set()
-
-    @classmethod
-    @typing.override
-    def hint_required_histogram_keys(cls, parameters: HistogramChartSettings) -> set[str]:
-        return {parameters.key}
-
-    @classmethod
-    @typing.override
-    def hint_required_hparams(cls, parameters: HistogramChartSettings) -> set[str] | None:
-        return set()
+    def data_request(cls, parameters: HistogramChartSettings) -> DataRequest:
+        return DataRequest(histograms=frozenset({parameters.key}))
 
     @classmethod
     @typing.override

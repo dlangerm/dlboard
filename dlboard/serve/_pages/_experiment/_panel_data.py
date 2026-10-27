@@ -45,7 +45,7 @@ from dlboard.serve._pages._experiment._paging import visible_chart_indexes
 from dlboard.serve._pages._experiment._shown_runs import shown_run_ids
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Mapping
+    from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 
     from dlboard.models import DataStore
     from dlboard.serve._pages._experiment._page_model import BasicExperimentPage
@@ -137,7 +137,7 @@ def panel_frames(
     return frames
 
 
-def _splits_metric_and_artifact_charts(panel: models.PanelInstance[Any, Any]) -> bool:
+def _splits_metric_and_artifact_charts(requests: Sequence[models.DataRequest]) -> bool:
     """
     Whether a chart of the panel needs only metrics and another only artifacts.
 
@@ -145,15 +145,48 @@ def _splits_metric_and_artifact_charts(panel: models.PanelInstance[Any, Any]) ->
     an artifact column) asks for nothing the panel would not fetch for it anyway.
     """
     wants = [
-        (
-            (cols := chart.hint_required_columns()) is None or bool(cols),
-            bool(chart.hint_required_artifact_keys() or chart.hint_required_artifact_key_prefixes()),
-        )
-        for chart in panel.charts
+        (bool(r.metrics or r.metric_patterns), bool(r.artifacts or r.artifact_prefixes)) for r in requests
     ]
     return any(metrics and not artifacts for metrics, artifacts in wants) and any(
         artifacts and not metrics for metrics, artifacts in wants
     )
+
+
+def _metric_columns(request: models.DataRequest, known_keys: Collection[str]) -> set[str] | None:
+    """The metrics a chart draws: its named ones, and those of `known_keys` its patterns match. `None` for every."""
+    if request.every_metric:
+        return None
+    return set(request.metrics) | {key for key in known_keys if request.draws_metric(key)}
+
+
+def _agreed(reductions: set[models.MetricReduction]) -> models.MetricReduction:
+    """The one way of fetching a metric that serves every reduction in `reductions`: theirs if they are one, else every step."""
+    return next(iter(reductions)) if len(reductions) == 1 else models.MetricReduction.HISTORY
+
+
+def metrics_by_reduction(
+    requests: Sequence[models.DataRequest], known_keys: Collection[str] = ()
+) -> Mapping[models.MetricReduction, set[str] | None]:
+    """
+    The metrics a panel fetches under each `MetricReduction`; `None` meaning every metric.
+
+    What each chart wants is its own metrics (by name, and those of `known_keys` its patterns match), each read as its
+    `reductions` say for that column. A metric the charts disagree on is fetched whole, which serves them all. A chart of
+    every metric draws each as its default says, and so the default of every such chart is what every metric is fetched
+    as, when they disagree.
+    """
+    wants = [(_metric_columns(request, known_keys), request.reductions) for request in requests]
+    wants = [(columns, reductions) for columns, reductions in wants if columns is None or columns]
+    if any(columns is None for columns, _ in wants):
+        return {_agreed({reductions.default for _, reductions in wants}): None}
+    wanted: dict[str, set[models.MetricReduction]] = {}
+    for columns, reductions in wants:
+        for column in columns or ():
+            wanted.setdefault(column, set()).add(reductions.of(column))
+    by_reduction: dict[models.MetricReduction, set[str]] = {}
+    for column, reductions in wanted.items():
+        by_reduction.setdefault(_agreed(reductions), set()).add(column)
+    return by_reduction
 
 
 def fetch_panel_dataframe(
@@ -163,30 +196,34 @@ def fetch_panel_dataframe(
     run_ids: frozenset[int] | None,
 ) -> pd.DataFrame:
     """Fetch just the data one panel needs -- not the whole experiment -- of `run_ids` (every run, if `None`)."""
-    artifact_keys = panel.hint_required_artifact_keys()
-    artifact_key_prefixes = frozenset(panel.hint_required_artifact_key_prefixes())
+    requests = [chart.data_request() for chart in panel.charts]
+    artifact_keys = frozenset[str]().union(*(r.artifacts for r in requests))
+    artifact_key_prefixes = frozenset[str]().union(*(r.artifact_prefixes for r in requests))
     has_artifacts = bool(artifact_keys or artifact_key_prefixes)
 
-    if _splits_metric_and_artifact_charts(panel):
+    if _splits_metric_and_artifact_charts(requests):
         _log.warning(
             "Panel %r mixes metric and artifact charts, fetching both is "
             "less efficient than a panel of one kind; consider splitting it.",
             panel.name,
         )
 
-    # Each hint is `None` for "everything" (e.g. a table chart with no `metrics` filter -- its normal
-    # default, flagged to the user by `_unscoped_fetch_badge`) or a set of keys, where empty means
-    # "none of this kind at all".
-    hparam_keys = panel.hint_required_hparams()
+    # `None` for every hyperparameter: a pattern is read whole, one small row per run, and narrowed by the chart.
+    hparam_keys = (
+        None if any(r.hparam_patterns for r in requests) else set[str]().union(*(r.hparams for r in requests))
+    )
     # A metric pattern names the metrics it matches among the ones logged, so the names are listed for it alone.
-    series_requests = sorted(panel.hint_required_series(), key=lambda request: request.column)
-    needs_names = bool(panel.hint_required_column_patterns() or series_requests)
+    series_requests = sorted(
+        frozenset[models.SeriesBandRequest]().union(*(r.series for r in requests)),
+        key=lambda request: request.column,
+    )
+    needs_names = any(r.metric_patterns and not r.every_metric for r in requests) or bool(series_requests)
     known_keys = (
         _read(_Read(PanelRead.KEY_NAMES), lambda: store.summarize_metric_keys(experiment_id))
         if needs_names
         else list[str]()
     )
-    metric_reductions = panel.metric_reductions(known_keys)
+    metric_reductions = metrics_by_reduction(requests, known_keys)
     metrics_df = (
         MetricFrame.merged(
             _read(
@@ -210,7 +247,7 @@ def fetch_panel_dataframe(
             lambda: build_artifacts_dataframe(
                 store.fetch_artifacts(
                     experiment_id,
-                    keys=frozenset(k for k in artifact_keys if k is not None),
+                    keys=artifact_keys,
                     key_prefixes=artifact_key_prefixes,
                     run_ids=run_ids,
                 )
@@ -230,14 +267,14 @@ def fetch_panel_dataframe(
         if hparam_keys is None or hparam_keys
         else pd.DataFrame()
     )
-    histogram_keys = panel.hint_required_histogram_keys()
+    histogram_keys = frozenset[str]().union(*(r.histograms for r in requests))
     histograms_df = (
         _read(
             _Read(PanelRead.HISTOGRAMS),
             lambda: build_histograms_dataframe(
                 store.fetch_histograms(
                     experiment_id,
-                    keys=frozenset(histogram_keys),
+                    keys=histogram_keys,
                     max_steps=HistogramFetchSettings().max_histogram_steps,
                     run_ids=run_ids,
                 )
@@ -319,22 +356,15 @@ def _chart_columns(chart: models.ChartInstance[Any, Any], df: pd.DataFrame) -> l
     """
     The columns of a panel's shared dataframe one chart renders from, in the dataframe's own order.
 
-    Each kind of column is scoped by its own hint, `None` meaning every column of that kind -- so a chart
-    that shows every metric but only some hyperparameters is not redrawn by an unrelated hyperparameter.
+    Each kind of column is scoped by the chart's own request -- so a chart that shows every metric but only some
+    hyperparameters is not redrawn by an unrelated hyperparameter.
     """
-    metrics = chart.hint_required_columns()
-    hparams = chart.hint_required_hparams()
-    wanted_hparams = None if hparams is None else {hparam_column(key) for key in hparams}
-    artifacts = tuple(
-        artifact_column(name)
-        for name in (
-            *(chart.hint_required_artifact_keys() or ()),
-            *chart.hint_required_artifact_key_prefixes(),
-        )
-    )
-    histograms = {histogram_column(key) for key in chart.hint_required_histogram_keys()}
-    patterns = models.KeyPatterns(tuple(chart.hint_required_column_patterns()))
-    bands = {request.column for request in chart.hint_required_series()}
+    request = chart.data_request()
+    # A hyperparameter pattern is read whole and narrowed by the chart, so it renders from every hyperparameter.
+    wanted_hparams = None if request.hparam_patterns else {hparam_column(key) for key in request.hparams}
+    artifacts = tuple(artifact_column(name) for name in (*request.artifacts, *request.artifact_prefixes))
+    histograms = {histogram_column(key) for key in request.histograms}
+    bands = {series.column for series in request.series}
 
     def renders_from(column: str) -> bool:
         if column in models.IDENTITY_COLUMNS:
@@ -347,7 +377,7 @@ def _chart_columns(chart: models.ChartInstance[Any, Any], df: pd.DataFrame) -> l
             case ColumnKind.HISTOGRAM:
                 return column in histograms
             case ColumnKind.METRIC:
-                return metrics is None or column in metrics or patterns.matches(column)
+                return request.every_metric or request.draws_metric(column)
             case ColumnKind.SERIES_BAND:
                 return column in bands
             case (ColumnKind.GROUPING | ColumnKind.LAYER) as kind:

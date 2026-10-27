@@ -20,6 +20,7 @@ from dlboard.models import (
     ChartInstance,
     ChartTypeRegistry,
     ColumnKind,
+    DataRequest,
     LayerKind,
     ParameterFieldType,
     Quantity,
@@ -86,15 +87,26 @@ def test_render_single_page_has_no_pager() -> None:
 
 
 @pytest.mark.parametrize(
-    ("x_axis", "expected"),
-    [("step", set[str]()), ("epoch", {"epoch"})],
+    ("settings", "metrics", "artifacts"),
+    [
+        pytest.param(ImageChartSettings(key="img"), set[str](), {"img"}, id="by-step"),
+        pytest.param(ImageChartSettings(key="img", x_axis="epoch"), {"epoch"}, {"img"}, id="by-a-metric"),
+        pytest.param(
+            ImageChartSettings(key="img", layers={"boxes": LayerStyle(), "mask": LayerStyle()}),
+            set[str](),
+            {"img", "boxes", "mask"},
+            id="the-layers-are-charted-with-the-image",
+        ),
+    ],
 )
-def test_hint_required_columns(x_axis: str, expected: set[str]) -> None:
-    assert ImageChart.hint_required_columns(ImageChartSettings(key="img", x_axis=x_axis)) == expected
-
-
-def test_hint_required_artifact_keys() -> None:
-    assert ImageChart.hint_required_artifact_keys(ImageChartSettings(key="img")) == {"img"}
+def test_the_chart_reads_its_picture_its_layers_and_every_overlay_over_it(
+    settings: ImageChartSettings, metrics: set[str], artifacts: set[str]
+) -> None:
+    assert ImageChart.data_request(settings) == DataRequest(
+        metrics=frozenset(metrics),
+        artifacts=frozenset(artifacts),
+        artifact_prefixes=frozenset({overlay_key("img")}),
+    )
 
 
 def _captions_store_data(stack: object) -> dict[str, Any]:
@@ -511,13 +523,6 @@ def test_an_image_chart_draws_nothing_over_its_pictures_that_is_not_its_own_over
     _log_layer(df, layer_key, "layer.json", kind=LayerKind.SHAPES)
 
     assert _store_data(ImageChart.render(ImageChartSettings(key="img"), df))["overlays"] == {}
-
-
-def test_the_layers_are_charted_with_the_image() -> None:
-    settings = ImageChartSettings(key="img", layers={"boxes": LayerStyle(), "mask": LayerStyle()})
-
-    assert ImageChart.hint_required_artifact_keys(settings) == {"img", "boxes", "mask"}
-    assert ImageChart.hint_required_artifact_key_prefixes(settings) == {overlay_key("img")}
 
 
 def test_a_removed_layer_is_not_drawn_listed_or_left_for_a_viewer_to_bring_back() -> None:

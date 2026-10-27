@@ -35,6 +35,7 @@ from dlboard.models import (
     RUN_NAME_COLUMN,
     ChartType,
     ColumnKind,
+    DataRequest,
     KeyPatterns,
     MetricColumn,
     MetricReduction,
@@ -593,52 +594,35 @@ class TableChart(ChartType[TableChartSettings, pd.DataFrame, dag.AgGrid], frozen
 
     @classmethod
     @typing.override
-    def hint_required_columns(cls, parameters: TableChartSettings) -> set[str] | None:
+    def data_request(cls, parameters: TableChartSettings) -> DataRequest:
         metrics = KeyPatterns(tuple(parameters.show_metrics))
-        if metrics.everything:
-            return None
-        wanted = set(metrics.exact) | (
-            {parameters.row_field} if parameters.rows is TableRows.FIELD else set()
-        )
-        # Metrics and hparams are fetched independently: a table that shows none of the former
-        # (only hyperparameters, or artifacts) must not fetch every metric of the experiment. A pattern's metrics
-        # are read by name, from the names logged, and need their step like any other.
-        return wanted | {MetricColumn.STEP} if (wanted or metrics.wildcards) else set()
-
-    @classmethod
-    @typing.override
-    def hint_required_column_patterns(cls, parameters: TableChartSettings) -> set[str]:
-        metrics = KeyPatterns(tuple(parameters.show_metrics))
-        return set() if metrics.everything else set(metrics.wildcards)
-
-    @classmethod
-    @typing.override
-    def metric_reductions(cls, parameters: TableChartSettings) -> MetricReductions:
+        field = {parameters.row_field} if parameters.rows is TableRows.FIELD else set()
+        # Every row has its step. A table that shows no metric at all (only hyperparameters, or artifacts) asks for none,
+        # so it never reads every metric of the experiment.
+        named = metrics.exact | field | ({MetricColumn.STEP} if metrics.patterns or field else set())
         # A row per run shows one value of each metric, so the series need not be read to the end (or at all).
         # Rows of a field are the steps themselves. `Aggregate` is named as the `MetricReduction` it is (see its test).
-        if parameters.rows is not TableRows.RUN:
-            return MetricReductions()
-        return MetricReductions(default=MetricReduction(parameters.aggregate))
-
-    @classmethod
-    @typing.override
-    def hint_required_artifact_keys(cls, parameters: TableChartSettings) -> set[str]:
-        return set(KeyPatterns(tuple(parameters.show_artifacts)).exact)
-
-    @classmethod
-    @typing.override
-    def hint_required_artifact_key_prefixes(cls, parameters: TableChartSettings) -> set[str]:
+        reductions = (
+            MetricReductions(default=MetricReduction(parameters.aggregate))
+            if parameters.rows is TableRows.RUN
+            else MetricReductions()
+        )
         artifacts = KeyPatterns(tuple(parameters.show_artifacts))
         # A pattern is fetched by the text before its first wildcard, a superset that the chart then narrows to the pattern.
         # The overlays of a picture shown by its key are drawn over it, so they are fetched with it.
-        prefixes = {literal_prefix(pattern) for pattern in artifacts.wildcards}
-        return prefixes | {overlay_key(key) for key in artifacts.exact}
-
-    @classmethod
-    @typing.override
-    def hint_required_hparams(cls, parameters: TableChartSettings) -> set[str] | None:
         hparams = KeyPatterns(tuple(parameters.show_hparams))
-        return None if hparams.wildcards else set(hparams.exact)
+        return DataRequest(
+            metrics=frozenset(named),
+            metric_patterns=metrics.wildcards,
+            reductions=reductions,
+            hparams=hparams.exact,
+            hparam_patterns=hparams.wildcards,
+            artifacts=artifacts.exact,
+            artifact_prefixes=frozenset(
+                {literal_prefix(pattern) for pattern in artifacts.wildcards}
+                | {overlay_key(key) for key in artifacts.exact}
+            ),
+        )
 
     @classmethod
     @typing.override

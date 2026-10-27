@@ -11,7 +11,7 @@ from dash import dcc
 from dash._utils import to_json
 from pydantic import ValidationError
 
-from dlboard.models import MetricColumn, SeriesBand, SeriesBandRequest
+from dlboard.models import DataRequest, MetricColumn, SeriesBand, SeriesBandRequest
 from dlboard.models._panel_frame import SERIES_BAND_COLUMN_PREFIX
 from dlboard.plugins.charts.series_band import SeriesBandChart, SeriesBandSettings
 from dlboard.serve import series_color
@@ -34,16 +34,20 @@ def _figure(chart: Component) -> dict[str, Any]:
 def test_the_band_asks_the_panel_for_the_patterns_it_spreads_on_its_grid_in_the_groups_it_names() -> None:
     settings = SeriesBandSettings(metrics=["layer_*/grad_norm"], grid=16, runs=2, group_by=1, max_groups=5)
 
-    assert SeriesBandChart.hint_required_series(settings) == {
-        SeriesBandRequest(
-            patterns=frozenset({"layer_*/grad_norm"}), grid=16, runs=2, group_by=(1,), max_groups=5
+    # The spread is read in place of the metrics: none of them is read for it.
+    assert SeriesBandChart.data_request(settings) == DataRequest(
+        series=frozenset(
+            {
+                SeriesBandRequest(
+                    patterns=frozenset({"layer_*/grad_norm"}), grid=16, runs=2, group_by=(1,), max_groups=5
+                )
+            }
         )
-    }
-    assert SeriesBandChart.hint_required_columns(settings) == set()
+    )
 
 
 def test_a_band_with_no_metrics_asks_for_nothing() -> None:
-    assert SeriesBandChart.hint_required_series(SeriesBandSettings()) == frozenset()
+    assert SeriesBandChart.data_request(SeriesBandSettings()) == DataRequest()
 
 
 @pytest.mark.parametrize(
@@ -60,7 +64,7 @@ def _render(settings: SeriesBandSettings, bands: list[SeriesBand]) -> list[dict[
 
 
 def _request(settings: SeriesBandSettings) -> SeriesBandRequest:
-    (request,) = SeriesBandChart.hint_required_series(settings)
+    (request,) = SeriesBandChart.data_request(settings).series
     return request
 
 

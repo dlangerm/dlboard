@@ -10,7 +10,14 @@ import pytest
 from dash import dcc, html
 
 from dlboard.conftest import props
-from dlboard.models import RUN_NAME_COLUMN, ChartTypeRegistry, Histogram, RenderContext, histogram_column
+from dlboard.models import (
+    RUN_NAME_COLUMN,
+    ChartTypeRegistry,
+    DataRequest,
+    Histogram,
+    RenderContext,
+    histogram_column,
+)
 from dlboard.plugins.charts._histogram_math import common_edges, regrid, spread
 from dlboard.plugins.charts.histogram import (
     Colorscale,
@@ -172,10 +179,7 @@ def test_a_key_nothing_logged_says_so_instead_of_drawing(df: pd.DataFrame) -> No
 
 
 def test_the_chart_asks_for_exactly_its_histogram_and_describes_its_settings() -> None:
-    assert HistogramChart.hint_required_histogram_keys(_SETTINGS) == {_KEY}
-    assert HistogramChart.hint_required_columns(_SETTINGS) == set()
-    assert HistogramChart.hint_required_artifact_keys(_SETTINGS) == set()
-    assert HistogramChart.hint_required_hparams(_SETTINGS) == set()
+    assert HistogramChart.data_request(_SETTINGS) == DataRequest(histograms=frozenset({_KEY}))
     HistogramChart.register(allow_override=True)
     fields = ChartTypeRegistry.get_registered_chart_types()[HistogramChart.name]
     assert fields["display"].choices == ("heatmap", "bands", "step")

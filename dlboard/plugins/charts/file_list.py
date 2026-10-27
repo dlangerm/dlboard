@@ -18,6 +18,7 @@ from dlboard.models import (
     Artifact,
     ChartType,
     ColumnKind,
+    DataRequest,
     MetricColumn,
     Quantity,
     TagValue,
@@ -203,23 +204,11 @@ class FileListChart(ChartType[FileListSettings, pd.DataFrame, dmc.Stack], frozen
 
     @typing.override
     @classmethod
-    def hint_required_columns(cls, parameters: FileListSettings) -> set[str]:
-        return set()
-
-    @typing.override
-    @classmethod
-    def hint_required_artifact_keys(cls, parameters: FileListSettings) -> set[str]:
-        return {parameters.key} if parameters.key else set()
-
-    @typing.override
-    @classmethod
-    def hint_required_artifact_key_prefixes(cls, parameters: FileListSettings) -> set[str]:
-        return {parameters.key_prefix} if parameters.key_prefix else set()
-
-    @typing.override
-    @classmethod
-    def hint_required_hparams(cls, parameters: FileListSettings) -> set[str]:
-        return set()
+    def data_request(cls, parameters: FileListSettings) -> DataRequest:
+        return DataRequest(
+            artifacts=frozenset({parameters.key} if parameters.key else ()),
+            artifact_prefixes=frozenset({parameters.key_prefix} if parameters.key_prefix else ()),
+        )
 
     @typing.override
     @classmethod

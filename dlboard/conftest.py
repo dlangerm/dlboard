@@ -716,7 +716,7 @@ def make_fake_chart(
     Build a minimal registrable `ChartType` around `params_type`.
 
     Only the description of the settings is under test wherever this is
-    used, so `render` and the `hint_required_*` methods are no-ops: just enough to satisfy
+    used, so `render` and `data_request` are no-ops: just enough to satisfy
     `ChartType`'s abstract interface.
     """
 
@@ -735,18 +735,8 @@ def make_fake_chart(
 
         @classmethod
         @typing.override
-        def hint_required_columns(cls, parameters: BaseModel) -> set[str] | None:
-            return set()
-
-        @classmethod
-        @typing.override
-        def hint_required_artifact_keys(cls, parameters: BaseModel) -> set[str] | None:
-            return set()
-
-        @classmethod
-        @typing.override
-        def hint_required_hparams(cls, parameters: BaseModel) -> set[str] | None:
-            return set()
+        def data_request(cls, parameters: BaseModel) -> models.DataRequest:
+            return models.DataRequest()
 
         @classmethod
         @typing.override

@@ -10,7 +10,7 @@ import pytest
 from dash._utils import to_json
 from pydantic import ValidationError
 
-from dlboard.models import RUN_NAME_COLUMN, artifact_column, artifact_tags_column
+from dlboard.models import RUN_NAME_COLUMN, DataRequest, artifact_column, artifact_tags_column
 from dlboard.plugins.charts.file_list import FileListChart, FileListSettings
 
 
@@ -157,7 +157,5 @@ def test_a_list_is_of_exactly_one_key_or_prefix(fields: dict[str, str]) -> None:
 def test_what_the_list_needs_fetched_follows_whether_it_names_a_key_or_a_prefix() -> None:
     by_key, by_prefix = FileListSettings(key="a"), FileListSettings(key_prefix="b/")
 
-    assert FileListChart.hint_required_artifact_keys(by_key) == {"a"}
-    assert FileListChart.hint_required_artifact_key_prefixes(by_key) == set()
-    assert FileListChart.hint_required_artifact_keys(by_prefix) == set()
-    assert FileListChart.hint_required_artifact_key_prefixes(by_prefix) == {"b/"}
+    assert FileListChart.data_request(by_key) == DataRequest(artifacts=frozenset({"a"}))
+    assert FileListChart.data_request(by_prefix) == DataRequest(artifact_prefixes=frozenset({"b/"}))

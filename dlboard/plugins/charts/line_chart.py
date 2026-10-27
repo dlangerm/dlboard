@@ -16,6 +16,7 @@ from dlboard.models import (
     RUN_NAME_COLUMN,
     ChartType,
     ColumnKind,
+    DataRequest,
     MetricColumn,
 )
 from dlboard.plugins.charts._axis_label import (
@@ -285,21 +286,8 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.Stack], frozen=Tr
 
     @classmethod
     @typing.override
-    def hint_required_columns(cls, parameters: LineChartSettings) -> set[str] | None:
-        return {
-            parameters.column,
-            parameters.x_axis,
-        }
-
-    @classmethod
-    @typing.override
-    def hint_required_artifact_keys(cls, parameters: LineChartSettings) -> set[str]:
-        return set()
-
-    @classmethod
-    @typing.override
-    def hint_required_hparams(cls, parameters: LineChartSettings) -> set[str]:
-        return set()
+    def data_request(cls, parameters: LineChartSettings) -> DataRequest:
+        return DataRequest(metrics=frozenset({parameters.column, parameters.x_axis}))
 
     @classmethod
     @typing.override

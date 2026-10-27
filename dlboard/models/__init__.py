@@ -28,6 +28,7 @@ from dlboard.models._audit_log import AuditAction, AuditLogEntry, EntityType, Ne
 from dlboard.models._auth import AuthProvider
 from dlboard.models._comment import Comment, NewComment
 from dlboard.models._credentials import ApiToken, NewApiToken, PasswordCredential
+from dlboard.models._data_request import EVERY_KEY, DataRequest
 from dlboard.models._data_store import SUMMARY_RUNS, ArtifactStore, DataStore
 from dlboard.models._experiment import Experiment, ExperimentSource, NewExperiment
 from dlboard.models._histogram import (
@@ -115,6 +116,7 @@ __all__ = [
     "DEFAULT_RENDER_CONTEXT",
     "DEFAULT_TAG_PRECISION",
     "DISPLAY_SECTION",
+    "EVERY_KEY",
     "FILE_KIND_TAG",
     "HISTOGRAM_COLUMN_PREFIX",
     "HPARAM_COLUMN_PREFIX",
@@ -148,6 +150,7 @@ __all__ = [
     "ColumnChoices",
     "ColumnKind",
     "Comment",
+    "DataRequest",
     "DataStore",
     "EntityType",
     "Experiment",
