@@ -7,7 +7,8 @@ Fully self-contained -- it renders into `constants.NAVBAR_RUN_LIST_ID`, a differ
 
 from __future__ import annotations
 
-import itertools
+import hashlib
+import json
 import typing
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -40,7 +41,12 @@ from dlboard.serve._pages._experiment import _ids as ids
 from dlboard.serve._pages._experiment import _page_edits as edits
 from dlboard.serve._pages._experiment import _page_model as page_model
 from dlboard.serve._pages._experiment import _page_repository as repo
-from dlboard.serve._pages._experiment._column_catalog import KEY_PICKER_LIMIT, first_matches
+from dlboard.serve._pages._experiment._column_catalog import (
+    KEY_PICKER_LIMIT,
+    first_matches,
+    summary_hparam_keys,
+)
+from dlboard.serve._pages._experiment._live_updates import STATE_LAST_KNOWN_REVISION
 from dlboard.serve._pages._experiment._run_compare import compare_button
 from dlboard.serve._pages._experiment._shown_runs import ShownRunsSettings, shown_run_ids
 from dlboard.serve._pages._experiment._views import VIEW_NOTIFY_ID
@@ -164,25 +170,28 @@ def _build_hparam_rows(
 
 
 def _load_hparam_view_data(
-    store: DataStore[...], experiment_id: int, hparams: list[str], selected_metrics: set[str], runs: list[Run]
+    store: DataStore[...],
+    experiment_id: int,
+    hparams: list[models.HyperParams],
+    selected: list[str],
+    runs: list[Run],
 ) -> tuple[list[str], list[str], list[dict[str, Any]]]:
     """
     Build displayable rows for `runs`, enriched with hparams and any selected last-step metrics.
 
-    Metric *names* come from a cheap `DISTINCT key` lookup (for the Columns picker); metric
-    *values* are only fetched for `selected_metrics` -- the columns the table is actually about to
-    show. Fetching every metric ever logged in the experiment just to populate a table nobody's
-    added a metric column to yet is the difference between this loading instantly and taking
-    seconds once an experiment has any real volume of logged steps. Takes `runs` rather than
-    querying them itself: `render_navbar_hparams` already needs that query to decide *whether* to
-    call this at all (see `_render_signature`), and this is also the callback that fires on every
-    live-update poll tick -- querying twice would mean paying for it even on the many ticks that
-    end up not calling this function at all.
+    Key *names* are what a picker offers (`summary_hparam_keys`, and a cheap `DISTINCT key` lookup of metrics), plus any
+    selected key a run holds, so a column picked from an older run stays applied; metric *values* are only fetched for
+    the selected metrics -- the columns the table is actually about to show. Takes `runs` and `hparams` rather than
+    querying them itself: `render_navbar_hparams` already needs them to decide *whether* to call this at all (see
+    `_render_signature`), on every live-update poll tick that saw a change.
     """
-    hydrated = [models.HyperParams.model_validate_json(run) for run in hparams]
-    hparams_by_run = {h.run_id: h for h in hydrated}
-    hparam_keys = sorted(set(itertools.chain(*[list(k.hparams_dict.keys()) for k in hydrated])))
+    hparams_by_run = {h.run_id: h for h in hparams}
+    held = {key for h in hparams for key in h.hparams_dict}
+    hparam_keys = sorted(
+        {*summary_hparam_keys(store, experiment_id), *(key for key in selected if key in held)}
+    )
     metric_keys = store.summarize_metric_keys(experiment_id)
+    selected_metrics = set(selected)
     wanted = frozenset(selected_metrics & set(metric_keys))
     latest: dict[int, dict[str, float]] = (
         store.fetch_metrics(
@@ -483,40 +492,41 @@ def _load_hparam_panel_settings(
 
 def _render_signature(
     experiment_id: int,
-    hparams: list[str],
+    hparams: list[models.HyperParams],
     selection: _Selection,
     selected: list[str],
     runs: list[Run],
-) -> list[Any]:
+) -> str:
     """
-    Everything `render_navbar_hparams`'s output actually depends on, as one comparable value.
+    A digest of everything `render_navbar_hparams`'s output actually depends on, as one comparable value.
 
-    Stored in (and read back from) `NAVBAR_HPARAM_SIGNATURE_ID`'s `dcc.Store`, so it round-trips
-    through JSON either way -- a typed structure here couldn't stay typed past that store anyway,
-    but naming every tracked field in one place (rather than as an inline list literal at the call
-    site) means a future addition to what this table renders from has one obvious place to also add
-    it, instead of a silently-still-passing equality check against a signature nobody remembered to
-    extend. The runs (not just `hparams`) must be included: a run with no hyperparameters yet still
-    needs to appear the moment `store.get_runs` (queried fresh in `_load_hparam_panel_settings`,
-    *before* this signature is even built) reports it, even though `hparams` itself hasn't changed --
-    and so must each one's status and end time, or a run finishing would never redraw its row.
+    Stored in (and read back from) `NAVBAR_HPARAM_SIGNATURE_ID`'s `dcc.Store`. A digest, not the values: they are every
+    run's, and the browser only needs to hand back whether they changed (#454). Naming every tracked field in one place
+    means a future addition to what this table renders from has one obvious place to also add it, instead of a
+    silently-still-passing equality check against a signature nobody remembered to extend. The runs (not just
+    `hparams`) must be included: a run with no hyperparameters yet still needs to appear the moment `store.get_runs`
+    (queried fresh in `_load_hparam_panel_settings`, *before* this signature is even built) reports it, even though
+    `hparams` itself hasn't changed -- and so must each one's status and end time, or a run finishing would never
+    redraw its row.
     """
     run_states = [[run.id, run.status, run.ended_at.isoformat() if run.ended_at else None] for run in runs]
-    return [
+    signed = [
         experiment_id,
-        hparams,
+        [[h.run_id, h.hparams_dict] for h in sorted(hparams, key=lambda h: h.run_id)],
         sorted(selection.shown),
         selection.chosen,
         selection.newer_hidden,
         selected,
         run_states,
     ]
+    return hashlib.sha256(json.dumps(signed, sort_keys=True, default=str).encode()).hexdigest()
 
 
 def _register_hparam_table(app: Dash) -> None:
     @app.callback(
         Output(constants.NAVBAR_RUN_LIST_ID, "children"),
-        Input(ids.STATE_HPARAMS, "data"),
+        # The experiment's revision, which the live poll moves on: what the table holds may have changed (#454).
+        Input(STATE_LAST_KNOWN_REVISION, "data"),
         Input(constants.STATE_EXPERIMENT_ID, "data", allow_optional=True),
         Input(ids.STATE_PAGE_STORAGE, "data", allow_optional=True),
         State(NAVBAR_HPARAM_SIGNATURE_ID, "data", allow_optional=True),
@@ -524,10 +534,10 @@ def _register_hparam_table(app: Dash) -> None:
         prevent_initial_call=True,
     )
     def render_navbar_hparams(
-        hparams: list[str],
+        _revision: int | None,
         experiment_id: int | None,
         page_json: str | None,
-        prev_signature: list[Any] | None,
+        prev_signature: str | None,
         view_id: int | None,
     ) -> dmc.Stack:
         if experiment_id is None:
@@ -552,24 +562,20 @@ def _register_hparam_table(app: Dash) -> None:
         # remounting) rebuild unless the specific settings this table renders actually changed --
         # see `_render_signature` for exactly what "changed" is measured against.
         #
-        # Checked *before* `_load_hparam_view_data` below (not after): `STATE_HPARAMS` is rewritten
-        # on every live-update poll tick that finds *any* change in the experiment, metrics
-        # included -- so this callback re-fires roughly as often as metrics get flushed during
-        # active training, not just when a run/hparam/column-selection actually changes.
-        # `_load_hparam_view_data`'s `summarize_metric_keys` scan and (if a metric column is selected)
-        # full metric-history refetch would otherwise run on every one of those ticks only to
-        # almost always end in the `PreventUpdate` below anyway -- a cost every open experiment
-        # page would pay constantly during training, not just the ones actually using the
-        # metric-column feature. `runs` (from `_load_hparam_panel_settings`, already cheap/bounded)
-        # is enough to detect every case this table needs to react to, so the expensive part only
-        # runs on the (comparatively rare) ticks that actually need a re-render.
+        # Checked *before* `_load_hparam_view_data` below (not after): the revision moves on every
+        # live-update poll tick that finds *any* change in the experiment, metrics included -- so
+        # this callback re-fires roughly as often as metrics get flushed during active training,
+        # not just when a run/hparam/column-selection actually changes. `_load_hparam_view_data`'s
+        # key reads and (if a metric column is selected) latest-value read would otherwise run on
+        # every one of those ticks only to almost always end in the `PreventUpdate` below anyway.
+        # The runs and their hyperparameters are enough to detect every case this table needs to
+        # react to, so the rest only runs on the ticks that actually need a re-render.
+        hparams = list(store.fetch_hyperparams(experiment_id, run_ids=None))
         signature = _render_signature(experiment_id, hparams, selection, selected, runs)
         if signature == prev_signature:
             raise PreventUpdate
 
-        hparam_keys, metric_keys, rows = _load_hparam_view_data(
-            store, experiment_id, hparams, set(selected), runs
-        )
+        hparam_keys, metric_keys, rows = _load_hparam_view_data(store, experiment_id, hparams, selected, runs)
 
         return dmc.Stack(
             [
@@ -793,11 +799,11 @@ def _register_column_search(app: Dash) -> None:
     ) -> list[dict[str, Any]]:
         """The Columns picker's options for what is typed in it, searched on the server."""
         store = get_data_store()
-        hparam_keys = sorted(
-            {key for h in store.fetch_hyperparams(experiment_id, run_ids=None) for key in h.hparams_dict}
-        )
         return _column_options(
-            hparam_keys, store.summarize_metric_keys(experiment_id), search=search or "", keep=picked or ()
+            summary_hparam_keys(store, experiment_id),
+            store.summarize_metric_keys(experiment_id),
+            search=search or "",
+            keep=picked or (),
         )
 
 

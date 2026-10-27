@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import pendulum
 import pytest
@@ -12,6 +12,7 @@ from dlboard.models import HyperParams, NewHyperParams, Run
 from dlboard.plugins.charts.file_list import FileListChart
 from dlboard.plugins.charts.image_series import ImageChart
 from dlboard.plugins.charts.line_chart import LineChart
+from dlboard.serve._pages._experiment import _column_catalog as column_catalog
 from dlboard.serve._pages._experiment import _run_comparison_table as run_table
 
 if TYPE_CHECKING:
@@ -93,7 +94,7 @@ def test_load_hparam_view_data_shows_each_selected_metrics_latest_value(
     _log_a_metric(store, experiment_id, run.id, "train/loss", step=9)
 
     _hk, _mk, rows = run_table._load_hparam_view_data(
-        store, experiment_id, [], selected_metrics={"val/acc", "train/loss"}, runs=[run]
+        store, experiment_id, [], selected=["val/acc", "train/loss"], runs=[run]
     )
 
     assert rows == [
@@ -110,12 +111,41 @@ def test_load_hparam_view_data_reports_available_metric_keys_without_fetching_va
     _log_a_metric(store, experiment_id, run.id, "loss")
 
     hparam_keys, metric_keys, rows = run_table._load_hparam_view_data(
-        store, experiment_id, [], selected_metrics=set(), runs=[run]
+        store, experiment_id, [], selected=[], runs=[run]
     )
 
     assert metric_keys == ["loss"]
     assert hparam_keys == []
     assert rows == [{"run_id": run.id, "run_name": run.name, **_RUNNING_FIELDS}]
+
+
+@pytest.mark.parametrize(
+    ("selected", "offered"),
+    [
+        pytest.param([], ["lr"], id="the-newest-runs-keys"),
+        pytest.param(["momentum"], ["lr", "momentum"], id="and-a-picked-key-only-an-older-run-has"),
+    ],
+)
+def test_the_columns_picker_offers_the_newest_runs_keys_and_keeps_an_older_one_it_shows(
+    store: SQLLiteStore,
+    experiment_id: int,
+    monkeypatch: pytest.MonkeyPatch,
+    selected: list[str],
+    offered: list[str],
+) -> None:
+    """Runs are unbounded, so their keys are read from the newest few; a column already shown stays shown (#454)."""
+    monkeypatch.setattr(column_catalog, "SUMMARY_RUNS", 1)
+    older, newer = (store.create_run(models.NewRun(experiment_id=experiment_id)) for _ in range(2))
+    store.log_hyperparams(NewHyperParams.from_raw(older.id, experiment_id, {"momentum": 0.9}))
+    store.log_hyperparams(NewHyperParams.from_raw(newer.id, experiment_id, {"lr": 0.1}))
+    hparams = list(store.fetch_hyperparams(experiment_id, run_ids=None))
+
+    hparam_keys, _metric_keys, rows = run_table._load_hparam_view_data(
+        store, experiment_id, hparams, selected=selected, runs=[older, newer]
+    )
+
+    assert hparam_keys == offered
+    assert [row.get("momentum") for row in rows] == [0.9, None]
 
 
 @pytest.mark.parametrize(
@@ -164,7 +194,7 @@ def test_the_runs_table_redraws_when_a_run_finishes() -> None:
         update={"status": models.RunStatus.FINISHED, "ended_at": _TS.add(minutes=1)}
     )
 
-    def signature(run: Run) -> list[Any]:
+    def signature(run: Run) -> str:
         return run_table._render_signature(
             1, [], run_table._Selection(frozenset(), chosen=False, newer_hidden=0), [], [run]
         )

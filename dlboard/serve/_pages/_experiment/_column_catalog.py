@@ -34,6 +34,18 @@ def first_matches(names: Iterable[str], search: str, limit: int = KEY_PICKER_LIM
     return list(itertools.islice((name for name in names if needle in name.lower()), max(limit, 0)))
 
 
+def summary_hparam_keys(store: DataStore[...], experiment_id: int) -> list[str]:
+    """
+    The hyperparameter keys a picker offers: those of the newest `SUMMARY_RUNS` runs, the same bound as the metric keys'.
+
+    Never every run's: runs are unbounded, and every picker that lists keys would read them all, on each keystroke.
+    """
+    newest = frozenset(run.id for run in store.get_runs(experiment_id, limit=SUMMARY_RUNS, run_ids=None))
+    return sorted(
+        {key for h in store.fetch_hyperparams(experiment_id, run_ids=newest) for key in h.hparams_dict}
+    )
+
+
 @dataclass(frozen=True)
 class ColumnCatalog:
     """
@@ -56,8 +68,6 @@ class ColumnCatalog:
     @classmethod
     def load(cls, store: DataStore[...], experiment_id: int) -> ColumnCatalog:
         artifacts = store.summarize_artifact_keys(experiment_id)
-        # Hyperparameter keys are read from the newest runs, the same bound as the metric keys' (`SUMMARY_RUNS`).
-        newest = frozenset(run.id for run in store.get_runs(experiment_id, limit=SUMMARY_RUNS, run_ids=None))
         return cls(
             metrics=tuple(store.summarize_metric_keys(experiment_id)),
             artifacts=tuple(sorted({a.key for a in artifacts})),
@@ -66,15 +76,7 @@ class ColumnCatalog:
             },
             layers=tuple(sorted({a.key for a in artifacts if layer_kind(a.tags, a.fname) is not None})),
             histograms=tuple(store.summarize_histogram_keys(experiment_id)),
-            hparams=tuple(
-                sorted(
-                    {
-                        k
-                        for h in store.fetch_hyperparams(experiment_id, run_ids=newest)
-                        for k in h.hparams_dict
-                    }
-                )
-            ),
+            hparams=tuple(summary_hparam_keys(store, experiment_id)),
         )
 
     @property

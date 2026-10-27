@@ -33,7 +33,7 @@ from dlboard.plugins.charts.bar_chart import BarChart
 from dlboard.plugins.charts.line_chart import LineChart
 from dlboard.plugins.charts.series_band import SeriesBandChart
 from dlboard.plugins.charts.table_chart import TableChart
-from dlboard.serve._pages._experiment._column_catalog import ColumnCatalog
+from dlboard.serve._pages._experiment._column_catalog import ColumnCatalog, summary_hparam_keys
 from dlboard.serve._pages._experiment._panel_data import fetch_panel_data
 from dlboard.serve._pages._experiment._run_compare import load_comparison
 
@@ -249,6 +249,7 @@ def test_a_load_of_the_runs_shown_reads_no_more_for_an_experiment_of_more_runs(
 _KEY_SUMMARIES: dict[str, Callable[[PostgresStore, int], object]] = {
     "metric steps": lambda s, e: s.summarize_metric_steps(e, frozenset(s.summarize_metric_keys(e))),
     "the column catalog": lambda s, e: ColumnCatalog.load(s, e),
+    "the Columns picker's hyperparameter keys": lambda s, e: summary_hparam_keys(s, e),
 }
 
 

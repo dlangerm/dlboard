@@ -19,7 +19,6 @@ class ExperimentPage:
 PAGE_EXPERIMENT_ID: DivId[ExperimentPage] = DivId("experiment-container")
 EXPERIMENT_HEADER_ID: DivId[ExperimentPage] = DivId("experiment-header")
 METRIC_CONTENT_ID: DivId[ExperimentPage] = DivId("metrics-view")
-STATE_HPARAMS: StoreId[ExperimentPage] = StoreId("hparams-state")
 STATE_PAGE_STORAGE: StoreId[ExperimentPage] = StoreId("current-page")
 STATE_VIEW_ID: StoreId[ExperimentPage] = StoreId("view-id-state")
 """The named view (`Page.id`) this page is showing, from its `?view=` URL, or `None` for the shared page."""

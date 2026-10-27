@@ -196,9 +196,8 @@ def register_live_update_callbacks(app: Dash) -> None:
     # --- live updates: a cheap poll of `Experiment.revision` re-renders only the individual open
     # charts whose own data actually changed (never touching the accordion/tabs shell, closed
     # panels, or sibling charts sharing a panel), so new data appears without any page/panel-level
-    # flash a coarser rebuild would cause. Also refreshes `STATE_HPARAMS`, since the navbar
-    # run-comparison table (`_run_comparison_table.py`) reads run/hparam data from it, not from a
-    # live store query of its own.
+    # flash a coarser rebuild would cause. Moves `STATE_LAST_KNOWN_REVISION` on, which the navbar
+    # run-comparison table (`_run_comparison_table.py`) listens to and reads its own data for.
     #
     # Each open *panel* is still fetched only once per tick (`fetch_panel_data`, the same call
     # the initial render makes) -- "Auto-generate charts" routinely groups several charts sharing a
@@ -209,7 +208,6 @@ def register_live_update_callbacks(app: Dash) -> None:
     # on screen carries, so a chart that was just mounted is not redrawn for nothing. ---
     @app.callback(
         Output(chart_view.CHART_BODY.all(), "children"),
-        Output(ids.STATE_HPARAMS, "data", allow_duplicate=True),
         Output(STATE_LAST_KNOWN_REVISION, "data", allow_duplicate=True),
         Output(STATE_LAST_FETCH_AT, "data", allow_duplicate=True),
         Output(LIVE_STATUS_ID, "children"),
@@ -220,7 +218,7 @@ def register_live_update_callbacks(app: Dash) -> None:
     )
     def poll_for_updates(
         _n_intervals: int, states: dict[str, Any]
-    ) -> tuple[list[Any], Any, Any, Any, Component, Any]:
+    ) -> tuple[list[Any], Any, Any, Component, Any]:
         polled = _PollStates.model_validate(states)
         chart_ids, experiment_id = polled.chart_ids, polled.experiment_id
         store = get_data_store()
@@ -247,7 +245,6 @@ def register_live_update_callbacks(app: Dash) -> None:
             return (
                 [no_update] * len(chart_ids),
                 no_update,
-                no_update,
                 fetched_at,
                 live_status_badge(ok=ok),
                 notes_revision,
@@ -267,24 +264,11 @@ def register_live_update_callbacks(app: Dash) -> None:
             shown,
             Paging.model_validate_json(polled.paging_json).sizes.charts,
         )
-        poll_ok = fetch_ok and render_ok
-
-        try:
-            hparams_json: Any = [
-                h.model_dump_json() for h in store.fetch_hyperparams(experiment_id, run_ids=None)
-            ]
-        except Exception:  # noqa: BLE001 -- charts refreshed above still ship even if this fails
-            _log.exception(
-                "Live-update poll failed to refresh hyperparameters for experiment %s", experiment_id
-            )
-            hparams_json, poll_ok = no_update, False
-
         return (
             contents,
-            hparams_json,
             experiment.revision,
             fetched_at,
-            live_status_badge(ok=poll_ok),
+            live_status_badge(ok=fetch_ok and render_ok),
             notes_revision,
         )
 

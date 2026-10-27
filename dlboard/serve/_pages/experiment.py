@@ -81,7 +81,6 @@ def layout(
     if not exp:
         return [html.Div(f"Experiment {experiment_id} not found")]
 
-    hparams = store.fetch_hyperparams(int(experiment_id), run_ids=None)
     # Rendered synchronously, here, rather than by a `render_initial`-style callback fired after
     # this static shell mounts -- see `render_panel`'s own docstring for why that's the one thing
     # that actually eliminates the page's extra round trip, not just hides it behind a spinner.
@@ -176,7 +175,6 @@ def layout(
         Store(id=STATE_NOTES_REVISION, data=exp.notes_revision),
         Store(id=constants.STATE_PROJECT_ID, data=exp.project_id),
         Store(id=constants.STATE_EXPERIMENT_ID, data=int(experiment_id)),
-        Store(id=ids.STATE_HPARAMS, data=[h.model_dump_json() for h in hparams]),
         *(Store(id=store_id) for store_id in _DRAG_DROP_STORE_IDS),
         Store(id=NAVBAR_RUN_SELECTION_ID),
         *chart_view_state_stores(),

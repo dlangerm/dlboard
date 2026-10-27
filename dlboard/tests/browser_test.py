@@ -217,13 +217,14 @@ def test_slow_page_render_shows_a_loading_indicator(
     """A page whose `layout()` is slow shows a spinner until it renders, not a blank main area."""
     _create_project_and_experiment(page, live_server_url, "Slow Page Experiment")
     store = get_system_data_store()
-    fetch_hyperparams = store.fetch_hyperparams
+    get_experiment = store.get_experiment
 
-    def slow_fetch_hyperparams(experiment_id: int, **kwargs: Any) -> Iterator[models.HyperParams]:  # noqa: ANN401
+    # What `layout()` reads first. It read every run's hyperparameters too, until #454 kept them off the page.
+    def slow_get_experiment(experiment_id: int) -> models.Experiment | None:
         time.sleep(2)
-        return fetch_hyperparams(experiment_id, **kwargs)
+        return get_experiment(experiment_id)
 
-    monkeypatch.setattr(store, "fetch_hyperparams", slow_fetch_hyperparams)
+    monkeypatch.setattr(store, "get_experiment", slow_get_experiment)
     page.locator(".experiment-card").click()
 
     spinner = page.locator(f".{PAGE_LOADING_CLASS} .mantine-Loader-root")
