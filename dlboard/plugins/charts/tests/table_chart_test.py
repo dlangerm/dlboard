@@ -250,6 +250,28 @@ def test_rows_of_a_field_have_a_row_per_run_and_value() -> None:
     ]
 
 
+@pytest.mark.parametrize(
+    ("spread_by_run", "max_rows", "drawn"),
+    [
+        pytest.param(False, 4, True, id="a-row-per-run-and-value-up-to-the-limit"),
+        pytest.param(False, 3, False, id="past-it-says-how-many-instead"),
+        pytest.param(True, 3, True, id="runs-side-by-side-are-a-row-per-value"),
+    ],
+)
+def test_a_table_of_a_fields_values_past_the_row_limit_says_so_instead_of_sending_them(
+    monkeypatch: pytest.MonkeyPatch, max_rows: int, *, spread_by_run: bool, drawn: bool
+) -> None:
+    """A row per step of a long run went to the browser whole: megabytes of rows for one table (#364)."""
+    monkeypatch.setenv("DLBOARD_MAX_TABLE_ROWS", str(max_rows))
+    settings = TableChartSettings(rows=TableRows.FIELD, row_field="step", spread_by_run=spread_by_run)
+
+    rows = _render(settings, _wide_df())["rowData"]
+
+    assert ("message" not in rows[0]) is drawn
+    if not drawn:
+        assert rows[0]["message"].startswith("A row for each step would be 4 rows, more than the 3")
+
+
 def test_runs_spread_side_by_side_are_a_column_each_headed_by_the_runs_name_and_color() -> None:
     df = _wide_df().assign(**{RUN_NAME_COLUMN: ["one", "one", "two", "two"]})
     settings = TableChartSettings(

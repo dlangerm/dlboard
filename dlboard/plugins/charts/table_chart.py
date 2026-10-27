@@ -27,6 +27,8 @@ import dash
 import dash_ag_grid as dag
 import pandas as pd
 from dash import MATCH, Input, Output, State
+from pydantic import PositiveInt
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from dlboard.models import (
     ARTIFACT_COLUMN_PREFIX,
@@ -72,6 +74,20 @@ _NOT_METRIC_PREFIXES: typing.Final = (HPARAM_COLUMN_PREFIX, ARTIFACT_COLUMN_PREF
 
 _GRID_TYPE: typing.Final = "dl-table-chart"
 """The `type` of a table chart's grid id (`{"type": ..., "chart": <chart id>}`), for its page-restoring callback."""
+
+
+class TableLimitSettings(BaseSettings):
+    """`DLBOARD_*` environment variables bounding how many rows one table chart shows."""
+
+    model_config = SettingsConfigDict(env_prefix="DLBOARD_")
+
+    max_table_rows: PositiveInt = 5000
+    """
+    A table with a row per value of a field (a row per step, say) that would have more rows than this is not drawn: it
+    says how many, and to show a row per run or a coarser field instead (#364). Every row goes to the browser, so a
+    row per step of a long run is megabytes.
+    """
+
 
 _ARTIFACT_FIELD: typing.Final = "artifact"
 """The field of an artifact's link in a table of artifacts; a tag's is this and `__tag__` and its name."""
@@ -581,6 +597,20 @@ class TableChart(ChartType[TableChartSettings, pd.DataFrame, dag.AgGrid], frozen
             ordered = ordered.assign(
                 **{parameters.row_field: ordered.groupby(MetricColumn.RUN_ID)[parameters.row_field].ffill()}
             )
+            # Counted before a row is built: past the limit, building and sending them is the cost (#364).
+            by = (
+                [parameters.row_field]
+                if parameters.spread_by_run
+                else [MetricColumn.RUN_ID, parameters.row_field]
+            )
+            limit = TableLimitSettings().max_table_rows
+            if (rows := ordered.groupby(by).ngroups) > limit:
+                return _message_table(
+                    f"A row for each {parameters.row_field} would be {rows:,} rows, more than the {limit:,} a table "
+                    "shows. Show a row per run, or a coarser field (an epoch) to see its rows.",
+                    parameters,
+                    context,
+                )
         source = _Source(
             parameters, context, ordered, _selected_columns(parameters, dataframe), _run_names(dataframe)
         )

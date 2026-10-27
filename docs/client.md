@@ -83,7 +83,9 @@ hand on to such a process.
 logged of its metrics for the runs shown, then thins them to `max_points` (500 by default) per run to draw, so it
 costs what was logged, not what is drawn: about 5 ms per thousand points on a laptop, which a live update repeats for
 each open panel. The run list, the lists of metrics and artifacts, a bar chart and a table with a row per run do not
-grow with the steps logged. For a long run, log less often rather than expecting every step to be cheap:
+grow with the steps logged. A table with a row per step sends every one of its rows to the browser, so past
+`DLBOARD_MAX_TABLE_ROWS` (5,000) it says how many instead of drawing them: a row per epoch, or per run, stays small.
+For a long run, log less often rather than expecting every step to be cheap:
 
 - Lightning's `Trainer(log_every_n_steps=...)` (50 by default) is the first knob. `examples/lightning_advanced.py`
   sets 5 and logs about fifty gradient norms every 10 steps because it is a stress test.
