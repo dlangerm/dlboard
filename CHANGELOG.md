@@ -59,6 +59,26 @@ pulls that section's body into the GitHub release notes and publishes both distr
   than every metric: it shows its own error either way. (#395)
 * **The chart editor draws an edit that asks for the same data without reading it again**, such as a change of a
   chart's height or colors, and opening the editor on a chart. A write to the experiment reads it afresh. (#335)
+* **A bar chart over a metric draws a bar per run.** With a metric on its x-axis (a final learning rate, say), runs that
+  ended on the same value used to be averaged into one bar; each run is now a bar of its own, labelled with its name,
+  with its x value in the tooltip ("lr: 0.001"). A hyperparameter on the x-axis still draws a bar per value. (#422)
+* **Run pickers list the newest 50 runs and find the rest as you type.** The compare picker and the notes' run picker
+  sent every run of the experiment to the browser; typing now searches the others on the server, by name or by id. A
+  storage plugin's `get_runs` takes a new `name_contains` (`""` for every run): a case-insensitive match on the name,
+  or the run with that id when it is all digits. (#374)
+* **Key pickers list 100 keys and find the rest as you type.** The chart editor's metric pickers and the run table's
+  Columns picker sent every key the experiment logged (about 250 KB a picker for 11,000 metrics) and filtered them in
+  the browser; they now send a page and what is picked, and search the rest on the server. (#416)
+* **A purge returns at once, and the admin page says while one is running.** The purge runs off the request, its
+  confirm button spins until it is handed off, and purging something already purged does nothing instead of failing.
+  The trash says "A purge is running" while blobs are being deleted, on whichever server process you reach, and offers
+  "Resume cleanup" only for one that stopped. Migration `0005` adds a nullable `AppState.artifact_purge_progress_at`;
+  a storage plugin implements `artifact_purge_progress_at()` and `record_artifact_purge_progress(running=)`, which
+  needs `Scope.PURGE`. (#429)
+
+### Fixed
+
+* **The navbar's runs table lines up with the experiment links above it.** It sat 10 px further in on each side. (#371)
 
 ## [0.12.0] - 2026-10-26
 
