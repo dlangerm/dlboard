@@ -484,6 +484,18 @@ class DataStore(typing.Protocol[_P]):
         """Record that a queued blob deletion failed. The task stays pending and is retried later."""
         ...
 
+    def artifact_purge_progress_at(self) -> datetime | None:
+        """
+        When a running purge last made progress; `None` while none is running.
+
+        Shared by every server process, so any of them can tell a purge in progress from one a process died in.
+        """
+        ...
+
+    def record_artifact_purge_progress(self, *, running: bool) -> None:
+        """Stamp that a purge is making progress now (`running`), or that it is done."""
+        ...
+
 
 class ArtifactStore(typing.Protocol[_P]):
     """An artifact store for files and arbitrary byte-like data."""

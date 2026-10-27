@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast
 
+import pendulum
+import pytest
+
 from dlboard import models
 from dlboard._version import __version__
 from dlboard.conftest import find_props
@@ -82,7 +85,24 @@ def test_render_pending_purge_banner_is_none_when_nothing_pending(store: SQLLite
     assert admin._render_pending_purge_banner(store) is None
 
 
-def test_render_pending_purge_banner_shows_the_count_and_a_resume_button(store: SQLLiteStore) -> None:
+@pytest.mark.parametrize(
+    ("stamped", "stalled_after_s", "running"),
+    [
+        pytest.param(False, 60, False, id="interrupted-offers-to-resume"),
+        pytest.param(True, 60, True, id="running-says-so-and-offers-nothing"),
+        pytest.param(True, 0, False, id="a-stamp-that-stopped-moving-is-interrupted"),
+    ],
+)
+def test_the_purge_banner_tells_a_running_purge_from_an_interrupted_one(
+    store: SQLLiteStore,
+    monkeypatch: pytest.MonkeyPatch,
+    stalled_after_s: int,
+    *,
+    stamped: bool,
+    running: bool,
+) -> None:
+    """Read from the database, so every server process says it, whichever is purging (#429)."""
+    monkeypatch.setattr(admin, "_PURGE_STALLED_AFTER", pendulum.duration(seconds=stalled_after_s))
     admin_user = store.get_or_create_user(models.Principal.unverified("admin"))
     project = store.create_project(models.NewProject(name="p", description="d"))
     experiment = store.create_experiment(models.NewExperiment(project_id=project.id))
@@ -92,11 +112,13 @@ def test_render_pending_purge_banner_shows_the_count_and_a_resume_button(store: 
     )
     store.delete_project(project.id, admin_user)
     store.purge_project(project.id, admin_user)
+    store.record_artifact_purge_progress(running=stamped)
 
     banner = cast("Any", admin._render_pending_purge_banner(store))
 
     assert banner is not None
-    assert find_props(banner, admin.ADMIN_RESUME_PURGE_ID) is not None
+    assert (find_props(banner, admin.ADMIN_RESUME_PURGE_ID) is None) is running
+    assert ("A purge is running" in str(banner)) is running
     assert "1 artifact blob" in str(banner)
 
 

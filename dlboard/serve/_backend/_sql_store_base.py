@@ -1846,12 +1846,18 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         right after this commits. The artifact rows' `ref`s -- the blob locations -- have to be read
         *before* that delete, since the cascade removes them without any Python code seeing them.
         Scope enforcement isn't this module's job -- see `AuthorizingDataStore`.
+
+        Purging what is purged already (a second click, another process) does nothing (#429): an entity that is gone is
+        what a purge was asked for, and only the purge that deletes its row records it and queues its blobs.
         """
-        if self._fetch_deleted_at(model, entity_id) is None:
+        table = self._tables[model]
+        rows = self._execute(sa.select(table.c.deleted_at).where(table.c.id == entity_id))
+        if not rows:
+            return
+        if rows[0][0] is None:
             msg = f"{model.__name__} {entity_id} must be soft-deleted before it can be purged"
             raise ValueError(msg)
 
-        table = self._tables[model]
         cascade = self._cascade(model, entity_id)
         details = self._cascade_counts(cascade)
 
@@ -1864,19 +1870,22 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         artifact_refs = self._execute(sa.select(artifacts.c.id, artifacts.c.ref).where(artifact_where))
 
         purge_tasks = self._tables[models.ArtifactPurgeTask]
-        self._transaction(
-            [
-                sa.delete(table).where(table.c.id == entity_id),
-                self._audit_log_insert(actor.id, models.AuditAction.PURGE, entity_type, entity_id, details),
-                *(
+        with self._begin() as conn:
+            if (
+                conn.execute(sa.delete(table).where(table.c.id == entity_id).returning(table.c.id)).first()
+                is None
+            ):
+                return  # another purge got there first, and recorded it
+            conn.execute(
+                self._audit_log_insert(actor.id, models.AuditAction.PURGE, entity_type, entity_id, details)
+            )
+            for artifact_id, ref in artifact_refs:
+                conn.execute(
                     sql.insert(
                         purge_tasks,
                         models.NewArtifactPurgeTask(artifact_id=artifact_id, ref=ref, requested_by=actor.id),
                     )
-                    for artifact_id, ref in artifact_refs
-                ),
-            ]
-        )
+                )
 
     def delete_project(self, project_id: int, actor: models.User) -> None:
         """Soft-delete a project and cascade to its experiments, runs, and artifacts. Requires `Scope.PROJECT_DELETE`."""
@@ -2008,3 +2017,20 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         tasks = self._tables[models.ArtifactPurgeTask]
         self._execute(sa.update(tasks).where(tasks.c.id == task_id).values(last_error=error))
         _PURGES.add(1, OutcomeAttributes(outcome=Outcome.FAILURE))
+
+    def artifact_purge_progress_at(self) -> datetime | None:
+        """When a running purge last made progress (on `AppState`'s one row); `None` while none is running."""
+        state = self._tables[AppState]
+        ((progress_at,),) = self._execute(
+            sa.select(state.c.artifact_purge_progress_at).where(state.c.id == APP_STATE_ROW_ID)
+        )
+        return progress_at
+
+    def record_artifact_purge_progress(self, *, running: bool) -> None:
+        """Stamp that a purge is making progress now (`running`), or clear it once the purge is done."""
+        state = self._tables[AppState]
+        self._execute(
+            sa.update(state)
+            .where(state.c.id == APP_STATE_ROW_ID)
+            .values(artifact_purge_progress_at=pendulum.now(pendulum.UTC) if running else None)
+        )

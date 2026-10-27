@@ -53,11 +53,18 @@ def _drain_pending(store: DataStore[...], artifact_store: ArtifactStore[...]) ->
     every time would see that same task forever and never terminate. Advancing the offset by
     however many tasks in each page failed (and so remained) skips past them on the next fetch,
     so this always finishes after one pass over what was pending when it started.
+
+    It stamps its progress after every batch, and clears the stamp once done, so every server process can tell a purge
+    in progress from one a process died in (`DataStore.artifact_purge_progress_at`).
     """
     offset = 0
+    deleted = 0
     while True:
+        store.record_artifact_purge_progress(running=True)
         batch = list(store.list_pending_artifact_purges(limit=100, offset=offset))
         if not batch:
+            store.record_artifact_purge_progress(running=False)
+            _log.info("Purged artifact blobs cleaned up", deleted=deleted, failed=offset)
             return
         still_pending = 0
         for task in batch:
@@ -70,7 +77,9 @@ def _drain_pending(store: DataStore[...], artifact_store: ArtifactStore[...]) ->
                 still_pending += 1
                 continue
             store.complete_artifact_purge(task.id)
+        deleted += len(batch) - still_pending
         offset += still_pending
+        _log.info("Cleaning up purged artifact blobs", deleted=deleted, failed=offset)
 
 
 def _run(app: Dash) -> None:

@@ -80,6 +80,7 @@ from dlboard.serve._pages._experiment._run_comparison_table import (
 )
 from dlboard.serve._pages._experiment._run_picker import RUN_PICKER_LIMIT
 from dlboard.serve._pages._experiment._tab_controls import NEW_TAB_PANELS_SELECT_ID, RENAME_TAB_NAME_INPUT_ID
+from dlboard.serve._pages._simple_admin_page import ADMIN_PURGE_CONFIRM_ID
 from dlboard.serve._pages._simple_homepage import NEW_PROJECT_BUTTON_ID, NEW_PROJECT_NAME_ID
 from dlboard.serve._pages._simple_project_page import NEW_EXP_BUTTON_ID, NEW_EXP_NAME_ID
 from dlboard.serve.app import PAGE_LOADING_CLASS
@@ -1791,6 +1792,30 @@ def test_a_view_branched_by_an_edit_can_be_deleted_without_a_reload(
     expect(page).to_have_url(re.compile(rf"/experiment/{experiment_id}\??$"))
     expect(page.get_by_role("textbox", name="View", exact=True)).to_have_value("Shared view")
     assert store.get_view(BasicExperimentPage, view_id) is None
+    assert console_errors == []
+
+
+def test_a_purge_returns_at_once_and_its_entity_leaves_the_trash_when_it_is_done(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """A large purge took the request with it and left the page unresponsive; it runs behind the page now (#429)."""
+    page.goto(
+        f"{live_server_url}/admin"
+    )  # first, so the browser's own user is there (the first user is the admin)
+    store = get_system_data_store()
+    actor = store.get_or_create_user(models.Principal.unverified("purger"))
+    project = store.create_project(models.NewProject(name="to be purged", description=""))
+    store.delete_project(project.id, actor)
+    page.reload()
+    row = page.locator(".mantine-Paper-root", has=page.get_by_text(f"Project {project.id}", exact=True))
+
+    row.get_by_role("button", name="Purge").click()
+    page.locator(f"#{ADMIN_PURGE_CONFIRM_ID}").click()
+
+    expect(page).to_have_url(re.compile(r"/admin$"))
+    _wait_until(lambda: [p.id for p in store.list_deleted_projects() if p.id == project.id], [])
+    page.reload()
+    expect(row).to_have_count(0)
     assert console_errors == []
 
 

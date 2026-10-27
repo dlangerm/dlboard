@@ -661,6 +661,14 @@ class AuthorizingDataStore(models.DataStore[...]):
         require_scope(self._actor, Scope.PURGE)
         self._inner.fail_artifact_purge(task_id, error)
 
+    def artifact_purge_progress_at(self) -> datetime | None:
+        # As public as `count_pending_artifact_purges`: whether a purge is running, nothing of what it purges.
+        return self._inner.artifact_purge_progress_at()
+
+    def record_artifact_purge_progress(self, *, running: bool) -> None:
+        require_scope(self._actor, Scope.PURGE)
+        self._inner.record_artifact_purge_progress(running=running)
+
 
 class AuthorizingArtifactStore(models.ArtifactStore[...]):
     """An `ArtifactStore` that only accepts artifacts for runs its `authorizer`'s actor may write to."""

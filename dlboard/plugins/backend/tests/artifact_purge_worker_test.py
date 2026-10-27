@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import typing
 from typing import TYPE_CHECKING, Self
 
 from dlboard import models
@@ -110,3 +111,43 @@ def test_the_store_counts_each_purge_by_whether_its_blob_was_deleted(
     scrape = serve_metrics().get_data(as_text=True)
     assert scraped_total(scrape, "dlboard_artifact_purges_total", dlboard_outcome="success") == 2
     assert scraped_total(scrape, "dlboard_artifact_purges_total", dlboard_outcome="failure") == 1
+
+
+def test_purging_what_is_purged_already_does_nothing_and_queues_no_blob_twice(store: SQLLiteStore) -> None:
+    """A second click, or another process, purging the same entity (#429)."""
+    admin = store.get_or_create_user(models.Principal.unverified("admin"))
+    project_id, *_ = create_entity_chain(store)
+    store.delete_project(project_id, admin)
+    store.purge_project(project_id, admin)
+    pending = store.count_pending_artifact_purges()
+
+    store.purge_project(project_id, admin)
+
+    assert store.count_pending_artifact_purges() == pending
+    purges = [entry for entry in store.list_audit_log(admin) if entry.action is models.AuditAction.PURGE]
+    assert len(purges) == 1
+
+
+class _WatchingArtifactStore(_RaisingArtifactStore):
+    """Notes, at each blob it deletes, whether the store says a purge is running."""
+
+    def __init__(self, store: SQLLiteStore) -> None:
+        super().__init__(bad_refs=set())
+        self.store = store
+        self.running: list[bool] = []
+
+    @typing.override
+    def delete_artifact(self, ref: AnyUrl) -> None:
+        self.running.append(self.store.artifact_purge_progress_at() is not None)
+        super().delete_artifact(ref)
+
+
+def test_a_drain_says_a_purge_is_running_until_it_is_done(store: SQLLiteStore) -> None:
+    """Every server process reads it, to tell a purge in progress from one a process died in (#429)."""
+    _queue_purge_tasks(store, 3)
+    artifact_store = _WatchingArtifactStore(store)
+
+    artifact_purge_worker._drain_pending(store, artifact_store)
+
+    assert artifact_store.running == [True, True, True]
+    assert store.artifact_purge_progress_at() is None

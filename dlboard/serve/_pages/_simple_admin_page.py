@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Final, cast
 
@@ -26,7 +27,7 @@ from dlboard.serve import (
 )
 from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import ButtonId, DivId, ModalId, StoreId, ValueId
-from dlboard.serve._pages._dash_helpers import require_triggered_id
+from dlboard.serve._pages._dash_helpers import busy_while_running, require_triggered_id
 from dlboard.serve._url import relative_path
 
 if TYPE_CHECKING:
@@ -37,6 +38,9 @@ if TYPE_CHECKING:
     from dlboard.models import AuditLogEntry, DataStore, InstalledPlugin, User
 
 _log = get_logger(__name__)
+
+_PURGE_STALLED_AFTER: Final = pendulum.duration(seconds=60)
+"""How long a running purge may go without progress before the admin page takes it for interrupted, and offers to resume it."""
 
 
 class _AdminPage:
@@ -97,15 +101,28 @@ def _restore(store: DataStore[...], entity_type: models.EntityType, entity_id: i
 
 
 def _purge(store: DataStore[...], entity_type: models.EntityType, entity_id: int, actor: User) -> None:
-    match entity_type:
-        case models.EntityType.PROJECT:
-            store.purge_project(entity_id, actor)
-        case models.EntityType.EXPERIMENT:
-            store.purge_experiment(entity_id, actor)
-        case models.EntityType.RUN:
-            store.purge_run(entity_id, actor)
-        case models.EntityType.ARTIFACT:
-            store.purge_artifact(entity_id, actor)
+    """
+    Purge an entity, then have its blobs cleaned up -- off the request that asked, which returns at once (#429).
+
+    A large purge (a run of thousands of artifacts and millions of metric values) takes far longer than a request
+    should wait. The store it runs on is the request's authorizing one, whose purge checks only the actor it was made
+    for, so it outlives the request safely. Purging what is purged already does nothing, so a second click cannot
+    queue its blobs twice.
+    """
+    try:
+        match entity_type:
+            case models.EntityType.PROJECT:
+                store.purge_project(entity_id, actor)
+            case models.EntityType.EXPERIMENT:
+                store.purge_experiment(entity_id, actor)
+            case models.EntityType.RUN:
+                store.purge_run(entity_id, actor)
+            case models.EntityType.ARTIFACT:
+                store.purge_artifact(entity_id, actor)
+    except (ValueError, PermissionError):
+        _log.exception("Failed to purge %s %s", entity_type, entity_id)
+    # Cleaned up, or not started: the worker clears the running stamp once there is nothing left to clean.
+    artifact_purge_worker.wake()
 
 
 def _trash_row(label: str, entity_type: models.EntityType, item: Any) -> Component:  # noqa: ANN401
@@ -195,22 +212,33 @@ def _render_trash_kind(label: str, entity_type: models.EntityType, items: list[A
 
 def _render_pending_purge_banner(store: DataStore[...]) -> Component | None:
     """
-    An alert when a previous purge's blob cleanup hasn't fully finished.
+    An alert while a purge is running, or when one's blob cleanup was interrupted.
 
     `None` (rendered as nothing) when there's no outstanding work -- the common case, since a
-    purge that happens while the server is running is drained automatically.
+    purge that happens while the server is running is drained automatically. Running is read from the database, so
+    every server process says so, whichever one is purging; a purge whose process died stops making progress, and after
+    `_PURGE_STALLED_AFTER` the banner offers to resume it (#429).
     """
     pending = store.count_pending_artifact_purges()
+    blobs = f"{pending} artifact blob{'s' if pending != 1 else ''}"
+    progress_at = store.artifact_purge_progress_at()
+    if (
+        progress_at is not None
+        and pendulum.now("UTC") - pendulum.instance(progress_at) < _PURGE_STALLED_AFTER
+    ):
+        return dmc.Alert(
+            dmc.Text(
+                f"A purge is running: {blobs} left to clean up. Reload to see how far it is.", size="sm"
+            ),
+            color="blue",
+            variant="light",
+        )
     if not pending:
         return None
     return dmc.Alert(
         dmc.Group(
             [
-                dmc.Text(
-                    f"{pending} artifact blob{'s' if pending != 1 else ''} not yet cleaned up "
-                    "from a previous purge.",
-                    size="sm",
-                ),
+                dmc.Text(f"{blobs} not yet cleaned up from an interrupted purge.", size="sm"),
                 dmc.Button("Resume cleanup", id=ADMIN_RESUME_PURGE_ID, size="xs", variant="light"),
             ],
             justify="space-between",
@@ -619,6 +647,7 @@ def _register_purge_callbacks(app: Dash) -> None:
         Input(ADMIN_PURGE_CONFIRM_ID, "n_clicks"),
         State(ADMIN_PENDING_PURGE_STORE_ID, "data"),
         prevent_initial_call=True,
+        running=busy_while_running(ADMIN_PURGE_CONFIRM_ID),
     )
     def confirm_purge(n_clicks: int, pending: dict[str, Any] | None) -> tuple[bool, str, bool]:
         if not n_clicks or not pending:
@@ -629,11 +658,14 @@ def _register_purge_callbacks(app: Dash) -> None:
         store = get_data_store()
         actor = get_current_user()
         try:
-            _purge(store, entity_type, entity_id, actor)
-        except (ValueError, PermissionError):
+            # Said before the page reloads, so it opens saying a purge is running rather than that nothing is.
+            store.record_artifact_purge_progress(running=True)
+        except PermissionError:
             _log.exception("Failed to purge %s %s", entity_type, entity_id)
         else:
-            artifact_purge_worker.wake()
+            threading.Thread(
+                target=_purge, args=(store, entity_type, entity_id, actor), daemon=True, name="purge"
+            ).start()
         return False, "/admin", True
 
     @app.callback(
