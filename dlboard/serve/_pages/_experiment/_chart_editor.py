@@ -107,15 +107,28 @@ _TARGET: Final[TypeAdapter[EditChart | AddChart]] = TypeAdapter(EditorTarget)
 _NO_LONGER_ON_THE_PAGE: Final = "This chart is no longer on the page."
 
 
-class _FormValues(edits.EditCtx):
-    chart_type_name: str | None
-    values: list[Any]
-    checked_values: list[Any]
-    field_ids: list[dict[str, str]]
-    table_ids: list[dict[str, str]]
-    table_values: list[Any]
-    target: dict[str, Any] | None
-    experiment_id: int
+class _FormStates(edits.EditCtx):
+    """What the editor's form is of: the chart type, what the editor is open on, and the ids of the form's fields."""
+
+    chart_type_name: Annotated[str | None, State(CHART_EDITOR_TYPE_ID, "value")]
+    target: Annotated[EditorTarget | None, State(CHART_EDITOR_TARGET_ID, "data")]
+    field_ids: Annotated[list[dict[str, str]], State(CHART_PARAM.all(), "id")]
+    table_ids: Annotated[list[dict[str, str]], State(CHART_PARAM_TABLE_DATA.all(), "id")]
+    experiment_id: Annotated[int, State(constants.STATE_EXPERIMENT_ID, "data")]
+
+
+class _FormValues(_FormStates):
+    """A whole form: what it is of, and what is in its fields."""
+
+    values: Annotated[list[Any], State(CHART_PARAM.all(), "value")]
+    checked_values: Annotated[list[Any], State(CHART_PARAM.all(), "checked")]
+    table_values: Annotated[list[Any], State(CHART_PARAM_TABLE_DATA.all(), "data")]
+
+
+class _DraftStates(_FormStates):
+    """What drawing the form's chart in its card reads beside the fields it listens to: the cards' drafts."""
+
+    draft_ids: Annotated[list[chart_view.ChartID], State(chart_view.CHART_DRAFT.all(), "id")]
 
 
 def chart_editor_dock() -> html.Aside:
@@ -252,22 +265,22 @@ def _draw_form(  # noqa: PLR0913
     A form that does not (yet) make a valid chart is an expected state while someone types, not an error: it says what
     is missing, and is logged at debug level with no traceback. Anything else that goes wrong is logged in full.
     """
-    chart_type_name = values["chart_type_name"]
+    chart_type_name = values.chart_type_name
     if not chart_type_name:
         return None, ""
     fields = models.ChartTypeRegistry.get_registered_chart_types().get(chart_type_name, {})
     parameters = merge_chart_param_values(
-        values["values"],
-        values["checked_values"],
-        values["field_ids"],
+        values.values,
+        values.checked_values,
+        values.field_ids,
         fields,
-        table_ids=values["table_ids"],
-        table_values=values["table_values"],
+        table_ids=values.table_ids,
+        table_values=values.table_values,
     )
     try:
         chart = build_validated_chart_instance(chart_type_name, parameters, chart_id)
-        document = page_model.BasicExperimentPage.model_validate_json(values["page_json"]).document
-        experiment_id = values["experiment_id"]
+        document = page_model.BasicExperimentPage.model_validate_json(values.page_json).document
+        experiment_id = values.experiment_id
         run_ids = shown_run_ids(store, experiment_id, document)
         panel = models.PanelInstance[Any, Any](name=panel_name, charts=[chart])
 
@@ -335,7 +348,7 @@ def render_card_drafts(  # noqa: PLR0913
     if drawn is None:
         return [no_update if error else None] * len(draft_ids), error
     here = (location.panel.name, location.index)
-    return [drawn if (i["panel"], i["index"]) == here else None for i in draft_ids], ""
+    return [drawn if (i.panel, i.index) == here else None for i in draft_ids], ""
 
 
 def _register_open_and_cancel(app: Dash) -> None:
@@ -357,7 +370,7 @@ def _register_open_and_cancel(app: Dash) -> None:
         _add_clicks: list[int], _edit_clicks: list[int], page_json: str, experiment_id: int
     ) -> tuple[bool, dict[str, Any], str | None, str, str, list[Component], dict[str, Any]]:
         """Opens the editor, with its form built in this same round trip: it is what the person is waiting for."""
-        triggered_id = cast("chart_view.ChartID", require_triggered_id())
+        triggered_id = cast("dict[str, Any]", require_triggered_id())
 
         if triggered_id["type"] == panel_view.OPEN_CHART_BUTTON.type:
             adding = AddChart(panel=triggered_id["panel"]).model_dump()
@@ -371,20 +384,21 @@ def _register_open_and_cancel(app: Dash) -> None:
                 _form_for(adding, None),
             )
 
-        if triggered_id["index"] is None:
+        edited = chart_view.ChartID.model_validate(triggered_id)
+        if edited.index is None:
             msg = f"Malformed edit-chart id: {triggered_id}"
             raise ValueError(msg)
         panel = next(
             (
                 p
                 for p in page_model.BasicExperimentPage.model_validate_json(page_json).panels
-                if p.name == triggered_id["panel"]
+                if p.name == edited.panel
             ),
             None,
         )
-        if panel is None or triggered_id["index"] >= len(panel.charts):
+        if panel is None or edited.index >= len(panel.charts):
             raise PreventUpdate  # the chart went from another tab since its button was drawn: there is nothing to open on
-        chart = panel.charts[triggered_id["index"]]
+        chart = panel.charts[edited.index]
         editing = EditChart(chart_id=chart.id).model_dump()
         return (
             False,
@@ -457,17 +471,7 @@ def _register_form_and_draft(app: Dash) -> None:
         Input(CHART_PARAM.all(), "checked"),
         Input(CHART_PARAM_TABLE_DATA.all(), "data"),
         Input(CHART_EDITOR_REMOUNT_ID, "data"),
-        {
-            "chart_type_name": State(CHART_EDITOR_TYPE_ID, "value"),
-            "target": State(CHART_EDITOR_TARGET_ID, "data"),
-            "field_ids": State(CHART_PARAM.all(), "id"),
-            "table_ids": State(CHART_PARAM_TABLE_DATA.all(), "id"),
-            "draft_ids": State(chart_view.CHART_DRAFT.all(), "id"),
-            "page_json": State(ids.STATE_PAGE_STORAGE, "data"),
-            "paging_json": State(ids.PANEL_PAGING_ID, "data"),
-            "experiment_id": State(constants.STATE_EXPERIMENT_ID, "data"),
-            "view_id": State(ids.STATE_VIEW_ID, "data"),
-        },
+        _DraftStates.states(),
         prevent_initial_call=True,
     )
     def render_draft(
@@ -475,26 +479,17 @@ def _register_form_and_draft(app: Dash) -> None:
         checked_values: list[Any],
         table_values: list[Any],
         _remounted: int | None,
-        state: dict[str, Any],
+        states: dict[str, Any],
     ) -> tuple[list[Any], Any, str]:
         # Not listening to the chart type: a type chosen rebuilds the form, and the form's own fields then say so. Listening
         # to both drew the chart once with the previous form's values (the wrong chart) before the right one.
-        chart_type_name = state["chart_type_name"]
-        target = _target_of(state["target"])
-        no_drafts: list[Any] = [None] * len(state["draft_ids"])
-        form = _FormValues(
-            chart_type_name=chart_type_name,
-            values=values,
-            checked_values=checked_values,
-            field_ids=state["field_ids"],
-            table_ids=state["table_ids"],
-            table_values=table_values,
-            target=state["target"],
-            experiment_id=state["experiment_id"],
-            page_json=state["page_json"],
-            paging_json=state["paging_json"],
+        draft = _DraftStates.model_validate(states)
+        no_drafts: list[Any] = [None] * len(draft.draft_ids)
+        form = _FormValues.model_validate(
+            draft.model_dump(exclude={"draft_ids"})
+            | {"values": values, "checked_values": checked_values, "table_values": table_values}
         )
-        match target:
+        match target := draft.target:
             case None:
                 raise PreventUpdate
             case AddChart():
@@ -502,13 +497,13 @@ def _register_form_and_draft(app: Dash) -> None:
                 shown = dmc.Stack([dmc.Text("Preview", fw=600), preview]) if preview is not None else None
                 return no_drafts, shown, error
             case EditChart():
-                panels = page_model.BasicExperimentPage.model_validate_json(state["page_json"]).panels
+                panels = page_model.BasicExperimentPage.model_validate_json(draft.page_json).panels
                 location = page_model.locate_chart(panels, target.chart_id)
                 if location is None:
                     return no_drafts, None, _NO_LONGER_ON_THE_PAGE
-                page_size = Paging.model_validate_json(state["paging_json"]).sizes.charts
+                page_size = Paging.model_validate_json(draft.paging_json).sizes.charts
                 drafts, error = render_card_drafts(
-                    form, location, page_size, state["draft_ids"], store=get_data_store(), reads=reads
+                    form, location, page_size, draft.draft_ids, store=get_data_store(), reads=reads
                 )
                 return drafts, None, error
 
@@ -521,38 +516,28 @@ def _register_save(app: Dash) -> None:
         Output(CHART_EDITOR_ERROR_ID, "children", allow_duplicate=True),
         Output(ids.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Input(CHART_EDITOR_SAVE_ID, "n_clicks"),
-        {
-            "chart_type_name": State(CHART_EDITOR_TYPE_ID, "value"),
-            "values": State(CHART_PARAM.all(), "value"),
-            "checked_values": State(CHART_PARAM.all(), "checked"),
-            "table_ids": State(CHART_PARAM_TABLE_DATA.all(), "id"),
-            "table_values": State(CHART_PARAM_TABLE_DATA.all(), "data"),
-            "field_ids": State(CHART_PARAM.all(), "id"),
-            "target": State(CHART_EDITOR_TARGET_ID, "data"),
-            "experiment_id": State(constants.STATE_EXPERIMENT_ID, "data"),
-            "page_json": State(ids.STATE_PAGE_STORAGE, "data"),
-            "paging_json": State(ids.PANEL_PAGING_ID, "data"),
-        },
+        _FormValues.states(),
         running=busy_while_running(CHART_EDITOR_SAVE_ID),
         prevent_initial_call=True,
     )
     def save_chart(
-        n_clicks: int, form: _FormValues
+        n_clicks: int, states: dict[str, Any]
     ) -> tuple[Any, bool | NoUpdate, dict[str, Any] | NoUpdate | None, str, str | NoUpdate]:
-        chart_type_name, target = form["chart_type_name"], _target_of(form["target"])
+        form = _FormValues.model_validate(states)
+        chart_type_name, target = form.chart_type_name, form.target
         if not n_clicks or not chart_type_name or target is None:
             raise PreventUpdate
 
         fields = models.ChartTypeRegistry.get_registered_chart_types().get(chart_type_name, {})
         parameters = merge_chart_param_values(
-            form["values"],
-            form["checked_values"],
-            form["field_ids"],
+            form.values,
+            form.checked_values,
+            form.field_ids,
             fields,
-            table_ids=form["table_ids"],
-            table_values=form["table_values"],
+            table_ids=form.table_ids,
+            table_values=form.table_values,
         )
-        panels = page_model.BasicExperimentPage.model_validate_json(form["page_json"]).panels
+        panels = page_model.BasicExperimentPage.model_validate_json(form.page_json).panels
         # An edit keeps each chart's id, so a link to it still opens it; a new chart gets one of its own, so two charts
         # of one config are not one chart to a link or to anything keyed by id.
         match target:
@@ -572,8 +557,8 @@ def _register_save(app: Dash) -> None:
             return [page_model.upsert_chart(p, panel_name, index, chart) for p in panels]
 
         page, container = edits.commit(
-            form["page_json"],
-            form["paging_json"],
+            form.page_json,
+            form.paging_json,
             edits.PageEdit(panels=apply_chart, reveal=edits.RevealChart(chart.id)),
         )
         return container, True, None, "", page.model_dump_json()

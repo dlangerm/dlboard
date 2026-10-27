@@ -36,7 +36,7 @@ from dlboard.serve import ClientsideScript, Icon, get_data_store, icon, series_s
 from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import ButtonId, DivId, ModalId, StoreId, ValueId
 from dlboard.serve._grid import themed_grid_kwargs
-from dlboard.serve._pages._dash_helpers import tooltipped_action_icon
+from dlboard.serve._pages._dash_helpers import CallbackStates, tooltipped_action_icon
 from dlboard.serve._pages._dataframe_helpers import run_display_name
 from dlboard.serve._pages._experiment import _ids as ids
 from dlboard.serve._pages._experiment import _page_model as page_model
@@ -489,6 +489,17 @@ def compare_components(store: DataStore[...], experiment_id: int, query: Compare
     return [modal, Store(id=COMPARE_KEYS_STORE_ID, data=comparison.index.model_dump())]
 
 
+class _ComparedPage(CallbackStates):
+    """The page of the comparison to show: the keys the runs have, each control that narrows them, and the runs."""
+
+    index: Annotated[CompareIndex | None, Input(COMPARE_KEYS_STORE_ID, "data")]
+    mode: Annotated[CompareMode, Input(COMPARE_MODE_ID, "value")]
+    search: Annotated[str | None, Input(COMPARE_SEARCH_ID, "value")]
+    number: Annotated[int | None, Input(COMPARE_PAGER_ID, "value", allow_optional=True)]
+    picked: Annotated[list[int], State(COMPARE_RUNS_ID, "value")]
+    experiment_id: Annotated[int, State(constants.STATE_EXPERIMENT_ID, "data")]
+
+
 def register_run_compare_callbacks(app: Dash) -> None:
     """
     Wire the compare modal: open from the button, load the picked runs' keys, page and filter them, mirror state into the URL.
@@ -546,34 +557,26 @@ def register_run_compare_callbacks(app: Dash) -> None:
         Output(COMPARE_GRID_ID, "columnDefs"),
         Output(COMPARE_GRID_ID, "rowData"),
         Output(COMPARE_PAGE_SLOT_ID, "children"),
-        Input(COMPARE_KEYS_STORE_ID, "data"),
-        Input(COMPARE_MODE_ID, "value"),
-        Input(COMPARE_SEARCH_ID, "value"),
-        Input(COMPARE_PAGER_ID, "value", allow_optional=True),
-        State(COMPARE_RUNS_ID, "value"),
-        State(constants.STATE_EXPERIMENT_ID, "data"),
+        _ComparedPage.states(),
         prevent_initial_call=True,
     )
-    def page_compared_keys(  # noqa: PLR0913 -- one input per control the page depends on
-        index: dict[str, Any] | None,
-        mode: str,
-        search: str | None,
-        number: int | None,
-        picked: list[str],
-        experiment_id: int,
+    def page_compared_keys(
+        **states: Any,  # noqa: ANN401 -- validated on the first line
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[Component]]:
+        # Its grouping is all it reads, so Dash hands it over as keyword arguments rather than one dict.
+        shown = _ComparedPage.model_validate(states)
         # A new filter or key list starts again from the first page; only the pager itself keeps its place.
-        page_number = (number or 1) if ctx.triggered_id == COMPARE_PAGER_ID else 1
+        page_number = (shown.number or 1) if ctx.triggered_id == COMPARE_PAGER_ID else 1
         store = get_data_store()
-        runs, hparams = load_compared(store, experiment_id, [int(run_id) for run_id in picked])
+        runs, hparams = load_compared(store, shown.experiment_id, shown.picked)
         page = comparison_page(
             store,
-            experiment_id,
+            shown.experiment_id,
             runs,
             hparams,
-            CompareIndex.model_validate(index or {}),
-            CompareMode(mode),
-            search or "",
+            shown.index or CompareIndex(),
+            shown.mode,
+            shown.search or "",
             page_number,
         )
         return comparison_columns(page.runs), page.rows, page_controls(page)

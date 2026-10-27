@@ -6,8 +6,9 @@ from typing import TYPE_CHECKING, Any, cast
 
 import dash_mantine_components as dmc
 import pendulum
-from dash import Output, ctx, html
+from dash import Input, Output, State, ctx, html
 from dash.exceptions import PreventUpdate
+from pydantic import BaseModel
 
 from dlboard import models
 from dlboard.serve import Icon, icon
@@ -153,3 +154,23 @@ def busy_while_running[P](button: ButtonId[P]) -> list[tuple[Output, bool, bool]
     this it sits there looking like it did nothing.
     """
     return [(Output(button, "loading"), True, False)]
+
+
+class CallbackStates(BaseModel, frozen=True, extra="forbid"):
+    """
+    What a callback reads, as one value it validates: each field is `Annotated` with the `State` it is read from.
+
+    A callback lists `states()` where it would list them, Dash hands back one dict of what the browser sent, and the
+    callback's first line is `model_validate` of it -- so a malformed one fails where it arrives, not as a `KeyError`
+    deep inside (a callback that reads nothing else gets it as keyword arguments, `**states`). A callback that would
+    take more arguments than ruff's `max-args` groups them this way; a field read from an `Input` rather than a `State`
+    also fires the callback.
+    """
+
+    @classmethod
+    def states(cls) -> dict[str, Input | State]:
+        def read_from(metadata: list[Any]) -> Input | State:
+            (dependency,) = (m for m in metadata if isinstance(m, Input | State))
+            return dependency
+
+        return {name: read_from(field.metadata) for name, field in cls.model_fields.items()}

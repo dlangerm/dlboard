@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 import pendulum
 from dash import no_update
@@ -17,9 +17,11 @@ from dlboard.plugins.charts.table_chart import TableChart
 from dlboard.serve._pages._experiment import _page_repository as repo
 from dlboard.serve._pages._experiment._chart_editor import (
     EditorReads,
+    _FormValues,
     render_card_drafts,
     render_chart_preview,
 )
+from dlboard.serve._pages._experiment._chart_view import CHART_DRAFT, ChartID
 from dlboard.serve._pages._experiment._page_model import BasicExperimentPage, ChartLocation, DocumentSettings
 
 if TYPE_CHECKING:
@@ -69,14 +71,14 @@ def test_render_chart_preview_draws_the_selected_runs_like_the_real_panel(
         experiment_id=experiment_id,
         page_json=repo.load_page(store, repo.PageRef(experiment_id, view.id)).model_dump_json(),
     )
-    preview, error = render_chart_preview(cast("Any", form), store=store, reads=EditorReads())
+    preview, error = render_chart_preview(form, store=store, reads=EditorReads())
 
     assert error == ""
     _title, plot = _to_props(preview)["children"]
     assert [s["name"] for s in _to_props(plot)["series"]] == [str(kept.id)]
 
 
-def _form(**changes: Any) -> dict[str, Any]:  # noqa: ANN401 -- the values of a form read by a callback
+def _form(**changes: Any) -> _FormValues:  # noqa: ANN401 -- the values of a form read by a callback
     form: dict[str, Any] = {
         "chart_type_name": "line",
         "values": ["loss", "step"],
@@ -89,7 +91,12 @@ def _form(**changes: Any) -> dict[str, Any]:  # noqa: ANN401 -- the values of a 
         "paging_json": "",
         "target": None,
     }
-    return form | changes
+    return _FormValues.model_validate(form | changes)
+
+
+def _draft_ids(*cards: tuple[str, int]) -> list[ChartID]:
+    """The ids the browser sends back for the cards' drafts, by each card's panel and index."""
+    return [ChartID(type=CHART_DRAFT.type, panel=panel, index=index) for panel, index in cards]
 
 
 def _page_with_a_chart(store: SQLLiteStore, experiment_id: int) -> tuple[models.PanelInstance[Any, Any], str]:
@@ -108,16 +115,13 @@ def test_an_edited_chart_is_drawn_in_its_own_card_under_ids_of_its_own_and_the_o
     panel, page_json = _page_with_a_chart(store, experiment_id)
     location = ChartLocation(panel, 0, panel.charts[0])
     form = _form(experiment_id=experiment_id, page_json=page_json)
-    draft_ids = [
-        {"type": "chart-draft", "panel": "train", "index": 0},
-        {"type": "chart-draft", "panel": "val", "index": 0},
-    ]
+    draft_ids = _draft_ids(("train", 0), ("val", 0))
 
     drafts, error = render_card_drafts(
-        cast("Any", form),
+        form,
         location,
         models.DEFAULT_RENDER_CONTEXT.page_size,
-        cast("Any", draft_ids),
+        draft_ids,
         store=store,
         reads=EditorReads(),
     )
@@ -136,14 +140,14 @@ def test_a_form_that_makes_no_valid_chart_leaves_the_draft_as_it_was_and_says_wh
     form = _form(
         experiment_id=experiment_id, page_json=page_json, values=[None, "step"]
     )  # the column is required
-    draft_ids = [{"type": "chart-draft", "panel": "train", "index": 0}]
+    draft_ids = _draft_ids(("train", 0))
 
     with capture_logs() as logs:
         drafts, error = render_card_drafts(
-            cast("Any", form),
+            form,
             location,
             models.DEFAULT_RENDER_CONTEXT.page_size,
-            cast("Any", draft_ids),
+            draft_ids,
             store=store,
             reads=EditorReads(),
         )
@@ -176,10 +180,10 @@ def test_a_display_only_edit_is_drawn_without_reading_again_until_the_experiment
             ],
         )
         _drafts, error = render_card_drafts(
-            cast("Any", form),
+            form,
             location,
             models.DEFAULT_RENDER_CONTEXT.page_size,
-            cast("Any", [{"type": "chart-draft", "panel": "train", "index": 0}]),
+            _draft_ids(("train", 0)),
             store=store,
             reads=reads,
         )

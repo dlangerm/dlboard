@@ -53,9 +53,7 @@ def test_a_body_carries_the_fingerprint_of_the_data_it_was_drawn_from() -> None:
 
 def _body_ids() -> list[chart_view.ChartID]:
     """The ids the browser reports back for the two charts' bodies -- JSON a callback reads as `ChartID`s."""
-    return typing.cast(
-        "list[chart_view.ChartID]", [chart_view.CHART_BODY.of("p", 0), chart_view.CHART_BODY.of("p", 1)]
-    )
+    return [chart_view.ChartID.model_validate(chart_view.CHART_BODY.of("p", i)) for i in (0, 1)]
 
 
 def test_only_a_chart_whose_data_moved_gets_a_new_body_and_the_rest_are_left_alone() -> None:

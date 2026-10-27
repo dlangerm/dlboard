@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import typing
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypedDict, cast
+from typing import TYPE_CHECKING, Annotated, Any, cast
 
 from dash import Dash, Input, Output, State, ctx, no_update
 from dash.exceptions import PreventUpdate
@@ -19,6 +19,7 @@ from structlog.stdlib import get_logger
 
 from dlboard.serve import ClientsideScript, get_data_store
 from dlboard.serve import _constants as constants
+from dlboard.serve._pages._dash_helpers import CallbackStates
 from dlboard.serve._pages._experiment._ids import (
     PANEL_PAGING_ID,
     STATE_PAGE_STORAGE,
@@ -73,26 +74,33 @@ _PAGING_SIDE_EFFECTS_JS = ClientsideScript(Path(__file__).with_name("paging_side
 _SIZES_COOKIE_MAX_AGE: typing.Final = 365 * 24 * 60 * 60
 
 
-class _PageChartsCtx(TypedDict):
-    filter_ids: list[dict[str, str]]
-    pager_ids: list[dict[str, str]]
-    slot_ids: list[dict[str, str]]
-    content_ids: list[dict[str, str]]
-    loaded: list[str] | None
-    paging_json: str
-    page_json: str
-    experiment_id: int
+class _ShownPage(CallbackStates):
+    """The page the panel area shows, and how it is paged."""
+
+    paging_json: Annotated[str, State(PANEL_PAGING_ID, "data")]
+    page_json: Annotated[str, State(STATE_PAGE_STORAGE, "data")]
+    experiment_id: Annotated[int, State(constants.STATE_EXPERIMENT_ID, "data")]
 
 
-class _PagePanelsCtx(TypedDict):
-    q: str | None
-    size: str | None
-    chart_size: str | None
-    tabs_value: str | None
-    paging_json: str
-    page_json: str
-    experiment_id: int
-    rendered_accordions: list[dict[str, str]]
+class _PageChartsCtx(_ShownPage):
+    filter_ids: Annotated[list[dict[str, str]], State(CHART_FILTER.all(), "id")]
+    pager_ids: Annotated[list[dict[str, str]], State(CHART_PAGER.all(), "id")]
+    slot_ids: Annotated[list[dict[str, str]], State(CHART_PAGER_SLOT.all(), "id")]
+    content_ids: Annotated[list[dict[str, str]], State(PANEL_CONTENT.all(), "id")]
+    loaded: Annotated[list[str] | None, State(LOADED_PANELS_STORE_ID, "data")]
+
+
+class _PagePanelsCtx(_ShownPage):
+    q: Annotated[str | None, Input(PANEL_FILTER_ID, "value", allow_optional=True)]
+    size: Annotated[str | None, Input(PANEL_PAGE_SIZE_ID, "value", allow_optional=True)]
+    chart_size: Annotated[str | None, Input(CHART_PAGE_SIZE_ID, "value", allow_optional=True)]
+    tabs_value: Annotated[str | None, Input(PANEL_TABS_ID, "value", allow_optional=True)]
+    rendered_accordions: Annotated[list[dict[str, str]], State(PANEL_ACCORDION.all(), "id")]
+
+
+class _OpenedPanelsCtx(_ShownPage):
+    panel_ids: Annotated[list[dict[str, str]], State(PANEL_CONTENT.all(), "id")]
+    loaded: Annotated[list[str] | None, State(LOADED_PANELS_STORE_ID, "data")]
 
 
 def _register_paging(app: Dash) -> None:
@@ -103,33 +111,25 @@ def _register_paging(app: Dash) -> None:
         Output(PANEL_PAGING_ID, "data", allow_duplicate=True),
         Output(LOADED_PANELS_STORE_ID, "data", allow_duplicate=True),
         Input(PANEL_PAGER_ID, "value", allow_optional=True),
-        {
-            "q": Input(PANEL_FILTER_ID, "value", allow_optional=True),
-            "size": Input(PANEL_PAGE_SIZE_ID, "value", allow_optional=True),
-            "chart_size": Input(CHART_PAGE_SIZE_ID, "value", allow_optional=True),
-            "tabs_value": Input(PANEL_TABS_ID, "value", allow_optional=True),
-            "paging_json": State(PANEL_PAGING_ID, "data"),
-            "page_json": State(STATE_PAGE_STORAGE, "data"),
-            "experiment_id": State(constants.STATE_EXPERIMENT_ID, "data"),
-            "rendered_accordions": State(PANEL_ACCORDION.all(), "id"),
-        },
+        _PagePanelsCtx.states(),
         prevent_initial_call=True,
         running=[(Output(PANEL_AREA_ID, "style"), {"opacity": 0.5}, {"opacity": 1})],
     )
     def page_panels(
-        pager_value: int | None, panel_ctx: _PagePanelsCtx
+        pager_value: int | None, states: dict[str, Any]
     ) -> tuple[list[Component], str, list[str]]:
         """Show the page of panels a filter, pager, page size or tab change asks for."""
-        paging = Paging.model_validate_json(panel_ctx["paging_json"])
-        rendered_accordions = panel_ctx["rendered_accordions"]
+        panel_ctx = _PagePanelsCtx.model_validate(states)
+        paging = Paging.model_validate_json(panel_ctx.paging_json)
+        rendered_accordions = panel_ctx.rendered_accordions
         rendered_tab = rendered_accordions[0]["tab"] if rendered_accordions else ""
-        tabs_value = panel_ctx["tabs_value"]
+        tabs_value = panel_ctx.tabs_value
         tab = tab_from_component_value(tabs_value) if tabs_value else rendered_tab
         try:
             sizes = PageSizes.model_validate(
                 {
-                    "panels": int(panel_ctx["size"] or paging.sizes.panels),
-                    "charts": int(panel_ctx["chart_size"] or paging.sizes.charts),
+                    "panels": int(panel_ctx.size or paging.sizes.panels),
+                    "charts": int(panel_ctx.chart_size or paging.sizes.charts),
                 }
             )
         except (ValueError, ValidationError):
@@ -137,7 +137,7 @@ def _register_paging(app: Dash) -> None:
 
         requested = next_panel_paging(
             paging,
-            q=panel_ctx["q"] or "",
+            q=panel_ctx.q or "",
             pager_value=pager_value,
             size=sizes.panels,
             chart_size=sizes.charts,
@@ -147,9 +147,7 @@ def _register_paging(app: Dash) -> None:
         store = get_data_store()
         page = load_page(
             store,
-            ref_of(
-                panel_ctx["experiment_id"], BasicExperimentPage.model_validate_json(panel_ctx["page_json"])
-            ),
+            ref_of(panel_ctx.experiment_id, BasicExperimentPage.model_validate_json(panel_ctx.page_json)),
         )
         new_paging = clamped_paging(page, tab, requested.viewing(tab=tab)).normalized(page.panels)
         # A control mounting reports its current value back as a "change" -- nothing to do for that.
@@ -176,26 +174,18 @@ def _register_paging(app: Dash) -> None:
         Output(PANEL_PAGING_ID, "data", allow_duplicate=True),
         Input(CHART_FILTER.all(), "value"),
         Input(CHART_PAGER.all(), "value"),
-        {
-            "filter_ids": State(CHART_FILTER.all(), "id"),
-            "pager_ids": State(CHART_PAGER.all(), "id"),
-            "slot_ids": State(CHART_PAGER_SLOT.all(), "id"),
-            "content_ids": State(PANEL_CONTENT.all(), "id"),
-            "loaded": State(LOADED_PANELS_STORE_ID, "data"),
-            "paging_json": State(PANEL_PAGING_ID, "data"),
-            "page_json": State(STATE_PAGE_STORAGE, "data"),
-            "experiment_id": State(constants.STATE_EXPERIMENT_ID, "data"),
-        },
+        _PageChartsCtx.states(),
         prevent_initial_call=True,
         running=[(Output(PANEL_AREA_ID, "style"), {"opacity": 0.5}, {"opacity": 1})],
     )
     def page_panel_charts(
-        filter_values: list[str | None], pager_values: list[int], chart_ctx: _PageChartsCtx
+        filter_values: list[str | None], pager_values: list[int], states: dict[str, Any]
     ) -> tuple[list[Any], list[Any], str]:
         """Show the page of a panel's charts that its filter or pager asks for; the other panels are untouched."""
-        filter_ids, pager_ids = chart_ctx["filter_ids"], chart_ctx["pager_ids"]
-        slot_ids, content_ids = chart_ctx["slot_ids"], chart_ctx["content_ids"]
-        paging = Paging.model_validate_json(chart_ctx["paging_json"])
+        chart_ctx = _PageChartsCtx.model_validate(states)
+        filter_ids, pager_ids = chart_ctx.filter_ids, chart_ctx.pager_ids
+        slot_ids, content_ids = chart_ctx.slot_ids, chart_ctx.content_ids
+        paging = Paging.model_validate_json(chart_ctx.paging_json)
         requested = next_chart_paging(
             paging,
             filters={pid["panel"]: value or "" for pid, value in zip(filter_ids, filter_values, strict=True)},
@@ -205,10 +195,10 @@ def _register_paging(app: Dash) -> None:
         if requested == paging:
             raise PreventUpdate
 
-        experiment_id = chart_ctx["experiment_id"]
+        experiment_id = chart_ctx.experiment_id
         store = get_data_store()
         page = load_page(
-            store, ref_of(experiment_id, BasicExperimentPage.model_validate_json(chart_ctx["page_json"]))
+            store, ref_of(experiment_id, BasicExperimentPage.model_validate_json(chart_ctx.page_json))
         )
         panel_by_name = {p.name: p for p in page.panels}
         changed = {
@@ -221,7 +211,7 @@ def _register_paging(app: Dash) -> None:
             number = visible_chart_indexes(panel_by_name[name], requested).number
             requested = requested.with_charts(name, chart_paging.model_copy(update={"page": number}))
 
-        redrawn = changed & set(chart_ctx["loaded"] or [])
+        redrawn = changed & set(chart_ctx.loaded or [])
         frames = panel_frames(store, page, requested, redrawn)
         return (
             [
@@ -291,33 +281,25 @@ def register_panel_area_callbacks(app: Dash) -> None:
         Output(PANEL_CONTENT.all(), "children"),
         Output(LOADED_PANELS_STORE_ID, "data"),
         Input(PANEL_ACCORDION.all(), "value"),
-        State(PANEL_CONTENT.all(), "id"),
-        State(LOADED_PANELS_STORE_ID, "data"),
-        State(constants.STATE_EXPERIMENT_ID, "data"),
-        State(STATE_PAGE_STORAGE, "data"),
-        State(PANEL_PAGING_ID, "data"),
+        _OpenedPanelsCtx.states(),
         prevent_initial_call=True,
     )
-    def render_opened_panels(  # noqa: PLR0913
-        open_values: list[list[str] | None],
-        panel_ids: list[dict[str, str]],
-        loaded: list[str] | None,
-        experiment_id: int,
-        page_json: str,
-        paging_json: str,
+    def render_opened_panels(
+        open_values: list[list[str] | None], states: dict[str, Any]
     ) -> tuple[list[Any], list[str]]:
+        opened = _OpenedPanelsCtx.model_validate(states)
         open_set = {name for group in open_values for name in (group or [])}
-        loaded_set = set(loaded or [])
+        loaded_set = set(opened.loaded or [])
         newly_opened = open_set - loaded_set
         if not newly_opened:
             raise PreventUpdate
 
-        paging = Paging.model_validate_json(paging_json)
+        paging = Paging.model_validate_json(opened.paging_json)
         store = get_data_store()
         # `ref_of`, not `STATE_VIEW_ID`: this accordion
         # remount can itself be the tail end of an edit that just branched into a new view.
-        curr_page = BasicExperimentPage.model_validate_json(page_json)
-        page = load_page(store, ref_of(experiment_id, curr_page))
+        curr_page = BasicExperimentPage.model_validate_json(opened.page_json)
+        page = load_page(store, ref_of(opened.experiment_id, curr_page))
         panel_by_name = {p.name: p for p in page.panels}
         rendered = newly_opened & panel_by_name.keys()
         frames = panel_frames(store, page, paging, rendered)
@@ -325,7 +307,7 @@ def register_panel_area_callbacks(app: Dash) -> None:
             render_panel_content(frames, panel_by_name[pid["panel"]], paging)
             if pid["panel"] in rendered
             else no_update
-            for pid in panel_ids
+            for pid in opened.panel_ids
         ]
         return outputs, sorted(loaded_set | newly_opened)
 

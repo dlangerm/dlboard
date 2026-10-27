@@ -10,9 +10,13 @@ never to the browser's copy of it: a copy can be stale, and writing it back woul
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, TypedDict, cast
+from typing import TYPE_CHECKING, Annotated, Any, cast
+
+from dash import State
 
 from dlboard.serve import get_data_store
+from dlboard.serve._pages._dash_helpers import CallbackStates
+from dlboard.serve._pages._experiment import _ids as ids
 from dlboard.serve._pages._experiment._page_model import BasicExperimentPage
 from dlboard.serve._pages._experiment._page_repository import load_page, ref_of, save_page
 from dlboard.serve._pages._experiment._paging import Paging, reveal, visible_open_panels
@@ -120,13 +124,8 @@ def commit(page_json: str, paging_json: str, edit: PageEdit) -> tuple[BasicExper
     return saved, accordion_view(panel_frames(get_data_store(), saved, paging, open_panels), saved, paging)
 
 
-class EditCtx(TypedDict):
-    """
-    Base for the grouped ("flexible callback signature") `State` dicts panel/chart mutations take.
+class EditCtx(CallbackStates):
+    """The `State`s every page edit reads: the page and paging the browser holds. Each edit's own adds what it needs."""
 
-    One dict argument instead of several separate ones keeps those callbacks under ruff's
-    `max-args`; each subclass adds whatever that one callback needs next to `page_json`.
-    """
-
-    page_json: str
-    paging_json: str
+    page_json: Annotated[str, State(ids.STATE_PAGE_STORAGE, "data")]
+    paging_json: Annotated[str, State(ids.PANEL_PAGING_ID, "data")]

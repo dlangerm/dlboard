@@ -10,7 +10,7 @@ callbacks that keep switching it off and the label's clock off the server entire
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 import dash_mantine_components as dmc
 import pendulum
@@ -22,6 +22,7 @@ from structlog.stdlib import get_logger
 from dlboard.serve import ClientsideScript, get_data_store
 from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import DivId, IntervalId, StoreId, ValueId
+from dlboard.serve._pages._dash_helpers import CallbackStates
 from dlboard.serve._pages._experiment import _chart_view as chart_view
 from dlboard.serve._pages._experiment import _ids as ids
 from dlboard.serve._pages._experiment import _page_model as page_model
@@ -87,6 +88,19 @@ class LiveUpdateSettings(BaseSettings):
     frequent than `poll_interval_ms`."""
 
 
+class _PollStates(CallbackStates):
+    """What a poll tick compares with the store: the charts on screen and what each was drawn from, and what it last saw."""
+
+    chart_ids: Annotated[list[chart_view.ChartID], State(chart_view.CHART_BODY.all(), "id")]
+    fingerprint_ids: Annotated[list[chart_view.ChartID], State(chart_view.CHART_FINGERPRINT.all(), "id")]
+    fingerprints: Annotated[list[str], State(chart_view.CHART_FINGERPRINT.all(), "children")]
+    experiment_id: Annotated[int, State(constants.STATE_EXPERIMENT_ID, "data")]
+    view_id: Annotated[int | None, State(ids.STATE_VIEW_ID, "data")]
+    last_known_revision: Annotated[int | None, State(STATE_LAST_KNOWN_REVISION, "data")]
+    last_notes_revision: Annotated[int | None, State(STATE_NOTES_REVISION, "data")]
+    paging_json: Annotated[str, State(ids.PANEL_PAGING_ID, "data")]
+
+
 def live_status_badge(*, ok: bool) -> Component:
     """
     Small colored chip reporting whether the live-update poll (`poll_for_updates`) is healthy.
@@ -120,8 +134,8 @@ def _fetch_open_panel_dataframes(
     panels_by_name = {p.name: p for p in page.panels}
     mounted: dict[str, set[int]] = {}
     for chart_id in chart_ids:
-        if chart_id["index"] is not None:
-            mounted.setdefault(chart_id["panel"], set()).add(chart_id["index"])
+        if chart_id.index is not None:
+            mounted.setdefault(chart_id.panel, set()).add(chart_id.index)
     dataframes: dict[str, panel_data.PanelData] = {}
     ok = True
     for panel_name, indexes in mounted.items():
@@ -153,7 +167,7 @@ def _refresh_chart_bodies(
     contents: list[Any] = []
     ok = True
     for chart_id in chart_ids:
-        panel_name, index = chart_id["panel"], chart_id["index"]
+        panel_name, index = chart_id.panel, chart_id.index
         panel = panels_by_name.get(panel_name)
         data = dataframes.get(panel_name)
         if panel is None or data is None or index is None or index >= len(panel.charts):
@@ -201,27 +215,14 @@ def register_live_update_callbacks(app: Dash) -> None:
         Output(LIVE_STATUS_ID, "children"),
         Output(STATE_NOTES_REVISION, "data"),
         Input(LIVE_POLL_INTERVAL_ID, "n_intervals"),
-        State(chart_view.CHART_BODY.all(), "id"),
-        State(chart_view.CHART_FINGERPRINT.all(), "id"),
-        State(chart_view.CHART_FINGERPRINT.all(), "children"),
-        State(constants.STATE_EXPERIMENT_ID, "data"),
-        State(ids.STATE_VIEW_ID, "data"),
-        State(STATE_LAST_KNOWN_REVISION, "data"),
-        State(STATE_NOTES_REVISION, "data"),
-        State(ids.PANEL_PAGING_ID, "data"),
+        _PollStates.states(),
         prevent_initial_call=True,
     )
-    def poll_for_updates(  # noqa: PLR0913
-        _n_intervals: int,
-        chart_ids: list[chart_view.ChartID],
-        fingerprint_ids: list[chart_view.ChartID],
-        fingerprints: list[str],
-        experiment_id: int,
-        view_id: int | None,
-        last_known_revision: int | None,
-        last_notes_revision: int | None,
-        paging_json: str,
+    def poll_for_updates(
+        _n_intervals: int, states: dict[str, Any]
     ) -> tuple[list[Any], Any, Any, Any, Component, Any]:
+        polled = _PollStates.model_validate(states)
+        chart_ids, experiment_id = polled.chart_ids, polled.experiment_id
         store = get_data_store()
         ok = True
         try:
@@ -238,11 +239,11 @@ def register_live_update_callbacks(app: Dash) -> None:
         # from the same one-row read -- and independently of whether any chart data changed.
         notes_revision = (
             experiment.notes_revision
-            if experiment is not None and experiment.notes_revision != last_notes_revision
+            if experiment is not None and experiment.notes_revision != polled.last_notes_revision
             else no_update
         )
 
-        if not ok or experiment is None or experiment.revision == last_known_revision:
+        if not ok or experiment is None or experiment.revision == polled.last_known_revision:
             return (
                 [no_update] * len(chart_ids),
                 no_update,
@@ -252,15 +253,19 @@ def register_live_update_callbacks(app: Dash) -> None:
                 notes_revision,
             )
 
-        page = repo.load_page(store, repo.PageRef(experiment_id, view_id))
+        page = repo.load_page(store, repo.PageRef(experiment_id, polled.view_id))
         panels_by_name = {p.name: p for p in page.panels}
         dataframes, fetch_ok = _fetch_open_panel_dataframes(store, experiment_id, page, chart_ids)
         shown = {
-            (i["panel"], i["index"]): fingerprint
-            for i, fingerprint in zip(fingerprint_ids, fingerprints, strict=True)
+            (i.panel, i.index): fingerprint
+            for i, fingerprint in zip(polled.fingerprint_ids, polled.fingerprints, strict=True)
         }
         contents, render_ok = _refresh_chart_bodies(
-            chart_ids, panels_by_name, dataframes, shown, Paging.model_validate_json(paging_json).sizes.charts
+            chart_ids,
+            panels_by_name,
+            dataframes,
+            shown,
+            Paging.model_validate_json(polled.paging_json).sizes.charts,
         )
         poll_ok = fetch_ok and render_ok
 

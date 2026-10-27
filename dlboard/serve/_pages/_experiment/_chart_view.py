@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, ClassVar, Final, TypedDict, cast
+from typing import TYPE_CHECKING, Any, ClassVar, Final, cast
 
 import dash_mantine_components as dmc
 from dash import html
+from pydantic import BaseModel
 from structlog.stdlib import get_logger
 
 from dlboard import models
@@ -25,12 +26,16 @@ from dlboard.serve._pages._experiment._panel_data import ChartFrames, WideHistor
 _log = get_logger(__name__)
 
 
-class ChartTargetData(TypedDict):
+class ChartTargetData(BaseModel, frozen=True, extra="forbid"):
+    """A chart, by its panel's name and its index in that panel: `None` for the panel's, not one of its charts'."""
+
     panel: str
     index: int | None
 
 
 class ChartID(ChartTargetData):
+    """The id of one of a `ChartPattern`'s components, as the browser sends it back."""
+
     type: str
 
 

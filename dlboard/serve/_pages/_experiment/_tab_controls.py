@@ -8,15 +8,15 @@ area -- see `tab_control_modals`), and the callbacks behind them. The tab bar it
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, TypedDict
+from typing import TYPE_CHECKING, Annotated, Any
 
 import dash_mantine_components as dmc
 from dash import Dash, Input, NoUpdate, Output, State, html, no_update
 from dash.dcc import Store
 from dash.exceptions import PreventUpdate
+from pydantic import BaseModel
 
 from dlboard.models import PanelInstance
-from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import ButtonId, DivId, ModalId, StoreId, ValueId
 from dlboard.serve._pages._dash_helpers import busy_while_running
 from dlboard.serve._pages._experiment import _ids as ids
@@ -54,14 +54,14 @@ TAB_DROP_STORE_ID: StoreId[ids.ExperimentPage] = StoreId("tab-drop-request")
 CHART_TAB_DROP_STORE_ID: StoreId[ids.ExperimentPage] = StoreId("chart-tab-drop-request")
 
 
-class TabDropRequest(TypedDict):
+class TabDropRequest(BaseModel, frozen=True, extra="forbid"):
     """A panel dropped onto an existing tab: move `panel` to `tab` (`""` for the ungrouped tab)."""
 
     panel: str
     tab: str
 
 
-class ChartTabDropRequest(TypedDict):
+class ChartTabDropRequest(BaseModel, frozen=True, extra="forbid"):
     """A chart dropped onto an existing tab: move the chart at `index` in `panel` to `tab`."""
 
     panel: str
@@ -70,15 +70,13 @@ class ChartTabDropRequest(TypedDict):
 
 
 class _NewTabCtx(edits.EditCtx):
-    name: str | None
-    panel_names: list[str] | None
-    experiment_id: int
+    name: Annotated[str | None, State(NEW_TAB_NAME_INPUT_ID, "value")]
+    panel_names: Annotated[list[str] | None, State(NEW_TAB_PANELS_SELECT_ID, "value")]
 
 
 class _RenameTabCtx(edits.EditCtx):
-    old_name: str | None
-    new_name: str | None
-    experiment_id: int
+    old_name: Annotated[str | None, State(RENAME_TAB_TARGET_ID, "data")]
+    new_name: Annotated[str | None, State(RENAME_TAB_NAME_INPUT_ID, "value")]
 
 
 def _new_tab_modal() -> dmc.Modal:
@@ -169,13 +167,14 @@ def _register_tab_drop(app: Dash) -> None:
         prevent_initial_call=True,
     )
     def drop_panel_on_tab(
-        request: TabDropRequest | None,
+        data: dict[str, Any] | None,
         page_json: str,
         paging_json: str,
     ) -> tuple[html.Div, str]:
-        if not request:
+        if not data:
             raise PreventUpdate
-        panel_name, new_tab = request["panel"], request["tab"]
+        request = TabDropRequest.model_validate(data)
+        panel_name, new_tab = request.panel, request.tab
 
         current_page = page_model.BasicExperimentPage.model_validate_json(page_json)
         current_tab = next((p.tab for p in current_page.panels if p.name == panel_name), None)
@@ -205,14 +204,15 @@ def _register_tab_drop(app: Dash) -> None:
         prevent_initial_call=True,
     )
     def drop_chart_on_tab(
-        request: ChartTabDropRequest | None,
+        data: dict[str, Any] | None,
         page_json: str,
         paging_json: str,
     ) -> tuple[html.Div, str]:
         """Move a single chart to an *existing* tab -- see `drop_panel_on_tab`, its panel-level twin."""
-        if not request:
+        if not data:
             raise PreventUpdate
-        panel_name, index, new_tab = request["panel"], request["index"], request["tab"]
+        request = ChartTabDropRequest.model_validate(data)
+        panel_name, index, new_tab = request.panel, request.index, request.tab
 
         def move(panels: list[Any]) -> list[Any]:
             return page_model.move_chart_to_tab(panels, panel_name, index, new_tab)
@@ -293,32 +293,27 @@ def _register_new_tab(app: Dash) -> None:
         Output(NEW_TAB_MODAL_ID, "opened", allow_duplicate=True),
         Output(NEW_TAB_ERROR_ID, "children", allow_duplicate=True),
         Input(NEW_TAB_SAVE_ID, "n_clicks"),
-        {
-            "name": State(NEW_TAB_NAME_INPUT_ID, "value"),
-            "panel_names": State(NEW_TAB_PANELS_SELECT_ID, "value"),
-            "experiment_id": State(constants.STATE_EXPERIMENT_ID, "data"),
-            "page_json": State(ids.STATE_PAGE_STORAGE, "data"),
-            "paging_json": State(ids.PANEL_PAGING_ID, "data"),
-        },
+        _NewTabCtx.states(),
         prevent_initial_call=True,
         running=busy_while_running(NEW_TAB_SAVE_ID),
     )
     def create_new_tab(
-        n_clicks: int, new_tab_ctx: _NewTabCtx
+        n_clicks: int, states: dict[str, Any]
     ) -> tuple[Any, str | NoUpdate, bool | NoUpdate, str]:
+        new_tab_ctx = _NewTabCtx.model_validate(states)
         if not n_clicks:
             raise PreventUpdate
-        name = (new_tab_ctx["name"] or "").strip()
-        panel_names = new_tab_ctx["panel_names"] or []
-        curr_page = page_model.BasicExperimentPage.model_validate_json(new_tab_ctx["page_json"])
+        name = (new_tab_ctx.name or "").strip()
+        panel_names = new_tab_ctx.panel_names or []
+        curr_page = page_model.BasicExperimentPage.model_validate_json(new_tab_ctx.page_json)
         error = _new_tab_error(name, curr_page.panels)
         if error:
             return no_update, no_update, no_update, error
 
         selected = set(panel_names)
         page, container = edits.commit(
-            new_tab_ctx["page_json"],
-            new_tab_ctx["paging_json"],
+            new_tab_ctx.page_json,
+            new_tab_ctx.paging_json,
             edits.PageEdit(
                 panels=lambda panels: _panels_with_new_tab(panels, name=name, panel_names=selected),
                 tab=name,
@@ -372,35 +367,26 @@ def _register_rename_tab(app: Dash) -> None:
         Output(RENAME_TAB_MODAL_ID, "opened", allow_duplicate=True),
         Output(RENAME_TAB_ERROR_ID, "children", allow_duplicate=True),
         Input(RENAME_TAB_SAVE_ID, "n_clicks"),
-        {
-            "old_name": State(RENAME_TAB_TARGET_ID, "data"),
-            "new_name": State(RENAME_TAB_NAME_INPUT_ID, "value"),
-            "experiment_id": State(constants.STATE_EXPERIMENT_ID, "data"),
-            "page_json": State(ids.STATE_PAGE_STORAGE, "data"),
-            "paging_json": State(ids.PANEL_PAGING_ID, "data"),
-        },
+        _RenameTabCtx.states(),
         prevent_initial_call=True,
         running=busy_while_running(RENAME_TAB_SAVE_ID),
     )
-    def rename_tab(
-        n_clicks: int, rename_ctx: _RenameTabCtx
-    ) -> tuple[Any, str | NoUpdate, bool | NoUpdate, str]:
-        old_name = rename_ctx["old_name"]
+    def rename_tab(n_clicks: int, states: dict[str, Any]) -> tuple[Any, str | NoUpdate, bool | NoUpdate, str]:
+        rename_ctx = _RenameTabCtx.model_validate(states)
+        old_name = rename_ctx.old_name
         if not n_clicks or not old_name:
             raise PreventUpdate
-        new_name = (rename_ctx["new_name"] or "").strip()
-        curr_page = page_model.BasicExperimentPage.model_validate_json(rename_ctx["page_json"])
+        new_name = (rename_ctx.new_name or "").strip()
+        curr_page = page_model.BasicExperimentPage.model_validate_json(rename_ctx.page_json)
         error = _rename_tab_error(old_name, new_name, curr_page.panels)
         if error:
             return no_update, no_update, no_update, error
 
         # Renaming the tab being shown keeps it the one shown.
-        follows = (
-            Paging.model_validate_json(rename_ctx["paging_json"]).shown_tab(curr_page.panels) == old_name
-        )
+        follows = Paging.model_validate_json(rename_ctx.paging_json).shown_tab(curr_page.panels) == old_name
         page, container = edits.commit(
-            rename_ctx["page_json"],
-            rename_ctx["paging_json"],
+            rename_ctx.page_json,
+            rename_ctx.paging_json,
             edits.PageEdit(
                 panels=lambda panels: _panels_with_renamed_tab(panels, old_name=old_name, new_name=new_name),
                 tab=new_name if follows else None,

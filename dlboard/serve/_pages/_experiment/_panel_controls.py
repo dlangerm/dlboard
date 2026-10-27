@@ -5,10 +5,7 @@ Owns its ids, the rename-panel and delete-panel/chart confirm modals (rendered o
 page, beside the panel area -- see `panel_control_modals`), and the callbacks behind them. Adding or
 editing a chart is `_chart_editor.py`'s; tabs are `_tab_controls.py`'s.
 
-Callbacks needing more than a couple of `State`s take them as one Dash "flexible callback
-signature" grouping -- a `dict` of `Input`/`State` objects that Dash flattens for dependency
-tracking but delivers back as a single dict argument (typed by a `edits.EditCtx` subclass), which is
-what keeps them under ruff's `max-args`.
+An edit's callback reads its `State`s as one `edits.EditCtx` (see `CallbackStates`).
 
 Each feature (create, delete-chart, delete-panel, move, toggle, rename) registers via its own small
 `_register_*` function -- mirroring `simple_admin_page.py`'s existing
@@ -19,17 +16,16 @@ single function accumulates enough nested callbacks to trip ruff's complexity/st
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypedDict, cast
+from typing import TYPE_CHECKING, Annotated, Any, cast
 
 import dash_mantine_components as dmc
 from dash import Dash, Input, NoUpdate, Output, State, ctx, html, no_update
 from dash.dcc import Store
 from dash.exceptions import PreventUpdate
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from dlboard.models import PanelInstance
 from dlboard.serve import ClientsideScript
-from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import ButtonId, DivId, ModalId, StoreId, ValueId
 from dlboard.serve._pages._dash_helpers import busy_while_running, require_triggered_id
 from dlboard.serve._pages._experiment import _chart_view as chart_view
@@ -72,7 +68,7 @@ CHART_REORDER_STORE_ID: StoreId[ids.ExperimentPage] = StoreId("chart-reorder-req
 CHART_PANEL_MOVE_STORE_ID: StoreId[ids.ExperimentPage] = StoreId("chart-panel-move-request")
 
 
-class PanelReorderRequest(TypedDict):
+class PanelReorderRequest(BaseModel, frozen=True, extra="forbid"):
     """A completed panel drag: move `panel` to just before/after `target`."""
 
     panel: str
@@ -80,7 +76,7 @@ class PanelReorderRequest(TypedDict):
     after: bool
 
 
-class ChartReorderRequest(TypedDict):
+class ChartReorderRequest(BaseModel, frozen=True, extra="forbid"):
     """A completed chart drag: move the chart at `index` in `panel` to just before/after `target_index`."""
 
     panel: str
@@ -89,7 +85,7 @@ class ChartReorderRequest(TypedDict):
     after: bool
 
 
-class ChartPanelMoveRequest(TypedDict):
+class ChartPanelMoveRequest(BaseModel, frozen=True, extra="forbid"):
     """
     A chart dropped into a *different* panel: move the chart at `index` in `panel` to `target_panel`.
 
@@ -106,19 +102,16 @@ class ChartPanelMoveRequest(TypedDict):
 
 
 class _DeleteChartCtx(edits.EditCtx):
-    target: chart_view.ChartTargetData | None
-    experiment_id: int
+    target: Annotated[chart_view.ChartTargetData | None, State(DELETE_CHART_TARGET_ID, "data")]
 
 
 class _DeletePanelCtx(edits.EditCtx):
-    target: str | None
-    experiment_id: int
+    target: Annotated[str | None, State(DELETE_PANEL_TARGET_ID, "data")]
 
 
 class _RenamePanelCtx(edits.EditCtx):
-    old_name: str | None
-    new_name: str | None
-    experiment_id: int
+    old_name: Annotated[str | None, State(RENAME_PANEL_TARGET_ID, "data")]
+    new_name: Annotated[str | None, State(RENAME_PANEL_NAME_INPUT_ID, "value")]
 
 
 def _rename_panel_modal() -> dmc.Modal:
@@ -276,31 +269,27 @@ def _register_delete_chart(app: Dash) -> None:
         Input(chart_view.DELETE_CHART_BUTTON.all(), "n_clicks"),
         prevent_initial_call=True,
     )
-    def open_delete_chart_modal(_n_clicks_list: list[int]) -> tuple[bool, chart_view.ChartTargetData]:
-        triggered_id = cast("chart_view.ChartTargetData", require_triggered_id())
-        return True, {"panel": triggered_id["panel"], "index": triggered_id["index"]}
+    def open_delete_chart_modal(_n_clicks_list: list[int]) -> tuple[bool, dict[str, Any]]:
+        triggered = chart_view.ChartID.model_validate(require_triggered_id())
+        return True, chart_view.ChartTargetData(panel=triggered.panel, index=triggered.index).model_dump()
 
     @app.callback(
         Output(ids.METRIC_CONTENT_ID, "children", allow_duplicate=True),
         Output(ids.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Output(DELETE_CHART_MODAL_ID, "opened", allow_duplicate=True),
         Input(DELETE_CHART_CONFIRM_ID, "n_clicks"),
-        {
-            "target": State(DELETE_CHART_TARGET_ID, "data"),
-            "experiment_id": State(constants.STATE_EXPERIMENT_ID, "data"),
-            "page_json": State(ids.STATE_PAGE_STORAGE, "data"),
-            "paging_json": State(ids.PANEL_PAGING_ID, "data"),
-        },
+        _DeleteChartCtx.states(),
         prevent_initial_call=True,
         running=busy_while_running(DELETE_CHART_CONFIRM_ID),
     )
     def delete_chart(
-        n_clicks: int, delete_ctx: _DeleteChartCtx
+        n_clicks: int, states: dict[str, Any]
     ) -> tuple[html.Div | NoUpdate, str | NoUpdate, bool]:
-        target = delete_ctx["target"]
+        delete_ctx = _DeleteChartCtx.model_validate(states)
+        target = delete_ctx.target
         if not n_clicks or not target:
             raise PreventUpdate
-        panel_name, index = target["panel"], target["index"]
+        panel_name, index = target.panel, target.index
 
         def remove_chart(panels: list[Any]) -> list[Any]:
             return [
@@ -311,7 +300,7 @@ def _register_delete_chart(app: Dash) -> None:
             ]
 
         page, container = edits.commit(
-            delete_ctx["page_json"], delete_ctx["paging_json"], edits.PageEdit(panels=remove_chart)
+            delete_ctx.page_json, delete_ctx.paging_json, edits.PageEdit(panels=remove_chart)
         )
         return container, page.model_dump_json(), False
 
@@ -343,19 +332,15 @@ def _register_delete_panel(app: Dash) -> None:
         Output(ids.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Output(DELETE_PANEL_MODAL_ID, "opened", allow_duplicate=True),
         Input(DELETE_PANEL_CONFIRM_ID, "n_clicks"),
-        {
-            "target": State(DELETE_PANEL_TARGET_ID, "data"),
-            "experiment_id": State(constants.STATE_EXPERIMENT_ID, "data"),
-            "page_json": State(ids.STATE_PAGE_STORAGE, "data"),
-            "paging_json": State(ids.PANEL_PAGING_ID, "data"),
-        },
+        _DeletePanelCtx.states(),
         prevent_initial_call=True,
         running=busy_while_running(DELETE_PANEL_CONFIRM_ID),
     )
     def delete_panel(
-        n_clicks: int, delete_ctx: _DeletePanelCtx
+        n_clicks: int, states: dict[str, Any]
     ) -> tuple[html.Div | NoUpdate, str | NoUpdate, bool]:
-        panel_name = delete_ctx["target"]
+        delete_ctx = _DeletePanelCtx.model_validate(states)
+        panel_name = delete_ctx.target
         if not n_clicks or not panel_name:
             raise PreventUpdate
 
@@ -363,7 +348,7 @@ def _register_delete_panel(app: Dash) -> None:
             return [p for p in panels if p.name != panel_name]
 
         page, container = edits.commit(
-            delete_ctx["page_json"], delete_ctx["paging_json"], edits.PageEdit(panels=remove_panel)
+            delete_ctx.page_json, delete_ctx.paging_json, edits.PageEdit(panels=remove_panel)
         )
         return container, page.model_dump_json(), False
 
@@ -395,19 +380,18 @@ def _register_reorder(app: Dash) -> None:
         State(ids.PANEL_PAGING_ID, "data"),
         prevent_initial_call=True,
     )
-    def reorder_panel(
-        request: PanelReorderRequest | None, page_json: str, paging_json: str
-    ) -> tuple[html.Div, str]:
-        if not request:
+    def reorder_panel(data: dict[str, Any] | None, page_json: str, paging_json: str) -> tuple[html.Div, str]:
+        if not data:
             raise PreventUpdate
+        request = PanelReorderRequest.model_validate(data)
         page, container = edits.commit(
             page_json,
             paging_json,
             edits.PageEdit(
                 panels=lambda panels: page_model.reorder_panel(
-                    panels, request["panel"], request["target"], after=request["after"]
+                    panels, request.panel, request.target, after=request.after
                 ),
-                reveal=edits.RevealPanel(request["panel"]),
+                reveal=edits.RevealPanel(request.panel),
             ),
         )
         return container, page.model_dump_json()
@@ -420,18 +404,17 @@ def _register_reorder(app: Dash) -> None:
         State(ids.PANEL_PAGING_ID, "data"),
         prevent_initial_call=True,
     )
-    def reorder_chart(
-        request: ChartReorderRequest | None, page_json: str, paging_json: str
-    ) -> tuple[html.Div, str]:
-        if not request:
+    def reorder_chart(data: dict[str, Any] | None, page_json: str, paging_json: str) -> tuple[html.Div, str]:
+        if not data:
             raise PreventUpdate
-        panel_name, index = request["panel"], request["index"]
+        request = ChartReorderRequest.model_validate(data)
+        panel_name, index = request.panel, request.index
         page, container = edits.commit(
             page_json,
             paging_json,
             edits.PageEdit(
                 panels=lambda panels: page_model.reorder_chart(
-                    panels, panel_name, index, request["target_index"], after=request["after"]
+                    panels, panel_name, index, request.target_index, after=request.after
                 ),
                 reveal=edits.RevealChartAt(panel_name, index),
             ),
@@ -547,14 +530,15 @@ def _register_chart_panel_move(app: Dash) -> None:
         prevent_initial_call=True,
     )
     def drop_chart_on_panel(
-        request: ChartPanelMoveRequest | None,
+        data: dict[str, Any] | None,
         page_json: str,
         paging_json: str,
     ) -> tuple[html.Div, str]:
-        if not request:
+        if not data:
             raise PreventUpdate
-        panel_name, index = request["panel"], request["index"]
-        target_panel, target_index, after = request["target_panel"], request["target_index"], request["after"]
+        request = ChartPanelMoveRequest.model_validate(data)
+        panel_name, index = request.panel, request.index
+        target_panel, target_index, after = request.target_panel, request.target_index, request.after
 
         def move(panels: list[Any]) -> list[Any]:
             return page_model.move_chart_to_panel(
@@ -593,36 +577,31 @@ def _register_rename(app: Dash) -> None:
         Output(RENAME_PANEL_MODAL_ID, "opened", allow_duplicate=True),
         Output(RENAME_PANEL_ERROR_ID, "children", allow_duplicate=True),
         Input(RENAME_PANEL_SAVE_ID, "n_clicks"),
-        {
-            "old_name": State(RENAME_PANEL_TARGET_ID, "data"),
-            "new_name": State(RENAME_PANEL_NAME_INPUT_ID, "value"),
-            "experiment_id": State(constants.STATE_EXPERIMENT_ID, "data"),
-            "page_json": State(ids.STATE_PAGE_STORAGE, "data"),
-            "paging_json": State(ids.PANEL_PAGING_ID, "data"),
-        },
+        _RenamePanelCtx.states(),
         prevent_initial_call=True,
         running=busy_while_running(RENAME_PANEL_SAVE_ID),
     )
     def rename_panel(
-        n_clicks: int, rename_ctx: _RenamePanelCtx
+        n_clicks: int, states: dict[str, Any]
     ) -> tuple[Any, str | NoUpdate, bool | NoUpdate, str]:
-        old_name = rename_ctx["old_name"]
+        rename_ctx = _RenamePanelCtx.model_validate(states)
+        old_name = rename_ctx.old_name
         if not n_clicks or not old_name:
             raise PreventUpdate
-        new_name = (rename_ctx["new_name"] or "").strip()
+        new_name = (rename_ctx.new_name or "").strip()
         if not new_name:
             return no_update, no_update, no_update, "Panel name cannot be empty"
 
-        curr_page = page_model.BasicExperimentPage.model_validate_json(rename_ctx["page_json"])
+        curr_page = page_model.BasicExperimentPage.model_validate_json(rename_ctx.page_json)
         if page_model.panel_name_taken(curr_page.panels, new_name, ignore=old_name):
             return no_update, no_update, no_update, f"A panel named {new_name!r} already exists"
 
         # Carry the rename into the open panels too, so a currently-open panel doesn't appear to
         # collapse just because its name changed underneath it.
-        opened = Paging.model_validate_json(rename_ctx["paging_json"]).open_panels
+        opened = Paging.model_validate_json(rename_ctx.paging_json).open_panels
         page, container = edits.commit(
-            rename_ctx["page_json"],
-            rename_ctx["paging_json"],
+            rename_ctx.page_json,
+            rename_ctx.paging_json,
             edits.PageEdit(
                 panels=lambda panels: _panels_with_renamed_panel(
                     panels, old_name=old_name, new_name=new_name
