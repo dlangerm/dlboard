@@ -42,7 +42,9 @@ def _shown(df: pd.DataFrame) -> dict[tuple[str, int | None], str]:
 
 
 def test_a_body_carries_the_fingerprint_of_the_data_it_was_drawn_from() -> None:
-    body = chart_view.chart_body(_PANEL, 0, panel_data_of(_BEFORE).for_chart(_PANEL.charts[0]), page_size=12)
+    body = chart_view.chart_body(
+        _PANEL, 0, panel_data_of(_BEFORE).for_chart(_PANEL.charts[0]), page_size=12, wide=None
+    )
 
     carried = _props(body[1])
     assert carried["id"] == chart_view.CHART_FINGERPRINT.of("p", 0)

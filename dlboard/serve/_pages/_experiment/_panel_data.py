@@ -11,7 +11,7 @@ import functools
 import hashlib
 import time
 import typing
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, cast
 
@@ -73,6 +73,37 @@ class HistogramFetchSettings(BaseSettings):
     """
 
 
+class HistoryLimitSettings(BaseSettings):
+    """`DLBOARD_*` environment variables bounding how many metrics' whole history one chart draws."""
+
+    model_config = SettingsConfigDict(env_prefix="DLBOARD_")
+
+    wide_history_metrics: PositiveInt = 200
+    """A chart that draws every step of more metrics than this (a pattern over a family of them) says so, with how many."""
+    max_history_metrics: PositiveInt = 5000
+    """
+    A chart that would draw every step of more metrics than this is not drawn, and their history not read: it says to
+    show their last value or their spread instead. No line or table can usefully draw that many series.
+    """
+
+
+@dataclass(frozen=True)
+class WideHistory:
+    """A chart that draws every step of many metrics: how many, and whether that was too many to read at all."""
+
+    metrics: int
+    refused: bool
+
+
+def _history_width(request: models.DataRequest, known_keys: Collection[str]) -> int:
+    """How many metrics' every step `request` reads: none for one of every metric, which says so on its own."""
+    columns = _metric_columns(request, known_keys) or set()
+    return sum(
+        column not in models.MetricColumn and request.reductions.of(column) is models.MetricReduction.HISTORY
+        for column in columns
+    )
+
+
 class PanelRead(StrEnum):
     """What one of a panel's reads from the store is for: how its span and its `_READS` series are told apart."""
 
@@ -120,6 +151,10 @@ class ChartFrames(typing.Protocol):
         """The frame `chart` is drawn from."""
         ...
 
+    def wide_history(self, chart: models.ChartInstance[Any, Any]) -> WideHistory | None:
+        """How many metrics' every step `chart` draws, if more than the page lets pass without saying so."""
+        ...
+
 
 @dataclass(frozen=True)
 class PanelData:
@@ -138,6 +173,12 @@ class PanelData:
     series: Mapping[str, pd.DataFrame]
     """By `SeriesBandRequest.column`."""
     run_names: pd.DataFrame
+    wide: Mapping[models.DataRequest, WideHistory] = field(default_factory=dict)
+    """The charts that draw every step of many metrics, by what they ask for; a refused one's were not read."""
+
+    def wide_history(self, chart: models.ChartInstance[Any, Any]) -> WideHistory | None:
+        """How many metrics' every step `chart` draws, if more than `HistoryLimitSettings` lets pass unsaid."""
+        return self.wide.get(chart.data_request())
 
     def for_chart(self, chart: models.ChartInstance[Any, Any]) -> pd.DataFrame:
         """
@@ -305,6 +346,14 @@ def fetch_panel_data(
         if needs_names
         else list[str]()
     )
+    # A chart over too many metrics' every step is said so of, or past the limit not read for at all (#417).
+    limits = HistoryLimitSettings()
+    wide = {
+        request: WideHistory(width, refused=width > limits.max_history_metrics)
+        for request in requests
+        if (width := _history_width(request, known_keys)) > limits.wide_history_metrics
+    }
+    read = [request for request in requests if request not in wide or not wide[request].refused]
     metrics = {
         reduction: _read(
             _MetricRead(PanelRead.METRICS, reduction, unscoped=columns is None),
@@ -316,7 +365,7 @@ def fetch_panel_data(
                 reduction=reduction,
             ),
         )
-        for reduction, columns in metrics_by_reduction(requests, known_keys).items()
+        for reduction, columns in metrics_by_reduction(read, known_keys).items()
     }
     artifacts_df = (
         _read(
@@ -388,7 +437,7 @@ def fetch_panel_data(
         if read_anything
         else pd.DataFrame()
     )
-    return PanelData(metrics, artifacts_df, hparams_df, histograms_df, series, run_names)
+    return PanelData(metrics, artifacts_df, hparams_df, histograms_df, series, run_names, wide)
 
 
 def build_series_band_dataframe(

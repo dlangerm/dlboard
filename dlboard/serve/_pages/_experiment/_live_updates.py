@@ -164,7 +164,11 @@ def _refresh_chart_bodies(
             if panel_data.chart_data_fingerprint(frame) == shown.get((panel_name, index)):
                 contents.append(no_update)
             else:
-                contents.append(chart_view.chart_body(panel, index, frame, page_size))
+                contents.append(
+                    chart_view.chart_body(
+                        panel, index, frame, page_size, wide=data.wide_history(panel.charts[index])
+                    )
+                )
         except Exception:  # noqa: BLE001 -- one bad chart must not break the whole poll tick
             _log.exception("Live-update poll failed to refresh chart %r", f"{panel_name}:{index}")
             contents.append(no_update)

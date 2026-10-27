@@ -282,6 +282,11 @@ def _draw_form(  # noqa: PLR0913
                 _ReadKey(experiment_id, experiment.revision, run_ids, chart.data_request()), fetch
             )
         )
+        if (wide := data.wide_history(chart)) is not None and wide.refused:
+            return (
+                None,
+                f"This chart would draw every step of {wide.metrics:,} metrics, more than one chart can show",
+            )
         return draw(chart, data.for_chart(chart)), ""
     except ValidationError as exc:
         _log.debug("the chart editor's form makes no chart yet", error=str(exc))

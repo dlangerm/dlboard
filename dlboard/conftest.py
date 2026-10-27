@@ -35,7 +35,7 @@ from dlboard.serve import app as build_app
 from dlboard.serve._backend import _auth
 from dlboard.serve._backend._data_store import ARTIFACT_STORE
 from dlboard.serve._backend._metric_frame import MetricFrame
-from dlboard.serve._pages._experiment._panel_data import PanelData
+from dlboard.serve._pages._experiment._panel_data import PanelData, WideHistory
 from dlboard.serve.telemetry import LOGS, METRICS, _instrument
 
 if TYPE_CHECKING:
@@ -631,6 +631,10 @@ class OneFrame:
     def for_chart(self, chart: models.ChartInstance[Any, Any]) -> pd.DataFrame:  # noqa: ARG002
         """The one frame, whichever chart asks."""
         return self.frame
+
+    def wide_history(self, chart: models.ChartInstance[Any, Any]) -> WideHistory | None:  # noqa: ARG002
+        """Never too wide: the frame is the test's own."""
+        return None
 
 
 def panel_data_of(wide: pd.DataFrame) -> PanelData:

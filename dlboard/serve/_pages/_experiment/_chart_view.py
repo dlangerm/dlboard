@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from dash.development.base_component import Component
 
 from dlboard.serve._pages._experiment._ids import CHART_VIEW_SAVE_REQUEST_ID, ExperimentPage
-from dlboard.serve._pages._experiment._panel_data import ChartFrames, chart_data_fingerprint
+from dlboard.serve._pages._experiment._panel_data import ChartFrames, WideHistory, chart_data_fingerprint
 
 _log = get_logger(__name__)
 
@@ -104,24 +104,38 @@ def _apply_panel_sync(rendered: Component, *, panel_name: str, sync: bool) -> Co
     return rendered
 
 
-def _unscoped_fetch_badge(chart: models.ChartInstance[Any, Any]) -> Component | None:
+_NARROWER: Final = (
+    "show their last value (a table of runs, a bar chart) or their spread (a series band) instead"
+)
+"""What to do about a chart over too many metrics' every step."""
+
+
+def _read_badge(chart: models.ChartInstance[Any, Any], wide: WideHistory | None) -> Component | None:
     """
-    A small, always-visible warning badge for a chart whose data fetch can't be scoped.
+    A small, always-visible warning badge for a chart whose read grows with the experiment rather than with what it shows.
 
     A chart that draws every metric (e.g. a table chart with no `metrics` filter, left at its "show every metric"
     default) and draws from every step (its request's `reductions`) means fetching every step of every metric logged
-    for the whole experiment, every time its panel updates. That's a real, sometimes-significant cost the user has no
-    other way to notice (it only ever shows up as a backend debug log), so it gets a badge instead of hover-only
-    controls: this should be visible without having to go looking for it.
+    for the whole experiment, every time its panel updates; so does one over a pattern that matches hundreds (`wide`).
+    That's a real, sometimes-significant cost the user has no other way to notice (it only ever shows up as a backend
+    debug log), so it gets a badge instead of hover-only controls: this should be visible without having to go looking
+    for it.
     """
     request = chart.data_request()
-    if not request.every_metric or not request.reductions.default.reads_every_step:
+    if request.every_metric and request.reductions.default.reads_every_step:
+        text = "fetches all metrics"
+        label = (
+            "No metrics filter is set, so this chart fetches every metric in the experiment on every update -- can be "
+            'slow on a large experiment. Set specific metrics in "Edit chart" to scope it down.'
+        )
+    elif wide is not None and not wide.refused:
+        text = f"reads {wide.metrics:,} metrics' history"
+        label = f"This chart draws every step of {wide.metrics:,} metrics, on every update. To see that many, {_NARROWER}."
+    else:
         return None
     return dmc.Tooltip(
-        dmc.Badge("fetches all metrics", color="yellow", variant="light", size="xs", radius="sm"),
-        label="No metrics filter is set, so this chart fetches every metric in the experiment on "
-        'every update -- can be slow on a large experiment. Set specific metrics in "Edit chart" '
-        "to scope it down.",
+        dmc.Badge(text, color="yellow", variant="light", size="xs", radius="sm"),
+        label=label,
         position="top",
         withArrow=True,
         multiline=True,
@@ -129,15 +143,32 @@ def _unscoped_fetch_badge(chart: models.ChartInstance[Any, Any]) -> Component | 
     )
 
 
+def _refused(wide: WideHistory) -> Component:
+    """What a chart over too many metrics' every step shows in its place: why, and what to draw instead."""
+    return dmc.Alert(
+        f"This chart would draw every step of {wide.metrics:,} metrics, more than one chart can show, so their "
+        f'history was not read. In "Edit chart", {_NARROWER}.',
+        title="Too many metrics to draw whole",
+        color="yellow",
+        variant="light",
+    )
+
+
 def chart_body(
-    panel: models.PanelInstance[Any, Any], index: int, dataframe: pd.DataFrame, page_size: int
+    panel: models.PanelInstance[Any, Any],
+    index: int,
+    dataframe: pd.DataFrame,
+    page_size: int,
+    *,
+    wide: WideHistory | None,
 ) -> list[Component]:
     """
     What a chart item shows below its controls: the chart, and a hidden node holding the fingerprint it is drawn from.
 
     The fingerprint travels with the DOM it describes (not in a store the page keeps beside it), so a
     chart mounted any way at all -- first load, a panel opening, a page of charts, an edit -- says what
-    it was drawn from, and the poll redraws it only when that is no longer what the data says.
+    it was drawn from, and the poll redraws it only when that is no longer what the data says. A chart over
+    too many metrics' every step (`wide`, refused) shows why it is not drawn instead.
     """
     chart = panel.charts[index]
     fingerprint = html.Div(
@@ -145,7 +176,12 @@ def chart_body(
         id=CHART_FINGERPRINT.of(panel.name, index),
         hidden=True,
     )
-    return [_draw_chart(panel, chart, chart.id, dataframe, page_size), fingerprint]
+    drawn = (
+        _refused(wide)
+        if wide is not None and wide.refused
+        else _draw_chart(panel, chart, chart.id, dataframe, page_size)
+    )
+    return [drawn, fingerprint]
 
 
 def draft_view(
@@ -212,7 +248,7 @@ def _view_bar() -> Component:
 def render_chart_item(
     panel: models.PanelInstance[Any, Any],
     index: int,
-    dataframe: pd.DataFrame,
+    frames: ChartFrames,
     page_size: int = models.DEFAULT_RENDER_CONTEXT.page_size,
 ) -> Component:
     """
@@ -227,6 +263,7 @@ def render_chart_item(
     untouched one too.
     """
     chart = panel.charts[index]
+    dataframe, wide = frames.for_chart(chart), frames.wide_history(chart)
     context = models.RenderContext(columns=panel.grid_columns, page_size=page_size, chart_id=chart.id)
     hover_controls = dmc.Group(
         [
@@ -273,7 +310,7 @@ def render_chart_item(
     # The badge (when present) must be a *sibling* of `hover_controls`, not nested inside it --
     # `dl-chart-controls`'s opacity:0-until-hover applies to its whole subtree, and this badge
     # is the one thing here that's supposed to stay visible without hovering.
-    badge = _unscoped_fetch_badge(chart)
+    badge = _read_badge(chart, wide)
     keeps_view = models.ChartTypeRegistry.keeps_viewer_state(chart)
     return dmc.Stack(
         [
@@ -281,7 +318,7 @@ def render_chart_item(
             hover_controls,
             *([_view_bar()] if keeps_view else []),
             html.Div(
-                chart_body(panel, index, dataframe, page_size),
+                chart_body(panel, index, dataframe, page_size, wide=wide),
                 id=CHART_BODY.of(panel.name, index),
                 className="dl-chart-body",
             ),
@@ -309,7 +346,7 @@ def render_panel_charts(
 ) -> list[Component]:
     """Render the charts of a panel at `indexes` (every chart, if not given), each from its own frame -- see `render_chart_item`."""
     return [
-        render_chart_item(panel, idx, frames.for_chart(panel.charts[idx]), page_size)
+        render_chart_item(panel, idx, frames, page_size)
         for idx in range(len(panel.charts))
         if indexes is None or idx in indexes
     ]
