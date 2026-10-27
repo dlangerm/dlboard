@@ -69,6 +69,7 @@ from dlboard.serve._pages._experiment._run_compare import (
     COMPARE_PAGE_SIZE,
     COMPARE_PAGE_SLOT_ID,
     COMPARE_PAGER_ID,
+    COMPARE_RUNS_ID,
     COMPARE_SEARCH_ID,
 )
 from dlboard.serve._pages._experiment._run_comparison_table import (
@@ -77,6 +78,7 @@ from dlboard.serve._pages._experiment._run_comparison_table import (
     NAVBAR_HPARAM_CONFIRM_COLS_ID,
     NAVBAR_HPARAM_DATATABLE_ID,
 )
+from dlboard.serve._pages._experiment._run_picker import RUN_PICKER_LIMIT
 from dlboard.serve._pages._experiment._tab_controls import NEW_TAB_PANELS_SELECT_ID, RENAME_TAB_NAME_INPUT_ID
 from dlboard.serve._pages._simple_homepage import NEW_PROJECT_BUTTON_ID, NEW_PROJECT_NAME_ID
 from dlboard.serve._pages._simple_project_page import NEW_EXP_BUTTON_ID, NEW_EXP_NAME_ID
@@ -1884,6 +1886,29 @@ def test_run_compare_modal_diffs_runs_and_its_state_is_a_shareable_link(
 
     page.keyboard.press("Escape")
     expect(page).not_to_have_url(re.compile(r"compare"))
+    assert console_errors == []
+
+
+def test_run_compare_finds_a_run_its_picker_does_not_list_by_searching_for_it(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """The picker lists the newest runs, not every one (#374): a run past them is found on the server as one types."""
+    _create_project_and_experiment(page, live_server_url, "Compare Many Runs")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    api = BasicDlboardAPI(live_server_url)
+    for i in range(RUN_PICKER_LIMIT + 5):
+        api.create_run(models.NewRun(experiment_id=experiment_id, name=f"many-{i:03d}"))
+    page.reload()
+
+    page.locator(f"#{COMPARE_OPEN_ID}").click()
+    picker = page.locator(f"#{COMPARE_RUNS_ID}")
+    picker.click()
+    expect(page.get_by_role("option", name="many-054")).to_be_visible()
+    expect(page.get_by_role("option", name="many-000")).to_have_count(0)  # older than the newest page
+
+    picker.press_sequentially("many-000")
+    expect(page.get_by_role("option", name="many-000")).to_be_visible()
     assert console_errors == []
 
 

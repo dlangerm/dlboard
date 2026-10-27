@@ -41,6 +41,7 @@ from dlboard.serve._pages._dataframe_helpers import run_display_name
 from dlboard.serve._pages._experiment import _ids as ids
 from dlboard.serve._pages._experiment import _page_model as page_model
 from dlboard.serve._pages._experiment._paging import page_slice
+from dlboard.serve._pages._experiment._run_picker import register_run_search, run_options
 from dlboard.serve._pages._experiment._shown_runs import shown_run_ids
 
 if TYPE_CHECKING:
@@ -384,10 +385,6 @@ def page_controls(page: ComparePage) -> list[Component]:
     ]
 
 
-def _run_options(runs: list[Run]) -> list[dict[str, str]]:
-    return [{"value": str(run.id), "label": run_display_name(run)} for run in runs]
-
-
 def compare_button() -> Component:
     """The navbar's "Compare" button that opens the modal."""
     return dmc.Button(
@@ -419,8 +416,10 @@ def compare_components(store: DataStore[...], experiment_id: int, query: Compare
         query.search,
         query.page,
     )
-    options: list[dict[str, str]] = (
-        _run_options(list(store.get_runs(experiment_id, limit=None, run_ids=None))) if query.runs else []
+    options = (
+        run_options(store, experiment_id, keep=[str(run_id) for run_id in query.runs])
+        if query.runs
+        else list[dict[str, str]]()
     )
     grid = themed_grid_kwargs()
     modal = dmc.Modal(
@@ -498,6 +497,7 @@ def register_run_compare_callbacks(app: Dash) -> None:
     controls (all in the page's static layout), so none of them costs a request on page load; the
     button, which is mounted later with the navbar, opens the modal clientside for the same reason.
     """
+    register_run_search(app, COMPARE_RUNS_ID)
     app.clientside_callback(
         _OPEN_JS.source,
         Output(COMPARE_MODAL_ID, "opened"),
@@ -506,7 +506,7 @@ def register_run_compare_callbacks(app: Dash) -> None:
     )
 
     @app.callback(
-        Output(COMPARE_RUNS_ID, "data"),
+        Output(COMPARE_RUNS_ID, "data", allow_duplicate=True),
         Output(COMPARE_RUNS_ID, "value"),
         Input(COMPARE_MODAL_ID, "opened"),
         State(COMPARE_RUNS_ID, "value"),
@@ -523,13 +523,14 @@ def register_run_compare_callbacks(app: Dash) -> None:
         if not opened:
             raise PreventUpdate
         store = get_data_store()
-        runs = list(store.get_runs(experiment_id, limit=None, run_ids=None))
         # Start from the runs the charts are showing, unless a link or an earlier open already chose.
         page = page_model.BasicExperimentPage.model_validate_json(page_json)
         shown = shown_run_ids(store, experiment_id, page.document)
-        charted = [run for run in runs if run.id in shown] or runs
-        default = [str(run.id) for run in charted[:MAX_COMPARED_RUNS]]
-        return _run_options(runs), picked or default
+        charted = list(store.get_runs(experiment_id, limit=MAX_COMPARED_RUNS, run_ids=shown)) or list(
+            store.get_runs(experiment_id, limit=MAX_COMPARED_RUNS, run_ids=None)
+        )
+        chosen = picked or [str(run.id) for run in charted]
+        return run_options(store, experiment_id, keep=chosen), chosen
 
     @app.callback(
         Output(COMPARE_KEYS_STORE_ID, "data"),

@@ -192,12 +192,14 @@ class DataStore(typing.Protocol[_P]):
         limit: int | None = 1000,
         offset: int = 0,
         run_ids: frozenset[int] | None,
+        name_contains: str = "",
     ) -> typing.Iterator[models.Run]:
         """
         A page of an experiment's (non-deleted) runs, most recently created first.
 
         A `limit` of `None` is every run, and `run_ids` limits it to those, as it does every read of what runs logged:
-        `None` is all of the experiment's, an empty set none.
+        `None` is all of the experiment's, an empty set none. `name_contains` keeps the runs whose name has it in it,
+        whatever its case, or whose id it is: what a picker of runs searches by.
         """
         ...
 

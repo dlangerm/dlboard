@@ -954,9 +954,21 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         limit: int | None = 1000,
         offset: int = 0,
         run_ids: frozenset[int] | None,
+        name_contains: str = "",
     ) -> Iterator[models.Run]:
-        """A page (`limit` of `None` being every one) of an experiment's (non-deleted) runs, most recently created first; only `run_ids`, if given."""
+        """A page (`limit` of `None` being every one) of an experiment's (non-deleted) runs, most recently created first; only `run_ids`, if given, and those `name_contains` finds."""
         runs = self._tables[models.Run]
+        searched = name_contains.strip()
+        named: list[sa.ColumnElement[bool]] = (
+            [
+                sa.or_(
+                    sa.func.lower(runs.c.name).contains(searched.lower(), autoescape=True),
+                    runs.c.id == int(searched) if searched.isdigit() else sa.false(),
+                )
+            ]
+            if searched
+            else []
+        )
         return iter(
             self._fetch(
                 models.Run,
@@ -965,6 +977,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
                     runs.c.experiment_id == experiment_id,
                     runs.c.deleted_at.is_(None),
                     *_runs_among(runs.c.id, run_ids),
+                    *named,
                 )
                 .order_by(runs.c.created_at.desc())
                 .limit(limit)

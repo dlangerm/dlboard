@@ -362,9 +362,12 @@ class AuthorizingDataStore(models.DataStore[...]):
         limit: int | None = 1000,
         offset: int = 0,
         run_ids: frozenset[int] | None,
+        name_contains: str = "",
     ) -> Iterator[models.Run]:
         self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
-        return self._inner.get_runs(experiment_id, limit=limit, offset=offset, run_ids=run_ids)
+        return self._inner.get_runs(
+            experiment_id, limit=limit, offset=offset, run_ids=run_ids, name_contains=name_contains
+        )
 
     def log_metrics(self, metric: Iterable[models.LoggedMetrics]) -> None:
         metric = list(metric)

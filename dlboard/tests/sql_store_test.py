@@ -175,6 +175,31 @@ def test_get_runs_defaults_to_a_generous_page_covering_typical_use(
     assert list(store.get_runs(experiment_id, run_ids=None)) == [run]
 
 
+@pytest.mark.parametrize(
+    ("search", "found"),
+    [
+        pytest.param("", ["warmup-50%", "Baseline", "baseline_lr"], id="nothing-searched-is-every-run"),
+        pytest.param("BASE", ["Baseline", "baseline_lr"], id="by-name-whatever-its-case"),
+        pytest.param("50%", ["warmup-50%"], id="a-wildcard-character-is-literal"),
+        pytest.param("id", ["Baseline"], id="by-its-id"),
+        pytest.param("nothing", [], id="none"),
+    ],
+)
+def test_get_runs_finds_the_runs_a_picker_searches_for(
+    store: SQLLiteStore, experiment_id: int, search: str, found: list[str]
+) -> None:
+    """What a picker of runs, which never lists every one, searches by (#374): newest first, as every page of runs."""
+    created = {
+        name: store.create_run(models.NewRun(experiment_id=experiment_id, name=name))
+        for name in ("baseline_lr", "Baseline", "warmup-50%")
+    }
+    searched = str(created["Baseline"].id) if search == "id" else search
+
+    runs = store.get_runs(experiment_id, limit=10, run_ids=None, name_contains=searched)
+
+    assert [run.name for run in runs] == found
+
+
 def test_get_runs_excludes_deleted_and_other_experiments(store: SQLLiteStore, experiment_id: int) -> None:
     project = store.create_project(models.NewProject(name="other", description="d"))
     other_experiment = store.create_experiment(models.NewExperiment(project_id=project.id))
