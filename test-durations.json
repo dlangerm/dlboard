@@ -370,6 +370,8 @@
   "dlboard/plugins/charts/tests/axis_label_test.py::test_a_long_label_keeps_the_end_of_its_name_behind_an_ellipsis[abcdef-4-\\u2026def]": 0.001298963004956022,
   "dlboard/plugins/charts/tests/axis_label_test.py::test_a_long_label_keeps_the_end_of_its_name_behind_an_ellipsis[loss-36-loss]": 0.0013432130217552185,
   "dlboard/plugins/charts/tests/axis_label_test.py::test_a_long_label_keeps_the_end_of_its_name_behind_an_ellipsis[xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx-36-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx]": 0.0012476289994083345,
+  "dlboard/plugins/charts/tests/charts_test.py::test_a_line_chart_that_read_far_more_points_than_it_draws_says_how_many[read-about-what-it-draws]": 0.04351813000084803,
+  "dlboard/plugins/charts/tests/charts_test.py::test_a_line_chart_that_read_far_more_points_than_it_draws_says_how_many[read-far-more-than-drawn]": 0.024917205999372527,
   "dlboard/plugins/charts/tests/charts_test.py::test_a_metric_chart_is_titled_with_its_full_metric_name[bar]": 0.009433380997506902,
   "dlboard/plugins/charts/tests/charts_test.py::test_a_metric_chart_is_titled_with_its_full_metric_name[line]": 0.01247595003223978,
   "dlboard/plugins/charts/tests/charts_test.py::test_an_axis_title_limit_too_small_to_keep_a_name_recognizable_is_rejected[BarChartSettings]": 0.0012971669784747064,

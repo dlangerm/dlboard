@@ -37,6 +37,19 @@ _BOOKKEEPING_COLS = frozenset({MetricColumn.RUN_ID, MetricColumn.TIMESTAMP_UTC})
 LEGEND_MAX_HEIGHT: typing.Final = 64
 """The most of a line chart's height, in px, its legend of runs takes: two rows of it, scrolling past them."""
 
+READ_NOTE_FACTOR: typing.Final = 4
+"""A chart that read more than this many times the points it can draw (`max_points`) says how many it read."""
+
+
+def _read_note(read: int, drawn: int) -> dmc.Text:
+    """What a chart that read far more than it draws says under itself: it is slow for what it shows."""
+    return dmc.Text(
+        f"{read:,} points read, {drawn:,} drawn: logging less often (Lightning's log_every_n_steps) draws this faster",
+        size="xs",
+        c="dimmed",
+    )
+
+
 _TOOLTIP_JS_PATH = Path(__file__).with_name("line_chart_tooltip.js")
 _TOOLTIP_CSS_PATH = Path(__file__).with_name("line_chart_tooltip.css")
 
@@ -169,11 +182,9 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.Stack], frozen=Tr
         plotted = dataframe.loc[has_x, ["run_id", "step", parameters.column]].assign(
             **{x_col: x_values[has_x]}
         )
-        df = (
-            plotted.loc[plotted[parameters.column].notna()]
-            .groupby([x_col, "run_id"], as_index=False)[[parameters.column]]
-            .mean()
-        )
+        has_value = plotted[parameters.column].notna()
+        read = has_value.sum()
+        df = plotted.loc[has_value].groupby([x_col, "run_id"], as_index=False)[[parameters.column]].mean()
         if parameters.sample:
             # Sample against every sibling metric column sharing this x-axis, not just this
             # chart's own -- so every chart in the panel picks the same x-values and stays
@@ -194,6 +205,9 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.Stack], frozen=Tr
             )
             df = df.merge(grid, on=["run_id", parameters.x_axis], how="inner")
         run_ids = sorted(df["run_id"].unique())
+        notes: list[dmc.Text] = (
+            [_read_note(read, len(df))] if read > READ_NOTE_FACTOR * parameters.max_points else []
+        )
         # A run with one point (an x-axis its values share, like a learning rate that never changes) has no line to
         # draw, so it is drawn as the dot it is.
         has_single_point_run = bool((df.groupby("run_id").size() == 1).any())
@@ -280,7 +294,7 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.Stack], frozen=Tr
                 "margin": {"left": 10, "right": 20, "top": 10, "bottom": 10},
             },
         )
-        return titled(parameters.column, plot)
+        return titled(parameters.column, plot, *notes)
 
     @classmethod
     @typing.override

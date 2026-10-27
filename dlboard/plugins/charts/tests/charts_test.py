@@ -170,6 +170,25 @@ def test_line_chart_render_sample_bounds_points() -> None:
     assert len(_props(chart)["data"]) <= 50
 
 
+@pytest.mark.parametrize(
+    ("max_points", "says"),
+    [
+        pytest.param(50, True, id="read-far-more-than-drawn"),
+        pytest.param(1000, False, id="read-about-what-it-draws"),
+    ],
+)
+def test_a_line_chart_that_read_far_more_points_than_it_draws_says_how_many(
+    max_points: int, *, says: bool
+) -> None:
+    """It is slow for what it shows, and only the logging can make it cheaper (`docs/client.md`)."""
+    chart = LineChart.render(
+        LineChartSettings(column="loss", x_axis="step", max_points=max_points), _metrics_df(2000)
+    )
+
+    notes = [str(props(node)["children"]) for node in chart._traverse() if isinstance(node, dmc.Text)]
+    assert any(note.startswith("4,000 points read, ") for note in notes) is says
+
+
 def test_line_chart_render_no_sample_keeps_all_points() -> None:
     df = _metrics_df(2000)
     chart = LineChart.render(LineChartSettings(column="loss", x_axis="step", sample=False), df)
