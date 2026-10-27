@@ -46,6 +46,8 @@ from dlboard.serve._pages._experiment._views import VIEW_NOTIFY_ID
 from dlboard.serve._url import relative_path
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from dash.development.base_component import Component
 
     from dlboard.models import DataStore, Run
@@ -364,10 +366,7 @@ def _render_hparam_panel(
                                     [
                                         dmc.MultiSelect(
                                             id=NAVBAR_HPARAM_COL_SELECT_ID,
-                                            data=[
-                                                {"group": "Hyperparameters", "items": hparam_keys},
-                                                {"group": "Metrics (latest)", "items": metric_keys},
-                                            ],
+                                            data=_column_options(hparam_keys, metric_keys, keep=applied),
                                             value=applied,
                                             limit=KEY_PICKER_LIMIT,
                                             searchable=True,
@@ -752,7 +751,49 @@ def _register_delete_run(app: Dash) -> None:
         return relative_path(f"/experiment/{experiment_id}"), True, False
 
 
+def _column_options(
+    hparam_keys: Sequence[str], metric_keys: Sequence[str], *, search: str = "", keep: Sequence[str] = ()
+) -> list[dict[str, Any]]:
+    """
+    The Columns picker's options: the first `KEY_PICKER_LIMIT` keys `search` finds, hyperparameters first, and `keep`.
+
+    Never every name: an experiment of 11,000 metrics would send each of them to the browser (#416); the rest are a
+    search away (`search_columns`, as someone types). `keep` is what the picker holds, so it keeps its picks.
+    """
+    needle = search.lower()
+    hparams = [key for key in hparam_keys if needle in key.lower()][:KEY_PICKER_LIMIT]
+    metrics = [key for key in metric_keys if needle in key.lower()][: KEY_PICKER_LIMIT - len(hparams)]
+    kept_hparams = [key for key in keep if key in hparam_keys and key not in hparams]
+    kept_metrics = [key for key in keep if key not in hparam_keys and key not in metrics]
+    return [
+        {"group": "Hyperparameters", "items": [*kept_hparams, *hparams]},
+        {"group": "Metrics (latest)", "items": [*kept_metrics, *metrics]},
+    ]
+
+
+def _register_column_search(app: Dash) -> None:
+    @app.callback(
+        Output(NAVBAR_HPARAM_COL_SELECT_ID, "data"),
+        Input(NAVBAR_HPARAM_COL_SELECT_ID, "searchValue"),
+        State(NAVBAR_HPARAM_COL_SELECT_ID, "value"),
+        State(constants.STATE_EXPERIMENT_ID, "data"),
+        prevent_initial_call=True,
+    )
+    def search_columns(
+        search: str | None, picked: list[str] | None, experiment_id: int
+    ) -> list[dict[str, Any]]:
+        """The Columns picker's options for what is typed in it, searched on the server."""
+        store = get_data_store()
+        hparam_keys = sorted(
+            {key for h in store.fetch_hyperparams(experiment_id, run_ids=None) for key in h.hparams_dict}
+        )
+        return _column_options(
+            hparam_keys, store.summarize_metric_keys(experiment_id), search=search or "", keep=picked or ()
+        )
+
+
 def register_run_comparison_callbacks(app: Dash) -> None:
     _register_hparam_table(app)
     _register_newest_runs(app)
     _register_delete_run(app)
+    _register_column_search(app)

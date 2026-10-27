@@ -184,3 +184,15 @@ def test_newer_hidden_counts_the_runs_logged_after_the_newest_one_a_selection_dr
 
     assert run_table._newer_hidden(runs, frozenset({1, 2})) == 2
     assert run_table._newer_hidden(runs, frozenset()) == 0
+
+
+def test_the_columns_picker_offers_a_page_of_what_its_search_finds_and_keeps_its_picks() -> None:
+    """Every metric name went to the browser with the picker (#416): a page of them, the rest a search away."""
+    hparams = ["batch_size", "lr"]
+    metrics = [f"metric_{i:05d}" for i in range(run_table.KEY_PICKER_LIMIT * 3)]
+
+    listed = run_table._column_options(hparams, metrics)
+    searched = run_table._column_options(hparams, metrics, search="00250", keep=["metric_00001", "lr"])
+
+    assert [len(group["items"]) for group in listed] == [2, run_table.KEY_PICKER_LIMIT - 2]
+    assert [group["items"] for group in searched] == [["lr"], ["metric_00001", "metric_00250"]]

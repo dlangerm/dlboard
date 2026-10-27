@@ -287,6 +287,24 @@ def _pattern_suggestions(names: list[str]) -> list[str]:
     return ["*", *sorted(f"{folder}*" for folder in folders), *sorted(shared), *sorted(names)]
 
 
+def key_picker_options(
+    field: models.ParameterField, catalog: ColumnCatalog, *, search: str = "", keep: Sequence[str] = ()
+) -> list[str]:
+    """
+    What a picker of `field`'s keys offers: the first `KEY_PICKER_LIMIT` of its choices that `search` finds, and `keep`.
+
+    Never every name: an experiment of 11,000 metrics would send each of them to the browser with every picker (#416).
+    The rest are a search away (`search_keys`, as someone types). `keep` is what the picker holds, so it keeps it.
+    """
+    names = catalog.options(field.column_kind) if field.column_kind is not None else list[str]()
+    choices = (
+        _pattern_suggestions(names) if field.type is models.ParameterFieldType.LIST_PATTERN else sorted(names)
+    )
+    needle = search.lower()
+    found = [choice for choice in choices if needle in choice.lower()][:KEY_PICKER_LIMIT]
+    return list(dict.fromkeys([*keep, *found]))
+
+
 def _param_field_input(  # noqa: PLR0911
     field_name: str,
     field: models.ParameterField,
@@ -349,13 +367,13 @@ def _param_field_input(  # noqa: PLR0911
                 fixed_rows or {},
             )
         case models.ParameterFieldType.LIST_PATTERN:
-            names = catalog.options(field.column_kind) if field.column_kind is not None else list[str]()
+            patterns = cast("list[str]", value or [])
             return dmc.TagsInput(
                 id=input_id,
                 label=label,
-                data=_pattern_suggestions(names),
+                data=key_picker_options(field, catalog, keep=patterns),
                 limit=KEY_PICKER_LIMIT,
-                value=cast("list[str]", value or []),
+                value=patterns,
                 description=field.description,
                 placeholder="Pick a name, or type a pattern: * is any text, # is digits",
                 clearable=True,
@@ -381,7 +399,7 @@ def _param_field_input(  # noqa: PLR0911
                 return dmc.MultiSelect(
                     id=input_id,
                     label=label,
-                    data=sorted(options) if options else [],
+                    data=key_picker_options(field, catalog, keep=multiselect_value or []),
                     limit=KEY_PICKER_LIMIT,
                     value=multiselect_value or [],
                     searchable=True,
@@ -392,7 +410,7 @@ def _param_field_input(  # noqa: PLR0911
                 return dmc.Select(
                     id=input_id,
                     label=label,
-                    data=sorted(options),
+                    data=key_picker_options(field, catalog, keep=[cast("str", value)] if value else []),
                     limit=KEY_PICKER_LIMIT,
                     value=value,  # pyrefly: ignore [bad-argument-type]
                     searchable=True,

@@ -479,3 +479,44 @@ def test_a_key_picker_lists_a_bounded_number_of_names_however_many_are_logged(fi
     props: dict[str, Any] = component.to_plotly_json()["props"]
 
     assert props["limit"] == KEY_PICKER_LIMIT
+
+
+_MANY = ColumnCatalog(metrics=tuple(f"layer_{i:04d}/grad_norm" for i in range(KEY_PICKER_LIMIT * 3)))
+
+
+@pytest.mark.parametrize(
+    ("field_type", "search", "keep", "first", "count"),
+    [
+        pytest.param(
+            ParameterFieldType.STR,
+            "",
+            [],
+            "layer_0000/grad_norm",
+            KEY_PICKER_LIMIT,
+            id="a-page-not-every-name",
+        ),
+        pytest.param(
+            ParameterFieldType.STR, "0250", [], "layer_0250/grad_norm", 1, id="the-rest-are-a-search-away"
+        ),
+        pytest.param(
+            ParameterFieldType.LIST_STR,
+            "layer_000",
+            ["layer_0299/grad_norm"],
+            "layer_0299/grad_norm",
+            11,
+            id="what-it-holds-is-kept",
+        ),
+        pytest.param(
+            ParameterFieldType.LIST_PATTERN, "#", [], "layer_#/grad_norm", 1, id="patterns-are-searched-too"
+        ),
+    ],
+)
+def test_a_key_picker_offers_a_page_of_what_its_search_finds(
+    field_type: ParameterFieldType, search: str, keep: list[str], first: str, count: int
+) -> None:
+    """An experiment of 11,000 metrics sent each one to the browser with every picker (#416)."""
+    field = ParameterField(name="column", type=field_type, required=True, column_kind=ColumnKind.METRIC)
+
+    options = settings_form.key_picker_options(field, _MANY, search=search, keep=keep)
+
+    assert (options[0], len(options)) == (first, count)

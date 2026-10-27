@@ -3360,6 +3360,44 @@ def test_switching_the_editor_to_a_chart_in_another_panel_moves_the_outline_and_
     assert console_errors == []
 
 
+def test_a_key_picker_lists_a_page_of_thousands_of_metrics_and_finds_the_rest_as_one_types(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """Every name went to the browser with every picker, 250 KB for 11,000 metrics (#416): the rest are searched for."""
+    _create_project_and_experiment(page, live_server_url, "Many Keys Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    api = BasicDlboardAPI(live_server_url)
+    run = api.create_run(models.NewRun(experiment_id=experiment_id))
+    api.log_metric_batch(
+        [
+            models.LoggedMetrics(
+                metrics={f"layer_{i:04d}/grad_norm": 1.0 for i in range(3000)},
+                step=0,
+                experiment_id=experiment_id,
+                run_id=run.id,
+                timestamp_utc=pendulum.now("UTC"),
+            )
+        ]
+    )
+    page.reload()
+    _create_panel(page, "keys")
+
+    page.get_by_role("button", name="Add chart to this panel").first.click()
+    dock = page.get_by_role("complementary", name="Chart settings")
+    dock.get_by_label("Chart type").click()
+    page.get_by_role("option", name="line", exact=True).click()
+    column = dock.get_by_label("Column *")
+    column.click()
+    expect(page.get_by_role("option", name="layer_0000/grad_norm")).to_be_visible()
+    expect(page.get_by_role("option", name="layer_2999/grad_norm")).to_have_count(0)  # past the first page
+
+    column.press_sequentially("2999")
+    page.get_by_role("option", name="layer_2999/grad_norm").click()
+    expect(column).to_have_value("layer_2999/grad_norm")
+    assert console_errors == []
+
+
 def test_a_chart_is_added_from_the_dock_with_its_preview_there_and_lands_at_the_end_of_its_panel(
     page: Page, live_server_url: str, console_errors: list[str]
 ) -> None:

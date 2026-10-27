@@ -45,6 +45,7 @@ from dlboard.serve._pages._experiment._chart_settings_form import (
     EditedChart,
     build_chart_param_form,
     build_validated_chart_instance,
+    key_picker_options,
     merge_chart_param_values,
     register_settings_form_callbacks,
 )
@@ -578,8 +579,35 @@ def _register_save(app: Dash) -> None:
         return container, True, None, "", page.model_dump_json()
 
 
+def _register_key_search(app: Dash) -> None:
+    @app.callback(
+        Output(CHART_PARAM.match(), "data"),
+        Input(CHART_PARAM.match(), "searchValue"),
+        State(CHART_PARAM.match(), "value"),
+        State(CHART_EDITOR_TYPE_ID, "value"),
+        State(constants.STATE_EXPERIMENT_ID, "data"),
+        prevent_initial_call=True,
+    )
+    def search_keys(
+        search: str | None, value: str | list[str] | None, chart_type_name: str | None, experiment_id: int
+    ) -> list[str]:
+        """A key picker's options for what is typed in it, searched on the server: it lists a page of them (#416)."""
+        field_name = cast("dict[str, str]", require_triggered_id())["field"]
+        field = (
+            models.ChartTypeRegistry.get_registered_chart_types()
+            .get(chart_type_name or "", {})
+            .get(field_name)
+        )
+        if field is None or field.column_kind is None:
+            raise PreventUpdate
+        kept = value if isinstance(value, list) else [value] if value else list[str]()
+        catalog = ColumnCatalog.load(get_data_store(), experiment_id)
+        return key_picker_options(field, catalog, search=search or "", keep=kept)
+
+
 def register_chart_editor_callbacks(app: Dash) -> None:
     register_settings_form_callbacks(app)
     _register_open_and_cancel(app)
     _register_form_and_draft(app)
     _register_save(app)
+    _register_key_search(app)
