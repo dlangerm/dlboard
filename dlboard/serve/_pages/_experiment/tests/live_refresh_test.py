@@ -10,6 +10,7 @@ import pytest
 from dash import no_update
 from pydantic import BaseModel
 
+from dlboard.conftest import panel_data_of
 from dlboard.conftest import props as _props
 from dlboard.models import EVERY_KEY, ChartInstance, ChartType, ColumnKind, DataRequest, PanelInstance
 from dlboard.plugins.charts.line_chart import LineChart
@@ -30,17 +31,22 @@ _AFTER = pd.concat(
 )
 
 
+def _print(chart: ChartInstance[Any, Any], wide: pd.DataFrame) -> str:
+    """The fingerprint of `chart` drawn from what its panel reads of a store holding `wide`."""
+    return panel_data.chart_data_fingerprint(panel_data_of(wide).for_chart(chart))
+
+
 def _shown(df: pd.DataFrame) -> dict[tuple[str, int | None], str]:
     """The fingerprints the bodies on screen carry, as the poll reads them back from the page."""
-    return {("p", i): panel_data.chart_data_fingerprint(chart, df) for i, chart in enumerate(_PANEL.charts)}
+    return {("p", i): _print(chart, df) for i, chart in enumerate(_PANEL.charts)}
 
 
 def test_a_body_carries_the_fingerprint_of_the_data_it_was_drawn_from() -> None:
-    body = chart_view.chart_body(_PANEL, 0, _BEFORE, page_size=12)
+    body = chart_view.chart_body(_PANEL, 0, panel_data_of(_BEFORE).for_chart(_PANEL.charts[0]), page_size=12)
 
     carried = _props(body[1])
     assert carried["id"] == chart_view.CHART_FINGERPRINT.of("p", 0)
-    assert carried["children"] == panel_data.chart_data_fingerprint(_PANEL.charts[0], _BEFORE)
+    assert carried["children"] == _print(_PANEL.charts[0], _BEFORE)
 
 
 def _body_ids() -> list[chart_view.ChartID]:
@@ -54,20 +60,20 @@ def test_only_a_chart_whose_data_moved_gets_a_new_body_and_the_rest_are_left_alo
     chart_ids = _body_ids()
 
     contents, ok = _refresh_chart_bodies(
-        chart_ids, {"p": _PANEL}, {"p": _AFTER}, _shown(_BEFORE), page_size=12
+        chart_ids, {"p": _PANEL}, {"p": panel_data_of(_AFTER)}, _shown(_BEFORE), page_size=12
     )
 
     assert ok
     assert contents[1] is no_update  # no new point for "acc"
     new_body: list[Any] = contents[0]
-    assert _props(new_body[1])["children"] == panel_data.chart_data_fingerprint(_PANEL.charts[0], _AFTER)
+    assert _props(new_body[1])["children"] == _print(_PANEL.charts[0], _AFTER)
 
 
 def test_a_chart_just_drawn_from_the_current_data_is_not_redrawn_by_the_next_poll() -> None:
     chart_ids = _body_ids()
 
     contents, _ok = _refresh_chart_bodies(
-        chart_ids, {"p": _PANEL}, {"p": _AFTER}, _shown(_AFTER), page_size=12
+        chart_ids, {"p": _PANEL}, {"p": panel_data_of(_AFTER)}, _shown(_AFTER), page_size=12
     )
 
     assert contents == [no_update, no_update]
@@ -136,9 +142,7 @@ def test_a_new_row_for_another_metric_does_not_redraw_a_chart_that_shows_none_of
     extra = pd.DataFrame({"run_id": [1], "step": [2], "acc": [0.95]})
     grown = pd.concat([_WIDE.iloc[:2], extra, _WIDE.iloc[2:]], ignore_index=True)
 
-    assert panel_data.chart_data_fingerprint(_CUSTOM, grown) == panel_data.chart_data_fingerprint(
-        _CUSTOM, _WIDE
-    )
+    assert _print(_CUSTOM, grown) == _print(_CUSTOM, _WIDE)
 
 
 @pytest.mark.parametrize(
@@ -151,9 +155,7 @@ def test_editing_a_hyperparameter_or_renaming_a_run_redraws_the_charts_that_show
 ) -> None:
     edited = _WIDE.copy()
     edited[column] = value
-    assert panel_data.chart_data_fingerprint(_CUSTOM, edited) != panel_data.chart_data_fingerprint(
-        _CUSTOM, _WIDE
-    )
+    assert _print(_CUSTOM, edited) != _print(_CUSTOM, _WIDE)
 
 
 _ALL_METRICS_ONE_HPARAM = ChartInstance[Any, Any](
@@ -175,6 +177,6 @@ def test_a_chart_showing_every_metric_but_some_hparams_is_scoped_by_each_hint_al
     column: str, value: float, *, redraws: bool
 ) -> None:
     edited = _WITH_OTHER_HPARAM.assign(**{column: value})
-    before = panel_data.chart_data_fingerprint(_ALL_METRICS_ONE_HPARAM, _WITH_OTHER_HPARAM)
+    before = _print(_ALL_METRICS_ONE_HPARAM, _WITH_OTHER_HPARAM)
 
-    assert (panel_data.chart_data_fingerprint(_ALL_METRICS_ONE_HPARAM, edited) != before) is redraws
+    assert (_print(_ALL_METRICS_ONE_HPARAM, edited) != before) is redraws

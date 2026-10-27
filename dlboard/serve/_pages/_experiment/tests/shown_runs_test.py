@@ -106,4 +106,4 @@ def test_the_charts_of_an_experiment_of_many_runs_are_drawn_from_only_the_newest
 
     frames = panel_data.panel_frames(store, loaded, paging, visible_open_panels(loaded.panels, "", paging))
 
-    assert set(frames["p"].run_id) == {run.id for run in runs[-20:]}
+    assert set(frames["p"].for_chart(panel.charts[0]).run_id) == {run.id for run in runs[-20:]}

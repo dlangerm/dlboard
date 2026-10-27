@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from dash.development.base_component import Component
 
 from dlboard.serve._pages._experiment._ids import CHART_VIEW_SAVE_REQUEST_ID, ExperimentPage
-from dlboard.serve._pages._experiment._panel_data import chart_data_fingerprint
+from dlboard.serve._pages._experiment._panel_data import ChartFrames, chart_data_fingerprint
 
 _log = get_logger(__name__)
 
@@ -141,7 +141,7 @@ def chart_body(
     """
     chart = panel.charts[index]
     fingerprint = html.Div(
-        chart_data_fingerprint(chart, dataframe),
+        chart_data_fingerprint(dataframe),
         id=CHART_FINGERPRINT.of(panel.name, index),
         hidden=True,
     )
@@ -221,7 +221,7 @@ def render_chart_item(
     Individually addressable via `CHART_CONTENT.of(panel.name, index)`, and its chart (the body, below the
     controls) via `CHART_BODY`: a live-update poll (`poll_for_updates` in `__init__.py`) replaces
     exactly the body of a chart whose own data changed, instead of rebuilding `render_panel_charts`' whole
-    shared-dataframe blob for the panel: two charts sharing a panel (a common "Auto-generate charts"
+    blob for the panel: two charts sharing a panel (a common "Auto-generate charts"
     grouping) commonly have very different update cadences -- an epoch-level validation chart next to a
     per-step training chart -- and rebuilding the *panel* whenever *either* changes would pop the
     untouched one too.
@@ -303,13 +303,13 @@ def render_chart_item(
 
 def render_panel_charts(
     panel: models.PanelInstance[Any, Any],
-    dataframe: pd.DataFrame,
+    frames: ChartFrames,
     indexes: Sequence[int] | None = None,
     page_size: int = models.DEFAULT_RENDER_CONTEXT.page_size,
 ) -> list[Component]:
-    """Render the charts of a panel at `indexes` (every chart, if not given) -- see `render_chart_item`."""
+    """Render the charts of a panel at `indexes` (every chart, if not given), each from its own frame -- see `render_chart_item`."""
     return [
-        render_chart_item(panel, idx, dataframe, page_size)
+        render_chart_item(panel, idx, frames.for_chart(panel.charts[idx]), page_size)
         for idx in range(len(panel.charts))
         if indexes is None or idx in indexes
     ]

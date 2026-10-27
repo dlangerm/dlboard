@@ -46,15 +46,16 @@ def test_a_panel_traces_each_read_by_kind_and_each_chart_it_renders(
     ]
     panel = PanelInstance[Any, Any](name="a panel name", charts=charts)
 
-    frame = panel_data.fetch_panel_dataframe(store, experiment_id, panel, None)
+    data = panel_data.fetch_panel_data(store, experiment_id, panel, None)
     for chart in charts:
-        chart.render(frame)
+        chart.render(data.for_chart(chart))
     flush()
 
     spans = span_exporter.get_finished_spans()
     reads = [dict(s.attributes or {}) for s in spans if s.name == "dlboard.panel.read"]
     assert {(read["dlboard.panel.read"], read.get("dlboard.read.unscoped")) for read in reads} == {
-        ("metrics", True),
+        ("metrics", True),  # the table's latest of every metric
+        ("metrics", False),  # the line's series of its metric
         ("hyperparams", None),
         ("run_names", None),
     }

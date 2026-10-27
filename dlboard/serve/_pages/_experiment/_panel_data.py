@@ -113,7 +113,90 @@ def _read[T](read: _Read, fetch: Callable[[], T]) -> T:
     return result
 
 
-type PanelFrames = Mapping[str, pd.DataFrame]
+class ChartFrames(typing.Protocol):
+    """Where a panel's charts get the frames they are drawn from."""
+
+    def for_chart(self, chart: models.ChartInstance[Any, Any]) -> pd.DataFrame:
+        """The frame `chart` is drawn from."""
+        ...
+
+
+@dataclass(frozen=True)
+class PanelData:
+    """
+    What a panel read for its charts, kept by kind, so that each chart is drawn from what it asked for and nothing else.
+
+    Read once for the whole panel (`fetch_panel_data`), not once per chart: what several charts ask for alike is read
+    once. A metric two charts read differently (one its mean, the other its series) is read both ways, so neither
+    reads more than it draws.
+    """
+
+    metrics: Mapping[models.MetricReduction, MetricFrame]
+    artifacts: pd.DataFrame
+    hparams: pd.DataFrame
+    histograms: pd.DataFrame
+    series: Mapping[str, pd.DataFrame]
+    """By `SeriesBandRequest.column`."""
+    run_names: pd.DataFrame
+
+    def for_chart(self, chart: models.ChartInstance[Any, Any]) -> pd.DataFrame:
+        """
+        `chart`'s own frame: the rows and columns of what its `data_request` asks for, and the names of the runs in it.
+
+        Each metric is in it as the chart reads it, so no metric is in it twice. A hyperparameter pattern is read whole
+        and narrowed by the chart, so a chart that asks for one is handed every hyperparameter read.
+        """
+        request = chart.data_request()
+        metrics = [
+            selected
+            for reduction, frame in self.metrics.items()
+            if (
+                selected := frame.select(
+                    key
+                    for key in frame.keys
+                    if request.reductions.of(key) is reduction
+                    and (request.every_metric or request.draws_metric(key))
+                )
+            ).keys
+        ]
+        artifacts = tuple(artifact_column(name) for name in (*request.artifacts, *request.artifact_prefixes))
+        histograms = {histogram_column(key) for key in request.histograms}
+        hparams = {hparam_column(key) for key in request.hparams}
+        merged = merge_hyperparams(
+            merge_by_step(
+                MetricFrame.merged(metrics).to_frame() if metrics else pd.DataFrame(),
+                _with_data_in(self.artifacts, lambda column: column.startswith(artifacts)),
+                _with_data_in(self.histograms, histograms.__contains__),
+                *(self.series[series.column] for series in request.series if series.column in self.series),
+            ),
+            _with_data_in(
+                self.hparams,
+                lambda column: bool(request.hparam_patterns) or column in hparams,
+                keep_rows=True,
+            ),
+        )
+        if merged.empty or self.run_names.empty:
+            return merged
+        return merged.merge(self.run_names, on="run_id", how="left")
+
+
+def _with_data_in(
+    frame: pd.DataFrame, wanted: Callable[[str], bool], *, keep_rows: bool = False
+) -> pd.DataFrame:
+    """
+    The columns of `frame` that are `wanted`, with where its rows are, over the rows where they hold something.
+
+    Empty if none is wanted. `keep_rows` keeps every row, for a frame (a run's hyperparameters) whose rows are not
+    steps a chart could have nothing at.
+    """
+    columns = [column for column in frame.columns if column not in models.NO_DATA_COLUMNS and wanted(column)]
+    if not columns:
+        return pd.DataFrame()
+    rows = frame if keep_rows else frame.dropna(how="all", subset=columns)
+    return rows[[column for column in frame.columns if column in models.NO_DATA_COLUMNS or column in columns]]
+
+
+type PanelFrames = Mapping[str, ChartFrames]
 """The data of the charts `Paging` shows in each open panel, by panel name; a panel with no chart showing has none."""
 
 
@@ -128,12 +211,12 @@ def panel_frames(
     experiment_id = cast("int", page.experiment_id)
     run_ids = shown_run_ids(store, experiment_id, page.document)
     wanted = frozenset(names)
-    frames: dict[str, pd.DataFrame] = {}
+    frames: dict[str, ChartFrames] = {}
     for panel in page.panels:
         indexes = visible_chart_indexes(panel, paging).items
         if panel.name in wanted and indexes:
             shown = panel.model_copy(update={"charts": [panel.charts[i] for i in indexes]})
-            frames[panel.name] = fetch_panel_dataframe(store, experiment_id, shown, run_ids)
+            frames[panel.name] = fetch_panel_data(store, experiment_id, shown, run_ids)
     return frames
 
 
@@ -159,42 +242,41 @@ def _metric_columns(request: models.DataRequest, known_keys: Collection[str]) ->
     return set(request.metrics) | {key for key in known_keys if request.draws_metric(key)}
 
 
-def _agreed(reductions: set[models.MetricReduction]) -> models.MetricReduction:
-    """The one way of fetching a metric that serves every reduction in `reductions`: theirs if they are one, else every step."""
-    return next(iter(reductions)) if len(reductions) == 1 else models.MetricReduction.HISTORY
-
-
 def metrics_by_reduction(
     requests: Sequence[models.DataRequest], known_keys: Collection[str] = ()
 ) -> Mapping[models.MetricReduction, set[str] | None]:
     """
     The metrics a panel fetches under each `MetricReduction`; `None` meaning every metric.
 
-    What each chart wants is its own metrics (by name, and those of `known_keys` its patterns match), each read as its
-    `reductions` say for that column. A metric the charts disagree on is fetched whole, which serves them all. A chart of
-    every metric draws each as its default says, and so the default of every such chart is what every metric is fetched
-    as, when they disagree.
+    Each chart's own metrics (by name, and those of `known_keys` its patterns match), each read as its `reductions` say
+    for that column. A metric two charts read differently is read both ways, so neither reads more than it draws: a mean
+    beside a chart of the series is the database's to compute, not a history to fetch. A chart of every metric reads each
+    as its default says, except the ones it names another way.
     """
-    wants = [(_metric_columns(request, known_keys), request.reductions) for request in requests]
-    wants = [(columns, reductions) for columns, reductions in wants if columns is None or columns]
-    if any(columns is None for columns, _ in wants):
-        return {_agreed({reductions.default for _, reductions in wants}): None}
-    wanted: dict[str, set[models.MetricReduction]] = {}
-    for columns, reductions in wants:
-        for column in columns or ():
-            wanted.setdefault(column, set()).add(reductions.of(column))
-    by_reduction: dict[models.MetricReduction, set[str]] = {}
-    for column, reductions in wanted.items():
-        by_reduction.setdefault(_agreed(reductions), set()).add(column)
-    return by_reduction
+    wanted: dict[models.MetricReduction, set[str] | None] = {}
+
+    def want(reduction: models.MetricReduction, columns: Collection[str] | None) -> None:
+        if columns is None:
+            wanted[reduction] = None
+        elif columns and (got := wanted.setdefault(reduction, set())) is not None:
+            got.update(columns)
+
+    for request in requests:
+        columns = _metric_columns(request, known_keys)
+        if columns is None:
+            want(request.reductions.default, None)
+            columns = set(request.reductions.by_column)
+        for column in columns:
+            want(request.reductions.of(column), {column})
+    return wanted
 
 
-def fetch_panel_dataframe(
+def fetch_panel_data(
     store: DataStore[...],
     experiment_id: int,
     panel: models.PanelInstance[Any, Any],
     run_ids: frozenset[int] | None,
-) -> pd.DataFrame:
+) -> PanelData:
     """Fetch just the data one panel needs -- not the whole experiment -- of `run_ids` (every run, if `None`)."""
     requests = [chart.data_request() for chart in panel.charts]
     artifact_keys = frozenset[str]().union(*(r.artifacts for r in requests))
@@ -223,24 +305,19 @@ def fetch_panel_dataframe(
         if needs_names
         else list[str]()
     )
-    metric_reductions = metrics_by_reduction(requests, known_keys)
-    metrics_df = (
-        MetricFrame.merged(
-            _read(
-                _MetricRead(PanelRead.METRICS, reduction, unscoped=columns is None),
-                functools.partial(
-                    store.fetch_metrics,
-                    experiment_id,
-                    keys=None if columns is None else frozenset(columns),
-                    run_ids=run_ids,
-                    reduction=reduction,
-                ),
-            )
-            for reduction, columns in metric_reductions.items()
-        ).to_frame()
-        if metric_reductions
-        else pd.DataFrame()
-    )
+    metrics = {
+        reduction: _read(
+            _MetricRead(PanelRead.METRICS, reduction, unscoped=columns is None),
+            functools.partial(
+                store.fetch_metrics,
+                experiment_id,
+                keys=None if columns is None else frozenset(columns),
+                run_ids=run_ids,
+                reduction=reduction,
+            ),
+        )
+        for reduction, columns in metrics_by_reduction(requests, known_keys).items()
+    }
     artifacts_df = (
         _read(
             _Read(PanelRead.ARTIFACTS),
@@ -283,32 +360,35 @@ def fetch_panel_dataframe(
         if histogram_keys
         else pd.DataFrame()
     )
-    series_dfs = [
-        _read(
+    series = {
+        request.column: _read(
             _Read(PanelRead.SERIES_BANDS),
             functools.partial(_series_band_frame, store, experiment_id, request, known_keys, run_ids),
         )
         for request in series_requests
-    ]
-    merged = merge_hyperparams(
-        merge_by_step(metrics_df, artifacts_df, histograms_df, *series_dfs), hparams_df
+    }
+    read_anything = (
+        any(not frame.run_id.empty for frame in metrics.values())
+        or not (artifacts_df.empty and hparams_df.empty and histograms_df.empty)
+        or any(not frame.empty for frame in series.values())
     )
-    if merged.empty:
-        return merged
-    # Carried in alongside the metric/artifact/hparam data (not fetched separately by each chart
-    # that wants it) so `LineChart`/`ImageChart` can label a run by its name instead of its bare id
-    # -- `table_chart.py`'s default "runs" mode explicitly excludes this column, since it isn't a
-    # real metric/hparam. Only the runs fetched need a name.
-    run_names = _read(
-        _Read(PanelRead.RUN_NAMES),
-        lambda: pd.DataFrame.from_records(
-            [
-                {"run_id": run.id, RUN_NAME_COLUMN: run_display_name(run)}
-                for run in store.get_runs(experiment_id, limit=None, run_ids=run_ids)
-            ]
-        ),
+    # Read once, not by each chart that wants it, so `LineChart`/`ImageChart` can label a run by its name instead of
+    # its bare id -- `table_chart.py`'s default "runs" mode explicitly excludes this column, since it isn't a real
+    # metric/hparam. Only the runs read need a name.
+    run_names = (
+        _read(
+            _Read(PanelRead.RUN_NAMES),
+            lambda: pd.DataFrame.from_records(
+                [
+                    {"run_id": run.id, RUN_NAME_COLUMN: run_display_name(run)}
+                    for run in store.get_runs(experiment_id, limit=None, run_ids=run_ids)
+                ]
+            ),
+        )
+        if read_anything
+        else pd.DataFrame()
     )
-    return merged if run_names.empty else merged.merge(run_names, on="run_id", how="left")
+    return PanelData(metrics, artifacts_df, hparams_df, histograms_df, series, run_names)
 
 
 def build_series_band_dataframe(
@@ -352,49 +432,14 @@ def is_lightning_experiment(data_store: DataStore[...], experiment_id: int) -> b
     return experiment is not None and experiment.source == models.ExperimentSource.PYTORCH_LIGHTNING
 
 
-def _chart_columns(chart: models.ChartInstance[Any, Any], df: pd.DataFrame) -> list[str]:
-    """
-    The columns of a panel's shared dataframe one chart renders from, in the dataframe's own order.
-
-    Each kind of column is scoped by the chart's own request -- so a chart that shows every metric but only some
-    hyperparameters is not redrawn by an unrelated hyperparameter.
-    """
-    request = chart.data_request()
-    # A hyperparameter pattern is read whole and narrowed by the chart, so it renders from every hyperparameter.
-    wanted_hparams = None if request.hparam_patterns else {hparam_column(key) for key in request.hparams}
-    artifacts = tuple(artifact_column(name) for name in (*request.artifacts, *request.artifact_prefixes))
-    histograms = {histogram_column(key) for key in request.histograms}
-    bands = {series.column for series in request.series}
-
-    def renders_from(column: str) -> bool:
-        if column in models.IDENTITY_COLUMNS:
-            return True
-        match column_kind(column):
-            case ColumnKind.HPARAM:
-                return wanted_hparams is None or column in wanted_hparams
-            case ColumnKind.ARTIFACT:
-                return column.startswith(artifacts)
-            case ColumnKind.HISTOGRAM:
-                return column in histograms
-            case ColumnKind.METRIC:
-                return request.every_metric or request.draws_metric(column)
-            case ColumnKind.SERIES_BAND:
-                return column in bands
-            case (ColumnKind.GROUPING | ColumnKind.LAYER) as kind:
-                msg = f"no dataframe column is of kind {kind}"
-                raise ValueError(msg)
-
-    return [column for column in df.columns if renders_from(column)]
-
-
 def _histogram_contents(cell: object) -> dict[str, Any] | None:
     """What a histogram column's cell holds, as plain data (`None` where the key was not logged at the step)."""
     return cell.model_dump() if isinstance(cell, Histogram) else None
 
 
-def chart_data_fingerprint(chart: models.ChartInstance[Any, Any], df: pd.DataFrame) -> str:
+def chart_data_fingerprint(df: pd.DataFrame) -> str:
     """
-    A cheap content hash of the slice of a panel's shared dataframe one chart actually renders from.
+    A cheap content hash of the frame one chart is drawn from (`PanelData.for_chart`).
 
     Lets a live-update poll tell "this chart's underlying data hasn't actually changed" apart from
     "the experiment changed *something*, somewhere" -- `Experiment.revision` is bumped by any write
@@ -405,10 +450,8 @@ def chart_data_fingerprint(chart: models.ChartInstance[Any, Any], df: pd.DataFra
     grouped there by "Auto-generate charts" -- and a panel-wide fingerprint would pop every chart in
     it whenever *any one* of them changed.
 
-    The slice is the chart's metrics, the hyperparameters and artifact columns it asks for, and the
+    The frame is the chart's metrics, the hyperparameters and artifact columns it asks for, and the
     run names, so editing a hyperparameter or renaming a run redraws the charts that show it.
-    A hint of `None` (a table chart with no metrics filter, documented to mean "show every metric") means
-    every column of that kind, since such a chart can't be scoped any tighter than the panel fetch already was.
 
     Hashes the `to_json(orient="split", ...)` serialization the rest of this page relies on,
     not `pandas.util.hash_pandas_object` -- that hashes cell values
@@ -417,13 +460,13 @@ def chart_data_fingerprint(chart: models.ChartInstance[Any, Any], df: pd.DataFra
     this change" has no business being pickier about content than the JSON serialization the rest of
     this page already ships to the browser).
 
-    Only rows where the chart has data of its own count: the dataframe is wide, so another metric
-    logging a step the chart has nothing at adds a row to it -- which is not a change to the chart,
-    and must not redraw it. (A hyperparameter is on every row of its run, so it never says a row is the
-    chart's.) The index is dropped for the same reason: it numbers the rows of the *whole* dataframe, so
-    another run's new row would renumber this chart's.
+    Only rows where the chart has data of its own count: a metric read alike for another chart of the
+    panel shares its rows, so another metric logging a step the chart has nothing at adds a row to it --
+    which is not a change to the chart, and must not redraw it. (A hyperparameter is on every row of its
+    run, so it never says a row is the chart's.) The index is dropped for the same reason: another run's
+    new row would renumber this chart's.
     """
-    scoped = df[_chart_columns(chart, df)]
+    scoped = df
     data_cols = [
         c
         for c in scoped.columns

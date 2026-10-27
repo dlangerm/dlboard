@@ -166,3 +166,10 @@ class MetricFrame:
     def to_frame(self) -> pd.DataFrame:
         """A copy of the underlying dataframe, for the (untyped) chart layer."""
         return self._frame.copy()
+
+    def select(self, keys: Iterable[str]) -> MetricFrame:
+        """Just the metrics `keys` names (of the ones this frame has), over the same rows."""
+        kept = self.keys & frozenset(keys)
+        return MetricFrame(
+            kept, self._frame[[c for c in self._frame.columns if c in kept or c not in self.keys]]
+        )

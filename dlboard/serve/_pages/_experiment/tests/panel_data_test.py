@@ -12,6 +12,7 @@ from dash import html
 from pydantic import BaseModel
 
 from dlboard import models
+from dlboard.conftest import panel_data_of
 from dlboard.models import (
     HPARAM_COLUMN_PREFIX,
     Artifact,
@@ -47,6 +48,12 @@ SeriesBandChart.register(allow_override=True)
 
 
 _TS = pendulum.datetime(2026, 1, 1, tz="UTC")
+
+
+def _frame(store: SQLLiteStore, experiment_id: int, panel: PanelInstance[Any, Any]) -> pd.DataFrame:
+    """The frame the panel's one chart is drawn from, of every run."""
+    (chart,) = panel.charts
+    return panel_data.fetch_panel_data(store, experiment_id, panel, run_ids=None).for_chart(chart)
 
 
 def _artifact(run_id: int, step: int, key: str, ref: str, tags: dict[str, str] | None = None) -> Artifact:
@@ -198,7 +205,7 @@ def test_a_panel_fetches_only_the_histograms_its_charts_show_thinned_to_the_cap(
         charts=[ChartInstance(chart_type=_HistogramHintChart.name, parameters={"key": "grad"})]
     )
 
-    df = panel_data.fetch_panel_dataframe(store, experiment_id, panel, run_ids=None)
+    df = _frame(store, experiment_id, panel)
 
     assert set(df.columns) == {"run_id", "step", histogram_column("grad"), models.RUN_NAME_COLUMN}
     assert list(df["step"]) == [0, 2, 4, 6, 7]
@@ -206,16 +213,17 @@ def test_a_panel_fetches_only_the_histograms_its_charts_show_thinned_to_the_cap(
 
 @pytest.mark.usefixtures("_histogram_hint_chart")
 def test_a_charts_fingerprint_follows_only_the_histograms_it_shows() -> None:
-    def frame(grad_count: int, weights_count: int) -> pd.DataFrame:
-        return panel_data.build_histograms_dataframe(
+    grad_chart = ChartInstance[Any, Any](chart_type=_HistogramHintChart.name, parameters={"key": "grad"})
+
+    def fingerprint(grad_count: int, weights_count: int) -> str:
+        histograms = panel_data.build_histograms_dataframe(
             [_histogram_entry(1, 0, "grad", grad_count), _histogram_entry(1, 0, "weights", weights_count)]
         )
+        read = panel_data.PanelData({}, pd.DataFrame(), pd.DataFrame(), histograms, {}, pd.DataFrame())
+        return panel_data.chart_data_fingerprint(read.for_chart(grad_chart))
 
-    grad_chart = ChartInstance[Any, Any](chart_type=_HistogramHintChart.name, parameters={"key": "grad"})
-    fingerprint = panel_data.chart_data_fingerprint(grad_chart, frame(1, 1))
-
-    assert panel_data.chart_data_fingerprint(grad_chart, frame(1, 99)) == fingerprint
-    assert panel_data.chart_data_fingerprint(grad_chart, frame(2, 1)) != fingerprint
+    assert fingerprint(1, 99) == fingerprint(1, 1)
+    assert fingerprint(2, 1) != fingerprint(1, 1)
 
 
 def test_build_hyperparams_dataframe_prefixes_columns() -> None:
@@ -297,10 +305,10 @@ def test_a_metric_and_an_artifact_sharing_a_key_both_render(store: SQLLiteStore,
         ],
     )
 
-    df = panel_data.fetch_panel_dataframe(store, experiment_id, panel, run_ids=None)
+    data = panel_data.fetch_panel_data(store, experiment_id, panel, run_ids=None)
 
     for chart in panel.charts:
-        chart.render(df)
+        chart.render(data.for_chart(chart))
 
 
 @pytest.mark.usefixtures("_plain_artifact_urls")
@@ -331,9 +339,9 @@ def test_a_file_list_of_a_key_prefix_fetches_every_key_under_it_including_later_
     log_file("ckpt/a", 0)
     log_file("elsewhere/b", 0)
 
-    first = panel_data.fetch_panel_dataframe(store, experiment_id, panel, run_ids=None)
+    first = _frame(store, experiment_id, panel)
     log_file("ckpt/c", 1)
-    later = panel_data.fetch_panel_dataframe(store, experiment_id, panel, run_ids=None)
+    later = _frame(store, experiment_id, panel)
 
     def files(df: pd.DataFrame) -> set[str]:
         return set(artifact_keys_in(df.columns, "", prefix=True))
@@ -352,18 +360,22 @@ def test_a_file_list_of_a_key_prefix_fetches_every_key_under_it_including_later_
 def test_a_chart_only_redraws_for_rows_where_it_has_data_of_its_own(
     new_row: dict[str, float | None], redraws: bool
 ) -> None:
-    """The panel's dataframe is wide, so another metric logging a step adds a (blank) row for this chart."""
+    """A metric read alike for another chart shares its rows, so another metric logging a step adds a (blank) row here."""
     chart = ChartInstance[pd.DataFrame, object](
         chart_type="line", parameters={"column": "loss", "x_axis": "step"}
+    )
+    acc = ChartInstance[pd.DataFrame, object](
+        chart_type="line", parameters={"column": "acc", "x_axis": "step"}
     )
     before = pd.DataFrame({"run_id": [1], "step": [0], "loss": [1.0], "acc": [0.8]})
     after = pd.concat([before, pd.DataFrame({"run_id": [1], "step": [1], **new_row})], ignore_index=True)
 
-    changed = panel_data.chart_data_fingerprint(chart, before) != panel_data.chart_data_fingerprint(
-        chart, after
-    )
+    def fingerprint(logged: pd.DataFrame) -> str:
+        return panel_data.chart_data_fingerprint(panel_data_of(logged).for_chart(chart))
 
-    assert changed is redraws
+    assert "acc" not in panel_data_of(after).for_chart(chart)
+    assert "acc" in panel_data_of(after).for_chart(acc)
+    assert (fingerprint(before) != fingerprint(after)) is redraws
 
 
 _LINE = ChartInstance[Any, Any](chart_type="line", parameters={"column": "loss", "x_axis": "step"})
@@ -404,9 +416,9 @@ def test_a_table_of_a_metric_pattern_fetches_the_metrics_it_matches_including_la
         ],
     )
 
-    first = panel_data.fetch_panel_dataframe(store, experiment_id, panel, run_ids=None)
+    first = _frame(store, experiment_id, panel)
     _log_a_metric(store, experiment_id, run.id, "layer_3/grad_norm")
-    later = panel_data.fetch_panel_dataframe(store, experiment_id, panel, run_ids=None)
+    later = _frame(store, experiment_id, panel)
 
     assert {"layer_1/grad_norm", "layer_2/grad_norm"} <= set(first.columns)
     assert not {"layer_2/acc", "loss"} & set(first.columns)
@@ -447,10 +459,10 @@ def test_a_series_band_panel_reads_the_spread_of_the_matched_metrics_on_the_newe
     )
     (chart,) = panel.charts
 
-    df = panel_data.fetch_panel_dataframe(store, experiment_id, panel, run_ids=None)
-    before = panel_data.chart_data_fingerprint(chart, df)
+    df = _frame(store, experiment_id, panel)
+    before = panel_data.chart_data_fingerprint(df)
     log(newer, 1, {"layer_3/grad_norm": 7.0})
-    later = panel_data.fetch_panel_dataframe(store, experiment_id, panel, run_ids=None)
+    later = _frame(store, experiment_id, panel)
 
     column = models.SeriesBandRequest(frozenset({"layer_*/grad_norm"}), grid=8, runs=1).column
     bands = [band for cell in df[column].dropna() for band in cell]
@@ -460,7 +472,7 @@ def test_a_series_band_panel_reads_the_spread_of_the_matched_metrics_on_the_newe
         newer.id, "", 1, 2, 1.0, 1.0, 1.0, 3.0, 3.0, 2.0, "layer_1/grad_norm", "layer_2/grad_norm"
     )
     assert isinstance(chart.render(df), html.Div)
-    assert panel_data.chart_data_fingerprint(chart, later) != before
+    assert panel_data.chart_data_fingerprint(later) != before
 
 
 def test_a_series_band_panel_reads_a_band_for_each_group_of_a_family_in_one_read(
@@ -487,7 +499,7 @@ def test_a_series_band_panel_reads_a_band_for_each_group_of_a_family_in_one_read
         ],
     )
 
-    df = panel_data.fetch_panel_dataframe(store, experiment_id, panel, run_ids=None)
+    df = _frame(store, experiment_id, panel)
 
     (request,) = panel.charts[0].data_request().series
     ((cell,),) = [df[request.column].dropna().tolist()]

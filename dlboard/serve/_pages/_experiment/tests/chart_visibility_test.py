@@ -7,6 +7,7 @@ from typing import Any, Literal
 import pandas as pd
 import pytest
 
+from dlboard.conftest import OneFrame
 from dlboard.conftest import find_props as _find_props
 from dlboard.conftest import props as _to_props
 from dlboard.models._view import ChartInstance, PanelInstance
@@ -33,7 +34,7 @@ def test_render_panel_charts_controls_are_always_enabled_and_hover_revealed() ->
     panel = _panel_with_chart()
     df = pd.DataFrame({"run_id": [1], "step": [0], "loss": [0.5]})
 
-    [stack] = chart_view.render_panel_charts(panel, df)
+    [stack] = chart_view.render_panel_charts(panel, OneFrame(df))
     assert _to_props(stack)["className"] == "dl-chart-item"
 
     controls = _find_props(stack, chart_view.CHART_CONTROLS_GROUP.of("p", 0))
@@ -75,7 +76,7 @@ def test_render_panel_charts_no_badge_when_chart_hints_its_columns() -> None:
     panel = _panel_with_chart()  # a line chart, always hints {column, x_axis}
     df = pd.DataFrame({"run_id": [1], "step": [0], "loss": [0.5]})
 
-    [stack] = chart_view.render_panel_charts(panel, df)
+    [stack] = chart_view.render_panel_charts(panel, OneFrame(df))
     hover_controls, _chart, _draft = _chart_item_parts(stack)  # no badge row above the controls
 
     assert _to_props(hover_controls)["className"] == "dl-chart-controls"
@@ -100,7 +101,7 @@ def test_render_panel_charts_badge_only_when_an_unscoped_chart_reads_every_step(
     )
     df = pd.DataFrame({"run_id": [1], "step": [0], "loss": [0.5]})
 
-    [stack] = chart_view.render_panel_charts(panel, df)
+    [stack] = chart_view.render_panel_charts(panel, OneFrame(df))
     parts = _chart_item_parts(stack)
 
     assert len(parts) == (4 if badged else 3)
@@ -117,6 +118,6 @@ def test_render_panel_charts_width_follows_the_layout(layout: Literal["packed", 
     panel = _panel_with_chart().model_copy(update={"layout": layout})
     df = pd.DataFrame({"run_id": [1], "step": [0], "loss": [0.5]})
 
-    [stack] = chart_view.render_panel_charts(panel, df)
+    [stack] = chart_view.render_panel_charts(panel, OneFrame(df))
 
     assert _to_props(stack)["w"] == (panel.charts[0].natural_width() if layout == "packed" else "100%")

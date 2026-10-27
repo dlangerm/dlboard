@@ -13,6 +13,7 @@ import dash_mantine_components as dmc
 import pandas as pd
 import pytest
 
+from dlboard.conftest import OneFrame
 from dlboard.conftest import props as _props
 from dlboard.models._view import ChartInstance, PanelInstance
 from dlboard.plugins.charts.line_chart import LineChart
@@ -55,7 +56,7 @@ def test_broken_chart_renders_as_error_alert_without_raising(
     df = pd.DataFrame({"run_id": [1], "step": [0], "loss": [0.5]})
     panel = PanelInstance[Any, Any](name="p", charts=[broken])
 
-    [stack] = _render_panel_charts(panel, df)
+    [stack] = _render_panel_charts(panel, OneFrame(df))
 
     rendered = _chart_in(stack)
     assert isinstance(rendered, dmc.Alert)
@@ -71,7 +72,7 @@ def test_broken_chart_does_not_prevent_sibling_charts_from_rendering() -> None:
     working = ChartInstance[Any, Any](chart_type="line", parameters={"column": "loss", "x_axis": "step"})
     panel = PanelInstance[Any, Any](name="p", charts=[broken, working])
 
-    stacks = _render_panel_charts(panel, df)
+    stacks = _render_panel_charts(panel, OneFrame(df))
 
     assert len(stacks) == 2
     broken_rendered = _chart_in(stacks[0])

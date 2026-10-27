@@ -34,6 +34,8 @@ from dlboard.serve import SQLStoreBase, get_system_data_store
 from dlboard.serve import app as build_app
 from dlboard.serve._backend import _auth
 from dlboard.serve._backend._data_store import ARTIFACT_STORE
+from dlboard.serve._backend._metric_frame import MetricFrame
+from dlboard.serve._pages._experiment._panel_data import PanelData
 from dlboard.serve.telemetry import LOGS, METRICS, _instrument
 
 if TYPE_CHECKING:
@@ -618,6 +620,45 @@ def span_exporter(telemetry: pytest.MonkeyPatch) -> Iterator[InMemorySpanExporte
     _sdk.resource.cache_clear()  # one identity per process, remembered: a test starts over
     yield exporter
     _instrument.uninstrument_libraries()
+
+
+@dataclass(frozen=True)
+class OneFrame:
+    """A panel's `ChartFrames` that hands every chart the same frame: for a test that builds what a chart is drawn from."""
+
+    frame: pd.DataFrame
+
+    def for_chart(self, chart: models.ChartInstance[Any, Any]) -> pd.DataFrame:  # noqa: ARG002
+        """The one frame, whichever chart asks."""
+        return self.frame
+
+
+def panel_data_of(wide: pd.DataFrame) -> PanelData:
+    """
+    What a panel reads of a store that holds `wide`: every metric whole, every hyperparameter, and the runs' names.
+
+    `wide` has a row per run and step, a column per metric, `hparam__` columns and a `run_name`, as a chart's frame does,
+    so a test can say what was logged as the frame it expects and have each chart framed from it as the page would.
+    """
+    hparams = [c for c in wide.columns if c.startswith(models.HPARAM_COLUMN_PREFIX)]
+    names = [c for c in wide.columns if c == models.RUN_NAME_COLUMN]
+    metrics = [c for c in wide.columns if c not in models.NO_DATA_COLUMNS and c not in hparams]
+    logged = wide.melt(id_vars=["run_id", "step"], value_vars=metrics, var_name="key").dropna(
+        subset=["value"]
+    )
+    rows = logged.assign(timestamp_utc="2026-01-01T00:00:00+00:00")[
+        ["run_id", "step", "key", "value", "timestamp_utc"]
+    ]
+    return PanelData(
+        metrics={
+            models.MetricReduction.HISTORY: MetricFrame.from_rows(rows.itertuples(index=False, name=None))
+        },
+        artifacts=pd.DataFrame(),
+        hparams=wide[["run_id", *hparams]].drop_duplicates("run_id") if hparams else pd.DataFrame(),
+        histograms=pd.DataFrame(),
+        series={},
+        run_names=wide[["run_id", *names]].drop_duplicates("run_id") if names else pd.DataFrame(),
+    )
 
 
 @dataclass

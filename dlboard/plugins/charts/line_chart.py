@@ -145,10 +145,8 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.Stack], frozen=Tr
     @classmethod
     @typing.override
     def render(cls, parameters: LineChartSettings, dataframe: pd.DataFrame) -> dmc.Stack:
-        # `render_panel_charts` shares one fetched dataframe across every chart in a panel, calling
-        # this once per chart, so this works on the few columns it needs and never writes to
-        # `dataframe` -- a panel of hundreds of charts would otherwise copy, and scan every column
-        # of, the whole panel's data once per chart.
+        # `dataframe` is the caller's (a chart's own frame, but a test or a plugin may share one), so this works
+        # on the few columns it needs and never writes to it.
         # Captured before the columns below are sliced down to just the plotted ones, and before
         # `_nearest_fill_pivot` rebuilds the frame from scratch -- `run_name` doesn't survive
         # either. A run with no name in the merged dataframe (an older, pre-auto-naming

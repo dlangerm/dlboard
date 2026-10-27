@@ -17,6 +17,7 @@ import pytest
 from dash._utils import to_json
 from pydantic import ValidationError
 
+from dlboard.conftest import OneFrame
 from dlboard.conftest import find_props as _find_props
 from dlboard.models._view import ChartInstance, PanelInstance
 from dlboard.plugins.charts._chart_title import titled
@@ -154,7 +155,7 @@ def test_a_grid_column_count_outside_the_supported_range_is_rejected(columns: in
 def test_a_grid_panel_renders_with_its_own_column_count() -> None:
     panel = PanelInstance[Any, Any](name="a", layout="grid", grid_columns=2)
 
-    rendered = panel_view.render_panel_content_from_df(panel, pd.DataFrame())
+    rendered = panel_view.render_panel_grid(panel, OneFrame(pd.DataFrame()))
 
     assert isinstance(rendered, dmc.SimpleGrid)
     assert rendered.cols == 2  # pyrefly: ignore [missing-attribute]

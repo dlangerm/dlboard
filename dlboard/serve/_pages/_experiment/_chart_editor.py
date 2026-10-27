@@ -200,7 +200,7 @@ def _draw_form(
 
     That is the drawing and "", or nothing and why not.
 
-    Goes through `fetch_panel_dataframe` rather than any whole-experiment dataframe, so only what this one chart needs is
+    Goes through `fetch_panel_data` rather than any whole-experiment dataframe, so only what this one chart needs is
     fetched, and the page's excluded runs (`page_json`, the page the browser has) are left out, like the real panel will.
 
     A form that does not (yet) make a valid chart is an expected state while someone types, not an error: it says what
@@ -222,10 +222,10 @@ def _draw_form(
         chart = build_validated_chart_instance(chart_type_name, parameters, chart_id)
         document = page_model.BasicExperimentPage.model_validate_json(values["page_json"]).document
         panel = models.PanelInstance[Any, Any](name=panel_name, charts=[chart])
-        dataframe = panel_data.fetch_panel_dataframe(
+        data = panel_data.fetch_panel_data(
             store, values["experiment_id"], panel, shown_run_ids(store, values["experiment_id"], document)
         )
-        return draw(chart, dataframe), ""
+        return draw(chart, data.for_chart(chart)), ""
     except ValidationError as exc:
         _log.debug("the chart editor's form makes no chart yet", error=str(exc))
         return None, f"Fill in required fields to see a preview ({exc})"

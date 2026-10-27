@@ -32,7 +32,6 @@ from dlboard.serve._pages._experiment._paging import Paging
 from dlboard.serve._pages._experiment._shown_runs import shown_run_ids
 
 if TYPE_CHECKING:
-    import pandas as pd
     from dash.development.base_component import Component
 
     from dlboard import models
@@ -108,7 +107,7 @@ def _fetch_open_panel_dataframes(
     experiment_id: int,
     page: page_model.BasicExperimentPage,
     chart_ids: list[chart_view.ChartID],
-) -> tuple[dict[str, pd.DataFrame], bool]:
+) -> tuple[dict[str, panel_data.PanelData], bool]:
     """
     Fetch the dataframe of each panel with charts on screen, for just those charts -- once per panel.
 
@@ -123,7 +122,7 @@ def _fetch_open_panel_dataframes(
     for chart_id in chart_ids:
         if chart_id["index"] is not None:
             mounted.setdefault(chart_id["panel"], set()).add(chart_id["index"])
-    dataframes: dict[str, pd.DataFrame] = {}
+    dataframes: dict[str, panel_data.PanelData] = {}
     ok = True
     for panel_name, indexes in mounted.items():
         panel = panels_by_name.get(panel_name)
@@ -131,7 +130,7 @@ def _fetch_open_panel_dataframes(
             continue
         shown = panel.model_copy(update={"charts": [c for i, c in enumerate(panel.charts) if i in indexes]})
         try:
-            dataframes[panel_name] = panel_data.fetch_panel_dataframe(store, experiment_id, shown, run_ids)
+            dataframes[panel_name] = panel_data.fetch_panel_data(store, experiment_id, shown, run_ids)
         except Exception:  # noqa: BLE001 -- one bad panel must not break the whole poll tick
             _log.exception("Live-update poll failed to fetch panel %r", panel_name)
             ok = False
@@ -141,7 +140,7 @@ def _fetch_open_panel_dataframes(
 def _refresh_chart_bodies(
     chart_ids: list[chart_view.ChartID],
     panels_by_name: dict[str, models.PanelInstance[Any, Any]],
-    dataframes: dict[str, pd.DataFrame],
+    dataframes: dict[str, panel_data.PanelData],
     shown: dict[tuple[str, int | None], str],
     page_size: int,
 ) -> tuple[list[Any], bool]:
@@ -156,15 +155,16 @@ def _refresh_chart_bodies(
     for chart_id in chart_ids:
         panel_name, index = chart_id["panel"], chart_id["index"]
         panel = panels_by_name.get(panel_name)
-        df = dataframes.get(panel_name)
-        if panel is None or df is None or index is None or index >= len(panel.charts):
+        data = dataframes.get(panel_name)
+        if panel is None or data is None or index is None or index >= len(panel.charts):
             contents.append(no_update)
             continue
         try:
-            if panel_data.chart_data_fingerprint(panel.charts[index], df) == shown.get((panel_name, index)):
+            frame = data.for_chart(panel.charts[index])
+            if panel_data.chart_data_fingerprint(frame) == shown.get((panel_name, index)):
                 contents.append(no_update)
             else:
-                contents.append(chart_view.chart_body(panel, index, df, page_size))
+                contents.append(chart_view.chart_body(panel, index, frame, page_size))
         except Exception:  # noqa: BLE001 -- one bad chart must not break the whole poll tick
             _log.exception("Live-update poll failed to refresh chart %r", f"{panel_name}:{index}")
             contents.append(no_update)
@@ -182,11 +182,11 @@ def register_live_update_callbacks(app: Dash) -> None:
     # run-comparison table (`_run_comparison_table.py`) reads run/hparam data from it, not from a
     # live store query of its own.
     #
-    # Each open *panel* is still fetched only once per tick (`fetch_panel_dataframe`, the same call
+    # Each open *panel* is still fetched only once per tick (`fetch_panel_data`, the same call
     # the initial render makes) -- "Auto-generate charts" routinely groups several charts sharing a
     # panel, and fetching once per panel rather than once per chart keeps this poll's per-tick cost
     # proportional to how many panels are open, not how many charts they hold. Each chart's own
-    # `chart_data_fingerprint` (scoped to just its own columns of that shared dataframe) is what
+    # `chart_data_fingerprint` (of its own frame of what the panel read) is what
     # decides whether *that* chart's body actually needs to be replaced -- compared with the one the body
     # on screen carries, so a chart that was just mounted is not redrawn for nothing. ---
     @app.callback(

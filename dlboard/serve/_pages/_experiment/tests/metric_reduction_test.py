@@ -109,9 +109,9 @@ def test_a_chart_is_drawn_the_same_from_one_row_per_run_as_from_every_step(
     panel = PanelInstance[pd.DataFrame, object](name="p", charts=[chart])
     assert chart.data_request().reductions.default is not MetricReduction.HISTORY
 
-    reduced = panel_data.fetch_panel_dataframe(store, experiment_id, panel, run_ids=None)
+    reduced = panel_data.fetch_panel_data(store, experiment_id, panel, run_ids=None).for_chart(chart)
     monkeypatch.setattr(ChartInstance, "data_request", _whole)
-    whole = panel_data.fetch_panel_dataframe(store, experiment_id, panel, run_ids=None)
+    whole = panel_data.fetch_panel_data(store, experiment_id, panel, run_ids=None).for_chart(chart)
 
     assert len(reduced) < len(whole)
     assert _drawn(chart, reduced) == _drawn(chart, whole)
@@ -136,8 +136,8 @@ _BAR = _chart("bar", column="loss", x_axis="lr")
         ),
         pytest.param(
             [_BAR, _LINE],
-            {MetricReduction.LATEST: {"lr"}, MetricReduction.HISTORY: {"loss", "step"}},
-            id="a-metric-they-disagree-on-is-fetched-whole",
+            {MetricReduction.LATEST: {"loss", "lr"}, MetricReduction.HISTORY: {"loss", "step"}},
+            id="a-metric-they-disagree-on-is-read-both-ways",
         ),
         pytest.param([_chart("table")], {MetricReduction.LATEST: None}, id="every-metric-as-asked"),
         pytest.param(
@@ -145,8 +145,8 @@ _BAR = _chart("bar", column="loss", x_axis="lr")
         ),
         pytest.param(
             [_chart("table"), _LINE],
-            {MetricReduction.HISTORY: None},
-            id="every-metric-whole-when-they-disagree",
+            {MetricReduction.LATEST: None, MetricReduction.HISTORY: {"loss", "step"}},
+            id="every-metric-as-the-table-asks-and-the-line-whole",
         ),
         pytest.param([_chart("table", show_metrics=[])], {}, id="no-metrics"),
     ],
@@ -165,15 +165,39 @@ def test_a_panel_whose_charts_need_different_fetches_draws_each_from_its_own(
     line = _chart("line", column="acc", x_axis="step")
     panel = PanelInstance[pd.DataFrame, object](name="p", charts=[bar, line])
 
-    frame = panel_data.fetch_panel_dataframe(store, experiment_id, panel, run_ids=None)
+    data = panel_data.fetch_panel_data(store, experiment_id, panel, run_ids=None)
 
-    runs = frame.groupby("run_id")
-    assert set(frame.columns) >= {"loss", "acc", "step"}
+    bars, lines = data.for_chart(bar), data.for_chart(line)
     # `acc` is every step the run logged it at; `loss`, which only the bar chart wants, is each run's last.
-    assert runs.acc.count().tolist() == [2, 2, 2]  # step 29 diverged: it logged only a loss
-    assert runs.loss.count().tolist() == [1, 1, 1]
-    assert _drawn(bar, frame) == _drawn(
-        bar, panel_data.fetch_panel_dataframe(store, experiment_id, panel, run_ids=None)
+    assert "acc" not in bars
+    assert "loss" not in lines
+    assert lines.groupby("run_id").acc.count().tolist() == [
+        2,
+        2,
+        2,
+    ]  # step 29 diverged: it logged only a loss
+    assert bars.groupby("run_id").loss.count().tolist() == [1, 1, 1]
+
+
+def test_a_mean_beside_a_line_of_the_same_metric_is_read_as_a_mean_and_the_line_as_its_series(
+    store: SQLLiteStore, experiment_id: int
+) -> None:
+    """The mean is the database's to compute: a panel reads it so, not the history the line beside it needs (#364)."""
+    _train(store, experiment_id)
+    mean = _chart(
+        "table", rows=TableRows.RUN, aggregate=Aggregate.MEAN, show_metrics=["loss"], show_hparams=[]
+    )
+    line = _chart("line", column="loss", x_axis="step")
+    panel = PanelInstance[pd.DataFrame, object](name="p", charts=[mean, line])
+
+    data = panel_data.fetch_panel_data(store, experiment_id, panel, run_ids=None)
+
+    assert set(data.metrics) == {MetricReduction.MEAN, MetricReduction.HISTORY}
+    assert data.for_chart(mean).groupby("run_id").loss.count().tolist() == [1, 1, 1]
+    assert data.for_chart(line).groupby("run_id").loss.count().tolist() == [30, 29, 30]  # the second diverged
+    alone = PanelInstance[pd.DataFrame, object](name="p", charts=[mean])
+    assert _drawn(mean, data.for_chart(mean)) == _drawn(
+        mean, panel_data.fetch_panel_data(store, experiment_id, alone, run_ids=None).for_chart(mean)
     )
 
 

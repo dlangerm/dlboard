@@ -40,10 +40,9 @@ from dlboard.serve._pages._experiment._paging import (
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    import pandas as pd
     from dash.development.base_component import Component
 
-    from dlboard.serve._pages._experiment._panel_data import PanelFrames
+    from dlboard.serve._pages._experiment._panel_data import ChartFrames, PanelFrames
 
 from dlboard.serve._pages._experiment._chart_view import (
     drag_handle,
@@ -146,14 +145,14 @@ CHART_PAGER: Final = PanelPattern("chart-pager")
 CHART_PAGER_SLOT: Final = PanelPattern("chart-pager-slot")
 
 
-def render_panel_content_from_df(
+def render_panel_grid(
     panel: models.PanelInstance[Any, Any],
-    df: pd.DataFrame,
+    frames: ChartFrames,
     indexes: Sequence[int] | None = None,
     page_size: int = models.DEFAULT_RENDER_CONTEXT.page_size,
 ) -> Component:
-    """Render a panel's charts at `indexes` from an already-fetched dataframe -- see `render_panel_content`."""
-    items = render_panel_charts(panel, df, indexes, page_size)
+    """Render a panel's charts at `indexes` from data already fetched -- see `render_panel_content`."""
+    items = render_panel_charts(panel, frames, indexes, page_size)
     # Read by the image series' slider lock (`image_series_lock.js`): which charts move together.
     sync_marker = cast("dict[str, Any]", {"data-dl-panel-sync": "1"} if panel.sync else {})
     return (
@@ -182,7 +181,7 @@ def render_panel_content(
             ta="center",
             py="md",
         )
-    return render_panel_content_from_df(panel, frames[panel.name], indexes, paging.sizes.charts)
+    return render_panel_grid(panel, frames[panel.name], indexes, paging.sizes.charts)
 
 
 def _panel_placeholder() -> dmc.Skeleton:

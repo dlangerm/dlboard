@@ -27,7 +27,7 @@ The column a run's display name is carried under, when a chart's dataframe has o
 
 Not a real metric/hparam/artifact column -- never fetched from the store directly, and not part
 of `MetricColumn`'s "fixed columns of a `MetricFrame`" -- it's merged onto a panel's fetched
-dataframe afterward (see `fetch_panel_dataframe`), so a chart can label a run by name instead of
+dataframe afterward (see `PanelData.for_chart`), so a chart can label a run by name instead of
 its bare id without fetching run metadata itself. A chart that needs to *exclude* non-metric columns
 (e.g. `table_chart.py`'s "runs" mode) can name it precisely rather than guessing at string prefixes.
 """
