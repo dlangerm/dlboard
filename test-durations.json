@@ -1924,6 +1924,7 @@
   "dlboard/tests/browser_test.py::test_the_enlarged_view_zooms_and_pans_its_picture_with_its_layers_and_keeps_the_legend_and_tags[chromium]": 9.043605590995867,
   "dlboard/tests/browser_test.py::test_the_enlarged_views_legend_and_controls_stay_usable_on_a_tiny_picture_at_its_own_size[chromium]": 5.48894531300175,
   "dlboard/tests/browser_test.py::test_the_legend_over_a_picture_lists_what_each_layer_holds_and_hides_peeks_and_solos_them[chromium]": 5.916423072951147,
+  "dlboard/tests/browser_test.py::test_the_runs_table_lines_up_with_the_experiment_links_above_it[chromium]": 3.52231012199627,
   "dlboard/tests/browser_test.py::test_the_runs_table_shows_how_each_run_ended_and_for_how_long[chromium]": 2.6908700880012475,
   "dlboard/tests/chart_render_isolation_test.py::test_broken_chart_does_not_prevent_sibling_charts_from_rendering": 1.0829002289974596,
   "dlboard/tests/chart_render_isolation_test.py::test_broken_chart_renders_as_error_alert_without_raising[missing-column]": 2.11799708896433,

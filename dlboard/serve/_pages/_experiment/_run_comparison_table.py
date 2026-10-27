@@ -579,7 +579,6 @@ def _register_hparam_table(app: Dash) -> None:
                 Store(id=NAVBAR_HPARAM_DRAWN_RUNS_ID, data=sorted(selection.shown)),
             ],
             gap="xs",
-            p="xs",
         )
 
     # The Apply button only makes sense once the picked columns diverge from what's applied --

@@ -41,6 +41,7 @@ from dlboard.client.histograms import ExponentialBinning
 from dlboard.models import OVERLAY_KEY_SUFFIX, RUN_NAME_COLUMN, PanelInstance, overlay_key
 from dlboard.plugins.charts.line_chart import LEGEND_MAX_HEIGHT
 from dlboard.serve import get_system_data_store
+from dlboard.serve._constants import NAVBAR_ID
 from dlboard.serve._jump import JUMP_SELECT_ID
 from dlboard.serve._pages._experiment._chart_autogen import AUTO_OPEN_MAX_CHARTS
 from dlboard.serve._pages._experiment._chart_editor import CHART_EDITOR_SAVE_ID
@@ -2154,6 +2155,29 @@ def test_the_runs_table_shows_how_each_run_ended_and_for_how_long(page: Page, li
     expect(rows.filter(has_text="crashed")).to_contain_text("✕ 1h 2m")
     expect(rows.filter(has_text="all-done")).to_contain_text("3m 23s")
     expect(rows.filter(has_text="walked-away")).to_contain_text("? 2d 3h")
+
+
+def test_the_runs_table_lines_up_with_the_experiment_links_above_it(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """It sat a padding further in on each side than the experiment links in the same navbar (#371)."""
+    api = BasicDlboardAPI(live_server_url)
+    project = api.create_project(models.NewProject(name="Navbar Alignment Project", description=""))
+    experiment = api.create_experiment(models.NewExperiment(project_id=project.id, name="aligned"))
+    api.create_run(models.NewRun(experiment_id=experiment.id, name="aligned-run"))
+
+    page.goto(f"{live_server_url}/experiment/{experiment.id}")
+
+    table = page.locator(".dl-run-table")
+    link = page.locator(f"#{NAVBAR_ID} a[href$='/experiment/{experiment.id}']")
+    expect(table.locator(".ag-row")).to_have_count(1)
+    expect(link).to_be_visible()
+    table_box, link_box = table.bounding_box(), link.bounding_box()
+    assert table_box is not None
+    assert link_box is not None
+    assert table_box["x"] == pytest.approx(link_box["x"], abs=1)
+    assert table_box["x"] + table_box["width"] == pytest.approx(link_box["x"] + link_box["width"], abs=1)
+    assert console_errors == []
 
 
 def test_panel_menu_controls_mount_only_when_the_menu_opens(page: Page, live_server_url: str) -> None:
