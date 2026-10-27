@@ -6,7 +6,7 @@ import pytest
 
 from dlboard.models import Artifact, Quantity, TagDisplay, TimeUnit, artifact_tags_column
 from dlboard.plugins.charts._artifact_tags import format_tags_caption
-from dlboard.serve._pages._experiment._panel_data import build_artifacts_dataframe
+from dlboard.serve import build_artifacts_dataframe
 
 
 @pytest.mark.usefixtures("_plain_artifact_urls")

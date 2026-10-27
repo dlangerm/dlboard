@@ -183,6 +183,11 @@ Subclass `ChartType` and implement its abstract methods:
   - `artifacts` and `artifact_prefixes` — the artifact keys drawn, by name, and every artifact whose key starts with one
     of the prefixes, for a chart that lists a whole family (every `checkpoints/...` key) including keys logged later. A
     prefix is literal: a `*` or `#` in it is part of the key.
+  - `artifact_window` — an `ArtifactWindow(key, steps)`, for a chart that shows one step of its artifacts at a time (the
+    image chart's slider): its artifacts are read at only the first `steps` of the steps `key` logged, and its frame
+    has a row for every step `key` logged, marked `True` in `artifact_logged_column(key)`, whether or not the step's
+    artifacts were read. The chart reads further windows itself as the viewer moves (`DataStore.artifact_steps`, and
+    `fetch_artifacts(..., steps=StepRange(first, last))`), so what it reads does not grow with the steps logged.
   - `histograms` — the logged histogram keys the chart shows. A chart always names them: there is no "every histogram",
     because a histogram is the most expensive thing a panel reads. A field naming one is a `ColumnKind.HISTOGRAM` in
     `field_column_kinds()`.

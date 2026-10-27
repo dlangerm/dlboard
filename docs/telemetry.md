@@ -130,7 +130,7 @@ Every attribute has a small, fixed set of values. The names and attributes are c
 | `dlboard.artifact.blob.write.duration` | histogram, s | `dlboard.outcome` | How long the writer took to store one artifact. |
 | `dlboard.artifact.ingest_queue.wait` | histogram, s | | How long a written artifact waited for the batch that recorded its ref. Includes the batching itself, up to a second by design. |
 | `dlboard.artifact.ingest.duration` | histogram, s | `dlboard.outcome` | How long recording one batch of written artifacts' refs took. |
-| `dlboard.panel.read.duration` | histogram, s | `dlboard.panel.read` (`key_names`, `metrics`, `artifacts`, `hyperparams`, `histograms`, `series_bands`, `run_names`) | One of an experiment page panel's reads from the store, building its dataframe included. |
+| `dlboard.panel.read.duration` | histogram, s | `dlboard.panel.read` (`key_names`, `metrics`, `artifacts`, `artifact_steps`, `hyperparams`, `histograms`, `series_bands`, `run_names`) | One of an experiment page panel's reads from the store, building its dataframe included. |
 | `dlboard.artifact.purges` | counter | `dlboard.outcome` | Purged artifacts' blobs deleted from the artifact store, or that couldn't be. |
 | `dlboard.runs.created` | counter | | Runs started. |
 | `dlboard.runs.finished` | counter | `dlboard.run.status` | Runs reported done, by how they ended. |

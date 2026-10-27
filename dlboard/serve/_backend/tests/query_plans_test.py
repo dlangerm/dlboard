@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 from dlboard import models
 from dlboard.conftest import StoreBackend
-from dlboard.models import MetricReduction
+from dlboard.models import MetricReduction, StepRange
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -44,6 +44,10 @@ _READS: dict[str, Callable[[PostgresStore, int], object]] = {
         e, keys=frozenset({"grad"}), max_steps=10, run_ids=None
     ),
     "fetch_artifacts": lambda s, e: list(s.fetch_artifacts(e, run_ids=None)),
+    "fetch_artifacts, a window": lambda s, e: list(
+        s.fetch_artifacts(e, keys=frozenset({"img"}), run_ids=None, steps=StepRange(0, 50))
+    ),
+    "artifact_steps": lambda s, e: s.artifact_steps(e, key="img", run_ids=None),
     "get_runs, the newest": lambda s, e: list(s.get_runs(e, limit=20, run_ids=None)),
     "get_runs, every one": lambda s, e: list(s.get_runs(e, limit=None, run_ids=None)),
     "fetch_hyperparams": lambda s, e: list(s.fetch_hyperparams(e, run_ids=None)),

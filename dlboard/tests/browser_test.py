@@ -39,6 +39,7 @@ from dlboard.client.artifacts.image import Image
 from dlboard.client.artifacts.overlay import DEFAULT_CLASS_COLORS, Box, Overlay, Point, Polygon, Shape
 from dlboard.client.histograms import ExponentialBinning
 from dlboard.models import OVERLAY_KEY_SUFFIX, RUN_NAME_COLUMN, PanelInstance, overlay_key
+from dlboard.plugins.charts.image_series import IMAGE_WINDOW_STEPS
 from dlboard.plugins.charts.line_chart import LEGEND_MAX_HEIGHT
 from dlboard.serve import get_system_data_store
 from dlboard.serve._constants import NAVBAR_ID
@@ -4426,4 +4427,43 @@ def test_scrubbing_the_enlarged_views_timeline_puts_in_only_the_pictures_it_stop
     assert len(seen["pictures"]) < 6  # not a picture a step
     assert seen["spinner"] is False
     expect(viewer).not_to_have_attribute("data-dl-loading", "")
+    assert console_errors == []
+
+
+def test_an_image_chart_reads_the_pictures_of_the_steps_its_slider_goes_to(
+    page: Page, live_server_url: str, tmp_path: Path, console_errors: list[str]
+) -> None:
+    """It reads a window of steps' pictures at a time, so going past them reads the next window (#364)."""
+    api = BasicDlboardAPI(live_server_url)
+    project = api.create_project(models.NewProject(name="Image Window Project", description=""))
+    experiment = api.create_experiment(models.NewExperiment(project_id=project.id, name="image-window"))
+    run = api.create_run(models.NewRun(experiment_id=experiment.id))
+    last = IMAGE_WINDOW_STEPS + 9
+    api.log_artifact_batch(
+        [
+            Image(
+                key="samples",
+                image=np.full((8, 8, 3), 128, dtype=np.uint8),
+                step=step,
+                format="jpg",
+                tags={"at": step},
+            ).to_artifact(tmp_path, run.id, experiment.id)
+            for step in range(last + 1)
+        ]
+    )
+    _wait_for_artifacts(experiment.id, last + 1)
+
+    page.goto(f"{live_server_url}/experiment/{experiment.id}")
+    _auto_generate_charts(page)
+    chart = page.locator(".dl-chart-item").filter(has=page.locator(".dl-image-series"))
+    caption = chart.locator(".dl-image-series-thumb + p")
+    expect(caption).to_contain_text("at: 0")
+
+    chart.locator(".mantine-Slider-thumb").focus()
+    page.keyboard.press("End")
+
+    expect(chart.locator(".mantine-Slider-thumb")).to_have_attribute("aria-valuenow", str(last))
+    expect(caption).to_contain_text(f"at: {last}")
+    page.keyboard.press("Home")
+    expect(caption).to_contain_text("at: 0")
     assert console_errors == []

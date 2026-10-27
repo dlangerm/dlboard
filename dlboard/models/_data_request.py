@@ -19,6 +19,20 @@ EVERY_STEP: typing.Final = MetricReductions()
 
 
 @dataclasses.dataclass(frozen=True)
+class ArtifactWindow:
+    """
+    The artifacts a chart asks for, read at only `steps` of the steps `key` logged: the first ones.
+
+    For a chart that shows one step at a time (an image chart's slider): its panel lists every step `key` logged, by
+    run, without their artifacts, and reads the artifacts of the window alone, so what it reads does not grow with the
+    steps logged. The chart reads the next window itself, as the viewer moves past this one.
+    """
+
+    key: str
+    steps: int
+
+
+@dataclasses.dataclass(frozen=True)
 class DataRequest:
     """
     Everything a chart reads, from its settings: what its panel fetches for it, and all the chart is handed.
@@ -70,6 +84,12 @@ class DataRequest:
 
     series: frozenset[SeriesBandRequest] = frozenset()
     """The spreads of many metrics' values the chart draws (`SeriesBandRequest`), read in place of the metrics."""
+
+    artifact_window: ArtifactWindow | None = None
+    """
+    Read the artifacts asked for at only a window of steps (`ArtifactWindow`), and every step its key logged; `None`
+    reads them at every step.
+    """
 
     @property
     def every_metric(self) -> bool:

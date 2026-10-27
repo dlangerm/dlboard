@@ -9,13 +9,19 @@ function imageSeriesScrub(step, data) {
     const runIds = Object.keys(data.per_run_steps);
     const srcs = [];
     const captions = [];
+    const domId = (type, rid) => JSON.stringify({ instance, run: rid, type }, ["instance", "run", "type"]);
     runIds.forEach((rid) => {
         const chosen = window.dlImageSeriesViewer.stepOf(data, rid, step);
-        srcs.push(data.per_run_urls[rid][String(chosen)]);
-        const runCaptions = data.per_run_captions ? data.per_run_captions[rid] : null;
-        captions.push(runCaptions ? runCaptions[String(chosen)] || "" : "");
+        // A step outside the window of pictures the chart has keeps the picture on show until its window arrives.
+        const shown = document
+            .getElementById(domId("image-series-thumb", rid))
+            ?.querySelector("img")
+            ?.getAttribute("src");
+        const url = data.per_run_urls[rid]?.[String(chosen)];
+        srcs.push(url ?? shown ?? null);
+        const caption = document.getElementById(domId("image-series-caption", rid))?.textContent ?? "";
+        captions.push(url === undefined ? caption : (data.per_run_captions?.[rid]?.[String(chosen)] ?? ""));
     });
-    const domId = (type, rid) => JSON.stringify({ instance, run: rid, type }, ["instance", "run", "type"]);
     runIds.forEach((rid, i) => {
         const thumb = document.getElementById(domId("image-series-thumb", rid));
         const img = thumb?.querySelector("img");

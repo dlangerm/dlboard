@@ -242,8 +242,10 @@ window.dlImageSeriesViewer = (() => {
         opened.set(instance, { data, run, step });
         const shown = stepOf(data, run, step);
         showDetails(instance, data, run, step, shown);
-        if (viewer) {
-            showPicture(instance, viewer, data.per_run_urls[run][String(shown)]);
+        // A step outside the window of pictures the chart has (#364) keeps the picture on show until its window arrives.
+        const url = data.per_run_urls[run]?.[String(shown)];
+        if (viewer && url !== undefined) {
+            showPicture(instance, viewer, url);
             prefetchAround(data, run, step);
         }
     };
@@ -293,8 +295,10 @@ window.dlImageSeriesViewer = (() => {
         const steps = stepsOf(data);
         const at = steps.indexOf(step);
         for (const near of [steps[at - 1], steps[at + 1]]) {
-            if (near !== undefined) {
-                new Image().src = data.per_run_urls[run][String(stepOf(data, run, near))];
+            const url =
+                near === undefined ? undefined : data.per_run_urls[run]?.[String(stepOf(data, run, near))];
+            if (url !== undefined) {
+                new Image().src = url;
             }
         }
     };

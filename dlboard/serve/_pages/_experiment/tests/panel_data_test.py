@@ -22,12 +22,13 @@ from dlboard.models import (
     artifact_column,
     artifact_fname_column,
     artifact_keys_in,
+    artifact_logged_column,
     artifact_tags_column,
     histogram_column,
 )
 from dlboard.models._view import ChartInstance, ChartType, ChartTypeRegistry, ColumnKind, PanelInstance
 from dlboard.plugins.charts.file_list import FileListChart
-from dlboard.plugins.charts.image_series import ImageChart
+from dlboard.plugins.charts.image_series import IMAGE_WINDOW_STEPS, ImageChart
 from dlboard.plugins.charts.line_chart import LineChart
 from dlboard.plugins.charts.series_band import SeriesBandChart
 from dlboard.plugins.charts.table_chart import TableChart
@@ -309,6 +310,44 @@ def test_a_metric_and_an_artifact_sharing_a_key_both_render(store: SQLLiteStore,
 
     for chart in panel.charts:
         chart.render(data.for_chart(chart))
+
+
+@pytest.mark.usefixtures("_plain_artifact_urls")
+def test_an_image_chart_is_handed_every_step_but_a_window_of_pictures_and_a_chart_beside_it_every_one(
+    store: SQLLiteStore, experiment_id: int
+) -> None:
+    """A picture logged every step was read, pivoted and sent for every step of every run: now a window of them (#364)."""
+    run = store.create_run(models.NewRun(experiment_id=experiment_id))
+    steps = IMAGE_WINDOW_STEPS + 20
+    store.log_artifact_refs(
+        [
+            models.Artifact(
+                key="img",
+                fname=f"{s}.png",
+                run_id=run.id,
+                experiment_id=experiment_id,
+                step=s,
+                ref=f"r://{s}",
+            )
+            for s in range(steps)
+        ]
+    )
+    image, files = (
+        ChartInstance[pd.DataFrame, object](chart_type=chart_type, parameters={"key": "img"})
+        for chart_type in (ImageChart.name, FileListChart.name)
+    )
+
+    data = panel_data.fetch_panel_data(
+        store,
+        experiment_id,
+        PanelInstance[pd.DataFrame, object](name="p", charts=[image, files]),
+        run_ids=None,
+    )
+    imaged, listed = data.for_chart(image), data.for_chart(files)
+
+    assert imaged[artifact_logged_column("img")].notna().sum() == steps
+    assert imaged[artifact_column("img")].notna().sum() == IMAGE_WINDOW_STEPS
+    assert listed[artifact_column("img")].notna().sum() == steps
 
 
 @pytest.mark.usefixtures("_plain_artifact_urls")

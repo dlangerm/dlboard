@@ -1636,14 +1636,18 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         keys: frozenset[str] | None = None,
         key_prefixes: frozenset[str] = frozenset(),
         run_ids: frozenset[int] | None,
+        steps: models.StepRange | None = None,
     ) -> Iterator[models.Artifact]:
         """
         An experiment's (non-deleted) artifact metadata, not bytes.
 
         Only the artifacts under `keys` and under any key starting with one of `key_prefixes`, if either
-        is given -- `keys=None` with no prefixes means every artifact.
+        is given -- `keys=None` with no prefixes means every artifact. Only those logged at `steps`, if given.
         """
         a = self._tables[models.Artifact]
+        step_filter = (
+            list[sa.ColumnElement[bool]]() if steps is None else [a.c.step.between(steps.first, steps.last)]
+        )
         key_filter: list[sa.ColumnElement[bool]] = (
             [
                 sa.or_(
@@ -1663,11 +1667,33 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
                     a.c.deleted_at.is_(None),
                     *_runs_among(a.c.run_id, run_ids),
                     *key_filter,
+                    *step_filter,
                 )
                 .order_by(a.c.run_id, a.c.step),
                 no_validate=True,
             )
         )
+
+    def artifact_steps(
+        self, experiment_id: int, *, key: str, run_ids: frozenset[int] | None
+    ) -> dict[int, list[int]]:
+        """The steps each run logged a (non-deleted) artifact under `key` at, in order, by run: none of their metadata."""
+        a = self._tables[models.Artifact]
+        rows = self._execute(
+            sa.select(a.c.run_id, a.c.step)
+            .distinct()
+            .where(
+                a.c.experiment_id == experiment_id,
+                a.c.key == key,
+                a.c.deleted_at.is_(None),
+                *_runs_among(a.c.run_id, run_ids),
+            )
+            .order_by(a.c.run_id, a.c.step)
+        )
+        steps: dict[int, list[int]] = {}
+        for run_id, step in rows:
+            steps.setdefault(run_id, []).append(step)
+        return steps
 
     def summarize_artifact_keys(self, experiment_id: int) -> list[models.Artifact]:
         """An experiment's latest (non-deleted) artifact under each key, sorted by key -- not every artifact logged under it."""

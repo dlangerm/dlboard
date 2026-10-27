@@ -1,5 +1,6 @@
 """Server backend, just expose the app for running."""
 
+from dlboard.serve._artifact_frame import build_artifacts_dataframe
 from dlboard.serve._assets import AssetKind, serve_asset
 from dlboard.serve._backend import _sql as sql
 from dlboard.serve._backend._api_tokens import mint_api_token
@@ -54,6 +55,7 @@ __all__ = [
     "add_public_route",
     "add_startup_check",
     "app",
+    "build_artifacts_dataframe",
     "end_session",
     "get_artifact_store",
     "get_auth_provider",

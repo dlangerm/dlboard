@@ -164,6 +164,10 @@ _OPERATIONS: dict[str, tuple[ProjectRole, Callable[[AuthorizingDataStore, _Chain
         lambda s, c: s.summarize_metric_steps(c[1].id, frozenset({"loss"})),
     ),
     "list artifact keys": (ProjectRole.VIEWER, lambda s, c: s.summarize_artifact_keys(c[1].id)),
+    "list an artifact key's steps": (
+        ProjectRole.VIEWER,
+        lambda s, c: s.artifact_steps(c[1].id, key="img", run_ids=None),
+    ),
     "read latest metrics": (
         ProjectRole.VIEWER,
         lambda s, c: s.fetch_metrics(c[1].id, run_ids=None, reduction=models.MetricReduction.LATEST),

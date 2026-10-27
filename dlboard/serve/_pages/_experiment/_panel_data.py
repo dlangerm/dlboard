@@ -25,20 +25,18 @@ from dlboard._telemetry import Attributes, attribute
 from dlboard._telemetry.traces import SpanKind, TraceKey, span
 from dlboard.models import (
     RUN_NAME_COLUMN,
-    Artifact,
     ColumnKind,
     Histogram,
     HyperParams,
     MetricColumn,
     artifact_column,
-    artifact_fname_column,
-    artifact_tags_column,
+    artifact_logged_column,
     column_kind,
     histogram_column,
     hparam_column,
 )
 from dlboard.serve import telemetry
-from dlboard.serve._backend._artifact_download import artifact_url
+from dlboard.serve._artifact_frame import build_artifacts_dataframe
 from dlboard.serve._backend._metric_frame import MetricFrame
 from dlboard.serve._pages._dataframe_helpers import run_display_name
 from dlboard.serve._pages._experiment._paging import visible_chart_indexes
@@ -110,6 +108,7 @@ class PanelRead(StrEnum):
     KEY_NAMES = "key_names"
     METRICS = "metrics"
     ARTIFACTS = "artifacts"
+    ARTIFACT_STEPS = "artifact_steps"
     HYPERPARAMS = "hyperparams"
     HISTOGRAMS = "histograms"
     SERIES_BANDS = "series_bands"
@@ -175,6 +174,11 @@ class PanelData:
     run_names: pd.DataFrame
     wide: Mapping[models.DataRequest, WideHistory] = field(default_factory=dict)
     """The charts that draw every step of many metrics, by what they ask for; a refused one's were not read."""
+    windows: Mapping[models.ArtifactWindow, pd.DataFrame] = field(default_factory=dict)
+    """
+    The artifacts of the charts that read a window of them (`ArtifactWindow`), by window: a row for each step its key
+    logged (`artifact_logged_column`), with the artifacts of the window's steps alone.
+    """
 
     def wide_history(self, chart: models.ChartInstance[Any, Any]) -> WideHistory | None:
         """How many metrics' every step `chart` draws, if more than `HistoryLimitSettings` lets pass unsaid."""
@@ -203,10 +207,16 @@ class PanelData:
         artifacts = tuple(artifact_column(name) for name in (*request.artifacts, *request.artifact_prefixes))
         histograms = {histogram_column(key) for key in request.histograms}
         hparams = {hparam_column(key) for key in request.hparams}
+        # A window's every row is a step its key logged, whether or not the step's artifacts were read.
+        window = request.artifact_window
         merged = merge_hyperparams(
             merge_by_step(
                 MetricFrame.merged(metrics).to_frame() if metrics else pd.DataFrame(),
-                _with_data_in(self.artifacts, lambda column: column.startswith(artifacts)),
+                _with_data_in(
+                    self.artifacts if window is None else self.windows.get(window, pd.DataFrame()),
+                    lambda column: column.startswith(artifacts),
+                    keep_rows=window is not None,
+                ),
                 _with_data_in(self.histograms, histograms.__contains__),
                 *(self.series[series.column] for series in request.series if series.column in self.series),
             ),
@@ -320,8 +330,10 @@ def fetch_panel_data(
 ) -> PanelData:
     """Fetch just the data one panel needs -- not the whole experiment -- of `run_ids` (every run, if `None`)."""
     requests = [chart.data_request() for chart in panel.charts]
-    artifact_keys = frozenset[str]().union(*(r.artifacts for r in requests))
-    artifact_key_prefixes = frozenset[str]().union(*(r.artifact_prefixes for r in requests))
+    # A chart that reads a window of its artifacts has them read apart, at the window's steps alone.
+    shared = [r for r in requests if r.artifact_window is None]
+    artifact_keys = frozenset[str]().union(*(r.artifacts for r in shared))
+    artifact_key_prefixes = frozenset[str]().union(*(r.artifact_prefixes for r in shared))
     has_artifacts = bool(artifact_keys or artifact_key_prefixes)
 
     if _splits_metric_and_artifact_charts(requests):
@@ -416,10 +428,16 @@ def fetch_panel_data(
         )
         for request in series_requests
     }
+    windows = {
+        window: _artifact_window_frame(
+            store, experiment_id, window, [r for r in requests if r.artifact_window == window], run_ids
+        )
+        for window in {r.artifact_window for r in requests if r.artifact_window is not None}
+    }
     read_anything = (
         any(not frame.run_id.empty for frame in metrics.values())
         or not (artifacts_df.empty and hparams_df.empty and histograms_df.empty)
-        or any(not frame.empty for frame in series.values())
+        or any(not frame.empty for frame in (*series.values(), *windows.values()))
     )
     # Read once, not by each chart that wants it, so `LineChart`/`ImageChart` can label a run by its name instead of
     # its bare id -- `table_chart.py`'s default "runs" mode explicitly excludes this column, since it isn't a real
@@ -437,7 +455,49 @@ def fetch_panel_data(
         if read_anything
         else pd.DataFrame()
     )
-    return PanelData(metrics, artifacts_df, hparams_df, histograms_df, series, run_names, wide)
+    return PanelData(metrics, artifacts_df, hparams_df, histograms_df, series, run_names, wide, windows)
+
+
+def _artifact_window_frame(
+    store: DataStore[...],
+    experiment_id: int,
+    window: models.ArtifactWindow,
+    requests: Sequence[models.DataRequest],
+    run_ids: frozenset[int] | None,
+) -> pd.DataFrame:
+    """
+    A row for each step `window.key` logged, by run, and the artifacts `requests` ask for at the window's steps alone.
+
+    The window is the first `window.steps` of the steps any run logged: what a chart showing one step at a time starts
+    at. What the steps cost to list grows with the steps logged, but a step is two numbers, not an artifact.
+    """
+    logged = _read(
+        _Read(PanelRead.ARTIFACT_STEPS),
+        lambda: store.artifact_steps(experiment_id, key=window.key, run_ids=run_ids),
+    )
+    steps = pd.DataFrame.from_records(
+        [
+            {"run_id": run_id, "step": step, artifact_logged_column(window.key): True}
+            for run_id, run_steps in logged.items()
+            for step in run_steps
+        ]
+    )
+    if steps.empty:
+        return steps
+    shown = sorted(set(steps["step"]))[: window.steps]
+    artifacts = _read(
+        _Read(PanelRead.ARTIFACTS),
+        lambda: build_artifacts_dataframe(
+            store.fetch_artifacts(
+                experiment_id,
+                keys=frozenset[str]().union(*(r.artifacts for r in requests)),
+                key_prefixes=frozenset[str]().union(*(r.artifact_prefixes for r in requests)),
+                run_ids=run_ids,
+                steps=models.StepRange(shown[0], shown[-1]),
+            )
+        ),
+    )
+    return steps if artifacts.empty else steps.merge(artifacts, on=["run_id", "step"], how="outer")
 
 
 def build_series_band_dataframe(
@@ -534,28 +594,6 @@ def chart_data_fingerprint(df: pd.DataFrame) -> str:
     return hashlib.blake2b(
         scoped.reset_index(drop=True).to_json(orient="split", date_format="iso").encode(), digest_size=16
     ).hexdigest()
-
-
-def build_artifacts_dataframe(artifacts: typing.Iterable[Artifact]) -> pd.DataFrame:
-    """Pivot artifact download URLs (and tags and file names) into columns per key, indexed by (run_id, step)."""
-    # A URL, not the underlying `ref` -- charts (and anything else consuming this dataframe) fetch
-    # an artifact by id through `/artifact/<id>`, never by talking to the ref's backend directly.
-    # One pass: each artifact is dumped and given its URL as it streams into the frame.
-    df = pd.DataFrame(a.model_dump(mode="json") | {"url": artifact_url(a)} for a in artifacts)
-    if df.empty:
-        return df
-
-    pivots = [
-        df.pivot_table(index=["run_id", "step"], columns="key", values=value, aggfunc="first").rename(
-            columns=column_name
-        )
-        for value, column_name in (
-            ("url", artifact_column),
-            ("tags", artifact_tags_column),
-            ("fname", artifact_fname_column),
-        )
-    ]
-    return pd.concat(pivots, axis=1).reset_index()
 
 
 def build_hyperparams_dataframe(

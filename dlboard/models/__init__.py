@@ -28,8 +28,8 @@ from dlboard.models._audit_log import AuditAction, AuditLogEntry, EntityType, Ne
 from dlboard.models._auth import AuthProvider
 from dlboard.models._comment import Comment, NewComment
 from dlboard.models._credentials import ApiToken, NewApiToken, PasswordCredential
-from dlboard.models._data_request import EVERY_KEY, DataRequest
-from dlboard.models._data_store import SUMMARY_RUNS, ArtifactStore, DataStore
+from dlboard.models._data_request import EVERY_KEY, ArtifactWindow, DataRequest
+from dlboard.models._data_store import SUMMARY_RUNS, ArtifactStore, DataStore, StepRange
 from dlboard.models._experiment import Experiment, ExperimentSource, NewExperiment
 from dlboard.models._histogram import (
     Histogram,
@@ -61,6 +61,7 @@ from dlboard.models._panel_frame import (
     artifact_column,
     artifact_fname_column,
     artifact_keys_in,
+    artifact_logged_column,
     artifact_tags_column,
     column_kind,
     histogram_column,
@@ -140,6 +141,7 @@ __all__ = [
     "ArtifactPurgeTask",
     "ArtifactStore",
     "ArtifactStoreUnavailableError",
+    "ArtifactWindow",
     "AuditAction",
     "AuditLogEntry",
     "AuthProvider",
@@ -207,6 +209,7 @@ __all__ = [
     "SeriesBandRequest",
     "SettingsSection",
     "SizeUnit",
+    "StepRange",
     "TagDisplay",
     "TagValue",
     "ThemeSpec",
@@ -224,6 +227,7 @@ __all__ = [
     "artifact_display_name",
     "artifact_fname_column",
     "artifact_keys_in",
+    "artifact_logged_column",
     "artifact_tags_column",
     "column_kind",
     "family_template",

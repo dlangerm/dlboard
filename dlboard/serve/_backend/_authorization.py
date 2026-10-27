@@ -450,11 +450,18 @@ class AuthorizingDataStore(models.DataStore[...]):
         keys: frozenset[str] | None = None,
         key_prefixes: frozenset[str] = frozenset(),
         run_ids: frozenset[int] | None,
+        steps: models.StepRange | None = None,
     ) -> Iterator[models.Artifact]:
         self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
         return self._inner.fetch_artifacts(
-            experiment_id, keys=keys, key_prefixes=key_prefixes, run_ids=run_ids
+            experiment_id, keys=keys, key_prefixes=key_prefixes, run_ids=run_ids, steps=steps
         )
+
+    def artifact_steps(
+        self, experiment_id: int, *, key: str, run_ids: frozenset[int] | None
+    ) -> dict[int, list[int]]:
+        self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
+        return self._inner.artifact_steps(experiment_id, key=key, run_ids=run_ids)
 
     def summarize_artifact_keys(self, experiment_id: int) -> list[models.Artifact]:
         self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)

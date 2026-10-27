@@ -118,6 +118,7 @@ class SeriesBandRequest:
 
 _TAGS_SUFFIX: typing.Final = "__tags"
 _FNAME_SUFFIX: typing.Final = "__fname"
+_LOGGED_SUFFIX: typing.Final = "__logged"
 
 
 def histogram_column(key: str) -> str:
@@ -140,6 +141,15 @@ def artifact_fname_column(key: str) -> str:
     return f"{artifact_column(key)}{_FNAME_SUFFIX}"
 
 
+def artifact_logged_column(key: str) -> str:
+    """
+    The panel-dataframe column marking each step `key` logged an artifact at, `True`, for a chart reading a window of them.
+
+    Its URL, tags and file name are read only for the steps of the window (`ArtifactWindow`): this says where the rest are.
+    """
+    return f"{artifact_column(key)}{_LOGGED_SUFFIX}"
+
+
 def artifact_keys_in(columns: Iterable[str], name: str, *, prefix: bool) -> list[str]:
     """
     The artifact keys among a panel dataframe's `columns` that `name` asks for, in column order.
@@ -150,7 +160,8 @@ def artifact_keys_in(columns: Iterable[str], name: str, *, prefix: bool) -> list
     keys = [
         column.removeprefix(ARTIFACT_COLUMN_PREFIX)
         for column in columns
-        if column.startswith(ARTIFACT_COLUMN_PREFIX) and not column.endswith((_TAGS_SUFFIX, _FNAME_SUFFIX))
+        if column.startswith(ARTIFACT_COLUMN_PREFIX)
+        and not column.endswith((_TAGS_SUFFIX, _FNAME_SUFFIX, _LOGGED_SUFFIX))
     ]
     return [key for key in keys if (key.startswith(name) if prefix else key == name)]
 

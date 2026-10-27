@@ -17,6 +17,7 @@ from dlboard.models import (
     OVERLAY_KEY_SUFFIX,
     RUN_NAME_COLUMN,
     UNNAMED_OVERLAY,
+    ArtifactWindow,
     ChartInstance,
     ChartTypeRegistry,
     ColumnKind,
@@ -29,10 +30,12 @@ from dlboard.models import (
     TimeUnit,
     artifact_column,
     artifact_fname_column,
+    artifact_logged_column,
     artifact_tags_column,
     overlay_key,
 )
 from dlboard.plugins.charts.image_series import (
+    IMAGE_WINDOW_STEPS,
     MAX_SLIDER_LABELS,
     ImageChart,
     ImageChartSettings,
@@ -106,6 +109,8 @@ def test_the_chart_reads_its_picture_its_layers_and_every_overlay_over_it(
         metrics=frozenset(metrics),
         artifacts=frozenset(artifacts),
         artifact_prefixes=frozenset({overlay_key("img")}),
+        # Over the step, a window of pictures at a time (#364); over a metric, every one.
+        artifact_window=None if metrics else ArtifactWindow("img", IMAGE_WINDOW_STEPS),
     )
 
 
@@ -676,3 +681,24 @@ def test_the_same_settings_under_different_chart_ids_get_different_component_ids
 def test_hiding_every_overlay_is_not_part_of_what_a_viewer_can_save() -> None:
     with pytest.raises(ValidationError):
         ImageViewerState.model_validate({"overlays_hidden": True})
+
+
+def test_a_window_of_pictures_draws_a_slider_over_every_step_and_says_which_steps_it_has() -> None:
+    """The slider goes to every step logged; the pictures are those of the window read, and it says which (#364)."""
+    frame = _artifacts_df(n_runs=2, steps_per_run=6).assign(**{artifact_logged_column("img"): True})
+    frame.loc[frame["step"] > 2, [artifact_column("img"), artifact_tags_column("img")]] = None
+
+    stack = ImageChart.render(ImageChartSettings(key="img"), frame)
+
+    def of_type(kind: str) -> dict[str, Any]:
+        (found,) = find_all_props(stack, lambda props: props.get("id", {}).get("type") == kind)
+        return found
+
+    data: dict[str, dict[str, dict[str, str]]] = of_type("image-series-data")["data"]
+    window = of_type("image-series-window")["data"]
+    assert of_type("image-series-slider")["max"] == 5
+    assert {run: list(urls) for run, urls in data["per_run_urls"].items()} == {
+        "1": ["0", "1", "2"],
+        "2": ["0", "1", "2"],
+    }
+    assert (window["first"], window["last"], window["runs"]) == (0, 2, [1, 2])

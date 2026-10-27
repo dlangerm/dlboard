@@ -347,6 +347,45 @@ def test_fetch_artifacts_by_key_and_key_prefix(
     assert {a.key for a in fetched} == expected
 
 
+def test_an_artifact_keys_steps_are_listed_by_run_and_a_window_of_them_is_fetched_alone(
+    store: SQLLiteStore, experiment_id: int, admin: models.User
+) -> None:
+    """What an image chart's slider can go to, without its pictures, and the pictures of a window of it (#364)."""
+    early, late = (store.create_run(models.NewRun(experiment_id=experiment_id)) for _ in range(2))
+    logged = {early.id: [0, 10, 20, 30], late.id: [20, 40]}
+    store.log_artifact_refs(
+        [
+            models.Artifact(
+                key=key,
+                fname=f"{step}.png",
+                run_id=run_id,
+                experiment_id=experiment_id,
+                step=step,
+                ref=f"ref://{step}",
+            )
+            for run_id, steps in logged.items()
+            for step in steps
+            for key in ("img", "other")
+        ]
+    )
+    deleted = next(
+        a for a in store.fetch_artifacts(experiment_id, keys=frozenset({"img"}), run_ids=None) if a.step == 30
+    )
+    assert deleted.id is not None
+    store.delete_artifact(deleted.id, admin)
+
+    window = store.fetch_artifacts(
+        experiment_id, keys=frozenset({"img"}), run_ids=None, steps=models.StepRange(10, 20)
+    )
+
+    assert store.artifact_steps(experiment_id, key="img", run_ids=None) == {
+        early.id: [0, 10, 20],
+        late.id: [20, 40],
+    }
+    assert store.artifact_steps(experiment_id, key="img", run_ids=frozenset({late.id})) == {late.id: [20, 40]}
+    assert sorted((a.run_id, a.step) for a in window) == [(early.id, 10), (early.id, 20), (late.id, 20)]
+
+
 def test_fetches_are_of_the_runs_asked_for_and_of_every_run_when_none_are(
     store: SQLLiteStore, experiment_id: int
 ) -> None:

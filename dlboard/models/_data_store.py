@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import typing
 
 from dlboard.models._metric import MetricReduction, SeriesBand
@@ -11,6 +12,15 @@ SUMMARY_RUNS: typing.Final = 100
 How many of an experiment's newest runs a summary judges by: the key summaries and the column catalog read no more than
 these, so what they cost does not grow with how many runs an experiment has.
 """
+
+
+@dataclasses.dataclass(frozen=True)
+class StepRange:
+    """The steps from `first` to `last`, both included."""
+
+    first: int
+    last: int
+
 
 # Pre-3.12 `TypeVar`/`ParamSpec` style (the client's floor is 3.10) -- `P` is `get_or_create`'s
 # constructor signature; `Dataframe`/`Chart` are `Page`'s own two type parameters,
@@ -376,12 +386,23 @@ class DataStore(typing.Protocol[_P]):
         keys: frozenset[str] | None = None,
         key_prefixes: frozenset[str] = frozenset(),
         run_ids: frozenset[int] | None,
+        steps: StepRange | None = None,
     ) -> typing.Iterator[models.Artifact]:
         """
         An experiment's (non-deleted) artifact metadata, not bytes.
 
         Only the artifacts under `keys` and under any key starting with one of `key_prefixes`, if either
-        is given -- `keys=None` with no prefixes means every artifact.
+        is given -- `keys=None` with no prefixes means every artifact. Only those logged at `steps`, if given.
+        """
+        ...
+
+    def artifact_steps(
+        self, experiment_id: int, *, key: str, run_ids: frozenset[int] | None
+    ) -> dict[int, list[int]]:
+        """
+        The steps each run logged a (non-deleted) artifact under `key` at, in order, by run: none of their metadata.
+
+        What a chart that shows one step at a time (an image chart's slider) can go to, read without the artifacts.
         """
         ...
 
