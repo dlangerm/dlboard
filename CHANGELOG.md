@@ -75,10 +75,26 @@ pulls that section's body into the GitHub release notes and publishes both distr
   "Resume cleanup" only for one that stopped. Migration `0005` adds a nullable `AppState.artifact_purge_progress_at`;
   a storage plugin implements `artifact_purge_progress_at()` and `record_artifact_purge_progress(running=)`, which
   needs `Scope.PURGE`. (#429)
+* **The experiment page no longer sends every run's hyperparameters to the browser.** They were sent on load and again
+  on every live update that saw a change, and the runs table read them back from the browser. The table now reads them
+  itself, and its Columns picker offers the hyperparameter keys of the newest 100 runs, as the chart editor does,
+  instead of reading every run's on each keystroke; a column already shown that only an older run has stays offered.
+  (#454)
+* **An image chart reads its pictures a window of 50 steps at a time.** Its slider still goes to every step logged;
+  moving it past the pictures read reads the ones around where it went. For 20 runs of 2,000 steps, drawing the chart
+  went from 1.8 s to 0.2 s, and from 5 MB to 0.4 MB sent to the browser. An image chart over a metric x-axis reads
+  every picture, as before. A chart plugin asks for a window with `DataRequest.artifact_window`, and a storage plugin
+  implements `artifact_steps()` and `fetch_artifacts(..., steps=StepRange)` (see
+  [docs/plugins/charts.md](docs/plugins/charts.md)). (#364)
+* **A table with a row per value of a field says how many rows it would have past 5,000, instead of drawing them.** A
+  row per step of 20 runs of 5,000 steps was 100,000 rows and 16 MB sent to the browser. Show a row per run or per
+  epoch, or raise `DLBOARD_MAX_TABLE_ROWS`. (#364)
 
 ### Fixed
 
 * **The navbar's runs table lines up with the experiment links above it.** It sat 10 px further in on each side. (#371)
+* **A file list of many keys draws in a second, not twenty.** Building its rows went over every key's columns for each
+  file: 10,000 checkpoints under `checkpoints/` took 17.6 s, and take 0.9 s. (#364)
 
 ## [0.12.0] - 2026-10-26
 
