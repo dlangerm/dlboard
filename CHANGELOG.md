@@ -12,6 +12,8 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-27
+
 ### Added
 
 * **Traces and metrics say where an artifact upload's time goes.** Each step from the request to the recorded ref is
