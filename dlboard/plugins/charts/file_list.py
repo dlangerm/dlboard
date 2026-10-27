@@ -83,7 +83,12 @@ def _file_rows(parameters: FileListSettings, dataframe: pd.DataFrame) -> list[di
     rows: list[dict[str, Any]] = []
     for key in keys:
         column, tags_column = artifact_column(key), artifact_tags_column(key)
-        for _, file in dataframe.loc[dataframe[column].notna()].iterrows():
+        # Only the file's own columns: a family of keys is a column each, and a row of every one of them per file made
+        # a list of 10,000 checkpoints take 17 s to draw.
+        own = [MetricColumn.RUN_ID, MetricColumn.STEP, column, tags_column, RUN_NAME_COLUMN]
+        for file in dataframe.loc[
+            dataframe[column].notna(), [c for c in own if c in dataframe.columns]
+        ].to_dict("records"):
             tags = parse_tags(file.get(tags_column))
             run_id = int(file[MetricColumn.RUN_ID])
             run_name = file.get(RUN_NAME_COLUMN)
