@@ -14,6 +14,9 @@ The settings form is `_chart_settings_form.py`'s.
 from __future__ import annotations
 
 import secrets
+import threading
+from collections import OrderedDict
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Final, Literal, cast
 
@@ -187,13 +190,55 @@ def _settings_form(
     return build_chart_param_form(chart_type_name, edited, catalog=catalog)
 
 
-def _draw_form(
+_KEPT_READS: Final = 8
+"""How many panel reads the chart editor keeps on a worker: about the charts open in an editor on it at once."""
+
+
+@dataclass(frozen=True)
+class _ReadKey:
+    """What a read for one chart depends on: the data it asks for, of which runs, as of which write to the experiment."""
+
+    experiment_id: int
+    revision: int
+    run_ids: frozenset[int] | None
+    request: models.DataRequest
+
+
+class EditorReads:
+    """
+    The last few panels the chart editor read, so an edit that asks for the same data is drawn without reading it again.
+
+    A display-only edit (a chart's height, its colors) asks for what it asked before, and so does opening the editor on
+    a chart the page has just drawn. Keyed by the experiment's `revision`, which every write to it bumps, so a read is
+    never served after the data changed, on this worker or another.
+    """
+
+    def __init__(self) -> None:
+        self._reads: OrderedDict[_ReadKey, panel_data.PanelData] = OrderedDict()
+        self._lock = threading.Lock()
+
+    def read(self, key: _ReadKey, fetch: Callable[[], panel_data.PanelData]) -> panel_data.PanelData:
+        """The read kept under `key`, or `fetch`'s, kept for the next edit that asks for the same."""
+        with self._lock:
+            if (kept := self._reads.get(key)) is not None:
+                self._reads.move_to_end(key)
+                return kept
+        fetched = fetch()
+        with self._lock:
+            self._reads[key] = fetched
+            while len(self._reads) > _KEPT_READS:
+                self._reads.popitem(last=False)
+        return fetched
+
+
+def _draw_form(  # noqa: PLR0913
     values: _FormValues,
     panel_name: str,
     chart_id: str | None,
     draw: Callable[[models.ChartInstance[Any, Any], pd.DataFrame], Component],
     *,
     store: DataStore[...],
+    reads: EditorReads,
 ) -> tuple[Component | None, str]:
     """
     The chart the form makes, drawn by `draw` from what a panel named `panel_name` would fetch for it.
@@ -221,9 +266,21 @@ def _draw_form(
     try:
         chart = build_validated_chart_instance(chart_type_name, parameters, chart_id)
         document = page_model.BasicExperimentPage.model_validate_json(values["page_json"]).document
+        experiment_id = values["experiment_id"]
+        run_ids = shown_run_ids(store, experiment_id, document)
         panel = models.PanelInstance[Any, Any](name=panel_name, charts=[chart])
-        data = panel_data.fetch_panel_data(
-            store, values["experiment_id"], panel, shown_run_ids(store, values["experiment_id"], document)
+
+        def fetch() -> panel_data.PanelData:
+            return panel_data.fetch_panel_data(store, experiment_id, panel, run_ids)
+
+        # Read through the caller's own store: `None` for an experiment they may not see, which is never served kept.
+        experiment = store.get_experiment(experiment_id)
+        data = (
+            fetch()
+            if experiment is None
+            else reads.read(
+                _ReadKey(experiment_id, experiment.revision, run_ids, chart.data_request()), fetch
+            )
         )
         return draw(chart, data.for_chart(chart)), ""
     except ValidationError as exc:
@@ -234,37 +291,41 @@ def _draw_form(
         return None, f"The chart could not be drawn ({exc})"
 
 
-def render_chart_preview(values: _FormValues, *, store: DataStore[...]) -> tuple[Component | None, str]:
+def render_chart_preview(
+    values: _FormValues, *, store: DataStore[...], reads: EditorReads
+) -> tuple[Component | None, str]:
     """Live-preview a chart that is being added exactly as it'd render in a panel of its own -- same fetch, same runs."""
 
     def draw(chart: models.ChartInstance[Any, Any], dataframe: pd.DataFrame) -> Component:
         return chart.render(dataframe)
 
-    return _draw_form(values, "preview", None, draw, store=store)
+    return _draw_form(values, "preview", None, draw, store=store, reads=reads)
 
 
-def render_card_drafts(
+def render_card_drafts(  # noqa: PLR0913
     values: _FormValues,
     location: page_model.ChartLocation,
     page_size: int,
     draft_ids: list[chart_view.ChartID],
     *,
     store: DataStore[...],
+    reads: EditorReads,
 ) -> tuple[list[Any], str]:
     """
     The `CHART_DRAFT` of each card, with the edited chart drawn as the form has it in its own and the rest empty.
 
     A form that does not (yet) make a valid chart leaves the draft as it was and says why.
 
-    It is drawn even while the form says what the saved chart says. The first draw of a card's draft is a heavy one, and
-    is better done as the editor opens than later, when the person is typing in the form: it can reorder their keystrokes
-    in a table cell that is open (the chart editor's tag display test caught exactly that).
+    It is drawn even while the form says what the saved chart says. The first draw of a card's draft reads the chart's
+    data, and is better done as the editor opens than later, when the person is typing in the form: it can reorder their
+    keystrokes in a table cell that is open (the chart editor's tag display test caught exactly that). Every later draw
+    that asks for the same data (a display-only edit) is drawn from that read (`EditorReads`).
     """
 
     def draw(chart: models.ChartInstance[Any, Any], dataframe: pd.DataFrame) -> Component:
         return chart_view.draft_view(location.panel, chart, dataframe, page_size)
 
-    drawn, error = _draw_form(values, location.panel.name, location.chart.id, draw, store=store)
+    drawn, error = _draw_form(values, location.panel.name, location.chart.id, draw, store=store, reads=reads)
     if drawn is None:
         return [no_update if error else None] * len(draft_ids), error
     here = (location.panel.name, location.index)
@@ -357,6 +418,8 @@ def _register_open_and_cancel(app: Dash) -> None:
 
 
 def _register_form_and_draft(app: Dash) -> None:
+    reads = EditorReads()  # this app's own: what one app read is no other's to draw
+
     @app.callback(
         Output(CHART_EDITOR_PARAMS_ID, "children"),
         Output(CHART_EDITOR_FORM_FOR_ID, "data"),
@@ -429,7 +492,7 @@ def _register_form_and_draft(app: Dash) -> None:
             case None:
                 raise PreventUpdate
             case AddChart():
-                preview, error = render_chart_preview(form, store=get_data_store())
+                preview, error = render_chart_preview(form, store=get_data_store(), reads=reads)
                 shown = dmc.Stack([dmc.Text("Preview", fw=600), preview]) if preview is not None else None
                 return no_drafts, shown, error
             case EditChart():
@@ -439,7 +502,7 @@ def _register_form_and_draft(app: Dash) -> None:
                     return no_drafts, None, _NO_LONGER_ON_THE_PAGE
                 page_size = Paging.model_validate_json(state["paging_json"]).sizes.charts
                 drafts, error = render_card_drafts(
-                    form, location, page_size, state["draft_ids"], store=get_data_store()
+                    form, location, page_size, state["draft_ids"], store=get_data_store(), reads=reads
                 )
                 return drafts, None, error
 

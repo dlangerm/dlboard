@@ -61,6 +61,10 @@ class MetricReductions(BaseModel, frozen=True, extra="forbid"):
         """How the metric called `column` is read."""
         return self.by_column.get(column, self.default)
 
+    def __hash__(self) -> int:
+        """As a frozen model's, but its columns' reductions too, which a dict cannot be: so a `DataRequest` is a key."""
+        return hash((self.default, frozenset(self.by_column.items())))
+
 
 class UnderlyingMetricTableEntry(BaseModel, frozen=True, extra="forbid"):
     """The underlying table schema of individual metrics."""
