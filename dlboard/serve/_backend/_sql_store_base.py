@@ -7,6 +7,7 @@ import json
 import math
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, Final, Literal, cast
 
 import pendulum
@@ -25,7 +26,6 @@ from dlboard.serve.telemetry import Counter, Outcome, OutcomeAttributes, Unit
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Collection, Generator, Iterable, Iterator, Mapping, Sequence
-    from datetime import datetime
 
 
 _log = get_logger(__name__)
@@ -1085,6 +1085,24 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             )
             .order_by(m.c.id)
         )
+
+    def check_stored_timestamps(self) -> None:
+        """
+        Raise unless the driver returns a stored metric timestamp as an ISO string or an aware datetime (#468).
+
+        `_metric_history` reads the timestamp column raw, for speed, and `MetricFrame.from_rows` accepts exactly those two
+        forms. A driver that returns anything else would fail deep in a chart, so startup checks one stored row. An
+        empty experiment has nothing to check, so this passes until something is logged.
+        """
+        m = self._tables[models.UnderlyingMetricTableEntry]
+        rows = self._execute(sa.select(sa.type_coerce(m.c.timestamp_utc, sa.types.NullType())).limit(1))
+        if not rows:
+            return
+        ((value,),) = rows
+        if isinstance(value, str) or (isinstance(value, datetime) and value.tzinfo is not None):
+            return
+        msg = f"the driver returned a stored timestamp as {type(value).__name__}, not an ISO string or aware datetime"
+        raise RuntimeError(msg)
 
     def _metric_ends(
         self,

@@ -117,6 +117,17 @@ connection settings and pooling live there), and implement `_insert_ignoring_con
 `sqlalchemy.dialects.<name>.insert`. See `plugins/data_stores/sqlite.py` for the reference
 implementation.
 
+**Which databases.** The generic `SQLStoreBase` is tested on SQLite and Postgres, and nothing else. Another database
+works in two ways. You can override the store's methods for it: a method you override is yours, and dlboard calls
+it through the `DataStore` interface, so the generic SQL is not used there. Or you can write the SQL for your database
+in your own plugin, which is then your own code to test. dlboard does not claim a database beyond the two it runs
+against, and a plugin that writes SQL outside the `DataStore` interface is responsible for that SQL.
+
+**Timestamps.** `_metric_history` reads each metric's `timestamp_utc` as the driver returns it, for speed, and
+`MetricFrame.from_rows` accepts only an ISO-8601 string or an aware datetime. At startup dlboard reads one stored
+metric timestamp and fails if the driver returned anything else. An empty experiment has nothing to read, so the
+check passes until something has been logged, and a driver that returns the wrong type is only caught then.
+
 For an `ArtifactStore` that's just somewhere to put and fetch whole blobs (as opposed to something
 with its own, different storage model entirely), you don't have to implement the protocol from
 scratch either — `BlobArtifactStore` (`plugins/data_stores/_blob_store.py`) already implements it

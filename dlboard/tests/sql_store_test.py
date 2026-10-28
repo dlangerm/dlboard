@@ -675,3 +675,27 @@ def test_update_experiment_does_not_clobber_a_concurrently_bumped_revision(
     assert after is not None
     assert after.description == "edited"
     assert after.revision == 1
+
+
+def test_the_startup_check_passes_on_an_empty_store_and_on_a_logged_metric(
+    store: SQLLiteStore, experiment_id: int
+) -> None:
+    """Each backend returns a stored timestamp as the metric frame takes it, so the check passes on the real driver (#468)."""
+    store.check_stored_timestamps()
+    _log_step(store, store.create_run(models.NewRun(experiment_id=experiment_id)), 0, loss=1.0)
+
+    store.check_stored_timestamps()
+
+
+def test_the_startup_check_refuses_a_driver_that_returns_a_timestamp_some_other_way(
+    store: SQLLiteStore, experiment_id: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _log_step(store, store.create_run(models.NewRun(experiment_id=experiment_id)), 0, loss=1.0)
+
+    def epoch_seconds(*_args: object, **_kwargs: object) -> list[tuple[int]]:
+        return [(1_700_000_000,)]
+
+    monkeypatch.setattr(store, "_execute", epoch_seconds)
+
+    with pytest.raises(RuntimeError, match="not an ISO string or aware datetime"):
+        store.check_stored_timestamps()

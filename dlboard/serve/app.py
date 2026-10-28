@@ -29,7 +29,8 @@ from dlboard.serve._backend._auth import (
 )
 from dlboard.serve._backend._data_store import get_data_store, get_system_data_store
 from dlboard.serve._backend._installed_plugins import set_installed_plugins
-from dlboard.serve._backend._startup_checks import run_startup_checks
+from dlboard.serve._backend._sql_store_base import SQLStoreBase
+from dlboard.serve._backend._startup_checks import add_startup_check, run_startup_checks
 from dlboard.serve._backend._theme import get_theme
 from dlboard.serve._clientside_script import ClientsideScript
 from dlboard.serve._grid import GRID_CELL_COMPONENTS_CSS, GRID_CELL_COMPONENTS_JS, GRID_FORMATTERS_JS
@@ -218,8 +219,16 @@ def app(plugins: list[models.PluginProtocol], *, url_prefix: str = "") -> Dash:
     _app.index_string = _preload_color_scheme(_app.index_string, theme)
     _app.layout = partial(_layout, theme)
     # Last, so a plugin's check sees the app exactly as it will serve -- every plugin plugged, the gate installed.
+    add_startup_check(_app, _check_stored_timestamps)
     run_startup_checks(_app)
     return _app
+
+
+def _check_stored_timestamps(app: Dash) -> None:
+    """The stored timestamps must read as the metric frame takes them (#468), for a store that reads them raw."""
+    store = get_system_data_store(app)
+    if isinstance(store, SQLStoreBase):
+        store.check_stored_timestamps()
 
 
 def _preload_color_scheme(index_string: str, theme: ThemeSpec) -> str:
