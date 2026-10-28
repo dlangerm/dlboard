@@ -327,6 +327,7 @@
   "dlboard/plugins/auth/tests/anonymous_auth_test.py::test_authenticate_falls_back_to_environment_when_header_is_blank": 0.0013086279795970768,
   "dlboard/plugins/auth/tests/anonymous_auth_test.py::test_authenticate_prefers_the_request_header": 0.0020117019885219634,
   "dlboard/plugins/backend/tests/artifact_purge_worker_test.py::test_a_drain_says_a_purge_is_running_until_it_is_done": 0.35249443400061864,
+  "dlboard/plugins/backend/tests/artifact_purge_worker_test.py::test_a_failed_drain_is_logged_and_the_worker_still_runs_the_next_purge": 0.08981000099447556,
   "dlboard/plugins/backend/tests/artifact_purge_worker_test.py::test_drain_pending_deletes_every_blob_and_clears_the_queue": 0.21206924595753662,
   "dlboard/plugins/backend/tests/artifact_purge_worker_test.py::test_drain_pending_is_a_noop_when_nothing_is_queued": 0.09388675898662768,
   "dlboard/plugins/backend/tests/artifact_purge_worker_test.py::test_drain_pending_records_a_failure_and_still_processes_the_rest": 0.23011920100543648,

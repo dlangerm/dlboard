@@ -7,6 +7,8 @@ import time
 import typing
 from typing import TYPE_CHECKING, Self
 
+import pytest
+
 from dlboard import models
 from dlboard.conftest import create_entity_chain, scraped_total
 from dlboard.plugins.backend import artifact_purge_worker
@@ -15,7 +17,6 @@ from dlboard.serve.telemetry._prometheus import serve_metrics
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-    import pytest
     from dash import Dash
     from flask import Response
     from pydantic import AnyUrl
@@ -156,6 +157,9 @@ def test_a_drain_says_a_purge_is_running_until_it_is_done(store: SQLLiteStore) -
     assert store.artifact_purge_progress_at() is None
 
 
+@pytest.mark.filterwarnings(
+    "ignore::pytest.PytestUnhandledThreadExceptionWarning"
+)  # the SystemExit that ends the worker below is one
 def test_a_failed_drain_is_logged_and_the_worker_still_runs_the_next_purge(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -180,10 +184,10 @@ def test_a_failed_drain_is_logged_and_the_worker_still_runs_the_next_purge(
     worker.start()
 
     for _ in range(500):
-        if len(drains) >= 2:
+        if len(drains) >= 3:
             break
         artifact_purge_worker.wake()
         time.sleep(0.01)
 
-    assert len(drains) >= 2
+    assert len(drains) >= 3  # the third drain ends the worker, so it is not left running into later tests
     worker.join(timeout=5)
