@@ -9,8 +9,9 @@ flows. The buttons that open them ("Suggest charts", a panel's own "Suggest char
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Final, cast, get_args
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Final, NamedTuple, cast, get_args
 
 import dash_mantine_components as dmc
 from dash import Dash, Input, NoUpdate, Output, State, ctx, html, no_update
@@ -61,6 +62,10 @@ SUGGEST_MODE_ID: ValueId[ids.ExperimentPage] = ValueId("suggest-charts-mode")
 SUGGEST_CONTENT_ID: DivId[ids.ExperimentPage] = DivId("suggest-charts-content")
 SUGGEST_SCOPE_STORE_ID: StoreId[ids.ExperimentPage] = StoreId("suggest-charts-scope")
 SUGGEST_FILTER_ID: ValueId[ids.ExperimentPage] = ValueId("suggest-charts-filter")
+SUGGEST_EXCLUDE_ID: ValueId[ids.ExperimentPage] = ValueId("suggest-charts-exclude")
+SUGGEST_PAGE_ID: StoreId[ids.ExperimentPage] = StoreId("suggest-charts-page")
+SUGGEST_PREV_ID: ButtonId[ids.ExperimentPage] = ButtonId("suggest-charts-prev")
+SUGGEST_NEXT_ID: ButtonId[ids.ExperimentPage] = ButtonId("suggest-charts-next")
 SUGGEST_SORT_ID: ValueId[ids.ExperimentPage] = ValueId("suggest-charts-sort")
 SUGGEST_SELECTION_ID: ValueId[ids.ExperimentPage] = ValueId("suggest-charts-selection")
 SUGGEST_SELECT_ALL_ID: ButtonId[ids.ExperimentPage] = ButtonId("suggest-charts-select-all")
@@ -80,8 +85,8 @@ _SPLIT_MODE_DATA: Final = [{"label": mode.title(), "value": mode} for mode in _S
 _SPLIT_MODE: Final = TypeAdapter(SplitMode)
 """Checks a mode the browser sent is one the control offers, instead of quietly falling back to the first."""
 _DEFAULT_DELIMITER: Final = "/"
-_SUGGESTIONS_SHOWN: Final = 50
-"""How many suggestions the drawer lists at once: a filter narrows the rest, so the browser never mounts every row."""
+_SUGGESTIONS_PER_PAGE: Final = 25
+"""How many suggestions the drawer lists on a page: the browser mounts one page of rows, and Previous/Next turn the rest."""
 
 
 class _SuggestionPattern(PatternId[ids.ExperimentPage]):
@@ -114,6 +119,7 @@ def _suggest_charts_drawer() -> dmc.Drawer:
         opened=False,
         children=[
             Store(id=SUGGEST_SCOPE_STORE_ID, data=None),
+            Store(id=SUGGEST_PAGE_ID, data=1),
             dmc.Group(
                 [
                     dmc.TextInput(
@@ -129,6 +135,12 @@ def _suggest_charts_drawer() -> dmc.Drawer:
                 [
                     dmc.TextInput(
                         id=SUGGEST_FILTER_ID, placeholder="Filter by name or panel", debounce=300, size="sm"
+                    ),
+                    dmc.TextInput(
+                        id=SUGGEST_EXCLUDE_ID,
+                        placeholder="Exclude, e.g. grad, val/*",
+                        debounce=300,
+                        size="sm",
                     ),
                     dmc.Group(
                         [
@@ -233,14 +245,20 @@ class _AutoPopulateCtx(edits.EditCtx):
     experiment_id: Annotated[int, State(constants.STATE_EXPERIMENT_ID, "data")]
 
 
-def _render_suggestions(
-    suggestions: list[Suggestion], *, total: int, filtered_out_all: bool = False
-) -> Component:
-    """
-    The suggestion rows, each a checkbox (for the selection) plus a one-click add.
+class _Page(NamedTuple):
+    """One page of the drawer's list, of the `total` the filter, exclude and sort leave, with `pages` in all."""
 
-    `suggestions` is the first page of the `total` the filter leaves. `filtered_out_all` says the list is empty
-    because of the filter, not because there is nothing left to chart.
+    items: list[Suggestion]
+    number: int
+    pages: int
+    total: int
+
+
+def _render_suggestions(page: _Page, *, filtered_out_all: bool = False) -> Component:
+    """
+    The suggestion rows, each a checkbox (for the selection) plus a one-click add, and Previous/Next to turn the page.
+
+    `filtered_out_all` says the list is empty because of the filter or exclude, not because there is nothing left to chart.
     """
 
     def _row(s: Suggestion) -> Component:
@@ -277,17 +295,50 @@ def _render_suggestions(
         ColumnKind.HISTOGRAM: "Histograms",
     }
     sections: dict[ColumnKind, list[Component]] = {kind: [] for kind in titles}
-    for s in suggestions:
+    for s in page.items:
         sections[s.kind].append(_row(s))
     if not any(sections.values()):
         return dmc.Text(
-            "No suggestion matches that filter."
+            "No suggestion matches that filter or exclude."
             if filtered_out_all
             else "Every metric, artifact and histogram already has a chart.",
             c="dimmed",
             size="sm",
         )
-    more = [dmc.Text(f"Showing {len(suggestions)} of {total}. Filter to narrow.", c="dimmed", size="sm")]
+    first = (page.number - 1) * _SUGGESTIONS_PER_PAGE + 1
+    pager: list[Component] = (
+        [
+            dmc.Group(
+                [
+                    dmc.Button(
+                        "Previous",
+                        id=SUGGEST_PREV_ID,
+                        variant="default",
+                        size="xs",
+                        n_clicks=0,
+                        disabled=page.number <= 1,
+                    ),
+                    dmc.Text(
+                        f"Page {page.number} of {page.pages}: {first}-{first + len(page.items) - 1} of {page.total}",
+                        c="dimmed",
+                        size="sm",
+                    ),
+                    dmc.Button(
+                        "Next",
+                        id=SUGGEST_NEXT_ID,
+                        variant="default",
+                        size="xs",
+                        n_clicks=0,
+                        disabled=page.number >= page.pages,
+                    ),
+                ],
+                justify="space-between",
+                mt="sm",
+            )
+        ]
+        if page.pages > 1
+        else []
+    )
     return dmc.Stack(
         [
             part
@@ -295,7 +346,7 @@ def _render_suggestions(
             if sections[kind]
             for part in (dmc.Text(title, fw=600, size="sm", mt="sm"), *sections[kind])
         ]
-        + (more if total > len(suggestions) else []),
+        + pager,
         gap="xs",
     )
 
@@ -308,11 +359,18 @@ class _Listing(CallbackStates):
     scope: Annotated[str | None, State(SUGGEST_SCOPE_STORE_ID, "data")]
 
 
-class _Drawer(_Listing):
-    """The drawer as it is: its listing, the filter and sort it is shown with, what is ticked, and the page it is of."""
+class _View(CallbackStates):
+    """What the drawer's list shows of its suggestions: the filter, the exclude patterns, the sort, and the page."""
 
     filter_text: Annotated[str | None, State(SUGGEST_FILTER_ID, "value")]
+    exclude: Annotated[str | None, State(SUGGEST_EXCLUDE_ID, "value")]
     sort: Annotated[str | None, State(SUGGEST_SORT_ID, "value")]
+    page: Annotated[int | None, State(SUGGEST_PAGE_ID, "data")]
+
+
+class _Drawer(_Listing, _View):
+    """The drawer as it is: its listing and what is ticked, and the page of the panels it is of."""
+
     selected: Annotated[list[str] | None, State(SUGGEST_SELECTION_ID, "value")]
     page_json: Annotated[str, State(ids.STATE_PAGE_STORAGE, "data")]
 
@@ -352,17 +410,29 @@ def _listed(
     return catalog, suggestions
 
 
-def _matching(suggestions: list[Suggestion], text: str | None, sort: str | None) -> list[Suggestion]:
-    return visible_suggestions(suggestions, text=text or "", sort=SuggestSort(sort or SuggestSort.NAME))
+def _matching(suggestions: list[Suggestion], view: _View) -> list[Suggestion]:
+    return visible_suggestions(
+        suggestions,
+        text=view.filter_text or "",
+        exclude=view.exclude or "",
+        sort=SuggestSort(view.sort or SuggestSort.NAME),
+    )
 
 
-def _listing(suggestions: list[Suggestion], text: str | None, sort: str | None) -> Component:
-    """The drawer's list: the suggestions the filter and sort leave, the first page of them at most."""
-    matching = _matching(suggestions, text, sort)
+def _page(suggestions: list[Suggestion], view: _View) -> _Page:
+    """The page of the suggestions the view leaves that it asks for, clamped to the pages there are."""
+    matching = _matching(suggestions, view)
+    pages = max(1, math.ceil(len(matching) / _SUGGESTIONS_PER_PAGE))
+    number = min(max(view.page or 1, 1), pages)
+    start = (number - 1) * _SUGGESTIONS_PER_PAGE
+    return _Page(matching[start : start + _SUGGESTIONS_PER_PAGE], number, pages, len(matching))
+
+
+def _listing(suggestions: list[Suggestion], view: _View) -> Component:
+    """The drawer's list: one page of the suggestions the filter, exclude and sort leave."""
     return _render_suggestions(
-        matching[:_SUGGESTIONS_SHOWN],
-        total=len(matching),
-        filtered_out_all=bool(suggestions) and not matching,
+        _page(suggestions, view),
+        filtered_out_all=bool(suggestions) and not _matching(suggestions, view),
     )
 
 
@@ -591,15 +661,13 @@ def _resolve_suggestion_trigger(
     return current_scope, no_update
 
 
-class _SuggestCtx(CallbackStates):
+class _SuggestCtx(_View):
     """What opening or regrouping the drawer lists from: the grouping, which fires it too, and the drawer as it was."""
 
     delimiter: Annotated[str | None, Input(SUGGEST_DELIMITER_ID, "value")]
     mode: Annotated[str | None, Input(SUGGEST_MODE_ID, "value")]
     page_json: Annotated[str, State(ids.STATE_PAGE_STORAGE, "data")]
     current_scope: Annotated[str | None, State(SUGGEST_SCOPE_STORE_ID, "data")]
-    filter_text: Annotated[str | None, State(SUGGEST_FILTER_ID, "value")]
-    sort: Annotated[str | None, State(SUGGEST_SORT_ID, "value")]
 
 
 def _add_charts(page_json: str, paging_json: str, chosen: list[Suggestion]) -> tuple[Any, str]:
@@ -629,6 +697,8 @@ def _register_suggestions(app: Dash) -> None:
         Output(SUGGEST_SCOPE_STORE_ID, "data", allow_duplicate=True),
         Output(SUGGEST_SELECTION_ID, "value", allow_duplicate=True),
         Output(SUGGEST_FILTER_ID, "value", allow_duplicate=True),
+        Output(SUGGEST_EXCLUDE_ID, "value", allow_duplicate=True),
+        Output(SUGGEST_PAGE_ID, "data", allow_duplicate=True),
         Input(panel_view.SUGGEST_CHARTS_BUTTON_ID, "n_clicks", allow_optional=True),
         Input(panel_view.PANEL_SUGGEST_BUTTON.all(), "n_clicks"),
         _SuggestCtx.states(),
@@ -636,7 +706,9 @@ def _register_suggestions(app: Dash) -> None:
     )
     def refresh_suggestions(
         n_clicks: int, _panel_clicks: list[int], states: dict[str, Any]
-    ) -> tuple[bool | NoUpdate, str | NoUpdate, Component, str | None, list[str], str | NoUpdate]:
+    ) -> tuple[
+        bool | NoUpdate, str | NoUpdate, Component, str | None, list[str], str | NoUpdate, str | NoUpdate, int
+    ]:
         suggest_ctx = _SuggestCtx.model_validate(states)
         # Either button mounting for the first time reports itself as "triggered" with `n_clicks`
         # still 0 -- each is rendered into its own container (the panel controls row / a panel's
@@ -644,9 +716,13 @@ def _register_suggestions(app: Dash) -> None:
         # `ctx.triggered_id` unambiguously resolves to the button on that mount even though
         # nothing was clicked.
         scope, opened = _resolve_suggestion_trigger(n_clicks, suggest_ctx.current_scope)
-        # The drawer outlives each opening, filter box included: a fresh opening starts unfiltered,
-        # while regrouping (delimiter/mode) keeps whatever filter is typed.
-        filter_text, filter_value = ("", "") if opened is True else (suggest_ctx.filter_text, no_update)
+        # The drawer outlives each opening, filter and exclude boxes included: a fresh opening starts unfiltered,
+        # while regrouping (delimiter/mode) keeps whatever is typed. Either way it is a new list, from its first page.
+        fresh = opened is True
+        filter_value, exclude_value = ("", "") if fresh else (no_update, no_update)
+        view = suggest_ctx.model_copy(
+            update={"page": 1, **({"filter_text": "", "exclude": ""} if fresh else {})}
+        )
 
         title = f"Suggested charts for {scope}" if scope else "Suggested charts"
         catalog, suggestions = _listed(
@@ -654,27 +730,56 @@ def _register_suggestions(app: Dash) -> None:
             _Listing(delimiter=suggest_ctx.delimiter, mode=suggest_ctx.mode, scope=scope),
         )
         content: Component = (
-            _listing(suggestions, filter_text, suggest_ctx.sort)
+            _listing(suggestions, view)
             if catalog.has_chartable_keys
             else dmc.Text(_NO_KEYS_MESSAGE, c="dimmed", size="sm")
         )
         # A different scope, or a regrouping, is a different list: whatever was ticked no longer applies.
-        return opened, title, content, scope, [], filter_value
+        return opened, title, content, scope, [], filter_value, exclude_value, 1
 
     @app.callback(
         Output(SUGGEST_CONTENT_ID, "children", allow_duplicate=True),
+        Output(SUGGEST_PAGE_ID, "data", allow_duplicate=True),
         Input(SUGGEST_FILTER_ID, "value"),
+        Input(SUGGEST_EXCLUDE_ID, "value"),
         Input(SUGGEST_SORT_ID, "value"),
         State(ids.STATE_PAGE_STORAGE, "data"),
         _Listing.states(),
         prevent_initial_call=True,
     )
     def filter_and_sort_suggestions(
-        filter_text: str | None, sort: str | None, page_json: str, listing: dict[str, Any]
-    ) -> Component:
-        """Re-list the uncharted keys the filter leaves; the ticked boxes live in the checkbox group, so they survive."""
+        filter_text: str | None,
+        exclude: str | None,
+        sort: str | None,
+        page_json: str,
+        listing: dict[str, Any],
+    ) -> tuple[Component, int]:
+        """Re-list the uncharted keys the filter and exclude leave, from their first page: the ticked boxes survive."""
         _catalog, suggestions = _listed(page_json, _Listing.model_validate(listing))
-        return _listing(suggestions, filter_text, sort)
+        view = _View(filter_text=filter_text, exclude=exclude, sort=sort, page=1)
+        return _listing(suggestions, view), 1
+
+    @app.callback(
+        Output(SUGGEST_CONTENT_ID, "children", allow_duplicate=True),
+        Output(SUGGEST_PAGE_ID, "data", allow_duplicate=True),
+        Input(SUGGEST_PREV_ID, "n_clicks"),
+        Input(SUGGEST_NEXT_ID, "n_clicks"),
+        _Drawer.states(),
+        prevent_initial_call=True,
+    )
+    def turn_suggestion_page(
+        prev_clicks: int | None, next_clicks: int | None, states: dict[str, Any]
+    ) -> tuple[Component, int]:
+        """Show the page before or after the one listed, of what the drawer lists now."""
+        # The buttons mount with no clicks each time the list is drawn, which is nothing to turn.
+        if not (prev_clicks or next_clicks):
+            raise PreventUpdate
+        drawer = _Drawer.model_validate(states)
+        _catalog, suggestions = _listed(drawer.page_json, drawer)
+        step = 1 if cast("str | None", ctx.triggered_id) == SUGGEST_NEXT_ID else -1
+        turned = drawer.model_copy(update={"page": (drawer.page or 1) + step})
+        number = _page(suggestions, turned).number
+        return _listing(suggestions, turned.model_copy(update={"page": number})), number
 
     @app.callback(
         Output(SUGGEST_SELECTION_ID, "value", allow_duplicate=True),
@@ -700,7 +805,7 @@ def _register_suggestions(app: Dash) -> None:
         if not select_all_clicks:
             raise PreventUpdate
         _catalog, suggestions = _listed(drawer.page_json, drawer)
-        shown = [s.selection_value for s in _matching(suggestions, drawer.filter_text, drawer.sort)]
+        shown = [s.selection_value for s in _matching(suggestions, drawer)]
         return [*dict.fromkeys([*(drawer.selected or []), *shown])][:AUTO_MAX_CHARTS]
 
     app.clientside_callback(
@@ -736,7 +841,7 @@ def _register_suggestion_adds(app: Dash) -> None:
         return (
             container,
             saved_page,
-            _listing(suggestions, drawer.filter_text, drawer.sort),
+            _listing(suggestions, drawer),
             still_ticked,
             False,
         )
@@ -762,7 +867,7 @@ def _register_suggestion_adds(app: Dash) -> None:
         catalog, chosen = _suggestions_to_add(drawer.page_json, drawer, picked)
         container, saved_page = _add_charts(drawer.page_json, drawer.paging_json, chosen)
         _catalog, suggestions = _listed(saved_page, drawer, catalog)
-        return container, saved_page, _listing(suggestions, drawer.filter_text, drawer.sort), [], False
+        return container, saved_page, _listing(suggestions, drawer), [], False
 
 
 def register_chart_suggestions_callbacks(app: Dash) -> None:

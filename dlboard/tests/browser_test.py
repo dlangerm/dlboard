@@ -2126,6 +2126,49 @@ def test_suggest_charts_filters_selects_and_adds_many_at_once(page: Page, live_s
     expect(page.get_by_role("button", name="Add selected (0)")).to_be_disabled()
 
 
+def test_suggest_charts_turns_pages_and_excludes_what_its_patterns_name(
+    page: Page, live_server_url: str
+) -> None:
+    """
+    A long list used to be one page of rows that was too long to scroll, with nothing to leave out. It is a page
+    at a time now, and an exclude pattern leaves out what it names (#478).
+    """
+    _create_project_and_experiment(page, live_server_url, "Suggest Paged Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    api = BasicDlboardAPI(live_server_url)
+    run = api.create_run(models.NewRun(experiment_id=experiment_id))
+    api.log_metric_batch(
+        [
+            models.LoggedMetrics(
+                experiment_id=experiment_id,
+                run_id=run.id,
+                step=0,
+                # Letters only: digits would fold a family of these into one band suggestion.
+                metrics={f"loss/{first}{second}": 1.0 for first in "abcdef" for second in "abcde"},
+                timestamp_utc=pendulum.now("UTC"),
+            )
+        ]
+    )
+    page.reload()
+    page.locator(f"#{NEW_PANEL_OPEN_ID}").click()
+    page.locator(f"#{NEW_PANEL_NAME_ID}").fill("Scratch")
+    page.locator(f"#{NEW_PANEL_ID}").click()
+    page.get_by_role("button", name="Suggest charts").first.click()
+
+    expect(page.get_by_text("Page 1 of 2: 1-25 of 30", exact=True)).to_be_visible()
+    expect(page.get_by_text("loss/aa", exact=True)).to_be_visible()
+    expect(page.get_by_text("loss/fa", exact=True)).to_have_count(0)
+    page.get_by_role("button", name="Next", exact=True).click()
+    expect(page.get_by_text("Page 2 of 2: 26-30 of 30", exact=True)).to_be_visible()
+    expect(page.get_by_text("loss/fa", exact=True)).to_be_visible()
+
+    page.get_by_placeholder("Exclude, e.g. grad, val/*").fill("loss/a*")
+    expect(page.get_by_text("loss/ab", exact=True)).to_have_count(0)
+    expect(page.get_by_text("loss/ba", exact=True)).to_be_visible()
+    expect(page.get_by_role("dialog").get_by_role("button", name="Next", exact=True)).to_have_count(0)
+
+
 def test_the_runs_table_shows_how_each_run_ended_and_for_how_long(page: Page, live_server_url: str) -> None:
     """A crashed run used to look exactly like a finished one, and nothing said how long either took."""
     _create_project_and_experiment(page, live_server_url, "Run Status Experiment")

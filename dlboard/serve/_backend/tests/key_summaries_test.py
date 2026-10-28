@@ -79,11 +79,15 @@ def test_summarize_metric_steps_judges_a_key_on_the_newest_runs_only(
     store: SQLLiteStore, experiment_id: int
 ) -> None:
     """The oldest run logged two steps, but it is older than the newest runs a summary looks at, so it does not count."""
-    oldest = store.create_run(models.NewRun(experiment_id=experiment_id))
+    # Creation times are distinct and ascending: runs made in one tight loop can tie, and then "newest" is a coin toss.
+    oldest = store.create_run(models.NewRun(experiment_id=experiment_id, created_at=_TS))
     _log(store, oldest, 0, m=1.0)
     _log(store, oldest, 1, m=1.0)
-    for _ in range(100):
-        _log(store, store.create_run(models.NewRun(experiment_id=experiment_id)), 0, m=1.0)
+    for index in range(1, 101):
+        newer = store.create_run(
+            models.NewRun(experiment_id=experiment_id, created_at=_TS.add(seconds=index))
+        )
+        _log(store, newer, 0, m=1.0)
 
     assert store.summarize_metric_steps(experiment_id, frozenset({"m"})) == [
         MetricKeySummary("m", max_steps_per_run=1)

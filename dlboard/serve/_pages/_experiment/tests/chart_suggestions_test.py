@@ -52,12 +52,8 @@ def test_the_preview_lists_a_bounded_number_of_panels_but_counts_them_all(
     assert [t for t in texts if t.startswith("…and")] == ([more] if more else [])
 
 
-@pytest.mark.parametrize(("total", "shown"), [(3, 3), (50, 50), (1200, 50)])
-def test_the_drawer_mounts_one_page_of_suggestions_and_says_how_many_the_filter_leaves(
-    total: int, shown: int
-) -> None:
-    """A row is a checkbox and a button, so the browser mounts one page of them however many metrics are uncharted."""
-    listed = [
+def _uncharted(total: int) -> list[autogen.Suggestion]:
+    return [
         autogen.Suggestion(
             key=f"m{i:04}",
             kind=ColumnKind.METRIC,
@@ -66,7 +62,26 @@ def test_the_drawer_mounts_one_page_of_suggestions_and_says_how_many_the_filter_
         )
         for i in range(total)
     ]
-    page = suggestions._render_suggestions(listed[:shown], total=total)
+
+
+def _view(page: int = 1) -> suggestions._View:
+    return suggestions._View(filter_text=None, exclude=None, sort=None, page=page)
+
+
+@pytest.mark.parametrize(
+    ("total", "shown", "pager"),
+    [
+        (3, 3, None),
+        (25, 25, None),
+        (26, 25, "Page 1 of 2: 1-25 of 26"),
+        (1200, 25, "Page 1 of 48: 1-25 of 1200"),
+    ],
+)
+def test_the_drawer_mounts_one_page_of_suggestions_and_says_which_page_it_is(
+    total: int, shown: int, pager: str | None
+) -> None:
+    """A row is a checkbox and a button, so the browser mounts one page of them however many metrics are uncharted."""
+    page = suggestions._render_suggestions(suggestions._page(_uncharted(total), _view()))
     nodes = _nodes(json.loads(cast("str", to_json(page))))
 
     texts = [
@@ -75,9 +90,33 @@ def test_the_drawer_mounts_one_page_of_suggestions_and_says_how_many_the_filter_
         if n["type"] == "Text" and isinstance(n["props"]["children"], str)
     ]
     assert sum(n["type"] == "Checkbox" for n in nodes) == shown
-    assert [t for t in texts if t.startswith("Showing")] == (
-        [f"Showing {shown} of {total}. Filter to narrow."] if total > shown else []
-    )
+    assert [t for t in texts if t.startswith("Page")] == ([pager] if pager else [])
+
+
+def test_the_drawer_turns_pages_and_stops_at_the_last_one() -> None:
+    listed = _uncharted(60)
+
+    second = suggestions._page(listed, _view(page=2))
+    assert (second.number, next(s.key for s in second.items)) == (2, "m0025")
+    assert suggestions._page(listed, _view(page=9)).number == 3
+    assert suggestions._page(listed, _view(page=0)).number == 1
+
+
+@pytest.mark.parametrize(
+    ("exclude", "left_out"),
+    [
+        pytest.param("", [], id="nothing-excluded"),
+        pytest.param("m0001", ["m0001"], id="a-word-leaves-out-what-contains-it"),
+        pytest.param("M0001, m0002", ["m0001", "m0002"], id="comma-separated-and-ignoring-case"),
+        pytest.param("*1", ["m0001"], id="a-star-matches-a-run-of-the-whole-name"),
+        pytest.param("p", [f"m{i:04}" for i in range(10)], id="a-word-matches-the-panel-too"),
+    ],
+)
+def test_the_exclude_patterns_leave_out_what_they_match(exclude: str, left_out: list[str]) -> None:
+    listed = _uncharted(10)
+    kept = autogen.visible_suggestions(listed, text="", exclude=exclude, sort=autogen.SuggestSort.NAME)
+
+    assert [s.key for s in kept] == [s.key for s in listed if s.key not in left_out]
 
 
 def test_the_preview_says_how_many_charts_auto_generate_left_out() -> None:
