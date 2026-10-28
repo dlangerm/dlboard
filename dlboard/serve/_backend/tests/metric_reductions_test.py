@@ -13,6 +13,7 @@ import sqlalchemy as sa
 from dlboard import models
 from dlboard.conftest import EVERY_STORE_BACKEND, StoreBackend
 from dlboard.plugins.data_stores.sqlite import SQLLiteStore
+from dlboard.serve._backend._sql_store_base import SETTLED_WALK_STEPS
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -319,3 +320,26 @@ def test_a_missing_last_value_is_looked_for_only_in_the_runs_and_keys_that_miss_
 
     assert frame.latest_per_run() == {first.id: {"x": 3.0, "y": 5.0}, second.id: {"x": 6.0, "y": 4.0}}
     assert asked == [[(first.id, "x"), (second.id, "y")]]
+
+
+@pytest.mark.parametrize(
+    ("missing_steps", "found"),
+    [
+        pytest.param(SETTLED_WALK_STEPS, True, id="the-last-real-value-is-within-the-walk"),
+        pytest.param(SETTLED_WALK_STEPS + 1, False, id="a-longer-diverged-tail-has-no-latest-value"),
+    ],
+)
+def test_a_diverged_tail_is_walked_back_only_as_far_as_the_walk_reaches(
+    store: SQLLiteStore, experiment_id: int, missing_steps: int, found: bool
+) -> None:
+    """Reads a window of steps, not the whole tail, so a run that diverged long ago costs the same (#415)."""
+    (run,) = _runs(store, experiment_id, 1)
+    _log(store, run, 0, loss=0.5)
+    for step in range(1, missing_steps + 1):
+        _log(store, run, step, loss=math.nan)
+
+    latest = store.fetch_metrics(
+        experiment_id, run_ids=None, reduction=models.MetricReduction.LATEST
+    ).latest_per_run()
+
+    assert latest == ({run.id: {"loss": 0.5}} if found else {})

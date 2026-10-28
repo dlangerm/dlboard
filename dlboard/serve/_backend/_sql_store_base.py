@@ -448,6 +448,14 @@ def _logged_keys(table: sa.Table, runs: sa.Table, experiment_id: int) -> sa.Subq
     return sa.select(keys.c.key).where(keys.c.key.is_not(None), logged_by_live_run).subquery("logged_keys")
 
 
+SETTLED_WALK_STEPS: Final = 100
+"""
+How many steps back from the end of a series a run's latest (or first) value is looked for, past its last missing value
+(#415). A run whose last values are missing for longer than this shows none, and what it costs is bounded by this, not
+by how long the run diverged. A proposal: the value is a product decision, not a tuning one.
+"""
+
+
 class SQLStoreBase[T](ABC, models.DataStore[T]):
     """
     The full `DataStore` contract over a database SQLAlchemy has a dialect for. Tested on SQLite and Postgres only.
@@ -1185,13 +1193,32 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             rewritten.c.id > m.c.id,
         )
 
+        def edge_step(order: Any) -> sa.ScalarSelect[Any]:  # noqa: ANN401
+            """The series' last (or first) step, whatever its value: the end the walk starts from."""
+            return (
+                sa.select(m.c.step)
+                .where(*_series(m, experiment_id, named.c.key, named.c.run_id))
+                .order_by(order)
+                .limit(1)
+                .correlate(named)
+                .scalar_subquery()
+            )
+
         def at_the_end(column: sa.ColumnElement[Any]) -> sa.ScalarSelect[Any]:
+            # Walks back at most `SETTLED_WALK_STEPS` steps from the end: a diverged run whose last values are missing for
+            # longer than that has no latest value (#415). Bounded here, not per row, so the probe reads a window of steps.
+            near_end = (
+                m.c.step >= edge_step(m.c.step.desc()) - SETTLED_WALK_STEPS
+                if latest
+                else m.c.step <= edge_step(m.c.step.asc()) + SETTLED_WALK_STEPS
+            )
             return (
                 sa.select(column)
                 .where(
                     *_series(m, experiment_id, named.c.key, named.c.run_id),
                     _is_number(m.c.value),
                     newest_write,
+                    near_end,
                 )
                 .order_by(*end)
                 .limit(1)
