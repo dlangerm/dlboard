@@ -34,7 +34,8 @@ between rows, the ticks named on a value axis and the default shape are `DLBOARD
 [Configuration](../configuration.md). Auto-generate makes a heatmap for each histogram key.
 
 `table_chart.py` is a data table. Two settings shape it: what a **row** is (`rows`), and which **columns** it
-shows (`show_metrics`, `show_hparams`, `show_artifacts`).
+shows (`show_metrics`, `show_hparams`, `show_artifacts`). A new table shows no columns until one is picked, so it
+says so where its values would be; a metric, hyperparameter or artifact picked in its settings fills it in.
 
 - `rows: run` (the default) is a row per run: its hyperparameters beside the latest value of each metric --
   each metric's own latest, as in the Runs table, not whatever was logged at the run's last step -- and its

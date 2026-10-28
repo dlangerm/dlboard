@@ -2955,7 +2955,7 @@ def test_a_tables_numbers_are_shown_by_what_they_are(page: Page, live_server_url
     )
     store = get_system_data_store()
     shared = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
-    table = models.ChartInstance[Any, Any](chart_type="table", parameters={})
+    table = models.ChartInstance[Any, Any](chart_type="table", parameters={"show_metrics": ["*"]})
     store.update_page(
         shared.model_copy(update={"panels": [PanelInstance[Any, Any](name="Numbers", charts=[table])]})
     )
@@ -3000,7 +3000,9 @@ def test_a_tables_sort_filter_and_page_survive_a_live_update_redrawing_it(
         log_loss(run, 0, float(n))
     store = get_system_data_store()
     shared = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
-    table = models.ChartInstance[Any, Any](chart_type="table", parameters={"page_size": 3})
+    table = models.ChartInstance[Any, Any](
+        chart_type="table", parameters={"show_metrics": ["*"], "page_size": 3}
+    )
     store.update_page(
         shared.model_copy(update={"panels": [PanelInstance[Any, Any](name="Runs", charts=[table])]})
     )
