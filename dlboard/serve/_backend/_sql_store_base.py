@@ -451,34 +451,6 @@ def _logged_keys(table: sa.Table, runs: sa.Table, experiment_id: int) -> sa.Subq
     return sa.select(keys.c.key).where(keys.c.key.is_not(None), logged_by_live_run).subquery("logged_keys")
 
 
-def _probe_for(
-    table: sa.Table, runs: sa.Table, experiment_id: int, key: str, dialect: sa.Dialect
-) -> sa.Select[tuple[str]]:
-    """
-    `_logged_keys`'s probe for one key, with the key written into the statement as a literal.
-
-    Not bound: a probe the planner plans for any key costs what an average key costs, and a rare key that no live run logged
-    can cost the whole table (see `SQLStoreBase._live_key_names`).
-    """
-    literal_key = sa.literal_column(
-        cast("Callable[[str], str]", sa.String().literal_processor(dialect=dialect))(key)
-    )
-    # Each row's run is looked up by its id, not joined: a join lets the planner merge-scan every run in the experiment.
-    live_run = (
-        sa.select(runs.c.id)
-        .where(runs.c.id == table.c.run_id, *_live_runs(runs, experiment_id))
-        .correlate(table)
-        .scalar_subquery()
-    )
-    first_live_run = (
-        sa.select(table.c.run_id)
-        .where(table.c.experiment_id == experiment_id, table.c.key == literal_key, live_run.is_not(None))
-        .limit(1)
-        .scalar_subquery()
-    )
-    return sa.select(literal_key.label("key")).where(first_live_run.is_not(None))
-
-
 class SQLStoreBase[T](ABC, models.DataStore[T]):
     """
     The full `DataStore` contract over a database SQLAlchemy has a dialect for. Tested on SQLite and Postgres only.
@@ -1316,31 +1288,11 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         )
         return [MetricRow._make(row) for row in rows]
 
-    def _live_key_names(self, table: sa.Table, runs: sa.Table, experiment_id: int) -> list[str]:
-        """
-        The keys a per-step `table` holds for a run of the experiment that is not soft-deleted, sorted.
-
-        On Postgres the keys come from `_distinct_keys`, then each is probed as a literal (`_probe_for`), in one
-        statement. The planner's plan for a probe whose key is a column depends on the keys it has not seen, and it
-        picks a sequential scan of the whole table for a key only deleted runs logged (#481). SQLite is probed as a column,
-        as before: its planner does not pick that scan.
-        """
-        if self._engine.dialect.name != "postgresql":
-            keys = _logged_keys(table, runs, experiment_id)
-            return [key for (key,) in self._execute(sa.select(keys.c.key).order_by(keys.c.key))]
-        distinct = _distinct_keys(table, experiment_id)
-        names = [
-            key for (key,) in self._execute(sa.select(distinct.c.key).where(distinct.c.key.is_not(None)))
-        ]
-        if not names:
-            return []
-        probes = [_probe_for(table, runs, experiment_id, key, self._engine.dialect) for key in names]
-        return sorted(key for (key,) in self._execute(sa.union_all(*probes), uncached=True))
-
     def summarize_metric_keys(self, experiment_id: int) -> list[str]:
         """Every metric key logged in an experiment (non-deleted runs), sorted, without judging or fetching any."""
         m, r = self._tables[models.UnderlyingMetricTableEntry], self._tables[models.Run]
-        return self._live_key_names(m, r, experiment_id)
+        keys = _logged_keys(m, r, experiment_id)
+        return [key for (key,) in self._execute(sa.select(keys.c.key).order_by(keys.c.key))]
 
     def summarize_metric_steps(self, experiment_id: int, keys: frozenset[str]) -> list[MetricKeySummary]:
         """
@@ -1582,9 +1534,10 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
 
     def summarize_histogram_keys(self, experiment_id: int) -> list[str]:
         """Every histogram key logged in an experiment (non-deleted runs), sorted, without fetching any."""
-        return self._live_key_names(
+        keys = _logged_keys(
             self._tables[models.UnderlyingHistogramTableEntry], self._tables[models.Run], experiment_id
         )
+        return [key for (key,) in self._execute(sa.select(keys.c.key).order_by(keys.c.key))]
 
     def log_hyperparams(self, hyperparams: models.NewHyperParams) -> models.HyperParams:
         """Log hyperparameters to the data store."""
