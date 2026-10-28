@@ -609,6 +609,34 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             msg = f"{model.__name__} {entity_id} has been deleted"
             raise ValueError(msg)
 
+    def _ensure_runs_not_deleted(self, run_ids: set[int]) -> None:
+        """
+        `_ensure_not_deleted` for many runs at once: one read, not one transaction a run (#436).
+
+        Raises as the one-at-a-time check does: for a run that does not exist, or that has been soft-deleted.
+        """
+        if not run_ids:
+            return
+        r = self._tables[models.Run]
+        found = dict(self._execute(sa.select(r.c.id, r.c.deleted_at).where(r.c.id.in_(run_ids))))
+        if missing := run_ids - found.keys():
+            msg = f"Run {min(missing)} does not exist"
+            raise ValueError(msg)
+        if deleted := {run_id for run_id, deleted_at in found.items() if deleted_at is not None}:
+            msg = f"Run {min(deleted)} has been deleted"
+            raise ValueError(msg)
+
+    def _touch_experiments(self, experiment_ids: set[int]) -> None:
+        """`_touch_experiment` for many experiments, in one statement: each is still its own short transaction, not one held over the batch."""
+        if not experiment_ids:
+            return
+        experiments = self._tables[models.Experiment]
+        self._execute(
+            sa.update(experiments)
+            .where(experiments.c.id.in_(experiment_ids))
+            .values(revision=experiments.c.revision + 1, last_activity_at=pendulum.now(pendulum.UTC))
+        )
+
     def _touch_experiment(self, experiment_id: int) -> None:
         """
         Bump an experiment's `revision` counter (and `last_activity_at`) after a mutation visible on its page.
@@ -1614,11 +1642,9 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
 
     def log_artifact_refs(self, artifacts: Iterable[models.Artifact]) -> None:
         artifacts = list(artifacts)
-        for run_id in {a.run_id for a in artifacts}:
-            self._ensure_not_deleted(models.Run, run_id)
+        self._ensure_runs_not_deleted({a.run_id for a in artifacts})
         self._insert_rows(models.Artifact, artifacts)
-        for experiment_id in {a.experiment_id for a in artifacts}:
-            self._touch_experiment(experiment_id)
+        self._touch_experiments({a.experiment_id for a in artifacts})
 
     def count_artifacts_by_ref(self, ref: str) -> int:
         a = self._tables[models.Artifact]
