@@ -427,24 +427,27 @@ def _logged_keys(table: sa.Table, runs: sa.Table, experiment_id: int) -> sa.Subq
     """
     The keys a per-step `table` holds for a run of the experiment that is not soft-deleted, as a `key` column.
 
-    The keys come from `_distinct_keys`; each is then kept for the first live run found to have logged it,
-    which for a key logged by the experiment's runs is the first run probed.
+    The keys come from `_distinct_keys`; each is kept if any live run logged it, found by one probe per key that stops at
+    the first such row (#372). The probe is scalar, with no order, so the index on the key and run answers it.
     """
     keys = _distinct_keys(table, experiment_id)
-    # Explicit, because a subquery auto-correlates only to the select directly around it, not the one around that.
-    logged_by_live_run = sa.exists(
-        sa.select(sa.literal(1))
-        .select_from(runs)
+    # A key's first row in a live run, found through the run join: a key a live run logged costs one probe, and a key
+    # only deleted runs logged reads only those runs' rows (#372). A scalar subquery, not an EXISTS, which Postgres
+    # flattens into a join over every row.
+    first_live_run = (
+        sa.select(table.c.run_id)
+        .select_from(table)
+        .join(runs, table.c.run_id == runs.c.id)
         .where(
+            table.c.experiment_id == experiment_id,
+            table.c.key == keys.c.key,
             *_live_runs(runs, experiment_id),
-            sa.exists(
-                sa.select(sa.literal(1))
-                .where(*_series(table, experiment_id, keys.c.key, runs.c.id))
-                .correlate(keys, runs)
-            ),
         )
+        .limit(1)  # any live run will do, so no order: an order walks the run index over every row (#372)
         .correlate(keys)
+        .scalar_subquery()
     )
+    logged_by_live_run = first_live_run.is_not(None)
     return sa.select(keys.c.key).where(keys.c.key.is_not(None), logged_by_live_run).subquery("logged_keys")
 
 
