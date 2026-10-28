@@ -1125,33 +1125,59 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         # Asked for by name, the keys are probed directly; only "every metric" has to find out which keys there are.
         logged = _distinct_keys(m, experiment_id) if keys is None else _named_keys(keys, self._engine.dialect)
         end = (m.c.step.desc() if latest else m.c.step.asc(), m.c.id.desc())
-        end_id = (
-            sa.select(m.c.id)
-            .where(*_series(m, experiment_id, logged.c.key, r.c.id))
-            .order_by(*end)
-            .limit(1)
-            .correlate(logged, r)
-            .scalar_subquery()
-        )
-        # Found once, as a CTE: each run and key is probed once, however many columns are read from its row.
-        ends = (
-            sa.select(r.c.id.label("run_id"), logged.c.key.label("key"), end_id.label("end_id"))
-            .select_from(logged.join(r, sa.true()))
-            .where(logged.c.key.is_not(None), *_live_runs(r, experiment_id), *_runs_among(r.c.id, run_ids))
-            .cte("ends")
-        )
-        found = m.alias("found")
+        if self._engine.dialect.name == "postgresql":
+            # One lateral probe per run and key, reading the end row's own columns: no second lookup by its id (#373).
+            end_row = (
+                sa.select(m.c.step, m.c.value, m.c.timestamp_utc)
+                .where(*_series(m, experiment_id, logged.c.key, r.c.id))
+                .order_by(*end)
+                .limit(1)
+                .correlate(logged, r)
+                .lateral("end_row")
+            )
+            ends_of = (
+                sa.select(
+                    r.c.id.label("run_id"),
+                    end_row.c.step,
+                    logged.c.key,
+                    end_row.c.value,
+                    end_row.c.timestamp_utc,
+                )
+                .select_from(logged.join(r, sa.true()).join(end_row, sa.true()))
+                .where(
+                    logged.c.key.is_not(None), *_live_runs(r, experiment_id), *_runs_among(r.c.id, run_ids)
+                )
+            )
+        else:
+            # SQLite has no LATERAL: the end row is found, then read by its id, as before.
+            end_id = (
+                sa.select(m.c.id)
+                .where(*_series(m, experiment_id, logged.c.key, r.c.id))
+                .order_by(*end)
+                .limit(1)
+                .correlate(logged, r)
+                .scalar_subquery()
+            )
+            ends = (
+                sa.select(r.c.id.label("run_id"), logged.c.key.label("key"), end_id.label("end_id"))
+                .select_from(logged.join(r, sa.true()))
+                .where(
+                    logged.c.key.is_not(None), *_live_runs(r, experiment_id), *_runs_among(r.c.id, run_ids)
+                )
+                .cte("ends")
+            )
+            found = m.alias("found")
 
-        def of_the_end(column: sa.ColumnElement[Any]) -> sa.ScalarSelect[Any]:
-            return sa.select(column).where(found.c.id == ends.c.end_id).correlate(ends).scalar_subquery()
+            def of_the_end(column: sa.ColumnElement[Any]) -> sa.ScalarSelect[Any]:
+                return sa.select(column).where(found.c.id == ends.c.end_id).correlate(ends).scalar_subquery()
 
-        ends_of = sa.select(
-            ends.c.run_id,
-            of_the_end(found.c.step).label("step"),
-            ends.c.key,
-            of_the_end(found.c.value).label("value"),
-            of_the_end(found.c.timestamp_utc).label("timestamp_utc"),
-        ).where(ends.c.end_id.is_not(None))
+            ends_of = sa.select(
+                ends.c.run_id,
+                of_the_end(found.c.step).label("step"),
+                ends.c.key,
+                of_the_end(found.c.value).label("value"),
+                of_the_end(found.c.timestamp_utc).label("timestamp_utc"),
+            ).where(ends.c.end_id.is_not(None))
         rows = [MetricRow._make(row) for row in self._execute(ends_of, uncached=keys is not None)]
         unsettled = {(row.run_id, row.key) for row in rows if row.value is None or math.isnan(row.value)}
         if not unsettled:
