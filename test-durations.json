@@ -1141,6 +1141,7 @@
   "dlboard/serve/_backend/tests/read_scaling_test.py::test_a_load_reads_no_more_rows_for_an_experiment_that_trained_longer[the latest of a metric pattern]": 3.44873862498207,
   "dlboard/serve/_backend/tests/read_scaling_test.py::test_a_load_reads_no_more_rows_for_an_experiment_that_trained_longer[the newest runs]": 0.7616432010545395,
   "dlboard/serve/_backend/tests/read_scaling_test.py::test_a_load_reads_no_more_rows_for_an_experiment_that_trained_longer[the run comparison]": 1.0242607379332185,
+  "dlboard/serve/_backend/tests/read_scaling_test.py::test_the_key_check_reads_no_more_for_a_key_only_a_deleted_run_logged_among_more_live_runs": 28.073216130003857,
   "dlboard/serve/_backend/tests/schema_upgrade_test.py::test_second_store_against_an_already_migrated_database_is_a_no_op[postgres]": 0.6351086409995332,
   "dlboard/serve/_backend/tests/schema_upgrade_test.py::test_second_store_against_an_already_migrated_database_is_a_no_op[sqlite]": 0.13503569198655896,
   "dlboard/serve/_backend/tests/series_band_test.py::test_a_cell_counts_only_the_keys_that_logged_a_number_in_it[postgres]": 0.5469860449666157,

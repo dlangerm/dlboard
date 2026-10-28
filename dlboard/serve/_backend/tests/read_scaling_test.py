@@ -308,3 +308,62 @@ def test_a_load_over_many_keys_reads_no_more_pages_for_an_experiment_that_traine
     assert read_long.pages <= 2 * read_short.pages + 10, (
         f"{read_long.pages} pages for {_WIDE_LONG} steps, {read_short.pages} for {_SHORT}, with {_WIDE_KEYS} keys"
     )
+
+
+def _stray_only_in_a_deleted_run(store: PostgresStore, project_id: int, runs: int) -> int:
+    """
+    An experiment of `runs` live runs, each logging `loss` at 20 steps; one more run, soft-deleted, is the only one to log `stray`.
+
+    No live run logged `stray`, so the catalog must look at every live run to find that out (#372).
+    """
+    experiment = store.create_experiment(models.NewExperiment(project_id=project_id))
+    for _ in range(runs):
+        run = store.create_run(models.NewRun(experiment_id=experiment.id))
+        store.log_metrics(
+            [
+                models.LoggedMetrics(
+                    metrics={"loss": float(step)},
+                    step=step,
+                    experiment_id=experiment.id,
+                    run_id=run.id,
+                    timestamp_utc=pendulum.now(),
+                )
+                for step in range(20)
+            ]
+        )
+    gone = store.create_run(models.NewRun(experiment_id=experiment.id))
+    store.log_metrics(
+        [
+            models.LoggedMetrics(
+                metrics={"stray": 1.0},
+                step=step,
+                experiment_id=experiment.id,
+                run_id=gone.id,
+                timestamp_utc=pendulum.now(),
+            )
+            for step in range(20)
+        ]
+    )
+    store.delete_run(gone.id, store.get_or_create_user(models.Principal.unverified("admin")))
+    with store._engine.begin() as conn:
+        for table in store.tables.values():
+            conn.exec_driver_sql(f'ANALYZE "{table.schema}"."{table.name}"')
+    return experiment.id
+
+
+def test_the_key_check_reads_no_more_for_a_key_only_a_deleted_run_logged_among_more_live_runs(
+    store: PostgresStore,
+) -> None:
+    """A key no live run logged costs the check every live run; it should not cost more as the live runs grow (#372)."""
+    project_id = store.create_project(models.NewProject(name="p", description="d")).id
+    few = _stray_only_in_a_deleted_run(store, project_id, runs=100)
+    many = _stray_only_in_a_deleted_run(store, project_id, runs=1000)
+
+    alone = _work(store, lambda: store.summarize_metric_keys(few))
+    among_many = _work(store, lambda: store.summarize_metric_keys(many))
+
+    assert alone.rows == 1  # `loss`; `stray` is not offered
+    assert among_many.rows == 1
+    assert among_many.pages <= 2 * alone.pages + 10, (
+        f"{among_many.pages} pages for 1000 runs, {alone.pages} for 100"
+    )
