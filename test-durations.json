@@ -652,7 +652,7 @@
   "dlboard/plugins/charts/tests/table_settings_test.py::test_the_artifact_keys_a_table_asks_the_panel_to_fetch[prefix]": 0.0006376480159815401,
   "dlboard/plugins/charts/tests/table_settings_test.py::test_the_metrics_and_hparams_a_table_asks_the_panel_to_fetch[a-name-is-not-a-pattern]": 0.0008147389996793208,
   "dlboard/plugins/charts/tests/table_settings_test.py::test_the_metrics_and_hparams_a_table_asks_the_panel_to_fetch[a-star-in-the-middle]": 0.0007756140000765299,
-  "dlboard/plugins/charts/tests/table_settings_test.py::test_the_metrics_and_hparams_a_table_asks_the_panel_to_fetch[everything-by-default]": 0.12946221200013497,
+  "dlboard/plugins/charts/tests/table_settings_test.py::test_the_metrics_and_hparams_a_table_asks_the_panel_to_fetch[everything]": 0.0017883710097521544,
   "dlboard/plugins/charts/tests/table_settings_test.py::test_the_metrics_and_hparams_a_table_asks_the_panel_to_fetch[names]": 0.0008250359996964107,
   "dlboard/plugins/charts/tests/table_settings_test.py::test_the_metrics_and_hparams_a_table_asks_the_panel_to_fetch[no-hparams]": 0.0007860030000301776,
   "dlboard/plugins/charts/tests/table_settings_test.py::test_the_metrics_and_hparams_a_table_asks_the_panel_to_fetch[only-hparams]": 0.0007230010000967013,

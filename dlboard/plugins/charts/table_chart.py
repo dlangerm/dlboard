@@ -97,6 +97,9 @@ ARTIFACT_RENDERER: typing.Final = "DlboardArtifactLink"
 _LINK_SUFFIX: typing.Final = "__link"
 """What a link's field is followed by for the field that holds what the renderer draws it from."""
 
+_PICK_A_COLUMN: typing.Final = "Nothing is shown yet. Pick a metric, hyperparameter or artifact in this chart's settings to see its values."
+"""What a table says where its values would be, when a new table has nothing picked yet."""
+
 _ROW_ID_FIELD: typing.Final = "_row_id"
 _SWATCH_FIELD: typing.Final = "_swatch"
 """A row's identity and a run's swatch class, as fields of its own: dash-ag-grid's JS-string parser has no `String(...)`."""
@@ -563,6 +566,18 @@ def _render_artifact_rows(source: _Source) -> dag.AgGrid:
     return _table(column_defs, rows, parameters=parameters, context=source.context, thumbnails=thumbnails)
 
 
+def _empty_message(parameters: TableChartSettings, dataframe: pd.DataFrame) -> str | None:
+    """What a table says instead of its rows, or `None` when it has rows to show."""
+    # A new table reads nothing until something is picked, and says so where its values would be (#393).
+    if parameters.rows is TableRows.RUN and not (
+        parameters.show_metrics or parameters.show_hparams or parameters.show_artifacts
+    ):
+        return _PICK_A_COLUMN
+    if dataframe.empty:
+        return "No data logged yet."
+    return None
+
+
 class TableChart(ChartType[TableChartSettings, pd.DataFrame, dag.AgGrid], frozen=True, extra="forbid"):
     """A data table over metrics, hyperparameters and artifacts."""
 
@@ -583,8 +598,9 @@ class TableChart(ChartType[TableChartSettings, pd.DataFrame, dag.AgGrid], frozen
     def render_in(
         cls, parameters: TableChartSettings, dataframe: pd.DataFrame, context: RenderContext
     ) -> dag.AgGrid:
-        if dataframe.empty:
-            return _message_table("No data logged yet.", parameters, context)
+        message = _empty_message(parameters, dataframe)
+        if message is not None:
+            return _message_table(message, parameters, context)
         ordered = (
             dataframe.sort_values([MetricColumn.RUN_ID, MetricColumn.STEP])
             if MetricColumn.STEP in dataframe.columns

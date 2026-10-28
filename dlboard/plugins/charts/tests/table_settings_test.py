@@ -23,7 +23,11 @@ _Asked = tuple[set[str], set[str], set[str], set[str]]
 @pytest.mark.parametrize(
     ("settings", "asked"),
     [
-        pytest.param(TableChartSettings(), ({"step"}, {"*"}, set(), {"*"}), id="everything-by-default"),
+        pytest.param(
+            TableChartSettings(show_metrics=["*"], show_hparams=["*"]),
+            ({"step"}, {"*"}, set(), {"*"}),
+            id="everything",
+        ),
         pytest.param(
             TableChartSettings(show_metrics=["loss", "acc"], show_hparams=["lr"]),
             ({"loss", "acc", "step"}, set(), {"lr"}, set()),
@@ -143,12 +147,12 @@ def test_rows_must_say_what_they_are_made_of(settings: dict[str, str], missing: 
         ),
         pytest.param(
             {"artifacts": ["img"]},
-            TableChartSettings(show_artifacts=["img"]),
+            TableChartSettings(show_metrics=["*"], show_hparams=["*"], show_artifacts=["img"]),
             id="artifacts-beside-everything",
         ),
         pytest.param(
             {"mode": "runs", "metrics": ["loss"], "pivot_on": "step", "page_size": 5},
-            TableChartSettings(show_metrics=["loss"], page_size=5),
+            TableChartSettings(show_metrics=["loss"], show_hparams=["*"], page_size=5),
             id="runs-ignores-the-pivot",
         ),
         pytest.param(

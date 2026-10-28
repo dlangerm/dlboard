@@ -139,12 +139,16 @@ _BAR = _chart("bar", column="loss", x_axis="lr")
             {MetricReduction.LATEST: {"loss", "lr"}, MetricReduction.HISTORY: {"loss", "step"}},
             id="a-metric-they-disagree-on-is-read-both-ways",
         ),
-        pytest.param([_chart("table")], {MetricReduction.LATEST: None}, id="every-metric-as-asked"),
         pytest.param(
-            [_chart("table"), _BAR], {MetricReduction.LATEST: None}, id="every-metric-when-all-ask-the-same"
+            [_chart("table", show_metrics=["*"])], {MetricReduction.LATEST: None}, id="every-metric-as-asked"
         ),
         pytest.param(
-            [_chart("table"), _LINE],
+            [_chart("table", show_metrics=["*"]), _BAR],
+            {MetricReduction.LATEST: None},
+            id="every-metric-when-all-ask-the-same",
+        ),
+        pytest.param(
+            [_chart("table", show_metrics=["*"]), _LINE],
             {MetricReduction.LATEST: None, MetricReduction.HISTORY: {"loss", "step"}},
             id="every-metric-as-the-table-asks-and-the-line-whole",
         ),

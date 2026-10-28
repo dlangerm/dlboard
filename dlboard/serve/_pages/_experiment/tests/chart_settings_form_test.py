@@ -108,7 +108,7 @@ def test_a_table_takes_typed_names_and_prefixes_not_only_those_that_exist(
         build_chart_param_form("table", None, catalog=ColumnCatalog.load(store, experiment_id))
     )
 
-    assert table["show_metrics"]["value"] == ["*"]
+    assert table["show_metrics"]["value"] == []
     assert table["show_artifacts"]["value"] == []
 
 

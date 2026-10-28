@@ -39,10 +39,10 @@ def test_a_panel_traces_each_read_by_kind_and_each_chart_it_renders(
             for step in range(3)
         ]
     )
-    # A table that names no metrics reads every one of them: the read that grows with the experiment.
+    # A table that shows every metric reads every one of them: the read that grows with the experiment.
     charts = [
         ChartInstance(chart_type=LineChart.name, parameters={"column": "loss", "x_axis": "step"}),
-        ChartInstance(chart_type=TableChart.name),
+        ChartInstance(chart_type=TableChart.name, parameters={"show_metrics": ["*"], "show_hparams": ["*"]}),
     ]
     panel = PanelInstance[Any, Any](name="a panel name", charts=charts)
 

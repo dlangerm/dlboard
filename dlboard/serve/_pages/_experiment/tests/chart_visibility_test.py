@@ -86,16 +86,20 @@ def test_render_panel_charts_no_badge_when_chart_hints_its_columns() -> None:
 @pytest.mark.parametrize(
     ("parameters", "badged"),
     [
-        pytest.param({"rows": "field", "row_field": "step"}, True, id="every-step-of-every-metric"),
-        pytest.param({"aggregate": "mean"}, True, id="a-mean-reads-every-step"),
-        pytest.param({}, False, id="one-value-per-run"),
+        pytest.param(
+            {"rows": "field", "row_field": "step", "show_metrics": ["*"]},
+            True,
+            id="every-step-of-every-metric",
+        ),
+        pytest.param({"aggregate": "mean", "show_metrics": ["*"]}, True, id="a-mean-reads-every-step"),
+        pytest.param({"show_metrics": ["*"]}, False, id="one-value-per-run"),
     ],
 )
 def test_render_panel_charts_badge_only_when_an_unscoped_chart_reads_every_step(
-    parameters: dict[str, str], *, badged: bool
+    parameters: dict[str, object], *, badged: bool
 ) -> None:
-    """A table chart with no `metrics` filter set (its documented "show everything" default) can't name the
-    columns to fetch, which only costs what the badge warns of if it reads every step of them."""
+    """A table chart showing every metric (`show_metrics: ["*"]`) can't name the columns to fetch, which only
+    costs what the badge warns of if it reads every step of them."""
     panel = PanelInstance[Any, Any](
         name="p", charts=[ChartInstance[Any, Any](chart_type="table", parameters=parameters)]
     )

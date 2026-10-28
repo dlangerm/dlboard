@@ -25,6 +25,8 @@ from dlboard.serve import series_swatch_class
 from dlboard.serve._grid import DEFAULT_TABLE_FONT_SIZE
 
 GAP = float("nan")
+_EVERYTHING = {"show_metrics": ["*"], "show_hparams": ["*"]}
+"""Every metric and hyperparameter shown: what a table showed by default before a new table started with none."""
 LR = f"{HPARAM_COLUMN_PREFIX}lr"
 BATCH_SIZE = f"{HPARAM_COLUMN_PREFIX}batch_size"
 
@@ -92,7 +94,7 @@ def _image(url: str, name: str) -> str:
 
 
 def test_render_empty_dataframe_shows_a_message() -> None:
-    [row] = _render(TableChartSettings(), pd.DataFrame())["rowData"]
+    [row] = _render(TableChartSettings(**_EVERYTHING), pd.DataFrame())["rowData"]
     assert "No data" in row["message"]
 
 
@@ -101,7 +103,7 @@ def test_a_run_row_shows_each_metrics_own_latest_value() -> None:
     df = pd.DataFrame(
         {"run_id": [1, 1, 1], "step": [0, 1, 2], "loss": [0.5, 0.4, 0.3], "val_acc": [0.6, GAP, GAP]}
     )
-    [row] = _render(TableChartSettings(), df)["rowData"]
+    [row] = _render(TableChartSettings(**_EVERYTHING), df)["rowData"]
 
     assert row["loss"] == pytest.approx(0.3)
     assert row["val_acc"] == pytest.approx(0.6)
@@ -109,7 +111,7 @@ def test_a_run_row_shows_each_metrics_own_latest_value() -> None:
 
 def test_a_run_row_does_not_show_bookkeeping_columns() -> None:
     row = _rows_by_run(
-        TableChart.render(TableChartSettings(), _wide_df().assign(timestamp_utc=pd.Timestamp(0)))
+        TableChart.render(TableChartSettings(**_EVERYTHING), _wide_df().assign(timestamp_utc=pd.Timestamp(0)))
     )[1]
     assert not {"step", "timestamp_utc"} & row.keys()
 
@@ -120,7 +122,9 @@ def test_a_metric_can_be_asked_for_by_name_even_when_it_is_bookkeeping() -> None
 
 
 def test_hparam_columns_are_titled_without_the_prefix_and_apart_from_a_metric_of_the_same_name() -> None:
-    table = TableChart.render(TableChartSettings(), _wide_df().assign(lr=[0.01, 0.02, 0.03, 0.04]))
+    table = TableChart.render(
+        TableChartSettings(**_EVERYTHING), _wide_df().assign(lr=[0.01, 0.02, 0.03, 0.04])
+    )
     headers = {column["field"]: column["headerName"] for column in _leaf_columns(table)}
     row = _rows_by_run(table)[1]
 
@@ -129,7 +133,7 @@ def test_hparam_columns_are_titled_without_the_prefix_and_apart_from_a_metric_of
 
 
 def test_a_dotted_metric_name_is_never_read_as_a_nested_field() -> None:
-    props = _render(TableChartSettings(), _wide_df().rename(columns={"loss": "val.loss"}))
+    props = _render(TableChartSettings(**_EVERYTHING), _wide_df().rename(columns={"loss": "val.loss"}))
     assert props["dashGridOptions"]["suppressFieldDotNotation"] is True
 
 
@@ -146,10 +150,15 @@ def test_a_dotted_metric_name_is_never_read_as_a_nested_field() -> None:
             TableChartSettings(show_metrics=["acc", "l*"]), {"acc", "loss", "lr_decay"}, set(), id="both"
         ),
         pytest.param(
-            TableChartSettings(show_metrics=[]), set(), {"loss", "acc", "lr_decay"}, id="no-metrics"
+            TableChartSettings(show_metrics=[], show_hparams=["*"]),
+            set(),
+            {"loss", "acc", "lr_decay"},
+            id="no-metrics",
         ),
         pytest.param(TableChartSettings(show_hparams=["lr"]), {LR}, {BATCH_SIZE}, id="hparam"),
-        pytest.param(TableChartSettings(show_hparams=[]), set(), {LR, BATCH_SIZE}, id="no-hparams"),
+        pytest.param(
+            TableChartSettings(show_metrics=["*"], show_hparams=[]), set(), {LR, BATCH_SIZE}, id="no-hparams"
+        ),
     ],
 )
 def test_a_run_row_shows_the_metrics_and_hparams_the_settings_pick(
@@ -175,13 +184,13 @@ def test_picking_an_artifact_does_not_bring_every_hyperparameter_along() -> None
 
 
 def test_a_run_row_leaves_out_artifacts_that_are_not_picked() -> None:
-    row = _rows_by_run(TableChart.render(TableChartSettings(), _artifacts_df()))[1]
+    row = _rows_by_run(TableChart.render(TableChartSettings(**_EVERYTHING), _artifacts_df()))[1]
     assert not any(field.startswith("artifact__") for field in row)
 
 
 def test_a_run_row_names_the_run_and_colors_it_as_the_charts_do() -> None:
     df = _wide_df().assign(**{RUN_NAME_COLUMN: pd.Series(["one", "one", None, None], dtype=object)})
-    table = TableChart.render(TableChartSettings(), df)
+    table = TableChart.render(TableChartSettings(**_EVERYTHING), df)
     rows = _rows_by_run(table)
     run_column = _leaf_columns(table)[0]
 
@@ -193,9 +202,9 @@ def test_a_run_row_names_the_run_and_colors_it_as_the_charts_do() -> None:
 
 
 def test_a_run_row_groups_hparams_and_metrics_under_their_headers() -> None:
-    groups: list[dict[str, Any]] = _render(TableChartSettings(aggregate=Aggregate.MAX), _wide_df())[
-        "columnDefs"
-    ][1:]
+    groups: list[dict[str, Any]] = _render(
+        TableChartSettings(**_EVERYTHING, aggregate=Aggregate.MAX), _wide_df()
+    )["columnDefs"][1:]
     assert [group["headerName"] for group in groups] == ["Hyperparameters", "Metrics (max)"]
 
 
@@ -210,7 +219,7 @@ def test_a_run_row_groups_hparams_and_metrics_under_their_headers() -> None:
     ],
 )
 def test_a_run_row_reduces_a_metric_as_the_aggregate_says(aggregate: Aggregate, run_1_loss: float) -> None:
-    table = TableChart.render(TableChartSettings(aggregate=aggregate), _wide_df())
+    table = TableChart.render(TableChartSettings(**_EVERYTHING, aggregate=aggregate), _wide_df())
     assert _rows_by_run(table)[1]["loss"] == pytest.approx(run_1_loss)
 
 
@@ -222,16 +231,19 @@ def test_a_metric_that_is_not_a_number_is_never_averaged() -> None:
 
 def test_a_run_row_without_a_step_column_dedupes_by_run() -> None:
     df = pd.DataFrame({"run_id": [1, 1], LR: [0.1, 0.1]})
-    assert len(_render(TableChartSettings(), df)["rowData"]) == 1
+    assert len(_render(TableChartSettings(**_EVERYTHING), df)["rowData"]) == 1
 
 
 def test_font_size_defaults_to_the_shared_smaller_one_and_can_be_set_in_pixels() -> None:
-    assert _render(TableChartSettings(), _wide_df())["style"]["--ag-font-size"] == DEFAULT_TABLE_FONT_SIZE
+    assert (
+        _render(TableChartSettings(**_EVERYTHING), _wide_df())["style"]["--ag-font-size"]
+        == DEFAULT_TABLE_FONT_SIZE
+    )
     assert _render(TableChartSettings(font_size=20), _wide_df())["style"]["--ag-font-size"] == "20px"
 
 
 def test_natural_width_is_flat_unless_set() -> None:
-    assert TableChart.natural_width(TableChartSettings()) == 700
+    assert TableChart.natural_width(TableChartSettings(**_EVERYTHING)) == 700
     assert TableChart.natural_width(TableChartSettings(width=333)) == 333
 
 
@@ -239,7 +251,7 @@ def test_natural_width_is_flat_unless_set() -> None:
 
 
 def test_rows_of_a_field_have_a_row_per_run_and_value() -> None:
-    settings = TableChartSettings(rows=TableRows.FIELD, row_field="step", show_hparams=[])
+    settings = TableChartSettings(show_metrics=["*"], rows=TableRows.FIELD, row_field="step", show_hparams=[])
     props = _render(settings, _wide_df())
 
     assert [row["_row_id"] for row in props["rowData"]] == ["1/0", "1/1", "2/0", "2/1"]
@@ -263,7 +275,9 @@ def test_a_table_of_a_fields_values_past_the_row_limit_says_so_instead_of_sendin
 ) -> None:
     """A row per step of a long run went to the browser whole: megabytes of rows for one table (#364)."""
     monkeypatch.setenv("DLBOARD_MAX_TABLE_ROWS", str(max_rows))
-    settings = TableChartSettings(rows=TableRows.FIELD, row_field="step", spread_by_run=spread_by_run)
+    settings = TableChartSettings(
+        **_EVERYTHING, rows=TableRows.FIELD, row_field="step", spread_by_run=spread_by_run
+    )
 
     rows = _render(settings, _wide_df())["rowData"]
 
@@ -473,7 +487,9 @@ def test_an_overlays_column_group_is_headed_by_its_image_and_name_not_its_key() 
 
 
 def test_the_grid_is_named_by_its_chart_so_it_keeps_its_state_across_a_redraw() -> None:
-    props = _props(TableChart.render_in(TableChartSettings(), _wide_df(), RenderContext(chart_id="abc")))
+    props = _props(
+        TableChart.render_in(TableChartSettings(**_EVERYTHING), _wide_df(), RenderContext(chart_id="abc"))
+    )
 
     assert props["id"] == {"type": "dl-table-chart", "chart": "abc"}
     assert props["persisted_props"] == ["columnState", "filterModel"]
@@ -483,7 +499,7 @@ def test_the_grid_is_named_by_its_chart_so_it_keeps_its_state_across_a_redraw() 
 @pytest.mark.parametrize(
     ("other", "same_state"),
     [
-        pytest.param(TableChartSettings(page_size=50), True, id="same-columns"),
+        pytest.param(TableChartSettings(**_EVERYTHING, page_size=50), True, id="same-columns"),
         pytest.param(TableChartSettings(show_metrics=["acc"]), False, id="other-columns"),
     ],
 )
@@ -491,7 +507,7 @@ def test_a_grid_of_other_columns_starts_without_the_old_ones_state(
     other: TableChartSettings, *, same_state: bool
 ) -> None:
     df = _wide_df().assign(acc=[0.6, 0.7, 0.8, 0.9])
-    before = _render(TableChartSettings(), df)["persistence"]
+    before = _render(TableChartSettings(**_EVERYTHING), df)["persistence"]
 
     assert (before == _render(other, df)["persistence"]) is same_state
 
