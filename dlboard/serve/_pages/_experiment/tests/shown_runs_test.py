@@ -29,7 +29,11 @@ _TS = pendulum.datetime(2026, 1, 1, tz="UTC")
 
 def _runs(store: SQLLiteStore, experiment_id: int, count: int) -> list[models.Run]:
     """`count` runs that each logged a loss, oldest first."""
-    runs = [store.create_run(models.NewRun(experiment_id=experiment_id)) for _ in range(count)]
+    # Distinct, ascending creation times: "newest" must not depend on how fast the runs were created (a flaky tie).
+    runs = [
+        store.create_run(models.NewRun(experiment_id=experiment_id, created_at=_TS.add(seconds=index)))
+        for index in range(count)
+    ]
     store.log_metrics(
         models.LoggedMetrics(
             metrics={"loss": 1.0}, step=0, experiment_id=experiment_id, run_id=run.id, timestamp_utc=_TS
