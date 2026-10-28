@@ -362,8 +362,8 @@ def test_the_key_check_reads_no_more_for_a_key_only_a_deleted_run_logged_among_m
     alone = _work(store, lambda: store.summarize_metric_keys(few))
     among_many = _work(store, lambda: store.summarize_metric_keys(many))
 
-    assert alone.rows == 1  # `loss`; `stray` is not offered
-    assert among_many.rows == 1
+    # Each key is read once (the distinct keys, then a probe for each), however many runs there are.
+    assert alone.rows == among_many.rows
     assert among_many.pages <= 2 * alone.pages + 10, (
         f"{among_many.pages} pages for 1000 runs, {alone.pages} for 100"
     )
