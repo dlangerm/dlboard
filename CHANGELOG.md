@@ -12,6 +12,12 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ## [Unreleased]
 
+### Changed
+
+* **The suggest-charts drawer lists a page at a time, and has an exclude box.** It listed the first 50 suggestions, to
+  be narrowed only by its filter. It now lists pages of 25 with Previous and Next, and an "Exclude" box leaves out what
+  its comma-separated words or `*` patterns name, by key or panel. (#478)
+
 ## [0.13.0] - 2026-10-27
 
 ### Added

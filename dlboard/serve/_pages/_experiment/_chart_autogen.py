@@ -9,6 +9,7 @@ decent default panel layout for a brand-new experiment, and the same grouping lo
 
 from __future__ import annotations
 
+import re
 import typing
 from enum import StrEnum
 from typing import TYPE_CHECKING, Final, Literal
@@ -400,12 +401,30 @@ def parse_selection(values: typing.Iterable[str]) -> frozenset[tuple[ColumnKind,
     return frozenset((ColumnKind(kind), key) for kind, _, key in (value.partition(":") for value in values))
 
 
+def _exclude_pattern(word: str) -> re.Pattern[str]:
+    """A word as a pattern on a whole name: a plain word matches anywhere in it, and `*` matches any run of characters."""
+    body = ".*".join(re.escape(part) for part in word.strip().lower().split("*"))
+    return re.compile(body if "*" in word else f".*{body}.*", re.DOTALL)
+
+
 def visible_suggestions(
-    suggestions: typing.Iterable[Suggestion], *, text: str, sort: SuggestSort
+    suggestions: typing.Iterable[Suggestion], *, text: str, exclude: str = "", sort: SuggestSort
 ) -> list[Suggestion]:
-    """The suggestions whose key or target panel contains `text` (ignoring case), in `sort` order."""
+    """
+    The suggestions whose key or target panel contains `text` (ignoring case), in `sort` order.
+
+    `exclude` is comma-separated patterns (`grad, val/*`): a suggestion whose key or panel matches any of them is left out.
+    """
     needle = text.strip().lower()
-    matching = (s for s in suggestions if needle in s.key.lower() or needle in s.panel_name.lower())
+    excluded = [_exclude_pattern(word) for word in exclude.split(",") if word.strip()]
+
+    def kept(s: Suggestion) -> bool:
+        names = (s.key.lower(), s.panel_name.lower())
+        return any(needle in name for name in names) and not any(
+            pattern.fullmatch(name) for pattern in excluded for name in names
+        )
+
+    matching = (s for s in suggestions if kept(s))
     match sort:
         case SuggestSort.NAME:
             return sorted(matching, key=lambda s: s.key)
