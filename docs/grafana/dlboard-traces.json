@@ -1,0 +1,202 @@
+{
+  "__inputs": [
+    {
+      "description": "The Tempo that receives dlboard's traces over OTLP (DLBOARD_TELEMETRY_TRACES=true)",
+      "label": "Tempo",
+      "name": "DS_TEMPO",
+      "pluginId": "tempo",
+      "pluginName": "Tempo",
+      "type": "datasource"
+    }
+  ],
+  "annotations": {
+    "list": []
+  },
+  "description": "The slowest and failed traces of a dlboard server, found with TraceQL. Each row opens its trace. See docs/telemetry.md for what each span measures.",
+  "editable": true,
+  "links": [],
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "panels": [],
+      "title": "Failures",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "tempo",
+        "uid": "${DS_TEMPO}"
+      },
+      "description": "Any trace with a span that failed. A failed dlboard.startup span is a server that could not start.",
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 1
+      },
+      "id": 2,
+      "targets": [
+        {
+          "limit": 20,
+          "query": "{ resource.service.name = \"dlboard\" && status = error }",
+          "queryType": "traceql",
+          "refId": "A"
+        }
+      ],
+      "title": "Failed traces",
+      "type": "table"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 9
+      },
+      "id": 3,
+      "panels": [],
+      "title": "Slow work",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "tempo",
+        "uid": "${DS_TEMPO}"
+      },
+      "description": "An upload's batch that took over a second to record its refs. Open one to see whether the time was waiting or work.",
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 10
+      },
+      "id": 4,
+      "targets": [
+        {
+          "limit": 20,
+          "query": "{ resource.service.name = \"dlboard\" && name = \"dlboard.blob.ingest\" && duration > 1s }",
+          "queryType": "traceql",
+          "refId": "A"
+        }
+      ],
+      "title": "Slow uploads (ingest over 1s)",
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "tempo",
+        "uid": "${DS_TEMPO}"
+      },
+      "description": "A database commit that took a long time. On Postgres this can be a wait for the write-ahead log.",
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 10
+      },
+      "id": 5,
+      "targets": [
+        {
+          "limit": 20,
+          "query": "{ resource.service.name = \"dlboard\" && name = \"dlboard.store.commit\" && duration > 500ms }",
+          "queryType": "traceql",
+          "refId": "A"
+        }
+      ],
+      "title": "Slow store commits (over 500ms)",
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "tempo",
+        "uid": "${DS_TEMPO}"
+      },
+      "description": "A Dash callback, which is a page interaction in the browser. Its dlboard.dash.outputs says which one.",
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 18
+      },
+      "id": 6,
+      "targets": [
+        {
+          "limit": 20,
+          "query": "{ resource.service.name = \"dlboard\" && name = \"POST /_dash-update-component\" && duration > 2s }",
+          "queryType": "traceql",
+          "refId": "A"
+        }
+      ],
+      "title": "Slow page updates (callbacks over 2s)",
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "tempo",
+        "uid": "${DS_TEMPO}"
+      },
+      "description": "One panel on an experiment page reading its data from the store. dlboard.panel.read says the kind of data.",
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 18
+      },
+      "id": 7,
+      "targets": [
+        {
+          "limit": 20,
+          "query": "{ resource.service.name = \"dlboard\" && name = \"dlboard.panel.read\" && duration > 1s }",
+          "queryType": "traceql",
+          "refId": "A"
+        }
+      ],
+      "title": "Slow panel reads (over 1s)",
+      "type": "table"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": [
+    "dlboard"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timezone": "browser",
+  "title": "dlboard traces",
+  "uid": "dlboard-traces",
+  "version": 1
+}
