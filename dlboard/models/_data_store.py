@@ -344,6 +344,62 @@ class DataStore(typing.Protocol[_P]):
         """Delete one of `owner_id`'s views; never anyone else's, nor a shared page."""
         ...
 
+    def create_comparison(
+        self,
+        page_type: type[models.Page[_Dataframe, _Chart]],
+        comparison: models.NewPage[_Dataframe, _Chart],
+        run_ids: frozenset[int],
+    ) -> models.Page[_Dataframe, _Chart]:
+        """
+        Save a comparison -- a named, owned page scoped to a project -- with `run_ids` as its first members.
+
+        Only the runs of that project that are still there become members (see `add_comparison_runs`), and the
+        page and its members are saved together or not at all. Raises if the comparison would hold more runs than
+        `DLBOARD_MAX_COMPARISON_RUNS`: the store owns that limit, so that no caller can hold more.
+        """
+        ...
+
+    def comparison_runs(self, page_id: int) -> list[models.Run]:
+        """
+        The members of a comparison that are still there, newest first.
+
+        Not a deleted run, nor one of a deleted experiment, nor one of an experiment that has moved to another project.
+        """
+        ...
+
+    def add_comparison_runs(self, page_id: int, run_ids: frozenset[int], *, added_by: int) -> int:
+        """
+        Add `run_ids` to a comparison, and say how many were new.
+
+        Only runs of the comparison's own project that are still there are added; a run that is a member already
+        is left as it was. Raises, adding nothing, if the comparison would then hold more runs than it may, counting
+        every member it has, deleted or not.
+        """
+        ...
+
+    def remove_comparison_runs(self, page_id: int, run_ids: frozenset[int]) -> None:
+        """Take `run_ids` out of a comparison; a run that is not a member is ignored."""
+        ...
+
+    def list_comparisons(
+        self, project_id: int, viewer_id: int, *, editable: bool = False
+    ) -> list[models.ComparisonSummary]:
+        """
+        The comparisons of a project visible to `viewer_id`: their own first, then anyone's shared ones, by name.
+
+        With `editable`, only those whose runs `viewer_id` may add to and take out of (their own, and a shared one if
+        they edit the project).
+        """
+        ...
+
+    def comparison_summary(self, page_id: int) -> models.ComparisonSummary | None:
+        """One comparison as `list_comparisons` lists it, or `None` if there is none (or it is not the viewer's to see)."""
+        ...
+
+    def can_change_comparison_runs(self, page_id: int) -> bool:
+        """Whether the viewer may add runs to a comparison and take them out: its owner, or an editor of a shared one."""
+        ...
+
     def add_comment(self, comment: models.NewComment) -> models.Comment:
         """Post a note to an experiment's thread, bumping its `notes_revision`."""
         ...

@@ -3648,9 +3648,9 @@ def test_a_layer_is_hidden_and_shown_from_the_legend_without_fetching_and_the_ch
     expect(bar).to_be_hidden()
     page.evaluate("window.sessionStorage.clear()")
     page.reload()
-    legend.get_by_role(
-        "button", name="Layers"
-    ).click()  # the session was cleared, so the legend is folded again
+    layers = legend.get_by_role("button", name="Layers")
+    expect(layers).to_be_visible()  # the reloaded legend is drawn before it is clicked
+    layers.click()  # the session was cleared, so the legend is folded again
     expect(boxes_chip).to_have_attribute("aria-pressed", "false")
     expect(layer.locator("rect")).to_be_hidden()
 

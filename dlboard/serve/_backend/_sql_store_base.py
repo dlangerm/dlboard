@@ -19,6 +19,7 @@ from dlboard import models
 from dlboard._telemetry.traces import SpanKind, span
 from dlboard.serve import sql
 from dlboard.serve._backend._app_state import APP_STATE_ROW_ID, AppState
+from dlboard.serve._backend._comparison_settings import ComparisonSettings
 from dlboard.serve._backend._foreign_keys import ForeignKey, ForeignKeyKind
 from dlboard.serve._backend._metric_frame import MetricFrame, MetricKeySummary, MetricRow
 from dlboard.serve._backend._schema_upgrade import run_migrations
@@ -122,6 +123,11 @@ FOREIGN_KEYS: dict[type[BaseModel], dict[str, ForeignKey]] = {
         ),  # denormalized convenience, like the per-step tables: not an ownership edge
         "pinned_by": ForeignKey(models.User),
     },
+    models.ComparisonRun: {
+        "page_id": ForeignKey(models.Page, _OWNS),
+        "run_id": ForeignKey(models.Run, _OWNS),
+        "added_by": ForeignKey(models.User),
+    },
     models.AuditLogEntry: {"user_id": ForeignKey(models.User)},
     models.ArtifactPurgeTask: {"requested_by": ForeignKey(models.User)},
     models.ProjectGrant: {
@@ -140,6 +146,7 @@ UNIQUE_COLUMNS: dict[type[BaseModel], list[tuple[str, ...]]] = {
     models.ApiToken: [("token_id",)],
     models.PasswordCredential: [("user_id",)],
     models.RunPin: [("run_id", "pinned_by", "color")],
+    models.ComparisonRun: [("page_id", "run_id")],
 }
 
 # Dependency order: every table appears after the tables its foreign keys point to.
@@ -159,6 +166,7 @@ TABLES: tuple[type[BaseModel], ...] = (
     models.Page,
     models.Comment,
     models.RunPin,
+    models.ComparisonRun,
     models.AuditLogEntry,
     models.ArtifactPurgeTask,
 )
@@ -255,7 +263,7 @@ def build_metadata(schema: str | None = None) -> tuple[sa.MetaData, dict[type[Ba
         tables[model] = sql.table_for(
             model, metadata, tables, FOREIGN_KEYS.get(model), UNIQUE_COLUMNS.get(model)
         )
-    runs, hyperparams, metrics, histograms, artifacts, pages, run_pins = (
+    runs, hyperparams, metrics, histograms, artifacts, pages, run_pins, comparison_runs = (
         tables[m]
         for m in (
             models.Run,
@@ -265,6 +273,7 @@ def build_metadata(schema: str | None = None) -> tuple[sa.MetaData, dict[type[Ba
             models.Artifact,
             models.Page,
             models.RunPin,
+            models.ComparisonRun,
         )
     )
     # `sa.Index(...)` registers itself onto its columns' table/metadata on construction, so building
@@ -300,6 +309,10 @@ def build_metadata(schema: str | None = None) -> tuple[sa.MetaData, dict[type[Ba
         )
     # A project's pins are found by the experiments of the project, then each experiment's by when it was pinned.
     sa.Index("idx_RunPin_experiment", run_pins.c.experiment_id, run_pins.c.pinned_at)
+    # A project's comparisons are listed by project and owner; the unique `(page_id, run_id)` already indexes a comparison's
+    # members, and purging a run finds the comparisons it is in by `run_id`, which that does not lead with.
+    sa.Index("idx_Page_project", pages.c.project_id, pages.c.owner_id)
+    sa.Index("idx_ComparisonRun_run", comparison_runs.c.run_id)
     return metadata, tables
 
 
@@ -1612,6 +1625,11 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         new_page_type: type[models.NewPage[D, C]] | None = None,
     ) -> models.Page[D, C]:
         field, value = _resolve_page_scope(run_id=run_id, experiment_id=experiment_id, project_id=project_id)
+        if field == "project_id":
+            # A page of a project is a comparison, which is someone's. Were there a shared one (`owner_id` NULL, as an
+            # experiment's is), `_page_repository.ref_of` would take it for a comparison it cannot load.
+            msg = "A project's pages are comparisons, which are someone's: save one with `create_comparison`"
+            raise ValueError(msg)
         pages = self._tables[models.Page]
         # The shared page only: every named view of it (`owner_id` set) is its own `Page` row with
         # the same scope, reached through `get_view` instead.
@@ -1644,8 +1662,216 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         if view.owner_id is None or not view.name:
             msg = "A view needs an owner and a name"
             raise ValueError(msg)
+        _resolve_page_scope(run_id=view.run_id, experiment_id=view.experiment_id, project_id=view.project_id)
         (created,) = self._fetch(page_type, sql.insert(self._tables[models.Page], view))
         return created
+
+    def create_comparison[D, C](
+        self,
+        page_type: type[models.Page[D, C]],
+        comparison: models.NewPage[D, C],
+        run_ids: frozenset[int],
+    ) -> models.Page[D, C]:
+        """Save `comparison` -- a named, owned page scoped to a project -- with the runs of `run_ids` that can be members."""
+        if comparison.owner_id is None or not comparison.name:
+            msg = "A comparison needs an owner and a name"
+            raise ValueError(msg)
+        field, project_id = _resolve_page_scope(
+            run_id=comparison.run_id, experiment_id=comparison.experiment_id, project_id=comparison.project_id
+        )
+        if field != "project_id":
+            msg = "A comparison is scoped to a project"
+            raise ValueError(msg)
+        with self._begin() as conn:
+            row = conn.execute(sql.insert(self._tables[models.Page], comparison)).mappings().one()
+            created = sql.construct(page_type, row)
+            self._add_members(conn, created.id, project_id, run_ids, added_by=comparison.owner_id)
+        return created
+
+    def _members_in_project(
+        self,
+    ) -> tuple[sa.Table, sa.Table, sa.Table, sa.Table, sa.Join, list[sa.ColumnElement[bool]]]:
+        """
+        The tables of a comparison's members, and what keeps the members that are still its to show.
+
+        A member is shown while its run and its experiment are not deleted (restoring either brings it back) and its
+        experiment is in the comparison's own project: an experiment can be moved to another project, and its runs must
+        not follow it into a comparison of people who can no longer see it.
+        """
+        pages, members, runs, experiments = (
+            self._tables[m] for m in (models.Page, models.ComparisonRun, models.Run, models.Experiment)
+        )
+        joined = (
+            members.join(pages, pages.c.id == members.c.page_id)
+            .join(runs, runs.c.id == members.c.run_id)
+            .join(experiments, experiments.c.id == runs.c.experiment_id)
+        )
+        return (
+            pages,
+            members,
+            runs,
+            experiments,
+            joined,
+            [
+                runs.c.deleted_at.is_(None),
+                experiments.c.deleted_at.is_(None),
+                experiments.c.project_id == pages.c.project_id,
+            ],
+        )
+
+    def comparison_runs(self, page_id: int) -> list[models.Run]:
+        """The members of a comparison that are still there, newest first."""
+        _pages, members, runs, _experiments, joined, shown = self._members_in_project()
+        return self._fetch(
+            models.Run,
+            sa.select(runs)
+            .select_from(joined)
+            .where(members.c.page_id == page_id, *shown)
+            .order_by(runs.c.created_at.desc(), runs.c.id.desc()),
+        )
+
+    def add_comparison_runs(self, page_id: int, run_ids: frozenset[int], *, added_by: int) -> int:
+        """Add the runs of `run_ids` that belong to the comparison's project and are still there; how many were new."""
+        pages = self._tables[models.Page]
+        with self._begin() as conn:
+            # Locked until this commits, so two adds to one comparison are counted one after the other (on a database
+            # with row locks: a one-writer database has no two).
+            project_id = conn.execute(
+                sa.select(pages.c.project_id)
+                .where(pages.c.id == page_id, pages.c.owner_id.is_not(None))
+                .with_for_update()
+            ).scalar_one_or_none()
+            if project_id is None:
+                msg = f"Comparison {page_id} does not exist"
+                raise ValueError(msg)
+            return self._add_members(conn, page_id, project_id, run_ids, added_by=added_by)
+
+    def _add_members(
+        self, conn: sa.Connection, page_id: int, project_id: int, run_ids: frozenset[int], *, added_by: int
+    ) -> int:
+        """`add_comparison_runs` on `conn`, so that `create_comparison` can add a comparison's first members in its transaction."""
+        members, runs, experiments = (
+            self._tables[m] for m in (models.ComparisonRun, models.Run, models.Experiment)
+        )
+        eligible = {
+            run_id
+            for batch in _in_batches(run_ids)
+            for run_id in conn.execute(
+                sa.select(runs.c.id)
+                .select_from(runs.join(experiments, experiments.c.id == runs.c.experiment_id))
+                .where(
+                    runs.c.id.in_(batch),
+                    experiments.c.project_id == project_id,
+                    runs.c.deleted_at.is_(None),
+                    experiments.c.deleted_at.is_(None),
+                )
+            ).scalars()
+        }
+        # Every member counts, a deleted one too: restoring it must not take the comparison past its limit.
+        held = set(conn.execute(sa.select(members.c.run_id).where(members.c.page_id == page_id)).scalars())
+        limit = ComparisonSettings().max_comparison_runs
+        if len(held | eligible) > limit:
+            msg = (
+                f"A comparison holds at most {limit} runs: it has {len(held)}, "
+                f"so {max(limit - len(held), 0)} more fit"
+            )
+            raise ValueError(msg)
+        new = eligible - held
+        for batch in _in_batches(new):
+            conn.execute(
+                self._insert_ignoring_conflicts(members).values(
+                    [
+                        sql.row_values(
+                            models.NewComparisonRun(page_id=page_id, run_id=run_id, added_by=added_by),
+                            exclude=frozenset({sql.ID_KEY}),
+                        )
+                        for run_id in batch
+                    ]
+                )
+            )
+        return len(new)
+
+    def remove_comparison_runs(self, page_id: int, run_ids: frozenset[int]) -> None:
+        """Take `run_ids` out of a comparison."""
+        members = self._tables[models.ComparisonRun]
+        self._transaction(
+            sa.delete(members).where(members.c.page_id == page_id, members.c.run_id.in_(batch))
+            for batch in _in_batches(run_ids)
+        )
+
+    def _comparison_summaries(
+        self, where: list[sa.ColumnElement[bool]], viewer_id: int
+    ) -> list[models.ComparisonSummary]:
+        """The comparisons that `where` (over `Page`) keeps, the viewer's own first, then by name."""
+        pages, members, runs, experiments = (
+            self._tables[m] for m in (models.Page, models.ComparisonRun, models.Run, models.Experiment)
+        )
+        users = self._tables[models.User]
+        run_count = (
+            sa.select(sa.func.count())
+            .select_from(
+                members.join(runs, runs.c.id == members.c.run_id).join(
+                    experiments, experiments.c.id == runs.c.experiment_id
+                )
+            )
+            .where(
+                members.c.page_id == pages.c.id,
+                runs.c.deleted_at.is_(None),
+                experiments.c.deleted_at.is_(None),
+                experiments.c.project_id == pages.c.project_id,
+            )
+            .scalar_subquery()
+        )
+        rows = self._execute(
+            sa.select(pages.c.id, pages.c.name, pages.c.owner_id, users.c.username, pages.c.shared, run_count)
+            .select_from(pages.join(users, users.c.id == pages.c.owner_id))
+            .where(pages.c.project_id.is_not(None), pages.c.owner_id.is_not(None), *where)
+            .order_by((pages.c.owner_id != viewer_id), pages.c.name, pages.c.id)
+        )
+        return [
+            models.ComparisonSummary(
+                id=id_, name=name, owner_id=owner_id, owner_name=owner_name, shared=shared, run_count=count
+            )
+            for id_, name, owner_id, owner_name, shared, count in rows
+        ]
+
+    def list_comparisons(
+        self,
+        project_id: int,
+        viewer_id: int,
+        *,
+        editable: bool = False,  # noqa: ARG002 -- this store has no access control to narrow by
+    ) -> list[models.ComparisonSummary]:
+        """
+        `viewer_id`'s own comparisons of a project, then anyone's shared ones, by name.
+
+        With `editable`, only those whose runs the viewer may change. Here that is all of them, since anyone who can
+        see one may: who may is the authorizing store's to say.
+        """
+        pages = self._tables[models.Page]
+        return self._comparison_summaries(
+            [
+                pages.c.project_id == project_id,
+                sa.or_(pages.c.owner_id == viewer_id, pages.c.shared.is_(True)),
+            ],
+            viewer_id,
+        )
+
+    def comparison_summary(self, page_id: int) -> models.ComparisonSummary | None:
+        """One comparison as `list_comparisons` lists it, or `None` if there is no such comparison."""
+        found = self._comparison_summaries([self._tables[models.Page].c.id == page_id], viewer_id=0)
+        return next(iter(found), None)
+
+    def can_change_comparison_runs(self, page_id: int) -> bool:
+        """Whether a comparison's runs can be changed: here by anyone, for any comparison there is."""
+        pages = self._tables[models.Page]
+        return bool(
+            self._execute(
+                sa.select(pages.c.id).where(
+                    pages.c.id == page_id, pages.c.project_id.is_not(None), pages.c.owner_id.is_not(None)
+                )
+            )
+        )
 
     def get_view[D, C](self, page_type: type[models.Page[D, C]], view_id: int) -> models.Page[D, C] | None:
         """A named view by id, or `None` if there's no such view (a shared page's id doesn't count)."""
@@ -1945,7 +2171,15 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         return self._fetch(models.User, sa.select(users).order_by(users.c.username))
 
     def update_page[D, C](self, page: models.Page[D, C]) -> models.Page[D, C]:
-        (updated,) = self._fetch(type(page), sql.update(self._tables[models.Page], page))
+        pages = self._tables[models.Page]
+        stored = self._execute(
+            sa.select(*(pages.c[field] for field in PAGE_SCOPE_FIELDS)).where(pages.c.id == page.id)
+        )
+        scope = page.model_dump(include=set(PAGE_SCOPE_FIELDS))
+        if stored and tuple(stored[0]) != tuple(scope[field] for field in PAGE_SCOPE_FIELDS):
+            msg = "A page's scope cannot change"
+            raise ValueError(msg)
+        (updated,) = self._fetch(type(page), sql.update(pages, page))
         return updated
 
     def log_artifact_refs(self, artifacts: Iterable[models.Artifact]) -> None:
@@ -2083,10 +2317,15 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         extra: Callable[[sa.Table], sa.ColumnElement[bool]] = lambda _: sa.true(),
     ) -> dict[str, int]:
         """How many rows each cascade target has matching its predicate (and `extra`), for the audit log."""
-        details: dict[str, int] = {}
+        # A table several paths lead to (a comparison's runs are owned by its page *and* by their run) is counted once,
+        # over the rows any of them selects.
+        paths: dict[sa.Table, list[sa.ColumnElement[bool]]] = {}
         for table, where in cascade:
+            paths.setdefault(table, []).append(where)
+        details: dict[str, int] = {}
+        for table, wheres in paths.items():
             ((count,),) = self._execute(
-                sa.select(sa.func.count()).select_from(table).where(where, extra(table))
+                sa.select(sa.func.count()).select_from(table).where(sa.or_(*wheres), extra(table))
             )
             details[table.name] = details.get(table.name, 0) + cast("int", count)
         return details

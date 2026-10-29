@@ -26,10 +26,15 @@ _SEEKS: dict[str, str | tuple[str, ...]] = {
     "HyperParams": "(experiment_id, run_id)",
     "Run": "(experiment_id, created_at)",
     "RunPin": ("(experiment_id, pinned_at)", "(run_id, pinned_by, color)"),
+    "ComparisonRun": "(page_id, run_id)",
 }
 """What each table an experiment page reads is sought by: the index that leads with the experiment (or the key, `id`)."""
-_BY_RUN = frozenset({"UnderlyingMetricTableEntry", "UnderlyingHistogramTableEntry", "Artifact"})
-"""The per-step tables, which deleting a run reaches by its `run_id`."""
+_BY_RUN = frozenset(
+    {"UnderlyingMetricTableEntry", "UnderlyingHistogramTableEntry", "Artifact", "ComparisonRun"}
+)
+"""The tables that deleting a run reaches by its `run_id`: the per-step ones, and the comparisons it is a member of."""
+_COUNTED_BY_PAGE = "(page_id, run_id)"
+"""How a comparison's members are also reached when a run is purged: the audit log counts them under the pages the run owns, too."""
 _READS: dict[str, Callable[[PostgresStore, int], object]] = {
     "summarize_metric_keys": lambda s, e: s.summarize_metric_keys(e),
     "summarize_metric_steps": lambda s, e: s.summarize_metric_steps(e, frozenset({"loss"})),
@@ -191,4 +196,33 @@ def test_deleting_and_purging_a_run_seek_the_per_step_tables_by_run(
         # With scans forbidden Postgres reads a whole index it can only filter by `run_id`, so the seek is the index's lead.
         for index in {n["Index Name"] for n in nodes if "Index Name" in n}:
             if any(f'"{table}"' in indexes[index] for table in _BY_RUN):
-                assert indexes[index].endswith(("(run_id)", "(id)")), (statement, index)
+                assert indexes[index].endswith(("(run_id)", "(id)", _COUNTED_BY_PAGE)), (statement, index)
+
+
+def test_reading_a_comparison_seeks_its_members_by_page(
+    store: PostgresStore, postgres_settings: PostgresSettings, experiment_id: int
+) -> None:
+    experiment = store.get_experiment(experiment_id)
+    assert experiment is not None
+    me = store.get_or_create_user(models.Principal.unverified("me"))
+    run = store.create_run(models.NewRun(experiment_id=experiment_id))
+    page = store.create_comparison(
+        models.Page[Any, Any],
+        models.NewPage[Any, Any](project_id=experiment.project_id, owner_id=me.id, name="mine"),
+        frozenset({run.id}),
+    )
+
+    statements = _recorded(
+        store,
+        lambda: (
+            store.comparison_runs(page.id),
+            store.list_comparisons(experiment.project_id, me.id),
+            store.add_comparison_runs(page.id, frozenset({run.id}), added_by=me.id),
+            store.remove_comparison_runs(page.id, frozenset({run.id})),
+        ),
+    )
+
+    reads = [(s, p) for s, p in statements if '"ComparisonRun"' in s]
+    assert len(reads) >= 4
+    for statement, parameters in reads:
+        _assert_seeks(store, postgres_settings, statement, parameters)

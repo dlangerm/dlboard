@@ -184,6 +184,18 @@ _OPERATIONS: dict[str, tuple[ProjectRole, Callable[[AuthorizingDataStore, _Chain
     ),
     "list who pinned in a project": (ProjectRole.VIEWER, lambda s, c: s.list_pinners(c[0].id)),
     "pin a run": (ProjectRole.VIEWER, lambda s, c: s.pin_runs(s.actor.id, frozenset({c[2].id}))),
+    "list the comparisons of a project": (
+        ProjectRole.VIEWER,
+        lambda s, c: s.list_comparisons(c[0].id, s.actor.id),
+    ),
+    "save a comparison": (
+        ProjectRole.VIEWER,
+        lambda s, c: s.create_comparison(
+            models.Page[Any, Any],
+            models.NewPage[Any, Any](project_id=c[0].id, owner_id=s.actor.id, name="mine"),
+            frozenset({c[2].id}),
+        ),
+    ),
     "create a run": (ProjectRole.EDITOR, lambda s, c: s.create_run(models.NewRun(experiment_id=c[1].id))),
     "log metrics": (ProjectRole.EDITOR, lambda s, c: s.log_metrics([_metric(c[1].id, c[2].id)])),
     "finish a run": (
@@ -240,6 +252,64 @@ def test_pinning_many_runs_authorizes_with_a_fixed_number_of_reads_and_which_exp
         as_bob.pin_runs(bob.id, frozenset({run.id, hidden.id}))
     assert len(store.pins_of(experiment.id, run_ids=None)) == len(runs)
     assert project.id != elsewhere.project_id
+
+
+@pytest.mark.parametrize(
+    ("held", "shared", "sees", "edits"),
+    [
+        pytest.param(ProjectRole.VIEWER, False, False, False, id="a-viewer-of-a-private-one"),
+        pytest.param(ProjectRole.VIEWER, True, True, False, id="a-viewer-of-a-shared-one"),
+        pytest.param(ProjectRole.EDITOR, False, False, False, id="an-editor-of-a-private-one"),
+        pytest.param(ProjectRole.EDITOR, True, True, True, id="an-editor-of-a-shared-one"),
+        pytest.param(None, True, False, False, id="nobody-with-access-to-the-project"),
+    ],
+)
+def test_a_shared_comparisons_runs_are_any_editors_to_change_but_its_page_is_its_owners(
+    store: SQLLiteStore, held: ProjectRole | None, *, shared: bool, sees: bool, edits: bool
+) -> None:
+    bob, (project, _experiment, run) = _shared_chain(store, held)
+    alice = store.find_user("alice")
+    assert alice is not None
+    page = store.create_comparison(
+        models.Page[Any, Any],
+        models.NewPage[Any, Any](project_id=project.id, owner_id=alice.id, name="shared", shared=shared),
+        frozenset(),
+    )
+    as_bob, as_alice = _as(store, bob), _as(store, alice)
+
+    def reading() -> object:
+        return as_bob.comparison_runs(page.id)
+
+    def adding() -> object:
+        return as_bob.add_comparison_runs(page.id, frozenset({run.id}), added_by=bob.id)
+
+    for attempt, allowed in ((reading, sees), (adding, edits)):
+        if allowed:
+            attempt()
+        else:
+            with pytest.raises(PermissionError):
+                attempt()
+    if edits:
+        as_bob.remove_comparison_runs(page.id, frozenset({run.id}))
+    else:
+        with pytest.raises(PermissionError):
+            as_bob.remove_comparison_runs(page.id, frozenset({run.id}))
+    # What the UI shows is the same rule as what the store allows: nothing is offered that would be refused.
+    assert as_bob.can_change_comparison_runs(page.id) is edits
+    assert (as_bob.comparison_summary(page.id) is not None) is sees
+    if held is None:
+        with pytest.raises(PermissionError):
+            as_bob.list_comparisons(project.id, bob.id, editable=True)
+    else:
+        assert [c.id for c in as_bob.list_comparisons(project.id, bob.id, editable=True)] == (
+            [page.id] if edits else []
+        )
+    # The runs are the one thing others may change: its charts and settings, and who owns it, are the owner's alone.
+    with pytest.raises(PermissionError):
+        as_bob.update_page(page)
+    with pytest.raises(PermissionError, match="as yourself"):
+        as_alice.add_comparison_runs(page.id, frozenset({run.id}), added_by=bob.id)
+    as_alice.add_comparison_runs(page.id, frozenset({run.id}), added_by=alice.id)
 
 
 def test_a_pin_is_only_ever_its_own_pinners(store: SQLLiteStore) -> None:

@@ -23,7 +23,7 @@ local single-user experience -- and deletes stay gated by scope alone, as they a
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, NoReturn, Self
+from typing import TYPE_CHECKING, Any, NoReturn, Self
 
 from dlboard import models
 from dlboard.models import ProjectRole, Scope, has_scope, require_scope
@@ -543,6 +543,79 @@ class AuthorizingDataStore(models.DataStore[...]):
     def delete_view(self, view_id: int, owner_id: int) -> None:
         self._require_self_or(owner_id, Scope.ALL)
         self._inner.delete_view(view_id, owner_id)
+
+    # -- Comparisons ---------------------------------------------------------------------------------
+    #
+    # A comparison is a view scoped to a project, so it is seen as one is: by its owner, and by anyone who can see
+    # the project if it is shared. Its runs are the one thing a shared one lets other people change: any editor of
+    # the project may add and remove them, while its charts and settings stay its owner's (an edit forks a copy).
+
+    def _visible_comparison(self, page_id: int) -> models.Page[Any, Any]:
+        page = self.get_view(models.Page[Any, Any], page_id)
+        if page is None or page.project_id is None:
+            _forbid("there is no such comparison, or it is not yours to see")
+        return page
+
+    def _may_change_runs(self, owner_id: int, project_id: int | None, *, shared: bool) -> bool:
+        """The one rule of who changes a comparison's runs: its owner, or an editor of the project if it is shared."""
+        return owner_id == self._actor.id or (shared and self._can(project_id, ProjectRole.EDITOR))
+
+    def _editable_comparison(self, page_id: int) -> models.Page[Any, Any]:
+        page = self._visible_comparison(page_id)
+        if page.owner_id is None or not self._may_change_runs(
+            page.owner_id, page.project_id, shared=page.shared
+        ):
+            _forbid("only a comparison's owner, or an editor of a shared one, can change its runs")
+        return page
+
+    def create_comparison[Dataframe, Chart](
+        self,
+        page_type: type[models.Page[Dataframe, Chart]],
+        comparison: models.NewPage[Dataframe, Chart],
+        run_ids: frozenset[int],
+    ) -> models.Page[Dataframe, Chart]:
+        if comparison.owner_id != self._actor.id:
+            _forbid("a comparison can only be saved as its own owner")
+        self._require(comparison.project_id, ProjectRole.VIEWER)
+        return self._inner.create_comparison(page_type, comparison, run_ids)
+
+    def comparison_runs(self, page_id: int) -> list[models.Run]:
+        self._visible_comparison(page_id)
+        return self._inner.comparison_runs(page_id)
+
+    def add_comparison_runs(self, page_id: int, run_ids: frozenset[int], *, added_by: int) -> int:
+        if added_by != self._actor.id:
+            _forbid("a run can only be added to a comparison as yourself")
+        self._editable_comparison(page_id)
+        return self._inner.add_comparison_runs(page_id, run_ids, added_by=added_by)
+
+    def remove_comparison_runs(self, page_id: int, run_ids: frozenset[int]) -> None:
+        self._editable_comparison(page_id)
+        self._inner.remove_comparison_runs(page_id, run_ids)
+
+    def list_comparisons(
+        self, project_id: int, viewer_id: int, *, editable: bool = False
+    ) -> list[models.ComparisonSummary]:
+        self._require_self_or(viewer_id, Scope.ALL)
+        self._require(project_id, ProjectRole.VIEWER)
+        listed = self._inner.list_comparisons(project_id, viewer_id)
+        if not editable:
+            return listed
+        return [c for c in listed if self._may_change_runs(c.owner_id, project_id, shared=c.shared)]
+
+    def comparison_summary(self, page_id: int) -> models.ComparisonSummary | None:
+        if self.get_view(models.Page[Any, Any], page_id) is None:
+            return None
+        return self._inner.comparison_summary(page_id)
+
+    def can_change_comparison_runs(self, page_id: int) -> bool:
+        page = self.get_view(models.Page[Any, Any], page_id)
+        return (
+            page is not None
+            and page.project_id is not None
+            and page.owner_id is not None
+            and self._may_change_runs(page.owner_id, page.project_id, shared=page.shared)
+        )
 
     def add_comment(self, comment: models.NewComment) -> models.Comment:
         if comment.author_id != self._actor.id:
