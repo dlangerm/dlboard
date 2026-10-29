@@ -173,8 +173,13 @@ def _train(store: PostgresStore, project_id: int, steps: int, runs: int = _RUNS,
     return experiment.id
 
 
-def _work(store: PostgresStore, load: Callable[[], object]) -> _Work:
-    """What running `load` cost: the rows its queries returned, and the pages they read, rerun under `EXPLAIN`."""
+def _work(store: PostgresStore, load: Callable[[], object], *, scans: bool = True) -> _Work:
+    """
+    What running `load` cost: the rows its queries returned, and the pages they read, rerun under `EXPLAIN`.
+
+    Without `scans`, a read of a table that has an index to use must use it: tables this small are cheaper to scan, which
+    says nothing of the plan at a size where a scan is what a read must not do.
+    """
     selects: list[tuple[str, Any, int]] = []
 
     def record(_conn: sa.Connection, cursor: Any, statement: str, parameters: Any, *_: object) -> None:  # noqa: ANN401
@@ -188,6 +193,8 @@ def _work(store: PostgresStore, load: Callable[[], object]) -> _Work:
         sa.event.remove(store._engine, "after_cursor_execute", record)
     pages = 0
     with store._engine.connect() as conn:
+        if not scans:
+            conn.exec_driver_sql("SET enable_seqscan = off")
         for statement, parameters, _ in selects:
             ((document,),) = conn.exec_driver_sql(
                 "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) " + statement, parameters
@@ -244,6 +251,56 @@ def test_a_load_of_the_runs_shown_reads_no_more_for_an_experiment_of_more_runs(
         f"{among_many.rows} rows beside 60 runs, {alone.rows} for {_SHOWN}"
     )
     assert among_many.pages <= 2 * alone.pages + 10, f"{among_many.pages} pages beside 60 runs, {alone.pages}"
+
+
+def _analyzed(store: PostgresStore) -> None:
+    """What the planner chooses between a scan and an index on, as autovacuum would have it by the time anyone looks."""
+    with store._engine.begin() as conn:
+        for table in store.tables.values():
+            conn.exec_driver_sql(f'ANALYZE "{table.schema}"."{table.name}"')
+
+
+def test_a_projects_pins_read_no_more_when_its_own_runs_or_another_projects_pins_grow(
+    store: PostgresStore,
+) -> None:
+    """The pins listed are what a read of them costs: not how many runs the project has, nor how many pins any other has."""
+    me = store.get_or_create_user(models.Principal.unverified("pinner")).id
+    project_id = store.create_project(models.NewProject(name="mine", description="")).id
+    experiment = store.create_experiment(models.NewExperiment(project_id=project_id)).id
+    pinned = frozenset(store.create_run(models.NewRun(experiment_id=experiment)).id for _ in range(_SHOWN))
+    store.pin_runs(me, pinned, models.PinColor.RED)
+    _analyzed(store)
+
+    def reads() -> _Work:
+        return _work(
+            store,
+            lambda: (
+                store.list_pinned_runs(project_id),
+                store.pin_counts(project_id),
+                store.pinned_run_ids(project_id, limit=100),
+                store.list_pinners(project_id),
+            ),
+            scans=False,
+        )
+
+    alone = reads()
+    # The project's runs grow by thousands, and so do another project's pins.
+    crowded = store.create_experiment(models.NewExperiment(project_id=project_id)).id
+    for _ in range(1500):
+        store.create_run(models.NewRun(experiment_id=crowded))
+    other_project = store.create_project(models.NewProject(name="other", description="")).id
+    for _ in range(50):  # pins are spread over a project's experiments, as people make them
+        elsewhere = store.create_experiment(models.NewExperiment(project_id=other_project)).id
+        others = frozenset(store.create_run(models.NewRun(experiment_id=elsewhere)).id for _ in range(30))
+        store.pin_runs(me, others, models.PinColor.BLUE)
+    _analyzed(store)
+    grown = reads()
+
+    assert alone.rows > 0
+    assert grown.rows <= 2 * alone.rows, (
+        f"{grown.rows} rows beside 3,000 more runs and 1,500 more pins, {alone.rows}"
+    )
+    assert grown.pages <= 2 * alone.pages + 10, f"{grown.pages} pages beside them, {alone.pages}"
 
 
 _KEY_SUMMARIES: dict[str, Callable[[PostgresStore, int], object]] = {

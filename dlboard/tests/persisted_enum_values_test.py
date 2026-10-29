@@ -18,7 +18,16 @@ import typing
 
 import pytest
 
-from dlboard.models import AuditAction, EntityType, ExperimentSource, FileKind, ProjectRole, RunStatus, Scope
+from dlboard.models import (
+    AuditAction,
+    EntityType,
+    ExperimentSource,
+    FileKind,
+    PinColor,
+    ProjectRole,
+    RunStatus,
+    Scope,
+)
 from dlboard.models._metric import MetricColumn
 from dlboard.plugins.charts._table_settings import Aggregate, TableMode, TableRows
 from dlboard.plugins.charts.bar_chart import BarChart
@@ -58,6 +67,9 @@ _FROZEN_ENUM_VALUES: dict[type[StrEnum], frozenset[str]] = {
     HistogramDisplay: frozenset({"heatmap", "bands", "step"}),
     Colorscale: frozenset({"Viridis", "Cividis", "Plasma", "Inferno", "Magma", "Blues"}),
     LayerVisibility: frozenset({"shown", "hidden", "off"}),
+    PinColor: frozenset(
+        {"plain", "red", "orange", "yellow", "green", "teal", "blue", "violet", "pink", "gray"}
+    ),
 }
 
 

@@ -286,6 +286,15 @@ ignore_names = [
   # registry looks this up via `getattr(module, "layout")` at routing time, not a call in our
   # own code.
   "layout",
+  # `PinColor`'s colours -- the pin popover and the pinned-runs filters list the whole enum (each value is its Mantine
+  # colour name), so most members are never named in code vulture can see.
+  "ORANGE",
+  "YELLOW",
+  "TEAL",
+  "BLUE",
+  "VIOLET",
+  "PINK",
+  "GRAY",
   # `flask.session.permanent` (`_auth.start_session`) -- a flag Flask itself reads when it saves the session.
   "permanent",
   # `Flask.session_interface` (`_auth.install_request_gate`) -- the attribute Flask looks up to open and save every session.

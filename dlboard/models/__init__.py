@@ -67,6 +67,7 @@ from dlboard.models._panel_frame import (
     histogram_column,
     hparam_column,
 )
+from dlboard.models._pin import NamedPin, NewRunPin, PinColor, PinnedRun, PinnedRuns, Pinner, RunPin
 from dlboard.models._plugin import InstalledPlugin, PluginProtocol
 from dlboard.models._project import NewProject, Project
 from dlboard.models._run import NewRun, Run, RunStatus
@@ -172,6 +173,7 @@ __all__ = [
     "MetricReduction",
     "MetricReductions",
     "NamePatternList",
+    "NamedPin",
     "NewApiToken",
     "NewArtifact",
     "NewArtifactLink",
@@ -184,6 +186,7 @@ __all__ = [
     "NewProject",
     "NewProjectGrant",
     "NewRun",
+    "NewRunPin",
     "NewUser",
     "OverlayKey",
     "PackedCounts",
@@ -193,6 +196,10 @@ __all__ = [
     "ParameterField",
     "ParameterFieldType",
     "PasswordCredential",
+    "PinColor",
+    "PinnedRun",
+    "PinnedRuns",
+    "Pinner",
     "PluginProtocol",
     "Principal",
     "Project",
@@ -202,6 +209,7 @@ __all__ = [
     "Quantity",
     "RenderContext",
     "Run",
+    "RunPin",
     "RunStatus",
     "SchemeColors",
     "Scope",

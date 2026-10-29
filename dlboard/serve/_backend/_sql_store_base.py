@@ -51,6 +51,9 @@ type AnyRow = sa.Row[*tuple[Any, ...]]
 
 _OWNS = ForeignKeyKind.OWNERSHIP
 
+_IN_BATCH: Final = 500
+"""How many ids or rows one statement binds: they are bound values, and a database allows only so many in a statement."""
+
 _STRIDE_DOUBLINGS: Final = 32
 """How many powers of two `fetch_histograms` can thin by: far more steps than any run will ever log."""
 
@@ -112,6 +115,13 @@ FOREIGN_KEYS: dict[type[BaseModel], dict[str, ForeignKey]] = {
         "experiment_id": ForeignKey(models.Experiment, _OWNS),
         "author_id": ForeignKey(models.User),
     },
+    models.RunPin: {
+        "run_id": ForeignKey(models.Run, _OWNS),
+        "experiment_id": ForeignKey(
+            models.Experiment
+        ),  # denormalized convenience, like the per-step tables: not an ownership edge
+        "pinned_by": ForeignKey(models.User),
+    },
     models.AuditLogEntry: {"user_id": ForeignKey(models.User)},
     models.ArtifactPurgeTask: {"requested_by": ForeignKey(models.User)},
     models.ProjectGrant: {
@@ -129,6 +139,7 @@ UNIQUE_COLUMNS: dict[type[BaseModel], list[tuple[str, ...]]] = {
     models.ProjectGrant: [("project_id", "user_id"), ("project_id", "group")],
     models.ApiToken: [("token_id",)],
     models.PasswordCredential: [("user_id",)],
+    models.RunPin: [("run_id", "pinned_by", "color")],
 }
 
 # Dependency order: every table appears after the tables its foreign keys point to.
@@ -147,6 +158,7 @@ TABLES: tuple[type[BaseModel], ...] = (
     models.Artifact,
     models.Page,
     models.Comment,
+    models.RunPin,
     models.AuditLogEntry,
     models.ArtifactPurgeTask,
 )
@@ -243,7 +255,7 @@ def build_metadata(schema: str | None = None) -> tuple[sa.MetaData, dict[type[Ba
         tables[model] = sql.table_for(
             model, metadata, tables, FOREIGN_KEYS.get(model), UNIQUE_COLUMNS.get(model)
         )
-    runs, hyperparams, metrics, histograms, artifacts, pages = (
+    runs, hyperparams, metrics, histograms, artifacts, pages, run_pins = (
         tables[m]
         for m in (
             models.Run,
@@ -252,6 +264,7 @@ def build_metadata(schema: str | None = None) -> tuple[sa.MetaData, dict[type[Ba
             models.UnderlyingHistogramTableEntry,
             models.Artifact,
             models.Page,
+            models.RunPin,
         )
     )
     # `sa.Index(...)` registers itself onto its columns' table/metadata on construction, so building
@@ -285,6 +298,8 @@ def build_metadata(schema: str | None = None) -> tuple[sa.MetaData, dict[type[Ba
             sqlite_where=pages.c.owner_id.is_(None),
             postgresql_where=pages.c.owner_id.is_(None),
         )
+    # A project's pins are found by the experiments of the project, then each experiment's by when it was pinned.
+    sa.Index("idx_RunPin_experiment", run_pins.c.experiment_id, run_pins.c.pinned_at)
     return metadata, tables
 
 
@@ -293,6 +308,24 @@ def _runs_among(
 ) -> list[sa.ColumnElement[bool]]:
     """What limits a query to the runs `run_ids` names, if it is limited to any: `None` is every run of the experiment."""
     return [] if run_ids is None else [column.in_(run_ids)]
+
+
+def _in_batches(ids: Iterable[int]) -> Iterator[list[int]]:
+    """`ids` in sorted batches of `_IN_BATCH`, for a statement that binds each of them."""
+    return (list(batch) for batch in itertools.batched(sorted(ids), _IN_BATCH))
+
+
+def _name_matches(runs: sa.Table, name_contains: str) -> list[sa.ColumnElement[bool]]:
+    """What keeps the runs whose name has `name_contains` in it (whatever its case) or whose id it is, if it is any."""
+    searched = name_contains.strip()
+    if not searched:
+        return []
+    return [
+        sa.or_(
+            sa.func.lower(runs.c.name).contains(searched.lower(), autoescape=True),
+            runs.c.id == int(searched) if searched.isdigit() else sa.false(),
+        )
+    ]
 
 
 def _among_keys(column: sa.ColumnElement[str], keys: frozenset[str] | None) -> list[sa.ColumnElement[bool]]:
@@ -612,22 +645,29 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             msg = f"{model.__name__} {entity_id} has been deleted"
             raise ValueError(msg)
 
-    def _ensure_runs_not_deleted(self, run_ids: set[int]) -> None:
+    def _ensure_runs_not_deleted(self, run_ids: set[int]) -> dict[int, int]:
         """
-        `_ensure_not_deleted` for many runs at once: one read, not one transaction a run (#436).
+        `_ensure_not_deleted` for many runs at once: one read, not one transaction a run (#436); the experiment of each.
 
         Raises as the one-at-a-time check does: for a run that does not exist, or that has been soft-deleted.
         """
         if not run_ids:
-            return
+            return {}
         r = self._tables[models.Run]
-        found = dict(self._execute(sa.select(r.c.id, r.c.deleted_at).where(r.c.id.in_(run_ids))))
+        found = {
+            run_id: (experiment_id, deleted_at)
+            for batch in _in_batches(run_ids)
+            for run_id, experiment_id, deleted_at in self._execute(
+                sa.select(r.c.id, r.c.experiment_id, r.c.deleted_at).where(r.c.id.in_(batch))
+            )
+        }
         if missing := run_ids - found.keys():
             msg = f"Run {min(missing)} does not exist"
             raise ValueError(msg)
-        if deleted := {run_id for run_id, deleted_at in found.items() if deleted_at is not None}:
+        if deleted := {run_id for run_id, (_, deleted_at) in found.items() if deleted_at is not None}:
             msg = f"Run {min(deleted)} has been deleted"
             raise ValueError(msg)
+        return {run_id: experiment_id for run_id, (experiment_id, _) in found.items()}
 
     def _touch_experiments(self, experiment_ids: set[int]) -> None:
         """`_touch_experiment` for many experiments, in one statement: each is still its own short transaction, not one held over the batch."""
@@ -989,17 +1029,6 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
     ) -> Iterator[models.Run]:
         """A page (`limit` of `None` being every one) of an experiment's (non-deleted) runs, most recently created first; only `run_ids`, if given, and those `name_contains` finds."""
         runs = self._tables[models.Run]
-        searched = name_contains.strip()
-        named: list[sa.ColumnElement[bool]] = (
-            [
-                sa.or_(
-                    sa.func.lower(runs.c.name).contains(searched.lower(), autoescape=True),
-                    runs.c.id == int(searched) if searched.isdigit() else sa.false(),
-                )
-            ]
-            if searched
-            else []
-        )
         return iter(
             self._fetch(
                 models.Run,
@@ -1008,7 +1037,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
                     runs.c.experiment_id == experiment_id,
                     runs.c.deleted_at.is_(None),
                     *_runs_among(runs.c.id, run_ids),
-                    *named,
+                    *_name_matches(runs, name_contains),
                 )
                 .order_by(runs.c.created_at.desc())
                 .limit(limit)
@@ -1677,6 +1706,238 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         )
         for (experiment_id,) in rows:
             self._bump_notes_revision(experiment_id)
+
+    def pin_runs(
+        self,
+        pinned_by: int,
+        run_ids: frozenset[int],
+        color: models.PinColor = models.PinColor.PLAIN,
+    ) -> None:
+        """Pin `run_ids` for `pinned_by` in `color`, a run already pinned in it keeping its pin."""
+        experiments = self._ensure_runs_not_deleted(set(run_ids))
+        pins = self._tables[models.RunPin]
+        now = pendulum.now(pendulum.UTC)
+        self._transaction(
+            self._insert_ignoring_conflicts(pins).values(
+                [
+                    sql.row_values(
+                        models.NewRunPin(
+                            run_id=run_id,
+                            experiment_id=experiments[run_id],
+                            pinned_by=pinned_by,
+                            color=color,
+                            pinned_at=now,
+                        ),
+                        exclude=frozenset({sql.ID_KEY}),
+                    )
+                    for run_id in batch
+                ]
+            )
+            for batch in _in_batches(run_ids)
+        )
+
+    def unpin_runs(self, pinned_by: int, run_ids: frozenset[int], color: models.PinColor) -> None:
+        """Remove `pinned_by`'s pin of `color` from each of `run_ids`; anyone else's, and other colours', are left alone."""
+        pins = self._tables[models.RunPin]
+        self._transaction(
+            sa.delete(pins).where(
+                pins.c.pinned_by == pinned_by, pins.c.color == color, pins.c.run_id.in_(batch)
+            )
+            for batch in _in_batches(run_ids)
+        )
+
+    def run_experiments(self, run_ids: frozenset[int]) -> dict[int, int]:
+        """The experiment each of `run_ids` is of, whether or not it is deleted; a run that does not exist is left out."""
+        runs = self._tables[models.Run]
+        return {
+            run_id: experiment_id
+            for batch in _in_batches(run_ids)
+            for run_id, experiment_id in self._execute(
+                sa.select(runs.c.id, runs.c.experiment_id).where(runs.c.id.in_(batch))
+            )
+        }
+
+    def _named_pins(self, statement: sa.Select[Any]) -> list[models.NamedPin]:
+        """The pins `statement` selects (all of the table's columns, then `username`), each with who pinned it."""
+        with self._begin() as conn:
+            return [
+                models.NamedPin(pin=sql.construct(models.RunPin, row), username=row["username"])
+                for row in conn.execute(statement).mappings()
+            ]
+
+    def pins_of(
+        self, experiment_id: int, *, run_ids: frozenset[int] | None
+    ) -> dict[int, list[models.NamedPin]]:
+        """The pins on an experiment's (non-deleted) runs, by run, oldest first: only `run_ids`' if given."""
+        pins, runs, users = (self._tables[m] for m in (models.RunPin, models.Run, models.User))
+        found = self._named_pins(
+            sa.select(pins, users.c.username)
+            .join(runs, runs.c.id == pins.c.run_id)
+            .join(users, users.c.id == pins.c.pinned_by)
+            .where(
+                pins.c.experiment_id == experiment_id,
+                runs.c.deleted_at.is_(None),
+                *_runs_among(pins.c.run_id, run_ids),
+            )
+            .order_by(pins.c.pinned_at, pins.c.id)
+        )
+        by_run: dict[int, list[models.NamedPin]] = {}
+        for named in found:
+            by_run.setdefault(named.pin.run_id, []).append(named)
+        return by_run
+
+    def _pins_of_project(
+        self,
+        project_id: int,
+        colors: frozenset[models.PinColor] | None,
+        pinned_by: frozenset[int] | None,
+        experiment_id: int | None,
+        name_contains: str,
+    ) -> tuple[sa.Join, list[sa.ColumnElement[bool]]]:
+        """
+        What the reads of a project's pins select from and keep.
+
+        The project's (not deleted) experiments are read first, which are few, and the pins are asked for `IN` those ids,
+        each found by `idx_RunPin_experiment`: never through the project's runs, whose number nothing bounds. The ids go
+        into the statement as values and not as a join to `Experiment`, because a planner cannot know which experiments
+        a join selects: it takes the average number of pins an experiment has, and a project whose experiments have few
+        beside others that have many is then read by hashing every pin there is.
+        """
+        pins, runs, experiments = (self._tables[m] for m in (models.RunPin, models.Run, models.Experiment))
+        in_project = [
+            experiment
+            for (experiment,) in self._execute(
+                sa.select(experiments.c.id).where(
+                    experiments.c.project_id == project_id, experiments.c.deleted_at.is_(None)
+                )
+            )
+        ]
+        return pins.join(runs, runs.c.id == pins.c.run_id), [
+            pins.c.experiment_id.in_(in_project),
+            runs.c.deleted_at.is_(None),
+            *([pins.c.color.in_(colors)] if colors is not None else []),
+            *([pins.c.pinned_by.in_(pinned_by)] if pinned_by is not None else []),
+            *([pins.c.experiment_id == experiment_id] if experiment_id is not None else []),
+            *_name_matches(runs, name_contains),
+        ]
+
+    def _pinned_run_page(  # noqa: PLR0913 -- the filters of the pinned-runs list, and its page
+        self,
+        project_id: int,
+        colors: frozenset[models.PinColor] | None,
+        pinned_by: frozenset[int] | None,
+        experiment_id: int | None,
+        name_contains: str,
+        limit: int,
+        offset: int,
+    ) -> tuple[int, list[int]]:
+        """How many runs match the filters, and the ids of a page of them: each once, the one pinned last first."""
+        pins = self._tables[models.RunPin]
+        selected, conditions = self._pins_of_project(
+            project_id, colors, pinned_by, experiment_id, name_contains
+        )
+        ((total,),) = self._execute(
+            sa.select(sa.func.count(sa.distinct(pins.c.run_id))).select_from(selected).where(*conditions)
+        )
+        newest = sa.func.max(pins.c.pinned_at)
+        rows = self._execute(
+            sa.select(pins.c.run_id)
+            .select_from(selected)
+            .where(*conditions)
+            .group_by(pins.c.run_id)
+            .order_by(newest.desc(), pins.c.run_id.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        return total, [run_id for (run_id,) in rows]
+
+    def list_pinned_runs(  # noqa: PLR0913 -- one keyword per filter of the pinned-runs list
+        self,
+        project_id: int,
+        *,
+        colors: frozenset[models.PinColor] | None = None,
+        pinned_by: frozenset[int] | None = None,
+        experiment_id: int | None = None,
+        name_contains: str = "",
+        limit: int = 25,
+        offset: int = 0,
+    ) -> models.PinnedRuns:
+        """A page of a project's pinned (non-deleted) runs, each once with every pin on it, the one pinned last first."""
+        runs, experiments, pins, users = (
+            self._tables[m] for m in (models.Run, models.Experiment, models.RunPin, models.User)
+        )
+        total, run_ids = self._pinned_run_page(
+            project_id, colors, pinned_by, experiment_id, name_contains, limit, offset
+        )
+        run_rows = {
+            run.id: run for run in self._fetch(models.Run, sa.select(runs).where(runs.c.id.in_(run_ids)))
+        }
+        experiment_rows = {
+            experiment.id: experiment
+            for experiment in self._fetch(
+                models.Experiment,
+                sa.select(experiments).where(
+                    experiments.c.id.in_({run.experiment_id for run in run_rows.values()})
+                ),
+            )
+        }
+        pins_by_run: dict[int, list[models.NamedPin]] = {}
+        for named in self._named_pins(
+            sa.select(pins, users.c.username)
+            .join(users, users.c.id == pins.c.pinned_by)
+            .where(pins.c.run_id.in_(run_ids))
+            .order_by(pins.c.pinned_at, pins.c.id)
+        ):
+            pins_by_run.setdefault(named.pin.run_id, []).append(named)
+        return models.PinnedRuns(
+            total=total,
+            runs=[
+                models.PinnedRun(
+                    run=run_rows[run_id],
+                    experiment=experiment_rows[run_rows[run_id].experiment_id],
+                    pins=pins_by_run[run_id],
+                )
+                for run_id in run_ids
+            ],
+        )
+
+    def pin_counts(self, project_id: int) -> dict[models.PinColor, int]:
+        """How many of a project's (non-deleted) runs are pinned in each colour by anyone."""
+        pins = self._tables[models.RunPin]
+        selected, conditions = self._pins_of_project(project_id, None, None, None, "")
+        rows = self._execute(
+            sa.select(pins.c.color, sa.func.count(sa.distinct(pins.c.run_id)))
+            .select_from(selected)
+            .where(*conditions)
+            .group_by(pins.c.color)
+        )
+        return {models.PinColor(color): count for color, count in rows}
+
+    def pinned_run_ids(  # noqa: PLR0913 -- the filters of `list_pinned_runs`, and how many runs
+        self,
+        project_id: int,
+        *,
+        colors: frozenset[models.PinColor] | None = None,
+        pinned_by: frozenset[int] | None = None,
+        experiment_id: int | None = None,
+        name_contains: str = "",
+        limit: int,
+    ) -> list[int]:
+        """The runs `list_pinned_runs` would list for these filters, the one pinned last first; at most `limit`."""
+        return self._pinned_run_page(project_id, colors, pinned_by, experiment_id, name_contains, limit, 0)[1]
+
+    def list_pinners(self, project_id: int) -> list[models.Pinner]:
+        """Who has pinned a run of a project (not a deleted one), by username."""
+        pins, users = self._tables[models.RunPin], self._tables[models.User]
+        selected, conditions = self._pins_of_project(project_id, None, None, None, "")
+        rows = self._execute(
+            sa.select(users.c.id, users.c.username)
+            .select_from(selected.join(users, users.c.id == pins.c.pinned_by))
+            .where(*conditions)
+            .distinct()
+            .order_by(users.c.username, users.c.id)
+        )
+        return [models.Pinner(user_id=user_id, username=username) for user_id, username in rows]
 
     def list_users(self) -> list[models.User]:
         """Every user, by username -- e.g. who a note can mention."""

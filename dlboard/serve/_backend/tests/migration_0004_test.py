@@ -30,7 +30,8 @@ def test_upgrading_builds_every_index_before_dropping_the_ones_it_replaces(
     """
     A drop holds its table's lock until the migration commits, so a build after it would wait with reads blocked.
 
-    Downgrades the migrated database to 0003 and upgrades it again, recording the DDL the upgrade sends.
+    Downgrades the migrated database to 0003 and upgrades it to 0004 again, recording the DDL that step sends (a later
+    migration is free to add indexes of its own), then on to head for the schema to be checked.
     """
     ddl: list[str] = []
 
@@ -44,6 +45,8 @@ def test_upgrading_builds_every_index_before_dropping_the_ones_it_replaces(
         cfg.attributes["connection"] = conn
         command.downgrade(cfg, "0003")
         sa.event.listen(conn, "before_cursor_execute", record)
+        command.upgrade(cfg, "0004")
+        sa.event.remove(conn, "before_cursor_execute", record)
         command.upgrade(cfg, "head")
         conn.execute(sa.text("RESET search_path"))
         conn.commit()
