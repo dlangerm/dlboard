@@ -443,7 +443,7 @@ def _register_toggle(app: Dash) -> None:
         panel_name = panel_view.PanelID.model_validate(ctx.triggered_id).panel
         sync = bool(cast("Any", ctx.triggered[0]["value"]))  # pyrefly: ignore [unsupported-operation]
 
-        # Like `sync_run_selection` (`_run_comparison_table.py`): this Switch's `checked` is *set
+        # Like `sync_run_selection` (`_runs_table.py`): this Switch's `checked` is *set
         # from* the panel's current `sync` value on every render, so a panel-sync switch mounting
         # for the first time (e.g. this page's very first render) reports that same value back as
         # a "change" even though nothing was actually toggled -- `prevent_initial_call` doesn't

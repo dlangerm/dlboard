@@ -74,13 +74,13 @@ from dlboard.serve._pages._experiment._run_compare import (
     COMPARE_RUNS_ID,
     COMPARE_SEARCH_ID,
 )
-from dlboard.serve._pages._experiment._run_comparison_table import (
+from dlboard.serve._pages._experiment._run_picker import RUN_PICKER_LIMIT
+from dlboard.serve._pages._experiment._runs_table import (
     NAVBAR_HPARAM_COL_SELECT_ID,
     NAVBAR_HPARAM_COLUMNS_TOGGLE_ID,
     NAVBAR_HPARAM_CONFIRM_COLS_ID,
     NAVBAR_HPARAM_DATATABLE_ID,
 )
-from dlboard.serve._pages._experiment._run_picker import RUN_PICKER_LIMIT
 from dlboard.serve._pages._experiment._tab_controls import NEW_TAB_PANELS_SELECT_ID, RENAME_TAB_NAME_INPUT_ID
 from dlboard.serve._pages._simple_admin_page import ADMIN_PURGE_CONFIRM_ID
 from dlboard.serve._pages._simple_homepage import NEW_PROJECT_BUTTON_ID, NEW_PROJECT_NAME_ID
@@ -896,7 +896,7 @@ def test_switching_tabs_does_not_remount_the_navbar_run_table(
 ) -> None:
     """
     Regression check: switching tabs persists the active tab by writing to the same shared
-    page-state store the navbar's run-comparison grid (`_run_comparison_table.py`) used to
+    page-state store the navbar's run-comparison grid (`_runs_table.py`) used to
     unconditionally rebuild itself from on *any* change to that store -- so every tab click tore
     down and remounted the whole ag-grid, a visible flicker unrelated to anything the grid actually
     displays (it doesn't even show tab data). A role/text-based assertion can't catch this -- the
@@ -1489,7 +1489,7 @@ def test_ctrl_k_dropdown_options_are_visible_and_clickable(
     it was clipped and invisible even though it existed in the DOM. Defaulting to Mantine's own
     `withinPortal: True` portals the dropdown to the document body instead, outside that clipping
     box, without reintroducing the *other* failure mode a bare `Popover` has in this situation (see
-    `_run_comparison_table.py`'s own Columns picker): a portalled dropdown's option is still
+    `_runs_table.py`'s own Columns picker): a portalled dropdown's option is still
     click-through-able here because `Modal`'s outside-click detection (unlike `Popover`'s) already
     accounts for its own nested portals.
     """

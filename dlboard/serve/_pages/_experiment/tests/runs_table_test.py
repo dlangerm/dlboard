@@ -13,7 +13,7 @@ from dlboard.plugins.charts.file_list import FileListChart
 from dlboard.plugins.charts.image_series import ImageChart
 from dlboard.plugins.charts.line_chart import LineChart
 from dlboard.serve._pages._experiment import _column_catalog as column_catalog
-from dlboard.serve._pages._experiment import _run_comparison_table as run_table
+from dlboard.serve._pages._experiment import _runs_table as run_table
 
 if TYPE_CHECKING:
     from dlboard.plugins.data_stores.sqlite import SQLLiteStore

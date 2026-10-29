@@ -12,7 +12,7 @@ each one's values differ across the runs (`CompareIndex`), needs every key's lat
 when the picked runs change, and the browser keeps only the keys and those flags. Each page then reads only
 its own keys' values (`comparison_page`), so paging and filtering never read the rest.
 
-Fully self-contained like `_run_comparison_table.py`; the one hook into the page is `compare_components`,
+Fully self-contained like `_runs_table.py`; the one hook into the page is `compare_components`,
 which the experiment layout places beside the notes drawer.
 """
 
@@ -296,7 +296,7 @@ class Comparison:
     index: CompareIndex
 
 
-def load_comparison(store: DataStore[...], experiment_id: int, run_ids: list[int]) -> Comparison:
+def load_run_compare(store: DataStore[...], experiment_id: int, run_ids: list[int]) -> Comparison:
     """
     The comparison of the picked runs: every key's latest value is read here, to say which keys differ, and not kept.
 
@@ -405,7 +405,7 @@ def compare_components(store: DataStore[...], experiment_id: int, query: Compare
     after it: `page_load_budget_test.py` caps the callbacks a page load may cost. Otherwise the
     modal starts empty and the button's callbacks fill it in.
     """
-    comparison = load_comparison(store, experiment_id, query.runs)
+    comparison = load_run_compare(store, experiment_id, query.runs)
     page = comparison_page(
         store,
         experiment_id,
@@ -550,7 +550,7 @@ def register_run_compare_callbacks(app: Dash) -> None:
         prevent_initial_call=True,
     )
     def load_compared_keys(picked: list[str], experiment_id: int) -> dict[str, Any]:
-        comparison = load_comparison(get_data_store(), experiment_id, [int(run_id) for run_id in picked])
+        comparison = load_run_compare(get_data_store(), experiment_id, [int(run_id) for run_id in picked])
         return comparison.index.model_dump()
 
     @app.callback(

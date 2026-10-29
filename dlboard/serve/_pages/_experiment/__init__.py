@@ -21,7 +21,7 @@ Features, each owning its ids, its modal or drawer, and its callbacks:
 - `_chart_settings_form.py` -- the form of a chart type's settings, and reading its values back.
 - `_chart_view_state.py` -- "Save as default" for what a viewer changed in a chart without editing it.
 - `_chart_suggestions.py` -- auto-populate charts for an empty view; suggest un-charted keys.
-- `_run_comparison_table.py` -- the navbar's hparam/metric/run comparison table + run deletion.
+- `_runs_table.py` -- the navbar's hparam/metric/run comparison table + run deletion.
 - `_panel_area_controls.py` -- paging and filtering the panel area, opening panels, switching tabs.
 - `_live_updates.py` -- the poll that redraws only charts whose data changed, and its status.
 
@@ -65,7 +65,7 @@ from dlboard.serve._pages._experiment._paging import visible_open_panels
 from dlboard.serve._pages._experiment._panel_area_controls import register_panel_area_callbacks
 from dlboard.serve._pages._experiment._panel_controls import register_panel_controls_callbacks
 from dlboard.serve._pages._experiment._run_compare import register_run_compare_callbacks
-from dlboard.serve._pages._experiment._run_comparison_table import register_run_comparison_callbacks
+from dlboard.serve._pages._experiment._runs_table import register_runs_table_callbacks
 from dlboard.serve._pages._experiment._tab_controls import register_tab_controls_callbacks
 from dlboard.serve._pages._experiment._views import register_view_callbacks
 from dlboard.serve._url import relative_path
@@ -201,7 +201,7 @@ def register(app: Dash) -> None:
     register_chart_editor_callbacks(app)
     register_chart_view_state_callbacks(app)
     register_chart_suggestions_callbacks(app)
-    register_run_comparison_callbacks(app)
+    register_runs_table_callbacks(app)
     register_run_compare_callbacks(app)
     register_view_callbacks(app)
     register_notes_callbacks(app)

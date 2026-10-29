@@ -807,7 +807,7 @@ def _register_column_search(app: Dash) -> None:
         )
 
 
-def register_run_comparison_callbacks(app: Dash) -> None:
+def register_runs_table_callbacks(app: Dash) -> None:
     _register_hparam_table(app)
     _register_newest_runs(app)
     _register_delete_run(app)
