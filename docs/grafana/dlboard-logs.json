@@ -1,0 +1,190 @@
+{
+  "__inputs": [
+    {
+      "description": "The Loki that receives dlboard's logs over OTLP (DLBOARD_TELEMETRY_LOGS=true)",
+      "label": "Loki",
+      "name": "DS_LOKI",
+      "pluginId": "loki",
+      "pluginName": "Loki",
+      "type": "datasource"
+    }
+  ],
+  "annotations": {
+    "list": []
+  },
+  "description": "dlboard's own log events, from the OTLP logs export. Every log line carries trace_id when tracing is on, so a line links to its trace.",
+  "editable": true,
+  "links": [],
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "panels": [],
+      "title": "Errors",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "description": "Error-level log events from dlboard. Any sustained count here is worth opening the log panel below for.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 1
+      },
+      "id": 2,
+      "targets": [
+        {
+          "expr": "sum(count_over_time({service_name=\"dlboard\"} | level=\"error\" [$__auto]))",
+          "legendFormat": "errors",
+          "refId": "A"
+        }
+      ],
+      "title": "Error log lines per interval",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "description": "The server could not start. Zero is the normal state; anything else means a worker failed setup.",
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 1
+      },
+      "id": 3,
+      "options": {
+        "colorMode": "background"
+      },
+      "targets": [
+        {
+          "expr": "sum(count_over_time({service_name=\"dlboard\"} |= \"dlboard could not start\" [$__range]))",
+          "legendFormat": "could not start",
+          "refId": "A"
+        }
+      ],
+      "title": "Failed to start, in the last window",
+      "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 9
+      },
+      "id": 4,
+      "panels": [],
+      "title": "Log lines",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "description": "Click a line's trace_id to open its trace in the Tempo dashboard's data source.",
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 10
+      },
+      "id": 5,
+      "options": {
+        "showTime": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": true
+      },
+      "targets": [
+        {
+          "expr": "{service_name=\"dlboard\"} | level=\"error\"",
+          "refId": "A"
+        }
+      ],
+      "title": "dlboard errors",
+      "type": "logs"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "description": "Every log event the server sends at its configured DLBOARD_LOG_LEVEL. Filter here, or narrow it by adding a | field filter to the query.",
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 22
+      },
+      "id": 6,
+      "options": {
+        "showTime": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": true
+      },
+      "targets": [
+        {
+          "expr": "{service_name=\"dlboard\"}",
+          "refId": "A"
+        }
+      ],
+      "title": "All dlboard log lines",
+      "type": "logs"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": [
+    "dlboard"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timezone": "browser",
+  "title": "dlboard logs",
+  "uid": "dlboard-logs",
+  "version": 1
+}
