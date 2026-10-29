@@ -34,7 +34,7 @@ from dlboard.plugins.charts.line_chart import LineChart
 from dlboard.plugins.charts.series_band import SeriesBandChart
 from dlboard.plugins.charts.table_chart import TableChart
 from dlboard.serve._pages._experiment._column_catalog import ColumnCatalog, summary_hparam_keys
-from dlboard.serve._pages._experiment._panel_data import fetch_panel_data
+from dlboard.serve._pages._experiment._panel_data import fetch_panel_data, scope_panel_data
 from dlboard.serve._pages._experiment._run_compare import load_run_compare
 
 if TYPE_CHECKING:
@@ -301,6 +301,28 @@ def test_a_projects_pins_read_no_more_when_its_own_runs_or_another_projects_pins
         f"{grown.rows} rows beside 3,000 more runs and 1,500 more pins, {alone.rows}"
     )
     assert grown.pages <= 2 * alone.pages + 10, f"{grown.pages} pages beside them, {alone.pages}"
+
+
+def test_a_comparison_of_two_experiments_reads_no_more_when_each_has_more_runs(store: PostgresStore) -> None:
+    """A comparison draws the runs it holds of each experiment; what else they hold is none of its business."""
+    project_id = store.create_project(models.NewProject(name="p", description="d")).id
+    few = _train(store, project_id, _SHORT, runs=_SHOWN), _train(store, project_id, _SHORT, runs=_SHOWN)
+    many = _train(store, project_id, _SHORT, runs=60), _train(store, project_id, _SHORT, runs=60)
+
+    def of_the_newest(experiments: tuple[int, int]) -> _Work:
+        scope = {
+            experiment_id: frozenset(
+                run.id for run in store.get_runs(experiment_id, limit=_SHOWN, run_ids=None)
+            )
+            for experiment_id in experiments
+        }
+        return _work(store, lambda: scope_panel_data(store, scope, _LINES))
+
+    alone, among_many = of_the_newest(few), of_the_newest(many)
+
+    assert alone.rows > 0
+    assert among_many.rows <= 2 * alone.rows, f"{among_many.rows} rows beside 60 runs each, {alone.rows}"
+    assert among_many.pages <= 2 * alone.pages + 10, f"{among_many.pages} pages beside 60 runs, {alone.pages}"
 
 
 _KEY_SUMMARIES: dict[str, Callable[[PostgresStore, int], object]] = {

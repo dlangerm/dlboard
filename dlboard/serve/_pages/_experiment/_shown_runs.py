@@ -1,4 +1,4 @@
-"""Which runs an experiment page draws: the ones a view selected, else only the newest few."""
+"""Which runs a page draws: an experiment page's selection (else only its newest few), or a comparison's members."""
 
 from __future__ import annotations
 
@@ -8,8 +8,13 @@ from pydantic import PositiveInt
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from dlboard.models import DataStore
-    from dlboard.serve._pages._experiment._page_model import DocumentSettings
+    from dlboard.serve._pages._experiment._page_model import BasicExperimentPage, DocumentSettings
+
+type RunScope = Mapping[int, frozenset[int]]
+"""The runs a page draws, by the experiment each is of: one experiment's on an experiment page, any number on a comparison."""
 
 
 class ShownRunsSettings(BaseSettings):
@@ -47,3 +52,29 @@ def shown_run_ids(store: DataStore[...], experiment_id: int, document: DocumentS
     newest = store.get_runs(experiment_id, limit=shown + len(excluded), run_ids=None)
     remaining = [run.id for run in newest if run.id not in excluded]
     return frozenset(remaining[:shown])
+
+
+def page_scope(
+    store: DataStore[...], page: BasicExperimentPage, hidden: frozenset[int] = frozenset()
+) -> RunScope:
+    """
+    The runs `page` draws, by experiment: the one place that tells an experiment's page from a comparison.
+
+    An experiment page has just its own experiment, whatever runs it shows (`shown_run_ids`), even none. A comparison has
+    the experiment of every member except those the viewer has `hidden`, and none for an experiment all of whose members
+    are: which runs a viewer looks at is theirs to choose, and is not saved with the comparison.
+    """
+    if page.experiment_id is not None:
+        return {page.experiment_id: shown_run_ids(store, page.experiment_id, page.document)}
+    drawn: dict[int, set[int]] = {}
+    for run in store.comparison_runs(page.id):
+        if run.id not in hidden:
+            drawn.setdefault(run.experiment_id, set()).add(run.id)
+    return {experiment_id: frozenset(run_ids) for experiment_id, run_ids in drawn.items()}
+
+
+def page_experiments(store: DataStore[...], page: BasicExperimentPage) -> list[int]:
+    """The experiments `page` draws runs of, for what is asked of an experiment rather than of its runs: its own, always."""
+    if page.experiment_id is not None:
+        return [page.experiment_id]
+    return list(page_scope(store, page))

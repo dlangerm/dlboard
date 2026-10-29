@@ -68,10 +68,9 @@ def test_render_chart_preview_draws_the_selected_runs_like_the_real_panel(
     )
 
     form = _form(
-        experiment_id=experiment_id,
         page_json=repo.load_page(store, repo.ExperimentRef(experiment_id, view.id)).model_dump_json(),
     )
-    preview, error = render_chart_preview(form, store=store, reads=EditorReads())
+    preview, error = render_chart_preview(form, store=store, reads=EditorReads(kept=8))
 
     assert error == ""
     _title, plot = _to_props(preview)["children"]
@@ -86,7 +85,6 @@ def _form(**changes: Any) -> _FormValues:  # noqa: ANN401 -- the values of a for
         "field_ids": [{"type": "chart-param", "field": "column"}, {"type": "chart-param", "field": "x_axis"}],
         "table_ids": [],
         "table_values": [],
-        "experiment_id": 0,
         "page_json": "",
         "paging_json": "",
         "target": None,
@@ -114,7 +112,7 @@ def test_an_edited_chart_is_drawn_in_its_own_card_under_ids_of_its_own_and_the_o
 ) -> None:
     panel, page_json = _page_with_a_chart(store, experiment_id)
     location = ChartLocation(panel, 0, panel.charts[0])
-    form = _form(experiment_id=experiment_id, page_json=page_json)
+    form = _form(page_json=page_json)
     draft_ids = _draft_ids(("train", 0), ("val", 0))
 
     drafts, error = render_card_drafts(
@@ -123,7 +121,7 @@ def test_an_edited_chart_is_drawn_in_its_own_card_under_ids_of_its_own_and_the_o
         models.DEFAULT_RENDER_CONTEXT.page_size,
         draft_ids,
         store=store,
-        reads=EditorReads(),
+        reads=EditorReads(kept=8),
     )
 
     assert error == ""
@@ -137,9 +135,7 @@ def test_a_form_that_makes_no_valid_chart_leaves_the_draft_as_it_was_and_says_wh
 ) -> None:
     panel, page_json = _page_with_a_chart(store, experiment_id)
     location = ChartLocation(panel, 0, panel.charts[0])
-    form = _form(
-        experiment_id=experiment_id, page_json=page_json, values=[None, "step"]
-    )  # the column is required
+    form = _form(page_json=page_json, values=[None, "step"])  # the column is required
     draft_ids = _draft_ids(("train", 0))
 
     with capture_logs() as logs:
@@ -149,7 +145,7 @@ def test_a_form_that_makes_no_valid_chart_leaves_the_draft_as_it_was_and_says_wh
             models.DEFAULT_RENDER_CONTEXT.page_size,
             draft_ids,
             store=store,
-            reads=EditorReads(),
+            reads=EditorReads(kept=8),
         )
 
     assert drafts == [no_update]
@@ -164,12 +160,11 @@ def test_a_display_only_edit_is_drawn_without_reading_again_until_the_experiment
     """Opening the editor reads the chart's data once; a change of height asks for the same, and a new write does not."""
     panel, page_json = _page_with_a_chart(store, experiment_id)
     location = ChartLocation(panel, 0, panel.charts[0])
-    reads = EditorReads()
+    reads = EditorReads(kept=8)
 
     def reads_to_draw(height: int) -> int:
         span_exporter.clear()
         form = _form(
-            experiment_id=experiment_id,
             page_json=page_json,
             values=["loss", "step", height],
             checked_values=[None, None, None],

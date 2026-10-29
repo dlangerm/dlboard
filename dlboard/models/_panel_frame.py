@@ -32,10 +32,16 @@ its bare id without fetching run metadata itself. A chart that needs to *exclude
 (e.g. `table_chart.py`'s "runs" mode) can name it precisely rather than guessing at string prefixes.
 """
 
-NO_DATA_COLUMNS: typing.Final = frozenset({*MetricColumn, RUN_NAME_COLUMN})
+EXPERIMENT_COLUMN: typing.Final = "experiment_id"
+"""
+The experiment a run is of, beside its name: which a chart that goes back to the server for more of its data (an image
+chart's window of steps) needs to ask for it, since a page can draw runs of several experiments (a comparison).
+"""
+
+NO_DATA_COLUMNS: typing.Final = frozenset({*MetricColumn, RUN_NAME_COLUMN, EXPERIMENT_COLUMN})
 """Columns that say where a row is, not what a chart shows: present on every row whatever was logged."""
 
-IDENTITY_COLUMNS: typing.Final = frozenset({MetricColumn.RUN_ID, RUN_NAME_COLUMN})
+IDENTITY_COLUMNS: typing.Final = frozenset({MetricColumn.RUN_ID, RUN_NAME_COLUMN, EXPERIMENT_COLUMN})
 """Which run a row belongs to, and what to call it: part of what every chart shows, though no chart asks for them."""
 
 HPARAM_COLUMN_PREFIX: typing.Final = "hparam__"

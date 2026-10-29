@@ -14,8 +14,6 @@ The settings form is `_chart_settings_form.py`'s.
 from __future__ import annotations
 
 import secrets
-import threading
-from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Final, Literal, cast
@@ -29,7 +27,6 @@ from structlog.stdlib import get_logger
 
 from dlboard import models
 from dlboard.serve import ClientsideScript, get_data_store
-from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import ButtonId, DivId, PaneId, StoreId, ValueId
 from dlboard.serve._pages._dash_helpers import TriggeredId, busy_while_running, require_triggered_id
 from dlboard.serve._pages._experiment import _chart_view as chart_view
@@ -51,8 +48,9 @@ from dlboard.serve._pages._experiment._chart_settings_form import (
     register_settings_form_callbacks,
 )
 from dlboard.serve._pages._experiment._column_catalog import ColumnCatalog
+from dlboard.serve._pages._experiment._kept_reads import KeptReads
 from dlboard.serve._pages._experiment._paging import Paging
-from dlboard.serve._pages._experiment._shown_runs import shown_run_ids
+from dlboard.serve._pages._experiment._shown_runs import page_scope
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -123,7 +121,6 @@ class _FormStates(edits.EditCtx):
     target: Annotated[EditorTarget | None, State(CHART_EDITOR_TARGET_ID, "data")]
     field_ids: Annotated[list[dict[str, str]], State(CHART_PARAM.all(), "id")]
     table_ids: Annotated[list[dict[str, str]], State(CHART_PARAM_TABLE_DATA.all(), "id")]
-    experiment_id: Annotated[int, State(constants.STATE_EXPERIMENT_ID, "data")]
 
 
 class _FormValues(_FormStates):
@@ -192,7 +189,7 @@ def _form_for(target_data: dict[str, Any] | None, chart_type_name: str | None) -
 
 
 def _settings_form(
-    target_data: dict[str, Any] | None, chart_type_name: str | None, page_json: str, experiment_id: int
+    target_data: dict[str, Any] | None, chart_type_name: str | None, page_json: str
 ) -> list[Component]:
     """
     The form for `chart_type_name`, starting from the chart being edited if it is of that type.
@@ -200,16 +197,17 @@ def _settings_form(
     Its tables also list the rows the chart type draws without saving (`ChartType.fixed_table_rows`): an image chart
     draws every overlay logged over its picture, and its Layers table lists each, though only some may be saved.
     """
-    catalog = ColumnCatalog.load(get_data_store(), experiment_id)
+    page = page_model.BasicExperimentPage.model_validate_json(page_json)
+    catalog = ColumnCatalog.of_page(get_data_store(), page)
     edited: EditedChart | None = None
-    if isinstance(target := _target_of(target_data), EditChart):
-        panels = page_model.BasicExperimentPage.model_validate_json(page_json).panels
-        if location := page_model.locate_chart(panels, target.chart_id):
-            edited = EditedChart(
-                chart_type=location.chart.chart_type,
-                parameters=models.ChartTypeRegistry.current_parameters(location.chart),
-                fixed_rows=models.ChartTypeRegistry.fixed_table_rows(location.chart, catalog),
-            )
+    if isinstance(target := _target_of(target_data), EditChart) and (
+        location := page_model.locate_chart(page.panels, target.chart_id)
+    ):
+        edited = EditedChart(
+            chart_type=location.chart.chart_type,
+            parameters=models.ChartTypeRegistry.current_parameters(location.chart),
+            fixed_rows=models.ChartTypeRegistry.fixed_table_rows(location.chart, catalog),
+        )
     return build_chart_param_form(chart_type_name, edited, catalog=catalog)
 
 
@@ -219,39 +217,20 @@ _KEPT_READS: Final = 8
 
 @dataclass(frozen=True)
 class _ReadKey:
-    """What a read for one chart depends on: the data it asks for, of which runs, as of which write to the experiment."""
+    """What a read for one chart depends on: the data it asks for, of which runs, as of which write to each experiment."""
 
-    experiment_id: int
-    revision: int
-    run_ids: frozenset[int] | None
+    experiments: tuple[tuple[int, int, frozenset[int]], ...]
+    """Each experiment drawn: its id, its revision, and the runs of it that are."""
     request: models.DataRequest
 
 
-class EditorReads:
-    """
-    The last few panels the chart editor read, so an edit that asks for the same data is drawn without reading it again.
+EditorReads = KeptReads[_ReadKey, panel_data.PanelData]
+"""
+The last few panels the chart editor read, so an edit that asks for the same data is drawn without reading it again.
 
-    A display-only edit (a chart's height, its colors) asks for what it asked before, and so does opening the editor on
-    a chart the page has just drawn. Keyed by the experiment's `revision`, which every write to it bumps, so a read is
-    never served after the data changed, on this worker or another.
-    """
-
-    def __init__(self) -> None:
-        self._reads: OrderedDict[_ReadKey, panel_data.PanelData] = OrderedDict()
-        self._lock = threading.Lock()
-
-    def read(self, key: _ReadKey, fetch: Callable[[], panel_data.PanelData]) -> panel_data.PanelData:
-        """The read kept under `key`, or `fetch`'s, kept for the next edit that asks for the same."""
-        with self._lock:
-            if (kept := self._reads.get(key)) is not None:
-                self._reads.move_to_end(key)
-                return kept
-        fetched = fetch()
-        with self._lock:
-            self._reads[key] = fetched
-            while len(self._reads) > _KEPT_READS:
-                self._reads.popitem(last=False)
-        return fetched
+A display-only edit (a chart's height, its colors) asks for what it asked before, and so does opening the editor on
+a chart the page has just drawn.
+"""
 
 
 def _draw_form(  # noqa: PLR0913
@@ -288,21 +267,25 @@ def _draw_form(  # noqa: PLR0913
     )
     try:
         chart = build_validated_chart_instance(chart_type_name, parameters, chart_id)
-        document = page_model.BasicExperimentPage.model_validate_json(values.page_json).document
-        experiment_id = values.experiment_id
-        run_ids = shown_run_ids(store, experiment_id, document)
+        scope = page_scope(store, page_model.BasicExperimentPage.model_validate_json(values.page_json))
         panel = models.PanelInstance[Any, Any](name=panel_name, charts=[chart])
 
         def fetch() -> panel_data.PanelData:
-            return panel_data.fetch_panel_data(store, experiment_id, panel, run_ids)
+            return panel_data.scope_panel_data(store, scope, panel)
 
         # Read through the caller's own store: `None` for an experiment they may not see, which is never served kept.
-        experiment = store.get_experiment(experiment_id)
+        experiments = [store.get_experiment(experiment_id) for experiment_id in scope]
         data = (
             fetch()
-            if experiment is None
+            if any(experiment is None for experiment in experiments)
             else reads.read(
-                _ReadKey(experiment_id, experiment.revision, run_ids, chart.data_request()), fetch
+                _ReadKey(
+                    experiments=tuple(
+                        sorted((e.id, e.revision, scope[e.id]) for e in experiments if e is not None)
+                    ),
+                    request=chart.data_request(),
+                ),
+                fetch,
             )
         )
         if (wide := data.wide_history(chart)) is not None and wide.refused:
@@ -372,11 +355,10 @@ def _register_open_and_cancel(app: Dash) -> None:
         Input(panel_view.OPEN_CHART_BUTTON.all(), "n_clicks"),
         Input(chart_view.EDIT_CHART_BUTTON.all(), "n_clicks"),
         State(ids.STATE_PAGE_STORAGE, "data"),
-        State(constants.STATE_EXPERIMENT_ID, "data"),
         prevent_initial_call=True,
     )
     def open_chart_editor(
-        _add_clicks: list[int], _edit_clicks: list[int], page_json: str, experiment_id: int
+        _add_clicks: list[int], _edit_clicks: list[int], page_json: str
     ) -> tuple[bool, dict[str, Any], str | None, str, str, list[Component], dict[str, Any]]:
         """Opens the editor, with its form built in this same round trip: it is what the person is waiting for."""
         opened = require_triggered_id(_OpenedFrom)
@@ -414,7 +396,7 @@ def _register_open_and_cancel(app: Dash) -> None:
             chart.chart_type,
             "Edit chart",
             "Save changes",
-            _settings_form(editing, chart.chart_type, page_json, experiment_id),
+            _settings_form(editing, chart.chart_type, page_json),
             _form_for(editing, chart.chart_type),
         )
 
@@ -446,7 +428,7 @@ def _register_open_and_cancel(app: Dash) -> None:
 
 
 def _register_form_and_draft(app: Dash) -> None:
-    reads = EditorReads()  # this app's own: what one app read is no other's to draw
+    reads = EditorReads(kept=_KEPT_READS)  # this app's own: what one app read is no other's to draw
 
     @app.callback(
         Output(CHART_EDITOR_PARAMS_ID, "children"),
@@ -455,7 +437,6 @@ def _register_form_and_draft(app: Dash) -> None:
         State(CHART_EDITOR_TARGET_ID, "data"),
         State(CHART_EDITOR_FORM_FOR_ID, "data"),
         State(ids.STATE_PAGE_STORAGE, "data"),
-        State(constants.STATE_EXPERIMENT_ID, "data"),
         prevent_initial_call=True,
     )
     def build_settings_form(
@@ -463,13 +444,12 @@ def _register_form_and_draft(app: Dash) -> None:
         target_data: dict[str, Any] | None,
         built_for: dict[str, Any] | None,
         page_json: str,
-        experiment_id: int,
     ) -> tuple[list[Component], dict[str, Any]]:
         """Rebuilds the form for the type the person chose; opening the editor has built it already."""
         form_for = _form_for(target_data, chart_type_name)
         if form_for == built_for:
             raise PreventUpdate
-        return _settings_form(target_data, chart_type_name, page_json, experiment_id), form_for
+        return _settings_form(target_data, chart_type_name, page_json), form_for
 
     @app.callback(
         Output(chart_view.CHART_DRAFT.all(), "children"),
@@ -578,11 +558,11 @@ def _register_key_search(app: Dash) -> None:
         Input(CHART_PARAM.match(), "searchValue"),
         State(CHART_PARAM.match(), "value"),
         State(CHART_EDITOR_TYPE_ID, "value"),
-        State(constants.STATE_EXPERIMENT_ID, "data"),
+        State(ids.STATE_PAGE_STORAGE, "data"),
         prevent_initial_call=True,
     )
     def search_keys(
-        search: str | None, value: str | list[str] | None, chart_type_name: str | None, experiment_id: int
+        search: str | None, value: str | list[str] | None, chart_type_name: str | None, page_json: str
     ) -> list[str]:
         """A key picker's options for what is typed in it, searched on the server: it lists a page of them (#416)."""
         field_name = require_triggered_id(FieldID).field
@@ -594,7 +574,9 @@ def _register_key_search(app: Dash) -> None:
         if field is None or field.column_kind is None:
             raise PreventUpdate
         kept = value if isinstance(value, list) else [value] if value else list[str]()
-        catalog = ColumnCatalog.load(get_data_store(), experiment_id)
+        catalog = ColumnCatalog.of_page(
+            get_data_store(), page_model.BasicExperimentPage.model_validate_json(page_json)
+        )
         return key_picker_options(field, catalog, search=search or "", keep=kept)
 
 

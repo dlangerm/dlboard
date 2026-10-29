@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import pendulum
 
@@ -15,7 +15,7 @@ from dlboard.serve._pages._experiment import _panel_data as panel_data
 from dlboard.serve._pages._experiment import _panel_view as panel_view
 from dlboard.serve._pages._experiment._page_model import DocumentSettings
 from dlboard.serve._pages._experiment._paging import Paging, visible_open_panels
-from dlboard.serve._pages._experiment._shown_runs import shown_run_ids
+from dlboard.serve._pages._experiment._shown_runs import page_experiments, page_scope, shown_run_ids
 
 if TYPE_CHECKING:
     import pytest
@@ -111,3 +111,56 @@ def test_the_charts_of_an_experiment_of_many_runs_are_drawn_from_only_the_newest
     frames = panel_data.panel_frames(store, loaded, paging, visible_open_panels(loaded.panels, "", paging))
 
     assert set(frames["p"].for_chart(panel.charts[0]).run_id) == {run.id for run in runs[-20:]}
+
+
+def _comparison(store: SQLLiteStore, project_id: int, run_ids: set[int]) -> page_model.BasicExperimentPage:
+    comparison = store.create_comparison(
+        page_model.BasicExperimentPage,
+        models.NewPage[Any, Any](
+            project_id=project_id,
+            owner_id=store.get_or_create_user(models.Principal.unverified("alice")).id,
+            name="sweep",
+        ),
+        frozenset(run_ids),
+    )
+    return cast("page_model.BasicExperimentPage", comparison)
+
+
+def test_an_experiment_page_draws_its_own_experiments_runs_and_a_comparison_the_members_it_has_not_hidden(
+    store: SQLLiteStore, experiment_id: int
+) -> None:
+    experiment = store.get_experiment(experiment_id)
+    assert experiment is not None
+    other = store.create_experiment(models.NewExperiment(project_id=experiment.project_id)).id
+    first, second = _runs(store, experiment_id, 2), _runs(store, other, 1)
+    shared = cast(
+        "page_model.BasicExperimentPage",
+        store.get_or_create_page(page_model.BasicExperimentPage, experiment_id=experiment_id),
+    )
+    members = {run.id for run in (*first, *second)}
+
+    comparison = _comparison(store, experiment.project_id, members)
+
+    assert page_scope(store, shared) == {experiment_id: frozenset(run.id for run in first)}
+    assert page_scope(store, comparison, frozenset({first[0].id})) == {
+        experiment_id: frozenset({first[1].id}),
+        other: frozenset({second[0].id}),
+    }
+    assert page_experiments(store, shared) == [experiment_id]
+    assert sorted(page_experiments(store, comparison)) == sorted([experiment_id, other])
+
+
+def test_a_comparison_whose_members_are_all_hidden_draws_nothing_and_an_experiment_page_still_has_its_experiment(
+    store: SQLLiteStore, experiment_id: int
+) -> None:
+    experiment = store.get_experiment(experiment_id)
+    assert experiment is not None
+    (run,) = _runs(store, experiment_id, 1)
+    comparison = _comparison(store, experiment.project_id, {run.id})
+    nothing_selected = cast(
+        "page_model.BasicExperimentPage",
+        store.get_or_create_page(page_model.BasicExperimentPage, experiment_id=experiment_id),
+    ).with_settings(DocumentSettings(selected_runs=[]))
+
+    assert page_scope(store, comparison, frozenset({run.id})) == {}
+    assert page_scope(store, nothing_selected) == {experiment_id: frozenset()}

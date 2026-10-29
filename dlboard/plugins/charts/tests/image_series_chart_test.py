@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 import pytest
+import sqlalchemy as sa
 from pydantic import ValidationError
 
+from dlboard import models
 from dlboard.conftest import find_all_props
 from dlboard.conftest import props as _props
 from dlboard.models import (
     DEFAULT_RENDER_CONTEXT,
+    EXPERIMENT_COLUMN,
     LAYER_KIND_TAG,
     OVERLAY_KEY_SUFFIX,
     RUN_NAME_COLUMN,
@@ -43,9 +46,15 @@ from dlboard.plugins.charts.image_series import (
     LayerStyle,
     LayerVisibility,
     ViewedLayer,
+    _LoadedWindow,
     _slider_marks,
+    read_window,
 )
 from dlboard.plugins.charts.line_chart import LineChart
+from dlboard.serve._backend import _artifact_download
+
+if TYPE_CHECKING:
+    from dlboard.plugins.data_stores.sqlite import SQLLiteStore
 
 LineChart.register(allow_override=True)  # a chart type that keeps no viewer state
 
@@ -685,7 +694,9 @@ def test_hiding_every_overlay_is_not_part_of_what_a_viewer_can_save() -> None:
 
 def test_a_window_of_pictures_draws_a_slider_over_every_step_and_says_which_steps_it_has() -> None:
     """The slider goes to every step logged; the pictures are those of the window read, and it says which (#364)."""
-    frame = _artifacts_df(n_runs=2, steps_per_run=6).assign(**{artifact_logged_column("img"): True})
+    frame = _artifacts_df(n_runs=2, steps_per_run=6).assign(
+        **{artifact_logged_column("img"): True, EXPERIMENT_COLUMN: 7}
+    )
     frame.loc[frame["step"] > 2, [artifact_column("img"), artifact_tags_column("img")]] = None
 
     stack = ImageChart.render(ImageChartSettings(key="img"), frame)
@@ -701,4 +712,45 @@ def test_a_window_of_pictures_draws_a_slider_over_every_step_and_says_which_step
         "1": ["0", "1", "2"],
         "2": ["0", "1", "2"],
     }
-    assert (window["first"], window["last"], window["runs"]) == (0, 2, [1, 2])
+    assert (window["first"], window["last"], window["runs"]) == (0, 2, {"7": [1, 2]})
+
+
+def test_a_slider_read_asks_the_store_for_the_experiments_of_the_window_and_for_nothing_per_run(
+    store: SQLLiteStore, experiment_id: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """It read each run by itself once, and so 20 queries more on every step of a default page (a comparison's reason)."""
+    # `relative_path` reads Dash's process-global config, which only exists once some test has built a Dash app.
+    monkeypatch.setattr(_artifact_download, "relative_path", str)
+
+    def queries_for(run_count: int) -> int:
+        runs = [store.create_run(models.NewRun(experiment_id=experiment_id)).id for _ in range(run_count)]
+        store.log_artifact_refs(
+            models.Artifact(
+                key="img",
+                fname="i.png",
+                run_id=run,
+                experiment_id=experiment_id,
+                step=step,
+                ref=f"r://{run}/{step}",
+            )
+            for run in runs
+            for step in range(3)
+        )
+        window = _LoadedWindow(
+            first=0, last=2, runs={experiment_id: runs}, settings=ImageChartSettings(key="img")
+        )
+        statements: list[str] = []
+
+        def record(_conn: sa.Connection, _cursor: object, statement: str, *_: object) -> None:
+            statements.append(statement)
+
+        sa.event.listen(store._engine, "before_cursor_execute", record)
+        try:
+            assert read_window(store, window, step=1) is not None
+        finally:
+            sa.event.remove(store._engine, "before_cursor_execute", record)
+        return len(statements)
+
+    few = queries_for(2)
+
+    assert queries_for(20) == few

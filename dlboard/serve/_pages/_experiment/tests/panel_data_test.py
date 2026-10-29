@@ -15,6 +15,7 @@ from dlboard import models
 from dlboard.conftest import panel_data_of
 from dlboard.models import (
     HPARAM_COLUMN_PREFIX,
+    RUN_NAME_COLUMN,
     Artifact,
     HyperParams,
     NewHyperParams,
@@ -208,7 +209,8 @@ def test_a_panel_fetches_only_the_histograms_its_charts_show_thinned_to_the_cap(
 
     df = _frame(store, experiment_id, panel)
 
-    assert set(df.columns) == {"run_id", "step", histogram_column("grad"), models.RUN_NAME_COLUMN}
+    identity = {"run_id", models.RUN_NAME_COLUMN, models.EXPERIMENT_COLUMN}
+    assert set(df.columns) == {*identity, "step", histogram_column("grad")}
     assert list(df["step"]) == [0, 2, 4, 6, 7]
 
 
@@ -543,3 +545,90 @@ def test_a_series_band_panel_reads_a_band_for_each_group_of_a_family_in_one_read
     (request,) = panel.charts[0].data_request().series
     ((cell,),) = [df[request.column].dropna().tolist()]
     assert [(band.group, band.count, band.mean) for band in cell] == [("cat", 1, 10.0), ("dog", 2, 2.0)]
+
+
+def _two_experiments(store: SQLLiteStore) -> tuple[dict[str, int], dict[str, int]]:
+    """A "baseline" and a "sweep" experiment of one project, each with a run called "fluffy" that logged a loss."""
+    project = store.create_project(models.NewProject(name="p", description="d"))
+    experiments: dict[str, int] = {}
+    runs: dict[str, int] = {}
+    for offset, (name, extra) in enumerate((("baseline", None), ("sweep", "acc"))):
+        experiment = store.create_experiment(models.NewExperiment(project_id=project.id, name=name))
+        run = store.create_run(models.NewRun(experiment_id=experiment.id, name="fluffy"))
+        store.log_metrics(
+            models.LoggedMetrics(
+                metrics={"loss": 1.0 / (offset + 1), **({extra: 0.9} if extra else {})},
+                step=step,
+                experiment_id=experiment.id,
+                run_id=run.id,
+                timestamp_utc=_TS,
+            )
+            for step in range(3)
+        )
+        experiments[name], runs[name] = experiment.id, run.id
+    return experiments, runs
+
+
+def _lines(column: str) -> PanelInstance[Any, Any]:
+    return PanelInstance[Any, Any](
+        name="lines",
+        charts=[ChartInstance(chart_type=LineChart.name, parameters={"column": column, "x_axis": "step"})],
+    )
+
+
+def test_a_panel_over_several_experiments_is_what_each_draws_alone_and_names_a_run_for_its_experiment(
+    store: SQLLiteStore,
+) -> None:
+    experiments, runs = _two_experiments(store)
+    panel = _lines("loss")
+    (chart,) = panel.charts
+    scope = {experiments[name]: frozenset({runs[name]}) for name in experiments}
+
+    together = panel_data.scope_panel_data(store, scope, panel).for_chart(chart)
+    alone = pd.concat(
+        [
+            panel_data.fetch_panel_data(store, experiments[name], panel, frozenset({runs[name]})).for_chart(
+                chart
+            )
+            for name in experiments
+        ],
+        ignore_index=True,
+    )
+
+    columns = ["run_id", "step", "loss"]
+    assert together[columns].equals(alone[columns].sort_values(["run_id", "step"], ignore_index=True))
+    assert {runs[name]: set(together[together.run_id == runs[name]][RUN_NAME_COLUMN]) for name in runs} == {
+        runs["baseline"]: {"baseline / fluffy"},
+        runs["sweep"]: {"sweep / fluffy"},
+    }
+
+
+def test_a_metric_only_one_experiment_logged_is_blank_in_the_others_rows(store: SQLLiteStore) -> None:
+    experiments, runs = _two_experiments(store)
+    panel = _lines("acc")
+    (chart,) = panel.charts
+
+    frame = panel_data.scope_panel_data(
+        store, {experiments[name]: frozenset({runs[name]}) for name in experiments}, panel
+    ).for_chart(chart)
+
+    assert frame[frame.run_id == runs["baseline"]]["acc"].isna().all()
+    assert frame[frame.run_id == runs["sweep"]]["acc"].tolist() == [0.9, 0.9, 0.9]
+
+
+def test_one_experiments_runs_are_fetched_exactly_as_before_and_no_runs_are_no_rows(
+    store: SQLLiteStore,
+) -> None:
+    experiments, runs = _two_experiments(store)
+    panel = _lines("loss")
+    (chart,) = panel.charts
+    only = {experiments["sweep"]: frozenset({runs["sweep"]})}
+
+    scoped = panel_data.scope_panel_data(store, only, panel).for_chart(chart)
+    direct = panel_data.fetch_panel_data(store, experiments["sweep"], panel, frozenset({runs["sweep"]}))
+
+    assert scoped.equals(direct.for_chart(chart))
+    assert set(scoped[RUN_NAME_COLUMN]) == {
+        "fluffy"
+    }  # named for its experiment only when there is more than one
+    assert panel_data.scope_panel_data(store, {}, panel).for_chart(chart).empty
