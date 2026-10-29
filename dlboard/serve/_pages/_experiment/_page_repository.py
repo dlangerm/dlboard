@@ -164,22 +164,28 @@ def save_page(store: DataStore[...], mutated: BasicExperimentPage) -> BasicExper
                     ),
                 ),
             )
-        case ComparisonRef(page_id=page_id):
-            project_id = cast("int", mutated.project_id)
-            return cast(
-                "BasicExperimentPage",
-                store.create_comparison(
-                    BasicExperimentPage,
-                    models.NewPage[Any, Any](
-                        project_id=project_id,
-                        owner_id=user_id,
-                        name=unique_comparison_name(store, project_id, user_id),
-                        panels=mutated.panels,
-                        page_settings=mutated.page_settings,
-                    ),
-                    frozenset(run.id for run in store.comparison_runs(page_id)),
-                ),
-            )
+        case ComparisonRef():
+            return copy_comparison(store, mutated)
+
+
+def copy_comparison(store: DataStore[...], comparison: BasicExperimentPage) -> BasicExperimentPage:
+    """A comparison of your own with `comparison`'s panels, settings and runs: what an edit that is not yours branches into."""
+    project_id = cast("int", comparison.project_id)
+    user_id = get_current_user().id
+    return cast(
+        "BasicExperimentPage",
+        store.create_comparison(
+            BasicExperimentPage,
+            models.NewPage[Any, Any](
+                project_id=project_id,
+                owner_id=user_id,
+                name=unique_comparison_name(store, project_id, user_id),
+                panels=comparison.panels,
+                page_settings=comparison.page_settings,
+            ),
+            frozenset(run.id for run in store.comparison_runs(comparison.id)),
+        ),
+    )
 
 
 def save_document_settings(

@@ -42,6 +42,8 @@ class DocumentSettings(BaseModel, frozen=True, extra="ignore", populate_by_name=
     """The run ids the run-comparison table has selected, which every panel fetches. `None` is the newest few (`shown_run_ids`)."""
     excluded_runs: list[int] = Field(default_factory=list)
     """The run ids a comparison hides (it draws its members but these), and which a view saved before `selected_runs` left out of the newest few."""
+    description: str = ""
+    """What a comparison is for, in its owner's words. An experiment has its own description, stored with it."""
     hparam_columns: list[str] = Field(default_factory=list, alias="hparam-table-selected")
     """Which hyperparameter columns the run-comparison table shows."""
 

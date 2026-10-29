@@ -405,8 +405,8 @@ def register(app: Dash) -> None:
             case RunAction.DELETE:
                 asked = ask_to_delete(request.run_ids)
                 return no_update, no_update, asked.opened, asked.body, asked.pending
-            case RunAction.DRAW | RunAction.HIDE | RunAction.DIFF:
-                # The project page draws nothing, so its list offers none of these.
+            case RunAction.DRAW | RunAction.HIDE | RunAction.DIFF | RunAction.REMOVE:
+                # The project page draws nothing and holds no comparison, so its list offers none of these.
                 raise PreventUpdate
 
     register_delete(app, RunListSurface.PROJECT, notify=PINNED_NOTIFY_ID)

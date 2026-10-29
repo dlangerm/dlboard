@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from dash import html
 
     from dlboard import models
+    from dlboard.models import DataStore
     from dlboard.serve._pages._experiment._page_model import DocumentSettings
 
 type PanelsEdit = Callable[[list[models.PanelInstance[Any, Any]]], list[models.PanelInstance[Any, Any]]]
@@ -114,18 +115,36 @@ def _revealed(
             )
 
 
+def render_panel_area(
+    store: DataStore[...], page: BasicExperimentPage, paging: Paging, *, focus_chart: str | None = None
+) -> html.Div:
+    """The panel area of `page`: the tabs and the page of panels `paging` shows, with the data of the charts open in them."""
+    paging = resolved_paging(page, paging, focus_chart=focus_chart)
+    open_panels = visible_open_panels(page.panels, paging.shown_tab(page.panels), paging)
+    return accordion_view(
+        panel_frames(store, page, paging, open_panels), page, paging, focus_banner(store, page, paging)
+    )
+
+
 def commit(page_json: str, paging_json: str, edit: PageEdit) -> tuple[BasicExperimentPage, html.Div]:
     """Apply and save `edit`, then re-render the whole panel area from the saved page, with `edit.reveal` on screen."""
     before, saved = _apply(page_json, edit)
     paging = Paging.model_validate_json(paging_json).viewing(tab=edit.tab, open_panels=edit.open_panels)
     if edit.reveal is not None:
         paging = _revealed(before, saved, paging, edit.reveal)
-    paging = resolved_paging(saved, paging)
-    open_panels = visible_open_panels(saved.panels, paging.shown_tab(saved.panels), paging)
+    return saved, render_panel_area(get_data_store(), saved, paging)
+
+
+def refresh(page_json: str, paging_json: str) -> tuple[BasicExperimentPage, html.Div]:
+    """
+    Re-render the whole panel area from the page as stored, saving nothing.
+
+    For a change to what the page draws that is not an edit of the page: a comparison gaining or losing a run changes
+    the data of every chart, but not the page, so it must not fork a copy of it for someone who is not its owner.
+    """
     store = get_data_store()
-    return saved, accordion_view(
-        panel_frames(store, saved, paging, open_panels), saved, paging, focus_banner(store, saved, paging)
-    )
+    stored = load_page(store, ref_of(BasicExperimentPage.model_validate_json(page_json)))
+    return stored, render_panel_area(store, stored, Paging.model_validate_json(paging_json))
 
 
 class EditCtx(CallbackStates):

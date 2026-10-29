@@ -52,6 +52,8 @@ SHARED_VIEW: typing.Final = "shared"
 """The picker's value for the shared page (a view's value is its id)."""
 
 VIEW_SELECT_ID: typing.Final = "view-select"
+VIEW_SYNC_REQUEST_ID: typing.Final = "view-sync-request"
+"""The page of an experiment the browser holds, as `gate_view_sync.js` passes it on to the callback that syncs the picker with it."""
 VIEW_NAV_SUPPRESS_ID: typing.Final = "view-nav-suppress"
 """
 One-shot flag: `sync_view_after_edit` sets it right before writing `VIEW_SELECT_ID.value` itself
@@ -105,6 +107,7 @@ DELETE_VIEW_IDS = DeleteConfirmIds(
 _NAVIGATE_JS = ClientsideScript(Path(__file__).with_name("view_navigate.js"))
 _OPEN_ON_CLICK_JS = ClientsideScript(Path(__file__).with_name("open_on_click.js"))
 _SYNC_VIEW_URL_JS = ClientsideScript(Path(__file__).with_name("sync_view_url.js"))
+_GATE_VIEW_SYNC_JS = ClientsideScript(Path(__file__).with_name("gate_view_sync.js"))
 
 
 class ViewFile(BaseModel, extra="forbid"):
@@ -546,6 +549,13 @@ def _register_export_import(app: Dash) -> None:
 
 
 def _register_sync_after_edit(app: Dash) -> None:
+    app.clientside_callback(
+        _GATE_VIEW_SYNC_JS.source,
+        Output(VIEW_SYNC_REQUEST_ID, "data"),
+        Input(ids.STATE_PAGE_STORAGE, "data"),
+        prevent_initial_call=True,
+    )
+
     @app.callback(
         Output(VIEW_SELECT_ID, "data", allow_duplicate=True),
         Output(VIEW_SELECT_ID, "value", allow_duplicate=True),
@@ -556,7 +566,7 @@ def _register_sync_after_edit(app: Dash) -> None:
         Output(SHARE_VIEW_TOGGLE_ID, "children", allow_duplicate=True),
         Output(VIEW_NOTIFY_ID, "sendNotifications"),
         Output(VIEW_DUPLICATED_ID, "data", allow_duplicate=True),
-        Input(ids.STATE_PAGE_STORAGE, "data"),
+        Input(VIEW_SYNC_REQUEST_ID, "data"),
         State(ids.STATE_VIEW_ID, "data"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
         State(VIEW_DUPLICATED_ID, "data"),

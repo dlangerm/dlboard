@@ -25,6 +25,8 @@ class RunAction(StrEnum):
     """Pin the runs as the viewer, in `color`."""
     UNPIN = "unpin"
     """Take the viewer's pin of `color` back from the runs."""
+    REMOVE = "remove"
+    """Take the runs out of the comparison they are listed in, leaving them in their experiments."""
 
 
 class RunActionRequest(BaseModel, frozen=True, extra="forbid"):
@@ -41,7 +43,7 @@ class RunActionRequest(BaseModel, frozen=True, extra="forbid"):
     @model_validator(mode="after")
     def _takes_the_colour_or_comparison_its_action_takes(self) -> Self:
         match self.action:
-            case RunAction.DRAW | RunAction.HIDE | RunAction.DIFF | RunAction.DELETE:
+            case RunAction.DRAW | RunAction.HIDE | RunAction.DIFF | RunAction.DELETE | RunAction.REMOVE:
                 if self.color is not None or self.comparison_id is not None:
                     msg = f"{self.action} takes no colour or comparison"
                     raise ValueError(msg)
