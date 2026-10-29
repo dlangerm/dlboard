@@ -269,7 +269,7 @@ def panel_to_open(panels: typing.Sequence[PanelInstance[typing.Any, typing.Any]]
     return [p.name for p in panels if len(p.charts) <= AUTO_OPEN_MAX_CHARTS][:1]
 
 
-AUTO_MAX_CHARTS: Final = 200
+AUTO_MAX_CHARTS: Final = 1000
 """
 Most charts auto-generate makes at once. Keys that are not one family, so cannot fold into a band, would otherwise make a
 chart each, and a page of thousands of charts. The keys left out stay uncharted, so "Suggest charts" still reaches them.

@@ -616,7 +616,7 @@ def test_auto_generate_charts_at_most_the_limit_and_leaves_the_rest_uncharted() 
 
 def test_the_limit_is_spent_on_bands_and_histograms_before_metrics_that_each_make_a_chart() -> None:
     family = tuple(f"layer_{i}/grad_norm" for i in range(autogen.FOLD_AT_KEYS))
-    metrics = tuple(f"m{_letters(i)}" for i in range(250))
+    metrics = tuple(f"m{_letters(i)}" for i in range(autogen.AUTO_MAX_CHARTS))
     catalog = ColumnCatalog(metrics=(*metrics, *family), histograms=("weights",))
 
     panels = autogen.build_auto_panels(catalog, delimiter="/", mode="prefix")
