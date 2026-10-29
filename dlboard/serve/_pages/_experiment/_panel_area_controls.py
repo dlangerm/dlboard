@@ -18,7 +18,6 @@ from pydantic import ValidationError
 from structlog.stdlib import get_logger
 
 from dlboard.serve import ClientsideScript, get_data_store
-from dlboard.serve import _constants as constants
 from dlboard.serve._pages._dash_helpers import CallbackStates
 from dlboard.serve._pages._experiment._ids import (
     PANEL_PAGING_ID,
@@ -79,7 +78,6 @@ class _ShownPage(CallbackStates):
 
     paging_json: Annotated[str, State(PANEL_PAGING_ID, "data")]
     page_json: Annotated[str, State(STATE_PAGE_STORAGE, "data")]
-    experiment_id: Annotated[int, State(constants.STATE_EXPERIMENT_ID, "data")]
 
 
 class _PageChartsCtx(_ShownPage):
@@ -147,7 +145,7 @@ def _register_paging(app: Dash) -> None:
         store = get_data_store()
         page = load_page(
             store,
-            ref_of(panel_ctx.experiment_id, BasicExperimentPage.model_validate_json(panel_ctx.page_json)),
+            ref_of(BasicExperimentPage.model_validate_json(panel_ctx.page_json)),
         )
         new_paging = clamped_paging(page, tab, requested.viewing(tab=tab)).normalized(page.panels)
         # A control mounting reports its current value back as a "change" -- nothing to do for that.
@@ -195,11 +193,8 @@ def _register_paging(app: Dash) -> None:
         if requested == paging:
             raise PreventUpdate
 
-        experiment_id = chart_ctx.experiment_id
         store = get_data_store()
-        page = load_page(
-            store, ref_of(experiment_id, BasicExperimentPage.model_validate_json(chart_ctx.page_json))
-        )
+        page = load_page(store, ref_of(BasicExperimentPage.model_validate_json(chart_ctx.page_json)))
         panel_by_name = {p.name: p for p in page.panels}
         changed = {
             name
@@ -299,7 +294,7 @@ def register_panel_area_callbacks(app: Dash) -> None:
         # `ref_of`, not `STATE_VIEW_ID`: this accordion
         # remount can itself be the tail end of an edit that just branched into a new view.
         curr_page = BasicExperimentPage.model_validate_json(opened.page_json)
-        page = load_page(store, ref_of(opened.experiment_id, curr_page))
+        page = load_page(store, ref_of(curr_page))
         panel_by_name = {p.name: p for p in page.panels}
         rendered = newly_opened & panel_by_name.keys()
         frames = panel_frames(store, page, paging, rendered)

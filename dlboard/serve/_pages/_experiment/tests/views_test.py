@@ -50,7 +50,7 @@ def test_edits_that_branch_into_a_view_get_distinct_names_per_person(
     store: SQLLiteStore, experiment_id: int, sign_in_as: Callable[[str], User]
 ) -> None:
     """Never "Copy of Copy of ...": your first branch is "My view", the next "My view 2", and so on."""
-    shared = repo.load_page(store, repo.PageRef(experiment_id, None))
+    shared = repo.load_page(store, repo.ExperimentRef(experiment_id, None))
 
     sign_in_as("alice")
     first = repo.save_page(store, shared)

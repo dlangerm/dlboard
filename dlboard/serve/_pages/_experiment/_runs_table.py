@@ -472,7 +472,7 @@ def _newer_hidden(runs: list[Run], shown: frozenset[int]) -> int:
 
 
 def _load_hparam_panel_settings(
-    store: DataStore[...], ref: repo.PageRef
+    store: DataStore[...], experiment_id: int, ref: repo.PageRef
 ) -> tuple[list[Run], _Selection, list[str]]:
     """
     The cheap, always-needed inputs for the navbar table: its run list and its persisted settings.
@@ -483,8 +483,8 @@ def _load_hparam_panel_settings(
     just on a real settings change.
     """
     page = repo.load_page(store, ref)
-    shown, columns = shown_run_ids(store, ref.experiment_id, page.document), page.document.hparam_columns
-    runs = list(store.get_runs(ref.experiment_id, limit=None, run_ids=None))
+    shown, columns = shown_run_ids(store, experiment_id, page.document), page.document.hparam_columns
+    runs = list(store.get_runs(experiment_id, limit=None, run_ids=None))
     chosen = page.document.selected_runs is not None
     selection = _Selection(shown, chosen=chosen, newer_hidden=_newer_hidden(runs, shown) if chosen else 0)
     return runs, selection, columns
@@ -550,11 +550,11 @@ def _register_hparam_table(app: Dash) -> None:
         # the page that edit branched *away* from, since `sync_view_after_edit` only catches
         # `STATE_VIEW_ID` up to it a separate, slightly later round trip.
         ref = (
-            repo.ref_of(experiment_id, page_model.BasicExperimentPage.model_validate_json(page_json))
+            repo.ref_of(page_model.BasicExperimentPage.model_validate_json(page_json))
             if page_json is not None
-            else repo.PageRef(experiment_id, view_id)
+            else repo.ExperimentRef(experiment_id, view_id)
         )
-        runs, selection, selected = _load_hparam_panel_settings(store, ref)
+        runs, selection, selected = _load_hparam_panel_settings(store, experiment_id, ref)
         # `STATE_PAGE_STORAGE` changes on *every* page-settings write -- a tab switch, a panel
         # rename, a drag-reorder, none of which this table cares about -- so rebuilding on it
         # unconditionally (tearing down and remounting the ag-grid) flickered on every one of
@@ -603,13 +603,10 @@ def _register_hparam_table(app: Dash) -> None:
         Output(ids.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Input(NAVBAR_HPARAM_CONFIRM_COLS_ID, "n_clicks", allow_optional=True),
         State(NAVBAR_HPARAM_COL_SELECT_ID, "value", allow_optional=True),
-        State(constants.STATE_EXPERIMENT_ID, "data"),
         State(ids.STATE_PAGE_STORAGE, "data"),
         prevent_initial_call=True,
     )
-    def persist_selected_hparam_cols(
-        n_clicks: int | None, selected: list[str] | None, experiment_id: int, page_json: str
-    ) -> str:
+    def persist_selected_hparam_cols(n_clicks: int | None, selected: list[str] | None, page_json: str) -> str:
         if not n_clicks:
             raise PreventUpdate
         store = get_data_store()
@@ -617,7 +614,7 @@ def _register_hparam_table(app: Dash) -> None:
         curr_page = page_model.BasicExperimentPage.model_validate_json(page_json)
         page = repo.save_document_settings(
             store,
-            repo.ref_of(experiment_id, curr_page),
+            repo.ref_of(curr_page),
             page_model.DocumentSettings(hparam_columns=selected or []),
         )
         return page.model_dump_json()
@@ -662,7 +659,7 @@ def _register_hparam_table(app: Dash) -> None:
         # Still checked here: the browser compared against the runs drawn when the table was built, and
         # the page may have changed since. `ref_of`, not `STATE_VIEW_ID` -- see `render_navbar_hparams`'s
         # own comment on why.
-        ref = repo.ref_of(experiment_id, page_model.BasicExperimentPage.model_validate_json(page_json))
+        ref = repo.ref_of(page_model.BasicExperimentPage.model_validate_json(page_json))
         current_page = repo.load_page(store, ref)
         listed = {row[MetricColumn.RUN_ID] for row in table_data}
         if selected_ids == shown_run_ids(store, experiment_id, current_page.document) & listed:
@@ -697,17 +694,14 @@ def _register_newest_runs(app: Dash) -> None:
         Output(ids.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Output(ids.METRIC_CONTENT_ID, "children", allow_duplicate=True),
         Input(NAVBAR_NEWEST_RUNS_ID, "n_clicks", allow_optional=True),
-        State(constants.STATE_EXPERIMENT_ID, "data"),
         State(ids.STATE_PAGE_STORAGE, "data"),
         State(ids.PANEL_PAGING_ID, "data"),
         prevent_initial_call=True,
     )
-    def show_newest_runs(
-        n_clicks: int | None, experiment_id: int, page_json: str, paging_json: str
-    ) -> tuple[str, html.Div]:
+    def show_newest_runs(n_clicks: int | None, page_json: str, paging_json: str) -> tuple[str, html.Div]:
         if not n_clicks:
             raise PreventUpdate
-        ref = repo.ref_of(experiment_id, page_model.BasicExperimentPage.model_validate_json(page_json))
+        ref = repo.ref_of(page_model.BasicExperimentPage.model_validate_json(page_json))
         if repo.load_page(get_data_store(), ref).document.selected_runs is None:
             raise PreventUpdate
         page, container = edits.commit(

@@ -39,7 +39,7 @@ def _render(  # noqa: PLR0913
 ) -> html.Div:
     page = store.get_or_create_page(page_model.BasicExperimentPage, experiment_id=experiment_id)
     store.update_page(page.model_copy(update={"panels": panels}))
-    loaded = repo.load_page(store, repo.PageRef(experiment_id, None))
+    loaded = repo.load_page(store, repo.ExperimentRef(experiment_id, None))
     resolved = panel_view.resolved_paging(
         loaded, paging.viewing(tab=active_tab, open_panels=open_panels or []), focus_chart=focus_chart
     )
