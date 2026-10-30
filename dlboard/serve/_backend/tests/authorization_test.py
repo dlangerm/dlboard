@@ -81,6 +81,7 @@ def test_restore_and_purge_need_their_scope(
         ("delete_project", Scope.PROJECT_DELETE),
         ("delete_experiment", Scope.EXPERIMENT_DELETE),
         ("delete_run", Scope.RUN_DELETE),
+        ("delete_runs", Scope.RUN_DELETE),
         ("delete_artifact", Scope.ARTIFACT_DELETE),
     ],
 )
@@ -93,6 +94,7 @@ def test_without_enforced_grants_deletes_stay_scope_gated(
         "delete_project": chain.project_id,
         "delete_experiment": chain.experiment_id,
         "delete_run": chain.run_id,
+        "delete_runs": frozenset({chain.run_id}),
         "delete_artifact": chain.artifact_id,
     }[method]
     nobody = _user(store, "nobody")

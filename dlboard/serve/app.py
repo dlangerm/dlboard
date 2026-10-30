@@ -36,7 +36,6 @@ from dlboard.serve._clientside_script import ClientsideScript
 from dlboard.serve._grid import GRID_CELL_COMPONENTS_CSS, GRID_CELL_COMPONENTS_JS, GRID_FORMATTERS_JS
 from dlboard.serve._icons import Icon, icon, install_icons
 from dlboard.serve._jump import install_jump, jump_modal, jump_trigger
-from dlboard.serve._pages._dash_helpers import section_label
 from dlboard.serve._proxy import apply_proxy_fix
 from dlboard.serve._stale_page import install_stale_page_guard
 from dlboard.serve._url import relative_path
@@ -47,7 +46,7 @@ if TYPE_CHECKING:
     from dash.development.base_component import Component
 
     from dlboard import models
-    from dlboard.models import ThemeSpec
+    from dlboard.models import DataStore, ThemeSpec
 
 
 _log = get_logger(__name__)
@@ -74,7 +73,7 @@ class _NavbarWidth(NamedTuple):
     default: int
 
 
-_NAVBAR_WIDTH = _NavbarWidth(min=260, max=640, default=300)
+_NAVBAR_WIDTH = _NavbarWidth(min=260, max=640, default=340)
 PAGE_LOADING_CLASS = "dl-page-loading"
 
 
@@ -208,11 +207,6 @@ def app(plugins: list[models.PluginProtocol], *, url_prefix: str = "") -> Dash:
         Input(constants.STATE_PROJECT_ID, "data", allow_optional=True),
         Input(constants.STATE_EXPERIMENT_ID, "data", allow_optional=True),
     )(_breadcrumbs)
-    _app.callback(
-        Output(constants.NAVBAR_CONTENT_ID, "children"),
-        Input(constants.STATE_PROJECT_ID, "data", allow_optional=True),
-        Input(constants.STATE_EXPERIMENT_ID, "data", allow_optional=True),
-    )(_render_navbar)
     # A theme plugin's `plug()` has already run by now (inside `Dash(...)` above), so its theme
     # goes straight into the first response -- no callback, no flash of an unthemed page.
     theme = get_theme(_app)
@@ -315,7 +309,6 @@ def _layout(theme: ThemeSpec) -> dmc.MantineProvider:
                     html.Div(
                         style={"position": "relative", "height": "100%"},
                         children=[
-                            html.Div(id=constants.NAVBAR_CONTENT_ID),
                             html.Div(id=constants.NAVBAR_RUN_LIST_ID),
                             html.Div(
                                 id=constants.NAVBAR_RESIZE_HANDLE_ID,
@@ -369,16 +362,76 @@ def _layout(theme: ThemeSpec) -> dmc.MantineProvider:
     )
 
 
+_SWITCHER_EXPERIMENTS = 15
+"""How many of a project's newest experiments its breadcrumb offers to switch to; the project page lists the rest."""
+
+
+def _experiment_switcher(
+    store: DataStore[...], project: models.Project, experiment_id: int, name: str
+) -> Component:
+    """
+    The last breadcrumb of an experiment page: its name, as a menu of the project's experiments to go to instead.
+
+    Never every experiment of a project that has thousands: the first few, the one being looked at among them, and a link
+    to the project page that lists them all.
+    """
+    # Newest first: the ones being worked on are the ones a switcher is for, and the store does not order them.
+    newest = sorted(store.get_experiments(project.id), key=lambda e: (e.created_at, e.id), reverse=True)
+    offered = newest[:_SWITCHER_EXPERIMENTS]
+    if not any(e.id == experiment_id for e in offered):
+        current = store.get_experiment(experiment_id)
+        offered = [*offered, *([current] if current else [])]
+    return dmc.Menu(
+        [
+            dmc.MenuTarget(
+                dmc.UnstyledButton(
+                    dmc.Group(
+                        [
+                            dmc.Text(name, c="bright", size="sm", fw=500, truncate="end", maw=320),
+                            icon(Icon.CHEVRON_DOWN),
+                        ],
+                        gap=4,
+                        wrap="nowrap",
+                    ),
+                    **cast("dict[str, Any]", {"aria-label": f"Switch experiment, now {name}"}),
+                )
+            ),
+            dmc.MenuDropdown(
+                [
+                    *(
+                        dmc.MenuItem(
+                            e.name or f"Experiment {e.id}",
+                            href=relative_path(f"/experiment/{e.id}"),
+                            refresh=False,
+                            leftSection=icon(Icon.COPIED) if e.id == experiment_id else None,
+                            fw=600 if e.id == experiment_id else None,
+                        )
+                        for e in offered
+                    ),
+                    dmc.MenuDivider(),
+                    dmc.MenuItem(
+                        "All experiments", href=relative_path(f"/project/{project.id}"), refresh=False
+                    ),
+                ]
+            ),
+        ],
+        position="bottom-start",
+        withinPortal=True,
+    )
+
+
 def _breadcrumbs(_: str, project_id: int | None, experiment_id: int | None) -> list[Component]:
-    """Where the current page sits: Projects > project > experiment, the last one emphasized."""
+    """Where the current page sits: Projects > project > experiment, the last one emphasized (and the experiment a menu)."""
     trail = [("Projects", relative_path("/"))]
     store = get_data_store()
     project = store.get_project(project_id) if project_id is not None else None
+    switcher: Component | None = None
     if project is not None:
         trail.append((project.name, relative_path(f"/project/{project.id}")))
         if experiment_id is not None:
             experiment = store.get_experiment(experiment_id)
             name = experiment.name if experiment and experiment.name else f"Experiment {experiment_id}"
+            switcher = _experiment_switcher(store, project, experiment_id, name)
             trail.append((name, relative_path(f"/experiment/{experiment_id}")))
     home_href = relative_path("/")
     *parents, (current, _href) = trail
@@ -388,7 +441,7 @@ def _breadcrumbs(_: str, project_id: int | None, experiment_id: int | None) -> l
             dmc.Anchor(label, href=href, refresh=href == home_href, c="dimmed", size="sm", underline="hover")
             for label, href in parents
         ),
-        dmc.Text(current, c="bright", size="sm", fw=500, truncate="end", maw=320),
+        switcher or dmc.Text(current, c="bright", size="sm", fw=500, truncate="end", maw=320),
     ]
 
 
@@ -450,43 +503,4 @@ def _user_menu() -> Component:
         ],
         position="bottom-end",
         width=220,
-    )
-
-
-def _render_navbar(project_id: int | None, experiment_id: int | None) -> Component:
-    """The current project's experiments. Empty outside a project, where the navbar is hidden."""
-    store = get_data_store()
-    project = store.get_project(project_id) if project_id is not None else None
-    if project is None:
-        return html.Div()
-
-    experiments = list(store.get_experiments(project.id))
-    return dmc.Stack(
-        [
-            dmc.Anchor(
-                project.name,
-                href=relative_path(f"/project/{project_id}"),
-                refresh=False,
-                c="bright",
-                fw=600,
-                size="sm",
-                underline="never",
-                truncate="end",
-            ),
-            section_label(f"Experiments · {len(experiments)}"),
-            dmc.Stack(
-                [
-                    dmc.NavLink(
-                        label=e.name or f"Experiment {e.id}",
-                        href=relative_path(f"/experiment/{e.id}"),
-                        active=e.id == experiment_id,
-                        variant="light",
-                    )
-                    for e in experiments
-                ],
-                gap=2,
-            ),
-        ],
-        gap="xs",
-        mb="md",
     )

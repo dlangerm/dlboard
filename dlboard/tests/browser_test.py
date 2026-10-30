@@ -42,7 +42,6 @@ from dlboard.models import OVERLAY_KEY_SUFFIX, RUN_NAME_COLUMN, PanelInstance, o
 from dlboard.plugins.charts.image_series import IMAGE_WINDOW_STEPS
 from dlboard.plugins.charts.line_chart import LEGEND_MAX_HEIGHT
 from dlboard.serve import get_system_data_store
-from dlboard.serve._constants import NAVBAR_ID
 from dlboard.serve._jump import JUMP_SELECT_ID
 from dlboard.serve._pages._experiment._chart_autogen import AUTO_OPEN_MAX_CHARTS
 from dlboard.serve._pages._experiment._chart_editor import CHART_EDITOR_SAVE_ID
@@ -67,7 +66,6 @@ from dlboard.serve._pages._experiment._panel_view import (
 from dlboard.serve._pages._experiment._run_compare import (
     COMPARE_GRID_ID,
     COMPARE_MODE_ID,
-    COMPARE_OPEN_ID,
     COMPARE_PAGE_SIZE,
     COMPARE_PAGE_SLOT_ID,
     COMPARE_PAGER_ID,
@@ -124,6 +122,14 @@ def _create_project_and_experiment(page: Page, live_server_url: str, name: str) 
 
     page.locator(f"#{NEW_EXP_NAME_ID}").fill(name)
     page.locator(f"#{NEW_EXP_BUTTON_ID}").click()
+
+
+def _diff_selected_runs(page: Page, count: int = 2) -> None:
+    """Select the newest `count` runs of the run table, and diff them from the bar that offers it once a run is selected."""
+    rows = page.locator(f"#{NAVBAR_HPARAM_DATATABLE_ID} .ag-center-cols-container .ag-row")
+    for index in range(count):
+        rows.nth(index).locator(".ag-selection-checkbox input").check()
+    page.get_by_role("button", name="Diff").click()
 
 
 def _create_panel(page: Page, name: str) -> None:
@@ -1017,7 +1023,7 @@ def test_the_charts_draw_the_newest_runs_until_the_run_table_selects_others(
     expect(row).to_have_count(1)
     expect(row).to_contain_text(oldest)
     page.keyboard.press("Escape")
-    row.locator(".ag-selection-checkbox input").check()
+    row.locator(".dl-eye").click()
     expect(curves).to_have_count(21)
 
     page.get_by_role("button", name="Newest 20").click()
@@ -1071,7 +1077,7 @@ def test_a_line_charts_legend_of_many_runs_leaves_its_plot_a_usable_height(
 def test_a_selection_past_the_run_cap_is_refused_and_the_charts_keep_the_last_one(
     page: Page, live_server_url: str, console_errors: list[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """With a cap of two, a third run ticked is refused with a notice, and the charts still draw the two before it."""
+    """With a cap of two, a third run shown is refused with a notice, and the charts still draw the two before it."""
     monkeypatch.setenv("DLBOARD_MAX_SHOWN_RUNS", "2")
     _create_project_and_experiment(page, live_server_url, "Capped Runs Experiment")
     page.locator(".experiment-card").click()
@@ -1084,11 +1090,11 @@ def test_a_selection_past_the_run_cap_is_refused_and_the_charts_keep_the_last_on
     expect(curves).to_have_count(3)
     rows = page.locator(f"#{NAVBAR_HPARAM_DATATABLE_ID} .ag-center-cols-container .ag-row")
     expect(rows).to_have_count(3)
-    # Every run is drawn (and so ticked) until told otherwise: untick the oldest, so two are selected, within the cap.
-    rows.nth(2).locator(".ag-selection-checkbox input").uncheck()
+    # Every run is drawn (its eye open) until told otherwise: untick the oldest, so two are selected, within the cap.
+    rows.nth(2).locator(".dl-eye").click()
     expect(curves).to_have_count(2)
-    # Ticking it back makes three, past the cap: refused, so the two drawn stay drawn.
-    rows.nth(2).locator(".ag-selection-checkbox input").check()
+    # Showing it again makes three, past the cap: refused, so the two drawn stay drawn.
+    rows.nth(2).locator(".dl-eye").click()
 
     expect(page.get_by_text("Too many runs to draw")).to_be_visible()
     expect(curves).to_have_count(2)
@@ -1109,14 +1115,14 @@ def test_runs_logged_after_a_selection_are_counted_as_not_drawn(
 
     rows = page.locator(f"#{NAVBAR_HPARAM_DATATABLE_ID} .ag-center-cols-container .ag-row")
     expect(rows).to_have_count(3)
-    # Every run is drawn (and so ticked) until told otherwise: untick the two oldest, leaving the newest selected.
-    rows.nth(1).locator(".ag-selection-checkbox input").uncheck()
-    rows.nth(2).locator(".ag-selection-checkbox input").uncheck()
-    expect(page.get_by_text("Runs selected in the table")).to_be_visible()
+    # Every run is drawn (its eye open) until told otherwise: untick the two oldest, leaving the newest selected.
+    rows.nth(1).locator(".dl-eye").click()
+    rows.nth(2).locator(".dl-eye").click()
+    expect(page.get_by_text("Drawing the runs you picked")).to_be_visible()
     _log_runs(api, experiment_id, 1)
     page.reload()
 
-    expect(page.get_by_text("Runs selected in the table")).to_be_visible()
+    expect(page.get_by_text("Drawing the runs you picked")).to_be_visible()
     expect(page.get_by_text("1 newer not drawn")).to_be_visible()
     assert console_errors == []
 
@@ -1891,10 +1897,10 @@ def test_run_compare_modal_diffs_runs_and_its_state_is_a_shareable_link(
         )
     page.reload()
 
-    page.locator(f"#{COMPARE_OPEN_ID}").click()
+    _diff_selected_runs(page)
     grid = page.locator(f"#{COMPARE_GRID_ID}")
     rows = grid.locator(".ag-center-cols-container .ag-row")
-    # Pre-filled with the charted runs (newest first, so run-b is the baseline); only differing keys are listed, with the other run's cell flagged.
+    # Opened on the selected runs (newest first, so run-b is the baseline); only differing keys are listed, with the other run's cell flagged.
     expect(rows).to_have_count(2)
     expect(grid.get_by_role("gridcell", name="adam")).to_be_visible()
     expect(grid.locator(".dl-compare-changed", has_text="adam")).to_be_visible()
@@ -1929,7 +1935,7 @@ def test_run_compare_finds_a_run_its_picker_does_not_list_by_searching_for_it(
         api.create_run(models.NewRun(experiment_id=experiment_id, name=f"many-{i:03d}"))
     page.reload()
 
-    page.locator(f"#{COMPARE_OPEN_ID}").click()
+    _diff_selected_runs(page, 1)
     picker = page.locator(f"#{COMPARE_RUNS_ID}")
     picker.click()
     expect(page.get_by_role("option", name="many-054")).to_be_visible()
@@ -1968,7 +1974,7 @@ def test_run_compare_lists_its_keys_a_page_at_a_time_and_its_page_is_a_shareable
         )
     page.reload()
 
-    page.locator(f"#{COMPARE_OPEN_ID}").click()
+    _diff_selected_runs(page)
     rows = page.locator(f"#{COMPARE_GRID_ID} .ag-center-cols-container .ag-row")
     controls = page.locator(f"#{COMPARE_PAGE_SLOT_ID}")
     expect(rows).to_have_count(COMPARE_PAGE_SIZE)
@@ -2200,29 +2206,6 @@ def test_the_runs_table_shows_how_each_run_ended_and_for_how_long(page: Page, li
     expect(rows.filter(has_text="crashed")).to_contain_text("✕ 1h 2m")
     expect(rows.filter(has_text="all-done")).to_contain_text("3m 23s")
     expect(rows.filter(has_text="walked-away")).to_contain_text("? 2d 3h")
-
-
-def test_the_runs_table_lines_up_with_the_experiment_links_above_it(
-    page: Page, live_server_url: str, console_errors: list[str]
-) -> None:
-    """It sat a padding further in on each side than the experiment links in the same navbar (#371)."""
-    api = BasicDlboardAPI(live_server_url)
-    project = api.create_project(models.NewProject(name="Navbar Alignment Project", description=""))
-    experiment = api.create_experiment(models.NewExperiment(project_id=project.id, name="aligned"))
-    api.create_run(models.NewRun(experiment_id=experiment.id, name="aligned-run"))
-
-    page.goto(f"{live_server_url}/experiment/{experiment.id}")
-
-    table = page.locator(".dl-run-table")
-    link = page.locator(f"#{NAVBAR_ID} a[href$='/experiment/{experiment.id}']")
-    expect(table.locator(".ag-row")).to_have_count(1)
-    expect(link).to_be_visible()
-    table_box, link_box = table.bounding_box(), link.bounding_box()
-    assert table_box is not None
-    assert link_box is not None
-    assert table_box["x"] == pytest.approx(link_box["x"], abs=1)
-    assert table_box["x"] + table_box["width"] == pytest.approx(link_box["x"] + link_box["width"], abs=1)
-    assert console_errors == []
 
 
 def test_panel_menu_controls_mount_only_when_the_menu_opens(page: Page, live_server_url: str) -> None:

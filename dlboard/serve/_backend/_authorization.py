@@ -764,6 +764,14 @@ class AuthorizingDataStore(models.DataStore[...]):
         self._require_scope_or_role(Scope.RUN_DELETE, self._run_project(run_id), ProjectRole.EDITOR)
         self._inner.delete_run(run_id, self._bound(actor))
 
+    def delete_runs(self, run_ids: frozenset[int], actor: models.User) -> None:
+        # Which experiments they are of in one read, then who may delete in each project; a run that is not there
+        # is for the store to refuse.
+        experiments = self._inner.run_experiments(run_ids)
+        for project_id in {self._experiment_project(e) for e in set(experiments.values())} or {None}:
+            self._require_scope_or_role(Scope.RUN_DELETE, project_id, ProjectRole.EDITOR)
+        self._inner.delete_runs(run_ids, self._bound(actor))
+
     def restore_run(self, run_id: int, actor: models.User) -> None:
         require_scope(self._actor, Scope.RESTORE)
         self._inner.restore_run(run_id, self._bound(actor))

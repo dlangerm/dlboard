@@ -24,7 +24,7 @@ from dlboard.serve._pages._experiment._chart_view_state import chart_view_state_
 from dlboard.serve._pages._experiment._notes import STATE_NOTES_REVISION, notes_button, notes_drawer
 from dlboard.serve._pages._experiment._paging import SIZES_COOKIE, Paging
 from dlboard.serve._pages._experiment._run_compare import CompareQuery, compare_components
-from dlboard.serve._pages._experiment._runs_table import NAVBAR_RUN_SELECTION_ID
+from dlboard.serve._pages._experiment._runs_table import run_table_shells
 from dlboard.serve._pages._experiment._views import resolve_view_id, view_controls
 from dlboard.serve._pages._onboarding import first_run_snippet, onboarding_card
 
@@ -176,7 +176,7 @@ def layout(
         Store(id=constants.STATE_PROJECT_ID, data=exp.project_id),
         Store(id=constants.STATE_EXPERIMENT_ID, data=int(experiment_id)),
         *(Store(id=store_id) for store_id in _DRAG_DROP_STORE_IDS),
-        Store(id=NAVBAR_RUN_SELECTION_ID),
+        *run_table_shells(),
         *chart_view_state_stores(),
     ]
 

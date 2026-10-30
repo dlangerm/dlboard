@@ -38,12 +38,17 @@ class ShownRunsSettings(BaseSettings):
     """
 
 
-def shown_run_ids(store: DataStore[...], experiment_id: int, document: DocumentSettings) -> frozenset[int]:
+def shown_run_ids(
+    store: DataStore[...], experiment_id: int, document: DocumentSettings, focus: int | None = None
+) -> frozenset[int]:
     """
     The runs `document` draws on the page: its selection if it has one, else the newest few.
 
-    A view saved before selections left runs out: it draws the newest few it did not leave out.
+    A view saved before selections left runs out: it draws the newest few it did not leave out. A `focus` (a link to
+    one run) draws just that run, if it is a run of the experiment, whatever the view holds.
     """
+    if focus is not None and next(store.get_runs(experiment_id, limit=1, run_ids=frozenset({focus})), None):
+        return frozenset({focus})
     if document.selected_runs is not None:
         return frozenset(document.selected_runs)
     shown = ShownRunsSettings().default_shown_runs
@@ -55,17 +60,20 @@ def shown_run_ids(store: DataStore[...], experiment_id: int, document: DocumentS
 
 
 def page_scope(
-    store: DataStore[...], page: BasicExperimentPage, hidden: frozenset[int] = frozenset()
+    store: DataStore[...],
+    page: BasicExperimentPage,
+    hidden: frozenset[int] = frozenset(),
+    focus: int | None = None,
 ) -> RunScope:
     """
     The runs `page` draws, by experiment: the one place that tells an experiment's page from a comparison.
 
-    An experiment page has just its own experiment, whatever runs it shows (`shown_run_ids`), even none. A comparison has
+    An experiment page has just its own experiment, whatever runs it shows (`shown_run_ids`, or the `focus`), even none. A comparison has
     the experiment of every member except those the viewer has `hidden`, and none for an experiment all of whose members
     are: which runs a viewer looks at is theirs to choose, and is not saved with the comparison.
     """
     if page.experiment_id is not None:
-        return {page.experiment_id: shown_run_ids(store, page.experiment_id, page.document)}
+        return {page.experiment_id: shown_run_ids(store, page.experiment_id, page.document, focus)}
     drawn: dict[int, set[int]] = {}
     for run in store.comparison_runs(page.id):
         if run.id not in hidden:

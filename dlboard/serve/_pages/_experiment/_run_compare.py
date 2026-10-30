@@ -56,7 +56,6 @@ MAX_COMPARED_RUNS: typing.Final = 5
 COMPARE_PAGE_SIZE: typing.Final = 50
 """How many keys the comparison lists at once. A page reads only its own keys' values."""
 
-COMPARE_OPEN_ID: ButtonId[ids.ExperimentPage] = ButtonId("compare-open")
 COMPARE_MODAL_ID: ModalId[ids.ExperimentPage] = ModalId("compare-modal")
 COMPARE_RUNS_ID: ValueId[ids.ExperimentPage] = ValueId("compare-runs")
 COMPARE_MODE_ID: ValueId[ids.ExperimentPage] = ValueId("compare-mode")
@@ -72,7 +71,6 @@ _CHANGED_FIELD = "_changed"
 _DIFFERS_FIELD = "_differs"
 
 _SYNC_URL_JS = ClientsideScript(Path(__file__).with_name("sync_compare_url.js"))
-_OPEN_JS = ClientsideScript(Path(__file__).with_name("open_on_click.js"))
 
 
 class CompareMode(StrEnum):
@@ -385,18 +383,6 @@ def page_controls(page: ComparePage) -> list[Component]:
     ]
 
 
-def compare_button() -> Component:
-    """The navbar's "Compare" button that opens the modal."""
-    return dmc.Button(
-        "Compare",
-        id=COMPARE_OPEN_ID,
-        n_clicks=0,
-        variant="subtle",
-        size="compact-xs",
-        leftSection=icon(Icon.COMPARE),
-    )
-
-
 def compare_components(store: DataStore[...], experiment_id: int, query: CompareQuery) -> list[Component]:
     """
     The modal and the store its keys live in: closed -- or, for a link carrying compare state, already open on it.
@@ -502,19 +488,13 @@ class _ComparedPage(CallbackStates):
 
 def register_run_compare_callbacks(app: Dash) -> None:
     """
-    Wire the compare modal: open from the button, load the picked runs' keys, page and filter them, mirror state into the URL.
+    Wire the compare modal: load the picked runs' keys, page and filter them, mirror state into the URL.
 
     Every server callback here is `prevent_initial_call` and listens only to the modal's own
-    controls (all in the page's static layout), so none of them costs a request on page load; the
-    button, which is mounted later with the navbar, opens the modal clientside for the same reason.
+    controls (all in the page's static layout), so none of them costs a request on page load. The run list
+    opens the modal itself, for the runs selected in it (`RunAction.DIFF`).
     """
     register_run_search(app, COMPARE_RUNS_ID)
-    app.clientside_callback(
-        _OPEN_JS.source,
-        Output(COMPARE_MODAL_ID, "opened"),
-        Input(COMPARE_OPEN_ID, "n_clicks", allow_optional=True),
-        prevent_initial_call=True,
-    )
 
     @app.callback(
         Output(COMPARE_RUNS_ID, "data", allow_duplicate=True),

@@ -302,7 +302,7 @@ def panel_frames(
 
     Only the page of charts shown is fetched for -- a panel of a thousand charts costs what one page of them does.
     """
-    scope = page_scope(store, page)
+    scope = page_scope(store, page, focus=paging.focus)
     experiments = experiment_names(store, scope)
     wanted = frozenset(names)
     frames: dict[str, ChartFrames] = {}

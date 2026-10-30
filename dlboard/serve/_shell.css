@@ -153,6 +153,17 @@
   opacity: 1;
 }
 
+/* A run list is narrow, and a funnel in every header is most of what its headers say: it shows once a header is pointed at,
+   or filters. */
+.dl-run-table .ag-header-cell .ag-header-cell-filter-button {
+  opacity: 0;
+}
+
+.dl-run-table .ag-header-cell:hover .ag-header-cell-filter-button,
+.dl-run-table .ag-header-cell-filtered .ag-header-cell-filter-button {
+  opacity: 1;
+}
+
 /* A run's color as a small dot before its name (`dlboard.serve.series_swatch_class`). */
 .dl-swatch::before {
   content: "";
@@ -160,7 +171,7 @@
   flex-shrink: 0;
   width: 0.625rem;
   height: 0.625rem;
-  margin-right: 0.5rem;
+  margin-right: 0.375rem;
   border-radius: 50%;
   vertical-align: baseline;
   background-color: var(--dl-swatch);

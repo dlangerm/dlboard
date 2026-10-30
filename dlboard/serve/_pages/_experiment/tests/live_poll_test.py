@@ -40,7 +40,7 @@ def test_a_tick_fetches_only_the_charts_on_screen(
 
     monkeypatch.setattr(store, "fetch_metrics", spy)
 
-    dataframes, ok = _fetch_open_panel_dataframes(store, experiment_id, page, on_screen)
+    dataframes, ok = _fetch_open_panel_dataframes(store, experiment_id, page, on_screen, None)
 
     assert ok
     assert set(dataframes) == {"p"}

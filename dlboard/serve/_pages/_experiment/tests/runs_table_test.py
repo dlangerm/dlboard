@@ -25,16 +25,38 @@ FileListChart.register(allow_override=True)
 ImageChart.register(allow_override=True)
 
 
+@pytest.fixture(autouse=True)
+def _plain_run_links(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Links to a run are plain paths, with no running Dash app for `relative_path` to read the prefix of."""
+    monkeypatch.setattr("dlboard.serve._pages._experiment._focus.relative_path", str)
+
+
 def _run(run_id: int, name: str | None = None) -> Run:
     return Run(id=run_id, experiment_id=1, name=name, created_at=_TS)
 
 
-_RUNNING_FIELDS = {
-    "_status": "running",
-    "_duration_s": None,
-    "_status_text": "running",
-    "_status_detail": "running",
-}
+def _fields(run_id: int, *, drawn: bool = False, focused: bool = False) -> dict[str, object]:
+    """The fields every row of a running run has besides its id and name: how it is drawn, and where it links."""
+    return {
+        "_drawn": drawn,
+        "_focused": focused,
+        "_href": f"/experiment/1?run={run_id}",
+        "_status": "running",
+        "_duration_s": None,
+        "_status_text": "running",
+        "_status_detail": "running",
+    }
+
+
+def _listed(
+    runs: list[Run],
+    hparams: list[HyperParams] | None = None,
+    *,
+    shown: frozenset[int] = frozenset(),
+    focus: int | None = None,
+) -> run_table._Listed:
+    selection = run_table._Selection(shown, chosen=False, focus=focus, newer_hidden=0)
+    return run_table._Listed(runs, hparams or [], selection, None)
 
 
 def test_build_hparam_rows_merges_hparams_and_latest_metrics() -> None:
@@ -55,11 +77,11 @@ def test_build_hparam_rows_merges_hparams_and_latest_metrics() -> None:
     }
     latest_metrics = {1: {"loss": 0.5}}
 
-    rows = run_table._build_hparam_rows(runs, hparams_by_run, latest_metrics)
+    rows = run_table._build_hparam_rows(1, _listed(runs), hparams_by_run, latest_metrics)
 
     assert rows == [
-        {"run_id": 1, "run_name": "Run 1", **_RUNNING_FIELDS, "lr": 0.1, "loss": 0.5},
-        {"run_id": 2, "run_name": "Run 2", **_RUNNING_FIELDS, "lr": 0.2},
+        {"run_id": 1, "run_name": "Run 1", **_fields(1), "lr": 0.1, "loss": 0.5},
+        {"run_id": 2, "run_name": "Run 2", **_fields(2), "lr": 0.2},
     ]
 
 
@@ -67,11 +89,11 @@ def test_build_hparam_rows_includes_runs_with_no_logged_hyperparameters() -> Non
     """A run that hasn't called `log_hyperparams` yet must still show up, not disappear."""
     runs = [_run(1, name="baseline"), _run(2)]
 
-    rows = run_table._build_hparam_rows(runs, hparams_by_run={}, latest_metrics={})
+    rows = run_table._build_hparam_rows(1, _listed(runs), hparams_by_run={}, latest_metrics={})
 
     assert rows == [
-        {"run_id": 1, "run_name": "baseline", **_RUNNING_FIELDS},
-        {"run_id": 2, "run_name": "Run 2", **_RUNNING_FIELDS},
+        {"run_id": 1, "run_name": "baseline", **_fields(1)},
+        {"run_id": 2, "run_name": "Run 2", **_fields(2)},
     ]
 
 
@@ -94,11 +116,17 @@ def test_load_hparam_view_data_shows_each_selected_metrics_latest_value(
     _log_a_metric(store, experiment_id, run.id, "train/loss", step=9)
 
     _hk, _mk, rows = run_table._load_hparam_view_data(
-        store, experiment_id, [], selected=["val/acc", "train/loss"], runs=[run]
+        store, experiment_id, _listed([run]), selected=["val/acc", "train/loss"]
     )
 
     assert rows == [
-        {"run_id": run.id, "run_name": run.name, **_RUNNING_FIELDS, "val/acc": 1.0, "train/loss": 1.0}
+        {
+            "run_id": run.id,
+            "run_name": run.name,
+            **(_fields(run.id) | {"_href": f"/experiment/{experiment_id}?run={run.id}"}),
+            "val/acc": 1.0,
+            "train/loss": 1.0,
+        }
     ]
 
 
@@ -111,12 +139,18 @@ def test_load_hparam_view_data_reports_available_metric_keys_without_fetching_va
     _log_a_metric(store, experiment_id, run.id, "loss")
 
     hparam_keys, metric_keys, rows = run_table._load_hparam_view_data(
-        store, experiment_id, [], selected=[], runs=[run]
+        store, experiment_id, _listed([run]), selected=[]
     )
 
     assert metric_keys == ["loss"]
     assert hparam_keys == []
-    assert rows == [{"run_id": run.id, "run_name": run.name, **_RUNNING_FIELDS}]
+    assert rows == [
+        {
+            "run_id": run.id,
+            "run_name": run.name,
+            **(_fields(run.id) | {"_href": f"/experiment/{experiment_id}?run={run.id}"}),
+        }
+    ]
 
 
 @pytest.mark.parametrize(
@@ -141,7 +175,7 @@ def test_the_columns_picker_offers_the_newest_runs_keys_and_keeps_an_older_one_i
     hparams = list(store.fetch_hyperparams(experiment_id, run_ids=None))
 
     hparam_keys, _metric_keys, rows = run_table._load_hparam_view_data(
-        store, experiment_id, hparams, selected=selected, runs=[older, newer]
+        store, experiment_id, _listed([older, newer], hparams), selected=selected
     )
 
     assert hparam_keys == offered
@@ -182,7 +216,7 @@ def test_build_hparam_rows_shows_how_a_run_ended_and_how_long_it_took(
     ended_at = None if ran_for_s is None else _TS.add(seconds=ran_for_s)
     run = _run(1).model_copy(update={"status": status, "ended_at": ended_at})
 
-    (row,) = run_table._build_hparam_rows([run], hparams_by_run={}, latest_metrics={})
+    (row,) = run_table._build_hparam_rows(1, _listed([run]), hparams_by_run={}, latest_metrics={})
 
     assert (row["_status"], row["_duration_s"], row["_status_text"], row["_status_detail"]) == expected
 
@@ -195,9 +229,7 @@ def test_the_runs_table_redraws_when_a_run_finishes() -> None:
     )
 
     def signature(run: Run) -> str:
-        return run_table._render_signature(
-            1, [], run_table._Selection(frozenset(), chosen=False, newer_hidden=0), [], [run]
-        )
+        return run_table._render_signature(1, _listed([run]), [])
 
     assert signature(running) != signature(finished)
     assert signature(finished) == signature(finished.model_copy())
@@ -226,3 +258,49 @@ def test_the_columns_picker_offers_a_page_of_what_its_search_finds_and_keeps_its
 
     assert [len(group["items"]) for group in listed] == [2, run_table.KEY_PICKER_LIMIT - 2]
     assert [group["items"] for group in searched] == [["lr"], ["metric_00001", "metric_00250"]]
+
+
+def test_a_row_is_drawn_when_the_charts_draw_it_and_focused_when_the_page_is_opened_on_it() -> None:
+    runs = [_run(1), _run(2), _run(3)]
+
+    rows = run_table._build_hparam_rows(
+        1, _listed(runs, shown=frozenset({2}), focus=2), hparams_by_run={}, latest_metrics={}
+    )
+
+    assert [(row["_drawn"], row["_focused"]) for row in rows] == [
+        (False, False),
+        (True, True),
+        (False, False),
+    ]
+
+
+def test_the_runs_table_redraws_when_the_page_is_opened_on_a_run_or_a_view() -> None:
+    """A link to a run stays in the view the page is of, and the run it links to is part of what the table is drawn from."""
+    runs = [_run(1)]
+    plain = run_table._render_signature(1, _listed(runs), [])
+
+    assert run_table._render_signature(1, _listed(runs, shown=frozenset({1}), focus=1), []) != plain
+    assert run_table._render_signature(1, _listed(runs)._replace(view_id=7), []) != plain
+
+
+def test_drawing_changes_exactly_the_rows_whose_eye_changed_and_clears_a_focus() -> None:
+    update = run_table._drawn_rows(frozenset({1, 2}), frozenset({2, 3}), focus=1)
+
+    assert {row.run_id: row.values for row in update.rows} == {
+        1: {"_drawn": False, "_focused": False},
+        3: {"_drawn": True},
+    }
+
+
+@pytest.mark.parametrize(
+    ("selected_rows", "expected"),
+    [
+        pytest.param(None, set(), id="nothing-yet"),
+        pytest.param({"ids": ["3", "5"]}, {3, 5}, id="the-ids-the-table-was-seeded-with"),
+        pytest.param([{"run_id": 4, "run_name": "a"}, {"run_id": 9}], {4, 9}, id="the-rows-once-reported"),
+    ],
+)
+def test_the_runs_a_grid_has_selected_are_read_from_either_shape_it_reports(
+    selected_rows: list[dict[str, int]] | dict[str, list[str]] | None, expected: set[int]
+) -> None:
+    assert run_table._picked_ids(selected_rows) == frozenset(expected)

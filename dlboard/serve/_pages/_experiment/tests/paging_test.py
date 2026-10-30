@@ -92,6 +92,7 @@ def test_chart_search_keys_cover_metrics_and_artifacts_but_not_axes() -> None:
         {"panels_page": "2", "charts": '{"p": {"page": 4}}', "panels_q": "x"},
         {"tab": "Images", "open": '["a", "b"]'},
         {"open": "[]"},
+        {"run": "17", "panels_q": "loss"},
     ],
 )
 def test_query_round_trips(raw: dict[str, str]) -> None:
@@ -108,6 +109,8 @@ def test_query_round_trips(raw: dict[str, str]) -> None:
         {"charts": "not json"},
         {"charts": '{"p": {"page": -1}}'},
         {"open": "not json"},
+        {"run": "0"},
+        {"run": "abc"},
     ],
 )
 def test_malformed_query_shows_the_first_page(raw: dict[str, str]) -> None:
@@ -229,3 +232,11 @@ def test_only_a_tab_or_open_panels_the_viewer_chose_goes_in_the_url() -> None:
     assert defaults == paging.Paging()
     assert (chosen.query["tab"], chosen.query["open"]) == ("Images", "[]")
     assert (chosen.shown_tab(panels), chosen.opened(panels)) == ("Images", [])
+
+
+def test_a_focus_is_in_the_address_and_is_cleared_with_none() -> None:
+    focused = paging.Paging.from_request({"run": "17"}, None)
+
+    assert (focused.focus, focused.query["run"]) == (17, "17")
+    assert focused.with_focus(None).focus is None
+    assert focused.with_focus(None).query["run"] == ""

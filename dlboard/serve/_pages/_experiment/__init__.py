@@ -60,6 +60,7 @@ from dlboard.serve._pages._experiment._chart_editor import register_chart_editor
 from dlboard.serve._pages._experiment._chart_suggestions import register_chart_suggestions_callbacks
 from dlboard.serve._pages._experiment._chart_view_state import register_chart_view_state_callbacks
 from dlboard.serve._pages._experiment._column_catalog import COMPARISON_CATALOGS, KEPT_CATALOGS
+from dlboard.serve._pages._experiment._focus import focus_banner
 from dlboard.serve._pages._experiment._kept_reads import KeptReads
 from dlboard.serve._pages._experiment._live_updates import register_live_update_callbacks
 from dlboard.serve._pages._experiment._notes import register_notes_callbacks
@@ -142,7 +143,10 @@ def render_panel(
     paging = panel_view.resolved_paging(page, paging, focus_chart=focus_chart)
     open_panels = visible_open_panels(page.panels, paging.shown_tab(page.panels), paging)
     container = panel_view.accordion_view(
-        panel_data.panel_frames(store, page, paging, open_panels), page, paging
+        panel_data.panel_frames(store, page, paging, open_panels),
+        page,
+        paging,
+        focus_banner(store, page, paging),
     )
     return container, header, page.model_dump_json()
 

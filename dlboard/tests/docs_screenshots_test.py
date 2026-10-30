@@ -40,7 +40,8 @@ from dlboard.serve._pages._experiment._chart_autogen import ARTIFACT_PANEL_SUFFI
 from dlboard.serve._pages._experiment._ids import PAGE_EXPERIMENT_ID
 from dlboard.serve._pages._experiment._notes import NOTES_THREAD_ID
 from dlboard.serve._pages._experiment._page_model import BasicExperimentPage
-from dlboard.serve._pages._experiment._run_compare import COMPARE_OPEN_ID
+from dlboard.serve._pages._experiment._run_compare import MAX_COMPARED_RUNS
+from dlboard.serve._pages._experiment._runs_table import NAVBAR_HPARAM_DATATABLE_ID
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -501,7 +502,11 @@ def _stage(shot: DocScreenshot, page: Page, demo: Demo, dlboard_app: Dash) -> Pa
         case DocScreenshot.RUN_COMPARE:
             page.goto(f"{demo.url}/experiment/{demo.experiment_id}")
             expect(page.locator(f"#{PAGE_EXPERIMENT_ID}")).to_be_visible()
-            page.locator(f"#{COMPARE_OPEN_ID}").click()
+            rows = page.locator(f"#{NAVBAR_HPARAM_DATATABLE_ID} .ag-center-cols-container .ag-row")
+            expect(rows.first).to_be_visible()
+            for index in range(min(rows.count(), MAX_COMPARED_RUNS)):
+                rows.nth(index).locator(".ag-selection-checkbox input").check()
+            page.get_by_role("button", name="Diff").click()
             dialog = page.get_by_role("dialog", name="Compare runs")
             # Differences only: the sweep varies the learning rate and batch size, and every run ends at its own metrics.
             expect(dialog.locator(".ag-center-cols-container .ag-row")).not_to_have_count(0)
