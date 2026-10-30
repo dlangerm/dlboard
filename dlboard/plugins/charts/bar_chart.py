@@ -29,6 +29,7 @@ from dlboard.plugins.charts._axis_label import (
     fit_axis_label,
 )
 from dlboard.plugins.charts._chart_title import titled
+from dlboard.plugins.charts._empty_chart import nothing_logged
 from dlboard.plugins.charts._grouping import latest_per_run
 from dlboard.serve import AssetKind, series_color, serve_asset
 
@@ -148,6 +149,22 @@ def _run_labels(run_ids: pd.Series[typing.Any], dataframe: pd.DataFrame) -> list
     ]
 
 
+def _coerce_x_axis(dataframe: pd.DataFrame, x_col: str, x_axis_type: str) -> None:
+    """Read the x-axis column as the type the chart was set to, in place: `dataframe` is the chart's own copy."""
+    match x_axis_type:
+        case "date":
+            with contextlib.suppress(ValueError, TypeError):
+                dataframe[x_col] = pd.to_datetime(dataframe[x_col], utc=True, format="ISO8601")
+        case "number":
+            dataframe[x_col] = pd.to_numeric(dataframe[x_col], errors="coerce")
+        case "category":
+            dataframe[x_col] = dataframe[x_col].astype(str)
+        case "auto":
+            if str(dataframe[x_col].dtype) in ("object", "str"):
+                with contextlib.suppress(ValueError, TypeError):
+                    dataframe[x_col] = pd.to_datetime(dataframe[x_col], utc=True, format="ISO8601")
+
+
 class BarChart(ChartType[BarChartSettings, pd.DataFrame, dmc.Stack], frozen=True, extra="forbid"):
     """A bar chart comparing an aggregated metric across groups of a metric or hyperparameter."""
 
@@ -163,6 +180,8 @@ class BarChart(ChartType[BarChartSettings, pd.DataFrame, dmc.Stack], frozen=True
     def render(cls, parameters: BarChartSettings, dataframe: pd.DataFrame) -> dmc.Stack:
         # `dataframe` is the caller's (a chart's own frame, but a test or a plugin may share one): mutating it in
         # place (the coercion loop below does) would corrupt it for whatever reads it next.
+        if dataframe.empty:
+            return nothing_logged(parameters.column)
         dataframe = dataframe.copy()
         x_col = _resolve_column(dataframe, parameters.x_axis)
 
@@ -172,18 +191,7 @@ class BarChart(ChartType[BarChartSettings, pd.DataFrame, dmc.Stack], frozen=True
                     dataframe[parameters.column], utc=True, format="ISO8601"
                 )
 
-        match parameters.x_axis_type:
-            case "date":
-                with contextlib.suppress(ValueError, TypeError):
-                    dataframe[x_col] = pd.to_datetime(dataframe[x_col], utc=True, format="ISO8601")
-            case "number":
-                dataframe[x_col] = pd.to_numeric(dataframe[x_col], errors="coerce")
-            case "category":
-                dataframe[x_col] = dataframe[x_col].astype(str)
-            case "auto":
-                if str(dataframe[x_col].dtype) in ("object", "str"):
-                    with contextlib.suppress(ValueError, TypeError):
-                        dataframe[x_col] = pd.to_datetime(dataframe[x_col], utc=True, format="ISO8601")
+        _coerce_x_axis(dataframe, x_col, parameters.x_axis_type)
 
         # Collapse each run down to its last-logged value before grouping, so a run that logs
         # `column` at every step doesn't outweigh a run that only logs it once -- every run
