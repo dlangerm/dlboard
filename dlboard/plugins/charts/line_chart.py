@@ -26,6 +26,7 @@ from dlboard.plugins.charts._axis_label import (
     fit_axis_label,
 )
 from dlboard.plugins.charts._chart_title import titled
+from dlboard.plugins.charts._empty_chart import nothing_logged
 from dlboard.plugins.charts._sampling import DEFAULT_MAX_POINTS, shared_sample_grid
 from dlboard.serve import AssetKind, series_color, serve_asset
 
@@ -158,6 +159,8 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.Stack], frozen=Tr
     @classmethod
     @typing.override
     def render(cls, parameters: LineChartSettings, dataframe: pd.DataFrame) -> dmc.Stack:
+        if dataframe.empty:
+            return nothing_logged(parameters.column)
         # `dataframe` is the caller's (a chart's own frame, but a test or a plugin may share one), so this works
         # on the few columns it needs and never writes to it.
         # Captured before the columns below are sliced down to just the plotted ones, and before
