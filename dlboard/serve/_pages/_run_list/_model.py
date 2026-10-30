@@ -27,6 +27,12 @@ class RunAction(StrEnum):
     """Take the viewer's pin of `color` back from the runs."""
     REMOVE = "remove"
     """Take the runs out of the comparison they are listed in, leaving them in their experiments."""
+    COMPARE_NEW = "compare_new"
+    """Start a comparison of the runs, and go to it."""
+    COMPARE_ADD = "compare_add"
+    """Add the runs to the comparison whose id is `comparison_id`, and go to it."""
+    COMPARE_PINS = "compare_pins"
+    """Start a comparison of every run of the project pinned in `color`, whoever pinned it: it names no runs."""
 
 
 class RunActionRequest(BaseModel, frozen=True, extra="forbid"):
@@ -35,20 +41,34 @@ class RunActionRequest(BaseModel, frozen=True, extra="forbid"):
     action: RunAction
     run_ids: frozenset[int]
     color: PinColor | None = None
-    """The colour of the pin a `PIN` or `UNPIN` takes."""
+    """The colour of the pin an action pins, unpins or compares the pinned runs of."""
     comparison_id: int | None = None
-    """The comparison an action adds the runs to: none of the actions here takes one yet."""
+    """The comparison `COMPARE_ADD` adds the runs to: only that action takes one."""
     at: int
 
     @model_validator(mode="after")
     def _takes_the_colour_or_comparison_its_action_takes(self) -> Self:
+        if not self.run_ids and self.action is not RunAction.COMPARE_PINS:
+            msg = f"{self.action} needs a run to act on"
+            raise ValueError(msg)
         match self.action:
-            case RunAction.DRAW | RunAction.HIDE | RunAction.DIFF | RunAction.DELETE | RunAction.REMOVE:
+            case (
+                RunAction.DRAW
+                | RunAction.HIDE
+                | RunAction.DIFF
+                | RunAction.DELETE
+                | RunAction.REMOVE
+                | RunAction.COMPARE_NEW
+            ):
                 if self.color is not None or self.comparison_id is not None:
                     msg = f"{self.action} takes no colour or comparison"
                     raise ValueError(msg)
-            case RunAction.PIN | RunAction.UNPIN:
+            case RunAction.PIN | RunAction.UNPIN | RunAction.COMPARE_PINS:
                 if self.color is None or self.comparison_id is not None:
                     msg = f"{self.action} takes a colour and no comparison"
+                    raise ValueError(msg)
+            case RunAction.COMPARE_ADD:
+                if self.comparison_id is None or self.color is not None:
+                    msg = f"{self.action} takes a comparison and no colour"
                     raise ValueError(msg)
         return self

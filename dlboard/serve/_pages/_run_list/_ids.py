@@ -66,3 +66,12 @@ class ActionButton(PatternId[RunList]):
 
 def action_button(surface: RunListSurface) -> ActionButton:
     return ActionButton(f"run-list-action-{surface}")
+
+
+def navigate_id(surface: RunListSurface) -> StoreId[RunList]:
+    """
+    Where an action writes the address to go to when it is done (a comparison it started), for the browser to go to (`register_navigate`).
+
+    In the page's static layout, like the request store.
+    """
+    return StoreId(f"run-list-navigate-{surface}")

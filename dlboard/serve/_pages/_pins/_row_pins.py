@@ -89,7 +89,16 @@ def pin_or_unpin(request: RunActionRequest, grid: str) -> Pinned:
         case RunAction.UNPIN:
             store.unpin_runs(me, request.run_ids, color)
             verb, message = "Unpinned", "Only your own pin is taken back."
-        case RunAction.DRAW | RunAction.HIDE | RunAction.DIFF | RunAction.DELETE | RunAction.REMOVE:
+        case (
+            RunAction.DRAW
+            | RunAction.HIDE
+            | RunAction.DIFF
+            | RunAction.DELETE
+            | RunAction.REMOVE
+            | RunAction.COMPARE_NEW
+            | RunAction.COMPARE_ADD
+            | RunAction.COMPARE_PINS
+        ):
             msg = f"{request.action} is not a pin"
             raise ValueError(msg)
     cells = pin_cells_by_run(store, request.run_ids, me)

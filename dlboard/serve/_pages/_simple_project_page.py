@@ -13,6 +13,7 @@ from dlboard.models import ActivityStats, NewExperiment
 from dlboard.serve import Icon, get_current_user, get_data_store, icon
 from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import ButtonId, ModalId
+from dlboard.serve._pages._comparison._cards import comparison_cards
 from dlboard.serve._pages._dash_helpers import entity_card
 from dlboard.serve._pages._dataframe_helpers import experiment_display_name
 from dlboard.serve._pages._delete_confirm import (
@@ -148,6 +149,7 @@ def render_project_page(project_id: int) -> dmc.Container:
                 mb="lg",
             ),
             dmc.Box(_experiment_grid(store, project_id), id=EXP_LIST_ID),
+            comparison_cards(store, project_id),
             render_members_section(project),
         ],
         size="lg",

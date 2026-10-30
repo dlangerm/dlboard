@@ -26,11 +26,12 @@ from dlboard.serve import ClientsideScript, Icon, get_current_user, get_data_sto
 from dlboard.serve import _constants as constants
 from dlboard.serve._grid import column_def, infer_column_dtype
 from dlboard.serve._pages._comparison import _ids as ids
-from dlboard.serve._pages._dash_helpers import CallbackStates, section_label
+from dlboard.serve._pages._dash_helpers import CallbackStates, register_navigate, section_label
 from dlboard.serve._pages._dataframe_helpers import experiment_display_name
 from dlboard.serve._pages._experiment import _ids as experiment_ids
 from dlboard.serve._pages._experiment import _page_edits as edits
 from dlboard.serve._pages._experiment import _page_model as page_model
+from dlboard.serve._pages._experiment._compare import compare, compare_menu, compare_pins_menu
 from dlboard.serve._pages._experiment._focus import experiment_href
 from dlboard.serve._pages._experiment._paging import Paging
 from dlboard.serve._pages._experiment._views import VIEW_NOTIFY_ID
@@ -54,6 +55,7 @@ from dlboard.serve._pages._run_list._columns import (
     run_fields,
     status_column_def,
 )
+from dlboard.serve._pages._run_list._ids import navigate_id
 from dlboard.serve._pages._run_list._rows import register_row_updates, row_update_shells, row_updates_id
 from dlboard.serve._pages._run_list._table import run_grid
 
@@ -155,9 +157,11 @@ def _rows(
     ]
 
 
-def _signature(rows: list[dict[str, Any]], *, can_edit: bool) -> str:
+def _signature(rows: list[dict[str, Any]], offered: object, *, can_edit: bool) -> str:
     """A digest of everything the list is drawn from, so a tab switch does not draw it again."""
-    return hashlib.sha256(json.dumps([rows, can_edit], sort_keys=True, default=str).encode()).hexdigest()
+    return hashlib.sha256(
+        json.dumps([rows, offered, can_edit], sort_keys=True, default=str).encode()
+    ).hexdigest()
 
 
 def render_members(
@@ -176,8 +180,15 @@ def render_members(
     runs = store.comparison_runs(page.id)
     pins = pin_cells_by_run(store, [run.id for run in runs], get_current_user().id)
     can_edit = store.can_change_comparison_runs(page.id)
+    project_id = typing.cast("int", page.project_id)
+    addable = store.list_comparisons(project_id, get_current_user().id, editable=True)
+    counts = store.pin_counts(project_id)
     rows = _rows(store, runs, page, hidden, pins)
-    signature = _signature(rows, can_edit=can_edit)
+    signature = _signature(
+        rows,
+        [[[c.id, c.name] for c in addable], sorted((color.value, n) for color, n in counts.items())],
+        can_edit=can_edit,
+    )
     if signature == prev_signature:
         return None
     columns = page.document.hparam_columns
@@ -185,6 +196,7 @@ def render_members(
         simple_action(RunListSurface.COMPARISON, RunAction.DRAW, "Show", icon_name=Icon.EYE),
         simple_action(RunListSurface.COMPARISON, RunAction.HIDE, "Hide", icon_name=Icon.EYE_OFF),
         *pin_menus(RunListSurface.COMPARISON),
+        compare_menu(RunListSurface.COMPARISON, addable, current=page.id, here=can_edit),
         *(
             [simple_action(RunListSurface.COMPARISON, RunAction.REMOVE, "Remove", icon_name=Icon.CLOSE)]
             if can_edit
@@ -210,6 +222,7 @@ def render_members(
                 ],
                 justify="space-between",
             ),
+            compare_pins_menu(RunListSurface.COMPARISON, counts, here=can_edit),
             action_bar(RunListSurface.COMPARISON, *actions),
             pin_filter(RunListSurface.COMPARISON, {cell.color for cells in pins.values() for cell in cells}),
             run_grid(
@@ -241,6 +254,7 @@ def members_shells() -> list[Component]:
     """What the list needs in the page itself, not in the list: its request store, and the stores its actions write."""
     return [
         Store(id=request_store_id(RunListSurface.COMPARISON)),
+        Store(id=navigate_id(RunListSurface.COMPARISON)),
         Store(id=ids.MEMBERS_REVISION_ID),
         *row_update_shells(RunListSurface.COMPARISON),
     ]
@@ -295,7 +309,31 @@ def _hide_or_show(request: RunActionRequest, act: _Act) -> tuple[Any, ...]:
     container, page_json, revision = membership_changed(
         act.page_json, paging.with_hidden(hidden).model_dump_json()
     )
-    return container, page_json, revision, no_update, no_update
+    return container, page_json, revision, no_update, no_update, no_update
+
+
+def _compare(request: RunActionRequest, act: _Act) -> tuple[Any, ...]:
+    """Start a comparison of the requested runs from this one's layout, or add them to another, and go to it."""
+    page = page_model.BasicExperimentPage.model_validate_json(act.page_json)
+    # Runs added to the comparison on screen change its list, which is drawn again, and not the view: no navigation.
+    editable = get_data_store().can_change_comparison_runs(page.id)
+    compared = compare(
+        request,
+        project_id=typing.cast("int", page.project_id),
+        layout=page,
+        here=page.id if editable else None,
+    )
+    if compared.changed:
+        container, page_json, revision = membership_changed(act.page_json, act.paging_json)
+        return container, page_json, revision, compared.notice, no_update, no_update
+    return (
+        no_update,
+        no_update,
+        no_update,
+        no_update if compared.notice is None else compared.notice,
+        no_update,
+        no_update if compared.destination is None else compared.destination,
+    )
 
 
 def _remove(request: RunActionRequest, act: _Act) -> tuple[Any, ...]:
@@ -309,15 +347,33 @@ def _remove(request: RunActionRequest, act: _Act) -> tuple[Any, ...]:
             "Only its owner, or an editor of a shared comparison, can take runs out of it.",
             color="red",
         )
-        return no_update, no_update, no_update, refused, no_update
+        return no_update, no_update, no_update, refused, no_update, no_update
     container, page_json, revision = membership_changed(act.page_json, act.paging_json)
-    return container, page_json, revision, no_update, no_update
+    return container, page_json, revision, no_update, no_update, no_update
+
+
+def _act(request: RunActionRequest, act: _Act) -> tuple[Any, ...]:
+    """What to change on the page for `request`, in the order of `act_on_members`'s `Output`s."""
+    match request.action:
+        case RunAction.DRAW | RunAction.HIDE:
+            return _hide_or_show(request, act)
+        case RunAction.REMOVE:
+            return _remove(request, act)
+        case RunAction.PIN | RunAction.UNPIN:
+            pinned = pin_or_unpin(request, ids.COMPARISON_GRID_ID)
+            return no_update, no_update, no_update, pinned.notice, pinned.rows, no_update
+        case RunAction.COMPARE_NEW | RunAction.COMPARE_ADD | RunAction.COMPARE_PINS:
+            return _compare(request, act)
+        case RunAction.DIFF | RunAction.DELETE:
+            # Not on a comparison yet (the diff reads one experiment), and its runs are deleted from their experiments.
+            raise PreventUpdate
 
 
 def register_members_callbacks(app: Dash) -> None:
     """Draw the sidebar's list, act on the selected runs, and follow the comparison to the copy an edit forked."""
     register_run_list(app, RunListSurface.COMPARISON, ids.COMPARISON_GRID_ID)
     register_row_updates(app, RunListSurface.COMPARISON)
+    register_navigate(app, navigate_id(RunListSurface.COMPARISON))
     register_pin_filter(app, RunListSurface.COMPARISON, ids.COMPARISON_GRID_ID)
 
     @app.callback(
@@ -349,6 +405,7 @@ def register_members_callbacks(app: Dash) -> None:
         Output(ids.MEMBERS_REVISION_ID, "data", allow_duplicate=True),
         Output(VIEW_NOTIFY_ID, "sendNotifications", allow_duplicate=True),
         Output(row_updates_id(RunListSurface.COMPARISON), "data", allow_duplicate=True),
+        Output(navigate_id(RunListSurface.COMPARISON), "data"),
         _Act.states(),
         prevent_initial_call=True,
     )
@@ -358,18 +415,7 @@ def register_members_callbacks(app: Dash) -> None:
         act = _Act.model_validate(states)
         if act.request is None:
             raise PreventUpdate
-        request = RunActionRequest.model_validate(act.request)
-        match request.action:
-            case RunAction.DRAW | RunAction.HIDE:
-                return _hide_or_show(request, act)
-            case RunAction.REMOVE:
-                return _remove(request, act)
-            case RunAction.PIN | RunAction.UNPIN:
-                pinned = pin_or_unpin(request, ids.COMPARISON_GRID_ID)
-                return no_update, no_update, no_update, pinned.notice, pinned.rows
-            case RunAction.DIFF | RunAction.DELETE:
-                # Not on a comparison yet (the diff reads one experiment), and its runs are deleted from their experiments.
-                raise PreventUpdate
+        return _act(RunActionRequest.model_validate(act.request), act)
 
     app.clientside_callback(
         _FOLLOW_FORK_JS.source,
