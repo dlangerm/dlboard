@@ -21,8 +21,7 @@ script ends up as a row in the database and eventually a chart in the browser.
 list, then calls `register(app)` directly on each of the built-in pages (always, unconditionally
 — they aren't `PluginProtocol` and are never part of the `plugins` argument at all), and wires the
 shared `AppShell` layout (header, collapsible navbar, page container) plus a few global callbacks:
-breadcrumbs, navbar collapse state (persisted to `localStorage`), and the navbar's project/experiment
-listing. `dlboard serve local` is the reference composition — it passes `dlboard.plugins.LOCAL_DEPLOYMENT`
+breadcrumbs, navbar collapse state (persisted to `localStorage`), and the navbar's run list (an experiment's runs, a comparison's, or a project's pinned runs). `dlboard serve local` is the reference composition — it passes `dlboard.plugins.LOCAL_DEPLOYMENT`
 (sqlite storage, filesystem artifacts, anonymous auth, the REST backend, the four built-in chart types)
 plus a theme.
 
