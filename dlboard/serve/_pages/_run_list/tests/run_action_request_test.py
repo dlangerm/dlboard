@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
+from dlboard.models import PinColor
 from dlboard.serve._pages._run_list import RunAction, RunActionRequest
 
 
@@ -30,3 +31,9 @@ def test_a_request_names_its_runs_once_however_the_browser_listed_them() -> None
 def test_a_malformed_request_is_refused_where_it_arrives(raw: dict[str, object]) -> None:
     with pytest.raises(ValidationError):
         RunActionRequest.model_validate(raw)
+
+
+def test_a_pin_names_its_colour_in_its_argument() -> None:
+    request = RunActionRequest.model_validate({"action": "pin", "run_ids": [1], "color": "red", "at": 1})
+
+    assert request.color is PinColor.RED

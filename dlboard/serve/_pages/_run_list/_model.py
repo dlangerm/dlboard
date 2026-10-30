@@ -21,6 +21,10 @@ class RunAction(StrEnum):
     """Open the A/B comparison of the runs' hyperparameters and metrics."""
     DELETE = "delete"
     """Delete the runs, after asking."""
+    PIN = "pin"
+    """Pin the runs as the viewer, in `color`."""
+    UNPIN = "unpin"
+    """Take the viewer's pin of `color` back from the runs."""
 
 
 class RunActionRequest(BaseModel, frozen=True, extra="forbid"):
@@ -29,7 +33,7 @@ class RunActionRequest(BaseModel, frozen=True, extra="forbid"):
     action: RunAction
     run_ids: frozenset[int]
     color: PinColor | None = None
-    """The colour an action pins, unpins or compares the pinned runs of: none of the actions here takes one yet."""
+    """The colour of the pin a `PIN` or `UNPIN` takes."""
     comparison_id: int | None = None
     """The comparison an action adds the runs to: none of the actions here takes one yet."""
     at: int
@@ -40,5 +44,9 @@ class RunActionRequest(BaseModel, frozen=True, extra="forbid"):
             case RunAction.DRAW | RunAction.HIDE | RunAction.DIFF | RunAction.DELETE:
                 if self.color is not None or self.comparison_id is not None:
                     msg = f"{self.action} takes no colour or comparison"
+                    raise ValueError(msg)
+            case RunAction.PIN | RunAction.UNPIN:
+                if self.color is None or self.comparison_id is not None:
+                    msg = f"{self.action} takes a colour and no comparison"
                     raise ValueError(msg)
         return self

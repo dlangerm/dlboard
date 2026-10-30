@@ -129,3 +129,118 @@
 .dl-run-list-bar {
   padding-bottom: var(--mantine-spacing-xs);
 }
+
+/* `DlboardPins`: a run's pins, as one pin; a run with none shows a faint pin on its hovered row. */
+.dl-pins {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  cursor: pointer;
+}
+
+.dl-pins .dl-icon {
+  font-size: 1rem;
+}
+
+.dl-pin-ghost {
+  opacity: 0;
+  color: var(--mantine-color-dimmed);
+}
+
+.ag-row-hover .dl-pin-ghost {
+  opacity: 0.5;
+}
+
+.ag-root .ag-cell.dl-pins-cell {
+  padding: 0;
+}
+
+/* The editor of a run's pins, outside the grid so its cell does not clip it. */
+.dl-pin-editor {
+  position: fixed;
+  z-index: 1000;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  width: 9.5rem;
+  padding: 6px;
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-sm);
+  background-color: var(--mantine-color-body);
+  box-shadow: var(--mantine-shadow-md);
+}
+
+.dl-pin-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--mantine-radius-sm);
+  background: none;
+  cursor: pointer;
+  opacity: 0.45;
+}
+
+.dl-pin-toggle:hover {
+  opacity: 0.9;
+}
+
+.dl-pin-toggle.dl-pin-mine {
+  opacity: 1;
+  border-color: var(--mantine-color-default-border);
+  background-color: var(--mantine-color-default-hover);
+}
+
+.dl-pin-toggle.dl-pin-others {
+  opacity: 0.8;
+}
+
+.dl-pin-toggle .dl-icon {
+  font-size: 1rem;
+}
+
+/* `DlboardPinsTooltip`. */
+.dl-pins-tooltip {
+  padding: 4px 8px;
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-sm);
+  background-color: var(--mantine-color-body);
+  box-shadow: var(--mantine-shadow-sm);
+  font-size: var(--mantine-font-size-xs);
+}
+
+.dl-pins-tooltip-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* The project page's sidebar of pinned runs. */
+.dl-pinned-runs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mantine-spacing-xs);
+}
+
+.dl-run-list-summary {
+  cursor: pointer;
+  font-size: var(--mantine-font-size-xs);
+  color: var(--mantine-color-dimmed);
+}
+
+/* The project page's sidebar of pinned runs. */
+.dl-pinned-runs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mantine-spacing-xs);
+}
+
+.dl-run-list-summary {
+  cursor: pointer;
+  font-size: var(--mantine-font-size-xs);
+  color: var(--mantine-color-dimmed);
+}

@@ -179,3 +179,127 @@ window.dashAgGridComponentFunctions.DlboardRunLink = (props) => {
         experiment ? h("span", { className: "dl-run-experiment" }, experiment) : null,
     );
 };
+
+// What a run's pins are drawn on: one pin, filled with the colours the run is pinned in (a wheel of them if there are several).
+const pinFill = (pins) =>
+    pins.length === 1
+        ? { backgroundColor: pins[0].css }
+        : {
+              background: `conic-gradient(${pins
+                  .map((pin, i) => `${pin.css} ${i / pins.length}turn ${(i + 1) / pins.length}turn`)
+                  .join(", ")})`,
+          };
+
+// The colours a run can be pinned in, to toggle. A colour you pinned the run in is filled and one you did not is not; a
+// colour someone else pinned is marked, and its tooltip says who. Closes on a click outside it, or Escape.
+const DlboardPinEditor = (props) => {
+    const { colors, pins, anchor, onToggle, onClose } = props;
+    React.useEffect(() => {
+        const away = (event) => {
+            if (!event.target.closest?.(".dl-pin-editor") && !anchor.contains(event.target)) {
+                onClose();
+            }
+        };
+        const onEscape = (event) => event.key === "Escape" && onClose();
+        document.addEventListener("mousedown", away);
+        document.addEventListener("keydown", onEscape);
+        return () => {
+            document.removeEventListener("mousedown", away);
+            document.removeEventListener("keydown", onEscape);
+        };
+    }, [anchor, onClose]);
+    const box = anchor.getBoundingClientRect();
+    return ReactDOM.createPortal(
+        h(
+            "div",
+            {
+                className: "dl-pin-editor",
+                style: { top: box.bottom + 4, left: Math.max(box.left - 60, 4) },
+                // A portal's events bubble through the React tree, to the cell it opened from, which would toggle it shut again.
+                onClick: (event) => event.stopPropagation(),
+            },
+            colors.map(({ color, css }) => {
+                const held = pins.find((pin) => pin.color === color);
+                return h("button", {
+                    key: color,
+                    type: "button",
+                    "aria-label": `Pin ${color}`,
+                    "aria-pressed": String(Boolean(held?.mine)),
+                    title: held ? held.who.join(", ") : undefined,
+                    className: `dl-pin-toggle${held?.mine ? " dl-pin-mine" : ""}${held && !held.mine ? " dl-pin-others" : ""}`,
+                    onClick: () => onToggle(color, !held?.mine),
+                    children: h("span", {
+                        className: "dl-icon dl-icon-pin",
+                        style: { backgroundColor: css },
+                    }),
+                });
+            }),
+        ),
+        document.body,
+    );
+};
+
+// The pins on a run (`value`, a `PinCell` for each colour): one pin filled with them all. A click opens the editor to pin the run
+// in other colours, or take your pin back. The editor hands its choice to `setData`, which the grid reports as
+// `cellRendererData` for the page to act on. A run with none shows a faint pin when its row is hovered, to say the cell is the
+// place to click.
+// Which run's editor is open. A change to a run's pins refreshes its cell, which draws the cell again from scratch, so the editor
+// being open cannot be the cell's own state: it would close at every pin.
+let pinEditorOpenFor = null;
+
+window.dashAgGridComponentFunctions.DlboardPins = (props) => {
+    const pins = props.value ?? [];
+    const runId = props.data.run_id;
+    const [open, setOpenState] = React.useState(pinEditorOpenFor === runId);
+    const [, drawn] = React.useState(false);
+    const anchor = React.useRef(null);
+    const setOpen = (next) => {
+        pinEditorOpenFor = next ? runId : pinEditorOpenFor === runId ? null : pinEditorOpenFor;
+        setOpenState(next);
+    };
+    // The editor is placed by the cell it opens from, which exists once this has been drawn.
+    React.useEffect(() => drawn(true), []);
+    return h(
+        "div",
+        {
+            className: "dl-pins",
+            ref: anchor,
+            role: "button",
+            "aria-label": pins.length ? `Pinned ${pins.map((pin) => pin.color).join(", ")}` : "Pin this run",
+            onClick: () => setOpen(!open),
+        },
+        h("span", {
+            className: `dl-icon dl-icon-pin${pins.length ? "" : " dl-pin-ghost"}`,
+            style: pins.length ? pinFill(pins) : undefined,
+        }),
+        open && anchor.current
+            ? h(DlboardPinEditor, {
+                  colors: props.colors,
+                  pins,
+                  anchor: anchor.current,
+                  onClose: () => setOpen(false),
+                  onToggle: (color, pinned) =>
+                      props.setData({
+                          action: pinned ? "pin" : "unpin",
+                          color,
+                          run_ids: [props.data.run_id],
+                      }),
+              })
+            : null,
+    );
+};
+
+// A run's pins in its tooltip: a pin in each colour and who pinned it in that colour.
+window.dashAgGridComponentFunctions.DlboardPinsTooltip = (props) =>
+    h(
+        "div",
+        { className: "dl-pins-tooltip" },
+        (props.value ?? []).map((pin) =>
+            h(
+                "div",
+                { key: pin.color, className: "dl-pins-tooltip-row" },
+                h("span", { className: "dl-icon dl-icon-pin", style: { backgroundColor: pin.css } }),
+                h("span", null, pin.who.join(", ")),
+            ),
+        ),
+    );

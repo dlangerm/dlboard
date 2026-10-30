@@ -20,3 +20,7 @@ window.dashAgGridFunctions.dlboardNumber = (params) => {
 // A file-list score: four significant digits.
 window.dashAgGridFunctions.dlboardScore = (params) =>
     params.value == null ? "" : Number(params.value).toPrecision(4);
+
+// The colours a run is pinned in, as the words a text filter matches (`red blue`): what a pin chip above a run list filters by.
+window.dashAgGridFunctions.dlboardPinColors = (params) =>
+    (params.data?._pins ?? []).map((pin) => pin.color).join(" ");
