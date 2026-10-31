@@ -44,6 +44,12 @@ CHOICE_RENDERER: Final = "DlboardChoice"
 KEY_PICKER_EDITOR: Final = "DlboardKeyPicker"
 """How a name is edited in a cell: typed in, with the names it can be (`options` of `cellEditorParams`) suggested."""
 
+EYE_RENDERER: Final = "DlboardEye"
+"""How a run is drawn or hidden in a cell: an eye, open if the cell's value is true. A click is reported as the grid's `cellRendererData`."""
+
+RUN_LINK_RENDERER: Final = "DlboardRunLink"
+"""How a run's name is shown in a cell: a link to the page of that run, which is its row's `_href`."""
+
 NUMBER_FORMATTER: Final = {"function": "dlboardNumber(params)"}
 """How a numeric cell is shown: whole numbers as they are, small ones to four significant digits."""
 

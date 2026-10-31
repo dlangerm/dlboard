@@ -17,6 +17,7 @@ from dash import State
 from dlboard.serve import get_data_store
 from dlboard.serve._pages._dash_helpers import CallbackStates
 from dlboard.serve._pages._experiment import _ids as ids
+from dlboard.serve._pages._experiment._focus import focus_banner
 from dlboard.serve._pages._experiment._page_model import BasicExperimentPage
 from dlboard.serve._pages._experiment._page_repository import load_page, ref_of, save_page
 from dlboard.serve._pages._experiment._paging import Paging, reveal, visible_open_panels
@@ -121,7 +122,10 @@ def commit(page_json: str, paging_json: str, edit: PageEdit) -> tuple[BasicExper
         paging = _revealed(before, saved, paging, edit.reveal)
     paging = resolved_paging(saved, paging)
     open_panels = visible_open_panels(saved.panels, paging.shown_tab(saved.panels), paging)
-    return saved, accordion_view(panel_frames(get_data_store(), saved, paging, open_panels), saved, paging)
+    store = get_data_store()
+    return saved, accordion_view(
+        panel_frames(store, saved, paging, open_panels), saved, paging, focus_banner(store, saved, paging)
+    )
 
 
 class EditCtx(CallbackStates):

@@ -1,8 +1,10 @@
 """
-The navbar's run-comparison table: a Columns picker plus a run-selection/deletion data table.
+The sidebar of an experiment page: its runs, as a list the charts and the actions on runs are driven from.
 
-Fully self-contained -- it renders into `constants.NAVBAR_RUN_LIST_ID`, a different container from
-`accordion_view`'s `METRIC_CONTENT_ID` tree, and has no modal of its own to render beside it.
+A run has an eye, to draw it in the charts or not (saved with the view, as a selection of runs always was), and a
+checkbox, to select it for the bar of actions above the list (`RunAction`): show, hide, diff or delete the selected runs.
+A Columns picker adds hyperparameters and metrics. It renders into `constants.NAVBAR_RUN_LIST_ID`, a different container
+from `accordion_view`'s `METRIC_CONTENT_ID` tree; what it asks for goes through `request_store_id`, in the page's layout.
 """
 
 from __future__ import annotations
@@ -10,33 +12,31 @@ from __future__ import annotations
 import hashlib
 import json
 import typing
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
-import dash_ag_grid as dag
 import dash_mantine_components as dmc
 from dash import Dash, Input, Output, State, html, no_update
 from dash.dcc import Store
 from dash.exceptions import PreventUpdate
-from pydantic import BaseModel, Field
 from structlog.stdlib import get_logger
 
 from dlboard import models
-from dlboard.models import RUN_NAME_COLUMN, MetricColumn
+from dlboard.models import MetricColumn
 from dlboard.serve import (
     ClientsideScript,
     Icon,
-    get_current_user,
     get_data_store,
-    icon_cell_class,
-    series_swatch_class,
 )
 from dlboard.serve import _constants as constants
-from dlboard.serve._component_ids import ButtonId, ModalId, StoreId, ValueId
-from dlboard.serve._format import format_duration
-from dlboard.serve._grid import column_def, infer_column_dtype, themed_grid_kwargs
-from dlboard.serve._pages._dash_helpers import section_label, tooltipped_action_icon
-from dlboard.serve._pages._dataframe_helpers import run_display_name
+from dlboard.serve._component_ids import ButtonId, StoreId, ValueId
+from dlboard.serve._grid import column_def, infer_column_dtype
+from dlboard.serve._pages._dash_helpers import (
+    CallbackStates,
+    section_label,
+    tooltipped_action_icon,
+)
 from dlboard.serve._pages._experiment import _ids as ids
 from dlboard.serve._pages._experiment import _page_edits as edits
 from dlboard.serve._pages._experiment import _page_model as page_model
@@ -46,15 +46,49 @@ from dlboard.serve._pages._experiment._column_catalog import (
     first_matches,
     summary_hparam_keys,
 )
+from dlboard.serve._pages._experiment._focus import experiment_href
 from dlboard.serve._pages._experiment._live_updates import STATE_LAST_KNOWN_REVISION
-from dlboard.serve._pages._experiment._run_compare import compare_button
+from dlboard.serve._pages._experiment._paging import Paging
+from dlboard.serve._pages._experiment._run_compare import COMPARE_MODAL_ID, COMPARE_RUNS_ID, MAX_COMPARED_RUNS
 from dlboard.serve._pages._experiment._shown_runs import ShownRunsSettings, shown_run_ids
 from dlboard.serve._pages._experiment._views import VIEW_NOTIFY_ID
-from dlboard.serve._url import relative_path
+from dlboard.serve._pages._run_list import (
+    RunAction,
+    RunActionRequest,
+    RunListSurface,
+    action_bar,
+    register_run_list,
+    request_store_id,
+    simple_action,
+)
+from dlboard.serve._pages._run_list._columns import (
+    DRAWN_FIELD,
+    FOCUSED_FIELD,
+    HREF_FIELD,
+    eye_column_def,
+    name_column_def,
+    run_fields,
+    status_column_def,
+)
+from dlboard.serve._pages._run_list._delete import (
+    ask_to_delete,
+    delete_outputs,
+    delete_shells,
+    register_delete,
+)
+from dlboard.serve._pages._run_list._rows import (
+    RowUpdate,
+    RowUpdates,
+    register_row_updates,
+    row_update_shells,
+    row_updates_id,
+)
+from dlboard.serve._pages._run_list._table import run_grid
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    import dash_ag_grid as dag
     from dash.development.base_component import Component
 
     from dlboard.models import DataStore, Run
@@ -68,98 +102,37 @@ NAVBAR_HPARAM_CONFIRM_COLS_ID: ButtonId[ids.ExperimentPage] = ButtonId("navbar-h
 NAVBAR_HPARAM_COLUMNS_TOGGLE_ID: ButtonId[ids.ExperimentPage] = ButtonId("navbar-hparam-columns-toggle")
 NAVBAR_NEWEST_RUNS_ID: ButtonId[ids.ExperimentPage] = ButtonId("navbar-newest-runs")
 NAVBAR_HPARAM_APPLIED_COLS_ID: StoreId[ids.ExperimentPage] = StoreId("navbar-hparam-applied-cols")
-_ROW_HEIGHT = 34
-_MAX_TABLE_HEIGHT = "50vh"
-_DELETE_COLUMN_ID = "_delete"
-_ROW_ID_FIELD = "_row_id"
-_SWATCH_FIELD = "_swatch"
-_STATUS_FIELD = "_status"
-_DURATION_FIELD = "_duration_s"
-_STATUS_TEXT_FIELD = "_status_text"
-_STATUS_DETAIL_FIELD = "_status_detail"
-"""Reserved row fields (underscore-prefixed, like `_swatch`): a hyperparameter or metric named "status" can't shadow them."""
-_STATUS_MIN_WIDTH = 74
-"""Room for "✕ 1h 2m" in the narrow sidebar the table lives in."""
-_STATUS_STYLES: dict[models.RunStatus, str] = {
-    models.RunStatus.RUNNING: "var(--mantine-color-blue-5)",
-    models.RunStatus.FINISHED: "var(--mantine-color-dimmed)",
-    models.RunStatus.FAILED: "var(--mantine-color-red-6)",
-    models.RunStatus.UNKNOWN: "var(--mantine-color-yellow-6)",
-}
-
-
-def _duration_seconds(run: Run) -> int | None:
-    """How long the run took, if it has ended."""
-    return int((run.ended_at - run.created_at).total_seconds()) if run.ended_at else None
-
-
-def _status_text(run: Run) -> str:
-    """The cell's text, short enough for the sidebar: "running", how long it took, marked if it failed or is unknown."""
-    seconds = _duration_seconds(run)
-    took = "" if seconds is None else format_duration(seconds)
-    match run.status:
-        case None:
-            return ""
-        case models.RunStatus.RUNNING:
-            return "running"
-        case models.RunStatus.FINISHED:
-            return took
-        case models.RunStatus.FAILED:
-            return f"✕ {took}".strip()
-        case models.RunStatus.UNKNOWN:
-            return f"? {took}".strip()
-
-
-def _status_detail(run: Run) -> str:
-    """The cell's tooltip: how the run ended and how long it took, in words. Empty for a run with no status."""
-    seconds = _duration_seconds(run)
-    after = "" if seconds is None else f" after {format_duration(seconds)}"
-    match run.status:
-        case None:
-            return ""
-        case models.RunStatus.RUNNING:
-            return "running"
-        case models.RunStatus.FINISHED | models.RunStatus.FAILED:
-            return f"{run.status.value}{after}"
-        case models.RunStatus.UNKNOWN:
-            return f"ended without saying how{after}"
-
-
 NAVBAR_HPARAM_SIGNATURE_ID: StoreId[ids.ExperimentPage] = StoreId("navbar-hparam-signature")
-
-DELETE_RUN_PENDING_STORE_ID: StoreId[ids.ExperimentPage] = StoreId("delete-run-pending")
-DELETE_RUN_MODAL_ID: ModalId[ids.ExperimentPage] = ModalId("delete-run-modal")
-DELETE_RUN_CONFIRM_ID: ButtonId[ids.ExperimentPage] = ButtonId("delete-run-confirm")
-DELETE_RUN_CANCEL_ID: ButtonId[ids.ExperimentPage] = ButtonId("delete-run-cancel")
-
-NAVBAR_HPARAM_DRAWN_RUNS_ID: StoreId[ids.ExperimentPage] = StoreId("navbar-hparam-drawn-runs")
-NAVBAR_RUN_SELECTION_ID: StoreId[ids.ExperimentPage] = StoreId("navbar-run-selection")
-"""
-The run ids the table's selection holds once it differs from `NAVBAR_HPARAM_DRAWN_RUNS_ID`: what the user chose.
-
-In the experiment page's static layout, not the table's own render tree: a store that mounted with the table would
-set `sync_run_selection` off itself, which is the round trip this store exists to avoid.
-"""
+NAVBAR_RUN_HEAD_ID: typing.Final = "navbar-run-head"
+"""What is said about what is drawn (how many runs are not, the way back to the view's): redrawn by the actions that change it."""
 
 _HPARAM_COLS_CHANGED_JS = ClientsideScript(Path(__file__).with_name("hparam_cols_changed.js"))
-_RUN_SELECTION_GATE_JS = ClientsideScript(Path(__file__).with_name("run_selection_gate.js"))
+
+
+class _Listed(typing.NamedTuple):
+    """What the table lists, read afresh on every tick that saw a change: its runs, their hyperparameters and which are drawn."""
+
+    runs: list[Run]
+    hparams: list[models.HyperParams]
+    selection: _Selection
+    view_id: int | None
+    """The view the page is of, which a link to a run stays in."""
 
 
 def _build_hparam_rows(
-    runs: list[Run],
+    experiment_id: int,
+    listed: _Listed,
     hparams_by_run: dict[int, models.HyperParams],
     latest_metrics: dict[int, dict[str, float]],
 ) -> list[dict[str, Any]]:
     """One row per run, whether or not it has logged hyperparameters or metrics yet."""
     rows: list[dict[str, Any]] = []
-    for run in runs:
+    for run in listed.runs:
         row: dict[str, Any] = {
-            MetricColumn.RUN_ID: run.id,
-            RUN_NAME_COLUMN: run_display_name(run),
-            _STATUS_FIELD: run.status.value if run.status else None,
-            _DURATION_FIELD: _duration_seconds(run),
-            _STATUS_TEXT_FIELD: _status_text(run),
-            _STATUS_DETAIL_FIELD: _status_detail(run),
+            DRAWN_FIELD: run.id in listed.selection.shown,
+            FOCUSED_FIELD: run.id == listed.selection.focus,
+            HREF_FIELD: experiment_href(experiment_id, view_id=listed.view_id, run_id=run.id),
+            **run_fields(run),
         }
         hparam = hparams_by_run.get(run.id)
         if hparam is not None:
@@ -172,21 +145,20 @@ def _build_hparam_rows(
 def _load_hparam_view_data(
     store: DataStore[...],
     experiment_id: int,
-    hparams: list[models.HyperParams],
+    listed: _Listed,
     selected: list[str],
-    runs: list[Run],
 ) -> tuple[list[str], list[str], list[dict[str, Any]]]:
     """
-    Build displayable rows for `runs`, enriched with hparams and any selected last-step metrics.
+    Build displayable rows for the `listed` runs, enriched with hparams and any selected last-step metrics.
 
     Key *names* are what a picker offers (`summary_hparam_keys`, and a cheap `DISTINCT key` lookup of metrics), plus any
     selected key a run holds, so a column picked from an older run stays applied; metric *values* are only fetched for
-    the selected metrics -- the columns the table is actually about to show. Takes `runs` and `hparams` rather than
-    querying them itself: `render_navbar_hparams` already needs them to decide *whether* to call this at all (see
+    the selected metrics -- the columns the table is actually about to show. Takes what is `listed` rather than
+    querying it itself: `render_navbar_hparams` already needs it to decide *whether* to call this at all (see
     `_render_signature`), on every live-update poll tick that saw a change.
     """
-    hparams_by_run = {h.run_id: h for h in hparams}
-    held = {key for h in hparams for key in h.hparams_dict}
+    hparams_by_run = {h.run_id: h for h in listed.hparams}
+    held = {key for h in listed.hparams for key in h.hparams_dict}
     hparam_keys = sorted(
         {*summary_hparam_keys(store, experiment_id), *(key for key in selected if key in held)}
     )
@@ -200,154 +172,50 @@ def _load_hparam_view_data(
         if wanted
         else {}
     )
-    rows = _build_hparam_rows(runs, hparams_by_run, latest)
+    rows = _build_hparam_rows(experiment_id, listed, hparams_by_run, latest)
     return hparam_keys, metric_keys, rows
 
 
-def _delete_run_modal() -> Component:
+def run_table_shells() -> list[Component]:
     """
-    Confirmation modal for deleting a run.
+    What the table's actions use that must not mount with the table.
 
-    Opened by clicking a row's trash icon in the table (see `_DELETE_COLUMN_ID` in
-    `_build_hparam_datatable`) -- mirrors the project/experiment delete modals `render_delete_control`
-    builds, but doesn't use that helper directly since its confirm target here
-    (`DELETE_RUN_PENDING_STORE_ID`) is resolved per-row rather than from a fixed State.
+    The store they are requested through, and the modal that asks before a delete. In the page's layout once, like every
+    modal the panel area can open: a callback listening to something that mounts with the table is called as it mounts,
+    though nobody asked anything.
     """
-    return dmc.Modal(
-        id=DELETE_RUN_MODAL_ID,
-        title="Delete this run?",
-        opened=False,
-        children=[
-            dmc.Text(
-                "This soft-deletes the run and everything under it. It can be restored from the "
-                "admin Trash until it's permanently purged."
-            ),
-            dmc.Group(
-                [
-                    dmc.Button("Cancel", id=DELETE_RUN_CANCEL_ID, variant="default"),
-                    dmc.Button("Delete", id=DELETE_RUN_CONFIRM_ID, color="red"),
-                ],
-                justify="flex-end",
-                mt="sm",
-            ),
-        ],
-    )
+    return [
+        Store(id=request_store_id(RunListSurface.EXPERIMENT)),
+        *row_update_shells(RunListSurface.EXPERIMENT),
+        *delete_shells(RunListSurface.EXPERIMENT),
+    ]
 
 
 def _build_hparam_datatable(
     rows: list[dict[str, Any]],
-    selected: list[str] | list[int],
-    shown: frozenset[int],
+    selected: list[str],
+    picked: frozenset[int],
     *,
     table_id: str,
 ) -> dag.AgGrid:
-    column_defs: list[dict[str, Any]] = [
-        {
-            "field": RUN_NAME_COLUMN,
-            "headerName": "Run",
-            "sortable": True,
-            "filter": True,
-            # Each run's chart color as a dot before its name, so this table doubles as the legend.
-            "cellClass": {"function": f"params.data.{_SWATCH_FIELD}"},
-        },
-        {
-            # Sorts by how long the run took; filters (as text) by its status.
-            "field": _DURATION_FIELD,
-            "headerName": "Status",
-            "headerTooltip": "How the run ended, and how long it took",
-            "sortable": True,
-            "filter": True,
-            "filterValueGetter": {"function": f"params.data.{_STATUS_FIELD}"},
-            "valueFormatter": {"function": f"params.data.{_STATUS_TEXT_FIELD}"},
-            "tooltipField": _STATUS_DETAIL_FIELD,
-            # The run name gets what is left, but this has to stay readable ("✕ 1h 2m") in a narrow sidebar.
-            "minWidth": _STATUS_MIN_WIDTH,
-            "cellStyle": {
-                "styleConditions": [
-                    {
-                        "condition": f"params.data.{_STATUS_FIELD} == '{status.value}'",
-                        "style": {"color": color},
-                    }
-                    for status, color in _STATUS_STYLES.items()
-                ]
-            },
-        },
+    column_defs = [
+        eye_column_def(),
+        name_column_def(swatch=True),
+        status_column_def(),
+        *(column_def(key, infer_column_dtype(rows, key)) for key in selected),
     ]
-    column_defs.extend(column_def(str(key), infer_column_dtype(rows, str(key))) for key in selected)
-    column_defs.append(
-        {
-            "field": _DELETE_COLUMN_ID,
-            "headerName": "",
-            "sortable": False,
-            "filter": False,
-            "minWidth": 36,
-            "maxWidth": 40,
-            "cellClass": icon_cell_class(Icon.DELETE),
-            "cellStyle": {"textAlign": "center", "cursor": "pointer", "color": "var(--mantine-color-red-6)"},
-        }
-    )
-
-    selected_ids = [str(row[MetricColumn.RUN_ID]) for row in rows if row[MetricColumn.RUN_ID] in shown]
-    data = [
-        {
-            **row,
-            _ROW_ID_FIELD: str(row[MetricColumn.RUN_ID]),
-            _SWATCH_FIELD: series_swatch_class(int(row[MetricColumn.RUN_ID])),
-        }
-        for row in rows
-    ]
-
-    # Sized to fit its rows (header included, and room for the empty-table overlay), up to a cap
-    # past which it scrolls -- and since it isn't `autoHeight`, ag-grid then only renders the rows
-    # actually in view, so a 500-run sweep costs the DOM what a 15-run one does. No pagination:
-    # scrolling a long list is fewer clicks than paging through it.
-    grid = themed_grid_kwargs()
-    grid["className"] = f"{grid['className']} dl-run-table"
-    grid["style"] = {
-        **grid["style"],
-        # Less than ag-grid's default padding a side: in a sidebar this narrow it is a third of every column.
-        "--ag-cell-horizontal-padding": "8px",
-        "height": f"min({(max(len(rows), 2) + 1) * _ROW_HEIGHT + 2}px, {_MAX_TABLE_HEIGHT})",
-    }
-    return dag.AgGrid(
-        id=table_id,
-        columnDefs=column_defs,
-        rowData=data,
-        # A dedicated already-stringified field, not `params.data.run_id` directly -- dash-ag-grid's
-        # string-prop JS parser only supports bare expressions (no function calls like `String(...)`),
-        # so casting has to happen on the Python side instead.
-        getRowId=f"params.data.{_ROW_ID_FIELD}",
-        # `getRowId` (and the numeric columns' `valueFormatter`, via `column_def`) are JS expression
-        # strings -- dash-ag-grid silently no-ops any string-valued JS prop unless this is set. Safe
-        # here: every such string is static and written by us, never derived from user/request data.
-        dangerously_allow_code=True,
-        selectedRows={"ids": selected_ids},
-        columnSize="responsiveSizeToFit",
-        dashGridOptions={
-            "rowHeight": _ROW_HEIGHT,
-            "headerHeight": _ROW_HEIGHT,
-            "rowSelection": {
-                "mode": "multiRow",
-                "checkboxes": True,
-                "headerCheckbox": True,
-                # With a filter on, the header checkbox is the runs it matches: every run of a long experiment is
-                # one click from being drawn, and so should never be what that click means.
-                "selectAll": "filtered",
-            },
-        },
-        **grid,
-    )
+    return run_grid(table_id, column_defs, rows, picked, swatches=True)
 
 
 def _render_hparam_panel(
-    rows: list[dict[str, Any]],
+    table: Component,
     hparam_keys: list[str],
     metric_keys: list[str],
     selected: list[str],
     selection: _Selection,
 ) -> Component:
     """
-    The comparison table, plus a Columns picker collapsed behind an icon so it doesn't permanently eat a row above the table it configures.
+    The runs table, with the bar of actions on the rows selected in it, plus a Columns picker collapsed behind an icon so it doesn't permanently eat a row above the table it configures.
 
     Column changes only take effect on "Apply" (not per-tick) -- computing the table involves a
     hyperparameter/metric fetch per run, so committing it once per intended change instead of once
@@ -361,7 +229,6 @@ def _render_hparam_panel(
             dmc.Group(
                 [
                     section_label("Runs"),
-                    compare_button(),
                     dmc.Popover(
                         [
                             dmc.PopoverTarget(
@@ -414,42 +281,87 @@ def _render_hparam_panel(
                 gap="xs",
                 wrap="nowrap",
             ),
-            *(
-                [
-                    dmc.Group(
-                        [
-                            dmc.Text("Runs selected in the table", size="xs", c="dimmed"),
-                            *(
-                                [dmc.Text(f"{selection.newer_hidden} newer not drawn", size="xs", c="orange")]
-                                if selection.newer_hidden
-                                else []
-                            ),
-                            dmc.Button(
-                                f"Newest {ShownRunsSettings().default_shown_runs}",
-                                id=NAVBAR_NEWEST_RUNS_ID,
-                                n_clicks=0,
-                                variant="subtle",
-                                size="compact-xs",
-                            ),
-                        ],
-                        justify="space-between",
-                        gap="xs",
-                        wrap="nowrap",
-                    )
-                ]
-                if selection.chosen
-                else []
-            ),
-            html.Div(
-                id=NAVBAR_HPARAM_TABLE_BODY_ID,
-                children=_build_hparam_datatable(
-                    rows,
-                    selected,
-                    selection.shown,
-                    table_id=NAVBAR_HPARAM_DATATABLE_ID,
+            action_bar(
+                RunListSurface.EXPERIMENT,
+                simple_action(RunListSurface.EXPERIMENT, RunAction.DRAW, "Show", icon_name=Icon.EYE),
+                simple_action(RunListSurface.EXPERIMENT, RunAction.HIDE, "Hide", icon_name=Icon.EYE_OFF),
+                simple_action(RunListSurface.EXPERIMENT, RunAction.DIFF, "Diff", icon_name=Icon.COMPARE),
+                simple_action(
+                    RunListSurface.EXPERIMENT, RunAction.DELETE, "Delete", icon_name=Icon.DELETE, color="red"
                 ),
             ),
+            html.Div(_run_head(selection), id=NAVBAR_RUN_HEAD_ID),
+            html.Div(table, id=NAVBAR_HPARAM_TABLE_BODY_ID),
         ]
+    )
+
+
+def _run_head(selection: _Selection) -> list[Component]:
+    """What is said about what is drawn: the runs logged after it, and the way back to the view's own. Nothing if the view draws its newest."""
+    if not selection.chosen:
+        return []
+    return [
+        dmc.Group(
+            [
+                dmc.Text("Drawing the runs you picked", size="xs", c="dimmed"),
+                *(
+                    [dmc.Text(f"{selection.newer_hidden} newer not drawn", size="xs", c="orange")]
+                    if selection.newer_hidden
+                    else []
+                ),
+                dmc.Button(
+                    f"Newest {ShownRunsSettings().default_shown_runs}",
+                    id=NAVBAR_NEWEST_RUNS_ID,
+                    n_clicks=0,
+                    variant="subtle",
+                    size="compact-xs",
+                ),
+            ],
+            justify="space-between",
+            gap="xs",
+            wrap="nowrap",
+        )
+    ]
+
+
+def _head_and_signature(
+    store: DataStore[...], page: page_model.BasicExperimentPage, experiment_id: int
+) -> tuple[list[Component], str]:
+    """
+    The head as `page` draws it now, and the signature the list is drawn under.
+
+    Nothing is focused: a draw or hide clears a focus. The action that changed what is drawn stores this signature, so the list's
+    own render sees nothing to draw again.
+    """
+    ref = repo.ref_of(page)
+    runs, selection, selected = _load_hparam_panel_settings(store, experiment_id, ref, None)
+    hparams = list(store.fetch_hyperparams(experiment_id, run_ids=None))
+    listed = _Listed(runs, hparams, selection, ref.view_id if isinstance(ref, repo.ExperimentRef) else None)
+    return _run_head(selection), _render_signature(experiment_id, listed, selected)
+
+
+def _head_fields(
+    store: DataStore[...], page: page_model.BasicExperimentPage, experiment_id: int
+) -> dict[str, Any]:
+    """The head and the signature `_head_and_signature` gives, as the fields of an action's `_Outputs`."""
+    head, signature = _head_and_signature(store, page, experiment_id)
+    return {"head": head, "signature": signature}
+
+
+def _drawn_rows(old_drawn: frozenset[int], new_drawn: frozenset[int], focus: int | None) -> RowUpdates:
+    """
+    The rows whose drawn state changed from `old_drawn` to `new_drawn`, and the focused row (if a focus was cleared), in place.
+
+    A row is patched, not drawn again: its eye (`_drawn`) and its link's focus (`_focused`) are the only fields that change.
+    """
+    values: dict[int, dict[str, Any]] = {
+        run: {DRAWN_FIELD: run in new_drawn} for run in old_drawn ^ new_drawn
+    }
+    if focus is not None:
+        values.setdefault(focus, {})[FOCUSED_FIELD] = False
+    return RowUpdates(
+        grid=NAVBAR_HPARAM_DATATABLE_ID,
+        rows=[RowUpdate(run_id=run, values=fields) for run, fields in sorted(values.items())],
     )
 
 
@@ -457,7 +369,10 @@ class _Selection(typing.NamedTuple):
     """The runs the charts draw, and whether a view selected them (rather than their being the newest)."""
 
     shown: frozenset[int]
+    """The runs drawn: the view's own, or just the `focus`."""
     chosen: bool
+    focus: int | None
+    """The one run drawn instead of the view's, if the page was opened on a run that is the experiment's (`Paging.focus`)."""
     newer_hidden: int
     """Runs logged after the newest run a selection draws, which that selection leaves out. Zero without a selection."""
 
@@ -472,7 +387,7 @@ def _newer_hidden(runs: list[Run], shown: frozenset[int]) -> int:
 
 
 def _load_hparam_panel_settings(
-    store: DataStore[...], experiment_id: int, ref: repo.PageRef
+    store: DataStore[...], experiment_id: int, ref: repo.PageRef, focus: int | None
 ) -> tuple[list[Run], _Selection, list[str]]:
     """
     The cheap, always-needed inputs for the navbar table: its run list and its persisted settings.
@@ -483,20 +398,20 @@ def _load_hparam_panel_settings(
     just on a real settings change.
     """
     page = repo.load_page(store, ref)
-    shown, columns = shown_run_ids(store, experiment_id, page.document), page.document.hparam_columns
+    view_shown, columns = shown_run_ids(store, experiment_id, page.document), page.document.hparam_columns
     runs = list(store.get_runs(experiment_id, limit=None, run_ids=None))
     chosen = page.document.selected_runs is not None
-    selection = _Selection(shown, chosen=chosen, newer_hidden=_newer_hidden(runs, shown) if chosen else 0)
+    focused = focus if focus in {run.id for run in runs} else None
+    selection = _Selection(
+        frozenset({focused}) if focused is not None else view_shown,
+        chosen=chosen,
+        focus=focused,
+        newer_hidden=_newer_hidden(runs, view_shown) if chosen else 0,
+    )
     return runs, selection, columns
 
 
-def _render_signature(
-    experiment_id: int,
-    hparams: list[models.HyperParams],
-    selection: _Selection,
-    selected: list[str],
-    runs: list[Run],
-) -> str:
+def _render_signature(experiment_id: int, listed: _Listed, selected: list[str]) -> str:
     """
     A digest of everything `render_navbar_hparams`'s output actually depends on, as one comparable value.
 
@@ -509,17 +424,37 @@ def _render_signature(
     `hparams` itself hasn't changed -- and so must each one's status and end time, or a run finishing would never
     redraw its row.
     """
-    run_states = [[run.id, run.status, run.ended_at.isoformat() if run.ended_at else None] for run in runs]
+    run_states = [
+        [run.id, run.status, run.ended_at.isoformat() if run.ended_at else None] for run in listed.runs
+    ]
+    selection = listed.selection
+    # Drawing a run (the eye) does not come through here: its action patches the rows that changed, rewrites the head, and
+    # stores this signature itself (`_head_and_signature`), so the list is not drawn again and keeps its filters and scroll.
     signed = [
         experiment_id,
-        [[h.run_id, h.hparams_dict] for h in sorted(hparams, key=lambda h: h.run_id)],
+        listed.view_id,
+        [[h.run_id, h.hparams_dict] for h in sorted(listed.hparams, key=lambda h: h.run_id)],
         sorted(selection.shown),
+        selection.focus,
         selection.chosen,
         selection.newer_hidden,
         selected,
         run_states,
     ]
     return hashlib.sha256(json.dumps(signed, sort_keys=True, default=str).encode()).hexdigest()
+
+
+def _picked_ids(selected_rows: list[dict[str, Any]] | dict[str, Any] | None) -> frozenset[int]:
+    """
+    The runs a grid has selected.
+
+    Its `selectedRows` is the rows once ag-grid reports them, and the `{"ids": [...]}` it was seeded with until it does.
+    """
+    if selected_rows is None:
+        return frozenset()
+    if isinstance(selected_rows, dict):
+        return frozenset(int(run_id) for run_id in selected_rows.get("ids", ()))
+    return frozenset(int(row[MetricColumn.RUN_ID]) for row in selected_rows)
 
 
 def _register_hparam_table(app: Dash) -> None:
@@ -531,14 +466,18 @@ def _register_hparam_table(app: Dash) -> None:
         Input(ids.STATE_PAGE_STORAGE, "data", allow_optional=True),
         State(NAVBAR_HPARAM_SIGNATURE_ID, "data", allow_optional=True),
         State(ids.STATE_VIEW_ID, "data", allow_optional=True),
+        State(ids.PANEL_PAGING_ID, "data", allow_optional=True),
+        State(NAVBAR_HPARAM_DATATABLE_ID, "selectedRows", allow_optional=True),
         prevent_initial_call=True,
     )
-    def render_navbar_hparams(
+    def render_navbar_hparams(  # noqa: PLR0913 -- the inputs the table is drawn from
         _revision: int | None,
         experiment_id: int | None,
         page_json: str | None,
         prev_signature: str | None,
         view_id: int | None,
+        paging_json: str | None,
+        selected_rows: list[dict[str, Any]] | dict[str, Any] | None,
     ) -> dmc.Stack:
         if experiment_id is None:
             raise PreventUpdate
@@ -554,7 +493,8 @@ def _register_hparam_table(app: Dash) -> None:
             if page_json is not None
             else repo.ExperimentRef(experiment_id, view_id)
         )
-        runs, selection, selected = _load_hparam_panel_settings(store, experiment_id, ref)
+        focus = Paging.model_validate_json(paging_json).focus if paging_json is not None else None
+        runs, selection, selected = _load_hparam_panel_settings(store, experiment_id, ref, focus)
         # `STATE_PAGE_STORAGE` changes on *every* page-settings write -- a tab switch, a panel
         # rename, a drag-reorder, none of which this table cares about -- so rebuilding on it
         # unconditionally (tearing down and remounting the ag-grid) flickered on every one of
@@ -571,19 +511,30 @@ def _register_hparam_table(app: Dash) -> None:
         # The runs and their hyperparameters are enough to detect every case this table needs to
         # react to, so the rest only runs on the ticks that actually need a re-render.
         hparams = list(store.fetch_hyperparams(experiment_id, run_ids=None))
-        signature = _render_signature(experiment_id, hparams, selection, selected, runs)
+        # The view of the freshest page, not `STATE_VIEW_ID`: after an edit that branched into a view that store is a round trip behind,
+        # and a link to a run must stay in the view the charts are in.
+        listed = _Listed(
+            runs, hparams, selection, ref.view_id if isinstance(ref, repo.ExperimentRef) else None
+        )
+        signature = _render_signature(experiment_id, listed, selected)
         if signature == prev_signature:
             raise PreventUpdate
 
-        hparam_keys, metric_keys, rows = _load_hparam_view_data(store, experiment_id, hparams, selected, runs)
+        hparam_keys, metric_keys, rows = _load_hparam_view_data(store, experiment_id, listed, selected)
 
+        # Selecting runs is work in progress, and the table is drawn again when a run starts or a choice changes under it:
+        # what was selected stays so.
+        picked = _picked_ids(selected_rows)
         return dmc.Stack(
             [
-                _render_hparam_panel(rows, hparam_keys, metric_keys, selected, selection),
-                _delete_run_modal(),
-                Store(id=DELETE_RUN_PENDING_STORE_ID),
+                _render_hparam_panel(
+                    _build_hparam_datatable(rows, selected, picked, table_id=NAVBAR_HPARAM_DATATABLE_ID),
+                    hparam_keys,
+                    metric_keys,
+                    selected,
+                    selection,
+                ),
                 Store(id=NAVBAR_HPARAM_SIGNATURE_ID, data=signature),
-                Store(id=NAVBAR_HPARAM_DRAWN_RUNS_ID, data=sorted(selection.shown)),
             ],
             gap="xs",
         )
@@ -619,146 +570,188 @@ def _register_hparam_table(app: Dash) -> None:
         )
         return page.model_dump_json()
 
-    # The table's `selectedRows` is *computed from* the runs the page currently shows (see
-    # `_build_hparam_datatable`), so ag-grid reports it on mount -- twice -- though nobody chose
-    # anything. Dash fires a callback on a dynamically-created component mounting with a value even
-    # with `prevent_initial_call=True` (that only suppresses the very first page render), and each
-    # one would be a server round trip that ends in `PreventUpdate`. So the browser compares the
-    # selection with the runs drawn first, and only a real change reaches `sync_run_selection`.
-    app.clientside_callback(
-        _RUN_SELECTION_GATE_JS.source,
-        Output(NAVBAR_RUN_SELECTION_ID, "data"),
-        Input(NAVBAR_HPARAM_DATATABLE_ID, "selectedRows", allow_optional=True),
-        State(NAVBAR_HPARAM_DRAWN_RUNS_ID, "data"),
-        prevent_initial_call=True,
-    )
-
-    @app.callback(
-        Output(ids.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
-        Output(ids.METRIC_CONTENT_ID, "children", allow_duplicate=True),
-        Output(VIEW_NOTIFY_ID, "sendNotifications", allow_duplicate=True),
-        Input(NAVBAR_RUN_SELECTION_ID, "data", allow_optional=True),
-        State(NAVBAR_HPARAM_DATATABLE_ID, "rowData", allow_optional=True),
-        State(constants.STATE_EXPERIMENT_ID, "data"),
-        State(ids.STATE_PAGE_STORAGE, "data"),
-        State(ids.PANEL_PAGING_ID, "data"),
-        prevent_initial_call=True,
-    )
-    def sync_run_selection(
-        selection: list[int] | None,
-        table_data: list[dict[str, Any]] | None,
-        experiment_id: int,
-        page_json: str,
-        paging_json: str,
-    ) -> tuple[Any, ...]:
-        if selection is None or table_data is None:
-            raise PreventUpdate
-        selected_ids = set(selection)
-
-        store = get_data_store()
-        # Still checked here: the browser compared against the runs drawn when the table was built, and
-        # the page may have changed since. `ref_of`, not `STATE_VIEW_ID` -- see `render_navbar_hparams`'s
-        # own comment on why.
-        ref = repo.ref_of(page_model.BasicExperimentPage.model_validate_json(page_json))
-        current_page = repo.load_page(store, ref)
-        listed = {row[MetricColumn.RUN_ID] for row in table_data}
-        if selected_ids == shown_run_ids(store, experiment_id, current_page.document) & listed:
-            raise PreventUpdate
-
-        cap = ShownRunsSettings().max_shown_runs
-        if len(selected_ids) > cap:
-            # Refused: the page keeps the runs it drew. The table still shows the larger selection, so the notice says so.
-            notice = {
-                "action": "show",
-                "id": f"run-cap-{len(selected_ids)}",
-                "title": "Too many runs to draw",
-                "message": f"A view draws at most {cap} runs. Deselect some to change what the charts draw.",
-                "color": "yellow",
-                "autoClose": 8_000,
-            }
-            return no_update, no_update, [notice]
-
-        page, container = edits.commit(
-            page_json,
-            paging_json,
-            # A selection replaces what a view left out before selections existed, so that is cleared with it.
-            edits.PageEdit(
-                document=page_model.DocumentSettings(selected_runs=sorted(selected_ids), excluded_runs=[]),
-            ),
-        )
-        return page.model_dump_json(), container, no_update
-
 
 def _register_newest_runs(app: Dash) -> None:
     @app.callback(
         Output(ids.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Output(ids.METRIC_CONTENT_ID, "children", allow_duplicate=True),
+        Output(row_updates_id(RunListSurface.EXPERIMENT), "data", allow_duplicate=True),
+        Output(NAVBAR_RUN_HEAD_ID, "children", allow_duplicate=True),
+        Output(NAVBAR_HPARAM_SIGNATURE_ID, "data", allow_duplicate=True),
         Input(NAVBAR_NEWEST_RUNS_ID, "n_clicks", allow_optional=True),
         State(ids.STATE_PAGE_STORAGE, "data"),
         State(ids.PANEL_PAGING_ID, "data"),
         prevent_initial_call=True,
     )
-    def show_newest_runs(n_clicks: int | None, page_json: str, paging_json: str) -> tuple[str, html.Div]:
+    def show_newest_runs(
+        n_clicks: int | None, page_json: str, paging_json: str
+    ) -> tuple[str, html.Div, dict[str, Any], list[Component], str]:
         if not n_clicks:
             raise PreventUpdate
+        store = get_data_store()
         ref = repo.ref_of(page_model.BasicExperimentPage.model_validate_json(page_json))
-        if repo.load_page(get_data_store(), ref).document.selected_runs is None:
+        before = repo.load_page(store, ref)
+        if before.document.selected_runs is None:
             raise PreventUpdate
+        experiment_id = typing.cast("int", before.experiment_id)
+        focus = Paging.model_validate_json(paging_json).focus
+        shown_before = shown_run_ids(store, experiment_id, before.document, focus)
         page, container = edits.commit(
             page_json,
             paging_json,
             edits.PageEdit(document=page_model.DocumentSettings(selected_runs=None, excluded_runs=[])),
         )
-        return page.model_dump_json(), container
+        shown_now = shown_run_ids(store, experiment_id, page.document)
+        return (
+            page.model_dump_json(),
+            container,
+            _drawn_rows(shown_before, shown_now, focus).dump(),
+            *_head_and_signature(store, page, experiment_id),
+        )
 
 
-class _CellClicked(BaseModel, frozen=True, extra="ignore"):
-    """The cell of the run table ag-grid says was clicked: its column, and its row (a run id). It says more, unread."""
+def _notice(title: str, message: str, *, color: str = "yellow") -> list[dict[str, Any]]:
+    """A notification for the page's notifications (`VIEW_NOTIFY_ID`)."""
+    return [
+        {
+            "action": "show",
+            "id": f"run-list-{title}",
+            "title": title,
+            "message": message,
+            "color": color,
+            "autoClose": 6_000,
+        }
+    ]
 
-    column: str = Field(alias="colId")
-    row: int = Field(alias="rowId")
+
+@dataclass(frozen=True)
+class _Outputs:
+    """What `act_on_runs` changes on the page: whatever it leaves out stays as it was."""
+
+    page_json: Any = no_update
+    container: Any = no_update
+    notices: Any = no_update
+    delete_opened: Any = no_update
+    delete_body: Any = no_update
+    delete_pending: Any = no_update
+    diff_runs: Any = no_update
+    diff_opened: Any = no_update
+    row_updates: Any = no_update
+    head: Any = no_update
+    signature: Any = no_update
+
+    def outputs(self) -> tuple[Any, ...]:
+        """The values, in the order of `act_on_runs`'s `Output`s."""
+        return (
+            self.page_json,
+            self.container,
+            self.notices,
+            self.delete_opened,
+            self.delete_body,
+            self.delete_pending,
+            self.diff_runs,
+            self.diff_opened,
+            self.row_updates,
+            self.head,
+            self.signature,
+        )
 
 
-def _register_delete_run(app: Dash) -> None:
+class _Act(CallbackStates):
+    """What `act_on_runs` reads: the request, and the page and paging it is made on."""
+
+    request: Annotated[dict[str, Any] | None, Input(request_store_id(RunListSurface.EXPERIMENT), "data")]
+    page_json: Annotated[str, State(ids.STATE_PAGE_STORAGE, "data")]
+    paging_json: Annotated[str, State(ids.PANEL_PAGING_ID, "data")]
+    experiment_id: Annotated[int, State(constants.STATE_EXPERIMENT_ID, "data")]
+
+
+def _draw_or_hide(store: DataStore[...], request: RunActionRequest, act: _Act) -> _Outputs:
+    """
+    Draw or hide the requested runs: the view's selection of runs, saved with it, so it is the same for everyone who opens it.
+
+    Always from the view's own runs, never from one focused run (`Paging.focus`): a link to a run is how someone looks at
+    it, and drawing another beside it is then a change to what the view draws, which leaves the focus.
+    """
+    document = repo.load_page(
+        store, repo.ref_of(page_model.BasicExperimentPage.model_validate_json(act.page_json))
+    ).document
+    paging = Paging.model_validate_json(act.paging_json)
+    asked = frozenset(
+        run.id for run in store.get_runs(act.experiment_id, limit=None, run_ids=request.run_ids)
+    )
+    drawn = shown_run_ids(store, act.experiment_id, document)
+    now = drawn | asked if request.action is RunAction.DRAW else drawn - asked
+    # What the list shows now: a focused run (`?run=`) or the view's runs, whichever is drawn.
+    shown_before = shown_run_ids(store, act.experiment_id, document, paging.focus)
+    if now == drawn and paging.focus is None:
+        raise PreventUpdate
+    cap = ShownRunsSettings().max_shown_runs
+    if len(now) > cap:
+        return _Outputs(
+            notices=_notice(
+                "Too many runs to draw", f"A view draws at most {cap} runs. Hide some to draw others."
+            )
+        )
+    page, container = edits.commit(
+        act.page_json,
+        paging.with_focus(None).model_dump_json(),
+        # A selection replaces what a view left out before selections existed, so that is cleared with it.
+        edits.PageEdit(document=page_model.DocumentSettings(selected_runs=sorted(now), excluded_runs=[])),
+    )
+    return _Outputs(
+        page_json=page.model_dump_json(),
+        container=container,
+        row_updates=_drawn_rows(shown_before, now, paging.focus).dump(),
+        **_head_fields(store, page, act.experiment_id),
+    )
+
+
+def _diff(request: RunActionRequest) -> _Outputs:
+    """Open the A/B diff on the requested runs, if there are few enough to read side by side."""
+    if len(request.run_ids) > MAX_COMPARED_RUNS:
+        return _Outputs(
+            notices=_notice("Too many runs to diff", f"The diff compares up to {MAX_COMPARED_RUNS} runs.")
+        )
+    # Newest first, as the modal has always listed the runs it was opened on: the first is the one the others are read against.
+    return _Outputs(
+        diff_runs=[str(run_id) for run_id in sorted(request.run_ids, reverse=True)], diff_opened=True
+    )
+
+
+def _register_run_actions(app: Dash) -> None:
     @app.callback(
-        Output(DELETE_RUN_MODAL_ID, "opened", allow_duplicate=True),
-        Output(DELETE_RUN_PENDING_STORE_ID, "data"),
-        Input(NAVBAR_HPARAM_DATATABLE_ID, "cellClicked", allow_optional=True),
+        Output(ids.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
+        Output(ids.METRIC_CONTENT_ID, "children", allow_duplicate=True),
+        Output(VIEW_NOTIFY_ID, "sendNotifications", allow_duplicate=True),
+        *delete_outputs(RunListSurface.EXPERIMENT),
+        Output(COMPARE_RUNS_ID, "value", allow_duplicate=True),
+        Output(COMPARE_MODAL_ID, "opened", allow_duplicate=True),
+        Output(row_updates_id(RunListSurface.EXPERIMENT), "data", allow_duplicate=True),
+        Output(NAVBAR_RUN_HEAD_ID, "children", allow_duplicate=True),
+        Output(NAVBAR_HPARAM_SIGNATURE_ID, "data", allow_duplicate=True),
+        _Act.states(),
         prevent_initial_call=True,
     )
-    def open_delete_run_modal(cell_clicked: dict[str, Any] | None) -> tuple[bool, int]:
-        if not cell_clicked:
+    def act_on_runs(
+        **states: Any,  # noqa: ANN401 -- validated on the first line
+    ) -> tuple[Any, ...]:
+        act = _Act.model_validate(states)
+        if act.request is None:
             raise PreventUpdate
-        clicked = _CellClicked.model_validate(cell_clicked)
-        if clicked.column != _DELETE_COLUMN_ID:
-            raise PreventUpdate
-        return True, clicked.row
+        request = RunActionRequest.model_validate(act.request)
+        match request.action:
+            case RunAction.DRAW | RunAction.HIDE:
+                return _draw_or_hide(get_data_store(), request, act).outputs()
+            case RunAction.DIFF:
+                return _diff(request).outputs()
+            case RunAction.DELETE:
+                asked = ask_to_delete(request.run_ids)
+                return _Outputs(
+                    delete_opened=asked.opened, delete_body=asked.body, delete_pending=asked.pending
+                ).outputs()
 
-    @app.callback(
-        Output(DELETE_RUN_MODAL_ID, "opened", allow_duplicate=True),
-        Input(DELETE_RUN_CANCEL_ID, "n_clicks"),
-        prevent_initial_call=True,
-    )
-    def cancel_delete_run(n_clicks: int) -> bool:
-        if not n_clicks:
-            raise PreventUpdate
-        return False
-
-    @app.callback(
-        Output(constants.LOCATION_ID, "href", allow_duplicate=True),
-        Output(constants.LOCATION_ID, "refresh", allow_duplicate=True),
-        Output(DELETE_RUN_MODAL_ID, "opened", allow_duplicate=True),
-        Input(DELETE_RUN_CONFIRM_ID, "n_clicks"),
-        State(DELETE_RUN_PENDING_STORE_ID, "data"),
-        State(constants.STATE_EXPERIMENT_ID, "data"),
-        prevent_initial_call=True,
-    )
-    def confirm_delete_run(n_clicks: int, run_id: int | None, experiment_id: int) -> tuple[str, bool, bool]:
-        if not n_clicks or run_id is None:
-            raise PreventUpdate
-        store = get_data_store()
-        store.delete_run(run_id, get_current_user())
-        return relative_path(f"/experiment/{experiment_id}"), True, False
+    register_delete(app, RunListSurface.EXPERIMENT, notify=VIEW_NOTIFY_ID)
 
 
 def _column_options(
@@ -804,5 +797,7 @@ def _register_column_search(app: Dash) -> None:
 def register_runs_table_callbacks(app: Dash) -> None:
     _register_hparam_table(app)
     _register_newest_runs(app)
-    _register_delete_run(app)
+    register_run_list(app, RunListSurface.EXPERIMENT, NAVBAR_HPARAM_DATATABLE_ID)
+    register_row_updates(app, RunListSurface.EXPERIMENT)
+    _register_run_actions(app)
     _register_column_search(app)

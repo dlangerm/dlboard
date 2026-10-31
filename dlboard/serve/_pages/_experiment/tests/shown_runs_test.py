@@ -103,7 +103,7 @@ def test_the_charts_of_an_experiment_of_many_runs_are_drawn_from_only_the_newest
     panel = PanelInstance[Any, Any](
         name="p", charts=[ChartInstance(chart_type="line", parameters={"column": "loss", "x_axis": "step"})]
     )
-    page = store.get_or_create_page(page_model.BasicExperimentPage, experiment_id=experiment_id)
+    page = repo.load_page(store, repo.ExperimentRef(experiment_id, None))
     store.update_page(page.model_copy(update={"panels": [panel]}))
     loaded = repo.load_page(store, repo.ExperimentRef(experiment_id, None))
     paging = panel_view.resolved_paging(loaded, Paging().viewing(tab="", open_panels=["p"]), focus_chart=None)
@@ -164,3 +164,24 @@ def test_a_comparison_whose_members_are_all_hidden_draws_nothing_and_an_experime
 
     assert page_scope(store, comparison, frozenset({run.id})) == {}
     assert page_scope(store, nothing_selected) == {experiment_id: frozenset()}
+
+
+def test_a_focus_draws_just_that_run_but_only_if_it_is_a_live_run_of_the_experiment(
+    store: SQLLiteStore, experiment_id: int, admin: models.User
+) -> None:
+    runs = _runs(store, experiment_id, 3)
+    project_id = store.get_experiment(experiment_id).project_id  # pyrefly: ignore [missing-attribute]
+    elsewhere = store.create_run(
+        models.NewRun(experiment_id=store.create_experiment(models.NewExperiment(project_id=project_id)).id)
+    )
+    store.delete_run(runs[0].id, admin)
+    page = repo.load_page(store, repo.ExperimentRef(experiment_id, None))
+    own = frozenset({runs[1].id, runs[2].id})
+
+    def drawn(focus: int | None) -> frozenset[int]:
+        return shown_run_ids(store, experiment_id, page.document, focus)
+
+    assert drawn(runs[1].id) == {runs[1].id}
+    assert page_scope(store, page, focus=runs[2].id) == {experiment_id: {runs[2].id}}
+    # A link to a run that is another experiment's, deleted, or not there at all draws what the view does.
+    assert [drawn(None), drawn(elsewhere.id), drawn(runs[0].id), drawn(999_999)] == [own] * 4

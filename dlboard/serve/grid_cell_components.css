@@ -84,3 +84,48 @@
 .dl-fixed-row .ag-selection-checkbox {
   visibility: hidden;
 }
+
+/* `DlboardEye`: always there, unlike the per-row icons that wait for the pointer. */
+.dl-eye {
+  cursor: pointer;
+  font-size: 1rem;
+  color: var(--mantine-color-dimmed);
+}
+
+.dl-eye.dl-icon-eye {
+  color: var(--mantine-color-text);
+}
+
+.ag-root .ag-cell.dl-eye-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+/* `DlboardRunLink`: a name that reads as a name, underlined only when it is about to be followed. */
+.dl-run-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.dl-run-link:hover {
+  text-decoration: underline;
+}
+
+/* Whose a run is, after its name, in a list of runs of several experiments. */
+.dl-run-experiment {
+  margin-left: 0.4rem;
+  color: var(--mantine-color-dimmed);
+  font-size: var(--mantine-font-size-xs);
+}
+
+/* The run the page was opened on (`?run=`), in the list that holds it. */
+.dl-run-focused {
+  background-color: var(--mantine-color-blue-light);
+}
+
+/* The bar of actions on the selected rows, above a run list. */
+.dl-run-list-bar {
+  padding-bottom: var(--mantine-spacing-xs);
+}

@@ -45,5 +45,4 @@ def test_a_second_app_in_the_process_still_draws_the_navbar_and_breadcrumbs(
             dispose_stores(app)
 
     for outputs in served:
-        assert f"{constants.NAVBAR_CONTENT_ID}.children" in outputs
         assert f"{constants.PAGE_BREADCRUMB_ID}.children" in outputs

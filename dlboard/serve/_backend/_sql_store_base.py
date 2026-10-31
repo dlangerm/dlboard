@@ -2514,6 +2514,31 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         """Soft-delete a run and cascade to its artifacts. Requires `Scope.RUN_DELETE`."""
         self._soft_delete(models.Run, run_id, actor, entity_type=models.EntityType.RUN)
 
+    def delete_runs(self, run_ids: frozenset[int], actor: models.User) -> None:
+        """
+        Soft-delete each of `run_ids` as `delete_run` does.
+
+        Every id is checked first, so one that does not exist or is already deleted refuses the whole call before any run is
+        touched. The deletes themselves are one transaction per run, each with its own audit entry, so a failure part-way
+        leaves the runs before it deleted.
+
+        Requires `Scope.RUN_DELETE`.
+        """
+        runs = self._tables[models.Run]
+        live = {
+            run_id
+            for batch in _in_batches(run_ids)
+            for (run_id,) in self._execute(
+                sa.select(runs.c.id).where(runs.c.id.in_(batch), runs.c.deleted_at.is_(None))
+            )
+        }
+        if gone := run_ids - live:
+            msg = f"Run {min(gone)} does not exist or is already deleted"
+            raise ValueError(msg)
+        # One by one, each in its own transaction: every run is audited, restored and purged on its own.
+        for run_id in sorted(run_ids):
+            self.delete_run(run_id, actor)
+
     def restore_run(self, run_id: int, actor: models.User) -> None:
         """Restore a soft-deleted run and every artifact deleted with it. Requires `Scope.RESTORE`."""
         self._restore(models.Run, run_id, actor, entity_type=models.EntityType.RUN)

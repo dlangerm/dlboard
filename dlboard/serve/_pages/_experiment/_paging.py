@@ -7,7 +7,7 @@ each panel, one page of its charts. Both levels take a fuzzy filter -- panels by
 metric or artifact keys they show -- so finding one doesn't mean paging through the rest.
 
 `Paging` is everything about "which slice is showing" -- which tab, which panels are open, and which page
-of panels and charts: it is the page URL's query (`?tab=`, `?open=`, `?panels_q=`, `?panels_page=`, `?charts=`,
+of panels and charts: it is the page URL's query (`?tab=`, `?open=`, `?panels_q=`, `?panels_page=`, `?charts=`, `?run=`,
 see `Paging.query`) plus the viewer's page sizes (a cookie, since the server needs them for the very first
 render). Nothing here is ever saved to a view, so how one viewer browses a page never changes it for another.
 """
@@ -123,6 +123,14 @@ class Paging(BaseModel, frozen=True, extra="ignore", populate_by_name=True):
     )
     """The panels open, by name; `None` until the viewer opens or closes one, which opens just the first."""
 
+    focus: int | None = Field(default=None, ge=1, alias="run")
+    """
+    The one run the charts draw instead of the view's, from a link to a run (`?run=`); `None` draws the view's own.
+
+    Viewer state like the tab: it saves nothing and never makes a copy of a view, so following a link to a run changes
+    what is drawn for you and no one else. A run that is not a live run of the experiment draws the view's as usual.
+    """
+
     @classmethod
     def from_request(cls, query: Mapping[str, str], sizes_cookie: str | None) -> Paging:
         """Parse a page request; a malformed link just shows the first page rather than breaking the page."""
@@ -149,6 +157,7 @@ class Paging(BaseModel, frozen=True, extra="ignore", populate_by_name=True):
             "charts": _CHARTS_ADAPTER.dump_json(self.charts, exclude_defaults=True).decode()
             if self.charts
             else "",
+            "run": str(self.focus) if self.focus else "",
         }
 
     def chart_paging(self, panel_name: str) -> ChartPaging:
@@ -189,6 +198,10 @@ class Paging(BaseModel, frozen=True, extra="ignore", populate_by_name=True):
                 "open_panels": None if self.opened(panels) == default_open else self.open_panels,
             }
         )
+
+    def with_focus(self, run_id: int | None) -> Paging:
+        """A copy drawing just the run `run_id`, or the view's own runs for `None`."""
+        return self.model_copy(update={"focus": run_id})
 
     def with_panels(self, *, q: str | None = None, page: int | None = None) -> Paging:
         """A copy with the panel filter and/or page replaced; a new filter goes back to the first page."""

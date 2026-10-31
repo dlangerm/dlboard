@@ -6,7 +6,7 @@
 // biome-ignore lint/correctness/noUnusedVariables: read as the body of a Dash clientside_callback
 function navbarState(pathname, collapsed, width) {
     const bounds = window.dlNavbarWidth;
-    const hasContent = /^\/(project|experiment)\//.test(pathname || "");
+    const hasContent = /^\/experiment\//.test(pathname || "");
     const hidden = !hasContent || Boolean(collapsed);
     return [
         {

@@ -121,6 +121,7 @@ def _fetch_open_panel_dataframes(
     experiment_id: int,
     page: page_model.BasicExperimentPage,
     chart_ids: list[chart_view.ChartID],
+    focus: int | None,
 ) -> tuple[dict[str, panel_data.PanelData], bool]:
     """
     Fetch the dataframe of each panel with charts on screen, for just those charts -- once per panel.
@@ -130,7 +131,7 @@ def _fetch_open_panel_dataframes(
     panels are open. And not for the panel's other charts: only one page of them is on screen (see
     `Paging`), so a tick costs what that page does, however many charts the panel holds.
     """
-    run_ids = shown_run_ids(store, experiment_id, page.document)
+    run_ids = shown_run_ids(store, experiment_id, page.document, focus)
     panels_by_name = {p.name: p for p in page.panels}
     mounted: dict[str, set[int]] = {}
     for chart_id in chart_ids:
@@ -252,7 +253,10 @@ def register_live_update_callbacks(app: Dash) -> None:
 
         page = repo.load_page(store, repo.ExperimentRef(experiment_id, polled.view_id))
         panels_by_name = {p.name: p for p in page.panels}
-        dataframes, fetch_ok = _fetch_open_panel_dataframes(store, experiment_id, page, chart_ids)
+        paging = Paging.model_validate_json(polled.paging_json)
+        dataframes, fetch_ok = _fetch_open_panel_dataframes(
+            store, experiment_id, page, chart_ids, paging.focus
+        )
         shown = {
             (i.panel, i.index): fingerprint
             for i, fingerprint in zip(polled.fingerprint_ids, polled.fingerprints, strict=True)
@@ -262,7 +266,7 @@ def register_live_update_callbacks(app: Dash) -> None:
             panels_by_name,
             dataframes,
             shown,
-            Paging.model_validate_json(polled.paging_json).sizes.charts,
+            paging.sizes.charts,
         )
         return (
             contents,

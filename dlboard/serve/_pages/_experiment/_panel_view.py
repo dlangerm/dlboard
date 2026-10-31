@@ -766,7 +766,9 @@ def resolved_paging(page: BasicExperimentPage, paging: Paging, *, focus_chart: s
     return clamped_paging(page, paging.shown_tab(page.panels), paging).normalized(page.panels)
 
 
-def accordion_view(frames: PanelFrames, page: BasicExperimentPage, paging: Paging) -> html.Div:
+def accordion_view(
+    frames: PanelFrames, page: BasicExperimentPage, paging: Paging, banner: Component | None = None
+) -> html.Div:
     """
     The full accordion/tabs view of `page` (the modals it opens belong to their features, rendered once).
 
@@ -775,13 +777,14 @@ def accordion_view(frames: PanelFrames, page: BasicExperimentPage, paging: Pagin
 
     `paging` is which tab, open panels and page of panels to show, as `resolved_paging` left it, and `frames`
     the data of the open panels on it (`panel_frames`). The store this emits (`PANEL_PAGING_ID`) holds that
-    paging.
+    paging. A `banner` (what a focused run says) is shown above the panels.
     """
     _log.debug("rendering chart for experiment %s", page.experiment_id)
     tab = paging.shown_tab(page.panels)
 
     return html.Div(
         [
+            banner,
             _page_view(frames, page, paging),
             Store(id=LOADED_PANELS_STORE_ID, data=visible_open_panels(page.panels, tab, paging)),
             Store(id=PANEL_PAGING_ID, data=paging.model_dump_json()),

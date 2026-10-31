@@ -22,7 +22,6 @@ STATE_EXPERIMENT_ID: StoreId[AppShell] = StoreId("experiment-id-state")
 
 MANTINE_PROVIDER_ID: Final = "mantine-provider"
 NAVBAR_ID: Final = "navbar"
-NAVBAR_CONTENT_ID = "navbar-content"
 NAVBAR_COLLAPSED_STORE_ID = "navbar-collapsed-store"
 NAVBAR_COLLAPSE_TOGGLE_ID = "navbar-collapse-toggle"
 NAVBAR_WIDTH_STORE_ID: Final = "navbar-width-store"

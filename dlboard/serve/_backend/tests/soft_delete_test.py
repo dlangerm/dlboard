@@ -299,3 +299,22 @@ def test_fetch_metrics_excludes_metrics_from_a_deleted_run(
 
     fetched = store.fetch_metrics(experiment_id, run_ids=None)
     assert set(fetched.run_id) == {kept_run.id}
+
+
+def test_delete_runs_refuses_a_bad_id_before_deleting_any(store: SQLLiteStore, admin: models.User) -> None:
+    project_id, experiment_id, first, artifact_id = create_entity_chain(store, artifact=True)
+    second = store.create_run(models.NewRun(experiment_id=experiment_id)).id
+    kept = store.create_run(models.NewRun(experiment_id=experiment_id)).id
+
+    with pytest.raises(ValueError, match="does not exist or is already deleted"):
+        store.delete_runs(frozenset({first, second, 999_999}), admin)
+    assert {run.id for run in store.get_runs(experiment_id, run_ids=None)} == {first, second, kept}
+
+    store.delete_runs(frozenset({first, second}), admin)
+
+    assert {run.id for run in store.get_runs(experiment_id, run_ids=None)} == {kept}
+    assert {run.id for run in store.list_deleted_runs()} == {first, second}
+    assert artifact_id in {a.id for a in store.list_deleted_artifacts()}
+    assert experiment_id in {e.id for e in store.get_experiments(project_id)}
+    with pytest.raises(ValueError, match="does not exist or is already deleted"):
+        store.delete_runs(frozenset({first}), admin)

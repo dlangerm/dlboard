@@ -142,3 +142,40 @@ window.dashAgGridComponentFunctions.DlboardKeyPicker = React.forwardRef((props, 
                   ),
     );
 });
+
+// An eye for a run: open if the run is drawn in the charts (`value`), closed if not. A click hands the request to draw it, or to hide
+// it if it is drawn, to `setData`, which the grid reports as `cellRendererData` for the page to act on.
+window.dashAgGridComponentFunctions.DlboardEye = (props) => {
+    const drawn = Boolean(props.value);
+    return h("span", {
+        className: `dl-icon dl-eye ${drawn ? "dl-icon-eye" : "dl-icon-eye-off"}`,
+        role: "button",
+        "aria-label": drawn ? "Hide this run" : "Show this run",
+        onClick: () => props.setData({ action: drawn ? "hide" : "draw", run_ids: [props.data.run_id] }),
+    });
+};
+
+// A run's name as a link to the run (`_href` of its row): the experiment page with just that run drawn. A plain click goes
+// there without a page load, as the app's own links do; a click with a modifier key is left to the browser (a new tab).
+window.dashAgGridComponentFunctions.DlboardRunLink = (props) => {
+    // A list of runs of several experiments (`_experiment` of a row) says whose each is after its name, dimmed.
+    const experiment = props.data._experiment;
+    return h(
+        "a",
+        {
+            href: props.data._href,
+            className: "dl-run-link",
+            title: experiment ? `${props.value} \u00b7 ${experiment}` : props.value,
+            onClick: (event) => {
+                if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey) {
+                    return;
+                }
+                event.preventDefault();
+                window.history.pushState({}, "", props.data._href);
+                window.dispatchEvent(new CustomEvent("_dashprivate_pushstate"));
+            },
+        },
+        props.value,
+        experiment ? h("span", { className: "dl-run-experiment" }, experiment) : null,
+    );
+};

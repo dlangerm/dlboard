@@ -572,6 +572,14 @@ class DataStore(typing.Protocol[_P]):
         """Soft-delete a run and cascade to its artifacts. Requires `Scope.RUN_DELETE`."""
         ...
 
+    def delete_runs(self, run_ids: frozenset[int], actor: models.User) -> None:
+        """
+        Soft-delete each of `run_ids` as `delete_run` does. Requires `Scope.RUN_DELETE`.
+
+        Every id is checked before any run is deleted, so a bad one refuses the call with nothing deleted.
+        """
+        ...
+
     def restore_run(self, run_id: int, actor: models.User) -> None:
         """Restore a soft-deleted run and everything deleted with it. Requires `Scope.RESTORE`."""
         ...
