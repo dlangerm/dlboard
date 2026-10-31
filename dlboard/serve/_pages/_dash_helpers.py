@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import dash_mantine_components as dmc
@@ -11,11 +12,13 @@ from dash.exceptions import PreventUpdate
 from pydantic import BaseModel
 
 from dlboard import models
-from dlboard.serve import Icon, icon
+from dlboard.serve import ClientsideScript, Icon, icon
+from dlboard.serve import _constants as constants
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from dash import Dash
     from dash.development.base_component import Component
 
     from dlboard.serve._component_ids import ButtonId
@@ -148,6 +151,25 @@ def require_triggered_id[M: BaseModel](shape: type[M]) -> M:
     if not ctx.triggered_id or not ctx.triggered[0]["value"]:  # pyrefly: ignore [unsupported-operation]
         raise PreventUpdate
     return shape.model_validate(ctx.triggered_id)
+
+
+_NAVIGATE_JS = ClientsideScript(Path(__file__).with_name("navigate.js"))
+
+
+def register_navigate(app: Dash, destination: str) -> None:
+    """
+    Go to the address a server callback writes to the `dcc.Store` `destination`, as an in-app link does.
+
+    A server callback with the app shell's `location` among its outputs is called as the page it listens to is drawn,
+    though nothing was asked: its inputs are new, and its output is not in the page. Writing a store in the page instead,
+    and going from there in the browser, is not. The id must be in the layout the page returns.
+    """
+    app.clientside_callback(
+        _NAVIGATE_JS.source,
+        Output(constants.LOCATION_ID, "href", allow_duplicate=True),  # always there, never written
+        Input(destination, "data"),
+        prevent_initial_call=True,
+    )
 
 
 def busy_while_running[P](button: ButtonId[P]) -> list[tuple[Output, bool, bool]]:

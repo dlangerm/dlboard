@@ -37,3 +37,19 @@ def test_a_pin_names_its_colour_in_its_argument() -> None:
     request = RunActionRequest.model_validate({"action": "pin", "run_ids": [1], "color": "red", "at": 1})
 
     assert request.color is PinColor.RED
+
+
+def test_comparing_the_runs_pinned_in_a_colour_names_a_colour_and_no_runs() -> None:
+    request = RunActionRequest.model_validate(
+        {"action": "compare_pins", "run_ids": [], "color": "red", "at": 1}
+    )
+
+    assert (request.color, request.run_ids) == (PinColor.RED, frozenset())
+
+
+def test_adding_runs_to_a_comparison_names_it() -> None:
+    request = RunActionRequest.model_validate(
+        {"action": "compare_add", "run_ids": [1, 2], "comparison_id": 12, "at": 1}
+    )
+
+    assert request.comparison_id == 12

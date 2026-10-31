@@ -66,11 +66,12 @@ def test_the_list_is_drawn_again_when_what_is_hidden_changes_and_not_when_nothin
     runs = store.comparison_runs(page.id)
 
     def signature(hidden: frozenset[int]) -> str:
-        return members._signature(members._rows(store, runs, page, hidden, {}), can_edit=True)
+        return members._signature(members._rows(store, runs, page, hidden, {}), [], can_edit=True)
 
     assert signature(frozenset()) == signature(frozenset())
     assert signature(frozenset()) != signature(frozenset({sweep.id}))
-    assert members._signature([], can_edit=True) != members._signature([], can_edit=False)
+    assert members._signature([], [], can_edit=True) != members._signature([], [], can_edit=False)
+    assert members._signature([], [[1, "a"]], can_edit=True) != members._signature([], [], can_edit=True)
 
 
 def test_a_metric_column_holds_the_latest_value_of_each_members_run(store: SQLLiteStore) -> None:

@@ -26,8 +26,9 @@ from dlboard.models import PinColor
 from dlboard.serve import ClientsideScript, Icon, get_current_user, get_data_store, icon
 from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import DivId, StoreId, ValueId
-from dlboard.serve._pages._dash_helpers import CallbackStates, section_label
+from dlboard.serve._pages._dash_helpers import CallbackStates, register_navigate, section_label
 from dlboard.serve._pages._dataframe_helpers import experiment_display_name
+from dlboard.serve._pages._experiment._compare import compare, compare_menu, compare_pins_menu
 from dlboard.serve._pages._experiment._focus import experiment_href
 from dlboard.serve._pages._pins._pin_menus import pin_menus
 from dlboard.serve._pages._pins._pin_view import pin_cells, pin_glyph
@@ -48,6 +49,7 @@ from dlboard.serve._pages._run_list._delete import (
     delete_shells,
     register_delete,
 )
+from dlboard.serve._pages._run_list._ids import navigate_id
 from dlboard.serve._pages._run_list._rows import register_row_updates, row_update_shells, row_updates_id
 from dlboard.serve._pages._run_list._table import run_grid
 
@@ -278,9 +280,11 @@ def render_pinned_runs(store: DataStore[...], project_id: int, flt: PinFilter) -
                 ],
                 open=bool(flt.pinned_by or flt.experiment is not None or flt.q),
             ),
+            compare_pins_menu(RunListSurface.PROJECT, counts),
             action_bar(
                 RunListSurface.PROJECT,
                 *pin_menus(RunListSurface.PROJECT),
+                compare_menu(RunListSurface.PROJECT, store.list_comparisons(project_id, me, editable=True)),
                 simple_action(
                     RunListSurface.PROJECT, RunAction.DELETE, "Delete", icon_name=Icon.DELETE, color="red"
                 ),
@@ -299,6 +303,7 @@ def pinned_runs_shells(project_id: int) -> list[Component]:
     return [
         Store(id=PINNED_PROJECT_ID, data=project_id),
         Store(id=request_store_id(RunListSurface.PROJECT)),
+        Store(id=navigate_id(RunListSurface.PROJECT)),
         *row_update_shells(RunListSurface.PROJECT),
         *delete_shells(RunListSurface.PROJECT),
         dmc.NotificationContainer(id=PINNED_NOTIFY_ID),
@@ -322,12 +327,40 @@ class _Act(CallbackStates):
     request: Annotated[
         dict[str, Any] | None, Input(request_store_id(RunListSurface.PROJECT), "data", allow_optional=True)
     ]
+    project_id: Annotated[int | None, State(PINNED_PROJECT_ID, "data", allow_optional=True)]
+
+
+def _act(request: RunActionRequest, act: _Act) -> tuple[Any, ...]:
+    """What to change on the page for `request`, in the order of `act_on_pinned_runs`'s `Output`s."""
+    match request.action:
+        case RunAction.PIN | RunAction.UNPIN:
+            pinned = pin_or_unpin(request, PINNED_GRID_ID)
+            return pinned.rows, pinned.notice, no_update, no_update, no_update, no_update
+        case RunAction.DELETE:
+            asked = ask_to_delete(request.run_ids)
+            return no_update, no_update, asked.opened, asked.body, asked.pending, no_update
+        case RunAction.COMPARE_NEW | RunAction.COMPARE_ADD | RunAction.COMPARE_PINS:
+            if act.project_id is None:
+                raise PreventUpdate
+            compared = compare(request, project_id=act.project_id, layout=None)
+            return (
+                no_update,
+                no_update if compared.notice is None else compared.notice,
+                no_update,
+                no_update,
+                no_update,
+                no_update if compared.destination is None else compared.destination,
+            )
+        case RunAction.DRAW | RunAction.HIDE | RunAction.DIFF | RunAction.REMOVE:
+            # The project page draws nothing and holds no comparison, so its list offers none of these.
+            raise PreventUpdate
 
 
 def register(app: Dash) -> None:
     """Draw the sidebar for the project page, redraw its list as a filter or the page changes, and act on the selected runs."""
     register_run_list(app, RunListSurface.PROJECT, PINNED_GRID_ID)
     register_row_updates(app, RunListSurface.PROJECT)
+    register_navigate(app, navigate_id(RunListSurface.PROJECT))
 
     @app.callback(
         Output(constants.NAVBAR_RUN_LIST_ID, "children", allow_duplicate=True),
@@ -388,6 +421,7 @@ def register(app: Dash) -> None:
         Output(row_updates_id(RunListSurface.PROJECT), "data", allow_duplicate=True),
         Output(PINNED_NOTIFY_ID, "sendNotifications", allow_duplicate=True),
         *delete_outputs(RunListSurface.PROJECT),
+        Output(navigate_id(RunListSurface.PROJECT), "data"),
         _Act.states(),
         prevent_initial_call=True,
     )
@@ -397,16 +431,6 @@ def register(app: Dash) -> None:
         act = _Act.model_validate(states)
         if act.request is None:
             raise PreventUpdate
-        request = RunActionRequest.model_validate(act.request)
-        match request.action:
-            case RunAction.PIN | RunAction.UNPIN:
-                pinned = pin_or_unpin(request, PINNED_GRID_ID)
-                return pinned.rows, pinned.notice, no_update, no_update, no_update
-            case RunAction.DELETE:
-                asked = ask_to_delete(request.run_ids)
-                return no_update, no_update, asked.opened, asked.body, asked.pending
-            case RunAction.DRAW | RunAction.HIDE | RunAction.DIFF | RunAction.REMOVE:
-                # The project page draws nothing and holds no comparison, so its list offers none of these.
-                raise PreventUpdate
+        return _act(RunActionRequest.model_validate(act.request), act)
 
     register_delete(app, RunListSurface.PROJECT, notify=PINNED_NOTIFY_ID)

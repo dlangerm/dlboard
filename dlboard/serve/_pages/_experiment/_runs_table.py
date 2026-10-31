@@ -30,6 +30,7 @@ from dlboard.serve._component_ids import ButtonId, StoreId, ValueId
 from dlboard.serve._grid import column_def, infer_column_dtype
 from dlboard.serve._pages._dash_helpers import (
     CallbackStates,
+    register_navigate,
     section_label,
     tooltipped_action_icon,
 )
@@ -42,6 +43,7 @@ from dlboard.serve._pages._experiment._column_catalog import (
     first_matches,
     summary_hparam_keys,
 )
+from dlboard.serve._pages._experiment._compare import compare, compare_menu, compare_pins_menu
 from dlboard.serve._pages._experiment._focus import experiment_href
 from dlboard.serve._pages._experiment._live_updates import STATE_LAST_KNOWN_REVISION
 from dlboard.serve._pages._experiment._paging import Paging
@@ -80,6 +82,7 @@ from dlboard.serve._pages._run_list._delete import (
     delete_shells,
     register_delete,
 )
+from dlboard.serve._pages._run_list._ids import navigate_id
 from dlboard.serve._pages._run_list._rows import (
     RowUpdate,
     RowUpdates,
@@ -194,6 +197,7 @@ def run_table_shells() -> list[Component]:
     """
     return [
         Store(id=request_store_id(RunListSurface.EXPERIMENT)),
+        Store(id=navigate_id(RunListSurface.EXPERIMENT)),
         *row_update_shells(RunListSurface.EXPERIMENT),
         *delete_shells(RunListSurface.EXPERIMENT),
     ]
@@ -290,29 +294,34 @@ def _render_hparam_panel(
                 gap="xs",
                 wrap="nowrap",
             ),
-            action_bar(
-                RunListSurface.EXPERIMENT,
-                simple_action(RunListSurface.EXPERIMENT, RunAction.DRAW, "Show", icon_name=Icon.EYE),
-                simple_action(RunListSurface.EXPERIMENT, RunAction.HIDE, "Hide", icon_name=Icon.EYE_OFF),
-                simple_action(RunListSurface.EXPERIMENT, RunAction.DIFF, "Diff", icon_name=Icon.COMPARE),
-                *pin_menus(RunListSurface.EXPERIMENT),
-                simple_action(
-                    RunListSurface.EXPERIMENT, RunAction.DELETE, "Delete", icon_name=Icon.DELETE, color="red"
-                ),
-            ),
             html.Div(head, id=NAVBAR_RUN_HEAD_ID),
             html.Div(table, id=NAVBAR_HPARAM_TABLE_BODY_ID),
         ]
     )
 
 
-def _run_head(selection: _Selection, pin_chips: Sequence[Component] = ()) -> list[Component]:
-    """
-    What sits above the table and changes with what is drawn or pinned.
+def _project_of(store: DataStore[...], experiment_id: int) -> int:
+    """The project an experiment is of."""
+    experiment = store.get_experiment(experiment_id)
+    if experiment is None:
+        msg = f"Experiment {experiment_id} is gone, or is not yours to see"
+        raise LookupError(msg)
+    return experiment.project_id
 
-    The runs logged after the drawn ones, the way back to the view's own, and the pin chips that find a pinned run. Redrawn by
-    the actions that change any of it, in place of the list.
+
+def _run_head(
+    store: DataStore[...], experiment_id: int, selection: _Selection, chips: Sequence[str]
+) -> list[Component]:
     """
+    What sits above the table and changes with what is drawn, compared or pinned.
+
+    The bar of actions on the selected runs, the menu that compares the runs pinned in a colour, the runs logged after the
+    drawn ones with the way back to the view's own, and the pin chips that find a pinned run. Redrawn by the actions that
+    change any of it, in place of the list. Read after the list's signature check, so a list nobody has changed reads none
+    of the comparisons or pin counts.
+    """
+    surface = RunListSurface.EXPERIMENT
+    project_id = _project_of(store, experiment_id)
     drawn: list[Component] = (
         [
             dmc.Group(
@@ -339,7 +348,21 @@ def _run_head(selection: _Selection, pin_chips: Sequence[Component] = ()) -> lis
         if selection.chosen
         else []
     )
-    return [*drawn, *pin_chips]
+    compare_pins = compare_pins_menu(surface, store.pin_counts(project_id))
+    return [
+        action_bar(
+            surface,
+            simple_action(surface, RunAction.DRAW, "Show", icon_name=Icon.EYE),
+            simple_action(surface, RunAction.HIDE, "Hide", icon_name=Icon.EYE_OFF),
+            simple_action(surface, RunAction.DIFF, "Diff", icon_name=Icon.COMPARE),
+            *pin_menus(surface),
+            compare_menu(surface, store.list_comparisons(project_id, get_current_user().id, editable=True)),
+            simple_action(surface, RunAction.DELETE, "Delete", icon_name=Icon.DELETE, color="red"),
+        ),
+        *([compare_pins] if compare_pins is not None else []),
+        *drawn,
+        *_pin_chips(store, experiment_id, chips),
+    ]
 
 
 def _pin_chips(store: DataStore[...], experiment_id: int, chips: Sequence[str]) -> list[Component]:
@@ -367,7 +390,7 @@ def _head_and_signature(
     runs, selection, selected = _load_hparam_panel_settings(store, experiment_id, ref, None)
     hparams = list(store.fetch_hyperparams(experiment_id, run_ids=None))
     listed = _Listed(runs, hparams, selection, ref.view_id if isinstance(ref, repo.ExperimentRef) else None)
-    return _run_head(selection, _pin_chips(store, experiment_id, chips)), _render_signature(
+    return _run_head(store, experiment_id, selection, chips), _render_signature(
         experiment_id, listed, selected
     )
 
@@ -568,7 +591,7 @@ def _register_hparam_table(app: Dash) -> None:
                     hparam_keys,
                     metric_keys,
                     selected,
-                    _run_head(selection, _pin_chips(store, experiment_id, chips or [])),
+                    _run_head(store, experiment_id, selection, chips or []),
                 ),
                 Store(id=NAVBAR_HPARAM_SIGNATURE_ID, data=signature),
             ],
@@ -676,6 +699,7 @@ class _Outputs:
     row_updates: Any = no_update
     head: Any = no_update
     signature: Any = no_update
+    destination: Any = no_update
 
     def outputs(self) -> tuple[Any, ...]:
         """The values, in the order of `act_on_runs`'s `Output`s."""
@@ -691,6 +715,7 @@ class _Outputs:
             self.row_updates,
             self.head,
             self.signature,
+            self.destination,
         )
 
 
@@ -747,6 +772,19 @@ def _draw_or_hide(store: DataStore[...], request: RunActionRequest, act: _Act) -
     )
 
 
+def _compare(request: RunActionRequest, act: _Act) -> _Outputs:
+    """Start a comparison of the requested runs, or add them to one, and go to it."""
+    store = get_data_store()
+    layout = repo.load_page(
+        store, repo.ref_of(page_model.BasicExperimentPage.model_validate_json(act.page_json))
+    )
+    compared = compare(request, project_id=_project_of(store, act.experiment_id), layout=layout)
+    return _Outputs(
+        destination=no_update if compared.destination is None else compared.destination,
+        notices=no_update if compared.notice is None else compared.notice,
+    )
+
+
 def _diff(request: RunActionRequest) -> _Outputs:
     """Open the A/B diff on the requested runs, if there are few enough to read side by side."""
     if len(request.run_ids) > MAX_COMPARED_RUNS:
@@ -770,6 +808,7 @@ def _register_run_actions(app: Dash) -> None:
         Output(row_updates_id(RunListSurface.EXPERIMENT), "data", allow_duplicate=True),
         Output(NAVBAR_RUN_HEAD_ID, "children", allow_duplicate=True),
         Output(NAVBAR_HPARAM_SIGNATURE_ID, "data", allow_duplicate=True),
+        Output(navigate_id(RunListSurface.EXPERIMENT), "data"),
         _Act.states(),
         prevent_initial_call=True,
     )
@@ -798,6 +837,8 @@ def _register_run_actions(app: Dash) -> None:
                     notices=pinned.notice,
                     **_head_fields(get_data_store(), page, act.experiment_id, act.chips or []),
                 ).outputs()
+            case RunAction.COMPARE_NEW | RunAction.COMPARE_ADD | RunAction.COMPARE_PINS:
+                return _compare(request, act).outputs()
             case RunAction.REMOVE:
                 # Only a comparison holds runs that can be taken out of it.
                 raise PreventUpdate
@@ -849,6 +890,7 @@ def register_runs_table_callbacks(app: Dash) -> None:
     _register_hparam_table(app)
     _register_newest_runs(app)
     register_run_list(app, RunListSurface.EXPERIMENT, NAVBAR_HPARAM_DATATABLE_ID)
+    register_navigate(app, navigate_id(RunListSurface.EXPERIMENT))
     register_row_updates(app, RunListSurface.EXPERIMENT)
     register_pin_filter(app, RunListSurface.EXPERIMENT, NAVBAR_HPARAM_DATATABLE_ID)
     _register_run_actions(app)
