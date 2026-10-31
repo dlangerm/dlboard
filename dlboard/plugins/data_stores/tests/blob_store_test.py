@@ -16,6 +16,7 @@ import sqlite3
 import threading
 import time
 from typing import TYPE_CHECKING, override
+from uuid import uuid4
 
 import pytest
 from dash import Dash
@@ -317,11 +318,24 @@ def test_a_failed_upload_leaves_nothing_in_the_staging_dir(
 def test_stale_staged_uploads_from_a_dead_process_are_swept_on_startup(tmp_path: Path) -> None:
     staging = tmp_path / "staging"
     staging.mkdir()
-    stale, fresh = staging / "stale", staging / "fresh"
+    stale, fresh = staging / str(uuid4()), staging / str(uuid4())
     stale.write_bytes(b"x")
     fresh.write_bytes(b"x")
     os.utime(stale, (0, 0))
 
     BlobArtifactStore(FSBlobs(tmp_path / "artifacts"), 10, staging).dispose()
 
-    assert [p.name for p in staging.iterdir()] == ["fresh"]
+    assert [p.name for p in staging.iterdir()] == [fresh.name]
+
+
+def test_the_sweep_leaves_a_file_it_did_not_stage_however_old(tmp_path: Path) -> None:
+    """The staging directory is the shared temp directory by default: a file another program left there is not the store's."""
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    theirs = staging / "cpan_install_x.txt"
+    theirs.write_bytes(b"x")
+    os.utime(theirs, (0, 0))
+
+    BlobArtifactStore(FSBlobs(tmp_path / "artifacts"), 10, staging).dispose()
+
+    assert theirs.exists()
