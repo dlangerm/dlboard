@@ -105,7 +105,7 @@ def test_the_charts_of_an_experiment_of_many_runs_are_drawn_from_only_the_newest
     )
     page = store.get_or_create_page(page_model.BasicExperimentPage, experiment_id=experiment_id)
     store.update_page(page.model_copy(update={"panels": [panel]}))
-    loaded = repo.load_page(store, repo.PageRef(experiment_id, None))
+    loaded = repo.load_page(store, repo.ExperimentRef(experiment_id, None))
     paging = panel_view.resolved_paging(loaded, Paging().viewing(tab="", open_panels=["p"]), focus_chart=None)
 
     frames = panel_data.panel_frames(store, loaded, paging, visible_open_panels(loaded.panels, "", paging))

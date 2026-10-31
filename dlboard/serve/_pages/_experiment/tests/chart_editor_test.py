@@ -64,12 +64,12 @@ def test_render_chart_preview_draws_the_selected_runs_like_the_real_panel(
     # Selecting runs branches into a view of alice's own (see `save_page`) -- preview from that
     # same view, not the (untouched) shared page, to see the selection it just made.
     view = repo.save_document_settings(
-        store, repo.PageRef(experiment_id, None), DocumentSettings(selected_runs=[kept.id])
+        store, repo.ExperimentRef(experiment_id, None), DocumentSettings(selected_runs=[kept.id])
     )
 
     form = _form(
         experiment_id=experiment_id,
-        page_json=repo.load_page(store, repo.PageRef(experiment_id, view.id)).model_dump_json(),
+        page_json=repo.load_page(store, repo.ExperimentRef(experiment_id, view.id)).model_dump_json(),
     )
     preview, error = render_chart_preview(form, store=store, reads=EditorReads())
 

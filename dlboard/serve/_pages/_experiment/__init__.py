@@ -116,7 +116,7 @@ def _delete_experiment_action() -> list[Component]:
 
 
 def render_panel(
-    store: DataStore[...], ref: repo.PageRef, paging: Paging, *, focus_chart: str | None = None
+    store: DataStore[...], ref: repo.ExperimentRef, paging: Paging, *, focus_chart: str | None = None
 ) -> tuple[html.Div, Component, str]:
     """
     Build the whole experiment panel: accordion, header, and its persisted page storage.

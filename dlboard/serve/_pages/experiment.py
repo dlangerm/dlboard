@@ -87,7 +87,7 @@ def layout(
     view_id = resolve_view_id(store, exp.id, view)
     container, header, page_json = render_panel(
         store,
-        repo.PageRef(exp.id, view_id),
+        repo.ExperimentRef(exp.id, view_id),
         Paging.from_request(query, request.cookies.get(SIZES_COOKIE)),
         focus_chart=chart,
     )

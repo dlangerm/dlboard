@@ -250,7 +250,7 @@ def register_live_update_callbacks(app: Dash) -> None:
                 notes_revision,
             )
 
-        page = repo.load_page(store, repo.PageRef(experiment_id, polled.view_id))
+        page = repo.load_page(store, repo.ExperimentRef(experiment_id, polled.view_id))
         panels_by_name = {p.name: p for p in page.panels}
         dataframes, fetch_ok = _fetch_open_panel_dataframes(store, experiment_id, page, chart_ids)
         shown = {

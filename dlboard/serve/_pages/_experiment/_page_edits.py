@@ -10,7 +10,7 @@ never to the browser's copy of it: a copy can be stale, and writing it back woul
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Annotated, Any, cast
+from typing import TYPE_CHECKING, Annotated, Any
 
 from dash import State
 
@@ -79,7 +79,7 @@ def _apply(page_json: str, edit: PageEdit) -> tuple[BasicExperimentPage, BasicEx
     """The stored page `page_json` names, and that page with `edit` applied and saved (branching if it isn't yours)."""
     store = get_data_store()
     held = BasicExperimentPage.model_validate_json(page_json)
-    before = load_page(store, ref_of(cast("int", held.experiment_id), held))
+    before = load_page(store, ref_of(held))
     edited = (
         before if edit.panels is None else before.model_copy(update={"panels": edit.panels(before.panels)})
     )

@@ -42,7 +42,7 @@ def test_accordion_view_offers_auto_populate_only_for_an_empty_view(
     page = store.get_or_create_page(page_model.BasicExperimentPage, experiment_id=experiment_id)
     store.update_page(page.model_copy(update={"panels": panels}))
 
-    loaded = repo.load_page(store, repo.PageRef(experiment_id, None))
+    loaded = repo.load_page(store, repo.ExperimentRef(experiment_id, None))
     container = panel_view.accordion_view({}, loaded, Paging())
 
     children = cast("list[Any]", container.children)
@@ -59,7 +59,7 @@ def test_accordion_view_delete_panel_reachable_without_opening_a_panel(
     page = store.get_or_create_page(page_model.BasicExperimentPage, experiment_id=experiment_id)
     store.update_page(page.model_copy(update={"panels": [PanelInstance[Any, Any](name="p")]}))
 
-    loaded = repo.load_page(store, repo.PageRef(experiment_id, None))
+    loaded = repo.load_page(store, repo.ExperimentRef(experiment_id, None))
     container = panel_view.accordion_view({}, loaded, Paging())
 
     delete_button = _find_props(
