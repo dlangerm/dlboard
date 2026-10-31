@@ -7,8 +7,9 @@ each panel, one page of its charts. Both levels take a fuzzy filter -- panels by
 metric or artifact keys they show -- so finding one doesn't mean paging through the rest.
 
 `Paging` is everything about "which slice is showing" -- which tab, which panels are open, and which page
-of panels and charts: it is the page URL's query (`?tab=`, `?open=`, `?panels_q=`, `?panels_page=`, `?charts=`, `?run=`,
-see `Paging.query`) plus the viewer's page sizes (a cookie, since the server needs them for the very first
+of panels and charts, and which runs of a comparison are hidden: it is the page URL's query (`?tab=`, `?open=`,
+`?panels_q=`, `?panels_page=`, `?charts=`, `?run=`, `?hidden=`, see `Paging.query`) plus the viewer's page sizes (a cookie,
+since the server needs them for the very first
 render). Nothing here is ever saved to a view, so how one viewer browses a page never changes it for another.
 """
 
@@ -131,6 +132,14 @@ class Paging(BaseModel, frozen=True, extra="ignore", populate_by_name=True):
     what is drawn for you and no one else. A run that is not a live run of the experiment draws the view's as usual.
     """
 
+    hidden: Annotated[frozenset[int], BeforeValidator(_load_json)] = Field(default_factory=frozenset)
+    """
+    The runs of a comparison the viewer has left out of the charts, by id.
+
+    A viewer's choice of what to look at, like the tab: a link carries it, and hiding a run saves nothing and so never forks
+    a comparison that is not the viewer's.
+    """
+
     @classmethod
     def from_request(cls, query: Mapping[str, str], sizes_cookie: str | None) -> Paging:
         """Parse a page request; a malformed link just shows the first page rather than breaking the page."""
@@ -158,6 +167,7 @@ class Paging(BaseModel, frozen=True, extra="ignore", populate_by_name=True):
             if self.charts
             else "",
             "run": str(self.focus) if self.focus else "",
+            "hidden": json.dumps(sorted(self.hidden)) if self.hidden else "",
         }
 
     def chart_paging(self, panel_name: str) -> ChartPaging:
@@ -202,6 +212,10 @@ class Paging(BaseModel, frozen=True, extra="ignore", populate_by_name=True):
     def with_focus(self, run_id: int | None) -> Paging:
         """A copy drawing just the run `run_id`, or the view's own runs for `None`."""
         return self.model_copy(update={"focus": run_id})
+
+    def with_hidden(self, run_ids: frozenset[int]) -> Paging:
+        """A copy with exactly `run_ids` hidden."""
+        return self.model_copy(update={"hidden": run_ids})
 
     def with_panels(self, *, q: str | None = None, page: int | None = None) -> Paging:
         """A copy with the panel filter and/or page replaced; a new filter goes back to the first page."""

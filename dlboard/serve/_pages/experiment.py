@@ -1,10 +1,8 @@
 """The experiment page for dlboard."""
 
-from typing import Any, cast
-
 import dash
 import dash_mantine_components as dmc
-from dash import dcc, html
+from dash import html
 from dash.dcc import Store
 from dash.development.base_component import Component
 from flask import request
@@ -15,12 +13,7 @@ from dlboard.serve._pages._experiment import _ids as ids
 from dlboard.serve._pages._experiment import _live_updates as live
 from dlboard.serve._pages._experiment import _page_model as page_model
 from dlboard.serve._pages._experiment import _page_repository as repo
-from dlboard.serve._pages._experiment import _panel_controls as panel_controls
-from dlboard.serve._pages._experiment import _tab_controls as tab_controls
-from dlboard.serve._pages._experiment import render_panel
-from dlboard.serve._pages._experiment._chart_editor import chart_editor_dock
-from dlboard.serve._pages._experiment._chart_suggestions import chart_suggestion_shells
-from dlboard.serve._pages._experiment._chart_view_state import chart_view_state_stores
+from dlboard.serve._pages._experiment import panel_area, panel_area_stores, render_panel
 from dlboard.serve._pages._experiment._notes import STATE_NOTES_REVISION, notes_button, notes_drawer
 from dlboard.serve._pages._experiment._paging import SIZES_COOKIE, Paging
 from dlboard.serve._pages._experiment._run_compare import CompareQuery, compare_components
@@ -30,17 +23,6 @@ from dlboard.serve._pages._onboarding import first_run_snippet, onboarding_card
 
 # Built once, at this module's import -- inside `build_app` -- so the env it reads is the app's (see tests/conftest.py).
 _LIVE_UPDATE_SETTINGS = live.LiveUpdateSettings()
-
-# One dcc.Store per drag-drop gesture a completed drag can report (`_experiment_page_dragdrop.js`,
-# via `set_props`) -- listed in the static layout below, not `accordion_view`'s render tree, so the
-# drop target always exists regardless of what's currently rendered underneath it.
-_DRAG_DROP_STORE_IDS = [
-    panel_controls.PANEL_REORDER_STORE_ID,
-    panel_controls.CHART_REORDER_STORE_ID,
-    tab_controls.TAB_DROP_STORE_ID,
-    tab_controls.CHART_TAB_DROP_STORE_ID,
-    panel_controls.CHART_PANEL_MOVE_STORE_ID,
-]
 
 
 def _live_update_header(header: Component, notes: Component, views: Component) -> dmc.Group:
@@ -120,51 +102,7 @@ def layout(
                     )
                     if next(store.get_runs(exp.id, limit=1, run_ids=None), None) is None
                     else None,
-                    # `container` (from `render_panel`, above) is real content from the very first
-                    # response now, not a `dmc.Loader()` placeholder -- `dcc.Loading` still wraps it
-                    # for every *later* full-panel rebuild (add/delete/rename a panel or chart,
-                    # apply suggestions, ...), which still goes through a callback writing this
-                    # same `children`. `custom_spinner` matches those rebuilds' spinner to the
-                    # app's own `dmc.Loader()` rather than `dcc.Loading`'s unstyled default, so a
-                    # rebuild doesn't visibly swap from one loading indicator to an
-                    # unrelated-looking second one partway through.
-                    #
-                    # `target_components` is required now that live updates poll in the
-                    # background: without it, `dcc.Loading` shows its overlay for *any* in-flight
-                    # callback touching a descendant, which includes `poll_for_updates`'s per-chart
-                    # patches (they live inside this subtree, at `CHART_CONTENT.of(...)`) -- a
-                    # stop-the-world flash on every poll tick, exactly what per-chart patching
-                    # exists to avoid. Scoping it to just this div's own `children` means the
-                    # spinner only ever covers a genuine full-panel rebuild; the poll's targeted
-                    # patches update their charts silently. Its generated type stub is an empty
-                    # `TypedDict` (a known Dash codegen gap for this genuinely dynamic dict) --
-                    # `cast` to `Any` rather than fight that, same as `_panel_view.py`'s
-                    # `data-*`-attr casts.
-                    # The panel area and the chart editor docked beside it, so the charts stay in view while one is
-                    # edited (`_experiment_page_hover.css`). The dock is rendered here once, outside `METRIC_CONTENT_ID`:
-                    # every structural edit rebuilds that.
-                    html.Div(
-                        [
-                            html.Div(
-                                cast("Any", dcc.Loading)(  # pyrefly: ignore [unknown-argument-type]
-                                    html.Div(container, id=ids.METRIC_CONTENT_ID),
-                                    delay_show=250,
-                                    target_components={str(ids.METRIC_CONTENT_ID): "children"},
-                                    custom_spinner=dmc.Loader(size="lg"),
-                                ),
-                                className="dl-experiment-main",
-                            ),
-                            chart_editor_dock(),
-                        ],
-                        className="dl-experiment-body",
-                    ),
-                    # Every modal the panel area can open, each owned by its feature module. Rendered
-                    # once, outside `METRIC_CONTENT_ID`: every structural edit rebuilds that, and each re-mount
-                    # of a shell set its confirm button's callback off again -- a burst of round trips that
-                    # answered nothing but delayed the render they came with. So each confirm closes its own.
-                    *chart_suggestion_shells(),
-                    *panel_controls.panel_control_modals(),
-                    *tab_controls.tab_control_modals(),
+                    *panel_area(container),
                 ],
                 gap="xs",
             ),
@@ -175,9 +113,8 @@ def layout(
         Store(id=STATE_NOTES_REVISION, data=exp.notes_revision),
         Store(id=constants.STATE_PROJECT_ID, data=exp.project_id),
         Store(id=constants.STATE_EXPERIMENT_ID, data=int(experiment_id)),
-        *(Store(id=store_id) for store_id in _DRAG_DROP_STORE_IDS),
+        *panel_area_stores(),
         *run_table_shells(),
-        *chart_view_state_stores(),
     ]
 
 

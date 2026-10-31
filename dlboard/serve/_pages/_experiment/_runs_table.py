@@ -493,7 +493,7 @@ def _register_hparam_table(app: Dash) -> None:
     @app.callback(
         Output(constants.NAVBAR_RUN_LIST_ID, "children"),
         # The experiment's revision, which the live poll moves on: what the table holds may have changed (#454).
-        Input(STATE_LAST_KNOWN_REVISION, "data"),
+        Input(STATE_LAST_KNOWN_REVISION, "data", allow_optional=True),
         Input(constants.STATE_EXPERIMENT_ID, "data", allow_optional=True),
         Input(ids.STATE_PAGE_STORAGE, "data", allow_optional=True),
         State(NAVBAR_HPARAM_SIGNATURE_ID, "data", allow_optional=True),
@@ -798,6 +798,9 @@ def _register_run_actions(app: Dash) -> None:
                     notices=pinned.notice,
                     **_head_fields(get_data_store(), page, act.experiment_id, act.chips or []),
                 ).outputs()
+            case RunAction.REMOVE:
+                # Only a comparison holds runs that can be taken out of it.
+                raise PreventUpdate
 
     register_delete(app, RunListSurface.EXPERIMENT, notify=VIEW_NOTIFY_ID)
 

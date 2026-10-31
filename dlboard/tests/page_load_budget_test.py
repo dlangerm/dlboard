@@ -11,7 +11,7 @@ page's load, so they're excluded rather than raced against.
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pendulum
 import pytest
@@ -19,8 +19,10 @@ from pydantic import BaseModel
 
 from dlboard import models
 from dlboard.client._rest_api import BasicDlboardAPI
+from dlboard.serve import get_system_data_store
 
 if TYPE_CHECKING:
+    from dash import Dash
     from playwright.sync_api import Page, Request
 
 pytestmark = pytest.mark.browser
@@ -30,12 +32,14 @@ class _Route(StrEnum):
     HOME = "home"
     PROJECT = "project"
     EXPERIMENT = "experiment"
+    COMPARISON = "comparison"
 
 
 PAGE_LOAD_CALLBACK_BUDGET: dict[_Route, int] = {
     _Route.HOME: 2,
     _Route.PROJECT: 5,
     _Route.EXPERIMENT: 7,
+    _Route.COMPARISON: 7,
 }
 """The most `_dash-update-component` requests each page's initial load may issue. Only ever lower."""
 
@@ -65,7 +69,9 @@ def _load_callbacks(page: Page, url: str) -> list[str]:
     return outputs
 
 
-def test_each_page_load_stays_within_its_callback_budget(page: Page, live_server_url: str) -> None:
+def test_each_page_load_stays_within_its_callback_budget(
+    page: Page, live_server_url: str, dlboard_app: Dash
+) -> None:
     api = BasicDlboardAPI(live_server_url)
     project = api.create_project(models.NewProject(name="Budget Project", description=""))
     experiment = api.create_experiment(models.NewExperiment(project_id=project.id, name="Budget Experiment"))
@@ -82,10 +88,13 @@ def test_each_page_load_stays_within_its_callback_budget(page: Page, live_server
             for step in range(3)
         ]
     )
+    with dlboard_app.server.app_context():
+        comparison_id = _a_comparison(project.id, run.id)
     urls = {
         _Route.HOME: live_server_url,
         _Route.PROJECT: f"{live_server_url}/project/{project.id}",
         _Route.EXPERIMENT: f"{live_server_url}/experiment/{experiment.id}",
+        _Route.COMPARISON: f"{live_server_url}/comparison/{comparison_id}",
     }
 
     loads = {route: _load_callbacks(page, url) for route, url in urls.items()}
@@ -96,3 +105,15 @@ def test_each_page_load_stays_within_its_callback_budget(page: Page, live_server
         if len(outputs) > PAGE_LOAD_CALLBACK_BUDGET[route]
     ]
     assert not over_budget, "\n".join(over_budget)
+
+
+def _a_comparison(project_id: int, run_id: int) -> int:
+    """A comparison of `run_id`, saved straight to the store: there is no REST route to create one."""
+    store = get_system_data_store()
+    owner = store.get_or_create_user(models.Principal.unverified("budget-owner"))
+    comparison = store.create_comparison(
+        models.Page[Any, Any],
+        models.NewPage[Any, Any](project_id=project_id, owner_id=owner.id, name="Budget", shared=True),
+        frozenset({run_id}),
+    )
+    return comparison.id

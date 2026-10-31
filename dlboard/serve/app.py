@@ -119,7 +119,13 @@ def app(plugins: list[models.PluginProtocol], *, url_prefix: str = "") -> Dash:
     # back into concrete chart classes, e.g. `_chart_autogen.py` imports `ImageChart` directly) at
     # `dlboard.serve` import time can race that still-in-progress import. Deferring to call time
     # sidesteps it, since `app()` only ever runs after process startup import resolution finishes.
-    from dlboard.serve._pages import _account_page, _simple_admin_page, _simple_homepage, _simple_project_page
+    from dlboard.serve._pages import (
+        _account_page,
+        _comparison,
+        _simple_admin_page,
+        _simple_homepage,
+        _simple_project_page,
+    )
     from dlboard.serve._pages import _experiment as _experiment_page
 
     installed = [InstalledPlugin.describe(p) for p in plugins]
@@ -144,7 +150,14 @@ def app(plugins: list[models.PluginProtocol], *, url_prefix: str = "") -> Dash:
     # should only reflect what a deployment actually chose to install). These page modules don't
     # implement `PluginProtocol`, so `register(app)` is called directly rather than threaded
     # through Dash's own `plugins=` constructor kwarg.
-    for page in (_simple_homepage, _simple_project_page, _experiment_page, _simple_admin_page, _account_page):
+    for page in (
+        _simple_homepage,
+        _simple_project_page,
+        _experiment_page,
+        _comparison,
+        _simple_admin_page,
+        _account_page,
+    ):
         page.register(_app)
     # Also core, non-optional: every chart that shows an artifact fetches it from this one route,
     # by id -- never by talking to whatever `ArtifactStore` a deployment happens to have plugged in.

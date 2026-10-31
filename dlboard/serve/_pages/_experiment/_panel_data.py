@@ -298,11 +298,11 @@ def panel_frames(
     store: DataStore[...], page: BasicExperimentPage, paging: Paging, names: Iterable[str]
 ) -> PanelFrames:
     """
-    Fetch the charts `paging` shows in the panels called `names`, of the runs `page` draws (`page_scope`).
+    Fetch the charts `paging` shows in the panels called `names`, of the runs `page` draws, but those `paging` hides (`page_scope`).
 
     Only the page of charts shown is fetched for -- a panel of a thousand charts costs what one page of them does.
     """
-    scope = page_scope(store, page, focus=paging.focus)
+    scope = page_scope(store, page, paging.hidden, paging.focus)
     experiments = experiment_names(store, scope)
     wanted = frozenset(names)
     frames: dict[str, ChartFrames] = {}
