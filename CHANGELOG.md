@@ -12,8 +12,34 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ## [Unreleased]
 
+### Added
+
+* **Pins, and comparisons of runs from several experiments.** A run could only be drawn beside the other runs of its
+  own experiment. Now a **pin** says a run matters (plain, or one of nine colours; project-wide, with who pinned it) and can
+  be put on a run the moment it exists. A run's pins are one pin filled with its colours, and a colour is only ever shown as
+  a pin in that colour. The project page's sidebar lists a project's pinned runs, a row to a run, filtered by colour, pinner,
+  experiment and name, and the filters are in the address bar. A **comparison** is a dashboard of runs picked from any
+  experiments of a project, drawn with the experiment page's panels, charts and chart editor, and labelled "experiment /
+  run". Start one from any run list (**Compare**, from the selected runs) or compare every run pinned in a colour (**Compare
+  pins**). It is its owner's, and can be shared with the project: the runs of a shared comparison are any editor's to change,
+  while its charts and settings fork a copy of your own, as a saved view does. Which runs you hide on a comparison is yours
+  alone, in the address bar. Every read stays one experiment's, on the existing indexes, so what a comparison reads is that
+  of its runs, once for each experiment it draws. A comparison holds at most `DLBOARD_MAX_COMPARISON_RUNS` runs (100).
+  Migrations `0006` and `0007` add the pin and comparison member tables, expand-only. Not yet on a comparison: live updates
+  and the A/B diff. See [docs/comparisons.md](docs/comparisons.md). (#483)
+
 ### Changed
 
+* **A run has an eye to draw it and a checkbox to select it, and a bar acts on the selected runs.** The checkbox in the
+  experiment sidebar used to mean "draw this run", leaving no way to select runs to do something to them. The eye draws
+  (and is saved with the view, as a selection of runs always was); the checkbox selects, and a bar above the list offers Show,
+  Hide, Diff, Pin, Unpin, Compare and Delete on what is selected. Deleting runs asks once, saying how many, and replaces the
+  trash icon on each row; the Compare button that opened the A/B diff is the bar's Diff. A run's name links to its
+  experiment with only that run drawn. (#483)
+* **The sidebar is the page's runs, and the breadcrumb switches experiments.** The sidebar listed the project's
+  experiments, which the project page lists too. It now holds the runs of what you are looking at: an experiment's, a
+  comparison's, or the project's pinned runs. The experiment in the breadcrumb is a menu of the project's experiments to
+  go to. (#483)
 * **The suggest-charts drawer lists a page at a time, and has an exclude box.** It listed the first 50 suggestions, to
   be narrowed only by its filter. It now lists pages of 25 with Previous and Next, and an "Exclude" box leaves out what
   its comma-separated words or `*` patterns name, by key or panel. (#478)

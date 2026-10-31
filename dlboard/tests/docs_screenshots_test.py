@@ -49,7 +49,7 @@ if TYPE_CHECKING:
     from dash import Dash
     from playwright.sync_api import FloatRect, Locator, Page
 
-    from dlboard.models import Histogram
+    from dlboard.models import DataStore, Histogram
 
 REPO_ROOT = Path(__file__).parents[2]
 IMAGES_DIR = REPO_ROOT / "docs" / "images"
@@ -108,6 +108,7 @@ class DocScreenshot(StrEnum):
     RUN_COMPARE = "run-compare"
     TABLE_CHART = "table-chart"
     HISTOGRAM_CHART = "histogram-chart"
+    COMPARISON = "comparison"
 
     @property
     def path(self) -> Path:
@@ -141,6 +142,7 @@ class Demo(NamedTuple):
     project_id: int
     experiment_id: int
     baseline_experiment_id: int
+    comparison_id: int
     n_projects: int
     n_experiments: int
 
@@ -162,6 +164,34 @@ def _confusion_matrix(step: int, rng: np.random.Generator) -> MplFigure:
     ax.imshow(counts, cmap="Blues")
     ax.set(xticks=range(10), yticks=range(10), xlabel="Predicted", ylabel="Actual", title=f"Step {step}")
     return fig
+
+
+def _seed_pins_and_comparison(store: DataStore[...], project_id: int) -> int:
+    """
+    Pin a few of the demo's runs (the best learning rate red, the baseline blue, a candidate green by a teammate) and save a
+    comparison of the sweep and the baseline that the project's team shares; its page's id.
+    """
+    me = store.get_or_create_user(models.Principal.unverified("demo")).id
+    teammate = store.get_or_create_user(models.Principal.unverified("mira")).id
+    runs = {
+        run.name: run.id
+        for experiment in store.get_experiments(project_id)
+        for run in store.get_runs(experiment.id, limit=None, run_ids=None)
+    }
+    store.pin_runs(me, frozenset({runs["lr=1e-3"]}), models.PinColor.RED)
+    store.pin_runs(me, frozenset({runs["baseline"]}), models.PinColor.BLUE)
+    store.pin_runs(teammate, frozenset({runs["lr=3e-3"]}), models.PinColor.GREEN)
+    panel = models.PanelInstance[Any, Any](
+        name="Validation loss",
+        charts=[models.ChartInstance(chart_type="line", parameters={"column": "loss/val", "x_axis": "step"})],
+    )
+    return store.create_comparison(
+        models.Page[Any, Any],
+        models.NewPage[Any, Any](
+            project_id=project_id, owner_id=me, name="Sweep against the baseline", shared=True, panels=[panel]
+        ),
+        frozenset(runs.values()),
+    ).id
 
 
 @pytest.fixture(scope="session")
@@ -262,7 +292,7 @@ def demo(live_server_url: str, dlboard_app: Dash, tmp_path_factory: pytest.TempP
                 experiment_id=baseline.id,
                 run_id=baseline_run.id,
                 step=int(step),
-                metrics={"loss": float(baseline_loss[step])},
+                metrics={"loss": float(baseline_loss[step]), "loss/val": float(baseline_loss[step]) + 0.1},
                 timestamp_utc=_T0.add(minutes=int(step)),
             )
             for step in baseline_steps
@@ -278,7 +308,15 @@ def demo(live_server_url: str, dlboard_app: Dash, tmp_path_factory: pytest.TempP
         assert time.monotonic() < deadline, "the demo artifacts were never recorded"
         time.sleep(0.2)
     try:
-        yield Demo(live_server_url, main.id, sweep.id, baseline.id, n_projects=3, n_experiments=3)
+        yield Demo(
+            live_server_url,
+            main.id,
+            sweep.id,
+            baseline.id,
+            _seed_pins_and_comparison(store, main.id),
+            n_projects=3,
+            n_experiments=3,
+        )
     finally:
         monkeypatch.undo()
 
@@ -499,6 +537,11 @@ def _stage(shot: DocScreenshot, page: Page, demo: Demo, dlboard_app: Dash) -> Pa
             panel = page.locator(".dl-panel-body", has=page.locator(".dl-histogram"))
             expect(panel.locator(".heatmaplayer image")).to_have_count(len(_SWEEP))
             return panel
+        case DocScreenshot.COMPARISON:
+            page.goto(f"{demo.url}/comparison/{demo.comparison_id}")
+            # Every run of the sweep and the baseline, in one chart: five lines, named for their experiments.
+            expect(page.locator(".mantine-ChartLegend-legendItemName")).to_have_count(len(_SWEEP) + 1)
+            return page
         case DocScreenshot.RUN_COMPARE:
             page.goto(f"{demo.url}/experiment/{demo.experiment_id}")
             expect(page.locator(f"#{PAGE_EXPERIMENT_ID}")).to_be_visible()

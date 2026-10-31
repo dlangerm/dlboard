@@ -54,6 +54,7 @@ Every metric, hyperparameter, and artifact you log gets synced to dlboard in the
 ## Features
 
 - **One-command setup** — `dlboard serve local` with zero configuration
+- **Pins and cross-experiment comparisons** — pin the runs that matter in a colour of your team's choosing, then put runs from any experiments of a project on one dashboard; see [docs/comparisons.md](docs/comparisons.md)
 - **Side-by-side run comparison** — compare metrics, hyperparameters, and artifacts across any runs, or diff up to five runs in a shareable modal
 - **PyTorch Lightning integration** — drop in `DLBoardLogger` and you're done
 - **Personal views** — save custom layouts and filters without touching the shared experiment page
@@ -94,6 +95,10 @@ Every metric, hyperparameter, and artifact you log gets synced to dlboard in the
 
 ![The run-compare modal, listing the hyperparameters and metrics that differ between four runs](docs/images/run-compare.png)
 
+**Pins and comparisons** — Pin the runs that matter in your team's colour, then draw runs from several experiments on one dashboard. Runs are labelled by experiment, and every run pinned in a colour is two clicks to compare:
+
+![A comparison of a sweep and the baseline experiment, one chart over runs of both and the list of the comparison's runs](docs/images/comparison.png)
+
 **Quick jump** — Search experiments by name with Ctrl+K:
 
 ![The Ctrl+K jump palette, open and matching an experiment by name](docs/images/jump-palette.png)
@@ -128,6 +133,7 @@ uv run prek run --all-files         # run pre-commit hooks manually
 
 - [Architecture](docs/architecture.md) — how the app is put together: the plugin system, and the
   request flow from a training script to the browser.
+- [Runs, pins & comparisons](docs/comparisons.md) — the run list, flag the runs that matter, and compare runs of several experiments.
 - [Client & logging](docs/client.md) — `DLBoardLogger`, the REST client, and how to log a new kind
   of artifact.
 - [Docker](docs/docker.md) — building and running the image, its Postgres + local-disk default, and
