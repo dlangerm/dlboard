@@ -21,6 +21,7 @@ from dlboard.models import (
     DEFAULT_RENDER_CONTEXT,
     DEFAULT_TAG_PRECISION,
     DISPLAY_SECTION,
+    EXPERIMENT_COLUMN,
     RUN_NAME_COLUMN,
     Artifact,
     ArtifactWindow,
@@ -62,10 +63,11 @@ from dlboard.serve import (
     series_swatch_class,
     serve_asset,
 )
-from dlboard.serve._constants import STATE_EXPERIMENT_ID
 
 if typing.TYPE_CHECKING:
     from collections.abc import Iterable
+
+    from dlboard.models import DataStore
 
 MAX_SLIDER_LABELS = 10
 DEFAULT_FIT_PIXELS = 1920
@@ -479,7 +481,8 @@ class _LoadedWindow(BaseModel, frozen=True, extra="forbid"):
 
     first: int
     last: int
-    runs: list[int]
+    runs: dict[int, list[int]]
+    """The runs it draws, by the experiment each is of: a chart can draw the runs of several (a comparison), and a read is one's."""
     settings: ImageChartSettings
 
 
@@ -537,6 +540,7 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
             *(c for c in (col, artifact_tags_column(parameters.key)) if c in dataframe.columns),
             *layer_cols,
             *([RUN_NAME_COLUMN] if has_names else []),
+            *([EXPERIMENT_COLUMN] if EXPERIMENT_COLUMN in dataframe.columns else []),
         ]
 
         df = (
@@ -563,10 +567,10 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
             _LoadedWindow(
                 first=int(pictures[x_col].min()) if not pictures.empty else all_steps[0],
                 last=int(pictures[x_col].max()) if not pictures.empty else all_steps[0],
-                runs=[int(rid) for rid in run_ids],
+                runs=_runs_by_experiment(df),
                 settings=parameters,
             ).model_dump(mode="json")
-            if windowed
+            if windowed and EXPERIMENT_COLUMN in df.columns
             else None
         )
 
@@ -783,56 +787,86 @@ class _Thumbnail(BaseModel, frozen=True, extra="forbid"):
     run: str
 
 
+def _runs_by_experiment(df: pd.DataFrame) -> dict[int, list[int]]:
+    """The runs of `df` by their experiment, which a frame of a page's panel names beside each run."""
+    grouped: dict[int, list[int]] = {}
+    for run_id, experiment_id in df.drop_duplicates("run_id")[["run_id", EXPERIMENT_COLUMN]].itertuples(
+        index=False
+    ):
+        grouped.setdefault(int(experiment_id), []).append(int(run_id))
+    return grouped
+
+
+def read_window(
+    store: DataStore[...], window: _LoadedWindow, step: int
+) -> tuple[Patch, _LoadedWindow] | None:
+    """
+    The pictures of the steps around `step`, in place of the window the chart had; `None` if no run logged any.
+
+    Reads each experiment of the window as a read of it alone, and nothing else: which experiment a run is of is
+    already in the window, so no run is read by itself.
+    """
+    settings = window.settings
+    logged = sorted(
+        {
+            at
+            for experiment_id, runs in window.runs.items()
+            for steps in store.artifact_steps(
+                experiment_id, key=settings.key, run_ids=frozenset(runs)
+            ).values()
+            for at in steps
+        }
+    )
+    if not logged:
+        return None
+    # Centred on the step asked for, so scrubbing on either side of it asks for nothing more for a while.
+    start = max(
+        min(bisect.bisect_left(logged, step) - IMAGE_WINDOW_STEPS // 2, len(logged) - IMAGE_WINDOW_STEPS),
+        0,
+    )
+    shown = logged[start : start + IMAGE_WINDOW_STEPS]
+    request = ImageChart.data_request(settings)
+    artifacts = build_artifacts_dataframe(
+        artifact
+        for experiment_id, runs in window.runs.items()
+        for artifact in store.fetch_artifacts(
+            experiment_id,
+            keys=request.artifacts,
+            key_prefixes=request.artifact_prefixes,
+            run_ids=frozenset(runs),
+            steps=StepRange(shown[0], shown[-1]),
+        )
+    )
+    col = artifact_column(settings.key)
+    pictures = artifacts[artifacts[col].notna()] if col in artifacts.columns else pd.DataFrame()
+    drawn = _pictures(pictures, settings, _layer_keys(settings, artifacts.columns), MetricColumn.STEP)
+    patch = Patch()
+    for name, value in drawn.items():
+        patch[name] = value
+    return patch, window.model_copy(update={"first": shown[0], "last": shown[-1]})
+
+
 def _register_window_reads(app: dash.Dash) -> None:
     @app.callback(
         Output({"type": "image-series-data", "instance": MATCH}, "data", allow_duplicate=True),
         Output({"type": "image-series-window", "instance": MATCH}, "data", allow_duplicate=True),
         Input({"type": "image-series-window-request", "instance": MATCH}, "data"),
         State({"type": "image-series-window", "instance": MATCH}, "data"),
-        State(STATE_EXPERIMENT_ID, "data"),
         prevent_initial_call=True,
     )
-    def read_window(
-        asked: dict[str, Any] | None, loaded: dict[str, Any] | None, experiment_id: int
+    def read_window_around(
+        asked: dict[str, Any] | None, loaded: dict[str, Any] | None
     ) -> tuple[Patch, dict[str, Any]]:
         """The pictures of the steps around the one the slider went to, in place of the window the chart had."""
         if not asked or not loaded:
             raise PreventUpdate
-        step = _WindowAsked.model_validate(asked).step
-        window = _LoadedWindow.model_validate(loaded)
-        store, runs, settings = get_data_store(), frozenset(window.runs), window.settings
-        logged = sorted(
-            {
-                at
-                for steps in store.artifact_steps(experiment_id, key=settings.key, run_ids=runs).values()
-                for at in steps
-            }
+        read = read_window(
+            get_data_store(), _LoadedWindow.model_validate(loaded), _WindowAsked.model_validate(asked).step
         )
-        if not logged:
+        if read is None:
             raise PreventUpdate
-        # Centred on the step asked for, so scrubbing on either side of it asks for nothing more for a while.
-        start = max(
-            min(bisect.bisect_left(logged, step) - IMAGE_WINDOW_STEPS // 2, len(logged) - IMAGE_WINDOW_STEPS),
-            0,
-        )
-        shown = logged[start : start + IMAGE_WINDOW_STEPS]
-        request = ImageChart.data_request(settings)
-        artifacts = build_artifacts_dataframe(
-            store.fetch_artifacts(
-                experiment_id,
-                keys=request.artifacts,
-                key_prefixes=request.artifact_prefixes,
-                run_ids=runs,
-                steps=StepRange(shown[0], shown[-1]),
-            )
-        )
-        col = artifact_column(settings.key)
-        pictures = artifacts[artifacts[col].notna()] if col in artifacts.columns else pd.DataFrame()
-        drawn = _pictures(pictures, settings, _layer_keys(settings, artifacts.columns), MetricColumn.STEP)
-        patch = Patch()
-        for name, value in drawn.items():
-            patch[name] = value
-        return patch, window.model_copy(update={"first": shown[0], "last": shown[-1]}).model_dump(mode="json")
+        patch, window = read
+        return patch, window.model_dump(mode="json")
 
 
 def plug(app: dash.Dash) -> None:

@@ -11,9 +11,9 @@ import functools
 import hashlib
 import time
 import typing
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 from pydantic import PositiveInt
@@ -24,6 +24,7 @@ from dlboard import models
 from dlboard._telemetry import Attributes, attribute
 from dlboard._telemetry.traces import SpanKind, TraceKey, span
 from dlboard.models import (
+    EXPERIMENT_COLUMN,
     RUN_NAME_COLUMN,
     ColumnKind,
     Histogram,
@@ -38,9 +39,9 @@ from dlboard.models import (
 from dlboard.serve import telemetry
 from dlboard.serve._artifact_frame import build_artifacts_dataframe
 from dlboard.serve._backend._metric_frame import MetricFrame
-from dlboard.serve._pages._dataframe_helpers import run_display_name
+from dlboard.serve._pages._dataframe_helpers import experiment_display_name, run_display_name
 from dlboard.serve._pages._experiment._paging import visible_chart_indexes
-from dlboard.serve._pages._experiment._shown_runs import shown_run_ids
+from dlboard.serve._pages._experiment._shown_runs import page_scope
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
@@ -48,6 +49,7 @@ if TYPE_CHECKING:
     from dlboard.models import DataStore
     from dlboard.serve._pages._experiment._page_model import BasicExperimentPage
     from dlboard.serve._pages._experiment._paging import Paging
+    from dlboard.serve._pages._experiment._shown_runs import RunScope
 
 _log = get_logger(__name__)
 
@@ -180,6 +182,47 @@ class PanelData:
     logged (`artifact_logged_column`), with the artifacts of the window's steps alone.
     """
 
+    @classmethod
+    def stacked(cls, parts: Sequence[PanelData]) -> PanelData:
+        """
+        One panel's data of runs of several experiments: the rows of each `part`, which are of different runs.
+
+        A column one has and another lacks is blank in the other's rows, as a metric only some experiments log is.
+        A chart that draws too many metrics' history in any part is refused for the whole.
+        """
+
+        def stack(frames: Iterable[pd.DataFrame]) -> pd.DataFrame:
+            present = [frame for frame in frames if not frame.empty]
+            return pd.concat(present, ignore_index=True) if present else pd.DataFrame()
+
+        def widest(request: models.DataRequest) -> WideHistory:
+            seen = [part.wide[request] for part in parts if request in part.wide]
+            return WideHistory(max(w.metrics for w in seen), refused=any(w.refused for w in seen))
+
+        return cls(
+            metrics={
+                reduction: MetricFrame.stacked(
+                    part.metrics[reduction] for part in parts if reduction in part.metrics
+                )
+                for reduction in {reduction for part in parts for reduction in part.metrics}
+            },
+            artifacts=stack(part.artifacts for part in parts),
+            hparams=stack(part.hparams for part in parts),
+            histograms=stack(part.histograms for part in parts),
+            series={
+                column: stack(part.series[column] for part in parts if column in part.series)
+                for column in {column for part in parts for column in part.series}
+            },
+            run_names=stack(part.run_names for part in parts),
+            wide={
+                request: widest(request) for request in {request for part in parts for request in part.wide}
+            },
+            windows={
+                window: stack(part.windows[window] for part in parts if window in part.windows)
+                for window in {window for part in parts for window in part.windows}
+            },
+        )
+
     def wide_history(self, chart: models.ChartInstance[Any, Any]) -> WideHistory | None:
         """How many metrics' every step `chart` draws, if more than `HistoryLimitSettings` lets pass unsaid."""
         return self.wide.get(chart.data_request())
@@ -255,20 +298,69 @@ def panel_frames(
     store: DataStore[...], page: BasicExperimentPage, paging: Paging, names: Iterable[str]
 ) -> PanelFrames:
     """
-    Fetch the charts `paging` shows in the panels called `names`, of the runs `page` shows (the newest few, or its selection).
+    Fetch the charts `paging` shows in the panels called `names`, of the runs `page` draws (`page_scope`).
 
     Only the page of charts shown is fetched for -- a panel of a thousand charts costs what one page of them does.
     """
-    experiment_id = cast("int", page.experiment_id)
-    run_ids = shown_run_ids(store, experiment_id, page.document)
+    scope = page_scope(store, page)
+    experiments = experiment_names(store, scope)
     wanted = frozenset(names)
     frames: dict[str, ChartFrames] = {}
     for panel in page.panels:
         indexes = visible_chart_indexes(panel, paging).items
         if panel.name in wanted and indexes:
             shown = panel.model_copy(update={"charts": [panel.charts[i] for i in indexes]})
-            frames[panel.name] = fetch_panel_data(store, experiment_id, shown, run_ids)
+            frames[panel.name] = scope_panel_data(store, scope, shown, experiments)
     return frames
+
+
+def experiment_names(store: DataStore[...], scope: RunScope) -> Mapping[int, str]:
+    """
+    What each experiment of `scope` is called in a run's name, once there is more than one: none for a single experiment.
+
+    Two experiments can each have a run called "fluffy-otter", so a run of several is named "experiment / run". Read once
+    for a page, not once for each panel it draws.
+    """
+    if len(scope) < 2:  # noqa: PLR2004
+        return {}
+    experiments = {experiment_id: store.get_experiment(experiment_id) for experiment_id in scope}
+    return {
+        experiment_id: experiment_display_name(experiment) if experiment else f"Experiment {experiment_id}"
+        for experiment_id, experiment in experiments.items()
+    }
+
+
+def scope_panel_data(
+    store: DataStore[...],
+    scope: RunScope,
+    panel: models.PanelInstance[Any, Any],
+    names: Mapping[int, str] | None = None,
+) -> PanelData:
+    """
+    Fetch just the data one panel needs of the runs in `scope`, a read of each experiment in it.
+
+    Every read stays one experiment's, on the indexes that lead with it, and is checked against what the viewer may see
+    of that experiment: how many experiments there are is bounded by how many runs a page draws. `names` are those of
+    `experiment_names`, which a caller drawing several panels reads once and passes to each.
+    """
+    parts = {
+        experiment_id: fetch_panel_data(store, experiment_id, panel, run_ids)
+        for experiment_id, run_ids in scope.items()
+    }
+    if len(parts) == 1:
+        return next(iter(parts.values()))
+    names = experiment_names(store, scope) if names is None else names
+    return PanelData.stacked([_named(part, names[experiment_id]) for experiment_id, part in parts.items()])
+
+
+def _named(part: PanelData, experiment_name: str) -> PanelData:
+    """`part` with each of its runs' names beginning with the name of the experiment: "experiment / run"."""
+    if part.run_names.empty:
+        return part
+    names = part.run_names.assign(
+        **{RUN_NAME_COLUMN: experiment_name + " / " + part.run_names[RUN_NAME_COLUMN]}
+    )
+    return replace(part, run_names=names)
 
 
 def _splits_metric_and_artifact_charts(requests: Sequence[models.DataRequest]) -> bool:
@@ -447,7 +539,11 @@ def fetch_panel_data(
             _Read(PanelRead.RUN_NAMES),
             lambda: pd.DataFrame.from_records(
                 [
-                    {"run_id": run.id, RUN_NAME_COLUMN: run_display_name(run)}
+                    {
+                        "run_id": run.id,
+                        RUN_NAME_COLUMN: run_display_name(run),
+                        EXPERIMENT_COLUMN: run.experiment_id,
+                    }
                     for run in store.get_runs(experiment_id, limit=None, run_ids=run_ids)
                 ]
             ),
@@ -530,15 +626,18 @@ def _series_band_frame(
     return build_series_band_dataframe(request, bands)
 
 
-def is_lightning_experiment(data_store: DataStore[...], experiment_id: int) -> bool:
+def any_lightning(data_store: DataStore[...], experiment_ids: Iterable[int]) -> bool:
     """
-    Whether `experiment_id`'s metrics were logged through `DLBoardLogger`.
+    Whether any of `experiment_ids`' metrics were logged through `DLBoardLogger`.
 
     Lightning-specific chart-autogen conventions (see `_chart_autogen.lightning_granularity`) only
     apply to those.
     """
-    experiment = data_store.get_experiment(experiment_id)
-    return experiment is not None and experiment.source == models.ExperimentSource.PYTORCH_LIGHTNING
+    return any(
+        (experiment := data_store.get_experiment(experiment_id)) is not None
+        and experiment.source == models.ExperimentSource.PYTORCH_LIGHTNING
+        for experiment_id in experiment_ids
+    )
 
 
 def _histogram_contents(cell: object) -> dict[str, Any] | None:

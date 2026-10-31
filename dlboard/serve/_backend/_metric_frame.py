@@ -120,6 +120,25 @@ class MetricFrame:
         )
         return cls(keys, wide)
 
+    @classmethod
+    def stacked(cls, frames: Iterable[MetricFrame]) -> MetricFrame:
+        """
+        One frame with the rows of every one of `frames`, which are of different runs (an experiment's each).
+
+        A key one of them lacks is blank in its rows. Unlike `merged`, the frames may share keys: it is the same
+        metrics logged by other runs. They may not share a run, whose rows would be one row's to say.
+        """
+        frames = list(frames)
+        if len(frames) <= 1:
+            return frames[0] if frames else cls.from_rows([])
+        wide = pd.concat([frame._frame for frame in frames], ignore_index=True)  # noqa: SLF001
+        if wide.duplicated(_INDEX).any():
+            msg = "Metrics of the same run cannot be stacked"
+            raise ValueError(msg)
+        return cls(
+            frozenset().union(*(frame.keys for frame in frames)), wide.sort_values(_INDEX, ignore_index=True)
+        )
+
     @property
     def run_id(self) -> pd.Series[int]:
         return self._frame[MetricColumn.RUN_ID]

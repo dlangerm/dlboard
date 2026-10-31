@@ -52,6 +52,7 @@ from dlboard.models._metric import (
 )
 from dlboard.models._panel_frame import (
     ARTIFACT_COLUMN_PREFIX,
+    EXPERIMENT_COLUMN,
     HISTOGRAM_COLUMN_PREFIX,
     HPARAM_COLUMN_PREFIX,
     IDENTITY_COLUMNS,
@@ -120,6 +121,7 @@ __all__ = [
     "DEFAULT_TAG_PRECISION",
     "DISPLAY_SECTION",
     "EVERY_KEY",
+    "EXPERIMENT_COLUMN",
     "FILE_KIND_TAG",
     "HISTOGRAM_COLUMN_PREFIX",
     "HPARAM_COLUMN_PREFIX",

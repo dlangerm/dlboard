@@ -33,6 +33,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from dlboard.models import (
     ARTIFACT_COLUMN_PREFIX,
     DEFAULT_RENDER_CONTEXT,
+    EXPERIMENT_COLUMN,
     HPARAM_COLUMN_PREFIX,
     RUN_NAME_COLUMN,
     ChartType,
@@ -68,8 +69,8 @@ from dlboard.serve._grid import (
     themed_grid_kwargs,
 )
 
-_IDENTITY_COLS = frozenset({MetricColumn.RUN_ID, RUN_NAME_COLUMN})
-_BOOKKEEPING_COLS = frozenset({*MetricColumn, RUN_NAME_COLUMN})
+_IDENTITY_COLS = frozenset({MetricColumn.RUN_ID, RUN_NAME_COLUMN, EXPERIMENT_COLUMN})
+_BOOKKEEPING_COLS = frozenset({*MetricColumn, RUN_NAME_COLUMN, EXPERIMENT_COLUMN})
 _NOT_METRIC_PREFIXES: typing.Final = (HPARAM_COLUMN_PREFIX, ARTIFACT_COLUMN_PREFIX)
 
 _GRID_TYPE: typing.Final = "dl-table-chart"

@@ -59,6 +59,8 @@ from dlboard.serve._pages._experiment import _panel_view as panel_view
 from dlboard.serve._pages._experiment._chart_editor import register_chart_editor_callbacks
 from dlboard.serve._pages._experiment._chart_suggestions import register_chart_suggestions_callbacks
 from dlboard.serve._pages._experiment._chart_view_state import register_chart_view_state_callbacks
+from dlboard.serve._pages._experiment._column_catalog import COMPARISON_CATALOGS, KEPT_CATALOGS
+from dlboard.serve._pages._experiment._kept_reads import KeptReads
 from dlboard.serve._pages._experiment._live_updates import register_live_update_callbacks
 from dlboard.serve._pages._experiment._notes import register_notes_callbacks
 from dlboard.serve._pages._experiment._paging import visible_open_panels
@@ -151,6 +153,9 @@ def register(app: Dash) -> None:
         serve_asset(app, kind, path.name, path.read_bytes())
 
     register_live_update_callbacks(app)
+    COMPARISON_CATALOGS.set(
+        app, KeptReads(kept=KEPT_CATALOGS)
+    )  # this app's own, like the chart editor's reads
 
     def _fetch_experiment_header(experiment_id: int) -> tuple[str, str]:
         store = get_data_store()

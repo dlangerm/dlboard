@@ -94,3 +94,30 @@ def test_latest_per_run_reads_every_run_of_a_frame_and_nothing_of_an_empty_one()
         11: {"loss": 112.0},
     }
     assert MetricFrame.from_rows([]).latest_per_run() == {}
+
+
+def test_stacked_frames_have_every_row_of_every_run_and_leave_the_keys_one_lacks_blank() -> None:
+    first = MetricFrame.from_rows(
+        [MetricRow(2, step, key, 1.0, "2026-01-01T00:00:00Z") for step in (0, 1) for key in ("loss", "acc")]
+    )
+    second = MetricFrame.from_rows([MetricRow(1, 0, "loss", 0.5, "2026-01-01T00:00:00Z")])
+
+    stacked = MetricFrame.stacked([first, second])
+
+    assert stacked.keys == {"loss", "acc"}
+    frame = stacked.to_frame()
+    assert list(zip(frame[MetricColumn.RUN_ID], frame[MetricColumn.STEP], strict=True)) == [
+        (1, 0),
+        (2, 0),
+        (2, 1),
+    ]
+    assert frame["acc"].isna().tolist() == [True, False, False]
+    assert MetricFrame.stacked([first]) is first
+    assert MetricFrame.stacked([]).keys == frozenset()
+
+
+def test_frames_of_the_same_run_cannot_be_stacked() -> None:
+    frame = MetricFrame.from_rows([MetricRow(1, 0, "loss", 0.5, "2026-01-01T00:00:00Z")])
+
+    with pytest.raises(ValueError, match="same run"):
+        MetricFrame.stacked([frame, frame])

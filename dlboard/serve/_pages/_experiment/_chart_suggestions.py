@@ -21,7 +21,6 @@ from pydantic import TypeAdapter
 
 from dlboard.models import ColumnKind
 from dlboard.serve import ClientsideScript, Icon, get_data_store, icon
-from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import ButtonId, DivId, ModalId, PatternId, StoreId, ValueId
 from dlboard.serve._pages._dash_helpers import CallbackStates, TriggeredId, require_triggered_id
 from dlboard.serve._pages._experiment import _ids as ids
@@ -46,6 +45,7 @@ from dlboard.serve._pages._experiment._chart_autogen import (
     visible_suggestions,
 )
 from dlboard.serve._pages._experiment._column_catalog import ColumnCatalog, single_value_metrics
+from dlboard.serve._pages._experiment._shown_runs import page_experiments
 
 if TYPE_CHECKING:
     from dash.development.base_component import Component
@@ -242,7 +242,6 @@ def chart_suggestion_shells() -> list[Component]:
 class _AutoPopulateCtx(edits.EditCtx):
     delimiter: Annotated[str | None, State(AUTO_POPULATE_DELIMITER_ID, "value")]
     mode: Annotated[str | None, State(AUTO_POPULATE_MODE_ID, "value")]
-    experiment_id: Annotated[int, State(constants.STATE_EXPERIMENT_ID, "data")]
 
 
 class _Page(NamedTuple):
@@ -395,15 +394,15 @@ def _listed(
     """
     curr_page = page_model.BasicExperimentPage.model_validate_json(page_json)
     store = get_data_store()
-    experiment_id = curr_page.experiment_id
+    experiments = page_experiments(store, curr_page)
     if catalog is None:
-        catalog = ColumnCatalog.load(store, experiment_id) if experiment_id is not None else ColumnCatalog()
+        catalog = ColumnCatalog.of_page(store, curr_page)
     suggestions = build_suggestions(
         find_uncharted_keys(curr_page.panels, catalog),
         catalog,
         delimiter=listing.delimiter or _DEFAULT_DELIMITER,
         mode=_SPLIT_MODE.validate_python(listing.mode),
-        lightning=experiment_id is not None and panel_data.is_lightning_experiment(store, experiment_id),
+        lightning=panel_data.any_lightning(store, experiments),
     )
     if listing.scope is not None:
         suggestions = [s for s in suggestions if s.panel_name == listing.scope]
@@ -447,11 +446,9 @@ def _suggestions_to_add(
     family its key (a template) names.
     """
     curr_page = page_model.BasicExperimentPage.model_validate_json(page_json)
-    experiment_id = curr_page.experiment_id
-    if experiment_id is None:
-        return ColumnCatalog(), []
     store = get_data_store()
-    catalog = ColumnCatalog.load(store, experiment_id)
+    experiments = page_experiments(store, curr_page)
+    catalog = ColumnCatalog.of_page(store, curr_page)
     uncharted = find_uncharted_keys(curr_page.panels, catalog)
     metrics = [key for kind, key in picked if kind is ColumnKind.METRIC]
     delimiter, split_mode = (
@@ -461,10 +458,10 @@ def _suggestions_to_add(
     suggestions = build_suggestions(
         UnchartedKeys(metrics=metrics, artifacts=uncharted.artifacts, histograms=uncharted.histograms),
         catalog,
-        single_value=single_value_metrics(store, experiment_id, metrics),
+        single_value=single_value_metrics(store, experiments, metrics),
         delimiter=delimiter,
         mode=split_mode,
-        lightning=panel_data.is_lightning_experiment(store, experiment_id),
+        lightning=panel_data.any_lightning(store, experiments),
     )
     bands = [
         band_suggestion(key, delimiter, split_mode) for kind, key in picked if kind is ColumnKind.SERIES_BAND
@@ -556,7 +553,7 @@ def _register_auto_populate(app: Dash) -> None:
         Input(AUTO_POPULATE_DELIMITER_ID, "value"),
         Input(AUTO_POPULATE_MODE_ID, "value"),
         State(AUTO_POPULATE_MODAL_ID, "opened"),
-        State(constants.STATE_EXPERIMENT_ID, "data"),
+        State(ids.STATE_PAGE_STORAGE, "data"),
         prevent_initial_call=True,
     )
     def preview_auto_populate(
@@ -564,14 +561,15 @@ def _register_auto_populate(app: Dash) -> None:
         delimiter: str | None,
         mode: str | None,
         opened: bool,  # noqa: FBT001
-        experiment_id: int,
+        page_json: str,
     ) -> tuple[bool | NoUpdate, Component, bool]:
         """Open the confirm modal, and keep its preview in step with the delimiter and grouping picked."""
         opening = cast("str | None", ctx.triggered_id) == panel_view.AUTO_POPULATE_OPEN_ID
         if (opening and not n_clicks) or (not opening and not opened):
             raise PreventUpdate
         store = get_data_store()
-        catalog = ColumnCatalog.load(store, experiment_id)
+        page = page_model.BasicExperimentPage.model_validate_json(page_json)
+        catalog = ColumnCatalog.of_page(store, page)
         if not catalog.has_chartable_keys:
             return True, dmc.Text(_NO_KEYS_MESSAGE, c="dimmed", size="sm"), True
         groups, left_out = limit_panel_groups(
@@ -579,7 +577,7 @@ def _register_auto_populate(app: Dash) -> None:
                 catalog,
                 delimiter=delimiter or _DEFAULT_DELIMITER,
                 mode=_SPLIT_MODE.validate_python(mode),
-                lightning=panel_data.is_lightning_experiment(store, experiment_id),
+                lightning=panel_data.any_lightning(store, page_experiments(store, page)),
             )
         )
         return True if opening else no_update, _render_auto_preview(groups, left_out=left_out), False
@@ -608,20 +606,21 @@ def _register_auto_populate(app: Dash) -> None:
         auto_populate_ctx = _AutoPopulateCtx.model_validate(states)
         if not n_clicks:
             raise PreventUpdate
-        experiment_id = auto_populate_ctx.experiment_id
         store = get_data_store()
-        catalog = ColumnCatalog.load(store, experiment_id)
+        shown = page_model.BasicExperimentPage.model_validate_json(auto_populate_ctx.page_json)
+        experiments = page_experiments(store, shown)
+        catalog = ColumnCatalog.of_page(store, shown)
         if not catalog.has_chartable_keys:
             raise ValueError(_NO_KEYS_MESSAGE)
         split_mode = _SPLIT_MODE.validate_python(auto_populate_ctx.mode)
-        lightning = panel_data.is_lightning_experiment(store, experiment_id)
+        lightning = panel_data.any_lightning(store, experiments)
 
         panels = build_auto_panels(
             catalog,
             delimiter=auto_populate_ctx.delimiter or _DEFAULT_DELIMITER,
             mode=split_mode,
             lightning=lightning,
-            single_value=lambda keys: single_value_metrics(store, experiment_id, keys),
+            single_value=lambda keys: single_value_metrics(store, experiments, keys),
         )
         page, container = edits.commit(
             auto_populate_ctx.page_json,
