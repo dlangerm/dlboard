@@ -11,8 +11,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: release
-  cancel-in-progress: false # don't cancel a release in progress if a new tag is pushed -- let it finish, since it's already running on the commit that was tagged.
+  group: release-${{ github.ref }} # cancel a tag that is in progress if it is pushed again but don't cancel an unrelated tag
+  cancel-in-progress: true
 
 jobs:
   check-version:
@@ -62,7 +62,7 @@ jobs:
       - run: uv run prek run --all-files --skip no-commit-to-branch
       - run: uv run pyrefly check
       - run: uv run playwright install --with-deps chromium
-      - run: uv run pytest --cov
+      - run: uv run pytest --cov -x
 
   # PyPI trusted publishing (OIDC, no stored token) -- one job per distribution, since each is a
   # separate PyPI project with its own trusted-publisher registration. See the PR description /

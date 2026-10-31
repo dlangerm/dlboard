@@ -57,9 +57,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-env
-      - run: uv run pytest -m "not browser and not postgres and not s3" --cov
+      - run: |
+          uv run pytest -m "not browser and not postgres and not s3" --cov --maxfail=3
       - run: uv run playwright install --with-deps chromium
-      - run: uv run pytest -m browser
+      - run: uv run pytest -m browser -x
       - run: uv run pytest --screenshots=check
       - if: failure()
         uses: ./.github/actions/recheck-failures
@@ -84,7 +85,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-env
-      - run: uv run pytest -m postgres
+      - run: uv run pytest -m postgres -x
       - if: failure()
         uses: ./.github/actions/recheck-failures
 
@@ -101,7 +102,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-env
-      - run: uv run pytest -m s3
+      - run: uv run pytest -m s3 -x
       - if: failure()
         uses: ./.github/actions/recheck-failures
 
