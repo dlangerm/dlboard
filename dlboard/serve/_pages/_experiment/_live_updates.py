@@ -197,7 +197,7 @@ def register_live_update_callbacks(app: Dash) -> None:
     # charts whose own data actually changed (never touching the accordion/tabs shell, closed
     # panels, or sibling charts sharing a panel), so new data appears without any page/panel-level
     # flash a coarser rebuild would cause. Moves `STATE_LAST_KNOWN_REVISION` on, which the navbar
-    # run-comparison table (`_run_comparison_table.py`) listens to and reads its own data for.
+    # run-comparison table (`_runs_table.py`) listens to and reads its own data for.
     #
     # Each open *panel* is still fetched only once per tick (`fetch_panel_data`, the same call
     # the initial render makes) -- "Auto-generate charts" routinely groups several charts sharing a

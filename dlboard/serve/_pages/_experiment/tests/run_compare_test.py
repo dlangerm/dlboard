@@ -22,7 +22,7 @@ from dlboard.serve._pages._experiment._run_compare import (
     comparison_rows,
     filtered_index,
     load_compared,
-    load_comparison,
+    load_run_compare,
     run_field,
 )
 
@@ -133,7 +133,7 @@ def test_filtered_index_filters_by_mode_and_search(
     assert [entry.key for entry in filtered_index(_index(), mode, search, _HPARAMS)] == expected
 
 
-def test_load_comparison_reads_the_picked_runs_latest_values_and_ignores_foreign_ones(
+def test_load_run_compare_reads_the_picked_runs_latest_values_and_ignores_foreign_ones(
     store: SQLLiteStore, experiment_id: int
 ) -> None:
     project = store.create_project(models.NewProject(name="other", description="d"))
@@ -155,7 +155,7 @@ def test_load_comparison_reads_the_picked_runs_latest_values_and_ignores_foreign
             ]
         )
 
-    comparison = load_comparison(store, experiment_id, [runs[2].id, foreign.id, runs[0].id])
+    comparison = load_run_compare(store, experiment_id, [runs[2].id, foreign.id, runs[0].id])
 
     # Only this experiment's runs, in the order picked (the first is the baseline), and not the unpicked run.
     assert [run.id for run in comparison.runs] == [runs[2].id, runs[0].id]
@@ -165,11 +165,13 @@ def test_load_comparison_reads_the_picked_runs_latest_values_and_ignores_foreign
     ]
 
 
-def test_load_comparison_copes_with_runs_that_logged_nothing(store: SQLLiteStore, experiment_id: int) -> None:
+def test_load_run_compare_copes_with_runs_that_logged_nothing(
+    store: SQLLiteStore, experiment_id: int
+) -> None:
     run = store.create_run(models.NewRun(experiment_id=experiment_id))
 
-    assert load_comparison(store, experiment_id, []).runs == []
-    comparison = load_comparison(store, experiment_id, [run.id])
+    assert load_run_compare(store, experiment_id, []).runs == []
+    comparison = load_run_compare(store, experiment_id, [run.id])
     assert ([r.id for r in comparison.runs], comparison.index.entries) == ([run.id], [])
 
 
@@ -188,7 +190,7 @@ def test_a_page_lists_its_keys_and_reads_only_their_values(store: SQLLiteStore, 
                 )
             ]
         )
-    comparison = load_comparison(store, experiment_id, [first.id, second.id])
+    comparison = load_run_compare(store, experiment_id, [first.id, second.id])
 
     def page(number: int) -> ComparePage:
         return comparison_page(
