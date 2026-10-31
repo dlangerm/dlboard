@@ -6,6 +6,7 @@ import dataclasses
 import typing
 
 from dlboard.models._metric import MetricReduction, SeriesBand
+from dlboard.models._pin import PinColor
 
 SUMMARY_RUNS: typing.Final = 100
 """
@@ -353,6 +354,78 @@ class DataStore(typing.Protocol[_P]):
 
     def delete_comment(self, comment_id: int, author_id: int) -> None:
         """Delete one of `author_id`'s own notes (bumping `notes_revision`); never anyone else's."""
+        ...
+
+    def pin_runs(
+        self,
+        pinned_by: int,
+        run_ids: frozenset[int],
+        color: PinColor = PinColor.PLAIN,
+    ) -> None:
+        """
+        Pin `run_ids` for `pinned_by` in `color`.
+
+        A run `pinned_by` already pinned in that colour keeps its pin. Raises for a run that does not exist or has been deleted.
+        """
+        ...
+
+    def unpin_runs(self, pinned_by: int, run_ids: frozenset[int], color: PinColor) -> None:
+        """Remove `pinned_by`'s pin of `color` from each of `run_ids`; never anyone else's, nor another colour's."""
+        ...
+
+    def run_experiments(self, run_ids: frozenset[int]) -> dict[int, int]:
+        """The experiment each of `run_ids` is of, whether or not it is deleted; a run that does not exist is left out."""
+        ...
+
+    def pins_of(
+        self, experiment_id: int, *, run_ids: frozenset[int] | None
+    ) -> dict[int, list[models.NamedPin]]:
+        """The pins on an experiment's (non-deleted) runs, by run, with who pinned each: only `run_ids`' if given, `None` being every run's."""
+        ...
+
+    def list_pinned_runs(  # noqa: PLR0913 -- one keyword per filter of the pinned-runs list
+        self,
+        project_id: int,
+        *,
+        colors: frozenset[PinColor] | None = None,
+        pinned_by: frozenset[int] | None = None,
+        experiment_id: int | None = None,
+        name_contains: str = "",
+        limit: int = 25,
+        offset: int = 0,
+    ) -> models.PinnedRuns:
+        """
+        A page of a project's pinned (non-deleted) runs, the one pinned last first, and how many runs matched in all.
+
+        A run is listed once however many pins it has, with every one of them. It matches if any of its pins is of
+        `colors`, by `pinned_by`, in `experiment_id`, and the run's name (or id) has `name_contains` in it, whatever its
+        case, if each is given; `None` for any of them is no filter.
+        """
+        ...
+
+    def pin_counts(self, project_id: int) -> dict[PinColor, int]:
+        """How many of a project's (non-deleted) runs are pinned in each colour by anyone; a colour nobody used is left out."""
+        ...
+
+    def pinned_run_ids(  # noqa: PLR0913 -- the filters of `list_pinned_runs`, and how many runs
+        self,
+        project_id: int,
+        *,
+        colors: frozenset[PinColor] | None = None,
+        pinned_by: frozenset[int] | None = None,
+        experiment_id: int | None = None,
+        name_contains: str = "",
+        limit: int,
+    ) -> list[int]:
+        """
+        The runs `list_pinned_runs` would list for these filters, the one pinned last first; at most `limit`.
+
+        The ids alone, for what acts on the runs (opening them as a comparison) and does not draw them.
+        """
+        ...
+
+    def list_pinners(self, project_id: int) -> list[models.Pinner]:
+        """Who has pinned a run of a project (not a deleted one), by username: the people a pinned-runs filter can offer."""
         ...
 
     def list_users(self) -> list[models.User]:

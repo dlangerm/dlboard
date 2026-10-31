@@ -558,6 +558,96 @@ class AuthorizingDataStore(models.DataStore[...]):
         self._require_self_or(author_id, Scope.ALL)
         self._inner.delete_comment(comment_id, author_id)
 
+    # -- Pins ---------------------------------------------------------------------------------------
+    #
+    # A pin is attribution, like a note: anyone who can see a run can pin it, as themselves, and
+    # everyone in the project sees who did.
+
+    def pin_runs(
+        self,
+        pinned_by: int,
+        run_ids: frozenset[int],
+        color: models.PinColor = models.PinColor.PLAIN,
+    ) -> None:
+        if pinned_by != self._actor.id:
+            _forbid("a run can only be pinned as yourself")
+        # Two reads whatever the number of runs: which experiments they are of, then who may see each (cached).
+        experiments = self._inner.run_experiments(run_ids)
+        if self._enforce and experiments.keys() != run_ids:
+            _forbid("a run that does not exist, or is not yours to see, cannot be pinned")
+        for project_id in {self._experiment_project(e) for e in set(experiments.values())}:
+            self._require(project_id, ProjectRole.VIEWER)
+        self._inner.pin_runs(pinned_by, run_ids, color)
+
+    def unpin_runs(self, pinned_by: int, run_ids: frozenset[int], color: models.PinColor) -> None:
+        self._require_self_or(pinned_by, Scope.ALL)
+        self._inner.unpin_runs(pinned_by, run_ids, color)
+
+    def run_experiments(self, run_ids: frozenset[int]) -> dict[int, int]:
+        """Only the runs of experiments the actor can see: which experiment a run is of is not for anyone to ask."""
+        found = self._inner.run_experiments(run_ids)
+        return {
+            run_id: experiment_id
+            for run_id, experiment_id in found.items()
+            if self._can(self._experiment_project(experiment_id), ProjectRole.VIEWER)
+        }
+
+    def pins_of(
+        self, experiment_id: int, *, run_ids: frozenset[int] | None
+    ) -> dict[int, list[models.NamedPin]]:
+        self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
+        return self._inner.pins_of(experiment_id, run_ids=run_ids)
+
+    def pinned_run_ids(  # noqa: PLR0913 -- the filters of `list_pinned_runs`, and how many runs
+        self,
+        project_id: int,
+        *,
+        colors: frozenset[models.PinColor] | None = None,
+        pinned_by: frozenset[int] | None = None,
+        experiment_id: int | None = None,
+        name_contains: str = "",
+        limit: int,
+    ) -> list[int]:
+        self._require(project_id, ProjectRole.VIEWER)
+        return self._inner.pinned_run_ids(
+            project_id,
+            colors=colors,
+            pinned_by=pinned_by,
+            experiment_id=experiment_id,
+            name_contains=name_contains,
+            limit=limit,
+        )
+
+    def list_pinners(self, project_id: int) -> list[models.Pinner]:
+        self._require(project_id, ProjectRole.VIEWER)
+        return self._inner.list_pinners(project_id)
+
+    def list_pinned_runs(  # noqa: PLR0913 -- one keyword per filter of the pinned-runs list
+        self,
+        project_id: int,
+        *,
+        colors: frozenset[models.PinColor] | None = None,
+        pinned_by: frozenset[int] | None = None,
+        experiment_id: int | None = None,
+        name_contains: str = "",
+        limit: int = 25,
+        offset: int = 0,
+    ) -> models.PinnedRuns:
+        self._require(project_id, ProjectRole.VIEWER)
+        return self._inner.list_pinned_runs(
+            project_id,
+            colors=colors,
+            pinned_by=pinned_by,
+            experiment_id=experiment_id,
+            name_contains=name_contains,
+            limit=limit,
+            offset=offset,
+        )
+
+    def pin_counts(self, project_id: int) -> dict[models.PinColor, int]:
+        self._require(project_id, ProjectRole.VIEWER)
+        return self._inner.pin_counts(project_id)
+
     # -- Soft-delete, restore, purge ------------------------------------------------------------------
     #
     # The `actor` every one of these takes must be the one this store is bound to (see `_bound`) --

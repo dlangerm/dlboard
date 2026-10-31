@@ -19,12 +19,13 @@ if TYPE_CHECKING:
 
 pytestmark = pytest.mark.postgres
 
-_SEEKS = {
+_SEEKS: dict[str, str | tuple[str, ...]] = {
     "UnderlyingMetricTableEntry": "(experiment_id, key, run_id, step)",
     "UnderlyingHistogramTableEntry": "(experiment_id, key, run_id, step)",
     "Artifact": "(experiment_id, key, run_id, step)",
     "HyperParams": "(experiment_id, run_id)",
     "Run": "(experiment_id, created_at)",
+    "RunPin": ("(experiment_id, pinned_at)", "(run_id, pinned_by, color)"),
 }
 """What each table an experiment page reads is sought by: the index that leads with the experiment (or the key, `id`)."""
 _BY_RUN = frozenset({"UnderlyingMetricTableEntry", "UnderlyingHistogramTableEntry", "Artifact"})
@@ -52,6 +53,8 @@ _READS: dict[str, Callable[[PostgresStore, int], object]] = {
     "get_runs, every one": lambda s, e: list(s.get_runs(e, limit=None, run_ids=None)),
     "fetch_hyperparams": lambda s, e: list(s.fetch_hyperparams(e, run_ids=None)),
     "fetch_hyperparams, some runs": lambda s, e: list(s.fetch_hyperparams(e, run_ids=frozenset({1, 2}))),
+    "pins_of": lambda s, e: s.pins_of(e, run_ids=None),
+    "pins_of, some runs": lambda s, e: s.pins_of(e, run_ids=frozenset({1, 2})),
 }
 
 
@@ -102,12 +105,11 @@ def _plan(
     return list(_nodes(plan)), {str(name): str(definition) for name, definition in definitions}
 
 
-@pytest.mark.parametrize("read", _READS)
-def test_a_read_seeks_a_table_by_experiment(
-    store: PostgresStore, postgres_settings: PostgresSettings, experiment_id: int, read: str
+def _assert_seeks(
+    store: PostgresStore, settings: PostgresSettings, statement: str, parameters: dict[str, object]
 ) -> None:
-    statement, parameters = _recorded(store, lambda: _READS[read](store, experiment_id))[-1]
-    nodes, indexes = _plan(store, postgres_settings, statement, parameters)
+    """`statement` scans none of `_SEEKS`' tables, and reaches each through an index that leads with its seek."""
+    nodes, indexes = _plan(store, settings, statement, parameters)
 
     scanned = {n["Relation Name"] for n in nodes if n["Node Type"] == "Seq Scan"} & _SEEKS.keys()
     assert not scanned
@@ -116,7 +118,47 @@ def test_a_read_seeks_a_table_by_experiment(
     for index in {n["Index Name"] for n in nodes if "Index Name" in n}:
         for table, seek in _SEEKS.items():
             if f'"{table}"' in indexes[index]:
-                assert indexes[index].endswith((seek, "(id)")), index
+                assert indexes[index].endswith((*([seek] if isinstance(seek, str) else seek), "(id)")), index
+
+
+@pytest.mark.parametrize("read", _READS)
+def test_a_read_seeks_a_table_by_experiment(
+    store: PostgresStore, postgres_settings: PostgresSettings, experiment_id: int, read: str
+) -> None:
+    statement, parameters = _recorded(store, lambda: _READS[read](store, experiment_id))[-1]
+    _assert_seeks(store, postgres_settings, statement, parameters)
+
+
+def test_listing_a_projects_pins_seeks_the_pin_table_by_experiment(
+    store: PostgresStore, postgres_settings: PostgresSettings, experiment_id: int
+) -> None:
+    experiment = store.get_experiment(experiment_id)
+    assert experiment is not None
+    me = store.get_or_create_user(models.Principal.unverified("me"))
+    run = store.create_run(models.NewRun(experiment_id=experiment_id))
+    store.pin_runs(me.id, frozenset({run.id}))
+
+    statements = _recorded(
+        store,
+        lambda: (
+            store.list_pinned_runs(
+                experiment.project_id,
+                colors=frozenset({models.PinColor.PLAIN}),
+                pinned_by=frozenset({me.id}),
+                name_contains="a",
+            ),
+            store.pinned_run_ids(experiment.project_id, name_contains="a", limit=10),
+            store.pin_counts(experiment.project_id),
+            store.list_pinners(experiment.project_id),
+        ),
+    )
+
+    reads = [(s, p) for s, p in statements if '"RunPin"' in s]
+    assert (
+        len(reads) >= 4
+    )  # the count and the page, the runs, and who pinned; the experiments are fetched by `id`
+    for statement, parameters in reads:
+        _assert_seeks(store, postgres_settings, statement, parameters)
 
 
 def test_deleting_and_purging_a_run_seek_the_per_step_tables_by_run(

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import inspect
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NoReturn
 
 import pendulum
 import pytest
@@ -172,6 +172,18 @@ _OPERATIONS: dict[str, tuple[ProjectRole, Callable[[AuthorizingDataStore, _Chain
         ProjectRole.VIEWER,
         lambda s, c: s.fetch_metrics(c[1].id, run_ids=None, reduction=models.MetricReduction.LATEST),
     ),
+    "read the pins of an experiment": (ProjectRole.VIEWER, lambda s, c: s.pins_of(c[1].id, run_ids=None)),
+    "list the pinned runs of a project with their pins": (
+        ProjectRole.VIEWER,
+        lambda s, c: s.list_pinned_runs(c[0].id),
+    ),
+    "count a project's pinned runs by colour": (ProjectRole.VIEWER, lambda s, c: s.pin_counts(c[0].id)),
+    "list the ids of the pinned runs of a project": (
+        ProjectRole.VIEWER,
+        lambda s, c: s.pinned_run_ids(c[0].id, limit=10),
+    ),
+    "list who pinned in a project": (ProjectRole.VIEWER, lambda s, c: s.list_pinners(c[0].id)),
+    "pin a run": (ProjectRole.VIEWER, lambda s, c: s.pin_runs(s.actor.id, frozenset({c[2].id}))),
     "create a run": (ProjectRole.EDITOR, lambda s, c: s.create_run(models.NewRun(experiment_id=c[1].id))),
     "log metrics": (ProjectRole.EDITOR, lambda s, c: s.log_metrics([_metric(c[1].id, c[2].id)])),
     "finish a run": (
@@ -201,6 +213,50 @@ def test_each_operation_needs_its_project_role(
     else:
         with pytest.raises(PermissionError):
             run_operation(as_bob, chain)
+
+
+def _refuse_a_run_read(*_args: object) -> NoReturn:
+    pytest.fail("a run was read by itself")
+
+
+def test_pinning_many_runs_authorizes_with_a_fixed_number_of_reads_and_which_experiment_a_run_is_of_is_not_for_everyone(
+    store: SQLLiteStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bob, (project, experiment, run) = _shared_chain(store, ProjectRole.VIEWER)
+    runs = {run.id, *(store.create_run(models.NewRun(experiment_id=experiment.id)).id for _ in range(40))}
+    elsewhere = store.create_experiment(
+        models.NewExperiment(project_id=store.create_project(models.NewProject(name="p2", description="")).id)
+    )
+    hidden = store.create_run(models.NewRun(experiment_id=elsewhere.id))
+    as_bob = _as(store, bob)
+    monkeypatch.setattr(store, "get_run", _refuse_a_run_read)
+
+    as_bob.pin_runs(bob.id, frozenset(runs))
+
+    assert as_bob.run_experiments(frozenset({*runs, hidden.id, 999_999})) == dict.fromkeys(
+        runs, experiment.id
+    )
+    with pytest.raises(PermissionError):
+        as_bob.pin_runs(bob.id, frozenset({run.id, hidden.id}))
+    assert len(store.pins_of(experiment.id, run_ids=None)) == len(runs)
+    assert project.id != elsewhere.project_id
+
+
+def test_a_pin_is_only_ever_its_own_pinners(store: SQLLiteStore) -> None:
+    bob, (_project, _experiment, run) = _shared_chain(store, ProjectRole.VIEWER)
+    alice = store.find_user("alice")
+    assert alice is not None
+    as_bob = _as(store, bob)
+    store.pin_runs(alice.id, frozenset({run.id}))
+
+    with pytest.raises(PermissionError, match="as yourself"):
+        as_bob.pin_runs(alice.id, frozenset({run.id}), models.PinColor.RED)
+    with pytest.raises(PermissionError):
+        as_bob.unpin_runs(alice.id, frozenset({run.id}), models.PinColor.PLAIN)
+
+    as_bob.pin_runs(bob.id, frozenset({run.id}))
+    as_bob.unpin_runs(bob.id, frozenset({run.id}), models.PinColor.PLAIN)
+    assert [p.pin.pinned_by for p in store.pins_of(run.experiment_id, run_ids=None)[run.id]] == [alice.id]
 
 
 def test_a_project_you_cannot_see_reads_as_missing(store: SQLLiteStore) -> None:
