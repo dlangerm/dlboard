@@ -21,6 +21,8 @@ class RunListSurface(StrEnum):
 
     EXPERIMENT = "experiment"
     """The sidebar of an experiment page: the experiment's runs, drawn or not."""
+    PROJECT = "project"
+    """The sidebar of a project page: the runs pinned in the project, from any of its experiments."""
 
 
 def request_store_id(surface: RunListSurface) -> StoreId[RunList]:

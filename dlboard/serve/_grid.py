@@ -44,6 +44,12 @@ CHOICE_RENDERER: Final = "DlboardChoice"
 KEY_PICKER_EDITOR: Final = "DlboardKeyPicker"
 """How a name is edited in a cell: typed in, with the names it can be (`options` of `cellEditorParams`) suggested."""
 
+PINS_RENDERER: Final = "DlboardPins"
+"""How a run's pins are shown in a cell: one pin filled with the colours it is pinned in, and an editor to change yours. Takes `cellRendererParams` of `colors`."""
+
+PINS_TOOLTIP: Final = "DlboardPinsTooltip"
+"""How a run's pins are shown in a tooltip: a pin in each colour and who pinned the run in it."""
+
 EYE_RENDERER: Final = "DlboardEye"
 """How a run is drawn or hidden in a cell: an eye, open if the cell's value is true. A click is reported as the grid's `cellRendererData`."""
 

@@ -24,11 +24,7 @@ from structlog.stdlib import get_logger
 
 from dlboard import models
 from dlboard.models import MetricColumn
-from dlboard.serve import (
-    ClientsideScript,
-    Icon,
-    get_data_store,
-)
+from dlboard.serve import ClientsideScript, Icon, get_current_user, get_data_store
 from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import ButtonId, StoreId, ValueId
 from dlboard.serve._grid import column_def, infer_column_dtype
@@ -52,6 +48,14 @@ from dlboard.serve._pages._experiment._paging import Paging
 from dlboard.serve._pages._experiment._run_compare import COMPARE_MODAL_ID, COMPARE_RUNS_ID, MAX_COMPARED_RUNS
 from dlboard.serve._pages._experiment._shown_runs import ShownRunsSettings, shown_run_ids
 from dlboard.serve._pages._experiment._views import VIEW_NOTIFY_ID
+from dlboard.serve._pages._pins._pin_filter import pin_filter, pin_filter_id, register_pin_filter
+from dlboard.serve._pages._pins._pin_menus import pin_menus
+from dlboard.serve._pages._pins._row_pins import (
+    PINS_FIELD,
+    experiment_pin_cells,
+    pin_column_def,
+    pin_or_unpin,
+)
 from dlboard.serve._pages._run_list import (
     RunAction,
     RunActionRequest,
@@ -86,12 +90,13 @@ from dlboard.serve._pages._run_list._rows import (
 from dlboard.serve._pages._run_list._table import run_grid
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
 
     import dash_ag_grid as dag
     from dash.development.base_component import Component
 
     from dlboard.models import DataStore, Run
+    from dlboard.serve._pages._pins._pin_view import PinCell
 
 _log = get_logger(__name__)
 
@@ -124,6 +129,7 @@ def _build_hparam_rows(
     listed: _Listed,
     hparams_by_run: dict[int, models.HyperParams],
     latest_metrics: dict[int, dict[str, float]],
+    pins: Mapping[int, list[PinCell]],
 ) -> list[dict[str, Any]]:
     """One row per run, whether or not it has logged hyperparameters or metrics yet."""
     rows: list[dict[str, Any]] = []
@@ -132,6 +138,7 @@ def _build_hparam_rows(
             DRAWN_FIELD: run.id in listed.selection.shown,
             FOCUSED_FIELD: run.id == listed.selection.focus,
             HREF_FIELD: experiment_href(experiment_id, view_id=listed.view_id, run_id=run.id),
+            PINS_FIELD: [cell.model_dump(mode="json") for cell in pins.get(run.id, [])],
             **run_fields(run),
         }
         hparam = hparams_by_run.get(run.id)
@@ -147,6 +154,7 @@ def _load_hparam_view_data(
     experiment_id: int,
     listed: _Listed,
     selected: list[str],
+    pins: Mapping[int, list[PinCell]],
 ) -> tuple[list[str], list[str], list[dict[str, Any]]]:
     """
     Build displayable rows for the `listed` runs, enriched with hparams and any selected last-step metrics.
@@ -172,7 +180,7 @@ def _load_hparam_view_data(
         if wanted
         else {}
     )
-    rows = _build_hparam_rows(experiment_id, listed, hparams_by_run, latest)
+    rows = _build_hparam_rows(experiment_id, listed, hparams_by_run, latest, pins)
     return hparam_keys, metric_keys, rows
 
 
@@ -201,6 +209,7 @@ def _build_hparam_datatable(
     column_defs = [
         eye_column_def(),
         name_column_def(swatch=True),
+        pin_column_def(),
         status_column_def(),
         *(column_def(key, infer_column_dtype(rows, key)) for key in selected),
     ]
@@ -212,7 +221,7 @@ def _render_hparam_panel(
     hparam_keys: list[str],
     metric_keys: list[str],
     selected: list[str],
-    selection: _Selection,
+    head: Sequence[Component],
 ) -> Component:
     """
     The runs table, with the bar of actions on the rows selected in it, plus a Columns picker collapsed behind an icon so it doesn't permanently eat a row above the table it configures.
@@ -286,65 +295,88 @@ def _render_hparam_panel(
                 simple_action(RunListSurface.EXPERIMENT, RunAction.DRAW, "Show", icon_name=Icon.EYE),
                 simple_action(RunListSurface.EXPERIMENT, RunAction.HIDE, "Hide", icon_name=Icon.EYE_OFF),
                 simple_action(RunListSurface.EXPERIMENT, RunAction.DIFF, "Diff", icon_name=Icon.COMPARE),
+                *pin_menus(RunListSurface.EXPERIMENT),
                 simple_action(
                     RunListSurface.EXPERIMENT, RunAction.DELETE, "Delete", icon_name=Icon.DELETE, color="red"
                 ),
             ),
-            html.Div(_run_head(selection), id=NAVBAR_RUN_HEAD_ID),
+            html.Div(head, id=NAVBAR_RUN_HEAD_ID),
             html.Div(table, id=NAVBAR_HPARAM_TABLE_BODY_ID),
         ]
     )
 
 
-def _run_head(selection: _Selection) -> list[Component]:
-    """What is said about what is drawn: the runs logged after it, and the way back to the view's own. Nothing if the view draws its newest."""
-    if not selection.chosen:
-        return []
+def _run_head(selection: _Selection, pin_chips: Sequence[Component] = ()) -> list[Component]:
+    """
+    What sits above the table and changes with what is drawn or pinned.
+
+    The runs logged after the drawn ones, the way back to the view's own, and the pin chips that find a pinned run. Redrawn by
+    the actions that change any of it, in place of the list.
+    """
+    drawn: list[Component] = (
+        [
+            dmc.Group(
+                [
+                    dmc.Text("Drawing the runs you picked", size="xs", c="dimmed"),
+                    *(
+                        [dmc.Text(f"{selection.newer_hidden} newer not drawn", size="xs", c="orange")]
+                        if selection.newer_hidden
+                        else []
+                    ),
+                    dmc.Button(
+                        f"Newest {ShownRunsSettings().default_shown_runs}",
+                        id=NAVBAR_NEWEST_RUNS_ID,
+                        n_clicks=0,
+                        variant="subtle",
+                        size="compact-xs",
+                    ),
+                ],
+                justify="space-between",
+                gap="xs",
+                wrap="nowrap",
+            )
+        ]
+        if selection.chosen
+        else []
+    )
+    return [*drawn, *pin_chips]
+
+
+def _pin_chips(store: DataStore[...], experiment_id: int, chips: Sequence[str]) -> list[Component]:
+    """The pin chips for the colours some run of the experiment is pinned in, with the ones the grid is filtered to picked."""
+    present = {
+        cell.color
+        for cells in experiment_pin_cells(store, experiment_id, get_current_user().id).values()
+        for cell in cells
+    }
     return [
-        dmc.Group(
-            [
-                dmc.Text("Drawing the runs you picked", size="xs", c="dimmed"),
-                *(
-                    [dmc.Text(f"{selection.newer_hidden} newer not drawn", size="xs", c="orange")]
-                    if selection.newer_hidden
-                    else []
-                ),
-                dmc.Button(
-                    f"Newest {ShownRunsSettings().default_shown_runs}",
-                    id=NAVBAR_NEWEST_RUNS_ID,
-                    n_clicks=0,
-                    variant="subtle",
-                    size="compact-xs",
-                ),
-            ],
-            justify="space-between",
-            gap="xs",
-            wrap="nowrap",
-        )
+        chip for chip in [pin_filter(RunListSurface.EXPERIMENT, present, value=chips)] if chip is not None
     ]
 
 
 def _head_and_signature(
-    store: DataStore[...], page: page_model.BasicExperimentPage, experiment_id: int
+    store: DataStore[...], page: page_model.BasicExperimentPage, experiment_id: int, chips: Sequence[str]
 ) -> tuple[list[Component], str]:
     """
     The head as `page` draws it now, and the signature the list is drawn under.
 
-    Nothing is focused: a draw or hide clears a focus. The action that changed what is drawn stores this signature, so the list's
-    own render sees nothing to draw again.
+    Nothing is focused: a draw or hide clears a focus. The action that changed what is drawn or pinned stores this signature
+    itself, so the list's own render sees nothing to draw again.
     """
     ref = repo.ref_of(page)
     runs, selection, selected = _load_hparam_panel_settings(store, experiment_id, ref, None)
     hparams = list(store.fetch_hyperparams(experiment_id, run_ids=None))
     listed = _Listed(runs, hparams, selection, ref.view_id if isinstance(ref, repo.ExperimentRef) else None)
-    return _run_head(selection), _render_signature(experiment_id, listed, selected)
+    return _run_head(selection, _pin_chips(store, experiment_id, chips)), _render_signature(
+        experiment_id, listed, selected
+    )
 
 
 def _head_fields(
-    store: DataStore[...], page: page_model.BasicExperimentPage, experiment_id: int
+    store: DataStore[...], page: page_model.BasicExperimentPage, experiment_id: int, chips: Sequence[str]
 ) -> dict[str, Any]:
     """The head and the signature `_head_and_signature` gives, as the fields of an action's `_Outputs`."""
-    head, signature = _head_and_signature(store, page, experiment_id)
+    head, signature = _head_and_signature(store, page, experiment_id, chips)
     return {"head": head, "signature": signature}
 
 
@@ -468,6 +500,7 @@ def _register_hparam_table(app: Dash) -> None:
         State(ids.STATE_VIEW_ID, "data", allow_optional=True),
         State(ids.PANEL_PAGING_ID, "data", allow_optional=True),
         State(NAVBAR_HPARAM_DATATABLE_ID, "selectedRows", allow_optional=True),
+        State(pin_filter_id(RunListSurface.EXPERIMENT), "value", allow_optional=True),
         prevent_initial_call=True,
     )
     def render_navbar_hparams(  # noqa: PLR0913 -- the inputs the table is drawn from
@@ -478,6 +511,7 @@ def _register_hparam_table(app: Dash) -> None:
         view_id: int | None,
         paging_json: str | None,
         selected_rows: list[dict[str, Any]] | dict[str, Any] | None,
+        chips: list[str] | None,
     ) -> dmc.Stack:
         if experiment_id is None:
             raise PreventUpdate
@@ -520,7 +554,9 @@ def _register_hparam_table(app: Dash) -> None:
         if signature == prev_signature:
             raise PreventUpdate
 
-        hparam_keys, metric_keys, rows = _load_hparam_view_data(store, experiment_id, listed, selected)
+        # The pins are read only for a list that is drawn; the chips are what the grid is filtered to, kept across a redraw.
+        pins = experiment_pin_cells(store, experiment_id, get_current_user().id)
+        hparam_keys, metric_keys, rows = _load_hparam_view_data(store, experiment_id, listed, selected, pins)
 
         # Selecting runs is work in progress, and the table is drawn again when a run starts or a choice changes under it:
         # what was selected stays so.
@@ -532,7 +568,7 @@ def _register_hparam_table(app: Dash) -> None:
                     hparam_keys,
                     metric_keys,
                     selected,
-                    selection,
+                    _run_head(selection, _pin_chips(store, experiment_id, chips or [])),
                 ),
                 Store(id=NAVBAR_HPARAM_SIGNATURE_ID, data=signature),
             ],
@@ -581,10 +617,11 @@ def _register_newest_runs(app: Dash) -> None:
         Input(NAVBAR_NEWEST_RUNS_ID, "n_clicks", allow_optional=True),
         State(ids.STATE_PAGE_STORAGE, "data"),
         State(ids.PANEL_PAGING_ID, "data"),
+        State(pin_filter_id(RunListSurface.EXPERIMENT), "value", allow_optional=True),
         prevent_initial_call=True,
     )
     def show_newest_runs(
-        n_clicks: int | None, page_json: str, paging_json: str
+        n_clicks: int | None, page_json: str, paging_json: str, chips: list[str] | None
     ) -> tuple[str, html.Div, dict[str, Any], list[Component], str]:
         if not n_clicks:
             raise PreventUpdate
@@ -606,7 +643,7 @@ def _register_newest_runs(app: Dash) -> None:
             page.model_dump_json(),
             container,
             _drawn_rows(shown_before, shown_now, focus).dump(),
-            *_head_and_signature(store, page, experiment_id),
+            *_head_and_signature(store, page, experiment_id, chips or []),
         )
 
 
@@ -664,6 +701,9 @@ class _Act(CallbackStates):
     page_json: Annotated[str, State(ids.STATE_PAGE_STORAGE, "data")]
     paging_json: Annotated[str, State(ids.PANEL_PAGING_ID, "data")]
     experiment_id: Annotated[int, State(constants.STATE_EXPERIMENT_ID, "data")]
+    chips: Annotated[
+        list[str] | None, State(pin_filter_id(RunListSurface.EXPERIMENT), "value", allow_optional=True)
+    ]
 
 
 def _draw_or_hide(store: DataStore[...], request: RunActionRequest, act: _Act) -> _Outputs:
@@ -703,7 +743,7 @@ def _draw_or_hide(store: DataStore[...], request: RunActionRequest, act: _Act) -
         page_json=page.model_dump_json(),
         container=container,
         row_updates=_drawn_rows(shown_before, now, paging.focus).dump(),
-        **_head_fields(store, page, act.experiment_id),
+        **_head_fields(store, page, act.experiment_id, act.chips or []),
     )
 
 
@@ -749,6 +789,14 @@ def _register_run_actions(app: Dash) -> None:
                 asked = ask_to_delete(request.run_ids)
                 return _Outputs(
                     delete_opened=asked.opened, delete_body=asked.body, delete_pending=asked.pending
+                ).outputs()
+            case RunAction.PIN | RunAction.UNPIN:
+                pinned = pin_or_unpin(request, NAVBAR_HPARAM_DATATABLE_ID)
+                page = page_model.BasicExperimentPage.model_validate_json(act.page_json)
+                return _Outputs(
+                    row_updates=pinned.rows,
+                    notices=pinned.notice,
+                    **_head_fields(get_data_store(), page, act.experiment_id, act.chips or []),
                 ).outputs()
 
     register_delete(app, RunListSurface.EXPERIMENT, notify=VIEW_NOTIFY_ID)
@@ -799,5 +847,6 @@ def register_runs_table_callbacks(app: Dash) -> None:
     _register_newest_runs(app)
     register_run_list(app, RunListSurface.EXPERIMENT, NAVBAR_HPARAM_DATATABLE_ID)
     register_row_updates(app, RunListSurface.EXPERIMENT)
+    register_pin_filter(app, RunListSurface.EXPERIMENT, NAVBAR_HPARAM_DATATABLE_ID)
     _register_run_actions(app)
     _register_column_search(app)

@@ -8,12 +8,13 @@ import pendulum
 import pytest
 
 from dlboard import models
-from dlboard.models import HyperParams, NewHyperParams, Run
+from dlboard.models import HyperParams, NewHyperParams, PinColor, Run
 from dlboard.plugins.charts.file_list import FileListChart
 from dlboard.plugins.charts.image_series import ImageChart
 from dlboard.plugins.charts.line_chart import LineChart
 from dlboard.serve._pages._experiment import _column_catalog as column_catalog
 from dlboard.serve._pages._experiment import _runs_table as run_table
+from dlboard.serve._pages._pins._pin_view import PinCell
 
 if TYPE_CHECKING:
     from dlboard.plugins.data_stores.sqlite import SQLLiteStore
@@ -41,6 +42,7 @@ def _fields(run_id: int, *, drawn: bool = False, focused: bool = False) -> dict[
         "_drawn": drawn,
         "_focused": focused,
         "_href": f"/experiment/1?run={run_id}",
+        "_pins": [],
         "_status": "running",
         "_duration_s": None,
         "_status_text": "running",
@@ -77,7 +79,7 @@ def test_build_hparam_rows_merges_hparams_and_latest_metrics() -> None:
     }
     latest_metrics = {1: {"loss": 0.5}}
 
-    rows = run_table._build_hparam_rows(1, _listed(runs), hparams_by_run, latest_metrics)
+    rows = run_table._build_hparam_rows(1, _listed(runs), hparams_by_run, latest_metrics, {})
 
     assert rows == [
         {"run_id": 1, "run_name": "Run 1", **_fields(1), "lr": 0.1, "loss": 0.5},
@@ -89,7 +91,7 @@ def test_build_hparam_rows_includes_runs_with_no_logged_hyperparameters() -> Non
     """A run that hasn't called `log_hyperparams` yet must still show up, not disappear."""
     runs = [_run(1, name="baseline"), _run(2)]
 
-    rows = run_table._build_hparam_rows(1, _listed(runs), hparams_by_run={}, latest_metrics={})
+    rows = run_table._build_hparam_rows(1, _listed(runs), hparams_by_run={}, latest_metrics={}, pins={})
 
     assert rows == [
         {"run_id": 1, "run_name": "baseline", **_fields(1)},
@@ -116,7 +118,7 @@ def test_load_hparam_view_data_shows_each_selected_metrics_latest_value(
     _log_a_metric(store, experiment_id, run.id, "train/loss", step=9)
 
     _hk, _mk, rows = run_table._load_hparam_view_data(
-        store, experiment_id, _listed([run]), selected=["val/acc", "train/loss"]
+        store, experiment_id, _listed([run]), selected=["val/acc", "train/loss"], pins={}
     )
 
     assert rows == [
@@ -139,7 +141,7 @@ def test_load_hparam_view_data_reports_available_metric_keys_without_fetching_va
     _log_a_metric(store, experiment_id, run.id, "loss")
 
     hparam_keys, metric_keys, rows = run_table._load_hparam_view_data(
-        store, experiment_id, _listed([run]), selected=[]
+        store, experiment_id, _listed([run]), selected=[], pins={}
     )
 
     assert metric_keys == ["loss"]
@@ -175,7 +177,7 @@ def test_the_columns_picker_offers_the_newest_runs_keys_and_keeps_an_older_one_i
     hparams = list(store.fetch_hyperparams(experiment_id, run_ids=None))
 
     hparam_keys, _metric_keys, rows = run_table._load_hparam_view_data(
-        store, experiment_id, _listed([older, newer], hparams), selected=selected
+        store, experiment_id, _listed([older, newer], hparams), selected=selected, pins={}
     )
 
     assert hparam_keys == offered
@@ -216,7 +218,7 @@ def test_build_hparam_rows_shows_how_a_run_ended_and_how_long_it_took(
     ended_at = None if ran_for_s is None else _TS.add(seconds=ran_for_s)
     run = _run(1).model_copy(update={"status": status, "ended_at": ended_at})
 
-    (row,) = run_table._build_hparam_rows(1, _listed([run]), hparams_by_run={}, latest_metrics={})
+    (row,) = run_table._build_hparam_rows(1, _listed([run]), hparams_by_run={}, latest_metrics={}, pins={})
 
     assert (row["_status"], row["_duration_s"], row["_status_text"], row["_status_detail"]) == expected
 
@@ -264,7 +266,7 @@ def test_a_row_is_drawn_when_the_charts_draw_it_and_focused_when_the_page_is_ope
     runs = [_run(1), _run(2), _run(3)]
 
     rows = run_table._build_hparam_rows(
-        1, _listed(runs, shown=frozenset({2}), focus=2), hparams_by_run={}, latest_metrics={}
+        1, _listed(runs, shown=frozenset({2}), focus=2), hparams_by_run={}, latest_metrics={}, pins={}
     )
 
     assert [(row["_drawn"], row["_focused"]) for row in rows] == [
@@ -304,3 +306,13 @@ def test_the_runs_a_grid_has_selected_are_read_from_either_shape_it_reports(
     selected_rows: list[dict[str, int]] | dict[str, list[str]] | None, expected: set[int]
 ) -> None:
     assert run_table._picked_ids(selected_rows) == frozenset(expected)
+
+
+def test_a_pinned_runs_row_carries_the_colours_it_is_pinned_in() -> None:
+    pins = {2: [PinCell(color=PinColor.RED, css="red", who=["alice"], mine=False)]}
+
+    rows = run_table._build_hparam_rows(
+        1, _listed([_run(1), _run(2)]), hparams_by_run={}, latest_metrics={}, pins=pins
+    )
+
+    assert [[pin["color"] for pin in row["_pins"]] for row in rows] == [[], ["red"]]

@@ -82,6 +82,7 @@ class Icon(StrEnum):
     MOVE_TO = "arrow-right"
     NOTES = "message-circle"
     OPTIONS = "adjustments-horizontal"
+    PIN = "pin"
     SEARCH = "search"
     SIDEBAR = "layout-sidebar"
     SIGN_OUT = "logout"

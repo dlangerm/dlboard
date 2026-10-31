@@ -26,6 +26,7 @@ from dlboard.serve._pages._description_editor import (
     render_header,
 )
 from dlboard.serve._pages._onboarding import first_experiment_snippet, onboarding_card
+from dlboard.serve._pages._pins._pinned_runs import register as register_pinned_runs
 from dlboard.serve._pages._project_members import register_members_callbacks, render_members_section
 from dlboard.serve._url import relative_path
 
@@ -155,7 +156,7 @@ def render_project_page(project_id: int) -> dmc.Container:
 
 
 def register(app: Dash) -> None:
-    """Wire the project page's create/edit/delete actions."""
+    """Wire the project page's create/edit/delete actions, and the sidebar of pinned runs."""
 
     @app.callback(
         Output(EXP_LIST_ID, "children"),
@@ -210,3 +211,4 @@ def register(app: Dash) -> None:
         on_confirm=_delete_project,
     )
     register_members_callbacks(app)
+    register_pinned_runs(app)
