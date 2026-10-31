@@ -23,7 +23,7 @@ from multiprocessing import parent_process, util
 from pathlib import Path, PurePosixPath
 from threading import Thread
 from typing import TYPE_CHECKING, Final, Protocol, Self, override
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from flask import abort
 from pydantic import AnyUrl
@@ -61,6 +61,15 @@ if TYPE_CHECKING:
 
 
 _log = get_logger(__name__)
+
+
+def _is_a_staged_name(name: str) -> bool:
+    """Whether `name` is one `_stage` gives a staged upload: the UUID it names it with."""
+    try:
+        UUID(name)
+    except ValueError:
+        return False
+    return True
 
 
 @dataclass(frozen=True, slots=True)
@@ -297,11 +306,21 @@ class BlobArtifactStore(models.ArtifactStore[BlobBackend, int]):
         self._finalizer = util.Finalize(None, self.close, exitpriority=_FINALIZER_PRIORITY)
 
     def _sweep_stale_staging(self) -> None:
-        """Delete staged uploads left behind by a process that died before writing them."""
+        """
+        Delete staged uploads left behind by a process that died before writing them.
+
+        The staging directory is the shared temp directory by default, so only a file the store would have named as a staged
+        upload is its to delete, and one that cannot be removed is left with a warning rather than failing the store's start.
+        """
         cutoff = time.time() - _STALE_STAGING_SEC
         for leftover in self._file_staging_dir.iterdir():
-            if leftover.is_file() and leftover.stat().st_mtime < cutoff:
-                leftover.unlink(missing_ok=True)
+            if not _is_a_staged_name(leftover.name) or not leftover.is_file():
+                continue
+            try:
+                if leftover.stat().st_mtime < cutoff:
+                    leftover.unlink(missing_ok=True)
+            except OSError:
+                _log.warning("Could not delete a stale staged upload", path=str(leftover), exc_info=True)
 
     def close(self, timeout: float = _DRAIN_TIMEOUT_SEC) -> None:
         """

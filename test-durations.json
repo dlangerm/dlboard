@@ -681,6 +681,7 @@
   "dlboard/plugins/data_stores/tests/blob_store_test.py::test_log_artifacts_rejects_a_duplicate_key_fname[filesystem]": 0.06428797304397449,
   "dlboard/plugins/data_stores/tests/blob_store_test.py::test_log_artifacts_rejects_a_duplicate_key_fname[s3]": 0.20053324004402384,
   "dlboard/plugins/data_stores/tests/blob_store_test.py::test_stale_staged_uploads_from_a_dead_process_are_swept_on_startup": 0.007297706993995234,
+  "dlboard/plugins/data_stores/tests/blob_store_test.py::test_the_sweep_leaves_a_file_it_did_not_stage_however_old": 0.2962197830202058,
   "dlboard/plugins/data_stores/tests/blob_store_test.py::test_uploads_are_turned_away_once_the_write_worker_is_gone": 0.009080265037482604,
   "dlboard/plugins/data_stores/tests/blob_store_test.py::test_uploads_are_turned_away_when_the_write_queue_is_full": 0.00917268797638826,
   "dlboard/plugins/data_stores/tests/blob_traces_test.py::test_an_uploads_trace_follows_it_through_the_writer_and_into_the_recording_of_its_ref": 3.251439793006284,
