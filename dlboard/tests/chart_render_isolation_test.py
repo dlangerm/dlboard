@@ -21,6 +21,8 @@ from dlboard.serve._pages._experiment._chart_view import (
     render_panel_charts as _render_panel_charts,
 )
 
+pytestmark = pytest.mark.expects_chart_render_failure
+
 LineChart.register(allow_override=True)
 
 

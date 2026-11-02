@@ -18,6 +18,8 @@ from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTrace
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from prometheus_client.parser import text_string_to_metric_families
 from pydantic import AnyHttpUrl, BaseModel, SecretStr, TypeAdapter
+from structlog import configure as _structlog_configure
+from structlog import get_config as _structlog_config
 from werkzeug.serving import make_server
 
 from dlboard import models
@@ -39,7 +41,7 @@ from dlboard.serve._pages._experiment._panel_data import PanelData, WideHistory
 from dlboard.serve.telemetry import LOGS, METRICS, _instrument
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Callable, Iterator, MutableMapping
     from wsgiref.types import InputStream, StartResponse, WSGIApplication, WSGIEnvironment
 
     from dash import Dash
@@ -815,3 +817,30 @@ def make_fake_chart(
             return {}
 
     return _Fake
+
+
+@pytest.fixture(autouse=True)
+def _no_chart_fails_to_render(request: pytest.FixtureRequest) -> Iterator[None]:
+    """
+    Fail a test in which a chart logs that it failed to render, unless the test means to break a chart.
+
+    A chart that fails shows an error alert rather than raising, so nothing else would notice. A processor is added just before
+    the renderer, so the log still prints as it did; the server runs in this process, so its threads are seen too.
+    """
+    failed: list[str] = []
+
+    def _note_failed_renders(
+        _logger: object, _method: str, event_dict: MutableMapping[str, Any]
+    ) -> MutableMapping[str, Any]:
+        if "Failed to render" in str(event_dict.get("event", "")):
+            failed.append(str(event_dict["event"]))
+        return event_dict
+
+    processors = _structlog_config()["processors"]
+    _structlog_configure(processors=[*processors[:-1], _note_failed_renders, processors[-1]])
+    try:
+        yield
+    finally:
+        _structlog_configure(processors=processors)
+    if failed and request.node.get_closest_marker("expects_chart_render_failure") is None:
+        pytest.fail(f"a chart failed to render: {failed[0]}")
