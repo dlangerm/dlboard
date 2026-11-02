@@ -107,7 +107,8 @@ markers = [
   "browser: browser-based end-to-end tests requiring a webdriver",
   "postgres: runs against a real Postgres in a throwaway container; needs Docker",
   "s3: runs against a real S3-compatible store (MinIO) in a throwaway container; needs Docker",
-  "screenshots: renders the docs screenshots; only runs with --screenshots=check|update"
+  "screenshots: renders the docs screenshots; only runs with --screenshots=check|update",
+  "expects_chart_render_failure: breaks a chart on purpose, so its 'Failed to render' log is not a failure"
 ]
 pythonpath = ["."]
 testpaths = ["dlboard"]
