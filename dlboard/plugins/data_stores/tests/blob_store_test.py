@@ -172,7 +172,7 @@ class _LockedOnceStore:
 def _ingest(store: BlobArtifactStore, data_store: object, artifacts: list[models.Artifact]) -> None:
     """Queue `artifacts` as though `_write_blobs` just wrote their blobs, then start ingesting them."""
     for artifact in artifacts:
-        store._saved_artifact_q.put(_Saved(artifact, {}, written_at=time.time()))
+        store._saved_artifact_q.put(_Saved(artifact, {}, written_at=time.monotonic()))
     app = _FakeApp()
     set_data_store(app, data_store)  # pyrefly: ignore [bad-argument-type]
     threading.Thread(target=store.ingest_stored_artifacts, args=(app,), daemon=True).start()
@@ -341,7 +341,7 @@ def test_the_sweep_leaves_a_file_it_did_not_stage_however_old(tmp_path: Path) ->
     assert theirs.exists()
 
 
-def test_a_queue_wait_is_never_negative_when_the_wall_clock_steps_back() -> None:
-    """The writer's stamp can be later than the server's clock reading, when the clock steps back between the two."""
-    assert _waited_since(time.time() + 60) == 0.0
-    assert _waited_since(time.time() - 2) >= 2
+def test_a_queue_wait_is_never_negative_for_a_stamp_later_than_now() -> None:
+    """A stamp later than this process's clock, as another process's can be, gives a zero wait, not a negative one."""
+    assert _waited_since(time.monotonic() + 60) == 0.0
+    assert _waited_since(time.monotonic() - 2) >= 2
