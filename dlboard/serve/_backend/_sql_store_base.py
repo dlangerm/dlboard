@@ -1052,7 +1052,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
                     *_runs_among(runs.c.id, run_ids),
                     *_name_matches(runs, name_contains),
                 )
-                .order_by(runs.c.created_at.desc())
+                .order_by(runs.c.created_at.desc(), runs.c.id.desc())
                 .limit(limit)
                 .offset(offset),
             )
@@ -1351,7 +1351,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         newest = (
             sa.select(r.c.id.label("run_id"))
             .where(*_live_runs(r, experiment_id))
-            .order_by(r.c.created_at.desc())
+            .order_by(r.c.created_at.desc(), r.c.id.desc())
             .limit(models.SUMMARY_RUNS)
             .subquery("newest")
         )
