@@ -63,6 +63,16 @@ if TYPE_CHECKING:
 _log = get_logger(__name__)
 
 
+def _waited_since(stamp: float) -> float:
+    """
+    How long since `stamp`, a `time.time()` the process that queued the item took: never negative.
+
+    The writer and the server are two processes, so the wall clock can step back between the two readings; a wait is not
+    negative for that.
+    """
+    return max(time.time() - stamp, 0.0)
+
+
 def _is_a_staged_name(name: str) -> bool:
     """Whether `name` is one `_stage` gives a staged upload: the UUID it names it with."""
     try:
@@ -248,7 +258,7 @@ def _write_blobs(
         if item is None:
             flush()
             return
-        waited = time.time() - item.accepted_at
+        waited = _waited_since(item.accepted_at)
         _WRITE_QUEUE_WAIT.record(waited)
         a = item.artifact
         started = time.perf_counter()
@@ -380,7 +390,7 @@ class BlobArtifactStore(models.ArtifactStore[BlobBackend, int]):
 
     def _record_saved(self, store: DataStore[...], saved: list[_Saved]) -> None:
         """Record a batch of written artifacts' refs, in one span linked to the write of each (it serves them all)."""
-        waited = [time.time() - item.written_at for item in saved]
+        waited = [_waited_since(item.written_at) for item in saved]
         started = time.perf_counter()
         outcome = Outcome.FAILURE
         try:
