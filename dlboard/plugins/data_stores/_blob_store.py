@@ -65,12 +65,12 @@ _log = get_logger(__name__)
 
 def _waited_since(stamp: float) -> float:
     """
-    How long since `stamp`, a `time.time()` the process that queued the item took: never negative.
+    How long since `stamp`, a `time.monotonic()` the process that queued the item took: never negative.
 
-    The writer and the server are two processes, so the wall clock can step back between the two readings; a wait is not
-    negative for that.
+    The writer is another process on this host. Its monotonic clock is the same one on the platforms dlboard runs on, but
+    Python does not promise that across processes, so a stamp that reads as later than now is clamped to zero.
     """
-    return max(time.time() - stamp, 0.0)
+    return max(time.monotonic() - stamp, 0.0)
 
 
 def _is_a_staged_name(name: str) -> bool:
@@ -91,7 +91,7 @@ class _Upload:
     staged: Path
     trace: Carrier
     accepted_at: float
-    """When the server queued it, by `time.time()`: the writer is another process, with no monotonic clock in common."""
+    """When the server queued it, by `time.monotonic()`, read by the writer through `_waited_since`."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,7 +101,7 @@ class _Saved:
     artifact: Artifact
     trace: Carrier
     written_at: float
-    """When the writer finished it, by `time.time()`, as `_Upload.accepted_at`."""
+    """When the writer finished it, by `time.monotonic()`, as `_Upload.accepted_at`."""
 
 
 class _Rejection(StrEnum):
@@ -276,7 +276,7 @@ def _write_blobs(
             artifact = models.Artifact.model_validate(a.model_dump() | {"ref": str(item.ref)})
             if return_q.full():
                 _log.warning("Return queue is full, runtime will be impacted")
-            return_q.put(_Saved(artifact, write_trace, written_at=time.time()))
+            return_q.put(_Saved(artifact, write_trace, written_at=time.monotonic()))
             outcome = Outcome.SUCCESS
         except Exception:  # noqa: BLE001
             _log.exception("Failed to save artifacts")
@@ -455,7 +455,7 @@ class BlobArtifactStore(models.ArtifactStore[BlobBackend, int]):
                     file.save(staging_path, buffer_size=int(1e6))
                 _STAGING.record(time.perf_counter() - started)
                 self._store_q.put(
-                    _Upload(a, ref, staging_path, carrier(), accepted_at=time.time()),
+                    _Upload(a, ref, staging_path, carrier(), accepted_at=time.monotonic()),
                     timeout=_ENQUEUE_TIMEOUT_SEC,
                 )
                 staging_path = None  # the write worker owns it now

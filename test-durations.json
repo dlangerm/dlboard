@@ -666,7 +666,7 @@
   "dlboard/plugins/charts/tests/table_settings_test.py::test_the_metrics_and_hparams_a_table_asks_the_panel_to_fetch[only-hparams]": 0.0007230010000967013,
   "dlboard/plugins/charts/tests/table_settings_test.py::test_the_metrics_and_hparams_a_table_asks_the_panel_to_fetch[the-row-field-is-fetched]": 0.0007939740000892925,
   "dlboard/plugins/data_stores/tests/blob_store_test.py::test_a_failed_upload_leaves_nothing_in_the_staging_dir": 0.11302611301653087,
-  "dlboard/plugins/data_stores/tests/blob_store_test.py::test_a_queue_wait_is_never_negative_when_the_wall_clock_steps_back": 0.3011054110000373,
+  "dlboard/plugins/data_stores/tests/blob_store_test.py::test_a_queue_wait_is_never_negative_for_a_stamp_later_than_now": 0.3011054110000373,
   "dlboard/plugins/data_stores/tests/blob_store_test.py::test_a_rejected_artifact_is_dropped_alone_and_its_blob_deleted": 1.7169671779847704,
   "dlboard/plugins/data_stores/tests/blob_store_test.py::test_a_transient_store_failure_does_not_lose_the_batch": 3.0925493570102844,
   "dlboard/plugins/data_stores/tests/blob_store_test.py::test_close_writes_every_queued_blob_and_records_its_ref_before_returning": 2.20491786301136,
