@@ -25,7 +25,7 @@ from werkzeug.datastructures import FileStorage
 
 from dlboard import models
 from dlboard.conftest import EVERY_ARTIFACT_BACKEND, ArtifactBackend, scraped_total
-from dlboard.plugins.data_stores._blob_store import BlobArtifactStore, _Saved, blob_key
+from dlboard.plugins.data_stores._blob_store import BlobArtifactStore, _Saved, _waited_since, blob_key
 from dlboard.plugins.data_stores.filesystem import FSBlobs
 from dlboard.serve import set_data_store
 from dlboard.serve.telemetry._prometheus import serve_metrics
@@ -339,3 +339,9 @@ def test_the_sweep_leaves_a_file_it_did_not_stage_however_old(tmp_path: Path) ->
     BlobArtifactStore(FSBlobs(tmp_path / "artifacts"), 10, staging).dispose()
 
     assert theirs.exists()
+
+
+def test_a_queue_wait_is_never_negative_when_the_wall_clock_steps_back() -> None:
+    """The writer's stamp can be later than the server's clock reading, when the clock steps back between the two."""
+    assert _waited_since(time.time() + 60) == 0.0
+    assert _waited_since(time.time() - 2) >= 2
