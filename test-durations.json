@@ -1313,6 +1313,7 @@
   "dlboard/serve/_backend/tests/read_scaling_test.py::test_a_load_reads_no_more_rows_for_an_experiment_that_trained_longer[the run compare]": 0.807579740008805,
   "dlboard/serve/_backend/tests/read_scaling_test.py::test_a_projects_pins_read_no_more_when_its_own_runs_or_another_projects_pins_grow": 24.948239062010543,
   "dlboard/serve/_backend/tests/read_scaling_test.py::test_the_key_check_reads_no_more_for_a_key_only_a_deleted_run_logged_among_more_live_runs": 18.814364418009063,
+  "dlboard/serve/_backend/tests/run_order_test.py::test_runs_created_at_the_same_instant_list_newest_id_first": 0.33974070599992956,
   "dlboard/serve/_backend/tests/schema_upgrade_test.py::test_second_store_against_an_already_migrated_database_is_a_no_op[postgres]": 0.6351086409995332,
   "dlboard/serve/_backend/tests/schema_upgrade_test.py::test_second_store_against_an_already_migrated_database_is_a_no_op[sqlite]": 0.13503569198655896,
   "dlboard/serve/_backend/tests/series_band_test.py::test_a_cell_counts_only_the_keys_that_logged_a_number_in_it[postgres]": 0.5469860449666157,
