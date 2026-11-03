@@ -2347,6 +2347,8 @@
   "dlboard/tests/docs_screenshots_test.py::test_doc_screenshot[chromium-run-compare]": 0.0004184420104138553,
   "dlboard/tests/docs_screenshots_test.py::test_doc_screenshot[chromium-table-chart]": 0.0006515239947475493,
   "dlboard/tests/docs_screenshots_test.py::test_the_screenshot_check_tolerates_rendering_noise_but_not_a_changed_word[a-changed-digit]": 0.18564972499734722,
+  "dlboard/tests/docs_screenshots_test.py::test_the_screenshot_check_tolerates_rendering_noise_but_not_a_changed_word[a-few-pixels-of-a-changed-colour]": 0.19907925500592683,
+  "dlboard/tests/docs_screenshots_test.py::test_the_screenshot_check_tolerates_rendering_noise_but_not_a_changed_word[a-scaled-image-resampled-another-way]": 0.17671958999562776,
   "dlboard/tests/docs_screenshots_test.py::test_the_screenshot_check_tolerates_rendering_noise_but_not_a_changed_word[a-stray-antialiased-pixel-or-two]": 0.2040623419743497,
   "dlboard/tests/docs_screenshots_test.py::test_the_screenshot_check_tolerates_rendering_noise_but_not_a_changed_word[faint-noise-everywhere]": 0.19086735497694463,
   "dlboard/tests/durations_test.py::test_recorded_durations_match_the_collected_suite": 0.003606169979320839,

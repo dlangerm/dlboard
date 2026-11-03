@@ -56,8 +56,14 @@ IMAGES_DIR = REPO_ROOT / "docs" / "images"
 DIFFS_DIR = REPO_ROOT / "screenshot-diffs"
 
 _VIEWPORT = {"width": 1440, "height": 900}
-_CHANNEL_TOLERANCE = 8
-"""Per-channel difference (out of 255) below which two pixels count as identical (anti-aliasing noise)."""
+_CHANNEL_TOLERANCE = 16
+"""
+Per-channel difference (out of 255) below which two pixels count as identical (anti-aliasing noise).
+
+An image drawn smaller than it is (a table chart's thumbnails, 400 pixels to 56) is resampled, and another machine's
+resampling lands a few pixels of it a little off: 12, on the CI runner that failed this check (#506). A word that
+changed is off by a hundred or more, so there is room above the noise before a real change slips under it.
+"""
 _MAX_DIFFERING_PIXEL_FRACTION = 0.00001
 """
 Fraction of an image's pixels that may differ by more than `_CHANNEL_TOLERANCE`: about a dozen of a
@@ -679,9 +685,17 @@ def test_doc_images_are_referenced_and_accounted_for() -> None:
     [
         (slice(0, 1), slice(0, 3), 100, True),
         (slice(None), slice(None), 5, True),
+        (slice(0, 4), slice(0, 4), 12, True),
+        (slice(0, 4), slice(0, 4), 40, False),
         (slice(0, 8), slice(0, 8), 100, False),
     ],
-    ids=["a-stray-antialiased-pixel-or-two", "faint-noise-everywhere", "a-changed-digit"],
+    ids=[
+        "a-stray-antialiased-pixel-or-two",
+        "faint-noise-everywhere",
+        "a-scaled-image-resampled-another-way",
+        "a-few-pixels-of-a-changed-colour",
+        "a-changed-digit",
+    ],
 )
 def test_the_screenshot_check_tolerates_rendering_noise_but_not_a_changed_word(  # noqa: PLR0913 -- one parameter per axis of the render being compared
     tmp_path: Path,
