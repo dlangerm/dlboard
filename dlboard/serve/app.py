@@ -58,6 +58,8 @@ _ASSETS = [
     # The slider and the key picker the chart editor edits its tables with (`serve/_grid.py`).
     (AssetKind.SCRIPT, GRID_CELL_COMPONENTS_JS),
     (AssetKind.STYLESHEET, GRID_CELL_COMPONENTS_CSS),
+    # What the Unpin menu offers, set by the run list's selection and row-update scripts (`_pages/_pins/_pin_menus.py`).
+    (AssetKind.SCRIPT, Path(__file__).parent / "_pages" / "_pins" / "unpin_colors.js"),
 ]
 _COLOR_SCHEME_PRELOAD_JS = Path(__file__).with_name("color_scheme_preload.js").read_text()
 _NAVBAR_STATE_JS = ClientsideScript(Path(__file__).with_name("navbar_state.js"))

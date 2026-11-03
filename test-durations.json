@@ -2409,6 +2409,7 @@
   "dlboard/tests/pins_browser_test.py::test_the_bar_pins_and_unpins_every_selected_run[chromium]": 3.3972270059748553,
   "dlboard/tests/pins_browser_test.py::test_the_project_page_lists_a_pinned_run_once_however_many_pins_it_has[chromium]": 2.514597859000787,
   "dlboard/tests/pins_browser_test.py::test_the_selected_pinned_runs_are_deleted_from_the_project_page[chromium]": 3.7129442729928996,
+  "dlboard/tests/pins_browser_test.py::test_the_unpin_menu_offers_only_the_colours_you_hold_on_the_selected_runs[chromium]": 5.952478278995841,
   "dlboard/tests/pins_browser_test.py::test_unpinning_takes_a_run_out_of_a_colour_filter_it_no_longer_matches[chromium]": 5.880072747007944,
   "dlboard/tests/proxy_fix_test.py::test_proxy_fix_is_off_by_default": 0.10383953803102486,
   "dlboard/tests/proxy_fix_test.py::test_proxy_fix_then_trusts_the_forwarded_scheme_and_address": 0.11093423294369131,

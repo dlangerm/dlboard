@@ -177,7 +177,7 @@ def test_comparing_the_same_pinned_runs_again_opens_the_comparison_already_made(
     page.get_by_role("menuitem", name="Compare red pins").click()
 
     expect(page.get_by_text("Opened your comparison of these runs.")).to_be_visible()
-    assert page.url == opened
+    expect(page).to_have_url(opened)  # the toast is shown as the page goes there, not after
     assert console_errors == []
 
 

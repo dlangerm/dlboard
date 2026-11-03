@@ -302,3 +302,36 @@ def test_unpinning_takes_a_run_out_of_a_colour_filter_it_no_longer_matches(
 
     expect(rows).to_have_count(1)
     assert console_errors == []
+
+
+def test_the_unpin_menu_offers_only_the_colours_you_hold_on_the_selected_runs(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    _, rows = _experiment_of_runs(page, live_server_url, "Unpin Menu Experiment", 3)
+    for index, color in ((0, "green"), (1, "red")):
+        rows.nth(index).locator(".ag-selection-checkbox input").check()
+        _bar(page).get_by_role("button", name="Pin", exact=True).click()
+        page.get_by_role("menuitem", name=f"Pin {color}").click()
+        expect(rows.nth(index).locator(_PIN)).to_have_count(1)
+        rows.nth(index).locator(".ag-selection-checkbox input").uncheck()
+    unpin_colors = page.get_by_role("menuitem", name=re.compile("^Unpin "))
+
+    def offered(*selected: int) -> None:
+        """Select exactly the runs at `selected`, and open the Unpin menu."""
+        for index in range(3):
+            rows.nth(index).locator(".ag-selection-checkbox input").set_checked(index in selected)
+        _bar(page).get_by_role("button", name="Unpin", exact=True).click()
+
+    offered(0)
+    expect(unpin_colors).to_have_count(1)
+    expect(page.get_by_role("menuitem", name="Unpin green")).to_be_visible()
+    page.keyboard.press("Escape")
+
+    offered(0, 1)
+    expect(unpin_colors).to_have_count(2)
+    page.keyboard.press("Escape")
+
+    offered(2)
+    expect(unpin_colors).to_have_count(0)
+    expect(page.get_by_text("You hold no pin on these")).to_be_visible()
+    assert console_errors == []

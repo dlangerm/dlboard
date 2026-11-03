@@ -19,9 +19,15 @@ _COLUMNS = 5
 """How many colours a row of the menu holds: ten colours are two rows of five."""
 
 
+def _unpin_item_style(color: PinColor) -> dict[str, str]:
+    """An Unpin item is shown while the page says the viewer holds `color` on a selected run (`unpin_colors.js`), else hidden."""
+    return {"display": f"var(--dl-unpin-{color.value}, none)"}
+
+
 def _colors_menu(surface: RunListSurface, action: RunAction, label: str) -> Component:
     """A button that opens the colours to `action` the selected runs in: each a pin in its colour, named only to a screen reader."""
     buttons = action_button(surface)
+    unpinning = action is RunAction.UNPIN
     return dmc.Menu(
         [
             dmc.MenuTarget(
@@ -35,19 +41,35 @@ def _colors_menu(surface: RunListSurface, action: RunAction, label: str) -> Comp
                 )
             ),
             dmc.MenuDropdown(
-                dmc.SimpleGrid(
-                    [
-                        dmc.MenuItem(
-                            pin_glyph(color),
-                            id=buttons.of(action, color=color),
-                            p=6,
-                            **cast("dict[str, Any]", {"aria-label": f"{label} {color.value}"}),
-                        )
-                        for color in PinColor
-                    ],
-                    cols=_COLUMNS,
-                    spacing=2,
-                ),
+                [
+                    dmc.SimpleGrid(
+                        [
+                            dmc.MenuItem(
+                                pin_glyph(color),
+                                id=buttons.of(action, color=color),
+                                p=6,
+                                style=_unpin_item_style(color) if unpinning else None,
+                                **cast("dict[str, Any]", {"aria-label": f"{label} {color.value}"}),
+                            )
+                            for color in PinColor
+                        ],
+                        cols=_COLUMNS,
+                        spacing=2,
+                    ),
+                    *(
+                        [
+                            dmc.Text(
+                                "You hold no pin on these",
+                                size="xs",
+                                c="dimmed",
+                                p=6,
+                                style={"display": "var(--dl-unpin-none, none)"},
+                            )
+                        ]
+                        if unpinning
+                        else []
+                    ),
+                ]
             ),
         ],
         position="bottom-start",

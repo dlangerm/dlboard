@@ -23,5 +23,7 @@ function applyRowUpdates(update) {
         }
     }
     api.onFilterChanged();
+    // A pin changed, not the selection: what the Unpin menu offers is what the selected rows hold now (`unpin_colors.js`).
+    window.dlSetUnpinColors?.(api.getSelectedRows());
     return window.dash_clientside.no_update;
 }
