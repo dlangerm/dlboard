@@ -12,7 +12,7 @@ import pytest
 from pydantic import ValidationError
 
 from dlboard.conftest import props
-from dlboard.models import RUN_NAME_COLUMN
+from dlboard.models import RUN_NAME_COLUMN, MetricReduction
 from dlboard.plugins.charts import line_chart
 from dlboard.plugins.charts._axis_label import (
     DEFAULT_MAX_AXIS_LABEL_CHARS,
@@ -28,6 +28,7 @@ from dlboard.plugins.charts.line_chart import (
     LineChart,
     LineChartSettings,
 )
+from dlboard.serve import series_color
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -455,12 +456,34 @@ def _hparam_grouped_df(hidden_sizes: dict[int, int], accuracies: dict[int, list[
     return pd.concat(frames, ignore_index=True)
 
 
-def test_bar_chart_aggregates_runs_sharing_an_x_value() -> None:
-    """Multiple runs with the same hidden_size collapse into one bar, aggregated across runs."""
+def _bars(chart: dmc.Stack, x_axis: str) -> dict[object, dict[str, float]]:
+    """A bar chart's groups, each as the runs' bars in it (by run id): what was drawn, less what labels it."""
+    rows: list[dict[str, Any]] = _props(chart)["data"]
+    return {
+        row[x_axis]: {key: value for key, value in row.items() if key not in (x_axis, "__x_axis_name__")}
+        for row in rows
+    }
+
+
+def test_bar_chart_draws_a_bar_for_each_run_in_the_group_it_shares() -> None:
+    """Runs with one hidden_size are bars side by side in its group, each in its own colour (#493)."""
     df = _hparam_grouped_df({1: 128, 2: 128, 3: 256}, {1: [0.8], 2: [0.9], 3: [0.7]})
     chart = BarChart.render(BarChartSettings(column="accuracy", x_axis="hidden_size"), df)
-    data = {row["hidden_size"]: row["accuracy"] for row in _props(chart)["data"]}
-    assert data == {128: pytest.approx(0.85), 256: pytest.approx(0.7)}
+    props = _props(chart)
+    assert _bars(chart, "hidden_size") == {128: {"1": 0.8, "2": 0.9}, 256: {"3": 0.7}}
+    assert [(s["name"], s["color"]) for s in props["series"]] == [
+        ("1", series_color(1)),
+        ("2", series_color(2)),
+        ("3", series_color(3)),
+    ]
+    assert props["type"] == "default"
+
+
+def test_bar_chart_fills_each_group_with_its_bar_when_no_group_has_more_than_one() -> None:
+    """Side by side, a lone bar would sit in a slot of its own, among the slots of runs that are not in its group."""
+    df = _hparam_grouped_df({1: 128, 2: 256}, {1: [0.8], 2: [0.9]})
+    chart = BarChart.render(BarChartSettings(column="accuracy", x_axis="hidden_size"), df)
+    assert _props(chart)["type"] == "stacked"
 
 
 @pytest.mark.parametrize(
@@ -499,9 +522,14 @@ def test_bar_chart_of_runs_labels_each_bar_with_its_run_name(
     chart = BarChart.render(BarChartSettings(column="accuracy", x_axis="run_id", x_axis_type=x_axis_type), df)
     props = _props(chart)
     assert [row["run_id"] for row in props["data"]] == labels
-    assert [row["accuracy"] for row in props["data"]] == [pytest.approx(0.8), pytest.approx(0.6)]
+    assert [row[run] for row, run in zip(props["data"], ["1", "2"], strict=True)] == [
+        pytest.approx(0.8),
+        pytest.approx(0.6),
+    ]
     assert {row["__x_axis_name__"] for row in props["data"]} == {"run"}  # what the tooltip prefixes it with
     assert props["xAxisLabel"] == "run"
+    assert props["type"] == "stacked"  # each run's bar fills its own group
+    assert props["withLegend"] is False  # the groups say which run each bar is of
 
 
 def test_bar_chart_of_runs_without_names_keeps_the_run_ids() -> None:
@@ -528,26 +556,40 @@ def test_bar_chart_render_does_not_mutate_input_dataframe() -> None:
     pd.testing.assert_frame_equal(df, before)
 
 
-def test_bar_chart_uses_last_logged_value_per_run() -> None:
-    """A run that logs the metric at every step contributes only its final value, not every step."""
+def test_bar_chart_draws_the_last_logged_value_of_a_run_unless_told_to_aggregate() -> None:
+    """A run that logs the metric at every step draws its final value, not every step: and so reads no more."""
     df = _hparam_grouped_df({1: 128, 2: 128}, {1: [0.1, 0.2, 0.9], 2: [0.5]})
-    chart = BarChart.render(BarChartSettings(column="accuracy", x_axis="hidden_size"), df)
-    data = {row["hidden_size"]: row["accuracy"] for row in _props(chart)["data"]}
-    assert data == {128: pytest.approx(0.7)}  # mean(0.9, 0.5), not mean(0.1, 0.2, 0.9, 0.5)
+    settings = BarChartSettings(column="accuracy", x_axis="hidden_size")
+    assert _bars(BarChart.render(settings, df), "hidden_size") == {128: {"1": 0.9, "2": 0.5}}
+    assert BarChart.data_request(settings).reductions.default is MetricReduction.LATEST
 
 
 @pytest.mark.parametrize(
-    ("aggregation", "expected"), [("mean", 0.75), ("min", 0.5), ("max", 1.0), ("sum", 1.5), ("count", 2)]
+    ("aggregation", "expected"),
+    [("mean", 0.4), ("median", 0.2), ("min", 0.1), ("max", 0.9), ("sum", 1.2), ("count", 3)],
 )
-def test_bar_chart_aggregation_is_configurable(
+def test_bar_chart_aggregates_what_a_run_logged_in_a_group(
     aggregation: Literal["mean", "median", "min", "max", "sum", "count"], expected: float
 ) -> None:
-    df = _hparam_grouped_df({1: 128, 2: 128}, {1: [0.5], 2: [1.0]})
-    chart = BarChart.render(
-        BarChartSettings(column="accuracy", x_axis="hidden_size", aggregation=aggregation), df
+    df = _hparam_grouped_df({1: 128, 2: 128}, {1: [0.1, 0.2, 0.9], 2: [0.5]})
+    settings = BarChartSettings(column="accuracy", x_axis="hidden_size", aggregation=aggregation)
+    bars = _bars(BarChart.render(settings, df), "hidden_size")[128]
+    assert bars["1"] == pytest.approx(expected)
+    assert BarChart.data_request(settings).reductions.default is MetricReduction.HISTORY
+
+
+def test_bar_chart_groups_the_steps_a_run_logged_by_an_x_axis_of_a_metric() -> None:
+    """Each epoch is a group, and in it each run's bar is the aggregate of the steps it logged in that epoch (#493)."""
+    df = pd.DataFrame(
+        {
+            "run_id": [1] * 4 + [2] * 4,
+            "step": [0, 1, 2, 3] * 2,
+            "epoch": [0, 0, 1, 1] * 2,
+            "loss": [4.0, 2.0, 1.0, 0.5, 8.0, 4.0, 2.0, 1.0],
+        }
     )
-    data = {row["hidden_size"]: row["accuracy"] for row in _props(chart)["data"]}
-    assert data[128] == pytest.approx(expected)
+    chart = BarChart.render(BarChartSettings(column="loss", x_axis="epoch", aggregation="mean"), df)
+    assert _bars(chart, "epoch") == {0: {"1": 3.0, "2": 6.0}, 1: {"1": 0.75, "2": 1.5}}
 
 
 @pytest.mark.parametrize(
@@ -572,11 +614,7 @@ def test_bar_chart_x_axis_type_category_forces_text_sort_over_numeric() -> None:
         {"run_id": [1, 2, 3], "step": [0, 0, 0], "version": ["v2", "v10", "v1"], "accuracy": [0.1, 0.2, 0.3]}
     )
     chart = BarChart.render(BarChartSettings(column="accuracy", x_axis="version", x_axis_type="category"), df)
-    assert [row["__x_detail__"] for row in _props(chart)["data"]] == [
-        "version: v1",
-        "version: v10",
-        "version: v2",
-    ]
+    assert list(_bars(chart, "version")) == ["v1", "v10", "v2"]
 
 
 def test_bar_chart_over_a_metric_draws_each_run_at_its_own_latest_value() -> None:
@@ -590,10 +628,8 @@ def test_bar_chart_over_a_metric_draws_each_run_at_its_own_latest_value() -> Non
         ignore_index=True,
     )
     chart = BarChart.render(BarChartSettings(column="loss", x_axis="step"), df)
-    props = _props(chart)
-    assert props["dataKey"] == "step"
-    data = {row["step"]: (row["loss"], row["__x_detail__"]) for row in props["data"]}
-    assert data == {"Run 2": (pytest.approx(0.3), "step: 1"), "Run 1": (pytest.approx(0.1), "step: 2")}
+    assert _props(chart)["dataKey"] == "step"
+    assert _bars(chart, "step") == {1: {"2": 0.3}, 2: {"1": 0.1}}
 
 
 def test_bar_chart_over_a_metric_keeps_runs_that_end_on_one_value_apart() -> None:
@@ -609,18 +645,15 @@ def test_bar_chart_over_a_metric_keeps_runs_that_end_on_one_value_apart() -> Non
     )
     chart = BarChart.render(BarChartSettings(column="grad_norm", x_axis="lr"), df)
 
-    rows = _props(chart)["data"]
-    assert [(row["lr"], row["grad_norm"], row["__x_detail__"]) for row in rows] == [
-        ("one", 0.5, "lr: 0.001"),
-        ("two", 0.7, "lr: 0.001"),
-    ]
+    assert _bars(chart, "lr") == {0.001: {"1": 0.5, "2": 0.7}}
+    assert [(s["name"], s["label"]) for s in _props(chart)["series"]] == [("1", "one"), ("2", "two")]
 
 
 def test_bar_chart_series_and_labels() -> None:
     df = _hparam_grouped_df({1: 128}, {1: [0.8]})
     chart = BarChart.render(BarChartSettings(column="accuracy", x_axis="hidden_size"), df)
     props = _props(chart)
-    assert props["series"] == [{"name": "accuracy", "label": "accuracy", "color": "var(--dl-series-1)"}]
+    assert props["series"] == [{"name": "1", "label": "Run 1", "color": series_color(1)}]
     assert "yAxisLabel" not in props
 
 
@@ -640,7 +673,7 @@ def test_bar_chart_vertical_orientation_flips_category_axis_and_labels() -> None
     assert props["orientation"] == "vertical"
     assert props["xAxisProps"] == {}
     assert props["yAxisProps"] == {"type": "category"}
-    assert props["xAxisLabel"] == "mean(accuracy)"
+    assert props["xAxisLabel"] == "latest(accuracy)"
     assert "yAxisLabel" not in props
 
 
@@ -703,7 +736,7 @@ def test_bar_chart_shortens_a_long_metric_name_inside_its_aggregation_label(limi
     )
 
     label = _props(chart)["xAxisLabel"]
-    assert label.startswith("mean(…")
+    assert label.startswith("latest(…")
     assert label.endswith(")")
     assert len(label) == limit
 
@@ -761,7 +794,7 @@ def _bar(df: pd.DataFrame) -> dmc.Stack:
 
 @pytest.mark.parametrize(
     ("render", "expected"),
-    [(_line, LONG_METRIC), (_bar, f"mean({LONG_METRIC})")],
+    [(_line, LONG_METRIC), (_bar, f"latest({LONG_METRIC})")],
     ids=["line", "bar"],
 )
 def test_a_metric_chart_is_titled_with_its_full_metric_name(

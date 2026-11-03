@@ -82,8 +82,9 @@ hand on to such a process.
 **How much to log.** How often you log decides how fast a chart of it draws. A line chart reads every point
 logged of its metrics for the runs shown, then thins them to `max_points` (500 by default) per run to draw, so it
 costs what was logged, not what is drawn: about 5 ms per thousand points on a laptop, which a live update repeats for
-each open panel. The run list, the lists of metrics and artifacts, a bar chart and a table with a row per run do not
-grow with the steps logged. A table with a row per step sends every one of its rows to the browser, so past
+each open panel. The run list, the lists of metrics and artifacts, a bar chart of each run's latest value (its
+default) and a table with a row per run do not grow with the steps logged; a bar chart that aggregates the steps of each
+run (`mean`, `sum`, ...) reads every one, as a line chart does. A table with a row per step sends every one of its rows to the browser, so past
 `DLBOARD_MAX_TABLE_ROWS` (5,000) it says how many instead of drawing them: a row per epoch, or per run, stays small.
 For a long run, log less often rather than expecting every step to be cheap:
 

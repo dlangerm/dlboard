@@ -89,9 +89,7 @@ _CHARTS = [
         id="bar-by-hparam",
     ),
     pytest.param(
-        ChartInstance(
-            chart_type=BarChart.name, parameters={"column": "loss", "x_axis": "acc", "aggregation": "max"}
-        ),
+        ChartInstance(chart_type=BarChart.name, parameters={"column": "loss", "x_axis": "acc"}),
         id="bar-by-metric",
     ),
     pytest.param(

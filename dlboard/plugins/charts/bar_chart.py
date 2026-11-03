@@ -1,4 +1,4 @@
-"""A bar chart that compares an aggregated metric across groups (e.g. accuracy by hidden size)."""
+"""A bar chart that compares an aggregated metric across groups (e.g. accuracy by hidden size), a bar for each run in each group."""
 
 from __future__ import annotations
 
@@ -31,12 +31,15 @@ from dlboard.plugins.charts._axis_label import (
 from dlboard.plugins.charts._chart_title import titled
 from dlboard.plugins.charts._empty_chart import nothing_logged
 from dlboard.plugins.charts._grouping import latest_per_run
+from dlboard.plugins.charts.line_chart import LEGEND_MAX_HEIGHT
 from dlboard.serve import AssetKind, series_color, serve_asset
 
 if typing.TYPE_CHECKING:
     from dash import Dash
 
 _TOOLTIP_JS_PATH = Path(__file__).with_name("bar_chart_tooltip.js")
+_GROUP: typing.Final = "__group__"
+"""The column of the x values the bars are grouped by, whatever they are the values of."""
 
 
 class BarChartSettings(BaseModel, frozen=True, extra="forbid", use_attribute_docstrings=True):
@@ -45,9 +48,11 @@ class BarChartSettings(BaseModel, frozen=True, extra="forbid", use_attribute_doc
     column: str
     """The metric to aggregate onto each bar."""
     x_axis: str
-    """The metric or hyperparameter key to group runs by, e.g. "hidden_size"."""
-    aggregation: typing.Literal["mean", "median", "min", "max", "sum", "count"] = Field(default="mean")
-    """How to combine runs that share the same x_axis value into one bar."""
+    """The metric or hyperparameter key to group bars by, e.g. "hidden_size": a group for each value, with a bar in it for each run that has it."""
+    aggregation: typing.Literal["latest", "mean", "median", "min", "max", "sum", "count"] = Field(
+        default="latest"
+    )
+    """How to combine a run's values in one group into its bar: its last-logged value ("latest", which reads no more than that), or an aggregate of every one it logged there."""
     orientation: typing.Annotated[typing.Literal["horizontal", "vertical"], DISPLAY_SECTION] = Field(
         default="horizontal"
     )
@@ -98,37 +103,36 @@ def _sorted_groups(
             return grouped.sort_values(x_col, key=lambda s: s.astype(str))
 
 
-def _bars(per_run: pd.DataFrame, x_col: str, parameters: BarChartSettings, *, by_run: bool) -> pd.DataFrame:
-    """The bars, sorted as `parameters` say: a run's own each (`by_run`), else the runs that share an x value, aggregated."""
-    bars = (
-        per_run
-        if by_run
-        else per_run.groupby(x_col, as_index=False, sort=False).agg(
-            **{parameters.column: (parameters.column, parameters.aggregation)}
-        )
+def _per_run_values(dataframe: pd.DataFrame, x_col: str, parameters: BarChartSettings) -> pd.DataFrame:
+    """A row per run and x value: the column aggregated over the run's rows at that value, or its last of it, for "latest"."""
+    if parameters.aggregation == "latest":
+        return latest_per_run(dataframe, [x_col, parameters.column])
+    rows = dataframe.dropna(subset=[x_col, parameters.column])
+    # `x_col` is the run itself when the bars are the runs.
+    keys = list(dict.fromkeys(["run_id", x_col]))
+    return rows.groupby(keys, as_index=False, sort=False)[[parameters.column]].agg(parameters.aggregation)
+
+
+def _groups(per_run: pd.DataFrame, x_col: str, parameters: BarChartSettings) -> pd.DataFrame:
+    """A row per x value (as `parameters` sort them), in `_GROUP`, and a column per run: its bar there, empty if it has none."""
+    groups = per_run.assign(**{_GROUP: per_run[x_col]})
+    # `pivot` sorts its rows; the order they were first seen in is what a sort of "none" keeps.
+    wide = (
+        groups.pivot(index=_GROUP, columns="run_id", values=parameters.column)
+        .reindex(groups[_GROUP].unique())
+        .rename_axis(columns=None)
+        .reset_index()
     )
     if parameters.sort != "none":
-        bars = _sorted_groups(bars, x_col, parameters.x_axis_type)
+        wide = _sorted_groups(wide, _GROUP, parameters.x_axis_type)
         if parameters.sort == "descending":
-            bars = bars.iloc[::-1]
-    return bars
+            wide = wide.iloc[::-1]
+    return wide
 
 
 def _is_named_run_axis(x_col: str, dataframe: pd.DataFrame) -> bool:
-    """Whether the bars are the runs, which `dataframe` has the names of."""
+    """Whether the groups are the runs, which `dataframe` has the names of."""
     return x_col == MetricColumn.RUN_ID and RUN_NAME_COLUMN in dataframe.columns
-
-
-def _named_runs(grouped: pd.DataFrame, x_col: str, dataframe: pd.DataFrame) -> pd.DataFrame:
-    """
-    `grouped` with its runs (if they are its bars) by their names, as every other chart names its runs.
-
-    A run with none is "Run <id>". Two runs with one name stay two bars: each is told apart by its id, or they would
-    share a tick.
-    """
-    if not _is_named_run_axis(x_col, dataframe):
-        return grouped
-    return grouped.assign(**{x_col: _run_labels(grouped[x_col], dataframe)})
 
 
 def _run_labels(run_ids: pd.Series[typing.Any], dataframe: pd.DataFrame) -> list[str]:
@@ -193,30 +197,36 @@ class BarChart(ChartType[BarChartSettings, pd.DataFrame, dmc.Stack], frozen=True
 
         _coerce_x_axis(dataframe, x_col, parameters.x_axis_type)
 
-        # Collapse each run down to its last-logged value before grouping, so a run that logs
-        # `column` at every step doesn't outweigh a run that only logs it once -- every run
-        # contributes exactly one value to its group's aggregation.
-        per_run = latest_per_run(dataframe, [x_col, parameters.column])
-        # Runs are grouped by a hyperparameter's value ("accuracy by hidden size"). Over a metric, two runs often end on
-        # one value (a schedule that decays to the same learning rate), and grouping them would collapse the chart to a
-        # bar or two: each run has its own bar there, at its own value, which its tooltip says (#422).
-        by_run = x_col == parameters.x_axis and x_col != MetricColumn.RUN_ID
-        grouped = _bars(per_run, x_col, parameters, by_run=by_run)
-        details = [f"{parameters.x_axis}: {value}" for value in grouped[x_col]] if by_run else None
-        if by_run:
-            grouped = grouped.assign(**{x_col: _run_labels(grouped[MetricColumn.RUN_ID], dataframe)})
-        # A bar per run says which run it is by its name, not its id.
-        x_title = "run" if by_run or _is_named_run_axis(x_col, dataframe) else parameters.x_axis
-        grouped = _named_runs(grouped, x_col, dataframe).rename(columns={x_col: parameters.x_axis})
+        # Every run is its own bar in each group it has a value in (#493) -- two runs that end on one learning rate, or
+        # share a hidden size, sit side by side in its group, rather than being merged into one bar or hidden by it.
+        per_run = _per_run_values(dataframe, x_col, parameters)
+        if per_run.empty:
+            return nothing_logged(parameters.column)
+        wide = _groups(per_run, x_col, parameters)
+        run_ids: list[typing.Any] = [run_id for run_id in wide.columns if run_id != _GROUP]
+        by_run_name = _is_named_run_axis(x_col, dataframe)
+        # A group that is a run is told by its name, not its id.
+        ticks = _run_labels(wide[_GROUP], dataframe) if by_run_name else wide[_GROUP].tolist()
+        x_title = "run" if by_run_name else parameters.x_axis
 
-        data = grouped[[parameters.x_axis, parameters.column]].to_dict(orient="records")
         # Carried on each row (not a real plotted column) so the tooltip's labelFormatter --
         # `bar_chart_tooltip.js` -- can prefix the hovered x-value with what it actually is,
-        # e.g. "hidden_size: 128" instead of a bare "128", and a run's bar with its own x value.
-        for i, row in enumerate(data):
-            row["__x_axis_name__"] = x_title
-            if details is not None:
-                row["__x_detail__"] = details[i]
+        # e.g. "hidden_size: 128" instead of a bare "128".
+        data = [
+            {
+                parameters.x_axis: tick,
+                "__x_axis_name__": x_title,
+                **{str(run_id): value for run_id, value in bars.items() if pd.notna(value)},
+            }
+            for tick, bars in zip(ticks, wide[run_ids].to_dict(orient="records"), strict=True)
+        ]
+        # A group holding one run's bar (every one of them, when the groups are the runs) is stacked so that the bar
+        # fills it, where side by side it would sit in a slot of its own, among slots left empty by the other runs.
+        shares_a_group = bool((wide[run_ids].notna().sum(axis=1) > 1).any())
+        series = [
+            {"name": str(run_id), "label": label, "color": series_color(int(run_id))}
+            for run_id, label in zip(run_ids, _run_labels(pd.Series(run_ids), dataframe), strict=True)
+        ]
 
         # Recharts' `layout` (what mantine's `orientation` controls) decides which axis is the
         # category axis -- x for the default `horizontal` orientation, y for `vertical` -- so the
@@ -244,19 +254,16 @@ class BarChart(ChartType[BarChartSettings, pd.DataFrame, dmc.Stack], frozen=True
             h=parameters.height,
             data=data,  # pyrefly: ignore [bad-argument-type]
             dataKey=parameters.x_axis,
-            series=[
-                {
-                    "name": parameters.column,
-                    "label": parameters.column,
-                    # pyrefly: ignore [bad-assignment]
-                    "color": series_color(0),
-                }
-            ],
+            series=series,  # pyrefly: ignore [bad-argument-type]
+            type="default" if shares_a_group else "stacked",
             orientation=parameters.orientation,
             xAxisLabel=x_axis_label,
             xAxisProps=x_axis_props,
             yAxisProps=y_axis_props,
-            withLegend=False,
+            # Told apart by colour where the groups do not say which run each bar is of. As many rows as there are
+            # runs would take the plot's height, so it is capped as the line chart's is.
+            withLegend=not by_run_name,
+            legendProps={"wrapperStyle": {"maxHeight": LEGEND_MAX_HEIGHT, "overflowY": "auto"}},
             withXAxis=True,
             withYAxis=True,
             tickLine="xy",
@@ -297,12 +304,14 @@ class BarChart(ChartType[BarChartSettings, pd.DataFrame, dmc.Stack], frozen=True
     @classmethod
     @typing.override
     def data_request(cls, parameters: BarChartSettings) -> DataRequest:
-        # A bar is a run's latest value: the chart takes that from each run's series itself, so it needs no more.
+        # A bar of a run's latest value is taken from the run's series itself, so it needs no more; any other
+        # aggregation is of the steps a run logged in a group, so the chart reads them all, as a line chart does.
         # x_axis may be a metric or a hyperparameter -- which, the data says when it comes back, so it is asked for as
         # both; asking for a key that isn't a real hyperparameter reads nothing.
+        reduction = MetricReduction.LATEST if parameters.aggregation == "latest" else MetricReduction.HISTORY
         return DataRequest(
             metrics=frozenset({parameters.column, parameters.x_axis}),
-            reductions=MetricReductions(default=MetricReduction.LATEST),
+            reductions=MetricReductions(default=reduction),
             hparams=frozenset({parameters.x_axis}),
         )
 
