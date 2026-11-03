@@ -337,7 +337,7 @@ def _act(request: RunActionRequest, act: _Act) -> tuple[Any, ...]:
     """What to change on the page for `request`, in the order of `act_on_pinned_runs`'s `Output`s."""
     match request.action:
         case RunAction.PIN | RunAction.UNPIN:
-            pinned = pin_or_unpin(request, PINNED_GRID_ID)
+            pinned = pin_or_unpin(request, PINNED_GRID_ID, RunListSurface.PROJECT)
             return pinned.rows, pinned.notice, no_update, no_update, no_update, no_update
         case RunAction.DELETE:
             asked = ask_to_delete(request.run_ids)

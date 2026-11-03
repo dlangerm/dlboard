@@ -28,7 +28,9 @@ pinned the moment it exists, whether or not it has logged anything yet.
 - **A run's pins are one pin**, filled with all its colours (a wheel of them, if there are several). Hover it to see who
   pinned the run in each. Click it to pin the run in other colours, or take your own pin back: another person's pin is theirs
   to take back.
-- **Pin a selection** with the bar's **Pin** and **Unpin**: every selected run, in one colour.
+- **Pin a selection** with the bar's **Pin** and **Unpin**: every selected run, in one colour. **Unpin** offers the colours you
+  hold on the selected runs, and the notice a pin shows has a **Compare every pin →** link that compares every run of the
+  project pinned in that colour (the same as **Compare pins**, below).
 - **Find a pinned run** with the chips above an experiment's list (one for each colour something in it is pinned in), which
   show only the runs pinned in the colours you pick, however far down the list they are.
 - **The project page** lists the project's pinned runs in its sidebar: a row for each run, however many pins it has,

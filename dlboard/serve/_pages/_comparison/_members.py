@@ -358,7 +358,7 @@ def _act(request: RunActionRequest, act: _Act) -> tuple[Any, ...]:
         case RunAction.REMOVE:
             return _remove(request, act)
         case RunAction.PIN | RunAction.UNPIN:
-            pinned = pin_or_unpin(request, ids.COMPARISON_GRID_ID)
+            pinned = pin_or_unpin(request, ids.COMPARISON_GRID_ID, RunListSurface.COMPARISON)
             return no_update, no_update, no_update, pinned.notice, pinned.rows, no_update
         case RunAction.COMPARE_NEW | RunAction.COMPARE_ADD | RunAction.COMPARE_PINS:
             return _compare(request, act)

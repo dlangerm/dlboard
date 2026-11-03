@@ -11,11 +11,14 @@ from __future__ import annotations
 import typing
 from typing import TYPE_CHECKING, Any
 
+import dash_mantine_components as dmc
+
 from dlboard.models import PinColor
 from dlboard.serve import get_current_user, get_data_store
 from dlboard.serve._grid import PINS_RENDERER, PINS_TOOLTIP
-from dlboard.serve._pages._pins._pin_view import PinCell, pin_cells, pin_css_color
-from dlboard.serve._pages._run_list import RunAction, RunActionRequest
+from dlboard.serve._pages._pins._pin_view import PinCell, pin_cells, pin_css_color, pin_glyph
+from dlboard.serve._pages._run_list import RunAction, RunActionRequest, RunListSurface
+from dlboard.serve._pages._run_list._ids import request_store_id
 from dlboard.serve._pages._run_list._rows import RowUpdate, RowUpdates
 
 if TYPE_CHECKING:
@@ -71,7 +74,7 @@ class Pinned(typing.NamedTuple):
     notice: list[dict[str, Any]]
 
 
-def pin_or_unpin(request: RunActionRequest, grid: str) -> Pinned:
+def pin_or_unpin(request: RunActionRequest, grid: str, surface: RunListSurface) -> Pinned:
     """
     Pin the requested runs as the viewer, or take the viewer's pin back, in the colour asked.
 
@@ -112,7 +115,7 @@ def pin_or_unpin(request: RunActionRequest, grid: str) -> Pinned:
         ],
     )
     count = len(request.run_ids)
-    notice = {
+    notice: dict[str, Any] = {
         "action": "show",
         "id": f"{verb}-{request.color}-{count}",
         "title": f"{verb} {count} run{'s' if count != 1 else ''}",
@@ -121,6 +124,30 @@ def pin_or_unpin(request: RunActionRequest, grid: str) -> Pinned:
         "color": "gray" if color is PinColor.PLAIN else color.value,
         "autoClose": 3_000,
     }
+    if request.action is RunAction.PIN:
+        # Pinning is how a comparison starts: the runs pinned in this colour, compared in one click (the same action as the
+        # bar's Compare pins menu). The notice stays long enough to read the link and reach it.
+        notice["message"] = dmc.Stack(
+            [
+                dmc.Text(message, size="sm"),
+                dmc.Button(
+                    ["Compare every ", pin_glyph(color), " pin →"],
+                    variant="subtle",
+                    size="compact-xs",
+                    color="gray",
+                    **typing.cast(
+                        "dict[str, Any]",
+                        {
+                            "data-dl-compare-pins": color.value,
+                            "data-dl-request-store": request_store_id(surface),
+                        },
+                    ),
+                ),
+            ],
+            gap=4,
+            align="flex-start",
+        )
+        notice["autoClose"] = 8_000
     return Pinned(rows.dump(), [notice])
 
 

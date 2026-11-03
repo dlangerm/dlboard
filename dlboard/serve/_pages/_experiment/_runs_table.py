@@ -913,7 +913,7 @@ def _register_run_actions(app: Dash) -> None:
                     delete_opened=asked.opened, delete_body=asked.body, delete_pending=asked.pending
                 ).outputs()
             case RunAction.PIN | RunAction.UNPIN:
-                pinned = pin_or_unpin(request, NAVBAR_HPARAM_DATATABLE_ID)
+                pinned = pin_or_unpin(request, NAVBAR_HPARAM_DATATABLE_ID, RunListSurface.EXPERIMENT)
                 page = page_model.BasicExperimentPage.model_validate_json(act.page_json)
                 return _Outputs(
                     row_updates=pinned.rows,

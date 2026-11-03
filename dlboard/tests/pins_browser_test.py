@@ -335,3 +335,22 @@ def test_the_unpin_menu_offers_only_the_colours_you_hold_on_the_selected_runs(
     expect(unpin_colors).to_have_count(0)
     expect(page.get_by_text("You hold no pin on these")).to_be_visible()
     assert console_errors == []
+
+
+def test_the_toast_of_a_pin_compares_every_run_pinned_in_its_colour(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    _, rows = _experiment_of_runs(page, live_server_url, "Pin Toast Experiment", 3)
+    for index in (0, 1):
+        rows.nth(index).locator(".ag-selection-checkbox input").check()
+        _bar(page).get_by_role("button", name="Pin", exact=True).click()
+        page.get_by_role("menuitem", name="Pin green").click()
+        expect(rows.nth(index).locator(_PIN)).to_have_count(1)
+        rows.nth(index).locator(".ag-selection-checkbox input").uncheck()
+
+    # The toast of the last pin is the one on screen to click: it compares every run in the colour, not just that one.
+    page.get_by_role("button", name=re.compile("^Compare every")).last.click()
+
+    expect(page).to_have_url(re.compile(r"/comparison/\d+$"))
+    expect(page.locator("#comparison-members-grid .ag-center-cols-container .ag-row")).to_have_count(2)
+    assert console_errors == []
