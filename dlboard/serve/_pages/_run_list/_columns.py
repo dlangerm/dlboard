@@ -17,6 +17,7 @@ ROW_ID_FIELD: Final = "_row_id"
 SWATCH_FIELD: Final = "_swatch"
 DRAWN_FIELD: Final = "_drawn"
 HREF_FIELD: Final = "_href"
+EXPERIMENT_FIELD: Final = "_experiment"
 FOCUSED_FIELD: Final = "_focused"
 STATUS_FIELD: Final = "_status"
 DURATION_FIELD: Final = "_duration_s"
@@ -26,8 +27,10 @@ STATUS_DETAIL_FIELD: Final = "_status_detail"
 
 EYE_COLUMN_WIDTH: Final = 32
 NAME_MIN_WIDTH: Final = 96
-STATUS_MIN_WIDTH: Final = 74
-"""Room for "✕ 1h 2m" in the narrow sidebar a run list lives in."""
+STATUS_MIN_WIDTH: Final = 88
+"""Room for "✕ 1h 2m", and for the "Status" header with its sort mark, in the narrow sidebar a run list lives in."""
+STATUS_MAX_WIDTH: Final = 108
+"""No more than that: the name is what the list is for, and sizing the columns to fit would give this half of what is left."""
 STATUS_STYLES: Final[dict[models.RunStatus, str]] = {
     models.RunStatus.RUNNING: "var(--mantine-color-blue-5)",
     models.RunStatus.FINISHED: "var(--mantine-color-dimmed)",
@@ -129,6 +132,7 @@ def status_column_def() -> dict[str, Any]:
         "tooltipField": STATUS_DETAIL_FIELD,
         # The run name gets what is left, but this has to stay readable ("✕ 1h 2m") in a narrow sidebar.
         "minWidth": STATUS_MIN_WIDTH,
+        "maxWidth": STATUS_MAX_WIDTH,
         "cellStyle": {
             "styleConditions": [
                 {

@@ -113,9 +113,25 @@
   text-decoration: underline;
 }
 
-/* Whose a run is, after its name, in a list of runs of several experiments. */
+/* Whose a run is, under its name, in a list of runs of several experiments: after it, a name would push it out of a narrow list. */
+.dl-run-link:has(.dl-run-experiment) {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+  line-height: 1.25;
+}
+
+/* Less the dot (`.dl-swatch::before` in `_shell.css`) that sits before the name in the same line. */
+.dl-swatch .dl-run-link:has(.dl-run-experiment) {
+  max-width: calc(100% - 1rem);
+}
+
 .dl-run-experiment {
-  margin-left: 0.4rem;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--mantine-color-dimmed);
   font-size: var(--mantine-font-size-xs);
 }

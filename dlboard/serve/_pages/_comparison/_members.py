@@ -49,6 +49,7 @@ from dlboard.serve._pages._run_list import (
 )
 from dlboard.serve._pages._run_list._columns import (
     DRAWN_FIELD,
+    EXPERIMENT_FIELD,
     HREF_FIELD,
     eye_column_def,
     name_column_def,
@@ -66,9 +67,6 @@ if TYPE_CHECKING:
 
     from dlboard.models import DataStore, Run
     from dlboard.serve._pages._pins._pin_view import PinCell
-
-EXPERIMENT_FIELD: typing.Final = "_experiment"
-"""The row field holding the name of the run's experiment (reserved like `_swatch`)."""
 
 _FOLLOW_FORK_JS = ClientsideScript(Path(__file__).with_name("follow_fork.js"))
 

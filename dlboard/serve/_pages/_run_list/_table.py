@@ -9,12 +9,19 @@ import dash_ag_grid as dag
 from dlboard.models import MetricColumn
 from dlboard.serve import series_swatch_class
 from dlboard.serve._grid import themed_grid_kwargs
-from dlboard.serve._pages._run_list._columns import FOCUSED_FIELD, ROW_ID_FIELD, SWATCH_FIELD
+from dlboard.serve._pages._run_list._columns import (
+    EXPERIMENT_FIELD,
+    FOCUSED_FIELD,
+    ROW_ID_FIELD,
+    SWATCH_FIELD,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Collection
 
 ROW_HEIGHT: Final = 34
+TWO_LINE_ROW_HEIGHT: Final = 46
+"""A row of a list of runs of several experiments: the run's name, and under it the experiment it is of."""
 MAX_TABLE_HEIGHT: Final = "50vh"
 
 
@@ -42,13 +49,14 @@ def run_grid(
         }
         for row in rows
     ]
+    row_height = TWO_LINE_ROW_HEIGHT if any(EXPERIMENT_FIELD in row for row in rows) else ROW_HEIGHT
     grid = themed_grid_kwargs()
     grid["className"] = f"{grid['className']} dl-run-table"
     grid["style"] = {
         **grid["style"],
         # Less than ag-grid's default padding a side: in a sidebar this narrow it is a third of every column.
         "--ag-cell-horizontal-padding": "8px",
-        "height": f"min({(max(len(rows), 2) + 1) * ROW_HEIGHT + 2}px, {MAX_TABLE_HEIGHT})",
+        "height": f"min({max(len(rows), 2) * row_height + ROW_HEIGHT + 2}px, {MAX_TABLE_HEIGHT})",
     }
     return dag.AgGrid(
         id=table_id,
@@ -67,7 +75,7 @@ def run_grid(
         },
         columnSize="responsiveSizeToFit",
         dashGridOptions={
-            "rowHeight": ROW_HEIGHT,
+            "rowHeight": row_height,
             "headerHeight": ROW_HEIGHT,
             "rowSelection": {
                 "mode": "multiRow",

@@ -42,7 +42,13 @@ from dlboard.serve._pages._run_list import (
     request_store_id,
     simple_action,
 )
-from dlboard.serve._pages._run_list._columns import HREF_FIELD, name_column_def, run_fields, status_column_def
+from dlboard.serve._pages._run_list._columns import (
+    EXPERIMENT_FIELD,
+    HREF_FIELD,
+    name_column_def,
+    run_fields,
+    status_column_def,
+)
 from dlboard.serve._pages._run_list._delete import (
     ask_to_delete,
     delete_outputs,
@@ -80,9 +86,6 @@ PINNED_LIST_ID: DivId[_PinnedRunsPage] = DivId("pinned-runs-list")
 PINNED_COUNT_ID: DivId[_PinnedRunsPage] = DivId("pinned-runs-count")
 PINNED_NOTIFY_ID: DivId[_PinnedRunsPage] = DivId("pinned-runs-notify")
 """Where the project page says why a delete was refused."""
-
-EXPERIMENT_FIELD: typing.Final = "_experiment"
-"""The row field holding the name of the run's experiment (reserved like `_swatch`)."""
 
 _SYNC_URL_JS = ClientsideScript(Path(__file__).with_name("sync_pins_url.js"))
 

@@ -2419,6 +2419,8 @@
   "dlboard/tests/run_list_browser_test.py::test_drawing_another_run_while_looking_at_one_leaves_the_link[chromium]": 5.4336276989779435,
   "dlboard/tests/run_list_browser_test.py::test_the_breadcrumb_switches_to_another_experiment_of_the_project[chromium]": 3.0048297320026904,
   "dlboard/tests/run_list_browser_test.py::test_the_eye_draws_a_run_and_the_checkbox_only_selects_it[chromium]": 8.886540070030605,
+  "dlboard/tests/run_list_journeys_browser_test.py::test_a_list_of_runs_of_several_experiments_shows_which_experiment_each_is_of_in_the_sidebar[chromium]": 2.6487009859993123,
+  "dlboard/tests/run_list_journeys_browser_test.py::test_check_runs_of_one_experiment_compare_them_then_add_runs_of_another[chromium]": 7.343312414006505,
   "dlboard/tests/split_install_test.py::test_the_server_half_imports_from_a_separate_path_entry[False]": 0.04622665900387801,
   "dlboard/tests/split_install_test.py::test_the_server_half_imports_from_a_separate_path_entry[True]": 0.03615957300644368,
   "dlboard/tests/sql_store_test.py::test_a_new_run_is_running_and_finishing_it_records_how_and_when[postgres]": 0.3513473469938617,
