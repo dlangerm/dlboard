@@ -33,6 +33,7 @@ from dlboard.serve._pages._experiment import _ids as ids
 from dlboard.serve._pages._experiment import _page_edits as edits
 from dlboard.serve._pages._experiment import _page_model as page_model
 from dlboard.serve._pages._experiment import _panel_view as panel_view
+from dlboard.serve._pages._experiment._bulk_chart_edits import bulk_chart_modals, register_bulk_chart_edits
 from dlboard.serve._pages._experiment._paging import Paging
 
 if TYPE_CHECKING:
@@ -167,7 +168,7 @@ def _delete_confirm_modal(  # noqa: PLR0913
 
 
 def panel_control_modals() -> list[Component]:
-    """The rename-panel and delete confirm modals, for the experiment page to render once, beside the panel area."""
+    """The rename-panel, delete and bulk-edit modals, for the experiment page to render once, beside the panel area."""
     return [
         _rename_panel_modal(),
         _delete_confirm_modal(
@@ -186,6 +187,7 @@ def panel_control_modals() -> list[Component]:
             title="Delete this chart?",
             body="This can't be undone.",
         ),
+        *bulk_chart_modals(),
     ]
 
 
@@ -627,3 +629,4 @@ def register_panel_controls_callbacks(app: Dash) -> None:
     _register_toggle(app)
     _register_chart_panel_move(app)
     _register_rename(app)
+    register_bulk_chart_edits(app)

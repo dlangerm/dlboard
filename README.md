@@ -99,9 +99,11 @@ Every metric, hyperparameter, and artifact you log gets synced to dlboard in the
 
 ![A comparison of a sweep and the baseline experiment, one chart over runs of both and the list of the comparison's runs](docs/images/comparison.png)
 
-**Quick jump** — Search experiments by name with Ctrl+K:
+**Quick jump** — Search projects, experiments and comparisons by name with Ctrl+K:
 
 ![The Ctrl+K jump palette, open and matching an experiment by name](docs/images/jump-palette.png)
+
+**Many charts** — Filter a panel's charts, then set the x-axis of every chart the filter matches or delete them together; it says how many first, and an edit to a page that is not yours is saved in a copy of your own.
 
 ## Deployment
 

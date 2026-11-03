@@ -6,6 +6,7 @@ from typing import Any, cast
 
 from dash import Dash
 
+from dlboard.serve._pages._experiment import _bulk_chart_edits as bulk_chart_edits
 from dlboard.serve._pages._experiment import _panel_controls as panel_controls
 from dlboard.serve._pages._experiment import _panel_view as panel_view
 from dlboard.serve._pages._experiment import _tab_controls as tab_controls
@@ -34,5 +35,7 @@ def test_buttons_that_rebuild_the_panel_area_spin_until_their_callback_returns()
             tab_controls.RENAME_TAB_SAVE_ID,
             panel_controls.DELETE_PANEL_CONFIRM_ID,
             panel_controls.DELETE_CHART_CONFIRM_ID,
+            bulk_chart_edits.BULK_DELETE_CONFIRM_ID,
+            bulk_chart_edits.BULK_EDIT_APPLY_ID,
         )
     }

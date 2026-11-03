@@ -145,6 +145,8 @@ PANEL_GRID: Final = PanelPattern("panel-grid")
 OPEN_CHART_BUTTON: Final = PanelPattern("open-add-chart")
 RENAME_PANEL_BUTTON: Final = PanelPattern("rename-panel")
 DELETE_PANEL_BUTTON: Final = PanelPattern("delete-panel")
+BULK_EDIT_BUTTON: Final = PanelPattern("bulk-edit-charts")
+BULK_DELETE_BUTTON: Final = PanelPattern("bulk-delete-charts")
 PANEL_SUGGEST_BUTTON: Final = PanelPattern("panel-suggest-charts")
 CHART_FILTER: Final = PanelPattern("chart-filter")
 CHART_PAGER: Final = PanelPattern("chart-pager")
@@ -250,6 +252,19 @@ def panel_header_controls(panel: models.PanelInstance[Any, Any]) -> Component:
                                 "Rename panel…",
                                 id=RENAME_PANEL_BUTTON.of(panel_name),
                                 leftSection=icon(Icon.EDIT),
+                            ),
+                            dmc.MenuDivider(),
+                            dmc.MenuLabel("Charts matching the chart filter"),
+                            dmc.MenuItem(
+                                "Set x-axis…",
+                                id=BULK_EDIT_BUTTON.of(panel_name),
+                                leftSection=icon(Icon.EDIT),
+                            ),
+                            dmc.MenuItem(
+                                "Delete…",
+                                id=BULK_DELETE_BUTTON.of(panel_name),
+                                leftSection=icon(Icon.DELETE),
+                                color="red",
                             ),
                             dmc.MenuDivider(),
                             dmc.Switch(
