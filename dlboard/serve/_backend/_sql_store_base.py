@@ -2353,19 +2353,23 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         actor_id: int,
         action: models.AuditAction,
         entity_type: models.EntityType,
-        entity_id: int,
-        details: dict[str, int],
+        details_by_entity: Mapping[int, dict[str, int]],
     ) -> sa.Insert:
-        """One audit log row's `INSERT`, to fold into a bigger transaction."""
-        return sql.insert(
-            self._tables[models.AuditLogEntry],
-            models.NewAuditLogEntry(
-                user_id=actor_id,
-                action=action,
-                entity_type=entity_type,
-                entity_id=entity_id,
-                details=json.dumps(details),
-            ),
+        """The `INSERT` of one audit log row for each entity of `details_by_entity`, to fold into a bigger transaction."""
+        return sa.insert(self._tables[models.AuditLogEntry]).values(
+            [
+                sql.row_values(
+                    models.NewAuditLogEntry(
+                        user_id=actor_id,
+                        action=action,
+                        entity_type=entity_type,
+                        entity_id=entity_id,
+                        details=json.dumps(details),
+                    ),
+                    exclude=frozenset({sql.ID_KEY}),
+                )
+                for entity_id, details in details_by_entity.items()
+            ]
         )
 
     def _soft_delete(
@@ -2403,7 +2407,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
                     for child, where in cascade
                 ),
                 self._audit_log_insert(
-                    actor.id, models.AuditAction.SOFT_DELETE, entity_type, entity_id, details
+                    actor.id, models.AuditAction.SOFT_DELETE, entity_type, {entity_id: details}
                 ),
             ]
         )
@@ -2439,7 +2443,9 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
                     sa.update(child).where(where, child.c.deleted_at == deleted_at).values(cleared)
                     for child, where in cascade
                 ),
-                self._audit_log_insert(actor.id, models.AuditAction.RESTORE, entity_type, entity_id, details),
+                self._audit_log_insert(
+                    actor.id, models.AuditAction.RESTORE, entity_type, {entity_id: details}
+                ),
             ]
         )
 
@@ -2494,7 +2500,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             ):
                 return  # another purge got there first, and recorded it
             conn.execute(
-                self._audit_log_insert(actor.id, models.AuditAction.PURGE, entity_type, entity_id, details)
+                self._audit_log_insert(actor.id, models.AuditAction.PURGE, entity_type, {entity_id: details})
             )
             for artifact_id, ref in artifact_refs:
                 conn.execute(
@@ -2534,11 +2540,14 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
 
     def delete_runs(self, run_ids: frozenset[int], actor: models.User) -> None:
         """
-        Soft-delete each of `run_ids` as `delete_run` does.
+        Soft-delete each of `run_ids` as `delete_run` does, a batch of runs to a transaction.
 
         Every id is checked first, so one that does not exist or is already deleted refuses the whole call before any run is
-        touched. The deletes themselves are one transaction per run, each with its own audit entry, so a failure part-way
-        leaves the runs before it deleted.
+        touched. A batch is one statement for the runs, one for what they own, and one audit entry for each run (with the
+        counts of what it owned, as `delete_run` records them): not a transaction for every run, which a selection of
+        thousands made take seconds for each thousand. All of them are stamped with one `deleted_at`: a restore of one run
+        matches that stamp among what it owns alone, so it brings back its own artifacts and no other run's. A failure
+        part-way leaves the batches before it deleted.
 
         Requires `Scope.RUN_DELETE`.
         """
@@ -2553,9 +2562,43 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         if gone := run_ids - live:
             msg = f"Run {min(gone)} does not exist or is already deleted"
             raise ValueError(msg)
-        # One by one, each in its own transaction: every run is audited, restored and purged on its own.
-        for run_id in sorted(run_ids):
-            self.delete_run(run_id, actor)
+        stamp = {"deleted_at": pendulum.now(pendulum.UTC), "deleted_by": actor.id}
+        owned = [self._owned_by_runs(path) for path in _cascade_targets(models.Run, within=SOFT_DELETABLE)]
+        for batch in _in_batches(run_ids):
+            # Counted before the mutation, as `_soft_delete` does, for the audit entries.
+            counts: dict[int, dict[str, int]] = {
+                run_id: dict.fromkeys((t.name for t, _ in owned), 0) for run_id in batch
+            }
+            for table, column in owned:
+                for run_id, count in self._execute(
+                    sa.select(column, sa.func.count())
+                    .where(column.in_(batch), table.c.deleted_at.is_(None))
+                    .group_by(column)
+                ):
+                    counts[run_id][table.name] = count
+            results = self._transaction(
+                [
+                    sa.update(runs)
+                    .where(runs.c.id.in_(batch), runs.c.deleted_at.is_(None))
+                    .values(stamp)
+                    .returning(runs.c.id),
+                    *(
+                        sa.update(table).where(column.in_(batch), table.c.deleted_at.is_(None)).values(stamp)
+                        for table, column in owned
+                    ),
+                    self._audit_log_insert(
+                        actor.id, models.AuditAction.SOFT_DELETE, models.EntityType.RUN, counts
+                    ),
+                ]
+            )
+            if gone := set(batch) - {run_id for (run_id,) in results[0]}:
+                msg = f"Run {min(gone)} does not exist or is already deleted"
+                raise ValueError(msg)
+
+    def _owned_by_runs(self, path: CascadePath) -> tuple[sa.Table, sa.Column[Any]]:
+        """A table a run owns, and its column that says whose each row is: its audit entries count them for each run."""
+        ((table, column),) = path  # a deeper path would need a join to say whose each row is
+        return self._tables[table], self._tables[table].c[column]
 
     def restore_run(self, run_id: int, actor: models.User) -> None:
         """Restore a soft-deleted run and every artifact deleted with it. Requires `Scope.RESTORE`."""
@@ -2604,7 +2647,8 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             model,
             sa.select(table)
             .where(table.c.deleted_at.is_not(None))
-            .order_by(table.c.deleted_at.desc())
+            # Runs deleted together share a stamp: the later id is the later run, and a page never repeats or skips one.
+            .order_by(table.c.deleted_at.desc(), table.c.id.desc())
             .limit(limit)
             .offset(offset),
         )

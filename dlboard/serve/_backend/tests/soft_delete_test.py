@@ -9,6 +9,7 @@ import pytest
 
 from dlboard import models
 from dlboard.conftest import EVERY_STORE_BACKEND, StoreBackend, create_entity_chain
+from dlboard.serve._backend import _sql_store_base as store_base
 
 if TYPE_CHECKING:
     from dlboard.plugins.data_stores.sqlite import SQLLiteStore
@@ -318,3 +319,107 @@ def test_delete_runs_refuses_a_bad_id_before_deleting_any(store: SQLLiteStore, a
     assert experiment_id in {e.id for e in store.get_experiments(project_id)}
     with pytest.raises(ValueError, match="does not exist or is already deleted"):
         store.delete_runs(frozenset({first}), admin)
+
+
+def _runs_with_artifacts(store: SQLLiteStore, experiment_id: int, artifacts_per_run: list[int]) -> list[int]:
+    """A run for each of `artifacts_per_run`, with that many artifacts logged for it: their ids."""
+    runs = [store.create_run(models.NewRun(experiment_id=experiment_id)).id for _ in artifacts_per_run]
+    store.log_artifact_refs(
+        [
+            models.Artifact(
+                key=f"k{n}",
+                fname="f.png",
+                run_id=run_id,
+                experiment_id=experiment_id,
+                step=0,
+                ref=f"ref://{run_id}/{n}",
+            )
+            for run_id, count in zip(runs, artifacts_per_run, strict=True)
+            for n in range(count)
+        ]
+    )
+    return runs
+
+
+def _audited(store: SQLLiteStore, admin: models.User, runs: list[int]) -> dict[int, tuple[str, str, str]]:
+    """What the audit log says of each of `runs`: its action, entity type and details."""
+    return {
+        entry.entity_id: (entry.action, entry.entity_type, entry.details)
+        for entry in store.list_audit_log(admin, limit=1_000)
+        if entry.entity_id in runs and entry.action is models.AuditAction.SOFT_DELETE
+    }
+
+
+def test_delete_runs_audits_each_run_as_deleting_it_alone_does(
+    store: SQLLiteStore, admin: models.User
+) -> None:
+    """One statement for a batch of runs is what a run at a time did, entry for entry (#514)."""
+    _, experiment_id, *_ = create_entity_chain(store)
+    shape = [2, 0, 1]
+    alone = _runs_with_artifacts(store, experiment_id, shape)
+    together = _runs_with_artifacts(store, experiment_id, shape)
+
+    for run_id in alone:
+        store.delete_run(run_id, admin)
+    store.delete_runs(frozenset(together), admin)
+
+    entries = [_audited(store, admin, runs) for runs in (alone, together)]
+    assert [sorted(e.values()) for e in entries] == [sorted(entries[0].values())] * 2
+    assert len(entries[1]) == len(shape)
+    assert {run.id for run in store.list_deleted_runs()} >= {*alone, *together}
+
+
+def test_restoring_a_run_deleted_with_others_restores_only_its_own_artifacts(
+    store: SQLLiteStore, admin: models.User
+) -> None:
+    _, experiment_id, *_ = create_entity_chain(store)
+    first, second = _runs_with_artifacts(store, experiment_id, [1, 1])
+    independently_deleted = next(
+        a for a in store.fetch_artifacts(experiment_id=experiment_id, run_ids=frozenset({second}))
+    ).id
+    assert independently_deleted is not None
+    store.delete_artifact(independently_deleted, admin)  # on its own, before the runs
+
+    store.delete_runs(frozenset({first, second}), admin)
+    store.restore_run(first, admin)
+
+    live = {a.run_id for a in store.fetch_artifacts(experiment_id=experiment_id, run_ids=None)}
+    assert live == {
+        first
+    }  # not the other run's, deleted at the same instant, nor an artifact deleted before it
+    assert {run.id for run in store.list_deleted_runs()} >= {second}
+    store.restore_run(second, admin)
+    assert {a.run_id for a in store.fetch_artifacts(experiment_id=experiment_id, run_ids=None)} == {first}
+
+
+def test_delete_runs_deletes_every_batch_of_a_long_selection(
+    store: SQLLiteStore, admin: models.User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(store_base, "_IN_BATCH", 3)
+    _, experiment_id, *_ = create_entity_chain(store)
+    runs = _runs_with_artifacts(store, experiment_id, [1] * 8)
+
+    store.delete_runs(frozenset(runs), admin)
+
+    assert {run.id for run in store.get_runs(experiment_id, run_ids=frozenset(runs))} == set()
+    assert len(_audited(store, admin, runs)) == len(runs)
+
+
+def test_the_trash_lists_runs_deleted_together_newest_id_first_and_pages_through_them(
+    store: SQLLiteStore, admin: models.User
+) -> None:
+    _, experiment_id, *_ = create_entity_chain(store)
+    runs = _runs_with_artifacts(store, experiment_id, [0] * 5)
+    store.delete_runs(frozenset(runs), admin)
+
+    pages = [[r.id for r in store.list_deleted_runs(limit=2, offset=offset)] for offset in (0, 2, 4)]
+
+    assert [i for page in pages for i in page][:5] == sorted(runs, reverse=True)
+
+
+def test_a_run_owns_what_it_does_directly_which_is_what_a_batch_counts_by() -> None:
+    """The audit counts of a batch group each table by the column that names its run: a deeper path would have no such column."""
+    paths = store_base._cascade_targets(models.Run, within=store_base.SOFT_DELETABLE)
+
+    assert paths
+    assert {len(path) for path in paths} == {1}
