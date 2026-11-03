@@ -1478,7 +1478,9 @@ def test_ctrl_k_jumps_straight_to_an_experiment_by_name(
     page.keyboard.press("Control+K")
     search = page.locator(f"#{JUMP_SELECT_ID}")
     expect(search).to_be_focused()
-    search.press_sequentially("needle")
+    # The options are fetched as it opens, and the first is taken as the search changes: type once there are some.
+    expect(page.get_by_role("option").first).to_be_visible()
+    search.press_sequentially("needle-in-a-haystack")
     page.keyboard.press("Enter")
 
     expect(page).to_have_url(f"{live_server_url}/experiment/{target.id}")
