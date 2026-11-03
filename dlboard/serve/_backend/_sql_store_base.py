@@ -693,6 +693,22 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             .values(revision=experiments.c.revision + 1, last_activity_at=pendulum.now(pendulum.UTC))
         )
 
+    def _bump_revisions(self, experiment_ids: Collection[int]) -> None:
+        """
+        Move `revision` of each experiment on, for a change a live page shows but that is not the experiment's activity.
+
+        A pin is that: a page that polls the revision redraws what it has to for it (a run's pin), while the experiment
+        is no more recently active than before.
+        """
+        if not experiment_ids:
+            return
+        experiments = self._tables[models.Experiment]
+        self._execute(
+            sa.update(experiments)
+            .where(experiments.c.id.in_(experiment_ids))
+            .values(revision=experiments.c.revision + 1)
+        )
+
     def _touch_experiment(self, experiment_id: int) -> None:
         """
         Bump an experiment's `revision` counter (and `last_activity_at`) after a mutation visible on its page.
@@ -1961,6 +1977,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             )
             for batch in _in_batches(run_ids)
         )
+        self._bump_revisions(set(experiments.values()))
 
     def unpin_runs(self, pinned_by: int, run_ids: frozenset[int], color: models.PinColor) -> None:
         """Remove `pinned_by`'s pin of `color` from each of `run_ids`; anyone else's, and other colours', are left alone."""
@@ -1971,6 +1988,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             )
             for batch in _in_batches(run_ids)
         )
+        self._bump_revisions(set(self.run_experiments(run_ids).values()))
 
     def run_experiments(self, run_ids: frozenset[int]) -> dict[int, int]:
         """The experiment each of `run_ids` is of, whether or not it is deleted; a run that does not exist is left out."""

@@ -14,10 +14,10 @@ import json
 import typing
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar
 
 import dash_mantine_components as dmc
-from dash import Dash, Input, Output, State, html, no_update
+from dash import Dash, Input, Output, State, ctx, html, no_update
 from dash.dcc import Store
 from dash.exceptions import PreventUpdate
 from structlog.stdlib import get_logger
@@ -26,7 +26,7 @@ from dlboard import models
 from dlboard.models import MetricColumn
 from dlboard.serve import ClientsideScript, Icon, get_current_user, get_data_store
 from dlboard.serve import _constants as constants
-from dlboard.serve._component_ids import ButtonId, StoreId, ValueId
+from dlboard.serve._component_ids import ButtonId, PatternId, StoreId, ValueId
 from dlboard.serve._grid import column_def, infer_column_dtype
 from dlboard.serve._pages._dash_helpers import (
     CallbackStates,
@@ -84,13 +84,14 @@ from dlboard.serve._pages._run_list._delete import (
 )
 from dlboard.serve._pages._run_list._ids import navigate_id
 from dlboard.serve._pages._run_list._rows import (
+    ROW_UPDATES,
     RowUpdate,
     RowUpdates,
     register_row_updates,
     row_update_shells,
     row_updates_id,
 )
-from dlboard.serve._pages._run_list._table import run_grid
+from dlboard.serve._pages._run_list._table import grid_rows, run_grid
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -110,9 +111,28 @@ NAVBAR_HPARAM_CONFIRM_COLS_ID: ButtonId[ids.ExperimentPage] = ButtonId("navbar-h
 NAVBAR_HPARAM_COLUMNS_TOGGLE_ID: ButtonId[ids.ExperimentPage] = ButtonId("navbar-hparam-columns-toggle")
 NAVBAR_NEWEST_RUNS_ID: ButtonId[ids.ExperimentPage] = ButtonId("navbar-newest-runs")
 NAVBAR_HPARAM_APPLIED_COLS_ID: StoreId[ids.ExperimentPage] = StoreId("navbar-hparam-applied-cols")
-NAVBAR_HPARAM_SIGNATURE_ID: StoreId[ids.ExperimentPage] = StoreId("navbar-hparam-signature")
-NAVBAR_RUN_HEAD_ID: typing.Final = "navbar-run-head"
-"""What is said about what is drawn (how many runs are not, the way back to the view's): redrawn by the actions that change it."""
+
+
+class _ListSlot(PatternId[ids.ExperimentPage]):
+    """
+    The one component of the run list's tree with this `type`.
+
+    The list is drawn into the shell by a callback, so its parts are not always on the page, and a callback may only
+    name an output that is. `all()` is that output when it may not be (a wildcard output matches none without an error);
+    `of()` is the component's own id, and what a callback that only runs with the list on the page names.
+    """
+
+    KEYS: ClassVar[tuple[str, ...]] = ("slot",)
+
+    def of(self) -> dict[str, str]:
+        return {"type": self.type, "slot": "only"}
+
+
+NAVBAR_HPARAM_SIGNATURE = _ListSlot("navbar-hparam-signature")
+"""The digest of what the list holds, which a tick that finds it unchanged stops at."""
+NAVBAR_HPARAM_STRUCTURE_ID: StoreId[ids.ExperimentPage] = StoreId("navbar-hparam-structure")
+NAVBAR_RUN_HEAD = _ListSlot("navbar-run-head")
+"""What is said about what is drawn (how many runs are not, the way back to the view's) and the actions on the selection."""
 
 _HPARAM_COLS_CHANGED_JS = ClientsideScript(Path(__file__).with_name("hparam_cols_changed.js"))
 
@@ -294,7 +314,7 @@ def _render_hparam_panel(
                 gap="xs",
                 wrap="nowrap",
             ),
-            html.Div(head, id=NAVBAR_RUN_HEAD_ID),
+            html.Div(head, id=NAVBAR_RUN_HEAD.of()),
             html.Div(table, id=NAVBAR_HPARAM_TABLE_BODY_ID),
         ]
     )
@@ -390,8 +410,9 @@ def _head_and_signature(
     runs, selection, selected = _load_hparam_panel_settings(store, experiment_id, ref, None)
     hparams = list(store.fetch_hyperparams(experiment_id, run_ids=None))
     listed = _Listed(runs, hparams, selection, ref.view_id if isinstance(ref, repo.ExperimentRef) else None)
+    pins = experiment_pin_cells(store, experiment_id, get_current_user().id)
     return _run_head(store, experiment_id, selection, chips), _render_signature(
-        experiment_id, listed, selected
+        experiment_id, listed, selected, pins
     )
 
 
@@ -466,11 +487,37 @@ def _load_hparam_panel_settings(
     return runs, selection, columns
 
 
-def _render_signature(experiment_id: int, listed: _Listed, selected: list[str]) -> str:
+def _structure_signature(
+    experiment_id: int,
+    selected: list[str],
+    hparam_keys: list[str],
+    metric_keys: list[str],
+    rows: list[dict[str, Any]],
+) -> str:
+    """
+    A digest of what the grid itself is built from, which only a change of this redraws: its columns, and what a column's cells are.
+
+    Not its runs, their values or their pins, which are rows (`apply_row_updates.js` patches those in place). The keys the
+    columns picker offers are part of it, since the picker is drawn with the grid; so is the kind of value each picked column
+    holds, which is read off the rows.
+    """
+    signed = [
+        experiment_id,
+        selected,
+        hparam_keys,
+        metric_keys,
+        [infer_column_dtype(rows, key) for key in selected],
+    ]
+    return hashlib.sha256(json.dumps(signed, default=str).encode()).hexdigest()
+
+
+def _render_signature(
+    experiment_id: int, listed: _Listed, selected: list[str], pins: Mapping[int, list[PinCell]]
+) -> str:
     """
     A digest of everything `render_navbar_hparams`'s output actually depends on, as one comparable value.
 
-    Stored in (and read back from) `NAVBAR_HPARAM_SIGNATURE_ID`'s `dcc.Store`. A digest, not the values: they are every
+    Stored in (and read back from) `NAVBAR_HPARAM_SIGNATURE`'s `dcc.Store`. A digest, not the values: they are every
     run's, and the browser only needs to hand back whether they changed (#454). Naming every tracked field in one place
     means a future addition to what this table renders from has one obvious place to also add it, instead of a
     silently-still-passing equality check against a signature nobody remembered to extend. The runs (not just
@@ -484,7 +531,7 @@ def _render_signature(experiment_id: int, listed: _Listed, selected: list[str]) 
     ]
     selection = listed.selection
     # Drawing a run (the eye) does not come through here: its action patches the rows that changed, rewrites the head, and
-    # stores this signature itself (`_head_and_signature`), so the list is not drawn again and keeps its filters and scroll.
+    # stores this signature itself (`_head_and_signature`), so the rows are not patched again for what it already did.
     signed = [
         experiment_id,
         listed.view_id,
@@ -495,6 +542,8 @@ def _render_signature(experiment_id: int, listed: _Listed, selected: list[str]) 
         selection.newer_hidden,
         selected,
         run_states,
+        # Pins made by other people are a change to the rows like any other, which is how a list finds them (#524).
+        {run_id: [cell.model_dump(mode="json") for cell in cells] for run_id, cells in sorted(pins.items())},
     ]
     return hashlib.sha256(json.dumps(signed, sort_keys=True, default=str).encode()).hexdigest()
 
@@ -512,14 +561,24 @@ def _picked_ids(selected_rows: list[dict[str, Any]] | dict[str, Any] | None) -> 
     return frozenset(int(row[MetricColumn.RUN_ID]) for row in selected_rows)
 
 
+def _for_each(value: object, matched: list[Any]) -> list[object]:
+    """`value` once for each component a wildcard output matched, which is the list Dash wants back: empty when it matched none."""
+    return [value] * len(matched)
+
+
 def _register_hparam_table(app: Dash) -> None:
     @app.callback(
         Output(constants.NAVBAR_RUN_LIST_ID, "children"),
+        # Where the grid is not drawn again, its rows are patched, and what is above it and what it was drawn under follow.
+        Output(ROW_UPDATES.all(), "data", allow_duplicate=True),
+        Output(NAVBAR_RUN_HEAD.all(), "children", allow_duplicate=True),
+        Output(NAVBAR_HPARAM_SIGNATURE.all(), "data", allow_duplicate=True),
         # The experiment's revision, which the live poll moves on: what the table holds may have changed (#454).
         Input(STATE_LAST_KNOWN_REVISION, "data", allow_optional=True),
         Input(constants.STATE_EXPERIMENT_ID, "data", allow_optional=True),
         Input(ids.STATE_PAGE_STORAGE, "data", allow_optional=True),
-        State(NAVBAR_HPARAM_SIGNATURE_ID, "data", allow_optional=True),
+        State(NAVBAR_HPARAM_SIGNATURE.of(), "data", allow_optional=True),
+        State(NAVBAR_HPARAM_STRUCTURE_ID, "data", allow_optional=True),
         State(ids.STATE_VIEW_ID, "data", allow_optional=True),
         State(ids.PANEL_PAGING_ID, "data", allow_optional=True),
         State(NAVBAR_HPARAM_DATATABLE_ID, "selectedRows", allow_optional=True),
@@ -531,11 +590,12 @@ def _register_hparam_table(app: Dash) -> None:
         experiment_id: int | None,
         page_json: str | None,
         prev_signature: str | None,
+        prev_structure: str | None,
         view_id: int | None,
         paging_json: str | None,
         selected_rows: list[dict[str, Any]] | dict[str, Any] | None,
         chips: list[str] | None,
-    ) -> dmc.Stack:
+    ) -> tuple[Any, ...]:
         if experiment_id is None:
             raise PreventUpdate
 
@@ -573,29 +633,52 @@ def _register_hparam_table(app: Dash) -> None:
         listed = _Listed(
             runs, hparams, selection, ref.view_id if isinstance(ref, repo.ExperimentRef) else None
         )
-        signature = _render_signature(experiment_id, listed, selected)
+        pins = experiment_pin_cells(store, experiment_id, get_current_user().id)
+        signature = _render_signature(experiment_id, listed, selected, pins)
         if signature == prev_signature:
             raise PreventUpdate
 
-        # The pins are read only for a list that is drawn; the chips are what the grid is filtered to, kept across a redraw.
-        pins = experiment_pin_cells(store, experiment_id, get_current_user().id)
+        matched_rows, matched_head, matched_signature = typing.cast("list[list[Any]]", ctx.outputs_list)[1:]
         hparam_keys, metric_keys, rows = _load_hparam_view_data(store, experiment_id, listed, selected, pins)
+        # The chips are what the grid is filtered to, kept across a change of what is above it.
+        head = _run_head(store, experiment_id, selection, chips or [])
 
-        # Selecting runs is work in progress, and the table is drawn again when a run starts or a choice changes under it:
-        # what was selected stays so.
+        structure = _structure_signature(experiment_id, selected, hparam_keys, metric_keys, rows)
+        if structure == prev_structure:
+            # The grid is built from the same columns: a run that started, finished or was pinned is a change to its rows, made in
+            # place so the list keeps its scroll, sort, filters and the selection being made in it (#513). What is said above it,
+            # and what it was last drawn under, are in the grid's tree: wildcard outputs, which are there to be written (one each).
+            rows_in_place = RowUpdates(
+                grid=NAVBAR_HPARAM_DATATABLE_ID, replace=grid_rows(rows, swatches=True)
+            )
+            return (
+                no_update,
+                _for_each(rows_in_place.dump(), matched_rows),
+                _for_each(head, matched_head),
+                _for_each(signature, matched_signature),
+            )
+        # Selecting runs is work in progress, and the table is drawn again when the columns change under it: what was selected
+        # stays so.
         picked = _picked_ids(selected_rows)
-        return dmc.Stack(
+        drawn = dmc.Stack(
             [
                 _render_hparam_panel(
                     _build_hparam_datatable(rows, selected, picked, table_id=NAVBAR_HPARAM_DATATABLE_ID),
                     hparam_keys,
                     metric_keys,
                     selected,
-                    _run_head(store, experiment_id, selection, chips or []),
+                    head,
                 ),
-                Store(id=NAVBAR_HPARAM_SIGNATURE_ID, data=signature),
+                Store(id=NAVBAR_HPARAM_SIGNATURE.of(), data=signature),
+                Store(id=NAVBAR_HPARAM_STRUCTURE_ID, data=structure),
             ],
             gap="xs",
+        )
+        return (
+            drawn,
+            _for_each(no_update, matched_rows),
+            _for_each(no_update, matched_head),
+            _for_each(no_update, matched_signature),
         )
 
     # The Apply button only makes sense once the picked columns diverge from what's applied --
@@ -635,8 +718,8 @@ def _register_newest_runs(app: Dash) -> None:
         Output(ids.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Output(ids.METRIC_CONTENT_ID, "children", allow_duplicate=True),
         Output(row_updates_id(RunListSurface.EXPERIMENT), "data", allow_duplicate=True),
-        Output(NAVBAR_RUN_HEAD_ID, "children", allow_duplicate=True),
-        Output(NAVBAR_HPARAM_SIGNATURE_ID, "data", allow_duplicate=True),
+        Output(NAVBAR_RUN_HEAD.of(), "children", allow_duplicate=True),
+        Output(NAVBAR_HPARAM_SIGNATURE.of(), "data", allow_duplicate=True),
         Input(NAVBAR_NEWEST_RUNS_ID, "n_clicks", allow_optional=True),
         State(ids.STATE_PAGE_STORAGE, "data"),
         State(ids.PANEL_PAGING_ID, "data"),
@@ -806,8 +889,8 @@ def _register_run_actions(app: Dash) -> None:
         Output(COMPARE_RUNS_ID, "value", allow_duplicate=True),
         Output(COMPARE_MODAL_ID, "opened", allow_duplicate=True),
         Output(row_updates_id(RunListSurface.EXPERIMENT), "data", allow_duplicate=True),
-        Output(NAVBAR_RUN_HEAD_ID, "children", allow_duplicate=True),
-        Output(NAVBAR_HPARAM_SIGNATURE_ID, "data", allow_duplicate=True),
+        Output(NAVBAR_RUN_HEAD.of(), "children", allow_duplicate=True),
+        Output(NAVBAR_HPARAM_SIGNATURE.of(), "data", allow_duplicate=True),
         Output(navigate_id(RunListSurface.EXPERIMENT), "data"),
         _Act.states(),
         prevent_initial_call=True,

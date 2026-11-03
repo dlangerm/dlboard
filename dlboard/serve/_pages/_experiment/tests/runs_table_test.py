@@ -231,7 +231,7 @@ def test_the_runs_table_redraws_when_a_run_finishes() -> None:
     )
 
     def signature(run: Run) -> str:
-        return run_table._render_signature(1, _listed([run]), [])
+        return run_table._render_signature(1, _listed([run]), [], {})
 
     assert signature(running) != signature(finished)
     assert signature(finished) == signature(finished.model_copy())
@@ -279,10 +279,10 @@ def test_a_row_is_drawn_when_the_charts_draw_it_and_focused_when_the_page_is_ope
 def test_the_runs_table_redraws_when_the_page_is_opened_on_a_run_or_a_view() -> None:
     """A link to a run stays in the view the page is of, and the run it links to is part of what the table is drawn from."""
     runs = [_run(1)]
-    plain = run_table._render_signature(1, _listed(runs), [])
+    plain = run_table._render_signature(1, _listed(runs), [], {})
 
-    assert run_table._render_signature(1, _listed(runs, shown=frozenset({1}), focus=1), []) != plain
-    assert run_table._render_signature(1, _listed(runs)._replace(view_id=7), []) != plain
+    assert run_table._render_signature(1, _listed(runs, shown=frozenset({1}), focus=1), [], {}) != plain
+    assert run_table._render_signature(1, _listed(runs)._replace(view_id=7), [], {}) != plain
 
 
 def test_drawing_changes_exactly_the_rows_whose_eye_changed_and_clears_a_focus() -> None:
@@ -316,3 +316,35 @@ def test_a_pinned_runs_row_carries_the_colours_it_is_pinned_in() -> None:
     )
 
     assert [[pin["color"] for pin in row["_pins"]] for row in rows] == [[], ["red"]]
+
+
+def test_the_runs_table_finds_a_pin_someone_else_made_in_its_signature() -> None:
+    runs = [_run(1), _run(2)]
+    pinned = {2: [PinCell(color=PinColor.RED, css="red", who=["bob"], mine=False)]}
+
+    plain = run_table._render_signature(1, _listed(runs), [], {})
+
+    assert run_table._render_signature(1, _listed(runs), [], pinned) != plain
+
+
+def test_the_grid_is_drawn_again_only_for_a_change_of_its_columns_not_of_its_runs() -> None:
+    rows: list[dict[str, object]] = [
+        {"run_id": 1, "lr": 0.1},
+        {"run_id": 2, "lr": 0.2},
+        {"run_id": 3, "lr": None},
+    ]
+    more_rows: list[dict[str, object]] = [*rows, {"run_id": 4, "lr": 0.4}]
+
+    def structure(rows: list[dict[str, object]], *, selected: list[str], hparams: list[str]) -> str:
+        return run_table._structure_signature(1, selected, hparams, ["loss"], rows)
+
+    drawn = structure(rows, selected=["lr"], hparams=["lr"])
+
+    assert structure(more_rows, selected=["lr"], hparams=["lr"]) == drawn  # a run that started
+    assert structure(rows, selected=[], hparams=["lr"]) != drawn  # a column applied
+    assert (
+        structure(rows, selected=["lr"], hparams=["lr", "depth"]) != drawn
+    )  # a key the picker did not offer
+    assert (
+        structure([{"run_id": 1, "lr": "fast"}], selected=["lr"], hparams=["lr"]) != drawn
+    )  # a number that is a word

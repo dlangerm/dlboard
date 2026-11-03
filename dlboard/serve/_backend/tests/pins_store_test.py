@@ -289,3 +289,23 @@ def test_a_project_counts_its_runs_pinned_in_each_colour_once_whoever_pinned(
 
     assert store.pin_counts(world.project_id) == {_RED: 2, _GREEN: 1}
     assert store.pin_counts(world.project_id + 100) == {}
+
+
+def test_a_pin_moves_the_revision_of_its_experiment_on_so_a_live_page_finds_it_but_is_not_activity(
+    store: SQLLiteStore, world: _World
+) -> None:
+    def seen(experiment: int) -> tuple[int, object]:
+        stats = store.get_experiment(experiment)
+        assert stats is not None
+        return stats.revision, stats.last_activity_at
+
+    first, second = seen(world.first), seen(world.second)
+
+    store.pin_runs(world.user["alice"], frozenset({world.run["alpha"], world.run["beta"]}), PinColor.RED)
+    assert seen(world.first)[0] == first[0] + 1  # one move for the experiment, however many of its runs
+    assert seen(world.second) == second
+
+    store.unpin_runs(world.user["alice"], frozenset({world.run["alpha"]}), PinColor.RED)
+    assert seen(world.first)[0] == first[0] + 2
+    assert seen(world.first)[1] == first[1]  # a pin is nobody's work on the experiment
+    assert seen(world.second) == second

@@ -1024,6 +1024,8 @@ def test_the_charts_draw_the_newest_runs_until_the_run_table_selects_others(
     expect(row).to_contain_text(oldest)
     page.keyboard.press("Escape")
     row.locator(".dl-eye").click()
+    # The selection is made once the way back to the newest appears; a poll tick no longer draws the list again over the click.
+    expect(page.get_by_role("button", name="Newest 20")).to_be_visible()
     expect(curves).to_have_count(21)
 
     page.get_by_role("button", name="Newest 20").click()

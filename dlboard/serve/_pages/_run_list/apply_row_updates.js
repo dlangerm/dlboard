@@ -1,12 +1,20 @@
-// Clientside body for a run list's row updates (`_rows.py`): set the fields of the rows a change touched, in place in the grid that
-// holds them, so the list is not drawn again and keeps its scroll, sort, selection and filters. Then the grid's filters are run
-// again, since a row that no longer matches one (a run unpinned while the pin filter shows only pinned runs) must leave the view.
+// Clientside body for a run list's row updates (`_rows.py`), in place in the grid that holds them, so the list is not drawn
+// again and keeps its scroll, sort, selection and filters: the grid's complete rows (`replace`, which ag-grid reconciles by
+// row id: rows added, changed and removed, in the order given) and/or the fields of some rows (`rows`) to set. Then the
+// grid's filters are run again, since a row that no longer matches one (a run unpinned while the pin filter shows only
+// pinned runs) must leave the view.
 // Returns `no_update` always -- side-effect only, the same pattern as `sync_view_url.js`.
 // biome-ignore lint/correctness/noUnusedVariables: read as the body of a Dash clientside_callback
 function applyRowUpdates(update) {
     const api = update ? window.dash_ag_grid.getApi(update.grid) : null;
-    if (!api || !update?.rows?.length) {
+    if (!api) {
         return window.dash_clientside.no_update;
+    }
+    if (update.replace) {
+        api.setGridOption("rowData", update.replace);
+        // A cell is drawn again only if what it shows changed, and a name's link is drawn from fields it does not show (the
+        // view it opens in): so they all are, whatever the rows changed in.
+        api.refreshCells({ force: true });
     }
     for (const { run_id, values } of update.rows) {
         const node = api.getRowNode(String(run_id));

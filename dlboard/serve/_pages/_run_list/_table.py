@@ -25,6 +25,22 @@ TWO_LINE_ROW_HEIGHT: Final = 46
 MAX_TABLE_HEIGHT: Final = "50vh"
 
 
+def grid_rows(rows: list[dict[str, Any]], *, swatches: bool) -> list[dict[str, Any]]:
+    """
+    `rows` as the grid holds them: each with the id the grid knows its run by, and the color it is drawn in if `swatches`.
+
+    What a grid is drawn with, and what replaces its rows in place (`RowUpdates.replace`), which it matches by that id.
+    """
+    return [
+        {
+            **row,
+            ROW_ID_FIELD: str(row[MetricColumn.RUN_ID]),
+            **({SWATCH_FIELD: series_swatch_class(int(row[MetricColumn.RUN_ID]))} if swatches else {}),
+        }
+        for row in rows
+    ]
+
+
 def run_grid(
     table_id: str,
     column_defs: list[dict[str, Any]],
@@ -41,14 +57,6 @@ def run_grid(
     since it isn't `autoHeight`, ag-grid then only renders the rows actually in view, so a 500-run sweep costs the DOM what a
     15-run one does. A run drawn in the charts has its color there as a dot (`swatches`).
     """
-    data = [
-        {
-            **row,
-            ROW_ID_FIELD: str(row[MetricColumn.RUN_ID]),
-            **({SWATCH_FIELD: series_swatch_class(int(row[MetricColumn.RUN_ID]))} if swatches else {}),
-        }
-        for row in rows
-    ]
     row_height = TWO_LINE_ROW_HEIGHT if any(EXPERIMENT_FIELD in row for row in rows) else ROW_HEIGHT
     grid = themed_grid_kwargs()
     grid["className"] = f"{grid['className']} dl-run-table"
@@ -61,7 +69,7 @@ def run_grid(
     return dag.AgGrid(
         id=table_id,
         columnDefs=column_defs,
-        rowData=data,
+        rowData=grid_rows(rows, swatches=swatches),
         # A dedicated already-stringified field, not `params.data.run_id` directly -- dash-ag-grid's
         # string-prop JS parser only supports bare expressions (no function calls like `String(...)`),
         # so casting has to happen on the Python side instead.

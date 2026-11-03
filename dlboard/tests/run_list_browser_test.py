@@ -223,3 +223,86 @@ def test_drawing_a_run_keeps_the_filter_the_list_is_narrowed_by(
     expect(rows.first).to_contain_text(target)
     expect(rows.first.locator(".dl-eye")).to_have_class(re.compile(r"dl-icon-eye-off"))
     assert console_errors == []
+
+
+_HEADER = f'.ag-header-cell[col-id="{RUN_NAME_COLUMN}"]'
+
+
+def _mark_the_grid(page: Page) -> Locator:
+    """Mark the list's grid, so a test can tell whether it was drawn again: the mark goes with the element."""
+    grid = page.locator(f"#{NAVBAR_HPARAM_DATATABLE_ID}")
+    grid.locator(".ag-root-wrapper").evaluate("el => el.setAttribute('data-marker', 'untouched')")
+    return grid
+
+
+def test_a_run_that_starts_is_added_to_the_list_without_drawing_it_again(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """While training logs new runs the list keeps what was done in it: its sort, and the runs being selected (#513)."""
+    experiment_id, runs, rows = _experiment_of_runs(page, live_server_url, "Run Starts Experiment", 3)
+    grid = page.locator(f"#{NAVBAR_HPARAM_DATATABLE_ID}")
+    grid.locator(_HEADER).click()
+    expect(grid.locator(_HEADER)).to_have_attribute("aria-sort", "ascending")
+    picked = runs[1].name or f"Run {runs[1].id}"
+    rows.filter(has_text=picked).locator(_CHECKBOX).check()
+    _mark_the_grid(page)
+
+    started = _log_runs(BasicDlboardAPI(live_server_url), experiment_id, 1)[0]
+
+    expect(rows).to_have_count(4, timeout=8000)
+    expect(rows.filter(has_text=started.name or f"Run {started.id}")).to_have_count(1)
+    expect(grid.locator(_HEADER)).to_have_attribute("aria-sort", "ascending")
+    expect(rows.filter(has_text=picked).locator(_CHECKBOX)).to_be_checked()
+    assert grid.locator(".ag-root-wrapper").get_attribute("data-marker") == "untouched"
+    assert console_errors == []
+
+
+def test_a_pin_made_by_someone_else_appears_in_the_list_without_drawing_it_again(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """A teammate's pin is found by the live poll, and patched in, with the selection being made left alone (#524)."""
+    _, runs, rows = _experiment_of_runs(page, live_server_url, "Teammate Pins Experiment", 3)
+    store = get_system_data_store()
+    teammate = store.get_or_create_user(models.Principal.unverified("teammate")).id
+    picked = runs[0].name or f"Run {runs[0].id}"
+    pinned = runs[2].name or f"Run {runs[2].id}"
+    rows.filter(has_text=picked).locator(_CHECKBOX).check()
+    grid = _mark_the_grid(page)
+
+    store.pin_runs(teammate, frozenset({runs[2].id}), models.PinColor.RED)
+
+    expect(rows.filter(has_text=pinned).locator(".dl-pins .dl-icon-pin:not(.dl-pin-ghost)")).to_have_count(
+        1, timeout=8000
+    )
+    expect(rows.filter(has_text=picked).locator(_CHECKBOX)).to_be_checked()
+    assert grid.locator(".ag-root-wrapper").get_attribute("data-marker") == "untouched"
+
+    store.unpin_runs(teammate, frozenset({runs[2].id}), models.PinColor.RED)
+
+    expect(rows.filter(has_text=pinned).locator(".dl-pins .dl-icon-pin:not(.dl-pin-ghost)")).to_have_count(
+        0, timeout=8000
+    )
+    assert grid.locator(".ag-root-wrapper").get_attribute("data-marker") == "untouched"
+    assert console_errors == []
+
+
+def test_a_teammates_first_pin_adds_the_menu_that_compares_the_pins_without_drawing_the_list_again(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """What a pin adds above the list is drawn in place too, and its buttons work."""
+    _, runs, _rows = _experiment_of_runs(page, live_server_url, "Teammate Compare Experiment", 2)
+    store = get_system_data_store()
+    teammate = store.get_or_create_user(models.Principal.unverified("teammate")).id
+    expect(page.get_by_role("button", name="Compare pins")).to_have_count(0)
+    grid = _mark_the_grid(page)
+
+    store.pin_runs(teammate, frozenset({runs[1].id}), models.PinColor.RED)
+
+    compare = page.get_by_role("button", name="Compare pins")
+    expect(compare).to_be_visible(timeout=8000)
+    assert grid.locator(".ag-root-wrapper").get_attribute("data-marker") == "untouched"
+    compare.click()
+    page.get_by_role("menuitem", name="Compare red pins").click()
+    expect(page).to_have_url(re.compile(r"/comparison/\d+$"))
+    expect(page.locator("#comparison-members-grid .ag-center-cols-container .ag-row")).to_have_count(1)
+    assert console_errors == []

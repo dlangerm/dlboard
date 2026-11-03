@@ -1,35 +1,53 @@
 """
 Changing what a run list shows about its runs in place: a run drawn or hidden, pinned or unpinned, without drawing the list again.
 
-A list is drawn again only when its runs, their hyperparameters or its columns change. Drawing a run, or pinning one, changes a
-value in a row, which is patched in the grid (`apply_row_updates.js`), so the list keeps its scroll, sort, selection and filters.
+A list is drawn again only when its columns change. A run drawn or pinned, started or finished, changes a value in a row or
+adds one, which is patched in the grid (`apply_row_updates.js`), so the list keeps its scroll, sort, selection and filters.
 The grid's filters are run again after the patch, since a row that no longer matches one must leave the view.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from dash import Input, Output
 from dash.dcc import Store
 from pydantic import BaseModel
 
 from dlboard.serve import ClientsideScript
-from dlboard.serve._component_ids import StoreId
+from dlboard.serve._component_ids import PatternId
+from dlboard.serve._pages._run_list._ids import RunList
 
 if TYPE_CHECKING:
     from dash import Dash
     from dash.development.base_component import Component
 
-    from dlboard.serve._pages._run_list._ids import RunList, RunListSurface
+    from dlboard.serve._pages._run_list._ids import RunListSurface
 
 _APPLY_JS = ClientsideScript(Path(__file__).with_name("apply_row_updates.js"))
 
 
-def row_updates_id(surface: RunListSurface) -> StoreId[RunList]:
+class RowUpdatesStores(PatternId[RunList]):
+    """
+    The store each surface's row changes are written to, told apart by the surface.
+
+    A pattern id so that a callback which runs wherever the page changes (the experiment's list is drawn by one the shell
+    holds) can name it as a wildcard output, which is not an error where the store is not on the page.
+    """
+
+    KEYS: ClassVar[tuple[str, ...]] = ("surface",)
+
+    def of(self, surface: RunListSurface) -> dict[str, str]:
+        return {"type": self.type, "surface": surface.value}
+
+
+ROW_UPDATES = RowUpdatesStores("run-list-row-updates")
+
+
+def row_updates_id(surface: RunListSurface) -> dict[str, str]:
     """Which rows changed, and their new values (`RowUpdates`), for the script to patch in the grid."""
-    return StoreId(f"run-list-row-updates-{surface}")
+    return ROW_UPDATES.of(surface)
 
 
 class RowUpdate(BaseModel, frozen=True, extra="forbid"):
@@ -43,7 +61,9 @@ class RowUpdates(BaseModel, frozen=True, extra="forbid"):
     """The rows of one grid to change in place."""
 
     grid: str
-    rows: list[RowUpdate]
+    rows: list[RowUpdate] = []
+    replace: list[dict[str, Any]] | None = None
+    """The grid's complete rows, to reconcile with what it holds by row id: runs that started, changed or went are added, patched or dropped."""
 
     def dump(self) -> dict[str, Any]:
         """As the store holds them."""
