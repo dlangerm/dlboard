@@ -286,3 +286,65 @@ def test_the_columns_picker_changes_the_list_of_a_comparison_of_your_own_in_plac
     assert saved is not None
     assert cast("BasicExperimentPage", saved).document.hparam_columns == ["loss"]
     assert console_errors == []
+
+
+def test_ctrl_k_finds_the_comparisons_the_viewer_may_see_and_only_those(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    seed = _a_shared_comparison_of_two_experiments("Palette Project")
+    store = get_system_data_store()
+    owner = store.get_or_create_user(models.Principal.unverified("owner")).id
+    # Named for what is searched, and for nothing else the whole suite's many projects have in them: the palette lists a few.
+    visible, private = (
+        store.create_comparison(
+            BasicExperimentPage,
+            models.NewPage[Any, Any](
+                project_id=seed.project_id, owner_id=owner, name=name, shared=shared, panels=[]
+            ),
+            frozenset(seed.run_ids),
+        )
+        for name, shared in (("palette-needle-open", True), ("palette-needle-closed", False))
+    )
+
+    page.goto(live_server_url)
+    expect(page.get_by_role("heading", name="Projects")).to_be_visible()
+    page.keyboard.press("Control+K")
+    search = page.locator("#jump-select")
+    expect(search).to_be_focused()
+    search.press_sequentially("palette-needle")
+
+    # Another person's private comparison is not the viewer's to open, so it is not offered.
+    option = page.get_by_role("option", name="palette-needle-open (comparison)")
+    expect(option).to_be_visible()
+    expect(page.get_by_role("option", name=f"{private.name} (comparison)")).to_have_count(0)
+    option.click()
+
+    expect(page).to_have_url(f"{live_server_url}/comparison/{visible.id}")
+    assert console_errors == []
+
+
+def test_ctrl_k_finds_an_experiment_of_a_project_past_the_first_fifty(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """The palette lists a few options, but searches every one: a project's place in the list does not hide its experiments."""
+    store = get_system_data_store()
+    for number in range(60):
+        project = store.create_project(models.NewProject(name=f"palette-filler-{number}", description=""))
+        store.create_experiment(
+            models.NewExperiment(project_id=project.id, name=f"palette-filler-run-{number}")
+        )
+    last = store.create_experiment(
+        models.NewExperiment(
+            project_id=store.create_project(models.NewProject(name="palette-last", description="")).id,
+            name="palette-needle-last",
+        )
+    )
+
+    page.goto(live_server_url)
+    expect(page.get_by_role("heading", name="Projects")).to_be_visible()
+    page.keyboard.press("Control+K")
+    page.locator("#jump-select").press_sequentially("palette-needle-last")
+    page.get_by_role("option", name="palette-needle-last").click()
+
+    expect(page).to_have_url(f"{live_server_url}/experiment/{last.id}")
+    assert console_errors == []

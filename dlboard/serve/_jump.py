@@ -2,7 +2,7 @@
 The jump palette: Ctrl/Cmd+K (or "/") from anywhere, type a few letters, Enter to open that page.
 
 Costs nothing until used. Opening it is purely client-side (`jump_shortcut.js`), and the list of
-projects and experiments is only fetched from the server when it opens, so no page load pays for
+projects, experiments and comparisons is only fetched from the server when it opens, so no page load pays for
 it. Picking a result navigates client-side, like any in-app link.
 """
 
@@ -17,6 +17,7 @@ from dash import Input, Output
 from dash.exceptions import PreventUpdate
 
 from dlboard.serve._assets import AssetKind, serve_asset
+from dlboard.serve._backend._auth import get_current_user
 from dlboard.serve._backend._data_store import get_data_store
 from dlboard.serve._clientside_script import ClientsideScript
 from dlboard.serve._icons import Icon, icon
@@ -61,7 +62,7 @@ def jump_modal() -> dmc.Modal:
             value=None,
             searchable=True,
             clearable=False,
-            placeholder="Jump to a project or experiment…",
+            placeholder="Jump to a project, experiment or comparison…",
             nothingFoundMessage="Nothing matches",
             leftSection=icon(Icon.SEARCH),
             maxDropdownHeight=360,
@@ -75,26 +76,32 @@ def jump_modal() -> dmc.Modal:
 
 
 def _destinations() -> list[dict[str, Any]]:
-    """Every project, then each project's experiments, as Select groups whose values are paths."""
+    """
+    Every project, and each project's experiments and the comparisons the viewer may see, as Select options whose values are paths.
+
+    A flat list, each named with its project: Mantine's `limit` counts a group however few of its options match, so a Select of
+    a group for each project could never reach past its first `limit` projects.
+    """
     store = get_data_store()
     projects = list(store.get_projects())
-    groups: list[dict[str, Any]] = [
-        {
-            "group": "Projects",
-            "items": [{"value": relative_path(f"/project/{p.id}"), "label": p.name} for p in projects],
-        }
-    ]
+    viewer = get_current_user().id
+    options = [{"value": relative_path(f"/project/{p.id}"), "label": p.name} for p in projects]
     for project in projects:
-        experiments = [
+        options.extend(
             {
                 "value": relative_path(f"/experiment/{e.id}"),
-                "label": e.name or f"Experiment {e.id}",
+                "label": f"{e.name or f'Experiment {e.id}'} · {project.name}",
             }
             for e in store.get_experiments(project.id)
-        ]
-        if experiments:
-            groups.append({"group": project.name, "items": experiments})
-    return groups
+        )
+        options.extend(
+            {
+                "value": relative_path(f"/comparison/{c.id}"),
+                "label": f"{c.name} (comparison) · {project.name}",
+            }
+            for c in store.list_comparisons(project.id, viewer)
+        )
+    return options
 
 
 def install_jump(app: Dash) -> None:

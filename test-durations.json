@@ -2230,6 +2230,8 @@
   "dlboard/tests/comparison_browser_test.py::test_a_comparisons_runs_are_listed_in_the_sidebar_with_the_experiment_each_is_of[chromium]": 2.4836188070185017,
   "dlboard/tests/comparison_browser_test.py::test_a_panel_edit_of_someone_elses_comparison_saves_a_copy_of_your_own_that_keeps_what_you_hid[chromium]": 3.526276706979843,
   "dlboard/tests/comparison_browser_test.py::test_a_run_taken_out_of_a_shared_comparison_leaves_its_chart_and_forks_nothing[chromium]": 2.30762689904077,
+  "dlboard/tests/comparison_browser_test.py::test_ctrl_k_finds_an_experiment_of_a_project_past_the_first_fifty[chromium]": 3.8755913470085943,
+  "dlboard/tests/comparison_browser_test.py::test_ctrl_k_finds_the_comparisons_the_viewer_may_see_and_only_those[chromium]": 2.9030277819911134,
   "dlboard/tests/comparison_browser_test.py::test_every_run_pinned_in_a_colour_is_added_to_a_shared_comparison_by_anyone_who_can_edit_it[chromium]": 2.6853512760135345,
   "dlboard/tests/comparison_browser_test.py::test_hiding_a_run_is_the_viewers_own_and_saves_no_copy_of_a_shared_comparison[chromium]": 2.661421786993742,
   "dlboard/tests/comparison_browser_test.py::test_the_bar_hides_shows_and_pins_the_selected_runs_of_a_comparison[chromium]": 3.3693406300153583,
