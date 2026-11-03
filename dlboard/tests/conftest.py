@@ -8,9 +8,12 @@ from typing import TYPE_CHECKING
 import pytest
 from werkzeug.serving import make_server
 
+from dlboard import models
+from dlboard._identity import resolve_username
 from dlboard.conftest import closing_responses
 from dlboard.plugins import LOCAL_DEPLOYMENT_DEFAULT
 from dlboard.serve import app as build_app
+from dlboard.serve import get_system_data_store
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -56,6 +59,11 @@ def dlboard_app(tmp_path_factory: pytest.TempPathFactory) -> Dash:
     # DOM footprint are both pure noise (or, for the layout-geometry tests, actively
     # counterproductive) in a test session.
     app.enable_dev_tools(dev_tools_hot_reload=False, dev_tools_ui=False)
+    # The first user an app sees is its admin (the bootstrap grant), and the browser tests drive the app as the OS user: if a
+    # test that seeds data as someone else came first in a session -- a subset of the suite, in an order the full one never
+    # runs in -- it would be the admin, and the viewer unable to delete a run of a project they made.
+    with app.server.app_context():
+        get_system_data_store(app).get_or_create_user(models.Principal.unverified(resolve_username()))
     return app
 
 

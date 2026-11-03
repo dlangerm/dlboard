@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 
 _ACTION_GATE_JS = ClientsideScript(Path(__file__).with_name("action_gate.js"))
 _CELL_GATE_JS = ClientsideScript(Path(__file__).with_name("cell_gate.js"))
+_CLICK_GATE_JS = ClientsideScript(Path(__file__).with_name("click_gate.js"))
 _SELECTION_BAR_JS = ClientsideScript(Path(__file__).with_name("selection_bar.js"))
 
 
@@ -84,5 +85,20 @@ def register_run_list(app: Dash, surface: RunListSurface, grid_id: str) -> None:
         _CELL_GATE_JS.source,
         Output(request_store_id(surface), "data", allow_duplicate=True),
         Input(grid_id, "cellRendererData", allow_optional=True),
+        prevent_initial_call=True,
+    )
+
+
+def register_click_gate(app: Dash, button: str, store: str) -> None:
+    """
+    Write when `button` was clicked to the store `store`, for a server callback to listen to instead of the button.
+
+    Dash calls a server callback listening to a button as the page draws it, though nobody clicked, when the callback also
+    writes something the page waits on: this one is the browser's own, and writes only on a click.
+    """
+    app.clientside_callback(
+        _CLICK_GATE_JS.source,
+        Output(store, "data"),
+        Input(button, "n_clicks", allow_optional=True),
         prevent_initial_call=True,
     )

@@ -60,10 +60,11 @@ belongs to whoever made it, and can be shared with the project. A project's comp
   of your own (which keeps what you had hidden), as editing someone else's saved view does.
 
 A comparison holds at most `DLBOARD_MAX_COMPARISON_RUNS` runs (100 by default), however it was filled: starting or adding to
-one that would hold more is refused, with how many fit. A run that was deleted still counts until it is purged. Its list shows
-the columns it started with (hyperparameters, and the latest value of each metric), since across
-experiments the config is often what tells two runs of the same name apart. It has no **Columns** picker of its own yet, so
-choose the columns on the experiment before you start the comparison from it.
+one that would hold more is refused, with how many fit. A run that was deleted still counts until it is purged. Its list
+starts with the columns of the experiment it was started from (hyperparameters, and the latest value of each metric), since
+across experiments the config is often what tells two runs of the same name apart. Its **Columns** picker, the same as an
+experiment's, chooses others from the hyperparameters of its runs and the metrics of their experiments, and **Apply** saves
+them in the comparison (in a copy of your own, if it is not yours).
 
 ### What a comparison costs
 

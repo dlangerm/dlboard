@@ -11,6 +11,7 @@ import pytest
 from playwright.sync_api import expect
 
 from dlboard import models
+from dlboard._identity import resolve_username
 from dlboard.models import ChartInstance, PanelInstance
 from dlboard.plugins.charts.line_chart import LineChart
 from dlboard.serve import get_system_data_store
@@ -232,4 +233,56 @@ def test_a_comparisons_runs_are_listed_in_the_sidebar_with_the_experiment_each_i
     page.locator(_ROWS).filter(has_text="sweep").get_by_role("link", name="fluffy").click()
     expect(page).to_have_url(re.compile(r"/experiment/\d+\?run=\d+"))
     expect(page.locator("#focus-banner")).to_contain_text("fluffy")
+    assert console_errors == []
+
+
+def test_the_columns_picker_adds_a_metric_of_its_experiments_to_the_list_and_saves_it_in_a_copy(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    comparison = _a_shared_comparison_of_two_experiments("Columns Project")
+    page.goto(f"{live_server_url}/comparison/{comparison.id}")
+    expect(page.locator(_ROWS)).to_have_count(2)
+    # Asked for nothing yet, so nothing was written: the page is still the shared comparison, not a copy of it.
+    expect(page).to_have_url(re.compile(rf"/comparison/{comparison.id}$"))
+
+    page.locator("#comparison-columns-toggle").click()
+    page.locator("#comparison-col-select").click()
+    page.get_by_role("option", name="loss").click()
+    page.locator("#comparison-confirm-cols").click()
+
+    # The comparison is another's: the edit is saved to a copy of the viewer's own, which the page goes to.
+    expect(page).not_to_have_url(re.compile(rf"/comparison/{comparison.id}$"))
+    grid = page.locator("#comparison-members-grid")
+    expect(grid.get_by_role("columnheader", name="loss")).to_be_visible()
+    expect(grid.locator(".ag-center-cols-container .ag-row")).to_have_count(2)
+    page.reload()
+    expect(grid.get_by_role("columnheader", name="loss")).to_be_visible()
+    assert console_errors == []
+
+
+def test_the_columns_picker_changes_the_list_of_a_comparison_of_your_own_in_place(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    shared = _a_shared_comparison_of_two_experiments("Own Columns Project")
+    store = get_system_data_store()
+    me = store.get_or_create_user(models.Principal.unverified(resolve_username())).id
+    mine = store.create_comparison(
+        BasicExperimentPage,
+        models.NewPage[Any, Any](project_id=shared.project_id, owner_id=me, name="mine", panels=[]),
+        frozenset(shared.run_ids),
+    )
+    page.goto(f"{live_server_url}/comparison/{mine.id}")
+    grid = page.locator("#comparison-members-grid")
+    expect(grid.locator(".ag-center-cols-container .ag-row")).to_have_count(2)
+
+    page.locator("#comparison-columns-toggle").click()
+    page.locator("#comparison-col-select").click()
+    page.get_by_role("option", name="loss").click()
+    page.locator("#comparison-confirm-cols").click()
+
+    expect(grid.get_by_role("columnheader", name="loss")).to_be_visible()
+    expect(page).to_have_url(re.compile(rf"/comparison/{mine.id}$"))  # saved in place: nothing to copy
+    saved = store.get_view(BasicExperimentPage, mine.id)
+    assert saved is not None
+    assert cast("BasicExperimentPage", saved).document.hparam_columns == ["loss"]
     assert console_errors == []

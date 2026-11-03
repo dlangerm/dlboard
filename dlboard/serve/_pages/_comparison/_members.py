@@ -31,6 +31,8 @@ from dlboard.serve._pages._dataframe_helpers import experiment_display_name
 from dlboard.serve._pages._experiment import _ids as experiment_ids
 from dlboard.serve._pages._experiment import _page_edits as edits
 from dlboard.serve._pages._experiment import _page_model as page_model
+from dlboard.serve._pages._experiment import _page_repository as repo
+from dlboard.serve._pages._experiment._column_catalog import ColumnCatalog
 from dlboard.serve._pages._experiment._compare import compare, compare_menu, compare_pins_menu
 from dlboard.serve._pages._experiment._focus import experiment_href
 from dlboard.serve._pages._experiment._paging import Paging
@@ -47,6 +49,7 @@ from dlboard.serve._pages._run_list import (
     request_store_id,
     simple_action,
 )
+from dlboard.serve._pages._run_list._bar import register_click_gate
 from dlboard.serve._pages._run_list._columns import (
     DRAWN_FIELD,
     EXPERIMENT_FIELD,
@@ -55,6 +58,12 @@ from dlboard.serve._pages._run_list._columns import (
     name_column_def,
     run_fields,
     status_column_def,
+)
+from dlboard.serve._pages._run_list._columns_picker import (
+    ColumnsPickerIds,
+    column_options,
+    columns_picker,
+    register_columns_picker,
 )
 from dlboard.serve._pages._run_list._ids import navigate_id
 from dlboard.serve._pages._run_list._rows import register_row_updates, row_update_shells, row_updates_id
@@ -69,6 +78,12 @@ if TYPE_CHECKING:
     from dlboard.serve._pages._pins._pin_view import PinCell
 
 _FOLLOW_FORK_JS = ClientsideScript(Path(__file__).with_name("follow_fork.js"))
+COMPARISON_COLUMNS_PICKER = ColumnsPickerIds(
+    select=ids.COLUMNS_SELECT_ID,
+    confirm=ids.COLUMNS_CONFIRM_ID,
+    applied=ids.COLUMNS_APPLIED_ID,
+    toggle=ids.COLUMNS_TOGGLE_ID,
+)
 
 
 def notice(title: str, message: str, *, color: str = "green") -> list[dict[str, Any]]:
@@ -190,6 +205,7 @@ def render_members(
     if signature == prev_signature:
         return None
     columns = page.document.hparam_columns
+    catalog = ColumnCatalog.of_page(store, page)
     actions = [
         simple_action(RunListSurface.COMPARISON, RunAction.DRAW, "Show", icon_name=Icon.EYE),
         simple_action(RunListSurface.COMPARISON, RunAction.HIDE, "Hide", icon_name=Icon.EYE_OFF),
@@ -216,7 +232,18 @@ def render_members(
                         ],
                         gap="xs",
                     ),
-                    *([add_runs_button()] if can_edit else []),
+                    dmc.Group(
+                        [
+                            *([add_runs_button()] if can_edit else []),
+                            *columns_picker(
+                                COMPARISON_COLUMNS_PICKER,
+                                catalog.hparams,
+                                catalog.metrics,
+                                [k for k in columns if k in catalog.hparams or k in catalog.metrics],
+                            ),
+                        ],
+                        gap="xs",
+                    ),
                 ],
                 justify="space-between",
             ),
@@ -254,6 +281,7 @@ def members_shells() -> list[Component]:
         Store(id=request_store_id(RunListSurface.COMPARISON)),
         Store(id=navigate_id(RunListSurface.COMPARISON)),
         Store(id=ids.MEMBERS_REVISION_ID),
+        Store(id=ids.COLUMNS_APPLY_REQUEST_ID),
         *row_update_shells(RunListSurface.COMPARISON),
     ]
 
@@ -373,6 +401,42 @@ def register_members_callbacks(app: Dash) -> None:
     register_row_updates(app, RunListSurface.COMPARISON)
     register_navigate(app, navigate_id(RunListSurface.COMPARISON))
     register_pin_filter(app, RunListSurface.COMPARISON, ids.COMPARISON_GRID_ID)
+    register_columns_picker(app, COMPARISON_COLUMNS_PICKER)
+    register_click_gate(app, ids.COLUMNS_CONFIRM_ID, ids.COLUMNS_APPLY_REQUEST_ID)
+
+    @app.callback(
+        Output(ids.COLUMNS_SELECT_ID, "data"),
+        Input(ids.COLUMNS_SELECT_ID, "searchValue"),
+        State(ids.COLUMNS_SELECT_ID, "value"),
+        State(experiment_ids.STATE_PAGE_STORAGE, "data"),
+        prevent_initial_call=True,
+    )
+    def search_columns(search: str | None, picked: list[str] | None, page_json: str) -> list[dict[str, Any]]:
+        """The picker's options for what is typed in it, searched across every experiment the comparison holds runs of."""
+        catalog = ColumnCatalog.of_page(
+            get_data_store(), page_model.BasicExperimentPage.model_validate_json(page_json)
+        )
+        return column_options(catalog.hparams, catalog.metrics, search=search or "", keep=picked or ())
+
+    @app.callback(
+        Output(experiment_ids.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
+        Output(ids.MEMBERS_REVISION_ID, "data", allow_duplicate=True),
+        Input(ids.COLUMNS_APPLY_REQUEST_ID, "data"),
+        State(ids.COLUMNS_SELECT_ID, "value", allow_optional=True),
+        State(experiment_ids.STATE_PAGE_STORAGE, "data"),
+        prevent_initial_call=True,
+    )
+    def apply_columns(request: int | None, picked: list[str] | None, page_json: str) -> tuple[str, int]:
+        """Save the picked columns in the comparison, or in a copy of it if it is not the viewer's (the page follows that)."""
+        if request is None:
+            raise PreventUpdate
+        store = get_data_store()
+        page = repo.save_document_settings(
+            store,
+            repo.ref_of(page_model.BasicExperimentPage.model_validate_json(page_json)),
+            page_model.DocumentSettings(hparam_columns=picked or []),
+        )
+        return page.model_dump_json(), pendulum.now("UTC").int_timestamp * 1000
 
     @app.callback(
         Output(constants.NAVBAR_RUN_LIST_ID, "children", allow_duplicate=True),

@@ -13,7 +13,6 @@ import hashlib
 import json
 import typing
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar
 
 import dash_mantine_components as dmc
@@ -24,7 +23,7 @@ from structlog.stdlib import get_logger
 
 from dlboard import models
 from dlboard.models import MetricColumn
-from dlboard.serve import ClientsideScript, Icon, get_current_user, get_data_store
+from dlboard.serve import Icon, get_current_user, get_data_store
 from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import ButtonId, PatternId, StoreId, ValueId
 from dlboard.serve._grid import column_def, infer_column_dtype
@@ -32,15 +31,12 @@ from dlboard.serve._pages._dash_helpers import (
     CallbackStates,
     register_navigate,
     section_label,
-    tooltipped_action_icon,
 )
 from dlboard.serve._pages._experiment import _ids as ids
 from dlboard.serve._pages._experiment import _page_edits as edits
 from dlboard.serve._pages._experiment import _page_model as page_model
 from dlboard.serve._pages._experiment import _page_repository as repo
 from dlboard.serve._pages._experiment._column_catalog import (
-    KEY_PICKER_LIMIT,
-    first_matches,
     summary_hparam_keys,
 )
 from dlboard.serve._pages._experiment._compare import compare, compare_menu, compare_pins_menu
@@ -75,6 +71,12 @@ from dlboard.serve._pages._run_list._columns import (
     name_column_def,
     run_fields,
     status_column_def,
+)
+from dlboard.serve._pages._run_list._columns_picker import (
+    ColumnsPickerIds,
+    column_options,
+    columns_picker,
+    register_columns_picker,
 )
 from dlboard.serve._pages._run_list._delete import (
     ask_to_delete,
@@ -111,6 +113,12 @@ NAVBAR_HPARAM_CONFIRM_COLS_ID: ButtonId[ids.ExperimentPage] = ButtonId("navbar-h
 NAVBAR_HPARAM_COLUMNS_TOGGLE_ID: ButtonId[ids.ExperimentPage] = ButtonId("navbar-hparam-columns-toggle")
 NAVBAR_NEWEST_RUNS_ID: ButtonId[ids.ExperimentPage] = ButtonId("navbar-newest-runs")
 NAVBAR_HPARAM_APPLIED_COLS_ID: StoreId[ids.ExperimentPage] = StoreId("navbar-hparam-applied-cols")
+NAVBAR_COLUMNS_PICKER = ColumnsPickerIds(
+    select=NAVBAR_HPARAM_COL_SELECT_ID,
+    confirm=NAVBAR_HPARAM_CONFIRM_COLS_ID,
+    applied=NAVBAR_HPARAM_APPLIED_COLS_ID,
+    toggle=NAVBAR_HPARAM_COLUMNS_TOGGLE_ID,
+)
 
 
 class _ListSlot(PatternId[ids.ExperimentPage]):
@@ -133,8 +141,6 @@ NAVBAR_HPARAM_SIGNATURE = _ListSlot("navbar-hparam-signature")
 NAVBAR_HPARAM_STRUCTURE_ID: StoreId[ids.ExperimentPage] = StoreId("navbar-hparam-structure")
 NAVBAR_RUN_HEAD = _ListSlot("navbar-run-head")
 """What is said about what is drawn (how many runs are not, the way back to the view's) and the actions on the selection."""
-
-_HPARAM_COLS_CHANGED_JS = ClientsideScript(Path(__file__).with_name("hparam_cols_changed.js"))
 
 
 class _Listed(typing.NamedTuple):
@@ -262,52 +268,7 @@ def _render_hparam_panel(
             dmc.Group(
                 [
                     section_label("Runs"),
-                    dmc.Popover(
-                        [
-                            dmc.PopoverTarget(
-                                tooltipped_action_icon(
-                                    Icon.COLUMNS,
-                                    component_id=NAVBAR_HPARAM_COLUMNS_TOGGLE_ID,
-                                    label="Choose columns",
-                                )
-                            ),
-                            dmc.PopoverDropdown(
-                                dmc.Group(
-                                    [
-                                        dmc.MultiSelect(
-                                            id=NAVBAR_HPARAM_COL_SELECT_ID,
-                                            data=_column_options(hparam_keys, metric_keys, keep=applied),
-                                            value=applied,
-                                            limit=KEY_PICKER_LIMIT,
-                                            searchable=True,
-                                            clearable=True,
-                                            size="xs",
-                                            style={"flex": 1, "minWidth": 220},
-                                            # Render this dropdown inline (not its own portal) so a
-                                            # click on one of its options still lands inside the
-                                            # outer Popover's own DOM subtree -- otherwise the
-                                            # Popover's own "click outside closes it" detection sees
-                                            # the option click as outside and closes before the
-                                            # selection is ever applied.
-                                            comboboxProps={"withinPortal": False},
-                                        ),
-                                        dmc.Button(
-                                            "Apply",
-                                            id=NAVBAR_HPARAM_CONFIRM_COLS_ID,
-                                            size="xs",
-                                            style={"display": "none", "flexShrink": 0},
-                                        ),
-                                    ],
-                                    align="center",
-                                    gap="xs",
-                                    wrap="nowrap",
-                                )
-                            ),
-                        ],
-                        position="bottom-end",
-                        withinPortal=True,
-                    ),
-                    Store(id=NAVBAR_HPARAM_APPLIED_COLS_ID, data=applied),
+                    *columns_picker(NAVBAR_COLUMNS_PICKER, hparam_keys, metric_keys, applied),
                 ],
                 align="center",
                 justify="space-between",
@@ -681,16 +642,7 @@ def _register_hparam_table(app: Dash) -> None:
             _for_each(no_update, matched_signature),
         )
 
-    # The Apply button only makes sense once the picked columns diverge from what's applied --
-    # comparing client-side (rather than round-tripping through a server callback per keystroke)
-    # keeps this instant and avoids yet another spurious-rerender source.
-    app.clientside_callback(
-        _HPARAM_COLS_CHANGED_JS.source,
-        Output(NAVBAR_HPARAM_CONFIRM_COLS_ID, "style"),
-        Input(NAVBAR_HPARAM_COL_SELECT_ID, "value"),
-        State(NAVBAR_HPARAM_APPLIED_COLS_ID, "data"),
-        prevent_initial_call=True,
-    )
+    register_columns_picker(app, NAVBAR_COLUMNS_PICKER)
 
     @app.callback(
         Output(ids.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
@@ -929,25 +881,6 @@ def _register_run_actions(app: Dash) -> None:
     register_delete(app, RunListSurface.EXPERIMENT, notify=VIEW_NOTIFY_ID)
 
 
-def _column_options(
-    hparam_keys: Sequence[str], metric_keys: Sequence[str], *, search: str = "", keep: Sequence[str] = ()
-) -> list[dict[str, Any]]:
-    """
-    The Columns picker's options: the first `KEY_PICKER_LIMIT` keys `search` finds, hyperparameters first, and `keep`.
-
-    Never every name: an experiment of 11,000 metrics would send each of them to the browser (#416); the rest are a
-    search away (`search_columns`, as someone types). `keep` is what the picker holds, so it keeps its picks.
-    """
-    hparams = first_matches(hparam_keys, search)
-    metrics = first_matches(metric_keys, search, KEY_PICKER_LIMIT - len(hparams))
-    kept_hparams = [key for key in keep if key in hparam_keys and key not in hparams]
-    kept_metrics = [key for key in keep if key not in hparam_keys and key not in metrics]
-    return [
-        {"group": "Hyperparameters", "items": [*kept_hparams, *hparams]},
-        {"group": "Metrics (latest)", "items": [*kept_metrics, *metrics]},
-    ]
-
-
 def _register_column_search(app: Dash) -> None:
     @app.callback(
         Output(NAVBAR_HPARAM_COL_SELECT_ID, "data"),
@@ -961,7 +894,7 @@ def _register_column_search(app: Dash) -> None:
     ) -> list[dict[str, Any]]:
         """The Columns picker's options for what is typed in it, searched on the server."""
         store = get_data_store()
-        return _column_options(
+        return column_options(
             summary_hparam_keys(store, experiment_id),
             store.summarize_metric_keys(experiment_id),
             search=search or "",

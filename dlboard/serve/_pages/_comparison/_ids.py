@@ -27,3 +27,10 @@ Nothing is saved to the page by such a change, so there is nothing else for the 
 
 MEMBERS_SIGNATURE_ID: StoreId[ComparisonPage] = StoreId("comparison-members-signature")
 """A digest of what the sidebar's list was drawn from, so that it is drawn again only when that changes."""
+
+COLUMNS_SELECT_ID: ValueId[ComparisonPage] = ValueId("comparison-col-select")
+COLUMNS_CONFIRM_ID: ButtonId[ComparisonPage] = ButtonId("comparison-confirm-cols")
+COLUMNS_APPLIED_ID: StoreId[ComparisonPage] = StoreId("comparison-applied-cols")
+COLUMNS_TOGGLE_ID: ButtonId[ComparisonPage] = ButtonId("comparison-columns-toggle")
+COLUMNS_APPLY_REQUEST_ID: StoreId[ComparisonPage] = StoreId("comparison-apply-cols")
+"""When the sidebar's Apply was clicked, for the page's callback to save the picked columns on (`register_click_gate`)."""

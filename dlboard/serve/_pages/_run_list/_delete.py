@@ -13,6 +13,7 @@ from dash.exceptions import PreventUpdate
 from dlboard.serve import ClientsideScript, get_current_user, get_data_store
 from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import ButtonId, DivId, ModalId, StoreId
+from dlboard.serve._pages._run_list._bar import register_click_gate
 
 if TYPE_CHECKING:
     from dash import Dash
@@ -74,7 +75,6 @@ def delete_shells(surface: RunListSurface) -> list[Component]:
     ]
 
 
-_CLICK_GATE_JS = ClientsideScript(Path(__file__).with_name("click_gate.js"))
 _RELOAD_PAGE_JS = ClientsideScript(Path(__file__).with_name("reload_page.js"))
 
 
@@ -128,12 +128,7 @@ def register_delete(app: Dash, surface: RunListSurface, *, notify: str) -> None:
             raise PreventUpdate
         return False
 
-    app.clientside_callback(
-        _CLICK_GATE_JS.source,
-        Output(_confirmed(surface), "data"),
-        Input(_confirm(surface), "n_clicks"),
-        prevent_initial_call=True,
-    )
+    register_click_gate(app, _confirm(surface), _confirmed(surface))
 
     @app.callback(
         Output(_modal(surface), "opened", allow_duplicate=True),
