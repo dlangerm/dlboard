@@ -12,6 +12,8 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-11-04
+
 ### Added
 
 * **Pins, and comparisons of runs from several experiments.** A run could only be drawn beside the other runs of its
