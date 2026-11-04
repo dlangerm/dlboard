@@ -37,6 +37,24 @@ version line without a deprecation window.
 | `DLBOARD_POLL_INTERVAL_MS` | `30000` | How often an open experiment page checks for new data. |
 | `DLBOARD_TICK_INTERVAL_MS` | `10000` | How often the "fetched Xs ago" label re-renders. Browser-only; never touches the server. |
 
+## Retention
+
+How many runs, or how old, a project keeps before its oldest runs are deleted. A project's owner sets its rule, and an
+editor may hold an experiment to a stricter one. These set what a new project starts with, the most an owner may keep,
+and how a changed rule takes effect. A kept run is never deleted by retention.
+
+| Variable | Default | |
+|---|---|---|
+| `DLBOARD_RETENTION_DEFAULT_MAX_RUNS` | none | A new project keeps this many runs of each `DLBOARD_RETENTION_DEFAULT_UNIT`, and deletes older ones. Unset, with no default age either, a new project keeps every run (or, with a cap set, is held to the first cap). A project that existed before retention gets this default too, after the grace period. |
+| `DLBOARD_RETENTION_DEFAULT_UNIT` | `experiment` | What `DLBOARD_RETENTION_DEFAULT_MAX_RUNS` counts over: each `experiment`'s runs on their own, or every run of the `project` together. |
+| `DLBOARD_RETENTION_DEFAULT_MAX_AGE_DAYS` | none | A new project keeps runs created in the last this many days, and deletes older ones. Not with `DLBOARD_RETENTION_DEFAULT_MAX_RUNS`. |
+| `DLBOARD_RETENTION_MAX_RUNS` | none | The most runs a project's owner may have each experiment keep; only an admin sets a project past it. With any cap set, an owner can no longer keep every run, nor choose a kind of rule that has no cap. |
+| `DLBOARD_RETENTION_MAX_AGE_DAYS` | none | The oldest, in days, a project's owner may have runs kept; only an admin sets a project past it. |
+| `DLBOARD_RETENTION_GRACE_DAYS` | `7` | How long a changed rule waits before it takes effect. Until then the rule before it is still enforced, so changing it again never puts retention off. |
+| `DLBOARD_RETENTION_RUN_SLACK` | `10` | How many runs past its count a project or experiment may hold before runs are deleted, down to the count: runs are deleted in batches, not one for each new run. |
+| `DLBOARD_RETENTION_AGE_SLACK_DAYS` | `1` | How many days past its age a run may get before runs are deleted, down to the age. |
+| `DLBOARD_RETENTION_RUNNING_GRACE_DAYS` | `7` | How long a run that is still running is never deleted for. One running longer than this has lost its client, which then never reported that it ended, and is deleted as any other. |
+
 ## Production server (Granian)
 
 These tune the process that `dlboard serve` runs under (not used by `--debug`).

@@ -5,11 +5,12 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
+import pendulum
 import pytest
 import sqlalchemy as sa
 
 from dlboard import models
-from dlboard.conftest import StoreBackend
+from dlboard.conftest import Clock, StoreBackend
 from dlboard.models import MetricReduction, StepRange
 
 if TYPE_CHECKING:
@@ -24,7 +25,11 @@ _SEEKS: dict[str, str | tuple[str, ...]] = {
     "UnderlyingHistogramTableEntry": "(experiment_id, key, run_id, step)",
     "Artifact": "(experiment_id, key, run_id, step)",
     "HyperParams": "(experiment_id, run_id)",
-    "Run": "(experiment_id, created_at)",
+    "Run": (
+        "(experiment_id, created_at)",
+        "(experiment_id, created_at) WHERE (deleted_at IS NULL)",
+        "(experiment_id) WHERE (kept_at IS NOT NULL)",
+    ),
     "RunPin": ("(experiment_id, pinned_at)", "(run_id, pinned_by, color)"),
     "ComparisonRun": "(page_id, run_id)",
 }
@@ -226,3 +231,69 @@ def test_reading_a_comparison_seeks_its_members_by_page(
     assert len(reads) >= 4
     for statement, parameters in reads:
         _assert_seeks(store, postgres_settings, statement, parameters)
+
+
+@pytest.fixture
+def _eager_retention(monkeypatch: pytest.MonkeyPatch, clock: Clock) -> None:
+    """A rule takes effect when it is saved, and acts on the first run past it."""
+    monkeypatch.setenv("DLBOARD_RETENTION_GRACE_DAYS", "0")
+    monkeypatch.setenv("DLBOARD_RETENTION_RUN_SLACK", "0")
+
+
+@pytest.mark.usefixtures("_eager_retention")
+@pytest.mark.parametrize(
+    "rule",
+    [
+        models.RunCount(max_runs=1, unit=models.RetentionUnit.EXPERIMENT),
+        models.RunCount(max_runs=1, unit=models.RetentionUnit.PROJECT),
+        models.RunAge(max_age_days=1),
+    ],
+    ids=["each experiment's runs", "the project's runs", "age"],
+)
+def test_finding_what_retention_deletes_seeks_the_runs_by_experiment(
+    store: PostgresStore,
+    postgres_settings: PostgresSettings,
+    experiment_id: int,
+    admin: models.User,
+    rule: models.RetentionRule,
+) -> None:
+    experiment = store.get_experiment(experiment_id)
+    assert experiment is not None
+    old = pendulum.now("UTC").subtract(days=10)
+    runs = [store.create_run(models.NewRun(experiment_id=experiment_id, created_at=old)).id for _ in range(3)]
+    store.keep_runs(frozenset(runs[:1]), admin)
+    store.set_retention_policy(experiment.project_id, None, rule, admin)
+
+    statements = _recorded(
+        store,
+        lambda: (
+            store.retention_candidates(experiment.project_id, limit=10),
+            store.retention_preview(experiment.project_id, experiment_id, rule, limit=10),
+            store.kept_runs(experiment_id, run_ids=None),
+        ),
+    )
+
+    reads = [(s, p) for s, p in statements if '"Run"' in s]
+    assert len(reads) >= 4
+    for statement, parameters in reads:
+        _assert_seeks(store, postgres_settings, statement, parameters)
+    assert store.retention_candidates(experiment.project_id, limit=10)
+
+
+def test_finding_what_has_been_in_the_trash_longest_reads_only_the_trash(
+    store: PostgresStore, postgres_settings: PostgresSettings, experiment_id: int, admin: models.User
+) -> None:
+    run = store.create_run(models.NewRun(experiment_id=experiment_id))
+    store.delete_run(run.id, admin)
+
+    statements = _recorded(
+        store,
+        lambda: [store.trashed_before(kind, pendulum.now("UTC"), limit=10) for kind in models.EntityType],
+    )
+
+    assert len(statements) == len(models.EntityType)
+    for statement, parameters in statements:
+        nodes, indexes = _plan(store, postgres_settings, statement, parameters)
+        assert {indexes[n["Index Name"]].split(" ON ")[0] for n in nodes if "Index Name" in n} <= {
+            f'CREATE INDEX "idx_{kind}_deleted"' for kind in ("Project", "Experiment", "Run", "Artifact")
+        }, statement

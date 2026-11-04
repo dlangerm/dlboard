@@ -24,3 +24,17 @@ class AppState(BaseModel, frozen=True, extra="forbid"):
     When a purge last made progress, while one is running; `None` once it is done. Shared by every server process: a
     stamp that is recent means one is purging now, an old one that its process died (a purge to resume).
     """
+    retention_lease_holder: str | None = None
+    """
+    Which server process enforces retention, while its lease lasts: of every process of every server sharing the
+    database, only the one holding the lease deletes anything, so they never contend for the same rows.
+    """
+    retention_lease_until: AwareDatetime | None = None
+    """When `retention_lease_holder`'s lease runs out, unless it renews it: after that, any process may take it."""
+    retention_swept_at: AwareDatetime | None = None
+    """When retention last checked every project."""
+    trash_retention_since: AwareDatetime | None = None
+    """
+    When retention first ran on this database: the Trash is emptied of what has been in it `DLBOARD_TRASH_RETENTION_DAYS`
+    counted from no earlier than this, so what was deleted long before an upgrade is not purged the moment it lands.
+    """

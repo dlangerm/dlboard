@@ -484,6 +484,91 @@ class DataStore(typing.Protocol[_P]):
         """Who has pinned a run of a project (not a deleted one), by username: the people a pinned-runs filter can offer."""
         ...
 
+    def keep_runs(self, run_ids: frozenset[int], actor: models.User) -> None:
+        """
+        Keep `run_ids`: never deleted by a retention policy, and deleted only by an owner of their project.
+
+        A run already kept stays kept by whoever kept it first. Raises for a run that does not exist or has been deleted.
+        """
+        ...
+
+    def release_runs(self, run_ids: frozenset[int], actor: models.User) -> None:
+        """Stop keeping `run_ids`, so that retention may delete them again; a run not kept is left as it is."""
+        ...
+
+    def kept_runs(self, experiment_id: int, *, run_ids: frozenset[int] | None) -> frozenset[int]:
+        """Which of an experiment's (non-deleted) runs are kept: only of `run_ids` if given, `None` being any of them."""
+        ...
+
+    def get_retention(self, project_id: int) -> models.ProjectRetention:
+        """A project's retention policies, in effect and pending, its experiments' own, and how it stood when last checked."""
+        ...
+
+    def set_retention_policy(
+        self,
+        project_id: int,
+        experiment_id: int | None,
+        rule: models.RetentionRule,
+        actor: models.User,
+        *,
+        cap_exempt: bool = False,
+    ) -> models.ScopedRetention:
+        """
+        Hold a project (`experiment_id` of `None`) or one of its experiments to `rule`, once the grace period is over.
+
+        Until then the rule in effect is enforced, and saving again replaces the one pending; saving the rule in effect
+        cancels it. An experiment's rule keeps at most what its project's does, and is of the same kind (unless the
+        project keeps every run); an experiment's `Unlimited` is no rule of its own, so it follows its project's.
+        Changing the kind of a project's rule drops every rule of its experiments: one kind's limit says nothing of
+        another's. `cap_exempt` records an admin setting a project past the server's cap. Raises `ValueError` for a
+        rule its project's does not allow, or an experiment not of the project.
+        """
+        ...
+
+    def cancel_pending_retention(
+        self, project_id: int, experiment_id: int | None, actor: models.User
+    ) -> None:
+        """Drop the rule a project or experiment would be held to once its grace period is over, if it has one."""
+        ...
+
+    def retention_candidates(self, project_id: int, *, limit: int) -> list[int]:
+        """
+        The runs a project's rules in effect say to delete now, oldest first: at most `limit`.
+
+        A count is only acted on once a project or experiment holds `DLBOARD_RETENTION_RUN_SLACK` runs past it, and an
+        age once a run is `DLBOARD_RETENTION_AGE_SLACK_DAYS` past it; then everything past the rule is deleted. A kept
+        run is never one, nor counted, and a run still running is not one for `DLBOARD_RETENTION_RUNNING_GRACE_DAYS`. An
+        experiment's own rule only counts while it keeps at most what its project's in effect does.
+        """
+        ...
+
+    def retention_preview(
+        self, project_id: int, experiment_id: int | None, rule: models.RetentionRule, *, limit: int
+    ) -> int:
+        """How many runs (counted up to `limit`) `retention_candidates` would find if `rule` were in effect for this scope now."""
+        ...
+
+    def record_retention_status(self, project_id: int, *, overdue_runs: int) -> models.RetentionStatus:
+        """Record that a project was checked now and still holds `overdue_runs` runs to delete; see `RetentionStatus`."""
+        ...
+
+    def claim_retention_lease(self, holder: str, *, until: datetime) -> bool:
+        """
+        Take (or renew) the one lease to enforce retention until `until`, unless another `holder` holds it: whether it did.
+
+        Every server process sharing the database asks; only the holder deletes anything, so none contend for the same
+        rows, and one that dies only holds the lease until it runs out.
+        """
+        ...
+
+    def record_retention_sweep(self) -> datetime:
+        """Record that every project was checked now; return since when retention has run on this database at all."""
+        ...
+
+    def trashed_before(self, entity_type: models.EntityType, cutoff: datetime, *, limit: int) -> list[int]:
+        """What of `entity_type` has been in the Trash since before `cutoff`, longest first: at most `limit` ids."""
+        ...
+
     def list_users(self) -> list[models.User]:
         """Every user, by username."""
         ...

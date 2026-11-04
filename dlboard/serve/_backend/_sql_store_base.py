@@ -22,6 +22,7 @@ from dlboard.serve._backend._app_state import APP_STATE_ROW_ID, AppState
 from dlboard.serve._backend._comparison_settings import ComparisonSettings
 from dlboard.serve._backend._foreign_keys import ForeignKey, ForeignKeyKind
 from dlboard.serve._backend._metric_frame import MetricFrame, MetricKeySummary, MetricRow
+from dlboard.serve._backend._retention_settings import RetentionSettings
 from dlboard.serve._backend._schema_upgrade import run_migrations
 from dlboard.serve.telemetry import Counter, Outcome, OutcomeAttributes, Unit
 
@@ -87,6 +88,7 @@ FOREIGN_KEYS: dict[type[BaseModel], dict[str, ForeignKey]] = {
     models.Run: {
         "experiment_id": ForeignKey(models.Experiment, _OWNS),
         "created_by": ForeignKey(models.User),
+        "kept_by": ForeignKey(models.User),
         "deleted_by": ForeignKey(models.User),
     },
     models.UnderlyingMetricTableEntry: {
@@ -134,6 +136,12 @@ FOREIGN_KEYS: dict[type[BaseModel], dict[str, ForeignKey]] = {
         "project_id": ForeignKey(models.Project, _OWNS),
         "user_id": ForeignKey(models.User),
     },
+    models.RetentionPolicy: {
+        "project_id": ForeignKey(models.Project, _OWNS),
+        "experiment_id": ForeignKey(models.Experiment, _OWNS),
+        "set_by": ForeignKey(models.User),
+    },
+    models.RetentionStatus: {"project_id": ForeignKey(models.Project, _OWNS)},
     models.ApiToken: {"user_id": ForeignKey(models.User)},
     models.PasswordCredential: {"user_id": ForeignKey(models.User)},
 }
@@ -147,6 +155,7 @@ UNIQUE_COLUMNS: dict[type[BaseModel], list[tuple[str, ...]]] = {
     models.PasswordCredential: [("user_id",)],
     models.RunPin: [("run_id", "pinned_by", "color")],
     models.ComparisonRun: [("page_id", "run_id")],
+    models.RetentionStatus: [("project_id",)],
 }
 
 # Dependency order: every table appears after the tables its foreign keys point to.
@@ -169,6 +178,8 @@ TABLES: tuple[type[BaseModel], ...] = (
     models.ComparisonRun,
     models.AuditLogEntry,
     models.ArtifactPurgeTask,
+    models.RetentionPolicy,
+    models.RetentionStatus,
 )
 
 # The entities a user can soft-delete/restore -- the only tables with `deleted_at`/`deleted_by`.
@@ -313,6 +324,30 @@ def build_metadata(schema: str | None = None) -> tuple[sa.MetaData, dict[type[Ba
     # members, and purging a run finds the comparisons it is in by `run_id`, which that does not lead with.
     sa.Index("idx_Page_project", pages.c.project_id, pages.c.owner_id)
     sa.Index("idx_ComparisonRun_run", comparison_runs.c.run_id)
+    # A scope's policies are read by project, then experiment, in the order they take effect.
+    policies = tables[models.RetentionPolicy]
+    sa.Index(
+        "idx_RetentionPolicy_scope", policies.c.project_id, policies.c.experiment_id, policies.c.effective_at
+    )
+    # Retention walks an experiment's live runs from either end, without reading its Trash, which retention fills from
+    # the oldest end: the runs it reads are what its rule keeps, not what it has deleted.
+    live = runs.c.deleted_at.is_(None)
+    sa.Index(
+        "idx_Run_live", runs.c.experiment_id, runs.c.created_at, sqlite_where=live, postgresql_where=live
+    )
+    # An experiment's kept runs, few, without reading its runs, which nothing bounds.
+    kept = runs.c.kept_at.is_not(None)
+    sa.Index("idx_Run_kept", runs.c.experiment_id, sqlite_where=kept, postgresql_where=kept)
+    # What has been in the Trash longest, without reading what is not in it, which is nearly everything.
+    for model in sorted(SOFT_DELETABLE, key=lambda m: m.__name__):
+        table = tables[model]
+        deleted = table.c.deleted_at.is_not(None)
+        sa.Index(
+            f"idx_{model.__name__}_deleted",
+            table.c.deleted_at,
+            sqlite_where=deleted,
+            postgresql_where=deleted,
+        )
     return metadata, tables
 
 
@@ -321,6 +356,176 @@ def _runs_among(
 ) -> list[sa.ColumnElement[bool]]:
     """What limits a query to the runs `run_ids` names, if it is limited to any: `None` is every run of the experiment."""
     return [] if run_ids is None else [column.in_(run_ids)]
+
+
+def _scoped_retention(policies: Iterable[models.RetentionPolicy], now: datetime) -> models.ScopedRetention:
+    """Of one scope's policies, the latest to have taken effect by `now`, and the latest still to."""
+    ordered = sorted(policies, key=lambda p: (p.effective_at, p.id))
+    return models.ScopedRetention(
+        active=next((p for p in reversed(ordered) if p.effective_at <= now), None),
+        pending=next((p for p in reversed(ordered) if p.effective_at > now), None),
+    )
+
+
+def _project_retention(
+    policies: Iterable[models.RetentionPolicy], status: models.RetentionStatus | None, now: datetime
+) -> models.ProjectRetention:
+    """A project's policy rows, by scope, as of `now`."""
+    own: list[models.RetentionPolicy] = []
+    by_experiment: dict[int, list[models.RetentionPolicy]] = {}
+    for policy in policies:
+        if policy.experiment_id is None:
+            own.append(policy)
+        else:
+            by_experiment.setdefault(policy.experiment_id, []).append(policy)
+    return models.ProjectRetention(
+        project=_scoped_retention(own, now),
+        experiments={e: _scoped_retention(p, now) for e, p in sorted(by_experiment.items())},
+        status=status,
+    )
+
+
+def _latest_rule(scope: models.ScopedRetention) -> models.RetentionRule:
+    """The rule a scope will be held to: the one pending, else the one in effect, else none (every run kept)."""
+    latest = scope.pending or scope.active
+    return latest.rule if latest is not None else models.Unlimited()
+
+
+def _active_rule(scope: models.ScopedRetention) -> models.RetentionRule:
+    """The rule a scope is held to now: the one in effect, else none (every run kept)."""
+    return scope.active.rule if scope.active is not None else models.Unlimited()
+
+
+type _Cutoff = tuple[datetime, int]
+"""A run is deleted by retention if its `(created_at, id)` is before its experiment's cutoff."""
+
+_TRASHABLE: Final[Mapping[models.EntityType, type[BaseModel]]] = {
+    models.EntityType.PROJECT: models.Project,
+    models.EntityType.EXPERIMENT: models.Experiment,
+    models.EntityType.RUN: models.Run,
+    models.EntityType.ARTIFACT: models.Artifact,
+}
+"""The table each kind of entity the Trash holds is in."""
+
+
+class _RetentionReads:
+    """
+    Which of a project's runs its retention rules say to delete now, read on one connection.
+
+    A run is deleted if its `(created_at, id)` is before its experiment's cutoff: each rule that has gone past its slack
+    moves the cutoff to where the rule says, and the strictest one wins. Every read is a range of one experiment's
+    `idx_run_experiment` sized by a rule (`N` runs), never by how many runs were logged.
+    """
+
+    def __init__(self, conn: sa.Connection, tables: Mapping[type[BaseModel], sa.Table]) -> None:
+        self._conn = conn
+        self._runs, self._experiments = tables[models.Run], tables[models.Experiment]
+        self._settings = RetentionSettings()
+        self._now = pendulum.now(pendulum.UTC)
+        runs = self._runs
+        self._counted = [runs.c.deleted_at.is_(None), runs.c.kept_at.is_(None)]
+        """What a count counts: a kept run is neither deleted nor counted."""
+        self._deletable = sa.not_(
+            sa.and_(
+                runs.c.status == models.RunStatus.RUNNING.value,
+                runs.c.created_at
+                > self._now - pendulum.duration(days=self._settings.retention_running_grace_days),
+            )
+        )
+        """What of that may be deleted: not a run still running in its grace period."""
+
+    def candidates(
+        self,
+        project_id: int,
+        project_rule: models.RetentionRule,
+        own: Mapping[int, models.RetentionRule],
+        limit: int,
+    ) -> list[int]:
+        """The runs `project_rule` and the experiments' `own` rules say to delete, oldest first, at most `limit`."""
+        experiments = self._experiments
+        experiment_ids: list[int] = list(
+            self._conn.execute(
+                sa.select(experiments.c.id).where(
+                    experiments.c.project_id == project_id, experiments.c.deleted_at.is_(None)
+                )
+            ).scalars()
+        )
+        cutoffs: dict[int, _Cutoff] = {}
+        if isinstance(project_rule, models.RunCount) and project_rule.unit is models.RetentionUnit.PROJECT:
+            if (whole := self._count_cutoff(experiment_ids, project_rule.max_runs)) is not None:
+                cutoffs = dict.fromkeys(experiment_ids, whole)
+            project_rule = (
+                models.Unlimited()
+            )  # counted over the project, above: never again for an experiment alone
+        for experiment_id in experiment_ids:
+            rules = [project_rule]
+            if (rule := own.get(experiment_id)) is not None and models.keeps_at_most(rule, project_rule):
+                rules.append(rule)
+            for cutoff in (self._cutoff(experiment_id, rule) for rule in rules):
+                if cutoff is not None:
+                    cutoffs[experiment_id] = max(cutoffs.get(experiment_id, cutoff), cutoff)
+        runs = self._runs
+        found = [
+            (created_at, run_id)
+            for experiment_id, (cut_at, cut_id) in cutoffs.items()
+            for created_at, run_id in self._conn.execute(
+                sa.select(runs.c.created_at, runs.c.id)
+                .where(
+                    runs.c.experiment_id == experiment_id,
+                    *self._counted,
+                    self._deletable,
+                    sa.or_(
+                        runs.c.created_at < cut_at, sa.and_(runs.c.created_at == cut_at, runs.c.id < cut_id)
+                    ),
+                )
+                .order_by(runs.c.created_at, runs.c.id)
+                .limit(limit)
+            )
+        ]
+        return [run_id for _, run_id in sorted(found)[:limit]]
+
+    def _cutoff(self, experiment_id: int, rule: models.RetentionRule) -> _Cutoff | None:
+        """Where `rule` cuts an experiment's runs, once they are past its slack; `None` while they are not."""
+        match rule:
+            case models.Unlimited():
+                return None
+            case models.RunCount(
+                max_runs=max_runs
+            ):  # an experiment's own count is of its own runs, whatever its unit
+                return self._count_cutoff([experiment_id], max_runs)
+            case models.RunAge(max_age_days=max_age_days):
+                runs = self._runs
+                oldest = self._conn.execute(
+                    sa.select(sa.func.min(runs.c.created_at)).where(
+                        runs.c.experiment_id == experiment_id, *self._counted, self._deletable
+                    )
+                ).scalar()
+                cutoff = self._now - pendulum.duration(days=max_age_days)
+                slack = pendulum.duration(days=self._settings.retention_age_slack_days)
+                return (cutoff, 0) if oldest is not None and oldest < cutoff - slack else None
+
+    def _count_cutoff(self, experiment_ids: Sequence[int], max_runs: int) -> _Cutoff | None:
+        """Where a count of `max_runs` over these experiments cuts, once they hold its slack past it: at its last run."""
+        held = self._newest(experiment_ids, max_runs + self._settings.retention_run_slack + 1)
+        return held[max_runs - 1] if len(held) > max_runs + self._settings.retention_run_slack else None
+
+    def _newest(self, experiment_ids: Sequence[int], count: int) -> list[_Cutoff]:
+        """The `count` newest counted runs of these experiments, newest first: `count` of each, merged."""
+        runs = self._runs
+        per_experiment = [
+            sa.select(runs.c.created_at, runs.c.id)
+            .where(runs.c.experiment_id == experiment_id, *self._counted)
+            .order_by(runs.c.created_at.desc(), runs.c.id.desc())
+            .limit(count)
+            .subquery()
+            for experiment_id in experiment_ids
+        ]
+        found: list[_Cutoff] = [
+            (created_at, run_id)
+            for block in itertools.batched(per_experiment, _COMPOUND_SELECT_TERMS)
+            for created_at, run_id in self._conn.execute(sa.union_all(*(sa.select(s) for s in block)))
+        ]
+        return sorted(found, reverse=True)[:count]
 
 
 def _in_batches(ids: Iterable[int]) -> Iterator[list[int]]:
@@ -932,9 +1137,28 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         )
 
     def create_project(self, project: models.NewProject) -> models.Project:
-        """Create a new project."""
+        """
+        Create a new project, held to the server's default retention rule from the start.
+
+        No grace period: a project with nothing in it has nothing for a rule to delete yet.
+        """
         _log.debug("Creating project with name %s", project.name)
-        (created,) = self._fetch(models.Project, sql.insert(self._tables[models.Project], project))
+        with self._begin() as conn:
+            row = conn.execute(sql.insert(self._tables[models.Project], project)).mappings().one()
+            created = sql.construct(models.Project, row)
+            conn.execute(
+                sql.insert(
+                    self._tables[models.RetentionPolicy],
+                    models.NewRetentionPolicy.of(
+                        RetentionSettings().default_rule,
+                        project_id=created.id,
+                        experiment_id=None,
+                        set_by=created.created_by,
+                        set_at=created.created_at,
+                        effective_at=created.created_at,
+                    ),
+                )
+            )
         return created
 
     def get_or_create_project(
@@ -2182,6 +2406,278 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             .order_by(users.c.username, users.c.id)
         )
         return [models.Pinner(user_id=user_id, username=username) for user_id, username in rows]
+
+    # -- Kept runs, retention policies ---------------------------------------------------------------
+
+    def keep_runs(self, run_ids: frozenset[int], actor: models.User) -> None:
+        """Keep `run_ids`, a run already kept staying kept by whoever kept it first."""
+        experiments = self._ensure_runs_not_deleted(set(run_ids))
+        runs = self._tables[models.Run]
+        stamp = {"kept_at": pendulum.now(pendulum.UTC), "kept_by": actor.id}
+        self._transaction(
+            sa.update(runs).where(runs.c.id.in_(batch), runs.c.kept_at.is_(None)).values(stamp)
+            for batch in _in_batches(run_ids)
+        )
+        self._bump_revisions(set(experiments.values()))
+
+    def release_runs(
+        self,
+        run_ids: frozenset[int],
+        actor: models.User,  # noqa: ARG002 -- part of the `DataStore` contract; enforced by `AuthorizingDataStore`
+    ) -> None:
+        """Stop keeping `run_ids`."""
+        runs = self._tables[models.Run]
+        self._transaction(
+            sa.update(runs).where(runs.c.id.in_(batch)).values(kept_at=None, kept_by=None)
+            for batch in _in_batches(run_ids)
+        )
+        self._bump_revisions(set(self.run_experiments(run_ids).values()))
+
+    def kept_runs(self, experiment_id: int, *, run_ids: frozenset[int] | None) -> frozenset[int]:
+        """Which of an experiment's (non-deleted) runs are kept, of `run_ids` if given: found by `idx_Run_kept`."""
+        runs = self._tables[models.Run]
+        return frozenset(
+            run_id
+            for (run_id,) in self._execute(
+                sa.select(runs.c.id).where(
+                    *_live_runs(runs, experiment_id),
+                    runs.c.kept_at.is_not(None),
+                    *_runs_among(runs.c.id, run_ids),
+                )
+            )
+        )
+
+    def _project_policies(self, conn: sa.Connection, project_id: int) -> list[models.RetentionPolicy]:
+        """Every policy row of a project and of its experiments that are not deleted: a few a scope (see `set_retention_policy`)."""
+        policies, experiments = self._tables[models.RetentionPolicy], self._tables[models.Experiment]
+        live_experiments = sa.select(experiments.c.id).where(
+            experiments.c.project_id == project_id, experiments.c.deleted_at.is_(None)
+        )
+        statement = sa.select(policies).where(
+            policies.c.project_id == project_id,
+            sa.or_(policies.c.experiment_id.is_(None), policies.c.experiment_id.in_(live_experiments)),
+        )
+        return [sql.construct(models.RetentionPolicy, row) for row in conn.execute(statement).mappings()]
+
+    def get_retention(self, project_id: int) -> models.ProjectRetention:
+        """A project's retention policies, its experiments' own, and its status: a few rows, however many runs it holds."""
+        statuses = self._tables[models.RetentionStatus]
+        with self._begin() as conn:
+            policies = self._project_policies(conn, project_id)
+            status = (
+                conn.execute(sa.select(statuses).where(statuses.c.project_id == project_id))
+                .mappings()
+                .first()
+            )
+        return _project_retention(
+            policies,
+            None if status is None else sql.construct(models.RetentionStatus, status),
+            pendulum.now(pendulum.UTC),
+        )
+
+    def set_retention_policy(
+        self,
+        project_id: int,
+        experiment_id: int | None,
+        rule: models.RetentionRule,
+        actor: models.User,
+        *,
+        cap_exempt: bool = False,
+    ) -> models.ScopedRetention:
+        """
+        Hold a project or experiment to `rule` once the grace period is over: see `DataStore.set_retention_policy`.
+
+        A scope keeps at most two rows: the one in effect, and the one pending. The project's row is locked for the
+        transaction, so two saves at once (to it or to any of its experiments) are made one after the other.
+        """
+        if experiment_id is not None:
+            experiment = self.get_experiment(experiment_id)
+            if experiment is None or experiment.project_id != project_id:
+                msg = f"Experiment {experiment_id} is not an experiment of project {project_id}"
+                raise ValueError(msg)
+        projects, policies = self._tables[models.Project], self._tables[models.RetentionPolicy]
+        now = pendulum.now(pendulum.UTC)
+        with self._begin() as conn:
+            locked = conn.execute(
+                sa.select(projects.c.id)
+                .where(projects.c.id == project_id, projects.c.deleted_at.is_(None))
+                .with_for_update()
+            ).first()
+            if locked is None:
+                msg = f"Project {project_id} does not exist or has been deleted"
+                raise ValueError(msg)
+            current = _project_retention(self._project_policies(conn, project_id), None, now)
+            project_rule = _latest_rule(current.project)
+            if experiment_id is None:
+                scope, in_scope = current.project, policies.c.experiment_id.is_(None)
+                if rule.kind is not project_rule.kind:
+                    conn.execute(
+                        sa.delete(policies).where(
+                            policies.c.project_id == project_id, policies.c.experiment_id.is_not(None)
+                        )
+                    )
+            else:
+                scope, in_scope = (
+                    current.experiments.get(experiment_id, models.ScopedRetention()),
+                    (policies.c.experiment_id == experiment_id),
+                )
+                if not isinstance(rule, models.Unlimited) and not models.keeps_at_most(rule, project_rule):
+                    msg = f"An experiment keeps at most what its project does, and with a rule of its kind ({project_rule.kind})"
+                    raise ValueError(msg)
+            # What is pending is replaced, and of what is in effect, only the rule enforced until this one is is kept.
+            kept = {scope.active.id} if scope.active is not None else set[int]()
+            conn.execute(
+                sa.delete(policies).where(
+                    policies.c.project_id == project_id, in_scope, policies.c.id.not_in(kept)
+                )
+            )
+            active_rule = scope.active.rule if scope.active is not None else models.Unlimited()
+            if rule != active_rule:
+                conn.execute(
+                    sql.insert(
+                        policies,
+                        models.NewRetentionPolicy.of(
+                            rule,
+                            project_id=project_id,
+                            experiment_id=experiment_id,
+                            set_by=actor.id,
+                            set_at=now,
+                            effective_at=now + RetentionSettings().grace,
+                            cap_exempt=cap_exempt,
+                        ),
+                    )
+                )
+            saved = _project_retention(self._project_policies(conn, project_id), None, now)
+        return (
+            saved.project
+            if experiment_id is None
+            else saved.experiments.get(experiment_id, models.ScopedRetention())
+        )
+
+    def cancel_pending_retention(
+        self,
+        project_id: int,
+        experiment_id: int | None,
+        actor: models.User,  # noqa: ARG002 -- part of the `DataStore` contract; enforced by `AuthorizingDataStore`
+    ) -> None:
+        """Drop the rule a project or experiment would be held to once its grace period is over."""
+        policies = self._tables[models.RetentionPolicy]
+        in_scope = (
+            policies.c.experiment_id.is_(None)
+            if experiment_id is None
+            else policies.c.experiment_id == experiment_id
+        )
+        self._execute(
+            sa.delete(policies).where(
+                policies.c.project_id == project_id,
+                in_scope,
+                policies.c.effective_at > pendulum.now(pendulum.UTC),
+            )
+        )
+
+    def _active_rules(
+        self, conn: sa.Connection, project_id: int
+    ) -> tuple[models.RetentionRule, dict[int, models.RetentionRule]]:
+        """A project's rule in effect now, and each of its experiments' own that is."""
+        current = _project_retention(
+            self._project_policies(conn, project_id), None, pendulum.now(pendulum.UTC)
+        )
+        own = {e: scope.active.rule for e, scope in current.experiments.items() if scope.active is not None}
+        return _active_rule(current.project), own
+
+    def retention_candidates(self, project_id: int, *, limit: int) -> list[int]:
+        """The runs a project's rules in effect say to delete now, oldest first: see `DataStore.retention_candidates`."""
+        with self._begin() as conn:
+            project_rule, own = self._active_rules(conn, project_id)
+            return _RetentionReads(conn, self._tables).candidates(project_id, project_rule, own, limit)
+
+    def retention_preview(
+        self, project_id: int, experiment_id: int | None, rule: models.RetentionRule, *, limit: int
+    ) -> int:
+        """How many runs `retention_candidates` would find with `rule` in effect for this scope; a kind change drops every experiment's."""
+        with self._begin() as conn:
+            project_rule, own = self._active_rules(conn, project_id)
+            if experiment_id is not None:
+                own[experiment_id] = rule
+            else:
+                if rule.kind is not project_rule.kind:
+                    own.clear()
+                project_rule = rule
+            return len(_RetentionReads(conn, self._tables).candidates(project_id, project_rule, own, limit))
+
+    def record_retention_status(self, project_id: int, *, overdue_runs: int) -> models.RetentionStatus:
+        """Record a project's check: out of spec since the first check that found runs to delete, until one finds none."""
+        statuses = self._tables[models.RetentionStatus]
+        now = pendulum.now(pendulum.UTC)
+        with self._begin() as conn:
+            conn.execute(
+                self._insert_ignoring_conflicts(statuses).values(project_id=project_id, checked_at=now)
+            )
+            since = sa.case(
+                (sa.literal(overdue_runs) == 0, sa.null()),
+                else_=sa.func.coalesce(
+                    statuses.c.out_of_spec_since, sa.literal(now, statuses.c.out_of_spec_since.type)
+                ),
+            )
+            row = (
+                conn.execute(
+                    sa.update(statuses)
+                    .where(statuses.c.project_id == project_id)
+                    .values(checked_at=now, overdue_runs=overdue_runs, out_of_spec_since=since)
+                    .returning(statuses)
+                )
+                .mappings()
+                .one()
+            )
+        return sql.construct(models.RetentionStatus, row)
+
+    def claim_retention_lease(self, holder: str, *, until: datetime) -> bool:
+        """One conditional `UPDATE`: atomic, so of processes asking at once, only one gets a lease no one holds."""
+        state = self._tables[AppState]
+        claimed = self._execute(
+            sa.update(state)
+            .where(
+                state.c.id == APP_STATE_ROW_ID,
+                sa.or_(
+                    state.c.retention_lease_holder.is_(None),
+                    state.c.retention_lease_holder == holder,
+                    state.c.retention_lease_until < pendulum.now(pendulum.UTC),
+                ),
+            )
+            .values(retention_lease_holder=holder, retention_lease_until=until)
+            .returning(state.c.id)
+        )
+        return bool(claimed)
+
+    def record_retention_sweep(self) -> datetime:
+        """Stamp the sweep, and since when retention has run here if this is the first: that, returned."""
+        state = self._tables[AppState]
+        now = pendulum.now(pendulum.UTC)
+        ((since,),) = self._execute(
+            sa.update(state)
+            .where(state.c.id == APP_STATE_ROW_ID)
+            .values(
+                {
+                    state.c.retention_swept_at: now,
+                    state.c.trash_retention_since: sa.func.coalesce(
+                        state.c.trash_retention_since, sa.literal(now, state.c.trash_retention_since.type)
+                    ),
+                }
+            )
+            .returning(state.c.trash_retention_since)
+        )
+        return since
+
+    def trashed_before(self, entity_type: models.EntityType, cutoff: datetime, *, limit: int) -> list[int]:
+        """What has been in the Trash since before `cutoff`, longest first, found by its partial `deleted_at` index."""
+        table = self._tables[_TRASHABLE[entity_type]]
+        rows = self._execute(
+            sa.select(table.c.id)
+            .where(table.c.deleted_at.is_not(None), table.c.deleted_at < cutoff)
+            .order_by(table.c.deleted_at, table.c.id)
+            .limit(limit)
+        )
+        return [entity_id for (entity_id,) in rows]
 
     def list_users(self) -> list[models.User]:
         """Every user, by username -- e.g. who a note can mention."""

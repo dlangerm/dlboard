@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any, NoReturn, Self
 
 from dlboard import models
 from dlboard.models import ProjectRole, Scope, has_scope, require_scope
+from dlboard.serve._backend._retention_settings import RetentionSettings
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Iterable, Iterator, Mapping
@@ -721,6 +722,114 @@ class AuthorizingDataStore(models.DataStore[...]):
         self._require(project_id, ProjectRole.VIEWER)
         return self._inner.pin_counts(project_id)
 
+    # -- Kept runs, retention -----------------------------------------------------------------------
+    #
+    # Keeping a run takes it out of retention's reach, so it is an editor's call; letting it go again, or deleting it,
+    # is an owner's, or else an editor could undo what keeping is for. An admin (`Scope.ALL`) is an owner everywhere,
+    # also where grants are not enforced, as a local deployment's one user is.
+
+    def _require_owner(self, project_id: int | None) -> None:
+        self._require_scope_or_role(Scope.ALL, project_id, ProjectRole.OWNER)
+
+    def _run_projects(self, run_ids: frozenset[int]) -> dict[int, set[int]]:
+        """The project of each of `run_ids` that exists, with which of them are of it, in two reads whatever their number."""
+        by_project: dict[int, set[int]] = {}
+        for run_id, experiment_id in self._inner.run_experiments(run_ids).items():
+            project_id = self._experiment_project(experiment_id)
+            if project_id is not None:
+                by_project.setdefault(project_id, set()).add(run_id)
+        return by_project
+
+    def _kept_among(self, run_ids: frozenset[int]) -> frozenset[int]:
+        """Which of `run_ids` are kept, an experiment at a time."""
+        by_experiment: dict[int, set[int]] = {}
+        for run_id, experiment_id in self._inner.run_experiments(run_ids).items():
+            by_experiment.setdefault(experiment_id, set()).add(run_id)
+        return frozenset().union(
+            *(self._inner.kept_runs(e, run_ids=frozenset(runs)) for e, runs in by_experiment.items())
+        )
+
+    def keep_runs(self, run_ids: frozenset[int], actor: models.User) -> None:
+        by_project = self._run_projects(run_ids)
+        if self._enforce and set().union(*by_project.values()) != run_ids:
+            _forbid("a run that does not exist, or is not yours to see, cannot be kept")
+        for project_id in by_project:
+            self._require(project_id, ProjectRole.EDITOR)
+        self._inner.keep_runs(run_ids, self._bound(actor))
+
+    def release_runs(self, run_ids: frozenset[int], actor: models.User) -> None:
+        for project_id in self._run_projects(run_ids) or {None}:
+            self._require_owner(project_id)
+        self._inner.release_runs(run_ids, self._bound(actor))
+
+    def kept_runs(self, experiment_id: int, *, run_ids: frozenset[int] | None) -> frozenset[int]:
+        self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
+        return self._inner.kept_runs(experiment_id, run_ids=run_ids)
+
+    def get_retention(self, project_id: int) -> models.ProjectRetention:
+        self._require(project_id, ProjectRole.VIEWER)
+        return self._inner.get_retention(project_id)
+
+    def _require_retention_role(self, project_id: int, experiment_id: int | None) -> None:
+        """A project's own rule is its owner's; an experiment's, stricter by construction, is any editor's."""
+        if experiment_id is None:
+            self._require_owner(project_id)
+        else:
+            self._require(project_id, ProjectRole.EDITOR)
+
+    def set_retention_policy(
+        self,
+        project_id: int,
+        experiment_id: int | None,
+        rule: models.RetentionRule,
+        actor: models.User,
+        *,
+        cap_exempt: bool = False,  # noqa: ARG002 -- decided here, from who the actor is, never taken from the caller
+    ) -> models.ScopedRetention:
+        """Only an admin sets a project's rule past the server's cap, and the rule then records that it was."""
+        self._require_retention_role(project_id, experiment_id)
+        past_cap = experiment_id is None and not RetentionSettings().within_caps(rule)
+        if past_cap:
+            require_scope(self._actor, Scope.ALL)
+        return self._inner.set_retention_policy(
+            project_id, experiment_id, rule, self._bound(actor), cap_exempt=past_cap
+        )
+
+    def cancel_pending_retention(
+        self, project_id: int, experiment_id: int | None, actor: models.User
+    ) -> None:
+        self._require_retention_role(project_id, experiment_id)
+        self._inner.cancel_pending_retention(project_id, experiment_id, self._bound(actor))
+
+    def retention_preview(
+        self, project_id: int, experiment_id: int | None, rule: models.RetentionRule, *, limit: int
+    ) -> int:
+        # How many runs a rule would delete is what a viewer weighing it asks; it deletes nothing.
+        self._require(project_id, ProjectRole.VIEWER)
+        return self._inner.retention_preview(project_id, experiment_id, rule, limit=limit)
+
+    # Enforcing retention is the worker's, which no user is behind (it uses the system store): like purging, never a request's.
+
+    def retention_candidates(self, project_id: int, *, limit: int) -> list[int]:
+        require_scope(self._actor, Scope.PURGE)
+        return self._inner.retention_candidates(project_id, limit=limit)
+
+    def record_retention_status(self, project_id: int, *, overdue_runs: int) -> models.RetentionStatus:
+        require_scope(self._actor, Scope.PURGE)
+        return self._inner.record_retention_status(project_id, overdue_runs=overdue_runs)
+
+    def claim_retention_lease(self, holder: str, *, until: datetime) -> bool:
+        require_scope(self._actor, Scope.PURGE)
+        return self._inner.claim_retention_lease(holder, until=until)
+
+    def record_retention_sweep(self) -> datetime:
+        require_scope(self._actor, Scope.PURGE)
+        return self._inner.record_retention_sweep()
+
+    def trashed_before(self, entity_type: models.EntityType, cutoff: datetime, *, limit: int) -> list[int]:
+        require_scope(self._actor, Scope.PURGE)
+        return self._inner.trashed_before(entity_type, cutoff, limit=limit)
+
     # -- Soft-delete, restore, purge ------------------------------------------------------------------
     #
     # The `actor` every one of these takes must be the one this store is bound to (see `_bound`) --
@@ -747,9 +856,11 @@ class AuthorizingDataStore(models.DataStore[...]):
         self._inner.purge_project(project_id, self._bound(actor))
 
     def delete_experiment(self, experiment_id: int, actor: models.User) -> None:
-        self._require_scope_or_role(
-            Scope.EXPERIMENT_DELETE, self._experiment_project(experiment_id), ProjectRole.EDITOR
-        )
+        """An experiment that holds a kept run is an owner's to delete, as the kept run is."""
+        project_id = self._experiment_project(experiment_id)
+        self._require_scope_or_role(Scope.EXPERIMENT_DELETE, project_id, ProjectRole.EDITOR)
+        if self._inner.kept_runs(experiment_id, run_ids=None):
+            self._require_owner(project_id)
         self._inner.delete_experiment(experiment_id, self._bound(actor))
 
     def restore_experiment(self, experiment_id: int, actor: models.User) -> None:
@@ -761,15 +872,22 @@ class AuthorizingDataStore(models.DataStore[...]):
         self._inner.purge_experiment(experiment_id, self._bound(actor))
 
     def delete_run(self, run_id: int, actor: models.User) -> None:
-        self._require_scope_or_role(Scope.RUN_DELETE, self._run_project(run_id), ProjectRole.EDITOR)
+        """A kept run is an owner's to delete."""
+        project_id = self._run_project(run_id)
+        self._require_scope_or_role(Scope.RUN_DELETE, project_id, ProjectRole.EDITOR)
+        if self._kept_among(frozenset({run_id})):
+            self._require_owner(project_id)
         self._inner.delete_run(run_id, self._bound(actor))
 
     def delete_runs(self, run_ids: frozenset[int], actor: models.User) -> None:
-        # Which experiments they are of in one read, then who may delete in each project; a run that is not there
-        # is for the store to refuse.
-        experiments = self._inner.run_experiments(run_ids)
-        for project_id in {self._experiment_project(e) for e in set(experiments.values())} or {None}:
+        # Which projects they are of in two reads, then who may delete in each, and an owner where any is kept; a run
+        # that is not there is for the store to refuse.
+        kept = self._kept_among(run_ids)
+        by_project: dict[int | None, set[int]] = {**self._run_projects(run_ids)} or {None: set()}
+        for project_id, runs in by_project.items():
             self._require_scope_or_role(Scope.RUN_DELETE, project_id, ProjectRole.EDITOR)
+            if runs & kept:
+                self._require_owner(project_id)
         self._inner.delete_runs(run_ids, self._bound(actor))
 
     def restore_run(self, run_id: int, actor: models.User) -> None:

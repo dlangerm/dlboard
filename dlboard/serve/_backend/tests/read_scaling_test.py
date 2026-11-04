@@ -27,7 +27,7 @@ import pytest
 import sqlalchemy as sa
 
 from dlboard import models
-from dlboard.conftest import StoreBackend
+from dlboard.conftest import Clock, StoreBackend
 from dlboard.models import ChartInstance, PanelInstance
 from dlboard.plugins.charts.bar_chart import BarChart
 from dlboard.plugins.charts.line_chart import LineChart
@@ -449,3 +449,63 @@ def test_the_key_check_reads_no_more_for_a_key_only_a_deleted_run_logged_among_m
     assert store.summarize_metric_keys(few) == ["loss"]
     assert store.summarize_metric_keys(many) == ["loss"]
     assert alone.rows == among_many.rows
+
+
+@pytest.mark.parametrize(
+    "rule",
+    [
+        models.RunCount(max_runs=20),
+        models.RunCount(max_runs=20, unit=models.RetentionUnit.PROJECT),
+        models.RunAge(max_age_days=5),
+    ],
+    ids=["each experiment's runs", "the project's runs", "age"],
+)
+def test_finding_what_retention_deletes_reads_no_more_for_what_it_deleted_already(
+    store: PostgresStore, monkeypatch: pytest.MonkeyPatch, rule: models.RetentionRule, clock: Clock
+) -> None:
+    """
+    What a rule reads is what it keeps, not the Trash it has filled from the oldest end.
+
+    Another project's runs are there from the start: they deepen the indexes every probe descends, a page or two each,
+    which is not what this is about (`test_a_load_reads_no_more_pages_when_another_experiment_grows` is).
+    """
+    monkeypatch.setenv("DLBOARD_RETENTION_GRACE_DAYS", "0")
+    admin = store.get_or_create_user(models.Principal.unverified("admin"))
+    project_id = store.create_project(models.NewProject(name="mine", description="")).id
+    experiment = store.create_experiment(models.NewExperiment(project_id=project_id)).id
+    now = pendulum.now("UTC")
+
+    def log(count: int, days_ago: int, into: int = experiment) -> list[int]:
+        return [
+            store.create_run(
+                models.NewRun(
+                    experiment_id=into,
+                    status=models.RunStatus.FINISHED,
+                    created_at=now.subtract(days=days_ago, seconds=i),
+                )
+            ).id
+            for i in range(count)
+        ]
+
+    other = store.create_experiment(
+        models.NewExperiment(
+            project_id=store.create_project(models.NewProject(name="other", description="")).id
+        )
+    ).id
+    log(1500, days_ago=20, into=other)
+    log(25, days_ago=1)
+    log(10, days_ago=9)
+    store.set_retention_policy(project_id, None, rule, admin)
+    _analyzed(store)
+
+    def reads() -> _Work:
+        return _work(store, lambda: store.retention_candidates(project_id, limit=100), scans=False)
+
+    alone = reads()
+    store.delete_runs(frozenset(log(1500, days_ago=20)), admin)
+    _analyzed(store)
+    grown = reads()
+
+    assert alone.rows > 0
+    assert grown.rows <= 2 * alone.rows, f"{grown.rows} rows beside 1,500 runs in the Trash, {alone.rows}"
+    assert grown.pages <= 2 * alone.pages + 10, f"{grown.pages} pages beside them, {alone.pages}"

@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import pandas as pd
+import pendulum
 import pytest
 import sqlalchemy as sa
 from flask import Flask
@@ -446,6 +447,36 @@ def _plain_artifact_urls(monkeypatch: pytest.MonkeyPatch) -> None:
     `Dash` app -- so a test that builds artifact URLs without one passes or fails by test order.
     """
     monkeypatch.setattr("dlboard.serve._backend._artifact_download.relative_path", str)
+
+
+@dataclass
+class Clock:
+    """A stopped `pendulum.now`, moved on only by however much a test has `advance`d it."""
+
+    at: pendulum.DateTime = field(default_factory=lambda: pendulum.now(pendulum.UTC))
+
+    def advance(self, **by: float) -> None:
+        """Move the clock on, e.g. `advance(days=8)`."""
+        self.at += pendulum.duration(**by)
+
+    def now(self, tz: str | pendulum.Timezone | None = None) -> pendulum.DateTime:
+        """The time it says, in `tz` (local time, as `pendulum.now`, if `None`)."""
+        return self.at.in_timezone(tz if tz is not None else pendulum.local_timezone())
+
+
+@pytest.fixture
+def clock(monkeypatch: pytest.MonkeyPatch) -> Clock:
+    """
+    A stopped clock a test moves on, for what waits on time (a retention policy's grace period, a run's age).
+
+    `pendulum.now` is replaced, not travelled: pendulum's own time travel needs its optional `test` extra. Everything in
+    dlboard reads the time through `pendulum.now`, so this is the time it sees. Stopped, so that a test does not rely on
+    the machine's clock only ever moving on: a synced one (WSL's, NTP's) steps back a second now and then, and a rule
+    saved to take effect at once then reads as pending.
+    """
+    clock = Clock()
+    monkeypatch.setattr(pendulum, "now", clock.now)
+    return clock
 
 
 @pytest.fixture
