@@ -76,6 +76,9 @@ pulls that section's body into the GitHub release notes and publishes both distr
 * **Ctrl+K finds the experiments of every project.** The palette's list was a group for each project, and Mantine counts a
   group against the options it lists however few of them match, so with more than about fifty projects the experiments of
   the later ones could not be found by name. It is a flat list now, each option naming its project.
+* **Saving a chart no longer sometimes leaves a second copy of it.** A preview still being drawn when Save closed the
+  chart editor could land after the save and sit in the chart's card beside the saved chart, doubling its picture and its
+  legend. A preview that arrives with no chart being edited is now emptied. (#542)
 
 ## [0.13.0] - 2026-10-27
 

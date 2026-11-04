@@ -2739,6 +2739,30 @@ def test_a_layer_typed_into_a_new_row_is_kept_when_save_is_pressed(
     assert console_errors == []
 
 
+def test_a_draft_that_lands_after_the_editor_closed_is_emptied(
+    page: Page, live_server_url: str, tmp_path: Path, console_errors: list[str]
+) -> None:
+    """A draw still in flight when Save closed the editor must not leave a second copy of the chart in its card."""
+    _create_project_and_experiment(page, live_server_url, "Stale Draft Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    _log_masks_over_a_picture(live_server_url, tmp_path, experiment_id)
+    page.reload()
+    _auto_generate_charts(page)
+
+    chart = page.locator(".dl-chart-item").filter(has_text="samples/a")
+    draft = chart.locator(".dl-chart-draft")
+    expect(draft).to_be_empty()
+    page.evaluate(
+        """() => {
+            const slot = document.querySelector(".dl-chart-item .dl-chart-draft");
+            window.dash_clientside.set_props(JSON.parse(slot.id), { children: "a late draft" });
+        }"""
+    )
+    expect(draft).to_be_empty()
+    assert console_errors == []
+
+
 _OVERLAY_COVERS_PICTURE_JS = """(layer) => {
     const picture = layer.parentElement?.querySelector("img")?.getBoundingClientRect();
     const drawn = layer.querySelector("svg, img")?.getBoundingClientRect();

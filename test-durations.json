@@ -2127,6 +2127,7 @@
   "dlboard/tests/browser_test.py::test_a_chart_being_edited_is_drawn_in_its_own_card_beside_the_page_and_cancelling_restores_it[chromium]": 14.695258606021525,
   "dlboard/tests/browser_test.py::test_a_chart_is_added_from_the_dock_with_its_preview_there_and_lands_at_the_end_of_its_panel[chromium]": 14.53010921398527,
   "dlboard/tests/browser_test.py::test_a_copied_chart_link_opens_that_chart_without_changing_the_shared_layout[chromium]": 4.640443230979145,
+  "dlboard/tests/browser_test.py::test_a_draft_that_lands_after_the_editor_closed_is_emptied[chromium]": 6.157521640983759,
   "dlboard/tests/browser_test.py::test_a_key_picker_lists_a_page_of_thousands_of_metrics_and_finds_the_rest_as_one_types[chromium]": 5.66956363799909,
   "dlboard/tests/browser_test.py::test_a_layer_is_hidden_and_shown_from_the_legend_without_fetching_and_the_change_can_be_saved_or_reset[chromium]": 7.6753134509781376,
   "dlboard/tests/browser_test.py::test_a_layer_shown_or_hidden_in_one_view_of_an_experiment_is_not_so_in_another[chromium]": 7.977551874995697,

@@ -65,6 +65,7 @@ _log = get_logger(__name__)
 _CANCEL_JS = ClientsideScript(Path(__file__).with_name("chart_editor_cancel.js"))
 _REMOUNT_JS = ClientsideScript(Path(__file__).with_name("chart_editor_remount.js"))
 _MARK_JS = ClientsideScript(Path(__file__).with_name("chart_editor_mark.js"))
+_STALE_DRAFT_JS = ClientsideScript(Path(__file__).with_name("chart_editor_stale_draft.js"))
 
 CHART_EDITOR_DOCK_ID: PaneId[ids.ExperimentPage] = PaneId("chart-editor-dock")
 CHART_EDITOR_TARGET_ID: StoreId[ids.ExperimentPage] = StoreId("chart-editor-target")
@@ -416,6 +417,14 @@ def _register_open_and_cancel(app: Dash) -> None:
         Output(CHART_EDITOR_DOCK_ID, "data-chart-id"),
         Input(CHART_EDITOR_TARGET_ID, "data"),
         Input(chart_view.CHART_DRAFT.all(), "id"),
+        prevent_initial_call=True,
+    )
+    app.clientside_callback(
+        _STALE_DRAFT_JS.source,
+        Output(chart_view.CHART_DRAFT.all(), "children", allow_duplicate=True),
+        Input(chart_view.CHART_DRAFT.all(), "children"),
+        State(CHART_EDITOR_TARGET_ID, "data"),
+        State(chart_view.CHART_DRAFT.all(), "id"),
         prevent_initial_call=True,
     )
     app.clientside_callback(
