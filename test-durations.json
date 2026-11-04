@@ -2137,6 +2137,7 @@
   "dlboard/tests/browser_test.py::test_a_page_from_an_older_version_offers_a_reload[chromium]": 0.9168588070315309,
   "dlboard/tests/browser_test.py::test_a_panels_charts_are_paged_and_filtered_by_metric_name[chromium]": 7.666768546012463,
   "dlboard/tests/browser_test.py::test_a_purge_returns_at_once_and_its_entity_leaves_the_trash_when_it_is_done[chromium]": 3.7434533100022236,
+  "dlboard/tests/browser_test.py::test_a_run_stays_in_the_url_as_its_page_is_edited_and_its_view_switched[chromium]": 5.859101921014371,
   "dlboard/tests/browser_test.py::test_a_scrubbed_thumbnail_shows_a_spinner_until_its_new_step_has_loaded[chromium]": 5.111889366002288,
   "dlboard/tests/browser_test.py::test_a_selection_past_the_run_cap_is_refused_and_the_charts_keep_the_last_one[chromium]": 6.002427776053082,
   "dlboard/tests/browser_test.py::test_a_series_band_is_drawn_in_its_runs_palette_colors_in_either_color_scheme[chromium]": 15.719128642987926,

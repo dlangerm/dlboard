@@ -79,6 +79,11 @@ pulls that section's body into the GitHub release notes and publishes both distr
 * **Saving a chart no longer sometimes leaves a second copy of it.** A preview still being drawn when Save closed the
   chart editor could land after the save and sit in the chart's card beside the saved chart, doubling its picture and its
   legend. A preview that arrives with no chart being edited is now emptied. (#542)
+* **Switching views keeps the run you came to look at.** A page opened on one run (`?run=`, from a comparison's link, say)
+  lost it when you picked another view in the picker. It stays in the address, and the banner with it. Switching back to
+  the shared view after an edit had branched into one of your own also drew nothing: the address bar had moved without
+  the page router being told, so the shared view's address looked like the one it already held. It reloads the page
+  there now. (#543)
 
 ## [0.13.0] - 2026-10-27
 

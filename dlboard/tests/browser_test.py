@@ -1646,6 +1646,42 @@ def test_changes_in_a_saved_view_leave_the_shared_view_alone(
     assert console_errors == []
 
 
+def test_a_run_stays_in_the_url_as_its_page_is_edited_and_its_view_switched(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """A page opened on one run (`?run=`) keeps it through auto-generating charts and through every pick in the view picker."""
+    _create_project_and_experiment(page, live_server_url, "Sticky Run Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    run = _log_runs(BasicDlboardAPI(live_server_url), experiment_id, 1)[0]
+    on_the_run = f"{live_server_url}/experiment/{experiment_id}?run={run.id}"
+    banner = page.locator("#focus-banner")
+    view_picker = page.get_by_role("textbox", name="View", exact=True)
+
+    page.goto(on_the_run)
+    expect(banner).to_be_visible()
+    _auto_generate_charts(page)  # an edit of the shared page branches into a view of the viewer's own
+    in_own_view = re.compile(
+        rf"/experiment/{experiment_id}\?(?=.*\bview=\d+)(?=.*\brun={run.id}$|.*\brun={run.id}&)"
+    )
+    expect(page).to_have_url(in_own_view)
+    expect(banner).to_be_visible()
+
+    view_picker.click()
+    page.get_by_role("option", name="Shared view").click()
+    expect(page).to_have_url(on_the_run)
+    expect(banner).to_be_visible()
+    expect(
+        page.get_by_role("button", name="Auto-generate charts")
+    ).to_be_visible()  # the shared view, with no charts yet
+
+    view_picker.click()
+    page.get_by_role("option").filter(has_not_text="Shared view").first.click()
+    expect(page).to_have_url(in_own_view)
+    expect(banner).to_be_visible()
+    assert console_errors == []
+
+
 def test_editing_the_shared_page_branches_into_your_own_view_without_asking(
     page: Page, live_server_url: str, console_errors: list[str]
 ) -> None:

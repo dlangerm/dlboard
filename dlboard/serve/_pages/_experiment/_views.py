@@ -380,6 +380,7 @@ def _register_switching(app: Dash) -> None:
         Input(VIEW_SELECT_ID, "value"),
         State(ids.STATE_VIEW_ID, "data"),
         State(VIEW_NAV_SUPPRESS_ID, "data"),
+        State(constants.LOCATION_ID, "search"),
         prevent_initial_call=True,
     )
 
