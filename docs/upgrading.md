@@ -33,6 +33,15 @@ restarts or is scaled up mid-rollout fails until it's replaced by the new versio
 rolling deploy does anyway. A release that can't promise even this says so in the changelog and needs
 all servers stopped together.
 
+## Retention
+
+Retention (0.15) changes nothing on its own: a project from before it keeps every run unless an admin sets
+`DLBOARD_RETENTION_DEFAULT_*` or a cap, and then the worker gives each such project that default once the grace period
+(`DLBOARD_RETENTION_GRACE_DAYS`, 7) is over, so there is time to see what it would delete on each project page first. The
+worker also starts emptying the Trash of what has been in it `DLBOARD_TRASH_RETENTION_DAYS` (30), counted from its
+first sweep: anything deleted long before the upgrade is purged 30 days after it, not at once. To keep everything in the
+Trash as before, set `DLBOARD_RETENTION_ENABLED=false`. See [retention.md](retention.md).
+
 ## Charts saved by a newer version
 
 A chart's settings are checked strictly, so a server shows a chart saved with settings it does not know as an error, and

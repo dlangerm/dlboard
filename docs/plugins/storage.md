@@ -5,7 +5,8 @@
 Storage is split into two protocols, both in `dlboard/models/_data_store.py`:
 
 - **`DataStore`** — structured metadata: users, projects, experiments, runs, metrics,
-  hyperparameters, artifact *references*, soft-delete/restore/purge, audit log.
+  hyperparameters, artifact *references*, soft-delete/restore/purge, audit log, retention policies and kept runs
+  (and the reads the retention worker sweeps with, see [retention.md](../retention.md)).
 - **`ArtifactStore`** — the artifact *blobs* themselves: `log_artifacts`, `link_artifacts`,
   `download_artifact`, `delete_artifact`.
 
@@ -108,7 +109,7 @@ of, and `None` means every run, which a caller passes explicitly.
 
 You don't have to implement `DataStore` from scratch — `SQLStoreBase`
 (`dlboard/serve/_backend/_sql_store_base.py`) already implements the full `DataStore` contract
-(CRUD, cascading soft-delete, audit log, scopes) on SQLAlchemy Core. It generates every table from
+(CRUD, cascading soft-delete, audit log, scopes, retention) on SQLAlchemy Core. It generates every table from
 its pydantic model and writes every query as a Core expression, so column types, identity columns,
 quoting and bind style all come from SQLAlchemy's dialect for your database. A new SQL-backed store
 only needs to subclass `SQLStoreBase`, pass `super().__init__()` an `sqlalchemy.Engine` (your

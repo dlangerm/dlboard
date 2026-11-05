@@ -9,8 +9,9 @@ pinned runs. They work the same way on all three, so what you learn on one is wh
   remembers which runs it draws); on a comparison it is yours alone, in the address bar, and saves nothing.
 - **The checkbox** only selects a run. Once something is selected, a bar above the list says how many and offers what can be
   done to them: **Show** or **Hide** them, **Diff** them (the A/B comparison, for up to five), **Pin** or **Unpin** them,
-  **Compare** them (below) and **Delete** them (asking first, and saying how many); on a comparison **Remove** takes them out
-  of it. The checkbox in the header selects the runs the list's filters match, not every run of a long experiment.
+  **Compare** them (below), **Keep** or **Release** them ([retention](retention.md): a kept run, with a lock after its name, is
+  never deleted by retention) and **Delete** them (asking first, and saying how many); on a comparison **Remove** takes them
+  out of it. The checkbox in the header selects the runs the list's filters match, not every run of a long experiment.
 - **A run's name** is a link to the run: its experiment with only that run drawn, and a banner that says so and
   links back to the view's own runs. Like the tab you are on, it is yours alone and saves nothing.
 - **The experiment's name**, in the breadcrumb, is a menu of the project's experiments to switch to.

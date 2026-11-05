@@ -12,6 +12,32 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ## [Unreleased]
 
+### Added
+
+* **Retention policies.** A deployment people log to for months no longer grows without bound. Each project keeps every
+  run, the newest N runs (of each experiment, or of the whole project), or the runs of the last N days, set by its owner in
+  a new **Retention** section of the project page; an editor may hold an experiment to a stricter rule of the same kind.
+  A changed rule waits `DLBOARD_RETENTION_GRACE_DAYS` (7) while the rule before it is still enforced, with a preview of what
+  it would delete. A background worker (the new `retention_worker` plugin, in every storage bundle) moves what a rule says
+  to delete to the Trash, in batches past a slack, as the `dlboard:retention` user; only the process holding a lease in the
+  database sweeps, so workers and replicas never contend, and it pauses between batches and stops at a budget a sweep so live
+  traffic keeps the database. A project it has not caught up with is flagged on its page and on the admin page's new
+  **Retention** tab, and in the new `dlboard.retention.*` metrics (with a Grafana row). Admins set the default for new
+  projects and a cap owners cannot exceed (`DLBOARD_RETENTION_DEFAULT_*`, `DLBOARD_RETENTION_MAX_*`). Nothing yet refuses
+  new data from a project far past its rule. See [docs/retention.md](docs/retention.md). (#472)
+* **Kept runs.** **Keep** in any run list's bar takes a run out of retention's reach (a lock after its name says so). An
+  editor keeps a run; only an owner releases it or deletes it, including by deleting its experiment. Keeping is not pinning,
+  which anyone can do. (#472)
+* **The Trash empties itself.** The retention worker purges what has been in the Trash `DLBOARD_TRASH_RETENTION_DAYS` (30),
+  whoever deleted it, counted from its first sweep, so upgrading never purges old Trash at once. Set
+  `DLBOARD_RETENTION_ENABLED=false` to keep everything as before. (#472)
+
+### Changed
+
+* **Migration `0008`** adds the retention tables, `Run.kept_at`/`kept_by`, the worker's `AppState` columns and partial
+  indexes for live, kept and deleted rows: expand-only. Every existing project keeps every run until an admin sets a
+  default, which then applies after the grace period. See [docs/upgrading.md](docs/upgrading.md#retention). (#472)
+
 ## [0.14.0] - 2026-11-04
 
 ### Added

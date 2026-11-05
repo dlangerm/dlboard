@@ -55,6 +55,7 @@ Every metric, hyperparameter, and artifact you log gets synced to dlboard in the
 
 - **One-command setup** — `dlboard serve local` with zero configuration
 - **Pins and cross-experiment comparisons** — pin the runs that matter in a colour of your team's choosing, then put runs from any experiments of a project on one dashboard; see [docs/comparisons.md](docs/comparisons.md)
+- **Retention policies** — cap the runs each project or experiment keeps, by count or by age, with kept runs exempt, a grace period on every change and a background worker that deletes quietly; see [docs/retention.md](docs/retention.md)
 - **Side-by-side run comparison** — compare metrics, hyperparameters, and artifacts across any runs, or diff up to five runs in a shareable modal
 - **PyTorch Lightning integration** — drop in `DLBoardLogger` and you're done
 - **Personal views** — save custom layouts and filters without touching the shared experiment page
@@ -136,6 +137,7 @@ uv run prek run --all-files         # run pre-commit hooks manually
 - [Architecture](docs/architecture.md) — how the app is put together: the plugin system, and the
   request flow from a training script to the browser.
 - [Runs, pins & comparisons](docs/comparisons.md) — the run list, flag the runs that matter, and compare runs of several experiments.
+- [Retention](docs/retention.md) — how many runs, or how old, a project keeps, kept runs, and when the Trash is emptied.
 - [Client & logging](docs/client.md) — `DLBoardLogger`, the REST client, and how to log a new kind
   of artifact.
 - [Docker](docs/docker.md) — building and running the image, its Postgres + local-disk default, and
