@@ -27,12 +27,15 @@ import pytest
 import sqlalchemy as sa
 
 from dlboard import models
-from dlboard.conftest import StoreBackend
+from dlboard.conftest import Clock, StoreBackend
 from dlboard.models import ChartInstance, PanelInstance
 from dlboard.plugins.charts.bar_chart import BarChart
 from dlboard.plugins.charts.line_chart import LineChart
 from dlboard.plugins.charts.series_band import SeriesBandChart
 from dlboard.plugins.charts.table_chart import TableChart
+from dlboard.plugins.retention._candidates import Candidates, Rules
+from dlboard.plugins.retention._rules import RetentionRule, RetentionUnit, RunAge, RunCount
+from dlboard.plugins.retention._settings import RetentionSettings
 from dlboard.serve._pages._experiment._column_catalog import ColumnCatalog, summary_hparam_keys
 from dlboard.serve._pages._experiment._panel_data import fetch_panel_data, scope_panel_data
 from dlboard.serve._pages._experiment._run_compare import load_run_compare
@@ -449,3 +452,107 @@ def test_the_key_check_reads_no_more_for_a_key_only_a_deleted_run_logged_among_m
     assert store.summarize_metric_keys(few) == ["loss"]
     assert store.summarize_metric_keys(many) == ["loss"]
     assert alone.rows == among_many.rows
+
+
+@pytest.mark.parametrize(
+    "rule",
+    [
+        RunCount(max_runs=20),
+        RunCount(max_runs=20, unit=RetentionUnit.PROJECT),
+        RunAge(max_age_days=5),
+    ],
+    ids=["each experiment's runs", "the project's runs", "age"],
+)
+def test_finding_what_retention_deletes_reads_no_more_for_what_it_deleted_already(
+    store: PostgresStore, rule: RetentionRule, clock: Clock
+) -> None:
+    """
+    What a rule reads is what it keeps, not the Trash it has filled from the oldest end.
+
+    Another project's runs are there from the start: they deepen the indexes every probe descends, a page or two each,
+    which is not what this is about (`test_a_load_reads_no_more_pages_when_another_experiment_grows` is).
+    """
+    admin = store.get_or_create_user(models.Principal.unverified("admin"))
+    project_id = store.create_project(models.NewProject(name="mine", description="")).id
+    experiment = store.create_experiment(models.NewExperiment(project_id=project_id)).id
+    now = pendulum.now("UTC")
+
+    def log(count: int, days_ago: int, into: int = experiment) -> list[int]:
+        return [
+            store.create_run(
+                models.NewRun(
+                    experiment_id=into,
+                    status=models.RunStatus.FINISHED,
+                    created_at=now.subtract(days=days_ago, seconds=i),
+                )
+            ).id
+            for i in range(count)
+        ]
+
+    other = store.create_experiment(
+        models.NewExperiment(
+            project_id=store.create_project(models.NewProject(name="other", description="")).id
+        )
+    ).id
+    log(1500, days_ago=20, into=other)
+    log(25, days_ago=1)
+    log(10, days_ago=9)
+    _analyzed(store)
+    candidates = Candidates(store, RetentionSettings(), now)
+
+    def reads() -> _Work:
+        return _work(
+            store,
+            lambda: candidates.find(project_id, Rules(project=rule, experiments={}), limit=100),
+            scans=False,
+        )
+
+    alone = reads()
+    store.delete_runs(frozenset(log(1500, days_ago=20)), admin)
+    _analyzed(store)
+    run_table = store.tables[models.Run]
+    with store._engine.connect().execution_options(
+        isolation_level="AUTOCOMMIT"
+    ) as conn:  # as autovacuum would have
+        conn.exec_driver_sql(f'VACUUM "{run_table.schema}"."{run_table.name}"')
+    grown = reads()
+
+    assert alone.rows > 0
+    assert grown.rows <= 2 * alone.rows, f"{grown.rows} rows beside 1,500 runs in the Trash, {alone.rows}"
+    assert grown.pages <= 2 * alone.pages + 10, f"{grown.pages} pages beside them, {alone.pages}"
+
+
+def test_a_retention_batch_reads_about_its_limit_and_a_backlog_is_counted_not_read(
+    store: PostgresStore, clock: Clock
+) -> None:
+    """
+    A project of many experiments, each far past its rule: a batch reads what it deletes, and the backlog costs a count.
+
+    What is read for every experiment is where its rule cuts it (the count and the slack: what the project keeps). The
+    runs to delete are read from one experiment at a time, until the batch is full, and the backlog is never read.
+    """
+    project_id = store.create_project(models.NewProject(name="wide", description="")).id
+    experiments = [store.create_experiment(models.NewExperiment(project_id=project_id)).id for _ in range(25)]
+    now = pendulum.now("UTC")
+    for experiment in experiments:
+        for i in range(120):
+            store.create_run(
+                models.NewRun(
+                    experiment_id=experiment,
+                    status=models.RunStatus.FINISHED,
+                    created_at=now.subtract(days=1, seconds=i),
+                )
+            )
+    _analyzed(store)
+    rules = Rules(project=RunCount(max_runs=20), experiments={})
+    candidates = Candidates(store, RetentionSettings(), now)
+
+    batch = _work(store, lambda: candidates.find(project_id, rules, limit=100), scans=False)
+    backlog = _work(store, lambda: candidates.overdue(project_id, rules, limit=10_000), scans=False)
+
+    assert candidates.overdue(project_id, rules, limit=10_000) == 25 * 100
+    cut = 25 * (20 + 10 + 1)  # each experiment's newest, to its slack: what its rule keeps
+    assert batch.rows <= cut + 100 + 50, f"{batch.rows} rows for a batch of 100 across 25 experiments"
+    assert backlog.rows <= cut + 2 * 25, (
+        f"{backlog.rows} rows to count 2,500 runs to delete"
+    )  # + the experiments, the counts

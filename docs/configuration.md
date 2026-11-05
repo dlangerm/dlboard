@@ -70,6 +70,28 @@ restarts it if it dies or hangs. Every server sharing a database starts one, and
 | `DLBOARD_CUSTODIAN_CLAIM_S` | `300` | How long a claim on a work item lasts: an item whose custodian died is claimed again after this. |
 | `DLBOARD_TRASH_RETENTION_DAYS` | `30` | How long anything stays in the Trash, restorable, before it is purged for good, whoever deleted it. Counted from no earlier than the first time the server checks, so what was in the Trash before an upgrade is not purged the moment it lands. |
 
+## Retention
+
+The retention plugin deletes a project's oldest runs (to the Trash) once they pass its rule: the newest N runs, or the runs of
+the last N days. A kept run is never deleted by it. These set what a new project starts with, how far an owner may go, and how
+a changed rule takes effect; the rule itself is set per project, on its page.
+
+| Variable | Default | |
+|---|---|---|
+| `DLBOARD_RETENTION_DEFAULT_MAX_RUNS` | none | A new project keeps this many runs of each `DLBOARD_RETENTION_DEFAULT_UNIT`, and deletes older ones. Unset, with no default age either, a new project keeps every run (or, with a cap set, is held to the first cap). A project with no rule of its own (a new one, or one from before retention) gets this default the next time retention looks for projects (`DLBOARD_RETENTION_INTERVAL_S`), after the grace period like any change. |
+| `DLBOARD_RETENTION_DEFAULT_UNIT` | `experiment` | What `DLBOARD_RETENTION_DEFAULT_MAX_RUNS` counts over: each `experiment`'s runs on their own, or every run of the `project` together. |
+| `DLBOARD_RETENTION_DEFAULT_MAX_AGE_DAYS` | none | A new project keeps runs created in the last this many days, and deletes older ones. Not with `DLBOARD_RETENTION_DEFAULT_MAX_RUNS`. |
+| `DLBOARD_RETENTION_MAX_RUNS` | none | The most runs a project's owner may have each experiment keep; only an admin sets a project past it. With any cap set, an owner can no longer keep every run, nor choose a kind of rule that has no cap. |
+| `DLBOARD_RETENTION_MAX_AGE_DAYS` | none | The oldest, in days, a project's owner may have runs kept; only an admin sets a project past it. |
+| `DLBOARD_RETENTION_GRACE_DAYS` | `7` | How long a changed rule waits before it takes effect. Until then the rule before it is still enforced, so changing it again never puts retention off. |
+| `DLBOARD_RETENTION_RUN_SLACK` | `10` | How many runs past its count a project or experiment may hold before runs are deleted, down to the count: runs are deleted in batches, not one for each new run. |
+| `DLBOARD_RETENTION_AGE_SLACK_DAYS` | `1` | How many days past its age a run may get before runs are deleted, down to the age. |
+| `DLBOARD_RETENTION_RUNNING_GRACE_DAYS` | `7` | How long a run that is still running is never deleted for. One running longer than this has lost its client, which then never reported that it ended, and is deleted as any other. |
+| `DLBOARD_RETENTION_WARN_AFTER_HOURS` | `24` | How long a project may hold runs its rules say to delete before its page says it is out of spec: retention has not caught up with it in that time. |
+| `DLBOARD_RETENTION_INTERVAL_S` | `300` | How often retention looks for projects to check. One read gives every project's rule; a project with none is not looked at again (unless a default or cap gives it one), so idle projects cost the server nothing and a project costs a statement only when its rule changes. |
+| `DLBOARD_RETENTION_BATCH` | `100` | How many runs one batch deletes, in one transaction. The custodian paces itself between batches (`DLBOARD_CUSTODIAN_DUTY_CYCLE`). |
+| `DLBOARD_RETENTION_PROJECT_BUDGET` | `5000` | The most runs one check of a project deletes before it moves on, so one project far past its rule cannot starve the others. It is caught up over several checks, and shows as out of spec until it is. |
+
 ## Logging
 
 | Variable | Default | |

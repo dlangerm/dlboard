@@ -289,6 +289,10 @@ ignore_names = [
   # `ScopedSetting.updated_by` -- who last wrote a plugin's setting, recorded for an admin reading the table; no code of
   # ours reads it back, a plugin's check or its own page may.
   "updated_by",
+  # `RuleVersion.set_by`/`set_at` (`plugins/retention/_rules.py`) -- who saved a retention rule and when, kept in the stored
+  # setting for an admin reading it; the page shows when it takes effect, not these.
+  "set_by",
+  "set_at",
   # `dash.register_page`'s per-route module contract (`serve/_pages/*.py`) -- Dash's page
   # registry looks this up via `getattr(module, "layout")` at routing time, not a call in our
   # own code.
