@@ -159,6 +159,14 @@ always reached polymorphically through `ChartTypeRegistry` (`dlboard/models/_vie
 `ChartInstance.render()`, never a direct import of a specific chart plugin's render function (auto-suggestion
 logic is a narrow exception: it references concrete chart classes to decide what to suggest, not to render).
 
+One more exception: a plugin may add a line under a project's header or a section under its experiments
+(`register_project_section`, `serve/_pages/_project_sections.py`), for a project setting of its own. Such a setting is
+plugin-owned JSON under the plugin's key (`DataStore.put_scoped_setting`), whose `SettingRule` (`register_setting`) says
+who may read it and write each scope, and may check a value first (a cap only an admin may pass): `AuthorizingDataStore`
+enforces it, so the plugin never authorizes by hand, and a key with no rule is the system's alone. A feature that needs
+policy over what was logged (which runs to delete, say) builds it on these and the generic reads (`get_runs`'s
+`created_before`/`oldest_first`/`include_kept`, `kept_runs`, `trashed_before`) in its plugin, not in `SQLStoreBase`.
+
 ### Data flow: client → server
 
 1. `dlboard.client.dlboard_logger.DLBoardLogger` is a `pytorch_lightning.loggers.Logger`. On init it creates

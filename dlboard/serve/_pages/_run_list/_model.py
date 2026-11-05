@@ -33,6 +33,10 @@ class RunAction(StrEnum):
     """Add the runs to the comparison whose id is `comparison_id`, and go to it."""
     COMPARE_PINS = "compare_pins"
     """Start a comparison of every run of the project pinned in `color`, whoever pinned it: it names no runs."""
+    KEEP = "keep"
+    """Keep the runs: no retention policy deletes them, and only an owner does."""
+    RELEASE = "release"
+    """Stop keeping the runs, so that retention may delete them again: an owner's to do."""
 
 
 class RunActionRequest(BaseModel, frozen=True, extra="forbid"):
@@ -59,6 +63,8 @@ class RunActionRequest(BaseModel, frozen=True, extra="forbid"):
                 | RunAction.DELETE
                 | RunAction.REMOVE
                 | RunAction.COMPARE_NEW
+                | RunAction.KEEP
+                | RunAction.RELEASE
             ):
                 if self.color is not None or self.comparison_id is not None:
                     msg = f"{self.action} takes no colour or comparison"

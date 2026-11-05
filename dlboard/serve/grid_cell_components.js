@@ -176,6 +176,15 @@ window.dashAgGridComponentFunctions.DlboardRunLink = (props) => {
             },
         },
         props.value,
+        // A kept run: retention never deletes it (`_kept` of its row).
+        props.data._kept
+            ? h("span", {
+                  className: "dl-icon dl-icon-lock dl-run-kept",
+                  role: "img",
+                  "aria-label": "Kept",
+                  title: "Kept: no retention policy deletes it",
+              })
+            : null,
         experiment ? h("span", { className: "dl-run-experiment" }, experiment) : null,
     );
 };

@@ -16,11 +16,27 @@ function applyRowUpdates(update) {
         // view it opens in): so they all are, whatever the rows changed in.
         api.refreshCells({ force: true });
     }
+    const redrawn = [];
     for (const { run_id, values } of update.rows) {
         const node = api.getRowNode(String(run_id));
-        for (const [field, value] of Object.entries(values)) {
-            node?.setDataValue(field, value);
+        if (!node) {
+            continue;
         }
+        for (const [field, value] of Object.entries(values)) {
+            // `setDataValue` takes only a field with a column: one a cell draws from without showing it (`_kept`, the lock
+            // after a kept run's name) has none, and is set on the row's data, for the refresh below to draw.
+            if (api.getColumn(field)) {
+                node.setDataValue(field, value);
+            } else {
+                node.data[field] = value;
+                redrawn.push(node);
+            }
+        }
+    }
+    // A cell is drawn again only if its own value changed: a name's lock is drawn from another field. Only those rows, so a
+    // cell with something open in it (a pin's editor) is not drawn again under it.
+    if (redrawn.length) {
+        api.refreshCells({ rowNodes: redrawn, force: true });
     }
     api.onFilterChanged();
     // A pin changed, not the selection: what the Unpin menu offers is what the selected rows hold now (`unpin_colors.js`).

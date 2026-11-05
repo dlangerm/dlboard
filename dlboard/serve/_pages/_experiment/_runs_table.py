@@ -59,6 +59,8 @@ from dlboard.serve._pages._run_list import (
     RunActionRequest,
     RunListSurface,
     action_bar,
+    keep_actions,
+    keep_or_release,
     register_run_list,
     request_store_id,
     simple_action,
@@ -338,6 +340,7 @@ def _run_head(
             simple_action(surface, RunAction.DIFF, "Diff", icon_name=Icon.COMPARE),
             *pin_menus(surface),
             compare_menu(surface, store.list_comparisons(project_id, get_current_user().id, editable=True)),
+            *keep_actions(surface),
             simple_action(surface, RunAction.DELETE, "Delete", icon_name=Icon.DELETE, color="red"),
         ),
         *([compare_pins] if compare_pins is not None else []),
@@ -874,6 +877,9 @@ def _register_run_actions(app: Dash) -> None:
                 ).outputs()
             case RunAction.COMPARE_NEW | RunAction.COMPARE_ADD | RunAction.COMPARE_PINS:
                 return _compare(request, act).outputs()
+            case RunAction.KEEP | RunAction.RELEASE:
+                kept = keep_or_release(request, NAVBAR_HPARAM_DATATABLE_ID)
+                return _Outputs(row_updates=kept.rows or no_update, notices=kept.notice).outputs()
             case RunAction.REMOVE:
                 # Only a comparison holds runs that can be taken out of it.
                 raise PreventUpdate

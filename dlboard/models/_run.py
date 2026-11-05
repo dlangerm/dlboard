@@ -77,6 +77,16 @@ class Run(NewRun, frozen=True, extra="ignore"):
     later. `None` while `RUNNING`, and for a run that never reported.
     """
 
+    kept_at: AwareDatetime | None = None
+    """
+    When this run was kept, if it is: no retention rule deletes a kept run, and only an owner of its project deletes it.
+
+    Not a pin (`RunPin`), which anyone who can see a run adds: keeping is what an editor does, and releasing it an owner.
+    """
+
+    kept_by: int | None = None
+    """The user who kept this run, while it is kept."""
+
     deleted_by: int | None = None
     """The user who soft-deleted this run, if it's been deleted."""
 

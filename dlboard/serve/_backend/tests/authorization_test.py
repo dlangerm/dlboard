@@ -215,6 +215,29 @@ _OPERATIONS: dict[str, tuple[ProjectRole, Callable[[AuthorizingDataStore, _Chain
         lambda s, c: s.update_project(c[0].model_copy(update={"everyone_role": ProjectRole.VIEWER})),
     ),
     "delete the project": (ProjectRole.OWNER, lambda s, c: s.delete_project(c[0].id, s.actor)),
+    "list an experiment's kept runs": (ProjectRole.VIEWER, lambda s, c: s.kept_runs(c[1].id, run_ids=None)),
+    "keep a run": (ProjectRole.EDITOR, lambda s, c: s.keep_runs(frozenset({c[2].id}), s.actor)),
+    "release a kept run": (ProjectRole.OWNER, lambda s, c: s.release_runs(frozenset({c[2].id}), s.actor)),
+    "delete a kept run": (
+        ProjectRole.OWNER,
+        lambda s, c: (s._inner.keep_runs(frozenset({c[2].id}), s.actor), s.delete_run(c[2].id, s.actor)),
+    ),
+    "delete kept runs with others": (
+        ProjectRole.OWNER,
+        lambda s, c: (
+            s._inner.keep_runs(frozenset({c[2].id}), s.actor),
+            s.delete_runs(
+                frozenset({c[2].id, s._inner.create_run(models.NewRun(experiment_id=c[1].id)).id}), s.actor
+            ),
+        ),
+    ),
+    "delete an experiment holding a kept run": (
+        ProjectRole.OWNER,
+        lambda s, c: (
+            s._inner.keep_runs(frozenset({c[2].id}), s.actor),
+            s.delete_experiment(c[1].id, s.actor),
+        ),
+    ),
 }
 
 

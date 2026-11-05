@@ -73,6 +73,7 @@ from dlboard.models._pin import NamedPin, NewRunPin, PinColor, PinnedRun, Pinned
 from dlboard.models._plugin import InstalledPlugin, PluginProtocol
 from dlboard.models._project import NewProject, Project
 from dlboard.models._run import NewRun, Run, RunStatus
+from dlboard.models._scoped_setting import NewScopedSetting, ScopedSetting, ScopedSettings
 from dlboard.models._scopes import Scope, has_scope, require_scope
 from dlboard.models._tag import (
     DEFAULT_TAG_PRECISION,
@@ -193,6 +194,7 @@ __all__ = [
     "NewProjectGrant",
     "NewRun",
     "NewRunPin",
+    "NewScopedSetting",
     "NewUser",
     "OverlayKey",
     "PackedCounts",
@@ -219,6 +221,8 @@ __all__ = [
     "RunStatus",
     "SchemeColors",
     "Scope",
+    "ScopedSetting",
+    "ScopedSettings",
     "SeriesBand",
     "SeriesBandRequest",
     "SettingsSection",

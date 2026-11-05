@@ -25,7 +25,11 @@ _SEEKS: dict[str, str | tuple[str, ...]] = {
     "UnderlyingHistogramTableEntry": "(experiment_id, key, run_id, step)",
     "Artifact": "(experiment_id, key, run_id, step)",
     "HyperParams": "(experiment_id, run_id)",
-    "Run": "(experiment_id, created_at)",
+    "Run": (
+        "(experiment_id, created_at)",
+        "(experiment_id, created_at) WHERE (deleted_at IS NULL)",
+        "(experiment_id) WHERE (kept_at IS NOT NULL)",
+    ),
     "RunPin": ("(experiment_id, pinned_at)", "(run_id, pinned_by, color)"),
     "ComparisonRun": "(page_id, run_id)",
 }
@@ -57,6 +61,20 @@ _READS: dict[str, Callable[[PostgresStore, int], object]] = {
     "artifact_steps": lambda s, e: s.artifact_steps(e, key="img", run_ids=None),
     "get_runs, the newest": lambda s, e: list(s.get_runs(e, limit=20, run_ids=None)),
     "get_runs, every one": lambda s, e: list(s.get_runs(e, limit=None, run_ids=None)),
+    "get_runs, the oldest not kept": lambda s, e: list(
+        s.get_runs(e, limit=20, run_ids=None, oldest_first=True, include_kept=False)
+    ),
+    "get_runs, older than a time": lambda s, e: list(
+        s.get_runs(e, limit=20, run_ids=None, created_before=pendulum.now("UTC"), oldest_first=True)
+    ),
+    "count_runs, past a cutoff": lambda s, e: s.count_runs(
+        e,
+        before=(pendulum.now("UTC"), 1),
+        include_kept=False,
+        spare_running_after=pendulum.now("UTC"),
+        limit=100,
+    ),
+    "kept_runs": lambda s, e: s.kept_runs(e, run_ids=None),
     "fetch_hyperparams": lambda s, e: list(s.fetch_hyperparams(e, run_ids=None)),
     "fetch_hyperparams, some runs": lambda s, e: list(s.fetch_hyperparams(e, run_ids=frozenset({1, 2}))),
     "pins_of": lambda s, e: s.pins_of(e, run_ids=None),

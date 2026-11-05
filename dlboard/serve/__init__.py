@@ -30,11 +30,21 @@ from dlboard.serve._backend._data_store import (
     wait_for_data_store,
 )
 from dlboard.serve._backend._installed_plugins import get_installed_plugins, set_installed_plugins
+from dlboard.serve._backend._setting_rules import SettingRule, SettingWrite, register_setting
 from dlboard.serve._backend._sql_store_base import SCHEMA_PREP_OPTION, SQLStoreBase
 from dlboard.serve._backend._startup_checks import add_startup_check
 from dlboard.serve._backend._theme import get_theme, set_theme
 from dlboard.serve._clientside_script import ClientsideScript
+from dlboard.serve._custodian import (
+    Task,
+    TaskContext,
+    TaskMode,
+    WorkRule,
+    register_task,
+    register_work_kind,
+)
 from dlboard.serve._icons import Icon, icon, icon_cell_class
+from dlboard.serve._pages._project_sections import ProjectSection, ProjectSlot, register_project_section
 from dlboard.serve._production_server import resolve_plugins, run_production_server
 from dlboard.serve._series import series_color, series_swatch_class
 from dlboard.serve._settings_env import set_setting_env
@@ -51,7 +61,15 @@ __all__ = [
     "ClientsideScript",
     "Dependency",
     "Icon",
+    "ProjectSection",
+    "ProjectSlot",
     "SQLStoreBase",
+    "SettingRule",
+    "SettingWrite",
+    "Task",
+    "TaskContext",
+    "TaskMode",
+    "WorkRule",
     "add_public_route",
     "add_startup_check",
     "app",
@@ -70,6 +88,10 @@ __all__ = [
     "icon",
     "icon_cell_class",
     "mint_api_token",
+    "register_project_section",
+    "register_setting",
+    "register_task",
+    "register_work_kind",
     "relative_path",
     "resolve_plugins",
     "run_production_server",

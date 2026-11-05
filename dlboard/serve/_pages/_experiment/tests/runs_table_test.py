@@ -47,6 +47,7 @@ def _fields(run_id: int, *, drawn: bool = False, focused: bool = False) -> dict[
         "_duration_s": None,
         "_status_text": "running",
         "_status_detail": "running",
+        "_kept": False,
     }
 
 

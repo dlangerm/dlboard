@@ -296,6 +296,8 @@ def compare(
             | RunAction.PIN
             | RunAction.UNPIN
             | RunAction.REMOVE
+            | RunAction.KEEP
+            | RunAction.RELEASE
         ):
             msg = f"{request.action} is not a comparison"
             raise ValueError(msg)

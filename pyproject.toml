@@ -286,6 +286,9 @@ ignore_names = [
   # `AppState.artifact_purge_progress_at` -- no longer read or written since background tasks took over purging, and
   # kept as a column until the release after next drops it (expand/contract, `docs/compatibility.md`).
   "artifact_purge_progress_at",
+  # `ScopedSetting.updated_by` -- who last wrote a plugin's setting, recorded for an admin reading the table; no code of
+  # ours reads it back, a plugin's check or its own page may.
+  "updated_by",
   # `dash.register_page`'s per-route module contract (`serve/_pages/*.py`) -- Dash's page
   # registry looks this up via `getattr(module, "layout")` at routing time, not a call in our
   # own code.

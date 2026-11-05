@@ -196,7 +196,7 @@ class DataStore(typing.Protocol[_P]):
         """
         ...
 
-    def get_runs(
+    def get_runs(  # noqa: PLR0913 -- one keyword per filter of a run list
         self,
         experiment_id: int,
         *,
@@ -204,13 +204,34 @@ class DataStore(typing.Protocol[_P]):
         offset: int = 0,
         run_ids: frozenset[int] | None,
         name_contains: str = "",
+        created_before: datetime | None = None,
+        oldest_first: bool = False,
+        include_kept: bool = True,
     ) -> typing.Iterator[models.Run]:
         """
-        A page of an experiment's (non-deleted) runs, most recently created first.
+        A page of an experiment's (non-deleted) runs, most recently created first (or `oldest_first`).
 
         A `limit` of `None` is every run, and `run_ids` limits it to those, as it does every read of what runs logged:
         `None` is all of the experiment's, an empty set none. `name_contains` keeps the runs whose name has it in it,
-        whatever its case, or whose id it is: what a picker of runs searches by.
+        whatever its case, or whose id it is: what a picker of runs searches by. `created_before` keeps the runs older
+        than it, and `include_kept` of `False` leaves the kept runs out: what a retention rule reads.
+        """
+        ...
+
+    def count_runs(
+        self,
+        experiment_id: int,
+        *,
+        before: tuple[datetime, int] | None = None,
+        include_kept: bool = True,
+        spare_running_after: datetime | None = None,
+        limit: int,
+    ) -> int:
+        """
+        How many of an experiment's (non-deleted) runs match, up to `limit`: counted by the database, none of them read.
+
+        `before` is a `(created_at, id)`, in the order `get_runs` lists: only the runs before it. `include_kept` of `False`
+        leaves out the kept ones, and `spare_running_after` a run still running that was created after it.
         """
         ...
 
@@ -484,6 +505,46 @@ class DataStore(typing.Protocol[_P]):
         """Who has pinned a run of a project (not a deleted one), by username: the people a pinned-runs filter can offer."""
         ...
 
+    def keep_runs(self, run_ids: frozenset[int], actor: models.User) -> None:
+        """
+        Keep `run_ids`: no retention rule deletes them, and only an owner of their project does.
+
+        A run already kept stays kept by whoever kept it first. Raises for a run that does not exist or has been deleted.
+        """
+        ...
+
+    def release_runs(self, run_ids: frozenset[int], actor: models.User) -> None:
+        """Stop keeping `run_ids`; a run not kept is left as it is."""
+        ...
+
+    def kept_runs(self, experiment_id: int, *, run_ids: frozenset[int] | None) -> frozenset[int]:
+        """Which of an experiment's (non-deleted) runs are kept: only of `run_ids` if given, `None` being any of them."""
+        ...
+
+    def get_scoped_settings(self, key: str, project_id: int) -> models.ScopedSettings:
+        """A plugin's setting `key` for a project, and for each of its (non-deleted) experiments that has its own."""
+        ...
+
+    def all_scoped_settings(self, key: str) -> dict[int, models.ScopedSettings]:
+        """A plugin's setting `key` of every project that has any (its own, or an experiment's), in one read."""
+        ...
+
+    def put_scoped_setting(
+        self,
+        key: str,
+        project_id: int,
+        experiment_id: int | None,
+        value: dict[str, typing.Any] | None,
+        actor: models.User,
+    ) -> models.ScopedSetting | None:
+        """
+        Set a plugin's setting `key` for a project (`experiment_id` of `None`) or one of its experiments; `None` deletes it.
+
+        Raises `ValueError` for an experiment that is not the project's. Who may is the `SettingRule` the plugin registered
+        for `key`: with none, no request may read or write it.
+        """
+        ...
+
     def list_users(self) -> list[models.User]:
         """Every user, by username."""
         ...
@@ -572,11 +633,15 @@ class DataStore(typing.Protocol[_P]):
         """Soft-delete a run and cascade to its artifacts. Requires `Scope.RUN_DELETE`."""
         ...
 
-    def delete_runs(self, run_ids: frozenset[int], actor: models.User) -> None:
+    def delete_runs(
+        self, run_ids: frozenset[int], actor: models.User, *, spare_kept: bool = False
+    ) -> frozenset[int]:
         """
-        Soft-delete each of `run_ids` as `delete_run` does. Requires `Scope.RUN_DELETE`.
+        Soft-delete each of `run_ids` as `delete_run` does: the ids it deleted. Requires `Scope.RUN_DELETE`.
 
-        Every id is checked before any run is deleted, so a bad one refuses the call with nothing deleted.
+        Every id is checked before any run is deleted, so a bad one refuses the call with nothing deleted. With
+        `spare_kept` a kept run is left alone (decided by the statement that deletes, not by an earlier read), and is
+        not among the ids returned.
         """
         ...
 

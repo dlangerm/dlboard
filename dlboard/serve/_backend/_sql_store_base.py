@@ -83,6 +83,7 @@ FOREIGN_KEYS: dict[type[BaseModel], dict[str, ForeignKey]] = {
     models.Run: {
         "experiment_id": ForeignKey(models.Experiment, _OWNS),
         "created_by": ForeignKey(models.User),
+        "kept_by": ForeignKey(models.User),
         "deleted_by": ForeignKey(models.User),
     },
     models.UnderlyingMetricTableEntry: {
@@ -130,6 +131,11 @@ FOREIGN_KEYS: dict[type[BaseModel], dict[str, ForeignKey]] = {
         "project_id": ForeignKey(models.Project, _OWNS),
         "user_id": ForeignKey(models.User),
     },
+    models.ScopedSetting: {
+        "project_id": ForeignKey(models.Project, _OWNS),
+        "experiment_id": ForeignKey(models.Experiment, _OWNS),
+        "updated_by": ForeignKey(models.User),
+    },
     models.ApiToken: {"user_id": ForeignKey(models.User)},
     models.PasswordCredential: {"user_id": ForeignKey(models.User)},
 }
@@ -167,6 +173,7 @@ TABLES: tuple[type[BaseModel], ...] = (
     models.AuditLogEntry,
     models.ArtifactPurgeTask,
     *TASK_TABLES,
+    models.ScopedSetting,
 )
 
 # The entities a user can soft-delete/restore -- the only tables with `deleted_at`/`deleted_by`.
@@ -293,7 +300,6 @@ def build_metadata(schema: str | None = None) -> tuple[sa.MetaData, dict[type[Ba
         ("idx_artifact_run", artifacts),
     ):
         sa.Index(name, per_step.c.run_id)
-    sa.Index("idx_run_experiment", runs.c.experiment_id, runs.c.created_at)
     sa.Index("idx_hyperparams_experiment", hyperparams.c.experiment_id, hyperparams.c.run_id)
     for field in PAGE_SCOPE_FIELDS:
         # At most one *shared* page (owner_id NULL) per scope -- exactly what `get_or_create_page`
@@ -314,6 +320,34 @@ def build_metadata(schema: str | None = None) -> tuple[sa.MetaData, dict[type[Ba
     # A custodian claims the longest due of one kind of work item.
     work = tables[WorkItem]
     sa.Index("idx_WorkItem_due", work.c.kind, work.c.due_at)
+    # A retention rule walks an experiment's live runs from either end, without reading its Trash, which it fills from the
+    # oldest end; an experiment's kept runs, few, are found without reading its runs, which nothing bounds.
+    live, kept = runs.c.deleted_at.is_(None), runs.c.kept_at.is_not(None)
+    sa.Index(
+        "idx_Run_live", runs.c.experiment_id, runs.c.created_at, sqlite_where=live, postgresql_where=live
+    )
+    sa.Index("idx_Run_kept", runs.c.experiment_id, sqlite_where=kept, postgresql_where=kept)
+    # One setting a key and scope: a project's own (experiment_id NULL, which a plain unique constraint lets repeat,
+    # NULLs being distinct) and each experiment's.
+    scoped = tables[models.ScopedSetting]
+    own, experiment_own = scoped.c.experiment_id.is_(None), scoped.c.experiment_id.is_not(None)
+    sa.Index(
+        "idx_ScopedSetting_project",
+        scoped.c.key,
+        scoped.c.project_id,
+        unique=True,
+        sqlite_where=own,
+        postgresql_where=own,
+    )
+    sa.Index(
+        "idx_ScopedSetting_experiment",
+        scoped.c.key,
+        scoped.c.project_id,
+        scoped.c.experiment_id,
+        unique=True,
+        sqlite_where=experiment_own,
+        postgresql_where=experiment_own,
+    )
     # What has been in the Trash longest, without reading what is not in it, which is nearly everything.
     for model in sorted(SOFT_DELETABLE, key=lambda m: m.__name__):
         table = tables[model]
@@ -325,6 +359,22 @@ def build_metadata(schema: str | None = None) -> tuple[sa.MetaData, dict[type[Ba
             postgresql_where=deleted,
         )
     return metadata, tables
+
+
+def _scopes(rows: Iterable[models.ScopedSetting]) -> models.ScopedSettings:
+    """One project's setting rows, as its own and each experiment's."""
+    rows = list(rows)
+    return models.ScopedSettings(
+        project=next((r for r in rows if r.experiment_id is None), None),
+        experiments={r.experiment_id: r for r in rows if r.experiment_id is not None},
+    )
+
+
+def _earlier(runs: sa.Table, created_at: datetime, run_id: int) -> sa.ColumnElement[bool]:
+    """Which runs come before `(created_at, run_id)` in the order `get_runs` lists them: older, or created at once, lower."""
+    return sa.or_(
+        runs.c.created_at < created_at, sa.and_(runs.c.created_at == created_at, runs.c.id < run_id)
+    )
 
 
 def _runs_among(
@@ -1067,7 +1117,7 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
         self._touch_experiment(finished.experiment_id)
         return finished
 
-    def get_runs(
+    def get_runs(  # noqa: PLR0913 -- one keyword per filter of a run list
         self,
         experiment_id: int,
         *,
@@ -1075,9 +1125,18 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
         offset: int = 0,
         run_ids: frozenset[int] | None,
         name_contains: str = "",
+        created_before: datetime | None = None,
+        oldest_first: bool = False,
+        include_kept: bool = True,
     ) -> Iterator[models.Run]:
-        """A page (`limit` of `None` being every one) of an experiment's (non-deleted) runs, most recently created first; only `run_ids`, if given, and those `name_contains` finds."""
+        """
+        A page (`limit` of `None` being every one) of an experiment's (non-deleted) runs, most recently created first.
+
+        Only `run_ids`, if given, those `name_contains` finds, those older than `created_before`, and not the kept ones
+        unless `include_kept`. Served by `idx_Run_live (experiment_id, created_at)` from either end.
+        """
         runs = self._tables[models.Run]
+        newest_first = (runs.c.created_at.desc(), runs.c.id.desc())
         return iter(
             self._fetch(
                 models.Run,
@@ -1087,12 +1146,58 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
                     runs.c.deleted_at.is_(None),
                     *_runs_among(runs.c.id, run_ids),
                     *_name_matches(runs, name_contains),
+                    *([] if created_before is None else [runs.c.created_at < created_before]),
+                    *([] if include_kept else [runs.c.kept_at.is_(None)]),
                 )
-                .order_by(runs.c.created_at.desc(), runs.c.id.desc())
+                .order_by(*((runs.c.created_at, runs.c.id) if oldest_first else newest_first))
                 .limit(limit)
                 .offset(offset),
             )
         )
+
+    def count_runs(
+        self,
+        experiment_id: int,
+        *,
+        before: tuple[datetime, int] | None = None,
+        include_kept: bool = True,
+        spare_running_after: datetime | None = None,
+        limit: int,
+    ) -> int:
+        """
+        How many of an experiment's (non-deleted) runs match, up to `limit`: counted by the database, none of them read.
+
+        Those before `before` (a `(created_at, id)`, the order `get_runs` lists in), not the kept ones unless
+        `include_kept`, and not a run still running that was created after `spare_running_after`. The count stops at
+        `limit`, so what a backlog costs is what the caller says it will count to.
+        """
+        runs = self._tables[models.Run]
+        counted = (
+            sa.select(sa.literal(1))
+            .select_from(runs)
+            .where(
+                runs.c.experiment_id == experiment_id,
+                runs.c.deleted_at.is_(None),
+                *([] if before is None else [_earlier(runs, *before)]),
+                *([] if include_kept else [runs.c.kept_at.is_(None)]),
+                *(
+                    []
+                    if spare_running_after is None
+                    else [
+                        sa.not_(
+                            sa.and_(
+                                runs.c.status == models.RunStatus.RUNNING,
+                                runs.c.created_at > spare_running_after,
+                            )
+                        )
+                    ]
+                ),
+            )
+            .limit(limit)
+            .subquery()
+        )
+        ((count,),) = self._execute(sa.select(sa.func.count()).select_from(counted))
+        return count
 
     def log_metrics(self, metric: Iterable[models.LoggedMetrics]) -> None:
         """Log a batch of metrics to the data store."""
@@ -2203,6 +2308,141 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
         )
         return [models.Pinner(user_id=user_id, username=username) for user_id, username in rows]
 
+    # -- Kept runs ------------------------------------------------------------------------------------
+
+    def keep_runs(self, run_ids: frozenset[int], actor: models.User) -> None:
+        """Keep `run_ids`, a run already kept staying kept by whoever kept it first."""
+        experiments = self._ensure_runs_not_deleted(set(run_ids))
+        runs = self._tables[models.Run]
+        stamp = {"kept_at": pendulum.now(pendulum.UTC), "kept_by": actor.id}
+        self._transaction(
+            sa.update(runs).where(runs.c.id.in_(batch), runs.c.kept_at.is_(None)).values(stamp)
+            for batch in _in_batches(run_ids)
+        )
+        self._bump_revisions(set(experiments.values()))
+
+    def release_runs(
+        self,
+        run_ids: frozenset[int],
+        actor: models.User,  # noqa: ARG002 -- part of the `DataStore` contract; enforced by `AuthorizingDataStore`
+    ) -> None:
+        """Stop keeping `run_ids`."""
+        runs = self._tables[models.Run]
+        self._transaction(
+            sa.update(runs).where(runs.c.id.in_(batch)).values(kept_at=None, kept_by=None)
+            for batch in _in_batches(run_ids)
+        )
+        self._bump_revisions(set(self.run_experiments(run_ids).values()))
+
+    def kept_runs(self, experiment_id: int, *, run_ids: frozenset[int] | None) -> frozenset[int]:
+        """Which of an experiment's (non-deleted) runs are kept, of `run_ids` if given: found by `idx_Run_kept`."""
+        runs = self._tables[models.Run]
+        return frozenset(
+            run_id
+            for (run_id,) in self._execute(
+                sa.select(runs.c.id).where(
+                    *_live_runs(runs, experiment_id),
+                    runs.c.kept_at.is_not(None),
+                    *_runs_among(runs.c.id, run_ids),
+                )
+            )
+        )
+
+    # -- Plugins' scoped settings ---------------------------------------------------------------------
+
+    def get_scoped_settings(self, key: str, project_id: int) -> models.ScopedSettings:
+        """A project's setting `key`, and each of its live experiments' own: a row a scope, found by its unique index."""
+        settings, experiments = self._tables[models.ScopedSetting], self._tables[models.Experiment]
+        live = sa.select(experiments.c.id).where(
+            experiments.c.project_id == project_id, experiments.c.deleted_at.is_(None)
+        )
+        rows = self._fetch(
+            models.ScopedSetting,
+            sa.select(settings).where(
+                settings.c.key == key,
+                settings.c.project_id == project_id,
+                sa.or_(settings.c.experiment_id.is_(None), settings.c.experiment_id.in_(live)),
+            ),
+        )
+        return _scopes(rows)
+
+    def all_scoped_settings(self, key: str) -> dict[int, models.ScopedSettings]:
+        """Setting `key` of every project that has it or any of its experiments does (live ones only): one statement."""
+        settings, projects, experiments = (
+            self._tables[models.ScopedSetting],
+            self._tables[models.Project],
+            self._tables[models.Experiment],
+        )
+        rows = self._fetch(
+            models.ScopedSetting,
+            sa.select(settings)
+            .join(projects, projects.c.id == settings.c.project_id)
+            .outerjoin(experiments, experiments.c.id == settings.c.experiment_id)
+            .where(
+                settings.c.key == key,
+                projects.c.deleted_at.is_(None),
+                sa.or_(settings.c.experiment_id.is_(None), experiments.c.deleted_at.is_(None)),
+            ),
+        )
+        by_project: dict[int, list[models.ScopedSetting]] = {}
+        for row in rows:
+            by_project.setdefault(row.project_id, []).append(row)
+        return {project_id: _scopes(found) for project_id, found in by_project.items()}
+
+    def put_scoped_setting(
+        self,
+        key: str,
+        project_id: int,
+        experiment_id: int | None,
+        value: dict[str, Any] | None,
+        actor: models.User,
+    ) -> models.ScopedSetting | None:
+        """Replace (or with `None`, delete) one scope's setting `key`, in one transaction: the scope's row, or none."""
+        if experiment_id is not None:
+            experiment = self.get_experiment(experiment_id)
+            if experiment is None or experiment.project_id != project_id:
+                msg = f"Experiment {experiment_id} is not an experiment of project {project_id}"
+                raise ValueError(msg)
+        else:
+            self._ensure_not_deleted(models.Project, project_id)
+        settings = self._tables[models.ScopedSetting]
+        in_scope = (
+            settings.c.experiment_id.is_(None)
+            if experiment_id is None
+            else settings.c.experiment_id == experiment_id
+        )
+        with self._begin() as conn:
+            if value is None:
+                conn.execute(
+                    sa.delete(settings).where(
+                        settings.c.key == key, settings.c.project_id == project_id, in_scope
+                    )
+                )
+                return None
+            # An upsert, in two statements: of two writers to one scope at once, the one whose insert finds the row there
+            # skips it, and both update, the last to commit winning, never a unique violation for either.
+            new = models.NewScopedSetting(
+                key=key, project_id=project_id, experiment_id=experiment_id, value=value, updated_by=actor.id
+            )
+            conn.execute(self._insert_ignoring_conflicts(settings).values(sql.row_values(new)))
+            row = (
+                conn.execute(
+                    sa.update(settings)
+                    .where(settings.c.key == key, settings.c.project_id == project_id, in_scope)
+                    .values(
+                        {
+                            settings.c.value: value,
+                            settings.c.updated_by: actor.id,
+                            settings.c.updated_at: new.updated_at,
+                        }
+                    )
+                    .returning(settings)
+                )
+                .mappings()
+                .one()
+            )
+        return sql.construct(models.ScopedSetting, row)
+
     def list_users(self) -> list[models.User]:
         """Every user, by username -- e.g. who a note can mention."""
         users = self._tables[models.User]
@@ -2557,7 +2797,9 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
         """Soft-delete a run and cascade to its artifacts. Requires `Scope.RUN_DELETE`."""
         self._soft_delete(models.Run, run_id, actor, entity_type=models.EntityType.RUN)
 
-    def delete_runs(self, run_ids: frozenset[int], actor: models.User) -> None:
+    def delete_runs(
+        self, run_ids: frozenset[int], actor: models.User, *, spare_kept: bool = False
+    ) -> frozenset[int]:
         """
         Soft-delete each of `run_ids` as `delete_run` does, a batch of runs to a transaction.
 
@@ -2567,6 +2809,11 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
         thousands made take seconds for each thousand. All of them are stamped with one `deleted_at`: a restore of one run
         matches that stamp among what it owns alone, so it brings back its own artifacts and no other run's. A failure
         part-way leaves the batches before it deleted.
+
+        With `spare_kept`, a run that is kept is left alone, and the call says which it deleted: the statement itself
+        carries `kept_at IS NULL` (and what a run owns follows only the runs this statement stamped), so a run kept at
+        any moment before it is never deleted, however long ago the caller chose it. (The audit entry's counts are read
+        beforehand, so one that is kept in that moment is counted but not deleted.)
 
         Requires `Scope.RUN_DELETE`.
         """
@@ -2583,6 +2830,8 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
             raise ValueError(msg)
         stamp = {"deleted_at": pendulum.now(pendulum.UTC), "deleted_by": actor.id}
         owned = [self._owned_by_runs(path) for path in _cascade_targets(models.Run, within=SOFT_DELETABLE)]
+        spared: list[sa.ColumnElement[bool]] = [runs.c.kept_at.is_(None)] if spare_kept else []
+        deleted = set[int]()
         for batch in _in_batches(run_ids):
             # Counted before the mutation, as `_soft_delete` does, for the audit entries.
             counts: dict[int, dict[str, int]] = {
@@ -2595,14 +2844,20 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
                     .group_by(column)
                 ):
                     counts[run_id][table.name] = count
+            # What a spared run owns is left too: only the runs this transaction stamped have theirs deleted.
+            stamped = sa.select(runs.c.id).where(
+                runs.c.id.in_(batch), runs.c.deleted_at == stamp["deleted_at"]
+            )
             results = self._transaction(
                 [
                     sa.update(runs)
-                    .where(runs.c.id.in_(batch), runs.c.deleted_at.is_(None))
+                    .where(runs.c.id.in_(batch), runs.c.deleted_at.is_(None), *spared)
                     .values(stamp)
                     .returning(runs.c.id),
                     *(
-                        sa.update(table).where(column.in_(batch), table.c.deleted_at.is_(None)).values(stamp)
+                        sa.update(table)
+                        .where(column.in_(stamped if spare_kept else batch), table.c.deleted_at.is_(None))
+                        .values(stamp)
                         for table, column in owned
                     ),
                     self._audit_log_insert(
@@ -2610,9 +2865,12 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
                     ),
                 ]
             )
-            if gone := set(batch) - {run_id for (run_id,) in results[0]}:
+            done = {run_id for (run_id,) in results[0]}
+            if not spare_kept and (gone := set(batch) - done):
                 msg = f"Run {min(gone)} does not exist or is already deleted"
                 raise ValueError(msg)
+            deleted |= done
+        return frozenset(deleted)
 
     def _owned_by_runs(self, path: CascadePath) -> tuple[sa.Table, sa.Column[Any]]:
         """A table a run owns, and its column that says whose each row is: its audit entries count them for each run."""

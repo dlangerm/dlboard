@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any, NoReturn, Self
 
 from dlboard import models
 from dlboard.models import ProjectRole, Scope, has_scope, require_scope
+from dlboard.serve._backend._setting_rules import SettingRule, SettingWrite
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Iterable, Iterator, Mapping
@@ -54,11 +55,13 @@ class AuthorizingDataStore(models.DataStore[...]):
         *,
         enforce_grants: bool,
         new_project_access: ProjectRole | None = None,
+        setting_rules: Mapping[str, SettingRule] | None = None,
     ) -> None:
         self._inner = inner
         self._actor = actor
         self._enforce = enforce_grants
         self._new_project_access = new_project_access
+        self._setting_rules = setting_rules or {}
         # Loaded lazily, once per request (one of these never outlives the request it was made for).
         self._projects: dict[int, models.Project] | None = None
         self._granted: dict[int, ProjectRole] | None = None
@@ -355,7 +358,7 @@ class AuthorizingDataStore(models.DataStore[...]):
         self._require(self._run_project(run_id), ProjectRole.EDITOR)
         return self._inner.finish_run(run_id, status, ended_at)
 
-    def get_runs(
+    def get_runs(  # noqa: PLR0913 -- one keyword per filter of a run list
         self,
         experiment_id: int,
         *,
@@ -363,10 +366,38 @@ class AuthorizingDataStore(models.DataStore[...]):
         offset: int = 0,
         run_ids: frozenset[int] | None,
         name_contains: str = "",
+        created_before: datetime | None = None,
+        oldest_first: bool = False,
+        include_kept: bool = True,
     ) -> Iterator[models.Run]:
         self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
         return self._inner.get_runs(
-            experiment_id, limit=limit, offset=offset, run_ids=run_ids, name_contains=name_contains
+            experiment_id,
+            limit=limit,
+            offset=offset,
+            run_ids=run_ids,
+            name_contains=name_contains,
+            created_before=created_before,
+            oldest_first=oldest_first,
+            include_kept=include_kept,
+        )
+
+    def count_runs(
+        self,
+        experiment_id: int,
+        *,
+        before: tuple[datetime, int] | None = None,
+        include_kept: bool = True,
+        spare_running_after: datetime | None = None,
+        limit: int,
+    ) -> int:
+        self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
+        return self._inner.count_runs(
+            experiment_id,
+            before=before,
+            include_kept=include_kept,
+            spare_running_after=spare_running_after,
+            limit=limit,
         )
 
     def log_metrics(self, metric: Iterable[models.LoggedMetrics]) -> None:
@@ -721,6 +752,105 @@ class AuthorizingDataStore(models.DataStore[...]):
         self._require(project_id, ProjectRole.VIEWER)
         return self._inner.pin_counts(project_id)
 
+    # -- Kept runs, retention -----------------------------------------------------------------------
+    #
+    # Keeping a run takes it out of retention's reach, so it is an editor's call; letting it go again, or deleting it,
+    # is an owner's, or else an editor could undo what keeping is for. An admin (`Scope.ALL`) is an owner everywhere,
+    # also where grants are not enforced, as a local deployment's one user is.
+
+    def _require_owner(self, project_id: int | None) -> None:
+        self._require_scope_or_role(Scope.ALL, project_id, ProjectRole.OWNER)
+
+    def _run_projects(self, experiments: Mapping[int, int]) -> dict[int, set[int]]:
+        """The project of each run (by the experiment each is of) that exists, with which of them are of it."""
+        by_project: dict[int, set[int]] = {}
+        for run_id, experiment_id in experiments.items():
+            project_id = self._experiment_project(experiment_id)
+            if project_id is not None:
+                by_project.setdefault(project_id, set()).add(run_id)
+        return by_project
+
+    def _kept_among(self, experiments: Mapping[int, int]) -> frozenset[int]:
+        """Which of the runs (by the experiment each is of) are kept, an experiment at a time."""
+        by_experiment: dict[int, set[int]] = {}
+        for run_id, experiment_id in experiments.items():
+            by_experiment.setdefault(experiment_id, set()).add(run_id)
+        return frozenset().union(
+            *(self._inner.kept_runs(e, run_ids=frozenset(runs)) for e, runs in by_experiment.items())
+        )
+
+    def keep_runs(self, run_ids: frozenset[int], actor: models.User) -> None:
+        by_project = self._run_projects(self._inner.run_experiments(run_ids))
+        if self._enforce and set().union(*by_project.values()) != run_ids:
+            _forbid("a run that does not exist, or is not yours to see, cannot be kept")
+        for project_id in by_project:
+            self._require(project_id, ProjectRole.EDITOR)
+        self._inner.keep_runs(run_ids, self._bound(actor))
+
+    def release_runs(self, run_ids: frozenset[int], actor: models.User) -> None:
+        for project_id in self._run_projects(self._inner.run_experiments(run_ids)) or {None}:
+            self._require_owner(project_id)
+        self._inner.release_runs(run_ids, self._bound(actor))
+
+    def kept_runs(self, experiment_id: int, *, run_ids: frozenset[int] | None) -> frozenset[int]:
+        self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
+        return self._inner.kept_runs(experiment_id, run_ids=run_ids)
+
+    # -- Plugins' scoped settings ---------------------------------------------------------------------
+    #
+    # Each key's rule is its plugin's (`register_setting`): a key with none is the system's alone.
+
+    def _setting_rule(self, key: str) -> SettingRule:
+        rule = self._setting_rules.get(key)
+        if rule is None:
+            _forbid(f"the setting {key!r}, which no plugin lets a request use")
+        return rule
+
+    def _require_role_or_admin(self, project_id: int | None, role: ProjectRole) -> None:
+        """An owner's role takes an admin's scope where grants are not enforced, as everything an owner does there does."""
+        if role is ProjectRole.OWNER:
+            self._require_owner(project_id)
+        else:
+            self._require(project_id, role)
+
+    def get_scoped_settings(self, key: str, project_id: int) -> models.ScopedSettings:
+        self._require(project_id, self._setting_rule(key).read)
+        return self._inner.get_scoped_settings(key, project_id)
+
+    def all_scoped_settings(self, key: str) -> dict[int, models.ScopedSettings]:
+        rule = self._setting_rule(key)
+        return {
+            project_id: found
+            for project_id, found in self._inner.all_scoped_settings(key).items()
+            if self._can(project_id, rule.read)
+        }
+
+    def put_scoped_setting(
+        self,
+        key: str,
+        project_id: int,
+        experiment_id: int | None,
+        value: dict[str, Any] | None,
+        actor: models.User,
+    ) -> models.ScopedSetting | None:
+        rule = self._setting_rule(key)
+        self._require_role_or_admin(
+            project_id, rule.write_project if experiment_id is None else rule.write_experiment
+        )
+        if value is not None and rule.check is not None:
+            stored = self._inner.get_scoped_settings(key, project_id)
+            current = stored.project if experiment_id is None else stored.experiments.get(experiment_id)
+            value = rule.check(
+                SettingWrite(
+                    project_id,
+                    experiment_id,
+                    value,
+                    stored=current.value if current is not None else None,
+                    admin=has_scope(self._actor, Scope.ALL),
+                )
+            )
+        return self._inner.put_scoped_setting(key, project_id, experiment_id, value, self._bound(actor))
+
     # -- Soft-delete, restore, purge ------------------------------------------------------------------
     #
     # The `actor` every one of these takes must be the one this store is bound to (see `_bound`) --
@@ -747,9 +877,11 @@ class AuthorizingDataStore(models.DataStore[...]):
         self._inner.purge_project(project_id, self._bound(actor))
 
     def delete_experiment(self, experiment_id: int, actor: models.User) -> None:
-        self._require_scope_or_role(
-            Scope.EXPERIMENT_DELETE, self._experiment_project(experiment_id), ProjectRole.EDITOR
-        )
+        """An experiment that holds a kept run is an owner's to delete, as the kept run is."""
+        project_id = self._experiment_project(experiment_id)
+        self._require_scope_or_role(Scope.EXPERIMENT_DELETE, project_id, ProjectRole.EDITOR)
+        if self._inner.kept_runs(experiment_id, run_ids=None):
+            self._require_owner(project_id)
         self._inner.delete_experiment(experiment_id, self._bound(actor))
 
     def restore_experiment(self, experiment_id: int, actor: models.User) -> None:
@@ -761,16 +893,27 @@ class AuthorizingDataStore(models.DataStore[...]):
         self._inner.purge_experiment(experiment_id, self._bound(actor))
 
     def delete_run(self, run_id: int, actor: models.User) -> None:
-        self._require_scope_or_role(Scope.RUN_DELETE, self._run_project(run_id), ProjectRole.EDITOR)
+        """A kept run is an owner's to delete."""
+        project_id = self._run_project(run_id)
+        self._require_scope_or_role(Scope.RUN_DELETE, project_id, ProjectRole.EDITOR)
+        if self._kept_among(self._inner.run_experiments(frozenset({run_id}))):
+            self._require_owner(project_id)
         self._inner.delete_run(run_id, self._bound(actor))
 
-    def delete_runs(self, run_ids: frozenset[int], actor: models.User) -> None:
-        # Which experiments they are of in one read, then who may delete in each project; a run that is not there
-        # is for the store to refuse.
+    def delete_runs(
+        self, run_ids: frozenset[int], actor: models.User, *, spare_kept: bool = False
+    ) -> frozenset[int]:
+        # Which experiment each is of in one read, then their projects, then who may delete in each, and an owner where
+        # any is kept (unless kept runs are spared: they are not deleted); a run that is not there is for the store to
+        # refuse.
         experiments = self._inner.run_experiments(run_ids)
-        for project_id in {self._experiment_project(e) for e in set(experiments.values())} or {None}:
+        kept = frozenset() if spare_kept else self._kept_among(experiments)
+        by_project: dict[int | None, set[int]] = {**self._run_projects(experiments)} or {None: set()}
+        for project_id, runs in by_project.items():
             self._require_scope_or_role(Scope.RUN_DELETE, project_id, ProjectRole.EDITOR)
-        self._inner.delete_runs(run_ids, self._bound(actor))
+            if runs & kept:
+                self._require_owner(project_id)
+        return self._inner.delete_runs(run_ids, self._bound(actor), spare_kept=spare_kept)
 
     def restore_run(self, run_id: int, actor: models.User) -> None:
         require_scope(self._actor, Scope.RESTORE)
