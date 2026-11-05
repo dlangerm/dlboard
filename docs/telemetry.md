@@ -136,6 +136,10 @@ Every attribute has a small, fixed set of values. The names and attributes are c
 | `dlboard.runs.finished` | counter | `dlboard.run.status` | Runs reported done, by how they ended. |
 | `dlboard.auth.sign_ins` | counter | `dlboard.auth.outcome` (`success`, `wrong_credentials`, `throttled`, `disabled`) | Attempts at the password sign-in form. |
 | `dlboard.server.workers` | up/down counter | | Server worker processes that started and are serving. One series per process, so it stops arriving when the server is down. |
+| `dlboard.task.runs` | counter | `dlboard.task`, `dlboard.outcome` (`success`, `failure`, `hung`) | Runs of each background task, by how they ended. Emitted by the custodian process. |
+| `dlboard.task.duration` | histogram, s | `dlboard.task` | How long one run of a background task took. |
+| `dlboard.task.backlog` | up/down counter | `dlboard.task` | What each background task last said it had left to do. Growing over several runs means it cannot keep up. |
+| `dlboard.custodian.starts` | counter | | Custodian processes started: more than one per server start is the server replacing one that died or hung. |
 
 ### Alerting that it's down
 

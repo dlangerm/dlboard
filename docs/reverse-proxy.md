@@ -81,7 +81,9 @@ location /dlboard/ {
 ## Health checks
 
 `/healthz` (the process is up) and `/readyz` (the database answers) need no sign-in; point a load
-balancer or orchestrator at them. Under a prefix they move with it (`/dlboard/healthz`).
+balancer or orchestrator at them. `/healthz/custodian` answers 503 when no custodian process has checked in lately or a
+background task has gone three of its intervals without succeeding: alert on it, rather than take the server out of
+rotation, since the server still serves requests without one. Under a prefix they move with it (`/dlboard/healthz`).
 
 ## Draining
 

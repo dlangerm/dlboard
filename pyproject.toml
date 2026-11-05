@@ -283,6 +283,9 @@ ignore_names = [
   # (see `dlboard.serve.resolve_plugins`/`dlboard.serve.app.app`), never by a literal `.plug(`
   # call vulture's static analysis can see.
   "plug",
+  # `AppState.artifact_purge_progress_at` -- no longer read or written since background tasks took over purging, and
+  # kept as a column until the release after next drops it (expand/contract, `docs/compatibility.md`).
+  "artifact_purge_progress_at",
   # `dash.register_page`'s per-route module contract (`serve/_pages/*.py`) -- Dash's page
   # registry looks this up via `getattr(module, "layout")` at routing time, not a call in our
   # own code.

@@ -1,101 +1,159 @@
 """
-Background worker that deletes purged artifacts' blobs from the `ArtifactStore`.
+Purging, as background tasks: entities an admin asked to purge, and the artifact blobs each purge leaves behind.
 
-Signaled via `wake()` rather than polling the database on an interval: a `Dash` app has no
-teardown hook to stop a polling thread cleanly, and polling would also make it impossible to
-distinguish "a purge just happened in this process" from "leftover work from a previous, possibly
-crashed, server run." Instead:
+Both are `SHARED` tasks over work items (`PurgeWork`): every custodian may run them, each claiming its own batch, so
+several servers sharing a database purge in parallel without doing anything twice. Work queued before a crash is still
+queued after it, and a task picks it up on its next run: nothing waits for an admin to resume it.
 
-- The worker sits parked on `threading.Event.wait()` until `wake()` is called.
-- A purge that runs in this process calls `wake()` itself (see `simple_admin_page.confirm_purge`),
-  so newly-queued work is picked up automatically without any polling.
-- A fresh server process starts with the event unset -- any `ArtifactPurgeTask` rows left over
-  from a previous run (e.g. the process died mid-cleanup) just sit there until an admin explicitly
-  clicks "Resume cleanup" in the admin page, which calls `wake()` too. This is deliberate: nothing
-  here auto-resumes on startup, so a crash-loop or multiple server processes can't end up hammering
-  the same artifact store concurrently.
+- **An entity purge** is queued by the admin page (as the admin who asked: `PURGE`). The task purges it as them, so the
+  audit log names them, and the purge queues a deletion for each blob it orphans, in its own transaction.
+- **A blob deletion** deletes one blob from the artifact store. One that fails is tried again later, backing off.
 """
 
 from __future__ import annotations
 
-import threading
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Final
 
+import pendulum
 from pydantic import AnyUrl
 from structlog.stdlib import get_logger
 
-from dlboard._telemetry.traces import SpanKind, span
-from dlboard.serve import wait_for_artifact_store, wait_for_data_store
+from dlboard import models
+from dlboard._compat import StrEnum
+from dlboard.models import Scope
+from dlboard.serve import get_system_artifact_store, get_system_data_store
+from dlboard.serve._backend._purge_work import REQUESTED_BY, BlobDeletion, EntityPurge, PurgeWork
+from dlboard.serve._custodian import (
+    Task,
+    TaskMode,
+    WorkRule,
+    get_system_task_store,
+    register_task,
+    register_work_kind,
+)
+from dlboard.serve.telemetry import Counter, Outcome, OutcomeAttributes, Unit
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from dash import Dash
 
-    from dlboard.models import ArtifactStore, DataStore
+    from dlboard.models import DataStore
+    from dlboard.serve._custodian import TaskContext, WorkItem
 
 _log = get_logger(__name__)
 
-_wake_event = threading.Event()
+_PURGES = Counter[OutcomeAttributes](
+    "dlboard.artifact.purges",
+    Unit.ARTIFACTS,
+    "Purged artifacts' blobs deleted from the artifact store, or that could not be.",
+)
+
+_BATCH: Final = 100
+"""How many items one batch claims."""
+_EVERY: Final = pendulum.duration(seconds=30)
+"""How often each task looks for work it was not asked to do: what a crash left queued, say."""
 
 
-def wake() -> None:
-    """Signal the worker to drain every currently-pending artifact-blob purge now."""
-    _wake_event.set()
+class PurgeTask(StrEnum):
+    """The plugin's tasks."""
+
+    BLOBS = "artifact_blob_deletion"
+    ENTITIES = "trash_purge"
 
 
-def _drain_pending(store: DataStore[...], artifact_store: ArtifactStore[...]) -> None:
-    """
-    Process every currently-pending purge task exactly once.
-
-    Pure and synchronous -- no threading involved -- so it's directly unit-testable. Pages through
-    `list_pending_artifact_purges` with an advancing `offset`, rather than re-fetching from the
-    start until empty: a successfully-processed task's row is deleted, so it drops out of the
-    table on its own, but a task that keeps failing stays pending -- re-fetching from offset 0
-    every time would see that same task forever and never terminate. Advancing the offset by
-    however many tasks in each page failed (and so remained) skips past them on the next fetch,
-    so this always finishes after one pass over what was pending when it started.
-
-    It stamps its progress after every batch, and clears the stamp once done, so every server process can tell a purge
-    in progress from one a process died in (`DataStore.artifact_purge_progress_at`).
-    """
-    offset = 0
-    deleted = 0
-    while True:
-        store.record_artifact_purge_progress(running=True)
-        batch = list(store.list_pending_artifact_purges(limit=100, offset=offset))
-        if not batch:
-            store.record_artifact_purge_progress(running=False)
-            _log.info("Purged artifact blobs cleaned up", deleted=deleted, failed=offset)
-            return
-        still_pending = 0
-        for task in batch:
-            assert task.id is not None
-            try:
-                artifact_store.delete_artifact(AnyUrl(task.ref))
-            except Exception as exc:  # noqa: BLE001 -- one bad ref must not stop the rest of the batch
-                _log.warning("Failed to delete purged artifact blob %s: %s", task.ref, exc)
-                store.fail_artifact_purge(task.id, str(exc))
-                still_pending += 1
-                continue
-            store.complete_artifact_purge(task.id)
-        deleted += len(batch) - still_pending
-        offset += still_pending
-        _log.info("Cleaning up purged artifact blobs", deleted=deleted, failed=offset)
+@dataclass(frozen=True)
+class _Drained:
+    done: int = 0
+    failed: int = 0
 
 
-def _run(app: Dash) -> None:
-    store = wait_for_data_store(app)
-    artifact_store = wait_for_artifact_store(app)
-    while True:
-        _wake_event.wait()
-        _wake_event.clear()
+def _drain(ctx: TaskContext, kind: PurgeWork, act: Callable[[WorkItem], None]) -> _Drained:
+    """Claim `kind`'s due items a batch at a time, `act` on each, until none is left or the custodian stops."""
+    done = failed = 0
+    while not ctx.should_stop():
+        with ctx.batch():
+            items = ctx.claim(kind, limit=_BATCH)
+            finished: list[WorkItem] = []
+            for item in items:
+                try:
+                    act(item)
+                except Exception as exc:  # noqa: BLE001 -- one bad item must not stop the rest of the batch
+                    _log.warning(
+                        "A purge item failed; it will be tried again",
+                        kind=str(kind),
+                        key=item.key,
+                        exc_info=True,
+                    )
+                    ctx.retry(item, f"{type(exc).__name__}: {exc}")
+                    failed += 1
+                else:
+                    finished.append(item)
+            ctx.done(finished)
+            done += len(finished)
+        if not items:
+            break
+    ctx.report(backlog=get_system_task_store(ctx.app).count_work(kind), done=done, failed=failed)
+    return _Drained(done, failed)
+
+
+def _delete_blobs(ctx: TaskContext) -> None:
+    artifact_store = get_system_artifact_store(ctx.app)
+
+    def delete(item: WorkItem) -> None:
+        deletion = BlobDeletion.model_validate(item.payload)
         try:
-            # Nobody's request: its own trace, with the storage client's calls (S3 deletes) under it.
-            with span("dlboard.artifact.purge", SpanKind.INTERNAL):
-                _drain_pending(store, artifact_store)
-        except Exception:  # noqa: BLE001 -- the worker outlives a failed drain: an uncaught one stops every later purge
-            _log.exception("Draining purged artifact blobs failed; the next purge will try again")
+            artifact_store.delete_artifact(AnyUrl(deletion.ref))
+        except Exception:
+            _PURGES.add(1, OutcomeAttributes(outcome=Outcome.FAILURE))
+            raise
+        _PURGES.add(1, OutcomeAttributes(outcome=Outcome.SUCCESS))
+
+    drained = _drain(ctx, PurgeWork.BLOB, delete)
+    if drained.done or drained.failed:
+        _log.info("Deleted purged artifacts' blobs", deleted=drained.done, failed=drained.failed)
+
+
+def _purge(store: DataStore[...], purge: EntityPurge, actor: models.User) -> None:
+    match purge.entity_type:
+        case models.EntityType.PROJECT:
+            store.purge_project(purge.entity_id, actor)
+        case models.EntityType.EXPERIMENT:
+            store.purge_experiment(purge.entity_id, actor)
+        case models.EntityType.RUN:
+            store.purge_run(purge.entity_id, actor)
+        case models.EntityType.ARTIFACT:
+            store.purge_artifact(purge.entity_id, actor)
+
+
+def _purge_entities(ctx: TaskContext) -> None:
+    store = get_system_data_store(ctx.app)
+
+    def purge(item: WorkItem) -> None:
+        asked = EntityPurge.model_validate(item.payload)
+        actor = store.get_user(asked.requested_by)
+        if actor is None:
+            msg = f"user {asked.requested_by}, who asked for the purge, is gone"
+            raise LookupError(msg)
+        try:
+            _purge(store, asked, actor)
+        except ValueError:  # restored since it was asked for: there is nothing to purge
+            _log.info("Not purging what was restored", entity=item.key)
+
+    drained = _drain(ctx, PurgeWork.ENTITY, purge)
+    if drained.done:
+        _log.info("Purged from the Trash", purged=drained.done, failed=drained.failed)
+        get_system_task_store(ctx.app).request_task_run(PurgeTask.BLOBS)  # the blobs they left, at once
 
 
 def plug(app: Dash) -> None:
-    """Start the background artifact-blob purge worker."""
-    threading.Thread(target=_run, args=(app,), daemon=True, name="artifact-purge-worker").start()
+    """Register the two purge tasks, and let an admin's request queue an entity purge."""
+    register_task(app, Task(name=PurgeTask.BLOBS, run_once=_delete_blobs, every=_EVERY, mode=TaskMode.SHARED))
+    register_task(
+        app, Task(name=PurgeTask.ENTITIES, run_once=_purge_entities, every=_EVERY, mode=TaskMode.SHARED)
+    )
+    register_work_kind(
+        app,
+        WorkRule(kind=PurgeWork.ENTITY, scope=Scope.PURGE, task=PurgeTask.ENTITIES, actor_field=REQUESTED_BY),
+    )

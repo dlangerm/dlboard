@@ -38,10 +38,14 @@ from dlboard.client.artifacts import rle
 from dlboard.client.artifacts.image import Image
 from dlboard.client.artifacts.overlay import DEFAULT_CLASS_COLORS, Box, Overlay, Point, Polygon, Shape
 from dlboard.client.histograms import ExponentialBinning
+from dlboard.conftest import run_task
 from dlboard.models import OVERLAY_KEY_SUFFIX, RUN_NAME_COLUMN, PanelInstance, overlay_key
+from dlboard.plugins.backend.artifact_purge_worker import PurgeTask
 from dlboard.plugins.charts.image_series import IMAGE_WINDOW_STEPS
 from dlboard.plugins.charts.line_chart import LEGEND_MAX_HEIGHT
 from dlboard.serve import get_system_data_store
+from dlboard.serve._backend._purge_work import PurgeWork
+from dlboard.serve._custodian import get_system_task_store
 from dlboard.serve._jump import JUMP_SELECT_ID
 from dlboard.serve._pages._experiment._chart_autogen import AUTO_OPEN_MAX_CHARTS
 from dlboard.serve._pages._experiment._chart_editor import CHART_EDITOR_SAVE_ID
@@ -1845,7 +1849,7 @@ def test_a_view_branched_by_an_edit_can_be_deleted_without_a_reload(
 
 
 def test_a_purge_returns_at_once_and_its_entity_leaves_the_trash_when_it_is_done(
-    page: Page, live_server_url: str, console_errors: list[str]
+    page: Page, live_server_url: str, console_errors: list[str], dlboard_app: Dash
 ) -> None:
     """A large purge took the request with it and left the page unresponsive; it runs behind the page now (#429)."""
     page.goto(
@@ -1862,9 +1866,15 @@ def test_a_purge_returns_at_once_and_its_entity_leaves_the_trash_when_it_is_done
     page.locator(f"#{ADMIN_PURGE_CONFIRM_ID}").click()
 
     expect(page).to_have_url(re.compile(r"/admin$"))
-    _wait_until(lambda: [p.id for p in store.list_deleted_projects() if p.id == project.id], [])
+    tasks = get_system_task_store()
+    _wait_until(
+        lambda: [tasks.count_work(PurgeWork.ENTITY)], [1]
+    )  # queued by the callback, not purged by the request
+    assert [p.id for p in store.list_deleted_projects()] == [project.id]
+    run_task(dlboard_app, PurgeTask.ENTITIES)  # the custodian's part, which tests never start
     page.reload()
     expect(row).to_have_count(0)
+    assert [p.id for p in store.list_deleted_projects()] == []
     assert console_errors == []
 
 

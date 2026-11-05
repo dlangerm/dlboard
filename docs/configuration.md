@@ -53,6 +53,22 @@ These tune the process that `dlboard serve` runs under (not used by `--debug`).
 Worker and thread counts are `dlboard serve --workers` (default 2) and `--blocking-threads`
 (default 16), not environment variables.
 
+## Background tasks
+
+The server starts one custodian process beside its workers, which runs every background task its plugins register, and
+restarts it if it dies or hangs. Every server sharing a database starts one, and they share the work through the database.
+
+| Variable | Default | |
+|---|---|---|
+| `DLBOARD_CUSTODIAN_ENABLED` | `true` | Whether the server starts a custodian at all. Off, no background task runs on this server (another sharing the database may still run them). |
+| `DLBOARD_CUSTODIAN_TICK_S` | `1.0` | How often the custodian checks on its tasks and on the server that started it, in memory, with no database query. |
+| `DLBOARD_CUSTODIAN_POLL_S` | `5.0` | How often it reads the database for runs asked for. |
+| `DLBOARD_CUSTODIAN_BEAT_S` | `15.0` | How often it records in the database that it is alive. A task it runs one at a time is held for three beats past the last: a custodian that dies holds its tasks only that long. |
+| `DLBOARD_CUSTODIAN_STALL_S` | `30.0` | How long the server waits for the custodian's heartbeat before it takes it for hung, kills it, and starts another. |
+| `DLBOARD_CUSTODIAN_STARTUP_S` | `600.0` | How long a custodian may take to start (build the app, and migrate the database if it is first) before the server takes it for hung. |
+| `DLBOARD_CUSTODIAN_DUTY_CYCLE` | `0.25` | The share of time a task may spend in a batch of work: after one that took `t`, it waits `t * (1 - d) / d`, so it takes at most this share of the database's time, and less when the database is busy. |
+| `DLBOARD_CUSTODIAN_CLAIM_S` | `300` | How long a claim on a work item lasts: an item whose custodian died is claimed again after this. |
+
 ## Logging
 
 | Variable | Default | |

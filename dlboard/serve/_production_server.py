@@ -21,6 +21,7 @@ from pydantic import ImportString, NonNegativeInt, PositiveInt
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from dlboard.models import PluginProtocol
+from dlboard.serve._custodian._process import CustodianProcess
 from dlboard.serve._logging import LoggingSettings, logging_config
 from dlboard.serve._settings_env import set_setting_env
 from dlboard.serve.telemetry import shared_prometheus_dir
@@ -99,6 +100,11 @@ def run_production_server(  # noqa: PLR0913
             header_read_timeout=tuning.header_read_timeout_s * 1000, keep_alive=tuning.keep_alive
         ),
     )
-    # The workers (and what they spawn) inherit the directory they leave their Prometheus snapshots in.
+    # The custodian runs the background tasks in a process of its own, started before the workers and stopped after
+    # them by this one (the master), never by a worker: see `dlboard/serve/_custodian/_process.py`.
+    custodian = CustodianProcess(stop_timeout_s=tuning.workers_kill_timeout_s)
+    granian.on_startup(custodian.start)
+    granian.on_shutdown(custodian.stop)
+    # The workers and the custodian (and what they spawn) inherit the directory they leave their Prometheus snapshots in.
     with shared_prometheus_dir():
         granian.serve()

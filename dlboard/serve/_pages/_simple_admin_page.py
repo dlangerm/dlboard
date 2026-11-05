@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import threading
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Final, cast
 
@@ -16,7 +15,6 @@ from structlog.stdlib import get_logger
 
 from dlboard import models
 from dlboard._version import __version__
-from dlboard.plugins.backend import artifact_purge_worker
 from dlboard.serve import (
     Icon,
     get_auth_provider,
@@ -26,7 +24,11 @@ from dlboard.serve import (
     icon,
 )
 from dlboard.serve import _constants as constants
+from dlboard.serve._backend._app_slot import current_dash_app
+from dlboard.serve._backend._purge_work import PurgeWork, entity_purge
 from dlboard.serve._component_ids import ButtonId, DivId, ModalId, StoreId, ValueId
+from dlboard.serve._custodian import TaskStore, get_task_store, registered_tasks
+from dlboard.serve._pages._admin_tasks import render_background_tasks
 from dlboard.serve._pages._dash_helpers import TriggeredId, busy_while_running, require_triggered_id
 from dlboard.serve._url import relative_path
 
@@ -38,9 +40,6 @@ if TYPE_CHECKING:
     from dlboard.models import AuditLogEntry, DataStore, InstalledPlugin, User
 
 _log = get_logger(__name__)
-
-_PURGE_STALLED_AFTER: Final = pendulum.duration(seconds=60)
-"""How long a running purge may go without progress before the admin page takes it for interrupted, and offers to resume it."""
 
 
 class _AdminPage:
@@ -55,6 +54,7 @@ ADMIN_TRASH_CONTENT_ID: DivId[_AdminPage] = DivId("admin-trash-content")
 ADMIN_AUDIT_LOG_CONTENT_ID: DivId[_AdminPage] = DivId("admin-audit-log-content")
 ADMIN_ABOUT_CONTENT_ID: DivId[_AdminPage] = DivId("admin-about-content")
 ADMIN_USERS_CONTENT_ID: DivId[_AdminPage] = DivId("admin-users-content")
+ADMIN_TASKS_CONTENT_ID: DivId[_AdminPage] = DivId("admin-tasks-content")
 ADMIN_INITIAL_TAB_ID: StoreId[_AdminPage] = StoreId("admin-initial-tab")
 # Pattern-matched "type" discriminators, not standalone component ids -- plain strings.
 ADMIN_RESTORE_BUTTON_TYPE: Final = "admin-restore-button"
@@ -64,7 +64,6 @@ ADMIN_PURGE_MODAL_ID: ModalId[_AdminPage] = ModalId("admin-purge-modal")
 ADMIN_PURGE_CONFIRM_ID: ButtonId[_AdminPage] = ButtonId("admin-purge-confirm")
 ADMIN_PURGE_CANCEL_ID: ButtonId[_AdminPage] = ButtonId("admin-purge-cancel")
 ADMIN_PENDING_PURGE_STORE_ID: StoreId[_AdminPage] = StoreId("admin-pending-purge-store")
-ADMIN_RESUME_PURGE_ID: ButtonId[_AdminPage] = ButtonId("admin-resume-purge")
 
 # One (label, entity type, lister, restorer) tuple per soft-deletable entity -- the single place
 # that needs to grow if a new soft-deletable entity is ever added.
@@ -98,32 +97,6 @@ def _restore(store: DataStore[...], entity_type: models.EntityType, entity_id: i
             store.restore_run(entity_id, actor)
         case models.EntityType.ARTIFACT:
             store.restore_artifact(entity_id, actor)
-
-
-def _purge(store: DataStore[...], entity_type: models.EntityType, entity_id: int, actor: User) -> None:
-    """
-    Purge an entity, then have its blobs cleaned up -- off the request that asked, which returns at once (#429).
-
-    A large purge (a run of thousands of artifacts and millions of metric values) takes far longer than a request
-    should wait. The store it runs on is the request's authorizing one, whose purge checks only the actor it was made
-    for, so it outlives the request safely. Purging what is purged already does nothing, so a second click cannot
-    queue its blobs twice.
-    """
-    try:
-        match entity_type:
-            case models.EntityType.PROJECT:
-                store.purge_project(entity_id, actor)
-            case models.EntityType.EXPERIMENT:
-                store.purge_experiment(entity_id, actor)
-            case models.EntityType.RUN:
-                store.purge_run(entity_id, actor)
-            case models.EntityType.ARTIFACT:
-                store.purge_artifact(entity_id, actor)
-    except Exception:  # noqa: BLE001 -- a thread of its own: anything it does not log here goes unseen
-        _log.exception("Failed to purge %s %s", entity_type, entity_id)
-    finally:
-        # Cleaned up, or not started: the worker clears the running stamp once there is nothing left to clean.
-        artifact_purge_worker.wake()
 
 
 def _trash_row(label: str, entity_type: models.EntityType, item: Any) -> Component:  # noqa: ANN401
@@ -211,47 +184,33 @@ def _render_trash_kind(label: str, entity_type: models.EntityType, items: list[A
     )
 
 
-def _render_pending_purge_banner(store: DataStore[...]) -> Component | None:
+def _render_pending_purge_banner(tasks: TaskStore) -> Component | None:
     """
-    An alert while a purge is running, or when one's blob cleanup was interrupted.
+    An alert while purges or their blobs' deletions are queued: the custodian works through them in the background.
 
-    `None` (rendered as nothing) when there's no outstanding work -- the common case, since a
-    purge that happens while the server is running is drained automatically. Running is read from the database, so
-    every server process says so, whichever one is purging; a purge whose process died stops making progress, and after
-    `_PURGE_STALLED_AFTER` the banner offers to resume it (#429).
+    `None` (rendered as nothing) when nothing is queued. What is queued stays queued across a restart, and the custodian
+    picks it up on its own: there is nothing for an admin to resume.
     """
-    pending = store.count_pending_artifact_purges()
-    blobs = f"{pending} artifact blob{'s' if pending != 1 else ''}"
-    progress_at = store.artifact_purge_progress_at()
-    if (
-        progress_at is not None
-        and pendulum.now("UTC") - pendulum.instance(progress_at) < _PURGE_STALLED_AFTER
-    ):
-        return dmc.Alert(
-            dmc.Text(
-                f"A purge is running: {blobs} left to clean up. Reload to see how far it is.", size="sm"
-            ),
-            color="blue",
-            variant="light",
-        )
-    if not pending:
+    purges, blobs = tasks.count_work(PurgeWork.ENTITY), tasks.count_work(PurgeWork.BLOB)
+    if not purges and not blobs:
         return None
+    queued = [
+        *([f"{purges} purge{'s' if purges != 1 else ''}"] if purges else []),
+        *([f"{blobs} artifact blob{'s' if blobs != 1 else ''} to delete"] if blobs else []),
+    ]
     return dmc.Alert(
-        dmc.Group(
-            [
-                dmc.Text(f"{blobs} not yet cleaned up from an interrupted purge.", size="sm"),
-                dmc.Button("Resume cleanup", id=ADMIN_RESUME_PURGE_ID, size="xs", variant="light"),
-            ],
-            justify="space-between",
+        dmc.Text(
+            f"Queued: {' and '.join(queued)}. The background tasks work through them; see Background tasks for how far.",
+            size="sm",
         ),
-        color="yellow",
+        color="blue",
         variant="light",
     )
 
 
-def _render_trash(store: DataStore[...]) -> Component:
+def _render_trash(store: DataStore[...], tasks: TaskStore) -> Component:
     sections: list[Component] = []
-    banner = _render_pending_purge_banner(store)
+    banner = _render_pending_purge_banner(tasks)
     if banner is not None:
         sections.append(banner)
     for label, entity_type in _TRASH_KINDS:
@@ -522,12 +481,14 @@ def _admin_layout(tab: str) -> Component:
                             dmc.TabsTab("Trash", value="trash"),
                             dmc.TabsTab("Audit Log", value="audit-log"),
                             dmc.TabsTab("Users", value="users"),
+                            dmc.TabsTab("Background tasks", value="tasks"),
                             dmc.TabsTab("About", value="about"),
                         ]
                     ),
                     dmc.TabsPanel(html.Div(id=ADMIN_TRASH_CONTENT_ID), value="trash", pt="md"),
                     dmc.TabsPanel(html.Div(id=ADMIN_AUDIT_LOG_CONTENT_ID), value="audit-log", pt="md"),
                     dmc.TabsPanel(html.Div(id=ADMIN_USERS_CONTENT_ID), value="users", pt="md"),
+                    dmc.TabsPanel(html.Div(id=ADMIN_TASKS_CONTENT_ID), value="tasks", pt="md"),
                     dmc.TabsPanel(html.Div(id=ADMIN_ABOUT_CONTENT_ID), value="about", pt="md"),
                 ],
                 id=ADMIN_TABS_ID,
@@ -568,7 +529,7 @@ def _register_tab_callbacks(app: Dash) -> None:
         if tab != "trash":
             raise PreventUpdate
         try:
-            return _render_trash(get_data_store())
+            return _render_trash(get_data_store(), get_task_store())
         except PermissionError:
             return dmc.Text("You don't have permission to view the trash.", c="dimmed")
 
@@ -601,6 +562,20 @@ def _register_tab_callbacks(app: Dash) -> None:
         store = get_data_store()
         auth_provider_name = get_auth_provider().__class__.__name__
         return _render_about(store, get_current_user(), auth_provider_name, get_installed_plugins())
+
+
+def _register_tasks_tab(app: Dash) -> None:
+    @app.callback(
+        Output(ADMIN_TASKS_CONTENT_ID, "children"),
+        Input(ADMIN_TABS_ID, "value"),
+    )
+    def render_tasks_tab(tab: str) -> Component:
+        if tab != "tasks":
+            raise PreventUpdate
+        try:
+            return render_background_tasks(get_task_store(), registered_tasks(current_dash_app()))
+        except PermissionError:
+            return dmc.Text("You don't have permission to view background tasks.", c="dimmed")
 
 
 def _register_restore_callback(app: Dash) -> None:
@@ -666,30 +641,15 @@ def _register_purge_callbacks(app: Dash) -> None:
         item = _TrashItem.model_validate(pending)
         entity_type, entity_id = item.entity_type, item.id
 
-        store = get_data_store()
-        actor = get_current_user()
+        # Queued for the custodian, which purges it as the admin who asked, off this request (#429): a large purge (a
+        # run of thousands of artifacts) takes far longer than a request should wait. Asking twice queues it once.
         try:
-            # Said before the page reloads, so it opens saying a purge is running rather than that nothing is.
-            store.record_artifact_purge_progress(running=True)
+            get_task_store().enqueue_work(
+                [entity_purge(entity_type, entity_id, requested_by=get_current_user().id)]
+            )
         except PermissionError:
-            _log.exception("Failed to purge %s %s", entity_type, entity_id)
-        else:
-            threading.Thread(
-                target=_purge, args=(store, entity_type, entity_id, actor), daemon=True, name="purge"
-            ).start()
+            _log.exception("Not allowed to purge %s %s", entity_type, entity_id)
         return False, "/admin", True
-
-    @app.callback(
-        Output(constants.LOCATION_ID, "href", allow_duplicate=True),
-        Output(constants.LOCATION_ID, "refresh", allow_duplicate=True),
-        Input(ADMIN_RESUME_PURGE_ID, "n_clicks"),
-        prevent_initial_call=True,
-    )
-    def resume_purge_cleanup(n_clicks: int) -> tuple[str, bool]:
-        if not n_clicks:
-            raise PreventUpdate
-        artifact_purge_worker.wake()
-        return relative_path("/admin"), True
 
 
 def _register_user_action_callback(app: Dash) -> None:
@@ -723,6 +683,7 @@ def register(app: Dash) -> None:
         return _admin_layout(tab or "trash")
 
     _register_tab_callbacks(app)
+    _register_tasks_tab(app)
     _register_restore_callback(app)
     _register_purge_callbacks(app)
     _register_user_action_callback(app)

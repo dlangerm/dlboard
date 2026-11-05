@@ -130,7 +130,7 @@ just to construct one.
 
 `dlboard/plugins/__init__.py` defines the bundles used for a local deployment:
 - `LOCAL_STORAGE` = `[sqlite, filesystem, artifact_purge_worker]` — the metadata DB, artifact blob storage, and the
-  worker that deletes purged artifacts' blobs
+  background tasks that purge what an admin asks to and delete the blobs purges orphan (see "Background tasks")
 - `BUILTIN_CHARTS` = image_series, file_list, line_chart, bar_chart, table_chart, histogram
 - `LOCAL_DEPLOYMENT` = all of the above, used by `dlboard serve local`
 - `POSTGRES_STORAGE` = `[postgres, filesystem, artifact_purge_worker]` — for a shared deployment, composed
@@ -223,6 +223,21 @@ user is behind (background workers, the gate itself, the password provider's cre
 without one.
 Constants for Dash component IDs live in `dlboard/serve/_constants.py`.
 Constants should only be added for globally-accessed values, not for per-plugin items that won't be used in other contexts.
+
+### Background tasks
+
+Custodial work (purges, blob deletion) runs in one custodian process per server, never in a web worker
+(`dlboard/serve/_custodian/`). Granian's master starts it before its workers (`on_startup`), stops it after them, reaps and
+restarts it when it exits, and replaces it when its shared-memory heartbeat goes stale; it dies with the master
+(`PR_SET_PDEATHSIG`). A plugin never starts a thread or process for background work: it registers a `Task` in `plug()`
+(`register_task`), which every process registers and only the custodian runs. A task is `SINGLETON` (one at a time across
+every server, under a lease of three beats renewed every beat) or `SHARED` (each custodian claims its own batch of
+`WorkItem`s, `SKIP LOCKED` on Postgres). Work goes in a batch at a time inside `ctx.batch()` (duty-cycle pacing), checks
+`ctx.should_stop()` between batches, and reports its backlog (`ctx.report`). The database holds the truth (`TaskState`,
+`Custodian`, `WorkItem`, through the `TaskStore` protocol, separate from `DataStore`); a request reads it through
+`get_task_store()` and queues only kinds a plugin lets it (`register_work_kind`, with the scope it needs). Tests never
+start a custodian: they call a task's `run_once` with a `TaskContext`, or a `Supervisor` directly
+(`dlboard/serve/_custodian/tests/`); `custodian_process_test.py` drives the real process.
 
 ### Telemetry
 

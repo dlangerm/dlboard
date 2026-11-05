@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast
 
-import pendulum
 import pytest
 
 from dlboard import models
 from dlboard._version import __version__
 from dlboard.conftest import find_props
 from dlboard.plugins.themes import default
+from dlboard.serve._backend._purge_work import blob_deletion, entity_purge
 from dlboard.serve._pages import _simple_admin_page as admin
 
 if TYPE_CHECKING:
@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 
 def test_render_trash_is_empty_message_when_nothing_deleted(store: SQLLiteStore) -> None:
-    rendered = admin._render_trash(store)
+    rendered = admin._render_trash(store, store)
 
     assert cast("Any", rendered).children == "Nothing in the trash."
 
@@ -30,7 +30,7 @@ def test_render_trash_lists_a_deleted_project_with_restore_and_purge_buttons(
     project = store.create_project(models.NewProject(name="p", description="d"))
     store.delete_project(project.id, admin_user)
 
-    rendered = admin._render_trash(store)
+    rendered = admin._render_trash(store, store)
 
     restore_id = {
         "type": admin.ADMIN_RESTORE_BUTTON_TYPE,
@@ -70,7 +70,7 @@ def test_render_trash_caps_each_kind_and_notes_the_overflow(store: SQLLiteStore)
         assert artifact.id is not None
         store.delete_artifact(artifact.id, admin_user)
 
-    rendered = cast("Any", admin._render_trash(store))
+    rendered = cast("Any", admin._render_trash(store, store))
 
     # only the Artifact kind has any deleted items here; children are [heading, *rows, overflow note]
     (artifact_section,) = rendered.children
@@ -86,46 +86,31 @@ def test_render_pending_purge_banner_is_none_when_nothing_pending(store: SQLLite
 
 
 @pytest.mark.parametrize(
-    ("stamped", "stalled_after_s", "running"),
+    ("purges", "blobs", "says"),
     [
-        pytest.param(False, 60, False, id="interrupted-offers-to-resume"),
-        pytest.param(True, 60, True, id="running-says-so-and-offers-nothing"),
-        pytest.param(True, 0, False, id="a-stamp-that-stopped-moving-is-interrupted"),
+        (1, 0, "Queued: 1 purge."),
+        (0, 2, "Queued: 2 artifact blobs to delete."),
+        (1, 1, "1 purge and 1 artifact blob"),
     ],
 )
-def test_the_purge_banner_tells_a_running_purge_from_an_interrupted_one(
-    store: SQLLiteStore,
-    monkeypatch: pytest.MonkeyPatch,
-    stalled_after_s: int,
-    *,
-    stamped: bool,
-    running: bool,
+def test_the_purge_banner_says_what_is_queued_for_the_background_tasks(
+    store: SQLLiteStore, purges: int, blobs: int, says: str
 ) -> None:
-    """Read from the database, so every server process says it, whichever is purging (#429)."""
-    monkeypatch.setattr(admin, "_PURGE_STALLED_AFTER", pendulum.duration(seconds=stalled_after_s))
-    admin_user = store.get_or_create_user(models.Principal.unverified("admin"))
-    project = store.create_project(models.NewProject(name="p", description="d"))
-    experiment = store.create_experiment(models.NewExperiment(project_id=project.id))
-    run = store.create_run(models.NewRun(experiment_id=experiment.id))
-    store.log_artifact_refs(
-        [models.Artifact(key="a", fname="a.png", run_id=run.id, experiment_id=experiment.id, step=0, ref="r")]
+    """Read from the database's work queue, so every server process says it, whichever custodian does the work."""
+    store.enqueue_work(
+        [
+            *(entity_purge(models.EntityType.RUN, i, requested_by=1) for i in range(purges)),
+            *(blob_deletion(i, f"ref://{i}", requested_by=1) for i in range(blobs)),
+        ]
     )
-    store.delete_project(project.id, admin_user)
-    store.purge_project(project.id, admin_user)
-    store.record_artifact_purge_progress(running=stamped)
-
-    banner = cast("Any", admin._render_pending_purge_banner(store))
-
-    assert banner is not None
-    assert (find_props(banner, admin.ADMIN_RESUME_PURGE_ID) is None) is running
-    assert ("A purge is running" in str(banner)) is running
-    assert "1 artifact blob" in str(banner)
+    banner = admin._render_pending_purge_banner(store)
+    assert says in str(banner)
 
 
 def test_render_trash_omits_a_project_that_is_not_deleted(store: SQLLiteStore) -> None:
     store.create_project(models.NewProject(name="p", description="d"))
 
-    rendered = admin._render_trash(store)
+    rendered = admin._render_trash(store, store)
 
     assert cast("Any", rendered).children == "Nothing in the trash."
 

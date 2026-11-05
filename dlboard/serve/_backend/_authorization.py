@@ -822,31 +822,6 @@ class AuthorizingDataStore(models.DataStore[...]):
         require_scope(self._actor, Scope.AUDIT_LOG_READ)
         return self._inner.list_audit_log(self._bound(actor), limit=limit, offset=offset)
 
-    def list_pending_artifact_purges(
-        self, limit: int = 100, offset: int = 0
-    ) -> Iterator[models.ArtifactPurgeTask]:
-        require_scope(self._actor, Scope.PURGE)
-        return self._inner.list_pending_artifact_purges(limit, offset)
-
-    def count_pending_artifact_purges(self) -> int:
-        return self._inner.count_pending_artifact_purges()
-
-    def complete_artifact_purge(self, task_id: int) -> None:
-        require_scope(self._actor, Scope.PURGE)
-        self._inner.complete_artifact_purge(task_id)
-
-    def fail_artifact_purge(self, task_id: int, error: str) -> None:
-        require_scope(self._actor, Scope.PURGE)
-        self._inner.fail_artifact_purge(task_id, error)
-
-    def artifact_purge_progress_at(self) -> datetime | None:
-        # As public as `count_pending_artifact_purges`: whether a purge is running, nothing of what it purges.
-        return self._inner.artifact_purge_progress_at()
-
-    def record_artifact_purge_progress(self, *, running: bool) -> None:
-        require_scope(self._actor, Scope.PURGE)
-        self._inner.record_artifact_purge_progress(running=running)
-
 
 class AuthorizingArtifactStore(models.ArtifactStore[...]):
     """An `ArtifactStore` that only accepts artifacts for runs its `authorizer`'s actor may write to."""

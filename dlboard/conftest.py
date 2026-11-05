@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 import pandas as pd
+import pendulum
 import pytest
 import sqlalchemy as sa
 from flask import Flask
@@ -37,6 +38,7 @@ from dlboard.serve import app as build_app
 from dlboard.serve._backend import _auth
 from dlboard.serve._backend._data_store import ARTIFACT_STORE
 from dlboard.serve._backend._metric_frame import MetricFrame
+from dlboard.serve._custodian import TaskContext, get_system_task_store, registered_tasks
 from dlboard.serve._pages._experiment._panel_data import PanelData, WideHistory
 from dlboard.serve.telemetry import LOGS, METRICS, _instrument
 
@@ -448,6 +450,35 @@ def _plain_artifact_urls(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("dlboard.serve._backend._artifact_download.relative_path", str)
 
 
+@dataclass
+class Clock:
+    """A stopped `pendulum.now`, moved on only by however much a test has `advance`d it."""
+
+    at: pendulum.DateTime = field(default_factory=lambda: pendulum.now(pendulum.UTC))
+
+    def advance(self, **by: float) -> None:
+        """Move the clock on, e.g. `advance(days=8)`."""
+        self.at += pendulum.duration(**by)
+
+    def now(self, tz: str | pendulum.Timezone | None = None) -> pendulum.DateTime:
+        """The time it says, in `tz` (local time, as `pendulum.now`, if `None`)."""
+        return self.at.in_timezone(tz if tz is not None else pendulum.local_timezone())
+
+
+@pytest.fixture
+def clock(monkeypatch: pytest.MonkeyPatch) -> Clock:
+    """
+    A stopped clock a test moves on, for what waits on time (a lease running out, a work item coming due).
+
+    `pendulum.now` is replaced, not travelled: pendulum's own time travel needs its optional `test` extra. Everything in
+    dlboard reads the time through `pendulum.now`, so this is the time it sees. Stopped, so that a test does not rely on
+    the machine's clock only ever moving on: a synced one (WSL's, NTP's) steps back a second now and then.
+    """
+    clock = Clock()
+    monkeypatch.setattr(pendulum, "now", clock.now)
+    return clock
+
+
 @pytest.fixture
 def admin(store: SQLStoreBase[Any]) -> models.User:
     """The bootstrap admin -- the first user any fresh store creates gets `Scope.ALL`."""
@@ -525,6 +556,24 @@ def dispose_stores(app: Dash) -> None:
     artifact_store = ARTIFACT_STORE.find(app)
     if isinstance(artifact_store, BlobArtifactStore):
         artifact_store.dispose()
+
+
+def run_task(app: Dash, name: StrEnum) -> None:
+    """One run of `app`'s registered background task `name`, at full speed, as the custodian (which tests never start) would."""
+    (task,) = [t for t in registered_tasks(app) if t.name == name]
+    tasks = get_system_task_store(app)
+    tasks.ensure_tasks([name])
+    task.run_once(
+        TaskContext(
+            app,
+            task,
+            tasks,
+            "test",
+            threading.Event(),
+            duty_cycle=1.0,
+            claim_for=pendulum.duration(minutes=5),
+        )
+    )
 
 
 class BackendServer(typing.NamedTuple):

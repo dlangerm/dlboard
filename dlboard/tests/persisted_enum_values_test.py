@@ -35,6 +35,7 @@ from dlboard.plugins.charts.histogram import Colorscale, HistogramChart, Histogr
 from dlboard.plugins.charts.image_series import ImageChart, LayerVisibility
 from dlboard.plugins.charts.line_chart import LineChart
 from dlboard.plugins.charts.table_chart import TableChart
+from dlboard.serve._custodian import TaskOutcome
 
 if typing.TYPE_CHECKING:
     from dlboard._compat import StrEnum
@@ -70,6 +71,7 @@ _FROZEN_ENUM_VALUES: dict[type[StrEnum], frozenset[str]] = {
     PinColor: frozenset(
         {"plain", "red", "orange", "yellow", "green", "teal", "blue", "violet", "pink", "gray"}
     ),
+    TaskOutcome: frozenset({"success", "failure", "hung"}),
 }
 
 

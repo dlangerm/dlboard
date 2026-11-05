@@ -15,6 +15,7 @@ from dlboard.models import ProjectRole, Scope
 from dlboard.plugins.data_stores._blob_store import blob_key
 from dlboard.plugins.data_stores.filesystem import FSBlobs
 from dlboard.serve._backend._authorization import AuthorizingArtifactStore, AuthorizingDataStore
+from dlboard.serve._custodian._store import AuthorizingTaskStore, TaskStore
 from dlboard.serve._pages._experiment._page_model import BasicExperimentPage
 
 if TYPE_CHECKING:
@@ -37,7 +38,11 @@ def _protocol_members(protocol: type) -> set[str]:
 
 @pytest.mark.parametrize(
     ("protocol", "wrapper"),
-    [(models.DataStore, AuthorizingDataStore), (models.ArtifactStore, AuthorizingArtifactStore)],
+    [
+        (models.DataStore, AuthorizingDataStore),
+        (models.ArtifactStore, AuthorizingArtifactStore),
+        (TaskStore, AuthorizingTaskStore),
+    ],
 )
 def test_every_protocol_method_has_an_explicit_rule(protocol: type, wrapper: type) -> None:
     """A store method added without a decision about who may call it would silently pass through."""

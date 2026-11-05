@@ -624,36 +624,6 @@ class DataStore(typing.Protocol[_P]):
         """List audit log entries, most recent first, for a trash/admin view. Requires `Scope.AUDIT_LOG_READ`."""
         ...
 
-    def list_pending_artifact_purges(
-        self, limit: int = 100, offset: int = 0
-    ) -> typing.Iterator[models.ArtifactPurgeTask]:
-        """List artifact blobs still waiting to be deleted from the `ArtifactStore`, oldest first."""
-        ...
-
-    def count_pending_artifact_purges(self) -> int:
-        """Count artifact blobs still waiting to be deleted. 0 means the last purge fully cleaned up."""
-        ...
-
-    def complete_artifact_purge(self, task_id: int) -> None:
-        """Record that a queued blob deletion succeeded by deleting its task row."""
-        ...
-
-    def fail_artifact_purge(self, task_id: int, error: str) -> None:
-        """Record that a queued blob deletion failed. The task stays pending and is retried later."""
-        ...
-
-    def artifact_purge_progress_at(self) -> datetime | None:
-        """
-        When a running purge last made progress; `None` while none is running.
-
-        Shared by every server process, so any of them can tell a purge in progress from one a process died in.
-        """
-        ...
-
-    def record_artifact_purge_progress(self, *, running: bool) -> None:
-        """Stamp that a purge is making progress now (`running`), or that it is done."""
-        ...
-
 
 class ArtifactStore(typing.Protocol[_P]):
     """An artifact store for files and arbitrary byte-like data."""

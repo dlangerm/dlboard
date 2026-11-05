@@ -15,6 +15,7 @@ from typing import Annotated
 
 import cyclopts
 import structlog
+from werkzeug.serving import is_running_from_reloader
 
 from dlboard._version import __version__
 from dlboard.plugins.auth.password import create_or_reset_user, new_password_problem
@@ -22,7 +23,9 @@ from dlboard.plugins.data_stores.filesystem import AppSettings as FilesystemAppS
 from dlboard.plugins.data_stores.sqlite import AppSettings as SqliteAppSettings
 from dlboard.serve import app as build_app
 from dlboard.serve import get_system_data_store, resolve_plugins, run_production_server, set_setting_env
+from dlboard.serve._custodian._process import CustodianProcess
 from dlboard.serve._logging import configure_logging as _configure_logging
+from dlboard.serve._production_server import WSGISettings
 from dlboard.serve.telemetry import shared_prometheus_dir
 
 app = cyclopts.App(
@@ -116,10 +119,22 @@ def _serve(plugins_target: str, runtime: ServerRuntimeOptions) -> None:
         # who explicitly wants Flask's dotenv loading can still opt back in.
         os.environ.setdefault("FLASK_SKIP_DOTENV", "1")  # dlboard-ignore[forbid-string-ignore]
         plugins = resolve_plugins(plugins_target)
+        # The custodian reads the plugin list from the environment, as Granian's workers do.
+        set_setting_env(WSGISettings, "dlboard_plugins", plugins_target)
+        set_setting_env(WSGISettings, "dlboard_url_prefix", runtime.url_prefix)
+        # Started by the reloader's own process only: the server it restarts on every code change is a child of it, and
+        # must not start a custodian of its own each time.
+        custodian = None if is_running_from_reloader() else CustodianProcess()
         with shared_prometheus_dir():
-            build_app(plugins, url_prefix=runtime.url_prefix).run(
-                host=runtime.host, port=runtime.port, debug=True
-            )
+            if custodian is not None:
+                custodian.start()
+            try:
+                build_app(plugins, url_prefix=runtime.url_prefix).run(
+                    host=runtime.host, port=runtime.port, debug=True
+                )
+            finally:
+                if custodian is not None:
+                    custodian.stop()
         return
     run_production_server(
         plugins_target,

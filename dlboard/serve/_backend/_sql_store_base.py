@@ -22,20 +22,16 @@ from dlboard.serve._backend._app_state import APP_STATE_ROW_ID, AppState
 from dlboard.serve._backend._comparison_settings import ComparisonSettings
 from dlboard.serve._backend._foreign_keys import ForeignKey, ForeignKeyKind
 from dlboard.serve._backend._metric_frame import MetricFrame, MetricKeySummary, MetricRow
+from dlboard.serve._backend._purge_work import blob_deletion
 from dlboard.serve._backend._schema_upgrade import run_migrations
-from dlboard.serve.telemetry import Counter, Outcome, OutcomeAttributes, Unit
+from dlboard.serve._custodian._models import WorkItem
+from dlboard.serve._custodian._sql import TASK_TABLES, TASK_UNIQUE_COLUMNS, SQLTaskStore
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Collection, Generator, Iterable, Iterator, Mapping, Sequence
 
 
 _log = get_logger(__name__)
-
-_PURGES = Counter[OutcomeAttributes](
-    "dlboard.artifact.purges",
-    Unit.ARTIFACTS,
-    "Purged artifacts' blobs deleted from the artifact store, or that could not be.",
-)
 
 SCHEMA_PREP_OPTION: Final = "dlboard_schema_prep"
 """
@@ -147,6 +143,7 @@ UNIQUE_COLUMNS: dict[type[BaseModel], list[tuple[str, ...]]] = {
     models.PasswordCredential: [("user_id",)],
     models.RunPin: [("run_id", "pinned_by", "color")],
     models.ComparisonRun: [("page_id", "run_id")],
+    **TASK_UNIQUE_COLUMNS,
 }
 
 # Dependency order: every table appears after the tables its foreign keys point to.
@@ -169,6 +166,7 @@ TABLES: tuple[type[BaseModel], ...] = (
     models.ComparisonRun,
     models.AuditLogEntry,
     models.ArtifactPurgeTask,
+    *TASK_TABLES,
 )
 
 # The entities a user can soft-delete/restore -- the only tables with `deleted_at`/`deleted_by`.
@@ -313,6 +311,9 @@ def build_metadata(schema: str | None = None) -> tuple[sa.MetaData, dict[type[Ba
     # members, and purging a run finds the comparisons it is in by `run_id`, which that does not lead with.
     sa.Index("idx_Page_project", pages.c.project_id, pages.c.owner_id)
     sa.Index("idx_ComparisonRun_run", comparison_runs.c.run_id)
+    # A custodian claims the longest due of one kind of work item.
+    work = tables[WorkItem]
+    sa.Index("idx_WorkItem_due", work.c.kind, work.c.due_at)
     return metadata, tables
 
 
@@ -497,7 +498,7 @@ def _logged_keys(table: sa.Table, runs: sa.Table, experiment_id: int) -> sa.Subq
     return sa.select(keys.c.key).where(keys.c.key.is_not(None), logged_by_live_run).subquery("logged_keys")
 
 
-class SQLStoreBase[T](ABC, models.DataStore[T]):
+class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
     """
     The full `DataStore` contract over a database SQLAlchemy has a dialect for. Tested on SQLite and Postgres only.
 
@@ -2463,7 +2464,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         soft-deletable entities -- and (unlike soft-delete/restore) counts matching rows regardless
         of their own `deleted_at`, since purging a project removes everything under it either way.
 
-        Every artifact blob about to be orphaned by the cascade gets one `ArtifactPurgeTask` row, in
+        Every artifact blob about to be orphaned by the cascade gets one work item (`blob_deletion`), in
         the same transaction as the delete, so a background worker can clean up the underlying
         `ArtifactStore` blobs afterward without risking losing track of one if the process dies
         right after this commits. The artifact rows' `ref`s -- the blob locations -- have to be read
@@ -2492,7 +2493,7 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         )
         artifact_refs = self._execute(sa.select(artifacts.c.id, artifacts.c.ref).where(artifact_where))
 
-        purge_tasks = self._tables[models.ArtifactPurgeTask]
+        work = self._tables[WorkItem]
         with self._begin() as conn:
             if (
                 conn.execute(sa.delete(table).where(table.c.id == entity_id).returning(table.c.id)).first()
@@ -2504,9 +2505,8 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
             )
             for artifact_id, ref in artifact_refs:
                 conn.execute(
-                    sql.insert(
-                        purge_tasks,
-                        models.NewArtifactPurgeTask(artifact_id=artifact_id, ref=ref, requested_by=actor.id),
+                    self._insert_ignoring_conflicts(work).values(
+                        sql.row_values(blob_deletion(artifact_id, ref, requested_by=actor.id))
                     )
                 )
 
@@ -2668,55 +2668,3 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
     def list_deleted_artifacts(self, limit: int = 100, offset: int = 0) -> Iterator[models.Artifact]:
         """List soft-deleted artifacts, most recently deleted first, for a trash/admin view."""
         yield from self._list_deleted(models.Artifact, limit=limit, offset=offset)
-
-    def list_pending_artifact_purges(
-        self, limit: int = 100, offset: int = 0
-    ) -> Iterator[models.ArtifactPurgeTask]:
-        """
-        List artifact blobs still waiting to be deleted from the `ArtifactStore`, oldest first.
-
-        Every row in this table is, by definition, pending work -- a completed task is deleted
-        outright (see `complete_artifact_purge`) rather than marked done, so there's no status
-        column to filter on here.
-        """
-        tasks = self._tables[models.ArtifactPurgeTask]
-        yield from self._fetch(
-            models.ArtifactPurgeTask,
-            sa.select(tasks).order_by(tasks.c.requested_at).limit(limit).offset(offset),
-        )
-
-    def count_pending_artifact_purges(self) -> int:
-        """Count artifact blobs still waiting to be deleted. 0 means the last purge fully cleaned up."""
-        ((count,),) = self._execute(
-            sa.select(sa.func.count()).select_from(self._tables[models.ArtifactPurgeTask])
-        )
-        return count
-
-    def complete_artifact_purge(self, task_id: int) -> None:
-        """Record that a queued blob deletion succeeded by deleting its task row."""
-        tasks = self._tables[models.ArtifactPurgeTask]
-        self._execute(sa.delete(tasks).where(tasks.c.id == task_id))
-        _PURGES.add(1, OutcomeAttributes(outcome=Outcome.SUCCESS))
-
-    def fail_artifact_purge(self, task_id: int, error: str) -> None:
-        """Record that a queued blob deletion failed. The task stays pending and is retried later."""
-        tasks = self._tables[models.ArtifactPurgeTask]
-        self._execute(sa.update(tasks).where(tasks.c.id == task_id).values(last_error=error))
-        _PURGES.add(1, OutcomeAttributes(outcome=Outcome.FAILURE))
-
-    def artifact_purge_progress_at(self) -> datetime | None:
-        """When a running purge last made progress (on `AppState`'s one row); `None` while none is running."""
-        state = self._tables[AppState]
-        ((progress_at,),) = self._execute(
-            sa.select(state.c.artifact_purge_progress_at).where(state.c.id == APP_STATE_ROW_ID)
-        )
-        return progress_at
-
-    def record_artifact_purge_progress(self, *, running: bool) -> None:
-        """Stamp that a purge is making progress now (`running`), or clear it once the purge is done."""
-        state = self._tables[AppState]
-        self._execute(
-            sa.update(state)
-            .where(state.c.id == APP_STATE_ROW_ID)
-            .values(artifact_purge_progress_at=pendulum.now(pendulum.UTC) if running else None)
-        )

@@ -35,6 +35,7 @@ from dlboard._mp_context import SPAWN_CONTEXT
 from dlboard._telemetry import Attributes, attribute
 from dlboard._telemetry.traces import SpanKind, TraceKey, carrier, flush, span
 from dlboard.serve import set_artifact_store, wait_for_data_store
+from dlboard.serve._custodian import in_custodian
 from dlboard.serve._logging import configure_logging
 from dlboard.serve.telemetry import (
     AttributeKey,
@@ -50,6 +51,7 @@ from dlboard.serve.telemetry import (
 if TYPE_CHECKING:
     from collections.abc import Iterable
     from multiprocessing import Queue
+    from multiprocessing.process import BaseProcess
 
     from dash import Dash
     from flask import Response
@@ -288,9 +290,14 @@ def _write_blobs(
 class BlobArtifactStore(models.ArtifactStore[BlobBackend, int]):
     """An `ArtifactStore` for any `BlobBackend` -- staging, batched writes, and ref-ingest are shared."""
 
-    def __init__(self, backend: BlobBackend, store_q_size: int, staging_dir: Path | None = None) -> None:
+    def __init__(
+        self, backend: BlobBackend, store_q_size: int, staging_dir: Path | None = None, *, writer: bool = True
+    ) -> None:
         """
-        Initialize the store, starting its background blob-writing worker process.
+        Initialize the store, starting its background blob-writing worker process (unless `writer` is off).
+
+        Without a writer the store takes no upload (`log_artifacts` says it is unavailable) but serves and deletes blobs:
+        the custodian process's, which runs background tasks and serves no request.
 
         Uploads are staged in `staging_dir` before being written to `backend`. Pass a directory on the
         same filesystem as the backend's storage so the final move is a rename, and a crash leaves
@@ -299,17 +306,22 @@ class BlobArtifactStore(models.ArtifactStore[BlobBackend, int]):
         self._backend = backend
         self._store_q: Queue[_Upload | None] = SPAWN_CONTEXT.Queue(store_q_size)
         self._saved_artifact_q: Queue[_Saved | None] = SPAWN_CONTEXT.Queue(store_q_size)
-        self._store_artifact_proc = SPAWN_CONTEXT.Process(
-            target=_write_blobs,
-            args=(backend, self._store_q, self._saved_artifact_q),
-            daemon=True,
+        self._store_artifact_proc: BaseProcess | None = (
+            SPAWN_CONTEXT.Process(
+                target=_write_blobs,
+                args=(backend, self._store_q, self._saved_artifact_q),
+                daemon=True,
+            )
+            if writer
+            else None
         )
         self._file_staging_dir = staging_dir or Path(tempfile.gettempdir())
         self._file_staging_dir.mkdir(parents=True, exist_ok=True)
         self._sweep_stale_staging()
         self._ingest_flushed = SPAWN_CONTEXT.Event()
         self._ingest_ready = SPAWN_CONTEXT.Event()
-        self._store_artifact_proc.start()
+        if self._store_artifact_proc is not None:
+            self._store_artifact_proc.start()
         # Not `atexit`: a Granian worker is a `multiprocessing` child, which exits through
         # `util._exit_function` (running only these finalizers) and never reaches `atexit` handlers.
         # Priority >= 0 also runs it before multiprocessing terminates its daemonic children (our writer).
@@ -342,7 +354,7 @@ class BlobArtifactStore(models.ArtifactStore[BlobBackend, int]):
         """
         self._finalizer.cancel()
         proc = self._store_artifact_proc
-        if not proc.is_alive():
+        if proc is None or not proc.is_alive():
             return
         deadline = time.monotonic() + timeout
         try:
@@ -372,8 +384,9 @@ class BlobArtifactStore(models.ArtifactStore[BlobBackend, int]):
         of the session instead of releasing their OS-level resources (file descriptors, semaphores).
         """
         self._finalizer.cancel()
-        self._store_artifact_proc.terminate()
-        self._store_artifact_proc.join()
+        if self._store_artifact_proc is not None:
+            self._store_artifact_proc.terminate()
+            self._store_artifact_proc.join()
         self._store_q.close()
         self._saved_artifact_q.close()
 
@@ -435,7 +448,7 @@ class BlobArtifactStore(models.ArtifactStore[BlobBackend, int]):
 
     def log_artifacts(self, artifacts: Iterable[tuple[NewArtifact, FileStorage]]) -> None:
         """Stage each uploaded file, then queue it for the write worker."""
-        if not self._store_artifact_proc.is_alive():
+        if self._store_artifact_proc is None or not self._store_artifact_proc.is_alive():
             _REJECTIONS.add(1, _RejectionAttributes(reason=_Rejection.WRITER_DOWN))
             msg = "the artifact write worker is not running"
             raise models.ArtifactStoreUnavailableError(msg)
@@ -504,7 +517,15 @@ class BlobArtifactStore(models.ArtifactStore[BlobBackend, int]):
 def plug_blob_store(
     app: Dash, backend: BlobBackend, store_q_size: int, staging_dir: Path | None = None
 ) -> None:
-    """Set `app`'s artifact store to a `BlobArtifactStore` over `backend`, and start ingesting its refs."""
-    store = BlobArtifactStore(backend, store_q_size, staging_dir)
+    """
+    Set `app`'s artifact store to a `BlobArtifactStore` over `backend`, and start ingesting its refs.
+
+    In the custodian process, which takes no upload, the store has no writer and nothing to ingest.
+    """
+    writer = not in_custodian()
+    store = BlobArtifactStore(backend, store_q_size, staging_dir, writer=writer)
     set_artifact_store(app, store)
-    Thread(target=store.ingest_stored_artifacts, args=(app,), daemon=True, name="artifact-ref-ingest").start()
+    if writer:
+        Thread(
+            target=store.ingest_stored_artifacts, args=(app,), daemon=True, name="artifact-ref-ingest"
+        ).start()
