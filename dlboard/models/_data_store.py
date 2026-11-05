@@ -624,6 +624,10 @@ class DataStore(typing.Protocol[_P]):
         """List audit log entries, most recent first, for a trash/admin view. Requires `Scope.AUDIT_LOG_READ`."""
         ...
 
+    def trashed_before(self, entity_type: models.EntityType, cutoff: datetime, *, limit: int) -> list[int]:
+        """What of `entity_type` has been in the Trash since before `cutoff`, longest first: at most `limit` ids."""
+        ...
+
 
 class ArtifactStore(typing.Protocol[_P]):
     """An artifact store for files and arbitrary byte-like data."""

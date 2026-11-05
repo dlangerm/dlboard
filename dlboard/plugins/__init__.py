@@ -3,16 +3,16 @@
 from dlboard.models import PluginProtocol
 from dlboard.plugins import auth, backend, charts, themes
 from dlboard.plugins.auth import anonymous, password
-from dlboard.plugins.backend import artifact_purge_worker, basic_rest_backend, error
+from dlboard.plugins.backend import artifact_purge_worker, basic_rest_backend, error, trash_retention
 from dlboard.plugins.data_stores import filesystem, postgres, s3, sqlite
 
-LOCAL_STORAGE: list[PluginProtocol] = [sqlite, filesystem, artifact_purge_worker]
+LOCAL_STORAGE: list[PluginProtocol] = [sqlite, filesystem, artifact_purge_worker, trash_retention]
 # Postgres metadata (configured from `POSTGRES_*` env vars -- see `postgres.PostgresSettings`) with
 # the same on-disk artifact store; compose it into a `dlboard serve custom --plugins` list.
-POSTGRES_STORAGE: list[PluginProtocol] = [postgres, filesystem, artifact_purge_worker]
+POSTGRES_STORAGE: list[PluginProtocol] = [postgres, filesystem, artifact_purge_worker, trash_retention]
 # Postgres metadata with an S3-protocol artifact store (configured from `S3_*` env vars -- see
 # `s3.S3Settings`) instead of local disk; needs the `s3` extra (`pip install 'dlboard[s3]'`).
-POSTGRES_S3_STORAGE: list[PluginProtocol] = [postgres, s3, artifact_purge_worker]
+POSTGRES_S3_STORAGE: list[PluginProtocol] = [postgres, s3, artifact_purge_worker, trash_retention]
 LOCAL_AUTH: list[PluginProtocol] = [anonymous]
 # Username/password sign-in, for hosting dlboard for other people: swap it in for `LOCAL_AUTH` in a
 # `dlboard serve custom --plugins` list. Needs `DLBOARD_SECRET_KEY` -- see `password.PasswordSettings`

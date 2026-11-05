@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
+import pendulum
 import pytest
 import sqlalchemy as sa
 
@@ -226,3 +227,22 @@ def test_reading_a_comparison_seeks_its_members_by_page(
     assert len(reads) >= 4
     for statement, parameters in reads:
         _assert_seeks(store, postgres_settings, statement, parameters)
+
+
+def test_finding_what_has_been_in_the_trash_longest_reads_only_the_trash(
+    store: PostgresStore, postgres_settings: PostgresSettings, experiment_id: int, admin: models.User
+) -> None:
+    run = store.create_run(models.NewRun(experiment_id=experiment_id))
+    store.delete_run(run.id, admin)
+
+    statements = _recorded(
+        store,
+        lambda: [store.trashed_before(kind, pendulum.now("UTC"), limit=10) for kind in models.EntityType],
+    )
+
+    assert len(statements) == len(models.EntityType)
+    for statement, parameters in statements:
+        nodes, indexes = _plan(store, postgres_settings, statement, parameters)
+        assert {indexes[n["Index Name"]].split(" ON ")[0] for n in nodes if "Index Name" in n} <= {
+            f'CREATE INDEX "idx_{kind}_deleted"' for kind in ("Project", "Experiment", "Run", "Artifact")
+        }, statement

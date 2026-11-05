@@ -822,6 +822,11 @@ class AuthorizingDataStore(models.DataStore[...]):
         require_scope(self._actor, Scope.AUDIT_LOG_READ)
         return self._inner.list_audit_log(self._bound(actor), limit=limit, offset=offset)
 
+    def trashed_before(self, entity_type: models.EntityType, cutoff: datetime, *, limit: int) -> list[int]:
+        # What the Trash has held longest is for the task that empties it, which no user is behind.
+        require_scope(self._actor, Scope.PURGE)
+        return self._inner.trashed_before(entity_type, cutoff, limit=limit)
+
 
 class AuthorizingArtifactStore(models.ArtifactStore[...]):
     """An `ArtifactStore` that only accepts artifacts for runs its `authorizer`'s actor may write to."""

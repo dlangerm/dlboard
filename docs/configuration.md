@@ -68,6 +68,7 @@ restarts it if it dies or hangs. Every server sharing a database starts one, and
 | `DLBOARD_CUSTODIAN_STARTUP_S` | `600.0` | How long a custodian may take to start (build the app, and migrate the database if it is first) before the server takes it for hung. |
 | `DLBOARD_CUSTODIAN_DUTY_CYCLE` | `0.25` | The share of time a task may spend in a batch of work: after one that took `t`, it waits `t * (1 - d) / d`, so it takes at most this share of the database's time, and less when the database is busy. |
 | `DLBOARD_CUSTODIAN_CLAIM_S` | `300` | How long a claim on a work item lasts: an item whose custodian died is claimed again after this. |
+| `DLBOARD_TRASH_RETENTION_DAYS` | `30` | How long anything stays in the Trash, restorable, before it is purged for good, whoever deleted it. Counted from no earlier than the first time the server checks, so what was in the Trash before an upgrade is not purged the moment it lands. |
 
 ## Logging
 

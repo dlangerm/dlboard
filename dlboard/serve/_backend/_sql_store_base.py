@@ -314,6 +314,16 @@ def build_metadata(schema: str | None = None) -> tuple[sa.MetaData, dict[type[Ba
     # A custodian claims the longest due of one kind of work item.
     work = tables[WorkItem]
     sa.Index("idx_WorkItem_due", work.c.kind, work.c.due_at)
+    # What has been in the Trash longest, without reading what is not in it, which is nearly everything.
+    for model in sorted(SOFT_DELETABLE, key=lambda m: m.__name__):
+        table = tables[model]
+        deleted = table.c.deleted_at.is_not(None)
+        sa.Index(
+            f"idx_{model.__name__}_deleted",
+            table.c.deleted_at,
+            sqlite_where=deleted,
+            postgresql_where=deleted,
+        )
     return metadata, tables
 
 
@@ -322,6 +332,15 @@ def _runs_among(
 ) -> list[sa.ColumnElement[bool]]:
     """What limits a query to the runs `run_ids` names, if it is limited to any: `None` is every run of the experiment."""
     return [] if run_ids is None else [column.in_(run_ids)]
+
+
+_TRASHABLE: Final[Mapping[models.EntityType, type[BaseModel]]] = {
+    models.EntityType.PROJECT: models.Project,
+    models.EntityType.EXPERIMENT: models.Experiment,
+    models.EntityType.RUN: models.Run,
+    models.EntityType.ARTIFACT: models.Artifact,
+}
+"""The table each kind of entity the Trash holds is in."""
 
 
 def _in_batches(ids: Iterable[int]) -> Iterator[list[int]]:
@@ -2668,3 +2687,14 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
     def list_deleted_artifacts(self, limit: int = 100, offset: int = 0) -> Iterator[models.Artifact]:
         """List soft-deleted artifacts, most recently deleted first, for a trash/admin view."""
         yield from self._list_deleted(models.Artifact, limit=limit, offset=offset)
+
+    def trashed_before(self, entity_type: models.EntityType, cutoff: datetime, *, limit: int) -> list[int]:
+        """What has been in the Trash since before `cutoff`, longest first, found by its partial `deleted_at` index."""
+        table = self._tables[_TRASHABLE[entity_type]]
+        rows = self._execute(
+            sa.select(table.c.id)
+            .where(table.c.deleted_at.is_not(None), table.c.deleted_at < cutoff)
+            .order_by(table.c.deleted_at, table.c.id)
+            .limit(limit)
+        )
+        return [entity_id for (entity_id,) in rows]
