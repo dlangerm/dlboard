@@ -22,7 +22,7 @@ artifacts. The built-ins are `dlboard/plugins/data_stores/sqlite.py`, `filesyste
 
 ## Postgres
 
-`dlboard.plugins.POSTGRES_STORAGE` (`postgres` + `filesystem` + the artifact purge worker) swaps
+`dlboard.plugins.POSTGRES_STORAGE` (`postgres` + `filesystem` + the artifact purge and retention workers) swaps
 sqlite for a shared Postgres. Install the driver with the `postgres` extra
 (`pip install 'dlboard[postgres]'`), put `POSTGRES_STORAGE` in your own plugin list, and run it with
 `dlboard serve custom --plugins yourmodule:PLUGINS`:

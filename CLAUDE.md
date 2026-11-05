@@ -129,13 +129,14 @@ class at all. Lives under `client/`, not `plugins/`, so a client install never n
 just to construct one.
 
 `dlboard/plugins/__init__.py` defines the bundles used for a local deployment:
-- `LOCAL_STORAGE` = `[sqlite, filesystem, artifact_purge_worker]` — the metadata DB, artifact blob storage, and the
-  worker that deletes purged artifacts' blobs
+- `LOCAL_STORAGE` = `[sqlite, filesystem, artifact_purge_worker, retention_worker]` — the metadata DB, artifact blob
+  storage, the worker that deletes purged artifacts' blobs, and the one that enforces retention policies and empties
+  the Trash (on a timer, under a DB lease so only one process sweeps; off in tests -- see `pytest_configure`)
 - `BUILTIN_CHARTS` = image_series, file_list, line_chart, bar_chart, table_chart, histogram
 - `LOCAL_DEPLOYMENT` = all of the above, used by `dlboard serve local`
-- `POSTGRES_STORAGE` = `[postgres, filesystem, artifact_purge_worker]` — for a shared deployment, composed
+- `POSTGRES_STORAGE` = `[postgres, filesystem, artifact_purge_worker, retention_worker]` — for a shared deployment, composed
   into a `dlboard serve custom --plugins` list; configured by `DLBOARD_POSTGRES_*` env vars (`PostgresSettings`)
-- `POSTGRES_S3_STORAGE` = `[postgres, s3, artifact_purge_worker]` — same, but artifacts go to any
+- `POSTGRES_S3_STORAGE` = `[postgres, s3, artifact_purge_worker, retention_worker]` — same, but artifacts go to any
   S3-protocol object store (AWS, MinIO, VAST, ...) instead of local disk; configured by `DLBOARD_S3_*` env
   vars (`S3Settings`). `filesystem` and `s3` are both just a `BlobBackend`
   (`plugins/data_stores/_blob_store.py`) plugged into the shared `BlobArtifactStore` -- see

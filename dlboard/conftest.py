@@ -28,6 +28,7 @@ from dlboard._telemetry import _sdk
 from dlboard._telemetry.traces import TRACES
 from dlboard.plugins import BUILTIN_BACKEND, LOCAL_AUTH
 from dlboard.plugins.backend import artifact_purge_worker
+from dlboard.plugins.backend.retention_worker import RetentionWorkerSettings
 from dlboard.plugins.data_stores import filesystem, postgres, s3, sqlite
 from dlboard.plugins.data_stores._blob_store import BlobArtifactStore
 from dlboard.plugins.data_stores.postgres import PostgresSettings, PostgresStore
@@ -39,6 +40,7 @@ from dlboard.serve._backend import _auth
 from dlboard.serve._backend._data_store import ARTIFACT_STORE
 from dlboard.serve._backend._metric_frame import MetricFrame
 from dlboard.serve._pages._experiment._panel_data import PanelData, WideHistory
+from dlboard.serve._settings_env import set_setting_env
 from dlboard.serve.telemetry import LOGS, METRICS, _instrument
 
 if TYPE_CHECKING:
@@ -194,8 +196,14 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    """Start an empty per-test duration tally for this run."""
+    """
+    Start an empty per-test duration tally for this run, and keep the retention worker out of every app a test builds.
+
+    It runs on a timer, so an app a test serves for minutes would sweep its store (and add its user) partway through
+    whatever the test was doing. A test of it builds a `Sweeper` and sweeps when it means to.
+    """
     config.stash[_MEASURED] = {}
+    set_setting_env(RetentionWorkerSettings, "retention_enabled", value=False)
 
 
 def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) -> None:

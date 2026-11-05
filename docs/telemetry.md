@@ -136,6 +136,10 @@ Every attribute has a small, fixed set of values. The names and attributes are c
 | `dlboard.runs.finished` | counter | `dlboard.run.status` | Runs reported done, by how they ended. |
 | `dlboard.auth.sign_ins` | counter | `dlboard.auth.outcome` (`success`, `wrong_credentials`, `throttled`, `disabled`) | Attempts at the password sign-in form. |
 | `dlboard.server.workers` | up/down counter | | Server worker processes that started and are serving. One series per process, so it stops arriving when the server is down. |
+| `dlboard.retention.runs.deleted` | counter | | Runs a retention policy moved to the Trash. |
+| `dlboard.retention.runs.overdue` | up/down counter | | Runs retention policies say to delete that are not deleted yet, as of the last sweep (counted up to 10,000 a project). Above zero for long means the worker cannot keep up: see `DLBOARD_RETENTION_SWEEP_BUDGET`. |
+| `dlboard.retention.sweep.duration` | histogram, s | `dlboard.outcome` | How long one retention sweep of every project took, on the one process that holds the retention lease. |
+| `dlboard.trash.purged` | counter | `dlboard.entity.type` (`project`, `experiment`, `run`, `artifact`) | What had been in the Trash `DLBOARD_TRASH_RETENTION_DAYS` and was purged for good. |
 
 ### Alerting that it's down
 
@@ -221,7 +225,7 @@ names (`http.request.method`, `http.response.status_code`), the same as the clie
 
 **Running under `opentelemetry-instrument` or the Kubernetes Operator.** A platform that sets OpenTelemetry up for you
 gets one pipeline, not two. If the process already has an SDK tracer provider when dlboard starts, dlboard's own spans
-(`dlboard.blob.write`, `dlboard.blob.ingest`, `dlboard.artifact.purge`) go through it, with or without
+(`dlboard.blob.write`, `dlboard.blob.ingest`, `dlboard.artifact.purge`, `dlboard.retention.sweep`) go through it, with or without
 `DLBOARD_TELEMETRY_TRACES`, and the libraries the platform already instrumented are left as it set them up. Without one,
 and with `DLBOARD_TELEMETRY_TRACES` on, dlboard's provider becomes the process's global one, so a plugin that calls
 `trace.get_tracer(...)` reaches it. This is the server only: the client never replaces a provider in your training process.

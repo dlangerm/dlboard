@@ -590,6 +590,81 @@
       ],
       "title": "Sign-in attempts, by outcome",
       "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 57
+      },
+      "id": 21,
+      "panels": [],
+      "title": "Retention",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Runs retention policies say to delete that are not deleted yet. Above zero for hours means the worker cannot keep up: raise DLBOARD_RETENTION_SWEEP_BUDGET.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 58
+      },
+      "id": 22,
+      "targets": [
+        {
+          "expr": "sum(dlboard_retention_runs_overdue)",
+          "legendFormat": "overdue",
+          "refId": "A"
+        }
+      ],
+      "title": "Runs retention has yet to delete",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 58
+      },
+      "id": 23,
+      "targets": [
+        {
+          "expr": "sum(rate(dlboard_retention_runs_deleted_total[$__rate_interval]))",
+          "legendFormat": "runs to the Trash",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (dlboard_entity_type) (rate(dlboard_trash_purged_total[$__rate_interval]))",
+          "legendFormat": "purged {{dlboard_entity_type}}",
+          "refId": "B"
+        }
+      ],
+      "title": "Retention deletions and Trash purges",
+      "type": "timeseries"
     }
   ],
   "refresh": "30s",

@@ -54,6 +54,12 @@ and how a changed rule takes effect. A kept run is never deleted by retention.
 | `DLBOARD_RETENTION_RUN_SLACK` | `10` | How many runs past its count a project or experiment may hold before runs are deleted, down to the count: runs are deleted in batches, not one for each new run. |
 | `DLBOARD_RETENTION_AGE_SLACK_DAYS` | `1` | How many days past its age a run may get before runs are deleted, down to the age. |
 | `DLBOARD_RETENTION_RUNNING_GRACE_DAYS` | `7` | How long a run that is still running is never deleted for. One running longer than this has lost its client, which then never reported that it ended, and is deleted as any other. |
+| `DLBOARD_RETENTION_ENABLED` | `true` | Whether this server enforces retention at all. Off, policies are still kept and shown, and nothing is deleted or purged. |
+| `DLBOARD_RETENTION_INTERVAL_S` | `300` | How long the retention worker waits between one sweep of every project and the next. Every server process runs the worker, but only the one holding the retention lease in the database sweeps, so replicas sharing a database never contend for the same rows. |
+| `DLBOARD_RETENTION_BATCH` | `100` | How many runs (or Trash entries) the worker deletes in one transaction. |
+| `DLBOARD_RETENTION_PAUSE_S` | `1.0` | How long the worker pauses between batches, so live traffic gets the database back. |
+| `DLBOARD_RETENTION_SWEEP_BUDGET` | `5000` | The most runs (and Trash entries) one sweep deletes. A project far past its rule is caught up over several sweeps, and shows as out of spec until it is; raise this if `dlboard.retention.runs.overdue` keeps growing. |
+| `DLBOARD_TRASH_RETENTION_DAYS` | `30` | How long anything stays in the Trash, restorable, before the worker purges it for good, whoever deleted it. Counted from no earlier than the worker's first sweep, so what was in the Trash before an upgrade is not purged the moment it lands. |
 
 ## Production server (Granian)
 
