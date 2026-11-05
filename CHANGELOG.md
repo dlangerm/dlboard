@@ -12,6 +12,51 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ## [Unreleased]
 
+### Added
+
+* **Retention policies.** A deployment people log to for months no longer grows without bound. Each project keeps every
+  run, the newest N runs (of each experiment, or of the whole project), or the runs of the last N days, set by its owner in
+  a new **Retention** section of the project page; an editor may hold an experiment to a stricter rule of the same kind.
+  A changed rule waits `DLBOARD_RETENTION_GRACE_DAYS` (7) while the rule before it is still enforced, with a preview of what
+  it would delete. The new `retention` plugin (in every storage bundle) moves what a rule says to delete to the Trash, in
+  batches past a slack, as the `dlboard:retention` user, from the custodian process: one check a project, claimed by any
+  custodian, paced to its share of the database, so servers sharing a Postgres add capacity and live traffic keeps the
+  database. A project it has not caught up with is flagged on its page and counted in `dlboard.retention.runs.deleted` and
+  `dlboard.task.backlog`. Admins set the default for new projects and a cap owners cannot exceed
+  (`DLBOARD_RETENTION_DEFAULT_*`, `DLBOARD_RETENTION_MAX_*`). Nothing yet refuses new data from a project far past its rule.
+  See [docs/retention.md](docs/retention.md). (#472)
+* **Kept runs.** **Keep** in any run list's bar takes a run out of retention's reach (a lock after its name says so). An
+  editor keeps a run; only an owner releases it or deletes it, including by deleting its experiment. Keeping is not pinning,
+  which anyone can pin. (#472)
+* **The Trash empties itself.** What has been in the Trash `DLBOARD_TRASH_RETENTION_DAYS` (30) is purged, whoever deleted
+  it, counted from the first time the server checks, so upgrading never purges old Trash at once. (#472)
+* **A custodian process for background work.** Purges, blob deletion, the Trash and retention no longer run on threads of
+  the web workers: the server starts one custodian process beside them, restarts it if it dies, kills and replaces it if it
+  hangs, and it dies with the server. Plugins register a `Task` instead of starting a thread; the database holds what each
+  task and custodian is doing, so several servers share the work (`FOR UPDATE SKIP LOCKED` on Postgres) and see whether it
+  is being done: the admin page's new **Background tasks** tab, `/healthz/custodian`, and the `dlboard.task.*` and
+  `dlboard.custodian.starts` metrics. An admin's Purge is queued and done by the custodian, not in the request. See
+  [docs/background-tasks.md](docs/background-tasks.md). (#472)
+* **Plugins can keep a setting per project** (`register_setting`, with who may read and write each scope and a check of the
+  value) **and add a section to a project's page** (`register_project_section`), without touching the store. Retention is
+  built on them. (#472)
+
+### Changed
+
+* **Migrations `0008` to `0010`** add the custodian's tables (copying the old purge queue's pending rows into them), partial
+  indexes for deleted rows, `Run.kept_at`/`kept_by`, the scoped settings table and partial indexes for live and kept runs
+  (the one for live runs replaces `idx_run_experiment`: the same index over the live rows only): expand-only but for that
+  index, which loses no data. Every existing project keeps every run until an admin sets a default, which then applies
+  after the grace period. See [docs/upgrading.md](docs/upgrading.md#background-tasks-and-retention). (#472)
+* **"Resume cleanup" is gone** from the admin page: queued work always resumes, by itself.
+* **A custom `DataStore` has more to implement.** `trashed_before`, `keep_runs`, `release_runs`, `kept_runs`,
+  `get_scoped_settings`, `all_scoped_settings`, `put_scoped_setting`, `count_runs`, and `get_runs(created_before=,
+  oldest_first=, include_kept=)`; `delete_runs` takes `spare_kept` and returns the ids it deleted. The purge queue's methods
+  are gone (`list_pending_artifact_purges`, `count_pending_artifact_purges`, `complete_artifact_purge`,
+  `fail_artifact_purge`, `artifact_purge_progress_at`, `record_artifact_purge_progress`), as is
+  `artifact_purge_worker.wake()`: queue a work item for the custodian instead (see
+  [docs/background-tasks.md](docs/background-tasks.md#for-plugin-authors)). (#472)
+
 ## [0.14.0] - 2026-11-04
 
 ### Added

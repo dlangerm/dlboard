@@ -33,6 +33,20 @@ restarts or is scaled up mid-rollout fails until it's replaced by the new versio
 rolling deploy does anyway. A release that can't promise even this says so in the changelog and needs
 all servers stopped together.
 
+## Background tasks and retention
+
+Retention (0.15) changes nothing on its own: a project from before it keeps every run unless an admin sets
+`DLBOARD_RETENTION_DEFAULT_*` or a cap, and then the scheduling task gives each such project that default once the grace
+period (`DLBOARD_RETENTION_GRACE_DAYS`, 7) is over, so there is time to see what it would delete on each project page first.
+The Trash starts emptying itself of what has been in it `DLBOARD_TRASH_RETENTION_DAYS` (30), counted from the first time the
+server checks: anything deleted long before the upgrade is purged 30 days after it, not at once.
+
+The server now starts a **custodian** process beside its workers for background work (purges, blob deletion, the Trash,
+retention), so a deployment that counted its processes, or limited them, sees one more per server. Purges an admin asks for
+no longer run in the request: they are queued and done by the custodian, and the old purge queue's pending rows are copied
+into the new one by the migration. To run no background work on a server, set `DLBOARD_CUSTODIAN_ENABLED=false` (another server
+sharing the database may still run it). See [background-tasks.md](background-tasks.md) and [retention.md](retention.md).
+
 ## Charts saved by a newer version
 
 A chart's settings are checked strictly, so a server shows a chart saved with settings it does not know as an error, and

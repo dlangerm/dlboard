@@ -55,8 +55,8 @@ their project:
 | Role | Can |
 |---|---|
 | `viewer` | read everything, post notes, save personal views |
-| `editor` | + log runs/metrics/artifacts, create experiments, edit the shared layout, soft-delete within the project |
-| `owner` | + manage members and sharing, rename or delete the project |
+| `editor` | + log runs/metrics/artifacts, create experiments, edit the shared layout, soft-delete within the project, keep a run, hold an experiment to a stricter [retention](../retention.md) rule |
+| `owner` | + manage members and sharing, rename or delete the project, set its retention rule, release or delete a kept run |
 
 A role comes from a grant to a user, a grant to an IdP group, or the project's `everyone_role`
 ("everyone signed in can view/edit"). Whoever creates a project owns it. Something you can't see

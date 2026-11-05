@@ -32,6 +32,11 @@ user) goes through small accessor functions in `dlboard/serve/_backend/` (e.g.
 `get_data_store()`, `get_auth_provider()`, `get_current_user()`) rather than plugins reaching into
 each other directly. See [plugins/overview.md](plugins/overview.md) for the plugin contract itself.
 
+**Background work.** Purges, blob deletion, the Trash and [retention](retention.md) run in one **custodian** process per
+server, started by the server's master beside the web workers, never in a worker. Plugins register tasks; the database
+holds each task's and custodian's state, so several servers share the work and anything can see whether it is being done. See
+[background-tasks.md](background-tasks.md).
+
 **Who's asking, and what they may do.** Every route sits behind one request gate, which resolves
 the caller to a `User` before the route runs: by API token, session, or the auth plugin. Within a
 request, `get_data_store()`/`get_artifact_store()` return wrappers bound to that user, which

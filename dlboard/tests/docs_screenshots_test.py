@@ -35,6 +35,7 @@ from dlboard.client.artifacts.figure import Figure
 from dlboard.client.artifacts.overlay import Box, Overlay, Point, Polyline, Shape
 from dlboard.client.histograms import ExponentialBinning
 from dlboard.conftest import ScreenshotMode
+from dlboard.plugins.retention import _section as retention
 from dlboard.serve import get_system_data_store
 from dlboard.serve._pages._experiment._chart_autogen import ARTIFACT_PANEL_SUFFIX
 from dlboard.serve._pages._experiment._ids import PAGE_EXPERIMENT_ID
@@ -115,6 +116,7 @@ class DocScreenshot(StrEnum):
     TABLE_CHART = "table-chart"
     HISTOGRAM_CHART = "histogram-chart"
     COMPARISON = "comparison"
+    RETENTION = "retention"
 
     @property
     def path(self) -> Path:
@@ -381,6 +383,15 @@ def _stage(shot: DocScreenshot, page: Page, demo: Demo, dlboard_app: Dash) -> Pa
             page.goto(f"{demo.url}/project/{demo.project_id}")
             expect(page.locator(".experiment-card")).to_have_count(demo.n_experiments)
             return page
+        case DocScreenshot.RETENTION:
+            page.goto(f"{demo.url}/project/{demo.project_id}")
+            # What a rule would delete, in the form alone: saving it would change the demo every other shot reads.
+            page.locator(f"#{retention.KIND_ID}").click()
+            page.get_by_role("option", name="The newest runs").click()
+            page.locator(f"#{retention.AMOUNT_ID}").fill("3")
+            expect(page.locator(f"#{retention.PREVIEW_ID}")).to_contain_text("it would delete")
+            page.mouse.move(0, _VIEWPORT["height"] - 1)
+            return page.locator(f"#{retention.SECTION_ID}")
         case DocScreenshot.JUMP_PALETTE:
             page.goto(demo.url)
             expect(page.locator(".project-card")).to_have_count(demo.n_projects)
