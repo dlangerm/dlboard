@@ -830,6 +830,11 @@ class AuthorizingDataStore(models.DataStore[...]):
         require_scope(self._actor, Scope.PURGE)
         return self._inner.trashed_before(entity_type, cutoff, limit=limit)
 
+    def retention_worker_state(self) -> models.RetentionWorkerState:
+        # Which host and process enforce it: for whoever may see the Trash, which it empties.
+        self._require_trash_access()
+        return self._inner.retention_worker_state()
+
     # -- Soft-delete, restore, purge ------------------------------------------------------------------
     #
     # The `actor` every one of these takes must be the one this store is bound to (see `_bound`) --

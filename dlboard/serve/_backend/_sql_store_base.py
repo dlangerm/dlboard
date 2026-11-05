@@ -2668,6 +2668,21 @@ class SQLStoreBase[T](ABC, models.DataStore[T]):
         )
         return since
 
+    def retention_worker_state(self) -> models.RetentionWorkerState:
+        """The retention columns of `AppState`'s one row."""
+        state = self._tables[AppState]
+        ((holder, until, swept_at, since),) = self._execute(
+            sa.select(
+                state.c.retention_lease_holder,
+                state.c.retention_lease_until,
+                state.c.retention_swept_at,
+                state.c.trash_retention_since,
+            ).where(state.c.id == APP_STATE_ROW_ID)
+        )
+        return models.RetentionWorkerState(
+            lease_holder=holder, lease_until=until, swept_at=swept_at, trash_retention_since=since
+        )
+
     def trashed_before(self, entity_type: models.EntityType, cutoff: datetime, *, limit: int) -> list[int]:
         """What has been in the Trash since before `cutoff`, longest first, found by its partial `deleted_at` index."""
         table = self._tables[_TRASHABLE[entity_type]]

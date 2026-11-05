@@ -23,6 +23,8 @@ STATUS_FIELD: Final = "_status"
 DURATION_FIELD: Final = "_duration_s"
 STATUS_TEXT_FIELD: Final = "_status_text"
 STATUS_DETAIL_FIELD: Final = "_status_detail"
+KEPT_FIELD: Final = "_kept"
+"""Whether the run is kept: retention never deletes it. Drawn as a lock after its name (`DlboardRunLink`)."""
 """Reserved row fields (underscore-prefixed, like `_swatch`): a hyperparameter or metric named "status" can't shadow them."""
 
 EYE_COLUMN_WIDTH: Final = 32
@@ -85,6 +87,7 @@ def run_fields(run: Run) -> dict[str, Any]:
         DURATION_FIELD: _duration_seconds(run),
         STATUS_TEXT_FIELD: _status_text(run),
         STATUS_DETAIL_FIELD: _status_detail(run),
+        KEPT_FIELD: run.kept_at is not None,
     }
 
 

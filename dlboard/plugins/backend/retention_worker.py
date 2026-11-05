@@ -38,7 +38,7 @@ from dlboard._telemetry import Attributes, attribute
 from dlboard._telemetry.traces import SpanKind, span
 from dlboard.plugins.backend import artifact_purge_worker
 from dlboard.serve import wait_for_data_store
-from dlboard.serve._backend._retention_settings import RetentionSettings
+from dlboard.serve._backend._retention_settings import OVERDUE_COUNTED, RetentionSettings
 from dlboard.serve.telemetry import (
     Counter,
     Histogram,
@@ -63,9 +63,6 @@ RETENTION_PRINCIPAL: Final = models.Principal(
     issuer="dlboard:system", subject="retention", username="dlboard:retention"
 )
 """Who retention deletes and purges as: an issuer no auth provider issues, so no one signs in as it."""
-
-_OVERDUE_COUNTED: Final = 10_000
-"""How many runs still to delete a project's status counts up to: past that, it says only that it holds this many."""
 
 
 class RetentionWorkerSettings(BaseSettings):
@@ -151,7 +148,7 @@ class Sweeper:
             overdue = 0
             for project in list(self._store.get_projects()):
                 budget = self._enforce(project.id, budget)
-                left = len(self._store.retention_candidates(project.id, limit=_OVERDUE_COUNTED))
+                left = len(self._store.retention_candidates(project.id, limit=OVERDUE_COUNTED))
                 self._store.record_retention_status(project.id, overdue_runs=left)
                 overdue += left
             self._report_overdue(overdue)

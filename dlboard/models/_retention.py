@@ -186,3 +186,15 @@ class ProjectRetention(BaseModel, frozen=True, extra="forbid"):
     experiments: dict[int, ScopedRetention] = {}
     """Only the experiments with a rule of their own (in effect or pending)."""
     status: RetentionStatus | None = None
+
+
+class RetentionWorkerState(BaseModel, frozen=True, extra="forbid"):
+    """Which server process enforces retention, and when it last swept: for the admin page."""
+
+    lease_holder: str | None = None
+    """The process holding the lease (`host:pid:tag`), while it does; `None` before any has swept."""
+    lease_until: AwareDatetime | None = None
+    swept_at: AwareDatetime | None = None
+    """When every project was last checked."""
+    trash_retention_since: AwareDatetime | None = None
+    """When retention first swept this database: the Trash is purged counting from no earlier than this."""

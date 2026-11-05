@@ -569,6 +569,10 @@ class DataStore(typing.Protocol[_P]):
         """What of `entity_type` has been in the Trash since before `cutoff`, longest first: at most `limit` ids."""
         ...
 
+    def retention_worker_state(self) -> models.RetentionWorkerState:
+        """Which server process enforces retention, and when it last swept, for an admin to see."""
+        ...
+
     def list_users(self) -> list[models.User]:
         """Every user, by username."""
         ...

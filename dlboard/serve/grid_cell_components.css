@@ -260,3 +260,11 @@
   font-size: var(--mantine-font-size-xs);
   color: var(--mantine-color-dimmed);
 }
+
+/* The lock after a kept run's name: retention never deletes it. */
+.dl-run-kept {
+  margin-left: 0.3em;
+  font-size: 0.85em;
+  vertical-align: -0.1em;
+  color: var(--mantine-color-dimmed);
+}

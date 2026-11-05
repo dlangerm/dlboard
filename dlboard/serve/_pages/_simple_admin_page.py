@@ -27,6 +27,7 @@ from dlboard.serve import (
 )
 from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import ButtonId, DivId, ModalId, StoreId, ValueId
+from dlboard.serve._pages._admin_retention import render_retention_overview
 from dlboard.serve._pages._dash_helpers import TriggeredId, busy_while_running, require_triggered_id
 from dlboard.serve._url import relative_path
 
@@ -55,6 +56,7 @@ ADMIN_TRASH_CONTENT_ID: DivId[_AdminPage] = DivId("admin-trash-content")
 ADMIN_AUDIT_LOG_CONTENT_ID: DivId[_AdminPage] = DivId("admin-audit-log-content")
 ADMIN_ABOUT_CONTENT_ID: DivId[_AdminPage] = DivId("admin-about-content")
 ADMIN_USERS_CONTENT_ID: DivId[_AdminPage] = DivId("admin-users-content")
+ADMIN_RETENTION_CONTENT_ID: DivId[_AdminPage] = DivId("admin-retention-content")
 ADMIN_INITIAL_TAB_ID: StoreId[_AdminPage] = StoreId("admin-initial-tab")
 # Pattern-matched "type" discriminators, not standalone component ids -- plain strings.
 ADMIN_RESTORE_BUTTON_TYPE: Final = "admin-restore-button"
@@ -521,12 +523,14 @@ def _admin_layout(tab: str) -> Component:
                         [
                             dmc.TabsTab("Trash", value="trash"),
                             dmc.TabsTab("Audit Log", value="audit-log"),
+                            dmc.TabsTab("Retention", value="retention"),
                             dmc.TabsTab("Users", value="users"),
                             dmc.TabsTab("About", value="about"),
                         ]
                     ),
                     dmc.TabsPanel(html.Div(id=ADMIN_TRASH_CONTENT_ID), value="trash", pt="md"),
                     dmc.TabsPanel(html.Div(id=ADMIN_AUDIT_LOG_CONTENT_ID), value="audit-log", pt="md"),
+                    dmc.TabsPanel(html.Div(id=ADMIN_RETENTION_CONTENT_ID), value="retention", pt="md"),
                     dmc.TabsPanel(html.Div(id=ADMIN_USERS_CONTENT_ID), value="users", pt="md"),
                     dmc.TabsPanel(html.Div(id=ADMIN_ABOUT_CONTENT_ID), value="about", pt="md"),
                 ],
@@ -601,6 +605,20 @@ def _register_tab_callbacks(app: Dash) -> None:
         store = get_data_store()
         auth_provider_name = get_auth_provider().__class__.__name__
         return _render_about(store, get_current_user(), auth_provider_name, get_installed_plugins())
+
+
+def _register_retention_tab(app: Dash) -> None:
+    @app.callback(
+        Output(ADMIN_RETENTION_CONTENT_ID, "children"),
+        Input(ADMIN_TABS_ID, "value"),
+    )
+    def render_retention_tab(tab: str) -> Component:
+        if tab != "retention":
+            raise PreventUpdate
+        try:
+            return render_retention_overview(get_data_store())
+        except PermissionError:
+            return dmc.Text("You don't have permission to view retention.", c="dimmed")
 
 
 def _register_restore_callback(app: Dash) -> None:
@@ -723,6 +741,7 @@ def register(app: Dash) -> None:
         return _admin_layout(tab or "trash")
 
     _register_tab_callbacks(app)
+    _register_retention_tab(app)
     _register_restore_callback(app)
     _register_purge_callbacks(app)
     _register_user_action_callback(app)

@@ -45,6 +45,8 @@ from dlboard.serve._pages._run_list import (
     RunActionRequest,
     RunListSurface,
     action_bar,
+    keep_actions,
+    keep_or_release,
     register_run_list,
     request_store_id,
     simple_action,
@@ -211,6 +213,7 @@ def render_members(
         simple_action(RunListSurface.COMPARISON, RunAction.HIDE, "Hide", icon_name=Icon.EYE_OFF),
         *pin_menus(RunListSurface.COMPARISON),
         compare_menu(RunListSurface.COMPARISON, addable, current=page.id, here=can_edit),
+        *keep_actions(RunListSurface.COMPARISON),
         *(
             [simple_action(RunListSurface.COMPARISON, RunAction.REMOVE, "Remove", icon_name=Icon.CLOSE)]
             if can_edit
@@ -390,6 +393,9 @@ def _act(request: RunActionRequest, act: _Act) -> tuple[Any, ...]:
             return no_update, no_update, no_update, pinned.notice, pinned.rows, no_update
         case RunAction.COMPARE_NEW | RunAction.COMPARE_ADD | RunAction.COMPARE_PINS:
             return _compare(request, act)
+        case RunAction.KEEP | RunAction.RELEASE:
+            kept = keep_or_release(request, ids.COMPARISON_GRID_ID)
+            return no_update, no_update, no_update, kept.notice, kept.rows or no_update, no_update
         case RunAction.DIFF | RunAction.DELETE:
             # Not on a comparison yet (the diff reads one experiment), and its runs are deleted from their experiments.
             raise PreventUpdate

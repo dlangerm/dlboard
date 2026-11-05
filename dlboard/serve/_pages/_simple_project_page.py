@@ -29,6 +29,11 @@ from dlboard.serve._pages._description_editor import (
 from dlboard.serve._pages._onboarding import first_experiment_snippet, onboarding_card
 from dlboard.serve._pages._pins._pinned_runs import register as register_pinned_runs
 from dlboard.serve._pages._project_members import register_members_callbacks, render_members_section
+from dlboard.serve._pages._project_retention import (
+    register_retention_callbacks,
+    render_retention_section,
+    retention_summary,
+)
 from dlboard.serve._url import relative_path
 
 if TYPE_CHECKING:
@@ -148,7 +153,9 @@ def render_project_page(project_id: int) -> dmc.Container:
                 align="flex-start",
                 mb="lg",
             ),
+            retention_summary(project_id),
             dmc.Box(_experiment_grid(store, project_id), id=EXP_LIST_ID),
+            render_retention_section(project),
             comparison_cards(store, project_id),
             render_members_section(project),
         ],
@@ -213,4 +220,5 @@ def register(app: Dash) -> None:
         on_confirm=_delete_project,
     )
     register_members_callbacks(app)
+    register_retention_callbacks(app)
     register_pinned_runs(app)

@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Self
+from typing import Final, Self
 
 import pendulum
 from pydantic import NonNegativeInt, PositiveInt, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from dlboard import models
+
+OVERDUE_COUNTED: Final = 10_000
+"""How many runs still to delete a project's status counts up to: past that, it says only that it holds this many or more."""
 
 
 class RetentionSettings(BaseSettings):
@@ -49,6 +52,9 @@ class RetentionSettings(BaseSettings):
     How long a run that is still running is never deleted for. One running longer has lost its client, which then
     never said it ended: it is deleted as any other.
     """
+
+    retention_warn_after_hours: NonNegativeInt = 24
+    """How long a project may hold runs its rules say to delete before its page and the admin page warn of it."""
 
     @model_validator(mode="after")
     def _one_default_within_the_caps(self) -> Self:

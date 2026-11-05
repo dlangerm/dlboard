@@ -38,6 +38,8 @@ from dlboard.serve._pages._run_list import (
     RunActionRequest,
     RunListSurface,
     action_bar,
+    keep_actions,
+    keep_or_release,
     register_run_list,
     request_store_id,
     simple_action,
@@ -288,6 +290,7 @@ def render_pinned_runs(store: DataStore[...], project_id: int, flt: PinFilter) -
                 RunListSurface.PROJECT,
                 *pin_menus(RunListSurface.PROJECT),
                 compare_menu(RunListSurface.PROJECT, store.list_comparisons(project_id, me, editable=True)),
+                *keep_actions(RunListSurface.PROJECT),
                 simple_action(
                     RunListSurface.PROJECT, RunAction.DELETE, "Delete", icon_name=Icon.DELETE, color="red"
                 ),
@@ -339,6 +342,9 @@ def _act(request: RunActionRequest, act: _Act) -> tuple[Any, ...]:
         case RunAction.PIN | RunAction.UNPIN:
             pinned = pin_or_unpin(request, PINNED_GRID_ID, RunListSurface.PROJECT)
             return pinned.rows, pinned.notice, no_update, no_update, no_update, no_update
+        case RunAction.KEEP | RunAction.RELEASE:
+            kept = keep_or_release(request, PINNED_GRID_ID)
+            return kept.rows or no_update, kept.notice, no_update, no_update, no_update, no_update
         case RunAction.DELETE:
             asked = ask_to_delete(request.run_ids)
             return no_update, no_update, asked.opened, asked.body, asked.pending, no_update
