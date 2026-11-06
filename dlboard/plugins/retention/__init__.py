@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 
 import pendulum
 
-from dlboard.plugins.retention._rules import RetentionKey, RetentionSetting
+from dlboard.plugins.retention._rules import RetentionKey, RetentionSetting, RuleVersion
 from dlboard.plugins.retention._section import (
     register_retention_callbacks,
     render_retention_section,
@@ -47,8 +47,10 @@ def _within_caps(write: SettingWrite) -> dict[str, Any]:
     The rule being saved, if the writer may set it: an owner changes only what is pending, within the caps.
 
     The rule in effect and the grace period are not a writer's to pick: a write that changes `active` from what the scope
-    holds (or has in effect by now) is refused to anyone but an admin. A pending rule past a cap is an admin's, and is marked
-    so (`cap_exempt`, worked out here, never taken from the writer) for the scheduling task never to lower it.
+    holds (or has in effect by now) is refused to anyone but an admin, and a pending rule is stamped here (who set it, when,
+    and when it takes effect), whatever the writer says of itself. Saving the rule already pending keeps its time, so
+    saving over and over never puts it off. A pending rule past a cap is an admin's, and is marked so (`cap_exempt`, worked
+    out here, never taken from the writer) for the scheduling task never to lower it.
     """
     setting = RetentionSetting.model_validate(write.value)
     stored = RetentionSetting.model_validate(write.stored) if write.stored else RetentionSetting()
@@ -65,9 +67,18 @@ def _within_caps(write: SettingWrite) -> dict[str, Any]:
     if past_cap and not write.admin:
         msg = "A rule that keeps more than this server's cap (DLBOARD_RETENTION_MAX_*) needs an admin."
         raise PermissionError(msg)
-    return RetentionSetting(
-        active=setting.active, pending=pending.model_copy(update={"cap_exempt": past_cap})
-    ).dump()
+    if stored.pending is not None and stored.pending.rule == pending.rule:
+        version = stored.pending.model_copy(update={"cap_exempt": past_cap})
+    else:
+        now = pendulum.now(pendulum.UTC)
+        version = RuleVersion(
+            rule=pending.rule,
+            set_by=write.actor_id,
+            set_at=now,
+            effective_at=now + RetentionSettings().grace,
+            cap_exempt=past_cap,
+        )
+    return RetentionSetting(active=setting.active, pending=version).dump()
 
 
 def _only_the_system(_write: SettingWrite) -> dict[str, Any]:

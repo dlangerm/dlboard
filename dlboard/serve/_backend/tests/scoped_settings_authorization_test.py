@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from sqlalchemy import event
 
 from dlboard import models
 from dlboard._compat import StrEnum
@@ -143,3 +144,27 @@ def test_a_check_is_told_what_the_scope_holds_now_and_a_bulk_read_shows_only_the
     assert seen == [None, {"n": 1}, None, {"n": 1}]
     assert sorted(as_owner.all_scoped_settings(_Key.RULE)) == sorted([mine, shared])
     assert list(as_bob.all_scoped_settings(_Key.RULE)) == [shared]
+
+
+def test_a_request_reads_a_projects_settings_once_and_a_write_of_its_own_is_seen(store: SQLLiteStore) -> None:
+    """A page draws a project's header and its sections apart, each reading the same setting (#558)."""
+    owner = _user(store, "owner")
+    as_owner = _as(store, owner)
+    project = as_owner.create_project(models.NewProject(name="p", description="")).id
+    reads: list[str] = []
+
+    def record(*args: Any) -> None:  # noqa: ANN401
+        if args[2].lstrip().startswith("SELECT") and "ScopedSetting" in args[2]:
+            reads.append(args[2])
+
+    event.listen(store._engine, "before_cursor_execute", record)
+    try:
+        assert as_owner.get_scoped_settings(_Key.RULE, project).project is None
+        assert as_owner.get_scoped_settings(_Key.RULE, project).project is None
+        assert len(reads) == 1
+        as_owner.put_scoped_setting(_Key.RULE, project, None, {"n": 1}, owner)
+        written = as_owner.get_scoped_settings(_Key.RULE, project).project
+        assert written is not None
+        assert written.value == {"n": 1}
+    finally:
+        event.remove(store._engine, "before_cursor_execute", record)

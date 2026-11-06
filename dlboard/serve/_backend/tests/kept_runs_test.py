@@ -70,7 +70,17 @@ def test_a_delete_that_spares_kept_runs_leaves_one_kept_after_it_was_chosen_and_
     assert store.delete_runs(chosen, admin, spare_kept=True) == {other}
     assert [r.id for r in store.get_runs(chain.experiment_id, run_ids=None)] == [chain.run_id]
     assert list(store.list_deleted_artifacts()) == []
+
+    def audited() -> set[int]:
+        return {
+            e.entity_id
+            for e in store.list_audit_log(admin, limit=1_000)
+            if e.action is models.AuditAction.SOFT_DELETE and e.entity_type is models.EntityType.RUN
+        }
+
+    assert audited() == {other}  # a run that was spared was not deleted, so the log does not say it was
     assert store.delete_runs(chosen - {other}, admin, spare_kept=False) == {chain.run_id}
+    assert audited() == chosen
 
 
 @pytest.mark.parametrize("include_kept", [True, False], ids=["with the kept", "without them"])

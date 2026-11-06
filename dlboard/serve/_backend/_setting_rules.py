@@ -33,6 +33,8 @@ class SettingWrite:
     """What the scope holds now (`None`: no setting), so a check can tell a change from a value that was not touched."""
     admin: bool
     """Whether the writer has `Scope.ALL`: an admin may set what an owner may not."""
+    actor_id: int
+    """Who the request is made as: a value that says who set it is the server's to fill in, not the writer's."""
 
 
 @dataclass(frozen=True)

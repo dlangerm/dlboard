@@ -23,6 +23,7 @@ from dlboard.plugins.retention._rules import (
     describe,
 )
 from dlboard.plugins.retention._section import rule_of
+from dlboard.plugins.retention._settings import RetentionSettings
 from dlboard.serve._backend._authorization import AuthorizingDataStore
 from dlboard.serve._backend._setting_rules import SettingRule
 
@@ -139,13 +140,25 @@ def test_an_owner_cannot_change_the_rule_in_effect_or_mark_a_rule_exempt_from_th
     store.put_scoped_setting(
         RetentionKey.RULE, project, None, RetentionSetting(active=in_effect).dump(), owner
     )
+    as_owner = _as(store, "owner")[0]  # a request after the server's own write: one reads settings once
     with pytest.raises(PermissionError, match="server's to change"):
         write(RetentionSetting(active=in_effect.model_copy(update={"rule": RunCount(max_runs=9)})))
 
-    pending = RuleVersion(rule=RunCount(max_runs=6), set_at=now, effective_at=now, cap_exempt=True)
+    pending = RuleVersion(
+        rule=RunCount(max_runs=6), set_by=owner.id + 1, set_at=now, effective_at=now, cap_exempt=True
+    )
     write(RetentionSetting(active=in_effect, pending=pending))  # within the cap, whatever it says of itself
-    stored = store.get_scoped_settings(RetentionKey.RULE, project).project
-    assert stored is not None
-    kept = RetentionSetting.model_validate(stored.value).pending
-    assert kept is not None
-    assert (kept.rule, kept.cap_exempt) == (RunCount(max_runs=6), False)
+
+    def kept() -> RuleVersion:
+        stored = store.get_scoped_settings(RetentionKey.RULE, project).project
+        assert stored is not None
+        version = RetentionSetting.model_validate(stored.value).pending
+        assert version is not None
+        return version
+
+    first = kept()
+    assert (first.rule, first.cap_exempt, first.set_by) == (RunCount(max_runs=6), False, owner.id)
+    assert first.effective_at - first.set_at == RetentionSettings().grace  # not the `now` the writer sent
+    assert first.effective_at > now
+    write(RetentionSetting(active=in_effect, pending=pending.model_copy(update={"effective_at": now})))
+    assert kept() == first  # saved again, it is not put off, nor brought forward
