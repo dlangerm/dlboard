@@ -37,8 +37,10 @@ pulls that section's body into the GitHub release notes and publishes both distr
   hangs, and it dies with the server. Plugins register a `Task` instead of starting a thread; the database holds what each
   task and custodian is doing, so several servers share the work (`FOR UPDATE SKIP LOCKED` on Postgres) and see whether it
   is being done: the admin page's new **Background tasks** tab, `/healthz/custodian`, and the `dlboard.task.*` and
-  `dlboard.custodian.starts` metrics. An admin's Purge is queued and done by the custodian, not in the request. See
-  [docs/background-tasks.md](docs/background-tasks.md). (#472)
+  `dlboard.custodian.starts` metrics. A task is due `every` after its last run finished, as the database records it, so
+  several servers share one schedule and a machine that sleeps runs what came due within a poll of waking. An admin's Purge
+  is queued and done by the custodian, not in the request. See [docs/background-tasks.md](docs/background-tasks.md).
+  (#472, #561)
 * **Plugins can keep a setting per project** (`register_setting`, with who may read and write each scope and a check of the
   value) **and add a section to a project's page** (`register_project_section`), without touching the store, **and refuse
   new runs in a project** (`register_run_guard`, raising `ProjectLockedError`, which the REST API answers with HTTP 423).
@@ -61,18 +63,6 @@ pulls that section's body into the GitHub release notes and publishes both distr
   [docs/background-tasks.md](docs/background-tasks.md#for-plugin-authors)). (#472)
 * **A client's error says why a server refused it.** A 4xx's `error` is in the exception's message, ahead of the server's
   request id.
-
-### Fixed
-
-* **Scheduled tasks no longer run late after a machine sleeps, nor show as overdue for it.** A task's interval was counted
-  on a clock that stops while a machine sleeps, by each server alone, while the admin page's overdue check read the wall
-  clock. A task is now due `every` after its last run finished, as the database records it, so a task that came due
-  while asleep runs within one poll of waking, and several servers share one schedule instead of each running the task.
-  (#561)
-* **Retention's grace period cannot be skipped.** A request that said its rule took effect at once was believed; the
-  server now stamps when a pending rule took effect, and by whom. (#558)
-* **A run retention spared has no audit entry.** A run kept between choosing it for deletion and deleting it was logged as
-  deleted though it was not. (#558)
 
 ## [0.14.0] - 2026-11-04
 
