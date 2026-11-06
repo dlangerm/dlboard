@@ -13,6 +13,7 @@ from dash.exceptions import PreventUpdate
 from dlboard.serve import ClientsideScript, get_current_user, get_data_store
 from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import ButtonId, DivId, ModalId, StoreId
+from dlboard.serve._pages._dash_helpers import NoticeColor, notice
 from dlboard.serve._pages._run_list._bar import register_click_gate
 
 if TYPE_CHECKING:
@@ -144,15 +145,13 @@ def register_delete(app: Dash, surface: RunListSurface, *, notify: str) -> None:
         try:
             get_data_store().delete_runs(frozenset(run_ids), get_current_user())
         except PermissionError:
-            notice = {
-                "action": "show",
-                "id": "run-list-not-yours-to-delete",
-                "title": "Not yours to delete",
-                "message": "Deleting runs takes editing the project.",
-                "color": "red",
-                "autoClose": 6_000,
-            }
-            return False, no_update, [notice]
+            refused = notice(
+                "Not yours to delete",
+                "Deleting runs takes editing the project.",
+                color=NoticeColor.RED,
+                auto_close_ms=6_000,
+            )
+            return False, no_update, refused
         return False, confirmed, no_update
 
     app.clientside_callback(

@@ -12,6 +12,7 @@ from dash.exceptions import PreventUpdate
 from pydantic import BaseModel
 
 from dlboard import models
+from dlboard._compat import StrEnum
 from dlboard.serve import ClientsideScript, Icon, icon
 from dlboard.serve import _constants as constants
 
@@ -132,6 +133,40 @@ def entity_card(
 def section_label(text: str) -> dmc.Text:
     """A small, quiet uppercase heading that groups a list (the navbar's Experiments, Runs, ...)."""
     return dmc.Text(text, size="xs", fw=600, c="dimmed", tt="uppercase", className="dl-section-label")
+
+
+class NoticeColor(StrEnum):
+    """A notification's colour: a Mantine theme colour, named as Mantine names it."""
+
+    GREEN = "green"
+    RED = "red"
+    YELLOW = "yellow"
+    BLUE = "blue"
+    GRAY = "gray"
+
+
+def notice(
+    title: str,
+    message: str,
+    *,
+    color: NoticeColor = NoticeColor.YELLOW,
+    auto_close_ms: int = 5_000,
+) -> list[dict[str, Any]]:
+    """
+    A notification for a page's notifications container: shown now, closed after `auto_close_ms`.
+
+    Its id is its title and message, so the same notice shown twice while it is still up is shown once.
+    """
+    return [
+        {
+            "action": "show",
+            "id": f"{title}-{message}",
+            "title": title,
+            "message": message,
+            "color": color,
+            "autoClose": auto_close_ms,
+        }
+    ]
 
 
 class TriggeredId(BaseModel, frozen=True, extra="forbid"):
