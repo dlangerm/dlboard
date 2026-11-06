@@ -72,21 +72,28 @@ Settings are in [configuration.md](configuration.md#background-tasks).
 ```python
 from dlboard.serve import Task, TaskContext, TaskMode, register_task
 
+
 class MyTask(StrEnum):
     TIDY = "my_tidy"
 
+
 def tidy(ctx: TaskContext) -> None:
-    store = get_system_data_store(ctx.app)   # no user is behind this: it is not authorized, so be careful with it
-    while not ctx.should_stop():             # check between batches
-        with ctx.batch():                    # paced by the duty cycle
+    store = get_system_data_store(
+        ctx.app
+    )  # no user is behind this: it is not authorized, so be careful with it
+    while not ctx.should_stop():  # check between batches
+        with ctx.batch():  # paced by the duty cycle
             ...
-    ctx.report(backlog=0)                    # what is left; shown on the tab and in dlboard.task.backlog
+    ctx.report(backlog=0)  # what is left; shown on the tab and in dlboard.task.backlog
+
 
 def plug(app: Dash) -> None:
     register_task(app, Task(name=MyTask.TIDY, run_once=tidy, every=pendulum.duration(minutes=5)))
 ```
 
-`every=None` is a task that runs only when asked for. A task that does not finish within its `timeout` is hung. A `SHARED`
+`every` counts from when the task's last run finished, on the wall clock, as the database records it: every server and the
+admin page's overdue check read the same row, so a machine that sleeps runs a task that came due within a poll of waking, and
+several servers run an hourly task once an hour between them. `every=None` is a task that runs only when asked for. A task that does not finish within its `timeout` is hung. A `SHARED`
 task claims its work with `ctx.claim(kind, limit=...)`, then `ctx.done(items)` or `ctx.retry(item, error)`; work is queued
 with `get_system_task_store(app).enqueue_work([NewWorkItem(kind=..., key=...)])` (both from `dlboard.serve._custodian`), where a key is unique among queued items of
 its kind, so queueing twice queues once, and `request_task_run(name)` starts the task on the next poll instead of its next

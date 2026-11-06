@@ -62,17 +62,74 @@ def _state(store: SQLStoreBase[Any]) -> Any:  # noqa: ANN401
     return state
 
 
+def _finished(store: SQLStoreBase[Any]) -> bool:
+    """Whether a run's end is recorded (the time it is stamped with is the clock's then, so wait before moving it)."""
+    return any(state.last_finished_at is not None for state in store.task_states())
+
+
+def _wait_for(condition: Callable[[], bool], seconds: float = 3) -> None:
+    deadline = time.monotonic() + seconds
+    while not condition():
+        assert time.monotonic() < deadline, "timed out"
+        time.sleep(0.02)
+
+
 @pytest.fixture(autouse=True)
 def _stopped(clock: Clock) -> None:
-    """Database stamps on a clock that only moves when told to (a run's timing is the monotonic clock's)."""
+    """Database stamps on a clock that only moves when told to: what is due is the wall clock's word."""
 
 
-def test_a_one_at_a_time_task_is_run_by_one_custodian_of_several(store: SQLStoreBase[Any]) -> None:
+def _interval_runs(
+    store: SQLStoreBase[Any], clock: Clock, mode: TaskMode, *, custodians: int, intervals: int
+) -> list[str]:
+    """Who ran a task of one-second intervals, as `custodians` of one database watch `intervals` of them go by."""
     holders: list[str] = []
-    task = _task(lambda ctx: holders.append(ctx.holder), every=pendulum.duration(seconds=0.05))
-    _for(0.6, _supervisor(store, task, "a"), _supervisor(store, task, "b"))
-    assert len(holders) > 2
-    assert len(set(holders)) == 1
+    every = pendulum.duration(seconds=1)
+    task = _task(lambda ctx: holders.append(ctx.holder), every=every, mode=mode)
+    supervisors = [_supervisor(store, task, name) for name in "abc"[:custodians]]
+    threads = [threading.Thread(target=s.run, daemon=True) for s in supervisors]
+    for thread in threads:
+        thread.start()
+    try:
+        for ran in range(1, intervals + 1):
+            deadline = time.monotonic() + 3
+            while len(holders) < ran and time.monotonic() < deadline:
+                time.sleep(0.02)
+            time.sleep(0.2)  # a few polls, to see that no custodian runs it twice
+            clock.advance(seconds=1)  # an interval goes by without a moment of the monotonic clock's
+    finally:
+        for supervisor in supervisors:
+            supervisor.stop.set()
+        for thread in threads:
+            thread.join(timeout=5)
+    return holders
+
+
+def test_a_one_at_a_time_task_runs_once_an_interval_across_custodians(
+    store: SQLStoreBase[Any], clock: Clock
+) -> None:
+    assert len(_interval_runs(store, clock, TaskMode.SINGLETON, custodians=2, intervals=4)) == 4
+
+
+def test_a_task_that_came_due_while_the_machine_slept_runs_within_a_poll(
+    store: SQLStoreBase[Any], clock: Clock
+) -> None:
+    """The wall clock moved on (a sleep) and the monotonic one did not: the next poll still sees the task due."""
+    ran: list[str] = []
+    task = _task(lambda ctx: ran.append(ctx.holder), every=pendulum.duration(hours=1))
+    supervisor = _supervisor(store, task, "a")
+    thread = threading.Thread(target=supervisor.run, daemon=True)
+    thread.start()
+    try:
+        _wait_for(lambda: len(ran) == 1 and _finished(store))
+        clock.advance(minutes=59)
+        time.sleep(0.3)
+        assert len(ran) == 1
+        clock.advance(hours=3)
+        _wait_for(lambda: len(ran) == 2)
+    finally:
+        supervisor.stop.set()
+        thread.join(timeout=5)
 
 
 def test_a_run_asked_for_starts_within_a_poll(store: SQLStoreBase[Any]) -> None:
@@ -107,12 +164,26 @@ def test_a_task_thread_that_dies_is_started_again(store: SQLStoreBase[Any]) -> N
     assert len(runs) > 1
 
 
-def test_a_failed_run_is_recorded_and_the_task_runs_again(store: SQLStoreBase[Any]) -> None:
+def test_a_failed_run_is_recorded_and_the_task_runs_again_when_due(
+    store: SQLStoreBase[Any], clock: Clock
+) -> None:
+    runs: list[int] = []
+
     def run_once(_ctx: TaskContext) -> None:
+        runs.append(1)
         msg = "boom"
         raise ValueError(msg)
 
-    _for(0.3, _supervisor(store, _task(run_once, every=pendulum.duration(seconds=0.05)), "a"))
+    supervisor = _supervisor(store, _task(run_once, every=pendulum.duration(minutes=1)), "a")
+    thread = threading.Thread(target=supervisor.run, daemon=True)
+    thread.start()
+    try:
+        _wait_for(lambda: len(runs) == 1 and _finished(store))
+        clock.advance(minutes=2)
+        _wait_for(lambda: len(runs) == 2)
+    finally:
+        supervisor.stop.set()
+        thread.join(timeout=5)
     state = _state(store)
     assert state.last_outcome is TaskOutcome.FAILURE
     assert "ValueError: boom" in (state.last_error or "")
