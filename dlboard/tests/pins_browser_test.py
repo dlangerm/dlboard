@@ -87,7 +87,7 @@ def test_a_run_is_pinned_in_several_colours_as_one_pin_and_unpinned_from_the_sam
     expect(editor).to_have_count(0)
     # In what the run list shows, which is all this is about: other tests of the session leave their own names on the page.
     shown = grid.inner_text().lower()
-    assert not [color for color in _COLORS if re.search(rf"\b{color}\b", shown)]
+    assert not [color for color in _COLORS if re.search(rf"\b{color}\b", shown)], f"GRID TEXT: {shown!r}"
     assert grid.locator(".ag-root-wrapper").get_attribute("data-marker") == "untouched"
     page.reload()
     expect(rows.first.locator(_PIN)).to_have_count(1)
