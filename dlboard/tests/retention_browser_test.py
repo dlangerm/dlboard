@@ -34,15 +34,13 @@ def test_a_project_is_held_to_a_rule_after_its_grace_period_and_the_change_can_b
     page.locator(f"#{retention.KIND_ID}").click()
     page.get_by_role("option", name="The newest runs").click()
     page.locator(f"#{retention.AMOUNT_ID}").fill("5")
-    expect(page.locator(f"#{retention.PREVIEW_ID}")).to_have_text(
-        ""
-    )  # nothing is counted until it is asked for
+    # Nothing is counted until it is asked for.
+    expect(page.locator(f"#{retention.PREVIEW_ID}")).to_have_text("")
     page.locator(f"#{retention.PREVIEW_BUTTON_ID}").click()
     expect(page.locator(f"#{retention.PREVIEW_ID}")).to_contain_text("it would delete 0 runs")
     page.locator(f"#{retention.AMOUNT_ID}").fill("6")
-    expect(page.locator(f"#{retention.PREVIEW_ID}")).to_have_text(
-        ""
-    )  # a changed form is not what was counted
+    # A changed form is not what was counted.
+    expect(page.locator(f"#{retention.PREVIEW_ID}")).to_have_text("")
     page.locator(f"#{retention.AMOUNT_ID}").fill("5")
 
     page.locator(f"#{retention.SAVE_ID}").click()

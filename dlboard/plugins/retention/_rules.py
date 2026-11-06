@@ -136,18 +136,30 @@ class RetentionSetting(BaseModel, frozen=True, extra="forbid"):
         return self.pending or self.active
 
     def saved(
-        self, rule: RetentionRule, *, by: int | None, now: datetime, grace: pendulum.Duration
+        self,
+        rule: RetentionRule,
+        *,
+        by: int | None,
+        now: datetime,
+        grace: pendulum.Duration,
+        cap_exempt: bool = False,
     ) -> RetentionSetting:
         """
         The setting once `rule` is saved: pending until its grace period is over, while the rule in effect is enforced.
 
-        Saving again replaces the pending rule, never the one in effect, so saving over and over never puts retention off;
-        saving the rule in effect drops the pending one.
+        Saving another rule replaces the pending one, never the one in effect, so saving over and over never puts
+        retention off; saving the rule already pending keeps its time, so it is not put off either; saving the rule in
+        effect drops the pending one.
         """
         current = self.as_of(now)
         if current.active is not None and current.active.rule == rule:
             return RetentionSetting(active=current.active)
-        version = RuleVersion(rule=rule, set_by=by, set_at=now, effective_at=now + grace)
+        if current.pending is not None and current.pending.rule == rule:
+            version = current.pending.model_copy(update={"cap_exempt": cap_exempt})
+        else:
+            version = RuleVersion(
+                rule=rule, set_by=by, set_at=now, effective_at=now + grace, cap_exempt=cap_exempt
+            )
         return RetentionSetting(active=current.active, pending=version)
 
     def dump(self) -> dict[str, Any]:

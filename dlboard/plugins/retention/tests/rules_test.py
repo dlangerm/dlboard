@@ -133,14 +133,14 @@ def test_an_owner_cannot_change_the_rule_in_effect_or_mark_a_rule_exempt_from_th
     in_effect = RuleVersion(rule=RunCount(max_runs=5), set_at=now, effective_at=now)
 
     def write(setting: RetentionSetting) -> None:
-        as_owner.put_scoped_setting(RetentionKey.RULE, project, None, setting.dump(), owner)
+        """As a request of its own does: one authorizer a request, which reads a project's settings once."""
+        _as(store, "owner")[0].put_scoped_setting(RetentionKey.RULE, project, None, setting.dump(), owner)
 
     with pytest.raises(PermissionError, match="server's to change"):
         write(RetentionSetting(active=in_effect))  # a rule nobody saved through its grace period
     store.put_scoped_setting(
         RetentionKey.RULE, project, None, RetentionSetting(active=in_effect).dump(), owner
     )
-    as_owner = _as(store, "owner")[0]  # a request after the server's own write: one reads settings once
     with pytest.raises(PermissionError, match="server's to change"):
         write(RetentionSetting(active=in_effect.model_copy(update={"rule": RunCount(max_runs=9)})))
 
