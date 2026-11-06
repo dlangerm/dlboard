@@ -117,5 +117,10 @@ the store:
   project's header, or a section under its experiments, drawn in the page's own layout. This is the one place a plugin
   reaches into a page.
 
+- `register_run_guard(app, guard)` asks `guard(store, project_id)` before every run a request creates, once the writer's role
+  is checked. `store` is the system's (no user is behind it), and the guard returns, or raises `ProjectLockedError(why)` to
+  refuse: the REST API answers HTTP 423 with `why`, which the client puts in its error. Retention uses it to refuse new runs
+  from a project far behind its rule; a request never refuses by hand.
+
 Choosing runs by age or count, or leaving out kept ones, is `get_runs(..., created_before=, oldest_first=, include_kept=)`;
 `kept_runs`, `keep_runs` and `release_runs` are the generic half of keeping a run.

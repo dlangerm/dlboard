@@ -89,6 +89,17 @@ shows both tasks and their backlog, and `/healthz/custodian` goes red if they st
 if a project stays behind. With the custodian off (`DLBOARD_CUSTODIAN_ENABLED=false`) and no other server sharing the
 database, rules are kept and shown and nothing is deleted.
 
+## When a project falls behind
+
+A project holding runs its rule says to delete (a backlog, or a rule far stricter than what it held) is flagged on its page
+after `DLBOARD_RETENTION_WARN_AFTER_HOURS` (24). That is all that happens by default. A deployment that must stay bounded can
+go further: with `DLBOARD_RETENTION_LOCK_AFTER_HOURS` set (at least the warning's), a project that has been behind for that
+long **takes no new runs**. The REST API answers a new run with HTTP 423 and says why, so the logging script fails at the
+start rather than part-way, and a client never retries it. Nothing already logging is touched: a run that exists goes on
+logging its metrics and artifacts, so no training job dies mid-epoch. The page says the project is locked, and it unlocks
+itself on the first check that finds nothing left to delete, so a backlog being drained is not also being refilled.
+`dlboard.retention.runs.refused` counts what a lock turned away.
+
 ## For admins: defaults and caps
 
 | Variable | |
@@ -115,6 +126,6 @@ kind) is a plugin on the same pieces.
 
 ## Not yet
 
-Retention warns when it falls behind, but nothing yet refuses new data from a project that is far past its rule
-(a read-only mode, to stop a project being filled faster than it is drained). Keeping a run from the client, as it is
-created, is not there yet either.
+Keeping a run from the client, as it is created, is not there yet ([#562](https://github.com/dlangerm/dlboard/issues/562)),
+and one very large run is deleted in one transaction rather than in chunks
+([#563](https://github.com/dlangerm/dlboard/issues/563)).

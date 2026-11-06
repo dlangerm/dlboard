@@ -140,6 +140,7 @@ Every attribute has a small, fixed set of values. The names and attributes are c
 | `dlboard.task.duration` | histogram, s | `dlboard.task` | How long one run of a background task took. |
 | `dlboard.task.backlog` | up/down counter | `dlboard.task` | What each background task last said it had left to do. Growing over several runs means it cannot keep up. |
 | `dlboard.retention.runs.deleted` | counter | | Runs [retention](retention.md) moved to the Trash. Emitted by the custodian process. |
+| `dlboard.retention.runs.refused` | counter | | New runs a [locked](retention.md#when-a-project-falls-behind) project refused. Emitted by the web workers. |
 | `dlboard.custodian.starts` | counter | | Custodian processes started: more than one per server start is the server replacing one that died or hung. |
 
 ### Alerting that it's down

@@ -30,6 +30,7 @@ from dlboard.serve._backend._data_store import (
     wait_for_data_store,
 )
 from dlboard.serve._backend._installed_plugins import get_installed_plugins, set_installed_plugins
+from dlboard.serve._backend._run_guards import RunGuard, register_run_guard
 from dlboard.serve._backend._setting_rules import SettingRule, SettingWrite, register_setting
 from dlboard.serve._backend._sql_store_base import SCHEMA_PREP_OPTION, SQLStoreBase
 from dlboard.serve._backend._startup_checks import add_startup_check
@@ -63,6 +64,7 @@ __all__ = [
     "Icon",
     "ProjectSection",
     "ProjectSlot",
+    "RunGuard",
     "SQLStoreBase",
     "SettingRule",
     "SettingWrite",
@@ -89,6 +91,7 @@ __all__ = [
     "icon_cell_class",
     "mint_api_token",
     "register_project_section",
+    "register_run_guard",
     "register_setting",
     "register_task",
     "register_work_kind",

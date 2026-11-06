@@ -469,6 +469,11 @@ def _handle_ambiguous_project(err: models.AmbiguousProjectError) -> tuple[dict[s
     return {"error": str(err)}, 409
 
 
+def _handle_project_locked(err: models.ProjectLockedError) -> tuple[dict[str, str], int]:
+    """Map a project that takes no new runs for now to a 423, a 4xx: the client does not retry it, and says why."""
+    return {"error": str(err)}, 423
+
+
 def _handle_unservable_ref_error(err: models.UnservableArtifactRefError) -> tuple[dict[str, str], int]:
     """Map a link to a ref this server's `ArtifactStore` won't serve to a 400, not a 500 -- same 4xx-vs-5xx reasoning as `_handle_validation_error`."""
     return {"error": str(err)}, 400
@@ -498,4 +503,5 @@ def plug(app: dash.Dash) -> None:
     app.server.errorhandler(ValidationError)(_handle_validation_error)
     app.server.errorhandler(models.UnservableArtifactRefError)(_handle_unservable_ref_error)
     app.server.errorhandler(models.AmbiguousProjectError)(_handle_ambiguous_project)
+    app.server.errorhandler(models.ProjectLockedError)(_handle_project_locked)
     app.server.errorhandler(models.ArtifactStoreUnavailableError)(_handle_store_unavailable)

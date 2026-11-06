@@ -63,6 +63,13 @@ class RetentionSettings(BaseSettings):
     retention_warn_after_hours: PositiveInt = 24
     """How long a project may hold runs its rule says to delete before the project page says it is out of spec."""
 
+    retention_lock_after_hours: PositiveInt | None = None
+    """
+    How long a project may hold runs its rule says to delete before it takes no new runs (the REST API refuses them) until
+    retention catches up, so that a project cannot be filled faster than it is drained. Unset, a project is only warned.
+    Runs already logging are never refused. At least `retention_warn_after_hours`.
+    """
+
     retention_interval_s: PositiveInt = 300
     """How often the custodian looks for projects whose rule needs checking."""
 
@@ -76,6 +83,12 @@ class RetentionSettings(BaseSettings):
     def _one_default_within_the_caps(self) -> Self:
         if self.retention_default_max_runs is not None and self.retention_default_max_age_days is not None:
             msg = "set DLBOARD_RETENTION_DEFAULT_MAX_RUNS or DLBOARD_RETENTION_DEFAULT_MAX_AGE_DAYS, not both"
+            raise ValueError(msg)
+        if (
+            self.retention_lock_after_hours is not None
+            and self.retention_lock_after_hours < self.retention_warn_after_hours
+        ):
+            msg = "DLBOARD_RETENTION_LOCK_AFTER_HOURS is at least DLBOARD_RETENTION_WARN_AFTER_HOURS: a project is warned before it is locked"
             raise ValueError(msg)
         if not self.within_caps(self.default_rule):
             msg = "the default retention rule (DLBOARD_RETENTION_DEFAULT_*) keeps more than its cap (DLBOARD_RETENTION_MAX_*)"
@@ -108,6 +121,12 @@ class RetentionSettings(BaseSettings):
     def within_caps(self, rule: RetentionRule) -> bool:
         """Whether an owner may set `rule`: with no cap, anything; else at most the cap of its kind."""
         return not self.caps or any(keeps_at_most(rule, cap) for cap in self.caps)
+
+    @property
+    def lock_after(self) -> pendulum.Duration | None:
+        """`DLBOARD_RETENTION_LOCK_AFTER_HOURS` as a duration, if a lock is set."""
+        hours = self.retention_lock_after_hours
+        return pendulum.duration(hours=hours) if hours is not None else None
 
     @property
     def grace(self) -> pendulum.Duration:

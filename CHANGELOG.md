@@ -17,14 +17,16 @@ pulls that section's body into the GitHub release notes and publishes both distr
 * **Retention policies.** A deployment people log to for months no longer grows without bound. Each project keeps every
   run, the newest N runs (of each experiment, or of the whole project), or the runs of the last N days, set by its owner in
   a new **Retention** section of the project page; an editor may hold an experiment to a stricter rule of the same kind.
-  A changed rule waits `DLBOARD_RETENTION_GRACE_DAYS` (7) while the rule before it is still enforced, with a preview of what
-  it would delete. The new `retention` plugin (in every storage bundle) moves what a rule says to delete to the Trash, in
+  A changed rule waits `DLBOARD_RETENTION_GRACE_DAYS` (7) while the rule before it is still enforced, and **Preview** says
+  what it would delete. The new `retention` plugin (in every storage bundle) moves what a rule says to delete to the Trash, in
   batches past a slack, as the `dlboard:retention` user, from the custodian process: one check a project, claimed by any
   custodian, paced to its share of the database, so servers sharing a Postgres add capacity and live traffic keeps the
   database. A project it has not caught up with is flagged on its page and counted in `dlboard.retention.runs.deleted` and
   `dlboard.task.backlog`. Admins set the default for new projects and a cap owners cannot exceed
-  (`DLBOARD_RETENTION_DEFAULT_*`, `DLBOARD_RETENTION_MAX_*`). Nothing yet refuses new data from a project far past its rule.
-  See [docs/retention.md](docs/retention.md). (#472)
+  (`DLBOARD_RETENTION_DEFAULT_*`, `DLBOARD_RETENTION_MAX_*`). With `DLBOARD_RETENTION_LOCK_AFTER_HOURS` set, a project that
+  has been behind its rule that long takes no new runs (HTTP 423, with the reason in the client's error, counted in
+  `dlboard.retention.runs.refused`) until it catches up; runs already logging are never refused. See
+  [docs/retention.md](docs/retention.md). (#472)
 * **Kept runs.** **Keep** in any run list's bar takes a run out of retention's reach (a lock after its name says so). An
   editor keeps a run; only an owner releases it or deletes it, including by deleting its experiment. Keeping is not pinning,
   which anyone can pin. (#472)
@@ -38,8 +40,9 @@ pulls that section's body into the GitHub release notes and publishes both distr
   `dlboard.custodian.starts` metrics. An admin's Purge is queued and done by the custodian, not in the request. See
   [docs/background-tasks.md](docs/background-tasks.md). (#472)
 * **Plugins can keep a setting per project** (`register_setting`, with who may read and write each scope and a check of the
-  value) **and add a section to a project's page** (`register_project_section`), without touching the store. Retention is
-  built on them. (#472)
+  value) **and add a section to a project's page** (`register_project_section`), without touching the store, **and refuse
+  new runs in a project** (`register_run_guard`, raising `ProjectLockedError`, which the REST API answers with HTTP 423).
+  Retention is built on them. (#472)
 
 ### Changed
 
@@ -56,6 +59,20 @@ pulls that section's body into the GitHub release notes and publishes both distr
   `fail_artifact_purge`, `artifact_purge_progress_at`, `record_artifact_purge_progress`), as is
   `artifact_purge_worker.wake()`: queue a work item for the custodian instead (see
   [docs/background-tasks.md](docs/background-tasks.md#for-plugin-authors)). (#472)
+* **A client's error says why a server refused it.** A 4xx's `error` is in the exception's message, ahead of the server's
+  request id.
+
+### Fixed
+
+* **Scheduled tasks no longer run late after a machine sleeps, nor show as overdue for it.** A task's interval was counted
+  on a clock that stops while a machine sleeps, by each server alone, while the admin page's overdue check read the wall
+  clock. A task is now due `every` after its last run finished, as the database records it, so a task that came due
+  while asleep runs within one poll of waking, and several servers share one schedule instead of each running the task.
+  (#561)
+* **Retention's grace period cannot be skipped.** A request that said its rule took effect at once was believed; the
+  server now stamps when a pending rule took effect, and by whom. (#558)
+* **A run retention spared has no audit entry.** A run kept between choosing it for deletion and deleting it was logged as
+  deleted though it was not. (#558)
 
 ## [0.14.0] - 2026-11-04
 

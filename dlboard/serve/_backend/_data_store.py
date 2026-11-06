@@ -16,6 +16,7 @@ from flask import g, has_request_context
 from dlboard.serve._backend._app_slot import AppSlot, current_dash_app
 from dlboard.serve._backend._auth import AUTH_SETTINGS, get_auth_provider, get_current_user
 from dlboard.serve._backend._authorization import AuthorizingArtifactStore, AuthorizingDataStore
+from dlboard.serve._backend._run_guards import RUN_GUARDS
 from dlboard.serve._backend._setting_rules import SETTING_RULES
 
 if TYPE_CHECKING:
@@ -45,6 +46,7 @@ def _authorizer() -> AuthorizingDataStore:
             enforce_grants=get_auth_provider(app).verifies_identity,
             new_project_access=AUTH_SETTINGS.get(app).new_project_access,
             setting_rules=SETTING_RULES.find(app),
+            run_guards=RUN_GUARDS.find(app) or (),
         )
     return g.dlboard_authorizer
 

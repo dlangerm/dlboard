@@ -144,18 +144,26 @@ def test_client_sends_a_timeout_on_every_request(monkeypatch: pytest.MonkeyPatch
 class _Reply:
     """A bare `requests.Response` stand-in: a status, headers, and `raise_for_status` for 4xx/5xx."""
 
-    def __init__(self, status_code: int, headers: dict[str, str] | None = None) -> None:
+    def __init__(
+        self, status_code: int, headers: dict[str, str] | None = None, body: dict[str, Any] | None = None
+    ) -> None:
         self.status_code = status_code
         self.ok = status_code < 400
         self.reason = "reason"
         self.headers = headers or {}
+        self._body = body
 
     def raise_for_status(self) -> None:
         if self.status_code >= 400:
             raise requests.HTTPError(str(self.status_code), response=cast("requests.Response", self))
 
     def json(self) -> dict[str, Any]:
-        return {"id": 7, "experiment_id": 1, "created_at": "2026-01-01T00:00:00+00:00", "status": "failed"}
+        return self._body or {
+            "id": 7,
+            "experiment_id": 1,
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "status": "failed",
+        }
 
 
 @pytest.mark.parametrize(
@@ -203,17 +211,26 @@ def test_finish_run_sends_the_end_time_it_is_given(monkeypatch: pytest.MonkeyPat
 
 
 @pytest.mark.parametrize(
-    ("headers", "expected"),
+    ("headers", "body", "expected"),
     [
-        pytest.param({backend.REQUEST_ID_HEADER: "abc-123"}, "500 (server request id abc-123)", id="named"),
-        pytest.param({}, "500", id="not-named"),
+        pytest.param(
+            {backend.REQUEST_ID_HEADER: "abc-123"}, None, "500 (server request id abc-123)", id="named"
+        ),
+        pytest.param({}, None, "500", id="not-named"),
+        pytest.param({}, {"error": "project 'p' is locked"}, "500: project 'p' is locked", id="says-why"),
+        pytest.param(
+            {backend.REQUEST_ID_HEADER: "abc-123"},
+            {"error": "no"},
+            "500: no (server request id abc-123)",
+            id="says-why-and-is-named",
+        ),
     ],
 )
-def test_a_failed_request_names_the_servers_request_id_so_its_log_line_can_be_found(
-    monkeypatch: pytest.MonkeyPatch, headers: dict[str, str], expected: str
+def test_a_failed_request_says_why_and_names_the_servers_request_id_so_its_log_line_can_be_found(
+    monkeypatch: pytest.MonkeyPatch, headers: dict[str, str], body: dict[str, Any] | None, expected: str
 ) -> None:
     api = backend.BasicDlboardAPI(base_url="http://host:1")
-    reply = _Reply(500, headers)
+    reply = _Reply(500, headers, body)
 
     def _request(_method: str, _url: str, **_kwargs: Any) -> _Reply:  # noqa: ANN401
         return reply

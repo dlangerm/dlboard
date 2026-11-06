@@ -164,13 +164,19 @@ def _status(status: RetentionStatus | None, now: datetime, settings: RetentionSe
     warn_after = pendulum.duration(hours=settings.retention_warn_after_hours)
     if since is None or now - pendulum.instance(since) < warn_after:
         return [line]
+    locked = status.is_locked(now, settings.lock_after)
     return [
         dmc.Alert(
             f"This project has held runs its rules say to delete since {_when(since)}: retention is catching up, a batch "
-            "at a time. An admin can let it delete more at once (DLBOARD_RETENTION_PROJECT_BUDGET).",
-            color="yellow",
+            "at a time. "
+            + (
+                "New runs are refused until it has caught up (runs already logging are not affected)."
+                if locked
+                else "An admin can let it delete more at once (DLBOARD_RETENTION_PROJECT_BUDGET)."
+            ),
+            color="red" if locked else "yellow",
             variant="light",
-            title="Behind on retention",
+            title="Locked: behind on retention" if locked else "Behind on retention",
         ),
         line,
     ]

@@ -72,5 +72,12 @@ def test_plug_registers_routes_only_on_the_given_app_not_globally() -> None:
         ValidationError: backend._handle_validation_error,
         models.UnservableArtifactRefError: backend._handle_unservable_ref_error,
         models.AmbiguousProjectError: backend._handle_ambiguous_project,
+        models.ProjectLockedError: backend._handle_project_locked,
         models.ArtifactStoreUnavailableError: backend._handle_store_unavailable,
     }
+
+
+def test_a_project_that_takes_no_new_runs_maps_to_a_423_the_client_does_not_retry() -> None:
+    body, status = backend._handle_project_locked(models.ProjectLockedError("takes no new runs"))
+
+    assert (status, body) == (423, {"error": "takes no new runs"})
