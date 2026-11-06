@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from dlboard.serve import Icon, get_current_user, get_data_store
+from dlboard.serve._pages._dash_helpers import NoticeColor, notice
 from dlboard.serve._pages._run_list._bar import simple_action
 from dlboard.serve._pages._run_list._columns import KEPT_FIELD
 from dlboard.serve._pages._run_list._model import RunAction
@@ -28,19 +29,6 @@ class Kept(NamedTuple):
 
     rows: dict[str, Any] | None
     notice: list[dict[str, Any]]
-
-
-def _notice(title: str, message: str, *, color: str) -> list[dict[str, Any]]:
-    return [
-        {
-            "action": "show",
-            "id": title,
-            "title": title,
-            "message": message,
-            "color": color,
-            "autoClose": 4_000,
-        }
-    ]
 
 
 def keep_or_release(request: RunActionRequest, grid: str) -> Kept:
@@ -76,11 +64,11 @@ def keep_or_release(request: RunActionRequest, grid: str) -> Kept:
     try:
         act(request.run_ids, me)
     except PermissionError:
-        return Kept(None, _notice("Not yours to change", refused, color="red"))
+        return Kept(None, notice("Not yours to change", refused, color=NoticeColor.RED))
     rows = RowUpdates(
         grid=grid, rows=[RowUpdate(run_id=run, values={KEPT_FIELD: kept}) for run in sorted(request.run_ids)]
     )
-    return Kept(rows.dump(), _notice(*done, color="gray"))
+    return Kept(rows.dump(), notice(*done, color=NoticeColor.GRAY))
 
 
 def keep_actions(surface: RunListSurface) -> list[Component]:

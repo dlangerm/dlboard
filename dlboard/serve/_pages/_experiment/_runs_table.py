@@ -29,6 +29,7 @@ from dlboard.serve._component_ids import ButtonId, PatternId, StoreId, ValueId
 from dlboard.serve._grid import column_def, infer_column_dtype
 from dlboard.serve._pages._dash_helpers import (
     CallbackStates,
+    notice,
     register_navigate,
     section_label,
 )
@@ -708,20 +709,6 @@ def _register_newest_runs(app: Dash) -> None:
         )
 
 
-def _notice(title: str, message: str, *, color: str = "yellow") -> list[dict[str, Any]]:
-    """A notification for the page's notifications (`VIEW_NOTIFY_ID`)."""
-    return [
-        {
-            "action": "show",
-            "id": f"run-list-{title}",
-            "title": title,
-            "message": message,
-            "color": color,
-            "autoClose": 6_000,
-        }
-    ]
-
-
 @dataclass(frozen=True)
 class _Outputs:
     """What `act_on_runs` changes on the page: whatever it leaves out stays as it was."""
@@ -792,7 +779,7 @@ def _draw_or_hide(store: DataStore[...], request: RunActionRequest, act: _Act) -
     cap = ShownRunsSettings().max_shown_runs
     if len(now) > cap:
         return _Outputs(
-            notices=_notice(
+            notices=notice(
                 "Too many runs to draw", f"A view draws at most {cap} runs. Hide some to draw others."
             )
         )
@@ -827,7 +814,7 @@ def _diff(request: RunActionRequest) -> _Outputs:
     """Open the A/B diff on the requested runs, if there are few enough to read side by side."""
     if len(request.run_ids) > MAX_COMPARED_RUNS:
         return _Outputs(
-            notices=_notice("Too many runs to diff", f"The diff compares up to {MAX_COMPARED_RUNS} runs.")
+            notices=notice("Too many runs to diff", f"The diff compares up to {MAX_COMPARED_RUNS} runs.")
         )
     # Newest first, as the modal has always listed the runs it was opened on: the first is the one the others are read against.
     return _Outputs(

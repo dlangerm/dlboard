@@ -20,7 +20,7 @@ from pydantic import BaseModel, ValidationError
 from dlboard import models
 from dlboard.serve import get_data_store
 from dlboard.serve._component_ids import ButtonId, DivId, ModalId, StoreId, ValueId
-from dlboard.serve._pages._dash_helpers import busy_while_running, require_triggered_id
+from dlboard.serve._pages._dash_helpers import busy_while_running, notice, require_triggered_id
 from dlboard.serve._pages._experiment import _ids as ids
 from dlboard.serve._pages._experiment import _page_edits as edits
 from dlboard.serve._pages._experiment import _page_model as page_model
@@ -167,19 +167,6 @@ def _with_x_axis(chart: models.ChartInstance[Any, Any], x_axis: str) -> models.C
     return chart.model_copy(update={"parameters": parameters})
 
 
-def _notice(message: str) -> list[dict[str, Any]]:
-    return [
-        {
-            "action": "show",
-            "id": f"bulk-charts-{message}",
-            "title": "No charts to change",
-            "message": message,
-            "color": "yellow",
-            "autoClose": 5_000,
-        }
-    ]
-
-
 def _asked(page_json: str, paging_json: str) -> tuple[BulkTarget, list[Any]]:
     """The panel whose menu item was clicked, its chart filter, and the charts that matches."""
     panel = require_triggered_id(panel_view.PanelID).panel
@@ -212,14 +199,16 @@ def _register_delete(app: Dash) -> None:
                 False,
                 no_update,
                 no_update,
-                _notice("Type in the panel's chart filter first: it says which charts."),
+                notice(
+                    "No charts to change", "Type in the panel's chart filter first: it says which charts."
+                ),
             )
         if not matching:
             return (
                 False,
                 no_update,
                 no_update,
-                _notice(f"No chart of {target.panel} matches {target.query!r}."),
+                notice("No charts to change", f"No chart of {target.panel} matches {target.query!r}."),
             )
         body = (
             f"This deletes the {_charts(len(matching))} of {target.panel} that match {target.query!r}. "
@@ -282,7 +271,9 @@ def _register_edit(app: Dash) -> None:
                 no_update,
                 no_update,
                 no_update,
-                _notice("Type in the panel's chart filter first: it says which charts."),
+                notice(
+                    "No charts to change", "Type in the panel's chart filter first: it says which charts."
+                ),
             )
         with_x_axis = [chart for chart in matching if _has_x_axis(chart)]
         if not with_x_axis:
@@ -291,7 +282,10 @@ def _register_edit(app: Dash) -> None:
                 no_update,
                 no_update,
                 no_update,
-                _notice(f"No chart of {target.panel} that matches {target.query!r} has an x-axis."),
+                notice(
+                    "No charts to change",
+                    f"No chart of {target.panel} that matches {target.query!r} has an x-axis.",
+                ),
             )
         body = (
             f"Sets the x-axis of the {_charts(len(with_x_axis))} of {target.panel} that match {target.query!r}"

@@ -26,7 +26,13 @@ from dlboard.serve import ClientsideScript, Icon, get_current_user, get_data_sto
 from dlboard.serve import _constants as constants
 from dlboard.serve._grid import column_def, infer_column_dtype
 from dlboard.serve._pages._comparison import _ids as ids
-from dlboard.serve._pages._dash_helpers import CallbackStates, register_navigate, section_label
+from dlboard.serve._pages._dash_helpers import (
+    CallbackStates,
+    NoticeColor,
+    notice,
+    register_navigate,
+    section_label,
+)
 from dlboard.serve._pages._dataframe_helpers import experiment_display_name
 from dlboard.serve._pages._experiment import _ids as experiment_ids
 from dlboard.serve._pages._experiment import _page_edits as edits
@@ -86,20 +92,6 @@ COMPARISON_COLUMNS_PICKER = ColumnsPickerIds(
     applied=ids.COLUMNS_APPLIED_ID,
     toggle=ids.COLUMNS_TOGGLE_ID,
 )
-
-
-def notice(title: str, message: str, *, color: str = "green") -> list[dict[str, Any]]:
-    """A notification for the page's notifications (`VIEW_NOTIFY_ID`)."""
-    return [
-        {
-            "action": "show",
-            "id": f"comparison-{title}-{message}",
-            "title": title,
-            "message": message,
-            "color": color,
-            "autoClose": 5_000,
-        }
-    ]
 
 
 def add_runs_button() -> Component:
@@ -374,7 +366,7 @@ def _remove(request: RunActionRequest, act: _Act) -> tuple[Any, ...]:
         refused = notice(
             "Not yours to change",
             "Only its owner, or an editor of a shared comparison, can take runs out of it.",
-            color="red",
+            color=NoticeColor.RED,
         )
         return no_update, no_update, no_update, refused, no_update, no_update
     container, page_json, revision = membership_changed(act.page_json, act.paging_json)

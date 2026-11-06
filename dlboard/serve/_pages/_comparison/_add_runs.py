@@ -21,8 +21,8 @@ from dlboard.serve import ClientsideScript, get_current_user, get_data_store
 from dlboard.serve._backend._comparison_settings import ComparisonSettings
 from dlboard.serve._component_ids import ButtonId, DivId, ModalId, ValueId
 from dlboard.serve._pages._comparison import _ids as ids
-from dlboard.serve._pages._comparison._members import membership_changed, notice
-from dlboard.serve._pages._dash_helpers import CallbackStates, section_label
+from dlboard.serve._pages._comparison._members import membership_changed
+from dlboard.serve._pages._dash_helpers import CallbackStates, NoticeColor, notice, section_label
 from dlboard.serve._pages._dataframe_helpers import experiment_display_name
 from dlboard.serve._pages._experiment import _ids as experiment_ids
 from dlboard.serve._pages._experiment import _page_model as page_model
@@ -182,18 +182,24 @@ def _add(run_ids: Collection[int], page_json: str, paging_json: str) -> tuple[An
             notice(
                 "Not yours to change",
                 "Only its owner, or an editor of a shared comparison, can add runs to it.",
-                color="red",
+                color=NoticeColor.RED,
             ),
             False,
         )
     except ValueError as refused:
-        return no_update, no_update, no_update, notice("Not added", str(refused), color="red"), False
+        return (
+            no_update,
+            no_update,
+            no_update,
+            notice("Not added", str(refused), color=NoticeColor.RED),
+            False,
+        )
     if not added:
         return (
             no_update,
             no_update,
             no_update,
-            notice("Nothing new", "Those runs are already in it.", color="yellow"),
+            notice("Nothing new", "Those runs are already in it.", color=NoticeColor.YELLOW),
             False,
         )
     message = f"Added {added} run{'s' if added != 1 else ''}."
