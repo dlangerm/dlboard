@@ -33,9 +33,11 @@ An admin can do all of it, in every project.
 ## When a rule takes effect
 
 A changed rule waits `DLBOARD_RETENTION_GRACE_DAYS` (7) before it takes effect, and the section shows it as pending, with
-the date and how many runs it would delete as things stand. Until then **the rule before it is still enforced**: saving
-again replaces the pending change, but never puts retention off. Saving the rule in effect again, or **Cancel pending
-change** (for the project or experiment the form is set to), drops the pending change.
+the date. **Preview** counts how many runs the form's rule would delete as things stand (a count of every experiment, so it
+is asked for rather than shown as you type). Until the rule takes effect **the rule before it is still enforced**: saving
+again replaces the pending change, but never puts retention off, and the server sets when it takes effect, whatever a
+request says. Saving the rule in effect again, or **Cancel pending change** (for the project or experiment the form is set
+to), drops the pending change.
 
 A project with no rule of its own (a new one, or one from before retention) is given the server's default (below) the next
 time [scheduling](#how-it-runs) runs, through the grace period like any other change: until then it keeps every run.

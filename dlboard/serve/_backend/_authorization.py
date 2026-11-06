@@ -66,6 +66,7 @@ class AuthorizingDataStore(models.DataStore[...]):
         self._projects: dict[int, models.Project] | None = None
         self._granted: dict[int, ProjectRole] | None = None
         self._experiment_projects: dict[int, int | None] = {}
+        self._settings: dict[tuple[str, int], models.ScopedSettings] = {}
 
     @classmethod
     def get_or_create(cls, *_args: object, **_kwargs: object) -> Self:
@@ -813,9 +814,15 @@ class AuthorizingDataStore(models.DataStore[...]):
         else:
             self._require(project_id, role)
 
+    def _read_settings(self, key: str, project_id: int) -> models.ScopedSettings:
+        """A project's settings under `key`, read once per request: the header and a section of a page share one read."""
+        if (key, project_id) not in self._settings:
+            self._settings[key, project_id] = self._inner.get_scoped_settings(key, project_id)
+        return self._settings[key, project_id]
+
     def get_scoped_settings(self, key: str, project_id: int) -> models.ScopedSettings:
         self._require(project_id, self._setting_rule(key).read)
-        return self._inner.get_scoped_settings(key, project_id)
+        return self._read_settings(key, project_id)
 
     def all_scoped_settings(self, key: str) -> dict[int, models.ScopedSettings]:
         rule = self._setting_rule(key)
@@ -838,7 +845,7 @@ class AuthorizingDataStore(models.DataStore[...]):
             project_id, rule.write_project if experiment_id is None else rule.write_experiment
         )
         if value is not None and rule.check is not None:
-            stored = self._inner.get_scoped_settings(key, project_id)
+            stored = self._read_settings(key, project_id)
             current = stored.project if experiment_id is None else stored.experiments.get(experiment_id)
             value = rule.check(
                 SettingWrite(
@@ -847,8 +854,10 @@ class AuthorizingDataStore(models.DataStore[...]):
                     value,
                     stored=current.value if current is not None else None,
                     admin=has_scope(self._actor, Scope.ALL),
+                    actor_id=self._actor.id,
                 )
             )
+        self._settings.pop((key, project_id), None)  # what this request reads next is what it wrote
         return self._inner.put_scoped_setting(key, project_id, experiment_id, value, self._bound(actor))
 
     # -- Soft-delete, restore, purge ------------------------------------------------------------------

@@ -2812,8 +2812,8 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
 
         With `spare_kept`, a run that is kept is left alone, and the call says which it deleted: the statement itself
         carries `kept_at IS NULL` (and what a run owns follows only the runs this statement stamped), so a run kept at
-        any moment before it is never deleted, however long ago the caller chose it. (The audit entry's counts are read
-        beforehand, so one that is kept in that moment is counted but not deleted.)
+        any moment before it is never deleted, however long ago the caller chose it, and has no audit entry: an entry is
+        written for each run the statement stamped, and only for those.
 
         Requires `Scope.RUN_DELETE`.
         """
@@ -2844,31 +2844,35 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
                     .group_by(column)
                 ):
                     counts[run_id][table.name] = count
-            # What a spared run owns is left too: only the runs this transaction stamped have theirs deleted.
-            stamped = sa.select(runs.c.id).where(
-                runs.c.id.in_(batch), runs.c.deleted_at == stamp["deleted_at"]
-            )
-            results = self._transaction(
-                [
-                    sa.update(runs)
-                    .where(runs.c.id.in_(batch), runs.c.deleted_at.is_(None), *spared)
-                    .values(stamp)
-                    .returning(runs.c.id),
-                    *(
-                        sa.update(table)
-                        .where(column.in_(stamped if spare_kept else batch), table.c.deleted_at.is_(None))
+            with self._begin() as conn:
+                done = {
+                    run_id
+                    for (run_id,) in conn.execute(
+                        sa.update(runs)
+                        .where(runs.c.id.in_(batch), runs.c.deleted_at.is_(None), *spared)
                         .values(stamp)
-                        for table, column in owned
-                    ),
-                    self._audit_log_insert(
-                        actor.id, models.AuditAction.SOFT_DELETE, models.EntityType.RUN, counts
-                    ),
-                ]
-            )
-            done = {run_id for (run_id,) in results[0]}
-            if not spare_kept and (gone := set(batch) - done):
-                msg = f"Run {min(gone)} does not exist or is already deleted"
-                raise ValueError(msg)
+                        .returning(runs.c.id)
+                    )
+                }
+                if not spare_kept and (gone := set(batch) - done):
+                    msg = f"Run {min(gone)} does not exist or is already deleted"
+                    raise ValueError(msg)
+                if done:
+                    # What a spared run owns is left too, and it has no audit entry: only the runs stamped have either.
+                    for table, column in owned:
+                        conn.execute(
+                            sa.update(table)
+                            .where(column.in_(done), table.c.deleted_at.is_(None))
+                            .values(stamp)
+                        )
+                    conn.execute(
+                        self._audit_log_insert(
+                            actor.id,
+                            models.AuditAction.SOFT_DELETE,
+                            models.EntityType.RUN,
+                            {run_id: counts[run_id] for run_id in done},
+                        )
+                    )
             deleted |= done
         return frozenset(deleted)
 

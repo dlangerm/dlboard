@@ -389,6 +389,7 @@ def _stage(shot: DocScreenshot, page: Page, demo: Demo, dlboard_app: Dash) -> Pa
             page.locator(f"#{retention.KIND_ID}").click()
             page.get_by_role("option", name="The newest runs").click()
             page.locator(f"#{retention.AMOUNT_ID}").fill("3")
+            page.locator(f"#{retention.PREVIEW_BUTTON_ID}").click()
             expect(page.locator(f"#{retention.PREVIEW_ID}")).to_contain_text("it would delete")
             page.mouse.move(0, _VIEWPORT["height"] - 1)
             return page.locator(f"#{retention.SECTION_ID}")

@@ -1437,6 +1437,7 @@
   "dlboard/serve/_backend/tests/schema_upgrade_test.py::test_second_store_against_an_already_migrated_database_is_a_no_op[postgres]": 0.9643080949999785,
   "dlboard/serve/_backend/tests/schema_upgrade_test.py::test_second_store_against_an_already_migrated_database_is_a_no_op[sqlite]": 0.23417352499973276,
   "dlboard/serve/_backend/tests/scoped_settings_authorization_test.py::test_a_check_is_told_what_the_scope_holds_now_and_a_bulk_read_shows_only_the_projects_a_reader_may_see": 0.1,
+  "dlboard/serve/_backend/tests/scoped_settings_authorization_test.py::test_a_request_reads_a_projects_settings_once_and_a_write_of_its_own_is_seen": 0.32,
   "dlboard/serve/_backend/tests/scoped_settings_authorization_test.py::test_a_setting_no_plugin_registered_a_rule_for_is_the_system_s_alone": 0.21576498700005686,
   "dlboard/serve/_backend/tests/scoped_settings_authorization_test.py::test_a_setting_s_check_holds_a_writer_to_it_and_records_an_admin_past_it": 0.3317607769999995,
   "dlboard/serve/_backend/tests/scoped_settings_authorization_test.py::test_a_setting_s_rule_says_who_reads_it_and_who_writes_each_scope[None-False-False-False]": 0.2798753750000742,

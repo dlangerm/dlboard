@@ -10,6 +10,7 @@ so none is called as the page draws it (each such one is a round trip a page loa
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Final
 
 import dash_mantine_components as dmc
@@ -33,8 +34,8 @@ from dlboard.plugins.retention._rules import (
     keeps_at_most,
 )
 from dlboard.plugins.retention._settings import OVERDUE_COUNTED, RetentionSettings
+from dlboard.serve import ClientsideScript, get_current_user, get_data_store, get_project_role
 from dlboard.serve import _constants as constants
-from dlboard.serve import get_current_user, get_data_store, get_project_role
 from dlboard.serve._component_ids import ButtonId, DivId, ValueId
 from dlboard.serve._pages._dash_helpers import CallbackStates, section_label
 from dlboard.serve._pages._dataframe_helpers import experiment_display_name
@@ -58,6 +59,7 @@ AMOUNT_ID: ValueId[_RetentionSection] = ValueId("retention-amount")
 UNIT_ID: ValueId[_RetentionSection] = ValueId("retention-unit")
 SAVE_ID: ButtonId[_RetentionSection] = ButtonId("retention-save")
 CANCEL_ID: ButtonId[_RetentionSection] = ButtonId("retention-cancel")
+PREVIEW_BUTTON_ID: ButtonId[_RetentionSection] = ButtonId("retention-preview-button")
 PREVIEW_ID: DivId[_RetentionSection] = DivId("retention-preview")
 ERROR_ID: DivId[_RetentionSection] = DivId("retention-error")
 SECTION_ID: DivId[_RetentionSection] = DivId("retention-section")
@@ -66,6 +68,8 @@ PROJECT_SCOPE: Final = "project"
 """The scope select's value for the project's own rule; an experiment's is its id."""
 PREVIEW_LIMIT: Final = 1_000
 """How many runs the preview counts to: past that it says only that many or more."""
+
+_CLEAR_PREVIEW_JS = ClientsideScript(Path(__file__).with_name("clear_preview.js"))
 
 _KINDS: Final = [
     {"value": RetentionKind.UNLIMITED.value, "label": "Every run"},
@@ -229,7 +233,6 @@ def _form(standing: _Standing, experiments: list[Experiment], *, owner: bool) ->
                         size="xs",
                         w=100,
                         label="Runs or days",
-                        debounce=300,
                     ),
                     dmc.Select(
                         id=UNIT_ID,
@@ -243,6 +246,7 @@ def _form(standing: _Standing, experiments: list[Experiment], *, owner: bool) ->
                         label="Counted",
                         disabled=not owner,  # an experiment's own count is of its own runs: nothing to choose
                     ),
+                    dmc.Button("Preview", id=PREVIEW_BUTTON_ID, size="xs", variant="default"),
                     dmc.Button("Save", id=SAVE_ID, size="xs"),
                     dmc.Button(
                         "Cancel pending change",
@@ -333,12 +337,13 @@ def _rule_from(kind: RetentionKind, amount: float | str | None, unit: RetentionU
 
 
 class _Form(CallbackStates):
-    """What the form says, as it changes: for the preview."""
+    """What the form says when Preview is clicked: counting what a rule would delete is a probe of every experiment."""
 
-    scope: Annotated[str | None, Input(SCOPE_ID, "value")]
-    kind: Annotated[RetentionKind, Input(KIND_ID, "value")]
-    amount: Annotated[float | str | None, Input(AMOUNT_ID, "value")]
-    unit: Annotated[RetentionUnit, Input(UNIT_ID, "value")]
+    clicks: Annotated[int | None, Input(PREVIEW_BUTTON_ID, "n_clicks")]
+    scope: Annotated[str | None, State(SCOPE_ID, "value")]
+    kind: Annotated[RetentionKind, State(KIND_ID, "value")]
+    amount: Annotated[float | str | None, State(AMOUNT_ID, "value")]
+    unit: Annotated[RetentionUnit, State(UNIT_ID, "value")]
     project_id: Annotated[int, State(constants.STATE_PROJECT_ID, "data")]
 
 
@@ -456,7 +461,20 @@ def register_retention_callbacks(app: Dash) -> None:
 
     @app.callback(Output(PREVIEW_ID, "children"), _Form.states(), prevent_initial_call=True)
     def preview(**states: Any) -> str:  # noqa: ANN401 -- validated on the first line
-        return _preview(_Form.model_validate(states))
+        form = _Form.model_validate(states)
+        if not form.clicks:  # the section drawn again, with a new button
+            raise PreventUpdate
+        return _preview(form)
+
+    app.clientside_callback(
+        _CLEAR_PREVIEW_JS.source,
+        Output(PREVIEW_ID, "children", allow_duplicate=True),
+        Input(SCOPE_ID, "value"),
+        Input(KIND_ID, "value"),
+        Input(AMOUNT_ID, "value"),
+        Input(UNIT_ID, "value"),
+        prevent_initial_call=True,
+    )
 
     @app.callback(*outputs, _Saved.states(), prevent_initial_call=True)
     def save(**states: Any) -> tuple[Any, Any]:  # noqa: ANN401 -- validated on the first line
