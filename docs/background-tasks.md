@@ -78,9 +78,8 @@ class MyTask(StrEnum):
 
 
 def tidy(ctx: TaskContext) -> None:
-    store = get_system_data_store(
-        ctx.app
-    )  # no user is behind this: it is not authorized, so be careful with it
+    # No user is behind this: it is not authorized, so be careful with it.
+    store = get_system_data_store(ctx.app)
     while not ctx.should_stop():  # check between batches
         with ctx.batch():  # paced by the duty cycle
             ...

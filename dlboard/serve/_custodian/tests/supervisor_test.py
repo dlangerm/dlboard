@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
+from contextlib import contextmanager
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, cast, override
 
@@ -15,7 +16,7 @@ from dlboard.serve._custodian import Task, TaskContext, TaskMode, TaskOutcome
 from dlboard.serve._custodian._supervisor import CustodianSettings, ExitCode, Supervisor
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Generator
     from datetime import datetime
 
     from dash import Dash
@@ -40,21 +41,19 @@ def _supervisor(store: SQLStoreBase[Any], task: Task, holder: str, **kwargs: Any
     return Supervisor(cast("Dash", object()), [task], store, settings=settings, holder=holder, **kwargs)
 
 
-def _for(seconds: float, *supervisors: Supervisor) -> list[ExitCode]:
-    """Run `supervisors` side by side for `seconds`, then stop them: how each ended."""
-    codes: dict[int, ExitCode] = {}
-    threads = [
-        threading.Thread(target=lambda i=i, s=s: codes.__setitem__(i, s.run()), daemon=True)
-        for i, s in enumerate(supervisors)
-    ]
+@contextmanager
+def _running(*supervisors: Supervisor) -> Generator[None]:
+    """Run `supervisors` side by side for the block, then stop them (their runs are joined before each returns)."""
+    threads = [threading.Thread(target=supervisor.run, daemon=True) for supervisor in supervisors]
     for thread in threads:
         thread.start()
-    time.sleep(seconds)
-    for supervisor in supervisors:
-        supervisor.stop.set()
-    for thread in threads:
-        thread.join(timeout=5)
-    return [codes[i] for i in range(len(supervisors))]
+    try:
+        yield
+    finally:
+        for supervisor in supervisors:
+            supervisor.stop.set()
+        for thread in threads:
+            thread.join(timeout=5)
 
 
 def _state(store: SQLStoreBase[Any]) -> Any:  # noqa: ANN401
@@ -79,36 +78,19 @@ def _stopped(clock: Clock) -> None:
     """Database stamps on a clock that only moves when told to: what is due is the wall clock's word."""
 
 
-def _interval_runs(
-    store: SQLStoreBase[Any], clock: Clock, mode: TaskMode, *, custodians: int, intervals: int
-) -> list[str]:
-    """Who ran a task of one-second intervals, as `custodians` of one database watch `intervals` of them go by."""
-    holders: list[str] = []
-    every = pendulum.duration(seconds=1)
-    task = _task(lambda ctx: holders.append(ctx.holder), every=every, mode=mode)
-    supervisors = [_supervisor(store, task, name) for name in "abc"[:custodians]]
-    threads = [threading.Thread(target=s.run, daemon=True) for s in supervisors]
-    for thread in threads:
-        thread.start()
-    try:
-        for ran in range(1, intervals + 1):
-            deadline = time.monotonic() + 3
-            while len(holders) < ran and time.monotonic() < deadline:
-                time.sleep(0.02)
-            time.sleep(0.2)  # a few polls, to see that no custodian runs it twice
-            clock.advance(seconds=1)  # an interval goes by without a moment of the monotonic clock's
-    finally:
-        for supervisor in supervisors:
-            supervisor.stop.set()
-        for thread in threads:
-            thread.join(timeout=5)
-    return holders
-
-
 def test_a_one_at_a_time_task_runs_once_an_interval_across_custodians(
     store: SQLStoreBase[Any], clock: Clock
 ) -> None:
-    assert len(_interval_runs(store, clock, TaskMode.SINGLETON, custodians=2, intervals=4)) == 4
+    holders: list[str] = []
+    task = _task(
+        lambda ctx: holders.append(ctx.holder), every=pendulum.duration(seconds=1), mode=TaskMode.SINGLETON
+    )
+    with _running(_supervisor(store, task, "a"), _supervisor(store, task, "b")):
+        for ran in range(1, 5):
+            _wait_for(lambda ran=ran: len(holders) == ran and _finished(store))
+            time.sleep(0.2)  # a few polls, to see that no custodian runs it twice
+            clock.advance(seconds=1)  # an interval goes by without a moment of the monotonic clock's
+    assert len(holders) == 4
 
 
 def test_a_task_that_came_due_while_the_machine_slept_runs_within_a_poll(
@@ -117,32 +99,22 @@ def test_a_task_that_came_due_while_the_machine_slept_runs_within_a_poll(
     """The wall clock moved on (a sleep) and the monotonic one did not: the next poll still sees the task due."""
     ran: list[str] = []
     task = _task(lambda ctx: ran.append(ctx.holder), every=pendulum.duration(hours=1))
-    supervisor = _supervisor(store, task, "a")
-    thread = threading.Thread(target=supervisor.run, daemon=True)
-    thread.start()
-    try:
+    with _running(_supervisor(store, task, "a")):
         _wait_for(lambda: len(ran) == 1 and _finished(store))
         clock.advance(minutes=59)
         time.sleep(0.3)
         assert len(ran) == 1
         clock.advance(hours=3)
         _wait_for(lambda: len(ran) == 2)
-    finally:
-        supervisor.stop.set()
-        thread.join(timeout=5)
 
 
 def test_a_run_asked_for_starts_within_a_poll(store: SQLStoreBase[Any]) -> None:
     ran = threading.Event()
-    supervisor = _supervisor(store, _task(lambda _ctx: ran.set()), "a")
-    thread = threading.Thread(target=supervisor.run, daemon=True)
-    thread.start()
-    time.sleep(0.2)
-    assert not ran.is_set()  # a task with no interval only runs when asked
-    store.request_task_run(_Name.WORK)
-    assert ran.wait(timeout=2)
-    supervisor.stop.set()
-    thread.join(timeout=5)  # its runs are joined before it returns: the finish is recorded
+    with _running(_supervisor(store, _task(lambda _ctx: ran.set()), "a")):
+        time.sleep(0.2)
+        assert not ran.is_set()  # a task with no interval only runs when asked
+        store.request_task_run(_Name.WORK)
+        assert ran.wait(timeout=2)
     state = _state(store)
     assert (state.requested_at, state.last_outcome) == (None, TaskOutcome.SUCCESS)
 
@@ -160,7 +132,8 @@ def test_a_task_thread_that_dies_is_started_again(store: SQLStoreBase[Any]) -> N
         if len(runs) == 1:
             raise _Die
 
-    _for(1.6, _supervisor(store, _task(run_once, every=pendulum.duration(seconds=0.05)), "a"))
+    with _running(_supervisor(store, _task(run_once, every=pendulum.duration(seconds=0.05)), "a")):
+        time.sleep(1.6)
     assert len(runs) > 1
 
 
@@ -174,16 +147,10 @@ def test_a_failed_run_is_recorded_and_the_task_runs_again_when_due(
         msg = "boom"
         raise ValueError(msg)
 
-    supervisor = _supervisor(store, _task(run_once, every=pendulum.duration(minutes=1)), "a")
-    thread = threading.Thread(target=supervisor.run, daemon=True)
-    thread.start()
-    try:
+    with _running(_supervisor(store, _task(run_once, every=pendulum.duration(minutes=1)), "a")):
         _wait_for(lambda: len(runs) == 1 and _finished(store))
         clock.advance(minutes=2)
         _wait_for(lambda: len(runs) == 2)
-    finally:
-        supervisor.stop.set()
-        thread.join(timeout=5)
     state = _state(store)
     assert state.last_outcome is TaskOutcome.FAILURE
     assert "ValueError: boom" in (state.last_error or "")
@@ -207,7 +174,8 @@ def test_a_custodian_whose_server_is_gone_stops(store: SQLStoreBase[Any]) -> Non
 
 def test_a_custodian_lets_go_of_its_leases_when_it_stops(store: SQLStoreBase[Any]) -> None:
     task = _task(lambda _ctx: None, every=pendulum.duration(seconds=0.05), mode=TaskMode.SINGLETON)
-    _for(0.3, _supervisor(store, task, "a"))
+    with _running(_supervisor(store, task, "a")):
+        time.sleep(0.3)
     assert store.claim_task(_Name.WORK, "b", until=pendulum.now("UTC").add(minutes=1))
 
 
@@ -246,7 +214,8 @@ def test_a_shared_run_keeps_renewing_its_claims_while_it_works(
     monkeypatch.setattr(store, "renew_work", renewing)
     task = _task(lambda _ctx: time.sleep(0.6), mode=TaskMode.SHARED)
     store.request_task_run(_Name.WORK)
-    _for(1.0, _supervisor(store, task, "a"))
+    with _running(_supervisor(store, task, "a")):
+        time.sleep(1.0)
     assert len(renewed) > 1
     assert set(renewed) == {"a"}
 
@@ -264,7 +233,8 @@ def test_the_heartbeat_does_not_wait_for_a_database_that_is_slow(
     supervisor = _supervisor(
         store, _task(lambda _ctx: None), "a", heartbeat=lambda: beats.append(1), parent_alive=lambda: True
     )
-    _for(0.5, supervisor)
+    with _running(supervisor):
+        time.sleep(0.5)
     assert len(beats) > 20
 
 
@@ -279,7 +249,8 @@ def test_an_idle_custodian_makes_at_most_thirty_statements_a_minute(store: SQLSt
     event.listen(store._engine, "before_cursor_execute", record)
     settings = CustodianSettings(tick_s=0.01, poll_s=0.1, beat_s=0.3, stall_s=5)
     try:
-        _for(1.2, _supervisor(store, _task(lambda _ctx: None), "a", settings=settings))
+        with _running(_supervisor(store, _task(lambda _ctx: None), "a", settings=settings)):
+            time.sleep(1.2)
     finally:
         event.remove(store._engine, "before_cursor_execute", record)
     assert len(statements) <= 30, statements

@@ -194,9 +194,8 @@ class _Runner:
                 return  # the supervisor recorded it as hung, and the process is ending
             store.finish_task_run(task.name, outcome, error=error, progress=None)
         finally:
-            self.running_since = (
-                None  # even if the thread dies, or its deadline would count on for a run that is over
-            )
+            # Even if the thread dies: its deadline must not count on for a run that is over.
+            self.running_since = None
         _RUNS.add(1, _RunAttributes(task=task.name, outcome=outcome))
         _DURATION.record(time.monotonic() - started, _TaskAttributes(task=task.name))
         if ctx.backlog is not None:
