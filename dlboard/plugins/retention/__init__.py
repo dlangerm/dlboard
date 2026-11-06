@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 import pendulum
 
+from dlboard.plugins.retention._lock import refuse_new_runs_while_locked
 from dlboard.plugins.retention._rules import RetentionKey, RetentionSetting, RuleVersion
 from dlboard.plugins.retention._section import (
     register_retention_callbacks,
@@ -32,6 +33,7 @@ from dlboard.serve import (
     Task,
     TaskMode,
     register_project_section,
+    register_run_guard,
     register_setting,
     register_task,
 )
@@ -88,9 +90,10 @@ def _only_the_system(_write: SettingWrite) -> dict[str, Any]:
 
 
 def plug(app: Dash) -> None:
-    """Register retention's settings, its two tasks, and its sections on the project page."""
+    """Register retention's settings, its run guard, its two tasks, and its sections on the project page."""
     register_setting(app, SettingRule(key=RetentionKey.RULE, check=_within_caps))
     register_setting(app, SettingRule(key=RetentionKey.STATUS, check=_only_the_system))
+    register_run_guard(app, refuse_new_runs_while_locked)
     every = pendulum.duration(seconds=RetentionSettings().retention_interval_s)
     register_task(app, Task(name=RetentionTask.SCHEDULE, run_once=schedule_checks, every=every))
     register_task(app, Task(name=RetentionTask.CHECK, run_once=run_checks, every=every, mode=TaskMode.SHARED))

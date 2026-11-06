@@ -30,7 +30,7 @@ from dlboard.models import ProjectRole, Scope, has_scope, require_scope
 from dlboard.serve._backend._setting_rules import SettingRule, SettingWrite
 
 if TYPE_CHECKING:
-    from collections.abc import Collection, Iterable, Iterator, Mapping
+    from collections.abc import Collection, Iterable, Iterator, Mapping, Sequence
     from datetime import datetime
 
     from flask import Response
@@ -38,6 +38,7 @@ if TYPE_CHECKING:
     from werkzeug.datastructures import FileStorage
 
     from dlboard.serve._backend._metric_frame import MetricFrame, MetricKeySummary
+    from dlboard.serve._backend._run_guards import RunGuard
 
 
 def _forbid(what: str) -> NoReturn:
@@ -48,7 +49,7 @@ def _forbid(what: str) -> NoReturn:
 class AuthorizingDataStore(models.DataStore[...]):
     """A `DataStore` that only lets `actor` do what their project roles and scopes allow."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 -- what a request's store is built from, each once
         self,
         inner: models.DataStore[...],
         actor: models.User,
@@ -56,12 +57,14 @@ class AuthorizingDataStore(models.DataStore[...]):
         enforce_grants: bool,
         new_project_access: ProjectRole | None = None,
         setting_rules: Mapping[str, SettingRule] | None = None,
+        run_guards: Sequence[RunGuard] = (),
     ) -> None:
         self._inner = inner
         self._actor = actor
         self._enforce = enforce_grants
         self._new_project_access = new_project_access
         self._setting_rules = setting_rules or {}
+        self._run_guards = run_guards
         # Loaded lazily, once per request (one of these never outlives the request it was made for).
         self._projects: dict[int, models.Project] | None = None
         self._granted: dict[int, ProjectRole] | None = None
@@ -344,7 +347,11 @@ class AuthorizingDataStore(models.DataStore[...]):
         return self._inner.update_experiment(experiment)
 
     def create_run(self, run: models.NewRun) -> models.Run:
-        self._require(self._experiment_project(run.experiment_id), ProjectRole.EDITOR)
+        project_id = self._experiment_project(run.experiment_id)
+        self._require(project_id, ProjectRole.EDITOR)
+        if project_id is not None:
+            for guard in self._run_guards:
+                guard(self._inner, project_id)
         return self._inner.create_run(run)
 
     def get_run(self, run_id: int) -> models.Run | None:

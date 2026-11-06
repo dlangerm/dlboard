@@ -1,6 +1,12 @@
 """All exported data models."""
 
-from dlboard.models._access import AmbiguousProjectError, NewProjectGrant, ProjectGrant, ProjectRole
+from dlboard.models._access import (
+    AmbiguousProjectError,
+    NewProjectGrant,
+    ProjectGrant,
+    ProjectLockedError,
+    ProjectRole,
+)
 from dlboard.models._activity import ActivityStats, ProjectStats
 from dlboard.models._artifact import (
     FILE_KIND_TAG,
@@ -212,6 +218,7 @@ __all__ = [
     "Principal",
     "Project",
     "ProjectGrant",
+    "ProjectLockedError",
     "ProjectRole",
     "ProjectStats",
     "Quantity",

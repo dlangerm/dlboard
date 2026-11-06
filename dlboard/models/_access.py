@@ -66,3 +66,7 @@ class ProjectGrant(NewProjectGrant, frozen=True, extra="forbid"):
 
 class AmbiguousProjectError(LookupError):
     """More than one project the caller can write to has the requested name -- they must pick one by id."""
+
+
+class ProjectLockedError(Exception):
+    """A plugin refuses new runs in a project for now: its message says why, and what ends it."""

@@ -61,18 +61,28 @@ DEFAULT_SERVER_URL: Final = "http://localhost:8050"
 
 def _raise_for_status(res: requests.Response) -> None:
     """
-    `res.raise_for_status()`, with the server's request id in the message when it sent one.
+    `res.raise_for_status()`, with what the server said and its request id in the message when it sent them.
 
     A bare "500 Server Error" says nothing about *which* request failed; the id is what finds that request's
-    line (and traceback) in the server's log. The response stays on the error, for `is_rejection` and friends.
+    line (and traceback) in the server's log. A 4xx's `error` says why it was refused (a project that takes no
+    new runs for now, say). The response stays on the error, for `is_rejection` and friends.
     """
     try:
         res.raise_for_status()
     except requests.HTTPError as exc:
         request_id = res.headers.get(REQUEST_ID_HEADER)
-        if not request_id:
+        try:
+            body = res.json()
+        except ValueError:  # not the JSON our server's errors are: nothing more to say
+            body = None
+        said = body.get("error") if isinstance(body, dict) else None
+        if not request_id and not said:
             raise
-        msg = f"{exc} (server request id {request_id})"
+        msg = (
+            f"{exc}"
+            + (f": {said}" if said else "")
+            + (f" (server request id {request_id})" if request_id else "")
+        )
         raise requests.HTTPError(msg, response=res) from exc
 
 

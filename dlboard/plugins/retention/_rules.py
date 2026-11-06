@@ -163,3 +163,9 @@ class RetentionStatus(BaseModel, frozen=True, extra="forbid"):
     """How many runs it still holds that its rules say to delete (counted up to `OVERDUE_COUNTED`)."""
     out_of_spec_since: AwareDatetime | None = None
     """Since when it has held runs to delete; `None` while it holds none."""
+
+    def is_locked(self, now: datetime, after: pendulum.Duration | None) -> bool:
+        """Whether it has held runs to delete for `after` (if a lock is set): it then takes no new runs until it catches up."""
+        return (
+            after is not None and self.out_of_spec_since is not None and now - self.out_of_spec_since >= after
+        )
