@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 
     from dash import Dash
 
-    from dlboard.serve._custodian._models import WorkItem
+    from dlboard.serve._custodian._models import TaskState, WorkItem
     from dlboard.serve._custodian._store import TaskStore
 
 
@@ -55,6 +55,26 @@ class Task:
     The longest one run may take. A run that passes it is hung: a thread cannot be stopped, so its custodian records
     it and exits, and the server starts a new one, clean.
     """
+
+    def is_due(self, state: TaskState | None, now: pendulum.DateTime, holder: str) -> bool:
+        """
+        Whether `holder`'s custodian should run this task at `now`, by what the database holds of its last run.
+
+        A task on an interval is due `every` after its last run finished, on the wall clock: the one every server and the
+        admin page agree on, which keeps counting while a machine sleeps (a monotonic one does not). Not due while
+        another custodian holds the lease of a one-at-a-time task, or if it never runs on a schedule.
+        """
+        if self.every is None:
+            return False
+        if (
+            self.mode is TaskMode.SINGLETON
+            and state is not None
+            and state.holder not in (None, holder)
+            and state.lease_until is not None
+            and state.lease_until > now
+        ):
+            return False
+        return state is None or state.last_finished_at is None or now >= state.last_finished_at + self.every
 
 
 TASKS: AppSlot[list[Task]] = AppSlot("background tasks")

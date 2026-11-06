@@ -11,7 +11,6 @@ database's side: records the custodian's beat, renews the leases and claims its 
 from __future__ import annotations
 
 import os
-import random
 import socket
 import threading
 import time
@@ -123,7 +122,7 @@ def custodian_holder() -> str:
 
 
 class _Runner:
-    """One task's thread: it waits until the task is due (or asked for), then runs it once."""
+    """One task's thread: it waits until it is woken (the task is due, or was asked for), then runs it once."""
 
     def __init__(self, supervisor: Supervisor, task: Task) -> None:
         self.task = task
@@ -131,9 +130,8 @@ class _Runner:
         self._wake = threading.Event()
         self.cancel = threading.Event()
         """Set to end the run in progress: its lease was taken over, or the custodian is stopping. A new one for each run."""
-        # Due soon after start, spread out so that every custodian started at once does not ask at once.
-        first = min(task.every.total_seconds() if task.every else 0, supervisor.settings.poll_s)
-        self._next_due = time.monotonic() + random.uniform(0, first)
+        self.woken = False
+        """From the poll waking the runner until its run is over and recorded: the poll wakes a runner once, not twice."""
         self.running_since: float | None = None
         self.thread: threading.Thread | None = None
         self.failures = 0
@@ -146,22 +144,22 @@ class _Runner:
         self.thread = threading.Thread(target=self._loop, daemon=True, name=f"task-{self.task.name}")
         self.thread.start()
 
-    def request(self) -> None:
-        """Run now, out of turn: a run was asked for."""
+    def wake(self) -> None:
+        """Run now: the task is due, or a run was asked for."""
+        self.woken = True
         self._wake.set()
 
     def _loop(self) -> None:
         stop = self._supervisor.stop
         while not stop.is_set():
-            due_in = self._next_due - time.monotonic() if self.task.every else None
-            if due_in is None or due_in > 0:
-                self._wake.wait(due_in)
-                self._wake.clear()
-                if stop.is_set():
-                    return
-            self._run_once()
-            if self.task.every:
-                self._next_due = time.monotonic() + self.task.every.total_seconds()
+            self._wake.wait()
+            self._wake.clear()
+            if stop.is_set():
+                return
+            try:
+                self._run_once()
+            finally:
+                self.woken = False
 
     def _run_once(self) -> None:
         supervisor, task = self._supervisor, self.task
@@ -183,21 +181,24 @@ class _Runner:
             claim_for=pendulum.duration(seconds=supervisor.settings.claim_s),
         )
         store.start_task_run(task.name)
-        self.running_since = time.monotonic()
+        started = self.running_since = time.monotonic()
         outcome, error = TaskOutcome.SUCCESS, None
         try:
-            with span(f"dlboard.task.{task.name}", SpanKind.INTERNAL):
-                task.run_once(ctx)
-        except Exception:  # noqa: BLE001 -- a failed run is recorded, and the task runs again when next due
-            outcome, error = TaskOutcome.FAILURE, traceback.format_exc(limit=8)
-            _log.exception("A background task failed", task=str(task.name))
-        took = time.monotonic() - self.running_since
-        self.running_since = None
-        if self.hung:
-            return  # the supervisor recorded it as hung, and the process is ending
-        store.finish_task_run(task.name, outcome, error=error, progress=None)
+            try:
+                with span(f"dlboard.task.{task.name}", SpanKind.INTERNAL):
+                    task.run_once(ctx)
+            except Exception:  # noqa: BLE001 -- a failed run is recorded, and the task runs again when next due
+                outcome, error = TaskOutcome.FAILURE, traceback.format_exc(limit=8)
+                _log.exception("A background task failed", task=str(task.name))
+            if self.hung:
+                return  # the supervisor recorded it as hung, and the process is ending
+            store.finish_task_run(task.name, outcome, error=error, progress=None)
+        finally:
+            self.running_since = (
+                None  # even if the thread dies, or its deadline would count on for a run that is over
+            )
         _RUNS.add(1, _RunAttributes(task=task.name, outcome=outcome))
-        _DURATION.record(took, _TaskAttributes(task=task.name))
+        _DURATION.record(time.monotonic() - started, _TaskAttributes(task=task.name))
         if ctx.backlog is not None:
             _BACKLOG.add(ctx.backlog - self.backlog_reported, _TaskAttributes(task=task.name))
             self.backlog_reported = ctx.backlog
@@ -289,7 +290,7 @@ class Supervisor:
                     self._renew_running()
                     beaten = now
                 if now - polled >= self.settings.poll_s:
-                    self._answer_requests()
+                    self._wake_due()
                     polled = now
             except Exception:  # noqa: BLE001 -- as above
                 _log.warning("Could not reach the database; trying again", exc_info=True)
@@ -340,12 +341,22 @@ class Supervisor:
         if any(runner.task.mode is TaskMode.SHARED for runner in running):
             self.store.renew_work(self.holder, until=now + pendulum.duration(seconds=self.settings.claim_s))
 
-    def _answer_requests(self) -> None:
-        """Start, out of turn, the tasks a run was asked for (and none has started since): one query for all of them."""
-        asked = {state.name for state in self.store.task_states() if state.requested_at is not None}
+    def _wake_due(self) -> None:
+        """
+        Start the tasks that are due, and those a run was asked for: one query for all of them.
+
+        Due is the database's word (`Task.is_due`), on the wall clock, so a task is as late after a sleep as the poll that
+        first sees the time gone by. A runner already woken (and so, perhaps, not yet running) is left alone, and the ones
+        left are picked before the read, so that one whose run ends in between is not woken by a finish it has not read.
+        """
+        idle = [runner for runner in self.runners if not runner.woken]
+        states = {state.name: state for state in self.store.task_states()}
+        now = pendulum.now(pendulum.UTC)
         for runner in self.runners:
-            if runner.task.name in asked:
-                runner.request()
+            state = states.get(str(runner.task.name))
+            asked = state is not None and state.requested_at is not None
+            if asked or (runner in idle and runner.task.is_due(state, now, self.holder)):
+                runner.wake()
 
     def _restart_dead(self, now: float) -> None:
         for runner in self.runners:
@@ -366,7 +377,7 @@ class Supervisor:
         """Wait (a little) for runs to stop, so that none takes a lease back after it is let go of."""
         deadline = time.monotonic() + _JOIN_S
         for runner in self.runners:
-            runner.request()  # a runner waiting to be asked for is woken, to see the stop
+            runner.wake()  # a runner waiting to be asked for is woken, to see the stop
         for runner in self.runners:
             if runner.thread is not None:
                 runner.thread.join(max(deadline - time.monotonic(), 0))
