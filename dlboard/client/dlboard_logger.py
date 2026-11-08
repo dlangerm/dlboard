@@ -405,6 +405,8 @@ class DLBoardLogger(Logger):
         run_id: int | None = None,
         *,
         log_model: bool | Literal["all"] = False,
+        pin: models.PinColor | None = None,
+        keep: bool = False,
     ) -> None:
         """
         Initialize with an existing project/experiment id; an experiment is created if none is given.
@@ -413,6 +415,10 @@ class DLBoardLogger(Logger):
         existing one to attach to -- for resuming a run, or sharing one between processes that were
         launched separately. `experiment_id` may be omitted then (it's the run's own); a different
         one is an error.
+
+        `pin` pins the run for you in that colour, and `keep` keeps it out of retention's reach (it takes an
+        editor of the project), the moment it exists: a baseline or a release candidate need not wait for someone
+        to click. A server that refuses fails this call, before anything starts logging.
 
         `log_model` is as for Lightning's MLflow/W&B loggers, for a `ModelCheckpoint` callback:
         `"all"` uploads every checkpoint as it is saved (or `True`, when `save_top_k=-1`), while `True`
@@ -448,6 +454,8 @@ class DLBoardLogger(Logger):
             if run_id is not None
             else self._api.create_run(models.NewRun(experiment_id=experiment_id)).id
         )
+        if pin is not None or keep:
+            self._api.mark_run(self._run_id, pin=pin, keep=keep)
         startup_start = time.perf_counter()
         self._metrics = _start_shipper(
             _ShipKind.METRICS,
@@ -492,12 +500,14 @@ class DLBoardLogger(Logger):
         run_id: int | None = None,
         *,
         log_model: bool | Literal["all"] = False,
+        pin: models.PinColor | None = None,
+        keep: bool = False,
     ) -> DLBoardLogger:
         """
         Initialize by project/experiment name instead of raw ids, creating either that don't exist yet.
 
         `project_description` only applies the first time `project_name` is seen -- once a project
-        exists, later calls just reuse it as-is. `run_id` and `log_model` are as for `__init__`.
+        exists, later calls just reuse it as-is. `run_id`, `log_model`, `pin` and `keep` are as for `__init__`.
         """
         if not _is_rank_zero():
             # Every rank runs this, and a get-or-create isn't safe to race: two ranks asking for the
@@ -508,6 +518,8 @@ class DLBoardLogger(Logger):
                 settings=settings,
                 run_id=run_id,
                 log_model=log_model,
+                pin=pin,
+                keep=keep,
             )
         api = BasicDlboardAPI(base_url=server_url)
         api.whoami()
@@ -522,6 +534,8 @@ class DLBoardLogger(Logger):
             settings=settings,
             run_id=run_id,
             log_model=log_model,
+            pin=pin,
+            keep=keep,
         )
 
     @property

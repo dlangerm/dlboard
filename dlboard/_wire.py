@@ -92,9 +92,18 @@ def get_or_create_path(resource: Resource, base_url: str = "/") -> str:
     return f"{base_url}/{API_PREFIX}/{resource}/get-or-create".strip("/")
 
 
-def run_finish_path(run_id: str = "<int:entity_id>", base_url: str = "/") -> str:
-    """The REST path a run's client reports it is done on, e.g. `api/v1/runs/<id>/finish`."""
-    return f"{entity_path(Resource.RUNS, run_id, base_url)}/finish"
+class RunCall(StrEnum):
+    """What a run's client says to the run it created: the last segment of `api/v1/runs/<id>/<call>`."""
+
+    FINISH = "finish"
+    """It is done, and how."""
+    MARK = "mark"
+    """It is to be pinned and/or kept (`MarkRun`)."""
+
+
+def run_path(call: RunCall, run_id: str = "<int:entity_id>", base_url: str = "/") -> str:
+    """The REST path of a call on one run, e.g. `api/v1/runs/<id>/finish`."""
+    return f"{entity_path(Resource.RUNS, run_id, base_url)}/{call}"
 
 
 class Identity(BaseModel, frozen=True, extra="ignore"):
@@ -135,6 +144,18 @@ class FinishRun(BaseModel, frozen=True, extra="ignore"):
             msg = "a run is finished as finished, failed or unknown, not running"
             raise ValueError(msg)
         return status
+
+
+class MarkRun(BaseModel, frozen=True, extra="ignore"):
+    """
+    Request body: a run's client pins it (for the caller) and/or keeps it, as it is launched.
+
+    Pinning is the caller's own, in a colour, as the UI does it. Keeping takes the run out of retention's reach, which an
+    editor of its project may do. Asking for neither does nothing.
+    """
+
+    pin: models.PinColor | None = None
+    keep: bool = False
 
 
 class GetOrCreateExperiment(BaseModel, frozen=True, extra="ignore"):

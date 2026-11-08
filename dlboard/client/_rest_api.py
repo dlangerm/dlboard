@@ -38,11 +38,13 @@ from dlboard._wire import (
     GetOrCreateExperiment,
     GetOrCreateProject,
     Identity,
+    MarkRun,
     Resource,
+    RunCall,
     create_path,
     entity_path,
     get_or_create_path,
-    run_finish_path,
+    run_path,
 )
 
 if TYPE_CHECKING:
@@ -287,10 +289,24 @@ class BasicDlboardAPI:
         """
         body = FinishRun(status=status, ended_at=ended_at or pendulum.now(pendulum.UTC))
         try:
-            self._post(run_finish_path(), body, models.Run, path=run_finish_path(str(run_id)))
+            self._post(run_path(RunCall.FINISH), body, models.Run, path=run_path(RunCall.FINISH, str(run_id)))
         except requests.HTTPError as exc:
             if exc.response is None or exc.response.status_code != HTTPStatus.NOT_FOUND:
                 raise
+
+    def mark_run(self, run_id: int, *, pin: models.PinColor | None = None, keep: bool = False) -> models.Run:
+        """
+        Pin run `run_id` as this client's user in the colour `pin`, and/or keep it from retention (`keep`).
+
+        Keeping takes an editor of the run's project. Raises `requests.HTTPError` when the server refuses it (a 403, or a
+        404 for a run that is gone, not yours, or a server from before this existed), with why in its message.
+        """
+        return self._post(
+            run_path(RunCall.MARK),
+            MarkRun(pin=pin, keep=keep),
+            models.Run,
+            path=run_path(RunCall.MARK, str(run_id)),
+        )
 
     def log_hyperparams(self, hyperparams: models.NewHyperParams) -> models.HyperParams:
         """Log hyperparameters."""

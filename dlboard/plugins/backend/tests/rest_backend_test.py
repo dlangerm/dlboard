@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import dash
+import pytest
 from pydantic import ValidationError
 
 from dlboard import models
+from dlboard.models import PinColor, ProjectRole
 from dlboard.plugins.backend import basic_rest_backend as backend
+from dlboard.serve._backend._authorization import AuthorizingDataStore
+
+if TYPE_CHECKING:
+    from dlboard.plugins.data_stores.sqlite import SQLLiteStore
 
 
 def test_permission_error_maps_to_a_403() -> None:
@@ -81,3 +87,26 @@ def test_a_project_that_takes_no_new_runs_maps_to_a_423_the_client_does_not_retr
     body, status = backend._handle_project_locked(models.ProjectLockedError("takes no new runs"))
 
     assert (status, body) == (423, {"error": "takes no new runs"})
+
+
+def test_a_viewer_who_may_not_keep_a_run_has_not_pinned_it_either(store: SQLLiteStore) -> None:
+    """Keeping needs an editor and pinning only a viewer, so the keep is asked first and a refusal marks nothing."""
+    alice = store.get_or_create_user(models.Principal(issuer="test", subject="alice", username="alice"))
+    bob = store.get_or_create_user(models.Principal(issuer="test", subject="bob", username="bob"))
+    project = AuthorizingDataStore(store, alice, enforce_grants=True).create_project(
+        models.NewProject(name="p", description="")
+    )
+    experiment = store.create_experiment(models.NewExperiment(project_id=project.id))
+    run = store.create_run(models.NewRun(experiment_id=experiment.id))
+    grant = models.NewProjectGrant(project_id=project.id, user_id=bob.id, role=ProjectRole.VIEWER)
+    store.set_project_grant(grant)
+
+    as_bob = AuthorizingDataStore(store, bob, enforce_grants=True)
+    with pytest.raises(PermissionError):
+        backend.handle_mark_run(as_bob, run.id, {"keep": True, "pin": PinColor.RED}, bob)
+
+    assert store.kept_runs(experiment.id, run_ids=None) == frozenset()
+    assert store.pins_of(experiment.id, run_ids=None) == {}
+    # A viewer may pin what they see, which is all this asks for.
+    backend.handle_mark_run(as_bob, run.id, {"pin": PinColor.RED}, bob)
+    assert list(store.pins_of(experiment.id, run_ids=None)) == [run.id]

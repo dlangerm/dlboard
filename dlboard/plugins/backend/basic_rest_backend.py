@@ -21,11 +21,13 @@ from dlboard._wire import (
     GetOrCreateExperiment,
     GetOrCreateProject,
     Identity,
+    MarkRun,
     Resource,
+    RunCall,
     create_path,
     entity_path,
     get_or_create_path,
-    run_finish_path,
+    run_path,
 )
 from dlboard.models import DataStore
 from dlboard.serve import get_artifact_store, get_current_user, get_data_store
@@ -113,6 +115,24 @@ def handle_finish_run(store: DataStore[...], run_id: int, body: dict[str, Any]) 
     finished = store.finish_run(run_id, req.status, req.ended_at)
     _RUNS_FINISHED.add(1, _FinishedAttributes(status=req.status))
     return finished.model_dump(mode="json")
+
+
+def handle_mark_run(
+    store: DataStore[...], run_id: int, body: dict[str, Any], actor: models.User
+) -> dict[str, Any]:
+    """
+    Keep and/or pin run `run_id` as `actor` (`MarkRun`), and say how the run stands. 404 as `handle_get_run`.
+
+    The keep comes first: it needs more than a pin does, so a writer who may pin but not keep marks nothing.
+    """
+    req = MarkRun.model_validate(body)
+    if store.get_run(run_id) is None:
+        raise NotFound
+    if req.keep:
+        store.keep_runs(frozenset({run_id}), actor)
+    if req.pin is not None:
+        store.pin_runs(actor.id, frozenset({run_id}), req.pin)
+    return handle_get_run(store, run_id)
 
 
 def handle_get_run(store: DataStore[...], run_id: int) -> dict[str, Any]:
@@ -269,6 +289,11 @@ def get_run(entity_id: int) -> dict[str, Any]:
 def finish_run(entity_id: int) -> dict[str, Any]:
     """A run's client reports it is done (finished or failed)."""
     return handle_finish_run(get_data_store(), entity_id, request.json)
+
+
+def mark_run(entity_id: int) -> dict[str, Any]:
+    """A run's client pins and/or keeps it, as it is launched."""
+    return handle_mark_run(get_data_store(), entity_id, request.json, get_current_user())
 
 
 def create_project() -> dict[str, Any]:
@@ -442,7 +467,8 @@ _ROUTES: tuple[tuple[str, list[str], Callable[..., Any]], ...] = (
     (f"{entity_path(Resource.EXPERIMENTS)}/restore", ["POST"], restore_experiment),
     (entity_path(Resource.RUNS), ["GET"], get_run),
     (entity_path(Resource.RUNS), ["DELETE"], delete_run),
-    (run_finish_path(), ["POST"], finish_run),
+    (run_path(RunCall.FINISH), ["POST"], finish_run),
+    (run_path(RunCall.MARK), ["POST"], mark_run),
     (f"{entity_path(Resource.RUNS)}/restore", ["POST"], restore_run),
     (entity_path(Resource.ARTIFACTS), ["DELETE"], delete_artifact),
     (f"{entity_path(Resource.ARTIFACTS)}/restore", ["POST"], restore_artifact),

@@ -53,7 +53,9 @@ Never deleted by retention:
 - **A kept run.** Select runs in any run list and click **Keep** in the bar: a lock after a run's name says it is kept. A
   kept run is not counted either, so keeping runs never makes retention delete others. An editor keeps a run; only an owner
   (or an admin) releases it (**Release**) or deletes it, and deleting an experiment that holds a kept run is an owner's too.
-  Keeping is not pinning: anyone can pin a run, which flags it for a comparison and nothing more.
+  A script that knows its run matters (a baseline, a release candidate) keeps it as it launches it:
+  `DLBoardLogger(..., keep=True)`, see [client.md](client.md#pinning-and-keeping-a-run). Keeping is not pinning: anyone can
+  pin a run, which flags it for a comparison and nothing more.
 - **A run still running**, for `DLBOARD_RETENTION_RUNNING_GRACE_DAYS` (7). A run that has been running for longer than that
   has lost its client (a training process that died never says it ended) and is deleted as any other.
 
@@ -126,6 +128,5 @@ kind) is a plugin on the same pieces.
 
 ## Not yet
 
-Keeping a run from the client, as it is created, is not there yet ([#562](https://github.com/dlangerm/dlboard/issues/562)),
-and one very large run is deleted in one transaction rather than in chunks
+One very large run is deleted in one transaction rather than in chunks
 ([#563](https://github.com/dlangerm/dlboard/issues/563)).

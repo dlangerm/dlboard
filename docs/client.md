@@ -45,6 +45,13 @@ stamped with the global step its callback saved at (with `log_model=True`, the s
 save). Any number of `ModelCheckpoint` callbacks work. On the experiment page they are one list, split into
 `Latest`, `Best` and `Top-k` tabs by those tags, paged and sortable by step and score.
 
+**Pinning and keeping a run.** A script that knows its run matters can say so as it launches it, instead of someone clicking
+afterwards: `DLBoardLogger(..., pin=PinColor.RED)` pins the run for you in that colour (see
+[comparisons.md](comparisons.md#pins)), and `keep=True` keeps it out of [retention](retention.md)'s reach. Both are
+also arguments of `DLBoardLogger.from_names`. Pinning is for anyone who can see the run; keeping takes an editor of its
+project. A server that refuses fails the logger's construction, with its reason in the error, before anything is logged;
+`BasicDlboardAPI.mark_run(run_id, pin=..., keep=...)` does the same to a run that exists.
+
 **Authenticating.** If the server signs people in (see [Auth](plugins/auth.md)), the script has to
 sign in too:
 

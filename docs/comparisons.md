@@ -19,7 +19,8 @@ pinned runs. They work the same way on all three, so what you learn on one is wh
 ## Pins
 
 A pin flags a run, and says who flagged it. It is project-wide: everyone who can see the run sees its pins. A run can be
-pinned the moment it exists, whether or not it has logged anything yet.
+pinned the moment it exists, whether or not it has logged anything yet, and by the script that launches it
+(`DLBoardLogger(..., pin=PinColor.RED)`, see [client.md](client.md#pinning-and-keeping-a-run)).
 
 ![A comparison of a learning-rate sweep and the baseline experiment, with each run's pins in the sidebar](images/comparison.png)
 

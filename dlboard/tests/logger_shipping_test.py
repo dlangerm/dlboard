@@ -13,7 +13,7 @@ import torch
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.demos.boring_classes import BoringModel
 
-from dlboard._wire import Resource, create_path, run_finish_path
+from dlboard._wire import Resource, RunCall, create_path, run_path
 from dlboard.client._rest_api import BasicDlboardAPI
 from dlboard.client.artifacts import image
 from dlboard.client.dlboard_logger import DLBoardLogger
@@ -23,6 +23,7 @@ from dlboard.models import (
     FileKind,
     NewArtifact,
     NewRun,
+    PinColor,
     Quantity,
     RunStatus,
     SizeUnit,
@@ -125,6 +126,26 @@ def test_a_second_logger_given_the_run_id_logs_into_the_same_run(
         logger.run_id
     ]
     assert list(backend_server.store.fetch_metrics(logger._experiment_id, run_ids=None).step) == [0]
+
+
+def test_a_run_is_pinned_and_kept_the_moment_it_is_launched(backend_server: BackendServer) -> None:
+    """A baseline need not wait for someone to click Pin and Keep (#499, #562)."""
+    logger = DLBoardLogger.from_names("shipping", server_url=backend_server.url, pin=PinColor.RED, keep=True)
+    try:
+        run_id = logger.run_id
+        assert run_id is not None
+        experiment_id, only = logger._experiment_id, frozenset({run_id})
+        pins = backend_server.store.pins_of(experiment_id, run_ids=only)[run_id]
+
+        assert backend_server.store.kept_runs(experiment_id, run_ids=only) == only
+        assert [named.pin.color for named in pins] == [PinColor.RED]
+    finally:
+        _abandon(logger)
+
+
+def test_a_run_marked_that_does_not_exist_is_a_404_the_client_raises(backend_server: BackendServer) -> None:
+    with pytest.raises(requests.HTTPError, match="404"):
+        BasicDlboardAPI(backend_server.url).mark_run(999_999, keep=True)
 
 
 def test_a_metric_without_a_step_is_rejected_where_it_was_logged(logger: DLBoardLogger) -> None:
@@ -242,7 +263,9 @@ def test_the_finish_route_rejects_what_it_cannot_record(
     expected_status: int,
 ) -> None:
     res = requests.post(
-        f"{backend_server.url}/{run_finish_path(str(run_id or logger.run_id))}", json=body, timeout=10
+        f"{backend_server.url}/{run_path(RunCall.FINISH, str(run_id or logger.run_id))}",
+        json=body,
+        timeout=10,
     )
 
     assert res.status_code == expected_status
