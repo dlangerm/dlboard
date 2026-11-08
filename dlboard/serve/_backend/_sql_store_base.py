@@ -6,7 +6,7 @@ import itertools
 import json
 import math
 from abc import ABC, abstractmethod
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Final, Literal, cast
 
@@ -50,6 +50,16 @@ _OWNS = ForeignKeyKind.OWNERSHIP
 
 _IN_BATCH: Final = 500
 """How many ids or rows one statement binds: they are bound values, and a database allows only so many in a statement."""
+
+_PURGE_CHUNK: Final = 10_000
+"""
+How many rows of a metrics or histograms table a purge deletes in one transaction. Measured on SQLite, which refuses every
+other writer for as long as one holds the lock: about 3 to 10 microseconds a row, so a chunk holds the database for 30 to
+100 milliseconds.
+"""
+
+_PURGE_ARTIFACT_CHUNK: Final = 1_000
+"""As `_PURGE_CHUNK`, for artifacts: each costs about ten times a metric row, as its blob's work item is queued with it."""
 
 _STRIDE_DOUBLINGS: Final = 32
 """How many powers of two `fetch_histograms` can thin by: far more steps than any run will ever log."""
@@ -2730,8 +2740,76 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
             ]
         )
 
+    def _drain_big_tables(
+        self,
+        root: sa.Table,
+        entity_id: int,
+        cascade: list[tuple[sa.Table, sa.ColumnElement[bool]]],
+        actor_id: int,
+        pace: models.Pace,
+    ) -> None:
+        """
+        Delete what a purge is about to cascade over in the tables that can hold millions of rows, a chunk at a time.
+
+        Those are a run's metrics, histograms and artifacts. A purge that deleted a very large run in one statement held the
+        database for as long as the run was big: a minute, for twenty million metrics, in which SQLite refused every other
+        writer. Here a chunk is `_PURGE_CHUNK` rows in a transaction of its own, entered through `pace`, so that the database
+        is free between them. A chunk of artifacts queues its blobs' deletions in the same transaction, so a blob is neither
+        forgotten nor queued twice if the purge stops and goes on later. The root goes last, and a chunk deletes only while it
+        is still in the Trash: one restored meanwhile is left alone.
+        """
+        still_trashed = sa.exists().where(root.c.id == entity_id, root.c.deleted_at.is_not(None))
+        big = {
+            self._tables[model]
+            for model in (
+                models.UnderlyingMetricTableEntry,
+                models.UnderlyingHistogramTableEntry,
+                models.Artifact,
+            )
+        }
+        paths: dict[sa.Table, list[sa.ColumnElement[bool]]] = {}
+        for table, where in cascade:
+            if table in big:
+                paths.setdefault(table, []).append(where)
+        for table, wheres in paths.items():
+            chunk = sa.and_(sa.or_(*wheres), still_trashed)
+            drained = True
+            while drained:
+                with pace():
+                    drained = self._delete_chunk(table, chunk, actor_id)
+
+    def _delete_chunk(self, table: sa.Table, where: sa.ColumnElement[bool], actor_id: int) -> bool:
+        """Delete up to a chunk of `table`'s rows matching `where` (and queue their blobs', for artifacts): whether any."""
+        is_artifact = table is self._tables[models.Artifact]
+        chosen = (
+            sa.select(table.c.id).where(where).limit(_PURGE_ARTIFACT_CHUNK if is_artifact else _PURGE_CHUNK)
+        )
+        deleting = sa.delete(table).where(table.c.id.in_(chosen))
+        with self._begin() as conn:
+            if not is_artifact:
+                return conn.execute(deleting).rowcount > 0
+            # The delete is the transaction's first statement, and says which blobs to queue: a read that came first and
+            # then wrote could not wait for a lock another writer holds, as SQLite fails it at once ("database is locked").
+            gone = conn.execute(deleting.returning(table.c.id, table.c.ref)).all()
+            for batch in itertools.batched(gone, _IN_BATCH):
+                conn.execute(
+                    self._insert_ignoring_conflicts(self._tables[WorkItem]).values(
+                        [
+                            sql.row_values(blob_deletion(artifact_id, ref, requested_by=actor_id))
+                            for artifact_id, ref in batch
+                        ]
+                    )
+                )
+            return bool(gone)
+
     def _purge(
-        self, model: type[BaseModel], entity_id: int, actor: models.User, *, entity_type: models.EntityType
+        self,
+        model: type[BaseModel],
+        entity_id: int,
+        actor: models.User,
+        *,
+        entity_type: models.EntityType,
+        pace: models.Pace | None = None,
     ) -> None:
         """
         Permanently delete one already-soft-deleted row.
@@ -2764,6 +2842,7 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
 
         cascade = self._cascade(model, entity_id)
         details = self._cascade_counts(cascade)
+        self._drain_big_tables(table, entity_id, cascade, actor.id, pace or nullcontext)
 
         artifacts = self._tables[models.Artifact]
         artifact_where = (
@@ -2775,11 +2854,13 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
 
         work = self._tables[WorkItem]
         with self._begin() as conn:
-            if (
-                conn.execute(sa.delete(table).where(table.c.id == entity_id).returning(table.c.id)).first()
-                is None
-            ):
-                return  # another purge got there first, and recorded it
+            deleted = conn.execute(
+                sa.delete(table)
+                .where(table.c.id == entity_id, table.c.deleted_at.is_not(None))
+                .returning(table.c.id)
+            ).first()
+            if deleted is None:
+                return  # another purge got there first (and recorded it), or it was restored while this one went on
             conn.execute(
                 self._audit_log_insert(actor.id, models.AuditAction.PURGE, entity_type, {entity_id: details})
             )
@@ -2798,9 +2879,9 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
         """Restore a soft-deleted project and every experiment/run/artifact deleted with it. Requires `Scope.RESTORE`."""
         self._restore(models.Project, project_id, actor, entity_type=models.EntityType.PROJECT)
 
-    def purge_project(self, project_id: int, actor: models.User) -> None:
-        """Permanently delete an already soft-deleted project and everything under it."""
-        self._purge(models.Project, project_id, actor, entity_type=models.EntityType.PROJECT)
+    def purge_project(self, project_id: int, actor: models.User, *, pace: models.Pace | None = None) -> None:
+        """Permanently delete an already soft-deleted project and everything under it, in chunks (`_drain_big_tables`)."""
+        self._purge(models.Project, project_id, actor, entity_type=models.EntityType.PROJECT, pace=pace)
 
     def delete_experiment(self, experiment_id: int, actor: models.User) -> None:
         """Soft-delete an experiment and cascade to its runs and artifacts. Requires `Scope.EXPERIMENT_DELETE`."""
@@ -2810,9 +2891,13 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
         """Restore a soft-deleted experiment and every run/artifact deleted with it. Requires `Scope.RESTORE`."""
         self._restore(models.Experiment, experiment_id, actor, entity_type=models.EntityType.EXPERIMENT)
 
-    def purge_experiment(self, experiment_id: int, actor: models.User) -> None:
-        """Permanently delete an already soft-deleted experiment and everything under it."""
-        self._purge(models.Experiment, experiment_id, actor, entity_type=models.EntityType.EXPERIMENT)
+    def purge_experiment(
+        self, experiment_id: int, actor: models.User, *, pace: models.Pace | None = None
+    ) -> None:
+        """Permanently delete an already soft-deleted experiment and everything under it, in chunks."""
+        self._purge(
+            models.Experiment, experiment_id, actor, entity_type=models.EntityType.EXPERIMENT, pace=pace
+        )
 
     def delete_run(self, run_id: int, actor: models.User) -> None:
         """Soft-delete a run and cascade to its artifacts. Requires `Scope.RUN_DELETE`."""
@@ -2906,9 +2991,9 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
         """Restore a soft-deleted run and every artifact deleted with it. Requires `Scope.RESTORE`."""
         self._restore(models.Run, run_id, actor, entity_type=models.EntityType.RUN)
 
-    def purge_run(self, run_id: int, actor: models.User) -> None:
-        """Permanently delete an already soft-deleted run and everything under it."""
-        self._purge(models.Run, run_id, actor, entity_type=models.EntityType.RUN)
+    def purge_run(self, run_id: int, actor: models.User, *, pace: models.Pace | None = None) -> None:
+        """Permanently delete an already soft-deleted run and everything under it, in chunks."""
+        self._purge(models.Run, run_id, actor, entity_type=models.EntityType.RUN, pace=pace)
 
     def delete_artifact(self, artifact_id: int, actor: models.User) -> None:
         """Soft-delete a single artifact (a leaf -- nothing depends on it). Requires `Scope.ARTIFACT_DELETE`."""

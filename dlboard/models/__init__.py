@@ -36,7 +36,7 @@ from dlboard.models._comment import Comment, NewComment
 from dlboard.models._comparison import ComparisonRun, ComparisonSummary, NewComparisonRun
 from dlboard.models._credentials import ApiToken, NewApiToken, PasswordCredential
 from dlboard.models._data_request import EVERY_KEY, ArtifactWindow, DataRequest
-from dlboard.models._data_store import SUMMARY_RUNS, ArtifactStore, DataStore, StepRange
+from dlboard.models._data_store import SUMMARY_RUNS, ArtifactStore, DataStore, Pace, StepRange
 from dlboard.models._experiment import Experiment, ExperimentSource, NewExperiment
 from dlboard.models._histogram import (
     Histogram,
@@ -203,6 +203,7 @@ __all__ = [
     "NewScopedSetting",
     "NewUser",
     "OverlayKey",
+    "Pace",
     "PackedCounts",
     "PackedFloats",
     "Page",

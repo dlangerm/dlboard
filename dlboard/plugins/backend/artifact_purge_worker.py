@@ -12,6 +12,8 @@ queued after it, and a task picks it up on its next run: nothing waits for an ad
 
 from __future__ import annotations
 
+import functools
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final
 
@@ -35,7 +37,7 @@ from dlboard.serve._custodian import (
 from dlboard.serve.telemetry import Counter, Outcome, OutcomeAttributes, Unit
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Generator
 
     from dash import Dash
 
@@ -69,16 +71,26 @@ class _Drained:
     failed: int = 0
 
 
-def _drain(ctx: TaskContext, kind: PurgeWork, act: Callable[[WorkItem], None]) -> _Drained:
-    """Claim `kind`'s due items a batch at a time, `act` on each, until none is left or the custodian stops."""
+def _drain(
+    ctx: TaskContext, kind: PurgeWork, act: Callable[[WorkItem], None], *, act_paces: bool = False
+) -> _Drained:
+    """
+    Claim `kind`'s due items a batch at a time, `act` on each, until none is left or the custodian stops.
+
+    A batch is followed by the rest the duty cycle asks for, unless `act` rests between chunks of its own (`act_paces`):
+    resting for the claim as well would make every item wait twice, and past the task's deadline for a very large one.
+    """
     done = failed = 0
     while not ctx.should_stop():
-        with ctx.batch():
+        with nullcontext() if act_paces else ctx.batch():
             items = ctx.claim(kind, limit=_BATCH)
             finished: list[WorkItem] = []
             for item in items:
                 try:
                     act(item)
+                except InterruptedError:
+                    # Not a failure: the run must stop. The item stays claimed, and is claimed again when its claim runs out.
+                    _log.info("An item goes on in a later run", kind=str(kind), key=item.key)
                 except Exception as exc:  # noqa: BLE001 -- one bad item must not stop the rest of the batch
                     _log.warning(
                         "A purge item failed; it will be tried again",
@@ -115,14 +127,24 @@ def _delete_blobs(ctx: TaskContext) -> None:
         _log.info("Deleted purged artifacts' blobs", deleted=drained.done, failed=drained.failed)
 
 
-def _purge(store: DataStore[...], purge: EntityPurge, actor: models.User) -> None:
+@contextmanager
+def _chunk_of_a_purge(ctx: TaskContext) -> Generator[None]:
+    """One chunk of a purge, then the duty cycle's rest. A run that must stop ends the purge, which goes on in the next."""
+    if ctx.should_stop():
+        msg = "the custodian is stopping, or this run is out of time; the purge goes on in the next"
+        raise InterruptedError(msg)
+    with ctx.batch():
+        yield
+
+
+def _purge(store: DataStore[...], purge: EntityPurge, actor: models.User, pace: models.Pace) -> None:
     match purge.entity_type:
         case models.EntityType.PROJECT:
-            store.purge_project(purge.entity_id, actor)
+            store.purge_project(purge.entity_id, actor, pace=pace)
         case models.EntityType.EXPERIMENT:
-            store.purge_experiment(purge.entity_id, actor)
+            store.purge_experiment(purge.entity_id, actor, pace=pace)
         case models.EntityType.RUN:
-            store.purge_run(purge.entity_id, actor)
+            store.purge_run(purge.entity_id, actor, pace=pace)
         case models.EntityType.ARTIFACT:
             store.purge_artifact(purge.entity_id, actor)
 
@@ -137,11 +159,11 @@ def _purge_entities(ctx: TaskContext) -> None:
             msg = f"user {asked.requested_by}, who asked for the purge, is gone"
             raise LookupError(msg)
         try:
-            _purge(store, asked, actor)
+            _purge(store, asked, actor, functools.partial(_chunk_of_a_purge, ctx))
         except ValueError:  # restored since it was asked for: there is nothing to purge
             _log.info("Not purging what was restored", entity=item.key)
 
-    drained = _drain(ctx, PurgeWork.ENTITY, purge)
+    drained = _drain(ctx, PurgeWork.ENTITY, purge, act_paces=True)
     if drained.done:
         _log.info("Purged from the Trash", purged=drained.done, failed=drained.failed)
         get_system_task_store(ctx.app).request_task_run(PurgeTask.BLOBS)  # the blobs they left, at once

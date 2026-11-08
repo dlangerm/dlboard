@@ -310,3 +310,21 @@ def test_a_batch_is_followed_by_a_wait_that_keeps_the_task_to_its_share_of_time(
             time.sleep(took)
     expected = [took * (1 - duty_cycle) / duty_cycle for took in (0.01, 0.01, 0.01, 0.2 * 10)]
     assert stop.waits == pytest.approx(expected, rel=0.5, abs=0.01)
+
+
+def test_a_run_is_told_to_stop_once_it_has_used_its_share_of_the_tasks_timeout(
+    store: SQLStoreBase[Any],
+) -> None:
+    """So that a task that checks between batches ends itself, rather than be found hung and its custodian restarted."""
+    ctx = TaskContext(
+        cast("Dash", object()),
+        _task(lambda _ctx: None, timeout=pendulum.duration(seconds=0.5)),
+        store,
+        "a",
+        threading.Event(),
+        duty_cycle=1.0,
+        claim_for=pendulum.duration(minutes=1),
+    )
+    assert not ctx.should_stop()
+    time.sleep(0.45)  # past 80% of the half second
+    assert ctx.should_stop()

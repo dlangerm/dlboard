@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import dataclasses
 import typing
+from collections.abc import Callable
+from contextlib import AbstractContextManager
 
 from dlboard.models._metric import MetricReduction, SeriesBand
 from dlboard.models._pin import PinColor
@@ -42,6 +44,13 @@ if typing.TYPE_CHECKING:
 
     from dlboard import models
     from dlboard.serve._backend._metric_frame import MetricFrame, MetricKeySummary
+
+
+Pace: typing.TypeAlias = Callable[[], AbstractContextManager[None]]
+"""
+How a purge rests between its chunks: entered around each chunk of work, it waits long enough afterwards to keep the work to
+its share of the database (`TaskContext.batch`), or raises to stop it. Without one, a purge goes on without a pause.
+"""
 
 
 class DataStore(typing.Protocol[_P]):
@@ -623,8 +632,13 @@ class DataStore(typing.Protocol[_P]):
         """Restore a soft-deleted project and everything deleted with it. Requires `Scope.RESTORE`."""
         ...
 
-    def purge_project(self, project_id: int, actor: models.User) -> None:
-        """Permanently delete an already soft-deleted project. Requires `Scope.PURGE`."""
+    def purge_project(self, project_id: int, actor: models.User, *, pace: Pace | None = None) -> None:
+        """
+        Permanently delete an already soft-deleted project. Requires `Scope.PURGE`.
+
+        The rows of its runs that can number in the millions (metrics, histograms, artifacts) go in chunks, each its own
+        transaction entered through `pace`, so that no one run holds the database for as long as it is big.
+        """
         ...
 
     def delete_experiment(self, experiment_id: int, actor: models.User) -> None:
@@ -635,8 +649,8 @@ class DataStore(typing.Protocol[_P]):
         """Restore a soft-deleted experiment and everything deleted with it. Requires `Scope.RESTORE`."""
         ...
 
-    def purge_experiment(self, experiment_id: int, actor: models.User) -> None:
-        """Permanently delete an already soft-deleted experiment. Requires `Scope.PURGE`."""
+    def purge_experiment(self, experiment_id: int, actor: models.User, *, pace: Pace | None = None) -> None:
+        """Permanently delete an already soft-deleted experiment, in chunks as `purge_project` does. Requires `Scope.PURGE`."""
         ...
 
     def delete_run(self, run_id: int, actor: models.User) -> None:
@@ -659,8 +673,8 @@ class DataStore(typing.Protocol[_P]):
         """Restore a soft-deleted run and everything deleted with it. Requires `Scope.RESTORE`."""
         ...
 
-    def purge_run(self, run_id: int, actor: models.User) -> None:
-        """Permanently delete an already soft-deleted run. Requires `Scope.PURGE`."""
+    def purge_run(self, run_id: int, actor: models.User, *, pace: Pace | None = None) -> None:
+        """Permanently delete an already soft-deleted run, in chunks as `purge_project` does. Requires `Scope.PURGE`."""
         ...
 
     def delete_artifact(self, artifact_id: int, actor: models.User) -> None:

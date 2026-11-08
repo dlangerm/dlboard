@@ -45,6 +45,11 @@ pulls that section's body into the GitHub release notes and publishes both distr
   value) **and add a section to a project's page** (`register_project_section`), without touching the store, **and refuse
   new runs in a project** (`register_run_guard`, raising `ProjectLockedError`, which the REST API answers with HTTP 423).
   Retention is built on them. (#472)
+* **Pin or keep a run from the script that launches it.** `DLBoardLogger(..., pin=PinColor.RED, keep=True)` (and
+  `DLBoardLogger.from_names`) pins the run for you and keeps it out of retention's reach as the run is created, so a baseline
+  need not wait for someone to click; a server that refuses (keeping takes an editor) fails the constructor, with its reason,
+  before anything is logged. It is one request, `POST /api/v1/runs/<id>/mark`, and `BasicDlboardAPI.mark_run`. See
+  [docs/client.md](docs/client.md#pinning-and-keeping-a-run). (#499, #562)
 
 ### Changed
 
@@ -63,6 +68,25 @@ pulls that section's body into the GitHub release notes and publishes both distr
   [docs/background-tasks.md](docs/background-tasks.md#for-plugin-authors)). (#472)
 * **A client's error says why a server refused it.** A 4xx's `error` is in the exception's message, ahead of the server's
   request id.
+* **A page reads the users it shows, not every user.** A non-admin's lookup of one name used to read every user, grant and
+  project on the site. The project's Sharing section and a note's thread now ask only for the people they name, a user is
+  looked up by id with one keyed read, and the mention picker lists the first fifty people and searches the rest on the server
+  as you type. (#501)
+* **A custom `DataStore` changes in three places.** `get_users(user_ids=, name_contains=, limit=)` replaces `list_users`,
+  `list_project_grants` takes `user_ids=`, and `purge_project`, `purge_experiment` and `purge_run` take `pace=` (see below).
+  (#501, #563)
+
+### Fixed
+
+* **Purging one very large run no longer holds the database for as long as the run is big.** A purge deleted a run's metrics,
+  histograms and artifacts in one transaction, and queued each artifact's blob for deletion one statement at a time inside
+  it. On SQLite, which lets one writer in at a time, a run of twenty million metrics held every other writer out for about a
+  minute, and a run logging beside it failed with `database is locked`; on Postgres one purge of a hundred thousand artifacts
+  was a transaction of a hundred seconds. The custodian now deletes those rows in chunks, each its own transaction, resting
+  between them like its other work, and queues a chunk's blobs together. The longest any other writer waited, in the same
+  twenty million metrics or half a million artifacts, fell from the full thirty seconds to under 0.4 s. A purge that is
+  interrupted goes on where it was. A run restored while its purge goes on is not purged, but comes back without the rows
+  already deleted. (#563)
 
 ## [0.14.0] - 2026-11-04
 

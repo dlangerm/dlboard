@@ -92,7 +92,8 @@ def plug(app: Dash) -> None:
 
 `every` counts from when the task's last run finished, on the wall clock, as the database records it: every server and the
 admin page's overdue check read the same row, so a machine that sleeps runs a task that came due within a poll of waking, and
-several servers run an hourly task once an hour between them. `every=None` is a task that runs only when asked for. A task that does not finish within its `timeout` is hung. A `SHARED`
+several servers run an hourly task once an hour between them. `every=None` is a task that runs only when asked for. A task that does not finish within its `timeout` is hung; one that checks `ctx.should_stop()` between batches is told to stop
+at 80% of it, and goes on in its next run. A `SHARED`
 task claims its work with `ctx.claim(kind, limit=...)`, then `ctx.done(items)` or `ctx.retry(item, error)`; work is queued
 with `get_system_task_store(app).enqueue_work([NewWorkItem(kind=..., key=...)])` (both from `dlboard.serve._custodian`), where a key is unique among queued items of
 its kind, so queueing twice queues once, and `request_task_run(name)` starts the task on the next poll instead of its next

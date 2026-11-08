@@ -896,9 +896,9 @@ class AuthorizingDataStore(models.DataStore[...]):
         require_scope(self._actor, Scope.RESTORE)
         self._inner.restore_project(project_id, self._bound(actor))
 
-    def purge_project(self, project_id: int, actor: models.User) -> None:
+    def purge_project(self, project_id: int, actor: models.User, *, pace: models.Pace | None = None) -> None:
         require_scope(self._actor, Scope.PURGE)
-        self._inner.purge_project(project_id, self._bound(actor))
+        self._inner.purge_project(project_id, self._bound(actor), pace=pace)
 
     def delete_experiment(self, experiment_id: int, actor: models.User) -> None:
         """An experiment that holds a kept run is an owner's to delete, as the kept run is."""
@@ -912,9 +912,11 @@ class AuthorizingDataStore(models.DataStore[...]):
         require_scope(self._actor, Scope.RESTORE)
         self._inner.restore_experiment(experiment_id, self._bound(actor))
 
-    def purge_experiment(self, experiment_id: int, actor: models.User) -> None:
+    def purge_experiment(
+        self, experiment_id: int, actor: models.User, *, pace: models.Pace | None = None
+    ) -> None:
         require_scope(self._actor, Scope.PURGE)
-        self._inner.purge_experiment(experiment_id, self._bound(actor))
+        self._inner.purge_experiment(experiment_id, self._bound(actor), pace=pace)
 
     def delete_run(self, run_id: int, actor: models.User) -> None:
         """A kept run is an owner's to delete."""
@@ -943,9 +945,9 @@ class AuthorizingDataStore(models.DataStore[...]):
         require_scope(self._actor, Scope.RESTORE)
         self._inner.restore_run(run_id, self._bound(actor))
 
-    def purge_run(self, run_id: int, actor: models.User) -> None:
+    def purge_run(self, run_id: int, actor: models.User, *, pace: models.Pace | None = None) -> None:
         require_scope(self._actor, Scope.PURGE)
-        self._inner.purge_run(run_id, self._bound(actor))
+        self._inner.purge_run(run_id, self._bound(actor), pace=pace)
 
     def delete_artifact(self, artifact_id: int, actor: models.User) -> None:
         self._require_scope_or_role(

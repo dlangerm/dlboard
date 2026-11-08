@@ -31,6 +31,12 @@ if TYPE_CHECKING:
 
 _DEFAULT_TIMEOUT: Final = pendulum.duration(minutes=15)
 
+_RUN_BUDGET: Final = 0.8
+"""
+The share of its `timeout` a run has before it is told to stop (`should_stop`): a task that checks it between batches ends
+itself and goes on in its next run, rather than be found hung, which restarts the whole custodian.
+"""
+
 
 class TaskMode(StrEnum):
     """How many custodians may run a task at once."""
@@ -124,12 +130,13 @@ class TaskContext:
         self._duty_cycle = duty_cycle
         self._claim_for = claim_for
         self._batches: deque[float] = deque(maxlen=_PACE_HISTORY)
+        self._ends_at = time.monotonic() + task.timeout.total_seconds() * _RUN_BUDGET
         self.backlog: int | None = None
         """What the task last said it had left to do, for the `dlboard.task.backlog` metric."""
 
     def should_stop(self) -> bool:
-        """Whether the custodian is stopping: a task checks between batches and returns."""
-        return self._stop.is_set()
+        """Whether the custodian is stopping, or this run has used its budget of the task's timeout: check between batches and return."""
+        return self._stop.is_set() or time.monotonic() > self._ends_at
 
     def report(self, *, backlog: int | None = None, **details: Any) -> None:  # noqa: ANN401 -- the task's own JSON
         """Record what the task is doing (how much is left), shown on the admin page and as `dlboard.task.backlog`."""

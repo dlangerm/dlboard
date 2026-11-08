@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import dataclasses
+import threading
 from typing import TYPE_CHECKING, Any
 
+import pendulum
 import pytest
 
 from dlboard import models
@@ -15,7 +18,7 @@ from dlboard.plugins.data_stores import filesystem, sqlite
 from dlboard.serve import app as build_app
 from dlboard.serve import get_system_artifact_store, get_system_data_store
 from dlboard.serve._backend._purge_work import PurgeWork, entity_purge
-from dlboard.serve._custodian import get_system_task_store
+from dlboard.serve._custodian import TaskContext, get_system_task_store, registered_tasks
 from dlboard.serve._custodian._store import WORK_RULES, AuthorizingTaskStore
 from dlboard.serve.telemetry._prometheus import serve_metrics
 
@@ -142,3 +145,37 @@ def test_a_request_queues_a_purge_only_as_someone_who_may_purge(
     assert state.requested_at is not None
     with pytest.raises(PermissionError):  # only the kinds a plugin lets a request queue
         as_user.enqueue_work([asked.model_copy(update={"kind": PurgeWork.BLOB})])
+
+
+def test_a_purge_the_run_has_no_time_for_goes_on_in_a_later_run_and_is_not_counted_a_failure(
+    app: Dash, clock: Clock
+) -> None:
+    store, tasks = _store(app), get_system_task_store(app)
+    admin = store.get_or_create_user(models.Principal.unverified("admin"))
+    project_id, *_ = create_entity_chain(store, artifact=True)
+    store.delete_project(project_id, admin)
+    tasks.enqueue_work([entity_purge(models.EntityType.PROJECT, project_id, requested_by=admin.id)])
+    (task,) = [t for t in registered_tasks(app) if t.name == PurgeTask.ENTITIES]
+    out_of_time = dataclasses.replace(task, timeout=pendulum.duration(seconds=-1))
+    tasks.ensure_tasks([PurgeTask.ENTITIES])
+
+    out_of_time.run_once(
+        TaskContext(
+            app,
+            out_of_time,
+            tasks,
+            "test",
+            threading.Event(),
+            duty_cycle=1.0,
+            claim_for=pendulum.duration(minutes=5),
+        )
+    )
+
+    assert [p.id for p in store.list_deleted_projects()] == [project_id]
+    assert (
+        tasks.count_work(PurgeWork.ENTITY) == 1
+    )  # still queued, claimed for five minutes, with no failure on it
+    clock.advance(minutes=6)
+    run_task(app, PurgeTask.ENTITIES)
+    assert list(store.list_deleted_projects()) == []
+    assert tasks.count_work(PurgeWork.ENTITY) == 0

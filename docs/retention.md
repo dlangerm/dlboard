@@ -69,6 +69,16 @@ whoever deleted it. The 30 days count from no earlier than the first time the se
 was already in the Trash the moment it starts. The purge is queued as the `dlboard:trash` user and done by the custodian like
 any admin's purge.
 
+A purge deletes the rows that can number in the millions (a run's metrics, histograms and artifacts) a chunk at a time, each
+in a transaction of its own, resting between chunks like the custodian's other work, so that one very large run never holds the
+database for as long as it is big. On SQLite, which lets one writer in at a time, deleting twenty million metrics in one
+transaction took a minute and turned away every other writer meanwhile (a run logging beside it failed with `database is
+locked`); in chunks, the longest anyone else waited was under 0.4 seconds, for twenty million metrics or half a million
+artifacts. A purge that is interrupted (the server stopping, say) goes on where it was. Restoring a run while its purge goes on
+stops the purge, but not what it had already deleted: the run comes back without those rows, so restore from the Trash before
+a purge is asked for, not after. Deleting a run (moving it to the Trash) was never the slow part: it stamps the run and its
+artifacts, and never touches its metrics.
+
 ## How it runs
 
 Retention is two [background tasks](background-tasks.md), run by the custodian process, never by a web worker:
@@ -125,8 +135,3 @@ core: a project's [scoped settings](background-tasks.md#plugin-settings-and-proj
 generic `get_runs` filters (`created_before`, `oldest_first`, `include_kept`) choose what to delete, `delete_runs` deletes it,
 and a project-page section shows it. A policy of your own (archiving to cold storage instead of deleting, a different rule
 kind) is a plugin on the same pieces.
-
-## Not yet
-
-One very large run is deleted in one transaction rather than in chunks
-([#563](https://github.com/dlangerm/dlboard/issues/563)).
