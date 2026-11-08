@@ -388,7 +388,7 @@ def _render_users(store: DataStore[...], actor: User, admin_url: str | None) -> 
                     dmc.TableThead(
                         dmc.TableTr([dmc.TableTh(h) for h in ("User", "Email", "Signs in via", "", "")])
                     ),
-                    dmc.TableTbody([_user_row(u, actor) for u in store.list_users()]),
+                    dmc.TableTbody([_user_row(u, actor) for u in store.get_users()]),
                 ],
                 withTableBorder=True,
                 verticalSpacing="xs",

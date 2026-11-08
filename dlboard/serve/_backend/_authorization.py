@@ -176,7 +176,7 @@ class AuthorizingDataStore(models.DataStore[...]):
         return self._inner.get_or_create_user(principal)
 
     def get_user(self, user_id: int) -> models.User | None:
-        return next((u for u in self._visible_users() if u.id == user_id), None)
+        return next(iter(self.get_users([user_id])), None)
 
     def find_user(self, username: str) -> models.User | None:
         return self._inner.find_user(username)
@@ -199,20 +199,24 @@ class AuthorizingDataStore(models.DataStore[...]):
             require_scope(self._actor, Scope.ALL)
         return self._inner.update_user(user)
 
-    def list_users(self) -> list[models.User]:
-        return list(self._visible_users())
+    def get_users(
+        self, user_ids: Collection[int] | None = None, *, name_contains: str = "", limit: int | None = None
+    ) -> list[models.User]:
+        """Everyone, for an admin; otherwise the actor and the members and creators of the projects they can see."""
+        if self._enforce and not has_scope(self._actor, Scope.USER_MANAGE):
+            user_ids = self._visible_user_ids(user_ids)
+        return self._inner.get_users(user_ids, name_contains=name_contains, limit=limit)
 
-    def _visible_users(self) -> Iterator[models.User]:
-        """Everyone, for an admin; otherwise the actor and the members of projects they can see."""
-        if not self._enforce or has_scope(self._actor, Scope.USER_MANAGE):
-            yield from self._inner.list_users()
-            return
+    def _visible_user_ids(self, among: Collection[int] | None) -> frozenset[int]:
+        """The users the actor may see (of `among`, if given): asked of the database for those, not for every user."""
         visible = frozenset(self._visible_project_ids())
         projects = self._all_projects()
         known: set[int | None] = {self._actor.id}
-        known.update(g.user_id for g in self._inner.list_project_grants(visible))
+        known.update(g.user_id for g in self._inner.list_project_grants(visible, user_ids=among))
         known.update(projects[pid].created_by for pid in visible)
-        yield from (u for u in self._inner.list_users() if u.id in known)
+        return frozenset(
+            user_id for user_id in known if user_id is not None and (among is None or user_id in among)
+        )
 
     def create_api_token(self, token: models.NewApiToken) -> models.ApiToken:
         self._require_self_or(token.user_id, Scope.USER_MANAGE)
@@ -244,8 +248,12 @@ class AuthorizingDataStore(models.DataStore[...]):
     def _visible_project_ids(self) -> Iterator[int]:
         return (pid for pid in self._all_projects() if self._can(pid, ProjectRole.VIEWER))
 
-    def list_project_grants(self, project_ids: Collection[int]) -> list[models.ProjectGrant]:
-        return self._inner.list_project_grants([p for p in project_ids if self._can(p, ProjectRole.VIEWER)])
+    def list_project_grants(
+        self, project_ids: Collection[int], *, user_ids: Collection[int] | None = None
+    ) -> list[models.ProjectGrant]:
+        return self._inner.list_project_grants(
+            [p for p in project_ids if self._can(p, ProjectRole.VIEWER)], user_ids=user_ids
+        )
 
     def grants_for(self, user: models.User) -> list[models.ProjectGrant]:
         self._require_self_or(user.id, Scope.USER_MANAGE)

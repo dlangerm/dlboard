@@ -401,7 +401,7 @@ class _SetupLatch:
 
     def is_open(self, store: DataStore[...]) -> bool:
         if not self._closed:
-            self._closed = bool(store.list_users())
+            self._closed = bool(store.get_users(limit=1))
         return not self._closed
 
 

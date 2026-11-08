@@ -28,6 +28,8 @@ from dlboard.serve._pages._dataframe_helpers import run_display_name
 from dlboard.serve._pages._experiment._run_picker import register_run_search, run_options
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from dash import Dash
     from dash.development.base_component import Component
 
@@ -45,6 +47,8 @@ NOTES_BODY_ID: typing.Final = "notes-body"
 NOTES_RUNS_ID: typing.Final = "notes-runs"
 NOTES_MENTIONS_ID: typing.Final = "notes-mentions"
 NOTES_POST_ID: typing.Final = "notes-post"
+MENTION_LIMIT: typing.Final = 50
+"""The most people the mention picker lists at once: the first by name, or the ones its search finds."""
 _DELETE_NOTE_TYPE: typing.Final = "delete-note"
 
 
@@ -166,21 +170,34 @@ def _note(
     )
 
 
-def _thread(store: DataStore[...], experiment_id: int) -> tuple[Component, int, list[models.User]]:
-    """The rendered thread, how many notes it has, and the users it (and the mention picker) name."""
+def _mention_options(
+    store: DataStore[...], *, search: str = "", keep: Iterable[str] = ()
+) -> list[dict[str, str]]:
+    """The people a note can mention: those it has picked (`keep`, as values) and the first `MENTION_LIMIT` `search` finds."""
+    found = store.get_users(name_contains=search, limit=MENTION_LIMIT)
+    kept = frozenset(int(value) for value in keep) - {user.id for user in found}
+    picked = store.get_users(kept) if kept else list[models.User]()
+    return [{"value": str(user.id), "label": user.username} for user in [*picked, *found]]
+
+
+def _thread(store: DataStore[...], experiment_id: int) -> tuple[Component, int]:
+    """The rendered thread and how many notes it has."""
     comments = store.list_comments(experiment_id)
-    users = store.list_users()
-    # Only the runs the notes are about: an experiment's runs are unbounded, its notes' are what they name.
+    # Only the runs and people the notes are about: an experiment's runs (and a site's users) are unbounded, its notes' are
+    # what they name.
     about = frozenset(run_id for comment in comments for run_id in comment.run_ids)
     runs = list(store.get_runs(experiment_id, limit=None, run_ids=about)) if about else list[models.Run]()
+    named = frozenset(
+        user_id for comment in comments for user_id in (comment.author_id, *comment.mentioned_user_ids)
+    )
     me = get_current_user()
-    users_by_id, runs_by_id = {u.id: u for u in users}, {r.id: r for r in runs}
+    users_by_id, runs_by_id = {u.id: u for u in store.get_users(named)}, {r.id: r for r in runs}
     thread = (
         dmc.Stack([_note(c, users_by_id, runs_by_id, me) for c in comments], gap="xs")
         if comments
         else dmc.Text("No notes yet. Start the thread below.", size="sm", c="dimmed")
     )
-    return thread, len(comments), users
+    return thread, len(comments)
 
 
 def register_notes_callbacks(app: Dash) -> None:
@@ -210,13 +227,17 @@ def register_notes_callbacks(app: Dash) -> None:
         if not opened:
             # A note came or went while the drawer's closed: just keep the button's count honest.
             return no_update, str(len(store.list_comments(experiment_id))), no_update, no_update
-        thread, count, users = _thread(store, experiment_id)
-        return (
-            thread,
-            str(count),
-            run_options(store, experiment_id),
-            [{"value": str(u.id), "label": u.username} for u in users],
-        )
+        thread, count = _thread(store, experiment_id)
+        return thread, str(count), run_options(store, experiment_id), _mention_options(store)
+
+    @app.callback(
+        Output(NOTES_MENTIONS_ID, "data", allow_duplicate=True),
+        Input(NOTES_MENTIONS_ID, "searchValue"),
+        State(NOTES_MENTIONS_ID, "value"),
+        prevent_initial_call=True,
+    )
+    def search_people(search: str | None, picked: list[str] | None) -> list[dict[str, str]]:
+        return _mention_options(get_data_store(), search=search or "", keep=picked or ())
 
     @app.callback(
         Output(NOTES_THREAD_ID, "children", allow_duplicate=True),
@@ -249,7 +270,7 @@ def register_notes_callbacks(app: Dash) -> None:
                 mentioned_user_ids=[int(u) for u in user_ids or []],
             )
         )
-        thread, count, _users = _thread(store, experiment_id)
+        thread, count = _thread(store, experiment_id)
         return thread, str(count), "", None, [], []
 
     @app.callback(
@@ -263,5 +284,5 @@ def register_notes_callbacks(app: Dash) -> None:
         note_id = require_triggered_id(_NoteButton).note
         store = get_data_store()
         store.delete_comment(note_id, get_current_user().id)
-        thread, count, _users = _thread(store, experiment_id)
+        thread, count = _thread(store, experiment_id)
         return thread, str(count)

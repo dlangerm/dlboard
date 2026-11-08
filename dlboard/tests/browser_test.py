@@ -1910,18 +1910,27 @@ def test_notes_post_to_the_thread_and_arrive_live_from_others(
     # own response clears it), and a bare `drawer.get_by_text(...)` would match both.
     thread = drawer.locator(f"#{NOTES_THREAD_ID}")
     expect(thread.get_by_text("No notes yet")).to_be_visible()
+    # Made after the drawer loaded, so that the picker has not been given them: only its search on the server finds them.
+    store = get_system_data_store()
+    store.get_or_create_user(models.Principal.unverified("mentionable"))
     drawer.get_by_role("textbox", name="Note").fill("baseline diverges after step 40")
     drawer.get_by_placeholder("About runs…").click()
     page.get_by_role("option", name="baseline-run").click()
+    page.keyboard.press("Escape")  # the (unportalled) runs dropdown would cover the next picker
+    mentions = drawer.get_by_placeholder("Mention people…")
+    mentions.click()
+    mentions.fill("MENTION")
+    page.get_by_role("option", name="mentionable").click()
+    page.keyboard.press("Escape")  # closes the (unportalled) dropdown, which covers Post
     drawer.get_by_role("button", name="Post").click()
 
     expect(thread.get_by_text("baseline diverges after step 40")).to_be_visible()
     expect(
         thread.locator(".mantine-Badge-root", has=page.locator(".dl-swatch"), has_text="baseline-run")
     ).to_be_visible()
+    expect(thread.locator(".mantine-Badge-root", has_text="@mentionable")).to_be_visible()
     expect(page.locator(f"#{NOTES_COUNT_ID}")).to_have_text("1")
 
-    store = get_system_data_store()
     colleague = store.get_or_create_user(models.Principal.unverified("colleague"))
     store.add_comment(models.NewComment(experiment_id=experiment_id, author_id=colleague.id, body="agreed"))
     expect(thread.get_by_text("agreed")).to_be_visible(timeout=10_000)  # one live-poll tick away

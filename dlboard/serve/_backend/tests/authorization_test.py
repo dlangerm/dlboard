@@ -10,7 +10,7 @@ import pytest
 from pydantic import AnyUrl
 
 from dlboard import models
-from dlboard.conftest import EVERY_STORE_BACKEND, StoreBackend, create_entity_chain
+from dlboard.conftest import EVERY_STORE_BACKEND, StoreBackend, create_entity_chain, recorded_statements
 from dlboard.models import ProjectRole, Scope
 from dlboard.plugins.data_stores._blob_store import blob_key
 from dlboard.plugins.data_stores.filesystem import FSBlobs
@@ -440,12 +440,35 @@ def test_get_or_create_project_refuses_an_ambiguous_name(store: SQLLiteStore) ->
 # -- Users, views, and notes ----------------------------------------------------------------------
 
 
-def test_list_users_only_shows_people_you_share_a_project_with(store: SQLLiteStore) -> None:
+def test_get_users_only_shows_people_you_share_a_project_with(store: SQLLiteStore) -> None:
     bob, _chain = _shared_chain(store, ProjectRole.VIEWER)
-    _user(store, "stranger")
+    stranger = _user(store, "stranger")
+    as_bob = _as(store, bob)
 
-    assert {u.username for u in _as(store, bob).list_users()} == {"alice", "bob"}
-    assert len(_as(store, _user(store, "root", Scope.USER_MANAGE)).list_users()) == 4
+    assert {u.username for u in as_bob.get_users()} == {"alice", "bob"}
+    # Asked for by id, a stranger is still not seen.
+    assert {u.username for u in as_bob.get_users({stranger.id, bob.id})} == {"bob"}
+    assert as_bob.get_user(stranger.id) is None
+    assert (found := as_bob.get_user(bob.id)) is not None
+    assert found.username == "bob"
+    assert [u.username for u in as_bob.get_users(name_contains="LI", limit=1)] == ["alice"]
+    assert len(_as(store, _user(store, "root", Scope.USER_MANAGE)).get_users()) == 4
+
+
+def test_a_lookup_of_a_user_by_id_does_not_read_every_user(store: SQLLiteStore) -> None:
+    """What a page costs for its names grows with the names it shows, not with the users the site has (#501)."""
+    bob, _chain = _shared_chain(store, ProjectRole.VIEWER)
+    for i in range(30):
+        _user(store, f"stranger{i}")
+    as_bob = _as(store, bob)
+    as_bob.get_users()  # the request's own settled reads: its projects, its grants
+
+    with recorded_statements(store._engine) as statements:
+        assert as_bob.get_user(bob.id) is not None
+
+    reads = [s for s in statements if s.sql.lstrip().startswith("SELECT") and '"User"' in s.sql]
+    assert len(reads) == 1
+    assert "WHERE" in reads[0].sql  # keyed, not a scan of the whole table
 
 
 def test_user_manage_alone_cannot_grant_all(store: SQLLiteStore) -> None:

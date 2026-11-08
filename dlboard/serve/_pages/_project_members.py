@@ -103,8 +103,8 @@ def render_members_section(project: Project) -> Component | None:
         return None
     store = get_data_store()
     can_manage = get_project_role(project.id) is ProjectRole.OWNER
-    users = {u.id: u for u in store.list_users()}
     grants = store.list_project_grants([project.id])
+    users = {u.id: u for u in store.get_users({g.user_id for g in grants if g.user_id is not None})}
     add_row = dmc.Group(
         [
             dmc.TextInput(

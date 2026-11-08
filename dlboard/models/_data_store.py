@@ -75,8 +75,10 @@ class DataStore(typing.Protocol[_P]):
         """Update a user, e.g. to grant/revoke scopes or disable them. For admin-driven user management."""
         ...
 
-    def list_project_grants(self, project_ids: Collection[int]) -> list[models.ProjectGrant]:
-        """Every grant on any of `project_ids`."""
+    def list_project_grants(
+        self, project_ids: Collection[int], *, user_ids: Collection[int] | None = None
+    ) -> list[models.ProjectGrant]:
+        """Every grant on any of `project_ids` (only those naming one of `user_ids`, if given)."""
         ...
 
     def grants_for(self, user: models.User) -> list[models.ProjectGrant]:
@@ -545,8 +547,16 @@ class DataStore(typing.Protocol[_P]):
         """
         ...
 
-    def list_users(self) -> list[models.User]:
-        """Every user, by username."""
+    def get_users(
+        self, user_ids: Collection[int] | None = None, *, name_contains: str = "", limit: int | None = None
+    ) -> list[models.User]:
+        """
+        Users, by username.
+
+        Only `user_ids` (every user, for `None`), only those with `name_contains` in their username (whatever its case),
+        the first `limit` of them. What a page shows names for asks for those ids, so that it costs what it shows and not
+        how many users there are.
+        """
         ...
 
     def log_artifact_refs(self, artifacts: Iterable[models.Artifact]) -> None:

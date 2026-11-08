@@ -911,13 +911,15 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
         (updated,) = self._fetch(models.User, sql.update(self._tables[models.User], user))
         return updated
 
-    def list_project_grants(self, project_ids: Collection[int]) -> list[models.ProjectGrant]:
-        """Every grant on any of `project_ids`."""
+    def list_project_grants(
+        self, project_ids: Collection[int], *, user_ids: Collection[int] | None = None
+    ) -> list[models.ProjectGrant]:
+        """Every grant on any of `project_ids` (only those naming one of `user_ids`, if given)."""
         grants = self._tables[models.ProjectGrant]
-        return self._fetch(
-            models.ProjectGrant,
-            sa.select(grants).where(grants.c.project_id.in_(project_ids)).order_by(grants.c.id),
-        )
+        where = [grants.c.project_id.in_(project_ids)]
+        if user_ids is not None:
+            where.append(grants.c.user_id.in_(user_ids))
+        return self._fetch(models.ProjectGrant, sa.select(grants).where(*where).order_by(grants.c.id))
 
     def grants_for(self, user: models.User) -> list[models.ProjectGrant]:
         """Every grant naming `user` directly, or one of `user.groups`."""
@@ -2443,10 +2445,29 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
             )
         return sql.construct(models.ScopedSetting, row)
 
-    def list_users(self) -> list[models.User]:
-        """Every user, by username -- e.g. who a note can mention."""
+    def get_users(
+        self, user_ids: Collection[int] | None = None, *, name_contains: str = "", limit: int | None = None
+    ) -> list[models.User]:
+        """Users, by username: only `user_ids` (every user, for `None`), only a name with `name_contains` in it, the first `limit`."""
         users = self._tables[models.User]
-        return self._fetch(models.User, sa.select(users).order_by(users.c.username))
+        searched = name_contains.strip().lower()
+        named: list[sa.ColumnElement[bool]] = (
+            [sa.func.lower(users.c.username).contains(searched, autoescape=True)] if searched else []
+        )
+        # One statement for every user, or one for each batch of the ids asked for: the database's order, if one is enough.
+        wheres = (
+            [named]
+            if user_ids is None
+            else [[*named, users.c.id.in_(batch)] for batch in _in_batches(user_ids)]
+        )
+        found = [
+            user
+            for where in wheres
+            for user in self._fetch(
+                models.User, sa.select(users).where(*where).order_by(users.c.username).limit(limit)
+            )
+        ]
+        return found if len(wheres) <= 1 else sorted(found, key=lambda user: user.username)[:limit]
 
     def update_page[D, C](self, page: models.Page[D, C]) -> models.Page[D, C]:
         pages = self._tables[models.Page]
