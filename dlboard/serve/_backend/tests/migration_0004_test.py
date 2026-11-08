@@ -9,7 +9,7 @@ import sqlalchemy as sa
 from alembic import command
 from alembic.config import Config
 
-from dlboard.conftest import StoreBackend
+from dlboard.conftest import StoreBackend, recorded_statements
 from dlboard.serve._backend._schema_upgrade import _MIGRATIONS_DIR
 from dlboard.serve._backend.tests.migrations_test import schema_diff
 
@@ -33,24 +33,19 @@ def test_upgrading_builds_every_index_before_dropping_the_ones_it_replaces(
     Downgrades the migrated database to 0003 and upgrades it to 0004 again, recording the DDL that step sends (a later
     migration is free to add indexes of its own), then on to head for the schema to be checked.
     """
-    ddl: list[str] = []
-
-    def record(_conn: sa.Connection, _cursor: object, statement: str, *_: object) -> None:
-        ddl.append(statement.split("(")[0].strip())
-
     cfg = Config()
     cfg.set_main_option("script_location", str(_MIGRATIONS_DIR))
     with store._engine.connect() as conn:
         conn.execute(sa.text(f'SET search_path TO "{postgres_settings.db_schema}"'))
         cfg.attributes["connection"] = conn
         command.downgrade(cfg, "0003")
-        sa.event.listen(conn, "before_cursor_execute", record)
-        command.upgrade(cfg, "0004")
-        sa.event.remove(conn, "before_cursor_execute", record)
+        with recorded_statements(conn) as statements:
+            command.upgrade(cfg, "0004")
         command.upgrade(cfg, "head")
         conn.execute(sa.text("RESET search_path"))
         conn.commit()
 
+    ddl = [statement.sql.split("(")[0].strip() for statement in statements]
     creates = [i for i, statement in enumerate(ddl) if statement.startswith("CREATE INDEX")]
     drops = [i for i, statement in enumerate(ddl) if statement.startswith("DROP INDEX")]
     assert drops

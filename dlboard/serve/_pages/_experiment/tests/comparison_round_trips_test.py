@@ -12,10 +12,10 @@ from typing import TYPE_CHECKING, Any, cast
 
 import pendulum
 import pytest
-import sqlalchemy as sa
 from dash import Dash
 
 from dlboard import models
+from dlboard.conftest import recorded_statements
 from dlboard.models import ChartInstance, PanelInstance
 from dlboard.plugins.charts.line_chart import LineChart
 from dlboard.serve._backend._app_slot import DASH_APP_EXTENSION
@@ -82,17 +82,8 @@ def comparison(store: SQLLiteStore) -> page_model.BasicExperimentPage:
 
 
 def _round_trips(store: SQLLiteStore, read: Callable[[], object]) -> int:
-    statements: list[str] = []
-
-    def record(_conn: sa.Connection, _cursor: object, statement: str, *_: object) -> None:
-        if not statement.startswith("BEGIN"):  # a transaction opening is no round trip of a query
-            statements.append(statement)
-
-    sa.event.listen(store._engine, "before_cursor_execute", record)
-    try:
+    with recorded_statements(store._engine) as statements:
         read()
-    finally:
-        sa.event.remove(store._engine, "before_cursor_execute", record)
     return len(statements)
 
 

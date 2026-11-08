@@ -10,7 +10,7 @@ import pytest
 import sqlalchemy as sa
 
 from dlboard import models
-from dlboard.conftest import StoreBackend
+from dlboard.conftest import Statement, StoreBackend, recorded_statements
 from dlboard.models import MetricReduction, StepRange
 
 if TYPE_CHECKING:
@@ -93,23 +93,10 @@ def _nodes(plan: dict[str, Any]) -> Iterator[dict[str, Any]]:
         yield from _nodes(child)
 
 
-def _recorded(store: PostgresStore, action: Callable[[], object]) -> list[tuple[str, dict[str, object]]]:
+def _recorded(store: PostgresStore, action: Callable[[], object]) -> list[Statement]:
     """The statements (and their parameters) `action` sent to the database."""
-    statements: list[tuple[str, dict[str, object]]] = []
-
-    def record(
-        _conn: sa.Connection,
-        _cursor: object,
-        statement: str,
-        parameters: dict[str, object],
-        _context: object,
-        _many: bool,
-    ) -> None:
-        statements.append((statement, parameters))
-
-    sa.event.listen(store._engine, "before_cursor_execute", record)
-    action()
-    sa.event.remove(store._engine, "before_cursor_execute", record)
+    with recorded_statements(store._engine) as statements:
+        action()
     return statements
 
 

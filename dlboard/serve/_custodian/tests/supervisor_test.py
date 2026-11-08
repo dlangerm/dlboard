@@ -10,8 +10,8 @@ from typing import TYPE_CHECKING, Any, cast, override
 
 import pendulum
 import pytest
-from sqlalchemy import event
 
+from dlboard.conftest import recorded_statements
 from dlboard.serve._custodian import Task, TaskContext, TaskMode, TaskOutcome
 from dlboard.serve._custodian._supervisor import CustodianSettings, ExitCode, Supervisor
 
@@ -271,19 +271,10 @@ def test_the_heartbeat_does_not_wait_for_a_database_that_is_slow(
 
 def test_an_idle_custodian_makes_at_most_thirty_statements_a_minute(store: SQLStoreBase[Any]) -> None:
     """At the default pace (a poll every 5 s, a beat every 15 s), here fifty times faster, over 1.2 s: a minute's worth."""
-    statements: list[str] = []
-
-    def record(*args: Any) -> None:  # noqa: ANN401
-        if not args[2].startswith("BEGIN"):  # SQLite's own start of a transaction: not a query
-            statements.append(args[2])
-
-    event.listen(store._engine, "before_cursor_execute", record)
     settings = CustodianSettings(tick_s=0.01, poll_s=0.1, beat_s=0.3, stall_s=5)
-    try:
-        with _running(_supervisor(store, _task(lambda _ctx: None), "a", settings=settings)):
-            time.sleep(1.2)
-    finally:
-        event.remove(store._engine, "before_cursor_execute", record)
+    supervisor = _supervisor(store, _task(lambda _ctx: None), "a", settings=settings)
+    with recorded_statements(store._engine) as statements, _running(supervisor):
+        time.sleep(1.2)
     assert len(statements) <= 30, statements
 
 

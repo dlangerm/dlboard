@@ -7,11 +7,10 @@ from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 import pytest
-import sqlalchemy as sa
 from pydantic import ValidationError
 
 from dlboard import models
-from dlboard.conftest import find_all_props
+from dlboard.conftest import find_all_props, recorded_statements
 from dlboard.conftest import props as _props
 from dlboard.models import (
     DEFAULT_RENDER_CONTEXT,
@@ -739,16 +738,8 @@ def test_a_slider_read_asks_the_store_for_the_experiments_of_the_window_and_for_
         window = _LoadedWindow(
             first=0, last=2, runs={experiment_id: runs}, settings=ImageChartSettings(key="img")
         )
-        statements: list[str] = []
-
-        def record(_conn: sa.Connection, _cursor: object, statement: str, *_: object) -> None:
-            statements.append(statement)
-
-        sa.event.listen(store._engine, "before_cursor_execute", record)
-        try:
+        with recorded_statements(store._engine) as statements:
             assert read_window(store, window, step=1) is not None
-        finally:
-            sa.event.remove(store._engine, "before_cursor_execute", record)
         return len(statements)
 
     few = queries_for(2)

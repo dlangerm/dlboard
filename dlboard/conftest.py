@@ -5,10 +5,11 @@ from __future__ import annotations
 import threading
 import typing
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import IntEnum, StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
 import pandas as pd
 import pendulum
@@ -19,6 +20,7 @@ from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTrace
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from prometheus_client.parser import text_string_to_metric_families
 from pydantic import AnyHttpUrl, BaseModel, SecretStr, TypeAdapter
+from sqlalchemy import event
 from structlog import configure as _structlog_configure
 from structlog import get_config as _structlog_config
 from werkzeug.serving import make_server
@@ -43,7 +45,7 @@ from dlboard.serve._pages._experiment._panel_data import PanelData, WideHistory
 from dlboard.serve.telemetry import LOGS, METRICS, _instrument
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator, MutableMapping
+    from collections.abc import Callable, Generator, Iterator, MutableMapping
     from wsgiref.types import InputStream, StartResponse, WSGIApplication, WSGIEnvironment
 
     from dash import Dash
@@ -448,6 +450,33 @@ def _plain_artifact_urls(monkeypatch: pytest.MonkeyPatch) -> None:
     `Dash` app -- so a test that builds artifact URLs without one passes or fails by test order.
     """
     monkeypatch.setattr("dlboard.serve._backend._artifact_download.relative_path", str)
+
+
+class Statement(NamedTuple):
+    """One statement as the database was sent it, with the parameters bound to it."""
+
+    sql: str
+    parameters: Any
+
+
+@contextmanager
+def recorded_statements(target: sa.Engine | sa.Connection) -> Generator[list[Statement]]:
+    """
+    The statements `target` sends the database for the length of the block, as a list that fills as they are sent.
+
+    SQLite's own start of a transaction (`BEGIN`) is no query, so it is left out.
+    """
+    statements: list[Statement] = []
+
+    def record(_conn: sa.Connection, _cursor: object, sql: str, parameters: Any, *_: object) -> None:  # noqa: ANN401
+        if not sql.startswith("BEGIN"):
+            statements.append(Statement(sql, parameters))
+
+    event.listen(target, "before_cursor_execute", record)
+    try:
+        yield statements
+    finally:
+        event.remove(target, "before_cursor_execute", record)
 
 
 @dataclass

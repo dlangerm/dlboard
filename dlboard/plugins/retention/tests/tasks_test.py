@@ -6,10 +6,9 @@ from typing import TYPE_CHECKING, Any
 
 import pendulum
 import pytest
-from sqlalchemy import event
 
 from dlboard import models
-from dlboard.conftest import dispose_stores, run_task, scraped_total
+from dlboard.conftest import dispose_stores, recorded_statements, run_task, scraped_total
 from dlboard.plugins import BUILTIN_BACKEND, LOCAL_AUTH
 from dlboard.plugins import retention as retention_plugin
 from dlboard.plugins.backend import artifact_purge_worker
@@ -206,17 +205,8 @@ def test_scheduling_costs_no_statement_for_a_project_with_no_rule_and_no_default
     _project(store, admin, 3, RunCount(max_runs=2))
     for i in range(30):
         store.create_project(models.NewProject(name=f"idle{i}", description=""))
-    statements: list[str] = []
-
-    def record(*args: Any) -> None:  # noqa: ANN401
-        if not args[2].startswith("BEGIN"):
-            statements.append(args[2])
-
-    event.listen(store._engine, "before_cursor_execute", record)
-    try:
+    with recorded_statements(store._engine) as statements:
         run_task(app, RetentionTask.SCHEDULE)
-    finally:
-        event.remove(store._engine, "before_cursor_execute", record)
     assert len(statements) < 15, statements  # the ruled project's own, and the sweep's: not thirty more
 
 
