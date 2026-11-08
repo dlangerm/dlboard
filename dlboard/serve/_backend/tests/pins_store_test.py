@@ -11,6 +11,7 @@ from dlboard.conftest import EVERY_STORE_BACKEND, StoreBackend
 from dlboard.models import PinColor
 
 if TYPE_CHECKING:
+    from dlboard.conftest import Clock
     from dlboard.plugins.data_stores.sqlite import SQLLiteStore
 
 
@@ -28,10 +29,12 @@ class _World(NamedTuple):
     run: dict[str, int]
     user: dict[str, int]
     admin: models.User
+    clock: Clock
+    """Stopped: a pin is as new as the clock says, so pins are ordered by moving it, not by when the test ran."""
 
 
 @pytest.fixture
-def world(store: SQLLiteStore, admin: models.User) -> _World:
+def world(store: SQLLiteStore, admin: models.User, clock: Clock) -> _World:
     project_id = store.create_project(models.NewProject(name="p", description="d")).id
     first, second = (
         store.create_experiment(models.NewExperiment(project_id=project_id)).id for _ in range(2)
@@ -43,16 +46,23 @@ def world(store: SQLLiteStore, admin: models.User) -> _World:
     users = {
         name: store.get_or_create_user(models.Principal.unverified(name)).id for name in ("alice", "bob")
     }
-    return _World(project_id, first, second, runs, users, admin)
+    return _World(project_id, first, second, runs, users, admin, clock)
+
+
+def _pin(
+    store: SQLLiteStore, w: _World, user: str, runs: frozenset[str], color: PinColor = PinColor.PLAIN
+) -> None:
+    """Pin the runs named `runs` as `user`, a second after the last pin."""
+    w.clock.advance(seconds=1)
+    store.pin_runs(w.user[user], frozenset(w.run[name] for name in runs), color)
 
 
 def _pin_everything(store: SQLLiteStore, w: _World) -> None:
     """Five pins, oldest first: alice's alpha and beta red, her gamma plain, then bob's alpha green and gamma red."""
-    pin = store.pin_runs
-    pin(w.user["alice"], frozenset({w.run["alpha"], w.run["beta"]}), PinColor.RED)
-    pin(w.user["alice"], frozenset({w.run["gamma"]}))
-    pin(w.user["bob"], frozenset({w.run["alpha"]}), PinColor.GREEN)
-    pin(w.user["bob"], frozenset({w.run["gamma"]}), PinColor.RED)
+    _pin(store, w, "alice", frozenset({"alpha", "beta"}), PinColor.RED)
+    _pin(store, w, "alice", frozenset({"gamma"}))
+    _pin(store, w, "bob", frozenset({"alpha"}), PinColor.GREEN)
+    _pin(store, w, "bob", frozenset({"gamma"}), PinColor.RED)
 
 
 class _Filter(NamedTuple):
@@ -232,9 +242,7 @@ def test_the_runs_pinned_are_each_one_run_the_last_pinned_first_whatever_the_col
     store: SQLLiteStore, world: _World
 ) -> None:
     _pin_everything(store, world)
-    store.pin_runs(
-        world.user["alice"], frozenset({world.run["gamma"]}), PinColor.BLUE
-    )  # gamma: three pins, the newest last
+    _pin(store, world, "alice", frozenset({"gamma"}), PinColor.BLUE)  # gamma: three pins, the newest last
 
     assert store.pinned_run_ids(world.project_id, limit=10) == [
         world.run["gamma"],
