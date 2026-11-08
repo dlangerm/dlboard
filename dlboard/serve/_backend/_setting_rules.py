@@ -58,10 +58,7 @@ SETTING_RULES: AppSlot[dict[str, SettingRule]] = AppSlot("setting rules")
 
 def register_setting(app: Dash, rule: SettingRule) -> None:
     """Let requests read and write the setting `rule.key`, as `rule` says."""
-    rules = SETTING_RULES.find(app)
-    if rules is None:
-        rules = dict[str, SettingRule]()
-        SETTING_RULES.set(app, rules)
+    rules = SETTING_RULES.setdefault(app, dict)
     if str(rule.key) in rules:
         msg = f"A rule for the setting {rule.key!r} is already registered"
         raise ValueError(msg)

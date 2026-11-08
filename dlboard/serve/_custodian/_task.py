@@ -82,10 +82,7 @@ TASKS: AppSlot[list[Task]] = AppSlot("background tasks")
 
 def register_task(app: Dash, task: Task) -> None:
     """Declare `task` as `app`'s: the custodian runs it, no web worker does."""
-    registered = TASKS.find(app)
-    if registered is None:
-        TASKS.set(app, [task])
-        return
+    registered = TASKS.setdefault(app, list)
     if any(t.name == task.name for t in registered):
         msg = f"A background task named {task.name!r} is already registered"
         raise ValueError(msg)

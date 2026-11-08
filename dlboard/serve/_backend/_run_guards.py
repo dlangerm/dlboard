@@ -26,8 +26,4 @@ RUN_GUARDS: AppSlot[list[RunGuard]] = AppSlot("run guards")
 
 def register_run_guard(app: Dash, guard: RunGuard) -> None:
     """Ask `guard` about every run a request creates in `app`, after the writer's role is checked."""
-    guards = RUN_GUARDS.find(app)
-    if guards is None:
-        RUN_GUARDS.set(app, [guard])
-    else:
-        guards.append(guard)
+    RUN_GUARDS.setdefault(app, list).append(guard)

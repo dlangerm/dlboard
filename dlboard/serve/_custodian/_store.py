@@ -124,10 +124,7 @@ WORK_RULES: AppSlot[dict[str, WorkRule]] = AppSlot("work rules")
 
 def register_work_kind(app: Dash, rule: WorkRule) -> None:
     """Let a request queue `rule.kind` of work, as a user holding `rule.scope`: no other kind can be queued but by the system."""
-    rules = WORK_RULES.find(app)
-    if rules is None:
-        rules = dict[str, WorkRule]()
-        WORK_RULES.set(app, rules)
+    rules = WORK_RULES.setdefault(app, dict)
     if str(rule.kind) in rules:
         msg = f"Work of kind {rule.kind!r} is already registered"
         raise ValueError(msg)

@@ -45,11 +45,7 @@ PROJECT_SECTIONS: AppSlot[list[ProjectSection]] = AppSlot("project sections")
 
 def register_project_section(app: Dash, section: ProjectSection) -> None:
     """Add `section` to every project's page, after the ones registered before it."""
-    sections = PROJECT_SECTIONS.find(app)
-    if sections is None:
-        PROJECT_SECTIONS.set(app, [section])
-    else:
-        sections.append(section)
+    PROJECT_SECTIONS.setdefault(app, list).append(section)
 
 
 def project_sections(slot: ProjectSlot, project: Project) -> list[Component]:

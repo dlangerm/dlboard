@@ -11,6 +11,8 @@ from flask import current_app, has_app_context
 from structlog.stdlib import get_logger
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from dash import Dash
 
 _log = get_logger(__name__)
@@ -68,6 +70,14 @@ class AppSlot[T]:
     def find(self, app: Dash) -> T | None:
         """Like `get`, but `None` when nothing set it -- for state that's optional to install."""
         return cast("T | None", getattr(app, self._attribute, None))  # dlboard-ignore[forbid-string-ignore]
+
+    def setdefault(self, app: Dash, make: Callable[[], T]) -> T:
+        """The state `app` holds, set to `make()` first if nothing set it: for a collection every plugin adds to in `plug()`."""
+        found = self.find(app)
+        if found is None:
+            found = make()
+            self.set(app, found)
+        return found
 
     def wait(self, app: Dash) -> T:
         """Like `get`, but blocks until some plugin's `plug()` sets it -- plugin order isn't guaranteed."""

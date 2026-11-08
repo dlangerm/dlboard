@@ -28,6 +28,17 @@ def test_set_refuses_to_overwrite() -> None:
         slot.set(app, "b")
 
 
+def test_setdefault_makes_a_collection_once_per_app_and_every_caller_adds_to_the_same_one() -> None:
+    slot = AppSlot[list[str]]("things")
+    app, other = _FakeApp(), _FakeApp()
+
+    slot.setdefault(app, list).append("a")
+    slot.setdefault(app, list).append("b")
+    slot.setdefault(other, list).append("elsewhere")
+
+    assert (slot.get(app), slot.get(other)) == (["a", "b"], ["elsewhere"])
+
+
 def test_get_follows_the_current_app(monkeypatch: pytest.MonkeyPatch) -> None:
     """Accessors used to be `functools.cache`d, pinning every later app in a process to the first one's state."""
     slot = AppSlot[str]("thing")

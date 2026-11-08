@@ -804,6 +804,7 @@
   "dlboard/serve/_backend/tests/app_slot_test.py::test_get_data_store_refuses_outside_a_request": 0.001722720975521952,
   "dlboard/serve/_backend/tests/app_slot_test.py::test_get_follows_the_current_app": 0.0013681279961019754,
   "dlboard/serve/_backend/tests/app_slot_test.py::test_set_refuses_to_overwrite": 0.0016027159872464836,
+  "dlboard/serve/_backend/tests/app_slot_test.py::test_setdefault_makes_a_collection_once_per_app_and_every_caller_adds_to_the_same_one": 0.0011432449973654002,
   "dlboard/serve/_backend/tests/app_slot_test.py::test_wait_blocks_until_set_on_that_specific_app": 1.0022775119869038,
   "dlboard/serve/_backend/tests/artifact_download_test.py::test_a_non_inlineable_artifact_is_forced_to_download_as_an_attachment": 0.0013095740287099034,
   "dlboard/serve/_backend/tests/artifact_download_test.py::test_a_presigned_redirect_is_never_given_the_immutable_cache_control_header": 0.0012506210478022695,

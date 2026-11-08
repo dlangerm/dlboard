@@ -146,11 +146,7 @@ def add_public_route(app: Dash, rule: str, view_func: Callable[..., Any], method
     prefix = str(app.config.routes_pathname_prefix)  # pyrefly: ignore [unknown-argument-type]
     endpoint = prefix + rule
     app.server.add_url_rule(endpoint, endpoint=endpoint, view_func=view_func, methods=methods)
-    public = PUBLIC_ENDPOINTS.find(app)
-    if public is None:
-        public = set[str]()
-        PUBLIC_ENDPOINTS.set(app, public)
-    public.add(endpoint)
+    PUBLIC_ENDPOINTS.setdefault(app, set).add(endpoint)
 
 
 def safe_next_path(next_path: str | None) -> str:
