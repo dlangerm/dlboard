@@ -1037,9 +1037,23 @@ def test_the_charts_draw_the_newest_runs_until_the_run_table_selects_others(
     assert console_errors == []
 
 
-def _log_runs(api: BasicDlboardAPI, experiment_id: int, count: int) -> list[models.Run]:
-    """`count` runs, oldest first, each logged a loss at three steps (a line needs more than one point)."""
-    runs = [api.create_run(models.NewRun(experiment_id=experiment_id)) for _ in range(count)]
+def _log_runs(
+    api: BasicDlboardAPI, experiment_id: int, count: int, *, names: list[str] | None = None
+) -> list[models.Run]:
+    """
+    `count` runs, oldest first, each logged a loss at three steps (a line needs more than one point).
+
+    A run is named `names[i]` if given: left to itself, a run gets a random two-word name, and one can contain a colour's
+    name, which a test that reads colour names off the page must not see (#571).
+    """
+    runs = [
+        api.create_run(
+            models.NewRun(experiment_id=experiment_id)
+            if names is None
+            else models.NewRun(experiment_id=experiment_id, name=names[i])
+        )
+        for i in range(count)
+    ]
     api.log_metric_batch(
         [
             models.LoggedMetrics(

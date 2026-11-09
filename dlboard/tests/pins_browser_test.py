@@ -41,7 +41,9 @@ def _experiment_of_runs(page: Page, live_server_url: str, name: str, count: int)
     _create_project_and_experiment(page, live_server_url, name)
     page.locator(".experiment-card").click()
     experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
-    _log_runs(BasicDlboardAPI(live_server_url), experiment_id, count)
+    _log_runs(
+        BasicDlboardAPI(live_server_url), experiment_id, count, names=[f"run-{i}" for i in range(count)]
+    )
     page.reload()
     rows = page.locator(f"#{NAVBAR_HPARAM_DATATABLE_ID} .ag-center-cols-container .ag-row")
     # A long list draws only the rows in view: its size is what the grid says it has, and a header.
