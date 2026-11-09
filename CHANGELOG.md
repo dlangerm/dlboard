@@ -12,6 +12,8 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-11-09
+
 ### Added
 
 * **Retention policies.** A deployment people log to for months no longer grows without bound. Each project keeps every
