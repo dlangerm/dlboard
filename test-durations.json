@@ -1571,6 +1571,7 @@
   "dlboard/serve/_custodian/tests/supervisor_test.py::test_a_batch_is_followed_by_a_wait_that_keeps_the_task_to_its_share_of_time[0.5]": 0.6217506899993168,
   "dlboard/serve/_custodian/tests/supervisor_test.py::test_a_batch_is_followed_by_a_wait_that_keeps_the_task_to_its_share_of_time[1.0]": 0.3495353689941112,
   "dlboard/serve/_custodian/tests/supervisor_test.py::test_a_custodian_lets_go_of_its_leases_when_it_stops": 0.4615173760030302,
+  "dlboard/serve/_custodian/tests/supervisor_test.py::test_a_custodian_whose_server_is_gone_releases_nothing_and_writes_nothing_as_it_stops": 0.13401747497846372,
   "dlboard/serve/_custodian/tests/supervisor_test.py::test_a_custodian_whose_server_is_gone_stops": 0.13607192800554913,
   "dlboard/serve/_custodian/tests/supervisor_test.py::test_a_failed_run_is_recorded_and_the_task_runs_again_when_due": 0.3663662379985908,
   "dlboard/serve/_custodian/tests/supervisor_test.py::test_a_one_at_a_time_task_runs_once_an_interval_across_custodians": 1.1646267769974656,
