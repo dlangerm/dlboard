@@ -65,6 +65,8 @@ class _Server:
         }
         env.pop("DLBOARD_CUSTODIAN_ENABLED", None)
         cli = Path(sys.executable).with_name("dlboard")
+        self.log_path = tmp_path / "server.log"
+        self.log = self.log_path.open("w")
         self.master = subprocess.Popen(
             [
                 str(cli),
@@ -73,8 +75,8 @@ class _Server:
                 *("--port", str(self.port), "--workers", "2"),
             ],
             env=env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=self.log,
+            stderr=subprocess.STDOUT,
         )
         try:
             _until("the server to be ready", self._ready)
@@ -109,6 +111,11 @@ class _Server:
             self.master.kill()
             self.master.wait()
         self.store.dispose()
+        self.log.close()
+
+    def output(self) -> str:
+        """What the server (and its custodian) logged, so that a failure says what they were doing."""
+        return self.log_path.read_text()
 
 
 @pytest.fixture
@@ -158,4 +165,4 @@ def test_a_custodian_does_not_outlive_a_server_killed_outright(server: _Server) 
     server.master.kill()
     server.master.wait()
     _, alive = psutil.wait_procs([custodian], timeout=_DEADLINE_S)
-    assert alive == []
+    assert alive == [], server.output()
