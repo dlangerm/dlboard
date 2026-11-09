@@ -187,6 +187,22 @@ def test_a_custodian_whose_server_is_gone_releases_nothing_and_writes_nothing_as
     assert released == []
 
 
+def test_a_stop_that_comes_after_the_server_died_releases_nothing_either(
+    store: SQLStoreBase[Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The kernel's parent-death signal stops the loop before its orphan check runs: that stop is an orphan's too (#580)."""
+    released: list[str] = []
+
+    def release(name: object, _holder: str) -> None:
+        released.append(str(name))
+
+    monkeypatch.setattr(store, "release_task", release)
+    supervisor = _supervisor(store, _task(lambda _ctx: None), "a", parent_alive=lambda: False)
+    supervisor.stop.set()
+    assert supervisor.run() is ExitCode.STOPPED
+    assert released == []
+
+
 def test_a_custodian_lets_go_of_its_leases_when_it_stops(store: SQLStoreBase[Any]) -> None:
     task = _task(lambda _ctx: None, every=pendulum.duration(seconds=0.05), mode=TaskMode.SINGLETON)
     with _running(_supervisor(store, task, "a")):

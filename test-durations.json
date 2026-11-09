@@ -1579,6 +1579,7 @@
   "dlboard/serve/_custodian/tests/supervisor_test.py::test_a_run_past_its_deadline_ends_the_custodian_and_says_it_hung": 0.28470873400510754,
   "dlboard/serve/_custodian/tests/supervisor_test.py::test_a_run_whose_lease_another_custodian_took_over_is_told_to_stop": 0.4701548969896976,
   "dlboard/serve/_custodian/tests/supervisor_test.py::test_a_shared_run_keeps_renewing_its_claims_while_it_works": 1.1527077910068328,
+  "dlboard/serve/_custodian/tests/supervisor_test.py::test_a_stop_that_comes_after_the_server_died_releases_nothing_either": 0.3473925110010896,
   "dlboard/serve/_custodian/tests/supervisor_test.py::test_a_task_that_came_due_while_the_machine_slept_runs_within_a_poll": 0.7002651719958521,
   "dlboard/serve/_custodian/tests/supervisor_test.py::test_a_task_thread_that_dies_is_started_again": 1.8877257099957205,
   "dlboard/serve/_custodian/tests/supervisor_test.py::test_an_idle_custodian_makes_at_most_thirty_statements_a_minute": 1.3338276560025406,

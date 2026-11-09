@@ -224,8 +224,6 @@ class Supervisor:
         self.stop = threading.Event()
         self._heartbeat = heartbeat
         self._parent_alive = parent_alive
-        self._orphaned = False
-        """Set when the server that started this custodian is gone: it then exits without touching the database."""
         self._started_at = pendulum.now(pendulum.UTC)
         self.lease = pendulum.duration(seconds=self.settings.beat_s * _LEASE_BEATS)
         """
@@ -247,7 +245,6 @@ class Supervisor:
                 now = time.monotonic()
                 if not self._parent_alive():
                     _log.warning("The server that started this custodian is gone; stopping")
-                    self._orphaned = True
                     return ExitCode.ORPHANED
                 if (hung := self._hung(now)) is not None:
                     self._hung_run = hung
@@ -259,7 +256,11 @@ class Supervisor:
             self.stop.set()
             for runner in self.runners:
                 runner.cancel.set()
-            if not self._orphaned:
+            # Checked here, not only where the loop noticed: a SIGTERM that arrives because the server died (the kernel's
+            # parent-death signal) stops the loop without the orphan check ever running (#580).
+            orphaned = not self._parent_alive()
+            _log.info("The custodian is stopping", orphaned=orphaned)
+            if not orphaned:
                 # An orphan exits at once: no server is waiting on it, its leases run out on their own, and a
                 # lock held by a write it would wait out (up to the busy timeout) must not keep it alive.
                 self._record_hung()
