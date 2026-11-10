@@ -198,6 +198,14 @@ class _Recorder(Protocol):
     def record(self, amount: float, attributes: OtelAttributes = None) -> None: ...
 
 
+INSTRUMENTS: Final[dict[str, _Instrument[Any]]] = {}
+"""
+Every instrument defined so far, by name: what `dashboard_test.py` holds `docs/telemetry.md` and the Grafana dashboard to.
+
+Filled as modules are imported, so it is only complete once everything that defines one has been.
+"""
+
+
 class _Instrument[I](ABC):
     """
     A named instrument that finds (and caches) its SDK counterpart on the current process's meter.
@@ -212,6 +220,7 @@ class _Instrument[I](ABC):
         self._description = description
         self._cache: tuple[Meter, I] | None = None
         self._warned = False
+        INSTRUMENTS[name] = self
 
     @abstractmethod
     def _create(self, meter: Meter) -> I: ...

@@ -262,7 +262,9 @@ import `opentelemetry` at runtime outside `telemetry/_sdk.py` (and tests): a loc
 `client_import_isolation_test.py` enforces that. The SDK objects are built lazily, once per *process*
 (`_PerProcess`), because Granian forks its workers while the blob writer is spawned -- so never build a meter
 provider in a process that goes on to fork, and don't cache SDK objects in module globals. `/metrics` adds up
-every process through snapshot files; see `_prometheus.py` and `docs/telemetry.md`.
+every process through snapshot files; see `_prometheus.py` and `docs/telemetry.md`. A new instrument needs a row in
+`docs/telemetry.md` and a panel in `docs/grafana/dlboard.json` (or an entry in `NOT_CHARTED` saying why not):
+`telemetry/tests/dashboard_test.py` fails without them.
 
 Traces (`DLBOARD_TELEMETRY_TRACES`) are the same discipline, in `dlboard/_telemetry/` -- shared with the client, so Python
 3.10 and OpenTelemetry API from the client `otel` extra's floor (1.16) only, enforced by `tools/check_client_tracing.py`

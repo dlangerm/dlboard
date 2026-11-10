@@ -12,6 +12,14 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ## [Unreleased]
 
+### Changed
+
+* **The Grafana metrics dashboard charts everything the server publishes.** `docs/grafana/dlboard.json` gains a
+  **Background tasks** row (runs by outcome, duration, backlog, custodian starts), a **Retention** row (runs deleted and
+  refused), and the artifact staging and recording durations. A test now fails when a metric is added without a row in
+  [docs/telemetry.md](docs/telemetry.md) and a panel on the dashboard, so it no longer falls behind. See
+  [docs/grafana](docs/grafana/README.md). (#582)
+
 ## [0.15.0] - 2026-11-09
 
 ### Added

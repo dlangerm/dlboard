@@ -53,10 +53,13 @@ against the Prometheus names of the metrics in [telemetry.md](../telemetry.md): 
 `_total`, and the unit is appended (`_seconds`, `_bytes`). The log queries use the `service_name` label and the `level`
 and `trace_id` fields; the trace queries use span names from the same document.
 
+For the metrics dashboard a test keeps this honest (`dlboard/serve/telemetry/tests/dashboard_test.py`). A new metric
+fails it until it has a row in [telemetry.md](../telemetry.md) and a panel in `dlboard.json`, or an entry in the test's
+`NOT_CHARTED` with the reason it is left off. A query for a series the server no longer serves fails it too. The logs and
+traces dashboards are not checked: their inputs are log fields and span names, not instruments.
+
 ## Caveats
 
-- The `dlboard_ingest_artifact_size_bytes_total` name follows the convention above, not a checked name. Confirm it on a
-  live `/metrics` before relying on the "bytes per second" series.
 - Histogram panels use `histogram_quantile` over `rate(..._bucket[$__rate_interval])`. A low-traffic server shows
   noisy quantiles; widen the time range if a panel looks jumpy.
 - The logs stat counts "could not start" lines over the whole selected time range, so it stays red for that range after
