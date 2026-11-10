@@ -2621,7 +2621,7 @@
   "dlboard/tests/configuration_docs_test.py::test_every_setting_is_documented[OTEL_SERVICE_NAME]": 0.0008996720007417025,
   "dlboard/tests/configuration_docs_test.py::test_every_setting_is_documented[OTEL_TRACES_EXPORTER]": 0.000868300000547606,
   "dlboard/tests/configuration_docs_test.py::test_the_documented_settings_all_exist": 0.009229223001057107,
-  "dlboard/tests/custodian_process_test.py::test_a_custodian_does_not_outlive_a_server_killed_outright": 4.412529856985202,
+  "dlboard/tests/custodian_process_test.py::test_nothing_the_server_started_outlives_it_killed_outright": 4.412529856985202,
   "dlboard/tests/custodian_process_test.py::test_the_server_keeps_one_custodian_alive_and_stops_it_with_itself": 19.26566103300138,
   "dlboard/tests/docs_screenshots_test.py::test_doc_images_are_referenced_and_accounted_for": 0.0045675370001845295,
   "dlboard/tests/docs_screenshots_test.py::test_doc_screenshot[chromium-chart-editor]": 0.0005253369999991264,

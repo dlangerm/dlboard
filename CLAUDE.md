@@ -240,7 +240,8 @@ Constants should only be added for globally-accessed values, not for per-plugin 
 Custodial work (purges, blob deletion) runs in one custodian process per server, never in a web worker
 (`dlboard/serve/_custodian/`). Granian's master starts it before its workers (`on_startup`), stops it after them, reaps and
 restarts it when it exits, and replaces it when its shared-memory heartbeat goes stale; it dies with the master
-(`PR_SET_PDEATHSIG`). A plugin never starts a thread or process for background work: it registers a `Task` in `plug()`
+(`PR_SET_PDEATHSIG`), and so does every web worker (`_wsgi.py`). A plugin never starts a thread or process for background
+work: it registers a `Task` in `plug()`
 (`register_task`), which every process registers and only the custodian runs. A task is `SINGLETON` (one at a time across
 every server, under a lease of three beats renewed every beat) or `SHARED` (each custodian claims its own batch of
 `WorkItem`s, `SKIP LOCKED` on Postgres). Work goes in a batch at a time inside `ctx.batch()` (duty-cycle pacing), checks

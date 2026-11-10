@@ -16,6 +16,7 @@ top-level module for its own worker entrypoint.
 from __future__ import annotations
 
 from dlboard.serve import app as build_app
+from dlboard.serve._custodian._process import die_with_parent
 from dlboard.serve._logging import configure_logging
 from dlboard.serve._production_server import WORKERS, WSGISettings
 
@@ -23,6 +24,11 @@ from dlboard.serve._production_server import WORKERS, WSGISettings
 # `spawn-ctx-methods`), which re-imports this module from scratch in each one with none of the
 # parent process's structlog setup -- so this has to run again here, not just once in `_cli.py`.
 configure_logging()
+# A worker goes when the master does, as the custodian does: killed outright, the master can't stop it, and an orphaned
+# worker would go on serving the port and holding the database (#584). Granian starts every worker from its main thread,
+# which lives as long as the master, so this fires only when the master is gone. Linux only (`PR_SET_PDEATHSIG`): a
+# deployment runs there; elsewhere a `kill -9` of the master still leaves its workers to be stopped by hand.
+die_with_parent()
 
 _settings = WSGISettings()
 try:

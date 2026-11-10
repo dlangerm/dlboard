@@ -45,6 +45,12 @@ pulls that section's body into the GitHub release notes and publishes both distr
   comparison's name) updates it in place, rather than drawing the header again (#547). Reopening a comparison's edit dialog
   now shows what is saved, not what was typed before a cancel.
 
+### Fixed
+
+* **A server killed outright no longer leaves its web workers running.** Killed by `kill -9` or the OOM killer, the server
+  stopped its custodian but not its Granian workers, which went on holding its port and its database. Each worker now
+  goes with the server (on Linux), as the custodian does. (#584)
+
 ## [0.15.0] - 2026-11-09
 
 ### Added

@@ -1,10 +1,11 @@
 """
 The custodian in a real `dlboard serve`: started by the server, replaced when it dies or hangs, untouched by a worker's
-death, stopped with the server, and gone when the server is killed outright.
+death, stopped with the server, and gone, with the web workers, when the server is killed outright.
 """
 
 from __future__ import annotations
 
+import contextlib
 import os
 import signal
 import socket
@@ -107,9 +108,20 @@ class _Server:
         return psutil.Process(self.master.pid).children(recursive=True)
 
     def stop(self) -> None:
+        """
+        Kill the server and everything it started, so that a failed test leaves nothing running.
+
+        Found by the database each was started on, not as the master's children: a test may already have killed the
+        master, and what outlived it is nobody's child any more.
+        """
         if self.master.poll() is None:
             self.master.kill()
             self.master.wait()
+        started = [p for p in psutil.process_iter(["cmdline"]) if str(self.db) in (p.info["cmdline"] or [])]
+        for process in started:
+            with contextlib.suppress(psutil.NoSuchProcess):  # gone with the server, as it should be
+                process.kill()
+        psutil.wait_procs(started, timeout=_DEADLINE_S)
         self.store.dispose()
         self.log.close()
 
@@ -160,9 +172,11 @@ def test_the_server_keeps_one_custodian_alive_and_stops_it_with_itself(server: _
     assert alive == []
 
 
-def test_a_custodian_does_not_outlive_a_server_killed_outright(server: _Server) -> None:
-    custodian = psutil.Process(server.custodian())
+def test_nothing_the_server_started_outlives_it_killed_outright(server: _Server) -> None:
+    """Its custodian and its web workers too: an orphaned worker keeps serving the port and holding the database (#584)."""
+    server.custodian()
+    everything = server.descendants()
     server.master.kill()
     server.master.wait()
-    _, alive = psutil.wait_procs([custodian], timeout=_DEADLINE_S)
+    _, alive = psutil.wait_procs(everything, timeout=_DEADLINE_S)
     assert alive == [], server.output()
