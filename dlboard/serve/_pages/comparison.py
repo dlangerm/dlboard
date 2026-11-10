@@ -18,9 +18,9 @@ from dlboard.serve._pages._comparison._header import comparison_header
 from dlboard.serve._pages._comparison._members import members_shells
 from dlboard.serve._pages._experiment import _ids as experiment_ids
 from dlboard.serve._pages._experiment import _page_edits as edits
-from dlboard.serve._pages._experiment import panel_area, panel_area_stores
 from dlboard.serve._pages._experiment._page_model import BasicExperimentPage
 from dlboard.serve._pages._experiment._paging import SIZES_COOKIE, Paging
+from dlboard.serve._pages._experiment._panel_area import panel_area, panel_area_stores
 from dlboard.serve._pages._experiment._views import VIEW_NOTIFY_ID
 
 if TYPE_CHECKING:

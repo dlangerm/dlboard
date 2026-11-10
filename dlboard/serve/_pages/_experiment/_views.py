@@ -166,26 +166,19 @@ def _share_label(*, is_shared: bool) -> str:
     return "Stop sharing with project" if is_shared else "Share with project"
 
 
-def view_controls(  # noqa: PLR0913
-    store: DataStore[...],
-    experiment_id: int,
-    view_id: int | None,
-    *,
-    is_owner: bool,
-    view_name: str | None = None,
-    is_shared: bool = False,
+def view_controls(
+    store: DataStore[...], experiment_id: int, page: page_model.BasicExperimentPage, view_id: int | None
 ) -> Component:
     """
-    The header's view picker and its actions menu (rename/delete included, in a view of your own).
+    The header's view picker and its actions menu (rename/delete included, in a view of your own), showing `page`.
 
-    `is_owner` is `False` for the shared page (nobody "owns" it) and for a view someone else's --
-    editing either still works, it just branches you into a view of your own the moment you make a
-    change (see `_page_repository.save_page`) rather than letting you rename or delete theirs.
-    `view_name` is the current page's own name, needed only to show a view that isn't yours (`not
-    is_owner`, `view_id` not `None`) in the picker at all -- see `_options`'s `foreign_view`.
-    `is_shared` is the current page's own `NewPage.shared` -- meaningless (and the toggle hidden)
-    unless `is_owner`, same as rename/delete.
+    Nobody owns the shared page (`view_id` is `None`), and someone else's view isn't yours: editing either still works,
+    it just branches you into a view of your own the moment you make a change (see `_page_repository.save_page`) rather
+    than letting you rename, share or delete theirs. A view that isn't yours is listed in the picker by its own name
+    (`_options`'s `foreign_view`), since it isn't among yours or the shared ones.
     """
+    is_owner = view_id is not None and page.owner_id == get_current_user().id
+    view_name, is_shared = page.name, page.shared
     owner_only = "dl-view-owner-only"
     return dmc.Group(
         [

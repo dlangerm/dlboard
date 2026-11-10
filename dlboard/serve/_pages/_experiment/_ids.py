@@ -14,10 +14,8 @@ class ExperimentPage:
     """Page tag: marks a component id as belonging to the experiment page."""
 
 
-# --- route-skeleton ids: a two-file contract with `serve/_pages/experiment.py`, which imports
-# these from `_experiment/__init__.py` (this package's public façade) rather than from here. ---
+# --- route-skeleton ids: the page `serve/_pages/experiment.py` (and `comparison.py`) lays out. ---
 PAGE_EXPERIMENT_ID: DivId[ExperimentPage] = DivId("experiment-container")
-EXPERIMENT_HEADER_ID: DivId[ExperimentPage] = DivId("experiment-header")
 METRIC_CONTENT_ID: DivId[ExperimentPage] = DivId("metrics-view")
 STATE_PAGE_STORAGE: StoreId[ExperimentPage] = StoreId("current-page")
 STATE_VIEW_ID: StoreId[ExperimentPage] = StoreId("view-id-state")

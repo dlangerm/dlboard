@@ -8,42 +8,22 @@ from dash.development.base_component import Component
 from flask import request
 
 from dlboard.serve import _constants as constants
-from dlboard.serve import get_current_user, get_data_store
+from dlboard.serve import get_data_store
 from dlboard.serve._pages._experiment import _ids as ids
 from dlboard.serve._pages._experiment import _live_updates as live
-from dlboard.serve._pages._experiment import _page_model as page_model
+from dlboard.serve._pages._experiment import _page_edits as edits
 from dlboard.serve._pages._experiment import _page_repository as repo
-from dlboard.serve._pages._experiment import panel_area, panel_area_stores, render_panel
-from dlboard.serve._pages._experiment._notes import STATE_NOTES_REVISION, notes_button, notes_drawer
+from dlboard.serve._pages._experiment._header import experiment_header
+from dlboard.serve._pages._experiment._notes import STATE_NOTES_REVISION, notes_drawer
 from dlboard.serve._pages._experiment._paging import SIZES_COOKIE, Paging
+from dlboard.serve._pages._experiment._panel_area import panel_area, panel_area_stores
 from dlboard.serve._pages._experiment._run_compare import CompareQuery, compare_components
 from dlboard.serve._pages._experiment._runs_table import run_table_shells
-from dlboard.serve._pages._experiment._views import resolve_view_id, view_controls
+from dlboard.serve._pages._experiment._views import resolve_view_id
 from dlboard.serve._pages._onboarding import first_run_snippet, onboarding_card
 
 # Built once, at this module's import -- inside `build_app` -- so the env it reads is the app's (see tests/conftest.py).
 _LIVE_UPDATE_SETTINGS = live.LiveUpdateSettings()
-
-
-def _live_update_header(header: Component, notes: Component, views: Component) -> dmc.Group:
-    """The experiment header, its notes and view picker, and the live-update status (`live.live_controls`)."""
-    return dmc.Group(
-        [
-            html.Div(header, id=ids.EXPERIMENT_HEADER_ID),
-            dmc.Group(
-                [
-                    notes,
-                    views,
-                    dmc.Divider(orientation="vertical"),
-                    *live.live_controls(),
-                ],
-                gap="xs",
-                wrap="nowrap",
-            ),
-        ],
-        justify="space-between",
-        wrap="nowrap",
-    )
 
 
 def layout(
@@ -57,42 +37,24 @@ def layout(
     `chart_deep_link.js` scrolls to it. `?compare=`, `?compare_mode=` and `?compare_q=` open the
     run-compare modal on that state (see `CompareQuery`). `?panels_q=`, `?panels_page=` and
     `?charts=` say which page of panels and charts is showing (see `Paging`). Any other query parameter is ignored.
+
+    Everything is drawn here, in the page's first response, rather than by a callback fired once this
+    shell mounts: that would cost every load a second round trip, not just hide it behind a spinner.
     """
     store = get_data_store()
     exp = store.get_experiment(int(experiment_id))
     if not exp:
         return [html.Div(f"Experiment {experiment_id} not found")]
-
-    # Rendered synchronously, here, rather than by a `render_initial`-style callback fired after
-    # this static shell mounts -- see `render_panel`'s own docstring for why that's the one thing
-    # that actually eliminates the page's extra round trip, not just hides it behind a spinner.
     view_id = resolve_view_id(store, exp.id, view)
-    container, header, page_json = render_panel(
-        store,
-        repo.ExperimentRef(exp.id, view_id),
-        Paging.from_request(query, request.cookies.get(SIZES_COOKIE)),
-        focus_chart=chart,
-    )
-    current_page = page_model.BasicExperimentPage.model_validate_json(page_json)
-    is_owner = view_id is not None and current_page.owner_id == get_current_user().id
+    page = repo.load_page(store, repo.ExperimentRef(exp.id, view_id))
+    paging = Paging.from_request(query, request.cookies.get(SIZES_COOKIE))
 
     return [
         html.Div(
             id=ids.PAGE_EXPERIMENT_ID,
             children=dmc.Stack(
                 [
-                    _live_update_header(
-                        header,
-                        notes_button(len(store.list_comments(exp.id))),
-                        view_controls(
-                            store,
-                            exp.id,
-                            view_id,
-                            is_owner=is_owner,
-                            view_name=current_page.name,
-                            is_shared=current_page.shared,
-                        ),
-                    ),
+                    experiment_header(store, exp, page, view_id),
                     notes_drawer(),
                     *compare_components(store, exp.id, CompareQuery.from_query(query)),
                     # Nothing logged yet: show how to log the first run, right where its charts will go.
@@ -102,17 +64,17 @@ def layout(
                     )
                     if next(store.get_runs(exp.id, limit=1, run_ids=None), None) is None
                     else None,
-                    *panel_area(container),
+                    *panel_area(edits.render_panel_area(store, page, paging, focus_chart=chart)),
                 ],
                 gap="xs",
             ),
         ),
         *live.live_timers(_LIVE_UPDATE_SETTINGS, exp.revision),
-        Store(id=ids.STATE_PAGE_STORAGE, data=page_json),
+        Store(id=ids.STATE_PAGE_STORAGE, data=page.model_dump_json()),
         Store(id=ids.STATE_VIEW_ID, data=view_id),
         Store(id=STATE_NOTES_REVISION, data=exp.notes_revision),
         Store(id=constants.STATE_PROJECT_ID, data=exp.project_id),
-        Store(id=constants.STATE_EXPERIMENT_ID, data=int(experiment_id)),
+        Store(id=constants.STATE_EXPERIMENT_ID, data=exp.id),
         *panel_area_stores(),
         *run_table_shells(),
     ]

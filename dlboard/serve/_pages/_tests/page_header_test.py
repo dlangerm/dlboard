@@ -15,7 +15,7 @@ from dlboard.plugins.data_stores import filesystem, sqlite
 from dlboard.serve import _constants as constants
 from dlboard.serve import app as build_app
 from dlboard.serve._backend._data_store import get_system_data_store
-from dlboard.serve._pages._experiment import EXPERIMENT_HEADER_IDS
+from dlboard.serve._pages._experiment._header import EXPERIMENT_HEADER_IDS
 from dlboard.serve._pages._page_header import NO_DESCRIPTION, PageHeaderIds, page_header
 from dlboard.serve._pages._simple_project_page import PROJECT_HEADER_IDS
 
