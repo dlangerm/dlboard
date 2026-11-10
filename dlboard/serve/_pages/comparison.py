@@ -23,6 +23,7 @@ from dlboard.serve._pages._experiment._notes import STATE_NOTES_REVISION
 from dlboard.serve._pages._experiment._page_model import BasicExperimentPage
 from dlboard.serve._pages._experiment._paging import SIZES_COOKIE, Paging
 from dlboard.serve._pages._experiment._panel_area import panel_area, panel_area_stores
+from dlboard.serve._pages._experiment._run_compare import CompareQuery, compare_components
 from dlboard.serve._pages._experiment._shown_runs import page_experiments
 from dlboard.serve._pages._experiment._views import VIEW_NOTIFY_ID
 
@@ -39,8 +40,9 @@ def layout(comparison_id: str, chart: str | None = None, **query: str) -> list[C
 
     `?chart=` (a `ChartInstance.id`, from a copied chart link) opens that chart's panel and tab; `?panels_q=`,
     `?panels_page=` and `?charts=` say which page of panels and charts is showing and `?hidden=` which runs are left out of
-    them (see `Paging`). Any other query parameter is ignored. Its runs are listed in the sidebar, as an experiment's are,
-    and its charts follow what is logged to them live, as an experiment's do.
+    them (see `Paging`); `?compare=` and the rest open the A/B diff on that state (`CompareQuery`). Any other query parameter
+    is ignored. Its runs are listed in the sidebar, as an experiment's are, and its charts follow what is logged to them
+    live, as an experiment's do.
     """
     store = get_data_store()
     found = store.get_view(BasicExperimentPage, int(comparison_id))
@@ -62,6 +64,7 @@ def layout(comparison_id: str, chart: str | None = None, **query: str) -> list[C
                         if store.can_change_comparison_runs(page.id)
                         else []
                     ),
+                    *compare_components(store, page, CompareQuery.from_query(query)),
                     *panel_area(container),
                     dmc.NotificationContainer(id=VIEW_NOTIFY_ID),
                 ],

@@ -42,6 +42,7 @@ from dlboard.serve._pages._experiment._column_catalog import ColumnCatalog
 from dlboard.serve._pages._experiment._compare import compare, compare_menu, compare_pins_menu
 from dlboard.serve._pages._experiment._focus import experiment_href
 from dlboard.serve._pages._experiment._paging import Paging
+from dlboard.serve._pages._experiment._run_compare import COMPARE_MODAL_ID, COMPARE_RUNS_ID, diff_of
 from dlboard.serve._pages._experiment._views import VIEW_NOTIFY_ID
 from dlboard.serve._pages._pins._pin_filter import pin_filter, register_pin_filter
 from dlboard.serve._pages._pins._pin_menus import pin_menus
@@ -203,6 +204,7 @@ def render_members(
     actions = [
         simple_action(RunListSurface.COMPARISON, RunAction.DRAW, "Show", icon_name=Icon.EYE),
         simple_action(RunListSurface.COMPARISON, RunAction.HIDE, "Hide", icon_name=Icon.EYE_OFF),
+        simple_action(RunListSurface.COMPARISON, RunAction.DIFF, "Diff", icon_name=Icon.COMPARE),
         *pin_menus(RunListSurface.COMPARISON),
         compare_menu(RunListSurface.COMPARISON, addable, current=page.id, here=can_edit),
         *keep_actions(RunListSurface.COMPARISON),
@@ -389,7 +391,8 @@ def _act(request: RunActionRequest, act: _Act) -> tuple[Any, ...]:
             kept = keep_or_release(request, ids.COMPARISON_GRID_ID)
             return no_update, no_update, no_update, kept.notice, kept.rows or no_update, no_update
         case RunAction.DIFF | RunAction.DELETE:
-            # Not on a comparison yet (the diff reads one experiment), and its runs are deleted from their experiments.
+            # The diff is opened before an action gets here (`act_on_members`), and a comparison's runs are deleted from
+            # their experiments.
             raise PreventUpdate
 
 
@@ -466,6 +469,9 @@ def register_members_callbacks(app: Dash) -> None:
         Output(VIEW_NOTIFY_ID, "sendNotifications", allow_duplicate=True),
         Output(row_updates_id(RunListSurface.COMPARISON), "data", allow_duplicate=True),
         Output(navigate_id(RunListSurface.COMPARISON), "data"),
+        # The A/B diff, opened on the selected runs as an experiment's run list opens it (`diff_of`).
+        Output(COMPARE_RUNS_ID, "value", allow_duplicate=True),
+        Output(COMPARE_MODAL_ID, "opened", allow_duplicate=True),
         _Act.states(),
         prevent_initial_call=True,
     )
@@ -475,7 +481,19 @@ def register_members_callbacks(app: Dash) -> None:
         act = _Act.model_validate(states)
         if act.request is None:
             raise PreventUpdate
-        return _act(RunActionRequest.model_validate(act.request), act)
+        request = RunActionRequest.model_validate(act.request)
+        if request.action is RunAction.DIFF:
+            diff = diff_of(request.run_ids)
+            opened = True if diff.runs else no_update
+            return (
+                *(no_update,) * 3,
+                diff.notice or no_update,
+                no_update,
+                no_update,
+                diff.runs or no_update,
+                opened,
+            )
+        return *_act(request, act), no_update, no_update
 
     app.clientside_callback(
         _FOLLOW_FORK_JS.source,

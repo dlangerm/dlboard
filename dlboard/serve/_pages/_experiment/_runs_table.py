@@ -44,7 +44,7 @@ from dlboard.serve._pages._experiment._compare import compare, compare_menu, com
 from dlboard.serve._pages._experiment._focus import experiment_href
 from dlboard.serve._pages._experiment._live_updates import STATE_LAST_KNOWN_REVISION
 from dlboard.serve._pages._experiment._paging import Paging
-from dlboard.serve._pages._experiment._run_compare import COMPARE_MODAL_ID, COMPARE_RUNS_ID, MAX_COMPARED_RUNS
+from dlboard.serve._pages._experiment._run_compare import COMPARE_MODAL_ID, COMPARE_RUNS_ID, diff_of
 from dlboard.serve._pages._experiment._shown_runs import ShownRunsSettings, shown_run_ids
 from dlboard.serve._pages._experiment._views import VIEW_NOTIFY_ID
 from dlboard.serve._pages._pins._pin_filter import pin_filter, pin_filter_id, register_pin_filter
@@ -811,15 +811,11 @@ def _compare(request: RunActionRequest, act: _Act) -> _Outputs:
 
 
 def _diff(request: RunActionRequest) -> _Outputs:
-    """Open the A/B diff on the requested runs, if there are few enough to read side by side."""
-    if len(request.run_ids) > MAX_COMPARED_RUNS:
-        return _Outputs(
-            notices=notice("Too many runs to diff", f"The diff compares up to {MAX_COMPARED_RUNS} runs.")
-        )
-    # Newest first, as the modal has always listed the runs it was opened on: the first is the one the others are read against.
-    return _Outputs(
-        diff_runs=[str(run_id) for run_id in sorted(request.run_ids, reverse=True)], diff_opened=True
-    )
+    """Open the A/B diff on the requested runs, if there are few enough to read side by side (`diff_of`)."""
+    diff = diff_of(request.run_ids)
+    if diff.runs is None:
+        return _Outputs(notices=diff.notice)
+    return _Outputs(diff_runs=diff.runs, diff_opened=True)
 
 
 def _register_run_actions(app: Dash) -> None:

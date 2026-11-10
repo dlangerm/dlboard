@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import pendulum
 import pytest
 from pydantic import ValidationError
 
 from dlboard import models
+from dlboard.serve._pages._experiment._page_model import BasicExperimentPage
 from dlboard.serve._pages._experiment._run_compare import (
     COMPARE_PAGE_SIZE,
     MAX_COMPARED_RUNS,
@@ -18,6 +19,7 @@ from dlboard.serve._pages._experiment._run_compare import (
     ComparePage,
     CompareQuery,
     RowKind,
+    compared_scope,
     comparison_page,
     comparison_rows,
     filtered_index,
@@ -155,7 +157,8 @@ def test_load_run_compare_reads_the_picked_runs_latest_values_and_ignores_foreig
             ]
         )
 
-    comparison = load_run_compare(store, experiment_id, [runs[2].id, foreign.id, runs[0].id])
+    picked = [runs[2].id, foreign.id, runs[0].id]
+    comparison = load_run_compare(store, {experiment_id: frozenset(picked)}, picked)
 
     # Only this experiment's runs, in the order picked (the first is the baseline), and not the unpicked run.
     assert [run.id for run in comparison.runs] == [runs[2].id, runs[0].id]
@@ -170,8 +173,8 @@ def test_load_run_compare_copes_with_runs_that_logged_nothing(
 ) -> None:
     run = store.create_run(models.NewRun(experiment_id=experiment_id))
 
-    assert load_run_compare(store, experiment_id, []).runs == []
-    comparison = load_run_compare(store, experiment_id, [run.id])
+    assert load_run_compare(store, {experiment_id: frozenset()}, []).runs == []
+    comparison = load_run_compare(store, {experiment_id: frozenset({run.id})}, [run.id])
     assert ([r.id for r in comparison.runs], comparison.index.entries) == ([run.id], [])
 
 
@@ -190,12 +193,13 @@ def test_a_page_lists_its_keys_and_reads_only_their_values(store: SQLLiteStore, 
                 )
             ]
         )
-    comparison = load_run_compare(store, experiment_id, [first.id, second.id])
+    comparison = load_run_compare(
+        store, {experiment_id: frozenset({first.id, second.id})}, [first.id, second.id]
+    )
 
     def page(number: int) -> ComparePage:
         return comparison_page(
             store,
-            experiment_id,
             comparison.runs,
             comparison.hparams,
             comparison.index,
@@ -214,7 +218,36 @@ def test_a_page_lists_its_keys_and_reads_only_their_values(store: SQLLiteStore, 
 
 
 def test_a_page_of_no_runs_is_empty(store: SQLLiteStore, experiment_id: int) -> None:
-    runs, hparams = load_compared(store, experiment_id, [])
-    page = comparison_page(store, experiment_id, runs, hparams, CompareIndex(), CompareMode.ALL, "", 3)
+    runs, hparams = load_compared(store, {experiment_id: frozenset()}, [])
+    page = comparison_page(store, runs, hparams, CompareIndex(), CompareMode.ALL, "", 3)
 
     assert (page.rows, page.matching, page.number, page.total) == ([], 0, 1, 1)
+
+
+def test_a_comparison_diffs_its_own_runs_of_each_experiment_and_no_other(store: SQLLiteStore) -> None:
+    """A link naming a run that is not in the comparison reaches nothing of it, of any experiment (#497)."""
+    project_id = store.create_project(models.NewProject(name="p", description="")).id
+    first, second = (
+        store.create_experiment(models.NewExperiment(project_id=project_id)).id for _ in range(2)
+    )
+    members = [store.create_run(models.NewRun(experiment_id=e)) for e in (first, second)]
+    outsider = store.create_run(models.NewRun(experiment_id=first))
+    for run, lr in zip(members, (0.1, 0.3), strict=True):
+        store.log_hyperparams(models.NewHyperParams.from_raw(run.id, run.experiment_id, {"lr": lr}))
+    comparison = store.create_comparison(
+        BasicExperimentPage,
+        models.NewPage[Any, Any](
+            project_id=project_id,
+            owner_id=store.get_or_create_user(models.Principal.unverified("a")).id,
+            name="c",
+        ),
+        frozenset(run.id for run in members),
+    )
+    picked = [members[1].id, outsider.id, members[0].id]
+
+    scope = compared_scope(store, cast("BasicExperimentPage", comparison), picked)
+    compared = load_run_compare(store, scope, picked)
+
+    assert scope == {first: frozenset({members[0].id}), second: frozenset({members[1].id})}
+    assert [run.id for run in compared.runs] == [members[1].id, members[0].id]  # in the order picked
+    assert compared.index.entries == [CompareKey("lr", RowKind.HPARAM, differs=True)]

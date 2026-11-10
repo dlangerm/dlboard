@@ -56,7 +56,7 @@ def layout(
                 [
                     experiment_header(store, exp, page, view_id),
                     notes_drawer(),
-                    *compare_components(store, exp.id, CompareQuery.from_query(query)),
+                    *compare_components(store, page, CompareQuery.from_query(query)),
                     # Nothing logged yet: show how to log the first run, right where its charts will go.
                     onboarding_card(
                         title="No runs yet — log your first one",

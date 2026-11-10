@@ -14,6 +14,11 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ### Added
 
+* **A comparison page follows what is logged live,** as an experiment's does: its live poll watches every experiment
+  it draws runs of, and redraws only the charts whose data changed. (#497)
+* **Diff on a comparison page.** Select runs in its list and **Diff** compares them, whatever experiments they are of,
+  each named "experiment / run" and read from its own experiment; a link reopens it, and reaches no run outside the
+  comparison. (#497)
 * **A project page with hundreds of experiments or comparisons draws a page of them.** Its experiment cards (the newest
   first) and its comparison cards each show 24 at a time, with a pager and a filter by name or id once there is more than
   a page, both kept in the page's link. The store reads only that page and its experiments' activity
@@ -28,6 +33,9 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ### Changed
 
+* **A page of several panels reads each experiment's run names and metric names once,** not once per panel, so a comparison
+  of many experiments makes half the round trips it did for each panel past the first, and an experiment page's open
+  panels and live updates read less too. (#505)
 * **The Grafana metrics dashboard charts everything the server publishes.** `docs/grafana/dlboard.json` gains a
   **Background tasks** row (runs by outcome, duration, backlog, custodian starts), a **Retention** row (runs deleted and
   refused), and the artifact staging and recording durations. A test now fails when a metric is added without a row in

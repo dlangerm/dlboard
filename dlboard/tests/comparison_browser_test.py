@@ -16,6 +16,7 @@ from dlboard.models import ChartInstance, PanelInstance
 from dlboard.plugins.charts.line_chart import LineChart
 from dlboard.serve import get_system_data_store
 from dlboard.serve._pages._experiment._page_model import BasicExperimentPage
+from dlboard.serve._pages._experiment._run_compare import COMPARE_GRID_ID
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -381,4 +382,28 @@ def test_a_comparison_follows_what_is_logged_to_any_of_its_experiments_without_a
     # The poll runs every 2 s in these tests (`dlboard/tests/conftest.py`): comfortably more than a cycle.
     expect(fingerprint).not_to_have_text(drawn, timeout=8000)
     expect(page.locator(_LEGEND)).to_have_count(2)
+    assert console_errors == []
+
+
+def test_the_runs_of_a_comparison_are_diffed_across_experiments_and_the_link_reopens_it(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """The A/B diff of a comparison's runs reads each from its own experiment, and names them by it (#497)."""
+    comparison = _a_shared_comparison_of_two_experiments("Diffed Comparison Project")
+    page.goto(f"{live_server_url}/comparison/{comparison.id}")
+    expect(page.locator(_ROWS)).to_have_count(2)
+
+    for row in range(2):
+        page.locator(_ROWS).nth(row).locator(_CHECKBOX).check()
+    page.locator("#run-list-bar-comparison").get_by_role("button", name="Diff").click()
+
+    grid = page.locator(f"#{COMPARE_GRID_ID}")
+    expect(grid.get_by_role("columnheader", name="baseline / fluffy")).to_be_visible()
+    expect(grid.get_by_role("columnheader", name="sweep / fluffy")).to_be_visible()
+    expect(grid.get_by_role("gridcell", name="loss")).to_be_visible()  # their latest losses differ
+    expect(page).to_have_url(re.compile(r"compare=\d+%2C\d+"))
+
+    page.goto(page.url)
+    expect(page.get_by_role("dialog", name="Compare runs")).to_be_visible()
+    expect(grid.get_by_role("columnheader", name="sweep / fluffy")).to_be_visible()
     assert console_errors == []

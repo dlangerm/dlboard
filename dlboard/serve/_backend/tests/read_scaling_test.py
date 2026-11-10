@@ -103,7 +103,11 @@ _LOADS: dict[str, Callable[[PostgresStore, int], object]] = {
     ).latest_per_run(),
     "the newest runs": lambda s, e: list(s.get_runs(e, limit=_SHOWN, run_ids=None)),
     "hyperparameters of every run": lambda s, e: list(s.fetch_hyperparams(e, run_ids=None)),
-    "the run compare": lambda s, e: load_run_compare(s, e, [run.id for run in s.get_runs(e, run_ids=None)]),
+    "the run compare": lambda s, e: load_run_compare(
+        s,
+        {e: frozenset(run.id for run in s.get_runs(e, run_ids=None))},
+        [run.id for run in s.get_runs(e, run_ids=None)],
+    ),
     "a panel of bars of the latest": lambda s, e: fetch_panel_data(s, e, _RUN_SUMMARIES[0], run_ids=None),
     "a table of every metric's mean": lambda s, e: fetch_panel_data(s, e, _RUN_SUMMARIES[1], run_ids=None),
 }
@@ -116,7 +120,7 @@ _SHOWN_LOADS: dict[str, Callable[[PostgresStore, int, frozenset[int]], object]] 
         e, run_ids=shown, reduction=models.MetricReduction.LATEST
     ).latest_per_run(),
     "hyperparameters of the shown runs": lambda s, e, shown: list(s.fetch_hyperparams(e, run_ids=shown)),
-    "the run compare": lambda s, e, shown: load_run_compare(s, e, sorted(shown)),
+    "the run compare": lambda s, e, shown: load_run_compare(s, {e: shown}, sorted(shown)),
     "a panel of bars of the latest": lambda s, e, shown: fetch_panel_data(s, e, _RUN_SUMMARIES[0], shown),
     "a table of every metric's mean": lambda s, e, shown: fetch_panel_data(s, e, _RUN_SUMMARIES[1], shown),
     "a panel of lines": lambda s, e, shown: fetch_panel_data(s, e, _LINES, shown),

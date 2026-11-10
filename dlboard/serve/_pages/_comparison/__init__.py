@@ -9,8 +9,8 @@ so it reuses `_experiment`'s pieces and adds what is a comparison's own:
 - `_add_runs.py` -- adding runs to it, from the pinned ones or from an experiment.
 
 Its page is a `Page` scoped to a project (`ComparisonRef`), shown at `/comparison/<id>`. Its charts follow what is logged
-live, as an experiment's do (`_live_updates.py` polls each experiment it draws). It has no A/B diff yet: that reads one
-experiment.
+live, as an experiment's do (`_live_updates.py` polls each experiment it draws). Its A/B diff
+(`_run_compare.py`) reads each of its runs from that run's own experiment.
 """
 
 from __future__ import annotations
