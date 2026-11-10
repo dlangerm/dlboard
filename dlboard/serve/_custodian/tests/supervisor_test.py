@@ -10,9 +10,11 @@ from typing import TYPE_CHECKING, Any, cast, override
 
 import pendulum
 import pytest
+import sqlalchemy as sa
 
 from dlboard.conftest import recorded_statements
 from dlboard.serve._custodian import Task, TaskContext, TaskMode, TaskOutcome
+from dlboard.serve._custodian._models import TaskState
 from dlboard.serve._custodian._supervisor import CustodianSettings, ExitCode, Supervisor
 
 if TYPE_CHECKING:
@@ -224,8 +226,14 @@ def test_a_run_whose_lease_another_custodian_took_over_is_told_to_stop(store: SQ
     thread = threading.Thread(target=supervisor.run, daemon=True)
     thread.start()
     assert started.wait(timeout=2)
-    store.release_task(_Name.WORK, "a")
-    assert store.claim_task(_Name.WORK, "b", until=pendulum.now("UTC").add(minutes=1))
+    # Another custodian holds the lease now, in one statement: let go of and then claimed, this custodian's own renewal,
+    # a beat at a time, could land between the two and keep it (it did, under load).
+    states = store.tables[TaskState]
+    store._execute(
+        sa.update(states)
+        .where(states.c.name == _Name.WORK)
+        .values({states.c.holder: "b", states.c.lease_until: pendulum.now("UTC").add(minutes=1)})
+    )
     assert stopped.wait(timeout=2), "the run went on after another custodian took its lease"
     assert thread.is_alive()  # the custodian itself carries on
     supervisor.stop.set()
