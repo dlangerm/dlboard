@@ -138,6 +138,7 @@ def _fetch_open_panel_dataframes(
         if chart_id.index is not None:
             mounted.setdefault(chart_id.panel, set()).add(chart_id.index)
     dataframes: dict[str, panel_data.PanelData] = {}
+    reads = panel_data.ExperimentReads(store)  # its metric names and run names, read once for every panel
     ok = True
     for panel_name, indexes in mounted.items():
         panel = panels_by_name.get(panel_name)
@@ -145,7 +146,7 @@ def _fetch_open_panel_dataframes(
             continue
         shown = panel.model_copy(update={"charts": [c for i, c in enumerate(panel.charts) if i in indexes]})
         try:
-            dataframes[panel_name] = panel_data.fetch_panel_data(store, experiment_id, shown, run_ids)
+            dataframes[panel_name] = panel_data.fetch_panel_data(store, experiment_id, shown, run_ids, reads)
         except Exception:  # noqa: BLE001 -- one bad panel must not break the whole poll tick
             _log.exception("Live-update poll failed to fetch panel %r", panel_name)
             ok = False

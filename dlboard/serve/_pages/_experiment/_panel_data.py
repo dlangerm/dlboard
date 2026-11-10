@@ -145,6 +145,47 @@ def _read[T](read: _Read, fetch: Callable[[], T]) -> T:
     return result
 
 
+@dataclass
+class ExperimentReads:
+    """
+    What a page reads of an experiment once, whichever of its panels asks first: the metrics it logged, its runs' names.
+
+    Neither depends on the panel, so a page of six panels over thirty experiments reads each once, not six times (#505).
+    Made for one request, and dropped with it: nothing is ever served from it after the request that read it.
+    """
+
+    store: DataStore[...]
+    _keys: dict[int, list[str]] = field(default_factory=dict)
+    _names: dict[tuple[int, frozenset[int] | None], pd.DataFrame] = field(default_factory=dict)
+
+    def metric_keys(self, experiment_id: int) -> list[str]:
+        """The names of the metrics logged to the experiment."""
+        if experiment_id not in self._keys:
+            self._keys[experiment_id] = _read(
+                _Read(PanelRead.KEY_NAMES), lambda: self.store.summarize_metric_keys(experiment_id)
+            )
+        return self._keys[experiment_id]
+
+    def run_names(self, experiment_id: int, run_ids: frozenset[int] | None) -> pd.DataFrame:
+        """Each of `run_ids` (every run, if `None`) of the experiment, by its id: its name and its experiment."""
+        key = (experiment_id, run_ids)
+        if key not in self._names:
+            self._names[key] = _read(
+                _Read(PanelRead.RUN_NAMES),
+                lambda: pd.DataFrame.from_records(
+                    [
+                        {
+                            "run_id": run.id,
+                            RUN_NAME_COLUMN: run_display_name(run),
+                            EXPERIMENT_COLUMN: run.experiment_id,
+                        }
+                        for run in self.store.get_runs(experiment_id, limit=None, run_ids=run_ids)
+                    ]
+                ),
+            )
+        return self._names[key]
+
+
 class ChartFrames(typing.Protocol):
     """Where a panel's charts get the frames they are drawn from."""
 
@@ -304,13 +345,14 @@ def panel_frames(
     """
     scope = page_scope(store, page, paging.hidden, paging.focus)
     experiments = experiment_names(store, scope)
+    reads = ExperimentReads(store)  # each experiment's metric names and run names, read once for every panel
     wanted = frozenset(names)
     frames: dict[str, ChartFrames] = {}
     for panel in page.panels:
         indexes = visible_chart_indexes(panel, paging).items
         if panel.name in wanted and indexes:
             shown = panel.model_copy(update={"charts": [panel.charts[i] for i in indexes]})
-            frames[panel.name] = scope_panel_data(store, scope, shown, experiments)
+            frames[panel.name] = scope_panel_data(store, scope, shown, experiments, reads)
     return frames
 
 
@@ -335,16 +377,18 @@ def scope_panel_data(
     scope: RunScope,
     panel: models.PanelInstance[Any, Any],
     names: Mapping[int, str] | None = None,
+    reads: ExperimentReads | None = None,
 ) -> PanelData:
     """
     Fetch just the data one panel needs of the runs in `scope`, a read of each experiment in it.
 
     Every read stays one experiment's, on the indexes that lead with it, and is checked against what the viewer may see
     of that experiment: how many experiments there are is bounded by how many runs a page draws. `names` are those of
-    `experiment_names`, which a caller drawing several panels reads once and passes to each.
+    `experiment_names`, which a caller drawing several panels reads once and passes to each, as it does `reads`.
     """
+    reads = ExperimentReads(store) if reads is None else reads
     parts = {
-        experiment_id: fetch_panel_data(store, experiment_id, panel, run_ids)
+        experiment_id: fetch_panel_data(store, experiment_id, panel, run_ids, reads)
         for experiment_id, run_ids in scope.items()
     }
     if len(parts) == 1:
@@ -419,8 +463,14 @@ def fetch_panel_data(
     experiment_id: int,
     panel: models.PanelInstance[Any, Any],
     run_ids: frozenset[int] | None,
+    reads: ExperimentReads | None = None,
 ) -> PanelData:
-    """Fetch just the data one panel needs -- not the whole experiment -- of `run_ids` (every run, if `None`)."""
+    """
+    Fetch just the data one panel needs -- not the whole experiment -- of `run_ids` (every run, if `None`).
+
+    What does not depend on the panel is read through `reads`, which a caller drawing several panels shares among them.
+    """
+    reads = ExperimentReads(store) if reads is None else reads
     requests = [chart.data_request() for chart in panel.charts]
     # A chart that reads a window of its artifacts has them read apart, at the window's steps alone.
     shared = [r for r in requests if r.artifact_window is None]
@@ -445,11 +495,7 @@ def fetch_panel_data(
         key=lambda request: request.column,
     )
     needs_names = any(r.metric_patterns and not r.every_metric for r in requests) or bool(series_requests)
-    known_keys = (
-        _read(_Read(PanelRead.KEY_NAMES), lambda: store.summarize_metric_keys(experiment_id))
-        if needs_names
-        else list[str]()
-    )
+    known_keys = reads.metric_keys(experiment_id) if needs_names else list[str]()
     # A chart over too many metrics' every step is said so of, or past the limit not read for at all (#417).
     limits = HistoryLimitSettings()
     wide = {
@@ -534,23 +580,7 @@ def fetch_panel_data(
     # Read once, not by each chart that wants it, so `LineChart`/`ImageChart` can label a run by its name instead of
     # its bare id -- `table_chart.py`'s default "runs" mode explicitly excludes this column, since it isn't a real
     # metric/hparam. Only the runs read need a name.
-    run_names = (
-        _read(
-            _Read(PanelRead.RUN_NAMES),
-            lambda: pd.DataFrame.from_records(
-                [
-                    {
-                        "run_id": run.id,
-                        RUN_NAME_COLUMN: run_display_name(run),
-                        EXPERIMENT_COLUMN: run.experiment_id,
-                    }
-                    for run in store.get_runs(experiment_id, limit=None, run_ids=run_ids)
-                ]
-            ),
-        )
-        if read_anything
-        else pd.DataFrame()
-    )
+    run_names = reads.run_names(experiment_id, run_ids) if read_anything else pd.DataFrame()
     return PanelData(metrics, artifacts_df, hparams_df, histograms_df, series, run_names, wide, windows)
 
 

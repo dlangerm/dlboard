@@ -137,3 +137,20 @@ def test_a_comparisons_catalog_is_read_again_only_after_a_write_to_one_of_its_ex
     _log(store, run.experiment_id, run.id, "accuracy")
 
     assert "accuracy" in ColumnCatalog.of_page(store, comparison).metrics
+
+
+def test_another_panel_costs_a_read_of_its_own_data_per_experiment_and_nothing_it_already_read(
+    store: SQLLiteStore, comparison: page_model.BasicExperimentPage
+) -> None:
+    """Each experiment's run names and metric names are read once for a page, whichever panel asks first (#505)."""
+    paging = panel_view.resolved_paging(
+        comparison,
+        Paging().viewing(tab="", open_panels=[p.name for p in comparison.panels]),
+        focus_chart=None,
+    )
+    names = visible_open_panels(comparison.panels, "", paging)
+
+    one = _round_trips(store, lambda: panel_data.panel_frames(store, comparison, paging, names[:1]))
+    every = _round_trips(store, lambda: panel_data.panel_frames(store, comparison, paging, names))
+
+    assert every - one == (_PANELS - 1) * _EXPERIMENTS  # each panel's own metrics, from each experiment

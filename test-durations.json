@@ -1808,6 +1808,7 @@
   "dlboard/serve/_pages/_experiment/tests/compare_menus_test.py::test_the_menu_offers_a_new_comparison_and_a_bounded_few_to_add_to_but_not_the_one_on_screen": 0.005260254954919219,
   "dlboard/serve/_pages/_experiment/tests/compare_menus_test.py::test_the_pins_menu_is_there_only_for_a_colour_with_runs_pinned_in_it": 0.001491335016908124,
   "dlboard/serve/_pages/_experiment/tests/comparison_round_trips_test.py::test_a_comparisons_catalog_is_read_again_only_after_a_write_to_one_of_its_experiments": 0.42298567603575066,
+  "dlboard/serve/_pages/_experiment/tests/comparison_round_trips_test.py::test_another_panel_costs_a_read_of_its_own_data_per_experiment_and_nothing_it_already_read": 0.9591002500000059,
   "dlboard/serve/_pages/_experiment/tests/comparison_round_trips_test.py::test_the_experiments_names_are_read_once_for_a_page_and_not_for_each_of_its_panels": 0.5372411749849562,
   "dlboard/serve/_pages/_experiment/tests/edit_mode_test.py::test_accordion_view_delete_panel_reachable_without_opening_a_panel": 0.10737461401731707,
   "dlboard/serve/_pages/_experiment/tests/edit_mode_test.py::test_accordion_view_offers_auto_populate_only_for_an_empty_view[a-view-with-panels-offers-suggest-charts]": 0.10413643001811579,
