@@ -42,7 +42,8 @@ pinned the moment it exists, whether or not it has logged anything yet, and by t
 ## Comparisons
 
 A comparison is a page of charts, like an experiment's, over a list of runs you chose from any experiments of a project. It
-belongs to whoever made it, and can be shared with the project. A project's comparisons are cards on its page.
+belongs to whoever made it, and can be shared with the project. A project's comparisons are cards on its page, a page of them
+at a time with a filter by name, as its experiments are.
 
 - **Start one from an experiment or a project.** On its run list, **Compare** has **New comparison** (from the selected runs)
   and **Add to** (the comparisons you may add to, the first few). A new one starts with the panels and columns of

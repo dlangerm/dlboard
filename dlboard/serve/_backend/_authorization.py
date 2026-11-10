@@ -345,9 +345,19 @@ class AuthorizingDataStore(models.DataStore[...]):
         self._require(project_id, ProjectRole.VIEWER)
         return self._inner.get_experiments(project_id)
 
-    def get_experiment_stats(self, project_id: int) -> dict[int, models.ActivityStats]:
+    def search_experiments(
+        self, project_id: int, *, name_contains: str = "", limit: int = 24, offset: int = 0
+    ) -> models.ExperimentList:
         self._require(project_id, ProjectRole.VIEWER)
-        return self._inner.get_experiment_stats(project_id)
+        return self._inner.search_experiments(
+            project_id, name_contains=name_contains, limit=limit, offset=offset
+        )
+
+    def get_experiment_stats(
+        self, project_id: int, experiment_ids: Collection[int] | None = None
+    ) -> dict[int, models.ActivityStats]:
+        self._require(project_id, ProjectRole.VIEWER)
+        return self._inner.get_experiment_stats(project_id, experiment_ids)
 
     def update_experiment(self, experiment: models.Experiment) -> models.Experiment:
         self._require(self._experiment_project(experiment.id), ProjectRole.EDITOR)
@@ -649,6 +659,15 @@ class AuthorizingDataStore(models.DataStore[...]):
         if not editable:
             return listed
         return [c for c in listed if self._may_change_runs(c.owner_id, project_id, shared=c.shared)]
+
+    def search_comparisons(
+        self, project_id: int, viewer_id: int, *, name_contains: str = "", limit: int = 24, offset: int = 0
+    ) -> models.ComparisonList:
+        self._require_self_or(viewer_id, Scope.ALL)
+        self._require(project_id, ProjectRole.VIEWER)
+        return self._inner.search_comparisons(
+            project_id, viewer_id, name_contains=name_contains, limit=limit, offset=offset
+        )
 
     def comparison_summary(self, page_id: int) -> models.ComparisonSummary | None:
         if self.get_view(models.Page[Any, Any], page_id) is None:

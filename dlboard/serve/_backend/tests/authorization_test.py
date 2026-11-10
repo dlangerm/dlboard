@@ -195,6 +195,14 @@ _OPERATIONS: dict[str, tuple[ProjectRole, Callable[[AuthorizingDataStore, _Chain
         ProjectRole.VIEWER,
         lambda s, c: s.list_comparisons(c[0].id, s.actor.id),
     ),
+    "search the comparisons of a project": (
+        ProjectRole.VIEWER,
+        lambda s, c: s.search_comparisons(c[0].id, s.actor.id, name_contains="x"),
+    ),
+    "search the experiments of a project": (
+        ProjectRole.VIEWER,
+        lambda s, c: s.search_experiments(c[0].id, name_contains="x"),
+    ),
     "save a comparison": (
         ProjectRole.VIEWER,
         lambda s, c: s.create_comparison(

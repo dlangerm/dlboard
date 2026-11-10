@@ -199,6 +199,16 @@ def test_a_user_lists_their_own_comparisons_first_then_shared_ones_and_never_a_p
     assert listed[2].id == theirs.id
     assert store.list_comparisons(world.project_id + 100, world.bob) == []
 
+    # A page of them is a page of that list, and a search keeps its order and counts only what matched.
+    page = store.search_comparisons(world.project_id, world.bob, limit=2, offset=1)
+    assert (page.total, [c.name for c in page.comparisons]) == (3, ["zeta", "shared"])
+    found = store.search_comparisons(world.project_id, world.bob, name_contains="A")
+    assert (found.total, [c.name for c in found.comparisons]) == (3, ["alpha", "zeta", "shared"])
+    found = store.search_comparisons(world.project_id, world.bob, name_contains="ze")
+    assert (found.total, [c.id for c in found.comparisons]) == (1, [mine.id])
+    by_id = store.search_comparisons(world.project_id, world.bob, name_contains=str(theirs.id))
+    assert theirs.id in [c.id for c in by_id.comparisons]
+
 
 @pytest.mark.parametrize("delete", ["run", "experiment"])
 def test_a_deleted_run_or_experiment_leaves_a_comparison_until_it_is_restored(

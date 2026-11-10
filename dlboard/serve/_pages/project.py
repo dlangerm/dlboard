@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from dash.development.base_component import Component
 
 
-def layout(project_id: str, **_query: str) -> list[Component]:
+def layout(project_id: str, **query: str) -> list[Component]:
     """
     The project page, with its URL's query parameters passed in as keyword arguments by Dash and left to the sidebar.
 
@@ -23,7 +23,7 @@ def layout(project_id: str, **_query: str) -> list[Component]:
     (`PinFilter`), so the page itself has no use for them; they must not be refused, though.
     """
     return [
-        render_project_page(int(project_id)),
+        render_project_page(int(project_id), query),
         dcc.Store(id=constants.STATE_PROJECT_ID, data=int(project_id)),
         *pinned_runs_shells(int(project_id)),
     ]

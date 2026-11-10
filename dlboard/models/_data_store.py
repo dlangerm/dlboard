@@ -183,8 +183,24 @@ class DataStore(typing.Protocol[_P]):
         """Get all experiments for a project."""
         ...
 
-    def get_experiment_stats(self, project_id: int) -> dict[int, models.ActivityStats]:
-        """Each of a project's (non-deleted) experiments' activity, keyed by experiment id -- in one read."""
+    def search_experiments(
+        self, project_id: int, *, name_contains: str = "", limit: int = 24, offset: int = 0
+    ) -> models.ExperimentList:
+        """
+        A page of a project's (non-deleted) experiments, the newest first, and how many matched in all.
+
+        An experiment matches if its name has `name_contains` in it, whatever its case, or it is its id.
+        """
+        ...
+
+    def get_experiment_stats(
+        self, project_id: int, experiment_ids: Collection[int] | None = None
+    ) -> dict[int, models.ActivityStats]:
+        """
+        Each of a project's (non-deleted) experiments' activity, keyed by experiment id -- in one read.
+
+        Only those of `experiment_ids`, if given: a page of them reads only theirs.
+        """
         ...
 
     def update_experiment(self, experiment: models.Experiment) -> models.Experiment:
@@ -421,6 +437,16 @@ class DataStore(typing.Protocol[_P]):
 
         With `editable`, only those whose runs `viewer_id` may add to and take out of (their own, and a shared one if
         they edit the project).
+        """
+        ...
+
+    def search_comparisons(
+        self, project_id: int, viewer_id: int, *, name_contains: str = "", limit: int = 24, offset: int = 0
+    ) -> models.ComparisonList:
+        """
+        A page of the comparisons `list_comparisons` lists, in its order, and how many matched in all.
+
+        A comparison matches if its name has `name_contains` in it, whatever its case, or it is its id.
         """
         ...
 

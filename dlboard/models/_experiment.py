@@ -73,3 +73,10 @@ class Experiment(NewExperiment, frozen=True, extra="ignore"):
 
     deleted_at: AwareDatetime | None = None
     """When this experiment was soft-deleted, if at all. See `Project.deleted_at`."""
+
+
+class ExperimentList(BaseModel, frozen=True, extra="forbid"):
+    """A page of a project's experiments, newest first, and how many matched in all, so a pager can say where it is."""
+
+    total: int
+    experiments: list[Experiment]

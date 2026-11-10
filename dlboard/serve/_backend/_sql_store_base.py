@@ -337,6 +337,16 @@ def build_metadata(schema: str | None = None) -> tuple[sa.MetaData, dict[type[Ba
         "idx_Run_live", runs.c.experiment_id, runs.c.created_at, sqlite_where=live, postgresql_where=live
     )
     sa.Index("idx_Run_kept", runs.c.experiment_id, sqlite_where=kept, postgresql_where=kept)
+    # A project's live experiments, the newest first, a page at a time (the project page's cards), without reading every
+    # other project's: nothing else leads with `project_id`.
+    experiments, live_experiment = tables[models.Experiment], tables[models.Experiment].c.deleted_at.is_(None)
+    sa.Index(
+        "idx_Experiment_project",
+        experiments.c.project_id,
+        experiments.c.created_at,
+        sqlite_where=live_experiment,
+        postgresql_where=live_experiment,
+    )
     # One setting a key and scope: a project's own (experiment_id NULL, which a plain unique constraint lets repeat,
     # NULLs being distinct) and each experiment's.
     scoped = tables[models.ScopedSetting]
@@ -805,18 +815,12 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
             .values(revision=experiments.c.revision + 1, last_activity_at=pendulum.now(pendulum.UTC))
         )
 
-    def _activity_rows(
-        self, group: type[models.Project | models.Experiment], project_id: int | None = None
-    ) -> list[AnyRow]:
-        """`(group id, experiment count, run count, last activity)` per project or experiment, non-deleted rows only."""
+    def get_project_stats(self) -> dict[int, models.ProjectStats]:
+        """Every (non-deleted) project's activity; a project with no experiments is simply absent."""
         p, e, r = (self._tables[m] for m in (models.Project, models.Experiment, models.Run))
-        group_id = p.c.id if group is models.Project else e.c.id
-        project_filter: list[sa.ColumnElement[bool]] = (
-            [p.c.id == project_id] if project_id is not None else []
-        )
-        return self._execute(
+        rows = self._execute(
             sa.select(
-                group_id,
+                p.c.id,
                 sa.func.count(sa.distinct(e.c.id)),
                 sa.func.count(r.c.id),
                 sa.func.max(e.c.last_activity_at),
@@ -826,26 +830,45 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
                     r, sa.and_(r.c.experiment_id == e.c.id, r.c.deleted_at.is_(None))
                 )
             )
-            .where(p.c.deleted_at.is_(None), *project_filter)
-            .group_by(group_id)
+            .where(p.c.deleted_at.is_(None))
+            .group_by(p.c.id)
         )
-
-    def get_project_stats(self) -> dict[int, models.ProjectStats]:
-        """Every (non-deleted) project's activity; a project with no experiments is simply absent."""
         return {
             project_id: models.ProjectStats(
                 experiment_count=experiments, run_count=runs, last_activity_at=last_activity
             )
-            for project_id, experiments, runs, last_activity in self._activity_rows(models.Project)
+            for project_id, experiments, runs, last_activity in rows
         }
 
-    def get_experiment_stats(self, project_id: int) -> dict[int, models.ActivityStats]:
-        """Each of a project's (non-deleted) experiments' activity, keyed by experiment id."""
+    def get_experiment_stats(
+        self, project_id: int, experiment_ids: Collection[int] | None = None
+    ) -> dict[int, models.ActivityStats]:
+        """
+        Each of a project's (non-deleted) experiments' activity, keyed by experiment id: of `experiment_ids`, if given.
+
+        Each experiment's runs are counted on their own (a seek of its live runs), not joined and grouped: a join reads
+        every run of the project, whichever experiments are asked for.
+        """
+        p, e, r = (self._tables[m] for m in (models.Project, models.Experiment, models.Run))
+        run_count = (
+            sa.select(sa.func.count())
+            .select_from(r)
+            .where(r.c.experiment_id == e.c.id, r.c.deleted_at.is_(None))
+            .scalar_subquery()
+        )
+        rows = self._execute(
+            sa.select(e.c.id, run_count, e.c.last_activity_at)
+            .select_from(e.join(p, p.c.id == e.c.project_id))
+            .where(
+                e.c.project_id == project_id,
+                e.c.deleted_at.is_(None),
+                p.c.deleted_at.is_(None),
+                *([e.c.id.in_(experiment_ids)] if experiment_ids is not None else []),
+            )
+        )
         return {
             experiment_id: models.ActivityStats(run_count=runs, last_activity_at=last_activity)
-            for experiment_id, _experiments, runs, last_activity in self._activity_rows(
-                models.Experiment, project_id
-            )
+            for experiment_id, runs, last_activity in rows
         }
 
     def get_or_create_user(self, principal: models.Principal) -> models.User:
@@ -1098,6 +1121,27 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
                 ),
             )
         )
+
+    def search_experiments(
+        self, project_id: int, *, name_contains: str = "", limit: int = 24, offset: int = 0
+    ) -> models.ExperimentList:
+        """A page of a project's (non-deleted) experiments whose name or id matches, the newest first, and how many did."""
+        experiments = self._tables[models.Experiment]
+        matching = [
+            experiments.c.project_id == project_id,
+            experiments.c.deleted_at.is_(None),
+            *_name_matches(experiments, name_contains),
+        ]
+        ((total,),) = self._execute(sa.select(sa.func.count()).select_from(experiments).where(*matching))
+        page = self._fetch(
+            models.Experiment,
+            sa.select(experiments)
+            .where(*matching)
+            .order_by(experiments.c.created_at.desc(), experiments.c.id.desc())
+            .limit(limit)
+            .offset(offset),
+        )
+        return models.ExperimentList(total=total, experiments=page)
 
     def update_experiment(self, experiment: models.Experiment) -> models.Experiment:
         """Update an experiment."""
@@ -1953,9 +1997,14 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
         )
 
     def _comparison_summaries(
-        self, where: list[sa.ColumnElement[bool]], viewer_id: int
+        self,
+        where: list[sa.ColumnElement[bool]],
+        viewer_id: int,
+        *,
+        limit: int | None = None,
+        offset: int = 0,
     ) -> list[models.ComparisonSummary]:
-        """The comparisons that `where` (over `Page`) keeps, the viewer's own first, then by name."""
+        """The comparisons that `where` (over `Page`) keeps, the viewer's own first, then by name: a page of them, if `limit`."""
         pages, members, runs, experiments = (
             self._tables[m] for m in (models.Page, models.ComparisonRun, models.Run, models.Experiment)
         )
@@ -1980,6 +2029,8 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
             .select_from(pages.join(users, users.c.id == pages.c.owner_id))
             .where(pages.c.project_id.is_not(None), pages.c.owner_id.is_not(None), *where)
             .order_by((pages.c.owner_id != viewer_id), pages.c.name, pages.c.id)
+            .limit(limit)
+            .offset(offset)
         )
         return [
             models.ComparisonSummary(
@@ -2001,14 +2052,31 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
         With `editable`, only those whose runs the viewer may change. Here that is all of them, since anyone who can
         see one may: who may is the authorizing store's to say.
         """
+        return self._comparison_summaries(self._visible_comparisons(project_id, viewer_id), viewer_id)
+
+    def search_comparisons(
+        self, project_id: int, viewer_id: int, *, name_contains: str = "", limit: int = 24, offset: int = 0
+    ) -> models.ComparisonList:
+        """A page of the comparisons `list_comparisons` lists whose name or id matches, in its order, and how many did."""
         pages = self._tables[models.Page]
-        return self._comparison_summaries(
-            [
-                pages.c.project_id == project_id,
-                sa.or_(pages.c.owner_id == viewer_id, pages.c.shared.is_(True)),
-            ],
-            viewer_id,
+        matching = [*self._visible_comparisons(project_id, viewer_id), *_name_matches(pages, name_contains)]
+        ((total,),) = self._execute(
+            sa.select(sa.func.count())
+            .select_from(pages)
+            .where(pages.c.project_id.is_not(None), pages.c.owner_id.is_not(None), *matching)
         )
+        return models.ComparisonList(
+            total=total,
+            comparisons=self._comparison_summaries(matching, viewer_id, limit=limit, offset=offset),
+        )
+
+    def _visible_comparisons(self, project_id: int, viewer_id: int) -> list[sa.ColumnElement[bool]]:
+        """What keeps a project's comparisons `viewer_id` may see: their own, and anyone's shared ones."""
+        pages = self._tables[models.Page]
+        return [
+            pages.c.project_id == project_id,
+            sa.or_(pages.c.owner_id == viewer_id, pages.c.shared.is_(True)),
+        ]
 
     def comparison_summary(self, page_id: int) -> models.ComparisonSummary | None:
         """One comparison as `list_comparisons` lists it, or `None` if there is no such comparison."""

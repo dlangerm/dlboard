@@ -26,7 +26,7 @@ from dlboard.models import PinColor
 from dlboard.serve import ClientsideScript, Icon, get_current_user, get_data_store, icon
 from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import DivId, StoreId, ValueId
-from dlboard.serve._pages._dash_helpers import CallbackStates, register_navigate, section_label
+from dlboard.serve._pages._dash_helpers import CallbackStates, pager_props, register_navigate, section_label
 from dlboard.serve._pages._dataframe_helpers import experiment_display_name
 from dlboard.serve._pages._experiment._compare import compare, compare_menu, compare_pins_menu
 from dlboard.serve._pages._experiment._focus import experiment_href
@@ -187,11 +187,6 @@ def pinned_runs_list(found: PinnedRuns, me: int, flt: PinFilter) -> Component:
     )
 
 
-def _pager_props(pages: int, page: int) -> dict[str, Any]:
-    """The pager's props for `pages` pages with `page` showing: it is only there to use when there is more than one."""
-    return {"total": pages, "value": min(page, pages), "style": {"display": "flex" if pages > 1 else "none"}}
-
-
 def render_pinned_runs(store: DataStore[...], project_id: int, flt: PinFilter) -> Component:
     """The project page's sidebar, showing the pinned runs `flt` asks for."""
     found, pages = _fetch(store, project_id, flt)
@@ -297,7 +292,7 @@ def render_pinned_runs(store: DataStore[...], project_id: int, flt: PinFilter) -
             ),
             html.Div(pinned_runs_list(found, me, flt), id=PINNED_LIST_ID),
             dmc.Pagination(
-                id=PINNED_PAGER_ID, withEdges=False, size="xs", mt="xs", **_pager_props(pages, flt.page)
+                id=PINNED_PAGER_ID, withEdges=False, size="xs", mt="xs", **pager_props(pages, flt.page)
             ),
         ],
         className="dl-pinned-runs",
@@ -406,7 +401,7 @@ def register(app: Dash) -> None:
             page=(shown.page or 1) if ctx.triggered_id == PINNED_PAGER_ID else 1,
         )
         found, pages = _fetch(get_data_store(), shown.project_id, flt)
-        props = _pager_props(pages, flt.page)
+        props = pager_props(pages, flt.page)
         return (
             pinned_runs_list(found, get_current_user().id, flt),
             _count(found),

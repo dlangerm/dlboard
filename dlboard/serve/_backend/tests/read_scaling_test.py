@@ -306,6 +306,49 @@ def test_a_projects_pins_read_no_more_when_its_own_runs_or_another_projects_pins
     assert grown.pages <= 2 * alone.pages + 10, f"{grown.pages} pages beside them, {alone.pages}"
 
 
+def test_a_page_of_a_projects_cards_reads_no_more_when_other_projects_or_its_unshown_experiments_grow(
+    store: PostgresStore,
+) -> None:
+    """
+    The project page reads its newest experiments and their stats, a page of them (#502).
+
+    Not every experiment of every project, nor the runs of the experiments it is not showing. How many experiments the
+    project has is counted for the pager, from the project's own index entries, so it is the project's own growth that
+    is held still here.
+    """
+    me = store.get_or_create_user(models.Principal.unverified("viewer")).id
+    project_id = store.create_project(models.NewProject(name="mine", description="")).id
+    oldest = [store.create_experiment(models.NewExperiment(project_id=project_id)).id for _ in range(10)]
+    for _ in range(24):
+        store.create_experiment(models.NewExperiment(project_id=project_id))
+    _analyzed(store)
+
+    def reads() -> _Work:
+        def cards() -> None:
+            shown = store.search_experiments(project_id, limit=24)
+            store.get_experiment_stats(project_id, experiment_ids=[e.id for e in shown.experiments])
+            store.search_comparisons(project_id, me, limit=24)
+
+        return _work(store, cards, scans=False)
+
+    alone = reads()
+    # Another project grows by a thousand experiments, and this project's oldest (not on the first page) by many runs.
+    other_project = store.create_project(models.NewProject(name="other", description="")).id
+    for _ in range(1000):
+        store.create_experiment(models.NewExperiment(project_id=other_project))
+    for experiment in oldest:
+        for _ in range(150):
+            store.create_run(models.NewRun(experiment_id=experiment))
+    _analyzed(store)
+    grown = reads()
+
+    assert alone.rows > 0
+    assert grown.rows <= 2 * alone.rows, (
+        f"{grown.rows} rows beside 1,000 more experiments and 1,500 runs, {alone.rows}"
+    )
+    assert grown.pages <= 2 * alone.pages + 10, f"{grown.pages} pages beside them, {alone.pages}"
+
+
 def test_a_comparison_of_two_experiments_reads_no_more_when_each_has_more_runs(store: PostgresStore) -> None:
     """A comparison draws the runs it holds of each experiment; what else they hold is none of its business."""
     project_id = store.create_project(models.NewProject(name="p", description="d")).id

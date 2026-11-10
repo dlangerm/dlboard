@@ -236,3 +236,8 @@ class CallbackStates(BaseModel, frozen=True, extra="forbid"):
             return dependency
 
         return {name: read_from(field.metadata) for name, field in cls.model_fields.items()}
+
+
+def pager_props(pages: int, page: int) -> dict[str, Any]:
+    """A `dmc.Pagination`'s props for `pages` pages with `page` showing: it is only there to use when there is more than one."""
+    return {"total": pages, "value": min(page, pages), "style": {"display": "flex" if pages > 1 else "none"}}

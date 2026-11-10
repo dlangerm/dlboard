@@ -32,6 +32,7 @@ _SEEKS: dict[str, str | tuple[str, ...]] = {
     ),
     "RunPin": ("(experiment_id, pinned_at)", "(run_id, pinned_by, color)"),
     "ComparisonRun": "(page_id, run_id)",
+    "Experiment": "(project_id, created_at) WHERE (deleted_at IS NULL)",
 }
 """What each table an experiment page reads is sought by: the index that leads with the experiment (or the key, `id`)."""
 _BY_RUN = frozenset(
@@ -138,6 +139,29 @@ def test_a_read_seeks_a_table_by_experiment(
 ) -> None:
     statement, parameters = _recorded(store, lambda: _READS[read](store, experiment_id))[-1]
     _assert_seeks(store, postgres_settings, statement, parameters)
+
+
+def test_a_page_of_a_projects_cards_seeks_its_experiments_by_project(
+    store: PostgresStore, postgres_settings: PostgresSettings, experiment_id: int
+) -> None:
+    """The project page's cards: a page of its experiments, their stats, and a page of its comparisons (#502)."""
+    experiment = store.get_experiment(experiment_id)
+    assert experiment is not None
+    me = store.get_or_create_user(models.Principal.unverified("me"))
+
+    statements = _recorded(
+        store,
+        lambda: (
+            store.search_experiments(experiment.project_id, name_contains="a", limit=24),
+            store.get_experiment_stats(experiment.project_id, experiment_ids=[experiment_id]),
+            store.search_comparisons(experiment.project_id, me.id, name_contains="a", limit=24),
+        ),
+    )
+
+    reads = [(s, p) for s, p in statements if '"Experiment"' in s or '"Page"' in s]
+    assert len(reads) >= 4
+    for statement, parameters in reads:
+        _assert_seeks(store, postgres_settings, statement, parameters)
 
 
 def test_listing_a_projects_pins_seeks_the_pin_table_by_experiment(

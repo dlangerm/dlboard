@@ -14,6 +14,11 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ### Added
 
+* **A project page with hundreds of experiments or comparisons draws a page of them.** Its experiment cards (the newest
+  first) and its comparison cards each show 24 at a time, with a pager and a filter by name or id once there is more than
+  a page, both kept in the page's link. The store reads only that page and its experiments' activity
+  (`DataStore.search_experiments`, `search_comparisons`, `get_experiment_stats(..., experiment_ids=)`), through a new
+  index on a project's live experiments (migration `0011`, expand-only). (#502)
 * **An experiment's page says what retention keeps of it.** A line under its header gives the experiment's own rule (or
   "Follows the project") and its project's, and links to the project's Retention section, so the page runs are deleted from
   says what deletes them (#547).

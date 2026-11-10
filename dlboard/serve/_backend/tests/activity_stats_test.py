@@ -62,3 +62,41 @@ def test_experiment_stats_are_scoped_to_their_project(store: SQLLiteStore) -> No
     _experiment(store, theirs.id, runs=4)
 
     assert store.get_experiment_stats(mine.id).keys() == {my_experiment}
+
+
+def test_a_page_of_experiments_reads_the_stats_of_that_page_only(store: SQLLiteStore) -> None:
+    project = store.create_project(models.NewProject(name="p", description=""))
+    shown, other = _experiment(store, project.id, runs=2), _experiment(store, project.id, runs=5)
+
+    stats = store.get_experiment_stats(project.id, experiment_ids=[shown])
+
+    assert stats.keys() == {shown}
+    assert stats[shown].run_count == 2
+    assert other in store.get_experiment_stats(project.id)
+
+
+def test_a_search_of_experiments_pages_the_newest_first_and_counts_every_match(
+    store: SQLLiteStore, admin: models.User
+) -> None:
+    project = store.create_project(models.NewProject(name="p", description=""))
+    names = ["lr-sweep", "baseline", "lr-decay", "gone"]
+    made = {
+        name: store.create_experiment(models.NewExperiment(project_id=project.id, name=name)).id
+        for name in names
+    }
+    store.delete_experiment(made["gone"], admin)
+    store.create_experiment(
+        models.NewExperiment(
+            project_id=store.create_project(models.NewProject(name="o", description="")).id, name="lr-other"
+        )
+    )
+
+    every = store.search_experiments(project.id)
+    assert (every.total, [e.name for e in every.experiments]) == (3, ["lr-decay", "baseline", "lr-sweep"])
+    page = store.search_experiments(project.id, limit=1, offset=1)
+    assert (page.total, [e.name for e in page.experiments]) == (3, ["baseline"])
+    found = store.search_experiments(project.id, name_contains="LR")
+    assert (found.total, [e.name for e in found.experiments]) == (2, ["lr-decay", "lr-sweep"])
+    assert [
+        e.id for e in store.search_experiments(project.id, name_contains=str(made["baseline"])).experiments
+    ] == [made["baseline"]]

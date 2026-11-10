@@ -13,7 +13,17 @@ from dlboard.models import ActivityStats, NewExperiment
 from dlboard.serve import Icon, get_current_user, get_data_store, icon
 from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import ButtonId, ModalId
-from dlboard.serve._pages._comparison._cards import comparison_cards
+from dlboard.serve._pages._card_grid import (
+    PAGE_SIZE,
+    CardGrid,
+    CardQuery,
+    Cards,
+    CardSource,
+    card_grid,
+    redraw_cards,
+    register_card_grid,
+)
+from dlboard.serve._pages._comparison._cards import COMPARISON_CARDS
 from dlboard.serve._pages._dash_helpers import entity_card
 from dlboard.serve._pages._dataframe_helpers import experiment_display_name
 from dlboard.serve._pages._delete_confirm import (
@@ -29,6 +39,8 @@ from dlboard.serve._pages._project_members import register_members_callbacks, re
 from dlboard.serve._url import relative_path
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from dash.development.base_component import Component
 
     from dlboard.models import DataStore, Experiment, Project
@@ -38,7 +50,6 @@ class _ProjectPage:
     """Page tag: marks a component id as belonging to `simple_project_page.py`."""
 
 
-EXP_LIST_ID: typing.Final = "experiment-list-id"
 NEW_EXP_BUTTON_ID: typing.Final = "new-experiment-button"
 NEW_EXP_NAME_ID: typing.Final = "new-experiment-name"
 
@@ -62,18 +73,27 @@ def _experiment_card(experiment: Experiment, stats: ActivityStats) -> Component:
     )
 
 
-def _experiment_grid(store: DataStore[...], project_id: int) -> Component:
-    experiments = list(store.get_experiments(project_id))
-    if not experiments:
-        return onboarding_card(
-            title="No experiments yet — log your first run", snippet=first_experiment_snippet(project_id)
-        )
-    stats = store.get_experiment_stats(project_id)
-    return dmc.SimpleGrid(
-        [_experiment_card(e, stats.get(e.id, ActivityStats())) for e in experiments],
-        cols={"base": 1, "sm": 2, "lg": 3},
-        spacing="md",
+def _read_experiments(store: DataStore[...], project_id: int, name_contains: str, offset: int) -> Cards:
+    found = store.search_experiments(project_id, name_contains=name_contains, limit=PAGE_SIZE, offset=offset)
+    stats = store.get_experiment_stats(project_id, experiment_ids=[e.id for e in found.experiments])
+    return Cards(
+        found.total, [_experiment_card(e, stats.get(e.id, ActivityStats())) for e in found.experiments]
     )
+
+
+def _no_experiments(project_id: int, query: CardQuery) -> Component:
+    """None matches the filter; or there are none yet, so how to log the first."""
+    if query.q:
+        return dmc.Text("No experiment matches.", c="dimmed", size="sm")
+    return onboarding_card(
+        title="No experiments yet — log your first run", snippet=first_experiment_snippet(project_id)
+    )
+
+
+EXPERIMENT_CARDS = CardSource(
+    grid=CardGrid.EXPERIMENTS, label="Experiments", read=_read_experiments, empty=_no_experiments
+)
+"""The project page's experiments, the newest first."""
 
 
 def _visible_project(project_id: int) -> Project:
@@ -84,8 +104,8 @@ def _visible_project(project_id: int) -> Project:
     return project
 
 
-def render_project_page(project_id: int) -> dmc.Container:
-    """The whole project page, rendered in the page's own `layout()` -- no callback round trip."""
+def render_project_page(project_id: int, query: Mapping[str, str]) -> dmc.Container:
+    """The whole project page, rendered in the page's own `layout()` -- no callback round trip -- as its URL's `query` asks."""
     store = get_data_store()
     project = store.get_project(project_id)
     if project is None:
@@ -124,9 +144,9 @@ def render_project_page(project_id: int) -> dmc.Container:
                 mb="lg",
             ),
             *project_sections(ProjectSlot.HEADER, project),
-            dmc.Box(_experiment_grid(store, project_id), id=EXP_LIST_ID),
+            card_grid(EXPERIMENT_CARDS, store, project_id, CardQuery.of(CardGrid.EXPERIMENTS, query)),
             *project_sections(ProjectSlot.BODY, project),
-            comparison_cards(store, project_id),
+            card_grid(COMPARISON_CARDS, store, project_id, CardQuery.of(CardGrid.COMPARISONS, query)),
             render_members_section(project),
         ],
         size="lg",
@@ -136,9 +156,18 @@ def render_project_page(project_id: int) -> dmc.Container:
 
 def register(app: Dash) -> None:
     """Wire the project page's create/edit/delete actions, and the sidebar of pinned runs."""
+    register_card_grid(app, EXPERIMENT_CARDS)
+    register_card_grid(app, COMPARISON_CARDS)
+    experiments = CardGrid.EXPERIMENTS
 
     @app.callback(
-        Output(EXP_LIST_ID, "children"),
+        Output(experiments.list_id, "children", allow_duplicate=True),
+        Output(experiments.count_id, "children", allow_duplicate=True),
+        Output(experiments.pager_id, "total", allow_duplicate=True),
+        Output(experiments.pager_id, "value", allow_duplicate=True),
+        Output(experiments.pager_id, "style", allow_duplicate=True),
+        Output(experiments.filter_id, "style", allow_duplicate=True),
+        Output(experiments.filter_id, "value"),
         Output(NEW_EXP_NAME_ID, "value"),
         Output(NEW_EXP_NAME_ID, "error"),
         Input(NEW_EXP_BUTTON_ID, "n_clicks"),
@@ -153,12 +182,13 @@ def register(app: Dash) -> None:
         if not n_clicks and not n_submit:
             raise PreventUpdate
         if not name or not name.strip():
-            return no_update, no_update, "Give the experiment a name"
+            return *(no_update,) * 8, "Give the experiment a name"
         store = get_data_store()
         store.create_experiment(
             NewExperiment(project_id=project_id, name=name.strip(), created_by=get_current_user().id)
         )
-        return _experiment_grid(store, project_id), "", None
+        # The new experiment is the newest: the first page, unfiltered, shows it.
+        return *redraw_cards(EXPERIMENT_CARDS, store, project_id, CardQuery()), "", "", None
 
     def _fetch_project_header(project_id: int) -> tuple[str, str]:
         project = _visible_project(project_id)

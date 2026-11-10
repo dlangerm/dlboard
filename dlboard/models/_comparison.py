@@ -35,3 +35,10 @@ class ComparisonSummary(BaseModel, frozen=True, extra="forbid"):
     shared: bool
     run_count: int
     """How many of its runs are still there: a deleted run, or one of a deleted experiment, is not counted."""
+
+
+class ComparisonList(BaseModel, frozen=True, extra="forbid"):
+    """A page of the comparisons a viewer can see, and how many matched in all, so a pager can say where it is."""
+
+    total: int
+    comparisons: list[ComparisonSummary]
