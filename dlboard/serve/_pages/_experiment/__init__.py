@@ -49,11 +49,6 @@ from dlboard.serve._pages._delete_confirm import (
     register_delete_callbacks,
     render_delete_control,
 )
-from dlboard.serve._pages._description_editor import (
-    DescriptionEditorIds,
-    register_edit_callbacks,
-    render_header,
-)
 from dlboard.serve._pages._experiment import _ids as ids
 from dlboard.serve._pages._experiment import _page_edits as edits
 from dlboard.serve._pages._experiment import _page_repository as repo
@@ -78,6 +73,7 @@ from dlboard.serve._pages._experiment._run_compare import register_run_compare_c
 from dlboard.serve._pages._experiment._runs_table import register_runs_table_callbacks
 from dlboard.serve._pages._experiment._tab_controls import register_tab_controls_callbacks
 from dlboard.serve._pages._experiment._views import VIEW_SYNC_REQUEST_ID, register_view_callbacks
+from dlboard.serve._pages._page_header import PageHeaderIds, page_header, register_page_header
 from dlboard.serve._url import relative_path
 
 if TYPE_CHECKING:
@@ -93,14 +89,7 @@ DELETE_EXPERIMENT_MODAL_ID: ModalId[ids.ExperimentPage] = ModalId("delete-experi
 DELETE_EXPERIMENT_CONFIRM_ID: ButtonId[ids.ExperimentPage] = ButtonId("delete-experiment-confirm")
 DELETE_EXPERIMENT_CANCEL_ID: ButtonId[ids.ExperimentPage] = ButtonId("delete-experiment-cancel")
 
-EXPERIMENT_DESC_IDS = DescriptionEditorIds(
-    header=ids.EXPERIMENT_HEADER_ID,
-    edit_button="experiment-edit-desc-button",
-    modal="experiment-edit-desc-modal",
-    textarea="experiment-edit-desc-textarea",
-    save="experiment-edit-desc-save",
-    cancel="experiment-edit-desc-cancel",
-)
+EXPERIMENT_HEADER_IDS = PageHeaderIds[ids.ExperimentPage].of("experiment")
 
 EXPERIMENT_DELETE_IDS = DeleteConfirmIds(
     button=DELETE_EXPERIMENT_BUTTON_ID,
@@ -140,11 +129,8 @@ def render_panel(
     page = repo.load_page(store, ref)
     exp = store.get_experiment(ref.experiment_id)
     name, description = (experiment_display_name(exp), exp.description) if exp else ("", "")
-    header = render_header(
-        EXPERIMENT_DESC_IDS,
-        title=name,
-        description=description,
-        extra_actions=_delete_experiment_action(),
+    header = page_header(
+        EXPERIMENT_HEADER_IDS, title=name, description=description, actions=_delete_experiment_action()
     )
     return (
         edits.render_panel_area(store, page, paging, focus_chart=focus_chart),
@@ -243,7 +229,9 @@ def register(app: Dash) -> None:
             raise ValueError(msg)
         return experiment_display_name(exp), exp.description
 
-    def _save_experiment_description(experiment_id: int, description: str) -> tuple[str, str]:
+    def _save_experiment_description(
+        experiment_id: int, _name: str | None, description: str
+    ) -> tuple[str, str]:
         store = get_data_store()
         exp = store.get_experiment(experiment_id)
         if exp is None:
@@ -252,13 +240,12 @@ def register(app: Dash) -> None:
         updated = store.update_experiment(exp.model_copy(update={"description": description}))
         return experiment_display_name(updated), updated.description
 
-    register_edit_callbacks(
+    register_page_header(
         app,
-        EXPERIMENT_DESC_IDS,
+        EXPERIMENT_HEADER_IDS,
         State(constants.STATE_EXPERIMENT_ID, "data"),
         fetch=_fetch_experiment_header,
         save=_save_experiment_description,
-        extra_actions=_delete_experiment_action(),
     )
 
     def _delete_experiment(experiment_id: int) -> str:
