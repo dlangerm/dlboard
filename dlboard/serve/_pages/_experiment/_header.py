@@ -25,6 +25,7 @@ from dlboard.serve._pages._experiment._live_updates import live_controls
 from dlboard.serve._pages._experiment._notes import notes_button
 from dlboard.serve._pages._experiment._views import view_controls
 from dlboard.serve._pages._page_header import PageHeaderIds, page_header, register_page_header
+from dlboard.serve._pages._page_sections import ExperimentSlot, experiment_sections
 from dlboard.serve._url import relative_path
 
 if TYPE_CHECKING:
@@ -55,6 +56,7 @@ def experiment_header(
         actions=render_delete_control(
             EXPERIMENT_DELETE_IDS, label="Delete experiment", entity_noun="experiment", icon_only=True
         ),
+        meta=experiment_sections(ExperimentSlot.HEADER, experiment),
         aside=[
             dmc.Group(
                 [

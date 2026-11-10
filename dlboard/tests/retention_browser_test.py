@@ -49,3 +49,17 @@ def test_a_project_is_held_to_a_rule_after_its_grace_period_and_the_change_can_b
     page.locator(f"#{retention.CANCEL_ID}").click()
     expect(pending).to_have_count(0)
     assert console_errors == []
+
+
+def test_an_experiment_page_says_what_keeps_its_runs_and_links_to_where_that_is_set(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    _create_project_and_experiment(page, live_server_url, "Retention Link Project")
+    page.locator(".experiment-card", has_text="Retention Link Project").click()
+    expect(page.get_by_text("Follows the project · Project: Keeps every run")).to_be_visible()
+
+    page.get_by_role("link", name="Change →").click()
+
+    expect(page).to_have_url(re.compile(rf"/project/\d+#{retention.SECTION_ID}$"))
+    expect(page.locator(f"#{retention.SECTION_ID}")).to_be_visible()
+    assert console_errors == []

@@ -102,7 +102,7 @@ interval. A request (an admin clicking Purge) may queue only a kind a plugin let
 
 Tests never start a custodian: they call a task's `run_once` with a `TaskContext` (`run_task` in `dlboard/conftest.py`).
 
-## Plugin settings and project sections
+## Plugin settings and page sections
 
 A plugin that keeps a setting of its own per project or experiment (retention's rules, say) does not add columns or methods to
 the store:
@@ -114,8 +114,10 @@ the store:
   experiment's), and may check a value before it is stored: return it as given or marked up, or raise `PermissionError`. The
   authorizing store enforces this, so a plugin never authorizes by hand, and a key with no rule is the system's alone.
 - `register_project_section(app, ProjectSection(ProjectSlot.HEADER | ProjectSlot.BODY, render))` adds a line under a
-  project's header, or a section under its experiments, drawn in the page's own layout. This is the one place a plugin
-  reaches into a page.
+  project's header, or a section under its experiments, drawn in the page's own layout.
+  `register_experiment_section(app, ExperimentSection(ExperimentSlot.HEADER, render))` adds a line under an experiment's
+  header the same way (retention says there what keeps the experiment's runs). These are the one place a plugin reaches
+  into a page.
 
 - `register_run_guard(app, guard)` asks `guard(store, project_id)` before every run a request creates, once the writer's role
   is checked. `store` is the system's (no user is behind it), and the guard returns, or raises `ProjectLockedError(why)` to

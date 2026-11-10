@@ -45,7 +45,14 @@ from dlboard.serve._custodian import (
     register_work_kind,
 )
 from dlboard.serve._icons import Icon, icon, icon_cell_class
-from dlboard.serve._pages._project_sections import ProjectSection, ProjectSlot, register_project_section
+from dlboard.serve._pages._page_sections import (
+    ExperimentSection,
+    ExperimentSlot,
+    ProjectSection,
+    ProjectSlot,
+    register_experiment_section,
+    register_project_section,
+)
 from dlboard.serve._production_server import resolve_plugins, run_production_server
 from dlboard.serve._series import series_color, series_swatch_class
 from dlboard.serve._settings_env import set_setting_env
@@ -61,6 +68,8 @@ __all__ = [
     "AuthorizingDataStore",
     "ClientsideScript",
     "Dependency",
+    "ExperimentSection",
+    "ExperimentSlot",
     "Icon",
     "ProjectSection",
     "ProjectSlot",
@@ -90,6 +99,7 @@ __all__ = [
     "icon",
     "icon_cell_class",
     "mint_api_token",
+    "register_experiment_section",
     "register_project_section",
     "register_run_guard",
     "register_setting",

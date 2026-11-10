@@ -12,6 +12,15 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ## [Unreleased]
 
+### Added
+
+* **An experiment's page says what retention keeps of it.** A line under its header gives the experiment's own rule (or
+  "Follows the project") and its project's, and links to the project's Retention section, so the page runs are deleted from
+  says what deletes them (#547).
+* **`register_experiment_section`** (`ExperimentSection`, `ExperimentSlot.HEADER`), for a plugin to add a line under an
+  experiment's header the way `register_project_section` adds one to a project's. See
+  [docs/background-tasks.md](docs/background-tasks.md#plugin-settings-and-page-sections).
+
 ### Changed
 
 * **The Grafana metrics dashboard charts everything the server publishes.** `docs/grafana/dlboard.json` gains a
@@ -19,6 +28,9 @@ pulls that section's body into the GitHub release notes and publishes both distr
   refused), and the artifact staging and recording durations. A test now fails when a metric is added without a row in
   [docs/telemetry.md](docs/telemetry.md) and a panel on the dashboard, so it no longer falls behind. See
   [docs/grafana](docs/grafana/README.md). (#582)
+* The project, experiment and comparison pages draw their headers with one component, and saving a description (or a
+  comparison's name) updates it in place, rather than drawing the header again (#547). Reopening a comparison's edit dialog
+  now shows what is saved, not what was typed before a cancel.
 
 ## [0.15.0] - 2026-11-09
 

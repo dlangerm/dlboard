@@ -23,9 +23,9 @@ from dlboard.serve._pages._delete_confirm import (
 )
 from dlboard.serve._pages._onboarding import first_experiment_snippet, onboarding_card
 from dlboard.serve._pages._page_header import PageHeaderIds, page_header, register_page_header
+from dlboard.serve._pages._page_sections import ProjectSlot, project_sections
 from dlboard.serve._pages._pins._pinned_runs import register as register_pinned_runs
 from dlboard.serve._pages._project_members import register_members_callbacks, render_members_section
-from dlboard.serve._pages._project_sections import ProjectSlot, project_sections
 from dlboard.serve._url import relative_path
 
 if TYPE_CHECKING:

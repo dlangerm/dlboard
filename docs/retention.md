@@ -15,7 +15,9 @@ A project has one rule, set in the **Retention** section of its page:
 - **Runs newer than**: keep the runs created in the last N days.
 
 An experiment may have a stricter rule of its own, of the same kind: fewer runs, or fewer days. Its project's rule is the
-most it can keep. A project that keeps every run lets its experiments choose any kind.
+most it can keep. A project that keeps every run lets its experiments choose any kind. Every experiment's page says under
+its header which rule its runs are kept by, its own (or "Follows the project") and its project's, and links to the
+project's Retention section, where both are set.
 
 Changing the *kind* of a project's rule (from a count to an age, say) drops every one of its experiments' rules: a number of
 runs says nothing about a number of days.
@@ -131,7 +133,7 @@ in [telemetry.md](telemetry.md#metrics).
 ## For plugin authors
 
 Retention is a plugin (`dlboard/plugins/retention/`), built on what any plugin may use rather than anything of its own in the
-core: a project's [scoped settings](background-tasks.md#plugin-settings-and-project-sections) hold its rules and status, the
+core: a project's [scoped settings](background-tasks.md#plugin-settings-and-page-sections) hold its rules and status, the
 generic `get_runs` filters (`created_before`, `oldest_first`, `include_kept`) choose what to delete, `delete_runs` deletes it,
 and a project-page section shows it. A policy of your own (archiving to cold storage instead of deleting, a different rule
 kind) is a plugin on the same pieces.

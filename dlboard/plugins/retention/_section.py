@@ -1,6 +1,8 @@
 """
 Retention on a project's page: a line under its header with the rule it is held to, and a section to see and change it.
 
+Each experiment's page has a line under its header too, with its own rule and its project's, linking to that section.
+
 One form sets a rule for the project (an owner's) or for one of its experiments (any editor's, stricter than the
 project's). A saved rule waits out the grace period, shown as pending with what it would delete, while the rule before it
 is enforced. Saving or cancelling draws the section again in place: every callback here writes only inside the section,
@@ -34,7 +36,7 @@ from dlboard.plugins.retention._rules import (
     keeps_at_most,
 )
 from dlboard.plugins.retention._settings import OVERDUE_COUNTED, RetentionSettings
-from dlboard.serve import ClientsideScript, get_current_user, get_data_store, get_project_role
+from dlboard.serve import ClientsideScript, get_current_user, get_data_store, get_project_role, relative_path
 from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import ButtonId, DivId, ValueId
 from dlboard.serve._pages._dash_helpers import CallbackStates, section_label
@@ -46,7 +48,7 @@ if TYPE_CHECKING:
 
     from dash.development.base_component import Component
 
-    from dlboard.models import DataStore, Experiment, Project
+    from dlboard.models import DataStore, Experiment, Project, ScopedSetting
 
 
 class _RetentionSection:
@@ -279,22 +281,44 @@ def retention_summary(project: Project) -> Component:
 
     Shown whether or not a rule is set, so that retention is something every project's page says it can do.
     """
-    own = (
-        get_data_store().get_scoped_settings(RetentionKey.RULE, project.id).project
+    rules = get_data_store().get_scoped_settings(
+        RetentionKey.RULE, project.id
     )  # not its status: not shown here
-    rule = RetentionSetting.model_validate(own.value).in_effect(pendulum.now(pendulum.UTC)) if own else None
+    return dmc.Box(_summary(describe(_in_effect(rules.project) or Unlimited()), f"#{SECTION_ID}"), mb="lg")
+
+
+def experiment_retention_summary(experiment: Experiment) -> Component:
+    """
+    The line under an experiment's header: its own rule, its project's, and a link to the project's section that sets both.
+
+    Shown on every experiment's page, so that the page runs are deleted from says what deletes them.
+    """
+    rules = get_data_store().get_scoped_settings(RetentionKey.RULE, experiment.project_id)
+    own = _in_effect(rules.experiments.get(experiment.id))
+    project = describe(_in_effect(rules.project) or Unlimited())
+    return _summary(
+        f"{describe(own) if own is not None else 'Follows the project'} · Project: {project}",
+        f"{relative_path(f'/project/{experiment.project_id}')}#{SECTION_ID}",
+        link="Change →",  # short: it shares the header's width with the page's controls
+    )
+
+
+def _in_effect(setting: ScopedSetting | None) -> RetentionRule | None:
+    return (
+        RetentionSetting.model_validate(setting.value).in_effect(pendulum.now(pendulum.UTC))
+        if setting
+        else None
+    )
+
+
+def _summary(rule: str, href: str, link: str = "Set how many runs are kept →") -> Component:
     return dmc.Group(
         [
             dmc.Text("Retention", size="sm", fw=600, c="dimmed"),
-            dmc.Text(describe(rule or Unlimited()), size="sm"),
-            html.A(
-                "Set how many runs are kept →",
-                href=f"#{SECTION_ID}",
-                style={"fontSize": "var(--mantine-font-size-sm)"},
-            ),
+            dmc.Text(rule, size="sm"),
+            html.A(link, href=href, style={"fontSize": "var(--mantine-font-size-sm)"}),
         ],
         gap="xs",
-        mb="lg",
     )
 
 

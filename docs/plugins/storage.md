@@ -6,7 +6,7 @@ Storage is split into two protocols, both in `dlboard/models/_data_store.py`:
 
 - **`DataStore`** — structured metadata: users, projects, experiments, runs, metrics,
   hyperparameters, artifact *references*, soft-delete/restore/purge, audit log, kept runs and plugins' scoped
-  settings (see [background-tasks.md](../background-tasks.md#plugin-settings-and-project-sections)).
+  settings (see [background-tasks.md](../background-tasks.md#plugin-settings-and-page-sections)).
 - **`ArtifactStore`** — the artifact *blobs* themselves: `log_artifacts`, `link_artifacts`,
   `download_artifact`, `delete_artifact`.
 

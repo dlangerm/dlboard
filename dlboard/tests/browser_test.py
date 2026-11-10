@@ -3888,7 +3888,8 @@ def test_the_legend_over_a_picture_lists_what_each_layer_holds_and_hides_peeks_a
 
     box = thumb.bounding_box()
     assert box is not None
-    page.mouse.move(box["x"] + box["width"] - 4, box["y"] + box["height"] - 4)
+    # Its bottom-left corner: clear of the legend (top-left) and of a notification, which stacks at the viewport's right.
+    page.mouse.move(box["x"] + 4, box["y"] + box["height"] - 4)
     page.mouse.down()  # held: the picture shows without its layers
     expect(chart.locator(".dl-image-series")).to_have_attribute("data-dl-peek", "")
     expect(thumb.locator(".dl-image-series-overlay")).to_have_css("visibility", "hidden")
