@@ -24,7 +24,12 @@ from dlboard.models import PluginProtocol
 from dlboard.serve._custodian._process import CustodianProcess
 from dlboard.serve._logging import LoggingSettings, logging_config
 from dlboard.serve._settings_env import set_setting_env
-from dlboard.serve.telemetry import shared_prometheus_dir
+from dlboard.serve.telemetry import NoAttributes, Unit, UpDownCounter, shared_prometheus_dir
+
+WORKERS = UpDownCounter[NoAttributes](
+    "dlboard.server.workers", Unit.WORKERS, "Server worker processes that have started and are serving."
+)
+"""Counted by `_wsgi` once a worker has built its app. Defined here because `_wsgi` builds the app as it is imported."""
 
 
 class WSGISettings(BaseSettings):

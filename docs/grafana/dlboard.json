@@ -438,12 +438,22 @@
       "id": 14,
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (le, dlboard_outcome) (rate(dlboard_artifact_blob_write_duration_seconds_bucket[$__rate_interval])))",
-          "legendFormat": "{{dlboard_outcome}}",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(dlboard_artifact_stage_duration_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "staging the upload",
           "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, dlboard_outcome) (rate(dlboard_artifact_blob_write_duration_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "writing to the store, {{dlboard_outcome}}",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, dlboard_outcome) (rate(dlboard_artifact_ingest_duration_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "recording the refs, {{dlboard_outcome}}",
+          "refId": "C"
         }
       ],
-      "title": "Writing one artifact to the store (p95)",
+      "title": "Handling one artifact, step by step (p95)",
       "type": "timeseries"
     },
     {
@@ -589,6 +599,181 @@
         }
       ],
       "title": "Sign-in attempts, by outcome",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 57
+      },
+      "id": 21,
+      "panels": [],
+      "title": "Background tasks",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Runs of each background task. Any failure or hung is worth a look; hung means the task did not stop when asked.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 58
+      },
+      "id": 22,
+      "targets": [
+        {
+          "expr": "sum by (dlboard_task, dlboard_outcome) (rate(dlboard_task_runs_total[$__rate_interval]))",
+          "legendFormat": "{{dlboard_task}} {{dlboard_outcome}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Task runs, by task and outcome",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 58
+      },
+      "id": 23,
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, dlboard_task) (rate(dlboard_task_duration_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "{{dlboard_task}}",
+          "refId": "A"
+        }
+      ],
+      "title": "One run of a task (p95)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "What each task last said it had left to do. Growing over several runs means it cannot keep up.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 66
+      },
+      "id": 24,
+      "targets": [
+        {
+          "expr": "sum by (dlboard_task) (dlboard_task_backlog)",
+          "legendFormat": "{{dlboard_task}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Backlog, by task",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "More than one per server start means the server replaced a custodian that died or hung.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 66
+      },
+      "id": 25,
+      "targets": [
+        {
+          "expr": "sum(increase(dlboard_custodian_starts_total[$__rate_interval]))",
+          "legendFormat": "custodian starts",
+          "refId": "A"
+        }
+      ],
+      "title": "Custodian starts",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 74
+      },
+      "id": 26,
+      "panels": [],
+      "title": "Retention",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Runs a retention rule moved to the Trash, and new runs a locked project turned away. Refusals mean a project is far behind its rule.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 75
+      },
+      "id": 27,
+      "targets": [
+        {
+          "expr": "sum(rate(dlboard_retention_runs_deleted_total[$__rate_interval]))",
+          "legendFormat": "deleted",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(dlboard_retention_runs_refused_total[$__rate_interval]))",
+          "legendFormat": "refused",
+          "refId": "B"
+        }
+      ],
+      "title": "Runs deleted and refused by retention",
       "type": "timeseries"
     }
   ],
