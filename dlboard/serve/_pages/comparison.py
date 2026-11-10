@@ -17,14 +17,20 @@ from dlboard.serve._pages._comparison._add_runs import add_runs_modal
 from dlboard.serve._pages._comparison._header import comparison_header
 from dlboard.serve._pages._comparison._members import members_shells
 from dlboard.serve._pages._experiment import _ids as experiment_ids
+from dlboard.serve._pages._experiment import _live_updates as live
 from dlboard.serve._pages._experiment import _page_edits as edits
+from dlboard.serve._pages._experiment._notes import STATE_NOTES_REVISION
 from dlboard.serve._pages._experiment._page_model import BasicExperimentPage
 from dlboard.serve._pages._experiment._paging import SIZES_COOKIE, Paging
 from dlboard.serve._pages._experiment._panel_area import panel_area, panel_area_stores
+from dlboard.serve._pages._experiment._shown_runs import page_experiments
 from dlboard.serve._pages._experiment._views import VIEW_NOTIFY_ID
 
 if TYPE_CHECKING:
     from dash.development.base_component import Component
+
+# Built once, at this module's import -- inside `build_app` -- so the env it reads is the app's, as `experiment.py`'s is.
+_LIVE_UPDATE_SETTINGS = live.LiveUpdateSettings()
 
 
 def layout(comparison_id: str, chart: str | None = None, **query: str) -> list[Component]:
@@ -33,7 +39,8 @@ def layout(comparison_id: str, chart: str | None = None, **query: str) -> list[C
 
     `?chart=` (a `ChartInstance.id`, from a copied chart link) opens that chart's panel and tab; `?panels_q=`,
     `?panels_page=` and `?charts=` say which page of panels and charts is showing and `?hidden=` which runs are left out of
-    them (see `Paging`). Any other query parameter is ignored. Its runs are listed in the sidebar, as an experiment's are.
+    them (see `Paging`). Any other query parameter is ignored. Its runs are listed in the sidebar, as an experiment's are,
+    and its charts follow what is logged to them live, as an experiment's do.
     """
     store = get_data_store()
     found = store.get_view(BasicExperimentPage, int(comparison_id))
@@ -43,6 +50,7 @@ def layout(comparison_id: str, chart: str | None = None, **query: str) -> list[C
     page, project_id = cast("BasicExperimentPage", found), found.project_id
     paging = Paging.from_request(query, request.cookies.get(SIZES_COOKIE))
     container = edits.render_panel_area(store, page, paging, focus_chart=chart)
+    drawn = [e for i in page_experiments(store, page) if (e := store.get_experiment(i)) is not None]
     return [
         html.Div(
             id=experiment_ids.PAGE_EXPERIMENT_ID,
@@ -65,6 +73,10 @@ def layout(comparison_id: str, chart: str | None = None, **query: str) -> list[C
         Store(id=ids.COMPARISON_ID_STORE, data=page.id),
         *members_shells(),
         *panel_area_stores(),
+        # Live updates: the poll compares the revision of every experiment the comparison draws (`page_revision`). Its notes
+        # store is here only as the poll's output, which must exist: a comparison has no notes.
+        *live.live_timers(_LIVE_UPDATE_SETTINGS, live.page_revision(drawn)),
+        Store(id=STATE_NOTES_REVISION, data=None),
     ]
 
 

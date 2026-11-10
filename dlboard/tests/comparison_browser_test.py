@@ -348,3 +348,37 @@ def test_ctrl_k_finds_an_experiment_of_a_project_past_the_first_fifty(
 
     expect(page).to_have_url(f"{live_server_url}/experiment/{last.id}")
     assert console_errors == []
+
+
+def test_a_comparison_follows_what_is_logged_to_any_of_its_experiments_without_a_reload(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """The live poll watches every experiment a comparison draws, and redraws the chart a new step lands in (#497)."""
+    comparison = _a_shared_comparison_of_two_experiments("Live Comparison Project")
+    page.goto(f"{live_server_url}/comparison/{comparison.id}")
+    expect(page.locator(_LEGEND)).to_have_count(2)
+    expect(page.get_by_text("Live", exact=True)).to_be_visible()
+    fingerprint = page.locator('[id*="chart-fingerprint"]').first
+    drawn = fingerprint.text_content()
+    assert drawn
+
+    sweep = comparison.run_ids[1]
+    store = get_system_data_store()
+    run = store.get_run(sweep)
+    assert run is not None
+    store.log_metrics(
+        [
+            models.LoggedMetrics(
+                metrics={"loss": 0.01},
+                step=3,
+                experiment_id=run.experiment_id,
+                run_id=sweep,
+                timestamp_utc=pendulum.now("UTC"),
+            )
+        ]
+    )
+
+    # The poll runs every 2 s in these tests (`dlboard/tests/conftest.py`): comfortably more than a cycle.
+    expect(fingerprint).not_to_have_text(drawn, timeout=8000)
+    expect(page.locator(_LEGEND)).to_have_count(2)
+    assert console_errors == []

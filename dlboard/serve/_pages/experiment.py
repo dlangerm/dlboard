@@ -69,7 +69,7 @@ def layout(
                 gap="xs",
             ),
         ),
-        *live.live_timers(_LIVE_UPDATE_SETTINGS, exp.revision),
+        *live.live_timers(_LIVE_UPDATE_SETTINGS, live.page_revision([exp])),
         Store(id=ids.STATE_PAGE_STORAGE, data=page.model_dump_json()),
         Store(id=ids.STATE_VIEW_ID, data=view_id),
         Store(id=STATE_NOTES_REVISION, data=exp.notes_revision),

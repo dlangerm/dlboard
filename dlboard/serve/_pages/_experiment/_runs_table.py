@@ -551,7 +551,7 @@ def _register_hparam_table(app: Dash) -> None:
         prevent_initial_call=True,
     )
     def render_navbar_hparams(  # noqa: PLR0913 -- the inputs the table is drawn from
-        _revision: int | None,
+        _revision: str | None,
         experiment_id: int | None,
         page_json: str | None,
         prev_signature: str | None,

@@ -25,6 +25,7 @@ from dlboard.serve._pages._delete_confirm import (
 )
 from dlboard.serve._pages._experiment import _page_model as page_model
 from dlboard.serve._pages._experiment import _page_repository as repo
+from dlboard.serve._pages._experiment._live_updates import live_controls
 from dlboard.serve._pages._page_header import PageHeaderIds, page_header, register_page_header
 from dlboard.serve._url import relative_path
 
@@ -87,52 +88,63 @@ def comparison_header(store: DataStore[...], page: page_model.BasicExperimentPag
             )
         ],
         aside=[
-            dmc.Menu(
+            # Whether the charts are following what is logged, then what can be done with the comparison, on one line as on an
+            # experiment's page.
+            dmc.Group(
                 [
-                    dmc.MenuTarget(
-                        dmc.ActionIcon(
-                            icon(Icon.MORE),
-                            variant="subtle",
-                            color="gray",
-                            **typing.cast("dict[str, Any]", {"aria-label": "Comparison actions"}),
-                        )
-                    ),
-                    dmc.MenuDropdown(
+                    *live_controls(),
+                    dmc.Divider(orientation="vertical"),
+                    dmc.Menu(
                         [
-                            *(
-                                [
-                                    dmc.MenuItem(
-                                        _share_label(shared=page.shared),
-                                        id=SHARE_ID,
-                                        leftSection=icon(Icon.LINK),
-                                    )
-                                ]
-                                if is_owner
-                                else []
+                            dmc.MenuTarget(
+                                dmc.ActionIcon(
+                                    icon(Icon.MORE),
+                                    variant="subtle",
+                                    color="gray",
+                                    **typing.cast("dict[str, Any]", {"aria-label": "Comparison actions"}),
+                                )
                             ),
-                            dmc.MenuItem(
-                                "Duplicate to a copy of your own",
-                                id=DUPLICATE_ID,
-                                leftSection=icon(Icon.COPY),
-                            ),
-                            *(
+                            dmc.MenuDropdown(
                                 [
-                                    dmc.MenuDivider(),
+                                    *(
+                                        [
+                                            dmc.MenuItem(
+                                                _share_label(shared=page.shared),
+                                                id=SHARE_ID,
+                                                leftSection=icon(Icon.LINK),
+                                            )
+                                        ]
+                                        if is_owner
+                                        else []
+                                    ),
                                     dmc.MenuItem(
-                                        "Delete this comparison…",
-                                        id=DELETE_IDS.button,
-                                        leftSection=icon(Icon.DELETE),
-                                        color="red",
+                                        "Duplicate to a copy of your own",
+                                        id=DUPLICATE_ID,
+                                        leftSection=icon(Icon.COPY),
+                                    ),
+                                    *(
+                                        [
+                                            dmc.MenuDivider(),
+                                            dmc.MenuItem(
+                                                "Delete this comparison…",
+                                                id=DELETE_IDS.button,
+                                                leftSection=icon(Icon.DELETE),
+                                                color="red",
+                                            ),
+                                        ]
+                                        if is_owner
+                                        else []
                                     ),
                                 ]
-                                if is_owner
-                                else []
                             ),
-                        ]
+                        ],
+                        position="bottom-end",
+                        withinPortal=True,
                     ),
                 ],
-                position="bottom-end",
-                withinPortal=True,
+                gap="xs",
+                wrap="nowrap",
+                style={"alignSelf": "center"},
             ),
             delete_confirm_modal(
                 DELETE_IDS,

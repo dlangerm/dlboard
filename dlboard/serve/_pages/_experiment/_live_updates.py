@@ -19,8 +19,8 @@ from dash.dcc import Interval, Store
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from structlog.stdlib import get_logger
 
+from dlboard import models
 from dlboard.serve import ClientsideScript, get_data_store
-from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import DivId, IntervalId, StoreId, ValueId
 from dlboard.serve._pages._dash_helpers import CallbackStates
 from dlboard.serve._pages._experiment import _chart_view as chart_view
@@ -30,12 +30,13 @@ from dlboard.serve._pages._experiment import _page_repository as repo
 from dlboard.serve._pages._experiment import _panel_data as panel_data
 from dlboard.serve._pages._experiment._notes import STATE_NOTES_REVISION
 from dlboard.serve._pages._experiment._paging import Paging
-from dlboard.serve._pages._experiment._shown_runs import shown_run_ids
+from dlboard.serve._pages._experiment._shown_runs import page_experiments, page_scope
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from dash.development.base_component import Component
 
-    from dlboard import models
     from dlboard.models import DataStore
 
 _log = get_logger(__name__)
@@ -94,9 +95,8 @@ class _PollStates(CallbackStates):
     chart_ids: Annotated[list[chart_view.ChartID], State(chart_view.CHART_BODY.all(), "id")]
     fingerprint_ids: Annotated[list[chart_view.ChartID], State(chart_view.CHART_FINGERPRINT.all(), "id")]
     fingerprints: Annotated[list[str], State(chart_view.CHART_FINGERPRINT.all(), "children")]
-    experiment_id: Annotated[int, State(constants.STATE_EXPERIMENT_ID, "data")]
-    view_id: Annotated[int | None, State(ids.STATE_VIEW_ID, "data")]
-    last_known_revision: Annotated[int | None, State(STATE_LAST_KNOWN_REVISION, "data")]
+    page_json: Annotated[str, State(ids.STATE_PAGE_STORAGE, "data")]
+    last_known_revision: Annotated[str | None, State(STATE_LAST_KNOWN_REVISION, "data")]
     last_notes_revision: Annotated[int | None, State(STATE_NOTES_REVISION, "data")]
     paging_json: Annotated[str, State(ids.PANEL_PAGING_ID, "data")]
 
@@ -116,12 +116,20 @@ def live_status_badge(*, ok: bool) -> Component:
     )
 
 
+def page_revision(experiments: Iterable[models.Experiment]) -> str:
+    """
+    What the data of a page's `experiments` was when it was read: each one's `revision`, which every write to it moves on.
+
+    A page draws one experiment, or (a comparison) several: it changed when any of them did, or when one joined or left.
+    """
+    return ",".join(f"{e.id}:{e.revision}" for e in sorted(experiments, key=lambda e: e.id))
+
+
 def _fetch_open_panel_dataframes(
     store: DataStore[...],
-    experiment_id: int,
     page: page_model.BasicExperimentPage,
     chart_ids: list[chart_view.ChartID],
-    focus: int | None,
+    paging: Paging,
 ) -> tuple[dict[str, panel_data.PanelData], bool]:
     """
     Fetch the dataframe of each panel with charts on screen, for just those charts -- once per panel.
@@ -129,9 +137,11 @@ def _fetch_open_panel_dataframes(
     Not once per chart: "Auto-generate charts" routinely groups several charts sharing a panel, so
     fetching per panel (rather than per chart) keeps a poll tick's cost proportional to how many
     panels are open. And not for the panel's other charts: only one page of them is on screen (see
-    `Paging`), so a tick costs what that page does, however many charts the panel holds.
+    `Paging`), so a tick costs what that page does, however many charts the panel holds. Of the runs the page draws
+    (`page_scope`): an experiment's shown runs, or a comparison's but the ones the viewer hid.
     """
-    run_ids = shown_run_ids(store, experiment_id, page.document, focus)
+    scope = page_scope(store, page, paging.hidden, paging.focus)
+    names = panel_data.experiment_names(store, scope)
     panels_by_name = {p.name: p for p in page.panels}
     mounted: dict[str, set[int]] = {}
     for chart_id in chart_ids:
@@ -146,7 +156,7 @@ def _fetch_open_panel_dataframes(
             continue
         shown = panel.model_copy(update={"charts": [c for i, c in enumerate(panel.charts) if i in indexes]})
         try:
-            dataframes[panel_name] = panel_data.fetch_panel_data(store, experiment_id, shown, run_ids, reads)
+            dataframes[panel_name] = panel_data.scope_panel_data(store, scope, shown, names, reads)
         except Exception:  # noqa: BLE001 -- one bad panel must not break the whole poll tick
             _log.exception("Live-update poll failed to fetch panel %r", panel_name)
             ok = False
@@ -222,28 +232,35 @@ def register_live_update_callbacks(app: Dash) -> None:
         _n_intervals: int, states: dict[str, Any]
     ) -> tuple[list[Any], Any, Any, Component, Any]:
         polled = _PollStates.model_validate(states)
-        chart_ids, experiment_id = polled.chart_ids, polled.experiment_id
+        chart_ids = polled.chart_ids
+        drawn = page_model.BasicExperimentPage.model_validate_json(polled.page_json)
         store = get_data_store()
         ok = True
         try:
-            experiment = store.get_experiment(experiment_id)
+            # One indexed read of each experiment the page draws (and, for a comparison, of which those are).
+            experiments = [
+                e for i in page_experiments(store, drawn) if (e := store.get_experiment(i)) is not None
+            ]
         except Exception:  # noqa: BLE001 -- a poll failure is reported via the status badge, not raised
-            _log.exception("Live-update poll failed for experiment %s", experiment_id)
-            experiment, ok = None, False
+            _log.exception("Live-update poll failed for page %s", drawn.id)
+            experiments, ok = list[models.Experiment](), False
 
         # Set on every tick that actually reached the store, whether or not anything had changed --
         # "how stale could this be" (`LIVE_LAST_FETCH_LABEL_ID`, ticked purely client-side) needs the
         # time of the last real check, not the time of the last real change.
         fetched_at = pendulum.now("UTC").isoformat() if ok else no_update
         # Notes changed (posted/deleted) since the last tick: tells an open notes thread to refresh,
-        # from the same one-row read -- and independently of whether any chart data changed.
+        # from the same one-row read -- and independently of whether any chart data changed. An experiment's page alone has
+        # notes: a comparison's has none.
+        own = next((e for e in experiments if e.id == drawn.experiment_id), None)
         notes_revision = (
-            experiment.notes_revision
-            if experiment is not None and experiment.notes_revision != polled.last_notes_revision
+            own.notes_revision
+            if own is not None and own.notes_revision != polled.last_notes_revision
             else no_update
         )
+        revision = page_revision(experiments)
 
-        if not ok or experiment is None or experiment.revision == polled.last_known_revision:
+        if not ok or not experiments or revision == polled.last_known_revision:
             return (
                 [no_update] * len(chart_ids),
                 no_update,
@@ -252,12 +269,10 @@ def register_live_update_callbacks(app: Dash) -> None:
                 notes_revision,
             )
 
-        page = repo.load_page(store, repo.ExperimentRef(experiment_id, polled.view_id))
+        page = repo.load_page(store, repo.ref_of(drawn))
         panels_by_name = {p.name: p for p in page.panels}
         paging = Paging.model_validate_json(polled.paging_json)
-        dataframes, fetch_ok = _fetch_open_panel_dataframes(
-            store, experiment_id, page, chart_ids, paging.focus
-        )
+        dataframes, fetch_ok = _fetch_open_panel_dataframes(store, page, chart_ids, paging)
         shown = {
             (i.panel, i.index): fingerprint
             for i, fingerprint in zip(polled.fingerprint_ids, polled.fingerprints, strict=True)
@@ -271,7 +286,7 @@ def register_live_update_callbacks(app: Dash) -> None:
         )
         return (
             contents,
-            experiment.revision,
+            revision,
             fetched_at,
             live_status_badge(ok=fetch_ok and render_ok),
             notes_revision,
@@ -326,10 +341,10 @@ def live_controls() -> list[Component]:
     ]
 
 
-def live_timers(settings: LiveUpdateSettings, revision: int) -> list[Interval | Store]:
+def live_timers(settings: LiveUpdateSettings, revision: str) -> list[Interval | Store]:
     """The two intervals that drive the poll and the label's clock, and the stores they read and write."""
     return [
-        # Drives `poll_for_updates`: each tick does one indexed PK read of `Experiment.revision`, only
+        # Drives `poll_for_updates`: each tick does one indexed PK read of each drawn `Experiment.revision`, only
         # paying for a real refresh when it's actually changed since the last poll. `disabled` is
         # flipped client-side by `LIVE_UPDATES_ENABLED_ID` (`live_switch_state.js`) -- unchecking it
         # genuinely stops this from firing at all, not just from being acted on.

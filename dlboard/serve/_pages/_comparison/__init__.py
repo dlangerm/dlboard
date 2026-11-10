@@ -8,8 +8,9 @@ so it reuses `_experiment`'s pieces and adds what is a comparison's own:
 - `_members.py` -- its member runs, as the run list in the sidebar: hide one from the charts, take some out;
 - `_add_runs.py` -- adding runs to it, from the pinned ones or from an experiment.
 
-Its page is a `Page` scoped to a project (`ComparisonRef`), shown at `/comparison/<id>`. It has no live updates and no
-A/B diff yet: those read one experiment.
+Its page is a `Page` scoped to a project (`ComparisonRef`), shown at `/comparison/<id>`. Its charts follow what is logged
+live, as an experiment's do (`_live_updates.py` polls each experiment it draws). It has no A/B diff yet: that reads one
+experiment.
 """
 
 from __future__ import annotations

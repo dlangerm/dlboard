@@ -83,4 +83,5 @@ The metrics that suggested charts and auto-populate offer are those the *experim
 the comparison's own runs, so a comparison of one run of a big sweep is offered charts of keys that run never logged, and they
 draw empty.
 
-Not yet: live updates and the A/B diff on a comparison page (reload to see new data).
+Not yet: the A/B diff on a comparison page. Its charts follow what is logged live, as an experiment's do: the poll watches
+every experiment the comparison draws runs of.
