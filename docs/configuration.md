@@ -206,7 +206,7 @@ Only matter with an identity-verifying provider such as `PASSWORD_AUTH`. See [au
 | `DLBOARD_S3_CA_BUNDLE` | none | CA bundle for a private-CA endpoint. |
 | `DLBOARD_S3_DOWNLOAD_MODE` | `proxy` | `proxy` streams through dlboard; `presign` redirects the browser to a short-lived URL (the endpoint must be reachable from browsers). |
 | `DLBOARD_S3_PRESIGN_TTL_S` | `300` | |
-| `DLBOARD_S3_EXTRA_READ_BUCKETS` | none | Other buckets dlboard may link and read, never write or delete. |
+| `DLBOARD_S3_EXTRA_READ_BUCKETS` | none | A JSON array of other buckets dlboard may link and read, never write or delete. |
 | `DLBOARD_S3_QUEUE_SIZE` | `100` | Uploads that can wait for the writer, as `DLBOARD_FILESYSTEM_STORE_QUEUE_SIZE`. |
 
 ## Client (training scripts)

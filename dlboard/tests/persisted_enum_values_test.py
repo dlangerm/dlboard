@@ -18,6 +18,7 @@ import typing
 
 import pytest
 
+from dlboard.conftest import builtin_chart_types
 from dlboard.models import (
     AuditAction,
     EntityType,
@@ -31,9 +32,11 @@ from dlboard.models import (
 from dlboard.models._metric import MetricColumn
 from dlboard.plugins.charts._table_settings import Aggregate, TableMode, TableRows
 from dlboard.plugins.charts.bar_chart import BarChart
+from dlboard.plugins.charts.file_list import FileListChart
 from dlboard.plugins.charts.histogram import Colorscale, HistogramChart, HistogramDisplay
 from dlboard.plugins.charts.image_series import ImageChart, LayerVisibility
 from dlboard.plugins.charts.line_chart import LineChart
+from dlboard.plugins.charts.series_band import SeriesBandChart
 from dlboard.plugins.charts.table_chart import TableChart
 from dlboard.serve._custodian import TaskOutcome
 
@@ -88,6 +91,8 @@ _FROZEN_CHART_TYPE_NAMES: dict[type[ChartType[typing.Any, typing.Any, typing.Any
     BarChart: "bar",
     TableChart: "table",
     HistogramChart: "histogram",
+    FileListChart: "files",
+    SeriesBandChart: "series_band",
 }
 
 
@@ -101,3 +106,10 @@ def test_builtin_chart_type_keeps_its_frozen_name(
     (`UnknownChartTypeError`, see `ChartInstance.render`).
     """
     assert chart_type.name == frozen_name
+
+
+@pytest.mark.parametrize("chart_type", [pytest.param(c, id=c.name) for c in builtin_chart_types()])
+def test_every_builtin_chart_type_has_a_frozen_name(
+    chart_type: type[ChartType[typing.Any, typing.Any, typing.Any]],
+) -> None:
+    assert chart_type in _FROZEN_CHART_TYPE_NAMES, f"freeze {chart_type.__name__}'s name here"

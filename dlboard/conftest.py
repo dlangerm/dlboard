@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import threading
 import typing
 import uuid
@@ -28,7 +29,7 @@ from werkzeug.serving import make_server
 from dlboard import models
 from dlboard._telemetry import _sdk
 from dlboard._telemetry.traces import TRACES
-from dlboard.plugins import BUILTIN_BACKEND, LOCAL_AUTH
+from dlboard.plugins import BUILTIN_BACKEND, BUILTIN_CHARTS, LOCAL_AUTH
 from dlboard.plugins.backend import artifact_purge_worker
 from dlboard.plugins.data_stores import filesystem, postgres, s3, sqlite
 from dlboard.plugins.data_stores._blob_store import BlobArtifactStore
@@ -570,6 +571,17 @@ def create_entity_chain(store: SQLStoreBase[Any], *, artifact: bool = False) -> 
         assert logged.id is not None
         artifact_id = logged.id
     return EntityChain(project.id, experiment.id, run.id, artifact_id)
+
+
+def builtin_chart_types() -> list[type[models.ChartType[Any, Any, Any]]]:
+    """Every chart type `BUILTIN_CHARTS` registers: those its modules define, by name."""
+    found = {
+        cls
+        for chart in BUILTIN_CHARTS
+        for _, cls in inspect.getmembers(chart, inspect.isclass)
+        if issubclass(cls, models.ChartType) and not inspect.isabstract(cls)
+    }
+    return sorted(found, key=lambda chart_type: chart_type.name)
 
 
 def dispose_stores(app: Dash) -> None:

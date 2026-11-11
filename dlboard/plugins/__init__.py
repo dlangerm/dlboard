@@ -7,7 +7,7 @@ from dlboard.plugins.backend import artifact_purge_worker, basic_rest_backend, e
 from dlboard.plugins.data_stores import filesystem, postgres, s3, sqlite
 
 LOCAL_STORAGE: list[PluginProtocol] = [sqlite, filesystem, artifact_purge_worker, trash_retention, retention]
-# Postgres metadata (configured from `POSTGRES_*` env vars -- see `postgres.PostgresSettings`) with
+# Postgres metadata (configured from `DLBOARD_POSTGRES_*` env vars -- see `postgres.PostgresSettings`) with
 # the same on-disk artifact store; compose it into a `dlboard serve custom --plugins` list.
 POSTGRES_STORAGE: list[PluginProtocol] = [
     postgres,
@@ -16,7 +16,7 @@ POSTGRES_STORAGE: list[PluginProtocol] = [
     trash_retention,
     retention,
 ]
-# Postgres metadata with an S3-protocol artifact store (configured from `S3_*` env vars -- see
+# Postgres metadata with an S3-protocol artifact store (configured from `DLBOARD_S3_*` env vars -- see
 # `s3.S3Settings`) instead of local disk; needs the `s3` extra (`pip install 'dlboard[s3]'`).
 POSTGRES_S3_STORAGE: list[PluginProtocol] = [postgres, s3, artifact_purge_worker, trash_retention, retention]
 LOCAL_AUTH: list[PluginProtocol] = [anonymous]

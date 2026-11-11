@@ -30,6 +30,15 @@ pulls that section's body into the GitHub release notes and publishes both distr
 * **`register_experiment_section`** (`ExperimentSection`, `ExperimentSlot.HEADER`), for a plugin to add a line under an
   experiment's header the way `register_project_section` adds one to a project's. See
   [docs/background-tasks.md](docs/background-tasks.md#plugin-settings-and-page-sections).
+* **A docs index,** [docs/README.md](docs/README.md): every page, grouped by running a server, operating it, and extending
+  it. A test fails when a page is missing from it, or when a link in the docs reaches a file or heading that is not there.
+  (#592)
+* **A skill for a coding agent writing a plugin,** [skills/dlboard-plugin](skills/dlboard-plugin/SKILL.md): which kind
+  of plugin to write, the built-in to read first, the public API, the rules, and how to test it, against the installed
+  version's own source. Copy it from the release tag you deploy. A test fails when a file or name it gives has moved.
+  (#592)
+* **`dlboard.plugins.data_stores` exports `BlobBackend`, `RefAccess` and `plug_blob_store`,** so an artifact store over a
+  blob store of its own is built without private imports. (#592)
 
 ### Changed
 
@@ -50,6 +59,12 @@ pulls that section's body into the GitHub release notes and publishes both distr
 * **A server killed outright no longer leaves its web workers running.** Killed by `kill -9` or the OOM killer, the server
   stopped its custodian but not its Granian workers, which went on holding its port and its database. Each worker now
   goes with the server (on Linux), as the custodian does. (#584)
+* **The `files` and `series_band` chart type names are part of the compatibility promise,** as every other built-in
+  chart's is: views save them. A test now fails when a built-in chart type's name is not frozen, or is missing from
+  [docs/compatibility.md](docs/compatibility.md) or its module from [docs/plugins/charts.md](docs/plugins/charts.md).
+  (#592)
+* The storage docs said to set a blob store with `set_artifact_store`, which skips starting what `plug_blob_store`
+  starts, and described the Postgres bundles as missing their retention plugins. (#592)
 
 ## [0.15.0] - 2026-11-09
 

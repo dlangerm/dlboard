@@ -138,7 +138,7 @@ just to construct one.
   empties the Trash of what has been in it `DLBOARD_TRASH_RETENTION_DAYS` (see "Background tasks"), and `retention`
   (`plugins/retention/`), which holds projects to the retention rule their owners set: it keeps its rules and status as
   scoped settings, adds its section to the project page, and deletes through the generic `get_runs`/`delete_runs`
-- `BUILTIN_CHARTS` = image_series, file_list, line_chart, bar_chart, table_chart, histogram
+- `BUILTIN_CHARTS` = image_series, file_list, line_chart, bar_chart, table_chart, histogram, series_band
 - `LOCAL_DEPLOYMENT` = all of the above, used by `dlboard serve local`
 - `POSTGRES_STORAGE` = `[postgres, filesystem, artifact_purge_worker, trash_retention, retention]` — for a shared deployment, composed
   into a `dlboard serve custom --plugins` list; configured by `DLBOARD_POSTGRES_*` env vars (`PostgresSettings`)

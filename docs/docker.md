@@ -24,7 +24,7 @@ instead needs no rebuild — see "Using an S3 artifact store instead" below.
 
 You're running dlboard in Docker/Compose/Kubernetes/ECS rather than installing it directly with
 `pip`/`uv tool install`. If you're running it as a plain process on a machine you control, see the
-root [README](../README.md#running-it) instead — there's no reason to containerize just to get
+root [README](../README.md#quick-start) instead — there's no reason to containerize just to get
 `dlboard serve local` or `serve custom` running.
 
 ## Running it
