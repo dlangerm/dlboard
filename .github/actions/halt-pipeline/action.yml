@@ -1,0 +1,17 @@
+name: Halt the pipeline
+description: Cancel the rest of a pull request's run after a job fails.
+
+runs:
+  using: composite
+  steps:
+    # The calling job needs `actions: write`, and calls this as its last step, `if: failure()`, after anything
+    # that reads what failed (`recheck-failures`): the cancel ends the job too.
+    # Not for a push to main. A cancelled run of main is not reported (`main-failure.yml` leaves it alone, as GitHub
+    # cancels a waiting one for a newer push), so a failure there must end as one, with every job finished.
+    # A fork's pull request has a read-only token and cannot cancel: it runs to the end, as it did before.
+    - if: github.event_name == 'pull_request'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        gh run cancel "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" || echo "::warning::could not cancel the run"
