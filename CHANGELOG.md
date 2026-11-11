@@ -65,6 +65,9 @@ pulls that section's body into the GitHub release notes and publishes both distr
   (#592)
 * The storage docs said to set a blob store with `set_artifact_store`, which skips starting what `plug_blob_store`
   starts, and described the Postgres bundles as missing their retention plugins. (#592)
+* **A deployment that leaves out the image chart no longer offers it.** Its chart type was registered when its module was
+  imported, so any deployment had it, without the scripts and stylesheet its plugin serves; it is now registered by the
+  plugin, as every other chart's is. (#601)
 
 ## [0.15.0] - 2026-11-09
 
