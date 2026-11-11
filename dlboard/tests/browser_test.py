@@ -4386,6 +4386,24 @@ def _offset_within(inner: Locator, outer: Locator) -> tuple[int, int, int, int]:
     )
 
 
+def _settled_offset(inner: Locator, outer: Locator) -> tuple[int, int, int, int]:
+    """
+    `_offset_within` once it stops changing: two readings in a row that agree.
+
+    A reading taken while the view is still laying out (a legend that has just opened, a dialog still settling) is off by
+    a pixel or two, and comparing that to a later reading fails with nothing wrong on the page.
+    """
+    reading = _offset_within(inner, outer)
+    deadline = time.monotonic() + 5
+    while True:
+        time.sleep(0.05)
+        again = _offset_within(inner, outer)
+        if again == reading:
+            return again
+        assert time.monotonic() < deadline, f"the offset never settled: {reading} then {again}"
+        reading = again
+
+
 def _is_inside(inner: Locator, outer: Locator) -> bool:
     """Whether `inner` is drawn within `outer`'s box."""
     inside, around = inner.bounding_box(), outer.bounding_box()
@@ -4478,14 +4496,14 @@ def test_the_enlarged_views_legend_and_controls_stay_usable_on_a_tiny_picture_at
     legend.get_by_role("button", name="Layers").click()
     row = _layer_row(legend, "boxes")
     expect(row).to_be_visible()
-    fitted = _offset_within(legend, viewer)
+    fitted = _settled_offset(legend, viewer)
 
     viewer.get_by_role("button", name="100%").click()
     expect(viewer.locator(".dl-zoom-level")).to_have_text("100%")
     picture = viewer.locator("img").first.bounding_box()
     assert picture is not None
     assert picture["width"] < 40  # a speck in the middle of the view
-    assert _offset_within(legend, viewer) == fitted  # which the legend does not follow
+    assert _settled_offset(legend, viewer) == fitted  # which the legend does not follow
     expect(row).to_be_visible()
     row.get_by_role("button").click()
     expect(_layer_holder(viewer, "boxes")).to_be_hidden()
