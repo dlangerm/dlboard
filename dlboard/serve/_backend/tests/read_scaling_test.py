@@ -27,7 +27,7 @@ import pytest
 import sqlalchemy as sa
 
 from dlboard import models
-from dlboard.conftest import Clock, StoreBackend
+from dlboard.conftest import Clock, StoreBackend, seed_runs
 from dlboard.models import ChartInstance, PanelInstance
 from dlboard.plugins.charts.bar_chart import BarChart
 from dlboard.plugins.charts.line_chart import LineChart
@@ -144,35 +144,39 @@ def _train(store: PostgresStore, project_id: int, steps: int, runs: int = _RUNS,
     A new experiment whose `runs` runs logged two metrics (and `keys` more), a histogram and an image at each step.
     """
     experiment = store.create_experiment(models.NewExperiment(project_id=project_id))
-    for _ in range(runs):
-        run = store.create_run(models.NewRun(experiment_id=experiment.id))
-        store.log_hyperparams(models.NewHyperParams.from_raw(run.id, experiment.id, {"lr": 0.1}))
-        store.log_metrics(
-            models.LoggedMetrics(
-                metrics={
-                    "loss": 1.0 / (step + 1),
-                    "acc": float(step),
-                    **{f"metric_{i:04d}": float(step + i) for i in range(keys)},
-                },
-                histograms={"grad": models.Histogram(edges=[0.0, 1.0], counts=[step])},
-                step=step,
-                experiment_id=experiment.id,
-                run_id=run.id,
-                timestamp_utc=pendulum.now(),
-            )
-            for step in range(steps)
+    run_ids = seed_runs(store, [models.NewRun(experiment_id=experiment.id)] * runs)
+    store._insert_rows(
+        models.HyperParams,
+        [models.NewHyperParams.from_raw(run_id, experiment.id, {"lr": 0.1}) for run_id in run_ids],
+    )
+    store.log_metrics(
+        models.LoggedMetrics(
+            metrics={
+                "loss": 1.0 / (step + 1),
+                "acc": float(step),
+                **{f"metric_{i:04d}": float(step + i) for i in range(keys)},
+            },
+            histograms={"grad": models.Histogram(edges=[0.0, 1.0], counts=[step])},
+            step=step,
+            experiment_id=experiment.id,
+            run_id=run_id,
+            timestamp_utc=pendulum.now(),
         )
-        store.log_artifact_refs(
-            models.Artifact(
-                key="img",
-                fname="img.png",
-                run_id=run.id,
-                experiment_id=experiment.id,
-                step=step,
-                ref=f"ref://{run.id}/{step}",
-            )
-            for step in range(steps)
+        for run_id in run_ids
+        for step in range(steps)
+    )
+    store.log_artifact_refs(
+        models.Artifact(
+            key="img",
+            fname="img.png",
+            run_id=run_id,
+            experiment_id=experiment.id,
+            step=step,
+            ref=f"ref://{run_id}/{step}",
         )
+        for run_id in run_ids
+        for step in range(steps)
+    )
     with store._engine.begin() as conn:
         # What the planner chooses between a scan and an index on, as autovacuum would have it by the time anyone looks.
         for table in store.tables.values():
@@ -293,12 +297,11 @@ def test_a_projects_pins_read_no_more_when_its_own_runs_or_another_projects_pins
     alone = reads()
     # The project's runs grow by thousands, and so do another project's pins.
     crowded = store.create_experiment(models.NewExperiment(project_id=project_id)).id
-    for _ in range(1500):
-        store.create_run(models.NewRun(experiment_id=crowded))
+    seed_runs(store, [models.NewRun(experiment_id=crowded)] * 1500)
     other_project = store.create_project(models.NewProject(name="other", description="")).id
     for _ in range(50):  # pins are spread over a project's experiments, as people make them
         elsewhere = store.create_experiment(models.NewExperiment(project_id=other_project)).id
-        others = frozenset(store.create_run(models.NewRun(experiment_id=elsewhere)).id for _ in range(30))
+        others = frozenset(seed_runs(store, [models.NewRun(experiment_id=elsewhere)] * 30))
         store.pin_runs(me, others, models.PinColor.BLUE)
     _analyzed(store)
     grown = reads()
@@ -340,9 +343,7 @@ def test_a_page_of_a_projects_cards_reads_no_more_when_other_projects_or_its_uns
     other_project = store.create_project(models.NewProject(name="other", description="")).id
     for _ in range(1000):
         store.create_experiment(models.NewExperiment(project_id=other_project))
-    for experiment in oldest:
-        for _ in range(150):
-            store.create_run(models.NewRun(experiment_id=experiment))
+    seed_runs(store, [models.NewRun(experiment_id=experiment) for experiment in oldest] * 150)
     _analyzed(store)
     grown = reads()
 
@@ -446,20 +447,17 @@ def _stray_only_in_a_deleted_run(store: PostgresStore, project_id: int, runs: in
     No live run logged `stray`, so the catalog must look at every live run to find that out (#372).
     """
     experiment = store.create_experiment(models.NewExperiment(project_id=project_id))
-    for _ in range(runs):
-        run = store.create_run(models.NewRun(experiment_id=experiment.id))
-        store.log_metrics(
-            [
-                models.LoggedMetrics(
-                    metrics={"loss": float(step)},
-                    step=step,
-                    experiment_id=experiment.id,
-                    run_id=run.id,
-                    timestamp_utc=pendulum.now(),
-                )
-                for step in range(20)
-            ]
+    store.log_metrics(
+        models.LoggedMetrics(
+            metrics={"loss": float(step)},
+            step=step,
+            experiment_id=experiment.id,
+            run_id=run_id,
+            timestamp_utc=pendulum.now(),
         )
+        for run_id in seed_runs(store, [models.NewRun(experiment_id=experiment.id)] * runs)
+        for step in range(20)
+    )
     gone = store.create_run(models.NewRun(experiment_id=experiment.id))
     store.log_metrics(
         [
@@ -525,16 +523,17 @@ def test_finding_what_retention_deletes_reads_no_more_for_what_it_deleted_alread
     now = pendulum.now("UTC")
 
     def log(count: int, days_ago: int, into: int = experiment) -> list[int]:
-        return [
-            store.create_run(
+        return seed_runs(
+            store,
+            [
                 models.NewRun(
                     experiment_id=into,
                     status=models.RunStatus.FINISHED,
                     created_at=now.subtract(days=days_ago, seconds=i),
                 )
-            ).id
-            for i in range(count)
-        ]
+                for i in range(count)
+            ],
+        )
 
     other = store.create_experiment(
         models.NewExperiment(
@@ -581,15 +580,18 @@ def test_a_retention_batch_reads_about_its_limit_and_a_backlog_is_counted_not_re
     project_id = store.create_project(models.NewProject(name="wide", description="")).id
     experiments = [store.create_experiment(models.NewExperiment(project_id=project_id)).id for _ in range(25)]
     now = pendulum.now("UTC")
-    for experiment in experiments:
-        for i in range(120):
-            store.create_run(
-                models.NewRun(
-                    experiment_id=experiment,
-                    status=models.RunStatus.FINISHED,
-                    created_at=now.subtract(days=1, seconds=i),
-                )
+    seed_runs(
+        store,
+        [
+            models.NewRun(
+                experiment_id=experiment,
+                status=models.RunStatus.FINISHED,
+                created_at=now.subtract(days=1, seconds=i),
             )
+            for experiment in experiments
+            for i in range(120)
+        ],
+    )
     _analyzed(store)
     rules = Rules(project=RunCount(max_runs=20), experiments={})
     candidates = Candidates(store, RetentionSettings(), now)

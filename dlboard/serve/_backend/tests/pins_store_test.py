@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, NamedTuple
 import pytest
 
 from dlboard import models
-from dlboard.conftest import EVERY_STORE_BACKEND, StoreBackend
+from dlboard.conftest import EVERY_STORE_BACKEND, StoreBackend, seed_runs
 from dlboard.models import PinColor
 
 if TYPE_CHECKING:
@@ -275,7 +275,7 @@ def test_a_pin_knows_its_runs_experiment_and_runs_experiments_are_told_whether_d
 
 
 def test_more_runs_than_a_statement_binds_are_pinned_and_unpinned(store: SQLLiteStore, world: _World) -> None:
-    runs = frozenset(store.create_run(models.NewRun(experiment_id=world.first)).id for _ in range(1200))
+    runs = frozenset(seed_runs(store, [models.NewRun(experiment_id=world.first)] * 1200))
     alice = world.user["alice"]
 
     store.pin_runs(alice, runs, PinColor.RED)

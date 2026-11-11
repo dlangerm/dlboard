@@ -38,7 +38,7 @@ from dlboard.plugins.data_stores.s3 import S3DownloadMode, S3Settings
 from dlboard.plugins.data_stores.sqlite import SQLLiteStore
 from dlboard.serve import SQLStoreBase, get_system_data_store
 from dlboard.serve import app as build_app
-from dlboard.serve._backend import _auth
+from dlboard.serve._backend import _auth, _sql
 from dlboard.serve._backend._data_store import ARTIFACT_STORE
 from dlboard.serve._backend._metric_frame import MetricFrame
 from dlboard.serve._custodian import TaskContext, get_system_task_store, registered_tasks
@@ -46,7 +46,7 @@ from dlboard.serve._pages._experiment._panel_data import PanelData, WideHistory
 from dlboard.serve.telemetry import LOGS, METRICS, _instrument
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Generator, Iterator, MutableMapping
+    from collections.abc import Callable, Generator, Iterable, Iterator, MutableMapping
     from wsgiref.types import InputStream, StartResponse, WSGIApplication, WSGIEnvironment
 
     from dash import Dash
@@ -432,6 +432,31 @@ def store(
             postgres = PostgresStore(request.getfixturevalue("postgres_settings"))
             yield postgres
             postgres.dispose()
+
+
+def seed_runs(store: SQLStoreBase[Any], runs: Iterable[models.NewRun]) -> list[int]:
+    """
+    Insert `runs` in one statement per thousand, returning their ids in order.
+
+    For a test that needs many runs as a backdrop (a thousand neighbours): `create_run` is three transactions each (the
+    deleted check, the insert, the experiment's revision), and over a database that is a round trip and a commit apiece.
+    It does not bump the experiment's revision, so a test that reads that makes its runs with `create_run`.
+    """
+    table = store.tables[models.Run]
+    rows = [_sql.row_values(run) for run in runs]
+    ids: list[int] = []
+    with store._engine.begin() as conn:  # noqa: SLF001 -- the store has no bulk insert that returns the ids
+        for start in range(0, len(rows), _SEED_CHUNK):
+            chunk = [
+                {k: v for k, v in row.items() if k != _sql.ID_KEY}
+                for row in rows[start : start + _SEED_CHUNK]
+            ]
+            ids.extend(conn.execute(sa.insert(table).values(chunk).returning(table.c[_sql.ID_KEY])).scalars())
+    return ids
+
+
+_SEED_CHUNK = 1000
+"""Rows per `seed_runs` statement: under every driver's cap on bind parameters at a run's dozen columns."""
 
 
 @pytest.fixture

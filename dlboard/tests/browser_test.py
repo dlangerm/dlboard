@@ -111,6 +111,20 @@ def _session_app_is_current(dlboard_app: Dash) -> Iterator[None]:
         yield
 
 
+@pytest.fixture(autouse=True)
+def toasts(page: Page) -> Locator:
+    """
+    Close the "Saved to your own view" toast as soon as it covers something a test is about to click.
+
+    The first edit to a shared page branches into a view of one's own and says so in a toast that stays up ten seconds,
+    over the toolbar's buttons: without this, the next click waits for it to fade, in most tests that edit twice. Only
+    that one: a test that asserts another notice must see it, and removes this handler to assert this one.
+    """
+    toast = page.locator(".mantine-Notification-root", has_text="Saved to your own view")
+    page.add_locator_handler(toast, lambda found: found.locator(".mantine-Notification-closeButton").click())
+    return toast
+
+
 def _create_project_and_experiment(page: Page, live_server_url: str, name: str) -> None:
     """
     Drive the real homepage/project-page forms to create `name` for both project and experiment.
@@ -1701,7 +1715,7 @@ def test_a_run_stays_in_the_url_as_its_page_is_edited_and_its_view_switched(
 
 
 def test_editing_the_shared_page_branches_into_your_own_view_without_asking(
-    page: Page, live_server_url: str, console_errors: list[str]
+    page: Page, live_server_url: str, console_errors: list[str], toasts: Locator
 ) -> None:
     """
     The whole point: deleting a panel while looking at the shared page -- no "save as a view" step
@@ -1731,6 +1745,9 @@ def test_editing_the_shared_page_branches_into_your_own_view_without_asking(
     store = get_system_data_store()
     shared = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
     store.update_page(shared.model_copy(update={"panels": [PanelInstance[Any, Any](name="Losses")]}))
+    page.remove_locator_handler(
+        toasts
+    )  # the toast is what this asserts: nothing here needs it out of the way
     page.reload()
     expect(page.get_by_role("textbox", name="View", exact=True)).to_have_value("Shared view")
     # Not yours, so the header says up front that an edit will land in a copy.
