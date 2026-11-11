@@ -10,9 +10,12 @@ on:
 permissions:
   contents: read
 
+# A newer push cancels a branch's run in progress, but never main's: landing a stack pushes main several
+# times in a row, and cancelling each run for the next left `latest` behind the head for hours. Main's runs
+# queue instead (GitHub keeps only the newest of the waiting ones), so the head's run always completes.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   check_doc_only:
@@ -162,6 +165,8 @@ jobs:
 
   # Build-only: proves the root `Dockerfile`'s multi-stage build still produces a working
   # dlboard image. Not pushed anywhere -- just a build sanity check on every PR.
+  # The layer cache is an optimization, so failing to write it (a run of an already merged PR gets a
+  # read-only cache token) must not fail the build: `ignore-error`.
   docker-build:
     if: needs.check_doc_only.outputs.skip-tests != 'true'
     needs: [check_doc_only, typecheck-precommit]
@@ -174,23 +179,63 @@ jobs:
           context: .
           push: false
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to: type=gha,mode=max,ignore-error=true
 
-  # Publishes the image once a change has landed on main and the test suite passed on it (this
-  # workflow only runs on push for main). `stable` and the version tags belong to release.yml.
-  # PRs only get `docker-build` above.
+  # Publishes the image once a change has landed on main and the test suite passed on it. `stable` and
+  # the version tags belong to release.yml. PRs only get `docker-build` above.
   publish-image:
     needs: [test]
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/push-image
+      # Main's runs queue, so one can get here after a newer push landed, or be rerun by hand long
+      # after: only main's head may move `latest`, or it would move backwards.
+      - id: head
+        run: |
+          if [ "$(git ls-remote origin refs/heads/main | cut -f1)" = "$GITHUB_SHA" ]; then
+            echo "current=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::$GITHUB_SHA is no longer the head of main; its image is not published."
+          fi
+      - if: steps.head.outputs.current == 'true'
+        uses: ./.github/actions/push-image
         with:
           tags: |
             type=raw,value=latest
             type=raw,value=beta
             type=sha,prefix=sha-
+
+  # A job that failed on main is an incident, not noise: people run what main builds. Files the issue
+  # that starts "When main is red" in CONTRIBUTING.md; `image-freshness.yml` is the backstop for what
+  # this cannot see (a run that never finished).
+  report-main-failure:
+    needs:
+      - typecheck-precommit
+      - test
+      - test-postgres
+      - test-s3
+      - client-compat
+      - client-otel
+      - docker-build
+      - publish-image
+    if: always() && github.event_name == 'push' && contains(needs.*.result, 
+      'failure')
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository 
+            }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh issue create --repo "$GITHUB_REPOSITORY" \
+            --title "CI failed on main at ${GITHUB_SHA::7}" \
+            --body "A job failed on the push of $GITHUB_SHA to main: $RUN_URL
+
+          Follow \"When main is red\" in CONTRIBUTING.md: triage it, and until it is fixed or reverted the
+          \`latest\`/\`beta\` images do not include this commit."

@@ -1,0 +1,28 @@
+name: Image freshness
+
+# `latest` and `beta` are a promise that they hold what is on main. CI's own failure report cannot see a
+# head whose run never finished, so this checks the promise itself, from outside: see
+# `tools/check_image_fresh.py`.
+on:
+  schedule:
+    - cron: 17 */4 * * *
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: astral-sh/setup-uv@v6
+      - run: >
+          uv run --no-project python tools/check_image_fresh.py
+          "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"

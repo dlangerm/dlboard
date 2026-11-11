@@ -36,6 +36,32 @@ repo follows -- file layout, the plugin system, test placement, and the rest.
 - Add tests for new behavior. Favor an end-to-end test that asserts behavior over one that pins
   implementation details, and don't duplicate coverage another test already provides.
 
+## When main is red
+
+People run what `main` builds: `latest`/`beta` are the image of its head, and releases are cut from it. So a failed
+or unfinished run on `main` is an incident, and a cancelled run is not a green one. Two things tell you: CI files
+"CI failed on main at `<sha>`" when a job fails on a push, and `image-freshness.yml` files "The latest image is behind
+main" when the head's image has not appeared within two hours (it also catches a run that never finished). Work them
+in this order:
+
+1. **Is it main?** Read the run's header, not just its title: the event must be `push` and the branch `main`. A
+   `pull_request` run of a PR that has already merged is not main -- it ran a moment after the merge on the same
+   commit, with a read-only cache token (`Cache mode: read` at the top of its log). Ignore it.
+2. **Is it transient?** Rerun the failed jobs once. If it passes, link the run in the issue and close it. If it fails
+   the same way again it was never transient (the cache failure of #598 failed twice), so go on to 3.
+3. **Fix forward or revert, now.** Revert the commit if the fix is not small and obvious; the head of `main` must
+   not stay red while it is investigated. Land the fix through a PR like any other change.
+4. **Confirm the contract holds.** The head's run completed, and `latest` is its image: both of these print the same
+   digest.
+
+   ```bash
+   docker buildx imagetools inspect ghcr.io/dlangerm/dlboard:latest | grep ^Digest
+   docker buildx imagetools inspect ghcr.io/dlangerm/dlboard:sha-$(git rev-parse --short=7 origin/main) | grep ^Digest
+   ```
+
+   If the head's publish was cancelled or skipped, rerun its `push` run (`gh run rerun <id>`). `publish-image` only
+   publishes the commit that is still the head of `main`, so rerunning an old run cannot move `latest` backwards.
+
 ## AI-assisted contributions
 
 dlboard's own history includes a fair amount of AI-assisted code (see the README's "AI Usage"
