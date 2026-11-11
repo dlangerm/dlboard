@@ -72,6 +72,10 @@ provisions itself, so no system Node/npm is required. These files target whateve
 Dash/browser runtime supports, not a specific Node version — keep that in mind before accepting an
 autofix/suggestion that assumes newer syntax.
 
+A failed, cancelled or unfinished CI run on `main` is an incident (the `latest`/`beta` images are a promise that they
+hold main's head): when asked about one, follow "When main is red" in `CONTRIBUTING.md`, starting with whether the run
+is really `main`'s (a `pull_request` run of an already merged PR is not).
+
 ## Architecture
 
 ### Packaging: two distributions, one source tree

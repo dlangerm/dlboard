@@ -32,4 +32,5 @@ runs:
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
         cache-from: type=gha
-        cache-to: type=gha,mode=max
+        # The cache only speeds the build up; failing to write it must never fail a publish.
+        cache-to: type=gha,mode=max,ignore-error=true

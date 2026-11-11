@@ -3,7 +3,7 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![PyPI - dlboard](https://img.shields.io/pypi/v/dlboard?label=dlboard)](https://pypi.org/project/dlboard/)
 [![PyPI - dlboard-client](https://img.shields.io/pypi/v/dlboard-client?label=dlboard-client)](https://pypi.org/project/dlboard-client/)
-[![CI](https://github.com/dlangerm/dlboard/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/dlangerm/dlboard/actions/workflows/ci.yml)
+[![CI](https://github.com/dlangerm/dlboard/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/dlangerm/dlboard/actions/workflows/ci.yml?query=branch%3Amain)
 
 **A free, self-hosted ML experiment tracker** that's as easy to run as TensorBoard, purpose-built for comparing runs and scaling to teams, large and small.
 

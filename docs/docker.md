@@ -241,7 +241,9 @@ Because `beta` and `latest` track unreleased code, a database migration they car
 release's worth of use; see [compatibility.md](compatibility.md) before pointing one at data you care about.
 
 `.github/workflows/ci.yml` pushes `latest`/`beta`/`sha-*` once its `test` job passes on `main` (a PR
-only gets the build-only `docker-build` check). Pushing a `vX.Y.Z`
+only gets the build-only `docker-build` check). Only the commit that is the head of `main` at that moment is
+published, so `latest` never moves backwards, and `.github/workflows/image-freshness.yml` opens an issue when it
+has not caught up with the head after two hours. Pushing a `vX.Y.Z`
 tag runs `.github/workflows/release.yml`, which publishes `dlboard-client`/`dlboard` to PyPI and then the
 release tags above.
 
