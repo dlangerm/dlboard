@@ -763,9 +763,6 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
         }
 
 
-ImageChart.register(allow_override=True)
-
-
 _SCRUB_JS = ClientsideScript(Path(__file__).with_name("image_series_scrub.js"))
 _PAGE_JS = ClientsideScript(Path(__file__).with_name("image_series_page.js"))
 _LOCK_JS = ClientsideScript(Path(__file__).with_name("image_series_lock.js"))
@@ -870,7 +867,8 @@ def _register_window_reads(app: dash.Dash) -> None:
 
 
 def plug(app: dash.Dash) -> None:
-    """Register clientside callbacks for image-series scrubbing, captions, pagination and overlays."""
+    """Plugin: registers the chart type, and its clientside callbacks for scrubbing, captions, pagination and overlays."""
+    ImageChart.register(allow_override=True)
     serve_layered_picture(app)
     serve_asset(app, AssetKind.STYLESHEET, _CSS_PATH.name, _CSS_PATH.read_bytes())
     serve_asset(app, AssetKind.SCRIPT, _OVERLAY_HELPER_PATH.name, _OVERLAY_HELPER_PATH.read_bytes())
