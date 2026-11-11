@@ -20,6 +20,9 @@ You're building a new storage backend, chart type, auth provider, or theme, and 
 the extension points are and how a plugin gets composed into a running app. Read the page for the
 specific category you're building — [storage](storage.md), [charts](charts.md), [auth](auth.md),
 [themes](themes.md) — this page is about the plugin mechanism itself, not any one category.
+If a coding agent is writing the plugin for you, give it [the plugin skill](../../skills/dlboard-plugin/SKILL.md): copy
+`skills/dlboard-plugin/`, from the release tag of the dlboard version you deploy, into your project's skills directory
+(`.claude/skills/` for Claude Code).
 
 Page layout (home, project, admin, experiment, account) is deliberately **not** a plugin category — these
 modules don't implement `PluginProtocol` at all, since nobody swaps out the experiment page's

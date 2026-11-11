@@ -134,29 +134,9 @@ uv run prek run --all-files         # run pre-commit hooks manually
 
 ## Learn More
 
-- [Architecture](docs/architecture.md) — how the app is put together: the plugin system, and the
-  request flow from a training script to the browser.
-- [Runs, pins & comparisons](docs/comparisons.md) — the run list, flag the runs that matter, and compare runs of several experiments.
-- [Retention](docs/retention.md) — how many runs, or how old, a project keeps, kept runs, and when the Trash is emptied.
-- [Background tasks](docs/background-tasks.md) — the custodian process, running several servers, watching it, and writing a task.
-- [Client & logging](docs/client.md) — `DLBoardLogger`, the REST client, and how to log a new kind
-  of artifact.
-- [Docker](docs/docker.md) — building and running the image, its Postgres + local-disk default, and
-  configuring it (including swapping in S3).
-- **Running it in production**
-  - [Configuration](docs/configuration.md) — every environment variable
-  - [Reverse proxy & TLS](docs/reverse-proxy.md) — Caddy and nginx examples
-  - [Telemetry](docs/telemetry.md) — Prometheus and OpenTelemetry metrics and logs, for Grafana, Mimir and Loki
-  - [Upgrading](docs/upgrading.md) and [Backup & restore](docs/backup.md)
-  - [Compatibility](docs/compatibility.md) — what's stable across releases and what may still change
-- **Plugins** — dlboard has no built-in opinions about storage, auth, charts, or theming; all of
-  it is plugins. (Page layout is the one deliberate exception — see
-  [architecture.md](docs/architecture.md).) Start with the
-  [overview](docs/plugins/overview.md), then the category you need:
-  - [Storage](docs/plugins/storage.md) — where projects/runs/metrics and artifact blobs live
-  - [Charts](docs/plugins/charts.md) — how a metric/artifact gets turned into a rendered chart
-  - [Auth](docs/plugins/auth.md) — signing people in, API tokens, and who can see which projects
-  - [Themes](docs/plugins/themes.md) — the Mantine theme the app renders with
+[The docs index](docs/README.md) lists every page by what you're doing: running a server, operating it, or
+extending it with plugins. New here? Start with [architecture](docs/architecture.md) for how dlboard fits together,
+and [client & logging](docs/client.md) for sending it runs from a training script.
 
 ## Contributing
 

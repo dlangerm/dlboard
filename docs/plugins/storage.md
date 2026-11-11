@@ -23,8 +23,8 @@ artifacts. The built-ins are `dlboard/plugins/data_stores/sqlite.py`, `filesyste
 
 ## Postgres
 
-`dlboard.plugins.POSTGRES_STORAGE` (`postgres` + `filesystem` + the artifact purge worker) swaps
-sqlite for a shared Postgres. Install the driver with the `postgres` extra
+`dlboard.plugins.POSTGRES_STORAGE` is `LOCAL_STORAGE` with a shared Postgres (`postgres`) in place of
+`sqlite`. Install the driver with the `postgres` extra
 (`pip install 'dlboard[postgres]'`), put `POSTGRES_STORAGE` in your own plugin list, and run it with
 `dlboard serve custom --plugins yourmodule:PLUGINS`:
 
@@ -34,17 +34,9 @@ from dlboard.plugins import BUILTIN_BACKEND, BUILTIN_CHARTS, PASSWORD_AUTH, POST
 PLUGINS = [*POSTGRES_STORAGE, *PASSWORD_AUTH, *BUILTIN_BACKEND, *BUILTIN_CHARTS, themes.default]
 ```
 
-Every setting is a `DLBOARD_POSTGRES_*` environment variable. The full list, with docs, is
-`PostgresSettings` in `dlboard/plugins/data_stores/postgres.py`:
-
-| Concern | Variables |
-|---|---|
-| Connection | `DLBOARD_POSTGRES_HOST` (a comma-separated list fails over between hosts), `_PORT`, `_DATABASE`, `_USER`, `_PASSWORD`, `_DB_SCHEMA` (created if missing), `_APPLICATION_NAME`, `_TARGET_SESSION_ATTRS` (e.g. `read-write`) |
-| TLS | `DLBOARD_POSTGRES_SSLMODE` (default `prefer`; use `verify-full` in production), `_SSLROOTCERT`, `_SSLCERT`, `_SSLKEY` |
-| Timeouts | `DLBOARD_POSTGRES_CONNECT_TIMEOUT_S`, `_STATEMENT_TIMEOUT_MS`, `_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS`, `_KEEPALIVES_IDLE_S` |
-| Pooling | `DLBOARD_POSTGRES_POOL_SIZE`, `_MAX_OVERFLOW`, `_POOL_TIMEOUT_S`, `_POOL_RECYCLE_S`, `_POOL_PRE_PING` |
-| PgBouncer | `DLBOARD_POSTGRES_PREPARE_THRESHOLD=null` disables server-side prepared statements for transaction pooling |
-| Anything else | `DLBOARD_POSTGRES_CONNECT_ARGS` — a JSON object of extra libpq parameters, e.g. `{"sslcrl": "..."}` |
+Every setting is a `DLBOARD_POSTGRES_*` environment variable, with its default, in
+[configuration.md](../configuration.md#postgres-storage). The code is `PostgresSettings` in
+`dlboard/plugins/data_stores/postgres.py`.
 
 The driver is libpq-based, so libpq's own environment (`PGPASSFILE`, `PGSERVICE`, ...) still works
 underneath these. Each server worker process has its own pool, so keep
@@ -56,8 +48,8 @@ once take turns creating/migrating the schema, under an advisory lock.
 `dlboard.plugins.s3` is an `ArtifactStore` over any S3-protocol object store — AWS, MinIO, VAST,
 or anything else that speaks the S3 API. Install boto3 with the `s3` extra
 (`pip install 'dlboard[s3]'`), put it in your own plugin list alongside whichever metadata store
-you're using (`dlboard.plugins.POSTGRES_S3_STORAGE` is `postgres` + `s3` + the artifact purge
-worker, ready-made), and run it with `dlboard serve custom --plugins yourmodule:PLUGINS`:
+you're using (`dlboard.plugins.POSTGRES_S3_STORAGE` is `POSTGRES_STORAGE` with `s3` in place of
+`filesystem`, ready-made), and run it with `dlboard serve custom --plugins yourmodule:PLUGINS`:
 
 ```python
 from dlboard.plugins import BUILTIN_BACKEND, BUILTIN_CHARTS, PASSWORD_AUTH, POSTGRES_S3_STORAGE, themes
@@ -65,18 +57,9 @@ from dlboard.plugins import BUILTIN_BACKEND, BUILTIN_CHARTS, PASSWORD_AUTH, POST
 PLUGINS = [*POSTGRES_S3_STORAGE, *PASSWORD_AUTH, *BUILTIN_BACKEND, *BUILTIN_CHARTS, themes.default]
 ```
 
-Every setting is a `DLBOARD_S3_*` environment variable. The full list, with docs, is `S3Settings` in
-`dlboard/plugins/data_stores/s3.py`:
-
-| Concern | Variables |
-|---|---|
-| Where blobs live | `DLBOARD_S3_BUCKET` (required), `_PREFIX` (default `dlboard`; every blob lives under `s3://bucket/prefix/...`) |
-| Connection | `DLBOARD_S3_ENDPOINT_URL` (unset talks to AWS; set it to any other S3-protocol endpoint), `_REGION`, `_ADDRESSING_STYLE` (`path` for MinIO/most on-prem/VAST — they don't support virtual-hosted bucket addressing) |
-| Credentials | `DLBOARD_S3_ACCESS_KEY_ID`, `_SECRET_ACCESS_KEY`, `_SESSION_TOKEN` — left unset, boto3 falls back to its own default chain (environment, shared config/profile, instance/container role) |
-| TLS | `DLBOARD_S3_VERIFY_TLS` (default `true`), `_CA_BUNDLE` (a CA bundle for a self-signed/private-CA endpoint) |
-| Downloads | `DLBOARD_S3_DOWNLOAD_MODE` (`proxy`, the default — streams through this server, reachable even from a private endpoint; or `presign` — a 302 to a short-lived presigned URL, no bytes through this server, but the endpoint must be reachable from the browser), `_PRESIGN_TTL_S` |
-| Linking (see below) | `DLBOARD_S3_EXTRA_READ_BUCKETS` — a JSON array of other buckets this store's credentials may read (and link/download) from, but never write to or delete from |
-| Throughput | `DLBOARD_S3_QUEUE_SIZE` |
+Every setting is a `DLBOARD_S3_*` environment variable, with its default, in
+[configuration.md](../configuration.md#s3-artifact-storage). The code is `S3Settings` in
+`dlboard/plugins/data_stores/s3.py`.
 
 ## Linking an already-uploaded artifact
 
@@ -93,13 +76,13 @@ allowlisted bucket is never deleted by dlboard, since dlboard didn't put it ther
 ## How do I build one
 
 Implement the protocol (`DataStore` or `ArtifactStore`, or both) and register the instance from
-`plug(app)`:
+`plug(app)`, with `set_data_store` and `set_artifact_store` from `dlboard.serve`:
 
 ```python
 def plug(app: Dash) -> None:
-    set_data_store(app, MyStore.get_or_create(...))  # dlboard.serve._backend._data_store
-    # or, for a blob store:
-    set_artifact_store(app, MyArtifactStore.get_or_create(...))
+    set_data_store(app, MyStore.get_or_create(...))
+    # or, for an artifact store:
+    set_artifact_store(app, MyArtifactStore(...))
 ```
 
 Two things a `DataStore` read takes are hints a store may ignore. A `MetricReduction` (`fetch_metrics`) asks for
@@ -131,8 +114,9 @@ check passes until something has been logged, and a driver that returns the wron
 
 For an `ArtifactStore` that's just somewhere to put and fetch whole blobs (as opposed to something
 with its own, different storage model entirely), you don't have to implement the protocol from
-scratch either — `BlobArtifactStore` (`plugins/data_stores/_blob_store.py`) already implements it
-on top of a much smaller `BlobBackend` protocol: `ref_for` (the ref a freshly written blob gets),
+scratch either — `plug_blob_store(app, backend, queue_size)` (`dlboard.plugins.data_stores`) sets a
+`BlobArtifactStore` that already implements it on top of a much smaller `BlobBackend` protocol, and
+starts what it needs in each process: `ref_for` (the ref a freshly written blob gets),
 `access` (whether a ref is servable at all, and whether this backend owns it or merely allowlists
 it — see "Linking" above), `exists`, `write`, `download`, and `delete`. `BlobArtifactStore` handles
 staging an upload, batching writes off to a worker process, async ref-ingest back into the
@@ -140,7 +124,7 @@ staging an upload, batching writes off to a worker process, async ref-ingest bac
 `delete_artifact` — a new backend only has to say how one blob is actually read, written, and
 deleted. `filesystem.py`'s `FSBlobs` (local disk) and `s3.py`'s `S3Blobs` (any S3-protocol store)
 are both just a `BlobBackend` plus a `pydantic_settings.BaseSettings` for configuration, read
-inside `plug()` — model a new one on whichever is closer to your backend.
+inside `plug()` and handed to `plug_blob_store` — model a new one on whichever is closer to your backend.
 
-Read from elsewhere in the app with `get_data_store()` / `get_artifact_store()`
-(`dlboard/serve/_backend/_data_store.py`) rather than passing the store instance around directly.
+Read from elsewhere in the app with `get_data_store()` / `get_artifact_store()` (`dlboard.serve`)
+rather than passing the store instance around directly.
