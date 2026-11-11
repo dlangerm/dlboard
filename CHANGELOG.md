@@ -12,6 +12,8 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-11-11
+
 ### Added
 
 * **A comparison page follows what is logged live,** as an experiment's does: its live poll watches every experiment
