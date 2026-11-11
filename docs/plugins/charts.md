@@ -263,7 +263,9 @@ def plug(app: Dash) -> None:
 Always pass `allow_override=True` — the composed app can get built more than once in a process
 (tests do this legitimately), and `ChartTypeRegistry.register` raises on a second registration of
 the same name unless told it's expected. `line_chart.py`/`bar_chart.py`/`table_chart.py`/
-`image_series.py` are all consistent about this; follow their lead.
+`image_series.py` are all consistent about this; follow their lead. Register in `plug()` and nowhere else: a
+registration at module level would offer the chart in every deployment that merely imports your module, whether or not
+it lists your plugin.
 
 If your chart needs its own browser-side JS, keep the `.js` file next to the chart module and
 serve/register it from `plug()` yourself, the way `bar_chart.py`/`line_chart.py` do for their
