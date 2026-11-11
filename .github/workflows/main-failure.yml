@@ -1,0 +1,33 @@
+name: Main failure
+
+# A run of CI that failed on main is an incident, not noise: people run what main builds. This watches the
+# run as a whole rather than a list of its jobs, so a job added to ci.yml is covered without being listed
+# here. A cancelled run is not reported: GitHub cancels a waiting run of main when a newer push replaces it.
+# `image-freshness.yml` is the backstop for a head that never got its image.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  issues: write
+
+jobs:
+  report:
+    if: >-
+      github.event.workflow_run.event == 'push'
+      && !contains(fromJSON('["success", "cancelled", "skipped"]'), github.event.workflow_run.conclusion)
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+        run: |
+          gh issue create --repo "$GITHUB_REPOSITORY" \
+            --title "CI failed on main at ${SHA::7}" \
+            --body "CI ended \`$CONCLUSION\` on the push of $SHA to main: $RUN_URL
+
+          Follow \"When main is red\" in CONTRIBUTING.md; until it is fixed or reverted the \`latest\`/\`beta\` images do not include this commit."

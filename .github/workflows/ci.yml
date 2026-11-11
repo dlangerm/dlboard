@@ -208,34 +208,3 @@ jobs:
             type=raw,value=latest
             type=raw,value=beta
             type=sha,prefix=sha-
-
-  # A job that failed on main is an incident, not noise: people run what main builds. Files the issue
-  # that starts "When main is red" in CONTRIBUTING.md; `image-freshness.yml` is the backstop for what
-  # this cannot see (a run that never finished).
-  report-main-failure:
-    needs:
-      - typecheck-precommit
-      - test
-      - test-postgres
-      - test-s3
-      - client-compat
-      - client-otel
-      - docker-build
-      - publish-image
-    if: always() && github.event_name == 'push' && contains(needs.*.result, 
-      'failure')
-    runs-on: ubuntu-latest
-    permissions:
-      issues: write
-    steps:
-      - env:
-          GH_TOKEN: ${{ github.token }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository 
-            }}/actions/runs/${{ github.run_id }}
-        run: |
-          gh issue create --repo "$GITHUB_REPOSITORY" \
-            --title "CI failed on main at ${GITHUB_SHA::7}" \
-            --body "A job failed on the push of $GITHUB_SHA to main: $RUN_URL
-
-          Follow \"When main is red\" in CONTRIBUTING.md: triage it, and until it is fixed or reverted the
-          \`latest\`/\`beta\` images do not include this commit."
