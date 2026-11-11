@@ -39,7 +39,7 @@ repo follows -- file layout, the plugin system, test placement, and the rest.
 ## When main is red
 
 People run what `main` builds (`latest`/`beta` are its head's image, and releases are cut from it), so a failed or
-cancelled run on `main` is an incident. CI files "CI failed on main at `<sha>`" when a job fails on a push, and
+cancelled run on `main` is an incident. CI files "CI failed on main at `<sha>`" when its run fails on a push, and
 `image-freshness.yml` files "The latest image is behind main" when the head has no image two hours after it landed.
 
 1. **Is it main?** The run's event must be `push` on `main`. A `pull_request` run of an already merged PR is not: it
