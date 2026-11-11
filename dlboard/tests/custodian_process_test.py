@@ -33,6 +33,11 @@ pytestmark = pytest.mark.skipif(
 )
 
 _DEADLINE_S = 20.0
+_SHUTDOWN_DEADLINE_S = 90.0
+"""
+How long a server may take to exit after SIGTERM: its own budgets for stopping the custodian and the workers are 30s each
+(`workers_kill_timeout_s`), so a shorter wait fails a shutdown the server is allowed to take, on a loaded machine (#605).
+"""
 
 
 def _free_port() -> int:
@@ -90,7 +95,8 @@ class _Server:
     def _ready(self) -> bool | None:
         try:
             return requests.get(f"http://127.0.0.1:{self.port}/readyz", timeout=1).ok or None
-        except requests.ConnectionError:
+        # A connection refused, or a slow answer on a loaded machine: poll again.
+        except requests.RequestException:
             return None
 
     def custodian(self, *, not_pid: int | None = None) -> int:
@@ -167,8 +173,8 @@ def test_the_server_keeps_one_custodian_alive_and_stops_it_with_itself(server: _
 
     everything = server.descendants()
     server.master.send_signal(signal.SIGTERM)
-    server.master.wait(timeout=_DEADLINE_S)
-    _, alive = psutil.wait_procs(everything, timeout=_DEADLINE_S)
+    server.master.wait(timeout=_SHUTDOWN_DEADLINE_S)
+    _, alive = psutil.wait_procs(everything, timeout=_SHUTDOWN_DEADLINE_S)
     assert alive == []
 
 
