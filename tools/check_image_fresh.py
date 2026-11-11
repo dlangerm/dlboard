@@ -11,8 +11,10 @@ from a checkout of `main`. Exits 1 while the image is stale. Stdlib only; it cal
 from __future__ import annotations
 
 import re
+import shlex
 import subprocess
 import sys
+from enum import StrEnum
 from typing import Final
 
 IMAGE: Final = "ghcr.io/dlangerm/dlboard"
@@ -20,73 +22,88 @@ GRACE: Final = 2 * 60 * 60
 """Seconds a commit on `main` has to be published before its image is overdue."""
 TITLE: Final = "The latest image is behind main"
 """The issue's title; an open issue with it is found by title, so a stale image is reported once."""
+LAST_PUSH: Final = shlex.split(
+    "gh run list --workflow ci.yml --branch main --event push --limit 1 --json createdAt --jq"
+)
+"""The run of `main`'s head; a `--jq` expression follows."""
+OPEN_ISSUES: Final = shlex.split("gh issue list --state open --search")
+"""The open issues matching a search that follows."""
 DIGEST: Final = re.compile(r"^Digest:\s+(\S+)", re.MULTILINE)
 
 
-def run(*cmd: str, check: bool = True) -> str:
-    """The stdout of `cmd`; a failing command raises unless `check` is off, so a broken `gh` is never read as "fine"."""
-    return subprocess.run(cmd, capture_output=True, text=True, check=check).stdout
+class State(StrEnum):
+    """How `latest` stands against the head of `main`."""
+
+    CURRENT = "current"
+    PENDING = "pending"
+    """No image of the head yet, but it landed less than `GRACE` ago."""
+    OVERDUE = "overdue"
 
 
 def digest(tag: str) -> str | None:
     """The digest `tag` resolves to, or None when there is no such tag."""
-    found = DIGEST.search(run("docker", "buildx", "imagetools", "inspect", f"{IMAGE}:{tag}", check=False))
+    inspected = subprocess.run(
+        ["docker", "buildx", "imagetools", "inspect", f"{IMAGE}:{tag}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    found = DIGEST.search(inspected.stdout)
     return found.group(1) if found else None
 
 
 def main(run_url: str) -> int:
-    """Report the image's state, file or close the issue to match (`run_url` is this run, for the issue), and return the exit status."""
-    head = run("git", "rev-parse", "--short=7", "HEAD").strip()
+    """Report the image's state, file or close the issue to match (`run_url` is this run, for the issue)."""
+    head = subprocess.run(
+        ["git", "rev-parse", "--short=7", "HEAD"], capture_output=True, text=True, check=True
+    ).stdout.strip()
     # When the head landed, not when it was committed: a stack lands commits hours after it wrote them.
-    landed = run(  # seconds since the head's push run started
-        "gh",
-        "run",
-        "list",
-        "--workflow",
-        "ci.yml",
-        "--branch",
-        "main",
-        "--event",
-        "push",
-        "--limit",
-        "1",
-        "--json",
-        "createdAt",
-        "--jq",
-        "now - (.[0].createdAt | fromdateiso8601)",
+    age = float(
+        subprocess.run(
+            [*LAST_PUSH, "now - (.[0].createdAt | fromdateiso8601)"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
     )
-    age = float(landed)
     head_digest = digest(f"sha-{head}")
-    stale = head_digest is None or head_digest != digest("latest")
-    overdue = stale and age > GRACE
-    filed = run(
-        "gh",
-        "issue",
-        "list",
-        "--state",
-        "open",
-        "--search",
-        f"{TITLE} in:title",
-        "--json",
-        "number",
-        "--jq",
-        ".[].number",
-    ).split()
-    match (overdue, stale, filed):
-        case (True, _, []):
+    if head_digest is not None and head_digest == digest("latest"):
+        state = State.CURRENT
+    else:
+        state = State.OVERDUE if age > GRACE else State.PENDING
+    filed = subprocess.run(
+        [*OPEN_ISSUES, f"{TITLE} in:title", "--json", "number", "--jq", ".[].number"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    match state:
+        case State.OVERDUE if not filed:
             what = "missing" if head_digest is None else "a different image"
             body = (
                 f"`{IMAGE}:latest` is not the image of `main`'s head `{head}`, which landed {age / 3600:.1f} hours ago "
                 f'(`sha-{head}` is {what}). Found by {run_url}. Follow "When main is red" in CONTRIBUTING.md.'
             )
-            run("gh", "issue", "create", "--title", TITLE, "--body", body)
-        case (_, False, [*numbers]):
-            for number in numbers:
-                run("gh", "issue", "close", number, "--comment", f"`latest` is `main`'s head `{head}` again.")
-        case _:
-            pass
-    sys.stdout.write(f"head {head}: latest is {'stale' if stale else 'current'} ({age / 3600:.1f}h old)\n")
-    return int(overdue)
+            subprocess.run(["gh", "issue", "create", "--title", TITLE, "--body", body], check=True)
+        case State.OVERDUE:
+            pass  # already reported
+        case State.PENDING:
+            pass  # still within GRACE
+        case State.CURRENT:
+            for number in filed:
+                subprocess.run(
+                    [
+                        "gh",
+                        "issue",
+                        "close",
+                        number,
+                        "--comment",
+                        f"`latest` is `main`'s head `{head}` again.",
+                    ],
+                    check=True,
+                )
+    sys.stdout.write(f"head {head}: latest is {state} ({age / 3600:.1f}h since it landed)\n")
+    return int(state is State.OVERDUE)
 
 
 if __name__ == "__main__":

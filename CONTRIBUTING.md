@@ -38,29 +38,17 @@ repo follows -- file layout, the plugin system, test placement, and the rest.
 
 ## When main is red
 
-People run what `main` builds: `latest`/`beta` are the image of its head, and releases are cut from it. So a failed
-or unfinished run on `main` is an incident, and a cancelled run is not a green one. Two things tell you: CI files
-"CI failed on main at `<sha>`" when a job fails on a push, and `image-freshness.yml` files "The latest image is behind
-main" when the head's image has not appeared within two hours (it also catches a run that never finished). Work them
-in this order:
+People run what `main` builds (`latest`/`beta` are its head's image, and releases are cut from it), so a failed or
+cancelled run on `main` is an incident. CI files "CI failed on main at `<sha>`" when a job fails on a push, and
+`image-freshness.yml` files "The latest image is behind main" when the head has no image two hours after it landed.
 
-1. **Is it main?** Read the run's header, not just its title: the event must be `push` and the branch `main`. A
-   `pull_request` run of a PR that has already merged is not main -- it ran a moment after the merge on the same
-   commit, with a read-only cache token (`Cache mode: read` at the top of its log). Ignore it.
-2. **Is it transient?** Rerun the failed jobs once. If it passes, link the run in the issue and close it. If it fails
-   the same way again it was never transient (the cache failure of #598 failed twice), so go on to 3.
-3. **Fix forward or revert, now.** Revert the commit if the fix is not small and obvious; the head of `main` must
-   not stay red while it is investigated. Land the fix through a PR like any other change.
-4. **Confirm the contract holds.** The head's run completed, and `latest` is its image: both of these print the same
-   digest.
-
-   ```bash
-   docker buildx imagetools inspect ghcr.io/dlangerm/dlboard:latest | grep ^Digest
-   docker buildx imagetools inspect ghcr.io/dlangerm/dlboard:sha-$(git rev-parse --short=7 origin/main) | grep ^Digest
-   ```
-
-   If the head's publish was cancelled or skipped, rerun its `push` run (`gh run rerun <id>`). `publish-image` only
-   publishes the commit that is still the head of `main`, so rerunning an old run cannot move `latest` backwards.
+1. **Is it main?** The run's event must be `push` on `main`. A `pull_request` run of an already merged PR is not: it
+   ran after the merge with a read-only cache token (`Cache mode: read` in its log). Ignore it.
+2. **Rerun the failed jobs once.** If they pass, link the run and close the issue; if not, it is real.
+3. **Fix forward or revert.** Don't leave the head red while investigating.
+4. **Confirm `latest` is the head's image:** `docker buildx imagetools inspect` of `ghcr.io/dlangerm/dlboard:latest`
+   and of `:sha-$(git rev-parse --short=7 origin/main)` print the same `Digest`. If not, `gh run rerun` the head's
+   `push` run; only the head publishes, so an old run can't move `latest` backwards.
 
 ## AI-assisted contributions
 
