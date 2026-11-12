@@ -27,6 +27,7 @@ from dlboard.serve._pages._experiment import _page_model as page_model
 from dlboard.serve._pages._experiment import _page_repository as repo
 from dlboard.serve._pages._experiment._live_updates import live_controls
 from dlboard.serve._pages._page_header import PageHeaderIds, page_header, register_page_header
+from dlboard.serve._pages._page_sections import ProjectPageTab
 from dlboard.serve._url import relative_path
 
 if TYPE_CHECKING:
@@ -210,6 +211,8 @@ def register_header_callbacks(app: Dash) -> None:
         store = get_data_store()
         page = _stored(store, page_id)
         store.delete_view(page_id, get_current_user().id)
-        return relative_path(f"/project/{page.project_id}")
+        return relative_path(
+            f"/project/{page.project_id}?tab={ProjectPageTab.COMPARISONS}"
+        )  # where it was listed
 
     register_delete_callbacks(app, DELETE_IDS, comparison, on_confirm=delete_comparison)

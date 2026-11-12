@@ -31,6 +31,7 @@ def test_a_project_is_held_to_a_rule_after_its_grace_period_and_the_change_can_b
 ) -> None:
     _create_project_and_experiment(page, live_server_url, "Retention Rule Project")
     page.reload()
+    page.get_by_role("tab", name="Retention").click()
     page.locator(f"#{retention.KIND_ID}").click()
     page.get_by_role("option", name="The newest runs").click()
     page.locator(f"#{retention.AMOUNT_ID}").fill("5")
@@ -60,6 +61,8 @@ def test_an_experiment_page_says_what_keeps_its_runs_and_links_to_where_that_is_
 
     page.get_by_role("link", name="Change →").click()
 
-    expect(page).to_have_url(re.compile(rf"/project/\d+#{retention.SECTION_ID}$"))
+    # The project page opens on the tab the link names (#615).
+    expect(page).to_have_url(re.compile(rf"/project/\d+\?tab={retention.RETENTION_TAB}$"))
+    expect(page.get_by_role("tab", name="Retention")).to_have_attribute("aria-selected", "true")
     expect(page.locator(f"#{retention.SECTION_ID}")).to_be_visible()
     assert console_errors == []

@@ -20,7 +20,7 @@ from dlboard.plugins.retention._rules import (
     RunAge,
     RunCount,
 )
-from dlboard.plugins.retention._section import SECTION_ID
+from dlboard.plugins.retention._section import RETENTION_TAB
 from dlboard.serve import app as build_app
 from dlboard.serve import get_system_data_store
 from dlboard.serve._backend import _auth
@@ -83,5 +83,5 @@ def test_an_experiment_header_says_its_rule_and_its_projects_and_links_to_the_pr
         header = experiment_header(store, experiment, page, None)
 
     assert [p["children"] for p in find_all_props(header, lambda p: p.get("children") == line)] == [line]
-    [link] = find_all_props(header, lambda p: p.get("href", "").endswith(f"#{SECTION_ID}"))
-    assert link["href"] == f"/project/{project.id}#{SECTION_ID}"
+    [link] = find_all_props(header, lambda p: "?tab=" in p.get("href", ""))
+    assert link["href"] == f"/project/{project.id}?tab={RETENTION_TAB}"

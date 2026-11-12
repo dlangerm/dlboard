@@ -1,4 +1,4 @@
-"""What plugins add to a project's or an experiment's page: each slot's sections, in the order they registered, and none that draws nothing."""
+"""What plugins add to a project's or an experiment's page: tabs and sections in the order they registered, never one that draws nothing."""
 
 from __future__ import annotations
 
@@ -12,12 +12,11 @@ from dlboard.serve._backend._app_slot import DASH_APP_EXTENSION
 from dlboard.serve._pages._page_sections import (
     ExperimentSection,
     ExperimentSlot,
-    ProjectSection,
-    ProjectSlot,
+    ProjectTab,
     experiment_sections,
-    project_sections,
+    project_tabs,
     register_experiment_section,
-    register_project_section,
+    register_project_tab,
 )
 
 if TYPE_CHECKING:
@@ -32,25 +31,48 @@ def app() -> Iterator[Dash]:
         yield app
 
 
-def test_a_project_slot_draws_its_sections_in_the_order_they_registered_and_skips_one_that_draws_nothing(
+def _drawing(text: str) -> ProjectTab:
+    return ProjectTab(key=text, label=text.title(), render=lambda p: html.Div(f"{text} {p.name}"))
+
+
+def test_a_project_page_has_its_plugins_tabs_in_the_order_they_registered_but_not_one_that_draws_nothing(
     app: Dash,
 ) -> None:
     project = models.Project(name="p", description="", id=1)
-    for slot, text in (
-        (ProjectSlot.BODY, "first"),
-        (ProjectSlot.HEADER, "line"),
-        (ProjectSlot.BODY, "second"),
-    ):
-        register_project_section(app, ProjectSection(slot, lambda p, text=text: html.Div(f"{text} {p.name}")))
-    register_project_section(app, ProjectSection(ProjectSlot.BODY, lambda _p: None))
+    register_project_tab(app, _drawing("first"))
+    register_project_tab(app, ProjectTab(key="empty", label="Empty", render=lambda _p: None))
+    register_project_tab(app, _drawing("second"))
 
-    assert [s.children for s in project_sections(ProjectSlot.BODY, project)] == ["first p", "second p"]
-    assert [s.children for s in project_sections(ProjectSlot.HEADER, project)] == ["line p"]
+    assert [(tab.label, drawn.children) for tab, drawn in project_tabs(project)] == [
+        ("First", "first p"),
+        ("Second", "second p"),
+    ]
 
 
-def test_an_experiment_draws_its_own_sections_never_a_projects(app: Dash) -> None:
+@pytest.mark.parametrize(
+    "key",
+    ["experiments", "sharing", "first", "Has Spaces", "-leading-dash", ""],
+    ids=[
+        "the-pages-own",
+        "the-pages-own-sharing",
+        "another-plugins",
+        "not-a-url-value",
+        "a-leading-dash",
+        "none",
+    ],
+)
+def test_a_tab_is_refused_a_key_the_page_or_another_plugin_has_or_one_a_link_cannot_carry(
+    app: Dash, key: str
+) -> None:
+    register_project_tab(app, _drawing("first"))
+
+    with pytest.raises(ValueError, match="tab"):
+        register_project_tab(app, _drawing(key))
+
+
+def test_an_experiment_draws_its_own_sections_never_a_projects_tabs(app: Dash) -> None:
     experiment = models.Experiment(project_id=1, name="e", id=2)
-    register_project_section(app, ProjectSection(ProjectSlot.HEADER, lambda p: html.Div(f"project {p.name}")))
+    register_project_tab(app, _drawing("project"))
     register_experiment_section(
         app, ExperimentSection(ExperimentSlot.HEADER, lambda e: html.Div(f"experiment {e.name}"))
     )
