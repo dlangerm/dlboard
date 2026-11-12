@@ -6,8 +6,8 @@ on:
   # Every PR, not just ones into main: a stacked PR targets the branch below it.
   pull_request:
 
-# Read-only for every job unless a job asks for more itself (`publish-image` does, for ghcr.io; the jobs that can fail
-# do, to halt the run: a failure in a pull request's run cancels the rest of it -- see `halt-pipeline`).
+# Read-only for every job unless a job asks for more itself (`publish-image` does, for ghcr.io; the suites do, to file
+# flaky tests; `halt-on-failure` does, to cancel the run).
 permissions:
   contents: read
 
@@ -55,11 +55,10 @@ jobs:
   test:
     needs: [check_doc_only, typecheck-precommit]
     runs-on: ubuntu-latest
-    # Reruns the tests this job's suite failed, and files an issue for each flaky one; halts the run after one.
+    # Reruns the tests this job's suite failed, and files an issue for each flaky one.
     permissions:
       contents: read
       issues: write
-      actions: write
     if: needs.check_doc_only.outputs.skip-tests != 'true'
     steps:
       - uses: actions/checkout@v4
@@ -68,17 +67,14 @@ jobs:
           uv run pytest -m "not browser and not postgres and not s3" --cov --maxfail=3
       - if: failure()
         uses: ./.github/actions/recheck-failures
-      - if: failure()
-        uses: ./.github/actions/halt-pipeline
 
   test-browser:
     needs: [check_doc_only, typecheck-precommit]
     runs-on: ubuntu-latest
-    # Reruns the tests this job's suite failed, and files an issue for each flaky one; halts the run after one.
+    # Reruns the tests this job's suite failed, and files an issue for each flaky one.
     permissions:
       contents: read
       issues: write
-      actions: write
     if: needs.check_doc_only.outputs.skip-tests != 'true'
     steps:
       - uses: actions/checkout@v4
@@ -87,19 +83,16 @@ jobs:
       - run: uv run pytest -m browser -x
       - if: failure()
         uses: ./.github/actions/recheck-failures
-      - if: failure()
-        uses: ./.github/actions/halt-pipeline
 
   # The docs images, re-rendered and compared with `docs/images`. Its own job: the render needs a browser
   # and a whole-database process of its own (see `dlboard/conftest.py`), so it shares nothing with the rest.
   test-screenshots:
     needs: [check_doc_only, typecheck-precommit]
     runs-on: ubuntu-latest
-    # Reruns the tests this job's suite failed, and files an issue for each flaky one; halts the run after one.
+    # Reruns the tests this job's suite failed, and files an issue for each flaky one.
     permissions:
       contents: read
       issues: write
-      actions: write
     if: needs.check_doc_only.outputs.skip-tests != 'true'
     steps:
       - uses: actions/checkout@v4
@@ -114,8 +107,6 @@ jobs:
           name: doc-screenshots
           path: screenshot-diffs/
           if-no-files-found: ignore
-      - if: failure()
-        uses: ./.github/actions/halt-pipeline
 
   # The store suite, soft-delete/purge, and the client -> REST -> store end-to-end test, against a
   # real Postgres: testcontainers starts one in Docker (preinstalled on GitHub's Ubuntu runners), the
@@ -124,19 +115,16 @@ jobs:
     if: needs.check_doc_only.outputs.skip-tests != 'true'
     needs: [check_doc_only, typecheck-precommit]
     runs-on: ubuntu-latest
-    # Reruns the tests this job's suite failed, and files an issue for each flaky one; halts the run after one.
+    # Reruns the tests this job's suite failed, and files an issue for each flaky one.
     permissions:
       contents: read
       issues: write
-      actions: write
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-env
       - run: uv run pytest -m postgres -x
       - if: failure()
         uses: ./.github/actions/recheck-failures
-      - if: failure()
-        uses: ./.github/actions/halt-pipeline
 
   # The S3 artifact store, against a real S3-protocol endpoint (LocalStack, in Docker) -- the same
   # way `uv run pytest -m s3` does locally. See `dlboard/conftest.py`'s `s3_test_server`.
@@ -144,19 +132,16 @@ jobs:
     if: needs.check_doc_only.outputs.skip-tests != 'true'
     needs: [check_doc_only, typecheck-precommit]
     runs-on: ubuntu-latest
-    # Reruns the tests this job's suite failed, and files an issue for each flaky one; halts the run after one.
+    # Reruns the tests this job's suite failed, and files an issue for each flaky one.
     permissions:
       contents: read
       issues: write
-      actions: write
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-env
       - run: uv run pytest -m s3 -x
       - if: failure()
         uses: ./.github/actions/recheck-failures
-      - if: failure()
-        uses: ./.github/actions/halt-pipeline
 
   # Confirms the client actually installs and imports on every Python version
   # `client/pyproject.toml`'s `requires-python = ">=3.10"` claims -- nothing else does: the repo's
@@ -166,9 +151,6 @@ jobs:
     if: needs.check_doc_only.outputs.skip-tests != 'true'
     needs: [check_doc_only, typecheck-precommit]
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      actions: write # to halt the run when this fails
     strategy:
       fail-fast: false
       matrix:
@@ -184,8 +166,6 @@ jobs:
       - run: >
           client-venv/bin/python -c
           "import dlboard, dlboard.client, dlboard.client.artifacts.image, dlboard.models"
-      - if: failure()
-        uses: ./.github/actions/halt-pipeline
 
   # The client's `otel` extra promises a floor and no ceiling, so a user's own OpenTelemetry is never forced to move
   # for dlboard. This installs the extra three ways -- every direct requirement at its floor, the newest releases,
@@ -196,9 +176,6 @@ jobs:
     if: needs.check_doc_only.outputs.skip-tests != 'true'
     needs: [check_doc_only, typecheck-precommit]
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      actions: write # to halt the run when this fails
     strategy:
       fail-fast: false
       matrix:
@@ -219,8 +196,6 @@ jobs:
           -r client/pyproject.toml --extra otel ${{ matrix.pin }}
       - run: uv pip install --python client-venv/bin/python --no-deps dist/*.whl
       - run: client-venv/bin/python tools/check_client_tracing.py
-      - if: failure()
-        uses: ./.github/actions/halt-pipeline
 
   # Build-only: proves the root `Dockerfile`'s multi-stage build still produces a working
   # dlboard image. Not pushed anywhere -- just a build sanity check on every PR.
@@ -230,9 +205,6 @@ jobs:
     if: needs.check_doc_only.outputs.skip-tests != 'true'
     needs: [check_doc_only, typecheck-precommit]
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      actions: write # to halt the run when this fails
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -242,8 +214,34 @@ jobs:
           push: false
           cache-from: type=gha
           cache-to: type=gha,mode=max,ignore-error=true
-      - if: failure()
-        uses: ./.github/actions/halt-pipeline
+
+  # A pull request's run stops at its first failure, so it is heard of in minutes rather than when the slowest job is
+  # done. A failing job cannot stop it itself: cancelling the run cancels the job that asked too, and the run showed every
+  # job cancelled and none failed. This job watches the others and cancels the run once a failed one has finished, which
+  # keeps its failure (`tools/halt_on_failure.py`). Not for a push to main: a cancelled run of main is not reported
+  # (`main-failure.yml` leaves it alone, as GitHub cancels a waiting one for a newer push), so a failure there must end as
+  # one, every job finished. Nor for a fork's pull request, whose read-only token cannot cancel: it runs to the end.
+  # It needs what the jobs it watches need, so it starts with them, and is skipped when they are.
+  halt-on-failure:
+    needs: [check_doc_only, typecheck-precommit]
+    if: >-
+      needs.check_doc_only.outputs.skip-tests != 'true'
+      && github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: tools/halt_on_failure.py
+          sparse-checkout-cone-mode: false
+      - run: >
+          python3 tools/halt_on_failure.py
+          "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$GITHUB_JOB"
+        env:
+          GH_TOKEN: ${{ github.token }}
 
   # Publishes the image once a change has landed on main and the test suite passed on it. `stable` and
   # the version tags belong to release.yml. PRs only get `docker-build` above.
