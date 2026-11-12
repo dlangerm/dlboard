@@ -49,9 +49,15 @@ def _read(store: DataStore[...], project_id: int, name_contains: str, offset: in
     return Cards(found.total, [_card(c, mine=c.owner_id == me) for c in found.comparisons])
 
 
-def _empty(_project_id: int, query: CardQuery) -> Component | None:
-    """No comparison matches the filter; a project with none has no grid of them at all."""
-    return dmc.Text("No comparison matches.", c="dimmed", size="sm") if query.q else None
+def _empty(_project_id: int, query: CardQuery) -> Component:
+    """No comparison matches the filter; or there are none yet, so how to make the first (the Comparisons tab is always there)."""
+    if query.q:
+        return dmc.Text("No comparison matches.", c="dimmed", size="sm")
+    return dmc.Text(
+        "No comparisons yet. Select runs in an experiment's run list, or pin them, and choose Compare.",
+        c="dimmed",
+        size="sm",
+    )
 
 
 COMPARISON_CARDS = CardSource(grid=CardGrid.COMPARISONS, label="Comparisons", read=_read, empty=_empty)

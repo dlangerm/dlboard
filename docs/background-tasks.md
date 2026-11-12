@@ -113,11 +113,13 @@ the store:
   [role](plugins/auth.md) may read the key and write each scope (defaults: viewer reads, owner writes a project's, editor an
   experiment's), and may check a value before it is stored: return it as given or marked up, or raise `PermissionError`. The
   authorizing store enforces this, so a plugin never authorizes by hand, and a key with no rule is the system's alone.
-- `register_project_section(app, ProjectSection(ProjectSlot.HEADER | ProjectSlot.BODY, render))` adds a line under a
-  project's header, or a section under its experiments, drawn in the page's own layout.
+- `register_project_tab(app, ProjectTab(key=..., label=..., render=...))` adds a tab to a project's page, after its own
+  Experiments, Comparisons and Sharing tabs, drawn in the page's own layout. `key` is its `?tab=` value, so a link opens
+  the page on it (`/project/<id>?tab=<key>`): lowercase letters, digits and dashes, and not a key the page or another plugin
+  already has. `render` returning `None` leaves the tab out for that project.
   `register_experiment_section(app, ExperimentSection(ExperimentSlot.HEADER, render))` adds a line under an experiment's
-  header the same way (retention says there what keeps the experiment's runs). These are the one place a plugin reaches
-  into a page.
+  header (retention says there what keeps the experiment's runs, and links to its tab). These are the one place a plugin
+  reaches into a page.
 
 - `register_run_guard(app, guard)` asks `guard(store, project_id)` before every run a request creates, once the writer's role
   is checked. `store` is the system's (no user is behind it), and the guard returns, or raises `ProjectLockedError(why)` to

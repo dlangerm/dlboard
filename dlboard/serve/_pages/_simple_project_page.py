@@ -1,8 +1,9 @@
-"""A project page: its experiments as cards, plus an inline "new experiment" field."""
+"""A project page: its experiments, comparisons, sharing and plugins' tabs, plus an inline "new experiment" field."""
 
 from __future__ import annotations
 
 import typing
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import dash_mantine_components as dmc
@@ -10,9 +11,9 @@ from dash import Dash, Input, Output, State, no_update
 from dash.exceptions import PreventUpdate
 
 from dlboard.models import ActivityStats, NewExperiment
-from dlboard.serve import Icon, get_current_user, get_data_store, icon
+from dlboard.serve import ClientsideScript, Icon, get_current_user, get_data_store, icon
 from dlboard.serve import _constants as constants
-from dlboard.serve._component_ids import ButtonId, ModalId
+from dlboard.serve._component_ids import ButtonId, ModalId, ValueId
 from dlboard.serve._pages._card_grid import (
     PAGE_SIZE,
     CardGrid,
@@ -33,7 +34,7 @@ from dlboard.serve._pages._delete_confirm import (
 )
 from dlboard.serve._pages._onboarding import first_experiment_snippet, onboarding_card
 from dlboard.serve._pages._page_header import PageHeaderIds, page_header, register_page_header
-from dlboard.serve._pages._page_sections import ProjectSlot, project_sections
+from dlboard.serve._pages._page_sections import ProjectPageTab, project_tabs
 from dlboard.serve._pages._pins._pinned_runs import register as register_pinned_runs
 from dlboard.serve._pages._project_members import register_members_callbacks, render_members_section
 from dlboard.serve._url import relative_path
@@ -52,6 +53,8 @@ class _ProjectPage:
 
 NEW_EXP_BUTTON_ID: typing.Final = "new-experiment-button"
 NEW_EXP_NAME_ID: typing.Final = "new-experiment-name"
+PROJECT_TABS_ID: typing.Final = ValueId[_ProjectPage]("project-tabs")
+_SYNC_TAB_URL_JS = ClientsideScript(Path(__file__).with_name("sync_project_tab_url.js"))
 
 PROJECT_HEADER_IDS = PageHeaderIds[_ProjectPage].of("project")
 
@@ -112,6 +115,23 @@ def render_project_page(project_id: int, query: Mapping[str, str]) -> dmc.Contai
         return dmc.Container(
             dmc.Text("This project doesn't exist, or you don't have access to it.", c="dimmed"), py="xl"
         )
+    members = render_members_section(project)
+    tabs = [
+        (
+            ProjectPageTab.EXPERIMENTS,
+            "Experiments",
+            card_grid(EXPERIMENT_CARDS, store, project_id, CardQuery.of(CardGrid.EXPERIMENTS, query)),
+        ),
+        (
+            ProjectPageTab.COMPARISONS,
+            "Comparisons",
+            card_grid(COMPARISON_CARDS, store, project_id, CardQuery.of(CardGrid.COMPARISONS, query)),
+        ),
+        *([(ProjectPageTab.SHARING, "Sharing", members)] if members is not None else []),
+        *((tab.key, tab.label, drawn) for tab, drawn in project_tabs(project)),
+    ]
+    keys = [str(key) for key, _label, _drawn in tabs]
+    asked = query.get("tab", "")
     return dmc.Container(
         [
             dmc.Box(
@@ -143,11 +163,16 @@ def render_project_page(project_id: int, query: Mapping[str, str]) -> dmc.Contai
                 ),
                 mb="lg",
             ),
-            *project_sections(ProjectSlot.HEADER, project),
-            card_grid(EXPERIMENT_CARDS, store, project_id, CardQuery.of(CardGrid.EXPERIMENTS, query)),
-            *project_sections(ProjectSlot.BODY, project),
-            card_grid(COMPARISON_CARDS, store, project_id, CardQuery.of(CardGrid.COMPARISONS, query)),
-            render_members_section(project),
+            # A tab each, so what plugins add never lengthens the page, and says whose it is (#615). Every tab is drawn
+            # here, in the page's own layout: switching tabs costs nothing, and a callback writing into one finds it.
+            dmc.Tabs(
+                [
+                    dmc.TabsList([dmc.TabsTab(label, value=str(key)) for key, label, _drawn in tabs]),
+                    *(dmc.TabsPanel(drawn, value=str(key), pt="md") for key, _label, drawn in tabs),
+                ],
+                id=PROJECT_TABS_ID,
+                value=asked if asked in keys else str(ProjectPageTab.EXPERIMENTS),
+            ),
         ],
         size="lg",
         py="xl",
@@ -170,6 +195,7 @@ def register(app: Dash) -> None:
         Output(experiments.filter_id, "value"),
         Output(NEW_EXP_NAME_ID, "value"),
         Output(NEW_EXP_NAME_ID, "error"),
+        Output(PROJECT_TABS_ID, "value"),
         Input(NEW_EXP_BUTTON_ID, "n_clicks"),
         Input(NEW_EXP_NAME_ID, "n_submit"),
         State(constants.STATE_PROJECT_ID, "data"),
@@ -182,13 +208,14 @@ def register(app: Dash) -> None:
         if not n_clicks and not n_submit:
             raise PreventUpdate
         if not name or not name.strip():
-            return *(no_update,) * 8, "Give the experiment a name"
+            return *(no_update,) * 8, "Give the experiment a name", no_update
         store = get_data_store()
         store.create_experiment(
             NewExperiment(project_id=project_id, name=name.strip(), created_by=get_current_user().id)
         )
-        # The new experiment is the newest: the first page, unfiltered, shows it.
-        return *redraw_cards(EXPERIMENT_CARDS, store, project_id, CardQuery()), "", "", None
+        # The new experiment is the newest: the first page, unfiltered, shows it, on the Experiments tab.
+        cards = redraw_cards(EXPERIMENT_CARDS, store, project_id, CardQuery())
+        return *cards, "", "", None, str(ProjectPageTab.EXPERIMENTS)
 
     def _fetch_project_header(project_id: int) -> tuple[str, str]:
         project = _visible_project(project_id)
@@ -220,3 +247,9 @@ def register(app: Dash) -> None:
     )
     register_members_callbacks(app)
     register_pinned_runs(app)
+    app.clientside_callback(
+        _SYNC_TAB_URL_JS.source,
+        Output(PROJECT_TABS_ID, "className"),
+        Input(PROJECT_TABS_ID, "value"),
+        prevent_initial_call=True,
+    )

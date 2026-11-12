@@ -43,6 +43,7 @@ from dlboard.serve._pages._experiment._notes import NOTES_THREAD_ID
 from dlboard.serve._pages._experiment._page_model import BasicExperimentPage
 from dlboard.serve._pages._experiment._run_compare import MAX_COMPARED_RUNS
 from dlboard.serve._pages._experiment._runs_table import NAVBAR_HPARAM_DATATABLE_ID
+from dlboard.serve._pages._simple_project_page import PROJECT_TABS_ID
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -384,7 +385,7 @@ def _stage(shot: DocScreenshot, page: Page, demo: Demo, dlboard_app: Dash) -> Pa
             expect(page.locator(".experiment-card")).to_have_count(demo.n_experiments)
             return page
         case DocScreenshot.RETENTION:
-            page.goto(f"{demo.url}/project/{demo.project_id}")
+            page.goto(f"{demo.url}/project/{demo.project_id}?tab={retention.RETENTION_TAB}")
             # What a rule would delete, in the form alone: saving it would change the demo every other shot reads.
             page.locator(f"#{retention.KIND_ID}").click()
             page.get_by_role("option", name="The newest runs").click()
@@ -392,7 +393,7 @@ def _stage(shot: DocScreenshot, page: Page, demo: Demo, dlboard_app: Dash) -> Pa
             page.locator(f"#{retention.PREVIEW_BUTTON_ID}").click()
             expect(page.locator(f"#{retention.PREVIEW_ID}")).to_contain_text("it would delete")
             page.mouse.move(0, _VIEWPORT["height"] - 1)
-            return page.locator(f"#{retention.SECTION_ID}")
+            return page.locator(f"#{PROJECT_TABS_ID}")  # the tab, and where it is on the page (#615)
         case DocScreenshot.JUMP_PALETTE:
             page.goto(demo.url)
             expect(page.locator(".project-card")).to_have_count(demo.n_projects)

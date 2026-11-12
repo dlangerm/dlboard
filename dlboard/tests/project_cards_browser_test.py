@@ -1,4 +1,4 @@
-"""A project with many experiments in a real browser: its cards a page at a time, a filter by name, and both in its link (#502)."""
+"""A project page in a real browser: its experiment cards a page at a time, a filter by name, and its tab, all in its link (#502, #615)."""
 
 from __future__ import annotations
 
@@ -55,4 +55,32 @@ def test_a_project_shows_its_newest_experiments_a_page_at_a_time_and_its_link_ke
     page.reload()  # the link shows what was seen
     expect(cards).to_have_count(10)
     expect(page.get_by_role("textbox", name="Filter experiments")).to_have_value("sweep-1")
+    assert console_errors == []
+
+
+def test_a_project_page_keeps_its_tab_in_its_link_and_opens_on_its_experiments_otherwise(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """Comparisons, sharing and what plugins add are each a tab of the page, not more of it to scroll past (#615)."""
+    project = get_system_data_store().create_project(models.NewProject(name="Tabbed Project", description=""))
+    tab = page.get_by_role("tab", name="Comparisons")
+
+    page.goto(f"{live_server_url}/project/{project.id}?tab=nonsense")
+    expect(page.get_by_role("tab", name="Experiments")).to_have_attribute("aria-selected", "true")
+    expect(page.get_by_text("No experiments yet")).to_be_visible()
+
+    tab.click()
+    expect(page.get_by_text("No comparisons yet")).to_be_visible()
+    expect(page.get_by_text("No experiments yet")).to_be_hidden()
+    expect(page).to_have_url(re.compile(r"[?&]tab=comparisons(&|$)"))
+
+    page.reload()  # the link opens the tab that was open
+    expect(tab).to_have_attribute("aria-selected", "true")
+    expect(page.get_by_text("No comparisons yet")).to_be_visible()
+
+    # An experiment made from the header, whatever tab is open, is shown where it is listed.
+    page.get_by_role("textbox", name="New experiment name").fill("from-another-tab")
+    page.get_by_role("button", name="Create").click()
+    expect(page.get_by_role("tab", name="Experiments")).to_have_attribute("aria-selected", "true")
+    expect(page.locator(".experiment-card", has_text="from-another-tab")).to_be_visible()
     assert console_errors == []

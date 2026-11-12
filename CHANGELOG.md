@@ -25,11 +25,10 @@ pulls that section's body into the GitHub release notes and publishes both distr
   (`DataStore.search_experiments`, `search_comparisons`, `get_experiment_stats(..., experiment_ids=)`), through a new
   index on a project's live experiments (migration `0011`, expand-only). (#502)
 * **An experiment's page says what retention keeps of it.** A line under its header gives the experiment's own rule (or
-  "Follows the project") and its project's, and links to the project's Retention section, so the page runs are deleted from
+  "Follows the project") and its project's, and links to the project's Retention tab, so the page runs are deleted from
   says what deletes them (#547).
 * **`register_experiment_section`** (`ExperimentSection`, `ExperimentSlot.HEADER`), for a plugin to add a line under an
-  experiment's header the way `register_project_section` adds one to a project's. See
-  [docs/background-tasks.md](docs/background-tasks.md#plugin-settings-and-page-sections).
+  experiment's header. See [docs/background-tasks.md](docs/background-tasks.md#plugin-settings-and-page-sections).
 * **A docs index,** [docs/README.md](docs/README.md): every page, grouped by running a server, operating it, and extending
   it. A test fails when a page is missing from it, or when a link in the docs reaches a file or heading that is not there.
   (#592)
@@ -58,6 +57,13 @@ pulls that section's body into the GitHub release notes and publishes both distr
   and the project's pinned runs) every comparison the viewer may change to offer 10; each now reads that page of them.
   `DataStore.search_comparisons` gains `which=` (`ComparisonFilter`: `VISIBLE`, `EDITABLE`, `OWN`), and
   `list_comparisons` loses its `editable=`, which a page of comparisons could not be filtered by. (#590)
+* **A project's page is a tab each for its experiments, its comparisons, its sharing and what plugins add** (Retention, in
+  a local deployment), rather than one page of them all, so what a deployment's plugins add never lengthens it and each
+  says whose it is. The tab open is in the page's link (`?tab=comparisons`), and the experiment page's retention line opens
+  the project on its Retention tab. The line retention drew under the project's header is now in its tab. For a plugin,
+  `register_project_tab(app, ProjectTab(key, label, render))` replaces `register_project_section`, `ProjectSection` and
+  `ProjectSlot`, which are gone; see
+  [docs/background-tasks.md](docs/background-tasks.md#plugin-settings-and-page-sections). (#615)
 
 ### Fixed
 

@@ -35,7 +35,7 @@ python -c "import dlboard.plugins, pathlib; print(pathlib.Path(dlboard.plugins._
 | Sign-in through an identity provider | `set_auth_provider`, and `add_public_route` for its login and callback | `dlboard/plugins/auth/password.py` | `plugins/auth.md` |
 | Colors, fonts, dark mode | `set_theme` | `dlboard/plugins/themes/default.py` | `plugins/themes.md` |
 | A scheduled job | `register_task` | `dlboard/plugins/backend/trash_retention.py` | `background-tasks.md` |
-| A per-project setting, shown on the project page | `register_setting` and `register_project_section` | `dlboard/plugins/retention/` | `background-tasks.md` |
+| A per-project setting, shown on the project page | `register_setting` and `register_project_tab` | `dlboard/plugins/retention/` | `background-tasks.md` |
 
 ## 3. Use only the public API
 

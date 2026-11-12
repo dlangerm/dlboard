@@ -97,7 +97,7 @@ def test_an_owner_shares_a_project_and_the_member_sees_it_read_only(
     page: Page, deployment: _Deployment, console_errors: list[str]
 ) -> None:
     project = _alices_project(deployment.store, "shared-with-bob")
-    _sign_in(page, deployment, "alice", f"/project/{project.id}")
+    _sign_in(page, deployment, "alice", f"/project/{project.id}?tab=sharing")
 
     page.fill(f"#{ADD_GRANTEE_ID}", "bob")
     page.click(f"#{ADD_BUTTON_ID}")
@@ -108,7 +108,7 @@ def test_an_owner_shares_a_project_and_the_member_sees_it_read_only(
     page.context.clear_cookies()
     _sign_in(page, deployment, "bob")
     expect(page.get_by_text("shared-with-bob")).to_be_visible()
-    page.goto(f"{deployment.url}/project/{project.id}")
+    page.goto(f"{deployment.url}/project/{project.id}?tab=sharing")
     expect(page.get_by_role("cell", name="alice", exact=True)).to_be_visible()
     expect(page.locator(f"#{ADD_BUTTON_ID}")).to_have_count(0)  # a viewer can't manage members
     assert console_errors == []

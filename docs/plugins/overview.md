@@ -30,7 +30,7 @@ tab+accordion layout the way they might swap sqlite for postgres. `dlboard.serve
 `register(app)` on each of the built-in pages directly and unconditionally — they're never
 part of the `plugins` list a deployment passes in, and never touch the `plug(app)` mechanism this
 page describes. See [architecture.md](../architecture.md) for where their code lives
-(`dlboard/serve/_pages/`). The one hook a plugin has into a page is `register_project_section` (or `register_experiment_section`), for a
+(`dlboard/serve/_pages/`). The one hook a plugin has into a page is `register_project_tab` (or `register_experiment_section`), for a
 plugin that keeps a setting of its own per project and needs somewhere to show it (see
 [background-tasks.md](../background-tasks.md#plugin-settings-and-page-sections)).
 

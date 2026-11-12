@@ -39,7 +39,7 @@ from dlboard.plugins.retention._settings import OVERDUE_COUNTED, RetentionSettin
 from dlboard.serve import ClientsideScript, get_current_user, get_data_store, get_project_role, relative_path
 from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import ButtonId, DivId, ValueId
-from dlboard.serve._pages._dash_helpers import CallbackStates, section_label
+from dlboard.serve._pages._dash_helpers import CallbackStates
 from dlboard.serve._pages._dataframe_helpers import experiment_display_name
 
 if TYPE_CHECKING:
@@ -65,6 +65,8 @@ PREVIEW_BUTTON_ID: ButtonId[_RetentionSection] = ButtonId("retention-preview-but
 PREVIEW_ID: DivId[_RetentionSection] = DivId("retention-preview")
 ERROR_ID: DivId[_RetentionSection] = DivId("retention-error")
 SECTION_ID: DivId[_RetentionSection] = DivId("retention-section")
+RETENTION_TAB: Final = "retention"
+"""The project page's tab retention draws in: its `?tab=`, which the experiment page's line links to."""
 
 PROJECT_SCOPE: Final = "project"
 """The scope select's value for the project's own rule; an experiment's is its id."""
@@ -275,21 +277,9 @@ def _form(standing: _Standing, experiments: list[Experiment], *, owner: bool) ->
     )
 
 
-def retention_summary(project: Project) -> Component:
-    """
-    The line under a project's header: the rule its runs are kept by, and a link to the section that sets it.
-
-    Shown whether or not a rule is set, so that retention is something every project's page says it can do.
-    """
-    rules = get_data_store().get_scoped_settings(
-        RetentionKey.RULE, project.id
-    )  # not its status: not shown here
-    return dmc.Box(_summary(describe(_in_effect(rules.project) or Unlimited()), f"#{SECTION_ID}"), mb="lg")
-
-
 def experiment_retention_summary(experiment: Experiment) -> Component:
     """
-    The line under an experiment's header: its own rule, its project's, and a link to the project's section that sets both.
+    The line under an experiment's header: its own rule, its project's, and a link to the project's tab that sets both.
 
     Shown on every experiment's page, so that the page runs are deleted from says what deletes them.
     """
@@ -298,7 +288,7 @@ def experiment_retention_summary(experiment: Experiment) -> Component:
     project = describe(_in_effect(rules.project) or Unlimited())
     return _summary(
         f"{describe(own) if own is not None else 'Follows the project'} · Project: {project}",
-        f"{relative_path(f'/project/{experiment.project_id}')}#{SECTION_ID}",
+        f"{relative_path(f'/project/{experiment.project_id}')}?tab={RETENTION_TAB}",
         link="Change →",  # short: it shares the header's width with the page's controls
     )
 
@@ -311,7 +301,7 @@ def _in_effect(setting: ScopedSetting | None) -> RetentionRule | None:
     )
 
 
-def _summary(rule: str, href: str, link: str = "Set how many runs are kept →") -> Component:
+def _summary(rule: str, href: str, link: str) -> Component:
     return dmc.Group(
         [
             dmc.Text("Retention", size="sm", fw=600, c="dimmed"),
@@ -323,7 +313,7 @@ def _summary(rule: str, href: str, link: str = "Set how many runs are kept →")
 
 
 def render_retention_section(project: Project) -> Component:
-    """The Retention section, in the container its Save and Cancel draw it again in."""
+    """The Retention tab's content, in the container its Save and Cancel draw it again in."""
     return html.Div(_section(project), id=SECTION_ID)
 
 
@@ -339,7 +329,6 @@ def _section(project: Project) -> Component:
     now = pendulum.now(pendulum.UTC)
     return dmc.Stack(
         [
-            section_label("Retention"),
             *_status(standing.status, now, settings),
             _scope_line("This project", standing.project, inherits="Keeps every run", now=now),
             *(
@@ -350,8 +339,6 @@ def _section(project: Project) -> Component:
             *([_form(standing, experiments, owner=owner)] if editor or owner else []),
         ],
         gap="xs",
-        mt="xl",
-        mb="xl",
     )
 
 

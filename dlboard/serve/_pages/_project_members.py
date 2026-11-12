@@ -22,9 +22,9 @@ from dlboard.serve._component_ids import ButtonId, DivId, ValueId
 from dlboard.serve._pages._dash_helpers import (
     TriggeredId,
     require_triggered_id,
-    section_label,
     tooltipped_action_icon,
 )
+from dlboard.serve._pages._page_sections import ProjectPageTab
 from dlboard.serve._url import relative_path
 
 if TYPE_CHECKING:
@@ -128,7 +128,6 @@ def render_members_section(project: Project) -> Component | None:
     )
     return dmc.Stack(
         [
-            section_label("Sharing"),
             dmc.Select(
                 id=EVERYONE_ROLE_ID,
                 data=_EVERYONE_OPTIONS,
@@ -147,7 +146,6 @@ def render_members_section(project: Project) -> Component | None:
             dmc.Text(id=MEMBERS_ERROR_ID, c="red", size="sm"),
         ],
         gap="sm",
-        mt="xl",
     )
 
 
@@ -211,7 +209,7 @@ def register_members_callbacks(app: Dash) -> None:
     def remove_member(_clicks: list[int], project_id: int) -> tuple[str, bool]:
         grant_id = require_triggered_id(_GrantControl).grant
         get_data_store().delete_project_grant(project_id, grant_id)
-        return relative_path(f"/project/{project_id}"), True
+        return relative_path(f"/project/{project_id}?tab={ProjectPageTab.SHARING}"), True
 
     @app.callback(
         *reload_outputs,
@@ -232,4 +230,4 @@ def register_members_callbacks(app: Dash) -> None:
         if isinstance(grant, str):
             return no_update, no_update, grant
         get_data_store().set_project_grant(grant)
-        return relative_path(f"/project/{project_id}"), True, ""
+        return relative_path(f"/project/{project_id}?tab={ProjectPageTab.SHARING}"), True, ""

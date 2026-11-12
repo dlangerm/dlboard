@@ -4,11 +4,11 @@ A deployment that people log to for months grows without bound unless something 
 project keeps a number of runs, or runs of a certain age, and a background task moves the rest to the Trash, which then
 empties itself of what has been in it long enough.
 
-![A project's Retention section: the rule in effect, a change waiting out its grace period, and the form](images/retention.png)
+![A project's Retention tab: the rule in effect, a change waiting out its grace period, and the form](images/retention.png)
 
 ## Rules
 
-A project has one rule, set in the **Retention** section of its page:
+A project has one rule, set in the **Retention** tab of its page:
 
 - **Every run**: nothing is deleted. A project that existed before retention keeps this until an admin sets a default.
 - **The newest runs**: keep the newest N runs **of each experiment**, or N **of the whole project** together.
@@ -17,7 +17,7 @@ A project has one rule, set in the **Retention** section of its page:
 An experiment may have a stricter rule of its own, of the same kind: fewer runs, or fewer days. Its project's rule is the
 most it can keep. A project that keeps every run lets its experiments choose any kind. Every experiment's page says under
 its header which rule its runs are kept by, its own (or "Follows the project") and its project's, and links to the
-project's Retention section, where both are set.
+project's Retention tab, where both are set.
 
 Changing the *kind* of a project's rule (from a count to an age, say) drops every one of its experiments' rules: a number of
 runs says nothing about a number of days.
@@ -34,7 +34,7 @@ An admin can do all of it, in every project.
 
 ## When a rule takes effect
 
-A changed rule waits `DLBOARD_RETENTION_GRACE_DAYS` (7) before it takes effect, and the section shows it as pending, with
+A changed rule waits `DLBOARD_RETENTION_GRACE_DAYS` (7) before it takes effect, and the tab shows it as pending, with
 the date. **Preview** counts how many runs the form's rule would delete as things stand (a count of every experiment, so it
 is asked for rather than shown as you type). Until the rule takes effect **the rule before it is still enforced**: saving
 again replaces the pending change, but never puts retention off, and the server sets when it takes effect, whatever a
@@ -135,5 +135,5 @@ in [telemetry.md](telemetry.md#metrics).
 Retention is a plugin (`dlboard/plugins/retention/`), built on what any plugin may use rather than anything of its own in the
 core: a project's [scoped settings](background-tasks.md#plugin-settings-and-page-sections) hold its rules and status, the
 generic `get_runs` filters (`created_before`, `oldest_first`, `include_kept`) choose what to delete, `delete_runs` deletes it,
-and a project-page section shows it. A policy of your own (archiving to cold storage instead of deleting, a different rule
+and a tab of the project page shows it. A policy of your own (archiving to cold storage instead of deleting, a different rule
 kind) is a plugin on the same pieces.

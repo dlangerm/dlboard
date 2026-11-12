@@ -139,7 +139,7 @@ def test_the_projects_pinned_runs_start_a_comparison_and_the_project_lists_compa
     me = store.get_or_create_user(models.Principal.unverified("pinner")).id
     for run in store.comparison_runs(comparison.id):
         store.pin_runs(me, frozenset({run.id}), models.PinColor.BLUE)
-    page.goto(f"{live_server_url}/project/{comparison.project_id}")
+    page.goto(f"{live_server_url}/project/{comparison.project_id}?tab=comparisons")
     expect(page.locator(".comparison-card")).to_have_count(1)
     expect(page.locator(".comparison-card")).to_contain_text("Sweep vs baseline")
 

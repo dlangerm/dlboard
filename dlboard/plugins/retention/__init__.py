@@ -4,11 +4,11 @@ Retention policies: a project, or one of its experiments, keeps its newest N run
 The plugin owns every opinion about this: the rule kinds, the grace period a change waits through, the slack runs may
 pass a rule by, the server's caps (`DLBOARD_RETENTION_MAX_*`), and how a project stands against its rules. The core knows
 only a run can be kept (`keep_runs`, which retention never deletes), a project's plugin-owned scoped settings
-(`register_setting`), sections on the project page (`register_project_section`), a line on an experiment's
+(`register_setting`), a tab on the project page (`register_project_tab`), a line on an experiment's
 (`register_experiment_section`) and background tasks (`register_task`).
 
 Rules and status are two scoped settings (`RetentionKey`); two tasks (`_tasks.py`) schedule a check of each project with a
-rule, and do the checks in the custodian process; the project page's section (`_section.py`) shows and changes them.
+rule, and do the checks in the custodian process; the project page's Retention tab (`_section.py`) shows and changes them.
 """
 
 from __future__ import annotations
@@ -20,24 +20,23 @@ import pendulum
 from dlboard.plugins.retention._lock import refuse_new_runs_while_locked
 from dlboard.plugins.retention._rules import RetentionKey, RetentionSetting
 from dlboard.plugins.retention._section import (
+    RETENTION_TAB,
     experiment_retention_summary,
     register_retention_callbacks,
     render_retention_section,
-    retention_summary,
 )
 from dlboard.plugins.retention._settings import RetentionSettings
 from dlboard.plugins.retention._tasks import RetentionTask, run_checks, schedule_checks
 from dlboard.serve import (
     ExperimentSection,
     ExperimentSlot,
-    ProjectSection,
-    ProjectSlot,
+    ProjectTab,
     SettingRule,
     SettingWrite,
     Task,
     TaskMode,
     register_experiment_section,
-    register_project_section,
+    register_project_tab,
     register_run_guard,
     register_setting,
     register_task,
@@ -94,7 +93,8 @@ def plug(app: Dash) -> None:
     every = pendulum.duration(seconds=RetentionSettings().retention_interval_s)
     register_task(app, Task(name=RetentionTask.SCHEDULE, run_once=schedule_checks, every=every))
     register_task(app, Task(name=RetentionTask.CHECK, run_once=run_checks, every=every, mode=TaskMode.SHARED))
-    register_project_section(app, ProjectSection(ProjectSlot.HEADER, retention_summary))
-    register_project_section(app, ProjectSection(ProjectSlot.BODY, render_retention_section))
+    register_project_tab(
+        app, ProjectTab(key=RETENTION_TAB, label="Retention", render=render_retention_section)
+    )
     register_experiment_section(app, ExperimentSection(ExperimentSlot.HEADER, experiment_retention_summary))
     register_retention_callbacks(app)
