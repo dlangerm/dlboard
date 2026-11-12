@@ -28,11 +28,11 @@ from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import ButtonId, PatternId, StoreId, ValueId
 from dlboard.serve._grid import column_def, infer_column_dtype
 from dlboard.serve._pages._dash_helpers import (
-    CallbackStates,
     notice,
     register_navigate,
     section_label,
 )
+from dlboard.serve._pages._experiment import _chart_view as chart_view
 from dlboard.serve._pages._experiment import _ids as ids
 from dlboard.serve._pages._experiment import _page_edits as edits
 from dlboard.serve._pages._experiment import _page_model as page_model
@@ -674,43 +674,53 @@ def _register_hparam_table(app: Dash) -> None:
         return page.model_dump_json()
 
 
+class _Newest(edits.ChartsOnScreen):
+    """What `show_newest_runs` reads: the click, the page and paging it is made on, and the charts it redraws."""
+
+    clicks: Annotated[int | None, Input(NAVBAR_NEWEST_RUNS_ID, "n_clicks", allow_optional=True)]
+    page_json: Annotated[str, State(ids.STATE_PAGE_STORAGE, "data")]
+    paging_json: Annotated[str, State(ids.PANEL_PAGING_ID, "data")]
+    chips: Annotated[
+        list[str] | None, State(pin_filter_id(RunListSurface.EXPERIMENT), "value", allow_optional=True)
+    ]
+
+
 def _register_newest_runs(app: Dash) -> None:
     @app.callback(
         Output(ids.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
-        Output(ids.METRIC_CONTENT_ID, "children", allow_duplicate=True),
+        Output(chart_view.CHART_BODY.all(), "children", allow_duplicate=True),
         Output(row_updates_id(RunListSurface.EXPERIMENT), "data", allow_duplicate=True),
         Output(NAVBAR_RUN_HEAD.of(), "children", allow_duplicate=True),
         Output(NAVBAR_HPARAM_SIGNATURE.of(), "data", allow_duplicate=True),
-        Input(NAVBAR_NEWEST_RUNS_ID, "n_clicks", allow_optional=True),
-        State(ids.STATE_PAGE_STORAGE, "data"),
-        State(ids.PANEL_PAGING_ID, "data"),
-        State(pin_filter_id(RunListSurface.EXPERIMENT), "value", allow_optional=True),
+        _Newest.states(),
         prevent_initial_call=True,
     )
     def show_newest_runs(
-        n_clicks: int | None, page_json: str, paging_json: str, chips: list[str] | None
-    ) -> tuple[str, html.Div, dict[str, Any], list[Component], str]:
-        if not n_clicks:
+        **states: Any,  # noqa: ANN401 -- validated on the first line
+    ) -> tuple[str, list[Any], dict[str, Any], list[Component], str]:
+        """Go back to drawing the newest runs, redrawing in place just the charts that changes (#616)."""
+        newest = _Newest.model_validate(states)
+        if not newest.clicks:
             raise PreventUpdate
         store = get_data_store()
-        ref = repo.ref_of(page_model.BasicExperimentPage.model_validate_json(page_json))
+        ref = repo.ref_of(page_model.BasicExperimentPage.model_validate_json(newest.page_json))
         before = repo.load_page(store, ref)
         if before.document.selected_runs is None:
             raise PreventUpdate
         experiment_id = typing.cast("int", before.experiment_id)
-        focus = Paging.model_validate_json(paging_json).focus
-        shown_before = shown_run_ids(store, experiment_id, before.document, focus)
-        page, container = edits.commit(
-            page_json,
-            paging_json,
+        paging = Paging.model_validate_json(newest.paging_json)
+        shown_before = shown_run_ids(store, experiment_id, before.document, paging.focus)
+        page = edits.save_edit(
+            newest.page_json,
             edits.PageEdit(document=page_model.DocumentSettings(selected_runs=None, excluded_runs=[])),
         )
         shown_now = shown_run_ids(store, experiment_id, page.document)
+        bodies, _ = newest.redraw(store, page, paging)
         return (
             page.model_dump_json(),
-            container,
-            _drawn_rows(shown_before, shown_now, focus).dump(),
-            *_head_and_signature(store, page, experiment_id, chips or []),
+            bodies,
+            _drawn_rows(shown_before, shown_now, paging.focus).dump(),
+            *_head_and_signature(store, page, experiment_id, newest.chips or []),
         )
 
 
@@ -720,6 +730,8 @@ class _Outputs:
 
     page_json: Any = no_update
     container: Any = no_update
+    bodies: list[Any] | None = None
+    """The charts redrawn in place (`ChartsOnScreen.redraw`), one value for each chart on screen; `None` leaves them be."""
     notices: Any = no_update
     delete_opened: Any = no_update
     delete_body: Any = no_update
@@ -731,11 +743,12 @@ class _Outputs:
     signature: Any = no_update
     destination: Any = no_update
 
-    def outputs(self) -> tuple[Any, ...]:
-        """The values, in the order of `act_on_runs`'s `Output`s."""
+    def outputs(self, charts: edits.ChartsOnScreen) -> tuple[Any, ...]:
+        """The values, in the order of `act_on_runs`'s `Output`s, for the `charts` on screen."""
         return (
             self.page_json,
             self.container,
+            charts.unchanged() if self.bodies is None else self.bodies,
             self.notices,
             self.delete_opened,
             self.delete_body,
@@ -749,8 +762,8 @@ class _Outputs:
         )
 
 
-class _Act(CallbackStates):
-    """What `act_on_runs` reads: the request, and the page and paging it is made on."""
+class _Act(edits.ChartsOnScreen):
+    """What `act_on_runs` reads: the request, the page and paging it is made on, and the charts it redraws."""
 
     request: Annotated[dict[str, Any] | None, Input(request_store_id(RunListSurface.EXPERIMENT), "data")]
     page_json: Annotated[str, State(ids.STATE_PAGE_STORAGE, "data")]
@@ -767,6 +780,9 @@ def _draw_or_hide(store: DataStore[...], request: RunActionRequest, act: _Act) -
 
     Always from the view's own runs, never from one focused run (`Paging.focus`): a link to a run is how someone looks at
     it, and drawing another beside it is then a change to what the view draws, which leaves the focus.
+
+    Only the charts whose data that changes are drawn again, in place (#616): the panels stay as they are, and nothing
+    covers them while it happens. Leaving a focus takes its banner off the panel area, which is then drawn again whole.
     """
     document = repo.load_page(
         store, repo.ref_of(page_model.BasicExperimentPage.model_validate_json(act.page_json))
@@ -788,15 +804,18 @@ def _draw_or_hide(store: DataStore[...], request: RunActionRequest, act: _Act) -
                 "Too many runs to draw", f"A view draws at most {cap} runs. Hide some to draw others."
             )
         )
-    page, container = edits.commit(
-        act.page_json,
-        paging.with_focus(None).model_dump_json(),
-        # A selection replaces what a view left out before selections existed, so that is cleared with it.
-        edits.PageEdit(document=page_model.DocumentSettings(selected_runs=sorted(now), excluded_runs=[])),
-    )
+    # A selection replaces what a view left out before selections existed, so that is cleared with it.
+    edit = edits.PageEdit(document=page_model.DocumentSettings(selected_runs=sorted(now), excluded_runs=[]))
+    if paging.focus is None:
+        page = edits.save_edit(act.page_json, edit)
+        container, (bodies, _) = no_update, act.redraw(store, page, paging)
+    else:
+        page, container = edits.commit(act.page_json, paging.with_focus(None).model_dump_json(), edit)
+        bodies = None
     return _Outputs(
         page_json=page.model_dump_json(),
         container=container,
+        bodies=bodies,
         row_updates=_drawn_rows(shown_before, now, paging.focus).dump(),
         **_head_fields(store, page, act.experiment_id, act.chips or []),
     )
@@ -827,6 +846,7 @@ def _register_run_actions(app: Dash) -> None:
     @app.callback(
         Output(ids.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Output(ids.METRIC_CONTENT_ID, "children", allow_duplicate=True),
+        Output(chart_view.CHART_BODY.all(), "children", allow_duplicate=True),
         Output(VIEW_NOTIFY_ID, "sendNotifications", allow_duplicate=True),
         *delete_outputs(RunListSurface.EXPERIMENT),
         Output(COMPARE_RUNS_ID, "value", allow_duplicate=True),
@@ -847,14 +867,14 @@ def _register_run_actions(app: Dash) -> None:
         request = RunActionRequest.model_validate(act.request)
         match request.action:
             case RunAction.DRAW | RunAction.HIDE:
-                return _draw_or_hide(get_data_store(), request, act).outputs()
+                return _draw_or_hide(get_data_store(), request, act).outputs(act)
             case RunAction.DIFF:
-                return _diff(request).outputs()
+                return _diff(request).outputs(act)
             case RunAction.DELETE:
                 asked = ask_to_delete(request.run_ids)
                 return _Outputs(
                     delete_opened=asked.opened, delete_body=asked.body, delete_pending=asked.pending
-                ).outputs()
+                ).outputs(act)
             case RunAction.PIN | RunAction.UNPIN:
                 pinned = pin_or_unpin(request, NAVBAR_HPARAM_DATATABLE_ID, RunListSurface.EXPERIMENT)
                 page = page_model.BasicExperimentPage.model_validate_json(act.page_json)
@@ -862,12 +882,12 @@ def _register_run_actions(app: Dash) -> None:
                     row_updates=pinned.rows,
                     notices=pinned.notice,
                     **_head_fields(get_data_store(), page, act.experiment_id, act.chips or []),
-                ).outputs()
+                ).outputs(act)
             case RunAction.COMPARE_NEW | RunAction.COMPARE_ADD | RunAction.COMPARE_PINS:
-                return _compare(request, act).outputs()
+                return _compare(request, act).outputs(act)
             case RunAction.KEEP | RunAction.RELEASE:
                 kept = keep_or_release(request, NAVBAR_HPARAM_DATATABLE_ID)
-                return _Outputs(row_updates=kept.rows or no_update, notices=kept.notice).outputs()
+                return _Outputs(row_updates=kept.rows or no_update, notices=kept.notice).outputs(act)
             case RunAction.REMOVE:
                 # Only a comparison holds runs that can be taken out of it.
                 raise PreventUpdate

@@ -16,7 +16,7 @@ from dlboard.models import EVERY_KEY, ChartInstance, ChartType, ColumnKind, Data
 from dlboard.plugins.charts.line_chart import LineChart
 from dlboard.serve._pages._experiment import _chart_view as chart_view
 from dlboard.serve._pages._experiment import _panel_data as panel_data
-from dlboard.serve._pages._experiment._live_updates import _refresh_chart_bodies
+from dlboard.serve._pages._experiment._page_edits import refresh_chart_bodies
 
 _PANEL = PanelInstance[Any, Any](
     name="p",
@@ -59,7 +59,7 @@ def _body_ids() -> list[chart_view.ChartID]:
 def test_only_a_chart_whose_data_moved_gets_a_new_body_and_the_rest_are_left_alone() -> None:
     chart_ids = _body_ids()
 
-    contents, ok = _refresh_chart_bodies(
+    contents, ok = refresh_chart_bodies(
         chart_ids, {"p": _PANEL}, {"p": panel_data_of(_AFTER)}, _shown(_BEFORE), page_size=12
     )
 
@@ -72,7 +72,7 @@ def test_only_a_chart_whose_data_moved_gets_a_new_body_and_the_rest_are_left_alo
 def test_a_chart_just_drawn_from_the_current_data_is_not_redrawn_by_the_next_poll() -> None:
     chart_ids = _body_ids()
 
-    contents, _ok = _refresh_chart_bodies(
+    contents, _ok = refresh_chart_bodies(
         chart_ids, {"p": _PANEL}, {"p": panel_data_of(_AFTER)}, _shown(_AFTER), page_size=12
     )
 

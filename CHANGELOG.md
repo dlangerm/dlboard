@@ -73,6 +73,9 @@ pulls that section's body into the GitHub release notes and publishes both distr
 * **A deployment that leaves out the image chart no longer offers it.** Its chart type was registered when its module was
   imported, so any deployment had it, without the scripts and stylesheet its plugin serves; it is now registered by the
   plugin, as every other chart's is. (#601)
+* **Showing or hiding a run no longer draws every chart again.** A run's eye, **Show**, **Hide** and "show the newest
+  runs" covered the panels with a spinner and drew each of them from scratch, on an experiment's page and a comparison's.
+  Now only the charts whose data changes are redrawn, in place, as a live update redraws them. (#616)
 
 ## [0.15.0] - 2026-11-09
 

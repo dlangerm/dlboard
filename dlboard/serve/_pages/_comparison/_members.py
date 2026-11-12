@@ -4,7 +4,8 @@ The comparison's runs, as the run list in the sidebar: whose each is, which are 
 Which runs are drawn is the viewer's choice (`Paging.hidden`), like the tab they are on: hiding one saves nothing, so it never
 forks a shared comparison for the people looking at it together. Taking a run out is a change to the comparison itself, which
 only its owner and, if it is shared, a project's editors can make (`can_change_comparison_runs`), so everyone else is not
-offered it. Either way the page is drawn again without saving it (`_page_edits.refresh`).
+offered it. Neither saves the page: hiding a run redraws in place the charts whose data it changes (`ChartsOnScreen`), and
+taking one out draws the page again (`_page_edits.refresh`).
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import json
 import typing
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any
 
@@ -24,6 +26,7 @@ from dash.exceptions import PreventUpdate
 from dlboard import models
 from dlboard.serve import ClientsideScript, Icon, get_current_user, get_data_store, icon
 from dlboard.serve import _constants as constants
+from dlboard.serve._component_ids import DivId
 from dlboard.serve._grid import column_def, infer_column_dtype
 from dlboard.serve._pages._comparison import _ids as ids
 from dlboard.serve._pages._dash_helpers import (
@@ -34,6 +37,7 @@ from dlboard.serve._pages._dash_helpers import (
     section_label,
 )
 from dlboard.serve._pages._dataframe_helpers import experiment_display_name
+from dlboard.serve._pages._experiment import _chart_view as chart_view
 from dlboard.serve._pages._experiment import _ids as experiment_ids
 from dlboard.serve._pages._experiment import _page_edits as edits
 from dlboard.serve._pages._experiment import _page_model as page_model
@@ -80,7 +84,13 @@ from dlboard.serve._pages._run_list._columns_picker import (
     register_columns_picker,
 )
 from dlboard.serve._pages._run_list._ids import navigate_id
-from dlboard.serve._pages._run_list._rows import register_row_updates, row_update_shells, row_updates_id
+from dlboard.serve._pages._run_list._rows import (
+    RowUpdate,
+    RowUpdates,
+    register_row_updates,
+    row_update_shells,
+    row_updates_id,
+)
 from dlboard.serve._pages._run_list._table import run_grid
 
 if TYPE_CHECKING:
@@ -92,6 +102,9 @@ if TYPE_CHECKING:
     from dlboard.serve._pages._pins._pin_view import PinCell
 
 _FOLLOW_FORK_JS = ClientsideScript(Path(__file__).with_name("follow_fork.js"))
+_HIDDEN_COUNT_ID: DivId[ids.ComparisonPage] = DivId("comparison-members-hidden")
+"""How many runs the list holds and how many are hidden: patched in place when a run is hidden or shown."""
+
 COMPARISON_COLUMNS_PICKER = ColumnsPickerIds(
     select=ids.COLUMNS_SELECT_ID,
     confirm=ids.COLUMNS_CONFIRM_ID,
@@ -227,7 +240,8 @@ def render_members(
                         [
                             section_label("Runs"),
                             dmc.Text(
-                                f"{len(rows)} · {len([r for r in rows if not r[DRAWN_FIELD]])} hidden",
+                                _hidden_count(len(rows), len([r for r in rows if not r[DRAWN_FIELD]])),
+                                id=_HIDDEN_COUNT_ID,
                                 size="xs",
                                 c="dimmed",
                             ),
@@ -307,8 +321,8 @@ class _Draw(CallbackStates):
     signature: Annotated[str | None, State(ids.MEMBERS_SIGNATURE_ID, "data", allow_optional=True)]
 
 
-class _Act(CallbackStates):
-    """What `act_on_members` reads: the request, and the page and paging it is made on."""
+class _Act(edits.ChartsOnScreen):
+    """What `act_on_members` reads: the request, the page and paging it is made on, and the charts it redraws."""
 
     request: Annotated[
         dict[str, Any] | None, Input(request_store_id(RunListSurface.COMPARISON), "data", allow_optional=True)
@@ -326,21 +340,82 @@ def _picked(selected: list[dict[str, Any]] | dict[str, Any] | None) -> frozenset
     return frozenset(int(row["run_id"]) for row in selected)
 
 
-def _hide_or_show(request: RunActionRequest, act: _Act) -> tuple[Any, ...]:
-    """Hide or show the requested runs in the viewer's charts: their paging, so nothing is saved."""
+@dataclass(frozen=True)
+class _Outputs:
+    """What `act_on_members` changes on the page: whatever it leaves out stays as it was."""
+
+    container: Any = no_update
+    page_json: Any = no_update
+    revision: Any = no_update
+    notices: Any = no_update
+    row_updates: Any = no_update
+    destination: Any = no_update
+    diff_runs: Any = no_update
+    diff_opened: Any = no_update
+    bodies: list[Any] | None = None
+    """The charts redrawn in place (`ChartsOnScreen.redraw`), one value for each chart on screen; `None` leaves them be."""
+    paging_json: Any = no_update
+    hidden_count: Any = no_update
+
+    def outputs(self, charts: edits.ChartsOnScreen) -> tuple[Any, ...]:
+        """The values, in the order of `act_on_members`'s `Output`s, for the `charts` on screen."""
+        return (
+            self.container,
+            self.page_json,
+            self.revision,
+            self.notices,
+            self.row_updates,
+            self.destination,
+            self.diff_runs,
+            self.diff_opened,
+            charts.unchanged() if self.bodies is None else self.bodies,
+            self.paging_json,
+            self.hidden_count,
+        )
+
+
+def _hide_or_show(request: RunActionRequest, act: _Act) -> _Outputs:
+    """
+    Hide or show the requested runs in the viewer's charts: their paging, so nothing is saved.
+
+    Only the charts whose data that changes are drawn again, in place (#616), and the list is patched, not drawn again:
+    the eyes of the rows that changed, and how many are hidden. Drawn again a moment after the charts (`draw_members`),
+    the list replaced a menu of its bar opened in between.
+    """
     paging = Paging.model_validate_json(act.paging_json)
     hidden = (
         paging.hidden - request.run_ids
         if request.action is RunAction.DRAW
         else paging.hidden | request.run_ids
     )
-    container, page_json, revision = membership_changed(
-        act.page_json, paging.with_hidden(hidden).model_dump_json()
+    store = get_data_store()
+    shown = paging.with_hidden(hidden)
+    page = repo.load_page(
+        store, repo.ref_of(page_model.BasicExperimentPage.model_validate_json(act.page_json))
     )
-    return container, page_json, revision, no_update, no_update, no_update
+    bodies, _ = act.redraw(store, page, shown)
+    members = frozenset(run.id for run in store.comparison_runs(page.id))
+    rows = RowUpdates(
+        grid=ids.COMPARISON_GRID_ID,
+        rows=[
+            RowUpdate(run_id=run, values={DRAWN_FIELD: run not in hidden})
+            for run in sorted((paging.hidden ^ hidden) & members)
+        ],
+    )
+    return _Outputs(
+        bodies=bodies,
+        paging_json=shown.model_dump_json(),
+        row_updates=rows.dump(),
+        hidden_count=_hidden_count(len(members), len(hidden & members)),
+    )
 
 
-def _compare(request: RunActionRequest, act: _Act) -> tuple[Any, ...]:
+def _hidden_count(members: int, hidden: int) -> str:
+    """How many runs the list holds, and how many of them are hidden."""
+    return f"{members} · {hidden} hidden"
+
+
+def _compare(request: RunActionRequest, act: _Act) -> _Outputs:
     """Start a comparison of the requested runs from this one's layout, or add them to another, and go to it."""
     page = page_model.BasicExperimentPage.model_validate_json(act.page_json)
     # Runs added to the comparison on screen change its list, which is drawn again, and not the view: no navigation.
@@ -353,18 +428,14 @@ def _compare(request: RunActionRequest, act: _Act) -> tuple[Any, ...]:
     )
     if compared.changed:
         container, page_json, revision = membership_changed(act.page_json, act.paging_json)
-        return container, page_json, revision, compared.notice, no_update, no_update
-    return (
-        no_update,
-        no_update,
-        no_update,
-        no_update if compared.notice is None else compared.notice,
-        no_update,
-        no_update if compared.destination is None else compared.destination,
+        return _Outputs(container=container, page_json=page_json, revision=revision, notices=compared.notice)
+    return _Outputs(
+        notices=no_update if compared.notice is None else compared.notice,
+        destination=no_update if compared.destination is None else compared.destination,
     )
 
 
-def _remove(request: RunActionRequest, act: _Act) -> tuple[Any, ...]:
+def _remove(request: RunActionRequest, act: _Act) -> _Outputs:
     """Take the requested runs out of the comparison, if the viewer may."""
     page = page_model.BasicExperimentPage.model_validate_json(act.page_json)
     try:
@@ -375,13 +446,13 @@ def _remove(request: RunActionRequest, act: _Act) -> tuple[Any, ...]:
             "Only its owner, or an editor of a shared comparison, can take runs out of it.",
             color=NoticeColor.RED,
         )
-        return no_update, no_update, no_update, refused, no_update, no_update
+        return _Outputs(notices=refused)
     container, page_json, revision = membership_changed(act.page_json, act.paging_json)
-    return container, page_json, revision, no_update, no_update, no_update
+    return _Outputs(container=container, page_json=page_json, revision=revision)
 
 
-def _act(request: RunActionRequest, act: _Act) -> tuple[Any, ...]:
-    """What to change on the page for `request`, in the order of `act_on_members`'s `Output`s."""
+def _act(request: RunActionRequest, act: _Act) -> _Outputs:
+    """What to change on the page for `request`."""
     match request.action:
         case RunAction.DRAW | RunAction.HIDE:
             return _hide_or_show(request, act)
@@ -389,15 +460,21 @@ def _act(request: RunActionRequest, act: _Act) -> tuple[Any, ...]:
             return _remove(request, act)
         case RunAction.PIN | RunAction.UNPIN:
             pinned = pin_or_unpin(request, ids.COMPARISON_GRID_ID, RunListSurface.COMPARISON)
-            return no_update, no_update, no_update, pinned.notice, pinned.rows, no_update
+            return _Outputs(notices=pinned.notice, row_updates=pinned.rows)
         case RunAction.COMPARE_NEW | RunAction.COMPARE_ADD | RunAction.COMPARE_PINS:
             return _compare(request, act)
         case RunAction.KEEP | RunAction.RELEASE:
             kept = keep_or_release(request, ids.COMPARISON_GRID_ID)
-            return no_update, no_update, no_update, kept.notice, kept.rows or no_update, no_update
-        case RunAction.DIFF | RunAction.DELETE:
-            # The diff is opened before an action gets here (`act_on_members`), and a comparison's runs are deleted from
-            # their experiments.
+            return _Outputs(notices=kept.notice, row_updates=kept.rows or no_update)
+        case RunAction.DIFF:
+            diff = diff_of(request.run_ids)
+            return _Outputs(
+                notices=diff.notice or no_update,
+                diff_runs=diff.runs or no_update,
+                diff_opened=True if diff.runs else no_update,
+            )
+        case RunAction.DELETE:
+            # A comparison's runs are deleted from their experiments.
             raise PreventUpdate
 
 
@@ -477,6 +554,10 @@ def register_members_callbacks(app: Dash) -> None:
         # The A/B diff, opened on the selected runs as an experiment's run list opens it (`diff_of`).
         Output(COMPARE_RUNS_ID, "value", allow_duplicate=True),
         Output(COMPARE_MODAL_ID, "opened", allow_duplicate=True),
+        # A run hidden or shown: the charts whose data that changes, drawn again in place, and the paging (the address).
+        Output(chart_view.CHART_BODY.all(), "children", allow_duplicate=True),
+        Output(experiment_ids.PANEL_PAGING_ID, "data", allow_duplicate=True),
+        Output(_HIDDEN_COUNT_ID, "children"),
         _Act.states(),
         prevent_initial_call=True,
     )
@@ -486,19 +567,7 @@ def register_members_callbacks(app: Dash) -> None:
         act = _Act.model_validate(states)
         if act.request is None:
             raise PreventUpdate
-        request = RunActionRequest.model_validate(act.request)
-        if request.action is RunAction.DIFF:
-            diff = diff_of(request.run_ids)
-            opened = True if diff.runs else no_update
-            return (
-                *(no_update,) * 3,
-                diff.notice or no_update,
-                no_update,
-                no_update,
-                diff.runs or no_update,
-                opened,
-            )
-        return *_act(request, act), no_update, no_update
+        return _act(RunActionRequest.model_validate(act.request), act).outputs(act)
 
     app.clientside_callback(
         _FOLLOW_FORK_JS.source,

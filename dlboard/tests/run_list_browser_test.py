@@ -15,6 +15,7 @@ from dlboard import models
 from dlboard.client._rest_api import BasicDlboardAPI
 from dlboard.models import RUN_NAME_COLUMN
 from dlboard.serve import get_system_data_store
+from dlboard.serve._pages._experiment._ids import METRIC_CONTENT_ID
 from dlboard.serve._pages._experiment._runs_table import NAVBAR_HPARAM_DATATABLE_ID
 from dlboard.serve._pages._run_list import RunListSurface
 from dlboard.serve._pages._run_list._ids import bar_id
@@ -58,13 +59,22 @@ def _bar(page: Page) -> Locator:
     return page.locator(f"#{bar_id(RunListSurface.EXPERIMENT)}")
 
 
+def _mark_the_panels(page: Page) -> Locator:
+    """Mark the panel area, so a test can tell whether it was drawn again whole: the mark goes with the element."""
+    panels = page.locator(f"#{METRIC_CONTENT_ID} > *").first
+    panels.evaluate("el => el.setAttribute('data-marker', 'untouched')")
+    return panels
+
+
 def test_the_eye_draws_a_run_and_the_checkbox_only_selects_it(
     page: Page, live_server_url: str, console_errors: list[str]
 ) -> None:
+    """Drawing or hiding a run redraws its charts in place: the panels are never drawn again, nor covered (#616)."""
     _, _, rows = _experiment_of_runs(page, live_server_url, "Eye Experiment", 3)
     curves = page.locator(_CURVES)
     expect(curves).to_have_count(3)
     expect(_bar(page)).to_be_hidden()
+    panels = _mark_the_panels(page)
 
     # Selecting a run draws nothing and hides nothing: it offers the actions on it.
     rows.first.locator(_CHECKBOX).check()
@@ -85,6 +95,7 @@ def test_the_eye_draws_a_run_and_the_checkbox_only_selects_it(
     expect(curves).to_have_count(2)
     rows.nth(1).locator(".dl-eye").click()
     expect(curves).to_have_count(3)
+    assert panels.get_attribute("data-marker") == "untouched"
 
     rows.first.locator(_CHECKBOX).uncheck()
     expect(_bar(page)).to_be_hidden()
