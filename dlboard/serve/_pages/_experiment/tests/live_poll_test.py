@@ -12,7 +12,8 @@ from dlboard.plugins.charts.line_chart import LineChart
 from dlboard.serve._pages._experiment import _chart_view as chart_view
 from dlboard.serve._pages._experiment import _page_model as page_model
 from dlboard.serve._pages._experiment import _page_repository as repo
-from dlboard.serve._pages._experiment._live_updates import _fetch_open_panel_dataframes, page_revision
+from dlboard.serve._pages._experiment._live_updates import page_revision
+from dlboard.serve._pages._experiment._page_edits import fetch_open_panel_dataframes
 from dlboard.serve._pages._experiment._paging import Paging
 from dlboard.serve._pages._experiment._shown_runs import page_experiments
 
@@ -45,7 +46,7 @@ def test_a_tick_fetches_only_the_charts_on_screen(
 
     monkeypatch.setattr(store, "fetch_metrics", spy)
 
-    dataframes, ok = _fetch_open_panel_dataframes(store, page, on_screen, Paging())
+    dataframes, ok = fetch_open_panel_dataframes(store, page, on_screen, Paging())
 
     assert ok
     assert set(dataframes) == {"p"}
@@ -111,10 +112,10 @@ def test_a_comparison_polls_every_experiment_it_draws_and_reads_their_runs_but_t
     assert revision() != before
 
     on_screen = [chart_view.ChartID.model_validate(chart_view.CHART_CONTENT.of("p", 0))]
-    every, ok = _fetch_open_panel_dataframes(store, comparison, on_screen, Paging())
+    every, ok = fetch_open_panel_dataframes(store, comparison, on_screen, Paging())
     assert ok
     assert set(every["p"].for_chart(chart).run_id) == {run.id for run in runs}
-    unhidden, _ = _fetch_open_panel_dataframes(
+    unhidden, _ = fetch_open_panel_dataframes(
         store, comparison, on_screen, Paging(hidden=frozenset({runs[0].id}))
     )
     assert set(unhidden["p"].for_chart(chart).run_id) == {runs[1].id}

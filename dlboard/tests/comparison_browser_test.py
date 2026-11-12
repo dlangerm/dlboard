@@ -15,6 +15,7 @@ from dlboard._identity import resolve_username
 from dlboard.models import ChartInstance, PanelInstance
 from dlboard.plugins.charts.line_chart import LineChart
 from dlboard.serve import get_system_data_store
+from dlboard.serve._pages._experiment._ids import METRIC_CONTENT_ID
 from dlboard.serve._pages._experiment._page_model import BasicExperimentPage
 from dlboard.serve._pages._experiment._run_compare import COMPARE_GRID_ID
 
@@ -124,10 +125,14 @@ def test_hiding_a_run_is_the_viewers_own_and_saves_no_copy_of_a_shared_compariso
     comparison = _a_shared_comparison_of_two_experiments("Hidden Project")
     page.goto(f"{live_server_url}/comparison/{comparison.id}")
     expect(page.locator(_LEGEND)).to_have_count(2)
+    # The mark goes with the element: the panels are not drawn again for a run hidden, just its charts (#616).
+    panels = page.locator(f"#{METRIC_CONTENT_ID} > *").first
+    panels.evaluate("el => el.setAttribute('data-marker', 'untouched')")
 
     page.locator(_ROWS).first.get_by_role("button", name=re.compile(r"^Hide")).click()
 
     expect(page.locator(_LEGEND)).to_have_count(1)
+    assert panels.get_attribute("data-marker") == "untouched"
     expect(page.locator(_ROWS)).to_have_count(2)
     expect(page.get_by_text("1 hidden")).to_be_visible()
     expect(page).to_have_url(re.compile(rf"/comparison/{comparison.id}\?.*hidden="))  # a link carries it
