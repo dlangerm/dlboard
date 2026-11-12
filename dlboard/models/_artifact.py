@@ -82,6 +82,21 @@ def overlay_image_key(key: str) -> str | None:
     return None if overlay is None else overlay.image_key
 
 
+PLOTLY_FIGURE_EXTENSION: Final = ".plotly.json"
+"""What a logged Plotly figure's file name ends in (`client.artifacts.plotly.PlotlyFigure`): how a chart knows it is one."""
+
+PLOTLY_DATA_EXTENSION: Final = ".plotly-data.json"
+"""What one step's data for a Plotly template ends in (`client.artifacts.plotly.PlotlyData`)."""
+
+PLOTLY_DATA_KEY_SUFFIX: Final = "_$data"
+"""What a Plotly template's data is logged under, after the template's own key (`samples/gps`, `samples/gps_$data`)."""
+
+
+def plotly_data_key(template_key: str) -> str:
+    """The key the data streamed into the Plotly template under `template_key` is logged under."""
+    return f"{template_key}{PLOTLY_DATA_KEY_SUFFIX}"
+
+
 class FileKind(StrEnum):
     """
     What a logged file artifact is -- a bare extension says too little (`.pt`, `.ckpt`, ...).

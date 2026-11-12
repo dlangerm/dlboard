@@ -13,6 +13,9 @@ from dlboard.models._artifact import (
     INLINEABLE_ARTIFACT_CONTENT_TYPES,
     LAYER_KIND_TAG,
     OVERLAY_KEY_SUFFIX,
+    PLOTLY_DATA_EXTENSION,
+    PLOTLY_DATA_KEY_SUFFIX,
+    PLOTLY_FIGURE_EXTENSION,
     UNNAMED_OVERLAY,
     AnyArtifact,
     Artifact,
@@ -28,6 +31,7 @@ from dlboard.models._artifact import (
     layer_kind,
     overlay_image_key,
     overlay_key,
+    plotly_data_key,
 )
 from dlboard.models._artifact_purge_task import ArtifactPurgeTask, NewArtifactPurgeTask
 from dlboard.models._audit_log import AuditAction, AuditLogEntry, EntityType, NewAuditLogEntry
@@ -145,6 +149,9 @@ __all__ = [
     "MIN_GRID_COLUMNS",
     "NO_DATA_COLUMNS",
     "OVERLAY_KEY_SUFFIX",
+    "PLOTLY_DATA_EXTENSION",
+    "PLOTLY_DATA_KEY_SUFFIX",
+    "PLOTLY_FIGURE_EXTENSION",
     "RUN_NAME_COLUMN",
     "SERIES_BAND_COLUMN_PREFIX",
     "SUMMARY_RUNS",
@@ -276,5 +283,6 @@ __all__ = [
     "max_histogram_buckets",
     "overlay_image_key",
     "overlay_key",
+    "plotly_data_key",
     "require_scope",
 ]
