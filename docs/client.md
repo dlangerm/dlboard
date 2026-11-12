@@ -255,6 +255,44 @@ There are five built-in kinds:
   (`dpi`, `bbox_inches`, ...). Any object with a matplotlib-style `savefig(fname, **kwargs)`
   works, and dlboard doesn't depend on matplotlib itself.
 
+- `dlboard.client.artifacts.plotly.PlotlyFigure` and `PlotlyData` — a Plotly figure, drawn by the `plotly` chart as
+  the interactive figure it is (hover, zoom, legend) rather than as a picture of it. A figure is anything with
+  plotly's `to_json` (a `plotly.graph_objects.Figure`) or a plain dict of the same shape, with arrays and tensors in
+  it; dlboard doesn't depend on plotly itself, and the figure is encoded right at the call. Three ways to use it:
+
+  ```python
+  import plotly.graph_objects as go
+  from dlboard.client.artifacts.plotly import PlotlyData, PlotlyFigure
+
+  # A figure at each step: the chart has a slider over the steps, and keeps your zoom as it moves.
+  pr = go.Figure(go.Scatter(x=recall, y=precision, mode="lines"))
+  logger.log_artifact([PlotlyFigure.from_figure(pr, "eval/pr_curve", step=global_step)])
+
+  # A figure logged once (step 0): drawn as it is.
+  logger.log_artifact([PlotlyFigure.from_figure(class_balance, "data/class_balance")])
+
+  # A template, logged once, then the data drawn into it at each step: here a trajectory and a confusion matrix.
+  template = go.Figure([go.Scattermap(mode="lines+markers")])
+  logger.log_artifact([PlotlyFigure.from_figure(template, "gps", bind={0: {"lat": "lat", "lon": "lon"}})])
+  logger.log_artifact([PlotlyFigure.from_figure(go.Figure(go.Heatmap()), "eval/confusion", bind={0: {"z": "z"}})])
+  ...
+  logger.log_artifact(
+      [
+          PlotlyData(template="gps", step=global_step, columns={"lat": lats, "lon": lons}),
+          PlotlyData(template="eval/confusion", step=global_step, columns={"z": confusion_matrix}),
+      ]
+  )
+  ```
+
+  `bind` names, for each trace by its position in the figure's `data`, which attribute (dotted for a nested one:
+  `marker.color`) is filled from which column of the `PlotlyData` logged for it. A column is a number, a list, a
+  string list, or a 1-D or 2-D array or tensor (NaN is a gap); one step's data holds at most a million values. The
+  chart draws every step's data one after another by default (a list grows by each step's values, a 2-D column by its
+  rows, so log a single row as shape `(1, n)` for a waterfall), or only the latest step's (set the chart's `data_steps`
+  to `latest`, for the confusion matrix), or one step at a time (`scrub`). Every step's data is a file the browser
+  fetches, so log it every few steps, not every one: a chart draws at most 256 steps of it per run (`max_data_steps`),
+  thinning a longer run.
+
 - `dlboard.client.artifacts.file.File` — uploads a file that already exists on disk, as-is, tagged with a
   `FileKind` saying what it is (`FileKind.CHECKPOINT`). `log_model` builds these for you; the
   file must stay put until the logger has flushed:

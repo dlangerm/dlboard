@@ -12,6 +12,16 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ## [Unreleased]
 
+### Added
+
+* **Log Plotly figures, drawn as the interactive figures they are.** `PlotlyFigure` logs any Plotly figure (or a dict
+  of one; the client does not depend on plotly), and the new `plotly` chart draws it in the browser with Plotly's own
+  hover, zoom and legend, in the page's colors: a figure at each step gets a slider that keeps your zoom as it moves, a
+  figure logged once is drawn as it is, and each run gets a figure of its own or, with `combine_runs`, every run's
+  traces are drawn in one. A figure logged with `bind` is a template that the data streamed into it at each step
+  (`PlotlyData`: a trajectory's points, a heatmap's rows, any array) is drawn into, every step's, the latest step's, or
+  one step at a time.
+
 ## [0.16.0] - 2026-11-11
 
 ### Added
