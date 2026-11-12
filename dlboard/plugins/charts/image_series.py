@@ -212,7 +212,7 @@ def _instance_id(parameters: ImageChartSettings, chart_id: str) -> str:
     return hashlib.shake_256(raw.encode()).hexdigest(8)
 
 
-def _slider_marks(all_steps: list[int], max_labels: int = MAX_SLIDER_LABELS) -> list[dict[str, typing.Any]]:
+def slider_marks(all_steps: list[int], max_labels: int = MAX_SLIDER_LABELS) -> list[dict[str, typing.Any]]:
     """
     One mark per real step, but only label a sparse subset.
 
@@ -687,7 +687,7 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
                     min=all_steps[0],
                     max=all_steps[-1],
                     value=all_steps[0],
-                    marks=_slider_marks(all_steps),  # pyrefly: ignore [bad-argument-type]
+                    marks=slider_marks(all_steps),  # pyrefly: ignore [bad-argument-type]
                     restrictToMarks=True,
                     persistence=True,
                     persistence_type="session",

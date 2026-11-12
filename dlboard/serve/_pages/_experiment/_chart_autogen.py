@@ -29,6 +29,7 @@ from dlboard.plugins.charts.file_list import FileListChart
 from dlboard.plugins.charts.histogram import HistogramChart
 from dlboard.plugins.charts.image_series import ImageChart
 from dlboard.plugins.charts.line_chart import LineChart
+from dlboard.plugins.charts.plotly_chart import PlotlyChart
 from dlboard.plugins.charts.series_band import SeriesBandChart
 
 if TYPE_CHECKING:
@@ -133,6 +134,7 @@ def default_chart_for_histogram(key: str) -> ChartInstance[typing.Any, typing.An
 
 ARTIFACT_CHART_TYPES: typing.Final[tuple[type[ChartType[typing.Any, typing.Any, typing.Any]], ...]] = (
     FileListChart,
+    PlotlyChart,
     ImageChart,
 )
 """

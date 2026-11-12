@@ -6,7 +6,7 @@ A chart plugin defines one `ChartType` — a way to turn parameters and a datafr
 into a rendered Dash component. `ChartType[P, D, C]` (`dlboard/models/_view.py`) is generic over
 its parameter model `P`, the data shape it renders from `D`, and the rendered component type `C`.
 Built-ins: `line_chart.py`, `bar_chart.py`, `table_chart.py`, `image_series.py`, `file_list.py`,
-`histogram.py`, `series_band.py` (`dlboard/plugins/charts/`). `bar_chart.py` draws a group of bars for each value of its `x_axis` (a
+`histogram.py`, `series_band.py`, `plotly_chart.py` (`dlboard/plugins/charts/`). `bar_chart.py` draws a group of bars for each value of its `x_axis` (a
 hyperparameter, a metric, the step, or the run), and in it a bar for each run that has that value, in the run's color:
 runs that share a hidden size stand side by side, rather than being merged into one bar. A bar's height is the run's
 last-logged value (`latest`, the default, which reads no more than that) or an `aggregation` (`mean`, `median`, `min`,
@@ -17,6 +17,24 @@ splits files into tabs by what they are -- for the checkpoints `DLBoardLogger` u
 and `Top-k`, read from the `tag` and `score` tags the logger records. Set `key_prefix` (say
 `checkpoints/`) instead of `key` and one chart lists every key under it, so a run's hundreds of
 checkpoints (one key apiece) are one list, and Auto-generate makes exactly that.
+
+`plotly_chart.py` (chart type `plotly`) draws a Plotly figure you logged (`PlotlyFigure`, see
+[Client & logging](../client.md)) as the interactive figure it is, with Plotly's own hover, zoom, pan and legend, rather
+than as a picture of it. The server never reads a figure: it hands the browser each run's figure URL at each step, as
+the image chart does its pictures, and the browser fetches the one on show (keeping the ones it has fetched) and draws
+it. A figure logged at several steps gets a slider over them, which keeps where you zoomed and what you hid as it moves
+(`keep_view_across_steps`), and moves with the other sliders of a panel that syncs; a figure logged once has none. Each
+run gets a figure of its own, in a grid of the panel's columns paged by its charts-per-page; `combine_runs` draws every
+run's traces in one figure instead, named and colored by run, for figures where that makes sense (curves, scatters, not
+heatmaps). A figure is drawn in the page's colors in either color scheme, its own template replaced by one of dlboard's,
+so what the figure sets itself (a trace's color, a title) is kept; `use_figure_theme` draws it in the theme it was
+logged with. A figure's own `height` and `width` give way to the chart's `height` and the panel's width. Auto-generate
+makes a `plotly` chart for each key a figure is logged under.
+
+The figure is fetched from `/artifact/<id>` by the browser, so with the S3 artifact store in `presign` download mode
+(`DLBOARD_S3_DOWNLOAD_MODE`) the bucket needs a CORS rule allowing `GET` from dlboard's origin; the filesystem store and
+S3's `proxy` mode serve it from dlboard's own origin. A figure is drawn as it was logged, so anything it loads itself
+(map tiles, a `layout.images` URL) is fetched by the viewer's browser.
 
 `histogram.py` charts a logged histogram (see [Client & logging](../client.md): values binned in your training
 process, so only buckets are sent) as it changes over steps -- per-layer gradient norms or weights, a distribution

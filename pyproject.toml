@@ -278,6 +278,8 @@ ignore_names = [
   "input_type",
   "autocomplete",
   "link_text",
+  # `plugins/charts/plotly_chart.py`'s `_Figures.keep_view` -- read by `plotly_chart.js`, never by Python.
+  "keep_view",
   # `PluginProtocol.plug(app: Dash) -> None` -- every plugin module's install hook, called
   # structurally as `plugin.plug(app)` off whatever module a deployment's plugin list supplies
   # (see `dlboard.serve.resolve_plugins`/`dlboard.serve.app.app`), never by a literal `.plug(`

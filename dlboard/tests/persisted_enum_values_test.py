@@ -40,6 +40,7 @@ from dlboard.plugins.charts.file_list import FileListChart
 from dlboard.plugins.charts.histogram import Colorscale, HistogramChart, HistogramDisplay
 from dlboard.plugins.charts.image_series import ImageChart, LayerVisibility
 from dlboard.plugins.charts.line_chart import LineChart
+from dlboard.plugins.charts.plotly_chart import PlotlyChart
 from dlboard.plugins.charts.series_band import SeriesBandChart
 from dlboard.plugins.charts.table_chart import TableChart
 from dlboard.serve._custodian import TaskOutcome
@@ -100,6 +101,7 @@ _FROZEN_CHART_TYPE_NAMES: dict[type[ChartType[typing.Any, typing.Any, typing.Any
     HistogramChart: "histogram",
     FileListChart: "files",
     SeriesBandChart: "series_band",
+    PlotlyChart: "plotly",
 }
 
 

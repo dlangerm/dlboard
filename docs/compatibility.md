@@ -22,7 +22,7 @@ Breaking any of these needs a migration path and a deprecation window of at leas
     keys; they still load, and those keys are ignored.
     A view with no `selected_runs` draws the newest runs (20 by default, `DLBOARD_DEFAULT_SHOWN_RUNS`); one saved
     before they existed has `excluded_runs` instead: it draws the newest of the runs it does not leave out.
-  - Chart type names (`line`, `bar`, `image`, `table`, `histogram`, `files`, `series_band`).
+  - Chart type names (`line`, `bar`, `image`, `table`, `histogram`, `files`, `series_band`, `plotly`).
   - The *values* of every setting of a built-in chart that has a fixed set of them, as saved in a chart's
     parameters: a table chart's `mode` (`runs`, `pivot`, `artifacts`) and `rows`, a histogram chart's `display`
     and `colorscale`, a bar chart's `aggregation`, `orientation`, `sort` and `x_axis_type`, a line chart's

@@ -7,7 +7,14 @@ from collections import Counter
 
 import pytest
 
-from dlboard.models import FILE_KIND_TAG, OVERLAY_KEY_SUFFIX, Artifact, overlay_key
+from dlboard.models import (
+    FILE_KIND_TAG,
+    OVERLAY_KEY_SUFFIX,
+    PLOTLY_DATA_EXTENSION,
+    PLOTLY_FIGURE_EXTENSION,
+    Artifact,
+    overlay_key,
+)
 from dlboard.models._view import ChartInstance, ColumnKind, PanelInstance
 from dlboard.plugins.charts.bar_chart import BarChart
 from dlboard.plugins.charts.file_list import FileListChart
@@ -392,6 +399,8 @@ def _artifact(fname: str, **tags: str) -> Artifact:
             _artifact("a.png", **{FILE_KIND_TAG: "checkpoint"}), "files", id="a-file-named-like-an-image"
         ),
         pytest.param(_artifact("grads.npy"), None, id="something-no-chart-type-claims"),
+        pytest.param(_artifact(f"f{PLOTLY_FIGURE_EXTENSION}"), "plotly", id="a-plotly-figure"),
+        pytest.param(_artifact(f"d{PLOTLY_DATA_EXTENSION}"), None, id="a-plotly-templates-data"),
     ],
 )
 def test_an_artifact_gets_the_chart_type_that_says_it_can_display_it(

@@ -37,12 +37,14 @@ from dlboard.client._rest_api import BasicDlboardAPI
 from dlboard.client.artifacts import rle
 from dlboard.client.artifacts.image import Image
 from dlboard.client.artifacts.overlay import DEFAULT_CLASS_COLORS, Box, Overlay, Point, Polygon, Shape
+from dlboard.client.artifacts.plotly import PlotlyFigure
 from dlboard.client.histograms import ExponentialBinning
 from dlboard.conftest import run_task
 from dlboard.models import OVERLAY_KEY_SUFFIX, RUN_NAME_COLUMN, PanelInstance, overlay_key
 from dlboard.plugins.backend.artifact_purge_worker import PurgeTask
 from dlboard.plugins.charts.image_series import IMAGE_WINDOW_STEPS
 from dlboard.plugins.charts.line_chart import LEGEND_MAX_HEIGHT
+from dlboard.plugins.charts.plotly_chart import PlotlyChart
 from dlboard.serve import get_system_data_store
 from dlboard.serve._backend._purge_work import PurgeWork
 from dlboard.serve._custodian import get_system_task_store
@@ -2616,6 +2618,51 @@ def test_image_series_charts_are_titled_fill_their_chart_and_share_a_synced_pane
     page.keyboard.press("ArrowLeft")
     expect(thumbs.nth(0)).to_have_attribute("aria-valuenow", "0")
     expect(thumbs.nth(1)).to_have_attribute("aria-valuenow", "5")
+
+
+def test_a_logged_plotly_figure_is_drawn_interactive_and_scrubbed_by_step(
+    page: Page, live_server_url: str, tmp_path: Path, console_errors: list[str]
+) -> None:
+    """
+    A Plotly figure logged at two steps is drawn by Plotly itself in the browser, fetched from its artifact, and the
+    chart's slider swaps in the other step's figure.
+    """
+    _create_project_and_experiment(page, live_server_url, "Plotly Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    api = BasicDlboardAPI(live_server_url)
+    run = api.create_run(models.NewRun(experiment_id=experiment_id))
+    api.log_artifact_batch(
+        [
+            PlotlyFigure.from_figure(
+                {
+                    "data": [{"type": "scatter", "x": [0, 1], "y": [1, step]}],
+                    "layout": {"title": {"text": f"at {step}"}},
+                },
+                "eval/pr",
+                step=step,
+            ).to_artifact(tmp_path, run.id, experiment_id)
+            for step in (0, 10)
+        ]
+    )
+    _wait_for_artifacts(experiment_id, 2)
+    store = get_system_data_store()
+    shared = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
+    chart = models.ChartInstance[Any, Any](chart_type=PlotlyChart.name, parameters={"key": "eval/pr"})
+    store.update_page(
+        shared.model_copy(update={"panels": [PanelInstance[Any, Any](name="Figures", charts=[chart])]})
+    )
+    page.reload()
+
+    plot = page.locator(".dl-panel-body .js-plotly-plot")
+    expect(plot.locator(".gtitle")).to_have_text("at 0")
+    expect(plot.locator(".scatterlayer .trace")).to_have_count(1)
+
+    slider = page.locator(".dl-panel-body").get_by_role("slider")
+    slider.focus()
+    page.keyboard.press("ArrowRight")
+    expect(plot.locator(".gtitle")).to_have_text("at 10")
+    assert console_errors == []
 
 
 def test_a_scrubbed_thumbnail_shows_a_spinner_until_its_new_step_has_loaded(

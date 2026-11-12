@@ -46,8 +46,8 @@ from dlboard.plugins.charts.image_series import (
     LayerVisibility,
     ViewedLayer,
     _LoadedWindow,
-    _slider_marks,
     read_window,
+    slider_marks,
 )
 from dlboard.plugins.charts.line_chart import LineChart
 from dlboard.serve._backend import _artifact_download
@@ -203,18 +203,18 @@ def test_render_handles_missing_tags_for_some_rows_without_crashing() -> None:
     assert _captions_store_data(stack) == {"1": {"0": "split: train", "1": ""}}
 
 
-# ---- _slider_marks: every real step is a snap target, but only a sparse subset gets a label ----
+# ---- slider_marks: every real step is a snap target, but only a sparse subset gets a label ----
 
 
 def test_slider_marks_labels_every_step_when_few() -> None:
-    marks = _slider_marks(list(range(5)))
+    marks = slider_marks(list(range(5)))
     assert [m["value"] for m in marks] == [0, 1, 2, 3, 4]
     assert all("label" in m for m in marks)
 
 
 def test_slider_marks_has_a_mark_for_every_step_even_when_many() -> None:
     steps = list(range(200))
-    marks = _slider_marks(steps, max_labels=10)
+    marks = slider_marks(steps, max_labels=10)
 
     assert [m["value"] for m in marks] == steps
 
