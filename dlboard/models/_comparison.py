@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from enum import StrEnum
-
 import pendulum
 from pydantic import AwareDatetime, BaseModel, Field
+
+from dlboard._compat import StrEnum
 
 
 class ComparisonFilter(StrEnum):
