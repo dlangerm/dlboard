@@ -92,18 +92,76 @@ function plotlyChartFigures(step, payload) {
             },
         });
 
-        // Every run's traces in the first run's figure, each named and grouped by its run, so a legend click on one
-        // hides a run's traces together. Frames are left out: one run's animation is not the others'.
+        // A trace of one run's among every run's: named and grouped by the run, so a legend click hides a run's traces
+        // together, and in the run's color unless the trace has one of its own, as every other chart draws a run.
+        const ofRun = (trace, run, runId) => ({
+            ...trace,
+            name: trace.name ? `${run.name} · ${trace.name}` : run.name,
+            legendgroup: `run-${runId}`,
+            line: { color: run.color, ...trace.line },
+            marker: { color: run.color, ...trace.marker },
+        });
+
+        // Every run's traces in the first run's figure. Frames are left out: one run's animation is not the others'.
         const combined = (payload, loaded) => ({
             data: loaded.flatMap(({ run, figure }) =>
-                (figure.data ?? []).map((trace, index) => ({
-                    ...trace,
-                    name: `${payload.runs[run].name} · ${trace.name ?? `trace ${index}`}`,
-                    legendgroup: `run-${run}`,
-                })),
+                (figure.data ?? []).map((trace) => ofRun(trace, payload.runs[run], run)),
             ),
             layout: loaded[0].figure.layout ?? {},
         });
+
+        // `node` with the value at `path` (`["marker", "color"]`) set, copying only what is on the way to it.
+        const withValue = (node, [name, ...rest], value) => ({
+            ...node,
+            [name]: rest.length ? withValue(node?.[name] ?? {}, rest, value) : value,
+        });
+
+        // The template's traces with one run's data in the attributes its bindings name: each record's column after
+        // the one before, so a list of values grows by each step's and a 2-D column by its rows. A trace no binding
+        // names is as it was logged.
+        const filled = (template, records) => {
+            const bindings = template[bindingsMember] ?? {};
+            return (template.data ?? []).map((trace, index) =>
+                Object.entries(bindings[index] ?? {}).reduce(
+                    (bound, [path, column]) =>
+                        withValue(
+                            bound,
+                            path.split("."),
+                            records.flatMap((record) => record.columns?.[column] ?? []),
+                        ),
+                    trace,
+                ),
+            );
+        };
+
+        // A template drawn with one run's data, or every run's: each run's bound traces then, the rest once.
+        const templated = async (runs, payload, step, combine) => {
+            const template = await load(payload.template);
+            const scrubbed = payload.data_steps === "scrub";
+            const traces = await Promise.all(
+                runs.map(async (run) => {
+                    const urls = payload.runs[run].urls;
+                    const records = scrubbed ? [urlAt(urls, step)] : Object.values(urls);
+                    return { run, traces: filled(template, await Promise.all(records.map(load))) };
+                }),
+            );
+            if (!combine) {
+                return { ...template, data: traces[0].traces };
+            }
+            const bound = new Set(Object.keys(template[bindingsMember] ?? {}).map(Number));
+            const { frames: _frames, ...still } = template;
+            return {
+                ...still,
+                data: [
+                    ...(template.data ?? []).filter((_, index) => !bound.has(index)),
+                    ...traces.flatMap(({ run, traces: own }) =>
+                        own
+                            .filter((_, index) => bound.has(index))
+                            .map((trace) => ofRun(trace, payload.runs[run], run)),
+                    ),
+                ],
+            };
+        };
 
         // The figure as its graph draws it, but for the theme: its own size gives way to the chart's, and its view is
         // kept across steps unless it asks otherwise.
@@ -119,17 +177,29 @@ function plotlyChartFigures(step, payload) {
                 },
             };
         };
-        const themed = (figure, theme) =>
-            theme ? { ...figure, layout: { ...figure.layout, template: resolve(theme) } } : figure;
+        // The run colors traces were given (`ofRun`) and the page's theme, in the colors the page has now.
+        const resolvedColor = (holder) =>
+            typeof holder?.color === "string" && holder.color.startsWith("var(")
+                ? { ...holder, color: resolveColor(holder.color) }
+                : holder;
+        const themed = (figure, theme) => ({
+            ...figure,
+            data: (figure.data ?? []).map((trace) => ({
+                ...trace,
+                ...(trace.line ? { line: resolvedColor(trace.line) } : {}),
+                ...(trace.marker ? { marker: resolvedColor(trace.marker) } : {}),
+            })),
+            layout: theme ? { ...figure.layout, template: resolve(theme) } : figure.layout,
+        });
 
         // Each graph's figure as drawn, but for the theme, by its id: what is drawn again in a new color scheme.
         const drawn = new Map();
         new MutationObserver(() => {
             for (const [key, { id, figure, theme }] of drawn) {
-                if (!document.getElementById(key)) {
-                    drawn.delete(key);
-                } else if (theme) {
+                if (document.getElementById(key)) {
                     window.dash_clientside.set_props(id, { figure: themed(figure, theme) });
+                } else {
+                    drawn.delete(key);
                 }
             }
         }).observe(document.documentElement, {
@@ -141,17 +211,25 @@ function plotlyChartFigures(step, payload) {
             const runs = id.run === combinedRuns ? payload.order.map(String) : [id.run];
             let figure;
             try {
-                const loaded = await Promise.all(
-                    runs.map(async (run) => ({
-                        run,
-                        figure: await load(urlAt(payload.runs[run].urls, step)),
-                    })),
-                );
-                figure = dressed(
-                    id.run === combinedRuns ? combined(payload, loaded) : loaded[0].figure,
-                    payload,
-                    step,
-                );
+                if (payload.template) {
+                    figure = dressed(
+                        await templated(runs, payload, step, id.run === combinedRuns),
+                        payload,
+                        step,
+                    );
+                } else {
+                    const loaded = await Promise.all(
+                        runs.map(async (run) => ({
+                            run,
+                            figure: await load(urlAt(payload.runs[run].urls, step)),
+                        })),
+                    );
+                    figure = dressed(
+                        id.run === combinedRuns ? combined(payload, loaded) : loaded[0].figure,
+                        payload,
+                        step,
+                    );
+                }
             } catch {
                 figure = unavailable("This figure could not be loaded.");
             }

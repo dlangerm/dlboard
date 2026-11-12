@@ -40,7 +40,7 @@ from dlboard.plugins.charts.file_list import FileListChart
 from dlboard.plugins.charts.histogram import Colorscale, HistogramChart, HistogramDisplay
 from dlboard.plugins.charts.image_series import ImageChart, LayerVisibility
 from dlboard.plugins.charts.line_chart import LineChart
-from dlboard.plugins.charts.plotly_chart import PlotlyChart
+from dlboard.plugins.charts.plotly_chart import PlotlyChart, StreamMode
 from dlboard.plugins.charts.series_band import SeriesBandChart
 from dlboard.plugins.charts.table_chart import TableChart
 from dlboard.serve._custodian import TaskOutcome
@@ -83,6 +83,7 @@ _FROZEN_ENUM_VALUES: dict[type[StrEnum], frozenset[str]] = {
         {"plain", "red", "orange", "yellow", "green", "teal", "blue", "violet", "pink", "gray"}
     ),
     TaskOutcome: frozenset({"success", "failure", "hung"}),
+    StreamMode: frozenset({"accumulate", "latest", "scrub"}),
 }
 
 

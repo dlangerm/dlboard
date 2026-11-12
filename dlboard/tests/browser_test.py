@@ -37,7 +37,7 @@ from dlboard.client._rest_api import BasicDlboardAPI
 from dlboard.client.artifacts import rle
 from dlboard.client.artifacts.image import Image
 from dlboard.client.artifacts.overlay import DEFAULT_CLASS_COLORS, Box, Overlay, Point, Polygon, Shape
-from dlboard.client.artifacts.plotly import PlotlyFigure
+from dlboard.client.artifacts.plotly import PlotlyData, PlotlyFigure
 from dlboard.client.histograms import ExponentialBinning
 from dlboard.conftest import run_task
 from dlboard.models import OVERLAY_KEY_SUFFIX, RUN_NAME_COLUMN, PanelInstance, overlay_key
@@ -2662,6 +2662,98 @@ def test_a_logged_plotly_figure_is_drawn_interactive_and_scrubbed_by_step(
     slider.focus()
     page.keyboard.press("ArrowRight")
     expect(plot.locator(".gtitle")).to_have_text("at 10")
+    assert console_errors == []
+
+
+def test_a_plotly_template_is_drawn_with_the_data_each_run_logged_into_it(
+    page: Page, live_server_url: str, tmp_path: Path, console_errors: list[str]
+) -> None:
+    """
+    A template logged once, with data logged into it at two steps by two runs: a curve over every run gets a trace per
+    run holding both steps' points, beside the template's own unbound trace, and a heatmap of the latest step is drawn
+    once per run.
+    """
+    _create_project_and_experiment(page, live_server_url, "Plotly Template Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    api = BasicDlboardAPI(live_server_url)
+    runs = [api.create_run(models.NewRun(experiment_id=experiment_id)) for _ in range(2)]
+    curve = {
+        "data": [
+            {"type": "scatter", "mode": "markers"},
+            {"type": "scatter", "x": [0, 3], "y": [0, 3], "name": "ideal"},
+        ]
+    }
+    artifacts = [
+        PlotlyFigure.from_figure(curve, "curve", bind={0: {"x": "x", "y": "y"}}).to_artifact(
+            tmp_path, runs[0].id, experiment_id
+        ),
+        PlotlyFigure.from_figure(
+            {"data": [{"type": "heatmap"}]}, "confusion", bind={0: {"z": "z"}}
+        ).to_artifact(tmp_path, runs[0].id, experiment_id),
+        *(
+            record.to_artifact(tmp_path, run.id, experiment_id)
+            for run in runs
+            for step in (1, 2)
+            for record in (
+                PlotlyData(
+                    template="curve", step=step, columns={"x": [step, step + 0.5], "y": [run.id, step]}
+                ),
+                PlotlyData(template="confusion", step=step, columns={"z": [[step, 0], [0, step]]}),
+            )
+        ),
+    ]
+    api.log_artifact_batch(artifacts)
+    _wait_for_artifacts(experiment_id, len(artifacts))
+    store = get_system_data_store()
+    shared = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
+    charts = [
+        models.ChartInstance[Any, Any](
+            chart_type=PlotlyChart.name, parameters={"key": "curve", "combine_runs": True}
+        ),
+        models.ChartInstance[Any, Any](
+            chart_type=PlotlyChart.name, parameters={"key": "confusion", "data_steps": "latest"}
+        ),
+    ]
+    store.update_page(
+        shared.model_copy(update={"panels": [PanelInstance[Any, Any](name="Templates", charts=charts)]})
+    )
+    page.reload()
+
+    plots = page.locator(".dl-panel-body .js-plotly-plot")
+    expect(plots).to_have_count(3)  # the curve over every run, and a heatmap per run
+    curve_plot = plots.first
+    expect(curve_plot.locator(".scatterlayer .trace")).to_have_count(
+        3
+    )  # the unbound trace once, and one per run
+    # Each run's 2 points at each of its 2 steps, and the unbound trace's 2.
+    expect(curve_plot.locator(".scatterlayer .trace .point")).to_have_count(10)
+    expect(plots.locator(".heatmaplayer image")).to_have_count(2)
+
+    # Each run's trace is in the run's own color, as its swatch in the run table, and the axes in the page's: both
+    # follow a change of color scheme (the theme's colors are CSS variables the browser resolves for Plotly).
+    swatches = page.locator(f"#{NAVBAR_HPARAM_DATATABLE_ID} .dl-swatch")
+    expect(swatches).to_have_count(2)
+
+    def drawn() -> tuple[list[str], list[str], str]:
+        runs = curve_plot.locator(".scatterlayer .trace").evaluate_all(
+            "traces => traces.slice(1).map(t => getComputedStyle(t.querySelector('.point')).fill)"
+        )
+        colors = swatches.evaluate_all(
+            "cells => cells.map(c => getComputedStyle(c, '::before').backgroundColor)"
+        )
+        ticks = curve_plot.locator(".xtick text").first.evaluate("t => getComputedStyle(t).fill")
+        return sorted(runs), sorted(colors), ticks
+
+    light_runs, light_swatches, light_ticks = drawn()
+    assert light_runs == light_swatches
+    scheme = page.locator("html")
+    before = scheme.get_attribute("data-mantine-color-scheme")
+    page.get_by_role("button", name="Toggle light/dark mode").click()
+    expect(scheme).not_to_have_attribute("data-mantine-color-scheme", before or "")
+    _wait_until(lambda: [drawn()[2] != light_ticks], [True])
+    dark_swatches = drawn()[1]
+    _wait_until(lambda: drawn()[0], dark_swatches)
     assert console_errors == []
 
 

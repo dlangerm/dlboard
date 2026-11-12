@@ -1,4 +1,4 @@
-"""Tests for the Plotly chart's figure mode: what the browser is handed to fetch and draw each run's figure by step."""
+"""Tests for the Plotly chart: what the browser is handed to fetch and draw, a figure per step or a template's data."""
 
 from __future__ import annotations
 
@@ -17,9 +17,17 @@ from dlboard.models import (
     DataRequest,
     RenderContext,
     artifact_column,
+    plotly_data_key,
 )
-from dlboard.plugins.charts.plotly_chart import COMBINED_RUNS, DLBOARD_THEME, PlotlyChart, PlotlySettings
-from dlboard.serve import series_swatch_class
+from dlboard.plugins.charts.plotly_chart import (
+    COMBINED_RUNS,
+    DLBOARD_THEME,
+    PlotlyChart,
+    PlotlySettings,
+    StreamMode,
+    thinned,
+)
+from dlboard.serve import series_color, series_swatch_class
 
 PlotlyChart.register(allow_override=True)
 
@@ -56,8 +64,10 @@ def test_the_browser_is_handed_each_runs_figure_url_by_step() -> None:
     assert payload["runs"]["1"] == {
         "name": "run-1",
         "swatch": series_swatch_class(1),
+        "color": series_color(1),
         "urls": {"0": "/artifact/1-0", "10": "/artifact/1-1"},
     }
+    assert payload["template"] is None
 
 
 def test_a_run_with_no_name_is_called_by_its_id() -> None:
@@ -122,8 +132,10 @@ def test_a_chart_with_nothing_logged_says_so(frame: pd.DataFrame) -> None:
     assert find_all_props(stack, lambda p: "Nothing logged for pr" in str(p.get("children")))
 
 
-def test_the_chart_reads_only_its_figure() -> None:
-    assert PlotlyChart.data_request(PlotlySettings(key="pr")) == DataRequest(artifacts=frozenset({"pr"}))
+def test_the_chart_reads_its_figure_and_any_data_logged_into_it() -> None:
+    assert PlotlyChart.data_request(PlotlySettings(key="pr")) == DataRequest(
+        artifacts=frozenset({"pr"}), artifact_prefixes=frozenset({plotly_data_key("pr")})
+    )
 
 
 @pytest.mark.parametrize(
@@ -155,3 +167,96 @@ def test_the_chart_is_as_wide_as_its_figures(
 def test_settings_without_a_key_are_invalid() -> None:
     with pytest.raises(ValidationError):
         ChartInstance(chart_type=PlotlyChart.name, parameters={}).render(_frame(runs=1, steps=1))
+
+
+# ---- a template: a figure logged once, drawn with the data logged into it ----
+
+
+def _template_frame(data_steps: dict[int, list[int]], template_runs: tuple[int, ...] = (1,)) -> pd.DataFrame:
+    """A frame of the template `gps` logged by `template_runs` at step 0, and each run's data at its steps."""
+    return pd.DataFrame(
+        [
+            *(
+                {"run_id": run, "step": 0, artifact_column("gps"): f"/artifact/t{run}"}
+                for run in template_runs
+            ),
+            *(
+                {
+                    "run_id": run,
+                    "step": step,
+                    artifact_column(plotly_data_key("gps")): f"/artifact/d{run}-{step}",
+                }
+                for run, steps in data_steps.items()
+                for step in steps
+            ),
+        ]
+    )
+
+
+@pytest.mark.parametrize(
+    ("mode", "urls", "steps"),
+    [
+        (StreamMode.ACCUMULATE, {"1": "/artifact/d1-1", "2": "/artifact/d1-2", "3": "/artifact/d1-3"}, [3]),
+        (StreamMode.LATEST, {"3": "/artifact/d1-3"}, [3]),
+        (StreamMode.SCRUB, {"1": "/artifact/d1-1", "2": "/artifact/d1-2", "3": "/artifact/d1-3"}, [1, 2, 3]),
+    ],
+    ids=["every-step", "latest", "one-step-at-a-time"],
+)
+def test_a_template_is_drawn_with_the_data_of_the_steps_its_mode_asks_for(
+    mode: StreamMode, urls: dict[str, str], steps: list[int]
+) -> None:
+    stack = PlotlyChart.render(PlotlySettings(key="gps", data_steps=mode), _template_frame({1: [1, 2, 3]}))
+
+    payload = _payload(stack)
+    assert payload["template"] == "/artifact/t1"
+    assert payload["data_steps"] == mode
+    assert payload["runs"]["1"]["urls"] == urls
+    assert payload["steps"] == steps
+    # Only a template scrubbed a step at a time has a slider.
+    assert len(_of_type(stack, "plotly-chart-slider")) == (mode is StreamMode.SCRUB)
+
+
+def test_the_template_is_the_newest_runs_and_every_run_with_data_is_drawn() -> None:
+    payload = _payload(
+        PlotlyChart.render(PlotlySettings(key="gps"), _template_frame({1: [1], 2: [1], 3: [1]}, (1, 2)))
+    )
+
+    assert payload["template"] == "/artifact/t2"
+    assert payload["order"] == [1, 2, 3]
+
+
+def test_data_with_no_template_logged_draws_nothing() -> None:
+    stack = PlotlyChart.render(PlotlySettings(key="gps"), _template_frame({1: [1]}, template_runs=()))
+
+    assert not _of_type(stack, "plotly-chart-graph")
+
+
+@pytest.mark.parametrize(
+    ("logged", "most", "kept"),
+    [
+        (list(range(5)), 8, list(range(5))),
+        (list(range(10)), 4, [0, 4, 8, 9]),
+        (list(range(11)), 4, [0, 4, 8, 10]),
+        (list(range(0, 100, 10)), 3, [0, 40, 80, 90]),
+    ],
+    ids=["few-enough", "every-4th-and-the-last", "the-last-is-its-own", "by-position-not-value"],
+)
+def test_long_data_is_thinned_by_a_power_of_two_keeping_the_latest(
+    logged: list[int], most: int, kept: list[int]
+) -> None:
+    assert thinned(logged, most) == kept
+
+
+def test_the_steps_kept_stay_put_as_a_run_logs_more() -> None:
+    before, after = thinned(list(range(20)), 8), thinned(list(range(24)), 8)
+
+    assert before[:-1] == after[: len(before) - 1]
+
+
+@pytest.mark.parametrize(("most", "noted"), [(2, True), (5, False)], ids=["thinned", "drawn-whole"])
+def test_a_chart_that_thinned_a_runs_data_says_so(most: int, noted: bool) -> None:
+    stack = PlotlyChart.render(
+        PlotlySettings(key="gps", max_data_steps=most), _template_frame({1: [1, 2, 3, 4, 5]})
+    )
+
+    assert bool(find_all_props(stack, lambda p: "max data steps" in str(p.get("children")))) is noted

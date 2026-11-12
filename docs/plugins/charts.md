@@ -31,6 +31,18 @@ so what the figure sets itself (a trace's color, a title) is kept; `use_figure_t
 logged with. A figure's own `height` and `width` give way to the chart's `height` and the panel's width. Auto-generate
 makes a `plotly` chart for each key a figure is logged under.
 
+A figure logged with bindings is a *template* once data has been logged into it (`PlotlyData`, logged under the
+template's key plus `_$data`, see `plotly_data_key`): the same chart draws the template with each run's data in the
+attributes its bindings name (trace 0's `lat` and `lon` from the `lat` and `lon` columns, say), and the rest of the
+figure as it was logged. `data_steps` says which steps' data: `accumulate` (the default) draws every step's in step
+order, so a column grows by each step's values and a 2-D column by its rows (a trajectory, a waterfall); `latest` draws
+each run's latest step's alone (a confusion matrix as it stands now); `scrub` draws one step's at a time, with a
+slider. `accumulate` draws at most `max_data_steps` (256) steps per run, keeping every 2nd, 4th, ... step of a longer
+run and always its latest, so the steps drawn stay put as it trains, and the chart says so under itself. With
+`combine_runs`, each run's bound traces are drawn in one figure, named and colored by run, and the traces no binding
+names once. The template is the newest run's, so a run that logs only data is drawn into it too. Every step's data is
+a file the browser fetches, so a chart costs what it draws: log a template's data every few steps, not every step.
+
 The figure is fetched from `/artifact/<id>` by the browser, so with the S3 artifact store in `presign` download mode
 (`DLBOARD_S3_DOWNLOAD_MODE`) the bucket needs a CORS rule allowing `GET` from dlboard's origin; the filesystem store and
 S3's `proxy` mode serve it from dlboard's own origin. A figure is drawn as it was logged, so anything it loads itself

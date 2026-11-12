@@ -19,7 +19,9 @@ import pandas as pd
 from dash import dcc
 from pydantic import BaseModel, Field
 
+from dlboard._compat import StrEnum
 from dlboard.models import (
+    ADVANCED_SECTION,
     DEFAULT_RENDER_CONTEXT,
     DISPLAY_SECTION,
     PLOTLY_FIGURE_EXTENSION,
@@ -32,6 +34,7 @@ from dlboard.models import (
     RenderContext,
     artifact_column,
     artifact_display_name,
+    plotly_data_key,
 )
 from dlboard.plugins.charts._empty_chart import nothing_logged
 from dlboard.plugins.charts.image_series import slider_marks
@@ -66,11 +69,27 @@ colors are CSS variables, which Plotly cannot read: the browser resolves them (`
 """
 
 
+class StreamMode(StrEnum):
+    """Which steps of the data streamed into a template a chart draws."""
+
+    ACCUMULATE = "accumulate"
+    """Every step's, in step order: a column of values grows by each step's, a 2-D one by its rows (a trajectory)."""
+    LATEST = "latest"
+    """Each run's latest step's alone (a confusion matrix as it stands)."""
+    SCRUB = "scrub"
+    """One step's at a time, with a slider over the steps."""
+
+
+DEFAULT_MAX_DATA_STEPS: Final = 256
+
+
 class PlotlySettings(BaseModel, frozen=True, extra="forbid", use_attribute_docstrings=True):
     """Plotly figure settings."""
 
     key: str
-    """The key the figure is logged under."""
+    """The key the figure, or the template, is logged under."""
+    data_steps: StreamMode = StreamMode.ACCUMULATE
+    """For a template, which steps of the data logged into it are drawn: every one, the latest, or one at a time."""
     combine_runs: Annotated[bool, DISPLAY_SECTION] = False
     """Draw every run's traces in one figure, a legend group each, rather than a figure per run."""
     height: Annotated[int, DISPLAY_SECTION] = Field(default=360, ge=100)
@@ -81,13 +100,16 @@ class PlotlySettings(BaseModel, frozen=True, extra="forbid", use_attribute_docst
     """Draw the figure in the theme it was logged with, rather than in the page's colors."""
     keep_view_across_steps: Annotated[bool, DISPLAY_SECTION] = True
     """Keep where you zoomed and panned, and the traces you hid, as the slider moves to another step."""
+    max_data_steps: Annotated[int, ADVANCED_SECTION] = Field(default=DEFAULT_MAX_DATA_STEPS, ge=1)
+    """The most steps of a template's data drawn per run when every step's is: a longer run is thinned to every 2nd, 4th, ... step, and its latest."""
 
 
 class _RunFigures(BaseModel, frozen=True, extra="forbid"):
     name: str
     swatch: str
+    color: str
     urls: dict[int, str]
-    """The run's figure at each step it logged one, by step."""
+    """By step: the run's figure, or for a template the data it logged."""
 
 
 class _Figures(BaseModel, frozen=True, extra="forbid"):
@@ -97,9 +119,29 @@ class _Figures(BaseModel, frozen=True, extra="forbid"):
     order: list[int]
     """The runs, in the order the combined figure lists them."""
     steps: list[int]
+    """The steps the slider goes to; one, and no slider, for a template drawn whole."""
     theme: dict[str, Any] | None
-    """The template the figures are drawn with, or `None` for their own."""
+    """The Plotly template the figures are drawn with, or `None` for their own."""
     keep_view: bool
+    template: str | None = None
+    """The URL of the figure a template's data is drawn into; `None` for figures drawn as they were logged."""
+    data_steps: StreamMode | None = None
+    thinned: int = 0
+    """How many runs had their data thinned to `max_data_steps`."""
+
+
+def thinned(steps: list[int], most: int) -> list[int]:
+    """
+    About `most` of `steps` (sorted): every `stride`-th from the first, and always the last.
+
+    `stride` is the least power of two that fits, so the steps kept stay put as a run logs more, until it doubles,
+    rather than shifting at every refresh (as `fetch_histograms` thins).
+    """
+    stride = 1
+    while -(-len(steps) // stride) > most:
+        stride *= 2
+    kept = steps[::stride]
+    return kept if kept[-1] == steps[-1] else [*kept, steps[-1]]
 
 
 _GRAPH: Final = "plotly-chart-graph"
@@ -131,33 +173,78 @@ def _run_names(dataframe: pd.DataFrame) -> dict[int, str]:
     return {int(run_id): name for run_id, name in rows.itertuples(index=False) if isinstance(name, str)}
 
 
-def _figures(parameters: PlotlySettings, dataframe: pd.DataFrame) -> _Figures | None:
-    """Each run's figure URLs by step, from the frame; `None` if no run drawn logged one."""
-    col = artifact_column(parameters.key)
+def _logged(dataframe: pd.DataFrame, key: str) -> dict[int, dict[int, str]]:
+    """The URL of each run's artifact under `key` at each step it logged one, by run and step, in step order."""
+    col = artifact_column(key)
     if col not in dataframe.columns:
-        return None
+        return {}
     urls: dict[int, dict[int, str]] = {}
-    for run_id, step, url in dataframe.loc[
-        dataframe[col].notna(), [MetricColumn.RUN_ID, MetricColumn.STEP, col]
-    ].itertuples(index=False):
+    rows = dataframe.loc[dataframe[col].notna(), [MetricColumn.RUN_ID, MetricColumn.STEP, col]]
+    for run_id, step, url in rows.sort_values(MetricColumn.STEP).itertuples(index=False):
         urls.setdefault(int(run_id), {})[int(step)] = str(url)
-    if not urls:
+    return urls
+
+
+def _streamed(
+    data: dict[int, dict[int, str]], parameters: PlotlySettings
+) -> tuple[dict[int, dict[int, str]], int]:
+    """Each run's data at the steps `parameters.data_steps` draws, and how many runs were thinned to get there."""
+    match parameters.data_steps:
+        case StreamMode.SCRUB:
+            return data, 0
+        case StreamMode.LATEST:
+            return {run: dict([max(urls.items())]) for run, urls in data.items()}, 0
+        case StreamMode.ACCUMULATE:
+            kept = {run: thinned(list(urls), parameters.max_data_steps) for run, urls in data.items()}
+            return (
+                {run: {step: data[run][step] for step in steps} for run, steps in kept.items()},
+                sum(len(steps) < len(data[run]) for run, steps in kept.items()),
+            )
+
+
+def _figures(parameters: PlotlySettings, dataframe: pd.DataFrame) -> _Figures | None:
+    """
+    What the browser draws, from the frame: each run's figures, or for a template each run's data; `None` for neither.
+
+    A key is a template once data has been logged into it (`plotly_data_key`): its figure is the newest run's latest,
+    and each run is drawn from the data it logged.
+    """
+    figures = _logged(dataframe, parameters.key)
+    data = _logged(dataframe, plotly_data_key(parameters.key))
+    if not figures:
         return None
+    newest = figures[max(figures)]
+    template = newest[max(newest)] if data else None
+    by_run, thinned_runs = _streamed(data, parameters) if data else (figures, 0)
     names = _run_names(dataframe)
-    runs = {
-        run_id: _RunFigures(
-            name=names.get(run_id, f"Run {run_id}"),
-            swatch=series_swatch_class(run_id),
-            urls=dict(sorted(by_step.items())),
-        )
-        for run_id, by_step in urls.items()
-    }
+    steps = sorted({step for urls in by_run.values() for step in urls})
     return _Figures(
-        runs=runs,
-        order=sorted(runs),
-        steps=sorted({step for by_step in urls.values() for step in by_step}),
+        runs={
+            run_id: _RunFigures(
+                name=names.get(run_id, f"Run {run_id}"),
+                swatch=series_swatch_class(run_id),
+                color=series_color(run_id),
+                urls=urls,
+            )
+            for run_id, urls in by_run.items()
+        },
+        order=sorted(by_run),
+        steps=steps if template is None or parameters.data_steps is StreamMode.SCRUB else steps[-1:],
         theme=None if parameters.use_figure_theme else DLBOARD_THEME,
         keep_view=parameters.keep_view_across_steps,
+        template=template,
+        data_steps=parameters.data_steps if template is not None else None,
+        thinned=thinned_runs,
+    )
+
+
+def _thinned_note(runs: int, most: int) -> dmc.Text:
+    """What a template chart says under itself when it drew only some of the steps a run logged data at."""
+    return dmc.Text(
+        f"{runs:,} run{'s' if runs > 1 else ''} logged data at more than {most:,} steps, so every few of them are "
+        "drawn, and the latest: raise the chart's max data steps, or log the data less often",
+        size="xs",
+        c="dimmed",
     )
 
 
@@ -266,6 +353,7 @@ class PlotlyChart(ChartType[PlotlySettings, pd.DataFrame, dmc.Stack], frozen=Tru
                     if parameters.combine_runs
                     else _run_grids(figures, parameters, instance, context)
                 ),
+                *([_thinned_note(figures.thinned, parameters.max_data_steps)] if figures.thinned else []),
             ],
             gap="sm",
         )
@@ -273,7 +361,11 @@ class PlotlyChart(ChartType[PlotlySettings, pd.DataFrame, dmc.Stack], frozen=Tru
     @typing.override
     @classmethod
     def data_request(cls, parameters: PlotlySettings) -> DataRequest:
-        return DataRequest(artifacts=frozenset({parameters.key}))
+        # The data logged into the key, if it is a template, is under a key of its own.
+        return DataRequest(
+            artifacts=frozenset({parameters.key}),
+            artifact_prefixes=frozenset({plotly_data_key(parameters.key)}),
+        )
 
     @typing.override
     @classmethod
