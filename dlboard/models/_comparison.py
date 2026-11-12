@@ -2,8 +2,21 @@
 
 from __future__ import annotations
 
+from enum import StrEnum
+
 import pendulum
 from pydantic import AwareDatetime, BaseModel, Field
+
+
+class ComparisonFilter(StrEnum):
+    """Which of a project's comparisons `DataStore.search_comparisons` lists to a viewer."""
+
+    VISIBLE = "visible"
+    """Every one the viewer may see: their own, and anyone's shared ones."""
+    EDITABLE = "editable"
+    """Those whose runs the viewer may change. A store with no access control lists every one they see."""
+    OWN = "own"
+    """The viewer's own."""
 
 
 class NewComparisonRun(BaseModel, frozen=True, extra="forbid"):

@@ -335,13 +335,19 @@ def test_a_shared_comparisons_runs_are_any_editors_to_change_but_its_page_is_its
     # What the UI shows is the same rule as what the store allows: nothing is offered that would be refused.
     assert as_bob.can_change_comparison_runs(page.id) is edits
     assert (as_bob.comparison_summary(page.id) is not None) is sees
+    editable = models.ComparisonFilter.EDITABLE
     if held is None:
         with pytest.raises(PermissionError):
-            as_bob.list_comparisons(project.id, bob.id, editable=True)
+            as_bob.search_comparisons(project.id, bob.id, which=editable)
     else:
-        assert [c.id for c in as_bob.list_comparisons(project.id, bob.id, editable=True)] == (
-            [page.id] if edits else []
+        own = as_bob.create_comparison(
+            models.Page[Any, Any],
+            models.NewPage[Any, Any](project_id=project.id, owner_id=bob.id, name="own"),
+            frozenset(),
         )
+        # Filtered in the store, so a page of them is full: bob's own, and alice's shared one only if he edits the project.
+        found = as_bob.search_comparisons(project.id, bob.id, which=editable)
+        assert [c.id for c in found.comparisons] == [own.id, *([page.id] if edits else [])]
     # The runs are the one thing others may change: its charts and settings, and who owns it, are the owner's alone.
     with pytest.raises(PermissionError):
         as_bob.update_page(page)
