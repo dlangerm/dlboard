@@ -40,7 +40,12 @@ from dlboard.serve._pages._experiment import _page_repository as repo
 from dlboard.serve._pages._experiment._column_catalog import (
     summary_hparam_keys,
 )
-from dlboard.serve._pages._experiment._compare import compare, compare_menu, compare_pins_menu
+from dlboard.serve._pages._experiment._compare import (
+    addable_comparisons,
+    compare,
+    compare_menu,
+    compare_pins_menu,
+)
 from dlboard.serve._pages._experiment._focus import experiment_href
 from dlboard.serve._pages._experiment._live_updates import STATE_LAST_KNOWN_REVISION
 from dlboard.serve._pages._experiment._paging import Paging
@@ -340,7 +345,7 @@ def _run_head(
             simple_action(surface, RunAction.HIDE, "Hide", icon_name=Icon.EYE_OFF),
             simple_action(surface, RunAction.DIFF, "Diff", icon_name=Icon.COMPARE),
             *pin_menus(surface),
-            compare_menu(surface, store.list_comparisons(project_id, get_current_user().id, editable=True)),
+            compare_menu(surface, addable_comparisons(store, project_id)),
             *keep_actions(surface),
             simple_action(surface, RunAction.DELETE, "Delete", icon_name=Icon.DELETE, color="red"),
         ),

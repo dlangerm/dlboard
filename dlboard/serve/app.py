@@ -392,9 +392,8 @@ def _experiment_switcher(
     Never every experiment of a project that has thousands: the first few, the one being looked at among them, and a link
     to the project page that lists them all.
     """
-    # Newest first: the ones being worked on are the ones a switcher is for, and the store does not order them.
-    newest = sorted(store.get_experiments(project.id), key=lambda e: (e.created_at, e.id), reverse=True)
-    offered = newest[:_SWITCHER_EXPERIMENTS]
+    # Newest first: the ones being worked on are the ones a switcher is for.
+    offered = store.search_experiments(project.id, limit=_SWITCHER_EXPERIMENTS).experiments
     if not any(e.id == experiment_id for e in offered):
         current = store.get_experiment(experiment_id)
         offered = [*offered, *([current] if current else [])]

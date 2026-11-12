@@ -33,7 +33,13 @@ from dlboard.models._artifact_purge_task import ArtifactPurgeTask, NewArtifactPu
 from dlboard.models._audit_log import AuditAction, AuditLogEntry, EntityType, NewAuditLogEntry
 from dlboard.models._auth import AuthProvider
 from dlboard.models._comment import Comment, NewComment
-from dlboard.models._comparison import ComparisonList, ComparisonRun, ComparisonSummary, NewComparisonRun
+from dlboard.models._comparison import (
+    ComparisonFilter,
+    ComparisonList,
+    ComparisonRun,
+    ComparisonSummary,
+    NewComparisonRun,
+)
 from dlboard.models._credentials import ApiToken, NewApiToken, PasswordCredential
 from dlboard.models._data_request import EVERY_KEY, ArtifactWindow, DataRequest
 from dlboard.models._data_store import SUMMARY_RUNS, ArtifactStore, DataStore, Pace, StepRange
@@ -163,6 +169,7 @@ __all__ = [
     "ColumnChoices",
     "ColumnKind",
     "Comment",
+    "ComparisonFilter",
     "ComparisonList",
     "ComparisonRun",
     "ComparisonSummary",

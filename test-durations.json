@@ -2246,6 +2246,8 @@
   "dlboard/serve/tests/assets_test.py::test_changed_content_gets_a_new_url_so_a_cached_copy_is_never_stale": 0.013988977996632457,
   "dlboard/serve/tests/clientside_script_test.py::test_clientside_script_asserts_the_path_exists": 0.004149049003899563,
   "dlboard/serve/tests/clientside_script_test.py::test_clientside_script_reads_the_file_contents": 0.0036909870032104664,
+  "dlboard/serve/tests/experiment_switcher_test.py::test_the_switcher_offers_the_newest_experiments_and_the_one_on_screen[a-new-one]": 0.24321292099739367,
+  "dlboard/serve/tests/experiment_switcher_test.py::test_the_switcher_offers_the_newest_experiments_and_the_one_on_screen[an-old-one]": 0.2873308710004494,
   "dlboard/serve/tests/format_test.py::test_a_duration_reads_as_its_two_largest_units[-5-0s]": 0.001680992001638515,
   "dlboard/serve/tests/format_test.py::test_a_duration_reads_as_its_two_largest_units[0-0s]": 0.0014757179997104686,
   "dlboard/serve/tests/format_test.py::test_a_duration_reads_as_its_two_largest_units[203-3m 23s]": 0.00128341599702253,

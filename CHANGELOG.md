@@ -53,6 +53,11 @@ pulls that section's body into the GitHub release notes and publishes both distr
 * The project, experiment and comparison pages draw their headers with one component, and saving a description (or a
   comparison's name) updates it in place, rather than drawing the header again (#547). Reopening a comparison's edit dialog
   now shows what is saved, not what was typed before a cancel.
+* **An experiment page's breadcrumb and the Compare menus read only what they show.** The experiment switcher read every
+  experiment of the project to offer the newest 15, and each Compare menu (on an experiment's run list, a comparison's,
+  and the project's pinned runs) every comparison the viewer may change to offer 10; each now reads that page of them.
+  `DataStore.search_comparisons` gains `which=` (`ComparisonFilter`: `VISIBLE`, `EDITABLE`, `OWN`), and
+  `list_comparisons` loses its `editable=`, which a page of comparisons could not be filtered by. (#590)
 
 ### Fixed
 

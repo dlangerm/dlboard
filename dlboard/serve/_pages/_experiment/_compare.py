@@ -36,6 +36,20 @@ OFFERED_COMPARISONS: typing.Final = 10
 """How many comparisons the menu offers to add runs to: the first few, the rest being a click on the project page away."""
 
 
+def addable_comparisons(store: DataStore[...], project_id: int) -> list[ComparisonSummary]:
+    """
+    The comparisons `compare_menu` offers to add runs to: the first of those whose runs the viewer may change.
+
+    One more than it offers, so that leaving out the one on screen still leaves it as many.
+    """
+    return store.search_comparisons(
+        project_id,
+        get_current_user().id,
+        which=models.ComparisonFilter.EDITABLE,
+        limit=OFFERED_COMPARISONS + 1,
+    ).comparisons
+
+
 def compare_menu(
     surface: RunListSurface,
     addable: Sequence[ComparisonSummary],

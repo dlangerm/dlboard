@@ -650,23 +650,30 @@ class AuthorizingDataStore(models.DataStore[...]):
         self._editable_comparison(page_id)
         self._inner.remove_comparison_runs(page_id, run_ids)
 
-    def list_comparisons(
-        self, project_id: int, viewer_id: int, *, editable: bool = False
-    ) -> list[models.ComparisonSummary]:
+    def list_comparisons(self, project_id: int, viewer_id: int) -> list[models.ComparisonSummary]:
         self._require_self_or(viewer_id, Scope.ALL)
         self._require(project_id, ProjectRole.VIEWER)
-        listed = self._inner.list_comparisons(project_id, viewer_id)
-        if not editable:
-            return listed
-        return [c for c in listed if self._may_change_runs(c.owner_id, project_id, shared=c.shared)]
+        return self._inner.list_comparisons(project_id, viewer_id)
 
-    def search_comparisons(
-        self, project_id: int, viewer_id: int, *, name_contains: str = "", limit: int = 24, offset: int = 0
+    def search_comparisons(  # noqa: PLR0913 -- one keyword per filter of a comparison list, and its page
+        self,
+        project_id: int,
+        viewer_id: int,
+        *,
+        name_contains: str = "",
+        which: models.ComparisonFilter = models.ComparisonFilter.VISIBLE,
+        limit: int = 24,
+        offset: int = 0,
     ) -> models.ComparisonList:
         self._require_self_or(viewer_id, Scope.ALL)
         self._require(project_id, ProjectRole.VIEWER)
+        if which is models.ComparisonFilter.EDITABLE:
+            # `_may_change_runs` as a filter the store can page: the viewer sees their own and shared ones, so an editor
+            # of the project may change every one of them, and anyone else only their own.
+            editor = self._can(project_id, ProjectRole.EDITOR)
+            which = models.ComparisonFilter.VISIBLE if editor else models.ComparisonFilter.OWN
         return self._inner.search_comparisons(
-            project_id, viewer_id, name_contains=name_contains, limit=limit, offset=offset
+            project_id, viewer_id, name_contains=name_contains, which=which, limit=limit, offset=offset
         )
 
     def comparison_summary(self, page_id: int) -> models.ComparisonSummary | None:

@@ -7,6 +7,7 @@ import typing
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 
+from dlboard.models._comparison import ComparisonFilter
 from dlboard.models._metric import MetricReduction, SeriesBand
 from dlboard.models._pin import PinColor
 
@@ -429,22 +430,22 @@ class DataStore(typing.Protocol[_P]):
         """Take `run_ids` out of a comparison; a run that is not a member is ignored."""
         ...
 
-    def list_comparisons(
-        self, project_id: int, viewer_id: int, *, editable: bool = False
-    ) -> list[models.ComparisonSummary]:
-        """
-        The comparisons of a project visible to `viewer_id`: their own first, then anyone's shared ones, by name.
-
-        With `editable`, only those whose runs `viewer_id` may add to and take out of (their own, and a shared one if
-        they edit the project).
-        """
+    def list_comparisons(self, project_id: int, viewer_id: int) -> list[models.ComparisonSummary]:
+        """The comparisons of a project visible to `viewer_id`: their own first, then anyone's shared ones, by name."""
         ...
 
-    def search_comparisons(
-        self, project_id: int, viewer_id: int, *, name_contains: str = "", limit: int = 24, offset: int = 0
+    def search_comparisons(  # noqa: PLR0913 -- one keyword per filter of a comparison list, and its page
+        self,
+        project_id: int,
+        viewer_id: int,
+        *,
+        name_contains: str = "",
+        which: ComparisonFilter = ComparisonFilter.VISIBLE,
+        limit: int = 24,
+        offset: int = 0,
     ) -> models.ComparisonList:
         """
-        A page of the comparisons `list_comparisons` lists, in its order, and how many matched in all.
+        A page of the comparisons `list_comparisons` lists (or `which` of them), in its order, and how many matched in all.
 
         A comparison matches if its name has `name_contains` in it, whatever its case, or it is its id.
         """

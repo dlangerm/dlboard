@@ -2039,27 +2039,37 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
             for id_, name, owner_id, owner_name, shared, count in rows
         ]
 
-    def list_comparisons(
+    def list_comparisons(self, project_id: int, viewer_id: int) -> list[models.ComparisonSummary]:
+        """`viewer_id`'s own comparisons of a project, then anyone's shared ones, by name."""
+        return self._comparison_summaries(self._visible_comparisons(project_id, viewer_id), viewer_id)
+
+    def search_comparisons(  # noqa: PLR0913 -- one keyword per filter of a comparison list, and its page
         self,
         project_id: int,
         viewer_id: int,
         *,
-        editable: bool = False,  # noqa: ARG002 -- this store has no access control to narrow by
-    ) -> list[models.ComparisonSummary]:
-        """
-        `viewer_id`'s own comparisons of a project, then anyone's shared ones, by name.
-
-        With `editable`, only those whose runs the viewer may change. Here that is all of them, since anyone who can
-        see one may: who may is the authorizing store's to say.
-        """
-        return self._comparison_summaries(self._visible_comparisons(project_id, viewer_id), viewer_id)
-
-    def search_comparisons(
-        self, project_id: int, viewer_id: int, *, name_contains: str = "", limit: int = 24, offset: int = 0
+        name_contains: str = "",
+        which: models.ComparisonFilter = models.ComparisonFilter.VISIBLE,
+        limit: int = 24,
+        offset: int = 0,
     ) -> models.ComparisonList:
-        """A page of the comparisons `list_comparisons` lists whose name or id matches, in its order, and how many did."""
+        """
+        A page of the comparisons `list_comparisons` lists whose name or id matches, in its order, and how many did.
+
+        `EDITABLE` lists every one the viewer sees, since anyone who can see one may change its runs here: who may is the
+        authorizing store's to say.
+        """
         pages = self._tables[models.Page]
-        matching = [*self._visible_comparisons(project_id, viewer_id), *_name_matches(pages, name_contains)]
+        match which:
+            case models.ComparisonFilter.VISIBLE | models.ComparisonFilter.EDITABLE:
+                whose = list[sa.ColumnElement[bool]]()
+            case models.ComparisonFilter.OWN:
+                whose = [pages.c.owner_id == viewer_id]
+        matching = [
+            *self._visible_comparisons(project_id, viewer_id),
+            *whose,
+            *_name_matches(pages, name_contains),
+        ]
         ((total,),) = self._execute(
             sa.select(sa.func.count())
             .select_from(pages)

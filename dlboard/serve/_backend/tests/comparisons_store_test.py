@@ -209,6 +209,12 @@ def test_a_user_lists_their_own_comparisons_first_then_shared_ones_and_never_a_p
     by_id = store.search_comparisons(world.project_id, world.bob, name_contains=str(theirs.id))
     assert theirs.id in [c.id for c in by_id.comparisons]
 
+    # Only their own, or (with no access control here) every one they see as the ones whose runs they may change.
+    own = store.search_comparisons(world.project_id, world.bob, which=models.ComparisonFilter.OWN)
+    assert (own.total, [c.name for c in own.comparisons]) == (2, ["alpha", "zeta"])
+    editable = store.search_comparisons(world.project_id, world.bob, which=models.ComparisonFilter.EDITABLE)
+    assert editable == store.search_comparisons(world.project_id, world.bob)
+
 
 @pytest.mark.parametrize("delete", ["run", "experiment"])
 def test_a_deleted_run_or_experiment_leaves_a_comparison_until_it_is_restored(

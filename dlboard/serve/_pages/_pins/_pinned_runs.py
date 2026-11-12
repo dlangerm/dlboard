@@ -28,7 +28,12 @@ from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import DivId, StoreId, ValueId
 from dlboard.serve._pages._dash_helpers import CallbackStates, pager_props, register_navigate, section_label
 from dlboard.serve._pages._dataframe_helpers import experiment_display_name
-from dlboard.serve._pages._experiment._compare import compare, compare_menu, compare_pins_menu
+from dlboard.serve._pages._experiment._compare import (
+    addable_comparisons,
+    compare,
+    compare_menu,
+    compare_pins_menu,
+)
 from dlboard.serve._pages._experiment._focus import experiment_href
 from dlboard.serve._pages._pins._pin_menus import pin_menus
 from dlboard.serve._pages._pins._pin_view import pin_cells, pin_glyph
@@ -284,7 +289,7 @@ def render_pinned_runs(store: DataStore[...], project_id: int, flt: PinFilter) -
             action_bar(
                 RunListSurface.PROJECT,
                 *pin_menus(RunListSurface.PROJECT),
-                compare_menu(RunListSurface.PROJECT, store.list_comparisons(project_id, me, editable=True)),
+                compare_menu(RunListSurface.PROJECT, addable_comparisons(store, project_id)),
                 *keep_actions(RunListSurface.PROJECT),
                 simple_action(
                     RunListSurface.PROJECT, RunAction.DELETE, "Delete", icon_name=Icon.DELETE, color="red"

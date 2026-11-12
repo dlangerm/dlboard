@@ -39,7 +39,12 @@ from dlboard.serve._pages._experiment import _page_edits as edits
 from dlboard.serve._pages._experiment import _page_model as page_model
 from dlboard.serve._pages._experiment import _page_repository as repo
 from dlboard.serve._pages._experiment._column_catalog import ColumnCatalog
-from dlboard.serve._pages._experiment._compare import compare, compare_menu, compare_pins_menu
+from dlboard.serve._pages._experiment._compare import (
+    addable_comparisons,
+    compare,
+    compare_menu,
+    compare_pins_menu,
+)
 from dlboard.serve._pages._experiment._focus import experiment_href
 from dlboard.serve._pages._experiment._paging import Paging
 from dlboard.serve._pages._experiment._run_compare import COMPARE_MODAL_ID, COMPARE_RUNS_ID, diff_of
@@ -189,7 +194,7 @@ def render_members(
     pins = pin_cells_by_run(store, [run.id for run in runs], get_current_user().id)
     can_edit = store.can_change_comparison_runs(page.id)
     project_id = typing.cast("int", page.project_id)
-    addable = store.list_comparisons(project_id, get_current_user().id, editable=True)
+    addable = addable_comparisons(store, project_id)
     counts = store.pin_counts(project_id)
     rows = _rows(store, runs, page, hidden, pins)
     signature = _signature(
