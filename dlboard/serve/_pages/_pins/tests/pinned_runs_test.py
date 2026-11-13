@@ -39,6 +39,9 @@ def test_the_address_says_which_runs_the_list_shows(search: str, expected: PinFi
     assert PinFilter.from_search(search) == expected
 
 
+@pytest.mark.usefixtures(
+    "clock"
+)  # the pins sort by when they were made: a stopped clock, not WSL's, which steps back
 def test_a_run_pinned_in_many_colours_by_many_people_is_one_row_with_all_its_pins(
     store: SQLLiteStore, experiment_id: int
 ) -> None:
