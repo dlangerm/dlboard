@@ -51,8 +51,16 @@ a file the browser fetches, so a chart costs what it draws: log a template's dat
 
 The figure is fetched from `/artifact/<id>` by the browser, so with the S3 artifact store in `presign` download mode
 (`DLBOARD_S3_DOWNLOAD_MODE`) the bucket needs a CORS rule allowing `GET` from dlboard's origin; the filesystem store and
-S3's `proxy` mode serve it from dlboard's own origin. A figure is drawn as it was logged, so anything it loads itself
-(map tiles, a `layout.images` URL) is fetched by the viewer's browser.
+S3's `proxy` mode serve it from dlboard's own origin (in `presign` mode the S3 plugin lets the page load from the bucket).
+Anything a figure would load from another server itself (a `layout.images` URL, a GeoJSON by URL, a map's style and
+tiles, a `geo` map's outlines from Plotly's CDN) is refused by the browser, because every page's Content-Security-Policy
+lets it load pictures, media, fonts and data from dlboard alone: otherwise anyone who can log to a project could make the
+browser of everyone who opens its charts request a URL of their choosing. `DLBOARD_PLOTLY_REMOTE_RESOURCES` lifts that.
+While it holds, a map is drawn on the tiles of `DLBOARD_PLOTLY_MAP_TILES` (a tile server the deployment chooses, which
+the page is then let load from) or on a blank background; a picture given as a `data:` URI is always drawn.
+
+A plugin whose deployment needs the page to load from somewhere else adds it with `dlboard.serve.allow_resources_from(app,
+url)` (that URL's origin) in its `plug()`, or `allow_resources_from_anywhere(app)`.
 
 `histogram.py` charts a logged histogram (see [Client & logging](../client.md): values binned in your training
 process, so only buckets are sent) as it changes over steps -- per-layer gradient norms or weights, a distribution

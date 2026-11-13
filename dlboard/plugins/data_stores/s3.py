@@ -22,7 +22,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from dlboard.models import INLINEABLE_ARTIFACT_CONTENT_TYPES
 from dlboard.plugins.data_stores._blob_store import RefAccess, plug_blob_store
-from dlboard.serve import Dependency, wait_for
+from dlboard.serve import Dependency, allow_resources_from, wait_for
 
 if TYPE_CHECKING:
     from dash import Dash
@@ -246,3 +246,10 @@ def plug(app: Dash) -> None:
         transient=_unreachable,
     )
     plug_blob_store(app, S3Blobs(settings), settings.queue_size)
+    if settings.download_mode is S3DownloadMode.PRESIGN:
+        # The browser follows an artifact's URL to the bucket, which the page's CSP must let it load from. Signing a URL
+        # reads nothing, and its host is the one every presigned URL has, however the endpoint is addressed.
+        signed = _client(settings).generate_presigned_url(  # pyrefly: ignore [bad-argument-type]
+            "get_object", Params={"Bucket": settings.bucket, "Key": settings.prefix or "_"}
+        )
+        allow_resources_from(app, signed)

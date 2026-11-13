@@ -345,3 +345,25 @@ def test_the_slider_leaving_the_window_reads_the_figures_around_where_it_went(
     assert len(urls) == PLOTLY_WINDOW_STEPS
     assert moved.first <= 2 * PLOTLY_WINDOW_STEPS <= moved.last
     assert sorted(map(int, urls)) == list(range(moved.first, moved.last + 1))
+
+
+@pytest.mark.parametrize(
+    ("env", "remote"),
+    [
+        ({}, {"remote_resources": False, "map_tiles": None}),
+        ({"DLBOARD_PLOTLY_REMOTE_RESOURCES": "true"}, {"remote_resources": True, "map_tiles": None}),
+        (
+            {"DLBOARD_PLOTLY_MAP_TILES": "https://tiles.example/{z}/{x}/{y}.png"},
+            {"remote_resources": False, "map_tiles": "https://tiles.example/{z}/{x}/{y}.png"},
+        ),
+    ],
+    ids=["nothing-by-default", "anything-when-the-deployment-lets-it", "maps-on-the-deployments-tiles"],
+)
+def test_a_figure_loads_nothing_from_other_servers_unless_the_deployment_lets_it(
+    monkeypatch: pytest.MonkeyPatch, env: dict[str, str], remote: dict[str, object]
+) -> None:
+    """The browser drops what a figure would fetch from elsewhere by what it is handed (#622)."""
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+
+    assert _payload(PlotlyChart.render(PlotlySettings(key="pr"), _frame(runs=1, steps=1)))["remote"] == remote

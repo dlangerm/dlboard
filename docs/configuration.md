@@ -34,6 +34,8 @@ version line without a deprecation window.
 | `DLBOARD_HISTOGRAM_ROW_GAP_PX` | `52` | Space between one run's row and the next in a histogram chart, with room for the run's name and the x axis. |
 | `DLBOARD_HISTOGRAM_MAX_TICKS` | `6` | How many buckets a histogram chart's value axis names (by lower edge). |
 | `DLBOARD_HISTOGRAM_ASPECT` | `2.5` | How much wider than tall a histogram chart is by default. |
+| `DLBOARD_PLOTLY_REMOTE_RESOURCES` | `false` | Let a logged Plotly figure load what it names from other servers: its pictures (`layout.images`, an image trace's `source`), a GeoJSON by URL, map styles and tiles, a `geo` map's outlines. Off, every page's Content-Security-Policy lets it load pictures, media, fonts and data from dlboard alone, so the browser refuses them, since anyone who can log to a project could otherwise make the browser of everyone who opens its charts request a URL of their choosing (which says that they looked, and from where). On, the policy no longer restricts what a page loads. A picture given as a `data:` URI is always drawn. |
+| `DLBOARD_PLOTLY_MAP_TILES` | unset | While `DLBOARD_PLOTLY_REMOTE_RESOURCES` is off, the raster tiles a Plotly map draws its map from, as a URL template (`https://tiles.example.com/{z}/{x}/{y}.png`), a tile server the deployment chooses; pages may load from its origin. Unset, a map is drawn on a blank background. |
 | `DLBOARD_POLL_INTERVAL_MS` | `30000` | How often an open experiment page checks for new data. |
 | `DLBOARD_TICK_INTERVAL_MS` | `10000` | How often the "fetched Xs ago" label re-renders. Browser-only; never touches the server. |
 

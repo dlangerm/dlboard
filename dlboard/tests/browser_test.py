@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 import time
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import parse_qs, urlparse
@@ -31,6 +32,7 @@ import pendulum
 import pytest
 from PIL import Image as PILImage
 from playwright.sync_api import expect
+from werkzeug.serving import make_server
 
 from dlboard import models
 from dlboard.client._rest_api import BasicDlboardAPI
@@ -2666,6 +2668,81 @@ def test_a_logged_plotly_figure_is_drawn_interactive_and_scrubbed_by_step(
     page.keyboard.press("End")
     expect(plot.locator(".gtitle")).to_have_text(f"at {last}")
     assert console_errors == []
+
+
+_ONE_PIXEL_PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+
+
+def test_a_page_with_a_logged_figure_on_it_loads_nothing_from_another_server(
+    page: Page, live_server_url: str, tmp_path: Path, console_errors: list[str]
+) -> None:
+    """
+    Whatever names it, a picture or data from another server is refused by the page's CSP (#622), while the figure and
+    the picture it holds inline, which are dlboard's own, are drawn.
+
+    Asked for from the page itself, not through one of a figure's attributes: the CSP, not a list of attributes that can
+    name a URL, is what stops it, so the test does not depend on which of them Plotly loads.
+    """
+    asked: list[str] = []
+    elsewhere = make_server(
+        "127.0.0.1", 0, lambda environ, start: asked.append(environ["PATH_INFO"]) or [b""]
+    )
+    threading.Thread(target=elsewhere.serve_forever, daemon=True).start()
+    remote = f"http://127.0.0.1:{elsewhere.server_port}"
+    _create_project_and_experiment(page, live_server_url, "Plotly Remote Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    api = BasicDlboardAPI(live_server_url)
+    run = api.create_run(models.NewRun(experiment_id=experiment_id))
+    picture = {
+        "xref": "paper",
+        "yref": "paper",
+        "x": 0,
+        "y": 1,
+        "sizex": 0.2,
+        "sizey": 0.2,
+        "source": _ONE_PIXEL_PNG,
+    }
+    figure = {"data": [{"type": "scatter", "y": [1, 2]}], "layout": {"images": [picture]}}
+    api.log_artifact_batch(
+        [PlotlyFigure.from_figure(figure, "pr").to_artifact(tmp_path, run.id, experiment_id)]
+    )
+    _wait_for_artifacts(experiment_id, 1)
+    store = get_system_data_store()
+    shared = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
+    chart = models.ChartInstance[Any, Any](chart_type=PlotlyChart.name, parameters={"key": "pr"})
+    store.update_page(
+        shared.model_copy(update={"panels": [PanelInstance[Any, Any](name="Figures", charts=[chart])]})
+    )
+    page.add_init_script(
+        "document.addEventListener('securitypolicyviolation', (e) => (window.dlRefused ??= []).push(e.blockedURI));"
+    )
+    try:
+        page.reload()
+
+        plot = page.locator(".dl-panel-body .js-plotly-plot")
+        expect(plot.locator(".scatterlayer .trace")).to_have_count(1)
+        expect(plot.locator("image")).to_have_count(1)
+        loaded = page.evaluate(
+            """async (remote) => [
+                await new Promise((done) => {
+                    const picture = new Image();
+                    picture.onload = () => done("loaded");
+                    picture.onerror = () => done("refused");
+                    picture.src = `${remote}/who-looked.png`;
+                }),
+                await fetch(`${remote}/who-asked.json`).then(() => "fetched", () => "refused"),
+            ]""",
+            remote,
+        )
+    finally:
+        elsewhere.shutdown()
+    assert loaded == ["refused", "refused"]
+    assert asked == []
+    # Refused by the page, not merely failed: the browser says so, of each.
+    assert page.evaluate("window.dlRefused ?? []") == [f"{remote}/who-looked.png", f"{remote}/who-asked.json"]
+    # The browser logs each refusal as an error; nothing else went wrong.
+    assert [error for error in console_errors if "Content Security Policy" not in error] == []
 
 
 def test_a_synced_panel_moves_plotly_and_image_charts_step_sliders_together(
