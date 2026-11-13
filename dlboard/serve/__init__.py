@@ -8,6 +8,8 @@ from dlboard.serve._backend._app_slot import AppSlot
 from dlboard.serve._backend._auth import (
     AuthSettings,
     add_public_route,
+    allow_resources_from,
+    allow_resources_from_anywhere,
     end_session,
     get_auth_provider,
     get_auth_settings,
@@ -81,6 +83,8 @@ __all__ = [
     "WorkRule",
     "add_public_route",
     "add_startup_check",
+    "allow_resources_from",
+    "allow_resources_from_anywhere",
     "app",
     "build_artifacts_dataframe",
     "end_session",

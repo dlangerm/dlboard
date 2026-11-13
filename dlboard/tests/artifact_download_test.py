@@ -13,6 +13,7 @@ import struct
 import time
 import warnings
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit
 
 import pytest
 import requests
@@ -97,6 +98,10 @@ def test_a_presigned_downloads_redirect_is_never_cached_as_long_as_the_bytes_it_
     assert response.content == b"hello"
     assert len(response.history) == 1, "expected exactly one presigned redirect hop"
     assert response.history[0].headers.get("Cache-Control") != _IMMUTABLE_CACHE_CONTROL
+    # A page may load what the redirect points at: its CSP lets in the bucket, and nothing else (#622).
+    bucket = urlsplit(response.history[0].headers["Location"])
+    policy = requests.get(backend_server.url, timeout=5).headers["Content-Security-Policy"]
+    assert f"img-src 'self' data: blob: {bucket.scheme}://{bucket.netloc}" in policy
 
 
 def test_an_unknown_artifact_id_404s(backend_server: BackendServer) -> None:

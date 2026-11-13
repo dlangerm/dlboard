@@ -19,6 +19,8 @@ import pandas as pd
 from dash import Patch, dcc
 from dash.exceptions import PreventUpdate
 from pydantic import BaseModel, Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from structlog.stdlib import get_logger
 
 from dlboard._compat import StrEnum
 from dlboard.models import (
@@ -52,11 +54,20 @@ from dlboard.plugins.charts._step_window import (
     runs_by_experiment,
 )
 from dlboard.plugins.charts.image_series import slider_marks
-from dlboard.serve import ClientsideScript, get_data_store, series_color, series_swatch_class
+from dlboard.serve import (
+    ClientsideScript,
+    allow_resources_from,
+    allow_resources_from_anywhere,
+    get_data_store,
+    series_color,
+    series_swatch_class,
+)
 from dlboard.serve._series import SERIES_SLOTS
 
 if typing.TYPE_CHECKING:
     from dlboard.models import DataStore
+
+_log = get_logger(__name__)
 
 COMBINED_RUNS: Final = "combined"
 """The `run` of the one graph a chart with `combine_runs` draws every run in: never a run's id, which is a number."""
@@ -129,8 +140,28 @@ class _RunFigures(BaseModel, frozen=True, extra="forbid"):
     """By step: the run's figure, or for a template the data it logged."""
 
 
+class RemoteResources(BaseSettings, frozen=True):
+    """
+    What a logged figure may load from other servers when it is drawn (#622): by default, nothing.
+
+    A figure is logged by anyone who can log to a project and drawn by the browser of everyone who opens its charts, so
+    a picture or a map it names on a server of its own would tell that server who looked, and from where. The page's CSP
+    is what refuses it (`allow_resources_from`), whatever in the figure names the URL: this says what `plug` lets in.
+    """
+
+    model_config = SettingsConfigDict(env_prefix="DLBOARD_PLOTLY_")
+
+    remote_resources: bool = False
+    """Let figures load their pictures, GeoJSON by URL, map styles and tiles from wherever they name."""
+    map_tiles: Annotated[str | None, Field(pattern=r"^https?://\S*\{z\}\S*$")] = None
+    """While remote resources are off, the raster tiles (`https://tiles.example.com/{z}/{x}/{y}.png`) a map is drawn on."""
+
+
 class _Figures(BaseModel, frozen=True, extra="forbid"):
     """What the browser draws a chart from (`plotly_chart.js`)."""
+
+    remote: RemoteResources = Field(default_factory=RemoteResources)
+    """What the figures may load from other servers, so a map whose own style the page would refuse is drawn on what is allowed."""
 
     runs: dict[int, _RunFigures]
     order: list[int]
@@ -497,6 +528,15 @@ def plug(app: dash.Dash) -> None:
     """Plugin: registers the chart type, and the callbacks that fetch and draw its figures, and read their windows."""
     PlotlyChart.register(allow_override=True)
     serve_plotly_colors(app)
+    remote = RemoteResources()
+    if remote.remote_resources:
+        allow_resources_from_anywhere(app)
+        if remote.map_tiles is not None:
+            _log.warning(
+                "DLBOARD_PLOTLY_MAP_TILES is ignored: DLBOARD_PLOTLY_REMOTE_RESOURCES lets maps load their own"
+            )
+    elif remote.map_tiles is not None:
+        allow_resources_from(app, remote.map_tiles)
     app.clientside_callback(
         WINDOW_JS.source,
         dash.Output({"type": _WINDOW_ASKED, "instance": dash.MATCH}, "data"),

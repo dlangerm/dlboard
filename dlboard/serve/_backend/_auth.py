@@ -10,6 +10,7 @@ reads it back; a request it can't resolve never reaches its route at all.
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from datetime import timedelta
 from enum import StrEnum
 from http import HTTPMethod, HTTPStatus
@@ -383,18 +384,78 @@ def install_request_gate(app: Dash, store_for: Callable[[], DataStore[...]]) -> 
     # First, ahead of Dash's own `before_request` hook: that one renders the layout on the first
     # request, which (via the header's user menu) needs the user this gate resolves.
     app.server.before_request_funcs.setdefault(None, []).insert(0, gate)
-    app.server.after_request(_add_security_headers)
+
+    def add_security_headers(response: BaseResponse) -> BaseResponse:
+        # The origins are read as each response goes, so a plugin plugged after this one still adds its own.
+        return _add_security_headers(response, RESOURCE_ORIGINS.find(app))
+
+    app.server.after_request(add_security_headers)
 
 
-def _add_security_headers(response: BaseResponse) -> BaseResponse:
+@dataclass
+class ResourceOrigins:
+    """
+    Where a page may load pictures, media, fonts and data from besides dlboard itself (#622): what its CSP allows.
+
+    Nothing else by default. Anyone who can log to a project chooses what its charts draw (a Plotly figure names its
+    pictures and map tiles by URL), and a page that loaded them from anywhere would let them make the browser of everyone
+    who opens it request a URL of their choosing. The browser refuses every such request, whatever asked for it, so no
+    chart has to know every way a figure can name a URL. A plugin adds what its deployment needs.
+    """
+
+    origins: set[str] = field(default_factory=set[str])
+    anywhere: bool = False
+
+
+RESOURCE_ORIGINS: AppSlot[ResourceOrigins] = AppSlot("resource origins")
+
+
+def allow_resources_from(app: Dash, url: str) -> None:
+    """Let `app`'s pages load pictures, media, fonts and data from `url`'s origin (a tile server, a bucket)."""
+    parts = urlsplit(url)
+    if parts.scheme not in ("http", "https") or not parts.netloc:
+        msg = f"not an http(s) URL to allow resources from: {url!r}"
+        raise ValueError(msg)
+    RESOURCE_ORIGINS.setdefault(app, ResourceOrigins).origins.add(f"{parts.scheme}://{parts.netloc}")
+
+
+def allow_resources_from_anywhere(app: Dash) -> None:
+    """Let `app`'s pages load pictures, media, fonts and data from anywhere: a deployment that trusts what is logged."""
+    RESOURCE_ORIGINS.setdefault(app, ResourceOrigins).anywhere = True
+
+
+_FETCHES: Final = {
+    "img-src": "'self' data: blob:",
+    "media-src": "'self' data: blob:",
+    "font-src": "'self' data:",
+    "connect-src": "'self' data: blob:",
+}
+"""Each CSP directive of something a page fetches, and what it may always fetch from: dlboard, and what it makes itself."""
+
+
+def content_security_policy(origins: ResourceOrigins | None) -> str:
+    """
+    Every page's CSP: never framed, and loading pictures, media, fonts and data only from `origins`.
+
+    Scripts and styles are left alone: Dash writes its own inline, and nothing logged becomes one.
+    """
+    directives = ["frame-ancestors 'none'"]
+    if origins is None or not origins.anywhere:
+        extra = sorted(origins.origins) if origins is not None else list[str]()
+        directives.extend(" ".join([name, sources, *extra]) for name, sources in _FETCHES.items())
+    return "; ".join(directives)
+
+
+def _add_security_headers(response: BaseResponse, origins: ResourceOrigins | None) -> BaseResponse:
     """
     Headers every response gets, regardless of auth provider.
 
     Defense in depth, not the primary control for any one of these -- the gate above, and
-    `_artifact_download.py`'s own stricter CSP for a route that serves client-controlled bytes, are.
+    `_artifact_download.py`'s own stricter CSP for a route that serves client-controlled bytes, are --
+    except what the CSP lets a page load (`ResourceOrigins`), which is the one control for that.
     """
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
-    response.headers.setdefault("Content-Security-Policy", "frame-ancestors 'none'")
+    response.headers.setdefault("Content-Security-Policy", content_security_policy(origins))
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "same-origin")
     return response

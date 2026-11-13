@@ -124,15 +124,38 @@ function plotlyChartFigures(step, payload) {
             };
         };
 
-        // The figure as its graph draws it, but for the theme: its own size gives way to the chart's, and its view is
-        // kept across steps unless it asks otherwise.
+        // Not a safeguard: the page's CSP refuses whatever a figure would load from another server (#622). While it
+        // does, a map's own style, which names its tiles on one, would leave the map blank, so a map is drawn on the
+        // deployment's tiles (`DLBOARD_PLOTLY_MAP_TILES`) instead, or on a plain background.
+        const mapStyle = (tiles) =>
+            tiles
+                ? {
+                      version: 8,
+                      sources: { dlboard: { type: "raster", tiles: [tiles], tileSize: 256 } },
+                      layers: [{ id: "dlboard", type: "raster", source: "dlboard" }],
+                  }
+                : "white-bg";
+        const onAllowedMaps = (layout, remote) =>
+            remote.remote_resources
+                ? layout
+                : Object.fromEntries(
+                      Object.entries(layout).map(([name, value]) => [
+                          name,
+                          /^(map|mapbox)\d*$/.test(name)
+                              ? { ...value, style: mapStyle(remote.map_tiles) }
+                              : value,
+                      ]),
+                  );
+
+        // The figure as its graph draws it, but for the theme: its own size gives way to the chart's, its view is kept
+        // across steps unless it asks otherwise, and a map is drawn on what the page may load.
         const dressed = (figure, payload, step) => {
             const { [bindingsMember]: _bindings, ...plain } = figure;
             const { height: _height, width: _width, ...layout } = plain.layout ?? {};
             return {
                 ...plain,
                 layout: {
-                    ...layout,
+                    ...onAllowedMaps(layout, payload.remote),
                     autosize: true,
                     uirevision: payload.keep_view ? (layout.uirevision ?? "dlboard") : String(step),
                 },
