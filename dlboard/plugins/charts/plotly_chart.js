@@ -37,12 +37,13 @@ function plotlyChartFigures(step, payload) {
 
         // The run's figure at the latest step it logged one at or before `step`; its first, if it has none yet. None if
         // the window of steps the chart has holds none of the run's (it is read as the slider gets there).
-        const urlAt = (urls, step) => {
+        const stepAt = (urls, step) => {
             const steps = Object.keys(urls)
                 .map(Number)
                 .sort((a, b) => a - b);
-            return urls[steps.filter((logged) => logged <= step).pop() ?? steps[0]];
+            return steps.filter((logged) => logged <= step).pop() ?? steps[0];
         };
+        const urlAt = (urls, step) => urls[stepAt(urls, step)];
 
         const unavailable = (text) => ({
             data: [],
@@ -77,19 +78,34 @@ function plotlyChartFigures(step, payload) {
             [name]: rest.length ? withValue(node?.[name] ?? {}, rest, value) : value,
         });
 
+        // A metric the run logged (#620), as a binding fills an attribute with it: at each step a record of data was
+        // logged at, its value there (the server sends one for every step of the run's data), so it lines up with the
+        // records' columns; with no records, its whole series. `step` is the steps themselves.
+        const metricValues = (run, name, recordSteps) => {
+            if (name === "step") {
+                return recordSteps.length ? recordSteps : run.metric_steps;
+            }
+            const values = run.metrics?.[name] ?? [];
+            if (!recordSteps.length) {
+                return values;
+            }
+            const at = new Map(run.metric_steps.map((step, i) => [step, values[i]]));
+            return recordSteps.map((step) => at.get(step) ?? null);
+        };
+
         // The template's traces with one run's data in the attributes its bindings name: each record's column after
-        // the one before, so a list of values grows by each step's and a 2-D column by its rows. A trace no binding
-        // names is as it was logged.
-        const filled = (template, records) => {
+        // the one before, so a list of values grows by each step's and a 2-D column by its rows, or the run's metric
+        // (`metricValues`) for a binding to one. A trace no binding names is as it was logged.
+        const filled = (template, records, run) => {
             const bindings = template[bindingsMember] ?? {};
+            const recordSteps = records.map((record) => record.step);
+            const valuesOf = (source) =>
+                typeof source === "string"
+                    ? records.flatMap((record) => record.columns?.[source] ?? [])
+                    : metricValues(run, source.metric, recordSteps);
             return (template.data ?? []).map((trace, index) =>
                 Object.entries(bindings[index] ?? {}).reduce(
-                    (bound, [path, column]) =>
-                        withValue(
-                            bound,
-                            path.split("."),
-                            records.flatMap((record) => record.columns?.[column] ?? []),
-                        ),
+                    (bound, [path, source]) => withValue(bound, path.split("."), valuesOf(source)),
                     trace,
                 ),
             );
@@ -102,8 +118,13 @@ function plotlyChartFigures(step, payload) {
             const traces = await Promise.all(
                 runs.map(async (run) => {
                     const urls = payload.runs[run].urls;
-                    const records = (scrubbed ? [urlAt(urls, step)] : Object.values(urls)).filter(Boolean);
-                    return { run, traces: filled(template, await Promise.all(records.map(load))) };
+                    const steps = scrubbed ? [stepAt(urls, step)] : Object.keys(urls).map(Number);
+                    const records = await Promise.all(
+                        steps
+                            .filter((at) => urls[at])
+                            .map(async (at) => ({ step: at, ...(await load(urls[at])) })),
+                    );
+                    return { run, traces: filled(template, records, payload.runs[run]) };
                 }),
             );
             if (!combine) {

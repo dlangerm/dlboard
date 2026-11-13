@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import typing
 from pathlib import Path
 from typing import Annotated, Any, Final, cast
@@ -45,6 +46,7 @@ from dlboard.models import (
 )
 from dlboard.plugins.charts._empty_chart import nothing_logged
 from dlboard.plugins.charts._plotly_colors import serve_plotly_colors
+from dlboard.plugins.charts._sampling import shared_sample_grid
 from dlboard.plugins.charts._step_slider import lock_step_sliders, step_slider
 from dlboard.plugins.charts._step_window import (
     WINDOW_JS,
@@ -130,6 +132,8 @@ class PlotlySettings(BaseModel, frozen=True, extra="forbid", use_attribute_docst
     """Keep where you zoomed and panned, and the traces you hid, as the slider moves to another step."""
     max_data_steps: Annotated[int, ADVANCED_SECTION] = Field(default=DEFAULT_MAX_DATA_STEPS, ge=1)
     """The most steps of a template's data drawn per run when every step's is: a longer run is thinned to every 2nd, 4th, ... step, and its latest."""
+    metrics: list[str] = Field(default_factory=list)
+    """The metrics a template's traces are bound to, read with it (auto-generate fills them in from the template)."""
 
 
 class _RunFigures(BaseModel, frozen=True, extra="forbid"):
@@ -138,6 +142,49 @@ class _RunFigures(BaseModel, frozen=True, extra="forbid"):
     color: str
     urls: dict[int, str]
     """By step: the run's figure, or for a template the data it logged."""
+    metric_steps: list[int] = Field(default_factory=list)
+    """The steps the run logged the metrics a template binds at, sampled as a line chart's are."""
+    metrics: dict[str, list[float | None]] = Field(default_factory=dict)
+    """Each bound metric's value at each of `metric_steps`, `None` where it logged none."""
+
+
+type _Series = dict[int, tuple[list[int], dict[str, list[float | None]]]]
+"""Each run's steps, and each metric's value at each of them (`None` where it has none)."""
+
+
+def _metric_series(dataframe: pd.DataFrame, metrics: list[str], at: dict[int, list[int]]) -> _Series:
+    """
+    Each run's series of the metrics a template binds (#620), as the browser fills a binding with it.
+
+    A run with data logged into the template has them at the steps of its data the chart draws (`at`): each metric's
+    latest value at or before each, from its whole series, so it lines up exactly with the data's columns. A run without
+    has its series sampled as a line chart's are (`shared_sample_grid`), so a long run costs the browser no more than a
+    line chart. `step` is no metric of its own: a binding to it is filled from the steps.
+    """
+    present = [m for m in metrics if m != MetricColumn.STEP and m in dataframe.columns]
+    if not present:
+        return {}
+    keys = [MetricColumn.RUN_ID, MetricColumn.STEP]
+    rows = dataframe.loc[dataframe[present].notna().any(axis=1), [*keys, *present]].astype(
+        {MetricColumn.RUN_ID: "int64", MetricColumn.STEP: "int64"}
+    )
+    alone = rows[~rows[MetricColumn.RUN_ID].isin(list(at))]
+    aligned = pd.DataFrame(
+        [(run, step) for run, steps in at.items() for step in steps], columns=keys, dtype="int64"
+    ).sort_values(MetricColumn.STEP)
+    for m in present:
+        logged = rows.loc[rows[m].notna(), [*keys, m]].sort_values(MetricColumn.STEP)
+        aligned = pd.merge_asof(aligned, logged, on=MetricColumn.STEP, by=MetricColumn.RUN_ID)
+    sampled = alone.merge(shared_sample_grid(alone, MetricColumn.STEP, MetricColumn.RUN_ID, present), on=keys)
+    series: _Series = {}
+    every = pd.concat([sampled, aligned]).drop_duplicates(keys).sort_values(MetricColumn.STEP)
+    for run_id, group in every.groupby(MetricColumn.RUN_ID):
+        values = group[present].astype(float).to_numpy()
+        series[int(cast("int", run_id))] = (  # pyrefly: ignore [unnecessary-type-conversion]
+            group[MetricColumn.STEP].astype(int).tolist(),
+            {m: [None if math.isnan(v) else v for v in values[:, i].tolist()] for i, m in enumerate(present)},
+        )
+    return series
 
 
 class RemoteResources(BaseSettings, frozen=True):
@@ -277,9 +324,9 @@ def _figures(
     """
     What the browser draws, from the frame: each run's figures, or for a template each run's data; `None` for neither.
 
-    A key is a template once data has been logged into it (`plotly_data_key`): its figure is the newest run's latest,
-    and each run is drawn from the data it logged. With them, the window of steps the chart has, for a slider that can
-    go past it.
+    A key is a template once data has been logged into it (`plotly_data_key`), or the chart reads metrics its traces are
+    bound to: its figure is the newest run's latest, and each run is drawn from the data and the metrics it logged. With
+    them, the window of steps the chart has, for a slider that can go past it.
     """
     data_key = plotly_data_key(parameters.key)
     figures = _logged(dataframe, parameters.key)
@@ -287,10 +334,23 @@ def _figures(
     if not figures:
         return None
     newest = figures[max(figures)]
-    template = newest[max(newest)] if data else None
-    windowed = artifact_logged_column(data_key) in dataframe.columns
-    by_run = _streamed(data, parameters, windowed=windowed) if data else figures
+    template = newest[max(newest)] if data or parameters.metrics else None
     logged_data = _logged_steps(dataframe, data_key)
+    drawn = _streamed(data, parameters, windowed=artifact_logged_column(data_key) in dataframe.columns)
+    # The metrics a template binds, at the steps of its data it draws: every one logged, for a slider over them.
+    at = (
+        logged_data
+        if parameters.data_steps is StreamMode.SCRUB
+        else {run: list(urls) for run, urls in drawn.items()}
+    )
+    series: _Series = _metric_series(dataframe, parameters.metrics, at) if template is not None else {}
+    if data:
+        by_run = drawn
+    elif template is not None:
+        # Bound to metrics alone: each run that logged them, or the template's own runs if none did yet.
+        by_run = {run: dict[int, str]() for run in series or figures}
+    else:
+        by_run = figures
     thinned_runs = (
         sum(len(urls) < len(logged_data.get(run, ())) for run, urls in by_run.items())
         if template is not None and parameters.data_steps is StreamMode.ACCUMULATE
@@ -301,10 +361,9 @@ def _figures(
     scrubbed = template is None or parameters.data_steps is StreamMode.SCRUB
     slider_key = parameters.key if template is None else data_key
     logged = _logged_steps(dataframe, slider_key) if scrubbed else dict[int, list[int]]()
-    steps = sorted({step for run_steps in logged.values() for step in run_steps}) or sorted(
-        {step for urls in by_run.values() for step in urls}
-    )
     read = sorted({step for urls in by_run.values() for step in urls})
+    # A template bound to metrics alone has no steps of data: it is drawn once, at the template's.
+    steps = sorted({step for run_steps in logged.values() for step in run_steps}) or read or [max(newest)]
     # A run with nothing in the window yet is drawn too, once the slider gets to its steps.
     by_run = {run: by_run.get(run, {}) for run in sorted({*by_run, *logged})}
     runs = runs_by_experiment(dataframe)
@@ -315,7 +374,7 @@ def _figures(
             runs={experiment: [run for run in ids if run in by_run] for experiment, ids in runs.items()},
             key=slider_key,
         )
-        if scrubbed and runs is not None and artifact_logged_column(slider_key) in dataframe.columns
+        if scrubbed and read and runs is not None and artifact_logged_column(slider_key) in dataframe.columns
         else None
     )
     return _Figures(
@@ -325,6 +384,8 @@ def _figures(
                 swatch=series_swatch_class(run_id),
                 color=series_color(run_id),
                 urls=urls,
+                metric_steps=series[run_id][0] if run_id in series else [],
+                metrics=series[run_id][1] if run_id in series else {},
             )
             for run_id, urls in by_run.items()
         },
@@ -479,6 +540,8 @@ class PlotlyChart(ChartType[PlotlySettings, pd.DataFrame, dmc.Stack], frozen=Tru
             case StreamMode.ACCUMULATE:
                 data_window = ArtifactWindow(data_key, parameters.max_data_steps, at=WindowAt.THINNED)
         return DataRequest(
+            # `step` is bound to the steps, not read as a metric.
+            metrics=frozenset(parameters.metrics) - {MetricColumn.STEP},
             artifacts=frozenset({parameters.key}),
             artifact_prefixes=frozenset({data_key}),
             artifact_windows=frozenset({ArtifactWindow(parameters.key, PLOTLY_WINDOW_STEPS), data_window}),
@@ -500,7 +563,7 @@ class PlotlyChart(ChartType[PlotlySettings, pd.DataFrame, dmc.Stack], frozen=Tru
     @typing.override
     @classmethod
     def field_column_kinds(cls) -> dict[str, ColumnKind]:
-        return {"key": ColumnKind.ARTIFACT}
+        return {"key": ColumnKind.ARTIFACT, "metrics": ColumnKind.METRIC}
 
 
 _FIGURES_JS: Final = ClientsideScript(Path(__file__).with_name("plotly_chart.js"))

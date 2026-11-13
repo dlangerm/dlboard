@@ -12,8 +12,13 @@ import pydantic
 import pytest
 import torch
 
-from dlboard.client.artifacts.plotly import BINDINGS_MEMBER, MAX_DATA_VALUES, PlotlyData, PlotlyFigure
-from dlboard.models import PLOTLY_DATA_EXTENSION, PLOTLY_FIGURE_EXTENSION, plotly_data_key
+from dlboard.client.artifacts.plotly import BINDINGS_MEMBER, MAX_DATA_VALUES, PlotlyData, PlotlyFigure, metric
+from dlboard.models import (
+    PLOTLY_DATA_EXTENSION,
+    PLOTLY_FIGURE_EXTENSION,
+    plotly_data_key,
+    plotly_template_metrics,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -70,6 +75,25 @@ def test_a_template_keeps_its_bindings_beside_the_figure(tmp_path: Path) -> None
     _logged, written = _written(template, tmp_path)
     assert written[BINDINGS_MEMBER] == {"0": {"lat": "lat", "lon": "lon"}, "1": {"z": "confusion"}}
     assert [trace["type"] for trace in written["data"]] == ["scattermap", "heatmap"]
+
+
+def test_a_template_bound_to_metrics_names_them_in_a_tag_the_server_reads(tmp_path: Path) -> None:
+    """The server never reads a figure: the metrics it binds are in a tag, so a chart reads them with it (#620)."""
+    template = PlotlyFigure.from_figure(
+        {"data": [{"type": "scatter"}, {"type": "heatmap"}]},
+        "curve",
+        bind={0: {"x": metric("step"), "y": metric("train/loss")}, 1: {"z": "confusion"}},
+        tags={"split": "val"},
+    )
+
+    logged, written = _written(template, tmp_path)
+    assert written[BINDINGS_MEMBER] == {
+        "0": {"x": {"metric": "step"}, "y": {"metric": "train/loss"}},
+        "1": {"z": "confusion"},
+    }
+    assert plotly_template_metrics(template.tags) == ("step", "train/loss")
+    assert logged.tags["split"] == "val"
+    assert plotly_template_metrics(PlotlyFigure.from_figure({"data": []}, "f").tags) == ()
 
 
 @pytest.mark.parametrize(

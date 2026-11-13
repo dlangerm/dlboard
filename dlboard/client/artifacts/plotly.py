@@ -7,6 +7,7 @@ Three ways to use it, all charted by the `plotly` chart:
 - One `PlotlyFigure` (step 0): the chart shows it as it is.
 - One `PlotlyFigure` with `bind`, a template, then a `PlotlyData` at each step: the chart draws the template with the data
   logged so far in the traces it binds (a heatmap's `z`, a trajectory's `lat` and `lon`), and keeps drawing as more comes.
+  A trace can also be bound to a metric the run already logs (`metric("train/loss")`), with no `PlotlyData` for it.
 
 Nothing here imports plotly: a figure is anything with plotly's `to_json`, or a plain mapping of the same shape.
 """
@@ -26,6 +27,7 @@ from dlboard.client._arrays import ArrayLike, TensorLike, to_numpy
 from dlboard.models import (
     PLOTLY_DATA_EXTENSION,
     PLOTLY_FIGURE_EXTENSION,
+    PLOTLY_METRICS_TAG,
     NewArtifact,
     TagValue,
     plotly_data_key,
@@ -56,8 +58,24 @@ AttributePath = Annotated[str, StringConstraints(pattern=r"^[A-Za-z_]\w*(\.[A-Za
 
 ColumnName = Annotated[str, StringConstraints(min_length=1)]
 
-Bindings = Mapping[int, Mapping[str, str]]
-"""For each trace, by its position in the figure's `data`, which attribute is filled from which `PlotlyData` column."""
+
+class MetricBinding(BaseModel, frozen=True, extra="forbid"):
+    """A trace attribute filled from a metric the run logs (`metric("train/loss")`), not from `PlotlyData` (#620)."""
+
+    metric: ColumnName
+    """The metric's name, or `step` for the steps it was logged at."""
+
+
+def metric(name: str) -> MetricBinding:
+    """Bind a template's trace attribute to the metric called `name` (or `step`), as each run logged it."""
+    return MetricBinding(metric=name)
+
+
+Bindings = Mapping[int, Mapping[str, str | MetricBinding]]
+"""
+For each trace, by its position in the figure's `data`, which attribute is filled from which `PlotlyData` column, or
+from which metric (`metric`).
+"""
 
 
 class _Figure(BaseModel, frozen=True, extra="allow"):
@@ -65,7 +83,7 @@ class _Figure(BaseModel, frozen=True, extra="allow"):
 
     data: list[dict[str, Any]]
     dlboard_bindings: dict[
-        NonNegativeInt, Annotated[dict[AttributePath, ColumnName], Field(min_length=1)]
+        NonNegativeInt, Annotated[dict[AttributePath, ColumnName | MetricBinding], Field(min_length=1)]
     ] = {}
 
     @model_validator(mode="after")
@@ -74,6 +92,17 @@ class _Figure(BaseModel, frozen=True, extra="allow"):
             msg = f"bindings name traces {missing}, but the figure has {len(self.data)}"
             raise ValueError(msg)
         return self
+
+    def metrics(self) -> list[str]:
+        """The metrics its bindings fill traces from, by name."""
+        return sorted(
+            {
+                source.metric
+                for attributes in self.dlboard_bindings.values()
+                for source in attributes.values()
+                if isinstance(source, MetricBinding)
+            }
+        )
 
 
 def _array_values(array: np.ndarray) -> list[Any]:
@@ -136,16 +165,27 @@ class PlotlyFigure(BaseModel, frozen=True, extra="forbid"):
         Encode `figure` right now -- it's mutable, and may be changed straight after logging.
 
         `bind` makes it a template: for each trace (by its position in `figure.data`), which attribute is filled from
-        which column of the `PlotlyData` logged for `key` (`{0: {"lat": "lat", "lon": "lon"}}`). The rest of the figure
-        (its layout, the traces' styles, any trace not bound) is drawn as it is.
+        which column of the `PlotlyData` logged for `key` (`{0: {"lat": "lat", "lon": "lon"}}`), or from which metric
+        the run logs (`{0: {"x": metric("step"), "y": metric("train/loss")}}`). The rest of the figure (its layout, the
+        traces' styles, any trace not bound) is drawn as it is.
         """
         raw = _jsonable(figure) if isinstance(figure, Mapping) else _jsonable(json.loads(figure.to_json()))
         if bind is not None:
-            raw[BINDINGS_MEMBER] = bind
+            raw[BINDINGS_MEMBER] = {
+                trace: {
+                    path: source.model_dump() if isinstance(source, MetricBinding) else source
+                    for path, source in attributes.items()
+                }
+                for trace, attributes in bind.items()
+            }
         checked = _Figure.model_validate(raw)
         if checked.dlboard_bindings:
             raw[BINDINGS_MEMBER] = checked.model_dump(mode="json")[BINDINGS_MEMBER]
-        return cls(key=key, data=_encoded(raw), step=step, tags=tags or {})
+        # The server never reads the figure: the metrics it binds go in a tag, so a chart knows to read them with it.
+        metrics: dict[str, TagValue] = (
+            {PLOTLY_METRICS_TAG: json.dumps(names)} if (names := checked.metrics()) else {}
+        )
+        return cls(key=key, data=_encoded(raw), step=step, tags={**(tags or {}), **metrics})
 
     def to_artifact(self, local_temp: Path, run_id: int, experiment_id: int) -> tuple[NewArtifact, Path]:
         """Convert this artifact."""

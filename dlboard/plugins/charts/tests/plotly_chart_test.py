@@ -76,6 +76,8 @@ def test_the_browser_is_handed_each_runs_figure_url_by_step() -> None:
         "swatch": series_swatch_class(1),
         "color": series_color(1),
         "urls": {"0": "/artifact/1-0", "10": "/artifact/1-1"},
+        "metric_steps": [],
+        "metrics": {},
     }
     assert payload["template"] is None
 
@@ -367,3 +369,53 @@ def test_a_figure_loads_nothing_from_other_servers_unless_the_deployment_lets_it
         monkeypatch.setenv(name, value)
 
     assert _payload(PlotlyChart.render(PlotlySettings(key="pr"), _frame(runs=1, steps=1)))["remote"] == remote
+
+
+def test_a_template_bound_to_metrics_alone_is_handed_each_runs_series() -> None:
+    """No data is logged into it: each run that logged the metrics is drawn from them, the steps they were at (#620)."""
+    frame = pd.DataFrame(
+        [
+            {"run_id": 1, "step": 0, artifact_column("curve"): "/artifact/t1"},
+            *({"run_id": run, "step": step, "loss": 1 / (step + run)} for run in (1, 2) for step in (1, 2)),
+            {"run_id": 2, "step": 3, "acc": 0.5},
+        ]
+    )
+
+    payload = _payload(
+        PlotlyChart.render(PlotlySettings(key="curve", metrics=["step", "loss", "acc"]), frame)
+    )
+
+    assert payload["template"] == "/artifact/t1"
+    assert payload["order"] == [1, 2]
+    assert payload["runs"]["1"]["metric_steps"] == [1, 2]
+    assert payload["runs"]["1"]["metrics"] == {"loss": [0.5, 1 / 3], "acc": [None, None]}
+    assert payload["runs"]["2"]["metric_steps"] == [1, 2, 3]
+    assert payload["runs"]["2"]["metrics"]["acc"] == [None, None, 0.5]
+
+
+def test_a_metric_beside_a_templates_data_is_its_exact_value_at_each_step_of_the_data() -> None:
+    """A metric long enough to be sampled for a line chart is still the value it had at each data step, not a sample's."""
+    data_steps = [7, 2501, 4999]
+    frame = pd.DataFrame(
+        [
+            {"run_id": 1, "step": 0, artifact_column("curve"): "/artifact/t1"},
+            *({"run_id": 1, "step": step, "loss": float(step)} for step in range(5000)),
+            *(
+                {"run_id": 1, "step": step, artifact_column(plotly_data_key("curve")): f"/artifact/d{step}"}
+                for step in data_steps
+            ),
+        ]
+    )
+
+    run: dict[str, Any] = _payload(PlotlyChart.render(PlotlySettings(key="curve", metrics=["loss"]), frame))[
+        "runs"
+    ]["1"]
+
+    assert run["metric_steps"] == data_steps
+    assert run["metrics"] == {"loss": [7.0, 2501.0, 4999.0]}
+
+
+def test_the_chart_reads_the_metrics_its_template_binds_and_not_the_steps() -> None:
+    request = PlotlyChart.data_request(PlotlySettings(key="curve", metrics=["step", "loss"]))
+
+    assert request.metrics == frozenset({"loss"})

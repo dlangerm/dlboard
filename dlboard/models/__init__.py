@@ -16,6 +16,7 @@ from dlboard.models._artifact import (
     PLOTLY_DATA_EXTENSION,
     PLOTLY_DATA_KEY_SUFFIX,
     PLOTLY_FIGURE_EXTENSION,
+    PLOTLY_METRICS_TAG,
     UNNAMED_OVERLAY,
     AnyArtifact,
     Artifact,
@@ -32,6 +33,7 @@ from dlboard.models._artifact import (
     overlay_image_key,
     overlay_key,
     plotly_data_key,
+    plotly_template_metrics,
 )
 from dlboard.models._artifact_purge_task import ArtifactPurgeTask, NewArtifactPurgeTask
 from dlboard.models._audit_log import AuditAction, AuditLogEntry, EntityType, NewAuditLogEntry
@@ -152,6 +154,7 @@ __all__ = [
     "PLOTLY_DATA_EXTENSION",
     "PLOTLY_DATA_KEY_SUFFIX",
     "PLOTLY_FIGURE_EXTENSION",
+    "PLOTLY_METRICS_TAG",
     "RUN_NAME_COLUMN",
     "SERIES_BAND_COLUMN_PREFIX",
     "SUMMARY_RUNS",
@@ -285,6 +288,7 @@ __all__ = [
     "overlay_image_key",
     "overlay_key",
     "plotly_data_key",
+    "plotly_template_metrics",
     "require_scope",
     "thinned",
 ]
