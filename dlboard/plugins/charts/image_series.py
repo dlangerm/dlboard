@@ -53,6 +53,7 @@ from dlboard.plugins.charts._layers import (
     overlay_keys_of,
     serve_layered_picture,
 )
+from dlboard.plugins.charts._step_slider import lock_step_sliders, step_slider
 from dlboard.plugins.charts._step_window import (
     WINDOW_JS,
     LoadedSteps,
@@ -688,7 +689,7 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
                     },
                 ),
                 dmc.Slider(
-                    id={"type": "image-series-slider", "instance": inst},
+                    id=step_slider(cls.name, inst),
                     min=all_steps[0],
                     max=all_steps[-1],
                     value=all_steps[0],
@@ -770,7 +771,6 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
 
 _SCRUB_JS = ClientsideScript(Path(__file__).with_name("image_series_scrub.js"))
 _PAGE_JS = ClientsideScript(Path(__file__).with_name("image_series_page.js"))
-_LOCK_JS = ClientsideScript(Path(__file__).with_name("image_series_lock.js"))
 _MODAL_PICTURE_JS = ClientsideScript(Path(__file__).with_name("image_series_modal_picture.js"))
 _MODAL_OVERLAY_JS = ClientsideScript(Path(__file__).with_name("image_series_modal_overlay.js"))
 _CSS_PATH = Path(__file__).with_name("image_series.css")
@@ -843,7 +843,7 @@ def plug(app: dash.Dash) -> None:
         dash.Output({"type": "image-series-modal-img", "instance": dash.MATCH}, "src"),
         dash.Input({"type": "image-series-modal", "instance": dash.MATCH}, "opened"),
         dash.Input({"type": "image-series-modal-run", "instance": dash.MATCH}, "data"),
-        dash.Input({"type": "image-series-slider", "instance": dash.MATCH}, "value"),
+        dash.Input(step_slider(ImageChart.name, dash.MATCH), "value"),
         # An Input, so the window of pictures that arrives after the slider left the last one is drawn.
         dash.Input({"type": "image-series-data", "instance": dash.MATCH}, "data"),
         prevent_initial_call=True,
@@ -863,26 +863,19 @@ def plug(app: dash.Dash) -> None:
                 {"type": "image-series-caption", "instance": dash.MATCH, "run": dash.ALL}, "children"
             ),
         ],
-        dash.Input({"type": "image-series-slider", "instance": dash.MATCH}, "value"),
+        dash.Input(step_slider(ImageChart.name, dash.MATCH), "value"),
         dash.Input({"type": "image-series-data", "instance": dash.MATCH}, "data"),
     )
     # A chart that reads a window of its pictures asks for the next when its slider leaves the one it has (#364).
     app.clientside_callback(
         WINDOW_JS.source,
         dash.Output({"type": "image-series-window-request", "instance": dash.MATCH}, "data"),
-        dash.Input({"type": "image-series-slider", "instance": dash.MATCH}, "value"),
+        dash.Input(step_slider(ImageChart.name, dash.MATCH), "value"),
         dash.State({"type": "image-series-window", "instance": dash.MATCH}, "data"),
     )
     _register_window_reads(app)
 
-    # Moves every other slider in the same synced panel (`data-dl-panel-sync`) along with the one dragged.
-    app.clientside_callback(
-        _LOCK_JS.source,
-        dash.Input({"type": "image-series-slider", "instance": dash.ALL}, "value"),
-        dash.State({"type": "image-series-slider", "instance": dash.ALL}, "id"),
-        dash.State({"type": "image-series-slider", "instance": dash.ALL}, "marks"),
-        prevent_initial_call=True,
-    )
+    lock_step_sliders(app)
 
     app.clientside_callback(
         _PAGE_JS.source,

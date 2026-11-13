@@ -334,8 +334,9 @@ window.dlImageSeriesViewer = (() => {
             ask.timer = null;
             if (ask.step !== ask.sent) {
                 ask.sent = ask.step;
+                // The chart's step slider (`_step_slider.py`'s `step_slider`, under the image chart's name).
                 window.dash_clientside.set_props(
-                    { type: "image-series-slider", instance },
+                    { type: "dl-step-slider", chart: "image", instance },
                     { value: ask.step },
                 );
                 ask.timer = setTimeout(send, STEP_INTERVAL_MS);

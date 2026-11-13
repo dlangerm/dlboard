@@ -32,48 +32,8 @@ function plotlyChartFigures(step, payload) {
             return figure;
         };
 
-        const colorKeys = new Set([
-            "color",
-            "colorway",
-            "bgcolor",
-            "fillcolor",
-            "gridcolor",
-            "linecolor",
-            "zerolinecolor",
-        ]);
-        const token = /(var\(--[\w-]+\))(?:\/([\d.]+))?/g;
-        // The page's own computed color is what a variable means to it, and one pixel of a canvas painted with it is
-        // that color as the red, green and blue Plotly can parse (as `series_band_colors.js` does).
-        const probe = document.createElement("span");
-        probe.hidden = true;
-        document.body.append(probe);
-        const canvas = document.createElement("canvas");
-        canvas.width = 1;
-        canvas.height = 1;
-        const pixel = canvas.getContext("2d", { willReadFrequently: true });
-        const rgb = (variable) => {
-            probe.style.color = "";
-            probe.style.color = variable;
-            pixel.clearRect(0, 0, 1, 1);
-            pixel.fillStyle = getComputedStyle(probe).color;
-            pixel.fillRect(0, 0, 1, 1);
-            return pixel.getImageData(0, 0, 1, 1).data.slice(0, 3).join(", ");
-        };
-        const resolveColor = (text) =>
-            text.replace(token, (_, variable, opacity) =>
-                opacity === undefined ? `rgb(${rgb(variable)})` : `rgba(${rgb(variable)}, ${opacity})`,
-            );
-        const resolve = (node, key) => {
-            if (Array.isArray(node)) {
-                return node.map((item) => resolve(item, key));
-            }
-            if (node && typeof node === "object") {
-                return Object.fromEntries(
-                    Object.entries(node).map(([name, value]) => [name, resolve(value, name)]),
-                );
-            }
-            return typeof node === "string" && colorKeys.has(key) ? resolveColor(node) : node;
-        };
+        // The page's colors, as Plotly can read them (`plotly_colors.js`).
+        const { resolveColor, resolve } = window.dlPlotlyColors;
 
         // The run's figure at the latest step it logged one at or before `step`; its first, if it has none yet. None if
         // the window of steps the chart has holds none of the run's (it is read as the slider gets there).

@@ -23,7 +23,8 @@ checkpoints (one key apiece) are one list, and Auto-generate makes exactly that.
 than as a picture of it. The server never reads a figure: it hands the browser each run's figure URL at each step, as
 the image chart does its pictures, and the browser fetches the one on show (keeping the ones it has fetched) and draws
 it. A figure logged at several steps gets a slider over them, which keeps where you zoomed and what you hid as it moves
-(`keep_view_across_steps`), and moves with the other sliders of a panel that syncs; a figure logged once has none. Each
+(`keep_view_across_steps`), and moves with the other sliders of a panel that syncs, an image chart's too (a prediction's
+picture and its PR curve at the same step); a figure logged once has none. Each
 run gets a figure of its own, in a grid of the panel's columns paged by its charts-per-page; `combine_runs` draws every
 run's traces in one figure instead, named and colored by run, for figures where that makes sense (curves, scatters, not
 heatmaps). A figure is drawn in the page's colors in either color scheme, its own template replaced by one of dlboard's,
@@ -255,7 +256,8 @@ Subclass `ChartType` and implement its abstract methods:
     drops). Name them in the figure as `series_color(...)`, or `series_color(...)/0.12` for one at an opacity, and the
     figure's colors (any `color`, `fillcolor`, `gridcolor` or `linecolor`, which may also be a variable such as
     `var(--mantine-color-text)`) are resolved in the browser, in the theme's current color scheme and again when it
-    changes, so a run is the color it is in every other chart. `series_band_colors.js` does it for the reference chart,
+    changes, so a run is the color it is in every other chart. `plotly_colors.js` resolves them, served once per app by
+    `_plotly_colors.serve_plotly_colors(app)` from each chart's `plug()`; `series_band_colors.js` uses it for the reference chart,
     which keeps its figure in a `dcc.Store` that a clientside callback turns into the graph's.
 
   The request also says which keys are charted already (so auto-generate does not chart them again) and is what the

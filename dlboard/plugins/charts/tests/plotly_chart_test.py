@@ -90,7 +90,7 @@ def test_a_run_with_no_name_is_called_by_its_id() -> None:
 def test_a_slider_scrubs_the_steps_only_when_there_is_more_than_one(steps: int, sliders: int) -> None:
     stack = PlotlyChart.render(PlotlySettings(key="pr"), _frame(runs=1, steps=steps))
 
-    assert len(_of_type(stack, "plotly-chart-slider")) == sliders
+    assert len(_of_type(stack, "dl-step-slider")) == sliders
     [step] = _of_type(stack, "plotly-chart-step")
     assert step["data"] == 0
 
@@ -239,7 +239,7 @@ def test_a_template_is_drawn_with_the_data_of_the_steps_its_mode_asks_for(
     assert payload["runs"]["1"]["urls"] == urls
     assert payload["steps"] == steps
     # Only a template scrubbed a step at a time has a slider.
-    assert len(_of_type(stack, "plotly-chart-slider")) == (mode is StreamMode.SCRUB)
+    assert len(_of_type(stack, "dl-step-slider")) == (mode is StreamMode.SCRUB)
 
 
 def test_the_template_is_the_newest_runs_and_every_run_with_data_is_drawn() -> None:
