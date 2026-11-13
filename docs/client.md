@@ -295,6 +295,22 @@ There are five built-in kinds:
   thinning a longer run. The server reads only the steps a chart draws (and a slider's a window at a time), so a run
   that trains longer costs its charts no more to load.
 
+  A trace can also be bound to a metric the run already logs, with `metric(name)` (from the same module) in place of a
+  column, so a scalar need not be logged twice:
+
+  ```python
+  from dlboard.client.artifacts.plotly import metric
+
+  curve = go.Figure([go.Scatter(mode="lines"), go.Scatter(x=[0, 1000], y=[0.1, 0.1], name="target")])
+  binding = {0: {"x": metric("step"), "y": metric("train/loss")}}
+  logger.log_artifact([PlotlyFigure.from_figure(curve, "train/loss_curve", bind=binding)])
+  ```
+
+  With no `PlotlyData` logged into the template, a metric binding is the run's whole series, sampled as a line chart's
+  is; `metric("step")` is the steps it was logged at. With data, it is the metric's value at each step of the data (its
+  latest at or before that step), so it lines up with a column that holds one value per step. The template names the
+  metrics it binds in a tag, and an auto-generated chart reads them with it (the chart's `metrics` setting).
+
 - `dlboard.client.artifacts.file.File` — uploads a file that already exists on disk, as-is, tagged with a
   `FileKind` saying what it is (`FileKind.CHECKPOINT`). `log_model` builds these for you; the
   file must stay put until the logger has flushed:

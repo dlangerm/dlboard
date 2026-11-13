@@ -205,6 +205,22 @@ def test_every_overlay_of_an_image_is_left_to_its_chart_not_charted_on_its_own()
     assert [c.parameters for c in charts] == [{"key": "img"}]
 
 
+def test_a_plotly_template_bound_to_metrics_is_charted_reading_them() -> None:
+    """The template names the metrics it binds in a tag, which the catalog reads, so its chart reads them too (#620)."""
+    catalog = ColumnCatalog(
+        artifacts=("curve", "pr"),
+        artifact_chart_types={"curve": "plotly", "pr": "plotly"},
+        template_metrics={"curve": ("step", "train/loss")},
+    )
+
+    charts = [c for p in autogen.build_auto_panels(catalog, delimiter="/", mode="prefix") for c in p.charts]
+
+    assert [c.parameters for c in charts] == [
+        {"key": "curve", "metrics": ["step", "train/loss"]},
+        {"key": "pr"},
+    ]
+
+
 def test_an_overlay_named_artifact_with_no_image_to_go_over_is_charted_as_any_other() -> None:
     key = f"lonely{OVERLAY_KEY_SUFFIX}"
     catalog = ColumnCatalog(artifacts=(key,), artifact_chart_types={key: "image"})

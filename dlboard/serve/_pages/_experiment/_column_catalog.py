@@ -15,6 +15,7 @@ from dlboard.models import (
     MetricColumn,
     OverlayKey,
     layer_kind,
+    plotly_template_metrics,
 )
 from dlboard.serve._backend._app_slot import AppSlot, current_dash_app
 from dlboard.serve._pages._experiment._chart_autogen import default_artifact_chart
@@ -86,6 +87,8 @@ class ColumnCatalog:
     """Artifact keys an image chart can draw over a picture: those of `Overlay`s, and of images."""
     histograms: tuple[str, ...] = ()
     hparams: tuple[str, ...] = ()
+    template_metrics: dict[str, tuple[str, ...]] = field(default_factory=dict[str, tuple[str, ...]])
+    """The metrics each Plotly template binds its traces to, by its key (`plotly_template_metrics`): a chart reads them."""
 
     @classmethod
     def load(
@@ -107,6 +110,9 @@ class ColumnCatalog:
             layers=tuple(sorted({a.key for a in artifacts if layer_kind(a.tags, a.fname) is not None})),
             histograms=tuple(store.summarize_histogram_keys(experiment_id)),
             hparams=tuple(summary_hparam_keys(store, experiment_id, runs)),
+            template_metrics={
+                a.key: metrics for a in artifacts if (metrics := plotly_template_metrics(a.tags))
+            },
         )
 
     @classmethod
@@ -145,6 +151,10 @@ class ColumnCatalog:
             layers=union(c.layers for c in catalogs),
             histograms=union(c.histograms for c in catalogs),
             hparams=union(c.hparams for c in catalogs),
+            template_metrics={
+                key: union(c.template_metrics.get(key, ()) for c in catalogs)
+                for key in {key for c in catalogs for key in c.template_metrics}
+            },
         )
 
     @classmethod

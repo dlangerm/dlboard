@@ -7,7 +7,7 @@ import typing
 from typing import Final, NamedTuple
 
 import pendulum
-from pydantic import AnyUrl, AwareDatetime, BaseModel, Field
+from pydantic import AnyUrl, AwareDatetime, BaseModel, Field, TypeAdapter
 from structlog.stdlib import get_logger
 
 from dlboard._compat import StrEnum
@@ -95,6 +95,23 @@ PLOTLY_DATA_KEY_SUFFIX: Final = "_$data"
 def plotly_data_key(template_key: str) -> str:
     """The key the data streamed into the Plotly template under `template_key` is logged under."""
     return f"{template_key}{PLOTLY_DATA_KEY_SUFFIX}"
+
+
+PLOTLY_METRICS_TAG: Final = "plotly_metrics"
+"""
+The tag a Plotly template records the metrics its traces are bound to under, as a JSON list of their names (#620).
+
+The server never reads a figure, so this is how a chart drawing the template knows which metrics to read with it.
+"""
+
+
+def plotly_template_metrics(tags: Mapping[str, TagValue]) -> tuple[str, ...]:
+    """The metrics a Plotly template with `tags` binds its traces to (`PLOTLY_METRICS_TAG`); none for any other artifact."""
+    stored = tags.get(PLOTLY_METRICS_TAG)
+    return tuple(_METRIC_NAMES.validate_json(stored)) if isinstance(stored, str) else ()
+
+
+_METRIC_NAMES: Final = TypeAdapter(list[str])
 
 
 class FileKind(StrEnum):

@@ -10,6 +10,8 @@ import pytest
 from dlboard.models import (
     FILE_KIND_TAG,
     LAYER_KIND_TAG,
+    PLOTLY_FIGURE_EXTENSION,
+    PLOTLY_METRICS_TAG,
     Artifact,
     Histogram,
     LoggedMetrics,
@@ -137,6 +139,15 @@ def test_column_catalog_load_summarizes_keys_without_their_values(
                 step=0,
                 ref="r://c",
             ),
+            Artifact(
+                key="curve",
+                fname=f"c{PLOTLY_FIGURE_EXTENSION}",
+                run_id=runs[0].id,
+                experiment_id=experiment_id,
+                step=0,
+                ref="r://e",
+                tags={PLOTLY_METRICS_TAG: '["loss", "step"]'},
+            ),
         ]
     )
 
@@ -144,11 +155,16 @@ def test_column_catalog_load_summarizes_keys_without_their_values(
 
     assert catalog == ColumnCatalog(
         metrics=("final_acc", "loss"),
-        artifacts=("boxes", "ckpt", "grads", "img"),
-        artifact_chart_types={"ckpt": "files", "img": "image"},  # nothing displays the grads
+        artifacts=("boxes", "ckpt", "curve", "grads", "img"),
+        artifact_chart_types={
+            "ckpt": "files",
+            "curve": "plotly",
+            "img": "image",
+        },  # nothing displays the grads
         layers=("boxes", "img"),  # the shapes say so; the image is drawn as it is; no one draws a checkpoint
         histograms=("grad",),
         hparams=("lr",),
+        template_metrics={"curve": ("loss", "step")},  # what a Plotly template binds, in its tag
     )
 
 

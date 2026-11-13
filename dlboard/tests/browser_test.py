@@ -39,7 +39,7 @@ from dlboard.client._rest_api import BasicDlboardAPI
 from dlboard.client.artifacts import rle
 from dlboard.client.artifacts.image import Image
 from dlboard.client.artifacts.overlay import DEFAULT_CLASS_COLORS, Box, Overlay, Point, Polygon, Shape
-from dlboard.client.artifacts.plotly import PlotlyData, PlotlyFigure
+from dlboard.client.artifacts.plotly import PlotlyData, PlotlyFigure, metric
 from dlboard.client.histograms import ExponentialBinning
 from dlboard.conftest import run_task
 from dlboard.models import OVERLAY_KEY_SUFFIX, RUN_NAME_COLUMN, PanelInstance, overlay_key
@@ -2667,6 +2667,73 @@ def test_a_logged_plotly_figure_is_drawn_interactive_and_scrubbed_by_step(
     expect(plot.locator(".gtitle")).to_have_text("at 1")
     page.keyboard.press("End")
     expect(plot.locator(".gtitle")).to_have_text(f"at {last}")
+    assert console_errors == []
+
+
+def test_a_plotly_template_draws_the_metrics_its_traces_are_bound_to(
+    page: Page, live_server_url: str, tmp_path: Path, console_errors: list[str]
+) -> None:
+    """
+    A template bound to a metric the run logs draws its series; one with data logged into it too draws the metric's
+    value at each step of the data, beside the data's own column (#620).
+    """
+    _create_project_and_experiment(page, live_server_url, "Plotly Metrics Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    api = BasicDlboardAPI(live_server_url)
+    run = api.create_run(models.NewRun(experiment_id=experiment_id))
+    api.log_metric_batch(
+        [
+            models.LoggedMetrics(
+                experiment_id=experiment_id,
+                run_id=run.id,
+                step=step,
+                metrics={"loss": 10.0 - step},
+                timestamp_utc=pendulum.now("UTC"),
+            )
+            for step in range(4)
+        ]
+    )
+    curve = {0: {"x": metric("step"), "y": metric("loss")}}
+    artifacts = [
+        PlotlyFigure.from_figure({"data": [{"type": "scatter"}]}, "curve", bind=curve).to_artifact(
+            tmp_path, run.id, experiment_id
+        ),
+        PlotlyFigure.from_figure(
+            {"data": [{"type": "scatter"}]}, "aligned", bind={0: {"x": "lr", "y": metric("loss")}}
+        ).to_artifact(tmp_path, run.id, experiment_id),
+        *(
+            PlotlyData(template="aligned", step=step, columns={"lr": step / 10}).to_artifact(
+                tmp_path, run.id, experiment_id
+            )
+            for step in (1, 3)
+        ),
+    ]
+    api.log_artifact_batch(artifacts)
+    _wait_for_artifacts(experiment_id, len(artifacts))
+    store = get_system_data_store()
+    shared = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
+    charts = [
+        models.ChartInstance[Any, Any](
+            chart_type=PlotlyChart.name, parameters={"key": key, "metrics": metrics}
+        )
+        for key, metrics in {"curve": ["step", "loss"], "aligned": ["loss"]}.items()
+    ]
+    store.update_page(
+        shared.model_copy(update={"panels": [PanelInstance[Any, Any](name="Templates", charts=charts)]})
+    )
+    page.reload()
+
+    curve_plot, aligned_plot = (
+        page.locator(".dl-chart-item").nth(index).locator(".js-plotly-plot") for index in range(2)
+    )
+    expect(curve_plot.locator(".scatterlayer .trace")).to_have_count(1)
+    expect(aligned_plot.locator(".scatterlayer .trace")).to_have_count(1)
+    assert curve_plot.evaluate("(graph) => [graph.data[0].x, graph.data[0].y]") == [
+        [0, 1, 2, 3],
+        [10, 9, 8, 7],
+    ]
+    assert aligned_plot.evaluate("(graph) => [graph.data[0].x, graph.data[0].y]") == [[0.1, 0.3], [9, 7]]
     assert console_errors == []
 
 

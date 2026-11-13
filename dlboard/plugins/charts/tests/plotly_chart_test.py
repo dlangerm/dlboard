@@ -76,6 +76,8 @@ def test_the_browser_is_handed_each_runs_figure_url_by_step() -> None:
         "swatch": series_swatch_class(1),
         "color": series_color(1),
         "urls": {"0": "/artifact/1-0", "10": "/artifact/1-1"},
+        "metric_steps": [],
+        "metrics": {},
     }
     assert payload["template"] is None
 
@@ -367,3 +369,31 @@ def test_a_figure_loads_nothing_from_other_servers_unless_the_deployment_lets_it
         monkeypatch.setenv(name, value)
 
     assert _payload(PlotlyChart.render(PlotlySettings(key="pr"), _frame(runs=1, steps=1)))["remote"] == remote
+
+
+def test_a_template_bound_to_metrics_alone_is_handed_each_runs_series() -> None:
+    """No data is logged into it: each run that logged the metrics is drawn from them, the steps they were at (#620)."""
+    frame = pd.DataFrame(
+        [
+            {"run_id": 1, "step": 0, artifact_column("curve"): "/artifact/t1"},
+            *({"run_id": run, "step": step, "loss": 1 / (step + run)} for run in (1, 2) for step in (1, 2)),
+            {"run_id": 2, "step": 3, "acc": 0.5},
+        ]
+    )
+
+    payload = _payload(
+        PlotlyChart.render(PlotlySettings(key="curve", metrics=["step", "loss", "acc"]), frame)
+    )
+
+    assert payload["template"] == "/artifact/t1"
+    assert payload["order"] == [1, 2]
+    assert payload["runs"]["1"]["metric_steps"] == [1, 2]
+    assert payload["runs"]["1"]["metrics"] == {"loss": [0.5, 1 / 3], "acc": [None, None]}
+    assert payload["runs"]["2"]["metric_steps"] == [1, 2, 3]
+    assert payload["runs"]["2"]["metrics"]["acc"] == [None, None, 0.5]
+
+
+def test_the_chart_reads_the_metrics_its_template_binds() -> None:
+    request = PlotlyChart.data_request(PlotlySettings(key="curve", metrics=["step", "loss"]))
+
+    assert request.metrics == frozenset({"step", "loss"})

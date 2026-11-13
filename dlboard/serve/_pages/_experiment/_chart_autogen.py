@@ -187,8 +187,11 @@ def default_artifact_charts(keys: typing.Iterable[str], catalog: ColumnCatalog) 
         chart_type = catalog.artifact_chart_types[key]
         directory = key.rpartition("/")[0]
         if chart_type != FileListChart.name or not directory:
+            # A Plotly template bound to metrics reads them with it: its chart names them (#620).
+            metrics = catalog.template_metrics.get(key, ()) if chart_type == PlotlyChart.name else ()
+            parameters = {"key": key, **({"metrics": list(metrics)} if metrics else {})}
             charts.append(
-                ArtifactChart(key, key, ChartInstance(chart_type=chart_type, parameters={"key": key}))
+                ArtifactChart(key, key, ChartInstance(chart_type=chart_type, parameters=parameters))
             )
         elif (prefix := f"{directory}/") not in directories:
             directories.add(prefix)
