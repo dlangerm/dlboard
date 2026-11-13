@@ -135,15 +135,41 @@ def _when(at: datetime) -> str:
     return pendulum.instance(at).format("D MMM YYYY")
 
 
-def _scope_line(label: str, setting: RetentionSetting, *, inherits: str, now: datetime) -> Component:
+def _described(rule: RetentionRule, settings: RetentionSettings) -> str:
+    """
+    A rule in words, and when it deletes.
+
+    A count or an age deletes nothing until runs are its slack past it, so a project holding more runs than its rule
+    says would otherwise look as if retention were not working.
+    """
+    match rule:
+        case Unlimited():
+            return describe(rule)
+        case RunCount(max_runs=n, unit=unit):
+            holder = "the project holds" if unit is RetentionUnit.PROJECT else "an experiment holds"
+            return f"{describe(rule)} · deletes down to {n} once {holder} more than {n + settings.retention_run_slack}"
+        case RunAge(max_age_days=days):
+            past = days + settings.retention_age_slack_days
+            return (
+                f"{describe(rule)} · deletes down to {_days(days)} once a run is more than {_days(past)} old"
+            )
+
+
+def _days(count: int) -> str:
+    return f"{count} day{'s' if count != 1 else ''}"
+
+
+def _scope_line(
+    label: str, setting: RetentionSetting, *, inherits: str, now: datetime, settings: RetentionSettings
+) -> Component:
     """One scope's rule in effect, and the one pending."""
     current = setting.as_of(now)
-    active = describe(current.active.rule) if current.active is not None else inherits
+    active = _described(current.active.rule, settings) if current.active is not None else inherits
     parts: list[Component] = [dmc.Text(label, fw=600, size="sm", w=160), dmc.Text(active, size="sm")]
     if current.pending is not None:
         parts.append(
             dmc.Badge(
-                f"{describe(current.pending.rule)} from {_when(current.pending.effective_at)}",
+                f"From {_when(current.pending.effective_at)}: {_described(current.pending.rule, settings)}",
                 color="yellow",
                 variant="light",
                 size="sm",
@@ -187,13 +213,8 @@ def _status(status: RetentionStatus | None, now: datetime, settings: RetentionSe
 
 
 def _hints(settings: RetentionSettings) -> list[Component]:
-    days = settings.retention_age_slack_days
     hints = [
         "A kept run (Keep, in a run list) is never deleted by retention. What retention deletes goes to the Trash first.",
-        (
-            f"Runs are deleted in batches: once a count is {settings.retention_run_slack} runs past, down to the count, "
-            f"and once a run is {days} day{'s' if days != 1 else ''} past an age, every run older than it."
-        ),
     ]
     if settings.caps:
         allowed = " or ".join(describe(cap).removeprefix("Keeps ") for cap in settings.caps)
@@ -330,9 +351,17 @@ def _section(project: Project) -> Component:
     return dmc.Stack(
         [
             *_status(standing.status, now, settings),
-            _scope_line("This project", standing.project, inherits="Keeps every run", now=now),
+            _scope_line(
+                "This project", standing.project, inherits="Keeps every run", now=now, settings=settings
+            ),
             *(
-                _scope_line(names.get(e, f"Experiment {e}"), s, inherits="Follows the project", now=now)
+                _scope_line(
+                    names.get(e, f"Experiment {e}"),
+                    s,
+                    inherits="Follows the project",
+                    now=now,
+                    settings=settings,
+                )
                 for e, s in standing.experiments.items()
             ),
             *_hints(settings),
@@ -394,7 +423,7 @@ def _preview(form: _Form) -> str:
     runs = f"{count:,}{' or more' if count >= PREVIEW_LIMIT else ''} run{'s' if count != 1 else ''}"
     grace = settings.retention_grace_days
     when = f"from {_when(now.add(days=grace))}" if grace else "at once"
-    return f"{describe(rule)}: it would delete {runs} as things stand, {when}."
+    return f"{_described(rule, settings)}: it would delete {runs} as things stand, {when}."
 
 
 def _save(form: _Saved) -> str | None:
