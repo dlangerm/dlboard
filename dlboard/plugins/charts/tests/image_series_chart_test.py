@@ -717,7 +717,7 @@ def test_a_window_of_pictures_draws_a_slider_over_every_step_and_says_which_step
 
     data: dict[str, dict[str, dict[str, str]]] = of_type("image-series-data")["data"]
     window = of_type("image-series-window")["data"]
-    assert of_type("image-series-slider")["max"] == 5
+    assert of_type("dl-step-slider")["max"] == 5
     assert {run: list(urls) for run, urls in data["per_run_urls"].items()} == {
         "1": ["0", "1", "2"],
         "2": ["0", "1", "2"],

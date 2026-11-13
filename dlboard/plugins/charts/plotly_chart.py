@@ -42,6 +42,8 @@ from dlboard.models import (
     thinned,
 )
 from dlboard.plugins.charts._empty_chart import nothing_logged
+from dlboard.plugins.charts._plotly_colors import serve_plotly_colors
+from dlboard.plugins.charts._step_slider import lock_step_sliders, step_slider
 from dlboard.plugins.charts._step_window import (
     WINDOW_JS,
     LoadedSteps,
@@ -178,7 +180,6 @@ def _logged_steps(dataframe: pd.DataFrame, key: str) -> dict[int, list[int]]:
 _GRAPH: Final = "plotly-chart-graph"
 _DATA: Final = "plotly-chart-data"
 _STEP: Final = "plotly-chart-step"
-_SLIDER: Final = "plotly-chart-slider"
 _PAGE: Final = "plotly-chart-page"
 _PAGER: Final = "plotly-chart-pager"
 _WINDOW: Final = "plotly-chart-window"
@@ -408,7 +409,7 @@ class PlotlyChart(ChartType[PlotlySettings, pd.DataFrame, dmc.Stack], frozen=Tru
                 *(
                     [
                         dmc.Slider(
-                            id={"type": _SLIDER, "instance": instance},
+                            id=step_slider(cls.name, instance),
                             min=first,
                             max=figures.steps[-1],
                             value=first,
@@ -473,8 +474,7 @@ class PlotlyChart(ChartType[PlotlySettings, pd.DataFrame, dmc.Stack], frozen=Tru
 
 _FIGURES_JS: Final = ClientsideScript(Path(__file__).with_name("plotly_chart.js"))
 _STEP_JS: Final = ClientsideScript(Path(__file__).with_name("plotly_chart_step.js"))
-# The image chart's: they move a synced panel's sliders together, and its paging, whatever the chart.
-_LOCK_JS: Final = ClientsideScript(Path(__file__).with_name("image_series_lock.js"))
+# The image chart's paging, whatever the chart.
 _PAGE_JS: Final = ClientsideScript(Path(__file__).with_name("image_series_page.js"))
 
 
@@ -496,10 +496,11 @@ def read_window(
 def plug(app: dash.Dash) -> None:
     """Plugin: registers the chart type, and the callbacks that fetch and draw its figures, and read their windows."""
     PlotlyChart.register(allow_override=True)
+    serve_plotly_colors(app)
     app.clientside_callback(
         WINDOW_JS.source,
         dash.Output({"type": _WINDOW_ASKED, "instance": dash.MATCH}, "data"),
-        dash.Input({"type": _SLIDER, "instance": dash.MATCH}, "value"),
+        dash.Input(step_slider(PlotlyChart.name, dash.MATCH), "value"),
         dash.State({"type": _WINDOW, "instance": dash.MATCH}, "data"),
     )
 
@@ -533,15 +534,9 @@ def plug(app: dash.Dash) -> None:
     app.clientside_callback(
         _STEP_JS.source,
         dash.Output({"type": _STEP, "instance": dash.MATCH}, "data"),
-        dash.Input({"type": _SLIDER, "instance": dash.MATCH}, "value"),
+        dash.Input(step_slider(PlotlyChart.name, dash.MATCH), "value"),
     )
-    app.clientside_callback(
-        _LOCK_JS.source,
-        dash.Input({"type": _SLIDER, "instance": dash.ALL}, "value"),
-        dash.State({"type": _SLIDER, "instance": dash.ALL}, "id"),
-        dash.State({"type": _SLIDER, "instance": dash.ALL}, "marks"),
-        prevent_initial_call=True,
-    )
+    lock_step_sliders(app)
     app.clientside_callback(
         _PAGE_JS.source,
         dash.Output({"type": _PAGE, "instance": dash.MATCH, "page": dash.ALL}, "style"),

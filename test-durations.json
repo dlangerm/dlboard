@@ -2461,6 +2461,7 @@
   "dlboard/tests/browser_test.py::test_a_scrubbed_thumbnail_shows_a_spinner_until_its_new_step_has_loaded[chromium]": 5.565373199999158,
   "dlboard/tests/browser_test.py::test_a_selection_past_the_run_cap_is_refused_and_the_charts_keep_the_last_one[chromium]": 5.064338162999775,
   "dlboard/tests/browser_test.py::test_a_series_band_is_drawn_in_its_runs_palette_colors_in_either_color_scheme[chromium]": 6.928160680003202,
+  "dlboard/tests/browser_test.py::test_a_synced_panel_moves_plotly_and_image_charts_step_sliders_together[chromium]": 6.0,
   "dlboard/tests/browser_test.py::test_a_table_of_artifacts_draws_the_overlays_logged_over_a_picture_on_its_thumbnail[chromium]": 4.30839338199803,
   "dlboard/tests/browser_test.py::test_a_table_of_artifacts_shows_thumbnails_and_sorts_by_a_tag[chromium]": 4.308728388001327,
   "dlboard/tests/browser_test.py::test_a_tables_editor_opens_an_old_table_as_its_new_settings_and_takes_a_typed_prefix[chromium]": 5.573301684002217,

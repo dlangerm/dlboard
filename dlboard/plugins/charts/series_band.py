@@ -34,6 +34,7 @@ from dlboard.models import (
     SeriesBandRequest,
 )
 from dlboard.plugins.charts._band_traces import nested_band
+from dlboard.plugins.charts._plotly_colors import serve_plotly_colors
 from dlboard.serve import ClientsideScript, series_color
 
 if typing.TYPE_CHECKING:
@@ -256,6 +257,7 @@ class SeriesBandChart(ChartType[SeriesBandSettings, pd.DataFrame, Component], fr
 def plug(app: Dash) -> None:
     """Plugin: registers this chart type, and the browser-side step that gives its figures the theme's colors."""
     SeriesBandChart.register(allow_override=True)
+    serve_plotly_colors(app)
     app.clientside_callback(
         _COLORS_JS.source,
         Output({"type": _GRAPH_TYPE, "instance": MATCH}, "figure"),

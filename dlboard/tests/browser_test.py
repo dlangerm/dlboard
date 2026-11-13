@@ -42,7 +42,7 @@ from dlboard.client.histograms import ExponentialBinning
 from dlboard.conftest import run_task
 from dlboard.models import OVERLAY_KEY_SUFFIX, RUN_NAME_COLUMN, PanelInstance, overlay_key
 from dlboard.plugins.backend.artifact_purge_worker import PurgeTask
-from dlboard.plugins.charts.image_series import IMAGE_WINDOW_STEPS
+from dlboard.plugins.charts.image_series import IMAGE_WINDOW_STEPS, ImageChart
 from dlboard.plugins.charts.line_chart import LEGEND_MAX_HEIGHT
 from dlboard.plugins.charts.plotly_chart import PLOTLY_WINDOW_STEPS, PlotlyChart
 from dlboard.serve import get_system_data_store
@@ -2665,6 +2665,55 @@ def test_a_logged_plotly_figure_is_drawn_interactive_and_scrubbed_by_step(
     expect(plot.locator(".gtitle")).to_have_text("at 1")
     page.keyboard.press("End")
     expect(plot.locator(".gtitle")).to_have_text(f"at {last}")
+    assert console_errors == []
+
+
+def test_a_synced_panel_moves_plotly_and_image_charts_step_sliders_together(
+    page: Page, live_server_url: str, tmp_path: Path, console_errors: list[str]
+) -> None:
+    """A prediction's picture and its PR curve, in one synced panel: moving either chart's slider moves the other (#621)."""
+    _create_project_and_experiment(page, live_server_url, "Synced Plotly Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    api = BasicDlboardAPI(live_server_url)
+    run = api.create_run(models.NewRun(experiment_id=experiment_id))
+    picture = np.zeros((8, 8, 3), dtype=np.uint8)
+    artifacts = [
+        *(
+            Image(key="pred", image=picture, step=step).to_artifact(tmp_path, run.id, experiment_id)
+            for step in (0, 10)
+        ),
+        *(
+            PlotlyFigure.from_figure(
+                {"data": [{"type": "scatter", "y": [step]}]}, "pr", step=step
+            ).to_artifact(tmp_path, run.id, experiment_id)
+            for step in (0, 5, 10)
+        ),
+    ]
+    api.log_artifact_batch(artifacts)
+    _wait_for_artifacts(experiment_id, len(artifacts))
+    store = get_system_data_store()
+    shared = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
+    charts = [
+        models.ChartInstance[Any, Any](chart_type=ImageChart.name, parameters={"key": "pred"}),
+        models.ChartInstance[Any, Any](chart_type=PlotlyChart.name, parameters={"key": "pr"}),
+    ]
+    store.update_page(
+        shared.model_copy(update={"panels": [PanelInstance[Any, Any](name="Predictions", charts=charts)]})
+    )
+    page.reload()
+
+    image_slider, plotly_slider = (
+        page.locator(".dl-chart-item").nth(index).get_by_role("slider") for index in range(2)
+    )
+    image_slider.focus()
+    page.keyboard.press("ArrowRight")
+    expect(image_slider).to_have_attribute("aria-valuenow", "10")
+    expect(plotly_slider).to_have_attribute("aria-valuenow", "10")
+    plotly_slider.focus()
+    page.keyboard.press("ArrowLeft")
+    expect(plotly_slider).to_have_attribute("aria-valuenow", "5")
+    expect(image_slider).to_have_attribute("aria-valuenow", "0")  # its latest step at or before 5
     assert console_errors == []
 
 
