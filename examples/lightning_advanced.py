@@ -176,7 +176,7 @@ TOUR = Volume(
     preview_every_n_epochs=5,
     device_stats=False,
 )
-"""Enough of each to show it: a slider over five previews, and a chart per gradient that draws at once."""
+"""Enough of each to show it: previews at epochs 0, 5, ..., 20 and 24, and gradient charts that draw at once."""
 
 
 def render_sample(rng: np.random.Generator, size: int, noise_std: float) -> tuple[np.ndarray, np.ndarray]:
@@ -510,55 +510,7 @@ class ShapesSegmenter(pl.LightningModule):
         logger = cast("DLBoardLogger", self.trainer.logger)
         step, epoch = self.trainer.global_step, self.trainer.current_epoch
         images, masks, preds = self._preview
-        artifacts: list[Image | Overlay | PlotlyFigure | PlotlyData] = []
-        # Every few epochs, ending on the last: a slider over every epoch's pictures is too fine to scrub.
-        previewing = (epoch + 1) % self.volume.preview_every_n_epochs == 0
-        for i in range(len(images) if previewing else 0):
-            rgb = (images[i].permute(1, 2, 0).numpy() * 255).astype(np.uint8)
-            truth, pred = masks[i], preds[i]
-            # DLBOARD GAP: one artifact per (key, step), so every preview image needs its own key.
-            # The picture is plain; each mask is an `Overlay` the chart draws over it, so the picture stays a
-            # small JPEG and the mask stays exact (run-length encoded). Tags are how numbers ride along with it.
-            # Both masks are over the one picture, each named: the chart's legend shows and hides each, to compare.
-            key = f"val/segmentation/sample_{i}"
-            artifacts += [
-                Image(
-                    key=key,
-                    image=rgb,
-                    step=step,
-                    format="jpg",
-                    tags={"epoch": epoch, "iou": sample_iou(truth, pred)},
-                ),
-                *(
-                    Overlay.over(key, name=name, shapes=[mask_layer(mask)], step=step)
-                    for name, mask in (("truth", truth), ("prediction", pred))
-                ),
-            ]
-            artifacts += [
-                Image(
-                    key=f"val/detection/sample_{i}",
-                    image=rgb,
-                    step=step,
-                    format="jpg",
-                    tags={
-                        "epoch": epoch,
-                        "true_boxes": len(class_boxes(truth)),
-                        "predicted_boxes": len(class_boxes(pred)),
-                    },
-                ),
-                # The boxes are overlays, drawn over the picture by the chart, not part of its pixels. There are two
-                # of them over one picture, so each is named.
-                Overlay.over(
-                    f"val/detection/sample_{i}", name="truth", shapes=box_shapes(truth, "#00c853"), step=step
-                ),
-                Overlay.over(
-                    f"val/detection/sample_{i}",
-                    name="prediction",
-                    shapes=box_shapes(pred, "#ff3b30"),
-                    step=step,
-                ),
-            ]
-        artifacts += [
+        artifacts: list[Image | Overlay | PlotlyFigure | PlotlyData] = [
             # A whole figure each epoch: the chart has a slider over them, and keeps a zoom as it moves.
             PlotlyFigure.from_figure(plot_class_iou(per_class), "val/iou_per_class", step=step),
             # Only the data, drawn into the template `main` logged: the chart adds each epoch's points to the last's.
@@ -572,6 +524,57 @@ class ShapesSegmenter(pl.LightningModule):
                 },
             ),
         ]
+        # Segmentation and detection previews from the first epoch, every few after it, and the last: a slider over
+        # every epoch's pictures is too fine to scrub.
+        if epoch % self.volume.preview_every_n_epochs == 0 or epoch == self.trainer.max_epochs - 1:
+            for i in range(len(images)):
+                rgb = (images[i].permute(1, 2, 0).numpy() * 255).astype(np.uint8)
+                truth, pred = masks[i], preds[i]
+                # DLBOARD GAP: one artifact per (key, step), so every preview image needs its own key.
+                # The picture is plain; each mask is an `Overlay` the chart draws over it, so the picture stays a
+                # small JPEG and the mask stays exact (run-length encoded). Tags are how numbers ride along with it.
+                # Both masks are over the one picture, each named: the chart's legend shows and hides each.
+                key = f"val/segmentation/sample_{i}"
+                artifacts += [
+                    Image(
+                        key=key,
+                        image=rgb,
+                        step=step,
+                        format="jpg",
+                        tags={"epoch": epoch, "iou": sample_iou(truth, pred)},
+                    ),
+                    *(
+                        Overlay.over(key, name=name, shapes=[mask_layer(mask)], step=step)
+                        for name, mask in (("truth", truth), ("prediction", pred))
+                    ),
+                ]
+                artifacts += [
+                    Image(
+                        key=f"val/detection/sample_{i}",
+                        image=rgb,
+                        step=step,
+                        format="jpg",
+                        tags={
+                            "epoch": epoch,
+                            "true_boxes": len(class_boxes(truth)),
+                            "predicted_boxes": len(class_boxes(pred)),
+                        },
+                    ),
+                    # The boxes are overlays, drawn over the picture by the chart, not part of its pixels. There are
+                    # two of them over one picture, so each is named.
+                    Overlay.over(
+                        f"val/detection/sample_{i}",
+                        name="truth",
+                        shapes=box_shapes(truth, "#00c853"),
+                        step=step,
+                    ),
+                    Overlay.over(
+                        f"val/detection/sample_{i}",
+                        name="prediction",
+                        shapes=box_shapes(pred, "#ff3b30"),
+                        step=step,
+                    ),
+                ]
         logger.log_artifact(artifacts)
 
     @override
