@@ -38,7 +38,14 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 from structlog.stdlib import get_logger
 
 from dlboard._telemetry import Attributes, PerProcess, attribute
-from dlboard._telemetry.traces import TRACES, own_process, sdk_installed
+from dlboard._telemetry.traces import (
+    TRACES,
+    OtlpExportSettings,
+    OtlpSignal,
+    own_process,
+    require_supported,
+    sdk_installed,
+)
 from dlboard.serve._settings_env import set_setting_env
 
 if TYPE_CHECKING:
@@ -57,7 +64,7 @@ class MetricsExporter(StrEnum):
     """Where metrics go."""
 
     OTLP = "otlp"
-    """Pushed over OTLP/HTTP to a collector, Mimir, Grafana Cloud, ..."""
+    """Pushed over OTLP (HTTP, or gRPC with the `otel-grpc` extra) to a collector, Mimir, Grafana Cloud, ..."""
     PROMETHEUS = "prometheus"
     """Scraped from `/metrics`."""
 
@@ -93,6 +100,11 @@ class TelemetrySettings(BaseSettings):
         if self.logs and _sdk_version() < _LOGS_MIN_SDK:
             msg = f"DLBOARD_TELEMETRY_LOGS needs opentelemetry-sdk>={_LOGS_MIN_SDK[0]}.{_LOGS_MIN_SDK[1]}, found {importlib.metadata.version('opentelemetry-sdk')}"
             raise ValueError(msg)
+        export = OtlpExportSettings()
+        if MetricsExporter.OTLP in self.metrics:
+            require_supported(OtlpSignal.METRICS, export.of(OtlpSignal.METRICS))
+        if self.logs:
+            require_supported(OtlpSignal.LOGS, export.of(OtlpSignal.LOGS))
         return self
 
 

@@ -13,15 +13,24 @@ a user would set.
     uv pip install --python venv/bin/python --resolution lowest-direct -r client/pyproject.toml --extra otel
     uv pip install --python venv/bin/python --no-deps dlboard_client-X.whl
     venv/bin/python tools/check_client_tracing.py
+
+With the `otel-grpc` extra installed instead, `--protocol grpc` exports over OTLP/gRPC to a stub gRPC collector (#300).
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import subprocess
 import sys
 import threading
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 from dlboard._wire import API_VERSION, REQUEST_ID_HEADER, WHOAMI_PATH
 
@@ -72,20 +81,60 @@ class _Stub(BaseHTTPRequestHandler):
         """Say nothing."""
 
 
+@contextmanager
+def _grpc_collector() -> Iterator[str]:
+    """A stub OTLP/gRPC trace collector, keeping what it is sent as `/v1/traces` bodies: yields its endpoint."""
+    import grpc
+    from opentelemetry.proto.collector.trace.v1 import trace_service_pb2, trace_service_pb2_grpc
+
+    class _Traces:
+        def Export(self, request: object, _context: object) -> object:  # noqa: N802 -- the generated service's name
+            body = request.SerializeToString()  # pyrefly: ignore [missing-attribute]
+            collected.append(("/v1/traces", body))
+            return trace_service_pb2.ExportTraceServiceResponse()
+
+    server = grpc.server(ThreadPoolExecutor(max_workers=2))
+    trace_service_pb2_grpc.add_TraceServiceServicer_to_server(_Traces(), server)
+    port = server.add_insecure_port("127.0.0.1:0")
+    server.start()
+    try:
+        yield f"http://127.0.0.1:{port}"
+    finally:
+        server.stop(grace=None)
+
+
+@contextmanager
+def _collector(protocol: str, url: str) -> Iterator[str]:
+    """Where spans go: the stub server itself over HTTP, or a gRPC collector of its own."""
+    if protocol == "grpc":
+        with _grpc_collector() as endpoint:
+            yield endpoint
+    else:
+        yield url
+
+
 def main() -> int:
     """Return a failing exit code, with what went wrong on stderr, if the client's tracing does not work here."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--protocol", choices=["http/protobuf", "grpc"], default="http/protobuf")
+    protocol = parser.parse_args().protocol
     server = HTTPServer(("127.0.0.1", 0), _Stub)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     url = f"http://127.0.0.1:{server.server_port}"
-    env = {"DLBOARD_TELEMETRY_TRACES": "true", "OTEL_EXPORTER_OTLP_ENDPOINT": url}
-    traced = subprocess.run(
-        [sys.executable, "-c", _TRACED, url],
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=120,
-        check=False,
-    )
+    with _collector(protocol, url) as endpoint:
+        env = {
+            "DLBOARD_TELEMETRY_TRACES": "true",
+            "OTEL_EXPORTER_OTLP_ENDPOINT": endpoint,
+            "OTEL_EXPORTER_OTLP_PROTOCOL": protocol,
+        }
+        traced = subprocess.run(
+            [sys.executable, "-c", _TRACED, url],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
     if traced.returncode != 0:
         sys.stderr.write(f"the traced process failed:\n{traced.stderr}\n")
         return 1

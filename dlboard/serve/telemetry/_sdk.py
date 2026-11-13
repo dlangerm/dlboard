@@ -25,10 +25,11 @@ from opentelemetry.exporter.prometheus import PrometheusMetricReader
 from opentelemetry.sdk._logs import LoggerProvider
 from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
 from opentelemetry.sdk.metrics import Histogram, MeterProvider
-from opentelemetry.sdk.metrics.export import MetricReader, PeriodicExportingMetricReader
+from opentelemetry.sdk.metrics.export import MetricExporter, MetricReader, PeriodicExportingMetricReader
 from opentelemetry.sdk.metrics.view import ExplicitBucketHistogramAggregation, View
 
 from dlboard._telemetry._sdk import quiet_exporter_retries, resource
+from dlboard._telemetry.traces import OtlpExportSettings, OtlpProtocol, OtlpSignal
 from dlboard._version import __version__
 from dlboard.serve.telemetry import LOGS, SECONDS_BUCKETS, MetricsExporter, TelemetrySettings, Unit
 
@@ -36,6 +37,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, MutableMapping
 
     from opentelemetry._logs import Logger
+    from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter as GrpcLogExporter
     from opentelemetry.metrics import Meter
     from opentelemetry.util.types import AttributeValue
 
@@ -73,6 +75,32 @@ class Logs:
         self.provider.shutdown()
 
 
+def _metric_exporter() -> MetricExporter:
+    """Metrics' OTLP exporter, by the protocol the standard variables choose (gRPC's is imported only then)."""
+    match OtlpExportSettings().of(OtlpSignal.METRICS):
+        case OtlpProtocol.GRPC:
+            from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (
+                OTLPMetricExporter as GrpcMetricExporter,
+            )
+
+            return GrpcMetricExporter()
+        case OtlpProtocol.HTTP_PROTOBUF | OtlpProtocol.HTTP_JSON:  # JSON is refused at startup
+            return OTLPMetricExporter()
+
+
+def _log_exporter() -> OTLPLogExporter | GrpcLogExporter:
+    """Logs' OTLP exporter, by the protocol the standard variables choose (gRPC's is imported only then)."""
+    match OtlpExportSettings().of(OtlpSignal.LOGS):
+        case OtlpProtocol.GRPC:
+            from opentelemetry.exporter.otlp.proto.grpc._log_exporter import (
+                OTLPLogExporter as GrpcLogExporter,
+            )
+
+            return GrpcLogExporter()
+        case OtlpProtocol.HTTP_PROTOBUF | OtlpProtocol.HTTP_JSON:  # JSON is refused at startup
+            return OTLPLogExporter()
+
+
 def build_metrics(settings: TelemetrySettings) -> Metrics:
     """The meter provider with one reader per exporter in `settings.metrics`."""
     quiet_exporter_retries()
@@ -80,7 +108,7 @@ def build_metrics(settings: TelemetrySettings) -> Metrics:
     for exporter in sorted(settings.metrics):
         match exporter:
             case MetricsExporter.OTLP:
-                readers.append(PeriodicExportingMetricReader(OTLPMetricExporter()))
+                readers.append(PeriodicExportingMetricReader(_metric_exporter()))
             case MetricsExporter.PROMETHEUS:
                 readers.append(PrometheusMetricReader())
     provider = MeterProvider(
@@ -108,7 +136,7 @@ def build_logs(_settings: TelemetrySettings) -> Logs:
     """The logger provider that batches log records and pushes them over OTLP."""
     quiet_exporter_retries()
     provider = LoggerProvider(resource=resource(os.getpid(), _SERVICE_NAME), shutdown_on_exit=False)
-    provider.add_log_record_processor(BatchLogRecordProcessor(OTLPLogExporter()))
+    provider.add_log_record_processor(BatchLogRecordProcessor(_log_exporter()))
     return Logs(provider, provider.get_logger(_SERVICE_NAME, __version__))
 
 

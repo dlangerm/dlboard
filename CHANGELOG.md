@@ -32,6 +32,11 @@ pulls that section's body into the GitHub release notes and publishes both distr
   of everyone who opens its charts request a URL of their choosing. `DLBOARD_PLOTLY_REMOTE_RESOURCES` lifts it;
   `DLBOARD_PLOTLY_MAP_TILES` names a tile server maps are drawn on meanwhile. The S3 store in `presign` mode lets in its
   bucket, and a plugin can let in what its deployment needs (`dlboard.serve.allow_resources_from`). (#622)
+* **Traces, metrics and logs over OTLP/gRPC.** Install the new `otel-grpc` extra (`dlboard-client[otel-grpc]`,
+  `dlboard[otel-grpc]`) and set `OTEL_EXPORTER_OTLP_PROTOCOL=grpc`, for a collector that speaks gRPC alone. Each signal's
+  own `OTEL_EXPORTER_OTLP_{TRACES,METRICS,LOGS}_PROTOCOL` overrides it, as OpenTelemetry's SDK does; gRPC without the
+  extra, or `http/json`, stops startup naming what to install or set. grpcio stays out of `otel`, and the client's floor
+  (OpenTelemetry 1.16) is the same for both, which CI runs over gRPC. (#300)
 
 ### Changed
 

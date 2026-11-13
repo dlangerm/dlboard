@@ -71,6 +71,8 @@ otel = [
   "opentelemetry-instrumentation-sqlalchemy>=0.46b0",
   "opentelemetry-sdk>=1.25"
 ]
+# Traces, metrics and logs over OTLP/gRPC (`OTEL_EXPORTER_OTLP_PROTOCOL=grpc`), for a collector that speaks gRPC alone.
+otel-grpc = ["dlboard[otel]", "opentelemetry-exporter-otlp-proto-grpc>=1.25"]
 postgres = ["psycopg[binary]>=3.0.0"]
 s3 = ["boto3>=1.26.0"]
 

@@ -276,8 +276,8 @@ def test_reading_the_open_span_never_builds_a_tracer(exported: InMemorySpanExpor
 @pytest.mark.parametrize(
     ("env", "traces_on", "message"),
     [
-        pytest.param({"OTEL_EXPORTER_OTLP_PROTOCOL": "grpc"}, True, "4318", id="grpc-for-everything"),
-        pytest.param({"OTEL_EXPORTER_OTLP_TRACES_PROTOCOL": "grpc"}, True, "4318", id="grpc-for-traces"),
+        pytest.param({"OTEL_EXPORTER_OTLP_PROTOCOL": "grpc"}, True, None, id="grpc-for-everything"),
+        pytest.param({"OTEL_EXPORTER_OTLP_TRACES_PROTOCOL": "grpc"}, True, None, id="grpc-for-traces"),
         pytest.param({"OTEL_EXPORTER_OTLP_PROTOCOL": "http/json"}, True, "protobuf", id="http-json"),
         pytest.param(
             {"OTEL_EXPORTER_OTLP_PROTOCOL": "grpc", "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL": "http/protobuf"},
@@ -288,7 +288,7 @@ def test_reading_the_open_span_never_builds_a_tracer(exported: InMemorySpanExpor
         pytest.param({"OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf"}, True, None, id="http-protobuf"),
         pytest.param({}, True, None, id="unset"),
         pytest.param({"OTEL_EXPORTER_OTLP_PROTOCOL": "grpc"}, False, None, id="not-asked-to-trace"),
-        pytest.param({"OTEL_TRACES_EXPORTER": "otlp_proto_grpc"}, True, "4318", id="the-grpc-exporter"),
+        pytest.param({"OTEL_TRACES_EXPORTER": "otlp_proto_grpc"}, True, None, id="the-grpc-exporter"),
         pytest.param(
             {"OTEL_TRACES_EXPORTER": "console", "OTEL_EXPORTER_OTLP_PROTOCOL": "grpc"},
             True,
@@ -308,4 +308,22 @@ def test_a_protocol_the_exporter_cannot_speak_stops_startup_instead_of_losing_ev
         telemetry.setenv(name, value)
 
     with pytest.raises(ValueError, match=message) if message else contextlib.nullcontext():
+        TraceSettings()
+
+
+@pytest.mark.parametrize(
+    "env",
+    [{"OTEL_EXPORTER_OTLP_PROTOCOL": "grpc"}, {"OTEL_TRACES_EXPORTER": "otlp_proto_grpc"}],
+    ids=["grpc-for-everything", "the-grpc-exporter"],
+)
+def test_grpc_without_its_extra_stops_startup_naming_it(
+    telemetry: pytest.MonkeyPatch, env: dict[str, str]
+) -> None:
+    """grpcio is an extra of its own (#300): asking for gRPC without it says which to install."""
+    telemetry.setenv("DLBOARD_TELEMETRY_TRACES", "true")
+    for name, value in env.items():
+        telemetry.setenv(name, value)
+    telemetry.setattr(traces, "grpc_exporter_installed", lambda: False)
+
+    with pytest.raises(ValueError, match=r"dlboard-client\[otel-grpc\]"):
         TraceSettings()

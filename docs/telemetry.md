@@ -84,8 +84,9 @@ matters to you.
 
 ### OTLP
 
-Metrics and logs are pushed over OTLP/HTTP (protobuf; gRPC is not supported). The endpoint, headers, timeouts
-and push interval all come from the standard variables:
+Metrics and logs are pushed over OTLP/HTTP with protobuf by default, or over OTLP/gRPC with the `otel-grpc` extra
+(`pip install 'dlboard[otel-grpc]'`) and `OTEL_EXPORTER_OTLP_PROTOCOL=grpc` (see "Over gRPC", under Traces). The endpoint,
+headers, timeouts and push interval all come from the standard variables:
 
 ```bash
 # An OpenTelemetry Collector, or Prometheus 3 with its OTLP receiver enabled
@@ -197,10 +198,27 @@ The endpoint, headers and timeouts are the standard `OTEL_EXPORTER_OTLP_*` ones,
 without a collector), both (`otlp,console`), or `none`, which exports nothing while the trace still crosses from client to
 server. Any other exporter is a startup error that lists the ones that work.
 
-Spans are exported over **OTLP/HTTP with protobuf only**, to the collector's HTTP port (usually 4318), as metrics and logs
-are. gRPC (usually port 4317) is not supported, and an `OTEL_EXPORTER_OTLP_PROTOCOL` (or `_TRACES_PROTOCOL`) of `grpc`
-stops startup with a message that says so, rather than losing every span to an export error. A shared environment that
-points other services at a gRPC endpoint needs a separate endpoint for dlboard.
+#### Over gRPC
+
+Spans, metrics and logs go over **OTLP/HTTP with protobuf** by default, to the collector's HTTP port (usually 4318). For a
+collector or gateway that speaks gRPC (usually port 4317), install the `otel-grpc` extra where each side runs, the
+client's (`pip install 'dlboard-client[otel-grpc]'`) in a training environment and the server's
+(`pip install 'dlboard[otel-grpc]'`), and set the standard variables:
+
+```bash
+OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+OTEL_EXPORTER_OTLP_ENDPOINT=http://collector:4317
+```
+
+The protocol is chosen per signal, as OpenTelemetry's own SDK does: `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL`,
+`_METRICS_PROTOCOL` and `_LOGS_PROTOCOL` each override `OTEL_EXPORTER_OTLP_PROTOCOL`, and `OTEL_TRACES_EXPORTER=otlp_proto_grpc`
+sends spans over gRPC whatever the protocol variables say. gRPC asked for without the extra, or `http/json` for any signal,
+stops startup with a message that says what to install or set, rather than losing everything to export errors.
+
+grpcio is an extra of its own because it is heavy, and torch and TensorFlow environments pin it tightly: the client's `otel`
+extra never pulls it in. Its floor is the same as `otel`'s (OpenTelemetry 1.16), which CI installs and runs over gRPC. A
+training process that has exported over gRPC can fork DataLoader workers: a child that traces builds an exporter, and a
+channel, of its own, never its parent's.
 
 The wire format that carries a trace between client and server is the standard `OTEL_PROPAGATORS`, by default W3C
 `traceparent` (and `baggage`), on both sides. A mesh that standardises on `b3` or `xray` sets it there, and the two halves

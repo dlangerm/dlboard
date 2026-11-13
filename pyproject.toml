@@ -13,6 +13,7 @@ dev = [
   # structurally, so neither distribution depends on it -- but its tests render real figures.
   "matplotlib>=3.10",
   # Test-only: the `otel` extra of `dlboard` (`server/pyproject.toml`), installed so the telemetry tests run.
+  "opentelemetry-exporter-otlp-proto-grpc>=1.25",
   "opentelemetry-exporter-otlp-proto-http>=1.25",
   "opentelemetry-exporter-prometheus>=0.46b0",
   "opentelemetry-instrumentation-botocore>=0.46b0",
@@ -280,6 +281,9 @@ ignore_names = [
   "link_text",
   # `plugins/charts/plotly_chart.py`'s `_Figures.keep_view` -- read by `plotly_chart.js`, never by Python.
   "keep_view",
+  # The stub OTLP/gRPC collector's services (`conftest.py`'s `_grpc_collector`, `tools/check_client_tracing.py`) --
+  # called by grpcio under the name its generated service gives the RPC, never by Python.
+  "Export",
   # `PluginProtocol.plug(app: Dash) -> None` -- every plugin module's install hook, called
   # structurally as `plugin.plug(app)` off whatever module a deployment's plugin list supplies
   # (see `dlboard.serve.resolve_plugins`/`dlboard.serve.app.app`), never by a literal `.plug(`

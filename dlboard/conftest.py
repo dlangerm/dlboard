@@ -29,7 +29,7 @@ from werkzeug.serving import make_server
 
 from dlboard import models
 from dlboard._telemetry import _sdk
-from dlboard._telemetry.traces import TRACES
+from dlboard._telemetry.traces import TRACES, OtlpProtocol
 from dlboard.plugins import BUILTIN_BACKEND, BUILTIN_CHARTS, LOCAL_AUTH
 from dlboard.plugins.backend import artifact_purge_worker
 from dlboard.plugins.data_stores import filesystem, postgres, s3, sqlite
@@ -828,43 +828,122 @@ def panel_data_of(wide: pd.DataFrame) -> PanelData:
     )
 
 
+type OtlpReceiver = Callable[[str, bytes], None]
+"""What a stub collector hands each export request it is sent: the HTTP path of its signal (`/v1/traces`), and its bytes."""
+
+
+@contextmanager
+def otlp_collector(protocol: OtlpProtocol, receive: OtlpReceiver) -> Generator[str]:
+    """
+    A stub OTLP collector listening here over `protocol`, answering every request with success: yields its endpoint.
+
+    Each request reaches `receive` the same whichever the protocol: a gRPC one serialized, under its signal's HTTP path.
+    """
+    match protocol:
+        case OtlpProtocol.HTTP_PROTOBUF | OtlpProtocol.HTTP_JSON:
+
+            def serve(environ: WSGIEnvironment, start_response: StartResponse) -> list[bytes]:
+                stream: InputStream = environ["wsgi.input"]
+                receive(environ["PATH_INFO"], stream.read(int(environ["CONTENT_LENGTH"])))
+                start_response("200 OK", [("Content-Type", "application/x-protobuf")])
+                return [b""]
+
+            server = make_server("127.0.0.1", 0, serve)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                yield f"http://127.0.0.1:{server.server_port}"
+            finally:
+                server.shutdown()
+                thread.join()
+        case OtlpProtocol.GRPC:
+            with _grpc_collector(receive) as port:
+                yield f"http://127.0.0.1:{port}"
+
+
+@contextmanager
+def _grpc_collector(receive: OtlpReceiver) -> Generator[int]:
+    """The OTLP/gRPC trace, metrics and logs services, each keeping what it is sent: yields the port they listen on."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    import grpc
+    from opentelemetry.proto.collector.logs.v1 import logs_service_pb2, logs_service_pb2_grpc
+    from opentelemetry.proto.collector.metrics.v1 import metrics_service_pb2, metrics_service_pb2_grpc
+    from opentelemetry.proto.collector.trace.v1 import trace_service_pb2, trace_service_pb2_grpc
+
+    class Traces:
+        def Export(  # noqa: N802 -- the name the generated gRPC service calls
+            self, request: trace_service_pb2.ExportTraceServiceRequest, context: object
+        ) -> trace_service_pb2.ExportTraceServiceResponse:
+            del context
+            receive("/v1/traces", request.SerializeToString())
+            return trace_service_pb2.ExportTraceServiceResponse()
+
+    class Metrics:
+        def Export(  # noqa: N802 -- the name the generated gRPC service calls
+            self, request: metrics_service_pb2.ExportMetricsServiceRequest, context: object
+        ) -> metrics_service_pb2.ExportMetricsServiceResponse:
+            del context
+            receive("/v1/metrics", request.SerializeToString())
+            return metrics_service_pb2.ExportMetricsServiceResponse()
+
+    class Logs:
+        def Export(  # noqa: N802 -- the name the generated gRPC service calls
+            self, request: logs_service_pb2.ExportLogsServiceRequest, context: object
+        ) -> logs_service_pb2.ExportLogsServiceResponse:
+            del context
+            receive("/v1/logs", request.SerializeToString())
+            return logs_service_pb2.ExportLogsServiceResponse()
+
+    server = grpc.server(ThreadPoolExecutor(max_workers=4))
+    trace_service_pb2_grpc.add_TraceServiceServicer_to_server(Traces(), server)
+    metrics_service_pb2_grpc.add_MetricsServiceServicer_to_server(Metrics(), server)
+    logs_service_pb2_grpc.add_LogsServiceServicer_to_server(Logs(), server)
+    port = server.add_insecure_port("127.0.0.1:0")
+    server.start()
+    try:
+        yield port
+    finally:
+        server.stop(grace=None)
+
+
+def otlp_protocol(request: pytest.FixtureRequest) -> OtlpProtocol:
+    """The protocol a test parametrizes a collector fixture with (`indirect=True`), else OTLP/HTTP."""
+    return cast("OtlpProtocol", getattr(request, "param", OtlpProtocol.HTTP_PROTOBUF))
+
+
 @dataclass
 class OtlpTraces:
     """An OTLP collector's view of traces: every span any process exported to it, as the wire format has them."""
 
     spans: list[WireSpan] = field(default_factory=list)
 
-    def __call__(self, environ: WSGIEnvironment, start_response: StartResponse) -> list[bytes]:
-        """Serve one export request: keep its spans, answer 200 to everything."""
-        stream: InputStream = environ["wsgi.input"]
-        body = stream.read(int(environ["CONTENT_LENGTH"]))
-        if environ["PATH_INFO"] == "/v1/traces":
+    def receive(self, path: str, body: bytes) -> None:
+        """Keep the spans of one export request."""
+        if path == "/v1/traces":
             for resource_spans in ExportTraceServiceRequest.FromString(body).resource_spans:
                 for scope_spans in resource_spans.scope_spans:
                     self.spans.extend(scope_spans.spans)
-        start_response("200 OK", [("Content-Type", "application/x-protobuf")])
-        return [b""]
 
 
 @pytest.fixture
-def otlp_traces(telemetry: pytest.MonkeyPatch) -> Iterator[OtlpTraces]:
+def otlp_traces(telemetry: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> Iterator[OtlpTraces]:
     """
     Tracing on, in this process and every one it spawns, exporting to a collector listening here.
 
     For a test that needs a spawned process's spans, which `span_exporter` cannot collect. Spans are exported every
     0.2s (the standard `OTEL_BSP_SCHEDULE_DELAY`), so a test polls for what it expects instead of waiting on a flush.
+    Over OTLP/HTTP, unless a test parametrizes it with another protocol (`indirect=True`).
     """
     collector = OtlpTraces()
-    server = make_server("127.0.0.1", 0, collector)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    telemetry.setenv("DLBOARD_TELEMETRY_TRACES", "true")
-    telemetry.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", f"http://127.0.0.1:{server.server_port}")
-    telemetry.setenv("OTEL_BSP_SCHEDULE_DELAY", "200")
-    yield collector
-    server.shutdown()
-    thread.join()
-    _instrument.uninstrument_libraries()
+    protocol = otlp_protocol(request)
+    with otlp_collector(protocol, collector.receive) as endpoint:
+        telemetry.setenv("DLBOARD_TELEMETRY_TRACES", "true")
+        telemetry.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", endpoint)
+        telemetry.setenv("OTEL_EXPORTER_OTLP_PROTOCOL", protocol.value)
+        telemetry.setenv("OTEL_BSP_SCHEDULE_DELAY", "200")
+        yield collector
+        _instrument.uninstrument_libraries()
 
 
 def scraped_total(scrape: str, name: str, **labels: str) -> float:
