@@ -292,7 +292,8 @@ There are five built-in kinds:
   rows, so log a single row as shape `(1, n)` for a waterfall), or only the latest step's (set the chart's `data_steps`
   to `latest`, for the confusion matrix), or one step at a time (`scrub`). Every step's data is a file the browser
   fetches, so log it every few steps, not every one: a chart draws at most 256 steps of it per run (`max_data_steps`),
-  thinning a longer run.
+  thinning a longer run. The server reads only the steps a chart draws (and a slider's a window at a time), so a run
+  that trains longer costs its charts no more to load.
 
 - `dlboard.client.artifacts.file.File` — uploads a file that already exists on disk, as-is, tagged with a
   `FileKind` saying what it is (`FileKind.CHECKPOINT`). `log_model` builds these for you; the

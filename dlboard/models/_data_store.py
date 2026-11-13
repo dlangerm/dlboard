@@ -622,13 +622,14 @@ class DataStore(typing.Protocol[_P]):
         keys: frozenset[str] | None = None,
         key_prefixes: frozenset[str] = frozenset(),
         run_ids: frozenset[int] | None,
-        steps: StepRange | None = None,
+        steps: StepRange | frozenset[int] | None = None,
     ) -> typing.Iterator[models.Artifact]:
         """
         An experiment's (non-deleted) artifact metadata, not bytes.
 
         Only the artifacts under `keys` and under any key starting with one of `key_prefixes`, if either
-        is given -- `keys=None` with no prefixes means every artifact. Only those logged at `steps`, if given.
+        is given -- `keys=None` with no prefixes means every artifact. Only those logged at `steps` (a range, or the
+        steps of a set), if given.
         """
         ...
 

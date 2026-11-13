@@ -45,7 +45,7 @@ from dlboard.models._comparison import (
     NewComparisonRun,
 )
 from dlboard.models._credentials import ApiToken, NewApiToken, PasswordCredential
-from dlboard.models._data_request import EVERY_KEY, ArtifactWindow, DataRequest
+from dlboard.models._data_request import EVERY_KEY, ArtifactWindow, DataRequest, WindowAt, thinned
 from dlboard.models._data_store import SUMMARY_RUNS, ArtifactStore, DataStore, Pace, StepRange
 from dlboard.models._experiment import Experiment, ExperimentList, ExperimentSource, NewExperiment
 from dlboard.models._histogram import (
@@ -265,6 +265,7 @@ __all__ = [
     "ValidJsonTypes",
     "ViewSummary",
     "ViewerState",
+    "WindowAt",
     "artifact_column",
     "artifact_display_name",
     "artifact_fname_column",
@@ -285,4 +286,5 @@ __all__ = [
     "overlay_key",
     "plotly_data_key",
     "require_scope",
+    "thinned",
 ]

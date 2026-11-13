@@ -2591,18 +2591,23 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
         keys: frozenset[str] | None = None,
         key_prefixes: frozenset[str] = frozenset(),
         run_ids: frozenset[int] | None,
-        steps: models.StepRange | None = None,
+        steps: models.StepRange | frozenset[int] | None = None,
     ) -> Iterator[models.Artifact]:
         """
         An experiment's (non-deleted) artifact metadata, not bytes.
 
         Only the artifacts under `keys` and under any key starting with one of `key_prefixes`, if either
-        is given -- `keys=None` with no prefixes means every artifact. Only those logged at `steps`, if given.
+        is given -- `keys=None` with no prefixes means every artifact. Only those logged at `steps` (a range, or the
+        steps of a set), if given.
         """
         a = self._tables[models.Artifact]
-        step_filter = (
-            list[sa.ColumnElement[bool]]() if steps is None else [a.c.step.between(steps.first, steps.last)]
-        )
+        match steps:
+            case None:
+                step_filter: list[sa.ColumnElement[bool]] = []
+            case models.StepRange(first=first, last=last):
+                step_filter = [a.c.step.between(first, last)]
+            case frozenset():
+                step_filter = [a.c.step.in_(sorted(steps))]
         key_filter: list[sa.ColumnElement[bool]] = (
             [
                 sa.or_(

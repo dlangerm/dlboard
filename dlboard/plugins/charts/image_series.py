@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import bisect
 import hashlib
 import json
 import typing
@@ -35,7 +34,6 @@ from dlboard.models import (
     RenderContext,
     SettingsSection,
     SizeUnit,
-    StepRange,
     TagDisplay,
     TimeUnit,
     ViewerState,
@@ -55,10 +53,16 @@ from dlboard.plugins.charts._layers import (
     overlay_keys_of,
     serve_layered_picture,
 )
+from dlboard.plugins.charts._step_window import (
+    WINDOW_JS,
+    LoadedSteps,
+    WindowAsked,
+    read_around,
+    runs_by_experiment,
+)
 from dlboard.serve import (
     AssetKind,
     ClientsideScript,
-    build_artifacts_dataframe,
     get_data_store,
     series_swatch_class,
     serve_asset,
@@ -476,20 +480,20 @@ def _pictures(
     }
 
 
-class _LoadedWindow(BaseModel, frozen=True, extra="forbid"):
+def _window(parameters: ImageChartSettings) -> ArtifactWindow:
+    """The pictures a chart over the step reads a window of steps of at a time, with their layers and overlays."""
+    return ArtifactWindow(
+        parameters.key,
+        IMAGE_WINDOW_STEPS,
+        with_keys=frozenset(parameters.layers),
+        with_prefixes=frozenset({overlay_key(parameters.key)}),
+    )
+
+
+class _LoadedWindow(LoadedSteps, frozen=True, extra="forbid"):
     """The steps whose pictures an image chart that reads a window of them has, and what it reads the next with."""
 
-    first: int
-    last: int
-    runs: dict[int, list[int]]
-    """The runs it draws, by the experiment each is of: a chart can draw the runs of several (a comparison), and a read is one's."""
     settings: ImageChartSettings
-
-
-class _WindowAsked(BaseModel, frozen=True, extra="forbid"):
-    """The step the slider went to, outside the window the chart has: the next window is read around it."""
-
-    step: int
 
 
 class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=True, extra="forbid"):
@@ -563,14 +567,15 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
         per_run_captions: dict[str, dict[str, str]] = drawn["per_run_captions"]
         has_tags = bool(per_run_captions)
         # The steps whose pictures were read, and what reads the next ones, for a chart that reads a window of them.
+        runs = runs_by_experiment(df)
         window = (
             _LoadedWindow(
                 first=int(pictures[x_col].min()) if not pictures.empty else all_steps[0],
                 last=int(pictures[x_col].max()) if not pictures.empty else all_steps[0],
-                runs=_runs_by_experiment(df),
+                runs=runs,
                 settings=parameters,
             ).model_dump(mode="json")
-            if windowed and EXPERIMENT_COLUMN in df.columns
+            if windowed and runs is not None
             else None
         )
 
@@ -699,7 +704,7 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
                 # Which run the enlarged view is on, set by the thumbnail clicked and by the keyboard.
                 dcc.Store(id={"type": "image-series-modal-run", "instance": inst}, data=None),
                 # The window of steps whose pictures the chart has (`_LoadedWindow`), for one that reads a window of
-                # them; the slider going outside it asks for the next (`image_series_window.js`).
+                # them; the slider going outside it asks for the next (`step_window.js`).
                 dcc.Store(id={"type": "image-series-window", "instance": inst}, data=window),
                 dcc.Store(id={"type": "image-series-window-request", "instance": inst}),
                 _enlarged_view(inst, parameters.key, has_legend=bool(layers)),
@@ -738,9 +743,9 @@ class ImageChart(ChartType[ImageChartSettings, pd.DataFrame, dmc.Stack], frozen=
             artifacts=frozenset({parameters.key, *parameters.layers}),
             # Every overlay logged over the picture, including ones logged after the chart was made.
             artifact_prefixes=frozenset({overlay_key(parameters.key)}),
-            # Its slider goes to every step; the pictures are read a window of steps at a time (#364). Over a metric, its
-            # slider moves in the metric's values, not steps, so every picture is read.
-            artifact_window=ArtifactWindow(parameters.key, IMAGE_WINDOW_STEPS) if by_step else None,
+            # Its slider goes to every step; the pictures are read a window of steps at a time (#364), with their layers
+            # and overlays. Over a metric, its slider moves in the metric's values, not steps, so every picture is read.
+            artifact_windows=frozenset({_window(parameters)} if by_step else ()),
         )
 
     @classmethod
@@ -768,7 +773,6 @@ _PAGE_JS = ClientsideScript(Path(__file__).with_name("image_series_page.js"))
 _LOCK_JS = ClientsideScript(Path(__file__).with_name("image_series_lock.js"))
 _MODAL_PICTURE_JS = ClientsideScript(Path(__file__).with_name("image_series_modal_picture.js"))
 _MODAL_OVERLAY_JS = ClientsideScript(Path(__file__).with_name("image_series_modal_overlay.js"))
-_WINDOW_JS = ClientsideScript(Path(__file__).with_name("image_series_window.js"))
 _CSS_PATH = Path(__file__).with_name("image_series.css")
 _OVERLAY_HELPER_PATH = Path(__file__).with_name("image_series_overlay.js")
 """Draws an image chart's legend over its pictures; both the scrub and the modal call it, so it is a shared script."""
@@ -784,63 +788,22 @@ class _Thumbnail(BaseModel, frozen=True, extra="forbid"):
     run: str
 
 
-def _runs_by_experiment(df: pd.DataFrame) -> dict[int, list[int]]:
-    """The runs of `df` by their experiment, which a frame of a page's panel names beside each run."""
-    grouped: dict[int, list[int]] = {}
-    for run_id, experiment_id in df.drop_duplicates("run_id")[["run_id", EXPERIMENT_COLUMN]].itertuples(
-        index=False
-    ):
-        grouped.setdefault(int(experiment_id), []).append(int(run_id))
-    return grouped
-
-
 def read_window(
     store: DataStore[...], window: _LoadedWindow, step: int
 ) -> tuple[Patch, _LoadedWindow] | None:
-    """
-    The pictures of the steps around `step`, in place of the window the chart had; `None` if no run logged any.
-
-    Reads each experiment of the window as a read of it alone, and nothing else: which experiment a run is of is
-    already in the window, so no run is read by itself.
-    """
+    """The pictures of the steps around `step`, in place of the window the chart had; `None` if no run logged any."""
     settings = window.settings
-    logged = sorted(
-        {
-            at
-            for experiment_id, runs in window.runs.items()
-            for steps in store.artifact_steps(
-                experiment_id, key=settings.key, run_ids=frozenset(runs)
-            ).values()
-            for at in steps
-        }
-    )
-    if not logged:
+    read = read_around(store, window.runs, _window(settings), step)
+    if read is None:
         return None
-    # Centred on the step asked for, so scrubbing on either side of it asks for nothing more for a while.
-    start = max(
-        min(bisect.bisect_left(logged, step) - IMAGE_WINDOW_STEPS // 2, len(logged) - IMAGE_WINDOW_STEPS),
-        0,
-    )
-    shown = logged[start : start + IMAGE_WINDOW_STEPS]
-    request = ImageChart.data_request(settings)
-    artifacts = build_artifacts_dataframe(
-        artifact
-        for experiment_id, runs in window.runs.items()
-        for artifact in store.fetch_artifacts(
-            experiment_id,
-            keys=request.artifacts,
-            key_prefixes=request.artifact_prefixes,
-            run_ids=frozenset(runs),
-            steps=StepRange(shown[0], shown[-1]),
-        )
-    )
+    artifacts, shown = read
     col = artifact_column(settings.key)
     pictures = artifacts[artifacts[col].notna()] if col in artifacts.columns else pd.DataFrame()
     drawn = _pictures(pictures, settings, _layer_keys(settings, artifacts.columns), MetricColumn.STEP)
     patch = Patch()
     for name, value in drawn.items():
         patch[name] = value
-    return patch, window.model_copy(update={"first": shown[0], "last": shown[-1]})
+    return patch, window.model_copy(update={"first": shown.first, "last": shown.last})
 
 
 def _register_window_reads(app: dash.Dash) -> None:
@@ -858,7 +821,7 @@ def _register_window_reads(app: dash.Dash) -> None:
         if not asked or not loaded:
             raise PreventUpdate
         read = read_window(
-            get_data_store(), _LoadedWindow.model_validate(loaded), _WindowAsked.model_validate(asked).step
+            get_data_store(), _LoadedWindow.model_validate(loaded), WindowAsked.model_validate(asked).step
         )
         if read is None:
             raise PreventUpdate
@@ -905,7 +868,7 @@ def plug(app: dash.Dash) -> None:
     )
     # A chart that reads a window of its pictures asks for the next when its slider leaves the one it has (#364).
     app.clientside_callback(
-        _WINDOW_JS.source,
+        WINDOW_JS.source,
         dash.Output({"type": "image-series-window-request", "instance": dash.MATCH}, "data"),
         dash.Input({"type": "image-series-slider", "instance": dash.MATCH}, "value"),
         dash.State({"type": "image-series-window", "instance": dash.MATCH}, "data"),

@@ -5,6 +5,7 @@ from __future__ import annotations
 import dataclasses
 import typing
 
+from dlboard._compat import StrEnum
 from dlboard.models._key_patterns import KeyPatterns
 from dlboard.models._metric import MetricReductions
 
@@ -18,18 +19,59 @@ EVERY_STEP: typing.Final = MetricReductions()
 """Every metric read whole, a row per step: what a chart that draws its series reads."""
 
 
+class WindowAt(StrEnum):
+    """Which of the steps a key logged a window reads the artifacts of."""
+
+    FIRST = "first"
+    """The first `steps` steps any run logged: where a slider starts. The chart reads the next as it moves past them."""
+    LATEST = "latest"
+    """Each run's latest step."""
+    THINNED = "thinned"
+    """About `steps` of each run's steps: every 2nd, 4th, ... one from its first, and always its latest (`thinned`)."""
+
+
+def thinned(steps: list[int], most: int) -> list[int]:
+    """
+    About `most` of `steps` (sorted): every `stride`-th from the first, and always the last.
+
+    `stride` is the least power of two that fits, so the steps kept stay put as a run logs more, until it doubles,
+    rather than shifting at every refresh (as `fetch_histograms` thins).
+    """
+    stride = 1
+    while -(-len(steps) // stride) > most:
+        stride *= 2
+    kept = steps[::stride]
+    return kept if kept[-1] == steps[-1] else [*kept, steps[-1]]
+
+
 @dataclasses.dataclass(frozen=True)
 class ArtifactWindow:
     """
-    The artifacts a chart asks for, read at only `steps` of the steps `key` logged: the first ones.
+    The artifacts under `key`, `with_keys` and `with_prefixes`, read at only some of the steps `key` logged (`at`).
 
-    For a chart that shows one step at a time (an image chart's slider): its panel lists every step `key` logged, by
-    run, without their artifacts, and reads the artifacts of the window alone, so what it reads does not grow with the
-    steps logged. The chart reads the next window itself, as the viewer moves past this one.
+    For a chart whose read would otherwise grow with the steps logged (an image chart's slider, a Plotly template's
+    data): its panel lists every step `key` logged, by run, without their artifacts, and reads the artifacts of the
+    window's steps alone. A step is two numbers, not an artifact.
     """
 
     key: str
     steps: int
+    at: WindowAt = WindowAt.FIRST
+    with_keys: frozenset[str] = frozenset()
+    """Other keys read at the window's steps (an image's layers)."""
+    with_prefixes: frozenset[str] = frozenset()
+    """Keys starting with these, read at the window's steps (the overlays logged over an image)."""
+
+    def selected(self, logged: dict[int, list[int]]) -> dict[int, set[int]]:
+        """The steps of each run the window reads, of the ones each `logged` (in order, by run)."""
+        match self.at:
+            case WindowAt.FIRST:
+                first = set(sorted({step for steps in logged.values() for step in steps})[: self.steps])
+                return {run: first.intersection(steps) for run, steps in logged.items()}
+            case WindowAt.LATEST:
+                return {run: {steps[-1]} for run, steps in logged.items() if steps}
+            case WindowAt.THINNED:
+                return {run: set(thinned(steps, self.steps)) for run, steps in logged.items() if steps}
 
 
 @dataclasses.dataclass(frozen=True)
@@ -85,10 +127,10 @@ class DataRequest:
     series: frozenset[SeriesBandRequest] = frozenset()
     """The spreads of many metrics' values the chart draws (`SeriesBandRequest`), read in place of the metrics."""
 
-    artifact_window: ArtifactWindow | None = None
+    artifact_windows: frozenset[ArtifactWindow] = frozenset()
     """
-    Read the artifacts asked for at only a window of steps (`ArtifactWindow`), and every step its key logged; `None`
-    reads them at every step.
+    Read the artifacts asked for at only some steps, through these windows (`ArtifactWindow`), and every step each
+    window's key logged; none reads them at every step. A chart with windows reads its artifacts through them alone.
     """
 
     @property

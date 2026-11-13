@@ -75,7 +75,8 @@ function plotlyChartFigures(step, payload) {
             return typeof node === "string" && colorKeys.has(key) ? resolveColor(node) : node;
         };
 
-        // The run's figure at the latest step it logged one at or before `step`; its first, if it has none yet.
+        // The run's figure at the latest step it logged one at or before `step`; its first, if it has none yet. None if
+        // the window of steps the chart has holds none of the run's (it is read as the slider gets there).
         const urlAt = (urls, step) => {
             const steps = Object.keys(urls)
                 .map(Number)
@@ -141,7 +142,7 @@ function plotlyChartFigures(step, payload) {
             const traces = await Promise.all(
                 runs.map(async (run) => {
                     const urls = payload.runs[run].urls;
-                    const records = scrubbed ? [urlAt(urls, step)] : Object.values(urls);
+                    const records = (scrubbed ? [urlAt(urls, step)] : Object.values(urls)).filter(Boolean);
                     return { run, traces: filled(template, await Promise.all(records.map(load))) };
                 }),
             );
@@ -218,17 +219,20 @@ function plotlyChartFigures(step, payload) {
                         step,
                     );
                 } else {
+                    const shown = runs.filter((run) => urlAt(payload.runs[run].urls, step));
                     const loaded = await Promise.all(
-                        runs.map(async (run) => ({
+                        shown.map(async (run) => ({
                             run,
                             figure: await load(urlAt(payload.runs[run].urls, step)),
                         })),
                     );
-                    figure = dressed(
-                        id.run === combinedRuns ? combined(payload, loaded) : loaded[0].figure,
-                        payload,
-                        step,
-                    );
+                    figure = loaded.length
+                        ? dressed(
+                              id.run === combinedRuns ? combined(payload, loaded) : loaded[0].figure,
+                              payload,
+                              step,
+                          )
+                        : unavailable("Loading this step's figure…");
                 }
             } catch {
                 figure = unavailable("This figure could not be loaded.");
@@ -246,7 +250,10 @@ function plotlyChartFigures(step, payload) {
                     continue;
                 }
                 for (const run of payload.order) {
-                    load(urlAt(payload.runs[run].urls, near)).catch(() => {});
+                    const url = urlAt(payload.runs[run].urls, near);
+                    if (url) {
+                        load(url).catch(() => {});
+                    }
                 }
             }
         };

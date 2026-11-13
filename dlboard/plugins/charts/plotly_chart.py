@@ -16,7 +16,8 @@ from typing import Annotated, Any, Final, cast
 import dash
 import dash_mantine_components as dmc
 import pandas as pd
-from dash import dcc
+from dash import Patch, dcc
+from dash.exceptions import PreventUpdate
 from pydantic import BaseModel, Field
 
 from dlboard._compat import StrEnum
@@ -27,19 +28,33 @@ from dlboard.models import (
     PLOTLY_FIGURE_EXTENSION,
     RUN_NAME_COLUMN,
     Artifact,
+    ArtifactWindow,
     ChartType,
     ColumnKind,
     DataRequest,
     MetricColumn,
     RenderContext,
+    WindowAt,
     artifact_column,
     artifact_display_name,
+    artifact_logged_column,
     plotly_data_key,
+    thinned,
 )
 from dlboard.plugins.charts._empty_chart import nothing_logged
+from dlboard.plugins.charts._step_window import (
+    WINDOW_JS,
+    LoadedSteps,
+    WindowAsked,
+    read_around,
+    runs_by_experiment,
+)
 from dlboard.plugins.charts.image_series import slider_marks
-from dlboard.serve import ClientsideScript, series_color, series_swatch_class
+from dlboard.serve import ClientsideScript, get_data_store, series_color, series_swatch_class
 from dlboard.serve._series import SERIES_SLOTS
+
+if typing.TYPE_CHECKING:
+    from dlboard.models import DataStore
 
 COMBINED_RUNS: Final = "combined"
 """The `run` of the one graph a chart with `combine_runs` draws every run in: never a run's id, which is a number."""
@@ -130,18 +145,34 @@ class _Figures(BaseModel, frozen=True, extra="forbid"):
     """How many runs had their data thinned to `max_data_steps`."""
 
 
-def thinned(steps: list[int], most: int) -> list[int]:
-    """
-    About `most` of `steps` (sorted): every `stride`-th from the first, and always the last.
+PLOTLY_WINDOW_STEPS: Final = 50
+"""
+How many steps' figures (or a scrubbed template's data) a chart reads at once (#619), as an image chart does its pictures:
+its slider goes to every step logged, and the steps around where it is are read as it gets there.
+"""
 
-    `stride` is the least power of two that fits, so the steps kept stay put as a run logs more, until it doubles,
-    rather than shifting at every refresh (as `fetch_histograms` thins).
+
+class _LoadedWindow(LoadedSteps, frozen=True, extra="forbid"):
+    """The steps a chart with a slider has the figures (or a template's data) of, and what it reads the next with."""
+
+    key: str
+    """The key the slider goes over the steps of: the figures', or for a scrubbed template its data's."""
+
+
+def _logged_steps(dataframe: pd.DataFrame, key: str) -> dict[int, list[int]]:
     """
-    stride = 1
-    while -(-len(steps) // stride) > most:
-        stride *= 2
-    kept = steps[::stride]
-    return kept if kept[-1] == steps[-1] else [*kept, steps[-1]]
+    Each run's steps `key` logged at, in order: every one for a frame read through a window, though not every one's URL.
+
+    For a frame that read every step (`artifact_logged_column` absent), the steps of the URLs read.
+    """
+    column = artifact_logged_column(key)
+    if column not in dataframe.columns:
+        return {run: list(urls) for run, urls in _logged(dataframe, key).items()}
+    rows = dataframe.loc[dataframe[column].notna(), [MetricColumn.RUN_ID, MetricColumn.STEP]]
+    steps: dict[int, list[int]] = {}
+    for run_id, step in rows.drop_duplicates().sort_values(MetricColumn.STEP).itertuples(index=False):
+        steps.setdefault(int(run_id), []).append(int(step))
+    return steps
 
 
 _GRAPH: Final = "plotly-chart-graph"
@@ -150,6 +181,8 @@ _STEP: Final = "plotly-chart-step"
 _SLIDER: Final = "plotly-chart-slider"
 _PAGE: Final = "plotly-chart-page"
 _PAGER: Final = "plotly-chart-pager"
+_WINDOW: Final = "plotly-chart-window"
+_WINDOW_ASKED: Final = "plotly-chart-window-asked"
 
 _GRAPH_CONFIG: Final = {"displaylogo": False, "responsive": True}
 _EMPTY_FIGURE: Final[dict[str, Any]] = {
@@ -186,38 +219,73 @@ def _logged(dataframe: pd.DataFrame, key: str) -> dict[int, dict[int, str]]:
 
 
 def _streamed(
-    data: dict[int, dict[int, str]], parameters: PlotlySettings
-) -> tuple[dict[int, dict[int, str]], int]:
-    """Each run's data at the steps `parameters.data_steps` draws, and how many runs were thinned to get there."""
+    data: dict[int, dict[int, str]], parameters: PlotlySettings, *, windowed: bool
+) -> dict[int, dict[int, str]]:
+    """
+    Each run's data at the steps `parameters.data_steps` draws.
+
+    A frame read through the chart's data window (`data_request`) holds those steps alone already; one that read every step
+    is narrowed here.
+    """
     match parameters.data_steps:
         case StreamMode.SCRUB:
-            return data, 0
+            return data
         case StreamMode.LATEST:
-            return {run: dict([max(urls.items())]) for run, urls in data.items()}, 0
+            return {run: dict([max(urls.items())]) for run, urls in data.items()}
         case StreamMode.ACCUMULATE:
+            if windowed:
+                return data
             kept = {run: thinned(list(urls), parameters.max_data_steps) for run, urls in data.items()}
-            return (
-                {run: {step: data[run][step] for step in steps} for run, steps in kept.items()},
-                sum(len(steps) < len(data[run]) for run, steps in kept.items()),
-            )
+            return {run: {step: data[run][step] for step in steps} for run, steps in kept.items()}
 
 
-def _figures(parameters: PlotlySettings, dataframe: pd.DataFrame) -> _Figures | None:
+def _figures(
+    parameters: PlotlySettings, dataframe: pd.DataFrame
+) -> tuple[_Figures, _LoadedWindow | None] | None:
     """
     What the browser draws, from the frame: each run's figures, or for a template each run's data; `None` for neither.
 
     A key is a template once data has been logged into it (`plotly_data_key`): its figure is the newest run's latest,
-    and each run is drawn from the data it logged.
+    and each run is drawn from the data it logged. With them, the window of steps the chart has, for a slider that can
+    go past it.
     """
+    data_key = plotly_data_key(parameters.key)
     figures = _logged(dataframe, parameters.key)
-    data = _logged(dataframe, plotly_data_key(parameters.key))
+    data = _logged(dataframe, data_key)
     if not figures:
         return None
     newest = figures[max(figures)]
     template = newest[max(newest)] if data else None
-    by_run, thinned_runs = _streamed(data, parameters) if data else (figures, 0)
+    windowed = artifact_logged_column(data_key) in dataframe.columns
+    by_run = _streamed(data, parameters, windowed=windowed) if data else figures
+    logged_data = _logged_steps(dataframe, data_key)
+    thinned_runs = (
+        sum(len(urls) < len(logged_data.get(run, ())) for run, urls in by_run.items())
+        if template is not None and parameters.data_steps is StreamMode.ACCUMULATE
+        else 0
+    )
     names = _run_names(dataframe)
-    steps = sorted({step for urls in by_run.values() for step in urls})
+    # The slider goes over every step logged, though the URLs read are a window's.
+    scrubbed = template is None or parameters.data_steps is StreamMode.SCRUB
+    slider_key = parameters.key if template is None else data_key
+    logged = _logged_steps(dataframe, slider_key) if scrubbed else dict[int, list[int]]()
+    steps = sorted({step for run_steps in logged.values() for step in run_steps}) or sorted(
+        {step for urls in by_run.values() for step in urls}
+    )
+    read = sorted({step for urls in by_run.values() for step in urls})
+    # A run with nothing in the window yet is drawn too, once the slider gets to its steps.
+    by_run = {run: by_run.get(run, {}) for run in sorted({*by_run, *logged})}
+    runs = runs_by_experiment(dataframe)
+    window = (
+        _LoadedWindow(
+            first=read[0],
+            last=read[-1],
+            runs={experiment: [run for run in ids if run in by_run] for experiment, ids in runs.items()},
+            key=slider_key,
+        )
+        if scrubbed and runs is not None and artifact_logged_column(slider_key) in dataframe.columns
+        else None
+    )
     return _Figures(
         runs={
             run_id: _RunFigures(
@@ -229,13 +297,13 @@ def _figures(parameters: PlotlySettings, dataframe: pd.DataFrame) -> _Figures | 
             for run_id, urls in by_run.items()
         },
         order=sorted(by_run),
-        steps=steps if template is None or parameters.data_steps is StreamMode.SCRUB else steps[-1:],
+        steps=steps if scrubbed else steps[-1:],
         theme=None if parameters.use_figure_theme else DLBOARD_THEME,
         keep_view=parameters.keep_view_across_steps,
         template=template,
         data_steps=parameters.data_steps if template is not None else None,
         thinned=thinned_runs,
-    )
+    ), window
 
 
 def _thinned_note(runs: int, most: int) -> dmc.Text:
@@ -319,9 +387,10 @@ class PlotlyChart(ChartType[PlotlySettings, pd.DataFrame, dmc.Stack], frozen=Tru
     def render_in(
         cls, parameters: PlotlySettings, dataframe: pd.DataFrame, context: RenderContext
     ) -> dmc.Stack:
-        figures = _figures(parameters, dataframe)
-        if figures is None:
+        drawn = _figures(parameters, dataframe)
+        if drawn is None:
             return nothing_logged(parameters.key)
+        figures, window = drawn
         instance = _instance_id(parameters, context.chart_id)
         first = figures.steps[0]
         return dmc.Stack(
@@ -330,6 +399,12 @@ class PlotlyChart(ChartType[PlotlySettings, pd.DataFrame, dmc.Stack], frozen=Tru
                 dcc.Store(id={"type": _DATA, "instance": instance}, data=figures.model_dump(mode="json")),
                 # The step on show: the slider's, or the one step logged when there is no slider.
                 dcc.Store(id={"type": _STEP, "instance": instance}, data=first),
+                # The window of steps the chart has the figures of; the slider leaving it asks for the next (#619).
+                dcc.Store(
+                    id={"type": _WINDOW, "instance": instance},
+                    data=window.model_dump(mode="json") if window is not None else None,
+                ),
+                dcc.Store(id={"type": _WINDOW_ASKED, "instance": instance}),
                 *(
                     [
                         dmc.Slider(
@@ -361,10 +436,20 @@ class PlotlyChart(ChartType[PlotlySettings, pd.DataFrame, dmc.Stack], frozen=Tru
     @typing.override
     @classmethod
     def data_request(cls, parameters: PlotlySettings) -> DataRequest:
-        # The data logged into the key, if it is a template, is under a key of its own.
+        # The data logged into the key, if it is a template, is under a key of its own. Neither is read at every step it
+        # was logged at (#619): the figures a window at a time, and a template's data at the steps it draws.
+        data_key = plotly_data_key(parameters.key)
+        match parameters.data_steps:
+            case StreamMode.SCRUB:
+                data_window = ArtifactWindow(data_key, PLOTLY_WINDOW_STEPS)
+            case StreamMode.LATEST:
+                data_window = ArtifactWindow(data_key, 1, at=WindowAt.LATEST)
+            case StreamMode.ACCUMULATE:
+                data_window = ArtifactWindow(data_key, parameters.max_data_steps, at=WindowAt.THINNED)
         return DataRequest(
             artifacts=frozenset({parameters.key}),
-            artifact_prefixes=frozenset({plotly_data_key(parameters.key)}),
+            artifact_prefixes=frozenset({data_key}),
+            artifact_windows=frozenset({ArtifactWindow(parameters.key, PLOTLY_WINDOW_STEPS), data_window}),
         )
 
     @typing.override
@@ -393,9 +478,52 @@ _LOCK_JS: Final = ClientsideScript(Path(__file__).with_name("image_series_lock.j
 _PAGE_JS: Final = ClientsideScript(Path(__file__).with_name("image_series_page.js"))
 
 
+def read_window(
+    store: DataStore[...], window: _LoadedWindow, step: int
+) -> tuple[Patch, _LoadedWindow] | None:
+    """Each run's figures (or a scrubbed template's data) at the steps around `step`, in place of the window it had."""
+    read = read_around(store, window.runs, ArtifactWindow(window.key, PLOTLY_WINDOW_STEPS), step)
+    if read is None:
+        return None
+    artifacts, shown = read
+    urls = _logged(artifacts, window.key)
+    patch = Patch()
+    for run_id in (run_id for runs in window.runs.values() for run_id in runs):
+        patch["runs"][str(run_id)]["urls"] = {str(at): url for at, url in urls.get(run_id, {}).items()}
+    return patch, window.model_copy(update={"first": shown.first, "last": shown.last})
+
+
 def plug(app: dash.Dash) -> None:
-    """Plugin: registers the chart type, and the clientside callbacks that fetch and draw its figures."""
+    """Plugin: registers the chart type, and the callbacks that fetch and draw its figures, and read their windows."""
     PlotlyChart.register(allow_override=True)
+    app.clientside_callback(
+        WINDOW_JS.source,
+        dash.Output({"type": _WINDOW_ASKED, "instance": dash.MATCH}, "data"),
+        dash.Input({"type": _SLIDER, "instance": dash.MATCH}, "value"),
+        dash.State({"type": _WINDOW, "instance": dash.MATCH}, "data"),
+    )
+
+    @app.callback(
+        dash.Output({"type": _DATA, "instance": dash.MATCH}, "data", allow_duplicate=True),
+        dash.Output({"type": _WINDOW, "instance": dash.MATCH}, "data", allow_duplicate=True),
+        dash.Input({"type": _WINDOW_ASKED, "instance": dash.MATCH}, "data"),
+        dash.State({"type": _WINDOW, "instance": dash.MATCH}, "data"),
+        prevent_initial_call=True,
+    )
+    def read_plotly_window(
+        asked: dict[str, Any] | None, loaded: dict[str, Any] | None
+    ) -> tuple[Patch, dict[str, Any]]:
+        """The figures of the steps around the one the slider went to, in place of the window the chart had."""
+        if not asked or not loaded:
+            raise PreventUpdate
+        read = read_window(
+            get_data_store(), _LoadedWindow.model_validate(loaded), WindowAsked.model_validate(asked).step
+        )
+        if read is None:
+            raise PreventUpdate
+        patch, window = read
+        return patch, window.model_dump(mode="json")
+
     app.clientside_callback(
         _FIGURES_JS.source,
         dash.Output({"type": _GRAPH, "instance": dash.MATCH, "run": dash.ALL}, "figure"),

@@ -507,7 +507,7 @@ class AuthorizingDataStore(models.DataStore[...]):
         keys: frozenset[str] | None = None,
         key_prefixes: frozenset[str] = frozenset(),
         run_ids: frozenset[int] | None,
-        steps: models.StepRange | None = None,
+        steps: models.StepRange | frozenset[int] | None = None,
     ) -> Iterator[models.Artifact]:
         self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
         return self._inner.fetch_artifacts(

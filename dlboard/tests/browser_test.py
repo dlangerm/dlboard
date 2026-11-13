@@ -44,7 +44,7 @@ from dlboard.models import OVERLAY_KEY_SUFFIX, RUN_NAME_COLUMN, PanelInstance, o
 from dlboard.plugins.backend.artifact_purge_worker import PurgeTask
 from dlboard.plugins.charts.image_series import IMAGE_WINDOW_STEPS
 from dlboard.plugins.charts.line_chart import LEGEND_MAX_HEIGHT
-from dlboard.plugins.charts.plotly_chart import PlotlyChart
+from dlboard.plugins.charts.plotly_chart import PLOTLY_WINDOW_STEPS, PlotlyChart
 from dlboard.serve import get_system_data_store
 from dlboard.serve._backend._purge_work import PurgeWork
 from dlboard.serve._custodian import get_system_task_store
@@ -2624,14 +2624,15 @@ def test_a_logged_plotly_figure_is_drawn_interactive_and_scrubbed_by_step(
     page: Page, live_server_url: str, tmp_path: Path, console_errors: list[str]
 ) -> None:
     """
-    A Plotly figure logged at two steps is drawn by Plotly itself in the browser, fetched from its artifact, and the
-    chart's slider swaps in the other step's figure.
+    A Plotly figure logged at every step is drawn by Plotly itself in the browser, fetched from its artifact, and the
+    chart's slider swaps in another step's figure, even one past the window of steps the page read (#619).
     """
     _create_project_and_experiment(page, live_server_url, "Plotly Experiment")
     page.locator(".experiment-card").click()
     experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
     api = BasicDlboardAPI(live_server_url)
     run = api.create_run(models.NewRun(experiment_id=experiment_id))
+    last = PLOTLY_WINDOW_STEPS + 9
     api.log_artifact_batch(
         [
             PlotlyFigure.from_figure(
@@ -2642,10 +2643,10 @@ def test_a_logged_plotly_figure_is_drawn_interactive_and_scrubbed_by_step(
                 "eval/pr",
                 step=step,
             ).to_artifact(tmp_path, run.id, experiment_id)
-            for step in (0, 10)
+            for step in range(last + 1)
         ]
     )
-    _wait_for_artifacts(experiment_id, 2)
+    _wait_for_artifacts(experiment_id, last + 1)
     store = get_system_data_store()
     shared = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
     chart = models.ChartInstance[Any, Any](chart_type=PlotlyChart.name, parameters={"key": "eval/pr"})
@@ -2661,7 +2662,9 @@ def test_a_logged_plotly_figure_is_drawn_interactive_and_scrubbed_by_step(
     slider = page.locator(".dl-panel-body").get_by_role("slider")
     slider.focus()
     page.keyboard.press("ArrowRight")
-    expect(plot.locator(".gtitle")).to_have_text("at 10")
+    expect(plot.locator(".gtitle")).to_have_text("at 1")
+    page.keyboard.press("End")
+    expect(plot.locator(".gtitle")).to_have_text(f"at {last}")
     assert console_errors == []
 
 
