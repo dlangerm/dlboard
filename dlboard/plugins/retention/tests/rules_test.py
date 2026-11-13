@@ -22,7 +22,7 @@ from dlboard.plugins.retention._rules import (
     Unlimited,
     describe,
 )
-from dlboard.plugins.retention._section import rule_of
+from dlboard.plugins.retention._section import _described, rule_of
 from dlboard.plugins.retention._settings import RetentionSettings
 from dlboard.serve._backend._authorization import AuthorizingDataStore
 from dlboard.serve._backend._setting_rules import SettingRule
@@ -45,6 +45,22 @@ _NOW = pendulum.datetime(2026, 1, 1)
 )
 def test_a_rule_is_described_in_words(rule: RetentionRule, words: str) -> None:
     assert describe(rule) == words
+
+
+@pytest.mark.parametrize(
+    ("rule", "deletes"),
+    [
+        (Unlimited(), "Keeps every run"),
+        (RunCount(max_runs=2), "deletes down to 2 once an experiment holds more than 12"),
+        (
+            RunCount(max_runs=2, unit=RetentionUnit.PROJECT),
+            "deletes down to 2 once the project holds more than 12",
+        ),
+        (RunAge(max_age_days=30), "deletes once a run is more than 31 days old"),
+    ],
+)
+def test_the_tab_says_when_a_rule_deletes_past_its_slack(rule: RetentionRule, deletes: str) -> None:
+    assert _described(rule, RetentionSettings()).endswith(deletes)
 
 
 @pytest.mark.parametrize(
@@ -80,6 +96,12 @@ def test_a_changed_rule_waits_pending_while_the_rule_before_it_is_in_effect_and_
     assert third.pending.effective_at == _NOW.add(days=19)
     assert third.in_effect(_NOW.add(days=13)) == RunCount(max_runs=50)
     assert third.saved(RunCount(max_runs=50), by=1, now=_NOW.add(days=13), grace=grace).pending is None
+
+    resaved = third.saved(RunCount(max_runs=5), by=1, now=_NOW.add(days=14), grace=grace)
+    assert resaved.pending is not None
+    assert resaved.pending.effective_at == _NOW.add(days=19)
+    shorter = third.saved(RunCount(max_runs=5), by=1, now=_NOW.add(days=14), grace=pendulum.duration())
+    assert shorter.in_effect(_NOW.add(days=14)) == RunCount(max_runs=5)
 
 
 def _as(store: SQLLiteStore, name: str, *scopes: Scope) -> tuple[AuthorizingDataStore, models.User]:

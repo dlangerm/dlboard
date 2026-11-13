@@ -148,14 +148,18 @@ class RetentionSetting(BaseModel, frozen=True, extra="forbid"):
         The setting once `rule` is saved: pending until its grace period is over, while the rule in effect is enforced.
 
         Saving another rule replaces the pending one, never the one in effect, so saving over and over never puts
-        retention off; saving the rule already pending keeps its time, so it is not put off either; saving the rule in
-        effect drops the pending one.
+        retention off; saving the rule already pending keeps its time, so it is not put off either, unless the grace
+        period is shorter now than when it was first saved, which moves it earlier; saving the rule in effect drops
+        the pending one.
         """
         current = self.as_of(now)
         if current.active is not None and current.active.rule == rule:
             return RetentionSetting(active=current.active)
         if current.pending is not None and current.pending.rule == rule:
-            version = current.pending.model_copy(update={"cap_exempt": cap_exempt})
+            effective_at = min(current.pending.effective_at, now + grace)
+            version = current.pending.model_copy(
+                update={"cap_exempt": cap_exempt, "effective_at": effective_at}
+            )
         else:
             version = RuleVersion(
                 rule=rule, set_by=by, set_at=now, effective_at=now + grace, cap_exempt=cap_exempt

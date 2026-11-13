@@ -45,7 +45,11 @@ def test_a_project_is_held_to_a_rule_after_its_grace_period_and_the_change_can_b
     page.locator(f"#{retention.AMOUNT_ID}").fill("5")
 
     page.locator(f"#{retention.SAVE_ID}").click()
-    pending = page.get_by_text(re.compile(r"Keeps the newest 5 runs of each experiment from"))
+    pending = page.get_by_text(
+        re.compile(
+            r"From .+: Keeps the newest 5 runs of each experiment · deletes down to 5 once an experiment holds"
+        )
+    )
     expect(pending).to_be_visible()
     page.locator(f"#{retention.CANCEL_ID}").click()
     expect(pending).to_have_count(0)
