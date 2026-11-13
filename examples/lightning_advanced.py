@@ -1,5 +1,5 @@
 """
-A deliberately heavy Lightning run, to put dlboard's UI through its paces with nothing but stock APIs.
+A tour of what dlboard draws, through a Lightning run that uses nothing but stock APIs.
 
 A small UNet learns to segment synthetic shapes (circles, squares, triangles on a noisy background).
 Nothing is downloaded, and it trains in a few minutes on a GPU (and a bit longer on a CPU). What it
@@ -9,21 +9,21 @@ exercises, all through ordinary Lightning/dlboard calls:
   flattened by the logger to `model/base_channels`, `optim/schedule/kind`, ...
 - 25 epochs with step- and epoch-level metrics, and per-class IoU
 - a histogram of every weight tensor's gradient, so how they spread over training shows without averaging
-- Lightning's `LearningRateMonitor`, `ThroughputMonitor` and `DeviceStatsMonitor`
+- Lightning's `LearningRateMonitor` and `ThroughputMonitor`
 - `ModelCheckpoint` with `log_model="all"`, so every checkpoint is uploaded as it is saved
-- per-epoch prediction previews: segmentation masks and bounding boxes (an image and the `Overlay`s, run-length
-  encoded masks included, a chart draws over it), and a matplotlib figure
+- prediction previews every few epochs: segmentation masks and bounding boxes (an image and the `Overlay`s,
+  run-length encoded masks included, a chart draws over it)
+- Plotly figures, drawn interactive by the `plotly` chart (needs `plotly` installed), in each of its three ways: the
+  training set's class balance, logged once; per-class IoU, a figure each epoch the chart scrubs through; and a
+  template each epoch's per-sample IoU against foreground area streams into, so the points pile up as training goes
 
 Run it a few times: each run samples fresh hyperparameters, so the run-comparison views have something
-to compare. What follows is what dlboard can't do yet, found by running this -- the backlog this example
-exists to produce. Where the script itself works around one, a `# DLBOARD GAP:` comment says so:
+to compare. `lightning_stress_test.py` runs the same model logging ten times as long and as often as it can, to
+load the server rather than to be looked at. What follows is what dlboard can't do yet, found by running this -- the
+backlog this example exists to produce. Where the script itself works around one, a `# DLBOARD GAP:` comment says so:
 
 1. One artifact per (run, key, step), so N previews need N keys (`sample_0`, `sample_1`, ...) rather than
    one batch rendered as a gallery.
-2. Nothing to skip or collapse a noisy group: `DeviceStatsMonitor` alone adds ~500 series, so auto-generate
-   offers 886 charts, and its panels sort first, ahead of `train` and `val`.
-3. A panel header carries about 30 Mantine components (8 tooltips), so a view with hundreds of panels is slow
-   to draw: 239 panels, which grouping this run by suffix makes, take about 14 s (#192).
 """
 
 import math
@@ -35,11 +35,11 @@ from pathlib import Path
 from typing import cast, override
 
 import numpy as np
+import plotly.graph_objects as go
 import pydantic
 import pydantic.dataclasses
 import pytorch_lightning as pl
 import torch
-from matplotlib.figure import Figure
 from pydantic import BaseModel, Field
 from pytorch_lightning.callbacks import (
     DeviceStatsMonitor,
@@ -56,14 +56,17 @@ from torchvision.ops import masks_to_boxes
 
 from dlboard.client.artifacts.image import Image
 from dlboard.client.artifacts.overlay import Box, ImageMask, Overlay, Shape
+from dlboard.client.artifacts.plotly import PlotlyData, PlotlyFigure
 from dlboard.client.artifacts.rle import run_length_encode
 from dlboard.client.dlboard_logger import DLBoardLogger
 
 LOGDIR = Path("./lightning-logs")
-MAX_EPOCHS = 250
-GRAD_HISTOGRAM_EVERY_N_STEPS = 10
 PREVIEW_SAMPLES = 4
-"""How many fixed validation images get a segmentation and a detection preview each epoch."""
+"""How many fixed validation images get a segmentation and a detection preview each time."""
+CLASS_BALANCE_SAMPLES = 256
+"""How many training images the class balance figure counts pixels over."""
+SAMPLE_IOU_KEY = "val/sample_iou"
+"""The template each validation epoch's per-sample IoU is streamed into."""
 
 
 class ShapeClass(IntEnum):
@@ -151,6 +154,29 @@ class AugmentConfig:
     """A plain stdlib dataclass."""
 
     noise_std: float = 0.05
+
+
+class Volume(BaseModel, frozen=True):
+    """How much a run logs, and how often: not a hyperparameter, so not logged as one."""
+
+    experiment: str
+    max_epochs: int
+    log_every_n_steps: int
+    grad_histogram_every_n_steps: int
+    preview_every_n_epochs: int
+    device_stats: bool
+    """Whether `DeviceStatsMonitor` logs its ~500 series of device and CPU stats."""
+
+
+TOUR = Volume(
+    experiment="unet-advanced",
+    max_epochs=25,
+    log_every_n_steps=10,
+    grad_histogram_every_n_steps=50,
+    preview_every_n_epochs=5,
+    device_stats=False,
+)
+"""Enough of each to show it: a slider over five previews, and a chart per gradient that draws at once."""
 
 
 def render_sample(rng: np.random.Generator, size: int, noise_std: float) -> tuple[np.ndarray, np.ndarray]:
@@ -321,24 +347,79 @@ def sample_iou(truth: torch.Tensor, pred: torch.Tensor) -> float:
     return float(torch.stack(ious).mean()) if ious else 1.0
 
 
-def plot_class_iou(iou: dict[str, float]) -> Figure:
-    """A bar per foreground class."""
-    fig = Figure(figsize=(5, 3), layout="constrained")
-    ax = fig.subplots()
-    ax.bar(list(iou), list(iou.values()))
-    ax.set(ylim=(0, 1), ylabel="IoU", title="Validation IoU per class")
-    return fig
+def plot_class_iou(iou: dict[str, float]) -> go.Figure:
+    """A bar per foreground class, in the color its masks are drawn in."""
+    return go.Figure(
+        go.Bar(
+            x=list(iou),
+            y=list(iou.values()),
+            marker={"color": [CLASS_COLORS[int(ShapeClass[name.upper()])] for name in iou]},
+        ),
+        layout={
+            "title": {"text": "Validation IoU per class"},
+            "yaxis": {"title": {"text": "IoU"}, "range": [0, 1]},
+        },
+    )
+
+
+def plot_class_balance(dataset: ShapesDataset) -> go.Figure:
+    """The share of the first `CLASS_BALANCE_SAMPLES` images' pixels each class covers, the background included."""
+    masks = torch.stack([dataset[i][1] for i in range(min(CLASS_BALANCE_SAMPLES, len(dataset)))])
+    share = torch.bincount(masks.flatten(), minlength=NUM_CLASSES) / masks.numel()
+    return go.Figure(
+        go.Bar(
+            x=[c.name.lower() for c in ShapeClass],
+            y=share.tolist(),
+            marker={"color": ["#888888", *(CLASS_COLORS[int(c)] for c in FOREGROUND)]},
+        ),
+        layout={
+            "title": {"text": "Training pixels per class"},
+            "yaxis": {"title": {"text": "share of pixels"}, "tickformat": ".0%"},
+        },
+    )
+
+
+def sample_iou_template() -> PlotlyFigure:
+    """
+    A scatter of each validation sample's IoU against how much of it is foreground, its points left empty.
+
+    The bindings say which `PlotlyData` column fills which attribute, so each epoch's data adds its points, colored by
+    their epoch: whether training lifts small shapes as much as large ones shows as the colors climb.
+    """
+    template = go.Figure(
+        go.Scatter(
+            mode="markers",
+            marker={
+                "colorscale": "Viridis",
+                "showscale": True,
+                "colorbar": {"title": {"text": "epoch"}},
+                "size": 6,
+            },
+            hovertemplate="foreground %{x:.1%}<br>IoU %{y:.2f}<br>epoch %{marker.color}<extra></extra>",
+        ),
+        layout={
+            "title": {"text": "Validation IoU per sample"},
+            "xaxis": {"title": {"text": "foreground share"}, "tickformat": ".0%"},
+            "yaxis": {"title": {"text": "IoU"}, "range": [0, 1.02]},
+        },
+    )
+    return PlotlyFigure.from_figure(
+        template, SAMPLE_IOU_KEY, bind={0: {"x": "foreground", "y": "iou", "marker.color": "epoch"}}
+    )
 
 
 class ShapesSegmenter(pl.LightningModule):
-    """UNet segmenter, with per-class IoU plus mask and box previews logged each validation epoch."""
+    """UNet segmenter, with per-class IoU each validation epoch, and mask and box previews as often as `volume` says."""
 
     _confusion: torch.Tensor
 
-    def __init__(self, model: ModelConfig, optim: OptimConfig, encoder_lr_scale: float = 0.5) -> None:
-        """`save_hyperparameters` logs all three args: two nested configs and a plain float."""
+    def __init__(
+        self, model: ModelConfig, optim: OptimConfig, volume: Volume, encoder_lr_scale: float = 0.5
+    ) -> None:
+        """`save_hyperparameters` logs three args: two nested configs and a plain float."""
         super().__init__()
-        self.save_hyperparameters()
+        self.save_hyperparameters(ignore=["volume"])
+        self.volume = volume
         self.net = UNet(model)
         self.optim_cfg = optim
         self.encoder_lr_scale = encoder_lr_scale
@@ -383,7 +464,7 @@ class ShapesSegmenter(pl.LightningModule):
     def on_before_optimizer_step(self, optimizer: Optimizer) -> None:
         # The gradients themselves, not a norm of them: binned right here (one pass over each tensor), and only
         # the buckets are sent. `rank_zero_only`, so the other ranks of a multi-GPU run skip it entirely.
-        if self.global_step % GRAD_HISTOGRAM_EVERY_N_STEPS == 0:
+        if self.global_step % self.volume.grad_histogram_every_n_steps == 0:
             cast("DLBoardLogger", self.trainer.logger).log_histograms(
                 {
                     f"grad/{name}": param.grad
@@ -401,8 +482,9 @@ class ShapesSegmenter(pl.LightningModule):
     def validation_step(self, batch: tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> None:
         _, preds = self._step(batch, Stage.VAL)
         if batch_idx == 0:  # the loader doesn't shuffle, so these are the same images every epoch
+            # The first few images, for the previews, and the whole batch's masks, for the per-sample IoU scatter.
             images, masks = batch
-            self._preview = tuple(t[:PREVIEW_SAMPLES].cpu() for t in (images, masks, preds))
+            self._preview = (images[:PREVIEW_SAMPLES].cpu(), masks.cpu(), preds.cpu())
 
     def _log_segmentation_metrics(self, stage: Stage) -> dict[str, float]:
         """Log mIoU, dice and per-class IoU of the confusion matrix `_step` accumulated; returns per-class IoU."""
@@ -428,8 +510,10 @@ class ShapesSegmenter(pl.LightningModule):
         logger = cast("DLBoardLogger", self.trainer.logger)
         step, epoch = self.trainer.global_step, self.trainer.current_epoch
         images, masks, preds = self._preview
-        artifacts: list[Image | Overlay] = []
-        for i in range(len(images)):
+        artifacts: list[Image | Overlay | PlotlyFigure | PlotlyData] = []
+        # Every few epochs, ending on the last: a slider over every epoch's pictures is too fine to scrub.
+        previewing = (epoch + 1) % self.volume.preview_every_n_epochs == 0
+        for i in range(len(images) if previewing else 0):
             rgb = (images[i].permute(1, 2, 0).numpy() * 255).astype(np.uint8)
             truth, pred = masks[i], preds[i]
             # DLBOARD GAP: one artifact per (key, step), so every preview image needs its own key.
@@ -474,8 +558,21 @@ class ShapesSegmenter(pl.LightningModule):
                     step=step,
                 ),
             ]
+        artifacts += [
+            # A whole figure each epoch: the chart has a slider over them, and keeps a zoom as it moves.
+            PlotlyFigure.from_figure(plot_class_iou(per_class), "val/iou_per_class", step=step),
+            # Only the data, drawn into the template `main` logged: the chart adds each epoch's points to the last's.
+            PlotlyData(
+                template=SAMPLE_IOU_KEY,
+                step=step,
+                columns={
+                    "foreground": (masks > 0).float().mean(dim=(1, 2)),
+                    "iou": [sample_iou(truth, pred) for truth, pred in zip(masks, preds, strict=True)],
+                    "epoch": np.full(len(masks), epoch),
+                },
+            ),
+        ]
         logger.log_artifact(artifacts)
-        logger.log_figure(plot_class_iou(per_class), "val/iou_per_class", step=step)
 
     @override
     def on_test_epoch_start(self) -> None:
@@ -529,12 +626,12 @@ def batch_size_of(batch: tuple[torch.Tensor, torch.Tensor]) -> int:
     return batch[0].size(0)
 
 
-def main() -> None:
-    """Sample hyperparameters, train for `MAX_EPOCHS`, then evaluate on the test split."""
+def main(volume: Volume) -> None:
+    """Sample hyperparameters, train for `volume.max_epochs`, then evaluate on the test split."""
     LOGDIR.mkdir(exist_ok=True)
     logger = DLBoardLogger.from_names(
         "shape-segmentation",
-        "unet-advanced",
+        volume.experiment,
         "Synthetic shapes, to exercise nested hyperparameters, checkpoints and rich previews",
         log_model="all",
         server_url=os.environ.get(  # dlboard-ignore[forbid-string-ignore]
@@ -542,6 +639,14 @@ def main() -> None:
         ),
     )
     data = ShapesDataModule(DataConfig(), AugmentConfig())
+    data.setup()
+    # Logged once, at step 0: a figure drawn as it is, and the template the validation epochs stream data into.
+    logger.log_artifact(
+        [
+            PlotlyFigure.from_figure(plot_class_balance(data.train), "data/class_balance"),
+            sample_iou_template(),
+        ]
+    )
     model = ShapesSegmenter(
         ModelConfig(
             base_channels=random.choice([8, 16, 24, 32]),
@@ -556,21 +661,22 @@ def main() -> None:
                 kind=random.choice(list(ScheduleKind)), warmup_steps=random.choice([50, 100, 200])
             ),
         ),
+        volume,
         encoder_lr_scale=random.choice([0.25, 0.5, 1.0]),
     )
 
     trainer = pl.Trainer(
-        max_epochs=MAX_EPOCHS,
+        max_epochs=volume.max_epochs,
         accelerator="auto",
         devices=1,
         precision="16-mixed" if torch.cuda.is_available() else "32-true",
         logger=logger,
-        log_every_n_steps=5,
+        log_every_n_steps=volume.log_every_n_steps,
         enable_model_summary=False,
         callbacks=[
             LearningRateMonitor(logging_interval="step", log_momentum=True, log_weight_decay=True),
             ThroughputMonitor(batch_size_fn=batch_size_of, window_size=50),
-            DeviceStatsMonitor(cpu_stats=True),
+            *([DeviceStatsMonitor(cpu_stats=True)] if volume.device_stats else []),
             ModelCheckpoint(
                 dirpath=LOGDIR / f"run-{logger.run_id}" / "checkpoints",
                 filename="epoch{epoch:02d}-step{step}",
@@ -587,4 +693,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    main(TOUR)

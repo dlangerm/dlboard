@@ -4,7 +4,8 @@ Training loop, doubling as a demo of dlboard's image-logging path under realisti
 Per-batch debug crops (the old version's `log_extra_artifacts`) barely exercise the upload path --
 they're tiny and infrequent. This logs two heavier things instead: a matplotlib confusion matrix
 once per validation epoch (via `logger.log_figure`, dlboard's `mlflow.log_figure`; needs
-`matplotlib` installed), and a large tiled mosaic once at startup. The actual performance
+`matplotlib` installed; `lightning_advanced.py` logs Plotly figures instead, which a chart draws
+interactive), and a large tiled mosaic once at startup. The actual performance
 guarantee for that workload (colocated client/server should be fast; degradation beyond that should
 come from the network, not dlboard) is asserted in `dlboard/client/tests/dlboard_logger_perf_test.py`,
 not here -- this script is just meant to look like something a real training run would log.

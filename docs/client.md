@@ -26,9 +26,10 @@ trainer = pl.Trainer(logger=logger)
 
 If you don't already have an experiment, omit `experiment_id` and one is created for you. Metrics
 logged via PL's normal `self.log(...)` and hyperparameters via `save_hyperparameters()` are picked
-up automatically. See `examples/lightning_quickstart.py` for a complete, runnable example (MNIST MLP), and
-`examples/lightning_advanced.py` for a heavier one (nested hyperparameters, checkpoints, mask and box
-previews, Lightning's monitoring callbacks) that doubles as a stress test for the UI.
+up automatically. See `examples/lightning_quickstart.py` for a complete, runnable example (MNIST MLP, with a
+matplotlib figure), `examples/lightning_advanced.py` for a tour of the rest (nested hyperparameters, checkpoints,
+mask and box previews, interactive Plotly figures, Lightning's monitoring callbacks), and
+`examples/lightning_stress_test.py`, the same run logging far more, to load a server rather than to be looked at.
 
 **Hyperparameters.** `save_hyperparameters()` (or `logger.log_hyperparams(...)`) takes anything
 nested: pydantic models, pydantic and stdlib dataclasses, a `Namespace`, plain dicts and ordinary
@@ -95,8 +96,8 @@ run (`mean`, `sum`, ...) reads every one, as a line chart does. A table with a r
 `DLBOARD_MAX_TABLE_ROWS` (5,000) it says how many instead of drawing them: a row per epoch, or per run, stays small.
 For a long run, log less often rather than expecting every step to be cheap:
 
-- Lightning's `Trainer(log_every_n_steps=...)` (50 by default) is the first knob. `examples/lightning_advanced.py`
-  sets 5 and logs about fifty gradient norms every 10 steps because it is a stress test.
+- Lightning's `Trainer(log_every_n_steps=...)` (50 by default) is the first knob. `examples/lightning_stress_test.py`
+  sets 5 and logs about fifty gradient histograms every 10 steps because it is a stress test.
 - Log a per-parameter series, a histogram or an image every *n*-th step, or per epoch, rather than every step.
 - Leave out the runs you are not comparing (a view remembers which), or open fewer panels at once, when looking at many long runs.
 - Many keys are fine, one series each: a step's keys are shipped in pieces of at most 1,000, and a family of keys
