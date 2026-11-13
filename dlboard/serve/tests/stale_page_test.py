@@ -22,6 +22,9 @@ if TYPE_CHECKING:
 _UPDATE = "/_dash-update-component"
 _OUTPUT = f"{JUMP_SELECT_ID}.data"
 _MODAL_CLOSED = {"id": JUMP_MODAL_ID, "property": "opened", "value": False}
+_NOTHING_TYPED = {"id": JUMP_SELECT_ID, "property": "searchValue", "value": ""}
+_INPUTS = [_MODAL_CLOSED, _NOTHING_TYPED]
+"""The palette's callback's inputs: whether it is open, and what is typed in it."""
 
 
 @pytest.fixture
@@ -42,7 +45,7 @@ def test_a_request_shaped_like_the_current_callback_goes_through(client: FlaskCl
         client,
         output=_OUTPUT,
         outputs={"id": JUMP_SELECT_ID, "property": "data"},
-        inputs=[_MODAL_CLOSED],
+        inputs=_INPUTS,
         changedPropIds=[f"{JUMP_MODAL_ID}.opened"],
     )
 
@@ -52,13 +55,9 @@ def test_a_request_shaped_like_the_current_callback_goes_through(client: FlaskCl
 @pytest.mark.parametrize(
     "body",
     [
-        pytest.param(
-            {"output": _OUTPUT, "inputs": [_MODAL_CLOSED, _MODAL_CLOSED]}, id="more-inputs-than-it-has"
-        ),
+        pytest.param({"output": _OUTPUT, "inputs": [*_INPUTS, _MODAL_CLOSED]}, id="more-inputs-than-it-has"),
         pytest.param({"output": _OUTPUT, "inputs": []}, id="fewer-inputs-than-it-has"),
-        pytest.param(
-            {"output": _OUTPUT, "inputs": [_MODAL_CLOSED], "state": [_MODAL_CLOSED]}, id="extra-state"
-        ),
+        pytest.param({"output": _OUTPUT, "inputs": _INPUTS, "state": [_MODAL_CLOSED]}, id="extra-state"),
         pytest.param({"output": "gone.children", "inputs": [_MODAL_CLOSED]}, id="callback-no-longer-exists"),
     ],
 )

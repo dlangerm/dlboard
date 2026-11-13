@@ -50,7 +50,7 @@ from dlboard.plugins.charts.plotly_chart import PLOTLY_WINDOW_STEPS, PlotlyChart
 from dlboard.serve import get_system_data_store
 from dlboard.serve._backend._purge_work import PurgeWork
 from dlboard.serve._custodian import get_system_task_store
-from dlboard.serve._jump import JUMP_SELECT_ID
+from dlboard.serve._jump import JUMP_LIMIT, JUMP_SELECT_ID
 from dlboard.serve._pages._experiment._chart_autogen import AUTO_OPEN_MAX_CHARTS
 from dlboard.serve._pages._experiment._chart_editor import CHART_EDITOR_SAVE_ID
 from dlboard.serve._pages._experiment._ids import METRIC_CONTENT_ID, PAGE_EXPERIMENT_ID
@@ -1522,6 +1522,31 @@ def test_ctrl_k_jumps_straight_to_an_experiment_by_name(
     expect(page).to_have_url(f"{live_server_url}/experiment/{target.id}")
     expect(page.locator(f"#{PAGE_EXPERIMENT_ID}")).to_be_visible()
     expect(page.get_by_role("dialog")).to_have_count(0)
+    assert console_errors == []
+
+
+def test_ctrl_k_finds_an_experiment_past_the_newest_it_lists_by_searching_the_server(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """The palette lists the newest experiments as it opens, never every one; the rest are a search away (#590)."""
+    api = BasicDlboardAPI(live_server_url)
+    project = api.create_project(models.NewProject(name="Jump Search Project", description=""))
+    buried = api.create_experiment(models.NewExperiment(project_id=project.id, name="buried-needle"))
+    for index in range(JUMP_LIMIT):
+        api.create_experiment(models.NewExperiment(project_id=project.id, name=f"newer-{index}"))
+
+    page.goto(live_server_url)
+    expect(page.get_by_role("heading", name="Projects")).to_be_visible()
+    page.keyboard.press("Control+K")
+    expect(page.get_by_role("option", name=f"newer-{JUMP_LIMIT - 1} · Jump Search Project")).to_be_attached()
+    expect(page.get_by_role("option", name="buried-needle · Jump Search Project")).to_have_count(0)
+    page.locator(f"#{JUMP_SELECT_ID}").press_sequentially("buried-nee")
+    # Found after the last keystroke, which is when Mantine takes the first option: it is taken as it arrives too.
+    option = page.get_by_role("option", name="buried-needle · Jump Search Project")
+    expect(option).to_have_attribute("data-combobox-selected", "true")
+    page.keyboard.press("Enter")
+
+    expect(page).to_have_url(f"{live_server_url}/experiment/{buried.id}")
     assert console_errors == []
 
 

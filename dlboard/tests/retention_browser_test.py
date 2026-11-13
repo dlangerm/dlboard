@@ -8,7 +8,10 @@ from typing import TYPE_CHECKING
 import pytest
 from playwright.sync_api import expect
 
+from dlboard import models
+from dlboard.client._rest_api import BasicDlboardAPI
 from dlboard.plugins.retention import _section as retention
+from dlboard.serve._pages._experiment_picker import EXPERIMENT_PICKER_LIMIT
 from dlboard.tests.browser_test import _create_project_and_experiment
 
 if TYPE_CHECKING:
@@ -69,4 +72,26 @@ def test_an_experiment_page_says_what_keeps_its_runs_and_links_to_where_that_is_
     expect(page).to_have_url(re.compile(rf"/project/\d+\?tab={retention.RETENTION_TAB}$"))
     expect(page.get_by_role("tab", name="Retention")).to_have_attribute("aria-selected", "true")
     expect(page.locator(f"#{retention.SECTION_ID}")).to_be_visible()
+    assert console_errors == []
+
+
+def test_the_rule_for_picker_finds_an_experiment_past_the_newest_it_lists_by_searching_the_server(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """It lists the newest experiments, never every one; what someone types searches the server for the rest (#590)."""
+    api = BasicDlboardAPI(live_server_url)
+    project = api.create_project(models.NewProject(name="Retention Picker Project", description=""))
+    api.create_experiment(models.NewExperiment(project_id=project.id, name="buried-experiment"))
+    for index in range(EXPERIMENT_PICKER_LIMIT):
+        api.create_experiment(models.NewExperiment(project_id=project.id, name=f"newer-{index}"))
+    page.goto(f"{live_server_url}/project/{project.id}?tab={retention.RETENTION_TAB}")
+
+    scope = page.locator(f"#{retention.SCOPE_ID}")
+    scope.click()
+    expect(page.get_by_role("option", name=f"newer-{EXPERIMENT_PICKER_LIMIT - 1}")).to_be_attached()
+    expect(page.get_by_role("option", name="buried-experiment")).to_have_count(0)
+    scope.fill("buried")
+    page.get_by_role("option", name="buried-experiment").click()
+
+    expect(scope).to_have_value("buried-experiment")
     assert console_errors == []

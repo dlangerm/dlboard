@@ -21,6 +21,38 @@ pulls that section's body into the GitHub release notes and publishes both distr
   traces are drawn in one. A figure logged with `bind` is a template that the data streamed into it at each step
   (`PlotlyData`: a trajectory's points, a heatmap's rows, any array) is drawn into, every step's, the latest step's, or
   one step at a time.
+* **A Plotly template can draw the metrics a run already logs.** Bind a trace's attribute to `metric("train/loss")` (or
+  `metric("step")`) in place of a `PlotlyData` column, and the chart reads the metric with the template, sampled as a
+  line chart's is; auto-generate fills in the chart's new `metrics` setting from the template. (#620)
+* **A synced panel moves its Plotly and image charts' step sliders together,** so a prediction's picture and its PR
+  curve stay at the same step. (#621)
+* **A page loads nothing a logged figure names on other servers, unless the deployment allows it.** Every page's
+  Content-Security-Policy lets it load pictures, media, fonts and data from dlboard alone, so the browser refuses a
+  figure's pictures by URL, GeoJSON by URL, map styles and tiles, and whoever can log to a project cannot make the browser
+  of everyone who opens its charts request a URL of their choosing. `DLBOARD_PLOTLY_REMOTE_RESOURCES` lifts it;
+  `DLBOARD_PLOTLY_MAP_TILES` names a tile server maps are drawn on meanwhile. The S3 store in `presign` mode lets in its
+  bucket, and a plugin can let in what its deployment needs (`dlboard.serve.allow_resources_from`). (#622)
+
+### Changed
+
+* **A Plotly chart's read does not grow with training.** Its figures are read a window of steps at a time, as an image
+  chart's pictures are, and a template's data only at the steps it draws (each run's latest, or thinned to
+  `max_data_steps`). `DataStore.fetch_artifacts(steps=)` also takes a set of steps, and `DataRequest.artifact_windows`
+  replaces `artifact_window`, each window saying which steps it reads (`WindowAt`). (#619)
+* **Ctrl+K, and the experiment pickers of the pinned-runs sidebar, the add-runs modal and the Retention tab, search the
+  server as you type** rather than listing every experiment (and, for Ctrl+K, every comparison) of every project. Each
+  lists the newest and keeps what it picked. New store reads: `search_experiments_in`, `search_comparisons_in`,
+  `get_experiments_by_id`. (#590)
+* **The Retention tab says when each rule deletes:** "deletes down to 2 once the project holds more than 12", or "deletes
+  down to 30 days once a run is more than 31 days old", so a project holding more runs than its count no longer looks
+  stuck. (#628)
+
+### Fixed
+
+* Re-saving a pending retention rule now picks up a shorter `DLBOARD_RETENTION_GRACE_DAYS`, where it kept the date it was
+  first given. (#628)
+* Showing or hiding a run with an artifact chart on screen no longer covers every chart with the panel area's loader while
+  they redraw. (#627)
 
 ## [0.16.0] - 2026-11-11
 

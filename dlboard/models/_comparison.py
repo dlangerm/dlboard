@@ -42,6 +42,7 @@ class ComparisonSummary(BaseModel, frozen=True, extra="forbid"):
 
     id: int
     name: str
+    project_id: int
     owner_id: int
     owner_name: str
     """The username of `owner_id`, read with the comparison so that naming its owner never reads the users."""

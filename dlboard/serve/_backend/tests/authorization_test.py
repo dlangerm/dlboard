@@ -382,6 +382,11 @@ def test_a_project_you_cannot_see_reads_as_missing(store: SQLLiteStore) -> None:
     assert as_bob.get_experiment(experiment.id) is None
     assert as_bob.get_run(run.id) is None
     assert project.id not in {p.id for p in as_bob.get_projects()}
+    # A search of several projects, or a read of experiments by id, leaves out what the viewer cannot see (#590).
+    assert as_bob.search_experiments_in([project.id], name_contains="", limit=10) == []
+    assert as_bob.search_comparisons_in([project.id], bob.id, name_contains="", limit=10) == []
+    assert as_bob.get_experiments_by_id([experiment.id]) == []
+    assert store.get_experiments_by_id([experiment.id]) != []
 
 
 def _share_with_everyone(store: SQLLiteStore, project: models.Project, _bob: models.User) -> None:

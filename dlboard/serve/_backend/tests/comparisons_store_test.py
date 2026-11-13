@@ -215,6 +215,13 @@ def test_a_user_lists_their_own_comparisons_first_then_shared_ones_and_never_a_p
     editable = store.search_comparisons(world.project_id, world.bob, which=models.ComparisonFilter.EDITABLE)
     assert editable == store.search_comparisons(world.project_id, world.bob)
 
+    # A search of several projects (the Ctrl+K palette's) sees the same ones, in the same order (#590).
+    everywhere = store.search_comparisons_in(
+        [world.project_id, world.project_id + 100], world.bob, name_contains="a", limit=2
+    )
+    assert [c.name for c in everywhere] == ["alpha", "zeta"]
+    assert store.search_comparisons_in([world.project_id + 100], world.bob, name_contains="", limit=10) == []
+
 
 @pytest.mark.parametrize("delete", ["run", "experiment"])
 def test_a_deleted_run_or_experiment_leaves_a_comparison_until_it_is_restored(

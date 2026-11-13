@@ -18,16 +18,21 @@ from dash.exceptions import PreventUpdate
 
 from dlboard.models import PinColor
 from dlboard.serve import ClientsideScript, get_current_user, get_data_store
+from dlboard.serve import _constants as constants
 from dlboard.serve._backend._comparison_settings import ComparisonSettings
 from dlboard.serve._component_ids import ButtonId, DivId, ModalId, ValueId
 from dlboard.serve._pages._comparison import _ids as ids
 from dlboard.serve._pages._comparison._members import membership_changed
 from dlboard.serve._pages._dash_helpers import CallbackStates, NoticeColor, notice, section_label
-from dlboard.serve._pages._dataframe_helpers import experiment_display_name
 from dlboard.serve._pages._experiment import _ids as experiment_ids
 from dlboard.serve._pages._experiment import _page_model as page_model
 from dlboard.serve._pages._experiment._run_picker import run_options
 from dlboard.serve._pages._experiment._views import VIEW_NOTIFY_ID
+from dlboard.serve._pages._experiment_picker import (
+    experiment_options,
+    experiment_search_store,
+    register_experiment_search,
+)
 from dlboard.serve._pages._pins._pin_view import pin_glyph
 
 if TYPE_CHECKING:
@@ -103,15 +108,14 @@ def add_runs_modal(store: DataStore[...], project_id: int) -> Component:
             section_label("From an experiment"),
             dmc.Select(
                 id=EXPERIMENT_ID,
-                data=[
-                    {"value": str(e.id), "label": experiment_display_name(e)}
-                    for e in store.get_experiments(project_id)
-                ],
+                # The newest; the rest are searched on the server as someone types (#590).
+                data=experiment_options(store, project_id),
                 placeholder="Pick an experiment",
                 searchable=True,
                 mb="xs",
                 **typing.cast("dict[str, Any]", {"aria-label": "Experiment"}),
             ),
+            experiment_search_store(EXPERIMENT_ID),
             dmc.Group(
                 [
                     dmc.MultiSelect(
@@ -211,6 +215,7 @@ _OPEN_ON_CLICK_JS = ClientsideScript(Path(__file__).with_name("open_on_click.js"
 
 def register_add_runs_callbacks(app: Dash) -> None:
     """Open the modal, offer an experiment's runs, say how many a colour would add, and add pinned or picked runs."""
+    register_experiment_search(app, EXPERIMENT_ID, constants.STATE_PROJECT_ID)
     app.clientside_callback(
         _OPEN_ON_CLICK_JS.source,
         Output(ADD_RUNS_MODAL_ID, "opened"),

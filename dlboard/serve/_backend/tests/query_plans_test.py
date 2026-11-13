@@ -167,6 +167,30 @@ def test_a_page_of_a_projects_cards_seeks_its_experiments_by_project(
         _assert_seeks(store, postgres_settings, statement, parameters)
 
 
+def test_a_search_of_every_project_and_a_read_of_experiments_by_id_seek_their_tables(
+    store: PostgresStore, postgres_settings: PostgresSettings, experiment_id: int
+) -> None:
+    """The Ctrl+K palette's search of every project the viewer sees, and a read of just some experiments (#590)."""
+    experiment = store.get_experiment(experiment_id)
+    assert experiment is not None
+    me = store.get_or_create_user(models.Principal.unverified("me"))
+    projects = [experiment.project_id, experiment.project_id + 1]
+
+    statements = _recorded(
+        store,
+        lambda: (
+            store.search_experiments_in(projects, name_contains="a", limit=25),
+            store.search_comparisons_in(projects, me.id, name_contains="a", limit=25),
+            store.get_experiments_by_id([experiment_id]),
+        ),
+    )
+
+    reads = [(s, p) for s, p in statements if '"Experiment"' in s or '"Page"' in s]
+    assert len(reads) >= 3
+    for statement, parameters in reads:
+        _assert_seeks(store, postgres_settings, statement, parameters)
+
+
 def test_listing_a_projects_pins_seeks_the_pin_table_by_experiment(
     store: PostgresStore, postgres_settings: PostgresSettings, experiment_id: int
 ) -> None:
