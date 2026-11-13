@@ -9,6 +9,9 @@ from __future__ import annotations
 
 import io
 import logging
+import os
+import subprocess
+import sys
 import time
 from typing import TYPE_CHECKING, override
 
@@ -30,9 +33,12 @@ from opentelemetry.util._once import Once
 
 from dlboard._telemetry import _sdk as sdk
 from dlboard._telemetry import traces
-from dlboard._telemetry.traces import TRACES, SpanKind, carrier, flush, own_process, span
+from dlboard._telemetry.traces import TRACES, OtlpProtocol, SpanKind, carrier, flush, own_process, span
+from dlboard.conftest import OtlpTraces, otlp_collector
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from opentelemetry.context import Context
 
 
@@ -209,3 +215,45 @@ def test_with_the_exporter_console_spans_are_written_out_instead_of_sent(
 
     assert '"name": "work"' in written.getvalue()
     assert not span_exporter.get_finished_spans(), "nothing was sent to OTLP"
+
+
+_FORKED = """
+import multiprocessing, sys
+from dlboard._telemetry.traces import SpanKind, flush, span
+
+def child() -> None:
+    with span("child", SpanKind.INTERNAL):
+        pass
+    flush()
+
+with span("parent", SpanKind.INTERNAL):
+    pass
+flush()  # the parent's gRPC channel is open, and has sent something, before the fork
+forked = multiprocessing.get_context("fork").Process(target=child)
+forked.start()
+forked.join(timeout=30)
+sys.exit(0 if forked.exitcode == 0 else 1)
+"""
+
+
+def test_a_child_forked_after_a_grpc_export_traces_on_a_channel_of_its_own(tmp_path: Path) -> None:
+    """
+    A training process that exported over gRPC forks DataLoader workers (#300): a child that traces builds its own
+    exporter (`PerProcess`, by pid), never its parent's channel, and neither hangs nor loses its spans.
+    """
+    collector = OtlpTraces()
+    with otlp_collector(OtlpProtocol.GRPC, collector.receive) as endpoint:
+        env = {
+            **os.environ,
+            "DLBOARD_TELEMETRY_TRACES": "true",
+            "OTEL_EXPORTER_OTLP_ENDPOINT": endpoint,
+            "OTEL_EXPORTER_OTLP_PROTOCOL": "grpc",
+        }
+        script = tmp_path / "forked.py"
+        script.write_text(_FORKED)
+        ran = subprocess.run(
+            [sys.executable, str(script)], env=env, capture_output=True, text=True, timeout=90, check=False
+        )
+
+        assert ran.returncode == 0, ran.stderr
+        assert sorted(s.name for s in collector.spans) == ["child", "parent"]

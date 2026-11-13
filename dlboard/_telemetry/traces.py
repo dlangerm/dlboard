@@ -105,14 +105,68 @@ class OtlpProtocol(StrEnum):
     HTTP_JSON = "http/json"
 
 
+class OtlpSignal(StrEnum):
+    """What is exported over OTLP, each of which the standard variables can send by its own protocol."""
+
+    TRACES = "traces"
+    METRICS = "metrics"
+    LOGS = "logs"
+
+
 class OtlpExportSettings(BaseSettings):
-    """The standard variables that choose the OTLP wire protocol, which the exporter dlboard uses does not honour."""
+    """The standard variables that choose the OTLP wire protocol: for every signal, and for each on its own."""
 
     model_config = SettingsConfigDict(env_prefix="OTEL_EXPORTER_OTLP_")
 
     protocol: OtlpProtocol | None = None
-    """For every signal, unless `traces_protocol` says otherwise."""
+    """For every signal, unless its own says otherwise."""
     traces_protocol: OtlpProtocol | None = None
+    metrics_protocol: OtlpProtocol | None = None
+    logs_protocol: OtlpProtocol | None = None
+
+    def of(self, signal: OtlpSignal) -> OtlpProtocol:
+        """The protocol `signal` is sent by: its own variable's, else every signal's, else OTLP/HTTP with protobuf."""
+        match signal:
+            case OtlpSignal.TRACES:
+                own = self.traces_protocol
+            case OtlpSignal.METRICS:
+                own = self.metrics_protocol
+            case OtlpSignal.LOGS:
+                own = self.logs_protocol
+        return own or self.protocol or OtlpProtocol.HTTP_PROTOBUF
+
+
+_GRPC_EXTRA: Final = "pip install 'dlboard-client[otel-grpc]' (or 'dlboard[otel-grpc]' on the server)"
+
+
+def grpc_exporter_installed() -> bool:
+    """Whether OpenTelemetry's OTLP/gRPC exporter can be imported, without importing it (or grpcio)."""
+    try:
+        return importlib.util.find_spec("opentelemetry.exporter.otlp.proto.grpc") is not None
+    except ModuleNotFoundError:
+        return False
+
+
+def require_supported(signal: OtlpSignal, protocol: OtlpProtocol) -> None:
+    """
+    Refuse at startup an OTLP protocol `signal` cannot be sent by here, rather than fail every export later.
+
+    gRPC needs its exporter, which is an extra of its own (grpcio is heavy, and ML environments pin it); JSON is never
+    sent, by either.
+    """
+    match protocol:
+        case OtlpProtocol.GRPC:
+            if not grpc_exporter_installed():
+                msg = f"OTLP over gRPC for {signal} needs OpenTelemetry's gRPC exporter: {_GRPC_EXTRA}"
+                raise ValueError(msg)
+        case OtlpProtocol.HTTP_JSON:
+            msg = (
+                f"OTLP for {signal} is sent with protobuf encoding, not JSON: set its protocol to http/protobuf "
+                "or grpc, or unset OTEL_EXPORTER_OTLP_PROTOCOL"
+            )
+            raise ValueError(msg)
+        case OtlpProtocol.HTTP_PROTOBUF:
+            pass
 
 
 class TracesExporter(StrEnum):
@@ -139,11 +193,20 @@ class TracesExporterSettings(BaseSettings):
         return [v.strip().lower() for v in value.split(",") if v.strip()] if isinstance(value, str) else value
 
 
-_GRPC_UNSUPPORTED: Final = (
-    "DLBOARD_TELEMETRY_TRACES exports OTLP over HTTP, not gRPC: unset OTEL_EXPORTER_OTLP_PROTOCOL (or set it to "
-    "http/protobuf), use OTEL_TRACES_EXPORTER=otlp, and point OTEL_EXPORTER_OTLP_ENDPOINT at the collector's HTTP "
-    "port, usually 4318"
-)
+def traces_protocol(exporters: frozenset[TracesExporter]) -> OtlpProtocol | None:
+    """
+    The protocol spans are sent over OTLP by, from `OTEL_TRACES_EXPORTER`'s exporters; `None` if not over OTLP.
+
+    `otlp_proto_grpc` and `otlp_proto_http` name theirs, as the SDK's own exporter names do; `otlp` follows
+    `OTEL_EXPORTER_OTLP_TRACES_PROTOCOL` (or `OTEL_EXPORTER_OTLP_PROTOCOL`).
+    """
+    if TracesExporter.OTLP_PROTO_GRPC in exporters:
+        return OtlpProtocol.GRPC
+    if TracesExporter.OTLP_PROTO_HTTP in exporters:
+        return OtlpProtocol.HTTP_PROTOBUF
+    if TracesExporter.OTLP in exporters:
+        return OtlpExportSettings().of(OtlpSignal.TRACES)
+    return None
 
 
 class TraceSettings(BaseSettings):
@@ -169,23 +232,10 @@ class TraceSettings(BaseSettings):
         """Spans sent where they cannot go would all fail; say so at startup rather than in an export error later."""
         if not self.traces:
             return self
-        exporters = TracesExporterSettings().traces_exporter
-        if TracesExporter.OTLP_PROTO_GRPC in exporters:
-            raise ValueError(_GRPC_UNSUPPORTED)
-        if exporters.isdisjoint({TracesExporter.OTLP, TracesExporter.OTLP_PROTO_HTTP}):
-            return self  # the console, or nowhere: no OTLP protocol is in play
-        export = OtlpExportSettings()
-        match export.traces_protocol or export.protocol:
-            case OtlpProtocol.GRPC:
-                raise ValueError(_GRPC_UNSUPPORTED)
-            case OtlpProtocol.HTTP_JSON:
-                msg = (
-                    "DLBOARD_TELEMETRY_TRACES exports OTLP with protobuf encoding, not JSON: unset "
-                    "OTEL_EXPORTER_OTLP_PROTOCOL or set it to http/protobuf"
-                )
-                raise ValueError(msg)
-            case OtlpProtocol.HTTP_PROTOBUF | None:
-                return self
+        protocol = traces_protocol(TracesExporterSettings().traces_exporter)
+        if protocol is not None:  # else the console, or nowhere: no OTLP protocol is in play
+            require_supported(OtlpSignal.TRACES, protocol)
+        return self
 
 
 def sdk_installed() -> bool:

@@ -24,11 +24,17 @@ from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExport
 from opentelemetry.propagate import extract, inject
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
+from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter, SpanExporter
 from opentelemetry.trace import Link, Status, StatusCode
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from dlboard._telemetry.traces import SpanKind, TracesExporter, TracesExporterSettings
+from dlboard._telemetry.traces import (
+    OtlpProtocol,
+    SpanKind,
+    TracesExporter,
+    TracesExporterSettings,
+    traces_protocol,
+)
 from dlboard._version import __version__
 
 if TYPE_CHECKING:
@@ -52,9 +58,22 @@ _KINDS: Final = {
 }
 
 
-def make_exporter() -> OTLPSpanExporter:
-    """The exporter every process's tracer sends to. A function so a test can put its own in its place."""
-    return OTLPSpanExporter()
+def make_exporter() -> SpanExporter:
+    """
+    The exporter every process's tracer sends to, over the protocol the standard variables choose.
+
+    A function so a test can put its own in its place. The gRPC one is imported only when chosen: grpcio is an extra of
+    its own (`otel-grpc`), checked for at startup.
+    """
+    match traces_protocol(TracesExporterSettings().traces_exporter):
+        case OtlpProtocol.GRPC:
+            from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
+                OTLPSpanExporter as GrpcSpanExporter,
+            )
+
+            return GrpcSpanExporter()
+        case OtlpProtocol.HTTP_PROTOBUF | OtlpProtocol.HTTP_JSON | None:  # JSON is refused at startup
+            return OTLPSpanExporter()
 
 
 class OtelResourceSettings(BaseSettings):
@@ -229,7 +248,7 @@ def build_traces(default_service_name: str, *, enabled: bool, owns_process: bool
     )
     exporters = TracesExporterSettings().traces_exporter
     if TracesExporter.NONE not in exporters:
-        if not exporters.isdisjoint({TracesExporter.OTLP, TracesExporter.OTLP_PROTO_HTTP}):
+        if traces_protocol(exporters) is not None:
             provider.add_span_processor(BatchSpanProcessor(make_exporter()))
         if TracesExporter.CONSOLE in exporters:
             provider.add_span_processor(BatchSpanProcessor(ConsoleSpanExporter()))

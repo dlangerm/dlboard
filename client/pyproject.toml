@@ -69,6 +69,16 @@ otel = [
   "opentelemetry-exporter-otlp-proto-http>=1.16",
   "opentelemetry-sdk>=1.16"
 ]
+# Traces over OTLP/gRPC (`OTEL_EXPORTER_OTLP_PROTOCOL=grpc`), apart from `otel` because grpcio is heavy and ML
+# environments pin it tightly: only someone whose collector speaks gRPC alone needs it. The same floor as `otel`,
+# which `client-otel` in CI installs and runs over gRPC. `otel`'s own packages are listed again, not named as
+# `dlboard-client[otel]`, so CI's `uv pip install -r client/pyproject.toml --extra otel-grpc` never looks for this
+# package on an index.
+otel-grpc = [
+  "opentelemetry-exporter-otlp-proto-grpc>=1.16",
+  "opentelemetry-exporter-otlp-proto-http>=1.16",
+  "opentelemetry-sdk>=1.16"
+]
 
 [project.urls]
 Changelog = "https://github.com/dlangerm/dlboard/blob/main/CHANGELOG.md"

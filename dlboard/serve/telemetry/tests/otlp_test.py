@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import importlib.metadata
-import threading
 from typing import TYPE_CHECKING
 
 import pytest
@@ -12,16 +11,16 @@ from opentelemetry._logs import SeverityNumber
 from opentelemetry.proto.collector.logs.v1.logs_service_pb2 import ExportLogsServiceRequest
 from opentelemetry.proto.collector.metrics.v1.metrics_service_pb2 import ExportMetricsServiceRequest
 from opentelemetry.proto.logs.v1.logs_pb2 import SeverityNumber as WireSeverity
-from werkzeug.serving import make_server
 
-from dlboard._telemetry.traces import SpanKind, span, trace_ids
+from dlboard._telemetry import traces
+from dlboard._telemetry.traces import OtlpExportSettings, OtlpProtocol, OtlpSignal, SpanKind, span, trace_ids
+from dlboard.conftest import otlp_collector, otlp_protocol
 from dlboard.serve._logging import configure_logging
 from dlboard.serve.telemetry import LOGS, METRICS, Counter, NoAttributes, TelemetrySettings, Unit
 from dlboard.serve.telemetry._sdk import _severity, forward_log
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
-    from wsgiref.types import InputStream, StartResponse, WSGIEnvironment
 
     from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
@@ -29,34 +28,33 @@ _ACCEPTED = Counter[NoAttributes]("test.accepted", Unit.ARTIFACTS, "Counted by a
 
 
 class _Sink:
-    """A collector that answers 200 to everything and keeps what it was sent, by path."""
+    """A collector's view: the last request it was sent of each signal, by its HTTP path."""
 
     def __init__(self) -> None:
         self.bodies: dict[str, bytes] = {}
 
-    def __call__(self, environ: WSGIEnvironment, start_response: StartResponse) -> list[bytes]:
-        stream: InputStream = environ["wsgi.input"]
-        self.bodies[environ["PATH_INFO"]] = stream.read(int(environ["CONTENT_LENGTH"]))
-        start_response("200 OK", [("Content-Type", "application/x-protobuf")])
-        return [b""]
+    def receive(self, path: str, body: bytes) -> None:
+        self.bodies[path] = body
 
 
 @pytest.fixture
-def collector(telemetry: pytest.MonkeyPatch) -> Iterator[_Sink]:
+def collector(telemetry: pytest.MonkeyPatch, request: pytest.FixtureRequest) -> Iterator[_Sink]:
+    """Metrics and logs on, exported to a collector listening here: over OTLP/HTTP, unless parametrized otherwise."""
     structlog.reset_defaults()  # `configure_logging` only configures once per process
     sink = _Sink()
-    server = make_server("127.0.0.1", 0, sink)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    telemetry.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", f"http://127.0.0.1:{server.server_port}")
-    telemetry.setenv("DLBOARD_TELEMETRY_METRICS", "otlp")
-    telemetry.setenv("DLBOARD_TELEMETRY_LOGS", "true")
-    yield sink
-    server.shutdown()
-    thread.join()
+    protocol = otlp_protocol(request)
+    with otlp_collector(protocol, sink.receive) as endpoint:
+        telemetry.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", endpoint)
+        telemetry.setenv("OTEL_EXPORTER_OTLP_PROTOCOL", protocol.value)
+        telemetry.setenv("DLBOARD_TELEMETRY_METRICS", "otlp")
+        telemetry.setenv("DLBOARD_TELEMETRY_LOGS", "true")
+        yield sink
     structlog.reset_defaults()
 
 
+@pytest.mark.parametrize(
+    "collector", [OtlpProtocol.HTTP_PROTOBUF, OtlpProtocol.GRPC], indirect=True, ids=["http", "grpc"]
+)
 def test_metrics_and_logs_reach_a_collector_with_this_processs_identity(collector: _Sink) -> None:
     configure_logging()
     _ACCEPTED.add(3)
@@ -154,3 +152,37 @@ def test_a_log_record_carries_its_spans_ids_in_its_own_fields_and_not_again_as_a
     assert ids is not None
     assert (record.trace_id.hex(), record.span_id.hex()) == ids
     assert {"trace_id", "span_id"}.isdisjoint(a.key for a in record.attributes)
+
+
+@pytest.mark.parametrize(
+    ("env", "message"),
+    [
+        ({"DLBOARD_TELEMETRY_METRICS": "otlp", "OTEL_EXPORTER_OTLP_METRICS_PROTOCOL": "grpc"}, "metrics"),
+        ({"DLBOARD_TELEMETRY_LOGS": "true", "OTEL_EXPORTER_OTLP_PROTOCOL": "grpc"}, "logs"),
+        ({"DLBOARD_TELEMETRY_LOGS": "true", "OTEL_EXPORTER_OTLP_LOGS_PROTOCOL": "http/json"}, "not JSON"),
+    ],
+    ids=["grpc-metrics-without-the-extra", "grpc-logs-without-the-extra", "json-logs"],
+)
+def test_a_protocol_a_signal_cannot_be_sent_by_stops_startup(
+    telemetry: pytest.MonkeyPatch, env: dict[str, str], message: str
+) -> None:
+    """Each signal's own protocol is checked (#300): gRPC without the `otel-grpc` extra, or JSON, says so at startup."""
+    for name, value in env.items():
+        telemetry.setenv(name, value)
+    telemetry.setattr(traces, "grpc_exporter_installed", lambda: False)
+
+    with pytest.raises(ValueError, match=message):
+        TelemetrySettings()
+
+
+def test_each_signal_is_sent_by_its_own_protocol_or_every_signals(telemetry: pytest.MonkeyPatch) -> None:
+    telemetry.setenv("OTEL_EXPORTER_OTLP_PROTOCOL", "grpc")
+    telemetry.setenv("OTEL_EXPORTER_OTLP_LOGS_PROTOCOL", "http/protobuf")
+
+    export = OtlpExportSettings()
+
+    assert [export.of(signal) for signal in OtlpSignal] == [
+        OtlpProtocol.GRPC,
+        OtlpProtocol.GRPC,
+        OtlpProtocol.HTTP_PROTOBUF,
+    ]

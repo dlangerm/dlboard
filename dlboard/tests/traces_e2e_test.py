@@ -16,6 +16,7 @@ import pytest
 import torch
 from opentelemetry.proto.trace.v1.trace_pb2 import Span
 
+from dlboard._telemetry.traces import OtlpProtocol
 from dlboard.client.artifacts import image
 from dlboard.client.dlboard_logger import DLBoardLogger
 from dlboard.conftest import EVERY_ARTIFACT_BACKEND, ArtifactBackend
@@ -56,6 +57,9 @@ def _is_sql(span: Span) -> bool:
     return any(attribute.key == "db.system" for attribute in span.attributes)
 
 
+@pytest.mark.parametrize(
+    "otlp_traces", [OtlpProtocol.HTTP_PROTOBUF, OtlpProtocol.GRPC], indirect=True, ids=["http", "grpc"]
+)
 @pytest.mark.parametrize("artifact_backend", EVERY_ARTIFACT_BACKEND)
 def test_a_shipped_batch_is_one_trace_from_the_client_to_the_database_and_the_blob_writer(
     logger: DLBoardLogger, otlp_traces: OtlpTraces, artifact_backend: ArtifactBackend
