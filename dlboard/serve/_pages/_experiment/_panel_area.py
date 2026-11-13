@@ -106,6 +106,8 @@ def panel_area_stores() -> list[Component]:
     return [
         *(Store(id=store_id) for store_id in _DRAG_DROP_STORE_IDS),
         Store(id=VIEW_SYNC_REQUEST_ID),
+        Store(id=ids.RUN_LIST_PAGE_ID),
+        Store(id=ids.RUN_LIST_HANDLED_ID),
         *chart_view_state_stores(),
     ]
 

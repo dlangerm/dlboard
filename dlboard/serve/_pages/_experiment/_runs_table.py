@@ -13,6 +13,7 @@ import hashlib
 import json
 import typing
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar
 
 import dash_mantine_components as dmc
@@ -23,7 +24,7 @@ from structlog.stdlib import get_logger
 
 from dlboard import models
 from dlboard.models import MetricColumn
-from dlboard.serve import Icon, get_current_user, get_data_store
+from dlboard.serve import ClientsideScript, Icon, get_current_user, get_data_store
 from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import ButtonId, PatternId, StoreId, ValueId
 from dlboard.serve._grid import column_def, infer_column_dtype
@@ -120,6 +121,10 @@ NAVBAR_HPARAM_TABLE_BODY_ID: typing.Final = "navbar-hparam-table-body"
 NAVBAR_HPARAM_CONFIRM_COLS_ID: ButtonId[ids.ExperimentPage] = ButtonId("navbar-hparam-confirm-cols")
 NAVBAR_HPARAM_COLUMNS_TOGGLE_ID: ButtonId[ids.ExperimentPage] = ButtonId("navbar-hparam-columns-toggle")
 NAVBAR_NEWEST_RUNS_ID: ButtonId[ids.ExperimentPage] = ButtonId("navbar-newest-runs")
+NAVBAR_NEWEST_RUNS_CLICKED_ID: StoreId[ids.ExperimentPage] = StoreId("navbar-newest-runs-clicked")
+"""When the "Newest N" button was last clicked: in the page's layout, so drawing the button again is not a click."""
+_NEWEST_RUNS_CLICKED_JS: typing.Final = ClientsideScript(Path(__file__).with_name("newest_runs_clicked.js"))
+_RUN_LIST_GATE_JS: typing.Final = ClientsideScript(Path(__file__).with_name("run_list_gate.js"))
 NAVBAR_HPARAM_APPLIED_COLS_ID: StoreId[ids.ExperimentPage] = StoreId("navbar-hparam-applied-cols")
 NAVBAR_COLUMNS_PICKER = ColumnsPickerIds(
     select=NAVBAR_HPARAM_COL_SELECT_ID,
@@ -232,6 +237,7 @@ def run_table_shells() -> list[Component]:
     return [
         Store(id=request_store_id(RunListSurface.EXPERIMENT)),
         Store(id=navigate_id(RunListSurface.EXPERIMENT)),
+        Store(id=NAVBAR_NEWEST_RUNS_CLICKED_ID),
         *row_update_shells(RunListSurface.EXPERIMENT),
         *delete_shells(RunListSurface.EXPERIMENT),
     ]
@@ -537,6 +543,14 @@ def _for_each(value: object, matched: list[Any]) -> list[object]:
 
 
 def _register_hparam_table(app: Dash) -> None:
+    app.clientside_callback(
+        _RUN_LIST_GATE_JS.source,
+        Output(ids.RUN_LIST_PAGE_ID, "data"),
+        Input(ids.STATE_PAGE_STORAGE, "data"),
+        State(ids.RUN_LIST_HANDLED_ID, "data"),
+        prevent_initial_call=True,
+    )
+
     @app.callback(
         Output(constants.NAVBAR_RUN_LIST_ID, "children"),
         # Where the grid is not drawn again, its rows are patched, and what is above it and what it was drawn under follow.
@@ -546,7 +560,8 @@ def _register_hparam_table(app: Dash) -> None:
         # The experiment's revision, which the live poll moves on: what the table holds may have changed (#454).
         Input(STATE_LAST_KNOWN_REVISION, "data", allow_optional=True),
         Input(constants.STATE_EXPERIMENT_ID, "data", allow_optional=True),
-        Input(ids.STATE_PAGE_STORAGE, "data", allow_optional=True),
+        # The page, when it may change the list (`run_list_gate.js`): not one a draw or a hide already wrote the rows of.
+        Input(ids.RUN_LIST_PAGE_ID, "data", allow_optional=True),
         State(NAVBAR_HPARAM_SIGNATURE.of(), "data", allow_optional=True),
         State(NAVBAR_HPARAM_STRUCTURE_ID, "data", allow_optional=True),
         State(ids.STATE_VIEW_ID, "data", allow_optional=True),
@@ -677,7 +692,8 @@ def _register_hparam_table(app: Dash) -> None:
 class _Newest(edits.ChartsOnScreen):
     """What `show_newest_runs` reads: the click, the page and paging it is made on, and the charts it redraws."""
 
-    clicks: Annotated[int | None, Input(NAVBAR_NEWEST_RUNS_ID, "n_clicks", allow_optional=True)]
+    clicks: Annotated[int | None, Input(NAVBAR_NEWEST_RUNS_CLICKED_ID, "data")]
+    """When the button was clicked (`newest_runs_clicked.js`): never because it was drawn again."""
     page_json: Annotated[str, State(ids.STATE_PAGE_STORAGE, "data")]
     paging_json: Annotated[str, State(ids.PANEL_PAGING_ID, "data")]
     chips: Annotated[
@@ -686,8 +702,16 @@ class _Newest(edits.ChartsOnScreen):
 
 
 def _register_newest_runs(app: Dash) -> None:
+    app.clientside_callback(
+        _NEWEST_RUNS_CLICKED_JS.source,
+        Output(NAVBAR_NEWEST_RUNS_CLICKED_ID, "data"),
+        Input(NAVBAR_NEWEST_RUNS_ID, "n_clicks"),
+        prevent_initial_call=True,
+    )
+
     @app.callback(
         Output(ids.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
+        Output(ids.RUN_LIST_HANDLED_ID, "data", allow_duplicate=True),
         Output(chart_view.CHART_BODY.all(), "children", allow_duplicate=True),
         Output(row_updates_id(RunListSurface.EXPERIMENT), "data", allow_duplicate=True),
         Output(NAVBAR_RUN_HEAD.of(), "children", allow_duplicate=True),
@@ -697,7 +721,7 @@ def _register_newest_runs(app: Dash) -> None:
     )
     def show_newest_runs(
         **states: Any,  # noqa: ANN401 -- validated on the first line
-    ) -> tuple[str, list[Any], dict[str, Any], list[Component], str]:
+    ) -> tuple[str, str, list[Any], dict[str, Any], list[Component], str]:
         """Go back to drawing the newest runs, redrawing in place just the charts that changes (#616)."""
         newest = _Newest.model_validate(states)
         if not newest.clicks:
@@ -716,8 +740,10 @@ def _register_newest_runs(app: Dash) -> None:
         )
         shown_now = shown_run_ids(store, experiment_id, page.document)
         bodies, _ = newest.redraw(store, page, paging)
+        page_json = page.model_dump_json()
         return (
-            page.model_dump_json(),
+            page_json,
+            page_json,  # the run list's rows, head and signature are written here: it need not read the page again
             bodies,
             _drawn_rows(shown_before, shown_now, paging.focus).dump(),
             *_head_and_signature(store, page, experiment_id, newest.chips or []),
@@ -741,11 +767,14 @@ class _Outputs:
     head: Any = no_update
     signature: Any = no_update
     destination: Any = no_update
+    handled: Any = no_update
+    """`page_json` again, when the rows, head and signature written with it are all the run list would draw from it."""
 
     def outputs(self, charts: edits.ChartsOnScreen) -> tuple[Any, ...]:
         """The values, in the order of `act_on_runs`'s `Output`s, for the `charts` on screen."""
         return (
             self.page_json,
+            self.handled,
             charts.unchanged() if self.bodies is None else self.bodies,
             self.notices,
             self.delete_opened,
@@ -811,8 +840,11 @@ def _draw_or_hide(store: DataStore[...], request: RunActionRequest, act: _Act) -
         # long as it runs, so the common redraw in place would show the panel area's loader over every chart (#627).
         return _Outputs(page_json=page.model_dump_json(), destination=unfocused_href(act.experiment_id, page))
     bodies, _ = act.redraw(store, page, paging)
+    page_json = page.model_dump_json()
     return _Outputs(
-        page_json=page.model_dump_json(),
+        page_json=page_json,
+        # The run list is brought up to date here, with its rows, head and signature: it need not read the page again.
+        handled=page_json,
         bodies=bodies,
         row_updates=_drawn_rows(shown_before, now, paging.focus).dump(),
         **_head_fields(store, page, act.experiment_id, act.chips or []),
@@ -843,6 +875,7 @@ def _diff(request: RunActionRequest) -> _Outputs:
 def _register_run_actions(app: Dash) -> None:
     @app.callback(
         Output(ids.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
+        Output(ids.RUN_LIST_HANDLED_ID, "data", allow_duplicate=True),
         Output(chart_view.CHART_BODY.all(), "children", allow_duplicate=True),
         Output(VIEW_NOTIFY_ID, "sendNotifications", allow_duplicate=True),
         *delete_outputs(RunListSurface.EXPERIMENT),

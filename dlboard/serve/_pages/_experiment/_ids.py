@@ -20,6 +20,13 @@ METRIC_CONTENT_ID: DivId[ExperimentPage] = DivId("metrics-view")
 STATE_PAGE_STORAGE: StoreId[ExperimentPage] = StoreId("current-page")
 STATE_VIEW_ID: StoreId[ExperimentPage] = StoreId("view-id-state")
 """The named view (`Page.id`) this page is showing, from its `?view=` URL, or `None` for the shared page."""
+RUN_LIST_PAGE_ID: StoreId[ExperimentPage] = StoreId("run-list-page")
+"""
+`STATE_PAGE_STORAGE`, passed on to the run list only when it may change it (`run_list_gate.js`): not for a page an action
+already brought the list up to date with (`RUN_LIST_HANDLED_ID`), nor on a comparison's page, which has no such list.
+"""
+RUN_LIST_HANDLED_ID: StoreId[ExperimentPage] = StoreId("run-list-handled")
+"""The page (as JSON) an action wrote along with the run list's rows and head itself, which the run list need not read again."""
 
 PANEL_PAGING_ID: StoreId[ExperimentPage] = StoreId("panel-paging")
 """

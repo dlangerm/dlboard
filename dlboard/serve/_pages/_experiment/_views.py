@@ -547,6 +547,7 @@ def _register_sync_after_edit(app: Dash) -> None:
         _GATE_VIEW_SYNC_JS.source,
         Output(VIEW_SYNC_REQUEST_ID, "data"),
         Input(ids.STATE_PAGE_STORAGE, "data"),
+        State(ids.STATE_VIEW_ID, "data", allow_optional=True),
         prevent_initial_call=True,
     )
 
@@ -578,8 +579,8 @@ def _register_sync_after_edit(app: Dash) -> None:
         Every persisting callback on this page writes its result to `STATE_PAGE_STORAGE` -- this is
         the one place that reacts to *any* of them, so an edit that branched into a new personal
         view (`_page_repository.save_page`) shows up here without every one of those callbacks
-        needing to know views exist at all. Cheap on the (overwhelmingly common) no-branch tick: the
-        comparison below is pure Python, so the `list_views` read only happens on an actual branch.
+        needing to know views exist at all. Free on the (overwhelmingly common) no-branch edit: the gate
+        (`gate_view_sync.js`) makes the comparison below in the browser, so this is only called on a branch.
 
         Arms `VIEW_NAV_SUPPRESS_ID` alongside its own `VIEW_SELECT_ID.value` write -- see that id's
         own docstring for why the picker's navigate-on-select callback needs it. Also reveals the

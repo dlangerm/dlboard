@@ -17,6 +17,7 @@ from dlboard.client._rest_api import BasicDlboardAPI
 from dlboard.models import RUN_NAME_COLUMN
 from dlboard.serve import get_system_data_store
 from dlboard.serve._pages._experiment._ids import METRIC_CONTENT_ID
+from dlboard.serve._pages._experiment._live_updates import LIVE_POLL_INTERVAL_ID
 from dlboard.serve._pages._experiment._runs_table import NAVBAR_HPARAM_DATATABLE_ID
 from dlboard.serve._pages._run_list import RunListSurface
 from dlboard.serve._pages._run_list._ids import bar_id
@@ -26,7 +27,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from dash import Dash
-    from playwright.sync_api import Locator, Page
+    from playwright.sync_api import Locator, Page, Request
 
 pytestmark = pytest.mark.browser
 
@@ -140,6 +141,37 @@ def test_a_slow_redraw_of_a_toggled_run_leaves_the_charts_uncovered(
 
     expect(curves).to_have_count(1)
     assert page.evaluate("window.dlPanelLoaderSeen") is False
+    assert console_errors == []
+
+
+def test_drawing_or_hiding_a_run_costs_one_server_request(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """
+    The draw or hide itself, and nothing after it: the run list it already wrote, the view it stayed in and the "Newest"
+    button it drew again each cost a round trip that found nothing to do, and queued behind the next toggle.
+    """
+    _, _, rows = _experiment_of_runs(page, live_server_url, "One Request Experiment", 3)
+    curves = page.locator(_CURVES)
+    expect(curves).to_have_count(3)
+    requests: list[str] = []
+
+    def callback(request: Request) -> None:
+        body: dict[str, Any] | None = (
+            request.post_data_json if "_dash-update-component" in request.url else None
+        )
+        # The live poll's tick is the clock's, not the toggle's, as `page_load_budget_test.py` leaves it out too.
+        if body is not None and all(i["id"] != LIVE_POLL_INTERVAL_ID for i in body.get("inputs", [])):
+            requests.append(str(body.get("output")))
+
+    page.on("request", callback)
+
+    for drawn in (2, 3):
+        requests.clear()
+        rows.first.locator(".dl-eye").click()
+        expect(curves).to_have_count(drawn)
+        page.wait_for_load_state("networkidle")
+        assert len(requests) == 1, requests
     assert console_errors == []
 
 

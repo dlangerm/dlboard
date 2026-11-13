@@ -2978,6 +2978,7 @@
   "dlboard/tests/run_list_browser_test.py::test_deleting_the_selected_runs_asks_once_and_deletes_them_all[chromium]": 8.823675739000464,
   "dlboard/tests/run_list_browser_test.py::test_drawing_a_run_keeps_the_filter_the_list_is_narrowed_by[chromium]": 9.08089881399792,
   "dlboard/tests/run_list_browser_test.py::test_drawing_another_run_while_looking_at_one_leaves_the_link[chromium]": 7.565047745996708,
+  "dlboard/tests/run_list_browser_test.py::test_drawing_or_hiding_a_run_costs_one_server_request[chromium]": 6.0,
   "dlboard/tests/run_list_browser_test.py::test_the_breadcrumb_switches_to_another_experiment_of_the_project[chromium]": 5.654227060000267,
   "dlboard/tests/run_list_browser_test.py::test_the_eye_draws_a_run_and_the_checkbox_only_selects_it[chromium]": 9.521876754002733,
   "dlboard/tests/run_list_journeys_browser_test.py::test_a_list_of_runs_of_several_experiments_shows_which_experiment_each_is_of_in_the_sidebar[chromium]": 3.05436975900011,

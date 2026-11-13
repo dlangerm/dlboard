@@ -57,6 +57,9 @@ pulls that section's body into the GitHub release notes and publishes both distr
   first given. (#628)
 * Showing or hiding a run with an artifact chart on screen no longer covers every chart with the panel area's loader while
   they redraw. (#627)
+* Showing or hiding a run costs one server round trip, where it cost four: the run list it already updated, the view it
+  stayed in and the "Newest" button it drew again each made a request that found nothing to do, and queued behind the next
+  toggle.
 
 ## [0.16.0] - 2026-11-11
 
