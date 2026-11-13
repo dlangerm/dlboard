@@ -353,6 +353,24 @@ class AuthorizingDataStore(models.DataStore[...]):
             project_id, name_contains=name_contains, limit=limit, offset=offset
         )
 
+    def search_experiments_in(
+        self, project_ids: Collection[int], *, name_contains: str, limit: int
+    ) -> list[models.Experiment]:
+        """Of the projects asked for, only those the viewer sees are searched."""
+        return self._inner.search_experiments_in(
+            [p for p in project_ids if self._can(p, ProjectRole.VIEWER)],
+            name_contains=name_contains,
+            limit=limit,
+        )
+
+    def get_experiments_by_id(self, experiment_ids: Collection[int]) -> list[models.Experiment]:
+        """Only the experiments of projects the viewer sees."""
+        return [
+            e
+            for e in self._inner.get_experiments_by_id(experiment_ids)
+            if self._can(e.project_id, ProjectRole.VIEWER)
+        ]
+
     def get_experiment_stats(
         self, project_id: int, experiment_ids: Collection[int] | None = None
     ) -> dict[int, models.ActivityStats]:
@@ -674,6 +692,18 @@ class AuthorizingDataStore(models.DataStore[...]):
             which = models.ComparisonFilter.VISIBLE if editor else models.ComparisonFilter.OWN
         return self._inner.search_comparisons(
             project_id, viewer_id, name_contains=name_contains, which=which, limit=limit, offset=offset
+        )
+
+    def search_comparisons_in(
+        self, project_ids: Collection[int], viewer_id: int, *, name_contains: str, limit: int
+    ) -> list[models.ComparisonSummary]:
+        """As `search_comparisons`, of only the projects asked for that the viewer sees."""
+        self._require_self_or(viewer_id, Scope.ALL)
+        return self._inner.search_comparisons_in(
+            [p for p in project_ids if self._can(p, ProjectRole.VIEWER)],
+            viewer_id,
+            name_contains=name_contains,
+            limit=limit,
         )
 
     def comparison_summary(self, page_id: int) -> models.ComparisonSummary | None:

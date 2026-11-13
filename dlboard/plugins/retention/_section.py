@@ -41,6 +41,12 @@ from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import ButtonId, DivId, ValueId
 from dlboard.serve._pages._dash_helpers import CallbackStates
 from dlboard.serve._pages._dataframe_helpers import experiment_display_name
+from dlboard.serve._pages._experiment_picker import (
+    experiment_options,
+    experiment_search_store,
+    register_search_gate,
+    searched,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -215,12 +221,27 @@ def _hints(settings: RetentionSettings) -> list[Component]:
     return [dmc.Text(hint, size="xs", c="dimmed") for hint in hints]
 
 
-def _form(standing: _Standing, experiments: list[Experiment], *, owner: bool) -> Component:
+def _owns(project_id: int) -> bool:
+    """Whether the viewer may set the project's own rule: its owner, or an admin."""
+    return has_scope(get_current_user(), Scope.ALL) or get_project_role(project_id) is ProjectRole.OWNER
+
+
+def _scopes(
+    store: DataStore[...], project_id: int, *, search: str = "", keep: str | None = None
+) -> list[dict[str, str]]:
+    """
+    What the form can set a rule for: the project, if the viewer owns it, and its experiments.
+
+    The newest of them, or those `search` finds, and the one picked (`keep`): an experiment picker's (#590).
+    """
+    experiments = experiment_options(
+        store, project_id, search=search, keep=[] if keep in (None, PROJECT_SCOPE) else [keep]
+    )
+    return [*([{"value": PROJECT_SCOPE, "label": "This project"}] if _owns(project_id) else []), *experiments]
+
+
+def _form(standing: _Standing, scopes: list[dict[str, str]], *, owner: bool) -> Component:
     """The form that sets a rule, for the project if the viewer owns it, else for one of its experiments."""
-    scopes = [
-        *([{"value": PROJECT_SCOPE, "label": "This project"}] if owner else []),
-        *({"value": str(e.id), "label": experiment_display_name(e)} for e in experiments),
-    ]
     latest = standing.project.latest()
     rule = latest.rule if latest is not None else Unlimited()
     match rule:
@@ -237,10 +258,12 @@ def _form(standing: _Standing, experiments: list[Experiment], *, owner: bool) ->
                         data=scopes,
                         value=scopes[0]["value"] if scopes else None,
                         allowDeselect=False,
+                        searchable=True,
                         size="xs",
                         w=180,
                         label="Rule for",
                     ),
+                    experiment_search_store(SCOPE_ID),
                     dmc.Select(
                         id=KIND_ID,
                         data=_KINDS,
@@ -335,10 +358,12 @@ def _section(project: Project) -> Component:
     store = get_data_store()
     standing = _Standing.of(store, project.id)
     role = get_project_role(project.id)
-    owner = has_scope(get_current_user(), Scope.ALL) or role is ProjectRole.OWNER
+    owner = _owns(project.id)
     editor = role is not None and role.includes(ProjectRole.EDITOR)
-    experiments = list(store.get_experiments(project.id))
-    names = {e.id: experiment_display_name(e) for e in experiments}
+    # The experiments with a rule of their own, by id: never every experiment of the project (#590).
+    names = {
+        e.id: experiment_display_name(e) for e in store.get_experiments_by_id(standing.experiments.keys())
+    }
     settings = RetentionSettings()
     now = pendulum.now(pendulum.UTC)
     return dmc.Stack(
@@ -358,7 +383,7 @@ def _section(project: Project) -> Component:
                 for e, s in standing.experiments.items()
             ),
             *_hints(settings),
-            *([_form(standing, experiments, owner=owner)] if editor or owner else []),
+            *([_form(standing, _scopes(store, project.id), owner=owner)] if editor or owner else []),
         ],
         gap="xs",
     )
@@ -497,6 +522,19 @@ def register_retention_callbacks(app: Dash) -> None:
     @app.callback(Output(UNIT_ID, "disabled"), Input(SCOPE_ID, "value"), prevent_initial_call=True)
     def unit_applies(scope: str | None) -> bool:
         return _experiment_of(scope) is not None
+
+    register_search_gate(app, SCOPE_ID)
+
+    @app.callback(
+        Output(SCOPE_ID, "data", allow_duplicate=True),
+        Input(searched(SCOPE_ID), "data"),
+        State(SCOPE_ID, "value"),
+        State(constants.STATE_PROJECT_ID, "data"),
+        prevent_initial_call=True,
+    )
+    def search_scopes(search: str | None, scope: str | None, project_id: int) -> list[dict[str, str]]:
+        """The experiments the form can set a rule for that a search finds, as someone types (#590)."""
+        return _scopes(get_data_store(), project_id, search=search or "", keep=scope)
 
     @app.callback(Output(PREVIEW_ID, "children"), _Form.states(), prevent_initial_call=True)
     def preview(**states: Any) -> str:  # noqa: ANN401 -- validated on the first line

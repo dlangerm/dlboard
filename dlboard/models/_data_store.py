@@ -194,6 +194,20 @@ class DataStore(typing.Protocol[_P]):
         """
         ...
 
+    def search_experiments_in(
+        self, project_ids: Collection[int], *, name_contains: str, limit: int
+    ) -> list[models.Experiment]:
+        """
+        The newest `limit` (non-deleted) experiments of any of `project_ids` that match, as `search_experiments`'s do.
+
+        One read over every project asked for, for a search of all of them as someone types (the Ctrl+K palette).
+        """
+        ...
+
+    def get_experiments_by_id(self, experiment_ids: Collection[int]) -> list[models.Experiment]:
+        """The (non-deleted) experiments of `experiment_ids` that exist, in no particular order: a read of just those."""
+        ...
+
     def get_experiment_stats(
         self, project_id: int, experiment_ids: Collection[int] | None = None
     ) -> dict[int, models.ActivityStats]:
@@ -448,6 +462,16 @@ class DataStore(typing.Protocol[_P]):
         A page of the comparisons `list_comparisons` lists (or `which` of them), in its order, and how many matched in all.
 
         A comparison matches if its name has `name_contains` in it, whatever its case, or it is its id.
+        """
+        ...
+
+    def search_comparisons_in(
+        self, project_ids: Collection[int], viewer_id: int, *, name_contains: str, limit: int
+    ) -> list[models.ComparisonSummary]:
+        """
+        The first `limit` comparisons `viewer_id` may see of any of `project_ids` that match, as `search_comparisons`'s do.
+
+        One read over every project asked for, for a search of all of them as someone types (the Ctrl+K palette).
         """
         ...
 

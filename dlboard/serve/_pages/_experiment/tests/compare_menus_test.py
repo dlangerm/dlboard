@@ -21,6 +21,7 @@ def _summary(comparison_id: int, owner_id: int = 1) -> ComparisonSummary:
     return ComparisonSummary(
         id=comparison_id,
         name=f"comparison {comparison_id}",
+        project_id=1,
         owner_id=owner_id,
         owner_name="alice" if owner_id == 1 else "bob",
         shared=owner_id != 1,

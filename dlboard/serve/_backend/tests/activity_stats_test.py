@@ -100,3 +100,26 @@ def test_a_search_of_experiments_pages_the_newest_first_and_counts_every_match(
     assert [
         e.id for e in store.search_experiments(project.id, name_contains=str(made["baseline"])).experiments
     ] == [made["baseline"]]
+
+
+def test_a_search_of_several_projects_finds_the_newest_of_any_of_them_and_a_read_by_id_just_those(
+    store: SQLLiteStore, admin: models.User
+) -> None:
+    """The Ctrl+K palette's search of every project the viewer sees, in one read; and a read of some experiments (#590)."""
+    one, two, other = (
+        store.create_project(models.NewProject(name=n, description="")) for n in ("1", "2", "3")
+    )
+    made = {
+        name: store.create_experiment(models.NewExperiment(project_id=project.id, name=name)).id
+        for project, name in [(one, "lr-a"), (two, "lr-b"), (one, "base"), (other, "lr-c"), (two, "lr-gone")]
+    }
+    store.delete_experiment(made["lr-gone"], admin)
+
+    found = store.search_experiments_in([one.id, two.id], name_contains="lr", limit=10)
+    assert [e.name for e in found] == ["lr-b", "lr-a"]
+    assert [e.name for e in store.search_experiments_in([one.id, two.id], name_contains="", limit=1)] == [
+        "base"
+    ]
+    assert store.search_experiments_in([], name_contains="", limit=10) == []
+    by_id = store.get_experiments_by_id([made["base"], made["lr-c"], made["lr-gone"], 9999])
+    assert sorted(e.name for e in by_id) == ["base", "lr-c"]

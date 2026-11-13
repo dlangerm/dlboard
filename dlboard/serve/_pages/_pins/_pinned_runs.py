@@ -35,6 +35,11 @@ from dlboard.serve._pages._experiment._compare import (
     compare_pins_menu,
 )
 from dlboard.serve._pages._experiment._focus import experiment_href
+from dlboard.serve._pages._experiment_picker import (
+    experiment_options,
+    experiment_search_store,
+    register_experiment_search,
+)
 from dlboard.serve._pages._pins._pin_menus import pin_menus
 from dlboard.serve._pages._pins._pin_view import pin_cells, pin_glyph
 from dlboard.serve._pages._pins._row_pins import PINS_FIELD, pin_column_def, pin_or_unpin
@@ -258,10 +263,12 @@ def render_pinned_runs(store: DataStore[...], project_id: int, flt: PinFilter) -
                             ),
                             dmc.Select(
                                 id=PINNED_EXPERIMENT_ID,
-                                data=[
-                                    {"value": str(e.id), "label": experiment_display_name(e)}
-                                    for e in store.get_experiments(project_id)
-                                ],
+                                # The newest, and the one picked; the rest are searched on the server (#590).
+                                data=experiment_options(
+                                    store,
+                                    project_id,
+                                    keep=[] if flt.experiment is None else [str(flt.experiment)],
+                                ),
                                 value=None if flt.experiment is None else str(flt.experiment),
                                 placeholder="Any experiment",
                                 clearable=True,
@@ -269,6 +276,7 @@ def render_pinned_runs(store: DataStore[...], project_id: int, flt: PinFilter) -
                                 size="xs",
                                 **typing.cast("dict[str, Any]", {"aria-label": "Experiment"}),
                             ),
+                            experiment_search_store(PINNED_EXPERIMENT_ID),
                             dmc.TextInput(
                                 id=PINNED_SEARCH_ID,
                                 value=flt.q,
@@ -370,6 +378,7 @@ def register(app: Dash) -> None:
     register_run_list(app, RunListSurface.PROJECT, PINNED_GRID_ID)
     register_row_updates(app, RunListSurface.PROJECT)
     register_navigate(app, navigate_id(RunListSurface.PROJECT))
+    register_experiment_search(app, PINNED_EXPERIMENT_ID, PINNED_PROJECT_ID)
 
     @app.callback(
         Output(constants.NAVBAR_RUN_LIST_ID, "children", allow_duplicate=True),

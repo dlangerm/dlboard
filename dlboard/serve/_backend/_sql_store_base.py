@@ -1143,6 +1143,37 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
         )
         return models.ExperimentList(total=total, experiments=page)
 
+    def search_experiments_in(
+        self, project_ids: Collection[int], *, name_contains: str, limit: int
+    ) -> list[models.Experiment]:
+        """The newest `limit` (non-deleted) experiments of any of `project_ids` whose name or id matches."""
+        if not project_ids:
+            return []
+        experiments = self._tables[models.Experiment]
+        return self._fetch(
+            models.Experiment,
+            sa.select(experiments)
+            .where(
+                experiments.c.project_id.in_(sorted(project_ids)),
+                experiments.c.deleted_at.is_(None),
+                *_name_matches(experiments, name_contains),
+            )
+            .order_by(experiments.c.created_at.desc(), experiments.c.id.desc())
+            .limit(limit),
+        )
+
+    def get_experiments_by_id(self, experiment_ids: Collection[int]) -> list[models.Experiment]:
+        """The (non-deleted) experiments of `experiment_ids` that exist."""
+        if not experiment_ids:
+            return []
+        experiments = self._tables[models.Experiment]
+        return self._fetch(
+            models.Experiment,
+            sa.select(experiments).where(
+                experiments.c.id.in_(sorted(experiment_ids)), experiments.c.deleted_at.is_(None)
+            ),
+        )
+
     def update_experiment(self, experiment: models.Experiment) -> models.Experiment:
         """Update an experiment."""
         _log.debug("updating experiment %s", experiment.id)
@@ -2025,7 +2056,15 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
             .scalar_subquery()
         )
         rows = self._execute(
-            sa.select(pages.c.id, pages.c.name, pages.c.owner_id, users.c.username, pages.c.shared, run_count)
+            sa.select(
+                pages.c.id,
+                pages.c.name,
+                pages.c.project_id,
+                pages.c.owner_id,
+                users.c.username,
+                pages.c.shared,
+                run_count,
+            )
             .select_from(pages.join(users, users.c.id == pages.c.owner_id))
             .where(pages.c.project_id.is_not(None), pages.c.owner_id.is_not(None), *where)
             .order_by((pages.c.owner_id != viewer_id), pages.c.name, pages.c.id)
@@ -2034,9 +2073,15 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
         )
         return [
             models.ComparisonSummary(
-                id=id_, name=name, owner_id=owner_id, owner_name=owner_name, shared=shared, run_count=count
+                id=id_,
+                name=name,
+                project_id=project_id,
+                owner_id=owner_id,
+                owner_name=owner_name,
+                shared=shared,
+                run_count=count,
             )
-            for id_, name, owner_id, owner_name, shared, count in rows
+            for id_, name, project_id, owner_id, owner_name, shared, count in rows
         ]
 
     def list_comparisons(self, project_id: int, viewer_id: int) -> list[models.ComparisonSummary]:
@@ -2080,13 +2125,28 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
             comparisons=self._comparison_summaries(matching, viewer_id, limit=limit, offset=offset),
         )
 
+    def search_comparisons_in(
+        self, project_ids: Collection[int], viewer_id: int, *, name_contains: str, limit: int
+    ) -> list[models.ComparisonSummary]:
+        """The first `limit` comparisons `viewer_id` may see of any of `project_ids` whose name or id matches."""
+        if not project_ids:
+            return []
+        pages = self._tables[models.Page]
+        matching = [
+            pages.c.project_id.in_(sorted(project_ids)),
+            *self._seen_by(viewer_id),
+            *_name_matches(pages, name_contains),
+        ]
+        return self._comparison_summaries(matching, viewer_id, limit=limit)
+
     def _visible_comparisons(self, project_id: int, viewer_id: int) -> list[sa.ColumnElement[bool]]:
         """What keeps a project's comparisons `viewer_id` may see: their own, and anyone's shared ones."""
+        return [self._tables[models.Page].c.project_id == project_id, *self._seen_by(viewer_id)]
+
+    def _seen_by(self, viewer_id: int) -> list[sa.ColumnElement[bool]]:
+        """What keeps the comparisons `viewer_id` may see of a project they see: their own, and anyone's shared ones."""
         pages = self._tables[models.Page]
-        return [
-            pages.c.project_id == project_id,
-            sa.or_(pages.c.owner_id == viewer_id, pages.c.shared.is_(True)),
-        ]
+        return [sa.or_(pages.c.owner_id == viewer_id, pages.c.shared.is_(True))]
 
     def comparison_summary(self, page_id: int) -> models.ComparisonSummary | None:
         """One comparison as `list_comparisons` lists it, or `None` if there is no such comparison."""
