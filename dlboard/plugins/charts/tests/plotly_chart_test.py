@@ -2,32 +2,42 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 import pytest
 from pydantic import ValidationError
 
+from dlboard import models
 from dlboard.conftest import find_all_props
 from dlboard.models import (
+    EXPERIMENT_COLUMN,
     PLOTLY_FIGURE_EXTENSION,
     RUN_NAME_COLUMN,
     Artifact,
+    ArtifactWindow,
     ChartInstance,
     DataRequest,
     RenderContext,
+    WindowAt,
     artifact_column,
+    artifact_logged_column,
     plotly_data_key,
 )
 from dlboard.plugins.charts.plotly_chart import (
     COMBINED_RUNS,
     DLBOARD_THEME,
+    PLOTLY_WINDOW_STEPS,
     PlotlyChart,
     PlotlySettings,
     StreamMode,
-    thinned,
+    _LoadedWindow,
+    read_window,
 )
 from dlboard.serve import series_color, series_swatch_class
+
+if TYPE_CHECKING:
+    from dlboard.plugins.data_stores.sqlite import SQLLiteStore
 
 PlotlyChart.register(allow_override=True)
 
@@ -132,9 +142,25 @@ def test_a_chart_with_nothing_logged_says_so(frame: pd.DataFrame) -> None:
     assert find_all_props(stack, lambda p: "Nothing logged for pr" in str(p.get("children")))
 
 
-def test_the_chart_reads_its_figure_and_any_data_logged_into_it() -> None:
-    assert PlotlyChart.data_request(PlotlySettings(key="pr")) == DataRequest(
-        artifacts=frozenset({"pr"}), artifact_prefixes=frozenset({plotly_data_key("pr")})
+@pytest.mark.parametrize(
+    ("mode", "data_window"),
+    [
+        (StreamMode.SCRUB, ArtifactWindow(plotly_data_key("pr"), PLOTLY_WINDOW_STEPS)),
+        (StreamMode.LATEST, ArtifactWindow(plotly_data_key("pr"), 1, at=WindowAt.LATEST)),
+        (StreamMode.ACCUMULATE, ArtifactWindow(plotly_data_key("pr"), 7, at=WindowAt.THINNED)),
+    ],
+    ids=["a-window-at-a-time", "each-runs-latest", "each-run-thinned"],
+)
+def test_the_chart_reads_a_window_of_its_figures_and_the_data_logged_into_it_its_mode_draws(
+    mode: StreamMode, data_window: ArtifactWindow
+) -> None:
+    """Neither read grows with the steps logged (#619)."""
+    assert PlotlyChart.data_request(
+        PlotlySettings(key="pr", data_steps=mode, max_data_steps=7)
+    ) == DataRequest(
+        artifacts=frozenset({"pr"}),
+        artifact_prefixes=frozenset({plotly_data_key("pr")}),
+        artifact_windows=frozenset({ArtifactWindow("pr", PLOTLY_WINDOW_STEPS), data_window}),
     )
 
 
@@ -231,28 +257,6 @@ def test_data_with_no_template_logged_draws_nothing() -> None:
     assert not _of_type(stack, "plotly-chart-graph")
 
 
-@pytest.mark.parametrize(
-    ("logged", "most", "kept"),
-    [
-        (list(range(5)), 8, list(range(5))),
-        (list(range(10)), 4, [0, 4, 8, 9]),
-        (list(range(11)), 4, [0, 4, 8, 10]),
-        (list(range(0, 100, 10)), 3, [0, 40, 80, 90]),
-    ],
-    ids=["few-enough", "every-4th-and-the-last", "the-last-is-its-own", "by-position-not-value"],
-)
-def test_long_data_is_thinned_by_a_power_of_two_keeping_the_latest(
-    logged: list[int], most: int, kept: list[int]
-) -> None:
-    assert thinned(logged, most) == kept
-
-
-def test_the_steps_kept_stay_put_as_a_run_logs_more() -> None:
-    before, after = thinned(list(range(20)), 8), thinned(list(range(24)), 8)
-
-    assert before[:-1] == after[: len(before) - 1]
-
-
 @pytest.mark.parametrize(("most", "noted"), [(2, True), (5, False)], ids=["thinned", "drawn-whole"])
 def test_a_chart_that_thinned_a_runs_data_says_so(most: int, noted: bool) -> None:
     stack = PlotlyChart.render(
@@ -260,3 +264,84 @@ def test_a_chart_that_thinned_a_runs_data_says_so(most: int, noted: bool) -> Non
     )
 
     assert bool(find_all_props(stack, lambda p: "max data steps" in str(p.get("children")))) is noted
+
+
+# ---- read through windows (#619): every step logged, and the URLs of some ----
+
+
+def _windowed_frame(logged: dict[int, list[int]], read: set[int]) -> pd.DataFrame:
+    """A panel's frame of figures under `pr` read through a window: each run's every step, the URLs of `read` alone."""
+    return pd.DataFrame(
+        [
+            {
+                "run_id": run,
+                "step": step,
+                EXPERIMENT_COLUMN: 7,
+                artifact_logged_column("pr"): True,
+                **({artifact_column("pr"): f"/artifact/{run}-{step}"} if step in read else {}),
+            }
+            for run, steps in logged.items()
+            for step in steps
+        ]
+    )
+
+
+def test_a_windowed_charts_slider_goes_to_every_step_and_every_run_is_drawn() -> None:
+    stack = PlotlyChart.render(PlotlySettings(key="pr"), _windowed_frame({1: [0, 1, 2, 3], 2: [3]}, {0, 1}))
+
+    payload = _payload(stack)
+    assert payload["steps"] == [0, 1, 2, 3]
+    assert payload["runs"]["1"]["urls"] == {"0": "/artifact/1-0", "1": "/artifact/1-1"}
+    # Run 2 logged nothing in the window yet: drawn once the slider gets to its steps.
+    assert payload["runs"]["2"]["urls"] == {}
+    [window] = _of_type(stack, "plotly-chart-window")
+    assert window["data"] == {"first": 0, "last": 1, "runs": {"7": [1, 2]}, "key": "pr"}
+
+
+def test_a_windowed_template_that_thinned_a_runs_data_says_so() -> None:
+    data_key = plotly_data_key("gps")
+    frame = pd.DataFrame(
+        [
+            {"run_id": 1, "step": 0, artifact_column("gps"): "/artifact/t1"},
+            *(
+                {
+                    "run_id": 1,
+                    "step": step,
+                    artifact_logged_column(data_key): True,
+                    # The panel read every 4th step's data of the 10 logged, and the latest.
+                    **({artifact_column(data_key): f"/artifact/d{step}"} if step in {1, 5, 9, 10} else {}),
+                }
+                for step in range(1, 11)
+            ),
+        ]
+    )
+
+    stack = PlotlyChart.render(PlotlySettings(key="gps", max_data_steps=3), frame)
+
+    assert _payload(stack)["runs"]["1"]["urls"] == {str(s): f"/artifact/d{s}" for s in (1, 5, 9, 10)}
+    assert find_all_props(stack, lambda p: "max data steps" in str(p.get("children")))
+
+
+@pytest.mark.usefixtures("_plain_artifact_urls")
+def test_the_slider_leaving_the_window_reads_the_figures_around_where_it_went(
+    store: SQLLiteStore, experiment_id: int
+) -> None:
+    run = store.create_run(models.NewRun(experiment_id=experiment_id))
+    store.log_artifact_refs(
+        models.Artifact(
+            key="pr", fname="f.json", run_id=run.id, experiment_id=experiment_id, step=step, ref=f"r://{step}"
+        )
+        for step in range(3 * PLOTLY_WINDOW_STEPS)
+    )
+    window = _LoadedWindow(first=0, last=PLOTLY_WINDOW_STEPS - 1, runs={experiment_id: [run.id]}, key="pr")
+
+    read = read_window(store, window, 2 * PLOTLY_WINDOW_STEPS)
+
+    assert read is not None
+    patch, moved = read
+    [operation] = patch.to_plotly_json()["operations"]
+    assert operation["location"] == ["runs", str(run.id), "urls"]
+    urls: dict[str, str] = operation["params"]["value"]
+    assert len(urls) == PLOTLY_WINDOW_STEPS
+    assert moved.first <= 2 * PLOTLY_WINDOW_STEPS <= moved.last
+    assert sorted(map(int, urls)) == list(range(moved.first, moved.last + 1))

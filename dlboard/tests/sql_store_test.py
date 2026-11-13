@@ -384,6 +384,10 @@ def test_an_artifact_keys_steps_are_listed_by_run_and_a_window_of_them_is_fetche
     }
     assert store.artifact_steps(experiment_id, key="img", run_ids=frozenset({late.id})) == {late.id: [20, 40]}
     assert sorted((a.run_id, a.step) for a in window) == [(early.id, 10), (early.id, 20), (late.id, 20)]
+    some = store.fetch_artifacts(
+        experiment_id, keys=frozenset({"img"}), run_ids=None, steps=frozenset({0, 40})
+    )
+    assert sorted((a.run_id, a.step) for a in some) == [(early.id, 0), (late.id, 40)]
 
 
 def test_fetches_are_of_the_runs_asked_for_and_of_every_run_when_none_are(

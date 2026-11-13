@@ -59,6 +59,9 @@ _READS: dict[str, Callable[[PostgresStore, int], object]] = {
     "fetch_artifacts, a window": lambda s, e: list(
         s.fetch_artifacts(e, keys=frozenset({"img"}), run_ids=None, steps=StepRange(0, 50))
     ),
+    "fetch_artifacts, a set of steps": lambda s, e: list(
+        s.fetch_artifacts(e, keys=frozenset({"img"}), run_ids=None, steps=frozenset({0, 8, 16, 49}))
+    ),
     "artifact_steps": lambda s, e: s.artifact_steps(e, key="img", run_ids=None),
     "get_runs, the newest": lambda s, e: list(s.get_runs(e, limit=20, run_ids=None)),
     "get_runs, every one": lambda s, e: list(s.get_runs(e, limit=None, run_ids=None)),

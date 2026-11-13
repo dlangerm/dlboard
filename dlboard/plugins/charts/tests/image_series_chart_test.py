@@ -117,8 +117,19 @@ def test_the_chart_reads_its_picture_its_layers_and_every_overlay_over_it(
         metrics=frozenset(metrics),
         artifacts=frozenset(artifacts),
         artifact_prefixes=frozenset({overlay_key("img")}),
-        # Over the step, a window of pictures at a time (#364); over a metric, every one.
-        artifact_window=None if metrics else ArtifactWindow("img", IMAGE_WINDOW_STEPS),
+        # Over the step, a window of pictures at a time (#364), with their layers and overlays; over a metric, every one.
+        artifact_windows=frozenset()
+        if metrics
+        else frozenset(
+            {
+                ArtifactWindow(
+                    "img",
+                    IMAGE_WINDOW_STEPS,
+                    with_keys=frozenset(artifacts - {"img"}),
+                    with_prefixes=frozenset({overlay_key("img")}),
+                )
+            }
+        ),
     )
 
 

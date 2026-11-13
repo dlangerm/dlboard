@@ -292,14 +292,17 @@ class PanelData:
         histograms = {histogram_column(key) for key in request.histograms}
         hparams = {hparam_column(key) for key in request.hparams}
         # A window's every row is a step its key logged, whether or not the step's artifacts were read.
-        window = request.artifact_window
+        windowed = bool(request.artifact_windows)
         merged = merge_hyperparams(
             merge_by_step(
                 MetricFrame.merged(metrics).to_frame() if metrics else pd.DataFrame(),
-                _with_data_in(
-                    self.artifacts if window is None else self.windows.get(window, pd.DataFrame()),
-                    lambda column: column.startswith(artifacts),
-                    keep_rows=window is not None,
+                *(
+                    _with_data_in(frame, lambda column: column.startswith(artifacts), keep_rows=windowed)
+                    for frame in (
+                        [self.windows.get(window, pd.DataFrame()) for window in request.artifact_windows]
+                        if windowed
+                        else [self.artifacts]
+                    )
                 ),
                 _with_data_in(self.histograms, histograms.__contains__),
                 *(self.series[series.column] for series in request.series if series.column in self.series),
@@ -472,8 +475,8 @@ def fetch_panel_data(
     """
     reads = ExperimentReads(store) if reads is None else reads
     requests = [chart.data_request() for chart in panel.charts]
-    # A chart that reads a window of its artifacts has them read apart, at the window's steps alone.
-    shared = [r for r in requests if r.artifact_window is None]
+    # A chart that reads windows of its artifacts has them read apart, at the windows' steps alone.
+    shared = [r for r in requests if not r.artifact_windows]
     artifact_keys = frozenset[str]().union(*(r.artifacts for r in shared))
     artifact_key_prefixes = frozenset[str]().union(*(r.artifact_prefixes for r in shared))
     has_artifacts = bool(artifact_keys or artifact_key_prefixes)
@@ -567,10 +570,8 @@ def fetch_panel_data(
         for request in series_requests
     }
     windows = {
-        window: _artifact_window_frame(
-            store, experiment_id, window, [r for r in requests if r.artifact_window == window], run_ids
-        )
-        for window in {r.artifact_window for r in requests if r.artifact_window is not None}
+        window: _artifact_window_frame(store, experiment_id, window, run_ids)
+        for window in frozenset[models.ArtifactWindow]().union(*(r.artifact_windows for r in requests))
     }
     read_anything = (
         any(not frame.run_id.empty for frame in metrics.values())
@@ -588,14 +589,12 @@ def _artifact_window_frame(
     store: DataStore[...],
     experiment_id: int,
     window: models.ArtifactWindow,
-    requests: Sequence[models.DataRequest],
     run_ids: frozenset[int] | None,
 ) -> pd.DataFrame:
     """
-    A row for each step `window.key` logged, by run, and the artifacts `requests` ask for at the window's steps alone.
+    A row for each step `window.key` logged, by run, and the window's artifacts at the steps it selects alone.
 
-    The window is the first `window.steps` of the steps any run logged: what a chart showing one step at a time starts
-    at. What the steps cost to list grows with the steps logged, but a step is two numbers, not an artifact.
+    What the steps cost to list grows with the steps logged, but a step is two numbers, not an artifact.
     """
     logged = _read(
         _Read(PanelRead.ARTIFACT_STEPS),
@@ -610,20 +609,30 @@ def _artifact_window_frame(
     )
     if steps.empty:
         return steps
-    shown = sorted(set(steps["step"]))[: window.steps]
+    selected = window.selected(logged)
+    shown = frozenset[int]().union(*selected.values())
     artifacts = _read(
         _Read(PanelRead.ARTIFACTS),
         lambda: build_artifacts_dataframe(
             store.fetch_artifacts(
                 experiment_id,
-                keys=frozenset[str]().union(*(r.artifacts for r in requests)),
-                key_prefixes=frozenset[str]().union(*(r.artifact_prefixes for r in requests)),
+                keys=frozenset({window.key, *window.with_keys}),
+                key_prefixes=window.with_prefixes,
                 run_ids=run_ids,
-                steps=models.StepRange(shown[0], shown[-1]),
+                # The first steps are a range; each run's own are a set, of which a run reads only its own.
+                steps=models.StepRange(min(shown), max(shown))
+                if window.at is models.WindowAt.FIRST
+                else shown,
             )
         ),
     )
-    return steps if artifacts.empty else steps.merge(artifacts, on=["run_id", "step"], how="outer")
+    if artifacts.empty:
+        return steps
+    own = [
+        step in selected.get(run, ())
+        for run, step in zip(artifacts["run_id"], artifacts["step"], strict=True)
+    ]
+    return steps.merge(artifacts[own], on=["run_id", "step"], how="outer")
 
 
 def build_series_band_dataframe(
