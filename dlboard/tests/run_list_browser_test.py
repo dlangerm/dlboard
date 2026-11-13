@@ -6,7 +6,8 @@ to a run draws just that run.
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING
+import time
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from playwright.sync_api import expect
@@ -99,6 +100,46 @@ def test_the_eye_draws_a_run_and_the_checkbox_only_selects_it(
 
     rows.first.locator(_CHECKBOX).uncheck()
     expect(_bar(page)).to_be_hidden()
+    assert console_errors == []
+
+
+def test_a_slow_redraw_of_a_toggled_run_leaves_the_charts_uncovered(
+    page: Page, live_server_url: str, monkeypatch: pytest.MonkeyPatch, console_errors: list[str]
+) -> None:
+    """
+    However long the charts take to redraw in place, the panel area's loader never covers them (#627).
+
+    The redraw is slowed past the loader's delay, as a chart that reads artifacts slows it.
+    """
+    _, _, rows = _experiment_of_runs(page, live_server_url, "Slow Eye Experiment", 2)
+    curves = page.locator(_CURVES)
+    expect(curves).to_have_count(2)
+    store_type = type(get_system_data_store())
+    fetch_metrics = store_type.fetch_metrics
+
+    def slow_fetch_metrics(*args: Any, **kwargs: Any) -> Any:  # noqa: ANN401 -- whatever the store's does
+        time.sleep(0.8)
+        return fetch_metrics(*args, **kwargs)
+
+    monkeypatch.setattr(store_type, "fetch_metrics", slow_fetch_metrics)
+    page.evaluate(
+        """(content) => {
+            window.dlPanelLoaderSeen = false;
+            const main = document.querySelector(".dl-experiment-main");
+            const panels = document.getElementById(content);
+            new MutationObserver(() => {
+                for (const loader of main.querySelectorAll(".mantine-Loader-root")) {
+                    window.dlPanelLoaderSeen ||= !panels.contains(loader);
+                }
+            }).observe(main, { childList: true, subtree: true, attributes: true });
+        }""",
+        str(METRIC_CONTENT_ID),
+    )
+
+    rows.first.locator(".dl-eye").click()
+
+    expect(curves).to_have_count(1)
+    assert page.evaluate("window.dlPanelLoaderSeen") is False
     assert console_errors == []
 
 

@@ -25,6 +25,11 @@ def experiment_href(experiment_id: int, *, view_id: int | None = None, run_id: i
     return relative_path(f"/experiment/{experiment_id}" + (f"?{query}" if query else ""))
 
 
+def unfocused_href(experiment_id: int, page: BasicExperimentPage) -> str:
+    """The address of the experiment's `page` with no run focused: the view's own runs drawn again, as it was saved."""
+    return experiment_href(experiment_id, view_id=page.id if page.owner_id is not None else None)
+
+
 def focus_banner(store: DataStore[...], page: BasicExperimentPage, paging: Paging) -> Component | None:
     """
     What the panel area says when it draws one run instead of the view's own: which run, and how to get the rest back.
@@ -43,9 +48,7 @@ def focus_banner(store: DataStore[...], page: BasicExperimentPage, paging: Pagin
                 dmc.Text(["Showing only ", dmc.Text(run_display_name(run), span=True, fw=600)], size="sm"),
                 dmc.Anchor(
                     "Show the view's runs",
-                    href=experiment_href(
-                        page.experiment_id, view_id=page.id if page.owner_id is not None else None
-                    ),
+                    href=unfocused_href(page.experiment_id, page),
                     refresh=False,
                     size="sm",
                 ),
