@@ -2747,6 +2747,7 @@
   "dlboard/tests/docs_screenshots_test.py::test_doc_screenshot[chromium-jump-palette]": 0.0006691009984933771,
   "dlboard/tests/docs_screenshots_test.py::test_doc_screenshot[chromium-notes]": 0.0004936730038025416,
   "dlboard/tests/docs_screenshots_test.py::test_doc_screenshot[chromium-personal-views]": 0.0005019669952162076,
+  "dlboard/tests/docs_screenshots_test.py::test_doc_screenshot[chromium-plotly-chart]": 0.0005,
   "dlboard/tests/docs_screenshots_test.py::test_doc_screenshot[chromium-project]": 0.0006890990007377695,
   "dlboard/tests/docs_screenshots_test.py::test_doc_screenshot[chromium-retention]": 0.0005080560040369164,
   "dlboard/tests/docs_screenshots_test.py::test_doc_screenshot[chromium-run-compare]": 0.0005547359978663735,

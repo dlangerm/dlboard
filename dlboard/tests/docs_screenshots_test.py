@@ -33,6 +33,7 @@ from dlboard import models
 from dlboard.client._rest_api import BasicDlboardAPI
 from dlboard.client.artifacts.figure import Figure
 from dlboard.client.artifacts.overlay import Box, Overlay, Point, Polyline, Shape
+from dlboard.client.artifacts.plotly import PlotlyFigure
 from dlboard.client.histograms import ExponentialBinning
 from dlboard.conftest import ScreenshotMode
 from dlboard.plugins.retention import _section as retention
@@ -84,6 +85,7 @@ _PROJECT_NAME = "image-classification"
 _EXPERIMENT_NAME = "lr-sweep"
 _CONFUSION_KEY = "samples/confusion_matrix"
 _GRAD_KEY = "grad_norm/layer1"
+_PR_CURVE_KEY = "eval/pr_curve"
 _NOW = _T0.add(days=1)
 _CONFUSION_OVERLAYS: dict[str, list[Shape]] = {
     "confused": [
@@ -118,6 +120,7 @@ class DocScreenshot(StrEnum):
     HISTOGRAM_CHART = "histogram-chart"
     COMPARISON = "comparison"
     RETENTION = "retention"
+    PLOTLY_CHART = "plotly-chart"
 
     @property
     def path(self) -> Path:
@@ -173,6 +176,24 @@ def _confusion_matrix(step: int, rng: np.random.Generator) -> MplFigure:
     ax.imshow(counts, cmap="Blues")
     ax.set(xticks=range(10), yticks=range(10), xlabel="Predicted", ylabel="Actual", title=f"Step {step}")
     return fig
+
+
+def _pr_curve(step: int, convergence_rate: float) -> dict[str, Any]:
+    """
+    A precision-recall curve as a Plotly figure: it bows out toward the top-right corner as the run converges.
+
+    Worked out, not sampled, so seeding it leaves the demo's random numbers (and every other screenshot) as they were.
+    """
+    recall = np.linspace(0, 1, 41)
+    progress = 1 - math.exp(-step * convergence_rate)
+    precision = 1 - 0.85 * recall ** (1 + 9 * progress)
+    return {
+        "data": [{"type": "scatter", "mode": "lines", "x": recall, "y": precision}],
+        "layout": {
+            "xaxis": {"title": {"text": "Recall"}, "range": [0, 1]},
+            "yaxis": {"title": {"text": "Precision"}, "range": [0, 1.02]},
+        },
+    }
 
 
 def _seed_pins_and_comparison(store: DataStore[...], project_id: int) -> int:
@@ -286,7 +307,13 @@ def demo(live_server_url: str, dlboard_app: Dash, tmp_path_factory: pytest.TempP
             for step in _IMAGE_STEPS
             for name, shapes in _CONFUSION_OVERLAYS.items()
         ]
-        api.log_artifact_batch([*converted, *overlays])
+        pr_curves = [
+            PlotlyFigure.from_figure(
+                _pr_curve(step, config.convergence_rate), _PR_CURVE_KEY, step=step
+            ).to_artifact(artifact_dir, run.id, sweep.id)
+            for step in _IMAGE_STEPS
+        ]
+        api.log_artifact_batch([*converted, *overlays, *pr_curves])
 
     # Kept separate from `sweep` (which every other scene charts and forks personal views off of) so
     # the PERSONAL_VIEWS scene's own view picker only ever shows what it creates itself. Named
@@ -311,7 +338,9 @@ def demo(live_server_url: str, dlboard_app: Dash, tmp_path_factory: pytest.TempP
     # The server records uploaded artifacts on a background batch (see `BlobArtifactStore`), so
     # they land shortly after the uploads above return.
     store = get_system_data_store(dlboard_app)
-    expected = len(_SWEEP) * len(_IMAGE_STEPS) * (1 + len(_CONFUSION_OVERLAYS))
+    expected = (
+        len(_SWEEP) * len(_IMAGE_STEPS) * (2 + len(_CONFUSION_OVERLAYS))
+    )  # a picture, its overlays, a PR curve
     deadline = time.monotonic() + _ARTIFACT_INGEST_TIMEOUT_S
     while len(list(store.fetch_artifacts(experiment_id=sweep.id, run_ids=None))) < expected:
         assert time.monotonic() < deadline, "the demo artifacts were never recorded"
@@ -555,6 +584,35 @@ def _stage(shot: DocScreenshot, page: Page, demo: Demo, dlboard_app: Dash) -> Pa
             page.goto(f"{demo.url}/experiment/{demo.experiment_id}?view={view.id}")
             panel = page.locator(".dl-panel-body", has=page.locator(".dl-histogram"))
             expect(panel.locator(".heatmaplayer image")).to_have_count(len(_SWEEP))
+            return panel
+        case DocScreenshot.PLOTLY_CHART:
+            # A view of its own holding just the Plotly chart, for the same reason as the table's: every run's PR curve
+            # in one figure, scrubbed to the last step (it opens at the first, as an image chart does), where they differ.
+            store = get_system_data_store(dlboard_app)
+            owner = store.get_or_create_user(models.Principal.unverified("demo"))
+            curves = models.ChartInstance[Any, Any](
+                chart_type="plotly",
+                parameters={"key": _PR_CURVE_KEY, "combine_runs": True, "height": 380, "width": 640},
+            )
+            view = store.create_view(
+                BasicExperimentPage,
+                models.NewPage[Any, Any](
+                    experiment_id=demo.experiment_id,
+                    owner_id=owner.id,
+                    name="PR curves",
+                    panels=[models.PanelInstance[Any, Any](name="Sweep", charts=[curves])],
+                ),
+            )
+            page.goto(f"{demo.url}/experiment/{demo.experiment_id}?view={view.id}")
+            panel = page.locator(".dl-panel-body", has=page.locator(".js-plotly-plot"))
+            expect(panel.locator(".scatterlayer .trace")).to_have_count(len(_SWEEP))
+            slider = panel.get_by_role("slider")
+            slider.press("End")
+            expect(slider).to_have_attribute("aria-valuenow", str(_IMAGE_STEPS[-1]))
+            page.mouse.move(
+                0, _VIEWPORT["height"] - 1
+            )  # off the figure, so its mode bar and hover label aren't shown
+            slider.blur()  # nor the slider's focus ring
             return panel
         case DocScreenshot.COMPARISON:
             page.goto(f"{demo.url}/comparison/{demo.comparison_id}")

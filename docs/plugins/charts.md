@@ -31,6 +31,11 @@ so what the figure sets itself (a trace's color, a title) is kept; `use_figure_t
 logged with. A figure's own `height` and `width` give way to the chart's `height` and the panel's width. Auto-generate
 makes a `plotly` chart for each key a figure is logged under.
 
+Four runs' precision-recall curves, logged as a figure at each of four steps, drawn in one figure (`combine_runs`) at
+the latest step, with the slider over the steps:
+
+![A Plotly chart of every run's precision-recall curve in one figure, with a slider over the steps](../images/plotly-chart.png)
+
 A figure logged with bindings is a *template* once data has been logged into it (`PlotlyData`, logged under the
 template's key plus `_$data`, see `plotly_data_key`): the same chart draws the template with each run's data in the
 attributes its bindings name (trace 0's `lat` and `lon` from the `lat` and `lon` columns, say), and the rest of the
