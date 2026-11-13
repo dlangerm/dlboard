@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import threading
+import time
 import typing
 import uuid
 from contextlib import contextmanager
@@ -276,6 +277,30 @@ EVERY_STORE_BACKEND: list[Any] = [
 """
 
 
+def pulled(image: str, attempts: int = 4) -> str:
+    """
+    `image`, once Docker has it, pulling it with retries first.
+
+    A container fixture is session-scoped, so one failed pull errors the first test that asks for it, and the flaky-test
+    check then blames that test (#629: `ImageNotFound` right after a pull on a CI runner). testcontainers pulls only an
+    image that isn't there yet, so pulling it here first leaves it nothing to pull.
+    """
+    import docker
+    from docker.errors import APIError
+
+    client = docker.from_env()
+    for attempt in range(attempts):
+        try:
+            client.images.pull(image)
+        except APIError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(2**attempt)
+        else:
+            break
+    return image
+
+
 @pytest.fixture(scope="session")
 def postgres_server() -> Iterator[PostgresSettings]:
     """A real Postgres in a throwaway container (needs Docker), started once per test session."""
@@ -284,7 +309,7 @@ def postgres_server() -> Iterator[PostgresSettings]:
     )
 
     with PostgresContainer(
-        "postgres:17-alpine", username="dlboard", password="dlboard", dbname="dlboard"
+        pulled("postgres:17-alpine"), username="dlboard", password="dlboard", dbname="dlboard"
     ) as pg:
         yield PostgresSettings(
             host=pg.get_container_host_ip(),
@@ -347,7 +372,7 @@ def s3_test_server() -> Iterator[S3Settings]:
     from testcontainers.community.localstack import LocalStackContainer
 
     bucket = "dlboard-test"
-    with LocalStackContainer() as localstack:
+    with LocalStackContainer(pulled("localstack/localstack:2.0.1")) as localstack:
         localstack.get_client("s3").create_bucket(
             Bucket=bucket, CreateBucketConfiguration={"LocationConstraint": localstack.region_name}
         )
