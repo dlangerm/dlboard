@@ -46,7 +46,7 @@ from dlboard.serve._pages._experiment._compare import (
     compare_menu,
     compare_pins_menu,
 )
-from dlboard.serve._pages._experiment._focus import experiment_href
+from dlboard.serve._pages._experiment._focus import experiment_href, unfocused_href
 from dlboard.serve._pages._experiment._live_updates import STATE_LAST_KNOWN_REVISION
 from dlboard.serve._pages._experiment._paging import Paging
 from dlboard.serve._pages._experiment._run_compare import COMPARE_MODAL_ID, COMPARE_RUNS_ID, diff_of
@@ -729,7 +729,6 @@ class _Outputs:
     """What `act_on_runs` changes on the page: whatever it leaves out stays as it was."""
 
     page_json: Any = no_update
-    container: Any = no_update
     bodies: list[Any] | None = None
     """The charts redrawn in place (`ChartsOnScreen.redraw`), one value for each chart on screen; `None` leaves them be."""
     notices: Any = no_update
@@ -747,7 +746,6 @@ class _Outputs:
         """The values, in the order of `act_on_runs`'s `Output`s, for the `charts` on screen."""
         return (
             self.page_json,
-            self.container,
             charts.unchanged() if self.bodies is None else self.bodies,
             self.notices,
             self.delete_opened,
@@ -782,7 +780,7 @@ def _draw_or_hide(store: DataStore[...], request: RunActionRequest, act: _Act) -
     it, and drawing another beside it is then a change to what the view draws, which leaves the focus.
 
     Only the charts whose data that changes are drawn again, in place (#616): the panels stay as they are, and nothing
-    covers them while it happens. Leaving a focus takes its banner off the panel area, which is then drawn again whole.
+    covers them while it happens (#627). Leaving a focus goes to the view's own address, where the page is drawn again.
     """
     document = repo.load_page(
         store, repo.ref_of(page_model.BasicExperimentPage.model_validate_json(act.page_json))
@@ -806,15 +804,15 @@ def _draw_or_hide(store: DataStore[...], request: RunActionRequest, act: _Act) -
         )
     # A selection replaces what a view left out before selections existed, so that is cleared with it.
     edit = edits.PageEdit(document=page_model.DocumentSettings(selected_runs=sorted(now), excluded_runs=[]))
-    if paging.focus is None:
-        page = edits.save_edit(act.page_json, edit)
-        container, (bodies, _) = no_update, act.redraw(store, page, paging)
-    else:
-        page, container = edits.commit(act.page_json, paging.with_focus(None).model_dump_json(), edit)
-        bodies = None
+    page = edits.save_edit(act.page_json, edit)
+    if paging.focus is not None:
+        # Leaving a focus goes to the view's own address, as the banner's link does, which draws it with this edit's
+        # runs. Not the panel area as an `Output`: Dash counts a callback as loading every output it declares for as
+        # long as it runs, so the common redraw in place would show the panel area's loader over every chart (#627).
+        return _Outputs(page_json=page.model_dump_json(), destination=unfocused_href(act.experiment_id, page))
+    bodies, _ = act.redraw(store, page, paging)
     return _Outputs(
         page_json=page.model_dump_json(),
-        container=container,
         bodies=bodies,
         row_updates=_drawn_rows(shown_before, now, paging.focus).dump(),
         **_head_fields(store, page, act.experiment_id, act.chips or []),
@@ -845,7 +843,6 @@ def _diff(request: RunActionRequest) -> _Outputs:
 def _register_run_actions(app: Dash) -> None:
     @app.callback(
         Output(ids.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
-        Output(ids.METRIC_CONTENT_ID, "children", allow_duplicate=True),
         Output(chart_view.CHART_BODY.all(), "children", allow_duplicate=True),
         Output(VIEW_NOTIFY_ID, "sendNotifications", allow_duplicate=True),
         *delete_outputs(RunListSurface.EXPERIMENT),

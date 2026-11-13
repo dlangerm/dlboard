@@ -2958,6 +2958,7 @@
   "dlboard/tests/run_list_browser_test.py::test_a_pin_made_by_someone_else_appears_in_the_list_without_drawing_it_again[chromium]": 9.548462432001543,
   "dlboard/tests/run_list_browser_test.py::test_a_run_that_starts_is_added_to_the_list_without_drawing_it_again[chromium]": 9.775950868999644,
   "dlboard/tests/run_list_browser_test.py::test_a_selection_in_progress_survives_the_table_being_drawn_again[chromium]": 7.571188699999766,
+  "dlboard/tests/run_list_browser_test.py::test_a_slow_redraw_of_a_toggled_run_leaves_the_charts_uncovered[chromium]": 7.0,
   "dlboard/tests/run_list_browser_test.py::test_a_teammates_first_pin_adds_the_menu_that_compares_the_pins_without_drawing_the_list_again[chromium]": 8.172738111999934,
   "dlboard/tests/run_list_browser_test.py::test_deleting_the_selected_runs_asks_once_and_deletes_them_all[chromium]": 8.823675739000464,
   "dlboard/tests/run_list_browser_test.py::test_drawing_a_run_keeps_the_filter_the_list_is_narrowed_by[chromium]": 9.08089881399792,
