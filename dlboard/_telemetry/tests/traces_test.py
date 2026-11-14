@@ -8,6 +8,7 @@ tested where they are made.
 from __future__ import annotations
 
 import contextlib
+import gc
 import os
 import pickle
 import time
@@ -112,8 +113,14 @@ def _spin(seconds: float) -> None:
 def test_a_span_tells_a_block_that_computed_from_one_that_waited(
     exported: InMemorySpanExporter, block: Callable[[float], None], *, computed: bool
 ) -> None:
-    with span("work", SpanKind.INTERNAL):
-        block(0.2)
+    # The one computation a sleeping block can still do is a garbage collection that starts inside it, as the block's
+    # way out allocates: on the heap a whole suite leaves behind, a full one is a tenth of a second of CPU (#644).
+    gc.disable()
+    try:
+        with span("work", SpanKind.INTERNAL):
+            block(0.2)
+    finally:
+        gc.enable()
 
     work = _finished(exported)["work"]
     assert work.start_time is not None
