@@ -58,6 +58,11 @@ pulls that section's body into the GitHub release notes and publishes both distr
   first given. (#628)
 * Showing or hiding a run with an artifact chart on screen no longer covers every chart with the panel area's loader while
   they redraw. (#627)
+* `/setup` makes the first admin again. The users retention and the Trash work as, which they make as the server starts,
+  had counted as someone already using it, so it closed for good and a restart with it on was refused. They are no longer
+  listed among the users on the admin page or offered when you mention someone in a note. (#647)
+* `DLBOARD_POSTGRES_PREPARE_THRESHOLD` can be turned off for PgBouncer's transaction pooling: `null`, as documented, was
+  refused, and so was the empty value a Kubernetes manifest's `value: null` sets. (#640)
 
 ## [0.16.0] - 2026-11-11
 

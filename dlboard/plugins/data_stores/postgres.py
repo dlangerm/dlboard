@@ -14,10 +14,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Final, Literal, cast, override
+from typing import TYPE_CHECKING, Annotated, Any, Final, Literal, cast, override
 
 import sqlalchemy as sa
-from pydantic import NonNegativeInt, PositiveFloat, PositiveInt, SecretStr
+from pydantic import BeforeValidator, NonNegativeInt, PositiveFloat, PositiveInt, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import OperationalError
@@ -39,6 +39,11 @@ type SslMode = Literal["disable", "allow", "prefer", "require", "verify-ca", "ve
 
 type TargetSessionAttrs = Literal["any", "read-write", "read-only", "primary", "standby", "prefer-standby"]
 """libpq's `target_session_attrs`: which server of a multi-host `host` list to settle on."""
+
+
+def _null_if_empty(value: object) -> object:
+    """`None` for an environment variable of `null` or nothing at all; anything else as it was."""
+    return None if isinstance(value, str) and value.strip().lower() in {"", "null"} else value
 
 
 class PostgresSettings(BaseSettings):
@@ -78,8 +83,12 @@ class PostgresSettings(BaseSettings):
     """Replace a pooled connection older than this, ahead of any proxy/server idle cutoff."""
     pool_pre_ping: bool = True
     """Check a pooled connection is alive before handing it out (survives failovers and restarts)."""
-    prepare_threshold: NonNegativeInt | None = 5
-    """psycopg's server-side prepared statements; set unset (`null`) behind PgBouncer's transaction pooling."""
+    prepare_threshold: Annotated[NonNegativeInt | None, BeforeValidator(_null_if_empty)] = 5
+    """
+    psycopg's server-side prepared statements; set to `null` behind PgBouncer's transaction pooling.
+
+    An empty value is `null` too: it is what a Kubernetes manifest's `value: null` sets the variable to.
+    """
 
     connect_args: dict[str, str] = {}
     """Any other libpq connection parameter (as a JSON object), e.g. `{"sslcrl": "/etc/ssl/crl.pem"}`."""

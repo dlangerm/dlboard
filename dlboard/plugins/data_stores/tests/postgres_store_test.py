@@ -66,6 +66,16 @@ def test_settings_are_read_from_postgres_env_vars(monkeypatch: pytest.MonkeyPatc
     assert settings.password.get_secret_value() == "s3cret"
 
 
+@pytest.mark.parametrize(("value", "threshold"), [("", None), ("null", None), ("0", 0)])
+def test_prepare_threshold_is_turned_off_by_null_or_by_nothing_as_kubernetes_sets_it(
+    monkeypatch: pytest.MonkeyPatch, value: str, threshold: int | None
+) -> None:
+    """A manifest's `value: null` sets the variable empty, and PgBouncer's transaction pooling needs it off (#640)."""
+    monkeypatch.setenv("DLBOARD_POSTGRES_PREPARE_THRESHOLD", value)
+
+    assert PostgresSettings().prepare_threshold == threshold
+
+
 @pytest.mark.postgres
 def test_store_lives_in_its_schema_with_utc_sessions_and_no_password_in_the_engine(
     postgres_settings: PostgresSettings,

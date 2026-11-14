@@ -189,7 +189,7 @@ Only matter with an identity-verifying provider such as `PASSWORD_AUTH`. See [au
 | `DLBOARD_POSTGRES_POOL_TIMEOUT_S` | `30` | |
 | `DLBOARD_POSTGRES_POOL_RECYCLE_S` | `1800` | Replace a pooled connection older than this. |
 | `DLBOARD_POSTGRES_POOL_PRE_PING` | `true` | Check a connection is alive before using it. |
-| `DLBOARD_POSTGRES_PREPARE_THRESHOLD` | `5` | Set to `null` behind PgBouncer's transaction pooling. |
+| `DLBOARD_POSTGRES_PREPARE_THRESHOLD` | `5` | Set to `null` (or leave it empty, as a Kubernetes `value: null` does) behind PgBouncer's transaction pooling. |
 | `DLBOARD_POSTGRES_CONNECT_ARGS` | `{}` | A JSON object of any other libpq parameter. |
 
 ## S3 artifact storage
