@@ -275,7 +275,9 @@ There are five built-in kinds:
   # A template, logged once, then the data drawn into it at each step: here a trajectory and a confusion matrix.
   template = go.Figure([go.Scattermap(mode="lines+markers")])
   logger.log_artifact([PlotlyFigure.from_figure(template, "gps", bind={0: {"lat": "lat", "lon": "lon"}})])
-  logger.log_artifact([PlotlyFigure.from_figure(go.Figure(go.Heatmap()), "eval/confusion", bind={0: {"z": "z"}})])
+  logger.log_artifact(
+      [PlotlyFigure.from_figure(go.Figure(go.Heatmap()), "eval/confusion", bind={0: {"z": "z"}})]
+  )
   ...
   logger.log_artifact(
       [

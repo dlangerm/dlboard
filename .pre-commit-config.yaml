@@ -30,15 +30,21 @@ repos:
         # biome.json is Biome's own config -- Biome reformats it to its own indent width
         # regardless of `files.includes`, which otherwise fights this hook's --indent=2.
         exclude: ^biome\.json$
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-      # Ruff version.
-    rev: v0.15.0
+  - repo: local
     hooks:
+      # The ruff in uv.lock, the one `uv run ruff` runs: a pinned hook of its own would be another
+      # version, formatting differently from what you just ran (#645).
       - id: ruff-check
+        name: ruff check
+        language: system
+        entry: uv run ruff check --fix --force-exclude
         types_or: [python, pyi]
-        args: [--fix]
       - id: ruff-format
-        types_or: [python, pyi]
+        # Markdown too: ruff formats the Python in its code blocks.
+        name: ruff format
+        language: system
+        entry: uv run ruff format --force-exclude
+        types_or: [python, pyi, markdown]
   - repo: https://github.com/macisamuele/language-formatters-pre-commit-hooks
     rev: v2.16.0
     hooks:
