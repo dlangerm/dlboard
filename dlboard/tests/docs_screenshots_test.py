@@ -428,7 +428,10 @@ def _stage(shot: DocScreenshot, page: Page, demo: Demo, dlboard_app: Dash) -> Pa
             expect(page.locator(".project-card")).to_have_count(demo.n_projects)
             page.keyboard.press("Control+K")
             page.locator("#jump-select").press_sequentially("lr")
-            expect(page.get_by_role("option", name=_EXPERIMENT_NAME)).to_be_visible()
+            # Highlighted as Enter would take it, a moment after it is listed: not before, or the shot is a frame early (#638).
+            expect(page.get_by_role("option", name=_EXPERIMENT_NAME)).to_have_attribute(
+                "data-combobox-selected", "true"
+            )
             return page
         case DocScreenshot.EXPERIMENT_CHARTS:
             _open_charted_experiment(page, demo)
