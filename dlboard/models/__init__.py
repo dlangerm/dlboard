@@ -104,7 +104,7 @@ from dlboard.models._tag import (
     format_tag_value,
 )
 from dlboard.models._theme import ColorScheme, SchemeColors, ThemeSpec
-from dlboard.models._user import UNVERIFIED_ISSUER, NewUser, Principal, User
+from dlboard.models._user import SYSTEM_ISSUER, UNVERIFIED_ISSUER, NewUser, Principal, User
 from dlboard.models._view import (
     ADVANCED_SECTION,
     DATA_SECTION,
@@ -158,6 +158,7 @@ __all__ = [
     "RUN_NAME_COLUMN",
     "SERIES_BAND_COLUMN_PREFIX",
     "SUMMARY_RUNS",
+    "SYSTEM_ISSUER",
     "UNNAMED_OVERLAY",
     "UNVERIFIED_ISSUER",
     "ActivityStats",

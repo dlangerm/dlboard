@@ -24,6 +24,9 @@ if TYPE_CHECKING:
 UNVERIFIED_ISSUER: Final = "unverified"
 """The issuer of an identity nobody proved -- the anonymous provider's (see `Principal.unverified`)."""
 
+SYSTEM_ISSUER: Final = "dlboard:system"
+"""The issuer of dlboard's own background work (see `Principal.system`): no auth provider issues it."""
+
 
 class Principal(BaseModel, frozen=True, extra="forbid"):
     """Who an `AuthProvider` says the in-flight caller is -- not yet a stored `User`."""
@@ -47,6 +50,15 @@ class Principal(BaseModel, frozen=True, extra="forbid"):
     def unverified(cls, username: str) -> Self:
         """An identity resolved best-effort, with nothing proving it -- attribution, not authentication."""
         return cls(issuer=UNVERIFIED_ISSUER, subject=username, username=username)
+
+    @classmethod
+    def system(cls, task: str) -> Self:
+        """
+        The dlboard server itself, doing `task` (retention, emptying the Trash): who that work is recorded as done by.
+
+        No one signs in as one, and it is not a person: listing or searching users leaves it out.
+        """
+        return cls(issuer=SYSTEM_ISSUER, subject=task, username=f"dlboard:{task}")
 
 
 class NewUser(BaseModel, frozen=True, extra="forbid"):

@@ -27,8 +27,8 @@ if TYPE_CHECKING:
 
     from dlboard.serve._custodian import TaskContext
 
-TRASH_PRINCIPAL: Final = models.Principal(issuer="dlboard:system", subject="trash", username="dlboard:trash")
-"""Who the Trash's own purges are asked for as: an issuer no auth provider issues, so no one signs in as it."""
+TRASH_PRINCIPAL: Final = models.Principal.system("trash")
+"""Who the Trash's own purges are asked for as."""
 
 _ORDER: Final = (
     models.EntityType.PROJECT,

@@ -41,10 +41,8 @@ _DELETED = Counter[NoAttributes](
     "dlboard.retention.runs.deleted", Unit.RUNS, "Runs retention moved to the Trash."
 )
 
-RETENTION_PRINCIPAL: Final = models.Principal(
-    issuer="dlboard:system", subject="retention", username="dlboard:retention"
-)
-"""Who retention deletes as: an issuer no auth provider issues, so no one signs in as it."""
+RETENTION_PRINCIPAL: Final = models.Principal.system("retention")
+"""Who retention deletes as."""
 
 
 class RetentionTask(StrEnum):

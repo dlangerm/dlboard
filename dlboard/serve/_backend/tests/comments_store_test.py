@@ -63,6 +63,16 @@ def test_get_users_is_sorted_by_username(store: SQLLiteStore) -> None:
     assert [u.username for u in store.get_users()] == ["alice", "bob", "carol"]
 
 
+def test_get_users_lists_people_and_finds_dlboards_own_users_only_by_id(store: SQLLiteStore) -> None:
+    """Retention and the Trash act as users of their own, which are never offered as people (#647)."""
+    alice = store.get_or_create_user(models.Principal.unverified("alice"))
+    retention = store.get_or_create_user(models.Principal.system("retention"))
+
+    assert [u.username for u in store.get_users()] == ["alice"]
+    assert store.get_users(name_contains="dlboard") == []
+    assert [u.username for u in store.get_users({alice.id, retention.id})] == ["alice", "dlboard:retention"]
+
+
 def test_get_users_asked_for_by_more_ids_than_a_statement_binds_is_still_one_sorted_and_limited_list(
     store: SQLLiteStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:

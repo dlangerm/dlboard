@@ -2596,7 +2596,7 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
     def get_users(
         self, user_ids: Collection[int] | None = None, *, name_contains: str = "", limit: int | None = None
     ) -> list[models.User]:
-        """Users, by username: only `user_ids` (every user, for `None`), only a name with `name_contains` in it, the first `limit`."""
+        """Users, by username: only `user_ids` (every person, for `None`), only a name with `name_contains` in it, the first `limit`."""
         users = self._tables[models.User]
         searched = name_contains.strip().lower()
         named: list[sa.ColumnElement[bool]] = (
@@ -2604,7 +2604,7 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
         )
         # One statement for every user, or one for each batch of the ids asked for: the database's order, if one is enough.
         wheres = (
-            [named]
+            [[*named, users.c.issuer != models.SYSTEM_ISSUER]]
             if user_ids is None
             else [[*named, users.c.id.in_(batch)] for batch in _in_batches(user_ids)]
         )

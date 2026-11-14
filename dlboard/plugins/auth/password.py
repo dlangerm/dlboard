@@ -388,7 +388,9 @@ def _setup_token(secret_key: str) -> str:
 
 class _SetupLatch:
     """
-    Whether `/setup` may still make the first admin: only while the database has no users at all.
+    Whether `/setup` may still make the first admin: only while the database has no users but dlboard's own.
+
+    Its background tasks make those as it starts, and `get_users` lists only people.
 
     Deliberately not "no admin exists": admins can be demoted, and `DLBOARD_ADMIN_USERS` only grants
     `Scope.ALL` at sign-in, so a server with no `Scope.ALL` user isn't necessarily a fresh one. Users are

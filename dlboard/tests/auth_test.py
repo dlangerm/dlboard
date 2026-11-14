@@ -429,6 +429,20 @@ def test_first_admin_setup_makes_one_admin_then_closes(empty_deployment: Passwor
 
 
 @pytest.mark.usefixtures("setup_enabled")
+def test_first_admin_setup_stays_open_while_the_only_users_are_dlboards_own(
+    empty_deployment: PasswordDeployment,
+) -> None:
+    """Retention and the Trash make their users as the server starts, before anyone could use `/setup` (#647)."""
+    client, store = empty_deployment
+    for task in ("retention", "trash"):
+        store.get_or_create_user(models.Principal.system(task))
+
+    dispose_stores(build_app([sqlite, *PASSWORD_AUTH, *BUILTIN_BACKEND]))  # a restart isn't refused
+    form = _setup_form(client, _setup_token(os.environ["DLBOARD_SECRET_KEY"]))
+    assert client.post("/setup", data=form).status_code == 302
+
+
+@pytest.mark.usefixtures("setup_enabled")
 def test_first_admin_setup_stays_closed_on_a_server_with_users_but_no_admin(
     deployment: PasswordDeployment,
 ) -> None:

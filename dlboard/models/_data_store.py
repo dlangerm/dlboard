@@ -615,7 +615,7 @@ class DataStore(typing.Protocol[_P]):
 
         Only `user_ids` (every user, for `None`), only those with `name_contains` in their username (whatever its case),
         the first `limit` of them. What a page shows names for asks for those ids, so that it costs what it shows and not
-        how many users there are.
+        how many users there are. Every user is every person: dlboard's own (`Principal.system`) only comes by its id.
         """
         ...
 
