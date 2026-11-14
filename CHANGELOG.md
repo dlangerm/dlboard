@@ -12,6 +12,8 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-11-14
+
 ### Added
 
 * **Log Plotly figures, drawn as the interactive figures they are.** `PlotlyFigure` logs any Plotly figure (or a dict
