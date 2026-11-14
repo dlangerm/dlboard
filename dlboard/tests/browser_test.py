@@ -48,6 +48,7 @@ from dlboard.plugins.charts.image_series import IMAGE_WINDOW_STEPS, ImageChart
 from dlboard.plugins.charts.line_chart import LEGEND_MAX_HEIGHT
 from dlboard.plugins.charts.plotly_chart import PLOTLY_WINDOW_STEPS, PlotlyChart
 from dlboard.serve import get_system_data_store
+from dlboard.serve._backend._artifact_download import artifact_url
 from dlboard.serve._backend._purge_work import PurgeWork
 from dlboard.serve._custodian import get_system_task_store
 from dlboard.serve._jump import JUMP_LIMIT, JUMP_SELECT_ID
@@ -4911,6 +4912,12 @@ def test_scrubbing_the_enlarged_views_timeline_puts_in_only_the_pictures_it_stop
     expect(dialog.locator(".dl-view-step")).to_have_text("step 0")
     page.wait_for_function(
         "(img) => img.complete && img.naturalWidth > 0", arg=viewer.locator("img").first.element_handle()
+    )
+    # Every picture in the browser already, so they arrive at once: a busy server's first download of one may take longer
+    # than the spinner waits, which would be the spinner doing its job (#648).
+    page.evaluate(
+        "(urls) => Promise.all(urls.map((url) => { const picture = new Image(); picture.src = url; return picture.decode(); }))",
+        [artifact_url(a) for a in get_system_data_store().fetch_artifacts(experiment_id, run_ids=None)],
     )
     # What the picture is set to, and whether a spinner is ever shown, from now on.
     viewer.evaluate(
