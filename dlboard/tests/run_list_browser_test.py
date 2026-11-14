@@ -175,6 +175,57 @@ def test_drawing_or_hiding_a_run_costs_one_server_request(
     assert console_errors == []
 
 
+_RESCANNED_IN_CHARTS = """
+() => {
+  // Components whose class asks Dash for children updates (Mantine's Tooltip, Menu parts, ...): the renderer scans every
+  // updated path for each one mounted, on every state change of the page.
+  const rescanned = (node) => {
+    const cls = node.namespace && window[node.namespace] && window[node.namespace][node.type];
+    return Boolean(cls && "dashChildrenUpdate" in cls);
+  };
+  let inCharts = 0;
+  const walk = (node, inChart) => {
+    if (Array.isArray(node)) { node.forEach((n) => walk(n, inChart)); return; }
+    if (!node || typeof node !== "object") return;
+    if (node.type && node.namespace) {
+      const id = node.props && node.props.id;
+      const chart = inChart || (id && typeof id === "object" && id.type === "chart-content");
+      if (chart && rescanned(node)) inCharts += 1;
+      walk(node.props, chart);
+      return;
+    }
+    for (const value of Object.values(node)) walk(value, inChart);
+  };
+  walk(window.store.getState().layout, false);
+  return inCharts;
+}
+"""
+
+
+def test_a_chart_card_mounts_nothing_dash_rescans_on_every_change_and_its_controls_say_what_they_do(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """
+    A chart card's controls are labelled by CSS, not Mantine's `Tooltip`: Dash's renderer re-examines every mounted
+    `Tooltip` (or menu part) on every state change, so a page of charts paid for three per chart on every click.
+    """
+    _experiment_of_runs(page, live_server_url, "Light Controls Experiment", 2)
+    expect(page.locator(_CURVES)).to_have_count(2)
+
+    assert page.evaluate(_RESCANNED_IN_CHARTS) == 0
+    edit = page.locator(".dl-chart-item").first.get_by_role("button", name="Edit chart")
+    page.locator(".dl-chart-item").first.hover()
+    edit.hover()
+    tooltip = edit.locator("xpath=..")
+    expect(tooltip).to_have_attribute("data-dl-tooltip", "Edit chart")
+    expect(tooltip).to_have_css("position", "relative")
+    shown = "(el) => getComputedStyle(el, '::after').opacity"
+    page.wait_for_function(
+        f"() => ({shown})(document.querySelector('[data-dl-tooltip=\"Edit chart\"]')) === '1'"
+    )
+    assert console_errors == []
+
+
 def test_deleting_the_selected_runs_asks_once_and_deletes_them_all(
     page: Page, live_server_url: str, console_errors: list[str]
 ) -> None:

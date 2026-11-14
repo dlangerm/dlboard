@@ -36,7 +36,7 @@ def test_render_delete_control_icon_only_renders_a_tooltipped_trash_icon() -> No
         for c in render_delete_control(_IDS, label="Delete project", entity_noun="project", icon_only=True)
     )
 
-    assert tooltip.label == "Delete project"
+    assert props(tooltip)["data-dl-tooltip"] == "Delete project"
     button = props(tooltip.children)  # pyrefly: ignore [unknown-argument-type]
     assert button["id"] == "btn"
     assert button["aria-label"] == "Delete project"

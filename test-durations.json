@@ -2968,6 +2968,7 @@
   "dlboard/tests/retention_browser_test.py::test_a_project_is_held_to_a_rule_after_its_grace_period_and_the_change_can_be_cancelled[chromium]": 5.433026699000038,
   "dlboard/tests/retention_browser_test.py::test_an_experiment_page_says_what_keeps_its_runs_and_links_to_where_that_is_set[chromium]": 5.508342396995431,
   "dlboard/tests/retention_browser_test.py::test_the_rule_for_picker_finds_an_experiment_past_the_newest_it_lists_by_searching_the_server[chromium]": 5.0,
+  "dlboard/tests/run_list_browser_test.py::test_a_chart_card_mounts_nothing_dash_rescans_on_every_change_and_its_controls_say_what_they_do[chromium]": 6.0,
   "dlboard/tests/run_list_browser_test.py::test_a_diff_of_more_runs_than_it_can_read_side_by_side_is_refused[chromium]": 7.657830417003424,
   "dlboard/tests/run_list_browser_test.py::test_a_link_to_a_run_draws_just_that_run_and_says_so[chromium]": 6.85279164500389,
   "dlboard/tests/run_list_browser_test.py::test_a_pin_made_by_someone_else_appears_in_the_list_without_drawing_it_again[chromium]": 9.548462432001543,

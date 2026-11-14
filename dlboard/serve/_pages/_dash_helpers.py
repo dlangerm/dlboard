@@ -39,10 +39,14 @@ def tooltipped_action_icon(  # noqa: PLR0913
     A hover-tooltipped `ActionIcon`.
 
     The shared fixture for every icon-only edit/delete/suggest control across the app, so each one
-    doesn't need to remember to wrap itself in a `Tooltip` -- an icon with no visible label is
+    doesn't need to remember to wrap itself in a tooltip -- an icon with no visible label is
     otherwise not self-explanatory. The tooltip text doubles as the button's accessible name.
+
+    The tooltip is CSS (`dl-tooltip`, `_shell.css`), not Mantine's `Tooltip`: Dash's renderer re-examines every mounted
+    `Tooltip` on every state change of the page, and every chart card has three of these, so a page of charts paid for
+    them on every click (with 20 charts open, about a third of a run toggle's time in the browser).
     """
-    return dmc.Tooltip(
+    return html.Span(
         dmc.ActionIcon(
             icon(name),
             id=component_id if isinstance(component_id, str) else dict(component_id),
@@ -54,9 +58,8 @@ def tooltipped_action_icon(  # noqa: PLR0913
             **{"aria-label": label},
             **extra,
         ),
-        label=label,
-        position="top",
-        withArrow=True,
+        className="dl-tooltip",
+        **{"data-dl-tooltip": label},
     )
 
 

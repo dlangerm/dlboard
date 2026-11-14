@@ -60,6 +60,9 @@ pulls that section's body into the GitHub release notes and publishes both distr
 * Showing or hiding a run costs one server round trip, where it cost four: the run list it already updated, the view it
   stayed in and the "Newest" button it drew again each made a request that found nothing to do, and queued behind the next
   toggle.
+* Clicking anything on a page of many charts is faster: a chart's icon controls are labelled by CSS, not Mantine's
+  `Tooltip`, which Dash's renderer re-examined on every change of the page (with 20 charts open, about a third of a run
+  toggle's time in the browser).
 
 ## [0.16.0] - 2026-11-11
 

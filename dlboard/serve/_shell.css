@@ -214,3 +214,64 @@
   margin-right: 0;
   vertical-align: middle;
 }
+
+/*
+ * A tooltip drawn by CSS alone, over an icon-only control (`tooltipped_action_icon`): its text is the wrapper's
+ * `data-dl-tooltip`. Not Mantine's `Tooltip` component, which Dash's renderer re-examines on every state change of the
+ * page, at a cost that grows with how many are mounted and how much the page has changed (every chart card has three).
+ * Looks as Mantine's does: above the control, with an arrow, in the scheme's inverse colors.
+ */
+.dl-tooltip {
+  --dl-tooltip-bg: var(--mantine-color-gray-9);
+  --dl-tooltip-color: var(--mantine-color-white);
+
+  position: relative;
+  display: inline-flex;
+}
+
+[data-mantine-color-scheme="dark"] .dl-tooltip {
+  --dl-tooltip-bg: var(--mantine-color-gray-2);
+  --dl-tooltip-color: var(--mantine-color-black);
+}
+
+.dl-tooltip::before,
+.dl-tooltip::after {
+  position: absolute;
+  left: 50%;
+  z-index: 300;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 100ms ease;
+}
+
+/* The label. */
+.dl-tooltip::after {
+  bottom: calc(100% + 7px);
+  padding: calc(var(--mantine-spacing-xs) / 2) var(--mantine-spacing-xs);
+  border-radius: var(--mantine-radius-sm);
+  background: var(--dl-tooltip-bg);
+  color: var(--dl-tooltip-color);
+  content: attr(data-dl-tooltip);
+  font-size: var(--mantine-font-size-sm);
+  line-height: 1.4;
+  white-space: nowrap;
+  transform: translateX(-50%);
+}
+
+/* The arrow under it. */
+.dl-tooltip::before {
+  bottom: calc(100% + 1px);
+  border: 6px solid transparent;
+  border-top-color: var(--dl-tooltip-bg);
+  border-bottom: 0;
+  content: "";
+  transform: translateX(-50%);
+}
+
+/* On hover, and on focus from the keyboard: not once a click leaves the control focused. */
+.dl-tooltip:hover::before,
+.dl-tooltip:hover::after,
+.dl-tooltip:has(:focus-visible)::before,
+.dl-tooltip:has(:focus-visible)::after {
+  opacity: 1;
+}
