@@ -8,6 +8,7 @@ markup or callbacks use lives with that feature (`_panel_view.py`, `_chart_view.
 from __future__ import annotations
 
 from dlboard.serve._component_ids import DivId, StoreId
+from dlboard.serve._run_toggle import RUN_TOGGLE_ID as RUN_TOGGLE
 
 
 class ExperimentPage:
@@ -20,6 +21,8 @@ METRIC_CONTENT_ID: DivId[ExperimentPage] = DivId("metrics-view")
 STATE_PAGE_STORAGE: StoreId[ExperimentPage] = StoreId("current-page")
 STATE_VIEW_ID: StoreId[ExperimentPage] = StoreId("view-id-state")
 """The named view (`Page.id`) this page is showing, from its `?view=` URL, or `None` for the shared page."""
+RUN_TOGGLE_ID: StoreId[ExperimentPage] = StoreId(RUN_TOGGLE)
+"""The last run drawn or hidden in the browser, which charts that can show or hide it follow (`dlboard.serve.RUN_TOGGLE_ID`)."""
 RUN_LIST_PAGE_ID: StoreId[ExperimentPage] = StoreId("run-list-page")
 """
 `STATE_PAGE_STORAGE`, passed on to the run list only when it may change it (`run_list_gate.js`): not for a page an action

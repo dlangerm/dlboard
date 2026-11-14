@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Annotated, Any
 
 from dash import State, no_update
+from pydantic import Json
 from structlog.stdlib import get_logger
 
 from dlboard.serve import get_data_store
@@ -253,6 +254,10 @@ class ChartsOnScreen(CallbackStates):
     chart_ids: Annotated[list[chart_view.ChartID], State(chart_view.CHART_BODY.all(), "id")]
     fingerprint_ids: Annotated[list[chart_view.ChartID], State(chart_view.CHART_FINGERPRINT.all(), "id")]
     fingerprints: Annotated[list[str], State(chart_view.CHART_FINGERPRINT.all(), "children")]
+    hiding: Annotated[
+        list[Json[list[int]]], State(chart_view.CHART_FINGERPRINT.all(), chart_view.HIDING_RUNS)
+    ]
+    """Which runs each chart hides in the browser: one that hides any is drawn again, as it is not what it was drawn as."""
 
     def unchanged(self) -> list[Any]:
         """The value of `CHART_BODY.all()`'s `children` that leaves every chart as it is."""
@@ -265,7 +270,10 @@ class ChartsOnScreen(CallbackStates):
         dataframes, fetched = fetch_open_panel_dataframes(store, page, self.chart_ids, paging)
         shown = {
             (i.panel, i.index): fingerprint
-            for i, fingerprint in zip(self.fingerprint_ids, self.fingerprints, strict=True)
+            for i, fingerprint, hiding in zip(
+                self.fingerprint_ids, self.fingerprints, self.hiding, strict=True
+            )
+            if not hiding
         }
         contents, drawn = refresh_chart_bodies(
             self.chart_ids, {p.name: p for p in page.panels}, dataframes, shown, paging.sizes.charts

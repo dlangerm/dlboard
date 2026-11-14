@@ -173,6 +173,15 @@ in each. It is an internal mechanism of dlboard's own charts for now (`ChartType
 `ViewerState.applied_to(parameters)` are the Python side, and the image chart is the only one that uses them): the
 browser-side store is not a plugin interface yet, so a chart type of your own has no way to keep viewer state.
 
+Showing or hiding a run with the eye in the run list redraws every chart whose data that changes, on the server. A chart
+type can do it in the browser instead, at once: set `hides_runs_in_browser = True` on it, and in its `plug()` register a
+clientside callback with `dash.Input(dlboard.serve.RUN_TOGGLE_ID, "data")`. Its data is each toggle as it is made,
+`{"action": "draw" | "hide", "run_ids": [...]}`, and the callback changes what the chart shows by it: it drops a hidden
+run's series and shows a drawn one's again. To do that it keeps every run the chart was drawn with. `line_chart.py` and
+`line_chart_run_toggle.js` are the reference. A toggle is done in the browser only when every chart on screen can, and
+holds every run drawn; anything else is drawn on the server as before. It is for data the chart already holds: a chart
+that would have to fetch a run's data to show it again should leave the toggle to the server.
+
 A table of runs, with an artifact column:
 
 ![A table chart](../images/table-chart.png)

@@ -40,6 +40,10 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ### Changed
 
+* **Hiding a run, and showing it again, is instant on a page of line charts.** The lines are hidden and shown in the
+  browser, and the server only saves the choice, where every chart was read and drawn again. A run the charts never drew
+  (hidden before they were, or one a chart drew again without) is still drawn by the server, as is a page with another
+  kind of chart on screen. A chart plugin can do the same (`ChartType.hides_runs_in_browser`, `dlboard.serve.RUN_TOGGLE_ID`).
 * **A Plotly chart's read does not grow with training.** Its figures are read a window of steps at a time, as an image
   chart's pictures are, and a template's data only at the steps it draws (each run's latest, or thinned to
   `max_data_steps`). `DataStore.fetch_artifacts(steps=)` also takes a set of steps, and `DataRequest.artifact_windows`

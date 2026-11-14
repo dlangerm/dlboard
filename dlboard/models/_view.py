@@ -180,6 +180,18 @@ class ChartType(ABC, BaseModel, typing.Generic[_Parameters, _Dataframe, _Chart],
 
     name: typing.ClassVar[str]
     """The name of the chart type."""
+    hides_runs_in_browser: typing.ClassVar[bool] = False
+    """
+    Whether a chart of this type hides a run, and shows it again, in the browser, without being drawn again.
+
+    Such a chart holds the series of every run it drew, and follows each run toggled in the page (`RUN_TOGGLE_ID`,
+    `dlboard.serve`) itself: its plugin registers a clientside callback from that store to its component, which hides a
+    hidden run's series and shows a drawn one's again. Drawing or hiding a run is then instant, and asks the server only
+    to save the choice. With any other chart on screen, or a run drawn that some chart never drew, the server draws the
+    charts again, as it always has.
+
+    Only for a chart that already holds what it shows again, as drawn: it never fetches a run's data in the browser.
+    """
 
     @classmethod
     @abstractmethod
@@ -478,6 +490,14 @@ class ChartTypeRegistry:
     def natural_width(cls, chart: ChartInstance[_Dataframe, _Chart], context: RenderContext) -> int:
         chart_type, parameters = cls._typed_chart(chart)
         return chart_type.natural_width_in(parameters, context)
+
+    @classmethod
+    def hides_runs_in_browser(cls, chart: ChartInstance[_Dataframe, _Chart]) -> bool:
+        """Whether `chart` hides and shows its runs in the browser (see `ChartType.hides_runs_in_browser`)."""
+        try:
+            return cls.get_chart_type(chart.chart_type).hides_runs_in_browser
+        except UnknownChartTypeError:
+            return False
 
     @classmethod
     def keeps_viewer_state(cls, chart: ChartInstance[_Dataframe, _Chart]) -> bool:

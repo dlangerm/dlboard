@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Any, ClassVar, Final, cast
 
 import dash_mantine_components as dmc
@@ -58,6 +59,16 @@ CHART_BODY: Final = ChartPattern("chart-body")
 """A chart item's body: the chart itself, what a live update replaces."""
 CHART_FINGERPRINT: Final = ChartPattern("chart-fingerprint")
 """The hidden node inside a `CHART_BODY` that carries the `chart_data_fingerprint` of the data it was drawn from."""
+# What a run drawn or hidden in the browser (`act_in_browser.js`) reads, and writes, of each chart's fingerprint.
+HIDES_RUNS: Final = "data-dl-hides-runs"
+"""`"1"` if the chart's type shows and hides a run in the browser (`ChartType.hides_runs_in_browser`), else `"0"`."""
+HOLDS_RUNS: Final = "data-dl-runs"
+"""The runs whose series the chart was drawn with, as a JSON list of ids: the ones it can show again."""
+HIDING_RUNS: Final = "data-dl-hiding"
+"""
+Which of the runs it holds the chart hides in the browser, as a JSON list of ids: `[]` as drawn. One that hides some does
+not show what its fingerprint says, so the server draws it again whenever it draws (`ChartsOnScreen`).
+"""
 CHART_DRAFT: Final = ChartPattern("chart-draft")
 """
 Where the chart editor draws the chart being edited, in its own card: while it holds something, the card shows it in
@@ -176,10 +187,21 @@ def chart_body(
     too many metrics' every step (`wide`, refused) shows why it is not drawn instead.
     """
     chart = panel.charts[index]
+    runs = (
+        sorted(int(r) for r in dataframe["run_id"].unique()) if "run_id" in dataframe.columns else list[int]()
+    )
     fingerprint = html.Div(
         chart_data_fingerprint(dataframe),
         id=CHART_FINGERPRINT.of(panel.name, index),
         hidden=True,
+        **cast(
+            "dict[str, Any]",
+            {
+                HIDES_RUNS: "1" if models.ChartTypeRegistry.hides_runs_in_browser(chart) else "0",
+                HOLDS_RUNS: json.dumps(runs),
+                HIDING_RUNS: "[]",
+            },
+        ),
     )
     drawn = (
         _refused(wide)

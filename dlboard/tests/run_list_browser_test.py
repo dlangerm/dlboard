@@ -226,6 +226,67 @@ def test_a_chart_card_mounts_nothing_dash_rescans_on_every_change_and_its_contro
     assert console_errors == []
 
 
+def test_line_charts_hide_and_show_a_run_again_in_the_browser_without_waiting_for_the_server(
+    page: Page, live_server_url: str, monkeypatch: pytest.MonkeyPatch, console_errors: list[str]
+) -> None:
+    """
+    With only line charts on screen, a run hidden, and shown again, changes the lines at once: they hold every run they
+    were drawn with, and the server only saves the choice. A run they never drew still waits for the server's redraw.
+    """
+    _, _, rows = _experiment_of_runs(page, live_server_url, "Browser Toggle Experiment", 3)
+    curves = page.locator(_CURVES)
+    expect(curves).to_have_count(3)
+    store_type = type(get_system_data_store())
+    fetch_metrics = store_type.fetch_metrics
+
+    def slow_fetch_metrics(*args: Any, **kwargs: Any) -> Any:  # noqa: ANN401 -- whatever the store's does
+        time.sleep(2)
+        return fetch_metrics(*args, **kwargs)
+
+    monkeypatch.setattr(store_type, "fetch_metrics", slow_fetch_metrics)
+
+    rows.first.locator(".dl-eye").click()
+    expect(curves).to_have_count(2, timeout=1000)
+    page.wait_for_load_state("networkidle")
+    rows.first.locator(".dl-eye").click()
+    expect(curves).to_have_count(3, timeout=1000)
+    page.wait_for_load_state("networkidle")
+
+    # Hidden before the charts on screen were drawn, a run's lines are not there to show: the server draws them.
+    rows.first.locator(".dl-eye").click()
+    expect(curves).to_have_count(2, timeout=1000)
+    page.wait_for_load_state("networkidle")
+    page.reload()
+    expect(curves).to_have_count(2)
+    rows.first.locator(".dl-eye").click()
+    page.wait_for_timeout(1000)
+    expect(curves).to_have_count(2)
+    expect(curves).to_have_count(3, timeout=10_000)
+    assert console_errors == []
+
+
+def test_a_run_hidden_in_the_browser_and_drawn_again_by_the_server_stays_drawn_through_the_next_toggle(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """A toggle made in the browser changes the lines it names, not every run the browser hid before the server drew again."""
+    _, _, rows = _experiment_of_runs(page, live_server_url, "Toggle After Redraw Experiment", 3)
+    curves = page.locator(_CURVES)
+    expect(curves).to_have_count(3)
+    rows.first.locator(".dl-eye").click()
+    expect(curves).to_have_count(2)
+    page.wait_for_load_state("networkidle")
+    page.get_by_role("button", name="Newest 20").click()
+    expect(curves).to_have_count(3)
+    page.wait_for_load_state("networkidle")
+
+    rows.nth(1).locator(".dl-eye").click()
+    expect(curves).to_have_count(2)
+    page.wait_for_load_state("networkidle")
+    page.wait_for_timeout(500)
+    expect(curves).to_have_count(2)
+    assert console_errors == []
+
+
 def test_deleting_the_selected_runs_asks_once_and_deletes_them_all(
     page: Page, live_server_url: str, console_errors: list[str]
 ) -> None:

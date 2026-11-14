@@ -20,6 +20,7 @@ import dash_mantine_components as dmc
 from dash import Dash, Input, Output, State, ctx, html, no_update
 from dash.dcc import Store
 from dash.exceptions import PreventUpdate
+from pydantic import BaseModel
 from structlog.stdlib import get_logger
 
 from dlboard import models
@@ -125,6 +126,9 @@ NAVBAR_NEWEST_RUNS_CLICKED_ID: StoreId[ids.ExperimentPage] = StoreId("navbar-new
 """When the "Newest N" button was last clicked: in the page's layout, so drawing the button again is not a click."""
 _NEWEST_RUNS_CLICKED_JS: typing.Final = ClientsideScript(Path(__file__).with_name("newest_runs_clicked.js"))
 _RUN_LIST_GATE_JS: typing.Final = ClientsideScript(Path(__file__).with_name("run_list_gate.js"))
+RUN_ACTION_ID: StoreId[ids.ExperimentPage] = StoreId("run-action")
+"""A run action as the browser passes it on to `act_on_runs`, having done what it could itself (`act_in_browser.js`)."""
+_ACT_IN_BROWSER_JS: typing.Final = ClientsideScript(Path(__file__).with_name("act_in_browser.js"))
 NAVBAR_HPARAM_APPLIED_COLS_ID: StoreId[ids.ExperimentPage] = StoreId("navbar-hparam-applied-cols")
 NAVBAR_COLUMNS_PICKER = ColumnsPickerIds(
     select=NAVBAR_HPARAM_COL_SELECT_ID,
@@ -238,6 +242,7 @@ def run_table_shells() -> list[Component]:
         Store(id=request_store_id(RunListSurface.EXPERIMENT)),
         Store(id=navigate_id(RunListSurface.EXPERIMENT)),
         Store(id=NAVBAR_NEWEST_RUNS_CLICKED_ID),
+        Store(id=RUN_ACTION_ID),
         *row_update_shells(RunListSurface.EXPERIMENT),
         *delete_shells(RunListSurface.EXPERIMENT),
     ]
@@ -789,10 +794,18 @@ class _Outputs:
         )
 
 
+class _Asked(BaseModel, frozen=True, extra="forbid"):
+    """A run action as `act_in_browser.js` passes it on: the request, and whether the charts on screen already did it."""
+
+    request: RunActionRequest
+    in_browser: bool
+    """A draw or hide every chart on screen made itself: the server saves it and updates the run list, draws nothing."""
+
+
 class _Act(edits.ChartsOnScreen):
     """What `act_on_runs` reads: the request, the page and paging it is made on, and the charts it redraws."""
 
-    request: Annotated[dict[str, Any] | None, Input(request_store_id(RunListSurface.EXPERIMENT), "data")]
+    asked: Annotated[dict[str, Any] | None, Input(RUN_ACTION_ID, "data")]
     page_json: Annotated[str, State(ids.STATE_PAGE_STORAGE, "data")]
     paging_json: Annotated[str, State(ids.PANEL_PAGING_ID, "data")]
     experiment_id: Annotated[int, State(constants.STATE_EXPERIMENT_ID, "data")]
@@ -801,15 +814,19 @@ class _Act(edits.ChartsOnScreen):
     ]
 
 
-def _draw_or_hide(store: DataStore[...], request: RunActionRequest, act: _Act) -> _Outputs:
+def _draw_or_hide(
+    store: DataStore[...], request: RunActionRequest, act: _Act, *, in_browser: bool
+) -> _Outputs:
     """
     Draw or hide the requested runs: the view's selection of runs, saved with it, so it is the same for everyone who opens it.
 
     Always from the view's own runs, never from one focused run (`Paging.focus`): a link to a run is how someone looks at
     it, and drawing another beside it is then a change to what the view draws, which leaves the focus.
 
-    Only the charts whose data that changes are drawn again, in place (#616): the panels stay as they are, and nothing
-    covers them while it happens (#627). Leaving a focus goes to the view's own address, where the page is drawn again.
+    When every chart on screen already showed or hid the runs itself (`in_browser`, `act_in_browser.js`), nothing is drawn
+    or read for them: the choice is saved and the run list updated. Otherwise only the charts whose data that changes are
+    drawn again, in place (#616): the panels stay as they are, and nothing covers them while it happens (#627). Leaving a
+    focus goes to the view's own address, where the page is drawn again.
     """
     document = repo.load_page(
         store, repo.ref_of(page_model.BasicExperimentPage.model_validate_json(act.page_json))
@@ -826,10 +843,13 @@ def _draw_or_hide(store: DataStore[...], request: RunActionRequest, act: _Act) -
         raise PreventUpdate
     cap = ShownRunsSettings().max_shown_runs
     if len(now) > cap:
+        # The charts that showed the runs in the browser at once (`act_in_browser.js`) are drawn as the view still is.
+        unchanged = page_model.BasicExperimentPage.model_validate_json(act.page_json)
         return _Outputs(
             notices=notice(
                 "Too many runs to draw", f"A view draws at most {cap} runs. Hide some to draw others."
-            )
+            ),
+            bodies=act.redraw(store, unchanged, paging)[0],
         )
     # A selection replaces what a view left out before selections existed, so that is cleared with it.
     edit = edits.PageEdit(document=page_model.DocumentSettings(selected_runs=sorted(now), excluded_runs=[]))
@@ -839,7 +859,7 @@ def _draw_or_hide(store: DataStore[...], request: RunActionRequest, act: _Act) -
         # runs. Not the panel area as an `Output`: Dash counts a callback as loading every output it declares for as
         # long as it runs, so the common redraw in place would show the panel area's loader over every chart (#627).
         return _Outputs(page_json=page.model_dump_json(), destination=unfocused_href(act.experiment_id, page))
-    bodies, _ = act.redraw(store, page, paging)
+    bodies = None if in_browser else act.redraw(store, page, paging)[0]
     page_json = page.model_dump_json()
     return _Outputs(
         page_json=page_json,
@@ -873,6 +893,18 @@ def _diff(request: RunActionRequest) -> _Outputs:
 
 
 def _register_run_actions(app: Dash) -> None:
+    app.clientside_callback(
+        _ACT_IN_BROWSER_JS.source,
+        Output(ids.RUN_TOGGLE_ID, "data"),
+        Output(chart_view.CHART_FINGERPRINT.all(), chart_view.HIDING_RUNS),
+        Output(RUN_ACTION_ID, "data"),
+        Input(request_store_id(RunListSurface.EXPERIMENT), "data"),
+        State(chart_view.CHART_FINGERPRINT.all(), chart_view.HIDES_RUNS),
+        State(chart_view.CHART_FINGERPRINT.all(), chart_view.HOLDS_RUNS),
+        State(chart_view.CHART_FINGERPRINT.all(), chart_view.HIDING_RUNS),
+        prevent_initial_call=True,
+    )
+
     @app.callback(
         Output(ids.STATE_PAGE_STORAGE, "data", allow_duplicate=True),
         Output(ids.RUN_LIST_HANDLED_ID, "data", allow_duplicate=True),
@@ -892,12 +924,13 @@ def _register_run_actions(app: Dash) -> None:
         **states: Any,  # noqa: ANN401 -- validated on the first line
     ) -> tuple[Any, ...]:
         act = _Act.model_validate(states)
-        if act.request is None:
+        if act.asked is None:
             raise PreventUpdate
-        request = RunActionRequest.model_validate(act.request)
+        asked = _Asked.model_validate(act.asked)
+        request = asked.request
         match request.action:
             case RunAction.DRAW | RunAction.HIDE:
-                return _draw_or_hide(get_data_store(), request, act).outputs(act)
+                return _draw_or_hide(get_data_store(), request, act, in_browser=asked.in_browser).outputs(act)
             case RunAction.DIFF:
                 return _diff(request).outputs(act)
             case RunAction.DELETE:

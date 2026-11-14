@@ -8,16 +8,19 @@ from pathlib import Path
 
 import dash_mantine_components as dmc
 import pandas as pd
+from dash import ALL, Input, Output, State
 from pydantic import BaseModel, Field
 
 from dlboard.models import (
     ADVANCED_SECTION,
+    DEFAULT_RENDER_CONTEXT,
     DISPLAY_SECTION,
     RUN_NAME_COLUMN,
     ChartType,
     ColumnKind,
     DataRequest,
     MetricColumn,
+    RenderContext,
 )
 from dlboard.plugins.charts._axis_label import (
     DEFAULT_MAX_AXIS_LABEL_CHARS,
@@ -28,7 +31,7 @@ from dlboard.plugins.charts._axis_label import (
 from dlboard.plugins.charts._chart_title import titled
 from dlboard.plugins.charts._empty_chart import nothing_logged
 from dlboard.plugins.charts._sampling import DEFAULT_MAX_POINTS, shared_sample_grid
-from dlboard.serve import AssetKind, series_color, serve_asset
+from dlboard.serve import RUN_TOGGLE_ID, AssetKind, ClientsideScript, series_color, serve_asset
 
 if typing.TYPE_CHECKING:
     from dash import Dash
@@ -150,6 +153,7 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.Stack], frozen=Tr
     """a line chart."""
 
     name: typing.ClassVar[str] = "line"
+    hides_runs_in_browser: typing.ClassVar[bool] = True
 
     @typing.override
     @classmethod
@@ -159,6 +163,13 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.Stack], frozen=Tr
     @classmethod
     @typing.override
     def render(cls, parameters: LineChartSettings, dataframe: pd.DataFrame) -> dmc.Stack:
+        return cls.render_in(parameters, dataframe, DEFAULT_RENDER_CONTEXT)
+
+    @classmethod
+    @typing.override
+    def render_in(
+        cls, parameters: LineChartSettings, dataframe: pd.DataFrame, context: RenderContext
+    ) -> dmc.Stack:
         if dataframe.empty:
             return nothing_logged(parameters.column)
         # `dataframe` is the caller's (a chart's own frame, but a test or a plugin may share one), so this works
@@ -239,6 +250,10 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.Stack], frozen=Tr
         label_formatter = _TOOLTIP_LABEL_FORMATTER.get(parameters.x_axis_type, "lineChartTooltipLabel")
 
         plot = dmc.LineChart(
+            # Under the chart's own id, so a run toggled in the browser leaves or rejoins its lines (`line_chart_run_toggle.js`).
+            **typing.cast(
+                "dict[str, typing.Any]", {"id": line_plot_id(context.chart_id)} if context.chart_id else {}
+            ),
             h=parameters.height,
             data=data,  # pyrefly: ignore [bad-argument-type]
             dataKey=parameters.x_axis,
@@ -283,6 +298,8 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.Stack], frozen=Tr
                 "xAxisName": parameters.x_axis,
                 "chartTitle": parameters.column,
                 "series": series,
+                # Every run the chart was drawn with, which the series hiding a run leaves out are taken from again.
+                "allSeries": series,
             },
             # syncMethod="value" matches synced charts by x-axis value rather than
             # array index — needed because sampled/unsampled charts (or charts
@@ -325,3 +342,23 @@ def plug(app: Dash) -> None:
     LineChart.register(allow_override=True)
     serve_asset(app, AssetKind.SCRIPT, _TOOLTIP_JS_PATH.name, _TOOLTIP_JS_PATH.read_bytes())
     serve_asset(app, AssetKind.STYLESHEET, _TOOLTIP_CSS_PATH.name, _TOOLTIP_CSS_PATH.read_bytes())
+    # A run hidden or drawn in the browser (`RUN_TOGGLE_ID`) leaves every line chart's lines, legend and tooltip at once,
+    # or comes back to them.
+    every = line_plot_id(ALL)
+    app.clientside_callback(
+        _RUN_TOGGLE_JS.source,
+        Output(every, "series"),
+        Output(every, "tooltipProps"),
+        Input(RUN_TOGGLE_ID, "data"),
+        State(every, "series"),
+        State(every, "tooltipProps"),
+        prevent_initial_call=True,
+    )
+
+
+_RUN_TOGGLE_JS: typing.Final = ClientsideScript(Path(__file__).with_name("line_chart_run_toggle.js"))
+
+
+def line_plot_id(chart_id: object) -> dict[str, object]:
+    """The id of the plot of the line chart `chart_id` names (`RenderContext.chart_id`), or a pattern over them."""
+    return {"type": "line-chart-plot", "chart": chart_id}

@@ -55,6 +55,7 @@ from dlboard.serve._pages._page_sections import (
     register_project_tab,
 )
 from dlboard.serve._production_server import resolve_plugins, run_production_server
+from dlboard.serve._run_toggle import RUN_TOGGLE_ID
 from dlboard.serve._series import series_color, series_swatch_class
 from dlboard.serve._settings_env import set_setting_env
 from dlboard.serve._startup import Dependency, wait_for
@@ -62,6 +63,7 @@ from dlboard.serve._url import relative_path
 from dlboard.serve.app import app
 
 __all__ = [
+    "RUN_TOGGLE_ID",
     "SCHEMA_PREP_OPTION",
     "AppSlot",
     "AssetKind",
