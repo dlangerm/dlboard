@@ -92,6 +92,7 @@ from dlboard.serve._pages._experiment._tab_controls import NEW_TAB_PANELS_SELECT
 from dlboard.serve._pages._simple_admin_page import ADMIN_PURGE_CONFIRM_ID
 from dlboard.serve._pages._simple_homepage import NEW_PROJECT_BUTTON_ID, NEW_PROJECT_NAME_ID
 from dlboard.serve._pages._simple_project_page import NEW_EXP_BUTTON_ID, NEW_EXP_NAME_ID
+from dlboard.serve._series import SERIES_SLOTS
 from dlboard.serve.app import PAGE_LOADING_CLASS
 
 if TYPE_CHECKING:
@@ -962,20 +963,22 @@ def test_switching_tabs_does_not_remount_the_navbar_run_table(
     assert console_errors == []
 
 
-def test_each_run_is_drawn_in_its_own_palette_color_matching_its_run_table_swatch(
+def test_each_run_is_drawn_in_its_own_palette_color_and_dash_matching_its_run_table_swatch(
     page: Page, live_server_url: str, console_errors: list[str]
 ) -> None:
     """
     Runs are colored by `series_color` -- CSS variables, not literal colors -- so this checks the
-    part a Python test can't: that the variables actually resolve through Recharts' SVG to real,
-    distinct stroke colors, one per run -- and that the navbar run table labels each run with the
-    very same color, so it reads as the charts' legend.
+    part a Python test can't: that the variables actually resolve through Recharts' SVG to real
+    stroke colors -- and that the navbar run table labels each run with the very same color and
+    dash, so it reads as the charts' legend. Nine runs are more than the palette's colors, so two
+    share one and are told apart by a dash (#500).
     """
     _create_project_and_experiment(page, live_server_url, "Palette Experiment")
     page.locator(".experiment-card").click()
     experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
     api = BasicDlboardAPI(live_server_url)
-    for _ in range(3):
+    runs = SERIES_SLOTS + 1
+    for _ in range(runs):
         run = api.create_run(models.NewRun(experiment_id=experiment_id))
         api.log_metric_batch(
             [
@@ -993,16 +996,22 @@ def test_each_run_is_drawn_in_its_own_palette_color_matching_its_run_table_swatc
     _auto_generate_charts(page)
 
     curves = page.locator(".dl-panel-body .recharts-line-curve")
-    expect(curves).to_have_count(3)
-    strokes = curves.evaluate_all("paths => paths.map(p => getComputedStyle(p).stroke)")
-    assert len(set(strokes)) == 3
-    assert all(stroke.startswith("rgb(") for stroke in strokes), strokes
-    swatch_cells = page.locator(f"#{NAVBAR_HPARAM_DATATABLE_ID} .dl-swatch")
-    expect(swatch_cells).to_have_count(3)
-    swatches = swatch_cells.evaluate_all(
-        "cells => cells.map(c => getComputedStyle(c, '::before').backgroundColor)"
+    expect(curves).to_have_count(runs)
+    # Each line as (its color, its dash).
+    lines = curves.evaluate_all(
+        "paths => paths.map(p => [getComputedStyle(p).stroke, getComputedStyle(p).strokeDasharray])"
     )
-    assert sorted(swatches) == sorted(strokes)
+    assert len({tuple(line) for line in lines}) == runs
+    assert len({stroke for stroke, _ in lines}) == SERIES_SLOTS
+    assert all(stroke.startswith("rgb(") for stroke, _ in lines), lines
+    swatch_cells = page.locator(f"#{NAVBAR_HPARAM_DATATABLE_ID} .dl-swatch")
+    expect(swatch_cells).to_have_count(runs)
+    # Each swatch as (its color, whether it is dashed): a dashed one is a gradient of its color.
+    swatches = swatch_cells.evaluate_all(
+        "cells => cells.map(c => getComputedStyle(c, '::before'))"
+        ".map(s => [s.color, s.backgroundImage !== 'none'])"
+    )
+    assert sorted(map(tuple, swatches)) == sorted((stroke, dash != "none") for stroke, dash in lines)
     assert console_errors == []
 
 
@@ -2961,9 +2970,7 @@ def test_a_plotly_template_is_drawn_with_the_data_each_run_logged_into_it(
         runs = curve_plot.locator(".scatterlayer .trace").evaluate_all(
             "traces => traces.slice(1).map(t => getComputedStyle(t.querySelector('.point')).fill)"
         )
-        colors = swatches.evaluate_all(
-            "cells => cells.map(c => getComputedStyle(c, '::before').backgroundColor)"
-        )
+        colors = swatches.evaluate_all("cells => cells.map(c => getComputedStyle(c, '::before').color)")
         ticks = curve_plot.locator(".xtick text").first.evaluate("t => getComputedStyle(t).fill")
         return sorted(runs), sorted(colors), ticks
 
@@ -3765,9 +3772,7 @@ def test_a_series_band_is_drawn_in_its_runs_palette_colors_in_either_color_schem
 
     def drawn() -> tuple[list[str], list[str]]:
         strokes = medians.evaluate_all("paths => paths.map(p => getComputedStyle(p).stroke)")
-        colors = swatches.evaluate_all(
-            "cells => cells.map(c => getComputedStyle(c, '::before').backgroundColor)"
-        )
+        colors = swatches.evaluate_all("cells => cells.map(c => getComputedStyle(c, '::before').color)")
         return sorted(strokes), sorted(colors)
 
     light_strokes, light_swatches = drawn()

@@ -55,7 +55,7 @@ from dlboard.serve._pages._page_sections import (
     register_project_tab,
 )
 from dlboard.serve._production_server import resolve_plugins, run_production_server
-from dlboard.serve._series import series_color, series_swatch_class
+from dlboard.serve._series import SeriesDash, series_color, series_dash, series_swatch_class
 from dlboard.serve._settings_env import set_setting_env
 from dlboard.serve._startup import Dependency, wait_for
 from dlboard.serve._url import relative_path
@@ -75,6 +75,7 @@ __all__ = [
     "ProjectTab",
     "RunGuard",
     "SQLStoreBase",
+    "SeriesDash",
     "SettingRule",
     "SettingWrite",
     "Task",
@@ -112,6 +113,7 @@ __all__ = [
     "run_production_server",
     "safe_next_path",
     "series_color",
+    "series_dash",
     "series_swatch_class",
     "serve_asset",
     "set_artifact_store",

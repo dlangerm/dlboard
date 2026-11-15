@@ -62,6 +62,7 @@ from dlboard.serve import (
     allow_resources_from_anywhere,
     get_data_store,
     series_color,
+    series_dash,
     series_swatch_class,
 )
 from dlboard.serve._series import SERIES_SLOTS
@@ -140,6 +141,8 @@ class _RunFigures(BaseModel, frozen=True, extra="forbid"):
     name: str
     swatch: str
     color: str
+    dash: str
+    """As Plotly's `line.dash` (`series_dash`): how a figure that combines every run's traces draws this run's."""
     urls: dict[int, str]
     """By step: the run's figure, or for a template the data it logged."""
     metric_steps: list[int] = Field(default_factory=list)
@@ -383,6 +386,7 @@ def _figures(
                 name=names.get(run_id, f"Run {run_id}"),
                 swatch=series_swatch_class(run_id),
                 color=series_color(run_id),
+                dash=series_dash(run_id).plotly,
                 urls=urls,
                 metric_steps=series[run_id][0] if run_id in series else [],
                 metrics=series[run_id][1] if run_id in series else {},

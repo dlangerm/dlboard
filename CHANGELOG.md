@@ -12,6 +12,15 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ## [Unreleased]
 
+### Fixed
+
+* **Runs that share a colour are told apart by their dash.** The palette has eight colours, so runs eight apart (a
+  comparison's runs of two experiments, an experiment page's newest twenty) were drawn alike. A run is now drawn solid,
+  dashed, dotted or dash-dotted as well, chosen from its id like its colour, so it looks the same on every page, whatever
+  is drawn beside it. Line, band and combined Plotly charts dash its line, and the run table, captions and the line
+  chart's tooltip label a run with a short line in its colour and dash rather than a dot. Bars, and the line chart's
+  legend, still show colour alone. Plugins: `dlboard.serve.series_dash` and `SeriesDash`. (#500)
+
 ## [0.17.0] - 2026-11-14
 
 ### Added

@@ -34,7 +34,7 @@ from dlboard.plugins.charts.plotly_chart import (
     _LoadedWindow,
     read_window,
 )
-from dlboard.serve import series_color, series_swatch_class
+from dlboard.serve import series_color, series_dash, series_swatch_class
 
 if TYPE_CHECKING:
     from dlboard.plugins.data_stores.sqlite import SQLLiteStore
@@ -75,6 +75,7 @@ def test_the_browser_is_handed_each_runs_figure_url_by_step() -> None:
         "name": "run-1",
         "swatch": series_swatch_class(1),
         "color": series_color(1),
+        "dash": series_dash(1).plotly,
         "urls": {"0": "/artifact/1-0", "10": "/artifact/1-1"},
         "metric_steps": [],
         "metrics": {},

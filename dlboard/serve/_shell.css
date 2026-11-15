@@ -164,17 +164,42 @@
   opacity: 1;
 }
 
-/* A run's color as a small dot before its name (`dlboard.serve.series_swatch_class`). */
+/* A run as its charts draw it, a short line in its color and dash, before its name (`dlboard.serve.series_swatch_class`).
+   `--dl-swatch-space` is how much of the line it takes, for a layout that leaves room for it. The line is drawn in its
+   `color`, which is the run's whatever the dash. */
+.dl-swatch {
+  --dl-swatch-space: 1.25rem;
+}
+
 .dl-swatch::before {
   content: "";
   display: inline-block;
   flex-shrink: 0;
-  width: 0.625rem;
-  height: 0.625rem;
+  width: 0.875rem;
+  height: 3px;
   margin-right: 0.375rem;
-  border-radius: 50%;
-  vertical-align: baseline;
-  background-color: var(--dl-swatch);
+  vertical-align: middle;
+  color: var(--dl-swatch);
+  background: currentColor;
+}
+
+/* The dashes of `SeriesDash`, at the swatch's scale. */
+.dl-swatch-dash::before {
+  background: repeating-linear-gradient(to right, currentColor 0 6px, transparent 6px 9px);
+}
+
+.dl-swatch-dot::before {
+  background: repeating-linear-gradient(to right, currentColor 0 3px, transparent 3px 5px);
+}
+
+.dl-swatch-dash-dot::before {
+  background: repeating-linear-gradient(
+    to right,
+    currentColor 0 6px,
+    transparent 6px 8px,
+    currentColor 8px 10px,
+    transparent 10px 12px
+  );
 }
 
 .dl-swatch-1 {
@@ -209,8 +234,7 @@
   --dl-swatch: var(--dl-series-8);
 }
 
-/* An empty swatch is a dot on its own (e.g. a badge's `leftSection`), not a prefix to any text. */
+/* An empty swatch is a line on its own (e.g. a badge's `leftSection`), not a prefix to any text. */
 .dl-swatch:empty::before {
   margin-right: 0;
-  vertical-align: middle;
 }

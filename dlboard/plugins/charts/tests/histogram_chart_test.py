@@ -25,6 +25,7 @@ from dlboard.plugins.charts.histogram import (
     HistogramChartSettings,
     HistogramDisplay,
 )
+from dlboard.serve import series_swatch_class
 
 _KEY = "grad"
 _SETTINGS = HistogramChartSettings(key=_KEY)
@@ -56,10 +57,13 @@ def _figure(chart: typing.Any) -> dict[str, typing.Any]:  # noqa: ANN401
 
 
 def _run_labels(chart: typing.Any) -> list[tuple[str, str]]:  # noqa: ANN401
-    """The (name, color class) of each run label over the figure, in row order."""
+    """The (name, swatch class) of each run label over the figure, in row order."""
     divs = [props(node) for node in chart._traverse() if isinstance(node, html.Div)]
     labels = [div for div in divs if "dl-histogram-run" in str(div.get("className"))]
-    return [(str(label["children"]), str(label["className"]).split()[-1]) for label in labels]
+    return [
+        (str(label["children"]), str(label["className"]).removeprefix("dl-histogram-run "))
+        for label in labels
+    ]
 
 
 def _values(figure: dict[str, typing.Any], trace: int, field: str) -> np.ndarray:
@@ -112,7 +116,7 @@ def test_every_display_is_one_figure_with_a_row_per_run_and_leaves_the_input_alo
 
     pd.testing.assert_frame_equal(df, before)
     assert {"xaxis", "xaxis2", "yaxis", "yaxis2"} <= figure["layout"].keys()
-    assert _run_labels(chart) == [("run-1", "dl-swatch-2"), ("run-2", "dl-swatch-3")]
+    assert _run_labels(chart) == [("run-1", series_swatch_class(1)), ("run-2", series_swatch_class(2))]
     domains = [figure["layout"][axis]["domain"] for axis in ("yaxis", "yaxis2")]
     assert 0 <= domains[1][0] < domains[1][1] < domains[0][0] < domains[0][1] <= 1
 
@@ -167,7 +171,7 @@ def test_the_step_view_has_a_frame_for_every_step_and_starts_on_the_latest() -> 
 def test_only_the_most_recent_runs_that_fit_the_page_are_drawn() -> None:
     chart = HistogramChart.render_in(_SETTINGS, _frame({1: [0], 2: [0], 3: [0]}), RenderContext(page_size=2))
 
-    assert _run_labels(chart) == [("run-2", "dl-swatch-3"), ("run-3", "dl-swatch-4")]
+    assert _run_labels(chart) == [("run-2", series_swatch_class(2)), ("run-3", series_swatch_class(3))]
     assert "Showing the 2 most recent of 3 runs" in str(props(chart)["children"])
 
 

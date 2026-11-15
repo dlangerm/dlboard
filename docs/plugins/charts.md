@@ -259,6 +259,11 @@ Subclass `ChartType` and implement its abstract methods:
     of a spread, as the histogram chart's bands view does), and autogen uses it for a family of metrics that share a
     template (`layer_0/grad_norm` to `layer_99/grad_norm`, once there are at least 12 of them).
 
+    Draw a run in `series_color(run_id)` and, for a line, dashed as `series_dash(run_id)` (its `dasharray` for an SVG or
+    Recharts line, its `plotly` for Plotly's `line.dash`): the palette has eight colors, so runs eight apart share one
+    and are told apart by their dash. Label a run where no line is, a caption or a table's header, with
+    `series_swatch_class(run_id)`, a short line in the same color and dash.
+
     A chart drawn with Plotly cannot use the theme's colors as they are (`series_color` is a CSS variable, which Plotly
     drops). Name them in the figure as `series_color(...)`, or `series_color(...)/0.12` for one at an opacity, and the
     figure's colors (any `color`, `fillcolor`, `gridcolor` or `linecolor`, which may also be a variable such as

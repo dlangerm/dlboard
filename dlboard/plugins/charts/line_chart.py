@@ -28,7 +28,7 @@ from dlboard.plugins.charts._axis_label import (
 from dlboard.plugins.charts._chart_title import titled
 from dlboard.plugins.charts._empty_chart import nothing_logged
 from dlboard.plugins.charts._sampling import DEFAULT_MAX_POINTS, shared_sample_grid
-from dlboard.serve import AssetKind, series_color, serve_asset
+from dlboard.serve import AssetKind, series_color, series_dash, serve_asset
 
 if typing.TYPE_CHECKING:
     from dash import Dash
@@ -221,6 +221,7 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.Stack], frozen=Tr
                 "name": str(run_id),
                 "label": run_names.get(run_id, f"Run {run_id}"),
                 "color": series_color(int(run_id)),
+                "strokeDasharray": series_dash(int(run_id)).dasharray,
             }
             for run_id in run_ids
         ]
