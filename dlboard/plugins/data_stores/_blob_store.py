@@ -13,17 +13,18 @@ from __future__ import annotations
 
 import functools
 import hashlib
+import heapq
+import itertools
+import math
 import queue
 import signal
-import tempfile
 import time
 from dataclasses import dataclass
 from enum import Enum, StrEnum, auto
 from multiprocessing import parent_process, util
 from pathlib import Path, PurePosixPath
-from threading import Thread
+from threading import Event, Lock, Thread
 from typing import TYPE_CHECKING, Final, Protocol, Self, override
-from uuid import UUID, uuid4
 
 from flask import abort
 from pydantic import AnyUrl
@@ -34,6 +35,7 @@ from dlboard._batching import BatchParams, ship_batches
 from dlboard._mp_context import SPAWN_CONTEXT
 from dlboard._telemetry import Attributes, attribute
 from dlboard._telemetry.traces import SpanKind, TraceKey, carrier, flush, span
+from dlboard.plugins.data_stores._upload_journal import Held, UploadJournal
 from dlboard.serve import set_artifact_store, wait_for_data_store
 from dlboard.serve._custodian import in_custodian
 from dlboard.serve._logging import configure_logging
@@ -75,15 +77,6 @@ def _waited_since(stamp: float) -> float:
     return max(time.monotonic() - stamp, 0.0)
 
 
-def _is_a_staged_name(name: str) -> bool:
-    """Whether `name` is one `_stage` gives a staged upload: the UUID it names it with."""
-    try:
-        UUID(name)
-    except ValueError:
-        return False
-    return True
-
-
 @dataclass(frozen=True, slots=True)
 class _Upload:
     """What the server hands the writer: the upload, where it goes, where it is staged, and the request's trace."""
@@ -94,16 +87,27 @@ class _Upload:
     trace: Carrier
     accepted_at: float
     """When the server queued it, by `time.monotonic()`, read by the writer through `_waited_since`."""
+    recovered: bool
+    """Taken over from a process that died (`Held.recovered`)."""
 
 
 @dataclass(frozen=True, slots=True)
 class _Saved:
-    """What the writer hands back to be recorded: the artifact, and the write's trace."""
+    """What the writer hands back to be recorded: the upload's journal name, the artifact, and the write's trace."""
 
+    name: str
     artifact: Artifact
     trace: Carrier
     written_at: float
     """When the writer finished it, by `time.monotonic()`, as `_Upload.accepted_at`."""
+    recovered: bool
+
+
+@dataclass(frozen=True, slots=True)
+class _Gone:
+    """An upload whose staged bytes are gone though its blob was never written: there is nothing left to write."""
+
+    name: str
 
 
 class _Rejection(StrEnum):
@@ -121,6 +125,9 @@ _REJECTIONS = Counter[_RejectionAttributes](
     "dlboard.artifact.write_queue.rejections",
     Unit.UPLOADS,
     "Uploads turned away with a 503 because the blob writer could not take them.",
+)
+_RESTARTS = Counter[NoAttributes](
+    "dlboard.artifact.writer.restarts", Unit.WORKERS, "Blob writers started again after the one before died."
 )
 
 
@@ -162,15 +169,20 @@ _INGESTS = Histogram[OutcomeAttributes](
 )
 
 _ENQUEUE_TIMEOUT_SEC: Final = 30
-"""How long an upload waits for room in a full write queue before it's turned away with a 503."""
+"""How long an upload waits for its worker to hold fewer than its limit of unfinished uploads before it's turned away with a 503."""
 
 _DRAIN_TIMEOUT_SEC: Final = 20
 """How long shutdown waits for queued blobs to be written and their refs recorded. Kept under
 Granian's `DLBOARD_WORKERS_KILL_TIMEOUT_S` default so the drain finishes before the worker is killed."""
 
-_STALE_STAGING_SEC: Final = 24 * 60 * 60
-"""A staged upload this old belongs to a process that died; every worker shares one staging dir, so
-only files older than any live upload could be are swept."""
+_TEND_SEC: Final = 1.0
+"""How often a worker checks that its writer is alive."""
+
+_ADOPT_EVERY_SEC: Final = 30.0
+"""How often a worker looks for uploads a process that died left unfinished, after the first look as it starts."""
+
+_RETRY_BACKOFF_SEC: Final = (1.0, 300.0)
+"""How long the writer waits to try a failed write again: doubling from the first, never past the second."""
 
 _FINALIZER_PRIORITY: Final = 100
 """Above the priority (10) `multiprocessing.Queue` closes its own feeder thread at: this drain still
@@ -178,6 +190,9 @@ has to put its stop signals through those queues, so it must run before they shu
 
 _WRITER_POLL_SEC: Final = 1.0
 """How often an idle write worker checks that the server process that spawned it is still alive."""
+
+_RESTART_INTERVAL_SEC: Final = 10.0
+"""The least time between two starts of a write worker: one that dies as it starts is not started again for every upload."""
 
 
 class RefAccess(Enum):
@@ -213,7 +228,11 @@ class BlobBackend(Protocol):
         ...
 
     def write(self, staged: Path, ref: AnyUrl) -> None:
-        """Move `staged`'s bytes to `ref`, consuming `staged`."""
+        """
+        Store `staged`'s bytes at `ref`, replacing whatever is there, and consume `staged` once they are.
+
+        A write that fails must leave `staged` where it is: it is the only copy, and the write is tried again.
+        """
         ...
 
     def download(self, ref: AnyUrl) -> Response:
@@ -233,10 +252,45 @@ def blob_key(experiment_id: int, run_id: int, key: str, step: int | None, fname:
     return PurePosixPath(str(experiment_id), str(run_id), key_hsh, _step, f"{fname_hsh}{Path(fname).suffix}")
 
 
+def _attempt(backend: BlobBackend, upload: _Upload) -> _Saved | _Gone | None:
+    """
+    Write `upload`'s blob; `None` if that failed this time, to be tried again.
+
+    Done twice, the second finds its bytes gone and the blob written: the first's result may not have reached the
+    server, or a writer that died may have written it before the server gave the upload to this one.
+    """
+    a = upload.artifact
+    started = time.perf_counter()
+    outcome = Outcome.FAILURE
+    try:
+        # The request that uploaded this is long gone: the trace crossed the queue in the item.
+        with span(
+            "dlboard.blob.write",
+            SpanKind.CONSUMER,
+            _WriteTrace(
+                experiment_id=a.experiment_id, run_id=a.run_id, queue_wait=_waited_since(upload.accepted_at)
+            ),
+            parent=upload.trace,
+        ):
+            if upload.staged.exists():
+                backend.write(upload.staged, upload.ref)
+            elif not backend.exists(upload.ref):
+                return _Gone(upload.staged.name)
+            write_trace = carrier()
+        outcome = Outcome.SUCCESS
+    except Exception:  # noqa: BLE001 -- nothing may kill the writer, and every upload is tried again
+        _log.exception("Failed to write an artifact's blob; trying again later", ref=str(upload.ref))
+        return None
+    finally:
+        _BLOB_WRITES.record(time.perf_counter() - started, OutcomeAttributes(outcome=outcome))
+    artifact = models.Artifact.model_validate(a.model_dump() | {"ref": str(upload.ref)})
+    return _Saved(upload.staged.name, artifact, write_trace, time.monotonic(), upload.recovered)
+
+
 def _write_blobs(
     backend: BlobBackend,
     input_q: Queue[_Upload | None],
-    return_q: Queue[_Saved | None],
+    return_q: Queue[_Saved | _Gone | None],
 ) -> None:
     # This runs in its own `SPAWN_CONTEXT`-spawned process (see `BlobArtifactStore.__init__`), a
     # fresh interpreter with none of the parent's structlog setup -- without this, a write failure
@@ -249,49 +303,90 @@ def _write_blobs(
     # process tells it to stop with a `None`, or the blobs still queued would be lost on shutdown.
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     parent = parent_process()
+    # A failed write waits its turn here, by when it is due, so that one the backend keeps refusing holds up no other.
+    retries: list[tuple[float, int, int, _Upload]] = []  # (due, tiebreak, attempts, upload)
+    tiebreak = itertools.count()
     while True:
+        due: list[tuple[int, _Upload]] = []
+        wait = _WRITER_POLL_SEC if not retries else retries[0][0] - time.monotonic()
         try:
-            item = input_q.get(timeout=_WRITER_POLL_SEC)
+            item = input_q.get(timeout=min(max(wait, 0.0), _WRITER_POLL_SEC))
         except queue.Empty:
             if parent is not None and not parent.is_alive():
                 flush()
-                return  # the server died without asking us to stop; nothing will record our refs
-            continue
-        if item is None:
-            flush()
-            return
-        waited = _waited_since(item.accepted_at)
-        _WRITE_QUEUE_WAIT.record(waited)
-        a = item.artifact
-        started = time.perf_counter()
-        outcome = Outcome.FAILURE
-        try:
-            # The request that uploaded this is long gone: the trace crossed the queue in the item.
-            with span(
-                "dlboard.blob.write",
-                SpanKind.CONSUMER,
-                _WriteTrace(experiment_id=a.experiment_id, run_id=a.run_id, queue_wait=waited),
-                parent=item.trace,
-            ):
-                backend.write(item.staged, item.ref)
-                write_trace = carrier()
-            artifact = models.Artifact.model_validate(a.model_dump() | {"ref": str(item.ref)})
-            if return_q.full():
-                _log.warning("Return queue is full, runtime will be impacted")
-            return_q.put(_Saved(artifact, write_trace, written_at=time.monotonic()))
-            outcome = Outcome.SUCCESS
-        except Exception:  # noqa: BLE001
-            _log.exception("Failed to save artifacts")
-            item.staged.unlink(missing_ok=True)
-        finally:
-            _BLOB_WRITES.record(time.perf_counter() - started, OutcomeAttributes(outcome=outcome))
+                return  # the server died without asking us to stop; what it held waits on disk for another
+        else:
+            if item is None:
+                flush()
+                return  # what still waits to be tried again stays on disk, for the next start
+            _WRITE_QUEUE_WAIT.record(_waited_since(item.accepted_at))
+            due.append((0, item))
+        while retries and retries[0][0] <= time.monotonic():
+            _, _, attempts, upload = heapq.heappop(retries)
+            due.append((attempts, upload))
+        for attempts, upload in due:
+            match _attempt(backend, upload):
+                case None:
+                    first, cap = _RETRY_BACKOFF_SEC
+                    again = time.monotonic() + min(first * 2.0**attempts, cap)
+                    heapq.heappush(retries, (again, next(tiebreak), attempts + 1, upload))
+                case result:
+                    if return_q.full():
+                        _log.warning("Return queue is full, runtime will be impacted")
+                    return_q.put(result)
 
 
-class BlobArtifactStore(models.ArtifactStore[BlobBackend, int]):
-    """An `ArtifactStore` for any `BlobBackend` -- staging, batched writes, and ref-ingest are shared."""
+@dataclass(frozen=True, slots=True)
+class _Writer:
+    """
+    A write worker: its process, and the queue only it reads.
+
+    They are replaced together. An idle worker waits inside `queue.get`, holding the queue's read lock, so one that is
+    killed (out of memory, say) most likely dies holding it, and a new worker on the same queue would wait on it forever.
+    """
+
+    process: BaseProcess
+    queue: Queue[_Upload | None]
+    """Unbounded: what this process holds is bounded instead (`UploadJournal.wait_for_room`), so a put never waits."""
+    started_at: float
+
+    @classmethod
+    def start(cls, backend: BlobBackend, saved: Queue[_Saved | _Gone | None]) -> _Writer:
+        """Start a worker writing to `backend`, on a fresh queue, handing what it wrote to `saved`."""
+        uploads: Queue[_Upload | None] = SPAWN_CONTEXT.Queue()
+        process = SPAWN_CONTEXT.Process(target=_write_blobs, args=(backend, uploads, saved), daemon=True)
+        process.start()
+        return cls(process, uploads, time.monotonic())
+
+    def send(self, held: Held, trace: Carrier) -> None:
+        """Give the worker `held` to write."""
+        self.queue.put(_Upload(held.artifact, held.ref, held.staged, trace, time.monotonic(), held.recovered))
+
+
+def _already_recorded(store: DataStore[...], artifact: Artifact) -> bool:
+    """Whether `artifact`'s ref is recorded already, by a process that died before it could finish its upload."""
+    return any(
+        a.ref == artifact.ref
+        for a in store.fetch_artifacts(
+            artifact.experiment_id,
+            keys=frozenset({artifact.key}),
+            run_ids=frozenset({artifact.run_id}),
+            steps=None if artifact.step is None else frozenset({artifact.step}),
+        )
+    )
+
+
+class BlobArtifactStore(models.ArtifactStore[BlobBackend, int, Path]):
+    """
+    An `ArtifactStore` for any `BlobBackend` -- staging, batched writes, and ref-ingest are shared.
+
+    An upload is answered once it is in the journal (`UploadJournal`), and from then on is the server's to finish however its
+    processes die: the writer retries a write that fails, a writer that dies is started again and given everything this
+    process holds, and an upload whose process died is taken over by another sharing the staging directory.
+    """
 
     def __init__(
-        self, backend: BlobBackend, store_q_size: int, staging_dir: Path | None = None, *, writer: bool = True
+        self, backend: BlobBackend, store_q_size: int, staging_dir: Path, *, writer: bool = True
     ) -> None:
         """
         Initialize the store, starting its background blob-writing worker process (unless `writer` is off).
@@ -299,79 +394,95 @@ class BlobArtifactStore(models.ArtifactStore[BlobBackend, int]):
         Without a writer the store takes no upload (`log_artifacts` says it is unavailable) but serves and deletes blobs:
         the custodian process's, which runs background tasks and serves no request.
 
-        Uploads are staged in `staging_dir` before being written to `backend`. Pass a directory on the
-        same filesystem as the backend's storage so the final move is a rename, and a crash leaves
-        its leftovers somewhere the operator already provisions and monitors. Defaults to the system temp dir.
+        Uploads are kept in `staging_dir` until written to `backend`: they are the only copy, so it must be on storage that
+        outlives the server (never a tmpfs), and this store's alone, since a store takes over every upload it finds there
+        that no live process holds. Pass a directory on the same filesystem as the backend's storage so the final move is a
+        rename. `store_q_size` is how many uploads one process holds unfinished before it turns more away (0: no limit).
         """
         self._backend = backend
-        self._store_q: Queue[_Upload | None] = SPAWN_CONTEXT.Queue(store_q_size)
-        self._saved_artifact_q: Queue[_Saved | None] = SPAWN_CONTEXT.Queue(store_q_size)
-        self._store_artifact_proc: BaseProcess | None = (
-            SPAWN_CONTEXT.Process(
-                target=_write_blobs,
-                args=(backend, self._store_q, self._saved_artifact_q),
-                daemon=True,
-            )
-            if writer
-            else None
-        )
-        self._file_staging_dir = staging_dir or Path(tempfile.gettempdir())
-        self._file_staging_dir.mkdir(parents=True, exist_ok=True)
-        self._sweep_stale_staging()
+        self._limit = store_q_size or math.inf
+        self._saved_artifact_q: Queue[_Saved | _Gone | None] = SPAWN_CONTEXT.Queue(store_q_size)
+        self._journal = UploadJournal(staging_dir)
+        self._journal.sweep()
         self._ingest_flushed = SPAWN_CONTEXT.Event()
         self._ingest_ready = SPAWN_CONTEXT.Event()
-        if self._store_artifact_proc is not None:
-            self._store_artifact_proc.start()
+        self._stopping = Event()
+        self._writer_lock = Lock()
+        self._writer = _Writer.start(backend, self._saved_artifact_q) if writer else None
+        """`None` once the store takes no more uploads: it never had a writer, or it was closed."""
+        if self._writer is not None:
+            Thread(target=self._tend, daemon=True, name="artifact-writer-tender").start()
         # Not `atexit`: a Granian worker is a `multiprocessing` child, which exits through
         # `util._exit_function` (running only these finalizers) and never reaches `atexit` handlers.
         # Priority >= 0 also runs it before multiprocessing terminates its daemonic children (our writer).
         self._finalizer = util.Finalize(None, self.close, exitpriority=_FINALIZER_PRIORITY)
 
-    def _sweep_stale_staging(self) -> None:
+    def _tend(self) -> None:
         """
-        Delete staged uploads left behind by a process that died before writing them.
+        Keep every upload this process holds on its way, until the store closes.
 
-        The staging directory is the shared temp directory by default, so only a file the store would have named as a staged
-        upload is its to delete, and one that cannot be removed is left with a warning rather than failing the store's start.
+        A writer that died is started again (no sooner than `_RESTART_INTERVAL_SEC` after it started, so that one dying as it
+        starts is not started over and over) and given every upload this process holds: what the dead one had queued died
+        with its queue. Every `_ADOPT_EVERY_SEC`, this process takes over the uploads of any process that died.
         """
-        cutoff = time.time() - _STALE_STAGING_SEC
-        for leftover in self._file_staging_dir.iterdir():
-            if not _is_a_staged_name(leftover.name) or not leftover.is_file():
-                continue
-            try:
-                if leftover.stat().st_mtime < cutoff:
-                    leftover.unlink(missing_ok=True)
-            except OSError:
-                _log.warning("Could not delete a stale staged upload", path=str(leftover), exc_info=True)
+        adopted_at = -math.inf
+        while not self._stopping.is_set():
+            with self._writer_lock:
+                writer = self._writer
+                if writer is None:
+                    return
+                if (
+                    not writer.process.is_alive()
+                    and time.monotonic() - writer.started_at >= _RESTART_INTERVAL_SEC
+                ):
+                    writer.process.join()
+                    _log.error("The blob writer died; starting another", exitcode=writer.process.exitcode)
+                    writer.queue.cancel_join_thread()  # nothing reads it any more: exiting must not wait to flush it
+                    writer.queue.close()
+                    writer = self._writer = _Writer.start(self._backend, self._saved_artifact_q)
+                    _RESTARTS.add(1)
+                    for held in self._journal.held():
+                        writer.send(held, {})
+                if time.monotonic() - adopted_at >= _ADOPT_EVERY_SEC:
+                    adopted = self._journal.adopt()
+                    if adopted:
+                        _log.warning("Taking over uploads a process died holding", count=len(adopted))
+                    for held in adopted:
+                        writer.send(held, {})
+                    adopted_at = time.monotonic()
+            self._stopping.wait(_TEND_SEC)
 
     def close(self, timeout: float = _DRAIN_TIMEOUT_SEC) -> None:
         """
         Gracefully stop: write every queued blob, record their refs, then stop the write worker.
 
-        Runs when the process exits (and is safe to call early or twice). Whatever doesn't finish within
-        `timeout` is abandoned with a warning -- the worker is terminated, and the client's retry of
-        the upload that never got a ref recorded is what recovers it.
+        Runs when the process exits (and is safe to call early or twice), and the store takes no upload after it.
+        Whatever doesn't finish within `timeout`, or is waiting to be tried again, stays in the journal for the next
+        process to start on this staging directory.
         """
         self._finalizer.cancel()
-        proc = self._store_artifact_proc
-        if proc is None or not proc.is_alive():
-            return
-        deadline = time.monotonic() + timeout
+        self._stopping.set()
+        with self._writer_lock:
+            writer, self._writer = self._writer, None
         try:
-            self._store_q.put(None, timeout=max(deadline - time.monotonic(), 0))
-        except queue.Full:
-            _log.warning("Shutting down with the blob write queue still full")
-        proc.join(max(deadline - time.monotonic(), 0))
-        if proc.is_alive():
-            _log.warning("Blob writer did not finish in %ss, abandoning its remaining queue", timeout)
-            proc.terminate()
-            proc.join()
-        elif self._ingest_ready.is_set():
-            self._saved_artifact_q.put(
-                None
-            )  # a flush request: acked once every ref queued before it is recorded
-            if not self._ingest_flushed.wait(max(deadline - time.monotonic(), 0)):
-                _log.warning("Some written artifacts' refs were not recorded before shutdown")
+            if writer is None or not writer.process.is_alive():
+                return
+            proc = writer.process
+            deadline = time.monotonic() + timeout
+            writer.queue.put(None)
+            proc.join(max(deadline - time.monotonic(), 0))
+            if proc.is_alive():
+                _log.warning("Blob writer did not finish in %ss; leaving the rest in the journal", timeout)
+                proc.terminate()
+                proc.join()
+            elif self._ingest_ready.is_set():
+                self._saved_artifact_q.put(
+                    None
+                )  # a flush request: acked once every ref queued before it is recorded
+                if not self._ingest_flushed.wait(max(deadline - time.monotonic(), 0)):
+                    _log.warning("Some written artifacts' refs were not recorded before shutdown")
+        finally:
+            self._journal.let_go()
 
     def dispose(self) -> None:
         """
@@ -384,11 +495,15 @@ class BlobArtifactStore(models.ArtifactStore[BlobBackend, int]):
         of the session instead of releasing their OS-level resources (file descriptors, semaphores).
         """
         self._finalizer.cancel()
-        if self._store_artifact_proc is not None:
-            self._store_artifact_proc.terminate()
-            self._store_artifact_proc.join()
-        self._store_q.close()
+        self._stopping.set()
+        with self._writer_lock:
+            writer, self._writer = self._writer, None
+        if writer is not None:
+            writer.process.terminate()
+            writer.process.join()
+            writer.queue.close()
         self._saved_artifact_q.close()
+        self._journal.let_go()
 
     def ingest_stored_artifacts(self, app: Dash) -> None:
         """Forever record the refs of blobs the write worker has finished writing into `app`'s data store."""
@@ -401,8 +516,33 @@ class BlobArtifactStore(models.ArtifactStore[BlobBackend, int]):
             is_permanent=lambda _exc: False,
         )
 
-    def _record_saved(self, store: DataStore[...], saved: list[_Saved]) -> None:
-        """Record a batch of written artifacts' refs, in one span linked to the write of each (it serves them all)."""
+    def _record_saved(self, store: DataStore[...], results: list[_Saved | _Gone]) -> None:
+        """
+        Record a batch of written artifacts' refs, in one span linked to the write of each (it serves them all).
+
+        Only an upload this process still holds is recorded, once: a writer started again, or this batch tried again,
+        may hand back one already finished. Done again, this does nothing more.
+        """
+        held: dict[str, _Saved] = {}
+        for result in results:
+            match result:
+                case _Gone(name=name):
+                    if self._journal.finish(name):
+                        _log.error(
+                            "An upload's staged bytes are gone and its blob was never written", name=name
+                        )
+                case _Saved(name=name) if self._journal.holds(name):
+                    held[name] = result
+                case _Saved():
+                    pass
+        saved: list[_Saved] = []
+        for item in held.values():
+            if item.recovered and _already_recorded(store, item.artifact):
+                self._journal.finish(item.name)
+            else:
+                saved.append(item)
+        if not saved:
+            return
         waited = [_waited_since(item.written_at) for item in saved]
         started = time.perf_counter()
         outcome = Outcome.FAILURE
@@ -413,7 +553,7 @@ class BlobArtifactStore(models.ArtifactStore[BlobBackend, int]):
                 _IngestTrace(items=len(saved), queue_wait=max(waited, default=0.0)),
                 links=[item.trace for item in saved],
             ) as active:
-                self._record_refs(store, [item.artifact for item in saved], active)
+                self._record_refs(store, saved, active)
             outcome = Outcome.SUCCESS
         finally:
             _INGESTS.record(time.perf_counter() - started, OutcomeAttributes(outcome=outcome))
@@ -421,9 +561,9 @@ class BlobArtifactStore(models.ArtifactStore[BlobBackend, int]):
         for wait in waited:
             _INGEST_QUEUE_WAIT.record(wait)
 
-    def _record_refs(self, store: DataStore[...], artifacts: list[Artifact], active: ActiveSpan) -> None:
+    def _record_refs(self, store: DataStore[...], saved: list[_Saved], active: ActiveSpan) -> None:
         """
-        Record `artifacts`' refs; one the store rejects outright is dropped alone, its blob deleted.
+        Record `saved`'s refs and finish their uploads; one the store rejects outright is dropped alone, its blob deleted.
 
         `log_artifact_refs` raises `ValueError` for input it will never accept (e.g. a run deleted
         while its upload was in flight) and checks the whole batch before writing any of it -- so on
@@ -431,58 +571,56 @@ class BlobArtifactStore(models.ArtifactStore[BlobBackend, int]):
         blobs deleted rather than orphaned with nothing referencing them.
         """
         try:
-            store.log_artifact_refs(artifacts)
+            store.log_artifact_refs([item.artifact for item in saved])
         except ValueError:
-            if len(artifacts) > 1:
+            if len(saved) > 1:
                 active.event("split")
-                for artifact in artifacts:
-                    self._record_refs(store, [artifact], active)
+                for item in saved:
+                    self._record_refs(store, [item], active)
                 return
-            _log.exception("The data store rejected artifact %s, deleting its blob", artifacts[0].ref)
-            self.delete_artifact(AnyUrl(artifacts[0].ref))
+            _log.exception("The data store rejected artifact %s, deleting its blob", saved[0].artifact.ref)
+            self.delete_artifact(AnyUrl(saved[0].artifact.ref))
+        for item in saved:
+            self._journal.finish(item.name)
 
     @classmethod
-    def get_or_create(cls, backend: BlobBackend, store_q_size: int) -> Self:
+    def get_or_create(cls, backend: BlobBackend, store_q_size: int, staging_dir: Path) -> Self:
         """Create a new store on top of `backend`."""
-        return cls(backend, store_q_size)
+        return cls(backend, store_q_size, staging_dir)
 
     def log_artifacts(self, artifacts: Iterable[tuple[NewArtifact, FileStorage]]) -> None:
-        """Stage each uploaded file, then queue it for the write worker."""
-        if self._store_artifact_proc is None or not self._store_artifact_proc.is_alive():
+        """
+        Keep each uploaded file in the journal, then queue it for the write worker.
+
+        Once this returns, every upload in the batch is on disk and the server's to finish: the client may discard its copy.
+        """
+        with self._writer_lock:
+            writer = self._writer
+        if writer is None or not writer.process.is_alive():
             _REJECTIONS.add(1, _RejectionAttributes(reason=_Rejection.WRITER_DOWN))
             msg = "the artifact write worker is not running"
             raise models.ArtifactStoreUnavailableError(msg)
-        staging_path: Path | None = None
+        if not self._journal.wait_for_room(self._limit, _ENQUEUE_TIMEOUT_SEC):
+            _REJECTIONS.add(1, _RejectionAttributes(reason=_Rejection.QUEUE_FULL))
+            msg = "this worker holds as many unwritten uploads as it may"
+            raise models.ArtifactStoreUnavailableError(msg)
         try:
             for a, file in artifacts:
                 ref = self._backend.ref_for(blob_key(a.experiment_id, a.run_id, a.key, a.step, a.fname))
                 if self._backend.exists(ref):
                     msg = f"duplicate key fname uploaded! {ref}"
                     raise ValueError(msg)  # noqa: TRY301
-
-                if self._store_q.full():
-                    _log.warning("Store queue is full, runtime will be impacted")
-                staging_path = self._file_staging_dir / str(uuid4())
                 started = time.perf_counter()
                 with span("dlboard.blob.stage", SpanKind.INTERNAL):
-                    file.save(staging_path, buffer_size=int(1e6))
+                    held = self._journal.accept(a, ref, file)
                 _STAGING.record(time.perf_counter() - started)
-                self._store_q.put(
-                    _Upload(a, ref, staging_path, carrier(), accepted_at=time.monotonic()),
-                    timeout=_ENQUEUE_TIMEOUT_SEC,
-                )
-                staging_path = None  # the write worker owns it now
-        except queue.Full as exc:
-            _REJECTIONS.add(1, _RejectionAttributes(reason=_Rejection.QUEUE_FULL))
-            msg = "the artifact write queue is full"
-            raise models.ArtifactStoreUnavailableError(msg) from exc
+                with self._writer_lock:
+                    if self._writer is not None:  # else closed since: the next process to start takes it over
+                        self._writer.send(held, carrier())
         except Exception:
             _REJECTIONS.add(1, _RejectionAttributes(reason=_Rejection.FAILED))
             _log.exception("failed to save artifact batch, reverting to allow client retry")
             raise
-        finally:
-            if staging_path is not None:
-                staging_path.unlink(missing_ok=True)
 
     @override
     def link_artifacts(self, links: Iterable[tuple[NewArtifact, AnyUrl]]) -> list[Artifact]:
@@ -514,9 +652,7 @@ class BlobArtifactStore(models.ArtifactStore[BlobBackend, int]):
                 _log.warning("Refusing to delete a ref this backend doesn't recognize: %s", ref)
 
 
-def plug_blob_store(
-    app: Dash, backend: BlobBackend, store_q_size: int, staging_dir: Path | None = None
-) -> None:
+def plug_blob_store(app: Dash, backend: BlobBackend, store_q_size: int, staging_dir: Path) -> None:
     """
     Set `app`'s artifact store to a `BlobArtifactStore` over `backend`, and start ingesting its refs.
 

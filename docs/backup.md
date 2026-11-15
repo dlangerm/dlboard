@@ -42,7 +42,8 @@ If you set `DLBOARD_POSTGRES_DB_SCHEMA`, add `--schema=<name>` to the dump. Mana
 
 Snapshot the volume that holds `DLBOARD_ARTIFACT_STORE_LOCATION` (LVM, ZFS, EBS, your storage array),
 or `rsync -a` it. Blobs are written once and never changed, so a plain copy of a running store is
-consistent; the one thing to skip is `.staging/`, which holds uploads still in flight.
+consistent; the one thing to skip is `.staging/`, which holds uploads not yet written. The server finishes those itself
+when it starts again.
 
 Take the **database backup first, then the artifacts**. An artifact copied after the database will have
 at least every blob the database refers to. The other order can leave references to blobs your copy

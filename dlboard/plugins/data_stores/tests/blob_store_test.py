@@ -11,27 +11,23 @@ from __future__ import annotations
 
 import io
 import os
-import queue
 import sqlite3
-import threading
 import time
 from typing import TYPE_CHECKING, override
 from uuid import uuid4
 
 import pytest
-from dash import Dash
 from pydantic import AnyUrl
 from werkzeug.datastructures import FileStorage
 
 from dlboard import models
-from dlboard.conftest import EVERY_ARTIFACT_BACKEND, ArtifactBackend, scraped_total
-from dlboard.plugins.data_stores._blob_store import BlobArtifactStore, _Saved, _waited_since, blob_key
+from dlboard.conftest import EVERY_ARTIFACT_BACKEND, ArtifactBackend
+from dlboard.plugins.data_stores._blob_store import BlobArtifactStore, _waited_since, blob_key
 from dlboard.plugins.data_stores.filesystem import FSBlobs
-from dlboard.serve import set_data_store
-from dlboard.serve.telemetry._prometheus import serve_metrics
+from dlboard.plugins.data_stores.tests.conftest import file, ingest, rejections, upload, wait_until
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
+    from collections.abc import Iterable
     from pathlib import Path
 
     from dlboard.conftest import MakeBlobStore
@@ -146,14 +142,6 @@ def test_link_artifacts_rejects_a_ref_outside_the_stores_own_space(
         store.link_artifacts([(new_artifact, AnyUrl("file:///etc/passwd"))])
 
 
-class _FakeApp(Dash):
-    """A bare stand-in for `Dash` -- the ingest thread only needs the data store set on it."""
-
-    def __init__(self) -> None:
-        # Deliberately skips `Dash.__init__`: nothing here needs a real app, only an identity to hang state on.
-        pass
-
-
 class _LockedOnceStore:
     """Passes through to a real store, except its first `log_artifact_refs` fails like a locked sqlite db."""
 
@@ -169,41 +157,17 @@ class _LockedOnceStore:
         self._inner.log_artifact_refs(artifacts)
 
 
-def _ingest(store: BlobArtifactStore, data_store: object, artifacts: list[models.Artifact]) -> None:
-    """Queue `artifacts` as though `_write_blobs` just wrote their blobs, then start ingesting them."""
-    for artifact in artifacts:
-        store._saved_artifact_q.put(_Saved(artifact, {}, written_at=time.monotonic()))
-    app = _FakeApp()
-    set_data_store(app, data_store)  # pyrefly: ignore [bad-argument-type]
-    threading.Thread(target=store.ingest_stored_artifacts, args=(app,), daemon=True).start()
-
-
-def _wait_until(condition: Callable[[], bool]) -> None:
-    deadline = time.monotonic() + 10
-    while not condition():
-        assert time.monotonic() < deadline, "timed out"
-        time.sleep(0.1)
-
-
-def _artifact(run: models.Run, name: str) -> models.Artifact:
-    return models.Artifact(
-        key="img", fname=name, run_id=run.id, experiment_id=run.experiment_id, step=0, ref=f"file:///{name}"
-    )
-
-
 def test_a_transient_store_failure_does_not_lose_the_batch(
     store: SQLLiteStore, experiment_id: int, tmp_path: Path, make_blob_store: MakeBlobStore
 ) -> None:
     """The ingest loop used to clear its batch on *any* failure, so a locked db lost artifacts for good."""
     run = store.create_run(models.NewRun(experiment_id=experiment_id))
+    artifact_store = make_blob_store(FSBlobs(tmp_path / "artifacts"), 10)
+    ingest(artifact_store, _LockedOnceStore(store))
 
-    _ingest(
-        make_blob_store(FSBlobs(tmp_path), 10),
-        _LockedOnceStore(store),
-        [_artifact(run, "a.png")],
-    )
+    upload(artifact_store, run, "a.png")
 
-    _wait_until(lambda: len(list(store.fetch_artifacts(experiment_id, run_ids=None))) == 1)
+    wait_until(lambda: len(list(store.fetch_artifacts(experiment_id, run_ids=None))) == 1)
 
 
 def test_a_rejected_artifact_is_dropped_alone_and_its_blob_deleted(
@@ -216,27 +180,18 @@ def test_a_rejected_artifact_is_dropped_alone_and_its_blob_deleted(
     """One rejected artifact used to take its whole batch down with it, orphaning every blob in it."""
     kept_run, deleted_run = (store.create_run(models.NewRun(experiment_id=experiment_id)) for _ in range(2))
     store.delete_run(deleted_run.id, admin)
-    orphan = tmp_path / "orphan.png"
-    orphan.write_bytes(b"data")
+    blobs = FSBlobs(tmp_path / "artifacts")
+    artifact_store = make_blob_store(blobs, 10)
+    ingest(artifact_store, store)
 
-    _ingest(
-        make_blob_store(FSBlobs(tmp_path), 10),
-        store,
-        [_artifact(kept_run, "kept.png"), _artifact(deleted_run, orphan.name)],
-    )
+    artifact_store.log_artifacts([file(kept_run, "kept.png"), file(deleted_run, "orphan.png")])
 
-    _wait_until(lambda: not orphan.exists())
+    wait_until(lambda: artifact_store._journal.held() == [])
     assert [a.run_id for a in store.fetch_artifacts(experiment_id, run_ids=None)] == [kept_run.id]
+    assert not blobs.exists(blobs.ref_for(blob_key(experiment_id, deleted_run.id, "img", 0, "orphan.png")))
 
 
 # -- Shutdown and staging -------------------------------------------------------------------------
-
-
-def _upload(store: BlobArtifactStore, run: models.Run, name: str) -> None:
-    new_artifact = models.NewArtifact(
-        key="img", fname=name, run_id=run.id, experiment_id=run.experiment_id, step=0
-    )
-    store.log_artifacts([(new_artifact, FileStorage(io.BytesIO(b"data"), filename=name))])
 
 
 def test_close_writes_every_queued_blob_and_records_its_ref_before_returning(
@@ -245,24 +200,17 @@ def test_close_writes_every_queued_blob_and_records_its_ref_before_returning(
     run = store.create_run(models.NewRun(experiment_id=experiment_id))
     blobs = FSBlobs(tmp_path / "artifacts")
     artifact_store = make_blob_store(blobs, 50)
-    _ingest(artifact_store, store, [])
-    _wait_until(artifact_store._ingest_ready.is_set)
+    ingest(artifact_store, store)
+    wait_until(artifact_store._ingest_ready.is_set)
 
     for i in range(20):
-        _upload(artifact_store, run, f"{i}.png")
+        upload(artifact_store, run, f"{i}.png")
     artifact_store.close()
 
     assert len(list(store.fetch_artifacts(experiment_id, run_ids=None))) == 20
 
 
-def _rejections(reason: str) -> float:
-    scrape = serve_metrics().get_data(as_text=True)
-    return scraped_total(
-        scrape, "dlboard_artifact_write_queue_rejections_total", dlboard_rejection_reason=reason
-    )
-
-
-def test_uploads_are_turned_away_once_the_write_worker_is_gone(
+def test_uploads_are_turned_away_once_the_store_is_disposed(
     tmp_path: Path, telemetry: pytest.MonkeyPatch, make_blob_store: MakeBlobStore
 ) -> None:
     telemetry.setenv("DLBOARD_TELEMETRY_METRICS", "prometheus")
@@ -270,26 +218,9 @@ def test_uploads_are_turned_away_once_the_write_worker_is_gone(
     store.dispose()
 
     with pytest.raises(models.ArtifactStoreUnavailableError):
-        _upload(store, models.Run.model_construct(id=1, experiment_id=1), "a.png")
+        upload(store, models.Run.model_construct(id=1, experiment_id=1), "a.png")
 
-    assert _rejections("writer_down") == 1
-
-
-def test_uploads_are_turned_away_when_the_write_queue_is_full(
-    tmp_path: Path, telemetry: pytest.MonkeyPatch, make_blob_store: MakeBlobStore
-) -> None:
-    telemetry.setenv("DLBOARD_TELEMETRY_METRICS", "prometheus")
-    store = make_blob_store(FSBlobs(tmp_path), 1)
-
-    def full(*_args: object, **_kwargs: object) -> None:
-        raise queue.Full
-
-    telemetry.setattr(store._store_q, "put", full)
-
-    with pytest.raises(models.ArtifactStoreUnavailableError):
-        _upload(store, models.Run.model_construct(id=1, experiment_id=1), "a.png")
-
-    assert _rejections("queue_full") == 1
+    assert rejections("writer_down") == 1
 
 
 def test_a_failed_upload_leaves_nothing_in_the_staging_dir(
@@ -311,7 +242,7 @@ def test_a_failed_upload_leaves_nothing_in_the_staging_dir(
         store.log_artifacts([(new_artifact, FileStorage(_Broken(), filename="a.png"))])
 
     assert list(staging.iterdir()) == []
-    assert _rejections("failed") == 1
+    assert rejections("failed") == 1
     store.dispose()
 
 
@@ -329,7 +260,7 @@ def test_stale_staged_uploads_from_a_dead_process_are_swept_on_startup(tmp_path:
 
 
 def test_the_sweep_leaves_a_file_it_did_not_stage_however_old(tmp_path: Path) -> None:
-    """The staging directory is the shared temp directory by default: a file another program left there is not the store's."""
+    """A staging directory may be one other programs use too: a file another program left there is not the store's."""
     staging = tmp_path / "staging"
     staging.mkdir()
     theirs = staging / "cpan_install_x.txt"

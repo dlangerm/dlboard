@@ -160,7 +160,7 @@ Only matter with an identity-verifying provider such as `PASSWORD_AUTH`. See [au
 | Variable | Default | |
 |---|---|---|
 | `DLBOARD_ARTIFACT_STORE_LOCATION` | `.dlboard/artifacts` | Where artifact blobs live. Uploads are staged in `.staging/` inside it, so give it enough room and keep it on one volume. |
-| `DLBOARD_FILESYSTEM_STORE_QUEUE_SIZE` | `100` | Uploads that can wait for the writer. When full, new uploads wait up to 30 seconds, then get a 503 the client retries. |
+| `DLBOARD_FILESYSTEM_STORE_QUEUE_SIZE` | `100` | Uploads each worker process may hold not yet written (`0`: no limit). When it holds that many, new uploads wait up to 30 seconds, then get a 503 the client retries, so an unwritable store turns uploads away rather than filling the disk. |
 
 ## Postgres storage
 
@@ -211,7 +211,8 @@ Only matter with an identity-verifying provider such as `PASSWORD_AUTH`. See [au
 | `DLBOARD_S3_DOWNLOAD_MODE` | `proxy` | `proxy` streams through dlboard; `presign` redirects the browser to a short-lived URL (the endpoint must be reachable from browsers). |
 | `DLBOARD_S3_PRESIGN_TTL_S` | `300` | |
 | `DLBOARD_S3_EXTRA_READ_BUCKETS` | none | A JSON array of other buckets dlboard may link and read, never write or delete. |
-| `DLBOARD_S3_QUEUE_SIZE` | `100` | Uploads that can wait for the writer, as `DLBOARD_FILESYSTEM_STORE_QUEUE_SIZE`. |
+| `DLBOARD_S3_QUEUE_SIZE` | `100` | Uploads each worker process may hold not yet in the bucket, as `DLBOARD_FILESYSTEM_STORE_QUEUE_SIZE`. |
+| `DLBOARD_S3_STAGING_DIR` | `.dlboard/s3-staging` (`/data/s3-staging` in the image) | Where uploads wait until they are in the bucket. An answered upload's only copy is here until then, so keep it on storage that outlives the server, never a tmpfs, and give each deployment its own. |
 
 ## Client (training scripts)
 
