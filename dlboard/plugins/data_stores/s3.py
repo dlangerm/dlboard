@@ -82,6 +82,8 @@ class S3Settings(BaseSettings):
     `bucket`/`prefix` itself."""
 
     queue_size: NonNegativeInt = 100
+    staging_dir: Path = Path(".dlboard/s3-staging")
+    """Where uploads wait until they are in the bucket: the only copy of each, so on storage that outlives the server."""
 
 
 # S3Settings is a frozen (so hashable) pydantic model; pyrefly does not see the `__hash__` pydantic generates.
@@ -170,18 +172,16 @@ class S3Blobs:
         return True
 
     def write(self, staged: Path, ref: AnyUrl) -> None:
-        """Upload `staged`'s bytes to `ref`, then remove `staged`."""
+        """Upload `staged`'s bytes to `ref`, then remove `staged`: only then, since a failed upload is tried again."""
         bucket, key = self._bucket_and_key(ref)
         content_type, _ = mimetypes.guess_type(key)
-        try:
-            _client(self._settings).upload_file(  # pyrefly: ignore [bad-argument-type]
-                str(staged),
-                Bucket=bucket,
-                Key=key,
-                ExtraArgs={"ContentType": content_type} if content_type else {},
-            )
-        finally:
-            staged.unlink(missing_ok=True)
+        _client(self._settings).upload_file(  # pyrefly: ignore [bad-argument-type]
+            str(staged),
+            Bucket=bucket,
+            Key=key,
+            ExtraArgs={"ContentType": content_type} if content_type else {},
+        )
+        staged.unlink(missing_ok=True)
 
     def download(self, ref: AnyUrl) -> Response:
         """Serve `ref`'s bytes to a browser, proxied or presigned per `download_mode`."""
@@ -245,7 +245,7 @@ def plug(app: Dash) -> None:
         lambda: _client(settings).head_bucket(Bucket=settings.bucket),  # pyrefly: ignore [bad-argument-type]
         transient=_unreachable,
     )
-    plug_blob_store(app, S3Blobs(settings), settings.queue_size)
+    plug_blob_store(app, S3Blobs(settings), settings.queue_size, settings.staging_dir)
     if settings.download_mode is S3DownloadMode.PRESIGN:
         # The browser follows an artifact's URL to the bucket, which the page's CSP must let it load from. Signing a URL
         # reads nothing, and its host is the one every presigned URL has, however the endpoint is addressed.

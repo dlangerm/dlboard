@@ -379,6 +379,11 @@
           "expr": "sum by (dlboard_rejection_reason) (rate(dlboard_artifact_write_queue_rejections_total[$__rate_interval]))",
           "legendFormat": "{{dlboard_rejection_reason}}",
           "refId": "A"
+        },
+        {
+          "expr": "sum(rate(dlboard_artifact_writer_restarts_total[$__rate_interval]))",
+          "legendFormat": "blob writer restarts",
+          "refId": "B"
         }
       ],
       "title": "Uploads turned away, by reason",

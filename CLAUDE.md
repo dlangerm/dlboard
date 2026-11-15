@@ -255,6 +255,12 @@ every server, under a lease of three beats renewed every beat) or `SHARED` (each
 start a custodian: they call a task's `run_once` with a `TaskContext`, or a `Supervisor` directly
 (`dlboard/serve/_custodian/tests/`); `custodian_process_test.py` drives the real process.
 
+The custodian is for work nobody waits on. Ingest is not that: metrics are written in the request, and an upload is
+journaled to disk (`_upload_journal.py`) and handed to its web worker's own blob writer (`_blob_store.py`), which retries
+it, while the worker restarts a dead writer and takes over what a dead worker left (an `flock` per upload says who holds
+it). A custodian task would add a database row and a poll to every upload, pace it to yield the database, run it on a host
+that may not hold the staged file, and let a slow object store restart the custodian. Keep ingest out of it.
+
 ### Telemetry
 
 Operational metrics and OTLP logs are opt-in (`DLBOARD_TELEMETRY_*`, the `otel` extra) and live in

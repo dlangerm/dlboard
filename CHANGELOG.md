@@ -14,6 +14,16 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ### Fixed
 
+* **An uploaded artifact is never lost once the server has answered for it.** An upload is answered once it is in the
+  staging directory, and the server then writes it and records its ref however its processes die: a write the object store
+  refuses is tried again (S3 used to delete the upload on a failed write), a blob writer that dies is started again with
+  everything its worker held, and the uploads of a worker or server that died are finished by the next process to start
+  on the same staging directory, never recorded twice. A worker holding `*_QUEUE_SIZE` unwritten uploads turns more away
+  with a 503, so an object store that is down no longer fills the disk. S3 deployments stage uploads in the new
+  `DLBOARD_S3_STAGING_DIR` (`.dlboard/s3-staging`; `/data/s3-staging` in the image) rather than the system temp
+  directory: keep it on persistent storage. Plugins: `plug_blob_store` and `BlobArtifactStore` take a `staging_dir`, and
+  `BlobBackend.write` must leave its staged file when it fails. New metric: `dlboard.artifact.writer.restarts`. (#658)
+
 * **Runs that share a colour are told apart by their dash.** The palette has eight colours, so runs eight apart (a
   comparison's runs of two experiments, an experiment page's newest twenty) were drawn alike. A run is now drawn solid,
   dashed, dotted or dash-dotted as well, chosen from its id like its colour, so it looks the same on every page, whatever

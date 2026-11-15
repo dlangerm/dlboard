@@ -423,21 +423,22 @@ def blob_backend(
 
 
 type MakeBlobStore = Callable[[BlobBackend, int], BlobArtifactStore]
-"""What `make_blob_store` yields: build a store on a backend with a write queue of the given size."""
+"""What `make_blob_store` yields: build a store on a backend, holding up to the given number of unfinished uploads."""
 
 
 @pytest.fixture
-def make_blob_store() -> Iterator[MakeBlobStore]:
+def make_blob_store(tmp_path: Path) -> Iterator[MakeBlobStore]:
     """
     `BlobArtifactStore.get_or_create` for one test, disposing every store it made once the test ends.
 
-    Each store runs a write-worker process (about 115 MB). One a test forgets to dispose lives on for
+    Every store a test makes shares the test's staging directory, as a server's processes do: one takes over what another
+    left. Each store runs a write-worker process (about 115 MB). One a test forgets to dispose lives on for
     the rest of the session, and enough of them slow a whole-suite run until browser tests time out.
     """
     made: list[BlobArtifactStore] = []
 
     def make(backend: BlobBackend, store_q_size: int) -> BlobArtifactStore:
-        made.append(BlobArtifactStore.get_or_create(backend, store_q_size))
+        made.append(BlobArtifactStore.get_or_create(backend, store_q_size, tmp_path / "staging"))
         return made[-1]
 
     yield make
@@ -733,6 +734,7 @@ def backend_server(
             )
             download_mode = cast("S3DownloadMode", request.getfixturevalue("s3_download_mode"))
             monkeypatch.setenv("DLBOARD_S3_DOWNLOAD_MODE", download_mode.value)
+            monkeypatch.setenv("DLBOARD_S3_STAGING_DIR", str(tmp_path / "s3-staging"))
             artifact_plugin = s3
     try:
         app = build_app(

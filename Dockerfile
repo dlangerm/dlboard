@@ -53,7 +53,7 @@ ENV PATH="/app/.venv/bin:$PATH"
 #   DLBOARD_POSTGRES_HOST / _PORT / _DATABASE / _USER / _PASSWORD  (dlboard/plugins/data_stores/postgres.py)
 #   DLBOARD_ARTIFACT_STORE_LOCATION  -- where blobs land inside the container; defaults to /data/artifacts
 #   (set below), so a volume mounted at /data is the only thing that needs to persist besides
-#   Postgres itself.
+#   Postgres itself. DLBOARD_S3_STAGING_DIR (uploads not yet in the bucket) lives there too.
 #   DLBOARD_SECRET_KEY  -- required by the password auth plugin this image runs; a missing one is a
 #   startup error, not a silent fall-through to anonymous access.
 # See docs/plugins/storage.md and docs/plugins/auth.md for the full variable lists. Create the
@@ -61,6 +61,7 @@ ENV PATH="/app/.venv/bin:$PATH"
 #   docker run --rm -it --env-file .env <image> users set-password <name> --admin \
 #     --plugins dlboard.scripts.docker_deployment:PLUGINS
 ENV DLBOARD_ARTIFACT_STORE_LOCATION=/data/artifacts
+ENV DLBOARD_S3_STAGING_DIR=/data/s3-staging
 # `FSBlobs` creates its own leaf directory on first use, but never the volume mount point above it
 # -- `/data` has to exist (and be writable by `dlboard`) before a volume is mounted over it at
 # `docker run` time.

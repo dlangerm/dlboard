@@ -114,7 +114,7 @@ check passes until something has been logged, and a driver that returns the wron
 
 For an `ArtifactStore` that's just somewhere to put and fetch whole blobs (as opposed to something
 with its own, different storage model entirely), you don't have to implement the protocol from
-scratch either — `plug_blob_store(app, backend, queue_size)` (`dlboard.plugins.data_stores`) sets a
+scratch either — `plug_blob_store(app, backend, queue_size, staging_dir)` (`dlboard.plugins.data_stores`) sets a
 `BlobArtifactStore` that already implements it on top of a much smaller `BlobBackend` protocol, and
 starts what it needs in each process: `ref_for` (the ref a freshly written blob gets),
 `access` (whether a ref is servable at all, and whether this backend owns it or merely allowlists
@@ -125,6 +125,13 @@ staging an upload, batching writes off to a worker process, async ref-ingest bac
 deleted. `filesystem.py`'s `FSBlobs` (local disk) and `s3.py`'s `S3Blobs` (any S3-protocol store)
 are both just a `BlobBackend` plus a `pydantic_settings.BaseSettings` for configuration, read
 inside `plug()` and handed to `plug_blob_store` — model a new one on whichever is closer to your backend.
+
+An upload is answered once it is in `staging_dir`, and from then on the store finishes it however the server's
+processes die: a write that fails is tried again, and an upload whose process died is taken over by another process on
+the same directory. It is not fsynced, so an OS crash or power loss can lose the last uploads the kernel had not yet
+written back (about 30 seconds' worth by default); keeping the host up through one is the hardware's job. So `staging_dir` must outlive the server (not a tmpfs, not a container's own filesystem) and belong to
+this store alone, and `write` must leave the staged file where it is when it fails, and replace a blob already at the ref
+(an upload interrupted after its write is written again).
 
 Read from elsewhere in the app with `get_data_store()` / `get_artifact_store()` (`dlboard.serve`)
 rather than passing the store instance around directly.
