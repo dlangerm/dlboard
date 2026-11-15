@@ -43,16 +43,15 @@
 
 .dl-chart-tooltip-row {
   display: grid;
-  grid-template-columns: 0.5rem minmax(0, 1fr) auto;
+  grid-template-columns: 0.875rem minmax(0, 1fr) auto;
   align-items: center;
   column-gap: 0.5rem;
   padding: 0.125rem 0;
 }
 
 .dl-chart-tooltip-swatch {
-  width: 0.5rem;
-  height: 0.5rem;
-  border-radius: 50%;
+  width: 0.875rem;
+  height: 0.25rem;
 }
 
 .dl-chart-tooltip-label {

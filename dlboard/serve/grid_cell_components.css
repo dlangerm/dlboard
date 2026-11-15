@@ -123,9 +123,9 @@
   line-height: 1.25;
 }
 
-/* Less the dot (`.dl-swatch::before` in `_shell.css`) that sits before the name in the same line. */
+/* Less the swatch (`.dl-swatch::before` in `_shell.css`) that sits before the name in the same line. */
 .dl-swatch .dl-run-link:has(.dl-run-experiment) {
-  max-width: calc(100% - 1rem);
+  max-width: calc(100% - var(--dl-swatch-space));
 }
 
 .dl-run-experiment {

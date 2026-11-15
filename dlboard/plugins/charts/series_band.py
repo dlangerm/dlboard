@@ -35,7 +35,7 @@ from dlboard.models import (
 )
 from dlboard.plugins.charts._band_traces import nested_band
 from dlboard.plugins.charts._plotly_colors import serve_plotly_colors
-from dlboard.serve import ClientsideScript, series_color
+from dlboard.serve import ClientsideScript, SeriesDash, series_color, series_dash
 
 if typing.TYPE_CHECKING:
     from dash import Dash
@@ -43,8 +43,6 @@ if typing.TYPE_CHECKING:
 _COLORS_JS: typing.Final = ClientsideScript(Path(__file__).with_name("series_band_colors.js"))
 _FIGURE_TYPE: typing.Final = "series-band-figure"
 _GRAPH_TYPE: typing.Final = "series-band-graph"
-_RUN_DASHES: typing.Final = ("solid", "dash", "dot")
-"""How a run is told from the others when the groups, not the runs, are what the colors are for."""
 
 _FILL_ALPHA: typing.Final = 0.12
 """How opaque the band of extremes is, against the median line drawn over it (the quartiles' band is twice that)."""
@@ -117,8 +115,8 @@ def _traces(
     Per run and group: the extremes, the quartiles and the median, each a trace over its grid steps.
 
     The colors are the theme's own (`series_color`, which Plotly cannot read: the browser resolves them), so a run is
-    the color it is in every other chart. With several groups it is the groups that get the colors, and the runs are
-    told apart by how their lines are dashed.
+    the color and dash (`series_dash`) it is in every other chart. With several groups it is the groups that get the
+    colors, and the runs are told apart by how their lines are dashed, in the order they are drawn.
     """
     series: dict[tuple[int, str], list[SeriesBand]] = {}
     for band in bands:
@@ -128,7 +126,9 @@ def _traces(
     traces: list[dict[str, typing.Any]] = []
     for (run_id, group), rows in series.items():
         color = series_color(groups.index(group) if len(groups) > 1 else run_id)
-        dash = _RUN_DASHES[runs.index(run_id) % len(_RUN_DASHES)] if len(groups) > 1 else "solid"
+        dash = (
+            list(SeriesDash)[runs.index(run_id) % len(SeriesDash)] if len(groups) > 1 else series_dash(run_id)
+        ).plotly
         run_label = names.get(run_id, f"Run {run_id}")
         label = " · ".join(part for part in (run_label if len(runs) > 1 or not group else "", group) if part)
         steps = [band.step for band in rows]

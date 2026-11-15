@@ -60,7 +60,7 @@ function plotlyChartFigures(step, payload) {
             ...trace,
             name: trace.name ? `${run.name} · ${trace.name}` : run.name,
             legendgroup: `run-${runId}`,
-            line: { color: run.color, ...trace.line },
+            line: { color: run.color, dash: run.dash, ...trace.line },
             marker: { color: run.color, ...trace.marker },
         });
 

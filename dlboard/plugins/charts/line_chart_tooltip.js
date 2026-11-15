@@ -74,7 +74,20 @@ window.dashMantineFunctions.lineChartTooltip = (props) => {
             h(
                 "div",
                 { className: "dl-chart-tooltip-row", key: run.series.name },
-                h("span", { className: "dl-chart-tooltip-swatch", style: { background: run.series.color } }),
+                // The run's line as the chart draws it, in its color and dash (`series_dash`).
+                h(
+                    "svg",
+                    { className: "dl-chart-tooltip-swatch", viewBox: "0 0 14 4" },
+                    h("line", {
+                        x1: 0,
+                        y1: 2,
+                        x2: 14,
+                        y2: 2,
+                        stroke: run.series.color,
+                        strokeWidth: 3,
+                        strokeDasharray: run.series.strokeDasharray,
+                    }),
+                ),
                 h(
                     "span",
                     { className: "dl-chart-tooltip-label" },

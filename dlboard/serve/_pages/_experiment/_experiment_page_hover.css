@@ -89,10 +89,10 @@
   display: none;
 }
 
-/* A run header (the compare grid's, a table chart's) carries the run's swatch dot, which ag-grid's header cell can't lay
+/* A run header (the compare grid's, a table chart's) carries the run's swatch, which ag-grid's header cell can't lay
    out as a flex item: pin it in the cell's left padding instead. */
 .ag-header-cell.dl-swatch {
-  padding-left: calc(var(--ag-cell-horizontal-padding) + 1rem);
+  padding-left: calc(var(--ag-cell-horizontal-padding) + var(--dl-swatch-space));
 }
 .ag-header-cell.dl-swatch::before {
   position: absolute;
