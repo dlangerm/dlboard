@@ -133,5 +133,10 @@ written back (about 30 seconds' worth by default); keeping the host up through o
 this store alone, and `write` must leave the staged file where it is when it fails, and replace a blob already at the ref
 (an upload interrupted after its write is written again).
 
+Which process holds an upload is an `flock` on its entry, so servers on several hosts may share a staging directory only on
+a filesystem whose locks reach across hosts (NFSv4 does; an NFS mount with `nolock` or `local_lock=flock` does not, and
+two hosts would both take over a dead one's uploads). Otherwise give each host its own. The built-in filesystem store
+stages in `.staging/` inside `DLBOARD_ARTIFACT_STORE_LOCATION`, so hosts sharing that directory share its staging too.
+
 Read from elsewhere in the app with `get_data_store()` / `get_artifact_store()` (`dlboard.serve`)
 rather than passing the store instance around directly.

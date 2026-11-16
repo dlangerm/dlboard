@@ -127,6 +127,7 @@ Every attribute has a small, fixed set of values. The names and attributes are c
 | `dlboard.ingest.artifact.size` | counter, By | | Bytes of artifact uploads. |
 | `dlboard.artifact.write_queue.rejections` | counter | `dlboard.rejection.reason` (`queue_full`, `writer_down`, `failed`) | Uploads turned away: the worker held as many unwritten uploads as it may (`*_QUEUE_SIZE`; the store may be failing writes), the writer was down, or the batch could not be staged. |
 | `dlboard.artifact.writer.restarts` | counter | | Blob writers started again after the one before died; the new one is given every upload its worker holds. Until then the worker turns uploads away (`writer_down`). |
+| `dlboard.artifact.uploads.held` | up/down counter | | Uploads answered for but not yet written and recorded, each a staged file and an open lock. Approaching `*_QUEUE_SIZE` times the number of workers, uploads are about to be turned away (`queue_full`); staying above zero with no uploads coming in, the store is refusing writes. |
 | `dlboard.artifact.stage.duration` | histogram, s | | How long a request took to stage one uploaded file before queueing it for the writer. |
 | `dlboard.artifact.write_queue.wait` | histogram, s | | How long a staged upload waited for the writer to take it. |
 | `dlboard.artifact.blob.write.duration` | histogram, s | `dlboard.outcome` | How long the writer took to store one artifact. |
