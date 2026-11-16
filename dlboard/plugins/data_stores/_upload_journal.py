@@ -25,6 +25,7 @@ from pydantic import AnyUrl, BaseModel, ConfigDict, ValidationError
 from structlog.stdlib import get_logger
 
 from dlboard import models
+from dlboard.serve.telemetry import NoAttributes, Unit, UpDownCounter
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -41,6 +42,12 @@ _STALE_SEC: Final = 24 * 60 * 60
 """Staged bytes with no entry this old belong to a request that died before it answered: nobody was told they were kept."""
 
 _COPY_BUFFER: Final = int(1e6)
+
+_HELD = UpDownCounter[NoAttributes](
+    "dlboard.artifact.uploads.held",
+    Unit.UPLOADS,
+    "Uploads answered for but not yet written and recorded, each holding its staged file and an open lock.",
+)
 
 
 class _Entry(BaseModel):
@@ -84,6 +91,8 @@ class UploadJournal:
         self._dir = directory
         self._dir.mkdir(parents=True, exist_ok=True)
         self._held: dict[str, Held] = {}
+        self._other_versions: set[str] = set()
+        """Entries a newer version wrote, which this one leaves alone (`_unreadable`)."""
         self._changed = Condition()
 
     def accept(self, artifact: models.NewArtifact, ref: AnyUrl, file: FileStorage) -> Held:
@@ -107,38 +116,77 @@ class UploadJournal:
             raise
         return self._hold(Held(artifact, ref, staged, recovered=False, lock=lock))
 
-    def adopt(self) -> list[Held]:
-        """Take over every entry no live process holds: each one's process died before it could finish it."""
+    def adopt(self, limit: float) -> list[Held]:
+        """
+        Take over entries no live process holds, until this process holds `limit`: each one's process died holding it.
+
+        The rest wait for a process with room, so a backlog is shared out rather than one process opening (and locking) all
+        of it. One that cannot be opened (out of file descriptors, say) ends the look: what it took over is still returned.
+        """
         adopted: list[Held] = []
         for path in self._dir.glob(f"*{_ENTRY}"):
-            if not _is_a_name(path.stem) or path.stem in self._held:
+            if len(self._held) >= limit:
+                break
+            if not _is_a_name(path.stem) or path.stem in self._held or path.stem in self._other_versions:
                 continue
             try:
-                lock = path.open("rb")
-            except FileNotFoundError:
-                continue  # finished since the listing
-            try:
-                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                # Finished between the open and the lock: the path no longer names the file the lock is on.
-                if path.stat().st_ino != os.fstat(lock.fileno()).st_ino:
-                    lock.close()
-                    continue
-                entry = _Entry.model_validate_json(lock.read())
-            except (BlockingIOError, FileNotFoundError):
-                lock.close()  # held by a live process, or finished since the open
-                continue
-            except ValidationError:
-                lock.close()
-                _log.exception("An upload's journal entry cannot be read; leaving it", path=str(path))
-                continue
-            adopted.append(
-                self._hold(Held(entry.artifact, entry.ref, self._dir / path.stem, recovered=True, lock=lock))
-            )
+                held = self._take_over(path)
+            except OSError:
+                _log.exception("Could not take over an upload; trying again later", path=str(path))
+                break
+            if held is not None:
+                adopted.append(held)
         return adopted
+
+    def _take_over(self, path: Path) -> Held | None:
+        """Hold the entry at `path` if no live process does, and it can be read."""
+        try:
+            lock = path.open("rb")
+        except FileNotFoundError:
+            return None  # finished since the listing
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            # Finished between the open and the lock: the path no longer names the file the lock is on.
+            ours = path.stat().st_ino == os.fstat(lock.fileno()).st_ino
+            text = lock.read() if ours else b""
+        except (BlockingIOError, FileNotFoundError):
+            ours, text = False, b""  # held by a live process, or finished since the open
+        except BaseException:
+            lock.close()
+            raise
+        if not ours:
+            lock.close()
+            return None
+        try:
+            entry = _Entry.model_validate_json(text)
+        except ValidationError as exc:
+            lock.close()  # first: deleting may fail, and another process finding it cut short deletes it too
+            self._unreadable(path, exc)
+            return None
+        return self._hold(Held(entry.artifact, entry.ref, self._dir / path.stem, recovered=True, lock=lock))
+
+    def _unreadable(self, path: Path, exc: ValidationError) -> None:
+        """
+        Delete the entry at `path`, and its bytes, if a crash cut it short; else keep it for the version that wrote it.
+
+        An entry is renamed into place only once whole, so only an OS crash before the kernel wrote it back leaves one cut
+        short: the upload was lost with it, as the module's docstring allows. A whole entry this version cannot read was
+        written by a newer one, before a rollback: it is kept, and told of once, for that version to finish.
+        """
+        if any(error["type"] == "json_invalid" for error in exc.errors()):
+            _log.error("An upload's journal entry was cut short by a crash; deleting it", path=str(path))
+            (self._dir / path.stem).unlink(missing_ok=True)
+            path.unlink(missing_ok=True)
+        else:
+            _log.error(
+                "An upload's journal entry is another version's; leaving it for that version", path=str(path)
+            )
+            self._other_versions.add(path.stem)
 
     def _hold(self, held: Held) -> Held:
         with self._changed:
             self._held[held.name] = held
+        _HELD.add(1)
         return held
 
     def holds(self, name: str) -> bool:
@@ -162,6 +210,7 @@ class UploadJournal:
             self._changed.notify_all()
         if held is None:
             return False
+        _HELD.add(-1)
         # Bytes first: an entry left without them is one whose blob was written, which `adopt` copes with.
         held.staged.unlink(missing_ok=True)
         held.staged.with_suffix(_ENTRY).unlink(missing_ok=True)
@@ -174,6 +223,7 @@ class UploadJournal:
             held = self._held
             self._held = {}
             self._changed.notify_all()
+        _HELD.add(-len(held))
         for upload in held.values():
             upload.lock.close()
 

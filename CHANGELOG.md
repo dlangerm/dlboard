@@ -23,6 +23,15 @@ pulls that section's body into the GitHub release notes and publishes both distr
   `DLBOARD_S3_STAGING_DIR` (`.dlboard/s3-staging`; `/data/s3-staging` in the image) rather than the system temp
   directory: keep it on persistent storage. Plugins: `plug_blob_store` and `BlobArtifactStore` take a `staging_dir`, and
   `BlobBackend.write` must leave its staged file when it fails. New metric: `dlboard.artifact.writer.restarts`. (#658)
+* **Nothing left in the staging directory keeps a worker from finishing uploads.** A blob writer killed while the
+  database was slow to take its results could leave the writer started after it unable to hand any back, so its worker
+  turned uploads away until it was recycled: each writer now gets its own results queue. A writer that could not be
+  started again at once (short of memory, say) was never tried again; now it is. A worker takes over no more of a dead
+  one's uploads than its `*_QUEUE_SIZE`, so a backlog is shared out instead of one worker opening a file for every
+  upload. An entry a crash cut short is deleted rather than logged every 30 seconds forever (one a newer version wrote is
+  kept for it, after a rollback), and the staging directory is swept hourly, not only at startup. Staging directories
+  shared by several hosts need locks that work across hosts (see `docs/plugins/storage.md`). New metric:
+  `dlboard.artifact.uploads.held`. (#659)
 
 * **Runs that share a colour are told apart by their dash.** The palette has eight colours, so runs eight apart (a
   comparison's runs of two experiments, an experiment page's newest twenty) were drawn alike. A run is now drawn solid,

@@ -5,7 +5,9 @@ once its storage and database are working again. No upload is lost, and none is 
 
 from __future__ import annotations
 
+import errno
 import io
+import threading
 from typing import TYPE_CHECKING, override
 
 import pytest
@@ -17,7 +19,7 @@ from dlboard.plugins.data_stores import _blob_store
 from dlboard.plugins.data_stores._blob_store import blob_key
 from dlboard.plugins.data_stores._upload_journal import UploadJournal
 from dlboard.plugins.data_stores.filesystem import FSBlobs
-from dlboard.plugins.data_stores.tests.conftest import ingest, rejections, upload, wait_until
+from dlboard.plugins.data_stores.tests.conftest import file, ingest, rejections, upload, wait_until
 from dlboard.serve.telemetry._prometheus import serve_metrics
 
 if TYPE_CHECKING:
@@ -26,6 +28,7 @@ if TYPE_CHECKING:
     from pydantic import AnyUrl
 
     from dlboard.conftest import MakeBlobStore
+    from dlboard.plugins.data_stores._blob_store import BlobArtifactStore
     from dlboard.plugins.data_stores.sqlite import SQLLiteStore
 
 
@@ -117,6 +120,85 @@ def test_a_writer_that_died_is_started_again_with_every_upload_it_had(
     assert (
         scraped_total(serve_metrics().get_data(as_text=True), "dlboard_artifact_writer_restarts_total") == 1
     )
+
+
+class _StalledStore:
+    """Records into a real store only once `going` is set, as a database that stalls: until then, written refs pile up."""
+
+    def __init__(self, store: SQLLiteStore) -> None:
+        self._store = store
+        self.going = threading.Event()
+
+    def log_artifact_refs(self, artifacts: list[models.Artifact]) -> None:
+        self.going.wait()
+        self._store.log_artifact_refs(artifacts)
+
+
+def test_a_writer_killed_while_the_database_stalls_does_not_wedge_the_one_started_after_it(
+    store: SQLLiteStore,
+    run: models.Run,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    make_blob_store: MakeBlobStore,
+) -> None:
+    """
+    Results the database has not taken fill the pipe back, and the writer blocks putting one, holding its queue's write lock.
+
+    Killed then, it holds that lock for good: the writer started after it needs a results queue of its own.
+    """
+    monkeypatch.setattr(_blob_store, "_RESTART_INTERVAL_SEC", 0.0)
+    stalled = _StalledStore(store)
+    artifact_store = make_blob_store(FSBlobs(tmp_path / "artifacts"), 1000)
+    ingest(artifact_store, stalled)
+    artifact_store.log_artifacts([file(run, f"{i}.png") for i in range(300)])
+    wait_until(
+        lambda: not any(p.suffix == "" for p in (tmp_path / "staging").iterdir())
+    )  # every blob written
+    dead = artifact_store._writer
+    assert dead is not None
+    dead.process.kill()
+    dead.process.join()
+
+    stalled.going.set()
+
+    wait_until(lambda: len(_recorded(store, run)) == 300)
+
+
+def test_a_writer_that_cannot_be_started_again_at_first_is_started_once_it_can_be(
+    store: SQLLiteStore,
+    run: models.Run,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    make_blob_store: MakeBlobStore,
+) -> None:
+    """A writer killed for want of memory may find too little left to start another: the next try must still come."""
+    monkeypatch.setattr(_blob_store, "_RESTART_INTERVAL_SEC", 0.0)
+    artifact_store = make_blob_store(FSBlobs(tmp_path / "artifacts"), 10)
+    ingest(artifact_store, store)
+    start, failures = _blob_store._Writer.start, iter([OSError(errno.ENOMEM, "Cannot allocate memory")])
+
+    def start_once_it_can(*args: object) -> object:
+        if (failure := next(failures, None)) is not None:
+            raise failure
+        return start(*args)  # pyrefly: ignore [bad-argument-type]
+
+    monkeypatch.setattr(_blob_store._Writer, "start", staticmethod(start_once_it_can))
+    dead = artifact_store._writer
+    assert dead is not None
+    dead.process.kill()
+    dead.process.join()
+
+    wait_until(lambda: _accepts(artifact_store, run, "a.png"))
+
+    wait_until(lambda: _recorded(store, run) == ["a.png"])
+
+
+def _accepts(artifact_store: BlobArtifactStore, run: models.Run, name: str) -> bool:
+    try:
+        upload(artifact_store, run, name)
+    except models.ArtifactStoreUnavailableError:
+        return False
+    return True
 
 
 def test_an_upload_recorded_by_a_process_that_died_before_finishing_it_is_not_recorded_again(

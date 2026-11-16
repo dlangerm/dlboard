@@ -181,6 +181,10 @@ _TEND_SEC: Final = 1.0
 _ADOPT_EVERY_SEC: Final = 30.0
 """How often a worker looks for uploads a process that died left unfinished, after the first look as it starts."""
 
+_SWEEP_EVERY_SEC: Final = 60 * 60.0
+"""How often a worker sweeps the staging directory of what requests that died before answering left, after the sweep as
+the store starts: a server that runs for months must not wait for a restart to drop them."""
+
 _RETRY_BACKOFF_SEC: Final = (1.0, 300.0)
 """How long the writer waits to try a failed write again: doubling from the first, never past the second."""
 
@@ -339,28 +343,45 @@ def _write_blobs(
 @dataclass(frozen=True, slots=True)
 class _Writer:
     """
-    A write worker: its process, and the queue only it reads.
+    A write worker: its process, the queue only it reads, and the one only it puts to.
 
-    They are replaced together. An idle worker waits inside `queue.get`, holding the queue's read lock, so one that is
-    killed (out of memory, say) most likely dies holding it, and a new worker on the same queue would wait on it forever.
+    They are replaced together, since a worker that is killed (out of memory, say) can leave either queue's lock held for
+    good. An idle worker waits inside `queue.get`, holding that queue's read lock. One whose results the database has not
+    taken yet fills `results`' pipe and blocks putting the next, holding that queue's write lock.
     """
 
     process: BaseProcess
     queue: Queue[_Upload | None]
     """Unbounded: what this process holds is bounded instead (`UploadJournal.wait_for_room`), so a put never waits."""
-    started_at: float
+    results: Queue[_Saved | _Gone | None]
 
     @classmethod
-    def start(cls, backend: BlobBackend, saved: Queue[_Saved | _Gone | None]) -> _Writer:
-        """Start a worker writing to `backend`, on a fresh queue, handing what it wrote to `saved`."""
+    def start(cls, backend: BlobBackend, results: int) -> _Writer:
+        """Start a worker writing to `backend` on fresh queues, with room for `results` of what it wrote (0: no limit)."""
         uploads: Queue[_Upload | None] = SPAWN_CONTEXT.Queue()
+        saved: Queue[_Saved | _Gone | None] = SPAWN_CONTEXT.Queue(results)
         process = SPAWN_CONTEXT.Process(target=_write_blobs, args=(backend, uploads, saved), daemon=True)
         process.start()
-        return cls(process, uploads, time.monotonic())
+        return cls(process, uploads, saved)
 
     def send(self, held: Held, trace: Carrier) -> None:
         """Give the worker `held` to write."""
         self.queue.put(_Upload(held.artifact, held.ref, held.staged, trace, time.monotonic(), held.recovered))
+
+
+class _Results:
+    """
+    The current writer's results, for the ingest loop to read: it moves to a writer started again at its next read.
+
+    The dead writer's queue is then dropped. Uploads it had written but whose results never arrived are still held, and
+    are given to the new writer, which finds each one's blob there and hands back its result again.
+    """
+
+    def __init__(self, writer: _Writer) -> None:
+        self.writer = writer
+
+    def get(self, block: bool = True, timeout: float | None = None) -> _Saved | _Gone | None:  # noqa: FBT001, FBT002
+        return self.writer.results.get(block, timeout)
 
 
 def _already_recorded(store: DataStore[...], artifact: Artifact) -> bool:
@@ -401,15 +422,17 @@ class BlobArtifactStore(models.ArtifactStore[BlobBackend, int, Path]):
         """
         self._backend = backend
         self._limit = store_q_size or math.inf
-        self._saved_artifact_q: Queue[_Saved | _Gone | None] = SPAWN_CONTEXT.Queue(store_q_size)
+        self._results_size = store_q_size
         self._journal = UploadJournal(staging_dir)
         self._journal.sweep()
         self._ingest_flushed = SPAWN_CONTEXT.Event()
         self._ingest_ready = SPAWN_CONTEXT.Event()
         self._stopping = Event()
         self._writer_lock = Lock()
-        self._writer = _Writer.start(backend, self._saved_artifact_q) if writer else None
+        self._writer = _Writer.start(backend, store_q_size) if writer else None
         """`None` once the store takes no more uploads: it never had a writer, or it was closed."""
+        self._results = None if self._writer is None else _Results(self._writer)
+        """What the ingest loop reads: the latest writer's results, still after the store is closed, so it can drain them."""
         if self._writer is not None:
             Thread(target=self._tend, daemon=True, name="artifact-writer-tender").start()
         # Not `atexit`: a Granian worker is a `multiprocessing` child, which exits through
@@ -421,36 +444,52 @@ class BlobArtifactStore(models.ArtifactStore[BlobBackend, int, Path]):
         """
         Keep every upload this process holds on its way, until the store closes.
 
-        A writer that died is started again (no sooner than `_RESTART_INTERVAL_SEC` after it started, so that one dying as it
-        starts is not started over and over) and given every upload this process holds: what the dead one had queued died
-        with its queue. Every `_ADOPT_EVERY_SEC`, this process takes over the uploads of any process that died.
+        A writer that died is started again (no sooner than `_RESTART_INTERVAL_SEC` after the last start, or try at one, so
+        that one dying as it starts is not started over and over) and given every upload this process holds: what the dead
+        one had queued died with its queue. Every `_ADOPT_EVERY_SEC`, this process takes over the uploads of any process
+        that died, as many as it has room for; every `_SWEEP_EVERY_SEC`, it sweeps the staging directory. Anything that
+        fails is tried again: nothing else would ever restart a writer.
         """
-        adopted_at = -math.inf
+        started_at, adopted_at, swept_at = time.monotonic(), -math.inf, time.monotonic()
         while not self._stopping.is_set():
-            with self._writer_lock:
-                writer = self._writer
-                if writer is None:
-                    return
-                if (
-                    not writer.process.is_alive()
-                    and time.monotonic() - writer.started_at >= _RESTART_INTERVAL_SEC
-                ):
-                    writer.process.join()
-                    _log.error("The blob writer died; starting another", exitcode=writer.process.exitcode)
-                    writer.queue.cancel_join_thread()  # nothing reads it any more: exiting must not wait to flush it
-                    writer.queue.close()
-                    writer = self._writer = _Writer.start(self._backend, self._saved_artifact_q)
-                    _RESTARTS.add(1)
-                    for held in self._journal.held():
-                        writer.send(held, {})
-                if time.monotonic() - adopted_at >= _ADOPT_EVERY_SEC:
-                    adopted = self._journal.adopt()
-                    if adopted:
-                        _log.warning("Taking over uploads a process died holding", count=len(adopted))
-                    for held in adopted:
-                        writer.send(held, {})
-                    adopted_at = time.monotonic()
+            try:
+                with self._writer_lock:
+                    writer = self._writer
+                    if writer is None:
+                        return
+                    if (
+                        not writer.process.is_alive()
+                        and time.monotonic() - started_at >= _RESTART_INTERVAL_SEC
+                    ):
+                        started_at = time.monotonic()
+                        writer = self._restart(writer)
+                    if time.monotonic() - adopted_at >= _ADOPT_EVERY_SEC:
+                        adopted_at = time.monotonic()
+                        adopted = self._journal.adopt(self._limit)
+                        if adopted:
+                            _log.warning("Taking over uploads a process died holding", count=len(adopted))
+                        for held in adopted:
+                            writer.send(held, {})
+                if time.monotonic() - swept_at >= _SWEEP_EVERY_SEC:
+                    swept_at = time.monotonic()
+                    self._journal.sweep()
+            except Exception:  # noqa: BLE001 -- the tender must outlive whatever it tends
+                _log.exception("Tending the blob writer failed; trying again")
             self._stopping.wait(_TEND_SEC)
+
+    def _restart(self, dead: _Writer) -> _Writer:
+        """Start a writer in place of `dead`, on queues of its own, and give it every upload this process holds."""
+        dead.process.join()
+        _log.error("The blob writer died; starting another", exitcode=dead.process.exitcode)
+        dead.queue.cancel_join_thread()  # nothing reads it any more: exiting must not wait to flush it
+        dead.queue.close()
+        writer = self._writer = _Writer.start(self._backend, self._results_size)
+        if self._results is not None:
+            self._results.writer = writer
+        _RESTARTS.add(1)
+        for held in self._journal.held():
+            writer.send(held, {})
+        return writer
 
     def close(self, timeout: float = _DRAIN_TIMEOUT_SEC) -> None:
         """
@@ -476,9 +515,7 @@ class BlobArtifactStore(models.ArtifactStore[BlobBackend, int, Path]):
                 proc.terminate()
                 proc.join()
             elif self._ingest_ready.is_set():
-                self._saved_artifact_q.put(
-                    None
-                )  # a flush request: acked once every ref queued before it is recorded
+                writer.results.put(None)  # a flush request: acked once every ref queued before it is recorded
                 if not self._ingest_flushed.wait(max(deadline - time.monotonic(), 0)):
                     _log.warning("Some written artifacts' refs were not recorded before shutdown")
         finally:
@@ -502,13 +539,16 @@ class BlobArtifactStore(models.ArtifactStore[BlobBackend, int, Path]):
             writer.process.terminate()
             writer.process.join()
             writer.queue.close()
-        self._saved_artifact_q.close()
+        if self._results is not None:
+            self._results.writer.results.close()
         self._journal.let_go()
 
     def ingest_stored_artifacts(self, app: Dash) -> None:
         """Forever record the refs of blobs the write worker has finished writing into `app`'s data store."""
+        if self._results is None:
+            return  # no writer: nothing is ever written
         ship_batches(
-            self._saved_artifact_q,
+            self._results,
             functools.partial(self._record_saved, wait_for_data_store(app)),
             BatchParams(flush_size=10, wait_sec=1, ready=self._ingest_ready, flushed=self._ingest_flushed),
             # `_record_refs` already drops (and cleans up after) anything the store rejects outright,
