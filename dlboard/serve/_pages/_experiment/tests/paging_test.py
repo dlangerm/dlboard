@@ -117,6 +117,14 @@ def test_malformed_query_shows_the_first_page(raw: dict[str, str]) -> None:
     assert paging.Paging.from_request(raw, None) == paging.Paging()
 
 
+def test_a_bad_value_in_a_link_costs_only_itself() -> None:
+    """Regression (#672): one bad value reset every other, so a comparison drew again the runs its viewer had hidden."""
+    parsed = paging.Paging.from_request({"hidden": "[3, 7]", "panels_page": "abc", "run": "5"}, None)
+
+    assert parsed == paging.Paging.from_request({"hidden": "[3, 7]", "run": "5"}, None)
+    assert parsed.panel_page == 1
+
+
 @pytest.mark.parametrize(
     ("cookie", "expected"),
     [

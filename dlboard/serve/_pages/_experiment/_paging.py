@@ -34,6 +34,7 @@ from pydantic import (
 
 from dlboard.models import NO_DATA_COLUMNS
 from dlboard.serve._pages._experiment._page_model import group_panels_by_tab
+from dlboard.serve._url import UrlState
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -68,7 +69,7 @@ def _is_subsequence(needle: str, haystack: str) -> bool:
     return all(char in remaining for char in needle)  # `in` on an iterator consumes up to the match
 
 
-class PageSizes(BaseModel, frozen=True, extra="ignore"):
+class PageSizes(UrlState, frozen=True, extra="ignore"):
     """How many panels per page, and charts per panel page, one viewer has chosen."""
 
     panels: PanelsPerPage = 10
@@ -103,7 +104,7 @@ def _drop_default_charts(charts: dict[str, ChartPaging]) -> dict[str, ChartPagin
     return {name: paging for name, paging in charts.items() if paging != ChartPaging()}
 
 
-class Paging(BaseModel, frozen=True, extra="ignore", populate_by_name=True):
+class Paging(UrlState, frozen=True, extra="ignore", populate_by_name=True):
     """Which slice of the experiment page is showing. See the module docstring."""
 
     panel_q: str = Field(default="", alias="panels_q")
@@ -145,11 +146,7 @@ class Paging(BaseModel, frozen=True, extra="ignore", populate_by_name=True):
     @classmethod
     def from_request(cls, query: Mapping[str, str], sizes_cookie: str | None) -> Paging:
         """Parse a page request; a malformed link just shows the first page rather than breaking the page."""
-        sizes = PageSizes.from_cookie(sizes_cookie)
-        try:
-            return cls.model_validate({**query, "sizes": sizes})
-        except ValidationError:
-            return cls(sizes=sizes)
+        return cls.model_validate({**query, "sizes": PageSizes.from_cookie(sizes_cookie)})
 
     @computed_field
     @property

@@ -20,7 +20,7 @@ import dash_mantine_components as dmc
 from dash import Dash, Input, Output, State, ctx, html, no_update
 from dash.dcc import Store
 from dash.exceptions import PreventUpdate
-from pydantic import BaseModel, BeforeValidator, Field, ValidationError
+from pydantic import BeforeValidator, Field
 
 from dlboard.models import PinColor
 from dlboard.serve import ClientsideScript, Icon, get_current_user, get_data_store, icon
@@ -70,7 +70,7 @@ from dlboard.serve._pages._run_list._delete import (
 from dlboard.serve._pages._run_list._ids import navigate_id
 from dlboard.serve._pages._run_list._rows import register_row_updates, row_update_shells, row_updates_id
 from dlboard.serve._pages._run_list._table import run_grid
-from dlboard.serve._url import split_commas
+from dlboard.serve._url import UrlState, split_commas
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -103,7 +103,7 @@ PINNED_NOTIFY_ID: DivId[_PinnedRunsPage] = DivId("pinned-runs-notify")
 _SYNC_URL_JS = ClientsideScript(Path(__file__).with_name("sync_pins_url.js"))
 
 
-class PinFilter(BaseModel, frozen=True, extra="ignore", populate_by_name=True):
+class PinFilter(UrlState, frozen=True, extra="ignore", populate_by_name=True):
     """Which runs the list shows and which page of them: the project page URL's `pins_*` query."""
 
     colors: Annotated[frozenset[PinColor], BeforeValidator(split_commas)] = Field(
@@ -119,10 +119,7 @@ class PinFilter(BaseModel, frozen=True, extra="ignore", populate_by_name=True):
     @classmethod
     def from_query(cls, query: Mapping[str, str]) -> PinFilter:
         """The filter a page URL's query describes; a malformed one just means no filter."""
-        try:
-            return cls.model_validate(query)
-        except ValidationError:
-            return cls()
+        return cls.model_validate(query)
 
     @classmethod
     def from_search(cls, search: str | None) -> PinFilter:

@@ -17,13 +17,14 @@ from typing import TYPE_CHECKING, Any
 
 import dash_mantine_components as dmc
 from dash import Input, Output, State, ctx
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import Field
 
 from dlboard._compat import StrEnum
 from dlboard.serve import ClientsideScript, Icon, get_data_store, icon
 from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import DivId, ValueId
 from dlboard.serve._pages._dash_helpers import pager_props, section_label
+from dlboard.serve._url import UrlState
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -65,7 +66,7 @@ class CardGrid(StrEnum):
         return DivId(f"{self}-count")
 
 
-class CardQuery(BaseModel, frozen=True, extra="forbid"):
+class CardQuery(UrlState, frozen=True, extra="forbid"):
     """Which cards a grid shows: those whose name has `q` in it, and which page of them."""
 
     q: str = ""
@@ -74,10 +75,9 @@ class CardQuery(BaseModel, frozen=True, extra="forbid"):
     @classmethod
     def of(cls, grid: CardGrid, query: Mapping[str, str]) -> CardQuery:
         """What a page URL's query asks `grid` to show; a malformed one just means the first page, unfiltered."""
-        try:
-            return cls(q=query.get(f"{grid}_q", "").strip(), page=int(query.get(f"{grid}_page", 1)))
-        except (ValidationError, ValueError):
-            return cls()
+        return cls.model_validate(
+            {"q": query.get(f"{grid}_q", "").strip(), "page": query.get(f"{grid}_page", 1)}
+        )
 
 
 class Cards(typing.NamedTuple):

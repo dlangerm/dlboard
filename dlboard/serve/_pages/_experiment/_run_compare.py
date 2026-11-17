@@ -30,7 +30,7 @@ import dash_mantine_components as dmc
 from dash import Dash, Input, Output, State, ctx
 from dash.dcc import Store
 from dash.exceptions import PreventUpdate
-from pydantic import BaseModel, BeforeValidator, Field, ValidationError, model_validator
+from pydantic import BaseModel, BeforeValidator, Field, model_validator
 
 from dlboard.models import MetricReduction, Run
 from dlboard.serve import ClientsideScript, Icon, get_data_store, icon, series_swatch_class
@@ -44,7 +44,7 @@ from dlboard.serve._pages._experiment._paging import page_slice
 from dlboard.serve._pages._experiment._panel_data import experiment_names
 from dlboard.serve._pages._experiment._run_picker import run_options
 from dlboard.serve._pages._experiment._shown_runs import page_scope
-from dlboard.serve._url import split_commas
+from dlboard.serve._url import UrlState, split_commas
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator, Mapping
@@ -93,7 +93,7 @@ class RowKind(StrEnum):
     METRIC = "Metric (latest)"
 
 
-class CompareQuery(BaseModel, frozen=True, extra="ignore", populate_by_name=True):
+class CompareQuery(UrlState, frozen=True, extra="ignore", populate_by_name=True):
     """
     The compare modal's state as it appears in the page URL.
 
@@ -115,10 +115,7 @@ class CompareQuery(BaseModel, frozen=True, extra="ignore", populate_by_name=True
     @classmethod
     def from_query(cls, query: Mapping[str, str]) -> CompareQuery:
         """Parse a page's query parameters; a malformed link just opens nothing rather than breaking the page."""
-        try:
-            return cls.model_validate(query)
-        except ValidationError:
-            return cls()
+        return cls.model_validate(query)
 
 
 def run_field(run_id: int) -> str:

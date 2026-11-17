@@ -2020,6 +2020,7 @@
   "dlboard/serve/_pages/_experiment/tests/page_repository_test.py::test_saving_document_settings_branches_into_a_separate_view_when_editing_someone_elses": 0.20499489299982088,
   "dlboard/serve/_pages/_experiment/tests/page_repository_test.py::test_saving_document_settings_branches_into_your_own_view_when_editing_the_shared_page": 0.19141920400215895,
   "dlboard/serve/_pages/_experiment/tests/page_repository_test.py::test_saving_document_settings_writes_your_own_view_in_place": 0.16981973099973402,
+  "dlboard/serve/_pages/_experiment/tests/paging_test.py::test_a_bad_value_in_a_link_costs_only_itself": 0.0020036249989061616,
   "dlboard/serve/_pages/_experiment/tests/paging_test.py::test_a_focus_is_in_the_address_and_is_cleared_with_none": 0.0010445439947943669,
   "dlboard/serve/_pages/_experiment/tests/paging_test.py::test_a_new_charts_per_page_size_keeps_every_filter_but_returns_to_the_first_page": 0.001044903005094966,
   "dlboard/serve/_pages/_experiment/tests/paging_test.py::test_a_panel_at_its_defaults_is_the_same_as_one_never_mentioned": 0.001039148002746515,

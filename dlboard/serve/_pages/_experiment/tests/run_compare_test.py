@@ -46,7 +46,8 @@ _METRICS = {1: {"loss": 0.5}, 2: {"loss": 0.4}}
         # Malformed links open nothing rather than breaking the page.
         ({"compare": "3,x"}, [], CompareMode.DIFF, ""),
         ({"compare": ",".join(map(str, range(MAX_COMPARED_RUNS + 1)))}, [], CompareMode.DIFF, ""),
-        ({"compare": "3", "compare_mode": "sideways"}, [], CompareMode.DIFF, ""),
+        # A bad value costs only itself: the runs it names are still compared, in the default mode (#672).
+        ({"compare": "3", "compare_mode": "sideways"}, [3], CompareMode.DIFF, ""),
     ],
 )
 def test_compare_query_parses_the_url(
