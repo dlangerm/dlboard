@@ -307,6 +307,17 @@ def test_line_chart_x_axis_type_is_configurable() -> None:
     assert _props(chart)["xAxisProps"] == {"type": "category"}
 
 
+def test_a_date_axis_over_values_that_are_no_dates_says_so_rather_than_drawing_nothing() -> None:
+    """Regression (#672): every x became NaN, and the chart was drawn blank with no word of why."""
+    df = _metrics_df(3).assign(timestamp_utc=["soon", "later", "never"] * 2)
+
+    chart = LineChart.render(
+        LineChartSettings(column="loss", x_axis="timestamp_utc", x_axis_type="date", sample=False), df
+    )
+
+    assert "the axis can place" in str(props(chart))
+
+
 def test_line_chart_x_axis_type_date_converts_timestamps_to_epoch_millis() -> None:
     """
     Regression: a timestamp x-axis (e.g. timestamp_utc) previously only offered "number"/

@@ -21,9 +21,9 @@
         area.style.opacity = "0";
         document.body.appendChild(area);
         area.select();
-        document.execCommand("copy");
+        const copied = document.execCommand("copy");
         area.remove();
-        return Promise.resolve();
+        return copied ? Promise.resolve() : Promise.reject(new Error("the browser refused to copy"));
     };
 
     document.addEventListener("click", (event) => {
@@ -38,10 +38,15 @@
         if (button.dataset.dlCopyChartLink !== undefined) {
             url.searchParams.set("chart", button.dataset.dlCopyChartLink);
         }
-        copy(url.toString()).then(() => {
-            button.setAttribute("data-dl-copied", "");
-            setTimeout(() => button.removeAttribute("data-dl-copied"), FOCUS_MS);
-        });
+        copy(url.toString()).then(
+            () => {
+                button.setAttribute("data-dl-copied", "");
+                setTimeout(() => button.removeAttribute("data-dl-copied"), FOCUS_MS);
+            },
+            // Not copied (a denied clipboard, or a browser without either way): show the link to copy by hand, rather
+            // than say it was copied, or say nothing.
+            () => window.prompt("Copy this link:", url.toString()),
+        );
     });
 
     const focusLinkedChart = () => {

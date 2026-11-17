@@ -12,12 +12,15 @@ import bisect
 import typing
 from pathlib import Path
 
+from dash.exceptions import PreventUpdate
 from pydantic import BaseModel
 
 from dlboard.models import EXPERIMENT_COLUMN, StepRange
-from dlboard.serve import ClientsideScript, build_artifacts_dataframe
+from dlboard.serve import ClientsideScript, build_artifacts_dataframe, get_data_store
 
 if typing.TYPE_CHECKING:
+    from collections.abc import Callable
+
     import pandas as pd
 
     from dlboard.models import ArtifactWindow, DataStore
@@ -39,6 +42,29 @@ class WindowAsked(BaseModel, frozen=True, extra="forbid"):
     """The step the slider went to, outside the window the chart has: the next window is read around it."""
 
     step: int
+
+
+def answer_window_ask[Loaded: LoadedSteps, Patch](
+    read: Callable[[DataStore[...], Loaded, int], tuple[Patch, Loaded] | None],
+    loaded_type: type[Loaded],
+    asked: dict[str, typing.Any] | None,
+    loaded: dict[str, typing.Any] | None,
+) -> tuple[Patch, dict[str, typing.Any]]:
+    """
+    A chart's answer to its slider leaving the window it has: `read` of the window around the step asked, and the window.
+
+    The body of the callback each chart with a window registers, which hands it what the browser sent; nothing to answer
+    (no ask yet, or no run logged anything there) leaves the chart as it is.
+    """
+    if not asked or not loaded:
+        raise PreventUpdate
+    answer = read(
+        get_data_store(), loaded_type.model_validate(loaded), WindowAsked.model_validate(asked).step
+    )
+    if answer is None:
+        raise PreventUpdate
+    patch, window = answer
+    return patch, window.model_dump(mode="json")
 
 
 def runs_by_experiment(df: pd.DataFrame) -> dict[int, list[int]] | None:

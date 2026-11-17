@@ -26,7 +26,7 @@ from dlboard.plugins.charts._axis_label import (
     fit_axis_label,
 )
 from dlboard.plugins.charts._chart_title import titled
-from dlboard.plugins.charts._empty_chart import nothing_logged
+from dlboard.plugins.charts._empty_chart import nothing_logged, nothing_to_place
 from dlboard.plugins.charts._sampling import DEFAULT_MAX_POINTS, shared_sample_grid
 from dlboard.serve import AssetKind, series_color, series_dash, serve_asset
 
@@ -117,7 +117,7 @@ def _to_epoch_millis(column: pd.Series) -> pd.Series:
     as_datetime = (
         column
         if pd.api.types.is_datetime64_any_dtype(column)
-        else pd.to_datetime(column, utc=True, errors="coerce")
+        else pd.to_datetime(column, utc=True, errors="coerce", format="ISO8601")
     )
     if as_datetime.dt.tz is None:
         as_datetime = as_datetime.dt.tz_localize("UTC")
@@ -181,6 +181,10 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.Stack], frozen=Tr
         if parameters.x_axis_type == "date":
             x_values = _to_epoch_millis(x_values)
         has_x = x_values.notna()
+        if (
+            not has_x.any()
+        ):  # rows, but no x the axis can place (no date, for a date axis): say so, not a blank chart
+            return nothing_to_place(parameters.column, x_col)
 
         plotted = dataframe.loc[has_x, ["run_id", "step", parameters.column]].assign(
             **{x_col: x_values[has_x]}

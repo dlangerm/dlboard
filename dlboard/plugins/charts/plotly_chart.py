@@ -18,7 +18,6 @@ import dash
 import dash_mantine_components as dmc
 import pandas as pd
 from dash import Patch, dcc
-from dash.exceptions import PreventUpdate
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from structlog.stdlib import get_logger
@@ -51,7 +50,7 @@ from dlboard.plugins.charts._step_slider import lock_step_sliders, step_slider
 from dlboard.plugins.charts._step_window import (
     WINDOW_JS,
     LoadedSteps,
-    WindowAsked,
+    answer_window_ask,
     read_around,
     runs_by_experiment,
 )
@@ -60,7 +59,6 @@ from dlboard.serve import (
     ClientsideScript,
     allow_resources_from,
     allow_resources_from_anywhere,
-    get_data_store,
     series_color,
     series_dash,
     series_swatch_class,
@@ -622,15 +620,7 @@ def plug(app: dash.Dash) -> None:
         asked: dict[str, Any] | None, loaded: dict[str, Any] | None
     ) -> tuple[Patch, dict[str, Any]]:
         """The figures of the steps around the one the slider went to, in place of the window the chart had."""
-        if not asked or not loaded:
-            raise PreventUpdate
-        read = read_window(
-            get_data_store(), _LoadedWindow.model_validate(loaded), WindowAsked.model_validate(asked).step
-        )
-        if read is None:
-            raise PreventUpdate
-        patch, window = read
-        return patch, window.model_dump(mode="json")
+        return answer_window_ask(read_window, _LoadedWindow, asked, loaded)
 
     app.clientside_callback(
         _FIGURES_JS.source,

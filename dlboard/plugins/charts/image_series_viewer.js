@@ -781,6 +781,9 @@ window.dlImageSeriesViewer = (() => {
             .join("_")
             .replace(/[^\w.-]+/g, "_");
         const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+        if (!blob) {
+            throw new Error("the browser could not make a picture that large: try a smaller size");
+        }
         const link = document.createElement("a");
         link.href = URL.createObjectURL(blob);
         link.download = `${name}.png`;
@@ -791,9 +794,11 @@ window.dlImageSeriesViewer = (() => {
     // Pointing at "Download" offers the sizes (see the CSS); a click on one downloads at it, and Enter in the pixels' field
     // downloads at those.
     const downloadAt = (title, choice) =>
-        download(title.dataset.dlInstance, choice).catch((error) =>
-            console.error("image viewer: the picture could not be downloaded:", error),
-        );
+        download(title.dataset.dlInstance, choice).catch((error) => {
+            // Said where it was asked for, not only in the console: a click that does nothing reads as a broken button.
+            console.error("image viewer: the picture could not be downloaded:", error);
+            window.alert(`The picture could not be downloaded: ${error.message}`);
+        });
     document.addEventListener("click", (event) => {
         const choice = event.target.closest?.(".dl-view-download [data-dl-download]");
         if (choice) {

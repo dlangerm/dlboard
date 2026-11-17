@@ -57,14 +57,13 @@ from dlboard.plugins.charts._step_slider import lock_step_sliders, step_slider
 from dlboard.plugins.charts._step_window import (
     WINDOW_JS,
     LoadedSteps,
-    WindowAsked,
+    answer_window_ask,
     read_around,
     runs_by_experiment,
 )
 from dlboard.serve import (
     AssetKind,
     ClientsideScript,
-    get_data_store,
     series_swatch_class,
     serve_asset,
 )
@@ -819,15 +818,7 @@ def _register_window_reads(app: dash.Dash) -> None:
         asked: dict[str, Any] | None, loaded: dict[str, Any] | None
     ) -> tuple[Patch, dict[str, Any]]:
         """The pictures of the steps around the one the slider went to, in place of the window the chart had."""
-        if not asked or not loaded:
-            raise PreventUpdate
-        read = read_window(
-            get_data_store(), _LoadedWindow.model_validate(loaded), WindowAsked.model_validate(asked).step
-        )
-        if read is None:
-            raise PreventUpdate
-        patch, window = read
-        return patch, window.model_dump(mode="json")
+        return answer_window_ask(read_window, _LoadedWindow, asked, loaded)
 
 
 def plug(app: dash.Dash) -> None:
