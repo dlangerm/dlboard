@@ -192,12 +192,12 @@ def run_checks(ctx: TaskContext) -> None:
         claimed = ctx.claim(RetentionWork.CHECK, limit=1)
         if not claimed:
             break
-        (item,) = claimed
-        try:
-            overdue += _check(ctx, int(item.key), asker)
-        except Exception as exc:  # noqa: BLE001 -- one project's failure must not stop the others' checks
-            _log.warning("A project's retention check failed", project_id=item.key, exc_info=True)
-            ctx.retry(item, f"{type(exc).__name__}: {exc}")
-        else:
-            ctx.done(claimed)
+        for item in claimed:  # one, as asked; but every item claimed is this custodian's to finish
+            try:
+                overdue += _check(ctx, int(item.key), asker)
+            except Exception as exc:  # noqa: BLE001 -- one project's failure must not stop the others' checks
+                _log.warning("A project's retention check failed", project_id=item.key, exc_info=True)
+                ctx.retry(item, f"{type(exc).__name__}: {exc}")
+            else:
+                ctx.done([item])
     ctx.report(backlog=overdue)

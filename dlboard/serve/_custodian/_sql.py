@@ -164,10 +164,13 @@ class SQLTaskStore:
 
     def claim_work(self, kind: str, holder: str, *, limit: int, until: datetime) -> list[WorkItem]:
         """
-        Claim a batch in one `UPDATE` of the ids its subquery picks.
+        Claim a batch in one `UPDATE` of the ids a materialized CTE picks.
 
-        On Postgres the subquery is `FOR UPDATE SKIP LOCKED`, so a claimer passes over rows another is claiming instead of
-        waiting; on SQLite, which has one writer, the statement is atomic anyway.
+        On Postgres the pick is `FOR UPDATE SKIP LOCKED`, so a claimer passes over rows another is claiming instead of
+        waiting; on SQLite, which has one writer, the statement is atomic anyway. The pick is a `MATERIALIZED` CTE, run
+        exactly once: a subquery in the `UPDATE`'s `WHERE` may be run again by the plan Postgres picks, and with `SKIP
+        LOCKED` each run can pass over rows a racing claimer just locked and pick others, so a claim of `limit` could
+        come back with more (#670).
         """
         work = self.tables[WorkItem]
         now = pendulum.now(pendulum.UTC)
@@ -181,12 +184,13 @@ class SQLTaskStore:
             .order_by(work.c.due_at, work.c.id)
             .limit(limit)
             .with_for_update(skip_locked=True)
-            .scalar_subquery()
+            .cte("due")
+            .prefix_with("MATERIALIZED")
         )
         claimed = self._fetch(
             WorkItem,
             sa.update(work)
-            .where(work.c.id.in_(due))
+            .where(work.c.id.in_(sa.select(due.c.id)))
             .values(
                 {work.c.claimed_by: holder, work.c.claimed_until: until, work.c.attempts: work.c.attempts + 1}
             )

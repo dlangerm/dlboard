@@ -158,3 +158,30 @@ def test_a_claim_skips_the_items_another_is_claiming_instead_of_waiting_for_them
         claimer.join(timeout=5)
         assert not claimer.is_alive(), "the claim waited on the rows another transaction holds"
     assert sorted(w.key for w in claimed) == sorted({"0", "1", "2", "3"} - set(locked))
+
+
+def test_racing_claimers_each_get_at_most_their_limit_and_never_the_same_item(
+    store: SQLStoreBase[Any],
+) -> None:
+    """
+    Regression (#670): Postgres could run the `SKIP LOCKED` subquery picking a claim's batch more than once in one
+    `UPDATE`, each time passing over other rows, so a claim of one came back with two and retention's check failed.
+    """
+    items, racers = 200, 8
+    _queue(store, items)
+    claims: list[list[WorkItem]] = []
+    lock = threading.Lock()
+
+    def claim_until_empty(holder: str) -> None:
+        while claimed := store.claim_work("blob", holder, limit=1, until=_later(minutes=5)):
+            with lock:
+                claims.append(claimed)
+
+    racing = [threading.Thread(target=claim_until_empty, args=(f"r{i}",)) for i in range(racers)]
+    for racer in racing:
+        racer.start()
+    for racer in racing:
+        racer.join(timeout=60)
+
+    assert max(len(claim) for claim in claims) == 1
+    assert sorted(int(w.key) for claim in claims for w in claim) == list(range(items))
