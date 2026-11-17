@@ -31,7 +31,7 @@ from dlboard._telemetry.traces import TraceSettings, trace_ids
 from dlboard.serve.telemetry import TelemetrySettings
 
 if typing.TYPE_CHECKING:
-    from structlog.typing import EventDict, Processor
+    from structlog.typing import EventDict, Processor, WrappedLogger
 
 
 class LogFormat(StrEnum):
@@ -57,7 +57,7 @@ class LoggingSettings(BaseSettings):
     proxy or load balancer usually already logs this."""
 
 
-def _add_trace_ids(_logger: object, _method: str, event_dict: EventDict) -> EventDict:
+def _add_trace_ids(_logger: WrappedLogger, _method: str, event_dict: EventDict) -> EventDict:
     """Put the open span's ids on the line, so a log line and the trace of its request find each other."""
     if (ids := trace_ids()) is not None:
         event_dict["trace_id"], event_dict["span_id"] = ids

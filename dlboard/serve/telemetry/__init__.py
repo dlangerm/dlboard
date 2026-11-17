@@ -365,7 +365,7 @@ def instrument_app(app: Dash) -> None:
             _log.warning("could not trace this server's requests; going on without", exc_info=True)
 
 
-def _one(_item: object) -> int:
+def _one[T](_item: T) -> int:
     return 1
 
 

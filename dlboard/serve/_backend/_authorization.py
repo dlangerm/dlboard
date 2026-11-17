@@ -46,7 +46,7 @@ def _forbid(what: str) -> NoReturn:
     raise PermissionError(msg)
 
 
-class AuthorizingDataStore(models.DataStore[...]):
+class AuthorizingDataStore(models.DataStore[[]]):
     """A `DataStore` that only lets `actor` do what their project roles and scopes allow."""
 
     def __init__(  # noqa: PLR0913 -- what a request's store is built from, each once
@@ -72,7 +72,7 @@ class AuthorizingDataStore(models.DataStore[...]):
         self._settings: dict[tuple[str, int], models.ScopedSettings] = {}
 
     @classmethod
-    def get_or_create(cls, *_args: object, **_kwargs: object) -> Self:
+    def get_or_create(cls) -> Self:
         """Never built this way -- `get_data_store()` builds one per request, around the real store."""
         msg = f"{cls.__name__} is built per request by get_data_store()"
         raise TypeError(msg)
@@ -1053,7 +1053,7 @@ class AuthorizingDataStore(models.DataStore[...]):
         return self._inner.trashed_before(entity_type, cutoff, limit=limit)
 
 
-class AuthorizingArtifactStore(models.ArtifactStore[...]):
+class AuthorizingArtifactStore(models.ArtifactStore[[]]):
     """An `ArtifactStore` that only accepts artifacts for runs its `authorizer`'s actor may write to."""
 
     def __init__(self, inner: models.ArtifactStore[...], authorizer: AuthorizingDataStore) -> None:
@@ -1061,7 +1061,7 @@ class AuthorizingArtifactStore(models.ArtifactStore[...]):
         self._authorizer = authorizer
 
     @classmethod
-    def get_or_create(cls, *_args: object, **_kwargs: object) -> Self:
+    def get_or_create(cls) -> Self:
         """Never built this way -- `get_artifact_store()` builds one per request, around the real store."""
         msg = f"{cls.__name__} is built per request by get_artifact_store()"
         raise TypeError(msg)

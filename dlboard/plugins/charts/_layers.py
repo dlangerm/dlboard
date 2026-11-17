@@ -49,8 +49,8 @@ class DrawnLayer(BaseModel, frozen=True):
     """The artifact key of the layer, which its style, and a viewer's change, is looked up by."""
 
 
-def is_overlay_of(key: str, image_key: object) -> bool:
-    """Whether `key` is an overlay of the picture under `image_key`."""
+def is_overlay_of(key: str, image_key: str | None) -> bool:
+    """Whether `key` is an overlay of the picture under `image_key` (never, with no picture)."""
     overlay = OverlayKey.parse(key)
     return overlay is not None and overlay.image_key == image_key
 

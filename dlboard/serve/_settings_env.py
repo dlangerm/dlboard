@@ -6,10 +6,12 @@ import os
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from pydantic_settings import BaseSettings
 
 
-def set_setting_env(settings_cls: type[BaseSettings], field_name: str, value: object) -> None:
+def set_setting_env(settings_cls: type[BaseSettings], field_name: str, value: str | Path) -> None:
     """
     Set the environment variable that `settings_cls`'s pydantic-settings field `field_name` reads.
 

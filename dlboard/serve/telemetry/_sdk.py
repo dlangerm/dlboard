@@ -15,7 +15,7 @@ import threading
 import traceback
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Final
 
 import pendulum
 from opentelemetry._logs import SeverityNumber
@@ -34,12 +34,13 @@ from dlboard._version import __version__
 from dlboard.serve.telemetry import LOGS, SECONDS_BUCKETS, MetricsExporter, TelemetrySettings, Unit
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, MutableMapping
+    from collections.abc import Mapping
 
     from opentelemetry._logs import Logger
     from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter as GrpcLogExporter
     from opentelemetry.metrics import Meter
     from opentelemetry.util.types import AttributeValue
+    from structlog.typing import EventDict, WrappedLogger
 
     from dlboard.serve.telemetry._prometheus import Snapshots
 
@@ -210,9 +211,7 @@ _WARNED: Final = threading.Event()
 """Set once a failure to forward has been reported, so a persistent one is not reported per log line."""
 
 
-def forward_log(
-    _logger: object, _method: str, event_dict: MutableMapping[str, Any]
-) -> MutableMapping[str, Any]:
+def forward_log(_logger: WrappedLogger, _method: str, event_dict: EventDict) -> EventDict:
     """
     A structlog processor: send each event over OTLP, and pass it on to the console/JSON renderer unchanged.
 

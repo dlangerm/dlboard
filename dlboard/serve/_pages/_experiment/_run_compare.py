@@ -44,6 +44,7 @@ from dlboard.serve._pages._experiment._paging import page_slice
 from dlboard.serve._pages._experiment._panel_data import experiment_names
 from dlboard.serve._pages._experiment._run_picker import run_options
 from dlboard.serve._pages._experiment._shown_runs import page_scope
+from dlboard.serve._url import split_commas
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator, Mapping
@@ -92,10 +93,6 @@ class RowKind(StrEnum):
     METRIC = "Metric (latest)"
 
 
-def _split_ids(value: object) -> object:
-    return [part for part in value.split(",") if part] if isinstance(value, str) else value
-
-
 class CompareQuery(BaseModel, frozen=True, extra="ignore", populate_by_name=True):
     """
     The compare modal's state as it appears in the page URL.
@@ -103,7 +100,7 @@ class CompareQuery(BaseModel, frozen=True, extra="ignore", populate_by_name=True
     For example `?compare=3,7&compare_mode=all&compare_q=lr`, with `&compare_page=2` past the first page.
     """
 
-    runs: Annotated[list[int], BeforeValidator(_split_ids)] = Field(
+    runs: Annotated[list[int], BeforeValidator(split_commas)] = Field(
         default_factory=list[int], alias="compare", max_length=MAX_COMPARED_RUNS
     )
     """The compared runs, baseline first. Empty means the modal is closed."""

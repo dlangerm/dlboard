@@ -41,7 +41,7 @@ type TargetSessionAttrs = Literal["any", "read-write", "read-only", "primary", "
 """libpq's `target_session_attrs`: which server of a multi-host `host` list to settle on."""
 
 
-def _null_if_empty(value: object) -> object:
+def _null_if_empty(value: str | int | None) -> str | int | None:
     """`None` for an environment variable of `null` or nothing at all; anything else as it was."""
     return None if isinstance(value, str) and value.strip().lower() in {"", "null"} else value
 

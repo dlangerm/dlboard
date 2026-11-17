@@ -49,7 +49,11 @@ metadata, _ = build_metadata()
 target_metadata = metadata
 
 
-def _render_item(type_: str, obj: object, autogen_context: AutogenContext) -> str | Literal[False]:
+def _render_item(
+    type_: str,
+    obj: object,  # dlboard-ignore[forbid-string-ignore] -- autogenerate hands every kind of schema object here
+    autogen_context: AutogenContext,
+) -> str | Literal[False]:
     """
     Render dlboard's own `UTCDateTime` by its stable public import path, not its real module.
 

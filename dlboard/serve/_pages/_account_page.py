@@ -15,6 +15,8 @@ from dlboard.serve._pages._dash_helpers import TriggeredId, require_triggered_id
 from dlboard.serve._url import relative_path
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from dash.development.base_component import Component
 
     from dlboard.models import ApiToken
@@ -36,7 +38,7 @@ class _TokenButton(TriggeredId):
     token: int
 
 
-def _when(token_time: object) -> str:
+def _when(token_time: datetime | None) -> str:
     return f"{token_time:%Y-%m-%d %H:%M} UTC" if token_time else "-"
 
 

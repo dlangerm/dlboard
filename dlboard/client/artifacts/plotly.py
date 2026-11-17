@@ -21,7 +21,15 @@ from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Annotated, Any, Final, Protocol, cast
 
 import numpy as np
-from pydantic import BaseModel, Field, NonNegativeInt, StringConstraints, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    JsonValue,
+    NonNegativeInt,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
 
 from dlboard.client._arrays import ArrayLike, TensorLike, to_numpy
 from dlboard.models import (
@@ -105,17 +113,17 @@ class _Figure(BaseModel, frozen=True, extra="allow"):
         )
 
 
-def _array_values(array: np.ndarray) -> list[Any]:
+def _array_values(array: np.ndarray) -> list[JsonValue]:
     """`array` as nested lists of plain values, with NaN and infinities as `None` (JSON's `null`, a gap to plotly)."""
     if array.dtype.kind == "f":
         values = array.astype(object)
         values[~np.isfinite(array)] = None
         return values.tolist()
-    return _jsonable(array.tolist())
+    return [_jsonable(value) for value in array.tolist()]
 
 
-def _jsonable(value: object) -> Any:  # noqa: ANN401 -- whatever JSON value `value` is
-    """`value` with every array, tensor and numpy scalar in it as plain values, and NaN as `None`."""
+def _jsonable(value: object) -> JsonValue:  # dlboard-ignore[forbid-string-ignore]
+    """`value` (anything a figure holds) with every array, tensor and numpy scalar in it as plain values, NaN as `None`."""
     match value:
         case str() | bool() | int() | None:
             return value
@@ -135,7 +143,7 @@ def _jsonable(value: object) -> Any:  # noqa: ANN401 -- whatever JSON value `val
             raise TypeError(msg)
 
 
-def _encoded(document: object) -> bytes:
+def _encoded(document: JsonValue) -> bytes:
     return json.dumps(document, allow_nan=False, separators=(",", ":")).encode()
 
 
@@ -170,9 +178,13 @@ class PlotlyFigure(BaseModel, frozen=True, extra="forbid"):
         traces' styles, any trace not bound) is drawn as it is.
         """
         raw = _jsonable(figure) if isinstance(figure, Mapping) else _jsonable(json.loads(figure.to_json()))
+        if not isinstance(raw, dict):
+            msg = f"a figure is a JSON object, not a {type(raw).__name__}"
+            raise TypeError(msg)
         if bind is not None:
+            # Keyed by the trace's position as JSON spells it -- a string, which `_Figure` reads back as the number.
             raw[BINDINGS_MEMBER] = {
-                trace: {
+                str(trace): {
                     path: source.model_dump() if isinstance(source, MetricBinding) else source
                     for path, source in attributes.items()
                 }

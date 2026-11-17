@@ -70,6 +70,7 @@ from dlboard.serve._pages._run_list._delete import (
 from dlboard.serve._pages._run_list._ids import navigate_id
 from dlboard.serve._pages._run_list._rows import register_row_updates, row_update_shells, row_updates_id
 from dlboard.serve._pages._run_list._table import run_grid
+from dlboard.serve._url import split_commas
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -102,18 +103,13 @@ PINNED_NOTIFY_ID: DivId[_PinnedRunsPage] = DivId("pinned-runs-notify")
 _SYNC_URL_JS = ClientsideScript(Path(__file__).with_name("sync_pins_url.js"))
 
 
-def _split(value: object) -> object:
-    """A comma-separated query value as its items; anything else is left for validation to judge."""
-    return [item for item in value.split(",") if item] if isinstance(value, str) else value
-
-
 class PinFilter(BaseModel, frozen=True, extra="ignore", populate_by_name=True):
     """Which runs the list shows and which page of them: the project page URL's `pins_*` query."""
 
-    colors: Annotated[frozenset[PinColor], BeforeValidator(_split)] = Field(
+    colors: Annotated[frozenset[PinColor], BeforeValidator(split_commas)] = Field(
         default=frozenset(), alias="pins_color"
     )
-    pinned_by: Annotated[frozenset[int], BeforeValidator(_split)] = Field(
+    pinned_by: Annotated[frozenset[int], BeforeValidator(split_commas)] = Field(
         default=frozenset(), alias="pins_by"
     )
     experiment: int | None = Field(default=None, alias="pins_exp")

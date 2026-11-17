@@ -94,7 +94,7 @@ from dlboard.serve._pages._run_list._rows import (
 from dlboard.serve._pages._run_list._table import run_grid
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
     from dash.development.base_component import Component
 
@@ -183,7 +183,7 @@ def _rows(
     ]
 
 
-def _signature(rows: list[dict[str, Any]], offered: object, *, can_edit: bool) -> str:
+def _signature(rows: list[dict[str, Any]], offered: Sequence[object], *, can_edit: bool) -> str:
     """A digest of everything the list is drawn from, so a tab switch does not draw it again."""
     return hashlib.sha256(
         json.dumps([rows, offered, can_edit], sort_keys=True, default=str).encode()

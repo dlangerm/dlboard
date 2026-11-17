@@ -77,7 +77,7 @@ class _Stub(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def log_message(self, *_args: object) -> None:
+    def log_message(self, *_args: object) -> None:  # dlboard-ignore[forbid-string-ignore]
         """Say nothing."""
 
 
@@ -88,7 +88,11 @@ def _grpc_collector() -> Iterator[str]:
     from opentelemetry.proto.collector.trace.v1 import trace_service_pb2, trace_service_pb2_grpc
 
     class _Traces:
-        def Export(self, request: object, _context: object) -> object:  # noqa: N802 -- the generated service's name
+        def Export(  # noqa: N802 -- the generated service's name
+            self,
+            request: trace_service_pb2.ExportTraceServiceRequest,
+            _context: grpc.ServicerContext,
+        ) -> trace_service_pb2.ExportTraceServiceResponse:
             body = request.SerializeToString()  # pyrefly: ignore [missing-attribute]
             collected.append(("/v1/traces", body))
             return trace_service_pb2.ExportTraceServiceResponse()

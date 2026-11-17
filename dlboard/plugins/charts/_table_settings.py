@@ -119,18 +119,18 @@ class TableChartSettings(BaseModel, frozen=True, extra="forbid", use_attribute_d
 
     @model_validator(mode="before")
     @classmethod
-    def _from_legacy_settings(cls, data: object) -> object:
+    def _from_legacy_settings(cls, data: object) -> object:  # dlboard-ignore[forbid-string-ignore]
         """A table saved with a `mode` and its own settings loads as the rows and columns that show the same table."""
         if not isinstance(data, dict):
             return data
-        fields = typing.cast("dict[str, object]", data)
+        fields = typing.cast("dict[object, object]", data)
         legacy = {key: value for key, value in fields.items() if key in _LEGACY_KEYS}
         if not legacy:
             return data
         current = {key: value for key, value in fields.items() if key not in _LEGACY_KEYS}
         migrated = _LegacySettings.model_validate(legacy).as_settings()
-        if current.keys() & migrated.keys():
-            msg = f"settings saved before rows and columns can't also set {sorted(current.keys() & migrated.keys())}"
+        if clashing := migrated.keys() & current.keys():
+            msg = f"settings saved before rows and columns can't also set {sorted(clashing)}"
             raise ValueError(msg)
         return {**current, **migrated}
 

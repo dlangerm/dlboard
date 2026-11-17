@@ -37,6 +37,7 @@ if TYPE_CHECKING:
     from typing import Any
 
     from flask import Flask
+    from opentelemetry.sdk.trace import TracerProvider
 
     from dlboard._telemetry._sdk import Traces
 
@@ -155,9 +156,9 @@ class _Instrumentor(Protocol):
 
     def instrumentation_dependencies(self) -> Collection[str]: ...
 
-    def instrument(self, **kwargs: object) -> None: ...
+    def instrument(self, **_kwargs: TracerProvider | bool) -> None: ...
 
-    def uninstrument(self, **kwargs: object) -> None: ...
+    def uninstrument(self) -> None: ...
 
 
 def _process_wide() -> list[EntryPoint]:

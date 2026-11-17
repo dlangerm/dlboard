@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from pydantic import TypeAdapter
+from pydantic import JsonValue, TypeAdapter
 
 from dlboard.models import TagDisplay, TagValue, format_tag_value
 
@@ -13,8 +13,11 @@ if TYPE_CHECKING:
 
 _TAGS_ADAPTER: TypeAdapter[dict[str, TagValue]] = TypeAdapter(dict[str, TagValue])
 
+type RawTags = Mapping[str, TagValue | JsonValue] | float | None
+"""A `<key>__tags` cell: the tags (as plain JSON, or typed), NaN where pivoting left a gap, or `None` for a column the row lacks."""
 
-def parse_tags(raw_tags: object) -> dict[str, TagValue]:
+
+def parse_tags(raw_tags: RawTags) -> dict[str, TagValue]:
     """
     An artifact `<key>__tags` cell as typed tags.
 
@@ -26,7 +29,7 @@ def parse_tags(raw_tags: object) -> dict[str, TagValue]:
 
 
 def format_tags(
-    raw_tags: object,
+    raw_tags: RawTags,
     display: TagDisplay = TagDisplay(),  # noqa: B008
     by_key: Mapping[str, TagDisplay] | None = None,
 ) -> dict[str, str]:
@@ -44,7 +47,7 @@ def format_tags(
 
 
 def format_tags_caption(
-    raw_tags: object,
+    raw_tags: RawTags,
     display: TagDisplay = TagDisplay(),  # noqa: B008
     by_key: Mapping[str, TagDisplay] | None = None,
 ) -> str:

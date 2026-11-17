@@ -26,6 +26,7 @@ from pydantic import (
     BaseModel,
     BeforeValidator,
     Field,
+    JsonValue,
     TypeAdapter,
     ValidationError,
     computed_field,
@@ -92,7 +93,8 @@ class ChartPaging(BaseModel, frozen=True, extra="forbid"):
 _CHARTS_ADAPTER: typing.Final = TypeAdapter(dict[str, ChartPaging])
 
 
-def _load_json(value: object) -> object:
+def _load_json[T](value: str | T) -> JsonValue | T:
+    """A JSON query value (`?hidden=[3,7]`) parsed, for a `BeforeValidator`; anything else is left for validation to judge."""
     return json.loads(value) if isinstance(value, str) else value
 
 

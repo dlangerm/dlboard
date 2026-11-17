@@ -15,13 +15,16 @@ import dash
 
 from dlboard.serve import AppSlot, ClientsideScript
 
+if typing.TYPE_CHECKING:
+    from dash.dependencies import Wildcard
+
 STEP_SLIDER: typing.Final = "dl-step-slider"
 
 _LOCK_JS: typing.Final = ClientsideScript(Path(__file__).with_name("step_slider_lock.js"))
 _LOCKED: AppSlot[bool] = AppSlot("step slider lock")
 
 
-def step_slider(chart: str, instance: object) -> dict[str, object]:
+def step_slider(chart: str, instance: str | Wildcard) -> dict[str, str | Wildcard]:
     """The id of the step slider of the chart `instance` of the chart type named `chart`, or a pattern over them."""
     return {"type": STEP_SLIDER, "chart": chart, "instance": instance}
 

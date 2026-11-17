@@ -96,6 +96,16 @@ FORBIDDEN_STRINGS: typing.Final = (
         pattern=re.compile(r"\bos\.path\b"),
         message="Use `pathlib` rather than the path helpers in the `os` module.",
     ),
+    # An argument or return annotated as the top type usually means its real type went unmodelled, and is then cast back
+    # into one -- a cast the checker takes on trust. `(?!\.)` leaves `object.__setattr__` to its own rule above.
+    ForbiddenString(
+        pattern=re.compile(r"(?:->|:)\s*object\b(?!\.)"),
+        message=(
+            "Annotate the real type (or a Protocol) instead of `object`. Where a value really can be anything (a pydantic "
+            "before-validator's input, an argument that is ignored), keep `object`, narrow it with `isinstance` rather than "
+            "`cast`, and mark the line."
+        ),
+    ),
 )
 
 

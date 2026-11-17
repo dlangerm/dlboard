@@ -17,7 +17,7 @@ from types import NoneType, UnionType
 import numpy as np
 import pendulum
 import sqlalchemy as sa
-from pydantic import AwareDatetime, BaseModel, TypeAdapter
+from pydantic import AwareDatetime, BaseModel, JsonValue, TypeAdapter
 from sqlalchemy.dialects.postgresql import JSONB
 
 from dlboard import models
@@ -105,13 +105,15 @@ class DecodedJSON(sa.TypeDecorator[typing.Any]):
     impl = _JSON
     cache_ok = True
 
-    def __init__(self, annotation: object) -> None:
+    def __init__(self, annotation: type[typing.Any] | None) -> None:
         super().__init__()
         self.annotation = annotation
         self._adapter: TypeAdapter[typing.Any] = TypeAdapter(annotation)
 
     @typing.override
-    def process_result_value(self, value: object, dialect: Dialect) -> object:
+    def process_result_value(
+        self, value: JsonValue, dialect: Dialect
+    ) -> object:  # dlboard-ignore[forbid-string-ignore] -- whatever `annotation` validates to
         return None if value is None else self._adapter.validate_python(value)
 
 
@@ -170,7 +172,7 @@ _PACKED_COLUMNS: typing.Final[Mapping[type[object], type[sa.types.TypeEngine[typ
 """The column a field marked with each kind of `Annotated` marker is stored in, instead of the one its type implies."""
 
 
-def _unwrap_optional(annotation: object) -> tuple[object, bool]:
+def _unwrap_optional(annotation: type[typing.Any] | None) -> tuple[type[typing.Any] | None, bool]:
     """`(inner type, nullable)` for `X | None`; `(annotation, False)` for anything else."""
     args = typing.get_args(annotation)
     if typing.get_origin(annotation) in (UnionType, typing.Union) and NoneType in args:
@@ -185,7 +187,7 @@ def _marked_type(metadata: Sequence[object]) -> sa.types.TypeEngine[typing.Any] 
 
 
 def column_type(  # noqa: PLR0911 -- one return per SQL type is the clearest shape here
-    annotation: object, metadata: Sequence[object] = ()
+    annotation: type[typing.Any] | None, metadata: Sequence[object] = ()
 ) -> sa.types.TypeEngine[typing.Any]:
     """The SQL column type a model field (its already un-`Optional`ed annotation, and any `Annotated` markers) is stored as."""
     if (marked := _marked_type(metadata)) is not None:
@@ -211,7 +213,9 @@ def column_type(  # noqa: PLR0911 -- one return per SQL type is the clearest sha
     raise NotImplementedError(kind)
 
 
-def _server_default(default: object) -> sa.TextClause | sa.ColumnElement[bool] | None:
+def _server_default(
+    default: object,  # dlboard-ignore[forbid-string-ignore] -- any field default
+) -> sa.TextClause | sa.ColumnElement[bool] | None:
     """
     A real SQL `DEFAULT` for a plain scalar field default (e.g. `revision: int = 0`).
 

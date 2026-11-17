@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any, Final, Generic, Literal, TypeVar, cast
 import numpy as np
 import pendulum
 import requests
-from pydantic import BaseModel
+from pydantic import BaseModel, JsonValue
 from pydantic_core import to_jsonable_python
 from pydantic_settings import BaseSettings
 from pytorch_lightning.loggers import Logger
@@ -310,32 +310,30 @@ class _LoggerEnv(BaseSettings):
     """An existing run to attach to instead of creating one -- see `DLBoardLogger`'s `run_id`."""
 
 
-def _jsonable_fallback(value: object) -> object:
+def _jsonable_fallback(value: object) -> JsonValue:  # dlboard-ignore[forbid-string-ignore]
     """What pydantic's JSON serializer can't convert itself: numpy scalars, `Namespace`s, anything else as text."""
     match value:
         case np.generic():
-            return cast("object", value.item())
+            return value.item()
         case Namespace():
             return vars(value)
         case _:
             return str(value)
 
 
-def _flatten_json(value: object, prefix: str) -> dict[str, models.ValidJsonTypes]:
+def _flatten_json(value: JsonValue, prefix: str) -> dict[str, models.ValidJsonTypes]:
     """Join nested dict keys with `"/"`, and keep a list as one JSON string -- a hparam is a single cell."""
     match value:
         case dict():
             return {
                 key: leaf
-                for name, child in cast("dict[str, object]", value).items()
+                for name, child in value.items()
                 for key, leaf in _flatten_json(child, f"{prefix}/{name}" if prefix else name).items()
             }
         case list():
             return {prefix: json.dumps(value)}
         case str() | int() | float() | bool() | None:
             return {prefix: value}
-        case _:
-            return {prefix: str(value)}
 
 
 def flatten_hparams(params: dict[str, Any] | Namespace) -> models.FlatHparamDict:

@@ -140,21 +140,22 @@ class ImageChartSettings(BaseModel, frozen=True, extra="forbid", use_attribute_d
 
     @model_validator(mode="before")
     @classmethod
-    def _from_overlays(cls, data: object) -> object:
+    def _from_overlays(cls, data: object) -> object:  # dlboard-ignore[forbid-string-ignore]
         """
         A chart saved with an `overlays` row per layer loads as the `layers` that draw the same.
 
-        Rows saved in `layers` itself win over what is carried across.
+        Rows saved in `layers` itself win over what is carried across. Either one that is not a mapping of rows is
+        refused as invalid settings, like any other bad value.
         """
         if not isinstance(data, dict) or "overlays" not in data:
             return data
-        fields = typing.cast("dict[str, object]", data)
+        fields = typing.cast("dict[object, object]", data)
         current = {key: value for key, value in fields.items() if key != "overlays"}
-        carried = typing.cast("dict[str, object]", fields["overlays"])
-        return {
-            **current,
-            "layers": {**carried, **typing.cast("dict[str, object]", current.get("layers", {}))},
-        }
+        carried, saved = fields["overlays"], current.get("layers", {})
+        if not isinstance(carried, dict) or not isinstance(saved, dict):
+            msg = "overlays and layers are each a row per layer"
+            raise ValueError(msg)  # noqa: TRY004 -- pydantic reports a ValueError as invalid settings, a TypeError escapes
+        return {**current, "layers": {**carried, **saved}}
 
     @field_validator("layers")
     @classmethod

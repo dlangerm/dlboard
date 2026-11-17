@@ -18,6 +18,7 @@ from dlboard.serve import SCHEMA_PREP_OPTION, SQLStoreBase, set_data_store
 
 if TYPE_CHECKING:
     from dash import Dash
+    from sqlalchemy.pool import ConnectionPoolEntry
 
 _logger = get_logger(__name__)
 
@@ -52,7 +53,7 @@ def _engine(location: Path, busy_timeout_ms: int) -> sa.Engine:
     return engine
 
 
-def _configure_connection(dbapi_connection: sqlite3.Connection, _record: object) -> None:
+def _configure_connection(dbapi_connection: sqlite3.Connection, _record: ConnectionPoolEntry) -> None:
     dbapi_connection.execute("PRAGMA foreign_keys = ON")
     _set_wal_mode(dbapi_connection)
     # pysqlite's own implicit transaction handling defers the real `BEGIN` until the first write

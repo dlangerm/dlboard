@@ -19,6 +19,10 @@ from dlboard._telemetry.traces import SpanKind, TraceKey, span
 from dlboard.models._data_request import DataRequest
 
 if typing.TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from pydantic import JsonValue
+
     from dlboard.models._artifact import Artifact
 
 _log = get_logger(__name__)
@@ -311,7 +315,7 @@ class UnknownChartTypeError(KeyError):
         )
 
 
-def _fixed_choices(annotation: object) -> tuple[str, ...] | None:
+def _fixed_choices(annotation: type[typing.Any] | None) -> tuple[str, ...] | None:
     """The values a `Literal["number", "category"]` or a `StrEnum` allows, else `None`."""
     if typing.get_origin(annotation) is typing.Literal:
         return tuple(str(choice) for choice in typing.get_args(annotation))
@@ -329,7 +333,7 @@ _SCALAR_WIDGETS: typing.Final = {
 }
 
 
-def _widget_for(annotation: object) -> tuple[ParameterFieldType, tuple[str, ...] | None]:
+def _widget_for(annotation: type[typing.Any] | None) -> tuple[ParameterFieldType, tuple[str, ...] | None]:
     """The widget a settings field is edited with, and its fixed choices (a dropdown) if it has any."""
     if typing.get_origin(annotation) in (typing.Union, types.UnionType):
         # Unwrap `X | None` (an optional field) down to the underlying `X` — the widget
@@ -464,7 +468,7 @@ class ChartTypeRegistry:
 
     @classmethod
     def render(
-        cls, chart: ChartInstance[_Dataframe, _Chart], dataframe: object, context: RenderContext
+        cls, chart: ChartInstance[_Dataframe, _Chart], dataframe: _Dataframe, context: RenderContext
     ) -> _Chart:
         chart_type, parameters = cls._typed_chart(chart)
         return chart_type.render_in(parameters, dataframe, context)
@@ -489,7 +493,7 @@ class ChartTypeRegistry:
 
     @classmethod
     def saved_with_viewer_state(
-        cls, chart: ChartInstance[_Dataframe, _Chart], state: object
+        cls, chart: ChartInstance[_Dataframe, _Chart], state: Mapping[str, JsonValue]
     ) -> ChartInstance[_Dataframe, _Chart]:
         """
         `chart` with a viewer's `state` (as the browser kept it) made its own settings, under the same id.
@@ -526,10 +530,10 @@ class ChartInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, 
 
     @model_validator(mode="before")
     @classmethod
-    def _default_id_from_content(cls, data: object) -> object:
+    def _default_id_from_content(cls, data: object) -> object:  # dlboard-ignore[forbid-string-ignore]
         if not isinstance(data, dict):
             return data
-        fields = typing.cast("dict[str, object]", data)
+        fields = typing.cast("dict[object, object]", data)
         if fields.get("id"):
             return fields
         content = json.dumps(

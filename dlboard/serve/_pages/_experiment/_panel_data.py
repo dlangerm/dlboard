@@ -679,8 +679,8 @@ def any_lightning(data_store: DataStore[...], experiment_ids: Iterable[int]) -> 
     )
 
 
-def _histogram_contents(cell: object) -> dict[str, Any] | None:
-    """What a histogram column's cell holds, as plain data (`None` where the key was not logged at the step)."""
+def _histogram_contents(cell: Histogram | float | None) -> dict[str, Any] | None:
+    """What a histogram column's cell holds, as plain data (`None` where the key was not logged at the step: NaN)."""
     return cell.model_dump() if isinstance(cell, Histogram) else None
 
 

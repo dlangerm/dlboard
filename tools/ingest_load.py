@@ -140,7 +140,7 @@ def _local_stack(out: Path, server_options: _Server, collector: _Collector) -> I
     from testcontainers.community.postgres import PostgresContainer
 
     class _Quiet(WSGIRequestHandler):
-        def log_message(self, *_args: object) -> None: ...
+        def log_message(self, *_args: object) -> None: ...  # dlboard-ignore[forbid-string-ignore] -- ignored
 
     otlp = make_server(_HOST, 0, collector, handler_class=_Quiet)
     threading.Thread(target=otlp.serve_forever, daemon=True).start()

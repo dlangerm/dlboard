@@ -18,7 +18,7 @@ from uuid import uuid4
 
 import pendulum
 import requests
-from pydantic import AnyUrl, AwareDatetime, BaseModel, PositiveFloat, SecretStr
+from pydantic import AnyUrl, AwareDatetime, BaseModel, JsonValue, PositiveFloat, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from structlog.stdlib import get_logger
 
@@ -48,7 +48,7 @@ from dlboard._wire import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Mapping, Sequence
     from typing import IO
 
 
@@ -180,7 +180,7 @@ class BasicDlboardAPI:
         route: str,
         *,
         path: str | None = None,
-        json: object = None,
+        json: Mapping[str, JsonValue] | Sequence[Mapping[str, JsonValue]] | None = None,
         files: Iterable[tuple[str, tuple[str, IO[bytes] | str, str]]] | None = None,
     ) -> requests.Response:
         """

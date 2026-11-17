@@ -531,11 +531,6 @@ def _picked_ids(selected_rows: list[dict[str, Any]] | dict[str, Any] | None) -> 
     return frozenset(int(row[MetricColumn.RUN_ID]) for row in selected_rows)
 
 
-def _for_each(value: object, matched: list[Any]) -> list[object]:
-    """`value` once for each component a wildcard output matched, which is the list Dash wants back: empty when it matched none."""
-    return [value] * len(matched)
-
-
 def _register_hparam_table(app: Dash) -> None:
     @app.callback(
         Output(constants.NAVBAR_RUN_LIST_ID, "children"),
@@ -623,9 +618,9 @@ def _register_hparam_table(app: Dash) -> None:
             )
             return (
                 no_update,
-                _for_each(rows_in_place.dump(), matched_rows),
-                _for_each(head, matched_head),
-                _for_each(signature, matched_signature),
+                [rows_in_place.dump()] * len(matched_rows),
+                [head] * len(matched_head),
+                [signature] * len(matched_signature),
             )
         # Selecting runs is work in progress, and the table is drawn again when the columns change under it: what was selected
         # stays so.
@@ -646,9 +641,9 @@ def _register_hparam_table(app: Dash) -> None:
         )
         return (
             drawn,
-            _for_each(no_update, matched_rows),
-            _for_each(no_update, matched_head),
-            _for_each(no_update, matched_signature),
+            [no_update] * len(matched_rows),
+            [no_update] * len(matched_head),
+            [no_update] * len(matched_signature),
         )
 
     register_columns_picker(app, NAVBAR_COLUMNS_PICKER)

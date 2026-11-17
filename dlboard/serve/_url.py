@@ -1,8 +1,21 @@
-"""A typed `dash.get_relative_path` -- its own type stubs are untyped, which strict mode rejects."""
+"""
+The app's URLs, and the values in a page's query.
+
+`relative_path` is a typed `dash.get_relative_path`: its own stubs are untyped, which strict mode rejects.
+"""
 
 from __future__ import annotations
 
 import dash
+
+
+def split_commas[T](value: str | T) -> list[str] | T:
+    """
+    A comma-separated query value (`?compare=3,7`) as its items, for a `BeforeValidator` to hand on.
+
+    A value that isn't a string -- a model built in code, with the items already apart -- is left for validation to judge.
+    """
+    return [item for item in value.split(",") if item] if isinstance(value, str) else value
 
 
 def relative_path(path: str) -> str:
