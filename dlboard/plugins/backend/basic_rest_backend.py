@@ -1,8 +1,9 @@
 """Routes for doing general api things."""
 
 from dataclasses import dataclass
+from http import HTTPStatus
 from time import perf_counter
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Final, Iterable
 
 import dash
 from flask import request
@@ -235,50 +236,26 @@ def whoami() -> dict[str, Any]:
 
 def log_batch() -> dict[str, str]:
     """Log a batch of metrics."""
-    try:
-        store = get_data_store()
-        batch = Tally(
-            (models.LoggedMetrics.model_validate(metric) for metric in request.json), weigh=_values_in
-        )
-        store.log_metrics(batch)
-        _METRIC_VALUES.add(batch.total)
-    except Exception:
-        _log.exception("Error logging metrics")
-        raise
+    batch = Tally((models.LoggedMetrics.model_validate(metric) for metric in request.json), weigh=_values_in)
+    get_data_store().log_metrics(batch)
+    _METRIC_VALUES.add(batch.total)
     return {}
 
 
 def log_hyperparams() -> dict[str, str]:
     """Log the hyperparameters for an experiment."""
-    try:
-        store = get_data_store()
-        return store.log_hyperparams(models.NewHyperParams.model_validate(request.json)).model_dump(
-            mode="json"
-        )
-    except Exception:
-        _log.exception("Error logging hyperparameters")
-        raise
+    hyperparams = models.NewHyperParams.model_validate(request.json)
+    return get_data_store().log_hyperparams(hyperparams).model_dump(mode="json")
 
 
 def create_experiment() -> dict[str, Any]:
     """Create a new experiment for a project."""
-    try:
-        store = get_data_store()
-        return handle_create_experiment(store, request.json, get_current_user())
-    except Exception:
-        _log.exception("Error creating")
-        raise
+    return handle_create_experiment(get_data_store(), request.json, get_current_user())
 
 
 def create_run() -> dict[str, Any]:
     """Create a new run for an experiment."""
-    try:
-        _log.info("create new run")
-        store = get_data_store()
-        return handle_create_run(store, request.json, get_current_user())
-    except Exception:
-        _log.exception("Error creating")
-        raise
+    return handle_create_run(get_data_store(), request.json, get_current_user())
 
 
 def get_run(entity_id: int) -> dict[str, Any]:
@@ -298,156 +275,56 @@ def mark_run(entity_id: int) -> dict[str, Any]:
 
 def create_project() -> dict[str, Any]:
     """Create a new project."""
-    try:
-        store = get_data_store()
-        return handle_create_project(store, request.json, get_current_user())
-    except Exception:
-        _log.exception("Error creating project")
-        raise
+    return handle_create_project(get_data_store(), request.json, get_current_user())
 
 
 def get_or_create_project() -> dict[str, Any]:
     """Get or create a project by name."""
-    try:
-        store = get_data_store()
-        return handle_get_or_create_project(store, request.json, get_current_user())
-    except Exception:
-        _log.exception("Error getting or creating project")
-        raise
+    return handle_get_or_create_project(get_data_store(), request.json, get_current_user())
 
 
 def get_or_create_experiment() -> dict[str, Any]:
     """Get or create an experiment by name within a project."""
-    try:
-        store = get_data_store()
-        return handle_get_or_create_experiment(store, request.json, get_current_user())
-    except Exception:
-        _log.exception("Error getting or creating experiment")
-        raise
+    return handle_get_or_create_experiment(get_data_store(), request.json, get_current_user())
 
 
 def log_artifact() -> dict[str, str]:
     """Log an artifact with metadata and files."""
-    try:
-        _log.debug("log artifact batch")
-        t0 = perf_counter()
-        pairs = Tally(
-            (
-                models.NewArtifact.model_validate_json(part.stream.read().decode()),
-                request.files[name.removesuffix(METADATA_PART_SUFFIX)],
-            )
-            for name, part in request.files.items()
-            if part.content_type == "application/json"
+    t0 = perf_counter()
+    pairs = Tally(
+        (
+            models.NewArtifact.model_validate_json(part.stream.read().decode()),
+            request.files[name.removesuffix(METADATA_PART_SUFFIX)],
         )
-        try:
-            handle_log_artifacts(get_artifact_store(), pairs, get_current_user())
-            _ARTIFACTS.add(pairs.total)
-            _ARTIFACT_BYTES.add(request.content_length or 0)
-        finally:
-            _log.debug("logging artifacts took %.3f seconds", perf_counter() - t0)
-    except Exception:
-        _log.exception("failed to create new artifacts")
-        raise
+        for name, part in request.files.items()
+        if part.content_type == "application/json"
+    )
+    try:
+        handle_log_artifacts(get_artifact_store(), pairs, get_current_user())
+        _ARTIFACTS.add(pairs.total)
+        _ARTIFACT_BYTES.add(request.content_length or 0)
+    finally:
+        _log.debug("logging artifacts took %.3f seconds", perf_counter() - t0)
     return {}
 
 
 def link_artifact() -> dict[str, str]:
     """Register a batch of already-stored artifacts by ref, with no bytes uploaded."""
-    try:
-        links = [models.NewArtifactLink.model_validate(item) for item in request.json]
-        handle_link_artifacts(get_data_store(), get_artifact_store(), links, get_current_user())
-    except Exception:
-        _log.exception("failed to link new artifacts")
-        raise
+    links = [models.NewArtifactLink.model_validate(item) for item in request.json]
+    handle_link_artifacts(get_data_store(), get_artifact_store(), links, get_current_user())
     return {}
 
 
-def delete_project(entity_id: int) -> dict[str, str]:
-    """Soft-delete a project and cascade to its experiments, runs, and artifacts."""
-    try:
-        store = get_data_store()
-        handle_delete_project(store, entity_id, get_current_user())
-    except Exception:
-        _log.exception("Error deleting project %s", entity_id)
-        raise
-    return {}
+def _entity_route(
+    change: Callable[[DataStore[...], int, models.User], None],
+) -> Callable[[int], dict[str, str]]:
+    """The route that makes `change` (a delete or a restore) to the entity its path names, as the request's user."""
 
+    def route(entity_id: int) -> dict[str, str]:
+        change(get_data_store(), entity_id, get_current_user())
+        return {}
 
-def restore_project(entity_id: int) -> dict[str, str]:
-    """Restore a soft-deleted project and everything deleted with it."""
-    try:
-        store = get_data_store()
-        handle_restore_project(store, entity_id, get_current_user())
-    except Exception:
-        _log.exception("Error restoring project %s", entity_id)
-        raise
-    return {}
-
-
-def delete_experiment(entity_id: int) -> dict[str, str]:
-    """Soft-delete an experiment and cascade to its runs and artifacts."""
-    try:
-        store = get_data_store()
-        handle_delete_experiment(store, entity_id, get_current_user())
-    except Exception:
-        _log.exception("Error deleting experiment %s", entity_id)
-        raise
-    return {}
-
-
-def restore_experiment(entity_id: int) -> dict[str, str]:
-    """Restore a soft-deleted experiment and everything deleted with it."""
-    try:
-        store = get_data_store()
-        handle_restore_experiment(store, entity_id, get_current_user())
-    except Exception:
-        _log.exception("Error restoring experiment %s", entity_id)
-        raise
-    return {}
-
-
-def delete_run(entity_id: int) -> dict[str, str]:
-    """Soft-delete a run and cascade to its artifacts."""
-    try:
-        store = get_data_store()
-        handle_delete_run(store, entity_id, get_current_user())
-    except Exception:
-        _log.exception("Error deleting run %s", entity_id)
-        raise
-    return {}
-
-
-def restore_run(entity_id: int) -> dict[str, str]:
-    """Restore a soft-deleted run and everything deleted with it."""
-    try:
-        store = get_data_store()
-        handle_restore_run(store, entity_id, get_current_user())
-    except Exception:
-        _log.exception("Error restoring run %s", entity_id)
-        raise
-    return {}
-
-
-def delete_artifact(entity_id: int) -> dict[str, str]:
-    """Soft-delete a single artifact."""
-    try:
-        store = get_data_store()
-        handle_delete_artifact(store, entity_id, get_current_user())
-    except Exception:
-        _log.exception("Error deleting artifact %s", entity_id)
-        raise
-    return {}
-
-
-def restore_artifact(entity_id: int) -> dict[str, str]:
-    """Restore a soft-deleted artifact."""
-    try:
-        store = get_data_store()
-        handle_restore_artifact(store, entity_id, get_current_user())
-    except Exception:
-        _log.exception("Error restoring artifact %s", entity_id)
-        raise
-    return {}
+    return route
 
 
 _ROUTES: tuple[tuple[str, list[str], Callable[..., Any]], ...] = (
@@ -461,55 +338,46 @@ _ROUTES: tuple[tuple[str, list[str], Callable[..., Any]], ...] = (
     (get_or_create_path(Resource.EXPERIMENTS), ["POST"], get_or_create_experiment),
     (create_path(Resource.ARTIFACTS), ["POST"], log_artifact),
     (create_path(Resource.ARTIFACT_LINKS), ["POST"], link_artifact),
-    (entity_path(Resource.PROJECTS), ["DELETE"], delete_project),
-    (f"{entity_path(Resource.PROJECTS)}/restore", ["POST"], restore_project),
-    (entity_path(Resource.EXPERIMENTS), ["DELETE"], delete_experiment),
-    (f"{entity_path(Resource.EXPERIMENTS)}/restore", ["POST"], restore_experiment),
+    (entity_path(Resource.PROJECTS), ["DELETE"], _entity_route(handle_delete_project)),
+    (f"{entity_path(Resource.PROJECTS)}/restore", ["POST"], _entity_route(handle_restore_project)),
+    (entity_path(Resource.EXPERIMENTS), ["DELETE"], _entity_route(handle_delete_experiment)),
+    (f"{entity_path(Resource.EXPERIMENTS)}/restore", ["POST"], _entity_route(handle_restore_experiment)),
     (entity_path(Resource.RUNS), ["GET"], get_run),
-    (entity_path(Resource.RUNS), ["DELETE"], delete_run),
+    (entity_path(Resource.RUNS), ["DELETE"], _entity_route(handle_delete_run)),
     (run_path(RunCall.FINISH), ["POST"], finish_run),
     (run_path(RunCall.MARK), ["POST"], mark_run),
-    (f"{entity_path(Resource.RUNS)}/restore", ["POST"], restore_run),
-    (entity_path(Resource.ARTIFACTS), ["DELETE"], delete_artifact),
-    (f"{entity_path(Resource.ARTIFACTS)}/restore", ["POST"], restore_artifact),
+    (f"{entity_path(Resource.RUNS)}/restore", ["POST"], _entity_route(handle_restore_run)),
+    (entity_path(Resource.ARTIFACTS), ["DELETE"], _entity_route(handle_delete_artifact)),
+    (f"{entity_path(Resource.ARTIFACTS)}/restore", ["POST"], _entity_route(handle_restore_artifact)),
 )
 
+_ERROR_STATUSES: Final[tuple[tuple[type[Exception], HTTPStatus], ...]] = (
+    (PermissionError, HTTPStatus.FORBIDDEN),
+    (ValidationError, HTTPStatus.BAD_REQUEST),
+    # A link to a ref this server's `ArtifactStore` won't serve.
+    (models.UnservableArtifactRefError, HTTPStatus.BAD_REQUEST),
+    # A run (or what holds it) deleted, or never there: what was logged to it can never land.
+    (models.EntityGoneError, HTTPStatus.NOT_FOUND),
+    # A project name the caller can write to more than one of: they must pick one by id.
+    (models.AmbiguousProjectError, HTTPStatus.CONFLICT),
+    # A plugin refuses new runs in the project for now, and says why.
+    (models.ProjectLockedError, HTTPStatus.LOCKED),
+    # An artifact store that can't take an upload right now.
+    (models.ArtifactStoreUnavailableError, HTTPStatus.SERVICE_UNAVAILABLE),
+)
+"""
+The status each of the errors a request can be refused with is answered with, instead of Flask's default 500.
 
-def _handle_permission_error(err: PermissionError) -> tuple[dict[str, str], int]:
-    """Map a missing-scope `PermissionError` to a 403, instead of Flask's default 500."""
-    return {"error": str(err)}, 403
-
-
-def _handle_validation_error(err: ValidationError) -> tuple[dict[str, str], int]:
-    """
-    Map an invalid request body to a 400, instead of Flask's default 500.
-
-    The distinction matters to the client's shipping processes (`dlboard_logger.ship_batches`): a
-    4xx means "this batch can never succeed, drop it", a 5xx means "transient, retry it".
-    """
-    return {"error": str(err)}, 400
-
-
-def _handle_ambiguous_project(err: models.AmbiguousProjectError) -> tuple[dict[str, str], int]:
-    """Map a project name the caller can write to more than one of to a 409 -- they must pick one by id."""
-    return {"error": str(err)}, 409
-
-
-def _handle_project_locked(err: models.ProjectLockedError) -> tuple[dict[str, str], int]:
-    """Map a project that takes no new runs for now to a 423, a 4xx: the client does not retry it, and says why."""
-    return {"error": str(err)}, 423
+The client's shipping processes go by the difference (`dlboard_logger.classify_failure`): a 4xx is never sent again,
+a 5xx is retried. So an error that a retry can't get past must be a 4xx here, or a client retries it forever.
+"""
 
 
-def _handle_unservable_ref_error(err: models.UnservableArtifactRefError) -> tuple[dict[str, str], int]:
-    """Map a link to a ref this server's `ArtifactStore` won't serve to a 400, not a 500 -- same 4xx-vs-5xx reasoning as `_handle_validation_error`."""
-    return {"error": str(err)}, 400
-
-
-def _handle_store_unavailable(
-    err: models.ArtifactStoreUnavailableError,
-) -> tuple[dict[str, str], int, dict[str, str]]:
-    """Map an artifact store that can't take an upload right now to a 503 -- a 5xx, so the client retries it."""
-    return {"error": str(err)}, 503, {"Retry-After": "5"}
+def _error_response(err: Exception) -> tuple[dict[str, str], HTTPStatus, dict[str, str]]:
+    """`err` answered with its status in `_ERROR_STATUSES`, and its message for the client to show."""
+    status = next(status for kind, status in _ERROR_STATUSES if isinstance(err, kind))
+    headers: dict[str, str] = {"Retry-After": "5"} if status is HTTPStatus.SERVICE_UNAVAILABLE else {}
+    return {"error": str(err)}, status, headers
 
 
 def plug(app: dash.Dash) -> None:
@@ -521,13 +389,9 @@ def plug(app: dash.Dash) -> None:
         prefix = str(app.config.routes_pathname_prefix)  # pyrefly: ignore [unknown-argument-type]
         full_path = prefix + path
         # One path can carry several methods (`GET`/`DELETE` on a run), so the endpoint name has to
-        # be per-handler, not per-path, or Flask rejects the second as a duplicate endpoint.
+        # be per method, not per path, or Flask rejects the second as a duplicate endpoint.
         app.server.add_url_rule(
-            full_path, endpoint=f"{full_path}:{view_func.__name__}", view_func=view_func, methods=methods
+            full_path, endpoint=f"{' '.join(methods)} {full_path}", view_func=view_func, methods=methods
         )
-    app.server.errorhandler(PermissionError)(_handle_permission_error)
-    app.server.errorhandler(ValidationError)(_handle_validation_error)
-    app.server.errorhandler(models.UnservableArtifactRefError)(_handle_unservable_ref_error)
-    app.server.errorhandler(models.AmbiguousProjectError)(_handle_ambiguous_project)
-    app.server.errorhandler(models.ProjectLockedError)(_handle_project_locked)
-    app.server.errorhandler(models.ArtifactStoreUnavailableError)(_handle_store_unavailable)
+    for kind, _status in _ERROR_STATUSES:
+        app.server.errorhandler(kind)(_error_response)

@@ -87,8 +87,6 @@ class _Upload:
     trace: Carrier
     accepted_at: float
     """When the server queued it, by `time.monotonic()`, read by the writer through `_waited_since`."""
-    recovered: bool
-    """Taken over from a process that died (`Held.recovered`)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,7 +98,6 @@ class _Saved:
     trace: Carrier
     written_at: float
     """When the writer finished it, by `time.monotonic()`, as `_Upload.accepted_at`."""
-    recovered: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -288,7 +285,7 @@ def _attempt(backend: BlobBackend, upload: _Upload) -> _Saved | _Gone | None:
     finally:
         _BLOB_WRITES.record(time.perf_counter() - started, OutcomeAttributes(outcome=outcome))
     artifact = models.Artifact.model_validate(a.model_dump() | {"ref": str(upload.ref)})
-    return _Saved(upload.staged.name, artifact, write_trace, time.monotonic(), upload.recovered)
+    return _Saved(upload.staged.name, artifact, write_trace, time.monotonic())
 
 
 def _write_blobs(
@@ -366,7 +363,7 @@ class _Writer:
 
     def send(self, held: Held, trace: Carrier) -> None:
         """Give the worker `held` to write."""
-        self.queue.put(_Upload(held.artifact, held.ref, held.staged, trace, time.monotonic(), held.recovered))
+        self.queue.put(_Upload(held.artifact, held.ref, held.staged, trace, time.monotonic()))
 
 
 class _Results:
@@ -384,17 +381,25 @@ class _Results:
         return self.writer.results.get(block, timeout)
 
 
-def _already_recorded(store: DataStore[...], artifact: Artifact) -> bool:
-    """Whether `artifact`'s ref is recorded already, by a process that died before it could finish its upload."""
-    return any(
-        a.ref == artifact.ref
-        for a in store.fetch_artifacts(
-            artifact.experiment_id,
-            keys=frozenset({artifact.key}),
-            run_ids=frozenset({artifact.run_id}),
-            steps=None if artifact.step is None else frozenset({artifact.step}),
+def _recorded_refs(store: DataStore[...], artifacts: list[Artifact]) -> set[str]:
+    """
+    Which of `artifacts`' refs are recorded already.
+
+    By an upload a client sent again after its first try had landed, or by a process that died after recording one but
+    before it could finish it. One indexed read an experiment, and a batch is almost always one run's.
+    """
+    wanted, steps = {a.ref for a in artifacts}, {a.step for a in artifacts}
+    return {
+        found.ref
+        for experiment_id in {a.experiment_id for a in artifacts}
+        for found in store.fetch_artifacts(
+            experiment_id,
+            keys=frozenset(a.key for a in artifacts),
+            run_ids=frozenset(a.run_id for a in artifacts),
+            steps=None if None in steps else frozenset(step for step in steps if step is not None),
         )
-    )
+        if found.ref in wanted
+    }
 
 
 class BlobArtifactStore(models.ArtifactStore[BlobBackend, int, Path]):
@@ -561,7 +566,9 @@ class BlobArtifactStore(models.ArtifactStore[BlobBackend, int, Path]):
         Record a batch of written artifacts' refs, in one span linked to the write of each (it serves them all).
 
         Only an upload this process still holds is recorded, once: a writer started again, or this batch tried again,
-        may hand back one already finished. Done again, this does nothing more.
+        may hand back one already finished. Done again, this does nothing more. A ref recorded already (a client's
+        retry of a batch that partly landed, or an upload taken over from a process that died after recording it), or
+        twice in this batch, is finished without being recorded again.
         """
         held: dict[str, _Saved] = {}
         for result in results:
@@ -575,11 +582,13 @@ class BlobArtifactStore(models.ArtifactStore[BlobBackend, int, Path]):
                     held[name] = result
                 case _Saved():
                     pass
+        recorded = _recorded_refs(store, [item.artifact for item in held.values()]) if held else set[str]()
         saved: list[_Saved] = []
         for item in held.values():
-            if item.recovered and _already_recorded(store, item.artifact):
+            if item.artifact.ref in recorded:
                 self._journal.finish(item.name)
             else:
+                recorded.add(item.artifact.ref)
                 saved.append(item)
         if not saved:
             return
@@ -633,6 +642,11 @@ class BlobArtifactStore(models.ArtifactStore[BlobBackend, int, Path]):
         Keep each uploaded file in the journal, then queue it for the write worker.
 
         Once this returns, every upload in the batch is on disk and the server's to finish: the client may discard its copy.
+
+        Safe to send again: an upload whose blob is written already, or that this batch holds twice, is kept as it is,
+        and one sent again before its blob is written is recorded once (`_record_saved`). So a client's retry of a batch
+        that failed partway, or whose answer was lost, costs nothing twice. A key, step and file name logged again with
+        other bytes keeps the first.
         """
         with self._writer_lock:
             writer = self._writer
@@ -644,12 +658,13 @@ class BlobArtifactStore(models.ArtifactStore[BlobBackend, int, Path]):
             _REJECTIONS.add(1, _RejectionAttributes(reason=_Rejection.QUEUE_FULL))
             msg = "this worker holds as many unwritten uploads as it may"
             raise models.ArtifactStoreUnavailableError(msg)
+        accepted: set[AnyUrl] = set()
         try:
             for a, file in artifacts:
                 ref = self._backend.ref_for(blob_key(a.experiment_id, a.run_id, a.key, a.step, a.fname))
-                if self._backend.exists(ref):
-                    msg = f"duplicate key fname uploaded! {ref}"
-                    raise ValueError(msg)  # noqa: TRY301
+                if ref in accepted or self._backend.exists(ref):
+                    continue
+                accepted.add(ref)
                 started = time.perf_counter()
                 with span("dlboard.blob.stage", SpanKind.INTERNAL):
                     held = self._journal.accept(a, ref, file)
@@ -658,8 +673,8 @@ class BlobArtifactStore(models.ArtifactStore[BlobBackend, int, Path]):
                     if self._writer is not None:  # else closed since: the next process to start takes it over
                         self._writer.send(held, carrier())
         except Exception:
+            # Answered with a 5xx (and logged) by the app; what was accepted before it is kept, for the retry to find.
             _REJECTIONS.add(1, _RejectionAttributes(reason=_Rejection.FAILED))
-            _log.exception("failed to save artifact batch, reverting to allow client retry")
             raise
 
     @override

@@ -123,7 +123,9 @@ bad item (an artifact whose file was deleted before it shipped, say) costs only 
 split until what fails is alone. A refusal of the request itself -- revoked credentials, a run that
 was deleted, a project that's locked -- drops the batch. A shipping process that dies is started
 again (at most every 10 seconds), and what it still held is lost, with a warning that says so. A
-metric that diverged to NaN or infinity is recorded as it is.
+metric that diverged to NaN or infinity is recorded as it is. An artifact batch sent again (after it
+failed partway, or its answer was lost) is recorded once: an artifact's key, step and file name are
+stored once, and logging the same three again keeps the first.
 
 **Tracing.** To see where a slow batch spent its time, install `dlboard-client[otel]` and set
 `DLBOARD_TELEMETRY_TRACES=true` (with the standard `OTEL_EXPORTER_OTLP_ENDPOINT`) in your training environment. Each

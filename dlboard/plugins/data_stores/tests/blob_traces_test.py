@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import io
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from werkzeug.datastructures import FileStorage
 
@@ -65,3 +65,6 @@ class _RecordingStore:
 
     def log_artifact_refs(self, artifacts: list[models.Artifact]) -> None:
         self.recorded.extend(artifacts)
+
+    def fetch_artifacts(self, *_args: Any, **_kwargs: Any) -> list[models.Artifact]:  # noqa: ANN401
+        return self.recorded

@@ -739,14 +739,14 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
         rows = self._execute(sa.select(table.c.deleted_at).where(table.c.id == entity_id))
         if not rows:
             msg = f"{model.__name__} {entity_id} does not exist"
-            raise ValueError(msg)
+            raise models.EntityGoneError(msg)
         return rows[0][0]
 
     def _ensure_not_deleted(self, model: type[BaseModel], entity_id: int) -> None:
         """Raise if `entity_id` doesn't exist, or has been soft-deleted."""
         if self._fetch_deleted_at(model, entity_id) is not None:
             msg = f"{model.__name__} {entity_id} has been deleted"
-            raise ValueError(msg)
+            raise models.EntityGoneError(msg)
 
     def _ensure_runs_not_deleted(self, run_ids: set[int]) -> dict[int, int]:
         """
@@ -766,10 +766,10 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
         }
         if missing := run_ids - found.keys():
             msg = f"Run {min(missing)} does not exist"
-            raise ValueError(msg)
+            raise models.EntityGoneError(msg)
         if deleted := {run_id for run_id, (_, deleted_at) in found.items() if deleted_at is not None}:
             msg = f"Run {min(deleted)} has been deleted"
-            raise ValueError(msg)
+            raise models.EntityGoneError(msg)
         return {run_id: experiment_id for run_id, (experiment_id, _) in found.items()}
 
     def _touch_experiments(self, experiment_ids: set[int]) -> None:

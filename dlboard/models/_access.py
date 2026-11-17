@@ -70,3 +70,11 @@ class AmbiguousProjectError(LookupError):
 
 class ProjectLockedError(Exception):
     """A plugin refuses new runs in a project for now: its message says why, and what ends it."""
+
+
+class EntityGoneError(ValueError):
+    """
+    What a write names doesn't exist, or was deleted: nothing logged to it can ever land, so it is not worth a retry.
+
+    A `ValueError`, as the store's refusals of bad input are, for the callers that catch one.
+    """

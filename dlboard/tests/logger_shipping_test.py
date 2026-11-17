@@ -8,6 +8,7 @@ import math
 import time
 from typing import TYPE_CHECKING, Literal
 
+import pendulum
 import pytest
 import pytorch_lightning as pl
 import requests
@@ -15,18 +16,21 @@ import torch
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.demos.boring_classes import BoringModel
 
+from dlboard._batching import Failure
 from dlboard._wire import Resource, RunCall, create_path, run_path
 from dlboard.client import dlboard_logger
 from dlboard.client._rest_api import BasicDlboardAPI
 from dlboard.client.artifacts import image
-from dlboard.client.dlboard_logger import DLBoardLogger
+from dlboard.client.dlboard_logger import DLBoardLogger, classify_failure
 from dlboard.conftest import EVERY_STORE_BACKEND, StoreBackend
 from dlboard.models import (
     FILE_KIND_TAG,
     FileKind,
+    LoggedMetrics,
     NewArtifact,
     NewRun,
     PinColor,
+    Principal,
     Quantity,
     RunStatus,
     SizeUnit,
@@ -196,6 +200,47 @@ def test_a_metric_that_diverged_to_nan_ships_and_does_not_hold_up_the_rest(
     assert math.isnan(loss[0])
     assert loss[1] == 1.0
     assert list(metrics.values("grad")) == [math.inf, 2.0]
+
+
+def test_metrics_for_a_run_deleted_mid_training_are_refused_for_good(
+    logger: DLBoardLogger, backend_server: BackendServer
+) -> None:
+    """Regression: retention deleting a long run answered its metrics with a 500, which a client retries forever."""
+    run_id = logger.run_id or 0
+    backend_server.store.delete_run(
+        run_id, backend_server.store.get_or_create_user(Principal.unverified("ret"))
+    )
+    metrics = LoggedMetrics(
+        metrics={"loss": 1.0},
+        step=0,
+        experiment_id=logger._experiment_id,
+        run_id=run_id,
+        timestamp_utc=pendulum.now("UTC"),
+    )
+
+    with pytest.raises(requests.HTTPError, match="404") as refused:
+        BasicDlboardAPI(backend_server.url).log_metric_batch([metrics])
+
+    assert classify_failure(refused.value) is Failure.WHOLE
+
+
+def test_an_artifact_batch_sent_again_is_recorded_once(
+    logger: DLBoardLogger, backend_server: BackendServer, tmp_path: Path
+) -> None:
+    """Regression: a retry of a batch that partly landed recorded its uploads twice, or failed on them for good."""
+    run_id, experiment_id = logger.run_id or 0, logger._experiment_id
+    upload = _image(0).to_artifact(tmp_path, run_id=run_id, experiment_id=experiment_id)
+    api = BasicDlboardAPI(backend_server.url)
+
+    api.log_artifact_batch([upload, upload])  # one ref, twice in one batch
+    api.log_artifact_batch([upload])  # and sent again, as a client whose answer was lost would
+
+    deadline = time.monotonic() + 10
+    while not list(backend_server.store.fetch_artifacts(experiment_id=experiment_id, run_ids=None)):
+        assert time.monotonic() < deadline, "the upload never showed up"
+        time.sleep(0.1)
+    time.sleep(2)  # what the ingest of a second copy would take, were there one
+    assert len(list(backend_server.store.fetch_artifacts(experiment_id=experiment_id, run_ids=None))) == 1
 
 
 def test_an_invalid_metric_batch_is_a_400_not_a_500(backend_server: BackendServer) -> None:

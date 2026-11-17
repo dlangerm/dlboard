@@ -66,8 +66,6 @@ class Held:
     artifact: models.NewArtifact
     ref: AnyUrl
     staged: Path
-    recovered: bool
-    """Taken over from a process that died, which may have recorded its ref before it could finish it."""
     lock: IO[bytes]
 
     @property
@@ -114,7 +112,7 @@ class UploadJournal:
             part.unlink(missing_ok=True)
             staged.unlink(missing_ok=True)
             raise
-        return self._hold(Held(artifact, ref, staged, recovered=False, lock=lock))
+        return self._hold(Held(artifact, ref, staged, lock=lock))
 
     def adopt(self, limit: float) -> list[Held]:
         """
@@ -163,7 +161,7 @@ class UploadJournal:
             lock.close()  # first: deleting may fail, and another process finding it cut short deletes it too
             self._unreadable(path, exc)
             return None
-        return self._hold(Held(entry.artifact, entry.ref, self._dir / path.stem, recovered=True, lock=lock))
+        return self._hold(Held(entry.artifact, entry.ref, self._dir / path.stem, lock=lock))
 
     def _unreadable(self, path: Path, exc: ValidationError) -> None:
         """

@@ -13,7 +13,7 @@ import io
 import os
 import sqlite3
 import time
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING, Any, override
 from uuid import uuid4
 
 import pytest
@@ -27,7 +27,7 @@ from dlboard.plugins.data_stores.filesystem import FSBlobs
 from dlboard.plugins.data_stores.tests.conftest import file, ingest, rejections, upload, wait_until
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Iterator
     from pathlib import Path
 
     from dlboard.conftest import MakeBlobStore
@@ -70,21 +70,23 @@ def test_delete_artifact_is_a_noop_for_a_blob_that_is_already_gone(
     store.delete_artifact(ref)  # must not raise
 
 
-def test_log_artifacts_rejects_a_duplicate_key_fname(
+def test_log_artifacts_keeps_a_blob_already_written_rather_than_refuse_the_batch_again(
     blob_backend: BlobBackend, tmp_path: Path, make_blob_store: MakeBlobStore
 ) -> None:
     """
-    The duplicate check must look at the same (suffixed) ref the write worker actually writes to.
+    A batch sent again after its first try landed is accepted, not refused for good: the retry must not wedge.
 
-    A blob already sitting at that ref -- placed directly here, not through the async write worker,
-    so this doesn't race it -- must reject a second upload for the same key/fname synchronously.
+    The check looks at the same (suffixed) ref the write worker actually writes to. A blob already sitting there --
+    placed directly here, not through the async write worker, so this doesn't race it -- is kept as it is.
     """
     store = make_blob_store(blob_backend, 10)
-    _write(blob_backend, "a.png", b"data", tmp_path)
+    ref = _write(blob_backend, "a.png", b"data", tmp_path)
     new_artifact = models.NewArtifact(key="img", fname="a.png", run_id=1, experiment_id=1, step=0)
 
-    with pytest.raises(ValueError, match="duplicate"):
-        store.log_artifacts([(new_artifact, FileStorage(io.BytesIO(b"x"), filename="a.png"))])
+    store.log_artifacts([(new_artifact, FileStorage(io.BytesIO(b"x"), filename="a.png"))])
+
+    assert store._journal.held() == []  # nothing queued to write over it
+    assert blob_backend.exists(ref)
 
 
 def test_link_artifacts_accepts_a_ref_already_written_inside_the_stores_own_space(
@@ -155,6 +157,9 @@ class _LockedOnceStore:
             msg = "database is locked"
             raise sqlite3.OperationalError(msg)
         self._inner.log_artifact_refs(artifacts)
+
+    def fetch_artifacts(self, *args: Any, **kwargs: Any) -> Iterator[models.Artifact]:  # noqa: ANN401
+        return self._inner.fetch_artifacts(*args, **kwargs)
 
 
 def test_a_transient_store_failure_does_not_lose_the_batch(

@@ -37,7 +37,7 @@ def test_an_upload_is_taken_over_only_once_the_process_holding_it_lets_go(tmp_pa
     holder.let_go()
     (adopted,) = other.adopt(math.inf)
 
-    assert (adopted.name, adopted.artifact, adopted.recovered) == (held.name, held.artifact, True)
+    assert (adopted.name, adopted.artifact) == (held.name, held.artifact)
     assert other.adopt(math.inf) == []  # held now, by `other`
     other.let_go()
 

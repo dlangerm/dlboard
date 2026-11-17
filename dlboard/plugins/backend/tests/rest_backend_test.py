@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, Any
 
 import dash
 import pytest
-from pydantic import ValidationError
 
 from dlboard import models
 from dlboard.models import PinColor, ProjectRole
@@ -17,11 +16,24 @@ if TYPE_CHECKING:
     from dlboard.plugins.data_stores.sqlite import SQLLiteStore
 
 
-def test_permission_error_maps_to_a_403() -> None:
-    body, status = backend._handle_permission_error(PermissionError("User 1 lacks the purge scope"))
-
-    assert status == 403
-    assert body == {"error": "User 1 lacks the purge scope"}
+@pytest.mark.parametrize(
+    ("error", "status", "headers"),
+    [
+        (PermissionError("User 1 lacks the purge scope"), 403, {}),
+        (models.UnservableArtifactRefError("not ours"), 400, {}),
+        # Regression: a run deleted mid-training was a 500, which a client retries forever.
+        (models.EntityGoneError("Run 7 has been deleted"), 404, {}),
+        (models.AmbiguousProjectError("two named p"), 409, {}),
+        # A 4xx: the client does not retry it, and says why.
+        (models.ProjectLockedError("takes no new runs"), 423, {}),
+        # A 5xx, so the client retries it, when the server says.
+        (models.ArtifactStoreUnavailableError("busy"), 503, {"Retry-After": "5"}),
+    ],
+)
+def test_each_refusal_maps_to_the_status_that_tells_a_client_whether_to_retry(
+    error: Exception, status: int, headers: dict[str, str]
+) -> None:
+    assert backend._error_response(error) == ({"error": str(error)}, status, headers)
 
 
 def test_importing_this_module_registers_nothing_in_dash_hooks_global_registry() -> None:
@@ -74,19 +86,8 @@ def test_plug_registers_routes_only_on_the_given_app_not_globally() -> None:
 
     assert len(registered_rules) == len(backend._ROUTES)
     assert registered_errorhandlers == {
-        PermissionError: backend._handle_permission_error,
-        ValidationError: backend._handle_validation_error,
-        models.UnservableArtifactRefError: backend._handle_unservable_ref_error,
-        models.AmbiguousProjectError: backend._handle_ambiguous_project,
-        models.ProjectLockedError: backend._handle_project_locked,
-        models.ArtifactStoreUnavailableError: backend._handle_store_unavailable,
+        kind: backend._error_response for kind, _status in backend._ERROR_STATUSES
     }
-
-
-def test_a_project_that_takes_no_new_runs_maps_to_a_423_the_client_does_not_retry() -> None:
-    body, status = backend._handle_project_locked(models.ProjectLockedError("takes no new runs"))
-
-    assert (status, body) == (423, {"error": "takes no new runs"})
 
 
 def test_a_viewer_who_may_not_keep_a_run_has_not_pinned_it_either(store: SQLLiteStore) -> None:

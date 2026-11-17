@@ -8,7 +8,7 @@ from __future__ import annotations
 import errno
 import io
 import threading
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING, Any, override
 
 import pytest
 from werkzeug.datastructures import FileStorage
@@ -23,6 +23,7 @@ from dlboard.plugins.data_stores.tests.conftest import file, ingest, rejections,
 from dlboard.serve.telemetry._prometheus import serve_metrics
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from pathlib import Path
 
     from pydantic import AnyUrl
@@ -132,6 +133,9 @@ class _StalledStore:
     def log_artifact_refs(self, artifacts: list[models.Artifact]) -> None:
         self.going.wait()
         self._store.log_artifact_refs(artifacts)
+
+    def fetch_artifacts(self, *args: Any, **kwargs: Any) -> Iterator[models.Artifact]:  # noqa: ANN401
+        return self._store.fetch_artifacts(*args, **kwargs)
 
 
 def test_a_writer_killed_while_the_database_stalls_does_not_wedge_the_one_started_after_it(

@@ -2,6 +2,7 @@
 
 from dlboard.models._access import (
     AmbiguousProjectError,
+    EntityGoneError,
     NewProjectGrant,
     ProjectGrant,
     ProjectLockedError,
@@ -186,6 +187,7 @@ __all__ = [
     "ComparisonSummary",
     "DataRequest",
     "DataStore",
+    "EntityGoneError",
     "EntityType",
     "Experiment",
     "ExperimentList",
