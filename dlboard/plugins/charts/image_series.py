@@ -11,8 +11,7 @@ from typing import Annotated, Any, cast
 import dash
 import dash_mantine_components as dmc
 import pandas as pd
-from dash import ALL, MATCH, Input, Output, Patch, State, ctx, dcc, html
-from dash.exceptions import PreventUpdate
+from dash import ALL, MATCH, Input, Output, Patch, State, dcc, html
 from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
 from dlboard._compat import StrEnum
@@ -67,6 +66,7 @@ from dlboard.serve import (
     series_swatch_class,
     serve_asset,
 )
+from dlboard.serve._pages._dash_helpers import require_triggered_id
 
 if typing.TYPE_CHECKING:
     from collections.abc import Iterable
@@ -882,7 +882,5 @@ def plug(app: dash.Dash) -> None:
         Input({"type": "image-series-thumb", "instance": MATCH, "run": ALL}, "n_clicks"),
         prevent_initial_call=True,
     )
-    def open_image_modal(n_clicks_list: list[int]) -> tuple[bool, str]:
-        if not ctx.triggered_id or not any(n_clicks_list):
-            raise PreventUpdate
-        return True, _Thumbnail.model_validate(ctx.triggered_id).run
+    def open_image_modal(_n_clicks_list: list[int]) -> tuple[bool, str]:
+        return True, require_triggered_id(_Thumbnail).run

@@ -653,10 +653,8 @@ def _resolve_suggestion_trigger(
         if not n_clicks:
             raise PreventUpdate
         return None, True
-    if isinstance(triggered_id, dict) and triggered_id.get("type") == panel_view.PANEL_SUGGEST_BUTTON.type:
-        if not ctx.triggered[0]["value"]:  # pyrefly: ignore [unsupported-operation]
-            raise PreventUpdate
-        return panel_view.PanelID.model_validate(triggered_id).panel, True
+    if isinstance(triggered_id, dict):  # the one pattern-matched input: a panel's own Suggest button
+        return require_triggered_id(panel_view.PanelID).panel, True
     return current_scope, no_update
 
 

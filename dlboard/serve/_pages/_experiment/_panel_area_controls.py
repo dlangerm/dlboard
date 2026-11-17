@@ -18,7 +18,7 @@ from pydantic import ValidationError
 from structlog.stdlib import get_logger
 
 from dlboard.serve import ClientsideScript, get_data_store
-from dlboard.serve._pages._dash_helpers import CallbackStates
+from dlboard.serve._pages._dash_helpers import CallbackStates, TriggeredId
 from dlboard.serve._pages._experiment._ids import (
     PANEL_PAGING_ID,
     STATE_PAGE_STORAGE,
@@ -73,6 +73,12 @@ _PAGING_SIDE_EFFECTS_JS = ClientsideScript(Path(__file__).with_name("paging_side
 _SIZES_COOKIE_MAX_AGE: typing.Final = 365 * 24 * 60 * 60
 
 
+class _AccordionID(TriggeredId):
+    """A tab's panel accordion's id, as the browser holds it."""
+
+    tab: str
+
+
 class _ShownPage(CallbackStates):
     """The page the panel area shows, and how it is paged."""
 
@@ -93,7 +99,7 @@ class _PagePanelsCtx(_ShownPage):
     size: Annotated[str | None, Input(PANEL_PAGE_SIZE_ID, "value", allow_optional=True)]
     chart_size: Annotated[str | None, Input(CHART_PAGE_SIZE_ID, "value", allow_optional=True)]
     tabs_value: Annotated[str | None, Input(PANEL_TABS_ID, "value", allow_optional=True)]
-    rendered_accordions: Annotated[list[dict[str, str]], State(PANEL_ACCORDION.all(), "id")]
+    rendered_accordions: Annotated[list[_AccordionID], State(PANEL_ACCORDION.all(), "id")]
 
 
 class _OpenedPanelsCtx(_ShownPage):
@@ -120,7 +126,7 @@ def _register_paging(app: Dash) -> None:
         panel_ctx = _PagePanelsCtx.model_validate(states)
         paging = Paging.model_validate_json(panel_ctx.paging_json)
         rendered_accordions = panel_ctx.rendered_accordions
-        rendered_tab = rendered_accordions[0]["tab"] if rendered_accordions else ""
+        rendered_tab = rendered_accordions[0].tab if rendered_accordions else ""
         tabs_value = panel_ctx.tabs_value
         tab = tab_from_component_value(tabs_value) if tabs_value else rendered_tab
         try:

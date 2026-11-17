@@ -27,7 +27,7 @@ import dash_mantine_components as dmc
 from dash import Input, NoUpdate, Output, State, html, no_update
 from dash.dcc import Store
 from dash.exceptions import PreventUpdate
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from dlboard import models
 from dlboard.serve import ClientsideScript, Icon, get_current_user, get_data_store, icon
@@ -124,6 +124,21 @@ class ViewFile(BaseModel, extra="forbid"):
     @classmethod
     def of(cls, page: models.NewPage[Any, Any], *, name: str) -> ViewFile:
         return cls(name=name, panels=page.panels, page_settings=page.page_settings)
+
+
+class _ViewOption(BaseModel, frozen=True, extra="ignore"):
+    """One of the view picker's options, as the browser holds them."""
+
+    value: str
+    label: str
+
+
+_VIEW_OPTIONS: typing.Final = TypeAdapter(list[_ViewOption])
+
+
+def _label_of(options: list[dict[str, str]], value: str, default: str) -> str:
+    """The name the view picker shows for `value`, read from its options as the browser holds them; else `default`."""
+    return next((o.label for o in _VIEW_OPTIONS.validate_python(options) if o.value == value), default)
 
 
 def _options(
@@ -431,7 +446,7 @@ def _register_rename(app: Dash) -> None:
     def open_rename_view(n_clicks: int | None, value: str, options: list[dict[str, str]]) -> tuple[bool, str]:
         if not n_clicks:
             raise PreventUpdate
-        current_name = next((o["label"] for o in options if o["value"] == value), "")
+        current_name = _label_of(options, value, "")
         return True, current_name
 
     @app.callback(
@@ -501,7 +516,7 @@ def _register_export_import(app: Dash) -> None:
         if not n_clicks:
             raise PreventUpdate
         page = page_model.BasicExperimentPage.model_validate_json(page_json)
-        name = next((o["label"] for o in options if o["value"] == value), "Shared view")
+        name = _label_of(options, value, "Shared view")
         exported = ViewFile.of(page, name=name).model_dump_json(indent=2)
         return True, html.Div(
             [
