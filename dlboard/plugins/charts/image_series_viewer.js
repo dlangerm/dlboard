@@ -255,8 +255,9 @@ window.dlImageSeriesViewer = (() => {
 
     // Shows the picture at `url`. It is loaded and decoded off screen first and put in place only then, so the one on show stays
     // until the next can replace it, with no blank or half-drawn picture between, and a step that is overtaken by the next
-    // while scrubbing costs nothing more than its download. If it takes a while, the one on show is dimmed with a spinner over
-    // it (as a thumbnail has) until the new one is in.
+    // while scrubbing costs nothing more than its download. If it takes a while to download, the one on show is dimmed with a
+    // spinner over it (as a thumbnail has) until the new one is in. A picture the browser holds already is not downloaded at
+    // all, so it never shows the spinner, however long a busy page takes to put it in place (#648).
     const showPicture = (instance, viewer, url) => {
         const picture = pictureOf(viewer);
         latestPicture.set(instance, url);
@@ -265,7 +266,14 @@ window.dlImageSeriesViewer = (() => {
             viewer.removeAttribute("data-dl-loading");
             return;
         }
-        viewer.dlLoaderTimer = setTimeout(() => viewer.setAttribute("data-dl-loading", ""), LOADER_DELAY_MS);
+        const incoming = new Image();
+        incoming.src = url;
+        if (!incoming.complete) {
+            viewer.dlLoaderTimer = setTimeout(
+                () => viewer.setAttribute("data-dl-loading", ""),
+                LOADER_DELAY_MS,
+            );
+        }
         const settle = () => {
             if (picture.getAttribute("src") === url) {
                 clearTimeout(viewer.dlLoaderTimer);
@@ -274,8 +282,6 @@ window.dlImageSeriesViewer = (() => {
         };
         picture.onload = settle;
         picture.onerror = settle;
-        const incoming = new Image();
-        incoming.src = url;
         // Decoded, or failed: either way the picture is put in place, to show it or to say it did not load.
         incoming
             .decode()
