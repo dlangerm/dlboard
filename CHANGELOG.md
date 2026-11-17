@@ -12,7 +12,35 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ## [Unreleased]
 
+### Changed
+
+* **Plugins: three `DataStore` methods, and setting checks that see deletes.** `create_project` takes an `owner_id`, whose
+  `OWNER` grant it makes in the same transaction; `get_or_create_owned_project(project, owner_id)` finds or makes one
+  person's project of a name under a lock on them; `add_password_credential(credential)` sets a password only if the
+  user has none, and says whether it did. A `SettingRule`'s `check` is asked about deletes too, with
+  `SettingWrite.value` of `None` (return `None` to allow it). A `DataStore` of a plugin's own implements the new
+  methods. (#677)
+
 ### Fixed
+
+* **Retention's check no longer fails with "too many values to unpack".** A claim of background work for one item could
+  come back with two on Postgres, when its plan ran the pick again with other rows locked by a racing claimer; a claim
+  now picks its items exactly once. (#674)
+* **A person's jobs that start at once with a new project name share one project,** rather than each making one and
+  leaving the name ambiguous for them from then on. A project is never left without its owner's grant, a signup never
+  replaces the password of an account another signup has just taken, and a setting only the server may write cannot be
+  deleted either. (#677)
+* **A bad value in a link costs only itself.** A truncated or hand-edited value in a page's URL reset every other: a
+  comparison drew again the runs its viewer had hidden, and lost its focus, tab and open panels. Only that value falls
+  back to its default now. (#679)
+* **Pages say why something they were asked to do did not happen.** A token made on the account page is listed at once
+  (and a double-click makes one); revoking one asks first. Renaming or sharing a view since deleted, a picture too large to
+  download, a link the browser would not copy, and a line chart whose date axis has no dates to place each say so rather
+  than doing nothing. A double-click posts a note once. A cached picture in the enlarged view no longer flashes a spinner
+  on a busy machine. (#676, #680, #681)
+* **Nothing is logged to a run deleted while its batch was being written,** where the artifacts of one could stay
+  readable until a purge. `/readyz` costs the same however many projects there are. Deleting many runs never fails part-way
+  with some batches deleted. (#678)
 
 * **The logger's shipping no longer stalls, fails training, or hangs at the end of a run.** A metric that diverged to NaN
   or infinity stopped every metric after it from shipping for the rest of the run; it is recorded as it is. A batch with
