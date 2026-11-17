@@ -22,8 +22,13 @@ from dash.exceptions import PreventUpdate
 from dlboard import models
 from dlboard.serve import ClientsideScript, Icon, get_current_user, get_data_store, icon, series_swatch_class
 from dlboard.serve import _constants as constants
-from dlboard.serve._component_ids import StoreId
-from dlboard.serve._pages._dash_helpers import TriggeredId, require_triggered_id, tooltipped_action_icon
+from dlboard.serve._component_ids import ButtonId, StoreId
+from dlboard.serve._pages._dash_helpers import (
+    TriggeredId,
+    busy_while_running,
+    require_triggered_id,
+    tooltipped_action_icon,
+)
 from dlboard.serve._pages._dataframe_helpers import run_display_name
 from dlboard.serve._pages._experiment._run_picker import register_run_search, run_options
 
@@ -46,7 +51,7 @@ NOTES_THREAD_ID: typing.Final = "notes-thread"
 NOTES_BODY_ID: typing.Final = "notes-body"
 NOTES_RUNS_ID: typing.Final = "notes-runs"
 NOTES_MENTIONS_ID: typing.Final = "notes-mentions"
-NOTES_POST_ID: typing.Final = "notes-post"
+NOTES_POST_ID: ButtonId[ids.ExperimentPage] = ButtonId("notes-post")
 MENTION_LIMIT: typing.Final = 50
 """The most people the mention picker lists at once: the first by name, or the ones its search finds."""
 _DELETE_NOTE_TYPE: typing.Final = "delete-note"
@@ -251,6 +256,7 @@ def register_notes_callbacks(app: Dash) -> None:
         State(NOTES_RUNS_ID, "value"),
         State(NOTES_MENTIONS_ID, "value"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
+        running=busy_while_running(NOTES_POST_ID),  # one note a click, however fast the clicks
         prevent_initial_call=True,
     )
     def post_note(
@@ -280,7 +286,9 @@ def register_notes_callbacks(app: Dash) -> None:
         State(constants.STATE_EXPERIMENT_ID, "data"),
         prevent_initial_call=True,
     )
-    def delete_note(_n_clicks: list[int | None], experiment_id: int) -> tuple[Any, str]:
+    def delete_note(clicks: list[int | None], experiment_id: int) -> tuple[Any, str]:
+        if not any(clicks):  # the thread drawn again (a note posted), not a click
+            raise PreventUpdate
         note_id = require_triggered_id(_NoteButton).note
         store = get_data_store()
         store.delete_comment(note_id, get_current_user().id)

@@ -5,13 +5,18 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Final, cast
 
 import dash_mantine_components as dmc
-from dash import ALL, Dash, Input, Output, State, html, no_update
+from dash import ALL, Dash, Input, Output, State, dcc, html, no_update
 from dash.exceptions import PreventUpdate
 
 from dlboard.serve import Icon, get_auth_provider, get_current_user, get_data_store, icon, mint_api_token
 from dlboard.serve import _constants as constants
-from dlboard.serve._component_ids import ButtonId, DivId, ValueId
-from dlboard.serve._pages._dash_helpers import TriggeredId, require_triggered_id, section_label
+from dlboard.serve._component_ids import ButtonId, DivId, ModalId, StoreId, ValueId
+from dlboard.serve._pages._dash_helpers import (
+    TriggeredId,
+    busy_while_running,
+    require_triggered_id,
+    section_label,
+)
 from dlboard.serve._url import relative_path
 
 if TYPE_CHECKING:
@@ -30,6 +35,12 @@ PAGE_ACCOUNT_ID: DivId[_AccountPage] = DivId("account-container")
 TOKEN_NAME_ID: ValueId[_AccountPage] = ValueId("account-token-name")
 CREATE_TOKEN_ID: ButtonId[_AccountPage] = ButtonId("account-create-token")
 NEW_TOKEN_ID: DivId[_AccountPage] = DivId("account-new-token")
+TOKEN_TABLE_ID: DivId[_AccountPage] = DivId("account-token-table")
+REVOKE_MODAL_ID: ModalId[_AccountPage] = ModalId("account-revoke-modal")
+REVOKE_CONFIRM_ID: ButtonId[_AccountPage] = ButtonId("account-revoke-confirm")
+REVOKE_CANCEL_ID: ButtonId[_AccountPage] = ButtonId("account-revoke-cancel")
+REVOKING_ID: StoreId[_AccountPage] = StoreId("account-revoking")
+"""The token a Revoke button was clicked for, until its confirmation is answered."""
 # Pattern-matched "type" discriminator, not a standalone component id -- a plain string.
 REVOKE_TOKEN_TYPE: Final = "account-revoke-token"
 
@@ -122,22 +133,45 @@ def render_account_page() -> Component:
                 mb="sm",
             ),
             html.Div(id=NEW_TOKEN_ID),
-            dmc.Table(
-                [
-                    dmc.TableThead(
-                        dmc.TableTr([dmc.TableTh(h) for h in ("Name", "Token", "Created", "Last used", "")])
+            html.Div(_token_table(tokens), id=TOKEN_TABLE_ID),
+            dmc.Modal(
+                id=REVOKE_MODAL_ID,
+                title="Revoke this token?",
+                opened=False,
+                children=[
+                    dmc.Text(
+                        "Every script that logs in with it stops being able to, at once. This cannot be undone."
                     ),
-                    dmc.TableTbody([_token_row(t) for t in tokens]),
+                    dmc.Group(
+                        [
+                            dmc.Button("Cancel", id=REVOKE_CANCEL_ID, variant="default"),
+                            dmc.Button("Revoke", id=REVOKE_CONFIRM_ID, color="red"),
+                        ],
+                        justify="flex-end",
+                        mt="sm",
+                    ),
                 ],
-                withTableBorder=True,
-                verticalSpacing="xs",
-                mt="md",
-            )
-            if tokens
-            else dmc.Text("No tokens yet.", size="sm", c="dimmed", mt="md"),
+            ),
+            dcc.Store(id=REVOKING_ID),
         ],
         size="md",
         py="xl",
+    )
+
+
+def _token_table(tokens: list[ApiToken]) -> Component:
+    if not tokens:
+        return dmc.Text("No tokens yet.", size="sm", c="dimmed", mt="md")
+    return dmc.Table(
+        [
+            dmc.TableThead(
+                dmc.TableTr([dmc.TableTh(h) for h in ("Name", "Token", "Created", "Last used", "")])
+            ),
+            dmc.TableTbody([_token_row(t) for t in tokens]),
+        ],
+        withTableBorder=True,
+        verticalSpacing="xs",
+        mt="md",
     )
 
 
@@ -148,30 +182,57 @@ def register(app: Dash) -> None:
         Output(NEW_TOKEN_ID, "children"),
         Output(TOKEN_NAME_ID, "value"),
         Output(TOKEN_NAME_ID, "error"),
+        Output(TOKEN_TABLE_ID, "children"),
         Input(CREATE_TOKEN_ID, "n_clicks"),
         Input(TOKEN_NAME_ID, "n_submit"),
         State(TOKEN_NAME_ID, "value"),
+        running=busy_while_running(CREATE_TOKEN_ID),  # one token a click, however fast the clicks
         prevent_initial_call=True,
     )
     def create_token(
         n_clicks: int | None, n_submit: int | None, name: str | None
-    ) -> tuple[Any, Any, str | None]:
+    ) -> tuple[Any, Any, str | None, Any]:
         if not n_clicks and not n_submit:
             raise PreventUpdate
         if not name or not name.strip():
-            return no_update, no_update, "Name the token"
-        _token, raw = mint_api_token(get_data_store(), get_current_user(), name.strip())
-        return new_token_notice(raw), "", None
+            return no_update, no_update, "Name the token", no_update
+        store, user = get_data_store(), get_current_user()
+        _token, raw = mint_api_token(store, user, name.strip())
+        return new_token_notice(raw), "", None, _token_table(store.list_api_tokens(user.id))
 
-    # Hard-reloads rather than re-rendering the table in place: the table holds the very
-    # pattern-matched (`ALL`) Revoke buttons this callback listens to (see the admin page's trash).
+    # A Revoke button asks first; only the confirmation revokes, and hard-reloads rather than re-rendering the table: the
+    # table holds the very pattern-matched (`ALL`) buttons listened to here (see the admin page's trash).
     @app.callback(
-        Output(constants.LOCATION_ID, "href", allow_duplicate=True),
-        Output(constants.LOCATION_ID, "refresh", allow_duplicate=True),
+        Output(REVOKE_MODAL_ID, "opened", allow_duplicate=True),
+        Output(REVOKING_ID, "data"),
         Input({"type": REVOKE_TOKEN_TYPE, "token": ALL}, "n_clicks"),
         prevent_initial_call=True,
     )
-    def revoke_token(_clicks: list[int]) -> tuple[str, bool]:
-        token_id = require_triggered_id(_TokenButton).token
+    def ask_to_revoke(clicks: list[int | None]) -> tuple[bool, int]:
+        if not any(clicks):  # the table drawn again (a token created), not a click
+            raise PreventUpdate
+        return True, require_triggered_id(_TokenButton).token
+
+    @app.callback(
+        Output(REVOKE_MODAL_ID, "opened", allow_duplicate=True),
+        Input(REVOKE_CANCEL_ID, "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def cancel_revoke(n_clicks: int | None) -> bool:
+        if not n_clicks:
+            raise PreventUpdate
+        return False
+
+    @app.callback(
+        Output(constants.LOCATION_ID, "href", allow_duplicate=True),
+        Output(constants.LOCATION_ID, "refresh", allow_duplicate=True),
+        Input(REVOKE_CONFIRM_ID, "n_clicks"),
+        State(REVOKING_ID, "data"),
+        running=busy_while_running(REVOKE_CONFIRM_ID),
+        prevent_initial_call=True,
+    )
+    def revoke_token(n_clicks: int | None, token_id: int | None) -> tuple[str, bool]:
+        if not n_clicks or token_id is None:
+            raise PreventUpdate
         get_data_store().revoke_api_token(token_id, get_current_user().id)
         return relative_path("/account"), True

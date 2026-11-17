@@ -140,9 +140,11 @@ def test_a_token_made_on_the_account_page_authenticates_a_script(
     )
     assert whoami.json()["username"] == "bob"
 
-    page.goto(f"{deployment.url}/account")
+    # Listed as it is made, not only once the page is loaded again (#672).
     expect(page.get_by_role("cell", name="laptop", exact=True)).to_be_visible()
     page.get_by_role("button", name="Revoke").click()
+    # Revoking asks first: a token in use stops working at once.
+    page.get_by_role("dialog").get_by_role("button", name="Revoke").click()
     expect(page.get_by_text("Revoked")).to_be_visible()
     revoked = requests.get(
         f"{deployment.url}/{WHOAMI_PATH}", headers={"Authorization": f"Bearer {raw.group(0)}"}, timeout=5

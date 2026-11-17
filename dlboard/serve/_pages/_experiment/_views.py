@@ -33,6 +33,7 @@ from dlboard import models
 from dlboard.serve import ClientsideScript, Icon, get_current_user, get_data_store, icon
 from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import ButtonId, ModalId
+from dlboard.serve._pages._dash_helpers import notice
 from dlboard.serve._pages._delete_confirm import (
     DeleteConfirmIds,
     delete_confirm_modal,
@@ -458,7 +459,7 @@ def _register_rename(app: Dash) -> None:
         # but the callback itself is reachable regardless, so it checks again before writing.
         view = store.get_view(page_model.BasicExperimentPage, view_id)
         if view is None or view.owner_id != get_current_user().id:
-            raise PreventUpdate
+            return no_update, no_update, "This view is gone, or no longer yours to rename."
         store.update_page(view.model_copy(update={"name": name.strip()}))
         return _options(store, experiment_id), False, None
 
@@ -466,11 +467,12 @@ def _register_rename(app: Dash) -> None:
 def _register_share_toggle(app: Dash) -> None:
     @app.callback(
         Output(SHARE_VIEW_TOGGLE_ID, "children"),
+        Output(VIEW_NOTIFY_ID, "sendNotifications", allow_duplicate=True),
         Input(SHARE_VIEW_TOGGLE_ID, "n_clicks"),
         State(ids.STATE_VIEW_ID, "data"),
         prevent_initial_call=True,
     )
-    def toggle_share(n_clicks: int | None, view_id: int | None) -> str:
+    def toggle_share(n_clicks: int | None, view_id: int | None) -> tuple[Any, Any]:
         if not n_clicks or view_id is None:
             raise PreventUpdate
         store = get_data_store()
@@ -478,9 +480,9 @@ def _register_share_toggle(app: Dash) -> None:
         # but the callback itself is reachable regardless, so it checks again before writing.
         view = store.get_view(page_model.BasicExperimentPage, view_id)
         if view is None or view.owner_id != get_current_user().id:
-            raise PreventUpdate
+            return no_update, notice("Not shared", "This view is gone, or no longer yours to share.")
         updated = store.update_page(view.model_copy(update={"shared": not view.shared}))
-        return _share_label(is_shared=updated.shared)
+        return _share_label(is_shared=updated.shared), no_update
 
 
 def _register_export_import(app: Dash) -> None:
