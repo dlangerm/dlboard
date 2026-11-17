@@ -487,6 +487,23 @@ def test_signing_up_follows_the_deployments_policy(
     assert (deployment.client.get(f"/{WHOAMI_PATH}").status_code == 200) is signed_in
 
 
+def test_a_signup_for_a_name_taken_meanwhile_never_resets_its_password(
+    deployment: PasswordDeployment, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: two signups for one new name both passed the check, and the second reset the first's password."""
+    monkeypatch.setenv("DLBOARD_PASSWORD_SIGNUP", SignupPolicy.OPEN.value)
+    create_or_reset_user(deployment.store, "erin", "erin's own password")
+
+    def nobody_yet(_username: str) -> None:  # as the check saw it, before the other signup landed
+        return None
+
+    with monkeypatch.context() as during_the_race:
+        during_the_race.setattr(deployment.store, "find_user", nobody_yet)
+        assert "That username" in _sign_up(deployment.client, "erin").get_data(as_text=True)
+
+    assert _sign_in(deployment.client, "erin", "erin's own password").status_code == 302
+
+
 def test_changing_your_password_signs_out_your_other_sessions(deployment: PasswordDeployment) -> None:
     other_browser = deployment.client.application.test_client()
     _sign_in(other_browser, "alice")

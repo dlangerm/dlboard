@@ -92,7 +92,7 @@ class AuthSettings(BaseSettings):
     secret_key: SecretStr | None = None
     """Signs session cookies. Required under a verifying provider, and must match across every worker process."""
 
-    session_lifetime_hours: int = 24 * 14
+    session_lifetime_hours: PositiveInt = 24 * 14
     """How long a browser stays signed in."""
 
     session_clock_skew_seconds: NonNegativeInt = 120

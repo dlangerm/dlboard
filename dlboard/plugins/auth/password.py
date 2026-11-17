@@ -23,7 +23,6 @@ import hmac
 import secrets
 import threading
 import time
-from collections import defaultdict
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -32,6 +31,7 @@ from urllib.parse import quote
 
 import pendulum
 from flask import abort, redirect, render_template_string, request, session
+from pydantic import PositiveInt
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from structlog.stdlib import get_logger
 
@@ -102,7 +102,7 @@ class PasswordSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="DLBOARD_PASSWORD_")
 
     signup: SignupPolicy = SignupPolicy.ADMIN_CREATES
-    min_length: int = 12
+    min_length: PositiveInt = 12
 
     first_admin_setup: bool = False
     """Serve `/setup`, which makes the first admin on an empty database. Turn it on for that, then off again."""
@@ -165,6 +165,9 @@ def _principal(username: str) -> models.Principal:
 
 # -- Throttling -----------------------------------------------------------------------------------
 
+_THROTTLE_SWEEP_FLOOR: Final = 1024
+"""How many names the throttle holds before it first sweeps out the ones whose failures have aged out."""
+
 
 class _Throttle:
     """Refuses a username's sign-ins for a while after too many recent failures."""
@@ -173,13 +176,20 @@ class _Throttle:
     window_seconds: Final = 15 * 60
 
     def __init__(self) -> None:
-        self._failures: defaultdict[str, list[float]] = defaultdict(list)
+        self._failures: dict[str, list[float]] = {}
+        self._sweep_at = _THROTTLE_SWEEP_FLOOR
         self._lock = threading.Lock()
 
     def _recent(self, username: str) -> list[float]:
+        """
+        `username`'s failures within the window.
+
+        Only a name with some is kept: anyone can try a sign-in, and a name merely tried must not cost a worker memory.
+        """
         cutoff = time.monotonic() - self.window_seconds
-        recent = [t for t in self._failures[username.lower()] if t > cutoff]
-        self._failures[username.lower()] = recent
+        recent = [t for t in self._failures.pop(username.lower(), []) if t > cutoff]
+        if recent:
+            self._failures[username.lower()] = recent
         return recent
 
     def locked(self, username: str) -> bool:
@@ -187,8 +197,13 @@ class _Throttle:
             return len(self._recent(username)) >= self.max_failures
 
     def fail(self, username: str) -> None:
+        """Count a failed sign-in, forgetting every name whose failures have all aged out once there are twice as many."""
         with self._lock:
-            self._recent(username).append(time.monotonic())
+            self._failures[username.lower()] = [*self._recent(username), time.monotonic()]
+            if len(self._failures) > self._sweep_at:
+                cutoff = time.monotonic() - self.window_seconds
+                self._failures = {name: times for name, times in self._failures.items() if times[-1] > cutoff}
+                self._sweep_at = max(_THROTTLE_SWEEP_FLOOR, 2 * len(self._failures))
 
     def clear(self, username: str) -> None:
         with self._lock:
@@ -322,9 +337,15 @@ def _signup() -> str | Response:
         problem = "That username isn't available."
     if problem is not None:
         return form.render(error=problem)
-    user = create_or_reset_user(store, username, password)
+    user = store.get_or_create_user(_principal(username))
+    if store.get_password_credential(user.id) is not None:
+        # Another signup took the name since the check above: never reset its password.
+        return form.render(error="That username isn't available.")
     if policy is SignupPolicy.APPROVAL:
-        store.update_user(user.model_copy(update={"disabled_at": pendulum.now(pendulum.UTC)}))
+        # Disabled before it has a password: an account cut short in between can never be signed in to unapproved.
+        user = store.update_user(user.model_copy(update={"disabled_at": pendulum.now(pendulum.UTC)}))
+    set_password(store, user, password)
+    if policy is SignupPolicy.APPROVAL:
         return form.render(message="Account created. You can sign in once an admin approves it.")
     signed_in = sign_in(store, _principal(username), get_auth_settings())
     if signed_in is not None:
