@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import pendulum
+
 from dlboard import models
 from dlboard.serve._pages._experiment._run_picker import RUN_PICKER_LIMIT, run_options
 
@@ -14,8 +16,12 @@ if TYPE_CHECKING:
 def test_a_picker_lists_the_newest_page_of_runs_keeps_its_picks_and_searches_the_rest(
     store: SQLLiteStore, experiment_id: int
 ) -> None:
+    # A minute apart by their own dates: which are newest is not left to the clock between quick creates (#667).
+    start = pendulum.now(pendulum.UTC).subtract(days=1)
     runs = [
-        store.create_run(models.NewRun(experiment_id=experiment_id, name=f"run-{i:03d}"))
+        store.create_run(
+            models.NewRun(experiment_id=experiment_id, name=f"run-{i:03d}", created_at=start.add(minutes=i))
+        )
         for i in range(RUN_PICKER_LIMIT + 10)
     ]
     oldest = runs[0]

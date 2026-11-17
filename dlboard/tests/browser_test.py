@@ -1541,7 +1541,14 @@ def test_ctrl_k_finds_an_experiment_past_the_newest_it_lists_by_searching_the_se
     """The palette lists the newest experiments as it opens, never every one; the rest are a search away (#590)."""
     api = BasicDlboardAPI(live_server_url)
     project = api.create_project(models.NewProject(name="Jump Search Project", description=""))
-    buried = api.create_experiment(models.NewExperiment(project_id=project.id, name="buried-needle"))
+    # A day older than the rest, by its own date: what makes it oldest is not left to the clock between two creates (#664).
+    buried = api.create_experiment(
+        models.NewExperiment(
+            project_id=project.id,
+            name="buried-needle",
+            created_at=pendulum.now(pendulum.UTC).subtract(days=1),
+        )
+    )
     for index in range(JUMP_LIMIT):
         api.create_experiment(models.NewExperiment(project_id=project.id, name=f"newer-{index}"))
 
