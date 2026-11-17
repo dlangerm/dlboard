@@ -54,14 +54,21 @@ def test_only_an_unverified_first_user_claims_the_bootstrap_admin_grant(store: S
 def test_a_user_can_be_disabled_and_have_its_sessions_revoked(store: SQLLiteStore) -> None:
     user = store.get_or_create_user(_principal("sub-1"))
 
+    revoked = user.session_epoch + 1
     updated = store.update_user(
         user.model_copy(
-            update={"scopes": [models.Scope.USER_MANAGE], "session_epoch": 1, "disabled_at": user.created_at}
+            update={
+                "scopes": [models.Scope.USER_MANAGE],
+                "session_epoch": revoked,
+                "disabled_at": user.created_at,
+            }
         )
     )
 
     assert store.get_user(user.id) == updated
-    assert (updated.session_epoch, updated.disabled_at) == (1, user.created_at)
+    assert (updated.session_epoch, updated.disabled_at) == (revoked, user.created_at)
+    # A copy read before the revocation, written back after it, must not sign those sessions back in.
+    assert store.update_user(user.model_copy(update={"email": "x@y.z"})).session_epoch == revoked
 
 
 def test_a_grant_replaces_the_same_grantees_earlier_role_and_reaches_them_by_user_or_group(

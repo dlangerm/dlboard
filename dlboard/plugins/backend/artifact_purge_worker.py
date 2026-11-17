@@ -160,7 +160,7 @@ def _purge_entities(ctx: TaskContext) -> None:
             raise LookupError(msg)
         try:
             _purge(store, asked, actor, functools.partial(_chunk_of_a_purge, ctx))
-        except ValueError:  # restored since it was asked for: there is nothing to purge
+        except models.NotInTrashError:  # restored since it was asked for: there is nothing to purge
             _log.info("Not purging what was restored", entity=item.key)
 
     drained = _drain(ctx, PurgeWork.ENTITY, purge, act_paces=True)

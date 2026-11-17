@@ -742,6 +742,25 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
             raise models.EntityGoneError(msg)
         return rows[0][0]
 
+    def _lock_live(self, conn: sa.Connection, model: type[BaseModel], entity_id: int) -> None:
+        """
+        Lock `model`'s row `entity_id` until `conn` commits, or raise `EntityGoneError` if it's missing or deleted.
+
+        A write (that changes nothing) as the transaction's first statement, so what is looked up and created under the
+        row is decided by one writer at a time, never by two that both found nothing. On SQLite it also takes the write
+        lock up front: a read first could not wait for another writer's lock, and the write after it fails at once.
+        """
+        table = self._tables[model]
+        locked = conn.execute(
+            sa.update(table)
+            .where(table.c.id == entity_id)
+            .values(id=table.c.id)
+            .returning(table.c.deleted_at)
+        ).all()
+        if not locked or locked[0][0] is not None:
+            msg = f"{model.__name__} {entity_id} {'does not exist' if not locked else 'has been deleted'}"
+            raise models.EntityGoneError(msg)
+
     def _ensure_not_deleted(self, model: type[BaseModel], entity_id: int) -> None:
         """Raise if `entity_id` doesn't exist, or has been soft-deleted."""
         if self._fetch_deleted_at(model, entity_id) is not None:
@@ -905,19 +924,21 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
             return user
 
         # A single conditional `UPDATE` is atomic under concurrent writers: if two processes race
-        # this for the first time simultaneously, only one can ever see (and flip) the flag unset.
+        # this for the first time simultaneously, only one can ever see (and flip) the flag unset. The grant is in
+        # the same transaction, so a failure between the two cannot spend the claim on nobody.
         state = self._tables[AppState]
-        claimed = self._execute(
-            sa.update(state)
-            .where(state.c.id == APP_STATE_ROW_ID, sa.not_(state.c.bootstrap_admin_assigned))
-            .values(bootstrap_admin_assigned=True)
-            .returning(state.c.id)
-        )
-        if not claimed:
-            return user
-
-        _log.info("Granting bootstrap admin scopes to user %s (%s)", user.id, user.username)
-        return self.update_user(user.model_copy(update={"scopes": [models.Scope.ALL]}))
+        with self._begin() as conn:
+            claimed = conn.execute(
+                sa.update(state)
+                .where(state.c.id == APP_STATE_ROW_ID, sa.not_(state.c.bootstrap_admin_assigned))
+                .values(bootstrap_admin_assigned=True)
+                .returning(state.c.id)
+            ).all()
+            if not claimed:
+                return user
+            _log.info("Granting bootstrap admin scopes to user %s (%s)", user.id, user.username)
+            granted = conn.execute(sql.update(users, user.model_copy(update={"scopes": [models.Scope.ALL]})))
+            return sql.construct(models.User, granted.mappings().one())
 
     def _refresh_user(self, user: models.User, principal: models.Principal) -> models.User:
         """`user`, with whatever its issuer now says about its email/groups written back if it changed."""
@@ -939,9 +960,18 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
         )
 
     def update_user(self, user: models.User) -> models.User:
-        """Update a user, e.g. to grant/revoke scopes."""
+        """
+        Update a user, e.g. to grant/revoke scopes.
+
+        Its `session_epoch` only ever goes up: one read before a "sign out everywhere" (a password change, say) and
+        written back after it must not sign those sessions back in.
+        """
         _log.debug("updating user %s", user.id)
-        (updated,) = self._fetch(models.User, sql.update(self._tables[models.User], user))
+        users = self._tables[models.User]
+        epoch = sa.case(
+            (users.c.session_epoch > user.session_epoch, users.c.session_epoch), else_=user.session_epoch
+        )
+        (updated,) = self._fetch(models.User, sql.update(users, user).values(session_epoch=epoch))
         return updated
 
     def list_project_grants(
@@ -1088,21 +1118,39 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
         created_by: int | None = None,
         source: models.ExperimentSource | None = None,
     ) -> models.Experiment:
-        """Get the named experiment within `project_id`, creating it if it doesn't exist yet."""
+        """
+        Get the named experiment within `project_id`, creating it if it doesn't exist yet.
+
+        One at a time per project (`_lock_live`): the workers of a sweep that all start at once get one experiment,
+        not one each.
+        """
         experiments = self._tables[models.Experiment]
-        existing = self._fetch(
-            models.Experiment,
-            sa.select(experiments).where(
+        named = (
+            sa.select(experiments)
+            .where(
                 experiments.c.project_id == project_id,
                 experiments.c.name == name,
                 experiments.c.deleted_at.is_(None),
-            ),
+            )
+            .order_by(experiments.c.id)
+            .limit(1)
         )
-        if existing:
-            return existing[0]
-        return self.create_experiment(
-            models.NewExperiment(project_id=project_id, name=name, created_by=created_by, source=source)
-        )
+        with self._begin() as conn:
+            self._lock_live(conn, models.Project, project_id)
+            row = (
+                conn.execute(named).mappings().first()
+                or conn.execute(
+                    sql.insert(
+                        experiments,
+                        models.NewExperiment(
+                            project_id=project_id, name=name, created_by=created_by, source=source
+                        ),
+                    )
+                )
+                .mappings()
+                .one()
+            )
+            return sql.construct(models.Experiment, row)
 
     def get_experiment(self, database_id: int) -> models.Experiment | None:
         """Get an experiment by id, or None if it doesn't exist (or has been deleted)."""
@@ -1291,8 +1339,7 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
         _log.debug("Logging metrics batch")
         with span("dlboard.metrics.parse", SpanKind.INTERNAL):
             metric = list(metric)
-        for run_id in {m.run_id for m in metric}:
-            self._ensure_not_deleted(models.Run, run_id)
+        self._ensure_runs_not_deleted({m.run_id for m in metric})
         self._insert_into(
             [
                 (
@@ -1305,8 +1352,7 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
                 ),
             ]
         )
-        for experiment_id in {m.experiment_id for m in metric}:
-            self._touch_experiment(experiment_id)
+        self._touch_experiments({m.experiment_id for m in metric})
 
     def fetch_metrics(
         self,
@@ -1340,7 +1386,7 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
     ) -> Sequence[AnyRow]:
         # `UnderlyingMetricTableEntry` has no `deleted_at` of its own -- visibility is inherited
         # transitively through its run, which is always soft-deleted in the same cascade as its
-        # metrics' logical owner (see `_soft_delete`), so a join against `Run` is sufficient.
+        # metrics' logical owner (see `_mark_deleted`), so a join against `Run` is sufficient.
         m, r = self._tables[models.UnderlyingMetricTableEntry], self._tables[models.Run]
         key_filter = _among_keys(m.c.key, keys)
         # The timestamp is left as stored: `MetricFrame.from_rows` has to read it as a column of timestamps anyway, and
@@ -1810,20 +1856,25 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
         return [key for (key,) in self._execute(sa.select(keys.c.key).order_by(keys.c.key))]
 
     def log_hyperparams(self, hyperparams: models.NewHyperParams) -> models.HyperParams:
-        """Log hyperparameters to the data store."""
+        """
+        Log a run's hyperparameters, once: the run's first are kept, and returned again to a later call.
+
+        One at a time per run (`_lock_live`), so two processes sharing a run cannot both store theirs. A caller
+        compares what comes back with what it sent to know whether its own were kept.
+        """
         _log.debug("Logging hyperparameters for experiment %s", hyperparams.experiment_id)
-        self._ensure_not_deleted(models.Run, hyperparams.run_id)
         table = self._tables[models.HyperParams]
-        if existing := self._fetch(
-            models.HyperParams, sa.select(table).where(table.c.run_id == hyperparams.run_id)
-        ):
-            _log.warning(
-                "Skipping duplicate hyperparameters for experiment %s run %s",
-                hyperparams.experiment_id,
-                hyperparams.run_id,
+        with self._begin() as conn:
+            self._lock_live(conn, models.Run, hyperparams.run_id)
+            if (
+                existing := conn.execute(sa.select(table).where(table.c.run_id == hyperparams.run_id))
+                .mappings()
+                .first()
+            ):
+                return sql.construct(models.HyperParams, existing)
+            created = sql.construct(
+                models.HyperParams, conn.execute(sql.insert(table, hyperparams)).mappings().one()
             )
-            return existing[0]
-        (created,) = self._fetch(models.HyperParams, sql.insert(table, hyperparams))
         self._touch_experiment(hyperparams.experiment_id)
         return created
 
@@ -1962,12 +2013,15 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
         """Add the runs of `run_ids` that belong to the comparison's project and are still there; how many were new."""
         pages = self._tables[models.Page]
         with self._begin() as conn:
-            # Locked until this commits, so two adds to one comparison are counted one after the other (on a database
-            # with row locks: a one-writer database has no two).
+            # A write first, which changes nothing but locks the page until this commits: two adds to one comparison are
+            # counted one after the other, and on SQLite the transaction holds the write lock from its first statement. A
+            # read first could not wait for a lock another writer (a training run's metrics) holds, and SQLite fails the
+            # insert after it at once ("database is locked").
             project_id = conn.execute(
-                sa.select(pages.c.project_id)
+                sa.update(pages)
                 .where(pages.c.id == page_id, pages.c.owner_id.is_not(None))
-                .with_for_update()
+                .values(id=pages.c.id)
+                .returning(pages.c.project_id)
             ).scalar_one_or_none()
             if project_id is None:
                 msg = f"Comparison {page_id} does not exist"
@@ -2806,82 +2860,58 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
             ]
         )
 
-    def _soft_delete(
+    def _mark_deleted(
         self,
         model: type[BaseModel],
         entity_id: int,
         actor: models.User,
         *,
         entity_type: models.EntityType,
+        action: Literal[models.AuditAction.SOFT_DELETE, models.AuditAction.RESTORE],
     ) -> None:
         """
-        Soft-delete one row and cascade to every table `_cascade_targets` finds owned by it.
+        Soft-delete one row (or restore it), cascading to every table `_cascade_targets` finds owned by it.
 
-        Cascade is restricted to `SOFT_DELETABLE`, since only those tables have `deleted_at`. Only
-        rows not already independently deleted are touched, so a child soft-deleted earlier on its
-        own keeps its original `deleted_at`. Scope enforcement isn't this module's job -- see
-        `AuthorizingDataStore` (`_authorization.py`), which every request reaches any `DataStore`
-        (this one included) through.
+        Cascade is restricted to `SOFT_DELETABLE`, since only those tables have `deleted_at`. A delete touches only rows
+        not already deleted, so a child soft-deleted earlier on its own keeps its original `deleted_at`. A restore
+        touches only rows deleted at the exact instant the root was (stamped once, across a whole delete cascade), so a
+        child deleted on its own at another time stays deleted. The root changes only if it is as its `deleted_at` was
+        read, in the same transaction as the cascade and its audit row: a purge (or another restore) that got there
+        between leaves nothing changed, and raises. Scope enforcement isn't this module's job -- see
+        `AuthorizingDataStore` (`_authorization.py`), which every request reaches any `DataStore` (this one included)
+        through.
         """
+        match action:
+            case models.AuditAction.SOFT_DELETE:
+                stamp: datetime | None = None
+                values: dict[str, Any] = {"deleted_at": pendulum.now(pendulum.UTC), "deleted_by": actor.id}
+            case models.AuditAction.RESTORE:
+                if (stamp := self._fetch_deleted_at(model, entity_id)) is None:
+                    msg = f"{model.__name__} {entity_id} is not deleted"
+                    raise ValueError(msg)
+                values = {"deleted_at": None, "deleted_by": None}
+
+        def as_it_was(table: sa.Table) -> sa.ColumnElement[bool]:
+            return table.c.deleted_at.is_(None) if stamp is None else table.c.deleted_at == stamp
+
         table = self._tables[model]
         cascade = self._cascade(model, entity_id, within=SOFT_DELETABLE)
-        # Counted *before* the mutation (same predicate, same "not already deleted" guard) so the
-        # audit row -- inserted in the same transaction as the mutation, right below -- can record
+        # Counted *before* the change (same predicate) so the audit row, written in the same transaction, can record
         # cascade counts without needing the UPDATEs' own row counts.
-        details = self._cascade_counts(cascade, lambda t: t.c.deleted_at.is_(None))
-        stamp = {"deleted_at": pendulum.now(pendulum.UTC), "deleted_by": actor.id}
-        results = self._transaction(
-            [
+        details = self._cascade_counts(cascade, as_it_was)
+        with self._begin() as conn:
+            if not conn.execute(
                 sa.update(table)
-                .where(table.c.id == entity_id, table.c.deleted_at.is_(None))
-                .values(stamp)
-                .returning(table.c.id),
-                *(
-                    sa.update(child).where(where, child.c.deleted_at.is_(None)).values(stamp)
-                    for child, where in cascade
-                ),
-                self._audit_log_insert(
-                    actor.id, models.AuditAction.SOFT_DELETE, entity_type, {entity_id: details}
-                ),
-            ]
-        )
-        if not results[0]:
-            msg = f"{model.__name__} {entity_id} does not exist or is already deleted"
-            raise ValueError(msg)
-
-    def _restore(
-        self, model: type[BaseModel], entity_id: int, actor: models.User, *, entity_type: models.EntityType
-    ) -> None:
-        """
-        Restore one soft-deleted row and cascade to dependents deleted at the exact same instant.
-
-        Matching on the exact `deleted_at` timestamp (stamped once, atomically, across a whole
-        delete cascade in `_soft_delete`) means a child that was independently soft-deleted at a
-        different time -- before or after its parent -- keeps its own deletion and isn't
-        accidentally resurrected just because an ancestor is being restored. Scope enforcement isn't
-        this module's job -- see `AuthorizingDataStore`.
-        """
-        deleted_at = self._fetch_deleted_at(model, entity_id)
-        if deleted_at is None:
-            msg = f"{model.__name__} {entity_id} is not deleted"
-            raise ValueError(msg)
-
-        table = self._tables[model]
-        cascade = self._cascade(model, entity_id, within=SOFT_DELETABLE)
-        details = self._cascade_counts(cascade, lambda t: t.c.deleted_at == deleted_at)
-        cleared: dict[str, None] = {"deleted_at": None, "deleted_by": None}
-        self._transaction(
-            [
-                sa.update(table).where(table.c.id == entity_id).values(cleared),
-                *(
-                    sa.update(child).where(where, child.c.deleted_at == deleted_at).values(cleared)
-                    for child, where in cascade
-                ),
-                self._audit_log_insert(
-                    actor.id, models.AuditAction.RESTORE, entity_type, {entity_id: details}
-                ),
-            ]
-        )
+                .where(table.c.id == entity_id, as_it_was(table))
+                .values(values)
+                .returning(table.c.id)
+            ).all():
+                was = "is already deleted" if stamp is None else "was purged or restored meanwhile"
+                msg = f"{model.__name__} {entity_id} does not exist or {was}"
+                raise ValueError(msg)
+            for child, where in cascade:
+                conn.execute(sa.update(child).where(where, as_it_was(child)).values(values))
+            conn.execute(self._audit_log_insert(actor.id, action, entity_type, {entity_id: details}))
 
     def _drain_big_tables(
         self,
@@ -2981,7 +3011,7 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
             return
         if rows[0][0] is None:
             msg = f"{model.__name__} {entity_id} must be soft-deleted before it can be purged"
-            raise ValueError(msg)
+            raise models.NotInTrashError(msg)
 
         cascade = self._cascade(model, entity_id)
         details = self._cascade_counts(cascade)
@@ -3016,11 +3046,23 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
 
     def delete_project(self, project_id: int, actor: models.User) -> None:
         """Soft-delete a project and cascade to its experiments, runs, and artifacts. Requires `Scope.PROJECT_DELETE`."""
-        self._soft_delete(models.Project, project_id, actor, entity_type=models.EntityType.PROJECT)
+        self._mark_deleted(
+            models.Project,
+            project_id,
+            actor,
+            entity_type=models.EntityType.PROJECT,
+            action=models.AuditAction.SOFT_DELETE,
+        )
 
     def restore_project(self, project_id: int, actor: models.User) -> None:
         """Restore a soft-deleted project and every experiment/run/artifact deleted with it. Requires `Scope.RESTORE`."""
-        self._restore(models.Project, project_id, actor, entity_type=models.EntityType.PROJECT)
+        self._mark_deleted(
+            models.Project,
+            project_id,
+            actor,
+            entity_type=models.EntityType.PROJECT,
+            action=models.AuditAction.RESTORE,
+        )
 
     def purge_project(self, project_id: int, actor: models.User, *, pace: models.Pace | None = None) -> None:
         """Permanently delete an already soft-deleted project and everything under it, in chunks (`_drain_big_tables`)."""
@@ -3028,11 +3070,23 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
 
     def delete_experiment(self, experiment_id: int, actor: models.User) -> None:
         """Soft-delete an experiment and cascade to its runs and artifacts. Requires `Scope.EXPERIMENT_DELETE`."""
-        self._soft_delete(models.Experiment, experiment_id, actor, entity_type=models.EntityType.EXPERIMENT)
+        self._mark_deleted(
+            models.Experiment,
+            experiment_id,
+            actor,
+            entity_type=models.EntityType.EXPERIMENT,
+            action=models.AuditAction.SOFT_DELETE,
+        )
 
     def restore_experiment(self, experiment_id: int, actor: models.User) -> None:
         """Restore a soft-deleted experiment and every run/artifact deleted with it. Requires `Scope.RESTORE`."""
-        self._restore(models.Experiment, experiment_id, actor, entity_type=models.EntityType.EXPERIMENT)
+        self._mark_deleted(
+            models.Experiment,
+            experiment_id,
+            actor,
+            entity_type=models.EntityType.EXPERIMENT,
+            action=models.AuditAction.RESTORE,
+        )
 
     def purge_experiment(
         self, experiment_id: int, actor: models.User, *, pace: models.Pace | None = None
@@ -3044,7 +3098,13 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
 
     def delete_run(self, run_id: int, actor: models.User) -> None:
         """Soft-delete a run and cascade to its artifacts. Requires `Scope.RUN_DELETE`."""
-        self._soft_delete(models.Run, run_id, actor, entity_type=models.EntityType.RUN)
+        self._mark_deleted(
+            models.Run,
+            run_id,
+            actor,
+            entity_type=models.EntityType.RUN,
+            action=models.AuditAction.SOFT_DELETE,
+        )
 
     def delete_runs(
         self, run_ids: frozenset[int], actor: models.User, *, spare_kept: bool = False
@@ -3082,7 +3142,7 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
         spared: list[sa.ColumnElement[bool]] = [runs.c.kept_at.is_(None)] if spare_kept else []
         deleted = set[int]()
         for batch in _in_batches(run_ids):
-            # Counted before the mutation, as `_soft_delete` does, for the audit entries.
+            # Counted before the mutation, as `_mark_deleted` does, for the audit entries.
             counts: dict[int, dict[str, int]] = {
                 run_id: dict.fromkeys((t.name for t, _ in owned), 0) for run_id in batch
             }
@@ -3132,7 +3192,9 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
 
     def restore_run(self, run_id: int, actor: models.User) -> None:
         """Restore a soft-deleted run and every artifact deleted with it. Requires `Scope.RESTORE`."""
-        self._restore(models.Run, run_id, actor, entity_type=models.EntityType.RUN)
+        self._mark_deleted(
+            models.Run, run_id, actor, entity_type=models.EntityType.RUN, action=models.AuditAction.RESTORE
+        )
 
     def purge_run(self, run_id: int, actor: models.User, *, pace: models.Pace | None = None) -> None:
         """Permanently delete an already soft-deleted run and everything under it, in chunks."""
@@ -3140,11 +3202,23 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
 
     def delete_artifact(self, artifact_id: int, actor: models.User) -> None:
         """Soft-delete a single artifact (a leaf -- nothing depends on it). Requires `Scope.ARTIFACT_DELETE`."""
-        self._soft_delete(models.Artifact, artifact_id, actor, entity_type=models.EntityType.ARTIFACT)
+        self._mark_deleted(
+            models.Artifact,
+            artifact_id,
+            actor,
+            entity_type=models.EntityType.ARTIFACT,
+            action=models.AuditAction.SOFT_DELETE,
+        )
 
     def restore_artifact(self, artifact_id: int, actor: models.User) -> None:
         """Restore a soft-deleted artifact. Requires `Scope.RESTORE`."""
-        self._restore(models.Artifact, artifact_id, actor, entity_type=models.EntityType.ARTIFACT)
+        self._mark_deleted(
+            models.Artifact,
+            artifact_id,
+            actor,
+            entity_type=models.EntityType.ARTIFACT,
+            action=models.AuditAction.RESTORE,
+        )
 
     def purge_artifact(self, artifact_id: int, actor: models.User) -> None:
         """Permanently delete an already soft-deleted artifact."""

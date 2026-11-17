@@ -78,3 +78,7 @@ class EntityGoneError(ValueError):
 
     A `ValueError`, as the store's refusals of bad input are, for the callers that catch one.
     """
+
+
+class NotInTrashError(ValueError):
+    """A purge of what isn't in the Trash (restored since it was asked for, say): there is nothing to purge."""

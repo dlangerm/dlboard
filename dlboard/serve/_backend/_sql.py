@@ -34,10 +34,14 @@ if typing.TYPE_CHECKING:
 ID_KEY: typing.Final = "id"
 
 # Fields no `update()` may ever write, regardless of what value the caller's in-memory model
-# happens to hold -- each is bumped exclusively by its own dedicated mechanism (`revision` by
-# `SQLStoreBase._touch_experiment`), so writing it back here would let a stale snapshot (fetched
-# before some *other* write bumped it concurrently) silently undo that bump.
-_NEVER_UPDATE_FIELDS: typing.Final = frozenset({"revision"})
+# happens to hold -- each is written exclusively by its own dedicated mechanism (`revision`,
+# `notes_revision` and `last_activity_at` by `SQLStoreBase._touch_experiment` and its kin, `deleted_*`
+# by soft-delete and restore), so writing it back here would let a stale snapshot (fetched before
+# some *other* write changed it concurrently) silently undo that write: an edit to a project's
+# description that lands just after the project was deleted would bring it back.
+_NEVER_UPDATE_FIELDS: typing.Final = frozenset(
+    {"revision", "notes_revision", "last_activity_at", "deleted_at", "deleted_by"}
+)
 
 # sqlite only treats a column as its auto-incrementing rowid alias when it is spelled exactly
 # `INTEGER PRIMARY KEY`, so every integer is `INTEGER` there; everywhere else it's 64-bit, since a

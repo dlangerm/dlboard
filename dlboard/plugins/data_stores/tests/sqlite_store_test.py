@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import sqlite3
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pendulum
 import pytest
@@ -78,6 +79,40 @@ def test_writer_holding_the_database_does_not_lock_out_a_concurrent_reader(store
     finally:
         release_writer.set()
         writer.join(timeout=5)
+
+
+def test_adding_runs_to_a_comparison_waits_out_a_writer_rather_than_fail(store: SQLLiteStore) -> None:
+    """
+    Regression: `add_comparison_runs` read before it wrote, so a write that committed meanwhile (a training run's metrics,
+    say) made SQLite refuse its insert at once ("database is locked"), however long the busy timeout.
+    """
+    project = store.create_project(models.NewProject(name="p", description=""))
+    experiment = store.create_experiment(models.NewExperiment(project_id=project.id))
+    first, second = (store.create_run(models.NewRun(experiment_id=experiment.id)).id for _ in range(2))
+    owner = store.get_or_create_user(models.Principal.unverified("owner"))
+    page = store.create_comparison(
+        models.Page[Any, Any],
+        models.NewPage[Any, Any](project_id=project.id, owner_id=owner.id, name="c"),
+        frozenset({first}),
+    )
+    writing, release = threading.Event(), threading.Event()
+
+    def commit_a_write_meanwhile() -> None:
+        with sqlite3.connect(store._location, timeout=5) as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute('UPDATE "Run" SET name = ? WHERE id = ?', ("renamed", first))
+            writing.set()
+            release.wait(timeout=5)
+
+    writer = threading.Thread(target=commit_a_write_meanwhile)
+    writer.start()
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        assert writing.wait(timeout=5)
+        added = pool.submit(store.add_comparison_runs, page.id, frozenset({second}), added_by=owner.id)
+        time.sleep(0.3)  # long enough for a read to have taken its snapshot, under the writer's lock
+        release.set()
+        assert added.result(timeout=10) == 1
+    writer.join(timeout=5)
 
 
 def test_foreign_keys_are_off_only_during_schema_prep(store: SQLLiteStore) -> None:

@@ -139,11 +139,16 @@ a timing tell."""
 
 
 def set_password(store: DataStore[...], user: User, password: str) -> User:
-    """Set `user`'s password, signing them out of every existing session."""
+    """
+    Set `user`'s password, signing them out of every existing session.
+
+    The user is read again after the (slow, by design) hash: what an admin changed meanwhile, a disable say, is kept.
+    """
     store.set_password_credential(
         models.PasswordCredential(user_id=user.id, password_hash=hash_password(password))
     )
-    return store.update_user(user.model_copy(update={"session_epoch": user.session_epoch + 1}))
+    current = store.get_user(user.id) or user
+    return store.update_user(current.model_copy(update={"session_epoch": current.session_epoch + 1}))
 
 
 def create_or_reset_user(store: DataStore[...], username: str, password: str, *, admin: bool = False) -> User:

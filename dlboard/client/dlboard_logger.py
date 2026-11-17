@@ -682,14 +682,19 @@ class DLBoardLogger(Logger):
         exactly as given -- dlboard never guesses at or rewrites a value's type. A `Namespace` built from `argparse` without a `type=` on
         `add_argument` hands every value over as a string (e.g. `"128"`, not `128`); that's the
         usual cause of a hyperparameter column that looks numeric but sorts/compares as text.
+
+        A run keeps the first hyperparameters logged to it. Logging others later (a second stage, or another process
+        sharing the run) changes nothing, and warns.
         """
-        self._api.log_hyperparams(
-            models.NewHyperParams.from_raw(
-                run_id=self._run_id,
-                experiment_id=self._experiment_id,
-                hparams=flatten_hparams(params),
-            )
+        sent = models.NewHyperParams.from_raw(
+            run_id=self._run_id, experiment_id=self._experiment_id, hparams=flatten_hparams(params)
         )
+        if self._api.log_hyperparams(sent).hparams_dict != sent.hparams_dict:
+            warnings.warn(
+                f"dlboard run {self._run_id} already has hyperparameters, which it keeps: these were not recorded. "
+                "Log every hyperparameter in one call, or give each process its own run.",
+                stacklevel=3,
+            )
 
     @override
     @rank_zero_only

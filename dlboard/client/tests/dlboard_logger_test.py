@@ -93,8 +93,9 @@ class _FakeRunAPI(_FakeAPI):
         self.calls.append(("create_run", (run.experiment_id,), {}))
         return models.Run(id=99, experiment_id=run.experiment_id)
 
-    def log_hyperparams(self, hparams: models.NewHyperParams) -> None:
+    def log_hyperparams(self, hparams: models.NewHyperParams) -> models.HyperParams:
         self.calls.append(("log_hyperparams", (hparams.hparams_dict,), {}))
+        return models.HyperParams(id=1, **hparams.model_dump())
 
 
 @dataclasses.dataclass
