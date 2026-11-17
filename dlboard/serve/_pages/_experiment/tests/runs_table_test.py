@@ -283,20 +283,6 @@ def test_drawing_changes_exactly_the_rows_whose_eye_changed_and_clears_a_focus()
     }
 
 
-@pytest.mark.parametrize(
-    ("selected_rows", "expected"),
-    [
-        pytest.param(None, set(), id="nothing-yet"),
-        pytest.param({"ids": ["3", "5"]}, {3, 5}, id="the-ids-the-table-was-seeded-with"),
-        pytest.param([{"run_id": 4, "run_name": "a"}, {"run_id": 9}], {4, 9}, id="the-rows-once-reported"),
-    ],
-)
-def test_the_runs_a_grid_has_selected_are_read_from_either_shape_it_reports(
-    selected_rows: list[dict[str, int]] | dict[str, list[str]] | None, expected: set[int]
-) -> None:
-    assert run_table._picked_ids(selected_rows) == frozenset(expected)
-
-
 def test_a_pinned_runs_row_carries_the_colours_it_is_pinned_in() -> None:
     pins = {2: [PinCell(color=PinColor.RED, css="red", who=["alice"], mine=False)]}
 

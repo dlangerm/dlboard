@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 from pydantic import ValidationError
 
 from dlboard.models import PinColor
-from dlboard.serve._pages._run_list import RunAction, RunActionRequest
+from dlboard.serve._pages._run_list import RunAction, RunActionRequest, selected_run_ids
 
 
 def test_a_request_names_its_runs_once_however_the_browser_listed_them() -> None:
@@ -53,3 +55,17 @@ def test_adding_runs_to_a_comparison_names_it() -> None:
     )
 
     assert request.comparison_id == 12
+
+
+@pytest.mark.parametrize(
+    ("selected", "expected"),
+    [
+        pytest.param(None, set(), id="nothing-yet"),
+        pytest.param({"ids": ["4", "9"]}, {4, 9}, id="the-ids-it-was-seeded-with"),
+        pytest.param([{"run_id": 4, "run_name": "a"}, {"run_id": 9}], {4, 9}, id="the-rows-once-reported"),
+    ],
+)
+def test_the_runs_a_grid_has_selected_are_read_from_either_shape_it_reports(
+    selected: list[dict[str, Any]] | dict[str, Any] | None, expected: set[int]
+) -> None:
+    assert selected_run_ids(selected) == frozenset(expected)

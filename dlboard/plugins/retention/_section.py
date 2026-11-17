@@ -437,18 +437,35 @@ def _with(rules: Rules, experiment_id: int | None, rule: RetentionRule) -> Rules
     return Rules(project=rule, experiments=kept)
 
 
+def _changes_kind(rule: RetentionRule, ceiling: RetentionRule) -> bool:
+    """
+    Whether saving `rule` for the project drops every experiment's own rule: it limits by another kind than before.
+
+    "Every run" is no kind of limit: only a count becoming an age (or the reverse) says nothing of what was set before.
+    """
+    return {rule.kind, ceiling.kind}.isdisjoint({RetentionKind.UNLIMITED}) and rule.kind is not ceiling.kind
+
+
 def _preview(form: _Form) -> str:
-    """How many runs the form's rule would delete now, and when it would take effect."""
+    """How many runs the form's rule would delete now, and when it would take effect; or why it is no rule."""
     rule = _rule_from(form.kind, form.amount, form.unit)
     if isinstance(rule, str):
-        return ""
+        return rule
     store, settings, now = get_data_store(), RetentionSettings(), pendulum.now(pendulum.UTC)
-    rules = _with(_Standing.of(store, form.project_id).rules(now), _experiment_of(form.scope), rule)
+    standing, experiment_id = _Standing.of(store, form.project_id), _experiment_of(form.scope)
+    rules = _with(standing.rules(now), experiment_id, rule)
     count = Candidates(store, settings, now).overdue(form.project_id, rules, limit=PREVIEW_LIMIT)
     runs = f"{count:,}{' or more' if count >= PREVIEW_LIMIT else ''} run{'s' if count != 1 else ''}"
     grace = settings.retention_grace_days
     when = f"from {_when(now.add(days=grace))}" if grace else "at once"
-    return f"{_described(rule, settings)}: it would delete {runs} as things stand, {when}."
+    latest = standing.project.latest()
+    drops = (
+        experiment_id is None
+        and standing.experiments
+        and _changes_kind(rule, latest.rule if latest is not None else Unlimited())
+    )
+    dropped = " Saving it drops every experiment's own rule, which limits by the other kind." if drops else ""
+    return f"{_described(rule, settings)}: it would delete {runs} as things stand, {when}.{dropped}"
 
 
 def _save(form: _Saved) -> str | None:
@@ -470,10 +487,7 @@ def _save(form: _Saved) -> str | None:
     )
     changed = current.saved(rule, by=user.id, now=now, grace=RetentionSettings().grace)
     no_rule_of_its_own = experiment_id is not None and changed.active is None and isinstance(rule, Unlimited)
-    # "Every run" is no kind of limit: only a count becoming an age (or the reverse) says nothing of what was set before.
-    changes_kind = {rule.kind, ceiling.kind}.isdisjoint(
-        {RetentionKind.UNLIMITED}
-    ) and rule.kind is not ceiling.kind
+    changes_kind = _changes_kind(rule, ceiling)
     try:
         value = None if no_rule_of_its_own else changed.dump()
         # The scope's own first: a save its check refuses (a cap) leaves the experiments' rules as they were.
@@ -509,6 +523,8 @@ def _cancel(project_id: int, scope: str | None) -> str | None:
         )
     except PermissionError:
         return "Not yours to change."
+    except ValueError as refused:  # as `_save`: a value the setting's check refuses
+        return str(refused)
     return None
 
 

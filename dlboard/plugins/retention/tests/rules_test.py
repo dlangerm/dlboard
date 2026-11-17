@@ -22,7 +22,7 @@ from dlboard.plugins.retention._rules import (
     Unlimited,
     describe,
 )
-from dlboard.plugins.retention._section import _described, rule_of
+from dlboard.plugins.retention._section import _changes_kind, _described, rule_of
 from dlboard.plugins.retention._settings import RetentionSettings
 from dlboard.serve._backend._authorization import AuthorizingDataStore
 from dlboard.serve._backend._setting_rules import SettingRule
@@ -184,3 +184,20 @@ def test_an_owner_cannot_change_the_rule_in_effect_or_mark_a_rule_exempt_from_th
     assert first.effective_at > now
     write(RetentionSetting(active=in_effect, pending=pending.model_copy(update={"effective_at": now})))
     assert kept() == first  # saved again, it is not put off, nor brought forward
+
+
+@pytest.mark.parametrize(
+    ("rule", "before", "drops"),
+    [
+        (RunAge(max_age_days=30), RunCount(max_runs=5), True),
+        (RunCount(max_runs=10), RunCount(max_runs=5), False),
+        # "Every run" is no kind of limit: becoming it, or leaving it, keeps what experiments set.
+        (Unlimited(), RunCount(max_runs=5), False),
+        (RunAge(max_age_days=30), Unlimited(), False),
+    ],
+)
+def test_only_a_change_of_the_projects_kind_of_limit_drops_the_experiments_rules(
+    rule: RetentionRule, before: RetentionRule, *, drops: bool
+) -> None:
+    """What the save does and what its preview warns of are the one predicate, so the preview cannot say otherwise."""
+    assert _changes_kind(rule, before) is drops

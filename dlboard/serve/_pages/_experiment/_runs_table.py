@@ -22,12 +22,12 @@ from dash.exceptions import PreventUpdate
 from structlog.stdlib import get_logger
 
 from dlboard import models
-from dlboard.models import MetricColumn
 from dlboard.serve import Icon, get_current_user, get_data_store
 from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import ButtonId, PatternId, StoreId, ValueId
 from dlboard.serve._grid import column_def, infer_column_dtype
 from dlboard.serve._pages._dash_helpers import (
+    CallbackStates,
     notice,
     register_navigate,
     section_label,
@@ -69,6 +69,7 @@ from dlboard.serve._pages._run_list import (
     keep_or_release,
     register_run_list,
     request_store_id,
+    selected_run_ids,
     simple_action,
 )
 from dlboard.serve._pages._run_list._columns import (
@@ -518,17 +519,30 @@ def _render_signature(
     return hashlib.sha256(json.dumps(signed, sort_keys=True, default=str).encode()).hexdigest()
 
 
-def _picked_ids(selected_rows: list[dict[str, Any]] | dict[str, Any] | None) -> frozenset[int]:
-    """
-    The runs a grid has selected.
+class _TableReads(CallbackStates):
+    """What the experiment's run table is drawn from."""
 
-    Its `selectedRows` is the rows once ag-grid reports them, and the `{"ids": [...]}` it was seeded with until it does.
-    """
-    if selected_rows is None:
-        return frozenset()
-    if isinstance(selected_rows, dict):
-        return frozenset(int(run_id) for run_id in selected_rows.get("ids", ()))
-    return frozenset(int(row[MetricColumn.RUN_ID]) for row in selected_rows)
+    revision: Annotated[str | None, Input(STATE_LAST_KNOWN_REVISION, "data", allow_optional=True)] = None
+    """The experiment's revision, which the live poll moves on: what the table holds may have changed (#454)."""
+    experiment_id: Annotated[
+        int | None, Input(constants.STATE_EXPERIMENT_ID, "data", allow_optional=True)
+    ] = None
+    page_json: Annotated[str | None, Input(ids.STATE_PAGE_STORAGE, "data", allow_optional=True)] = None
+    prev_signature: Annotated[
+        str | None, State(NAVBAR_HPARAM_SIGNATURE.of(), "data", allow_optional=True)
+    ] = None
+    prev_structure: Annotated[str | None, State(NAVBAR_HPARAM_STRUCTURE_ID, "data", allow_optional=True)] = (
+        None
+    )
+    view_id: Annotated[int | None, State(ids.STATE_VIEW_ID, "data", allow_optional=True)] = None
+    paging_json: Annotated[str | None, State(ids.PANEL_PAGING_ID, "data", allow_optional=True)] = None
+    selected_rows: Annotated[
+        list[dict[str, Any]] | dict[str, Any] | None,
+        State(NAVBAR_HPARAM_DATATABLE_ID, "selectedRows", allow_optional=True),
+    ] = None
+    chips: Annotated[
+        list[str] | None, State(pin_filter_id(RunListSurface.EXPERIMENT), "value", allow_optional=True)
+    ] = None
 
 
 def _register_hparam_table(app: Dash) -> None:
@@ -538,29 +552,23 @@ def _register_hparam_table(app: Dash) -> None:
         Output(ROW_UPDATES.all(), "data", allow_duplicate=True),
         Output(NAVBAR_RUN_HEAD.all(), "children", allow_duplicate=True),
         Output(NAVBAR_HPARAM_SIGNATURE.all(), "data", allow_duplicate=True),
-        # The experiment's revision, which the live poll moves on: what the table holds may have changed (#454).
-        Input(STATE_LAST_KNOWN_REVISION, "data", allow_optional=True),
-        Input(constants.STATE_EXPERIMENT_ID, "data", allow_optional=True),
-        Input(ids.STATE_PAGE_STORAGE, "data", allow_optional=True),
-        State(NAVBAR_HPARAM_SIGNATURE.of(), "data", allow_optional=True),
-        State(NAVBAR_HPARAM_STRUCTURE_ID, "data", allow_optional=True),
-        State(ids.STATE_VIEW_ID, "data", allow_optional=True),
-        State(ids.PANEL_PAGING_ID, "data", allow_optional=True),
-        State(NAVBAR_HPARAM_DATATABLE_ID, "selectedRows", allow_optional=True),
-        State(pin_filter_id(RunListSurface.EXPERIMENT), "value", allow_optional=True),
+        _TableReads.states(),
         prevent_initial_call=True,
     )
-    def render_navbar_hparams(  # noqa: PLR0913 -- the inputs the table is drawn from
-        _revision: str | None,
-        experiment_id: int | None,
-        page_json: str | None,
-        prev_signature: str | None,
-        prev_structure: str | None,
-        view_id: int | None,
-        paging_json: str | None,
-        selected_rows: list[dict[str, Any]] | dict[str, Any] | None,
-        chips: list[str] | None,
-    ) -> tuple[Any, ...]:
+    def render_navbar_hparams(**states: Any) -> tuple[Any, ...]:  # noqa: ANN401 -- validated on the first line
+        reads = _TableReads.model_validate(states)
+        experiment_id, page_json, view_id, paging_json = (
+            reads.experiment_id,
+            reads.page_json,
+            reads.view_id,
+            reads.paging_json,
+        )
+        prev_signature, prev_structure, selected_rows, chips = (
+            reads.prev_signature,
+            reads.prev_structure,
+            reads.selected_rows,
+            reads.chips,
+        )
         if experiment_id is None:
             raise PreventUpdate
 
@@ -624,7 +632,7 @@ def _register_hparam_table(app: Dash) -> None:
             )
         # Selecting runs is work in progress, and the table is drawn again when the columns change under it: what was selected
         # stays so.
-        picked = _picked_ids(selected_rows)
+        picked = selected_run_ids(selected_rows)
         drawn = dmc.Stack(
             [
                 _render_hparam_panel(

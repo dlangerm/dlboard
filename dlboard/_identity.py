@@ -39,7 +39,10 @@ def resolve_username() -> str:
 
     try:
         os_username = getpass.getuser().strip()
-    except Exception:  # noqa: BLE001
+    except (
+        OSError,
+        KeyError,
+    ):  # no login name, or no passwd entry for this uid (which one depends on the Python)
         _log.debug("Could not resolve an OS username, falling back to %s", ANONYMOUS)
     else:
         if os_username:

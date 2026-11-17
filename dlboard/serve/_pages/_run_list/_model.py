@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Self
+from typing import Any, Self
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, TypeAdapter, model_validator
 
 from dlboard._compat import StrEnum
 from dlboard.models import PinColor
@@ -78,3 +78,31 @@ class RunActionRequest(BaseModel, frozen=True, extra="forbid"):
                     msg = f"{self.action} takes a comparison and no colour"
                     raise ValueError(msg)
         return self
+
+
+class _SeededSelection(BaseModel, frozen=True, extra="forbid"):
+    """A grid's `selectedRows` as the page seeds it, before ag-grid has reported its own: the runs by id."""
+
+    ids: list[int] = []
+
+
+class _SelectedRow(BaseModel, frozen=True, extra="ignore"):
+    """A row ag-grid reports selected: a run's row, whatever else its columns hold."""
+
+    run_id: int
+
+
+_SELECTION: TypeAdapter[_SeededSelection | list[_SelectedRow] | None] = TypeAdapter(
+    _SeededSelection | list[_SelectedRow] | None
+)
+
+
+def selected_run_ids(selected_rows: list[dict[str, Any]] | dict[str, Any] | None) -> frozenset[int]:
+    """The runs a run list's grid has selected: its rows once ag-grid reports them, the ids it was seeded with until then."""
+    match _SELECTION.validate_python(selected_rows):
+        case None:
+            return frozenset()
+        case _SeededSelection(ids=ids):
+            return frozenset(ids)
+        case rows:
+            return frozenset(row.run_id for row in rows)

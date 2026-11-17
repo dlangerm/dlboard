@@ -65,6 +65,7 @@ from dlboard.serve._pages._run_list import (
     keep_or_release,
     register_run_list,
     request_store_id,
+    selected_run_ids,
     simple_action,
 )
 from dlboard.serve._pages._run_list._bar import register_click_gate
@@ -331,15 +332,6 @@ class _Act(edits.ChartsOnScreen):
     paging_json: Annotated[str, State(experiment_ids.PANEL_PAGING_ID, "data")]
 
 
-def _picked(selected: list[dict[str, Any]] | dict[str, Any] | None) -> frozenset[int]:
-    """The runs a grid has selected: its rows once ag-grid reports them, the `{"ids": [...]}` it was seeded with until then."""
-    if selected is None:
-        return frozenset()
-    if isinstance(selected, dict):
-        return frozenset(int(run_id) for run_id in selected.get("ids", ()))
-    return frozenset(int(row["run_id"]) for row in selected)
-
-
 @dataclass(frozen=True)
 class _Outputs:
     """What `act_on_members` changes on the page: whatever it leaves out stays as it was."""
@@ -537,7 +529,7 @@ def register_members_callbacks(app: Dash) -> None:
             get_data_store(),
             page,
             Paging.model_validate_json(drawn.paging_json).hidden,
-            _picked(drawn.selected),
+            selected_run_ids(drawn.selected),
             prev_signature=drawn.signature,
         )
         if members is None:

@@ -35,11 +35,17 @@ class FSBlobs:
         _logger.info("Using filesystem artifact store", root=str(self._root))
 
     def _resolve(self, ref: AnyUrl) -> Path | None:
-        """The local path `ref` names, or `None` if it's not a `file:` ref inside `self._root`."""
+        """
+        The local path `ref` names, or `None` if it's not a `file:` ref to a blob inside `self._root`.
+
+        Neither the root itself nor the staging directory under it is a blob: linking `file:///` would otherwise have a
+        purge try to delete the whole store (and fail on every retry), and a staged upload is the journal's, not a ref's.
+        """
         if ref.scheme != "file":
             return None
         candidate = (self._root / str(ref.path).lstrip("/")).resolve()
-        if candidate != self._root and self._root not in candidate.parents:
+        staging = self._root / STAGING_DIRNAME
+        if self._root not in candidate.parents or staging in (candidate, *candidate.parents):
             return None
         return candidate
 

@@ -77,7 +77,7 @@ def _render_chart_safely(
     """Render one chart, isolating failures so a broken chart doesn't take the rest of the panel down."""
     try:
         return chart.render(dataframe, context)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001 -- shown in the chart's place: one broken chart must not break its panel
         _log.exception("Failed to render %r chart in panel %r", chart.chart_type, panel_name)
         return dmc.Alert(
             f"{type(exc).__name__}: {exc}",

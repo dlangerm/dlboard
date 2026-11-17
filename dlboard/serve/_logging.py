@@ -22,8 +22,10 @@ import logging.config
 import sys
 import typing
 from enum import StrEnum
+from typing import Annotated
 
 import structlog
+from pydantic import BeforeValidator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from dlboard._logging import SAFE_TRACEBACK
@@ -44,13 +46,23 @@ class LogFormat(StrEnum):
     """One JSON object per line, for a log collector (Loki, CloudWatch, ...) to parse structurally."""
 
 
+class LogLevel(StrEnum):
+    """A standard `logging` level name."""
+
+    DEBUG = "DEBUG"
+    INFO = "INFO"
+    WARNING = "WARNING"
+    ERROR = "ERROR"
+    CRITICAL = "CRITICAL"
+
+
 class LoggingSettings(BaseSettings):
     """`DLBOARD_*` environment variables controlling every process's logging."""
 
     model_config = SettingsConfigDict(env_prefix="DLBOARD_")
 
-    log_level: str = "INFO"
-    """A standard `logging` level name (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`)."""
+    log_level: Annotated[LogLevel, BeforeValidator(lambda level: str(level).upper())] = LogLevel.INFO
+    """A standard `logging` level name, in any case. Anything else stops the server at startup, saying so."""
     log_format: LogFormat = LogFormat.CONSOLE
     access_log: bool = False
     """Log every request's method, path, status, and duration -- off by default since a reverse

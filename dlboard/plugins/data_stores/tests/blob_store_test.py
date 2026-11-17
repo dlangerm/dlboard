@@ -144,6 +144,16 @@ def test_link_artifacts_rejects_a_ref_outside_the_stores_own_space(
         store.link_artifacts([(new_artifact, AnyUrl("file:///etc/passwd"))])
 
 
+@pytest.mark.parametrize("ref", ["file:///", "file:///.staging", "file:///.staging/an-upload"])
+def test_the_stores_own_root_and_staging_are_no_blob_a_ref_can_name(tmp_path: Path, ref: str) -> None:
+    """Regression: linking `file:///` made the root an owned blob, which a purge then tried to delete on every retry."""
+    blobs = FSBlobs(tmp_path)
+    (tmp_path / ".staging").mkdir(exist_ok=True)
+
+    assert blobs.access(AnyUrl(ref)) is None
+    assert not blobs.exists(AnyUrl(ref))
+
+
 class _LockedOnceStore:
     """Passes through to a real store, except its first `log_artifact_refs` fails like a locked sqlite db."""
 
