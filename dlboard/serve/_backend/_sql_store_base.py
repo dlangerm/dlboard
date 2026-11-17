@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import enum
 import itertools
 import json
 import math
@@ -50,6 +51,18 @@ _OWNS = ForeignKeyKind.OWNERSHIP
 
 _IN_BATCH: Final = 500
 """How many ids or rows one statement binds: they are bound values, and a database allows only so many in a statement."""
+
+
+class _Touch(enum.Enum):
+    """What changed in an experiment, for the counter a live page polls to notice it (`SQLStoreBase._touch`)."""
+
+    ACTIVITY = enum.auto()
+    """Something was logged to it: `revision` moves on, and `last_activity_at` is now."""
+    VIEW = enum.auto()
+    """Something its page shows that is not activity, a run's pin say: `revision` alone moves on."""
+    NOTES = enum.auto()
+    """Its notes: `notes_revision` moves on, which an open notes thread polls."""
+
 
 _PURGE_CHUNK: Final = 10_000
 """
@@ -708,8 +721,18 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
         """Bulk-insert `rows` into `model`'s table in one transaction."""
         self._insert_into([(model, rows)])
 
-    def _insert_into(self, tables: Iterable[tuple[type[BaseModel], Iterable[BaseModel]]]) -> None:
-        """Bulk-insert each table's rows, all in one transaction (one commit, however many tables)."""
+    def _insert_into(
+        self,
+        tables: Iterable[tuple[type[BaseModel], Iterable[BaseModel]]],
+        *,
+        live_runs: Collection[int] = (),
+    ) -> None:
+        """
+        Bulk-insert each table's rows, all in one transaction (one commit, however many tables).
+
+        With `live_runs`, the runs the rows belong to are checked live in the same transaction, after the insert (a write
+        first, as SQLite needs: `_ensure_runs_not_deleted`), so rows are never left logged to a run deleted meanwhile.
+        """
         with span("dlboard.store.rows", SpanKind.INTERNAL):
             pending = [
                 (self._tables[model], [sql.row_values(row, exclude=frozenset({sql.ID_KEY})) for row in rows])
@@ -717,10 +740,12 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
             ]
         pending = [(table, values) for table, values in pending if values]
         if not pending:
+            self._ensure_runs_not_deleted(set(live_runs))
             return
         with self._begin() as conn, span("dlboard.store.insert", SpanKind.INTERNAL):
             for table, values in pending:
                 self._bulk_insert(conn, table, values)
+            self._ensure_runs_not_deleted(set(live_runs), on=conn)
 
     def _bulk_insert(self, conn: sa.Connection, table: sa.Table, rows: list[dict[str, Any]]) -> None:
         """Insert `rows` (each keyed by column) into `table` on `conn`. A dialect may load them faster than this does."""
@@ -767,20 +792,31 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
             msg = f"{model.__name__} {entity_id} has been deleted"
             raise models.EntityGoneError(msg)
 
-    def _ensure_runs_not_deleted(self, run_ids: set[int]) -> dict[int, int]:
+    def _ensure_runs_not_deleted(
+        self, run_ids: set[int], *, on: sa.Connection | None = None
+    ) -> dict[int, int]:
         """
         `_ensure_not_deleted` for many runs at once: one read, not one transaction a run (#436); the experiment of each.
 
-        Raises as the one-at-a-time check does: for a run that does not exist, or that has been soft-deleted.
+        Raises as the one-at-a-time check does: for a run that does not exist, or that has been soft-deleted. `on` a
+        transaction that has written what the runs are to own, the read shares their rows' lock (Postgres) until it
+        commits, so a delete of one either waits for it or is seen here and rolls the write back: nothing is left logged
+        to a run that is gone.
         """
         if not run_ids:
             return {}
         r = self._tables[models.Run]
+        reads = (
+            sa.select(r.c.id, r.c.experiment_id, r.c.deleted_at)
+            .where(r.c.id.in_(batch))
+            .with_for_update(read=True)
+            for batch in _in_batches(run_ids)
+        )
         found = {
             run_id: (experiment_id, deleted_at)
-            for batch in _in_batches(run_ids)
-            for run_id, experiment_id, deleted_at in self._execute(
-                sa.select(r.c.id, r.c.experiment_id, r.c.deleted_at).where(r.c.id.in_(batch))
+            for read in reads
+            for run_id, experiment_id, deleted_at in (
+                on.execute(read).all() if on is not None else self._execute(read)
             )
         }
         if missing := run_ids - found.keys():
@@ -791,48 +827,28 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
             raise models.EntityGoneError(msg)
         return {run_id: experiment_id for run_id, (experiment_id, _) in found.items()}
 
-    def _touch_experiments(self, experiment_ids: set[int]) -> None:
-        """`_touch_experiment` for many experiments, in one statement: each is still its own short transaction, not one held over the batch."""
-        if not experiment_ids:
-            return
-        experiments = self._tables[models.Experiment]
-        self._execute(
-            sa.update(experiments)
-            .where(experiments.c.id.in_(experiment_ids))
-            .values(revision=experiments.c.revision + 1, last_activity_at=pendulum.now(pendulum.UTC))
-        )
-
-    def _bump_revisions(self, experiment_ids: Collection[int]) -> None:
+    def _touch(self, experiment_ids: Collection[int], change: _Touch) -> None:
         """
-        Move `revision` of each experiment on, for a change a live page shows but that is not the experiment's activity.
+        Move on the counter of each experiment that a live page polls for `change` (see `_Touch`), in one statement.
 
-        A pin is that: a page that polls the revision redraws what it has to for it (a run's pin), while the experiment
-        is no more recently active than before.
+        A statement after the write's own commit, not folded into one transaction with it -- self-healing (the next write
+        to the experiment moves it on again), so the narrow window where a crash could leave a counter stale by one is a
+        possible one-write delay in a live client noticing, not a correctness bug.
         """
         if not experiment_ids:
             return
         experiments = self._tables[models.Experiment]
-        self._execute(
-            sa.update(experiments)
-            .where(experiments.c.id.in_(experiment_ids))
-            .values(revision=experiments.c.revision + 1)
-        )
-
-    def _touch_experiment(self, experiment_id: int) -> None:
-        """
-        Bump an experiment's `revision` counter (and `last_activity_at`) after a mutation visible on its page.
-
-        A second statement after the write's own commit, not folded into one transaction with it --
-        self-healing (the next write to this experiment bumps it again), so the narrow window where
-        a crash could leave `revision` stale by one increment is a possible one-write delay in a live
-        client noticing, not a correctness bug.
-        """
-        experiments = self._tables[models.Experiment]
-        self._execute(
-            sa.update(experiments)
-            .where(experiments.c.id == experiment_id)
-            .values(revision=experiments.c.revision + 1, last_activity_at=pendulum.now(pendulum.UTC))
-        )
+        match change:
+            case _Touch.ACTIVITY:
+                values = {
+                    experiments.c.revision: experiments.c.revision + 1,
+                    experiments.c.last_activity_at: pendulum.now(pendulum.UTC),
+                }
+            case _Touch.VIEW:
+                values = {experiments.c.revision: experiments.c.revision + 1}
+            case _Touch.NOTES:
+                values = {experiments.c.notes_revision: experiments.c.notes_revision + 1}
+        self._execute(sa.update(experiments).where(experiments.c.id.in_(set(experiment_ids))).values(values))
 
     def get_project_stats(self) -> dict[int, models.ProjectStats]:
         """Every (non-deleted) project's activity; a project with no experiments is simply absent."""
@@ -1283,7 +1299,7 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
     def create_run(self, run: models.NewRun) -> models.Run:
         self._ensure_not_deleted(models.Experiment, run.experiment_id)
         (created,) = self._fetch(models.Run, sql.insert(self._tables[models.Run], run))
-        self._touch_experiment(run.experiment_id)
+        self._touch({run.experiment_id}, _Touch.ACTIVITY)
         return created
 
     def get_run(self, run_id: int) -> models.Run | None:
@@ -1301,7 +1317,7 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
             .values(status=status.value, ended_at=ended_at)
             .returning(runs),
         )
-        self._touch_experiment(finished.experiment_id)
+        self._touch({finished.experiment_id}, _Touch.ACTIVITY)
         return finished
 
     def get_runs(  # noqa: PLR0913 -- one keyword per filter of a run list
@@ -1391,7 +1407,6 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
         _log.debug("Logging metrics batch")
         with span("dlboard.metrics.parse", SpanKind.INTERNAL):
             metric = list(metric)
-        self._ensure_runs_not_deleted({m.run_id for m in metric})
         self._insert_into(
             [
                 (
@@ -1402,9 +1417,10 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
                     models.UnderlyingHistogramTableEntry,
                     itertools.chain.from_iterable(m.to_underlying_histograms() for m in metric),
                 ),
-            ]
+            ],
+            live_runs={m.run_id for m in metric},
         )
-        self._touch_experiments({m.experiment_id for m in metric})
+        self._touch({m.experiment_id for m in metric}, _Touch.ACTIVITY)
 
     def fetch_metrics(
         self,
@@ -1927,7 +1943,7 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
             created = sql.construct(
                 models.HyperParams, conn.execute(sql.insert(table, hyperparams)).mappings().one()
             )
-        self._touch_experiment(hyperparams.experiment_id)
+        self._touch({hyperparams.experiment_id}, _Touch.ACTIVITY)
         return created
 
     def fetch_hyperparams(
@@ -2296,19 +2312,11 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
         pages = self._tables[models.Page]
         self._execute(sa.delete(pages).where(pages.c.id == view_id, pages.c.owner_id == owner_id))
 
-    def _bump_notes_revision(self, experiment_id: int) -> None:
-        experiments = self._tables[models.Experiment]
-        self._execute(
-            sa.update(experiments)
-            .where(experiments.c.id == experiment_id)
-            .values(notes_revision=experiments.c.notes_revision + 1)
-        )
-
     def add_comment(self, comment: models.NewComment) -> models.Comment:
         """Post a note to an experiment's thread."""
         self._ensure_not_deleted(models.Experiment, comment.experiment_id)
         (created,) = self._fetch(models.Comment, sql.insert(self._tables[models.Comment], comment))
-        self._bump_notes_revision(comment.experiment_id)
+        self._touch({comment.experiment_id}, _Touch.NOTES)
         return created
 
     def list_comments(self, experiment_id: int) -> list[models.Comment]:
@@ -2328,7 +2336,7 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
             .returning(comments.c.experiment_id)
         )
         for (experiment_id,) in rows:
-            self._bump_notes_revision(experiment_id)
+            self._touch({experiment_id}, _Touch.NOTES)
 
     def pin_runs(
         self,
@@ -2358,7 +2366,7 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
             )
             for batch in _in_batches(run_ids)
         )
-        self._bump_revisions(set(experiments.values()))
+        self._touch(set(experiments.values()), _Touch.VIEW)
 
     def unpin_runs(self, pinned_by: int, run_ids: frozenset[int], color: models.PinColor) -> None:
         """Remove `pinned_by`'s pin of `color` from each of `run_ids`; anyone else's, and other colours', are left alone."""
@@ -2369,7 +2377,7 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
             )
             for batch in _in_batches(run_ids)
         )
-        self._bump_revisions(set(self.run_experiments(run_ids).values()))
+        self._touch(set(self.run_experiments(run_ids).values()), _Touch.VIEW)
 
     def run_experiments(self, run_ids: frozenset[int]) -> dict[int, int]:
         """The experiment each of `run_ids` is of, whether or not it is deleted; a run that does not exist is left out."""
@@ -2575,7 +2583,7 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
             sa.update(runs).where(runs.c.id.in_(batch), runs.c.kept_at.is_(None)).values(stamp)
             for batch in _in_batches(run_ids)
         )
-        self._bump_revisions(set(experiments.values()))
+        self._touch(set(experiments.values()), _Touch.VIEW)
 
     def release_runs(
         self,
@@ -2588,7 +2596,7 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
             sa.update(runs).where(runs.c.id.in_(batch)).values(kept_at=None, kept_by=None)
             for batch in _in_batches(run_ids)
         )
-        self._bump_revisions(set(self.run_experiments(run_ids).values()))
+        self._touch(set(self.run_experiments(run_ids).values()), _Touch.VIEW)
 
     def kept_runs(self, experiment_id: int, *, run_ids: frozenset[int] | None) -> frozenset[int]:
         """Which of an experiment's (non-deleted) runs are kept, of `run_ids` if given: found by `idx_Run_kept`."""
@@ -2737,9 +2745,8 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
 
     def log_artifact_refs(self, artifacts: Iterable[models.Artifact]) -> None:
         artifacts = list(artifacts)
-        self._ensure_runs_not_deleted({a.run_id for a in artifacts})
-        self._insert_rows(models.Artifact, artifacts)
-        self._touch_experiments({a.experiment_id for a in artifacts})
+        self._insert_into([(models.Artifact, artifacts)], live_runs={a.run_id for a in artifacts})
+        self._touch({a.experiment_id for a in artifacts}, _Touch.ACTIVITY)
 
     def count_artifacts_by_ref(self, ref: str) -> int:
         a = self._tables[models.Artifact]
@@ -3168,8 +3175,9 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
         touched. A batch is one statement for the runs, one for what they own, and one audit entry for each run (with the
         counts of what it owned, as `delete_run` records them): not a transaction for every run, which a selection of
         thousands made take seconds for each thousand. All of them are stamped with one `deleted_at`: a restore of one run
-        matches that stamp among what it owns alone, so it brings back its own artifacts and no other run's. A failure
-        part-way leaves the batches before it deleted.
+        matches that stamp among what it owns alone, so it brings back its own artifacts and no other run's. A run someone
+        else deletes after the check (retention, say) is deleted all the same, and only left out of the ids returned: the
+        call never fails part-way with some batches deleted.
 
         With `spare_kept`, a run that is kept is left alone, and the call says which it deleted: the statement itself
         carries `kept_at IS NULL` (and what a run owns follows only the runs this statement stamped), so a run kept at
@@ -3215,9 +3223,6 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
                         .returning(runs.c.id)
                     )
                 }
-                if not spare_kept and (gone := set(batch) - done):
-                    msg = f"Run {min(gone)} does not exist or is already deleted"
-                    raise ValueError(msg)
                 if done:
                     # What a spared run owns is left too, and it has no audit entry: only the runs stamped have either.
                     for table, column in owned:

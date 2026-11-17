@@ -732,9 +732,10 @@ class DataStore(typing.Protocol[_P]):
         """
         Soft-delete each of `run_ids` as `delete_run` does: the ids it deleted. Requires `Scope.RUN_DELETE`.
 
-        Every id is checked before any run is deleted, so a bad one refuses the call with nothing deleted. With
-        `spare_kept` a kept run is left alone (decided by the statement that deletes, not by an earlier read), and is
-        not among the ids returned.
+        Every id is checked before any run is deleted, so a bad one refuses the call with nothing deleted. One someone
+        else deletes after that check is deleted all the same, and only left out of the ids returned. With `spare_kept`
+        a kept run is left alone (decided by the statement that deletes, not by an earlier read), and is not among the
+        ids returned.
         """
         ...
 

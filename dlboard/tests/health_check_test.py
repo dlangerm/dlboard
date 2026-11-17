@@ -59,7 +59,7 @@ def test_readyz_is_unavailable_when_the_store_is_broken(
         msg = "db is down"
         raise RuntimeError(msg)
 
-    monkeypatch.setattr(store, "get_projects", _broken)
+    monkeypatch.setattr(store, "get_project", _broken)
 
     response = client.get("/readyz")
 

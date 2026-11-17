@@ -34,9 +34,14 @@ def _healthz() -> tuple[BaseResponse, int]:
 
 
 def _readyz() -> tuple[BaseResponse, int]:
-    """The process is up *and* its data store actually answers a query."""
+    """
+    The process is up *and* its data store actually answers a query.
+
+    One indexed lookup, of an id no row has: a probe every few seconds must cost the same however many projects there are
+    (reading the first of `get_projects` read, and validated, all of them).
+    """
     try:
-        next(iter(get_system_data_store().get_projects()), None)
+        get_system_data_store().get_project(0)
     except Exception:  # noqa: BLE001 -- a broken store must report 503, not crash the health route itself
         _log.exception("readiness check failed")
         return jsonify(status="unavailable"), HTTPStatus.SERVICE_UNAVAILABLE
