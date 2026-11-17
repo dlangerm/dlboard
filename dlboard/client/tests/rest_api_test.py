@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import warnings
 from pathlib import Path
 from typing import Any, cast
@@ -71,12 +72,12 @@ def test_create_project_sends_the_user_header(monkeypatch: pytest.MonkeyPatch) -
         _method: str,
         _url: str,
         *,
-        json: dict[str, Any],
+        data: str | None = None,
         files: object = None,
         headers: dict[str, str] | None = None,
         timeout: tuple[float, float] | None = None,
     ) -> _FakeResponse:
-        del timeout, files
+        del timeout, files, data
         captured["headers"] = headers
         return _FakeResponse()
 
@@ -181,7 +182,7 @@ def test_finish_run_reports_how_a_run_ended_and_tolerates_a_server_that_cannot_r
     sent: dict[str, Any] = {}
 
     def _request(_method: str, url: str, **kwargs: Any) -> _Reply:  # noqa: ANN401
-        sent.update(url=url, json=kwargs["json"])
+        sent.update(url=url, json=json.loads(kwargs["data"]))
         return _Reply(status_code)
 
     monkeypatch.setattr(api._session, "request", _request)
@@ -200,7 +201,7 @@ def test_finish_run_sends_the_end_time_it_is_given(monkeypatch: pytest.MonkeyPat
     sent: dict[str, Any] = {}
 
     def _request(_method: str, url: str, **kwargs: Any) -> _Reply:  # noqa: ANN401
-        sent.update(url=url, json=kwargs["json"])
+        sent.update(url=url, json=json.loads(kwargs["data"]))
         return _Reply(200)
 
     monkeypatch.setattr(api._session, "request", _request)

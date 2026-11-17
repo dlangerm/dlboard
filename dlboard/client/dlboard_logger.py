@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import atexit
-import contextlib
 import functools
 import json
 import shutil
@@ -11,6 +10,7 @@ import signal
 import tempfile
 import time
 import warnings
+import weakref
 from argparse import Namespace
 from dataclasses import dataclass, field
 from http import HTTPStatus
@@ -32,7 +32,7 @@ from pytorch_lightning.utilities import rank_zero_only
 from typing_extensions import override
 
 from dlboard import models
-from dlboard._batching import BatchParams, ship_batches
+from dlboard._batching import BatchParams, Failure, ship_batches
 from dlboard._compat import StrEnum
 from dlboard._logging import configure_client_logging
 from dlboard._mp_context import SPAWN_CONTEXT
@@ -50,6 +50,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
     from multiprocessing import Queue
     from multiprocessing.context import SpawnProcess
+    from multiprocessing.sharedctypes import Synchronized
     from multiprocessing.synchronize import Event as MPEvent
 
     from pytorch_lightning.callbacks import ModelCheckpoint
@@ -76,6 +77,15 @@ How many keys one queued `LoggedMetrics` carries. A wider call is queued as seve
 `metrics_q_flush_size` items stays a bounded upload however many keys each step logged.
 """
 _TRANSIENT_CLIENT_ERRORS: Final = frozenset({HTTPStatus.REQUEST_TIMEOUT, HTTPStatus.TOO_MANY_REQUESTS})
+_ITEM_CLIENT_ERRORS: Final = frozenset(
+    {
+        HTTPStatus.BAD_REQUEST,
+        HTTPStatus.CONFLICT,
+        HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+        HTTPStatus.UNPROCESSABLE_ENTITY,
+    }
+)
+"""The 4xx a server answers about what a batch holds, so a batch without the offending item can still land."""
 
 
 def _split_keys(metrics: dict[str, float]) -> list[dict[str, float]]:
@@ -100,33 +110,26 @@ def warn_if_startup_was_slow(elapsed_sec: float) -> None:
         )
 
 
-def is_rejection(exc: Exception) -> bool:
+def classify_failure(exc: Exception) -> Failure:
     """
-    Whether the server refused a batch outright (4xx) -- resending the exact same batch can never succeed.
+    What a failure to ship a batch says about it (see `Failure`).
 
-    A connection error or 5xx is transient instead, as are a 408/429, which only ask to retry later.
+    Transient: the server or network is down or busy -- a connection error, a timeout, a 5xx, or a 408/429, which
+    only ask to retry later. Per item: something in the batch can never be sent, so the batch is split to find it --
+    a 4xx about what was sent (an invalid item, a duplicate, a batch grown past `DLBOARD_MAX_UPLOAD_MB` while the
+    server was down), or an error here, such as a `File` whose path is gone. Whole: a 4xx that refuses the request
+    itself, whatever is in it -- credentials, access, a run that is gone, a locked project -- so no part of it lands.
     """
-    if not isinstance(exc, requests.HTTPError) or exc.response is None:
-        return False
-    status = cast("int", exc.response.status_code)  # `requests` ships no type information
-    return HTTPStatus.BAD_REQUEST <= status < HTTPStatus.INTERNAL_SERVER_ERROR and (
-        status not in _TRANSIENT_CLIENT_ERRORS
-    )
-
-
-def is_oversized(exc: Exception) -> bool:
-    """
-    Whether the server rejected a batch for being too large (413) -- see `ship_batches`'s `is_oversized`.
-
-    Only reachable once recovering from an outage has let a backlog grow past
-    `DLBOARD_MAX_UPLOAD_MB` on the server; an ordinary batch (`metrics_q_flush_size`/
-    `artifact_q_flush_size` items) is nowhere near that limit on its own.
-    """
-    return (
-        isinstance(exc, requests.HTTPError)
-        and exc.response is not None
-        and exc.response.status_code == HTTPStatus.REQUEST_ENTITY_TOO_LARGE
-    )
+    match exc:
+        case requests.ConnectionError() | requests.Timeout():
+            return Failure.TRANSIENT
+        case requests.HTTPError(response=requests.Response() as response):
+            status = response.status_code
+            if status >= HTTPStatus.INTERNAL_SERVER_ERROR or status in _TRANSIENT_CLIENT_ERRORS:
+                return Failure.TRANSIENT
+            return Failure.PER_ITEM if status in _ITEM_CLIENT_ERRORS else Failure.WHOLE
+        case _:
+            return Failure.PER_ITEM
 
 
 def _ship_artifacts(
@@ -150,79 +153,160 @@ _DROP_WARNING_INTERVAL_SEC = 5.0
 warning per dropped item -- which, at training-loop frequency, would itself flood the console."""
 
 
-@dataclass
-class _Shipper(Generic[T]):
-    """One background process running `ship_batches`, plus the queue feeding it."""
+_RESTART_INTERVAL_SEC = 10.0
+"""The soonest a shipping process that died is started again: one that dies on starting must not spin."""
 
-    name: str
+
+@dataclass(frozen=True)
+class _Worker(Generic[T]):
+    """One shipping process, and what the training process talks to it through."""
+
     queue: Queue[T | None]
     process: SpawnProcess
     ready: MPEvent
     flushed: MPEvent
+    refused: Synchronized[int]
+    """How many items the server has refused for good (see `classify_failure`), counted by the process itself."""
+
+    def stop(self) -> None:
+        """End the process, and let go of the queue without waiting on what it still held."""
+        self.process.terminate()
+        self.process.join(timeout=1)
+        self.queue.cancel_join_thread()
+        self.queue.close()
+
+
+@dataclass
+class _Shipper(Generic[T]):
+    """A shipping process kept running (started again whenever it is found dead), plus the queue feeding it."""
+
+    name: str
+    start: Callable[[], _Worker[T]]
+    worker: _Worker[T] = field(init=False)
+    started_at: float = field(init=False)
+    unflushed: bool = field(default=False, init=False)
+    """Whether anything was queued since the last flush that saw it shipped."""
     _dropped_total: int = field(default=0, init=False)
     _dropped_since_warning: int = field(default=0, init=False)
     _last_drop_warning: float = field(default=0.0, init=False)
+    _refused_reported: int = field(default=0, init=False)
+
+    def __post_init__(self) -> None:
+        self.worker, self.started_at = self.start(), time.monotonic()
 
     def put(self, item: T) -> None:
         """
-        Queue `item` for shipping, never blocking: training must never stall on dlboard falling behind.
+        Queue `item` for shipping, never blocking and never raising: training must never stall on dlboard.
 
-        A full queue means the shipping process can't keep up, or the server/network is down --
-        rather than block (which could wedge the training loop indefinitely once the queue filled),
-        this drops `item` and counts it, warning at most once every `_DROP_WARNING_INTERVAL_SEC`
-        while it keeps happening, plus a final total once `finalize()` calls `flush()`.
+        A shipping process found dead is started again, on a queue of its own (a process killed while reading
+        dies holding the old one's lock), at most once every `_RESTART_INTERVAL_SEC`; until then, and whenever the
+        queue is full (the process can't keep up, or the server/network is down), `item` is dropped and counted,
+        warning at most once every `_DROP_WARNING_INTERVAL_SEC` while it keeps happening, plus a final total once
+        `finalize()` calls `flush()`.
         """
-        if not self.process.is_alive():
-            msg = f"dlboard's {self.name} shipping process died, refusing to back up its queue"
-            raise RuntimeError(msg)
+        if not self.worker.process.is_alive() and not self._restart():
+            self._drop("its shipping process died, and is started again shortly")
+            return
         try:
-            self.queue.put_nowait(item)
+            self.worker.queue.put_nowait(item)
+            self.unflushed = True
         except Full:
-            self._dropped_total += 1
-            self._dropped_since_warning += 1
-            now = time.monotonic()
-            if now - self._last_drop_warning > _DROP_WARNING_INTERVAL_SEC:
-                warnings.warn(
-                    f"dlboard's {self.name} queue is full -- the shipping process can't keep up, or the "
-                    f"server/network is down. Dropped {self._dropped_since_warning} item(s) rather than "
-                    "block training; see `DLBoardLoggerSettings` to size the queue, or check the server.",
-                    stacklevel=3,
-                )
-                self._dropped_since_warning = 0
-                self._last_drop_warning = now
+            self._drop(
+                "its queue is full -- the shipping process can't keep up, or the server/network is down; see "
+                "`DLBoardLoggerSettings` to size the queue, or check the server"
+            )
 
-    def flush(self) -> None:
-        """Block until everything queued so far has been shipped (or rejected by the server)."""
+    def _restart(self) -> bool:
+        """Start the dead process again, unless it was started too recently; whether it was."""
+        if time.monotonic() - self.started_at < _RESTART_INTERVAL_SEC:
+            return False
+        dead = self.worker
+        try:
+            lost = f"the {dead.queue.qsize()} item(s) it still held are lost"
+        except NotImplementedError:  # macOS cannot count a queue's items
+            lost = "whatever it still held is lost"
+        self._report_refused()
+        dead.stop()
+        self.worker, self.started_at = self.start(), time.monotonic()
+        warnings.warn(
+            f"dlboard's {self.name} shipping process died (exit code {dead.process.exitcode}) and was started again; "
+            f"{lost}.",
+            stacklevel=4,
+        )
+        return True
+
+    def _drop(self, why: str) -> None:
+        self._dropped_total += 1
+        self._dropped_since_warning += 1
+        now = time.monotonic()
+        if now - self._last_drop_warning > _DROP_WARNING_INTERVAL_SEC:
+            warnings.warn(
+                f"dlboard dropped {self._dropped_since_warning} {self.name} item(s) rather than block training: {why}.",
+                stacklevel=4,
+            )
+            self._dropped_since_warning = 0
+            self._last_drop_warning = now
+
+    def _report_refused(self) -> None:
+        """Warn, here in the training process, about what the server refused since the last report."""
+        refused = self.worker.refused.value - self._refused_reported
+        if refused:
+            warnings.warn(
+                f"The dlboard server refused {refused} {self.name} item(s), which are dropped: the shipping "
+                "process's log says why.",
+                stacklevel=4,
+            )
+        self._refused_reported = self.worker.refused.value
+
+    def flush(self, deadline: float) -> bool:
+        """
+        Wait, until `deadline` (`time.monotonic`) at the latest, for everything queued to be shipped; whether it was.
+
+        Something the server refused for good counts as gone, and is warned about here; so is what was dropped.
+        """
         if self._dropped_total:
             warnings.warn(
-                f"dlboard dropped {self._dropped_total} {self.name} item(s) during this run because its "
-                "queue was full -- see the warnings above for when.",
+                f"dlboard dropped {self._dropped_total} {self.name} item(s) during this run -- see the warnings "
+                "above for when.",
                 stacklevel=3,
             )
             self._dropped_total = 0
-        if not self.process.is_alive():
+        if not self.unflushed:
+            return True
+        if not self.worker.process.is_alive():
             warnings.warn(
-                f"dlboard's {self.name} shipping process is dead, nothing queued can be flushed",
+                f"dlboard's {self.name} shipping process is dead, so what it held cannot be shipped",
                 stacklevel=3,
             )
-            return
-        self.flushed.clear()
-        self.queue.put(None)
-        if not self.flushed.wait(_FLUSH_TIMEOUT_SEC):
+            return False
+        self.worker.flushed.clear()
+        try:
+            self.worker.queue.put(None, timeout=max(0.0, deadline - time.monotonic()))
+            shipped = self.worker.flushed.wait(max(0.0, deadline - time.monotonic()))
+        except Full:
+            shipped = False
+        self._report_refused()
+        if not shipped:
             warnings.warn(
                 f"dlboard's {self.name} still hadn't all been shipped after {_FLUSH_TIMEOUT_SEC}s -- "
                 "anything not yet shipped is lost if this process exits now.",
                 stacklevel=3,
             )
+            return False
+        self.unflushed = False
+        return True
+
+    def close(self) -> None:
+        """Ship what is still queued (as `finalize` would), then stop the process: this logger is done with it."""
+        self.flush(time.monotonic() + _FLUSH_TIMEOUT_SEC)
+        self.worker.stop()
 
 
 def _ship_until_parent_says_stop(
     q: Queue[T | None],
     ship: Callable[[list[T]], None],
     params: BatchParams,
-    *,
-    is_permanent: Callable[[Exception], bool],
-    is_oversized: Callable[[Exception], bool],
+    refused: Synchronized[int],
 ) -> None:
     """
     `ship_batches` in a shipping process, which ignores Ctrl+C so the training process owns shutdown.
@@ -230,13 +314,19 @@ def _ship_until_parent_says_stop(
     A terminal's Ctrl+C goes to the whole foreground process group, shipping processes included. Without
     this, they'd die mid-batch with a KeyboardInterrupt, and the training process's final flush would have
     nothing left to ship to. Ignoring SIGINT here lets the parent flush what's queued, then exit, which also
-    takes these daemons down.
+    takes these daemons down. What the server refuses for good is counted in `refused`, for the training process to
+    say so where it is seen.
     """
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     configure_client_logging()
     name_service(CLIENT_SERVICE_NAME)
+
+    def count_refused(count: int) -> None:
+        with refused.get_lock():
+            refused.value += count
+
     # Daemons are killed at exit with whatever spans they had not exported yet: a flush is where they go out.
-    ship_batches(q, ship, params, is_permanent=is_permanent, is_oversized=is_oversized, on_flush=flush)
+    ship_batches(q, ship, params, classify=classify_failure, on_flush=flush, on_drop=count_refused)
 
 
 class _ShipKind(StrEnum):
@@ -264,7 +354,7 @@ def _ship_in_span(
         ship(batch)
 
 
-def _start_shipper(  # noqa: PLR0913 -- one shipper, fully described
+def _start_worker(  # noqa: PLR0913 -- one shipper, fully described
     kind: _ShipKind,
     ship: Callable[[list[T]], None],
     *,
@@ -272,22 +362,23 @@ def _start_shipper(  # noqa: PLR0913 -- one shipper, fully described
     run_id: int,
     q_size: int,
     flush_size: int,
-) -> _Shipper[T]:
+) -> _Worker[T]:
     queue: Queue[T | None] = SPAWN_CONTEXT.Queue(maxsize=q_size)
     ready, flushed = SPAWN_CONTEXT.Event(), SPAWN_CONTEXT.Event()
+    refused: Synchronized[int] = SPAWN_CONTEXT.Value("q", 0)
     process = SPAWN_CONTEXT.Process(
         target=_ship_until_parent_says_stop,
         args=(
             queue,
             functools.partial(_ship_in_span, kind, experiment_id, run_id, ship),
             BatchParams(flush_size, _SHIP_INTERVAL_SEC, ready, flushed),
+            refused,
         ),
-        kwargs={"is_permanent": is_rejection, "is_oversized": is_oversized},
         name=f"dlboard-{kind}",
         daemon=True,
     )
     process.start()
-    return _Shipper(kind, queue, process, ready, flushed)
+    return _Worker(queue, process, ready, flushed, refused)
 
 
 class DLBoardLoggerSettings(BaseModel, frozen=True, extra="forbid"):
@@ -380,6 +471,18 @@ _UNRESOLVED_ID: Final = 0
 """Stands in for an id a non-zero rank never resolves (it makes no server calls, see `DLBoardLogger`)."""
 
 
+def _call_if_alive(method: weakref.WeakMethod[Callable[[], None]]) -> None:
+    """Call `method`, unless its object is already gone."""
+    if (bound := method()) is not None:
+        bound()
+
+
+def _close_shippers(*shippers: _Shipper[Any]) -> None:
+    """Ship what a logger nothing uses any more still had queued, and stop its shipping processes."""
+    for shipper in shippers:
+        shipper.close()
+
+
 class DLBoardLogger(Logger):
     """
     The lightning logger for dlboard.
@@ -433,8 +536,8 @@ class DLBoardLogger(Logger):
         configure_client_logging()
         name_service(CLIENT_SERVICE_NAME)
         self._api = BasicDlboardAPI(base_url=server_url)
-        # Up front, before any worker starts: the workers treat every 4xx as "drop this batch" (see
-        # `is_rejection`), so bad credentials would otherwise only show up as silently lost metrics.
+        # Up front, before any worker starts: the workers never retry a 4xx (see
+        # `classify_failure`), so bad credentials would otherwise only show up as silently lost metrics.
         self._api.whoami()
         if run_id is not None:
             run = self._api.get_run(run_id)
@@ -455,26 +558,41 @@ class DLBoardLogger(Logger):
         if pin is not None or keep:
             self._api.mark_run(self._run_id, pin=pin, keep=keep)
         startup_start = time.perf_counter()
-        self._metrics = _start_shipper(
+        self._metrics: _Shipper[models.LoggedMetrics] = _Shipper(
             _ShipKind.METRICS,
-            self._api.log_metric_batch,
-            experiment_id=self._experiment_id,
-            run_id=self._run_id,
-            q_size=settings.metrics_q_size,
-            flush_size=settings.metrics_q_flush_size,
+            functools.partial(
+                _start_worker,
+                _ShipKind.METRICS,
+                self._api.log_metric_batch,
+                experiment_id=self._experiment_id,
+                run_id=self._run_id,
+                q_size=settings.metrics_q_size,
+                flush_size=settings.metrics_q_flush_size,
+            ),
         )
-        self._artifacts = _start_shipper(
+        ship_artifacts: Callable[[list[Sequence[AnyArtifact]]], None] = functools.partial(
+            _ship_artifacts, self._api, self._experiment_id, self._run_id
+        )
+        self._artifacts: _Shipper[Sequence[AnyArtifact]] = _Shipper(
             _ShipKind.ARTIFACTS,
-            functools.partial(_ship_artifacts, self._api, self._experiment_id, self._run_id),
-            experiment_id=self._experiment_id,
-            run_id=self._run_id,
-            q_size=settings.artifact_q_size,
-            flush_size=settings.artifact_q_flush_size,
+            functools.partial(
+                _start_worker,
+                _ShipKind.ARTIFACTS,
+                ship_artifacts,
+                experiment_id=self._experiment_id,
+                run_id=self._run_id,
+                q_size=settings.artifact_q_size,
+                flush_size=settings.artifact_q_flush_size,
+            ),
         )
         for shipper in (self._metrics, self._artifacts):
-            shipper.ready.wait(_STARTUP_WAIT_TIMEOUT_SEC)
+            if not shipper.worker.ready.wait(_STARTUP_WAIT_TIMEOUT_SEC):
+                warnings.warn(
+                    f"dlboard's {shipper.name} shipping process hadn't started after {_STARTUP_WAIT_TIMEOUT_SEC}s; "
+                    "what is logged queues up until it does.",
+                    stacklevel=2,
+                )
         warn_if_startup_was_slow(time.perf_counter() - startup_start)
-        self._unflushed = False
         self._reported_done = False
         self._log_model = log_model
         self._checkpoint_callbacks: dict[str, ModelCheckpoint] = {}
@@ -483,9 +601,11 @@ class DLBoardLogger(Logger):
         # The shipping processes are daemons -- killed with whatever's still queued the moment the
         # interpreter exits, unless something flushes them first. Lightning's trainer calls
         # `finalize()` after `fit`/`test`/..., but a crash, or any script that drives this logger
-        # without going through a `Trainer` at all, never would otherwise.
-        atexit.register(self._finalize_at_exit)
-        super().__init__()
+        # without going through a `Trainer` at all, never would otherwise. Held weakly, so a logger nothing uses
+        # any more (one per trial of a sweep) is collected, and its processes stopped with it.
+        self._exit_hook = functools.partial(_call_if_alive, weakref.WeakMethod(self._finalize_at_exit))
+        atexit.register(self._exit_hook)
+        weakref.finalize(self, _close_shippers, self._metrics, self._artifacts)
 
     @classmethod
     def from_names(  # noqa: PLR0913
@@ -594,7 +714,6 @@ class DLBoardLogger(Logger):
                     timestamp_utc=timestamp_utc,
                 )
             )
-        self._unflushed = True
 
     @rank_zero_only
     def log_histograms(
@@ -623,7 +742,6 @@ class DLBoardLogger(Logger):
                 timestamp_utc=pendulum.now(pendulum.UTC),
             )
         )
-        self._unflushed = True
 
     @rank_zero_only
     def log_artifact(self, artifacts: Sequence[AnyArtifact]) -> None:
@@ -650,7 +768,6 @@ class DLBoardLogger(Logger):
                 )
             slots.add(slot)
         self._artifacts.put(artifacts)
-        self._unflushed = True
 
     @rank_zero_only
     def log_figure(
@@ -721,17 +838,25 @@ class DLBoardLogger(Logger):
         up to `_SHIP_INTERVAL_SEC` of logged-but-unshipped metrics and artifacts still queued. Every call
         flushes, since Lightning calls this after each stage (`fit`, then `test`, ...) and what the
         later one logged is just as unshipped. Safe to call more than once -- `_Shipper.flush` itself
-        tolerates a dead process, and warns about each dropped item only once.
+        tolerates a dead process, and warns about each dropped item only once. It waits `_FLUSH_TIMEOUT_SEC` at the
+        most, for both shipping processes together, however long the server has been down.
         """
         for callback in self._checkpoint_callbacks.values():
-            # Lightning hands over a weak proxy: once the trainer is gone there is nothing left to scan.
-            with contextlib.suppress(ReferenceError):
+            try:
                 self._upload_new_checkpoints(callback)
-        for shipper in (self._metrics, self._artifacts):
-            shipper.flush()
-        for copy_dir in self._checkpoint_copy_dirs:
-            shutil.rmtree(copy_dir, ignore_errors=True)
-        self._unflushed = False
+            except ReferenceError:  # Lightning hands over a weak proxy, and the trainer is gone
+                warnings.warn(
+                    "dlboard could not upload the checkpoints `log_model` keeps: the trainer was gone by the time "
+                    "this logger was finalized. Call `trainer.logger.finalize(...)` while the trainer is alive.",
+                    stacklevel=3,
+                )
+        deadline = time.monotonic() + _FLUSH_TIMEOUT_SEC
+        self._metrics.flush(deadline)
+        if self._artifacts.flush(deadline):
+            # Only once shipped: the shipping process reads each checkpoint from its copy.
+            for copy_dir in self._checkpoint_copy_dirs:
+                shutil.rmtree(copy_dir, ignore_errors=True)
+            self._checkpoint_copy_dirs.clear()
         if (done := _done_status(status, already_reported=self._reported_done)) is not None:
             self._report_done(done)
         super().finalize(status)
@@ -747,7 +872,7 @@ class DLBoardLogger(Logger):
     @rank_zero_only
     def _finalize_at_exit(self) -> None:
         """Catch a crash, or any training loop that drives this logger without a `Trainer` at all."""
-        if self._unflushed or not self._reported_done:
+        if self._metrics.unflushed or self._artifacts.unflushed or not self._reported_done:
             warnings.warn(
                 "dlboard's logger was never finalized -- flushing whatever's still queued now, at "
                 "interpreter exit. Call `trainer.logger.finalize('success')` yourself to avoid this "

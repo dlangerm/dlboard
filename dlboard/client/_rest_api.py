@@ -8,6 +8,7 @@ Pure `requests` -- no `dash`/`flask`, so importing this (and anything that impor
 from __future__ import annotations
 
 import itertools
+import json
 import warnings
 from dataclasses import dataclass
 from http import HTTPStatus
@@ -18,9 +19,8 @@ from uuid import uuid4
 
 import pendulum
 import requests
-from pydantic import AnyUrl, AwareDatetime, BaseModel, JsonValue, PositiveFloat, SecretStr
+from pydantic import AnyUrl, AwareDatetime, BaseModel, PositiveFloat, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from structlog.stdlib import get_logger
 
 from dlboard import models
 from dlboard._identity import resolve_username
@@ -48,11 +48,9 @@ from dlboard._wire import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping, Sequence
+    from collections.abc import Iterable, Sequence
     from typing import IO
 
-
-_log = get_logger(__name__)
 
 R = TypeVar("R", bound=BaseModel)
 """Pre-3.12 `TypeVar` style (the client's floor is 3.10): the response body a request validates into."""
@@ -67,7 +65,7 @@ def _raise_for_status(res: requests.Response) -> None:
 
     A bare "500 Server Error" says nothing about *which* request failed; the id is what finds that request's
     line (and traceback) in the server's log. A 4xx's `error` says why it was refused (a project that takes no
-    new runs for now, say). The response stays on the error, for `is_rejection` and friends.
+    new runs for now, say). The response stays on the error, for `classify_failure` (`dlboard_logger.py`).
     """
     try:
         res.raise_for_status()
@@ -180,7 +178,7 @@ class BasicDlboardAPI:
         route: str,
         *,
         path: str | None = None,
-        json: Mapping[str, JsonValue] | Sequence[Mapping[str, JsonValue]] | None = None,
+        body: BaseModel | Sequence[BaseModel] | None = None,
         files: Iterable[tuple[str, tuple[str, IO[bytes] | str, str]]] | None = None,
     ) -> requests.Response:
         """
@@ -190,7 +188,19 @@ class BasicDlboardAPI:
         id in it would be one of a million. `path` is the concrete one to request, when it differs. Every request
         carries an `X-Request-Id` of its own, known here even if no response ever comes back to say it, and the
         trace context on its way to the server. Never a credential: `Authorization` is not an attribute.
+
+        `body` is sent as JSON with NaN and the infinities spelled out (`NaN`, `Infinity`), which the server reads back:
+        a loss that diverged is worth recording. `requests`' own `json=` refuses them, which would leave a batch that
+        holds one failing for good.
         """
+        match body:
+            case None:
+                data = None
+            case BaseModel():
+                data = json.dumps(body.model_dump(mode="json"))
+            case _:
+                data = json.dumps([model.model_dump(mode="json") for model in body])
+        content_type: dict[str, str] = {} if data is None else {"Content-Type": "application/json"}
         request_id = uuid4().hex
         server = urlsplit(self.base_url)
         host = server.hostname or ""
@@ -200,9 +210,9 @@ class BasicDlboardAPI:
             res = self._session.request(
                 method,
                 f"{self.base_url}/{path or route}",
-                json=json,
+                data=data,
                 files=files,
-                headers={**self._headers, REQUEST_ID_HEADER: request_id, **carrier()},
+                headers={**self._headers, **content_type, REQUEST_ID_HEADER: request_id, **carrier()},
                 timeout=self._timeout,
             )
             active.set(_ResponseTrace(status_code=res.status_code))
@@ -211,7 +221,7 @@ class BasicDlboardAPI:
         return res
 
     def _post(self, route: str, body: BaseModel, return_model: type[R], *, path: str | None = None) -> R:
-        res = self._send("POST", route, path=path, json=body.model_dump(mode="json"))
+        res = self._send("POST", route, path=path, body=body)
         _raise_for_status(res)
         return return_model.model_validate(res.json())
 
@@ -314,10 +324,7 @@ class BasicDlboardAPI:
 
     def log_metric_batch(self, metrics: list[models.LoggedMetrics]) -> None:
         """Log a batch of metrics."""
-        res = self._send(
-            "POST", create_path(Resource.METRICS), json=[m.model_dump(mode="json") for m in metrics]
-        )
-        _raise_for_status(res)
+        _raise_for_status(self._send("POST", create_path(Resource.METRICS), body=metrics))
 
     def log_artifact_batch(self, artifacts: Iterable[tuple[models.NewArtifact, Path | AnyUrl]]) -> None:
         """
@@ -385,22 +392,11 @@ class BasicDlboardAPI:
                 ),
             )
             _raise_for_status(res)
-        except Exception:
-            _log.exception("Failed to upload %d artifact(s)", len(uploads))
-            raise
         finally:
             for fh in opened:
                 fh.close()
 
     def _link_artifacts(self, links: list[tuple[models.NewArtifact, AnyUrl]]) -> None:
         """Register a batch of already-stored artifacts by ref, with no bytes uploaded."""
-        body = [
-            models.NewArtifactLink.model_validate(a.model_dump() | {"ref": ref}).model_dump(mode="json")
-            for a, ref in links
-        ]
-        try:
-            res = self._send("POST", create_path(Resource.ARTIFACT_LINKS), json=body)
-            _raise_for_status(res)
-        except Exception:
-            _log.exception("Failed to link %d artifact(s)", len(links))
-            raise
+        body = [models.NewArtifactLink.model_validate(a.model_dump() | {"ref": ref}) for a, ref in links]
+        _raise_for_status(self._send("POST", create_path(Resource.ARTIFACT_LINKS), body=body))

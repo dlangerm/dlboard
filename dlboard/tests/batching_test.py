@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from dlboard import _batching
-from dlboard._batching import BatchParams, ship_batches
+from dlboard._batching import BatchParams, Failure, ship_batches
 from dlboard._mp_context import SPAWN_CONTEXT
 
 
@@ -24,37 +24,60 @@ class _ScriptedQueue:
         return self._items.pop(0)
 
 
+class _RefusedError(Exception):
+    pass
+
+
+def _transient(_exc: Exception) -> Failure:
+    return Failure.TRANSIENT
+
+
+def _no_sleep(seconds: float) -> None:
+    del seconds
+
+
 @pytest.mark.parametrize(
-    ("failure", "shipped"),
+    ("failure", "shipped", "dropped"),
     [
-        # Permanent: dropped, and it doesn't wedge the items queued after it.
-        (ValueError("never going to work"), [["b"]]),
-        # Transient: kept and retried, so nothing is lost.
-        (RuntimeError("try again"), [["a"], ["b"]]),
+        # Transient: kept and retried, with what arrived meanwhile, so nothing is lost.
+        (Failure.TRANSIENT, [["a", "bad", "c", "d"]], []),
+        # Per item: split until the bad item is alone, so it costs only itself, and nothing is sent twice.
+        (Failure.PER_ITEM, [["a"], ["c"], ["d"]], [1]),
+        # Whole: nothing in it can land, so it's dropped -- without wedging what's queued after it.
+        (Failure.WHOLE, [["d"]], [3]),
     ],
 )
-def test_ship_batches_drops_permanent_failures_and_retries_transient_ones(
-    failure: Exception, shipped: list[list[str]]
+def test_ship_batches_keeps_splits_or_drops_a_failed_batch_as_its_failure_says(
+    monkeypatch: pytest.MonkeyPatch, failure: Failure, shipped: list[list[str]], dropped: list[int]
 ) -> None:
-    failures = [failure]
+    monkeypatch.setattr(_batching.time, "sleep", _no_sleep)
+    attempts: list[list[str]] = []
     successes: list[list[str]] = []
+    drops: list[int] = []
 
     def ship(batch: list[str]) -> None:
-        if failures:
-            raise failures.pop()
+        attempts.append(list(batch))
+        if "bad" in batch and (failure is not Failure.TRANSIENT or len(attempts) == 1):
+            raise _RefusedError
         successes.append(list(batch))
 
+    def classify(_exc: Exception) -> Failure:
+        return failure
+
+    # A large `wait_sec`, so only a flush (`None`) ships: the batches are exactly what was queued between them.
     flushed = SPAWN_CONTEXT.Event()
-    params = BatchParams(flush_size=100, wait_sec=0, ready=SPAWN_CONTEXT.Event(), flushed=flushed)
+    params = BatchParams(flush_size=100, wait_sec=100, ready=SPAWN_CONTEXT.Event(), flushed=flushed)
     with pytest.raises(_ScriptDone):
         ship_batches(
-            _ScriptedQueue(["a", None, "b", None]),
+            _ScriptedQueue(["a", "bad", "c", None, "d", None]),
             ship,
             params,
-            is_permanent=lambda exc: isinstance(exc, ValueError),
+            classify=classify,
+            on_drop=drops.append,
         )
 
     assert successes == shipped
+    assert drops == dropped
     assert flushed.is_set()
 
 
@@ -87,84 +110,9 @@ def test_ship_batches_backs_off_exponentially_and_resets_on_success(monkeypatch:
 
     params = BatchParams(flush_size=1, wait_sec=1, ready=SPAWN_CONTEXT.Event(), flushed=SPAWN_CONTEXT.Event())
     with pytest.raises(_ScriptDone):
-        ship_batches(
-            _ScriptedQueue(["a", "a", "a", "a", "a", None]),
-            ship,
-            params,
-            is_permanent=lambda _exc: False,
-        )
+        ship_batches(_ScriptedQueue(["a", "a", "a", "a", "a", None]), ship, params, classify=_transient)
 
     assert slept == [1, 2, 4, 1]
-
-
-def test_ship_batches_splits_an_oversized_batch_and_ships_both_halves(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A batch too large for one request is split in half; each half ships once both fit."""
-
-    def no_sleep(seconds: float) -> None:
-        del seconds
-
-    monkeypatch.setattr(_batching.time, "sleep", no_sleep)
-
-    class _TooLargeError(Exception):
-        pass
-
-    successes: list[list[str]] = []
-
-    def ship(batch: list[str]) -> None:
-        if len(batch) > 1:
-            raise _TooLargeError
-        successes.append(list(batch))
-
-    # A large `wait_sec`, so only `flush_size` being reached (not the batch going stale) triggers a
-    # ship attempt -- isolates the splitting behavior from the unrelated staleness-based trigger.
-    params = BatchParams(
-        flush_size=4, wait_sec=100, ready=SPAWN_CONTEXT.Event(), flushed=SPAWN_CONTEXT.Event()
-    )
-    with pytest.raises(_ScriptDone):
-        ship_batches(
-            _ScriptedQueue(["a", "b", "c", "d", None]),
-            ship,
-            params,
-            is_permanent=lambda _exc: False,
-            is_oversized=lambda exc: isinstance(exc, _TooLargeError),
-        )
-
-    assert sorted(successes) == [["a"], ["b"], ["c"], ["d"]]
-
-
-def test_ship_batches_drops_a_single_item_still_too_large_to_split(monkeypatch: pytest.MonkeyPatch) -> None:
-    """One item alone over the limit can never succeed by splitting further -- it's dropped, not retried forever."""
-
-    def no_sleep(seconds: float) -> None:
-        del seconds
-
-    monkeypatch.setattr(_batching.time, "sleep", no_sleep)
-
-    class _TooLargeError(Exception):
-        pass
-
-    successes: list[list[str]] = []
-
-    def ship(batch: list[str]) -> None:
-        if "huge" in batch:
-            raise _TooLargeError
-        successes.append(list(batch))
-
-    params = BatchParams(
-        flush_size=2, wait_sec=100, ready=SPAWN_CONTEXT.Event(), flushed=SPAWN_CONTEXT.Event()
-    )
-    with pytest.raises(_ScriptDone):
-        ship_batches(
-            _ScriptedQueue(["huge", "fine", None]),
-            ship,
-            params,
-            is_permanent=lambda exc: isinstance(exc, _TooLargeError),
-            is_oversized=lambda exc: isinstance(exc, _TooLargeError),
-        )
-
-    assert successes == [["fine"]]
 
 
 def test_ship_batches_runs_on_flush_after_the_shipping_and_before_the_flush_is_acknowledged() -> None:
@@ -181,7 +129,7 @@ def test_ship_batches_runs_on_flush_after_the_shipping_and_before_the_flush_is_a
             _ScriptedQueue(["a", None]),
             lambda batch: events.append(f"ship {batch}"),
             params,
-            is_permanent=lambda _exc: False,
+            classify=_transient,
             on_flush=on_flush,
         )
 

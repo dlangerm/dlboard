@@ -108,14 +108,22 @@ For a long run, log less often rather than expecting every step to be cheap:
   class). Auto-generate makes at most 200 charts at once: the keys past that
   stay uncharted, and Suggest charts can add them.
 
-**If the server (or your network) is down.** Logging never blocks training: `log_metrics`/
+**If the server (or your network) is down.** Logging never blocks training, and never fails it: `log_metrics`/
 `log_artifact` queue onto a bounded buffer the shipping processes drain in the background, retrying
 a failure with exponential backoff rather than hammering a server that's still down. If the buffer
-fills faster than it can drain, the oldest-queued item is dropped (not blocked on), with a
+fills faster than it can drain, the item being logged is dropped (not blocked on), with a
 rate-limited warning while it keeps happening and a final count at `finalize()`. Size the buffers
 with `DLBoardLoggerSettings` (`metrics_q_size`, `artifact_q_size`, ...) if your logging rate is high
 enough that this matters; `DLBOARD_CONNECT_TIMEOUT_S`/`DLBOARD_READ_TIMEOUT_S` (defaults 10s/60s)
-cap how long any one request waits before it's treated as failed.
+cap how long any one request waits before it's treated as failed, and `finalize()` waits at most 60s
+for both shipping processes together, however long the server stays down.
+
+What the server refuses for good is dropped rather than retried, and `finalize()` warns how much. One
+bad item (an artifact whose file was deleted before it shipped, say) costs only itself: a batch is
+split until what fails is alone. A refusal of the request itself -- revoked credentials, a run that
+was deleted, a project that's locked -- drops the batch. A shipping process that dies is started
+again (at most every 10 seconds), and what it still held is lost, with a warning that says so. A
+metric that diverged to NaN or infinity is recorded as it is.
 
 **Tracing.** To see where a slow batch spent its time, install `dlboard-client[otel]` and set
 `DLBOARD_TELEMETRY_TRACES=true` (with the standard `OTEL_EXPORTER_OTLP_ENDPOINT`) in your training environment. Each

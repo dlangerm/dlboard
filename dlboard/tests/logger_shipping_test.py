@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import atexit
+import functools
+import math
 import time
 from typing import TYPE_CHECKING, Literal
 
@@ -14,6 +16,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.demos.boring_classes import BoringModel
 
 from dlboard._wire import Resource, RunCall, create_path, run_path
+from dlboard.client import dlboard_logger
 from dlboard.client._rest_api import BasicDlboardAPI
 from dlboard.client.artifacts import image
 from dlboard.client.dlboard_logger import DLBoardLogger
@@ -53,7 +56,7 @@ def _no_logger_left_for_interpreter_exit(monkeypatch: pytest.MonkeyPatch) -> Ite
     register, unregister = atexit.register, atexit.unregister
 
     def track(func: Callable[[], None]) -> Callable[[], None]:
-        if isinstance(getattr(func, "__self__", None), DLBoardLogger):
+        if isinstance(func, functools.partial) and func.func is dlboard_logger._call_if_alive:
             armed.add(func)
         return register(func)
 
@@ -69,9 +72,9 @@ def _no_logger_left_for_interpreter_exit(monkeypatch: pytest.MonkeyPatch) -> Ite
 
 def _abandon(logger: DLBoardLogger) -> None:
     """End a test's logger without flushing: stop its shippers and its exit-time flush."""
-    atexit.unregister(logger._finalize_at_exit)
+    atexit.unregister(logger._exit_hook)
     for shipper in (logger._metrics, logger._artifacts):
-        shipper.process.kill()
+        shipper.worker.process.kill()
 
 
 @pytest.fixture
@@ -153,13 +156,46 @@ def test_a_metric_without_a_step_is_rejected_where_it_was_logged(logger: DLBoard
         logger.log_metrics({"loss": 1.0})
 
 
-def test_logging_an_artifact_after_its_shipping_process_died_raises(logger: DLBoardLogger) -> None:
-    """`log_artifact` used to check the *metrics* process instead, queueing into the void."""
-    logger._artifacts.process.kill()
-    logger._artifacts.process.join()
+def test_a_shipping_process_that_died_is_started_again_and_training_goes_on(
+    logger: DLBoardLogger, backend_server: BackendServer
+) -> None:
+    """Regression: logging after a shipping process died raised, which ended the training run with it."""
+    logger._artifacts.worker.process.kill()
+    logger._artifacts.worker.process.join()
 
-    with pytest.raises(RuntimeError, match="artifacts shipping process died"):
-        logger.log_artifact([_image(0)])
+    with pytest.warns(UserWarning, match="its shipping process died"):
+        logger.log_artifact([_image(0)])  # too soon to start it again: this one is dropped, and says so
+    logger._artifacts.started_at -= dlboard_logger._RESTART_INTERVAL_SEC
+    with pytest.warns(UserWarning, match="started again"):
+        logger.log_artifact([_image(1)])
+    with pytest.warns(UserWarning, match="dropped 1 artifacts item"):
+        logger.finalize("success")
+
+    deadline = time.monotonic() + 10
+    while not (
+        artifacts := list(
+            backend_server.store.fetch_artifacts(experiment_id=logger._experiment_id, run_ids=None)
+        )
+    ):
+        assert time.monotonic() < deadline, "what was logged after the restart never showed up"
+        time.sleep(0.1)
+    assert [a.step for a in artifacts] == [1]
+
+
+def test_a_metric_that_diverged_to_nan_ships_and_does_not_hold_up_the_rest(
+    logger: DLBoardLogger, backend_server: BackendServer
+) -> None:
+    """Regression: `requests` refuses NaN in a JSON body, and the batch holding one was retried forever."""
+    logger.log_metrics({"loss": math.nan, "grad": math.inf}, step=0)
+    logger.log_metrics({"loss": 1.0, "grad": 2.0}, step=1)
+    logger.finalize("success")
+
+    metrics = backend_server.store.fetch_metrics(logger._experiment_id, run_ids=None)
+    assert list(metrics.step) == [0, 1]
+    loss = list(metrics.values("loss"))
+    assert math.isnan(loss[0])
+    assert loss[1] == 1.0
+    assert list(metrics.values("grad")) == [math.inf, 2.0]
 
 
 def test_an_invalid_metric_batch_is_a_400_not_a_500(backend_server: BackendServer) -> None:
@@ -209,7 +245,7 @@ def test_log_model_uploads_the_checkpoints_a_real_fit_saves(
     finally:
         _abandon(logger)
 
-    assert not logger._unflushed, "the kept checkpoints were queued after the last flush"
+    assert not logger._artifacts.unflushed, "the kept checkpoints were queued after the last flush"
 
     deadline = time.monotonic() + 10
     while True:

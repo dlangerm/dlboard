@@ -31,7 +31,7 @@ from pydantic import AnyUrl
 from structlog.stdlib import get_logger
 
 from dlboard import models
-from dlboard._batching import BatchParams, ship_batches
+from dlboard._batching import BatchParams, Failure, ship_batches
 from dlboard._mp_context import SPAWN_CONTEXT
 from dlboard._telemetry import Attributes, attribute
 from dlboard._telemetry.traces import SpanKind, TraceKey, carrier, flush, span
@@ -553,7 +553,7 @@ class BlobArtifactStore(models.ArtifactStore[BlobBackend, int, Path]):
             BatchParams(flush_size=10, wait_sec=1, ready=self._ingest_ready, flushed=self._ingest_flushed),
             # `_record_refs` already drops (and cleans up after) anything the store rejects outright,
             # so whatever still escapes it -- a locked database, say -- is worth retrying.
-            is_permanent=lambda _exc: False,
+            classify=lambda _exc: Failure.TRANSIENT,
         )
 
     def _record_saved(self, store: DataStore[...], results: list[_Saved | _Gone]) -> None:

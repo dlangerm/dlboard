@@ -9,6 +9,7 @@ import dataclasses
 import io
 import queue
 import threading
+import time
 import warnings
 from argparse import Namespace
 from enum import Enum
@@ -27,6 +28,8 @@ from pytorch_lightning.demos.boring_classes import BoringModel
 from pytorch_lightning.utilities import rank_zero_only
 
 from dlboard import models
+from dlboard._batching import Failure
+from dlboard._mp_context import SPAWN_CONTEXT
 from dlboard._wire import Identity
 from dlboard.client import dlboard_logger
 from dlboard.client.artifacts.figure import Figure
@@ -36,9 +39,8 @@ from dlboard.client.artifacts.overlay import Overlay
 from dlboard.client.dlboard_logger import (
     DLBoardLogger,
     DLBoardLoggerSettings,
+    classify_failure,
     flatten_hparams,
-    is_oversized,
-    is_rejection,
     warn_if_startup_was_slow,
 )
 from dlboard.client.histograms import ExplicitBinning, ExponentialBinning
@@ -95,22 +97,38 @@ class _FakeRunAPI(_FakeAPI):
         self.calls.append(("log_hyperparams", (hparams.hparams_dict,), {}))
 
 
+@dataclasses.dataclass
+class _ReadyWorker:
+    """Already `ready`, so the logger's `__init__` doesn't wait for a process that never spawns."""
+
+    ready: threading.Event = dataclasses.field(default_factory=threading.Event)
+
+    def __post_init__(self) -> None:
+        self.ready.set()
+
+
 class _FakeShipper:
-    """Stands in for `_Shipper`: nothing spawns, and `ready` is already set so `__init__` doesn't wait."""
+    """Stands in for `_Shipper`: nothing spawns."""
 
     def __init__(self) -> None:
-        self.ready = threading.Event()
-        self.ready.set()
+        self.worker = _ReadyWorker()
         self.flushed = False
+        self.unflushed = False
         self.items: list[Any] = []
 
     def put(self, item: Any) -> None:  # noqa: ANN401
         """Record what the logger queued, instead of shipping it."""
         self.items.append(item)
+        self.unflushed = True
 
-    def flush(self) -> None:
+    def flush(self, deadline: float) -> bool:
         """So `finalize()` (called explicitly, or by the logger's own atexit hook) has something to call."""
-        self.flushed = True
+        del deadline
+        self.flushed, self.unflushed = True, False
+        return True
+
+    def close(self) -> None:
+        """What a logger nothing uses any more calls on its way out."""
 
 
 def _stub_shippers(monkeypatch: pytest.MonkeyPatch) -> list[_FakeShipper]:
@@ -120,7 +138,7 @@ def _stub_shippers(monkeypatch: pytest.MonkeyPatch) -> list[_FakeShipper]:
         started.append(_FakeShipper())
         return started[-1]
 
-    monkeypatch.setattr(dlboard_logger, "_start_shipper", _start)
+    monkeypatch.setattr(dlboard_logger, "_Shipper", _start)
     return started
 
 
@@ -351,32 +369,34 @@ def _http_error(status: int) -> requests.HTTPError:
 
 
 @pytest.mark.parametrize(
-    ("failure", "rejected"),
+    ("failure", "kind"),
     [
-        (_http_error(400), True),
-        (_http_error(422), True),
-        (_http_error(503), False),
-        (_http_error(408), False),
-        (_http_error(429), False),
-        (requests.ConnectionError(), False),
+        (requests.ConnectionError(), Failure.TRANSIENT),
+        (requests.Timeout(), Failure.TRANSIENT),
+        (_http_error(503), Failure.TRANSIENT),
+        (_http_error(408), Failure.TRANSIENT),
+        (_http_error(429), Failure.TRANSIENT),
+        # About what was sent: the batch is split, so only the item at fault is lost.
+        (_http_error(400), Failure.PER_ITEM),
+        (_http_error(409), Failure.PER_ITEM),
+        (_http_error(413), Failure.PER_ITEM),
+        (_http_error(422), Failure.PER_ITEM),
+        (FileNotFoundError("a `File` whose path is gone"), Failure.PER_ITEM),
+        (requests.exceptions.InvalidJSONError(), Failure.PER_ITEM),
+        # About the request itself: nothing in it can land.
+        (_http_error(403), Failure.WHOLE),
+        (_http_error(404), Failure.WHOLE),
+        (_http_error(423), Failure.WHOLE),
     ],
 )
-def test_is_rejection_only_treats_a_4xx_that_can_never_succeed_as_permanent(
-    failure: Exception, *, rejected: bool
-) -> None:
-    assert is_rejection(failure) is rejected
-
-
-@pytest.mark.parametrize(
-    ("failure", "oversized"),
-    [(_http_error(413), True), (_http_error(400), False), (requests.ConnectionError(), False)],
-)
-def test_is_oversized_only_matches_413(failure: Exception, *, oversized: bool) -> None:
-    assert is_oversized(failure) is oversized
+def test_classify_failure_retries_only_what_a_retry_can_fix(failure: Exception, kind: Failure) -> None:
+    assert classify_failure(failure) is kind
 
 
 class _FakeProcess:
     """`alive` is a plain mutable attribute, not init-only -- a real process can die mid-test too."""
+
+    exitcode: int | None = None
 
     def __init__(self, *, alive: bool) -> None:
         self.alive = alive
@@ -384,66 +404,119 @@ class _FakeProcess:
     def is_alive(self) -> bool:
         return self.alive
 
+    def terminate(self) -> None:
+        self.alive = False
 
-def _shipper(*, alive: bool = True, maxsize: int = 0) -> dlboard_logger._Shipper[str]:
+    def join(self, timeout: float) -> None:
+        del timeout
+
+
+class _FakeQueue(queue.Queue[str | None]):
+    """A plain `queue.Queue`, plus the two methods of a `multiprocessing.Queue` a worker is stopped with."""
+
+    def cancel_join_thread(self) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
+
+def _worker(*, alive: bool = True, maxsize: int = 0) -> dlboard_logger._Worker[str]:
     """
-    A real `_Shipper` over test doubles: a plain `queue.Queue` (not a real `multiprocessing.Queue`,
-    which needs a spawned process on the other end) and `threading.Event` (not
-    `multiprocessing.synchronize.Event`) -- structurally identical for every method `_Shipper` calls.
+    A real `_Worker` over test doubles: a plain queue (not a real `multiprocessing.Queue`, which needs a spawned
+    process on the other end) and `threading.Event` (not `multiprocessing.synchronize.Event`) -- structurally
+    identical for every method `_Shipper` calls.
     """
-    q: queue.Queue[str | None] = queue.Queue(maxsize=maxsize)
-    shipper: dlboard_logger._Shipper[str] = dlboard_logger._Shipper(
-        "test",
-        q,  # pyrefly: ignore [bad-argument-type]
+    return dlboard_logger._Worker(
+        _FakeQueue(maxsize=maxsize),  # pyrefly: ignore [bad-argument-type]
         _FakeProcess(alive=alive),  # pyrefly: ignore [bad-argument-type]
         threading.Event(),  # pyrefly: ignore [bad-argument-type]
         threading.Event(),  # pyrefly: ignore [bad-argument-type]
+        SPAWN_CONTEXT.Value("q", 0),
     )
-    return shipper
+
+
+def _shipper(*workers: dlboard_logger._Worker[str]) -> dlboard_logger._Shipper[str]:
+    """A real `_Shipper` that starts each of `workers` in turn: the first at once, the rest as it restarts."""
+    return dlboard_logger._Shipper("test", iter(workers).__next__)
+
+
+def _killed(worker: dlboard_logger._Worker[str]) -> None:
+    assert isinstance(worker.process, _FakeProcess)
+    worker.process.alive = False
 
 
 def test_shipper_put_drops_rather_than_blocks_once_the_queue_is_full() -> None:
     """Regression: training must never stall on dlboard falling behind -- the old blocking `put` could."""
-    shipper = _shipper(maxsize=1)
+    shipper = _shipper(_worker(maxsize=1))
     shipper.put("a")
 
     with pytest.warns(UserWarning, match="queue is full"):
         shipper.put("b")
 
-    assert shipper.queue.get_nowait() == "a"
-    assert shipper.queue.empty()  # "b" was dropped, never queued
+    assert shipper.worker.queue.get_nowait() == "a"
+    assert shipper.worker.queue.empty()  # "b" was dropped, never queued
     assert shipper._dropped_total == 1
 
 
-def test_shipper_put_raises_if_the_shipping_process_already_died() -> None:
-    shipper = _shipper(alive=False)
+def test_shipper_starts_a_process_that_died_again_rather_than_fail_training() -> None:
+    """Regression: a dead shipping process used to make the next `log_*` call raise, ending the training run."""
+    first, second = _worker(), _worker()
+    shipper = _shipper(first, second)
+    _killed(first)
 
-    with pytest.raises(RuntimeError, match="died"):
-        shipper.put("a")
+    with pytest.warns(UserWarning, match="died"):
+        shipper.put("a")  # too soon after it started: dropped, and started again on a later call
+    shipper.started_at -= dlboard_logger._RESTART_INTERVAL_SEC
+    with pytest.warns(UserWarning, match="started again"):
+        shipper.put("b")
+
+    assert shipper.worker is second
+    assert second.queue.get_nowait() == "b"
+
+
+def test_shipper_flush_gives_up_at_its_deadline_and_says_what_the_server_refused() -> None:
+    """Nothing drains these queues, so only the deadline ends the wait: `finalize` is bounded however long it takes."""
+    shipper = _shipper(_worker())
+    shipper.put("a")
+    shipper.worker.refused.value = 3
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        shipped = shipper.flush(time.monotonic())
+
+    assert not shipped
+    assert shipper.unflushed
+    messages = [str(w.message) for w in caught]
+    assert any("refused 3 test" in m for m in messages)
+    assert any("still hadn't all been shipped" in m for m in messages)
 
 
 def test_shipper_flush_warns_and_returns_instead_of_hanging_on_a_dead_process() -> None:
-    shipper = _shipper(alive=False)
+    worker = _worker()
+    shipper = _shipper(worker)
+    shipper.put("a")
+    _killed(worker)
 
     with pytest.warns(UserWarning, match="dead"):
-        shipper.flush()
+        assert not shipper.flush(time.monotonic() + 60)
 
-    assert shipper.queue.empty()  # no flush sentinel was queued for nothing to ever drain
+    assert worker.queue.get_nowait() == "a"  # no flush sentinel was queued for nothing to ever drain
 
 
 def test_shipper_flush_warns_once_with_the_total_dropped_this_run() -> None:
-    shipper = _shipper(maxsize=1)
+    worker = _worker(maxsize=1)
+    shipper = _shipper(worker)
     shipper.put("a")
     with pytest.warns(UserWarning, match="queue is full"):
         shipper.put("b")
     shipper.put("c")  # dropped too, but rate-limited: no second warning right after the first
 
     # Dead now, so `flush()` doesn't block waiting on `flushed` -- nothing would ever set it here.
-    assert isinstance(shipper.process, _FakeProcess)
-    shipper.process.alive = False
+    _killed(worker)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        shipper.flush()
+        shipper.flush(time.monotonic() + 60)
 
     assert any("dropped 2 test" in str(w.message) for w in caught)
 

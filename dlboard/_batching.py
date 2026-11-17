@@ -9,6 +9,7 @@ never lose a batch to a failure that a retry would have survived.
 
 from __future__ import annotations
 
+import enum
 import logging
 import random
 import time
@@ -36,6 +37,18 @@ _JITTER_FRACTION: float = 0.25
 don't all land on the server in lockstep."""
 
 
+class Failure(enum.Enum):
+    """What a failed shipment says about the batch it was shipping."""
+
+    TRANSIENT = enum.auto()
+    """Nothing about the batch: the destination is down or busy. Kept, and tried again after a backoff."""
+    PER_ITEM = enum.auto()
+    """Something in the batch (one bad item, or too many at once). Split in halves until only what fails alone is
+    dropped, so one bad item costs itself and not the batch it came in."""
+    WHOLE = enum.auto()
+    """Nothing in the batch can ever land as sent (refused credentials, a run that is gone). Dropped whole."""
+
+
 class BatchParams(NamedTuple):
     """How `ship_batches` batches, plus the events it reports through."""
 
@@ -51,38 +64,37 @@ class Receiver(Protocol[_T_co]):
     def get(self, block: bool = True, timeout: float | None = None) -> _T_co: ...  # noqa: FBT001, FBT002
 
 
-def _split_oversized(
+def _ship_what_can_land(
     ship: Callable[[list[T]], None],
     batch: list[T],
     *,
-    is_permanent: Callable[[Exception], bool],
-    is_oversized: Callable[[Exception], bool],
+    classify: Callable[[Exception], Failure],
+    on_drop: Callable[[int], None],
 ) -> list[T]:
     """
-    Ship `batch` in two halves, recursing into a half that's still too large, down to one item each.
+    Ship `batch`, returning what is left to try again later: all of it, if it failed transiently.
 
-    Returns whatever's left unshipped: a permanently-rejected chunk is dropped (and so absent from
-    the result), but one that fails for some other transient reason comes back in it, for
-    `ship_batches` to retry (at its own pace, with backoff) on a later pass -- never lost, and never
-    re-sent on top of a chunk that already landed. A chunk of exactly one item that's still too
-    large has nothing left to split into, so it's treated as permanent either way: resending the
-    same single oversized item can never succeed.
+    A `PER_ITEM` failure ships each half the same way, down to single items, so whatever lands has landed (and is
+    never sent again) and only an item that fails on its own is dropped. Everything dropped is counted to `on_drop`.
     """
-    mid = len(batch) // 2
-    leftover: list[T] = []
-    for chunk in (batch[:mid], batch[mid:]):
-        try:
-            ship(chunk)
-        except Exception as exc:  # noqa: BLE001 -- nothing may kill the shipping loop
-            if is_oversized(exc) and len(chunk) > 1:
-                leftover.extend(
-                    _split_oversized(ship, chunk, is_permanent=is_permanent, is_oversized=is_oversized)
-                )
-            elif is_permanent(exc):
-                _log.exception("A sub-batch of %s was rejected, dropping it", len(chunk))
-            else:
-                leftover.extend(chunk)  # transient; retry (with backoff) on a later pass
-    return leftover
+    try:
+        ship(batch)
+    except Exception as exc:  # noqa: BLE001 -- nothing may kill the shipping loop
+        match classify(exc):
+            case Failure.TRANSIENT:
+                _log.warning("Failed to ship a batch of %s, retrying", len(batch), exc_info=True)
+                return batch
+            case Failure.PER_ITEM if len(batch) > 1:
+                mid = len(batch) // 2
+                return [
+                    item
+                    for half in (batch[:mid], batch[mid:])
+                    for item in _ship_what_can_land(ship, half, classify=classify, on_drop=on_drop)
+                ]
+            case Failure.PER_ITEM | Failure.WHOLE:
+                _log.exception("A batch of %s can never be shipped, dropping it", len(batch))
+                on_drop(len(batch))
+    return []
 
 
 def ship_batches(  # noqa: PLR0913 -- each is a distinct knob of one loop
@@ -90,25 +102,21 @@ def ship_batches(  # noqa: PLR0913 -- each is a distinct knob of one loop
     ship: Callable[[list[T]], None],
     params: BatchParams,
     *,
-    is_permanent: Callable[[Exception], bool],
-    is_oversized: Callable[[Exception], bool] = lambda _exc: False,
+    classify: Callable[[Exception], Failure],
     on_flush: Callable[[], None] = lambda: None,
+    on_drop: Callable[[int], None] = lambda _count: None,
 ) -> None:
     """
     Forever drain `q` into batches, shipping one once it's full, `wait_sec` old, or a flush asks for it.
 
-    A batch whose failure `is_permanent` is dropped: resending it can never succeed, and keeping it
-    would wedge every later item behind it. A batch whose failure `is_oversized` is instead split in
-    half and each half attempted once right away (`_split_oversized`) -- resending the exact same
-    oversized batch could never succeed either, but a batch that only grew this large because the
-    server was briefly unreachable shouldn't be dropped just because it doesn't fit in one request
-    once it's reachable again. Any other failure is transient -- the batch is kept, keeps growing
-    with whatever arrives meanwhile, and is retried after an exponentially growing backoff (reset
-    the moment a batch ships successfully) rather than hammering a server that's still down. A
-    `None` queued in place of an item requests a flush, acknowledged (`params.flushed`) only once
-    everything queued before it is gone and `on_flush` (which must not raise) has run: whatever else the process
-    holds that dies with it, such as spans not yet exported, can be pushed out first. Returns once `q` itself is
-    closed (e.g. at interpreter shutdown) -- nothing more can ever arrive through it.
+    How a failed shipment is handled is up to what `classify` makes of it (see `Failure`): a transient one keeps the
+    batch, which keeps growing with whatever arrives meanwhile, and retries it after an exponentially growing backoff
+    (reset the moment a batch ships) rather than hammering a destination that's still down; the others drop what can
+    never land, counting it to `on_drop`, without wedging the items queued behind it. A `None` queued in place of an
+    item requests a flush, acknowledged (`params.flushed`) only once everything queued before it is gone and
+    `on_flush` (which must not raise) has run: whatever else the process holds that dies with it, such as spans not
+    yet exported, can be pushed out first. Returns once `q` itself is closed (e.g. at interpreter shutdown) --
+    nothing more can ever arrive through it.
     """
     params.ready.set()
     batch: list[T] = []
@@ -128,28 +136,15 @@ def ship_batches(  # noqa: PLR0913 -- each is a distinct knob of one loop
             return
         due = flush_requested or len(batch) >= params.flush_size
         if batch and (due or time.perf_counter() - last_attempt > params.wait_sec):
-            try:
-                ship(batch)
-                batch = []
+            batch = _ship_what_can_land(ship, batch, classify=classify, on_drop=on_drop)
+            if batch:
+                # `int ** int` is typed `Any` (it's a float for a negative exponent), hence the annotation.
+                backoff: float = params.wait_sec * 2 ** min(consecutive_failures, _MAX_BACKOFF_FACTOR)
+                jitter = backoff * _JITTER_FRACTION
+                time.sleep(backoff + random.uniform(-jitter, jitter))
+                consecutive_failures += 1
+            else:
                 consecutive_failures = 0
-            except Exception as exc:  # noqa: BLE001 -- nothing may kill the shipping loop
-                if is_oversized(exc) and len(batch) > 1:
-                    _log.warning("A batch of %s was too large for one request, splitting it", len(batch))
-                    batch = _split_oversized(
-                        ship, batch, is_permanent=is_permanent, is_oversized=is_oversized
-                    )
-                    consecutive_failures = 0
-                elif is_permanent(exc):
-                    _log.exception("A batch of %s was rejected, dropping it", len(batch))
-                    batch = []
-                    consecutive_failures = 0
-                else:
-                    _log.exception("Failed to ship a batch of %s, retrying", len(batch))
-                    # `int ** int` is typed `Any` (it's a float for a negative exponent), hence the annotation.
-                    backoff: float = params.wait_sec * 2 ** min(consecutive_failures, _MAX_BACKOFF_FACTOR)
-                    jitter = backoff * _JITTER_FRACTION
-                    time.sleep(backoff + random.uniform(-jitter, jitter))
-                    consecutive_failures += 1
             last_attempt = time.perf_counter()
         if flush_requested and not batch:
             flush_requested = False
