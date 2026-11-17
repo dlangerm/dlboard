@@ -14,6 +14,40 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ### Fixed
 
+* **The logger's shipping no longer stalls, fails training, or hangs at the end of a run.** A metric that diverged to NaN
+  or infinity stopped every metric after it from shipping for the rest of the run; it is recorded as it is. A batch with
+  one bad item in it (an artifact whose file was deleted before it shipped) was retried forever, holding up everything
+  after it, and a batch the server refused was dropped whole for one bad item: now only the bad item is dropped, and
+  `finalize()` warns how many were. A shipping process that died made the next `log_*` call raise, ending training; it is
+  started again, with a warning. `finalize()` waits at most 60 seconds however long the server is down (it could block
+  for half an hour), and keeps checkpoints `log_model` copied until they have shipped. A logger nothing uses any more
+  (one per trial of a sweep) no longer keeps its two processes until the script exits. (#662)
+* **The server answers what can never be logged with a 4xx, so a client stops resending it.** Metrics or artifacts for a
+  run that was deleted (retention deletes runs still running past its grace period) were a 500, which a client retried
+  forever; they are a 404. An artifact batch sent again after it failed partway, or after its answer was lost, is
+  accepted and recorded once: it used to fail for good on what had landed, or record it twice. Logging the same key, step
+  and file name again keeps the first. (#663)
+* **Writes that race no longer duplicate or undo one another.** The workers of a sweep that start at once share one
+  experiment instead of creating one each; processes sharing a run keep its first hyperparameters (and the logger warns
+  when it logs others that were not kept); adding runs to a comparison no longer fails with "database is locked" while
+  something is training (SQLite). An edit read before a delete no longer brings the project back, a password change or
+  an edit no longer undoes an admin's disable or a "sign out everywhere", and a restore that a purge overtook no longer
+  reports success. A purge that failed is retried rather than taken for one that was restored. (#665)
+* **A signup is never live before it is approved, and never takes over an account.** Under `signup=approval` an account
+  could be left enabled by a failure halfway through creating it, and two signups for one new name could leave the second
+  person's password on the first person's account. The sign-in throttle no longer keeps an entry, in every worker, for
+  each username anyone tries. `DLBOARD_PASSWORD_MIN_LENGTH` and `DLBOARD_SESSION_LIFETIME_HOURS` must be positive. (#668)
+* **The experiment page says when an edit didn't land, or a chart is stale.** A chart that failed to redraw while live
+  updates were on showed "Live" again a tick later while it stayed stale; it is tried again, and the badge says so
+  meanwhile. Saving the chart editor after another tab reordered or deleted charts no longer overwrites a different chart,
+  or loses a chart added to a panel since renamed: it says the chart is no longer on the page. An edit that changes
+  nothing no longer forks a view of your own. The admin page says why a restore, purge or change to a user was refused
+  rather than reloading as if it had happened. (#669)
+* **The retention section's preview says why a rule is no rule, and when saving one drops the experiments' own rules**
+  (changing the project's limit from a run count to an age, or the reverse). `DLBOARD_LOG_LEVEL` is checked at startup. A
+  `file:///` link to the filesystem store's own root is refused, rather than becoming a blob a purge could never delete.
+  (#671)
+
 * **An uploaded artifact is never lost once the server has answered for it.** An upload is answered once it is in the
   staging directory, and the server then writes it and records its ref however its processes die: a write the object store
   refuses is tried again (S3 used to delete the upload on a failed write), a blob writer that dies is started again with
