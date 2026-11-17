@@ -243,6 +243,10 @@ class AuthorizingDataStore(models.DataStore[[]]):
         self._require_self_or(credential.user_id, Scope.USER_MANAGE)
         self._inner.set_password_credential(credential)
 
+    def add_password_credential(self, credential: models.PasswordCredential) -> bool:
+        self._require_self_or(credential.user_id, Scope.USER_MANAGE)
+        return self._inner.add_password_credential(credential)
+
     # -- Projects and their grants ----------------------------------------------------------------
 
     def _visible_project_ids(self) -> Iterator[int]:
@@ -267,14 +271,28 @@ class AuthorizingDataStore(models.DataStore[[]]):
         self._require(project_id, ProjectRole.OWNER)
         self._inner.delete_project_grant(project_id, grant_id)
 
-    def create_project(self, project: models.NewProject) -> models.Project:
-        """Create a project owned by the actor, starting at the deployment's default `everyone_role`."""
-        if project.everyone_role is None and self._new_project_access is not None:
-            project = project.model_copy(update={"everyone_role": self._new_project_access})
-        created = self._inner.create_project(project.model_copy(update={"created_by": self._actor.id}))
-        self._inner.set_project_grant(
-            models.NewProjectGrant(project_id=created.id, user_id=self._actor.id, role=ProjectRole.OWNER)
-        )
+    def _as_new(self, project: models.NewProject) -> models.NewProject:
+        """`project` as the actor creates it: by them, at the deployment's default `everyone_role` unless it sets one."""
+        everyone = project.everyone_role if project.everyone_role is not None else self._new_project_access
+        return project.model_copy(update={"created_by": self._actor.id, "everyone_role": everyone})
+
+    def create_project(self, project: models.NewProject, *, owner_id: int | None = None) -> models.Project:
+        """
+        Create a project owned by the actor, starting at the deployment's default `everyone_role`.
+
+        Its owner's grant is made with it, in one transaction: a project cut short between the two would be one its
+        creator can't see. Owned by the actor, whoever `owner_id` names: a request creates projects for itself.
+        """
+        del owner_id
+        created = self._inner.create_project(self._as_new(project), owner_id=self._actor.id)
+        self._projects, self._granted = None, None
+        return created
+
+    def get_or_create_owned_project(self, project: models.NewProject, owner_id: int) -> models.Project:
+        """`DataStore.get_or_create_owned_project`, for the actor alone: a request makes projects only for itself."""
+        if owner_id != self._actor.id:
+            _forbid("a project is only made for the actor making it")
+        created = self._inner.get_or_create_owned_project(self._as_new(project), self._actor.id)
         self._projects, self._granted = None, None
         return created
 
@@ -289,13 +307,16 @@ class AuthorizingDataStore(models.DataStore[[]]):
 
         Scoped to the actor's own writable projects, so two people both logging to "mnist" each
         get their own rather than one being refused the other's. Raises `AmbiguousProjectError` if
-        the actor can write to more than one project of that name.
+        the actor can write to more than one project of that name. One the actor creates is made under a lock on them
+        (`get_or_create_owned_project`), so their jobs that start at once with a new name share one.
         """
         writable = (p for p in self.get_projects() if p.name == name and self._can(p.id, ProjectRole.EDITOR))
         # Two is all it takes to know the name is ambiguous, so never look past the second match.
         match next(writable, None), next(writable, None):
             case None, _:
-                return self.create_project(models.NewProject(name=name, description=description))
+                return self.get_or_create_owned_project(
+                    models.NewProject(name=name, description=description), self._actor.id
+                )
             case models.Project() as project, None:
                 return project
             case _:
@@ -915,7 +936,7 @@ class AuthorizingDataStore(models.DataStore[[]]):
         self._require_role_or_admin(
             project_id, rule.write_project if experiment_id is None else rule.write_experiment
         )
-        if value is not None and rule.check is not None:
+        if rule.check is not None:
             stored = self._read_settings(key, project_id)
             current = stored.project if experiment_id is None else stored.experiments.get(experiment_id)
             value = rule.check(

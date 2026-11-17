@@ -21,8 +21,13 @@ class _Key(StrEnum):
     RULE = "plugin.rule"
 
 
-def _capped(write: SettingWrite) -> dict[str, Any]:
-    """At most 10, unless an admin says otherwise, which the stored value then records."""
+def _capped(write: SettingWrite) -> dict[str, Any] | None:
+    """At most 10, unless an admin says otherwise, which the stored value then records; and only an admin deletes it."""
+    if write.value is None:
+        if not write.admin:
+            msg = "only an admin deletes it"
+            raise PermissionError(msg)
+        return None
     if write.value["n"] > 10:
         if not write.admin:
             msg = "past the cap"
@@ -86,6 +91,11 @@ def test_a_setting_s_check_holds_a_writer_to_it_and_records_an_admin_past_it(sto
     saved = _as(store, admin).put_scoped_setting(_Key.RULE, project, None, {"n": 11}, admin)
     assert saved is not None
     assert saved.value == {"n": 11, "past_cap": True}
+    # A delete is a write the check is asked about too (#666): it used to skip it, so an owner could drop what only an
+    # admin may set.
+    with pytest.raises(PermissionError, match="only an admin deletes it"):
+        _as(store, owner).put_scoped_setting(_Key.RULE, project, None, None, owner)
+    assert _as(store, admin).put_scoped_setting(_Key.RULE, project, None, None, admin) is None
 
 
 def test_a_setting_no_plugin_registered_a_rule_for_is_the_system_s_alone(store: SQLLiteStore) -> None:
@@ -126,7 +136,7 @@ def test_a_check_is_told_what_the_scope_holds_now_and_a_bulk_read_shows_only_the
 ) -> None:
     seen: list[dict[str, Any] | None] = []
 
-    def watching(write: SettingWrite) -> dict[str, Any]:
+    def watching(write: SettingWrite) -> dict[str, Any] | None:
         seen.append(write.stored)
         return write.value
 

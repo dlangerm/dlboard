@@ -111,8 +111,9 @@ the store:
   value under the plugin's key, for a project or one of its experiments (`value=None` deletes it).
 - `register_setting(app, SettingRule(key=..., read=..., write_project=..., write_experiment=..., check=...))` says which
   [role](plugins/auth.md) may read the key and write each scope (defaults: viewer reads, owner writes a project's, editor an
-  experiment's), and may check a value before it is stored: return it as given or marked up, or raise `PermissionError`. The
-  authorizing store enforces this, so a plugin never authorizes by hand, and a key with no rule is the system's alone.
+  experiment's), and may check a value before it is stored: return it as given or marked up, or raise `PermissionError`. A
+  delete is checked too, with `SettingWrite.value` of `None` (return `None` to let it through). The authorizing store
+  enforces this, so a plugin never authorizes by hand, and a key with no rule is the system's alone.
 - `register_project_tab(app, ProjectTab(key=..., label=..., render=...))` adds a tab to a project's page, after its own
   Experiments, Comparisons and Sharing tabs, drawn in the page's own layout. `key` is its `?tab=` value, so a link opens
   the page on it (`/project/<id>?tab=<key>`): lowercase letters, digits and dashes, and not a key the page or another plugin

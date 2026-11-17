@@ -28,7 +28,8 @@ class SettingWrite:
 
     project_id: int
     experiment_id: int | None
-    value: dict[str, Any]
+    value: dict[str, Any] | None
+    """What the request would store; `None` deletes the setting, which the check is asked about like any other write."""
     stored: dict[str, Any] | None
     """What the scope holds now (`None`: no setting), so a check can tell a change from a value that was not touched."""
     admin: bool
@@ -46,10 +47,10 @@ class SettingRule:
     write_project: ProjectRole = ProjectRole.OWNER
     """The role a project's own setting needs: `OWNER` is an owner, or an admin wherever grants are not enforced."""
     write_experiment: ProjectRole = ProjectRole.EDITOR
-    check: Callable[[SettingWrite], dict[str, Any]] | None = None
+    check: Callable[[SettingWrite], dict[str, Any] | None] | None = None
     """
-    Asked about every write a request makes: the value to store (as given, or marked up), or `PermissionError` if the
-    writer may not set it.
+    Asked about every write a request makes, a delete included: the value to store (as given, or marked up; `None` to
+    delete), or `PermissionError` if the writer may not set it.
     """
 
 

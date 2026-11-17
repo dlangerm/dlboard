@@ -131,8 +131,25 @@ class DataStore(typing.Protocol[_P]):
         """Set (or replace) a user's password hash."""
         ...
 
-    def create_project(self, project: models.NewProject) -> models.Project:
-        """Create a project."""
+    def add_password_credential(self, credential: models.PasswordCredential) -> bool:
+        """
+        Give a user a password hash only if they have none: whether this did.
+
+        Of two at once, one gets it and the other is told so: an account being created is never handed a second password.
+        """
+        ...
+
+    def create_project(self, project: models.NewProject, *, owner_id: int | None = None) -> models.Project:
+        """Create a project, and with it (in the same transaction) an `OWNER` grant to `owner_id`, if given."""
+        ...
+
+    def get_or_create_owned_project(self, project: models.NewProject, owner_id: int) -> models.Project:
+        """
+        The live project named `project.name` that `owner_id` created, else `project`, created now and owned by them.
+
+        One at a time per owner: the processes of one person that start at once with a new project name get one project,
+        not one each.
+        """
         ...
 
     def get_or_create_project(

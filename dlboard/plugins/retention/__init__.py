@@ -48,7 +48,7 @@ if TYPE_CHECKING:
     from dash import Dash
 
 
-def _within_caps(write: SettingWrite) -> dict[str, Any]:
+def _within_caps(write: SettingWrite) -> dict[str, Any] | None:
     """
     The rule being saved, if the writer may set it: an owner changes only what is pending, within the caps.
 
@@ -56,7 +56,12 @@ def _within_caps(write: SettingWrite) -> dict[str, Any]:
     holds (or has in effect by now) is refused to anyone but an admin, and a pending rule is saved here, onto what is stored
     (`RetentionSetting.saved`: who set it, when, and when it takes effect), whatever the writer says of itself. A pending rule past a cap is an admin's, and is marked so (`cap_exempt`, worked
     out here, never taken from the writer) for the scheduling task never to lower it.
+
+    A delete is let through: it is how an experiment goes back to its project's rule, and how changing the project's kind
+    of limit drops the experiments' rules of the other kind (the section's preview says so before it is saved).
     """
+    if write.value is None:
+        return None
     setting = RetentionSetting.model_validate(write.value)
     stored = RetentionSetting.model_validate(write.stored) if write.stored else RetentionSetting()
     now = pendulum.now(pendulum.UTC)
@@ -79,8 +84,8 @@ def _within_caps(write: SettingWrite) -> dict[str, Any]:
     ).dump()
 
 
-def _only_the_system(_write: SettingWrite) -> dict[str, Any]:
-    """No request writes a project's status: only the task that checked it does."""
+def _only_the_system(_write: SettingWrite) -> dict[str, Any] | None:
+    """No request writes a project's status, nor deletes it: only the task that checked it does."""
     msg = "A project's retention status is recorded by the server."
     raise PermissionError(msg)
 

@@ -1066,10 +1066,62 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
             ]
         )
 
-    def create_project(self, project: models.NewProject) -> models.Project:
-        """Create a new project."""
+    def add_password_credential(self, credential: models.PasswordCredential) -> bool:
+        """Give a user a password hash only if they have none: whether this did (one statement, so of two at once one does)."""
+        creds = self._tables[models.PasswordCredential]
+        added = self._execute(
+            self._insert_ignoring_conflicts(creds)
+            .values(credential.model_dump(mode="json", exclude={"id"}))
+            .returning(creds.c.id)
+        )
+        return bool(added)
+
+    def create_project(self, project: models.NewProject, *, owner_id: int | None = None) -> models.Project:
+        """Create a new project, and its `OWNER` grant to `owner_id` (if given) in the same transaction."""
         _log.debug("Creating project with name %s", project.name)
-        (created,) = self._fetch(models.Project, sql.insert(self._tables[models.Project], project))
+        with self._begin() as conn:
+            return self._create_project_on(conn, project, owner_id)
+
+    def get_or_create_owned_project(self, project: models.NewProject, owner_id: int) -> models.Project:
+        """
+        The live project named `project.name` that `owner_id` created, else `project`, created now and owned by them.
+
+        The owner's row is locked first (a write that changes nothing), so their requests that race to create one name
+        do it one at a time, and the later finds the earlier's.
+        """
+        projects, users = self._tables[models.Project], self._tables[models.User]
+        with self._begin() as conn:
+            conn.execute(sa.update(users).where(users.c.id == owner_id).values(id=users.c.id))
+            if (
+                existing := conn.execute(
+                    sa.select(projects)
+                    .where(
+                        projects.c.name == project.name,
+                        projects.c.created_by == owner_id,
+                        projects.c.deleted_at.is_(None),
+                    )
+                    .order_by(projects.c.id)
+                    .limit(1)
+                )
+                .mappings()
+                .first()
+            ):
+                return sql.construct(models.Project, existing)
+            return self._create_project_on(
+                conn, project.model_copy(update={"created_by": owner_id}), owner_id
+            )
+
+    def _create_project_on(
+        self, conn: sa.Connection, project: models.NewProject, owner_id: int | None
+    ) -> models.Project:
+        created = sql.construct(
+            models.Project, conn.execute(sql.insert(self._tables[models.Project], project)).mappings().one()
+        )
+        if owner_id is not None:
+            grant = models.NewProjectGrant(
+                project_id=created.id, user_id=owner_id, role=models.ProjectRole.OWNER
+            )
+            conn.execute(sql.insert(self._tables[models.ProjectGrant], grant))
         return created
 
     def get_or_create_project(

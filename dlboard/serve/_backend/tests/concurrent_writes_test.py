@@ -10,6 +10,7 @@ import sqlalchemy as sa
 
 from dlboard import models
 from dlboard.conftest import EVERY_STORE_BACKEND, StoreBackend
+from dlboard.serve._backend._authorization import AuthorizingDataStore
 
 if TYPE_CHECKING:
     from dlboard.plugins.data_stores.sqlite import SQLLiteStore
@@ -64,3 +65,33 @@ def test_an_edit_read_before_a_delete_does_not_bring_the_project_back(
     store.update_project(project.model_copy(update={"description": "edited"}))
 
     assert store.get_project(project.id) is None
+
+
+def test_one_persons_jobs_starting_at_once_with_a_new_project_name_get_one_project(
+    store: SQLLiteStore,
+) -> None:
+    """Regression (#666): each found no project of the name it could write to, and each created one."""
+    alice = store.get_or_create_user(models.Principal.unverified("alice"))
+
+    def start(_job: int) -> int:
+        # A store per request, as every request gets one.
+        return AuthorizingDataStore(store, alice, enforce_grants=True).get_or_create_project("mnist").id
+
+    with ThreadPoolExecutor(max_workers=_RACERS) as pool:
+        got = list(pool.map(start, range(_RACERS)))
+
+    assert len(set(got)) == 1
+    assert AuthorizingDataStore(store, alice, enforce_grants=True).get_or_create_project("mnist").id == got[0]
+
+
+def test_a_password_is_set_once_by_whoever_gets_there_first(store: SQLLiteStore) -> None:
+    """What signing up rests on: of two signups for one new name, the second never replaces the first's password."""
+    user = store.get_or_create_user(models.Principal.unverified("erin"))
+
+    first = store.add_password_credential(models.PasswordCredential(user_id=user.id, password_hash="first"))
+    second = store.add_password_credential(models.PasswordCredential(user_id=user.id, password_hash="second"))
+
+    assert (first, second) == (True, False)
+    credential = store.get_password_credential(user.id)
+    assert credential is not None
+    assert credential.password_hash == "first"

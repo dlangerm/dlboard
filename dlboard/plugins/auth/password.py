@@ -338,13 +338,17 @@ def _signup() -> str | Response:
     if problem is not None:
         return form.render(error=problem)
     user = store.get_or_create_user(_principal(username))
-    if store.get_password_credential(user.id) is not None:
-        # Another signup took the name since the check above: never reset its password.
+    if store.get_password_credential(user.id) is not None:  # an account already: theirs, untouched
         return form.render(error="That username isn't available.")
-    if policy is SignupPolicy.APPROVAL:
+    # A signup racing this one, past the check above, is pending approval too (so disabled already), or open: either way
+    # what decides whose account it is is the password, set once below.
+    if policy is SignupPolicy.APPROVAL and user.disabled_at is None:
         # Disabled before it has a password: an account cut short in between can never be signed in to unapproved.
         user = store.update_user(user.model_copy(update={"disabled_at": pendulum.now(pendulum.UTC)}))
-    set_password(store, user, password)
+    credential = models.PasswordCredential(user_id=user.id, password_hash=hash_password(password))
+    if not store.add_password_credential(credential):
+        # Another signup took the name since the check above: its password is its own, never replaced by this one.
+        return form.render(error="That username isn't available.")
     if policy is SignupPolicy.APPROVAL:
         return form.render(message="Account created. You can sign in once an admin approves it.")
     signed_in = sign_in(store, _principal(username), get_auth_settings())
