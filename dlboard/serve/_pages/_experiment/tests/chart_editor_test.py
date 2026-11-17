@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import pendulum
+import pytest
 from dash import no_update
 from structlog.testing import capture_logs
 
@@ -14,10 +15,14 @@ from dlboard.conftest import props as _to_props
 from dlboard.plugins.charts.bar_chart import BarChart
 from dlboard.plugins.charts.line_chart import LineChart
 from dlboard.plugins.charts.table_chart import TableChart
+from dlboard.serve._pages._experiment import _page_model as page_model
 from dlboard.serve._pages._experiment import _page_repository as repo
 from dlboard.serve._pages._experiment._chart_editor import (
+    AddChart,
+    EditChart,
     EditorReads,
     _FormValues,
+    _placed,
     render_card_drafts,
     render_chart_preview,
 )
@@ -198,3 +203,36 @@ def test_a_display_only_edit_is_drawn_without_reading_again_until_the_experiment
         ]
     )
     assert reads_to_draw(400) > 0
+
+
+def _stored(*panels: tuple[str, list[str]]) -> list[models.PanelInstance[Any, Any]]:
+    return [
+        models.PanelInstance[Any, Any](
+            name=name,
+            charts=[
+                models.ChartInstance[Any, Any](id=chart_id, chart_type="line", parameters={})
+                for chart_id in ids
+            ],
+        )
+        for name, ids in panels
+    ]
+
+
+def test_an_edit_lands_on_its_chart_where_the_stored_page_has_it_not_where_the_browser_did() -> None:
+    """Regression: the index came from the browser's copy, so after another tab reordered, Save overwrote a neighbour."""
+    edited = models.ChartInstance[Any, Any](id="b", chart_type="line", parameters={"column": "edited"})
+
+    (panel,) = _placed(_stored(("p", ["b", "a"])), target=EditChart(chart_id="b"), chart=edited)
+
+    assert [(c.id, c.parameters) for c in panel.charts] == [("b", {"column": "edited"}), ("a", {})]
+
+
+@pytest.mark.parametrize(
+    "target", [EditChart(chart_id="gone"), AddChart(panel="renamed")], ids=["deleted-chart", "renamed-panel"]
+)
+def test_an_edit_to_what_another_tab_removed_is_refused_not_dropped(target: EditChart | AddChart) -> None:
+    """Regression: a chart added to a panel since renamed vanished, and the editor closed as if it was saved."""
+    chart = models.ChartInstance[Any, Any](id="gone", chart_type="line", parameters={})
+
+    with pytest.raises(page_model.NotOnThePageError):
+        _placed(_stored(("p", ["a"])), target=target, chart=chart)

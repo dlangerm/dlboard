@@ -13,6 +13,7 @@ The settings form is `_chart_settings_form.py`'s.
 
 from __future__ import annotations
 
+import functools
 import secrets
 from dataclasses import dataclass
 from pathlib import Path
@@ -505,6 +506,31 @@ def _register_form_and_draft(app: Dash) -> None:
                 return drafts, None, error
 
 
+def _placed(
+    stored: list[models.PanelInstance[Any, Any]],
+    *,
+    target: EditChart | AddChart,
+    chart: models.ChartInstance[Any, Any],
+) -> list[models.PanelInstance[Any, Any]]:
+    """
+    `stored` with `chart` put where `target` says, found on the page as stored: never at a place only the browser's copy had.
+
+    Another tab may have moved, removed or renamed what the editor was opened on: that is `NotOnThePageError`, not an
+    edit to whatever now sits at the place it was.
+    """
+    match target:
+        case EditChart():
+            location = page_model.locate_chart(stored, chart.id)
+            if location is None:
+                raise page_model.NotOnThePageError(_NO_LONGER_ON_THE_PAGE)
+            panel_name, index = location.panel.name, location.index
+        case AddChart():
+            if not any(p.name == target.panel for p in stored):
+                raise page_model.NotOnThePageError(_NO_LONGER_ON_THE_PAGE)
+            panel_name, index = target.panel, None
+    return [page_model.upsert_chart(p, panel_name, index, chart) for p in stored]
+
+
 def _register_save(app: Dash) -> None:
     @app.callback(
         Output(ids.METRIC_CONTENT_ID, "children", allow_duplicate=True),
@@ -534,30 +560,29 @@ def _register_save(app: Dash) -> None:
             table_ids=form.table_ids,
             table_values=form.table_values,
         )
-        panels = page_model.BasicExperimentPage.model_validate_json(form.page_json).panels
         # An edit keeps each chart's id, so a link to it still opens it; a new chart gets one of its own, so two charts
         # of one config are not one chart to a link or to anything keyed by id.
         match target:
             case EditChart():
-                location = page_model.locate_chart(panels, target.chart_id)
-                if location is None:
-                    return no_update, no_update, no_update, _NO_LONGER_ON_THE_PAGE, no_update
-                panel_name, index, chart_id = location.panel.name, location.index, location.chart.id
+                chart_id = target.chart_id
             case AddChart():
-                panel_name, index, chart_id = target.panel, None, secrets.token_hex(NEW_CHART_ID_BYTES)
+                chart_id = secrets.token_hex(NEW_CHART_ID_BYTES)
         try:
             chart = build_validated_chart_instance(chart_type_name, parameters, chart_id)
         except (ValidationError, KeyError) as exc:
             return no_update, no_update, no_update, f"Invalid parameters: {exc}", no_update
 
-        def apply_chart(panels: list[Any]) -> list[Any]:
-            return [page_model.upsert_chart(p, panel_name, index, chart) for p in panels]
-
-        page, container = edits.commit(
-            form.page_json,
-            form.paging_json,
-            edits.PageEdit(panels=apply_chart, reveal=edits.RevealChart(chart.id)),
-        )
+        try:
+            page, container = edits.commit(
+                form.page_json,
+                form.paging_json,
+                edits.PageEdit(
+                    panels=functools.partial(_placed, target=target, chart=chart),
+                    reveal=edits.RevealChart(chart.id),
+                ),
+            )
+        except page_model.NotOnThePageError:
+            return no_update, no_update, no_update, _NO_LONGER_ON_THE_PAGE, no_update
         return container, True, None, "", page.model_dump_json()
 
 

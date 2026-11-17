@@ -105,6 +105,10 @@ class BasicExperimentPage(models.Page[pd.DataFrame, Component], frozen=True, ext
         return self.model_copy(update={"page_settings": change.merged_into(self.page_settings)})
 
 
+class NotOnThePageError(LookupError):
+    """What an edit is made to (a chart, a panel) is not on the page as stored: another tab moved or removed it."""
+
+
 class ChartLocation(typing.NamedTuple):
     """Where a chart sits on the page: the panel that holds it, and its place in that panel."""
 

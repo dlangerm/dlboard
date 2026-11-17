@@ -8,6 +8,7 @@ import pytest
 
 from dlboard import models
 from dlboard.models._view import PanelInstance
+from dlboard.serve._pages._experiment import _page_edits as edits
 from dlboard.serve._pages._experiment import _page_model as page_model
 from dlboard.serve._pages._experiment import _page_repository as repo
 
@@ -197,3 +198,19 @@ def test_a_shared_page_of_a_project_is_no_comparison_and_cannot_be_made(
         store.get_or_create_page(page_model.BasicExperimentPage, project_id=project_id)
     with pytest.raises(ValueError, match="shared page of a project"):
         repo.ref_of(ownerless)
+
+
+def test_an_edit_that_changes_nothing_saves_nothing_so_branches_no_view(
+    store: SQLLiteStore,
+    experiment_id: int,
+    sign_in_as: Callable[[str], None],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: a "save view" whose chart was gone saved the page unchanged, forking a view for nothing."""
+    sign_in_as("alice")
+    monkeypatch.setattr(edits, "get_data_store", lambda: store)
+    shared = repo.load_page(store, repo.ExperimentRef(experiment_id, None))
+
+    saved = edits.save_edit(shared.model_dump_json(), edits.PageEdit(panels=list))
+
+    assert (saved.id, saved.owner_id) == (shared.id, None)

@@ -180,9 +180,21 @@ def register_live_update_callbacks(app: Dash) -> None:
         if not ok or not experiments or revision == polled.last_known_revision:
             return polled.unchanged(), no_update, fetched_at, live_status_badge(ok=ok), notes_revision
 
-        page = repo.load_page(store, repo.ref_of(drawn))
+        try:
+            page = repo.load_page(store, repo.ref_of(drawn))
+        except LookupError:  # a comparison that is gone, or no longer yours: nothing to draw it from
+            _log.warning("Live-update poll found page %s gone", drawn.id)
+            return polled.unchanged(), no_update, fetched_at, live_status_badge(ok=False), notes_revision
         contents, redrawn = polled.redraw(store, page, Paging.model_validate_json(polled.paging_json))
-        return contents, revision, fetched_at, live_status_badge(ok=redrawn), notes_revision
+        # The revision moves on only once every chart is drawn from it: kept back, the next tick tries a chart that
+        # failed again (and the badge says so meanwhile), where moved on it would find "nothing changed" and say Live.
+        return (
+            contents,
+            revision if redrawn else no_update,
+            fetched_at,
+            live_status_badge(ok=redrawn),
+            notes_revision,
+        )
 
     # Both pure client-side, deliberately never round-tripping to the server -- see
     # `live_switch_state.js`/`live_last_fetch_label.js` and the ids' own docstrings above.

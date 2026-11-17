@@ -87,7 +87,12 @@ class PageEdit:
 
 
 def _apply(page_json: str, edit: PageEdit) -> tuple[BasicExperimentPage, BasicExperimentPage]:
-    """The stored page `page_json` names, and that page with `edit` applied and saved (branching if it isn't yours)."""
+    """
+    The stored page `page_json` names, and that page with `edit` applied and saved (branching if it isn't yours).
+
+    An edit that changes nothing saves nothing, so it never branches a view of your own out of a page that isn't yours.
+    One whose chart or panel is gone from the stored page (`NotOnThePageError`) raises before anything is saved.
+    """
     store = get_data_store()
     held = BasicExperimentPage.model_validate_json(page_json)
     before = load_page(store, ref_of(held))
@@ -96,7 +101,7 @@ def _apply(page_json: str, edit: PageEdit) -> tuple[BasicExperimentPage, BasicEx
     )
     if edit.document is not None:
         edited = edited.with_settings(edit.document)
-    return before, save_page(store, edited)
+    return before, before if edited == before else save_page(store, edited)
 
 
 def save_edit(page_json: str, edit: PageEdit) -> BasicExperimentPage:

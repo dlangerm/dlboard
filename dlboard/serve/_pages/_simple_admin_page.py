@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, Final, cast
 
 import dash_mantine_components as dmc
 import pendulum
-from dash import ALL, Dash, Input, Output, State, html
+from dash import ALL, Dash, Input, Output, State, html, no_update
 from dash.dcc import Store
 from dash.exceptions import PreventUpdate
 from structlog.stdlib import get_logger
@@ -29,7 +29,13 @@ from dlboard.serve._backend._purge_work import PurgeWork, entity_purge
 from dlboard.serve._component_ids import ButtonId, DivId, ModalId, StoreId, ValueId
 from dlboard.serve._custodian import TaskStore, get_task_store, registered_tasks
 from dlboard.serve._pages._admin_tasks import render_background_tasks
-from dlboard.serve._pages._dash_helpers import TriggeredId, busy_while_running, require_triggered_id
+from dlboard.serve._pages._dash_helpers import (
+    NoticeColor,
+    TriggeredId,
+    busy_while_running,
+    notice,
+    require_triggered_id,
+)
 from dlboard.serve._url import relative_path
 
 if TYPE_CHECKING:
@@ -55,6 +61,8 @@ ADMIN_AUDIT_LOG_CONTENT_ID: DivId[_AdminPage] = DivId("admin-audit-log-content")
 ADMIN_ABOUT_CONTENT_ID: DivId[_AdminPage] = DivId("admin-about-content")
 ADMIN_USERS_CONTENT_ID: DivId[_AdminPage] = DivId("admin-users-content")
 ADMIN_TASKS_CONTENT_ID: DivId[_AdminPage] = DivId("admin-tasks-content")
+ADMIN_NOTIFY_ID: DivId[_AdminPage] = DivId("admin-notify")
+"""Where the admin page says why something it was asked to do was not done: it reloads only once it was."""
 ADMIN_INITIAL_TAB_ID: StoreId[_AdminPage] = StoreId("admin-initial-tab")
 # Pattern-matched "type" discriminators, not standalone component ids -- plain strings.
 ADMIN_RESTORE_BUTTON_TYPE: Final = "admin-restore-button"
@@ -514,6 +522,7 @@ def _admin_layout(tab: str) -> Component:
                 ],
             ),
             Store(id=ADMIN_PENDING_PURGE_STORE_ID),
+            dmc.NotificationContainer(id=ADMIN_NOTIFY_ID),
         ],
         size="lg",
         py="xl",
@@ -587,10 +596,11 @@ def _register_restore_callback(app: Dash) -> None:
     @app.callback(
         Output(constants.LOCATION_ID, "href", allow_duplicate=True),
         Output(constants.LOCATION_ID, "refresh", allow_duplicate=True),
+        Output(ADMIN_NOTIFY_ID, "sendNotifications", allow_duplicate=True),
         Input({"type": ADMIN_RESTORE_BUTTON_TYPE, "entity_type": ALL, "id": ALL}, "n_clicks"),
         prevent_initial_call=True,
     )
-    def restore_entity(_n_clicks_list: list[int]) -> tuple[str, bool]:
+    def restore_entity(_n_clicks_list: list[int]) -> tuple[Any, Any, Any]:
         item = require_triggered_id(_TrashItem)
         entity_type, entity_id = item.entity_type, item.id
 
@@ -598,9 +608,10 @@ def _register_restore_callback(app: Dash) -> None:
         actor = get_current_user()
         try:
             _restore(store, entity_type, entity_id, actor)
-        except (ValueError, PermissionError):
+        except (ValueError, PermissionError) as refused:
             _log.exception("Failed to restore %s %s", entity_type, entity_id)
-        return relative_path("/admin"), True
+            return no_update, no_update, notice("Not restored", str(refused), color=NoticeColor.RED)
+        return relative_path("/admin"), True, no_update
 
 
 def _register_purge_callbacks(app: Dash) -> None:
@@ -630,12 +641,13 @@ def _register_purge_callbacks(app: Dash) -> None:
         Output(ADMIN_PURGE_MODAL_ID, "opened", allow_duplicate=True),
         Output(constants.LOCATION_ID, "href", allow_duplicate=True),
         Output(constants.LOCATION_ID, "refresh", allow_duplicate=True),
+        Output(ADMIN_NOTIFY_ID, "sendNotifications", allow_duplicate=True),
         Input(ADMIN_PURGE_CONFIRM_ID, "n_clicks"),
         State(ADMIN_PENDING_PURGE_STORE_ID, "data"),
         prevent_initial_call=True,
         running=busy_while_running(ADMIN_PURGE_CONFIRM_ID),
     )
-    def confirm_purge(n_clicks: int, pending: dict[str, Any] | None) -> tuple[bool, str, bool]:
+    def confirm_purge(n_clicks: int, pending: dict[str, Any] | None) -> tuple[bool, Any, Any, Any]:
         if not n_clicks or not pending:
             raise PreventUpdate
         item = _TrashItem.model_validate(pending)
@@ -647,9 +659,10 @@ def _register_purge_callbacks(app: Dash) -> None:
             get_task_store().enqueue_work(
                 [entity_purge(entity_type, entity_id, requested_by=get_current_user().id)]
             )
-        except PermissionError:
+        except PermissionError as refused:
             _log.exception("Not allowed to purge %s %s", entity_type, entity_id)
-        return False, "/admin", True
+            return False, no_update, no_update, notice("Not purged", str(refused), color=NoticeColor.RED)
+        return False, "/admin", True, no_update
 
 
 def _register_user_action_callback(app: Dash) -> None:
@@ -657,19 +670,21 @@ def _register_user_action_callback(app: Dash) -> None:
     @app.callback(
         Output(constants.LOCATION_ID, "href", allow_duplicate=True),
         Output(constants.LOCATION_ID, "refresh", allow_duplicate=True),
+        Output(ADMIN_NOTIFY_ID, "sendNotifications", allow_duplicate=True),
         Input({"type": ADMIN_USER_ACTION_TYPE, "action": ALL, "user": ALL}, "n_clicks"),
         prevent_initial_call=True,
     )
-    def act_on_user(_n_clicks_list: list[int]) -> tuple[str, bool]:
+    def act_on_user(_n_clicks_list: list[int]) -> tuple[Any, Any, Any]:
         clicked = require_triggered_id(_UserButton)
         store = get_data_store()
         user, action = store.get_user(clicked.user), clicked.action
-        locks_self_out = (
-            action in (UserAction.DISABLE, UserAction.REVOKE_ADMIN) and user == get_current_user()
-        )
-        if user is not None and not locks_self_out:
-            apply_user_action(store, user, action)
-        return relative_path("/admin?tab=users"), True
+        if user is None:
+            return no_update, no_update, notice("Not changed", "That user is gone.", color=NoticeColor.RED)
+        if action in (UserAction.DISABLE, UserAction.REVOKE_ADMIN) and user == get_current_user():
+            why = "You can't disable yourself, or take away your own admin: ask another admin."
+            return no_update, no_update, notice("Not changed", why, color=NoticeColor.RED)
+        apply_user_action(store, user, action)
+        return relative_path("/admin?tab=users"), True, no_update
 
 
 def register(app: Dash) -> None:

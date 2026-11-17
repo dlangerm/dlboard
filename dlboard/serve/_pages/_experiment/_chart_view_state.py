@@ -79,12 +79,17 @@ def register_chart_view_state_callbacks(app: Dash) -> None:
         def apply(panels: list[Any]) -> list[Any]:
             location = page_model.locate_chart(panels, saving.chart_id)
             if location is None:
-                return panels
+                msg = f"chart {saving.chart_id} is no longer on the page"
+                raise page_model.NotOnThePageError(msg)
             saved = models.ChartTypeRegistry.saved_with_viewer_state(location.chart, saving.state)
             return [page_model.upsert_chart(p, location.panel.name, location.index, saved) for p in panels]
 
         try:
             page, container = edits.commit(page_json, paging_json, edits.PageEdit(panels=apply))
+        except page_model.NotOnThePageError:
+            # Not saved, so not told it was: the change stays the browser's own, rather than a view forked for nothing.
+            _log.info("a viewer's change to a chart that is gone was not saved", chart_id=saving.chart_id)
+            return no_update, no_update, no_update
         except (ValidationError, ValueError):
             _log.exception("a viewer's change to a chart could not be saved", chart_id=saving.chart_id)
             return no_update, no_update, no_update
