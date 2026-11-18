@@ -12,10 +12,9 @@ import hashlib
 import json
 import typing
 from html import escape
-from pathlib import Path
 
 import pandas as pd
-from dash import MATCH, Input, Output, dcc, html
+from dash import dcc
 from dash.development.base_component import Component
 from pydantic import BaseModel, Field
 
@@ -34,22 +33,21 @@ from dlboard.models import (
     SeriesBandRequest,
 )
 from dlboard.plugins.charts._band_traces import nested_band
-from dlboard.plugins.charts._plotly_colors import serve_plotly_colors
-from dlboard.serve import ClientsideScript, SeriesDash, series_color, series_dash
+from dlboard.plugins.charts._themed_figure import register_themed_graphs, themed_graph
+from dlboard.serve import SeriesDash, series_color, series_dash
 
 if typing.TYPE_CHECKING:
     from dash import Dash
 
-_COLORS_JS: typing.Final = ClientsideScript(Path(__file__).with_name("series_band_colors.js"))
-_FIGURE_TYPE: typing.Final = "series-band-figure"
-_GRAPH_TYPE: typing.Final = "series-band-graph"
+_KIND: typing.Final = "series-band"
+"""Its graphs' kind (`themed_graph`)."""
 
 _FILL_ALPHA: typing.Final = 0.12
 """How opaque the band of extremes is, against the median line drawn over it (the quartiles' band is twice that)."""
 
 
 def _opaque_to(color: str, opacity: float) -> str:
-    """A theme color (`series_color`) at `opacity`, in the form `series_band_colors.js` resolves in the browser."""
+    """A theme color (`series_color`) at `opacity`, in the form `themed_figure.js` resolves in the browser."""
     return f"{color}/{opacity}"
 
 
@@ -222,20 +220,7 @@ class SeriesBandChart(ChartType[SeriesBandSettings, pd.DataFrame, Component], fr
                 "plot_bgcolor": "rgba(0,0,0,0)",
             },
         }
-        instance = _instance(parameters, context.chart_id)
-        # The graph starts empty and the figure waits in a store: Plotly drops a color it cannot parse (a CSS
-        # variable), so `series_band_colors.js` hands it the figure with the theme's colors in place of them.
-        return html.Div(
-            [
-                dcc.Store(id={"type": _FIGURE_TYPE, "instance": instance}, data=figure),
-                dcc.Graph(
-                    id={"type": _GRAPH_TYPE, "instance": instance},
-                    figure={"data": [], "layout": {"height": parameters.height}},
-                    config={"displayModeBar": False, "responsive": True},
-                    style={"height": f"{parameters.height}px", "width": "100%"},
-                ),
-            ]
-        )
+        return themed_graph(_KIND, _instance(parameters, context.chart_id), figure, parameters.height)
 
     @classmethod
     @typing.override
@@ -257,9 +242,4 @@ class SeriesBandChart(ChartType[SeriesBandSettings, pd.DataFrame, Component], fr
 def plug(app: Dash) -> None:
     """Plugin: registers this chart type, and the browser-side step that gives its figures the theme's colors."""
     SeriesBandChart.register(allow_override=True)
-    serve_plotly_colors(app)
-    app.clientside_callback(
-        _COLORS_JS.source,
-        Output({"type": _GRAPH_TYPE, "instance": MATCH}, "figure"),
-        Input({"type": _FIGURE_TYPE, "instance": MATCH}, "data"),
-    )
+    register_themed_graphs(app, _KIND)

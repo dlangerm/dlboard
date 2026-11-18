@@ -6,7 +6,12 @@ A chart plugin defines one `ChartType` — a way to turn parameters and a datafr
 into a rendered Dash component. `ChartType[P, D, C]` (`dlboard/models/_view.py`) is generic over
 its parameter model `P`, the data shape it renders from `D`, and the rendered component type `C`.
 Built-ins: `line_chart.py`, `bar_chart.py`, `table_chart.py`, `image_series.py`, `file_list.py`,
-`histogram.py`, `series_band.py`, `plotly_chart.py`, `console.py` (`dlboard/plugins/charts/`). `console.py` shows what a
+`histogram.py`, `series_band.py`, `plotly_chart.py`, `console.py`, `scatter.py`, `parallel_coordinates.py`
+(`dlboard/plugins/charts/`). `scatter.py` draws a point per run, its latest value of `y` against its `x`, either of which
+may be a hyperparameter or a metric; `parallel_coordinates.py` draws an axis per hyperparameter (every one the runs
+shown don't all share, or those named in `hparams`, at most `max_axes`) and one for a metric, a line per run coloured by
+the metric, brushable along each axis. Both read a row per run (`MetricReduction.LATEST`, and the hyperparameters), so
+they cost the runs a panel draws, never how long those trained; both draw with Plotly in the theme (`_themed_figure.py`). `console.py` shows what a
 run printed (`models.CONSOLE_KEY`, a chunk per step): each run's newest chunk, read as a `WindowAt.LATEST` window, with
 Older/Newer reading the chunk beside it alone, and a filter over the lines of the one on show. `bar_chart.py` draws a group of bars for each value of its `x_axis` (a
 hyperparameter, a metric, the step, or the run), and in it a bar for each run that has that value, in the run's color:

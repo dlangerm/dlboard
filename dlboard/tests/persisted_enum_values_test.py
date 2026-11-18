@@ -41,7 +41,9 @@ from dlboard.plugins.charts.file_list import FileListChart
 from dlboard.plugins.charts.histogram import Colorscale, HistogramChart, HistogramDisplay
 from dlboard.plugins.charts.image_series import ImageChart, LayerVisibility
 from dlboard.plugins.charts.line_chart import LineChart
+from dlboard.plugins.charts.parallel_coordinates import ParallelCoordinatesChart
 from dlboard.plugins.charts.plotly_chart import PlotlyChart, StreamMode
+from dlboard.plugins.charts.scatter import ScatterChart
 from dlboard.plugins.charts.series_band import SeriesBandChart
 from dlboard.plugins.charts.table_chart import TableChart
 from dlboard.serve._custodian import TaskOutcome
@@ -105,6 +107,8 @@ _FROZEN_CHART_TYPE_NAMES: dict[type[ChartType[typing.Any, typing.Any, typing.Any
     SeriesBandChart: "series_band",
     PlotlyChart: "plotly",
     ConsoleChart: "console",
+    ScatterChart: "scatter",
+    ParallelCoordinatesChart: "parallel_coordinates",
 }
 
 
@@ -130,6 +134,8 @@ def test_every_builtin_chart_type_has_a_frozen_name(
 _FROZEN_SETTING_LITERALS: dict[str, frozenset[str]] = {
     "line.x_axis_type": frozenset({"number", "category", "date", "time"}),
     "line.y_scale": frozenset({"linear", "log"}),
+    "scatter.x_scale": frozenset({"linear", "log"}),
+    "scatter.y_scale": frozenset({"linear", "log"}),
     "bar.aggregation": frozenset({"latest", "mean", "median", "min", "max", "sum", "count"}),
     "bar.orientation": frozenset({"horizontal", "vertical"}),
     "bar.sort": frozenset({"none", "ascending", "descending"}),

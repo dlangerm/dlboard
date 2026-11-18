@@ -13,7 +13,6 @@ from pydantic import BaseModel, Field
 
 from dlboard.models import (
     DISPLAY_SECTION,
-    HPARAM_COLUMN_PREFIX,
     RUN_NAME_COLUMN,
     ChartType,
     ColumnKind,
@@ -30,7 +29,7 @@ from dlboard.plugins.charts._axis_label import (
 )
 from dlboard.plugins.charts._chart_title import titled
 from dlboard.plugins.charts._empty_chart import nothing_logged, nothing_to_place
-from dlboard.plugins.charts._grouping import latest_per_run
+from dlboard.plugins.charts._grouping import frame_column, latest_per_run
 from dlboard.plugins.charts.line_chart import LEGEND_MAX_HEIGHT
 from dlboard.serve import AssetKind, series_color, serve_asset
 
@@ -72,18 +71,6 @@ class BarChartSettings(BaseModel, frozen=True, extra="forbid", use_attribute_doc
         MaxAxisLabelChars, DISPLAY_SECTION, Field(title="Max axis label characters")
     ] = DEFAULT_MAX_AXIS_LABEL_CHARS
     """Longest axis title, in characters. A longer metric name is shortened to its last characters behind an ellipsis, so it stays inside the chart; raise it for a taller or wider chart."""
-
-
-def _resolve_column(dataframe: pd.DataFrame, name: str) -> str:
-    """
-    Resolve a settings field to the dataframe column it actually names.
-
-    It may name a metric column directly, or a hyperparameter key -- the latter only exists in
-    the dataframe under its prefixed column name (see
-    `_panel_data.build_hyperparams_dataframe`).
-    """
-    hparam_column = f"{HPARAM_COLUMN_PREFIX}{name}"
-    return hparam_column if hparam_column in dataframe.columns else name
 
 
 def _sorted_groups(
@@ -191,7 +178,7 @@ class BarChart(ChartType[BarChartSettings, pd.DataFrame, dmc.Stack], frozen=True
         if dataframe.empty:
             return nothing_logged(parameters.column)
         dataframe = dataframe.copy()
-        x_col = _resolve_column(dataframe, parameters.x_axis)
+        x_col = frame_column(dataframe, parameters.x_axis)
 
         if str(dataframe[parameters.column].dtype) in ("object", "str"):
             with contextlib.suppress(ValueError, TypeError):

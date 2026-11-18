@@ -56,6 +56,8 @@ BUILTIN_CHARTS: list[PluginProtocol] = [
     charts.series_band,
     charts.plotly_chart,
     charts.console,
+    charts.scatter,
+    charts.parallel_coordinates,
 ]
 
 # Built-in pages (home, project, admin, experiment, account) aren't listed here -- their tab+accordion

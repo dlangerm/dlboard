@@ -22,11 +22,11 @@ Breaking any of these needs a migration path and a deprecation window of at leas
     keys; they still load, and those keys are ignored.
     A view with no `selected_runs` draws the newest runs (20 by default, `DLBOARD_DEFAULT_SHOWN_RUNS`); one saved
     before they existed has `excluded_runs` instead: it draws the newest of the runs it does not leave out.
-  - Chart type names (`line`, `bar`, `image`, `table`, `histogram`, `files`, `series_band`, `plotly`, `console`).
+  - Chart type names (`line`, `bar`, `image`, `table`, `histogram`, `files`, `series_band`, `plotly`, `console`, `scatter`, `parallel_coordinates`).
   - The *values* of every setting of a built-in chart that has a fixed set of them, as saved in a chart's
     parameters: a table chart's `mode` (`runs`, `pivot`, `artifacts`) and `rows`, a histogram chart's `display`
     and `colorscale`, a bar chart's `aggregation`, `orientation`, `sort` and `x_axis_type`, a line chart's
-    `x_axis_type` and `y_scale`, and an image chart's layer visibility and tag units. A test fails when one of them is
+    `x_axis_type` and `y_scale`, a scatter chart's `x_scale` and `y_scale`, and an image chart's layer visibility and tag units. A test fails when one of them is
     renamed or dropped, and when a built-in chart gains a setting of this kind that is not listed in it.
   - The *values* of persisted enums (roles, scopes, audit actions, entity types, experiment sources, run
     statuses).

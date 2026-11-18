@@ -1,7 +1,7 @@
 // Plotly cannot read a CSS variable, so a figure dlboard draws names its colors as `var(--dl-series-3)` (or
 // `var(--dl-series-3)/0.12`, the same at an opacity), and this turns them into the colors the page's theme gives them.
 // Served once per app (`_plotly_colors.py`) for every chart that draws such a figure: the band chart
-// (`series_band_colors.js`) and the Plotly chart (`plotly_chart.js`).
+// (`themed_figure.js`) and the Plotly chart (`plotly_chart.js`).
 window.dlPlotlyColors = (() => {
     const colorKeys = new Set([
         "color",

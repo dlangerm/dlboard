@@ -3774,7 +3774,7 @@ def test_a_series_band_is_drawn_in_its_runs_palette_colors_in_either_color_schem
 ) -> None:
     """
     Plotly cannot read the CSS variables the palette is made of, so the band chart's figure names them and the browser
-    resolves them (`series_band_colors.js`): this checks the part a Python test can't, that each run's band is drawn in
+    resolves them (`themed_figure.js`): this checks the part a Python test can't, that each run's band is drawn in
     the very color the run table's swatch and the other charts give it, and that it follows a change of color scheme.
     """
     _create_project_and_experiment(page, live_server_url, "Band Palette Experiment")

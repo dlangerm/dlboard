@@ -7,7 +7,9 @@ from dlboard.plugins.charts import (
     histogram,
     image_series,
     line_chart,
+    parallel_coordinates,
     plotly_chart,
+    scatter,
     series_band,
     table_chart,
 )
@@ -19,7 +21,9 @@ __all__ = [
     "histogram",
     "image_series",
     "line_chart",
+    "parallel_coordinates",
     "plotly_chart",
+    "scatter",
     "series_band",
     "table_chart",
 ]
