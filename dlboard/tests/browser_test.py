@@ -1713,7 +1713,11 @@ def test_changes_in_a_saved_view_leave_the_shared_view_alone(
     )
     page.reload()
     _open_panel_menu(page)
-    expect(page.get_by_role("textbox", name="Grid columns")).to_have_value("2")
+    columns = page.get_by_role("textbox", name="Grid columns")
+    expect(columns).to_have_value("2")
+    columns.fill("")  # cleared, it is no count (#672): once it loses focus it shows the saved one again
+    columns.press("Tab")
+    expect(columns).to_have_value("2")
     shared = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
     assert {(p.layout, p.grid_columns) for p in shared.panels} == {("packed", 3)}
 

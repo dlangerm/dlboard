@@ -40,6 +40,7 @@ if TYPE_CHECKING:
     from dash.development.base_component import Component
 
 _PANEL_GRID_COLUMNS_JS = ClientsideScript(Path(__file__).with_name("panel_grid_columns.js"))
+_PANEL_GRID_COLUMNS_REFILL_JS = ClientsideScript(Path(__file__).with_name("panel_grid_columns_refill.js"))
 _PANEL_GRID_FOLLOWERS_JS = ClientsideScript(Path(__file__).with_name("panel_grid_followers.js"))
 
 # --- rename-panel modal ---
@@ -487,6 +488,16 @@ def _register_toggle(app: Dash) -> None:
         _PANEL_GRID_COLUMNS_JS.source,
         Output(panel_view.PANEL_GRID.match(), "cols"),
         Input(panel_view.PANEL_GRID_COLUMNS.match(), "value"),
+        prevent_initial_call=True,
+    )
+
+    # A cleared field is not a column count: nothing is applied or saved, and once it loses focus it shows the count again.
+    app.clientside_callback(
+        _PANEL_GRID_COLUMNS_REFILL_JS.source,
+        Output(panel_view.PANEL_GRID_COLUMNS.match(), "value"),
+        Input(panel_view.PANEL_GRID_COLUMNS.match(), "value"),
+        Input(panel_view.PANEL_GRID_COLUMNS.match(), "n_blur"),
+        State(ids.STATE_PAGE_STORAGE, "data"),
         prevent_initial_call=True,
     )
 
