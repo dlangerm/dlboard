@@ -27,6 +27,7 @@ from dlboard.models import (
     family_template,
 )
 from dlboard.plugins.charts.bar_chart import BarChart
+from dlboard.plugins.charts.console import ConsoleChart
 from dlboard.plugins.charts.file_list import FileListChart
 from dlboard.plugins.charts.histogram import HistogramChart
 from dlboard.plugins.charts.image_series import ImageChart
@@ -141,6 +142,7 @@ def default_chart_for_histogram(key: str) -> ChartInstance[typing.Any, typing.An
 
 
 ARTIFACT_CHART_TYPES: typing.Final[tuple[type[ChartType[typing.Any, typing.Any, typing.Any]], ...]] = (
+    ConsoleChart,
     FileListChart,
     PlotlyChart,
     ImageChart,

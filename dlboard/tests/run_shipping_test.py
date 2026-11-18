@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import atexit
 import platform
+import time
 from typing import TYPE_CHECKING
 
 import pytest
 
 from dlboard import models
 from dlboard.client import run
+from dlboard.client._console import ConsoleSettings
 
 if TYPE_CHECKING:
     from dlboard.conftest import BackendServer
@@ -54,3 +56,19 @@ def test_a_run_from_init_lands_in_the_project_it_names_and_ends_as_its_block_did
     (context,) = store.fetch_run_contexts(experiment_id, run_ids=frozenset({run_id}))
     assert context.python_version == platform.python_version()
     assert "dlboard-client" in context.packages
+
+
+def test_what_a_run_prints_reaches_the_server_as_its_console(backend_server: BackendServer) -> None:
+    settings = run.RunSettings(console=ConsoleSettings(enabled=True))
+    with run.init("plain", "printed", server_url=backend_server.url, settings=settings) as started:
+        print("loss went up")
+    _stop(started)
+
+    assert started.experiment_id is not None
+    deadline = time.monotonic() + 10  # the server records an upload a moment after accepting it
+    while not (chunks := list(backend_server.store.fetch_artifacts(started.experiment_id, run_ids=None))):
+        assert time.monotonic() < deadline, "the console chunk never showed up"
+        time.sleep(0.1)
+    assert [(chunk.key, chunk.fname, chunk.step) for chunk in chunks] == [
+        (models.CONSOLE_KEY, "console-000000.txt", 0)
+    ]

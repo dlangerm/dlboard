@@ -11,6 +11,7 @@ from dlboard.models._access import (
 )
 from dlboard.models._activity import ActivityStats, ProjectStats
 from dlboard.models._artifact import (
+    CONSOLE_KEY,
     FILE_KIND_TAG,
     INLINEABLE_ARTIFACT_CONTENT_TYPES,
     LAYER_KIND_TAG,
@@ -139,6 +140,7 @@ from dlboard.models._view import (
 __all__ = [
     "ADVANCED_SECTION",
     "ARTIFACT_COLUMN_PREFIX",
+    "CONSOLE_KEY",
     "DATA_SECTION",
     "DEFAULT_RENDER_CONTEXT",
     "DEFAULT_TAG_PRECISION",

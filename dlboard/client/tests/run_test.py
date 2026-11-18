@@ -10,6 +10,7 @@ import contextlib
 import dataclasses
 import io
 import queue
+import sys
 import threading
 import time
 import warnings
@@ -29,6 +30,7 @@ from dlboard import models
 from dlboard._batching import Failure
 from dlboard._mp_context import SPAWN_CONTEXT
 from dlboard.client import _context, run
+from dlboard.client._console import ConsoleChunk, ConsoleSettings
 from dlboard.client.artifacts.figure import Figure
 from dlboard.client.artifacts.image import Image
 from dlboard.client.artifacts.overlay import Overlay
@@ -579,3 +581,26 @@ def test_a_non_zero_rank_samples_nothing(
     run.init("proj").finish()
 
     assert fake_api.samplers == []
+
+
+def test_a_run_captures_what_the_script_prints_until_it_finishes(
+    fake_api: FakeAPI, shippers: list[FakeShipper]
+) -> None:
+    del fake_api
+    streams = (sys.stdout, sys.stderr)
+    started = run.init("proj", settings=run.RunSettings(console=ConsoleSettings(enabled=True)))
+    print("epoch 1: loss 0.5")
+
+    started.finish()
+    print("not the run's")
+
+    _metrics, artifacts = shippers
+    ((chunk,),) = artifacts.items
+    assert isinstance(chunk, ConsoleChunk)
+    assert (chunk.key, chunk.data) == (models.CONSOLE_KEY, b"epoch 1: loss 0.5\n")
+    assert (sys.stdout, sys.stderr) == streams
+
+
+def test_a_runs_ids_can_be_bound_into_the_scripts_own_logs(started: run.Run) -> None:
+    assert started.log_context == {"dlboard.run_id": 99, "dlboard.experiment_id": 2}
+    assert run.Run(None).log_context == {}

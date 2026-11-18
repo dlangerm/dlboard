@@ -2,6 +2,7 @@
 
 from dlboard.plugins.charts import (
     bar_chart,
+    console,
     file_list,
     histogram,
     image_series,
@@ -13,6 +14,7 @@ from dlboard.plugins.charts import (
 
 __all__ = [
     "bar_chart",
+    "console",
     "file_list",
     "histogram",
     "image_series",

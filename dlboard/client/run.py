@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from http import HTTPStatus
 from pathlib import Path
 from queue import Full
-from typing import TYPE_CHECKING, Any, Final, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, Final, Generic, Protocol, TypeVar
 
 import numpy as np
 import pendulum
@@ -46,6 +46,7 @@ from dlboard._telemetry import Attributes, attribute, system
 from dlboard._telemetry.system import SystemMetricsSettings
 from dlboard._telemetry.traces import CLIENT_SERVICE_NAME, SpanKind, TraceKey, flush, name_service, span
 from dlboard.client import _context
+from dlboard.client._console import ConsoleCapture, ConsoleChunk, ConsoleSettings
 from dlboard.client._context import ContextSettings
 from dlboard.client._rest_api import DEFAULT_SERVER_URL, BasicDlboardAPI
 from dlboard.client._warnings import warn
@@ -387,6 +388,8 @@ class RunSettings(BaseModel, frozen=True, extra="forbid"):
     """What a new run records about its code, command and environment (`DLBOARD_CONTEXT_*` by default)."""
     system_metrics: SystemMetricsSettings = Field(default_factory=SystemMetricsSettings)
     """Whether, and how often, the run samples CPU, memory and GPUs (`DLBOARD_SYSTEM_METRICS_*` by default)."""
+    console: ConsoleSettings = Field(default_factory=ConsoleSettings)
+    """Whether, and how, the run captures what the script prints (`DLBOARD_CONSOLE_*` by default)."""
 
     metrics_q_size: int = 500
     """Max metric batches buffered before `log_metrics` starts warning about backpressure."""
@@ -470,14 +473,28 @@ def _close_shippers(*shippers: _Shipper[Any]) -> None:
         shipper.close()
 
 
-def _log_system(run: weakref.ref[Run], values: Mapping[str, float]) -> None:
-    """
-    Log a system metrics sample into `run` (held weakly by its sampler), at the Unix time it was taken.
+class _Stops(Protocol):
+    """What a run keeps running beside it until it finishes: its system metrics sampler, its console capture."""
 
-    Its step is that time, not a training step (see `models.SYSTEM_METRIC_PREFIX`).
+    def stop(self) -> None:
+        """Stop, logging into the run what is still held."""
+        ...
+
+
+def _log_system(run: Callable[[], Run | None], values: Mapping[str, float]) -> None:
+    """
+    Log a system metrics sample into `run` (a weak reference: the sampler must not keep it alive), at the time taken.
+
+    Its step is the Unix time it was taken, not a training step (see `models.SYSTEM_METRIC_PREFIX`).
     """
     if (alive := run()) is not None:
         alive.log_metrics(values, step=int(time.time()))
+
+
+def _log_console(run: Callable[[], Run | None], chunk: ConsoleChunk) -> None:
+    """Log a chunk of console output into `run` (a weak reference, as `_log_system`'s), as the artifact it is."""
+    if (alive := run()) is not None:
+        alive.log_artifact([chunk])
 
 
 @dataclass(frozen=True)
@@ -508,7 +525,7 @@ class Run:
         """Use `init` (or `Run.start`); an inert run is `Run(None)`, with the `run_id` it would log to if known."""
         self._shipping = shipping
         self._inert_run_id = run_id
-        self._sampler: system.Sampler | None = None
+        self._helpers: list[_Stops] = []
         self.status: models.RunStatus | None = None
         """How this process last told the server the run ended, if it has."""
         if shipping is None:
@@ -601,12 +618,16 @@ class Run:
         started = cls(_Shipping(api, experiment_id, run_id, metrics, artifacts))
         if created:  # a run attached to keeps the context it was started with
             started._record_context(settings.context)
-        started._sampler = system.start(
-            settings.system_metrics, functools.partial(_log_system, weakref.ref(started))
-        )
-        if started._sampler is not None:
-            weakref.finalize(started, started._sampler.stop)
+        alive = weakref.ref(started)  # held weakly, so a run nothing uses any more is still collected
+        started._attach(system.start(settings.system_metrics, functools.partial(_log_system, alive)))
+        started._attach(ConsoleCapture.start(settings.console, functools.partial(_log_console, alive)))
         return started
+
+    def _attach(self, helper: _Stops | None) -> None:
+        """Keep `helper` (a sampler, a console capture) running until the run finishes, or is collected."""
+        if helper is not None:
+            self._helpers.append(helper)
+            weakref.finalize(self, helper.stop)
 
     def _record_context(self, settings: ContextSettings) -> None:
         """Record what produced this run, and queue its uncommitted changes. Never fails the script."""
@@ -629,6 +650,19 @@ class Run:
     def experiment_id(self) -> int | None:
         """The experiment the run is in; `None` on a non-zero rank, which never asks the server."""
         return None if self._shipping is None else self._shipping.experiment_id
+
+    @property
+    def log_context(self) -> dict[str, int]:
+        """
+        The run's ids, to bind into the script's own logs: `structlog.contextvars.bind_contextvars(**run.log_context)`.
+
+        Logs already sent to Loki (or anywhere else) can then be found by the run, without dlboard becoming a log store.
+        Empty on a non-zero rank, which has no run of its own.
+        """
+        shipping = self._shipping
+        if shipping is None:
+            return {}
+        return {"dlboard.run_id": shipping.run_id, "dlboard.experiment_id": shipping.experiment_id}
 
     def log_hyperparams(self, params: Mapping[str, Any] | Namespace | BaseModel) -> None:
         """
@@ -772,15 +806,16 @@ class Run:
 
     def finish(self, status: models.RunStatus = models.RunStatus.FINISHED) -> None:
         """
-        Stop sampling system metrics, flush, then tell the server the run ended, and how. Never fails the script.
+        Stop sampling system metrics and capturing the console, flush, then tell the server the run ended, and how.
 
-        A run can go on logging after this (a test stage after fit), and finishing it again moves its end later.
+        Never fails the script. A run can go on logging after this (a test stage after fit), and finishing it again
+        moves its end later.
         """
         if (shipping := self._shipping) is None:
             return
-        if self._sampler is not None:
-            self._sampler.stop()
-            self._sampler = None
+        for helper in self._helpers:  # a console capture cuts its last chunk as it stops, so before the flush
+            helper.stop()
+        self._helpers.clear()
         self.flush()
         try:
             shipping.api.finish_run(shipping.run_id, status)

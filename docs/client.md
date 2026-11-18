@@ -120,6 +120,20 @@ it is finished, and costs a handful of rows per sample: 8 GPUs and the host are 
 `DLBOARD_SYSTEM_METRICS_INTERVAL_S` to sample less often, or `DLBOARD_SYSTEM_METRICS_ENABLED=false` (or
 `RunSettings(system_metrics=...)`) to turn it off. Only rank 0 samples, so a multi-node job covers rank 0's node.
 
+**Console output.** A run captures what the script prints -- everything written to `sys.stdout` and `sys.stderr`,
+tracebacks included -- from its start until it is finished, and auto-generate gives it a `console` chart: each run's
+newest stretch of output, **Older** and **Newer** to page through the rest, and a filter over the lines on show. A line
+that is a JSON object (structlog's `JSONRenderer`, say) is drawn with its time, level and message pulled out, and its
+other fields after them. It is kept small on purpose, and is not a log service: output is cut into chunks every 30
+seconds (sooner past 256 KB) and logged as ordinary artifacts, the server never parses or searches it, and nothing searches
+more than the chunk on show. A write never waits on dlboard: it goes to the real stream, then into a bounded buffer, and
+what finds the buffer full is dropped and said so. A run keeps at most 10 MB of it; a progress bar redrawn with `\r` is
+kept as it last looked, once. Only Python's streams are captured: output of native code and of child processes, which
+never passes through them, is not, and neither is a logging handler that was bound to the original stream before the
+run started. A `kill -9` loses what was printed since the last chunk. Tune it with `DLBOARD_CONSOLE_*` (below), or turn
+it off with `DLBOARD_CONSOLE_ENABLED=false`. If your logs already go to Loki or the like, bind the run's ids into them
+instead (`structlog.contextvars.bind_contextvars(**run.log_context)`) and find them there by the run.
+
 **How a run ends.** A run's `with` block (or `run.finish(...)`) ends it, and Lightning finalizes the logger when a
 stage finishes: `"success"` records the run as *finished* and `"failed"` as *failed*, with the time it ended (stamped by your machine, like the run's start,
  so the duration never mixes two clocks). The runs table shows it as "running", "3m 23s", "2d 3h" or "✕ 1h 2m" next to

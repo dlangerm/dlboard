@@ -1041,14 +1041,18 @@ def make_fake_chart(
 
 
 @pytest.fixture(autouse=True)
-def _no_diff_of_the_test_checkout(monkeypatch: pytest.MonkeyPatch) -> None:
+def _runs_record_nothing_of_the_test_process(monkeypatch: pytest.MonkeyPatch) -> None:
     """
-    A run a test starts records its context, but does not upload the uncommitted changes of the checkout running the suite.
+    A run a test starts logs only what the test logs: not the checkout's diff, its system metrics or the suite's console.
 
-    Otherwise what a test's run logs would depend on whether the tree is clean: one more artifact, queued as the run starts.
-    `client/tests/context_test.py` covers the diff, with settings of its own.
+    Otherwise what a test's run logs would depend on whether the tree is clean (one more artifact, queued as the run
+    starts); a sampler's thread, and a capture wrapped over pytest's own `sys.stdout`, would outlive a test that abandons
+    its run rather than finishing it. The tests of each (`context_test.py`, `system_test.py`, `console_test.py`, and the
+    end-to-end ones that turn one on) ask for it with settings of their own.
     """
     monkeypatch.setenv("DLBOARD_CONTEXT_DIFF", "false")
+    monkeypatch.setenv("DLBOARD_SYSTEM_METRICS_ENABLED", "false")
+    monkeypatch.setenv("DLBOARD_CONSOLE_ENABLED", "false")
 
 
 @pytest.fixture(autouse=True)

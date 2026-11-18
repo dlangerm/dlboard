@@ -1,0 +1,41 @@
+/* A run's console chunk (`console.py`): monospace, scrolling, a JSON line's level coloured as a log viewer's would be. */
+.dl-console {
+    overflow: auto;
+    padding: var(--mantine-spacing-xs);
+    border: 1px solid var(--mantine-color-default-border);
+    border-radius: var(--mantine-radius-sm);
+    background: var(--mantine-color-default);
+    font-family: var(--mantine-font-family-monospace);
+    font-size: var(--mantine-font-size-xs);
+    line-height: 1.45;
+}
+
+.dl-console-line {
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.dl-console-time,
+.dl-console-rest {
+    color: var(--mantine-color-dimmed);
+}
+
+.dl-console-level {
+    font-weight: 600;
+}
+
+.dl-console-warning .dl-console-level,
+.dl-console-warn .dl-console-level {
+    color: var(--mantine-color-yellow-text);
+}
+
+.dl-console-error .dl-console-level,
+.dl-console-critical .dl-console-level,
+.dl-console-exception .dl-console-level {
+    color: var(--mantine-color-red-text);
+}
+
+.dl-console-notice {
+    color: var(--mantine-color-dimmed);
+    font-style: italic;
+}

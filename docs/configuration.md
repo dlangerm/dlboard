@@ -233,6 +233,10 @@ Read by `dlboard.client.run.init`, `DLBoardLogger` and the REST client in the tr
 | `DLBOARD_SYSTEM_METRICS_ENABLED` | `true` | Sample CPU, memory and GPUs into the run, with whichever of the `system` and `gpu` extras are installed. See [client.md](client.md). |
 | `DLBOARD_SYSTEM_METRICS_INTERVAL_S` | `30` | Seconds between samples, at least 1. |
 | `DLBOARD_SYSTEM_METRICS_GPU` | `true` | Sample NVIDIA GPUs through NVML, when the `gpu` extra is installed. |
+| `DLBOARD_CONSOLE_ENABLED` | `true` | Capture what the script writes to `sys.stdout` and `sys.stderr` into the run. See [client.md](client.md). |
+| `DLBOARD_CONSOLE_INTERVAL_S` | `30` | Seconds between chunks: also how much of a run's last output a `kill -9` can cost. |
+| `DLBOARD_CONSOLE_CHUNK_KB` | `256` | A chunk is cut sooner once this much is waiting. |
+| `DLBOARD_CONSOLE_MAX_MB` | `10` | The most a run captures; past it, capture stops and the last chunk says so. |
 
 `init` also reads the rank a launcher gives each process, the way Lightning does: the first of `RANK`,
 `LOCAL_RANK`, `SLURM_PROCID` and `JSM_NAMESPACE_RANK` that is set (torchrun, accelerate, SLURM and jsrun set them).

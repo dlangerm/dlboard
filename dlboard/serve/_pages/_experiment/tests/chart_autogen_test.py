@@ -8,6 +8,7 @@ from collections import Counter
 import pytest
 
 from dlboard.models import (
+    CONSOLE_KEY,
     FILE_KIND_TAG,
     OVERLAY_KEY_SUFFIX,
     PLOTLY_DATA_EXTENSION,
@@ -676,3 +677,11 @@ def test_a_metric_is_charted_against_what_its_step_means(key: str, x_axis: str, 
         x_axis,
         x_axis_type,
     )
+
+
+def test_a_runs_console_is_charted_as_a_console_not_a_file() -> None:
+    console = Artifact(
+        id=1, key=CONSOLE_KEY, fname="console-000000.txt", run_id=1, experiment_id=1, step=0, ref="r"
+    )
+
+    assert autogen.default_artifact_chart(console) == "console"

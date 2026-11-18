@@ -6,7 +6,9 @@ A chart plugin defines one `ChartType` — a way to turn parameters and a datafr
 into a rendered Dash component. `ChartType[P, D, C]` (`dlboard/models/_view.py`) is generic over
 its parameter model `P`, the data shape it renders from `D`, and the rendered component type `C`.
 Built-ins: `line_chart.py`, `bar_chart.py`, `table_chart.py`, `image_series.py`, `file_list.py`,
-`histogram.py`, `series_band.py`, `plotly_chart.py` (`dlboard/plugins/charts/`). `bar_chart.py` draws a group of bars for each value of its `x_axis` (a
+`histogram.py`, `series_band.py`, `plotly_chart.py`, `console.py` (`dlboard/plugins/charts/`). `console.py` shows what a
+run printed (`models.CONSOLE_KEY`, a chunk per step): each run's newest chunk, read as a `WindowAt.LATEST` window, with
+Older/Newer reading the chunk beside it alone, and a filter over the lines of the one on show. `bar_chart.py` draws a group of bars for each value of its `x_axis` (a
 hyperparameter, a metric, the step, or the run), and in it a bar for each run that has that value, in the run's color:
 runs that share a hidden size stand side by side, rather than being merged into one bar. A bar's height is the run's
 last-logged value (`latest`, the default, which reads no more than that) or an `aggregation` (`mean`, `median`, `min`,

@@ -127,6 +127,11 @@ class FileKind(StrEnum):
     """Changes to a run's code not yet committed as it started (`git diff HEAD`): its `context/git.diff`."""
 
 
+CONSOLE_KEY: Final = "console"
+"""
+The key a run's console output is logged under, a chunk per step (`dlboard.client._console`): the console chart's.
+"""
+
 LAYER_KIND_TAG: Final = "layer_kind"
 """The tag an artifact records its `LayerKind` under, when a browser has to be told how to draw it as a layer."""
 

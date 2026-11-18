@@ -36,6 +36,7 @@ from dlboard.models import (
 from dlboard.models._metric import MetricColumn
 from dlboard.plugins.charts._table_settings import Aggregate, TableMode, TableRows
 from dlboard.plugins.charts.bar_chart import BarChart
+from dlboard.plugins.charts.console import ConsoleChart
 from dlboard.plugins.charts.file_list import FileListChart
 from dlboard.plugins.charts.histogram import Colorscale, HistogramChart, HistogramDisplay
 from dlboard.plugins.charts.image_series import ImageChart, LayerVisibility
@@ -103,6 +104,7 @@ _FROZEN_CHART_TYPE_NAMES: dict[type[ChartType[typing.Any, typing.Any, typing.Any
     FileListChart: "files",
     SeriesBandChart: "series_band",
     PlotlyChart: "plotly",
+    ConsoleChart: "console",
 }
 
 

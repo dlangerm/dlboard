@@ -13,12 +13,14 @@ silently becoming one request per file).
 
 from __future__ import annotations
 
+import io
 import time
 from typing import TYPE_CHECKING
 
 import torch
 
 from dlboard import models
+from dlboard.client import _console
 from dlboard.client._rest_api import BasicDlboardAPI
 from dlboard.client.artifacts import image
 
@@ -71,4 +73,31 @@ def test_logging_a_batch_of_large_images_stays_within_budget_when_colocated(
         f"Logging {_MOSAIC_COUNT} {_MOSAIC_SIDE_PX}x{_MOSAIC_SIDE_PX} images to a colocated server "
         f"took {elapsed:.2f}s, over the {_UPLOAD_BUDGET_SEC}s budget -- with no real network hop in "
         "the way, this points at dlboard's own overhead, not network latency."
+    )
+
+
+_PRINTS = 100_000
+_PRINT_OVERHEAD_BUDGET_SEC = 1.0
+"""What capturing may add to 100k writes: a write appends to a list under a lock, so ~1 µs each, with room for a slow box."""
+
+
+def test_capturing_the_console_costs_a_print_heavy_loop_little() -> None:
+    """A training loop printing every step must not slow down because its run captures the console (#697)."""
+    sink = io.StringIO()
+
+    def write_all(stream: io.TextIOBase | _console._Tee) -> float:
+        start = time.perf_counter()
+        for i in range(_PRINTS):
+            stream.write(f"step {i}: loss 0.5\n")
+        return time.perf_counter() - start
+
+    plain = write_all(sink)
+    capture = _console.ConsoleCapture(
+        _console.ConsoleSettings(enabled=True, interval_s=3600, chunk_kb=64 * 1024, max_mb=1024),
+        lambda _chunk: None,
+    )
+    captured = write_all(_console._Tee(sink, capture))
+
+    assert captured - plain < _PRINT_OVERHEAD_BUDGET_SEC, (
+        f"{_PRINTS} captured writes took {captured:.2f}s against {plain:.2f}s plain"
     )
