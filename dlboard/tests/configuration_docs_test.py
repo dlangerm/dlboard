@@ -40,8 +40,8 @@ def _env_vars() -> list[str]:
     return sorted(found)
 
 
-_LAUNCHER_VARIABLES = "RANK|LOCAL_RANK|SLURM_PROCID|JSM_NAMESPACE_RANK"
-"""What a distributed launcher sets, which the client reads to log from rank 0 only (`LaunchEnv`)."""
+_LAUNCHER_VARIABLES = "RANK|LOCAL_RANK|SLURM_PROCID|JSM_NAMESPACE_RANK|CUDA_VISIBLE_DEVICES"
+"""What a launcher sets, which the client reads: the rank (to log from rank 0 only) and the GPUs a run may use."""
 _DOCUMENTED = set(re.findall(rf"`((?:DLBOARD|OTEL)_[A-Z0-9_]+|{_LAUNCHER_VARIABLES})`", _DOC.read_text()))
 
 

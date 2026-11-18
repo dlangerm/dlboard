@@ -9,10 +9,14 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from dlboard import models
+from dlboard._telemetry import system
 from dlboard._wire import Identity
 from dlboard.client import _context, dlboard_logger, run
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping
+
+    from dlboard._telemetry.system import SystemMetricsSettings
     from dlboard.client._context import ContextSettings, Diff
 
 
@@ -25,6 +29,16 @@ class FakeAPI:
         self.context_error: Exception | None = None
         self.diff: Diff | None = None
         """What `_context.collect` finds uncommitted, for every run started in the test (nothing, by default)."""
+        self.samplers: list[FakeSampler] = []
+        """Each system metrics sampler a run started in the test, in order."""
+
+    def start_sampling(
+        self, settings: SystemMetricsSettings, log: Callable[[Mapping[str, float]], None]
+    ) -> FakeSampler:
+        """Stands in for `system.start`: no sampling thread in a unit test; the test logs a sample itself."""
+        del settings
+        self.samplers.append(FakeSampler(log))
+        return self.samplers[-1]
 
     def collect(
         self, run_id: int, experiment_id: int, settings: ContextSettings
@@ -135,7 +149,19 @@ def fake_api(monkeypatch: pytest.MonkeyPatch) -> FakeAPI:
     monkeypatch.setattr(run, "BasicDlboardAPI", _factory)
     monkeypatch.setattr(dlboard_logger, "BasicDlboardAPI", _factory)
     monkeypatch.setattr(_context, "collect", api.collect)
+    monkeypatch.setattr(system, "start", api.start_sampling)
     return api
+
+
+@dataclasses.dataclass
+class FakeSampler:
+    """A system metrics sampler that samples nothing by itself: `log` is the run's callback."""
+
+    log: Callable[[Mapping[str, float]], None]
+    stopped: bool = False
+
+    def stop(self) -> None:
+        self.stopped = True
 
 
 @pytest.fixture

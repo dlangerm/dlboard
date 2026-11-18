@@ -552,3 +552,30 @@ class _Config(pydantic.BaseModel):
 )
 def test_flatten_hparams_joins_nested_configs_with_slashes(params: Any, expected: dict[str, Any]) -> None:  # noqa: ANN401
     assert run.flatten_hparams(params) == expected
+
+
+def test_a_run_logs_its_system_metrics_at_the_time_sampled_until_it_finishes(
+    fake_api: FakeAPI, shippers: list[FakeShipper]
+) -> None:
+    started = run.init("proj")
+    (sampler,) = fake_api.samplers
+    before = int(time.time())
+
+    sampler.log({"system/cpu.utilization": 0.5})
+    started.finish()
+
+    ((sample,),) = [item for item in [shippers[0].items] if item]
+    assert sample.metrics == {"system/cpu.utilization": 0.5}
+    assert before <= sample.step <= int(time.time())  # a Unix time, never a training step
+    assert sampler.stopped
+
+
+def test_a_non_zero_rank_samples_nothing(
+    monkeypatch: pytest.MonkeyPatch, fake_api: FakeAPI, shippers: list[FakeShipper]
+) -> None:
+    del shippers
+    monkeypatch.setenv("RANK", "1")
+
+    run.init("proj").finish()
+
+    assert fake_api.samplers == []

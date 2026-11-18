@@ -230,10 +230,14 @@ Read by `dlboard.client.run.init`, `DLBoardLogger` and the REST client in the tr
 | `DLBOARD_CONTEXT_MAX_DIFF_KB` | `1024` | A bigger diff is left out, with a warning. |
 | `DLBOARD_CONTEXT_COMMAND` | `true` | Record the command line, working directory and interpreter. Turn it off if arguments carry secrets. |
 | `DLBOARD_CONTEXT_PACKAGES` | `true` | Record each installed distribution's version. |
+| `DLBOARD_SYSTEM_METRICS_ENABLED` | `true` | Sample CPU, memory and GPUs into the run, with whichever of the `system` and `gpu` extras are installed. See [client.md](client.md). |
+| `DLBOARD_SYSTEM_METRICS_INTERVAL_S` | `30` | Seconds between samples, at least 1. |
+| `DLBOARD_SYSTEM_METRICS_GPU` | `true` | Sample NVIDIA GPUs through NVML, when the `gpu` extra is installed. |
 
 `init` also reads the rank a launcher gives each process, the way Lightning does: the first of `RANK`,
 `LOCAL_RANK`, `SLURM_PROCID` and `JSM_NAMESPACE_RANK` that is set (torchrun, accelerate, SLURM and jsrun set them).
-Only rank 0 logs, and with none of them set a process is rank 0.
+Only rank 0 logs, and with none of them set a process is rank 0. GPU sampling reads `CUDA_VISIBLE_DEVICES`, as CUDA
+does, to sample only the run's own GPUs.
 
 ## Shutting down
 

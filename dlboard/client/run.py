@@ -42,7 +42,8 @@ from dlboard._batching import BatchParams, Failure, ship_batches
 from dlboard._compat import StrEnum
 from dlboard._logging import configure_client_logging
 from dlboard._mp_context import SPAWN_CONTEXT
-from dlboard._telemetry import Attributes, attribute
+from dlboard._telemetry import Attributes, attribute, system
+from dlboard._telemetry.system import SystemMetricsSettings
 from dlboard._telemetry.traces import CLIENT_SERVICE_NAME, SpanKind, TraceKey, flush, name_service, span
 from dlboard.client import _context
 from dlboard.client._context import ContextSettings
@@ -384,6 +385,8 @@ class RunSettings(BaseModel, frozen=True, extra="forbid"):
 
     context: ContextSettings = Field(default_factory=ContextSettings)
     """What a new run records about its code, command and environment (`DLBOARD_CONTEXT_*` by default)."""
+    system_metrics: SystemMetricsSettings = Field(default_factory=SystemMetricsSettings)
+    """Whether, and how often, the run samples CPU, memory and GPUs (`DLBOARD_SYSTEM_METRICS_*` by default)."""
 
     metrics_q_size: int = 500
     """Max metric batches buffered before `log_metrics` starts warning about backpressure."""
@@ -467,6 +470,16 @@ def _close_shippers(*shippers: _Shipper[Any]) -> None:
         shipper.close()
 
 
+def _log_system(run: weakref.ref[Run], values: Mapping[str, float]) -> None:
+    """
+    Log a system metrics sample into `run` (held weakly by its sampler), at the Unix time it was taken.
+
+    Its step is that time, not a training step (see `models.SYSTEM_METRIC_PREFIX`).
+    """
+    if (alive := run()) is not None:
+        alive.log_metrics(values, step=int(time.time()))
+
+
 @dataclass(frozen=True)
 class _Shipping:
     """A started run's server, ids and shipping processes -- what only the process that logs has."""
@@ -495,6 +508,7 @@ class Run:
         """Use `init` (or `Run.start`); an inert run is `Run(None)`, with the `run_id` it would log to if known."""
         self._shipping = shipping
         self._inert_run_id = run_id
+        self._sampler: system.Sampler | None = None
         self.status: models.RunStatus | None = None
         """How this process last told the server the run ended, if it has."""
         if shipping is None:
@@ -587,6 +601,11 @@ class Run:
         started = cls(_Shipping(api, experiment_id, run_id, metrics, artifacts))
         if created:  # a run attached to keeps the context it was started with
             started._record_context(settings.context)
+        started._sampler = system.start(
+            settings.system_metrics, functools.partial(_log_system, weakref.ref(started))
+        )
+        if started._sampler is not None:
+            weakref.finalize(started, started._sampler.stop)
         return started
 
     def _record_context(self, settings: ContextSettings) -> None:
@@ -753,12 +772,15 @@ class Run:
 
     def finish(self, status: models.RunStatus = models.RunStatus.FINISHED) -> None:
         """
-        Flush, then tell the server the run ended, and how. Never fails the script.
+        Stop sampling system metrics, flush, then tell the server the run ended, and how. Never fails the script.
 
         A run can go on logging after this (a test stage after fit), and finishing it again moves its end later.
         """
         if (shipping := self._shipping) is None:
             return
+        if self._sampler is not None:
+            self._sampler.stop()
+            self._sampler = None
         self.flush()
         try:
             shipping.api.finish_run(shipping.run_id, status)

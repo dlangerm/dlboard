@@ -661,3 +661,18 @@ def test_a_metrics_shape_is_judged_only_if_the_limit_leaves_its_chart() -> None:
     autogen.build_auto_panels(catalog, delimiter="/", mode="prefix", single_value=single_value)
 
     assert [len(keys) for keys in judged] == [autogen.AUTO_MAX_CHARTS]
+
+
+@pytest.mark.parametrize(
+    ("key", "x_axis", "x_axis_type"),
+    [("train/loss", "step", "number"), ("system/hw.gpu.utilization/gpu0", "timestamp_utc", "date")],
+    ids=["a-training-metric-against-its-step", "a-system-metric-against-the-time-it-was-sampled"],
+)
+def test_a_metric_is_charted_against_what_its_step_means(key: str, x_axis: str, x_axis_type: str) -> None:
+    chart = autogen.default_chart_for_metric(key)
+
+    assert chart.chart_type == LineChart.name
+    assert (chart.parameters["x_axis"], chart.parameters.get("x_axis_type", "number")) == (
+        x_axis,
+        x_axis_type,
+    )

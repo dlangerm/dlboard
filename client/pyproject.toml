@@ -56,6 +56,12 @@ readme = "README.md"
 requires-python = ">=3.10"
 
 [project.optional-dependencies]
+# GPU metrics, through NVML (NVIDIA's management library), the same way. Apart from `system` because NVML is missing or
+# unusable on plenty of machines that still have a CPU and memory worth watching; either works without the other.
+gpu = [
+  "nvidia-ml-py>=11.450",
+  "opentelemetry-sdk>=1.16"
+]
 # Needed by `dlboard.client.dlboard_logger.DLBoardLogger`, the `pytorch_lightning.loggers.Logger`
 # adapter. Nothing else under `dlboard.client`/`dlboard.models` needs it.
 lightning = ["pytorch-lightning>=2.0.0"]
@@ -78,6 +84,13 @@ otel-grpc = [
   "opentelemetry-exporter-otlp-proto-grpc>=1.16",
   "opentelemetry-exporter-otlp-proto-http>=1.16",
   "opentelemetry-sdk>=1.16"
+]
+# System metrics (`DLBOARD_SYSTEM_METRICS_*`): the host's CPU and memory and the training process's own, read through
+# psutil into OpenTelemetry instruments on a meter provider of the run's own (never the global one, never exported).
+# The same SDK floor as `otel`, and only the stable core. psutil's floor is the oldest with every reading used here.
+system = [
+  "opentelemetry-sdk>=1.16",
+  "psutil>=5.9"
 ]
 
 [project.urls]

@@ -203,6 +203,19 @@ jobs:
           -r client/pyproject.toml --extra otel-grpc ${{ matrix.pin }}
       - run: client-venv/bin/python tools/check_client_tracing.py --protocol 
           grpc
+      # Then the `system` extra's floors (the same SDK, and psutil): a run's system metrics sample through it.
+      - run: >
+          uv pip install --python client-venv/bin/python --resolution ${{ matrix.resolution
+          }}
+          -r client/pyproject.toml --extra system ${{ matrix.pin }}
+      - run: client-venv/bin/python tools/check_client_system_metrics.py system
+      # Then the `gpu` extra's (nvidia-ml-py): with no GPU on the runner, every NVML call the sampler makes is checked to
+      # exist in the binding, and asking for GPU metrics alone is checked to give a run no sampler rather than an error.
+      - run: >
+          uv pip install --python client-venv/bin/python --resolution ${{ matrix.resolution
+          }}
+          -r client/pyproject.toml --extra gpu ${{ matrix.pin }}
+      - run: client-venv/bin/python tools/check_client_system_metrics.py gpu
 
   # Build-only: proves the root `Dockerfile`'s multi-stage build still produces a working
   # dlboard image. Not pushed anywhere -- just a build sanity check on every PR.

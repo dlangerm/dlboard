@@ -15,11 +15,13 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Final, Literal
 
 from dlboard.models import (
+    SYSTEM_METRIC_PREFIX,
     Artifact,
     ChartInstance,
     ChartType,
     ColumnKind,
     KeyPatterns,
+    MetricColumn,
     OverlayKey,
     PanelInstance,
     family_template,
@@ -116,14 +118,20 @@ def default_chart_for_metric(
     column: str, *, single_value: bool = False
 ) -> ChartInstance[typing.Any, typing.Any]:
     """
-    The sensible default chart for a metric column: a line chart against `step`.
+    The sensible default chart for a metric column: a line chart against `step`, or a system metric's against time.
 
     `single_value` (every run logs this metric at most once, per
     `single_value_metrics`) switches that to a bar chart comparing the
-    value across runs instead -- a line chart of a single point per run isn't a chart at all.
+    value across runs instead -- a line chart of a single point per run isn't a chart at all. A system metric's step
+    is the time it was sampled (`SYSTEM_METRIC_PREFIX`), so it is drawn against the date it was logged at.
     """
     if single_value:
         return ChartInstance(chart_type=BarChart.name, parameters={"column": column, "x_axis": "run_id"})
+    if column.startswith(SYSTEM_METRIC_PREFIX):
+        return ChartInstance(
+            chart_type=LineChart.name,
+            parameters={"column": column, "x_axis": MetricColumn.TIMESTAMP_UTC, "x_axis_type": "date"},
+        )
     return ChartInstance(chart_type=LineChart.name, parameters={"column": column, "x_axis": "step"})
 
 

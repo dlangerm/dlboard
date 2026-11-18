@@ -105,6 +105,21 @@ visible as training appearing to restart, or the logger itself being constructed
 This is the same requirement Python's own `multiprocessing` docs describe for any spawn-based code,
 not something specific to dlboard.
 
+**System metrics.** Install `dlboard-client[system]` and a run samples the host's CPU and
+memory and the training process's own, every 30 seconds; add `dlboard-client[gpu]` (NVML, NVIDIA's management library)
+and it samples each GPU the run can use too (`CUDA_VISIBLE_DEVICES`, as CUDA numbers them: `gpu0` is `cuda:0`):
+utilization, memory, temperature and power. They are two extras because NVML is missing or unusable on plenty of
+machines that still have a CPU worth watching: either works without the other, and NVML that can't start only turns
+the GPU part off. Each sample is ordinary metrics under `system/` (`system/cpu.utilization`,
+`system/hw.gpu.memory.usage/gpu0`, ... named after OpenTelemetry's semantic conventions), at a step that is the Unix
+time it was taken, so a resumed run's samples never land on its earlier ones; auto-generate charts them in a `system`
+panel against the time they were logged. They are read through OpenTelemetry instruments on a meter provider of the
+run's own: it is never made the global one, and nothing is exported anywhere but to the dlboard server. Sampling runs on
+a thread of its own in the training process (process metrics have to describe it), from the moment the run starts until
+it is finished, and costs a handful of rows per sample: 8 GPUs and the host are about 70 rows a minute. Set
+`DLBOARD_SYSTEM_METRICS_INTERVAL_S` to sample less often, or `DLBOARD_SYSTEM_METRICS_ENABLED=false` (or
+`RunSettings(system_metrics=...)`) to turn it off. Only rank 0 samples, so a multi-node job covers rank 0's node.
+
 **How a run ends.** A run's `with` block (or `run.finish(...)`) ends it, and Lightning finalizes the logger when a
 stage finishes: `"success"` records the run as *finished* and `"failed"` as *failed*, with the time it ended (stamped by your machine, like the run's start,
  so the duration never mixes two clocks). The runs table shows it as "running", "3m 23s", "2d 3h" or "✕ 1h 2m" next to

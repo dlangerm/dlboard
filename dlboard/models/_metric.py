@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, NamedTuple, TypeVar
+from typing import TYPE_CHECKING, Final, NamedTuple, TypeVar
 
 from pydantic import AwareDatetime, BaseModel, Field, field_validator
 
@@ -83,6 +83,15 @@ class UnderlyingMetricTableEntry(BaseModel, frozen=True, extra="forbid"):
     """Step the metric was taken at."""
     timestamp_utc: AwareDatetime
     """Time recorded from the client."""
+
+
+SYSTEM_METRIC_PREFIX: Final = "system/"
+"""
+The keys a run's system metrics are logged under (`dlboard._telemetry.system`): `system/cpu.utilization`, ...
+
+Their step is the Unix time they were sampled at, not a training step, so a resumed run's samples never land on its
+earlier ones, and they are charted against time.
+"""
 
 
 class LoggedMetrics(BaseModel, frozen=True, extra="ignore"):

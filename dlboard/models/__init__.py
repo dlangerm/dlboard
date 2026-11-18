@@ -63,6 +63,7 @@ from dlboard.models._histogram import (
 from dlboard.models._hparams import FlatHparamDict, HyperParams, NewHyperParams, ValidJsonTypes
 from dlboard.models._key_patterns import KeyPatterns, family_template, literal_prefix
 from dlboard.models._metric import (
+    SYSTEM_METRIC_PREFIX,
     LoggedMetrics,
     MetricColumn,
     MetricReduction,
@@ -162,6 +163,7 @@ __all__ = [
     "SERIES_BAND_COLUMN_PREFIX",
     "SUMMARY_RUNS",
     "SYSTEM_ISSUER",
+    "SYSTEM_METRIC_PREFIX",
     "UNNAMED_OVERLAY",
     "UNVERIFIED_ISSUER",
     "ActivityStats",

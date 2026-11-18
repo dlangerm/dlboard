@@ -161,3 +161,17 @@ except ValueError as exc:
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "True"
+
+
+def test_a_client_without_the_system_or_gpu_extra_samples_nothing_and_loads_no_opentelemetry() -> None:
+    script = """
+import sys
+from dlboard._telemetry.system import SystemMetricsSettings, start
+assert start(SystemMetricsSettings(), print) is None
+assert not [name for name in sys.modules if name.split(".")[0] in ("opentelemetry", "psutil", "pynvml")]
+print("ok")
+"""
+    result = _run_with_blocked_imports((*_OPENTELEMETRY_PACKAGES, "psutil", "pynvml"), script)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "ok"

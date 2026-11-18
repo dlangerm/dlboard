@@ -23,6 +23,7 @@ members = [
 dev = [
     { name = "boto3", specifier = ">=1.40" },
     { name = "matplotlib", specifier = ">=3.10" },
+    { name = "nvidia-ml-py", specifier = ">=12.535" },
     { name = "opentelemetry-exporter-otlp-proto-grpc", specifier = ">=1.25" },
     { name = "opentelemetry-exporter-otlp-proto-http", specifier = ">=1.25" },
     { name = "opentelemetry-exporter-prometheus", specifier = ">=0.46b0" },
@@ -894,6 +895,10 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+gpu = [
+    { name = "nvidia-ml-py" },
+    { name = "opentelemetry-sdk" },
+]
 lightning = [
     { name = "pytorch-lightning" },
 ]
@@ -906,19 +911,27 @@ otel-grpc = [
     { name = "opentelemetry-exporter-otlp-proto-http" },
     { name = "opentelemetry-sdk" },
 ]
+system = [
+    { name = "opentelemetry-sdk" },
+    { name = "psutil" },
+]
 
 [package.metadata]
 requires-dist = [
     { name = "coolname", specifier = ">=5.0.0" },
     { name = "dltype", specifier = ">=0.16.0" },
     { name = "numpy", specifier = ">=1.26.0" },
+    { name = "nvidia-ml-py", marker = "extra == 'gpu'", specifier = ">=11.450" },
     { name = "opentelemetry-exporter-otlp-proto-grpc", marker = "extra == 'otel-grpc'", specifier = ">=1.16" },
     { name = "opentelemetry-exporter-otlp-proto-http", marker = "extra == 'otel'", specifier = ">=1.16" },
     { name = "opentelemetry-exporter-otlp-proto-http", marker = "extra == 'otel-grpc'", specifier = ">=1.16" },
+    { name = "opentelemetry-sdk", marker = "extra == 'gpu'", specifier = ">=1.16" },
     { name = "opentelemetry-sdk", marker = "extra == 'otel'", specifier = ">=1.16" },
     { name = "opentelemetry-sdk", marker = "extra == 'otel-grpc'", specifier = ">=1.16" },
+    { name = "opentelemetry-sdk", marker = "extra == 'system'", specifier = ">=1.16" },
     { name = "pendulum", specifier = ">=3.0.0" },
     { name = "pillow", specifier = ">=10.0.0" },
+    { name = "psutil", marker = "extra == 'system'", specifier = ">=5.9" },
     { name = "pydantic", specifier = ">=2.5.0" },
     { name = "pydantic-settings", specifier = ">=2.0.0" },
     { name = "pytorch-lightning", marker = "extra == 'lightning'", specifier = ">=2.0.0" },
@@ -926,7 +939,7 @@ requires-dist = [
     { name = "structlog", specifier = ">=23.1.0" },
     { name = "typing-extensions", specifier = ">=4.5.0" },
 ]
-provides-extras = ["lightning", "otel", "otel-grpc"]
+provides-extras = ["gpu", "lightning", "otel", "otel-grpc", "system"]
 
 [[package]]
 name = "dltype"
@@ -2111,6 +2124,15 @@ source = { registry = "https://pypi.org/simple" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/46/e1/cdc1797eadf82d3a9a575a19b33fdc871a97edbec42c00b5b5e914f4aff4/nvidia_cusparselt_cu13-0.8.1-py3-none-manylinux2014_aarch64.whl", hash = "sha256:4dca476c50bf4780d46cd0bfbd82e2bc10a08e4fef7950917ce8d7578d22a23f", size = 221051344, upload-time = "2025-09-05T18:49:51.289Z" },
     { url = "https://files.pythonhosted.org/packages/34/7d/2661f2fb3ac4302f3a246f5fc030213ac60c1fe0bce84f9783dbd831dbb7/nvidia_cusparselt_cu13-0.8.1-py3-none-manylinux2014_x86_64.whl", hash = "sha256:786ce87568c303fadb5afcc7102d454cd3040d75f6f8626f5db460d1871f4dd0", size = 170148586, upload-time = "2025-09-05T18:50:50.248Z" },
+]
+
+[[package]]
+name = "nvidia-ml-py"
+version = "13.615.71"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/fd/30/b25216758be3d3e2834825d8193609e2d71c770a8bd7984438c058c90268/nvidia_ml_py-13.615.71.tar.gz", hash = "sha256:bebe4e48f51b1dc75028c0815cb7bfa14a31a5bb80be70c9d980c6036953fc3d", size = 57485, upload-time = "2026-09-25T15:15:28.226Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/53/a1/1681dfa1c904d4e3e72e51b55a0ff012d50b766843ef832d584abe2113c6/nvidia_ml_py-13.615.71-py3-none-any.whl", hash = "sha256:959bf4adf6fe1308e4bd739e722236b0d1ec8392e2cefad33ff70c311380b9b6", size = 58132, upload-time = "2026-09-25T15:15:26.54Z" },
 ]
 
 [[package]]
