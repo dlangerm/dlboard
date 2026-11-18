@@ -307,15 +307,40 @@ def test_line_chart_x_axis_type_is_configurable() -> None:
     assert _props(chart)["xAxisProps"] == {"type": "category"}
 
 
-def test_a_date_axis_over_values_that_are_no_dates_says_so_rather_than_drawing_nothing() -> None:
-    """Regression (#672): every x became NaN, and the chart was drawn blank with no word of why."""
+@pytest.mark.parametrize(
+    "settings",
+    [
+        LineChartSettings(column="loss", x_axis="timestamp_utc", x_axis_type="date", sample=False),
+        BarChartSettings(column="loss", x_axis="timestamp_utc", x_axis_type="date"),
+    ],
+    ids=["line", "bar"],
+)
+def test_a_date_axis_over_values_that_are_no_dates_says_so_rather_than_drawing_nothing(
+    settings: LineChartSettings | BarChartSettings,
+) -> None:
+    """Regression (#672): a line chart was drawn blank, and a bar chart drew the text as groups, with no word of why."""
     df = _metrics_df(3).assign(timestamp_utc=["soon", "later", "never"] * 2)
-
-    chart = LineChart.render(
-        LineChartSettings(column="loss", x_axis="timestamp_utc", x_axis_type="date", sample=False), df
-    )
+    match settings:
+        case LineChartSettings():
+            chart = LineChart.render(settings, df)
+        case BarChartSettings():
+            chart = BarChart.render(settings, df)
 
     assert "the axis can place" in str(props(chart))
+
+
+def test_a_bar_chart_on_a_date_axis_groups_only_the_values_that_are_dates_in_date_order() -> None:
+    """Regression (#672): one value that was no date left every value as text, sorted as text among the dates."""
+    df = _metrics_df(3).assign(when=["2026-01-10T00:00:00Z", "soon", "2026-01-09T00:00:00Z"] * 2)
+
+    chart = BarChart.render(
+        BarChartSettings(column="loss", x_axis="when", x_axis_type="date", aggregation="mean"), df
+    )
+
+    assert list(_bars(chart, "when")) == [
+        pd.Timestamp("2026-01-09", tz="UTC"),
+        pd.Timestamp("2026-01-10", tz="UTC"),
+    ]
 
 
 def test_line_chart_x_axis_type_date_converts_timestamps_to_epoch_millis() -> None:

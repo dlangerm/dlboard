@@ -29,7 +29,7 @@ from dlboard.plugins.charts._axis_label import (
     fit_axis_label,
 )
 from dlboard.plugins.charts._chart_title import titled
-from dlboard.plugins.charts._empty_chart import nothing_logged
+from dlboard.plugins.charts._empty_chart import nothing_logged, nothing_to_place
 from dlboard.plugins.charts._grouping import latest_per_run
 from dlboard.plugins.charts.line_chart import LEGEND_MAX_HEIGHT
 from dlboard.serve import AssetKind, series_color, serve_asset
@@ -154,11 +154,15 @@ def _run_labels(run_ids: pd.Series[typing.Any], dataframe: pd.DataFrame) -> list
 
 
 def _coerce_x_axis(dataframe: pd.DataFrame, x_col: str, x_axis_type: str) -> None:
-    """Read the x-axis column as the type the chart was set to, in place: `dataframe` is the chart's own copy."""
+    """
+    Read the x-axis column as the type the chart was set to, in place: `dataframe` is the chart's own copy.
+
+    A value a forced type cannot read is left empty, never kept as it was: a group's bars are drawn only where the axis
+    can place them, rather than as text sorted among the dates or numbers.
+    """
     match x_axis_type:
         case "date":
-            with contextlib.suppress(ValueError, TypeError):
-                dataframe[x_col] = pd.to_datetime(dataframe[x_col], utc=True, format="ISO8601")
+            dataframe[x_col] = pd.to_datetime(dataframe[x_col], utc=True, errors="coerce", format="ISO8601")
         case "number":
             dataframe[x_col] = pd.to_numeric(dataframe[x_col], errors="coerce")
         case "category":
@@ -196,6 +200,10 @@ class BarChart(ChartType[BarChartSettings, pd.DataFrame, dmc.Stack], frozen=True
                 )
 
         _coerce_x_axis(dataframe, x_col, parameters.x_axis_type)
+        if (
+            dataframe[x_col].isna().all()
+        ):  # rows, but no x the axis can place (no date, for a date axis): say so
+            return nothing_to_place(parameters.column, x_col)
 
         # Every run is its own bar in each group it has a value in (#493) -- two runs that end on one learning rate, or
         # share a hidden size, sit side by side in its group, rather than being merged into one bar or hidden by it.
