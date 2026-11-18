@@ -1,4 +1,4 @@
-"""A sweep's scatter and parallel coordinates draw in the browser, through the shared themed figure (#698)."""
+"""A sweep's scatter, parallel coordinates and grouped lines draw in the browser, as themed figures (#698, #699)."""
 
 from __future__ import annotations
 
@@ -69,6 +69,10 @@ def test_a_sweep_draws_a_point_per_run_and_a_line_per_run_across_its_hyperparame
                         models.ChartInstance(
                             chart_type="parallel_coordinates", parameters={"metric": "loss"}
                         ),
+                        models.ChartInstance(
+                            chart_type="line",
+                            parameters={"column": "loss", "x_axis": "step", "group_by": "optimizer"},
+                        ),
                     ],
                 )
             ],
@@ -79,4 +83,6 @@ def test_a_sweep_draws_a_point_per_run_and_a_line_per_run_across_its_hyperparame
 
     expect(page.locator(".scatterlayer .point")).to_have_count(len(_LEARNING_RATES), timeout=15_000)
     expect(page.locator(".parcoords .axis-title")).to_have_text(["lr", "optimizer", "loss"])
+    # The grouped line chart (#699): a legend entry per value, saying how many runs it is the mean of.
+    expect(page.locator(".legendtext")).to_have_text(["optimizer=adam (2 runs)", "optimizer=sgd (1 runs)"])
     assert console_errors == []

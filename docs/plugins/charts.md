@@ -125,7 +125,10 @@ in the pane. Settings are grouped into collapsible sections (Data, Display, and 
 The built-in line charts, and the image series that steps through logged images. A line chart's `smoothing` (0 to 0.99)
 smooths each run as TensorBoard does, a debiased moving average computed over every point read before the line is
 thinned, so the curve is the same at any `max_points`; the tooltip names each logged value beside its smoothed one. Its
-`y_scale` of `log` spaces values by order of magnitude, leaving out (and saying how many) values at or below 0:
+`y_scale` of `log` spaces values by order of magnitude, leaving out (and saying how many) values at or below 0. Its
+`group_by` names a hyperparameter: a line per value of it (at most `max_groups`), the mean of its runs in a band from the
+lowest to the highest, over the runs the panel draws, in a color that comes from the value; it groups by one key and
+exact values only, and draws with Plotly, which bands need:
 
 ![Line charts of logged metrics](../images/experiment-charts.png)
 

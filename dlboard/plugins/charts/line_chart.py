@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import contextlib
+import dataclasses
+import hashlib
+import json
 import typing
 from pathlib import Path
 
@@ -18,6 +21,7 @@ from dlboard.models import (
     ColumnKind,
     DataRequest,
     MetricColumn,
+    RenderContext,
 )
 from dlboard.plugins.charts._axis_label import (
     DEFAULT_MAX_AXIS_LABEL_CHARS,
@@ -27,7 +31,9 @@ from dlboard.plugins.charts._axis_label import (
 )
 from dlboard.plugins.charts._chart_title import titled
 from dlboard.plugins.charts._empty_chart import nothing_logged, nothing_to_place
+from dlboard.plugins.charts._run_groups import grouped_traces, groups_of
 from dlboard.plugins.charts._sampling import DEFAULT_MAX_POINTS, shared_sample_grid
+from dlboard.plugins.charts._themed_figure import plotly_layout, register_themed_graphs, themed_graph
 from dlboard.serve import AssetKind, series_color, series_dash, serve_asset
 
 if typing.TYPE_CHECKING:
@@ -72,6 +78,9 @@ _TICK_FORMATTER: typing.Final = {
 
 YScale = typing.Literal["linear", "log"]
 """How a line chart spaces its values: evenly, or by order of magnitude."""
+
+_GROUPED_KIND: typing.Final = "grouped-line"
+"""The kind of a grouped line chart's graph (`themed_graph`)."""
 
 _RAW: typing.Final = "__raw"
 """The suffix of a smoothed run's logged values: its frame column, and its tooltip one (`"<run_id>__raw__y"`)."""
@@ -204,6 +213,114 @@ class LineChartSettings(BaseModel, frozen=True, extra="forbid", use_attribute_do
     """Smooths each run's line as TensorBoard does (a debiased moving average): 0 is off, 0.9 smooths a lot. The tooltip names each logged value beside its smoothed one."""
     y_scale: typing.Annotated[YScale, DISPLAY_SECTION] = Field(default="linear")
     """"log" for values spread over orders of magnitude (a loss early and late in training). It can't place a value at or below 0: those are left out, and the chart says how many."""
+    group_by: typing.Annotated[str, DISPLAY_SECTION] = Field(default="")
+    """A hyperparameter (`lr`): a line per value of it, the mean of its runs in a band from the lowest to the highest. Leave blank for a line per run."""
+    max_groups: typing.Annotated[int, ADVANCED_SECTION] = Field(default=12, ge=1, le=24)
+    """The most groups drawn, in the order of their values: past a dozen the bands are too many to tell apart."""
+
+
+@dataclasses.dataclass(frozen=True)
+class _Lines:
+    """The lines a chart draws, however it draws them: each run's points, nearest-filled (`_nearest_fill_pivot`)."""
+
+    pivot: pd.DataFrame
+    run_ids: list[int]
+    notes: list[dmc.Text]
+    single_point: bool
+    """Whether a run has a single point, drawn as a dot: there is no line to draw of it."""
+
+
+def _lines(parameters: LineChartSettings, dataframe: pd.DataFrame) -> _Lines | dmc.Stack:
+    """The runs' points as the axes place them, smoothed and thinned; or what the chart says instead, if there are none."""
+    x_col = parameters.x_axis
+    x_values = dataframe[x_col]
+    if str(x_values.dtype) in ("object", "str"):
+        with contextlib.suppress(ValueError, TypeError):
+            x_values = pd.to_datetime(x_values, utc=True, format="ISO8601")
+    if parameters.x_axis_type == "date":
+        x_values = _to_epoch_millis(x_values)
+    has_x = x_values.notna()
+    if (
+        not has_x.any()
+    ):  # rows, but no x the axis can place (no date, for a date axis): say so, not a blank chart
+        return nothing_to_place(parameters.column, x_col)
+
+    plotted = dataframe.loc[has_x, ["run_id", "step", parameters.column]].assign(**{x_col: x_values[has_x]})
+    has_value = plotted[parameters.column].notna()
+    read = has_value.sum()
+    df = plotted.loc[has_value].groupby([x_col, "run_id"], as_index=False)[[parameters.column]].mean()
+    df, notes = _placeable(df, parameters.column, parameters.y_scale)
+    df = _smoothed(df, x_col, parameters.column, parameters.smoothing)
+    if parameters.sample:
+        # Sample against every sibling metric column sharing this x-axis, not just this
+        # chart's own -- so every chart in the panel picks the same x-values and stays
+        # aligned when synced, regardless of which metric each one plots.
+        value_cols = sorted(
+            {
+                str(c)
+                for c, dtype in dataframe.dtypes.items()
+                if c not in _BOOKKEEPING_COLS and c != x_col and pd.api.types.is_numeric_dtype(dtype)
+            }
+            | {parameters.column}
+        )
+        wide = dataframe.loc[has_x, ["run_id", *value_cols]].assign(**{x_col: x_values[has_x]})
+        if wide.duplicated(["run_id", x_col]).any():
+            wide = wide.groupby(["run_id", x_col], as_index=False).mean()
+        grid = shared_sample_grid(
+            wide, x_col=x_col, group_col="run_id", value_cols=value_cols, max_points=parameters.max_points
+        )
+        df = df.merge(grid, on=["run_id", parameters.x_axis], how="inner")
+    if df.empty:  # every value was one a log scale can't place
+        return titled(parameters.column, nothing_to_place(parameters.column, x_col), *notes)
+    if read > READ_NOTE_FACTOR * parameters.max_points:
+        notes.append(_read_note(read, len(df)))
+    return _Lines(
+        pivot=_nearest_fill_pivot(df, x_axis=parameters.x_axis, column=parameters.column),
+        run_ids=sorted(int(run) for run in df["run_id"].unique()),
+        notes=notes,
+        # A run with one point (an x-axis its values share, like a learning rate that never changes) has no line to
+        # draw, so it is drawn as the dot it is.
+        single_point=bool((df.groupby("run_id").size() == 1).any()),
+    )
+
+
+def _grouped(parameters: LineChartSettings, dataframe: pd.DataFrame, chart_id: str) -> dmc.Stack:
+    """The runs grouped by `group_by`'s value: a band and a mean line per group (`_run_groups`), with Plotly."""
+    lines = _lines(parameters, dataframe)
+    if not isinstance(lines, _Lines):
+        return lines
+    groups = groups_of(dataframe, parameters.group_by)
+    traces, left_out = grouped_traces(
+        lines.pivot, parameters.x_axis, groups, parameters.group_by, parameters.max_groups
+    )
+    layout = plotly_layout(
+        parameters.height,
+        xaxis={
+            "title": {"text": parameters.x_axis},
+            "type": {"date": "date", "category": "category"}.get(parameters.x_axis_type, "linear"),
+            "gridcolor": "var(--mantine-color-default-border)",
+        },
+        yaxis={"type": parameters.y_scale, "gridcolor": "var(--mantine-color-default-border)"},
+        hovermode="x unified",
+        legend={"orientation": "h", "y": -0.25},
+    )
+    raw = json.dumps([chart_id, parameters.model_dump()], sort_keys=True)
+    instance = hashlib.shake_256(raw.encode()).hexdigest(8)
+    notes = [
+        dmc.Text(
+            f"{len(set(groups.values()))} groups of {len(groups)} runs: a group's mean, in a band from its lowest run to its highest",
+            size="xs",
+            c="dimmed",
+        ),
+        *(
+            [dmc.Text(f"{left_out} more groups not drawn: raise max_groups", size="xs", c="dimmed")]
+            if left_out
+            else []
+        ),
+        *lines.notes,
+    ]
+    graph = themed_graph(_GROUPED_KIND, instance, {"data": traces, "layout": layout}, parameters.height)
+    return titled(parameters.column, graph, *notes)
 
 
 class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.Stack], frozen=True, extra="forbid"):
@@ -215,6 +332,16 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.Stack], frozen=Tr
     @classmethod
     def parameter_type(cls) -> type[LineChartSettings]:
         return LineChartSettings
+
+    @classmethod
+    @typing.override
+    def render_in(
+        cls, parameters: LineChartSettings, dataframe: pd.DataFrame, context: RenderContext
+    ) -> dmc.Stack:
+        """A line per run, or with `group_by` a band and a mean line per group of runs (`_run_groups`)."""
+        if dataframe.empty or not parameters.group_by:
+            return cls.render(parameters, dataframe)
+        return _grouped(parameters, dataframe, context.chart_id)
 
     @classmethod
     @typing.override
@@ -233,62 +360,17 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.Stack], frozen=Tr
             if RUN_NAME_COLUMN in dataframe.columns
             else {}
         )
-        x_col = parameters.x_axis
-        x_values = dataframe[x_col]
-        if str(x_values.dtype) in ("object", "str"):
-            with contextlib.suppress(ValueError, TypeError):
-                x_values = pd.to_datetime(x_values, utc=True, format="ISO8601")
-        if parameters.x_axis_type == "date":
-            x_values = _to_epoch_millis(x_values)
-        has_x = x_values.notna()
-        if (
-            not has_x.any()
-        ):  # rows, but no x the axis can place (no date, for a date axis): say so, not a blank chart
-            return nothing_to_place(parameters.column, x_col)
-
-        plotted = dataframe.loc[has_x, ["run_id", "step", parameters.column]].assign(
-            **{x_col: x_values[has_x]}
-        )
-        has_value = plotted[parameters.column].notna()
-        read = has_value.sum()
-        df = plotted.loc[has_value].groupby([x_col, "run_id"], as_index=False)[[parameters.column]].mean()
-        df, notes = _placeable(df, parameters.column, parameters.y_scale)
-        df = _smoothed(df, x_col, parameters.column, parameters.smoothing)
-        if parameters.sample:
-            # Sample against every sibling metric column sharing this x-axis, not just this
-            # chart's own -- so every chart in the panel picks the same x-values and stays
-            # aligned when synced, regardless of which metric each one plots.
-            value_cols = sorted(
-                {
-                    str(c)
-                    for c, dtype in dataframe.dtypes.items()
-                    if c not in _BOOKKEEPING_COLS and c != x_col and pd.api.types.is_numeric_dtype(dtype)
-                }
-                | {parameters.column}
-            )
-            wide = dataframe.loc[has_x, ["run_id", *value_cols]].assign(**{x_col: x_values[has_x]})
-            if wide.duplicated(["run_id", x_col]).any():
-                wide = wide.groupby(["run_id", x_col], as_index=False).mean()
-            grid = shared_sample_grid(
-                wide, x_col=x_col, group_col="run_id", value_cols=value_cols, max_points=parameters.max_points
-            )
-            df = df.merge(grid, on=["run_id", parameters.x_axis], how="inner")
-        if df.empty:  # every value was one a log scale can't place
-            return titled(parameters.column, nothing_to_place(parameters.column, x_col), *notes)
-        run_ids = sorted(df["run_id"].unique())
-        if read > READ_NOTE_FACTOR * parameters.max_points:
-            notes.append(_read_note(read, len(df)))
-        # A run with one point (an x-axis its values share, like a learning rate that never changes) has no line to
-        # draw, so it is drawn as the dot it is.
-        has_single_point_run = bool((df.groupby("run_id").size() == 1).any())
-        df = _nearest_fill_pivot(df, x_axis=parameters.x_axis, column=parameters.column)
-        data = df.to_dict(orient="records")
+        lines = _lines(parameters, dataframe)
+        if not isinstance(lines, _Lines):
+            return lines
+        run_ids, notes, has_single_point_run = lines.run_ids, lines.notes, lines.single_point
+        data = lines.pivot.to_dict(orient="records")
         series = [
             {
                 "name": str(run_id),
                 "label": run_names.get(run_id, f"Run {run_id}"),
-                "color": series_color(int(run_id)),
-                "strokeDasharray": series_dash(int(run_id)).dasharray,
+                "color": series_color(run_id),
+                "strokeDasharray": series_dash(run_id).dasharray,
             }
             for run_id in run_ids
         ]
@@ -370,7 +452,8 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.Stack], frozen=Tr
     @classmethod
     @typing.override
     def data_request(cls, parameters: LineChartSettings) -> DataRequest:
-        return DataRequest(metrics=frozenset({parameters.column, parameters.x_axis}))
+        hparams = frozenset({parameters.group_by} if parameters.group_by else ())
+        return DataRequest(metrics=frozenset({parameters.column, parameters.x_axis}), hparams=hparams)
 
     @classmethod
     @typing.override
@@ -380,7 +463,7 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.Stack], frozen=Tr
     @classmethod
     @typing.override
     def field_column_kinds(cls) -> dict[str, ColumnKind]:
-        return {"column": ColumnKind.METRIC, "x_axis": ColumnKind.METRIC}
+        return {"column": ColumnKind.METRIC, "x_axis": ColumnKind.METRIC, "group_by": ColumnKind.HPARAM}
 
 
 def plug(app: Dash) -> None:
@@ -391,5 +474,6 @@ def plug(app: Dash) -> None:
     `line_chart_tooltip.js`), served from this app instance only via `serve_asset`.
     """
     LineChart.register(allow_override=True)
+    register_themed_graphs(app, _GROUPED_KIND)
     serve_asset(app, AssetKind.SCRIPT, _TOOLTIP_JS_PATH.name, _TOOLTIP_JS_PATH.read_bytes())
     serve_asset(app, AssetKind.STYLESHEET, _TOOLTIP_CSS_PATH.name, _TOOLTIP_CSS_PATH.read_bytes())
