@@ -386,6 +386,14 @@ class DataStore(typing.Protocol[_P]):
         """Every (non-deleted) run's hyperparameters for an experiment."""
         ...
 
+    def heartbeat(self, run_id: int) -> None:
+        """A run's client says it is alive between batches: its `last_seen_at`, and running again if it was lost."""
+        ...
+
+    def mark_lost_runs(self, quiet_since: datetime, *, limit: int) -> int:
+        """Give up as lost (`UNKNOWN`, `lost_at`) at most `limit` running runs not heard from since `quiet_since`."""
+        ...
+
     def record_run_context(self, context: models.NewRunContext) -> models.RunContext:
         """Record what produced a run, once: the run's first context is kept, and returned again to a later call."""
         ...

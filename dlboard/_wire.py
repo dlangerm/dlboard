@@ -100,6 +100,8 @@ class RunCall(StrEnum):
     """It is done, and how."""
     MARK = "mark"
     """It is to be pinned and/or kept (`MarkRun`)."""
+    HEARTBEAT = "heartbeat"
+    """It is still alive, between batches (a long evaluation): so it is not given up as lost."""
 
 
 def run_path(call: RunCall, run_id: str = "<int:entity_id>", base_url: str = "/") -> str:

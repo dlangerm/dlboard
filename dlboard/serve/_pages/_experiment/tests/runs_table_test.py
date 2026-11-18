@@ -323,3 +323,20 @@ def test_the_grid_is_drawn_again_only_for_a_change_of_its_columns_not_of_its_run
     assert (
         structure([{"run_id": 1, "lr": "fast"}], selected=["lr"], hparams=["lr"]) != drawn
     )  # a number that is a word
+
+
+def test_a_run_given_up_as_lost_says_its_process_likely_died() -> None:
+    run = _run(1).model_copy(
+        update={
+            "status": models.RunStatus.UNKNOWN,
+            "ended_at": _TS.add(seconds=300),
+            "lost_at": _TS.add(seconds=900),
+        }
+    )
+
+    (row,) = run_table._build_hparam_rows(1, _listed([run]), hparams_by_run={}, latest_metrics={}, pins={})
+
+    assert (row["_status_text"], row["_status_detail"]) == (
+        "? 5m 0s",
+        "lost: it stopped being heard from after 5m 0s, so its process likely died",
+    )

@@ -304,6 +304,21 @@ class BasicDlboardAPI:
             if exc.response is None or exc.response.status_code != HTTPStatus.NOT_FOUND:
                 raise
 
+    def heartbeat(self, run_id: int) -> bool:
+        """
+        Tell the server run `run_id` is still alive; whether it is listening.
+
+        `False` for a 404 -- a server from before heartbeats, or a run that is gone -- after which there is no point in
+        another. Anything else raises.
+        """
+        response = self._send(
+            "POST", run_path(RunCall.HEARTBEAT), path=run_path(RunCall.HEARTBEAT, str(run_id))
+        )
+        if response.status_code == HTTPStatus.NOT_FOUND:
+            return False
+        _raise_for_status(response)
+        return True
+
     def mark_run(self, run_id: int, *, pin: models.PinColor | None = None, keep: bool = False) -> models.Run:
         """
         Pin run `run_id` as this client's user in the colour `pin`, and/or keep it from retention (`keep`).

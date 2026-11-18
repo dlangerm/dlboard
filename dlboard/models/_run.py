@@ -77,6 +77,22 @@ class Run(NewRun, frozen=True, extra="ignore"):
     later. `None` while `RUNNING`, and for a run that never reported.
     """
 
+    last_seen_at: AwareDatetime | None = None
+    """
+    When the server last heard from the run's client: a batch it shipped, or a heartbeat (stamped by the server's clock).
+
+    Kept at most a little behind (a run's batches arrive every few seconds; it is written at most twice a minute), and
+    `None` for a run nothing has been heard from since this was added.
+    """
+
+    lost_at: AwareDatetime | None = None
+    """
+    When the server gave the run up as lost: `RUNNING`, but not heard from for long (`DLBOARD_LOST_RUN_AFTER_S`).
+
+    Such a run is marked `UNKNOWN`, ended when it was last seen -- its process was killed (`kill -9`, the OOM killer) or
+    its node lost. Cleared, and the run running again, the moment it is heard from once more.
+    """
+
     kept_at: AwareDatetime | None = None
     """
     When this run was kept, if it is: no retention rule deletes a kept run, and only an owner of its project deletes it.

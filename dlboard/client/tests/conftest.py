@@ -49,6 +49,11 @@ class FakeAPI:
             run_id=run_id, experiment_id=experiment_id, hostname="test-host"
         ), self.diff
 
+    def heartbeat(self, run_id: int) -> bool:
+        """Only bound into each run's heartbeat thread, which waits a minute before its first: never called."""
+        del run_id
+        return True
+
     def record_run_context(self, context: models.NewRunContext) -> models.RunContext:
         self.calls.append(("record_run_context", (context.run_id,), {"hostname": context.hostname}))
         if self.context_error is not None:

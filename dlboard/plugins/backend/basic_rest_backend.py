@@ -279,6 +279,15 @@ def mark_run(entity_id: int) -> dict[str, Any]:
     return handle_mark_run(get_data_store(), entity_id, request.json, get_current_user())
 
 
+def heartbeat(entity_id: int) -> dict[str, Any]:
+    """A run's client says it is alive, between batches. 404 for a run that is gone, as `handle_get_run`."""
+    store = get_data_store()
+    if store.get_run(entity_id) is None:
+        raise NotFound
+    store.heartbeat(entity_id)
+    return {}
+
+
 def create_project() -> dict[str, Any]:
     """Create a new project."""
     return handle_create_project(get_data_store(), request.json, get_current_user())
@@ -353,6 +362,7 @@ _ROUTES: tuple[tuple[str, list[str], Callable[..., Any]], ...] = (
     (entity_path(Resource.RUNS), ["DELETE"], _entity_route(handle_delete_run)),
     (run_path(RunCall.FINISH), ["POST"], finish_run),
     (run_path(RunCall.MARK), ["POST"], mark_run),
+    (run_path(RunCall.HEARTBEAT), ["POST"], heartbeat),
     (f"{entity_path(Resource.RUNS)}/restore", ["POST"], _entity_route(handle_restore_run)),
     (entity_path(Resource.ARTIFACTS), ["DELETE"], _entity_route(handle_delete_artifact)),
     (f"{entity_path(Resource.ARTIFACTS)}/restore", ["POST"], _entity_route(handle_restore_artifact)),

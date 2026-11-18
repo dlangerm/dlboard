@@ -74,6 +74,8 @@ def _status_detail(run: Run) -> str:
             return "running"
         case models.RunStatus.FINISHED | models.RunStatus.FAILED:
             return f"{run.status.value}{after}"
+        case models.RunStatus.UNKNOWN if run.lost_at is not None:
+            return f"lost: it stopped being heard from{after}, so its process likely died"
         case models.RunStatus.UNKNOWN:
             return f"ended without saying how{after}"
 

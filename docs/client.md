@@ -139,7 +139,10 @@ stage finishes: `"success"` records the run as *finished* and `"failed"` as *fai
  so the duration never mixes two clocks). The runs table shows it as "running", "3m 23s", "2d 3h" or "✕ 1h 2m" next to
 the run. A later stage (`trainer.test` after `fit`) moves the end time later. A script that exits without Lightning
 finalizing the logger (an exception outside the trainer, say) is recorded as *unknown* -- ended, but not known how.
-A process that is killed outright (`kill -9`, the OOM killer) can't say anything, so its run stays *running*. A
+A process that is killed outright (`kill -9`, the OOM killer, a lost node) can't say anything, so the server watches instead: a
+run heartbeats every minute between its batches, and one not heard from in `DLBOARD_LOST_RUN_AFTER_S` (10 minutes) is
+given up as *lost* -- *unknown*, ended when it was last heard from, and said so in the runs table. Heard from again (a
+network partition healed, a job resumed), it is running again. A
 server that predates this simply doesn't record any of it.
 
 **Multi-GPU (DDP).** Every rank builds its own logger and Lightning calls all of them, so only

@@ -525,6 +525,15 @@ class AuthorizingDataStore(models.DataStore[[]]):
         self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
         return self._inner.fetch_hyperparams(experiment_id, run_ids=run_ids)
 
+    def heartbeat(self, run_id: int) -> None:
+        self._require(self._run_project(run_id), ProjectRole.EDITOR)
+        self._inner.heartbeat(run_id)
+
+    def mark_lost_runs(self, quiet_since: datetime, *, limit: int) -> int:
+        # Which runs went quiet is for the custodian's task, which no user is behind.
+        require_scope(self._actor, Scope.ALL)
+        return self._inner.mark_lost_runs(quiet_since, limit=limit)
+
     def record_run_context(self, context: models.NewRunContext) -> models.RunContext:
         self.require_run_write(context.run_id, context.experiment_id)
         return self._inner.record_run_context(context)

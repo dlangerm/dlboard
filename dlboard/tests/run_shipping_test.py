@@ -12,6 +12,7 @@ import pytest
 from dlboard import models
 from dlboard.client import run
 from dlboard.client._console import ConsoleSettings
+from dlboard.client._rest_api import BasicDlboardAPI
 
 if TYPE_CHECKING:
     from dlboard.conftest import BackendServer
@@ -72,3 +73,18 @@ def test_what_a_run_prints_reaches_the_server_as_its_console(backend_server: Bac
     assert [(chunk.key, chunk.fname, chunk.step) for chunk in chunks] == [
         (models.CONSOLE_KEY, "console-000000.txt", 0)
     ]
+
+
+def test_a_heartbeat_keeps_a_run_heard_from_and_a_gone_run_answers_that_nobody_is_listening(
+    backend_server: BackendServer,
+) -> None:
+    api = BasicDlboardAPI(base_url=backend_server.url)
+    project = api.get_or_create_project("beating")
+    experiment = api.create_experiment(models.NewExperiment(project_id=project.id))
+    alive = api.create_run(models.NewRun(experiment_id=experiment.id))
+
+    assert api.heartbeat(alive.id)
+    seen = backend_server.store.get_run(alive.id)
+    assert seen is not None
+    assert seen.last_seen_at is not None
+    assert not api.heartbeat(alive.id + 1000)

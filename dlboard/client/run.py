@@ -48,6 +48,7 @@ from dlboard._telemetry.traces import CLIENT_SERVICE_NAME, SpanKind, TraceKey, f
 from dlboard.client import _context
 from dlboard.client._console import ConsoleCapture, ConsoleChunk, ConsoleSettings
 from dlboard.client._context import ContextSettings
+from dlboard.client._heartbeat import Heartbeat
 from dlboard.client._rest_api import DEFAULT_SERVER_URL, BasicDlboardAPI
 from dlboard.client._warnings import warn
 from dlboard.client.artifacts.figure import Figure
@@ -621,6 +622,7 @@ class Run:
         alive = weakref.ref(started)  # held weakly, so a run nothing uses any more is still collected
         started._attach(system.start(settings.system_metrics, functools.partial(_log_system, alive)))
         started._attach(ConsoleCapture.start(settings.console, functools.partial(_log_console, alive)))
+        started._attach(Heartbeat.start(functools.partial(api.heartbeat, run_id)))
         return started
 
     def _attach(self, helper: _Stops | None) -> None:

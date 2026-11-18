@@ -52,6 +52,9 @@ _OWNS = ForeignKeyKind.OWNERSHIP
 _IN_BATCH: Final = 500
 """How many ids or rows one statement binds: they are bound values, and a database allows only so many in a statement."""
 
+_SEEN_EVERY: Final = pendulum.duration(seconds=30)
+"""How often at most a run's `last_seen_at` is written: far within the time a run takes to be given up as lost."""
+
 
 class _Touch(enum.Enum):
     """What changed in an experiment, for the counter a live page polls to notice it (`SQLStoreBase._touch`)."""
@@ -356,6 +359,9 @@ def build_metadata(schema: str | None = None) -> tuple[sa.MetaData, dict[type[Ba
         "idx_Run_live", runs.c.experiment_id, runs.c.created_at, sqlite_where=live, postgresql_where=live
     )
     sa.Index("idx_Run_kept", runs.c.experiment_id, sqlite_where=kept, postgresql_where=kept)
+    # The runs still running, by when they were last heard from: what the sweep for lost runs reads, without the rest.
+    running = sa.and_(runs.c.status == models.RunStatus.RUNNING.value, live)
+    sa.Index("idx_Run_running", runs.c.last_seen_at, sqlite_where=running, postgresql_where=running)
     # A project's live experiments, the newest first, a page at a time (the project page's cards), without reading every
     # other project's: nothing else leads with `project_id`.
     experiments, live_experiment = tables[models.Experiment], tables[models.Experiment].c.deleted_at.is_(None)
@@ -1427,6 +1433,68 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
             live_runs={m.run_id for m in metric},
         )
         self._touch({m.experiment_id for m in metric}, _Touch.ACTIVITY)
+        self._seen({m.run_id for m in metric})
+
+    def _seen(self, run_ids: Collection[int]) -> None:
+        """
+        Note that `run_ids` were heard from now: their `last_seen_at`, and a run that was given up as lost runs again.
+
+        At most once every `_SEEN_EVERY` a run (a lost run at once): its batches arrive every few seconds, and a write
+        each would be a write per batch more on `Run`. One statement after the write's own commit, as `_touch` is, and
+        self-healing as it is: the next batch notes the run again.
+        """
+        if not run_ids:
+            return
+        runs, now = self._tables[models.Run], pendulum.now(pendulum.UTC)
+        lost = runs.c.lost_at.is_not(None)
+        self._execute(
+            sa.update(runs)
+            .where(
+                runs.c.id.in_(set(run_ids)),
+                sa.or_(runs.c.last_seen_at.is_(None), runs.c.last_seen_at < now - _SEEN_EVERY, lost),
+            )
+            .values(
+                last_seen_at=now,
+                status=sa.case((lost, models.RunStatus.RUNNING.value), else_=runs.c.status),
+                ended_at=sa.case((lost, sa.null()), else_=runs.c.ended_at),
+                lost_at=None,
+            )
+        )
+
+    def heartbeat(self, run_id: int) -> None:
+        """A run's client says it is alive, between batches (a long evaluation): as `_seen`."""
+        self._seen({run_id})
+
+    def mark_lost_runs(self, quiet_since: datetime, *, limit: int) -> int:
+        """
+        Give up as lost at most `limit` live runs still `RUNNING` but not heard from since `quiet_since`; how many.
+
+        A run never heard from (from before `last_seen_at`, or a client that died as it started) counts from when it was
+        created. Each is marked `UNKNOWN`, ended when it was last seen, and `lost_at` now. Found by `idx_Run_running`.
+        """
+        runs = self._tables[models.Run]
+        quiet = sa.or_(
+            runs.c.last_seen_at < quiet_since,
+            sa.and_(runs.c.last_seen_at.is_(None), runs.c.created_at < quiet_since),
+        )
+        due = (
+            sa.select(runs.c.id)
+            .where(runs.c.status == models.RunStatus.RUNNING.value, runs.c.deleted_at.is_(None), quiet)
+            .limit(limit)
+            .scalar_subquery()
+        )
+        marked = self._execute(
+            sa.update(runs)
+            .where(runs.c.id.in_(due))
+            .values(
+                status=models.RunStatus.UNKNOWN.value,
+                ended_at=sa.func.coalesce(runs.c.last_seen_at, runs.c.created_at),
+                lost_at=pendulum.now(pendulum.UTC),
+            )
+            .returning(runs.c.experiment_id)
+        )
+        self._touch({experiment_id for (experiment_id,) in marked}, _Touch.ACTIVITY)
+        return len(marked)
 
     def fetch_metrics(
         self,
@@ -2783,6 +2851,7 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
         artifacts = list(artifacts)
         self._insert_into([(models.Artifact, artifacts)], live_runs={a.run_id for a in artifacts})
         self._touch({a.experiment_id for a in artifacts}, _Touch.ACTIVITY)
+        self._seen({a.run_id for a in artifacts})
 
     def count_artifacts_by_ref(self, ref: str) -> int:
         a = self._tables[models.Artifact]
