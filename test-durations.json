@@ -2539,6 +2539,8 @@
   "dlboard/tests/browser_test.py::test_a_logged_plotly_figure_is_drawn_interactive_and_scrubbed_by_step[chromium]": 10.365357815000607,
   "dlboard/tests/browser_test.py::test_a_page_from_an_older_version_offers_a_reload[chromium]": 0.8857513879993348,
   "dlboard/tests/browser_test.py::test_a_page_with_a_logged_figure_on_it_loads_nothing_from_another_server[chromium]": 5.0,
+  "dlboard/tests/browser_test.py::test_a_page_with_tabs_keeps_the_one_it_is_on_in_its_address_and_reloads_on_it[chromium-admin-Users]": 3.0157301850122167,
+  "dlboard/tests/browser_test.py::test_a_page_with_tabs_keeps_the_one_it_is_on_in_its_address_and_reloads_on_it[chromium-project-Comparisons]": 3.0938072229910176,
   "dlboard/tests/browser_test.py::test_a_panels_charts_are_paged_and_filtered_by_metric_name[chromium]": 8.364102888997877,
   "dlboard/tests/browser_test.py::test_a_plotly_template_draws_the_metrics_its_traces_are_bound_to[chromium]": 6.0,
   "dlboard/tests/browser_test.py::test_a_plotly_template_is_drawn_with_the_data_each_run_logged_into_it[chromium]": 5.9703480699990905,

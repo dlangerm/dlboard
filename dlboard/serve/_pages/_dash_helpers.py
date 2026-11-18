@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from dash import Dash
     from dash.development.base_component import Component
 
-    from dlboard.serve._component_ids import ButtonId
+    from dlboard.serve._component_ids import ButtonId, ValueId
 
 
 def tooltipped_action_icon(  # noqa: PLR0913
@@ -203,6 +203,19 @@ def register_navigate(app: Dash, destination: str) -> None:
         _NAVIGATE_JS.source,
         Output(constants.LOCATION_ID, "href", allow_duplicate=True),  # always there, never written
         Input(destination, "data"),
+        prevent_initial_call=True,
+    )
+
+
+_SYNC_TAB_URL_JS = ClientsideScript(Path(__file__).with_name("sync_tab_url.js"))
+
+
+def register_tab_url(app: Dash, tabs: ValueId[Any]) -> None:
+    """Keep the tab a page's `tabs` are on in its address as `?tab=`, which its `layout()` opens it on: a reload or a link."""
+    app.clientside_callback(
+        _SYNC_TAB_URL_JS.source,
+        Output(tabs, "className"),  # never written: the script returns `no_update`
+        Input(tabs, "value"),
         prevent_initial_call=True,
     )
 

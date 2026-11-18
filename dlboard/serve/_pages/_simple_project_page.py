@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import typing
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import dash_mantine_components as dmc
@@ -11,7 +10,7 @@ from dash import Dash, Input, Output, State, no_update
 from dash.exceptions import PreventUpdate
 
 from dlboard.models import ActivityStats, NewExperiment
-from dlboard.serve import ClientsideScript, Icon, get_current_user, get_data_store, icon
+from dlboard.serve import Icon, get_current_user, get_data_store, icon
 from dlboard.serve import _constants as constants
 from dlboard.serve._component_ids import ButtonId, ModalId, ValueId
 from dlboard.serve._pages._card_grid import (
@@ -25,7 +24,7 @@ from dlboard.serve._pages._card_grid import (
     register_card_grid,
 )
 from dlboard.serve._pages._comparison._cards import COMPARISON_CARDS
-from dlboard.serve._pages._dash_helpers import entity_card
+from dlboard.serve._pages._dash_helpers import entity_card, register_tab_url
 from dlboard.serve._pages._dataframe_helpers import experiment_display_name
 from dlboard.serve._pages._delete_confirm import (
     DeleteConfirmIds,
@@ -54,7 +53,6 @@ class _ProjectPage:
 NEW_EXP_BUTTON_ID: typing.Final = "new-experiment-button"
 NEW_EXP_NAME_ID: typing.Final = "new-experiment-name"
 PROJECT_TABS_ID: typing.Final = ValueId[_ProjectPage]("project-tabs")
-_SYNC_TAB_URL_JS = ClientsideScript(Path(__file__).with_name("sync_project_tab_url.js"))
 
 PROJECT_HEADER_IDS = PageHeaderIds[_ProjectPage].of("project")
 
@@ -247,9 +245,4 @@ def register(app: Dash) -> None:
     )
     register_members_callbacks(app)
     register_pinned_runs(app)
-    app.clientside_callback(
-        _SYNC_TAB_URL_JS.source,
-        Output(PROJECT_TABS_ID, "className"),
-        Input(PROJECT_TABS_ID, "value"),
-        prevent_initial_call=True,
-    )
+    register_tab_url(app, PROJECT_TABS_ID)

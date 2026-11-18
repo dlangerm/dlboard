@@ -23,7 +23,7 @@ import json
 import re
 import threading
 import time
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 from urllib.parse import parse_qs, urlparse
 
 import numpy as np
@@ -357,6 +357,24 @@ def test_delete_experiment_and_restore_from_admin_trash(
 
     page.goto(project_url)
     expect(page.locator(".experiment-card")).to_have_count(1)
+    assert console_errors == []
+
+
+@pytest.mark.parametrize(("on", "tab"), [("admin", "Users"), ("project", "Comparisons")])
+def test_a_page_with_tabs_keeps_the_one_it_is_on_in_its_address_and_reloads_on_it(
+    page: Page, live_server_url: str, console_errors: list[str], on: Literal["admin", "project"], tab: str
+) -> None:
+    """Regression (#672): the admin page went back to its first tab on a reload, where a project's page stays on its own."""
+    match on:
+        case "admin":
+            page.goto(f"{live_server_url}/admin")
+        case "project":
+            _create_project_and_experiment(page, live_server_url, "Tab Address Project")
+
+    page.get_by_role("tab", name=tab).click()
+    expect(page).to_have_url(re.compile(rf"[?&]tab={tab.lower()}(&|$)"))
+    page.reload()
+    expect(page.get_by_role("tab", name=tab)).to_have_attribute("aria-selected", "true")
     assert console_errors == []
 
 

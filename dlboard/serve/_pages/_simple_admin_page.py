@@ -34,6 +34,7 @@ from dlboard.serve._pages._dash_helpers import (
     TriggeredId,
     busy_while_running,
     notice,
+    register_tab_url,
     require_triggered_id,
 )
 from dlboard.serve._url import relative_path
@@ -530,6 +531,8 @@ def _admin_layout(tab: str) -> Component:
 
 
 def _register_tab_callbacks(app: Dash) -> None:
+    register_tab_url(app, ADMIN_TABS_ID)
+
     @app.callback(
         Output(ADMIN_TRASH_CONTENT_ID, "children"),
         Input(ADMIN_TABS_ID, "value"),
