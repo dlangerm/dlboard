@@ -112,6 +112,12 @@ window.dlImageSeriesOverlay = (() => {
         return el;
     };
 
+    // What a layer's toggle says when hovered: what it does, or that this picture's layer did not load.
+    const toggleTitle = (label, failed) =>
+        failed
+            ? `${label} did not load for this picture.`
+            : `Show or hide ${label}. Shift-click to show only ${label}.`;
+
     // The legend of one picture, built once for its layers: the eye (every overlay, and peek), then a row for each layer with
     // a toggle and, beneath, the classes it holds. After that it is only updated, so a click is never on an element that
     // has been replaced since the press.
@@ -132,7 +138,7 @@ window.dlImageSeriesOverlay = (() => {
             row.dataset.dlLayer = key;
             const toggle = make("button", "dl-layer-toggle");
             toggle.type = "button";
-            toggle.title = `Show or hide ${label}. Shift-click to show only ${label}.`;
+            toggle.title = toggleTitle(label, false);
             toggle.append(make("span", "dl-layer-box"), make("span", "dl-layer-name", label));
             row.append(toggle, make("span", "dl-layer-classes"));
             rows.append(row);
@@ -167,7 +173,8 @@ window.dlImageSeriesOverlay = (() => {
     // corner of it (see the CSS), whatever the picture in it, which may be tiny, or zoomed out to its own size.
     const frameOf = (overlay) => overlay.closest(".dl-image-series-thumb, .dl-image-series-viewer");
 
-    // Brings the legend over one picture up to date: what is shown, what this picture has nothing for, what each layer holds.
+    // Brings the legend over one picture up to date: what is shown, what this picture has nothing for or could not load, and
+    // what each layer holds.
     const updateLegend = (overlay) => {
         const legend = frameOf(overlay)?.querySelector(":scope > .dl-layer-legend");
         const root = chartRoot(overlay.dataset.dlInstance);
@@ -190,11 +197,12 @@ window.dlImageSeriesOverlay = (() => {
         for (const row of legend.querySelectorAll(".dl-layer-row")) {
             const name = row.dataset.dlLayer;
             const holder = holders.get(name);
-            row.querySelector(".dl-layer-toggle").setAttribute(
-                "aria-pressed",
-                String(!layerStyle(root, name).hidden),
-            );
+            const failed = holder?.hasAttribute("data-dl-failed") ?? false;
+            const toggle = row.querySelector(".dl-layer-toggle");
+            toggle.setAttribute("aria-pressed", String(!layerStyle(root, name).hidden));
+            toggle.title = toggleTitle(layerLabel(root, name), failed);
             row.toggleAttribute("data-dl-absent", !holder);
+            row.toggleAttribute("data-dl-failed", failed);
             // The classes of a layer that is not shown are not on the picture, so they are not listed.
             const classes = holder && !holder.hidden ? (holder.dlClasses ?? []) : [];
             const target = row.querySelector(".dl-layer-classes");

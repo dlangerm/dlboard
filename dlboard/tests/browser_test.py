@@ -4298,6 +4298,47 @@ def test_the_legend_over_a_picture_lists_what_each_layer_holds_and_hides_peeks_a
     assert console_errors == []
 
 
+def test_a_layer_that_does_not_load_is_struck_out_in_the_legend_with_why(
+    page: Page, live_server_url: str, tmp_path: Path, console_errors: list[str]
+) -> None:
+    """Regression (#672): a layer whose file did not load was listed as if it were drawn, the reason only in the console."""
+    _create_project_and_experiment(page, live_server_url, "Failed Layer Experiment")
+    page.locator(".experiment-card").click()
+    experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
+    api = BasicDlboardAPI(live_server_url)
+    run = api.create_run(models.NewRun(experiment_id=experiment_id))
+    boxes: list[Shape] = [Box(x=0.125, y=0.25, width=0.375, height=0.25, label="dog")]
+    api.log_artifact_batch(
+        [
+            Image(
+                key="samples/a", image=np.full((48, 64, 3), 128, dtype=np.uint8), step=0, format="jpg"
+            ).to_artifact(tmp_path, run.id, experiment_id),
+            Overlay.over("samples/a", name="boxes", shapes=boxes, step=0).to_artifact(
+                tmp_path, run.id, experiment_id
+            ),
+        ]
+    )
+    _wait_for_artifacts(experiment_id, 2)
+
+    def refuse_layers(route: Route) -> None:
+        # A shapes layer is fetched, the picture under it is not: only the layer fails.
+        if route.request.resource_type == "fetch":
+            route.fulfill(status=500)
+        else:
+            route.continue_()
+
+    page.route(re.compile(r"/artifact/\d+"), refuse_layers)
+    page.reload()
+    _auto_generate_charts(page)
+
+    legend = page.locator(".dl-image-series-thumb .dl-layer-legend")
+    legend.get_by_role("button", name="Layers").click()
+    row = _layer_row(legend, "boxes")
+    expect(row).to_have_attribute("data-dl-failed", "")
+    expect(row.get_by_role("button")).to_have_attribute("title", "boxes did not load for this picture.")
+    assert any("a shapes layer was not drawn" in error for error in console_errors)
+
+
 def _log_tagged_pictures_with_a_mask(
     live_server_url: str, tmp_path: Path, experiment_id: int, *, runs: int = 1
 ) -> None:

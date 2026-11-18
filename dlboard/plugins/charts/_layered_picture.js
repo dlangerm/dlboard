@@ -5,11 +5,12 @@
 //
 // Shared by every chart that shows a picture with its layers (an image chart's thumbnails and enlarged view, a table's
 // cells): it knows nothing of the chart around it, which says how each layer is drawn (`styleOf`) and hears of a layer that
-// has been drawn through the `dl-layer-drawn` event.
+// has been drawn, or has failed, through the `dl-layer-drawn` event.
 //
 // The data was checked where it was made, so none of it is checked again here. What can still go wrong (a layer that
 // will not load, a kind this script does not know, a shape that cannot be drawn) is logged with `console.error`, which
-// the browser tests fail on, and never stops the rest of the page or the other layers from drawing.
+// the browser tests fail on, and never stops the rest of the page or the other layers from drawing. A layer that will
+// not load, or that this script cannot draw, is marked `data-dl-failed` on its holder, for a legend to say so.
 window.dlLayeredPicture = (() => {
     const SVG_NS = "http://www.w3.org/2000/svg";
     const MIN_LABEL_SIZE = 8;
@@ -173,6 +174,13 @@ window.dlLayeredPicture = (() => {
         return svg;
     };
 
+    // A layer of `holder` that will not load, or cannot be drawn: logged, and marked for the legend, which hears of it.
+    const fail = (holder, ...problem) => {
+        console.error(...problem);
+        holder.toggleAttribute("data-dl-failed", true);
+        holder.dispatchEvent(new CustomEvent("dl-layer-drawn", { bubbles: true }));
+    };
+
     // How each kind of layer is drawn into its `holder`, given the layer (`{url, kind, layer}`) and what the drawing
     // needs of the picture it goes over (`context`: its element and URL, and whether this request is still the latest).
     const LAYER_DRAWERS = {
@@ -180,7 +188,7 @@ window.dlLayeredPicture = (() => {
             const img = document.createElement("img");
             img.alt = "";
             img.src = url;
-            img.onerror = () => console.error("image overlay: a picture layer did not load:", url);
+            img.onerror = () => fail(holder, "image overlay: a picture layer did not load:", url);
             holder.append(img);
         },
         shapes: (holder, { url }, { picture, pictureUrl, isCurrent }) => {
@@ -217,7 +225,7 @@ window.dlLayeredPicture = (() => {
                         holder.dispatchEvent(new CustomEvent("dl-layer-drawn", { bubbles: true }));
                     }
                 })
-                .catch((error) => console.error("image overlay: a shapes layer was not drawn:", url, error));
+                .catch((error) => fail(holder, "image overlay: a shapes layer was not drawn:", url, error));
         },
     };
 
@@ -274,14 +282,14 @@ window.dlLayeredPicture = (() => {
             layer.append(holder);
             const draw = LAYER_DRAWERS[spec.kind];
             if (!draw) {
-                console.error(`image overlay: no way to draw a layer of kind "${spec.kind}":`, spec.url);
+                fail(holder, `image overlay: no way to draw a layer of kind "${spec.kind}":`, spec.url);
                 continue;
             }
             holder.dlDraw = () => {
                 try {
                     draw(holder, spec, context);
                 } catch (error) {
-                    console.error("image overlay: a layer was not drawn:", spec.url, error);
+                    fail(holder, "image overlay: a layer was not drawn:", spec.url, error);
                 }
             };
             applyStyle(holder, styleOf(spec.layer));

@@ -183,14 +183,19 @@
     transform: rotate(45deg);
 }
 
-/* A layer that is hidden, or that this picture has nothing for, is dimmed. */
+/* A layer that is hidden, or that this picture has nothing for or could not load, is dimmed. */
 .dl-layer-row:has(.dl-layer-toggle[aria-pressed="false"]),
-.dl-layer-row[data-dl-absent] {
+.dl-layer-row[data-dl-absent],
+.dl-layer-row[data-dl-failed] {
     opacity: 0.5;
 }
 
 .dl-layer-row[data-dl-absent] .dl-layer-name {
     font-style: italic;
+}
+
+.dl-layer-row[data-dl-failed] .dl-layer-name {
+    text-decoration: line-through;
 }
 
 /* What a layer holds, beneath its name, each in its color. */

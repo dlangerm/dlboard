@@ -597,7 +597,7 @@ window.dlImageSeriesViewer = (() => {
         [...viewer.querySelectorAll(".dl-layer-row")].flatMap((row) => {
             const key = CSS.escape(row.dataset.dlLayer);
             const holder = viewer.querySelector(`.dl-image-series-layer[data-dl-layer="${key}"]`);
-            if (!holder || holder.hidden) {
+            if (!holder || holder.hidden || holder.hasAttribute("data-dl-failed")) {
                 return [];
             }
             const classes = [...row.querySelectorAll(".dl-class")].map((entry) => ({
