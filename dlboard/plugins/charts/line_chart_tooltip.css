@@ -75,3 +75,8 @@
   padding-top: 0.25rem;
   color: var(--mantine-color-dimmed);
 }
+
+/* A smoothed run's logged value, beside its smoothed one. */
+.dl-chart-tooltip-raw {
+    color: var(--mantine-color-dimmed);
+}

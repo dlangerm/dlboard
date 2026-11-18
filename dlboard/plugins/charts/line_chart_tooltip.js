@@ -54,7 +54,13 @@ window.dashMantineFunctions.lineChartTooltip = (props) => {
     var hoveredX = row[axisName];
     var formatX = (x) => (props.labelFormatter ? props.labelFormatter(x, props.payload) : String(x));
     var runs = (props.series || [])
-        .map((s) => ({ series: s, value: row[`${s.name}__y`], sourceX: row[`${s.name}__x`] }))
+        .map((s) => ({
+            series: s,
+            value: row[`${s.name}__y`],
+            sourceX: row[`${s.name}__x`],
+            // A smoothed run's logged value, named beside its smoothed one (`_nearest_fill_pivot`).
+            raw: row[`${s.name}__raw__y`],
+        }))
         .filter((run) => run.value != null)
         .sort((a, b) => b.value - a.value);
     var shown = runs.slice(0, DLBOARD_TOOLTIP_MAX_ROWS);
@@ -96,7 +102,18 @@ window.dashMantineFunctions.lineChartTooltip = (props) => {
                         ? h("span", { className: "dl-chart-tooltip-source" }, `@ ${formatX(run.sourceX)}`)
                         : null,
                 ),
-                h("span", { className: "dl-chart-tooltip-value" }, dlboardFormatValue(run.value)),
+                h(
+                    "span",
+                    { className: "dl-chart-tooltip-value" },
+                    dlboardFormatValue(run.value),
+                    run.raw != null
+                        ? h(
+                              "span",
+                              { className: "dl-chart-tooltip-raw" },
+                              ` (${dlboardFormatValue(run.raw)})`,
+                          )
+                        : null,
+                ),
             ),
         ),
         hidden > 0 ? h("div", { className: "dl-chart-tooltip-more" }, `+${hidden} more`) : null,

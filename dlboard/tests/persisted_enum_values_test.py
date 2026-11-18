@@ -129,6 +129,7 @@ def test_every_builtin_chart_type_has_a_frozen_name(
 
 _FROZEN_SETTING_LITERALS: dict[str, frozenset[str]] = {
     "line.x_axis_type": frozenset({"number", "category", "date", "time"}),
+    "line.y_scale": frozenset({"linear", "log"}),
     "bar.aggregation": frozenset({"latest", "mean", "median", "min", "max", "sum", "count"}),
     "bar.orientation": frozenset({"horizontal", "vertical"}),
     "bar.sort": frozenset({"none", "ascending", "descending"}),

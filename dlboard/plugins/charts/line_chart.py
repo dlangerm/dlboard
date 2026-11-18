@@ -70,6 +70,58 @@ _TICK_FORMATTER: typing.Final = {
 }
 
 
+YScale = typing.Literal["linear", "log"]
+"""How a line chart spaces its values: evenly, or by order of magnitude."""
+
+_RAW: typing.Final = "__raw"
+"""The suffix of a smoothed run's logged values: its frame column, and its tooltip one (`"<run_id>__raw__y"`)."""
+
+
+def _smoothed(df: pd.DataFrame, x_axis: str, column: str, weight: float) -> pd.DataFrame:
+    """
+    `df` with each run's `column` smoothed in x order, and what it logged kept beside it (`column + _RAW`).
+
+    TensorBoard's debiased exponential moving average, which is pandas' `ewm(adjust=True)`: each point a weighted mean of
+    the run's points up to it, the latest weighted most. Smoothed here, over every point read, before the line is
+    thinned to `max_points`: smoothing the thinned points would draw a different curve at every `max_points`.
+    """
+    if not weight:
+        return df
+
+    def average(values: pd.Series) -> pd.Series:
+        return values.ewm(alpha=1 - weight, adjust=True).mean()
+
+    ordered = df.sort_values(["run_id", x_axis])
+    return ordered.assign(
+        **{f"{column}{_RAW}": ordered[column], column: ordered.groupby("run_id")[column].transform(average)}
+    )
+
+
+def _placeable(df: pd.DataFrame, column: str, y_scale: YScale) -> tuple[pd.DataFrame, list[dmc.Text]]:
+    """The points of `df` a `y_scale` axis can place, and a note of how many it can't: a log axis has no 0 or below."""
+    match y_scale:
+        case "linear":
+            return df, []
+        case "log":
+            placeable = df[column] > 0
+            unplaceable = (~placeable).sum()
+            note = f"{unplaceable:,} values at or below 0 left out: a log scale can't place them"
+            return df[placeable], [dmc.Text(note, size="xs", c="dimmed")] if unplaceable else []
+
+
+def _y_axis_props(y_scale: YScale) -> dict[str, typing.Any]:
+    """The value axis: its width and tick format, and for a log scale the scale and a domain of the data's own range."""
+    props: dict[str, typing.Any] = {
+        "width": VALUE_AXIS_WIDTH,
+        "tickFormatter": {"function": "lineChartValueTick"},
+    }
+    match y_scale:
+        case "linear":
+            return props
+        case "log":
+            return props | {"scale": "log", "domain": ["auto", "auto"], "allowDataOverflow": True}
+
+
 def _nearest_fill_pivot(df: pd.DataFrame, x_axis: str, column: str) -> pd.DataFrame:
     """
     Pivot `df` (long: `[x_axis, "run_id", column]`) into one row per x that *any* run logged at.
@@ -92,8 +144,10 @@ def _nearest_fill_pivot(df: pd.DataFrame, x_axis: str, column: str) -> pd.DataFr
     """
     all_x = pd.DataFrame({x_axis: sorted(df[x_axis].unique())})
     result = {x_axis: all_x[x_axis]}
+    raw = f"{column}{_RAW}"
+    values = [column, *([raw] if raw in df.columns else [])]
     for run_id, run_df in df.groupby("run_id"):
-        run_df = run_df[[x_axis, column]].sort_values(x_axis)
+        run_df = run_df[[x_axis, *values]].sort_values(x_axis)
         run_df["_source_x"] = run_df[x_axis]
         filled = pd.merge_asof(all_x, run_df, on=x_axis, direction="nearest")
         in_range = all_x[x_axis].between(run_df[x_axis].iloc[0], run_df[x_axis].iloc[-1])
@@ -101,6 +155,8 @@ def _nearest_fill_pivot(df: pd.DataFrame, x_axis: str, column: str) -> pd.DataFr
         result[str(run_id)] = filled[column].where(logged_here)
         result[f"{run_id}__y"] = filled[column].where(in_range)
         result[f"{run_id}__x"] = filled["_source_x"].where(in_range)
+        if raw in values:  # a smoothed run's logged value, named in the tooltip beside its smoothed one
+            result[f"{run_id}{_RAW}__y"] = filled[raw].where(in_range)
     return pd.DataFrame(result)
 
 
@@ -144,6 +200,10 @@ class LineChartSettings(BaseModel, frozen=True, extra="forbid", use_attribute_do
         Field(default="number")
     )
     """"number" spaces points by their actual value (step 10 sits 10x as far from 0 as step 1); "category" gives every distinct x value equal spacing regardless of its size; "date" treats the axis as a timestamp (e.g. timestamp_utc), showing real calendar dates; "time" treats it as an elapsed duration in seconds, showing it as h:mm:ss."""
+    smoothing: typing.Annotated[float, DISPLAY_SECTION] = Field(default=0.0, ge=0.0, le=0.99)
+    """Smooths each run's line as TensorBoard does (a debiased moving average): 0 is off, 0.9 smooths a lot. The tooltip names each logged value beside its smoothed one."""
+    y_scale: typing.Annotated[YScale, DISPLAY_SECTION] = Field(default="linear")
+    """"log" for values spread over orders of magnitude (a loss early and late in training). It can't place a value at or below 0: those are left out, and the chart says how many."""
 
 
 class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.Stack], frozen=True, extra="forbid"):
@@ -192,6 +252,8 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.Stack], frozen=Tr
         has_value = plotted[parameters.column].notna()
         read = has_value.sum()
         df = plotted.loc[has_value].groupby([x_col, "run_id"], as_index=False)[[parameters.column]].mean()
+        df, notes = _placeable(df, parameters.column, parameters.y_scale)
+        df = _smoothed(df, x_col, parameters.column, parameters.smoothing)
         if parameters.sample:
             # Sample against every sibling metric column sharing this x-axis, not just this
             # chart's own -- so every chart in the panel picks the same x-values and stays
@@ -211,10 +273,11 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.Stack], frozen=Tr
                 wide, x_col=x_col, group_col="run_id", value_cols=value_cols, max_points=parameters.max_points
             )
             df = df.merge(grid, on=["run_id", parameters.x_axis], how="inner")
+        if df.empty:  # every value was one a log scale can't place
+            return titled(parameters.column, nothing_to_place(parameters.column, x_col), *notes)
         run_ids = sorted(df["run_id"].unique())
-        notes: list[dmc.Text] = (
-            [_read_note(read, len(df))] if read > READ_NOTE_FACTOR * parameters.max_points else []
-        )
+        if read > READ_NOTE_FACTOR * parameters.max_points:
+            notes.append(_read_note(read, len(df)))
         # A run with one point (an x-axis its values share, like a learning rate that never changes) has no line to
         # draw, so it is drawn as the dot it is.
         has_single_point_run = bool((df.groupby("run_id").size() == 1).any())
@@ -250,7 +313,7 @@ class LineChart(ChartType[LineChartSettings, pd.DataFrame, dmc.Stack], frozen=Tr
             series=series,  # pyrefly: ignore [bad-argument-type]
             xAxisLabel=fit_axis_label(parameters.x_axis, parameters.max_axis_label_chars),
             xAxisProps=x_axis_props,
-            yAxisProps={"width": VALUE_AXIS_WIDTH, "tickFormatter": {"function": "lineChartValueTick"}},
+            yAxisProps=_y_axis_props(parameters.y_scale),
             withLegend=True,
             # A legend of many runs wraps to many rows, which Recharts takes from the plot: capped at a couple of
             # rows (and scrolled past them), the plot keeps its height whatever the number of runs. The tooltip
