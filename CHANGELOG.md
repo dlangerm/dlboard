@@ -41,6 +41,10 @@ pulls that section's body into the GitHub release notes and publishes both distr
 * **Nothing is logged to a run deleted while its batch was being written,** where the artifacts of one could stay
   readable until a purge. `/readyz` costs the same however many projects there are. Deleting many runs never fails part-way
   with some batches deleted. (#678)
+* **A background task's run ends with its work.** The rest the duty cycle asks for came after every batch, the last one
+  included, so a run went on holding its lease, and what it asked for next (retention's checks, after scheduling them),
+  for three times as long as its last batch took, with nothing left to do. A task now rests before its next batch, and the
+  rest is a `dlboard.custodian.rest` span where a trace showed only a gap. (#684)
 
 * **The logger's shipping no longer stalls, fails training, or hangs at the end of a run.** A metric that diverged to NaN
   or infinity stopped every metric after it from shipping for the rest of the run; it is recorded as it is. A batch with

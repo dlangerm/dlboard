@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any, Final
 import pendulum
 
 from dlboard._compat import StrEnum
+from dlboard._telemetry.traces import SpanKind, span
 from dlboard.serve._backend._app_slot import AppSlot
 
 if TYPE_CHECKING:
@@ -130,13 +131,27 @@ class TaskContext:
         self._duty_cycle = duty_cycle
         self._claim_for = claim_for
         self._batches: deque[float] = deque(maxlen=_PACE_HISTORY)
+        self._rest_owed = 0.0
+        """How long the last batch asks the task to rest before its next (`batch`)."""
         self._ends_at = time.monotonic() + task.timeout.total_seconds() * _RUN_BUDGET
         self.backlog: int | None = None
         """What the task last said it had left to do, for the `dlboard.task.backlog` metric."""
 
     def should_stop(self) -> bool:
-        """Whether the custodian is stopping, or this run has used its budget of the task's timeout: check between batches and return."""
+        """
+        Whether the custodian is stopping, or this run has used its budget of the task's timeout: check between batches and return.
+
+        Rests first for what the last batch owes, so a stop asked for while resting is answered before the next batch.
+        """
+        self._rest()
         return self._stop.is_set() or time.monotonic() > self._ends_at
+
+    def _rest(self) -> None:
+        """Wait out what the last batch owes, once, as a span of its own: a trace would show only a gap where it was."""
+        if self._rest_owed > 0:
+            with span("dlboard.custodian.rest", SpanKind.INTERNAL):
+                self._stop.wait(self._rest_owed)
+            self._rest_owed = 0.0
 
     def report(self, *, backlog: int | None = None, **details: Any) -> None:  # noqa: ANN401 -- the task's own JSON
         """Record what the task is doing (how much is left), shown on the admin page and as `dlboard.task.backlog`."""
@@ -161,16 +176,19 @@ class TaskContext:
     @contextmanager
     def batch(self) -> Generator[None]:
         """
-        Do one batch of work, then wait long enough to keep this task to its share of the database (`duty_cycle`).
+        Do one batch of work, resting first long enough to keep this task to its share of the database (`duty_cycle`).
 
-        A batch that took `t` is followed by a wait of `t * (1 - d) / d`: the busier the database, the longer each batch takes,
-        and the longer the task leaves it alone. One far slower than the task's usual waits that much longer again.
+        A batch that took `t` owes a rest of `t * (1 - d) / d`: the busier the database, the longer each batch takes, and the
+        longer the task leaves it alone. One far slower than the task's usual owes that much longer again. The rest comes
+        before the next batch (or `should_stop`), not after this one: nothing follows a run's last batch, so its run ends
+        with its work instead of holding its lease, and whatever it asked for, to rest.
         """
+        self._rest()
         started = time.monotonic()  # not the wall clock, which a synced machine steps
         yield
         took = time.monotonic() - started
-        wait = took * (1 - self._duty_cycle) / self._duty_cycle
+        rest = took * (1 - self._duty_cycle) / self._duty_cycle
         if len(self._batches) >= _PACE_HISTORY_MIN and took > _SLOW_BATCH * statistics.median(self._batches):
-            wait *= _SLOW_BATCH
+            rest *= _SLOW_BATCH
         self._batches.append(took)
-        self._stop.wait(wait)
+        self._rest_owed = rest

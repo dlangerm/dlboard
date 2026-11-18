@@ -296,6 +296,11 @@ the panel or chart name in it. Under it, each kind of data a panel reads is a `d
 `dlboard.read.unscoped`, whether it read every metric the experiment logged, which a table that names no metrics does.
 Drawing each chart is a `dlboard.chart.render` span with the chart's `dlboard.chart.type`.
 
+**A background task's run** is a trace of its own, `dlboard.task.<name>`, in the custodian process. Each rest the duty
+cycle asks for between its batches is a `dlboard.custodian.rest` span (see
+[background-tasks.md](background-tasks.md#how-it-works)): a run whose batch took `t` rests `3t` by default, so a slow
+commit in one batch shows up again as a rest three times as long before the next.
+
 `tools/ingest_load.py` in the repository reproduces an upload load, with headless browsers holding the experiment page
 open if asked, against a local Postgres or a deployment of yours, and reports where `dlboard.blob.ingest` spent its time.
 

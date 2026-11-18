@@ -12,6 +12,7 @@ import pendulum
 import pytest
 import sqlalchemy as sa
 
+from dlboard._telemetry.traces import flush
 from dlboard.conftest import recorded_statements
 from dlboard.serve._custodian import Task, TaskContext, TaskMode, TaskOutcome
 from dlboard.serve._custodian._models import TaskState
@@ -22,6 +23,7 @@ if TYPE_CHECKING:
     from datetime import datetime
 
     from dash import Dash
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
     from dlboard.conftest import Clock
     from dlboard.serve import SQLStoreBase
@@ -300,9 +302,11 @@ class _RecordedWaits(threading.Event):
 
 
 @pytest.mark.parametrize("duty_cycle", [0.25, 0.5, 1.0])
-def test_a_batch_is_followed_by_a_wait_that_keeps_the_task_to_its_share_of_time(
-    store: SQLStoreBase[Any], duty_cycle: float
+@pytest.mark.parametrize("checks_between", [True, False], ids=["checks-should-stop", "batches-back-to-back"])
+def test_each_batch_rests_for_the_one_before_it_to_keep_the_task_to_its_share_of_time(
+    span_exporter: InMemorySpanExporter, store: SQLStoreBase[Any], duty_cycle: float, checks_between: bool
 ) -> None:
+    """Once, before the next batch, and never after the last: a run ends with its work, not a rest nothing follows."""
     stop = _RecordedWaits()
     ctx = TaskContext(
         cast("Dash", object()),
@@ -313,11 +317,19 @@ def test_a_batch_is_followed_by_a_wait_that_keeps_the_task_to_its_share_of_time(
         duty_cycle=duty_cycle,
         claim_for=pendulum.duration(minutes=1),
     )
-    for took in (0.01, 0.01, 0.01, 0.2):
+    for took in (0.01, 0.01, 0.01, 0.2, 0.01):
+        if checks_between:
+            assert not ctx.should_stop()
         with ctx.batch():
             time.sleep(took)
-    expected = [took * (1 - duty_cycle) / duty_cycle for took in (0.01, 0.01, 0.01, 0.2 * 10)]
+    flush()
+    # The fourth, 10x the others, is the database under strain: the rest after it is 10x longer again.
+    expected = [
+        took * (1 - duty_cycle) / duty_cycle for took in (0.01, 0.01, 0.01, 0.2 * 10) if duty_cycle < 1
+    ]
     assert stop.waits == pytest.approx(expected, rel=0.5, abs=0.01)
+    rests = [s for s in span_exporter.get_finished_spans() if s.name == "dlboard.custodian.rest"]
+    assert len(rests) == len(expected)  # a trace shows each rest, not a gap
 
 
 def test_a_run_is_told_to_stop_once_it_has_used_its_share_of_the_tasks_timeout(

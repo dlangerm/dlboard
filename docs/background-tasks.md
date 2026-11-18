@@ -46,9 +46,10 @@ database:
 - SQLite has one writer whatever the number of custodians: more servers on one SQLite database add no throughput. More than
   one server is a Postgres deployment.
 
-**It keeps out of the way of live traffic.** After a batch of work that took `t`, a task waits `t * (1 - d) / d`, where `d` is
-`DLBOARD_CUSTODIAN_DUTY_CYCLE` (0.25): it takes at most that share of the database's time, drains as fast as that allows, and
-slows itself when the database is busy, because every batch then takes longer. A task claims, deletes and writes a batch at a
+**It keeps out of the way of live traffic.** A batch of work that took `t` is followed, before the next one, by a rest of
+`t * (1 - d) / d`, where `d` is `DLBOARD_CUSTODIAN_DUTY_CYCLE` (0.25): a task takes at most that share of the database's
+time, drains as fast as that allows, and slows itself when the database is busy, because every batch then takes longer.
+Nothing follows a run's last batch, so a run ends as soon as its work does. A task claims, deletes and writes a batch at a
 time, never a row at a time, and an idle custodian reads the database every `DLBOARD_CUSTODIAN_POLL_S` and records its
 heartbeat every `DLBOARD_CUSTODIAN_BEAT_S`: a few statements a minute.
 
