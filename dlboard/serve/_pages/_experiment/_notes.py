@@ -17,12 +17,13 @@ from typing import TYPE_CHECKING, Any, cast
 import dash_mantine_components as dmc
 import pendulum
 from dash import ALL, Input, Output, State, ctx, html, no_update
+from dash.dcc import Store
 from dash.exceptions import PreventUpdate
 
 from dlboard import models
 from dlboard.serve import ClientsideScript, Icon, get_current_user, get_data_store, icon, series_swatch_class
 from dlboard.serve import _constants as constants
-from dlboard.serve._component_ids import ButtonId, StoreId
+from dlboard.serve._component_ids import ButtonId, ModalId, StoreId
 from dlboard.serve._pages._dash_helpers import (
     TriggeredId,
     busy_while_running,
@@ -30,6 +31,7 @@ from dlboard.serve._pages._dash_helpers import (
     tooltipped_action_icon,
 )
 from dlboard.serve._pages._dataframe_helpers import run_display_name
+from dlboard.serve._pages._delete_confirm import DeleteConfirmIds, delete_confirm_modal
 from dlboard.serve._pages._experiment._run_picker import register_run_search, run_options
 
 if TYPE_CHECKING:
@@ -55,6 +57,17 @@ NOTES_POST_ID: ButtonId[ids.ExperimentPage] = ButtonId("notes-post")
 MENTION_LIMIT: typing.Final = 50
 """The most people the mention picker lists at once: the first by name, or the ones its search finds."""
 _DELETE_NOTE_TYPE: typing.Final = "delete-note"
+_DELETE_NOTE_MODAL: ModalId[ids.ExperimentPage] = ModalId("notes-delete-modal")
+_DELETE_NOTE_CONFIRM: ButtonId[ids.ExperimentPage] = ButtonId("notes-delete-confirm")
+_DELETE_NOTE_CANCEL: ButtonId[ids.ExperimentPage] = ButtonId("notes-delete-cancel")
+_DELETE_NOTE = DeleteConfirmIds(
+    button=_DELETE_NOTE_TYPE,  # the type of each note's own button, which are pattern-matched
+    modal=_DELETE_NOTE_MODAL,
+    confirm=_DELETE_NOTE_CONFIRM,
+    cancel=_DELETE_NOTE_CANCEL,
+)
+_DELETING_NOTE: StoreId[ids.ExperimentPage] = StoreId("notes-deleting")
+"""The note a delete button was clicked for, until its confirmation is answered."""
 
 
 class _NoteButton(TriggeredId):
@@ -117,6 +130,8 @@ def notes_drawer() -> dmc.Drawer:
                 dmc.Group(
                     dmc.Button("Post", id=NOTES_POST_ID, leftSection=icon(Icon.NOTES)), justify="flex-end"
                 ),
+                delete_confirm_modal(_DELETE_NOTE, entity_noun="note", body="It is deleted for good."),
+                Store(id=_DELETING_NOTE),
             ]
         ),
     )
@@ -279,18 +294,47 @@ def register_notes_callbacks(app: Dash) -> None:
         thread, count = _thread(store, experiment_id)
         return thread, str(count), "", None, [], []
 
+    _register_note_deletion(app)
+
+
+def _register_note_deletion(app: Dash) -> None:
+    """A note's delete button asks first; only the confirmation deletes it, and draws the thread again."""
+
+    @app.callback(
+        Output(_DELETE_NOTE.modal, "opened", allow_duplicate=True),
+        Output(_DELETING_NOTE, "data"),
+        Input({"type": _DELETE_NOTE_TYPE, "note": ALL}, "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def ask_to_delete_note(clicks: list[int | None]) -> tuple[bool, int]:
+        if not any(clicks):  # the thread drawn again (a note posted or deleted), not a click
+            raise PreventUpdate
+        return True, require_triggered_id(_NoteButton).note
+
+    @app.callback(
+        Output(_DELETE_NOTE.modal, "opened", allow_duplicate=True),
+        Input(_DELETE_NOTE.cancel, "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def cancel_delete_note(n_clicks: int | None) -> bool:
+        if not n_clicks:
+            raise PreventUpdate
+        return False
+
     @app.callback(
         Output(NOTES_THREAD_ID, "children", allow_duplicate=True),
         Output(NOTES_COUNT_ID, "children", allow_duplicate=True),
-        Input({"type": _DELETE_NOTE_TYPE, "note": ALL}, "n_clicks"),
+        Output(_DELETE_NOTE.modal, "opened", allow_duplicate=True),
+        Input(_DELETE_NOTE_CONFIRM, "n_clicks"),
+        State(_DELETING_NOTE, "data"),
         State(constants.STATE_EXPERIMENT_ID, "data"),
+        running=busy_while_running(_DELETE_NOTE_CONFIRM),
         prevent_initial_call=True,
     )
-    def delete_note(clicks: list[int | None], experiment_id: int) -> tuple[Any, str]:
-        if not any(clicks):  # the thread drawn again (a note posted), not a click
+    def delete_note(n_clicks: int | None, note_id: int | None, experiment_id: int) -> tuple[Any, str, bool]:
+        if not n_clicks or note_id is None:
             raise PreventUpdate
-        note_id = require_triggered_id(_NoteButton).note
         store = get_data_store()
         store.delete_comment(note_id, get_current_user().id)
         thread, count = _thread(store, experiment_id)
-        return thread, str(count)
+        return thread, str(count), False

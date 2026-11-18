@@ -2020,6 +2020,20 @@ def test_notes_post_to_the_thread_and_arrive_live_from_others(
     store.add_comment(models.NewComment(experiment_id=experiment_id, author_id=colleague.id, body="agreed"))
     expect(thread.get_by_text("agreed")).to_be_visible(timeout=10_000)  # one live-poll tick away
     expect(page.locator(f"#{NOTES_COUNT_ID}")).to_have_text("2")
+
+    # Deleting one's own note asks first (#672): cancelled, it is still there; confirmed, it is gone.
+    delete = thread.get_by_role("button", name="Delete this note")
+    expect(delete).to_have_count(1)  # only on one's own note, not the colleague's
+    delete.click()
+    confirm = page.get_by_role("dialog", name="Delete this note?")
+    confirm.get_by_role("button", name="Cancel").click()
+    expect(confirm).to_be_hidden()
+    expect(thread.get_by_text("baseline diverges after step 40")).to_be_visible()
+    delete.click()
+    confirm.get_by_role("button", name="Delete", exact=True).click()
+    expect(thread.get_by_text("baseline diverges after step 40")).to_have_count(0)
+    expect(thread.get_by_text("agreed")).to_be_visible()
+    expect(page.locator(f"#{NOTES_COUNT_ID}")).to_have_text("1")
     assert console_errors == []
 
 
