@@ -2,12 +2,11 @@
 
 ## What is this
 
-`dlboard.client.dlboard_logger.DLBoardLogger` (`dlboard/client/dlboard_logger.py`) is a
-`pytorch_lightning.loggers.Logger` — drop it into a `Trainer` like any other PL logger. Under the
-hood it talks to a running dlboard server over REST via `BasicDlboardAPI`
-(`dlboard/client/_rest_api.py`), and spawns two daemon subprocesses that batch
-metrics and artifacts off multiprocessing queues and flush them on an interval, so training is
-never blocked on network I/O.
+`dlboard.client.run` (`dlboard/client/run.py`) logs a run from any training loop: plain PyTorch, the HF `Trainer`,
+JAX, anything. `dlboard.client.dlboard_logger.DLBoardLogger` is the same thing as a `pytorch_lightning.loggers.Logger`,
+to drop into a `Trainer` like any other PL logger. Either talks to a running dlboard server over REST via
+`BasicDlboardAPI` (`dlboard/client/_rest_api.py`), and spawns two daemon subprocesses that batch metrics and artifacts
+off multiprocessing queues and flush them on an interval, so training is never blocked on network I/O.
 
 ## When you'd need this
 
@@ -18,20 +17,41 @@ below.
 ## How it works
 
 ```python
+from dlboard.client import run as dlboard
+
+if __name__ == "__main__":
+    with dlboard.init("my-project", hparams=config, server_url="http://localhost:8050") as run:
+        for step, batch in enumerate(loader):
+            run.log_metrics({"train/loss": train_step(batch)}, step=step)
+```
+
+`init(project, experiment="default", ...)` creates the project and experiment by name the first time it sees them and
+starts a run in them (`name=` names it; one is made up otherwise). It needs only the base `dlboard-client` install,
+not Lightning or torch. Every metric needs its `step`: dlboard keeps no counter of its own, which another process
+sharing the run or a resumed run couldn't agree with. The `with` block finishes the run as *finished*, or as *failed* if
+it raises; without one, call `run.finish()` (or `run.finish(RunStatus.FAILED)`). `examples/plain_quickstart.py` is a
+complete, runnable example.
+
+With PyTorch Lightning, the logger does the same:
+
+```python
 from dlboard.client.dlboard_logger import DLBoardLogger
 
-logger = DLBoardLogger(project_id=project.id, server_url="http://localhost:8050")
+logger = DLBoardLogger.from_names("my-project", server_url="http://localhost:8050")
 trainer = pl.Trainer(logger=logger)
 ```
 
-If you don't already have an experiment, omit `experiment_id` and one is created for you. Metrics
-logged via PL's normal `self.log(...)` and hyperparameters via `save_hyperparameters()` are picked
-up automatically. See `examples/lightning_quickstart.py` for a complete, runnable example (MNIST MLP, with a
-matplotlib figure), `examples/lightning_advanced.py` for a tour of the rest (nested hyperparameters, checkpoints,
-mask and box previews, interactive Plotly figures, Lightning's monitoring callbacks), and
-`examples/lightning_stress_test.py`, the same run logging far more, to load a server rather than to be looked at.
+`DLBoardLogger(project_id=..., experiment_id=...)` takes ids instead; omit `experiment_id` and one is created for you.
+Metrics logged via PL's normal `self.log(...)` and hyperparameters via `save_hyperparameters()` are picked up
+automatically. See `examples/lightning_quickstart.py` for a complete, runnable example (MNIST MLP, with a matplotlib
+figure), `examples/lightning_advanced.py` for a tour of the rest (nested hyperparameters, checkpoints, mask and box
+previews, interactive Plotly figures, Lightning's monitoring callbacks), and `examples/lightning_stress_test.py`, the
+same run logging far more, to load a server rather than to be looked at.
 
-**Hyperparameters.** `save_hyperparameters()` (or `logger.log_hyperparams(...)`) takes anything
+Everything below is the same for both: `logger.log_artifact(...)`, `logger.log_histograms(...)` and the rest are a
+run's `run.log_artifact(...)`, `run.log_histograms(...)`, ..., and `logger.finalize(...)` is `run.finish(...)`.
+
+**Hyperparameters.** `init(hparams=...)`, `save_hyperparameters()` (or `logger.log_hyperparams(...)`) takes anything
 nested: pydantic models, pydantic and stdlib dataclasses, a `Namespace`, plain dicts and ordinary
 init args. They're flattened to `parent/child` keys (`optim/schedule/warmup_steps`), which the
 experiment page's hyperparameter columns and run compare group on the same `/`. Pydantic serializes
@@ -71,8 +91,8 @@ visible as training appearing to restart, or the logger itself being constructed
 This is the same requirement Python's own `multiprocessing` docs describe for any spawn-based code,
 not something specific to dlboard.
 
-**How a run ends.** Lightning finalizes the logger when a stage finishes: `"success"` records the run as
-*finished* and `"failed"` as *failed*, with the time it ended (stamped by your machine, like the run's start,
+**How a run ends.** A run's `with` block (or `run.finish(...)`) ends it, and Lightning finalizes the logger when a
+stage finishes: `"success"` records the run as *finished* and `"failed"` as *failed*, with the time it ended (stamped by your machine, like the run's start,
  so the duration never mixes two clocks). The runs table shows it as "running", "3m 23s", "2d 3h" or "✕ 1h 2m" next to
 the run. A later stage (`trainer.test` after `fit`) moves the end time later. A script that exits without Lightning
 finalizing the logger (an exception outside the trainer, say) is recorded as *unknown* -- ended, but not known how.
@@ -81,7 +101,9 @@ server that predates this simply doesn't record any of it.
 
 **Multi-GPU (DDP).** Every rank builds its own logger and Lightning calls all of them, so only
 global rank 0 logs: a non-zero rank makes no server calls, starts no shipping processes and drops
-whatever it's asked to log, which means one run per job rather than one per GPU. To log into a run
+whatever it's asked to log, which means one run per job rather than one per GPU. Call `init` on every rank too: it
+reads the rank the launcher set (`RANK`, else `LOCAL_RANK`, `SLURM_PROCID` or `JSM_NAMESPACE_RANK`, as Lightning
+does), and a non-zero rank gets a run that does nothing. To log into a run
 that already exists instead of creating one — resuming it, or sharing it between processes you
 launch separately — pass `run_id=` or set `DLBOARD_RUN_ID`; the logger checks it exists up front
 and uses its experiment. `logger.run_id` is how you read the id of a run the logger created, to
@@ -113,7 +135,7 @@ For a long run, log less often rather than expecting every step to be cheap:
 a failure with exponential backoff rather than hammering a server that's still down. If the buffer
 fills faster than it can drain, the item being logged is dropped (not blocked on), with a
 rate-limited warning while it keeps happening and a final count at `finalize()`. Size the buffers
-with `DLBoardLoggerSettings` (`metrics_q_size`, `artifact_q_size`, ...) if your logging rate is high
+with `RunSettings` (`DLBoardLoggerSettings` for the logger; `metrics_q_size`, `artifact_q_size`, ...) if your logging rate is high
 enough that this matters; `DLBOARD_CONNECT_TIMEOUT_S`/`DLBOARD_READ_TIMEOUT_S` (defaults 10s/60s)
 cap how long any one request waits before it's treated as failed, and `finalize()` waits at most 60s
 for both shipping processes together, however long the server stays down.

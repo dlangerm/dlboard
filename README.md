@@ -34,7 +34,17 @@ That's it. Visit `http://localhost:8050` and you'll have a clean, modern experim
 
 ### 3. Log a training run
 
-Point your training script at the running server:
+Point your training script at the running server, from any training loop:
+
+```python
+from dlboard.client import run as dlboard
+
+with dlboard.init("character-classification", "mnist", hparams=config) as run:
+    for step, batch in enumerate(loader):
+        run.log_metrics({"train/loss": train_step(batch)}, step=step)
+```
+
+Or, with PyTorch Lightning, drop in the logger:
 
 ```python
 from dlboard.client.dlboard_logger import DLBoardLogger
@@ -57,7 +67,7 @@ Every metric, hyperparameter, and artifact you log gets synced to dlboard in the
 - **Pins and cross-experiment comparisons** — pin the runs that matter in a colour of your team's choosing, then put runs from any experiments of a project on one dashboard; see [docs/comparisons.md](docs/comparisons.md)
 - **Retention policies** — cap the runs each project or experiment keeps, by count or by age, with kept runs exempt, a grace period on every change and a background custodian that deletes quietly; see [docs/retention.md](docs/retention.md)
 - **Side-by-side run comparison** — compare metrics, hyperparameters, and artifacts across any runs, or diff up to five runs in a shareable modal
-- **PyTorch Lightning integration** — drop in `DLBoardLogger` and you're done
+- **Any training loop** — `dlboard.client.run.init` from plain PyTorch, the HF `Trainer` or JAX, or drop `DLBoardLogger` into a PyTorch Lightning `Trainer` and you're done
 - **Personal views** — save custom layouts and filters without touching the shared experiment page
 - **Built for big experiments** — panels and the charts in them are paged and fuzzy-filterable, so an experiment with thousands of charts opens as fast as a small one, and every page and filter is a shareable link
 - **Artifact streaming** — log images, plots, and structured data; browse them in the UI

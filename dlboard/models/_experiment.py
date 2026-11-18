@@ -11,6 +11,8 @@ class ExperimentSource(StrEnum):
 
     PYTORCH_LIGHTNING = "pytorch_lightning"
     """Logged via `dlboard.client.dlboard_logger.DLBoardLogger`, a `pytorch_lightning` `Logger`."""
+    PYTHON = "python"
+    """Logged via `dlboard.client.run.init`, from a training loop of any framework (or none)."""
 
 
 class NewExperiment(BaseModel, frozen=True, extra="ignore"):

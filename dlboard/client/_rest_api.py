@@ -65,7 +65,7 @@ def _raise_for_status(res: requests.Response) -> None:
 
     A bare "500 Server Error" says nothing about *which* request failed; the id is what finds that request's
     line (and traceback) in the server's log. A 4xx's `error` says why it was refused (a project that takes no
-    new runs for now, say). The response stays on the error, for `classify_failure` (`dlboard_logger.py`).
+    new runs for now, say). The response stays on the error, for `classify_failure` (`dlboard/client/run.py`).
     """
     try:
         res.raise_for_status()

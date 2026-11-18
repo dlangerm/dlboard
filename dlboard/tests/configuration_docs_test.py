@@ -40,7 +40,9 @@ def _env_vars() -> list[str]:
     return sorted(found)
 
 
-_DOCUMENTED = set(re.findall(r"`((?:DLBOARD|OTEL)_[A-Z0-9_]+)`", _DOC.read_text()))
+_LAUNCHER_VARIABLES = "RANK|LOCAL_RANK|SLURM_PROCID|JSM_NAMESPACE_RANK"
+"""What a distributed launcher sets, which the client reads to log from rank 0 only (`LaunchEnv`)."""
+_DOCUMENTED = set(re.findall(rf"`((?:DLBOARD|OTEL)_[A-Z0-9_]+|{_LAUNCHER_VARIABLES})`", _DOC.read_text()))
 
 
 @pytest.mark.parametrize("env_var", _env_vars())

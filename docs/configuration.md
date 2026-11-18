@@ -216,7 +216,7 @@ Only matter with an identity-verifying provider such as `PASSWORD_AUTH`. See [au
 
 ## Client (training scripts)
 
-Read by `DLBoardLogger` and the REST client in the training process. See [client.md](client.md).
+Read by `dlboard.client.run.init`, `DLBoardLogger` and the REST client in the training process. See [client.md](client.md).
 
 | Variable | Default | |
 |---|---|---|
@@ -225,6 +225,10 @@ Read by `DLBoardLogger` and the REST client in the training process. See [client
 | `DLBOARD_USER` | OS login name | The username to attribute a run to on a server that doesn't verify identity. |
 | `DLBOARD_CONNECT_TIMEOUT_S` | `10` | How long a request waits to connect. |
 | `DLBOARD_READ_TIMEOUT_S` | `60` | How long a request waits for the server's response. |
+
+`init` also reads the rank a launcher gives each process, the way Lightning does: the first of `RANK`,
+`LOCAL_RANK`, `SLURM_PROCID` and `JSM_NAMESPACE_RANK` that is set (torchrun, accelerate, SLURM and jsrun set them).
+Only rank 0 logs, and with none of them set a process is rank 0.
 
 ## Shutting down
 

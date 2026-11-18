@@ -61,6 +61,18 @@ print("ok")
     assert result.stdout.strip() == "ok"
 
 
+def test_the_client_s_own_run_api_never_needs_lightning_or_torch() -> None:
+    """A plain PyTorch loop, the HF `Trainer` or a JAX script logs through `init` without the `[lightning]` extra."""
+    script = """
+from dlboard.client.run import Run, RunSettings, init
+print("ok")
+"""
+    result = _run_with_blocked_imports((*_SERVER_ONLY_PACKAGES, *_CLIENT_ONLY_PACKAGES), script)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "ok"
+
+
 def test_importing_the_server_never_needs_torch() -> None:
     script = """
 import dlboard.plugins.backend.basic_rest_backend

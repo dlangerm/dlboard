@@ -45,7 +45,8 @@ background work no user is behind uses `get_system_data_store()` instead. See
 [plugins/auth.md](plugins/auth.md).
 
 **Request flow, client to server.**
-1. `DLBoardLogger` (`dlboard/client/dlboard_logger.py`) creates a run via `BasicDlboardAPI`
+1. A `Run` (`dlboard/client/run.py`, started by `init`, or by `DLBoardLogger` in `dlboard/client/dlboard_logger.py`
+   for Lightning) creates a run via `BasicDlboardAPI`
    (`dlboard/plugins/backend/basic_rest_backend.py`) and spawns two daemon subprocesses that batch
    metrics/artifacts off multiprocessing queues and flush them to the REST API on an interval, so
    training never blocks on network I/O.

@@ -175,11 +175,13 @@ policy over what was logged (which runs to delete, say) builds it on these and t
 
 ### Data flow: client → server
 
-1. `dlboard.client.dlboard_logger.DLBoardLogger` is a `pytorch_lightning.loggers.Logger`. On init it creates
-   an experiment/run via `BasicDlboardAPI` (`dlboard/client/_rest_api.py`) and spawns two daemon
-   subprocesses, one for metrics and one for artifacts (`_start_shipper`, each running `dlboard._batching.ship_batches`),
+1. `dlboard.client.run.Run` (started by `dlboard.client.run.init`, from any training loop) creates an
+   experiment/run via `BasicDlboardAPI` (`dlboard/client/_rest_api.py`) and spawns two daemon
+   subprocesses, one for metrics and one for artifacts (`_start_worker`, each running `dlboard._batching.ship_batches`),
    that batch and flush them from multiprocessing queues to the REST backend on an interval, so training isn't
-   blocked on network I/O.
+   blocked on network I/O. `dlboard.client.dlboard_logger.DLBoardLogger` is the `pytorch_lightning.loggers.Logger`
+   adapter over a `Run`, adding only what is Lightning's (rank-zero decorators, `finalize`'s statuses, checkpoints);
+   anything a run does for every training loop belongs in `run.py`, which must never import Lightning.
 2. `dlboard/plugins/backend/basic_rest_backend.py` (server side) exposes the REST API that ingests these batches.
 3. Server-side storage is split into a `DataStore` (structured metadata: projects, experiments, runs, metrics,
    hparams) and an `ArtifactStore` (blob storage), both defined as generic protocols in
