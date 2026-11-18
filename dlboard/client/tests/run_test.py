@@ -28,7 +28,7 @@ import requests
 from dlboard import models
 from dlboard._batching import Failure
 from dlboard._mp_context import SPAWN_CONTEXT
-from dlboard.client import run
+from dlboard.client import _context, run
 from dlboard.client.artifacts.figure import Figure
 from dlboard.client.artifacts.image import Image
 from dlboard.client.artifacts.overlay import Overlay
@@ -66,6 +66,7 @@ def test_init_starts_a_named_run_in_the_project_and_experiment_it_names(
         ("get_or_create_experiment", (1,)),
         ("create_run", (2,)),
         ("mark_run", (99,)),
+        ("record_run_context", (99,)),
         ("log_hyperparams", ({"lr": 0.1},)),
     ]
     assert fake_api.calls[0][2] == {"description": "desc"}
@@ -73,6 +74,46 @@ def test_init_starts_a_named_run_in_the_project_and_experiment_it_names(
     assert fake_api.calls[2][2] == {"name": "baseline"}
     assert (started.run_id, started.experiment_id, len(shippers)) == (99, 2, 2)
     started.finish()
+
+
+def test_a_new_run_records_what_produced_it_and_queues_its_uncommitted_changes(
+    fake_api: FakeAPI, shippers: list[FakeShipper]
+) -> None:
+    fake_api.diff = _context.Diff(data=b"--- a/train.py\n+++ b/train.py\n")
+
+    with run.init("proj"):
+        pass
+
+    assert fake_api.called("record_run_context") == [(99,)]
+    _metrics, artifacts = shippers
+    ((diff,),) = artifacts.items
+    assert (diff.key, diff.tags) == (_context.DIFF_KEY, {models.FILE_KIND_TAG: models.FileKind.DIFF.value})
+
+
+def test_a_run_attached_to_keeps_the_context_it_was_started_with(
+    fake_api: FakeAPI, shippers: list[FakeShipper]
+) -> None:
+    del shippers
+    with run.init("proj", run_id=7):
+        pass
+
+    assert fake_api.called("record_run_context") == []
+
+
+def test_a_server_that_cannot_record_the_context_never_fails_the_script(
+    fake_api: FakeAPI, shippers: list[FakeShipper]
+) -> None:
+    """An older server has no route for it: the run goes on, and says what it could not record."""
+    del shippers
+    fake_api.context_error = requests.HTTPError("404 Not Found")
+
+    with (
+        pytest.warns(UserWarning, match="could not record what produced this run"),
+        run.init("proj") as started,
+    ):
+        started.log_metrics({"loss": 1.0}, step=0)
+
+    assert started.status is models.RunStatus.FINISHED
 
 
 def test_a_run_given_no_name_is_named_by_the_server_model(fake_api: FakeAPI, started: run.Run) -> None:

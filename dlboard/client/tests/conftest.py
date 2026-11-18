@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import dataclasses
 import threading
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
 from dlboard import models
 from dlboard._wire import Identity
-from dlboard.client import dlboard_logger, run
+from dlboard.client import _context, dlboard_logger, run
+
+if TYPE_CHECKING:
+    from dlboard.client._context import ContextSettings, Diff
 
 
 class FakeAPI:
@@ -19,6 +22,24 @@ class FakeAPI:
     def __init__(self) -> None:
         self.calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
         self.finish_error: Exception | None = None
+        self.context_error: Exception | None = None
+        self.diff: Diff | None = None
+        """What `_context.collect` finds uncommitted, for every run started in the test (nothing, by default)."""
+
+    def collect(
+        self, run_id: int, experiment_id: int, settings: ContextSettings
+    ) -> tuple[models.NewRunContext, Diff | None]:
+        """Stands in for `_context.collect`: no git, no package listing, in a unit test."""
+        del settings
+        return models.NewRunContext(
+            run_id=run_id, experiment_id=experiment_id, hostname="test-host"
+        ), self.diff
+
+    def record_run_context(self, context: models.NewRunContext) -> models.RunContext:
+        self.calls.append(("record_run_context", (context.run_id,), {"hostname": context.hostname}))
+        if self.context_error is not None:
+            raise self.context_error
+        return models.RunContext(id=1, **context.model_dump())
 
     def whoami(self) -> Identity:
         return Identity(id=1, username="me", server_version="0.0.0-test")
@@ -104,7 +125,7 @@ class FakeShipper:
 
 @pytest.fixture
 def fake_api(monkeypatch: pytest.MonkeyPatch) -> FakeAPI:
-    """The server every run and logger started in the test talks to."""
+    """The server every run and logger started in the test talks to, and the context each one finds."""
     api = FakeAPI()
 
     def _factory(base_url: str) -> FakeAPI:
@@ -113,6 +134,7 @@ def fake_api(monkeypatch: pytest.MonkeyPatch) -> FakeAPI:
 
     monkeypatch.setattr(run, "BasicDlboardAPI", _factory)
     monkeypatch.setattr(dlboard_logger, "BasicDlboardAPI", _factory)
+    monkeypatch.setattr(_context, "collect", api.collect)
     return api
 
 

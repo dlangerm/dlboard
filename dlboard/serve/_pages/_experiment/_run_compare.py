@@ -90,7 +90,36 @@ class RowKind(StrEnum):
     """What a comparison row's key is."""
 
     HPARAM = "Hyperparameter"
+    CONTEXT = "Context"
+    """What produced the run: its commit, command, packages and machine (`RunContext.flat`)."""
     METRIC = "Metric (latest)"
+
+
+@dataclass(frozen=True)
+class Described:
+    """
+    What the compared runs are described by, which the comparison holds whole: their hyperparameters, and their context.
+
+    A few of each per run (a context's packages, a few hundred), read once for the picked runs; metrics, of which a run
+    can log any number, are read by key, a page at a time.
+    """
+
+    hparams: dict[int, FlatHparamDict]
+    context: dict[int, FlatHparamDict]
+
+    def only(self, entries: Iterable[CompareKey]) -> Described:
+        """The same runs, described by the hyperparameters and facts among `entries` alone (a key of each kind is its own)."""
+        listed = {(entry.kind, entry.key) for entry in entries}
+        return Described(
+            {
+                run: {k: v for k, v in logged.items() if (RowKind.HPARAM, k) in listed}
+                for run, logged in self.hparams.items()
+            },
+            {
+                run: {k: v for k, v in logged.items() if (RowKind.CONTEXT, k) in listed}
+                for run, logged in self.context.items()
+            },
+        )
 
 
 class CompareQuery(UrlState, frozen=True, extra="ignore", populate_by_name=True):
@@ -131,19 +160,28 @@ def _valued(
         yield key, [by_run.get(run_id, {}).get(key) for run_id in run_ids]
 
 
+def _kinds(
+    described: Described, metrics: Mapping[int, Mapping[str, object]]
+) -> tuple[tuple[RowKind, Mapping[int, Mapping[str, object]]], ...]:
+    """Each kind of key a comparison lists, in the order it lists them, with the runs' values of it."""
+    return (
+        (RowKind.HPARAM, described.hparams),
+        (RowKind.CONTEXT, described.context),
+        (RowKind.METRIC, metrics),
+    )
+
+
 def comparison_rows(
-    run_ids: list[int],
-    hparams: Mapping[int, FlatHparamDict],
-    metrics: Mapping[int, Mapping[str, float]],
+    run_ids: list[int], described: Described, metrics: Mapping[int, Mapping[str, float]]
 ) -> list[dict[str, Any]]:
     """
-    One row per hyperparameter, then per metric, any of `run_ids` logged, valued per run (`None` where it didn't).
+    One row per hyperparameter, then context fact, then metric, of any of `run_ids`, valued per run (`None` where none).
 
     Each row also records which runs' cells differ from the baseline (the first of `run_ids`), the
     single source of truth for the highlighting.
     """
     rows: list[dict[str, Any]] = []
-    for kind, by_run in ((RowKind.HPARAM, hparams), (RowKind.METRIC, metrics)):
+    for kind, by_run in _kinds(described, metrics):
         for key, values in _valued(by_run, run_ids):
             changed = [
                 run_field(run_id) for run_id, value in zip(run_ids, values, strict=True) if value != values[0]
@@ -174,64 +212,71 @@ class CompareIndex(BaseModel, frozen=True):
 
     keys: list[str] = Field(default_factory=list[str])
     hparams: int = 0
-    """How many of the keys, from the first, are hyperparameters; the rest are metrics."""
+    """How many of the keys, from the first, are hyperparameters."""
+    context: int = 0
+    """How many of the keys after those are facts of the runs' context; the rest are metrics."""
     differs: str = Field(default="", pattern=r"^[01]*$")
     """A `1` for each key whose values differ across the runs, and a `0` for each that agrees."""
 
     @model_validator(mode="after")
     def _one_flag_per_key(self) -> Self:
-        if len(self.differs) != len(self.keys) or self.hparams > len(self.keys):
-            msg = "a comparison index has a flag for each key, and no more hyperparameters than keys"
+        if len(self.differs) != len(self.keys) or self.hparams + self.context > len(self.keys):
+            msg = "a comparison index has a flag for each key, and no more hyperparameters and context than keys"
             raise ValueError(msg)
         return self
 
     @classmethod
     def of(
-        cls,
-        run_ids: list[int],
-        hparams: Mapping[int, FlatHparamDict],
-        metrics: Mapping[int, Mapping[str, float]],
+        cls, run_ids: list[int], described: Described, metrics: Mapping[int, Mapping[str, float]]
     ) -> CompareIndex:
-        """The index of a comparison: the hyperparameters' keys, then the metrics', with whether each differs."""
+        """The index of a comparison: the hyperparameters' keys, the context's, then the metrics', with whether each differs."""
         listed = [
             (key, any(value != values[0] for value in values))
-            for by_run in (hparams, metrics)
+            for _kind, by_run in _kinds(described, metrics)
             for key, values in _valued(by_run, run_ids)
         ]
         return cls(
             keys=[key for key, _ in listed],
-            hparams=len({key for logged in hparams.values() for key in logged}),
+            hparams=len({key for logged in described.hparams.values() for key in logged}),
+            context=len({key for logged in described.context.values() for key in logged}),
             differs="".join("1" if differs else "0" for _, differs in listed),
         )
+
+    def _kind_at(self, at: int) -> RowKind:
+        if at < self.hparams:
+            return RowKind.HPARAM
+        return RowKind.CONTEXT if at < self.hparams + self.context else RowKind.METRIC
 
     @property
     def entries(self) -> list[CompareKey]:
         return [
-            CompareKey(key, RowKind.HPARAM if at < self.hparams else RowKind.METRIC, flag == "1")
+            CompareKey(key, self._kind_at(at), flag == "1")
             for at, (key, flag) in enumerate(zip(self.keys, self.differs, strict=True))
         ]
 
 
 def filtered_index(
-    index: CompareIndex, mode: CompareMode, search: str, hparams: Mapping[int, FlatHparamDict]
+    index: CompareIndex, mode: CompareMode, search: str, described: Described
 ) -> list[CompareKey]:
     """
     The keys of `index` that `mode` and `search` leave, in order.
 
-    A search matches a key's name, and a hyperparameter's values across the runs. A metric's values are not
-    searched: that would need every metric's latest value on each keystroke, which the index does not hold.
+    A search matches a key's name, and a hyperparameter's or context fact's values across the runs. A metric's values
+    are not searched: that would need every metric's latest value on each keystroke, which the index does not hold.
     """
     needle = search.strip().lower()
-    values: dict[str, list[object]] = {}
-    for logged in hparams.values():
-        for key, value in logged.items():
-            values.setdefault(key, []).append(value)
+    values: dict[tuple[RowKind, str], list[object]] = {}
+    for kind, by_run in ((RowKind.HPARAM, described.hparams), (RowKind.CONTEXT, described.context)):
+        for logged in by_run.values():
+            for key, value in logged.items():
+                values.setdefault((kind, key), []).append(value)
 
     def matches(entry: CompareKey) -> bool:
         if needle in entry.key.lower():
             return True
-        return entry.kind is RowKind.HPARAM and any(
-            value is not None and needle in str(value).lower() for value in values.get(entry.key, [])
+        return any(
+            value is not None and needle in str(value).lower()
+            for value in values.get((entry.kind, entry.key), [])
         )
 
     return [
@@ -289,16 +334,14 @@ def compared_scope(
     return {experiment_id: frozenset(ids) for experiment_id, ids in scope.items()}
 
 
-def load_compared(
-    store: DataStore[...], scope: RunScope, run_ids: list[int]
-) -> tuple[list[Run], dict[int, FlatHparamDict]]:
+def load_compared(store: DataStore[...], scope: RunScope, run_ids: list[int]) -> tuple[list[Run], Described]:
     """
-    The picked runs `scope` holds, in the order picked (the first is the baseline), and their hyperparameters.
+    The picked runs `scope` holds, in the order picked (the first is the baseline), and their hyperparameters and context.
 
     A read of each experiment in `scope`, of its picked runs alone: a run of another experiment is not among them.
     """
     by_id: dict[int, Run] = {}
-    hparams: dict[int, FlatHparamDict] = {}
+    described = Described(hparams={}, context={})
     for experiment_id, picked in scope.items():
         found = (
             {run.id: run for run in store.get_runs(experiment_id, limit=None, run_ids=picked)}
@@ -307,11 +350,15 @@ def load_compared(
         )
         by_id.update(found)
         if found:
-            hparams.update(
+            described.hparams.update(
                 (h.run_id, h.hparams_dict)
                 for h in store.fetch_hyperparams(experiment_id, run_ids=frozenset(found))
             )
-    return [by_id[run_id] for run_id in dict.fromkeys(run_ids) if run_id in by_id], hparams
+            described.context.update(
+                (c.run_id, c.flat())
+                for c in store.fetch_run_contexts(experiment_id, run_ids=frozenset(found))
+            )
+    return [by_id[run_id] for run_id in dict.fromkeys(run_ids) if run_id in by_id], described
 
 
 def run_experiment_names(store: DataStore[...], runs: list[Run]) -> Mapping[int, str]:
@@ -338,10 +385,10 @@ def _latest(
 
 @dataclass(frozen=True)
 class Comparison:
-    """The runs a comparison is of, their hyperparameters, and the index of every key they logged."""
+    """The runs a comparison is of, what describes them, and the index of every key they have."""
 
     runs: list[Run]
-    hparams: dict[int, FlatHparamDict]
+    described: Described
     index: CompareIndex
 
 
@@ -351,12 +398,12 @@ def load_run_compare(store: DataStore[...], scope: RunScope, run_ids: list[int])
 
     Reads only through existing store calls, scoped to the picked runs (see `load_compared`).
     """
-    runs, hparams = load_compared(store, scope, run_ids)
+    runs, described = load_compared(store, scope, run_ids)
     if not runs:
-        return Comparison(runs=[], hparams={}, index=CompareIndex())
+        return Comparison(runs=[], described=described, index=CompareIndex())
     metrics = _latest(store, runs, None)
     return Comparison(
-        runs=runs, hparams=hparams, index=CompareIndex.of([run.id for run in runs], hparams, metrics)
+        runs=runs, described=described, index=CompareIndex.of([run.id for run in runs], described, metrics)
     )
 
 
@@ -384,7 +431,7 @@ class ComparePage:
 def comparison_page(  # noqa: PLR0913 -- the store and the runs, then what the page is of
     store: DataStore[...],
     runs: list[Run],
-    hparams: Mapping[int, FlatHparamDict],
+    described: Described,
     index: CompareIndex,
     mode: CompareMode,
     search: str,
@@ -393,17 +440,16 @@ def comparison_page(  # noqa: PLR0913 -- the store and the runs, then what the p
     """
     Page `number` of the comparison `index` describes, for `runs`: those keys' values, and no other key's.
 
-    The page's hyperparameters come from `hparams` (a few per run) and its metrics are read by key, one probe per run
-    and key on the page. The index already says which keys are listed, so a page never reads the others.
+    The page's hyperparameters and context come from `described` (held whole) and its metrics are read by key, one probe
+    per run and key on the page. The index already says which keys are listed, so a page never reads the others.
     """
     if not runs:
         return ComparePage(runs=[], rows=[], matching=0, number=1, total=1)
-    matching = filtered_index(index, mode, search, hparams)
+    matching = filtered_index(index, mode, search, described)
     shown = page_slice(matching, number, COMPARE_PAGE_SIZE)
-    hparam_keys = frozenset(entry.key for entry in shown.items if entry.kind is RowKind.HPARAM)
     metric_keys = frozenset(entry.key for entry in shown.items if entry.kind is RowKind.METRIC)
     metrics = _latest(store, runs, metric_keys) if metric_keys else dict[int, dict[str, float]]()
-    rows = comparison_rows([run.id for run in runs], _only(hparams, hparam_keys), _only(metrics, metric_keys))
+    rows = comparison_rows([run.id for run in runs], described.only(shown.items), _only(metrics, metric_keys))
     return ComparePage(runs=runs, rows=rows, matching=len(matching), number=shown.number, total=shown.total)
 
 
@@ -476,7 +522,7 @@ def compare_components(
     shown = comparison_page(
         store,
         comparison.runs,
-        comparison.hparams,
+        comparison.described,
         comparison.index,
         query.mode,
         query.search,
@@ -516,7 +562,7 @@ def compare_components(
                         ),
                         dmc.TextInput(
                             id=COMPARE_SEARCH_ID,
-                            placeholder="Search keys and hyperparams…",
+                            placeholder="Search keys, hyperparams and context…",
                             leftSection=icon(Icon.SEARCH),
                             value=query.search,
                             debounce=300,
@@ -651,13 +697,13 @@ def register_run_compare_callbacks(app: Dash) -> None:
         # A new filter or key list starts again from the first page; only the pager itself keeps its place.
         page_number = (shown.number or 1) if ctx.triggered_id == COMPARE_PAGER_ID else 1
         store = get_data_store()
-        runs, hparams = load_compared(
+        runs, described = load_compared(
             store, compared_scope(store, drawn(shown.page_json), shown.picked), shown.picked
         )
         page = comparison_page(
             store,
             runs,
-            hparams,
+            described,
             shown.index or CompareIndex(),
             shown.mode,
             shown.search or "",

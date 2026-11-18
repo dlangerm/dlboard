@@ -75,6 +75,7 @@ class Resource(StrEnum):
     ARTIFACT_LINKS = "artifact-links"
     METRICS = "metrics"
     HYPERPARAMS = "hyperparams"
+    RUN_CONTEXTS = "run-contexts"
 
 
 def create_path(resource: Resource, base_url: str = "/") -> str:

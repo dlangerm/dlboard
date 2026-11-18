@@ -93,6 +93,7 @@ from dlboard.models._pin import NamedPin, NewRunPin, PinColor, PinnedRun, Pinned
 from dlboard.models._plugin import InstalledPlugin, PluginProtocol
 from dlboard.models._project import NewProject, Project
 from dlboard.models._run import NewRun, Run, RunStatus
+from dlboard.models._run_context import NewRunContext, RunContext
 from dlboard.models._scoped_setting import NewScopedSetting, ScopedSetting, ScopedSettings
 from dlboard.models._scopes import Scope, has_scope, require_scope
 from dlboard.models._tag import (
@@ -222,6 +223,7 @@ __all__ = [
     "NewProject",
     "NewProjectGrant",
     "NewRun",
+    "NewRunContext",
     "NewRunPin",
     "NewScopedSetting",
     "NewUser",
@@ -249,6 +251,7 @@ __all__ = [
     "Quantity",
     "RenderContext",
     "Run",
+    "RunContext",
     "RunPin",
     "RunStatus",
     "SchemeColors",

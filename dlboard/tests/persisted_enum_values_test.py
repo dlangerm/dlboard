@@ -68,7 +68,7 @@ _FROZEN_ENUM_VALUES: dict[type[StrEnum], frozenset[str]] = {
     AuditAction: frozenset({"soft_delete", "restore", "purge"}),
     EntityType: frozenset({"project", "experiment", "run", "artifact"}),
     ExperimentSource: frozenset({"pytorch_lightning", "python"}),
-    FileKind: frozenset({"checkpoint"}),
+    FileKind: frozenset({"checkpoint", "diff"}),
     RunStatus: frozenset({"running", "finished", "failed", "unknown"}),
     MetricColumn: frozenset({"run_id", "step", "timestamp_utc"}),
     TableMode: frozenset({"runs", "pivot", "artifacts"}),

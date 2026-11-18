@@ -18,6 +18,7 @@ from dlboard.serve._pages._experiment._run_compare import (
     CompareMode,
     ComparePage,
     CompareQuery,
+    Described,
     RowKind,
     compared_scope,
     comparison_page,
@@ -33,6 +34,11 @@ if TYPE_CHECKING:
     from dlboard.plugins.data_stores.sqlite import SQLLiteStore
 
 _HPARAMS: dict[int, FlatHparamDict] = {1: {"lr": 0.1, "opt": "adam", "seed": 0}, 2: {"lr": 0.1, "opt": "sgd"}}
+_CONTEXT: dict[int, FlatHparamDict] = {
+    1: {"git/commit": "abc1", "host": "gpu-1"},
+    2: {"git/commit": "def2", "host": "gpu-1"},
+}
+_DESCRIBED = Described(hparams=_HPARAMS, context=_CONTEXT)
 _METRICS = {1: {"loss": 0.5}, 2: {"loss": 0.4}}
 
 
@@ -67,23 +73,32 @@ def test_compare_query_reads_the_page(query: dict[str, str], page: int) -> None:
 
 
 def _rows() -> list[dict[str, Any]]:
-    return comparison_rows([1, 2], hparams=_HPARAMS, metrics=_METRICS)
+    return comparison_rows([1, 2], _DESCRIBED, metrics=_METRICS)
 
 
-def test_comparison_rows_list_hparams_then_metrics_and_flag_changes_from_the_baseline() -> None:
+def test_comparison_rows_list_hparams_then_context_then_metrics_and_flag_changes_from_the_baseline() -> None:
     rows = {row["key"]: row for row in _rows()}
 
-    assert [row["key"] for row in _rows()] == ["lr", "opt", "seed", "loss"]
+    assert [row["key"] for row in _rows()] == ["lr", "opt", "seed", "git/commit", "host", "loss"]
     assert rows["lr"]["_changed"] == []
     assert rows["opt"]["_changed"] == [run_field(2)]
     # A key only some runs logged counts as a difference.
     assert rows["seed"][run_field(2)] is None
     assert rows["seed"]["_differs"]
+    assert (rows["git/commit"]["kind"], rows["git/commit"]["_changed"]) == ("Context", [run_field(2)])
     assert rows["loss"]["kind"] == "Metric (latest)"
 
 
+def test_a_hyperparameter_and_a_context_fact_of_one_name_are_each_their_own_row() -> None:
+    described = Described(hparams={1: {"host": "mine"}}, context={1: {"host": "gpu-1"}})
+
+    rows = comparison_rows([1], described.only([CompareKey("host", RowKind.CONTEXT, differs=False)]), {})
+
+    assert [(row["kind"], row[run_field(1)]) for row in rows] == [("Context", "gpu-1")]
+
+
 def _index() -> CompareIndex:
-    return CompareIndex.of([1, 2], _HPARAMS, _METRICS)
+    return CompareIndex.of([1, 2], _DESCRIBED, _METRICS)
 
 
 def test_the_index_keeps_each_keys_order_kind_and_whether_it_differs() -> None:
@@ -91,6 +106,8 @@ def test_the_index_keeps_each_keys_order_kind_and_whether_it_differs() -> None:
         CompareKey("lr", RowKind.HPARAM, differs=False),
         CompareKey("opt", RowKind.HPARAM, differs=True),
         CompareKey("seed", RowKind.HPARAM, differs=True),
+        CompareKey("git/commit", RowKind.CONTEXT, differs=True),
+        CompareKey("host", RowKind.CONTEXT, differs=False),
         CompareKey("loss", RowKind.METRIC, differs=True),
     ]
 
@@ -98,7 +115,12 @@ def test_the_index_keeps_each_keys_order_kind_and_whether_it_differs() -> None:
 def test_the_index_is_what_a_page_request_sends_back_in_columns() -> None:
     sent = _index().model_dump()
 
-    assert sent == {"keys": ["lr", "opt", "seed", "loss"], "hparams": 3, "differs": "0111"}
+    assert sent == {
+        "keys": ["lr", "opt", "seed", "git/commit", "host", "loss"],
+        "hparams": 3,
+        "context": 2,
+        "differs": "011101",
+    }
     assert CompareIndex.model_validate(sent) == _index()
 
 
@@ -107,9 +129,15 @@ def test_the_index_is_what_a_page_request_sends_back_in_columns() -> None:
     [
         {"keys": ["a"], "hparams": 0, "differs": ""},
         {"keys": ["a"], "hparams": 2, "differs": "1"},
+        {"keys": ["a"], "hparams": 1, "context": 1, "differs": "1"},
         {"keys": ["a"], "hparams": 0, "differs": "x"},
     ],
-    ids=["a-flag-missing", "more-hyperparameters-than-keys", "a-flag-that-is-neither"],
+    ids=[
+        "a-flag-missing",
+        "more-hyperparameters-than-keys",
+        "more-described-than-keys",
+        "a-flag-that-is-neither",
+    ],
 )
 def test_an_index_the_browser_sends_back_wrong_is_refused(sent: dict[str, Any]) -> None:
     with pytest.raises(ValidationError):
@@ -119,11 +147,13 @@ def test_an_index_the_browser_sends_back_wrong_is_refused(sent: dict[str, Any]) 
 @pytest.mark.parametrize(
     ("mode", "search", "expected"),
     [
-        (CompareMode.ALL, "", ["lr", "opt", "seed", "loss"]),
-        (CompareMode.DIFF, "", ["opt", "seed", "loss"]),
+        (CompareMode.ALL, "", ["lr", "opt", "seed", "git/commit", "host", "loss"]),
+        (CompareMode.DIFF, "", ["opt", "seed", "git/commit", "loss"]),
         (CompareMode.ALL, "LR", ["lr"]),
         (CompareMode.ALL, "adam", ["opt"]),
         (CompareMode.ALL, "0", ["lr", "seed"]),
+        # A context fact's values are searched as a hyperparameter's are.
+        (CompareMode.ALL, "def2", ["git/commit"]),
         # A metric's values are not searched, only its name.
         (CompareMode.ALL, "0.4", []),
         (CompareMode.DIFF, "lr", []),
@@ -133,7 +163,7 @@ def test_an_index_the_browser_sends_back_wrong_is_refused(sent: dict[str, Any]) 
 def test_filtered_index_filters_by_mode_and_search(
     mode: CompareMode, search: str, expected: list[str]
 ) -> None:
-    assert [entry.key for entry in filtered_index(_index(), mode, search, _HPARAMS)] == expected
+    assert [entry.key for entry in filtered_index(_index(), mode, search, _DESCRIBED)] == expected
 
 
 def test_load_run_compare_reads_the_picked_runs_latest_values_and_ignores_foreign_ones(
@@ -202,7 +232,7 @@ def test_a_page_lists_its_keys_and_reads_only_their_values(store: SQLLiteStore, 
         return comparison_page(
             store,
             comparison.runs,
-            comparison.hparams,
+            comparison.described,
             comparison.index,
             CompareMode.DIFF,
             "",
@@ -219,8 +249,8 @@ def test_a_page_lists_its_keys_and_reads_only_their_values(store: SQLLiteStore, 
 
 
 def test_a_page_of_no_runs_is_empty(store: SQLLiteStore, experiment_id: int) -> None:
-    runs, hparams = load_compared(store, {experiment_id: frozenset()}, [])
-    page = comparison_page(store, runs, hparams, CompareIndex(), CompareMode.ALL, "", 3)
+    runs, described = load_compared(store, {experiment_id: frozenset()}, [])
+    page = comparison_page(store, runs, described, CompareIndex(), CompareMode.ALL, "", 3)
 
     assert (page.rows, page.matching, page.number, page.total) == ([], 0, 1, 1)
 
@@ -252,3 +282,23 @@ def test_a_comparison_diffs_its_own_runs_of_each_experiment_and_no_other(store: 
     assert scope == {first: frozenset({members[0].id}), second: frozenset({members[1].id})}
     assert [run.id for run in compared.runs] == [members[1].id, members[0].id]  # in the order picked
     assert compared.index.entries == [CompareKey("lr", RowKind.HPARAM, differs=True)]
+
+
+def test_a_comparison_lists_what_produced_each_run_as_its_context(
+    store: SQLLiteStore, experiment_id: int
+) -> None:
+    runs = [store.create_run(models.NewRun(experiment_id=experiment_id)) for _ in range(2)]
+    for run, commit in zip(runs, ("abc1", "def2"), strict=True):
+        store.record_run_context(
+            models.NewRunContext(
+                run_id=run.id, experiment_id=experiment_id, git_commit=commit, hostname="gpu-1"
+            )
+        )
+    picked = [run.id for run in runs]
+
+    comparison = load_run_compare(store, {experiment_id: frozenset(picked)}, picked)
+
+    assert comparison.index.entries == [
+        CompareKey("git/commit", RowKind.CONTEXT, differs=True),
+        CompareKey("host", RowKind.CONTEXT, differs=False),
+    ]

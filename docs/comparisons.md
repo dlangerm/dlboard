@@ -8,7 +8,8 @@ pinned runs. They work the same way on all three, so what you learn on one is wh
 - **The eye** draws a run in the charts, or takes it out of them. On an experiment it is saved with the view (a view
   remembers which runs it draws); on a comparison it is yours alone, in the address bar, and saves nothing.
 - **The checkbox** only selects a run. Once something is selected, a bar above the list says how many and offers what can be
-  done to them: **Show** or **Hide** them, **Diff** them (the A/B comparison, for up to five), **Pin** or **Unpin** them,
+  done to them: **Show** or **Hide** them, **Diff** them (the A/B comparison, for up to five, of their hyperparameters, their
+  [context](client.md) -- commit, command, packages, machine -- and latest metrics), **Pin** or **Unpin** them,
   **Compare** them (below), **Keep** or **Release** them ([retention](retention.md): a kept run, with a lock after its name,
   is never deleted by retention) and **Delete** them (asking first, and saying how many); on a comparison **Remove** takes them
   out of it. The checkbox in the header selects the runs the list's filters match, not every run of a long experiment.

@@ -19,9 +19,10 @@ from typing_extensions import override
 
 from dlboard import models
 from dlboard.client._rest_api import DEFAULT_SERVER_URL, BasicDlboardAPI
+from dlboard.client._warnings import warn
 from dlboard.client.artifacts.file import File
 from dlboard.client.histograms import DEFAULT_BINNING
-from dlboard.client.run import DEFAULT_EXPERIMENT_NAME, LaunchEnv, Run, RunSettings, call_if_alive, warn
+from dlboard.client.run import DEFAULT_EXPERIMENT_NAME, LaunchEnv, Run, RunSettings, call_if_alive
 from dlboard.models import FileKind
 
 if TYPE_CHECKING:

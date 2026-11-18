@@ -248,6 +248,12 @@ def log_hyperparams() -> dict[str, str]:
     return get_data_store().log_hyperparams(hyperparams).model_dump(mode="json")
 
 
+def record_run_context() -> dict[str, Any]:
+    """Record what produced a run: its commit, command, packages and machine. A run keeps the first one."""
+    context = models.NewRunContext.model_validate(request.json)
+    return get_data_store().record_run_context(context).model_dump(mode="json")
+
+
 def create_experiment() -> dict[str, Any]:
     """Create a new experiment for a project."""
     return handle_create_experiment(get_data_store(), request.json, get_current_user())
@@ -331,6 +337,7 @@ _ROUTES: tuple[tuple[str, list[str], Callable[..., Any]], ...] = (
     (WHOAMI_PATH, ["GET"], whoami),
     (create_path(Resource.METRICS), ["POST"], log_batch),
     (create_path(Resource.HYPERPARAMS), ["POST"], log_hyperparams),
+    (create_path(Resource.RUN_CONTEXTS), ["POST"], record_run_context),
     (create_path(Resource.EXPERIMENTS), ["POST"], create_experiment),
     (create_path(Resource.RUNS), ["POST"], create_run),
     (create_path(Resource.PROJECTS), ["POST"], create_project),

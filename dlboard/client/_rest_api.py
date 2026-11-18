@@ -322,6 +322,10 @@ class BasicDlboardAPI:
         """Log hyperparameters."""
         return self._post(create_path(Resource.HYPERPARAMS), hyperparams, models.HyperParams)
 
+    def record_run_context(self, context: models.NewRunContext) -> models.RunContext:
+        """Record what produced a run; a run keeps the first context recorded for it, which is returned."""
+        return self._post(create_path(Resource.RUN_CONTEXTS), context, models.RunContext)
+
     def log_metric_batch(self, metrics: list[models.LoggedMetrics]) -> None:
         """Log a batch of metrics."""
         _raise_for_status(self._send("POST", create_path(Resource.METRICS), body=metrics))

@@ -18,12 +18,10 @@ from __future__ import annotations
 
 import atexit
 import functools
-import inspect
 import json
 import signal
 import tempfile
 import time
-import warnings
 import weakref
 from argparse import Namespace
 from dataclasses import dataclass, field
@@ -35,7 +33,7 @@ from typing import TYPE_CHECKING, Any, Final, Generic, TypeVar
 import numpy as np
 import pendulum
 import requests
-from pydantic import BaseModel, JsonValue
+from pydantic import BaseModel, Field, JsonValue
 from pydantic_core import to_jsonable_python
 from pydantic_settings import BaseSettings
 
@@ -46,7 +44,10 @@ from dlboard._logging import configure_client_logging
 from dlboard._mp_context import SPAWN_CONTEXT
 from dlboard._telemetry import Attributes, attribute
 from dlboard._telemetry.traces import CLIENT_SERVICE_NAME, SpanKind, TraceKey, flush, name_service, span
+from dlboard.client import _context
+from dlboard.client._context import ContextSettings
 from dlboard.client._rest_api import DEFAULT_SERVER_URL, BasicDlboardAPI
+from dlboard.client._warnings import warn
 from dlboard.client.artifacts.figure import Figure
 from dlboard.client.histograms import DEFAULT_BINNING
 from dlboard.models import Histogram
@@ -93,28 +94,6 @@ _ITEM_CLIENT_ERRORS: Final = frozenset(
     }
 )
 """The 4xx a server answers about what a batch holds, so a batch without the offending item can still land."""
-
-_CALLED_THROUGH: Final = (
-    "dlboard.client.run",
-    "dlboard.client.dlboard_logger",
-    "pytorch_lightning.",
-    "lightning_fabric.",
-    "lightning_utilities.",
-)
-"""The modules a logging call passes through on its way here: this one, the Lightning adapter, and Lightning."""
-
-
-def warn(message: str) -> None:
-    """
-    Warn at the line that made the logging call: the first frame outside `_CALLED_THROUGH`.
-
-    A fixed `stacklevel` would be right for one path only, and a `Run` is reached both directly and through
-    `DLBoardLogger` (itself behind Lightning's `rank_zero_only`, or called by a `Trainer`).
-    """
-    frame, level = inspect.currentframe(), 1
-    while frame is not None and str(frame.f_globals.get("__name__")).startswith(_CALLED_THROUGH):
-        frame, level = frame.f_back, level + 1
-    warnings.warn(message, UserWarning, stacklevel=level)
 
 
 def _split_keys(metrics: Mapping[str, float]) -> list[dict[str, float]]:
@@ -401,7 +380,10 @@ def _start_worker(  # noqa: PLR0913 -- one shipper, fully described
 
 
 class RunSettings(BaseModel, frozen=True, extra="forbid"):
-    """Tunables for a run's background metric/artifact-shipping queues."""
+    """Tunables for a run: what it records about what produced it, and its background shipping queues."""
+
+    context: ContextSettings = Field(default_factory=ContextSettings)
+    """What a new run records about its code, command and environment (`DLBOARD_CONTEXT_*` by default)."""
 
     metrics_q_size: int = 500
     """Max metric batches buffered before `log_metrics` starts warning about backpressure."""
@@ -560,6 +542,7 @@ class Run:
             experiment_id = api.create_experiment(
                 models.NewExperiment(project_id=project_id, source=source)
             ).id
+        created = run_id is None
         if run_id is None:
             # `name` only when given: `NewRun` names a run itself when the field is omitted, never when it is `None`.
             new_run = models.NewRun(experiment_id=experiment_id, **({} if name is None else {"name": name}))
@@ -601,7 +584,22 @@ class Run:
                     "what is logged queues up until it does."
                 )
         warn_if_startup_was_slow(time.perf_counter() - startup_start)
-        return cls(_Shipping(api, experiment_id, run_id, metrics, artifacts))
+        started = cls(_Shipping(api, experiment_id, run_id, metrics, artifacts))
+        if created:  # a run attached to keeps the context it was started with
+            started._record_context(settings.context)
+        return started
+
+    def _record_context(self, settings: ContextSettings) -> None:
+        """Record what produced this run, and queue its uncommitted changes. Never fails the script."""
+        if (shipping := self._shipping) is None:
+            return
+        context, diff = _context.collect(shipping.run_id, shipping.experiment_id, settings)
+        try:
+            shipping.api.record_run_context(context)
+        except requests.RequestException as exc:  # an older server has no such route: a 404
+            warn(f"dlboard could not record what produced this run (its commit, command and packages): {exc}")
+        if diff is not None:
+            self.log_artifact([diff])
 
     @property
     def run_id(self) -> int | None:

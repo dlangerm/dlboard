@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import atexit
+import platform
 from typing import TYPE_CHECKING
 
 import pytest
@@ -50,3 +51,6 @@ def test_a_run_from_init_lands_in_the_project_it_names_and_ends_as_its_block_did
     assert list(store.fetch_metrics(experiment_id, run_ids=None).step) == [0, 1, 2]
     (hparams,) = store.fetch_hyperparams(experiment_id, run_ids=None)
     assert hparams.hparams_dict == {"lr": 0.1}
+    (context,) = store.fetch_run_contexts(experiment_id, run_ids=frozenset({run_id}))
+    assert context.python_version == platform.python_version()
+    assert "dlboard-client" in context.packages

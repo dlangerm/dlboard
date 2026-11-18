@@ -525,6 +525,14 @@ class AuthorizingDataStore(models.DataStore[[]]):
         self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
         return self._inner.fetch_hyperparams(experiment_id, run_ids=run_ids)
 
+    def record_run_context(self, context: models.NewRunContext) -> models.RunContext:
+        self.require_run_write(context.run_id, context.experiment_id)
+        return self._inner.record_run_context(context)
+
+    def fetch_run_contexts(self, experiment_id: int, *, run_ids: frozenset[int]) -> list[models.RunContext]:
+        self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
+        return self._inner.fetch_run_contexts(experiment_id, run_ids=run_ids)
+
     def log_artifact_refs(self, artifacts: Iterable[models.Artifact]) -> None:
         artifacts = list(artifacts)
         self._require_runs_write(artifacts)

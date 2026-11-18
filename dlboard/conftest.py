@@ -1041,6 +1041,17 @@ def make_fake_chart(
 
 
 @pytest.fixture(autouse=True)
+def _no_diff_of_the_test_checkout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    A run a test starts records its context, but does not upload the uncommitted changes of the checkout running the suite.
+
+    Otherwise what a test's run logs would depend on whether the tree is clean: one more artifact, queued as the run starts.
+    `client/tests/context_test.py` covers the diff, with settings of its own.
+    """
+    monkeypatch.setenv("DLBOARD_CONTEXT_DIFF", "false")
+
+
+@pytest.fixture(autouse=True)
 def _no_chart_fails_to_render(request: pytest.FixtureRequest) -> Iterator[None]:
     """
     Fail a test in which a chart logs that it failed to render, unless the test means to break a chart.

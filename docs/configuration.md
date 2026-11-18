@@ -225,6 +225,11 @@ Read by `dlboard.client.run.init`, `DLBoardLogger` and the REST client in the tr
 | `DLBOARD_USER` | OS login name | The username to attribute a run to on a server that doesn't verify identity. |
 | `DLBOARD_CONNECT_TIMEOUT_S` | `10` | How long a request waits to connect. |
 | `DLBOARD_READ_TIMEOUT_S` | `60` | How long a request waits for the server's response. |
+| `DLBOARD_CONTEXT_GIT` | `true` | Record a new run's commit, branch, `origin` remote and whether tracked files had changes. See [client.md](client.md). |
+| `DLBOARD_CONTEXT_DIFF` | `false` | Upload those changes (`git diff HEAD`) as the run's `context/git.diff` artifact. Off unless asked for: uncommitted changes can hold secrets. |
+| `DLBOARD_CONTEXT_MAX_DIFF_KB` | `1024` | A bigger diff is left out, with a warning. |
+| `DLBOARD_CONTEXT_COMMAND` | `true` | Record the command line, working directory and interpreter. Turn it off if arguments carry secrets. |
+| `DLBOARD_CONTEXT_PACKAGES` | `true` | Record each installed distribution's version. |
 
 `init` also reads the rank a launcher gives each process, the way Lightning does: the first of `RANK`,
 `LOCAL_RANK`, `SLURM_PROCID` and `JSM_NAMESPACE_RANK` that is set (torchrun, accelerate, SLURM and jsrun set them).

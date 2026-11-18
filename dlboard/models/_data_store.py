@@ -386,6 +386,14 @@ class DataStore(typing.Protocol[_P]):
         """Every (non-deleted) run's hyperparameters for an experiment."""
         ...
 
+    def record_run_context(self, context: models.NewRunContext) -> models.RunContext:
+        """Record what produced a run, once: the run's first context is kept, and returned again to a later call."""
+        ...
+
+    def fetch_run_contexts(self, experiment_id: int, *, run_ids: frozenset[int]) -> list[models.RunContext]:
+        """The recorded contexts of those of `run_ids` that are (non-deleted) runs of the experiment and have one."""
+        ...
+
     def get_or_create_page(
         self,
         page_type: type[models.Page[_Dataframe, _Chart]],

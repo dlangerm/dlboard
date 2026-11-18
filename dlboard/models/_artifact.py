@@ -123,6 +123,8 @@ class FileKind(StrEnum):
 
     CHECKPOINT = "checkpoint"
     """A model checkpoint, e.g. one `ModelCheckpoint` saved."""
+    DIFF = "diff"
+    """Changes to a run's code not yet committed as it started (`git diff HEAD`): its `context/git.diff`."""
 
 
 LAYER_KIND_TAG: Final = "layer_kind"

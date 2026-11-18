@@ -121,6 +121,10 @@ FOREIGN_KEYS: dict[type[BaseModel], dict[str, ForeignKey]] = {
         "experiment_id": ForeignKey(models.Experiment),
         "run_id": ForeignKey(models.Run, _OWNS),
     },
+    models.RunContext: {
+        "experiment_id": ForeignKey(models.Experiment),
+        "run_id": ForeignKey(models.Run, _OWNS),
+    },
     models.Artifact: {
         "experiment_id": ForeignKey(models.Experiment),
         "run_id": ForeignKey(models.Run, _OWNS),
@@ -172,6 +176,7 @@ UNIQUE_COLUMNS: dict[type[BaseModel], list[tuple[str, ...]]] = {
     models.PasswordCredential: [("user_id",)],
     models.RunPin: [("run_id", "pinned_by", "color")],
     models.ComparisonRun: [("page_id", "run_id")],
+    models.RunContext: [("run_id",)],
     **TASK_UNIQUE_COLUMNS,
 }
 
@@ -188,6 +193,7 @@ TABLES: tuple[type[BaseModel], ...] = (
     models.UnderlyingMetricTableEntry,
     models.UnderlyingHistogramTableEntry,
     models.HyperParams,
+    models.RunContext,
     models.Artifact,
     models.Page,
     models.Comment,
@@ -1960,6 +1966,36 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
                 r.c.deleted_at.is_(None),
                 *_runs_among(h.c.run_id, run_ids),
             ),
+        )
+
+    def record_run_context(self, context: models.NewRunContext) -> models.RunContext:
+        """Record what produced a run, once: the run's first context is kept, as its first hyperparameters are."""
+        table = self._tables[models.RunContext]
+        with self._begin() as conn:
+            self._lock_live(conn, models.Run, context.run_id)
+            if (
+                existing := conn.execute(sa.select(table).where(table.c.run_id == context.run_id))
+                .mappings()
+                .first()
+            ):
+                return sql.construct(models.RunContext, existing)
+            return sql.construct(models.RunContext, conn.execute(sql.insert(table, context)).mappings().one())
+
+    def fetch_run_contexts(self, experiment_id: int, *, run_ids: frozenset[int]) -> list[models.RunContext]:
+        """
+        The recorded contexts of those of `run_ids` that are live runs of the experiment.
+
+        `run_ids` is required, not "every run": a context lists every installed package, so it is read for the runs a
+        page shows (compared, say), found by the unique `run_id` each one has.
+        """
+        c, r = self._tables[models.RunContext], self._tables[models.Run]
+        return list(
+            self._fetch(
+                models.RunContext,
+                sa.select(c)
+                .join(r, c.c.run_id == r.c.id)
+                .where(c.c.experiment_id == experiment_id, r.c.deleted_at.is_(None), c.c.run_id.in_(run_ids)),
+            )
         )
 
     def get_or_create_page[D, C](

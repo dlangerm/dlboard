@@ -66,6 +66,20 @@ stamped with the global step its callback saved at (with `log_model=True`, the s
 save). Any number of `ModelCheckpoint` callbacks work. On the experiment page they are one list, split into
 `Latest`, `Best` and `Top-k` tabs by those tags, paged and sortable by step and score.
 
+**What produced a run.** A new run records, as it starts, what produced it: the git commit, branch and
+`origin` remote (credentials taken out of its URL) and whether tracked files had changes, the command line, working
+directory and interpreter, the Python version, platform and host, every installed distribution's version, and -- when
+the script already imported torch -- the CUDA version it was built with (and the GPUs' names, once the script has
+started CUDA itself: dlboard never starts it). With `DLBOARD_CONTEXT_DIFF=true` (off by default, since uncommitted changes
+are where a secret pasted in to try something sits) the changes not yet committed (`git diff HEAD`) are uploaded as the
+run's `context/git.diff` artifact, listed for download on the experiment page, unless the diff is over 1 MB. The run compare
+(**Diff**) lists all of it as *Context*, beside the hyperparameters, so "Differences" shows the commit, the command or
+the package versions two runs did not share. Nothing about it fails or holds up a run: what can't be found (no git, a
+notebook) is left out, and a server older than this answers with a warning. Turn parts off with `DLBOARD_CONTEXT_GIT`,
+`DLBOARD_CONTEXT_COMMAND` (if your arguments carry secrets) and `DLBOARD_CONTEXT_PACKAGES`, or
+`RunSettings(context=ContextSettings(...))`. Environment variables are never recorded. A run attached to (`run_id=`)
+keeps the context it was started with.
+
 **Pinning and keeping a run.** A script that knows its run matters can say so as it launches it, instead of someone clicking
 afterwards: `DLBoardLogger(..., pin=PinColor.RED)` pins the run for you in that colour (see
 [comparisons.md](comparisons.md#pins)), and `keep=True` keeps it out of [retention](retention.md)'s reach. Both are
