@@ -12,6 +12,8 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-11-17
+
 ### Changed
 
 * **Plugins: three `DataStore` methods, and setting checks that see deletes.** `create_project` takes an `owner_id`, whose
