@@ -45,6 +45,11 @@ pulls that section's body into the GitHub release notes and publishes both distr
   included, so a run went on holding its lease, and what it asked for next (retention's checks, after scheduling them),
   for three times as long as its last batch took, with nothing left to do. A task now rests before its next batch, and the
   rest is a `dlboard.custodian.rest` span where a trace showed only a gap. (#684)
+* **The last of the hardening audit's smaller fixes.** A bar chart's date axis groups only the values that are dates, in
+  date order, and says so when none is, where one that was not left them all sorted as text. A picture's legend strikes
+  out a layer that did not load, saying so on hover, and a downloaded picture's legend leaves it out. A grid panel's
+  column field, once cleared and left, shows the panel's column count again. The admin page keeps its tab in its
+  address, so a reload or a link opens on it. Deleting a note asks first. (#685, #686, #687, #688, #689)
 
 * **The logger's shipping no longer stalls, fails training, or hangs at the end of a run.** A metric that diverged to NaN
   or infinity stopped every metric after it from shipping for the rest of the run; it is recorded as it is. A batch with
