@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import getpass
 import os
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Annotated
@@ -18,6 +19,8 @@ import structlog
 from werkzeug.serving import is_running_from_reloader
 
 from dlboard._version import __version__
+from dlboard.client._rest_api import DEFAULT_SERVER_URL, BasicDlboardAPI
+from dlboard.client.tensorboard import STATE_FILE, import_logdir
 from dlboard.plugins.auth.password import create_or_reset_user, new_password_problem
 from dlboard.plugins.data_stores.filesystem import AppSettings as FilesystemAppSettings
 from dlboard.plugins.data_stores.sqlite import AppSettings as SqliteAppSettings
@@ -39,6 +42,8 @@ users_app = cyclopts.App(
     name="users", help="Manage the users of a deployment that signs people in with a password."
 )
 app.command(users_app)
+import_app = cyclopts.App(name="import", help="Bring runs another tool logged into a dlboard server.")
+app.command(import_app)
 
 _log = structlog.stdlib.get_logger(__name__)
 
@@ -247,6 +252,49 @@ def set_password(
     store = get_system_data_store(build_app(resolve_plugins(plugins)))
     user = create_or_reset_user(store, username, password, admin=admin)
     _log.warning(f"Saved {user.username}" + (" (admin)" if admin else ""))
+
+
+@dataclass(frozen=True)
+class TensorboardImportOptions:
+    """Options for `dlboard import tensorboard`, grouped into one type so the command signature stays flat."""
+
+    project: Annotated[str, cyclopts.Parameter(help="The project to import into, made if it is not there.")]
+    experiment: Annotated[
+        str | None, cyclopts.Parameter(help="The experiment the logdir becomes: by default, named after it.")
+    ] = None
+    server: Annotated[
+        str,
+        cyclopts.Parameter(help="The dlboard server to import into (with an API token in DLBOARD_API_KEY)."),
+    ] = DEFAULT_SERVER_URL
+    state: Annotated[
+        Path | None,
+        cyclopts.Parameter(
+            help=f"Where to keep how far each event file was read: by default {STATE_FILE} in the logdir."
+        ),
+    ] = None
+    watch: Annotated[
+        float | None,
+        cyclopts.Parameter(
+            help="Keep importing what is new every this many seconds, for runs still writing, until stopped."
+        ),
+    ] = None
+
+
+@import_app.command
+def tensorboard(
+    logdir: Path, *, opts: Annotated[TensorboardImportOptions, cyclopts.Parameter(name="*")]
+) -> None:
+    """Import a TensorBoard logdir: the logdir is an experiment, and each directory of event files in it a run."""
+    _configure_logging()
+    api = BasicDlboardAPI(opts.server)
+    while True:
+        report = import_logdir(
+            api, logdir, project=opts.project, experiment=opts.experiment, state_path=opts.state
+        )
+        _log.warning(f"Imported {report}")
+        if opts.watch is None:
+            return
+        time.sleep(opts.watch)
 
 
 def main() -> None:

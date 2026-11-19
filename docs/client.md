@@ -459,3 +459,25 @@ if not loss.complete:
 `pages(read)` walks any of them: `pages(lambda cursor: api.metric_keys(experiment_id, cursor=cursor))`.
 `series_frame` takes a bound (`max_rows`) and says whether it stopped short (`complete`), instead of silently truncating.
 There is no read of everything a run logged at once: walk the pages of what you need.
+
+## Importing a TensorBoard logdir
+
+Runs that already logged to TensorBoard event files (`SummaryWriter`, Lightning's `TensorBoardLogger`, TF/JAX tooling)
+can be brought into dlboard as they are, without changing the code that writes them:
+
+```bash
+dlboard import tensorboard runs/ --project vision --server http://localhost:8050
+dlboard import tensorboard runs/ --project vision --watch 30   # and keep bringing what runs still writing add
+```
+
+The logdir becomes an experiment (named after it, or `--experiment`), and each directory under it that holds event files
+a run, named by its path in the logdir (`sweep/lr=0.01`). Scalars become metrics, histograms histograms, images image
+artifacts, and the hparams plugin's values the run's hyperparameters. Other kinds of summary (text, audio, PR curves,
+...) are left out, and the command says how many of each. A run is marked finished when its event files last wrote,
+and again if it writes more later.
+
+An import is incremental: how far it read each event file is kept in `.dlboard-import.json` in the logdir (or
+`--state`), so running it again brings only what is new, and an event file cut short by a killed run is read up to its
+last whole record. It reads event files itself, with no TensorFlow or `tensorboard` package, and writes through the REST
+API like any run (an API token in `DLBOARD_API_KEY`), so it can import into a server elsewhere. From Python,
+`dlboard.client.tensorboard.import_logdir(api, logdir, project=...)` does the same and returns what it imported.

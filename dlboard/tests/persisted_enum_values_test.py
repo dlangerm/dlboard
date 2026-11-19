@@ -70,7 +70,7 @@ _FROZEN_ENUM_VALUES: dict[type[StrEnum], frozenset[str]] = {
     ProjectRole: frozenset({"viewer", "editor", "owner"}),
     AuditAction: frozenset({"soft_delete", "restore", "purge"}),
     EntityType: frozenset({"project", "experiment", "run", "artifact"}),
-    ExperimentSource: frozenset({"pytorch_lightning", "python"}),
+    ExperimentSource: frozenset({"pytorch_lightning", "python", "tensorboard"}),
     FileKind: frozenset({"checkpoint", "diff"}),
     RunStatus: frozenset({"running", "finished", "failed", "unknown"}),
     MetricColumn: frozenset({"run_id", "step", "timestamp_utc"}),

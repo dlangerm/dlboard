@@ -13,6 +13,8 @@ class ExperimentSource(StrEnum):
     """Logged via `dlboard.client.dlboard_logger.DLBoardLogger`, a `pytorch_lightning` `Logger`."""
     PYTHON = "python"
     """Logged via `dlboard.client.run.init`, from a training loop of any framework (or none)."""
+    TENSORBOARD = "tensorboard"
+    """Imported from a TensorBoard logdir (`dlboard.client.tensorboard`)."""
 
 
 class NewExperiment(BaseModel, frozen=True, extra="ignore"):
