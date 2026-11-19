@@ -175,7 +175,7 @@ FOREIGN_KEYS: dict[type[BaseModel], dict[str, ForeignKey]] = {
         "experiment_id": ForeignKey(models.Experiment, _OWNS),
         "updated_by": ForeignKey(models.User),
     },
-    models.ApiToken: {"user_id": ForeignKey(models.User)},
+    models.ApiToken: {"user_id": ForeignKey(models.User), "run_id": ForeignKey(models.Run, _OWNS)},
     models.PasswordCredential: {"user_id": ForeignKey(models.User)},
 }
 
@@ -198,12 +198,12 @@ UNIQUE_COLUMNS: dict[type[BaseModel], list[tuple[str, ...]]] = {
 TABLES: tuple[type[BaseModel], ...] = (
     AppState,
     models.User,
-    models.ApiToken,
     models.PasswordCredential,
     models.Project,
     models.ProjectGrant,
     models.Experiment,
     models.Run,
+    models.ApiToken,
     models.UnderlyingMetricTableEntry,
     models.UnderlyingHistogramTableEntry,
     models.HyperParams,
@@ -1085,11 +1085,13 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
         )
 
     def list_api_tokens(self, user_id: int) -> list[models.ApiToken]:
-        """`user_id`'s API tokens, newest first, including revoked ones."""
+        """`user_id`'s full API tokens, newest first, including revoked ones: not the run tokens a job carries."""
         tokens = self._tables[models.ApiToken]
         return self._fetch(
             models.ApiToken,
-            sa.select(tokens).where(tokens.c.user_id == user_id).order_by(tokens.c.id.desc()),
+            sa.select(tokens)
+            .where(tokens.c.user_id == user_id, tokens.c.run_id.is_(None))
+            .order_by(tokens.c.id.desc()),
         )
 
     def revoke_api_token(self, api_token_id: int, user_id: int) -> None:

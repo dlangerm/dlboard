@@ -8,7 +8,7 @@ import shutil
 import tempfile
 import weakref
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Final, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from pytorch_lightning.loggers import Logger
 from pytorch_lightning.loggers.utilities import (
@@ -23,7 +23,14 @@ from dlboard.client._rest_api import DEFAULT_SERVER_URL
 from dlboard.client._warnings import warn
 from dlboard.client.artifacts.file import File
 from dlboard.client.histograms import DEFAULT_BINNING
-from dlboard.client.run import DEFAULT_EXPERIMENT_NAME, LaunchEnv, Run, RunSettings, call_if_alive
+from dlboard.client.run import (
+    DEFAULT_EXPERIMENT_NAME,
+    LaunchEnv,
+    Run,
+    RunSettings,
+    call_if_alive,
+    resolve_names,
+)
 from dlboard.models import FileKind
 
 if TYPE_CHECKING:
@@ -72,10 +79,6 @@ def _done_status(lightning_status: str, *, already_reported: bool) -> models.Run
             return None
 
 
-_UNRESOLVED_ID: Final = 0
-"""Stands in for an id a non-zero rank never resolves (it makes no server calls, see `DLBoardLogger`)."""
-
-
 class DLBoardLogger(Logger):
     """
     The lightning logger for dlboard.
@@ -91,7 +94,7 @@ class DLBoardLogger(Logger):
 
     def __init__(  # noqa: PLR0913
         self,
-        project_id: int,
+        project_id: int | None,
         experiment_id: int | None = None,
         server_url: str = DEFAULT_SERVER_URL,
         settings: RunSettings | None = None,
@@ -108,7 +111,8 @@ class DLBoardLogger(Logger):
         A run is created too, unless `run_id` (default: the `DLBOARD_RUN_ID` env var) names an
         existing one to attach to -- for resuming a run, or sharing one between processes that were
         launched separately. `experiment_id` may be omitted then (it's the run's own); a different
-        one is an error.
+        one is an error. With a run token as `DLBOARD_API_KEY` (`dlboard run-token`), the run is the
+        token's, and `project_id` may be `None`.
 
         `pin` pins the run for you in that colour, and `keep` keeps it out of retention's reach (it takes an
         editor of the project), the moment it exists, as do `tags`: a baseline or a release candidate need not wait for someone
@@ -170,7 +174,7 @@ class DLBoardLogger(Logger):
             # Every rank runs this, and a get-or-create isn't safe to race: two ranks asking for the
             # same new experiment at once could each create it. Rank 0 alone resolves the names.
             return cls(
-                project_id=_UNRESOLVED_ID,
+                project_id=None,  # a non-zero rank resolves nothing: it makes no server calls
                 server_url=server_url,
                 settings=settings,
                 run_id=run_id,
@@ -179,15 +183,16 @@ class DLBoardLogger(Logger):
                 keep=keep,
                 tags=tags,
             )
-        api = connect(server_url)
-        api.whoami()
-        project = api.get_or_create_project(project_name, description=project_description)
-        experiment = api.get_or_create_experiment(
-            project.id, name=experiment_name, source=models.ExperimentSource.PYTORCH_LIGHTNING
+        project_id, experiment_id = resolve_names(
+            connect(server_url),
+            project_name,
+            experiment_name,
+            description=project_description,
+            source=models.ExperimentSource.PYTORCH_LIGHTNING,
         )
         return cls(
-            project_id=project.id,
-            experiment_id=experiment.id,
+            project_id=project_id,
+            experiment_id=experiment_id,
             server_url=server_url,
             settings=settings,
             run_id=run_id,

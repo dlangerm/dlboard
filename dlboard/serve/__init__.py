@@ -3,14 +3,16 @@
 from dlboard.serve._artifact_frame import build_artifacts_dataframe
 from dlboard.serve._assets import AssetKind, serve_asset
 from dlboard.serve._backend import _sql as sql
-from dlboard.serve._backend._api_tokens import mint_api_token
+from dlboard.serve._backend._api_tokens import mint_api_token, mint_run_token
 from dlboard.serve._backend._app_slot import AppSlot
 from dlboard.serve._backend._auth import (
     AuthSettings,
     add_public_route,
     allow_resources_from,
     allow_resources_from_anywhere,
+    allow_run_tokens,
     end_session,
+    find_run_scope,
     get_auth_provider,
     get_auth_settings,
     get_current_user,
@@ -86,9 +88,11 @@ __all__ = [
     "add_startup_check",
     "allow_resources_from",
     "allow_resources_from_anywhere",
+    "allow_run_tokens",
     "app",
     "build_artifacts_dataframe",
     "end_session",
+    "find_run_scope",
     "get_artifact_store",
     "get_auth_provider",
     "get_auth_settings",
@@ -102,6 +106,7 @@ __all__ = [
     "icon",
     "icon_cell_class",
     "mint_api_token",
+    "mint_run_token",
     "register_experiment_section",
     "register_project_tab",
     "register_run_guard",

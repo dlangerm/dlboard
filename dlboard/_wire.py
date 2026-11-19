@@ -105,6 +105,8 @@ class RunCall(StrEnum):
     """It is to be pinned and/or kept (`MarkRun`)."""
     HEARTBEAT = "heartbeat"
     """It is still alive, between batches (a long evaluation): so it is not given up as lost."""
+    TOKEN = "token"
+    """A run token for it, for a job to log to it with (`RunToken`): asked with a full token or a session, never a run token."""
 
 
 def run_path(call: RunCall, run_id: str = "<int:entity_id>", base_url: str = "/") -> str:
@@ -192,6 +194,16 @@ class Identity(BaseModel, frozen=True, extra="ignore"):
     api_version: int = API_VERSION
     """The REST API major this server speaks. A client that doesn't recognize it should refuse to
     proceed rather than guess -- see `DLBoardLogger.__init__`."""
+    run_id: int | None = None
+    """The one run the request's run token logs to, or `None` for any other credential (and from an older server)."""
+
+
+class RunToken(BaseModel, frozen=True, extra="ignore"):
+    """A run token just minted: its only copy (the server keeps a hash), the run it logs to, and when it stops working."""
+
+    token: str
+    run_id: int
+    expires_at: AwareDatetime
 
 
 class GetOrCreateProject(BaseModel, frozen=True, extra="ignore"):

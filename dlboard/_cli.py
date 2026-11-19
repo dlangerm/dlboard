@@ -10,6 +10,7 @@ from __future__ import annotations
 import functools
 import getpass
 import os
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -20,10 +21,12 @@ import requests
 import structlog
 from werkzeug.serving import is_running_from_reloader
 
+from dlboard import models
 from dlboard._mp_context import SPAWN_CONTEXT
 from dlboard._version import __version__
 from dlboard.client._offline import sync
 from dlboard.client._rest_api import DEFAULT_SERVER_URL, BasicDlboardAPI
+from dlboard.client.run import DEFAULT_EXPERIMENT_NAME, resolve_names
 from dlboard.client.tensorboard import STATE_FILE, import_logdir
 from dlboard.plugins.auth.password import create_or_reset_user, new_password_problem
 from dlboard.plugins.data_stores.filesystem import AppSettings as FilesystemAppSettings
@@ -384,6 +387,50 @@ def sync_folder(
         if watch is None:
             return
         time.sleep(watch)
+
+
+@app.command(name="run-token")
+def run_token(
+    *,
+    project: Annotated[str | None, cyclopts.Parameter(help="The project to start a new run in.")] = None,
+    experiment: Annotated[str, cyclopts.Parameter(help="Its experiment.")] = DEFAULT_EXPERIMENT_NAME,
+    name: Annotated[
+        str | None, cyclopts.Parameter(help="The new run's name (one is made up otherwise).")
+    ] = None,
+    run_id: Annotated[
+        int | None, cyclopts.Parameter(help="An existing run to mint a token for, instead of starting one.")
+    ] = None,
+    server: Annotated[
+        str, cyclopts.Parameter(help="The dlboard server (with your API token in DLBOARD_API_KEY).")
+    ] = DEFAULT_SERVER_URL,
+) -> None:
+    """
+    Start a run (or take `--run-id`'s) and print a token that logs to it alone, for a job to carry as DLBOARD_API_KEY.
+
+    The job's `init`/`DLBoardLogger` then logs to that run, and nothing else can be done with the token: it never needs
+    your own. For example: `DLBOARD_API_KEY=$(dlboard run-token --project vision) sbatch train.sh`.
+    """
+    api = BasicDlboardAPI(server)
+    if run_id is None:
+        if project is None:
+            msg = "give --project (and --experiment) to start a run in, or --run-id"
+            raise SystemExit(msg)
+        _, experiment_id = resolve_names(
+            api, project, experiment, description="", source=models.ExperimentSource.PYTHON
+        )
+        if experiment_id is None:
+            msg = "DLBOARD_API_KEY is a run token already: mint one with your own"
+            raise SystemExit(msg)
+        run_id = api.create_run(
+            models.NewRun(experiment_id=experiment_id, **({} if name is None else {"name": name}))
+        ).id
+    minted = api.run_token(run_id)
+    # The token alone on stdout, for a shell to pass on; what it is for, beside it on stderr. No logging set up: it would
+    # write to stdout too.
+    sys.stderr.write(
+        f"A token for run {run_id}, which logs to it alone until {minted.expires_at.isoformat()}\n"
+    )
+    sys.stdout.write(f"{minted.token}\n")
 
 
 def main() -> None:

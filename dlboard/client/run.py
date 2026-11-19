@@ -462,6 +462,43 @@ def flatten_hparams(params: Mapping[str, Any] | Namespace | BaseModel) -> models
     return _flatten_json(to_jsonable_python(params, fallback=_jsonable_fallback), "")
 
 
+def _place_run(  # noqa: PLR0913 -- where a run can be given to go, each once
+    api: RunAPI,
+    *,
+    project_id: int | None,
+    experiment_id: int | None,
+    run_id: int | None,
+    source: models.ExperimentSource,
+    name: str | None,
+) -> tuple[int, int, bool]:
+    """
+    The experiment and run a run logs to, and whether the run was created for it: a run token's, `run_id`, or a new one.
+
+    Asks who the credentials are first, before any worker starts: the workers never retry a 4xx (see `classify_failure`),
+    so bad credentials would otherwise only show up as silently lost metrics.
+    """
+    token_run = api.whoami().run_id
+    if token_run is not None:
+        if run_id not in (None, token_run):
+            msg = f"DLBOARD_API_KEY is a run token for run {token_run}, not run {run_id}"
+            raise ValueError(msg)
+        run_id = token_run
+    if run_id is not None:
+        run = api.get_run(run_id)
+        if experiment_id not in (None, run.experiment_id):
+            msg = f"run {run_id} belongs to experiment {run.experiment_id}, not {experiment_id}"
+            raise ValueError(msg)
+        return run.experiment_id, run_id, False
+    if experiment_id is None:
+        if project_id is None:
+            msg = "a new run needs a project or an experiment to go in"
+            raise ValueError(msg)
+        experiment_id = api.create_experiment(models.NewExperiment(project_id=project_id, source=source)).id
+    # `name` only when given: `NewRun` names a run itself when the field is omitted, never when it is `None`.
+    new_run = models.NewRun(experiment_id=experiment_id, **({} if name is None else {"name": name}))
+    return experiment_id, api.create_run(new_run).id, True
+
+
 def call_if_alive(method: weakref.WeakMethod[Callable[[], None]]) -> None:
     """Call `method`, unless its object is already gone."""
     if (bound := method()) is not None:
@@ -543,7 +580,7 @@ class Run:
         cls,
         api: RunAPI,
         *,
-        project_id: int,
+        project_id: int | None,
         experiment_id: int | None,
         run_id: int | None,
         source: models.ExperimentSource,
@@ -556,30 +593,16 @@ class Run:
         """
         Attach to `run_id`, or create a run (in `experiment_id`, or a new experiment of `project_id`); start shipping.
 
-        A `run_id` is checked to belong to `experiment_id`, if both are given. `pin` and `keep` mark the run the
-        moment it exists; a server that refuses fails this call, before anything starts logging.
+        A `run_id` is checked to belong to `experiment_id`, if both are given. A run token's run is the run, whatever
+        else is given (and another `run_id` an error). `pin` and `keep` mark the run the moment it exists; a server that
+        refuses fails this call, before anything starts logging.
         """
         settings = settings or RunSettings()
         configure_client_logging()
         name_service(CLIENT_SERVICE_NAME)
-        # Up front, before any worker starts: the workers never retry a 4xx (see `classify_failure`), so bad
-        # credentials would otherwise only show up as silently lost metrics.
-        api.whoami()
-        if run_id is not None:
-            run = api.get_run(run_id)
-            if experiment_id not in (None, run.experiment_id):
-                msg = f"run {run_id} belongs to experiment {run.experiment_id}, not {experiment_id}"
-                raise ValueError(msg)
-            experiment_id = run.experiment_id
-        elif experiment_id is None:
-            experiment_id = api.create_experiment(
-                models.NewExperiment(project_id=project_id, source=source)
-            ).id
-        created = run_id is None
-        if run_id is None:
-            # `name` only when given: `NewRun` names a run itself when the field is omitted, never when it is `None`.
-            new_run = models.NewRun(experiment_id=experiment_id, **({} if name is None else {"name": name}))
-            run_id = api.create_run(new_run).id
+        experiment_id, run_id, created = _place_run(
+            api, project_id=project_id, experiment_id=experiment_id, run_id=run_id, source=source, name=name
+        )
         if pin is not None or keep or tags:
             api.mark_run(run_id, pin=pin, keep=keep, tags=tags)
         startup_start = time.perf_counter()
@@ -853,6 +876,21 @@ class Run:
                 self.flush()
 
 
+def resolve_names(
+    api: RunAPI, project: str, experiment: str, *, description: str, source: models.ExperimentSource
+) -> tuple[int | None, int | None]:
+    """
+    The ids of `project` and its `experiment`, creating either that doesn't exist yet, once the credentials are checked.
+
+    Neither, for a run token (`BasicDlboardAPI.run_token`): it comes with its run, which is where the run goes, and may not
+    look anything else up.
+    """
+    if api.whoami().run_id is not None:
+        return None, None
+    project_id = api.get_or_create_project(project, description=description).id
+    return project_id, api.get_or_create_experiment(project_id, name=experiment, source=source).id
+
+
 def init(  # noqa: PLR0913 -- one keyword per thing a run is started with
     project: str,
     experiment: str = DEFAULT_EXPERIMENT_NAME,
@@ -871,7 +909,8 @@ def init(  # noqa: PLR0913 -- one keyword per thing a run is started with
     Start a run in `experiment` of `project` (creating either by name if it doesn't exist yet), from any script.
 
     `run_id` (default: the `DLBOARD_RUN_ID` env var) attaches to an existing run of that experiment instead -- for
-    resuming a run, or sharing one between processes launched separately. `name` names a new run (one is made up
+    resuming a run, or sharing one between processes launched separately. With a run token as `DLBOARD_API_KEY`
+    (`dlboard run-token`), the run is the token's, and `project` and `experiment` aren't looked up. `name` names a new run (one is made up
     otherwise), `hparams` are logged straight away (see `Run.log_hyperparams`), and `pin`/`keep` mark the run the
     moment it exists, as do `tags` (`["baseline"]`, shared by the project). `project_description` only applies the first
     time `project` is seen.
@@ -884,11 +923,9 @@ def init(  # noqa: PLR0913 -- one keyword per thing a run is started with
         # Every rank runs this, and a get-or-create isn't safe to race: rank 0 alone resolves the names.
         return Run(None, run_id=run_id)
     api = connect(server_url)
-    api.whoami()
-    project_id = api.get_or_create_project(project, description=project_description).id
-    experiment_id = api.get_or_create_experiment(
-        project_id, name=experiment, source=models.ExperimentSource.PYTHON
-    ).id
+    project_id, experiment_id = resolve_names(
+        api, project, experiment, description=project_description, source=models.ExperimentSource.PYTHON
+    )
     run = Run.start(
         api,
         project_id=project_id,

@@ -31,6 +31,14 @@ class NewApiToken(BaseModel, frozen=True, extra="forbid"):
     expires_at: AwareDatetime | None = None
     """When the token stops working, or `None` for never."""
 
+    run_id: int | None = None
+    """
+    The one run a run token logs to, or `None` for a full token.
+
+    A run token is minted with a full token or a session for a job to carry (#718). It reaches only a run client's own
+    calls (`allow_run_tokens`), each only for this run (`AuthorizingDataStore`), and always expires.
+    """
+
 
 class ApiToken(NewApiToken, frozen=True, extra="forbid"):
     """An API token stored in the database."""

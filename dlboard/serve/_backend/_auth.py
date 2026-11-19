@@ -44,6 +44,7 @@ _log = get_logger(__name__)
 
 AUTH_PROVIDER: AppSlot[AuthProvider[...]] = AppSlot("auth provider")
 PUBLIC_ENDPOINTS: AppSlot[set[str]] = AppSlot("public endpoints")
+RUN_TOKEN_ENDPOINTS: AppSlot[set[str]] = AppSlot("run token endpoints")
 AUTH_SETTINGS: AppSlot[AuthSettings] = AppSlot("auth settings")
 
 set_auth_provider = AUTH_PROVIDER.set
@@ -150,6 +151,16 @@ def add_public_route(app: Dash, rule: str, view_func: Callable[..., Any], method
     PUBLIC_ENDPOINTS.setdefault(app, set).add(endpoint)
 
 
+def allow_run_tokens(app: Dash, endpoint: str) -> None:
+    """
+    Let a run token reach `endpoint`: one of a run client's own calls (logging, finishing, a heartbeat).
+
+    A run token reaches nothing else: every other route, pages and callbacks included, refuses it before it runs. What
+    each of these routes does for it is then held to its run by `AuthorizingDataStore`.
+    """
+    RUN_TOKEN_ENDPOINTS.setdefault(app, set).add(endpoint)
+
+
 def safe_next_path(next_path: str | None) -> str:
     """
     `next_path` reduced to a same-site path and query, else `/` -- so a login form's `?next=` can't redirect off-site.
@@ -163,9 +174,19 @@ def safe_next_path(next_path: str | None) -> str:
     return urlunsplit(("", "", target.path, target.query, ""))
 
 
-def bind_current_user(user: User) -> None:
-    """Make `user` who `get_current_user()` resolves to for the rest of the in-flight request, on `flask.g`."""
+def bind_current_user(user: User, run_id: int | None = None) -> None:
+    """
+    Make `user` who `get_current_user()` resolves to for the rest of the in-flight request, on `flask.g`.
+
+    `run_id` is the one run the request may touch, when it came with a run token (see `find_run_scope`).
+    """
     g.dlboard_user = user
+    g.dlboard_run_scope = run_id
+
+
+def find_run_scope() -> int | None:
+    """The one run the in-flight request may touch, if it came with a run token; `None` for any other credential."""
+    return g.dlboard_run_scope if has_request_context() and hasattr(g, "dlboard_run_scope") else None
 
 
 def find_current_user() -> User | None:
@@ -223,26 +244,29 @@ def _session_user(store: DataStore[...]) -> User | None:
 
 
 def _bearer_dlboard_token() -> str | None:
-    """The `Authorization: Bearer dlb_...` token on this request, or `None` if it's using anything else."""
+    """The `Authorization: Bearer dlb_...` (or a run token's `dlr_...`) token on this request, or `None` if it's using anything else."""
     auth = request.authorization
     if (
         auth is not None
         and auth.type == "bearer"
-        and (auth.token or "").startswith(_api_tokens.API_TOKEN_PREFIX)
+        and (auth.token or "").startswith(_api_tokens.TOKEN_PREFIXES)
     ):
         return auth.token
     return None
 
 
-def _authenticate(store: DataStore[...], provider: AuthProvider[...], settings: AuthSettings) -> User | None:
+def _authenticate(
+    store: DataStore[...], provider: AuthProvider[...], settings: AuthSettings
+) -> _api_tokens.Bearer | None:
     if (token := _bearer_dlboard_token()) is not None:
         # Anything claiming to be a dlboard token that doesn't check out (malformed or wrong) is a hard failure -- never quietly fall back to
         # some other identity for a caller that plainly meant to be this one.
         return _api_tokens.user_for_token(store, token)
     if provider.verifies_identity and (user := _session_user(store)) is not None:
-        return user
+        return _api_tokens.Bearer(user, None)
     principal = provider.authenticate()
-    return sign_in(store, principal, settings) if principal is not None else None
+    user = sign_in(store, principal, settings) if principal is not None else None
+    return _api_tokens.Bearer(user, None) if user is not None else None
 
 
 def _same_site_request() -> bool:
@@ -263,6 +287,29 @@ def _same_site_request() -> bool:
         return fetch_site in ("same-origin", "none")
     origin = request.headers.get("Origin")
     return origin is None or urlsplit(origin).netloc == request.host
+
+
+def _refusal(app: Dash, provider: AuthProvider[...], bearer: _api_tokens.Bearer) -> str | None:
+    """
+    Why this authenticated request is refused (a 403), or `None` if it isn't.
+
+    A run token reaches only the routes `allow_run_tokens` opened to it. A bearer token is never ambient -- a cross-site
+    page can't attach one a browser didn't already hand it, so only a session-cookie-authenticated request needs the
+    cross-site check at all. Every password-auth form route (login, signup, account) already carries its own CSRF token
+    (`password.py`'s `_require_csrf`) and is public pre-auth anyway; the check instead covers every *other*
+    state-changing route -- the REST API and Dash's own callback endpoint -- which ride the cookie with no token of their
+    own.
+    """
+    if bearer.run_id is not None and request.endpoint not in (RUN_TOKEN_ENDPOINTS.find(app) or set[str]()):
+        return "A run token only logs to its own run"
+    if (
+        provider.verifies_identity
+        and request.method not in _SAFE_METHODS
+        and _bearer_dlboard_token() is None
+        and not _same_site_request()
+    ):
+        return "Cross-site request blocked"
+    return None
 
 
 def _challenge(provider: AuthProvider[...]) -> BaseResponse | tuple[BaseResponse, int]:
@@ -362,23 +409,12 @@ def install_request_gate(app: Dash, store_for: Callable[[], DataStore[...]]) -> 
         public = PUBLIC_ENDPOINTS.find(app) or set[str]()
         if request.endpoint in public:
             return None
-        user = _authenticate(store_for(), provider, settings)
-        if user is None:
+        bearer = _authenticate(store_for(), provider, settings)
+        if bearer is None:
             return _challenge(provider)
-        # A bearer token is never ambient -- a cross-site page can't attach one a browser didn't
-        # already hand it, so only a session-cookie-authenticated request needs this at all. Every
-        # password-auth form route (login, signup, account) already carries its own CSRF token
-        # (`password.py`'s `_require_csrf`) and is public pre-auth anyway; this instead covers every
-        # *other* state-changing route -- the REST API and Dash's own callback endpoint -- which
-        # ride the cookie with no token of their own.
-        if (
-            provider.verifies_identity
-            and request.method not in _SAFE_METHODS
-            and _bearer_dlboard_token() is None
-            and not _same_site_request()
-        ):
-            return jsonify(error="Cross-site request blocked"), HTTPStatus.FORBIDDEN
-        bind_current_user(user)
+        if (refusal := _refusal(app, provider, bearer)) is not None:
+            return jsonify(error=refusal), HTTPStatus.FORBIDDEN
+        bind_current_user(bearer.user, bearer.run_id)
         return None
 
     # First, ahead of Dash's own `before_request` hook: that one renders the layout on the first

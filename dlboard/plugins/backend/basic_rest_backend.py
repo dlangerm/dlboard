@@ -25,6 +25,7 @@ from dlboard._wire import (
     MarkRun,
     Resource,
     RunCall,
+    RunToken,
     create_path,
     entity_path,
     get_or_create_path,
@@ -32,7 +33,14 @@ from dlboard._wire import (
 )
 from dlboard.models import DataStore
 from dlboard.plugins.backend._reads import READ_ROUTES
-from dlboard.serve import get_artifact_store, get_current_user, get_data_store
+from dlboard.serve import (
+    allow_run_tokens,
+    find_run_scope,
+    get_artifact_store,
+    get_current_user,
+    get_data_store,
+    mint_run_token,
+)
 from dlboard.serve.telemetry import AttributeKey, Counter, NoAttributes, Tally, Unit
 
 _log = get_logger(__name__)
@@ -234,7 +242,9 @@ def handle_restore_artifact(store: DataStore[...], artifact_id: int, actor: mode
 def whoami() -> dict[str, Any]:
     """Who this request was authenticated as, plus this server's version -- the client's handshake."""
     user = get_current_user()
-    return Identity(id=user.id, username=user.username, server_version=__version__).model_dump(mode="json")
+    return Identity(
+        id=user.id, username=user.username, server_version=__version__, run_id=find_run_scope()
+    ).model_dump(mode="json")
 
 
 def log_batch() -> dict[str, str]:
@@ -289,6 +299,18 @@ def heartbeat(entity_id: int) -> dict[str, Any]:
         raise NotFound
     store.heartbeat(entity_id)
     return {}
+
+
+def run_token(entity_id: int) -> dict[str, Any]:
+    """A run token for run `entity_id`, as the request's user: for a job to log to the run with, and nothing else."""
+    store = get_data_store()
+    if store.get_run(entity_id) is None:
+        raise NotFound
+    token, raw = mint_run_token(store, get_current_user(), entity_id)
+    expires_at = token.expires_at
+    if expires_at is None:  # `mint_run_token` always sets it
+        raise ValueError(token)
+    return RunToken(token=raw, run_id=entity_id, expires_at=expires_at).model_dump(mode="json")
 
 
 def create_project() -> dict[str, Any]:
@@ -366,11 +388,23 @@ _ROUTES: tuple[tuple[str, list[str], Callable[..., Any]], ...] = (
     (run_path(RunCall.FINISH), ["POST"], finish_run),
     (run_path(RunCall.MARK), ["POST"], mark_run),
     (run_path(RunCall.HEARTBEAT), ["POST"], heartbeat),
+    (run_path(RunCall.TOKEN), ["POST"], run_token),
     (f"{entity_path(Resource.RUNS)}/restore", ["POST"], _entity_route(handle_restore_run)),
     (entity_path(Resource.ARTIFACTS), ["DELETE"], _entity_route(handle_delete_artifact)),
     (f"{entity_path(Resource.ARTIFACTS)}/restore", ["POST"], _entity_route(handle_restore_artifact)),
     *READ_ROUTES,
 )
+
+_RUN_CALLS: Final = frozenset(
+    {whoami, log_batch, log_hyperparams, record_run_context, log_artifact, link_artifact}
+    | {get_run, finish_run, mark_run, heartbeat}
+)
+"""
+The routes a run's client calls once its run exists: the only ones a run token reaches (`allow_run_tokens`).
+
+Not a run's creation, nor a project's or an experiment's: a run token comes with its run. What each does is held to that
+run by `AuthorizingDataStore`, as most of them name it in their body rather than their path.
+"""
 
 _ERROR_STATUSES: Final[tuple[tuple[type[Exception], HTTPStatus], ...]] = (
     (PermissionError, HTTPStatus.FORBIDDEN),
@@ -411,8 +445,9 @@ def plug(app: dash.Dash) -> None:
         full_path = prefix + path
         # One path can carry several methods (`GET`/`DELETE` on a run), so the endpoint name has to
         # be per method, not per path, or Flask rejects the second as a duplicate endpoint.
-        app.server.add_url_rule(
-            full_path, endpoint=f"{' '.join(methods)} {full_path}", view_func=view_func, methods=methods
-        )
+        endpoint = f"{' '.join(methods)} {full_path}"
+        app.server.add_url_rule(full_path, endpoint=endpoint, view_func=view_func, methods=methods)
+        if view_func in _RUN_CALLS:
+            allow_run_tokens(app, endpoint)
     for kind, _status in _ERROR_STATUSES:
         app.server.errorhandler(kind)(_error_response)

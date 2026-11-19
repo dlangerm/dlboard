@@ -98,6 +98,22 @@ Before it starts, the logger checks the key with the server's `/api/v1/whoami` a
 it's missing or wrong. Without that check, bad credentials would only show up later, as metrics
 that were never stored. `dlboard serve local` needs no key.
 
+**A job on a cluster: a run token.** A job that runs somewhere else (a SLURM or Kubernetes job, a shared
+cluster's vault) shouldn't carry your API token, which can do anything you can. Mint a *run token* where
+you submit the job instead, and hand the job that:
+
+```bash
+DLBOARD_API_KEY=$(dlboard run-token --project vision --experiment sweep) sbatch train.sh
+```
+
+`dlboard run-token` starts a run (or takes `--run-id`'s) with your own token, and prints a `dlr_...` token
+that logs to that run alone. The job's `dlboard.init(...)` or `DLBoardLogger` then logs to that run,
+whatever project and experiment the script names. It needs no `run_id` and looks nothing up by name. The
+token reaches only what a run's own client calls: logging metrics, hyperparameters and artifacts, and
+marking and finishing the run. It can't read anything back, see or log to another run, make a project, or
+mint more tokens. It expires a week after it is minted (`DLBOARD_RUN_TOKEN_LIFETIME_HOURS`), and minting
+one takes an editor of the run's project. From Python, `BasicDlboardAPI.run_token(run_id)` mints one.
+
 **Guard your script's entry point.** The two shipping processes are started with `multiprocessing`'s
 `spawn` method, which re-imports your training script's `__main__` module from scratch in each one.
 A script that builds the logger (or starts training) at module level, with no

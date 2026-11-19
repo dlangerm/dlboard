@@ -22,9 +22,9 @@ def test_a_minted_token_authenticates_as_its_owner_and_is_stored_hashed(store: S
     token, raw = _api_tokens.mint_api_token(store, owner, "ci")
 
     assert raw.split("_", 2)[2] not in token.secret_hash
-    user = _api_tokens.user_for_token(store, raw)
-    assert user is not None
-    assert user.id == owner.id
+    bearer = _api_tokens.user_for_token(store, raw)
+    assert bearer is not None
+    assert (bearer.user.id, bearer.run_id) == (owner.id, None)
     (listed,) = store.list_api_tokens(owner.id)
     assert listed.last_used_at is not None
 
@@ -92,3 +92,22 @@ def test_a_tampered_or_unknown_token_is_rejected(store: SQLLiteStore, tamper: Ca
     _, raw = _api_tokens.mint_api_token(store, owner, "ci")
 
     assert _api_tokens.user_for_token(store, tamper(raw)) is None
+
+
+def test_a_run_token_is_bound_to_its_run_expires_and_is_not_listed_with_the_owners_tokens(
+    store: SQLLiteStore, experiment_id: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("DLBOARD_RUN_TOKEN_LIFETIME_HOURS", "2")
+    owner = store.get_or_create_user(models.Principal.unverified("owner"))
+    run = store.create_run(models.NewRun(experiment_id=experiment_id))
+
+    token, raw = _api_tokens.mint_run_token(store, owner, run.id)
+
+    bearer = _api_tokens.user_for_token(store, raw)
+    assert bearer is not None
+    assert (bearer.user.id, bearer.run_id, raw[:4]) == (owner.id, run.id, "dlr_")
+    assert token.expires_at is not None
+    assert pendulum.duration(hours=2) - (token.expires_at - token.created_at) < pendulum.duration(seconds=5)
+    assert store.list_api_tokens(owner.id) == []
+    # The same secret with a full token's prefix is not a full token: a token's prefix must say what it is.
+    assert _api_tokens.user_for_token(store, "dlb_" + raw[4:]) is None

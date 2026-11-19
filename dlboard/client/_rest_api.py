@@ -47,6 +47,7 @@ from dlboard._wire import (
     Read,
     Resource,
     RunCall,
+    RunToken,
     create_path,
     entity_path,
     get_or_create_path,
@@ -359,6 +360,19 @@ class BasicDlboardAPI:
             return False
         _raise_for_status(response)
         return True
+
+    def run_token(self, run_id: int) -> RunToken:
+        """
+        A run token for run `run_id`: what a job that logs to the run carries as its `DLBOARD_API_KEY`, instead of yours.
+
+        It logs to that run alone (a run started with it is that run), reaches nothing else, and expires (the server's
+        `DLBOARD_RUN_TOKEN_LIFETIME_HOURS`, a week by default). Asking takes an editor of the run's project, and a full
+        token or session, not a run token. Raises `requests.HTTPError` when the server refuses (a 404 from one from before
+        run tokens).
+        """
+        response = self._send("POST", run_path(RunCall.TOKEN), path=run_path(RunCall.TOKEN, str(run_id)))
+        _raise_for_status(response)
+        return RunToken.model_validate(response.json())
 
     def mark_run(
         self, run_id: int, *, pin: models.PinColor | None = None, keep: bool = False, tags: Sequence[str] = ()

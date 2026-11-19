@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 from flask import g, has_request_context
 
 from dlboard.serve._backend._app_slot import AppSlot, current_dash_app
-from dlboard.serve._backend._auth import AUTH_SETTINGS, get_auth_provider, get_current_user
+from dlboard.serve._backend._auth import AUTH_SETTINGS, find_run_scope, get_auth_provider, get_current_user
 from dlboard.serve._backend._authorization import AuthorizingArtifactStore, AuthorizingDataStore
 from dlboard.serve._backend._run_guards import RUN_GUARDS
 from dlboard.serve._backend._setting_rules import SETTING_RULES
@@ -47,6 +47,7 @@ def _authorizer() -> AuthorizingDataStore:
             new_project_access=AUTH_SETTINGS.get(app).new_project_access,
             setting_rules=SETTING_RULES.find(app),
             run_guards=RUN_GUARDS.find(app) or (),
+            run_scope=find_run_scope(),
         )
     return g.dlboard_authorizer
 

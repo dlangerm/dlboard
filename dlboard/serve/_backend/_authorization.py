@@ -58,9 +58,11 @@ class AuthorizingDataStore(models.DataStore[[]]):
         new_project_access: ProjectRole | None = None,
         setting_rules: Mapping[str, SettingRule] | None = None,
         run_guards: Sequence[RunGuard] = (),
+        run_scope: int | None = None,
     ) -> None:
         self._inner = inner
         self._actor = actor
+        self._run_scope = run_scope
         self._enforce = enforce_grants
         self._new_project_access = new_project_access
         self._setting_rules = setting_rules or {}
@@ -157,8 +159,19 @@ class AuthorizingDataStore(models.DataStore[[]]):
             return self._experiment_project(experiment_id)
         return project_id
 
+    def _require_in_run_scope(self, run_ids: Iterable[int]) -> None:
+        """
+        Raise unless every run of `run_ids` is the one a run token is for: on top of the roles, never instead of them.
+
+        Only the calls a run's client makes ask (the request gate turns a run token away from every other route); with any
+        other credential there is no run scope, and this allows everything.
+        """
+        if self._run_scope is not None and set(run_ids) - {self._run_scope}:
+            _forbid(f"a run token logs to run {self._run_scope} alone")
+
     def require_run_write(self, run_id: int, experiment_id: int) -> None:
         """Raise unless the actor may log data to `run_id`, which must really belong to `experiment_id`."""
+        self._require_in_run_scope([run_id])
         run = self._inner.get_run(run_id)
         if self._enforce and (run is None or run.experiment_id != experiment_id):
             msg = f"Run {run_id} does not belong to experiment {experiment_id}"
@@ -219,7 +232,14 @@ class AuthorizingDataStore(models.DataStore[[]]):
         )
 
     def create_api_token(self, token: models.NewApiToken) -> models.ApiToken:
+        """Your own token, never minted with a run token; a run token also expires, and needs the editor role on its run."""
         self._require_self_or(token.user_id, Scope.USER_MANAGE)
+        if self._run_scope is not None:
+            _forbid("a run token cannot mint tokens")
+        if token.run_id is not None:
+            if token.expires_at is None:
+                _forbid("a run token always expires")
+            self._require(self._run_project(token.run_id), ProjectRole.EDITOR)
         return self._inner.create_api_token(token)
 
     def get_api_token(self, token_id: str) -> models.ApiToken | None:  # noqa: ARG002
@@ -412,6 +432,8 @@ class AuthorizingDataStore(models.DataStore[[]]):
         return self._inner.create_run(run)
 
     def get_run(self, run_id: int) -> models.Run | None:
+        if self._run_scope not in (None, run_id):
+            return None  # another run is not a run token's to see: as if it were missing
         run = self._inner.get_run(run_id)
         return (
             run
@@ -420,6 +442,7 @@ class AuthorizingDataStore(models.DataStore[[]]):
         )
 
     def finish_run(self, run_id: int, status: models.RunStatus, ended_at: datetime) -> models.Run:
+        self._require_in_run_scope([run_id])
         self._require(self._run_project(run_id), ProjectRole.EDITOR)
         return self._inner.finish_run(run_id, status, ended_at)
 
@@ -536,6 +559,7 @@ class AuthorizingDataStore(models.DataStore[[]]):
         return self._inner.fetch_hyperparams(experiment_id, run_ids=run_ids)
 
     def heartbeat(self, run_id: int) -> None:
+        self._require_in_run_scope([run_id])
         self._require(self._run_project(run_id), ProjectRole.EDITOR)
         self._inner.heartbeat(run_id)
 
@@ -801,6 +825,7 @@ class AuthorizingDataStore(models.DataStore[[]]):
     ) -> None:
         if pinned_by != self._actor.id:
             _forbid("a run can only be pinned as yourself")
+        self._require_in_run_scope(run_ids)
         # Two reads whatever the number of runs: which experiments they are of, then who may see each (cached).
         experiments = self._inner.run_experiments(run_ids)
         if self._enforce and experiments.keys() != run_ids:
@@ -906,6 +931,7 @@ class AuthorizingDataStore(models.DataStore[[]]):
         )
 
     def keep_runs(self, run_ids: frozenset[int], actor: models.User) -> None:
+        self._require_in_run_scope(run_ids)
         by_project = self._run_projects(self._inner.run_experiments(run_ids))
         if self._enforce and set().union(*by_project.values()) != run_ids:
             _forbid("a run that does not exist, or is not yours to see, cannot be kept")
@@ -914,6 +940,7 @@ class AuthorizingDataStore(models.DataStore[[]]):
         self._inner.keep_runs(run_ids, self._bound(actor))
 
     def tag_runs(self, run_ids: frozenset[int], names: frozenset[str], actor: models.User) -> None:
+        self._require_in_run_scope(run_ids)
         by_project = self._run_projects(self._inner.run_experiments(run_ids))
         if self._enforce and set().union(*by_project.values()) != run_ids:
             _forbid("a run that does not exist, or is not yours to see, cannot be tagged")

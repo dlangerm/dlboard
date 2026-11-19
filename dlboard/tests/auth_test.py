@@ -17,7 +17,7 @@ import pytest
 from flask.testing import FlaskClient
 
 from dlboard import models
-from dlboard._wire import WHOAMI_PATH, Resource, create_path, get_or_create_path
+from dlboard._wire import WHOAMI_PATH, Resource, RunCall, create_path, get_or_create_path, run_path
 from dlboard.conftest import dispose_stores, scraped_total
 from dlboard.plugins import BUILTIN_BACKEND, PASSWORD_AUTH
 from dlboard.plugins.auth.password import (
@@ -367,6 +367,33 @@ def test_an_artifact_you_cannot_see_is_not_found(deployment: PasswordDeployment)
     (artifact,) = store.fetch_artifacts(experiment.id, run_ids=None)
 
     assert deployment.client.get(f"/artifact/{artifact.id}", headers=_bearer(store, "bob")).status_code == 404
+
+
+@pytest.mark.parametrize(
+    ("bobs_role", "status"),
+    [(None, 404), (models.ProjectRole.VIEWER, 403), (models.ProjectRole.EDITOR, 200)],
+    ids=["no access", "viewer", "editor"],
+)
+def test_only_an_editor_of_a_run_may_mint_a_run_token_for_it(
+    deployment: PasswordDeployment, bobs_role: models.ProjectRole | None, status: int
+) -> None:
+    store, alice, bob = (
+        deployment.store,
+        deployment.store.find_user("alice"),
+        deployment.store.find_user("bob"),
+    )
+    assert alice is not None
+    assert bob is not None
+    project = store.create_project(models.NewProject(name="p", description="", created_by=alice.id))
+    if bobs_role is not None:
+        store.set_project_grant(models.NewProjectGrant(project_id=project.id, user_id=bob.id, role=bobs_role))
+    run = store.create_run(
+        models.NewRun(experiment_id=store.create_experiment(models.NewExperiment(project_id=project.id)).id)
+    )
+
+    minted = deployment.client.post(f"/{run_path(RunCall.TOKEN, str(run.id))}", headers=_bearer(store, "bob"))
+
+    assert minted.status_code == status
 
 
 # -- Signing up and managing passwords --------------------------------------------------------------

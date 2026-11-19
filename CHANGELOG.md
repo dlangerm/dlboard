@@ -45,6 +45,10 @@ pulls that section's body into the GitHub release notes and publishes both distr
 * **Offline mode.** With `DLBOARD_OFFLINE_DIR` (or a `file://` server URL) a run logs to a folder with no server.
   `dlboard serve local --logdir` opens it, and `dlboard sync DIR --server URL` sends it to a shared server, both
   incrementally. (#703)
+* **Run tokens for cluster jobs.** `dlboard run-token --project P` starts a run and prints a `dlr_...` token that logs
+  to it alone. A job carries the token as `DLBOARD_API_KEY` instead of your own, and its `init`/`DLBoardLogger` logs to
+  that run. The token can't read anything, touch another run or mint more, and it expires after
+  `DLBOARD_RUN_TOKEN_LIFETIME_HOURS` (a week). (#718)
 
 ### Changed
 
@@ -54,7 +58,8 @@ pulls that section's body into the GitHub release notes and publishes both distr
   * `tag_runs`/`untag_runs`/`run_tags`/`search_tags` (#700);
   * `metric_series`/`artifact_series`, plus `get_runs`' new `tags=` and `before=` (#701).
 
-  Migrations 0012–0014 add their tables and columns, additively.
+  It also stores `NewApiToken.run_id`, and leaves run tokens out of `list_api_tokens` (#718). Migrations 0012–0015 add
+  their tables and columns, additively.
 
 ## [0.18.0] - 2026-11-17
 

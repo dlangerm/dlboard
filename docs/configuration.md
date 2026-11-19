@@ -138,6 +138,7 @@ Only matter with an identity-verifying provider such as `PASSWORD_AUTH`. See [au
 |---|---|---|
 | `DLBOARD_SECRET_KEY` | | Signs session cookies. At least 32 characters (`openssl rand -hex 32`) and identical across every worker and replica. |
 | `DLBOARD_SESSION_LIFETIME_HOURS` | `336` | How long a browser stays signed in. |
+| `DLBOARD_RUN_TOKEN_LIFETIME_HOURS` | `168` | How long a [run token](client.md#how-it-works) (`dlboard run-token`) logs to its run before it stops working. |
 | `DLBOARD_SESSION_CLOCK_SKEW_SECONDS` | `120` | How far ahead of a replica's own clock a session cookie may be dated (by whichever replica last renewed it) and still be accepted. Replicas never agree to the second, so too little signs people out at random. Keep your nodes on NTP regardless. |
 | `DLBOARD_SECURE_COOKIES` | `true` | Send the session cookie over HTTPS only. Turn off only for plain-HTTP local testing. |
 | `DLBOARD_ADMIN_USERS` | none | Comma-separated usernames granted admin whenever they sign in. How the first admin is made. |
