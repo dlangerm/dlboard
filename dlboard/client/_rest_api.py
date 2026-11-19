@@ -319,16 +319,18 @@ class BasicDlboardAPI:
         _raise_for_status(response)
         return True
 
-    def mark_run(self, run_id: int, *, pin: models.PinColor | None = None, keep: bool = False) -> models.Run:
+    def mark_run(
+        self, run_id: int, *, pin: models.PinColor | None = None, keep: bool = False, tags: Sequence[str] = ()
+    ) -> models.Run:
         """
-        Pin run `run_id` as this client's user in the colour `pin`, and/or keep it from retention (`keep`).
+        Pin run `run_id` as this client's user in the colour `pin`, keep it from retention (`keep`), and/or tag it (`tags`).
 
         Keeping takes an editor of the run's project. Raises `requests.HTTPError` when the server refuses it (a 403, or a
         404 for a run that is gone, not yours, or a server from before this existed), with why in its message.
         """
         return self._post(
             run_path(RunCall.MARK),
-            MarkRun(pin=pin, keep=keep),
+            MarkRun(pin=pin, keep=keep, tags=list(tags)),
             models.Run,
             path=run_path(RunCall.MARK, str(run_id)),
         )

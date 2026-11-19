@@ -302,6 +302,8 @@ def compare(
             | RunAction.REMOVE
             | RunAction.KEEP
             | RunAction.RELEASE
+            | RunAction.TAG
+            | RunAction.UNTAG
         ):
             msg = f"{request.action} is not a comparison"
             raise ValueError(msg)

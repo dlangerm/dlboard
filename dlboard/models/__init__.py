@@ -96,6 +96,7 @@ from dlboard.models._plugin import InstalledPlugin, PluginProtocol
 from dlboard.models._project import NewProject, Project
 from dlboard.models._run import NewRun, Run, RunStatus
 from dlboard.models._run_context import NewRunContext, RunContext
+from dlboard.models._run_tag import MAX_TAG_LENGTH, NewRunTag, NewTag, RunTag, Tag, TagName, normalize_tag
 from dlboard.models._scoped_setting import NewScopedSetting, ScopedSetting, ScopedSettings
 from dlboard.models._scopes import Scope, has_scope, require_scope
 from dlboard.models._tag import (
@@ -154,6 +155,7 @@ __all__ = [
     "INLINEABLE_ARTIFACT_CONTENT_TYPES",
     "LAYER_KIND_TAG",
     "MAX_GRID_COLUMNS",
+    "MAX_TAG_LENGTH",
     "MIN_GRID_COLUMNS",
     "NO_DATA_COLUMNS",
     "OVERLAY_KEY_SUFFIX",
@@ -229,7 +231,9 @@ __all__ = [
     "NewRun",
     "NewRunContext",
     "NewRunPin",
+    "NewRunTag",
     "NewScopedSetting",
+    "NewTag",
     "NewUser",
     "NotInTrashError",
     "OverlayKey",
@@ -258,6 +262,7 @@ __all__ = [
     "RunContext",
     "RunPin",
     "RunStatus",
+    "RunTag",
     "SchemeColors",
     "Scope",
     "ScopedSetting",
@@ -267,7 +272,9 @@ __all__ = [
     "SettingsSection",
     "SizeUnit",
     "StepRange",
+    "Tag",
     "TagDisplay",
+    "TagName",
     "TagValue",
     "ThemeSpec",
     "TimeUnit",
@@ -297,6 +304,7 @@ __all__ = [
     "layer_kind",
     "literal_prefix",
     "max_histogram_buckets",
+    "normalize_tag",
     "overlay_image_key",
     "overlay_key",
     "plotly_data_key",

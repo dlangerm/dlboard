@@ -128,6 +128,15 @@ FOREIGN_KEYS: dict[type[BaseModel], dict[str, ForeignKey]] = {
         "experiment_id": ForeignKey(models.Experiment),
         "run_id": ForeignKey(models.Run, _OWNS),
     },
+    models.Tag: {"project_id": ForeignKey(models.Project, _OWNS)},
+    models.RunTag: {
+        "run_id": ForeignKey(models.Run, _OWNS),
+        "tag_id": ForeignKey(models.Tag, _OWNS),
+        "experiment_id": ForeignKey(
+            models.Experiment
+        ),  # denormalized convenience, as a pin's: not an ownership edge
+        "tagged_by": ForeignKey(models.User),
+    },
     models.Artifact: {
         "experiment_id": ForeignKey(models.Experiment),
         "run_id": ForeignKey(models.Run, _OWNS),
@@ -180,6 +189,8 @@ UNIQUE_COLUMNS: dict[type[BaseModel], list[tuple[str, ...]]] = {
     models.RunPin: [("run_id", "pinned_by", "color")],
     models.ComparisonRun: [("page_id", "run_id")],
     models.RunContext: [("run_id",)],
+    models.Tag: [("project_id", "name")],
+    models.RunTag: [("run_id", "tag_id")],
     **TASK_UNIQUE_COLUMNS,
 }
 
@@ -197,6 +208,8 @@ TABLES: tuple[type[BaseModel], ...] = (
     models.UnderlyingHistogramTableEntry,
     models.HyperParams,
     models.RunContext,
+    models.Tag,
+    models.RunTag,
     models.Artifact,
     models.Page,
     models.Comment,
@@ -362,6 +375,9 @@ def build_metadata(schema: str | None = None) -> tuple[sa.MetaData, dict[type[Ba
     # The runs still running, by when they were last heard from: what the sweep for lost runs reads, without the rest.
     running = sa.and_(runs.c.status == models.RunStatus.RUNNING.value, live)
     sa.Index("idx_Run_running", runs.c.last_seen_at, sqlite_where=running, postgresql_where=running)
+    # A tag's runs of an experiment, which is how a list is filtered by it; a run's tags by its unique `(run_id, tag_id)`.
+    run_tags = tables[models.RunTag]
+    sa.Index("idx_RunTag_tag", run_tags.c.tag_id, run_tags.c.experiment_id)
     # A project's live experiments, the newest first, a page at a time (the project page's cards), without reading every
     # other project's: nothing else leads with `project_id`.
     experiments, live_experiment = tables[models.Experiment], tables[models.Experiment].c.deleted_at.is_(None)
@@ -1343,12 +1359,15 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
         created_before: datetime | None = None,
         oldest_first: bool = False,
         include_kept: bool = True,
+        tags: frozenset[str] = frozenset(),
     ) -> Iterator[models.Run]:
         """
         A page (`limit` of `None` being every one) of an experiment's (non-deleted) runs, most recently created first.
 
-        Only `run_ids`, if given, those `name_contains` finds, those older than `created_before`, and not the kept ones
-        unless `include_kept`. Served by `idx_Run_live (experiment_id, created_at)` from either end.
+        Only `run_ids`, if given, those `name_contains` finds, those with any of `tags`, those older than `created_before`, and
+        not the kept ones
+        unless `include_kept`. Served by `idx_Run_live (experiment_id, created_at)` from either end, a tag's runs by
+        `idx_RunTag_tag`.
         """
         runs = self._tables[models.Run]
         newest_first = (runs.c.created_at.desc(), runs.c.id.desc())
@@ -1361,6 +1380,7 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
                     runs.c.deleted_at.is_(None),
                     *_runs_among(runs.c.id, run_ids),
                     *_name_matches(runs, name_contains),
+                    *self._tagged(runs, experiment_id, tags),
                     *([] if created_before is None else [runs.c.created_at < created_before]),
                     *([] if include_kept else [runs.c.kept_at.is_(None)]),
                 )
@@ -1369,6 +1389,31 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
                 .offset(offset),
             )
         )
+
+    def _tagged(
+        self, runs: sa.Table, experiment_id: int, tags: frozenset[str]
+    ) -> list[sa.ColumnElement[bool]]:
+        """
+        What keeps the runs of the experiment with any of `tags` (normalized); nothing, for no tags.
+
+        The tags are found by the unique `(project_id, name)` in the experiment's project, and their runs by `idx_RunTag_tag`.
+        """
+        if not tags:
+            return []
+        exp_table, tag_table, run_tags = (
+            self._tables[m] for m in (models.Experiment, models.Tag, models.RunTag)
+        )
+        project = sa.select(exp_table.c.project_id).where(exp_table.c.id == experiment_id).scalar_subquery()
+        tagged = (
+            sa.select(run_tags.c.run_id)
+            .join(tag_table, tag_table.c.id == run_tags.c.tag_id)
+            .where(
+                tag_table.c.project_id == project,
+                tag_table.c.name.in_({models.normalize_tag(tag) for tag in tags}),
+                run_tags.c.experiment_id == experiment_id,
+            )
+        )
+        return [runs.c.id.in_(tagged)]
 
     def count_runs(
         self,
@@ -2688,6 +2733,86 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
             for batch in _in_batches(run_ids)
         )
         self._touch(set(experiments.values()), _Touch.VIEW)
+
+    def tag_runs(self, run_ids: frozenset[int], names: frozenset[str], actor: models.User) -> None:
+        """
+        Give each of `run_ids` each tag of `names` (normalized), a run that has one already keeping it.
+
+        A tag is its project's: made there the first time a run of the project is given it. All in one transaction, each an
+        `INSERT ... SELECT` from the runs: each tag into the runs' projects, then each run its tags; then the check that
+        every run is there and not deleted, which rolls both back if not. Writes first: on SQLite a read first could not
+        wait for another writer, and on Postgres the check after them holds the runs until the commit.
+        """
+        names = frozenset(models.normalize_tag(name) for name in names) - {""}
+        runs, experiments, tags, run_tags = (
+            self._tables[m] for m in (models.Run, models.Experiment, models.Tag, models.RunTag)
+        )
+        now = sa.literal(pendulum.now(pendulum.UTC), tags.c.created_at.type)
+        of_runs = runs.join(experiments, experiments.c.id == runs.c.experiment_id)
+        with self._begin() as conn:
+            for batch in _in_batches(run_ids):
+                for name in names:
+                    conn.execute(
+                        self._insert_ignoring_conflicts(tags).from_select(
+                            ["project_id", "name", "created_at"],
+                            sa.select(experiments.c.project_id, sa.literal(name), now)
+                            .select_from(of_runs)
+                            .where(runs.c.id.in_(batch))
+                            .distinct(),
+                        )
+                    )
+                conn.execute(
+                    self._insert_ignoring_conflicts(run_tags).from_select(
+                        ["run_id", "tag_id", "experiment_id", "tagged_by", "tagged_at"],
+                        sa.select(runs.c.id, tags.c.id, runs.c.experiment_id, sa.literal(actor.id), now)
+                        .select_from(of_runs.join(tags, tags.c.project_id == experiments.c.project_id))
+                        .where(runs.c.id.in_(batch), tags.c.name.in_(names)),
+                    )
+                )
+            touched = self._ensure_runs_not_deleted(set(run_ids), on=conn)
+        self._touch(set(touched.values()), _Touch.VIEW)
+
+    def untag_runs(self, run_ids: frozenset[int], names: frozenset[str]) -> None:
+        """Take the tags of `names` (normalized) off `run_ids`; a tag no run has any more stays its project's, unlisted."""
+        names = frozenset(models.normalize_tag(name) for name in names)
+        tags, run_tags = self._tables[models.Tag], self._tables[models.RunTag]
+        named = sa.select(tags.c.id).where(tags.c.name.in_(names))
+        self._transaction(
+            sa.delete(run_tags).where(run_tags.c.run_id.in_(batch), run_tags.c.tag_id.in_(named))
+            for batch in _in_batches(run_ids)
+        )
+        self._touch(set(self.run_experiments(run_ids).values()), _Touch.VIEW)
+
+    def run_tags(self, run_ids: frozenset[int]) -> dict[int, list[str]]:
+        """Each of `run_ids`' tags, by name in order; a run with none is left out. Found by the unique `(run_id, tag_id)`."""
+        tags, run_tags = self._tables[models.Tag], self._tables[models.RunTag]
+        found: dict[int, list[str]] = {}
+        for batch in _in_batches(run_ids):
+            for run, name in self._execute(
+                sa.select(run_tags.c.run_id, tags.c.name)
+                .join(tags, tags.c.id == run_tags.c.tag_id)
+                .where(run_tags.c.run_id.in_(batch))
+                .order_by(tags.c.name)
+            ):
+                found.setdefault(run, []).append(name)
+        return found
+
+    def search_tags(self, project_id: int, *, search: str = "", limit: int) -> list[str]:
+        """A project's tags with `search` in their name, in order, at most `limit`: found by the unique `(project_id, name)`."""
+        tags = self._tables[models.Tag]
+        needle = models.normalize_tag(search)
+        matched = (
+            [tags.c.name.contains(needle, autoescape=True)] if needle else list[sa.ColumnElement[bool]]()
+        )
+        return [
+            name
+            for (name,) in self._execute(
+                sa.select(tags.c.name)
+                .where(tags.c.project_id == project_id, *matched)
+                .order_by(tags.c.name)
+                .limit(limit)
+            )
+        ]
 
     def release_runs(
         self,

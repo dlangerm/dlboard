@@ -551,6 +551,7 @@ class Run:
         name: str | None = None,
         pin: models.PinColor | None = None,
         keep: bool = False,
+        tags: Sequence[str] = (),
     ) -> Self:
         """
         Attach to `run_id`, or create a run (in `experiment_id`, or a new experiment of `project_id`); start shipping.
@@ -579,8 +580,8 @@ class Run:
             # `name` only when given: `NewRun` names a run itself when the field is omitted, never when it is `None`.
             new_run = models.NewRun(experiment_id=experiment_id, **({} if name is None else {"name": name}))
             run_id = api.create_run(new_run).id
-        if pin is not None or keep:
-            api.mark_run(run_id, pin=pin, keep=keep)
+        if pin is not None or keep or tags:
+            api.mark_run(run_id, pin=pin, keep=keep, tags=tags)
         startup_start = time.perf_counter()
         metrics: _Shipper[models.LoggedMetrics] = _Shipper(
             _ShipKind.METRICS,
@@ -864,6 +865,7 @@ def init(  # noqa: PLR0913 -- one keyword per thing a run is started with
     run_id: int | None = None,
     pin: models.PinColor | None = None,
     keep: bool = False,
+    tags: Sequence[str] = (),
 ) -> Run:
     """
     Start a run in `experiment` of `project` (creating either by name if it doesn't exist yet), from any script.
@@ -871,7 +873,8 @@ def init(  # noqa: PLR0913 -- one keyword per thing a run is started with
     `run_id` (default: the `DLBOARD_RUN_ID` env var) attaches to an existing run of that experiment instead -- for
     resuming a run, or sharing one between processes launched separately. `name` names a new run (one is made up
     otherwise), `hparams` are logged straight away (see `Run.log_hyperparams`), and `pin`/`keep` mark the run the
-    moment it exists. `project_description` only applies the first time `project` is seen.
+    moment it exists, as do `tags` (`["baseline"]`, shared by the project). `project_description` only applies the first
+    time `project` is seen.
 
     On a non-zero rank this makes no server calls and returns an inert run (see `Run`): call it on every rank.
     """
@@ -896,6 +899,7 @@ def init(  # noqa: PLR0913 -- one keyword per thing a run is started with
         name=name,
         pin=pin,
         keep=keep,
+        tags=tags,
     )
     if hparams is not None:
         run.log_hyperparams(hparams)

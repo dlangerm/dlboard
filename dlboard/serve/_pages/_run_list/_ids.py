@@ -47,6 +47,23 @@ def count_id(surface: RunListSurface) -> DivId[RunList]:
     return DivId(f"run-list-count-{surface}")
 
 
+class TagPicker(PatternId[RunList]):
+    """
+    The bar's tag box: what is typed in it is put on the selected rows, or taken off them.
+
+    Its id names the project whose tags it offers, so the one callback that searches them serves every page of a surface.
+    """
+
+    KEYS: ClassVar[tuple[str, ...]] = ("project_id",)
+
+    def of(self, project_id: int) -> dict[str, str]:
+        return {"type": self.type, "project_id": str(project_id)}
+
+
+def tag_picker(surface: RunListSurface) -> TagPicker:
+    return TagPicker(f"run-list-tag-{surface}")
+
+
 class ActionButton(PatternId[RunList]):
     """A family of buttons, one for each way to act on the selected rows: told apart by what they do, and what they name."""
 

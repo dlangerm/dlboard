@@ -151,14 +151,16 @@ class FinishRun(BaseModel, frozen=True, extra="ignore"):
 
 class MarkRun(BaseModel, frozen=True, extra="ignore"):
     """
-    Request body: a run's client pins it (for the caller) and/or keeps it, as it is launched.
+    Request body: a run's client pins it (for the caller), keeps it and/or tags it, as it is launched.
 
     Pinning is the caller's own, in a colour, as the UI does it. Keeping takes the run out of retention's reach, which an
-    editor of its project may do. Asking for neither does nothing.
+    editor of its project may do, as is tagging it. Asking for none does nothing.
     """
 
     pin: models.PinColor | None = None
     keep: bool = False
+    tags: list[models.TagName] = Field(default_factory=list[str], max_length=100)
+    """Tags to give the run, as a project editor does (`DataStore.tag_runs`); an older server ignores them."""
 
 
 class GetOrCreateExperiment(BaseModel, frozen=True, extra="ignore"):

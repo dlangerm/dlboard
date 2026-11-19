@@ -11,6 +11,8 @@ from dlboard.serve._grid import EYE_RENDERER, RUN_LINK_RENDERER
 from dlboard.serve._pages._dataframe_helpers import run_display_name
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from dlboard.models import Run
 
 ROW_ID_FIELD: Final = "_row_id"
@@ -26,6 +28,8 @@ STATUS_DETAIL_FIELD: Final = "_status_detail"
 """Reserved row fields (underscore-prefixed, like `_swatch`): a hyperparameter or metric named "status" can't shadow them."""
 KEPT_FIELD: Final = "_kept"
 """Whether the run is kept: retention never deletes it. Drawn as a lock after its name (`DlboardRunLink`)."""
+TAGS_FIELD: Final = "_tags"
+"""The run's tags, by name: drawn after its name (`DlboardRunLink`), and matched by the Run column's filter."""
 
 EYE_COLUMN_WIDTH: Final = 32
 NAME_MIN_WIDTH: Final = 96
@@ -80,8 +84,8 @@ def _status_detail(run: Run) -> str:
             return f"ended without saying how{after}"
 
 
-def run_fields(run: Run) -> dict[str, Any]:
-    """The fields of a run's row that every run list has: its id and name, and how it ended and how long it took."""
+def run_fields(run: Run, tags: Sequence[str] = ()) -> dict[str, Any]:
+    """The fields of a run's row that every run list has: its id and name, how it ended and how long it took, its tags."""
     return {
         MetricColumn.RUN_ID: run.id,
         RUN_NAME_COLUMN: run_display_name(run),
@@ -90,6 +94,7 @@ def run_fields(run: Run) -> dict[str, Any]:
         STATUS_TEXT_FIELD: _status_text(run),
         STATUS_DETAIL_FIELD: _status_detail(run),
         KEPT_FIELD: run.kept_at is not None,
+        TAGS_FIELD: list(tags),
     }
 
 
@@ -110,12 +115,21 @@ def eye_column_def() -> dict[str, Any]:
 
 
 def name_column_def(*, swatch: bool) -> dict[str, Any]:
-    """The run's name, as a link to the run (its row's `_href`); with its color in the charts as a dot, if it is drawn there."""
+    """
+    The run's name, as a link to the run (its row's `_href`); with its color in the charts as a dot, if it is drawn there.
+
+    Its tags follow it, and its filter matches them as well as the name: `baseline` keeps the runs tagged that.
+    """
     return {
         "field": RUN_NAME_COLUMN,
         "headerName": "Run",
+        "headerTooltip": "The run, and its tags: the filter matches either",
         "sortable": True,
         "filter": True,
+        # dash-ag-grid reads a function as an expression of its own, not JavaScript: no spread, so the tags are joined on.
+        "filterValueGetter": {
+            "function": f"params.data.{RUN_NAME_COLUMN} + ' ' + (params.data.{TAGS_FIELD} || []).join(' ')"
+        },
         "cellRenderer": RUN_LINK_RENDERER,
         # The name is what the list is for: it takes what the narrow columns around it leave.
         "minWidth": NAME_MIN_WIDTH,

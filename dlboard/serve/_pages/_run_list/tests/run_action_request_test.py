@@ -28,6 +28,9 @@ def test_a_request_names_its_runs_once_however_the_browser_listed_them() -> None
         pytest.param(
             {"action": "draw", "run_ids": [1], "at": 1, "extra": 1}, id="something-it-did-not-ask-for"
         ),
+        pytest.param({"action": "tag", "run_ids": [1], "at": 1}, id="a-tag-that-names-no-tag"),
+        pytest.param({"action": "tag", "run_ids": [1], "tag": "  ", "at": 1}, id="a-blank-tag"),
+        pytest.param({"action": "keep", "run_ids": [1], "tag": "a", "at": 1}, id="a-tag-it-does-not-take"),
     ],
 )
 def test_a_malformed_request_is_refused_where_it_arrives(raw: dict[str, object]) -> None:
@@ -39,6 +42,14 @@ def test_a_pin_names_its_colour_in_its_argument() -> None:
     request = RunActionRequest.model_validate({"action": "pin", "run_ids": [1], "color": "red", "at": 1})
 
     assert request.color is PinColor.RED
+
+
+def test_a_tag_is_named_as_the_project_stores_it() -> None:
+    request = RunActionRequest.model_validate(
+        {"action": "untag", "run_ids": [1], "tag": " Base  Line ", "at": 1}
+    )
+
+    assert request.tag == "base line"
 
 
 def test_comparing_the_runs_pinned_in_a_colour_names_a_colour_and_no_runs() -> None:

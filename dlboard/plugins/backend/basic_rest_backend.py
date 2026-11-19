@@ -122,7 +122,7 @@ def handle_mark_run(
     store: DataStore[...], run_id: int, body: dict[str, Any], actor: models.User
 ) -> dict[str, Any]:
     """
-    Keep and/or pin run `run_id` as `actor` (`MarkRun`), and say how the run stands. 404 as `handle_get_run`.
+    Keep, pin and/or tag run `run_id` as `actor` (`MarkRun`), and say how the run stands. 404 as `handle_get_run`.
 
     The keep comes first: it needs more than a pin does, so a writer who may pin but not keep marks nothing.
     """
@@ -133,6 +133,8 @@ def handle_mark_run(
         store.keep_runs(frozenset({run_id}), actor)
     if req.pin is not None:
         store.pin_runs(actor.id, frozenset({run_id}), req.pin)
+    if req.tags:
+        store.tag_runs(frozenset({run_id}), frozenset(req.tags), actor)
     return handle_get_run(store, run_id)
 
 

@@ -48,8 +48,8 @@ from dlboard.serve._pages._run_list import (
     RunActionRequest,
     RunListSurface,
     action_bar,
-    keep_actions,
-    keep_or_release,
+    mark_actions,
+    mark_runs,
     register_run_list,
     request_store_id,
     simple_action,
@@ -151,10 +151,11 @@ def _fetch(store: DataStore[...], project_id: int, flt: PinFilter) -> tuple[Pinn
     return (found, pages) if flt.page <= pages else (page_of(pages), pages)
 
 
-def _rows(found: PinnedRuns, me: int) -> list[dict[str, Any]]:
+def _rows(store: DataStore[...], found: PinnedRuns, me: int) -> list[dict[str, Any]]:
+    tags = store.run_tags(frozenset(pinned.run.id for pinned in found.runs))
     return [
         {
-            **run_fields(pinned.run),
+            **run_fields(pinned.run, tags.get(pinned.run.id, ())),
             HREF_FIELD: experiment_href(pinned.experiment.id, run_id=pinned.run.id),
             EXPERIMENT_FIELD: experiment_display_name(pinned.experiment),
             PINS_FIELD: [cell.model_dump(mode="json") for cell in pin_cells(pinned.pins, me)],
@@ -167,7 +168,7 @@ def _count(found: PinnedRuns) -> str:
     return f"{found.total} run{'s' if found.total != 1 else ''}"
 
 
-def pinned_runs_list(found: PinnedRuns, me: int, flt: PinFilter) -> Component:
+def pinned_runs_list(store: DataStore[...], found: PinnedRuns, me: int, flt: PinFilter) -> Component:
     """The runs of `found` as a list, or what to do if there are none."""
     if not found.runs:
         return dmc.Text(
@@ -184,7 +185,7 @@ def pinned_runs_list(found: PinnedRuns, me: int, flt: PinFilter) -> Component:
             pin_column_def(),
             status_column_def(),
         ],
-        _rows(found, me),
+        _rows(store, found, me),
         (),
         swatches=False,
     )
@@ -291,12 +292,12 @@ def render_pinned_runs(store: DataStore[...], project_id: int, flt: PinFilter) -
                 RunListSurface.PROJECT,
                 *pin_menus(RunListSurface.PROJECT),
                 compare_menu(RunListSurface.PROJECT, addable_comparisons(store, project_id)),
-                *keep_actions(RunListSurface.PROJECT),
+                *mark_actions(RunListSurface.PROJECT, store, project_id),
                 simple_action(
                     RunListSurface.PROJECT, RunAction.DELETE, "Delete", icon_name=Icon.DELETE, color="red"
                 ),
             ),
-            html.Div(pinned_runs_list(found, me, flt), id=PINNED_LIST_ID),
+            html.Div(pinned_runs_list(store, found, me, flt), id=PINNED_LIST_ID),
             dmc.Pagination(
                 id=PINNED_PAGER_ID, withEdges=False, size="xs", mt="xs", **pager_props(pages, flt.page)
             ),
@@ -343,9 +344,9 @@ def _act(request: RunActionRequest, act: _Act) -> tuple[Any, ...]:
         case RunAction.PIN | RunAction.UNPIN:
             pinned = pin_or_unpin(request, PINNED_GRID_ID, RunListSurface.PROJECT)
             return pinned.rows, pinned.notice, no_update, no_update, no_update, no_update
-        case RunAction.KEEP | RunAction.RELEASE:
-            kept = keep_or_release(request, PINNED_GRID_ID)
-            return kept.rows or no_update, kept.notice, no_update, no_update, no_update, no_update
+        case RunAction.KEEP | RunAction.RELEASE | RunAction.TAG | RunAction.UNTAG:
+            marked = mark_runs(request, PINNED_GRID_ID)
+            return marked.rows or no_update, marked.notice, no_update, no_update, no_update, no_update
         case RunAction.DELETE:
             asked = ask_to_delete(request.run_ids)
             return no_update, no_update, asked.opened, asked.body, asked.pending, no_update
@@ -407,10 +408,11 @@ def register(app: Dash) -> None:
             q=(shown.q or "").strip(),
             page=(shown.page or 1) if ctx.triggered_id == PINNED_PAGER_ID else 1,
         )
-        found, pages = _fetch(get_data_store(), shown.project_id, flt)
+        store = get_data_store()
+        found, pages = _fetch(store, shown.project_id, flt)
         props = pager_props(pages, flt.page)
         return (
-            pinned_runs_list(found, get_current_user().id, flt),
+            pinned_runs_list(store, found, get_current_user().id, flt),
             _count(found),
             props["total"],
             props["value"],

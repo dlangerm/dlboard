@@ -7,7 +7,7 @@ from typing import Any, Self
 from pydantic import BaseModel, TypeAdapter, model_validator
 
 from dlboard._compat import StrEnum
-from dlboard.models import PinColor
+from dlboard.models import PinColor, TagName
 
 
 class RunAction(StrEnum):
@@ -37,6 +37,10 @@ class RunAction(StrEnum):
     """Keep the runs: no retention policy deletes them, and only an owner does."""
     RELEASE = "release"
     """Stop keeping the runs, so that retention may delete them again: an owner's to do."""
+    TAG = "tag"
+    """Tag the runs `tag`, for everyone in the project: an editor's to do."""
+    UNTAG = "untag"
+    """Take the tag `tag` off the runs: an editor's to do."""
 
 
 class RunActionRequest(BaseModel, frozen=True, extra="forbid"):
@@ -48,12 +52,17 @@ class RunActionRequest(BaseModel, frozen=True, extra="forbid"):
     """The colour of the pin an action pins, unpins or compares the pinned runs of."""
     comparison_id: int | None = None
     """The comparison `COMPARE_ADD` adds the runs to: only that action takes one."""
+    tag: TagName | None = None
+    """The tag `TAG` and `UNTAG` put on or take off the runs: only those actions take one."""
     at: int
 
     @model_validator(mode="after")
     def _takes_the_colour_or_comparison_its_action_takes(self) -> Self:
         if not self.run_ids and self.action is not RunAction.COMPARE_PINS:
             msg = f"{self.action} needs a run to act on"
+            raise ValueError(msg)
+        if (self.tag is None) == (self.action in {RunAction.TAG, RunAction.UNTAG}):
+            msg = f"{self.action} takes a tag only if it tags"
             raise ValueError(msg)
         match self.action:
             case (
@@ -65,6 +74,8 @@ class RunActionRequest(BaseModel, frozen=True, extra="forbid"):
                 | RunAction.COMPARE_NEW
                 | RunAction.KEEP
                 | RunAction.RELEASE
+                | RunAction.TAG
+                | RunAction.UNTAG
             ):
                 if self.color is not None or self.comparison_id is not None:
                     msg = f"{self.action} takes no colour or comparison"

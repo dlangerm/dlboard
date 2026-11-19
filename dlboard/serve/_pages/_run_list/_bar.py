@@ -3,18 +3,20 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 import dash_mantine_components as dmc
 from dash import Input, Output, State, html
 
-from dlboard.serve import ClientsideScript, Icon, icon
+from dlboard.serve import ClientsideScript, Icon, get_data_store, icon
+from dlboard.serve._pages._dash_helpers import TriggeredId, require_triggered_id
 from dlboard.serve._pages._run_list._ids import (
     RunListSurface,
     action_button,
     bar_id,
     count_id,
     request_store_id,
+    tag_picker,
 )
 
 if TYPE_CHECKING:
@@ -22,6 +24,14 @@ if TYPE_CHECKING:
     from dash.development.base_component import Component
 
     from dlboard.serve._pages._run_list._model import RunAction
+
+TAG_PICKER_LIMIT: Final = 20
+"""The most tags the bar's tag box offers at once: the first of the project's, or the ones what is typed finds."""
+
+
+class _TagPickerId(TriggeredId):
+    project_id: int
+
 
 _ACTION_GATE_JS = ClientsideScript(Path(__file__).with_name("action_gate.js"))
 _CELL_GATE_JS = ClientsideScript(Path(__file__).with_name("cell_gate.js"))
@@ -79,8 +89,20 @@ def register_run_list(app: Dash, surface: RunListSurface, grid_id: str) -> None:
         Output(request_store_id(surface), "data"),
         Input(action_button(surface).all(), "n_clicks", allow_optional=True),
         State(grid_id, "selectedRows", allow_optional=True),
+        State(tag_picker(surface).all(), "value", allow_optional=True),
         prevent_initial_call=True,
     )
+
+    @app.callback(
+        Output(tag_picker(surface).match(), "data"),
+        Input(tag_picker(surface).match(), "value"),
+        prevent_initial_call=True,
+    )
+    def search_tags(typed: str | None) -> list[str]:
+        """The project's tags that what is typed in the tag box finds, a page of them: every tag is a search away."""
+        project_id = require_triggered_id(_TagPickerId).project_id
+        return get_data_store().search_tags(project_id, search=typed or "", limit=TAG_PICKER_LIMIT)
+
     app.clientside_callback(
         _CELL_GATE_JS.source,
         Output(request_store_id(surface), "data", allow_duplicate=True),

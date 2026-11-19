@@ -65,8 +65,8 @@ from dlboard.serve._pages._run_list import (
     RunActionRequest,
     RunListSurface,
     action_bar,
-    keep_actions,
-    keep_or_release,
+    mark_actions,
+    mark_runs,
     register_run_list,
     request_store_id,
     selected_run_ids,
@@ -160,6 +160,8 @@ class _Listed(typing.NamedTuple):
     selection: _Selection
     view_id: int | None
     """The view the page is of, which a link to a run stays in."""
+    tags: Mapping[int, list[str]] = {}
+    """Each run's tags (`DataStore.run_tags`)."""
 
 
 def _build_hparam_rows(
@@ -177,7 +179,7 @@ def _build_hparam_rows(
             FOCUSED_FIELD: run.id == listed.selection.focus,
             HREF_FIELD: experiment_href(experiment_id, view_id=listed.view_id, run_id=run.id),
             PINS_FIELD: [cell.model_dump(mode="json") for cell in pins.get(run.id, [])],
-            **run_fields(run),
+            **run_fields(run, listed.tags.get(run.id, ())),
         }
         hparam = hparams_by_run.get(run.id)
         if hparam is not None:
@@ -347,7 +349,7 @@ def _run_head(
             simple_action(surface, RunAction.DIFF, "Diff", icon_name=Icon.COMPARE),
             *pin_menus(surface),
             compare_menu(surface, addable_comparisons(store, project_id)),
-            *keep_actions(surface),
+            *mark_actions(surface, store, project_id),
             simple_action(surface, RunAction.DELETE, "Delete", icon_name=Icon.DELETE, color="red"),
         ),
         *([compare_pins] if compare_pins is not None else []),
@@ -380,7 +382,13 @@ def _head_and_signature(
     ref = repo.ref_of(page)
     runs, selection, selected = _load_hparam_panel_settings(store, experiment_id, ref, None)
     hparams = list(store.fetch_hyperparams(experiment_id, run_ids=None))
-    listed = _Listed(runs, hparams, selection, ref.view_id if isinstance(ref, repo.ExperimentRef) else None)
+    listed = _Listed(
+        runs,
+        hparams,
+        selection,
+        ref.view_id if isinstance(ref, repo.ExperimentRef) else None,
+        store.run_tags(frozenset(run.id for run in runs)),
+    )
     pins = experiment_pin_cells(store, experiment_id, get_current_user().id)
     return _run_head(store, experiment_id, selection, chips), _render_signature(
         experiment_id, listed, selected, pins
@@ -498,7 +506,8 @@ def _render_signature(
     redraw its row.
     """
     run_states = [
-        [run.id, run.status, run.ended_at.isoformat() if run.ended_at else None] for run in listed.runs
+        [run.id, run.status, run.ended_at.isoformat() if run.ended_at else None, listed.tags.get(run.id, [])]
+        for run in listed.runs
     ]
     selection = listed.selection
     # Drawing a run (the eye) does not come through here: its action patches the rows that changed, rewrites the head, and
@@ -604,7 +613,11 @@ def _register_hparam_table(app: Dash) -> None:
         # The view of the freshest page, not `STATE_VIEW_ID`: after an edit that branched into a view that store is a round trip behind,
         # and a link to a run must stay in the view the charts are in.
         listed = _Listed(
-            runs, hparams, selection, ref.view_id if isinstance(ref, repo.ExperimentRef) else None
+            runs,
+            hparams,
+            selection,
+            ref.view_id if isinstance(ref, repo.ExperimentRef) else None,
+            store.run_tags(frozenset(run.id for run in runs)),
         )
         pins = experiment_pin_cells(store, experiment_id, get_current_user().id)
         signature = _render_signature(experiment_id, listed, selected, pins)
@@ -885,9 +898,16 @@ def _register_run_actions(app: Dash) -> None:
                 ).outputs(act)
             case RunAction.COMPARE_NEW | RunAction.COMPARE_ADD | RunAction.COMPARE_PINS:
                 return _compare(request, act).outputs(act)
-            case RunAction.KEEP | RunAction.RELEASE:
-                kept = keep_or_release(request, NAVBAR_HPARAM_DATATABLE_ID)
-                return _Outputs(row_updates=kept.rows or no_update, notices=kept.notice).outputs(act)
+            case RunAction.KEEP | RunAction.RELEASE | RunAction.TAG | RunAction.UNTAG:
+                # As a pin: the rows are patched, and the signature stored, or the list would be drawn again for the
+                # tags it already shows, as the write moves the experiment on, losing the selection and the filter.
+                marked = mark_runs(request, NAVBAR_HPARAM_DATATABLE_ID)
+                page = page_model.BasicExperimentPage.model_validate_json(act.page_json)
+                return _Outputs(
+                    row_updates=marked.rows or no_update,
+                    notices=marked.notice,
+                    **_head_fields(get_data_store(), page, act.experiment_id, act.chips or []),
+                ).outputs(act)
             case RunAction.REMOVE:
                 # Only a comparison holds runs that can be taken out of it.
                 raise PreventUpdate

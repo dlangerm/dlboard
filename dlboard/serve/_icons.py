@@ -89,6 +89,7 @@ class Icon(StrEnum):
     SIDEBAR = "layout-sidebar"
     SIGN_OUT = "logout"
     SUGGEST = "sparkles"
+    TAG = "tag"
 
     @property
     def class_name(self) -> str:

@@ -11,7 +11,7 @@ pinned runs. They work the same way on all three, so what you learn on one is wh
   done to them: **Show** or **Hide** them, **Diff** them (the A/B comparison, for up to five, of their hyperparameters, their
   [context](client.md) -- commit, command, packages, machine -- and latest metrics), **Pin** or **Unpin** them,
   **Compare** them (below), **Keep** or **Release** them ([retention](retention.md): a kept run, with a lock after its name,
-  is never deleted by retention) and **Delete** them (asking first, and saying how many); on a comparison **Remove** takes them
+  is never deleted by retention), **Tag** or **Untag** them ([below](#tags)) and **Delete** them (asking first, and saying how many); on a comparison **Remove** takes them
   out of it. The checkbox in the header selects the runs the list's filters match, not every run of a long experiment.
 - **A run's name** is a link to the run: its experiment with only that run drawn, and a banner that says so and
   links back to the view's own runs. Like the tab you are on, it is yours alone and saves nothing.
@@ -39,6 +39,21 @@ pinned the moment it exists, whether or not it has logged anything yet, and by t
 - **The project page** lists the project's pinned runs in its sidebar: a row for each run, however many pins it has,
   paged, and filtered by colour, who pinned it, experiment and name. The filters and the page are in the address bar, so
   "Alice's red pins in this experiment" is a link you can send.
+
+## Tags
+
+A tag is a label the project shares: `baseline`, `ablation/lr`, `sweep-3`. Where a pin says who flagged a run, a tag says what
+the run is, so it has no owner and no colour. Everyone who can see the run sees its tags, and an editor of the project puts
+them on and takes them off.
+
+- **Tagging.** Select runs, type a tag in the bar's box (it offers the project's tags as you type) and click **Tag**, or
+  **Untag** to take it off them. A script tags its
+  run as it launches it (`dlboard.init(..., tags=["baseline"])`, see [client.md](client.md#how-it-works)). A tag is
+  stored in lower case, with its spaces trimmed and runs of them made one, so `Baseline ` and `baseline` are the same tag. It
+  is at most 64 characters long.
+- **Finding runs by tag.** A run's tags follow its name in every run list, and the **Run** column's filter matches them as
+  well as the name: `baseline` keeps the runs tagged that. A chart's run picker finds a run by its tag too, and a link to one
+  run shows its tags in the banner above the charts.
 
 ## Comparisons
 

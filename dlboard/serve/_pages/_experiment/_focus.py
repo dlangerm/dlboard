@@ -42,10 +42,12 @@ def focus_banner(store: DataStore[...], page: BasicExperimentPage, paging: Pagin
     run = next(store.get_runs(page.experiment_id, limit=1, run_ids=frozenset({paging.focus})), None)
     if run is None:
         return None
+    tags = store.run_tags(frozenset({run.id})).get(run.id, [])
     return dmc.Alert(
         dmc.Group(
             [
                 dmc.Text(["Showing only ", dmc.Text(run_display_name(run), span=True, fw=600)], size="sm"),
+                *(dmc.Badge(tag, size="sm", variant="light", color="gray", tt="none") for tag in tags),
                 dmc.Anchor(
                     "Show the view's runs",
                     href=unfocused_href(page.experiment_id, page),

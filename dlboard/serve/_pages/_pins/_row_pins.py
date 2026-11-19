@@ -103,6 +103,8 @@ def pin_or_unpin(request: RunActionRequest, grid: str, surface: RunListSurface) 
             | RunAction.COMPARE_PINS
             | RunAction.KEEP
             | RunAction.RELEASE
+            | RunAction.TAG
+            | RunAction.UNTAG
         ):
             msg = f"{request.action} is not a pin"
             raise ValueError(msg)

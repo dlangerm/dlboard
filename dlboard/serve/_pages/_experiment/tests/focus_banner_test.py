@@ -21,14 +21,18 @@ def _plain_links(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("dlboard.serve._pages._experiment._focus.relative_path", str)
 
 
-def test_the_banner_names_the_run_and_links_back_to_the_view(store: SQLLiteStore, experiment_id: int) -> None:
+def test_the_banner_names_the_run_and_its_tags_and_links_back_to_the_view(
+    store: SQLLiteStore, experiment_id: int, admin: models.User
+) -> None:
     run = store.create_run(models.NewRun(experiment_id=experiment_id, name="fluffy-otter"))
+    store.tag_runs(frozenset({run.id}), frozenset({"paper-fig-3"}), admin)
     page = repo.load_page(store, repo.ExperimentRef(experiment_id, None))
 
     banner = focus_banner(store, page, Paging().with_focus(run.id))
 
     assert banner is not None
     assert "fluffy-otter" in str(banner.to_plotly_json())
+    assert "paper-fig-3" in str(banner.to_plotly_json())
     assert find_props([banner], "focus-banner") is not None
     link = next(node for node in banner._traverse() if getattr(node, "href", None))
     assert props(link)["href"] == f"/experiment/{experiment_id}"

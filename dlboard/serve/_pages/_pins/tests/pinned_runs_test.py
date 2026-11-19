@@ -55,7 +55,7 @@ def test_a_run_pinned_in_many_colours_by_many_people_is_one_row_with_all_its_pin
     store.pin_runs(alice, frozenset({beta.id}), PinColor.PLAIN)
 
     found, pages = pinned_runs._fetch(store, project_id, PinFilter())
-    rows = pinned_runs._rows(found, alice)
+    rows = pinned_runs._rows(store, found, alice)
 
     assert pages == 1
     assert sorted(row["run_name"] for row in rows) == ["alpha", "beta"]

@@ -8,7 +8,7 @@ write (`request_store_id`).
 
 from dlboard.serve._pages._run_list._bar import action_bar, register_run_list, simple_action
 from dlboard.serve._pages._run_list._ids import RunListSurface, request_store_id
-from dlboard.serve._pages._run_list._keep import keep_actions, keep_or_release
+from dlboard.serve._pages._run_list._marks import mark_actions, mark_runs
 from dlboard.serve._pages._run_list._model import RunAction, RunActionRequest, selected_run_ids
 
 __all__ = [
@@ -16,8 +16,8 @@ __all__ = [
     "RunActionRequest",
     "RunListSurface",
     "action_bar",
-    "keep_actions",
-    "keep_or_release",
+    "mark_actions",
+    "mark_runs",
     "register_run_list",
     "request_store_id",
     "selected_run_ids",

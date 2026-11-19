@@ -32,6 +32,8 @@ _SEEKS: dict[str, str | tuple[str, ...]] = {
     ),
     "RunPin": ("(experiment_id, pinned_at)", "(run_id, pinned_by, color)"),
     "ComparisonRun": "(page_id, run_id)",
+    "Tag": "(project_id, name)",
+    "RunTag": ("(run_id, tag_id)", "(tag_id, experiment_id)"),
     "Experiment": "(project_id, created_at) WHERE (deleted_at IS NULL)",
 }
 """What each table an experiment page reads is sought by: the index that leads with the experiment (or the key, `id`)."""
@@ -78,7 +80,11 @@ _READS: dict[str, Callable[[PostgresStore, int], object]] = {
         spare_running_after=pendulum.now("UTC"),
         limit=100,
     ),
+    "get_runs, tagged": lambda s, e: list(
+        s.get_runs(e, limit=20, run_ids=None, tags=frozenset({"baseline"}))
+    ),
     "kept_runs": lambda s, e: s.kept_runs(e, run_ids=None),
+    "run_tags": lambda s, e: s.run_tags(frozenset({1, 2})),
     "fetch_hyperparams": lambda s, e: list(s.fetch_hyperparams(e, run_ids=None)),
     "fetch_hyperparams, some runs": lambda s, e: list(s.fetch_hyperparams(e, run_ids=frozenset({1, 2}))),
     "fetch_run_contexts": lambda s, e: s.fetch_run_contexts(e, run_ids=frozenset({1, 2})),

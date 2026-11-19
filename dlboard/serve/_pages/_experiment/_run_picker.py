@@ -30,11 +30,27 @@ RUN_PICKER_LIMIT: Final = 50
 def run_options(
     store: DataStore[...], experiment_id: int, *, search: str = "", keep: Iterable[str] = ()
 ) -> list[dict[str, str]]:
-    """A picker's options: the runs it has picked (`keep`, as its values) and the newest `RUN_PICKER_LIMIT` `search` finds."""
-    found = list(store.get_runs(experiment_id, limit=RUN_PICKER_LIMIT, run_ids=None, name_contains=search))
+    """
+    A picker's options: the runs it has picked (`keep`, as its values) and the newest `RUN_PICKER_LIMIT` `search` finds.
+
+    A search finds a run by its name or by a tag of it (`baseline`), and a run's tags follow its name in its label, which is
+    what the picker itself filters what it holds by.
+    """
+    named = store.get_runs(experiment_id, limit=RUN_PICKER_LIMIT, run_ids=None, name_contains=search)
+    tagged = (
+        store.get_runs(experiment_id, limit=RUN_PICKER_LIMIT, run_ids=None, tags=frozenset({search}))
+        if search.strip()
+        else ()
+    )
+    found = list({run.id: run for run in [*tagged, *named]}.values())[:RUN_PICKER_LIMIT]
     kept = frozenset(int(value) for value in keep) - {run.id for run in found}
     picked = list(store.get_runs(experiment_id, limit=None, run_ids=kept)) if kept else list[Run]()
-    return [{"value": str(run.id), "label": run_display_name(run)} for run in [*picked, *found]]
+    listed = [*picked, *found]
+    tags = store.run_tags(frozenset(run.id for run in listed))
+    return [
+        {"value": str(run.id), "label": " · ".join([run_display_name(run), *tags.get(run.id, [])])}
+        for run in listed
+    ]
 
 
 def register_run_search(app: Dash, picker: str) -> None:

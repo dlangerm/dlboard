@@ -80,12 +80,13 @@ notebook) is left out, and a server older than this answers with a warning. Turn
 `RunSettings(context=ContextSettings(...))`. Environment variables are never recorded. A run attached to (`run_id=`)
 keeps the context it was started with.
 
-**Pinning and keeping a run.** A script that knows its run matters can say so as it launches it, instead of someone clicking
-afterwards: `DLBoardLogger(..., pin=PinColor.RED)` pins the run for you in that colour (see
-[comparisons.md](comparisons.md#pins)), and `keep=True` keeps it out of [retention](retention.md)'s reach. Both are
-also arguments of `DLBoardLogger.from_names`. Pinning is for anyone who can see the run; keeping takes an editor of its
-project. A server that refuses fails the logger's construction, with its reason in the error, before anything is logged;
-`BasicDlboardAPI.mark_run(run_id, pin=..., keep=...)` does the same to a run that exists.
+**Pinning, keeping and tagging a run.** A script that knows its run matters can say so as it launches it, instead of
+someone clicking afterwards: `DLBoardLogger(..., pin=PinColor.RED)` pins the run for you in that colour (see
+[comparisons.md](comparisons.md#pins)), `keep=True` keeps it out of [retention](retention.md)'s reach, and
+`tags=["baseline", "sweep-3"]` tags it (see [comparisons.md](comparisons.md#tags)). All three are also arguments of
+`DLBoardLogger.from_names` and `dlboard.init`. Pinning is for anyone who can see the run; keeping and tagging take an
+editor of its project. A server that refuses fails the logger's construction, with its reason in the error, before anything
+is logged; `BasicDlboardAPI.mark_run(run_id, pin=..., keep=..., tags=...)` does the same to a run that exists.
 
 **Authenticating.** If the server signs people in (see [Auth](plugins/auth.md)), the script has to
 sign in too:

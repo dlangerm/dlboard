@@ -160,12 +160,15 @@ window.dashAgGridComponentFunctions.DlboardEye = (props) => {
 window.dashAgGridComponentFunctions.DlboardRunLink = (props) => {
     // A list of runs of several experiments (`_experiment` of a row) says whose each is after its name, dimmed.
     const experiment = props.data._experiment;
+    // The run's tags (`_tags` of its row) follow its name, in the project's order.
+    const tags = props.data._tags || [];
+    const title = [props.value, ...(experiment ? [experiment] : []), ...tags].join(" \u00b7 ");
     return h(
         "a",
         {
             href: props.data._href,
             className: "dl-run-link",
-            title: experiment ? `${props.value} \u00b7 ${experiment}` : props.value,
+            title,
             onClick: (event) => {
                 if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey) {
                     return;
@@ -185,6 +188,7 @@ window.dashAgGridComponentFunctions.DlboardRunLink = (props) => {
                   title: "Kept: no retention policy deletes it",
               })
             : null,
+        ...tags.map((tag) => h("span", { key: tag, className: "dl-run-tag" }, tag)),
         experiment ? h("span", { className: "dl-run-experiment" }, experiment) : null,
     );
 };

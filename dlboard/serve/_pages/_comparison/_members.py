@@ -61,8 +61,8 @@ from dlboard.serve._pages._run_list import (
     RunActionRequest,
     RunListSurface,
     action_bar,
-    keep_actions,
-    keep_or_release,
+    mark_actions,
+    mark_runs,
     register_run_list,
     request_store_id,
     selected_run_ids,
@@ -170,9 +170,10 @@ def _rows(
                 run_ids=frozenset(run_ids),
             ).latest_per_run()
     values = {run.id: hparams.get(run.id, {}) | latest.get(run.id, {}) for run in runs}
+    tags = store.run_tags(frozenset(values))
     return [
         {
-            **run_fields(run),
+            **run_fields(run, tags.get(run.id, ())),
             DRAWN_FIELD: run.id not in hidden,
             HREF_FIELD: experiment_href(run.experiment_id, run_id=run.id),
             EXPERIMENT_FIELD: experiment_display_name(experiments[run.experiment_id]),
@@ -226,7 +227,7 @@ def render_members(
         simple_action(RunListSurface.COMPARISON, RunAction.DIFF, "Diff", icon_name=Icon.COMPARE),
         *pin_menus(RunListSurface.COMPARISON),
         compare_menu(RunListSurface.COMPARISON, addable, current=page.id, here=can_edit),
-        *keep_actions(RunListSurface.COMPARISON),
+        *mark_actions(RunListSurface.COMPARISON, store, project_id),
         *(
             [simple_action(RunListSurface.COMPARISON, RunAction.REMOVE, "Remove", icon_name=Icon.CLOSE)]
             if can_edit
@@ -455,9 +456,9 @@ def _act(request: RunActionRequest, act: _Act) -> _Outputs:
             return _Outputs(notices=pinned.notice, row_updates=pinned.rows)
         case RunAction.COMPARE_NEW | RunAction.COMPARE_ADD | RunAction.COMPARE_PINS:
             return _compare(request, act)
-        case RunAction.KEEP | RunAction.RELEASE:
-            kept = keep_or_release(request, ids.COMPARISON_GRID_ID)
-            return _Outputs(notices=kept.notice, row_updates=kept.rows or no_update)
+        case RunAction.KEEP | RunAction.RELEASE | RunAction.TAG | RunAction.UNTAG:
+            marked = mark_runs(request, ids.COMPARISON_GRID_ID)
+            return _Outputs(notices=marked.notice, row_updates=marked.rows or no_update)
         case RunAction.DIFF:
             diff = diff_of(request.run_ids)
             return _Outputs(

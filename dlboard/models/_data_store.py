@@ -266,6 +266,7 @@ class DataStore(typing.Protocol[_P]):
         created_before: datetime | None = None,
         oldest_first: bool = False,
         include_kept: bool = True,
+        tags: frozenset[str] = frozenset(),
     ) -> typing.Iterator[models.Run]:
         """
         A page of an experiment's (non-deleted) runs, most recently created first (or `oldest_first`).
@@ -273,7 +274,8 @@ class DataStore(typing.Protocol[_P]):
         A `limit` of `None` is every run, and `run_ids` limits it to those, as it does every read of what runs logged:
         `None` is all of the experiment's, an empty set none. `name_contains` keeps the runs whose name has it in it,
         whatever its case, or whose id it is: what a picker of runs searches by. `created_before` keeps the runs older
-        than it, and `include_kept` of `False` leaves the kept runs out: what a retention rule reads.
+        than it, and `include_kept` of `False` leaves the kept runs out: what a retention rule reads. `tags` keeps the runs
+        with any of those tags (`tag_runs`).
         """
         ...
 
@@ -384,6 +386,22 @@ class DataStore(typing.Protocol[_P]):
         self, experiment_id: int, *, run_ids: frozenset[int] | None
     ) -> typing.Iterator[models.HyperParams]:
         """Every (non-deleted) run's hyperparameters for an experiment."""
+        ...
+
+    def tag_runs(self, run_ids: frozenset[int], names: frozenset[str], actor: models.User) -> None:
+        """Give `run_ids` the tags `names`, made in each run's project the first time; a run with one keeps it."""
+        ...
+
+    def untag_runs(self, run_ids: frozenset[int], names: frozenset[str]) -> None:
+        """Take the tags `names` off `run_ids`."""
+        ...
+
+    def run_tags(self, run_ids: frozenset[int]) -> dict[int, list[str]]:
+        """Each of `run_ids`' tags, by name in order; a run with none is left out."""
+        ...
+
+    def search_tags(self, project_id: int, *, search: str = "", limit: int) -> list[str]:
+        """A project's tags with `search` in their name, in order, at most `limit`."""
         ...
 
     def heartbeat(self, run_id: int) -> None:

@@ -34,3 +34,21 @@ def test_a_picker_lists_the_newest_page_of_runs_keeps_its_picks_and_searches_the
     assert kept[0] == {"value": str(oldest.id), "label": "run-000"}
     assert len(kept) == RUN_PICKER_LIMIT + 1
     assert found == [{"value": str(oldest.id), "label": "run-000"}]
+
+
+def test_a_picker_finds_a_run_by_its_tag_and_labels_it_with_its_tags(
+    store: SQLLiteStore, experiment_id: int, admin: models.User
+) -> None:
+    baseline, other = (
+        store.create_run(models.NewRun(experiment_id=experiment_id, name=name))
+        for name in ("lr=1e-3", "lr=1e-2")
+    )
+    store.tag_runs(frozenset({baseline.id}), frozenset({"baseline"}), admin)
+
+    assert run_options(store, experiment_id, search="Baseline") == [
+        {"value": str(baseline.id), "label": "lr=1e-3 · baseline"}
+    ]
+    assert {option["label"] for option in run_options(store, experiment_id)} == {
+        "lr=1e-3 · baseline",
+        other.name,
+    }

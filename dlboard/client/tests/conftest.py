@@ -14,7 +14,7 @@ from dlboard._wire import Identity
 from dlboard.client import _context, dlboard_logger, run
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Callable, Mapping, Sequence
 
     from dlboard._telemetry.system import SystemMetricsSettings
     from dlboard.client._context import ContextSettings, Diff
@@ -95,8 +95,10 @@ class FakeAPI:
         self.calls.append(("create_run", (new_run.experiment_id,), {"name": new_run.name}))
         return models.Run(id=99, experiment_id=new_run.experiment_id, name=new_run.name)
 
-    def mark_run(self, run_id: int, *, pin: models.PinColor | None = None, keep: bool = False) -> models.Run:
-        self.calls.append(("mark_run", (run_id,), {"pin": pin, "keep": keep}))
+    def mark_run(
+        self, run_id: int, *, pin: models.PinColor | None = None, keep: bool = False, tags: Sequence[str] = ()
+    ) -> models.Run:
+        self.calls.append(("mark_run", (run_id,), {"pin": pin, "keep": keep, "tags": list(tags)}))
         return models.Run(id=run_id, experiment_id=2)
 
     def log_hyperparams(self, hparams: models.NewHyperParams) -> models.HyperParams:

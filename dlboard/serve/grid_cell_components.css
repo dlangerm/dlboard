@@ -268,3 +268,13 @@
   vertical-align: -0.1em;
   color: var(--mantine-color-dimmed);
 }
+
+/* A run's tags after its name: small and dimmed, so a long list of them gives way to the name in a narrow sidebar. */
+.dl-run-tag {
+  margin-left: 0.3em;
+  padding: 0 0.35em;
+  border-radius: var(--mantine-radius-sm);
+  background: var(--mantine-color-default-hover);
+  color: var(--mantine-color-dimmed);
+  font-size: var(--mantine-font-size-xs);
+}

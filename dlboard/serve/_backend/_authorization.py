@@ -434,6 +434,7 @@ class AuthorizingDataStore(models.DataStore[[]]):
         created_before: datetime | None = None,
         oldest_first: bool = False,
         include_kept: bool = True,
+        tags: frozenset[str] = frozenset(),
     ) -> Iterator[models.Run]:
         self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
         return self._inner.get_runs(
@@ -445,6 +446,7 @@ class AuthorizingDataStore(models.DataStore[[]]):
             created_before=created_before,
             oldest_first=oldest_first,
             include_kept=include_kept,
+            tags=tags,
         )
 
     def count_runs(
@@ -896,6 +898,28 @@ class AuthorizingDataStore(models.DataStore[[]]):
         for project_id in by_project:
             self._require(project_id, ProjectRole.EDITOR)
         self._inner.keep_runs(run_ids, self._bound(actor))
+
+    def tag_runs(self, run_ids: frozenset[int], names: frozenset[str], actor: models.User) -> None:
+        by_project = self._run_projects(self._inner.run_experiments(run_ids))
+        if self._enforce and set().union(*by_project.values()) != run_ids:
+            _forbid("a run that does not exist, or is not yours to see, cannot be tagged")
+        for project_id in by_project:
+            self._require(project_id, ProjectRole.EDITOR)
+        self._inner.tag_runs(run_ids, names, self._bound(actor))
+
+    def untag_runs(self, run_ids: frozenset[int], names: frozenset[str]) -> None:
+        for project_id in self._run_projects(self._inner.run_experiments(run_ids)) or {None}:
+            self._require(project_id, ProjectRole.EDITOR)
+        self._inner.untag_runs(run_ids, names)
+
+    def run_tags(self, run_ids: frozenset[int]) -> dict[int, list[str]]:
+        for project_id in self._run_projects(self._inner.run_experiments(run_ids)):
+            self._require(project_id, ProjectRole.VIEWER)
+        return self._inner.run_tags(run_ids)
+
+    def search_tags(self, project_id: int, *, search: str = "", limit: int) -> list[str]:
+        self._require(project_id, ProjectRole.VIEWER)
+        return self._inner.search_tags(project_id, search=search, limit=limit)
 
     def release_runs(self, run_ids: frozenset[int], actor: models.User) -> None:
         for project_id in self._run_projects(self._inner.run_experiments(run_ids)) or {None}:

@@ -88,3 +88,12 @@ def test_a_heartbeat_keeps_a_run_heard_from_and_a_gone_run_answers_that_nobody_i
     assert seen is not None
     assert seen.last_seen_at is not None
     assert not api.heartbeat(alive.id + 1000)
+
+
+def test_a_run_launched_with_tags_is_found_by_them(backend_server: BackendServer) -> None:
+    with run.init("plain", "tagged", server_url=backend_server.url, tags=["Baseline"]) as started:
+        pass
+    _stop(started)
+
+    assert started.run_id is not None
+    assert backend_server.store.run_tags(frozenset({started.run_id})) == {started.run_id: ["baseline"]}

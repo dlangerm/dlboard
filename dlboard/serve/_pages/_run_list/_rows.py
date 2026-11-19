@@ -9,7 +9,7 @@ The grid's filters are run again after the patch, since a row that no longer mat
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, NamedTuple
 
 from dash import Input, Output
 from dash.dcc import Store
@@ -68,6 +68,13 @@ class RowUpdates(BaseModel, frozen=True, extra="forbid"):
     def dump(self) -> dict[str, Any]:
         """As the store holds them."""
         return self.model_dump(mode="json")
+
+
+class Patched(NamedTuple):
+    """What an action on some runs changed in place: their rows (`RowUpdates.dump`), and a notice that says so (or why not)."""
+
+    rows: dict[str, Any] | None
+    notice: list[dict[str, Any]]
 
 
 def row_update_shells(surface: RunListSurface) -> list[Component]:

@@ -99,6 +99,7 @@ class DLBoardLogger(Logger):
         log_model: bool | Literal["all"] = False,
         pin: models.PinColor | None = None,
         keep: bool = False,
+        tags: Sequence[str] = (),
     ) -> None:
         """
         Initialize with an existing project/experiment id; an experiment is created if none is given.
@@ -109,7 +110,7 @@ class DLBoardLogger(Logger):
         one is an error.
 
         `pin` pins the run for you in that colour, and `keep` keeps it out of retention's reach (it takes an
-        editor of the project), the moment it exists: a baseline or a release candidate need not wait for someone
+        editor of the project), the moment it exists, as do `tags`: a baseline or a release candidate need not wait for someone
         to click. A server that refuses fails this call, before anything starts logging.
 
         `log_model` is as for Lightning's MLflow/W&B loggers, for a `ModelCheckpoint` callback:
@@ -131,6 +132,7 @@ class DLBoardLogger(Logger):
             settings=settings,
             pin=pin,
             keep=keep,
+            tags=tags,
         )
         self._log_model = log_model
         self._checkpoint_callbacks: dict[str, ModelCheckpoint] = {}
@@ -154,6 +156,7 @@ class DLBoardLogger(Logger):
         *,
         log_model: bool | Literal["all"] = False,
         pin: models.PinColor | None = None,
+        tags: Sequence[str] = (),
         keep: bool = False,
     ) -> DLBoardLogger:
         """
@@ -173,6 +176,7 @@ class DLBoardLogger(Logger):
                 log_model=log_model,
                 pin=pin,
                 keep=keep,
+                tags=tags,
             )
         api = BasicDlboardAPI(base_url=server_url)
         api.whoami()
@@ -189,6 +193,7 @@ class DLBoardLogger(Logger):
             log_model=log_model,
             pin=pin,
             keep=keep,
+            tags=tags,
         )
 
     @property

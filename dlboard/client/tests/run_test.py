@@ -604,3 +604,11 @@ def test_a_run_captures_what_the_script_prints_until_it_finishes(
 def test_a_runs_ids_can_be_bound_into_the_scripts_own_logs(started: run.Run) -> None:
     assert started.log_context == {"dlboard.run_id": 99, "dlboard.experiment_id": 2}
     assert run.Run(None).log_context == {}
+
+
+def test_a_run_is_tagged_the_moment_it_exists(fake_api: FakeAPI, shippers: list[FakeShipper]) -> None:
+    del shippers
+    run.init("proj", tags=["baseline", "paper-fig-3"]).finish()
+
+    ((_, _, marked),) = [call for call in fake_api.calls if call[0] == "mark_run"]
+    assert marked == {"pin": None, "keep": False, "tags": ["baseline", "paper-fig-3"]}
