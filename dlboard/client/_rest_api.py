@@ -13,7 +13,7 @@ import warnings
 from dataclasses import dataclass
 from http import HTTPStatus
 from pathlib import Path
-from typing import TYPE_CHECKING, Final, Literal, TypeVar
+from typing import TYPE_CHECKING, Any, Final, Literal, NamedTuple, TypeVar
 from urllib.parse import urlsplit
 from uuid import uuid4
 
@@ -29,31 +29,42 @@ from dlboard._telemetry.traces import SpanKind, TraceKey, carrier, span
 from dlboard._version import __version__
 from dlboard._wire import (
     API_VERSION,
+    ARTIFACT_CONTENT_PATH,
     DLBOARD_CLIENT_VERSION_HEADER,
     DLBOARD_USER_HEADER,
     METADATA_PART_SUFFIX,
     REQUEST_ID_HEADER,
     WHOAMI_PATH,
+    ArtifactInfo,
     FinishRun,
     GetOrCreateExperiment,
     GetOrCreateProject,
     Identity,
+    LatestValue,
     MarkRun,
+    MetricPoint,
+    Page,
+    Read,
     Resource,
     RunCall,
     create_path,
     entity_path,
     get_or_create_path,
+    read_path,
     run_path,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
     from typing import IO
+
+    import pandas as pd
 
 
 R = TypeVar("R", bound=BaseModel)
 """Pre-3.12 `TypeVar` style (the client's floor is 3.10): the response body a request validates into."""
+T = TypeVar("T")
+"""What a page of a read holds."""
 
 DEFAULT_SERVER_URL: Final = "http://localhost:8050"
 """Matches `dlboard serve local`'s own default host/port (see `ServerRuntimeOptions` in `_cli.py`)."""
@@ -172,7 +183,7 @@ class BasicDlboardAPI:
         timeouts = ClientTimeoutSettings()
         self._timeout = (timeouts.connect_timeout_s, timeouts.read_timeout_s)
 
-    def _send(
+    def _send(  # noqa: PLR0913 -- the parts of a request, each optional but the method and route
         self,
         method: _Method,
         route: str,
@@ -180,6 +191,7 @@ class BasicDlboardAPI:
         path: str | None = None,
         body: BaseModel | Sequence[BaseModel] | None = None,
         files: Iterable[tuple[str, tuple[str, IO[bytes] | str, str]]] | None = None,
+        params: Mapping[str, str | Sequence[str]] | None = None,
     ) -> requests.Response:
         """
         Send one request, as a client span that the server's span for it continues.
@@ -212,6 +224,7 @@ class BasicDlboardAPI:
                 f"{self.base_url}/{path or route}",
                 data=data,
                 files=files,
+                params=params,
                 headers={**self._headers, **content_type, REQUEST_ID_HEADER: request_id, **carrier()},
                 timeout=self._timeout,
             )
@@ -421,3 +434,189 @@ class BasicDlboardAPI:
         """Register a batch of already-stored artifacts by ref, with no bytes uploaded."""
         body = [models.NewArtifactLink.model_validate(a.model_dump() | {"ref": ref}) for a, ref in links]
         _raise_for_status(self._send("POST", create_path(Resource.ARTIFACT_LINKS), body=body))
+
+    # -- Reading back what was logged, a page at a time ---------------------------------------------------------------
+    #
+    # Each read is one page: at most `limit` items (and never more than the server's own cap for that read), and the
+    # cursor that asks for the next page, `None` on the last. `pages` walks them lazily, as `iter_runs`/`iter_series` do.
+
+    def _read(
+        self, route: str, path: str, parse: Callable[[Any], T], query: Mapping[str, str | Sequence[str]]
+    ) -> Page[T]:
+        res = self._send("GET", route, path=path, params=query)
+        _raise_for_status(res)
+        page = Page[Any].model_validate(res.json())
+        return Page(items=[parse(item) for item in page.items], next_cursor=page.next_cursor)
+
+    def projects(
+        self, *, search: str = "", cursor: str | None = None, limit: int | None = None
+    ) -> Page[models.Project]:
+        """A page of the projects you can see, in the order they were made; `search` keeps those whose name has it."""
+        route = create_path(Resource.PROJECTS)
+        return self._read(
+            route, route, models.Project.model_validate, _paging(cursor, limit, {"search": search})
+        )
+
+    def experiments(
+        self, project_id: int, *, search: str = "", cursor: str | None = None, limit: int | None = None
+    ) -> Page[models.Experiment]:
+        """A page of a project's experiments, newest first; `search` keeps those whose name has it."""
+        return self._read(
+            read_path(Resource.PROJECTS, Read.EXPERIMENTS),
+            read_path(Resource.PROJECTS, Read.EXPERIMENTS, str(project_id)),
+            models.Experiment.model_validate,
+            _paging(cursor, limit, {"search": search}),
+        )
+
+    def runs(
+        self,
+        experiment_id: int,
+        *,
+        search: str = "",
+        tags: Sequence[str] = (),
+        cursor: str | None = None,
+        limit: int | None = None,
+    ) -> Page[models.Run]:
+        """A page of an experiment's runs, newest first: `search` by name (or id), `tags` the runs with any of them."""
+        return self._read(
+            read_path(Resource.EXPERIMENTS, Read.RUNS),
+            read_path(Resource.EXPERIMENTS, Read.RUNS, str(experiment_id)),
+            models.Run.model_validate,
+            _paging(cursor, limit, {"search": search, "tag": list(tags)}),
+        )
+
+    def metric_keys(
+        self, experiment_id: int, *, cursor: str | None = None, limit: int | None = None
+    ) -> Page[str]:
+        """A page of the keys an experiment's runs logged metrics under, in order."""
+        return self._read(
+            read_path(Resource.EXPERIMENTS, Read.METRIC_KEYS),
+            read_path(Resource.EXPERIMENTS, Read.METRIC_KEYS, str(experiment_id)),
+            str,
+            _paging(cursor, limit),
+        )
+
+    def artifact_keys(
+        self, experiment_id: int, *, cursor: str | None = None, limit: int | None = None
+    ) -> Page[str]:
+        """A page of the keys an experiment's runs logged artifacts under, in order."""
+        return self._read(
+            read_path(Resource.EXPERIMENTS, Read.ARTIFACT_KEYS),
+            read_path(Resource.EXPERIMENTS, Read.ARTIFACT_KEYS, str(experiment_id)),
+            str,
+            _paging(cursor, limit),
+        )
+
+    def hyperparams(self, run_id: int) -> dict[str, Any]:
+        """A run's hyperparameters, flattened as it logged them: empty if it logged none."""
+        res = self._send(
+            "GET",
+            read_path(Resource.RUNS, Read.HYPERPARAMS),
+            path=read_path(Resource.RUNS, Read.HYPERPARAMS, str(run_id)),
+        )
+        _raise_for_status(res)
+        return dict(res.json())
+
+    def summary(
+        self, run_id: int, *, cursor: str | None = None, limit: int | None = None
+    ) -> Page[LatestValue]:
+        """A run's latest value under each of a page of its experiment's metric keys (those it logged nothing under left out)."""
+        return self._read(
+            read_path(Resource.RUNS, Read.SUMMARY),
+            read_path(Resource.RUNS, Read.SUMMARY, str(run_id)),
+            LatestValue.model_validate,
+            _paging(cursor, limit),
+        )
+
+    def series(
+        self, run_id: int, key: str, *, cursor: str | None = None, limit: int | None = None
+    ) -> Page[MetricPoint]:
+        """A page of every value a run logged under `key`, by step (a step logged twice is there twice, in that order)."""
+        return self._read(
+            read_path(Resource.RUNS, Read.SERIES),
+            read_path(Resource.RUNS, Read.SERIES, str(run_id)),
+            MetricPoint.model_validate,
+            _paging(cursor, limit, {"key": key}),
+        )
+
+    def artifacts(
+        self, run_id: int, key: str, *, cursor: str | None = None, limit: int | None = None
+    ) -> Page[ArtifactInfo]:
+        """A page of a run's artifacts under `key`, without their bytes: by step, then those logged at no step."""
+        return self._read(
+            read_path(Resource.RUNS, Read.ARTIFACTS),
+            read_path(Resource.RUNS, Read.ARTIFACTS, str(run_id)),
+            ArtifactInfo.model_validate,
+            _paging(cursor, limit, {"key": key}),
+        )
+
+    def artifact_bytes(self, artifact_id: int) -> bytes:
+        """An artifact's bytes, by its id (`ArtifactInfo.id`), from wherever the server keeps them."""
+        res = self._send(
+            "GET",
+            ARTIFACT_CONTENT_PATH.format(artifact_id="<int:artifact_id>"),
+            path=ARTIFACT_CONTENT_PATH.format(artifact_id=artifact_id),
+        )
+        _raise_for_status(res)
+        return res.content
+
+    def iter_runs(
+        self, experiment_id: int, *, search: str = "", tags: Sequence[str] = ()
+    ) -> Iterator[Page[models.Run]]:
+        """An experiment's runs, a page at a time, newest first, read as each page is asked for."""
+        return pages(lambda cursor: self.runs(experiment_id, search=search, tags=tags, cursor=cursor))
+
+    def iter_series(self, run_id: int, key: str) -> Iterator[Page[MetricPoint]]:
+        """What a run logged under `key`, a page at a time, read as each page is asked for: `for page in api.iter_series(...)`."""
+        return pages(lambda cursor: self.series(run_id, key, cursor=cursor))
+
+    def series_frame(self, run_id: int, key: str, *, max_rows: int) -> SeriesFrame:
+        """
+        What a run logged under `key` as a pandas `DataFrame` (`step`, `value`, `timestamp_utc`), of at most `max_rows` rows.
+
+        Read page by page until the series ends or `max_rows` is reached, whichever is first: `complete` says which, so a
+        frame that stopped short is never mistaken for the whole series. Needs pandas installed (it is not a dependency).
+        """
+        import pandas as pd  # optional: only this needs it
+
+        rows: list[MetricPoint] = []
+        complete = True
+        for page in self.iter_series(run_id, key):
+            rows.extend(page.items)
+            if len(rows) >= max_rows and (page.next_cursor is not None or len(rows) > max_rows):
+                complete = False
+                break
+        frame = pd.DataFrame(
+            [point.model_dump() for point in rows[:max_rows]], columns=["step", "value", "timestamp_utc"]
+        )
+        return SeriesFrame(frame=frame, complete=complete)
+
+
+class SeriesFrame(NamedTuple):
+    """A series read into pandas (`BasicDlboardAPI.series_frame`), and whether it is all of it."""
+
+    frame: pd.DataFrame
+    complete: bool
+    """`False` if the series went on past the rows asked for."""
+
+
+def pages(read: Callable[[str | None], Page[T]]) -> Iterator[Page[T]]:
+    """Every page of a read, each one read only when it is asked for: `read(cursor)` is one page, from `None` on."""
+    cursor: str | None = None
+    while True:
+        page = read(cursor)
+        yield page
+        if page.next_cursor is None:
+            return
+        cursor = page.next_cursor
+
+
+def _paging(
+    cursor: str | None, limit: int | None, filters: Mapping[str, str | Sequence[str]] | None = None
+) -> dict[str, str | Sequence[str]]:
+    """A read's query: what it keeps (`filters`), where its page starts (`cursor`) and how many it holds (`limit`)."""
+    return {
+        **(filters or {}),
+        **({} if cursor is None else {"cursor": cursor}),
+        **({} if limit is None else {"limit": str(limit)}),
+    }

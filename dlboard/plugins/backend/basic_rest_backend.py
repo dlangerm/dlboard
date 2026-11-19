@@ -31,6 +31,7 @@ from dlboard._wire import (
     run_path,
 )
 from dlboard.models import DataStore
+from dlboard.plugins.backend._reads import READ_ROUTES
 from dlboard.serve import get_artifact_store, get_current_user, get_data_store
 from dlboard.serve.telemetry import AttributeKey, Counter, NoAttributes, Tally, Unit
 
@@ -368,6 +369,7 @@ _ROUTES: tuple[tuple[str, list[str], Callable[..., Any]], ...] = (
     (f"{entity_path(Resource.RUNS)}/restore", ["POST"], _entity_route(handle_restore_run)),
     (entity_path(Resource.ARTIFACTS), ["DELETE"], _entity_route(handle_delete_artifact)),
     (f"{entity_path(Resource.ARTIFACTS)}/restore", ["POST"], _entity_route(handle_restore_artifact)),
+    *READ_ROUTES,
 )
 
 _ERROR_STATUSES: Final[tuple[tuple[type[Exception], HTTPStatus], ...]] = (

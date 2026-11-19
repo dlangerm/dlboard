@@ -432,10 +432,28 @@ def _scopes(rows: Iterable[models.ScopedSetting]) -> models.ScopedSettings:
 
 
 def _earlier(runs: sa.Table, created_at: datetime, run_id: int) -> sa.ColumnElement[bool]:
-    """Which runs come before `(created_at, run_id)` in the order `get_runs` lists them: older, or created at once, lower."""
-    return sa.or_(
-        runs.c.created_at < created_at, sa.and_(runs.c.created_at == created_at, runs.c.id < run_id)
+    """
+    Which runs come before `(created_at, run_id)` in the order `get_runs` lists them: older, or created at once, lower.
+
+    The plain bound on `created_at` is what an index on it seeks from; the rest only settles ties at that one time.
+    """
+    return sa.and_(
+        runs.c.created_at <= created_at,
+        sa.or_(runs.c.created_at < created_at, runs.c.id < run_id),
     )
+
+
+def _after_step(table: sa.Table, after: tuple[int, int] | None) -> list[sa.ColumnElement[bool]]:
+    """
+    What keeps the rows of a per-step table after `(step, id)`, in the order a series is paged in: none, for the first page.
+
+    The plain bound on `step` is what the `(experiment_id, key, run_id, step)` index seeks from; the rest settles a step
+    logged more than once.
+    """
+    if after is None:
+        return []
+    step, row = after
+    return [table.c.step >= step, sa.or_(table.c.step > step, table.c.id > row)]
 
 
 def _runs_among(
@@ -1360,14 +1378,14 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
         oldest_first: bool = False,
         include_kept: bool = True,
         tags: frozenset[str] = frozenset(),
+        before: tuple[datetime, int] | None = None,
     ) -> Iterator[models.Run]:
         """
         A page (`limit` of `None` being every one) of an experiment's (non-deleted) runs, most recently created first.
 
-        Only `run_ids`, if given, those `name_contains` finds, those with any of `tags`, those older than `created_before`, and
-        not the kept ones
-        unless `include_kept`. Served by `idx_Run_live (experiment_id, created_at)` from either end, a tag's runs by
-        `idx_RunTag_tag`.
+        Only `run_ids`, if given, those `name_contains` finds, those with any of `tags`, those older than `created_before` or
+        listed after `before`, and not the kept ones unless `include_kept`. Served by `idx_Run_live (experiment_id,
+        created_at)` from either end (or from `before`), a tag's runs by `idx_RunTag_tag`.
         """
         runs = self._tables[models.Run]
         newest_first = (runs.c.created_at.desc(), runs.c.id.desc())
@@ -1382,6 +1400,7 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
                     *_name_matches(runs, name_contains),
                     *self._tagged(runs, experiment_id, tags),
                     *([] if created_before is None else [runs.c.created_at < created_before]),
+                    *([] if before is None else [_earlier(runs, *before)]),
                     *([] if include_kept else [runs.c.kept_at.is_(None)]),
                 )
                 .order_by(*((runs.c.created_at, runs.c.id) if oldest_first else newest_first))
@@ -1790,6 +1809,25 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
             .group_by(written.c.run_id, written.c.key)
         )
         return [MetricRow._make(row) for row in rows]
+
+    def metric_series(
+        self, experiment_id: int, *, run_id: int, key: str, after: tuple[int, int] | None, limit: int
+    ) -> list[models.UnderlyingMetricTableEntry]:
+        """A page of one run's values under `key`, by `(step, id)`: sought by `(experiment_id, key, run_id, step)`."""
+        table = self._tables[models.UnderlyingMetricTableEntry]
+        page = self._series(table, experiment_id, run_id=run_id, key=key)
+        return self._fetch(
+            models.UnderlyingMetricTableEntry,
+            page.where(*_after_step(table, after)).order_by(table.c.step, table.c.id).limit(limit),
+        )
+
+    def _series(self, table: sa.Table, experiment_id: int, *, run_id: int, key: str) -> sa.Select[Any]:
+        """One series of a per-step table, unordered: one run's rows under one key, while the run is live."""
+        runs = self._tables[models.Run]
+        live = sa.exists(sa.select(runs.c.id).where(runs.c.id == run_id, runs.c.deleted_at.is_(None)))
+        return sa.select(table).where(
+            table.c.experiment_id == experiment_id, table.c.key == key, table.c.run_id == run_id, live
+        )
 
     def summarize_metric_keys(self, experiment_id: int) -> list[str]:
         """Every metric key logged in an experiment (non-deleted runs), sorted, without judging or fetching any."""
@@ -3035,6 +3073,45 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
                 .order_by(a.c.run_id, a.c.step),
                 no_validate=True,
             )
+        )
+
+    def artifact_series(
+        self, experiment_id: int, *, run_id: int, key: str, after: tuple[int | None, int] | None, limit: int
+    ) -> list[models.Artifact]:
+        """
+        A page of one run's artifacts under `key`: those logged at a step by `(step, id)`, then those logged at none by id.
+
+        Each half is sought by `(experiment_id, key, run_id, step)`, and a page that ends the first goes on into the second.
+        `after` names the last artifact of the page before, its step `None` if it was logged at none.
+        """
+        table = self._tables[models.Artifact]
+        series = self._series(table, experiment_id, run_id=run_id, key=key).where(
+            table.c.deleted_at.is_(None)
+        )
+        # Where the second half starts: from its first artifact, unless the page before ended in it.
+        found: list[models.Artifact] = []
+        unstepped_after = 0
+        match after:
+            case (None, int() as row):
+                unstepped_after = row
+            case None:
+                found = self._stepped_artifacts(series, table, None, limit)
+            case (int() as step, int() as row):
+                found = self._stepped_artifacts(series, table, (step, row), limit)
+        if len(found) == limit:
+            return found
+        unstepped = series.where(table.c.step.is_(None), table.c.id > unstepped_after)
+        return found + self._fetch(
+            models.Artifact, unstepped.order_by(table.c.id).limit(limit - len(found)), no_validate=True
+        )
+
+    def _stepped_artifacts(
+        self, series: sa.Select[Any], table: sa.Table, after: tuple[int, int] | None, limit: int
+    ) -> list[models.Artifact]:
+        """The first half of `artifact_series`: a page of the series' artifacts logged at a step, after `(step, id)`."""
+        stepped = series.where(table.c.step.is_not(None), *_after_step(table, after))
+        return self._fetch(
+            models.Artifact, stepped.order_by(table.c.step, table.c.id).limit(limit), no_validate=True
         )
 
     def artifact_steps(

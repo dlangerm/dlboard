@@ -605,3 +605,29 @@ def test_a_retention_batch_reads_about_its_limit_and_a_backlog_is_counted_not_re
     assert backlog.rows <= cut + 2 * 25, (
         f"{backlog.rows} rows to count 2,500 runs to delete"
     )  # + the experiments, the counts
+
+
+_SERIES_PAGES: dict[str, Callable[[PostgresStore, int, int, tuple[int, int] | None], object]] = {
+    "a run's values under a key": lambda s, e, run, after: s.metric_series(
+        e, run_id=run, key="loss", after=after, limit=20
+    ),
+    "a run's artifacts under a key": lambda s, e, run, after: s.artifact_series(
+        e, run_id=run, key="img", after=after, limit=20
+    ),
+}
+
+
+@pytest.mark.parametrize("name", _SERIES_PAGES)
+def test_a_page_deep_into_a_long_series_reads_no_more_than_its_first(store: PostgresStore, name: str) -> None:
+    """A series is paged from a cursor, never counted to: a page near the end of a long run costs what the first does (#701)."""
+    project_id = store.create_project(models.NewProject(name="p", description="d")).id
+    experiment = _train(store, project_id, _NEIGHBOUR, runs=1)
+    (run,) = store.get_runs(experiment, limit=1, run_ids=None)
+
+    first = _work(store, lambda: _SERIES_PAGES[name](store, experiment, run.id, None), scans=False)
+    deep = _work(
+        store, lambda: _SERIES_PAGES[name](store, experiment, run.id, (_NEIGHBOUR - 40, 0)), scans=False
+    )
+
+    assert deep.rows == first.rows
+    assert deep.pages <= 2 * first.pages + 10, f"{deep.pages} pages near the end, {first.pages} for the first"

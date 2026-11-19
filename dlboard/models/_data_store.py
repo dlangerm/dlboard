@@ -267,6 +267,7 @@ class DataStore(typing.Protocol[_P]):
         oldest_first: bool = False,
         include_kept: bool = True,
         tags: frozenset[str] = frozenset(),
+        before: tuple[datetime, int] | None = None,
     ) -> typing.Iterator[models.Run]:
         """
         A page of an experiment's (non-deleted) runs, most recently created first (or `oldest_first`).
@@ -275,7 +276,8 @@ class DataStore(typing.Protocol[_P]):
         `None` is all of the experiment's, an empty set none. `name_contains` keeps the runs whose name has it in it,
         whatever its case, or whose id it is: what a picker of runs searches by. `created_before` keeps the runs older
         than it, and `include_kept` of `False` leaves the kept runs out: what a retention rule reads. `tags` keeps the runs
-        with any of those tags (`tag_runs`).
+        with any of those tags (`tag_runs`). `before` is a `(created_at, id)` of the newest-first order: the page after
+        the run it names, sought from it, so a page deep into the list costs what the first does.
         """
         ...
 
@@ -318,6 +320,17 @@ class DataStore(typing.Protocol[_P]):
         reduces it itself (a chart's own reduction of the rows it is handed gives the same answer). So a store that
         cannot reduce cheaply need not, and a `MetricReduction` added later does not break one that predates it.
         """
+
+    def metric_series(
+        self, experiment_id: int, *, run_id: int, key: str, after: tuple[int, int] | None, limit: int
+    ) -> list[models.UnderlyingMetricTableEntry]:
+        """
+        A page of what a (non-deleted) run logged under `key`: at most `limit` values, by step and then in the order logged.
+
+        `after` is the `(step, id)` of the last value of the page before. Each page is sought from it, so the thousandth costs
+        what the first does, and a page stays whole while the run logs more.
+        """
+        ...
 
     def summarize_metric_keys(self, experiment_id: int) -> list[str]:
         """
@@ -706,6 +719,12 @@ class DataStore(typing.Protocol[_P]):
         is given -- `keys=None` with no prefixes means every artifact. Only those logged at `steps` (a range, or the
         steps of a set), if given.
         """
+        ...
+
+    def artifact_series(
+        self, experiment_id: int, *, run_id: int, key: str, after: tuple[int | None, int] | None, limit: int
+    ) -> list[models.Artifact]:
+        """A page of a run's (non-deleted) artifacts under `key`, by step, as `metric_series` pages its values."""
         ...
 
     def artifact_steps(

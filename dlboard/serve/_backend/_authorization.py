@@ -435,6 +435,7 @@ class AuthorizingDataStore(models.DataStore[[]]):
         oldest_first: bool = False,
         include_kept: bool = True,
         tags: frozenset[str] = frozenset(),
+        before: tuple[datetime, int] | None = None,
     ) -> Iterator[models.Run]:
         self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
         return self._inner.get_runs(
@@ -447,6 +448,7 @@ class AuthorizingDataStore(models.DataStore[[]]):
             oldest_first=oldest_first,
             include_kept=include_kept,
             tags=tags,
+            before=before,
         )
 
     def count_runs(
@@ -482,6 +484,12 @@ class AuthorizingDataStore(models.DataStore[[]]):
     ) -> MetricFrame:
         self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
         return self._inner.fetch_metrics(experiment_id, keys=keys, run_ids=run_ids, reduction=reduction)
+
+    def metric_series(
+        self, experiment_id: int, *, run_id: int, key: str, after: tuple[int, int] | None, limit: int
+    ) -> list[models.UnderlyingMetricTableEntry]:
+        self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
+        return self._inner.metric_series(experiment_id, run_id=run_id, key=key, after=after, limit=limit)
 
     def summarize_metric_keys(self, experiment_id: int) -> list[str]:
         self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
@@ -571,6 +579,12 @@ class AuthorizingDataStore(models.DataStore[[]]):
         return self._inner.fetch_artifacts(
             experiment_id, keys=keys, key_prefixes=key_prefixes, run_ids=run_ids, steps=steps
         )
+
+    def artifact_series(
+        self, experiment_id: int, *, run_id: int, key: str, after: tuple[int | None, int] | None, limit: int
+    ) -> list[models.Artifact]:
+        self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
+        return self._inner.artifact_series(experiment_id, run_id=run_id, key=key, after=after, limit=limit)
 
     def artifact_steps(
         self, experiment_id: int, *, key: str, run_ids: frozenset[int] | None

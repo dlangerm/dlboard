@@ -423,3 +423,39 @@ and pass instances of it to `log_artifact` the same way. The server stores it as
 plus whatever metadata `to_artifact` put in the `NewArtifact`; if you also want a dedicated way to
 *render* that kind of artifact, pair it with a [chart plugin](plugins/charts.md) — see
 `image_series.py` for how the built-in image chart type reads back what `Image.to_artifact` wrote.
+
+## Reading back what was logged
+
+`BasicDlboardAPI` reads back what runs logged, for a notebook, a paper figure or your own analysis, without going into the
+database. Every read returns one `Page`: its `items`, and a `next_cursor` to pass back as `cursor` for the next page (`None`
+on the last). A page holds at most `limit` items and never more than the server allows for that read, so no read is ever
+unbounded. A page starts from where the last one ended, never from a count, so the last page of a long series costs what
+the first does. A run that is still logging neither skips nor repeats a value between pages.
+
+```python
+from dlboard.client._rest_api import BasicDlboardAPI, pages
+
+api = BasicDlboardAPI("http://localhost:8050")  # an API token in DLBOARD_API_KEY reads what its user can see
+runs = api.runs(experiment_id, tags=["baseline"])  # newest first; `search=` by name too
+for page in api.iter_series(run_id, "loss"):  # each page read only when the loop gets to it
+    for point in page.items:
+        print(point.step, point.value)
+loss = api.series_frame(run_id, "loss", max_rows=100_000)  # pandas, if installed
+if not loss.complete:
+    print("the series is longer than 100k values; frame holds the first 100k")
+```
+
+| Read | What one page holds | Most a page holds |
+| --- | --- | --- |
+| `projects(search=)` | the projects you can see, in the order they were made | 100 |
+| `experiments(project_id, search=)` | a project's experiments, newest first | 100 |
+| `runs(experiment_id, search=, tags=)` | an experiment's runs, newest first | 200 |
+| `metric_keys(experiment_id)`, `artifact_keys(experiment_id)` | the keys its runs logged under, in order | 1000 |
+| `summary(run_id)` | the run's latest value under each of a page of keys | 1000 |
+| `series(run_id, key)` | every value it logged under `key`, by step | 5000 |
+| `artifacts(run_id, key)` | its artifacts under `key` (by step, then those of no step), not their bytes | 200 |
+
+`hyperparams(run_id)` is a run's hyperparameters as one object, and `artifact_bytes(artifact_id)` an artifact's bytes.
+`pages(read)` walks any of them: `pages(lambda cursor: api.metric_keys(experiment_id, cursor=cursor))`.
+`series_frame` takes a bound (`max_rows`) and says whether it stopped short (`complete`), instead of silently truncating.
+There is no read of everything a run logged at once: walk the pages of what you need.

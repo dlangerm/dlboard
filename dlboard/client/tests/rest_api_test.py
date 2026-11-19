@@ -76,8 +76,9 @@ def test_create_project_sends_the_user_header(monkeypatch: pytest.MonkeyPatch) -
         files: object = None,
         headers: dict[str, str] | None = None,
         timeout: tuple[float, float] | None = None,
+        params: dict[str, str] | None = None,
     ) -> _FakeResponse:
-        del timeout, files, data
+        del timeout, files, data, params
         captured["headers"] = headers
         return _FakeResponse()
 

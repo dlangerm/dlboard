@@ -83,7 +83,15 @@ _READS: dict[str, Callable[[PostgresStore, int], object]] = {
     "get_runs, tagged": lambda s, e: list(
         s.get_runs(e, limit=20, run_ids=None, tags=frozenset({"baseline"}))
     ),
+    "get_runs, the page after a run": lambda s, e: list(
+        s.get_runs(e, limit=20, run_ids=None, before=(pendulum.now("UTC"), 10))
+    ),
     "kept_runs": lambda s, e: s.kept_runs(e, run_ids=None),
+    "metric_series": lambda s, e: s.metric_series(e, run_id=1, key="loss", after=(5, 100), limit=100),
+    "artifact_series": lambda s, e: s.artifact_series(e, run_id=1, key="img", after=(5, 100), limit=100),
+    "artifact_series, of no step": lambda s, e: s.artifact_series(
+        e, run_id=1, key="img", after=(None, 100), limit=100
+    ),
     "run_tags": lambda s, e: s.run_tags(frozenset({1, 2})),
     "fetch_hyperparams": lambda s, e: list(s.fetch_hyperparams(e, run_ids=None)),
     "fetch_hyperparams, some runs": lambda s, e: list(s.fetch_hyperparams(e, run_ids=frozenset({1, 2}))),
