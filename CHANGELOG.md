@@ -12,6 +12,50 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ## [Unreleased]
 
+### Added
+
+* **Log from any training loop.** `dlboard.client.run.init(project, experiment, hparams=...)` starts a run from plain
+  PyTorch, the HF `Trainer`, JAX or anything else, as a context manager that ends the run as its block does.
+  `DLBoardLogger` is now a thin Lightning adapter over the same run. (#692)
+* **A run records what produced it:** its git commit, branch, remote and whether it had uncommitted changes, the command
+  line, installed packages and machine. They're shown as Context rows in Diff, and set with `DLBOARD_CONTEXT_*`. The
+  changes themselves are uploaded as a diff artifact only with `DLBOARD_CONTEXT_DIFF=true`, since they can hold
+  secrets. (#693)
+* **System metrics.** With the `system` extra (psutil) a run samples CPU and memory, and with the `gpu` extra (NVML) its
+  own GPUs, into `system/` keys charted against time. Sampling goes through a private OpenTelemetry meter, so it never
+  touches the script's own telemetry. Set with `DLBOARD_SYSTEM_METRICS_*`. (#694)
+* **Smoothing and a log scale for line charts.** The tooltip still shows the raw value. (#695)
+* **A run whose process died is given up as lost** instead of running forever. A client heartbeat and its batches keep a
+  run heard from, and a background task marks quiet ones lost, with a tooltip that says so. (#696)
+* **Console output.** A run captures what the script prints, in chunks, and the new `console` chart shows it beside the
+  charts. Set with `DLBOARD_CONSOLE_*`. (#697)
+* **Scatter and parallel-coordinates charts** that relate a sweep's hyperparameters to its metrics. (#698)
+* **Group a line chart's runs by a hyperparameter:** a mean and a min–max band per value, up to `max_groups`. (#699)
+* **Run tags.** A project's labels on its runs, shared by everyone in it. A script sets them at launch
+  (`init(..., tags=[...])`), and an editor sets them from every run list's bar, which offers the project's tags as you
+  type. A run's tags follow its name, and the Run column's filter, a chart's run picker and `get_runs(tags=...)` find
+  runs by them. (#700)
+* **Read what was logged back out.** Paged REST reads, with client methods, of projects, experiments, runs, keys,
+  hyperparameters, a run's summary, a series and artifacts. Every read is one page, capped by the server and sought from a
+  cursor, so the last page of a long series costs what the first does. `pages()` walks them, and
+  `series_frame(..., max_rows=)` reads into pandas and says when it stopped short. (#701)
+* **Import a TensorBoard logdir:** `dlboard import tensorboard LOGDIR --project P [--watch S]`. It needs neither
+  TensorFlow nor the `tensorboard` package, and it's incremental, so it can follow runs still writing.
+  `serve local --tensorboard-logdir` does the same as it serves. (#702, #703)
+* **Offline mode.** With `DLBOARD_OFFLINE_DIR` (or a `file://` server URL) a run logs to a folder with no server.
+  `dlboard serve local --logdir` opens it, and `dlboard sync DIR --server URL` sends it to a shared server, both
+  incrementally. (#703)
+
+### Changed
+
+* **Plugins: new `DataStore` methods.** A `DataStore` of a plugin's own implements these:
+  * `record_run_context`/`fetch_run_contexts` (#693);
+  * `heartbeat`/`mark_lost_runs` (#696);
+  * `tag_runs`/`untag_runs`/`run_tags`/`search_tags` (#700);
+  * `metric_series`/`artifact_series`, plus `get_runs`' new `tags=` and `before=` (#701).
+
+  Migrations 0012–0014 add their tables and columns, additively.
+
 ## [0.18.0] - 2026-11-17
 
 ### Changed

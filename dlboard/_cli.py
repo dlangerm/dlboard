@@ -7,18 +7,22 @@ entrypoint, installed as a console script by `[project.scripts]` in `pyproject.t
 
 from __future__ import annotations
 
+import functools
 import getpass
 import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated, Final
 
 import cyclopts
+import requests
 import structlog
 from werkzeug.serving import is_running_from_reloader
 
+from dlboard._mp_context import SPAWN_CONTEXT
 from dlboard._version import __version__
+from dlboard.client._offline import sync
 from dlboard.client._rest_api import DEFAULT_SERVER_URL, BasicDlboardAPI
 from dlboard.client.tensorboard import STATE_FILE, import_logdir
 from dlboard.plugins.auth.password import create_or_reset_user, new_password_problem
@@ -26,10 +30,13 @@ from dlboard.plugins.data_stores.filesystem import AppSettings as FilesystemAppS
 from dlboard.plugins.data_stores.sqlite import AppSettings as SqliteAppSettings
 from dlboard.serve import app as build_app
 from dlboard.serve import get_system_data_store, resolve_plugins, run_production_server, set_setting_env
-from dlboard.serve._custodian._process import CustodianProcess
+from dlboard.serve._custodian._process import CustodianProcess, die_with_parent
 from dlboard.serve._logging import configure_logging as _configure_logging
 from dlboard.serve._production_server import WSGISettings
 from dlboard.serve.telemetry import shared_prometheus_dir
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 app = cyclopts.App(
     name="dlboard",
@@ -176,12 +183,69 @@ class LocalServeOptions:
             "own machine, unless you're fronting it with your own access control."
         ),
     ] = False
+    logdir: Annotated[
+        Path | None,
+        cyclopts.Parameter(
+            help="A folder runs logged offline to (`DLBOARD_OFFLINE_DIR`, or a `file://` server URL): brought in as "
+            "the server starts, and followed for as long as it runs."
+        ),
+    ] = None
+    tensorboard_logdir: Annotated[
+        Path | None,
+        cyclopts.Parameter(
+            help="A TensorBoard logdir, imported and followed the same way (`dlboard import tensorboard`)."
+        ),
+    ] = None
+    tensorboard_project: Annotated[
+        str, cyclopts.Parameter(help="The project --tensorboard-logdir is imported into.")
+    ] = "tensorboard"
     runtime: Annotated[ServerRuntimeOptions, cyclopts.Parameter(name="*")] = field(
         default_factory=ServerRuntimeOptions
     )
 
 
 _DEFAULT_LOCAL_SERVE_OPTIONS = LocalServeOptions()
+_FOLLOW_INTERVAL_S: Final = 10.0
+"""How often `serve local` looks for what is new in a folder it follows."""
+
+
+def _follow(bring: Callable[[BasicDlboardAPI], object], server: str) -> None:
+    """
+    Bring what is new into the server at `server` (`bring(api)`) every `_FOLLOW_INTERVAL_S`, for as long as it runs.
+
+    Its own process, which dies with the server's (`die_with_parent`). A server not up yet, or going down, is waited out.
+    """
+    die_with_parent()
+    _configure_logging()
+    api = BasicDlboardAPI(server)
+    while True:
+        try:
+            _log.info(f"Brought in {bring(api)}")
+        except requests.ConnectionError:
+            _log.debug("The server is not answering yet")
+        time.sleep(_FOLLOW_INTERVAL_S)
+
+
+def _start_following(opts: LocalServeOptions) -> None:
+    """Follow the folders `serve local` was told to bring in, each in a process of its own, against the server it starts."""
+    host = "127.0.0.1" if opts.runtime.host in {"0.0.0.0", "::"} else opts.runtime.host
+    server = f"http://{host}:{opts.runtime.port}/{opts.runtime.url_prefix}".rstrip("/")
+    brought: list[Callable[[BasicDlboardAPI], object]] = [
+        *([functools.partial(sync, folder=opts.logdir)] if opts.logdir is not None else []),
+        *(
+            [
+                functools.partial(
+                    import_logdir, logdir=opts.tensorboard_logdir, project=opts.tensorboard_project
+                )
+            ]
+            if opts.tensorboard_logdir is not None
+            else []
+        ),
+    ]
+    for bring in brought:
+        SPAWN_CONTEXT.Process(
+            target=_follow, args=(bring, server), name="dlboard-follow", daemon=True
+        ).start()
 
 
 @serve_app.command
@@ -201,6 +265,7 @@ def local(
     set_setting_env(SqliteAppSettings, "sqlite_location", opts.sqlite_location)
     set_setting_env(FilesystemAppSettings, "artifact_store_location", opts.artifact_store_location)
     _log.info("dlboard server is starting...")
+    _start_following(opts)
     _serve(_LOCAL_PLUGINS_TARGET, opts.runtime)
 
 
@@ -295,6 +360,30 @@ def tensorboard(
         if opts.watch is None:
             return
         time.sleep(opts.watch)
+
+
+@app.command(name="sync")
+def sync_folder(
+    folder: Path,
+    *,
+    server: Annotated[
+        str, cyclopts.Parameter(help="The dlboard server to sync to (with an API token in DLBOARD_API_KEY).")
+    ] = DEFAULT_SERVER_URL,
+    watch: Annotated[
+        float | None,
+        cyclopts.Parameter(
+            help="Keep syncing what is new every this many seconds, for runs still logging, until stopped."
+        ),
+    ] = None,
+) -> None:
+    """Send the runs logged offline to `folder` to a server: only what is new since the last sync of it there."""
+    _configure_logging()
+    api = BasicDlboardAPI(server)
+    while True:
+        _log.warning(f"Synced {sync(api, folder)}")
+        if watch is None:
+            return
+        time.sleep(watch)
 
 
 def main() -> None:

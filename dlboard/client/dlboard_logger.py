@@ -18,7 +18,8 @@ from pytorch_lightning.utilities import rank_zero_only
 from typing_extensions import override
 
 from dlboard import models
-from dlboard.client._rest_api import DEFAULT_SERVER_URL, BasicDlboardAPI
+from dlboard.client._offline import connect
+from dlboard.client._rest_api import DEFAULT_SERVER_URL
 from dlboard.client._warnings import warn
 from dlboard.client.artifacts.file import File
 from dlboard.client.histograms import DEFAULT_BINNING
@@ -124,7 +125,7 @@ class DLBoardLogger(Logger):
             self._inert_run_id = run_id
             return
         self._run = Run.start(
-            BasicDlboardAPI(base_url=server_url),
+            connect(server_url),
             project_id=project_id,
             experiment_id=experiment_id,
             run_id=run_id,
@@ -178,7 +179,7 @@ class DLBoardLogger(Logger):
                 keep=keep,
                 tags=tags,
             )
-        api = BasicDlboardAPI(base_url=server_url)
+        api = connect(server_url)
         api.whoami()
         project = api.get_or_create_project(project_name, description=project_description)
         experiment = api.get_or_create_experiment(

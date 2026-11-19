@@ -238,6 +238,7 @@ Read by `dlboard.client.run.init`, `DLBoardLogger` and the REST client in the tr
 | `DLBOARD_CONSOLE_INTERVAL_S` | `30` | Seconds between chunks: also how much of a run's last output a `kill -9` can cost. |
 | `DLBOARD_CONSOLE_CHUNK_KB` | `256` | A chunk is cut sooner once this much is waiting. |
 | `DLBOARD_CONSOLE_MAX_MB` | `10` | The most a run captures; past it, capture stops and the last chunk says so. |
+| `DLBOARD_OFFLINE_DIR` | none | Log every run to this folder instead of a server, to sync later (`dlboard sync`, `dlboard serve local --logdir`). A `file://` server URL does the same for one run. See [client.md](client.md#offline-mode). |
 
 `init` also reads the rank a launcher gives each process, the way Lightning does: the first of `RANK`,
 `LOCAL_RANK`, `SLURM_PROCID` and `JSM_NAMESPACE_RANK` that is set (torchrun, accelerate, SLURM and jsrun set them).

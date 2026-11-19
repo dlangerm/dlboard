@@ -149,12 +149,12 @@ def fake_api(monkeypatch: pytest.MonkeyPatch) -> FakeAPI:
     """The server every run and logger started in the test talks to, and the context each one finds."""
     api = FakeAPI()
 
-    def _factory(base_url: str) -> FakeAPI:
-        del base_url
+    def _connect(server_url: str) -> FakeAPI:
+        del server_url
         return api
 
-    monkeypatch.setattr(run, "BasicDlboardAPI", _factory)
-    monkeypatch.setattr(dlboard_logger, "BasicDlboardAPI", _factory)
+    monkeypatch.setattr(run, "connect", _connect)
+    monkeypatch.setattr(dlboard_logger, "connect", _connect)
     monkeypatch.setattr(_context, "collect", api.collect)
     monkeypatch.setattr(system, "start", api.start_sampling)
     return api

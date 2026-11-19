@@ -481,3 +481,25 @@ An import is incremental: how far it read each event file is kept in `.dlboard-i
 last whole record. It reads event files itself, with no TensorFlow or `tensorboard` package, and writes through the REST
 API like any run (an API token in `DLBOARD_API_KEY`), so it can import into a server elsewhere. From Python,
 `dlboard.client.tensorboard.import_logdir(api, logdir, project=...)` does the same and returns what it imported.
+
+## Offline mode
+
+A run can log with no server at all: to a folder, opened or sent to a server later, the way TensorBoard is used, or the only
+way out of an air-gapped cluster.
+
+```bash
+DLBOARD_OFFLINE_DIR=runs/ python train.py              # or init(..., server_url="file:///abs/path/runs")
+dlboard serve local --logdir runs/                     # open it: brought in as the server starts, and followed
+dlboard sync runs/ --server https://dlboard.example    # or send it to a shared server, like `wandb sync`
+```
+
+The folder holds what the run would have sent (the same wire payloads), a folder per run with a JSON line per call, and
+its artifacts' bytes beside them. So everything a run logs is kept: metrics, histograms, artifacts, hyperparameters,
+its context, pins, tags and how it ended. A folder an older client wrote stays readable by a newer server. A folder that
+can't be written fails the run as it starts, not partway through.
+
+Syncing is incremental: how far each file was read, and which run each one became, are kept in `.dlboard-sync.json` in
+the folder, per server. Syncing again sends only what is new, an interrupted sync picks up where it stopped, and a run
+still logging (`--watch SECONDS`, which `serve local --logdir` does for you) is followed as it goes. A run killed
+mid-write is read up to its last whole call. An offline run can't be attached to with `run_id=` until it is synced.
+`serve local --tensorboard-logdir DIR` follows a [TensorBoard logdir](#importing-a-tensorboard-logdir) the same way.

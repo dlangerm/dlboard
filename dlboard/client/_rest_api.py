@@ -13,7 +13,7 @@ import warnings
 from dataclasses import dataclass
 from http import HTTPStatus
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Final, Literal, NamedTuple, TypeVar
+from typing import TYPE_CHECKING, Any, Final, Literal, NamedTuple, Protocol, TypeVar
 from urllib.parse import urlsplit
 from uuid import uuid4
 
@@ -153,8 +153,36 @@ class UnsupportedServerError(RuntimeError):
     """The server speaks a REST API major this client doesn't -- see `BasicDlboardAPI.whoami`."""
 
 
+class RunAPI(Protocol):
+    """
+    What a run says to whatever takes what it logs: a server (`BasicDlboardAPI`), or a folder (`_offline.OfflineAPI`).
+
+    Picklable, as a run's shipping processes are handed it.
+    """
+
+    def whoami(self) -> Identity: ...
+    def get_or_create_project(self, name: str, description: str = "") -> models.Project: ...
+    def get_or_create_experiment(
+        self, project_id: int, name: str = "default", source: models.ExperimentSource | None = None
+    ) -> models.Experiment: ...
+    def create_experiment(self, new_experiment: models.NewExperiment) -> models.Experiment: ...
+    def create_run(self, run: models.NewRun) -> models.Run: ...
+    def get_run(self, run_id: int) -> models.Run: ...
+    def mark_run(
+        self, run_id: int, *, pin: models.PinColor | None = None, keep: bool = False, tags: Sequence[str] = ()
+    ) -> models.Run: ...
+    def log_hyperparams(self, hyperparams: models.NewHyperParams) -> models.HyperParams: ...
+    def record_run_context(self, context: models.NewRunContext) -> models.RunContext: ...
+    def log_metric_batch(self, metrics: list[models.LoggedMetrics]) -> None: ...
+    def log_artifact_batch(self, artifacts: Iterable[tuple[models.NewArtifact, Path | AnyUrl]]) -> None: ...
+    def finish_run(
+        self, run_id: int, status: models.RunStatus, ended_at: AwareDatetime | None = None
+    ) -> None: ...
+    def heartbeat(self, run_id: int) -> bool: ...
+
+
 class BasicDlboardAPI:
-    """API class."""
+    """What a run says to a dlboard server, over its REST API, and what a script reads back from one."""
 
     def __init__(self, base_url: str = DEFAULT_SERVER_URL, api_key: SecretStr | None = None) -> None:
         """Initialize the API class, authenticating with `api_key` (default: the `DLBOARD_API_KEY` env var)."""

@@ -49,7 +49,8 @@ from dlboard.client import _context
 from dlboard.client._console import ConsoleCapture, ConsoleChunk, ConsoleSettings
 from dlboard.client._context import ContextSettings
 from dlboard.client._heartbeat import Heartbeat
-from dlboard.client._rest_api import DEFAULT_SERVER_URL, BasicDlboardAPI
+from dlboard.client._offline import connect
+from dlboard.client._rest_api import DEFAULT_SERVER_URL
 from dlboard.client._warnings import warn
 from dlboard.client.artifacts.figure import Figure
 from dlboard.client.histograms import DEFAULT_BINNING
@@ -66,6 +67,7 @@ if TYPE_CHECKING:
     from typing_extensions import Self
 
     from dlboard.client._arrays import ArrayLike
+    from dlboard.client._rest_api import RunAPI
     from dlboard.client.artifacts.figure import SavesFigure
     from dlboard.client.histograms import Binning
     from dlboard.models import TagValue
@@ -142,9 +144,7 @@ def classify_failure(exc: Exception) -> Failure:
             return Failure.PER_ITEM
 
 
-def _ship_artifacts(
-    api: BasicDlboardAPI, experiment_id: int, run_id: int, batch: list[Sequence[AnyArtifact]]
-) -> None:
+def _ship_artifacts(api: RunAPI, experiment_id: int, run_id: int, batch: list[Sequence[AnyArtifact]]) -> None:
     """Encode `batch` into a scratch dir that's deleted once it's shipped, then ship it."""
     with tempfile.TemporaryDirectory() as tmp:
         pairs = [
@@ -502,7 +502,7 @@ def _log_console(run: Callable[[], Run | None], chunk: ConsoleChunk) -> None:
 class _Shipping:
     """A started run's server, ids and shipping processes -- what only the process that logs has."""
 
-    api: BasicDlboardAPI
+    api: RunAPI
     experiment_id: int
     run_id: int
     metrics: _Shipper[models.LoggedMetrics]
@@ -541,7 +541,7 @@ class Run:
     @classmethod
     def start(  # noqa: PLR0913 -- one keyword per thing a run is started with
         cls,
-        api: BasicDlboardAPI,
+        api: RunAPI,
         *,
         project_id: int,
         experiment_id: int | None,
@@ -883,7 +883,7 @@ def init(  # noqa: PLR0913 -- one keyword per thing a run is started with
     if env.global_rank != 0:
         # Every rank runs this, and a get-or-create isn't safe to race: rank 0 alone resolves the names.
         return Run(None, run_id=run_id)
-    api = BasicDlboardAPI(base_url=server_url)
+    api = connect(server_url)
     api.whoami()
     project_id = api.get_or_create_project(project, description=project_description).id
     experiment_id = api.get_or_create_experiment(

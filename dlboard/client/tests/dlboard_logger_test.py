@@ -142,11 +142,11 @@ def test_a_metric_without_a_step_is_rejected_at_the_call(
 def test_a_non_zero_rank_makes_no_server_calls_and_logs_nothing(
     monkeypatch: pytest.MonkeyPatch, shippers: list[FakeShipper]
 ) -> None:
-    def _no_api(base_url: str) -> None:
-        msg = f"a non-zero rank must not talk to the server ({base_url})"
+    def _no_api(server_url: str) -> None:
+        msg = f"a non-zero rank must not talk to the server ({server_url})"
         raise AssertionError(msg)
 
-    monkeypatch.setattr(dlboard_logger, "BasicDlboardAPI", _no_api)
+    monkeypatch.setattr(dlboard_logger, "connect", _no_api)
     monkeypatch.setattr(rank_zero_only, "rank", 1, raising=False)
 
     logger = DLBoardLogger.from_names("proj", run_id=7)
