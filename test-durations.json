@@ -3247,6 +3247,7 @@
   "dlboard/tests/run_tokens_test.py::test_a_run_token_reaches_nothing_but_its_own_run[mint a token]": 0.9280654409958515,
   "dlboard/tests/run_tokens_test.py::test_a_run_token_reaches_nothing_but_its_own_run[read]": 1.298018362998846,
   "dlboard/tests/run_tokens_test.py::test_a_run_token_reaches_nothing_but_its_own_run[see another run]": 0.923162835992116,
+  "dlboard/tests/run_tokens_test.py::test_a_submit_script_mints_a_token_for_a_new_run_from_python": 1.1625973069894826,
   "dlboard/tests/split_install_test.py::test_the_server_half_imports_from_a_separate_path_entry[False]": 0.033320639999146806,
   "dlboard/tests/split_install_test.py::test_the_server_half_imports_from_a_separate_path_entry[True]": 0.03956354300316889,
   "dlboard/tests/sql_store_test.py::test_a_new_run_is_running_and_finishing_it_records_how_and_when[postgres]": 0.4469546820000687,

@@ -112,7 +112,19 @@ whatever project and experiment the script names. It needs no `run_id` and looks
 token reaches only what a run's own client calls: logging metrics, hyperparameters and artifacts, and
 marking and finishing the run. It can't read anything back, see or log to another run, make a project, or
 mint more tokens. It expires a week after it is minted (`DLBOARD_RUN_TOKEN_LIFETIME_HOURS`), and minting
-one takes an editor of the run's project. From Python, `BasicDlboardAPI.run_token(run_id)` mints one.
+one takes an editor of the run's project.
+
+From Python (a Bazel rule, a launcher, a notebook that submits jobs), `dlboard.client.run.run_token` does the same:
+
+```python
+from dlboard.client.run import run_token
+
+# Asked with your own key, from DLBOARD_API_KEY; the job gets only the run token.
+minted = run_token("vision", "sweep", name="lr-3e-4", server_url="https://dlboard.example")
+env = {**job_env, "DLBOARD_API_KEY": minted.token}  # and minted.run_id, minted.expires_at
+```
+
+`run_id=` mints one for a run that exists instead, and `api_key=` asks with a key other than `DLBOARD_API_KEY`.
 
 **Guard your script's entry point.** The two shipping processes are started with `multiprocessing`'s
 `spawn` method, which re-imports your training script's `__main__` module from scratch in each one.

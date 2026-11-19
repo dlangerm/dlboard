@@ -54,6 +54,18 @@ def test_a_job_with_a_run_token_logs_to_its_run_without_naming_it(
     assert [project.name for project in store.get_projects()] == ["cluster"]
 
 
+def test_a_submit_script_mints_a_token_for_a_new_run_from_python(backend_server: BackendServer) -> None:
+    minted = run.run_token("cluster", "sweep", name="job-1", server_url=backend_server.url)
+
+    job = BasicDlboardAPI(backend_server.url, api_key=SecretStr(minted.token))
+    stored = backend_server.store.get_run(minted.run_id)
+    assert stored is not None
+    experiment = backend_server.store.get_experiment(stored.experiment_id)
+    assert experiment is not None
+    assert (job.whoami().run_id, stored.name, experiment.name) == (minted.run_id, "job-1", "sweep")
+    assert minted.expires_at > pendulum.now(pendulum.UTC)
+
+
 def _log_to(api: BasicDlboardAPI, other: models.Run) -> object:
     metrics = models.LoggedMetrics(
         experiment_id=other.experiment_id,

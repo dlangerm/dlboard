@@ -21,12 +21,12 @@ import requests
 import structlog
 from werkzeug.serving import is_running_from_reloader
 
-from dlboard import models
 from dlboard._mp_context import SPAWN_CONTEXT
 from dlboard._version import __version__
 from dlboard.client._offline import sync
 from dlboard.client._rest_api import DEFAULT_SERVER_URL, BasicDlboardAPI
-from dlboard.client.run import DEFAULT_EXPERIMENT_NAME, resolve_names
+from dlboard.client.run import DEFAULT_EXPERIMENT_NAME
+from dlboard.client.run import run_token as mint_run_token
 from dlboard.client.tensorboard import STATE_FILE, import_logdir
 from dlboard.plugins.auth.password import create_or_reset_user, new_password_problem
 from dlboard.plugins.data_stores.filesystem import AppSettings as FilesystemAppSettings
@@ -410,25 +410,14 @@ def run_token(
     The job's `init`/`DLBoardLogger` then logs to that run, and nothing else can be done with the token: it never needs
     your own. For example: `DLBOARD_API_KEY=$(dlboard run-token --project vision) sbatch train.sh`.
     """
-    api = BasicDlboardAPI(server)
-    if run_id is None:
-        if project is None:
-            msg = "give --project (and --experiment) to start a run in, or --run-id"
-            raise SystemExit(msg)
-        _, experiment_id = resolve_names(
-            api, project, experiment, description="", source=models.ExperimentSource.PYTHON
-        )
-        if experiment_id is None:
-            msg = "DLBOARD_API_KEY is a run token already: mint one with your own"
-            raise SystemExit(msg)
-        run_id = api.create_run(
-            models.NewRun(experiment_id=experiment_id, **({} if name is None else {"name": name}))
-        ).id
-    minted = api.run_token(run_id)
+    try:
+        minted = mint_run_token(project, experiment, name=name, run_id=run_id, server_url=server)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
     # The token alone on stdout, for a shell to pass on; what it is for, beside it on stderr. No logging set up: it would
     # write to stdout too.
     sys.stderr.write(
-        f"A token for run {run_id}, which logs to it alone until {minted.expires_at.isoformat()}\n"
+        f"A token for run {minted.run_id}, which logs to it alone until {minted.expires_at.isoformat()}\n"
     )
     sys.stdout.write(f"{minted.token}\n")
 

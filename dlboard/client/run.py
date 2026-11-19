@@ -33,7 +33,7 @@ from typing import TYPE_CHECKING, Any, Final, Generic, Protocol, TypeVar
 import numpy as np
 import pendulum
 import requests
-from pydantic import BaseModel, Field, JsonValue
+from pydantic import BaseModel, Field, JsonValue, SecretStr
 from pydantic_core import to_jsonable_python
 from pydantic_settings import BaseSettings
 
@@ -50,7 +50,7 @@ from dlboard.client._console import ConsoleCapture, ConsoleChunk, ConsoleSetting
 from dlboard.client._context import ContextSettings
 from dlboard.client._heartbeat import Heartbeat
 from dlboard.client._offline import connect
-from dlboard.client._rest_api import DEFAULT_SERVER_URL
+from dlboard.client._rest_api import DEFAULT_SERVER_URL, BasicDlboardAPI
 from dlboard.client._warnings import warn
 from dlboard.client.artifacts.figure import Figure
 from dlboard.client.histograms import DEFAULT_BINNING
@@ -66,6 +66,7 @@ if TYPE_CHECKING:
 
     from typing_extensions import Self
 
+    from dlboard._wire import RunToken
     from dlboard.client._arrays import ArrayLike
     from dlboard.client._rest_api import RunAPI
     from dlboard.client.artifacts.figure import SavesFigure
@@ -882,13 +883,48 @@ def resolve_names(
     """
     The ids of `project` and its `experiment`, creating either that doesn't exist yet, once the credentials are checked.
 
-    Neither, for a run token (`BasicDlboardAPI.run_token`): it comes with its run, which is where the run goes, and may not
-    look anything else up.
+    Neither, for a run token (`run_token`): it comes with its run, which is where the run goes, and may not look anything
+    else up.
     """
     if api.whoami().run_id is not None:
         return None, None
     project_id = api.get_or_create_project(project, description=description).id
     return project_id, api.get_or_create_experiment(project_id, name=experiment, source=source).id
+
+
+def run_token(  # noqa: PLR0913 -- where the run goes, each once, and the server and key to ask with
+    project: str | None = None,
+    experiment: str = DEFAULT_EXPERIMENT_NAME,
+    *,
+    name: str | None = None,
+    run_id: int | None = None,
+    server_url: str = DEFAULT_SERVER_URL,
+    api_key: SecretStr | None = None,
+) -> RunToken:
+    """
+    Start a run in `experiment` of `project` (or take `run_id`'s) and mint a token that logs to it alone, for a job.
+
+    Run where the job is submitted, with your own key (`api_key`, default: the `DLBOARD_API_KEY` env var); hand the job
+    the token's `token` as its `DLBOARD_API_KEY`, and its `init` or `DLBoardLogger` logs to this run, whatever project
+    the job's script names. The token can do nothing but that, and stops working at its `expires_at` (the server's
+    `DLBOARD_RUN_TOKEN_LIFETIME_HOURS`). `dlboard run-token` is this, from a shell. Always asks a server: a run in an
+    offline folder has no token.
+    """
+    api = BasicDlboardAPI(server_url, api_key)
+    if run_id is None:
+        if project is None:
+            msg = "give a project (and experiment) to start a run in, or an existing run's id"
+            raise ValueError(msg)
+        _, experiment_id = resolve_names(
+            api, project, experiment, description="", source=models.ExperimentSource.PYTHON
+        )
+        if experiment_id is None:
+            msg = "DLBOARD_API_KEY is a run token already: mint one with your own key"
+            raise ValueError(msg)
+        # `name` only when given: `NewRun` names a run itself when the field is omitted, never when it is `None`.
+        new_run = models.NewRun(experiment_id=experiment_id, **({} if name is None else {"name": name}))
+        run_id = api.create_run(new_run).id
+    return api.run_token(run_id)
 
 
 def init(  # noqa: PLR0913 -- one keyword per thing a run is started with
