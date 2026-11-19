@@ -12,6 +12,8 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-11-19
+
 ### Added
 
 * **Log from any training loop.** `dlboard.client.run.init(project, experiment, hparams=...)` starts a run from plain
@@ -45,9 +47,9 @@ pulls that section's body into the GitHub release notes and publishes both distr
 * **Offline mode.** With `DLBOARD_OFFLINE_DIR` (or a `file://` server URL) a run logs to a folder with no server.
   `dlboard serve local --logdir` opens it, and `dlboard sync DIR --server URL` sends it to a shared server, both
   incrementally. (#703)
-* **Run tokens for cluster jobs.** `dlboard run-token --project P` starts a run and prints a `dlr_...` token that logs
-  to it alone. A job carries the token as `DLBOARD_API_KEY` instead of your own, and its `init`/`DLBoardLogger` logs to
-  that run. The token can't read anything, touch another run or mint more, and it expires after
+* **Run tokens for cluster jobs.** `dlboard run-token --project P` (or `dlboard.client.run.run_token("P")` from Python, a
+  Bazel rule or a launcher) starts a run and mints a `dlr_...` token that logs to it alone. A job carries the token as
+  `DLBOARD_API_KEY` instead of your own, and its `init`/`DLBoardLogger` logs to that run. The token can't read anything, touch another run or mint more, and it expires after
   `DLBOARD_RUN_TOKEN_LIFETIME_HOURS` (a week). (#718)
 
 ### Changed
