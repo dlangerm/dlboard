@@ -96,6 +96,22 @@ at all. Once any user exists, `/setup` returns 404 for good. Demoting every admi
 neither does relying on `DLBOARD_ADMIN_USERS`. Anyone who can read the server log during that first window
 could create the admin first, so do it before sharing the address.
 
+### Letting people sign up
+
+There is a sign-up page, `/signup`, but it is off by default: on a server anyone can reach, strangers should
+not be able to make themselves an account unless you say so. With the default, `DLBOARD_PASSWORD_SIGNUP=admin_creates`,
+`/signup` answers 404, the login page offers no way to make an account, and an admin creates each one from
+Admin → Users (or `dlboard users set-password NAME`). Set it to open the page; the login page then links to it
+("No account yet? Create one"):
+
+- `approval`: anyone can sign up, but the account stays disabled until an admin enables it from Admin → Users.
+  Sign-up says so, and the person can sign in once that's done.
+- `open`: anyone who can reach the server can sign up and use it straight away. Only for a server on a network you
+  trust.
+
+Either way, a new account sees only the projects that let it: one shared with it from the project's Sharing tab, or
+one that gives everyone a role (which `DLBOARD_NEW_PROJECT_ACCESS`, below, does for each new project).
+
 | Setting | Default | |
 |---|---|---|
 | `DLBOARD_SECRET_KEY` | — (required) | Signs session cookies. Startup fails without it. |
@@ -104,7 +120,7 @@ could create the admin first, so do it before sharing the address.
 | `DLBOARD_NEW_PROJECT_ACCESS` | unset (private) | `viewer`/`editor`: what everyone signed in gets on a new project. |
 | `DLBOARD_SESSION_LIFETIME_HOURS` | 336 | How long a browser stays signed in. |
 | `DLBOARD_SECURE_COOKIES` | `true` | Turn off only for plain-HTTP testing. |
-| `DLBOARD_PASSWORD_SIGNUP` | `admin_creates` | `approval` (sign up, then an admin enables you) or `open`. |
+| `DLBOARD_PASSWORD_SIGNUP` | `admin_creates` | Who may make an account at `/signup`: `approval` (sign up, then an admin enables you) or `open`. See [Letting people sign up](#letting-people-sign-up). |
 | `DLBOARD_PASSWORD_MIN_LENGTH` | 12 | |
 | `DLBOARD_PASSWORD_FIRST_ADMIN_SETUP` | `false` | Serve `/setup` for the first admin (above). Startup fails if it's on and the database already has users. |
 
