@@ -18,6 +18,9 @@ hyperparameter, a metric, the step, or the run), and in it a bar for each run th
 runs that share a hidden size stand side by side, rather than being merged into one bar. A bar's height is the run's
 last-logged value (`latest`, the default, which reads no more than that) or an `aggregation` (`mean`, `median`, `min`,
 `max`, `sum`, `count`) of every value it logged in that group, which reads every step as a line chart does.
+
+![A scatter of each run's validation loss against its learning rate on a log axis, beside parallel coordinates of the sweep's hyperparameters coloured by that loss](../images/hparam-charts.png)
+
 `file_list.py` is what an artifact a browser can't show inline gets (a
 checkpoint, say): its files by run and step, each with a download link. It is paged and sortable, and
 splits files into tabs by what they are -- for the checkpoints `DLBoardLogger` uploads, `Latest`, `Best`
@@ -130,6 +133,8 @@ thinned, so the curve is the same at any `max_points`; the tooltip names each lo
 lowest to the highest, over the runs the panel draws, in a color that comes from the value (unless another value on
 the chart has it first: no two groups are drawn alike, and past eight the colors come round again dashed); it groups
 by one key and exact values only, and draws with Plotly, which bands need:
+
+![A line chart of validation loss on a log axis, smoothed, a line per batch size with a band from its lowest run to its highest](../images/grouped-line-chart.png)
 
 ![Line charts of logged metrics](../images/experiment-charts.png)
 

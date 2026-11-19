@@ -55,6 +55,8 @@ them on and takes them off.
   well as the name: `baseline` keeps the runs tagged that. A chart's run picker finds a run by its tag too, and a link to one
   run shows its tags in the banner above the charts.
 
+![The run list with each run's tags after its name, one more run selected and being tagged from the bar's box](images/run-tags.png)
+
 ## Comparisons
 
 A comparison is a page of charts, like an experiment's, over a list of runs you chose from any experiments of a project. It

@@ -17,6 +17,7 @@ import functools
 import io
 import math
 import re
+import tempfile
 import time
 from enum import StrEnum
 from pathlib import Path
@@ -30,14 +31,17 @@ from PIL import Image as PILImage
 from playwright.sync_api import expect
 
 from dlboard import models
+from dlboard.client._console import ConsoleChunk
 from dlboard.client._rest_api import BasicDlboardAPI
 from dlboard.client.artifacts.figure import Figure
 from dlboard.client.artifacts.overlay import Box, Overlay, Point, Polyline, Shape
 from dlboard.client.artifacts.plotly import PlotlyFigure
 from dlboard.client.histograms import ExponentialBinning
 from dlboard.conftest import ScreenshotMode
+from dlboard.models import CONSOLE_KEY
 from dlboard.plugins.retention import _section as retention
 from dlboard.serve import get_system_data_store
+from dlboard.serve._constants import NAVBAR_RESIZE_HANDLE_ID, NAVBAR_RUN_LIST_ID
 from dlboard.serve._pages._experiment._chart_autogen import ARTIFACT_PANEL_SUFFIX
 from dlboard.serve._pages._experiment._ids import PAGE_EXPERIMENT_ID
 from dlboard.serve._pages._experiment._notes import NOTES_THREAD_ID
@@ -121,6 +125,13 @@ class DocScreenshot(StrEnum):
     COMPARISON = "comparison"
     RETENTION = "retention"
     PLOTLY_CHART = "plotly-chart"
+    # Last, and in this order: each seeds what it shows as it is staged (console output, system metrics, tags), which the
+    # shots before it must not show.
+    HPARAM_CHARTS = "hparam-charts"
+    GROUPED_LINE_CHART = "grouped-line-chart"
+    CONSOLE_CHART = "console-chart"
+    SYSTEM_METRICS = "system-metrics"
+    RUN_TAGS = "run-tags"
 
     @property
     def path(self) -> Path:
@@ -196,6 +207,62 @@ def _pr_curve(step: int, convergence_rate: float) -> dict[str, Any]:
     }
 
 
+def _console_output(config: _Sweep) -> list[bytes]:
+    """
+    What a sweep run printed, as the two chunks a run logs it in: starting up, then training.
+
+    Worked out from the run's settings, not sampled, like `_pr_curve`; a structlog JSON line or two among the plain ones,
+    which the console draws with their level.
+    """
+
+    def loss(step: int) -> float:
+        return 0.15 + 2.0 * math.exp(-step * config.convergence_rate)
+
+    started = [
+        "Using device cuda:0 (NVIDIA A100-SXM4-40GB)",
+        "Files already downloaded and verified",
+        f'{{"event": "dataloader ready", "level": "info", "batch_size": {config.batch_size}, "workers": 8}}',
+    ]
+    training = [
+        *(
+            f"step {step:>2}  loss/train={loss(step):.3f}  lr={config.lr:.0e}"
+            for step in range(0, _N_STEPS, 10)
+        ),
+        '{"event": "val/acc has not improved for 10 steps", "level": "warning"}',
+        f"step {_N_STEPS - 1}  loss/train={loss(_N_STEPS - 1):.3f}  lr={config.lr:.0e}",
+        '{"event": "checkpoint saved", "level": "info", "path": "checkpoints/last.ckpt"}',
+    ]
+    return ["\n".join(lines).encode() + b"\n" for lines in (started, training)]
+
+
+def _system_samples(index: int, experiment_id: int, run_id: int) -> list[models.LoggedMetrics]:
+    """
+    A sweep run's system metrics, sampled every two minutes as it trained: its GPU's utilization and its process's memory.
+
+    Keyed and stepped as a run's sampler logs them (`system/...`, at the Unix time of the sample), from a generator of the
+    run's own, so they leave every other number in the demo as it was.
+    """
+    rng = np.random.default_rng(100 + index)
+    return [
+        models.LoggedMetrics(
+            experiment_id=experiment_id,
+            run_id=run_id,
+            step=int(when.timestamp()),
+            metrics={
+                "system/hw.gpu.utilization/gpu0": float(
+                    np.clip(0.82 + 0.04 * index + rng.normal(0, 0.03), 0, 1)
+                ),
+                "system/process.memory.usage": float(
+                    2.1e9 + 0.4e9 * index + minute * 4e6 + rng.normal(0, 2e7)
+                ),
+            },
+            timestamp_utc=when,
+        )
+        for minute in range(0, _N_STEPS, 2)
+        for when in [_T0.add(hours=index, minutes=minute)]
+    ]
+
+
 def _seed_pins_and_comparison(store: DataStore[...], project_id: int) -> int:
     """
     Pin a few of the demo's runs (the best learning rate red, the baseline blue, a candidate green by a teammate) and save a
@@ -264,6 +331,21 @@ def demo(live_server_url: str, dlboard_app: Dash, tmp_path_factory: pytest.TempP
                 run.id,
                 sweep.id,
                 {"lr": config.lr, "batch_size": config.batch_size, "optimizer": "adamw"},
+            )
+        )
+        # What produced it, as `init` records it: one command line a learning rate, the last run started after a fix
+        # landed, and the sweep spread over two machines. The run compare's Diff shows what two runs did not share.
+        api.record_run_context(
+            models.NewRunContext(
+                run_id=run.id,
+                experiment_id=sweep.id,
+                git_commit="8d41e07b2c" if index == len(_SWEEP) - 1 else "3f2a9c1e5d",
+                git_branch="lr-sweep",
+                git_dirty=False,
+                command=["python", "train.py", f"--lr={config.lr}", f"--batch-size={config.batch_size}"],
+                hostname=f"gpu-node-{index % 2 + 1:02d}",
+                python_version="3.12.7",
+                packages={"torch": "2.5.1", "torchvision": "0.20.1"},
             )
         )
         steps = np.arange(_N_STEPS)
@@ -361,9 +443,10 @@ def demo(live_server_url: str, dlboard_app: Dash, tmp_path_factory: pytest.TempP
 
 @pytest.fixture(scope="session")
 def browser_context_args(browser_context_args: dict[str, Any]) -> dict[str, Any]:
-    """A fixed, animation-free, dark-mode window so every machine frames the same page."""
+    """A fixed, animation-free, dark-mode window in UTC so every machine frames the same page (a date axis included)."""
     return {
         **browser_context_args,
+        "timezone_id": "UTC",
         "viewport": _VIEWPORT,
         "device_scale_factor": 1,
         "color_scheme": "dark",
@@ -393,6 +476,51 @@ def _open_charted_experiment(page: Page, demo: Demo) -> None:
         # document -- and would sit in the corner of every one of them for its ten seconds.
         page.locator(".mantine-Notification-closeButton").click()
         expect(page.locator(".mantine-Notification-root")).to_have_count(0)
+
+
+def _open_view(
+    page: Page, demo: Demo, dlboard_app: Dash, name: str, charts: list[models.ChartInstance[Any, Any]]
+) -> None:
+    """
+    Open a view of the demo experiment of its own, a panel of `charts`.
+
+    So no other scene's panels (or the personal view auto-generating charts branches into) change what a shot of one
+    chart photographs.
+    """
+    store = get_system_data_store(dlboard_app)
+    owner = store.get_or_create_user(models.Principal.unverified("demo"))
+    view = store.create_view(
+        BasicExperimentPage,
+        models.NewPage[Any, Any](
+            experiment_id=demo.experiment_id,
+            owner_id=owner.id,
+            name=name,
+            panels=[models.PanelInstance[Any, Any](name="Sweep", charts=charts)],
+        ),
+    )
+    page.goto(f"{demo.url}/experiment/{demo.experiment_id}?view={view.id}")
+
+
+def _sweep_runs(dlboard_app: Dash, demo: Demo) -> dict[str, int]:
+    """The demo sweep's runs' ids, by name."""
+    store = get_system_data_store(dlboard_app)
+    return {
+        run.name: run.id for run in store.get_runs(demo.experiment_id, limit=None, run_ids=None) if run.name
+    }
+
+
+def _wait_for_artifacts(dlboard_app: Dash, demo: Demo, key: str, count: int) -> None:
+    """Until the server has recorded `count` artifacts of `key`: it records uploads on a background batch."""
+    store = get_system_data_store(dlboard_app)
+    deadline = time.monotonic() + _ARTIFACT_INGEST_TIMEOUT_S
+    while (
+        len(
+            [a for a in store.fetch_artifacts(experiment_id=demo.experiment_id, run_ids=None) if a.key == key]
+        )
+        < count
+    ):
+        assert time.monotonic() < deadline, f"the demo's {key} artifacts were never recorded"
+        time.sleep(0.2)
 
 
 def _stage(shot: DocScreenshot, page: Page, demo: Demo, dlboard_app: Dash) -> Page | Locator:  # noqa: C901, PLR0911, PLR0912, PLR0915 -- one case per screenshot, kept exhaustive
@@ -540,10 +668,6 @@ def _stage(shot: DocScreenshot, page: Page, demo: Demo, dlboard_app: Dash) -> Pa
             expect(thread.get_by_text("Grad norms spike")).to_be_visible(timeout=10_000)
             return drawer
         case DocScreenshot.TABLE_CHART:
-            # A view of its own holding just the table, so no other scene's panels (or the personal view
-            # auto-generating charts branches into) change what this one photographs.
-            store = get_system_data_store(dlboard_app)
-            owner = store.get_or_create_user(models.Principal.unverified("demo"))
             table = models.ChartInstance[Any, Any](
                 chart_type="table",
                 parameters={
@@ -552,61 +676,29 @@ def _stage(shot: DocScreenshot, page: Page, demo: Demo, dlboard_app: Dash) -> Pa
                     "show_artifacts": [_CONFUSION_KEY],
                 },
             )
-            view = store.create_view(
-                BasicExperimentPage,
-                models.NewPage[Any, Any](
-                    experiment_id=demo.experiment_id,
-                    owner_id=owner.id,
-                    name="Run table",
-                    panels=[models.PanelInstance[Any, Any](name="Sweep", charts=[table])],
-                ),
-            )
-            page.goto(f"{demo.url}/experiment/{demo.experiment_id}?view={view.id}")
+            _open_view(page, demo, dlboard_app, "Run table", [table])
             panel = page.locator(".dl-panel-body", has=page.locator(".ag-root-wrapper"))
             expect(panel.locator(".ag-center-cols-container .ag-row")).to_have_count(len(_SWEEP))
             expect(panel.locator(".ag-cell img")).to_have_count(len(_SWEEP))
             page.wait_for_function("[...document.images].every(i => i.complete && i.naturalWidth > 0)")
             return panel
         case DocScreenshot.HISTOGRAM_CHART:
-            # A view of its own holding just the heatmap, for the same reason as the table's.
-            store = get_system_data_store(dlboard_app)
-            owner = store.get_or_create_user(models.Principal.unverified("demo"))
             heatmap = models.ChartInstance[Any, Any](
                 chart_type="histogram",
                 parameters={"key": _GRAD_KEY, "display": "heatmap", "height": 130, "width": 760},
             )
-            view = store.create_view(
-                BasicExperimentPage,
-                models.NewPage[Any, Any](
-                    experiment_id=demo.experiment_id,
-                    owner_id=owner.id,
-                    name="Gradients",
-                    panels=[models.PanelInstance[Any, Any](name="Sweep", charts=[heatmap])],
-                ),
-            )
-            page.goto(f"{demo.url}/experiment/{demo.experiment_id}?view={view.id}")
+            _open_view(page, demo, dlboard_app, "Gradients", [heatmap])
             panel = page.locator(".dl-panel-body", has=page.locator(".dl-histogram"))
             expect(panel.locator(".heatmaplayer image")).to_have_count(len(_SWEEP))
             return panel
         case DocScreenshot.PLOTLY_CHART:
-            # A view of its own holding just the Plotly chart, for the same reason as the table's: every run's PR curve
-            # in one figure, scrubbed to the last step (it opens at the first, as an image chart does), where they differ.
-            store = get_system_data_store(dlboard_app)
-            owner = store.get_or_create_user(models.Principal.unverified("demo"))
+            # Every run's PR curve in one figure, scrubbed to the last step (it opens at the first, as an image chart does),
+            # where they differ.
             curves = models.ChartInstance[Any, Any](
                 chart_type="plotly",
                 parameters={"key": _PR_CURVE_KEY, "combine_runs": True, "height": 380, "width": 640},
             )
-            view = store.create_view(
-                BasicExperimentPage,
-                models.NewPage[Any, Any](
-                    experiment_id=demo.experiment_id,
-                    owner_id=owner.id,
-                    name="PR curves",
-                    panels=[models.PanelInstance[Any, Any](name="Sweep", charts=[curves])],
-                ),
-            )
-            page.goto(f"{demo.url}/experiment/{demo.experiment_id}?view={view.id}")
+            _open_view(page, demo, dlboard_app, "PR curves", [curves])
             panel = page.locator(".dl-panel-body", has=page.locator(".js-plotly-plot"))
             expect(panel.locator(".scatterlayer .trace")).to_have_count(len(_SWEEP))
             slider = panel.get_by_role("slider")
@@ -617,6 +709,117 @@ def _stage(shot: DocScreenshot, page: Page, demo: Demo, dlboard_app: Dash) -> Pa
             )  # off the figure, so its mode bar and hover label aren't shown
             slider.blur()  # nor the slider's focus ring
             return panel
+        case DocScreenshot.HPARAM_CHARTS:
+            # Which learning rate won, two ways: a point per run, and a line per run across its hyperparameters.
+            scatter = models.ChartInstance[Any, Any](
+                chart_type="scatter",
+                parameters={"x": "lr", "y": "loss/val", "x_scale": "log", "height": 340, "width": 520},
+            )
+            parallel = models.ChartInstance[Any, Any](
+                chart_type="parallel_coordinates",
+                parameters={"metric": "loss/val", "height": 340, "width": 620},
+            )
+            _open_view(page, demo, dlboard_app, "Hyperparameters", [scatter, parallel])
+            panel = page.locator(".dl-panel-body")
+            expect(panel.locator(".js-plotly-plot")).to_have_count(2)
+            expect(panel.locator(".scatterlayer .point")).to_have_count(len(_SWEEP))
+            expect(panel.locator(".parcoords .axis")).not_to_have_count(0)
+            page.mouse.move(0, _VIEWPORT["height"] - 1)
+            return panel
+        case DocScreenshot.GROUPED_LINE_CHART:
+            # The sweep's runs grouped by batch size (the two at 64 make a band), smoothed, on a log axis.
+            grouped = models.ChartInstance[Any, Any](
+                chart_type="line",
+                parameters={
+                    "column": "loss/val",
+                    "x_axis": "step",
+                    "group_by": "batch_size",
+                    "smoothing": 0.6,
+                    "y_scale": "log",
+                    "height": 360,
+                    "width": 760,
+                },
+            )
+            _open_view(page, demo, dlboard_app, "By batch size", [grouped])
+            panel = page.locator(".dl-panel-body", has=page.locator(".js-plotly-plot"))
+            expect(panel.locator(".scatterlayer .trace")).not_to_have_count(0)
+            page.mouse.move(0, _VIEWPORT["height"] - 1)
+            return panel
+        case DocScreenshot.CONSOLE_CHART:
+            api = BasicDlboardAPI(demo.url)
+            runs = _sweep_runs(dlboard_app, demo)
+            # A folder a run, as the client ships a run's chunks: each is written to its step's file name.
+            for config in _SWEEP:
+                with tempfile.TemporaryDirectory() as scratch:
+                    api.log_artifact_batch(
+                        [
+                            ConsoleChunk(data=chunk, step=step).to_artifact(
+                                Path(scratch), runs[config.name], demo.experiment_id
+                            )
+                            for step, chunk in enumerate(_console_output(config))
+                        ]
+                    )
+            _wait_for_artifacts(dlboard_app, demo, CONSOLE_KEY, 2 * len(_SWEEP))
+            console = models.ChartInstance[Any, Any](chart_type="console", parameters={"height": 300})
+            _open_view(page, demo, dlboard_app, "Console", [console])
+            panel = page.locator(".dl-panel-body")
+            expect(panel.get_by_text("checkpoint saved").first).to_be_visible()
+            page.mouse.move(0, _VIEWPORT["height"] - 1)
+            return panel
+        case DocScreenshot.SYSTEM_METRICS:
+            api = BasicDlboardAPI(demo.url)
+            runs = _sweep_runs(dlboard_app, demo)
+            api.log_metric_batch(
+                [
+                    sample
+                    for index, config in enumerate(_SWEEP)
+                    for sample in _system_samples(index, demo.experiment_id, runs[config.name])
+                ]
+            )
+            charts = [
+                models.ChartInstance[Any, Any](
+                    chart_type="line",
+                    parameters={
+                        "column": column,
+                        "x_axis": "timestamp_utc",
+                        "x_axis_type": "date",
+                        "height": 240,
+                        "width": 560,
+                    },
+                )
+                for column in ("system/hw.gpu.utilization/gpu0", "system/process.memory.usage")
+            ]
+            _open_view(page, demo, dlboard_app, "System", charts)
+            panel = page.locator(".dl-panel-body")
+            expect(panel.locator("svg .recharts-line")).to_have_count(2 * len(_SWEEP))
+            page.mouse.move(0, _VIEWPORT["height"] - 1)
+            return panel
+        case DocScreenshot.RUN_TAGS:
+            # The sweep tagged as a whole and its best run singled out; one more run selected, being tagged from the
+            # bar's box, which offers the project's tags as they are typed.
+            store = get_system_data_store(dlboard_app)
+            owner = store.get_or_create_user(models.Principal.unverified("demo"))
+            runs = _sweep_runs(dlboard_app, demo)
+            store.tag_runs(frozenset(runs.values()), frozenset({"sweep-3"}), owner)
+            store.tag_runs(frozenset({runs["lr=1e-3"]}), frozenset({"best"}), owner)
+            page.goto(f"{demo.url}/experiment/{demo.experiment_id}")
+            rows = page.locator(f"#{NAVBAR_HPARAM_DATATABLE_ID} .ag-center-cols-container .ag-row")
+            expect(page.locator(f"#{NAVBAR_HPARAM_DATATABLE_ID} .dl-run-tag")).to_have_count(len(_SWEEP) + 1)
+            # The sidebar dragged wider, as anyone reading tags would: at its default width they are cut short.
+            handle = page.locator(f"#{NAVBAR_RESIZE_HANDLE_ID}").bounding_box()
+            assert handle is not None
+            page.mouse.move(handle["x"] + 3, handle["y"] + 100)
+            page.mouse.down()
+            page.mouse.move(handle["x"] + 243, handle["y"] + 100, steps=8)
+            page.mouse.up()
+            run_list = page.locator(f"#{NAVBAR_RUN_LIST_ID}")
+            page.wait_for_function(
+                f"document.getElementById('{NAVBAR_RUN_LIST_ID}').getBoundingClientRect().width > 500"
+            )
+            rows.filter(has_text="lr=3e-3").locator(".ag-selection-checkbox input").check()
+            page.get_by_placeholder("tag").fill("b")
+            expect(page.get_by_role("option", name="best")).to_be_visible()
+            return run_list
         case DocScreenshot.COMPARISON:
             page.goto(f"{demo.url}/comparison/{demo.comparison_id}")
             # Every run of the sweep and the baseline, in one chart: five lines, named for their experiments.
