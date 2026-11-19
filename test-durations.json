@@ -735,6 +735,7 @@
   "dlboard/plugins/charts/tests/run_groups_test.py::test_a_group_is_its_runs_mean_in_a_band_from_the_lowest_to_the_highest": 0.02047189199947752,
   "dlboard/plugins/charts/tests/run_groups_test.py::test_a_groups_color_comes_from_its_value_on_every_chart": 0.0171443189974525,
   "dlboard/plugins/charts/tests/run_groups_test.py::test_each_run_is_in_the_group_of_its_value_and_one_given_none_in_its_own": 0.0033772200004023034,
+  "dlboard/plugins/charts/tests/run_groups_test.py::test_groups_on_one_chart_never_look_alike_however_their_values_hash": 0.010797213995829225,
   "dlboard/plugins/charts/tests/run_groups_test.py::test_groups_past_max_groups_are_left_out_and_counted": 0.0033490050009277184,
   "dlboard/plugins/charts/tests/run_groups_test.py::test_only_a_grouped_chart_reads_the_hyperparameter[-hparams1]": 0.0006624950001423713,
   "dlboard/plugins/charts/tests/run_groups_test.py::test_only_a_grouped_chart_reads_the_hyperparameter[lr-hparams0]": 0.0007742499983578455,

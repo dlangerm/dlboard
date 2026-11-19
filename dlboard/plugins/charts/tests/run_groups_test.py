@@ -63,6 +63,17 @@ def test_a_groups_color_comes_from_its_value_on_every_chart() -> None:
     assert mean["line"]["color"] == series_color(zlib.crc32(b"0.1"))
 
 
+def test_groups_on_one_chart_never_look_alike_however_their_values_hash() -> None:
+    # Nine groups and eight colors: two values' hashes always share a color here (they do for 32 and 64 alone).
+    pivot = pd.DataFrame({"step": [0], **{f"{run}__y": [float(run)] for run in range(9)}})
+
+    traces, _ = grouped_traces(pivot, "step", {run: str(run) for run in range(9)}, "seed", max_groups=9)
+
+    means = [trace["line"] for trace in traces if "name" in trace]
+    assert len({(line["color"], line["dash"]) for line in means}) == 9
+    assert len({line["color"] for line in means}) == 8
+
+
 def test_groups_past_max_groups_are_left_out_and_counted() -> None:
     pivot = pd.DataFrame({"step": [0], "1__y": [1.0], "2__y": [2.0], "3__y": [3.0]})
 

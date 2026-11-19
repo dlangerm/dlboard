@@ -5,7 +5,8 @@ Deliberately narrow (#699): one key, its values compared as they read, at most `
 already draws -- a pandas reduction of the chart's own frame, with no read of its own. Each run counts at every x
 within the range it logged over, by its nearest logged value there (`_nearest_fill_pivot`'s `__y` columns), so runs
 that logged at different steps still share a mean. Drawn with Plotly (`_themed_figure`), since Mantine's line chart
-draws no band; a group's color comes from its value, the same on every chart and page.
+draws no band; a group's color comes from its value, the same on every chart and page, unless another value on the chart
+takes it first (`_slots`).
 """
 
 from __future__ import annotations
@@ -16,7 +17,8 @@ import zlib
 import pandas as pd
 
 from dlboard.models import MetricColumn, hparam_column
-from dlboard.serve import series_color
+from dlboard.serve import SeriesDash, series_color, series_dash
+from dlboard.serve._series import SERIES_SLOTS
 
 _NONE: typing.Final = "(none)"
 """The group of the runs that were not given the hyperparameter."""
@@ -34,6 +36,27 @@ def groups_of(dataframe: pd.DataFrame, key: str) -> dict[int, str]:
     }
 
 
+def _slots(groups: list[str]) -> dict[str, int]:
+    """
+    Each group's series slot (`series_color`, then `series_dash`), no two alike, in the order given.
+
+    A group's own color is its value's hash's, so it is the same wherever the value is drawn; one an earlier group on
+    the chart has taken (two hashes can share a color: there are only `SERIES_SLOTS`) moves on to the next color free,
+    and with every color taken the colors come round again dashed.
+    """
+    taken: dict[str, int] = {}
+    for group in groups:
+        own = zlib.crc32(group.encode()) % SERIES_SLOTS
+        free = (
+            slot
+            for dash in range(len(SeriesDash))
+            for color in range(SERIES_SLOTS)
+            if (slot := dash * SERIES_SLOTS + (own + color) % SERIES_SLOTS) not in taken.values()
+        )
+        taken[group] = next(free)
+    return taken
+
+
 def grouped_traces(
     pivot: pd.DataFrame, x_axis: str, groups: dict[int, str], key: str, max_groups: int
 ) -> tuple[list[dict[str, typing.Any]], int]:
@@ -49,9 +72,9 @@ def grouped_traces(
     drawn = sorted(members)[:max_groups]
     x = pivot[x_axis].tolist()
     traces: list[dict[str, typing.Any]] = []
-    for group in drawn:
+    for group, slot in _slots(drawn).items():
         values = pivot[members[group]]
-        color = series_color(zlib.crc32(group.encode()))
+        color = series_color(slot)
         hidden = {"type": "scatter", "mode": "lines", "x": x, "line": {"width": 0}, "hoverinfo": "skip"}
         shared = {"legendgroup": group, "showlegend": False}
         name = f"{key}={group} ({len(members[group])} runs)"
@@ -67,7 +90,7 @@ def grouped_traces(
                 "y": values.mean(axis=1).tolist(),
                 "name": name,
                 "legendgroup": group,
-                "line": {"color": color, "width": 2},
+                "line": {"color": color, "width": 2, "dash": series_dash(slot).plotly},
                 "hovertemplate": f"{name}<br>{x_axis}: %{{x}}<br>mean: %{{y}}<extra></extra>",
             },
         ]
