@@ -88,7 +88,8 @@ def test_a_stream_something_else_wrapped_since_is_left_to_it(chunks: list[Consol
 
 
 def test_a_write_that_finds_the_buffer_full_is_dropped_and_said_so(chunks: list[ConsoleChunk]) -> None:
-    capture = _capture(chunks)
+    # Not started: a cutter thread woken by the first full chunk could empty the buffer between these writes.
+    capture = ConsoleCapture(ConsoleSettings(enabled=True, interval_s=3600), chunks.append)
     for _ in range(5):  # four chunks' worth is held; the fifth finds the buffer full
         capture.append("x" * 256 * 1024)
 
