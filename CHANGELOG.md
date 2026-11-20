@@ -12,6 +12,8 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ## [Unreleased]
 
+## [0.19.1] - 2026-11-19
+
 ### Added
 
 * **A chart of what produced each run.** The `run_context` chart lists each run's commit, command, machine and

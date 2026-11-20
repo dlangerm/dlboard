@@ -4,6 +4,7 @@ Cut the next dlboard release.
 Moves CHANGELOG.md's [Unreleased] notes under a new `## [X.Y.Z] - date` heading (leaving [Unreleased]
 empty above it), bumps `__version__` in dlboard/_version.py, then runs prek.
 
+    uv run python tools/bump_version.py patch    # 0.7.0 -> 0.7.1
     uv run python tools/bump_version.py minor    # 0.7.0 -> 0.8.0
     uv run python tools/bump_version.py major    # 0.7.0 -> 1.0.0
 
@@ -60,12 +61,15 @@ class Version(BaseModel):
 class Bump(StrEnum):
     """Which part of the version to increment."""
 
+    PATCH = "patch"
     MINOR = "minor"
     MAJOR = "major"
 
     def apply(self, version: Version) -> Version:
         """Return the next version: minor resets patch, major resets minor and patch."""
         match self:
+            case Bump.PATCH:
+                return Version(major=version.major, minor=version.minor, patch=version.patch + 1)
             case Bump.MINOR:
                 return Version(major=version.major, minor=version.minor + 1, patch=0)
             case Bump.MAJOR:
