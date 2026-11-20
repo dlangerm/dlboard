@@ -38,6 +38,12 @@ The experiment a run is of, beside its name: which a chart that goes back to the
 chart's window of steps) needs to ask for it, since a page can draw runs of several experiments (a comparison).
 """
 
+RUN_CONTEXT_COLUMN: typing.Final = "run_context"
+"""
+The column a run's context (`RunContext`, as JSON) is carried under, on each of its rows, for a chart that asks for it
+(`DataRequest.run_context`). One per run, as a hyperparameter is; not a metric.
+"""
+
 NO_DATA_COLUMNS: typing.Final = frozenset({*MetricColumn, RUN_NAME_COLUMN, EXPERIMENT_COLUMN})
 """Columns that say where a row is, not what a chart shows: present on every row whatever was logged."""
 

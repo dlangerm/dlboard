@@ -13,6 +13,7 @@ from dlboard.models import (
     OVERLAY_KEY_SUFFIX,
     PLOTLY_DATA_EXTENSION,
     PLOTLY_FIGURE_EXTENSION,
+    RUN_CONTEXT_DIFF_KEY,
     Artifact,
     overlay_key,
 )
@@ -22,6 +23,7 @@ from dlboard.plugins.charts.file_list import FileListChart
 from dlboard.plugins.charts.histogram import HistogramChart
 from dlboard.plugins.charts.image_series import ImageChart
 from dlboard.plugins.charts.line_chart import LineChart
+from dlboard.plugins.charts.run_context import RunContextChart
 from dlboard.plugins.charts.series_band import SeriesBandChart
 from dlboard.serve._pages._experiment import _chart_autogen as autogen
 from dlboard.serve._pages._experiment._column_catalog import ColumnCatalog
@@ -32,6 +34,7 @@ SeriesBandChart.register(allow_override=True)
 ImageChart.register(allow_override=True)
 BarChart.register(allow_override=True)
 FileListChart.register(allow_override=True)
+RunContextChart.register(allow_override=True)
 
 
 def _panel(name: str, *charts: ChartInstance[object, object]) -> PanelInstance[object, object]:
@@ -325,6 +328,36 @@ def test_keys_under_a_charted_prefix_are_not_suggested_again() -> None:
     assert [(s.key, s.chart.parameters) for s in suggestions] == [("other/", {"key_prefix": "other/"})]
 
 
+def test_runs_that_recorded_a_context_get_one_chart_of_it_that_their_changes_are_listed_in() -> None:
+    """Not a file list of `context/` too, which said nothing was logged for the runs shown that had no changes."""
+    catalog = ColumnCatalog(
+        metrics=("loss",), artifact_chart_types={RUN_CONTEXT_DIFF_KEY: "run_context"}, run_context=True
+    )
+
+    panels = autogen.build_auto_panels(catalog, delimiter="/", mode="prefix")
+
+    assert {p.name: [c.chart_type for c in p.charts] for p in panels} == {
+        autogen.UNGROUPED_GROUP_NAME: ["line"],
+        autogen.RUN_CONTEXT_PANEL: ["run_context"],
+    }
+    assert autogen.find_uncharted_keys(panels, catalog) == autogen.UnchartedKeys(metrics=[], artifacts=[])
+
+
+def test_the_runs_context_is_suggested_until_a_chart_shows_it() -> None:
+    catalog = ColumnCatalog(run_context=True)
+
+    (suggestion,) = autogen.build_suggestions(
+        autogen.find_uncharted_keys([], catalog), catalog, delimiter="/", mode="prefix"
+    )
+
+    assert (suggestion.kind, suggestion.panel_name, suggestion.chart.chart_type) == (
+        ColumnKind.RUN_CONTEXT,
+        autogen.RUN_CONTEXT_PANEL,
+        "run_context",
+    )
+    assert not autogen.find_uncharted_keys([_panel("p", suggestion.chart)], catalog).run_context
+
+
 # ---- build_suggestions ----
 
 
@@ -418,6 +451,11 @@ def _artifact(fname: str, **tags: str) -> Artifact:
         pytest.param(_artifact("grads.npy"), None, id="something-no-chart-type-claims"),
         pytest.param(_artifact(f"f{PLOTLY_FIGURE_EXTENSION}"), "plotly", id="a-plotly-figure"),
         pytest.param(_artifact(f"d{PLOTLY_DATA_EXTENSION}"), None, id="a-plotly-templates-data"),
+        pytest.param(
+            _artifact("git.diff", **{FILE_KIND_TAG: "diff"}).model_copy(update={"key": RUN_CONTEXT_DIFF_KEY}),
+            "run_context",
+            id="a-runs-uncommitted-changes",
+        ),
     ],
 )
 def test_an_artifact_gets_the_chart_type_that_says_it_can_display_it(

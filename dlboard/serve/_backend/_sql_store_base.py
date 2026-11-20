@@ -346,6 +346,9 @@ def build_metadata(schema: str | None = None) -> tuple[sa.MetaData, dict[type[Ba
     ):
         sa.Index(name, per_step.c.run_id)
     sa.Index("idx_hyperparams_experiment", hyperparams.c.experiment_id, hyperparams.c.run_id)
+    # Whether any of an experiment's runs recorded a context, without reading every experiment's.
+    run_contexts = tables[models.RunContext]
+    sa.Index("idx_RunContext_experiment", run_contexts.c.experiment_id, run_contexts.c.run_id)
     for field in PAGE_SCOPE_FIELDS:
         # At most one *shared* page (owner_id NULL) per scope -- exactly what `get_or_create_page`
         # relies on to make its own check-then-insert race-safe.
@@ -2150,6 +2153,16 @@ class SQLStoreBase[T](SQLTaskStore, ABC, models.DataStore[T]):
                 .where(c.c.experiment_id == experiment_id, r.c.deleted_at.is_(None), c.c.run_id.in_(run_ids)),
             )
         )
+
+    def has_run_contexts(self, experiment_id: int) -> bool:
+        """Whether any live run of the experiment recorded a context: a probe of its first, not a read of them."""
+        c, r = self._tables[models.RunContext], self._tables[models.Run]
+        recorded = (
+            sa.select(c.c.run_id)
+            .join(r, c.c.run_id == r.c.id)
+            .where(c.c.experiment_id == experiment_id, r.c.deleted_at.is_(None))
+        )
+        return any(found for (found,) in self._execute(sa.select(sa.exists(recorded))))
 
     def get_or_create_page[D, C](
         self,

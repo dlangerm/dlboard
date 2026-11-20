@@ -25,6 +25,7 @@ _SEEKS: dict[str, str | tuple[str, ...]] = {
     "UnderlyingHistogramTableEntry": "(experiment_id, key, run_id, step)",
     "Artifact": "(experiment_id, key, run_id, step)",
     "HyperParams": "(experiment_id, run_id)",
+    "RunContext": ("(experiment_id, run_id)", "(run_id)"),
     "Run": (
         "(experiment_id, created_at)",
         "(experiment_id, created_at) WHERE (deleted_at IS NULL)",
@@ -96,6 +97,7 @@ _READS: dict[str, Callable[[PostgresStore, int], object]] = {
     "fetch_hyperparams": lambda s, e: list(s.fetch_hyperparams(e, run_ids=None)),
     "fetch_hyperparams, some runs": lambda s, e: list(s.fetch_hyperparams(e, run_ids=frozenset({1, 2}))),
     "fetch_run_contexts": lambda s, e: s.fetch_run_contexts(e, run_ids=frozenset({1, 2})),
+    "has_run_contexts": lambda s, e: s.has_run_contexts(e),
     "pins_of": lambda s, e: s.pins_of(e, run_ids=None),
     "pins_of, some runs": lambda s, e: s.pins_of(e, run_ids=frozenset({1, 2})),
 }

@@ -89,6 +89,8 @@ class ColumnCatalog:
     hparams: tuple[str, ...] = ()
     template_metrics: dict[str, tuple[str, ...]] = field(default_factory=dict[str, tuple[str, ...]])
     """The metrics each Plotly template binds its traces to, by its key (`plotly_template_metrics`): a chart reads them."""
+    run_context: bool = False
+    """Whether any run recorded what produced it (`DataStore.has_run_contexts`): what offers a chart of that."""
 
     @classmethod
     def load(
@@ -113,6 +115,7 @@ class ColumnCatalog:
             template_metrics={
                 a.key: metrics for a in artifacts if (metrics := plotly_template_metrics(a.tags))
             },
+            run_context=store.has_run_contexts(experiment_id),
         )
 
     @classmethod
@@ -155,6 +158,7 @@ class ColumnCatalog:
                 key: union(c.template_metrics.get(key, ()) for c in catalogs)
                 for key in {key for c in catalogs for key in c.template_metrics}
             },
+            run_context=any(c.run_context for c in catalogs),
         )
 
     @classmethod
@@ -176,7 +180,7 @@ class ColumnCatalog:
 
     @property
     def has_chartable_keys(self) -> bool:
-        return bool(self.metrics or self.artifact_chart_types or self.histograms)
+        return bool(self.metrics or self.artifact_chart_types or self.histograms or self.run_context)
 
     def artifact_keys(self) -> list[str]:
         return sorted(self.artifacts)
@@ -210,7 +214,7 @@ class ColumnCatalog:
                 return list(self.histograms)
             case ColumnKind.HPARAM:
                 return list(self.hparams)
-            case ColumnKind.SERIES_BAND:
+            case ColumnKind.SERIES_BAND | ColumnKind.RUN_CONTEXT:
                 msg = f"no field is populated from a {kind} column"
                 raise ValueError(msg)
             case ColumnKind.GROUPING:

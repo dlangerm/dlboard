@@ -433,6 +433,10 @@ class DataStore(typing.Protocol[_P]):
         """The recorded contexts of those of `run_ids` that are (non-deleted) runs of the experiment and have one."""
         ...
 
+    def has_run_contexts(self, experiment_id: int) -> bool:
+        """Whether any (non-deleted) run of the experiment recorded a context: what a chart of them is offered by."""
+        ...
+
     def get_or_create_page(
         self,
         page_type: type[models.Page[_Dataframe, _Chart]],

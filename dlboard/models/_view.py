@@ -62,6 +62,8 @@ class ColumnKind(StrEnum):
     SERIES_BAND = "series_band"
     """The spread of several metrics' values at each step of a grid. No chart field is populated from one."""
     HPARAM = "hparam"
+    RUN_CONTEXT = "run_context"
+    """What produced each run (`RunContext`), which a chart reads whole. No chart field is populated from one."""
     LAYER = "layer"
     """Artifact keys an image chart can draw over a picture besides its own overlays: an `Overlay` logged under a key of its own, or an image. No dataframe column is ever tagged with this kind directly."""
     GROUPING = "grouping"
@@ -242,6 +244,16 @@ class ChartType(ABC, BaseModel, typing.Generic[_Parameters, _Dataframe, _Chart],
         built-in chart type that says yes. An artifact no chart type claims (a histogram of gradients
         logged as a custom kind, say) simply gets no generated chart, rather than one that cannot show it.
         Defaults to `False`, so a chart type that does not display artifacts need not say anything.
+        """
+        return False
+
+    @classmethod
+    def can_display_run_context(cls) -> bool:
+        """
+        Whether this chart type, with its default settings, displays what produced each run (`DataRequest.run_context`).
+
+        What auto-generating and suggesting charts go by for an experiment whose runs recorded a context: the first
+        built-in chart type that says yes gets a chart. Defaults to `False`.
         """
         return False
 

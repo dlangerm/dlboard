@@ -43,6 +43,7 @@ from dlboard.plugins.charts.image_series import ImageChart, LayerVisibility
 from dlboard.plugins.charts.line_chart import LineChart
 from dlboard.plugins.charts.parallel_coordinates import ParallelCoordinatesChart
 from dlboard.plugins.charts.plotly_chart import PlotlyChart, StreamMode
+from dlboard.plugins.charts.run_context import RunContextChart
 from dlboard.plugins.charts.scatter import ScatterChart
 from dlboard.plugins.charts.series_band import SeriesBandChart
 from dlboard.plugins.charts.table_chart import TableChart
@@ -109,6 +110,7 @@ _FROZEN_CHART_TYPE_NAMES: dict[type[ChartType[typing.Any, typing.Any, typing.Any
     ConsoleChart: "console",
     ScatterChart: "scatter",
     ParallelCoordinatesChart: "parallel_coordinates",
+    RunContextChart: "run_context",
 }
 
 

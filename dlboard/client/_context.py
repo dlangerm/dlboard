@@ -24,11 +24,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from dlboard import models
 from dlboard.client._warnings import warn
-from dlboard.models import FILE_KIND_TAG, FileKind, NewArtifact, TagValue
+from dlboard.models import FILE_KIND_TAG, RUN_CONTEXT_DIFF_KEY, FileKind, NewArtifact, TagValue
 from dlboard.models._run_context import MAX_PACKAGES
 
-DIFF_KEY: Final = "context/git.diff"
-"""The artifact a run's uncommitted changes are logged as."""
 _GIT_TIMEOUT_SEC: Final = 5.0
 _KB: Final = 1024
 
@@ -58,7 +56,7 @@ class Diff(BaseModel, frozen=True, extra="forbid"):
     """A run's uncommitted changes, as an artifact: a `FileKind.DIFF` file the experiment page lists for download."""
 
     data: bytes
-    key: str = DIFF_KEY
+    key: str = RUN_CONTEXT_DIFF_KEY
     step: int = 0
     tags: Mapping[str, TagValue] = Field(default_factory=lambda: {FILE_KIND_TAG: FileKind.DIFF.value})
 

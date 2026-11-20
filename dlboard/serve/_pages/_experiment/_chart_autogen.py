@@ -33,6 +33,7 @@ from dlboard.plugins.charts.histogram import HistogramChart
 from dlboard.plugins.charts.image_series import ImageChart
 from dlboard.plugins.charts.line_chart import LineChart
 from dlboard.plugins.charts.plotly_chart import PlotlyChart
+from dlboard.plugins.charts.run_context import RunContextChart
 from dlboard.plugins.charts.series_band import SeriesBandChart
 
 if TYPE_CHECKING:
@@ -47,6 +48,10 @@ SplitMode = Literal["prefix", "suffix"]
 ARTIFACT_PANEL_SUFFIX = " (artifacts)"
 HISTOGRAM_PANEL_SUFFIX = " (histograms)"
 """The same, for histograms."""
+RUN_CONTEXT_PANEL: Final = "Run context"
+"""The panel auto-generate puts the chart of what produced each run in: a chart of the runs, of no key's group."""
+RUN_CONTEXT_LABEL: Final = "run context"
+"""What that chart is listed as, where the others are listed by the key they chart."""
 
 # Keys the delimiter doesn't actually split (no delimiter configured, or the key doesn't contain
 # it) all land together in this one shared panel, rather than each getting its own single-chart
@@ -110,6 +115,7 @@ def panel_name_for_group(group: str, kind: ColumnKind, *, granularity: str | Non
             | ColumnKind.GROUPING
             | ColumnKind.LAYER
             | ColumnKind.SERIES_BAND
+            | ColumnKind.RUN_CONTEXT
         ):
             name = group
     return f"{name} ({granularity})" if granularity else name
@@ -142,15 +148,20 @@ def default_chart_for_histogram(key: str) -> ChartInstance[typing.Any, typing.An
 
 
 ARTIFACT_CHART_TYPES: typing.Final[tuple[type[ChartType[typing.Any, typing.Any, typing.Any]], ...]] = (
+    RunContextChart,
     ConsoleChart,
     FileListChart,
     PlotlyChart,
     ImageChart,
 )
 """
-The built-in chart types auto-generate may give an artifact key, most specific first: a file is marked
-as one by its tag, which a file named like an image could otherwise be mistaken for.
+The built-in chart types auto-generate may give an artifact key, or the runs' context, most specific first: a file is
+marked as one by its tag, which a file named like an image could otherwise be mistaken for, and a run's uncommitted
+changes are a file that is part of its context.
 """
+
+_RUN_CONTEXT_CHARTS: Final = frozenset(c.name for c in ARTIFACT_CHART_TYPES if c.can_display_run_context())
+"""The chart types that display the runs' context: an artifact one of them claims is charted with the rest of it."""
 
 
 def default_artifact_chart(artifact: Artifact) -> str | None:
@@ -161,6 +172,17 @@ def default_artifact_chart(artifact: Artifact) -> str | None:
     chart type claims gets no generated chart instead of one that can't show it.
     """
     return next((c.name for c in ARTIFACT_CHART_TYPES if c.can_display_artifact(artifact)), None)
+
+
+def default_run_context_chart() -> ChartInstance[typing.Any, typing.Any] | None:
+    """
+    The chart of what produced each run, of the first built-in chart type that displays it, or `None` if none does.
+
+    Each chart type says whether it can (`ChartType.can_display_run_context`), as it says which artifacts it displays.
+    """
+    return next(
+        (ChartInstance(chart_type=c.name) for c in ARTIFACT_CHART_TYPES if c.can_display_run_context()), None
+    )
 
 
 class ArtifactChart(typing.NamedTuple):
@@ -182,7 +204,8 @@ def default_artifact_charts(keys: typing.Iterable[str], catalog: ColumnCatalog) 
     together, grouped and paged, and includes any logged later.
 
     An image's overlays (`overlay_key`: its key plus `OVERLAY_KEY_SUFFIX`, then a name if it has several) are drawn over
-    it by its chart, in key order, rather than charted on their own.
+    it by its chart, in key order, rather than charted on their own. A run's uncommitted changes are listed by the chart
+    of the runs' context (`default_run_context_chart`), rather than by one of their own.
     """
     keys = list(keys)
     images = {key for key in keys if catalog.artifact_chart_types[key] == ImageChart.name}
@@ -192,9 +215,9 @@ def default_artifact_charts(keys: typing.Iterable[str], catalog: ColumnCatalog) 
     charts: list[ArtifactChart] = []
     directories: set[str] = set()
     for key in keys:
-        if key in drawn_over_images:
-            continue
         chart_type = catalog.artifact_chart_types[key]
+        if key in drawn_over_images or chart_type in _RUN_CONTEXT_CHARTS:
+            continue
         directory = key.rpartition("/")[0]
         if chart_type != FileListChart.name or not directory:
             # A Plotly template bound to metrics reads them with it: its chart names them (#620).
@@ -276,6 +299,8 @@ def group_keys_into_panels(
         panels.setdefault(panel_name_for_group(group, ColumnKind.HISTOGRAM), []).append(
             (key, ColumnKind.HISTOGRAM)
         )
+    if catalog.run_context and default_run_context_chart() is not None:
+        panels.setdefault(RUN_CONTEXT_PANEL, []).append((RUN_CONTEXT_LABEL, ColumnKind.RUN_CONTEXT))
     return panels
 
 
@@ -333,6 +358,7 @@ def build_auto_panels(
     single = single_value(
         [key for entries in groups.values() for key, kind in entries if kind is ColumnKind.METRIC]
     )
+    run_context = default_run_context_chart()
 
     def chart_for(key: str, kind: ColumnKind) -> ChartInstance[typing.Any, typing.Any]:
         match kind:
@@ -344,7 +370,9 @@ def build_auto_panels(
                 return default_chart_for_histogram(key)
             case ColumnKind.SERIES_BAND:
                 return series_band_chart(key)
-            case ColumnKind.HPARAM | ColumnKind.GROUPING | ColumnKind.LAYER:
+            case ColumnKind.RUN_CONTEXT if run_context is not None:
+                return run_context
+            case ColumnKind.HPARAM | ColumnKind.GROUPING | ColumnKind.LAYER | ColumnKind.RUN_CONTEXT:
                 msg = f"no chart is generated for a {kind} key"
                 raise ValueError(msg)
 
@@ -360,6 +388,8 @@ class UnchartedKeys(typing.NamedTuple):
     metrics: list[str]
     artifacts: list[str]
     histograms: list[str] = []  # noqa: RUF012 -- a NamedTuple field default; never mutated
+    run_context: bool = False
+    """Whether the runs recorded what produced them and no chart on the page shows it."""
 
 
 def find_uncharted_keys(
@@ -371,12 +401,14 @@ def find_uncharted_keys(
     charted_prefixes: set[str] = set()
     charted_histograms: set[str] = set()
     charted_patterns: set[str] = set()
+    charted_context = False
     for request in (chart.data_request() for panel in panels for chart in panel.charts):
         charted_metrics |= request.metrics
         charted_patterns |= {pattern for series in request.series for pattern in series.patterns}
         charted_artifacts |= request.artifacts
         charted_prefixes |= request.artifact_prefixes
         charted_histograms |= request.histograms
+        charted_context |= request.run_context
 
     covered = KeyPatterns(tuple(charted_patterns))
     return UnchartedKeys(
@@ -387,6 +419,7 @@ def find_uncharted_keys(
             if k not in charted_artifacts and not k.startswith(tuple(charted_prefixes))
         ],
         histograms=[k for k in catalog.histograms if k not in charted_histograms],
+        run_context=catalog.run_context and not charted_context,
     )
 
 
@@ -510,4 +543,8 @@ def build_suggestions(  # noqa: PLR0913
         )
         for key in uncharted.histograms
     )
+    if uncharted.run_context and (run_context := default_run_context_chart()) is not None:
+        suggestions.append(
+            Suggestion(RUN_CONTEXT_LABEL, ColumnKind.RUN_CONTEXT, RUN_CONTEXT_PANEL, run_context)
+        )
     return suggestions

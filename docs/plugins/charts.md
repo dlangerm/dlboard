@@ -6,8 +6,10 @@ A chart plugin defines one `ChartType` — a way to turn parameters and a datafr
 into a rendered Dash component. `ChartType[P, D, C]` (`dlboard/models/_view.py`) is generic over
 its parameter model `P`, the data shape it renders from `D`, and the rendered component type `C`.
 Built-ins: `line_chart.py`, `bar_chart.py`, `table_chart.py`, `image_series.py`, `file_list.py`,
-`histogram.py`, `series_band.py`, `plotly_chart.py`, `console.py`, `scatter.py`, `parallel_coordinates.py`
-(`dlboard/plugins/charts/`). `scatter.py` draws a point per run, its latest value of `y` against its `x`, either of which
+`histogram.py`, `series_band.py`, `plotly_chart.py`, `console.py`, `scatter.py`, `parallel_coordinates.py`,
+`run_context.py` (`dlboard/plugins/charts/`). `run_context.py` lists what produced each run shown (its `RunContext`: the
+commit, the command, the machine, the packages), a fact a row and a run a column, filtered by section or to the facts
+the runs differ in, with each run's uncommitted changes (`context/git.diff`) linked under it. `scatter.py` draws a point per run, its latest value of `y` against its `x`, either of which
 may be a hyperparameter or a metric; `parallel_coordinates.py` draws an axis per hyperparameter (every one the runs
 shown don't all share, or those named in `hparams`, at most `max_axes`) and one for a metric, a line per run coloured by
 the metric, brushable along each axis. Both read a row per run (`MetricReduction.LATEST`, and the hyperparameters), so
@@ -291,6 +293,10 @@ Subclass `ChartType` and implement its abstract methods:
     `_plotly_colors.serve_plotly_colors(app)` from each chart's `plug()`; `series_band_colors.js` uses it for the
     reference chart, which keeps its figure in a `dcc.Store` that a clientside callback turns into the graph's.
 
+  - `run_context` — what produced each run (`RunContext`), as JSON under `RUN_CONTEXT_COLUMN` on each of its rows (a
+    row of its own for a run the chart reads nothing else of). It is read for the runs the panel draws alone, since a
+    context lists every installed package.
+
   The request also says which keys are charted already (so auto-generate does not chart them again) and is what the
   panel's chart filter matches against (a fuzzy match on each metric and artifact key, and on the chart type), so a
   chart type that asks for exactly what it draws is cheap to page and easy to find. A chart of every metric is found by
@@ -301,6 +307,10 @@ Subclass `ChartType` and implement its abstract methods:
 - `can_display_artifact(artifact) -> bool` (optional, `False` by default) — say which logged artifacts this
   chart type can display. Auto-generating and suggesting charts give an artifact key the first built-in
   chart type that says yes; an artifact no chart type claims simply gets no generated chart.
+- `can_display_run_context() -> bool` (optional, `False` by default) — say that this chart type, with its default
+  settings, shows what produced each run. An experiment any of whose runs recorded a context gets a chart of the first
+  built-in chart type that says yes, in a "Run context" panel, and an artifact that chart type claims is left to it
+  rather than charted on its own.
 - `fixed_table_rows(parameters, choices)` (optional, none by default) — the rows of a table setting that the chart draws
   whether or not they are saved, by setting name and then each row's key and the label it is shown by. The image chart
   draws every overlay logged over its picture and saves only the ones it was told to treat differently, so its Layers

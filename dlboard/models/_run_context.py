@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING, Annotated, Final
 
 from pydantic import BaseModel, Field, StringConstraints
 
+from dlboard._compat import StrEnum
+
 if TYPE_CHECKING:
     from dlboard.models._hparams import FlatHparamDict
 
@@ -16,6 +18,22 @@ _Text = Annotated[str, StringConstraints(max_length=_MAX_TEXT)]
 
 MAX_PACKAGES: Final = 5000
 """The most installed distributions a context lists -- far more than a real environment holds."""
+
+RUN_CONTEXT_DIFF_KEY: Final = "context/git.diff"
+"""The artifact a run's uncommitted changes are logged as, beside its context."""
+
+
+class ContextSection(StrEnum):
+    """What a fact of a run's context is about."""
+
+    GIT = "git"
+    """The commit, branch and remote, and whether there were changes not committed."""
+    COMMAND = "command"
+    """How the run was started: its command line, working directory and interpreter."""
+    MACHINE = "machine"
+    """Where it ran: Python, the platform, the host, CUDA and the GPUs."""
+    PACKAGES = "packages"
+    """Each installed distribution's version."""
 
 
 class NewRunContext(BaseModel, frozen=True, extra="ignore"):
@@ -57,28 +75,43 @@ class NewRunContext(BaseModel, frozen=True, extra="ignore"):
     cuda_version: str | None = Field(default=None, max_length=_MAX_TEXT)
     """The CUDA version torch was built with, when torch was already imported."""
 
-    def flat(self) -> FlatHparamDict:
+    def sections(self) -> dict[ContextSection, FlatHparamDict]:
         """
-        One key per fact, as run compare lists it alongside a run's hyperparameters: `git/commit`, `packages/torch`, ...
+        The facts recorded, by what each is about, a key each: `git/commit`, `command`, `packages/torch`, ...
 
         Facts not recorded are left out, rather than shown as an empty value that would differ from a run that has one.
         """
-        facts: FlatHparamDict = {
-            "git/commit": self.git_commit,
-            "git/branch": self.git_branch,
-            "git/remote": self.git_remote,
-            "git/dirty": self.git_dirty,
-            "command": shlex.join(self.command) if self.command else None,
-            "cwd": self.cwd,
-            "executable": self.executable,
-            "python": self.python_version,
-            "platform": self.platform,
-            "host": self.hostname,
-            "gpus": ", ".join(self.gpus) if self.gpus else None,
-            "cuda": self.cuda_version,
-            **{f"packages/{name}": version for name, version in sorted(self.packages.items())},
+        sections: dict[ContextSection, FlatHparamDict] = {
+            ContextSection.GIT: {
+                "git/commit": self.git_commit,
+                "git/branch": self.git_branch,
+                "git/remote": self.git_remote,
+                "git/dirty": self.git_dirty,
+            },
+            ContextSection.COMMAND: {
+                "command": shlex.join(self.command) if self.command else None,
+                "cwd": self.cwd,
+                "executable": self.executable,
+            },
+            ContextSection.MACHINE: {
+                "python": self.python_version,
+                "platform": self.platform,
+                "host": self.hostname,
+                "gpus": ", ".join(self.gpus) if self.gpus else None,
+                "cuda": self.cuda_version,
+            },
+            ContextSection.PACKAGES: {
+                f"packages/{name}": version for name, version in sorted(self.packages.items())
+            },
         }
-        return {key: value for key, value in facts.items() if value is not None}
+        return {
+            section: {key: value for key, value in facts.items() if value is not None}
+            for section, facts in sections.items()
+        }
+
+    def flat(self) -> FlatHparamDict:
+        """Every fact recorded, as run compare lists them alongside a run's hyperparameters (see `sections`)."""
+        return {key: value for facts in self.sections().values() for key, value in facts.items()}
 
 
 class RunContext(NewRunContext, frozen=True, extra="ignore"):

@@ -33,7 +33,6 @@ from dlboard.serve._pages._experiment._chart_autogen import (
     SplitMode,
     Suggestion,
     SuggestSort,
-    UnchartedKeys,
     band_suggestion,
     build_auto_panels,
     build_suggestions,
@@ -456,7 +455,7 @@ def _suggestions_to_add(
         _SPLIT_MODE.validate_python(listing.mode),
     )
     suggestions = build_suggestions(
-        UnchartedKeys(metrics=metrics, artifacts=uncharted.artifacts, histograms=uncharted.histograms),
+        uncharted._replace(metrics=metrics),
         catalog,
         single_value=single_value_metrics(store, experiments, metrics),
         delimiter=delimiter,

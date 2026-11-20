@@ -89,7 +89,10 @@ def test_a_new_run_records_what_produced_it_and_queues_its_uncommitted_changes(
     assert fake_api.called("record_run_context") == [(99,)]
     _metrics, artifacts = shippers
     ((diff,),) = artifacts.items
-    assert (diff.key, diff.tags) == (_context.DIFF_KEY, {models.FILE_KIND_TAG: models.FileKind.DIFF.value})
+    assert (diff.key, diff.tags) == (
+        models.RUN_CONTEXT_DIFF_KEY,
+        {models.FILE_KIND_TAG: models.FileKind.DIFF.value},
+    )
 
 
 def test_a_run_attached_to_keeps_the_context_it_was_started_with(

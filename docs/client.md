@@ -72,7 +72,9 @@ directory and interpreter, the Python version, platform and host, every installe
 the script already imported torch -- the CUDA version it was built with (and the GPUs' names, once the script has
 started CUDA itself: dlboard never starts it). With `DLBOARD_CONTEXT_DIFF=true` (off by default, since uncommitted changes
 are where a secret pasted in to try something sits) the changes not yet committed (`git diff HEAD`) are uploaded as the
-run's `context/git.diff` artifact, listed for download on the experiment page, unless the diff is over 1 MB. The run compare
+run's `context/git.diff` artifact, unless the diff is over 1 MB. On the experiment page, auto-generate gives it a
+`run_context` chart in a *Run context* panel (or add one from Suggest charts): a fact a row and a run a column, its
+sections and "only differences" chosen in its settings, with each run's `git.diff` linked under it. The run compare
 (**Diff**) lists all of it as *Context*, beside the hyperparameters, so "Differences" shows the commit, the command or
 the package versions two runs did not share. Nothing about it fails or holds up a run: what can't be found (no git, a
 notebook) is left out, and a server older than this answers with a warning. Turn parts off with `DLBOARD_CONTEXT_GIT`,

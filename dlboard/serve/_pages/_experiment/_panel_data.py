@@ -25,6 +25,7 @@ from dlboard._telemetry import Attributes, attribute
 from dlboard._telemetry.traces import SpanKind, TraceKey, span
 from dlboard.models import (
     EXPERIMENT_COLUMN,
+    RUN_CONTEXT_COLUMN,
     RUN_NAME_COLUMN,
     ColumnKind,
     Histogram,
@@ -114,6 +115,7 @@ class PanelRead(StrEnum):
     HYPERPARAMS = "hyperparams"
     HISTOGRAMS = "histograms"
     SERIES_BANDS = "series_bands"
+    RUN_CONTEXTS = "run_contexts"
     RUN_NAMES = "run_names"
 
 
@@ -222,6 +224,8 @@ class PanelData:
     The artifacts of the charts that read a window of them (`ArtifactWindow`), by window: a row for each step its key
     logged (`artifact_logged_column`), with the artifacts of the window's steps alone.
     """
+    contexts: pd.DataFrame = field(default_factory=pd.DataFrame)
+    """What produced each run read, a row per run with one (`RUN_CONTEXT_COLUMN`), for the charts that ask for it."""
 
     @classmethod
     def stacked(cls, parts: Sequence[PanelData]) -> PanelData:
@@ -262,6 +266,7 @@ class PanelData:
                 window: stack(part.windows[window] for part in parts if window in part.windows)
                 for window in {window for part in parts for window in part.windows}
             },
+            contexts=stack(part.contexts for part in parts),
         )
 
     def wide_history(self, chart: models.ChartInstance[Any, Any]) -> WideHistory | None:
@@ -313,6 +318,9 @@ class PanelData:
                 keep_rows=True,
             ),
         )
+        if request.run_context and not self.contexts.empty:
+            # Every run with a context, whether or not it logged anything else the chart reads.
+            merged = self.contexts if merged.empty else merged.merge(self.contexts, on="run_id", how="outer")
         if merged.empty or self.run_names.empty:
             return merged
         return merged.merge(self.run_names, on="run_id", how="left")
@@ -573,16 +581,46 @@ def fetch_panel_data(
         window: _artifact_window_frame(store, experiment_id, window, run_ids)
         for window in frozenset[models.ArtifactWindow]().union(*(r.artifact_windows for r in requests))
     }
+    contexts = (
+        _read(
+            _Read(PanelRead.RUN_CONTEXTS),
+            lambda: build_run_contexts_dataframe(
+                store.fetch_run_contexts(experiment_id, run_ids=_listed_runs(reads, experiment_id, run_ids))
+            ),
+        )
+        if any(r.run_context for r in requests)
+        else pd.DataFrame()
+    )
     read_anything = (
         any(not frame.run_id.empty for frame in metrics.values())
-        or not (artifacts_df.empty and hparams_df.empty and histograms_df.empty)
+        or not (artifacts_df.empty and hparams_df.empty and histograms_df.empty and contexts.empty)
         or any(not frame.empty for frame in (*series.values(), *windows.values()))
     )
     # Read once, not by each chart that wants it, so `LineChart`/`ImageChart` can label a run by its name instead of
     # its bare id -- `table_chart.py`'s default "runs" mode explicitly excludes this column, since it isn't a real
     # metric/hparam. Only the runs read need a name.
     run_names = reads.run_names(experiment_id, run_ids) if read_anything else pd.DataFrame()
-    return PanelData(metrics, artifacts_df, hparams_df, histograms_df, series, run_names, wide, windows)
+    return PanelData(
+        metrics, artifacts_df, hparams_df, histograms_df, series, run_names, wide, windows, contexts
+    )
+
+
+def _listed_runs(
+    reads: ExperimentReads, experiment_id: int, run_ids: frozenset[int] | None
+) -> frozenset[int]:
+    """`run_ids`, or for `None` every run of the experiment: what a read that needs the runs named is given."""
+    if run_ids is not None:
+        return run_ids
+    listed = reads.run_names(experiment_id, None)
+    return frozenset() if listed.empty else frozenset(int(run) for run in listed[MetricColumn.RUN_ID])
+
+
+def build_run_contexts_dataframe(contexts: Iterable[models.RunContext]) -> pd.DataFrame:
+    """One row per run that recorded a context, holding it as JSON under `RUN_CONTEXT_COLUMN`."""
+    return pd.DataFrame.from_records(
+        {MetricColumn.RUN_ID: context.run_id, RUN_CONTEXT_COLUMN: context.model_dump(mode="json")}
+        for context in contexts
+    )
 
 
 def _artifact_window_frame(

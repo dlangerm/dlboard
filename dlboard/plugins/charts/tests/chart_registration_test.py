@@ -5,6 +5,11 @@ from __future__ import annotations
 import subprocess
 import sys
 
+from dash import Dash
+
+from dlboard.models import ChartTypeRegistry
+from dlboard.plugins import BUILTIN_CHARTS
+
 
 def test_importing_the_plugins_registers_no_chart_type() -> None:
     """
@@ -22,3 +27,18 @@ print(sorted(ChartTypeRegistry.get_registered_chart_types()))
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "[]"
+
+
+def test_every_built_in_chart_type_is_a_whole_chart_type_the_editor_can_describe() -> None:
+    """A chart type is never instantiated, so a classmethod it leaves abstract goes unnoticed until the editor calls it."""
+    app = Dash(__name__)
+    for plugin in BUILTIN_CHARTS:
+        plugin.plug(app)
+    described = ChartTypeRegistry.get_registered_chart_types()
+
+    unfinished = {
+        name: sorted(chart.__abstractmethods__)
+        for name in described
+        if (chart := ChartTypeRegistry.get_chart_type(name)).__abstractmethods__
+    }
+    assert not unfinished

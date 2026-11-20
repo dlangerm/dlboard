@@ -79,6 +79,7 @@ from dlboard.models._panel_frame import (
     HPARAM_COLUMN_PREFIX,
     IDENTITY_COLUMNS,
     NO_DATA_COLUMNS,
+    RUN_CONTEXT_COLUMN,
     RUN_NAME_COLUMN,
     SERIES_BAND_COLUMN_PREFIX,
     SeriesBandRequest,
@@ -95,7 +96,7 @@ from dlboard.models._pin import NamedPin, NewRunPin, PinColor, PinnedRun, Pinned
 from dlboard.models._plugin import InstalledPlugin, PluginProtocol
 from dlboard.models._project import NewProject, Project
 from dlboard.models._run import NewRun, Run, RunStatus
-from dlboard.models._run_context import NewRunContext, RunContext
+from dlboard.models._run_context import RUN_CONTEXT_DIFF_KEY, ContextSection, NewRunContext, RunContext
 from dlboard.models._run_tag import MAX_TAG_LENGTH, NewRunTag, NewTag, RunTag, Tag, TagName, normalize_tag
 from dlboard.models._scoped_setting import NewScopedSetting, ScopedSetting, ScopedSettings
 from dlboard.models._scopes import Scope, has_scope, require_scope
@@ -163,6 +164,8 @@ __all__ = [
     "PLOTLY_DATA_KEY_SUFFIX",
     "PLOTLY_FIGURE_EXTENSION",
     "PLOTLY_METRICS_TAG",
+    "RUN_CONTEXT_COLUMN",
+    "RUN_CONTEXT_DIFF_KEY",
     "RUN_NAME_COLUMN",
     "SERIES_BAND_COLUMN_PREFIX",
     "SUMMARY_RUNS",
@@ -193,6 +196,7 @@ __all__ = [
     "ComparisonList",
     "ComparisonRun",
     "ComparisonSummary",
+    "ContextSection",
     "DataRequest",
     "DataStore",
     "EntityGoneError",

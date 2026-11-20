@@ -576,6 +576,10 @@ class AuthorizingDataStore(models.DataStore[[]]):
         self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
         return self._inner.fetch_run_contexts(experiment_id, run_ids=run_ids)
 
+    def has_run_contexts(self, experiment_id: int) -> bool:
+        self._require(self._experiment_project(experiment_id), ProjectRole.VIEWER)
+        return self._inner.has_run_contexts(experiment_id)
+
     def log_artifact_refs(self, artifacts: Iterable[models.Artifact]) -> None:
         artifacts = list(artifacts)
         self._require_runs_write(artifacts)

@@ -133,6 +133,12 @@ class DataRequest:
     window's key logged; none reads them at every step. A chart with windows reads its artifacts through them alone.
     """
 
+    run_context: bool = False
+    """
+    What produced each run (`RunContext`: its commit, command, machine and packages), under `RUN_CONTEXT_COLUMN`. One
+    row per run, read for the runs drawn alone: a context lists every installed package.
+    """
+
     @property
     def every_metric(self) -> bool:
         """Whether the chart draws every metric logged: the read that grows with the experiment."""
