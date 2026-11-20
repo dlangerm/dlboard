@@ -1,18 +1,40 @@
 /* A run's console chunk (`console.py`): monospace, scrolling, a JSON line's level coloured as a log viewer's would be. */
 .dl-console {
+    position: relative;
     overflow: auto;
-    padding: var(--mantine-spacing-xs);
     border: 1px solid var(--mantine-color-default-border);
     border-radius: var(--mantine-radius-sm);
     background: var(--mantine-color-default);
     font-family: var(--mantine-font-family-monospace);
     font-size: var(--mantine-font-size-xs);
-    line-height: 1.45;
 }
 
+/* As tall as every line together, so the scrollbar is the whole chunk's; only the lines in view are in it. */
+.dl-console-sizer {
+    position: relative;
+    min-width: 100%;
+}
+
+.dl-console-window {
+    position: absolute;
+    top: 0;
+    left: 0;
+    min-width: 100%;
+    width: max-content;
+    padding-inline: var(--mantine-spacing-xs);
+    box-sizing: border-box;
+}
+
+/* One height for every line, which `console.js` (`lineHeight`) finds the lines in view by: a line never wraps. */
 .dl-console-line {
-    white-space: pre-wrap;
-    word-break: break-word;
+    height: 18px;
+    line-height: 18px;
+    white-space: pre;
+}
+
+.dl-console-position {
+    color: var(--mantine-color-dimmed);
+    font-size: var(--mantine-font-size-xs);
 }
 
 .dl-console-time,
@@ -38,4 +60,131 @@
 .dl-console-notice {
     color: var(--mantine-color-dimmed);
     font-style: italic;
+}
+
+/* A terminal's 16 colours (ANSI SGR 30-37 and 90-97, their backgrounds 40-47 and 100-107), in the theme's: readable in
+   either colour scheme, as a terminal's own theme makes them. */
+.dl-ansi-bold {
+    font-weight: 700;
+}
+
+.dl-ansi-dim {
+    opacity: 0.65;
+}
+
+.dl-ansi-italic {
+    font-style: italic;
+}
+
+.dl-ansi-underline {
+    text-decoration: underline;
+}
+
+.dl-ansi-inverse {
+    color: var(--mantine-color-body);
+    background: var(--mantine-color-text);
+}
+
+.dl-ansi-fg-0 {
+    color: var(--mantine-color-dark-text);
+}
+
+.dl-ansi-fg-1 {
+    color: var(--mantine-color-red-text);
+}
+
+.dl-ansi-fg-2 {
+    color: var(--mantine-color-green-text);
+}
+
+.dl-ansi-fg-3 {
+    color: var(--mantine-color-yellow-text);
+}
+
+.dl-ansi-fg-4 {
+    color: var(--mantine-color-blue-text);
+}
+
+.dl-ansi-fg-5 {
+    color: var(--mantine-color-grape-text);
+}
+
+.dl-ansi-fg-6 {
+    color: var(--mantine-color-cyan-text);
+}
+
+.dl-ansi-fg-7 {
+    color: var(--mantine-color-text);
+}
+
+.dl-ansi-fg-8 {
+    color: var(--mantine-color-dimmed);
+}
+
+.dl-ansi-fg-9 {
+    color: var(--mantine-color-red-filled);
+}
+
+.dl-ansi-fg-10 {
+    color: var(--mantine-color-green-filled);
+}
+
+.dl-ansi-fg-11 {
+    color: var(--mantine-color-yellow-filled);
+}
+
+.dl-ansi-fg-12 {
+    color: var(--mantine-color-blue-filled);
+}
+
+.dl-ansi-fg-13 {
+    color: var(--mantine-color-grape-filled);
+}
+
+.dl-ansi-fg-14 {
+    color: var(--mantine-color-cyan-filled);
+}
+
+.dl-ansi-fg-15 {
+    color: var(--mantine-color-bright);
+}
+
+.dl-ansi-bg-0,
+.dl-ansi-bg-8 {
+    background: var(--mantine-color-dark-light);
+}
+
+.dl-ansi-bg-1,
+.dl-ansi-bg-9 {
+    background: var(--mantine-color-red-light);
+}
+
+.dl-ansi-bg-2,
+.dl-ansi-bg-10 {
+    background: var(--mantine-color-green-light);
+}
+
+.dl-ansi-bg-3,
+.dl-ansi-bg-11 {
+    background: var(--mantine-color-yellow-light);
+}
+
+.dl-ansi-bg-4,
+.dl-ansi-bg-12 {
+    background: var(--mantine-color-blue-light);
+}
+
+.dl-ansi-bg-5,
+.dl-ansi-bg-13 {
+    background: var(--mantine-color-grape-light);
+}
+
+.dl-ansi-bg-6,
+.dl-ansi-bg-14 {
+    background: var(--mantine-color-cyan-light);
+}
+
+.dl-ansi-bg-7,
+.dl-ansi-bg-15 {
+    background: var(--mantine-color-gray-light);
 }

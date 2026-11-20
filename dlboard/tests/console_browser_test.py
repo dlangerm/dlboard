@@ -1,4 +1,4 @@
-"""A run's console in the browser: its newest chunk first, older ones a click away, JSON lines drawn as log lines (#697)."""
+"""A run's console in the browser: its newest chunk first, older ones a click away, drawn as a terminal or log viewer would."""
 
 from __future__ import annotations
 
@@ -38,22 +38,27 @@ def _session_app_is_current(dlboard_app: Dash) -> Iterator[None]:
         yield
 
 
-def test_a_runs_console_opens_on_its_newest_chunk_pages_back_and_filters_its_lines(
-    page: Page, live_server_url: str, console_errors: list[str], tmp_path: Path
-) -> None:
+def _console_of(
+    live_server_url: str,
+    tmp_path: Path,
+    chunks: tuple[str, ...],
+    settings: dict[str, Any] | None = None,
+    **panel: Any,  # noqa: ANN401
+) -> str:
+    """The address of a view of one console chart of `settings` (in a panel of `panel`'s), of a run that printed `chunks`."""
     store = get_system_data_store()
-    project = store.create_project(models.NewProject(name="Console Project", description=""))
+    project = store.create_project(models.NewProject(name=f"Console {time.monotonic_ns()}", description=""))
     experiment = store.create_experiment(models.NewExperiment(project_id=project.id, name="printed"))
     api = BasicDlboardAPI(live_server_url)
     run = api.create_run(models.NewRun(experiment_id=experiment.id, name="chatty"))
     api.log_artifact_batch(
         [
             ConsoleChunk(data=text.encode(), step=step).to_artifact(tmp_path, run.id, experiment.id)
-            for step, text in enumerate(_CHUNKS)
+            for step, text in enumerate(chunks)
         ]
     )
     deadline = time.monotonic() + 30
-    while len(list(store.fetch_artifacts(experiment.id, run_ids=None))) < len(_CHUNKS):
+    while len(list(store.fetch_artifacts(experiment.id, run_ids=None))) < len(chunks):
         assert time.monotonic() < deadline, "the chunks were never recorded"
         time.sleep(0.1)
     owner = store.get_or_create_user(models.Principal.unverified("console"))
@@ -67,29 +72,70 @@ def test_a_runs_console_opens_on_its_newest_chunk_pages_back_and_filters_its_lin
                 models.PanelInstance[Any, Any](
                     name="Console",
                     charts=[
-                        models.ChartInstance(chart_type="console", parameters={"key": models.CONSOLE_KEY})
+                        models.ChartInstance(
+                            chart_type="console", parameters={"key": models.CONSOLE_KEY, **(settings or {})}
+                        )
                     ],
+                    **panel,
                 )
             ],
         ),
     )
+    return f"{live_server_url}/experiment/{experiment.id}?view={view.id}"
 
-    page.goto(f"{live_server_url}/experiment/{experiment.id}?view={view.id}")
 
-    lines = page.locator(".dl-console-line")
+def test_a_runs_console_opens_newest_first_pages_through_its_chunks_and_filters_their_lines(
+    page: Page, live_server_url: str, console_errors: list[str], tmp_path: Path
+) -> None:
+    page.goto(_console_of(live_server_url, tmp_path, _CHUNKS))
+
+    lines, position = page.locator(".dl-console-line"), page.locator(".dl-console-position")
     # The page's panels, then the chunk the browser fetches itself: on a cold server, more than the default 5 s.
     expect(lines).to_have_text(["epoch 2: loss 0.5"], timeout=15_000)
-    page.get_by_role("button", name="Older").click()
-    expect(lines).to_have_count(2)
-    warning = page.locator(".dl-console-json")
+    expect(position).to_have_text("Chunk 3 of 3 (newest)")
+    page.get_by_role("button", name="← Older").click()
+    # Newest first: the chunk's last line at the top, so reading down goes back in time.
+    expect(lines.nth(1)).to_have_text("epoch 1: loss 1.0")
+    expect(position).to_have_text("Chunk 2 of 3")
+    warning = lines.first
     expect(warning.locator(".dl-console-level")).to_have_text("WARNING ")
     expect(warning.locator(".dl-console-message")).to_have_text("loss went up")
     expect(warning.locator(".dl-console-rest")).to_have_text(" lr=0.1")
     page.get_by_placeholder("Filter these lines").fill("went up")
     expect(lines).to_have_count(1)
     page.get_by_placeholder("Filter these lines").fill("")
-    page.get_by_role("button", name="Older").click()
+    page.get_by_role("button", name="← Older").click()
     expect(lines).to_have_text(["epoch 0: loss 2.0"])
-    page.get_by_role("button", name="Newer").click()
+    expect(position).to_have_text("Chunk 1 of 3 (oldest)")
+    page.get_by_role("button", name="Newest ⇥").click()
+    expect(lines).to_have_text(["epoch 2: loss 0.5"])
+    page.get_by_role("button", name="⇤ Oldest").click()
+    expect(lines).to_have_text(["epoch 0: loss 2.0"])
+    page.get_by_role("button", name="Newer →").click()
     expect(lines).to_have_count(2)
+    assert console_errors == []
+
+
+def test_a_long_chunk_read_oldest_first_is_drawn_a_screenful_at_a_time_in_its_colours_filling_its_cell(
+    page: Page, live_server_url: str, console_errors: list[str], tmp_path: Path
+) -> None:
+    """#726: every line was a component of its own, escapes showed as text, and the chart kept its own width."""
+    progress = "".join(f"\r\x1b[2Kepoch 1: {percent}%" for percent in range(0, 101, 10))
+    chunk = f"\x1b[1;31mfailed\x1b[0m twice\n{progress}\n" + "".join(f"line {n}\n" for n in range(5000))
+    oldest_first = {"order": "oldest_first"}
+    page.goto(_console_of(live_server_url, tmp_path, (chunk,), oldest_first, layout="grid", grid_columns=1))
+
+    lines = page.locator(".dl-console-line")
+    expect(lines.first).to_have_text("failed twice", timeout=15_000)
+    expect(lines.first.locator(".dl-ansi-fg-1.dl-ansi-bold")).to_have_text("failed")
+    expect(lines.nth(1)).to_have_text("epoch 1: 100%")
+    assert lines.count() < 100
+    console = page.locator(".dl-console")
+    console.evaluate("element => { element.scrollTop = element.scrollHeight; }")
+    expect(lines.last).to_have_text("line 4999")
+    assert lines.count() < 100
+    cell, chart = page.locator(".dl-chart-item").bounding_box(), console.bounding_box()
+    assert cell is not None
+    assert chart is not None
+    assert chart["width"] > cell["width"] - 40  # the cell's padding, not the 760 px the chart packs to
     assert console_errors == []

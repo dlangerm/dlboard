@@ -155,9 +155,13 @@ it is finished, and costs a handful of rows per sample: 8 GPUs and the host are 
 
 **Console output.** A run captures what the script prints -- everything written to `sys.stdout` and `sys.stderr`,
 tracebacks included -- from its start until it is finished, and auto-generate gives it a `console` chart: each run's
-newest stretch of output, **Older** and **Newer** to page through the rest, and a filter over the lines on show. A line
+newest stretch of output with its latest line at the top (or, set to *oldest first*, its first stretch as printed), a
+pager through the rest (**Oldest**, **Older**, **Newer**, **Newest**, and which chunk is on show), and a filter over the
+lines on show. A line
 that is a JSON object (structlog's `JSONRenderer`, say) is drawn with its time, level and message pulled out, and its
-other fields after them. It is kept small on purpose, and is not a log service: output is cut into chunks every 30
+other fields after them; any other line as a terminal shows it, in its colours (ANSI escapes, 16, 256 or 24-bit), and a
+progress bar that redraws its line (`\r`, as tqdm and Lightning's do) as it was last drawn. Lines never wrap (a long one
+scrolls sideways), and only the ones in view are in the page, so a chunk of thousands scrolls as quickly as a short one. It is kept small on purpose, and is not a log service: output is cut into chunks every 30
 seconds (sooner past 256 KB) and logged as ordinary artifacts, the server never parses or searches it, and nothing searches
 more than the chunk on show. A write never waits on dlboard: it goes to the real stream, then into a bounded buffer, and
 what finds the buffer full is dropped and said so. A run keeps at most 10 MB of it; a progress bar redrawn with `\r` is

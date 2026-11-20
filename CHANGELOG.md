@@ -12,6 +12,24 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ## [Unreleased]
 
+### Added
+
+* **A chart of what produced each run.** The `run_context` chart lists each run's commit, command, machine and
+  packages, a row per fact and a column per run, filtered by section or to what the runs differ in, with each run's
+  `git.diff` linked under it. Auto-generate gives an experiment whose runs recorded a context one in a *Run context*
+  panel, and Suggest charts offers it, in place of the file list of `context/` that said nothing was logged for runs
+  with no diff. A chart type says it can show the runs' context with `ChartType.can_display_run_context`, and asks for it
+  with `DataRequest.run_context`.
+* **The console chart reads newest first or oldest first.** Newest first (the default) opens on each run's newest chunk
+  with its latest line at the top; oldest first opens on the first chunk, as printed. Its pager says which chunk is on
+  show (*Chunk 3 of 40*) and jumps to the oldest or newest as well as a chunk back or on.
+
+### Fixed
+
+* **The console chart draws a long chunk quickly, in its colours, and fills its cell.** Only the lines in view are in
+  the page, ANSI colours are drawn rather than shown as escapes, a progress bar's redraws (`\r`) collapse to the last
+  one, and in a grid the chart fills its cell instead of keeping its own width. (#726)
+
 ## [0.19.0] - 2026-11-19
 
 ### Added

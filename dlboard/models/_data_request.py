@@ -26,6 +26,8 @@ class WindowAt(StrEnum):
     """The first `steps` steps any run logged: where a slider starts. The chart reads the next as it moves past them."""
     LATEST = "latest"
     """Each run's latest step."""
+    EARLIEST = "earliest"
+    """Each run's earliest step: its own, where `FIRST` is of the steps any run logged."""
     THINNED = "thinned"
     """About `steps` of each run's steps: every 2nd, 4th, ... one from its first, and always its latest (`thinned`)."""
 
@@ -70,6 +72,8 @@ class ArtifactWindow:
                 return {run: first.intersection(steps) for run, steps in logged.items()}
             case WindowAt.LATEST:
                 return {run: {steps[-1]} for run, steps in logged.items() if steps}
+            case WindowAt.EARLIEST:
+                return {run: {steps[0]} for run, steps in logged.items() if steps}
             case WindowAt.THINNED:
                 return {run: set(thinned(steps, self.steps)) for run, steps in logged.items() if steps}
 
