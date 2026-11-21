@@ -11,11 +11,12 @@ from pathlib import Path
 
 import dash_mantine_components as dmc
 import pandas as pd
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from dlboard.models import (
     ADVANCED_SECTION,
     DISPLAY_SECTION,
+    LAYERED,
     RUN_NAME_COLUMN,
     ChartType,
     ColumnKind,
@@ -47,6 +48,17 @@ LEGEND_MAX_HEIGHT: typing.Final = 64
 
 READ_NOTE_FACTOR: typing.Final = 4
 """A chart that read more than this many times the points it can draw (`max_points`) says how many it read."""
+
+
+def not_against_itself(column: str, x_axis: str) -> None:
+    """
+    Refuse an x axis that is the chart's own column: drawn against itself it shows nothing, and its frame has it twice.
+
+    So a panel's or a page's chart settings that set it (an x axis of `epoch`) leave the chart of `epoch` on its own.
+    """
+    if x_axis == column:
+        msg = f"{column} can't be drawn against itself: pick another x axis"
+        raise ValueError(msg)
 
 
 def _read_note(read: int, drawn: int) -> dmc.Text:
@@ -194,7 +206,7 @@ class LineChartSettings(BaseModel, frozen=True, extra="forbid", use_attribute_do
     """Line chart settings."""
 
     column: str
-    x_axis: str
+    x_axis: typing.Annotated[str, LAYERED]
     height: typing.Annotated[int, DISPLAY_SECTION] = 300
     width: typing.Annotated[int | None, DISPLAY_SECTION] = Field(default=None)
     """Overall chart width in px. Leave blank to size it automatically from height."""
@@ -220,6 +232,11 @@ class LineChartSettings(BaseModel, frozen=True, extra="forbid", use_attribute_do
     """A hyperparameter (`lr`): a line per value of it, the mean of its runs in a band from the lowest to the highest. Leave blank for a line per run."""
     max_groups: typing.Annotated[int, ADVANCED_SECTION] = Field(default=12, ge=1, le=24)
     """The most groups drawn, in the order of their values: past a dozen the bands are too many to tell apart."""
+
+    @model_validator(mode="after")
+    def _distinct_axes(self) -> typing.Self:
+        not_against_itself(self.column, self.x_axis)
+        return self
 
 
 @dataclasses.dataclass(frozen=True)

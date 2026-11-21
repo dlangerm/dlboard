@@ -15,6 +15,7 @@ from dlboard.models._view import (
     ADVANCED_SECTION,
     DATA_SECTION,
     DISPLAY_SECTION,
+    LAYERED,
     ChartInstance,
     ChartType,
     ChartTypeRegistry,
@@ -184,6 +185,54 @@ def test_a_setting_marked_slider_is_slid_between_its_bounds_and_needs_both(
     monkeypatch.setitem(ChartTypeRegistry._all_charts, unbounded.name, unbounded)
     with pytest.raises(ValueError, match="both ge and le"):
         ChartTypeRegistry.get_registered_chart_types()
+
+
+class _FakeParamsLayered(BaseModel, frozen=True, extra="forbid"):
+    metric: str
+    x_axis: typing.Annotated[str, LAYERED] = "step"
+    height: typing.Annotated[int, DISPLAY_SECTION] = Field(default=300, ge=100)
+    scale: typing.Annotated[typing.Literal["linear", "log"], DISPLAY_SECTION] = "linear"
+    limit: typing.Annotated[int, ADVANCED_SECTION] = 5
+    rows: typing.Annotated[dict[str, _FakeParamsWithSlider], DISPLAY_SECTION] = Field(default_factory=dict)
+
+
+def test_a_setting_may_be_layered_if_it_says_how_a_chart_looks_or_is_marked_layered() -> None:
+    make_fake_chart("fake-layered", _FakeParamsLayered).register()
+    fields = ChartTypeRegistry.get_registered_chart_types()["fake-layered"]
+    assert {name: field.layerable for name, field in fields.items()} == {
+        "metric": False,  # what it draws
+        "x_axis": True,  # marked
+        "height": True,
+        "scale": True,
+        "limit": True,
+        "rows": False,  # a table
+    }
+
+
+@pytest.mark.parametrize(
+    ("layers", "drawn"),
+    [
+        pytest.param([{"height": 500}], {"height": 500}, id="a-page-sets-what-the-chart-did-not"),
+        pytest.param([{"height": 500}, {"height": 700}], {"height": 700}, id="the-panel-says-last"),
+        pytest.param([{"x_axis": "epoch"}], {"x_axis": "epoch"}, id="a-marked-data-setting"),
+        pytest.param([{"metric": "acc"}], {}, id="never-what-it-draws"),
+        pytest.param([{"height": 10}, {"scale": "cube"}], {}, id="a-value-it-does-not-take-is-left-out"),
+        pytest.param([{"smoothing": 0.5}], {}, id="one-its-type-has-not-waits"),
+    ],
+)
+def test_a_chart_is_drawn_under_its_page_then_its_panel_settings_never_saved(
+    layers: list[dict[str, object]], drawn: dict[str, object]
+) -> None:
+    make_fake_chart("fake-layered", _FakeParamsLayered).register()
+    chart = ChartInstance[typing.Any, typing.Any](
+        chart_type="fake-layered", parameters={"metric": "loss", "height": 400}
+    )
+
+    assert chart.drawn_with(layers).parameters == {"metric": "loss", "height": 400, **drawn}
+    assert (
+        chart.drawn_with(layers).id == chart.id
+    )  # the same chart, so its links and its editor still find it
+    assert chart.model_copy(update={"locked": True}).drawn_with(layers).parameters == chart.parameters
 
 
 class _FakeParamsWithTitles(BaseModel, frozen=True, extra="forbid"):

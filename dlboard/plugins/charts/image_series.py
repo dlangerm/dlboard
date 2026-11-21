@@ -20,6 +20,7 @@ from dlboard.models import (
     DEFAULT_TAG_PRECISION,
     DISPLAY_SECTION,
     EXPERIMENT_COLUMN,
+    LAYERED,
     RUN_NAME_COLUMN,
     Artifact,
     ArtifactWindow,
@@ -118,7 +119,7 @@ class ImageChartSettings(BaseModel, frozen=True, extra="forbid", use_attribute_d
     """Image chart settings."""
 
     key: str
-    x_axis: str = "step"
+    x_axis: Annotated[str, LAYERED] = "step"
     height: Annotated[int, DISPLAY_SECTION] = 220
     width: Annotated[int | None, DISPLAY_SECTION] = Field(default=None)
     """Overall chart width in px. Leave blank to size it automatically from height (the default). Unrelated to native_size below, which only affects individual thumbnails."""

@@ -268,8 +268,15 @@ def _draw_form(  # noqa: PLR0913
         table_values=values.table_values,
     )
     try:
+        page = page_model.BasicExperimentPage.model_validate_json(values.page_json)
+        held = page_model.locate_chart(page.panels, chart_id) if chart_id is not None else None
         chart = build_validated_chart_instance(chart_type_name, parameters, chart_id)
-        scope = page_scope(store, page_model.BasicExperimentPage.model_validate_json(values.page_json))
+        if held is not None:
+            # Drawn as it will be: under its page's and its panel's chart settings, unless it is locked.
+            chart = chart.model_copy(update={"locked": held.chart.locked}).drawn_with(
+                (page.document.chart_settings, held.panel.chart_settings)
+            )
+        scope = page_scope(store, page)
         panel = models.PanelInstance[Any, Any](name=panel_name, charts=[chart])
 
         def fetch() -> panel_data.PanelData:
@@ -524,6 +531,8 @@ def _placed(
             if location is None:
                 raise page_model.NotOnThePageError(_NO_LONGER_ON_THE_PAGE)
             panel_name, index = location.panel.name, location.index
+            # The form is of the chart's settings: whether it is locked is the card's to say, and stays.
+            chart = chart.model_copy(update={"locked": location.chart.locked})
         case AddChart():
             if not any(p.name == target.panel for p in stored):
                 raise page_model.NotOnThePageError(_NO_LONGER_ON_THE_PAGE)

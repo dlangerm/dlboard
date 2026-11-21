@@ -152,7 +152,7 @@ def _register_paging(app: Dash) -> None:
         page = load_page(
             store,
             ref_of(BasicExperimentPage.model_validate_json(panel_ctx.page_json)),
-        )
+        ).drawn()
         new_paging = clamped_paging(page, tab, requested.viewing(tab=tab)).normalized(page.panels)
         # A control mounting reports its current value back as a "change" -- nothing to do for that.
         if new_paging == paging and tab == rendered_tab:
@@ -200,7 +200,7 @@ def _register_paging(app: Dash) -> None:
             raise PreventUpdate
 
         store = get_data_store()
-        page = load_page(store, ref_of(BasicExperimentPage.model_validate_json(chart_ctx.page_json)))
+        page = load_page(store, ref_of(BasicExperimentPage.model_validate_json(chart_ctx.page_json))).drawn()
         panel_by_name = {p.name: p for p in page.panels}
         changed = {
             name
@@ -300,7 +300,7 @@ def register_panel_area_callbacks(app: Dash) -> None:
         # `ref_of`, not `STATE_VIEW_ID`: this accordion
         # remount can itself be the tail end of an edit that just branched into a new view.
         curr_page = BasicExperimentPage.model_validate_json(opened.page_json)
-        page = load_page(store, ref_of(curr_page))
+        page = load_page(store, ref_of(curr_page)).drawn()
         panel_by_name = {p.name: p for p in page.panels}
         rendered = newly_opened & panel_by_name.keys()
         frames = panel_frames(store, page, paging, rendered)
