@@ -18,6 +18,7 @@ from dlboard.serve import get_system_data_store
 from dlboard.serve._pages._experiment._ids import METRIC_CONTENT_ID
 from dlboard.serve._pages._experiment._page_model import BasicExperimentPage
 from dlboard.serve._pages._experiment._run_compare import COMPARE_GRID_ID
+from dlboard.tests.browser_test import _shared_soon
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -291,6 +292,32 @@ def test_the_columns_picker_changes_the_list_of_a_comparison_of_your_own_in_plac
     saved = store.get_view(BasicExperimentPage, mine.id)
     assert saved is not None
     assert cast("BasicExperimentPage", saved).document.hparam_columns == ["loss"]
+    assert console_errors == []
+
+
+def test_a_comparison_of_your_own_is_shared_by_its_switch_and_anyone_elses_says_whether_it_is(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    shared = _a_shared_comparison_of_two_experiments("Sharing Comparison Project")
+    store = get_system_data_store()
+    me = store.get_or_create_user(models.Principal.unverified(resolve_username())).id
+    mine = store.create_comparison(
+        BasicExperimentPage,
+        models.NewPage[Any, Any](project_id=shared.project_id, owner_id=me, name="mine", panels=[]),
+        frozenset(shared.run_ids),
+    )
+    page.goto(f"{live_server_url}/comparison/{shared.id}")
+    expect(
+        page.get_by_text("Shared with the project", exact=True)
+    ).to_be_visible()  # someone else's: no switch
+    switch = page.get_by_role("switch", name="Share this comparison with the project")
+    expect(switch).to_have_count(0)
+
+    page.goto(f"{live_server_url}/comparison/{mine.id}")
+    expect(switch).not_to_be_checked()
+    switch.check(force=True)
+    expect(switch).to_be_checked()
+    assert _shared_soon(page, mine.id)
     assert console_errors == []
 
 
