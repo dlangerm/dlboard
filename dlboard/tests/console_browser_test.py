@@ -43,22 +43,29 @@ def _console_of(
     tmp_path: Path,
     chunks: tuple[str, ...],
     settings: dict[str, Any] | None = None,
+    runs: tuple[str, ...] = ("chatty",),
     **panel: Any,  # noqa: ANN401
 ) -> str:
-    """The address of a view of one console chart of `settings` (in a panel of `panel`'s), of a run that printed `chunks`."""
+    """
+    The address of a view of one console chart of `settings` (in a panel of `panel`'s), of runs named `runs` (created in
+    that order) that each printed `chunks`.
+    """
     store = get_system_data_store()
     project = store.create_project(models.NewProject(name=f"Console {time.monotonic_ns()}", description=""))
     experiment = store.create_experiment(models.NewExperiment(project_id=project.id, name="printed"))
     api = BasicDlboardAPI(live_server_url)
-    run = api.create_run(models.NewRun(experiment_id=experiment.id, name="chatty"))
-    api.log_artifact_batch(
-        [
-            ConsoleChunk(data=text.encode(), step=step).to_artifact(tmp_path, run.id, experiment.id)
-            for step, text in enumerate(chunks)
-        ]
-    )
+    for name in runs:
+        run = api.create_run(models.NewRun(experiment_id=experiment.id, name=name))
+        staged = tmp_path / name
+        staged.mkdir()
+        api.log_artifact_batch(
+            [
+                ConsoleChunk(data=text.encode(), step=step).to_artifact(staged, run.id, experiment.id)
+                for step, text in enumerate(chunks)
+            ]
+        )
     deadline = time.monotonic() + 30
-    while len(list(store.fetch_artifacts(experiment.id, run_ids=None))) < len(chunks):
+    while len(list(store.fetch_artifacts(experiment.id, run_ids=None))) < len(chunks) * len(runs):
         assert time.monotonic() < deadline, "the chunks were never recorded"
         time.sleep(0.1)
     owner = store.get_or_create_user(models.Principal.unverified("console"))
@@ -82,6 +89,30 @@ def _console_of(
         ),
     )
     return f"{live_server_url}/experiment/{experiment.id}?view={view.id}"
+
+
+def test_the_run_picker_lists_the_newest_run_first_each_in_its_colours(
+    page: Page, live_server_url: str, console_errors: list[str], tmp_path: Path
+) -> None:
+    """A run is found as the other charts draw it, and the one still printing is the one opened, as the Runs table lists them."""
+    page.goto(_console_of(live_server_url, tmp_path, ("epoch 0\n",), runs=("first", "second", "third")))
+
+    picker = page.get_by_role("textbox", name="Run", exact=True)
+    expect(picker).to_have_value("third", timeout=15_000)
+    picked_swatch = page.locator(".mantine-Select-section .dl-swatch")
+    expect(picked_swatch).to_have_count(1)
+    picker.click()
+    options = page.get_by_role("option")
+    expect(options).to_have_text(["third", "second", "first"])
+    expect(options.locator(".dl-swatch")).to_have_count(3)
+    swatches: list[str] = options.locator(".dl-swatch").evaluate_all(
+        "spans => spans.map(span => span.className)"
+    )
+    assert len(set(swatches)) == 3  # each run its own colour
+    options.nth(2).click()
+    expect(picker).to_have_value("first")
+    expect(picked_swatch).to_have_class(swatches[2])
+    assert console_errors == []
 
 
 def test_a_runs_console_opens_newest_first_pages_through_its_chunks_and_filters_their_lines(

@@ -43,7 +43,14 @@ from dlboard.models import (
     artifact_tags_column,
 )
 from dlboard.plugins.charts._artifact_tags import parse_tags
-from dlboard.serve import AssetKind, ClientsideScript, build_artifacts_dataframe, get_data_store, serve_asset
+from dlboard.serve import (
+    AssetKind,
+    ClientsideScript,
+    build_artifacts_dataframe,
+    get_data_store,
+    series_swatch_class,
+    serve_asset,
+)
 from dlboard.serve._pages._dash_helpers import require_triggered_id
 
 if typing.TYPE_CHECKING:
@@ -51,8 +58,12 @@ if typing.TYPE_CHECKING:
 
 _JS: Final = ClientsideScript(Path(__file__).with_name("console.js"))
 _CSS_PATH: Final = Path(__file__).with_name("console.css")
+_RUN_OPTION_JS_PATH: Final = Path(__file__).with_name("console_run_option.js")
+RUN_OPTION_FUNCTION: Final = "consoleRunOption"
+"""What draws an option of the run picker, with its run's swatch: `console_run_option.js`."""
 
 _RUN: Final = "dl-console-run"
+_RUN_SWATCH: Final = "dl-console-run-swatch"
 _SHOWN: Final = "dl-console-shown"
 _OPENING: Final = "dl-console-opening"
 _PAGE: Final = "dl-console-page"
@@ -159,9 +170,11 @@ def _opening_window(parameters: ConsoleChartSettings) -> ArtifactWindow:
 
 def opening_chunks(parameters: ConsoleChartSettings, dataframe: pd.DataFrame) -> dict[int, Shown]:
     """
-    The chunk each run opens on, the one the panel read the URL of, by run id, in the order the frame lists the runs.
+    The chunk each run opens on, the one the panel read the URL of, by run id, the newest run first.
 
-    The frame lists every chunk each run logged (`artifact_logged_column`), which says where the run's first and newest are.
+    Newest first as the Runs table lists them, so the run still printing is the one the chart opens on: by id, which a
+    run is given as it is created. The frame lists every chunk each run logged (`artifact_logged_column`), which says
+    where the run's first and newest are.
     """
     url_column = artifact_column(parameters.key)
     if dataframe.empty or url_column not in dataframe.columns:
@@ -173,7 +186,6 @@ def opening_chunks(parameters: ConsoleChartSettings, dataframe: pd.DataFrame) ->
     for run, step in logged[[MetricColumn.RUN_ID, MetricColumn.STEP]].itertuples(index=False):
         steps.setdefault(int(run), []).append(int(step))
     opening = dataframe[dataframe[url_column].notna()].drop_duplicates(MetricColumn.RUN_ID)
-    order = list(dict.fromkeys(int(run) for run in dataframe[MetricColumn.RUN_ID]))
     found = {
         (run := int(row[MetricColumn.RUN_ID])): Shown(
             experiment_id=int(row[EXPERIMENT_COLUMN]),
@@ -187,7 +199,7 @@ def opening_chunks(parameters: ConsoleChartSettings, dataframe: pd.DataFrame) ->
         )
         for _, row in opening.iterrows()
     }
-    return {run: found[run] for run in order if run in found}
+    return {run: found[run] for run in sorted(found, reverse=True)}
 
 
 def _run_names(dataframe: pd.DataFrame) -> dict[int, str]:
@@ -282,15 +294,28 @@ class ConsoleChart(ChartType[ConsoleChartSettings, pd.DataFrame, dmc.Stack], fro
             [
                 dmc.Group(
                     [
+                        # Each run as the charts draw it, its colour and dash before its name: in the list, and
+                        # before the one picked.
                         dmc.Select(
                             id={"type": _RUN, "instance": instance},
                             data=[
-                                {"value": str(run), "label": names.get(run, f"Run {run}")} for run in opening
+                                {
+                                    "value": str(run),
+                                    "label": names.get(run, f"Run {run}"),
+                                    "swatch": series_swatch_class(run),
+                                }
+                                for run in opening
                             ],
                             value=str(first.run_id),
+                            renderOption={"function": RUN_OPTION_FUNCTION},
+                            leftSection=html.Span(
+                                id={"type": _RUN_SWATCH, "instance": instance},
+                                className=series_swatch_class(first.run_id),
+                            ),
                             allowDeselect=False,
                             size="xs",
                             w=200,
+                            **cast("dict[str, Any]", {"aria-label": "Run"}),
                         ),
                         dmc.TextInput(
                             id={"type": _FILTER, "instance": instance},
@@ -372,19 +397,21 @@ def plug(app: dash.Dash) -> None:
     """Plugin: registers the chart type, the callbacks that pick and page its chunks, and the script that draws one."""
     ConsoleChart.register(allow_override=True)
     serve_asset(app, AssetKind.STYLESHEET, _CSS_PATH.name, _CSS_PATH.read_bytes())
+    serve_asset(app, AssetKind.SCRIPT, _RUN_OPTION_JS_PATH.name, _RUN_OPTION_JS_PATH.read_bytes())
 
     @app.callback(
         dash.Output({"type": _SHOWN, "instance": dash.MATCH}, "data", allow_duplicate=True),
+        dash.Output({"type": _RUN_SWATCH, "instance": dash.MATCH}, "className"),
         dash.Input({"type": _RUN, "instance": dash.MATCH}, "value"),
         dash.State({"type": _OPENING, "instance": dash.MATCH}, "data"),
         prevent_initial_call=True,
     )
-    def show_run(run: str | None, opening: dict[str, Any]) -> dict[str, Any]:
-        """A run picked: the chunk it opens on, which the chart already has."""
+    def show_run(run: str | None, opening: dict[str, Any]) -> tuple[dict[str, Any], str]:
+        """A run picked: the chunk it opens on, which the chart already has, and its swatch before its name."""
         runs = _Opening.model_validate(opening).runs
         if run is None or run not in runs:
             raise PreventUpdate
-        return runs[run].model_dump()
+        return runs[run].model_dump(), series_swatch_class(int(run))
 
     @app.callback(
         dash.Output({"type": _SHOWN, "instance": dash.MATCH}, "data", allow_duplicate=True),

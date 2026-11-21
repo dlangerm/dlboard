@@ -132,6 +132,9 @@ def _create_project_and_experiment(page: Page, live_server_url: str, name: str) 
 
     page.locator(f"#{NEW_EXP_NAME_ID}").fill(name)
     page.locator(f"#{NEW_EXP_BUTTON_ID}").click()
+    # Created, and its callback done: it also puts the page back on its Experiments tab, which would undo a tab clicked
+    # before it returns.
+    expect(page.locator(".experiment-card", has_text=name)).to_be_visible()
 
 
 def _diff_selected_runs(page: Page, count: int = 2) -> None:
@@ -329,12 +332,12 @@ def test_delete_experiment_and_restore_from_admin_trash(
     """
     _create_project_and_experiment(page, live_server_url, "Delete Me Experiment")
 
-    project_url = page.url
+    project_url = page.url.split("?")[0]  # the project, whichever tab its address says it is on
     page.locator(".experiment-card").click()
     page.get_by_role("button", name="Delete experiment").click()
     page.get_by_role("button", name="Delete", exact=True).click()
 
-    expect(page).to_have_url(project_url)
+    expect(page).to_have_url(re.compile(rf"^{re.escape(project_url)}(\?|$)"))
     expect(page.locator(".experiment-card")).to_have_count(0)
 
     page.goto(f"{live_server_url}/admin")
