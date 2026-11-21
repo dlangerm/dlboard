@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from dash import Dash
-    from playwright.sync_api import Page
+    from playwright.sync_api import Locator, Page
 
 
 @pytest.fixture(scope="session")
@@ -78,6 +78,24 @@ def live_server_url(dlboard_app: Dash) -> Iterator[str]:
     finally:
         server.shutdown()
         thread.join()
+
+
+@pytest.fixture(autouse=True)
+def fork_modal(request: pytest.FixtureRequest) -> Locator | None:
+    """
+    In a test in a browser, keep the view an edit branches into, as soon as the modal asking whether to covers the page.
+
+    The first edit to a page that isn't yours (the shared page, in most tests) branches into a view of your own and asks
+    whether to keep it, and nothing else can be clicked until it is answered. A test that asserts the modal removes this
+    handler (`page.remove_locator_handler(fork_modal)`) to answer it itself. By marker, not by a fixture named `page`:
+    a test of the docs has a `page` of its own, a file's name.
+    """
+    if not any(request.node.get_closest_marker(marker) for marker in ("browser", "screenshots")):
+        return None
+    page: Page = request.getfixturevalue("page")
+    modal = page.get_by_role("dialog", name="Saved to a new view of your own")
+    page.add_locator_handler(modal, lambda found: found.get_by_role("button", name="Keep my view").click())
+    return modal
 
 
 @pytest.fixture

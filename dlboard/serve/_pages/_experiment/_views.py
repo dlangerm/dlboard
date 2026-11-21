@@ -64,12 +64,22 @@ show up as the exact same prop change -- knows to skip navigating that once inst
 reload-triggering `?view=` change out from under whatever the edit itself already did.
 """
 VIEW_NOTIFY_ID: typing.Final = "view-notify"
-"""Toasts about views -- chiefly that an edit just branched into a new view of your own."""
+"""Toasts about views."""
+VIEW_FORKED_MODAL_ID: typing.Final = "view-forked-modal"
+"""
+What an edit that branched into a new view of your own opens (#735): that it did, and Keep or Undo. It can't be closed
+any other way, so a view is never made without your saying it may stay.
+"""
+VIEW_FORKED_TEXT_ID: typing.Final = "view-forked-text"
+VIEW_FORKED_ID: typing.Final = "view-forked"
+"""The branch the modal asks about (`Forked`): what Undo deletes, and the view it goes back to."""
+VIEW_FORK_KEEP_ID: typing.Final = "view-fork-keep"
+VIEW_FORK_UNDO_ID: typing.Final = "view-fork-undo"
 VIEW_DUPLICATED_ID: typing.Final = "view-duplicated"
 """
 One-shot flag: "Duplicate this view" sets it alongside its new page, so `sync_view_after_edit` -- which
 sees that new page exactly as it sees an edit branching into one -- knows you named this one
-yourself and skips the "saved to your own view" toast it would otherwise show.
+yourself and asks nothing about it.
 """
 VIEW_FORK_HINT_ID: typing.Final = "view-fork-hint"
 """The "edits save to a copy" badge, shown only while the page on screen isn't yours."""
@@ -124,6 +134,15 @@ class ViewFile(BaseModel, extra="forbid"):
     @classmethod
     def of(cls, page: models.NewPage[Any, Any], *, name: str) -> ViewFile:
         return cls(name=name, panels=page.panels, page_settings=page.page_settings)
+
+
+class Forked(BaseModel, frozen=True, extra="forbid"):
+    """An edit's branch into a new view of your own, as `VIEW_FORKED_ID` holds it until you keep it or undo it."""
+
+    view_id: int
+    """The new view."""
+    source_view_id: int | None
+    """The view it was branched from, which Undo goes back to: `None` for the shared page."""
 
 
 class _ViewOption(BaseModel, frozen=True, extra="ignore"):
@@ -283,6 +302,8 @@ def view_controls(
             _rename_modal(),
             _export_modal(),
             _import_modal(),
+            _forked_modal(),
+            Store(id=VIEW_FORKED_ID, data=None),
             Store(id=VIEW_NAV_SUPPRESS_ID, data=False),
             Store(id=VIEW_DUPLICATED_ID, data=False),
             dmc.NotificationContainer(id=VIEW_NOTIFY_ID),
@@ -311,6 +332,29 @@ def _duplicate_modal() -> dmc.Modal:
                     **cast("dict[str, Any]", {"data-autofocus": True, "aria-label": "View name"}),
                 ),
                 dmc.Group(dmc.Button("Duplicate", id=DUPLICATE_VIEW_CONFIRM_ID), justify="flex-end"),
+            ]
+        ),
+    )
+
+
+def _forked_modal() -> dmc.Modal:
+    return dmc.Modal(
+        id=VIEW_FORKED_MODAL_ID,
+        title="Saved to a new view of your own",
+        opened=False,
+        closeOnClickOutside=False,
+        closeOnEscape=False,
+        withCloseButton=False,
+        children=dmc.Stack(
+            [
+                dmc.Text(id=VIEW_FORKED_TEXT_ID, size="sm"),
+                dmc.Group(
+                    [
+                        dmc.Button("Undo", id=VIEW_FORK_UNDO_ID, variant="default"),
+                        dmc.Button("Keep my view", id=VIEW_FORK_KEEP_ID),
+                    ],
+                    justify="flex-end",
+                ),
             ]
         ),
     )
@@ -575,7 +619,9 @@ def _register_sync_after_edit(app: Dash) -> None:
         Output(VIEW_MENU_ID, "className"),
         Output(VIEW_FORK_HINT_ID, "style"),
         Output(SHARE_VIEW_TOGGLE_ID, "children", allow_duplicate=True),
-        Output(VIEW_NOTIFY_ID, "sendNotifications"),
+        Output(VIEW_FORKED_MODAL_ID, "opened"),
+        Output(VIEW_FORKED_TEXT_ID, "children"),
+        Output(VIEW_FORKED_ID, "data"),
         Output(VIEW_DUPLICATED_ID, "data", allow_duplicate=True),
         Input(VIEW_SYNC_REQUEST_ID, "data"),
         State(ids.STATE_VIEW_ID, "data"),
@@ -601,8 +647,9 @@ def _register_sync_after_edit(app: Dash) -> None:
         Arms `VIEW_NAV_SUPPRESS_ID` alongside its own `VIEW_SELECT_ID.value` write -- see that id's
         own docstring for why the picker's navigate-on-select callback needs it. Also reveals the
         menu's rename/delete/share items and hides the "edits save to a copy" badge, since the page
-        on screen is now yours -- and says so in a toast, because a branch is otherwise silent: it's
-        the edit you were making that created a view, and nothing on screen would tell you. Not for
+        on screen is now yours -- and asks whether to keep it (`VIEW_FORKED_MODAL_ID`), because a
+        branch is otherwise silent: it's the edit you were making that created a view, something as
+        small as hiding a run, and a view kept that you never meant to make is clutter (#735). Not for
         "Duplicate this view" (`VIEW_DUPLICATED_ID`), where you named the new view yourself.
 
         The share toggle's own label needs refreshing here too, same reasoning: a branch always
@@ -616,25 +663,24 @@ def _register_sync_after_edit(app: Dash) -> None:
         store = get_data_store()
         value = str(effective) if effective is not None else SHARED_VIEW
         is_owner = page.owner_id == get_current_user().id
-        toast: list[dict[str, Any]] | NoUpdate = no_update
-        if is_owner and not duplicated:
+        asked: tuple[bool, str, dict[str, Any]] | tuple[NoUpdate, NoUpdate, NoUpdate] = (
+            no_update,
+            no_update,
+            no_update,
+        )
+        if is_owner and effective is not None and not duplicated:
             previous = (
                 None
                 if current_view_id is None
                 else store.get_view(page_model.BasicExperimentPage, current_view_id)
             )
             original = f"“{previous.name}”" if previous is not None else "The shared view"
-            toast = [
-                {
-                    "action": "show",
-                    "id": f"view-fork-{page.id}",
-                    "title": "Saved to your own view",
-                    "message": f"Your change went into a new view, “{page.name}”. {original} is unchanged. "
-                    "Rename your copy from the ⋯ menu.",
-                    "color": "teal",
-                    "autoClose": 10_000,
-                }
-            ]
+            said = (
+                f"{original} isn't yours, so your change went into a new view of your own, “{page.name}”. "
+                f"{original} is unchanged. Keep your view (rename it from the ⋯ menu), or undo the change "
+                "and go back."
+            )
+            asked = (True, said, Forked(view_id=effective, source_view_id=current_view_id).model_dump())
         return (
             _options(store, experiment_id),
             value,
@@ -643,9 +689,50 @@ def _register_sync_after_edit(app: Dash) -> None:
             _menu_class(is_owner=is_owner),
             _fork_hint_style(is_owner=is_owner),
             _share_label(is_shared=page.shared),
-            toast,
+            *asked,
             False,
         )
+
+    @app.callback(
+        Output(VIEW_FORKED_MODAL_ID, "opened", allow_duplicate=True),
+        Input(VIEW_FORK_KEEP_ID, "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def keep_fork(n_clicks: int | None) -> bool:
+        if not n_clicks:
+            raise PreventUpdate
+        return False
+
+    @app.callback(
+        Output(VIEW_FORKED_MODAL_ID, "opened", allow_duplicate=True),
+        Output(VIEW_SELECT_ID, "data", allow_duplicate=True),
+        Output(VIEW_SELECT_ID, "value", allow_duplicate=True),
+        Input(VIEW_FORK_UNDO_ID, "n_clicks"),
+        State(VIEW_FORKED_ID, "data"),
+        State(constants.STATE_EXPERIMENT_ID, "data"),
+        prevent_initial_call=True,
+    )
+    def undo_fork(n_clicks: int | None, forked: dict[str, Any] | None, experiment_id: int) -> tuple[Any, ...]:
+        """
+        Delete the view the edit made, and go back to the one it was made from, as picking it would.
+
+        The picker navigates (`view_navigate.js`), not this: a callback that writes the page's `Location` is one more
+        request every load of the page makes (`page_load_budget_test.py`).
+        """
+        if not n_clicks or forked is None:
+            raise PreventUpdate
+        branch = Forked.model_validate(forked)
+        store = get_data_store()
+        store.delete_view(branch.view_id, get_current_user().id)
+        source = (
+            None
+            if branch.source_view_id is None
+            else store.get_view(page_model.BasicExperimentPage, branch.source_view_id)
+        )
+        options = _options(
+            store, experiment_id, foreign_view=None if source is None else (source.id, source.name)
+        )
+        return False, options, SHARED_VIEW if source is None else str(source.id)
 
     # The above changing `STATE_VIEW_ID` (without a page reload) still needs the address bar to
     # catch up, so a bookmark or a refresh keeps landing on the same branch -- purely client-side.

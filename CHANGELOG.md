@@ -12,6 +12,35 @@ pulls that section's body into the GitHub release notes and publishes both distr
 
 ## [Unreleased]
 
+### Added
+
+* **The console chart wraps a long line.** A line wider than the chart wraps onto as many rows as it takes, and wraps
+  again as the chart is narrowed or widened, instead of being cut at the chart's edge; set *wrap* off and it scrolls
+  sideways as before. (#734)
+* **Plugin docs say how to act on a run ending.** `docs/background-tasks.md` shows how a plugin's task finds the runs
+  that finished, failed or were lost (there is no hook that calls it), and why `ended_at` is not a cursor.
+  `NewWorkItem`, `WorkItem` and `get_system_task_store` are exported from `dlboard.serve`. (#736)
+
+### Changed
+
+* **An edit that makes a view of your own asks whether to keep it.** Editing a page that isn't yours (the shared page,
+  or someone else's view) still saves the change to a new view of your own, and now says so in a dialog, with **Keep my
+  view** or **Undo**, which deletes the new view and goes back to the one you were on, instead of a toast. Even hiding
+  a run did this, and the views piled up unnoticed. (#735)
+
+### Fixed
+
+* **A run's console has what Lightning logs.** A logging handler made before the run (Lightning's, made as it is
+  imported, or `logging.basicConfig`'s) wrote past the capture: without `rich`, the model summary and "GPU available"
+  were missing. It is captured now, and given its stream back when the run ends. (#733)
+* **Rich's progress bars are kept once in a run's console.** Lightning's `RichProgressBar` draws its training and
+  validation bars again by going back up over them, and every drawing was kept, about ten lines a second, burying what
+  was printed before them. Each chunk now keeps them as they last looked. A chunk also ends at a line end, so a line is
+  never split between two, and the capture limit never cuts a character in half. (#734)
+* **Newer opens a console chunk where reading goes on.** Read newest first, Newer opened the next chunk at its top,
+  while what followed the chunk you were reading was at its end; it now opens there (and so does Older, read oldest
+  first). (#734)
+
 ## [0.19.1] - 2026-11-19
 
 ### Added

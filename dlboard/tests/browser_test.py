@@ -117,20 +117,6 @@ def _session_app_is_current(dlboard_app: Dash) -> Iterator[None]:
         yield
 
 
-@pytest.fixture(autouse=True)
-def toasts(page: Page) -> Locator:
-    """
-    Close the "Saved to your own view" toast as soon as it covers something a test is about to click.
-
-    The first edit to a shared page branches into a view of one's own and says so in a toast that stays up ten seconds,
-    over the toolbar's buttons: without this, the next click waits for it to fade, in most tests that edit twice. Only
-    that one: a test that asserts another notice must see it, and removes this handler to assert this one.
-    """
-    toast = page.locator(".mantine-Notification-root", has_text="Saved to your own view")
-    page.add_locator_handler(toast, lambda found: found.locator(".mantine-Notification-closeButton").click())
-    return toast
-
-
 def _create_project_and_experiment(page: Page, live_server_url: str, name: str) -> None:
     """
     Drive the real homepage/project-page forms to create `name` for both project and experiment.
@@ -1782,15 +1768,17 @@ def test_a_run_stays_in_the_url_as_its_page_is_edited_and_its_view_switched(
     assert console_errors == []
 
 
-def test_editing_the_shared_page_branches_into_your_own_view_without_asking(
-    page: Page, live_server_url: str, console_errors: list[str], toasts: Locator
+@pytest.mark.parametrize("keep", [True, False])
+def test_editing_the_shared_page_branches_into_your_own_view_and_asks_whether_to_keep_it(
+    page: Page, live_server_url: str, console_errors: list[str], fork_modal: Locator, *, keep: bool
 ) -> None:
     """
     The whole point: deleting a panel while looking at the shared page -- no "save as a view" step
-    first -- must not delete it for everyone. It should silently branch into a view of your own
-    (landing on `?view=<id>` with no page reload) and delete it there instead.
+    first -- must not delete it for everyone. It branches into a view of your own (landing on
+    `?view=<id>` with no page reload) and deletes it there instead, then asks whether to keep that
+    view (#735): Undo deletes it and goes back to the shared page, as it was.
     """
-    _create_project_and_experiment(page, live_server_url, "Branch On Edit Experiment")
+    _create_project_and_experiment(page, live_server_url, f"Branch On Edit {'Kept' if keep else 'Undone'}")
     page.locator(".experiment-card").click()
     experiment_id = int(page.url.rstrip("/").rsplit("/", 1)[-1])
     api = BasicDlboardAPI(live_server_url)
@@ -1813,9 +1801,7 @@ def test_editing_the_shared_page_branches_into_your_own_view_without_asking(
     store = get_system_data_store()
     shared = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
     store.update_page(shared.model_copy(update={"panels": [PanelInstance[Any, Any](name="Losses")]}))
-    page.remove_locator_handler(
-        toasts
-    )  # the toast is what this asserts: nothing here needs it out of the way
+    page.remove_locator_handler(fork_modal)  # the modal is what this asserts
     page.reload()
     expect(page.get_by_role("textbox", name="View", exact=True)).to_have_value("Shared view")
     # Not yours, so the header says up front that an edit will land in a copy.
@@ -1829,15 +1815,21 @@ def test_editing_the_shared_page_branches_into_your_own_view_without_asking(
     expect(page).to_have_url(re.compile(r"\?view=\d+$"))
     view_id = int(page.url.rsplit("=", 1)[-1])
     expect(page.get_by_role("textbox", name="View", exact=True)).to_have_value("My view")
-    # ...and says what just happened, instead of leaving a new view to be noticed in the picker.
-    expect(page.get_by_text("Saved to your own view")).to_be_visible()
     expect(hint).to_be_hidden()
     store = get_system_data_store()
     branched = store.get_view(BasicExperimentPage, view_id)
     assert branched is not None
     assert branched.panels == []
+    # ...and asks whether to keep it, instead of leaving a new view to be noticed in the picker.
+    expect(fork_modal).to_contain_text("The shared view isn't yours")
+    fork_modal.get_by_role("button", name="Keep my view" if keep else "Undo").click()
+    expect(fork_modal).to_be_hidden()
 
-    page.goto(f"{live_server_url}/experiment/{experiment_id}")
+    if keep:
+        page.goto(f"{live_server_url}/experiment/{experiment_id}")
+    else:
+        expect(page.get_by_role("textbox", name="View", exact=True)).to_have_value("Shared view")
+        assert store.get_view(BasicExperimentPage, view_id) is None
     expect(page.locator(".dl-panel-item-header")).to_be_visible()
     shared = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment_id)
     assert [p.name for p in shared.panels] == ["Losses"]
