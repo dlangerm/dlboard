@@ -162,10 +162,11 @@ that is a JSON object (structlog's `JSONRenderer`, say) is drawn with its time, 
 other fields after them; any other line as a terminal shows it, in its colours (ANSI escapes, 16, 256 or 24-bit), and a
 progress bar that redraws its line (`\r`, as tqdm and Lightning's do) as it was last drawn. Lines never wrap (a long one
 scrolls sideways), and only the ones in view are in the page, so a chunk of thousands scrolls as quickly as a short one. It is kept small on purpose, and is not a log service: output is cut into chunks every 30
-seconds (sooner past 256 KB) and logged as ordinary artifacts, the server never parses or searches it, and nothing searches
-more than the chunk on show. A write never waits on dlboard: it goes to the real stream, then into a bounded buffer, and
-what finds the buffer full is dropped and said so. A run keeps at most 10 MB of it; a progress bar redrawn with `\r` is
-kept as it last looked, once. A logging handler writing to either stream is captured too, even one made before the run
+seconds (sooner past 256 KB), each ending at a line end, and logged as ordinary artifacts, the server never parses or
+searches it, and nothing searches more than the chunk on show. A write never waits on dlboard: it goes to the real stream,
+then into a bounded buffer, and what finds the buffer full is dropped and said so. A run keeps at most 10 MB of it; what
+is drawn again in place is kept as it last looked, once: a progress bar redrawn with `\r`, and rich's (Lightning's
+`RichProgressBar`), which goes back up over its lines to draw them again. A logging handler writing to either stream is captured too, even one made before the run
 started (Lightning's, `logging.basicConfig`'s). Only Python's streams are captured: output of native code and of child
 processes, which never passes through them, is not. A `kill -9` loses what was printed since the last chunk. Tune it with `DLBOARD_CONSOLE_*` (below), or turn
 it off with `DLBOARD_CONSOLE_ENABLED=false`. If your logs already go to Loki or the like, bind the run's ids into them

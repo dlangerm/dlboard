@@ -1,10 +1,10 @@
-"""
+r"""
 A run's console output -- what the script writes to `sys.stdout` and `sys.stderr` -- captured into the run, in chunks.
 
 Deliberately small (#697): this shows the end of a run's output next to its metrics, and is not a log service. Python's
 two streams are wrapped, and a write goes to the real stream, then into a bounded buffer: no queue per line, no syscall,
-no parsing. A timer thread cuts the buffer into a chunk every `interval_s` (sooner once it holds `chunk_kb`), with
-carriage-return updates (a progress bar) collapsed to their last state, and logs it as an ordinary artifact
+no parsing. A timer thread cuts the buffer into a chunk every `interval_s` (sooner once it holds `chunk_kb`), at a line
+end, with what is drawn in place (a progress bar's `\r`, rich's lines drawn again) as it last looked, and logs it as an ordinary artifact
 (`models.CONSOLE_KEY`, at the chunk's sequence number as its step): the server stores it as any other, and the console
 chart reads it back a chunk at a time. A write that finds the buffer full is dropped and counted, never waited on, and
 past `max_mb` a run's capture stops. Native (C/C++) and child-process output, which never passes through Python's
@@ -15,6 +15,7 @@ there would block every `print` of the training loop.
 from __future__ import annotations
 
 import logging
+import re
 import sys
 import threading
 from collections.abc import Mapping
@@ -76,11 +77,33 @@ class ConsoleChunk(BaseModel, frozen=True, extra="forbid"):
         return new, path
 
 
-def collapse_carriage_returns(text: str) -> str:
-    r"""Each line as it last looked: a progress bar redrawn with `\r` a thousand times is its final state, once."""
-    return "\n".join(
-        next((part for part in reversed(line.split("\r")) if part), "") for line in text.split("\n")
-    )
+_DRAWING: Final = re.compile(r"(\n|\r|\x1b\[2K|\x1b\[\d*A)")
+"""What draws over what was written: a line end, a carriage return, erasing the line, the cursor going up."""
+_UP: Final = re.compile(r"\x1b\[(\d*)A")
+
+
+def as_last_drawn(text: str) -> str:
+    r"""
+    The lines as a terminal leaves them: what is drawn again in place is kept once, as it last looked.
+
+    A progress bar drawn again with `\r` a thousand times is its last state, once, and so are rich's lines drawn again
+    by going back up over them (two progress bars, training and validation). Text written after a line is erased or
+    returned to replaces it; one that is only returned to (`\r\n`) keeps what it had.
+    """
+    lines, at, replacing = [""], 0, False
+    for part in _DRAWING.split(text):
+        if part == "\n":
+            at += 1
+            if at == len(lines):
+                lines.append("")
+            replacing = True
+        elif part in ("\r", "\x1b[2K"):
+            replacing = True
+        elif up := _UP.fullmatch(part):
+            at, replacing = max(0, at - int(up[1] or 1)), True
+        elif part:
+            lines[at], replacing = (part if replacing else lines[at] + part), False
+    return "\n".join(lines)
 
 
 class _Tee:
@@ -174,18 +197,25 @@ class ConsoleCapture:
             self._cut.set()
 
     def cut(self) -> None:
-        """Log what is held as the next chunk, if anything is (or was dropped)."""
+        """
+        Log what is held as the next chunk, if anything is (or was dropped), up to its last line end.
+
+        The rest of a line goes in the next chunk, so a line is never split between two: `print` writes a line, then its
+        end. All of it goes when there is no line end (a progress bar drawn in place), and when the capture is stopping.
+        """
         with self._lock:
-            text, dropped = "".join(self._parts), self._dropped
-            self._parts.clear()
-            self._held = self._dropped = 0
+            held, dropped = "".join(self._parts), self._dropped
+            end = len(held) if self._stopping else held.rfind("\n") + 1 or len(held)
+            text, rest = held[:end], held[end:]
+            self._parts[:] = [rest] if rest else []
+            self._held, self._dropped = len(rest), 0
             if self._capped or not (text or dropped):
                 return
-            data = collapse_carriage_returns(text).encode(errors="replace")
+            data = as_last_drawn(text).encode(errors="replace")
             room = self._settings.max_mb * _KB * _KB - self._shipped
             tags: dict[str, TagValue] = {DROPPED_TAG: dropped} if dropped else {}
-            if len(data) >= room:
-                data, self._capped = data[:room], True
+            if len(data) >= room:  # cut on a character: what was cut from the last one is dropped with it
+                data, self._capped = data[:room].decode(errors="ignore").encode(), True
                 tags[CAPPED_TAG] = True
             chunk = ConsoleChunk(data=data, step=self._sequence, tags=tags)
             self._sequence += 1
@@ -209,9 +239,9 @@ class ConsoleCapture:
         for handler, at in self._handlers:
             if handler.stream is self._tees[at]:
                 handler.setStream(self._streams[at])
-        self.cut()
         with self._lock:
             self._stopping = True
+        self.cut()
         self._cut.set()
         if self._thread.is_alive() and self._thread is not threading.current_thread():
             self._thread.join(1.0)

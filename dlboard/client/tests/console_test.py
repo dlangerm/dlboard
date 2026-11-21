@@ -19,8 +19,11 @@ from dlboard.client._console import (
     ConsoleCapture,
     ConsoleChunk,
     ConsoleSettings,
-    collapse_carriage_returns,
+    as_last_drawn,
 )
+
+_REDRAW = "\r\x1b[2K\x1b[1A\x1b[2K"
+"""What rich writes before it draws a two-line progress display again: erase the line, go up one, erase that too."""
 
 
 @pytest.mark.parametrize(
@@ -30,10 +33,19 @@ from dlboard.client._console import (
         ("10%\r50%\r100%\ndone\n", "100%\ndone\n"),
         ("epoch 1\r\n", "epoch 1\n"),  # a Windows line end is not an update
         ("redrawn\r", "redrawn"),
+        # #734: rich's two lines (training and validation) were kept once for every time they were drawn.
+        (
+            f"Total params: 161\nEpoch 0 10%\nval 0%{_REDRAW}Epoch 0 90%\nval 50%",
+            "Total params: 161\nEpoch 0 90%\nval 50%",
+        ),
+        # What is printed while it draws goes above it, as it does in a terminal.
+        (f"Epoch 0 10%\nval 0%{_REDRAW}warning!\nEpoch 0 20%\nval 9%\n", "warning!\nEpoch 0 20%\nval 9%\n"),
+        ("\x1b[1A\x1b[1Aup past the first line", "up past the first line"),
+        ("\x1b[1mTotal\x1b[0m: 161\n\x1b[2A\x1b[32mgreen", "\x1b[32mgreen\n"),  # colours are text; up two
     ],
 )
-def test_a_progress_bar_is_kept_as_it_last_looked(written: str, kept: str) -> None:
-    assert collapse_carriage_returns(written) == kept
+def test_what_is_drawn_again_is_kept_as_it_last_looked(written: str, kept: str) -> None:
+    assert as_last_drawn(written) == kept
 
 
 @pytest.fixture
@@ -65,6 +77,22 @@ def test_what_is_printed_reaches_the_next_chunk_in_order(chunks: list[ConsoleChu
         'step 1\nTraceback (most recent call last):\n  File "train.py", line 3\nZeroDivisionError\nstep 2\n'
     )
     assert (chunk.step, chunk.tags) == (0, {})
+
+
+def test_a_chunk_ends_at_a_line_end_and_the_rest_of_the_line_goes_in_the_next(
+    chunks: list[ConsoleChunk],
+) -> None:
+    """#734: `print` writes a line, then its end, and a chunk cut between the two split the line in two."""
+    capture = _capture(chunks)
+    print("step 1")
+    sys.stdout.write("step 2")
+    capture.cut()
+    sys.stdout.write(" done\n")
+    sys.stdout.write("10%\r50%")  # a line drawn in place with nothing else in a chunk goes as it looks
+    capture.cut()
+    capture.stop()
+
+    assert [chunk.data.decode() for chunk in chunks] == ["step 1\n", "step 2 done\n", "50%"]
 
 
 def test_stopping_cuts_the_last_chunk_and_puts_the_streams_back(chunks: list[ConsoleChunk]) -> None:
@@ -147,6 +175,15 @@ def test_past_the_cap_a_run_captures_nothing_and_its_last_chunk_says_so(chunks: 
 
     assert [len(chunk.data) for chunk in chunks] == [700 * 1024, 324 * 1024]
     assert chunks[-1].tags == {CAPPED_TAG: True}
+
+
+def test_the_cap_never_cuts_a_character_in_half(chunks: list[ConsoleChunk]) -> None:
+    capture = _capture(chunks, max_mb=1)
+    capture.append("x" + "é" * 600 * 1024)  # two bytes each, after one: the 1 MB cap falls inside one
+    capture.stop()
+
+    (chunk,) = chunks
+    assert chunk.data.decode() == "x" + "é" * (1024 * 1024 // 2 - 1)
 
 
 def test_a_chunk_is_cut_without_waiting_for_the_interval_once_it_is_full(chunks: list[ConsoleChunk]) -> None:
