@@ -12,7 +12,7 @@ import pytest
 from pydantic import ValidationError
 
 from dlboard.conftest import props
-from dlboard.models import RUN_NAME_COLUMN, MetricReduction
+from dlboard.models import RUN_NAME_COLUMN, ChartInstance, MetricReduction
 from dlboard.plugins.charts import line_chart
 from dlboard.plugins.charts._axis_label import (
     DEFAULT_MAX_AXIS_LABEL_CHARS,
@@ -783,6 +783,24 @@ def test_an_axis_title_limit_too_small_to_keep_a_name_recognizable_is_rejected(
 ) -> None:
     with pytest.raises(ValidationError):
         settings(column="loss", x_axis="step", max_axis_label_chars=MIN_MAX_AXIS_LABEL_CHARS - 1)
+
+
+@pytest.mark.parametrize("chart_type", [LineChart, BarChart])
+def test_a_chart_of_its_own_x_axis_is_refused_so_a_page_drawing_by_epoch_leaves_its_epoch_chart_alone(
+    chart_type: type[LineChart | BarChart],
+) -> None:
+    """Regression: a page's x axis of `epoch` drew the chart of `epoch` against itself, which failed to render."""
+    chart_type.register(allow_override=True)
+    with pytest.raises(ValidationError, match="against itself"):
+        chart_type.parameter_type()(column="epoch", x_axis="epoch")
+    page = [{"x_axis": "epoch"}]
+    epoch, loss = (
+        ChartInstance[Any, Any](chart_type=chart_type.name, parameters={"column": column, "x_axis": "step"})
+        for column in ("epoch", "loss")
+    )
+
+    assert epoch.drawn_with(page).parameters["x_axis"] == "step"
+    assert loss.drawn_with(page).parameters["x_axis"] == "epoch"
 
 
 def test_line_chart_gives_its_value_axis_room_for_ticks_and_no_title_of_its_own() -> None:

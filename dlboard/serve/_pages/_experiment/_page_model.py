@@ -46,6 +46,11 @@ class DocumentSettings(BaseModel, frozen=True, extra="ignore", populate_by_name=
     """What a comparison is for, in its owner's words. An experiment has its own description, stored with it."""
     hparam_columns: list[str] = Field(default_factory=list, alias="hparam-table-selected")
     """Which hyperparameter columns the run-comparison table shows."""
+    chart_settings: dict[str, object] = Field(default_factory=dict)
+    """
+    Settings the page draws all its charts with, by name, over each chart's own; a panel's own say over these
+    (`PanelInstance.drawn`). Kept whether or not a chart on the page has the setting.
+    """
 
     def merged_into(self, page_settings: Mapping[str, Any]) -> dict[str, Any]:
         """`page_settings` with every field this was constructed with written in."""
@@ -103,6 +108,16 @@ class BasicExperimentPage(models.Page[pd.DataFrame, Component], frozen=True, ext
     def with_settings(self, change: DocumentSettings) -> BasicExperimentPage:
         """A copy with `change` written into its settings (see `DocumentSettings.merged_into`)."""
         return self.model_copy(update={"page_settings": change.merged_into(self.page_settings)})
+
+    def drawn(self) -> BasicExperimentPage:
+        """
+        The page as its charts are drawn and read: each under the page's chart settings, then its panel's.
+
+        What draws a chart or reads its data takes this; an edit never does, so no chart ever saves what a page or a panel
+        set for it (see `ChartInstance.drawn_with`).
+        """
+        page_settings = self.document.chart_settings
+        return self.model_copy(update={"panels": [panel.drawn(page_settings) for panel in self.panels]})
 
 
 class NotOnThePageError(LookupError):

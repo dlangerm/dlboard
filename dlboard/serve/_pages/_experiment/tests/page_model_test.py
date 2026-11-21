@@ -6,6 +6,7 @@ import pandas as pd
 import pytest
 
 from dlboard.models._view import ChartInstance, PanelInstance
+from dlboard.plugins.charts.line_chart import LineChart
 from dlboard.serve._pages._experiment import _page_model as page_model
 
 
@@ -46,6 +47,30 @@ def test_upsert_chart_ignores_other_panels() -> None:
     new_chart = ChartInstance[pd.DataFrame, object](chart_type="line", parameters={"column": "new"})
 
     assert page_model.upsert_chart(panel, "p", 0, new_chart) is panel
+
+
+def test_a_page_is_drawn_under_its_chart_settings_then_each_panels_and_keeps_its_own() -> None:
+    LineChart.register(allow_override=True)
+    line = ChartInstance[pd.DataFrame, object](
+        chart_type="line", parameters={"column": "loss", "x_axis": "step"}
+    )
+    stored = page_model.BasicExperimentPage(
+        id=1,
+        panels=[
+            PanelInstance[pd.DataFrame, object](name="set", charts=[line], chart_settings={"height": 700}),
+            PanelInstance[pd.DataFrame, object](
+                name="unset", charts=[line, line.model_copy(update={"locked": True})]
+            ),
+        ],
+    ).with_settings(page_model.DocumentSettings(chart_settings={"height": 500, "smoothing": 0.5}))
+
+    drawn = stored.drawn()
+
+    assert [[chart.parameters for chart in panel.charts] for panel in drawn.panels] == [
+        [{**line.parameters, "height": 700, "smoothing": 0.5}],  # the panel's say over the page's
+        [{**line.parameters, "height": 500, "smoothing": 0.5}, line.parameters],  # a locked chart is its own
+    ]
+    assert stored.panels[0].charts == [line]  # what is stored is never drawn into
 
 
 def test_a_settings_change_writes_only_what_it_sets_and_keeps_every_other_key() -> None:

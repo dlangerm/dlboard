@@ -9,10 +9,11 @@ from pathlib import Path
 
 import dash_mantine_components as dmc
 import pandas as pd
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from dlboard.models import (
     DISPLAY_SECTION,
+    LAYERED,
     RUN_NAME_COLUMN,
     ChartType,
     ColumnKind,
@@ -30,7 +31,7 @@ from dlboard.plugins.charts._axis_label import (
 from dlboard.plugins.charts._chart_title import titled
 from dlboard.plugins.charts._empty_chart import nothing_logged, nothing_to_place
 from dlboard.plugins.charts._grouping import frame_column, latest_per_run
-from dlboard.plugins.charts.line_chart import LEGEND_MAX_HEIGHT
+from dlboard.plugins.charts.line_chart import LEGEND_MAX_HEIGHT, not_against_itself
 from dlboard.serve import AssetKind, series_color, serve_asset
 
 if typing.TYPE_CHECKING:
@@ -46,7 +47,7 @@ class BarChartSettings(BaseModel, frozen=True, extra="forbid", use_attribute_doc
 
     column: str
     """The metric to aggregate onto each bar."""
-    x_axis: str
+    x_axis: typing.Annotated[str, LAYERED]
     """The metric or hyperparameter key to group bars by, e.g. "hidden_size": a group for each value, with a bar in it for each run that has it."""
     aggregation: typing.Literal["latest", "mean", "median", "min", "max", "sum", "count"] = Field(
         default="latest"
@@ -71,6 +72,11 @@ class BarChartSettings(BaseModel, frozen=True, extra="forbid", use_attribute_doc
         MaxAxisLabelChars, DISPLAY_SECTION, Field(title="Max axis label characters")
     ] = DEFAULT_MAX_AXIS_LABEL_CHARS
     """Longest axis title, in characters. A longer metric name is shortened to its last characters behind an ellipsis, so it stays inside the chart; raise it for a taller or wider chart."""
+
+    @model_validator(mode="after")
+    def _distinct_axes(self) -> typing.Self:
+        not_against_itself(self.column, self.x_axis)
+        return self
 
 
 def _sorted_groups(

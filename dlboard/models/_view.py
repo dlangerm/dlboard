@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import functools
 import hashlib
 import json
 import types
@@ -19,7 +20,7 @@ from dlboard._telemetry.traces import SpanKind, TraceKey, span
 from dlboard.models._data_request import DataRequest
 
 if typing.TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
     from pydantic import JsonValue
 
@@ -143,6 +144,20 @@ class NamePatterns:
 
 NamePatternList = typing.Annotated[list[str], NamePatterns()]
 """The type of a setting marked `NamePatterns`."""
+
+
+@dataclasses.dataclass(frozen=True)
+class Layered:
+    """
+    Marks a Data setting as one that a panel's or a page's chart settings may set for all its charts: an x axis.
+
+    A Display or Advanced setting (how a chart looks) may be set so without a mark. A Data one says what a chart draws,
+    and one value of it for every chart would draw the same chart in each, so only one marked `LAYERED` may be.
+    """
+
+
+LAYERED: typing.Final = Layered()
+"""The `Layered` mark: `x_axis: Annotated[str, LAYERED]`."""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -312,6 +327,11 @@ class ParameterField(BaseModel, frozen=True, extra="forbid"):
     """The most a number field may be (its `le`), if the settings model says."""
     slider_step: float | None = None
     """For a number field marked `Slider`, its step: it is edited with a slider from `minimum` to `maximum`."""
+    layerable: bool = False
+    """
+    Whether a panel's or a page's chart settings may set it for their charts (`ChartInstance.drawn_with`): a Display or
+    Advanced setting, or a Data one marked `LAYERED`, but never a table or a list of name patterns.
+    """
     description: str | None = None
     """Help text shown alongside the field's widget: the field's attribute docstring on the settings model."""
     section: SettingsSection = DATA_SECTION
@@ -383,6 +403,13 @@ def _widget_for(annotation: type[typing.Any] | None) -> tuple[ParameterFieldType
             raise TypeError(msg)
 
 
+@functools.cache
+def _described(chart_type: type[ChartType[typing.Any, typing.Any, typing.Any]]) -> dict[str, ParameterField]:
+    """`chart_type`'s settings, described, by the type itself: a type registered again in its place is described anew."""
+    describe = ChartTypeRegistry._describe_parameter_fields  # noqa: SLF001 -- the registry's own, cached by type here
+    return describe(chart_type.parameter_type(), chart_type.field_column_kinds())
+
+
 class ChartTypeRegistry:
     """Registry of all chart types."""
 
@@ -411,13 +438,12 @@ class ChartTypeRegistry:
     @classmethod
     def get_registered_chart_types(cls) -> dict[str, dict[str, ParameterField]]:
         """Expose chart metadata for simple editors and plugins."""
-        return {
-            name: cls._describe_parameter_fields(
-                cls.get_chart_type(name).parameter_type(),
-                cls.get_chart_type(name).field_column_kinds(),
-            )
-            for name in sorted(cls._all_charts)
-        }
+        return {name: cls.parameter_fields(name) for name in sorted(cls._all_charts)}
+
+    @classmethod
+    def parameter_fields(cls, chart_type_name: str) -> dict[str, ParameterField]:
+        """The settings of the chart type `chart_type_name`, described: worked out once a type (every chart drawn asks)."""
+        return _described(cls.get_chart_type(chart_type_name))
 
     @staticmethod
     def _describe_parameter_fields(
@@ -467,6 +493,8 @@ class ChartTypeRegistry:
                 minimum=minimum,
                 maximum=maximum,
                 slider_step=slider.step if slider is not None else None,
+                layerable=field_type not in (ParameterFieldType.TABLE, ParameterFieldType.LIST_PATTERN)
+                and (section != DATA_SECTION or LAYERED in field.metadata),
                 description=field.description,
                 section=section,
                 title=field.title,
@@ -566,6 +594,37 @@ class ChartInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, 
     parameters: dict[str, object] = {}
     """Parameters for the specific chart."""
 
+    locked: bool = False
+    """Drawn with its own settings only, whatever its panel's and its page's chart settings say (`drawn_with`)."""
+
+    def drawn_with(self, layers: Sequence[Mapping[str, object]]) -> ChartInstance[_Dataframe, _Chart]:
+        """
+        The chart as it is drawn under `layers` of chart settings, a page's then its panel's: the last one says last.
+
+        A setting of a layer is drawn in place of the chart's own if the chart's type has it, lets a layer set it
+        (`ParameterField.layerable`), and takes the value; any other is left out, for this chart alone. A layer's setting
+        that no chart on the page has waits there for one that has. Never saved: the chart keeps its own settings, which
+        are drawn again when a layer stops setting one. A `locked` chart, or one of a type not installed, is itself.
+        """
+        if self.locked or not any(layers):
+            return self
+        try:
+            chart_type = ChartTypeRegistry.get_chart_type(self.chart_type)
+        except UnknownChartTypeError:
+            return self
+        fields, model = ChartTypeRegistry.parameter_fields(self.chart_type), chart_type.parameter_type()
+        parameters = dict(self.parameters)
+        for layer in layers:
+            for name, value in layer.items():
+                if name not in fields or not fields[name].layerable:
+                    continue
+                try:
+                    model.model_validate({**parameters, name: value})
+                except ValidationError:
+                    continue  # a value this chart's type does not take (a choice it has not got): its own stays
+                parameters[name] = value
+        return self.model_copy(update={"parameters": parameters})
+
     @model_validator(mode="before")
     @classmethod
     def _default_id_from_content(cls, data: object) -> object:  # dlboard-ignore[forbid-string-ignore]
@@ -635,6 +694,20 @@ class PanelInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, 
     grid_columns: GridColumns = 3
     """How many equal-width columns the `"grid"` layout has; unused by `"packed"`."""
 
+    chart_settings: dict[str, object] = {}
+    """
+    Settings this panel draws its charts with, by name, over the page's and over each chart's own (`drawn_with`).
+
+    Kept whether or not a chart of the panel has the setting: one that has none waits here for a chart that does.
+    """
+
+    def drawn(self, page_settings: Mapping[str, object]) -> PanelInstance[_Dataframe, _Chart]:
+        """The panel with each chart as it is drawn: under `page_settings` (its page's chart settings), then its own."""
+        if not page_settings and not self.chart_settings:
+            return self
+        layers = (page_settings, self.chart_settings)
+        return self.model_copy(update={"charts": [chart.drawn_with(layers) for chart in self.charts]})
+
     def render(
         self, dataframes: _Dataframe, page_size: int = DEFAULT_RENDER_CONTEXT.page_size
     ) -> list[_Chart]:
@@ -679,8 +752,8 @@ class NewPage(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, extra=
     panels: list[PanelInstance[_Dataframe, _Chart]] = []
     """The set of panel instances on a page."""
 
-    page_settings: dict[str, int | float | bool | str | list[str] | list[int] | None] = {}
-    """Page settings."""
+    page_settings: dict[str, int | float | bool | str | list[str] | list[int] | dict[str, object] | None] = {}
+    """Page settings: a page's own, typed by the page that keeps them (a chart settings map among them)."""
 
     @field_validator("panels", "page_settings", mode="before")
     @classmethod

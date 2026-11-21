@@ -133,6 +133,7 @@ def render_panel_area(
     store: DataStore[...], page: BasicExperimentPage, paging: Paging, *, focus_chart: str | None = None
 ) -> html.Div:
     """The panel area of `page`: the tabs and the page of panels `paging` shows, with the data of the charts open in them."""
+    page = page.drawn()
     paging = resolved_paging(page, paging, focus_chart=focus_chart)
     open_panels = visible_open_panels(page.panels, paging.shown_tab(page.panels), paging)
     return accordion_view(
@@ -267,6 +268,7 @@ class ChartsOnScreen(CallbackStates):
         self, store: DataStore[...], page: BasicExperimentPage, paging: Paging
     ) -> tuple[list[Any], bool]:
         """A new body for each chart on screen whose data, as `page` and `paging` draw it, changed; and whether all read."""
+        page = page.drawn()
         dataframes, fetched = fetch_open_panel_dataframes(store, page, self.chart_ids, paging)
         shown = {
             (i.panel, i.index): fingerprint
