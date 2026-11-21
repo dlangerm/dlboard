@@ -54,6 +54,8 @@ CHART_DRAG_HANDLE: Final = ChartPattern("chart-drag-handle")
 EDIT_CHART_BUTTON: Final = ChartPattern("edit-chart")
 COPY_CHART_LINK_BUTTON: Final = ChartPattern("copy-chart-link")
 DELETE_CHART_BUTTON: Final = ChartPattern("delete-chart")
+LOCK_CHART_BUTTON: Final = ChartPattern("lock-chart")
+"""Locks a chart to its own settings, or unlocks it (`_chart_settings_layers.py`): shown always while it is locked."""
 CHART_BODY: Final = ChartPattern("chart-body")
 """A chart item's body: the chart itself, what a live update replaces."""
 CHART_FINGERPRINT: Final = ChartPattern("chart-fingerprint")
@@ -270,8 +272,18 @@ def render_chart_item(
     chart = panel.charts[index]
     dataframe, wide = frames.for_chart(chart), frames.wide_history(chart)
     context = models.RenderContext(columns=panel.grid_columns, page_size=page_size, chart_id=chart.id)
+    lock = tooltipped_action_icon(
+        Icon.KEPT if chart.locked else Icon.RELEASED,
+        component_id=LOCK_CHART_BUTTON.of(panel.name, index),
+        label="Locked: drawn with its own settings, not its panel's or page's chart settings. Unlock"
+        if chart.locked
+        else "Lock: keep this chart's own settings, whatever its panel's or page's chart settings say",
+        size="xs",
+        color="yellow" if chart.locked else "gray",
+    )
     hover_controls = dmc.Group(
         [
+            *([] if chart.locked else [lock]),
             drag_handle(
                 class_name="dl-chart-drag-handle",
                 component_id=CHART_DRAG_HANDLE.of(panel.name, index),
@@ -317,9 +329,11 @@ def render_chart_item(
     # is the one thing here that's supposed to stay visible without hovering.
     badge = _read_badge(chart, wide)
     keeps_view = models.ChartTypeRegistry.keeps_viewer_state(chart)
+    # A locked chart says so without a hover, as the badge does: it is drawn unlike its neighbours, and this is why.
+    shown = [*([badge] if badge else []), *([lock] if chart.locked else [])]
     return dmc.Stack(
         [
-            *([dmc.Group([badge])] if badge else []),
+            *([dmc.Group(shown, gap="xs")] if shown else []),
             hover_controls,
             *([_view_bar()] if keeps_view else []),
             html.Div(

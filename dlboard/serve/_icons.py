@@ -74,6 +74,7 @@ class Icon(StrEnum):
     EYE = "eye"
     EYE_OFF = "eye-off"
     IMPORT = "upload"
+    INFO = "info-circle"
     KEPT = "lock"
     KEY = "key"
     LIGHT_MODE = "sun"

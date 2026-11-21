@@ -96,14 +96,12 @@ def test_the_x_axis_of_the_charts_a_filter_matches_is_set_together(
 
     chart_filter.fill("acc")
     expect(charts).to_have_count(_FAMILY_SIZE)
-    _panel_action(page, "Set x-axis…")
-    dialog = page.get_by_role("dialog", name="Set the x-axis of these charts")
+    _panel_action(page, "Chart settings…")  # with the filter typed, it writes into the charts it matches
+    dialog = page.get_by_role("dialog", name="Chart settings")
     expect(dialog).to_contain_text(f"{_FAMILY_SIZE} charts")
-    dialog.get_by_label("X-axis").fill("not-a-metric")
-    dialog.get_by_role("button", name="Apply").click()
-    expect(dialog).to_contain_text("Not a metric or hyperparameter")
-
-    dialog.get_by_label("X-axis").fill("g/loss_a")
+    dialog.get_by_role("checkbox", name="Set X axis", exact=True).check()
+    dialog.get_by_role("textbox", name="X axis", exact=True).click()
+    page.get_by_role("option", name="g/loss_a", exact=True).click()
     dialog.get_by_role("button", name="Apply").click()
     expect(dialog).to_be_hidden()
     # Saved in a view of the viewer's own, as any edit of a page that is not theirs is.

@@ -103,6 +103,8 @@ NEW_PANEL_ID: ButtonId[ExperimentPage] = ButtonId("new-panel-button")
 # --- buttons in the panel area that open a modal or drawer -- each rendered once, beside the panel
 # area, by the feature module that owns it (`_chart_suggestions.py`, `_tab_controls.py`). ---
 SUGGEST_CHARTS_BUTTON_ID: ButtonId[ExperimentPage] = ButtonId("suggest-charts-button")
+PAGE_CHART_SETTINGS_BUTTON_ID: ButtonId[ExperimentPage] = ButtonId("page-chart-settings")
+"""The toolbar's "Chart settings": what every chart on the page is drawn with (`_chart_settings_layers.py`)."""
 AUTO_POPULATE_OPEN_ID: ButtonId[ExperimentPage] = ButtonId("auto-populate-open")
 NEW_TAB_BUTTON_ID: ButtonId[ExperimentPage] = ButtonId("new-tab-button")
 RENAME_TAB_BUTTON_ID: ButtonId[ExperimentPage] = ButtonId("rename-tab-button")
@@ -145,7 +147,8 @@ PANEL_GRID: Final = PanelPattern("panel-grid")
 OPEN_CHART_BUTTON: Final = PanelPattern("open-add-chart")
 RENAME_PANEL_BUTTON: Final = PanelPattern("rename-panel")
 DELETE_PANEL_BUTTON: Final = PanelPattern("delete-panel")
-BULK_EDIT_BUTTON: Final = PanelPattern("bulk-edit-charts")
+PANEL_CHART_SETTINGS_BUTTON: Final = PanelPattern("panel-chart-settings")
+"""A panel's "Chart settings…": what its charts are drawn with (`_chart_settings_layers.py`)."""
 BULK_DELETE_BUTTON: Final = PanelPattern("bulk-delete-charts")
 PANEL_SUGGEST_BUTTON: Final = PanelPattern("panel-suggest-charts")
 CHART_FILTER: Final = PanelPattern("chart-filter")
@@ -253,13 +256,13 @@ def panel_header_controls(panel: models.PanelInstance[Any, Any]) -> Component:
                                 id=RENAME_PANEL_BUTTON.of(panel_name),
                                 leftSection=icon(Icon.EDIT),
                             ),
+                            dmc.MenuItem(
+                                "Chart settings…",
+                                id=PANEL_CHART_SETTINGS_BUTTON.of(panel_name),
+                                leftSection=icon(Icon.ADMIN),
+                            ),
                             dmc.MenuDivider(),
                             dmc.MenuLabel("Charts matching the chart filter"),
-                            dmc.MenuItem(
-                                "Set x-axis…",
-                                id=BULK_EDIT_BUTTON.of(panel_name),
-                                leftSection=icon(Icon.EDIT),
-                            ),
                             dmc.MenuItem(
                                 "Delete…",
                                 id=BULK_DELETE_BUTTON.of(panel_name),
@@ -421,6 +424,14 @@ def _page_view(frames: PanelFrames, page: BasicExperimentPage, paging: Paging) -
         _panel_filter(paging),
         _new_panel_popover(),
         _suggest_charts_button(),
+        dmc.Button(
+            "Chart settings",
+            id=PAGE_CHART_SETTINGS_BUTTON_ID,
+            n_clicks=0,
+            leftSection=icon(Icon.ADMIN),
+            variant="subtle",
+            size="xs",
+        ),
     ]
     if len(tabs) <= 1:
         return html.Div([_toolbar([new_tab_button], panel_actions), area])

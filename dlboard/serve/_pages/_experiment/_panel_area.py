@@ -38,6 +38,7 @@ if TYPE_CHECKING:
 
 _ASSETS = [
     (AssetKind.STYLESHEET, Path(__file__).with_name("_experiment_page_hover.css")),
+    (AssetKind.STYLESHEET, Path(__file__).with_name("chart_settings.css")),
     (AssetKind.SCRIPT, Path(__file__).with_name("_experiment_page_dragdrop.js")),
     (AssetKind.SCRIPT, Path(__file__).with_name("chart_deep_link.js")),
     (AssetKind.SCRIPT, Path(__file__).with_name("chart_view_state.js")),
