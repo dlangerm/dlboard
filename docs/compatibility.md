@@ -20,6 +20,9 @@ Breaking any of these needs a migration path and a deprecation window of at leas
     columns), not how it's being browsed: which panels are open and which tab is shown live in the page's
     address (`?open=`, `?tab=`). Views saved before that change may still hold `open_panel` and `active_tab`
     keys; they still load, and those keys are ignored.
+    A view also saves its chart settings: a panel's `chart_settings`, the page's (`chart_settings` among its page
+    settings), and which charts are `locked`, each by a setting's name. A view saved before them has none, and is drawn as
+    it was.
     A view with no `selected_runs` draws the newest runs (20 by default, `DLBOARD_DEFAULT_SHOWN_RUNS`); one saved
     before they existed has `excluded_runs` instead: it draws the newest of the runs it does not leave out.
   - Chart type names (`line`, `bar`, `image`, `table`, `histogram`, `files`, `series_band`, `plotly`, `console`, `scatter`, `parallel_coordinates`, `run_context`).

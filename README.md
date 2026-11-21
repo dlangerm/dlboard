@@ -94,7 +94,7 @@ Every metric, hyperparameter, and artifact you log gets synced to dlboard in the
 
 ![A confusion matrix logged at each step, one image per run, with overlays drawn over it that a legend shows and hides](docs/images/image-series.png)
 
-**Personal views** — Customize layouts per-user without affecting what others see (or share it with them with a click of a button):
+**Personal views** — Customize layouts per-user without affecting what others see; a view is private until its switch beside the view picker shares it with the project:
 
 ![The view picker, with a personal view saved alongside the shared view](docs/images/personal-views.png)
 
@@ -114,7 +114,7 @@ Every metric, hyperparameter, and artifact you log gets synced to dlboard in the
 
 ![The Ctrl+K jump palette, open and matching an experiment by name](docs/images/jump-palette.png)
 
-**Many charts** — Filter a panel's charts, then set the x-axis of every chart the filter matches or delete them together; it says how many first, and an edit to a page that is not yours is saved in a copy of your own.
+**Many charts** — Set a panel's or the whole page's chart settings once (smoothing, height, the x-axis, a log scale…) and every chart is drawn with them, a panel's over the page's, except a chart you lock to its own. Filter a panel's charts to set them on just the ones the filter matches, or to delete those together; an edit to a page that is not yours is saved in a copy of your own, and it asks whether to keep it.
 
 ## Deployment
 
