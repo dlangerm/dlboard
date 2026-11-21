@@ -14,6 +14,7 @@ there would block every `print` of the training loop.
 
 from __future__ import annotations
 
+import logging
 import sys
 import threading
 from collections.abc import Mapping
@@ -121,15 +122,40 @@ class ConsoleCapture:
         self._cut = threading.Event()
         self._streams: tuple[TextIO, TextIO] = (sys.stdout, sys.stderr)
         self._tees = (_Tee(self._streams[0], self), _Tee(self._streams[1], self))
+        handlers: list[logging.StreamHandler[TextIO | _Tee]] = [
+            handler
+            for logger in (logging.root, *logging.root.manager.loggerDict.values())
+            if isinstance(logger, logging.Logger)
+            for handler in logger.handlers
+            if isinstance(handler, logging.StreamHandler)
+        ]
+        self._handlers = [
+            (handler, at)
+            for handler in handlers
+            for at, stream in enumerate(self._streams)
+            if handler.stream is stream
+        ]
+        """
+        Every handler writing to one of the streams, and which, of every logger made so far: `start` points them at the
+        tees. One that looks the stream up each time it writes (logging's last resort, pytest's) follows the tee itself.
+        """
         self._thread = threading.Thread(target=self._cut_until_stopped, name="dlboard-console", daemon=True)
 
     @classmethod
     def start(cls, settings: ConsoleSettings, ship: Callable[[ConsoleChunk], None]) -> ConsoleCapture | None:
-        """Wrap the streams and start cutting chunks, or `None` when turned off."""
+        """
+        Wrap the streams and start cutting chunks, or `None` when turned off.
+
+        A logging handler holds the stream it was made with, so one made before the run (Lightning's, made as it is
+        imported; `logging.basicConfig`'s) is pointed at the wrapped stream too, or what it logs would never be captured.
+        """
         if not settings.enabled or settings.max_mb == 0:
             return None
         capture = cls(settings, ship)
         sys.stdout, sys.stderr = capture._tees
+        for handler, at in capture._handlers:
+            if handler.stream is capture._streams[at]:  # not one that follows `sys.stderr` to the tee already
+                handler.setStream(capture._tees[at])
         capture._thread.start()
         return capture
 
@@ -180,6 +206,9 @@ class ConsoleCapture:
             sys.stdout = self._streams[0]
         if sys.stderr is self._tees[1]:
             sys.stderr = self._streams[1]
+        for handler, at in self._handlers:
+            if handler.stream is self._tees[at]:
+                handler.setStream(self._streams[at])
         self.cut()
         with self._lock:
             self._stopping = True

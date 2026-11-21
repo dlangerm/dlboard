@@ -7,6 +7,7 @@ the test, so one started by a fixture would never see the test's prints.
 
 from __future__ import annotations
 
+import logging
 import sys
 import threading
 
@@ -76,6 +77,43 @@ def test_stopping_cuts_the_last_chunk_and_puts_the_streams_back(chunks: list[Con
 
     assert (sys.stdout, sys.stderr) == streams
     assert [chunk.data.decode() for chunk in chunks] == ["last words\n"]
+
+
+def test_a_logging_handler_made_before_the_run_is_captured_then_given_its_stream_back(
+    chunks: list[ConsoleChunk],
+) -> None:
+    """#733: Lightning makes its handler as it is imported, so its model summary went to the real stream alone."""
+    logger = logging.getLogger("dlboard.tests.console")
+    handler = logging.StreamHandler()  # holds `sys.stderr` as it is now
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+    try:
+        capture = _capture(chunks)
+        logger.info("Total params: 161")
+        capture.stop()
+        assert handler.stream is sys.stderr
+    finally:
+        logger.removeHandler(handler)
+
+    assert [chunk.data.decode() for chunk in chunks] == ["Total params: 161\n"]
+
+
+def test_a_logging_handler_that_looks_up_its_stream_as_it_writes_follows_the_capture_itself(
+    chunks: list[ConsoleChunk],
+) -> None:
+    """Logging's last resort (and pytest's live log) reads `sys.stderr` when it writes: it can't be given a stream."""
+    logger = logging.getLogger("dlboard.tests.console.follows")
+    handler = logging.lastResort  # warnings and up
+    assert isinstance(handler, logging.StreamHandler)
+    logger.addHandler(handler)
+    try:
+        capture = _capture(chunks)
+        logger.warning("followed")
+        capture.stop()
+    finally:
+        logger.removeHandler(handler)
+
+    assert [chunk.data.decode() for chunk in chunks] == ["followed\n"]
 
 
 def test_a_stream_something_else_wrapped_since_is_left_to_it(chunks: list[ConsoleChunk]) -> None:

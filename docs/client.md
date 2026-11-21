@@ -165,9 +165,9 @@ scrolls sideways), and only the ones in view are in the page, so a chunk of thou
 seconds (sooner past 256 KB) and logged as ordinary artifacts, the server never parses or searches it, and nothing searches
 more than the chunk on show. A write never waits on dlboard: it goes to the real stream, then into a bounded buffer, and
 what finds the buffer full is dropped and said so. A run keeps at most 10 MB of it; a progress bar redrawn with `\r` is
-kept as it last looked, once. Only Python's streams are captured: output of native code and of child processes, which
-never passes through them, is not, and neither is a logging handler that was bound to the original stream before the
-run started. A `kill -9` loses what was printed since the last chunk. Tune it with `DLBOARD_CONSOLE_*` (below), or turn
+kept as it last looked, once. A logging handler writing to either stream is captured too, even one made before the run
+started (Lightning's, `logging.basicConfig`'s). Only Python's streams are captured: output of native code and of child
+processes, which never passes through them, is not. A `kill -9` loses what was printed since the last chunk. Tune it with `DLBOARD_CONSOLE_*` (below), or turn
 it off with `DLBOARD_CONSOLE_ENABLED=false`. If your logs already go to Loki or the like, bind the run's ids into them
 instead (`structlog.contextvars.bind_contextvars(**run.log_context)`) and find them there by the run.
 

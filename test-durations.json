@@ -111,6 +111,8 @@
   "dlboard/client/tests/client_traces_test.py::test_a_request_is_one_trace_across_the_client_and_the_server": 1.5128678959990793,
   "dlboard/client/tests/client_traces_test.py::test_a_request_with_tracing_off_still_has_its_own_request_id": 0.7364951459967415,
   "dlboard/client/tests/console_test.py::test_a_chunk_is_cut_without_waiting_for_the_interval_once_it_is_full": 0.0024182990000554128,
+  "dlboard/client/tests/console_test.py::test_a_logging_handler_made_before_the_run_is_captured_then_given_its_stream_back": 0.0021,
+  "dlboard/client/tests/console_test.py::test_a_logging_handler_that_looks_up_its_stream_as_it_writes_follows_the_capture_itself": 0.0037002879980718717,
   "dlboard/client/tests/console_test.py::test_a_progress_bar_is_kept_as_it_last_looked[10%\\r50%\\r100%\\ndone\\n-100%\\ndone\\n]": 0.00143661800029804,
   "dlboard/client/tests/console_test.py::test_a_progress_bar_is_kept_as_it_last_looked[epoch 1\\r\\n-epoch 1\\n]": 0.0013095719996272237,
   "dlboard/client/tests/console_test.py::test_a_progress_bar_is_kept_as_it_last_looked[plain\\nlines\\n-plain\\nlines\\n]": 0.0020832149994021165,
