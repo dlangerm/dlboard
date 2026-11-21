@@ -333,6 +333,18 @@ as the line chart's `smoothing: Annotated[float, DISPLAY_SECTION, Slider(step=0.
 Its `ge` and `le` are the slider's ends (a slider with either missing is refused when the chart type is listed), and
 the chart is drawn again as the slider is let go, not at every step it passes.
 
+A panel's or a page's **Chart settings** set a setting for all their charts at once, and the form offers every setting
+of the chart types in reach that may be set so (`ParameterField.layerable`): any Display or Advanced one, and a Data one
+only if marked `LAYERED` (the x axis of the line, bar and image charts, `x_axis: Annotated[str, LAYERED]`), since a Data
+setting says what a chart draws and one value of it for every chart would draw the same chart in each. A table, or a list
+of name patterns, never. Two chart types that name a setting alike share its field, so name a setting as the built-in
+charts do (`height`, `x_axis`, `smoothing`) where it means the same thing. A value is drawn over a chart's own only if
+the chart's settings model takes it (`ChartInstance.drawn_with`), and never saved into the chart: a chart type sees the
+settings it is drawn with in `render` and `data_request`, as it always did, and needs no code for any of this. So refuse
+in a `model_validator` any combination your chart can't draw: the line and bar charts refuse an x axis that is their own
+column, and a page drawn by `epoch` leaves its chart of `epoch` on its own x axis. A chart whose setting someone changes
+in the chart editor while its panel or page sets it is locked to its own settings, so the change is the one drawn.
+
 `plug(app)` registers the class and, if the chart needs its own clientside JS (a tooltip
 formatter, say), serves it from a route this plugin owns:
 

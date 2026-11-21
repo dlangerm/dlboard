@@ -20,8 +20,27 @@ pulls that section's body into the GitHub release notes and publishes both distr
 * **Plugin docs say how to act on a run ending.** `docs/background-tasks.md` shows how a plugin's task finds the runs
   that finished, failed or were lost (there is no hook that calls it), and why `ended_at` is not a cursor.
   `NewWorkItem`, `WorkItem` and `get_system_task_store` are exported from `dlboard.serve`. (#736)
+* **Chart settings for a panel or the whole page.** **Chart settings…** in a panel's menu, and **Chart settings** in the
+  page's toolbar, set settings for every chart there at once (smoothing, height, the x-axis, a log scale…): the form
+  offers every setting of the chart types on the panel or page, and each one ticked is drawn over every chart's own, a
+  panel's over the page's, and over any chart added later, without being saved into a chart. A setting no chart there has
+  now is kept, for one added later. With the chart filter (or the panel filter) typed, the form writes what is ticked into
+  just the charts it matches, once; it replaces **Set x-axis…**. The form says which charts it reaches, how many of each
+  type, and which settings reach only some of them. A chart can be **locked** from its card to keep its own settings; the
+  chart editor shows a chart as its panel or page draws it, and changing there a setting they set locks the chart with
+  that change. A line or bar chart is never drawn against itself: the page's x-axis of `epoch` leaves the chart of
+  `epoch` on its own, and the chart editor refuses one. A chart plugin marks a Data setting that may be set this way
+  `LAYERED`; Display and Advanced ones may be already.
+* **A slider for smoothing.** A line chart's smoothing is slid from off to the most there is, not typed; a chart
+  plugin marks any bounded number setting `Slider(step=...)` for one.
 
 ### Changed
+
+* **A view says whether it is private, and a switch shares it.** The owner of a view (or a comparison) has a
+  **Private / Shared** switch in its header, with a tooltip saying what each means, in place of the "Share with
+  project" item of its ⋯ menu that nobody found.
+* **The console chart's run picker lists the newest run first, in its colours.** The runs are in the Runs table's
+  order, each drawn with the colour and dash it has on the page's other charts, and the newest is the one opened.
 
 * **An edit that makes a view of your own asks whether to keep it.** Editing a page that isn't yours (the shared page,
   or someone else's view) still saves the change to a new view of your own, and now says so in a dialog, with **Keep my
