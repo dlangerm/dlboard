@@ -3160,6 +3160,7 @@
   "dlboard/tests/pins_browser_test.py::test_the_unpin_menu_offers_only_the_colours_you_hold_on_the_selected_runs[chromium]": 6.91331244900357,
   "dlboard/tests/pins_browser_test.py::test_unpinning_takes_a_run_out_of_a_colour_filter_it_no_longer_matches[chromium]": 7.321336232998874,
   "dlboard/tests/plugin_skill_test.py::test_every_file_it_points_to_exists[dlboard/plugins/auth/password.py]": 0.0010823369993886445,
+  "dlboard/tests/plugin_skill_test.py::test_every_file_it_points_to_exists[dlboard/plugins/backend/lost_runs.py]": 0.0010715330026869196,
   "dlboard/tests/plugin_skill_test.py::test_every_file_it_points_to_exists[dlboard/plugins/backend/trash_retention.py]": 0.0010715330026869196,
   "dlboard/tests/plugin_skill_test.py::test_every_file_it_points_to_exists[dlboard/plugins/charts/series_band.py]": 0.0013499689994205255,
   "dlboard/tests/plugin_skill_test.py::test_every_file_it_points_to_exists[dlboard/plugins/data_stores/s3.py]": 0.001109236000047531,

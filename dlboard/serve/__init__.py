@@ -41,10 +41,13 @@ from dlboard.serve._backend._startup_checks import add_startup_check
 from dlboard.serve._backend._theme import get_theme, set_theme
 from dlboard.serve._clientside_script import ClientsideScript
 from dlboard.serve._custodian import (
+    NewWorkItem,
     Task,
     TaskContext,
     TaskMode,
+    WorkItem,
     WorkRule,
+    get_system_task_store,
     register_task,
     register_work_kind,
 )
@@ -74,6 +77,7 @@ __all__ = [
     "ExperimentSection",
     "ExperimentSlot",
     "Icon",
+    "NewWorkItem",
     "ProjectTab",
     "RunGuard",
     "SQLStoreBase",
@@ -83,6 +87,7 @@ __all__ = [
     "Task",
     "TaskContext",
     "TaskMode",
+    "WorkItem",
     "WorkRule",
     "add_public_route",
     "add_startup_check",
@@ -102,6 +107,7 @@ __all__ = [
     "get_project_role",
     "get_system_artifact_store",
     "get_system_data_store",
+    "get_system_task_store",
     "get_theme",
     "icon",
     "icon_cell_class",

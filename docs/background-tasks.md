@@ -96,12 +96,32 @@ admin page's overdue check read the same row, so a machine that sleeps runs a ta
 several servers run an hourly task once an hour between them. `every=None` is a task that runs only when asked for. A task that does not finish within its `timeout` is hung; one that checks `ctx.should_stop()` between batches is told to stop
 at 80% of it, and goes on in its next run. A `SHARED`
 task claims its work with `ctx.claim(kind, limit=...)`, then `ctx.done(items)` or `ctx.retry(item, error)`; work is queued
-with `get_system_task_store(app).enqueue_work([NewWorkItem(kind=..., key=...)])` (both from `dlboard.serve._custodian`), where a key is unique among queued items of
+with `get_system_task_store(app).enqueue_work([NewWorkItem(kind=..., key=...)])` (both from `dlboard.serve`), where a key is unique among queued items of
 its kind, so queueing twice queues once, and `request_task_run(name)` starts the task on the next poll instead of its next
 interval. A request (an admin clicking Purge) may queue only a kind a plugin lets it, as a user holding a scope
 (`register_work_kind(app, WorkRule(...))`); everything else about the task store is the custodian's.
 
 Tests never start a custodian: they call a task's `run_once` with a `TaskContext` (`run_task` in `dlboard/conftest.py`).
+
+### When a run ends
+
+There is no hook that calls a plugin when a run finishes, fails or is lost, and there won't be: a run is finished by a
+request in a web worker and given up as lost by the custodian, so a callback would be split between processes, slow
+ingest down, and miss what happened while a process was down. A plugin that acts on how runs end (a notice when one
+fails, a summary once it is done) looks for them instead, in a `SINGLETON` task, as `lost_runs`
+(`dlboard/plugins/backend/lost_runs.py`) and retention (`dlboard/plugins/retention/`) do:
+
+- **What ended.** A run is `RUNNING` until its client reports `FINISHED` or `FAILED` (a `with` block, Lightning's
+  `finalize`), or `UNKNOWN` (its script exited without saying). One that goes quiet for `DLBOARD_LOST_RUN_AFTER_S` (a
+  `kill -9`, a lost node) is marked `UNKNOWN` by `lost_runs`, with `lost_at` set; heard from again, it is `RUNNING` once
+  more, with `lost_at` and `ended_at` cleared.
+- **Where to look.** An experiment's `last_activity_at` moves whenever one of its runs logs, ends or is lost, so a task
+  reads `get_runs` only for the experiments active since it last looked, and keeps when that was in a
+  [setting](#plugin-settings-and-page-sections) of its own.
+- **Not exactly once.** `ended_at` is the client's clock: an offline run synced later, or an import, ends in the past, and a
+  run reported done twice (Lightning's `fit`, then `test`) moves it. Don't use it as a cursor. Keep what was handled
+  instead, and make the work idempotent: one `NewWorkItem` per run and status, `key=f"{run.id}:{run.status}"`, done by a
+  `SHARED` task, queues each once while it waits.
 
 ## Plugin settings and page sections
 
