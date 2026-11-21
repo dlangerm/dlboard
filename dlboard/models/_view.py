@@ -146,6 +146,19 @@ NamePatternList = typing.Annotated[list[str], NamePatterns()]
 
 
 @dataclasses.dataclass(frozen=True)
+class Slider:
+    """
+    Marks a number setting as edited with a slider, in steps of `step`, rather than typed.
+
+    For a value felt out by trying it: `smoothing: Annotated[float, DISPLAY_SECTION, Slider(step=0.01)] = Field(0.0,
+    ge=0, le=0.99)`. The setting needs both bounds (`ge` and `le`), which are the slider's ends. The chart is drawn again as the slider is
+    let go, not at every step it passes.
+    """
+
+    step: float
+
+
+@dataclasses.dataclass(frozen=True)
 class SettingsSection:
     """
     A titled group of a chart type's settings in the chart editor.
@@ -297,6 +310,8 @@ class ParameterField(BaseModel, frozen=True, extra="forbid"):
     """The least a number field may be (its `ge`), if the settings model says."""
     maximum: float | None = None
     """The most a number field may be (its `le`), if the settings model says."""
+    slider_step: float | None = None
+    """For a number field marked `Slider`, its step: it is edited with a slider from `minimum` to `maximum`."""
     description: str | None = None
     """Help text shown alongside the field's widget: the field's attribute docstring on the settings model."""
     section: SettingsSection = DATA_SECTION
@@ -431,6 +446,16 @@ class ChartTypeRegistry:
                 if field_type == ParameterFieldType.TABLE
                 else None
             )
+            minimum = next((typing.cast("float", m.ge) for m in field.metadata if isinstance(m, Ge)), None)
+            maximum = next((typing.cast("float", m.le) for m in field.metadata if isinstance(m, Le)), None)
+            slider = next((m for m in field.metadata if isinstance(m, Slider)), None)
+            if slider is not None and (
+                field_type not in (ParameterFieldType.INT, ParameterFieldType.FLOAT)
+                or minimum is None
+                or maximum is None
+            ):
+                msg = f"{parameter_type.__name__}.{field_name} is a Slider: it must be a number with both ge and le"
+                raise ValueError(msg)
             field_descriptors[field_name] = ParameterField(
                 name=field_name,
                 type=field_type,
@@ -439,8 +464,9 @@ class ChartTypeRegistry:
                 column_kind=field_column_kinds.get(field_name),
                 choices=choices,
                 columns=columns,
-                minimum=next((typing.cast("float", m.ge) for m in field.metadata if isinstance(m, Ge)), None),
-                maximum=next((typing.cast("float", m.le) for m in field.metadata if isinstance(m, Le)), None),
+                minimum=minimum,
+                maximum=maximum,
+                slider_step=slider.step if slider is not None else None,
                 description=field.description,
                 section=section,
                 title=field.title,

@@ -328,6 +328,11 @@ collapsible group, in the order its first setting is declared, with only the one
 an image chart's Layers) expanded. A chart type whose settings are all in one section gets no groups at all, so a plugin that
 marks nothing looks the way it always did.
 
+A number setting is typed into a box. One whose value is found by trying it is better slid: mark it `Slider(step=...)`,
+as the line chart's `smoothing: Annotated[float, DISPLAY_SECTION, Slider(step=0.01)] = Field(0.0, ge=0, le=0.99)`.
+Its `ge` and `le` are the slider's ends (a slider with either missing is refused when the chart type is listed), and
+the chart is drawn again as the slider is let go, not at every step it passes.
+
 `plug(app)` registers the class and, if the chart needs its own clientside JS (a tooltip
 formatter, say), serves it from a route this plugin owns:
 

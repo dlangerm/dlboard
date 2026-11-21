@@ -22,6 +22,7 @@ from dlboard.models import (
     DataRequest,
     MetricColumn,
     RenderContext,
+    Slider,
 )
 from dlboard.plugins.charts._axis_label import (
     DEFAULT_MAX_AXIS_LABEL_CHARS,
@@ -209,7 +210,9 @@ class LineChartSettings(BaseModel, frozen=True, extra="forbid", use_attribute_do
         Field(default="number")
     )
     """"number" spaces points by their actual value (step 10 sits 10x as far from 0 as step 1); "category" gives every distinct x value equal spacing regardless of its size; "date" treats the axis as a timestamp (e.g. timestamp_utc), showing real calendar dates; "time" treats it as an elapsed duration in seconds, showing it as h:mm:ss."""
-    smoothing: typing.Annotated[float, DISPLAY_SECTION] = Field(default=0.0, ge=0.0, le=0.99)
+    smoothing: typing.Annotated[float, DISPLAY_SECTION, Slider(step=0.01)] = Field(
+        default=0.0, ge=0.0, le=0.99
+    )
     """Smooths each run's line as TensorBoard does (a debiased moving average): 0 is off, 0.9 smooths a lot. The tooltip names each logged value beside its smoothed one."""
     y_scale: typing.Annotated[YScale, DISPLAY_SECTION] = Field(default="linear")
     """"log" for values spread over orders of magnitude (a loss early and late in training). It can't place a value at or below 0: those are left out, and the chart says how many."""
