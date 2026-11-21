@@ -1839,6 +1839,45 @@ def test_editing_the_shared_page_branches_into_your_own_view_and_asks_whether_to
     assert console_errors == []
 
 
+def _shared_soon(page: Page, view_id: int) -> bool:
+    """Whether the view `view_id` is shared within a few seconds: a switch flipped is saved by a callback of its own."""
+    for _ in range(50):
+        view = get_system_data_store().get_view(BasicExperimentPage, view_id)
+        if view is not None and view.shared:
+            return True
+        page.wait_for_timeout(100)
+    return False
+
+
+def test_a_view_of_your_own_says_it_is_private_and_its_switch_shares_it(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """A view was private, and shareable, only by an item in its ⋯ menu that nobody found: its switch is in the header."""
+    store = get_system_data_store()
+    project = store.create_project(models.NewProject(name=f"Sharing {time.monotonic_ns()}", description=""))
+    experiment = store.create_experiment(models.NewExperiment(project_id=project.id, name="shared or not"))
+    shared = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment.id)
+    store.update_page(shared.model_copy(update={"panels": [PanelInstance[Any, Any](name="Losses")]}))
+    page.goto(f"{live_server_url}/experiment/{experiment.id}")
+    switch = page.get_by_role("switch", name="Share this view with the project")
+    expect(page.get_by_text("Edits save to a copy")).to_be_visible()
+    expect(switch).to_be_hidden()  # the shared page is nobody's to share
+
+    _open_panel_menu(page)  # an edit makes a view of your own (`fork_modal` keeps it)
+    page.get_by_role("menuitem", name="Delete panel…").click()
+    page.get_by_role("button", name="Delete", exact=True).click()
+    expect(page).to_have_url(re.compile(r"\?view=\d+$"))
+    view_id = int(page.url.rsplit("=", 1)[-1])
+    expect(switch).not_to_be_checked()  # a view of your own is private
+
+    switch.check(force=True)  # the input is drawn over by Mantine's track
+    expect(switch).to_be_checked()
+    assert _shared_soon(page, view_id)
+    page.reload()
+    expect(switch).to_be_checked()
+    assert console_errors == []
+
+
 def test_editing_a_view_you_do_not_own_branches_into_a_separate_view_of_your_own(
     page: Page, live_server_url: str, console_errors: list[str]
 ) -> None:

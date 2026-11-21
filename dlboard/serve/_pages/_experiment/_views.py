@@ -41,6 +41,7 @@ from dlboard.serve._pages._delete_confirm import (
 )
 from dlboard.serve._pages._experiment import _ids as ids
 from dlboard.serve._pages._experiment import _page_model as page_model
+from dlboard.serve._pages._sharing import sharing_switch
 from dlboard.serve._url import relative_path
 
 if TYPE_CHECKING:
@@ -90,8 +91,10 @@ The actions menu's dropdown. Its `className` says whether you own the view on sc
 class rather than a rebuilt menu so `sync_view_after_edit` can update it when an edit branches
 into a view of your own, with no reload.
 """
-SHARE_VIEW_TOGGLE_ID: typing.Final = "share-view-toggle"
-"""Owner-only menu item that flips a view's `shared` flag; its own label reflects the new state."""
+SHARE_VIEW_SWITCH_ID: typing.Final = "share-view-switch"
+"""The view's Private/Shared switch (`sharing_switch`), beside the picker: flips its `shared` flag."""
+SHARE_VIEW_SWITCH_WRAP_ID: typing.Final = "share-view-switch-wrap"
+"""What holds the switch: shown only while the view on screen is yours, as `VIEW_FORK_HINT_ID` is only while it isn't."""
 DUPLICATE_VIEW_OPEN_ID: typing.Final = "duplicate-view-open"
 DUPLICATE_VIEW_MODAL_ID: typing.Final = "duplicate-view-modal"
 DUPLICATE_VIEW_NAME_ID: typing.Final = "duplicate-view-name"
@@ -197,8 +200,9 @@ def _fork_hint_style(*, is_owner: bool) -> dict[str, str]:
     return {"display": "none"} if is_owner else {}
 
 
-def _share_label(*, is_shared: bool) -> str:
-    return "Stop sharing with project" if is_shared else "Share with project"
+def _share_switch_style(*, is_owner: bool) -> dict[str, str]:
+    """Always in the layout too, and shown just while the page on screen is yours: only its owner shares a view."""
+    return {} if is_owner else {"display": "none"}
 
 
 def view_controls(
@@ -244,6 +248,11 @@ def view_controls(
                 id=VIEW_FORK_HINT_ID,
                 style=_fork_hint_style(is_owner=is_owner),
             ),
+            html.Div(
+                sharing_switch(SHARE_VIEW_SWITCH_ID, shared=is_shared, noun="view"),
+                id=SHARE_VIEW_SWITCH_WRAP_ID,
+                style=_share_switch_style(is_owner=is_owner),
+            ),
             dmc.Menu(
                 [
                     dmc.MenuTarget(
@@ -260,12 +269,6 @@ def view_controls(
                                 "Rename this view…",
                                 id=RENAME_VIEW_OPEN_ID,
                                 leftSection=icon(Icon.EDIT),
-                                className=owner_only,
-                            ),
-                            dmc.MenuItem(
-                                _share_label(is_shared=is_shared),
-                                id=SHARE_VIEW_TOGGLE_ID,
-                                leftSection=icon(Icon.LINK),
                                 className=owner_only,
                             ),
                             dmc.MenuItem(
@@ -525,23 +528,30 @@ def _register_rename(app: Dash) -> None:
 
 def _register_share_toggle(app: Dash) -> None:
     @app.callback(
-        Output(SHARE_VIEW_TOGGLE_ID, "children"),
         Output(VIEW_NOTIFY_ID, "sendNotifications", allow_duplicate=True),
-        Input(SHARE_VIEW_TOGGLE_ID, "n_clicks"),
+        Input(SHARE_VIEW_SWITCH_ID, "checked"),
         State(ids.STATE_VIEW_ID, "data"),
         prevent_initial_call=True,
     )
-    def toggle_share(n_clicks: int | None, view_id: int | None) -> tuple[Any, Any]:
-        if not n_clicks or view_id is None:
+    def toggle_share(checked: bool | None, view_id: int | None) -> Any:  # noqa: ANN401, FBT001 -- a notice, or none
+        """
+        Share the view on screen, or stop: whichever way the switch was flipped.
+
+        Also called when `sync_view_after_edit` sets the switch to say how a view an edit branched into is (private),
+        which writes nothing: the view already is.
+        """
+        if checked is None or view_id is None:
             raise PreventUpdate
         store = get_data_store()
         # Defensive, not just decorative -- `view_controls` only *shows* this to a view's owner,
         # but the callback itself is reachable regardless, so it checks again before writing.
         view = store.get_view(page_model.BasicExperimentPage, view_id)
         if view is None or view.owner_id != get_current_user().id:
-            return no_update, notice("Not shared", "This view is gone, or no longer yours to share.")
-        updated = store.update_page(view.model_copy(update={"shared": not view.shared}))
-        return _share_label(is_shared=updated.shared), no_update
+            return notice("Not shared", "This view is gone, or no longer yours to share.")
+        if view.shared == checked:
+            raise PreventUpdate
+        store.update_page(view.model_copy(update={"shared": checked}))
+        return no_update
 
 
 def _register_export_import(app: Dash) -> None:
@@ -618,7 +628,8 @@ def _register_sync_after_edit(app: Dash) -> None:
         Output(VIEW_NAV_SUPPRESS_ID, "data", allow_duplicate=True),
         Output(VIEW_MENU_ID, "className"),
         Output(VIEW_FORK_HINT_ID, "style"),
-        Output(SHARE_VIEW_TOGGLE_ID, "children", allow_duplicate=True),
+        Output(SHARE_VIEW_SWITCH_WRAP_ID, "style"),
+        Output(SHARE_VIEW_SWITCH_ID, "checked"),
         Output(VIEW_FORKED_MODAL_ID, "opened"),
         Output(VIEW_FORKED_TEXT_ID, "children"),
         Output(VIEW_FORKED_ID, "data"),
@@ -646,15 +657,15 @@ def _register_sync_after_edit(app: Dash) -> None:
 
         Arms `VIEW_NAV_SUPPRESS_ID` alongside its own `VIEW_SELECT_ID.value` write -- see that id's
         own docstring for why the picker's navigate-on-select callback needs it. Also reveals the
-        menu's rename/delete/share items and hides the "edits save to a copy" badge, since the page
-        on screen is now yours -- and asks whether to keep it (`VIEW_FORKED_MODAL_ID`), because a
+        menu's rename/delete items and the Private/Shared switch, and hides the "edits save to a copy"
+        badge, since the page on screen is now yours -- and asks whether to keep it (`VIEW_FORKED_MODAL_ID`), because a
         branch is otherwise silent: it's the edit you were making that created a view, something as
         small as hiding a run, and a view kept that you never meant to make is clutter (#735). Not for
         "Duplicate this view" (`VIEW_DUPLICATED_ID`), where you named the new view yourself.
 
-        The share toggle's own label needs refreshing here too, same reasoning: a branch always
-        creates a brand-new, private view (see `save_page`), so it may no longer match whatever this
-        menu item said about the page you branched *from* (if that one happened to be shared).
+        The switch is set to the page too, same reasoning: a branch always creates a brand-new,
+        private view (see `save_page`), so it may no longer say what it said of the page you branched
+        *from* (if that one happened to be shared).
         """
         page = page_model.BasicExperimentPage.model_validate_json(page_json)
         effective = page.id if page.owner_id is not None else None
@@ -688,7 +699,8 @@ def _register_sync_after_edit(app: Dash) -> None:
             True,
             _menu_class(is_owner=is_owner),
             _fork_hint_style(is_owner=is_owner),
-            _share_label(is_shared=page.shared),
+            _share_switch_style(is_owner=is_owner),
+            page.shared,
             *asked,
             False,
         )

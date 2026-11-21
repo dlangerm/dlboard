@@ -86,6 +86,7 @@ class Icon(StrEnum):
     PIN = "pin"
     RELEASED = "lock-open"
     SEARCH = "search"
+    SHARED = "users"
     SIDEBAR = "layout-sidebar"
     SIGN_OUT = "logout"
     SUGGEST = "sparkles"

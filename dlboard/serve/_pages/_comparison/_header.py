@@ -16,7 +16,7 @@ from dash.exceptions import PreventUpdate
 
 from dlboard.serve import Icon, get_current_user, get_data_store, icon
 from dlboard.serve import _constants as constants
-from dlboard.serve._component_ids import ButtonId, DivId, ModalId
+from dlboard.serve._component_ids import ButtonId, DivId, ModalId, ValueId
 from dlboard.serve._pages._comparison import _ids as ids
 from dlboard.serve._pages._delete_confirm import (
     DeleteConfirmIds,
@@ -28,6 +28,7 @@ from dlboard.serve._pages._experiment import _page_repository as repo
 from dlboard.serve._pages._experiment._live_updates import live_controls
 from dlboard.serve._pages._page_header import PageHeaderIds, page_header, register_page_header
 from dlboard.serve._pages._page_sections import ProjectPageTab
+from dlboard.serve._pages._sharing import sharing_switch
 from dlboard.serve._url import relative_path
 
 if TYPE_CHECKING:
@@ -37,7 +38,9 @@ if TYPE_CHECKING:
 
 HEADER_IDS = PageHeaderIds[ids.ComparisonPage].of("comparison", name=True)
 SHARED_BADGE_ID: DivId[ids.ComparisonPage] = DivId("comparison-shared")
-SHARE_ID: ButtonId[ids.ComparisonPage] = ButtonId("comparison-share")
+"""Whether the comparison is shared, for someone who doesn't own it; its owner has the switch (`SHARE_ID`) instead."""
+SHARE_ID: ValueId[ids.ComparisonPage] = ValueId("comparison-share")
+"""The comparison's Private/Shared switch (`sharing_switch`), for its owner."""
 DUPLICATE_ID: ButtonId[ids.ComparisonPage] = ButtonId("comparison-duplicate")
 
 DELETE_IDS = DeleteConfirmIds(
@@ -46,10 +49,6 @@ DELETE_IDS = DeleteConfirmIds(
     confirm=ButtonId[ids.ComparisonPage]("comparison-delete-confirm"),
     cancel=ButtonId[ids.ComparisonPage]("comparison-delete-cancel"),
 )
-
-
-def _share_label(*, shared: bool) -> str:
-    return "Stop sharing with the project" if shared else "Share with the project"
 
 
 def _shared_text(*, shared: bool) -> str:
@@ -69,19 +68,22 @@ def comparison_header(store: DataStore[...], page: page_model.BasicExperimentPag
             dmc.Group(
                 [
                     dmc.Text(f"by {summary.owner_name}" if summary else "", size="xs", c="dimmed"),
-                    dmc.Badge(
-                        _shared_text(shared=page.shared), id=SHARED_BADGE_ID, variant="light", size="sm"
-                    ),
                     *(
-                        []
+                        [sharing_switch(SHARE_ID, shared=page.shared, noun="comparison")]
                         if is_owner
                         else [
+                            dmc.Badge(
+                                _shared_text(shared=page.shared),
+                                id=SHARED_BADGE_ID,
+                                variant="light",
+                                size="sm",
+                            ),
                             dmc.Badge(
                                 "Your edits save to a copy of your own",
                                 variant="light",
                                 color="yellow",
                                 size="sm",
-                            )
+                            ),
                         ]
                     ),
                 ],
@@ -107,17 +109,6 @@ def comparison_header(store: DataStore[...], page: page_model.BasicExperimentPag
                             ),
                             dmc.MenuDropdown(
                                 [
-                                    *(
-                                        [
-                                            dmc.MenuItem(
-                                                _share_label(shared=page.shared),
-                                                id=SHARE_ID,
-                                                leftSection=icon(Icon.LINK),
-                                            )
-                                        ]
-                                        if is_owner
-                                        else []
-                                    ),
                                     dmc.MenuItem(
                                         "Duplicate to a copy of your own",
                                         id=DUPLICATE_ID,
@@ -178,21 +169,14 @@ def register_header_callbacks(app: Dash) -> None:
 
     register_page_header(app, HEADER_IDS, comparison, fetch=fetch, save=save)
 
-    @app.callback(
-        Output(SHARE_ID, "children"),
-        Output(SHARED_BADGE_ID, "children"),
-        Input(SHARE_ID, "n_clicks"),
-        comparison,
-        prevent_initial_call=True,
-    )
-    def toggle_sharing(n_clicks: int | None, page_id: int) -> tuple[str, str]:
-        if not n_clicks:
-            raise PreventUpdate
+    @app.callback(Input(SHARE_ID, "checked"), comparison, prevent_initial_call=True)
+    def toggle_sharing(checked: bool | None, page_id: int) -> None:  # noqa: FBT001
+        """Share the comparison, or stop: whichever way its owner flipped the switch, which already says so."""
         store = get_data_store()
         page = _stored(store, page_id)
-        shared = not page.shared
-        store.update_page(page.model_copy(update={"shared": shared}))
-        return _share_label(shared=shared), _shared_text(shared=shared)
+        if checked is None or page.shared == checked:
+            raise PreventUpdate
+        store.update_page(page.model_copy(update={"shared": checked}))
 
     @app.callback(
         Output(constants.LOCATION_ID, "href", allow_duplicate=True),
