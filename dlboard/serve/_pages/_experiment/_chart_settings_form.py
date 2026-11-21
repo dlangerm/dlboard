@@ -331,6 +331,25 @@ def _param_field_input(  # noqa: PLR0911
                 description=field.description,
                 style=_SMALL_FIELD,
             )
+        case models.ParameterFieldType.INT | models.ParameterFieldType.FLOAT if field.slider_step is not None:
+            # A setting felt out by trying it (`Slider`): its value shown as it is dragged, the chart drawn again once let go.
+            low, high = cast("float", field.minimum), cast("float", field.maximum)
+            return dmc.InputWrapper(
+                dmc.Slider(
+                    id=input_id,
+                    value=cast("float", value if value is not None else low),
+                    min=low,
+                    max=high,
+                    step=field.slider_step,
+                    marks=[{"value": low, "label": f"{low:g}"}, {"value": high, "label": f"{high:g}"}],
+                    updatemode="mouseup",
+                    mb="md",
+                    thumbLabel=label,
+                ),
+                label=label,
+                description=field.description,
+                style=_SMALL_FIELD,
+            )
         case models.ParameterFieldType.INT | models.ParameterFieldType.FLOAT:
             number_value = cast("int | float | None", value)
             return dmc.NumberInput(

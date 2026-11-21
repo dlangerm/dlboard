@@ -3182,6 +3182,50 @@ def _log_masks_over_a_picture(
     _wait_for_artifacts(experiment_id, len(artifacts))
 
 
+def test_a_line_charts_smoothing_is_a_slider_in_the_chart_editor(
+    page: Page, live_server_url: str, console_errors: list[str]
+) -> None:
+    """Smoothing was a number to type, guessed at: it is a slider from off to the most there is."""
+    store = get_system_data_store()
+    project = store.create_project(models.NewProject(name=f"Smoothing {time.monotonic_ns()}", description=""))
+    experiment = store.create_experiment(models.NewExperiment(project_id=project.id, name="noisy"))
+    api = BasicDlboardAPI(live_server_url)
+    run = api.create_run(models.NewRun(experiment_id=experiment.id))
+    api.log_metric_batch(
+        [
+            models.LoggedMetrics(
+                experiment_id=experiment.id,
+                run_id=run.id,
+                step=step,
+                metrics={"loss": 1.0 / (step + 1)},
+                timestamp_utc=pendulum.now("UTC"),
+            )
+            for step in range(5)
+        ]
+    )
+    shared = store.get_or_create_page(BasicExperimentPage, experiment_id=experiment.id)
+    line = models.ChartInstance[Any, Any](chart_type="line", parameters={"column": "loss", "x_axis": "step"})
+    store.update_page(
+        shared.model_copy(update={"panels": [PanelInstance[Any, Any](name="Loss", charts=[line])]})
+    )
+    page.goto(f"{live_server_url}/experiment/{experiment.id}")
+
+    editor = _open_layers_editor(page, page.locator(".dl-chart-item"))
+    editor.get_by_role("button", name="Display").click()
+    smoothing = editor.get_by_role("slider", name="Smoothing")
+    expect(smoothing).to_have_attribute("aria-valuenow", "0")
+    smoothing.focus()
+    for _ in range(5):
+        page.keyboard.press("ArrowRight")
+    expect(smoothing).to_have_attribute("aria-valuenow", "0.05")
+    page.locator(f"#{CHART_EDITOR_SAVE_ID}").click()
+    expect(page).to_have_url(re.compile(r"\?view=\d+$"))  # the shared page's chart, in a view of your own
+    saved = store.get_view(BasicExperimentPage, int(page.url.rsplit("=", 1)[-1]))
+    assert saved is not None
+    assert saved.panels[0].charts[0].parameters["smoothing"] == pytest.approx(0.05)
+    assert console_errors == []
+
+
 def _open_layers_editor(page: Page, chart: Locator) -> Locator:
     """Open the chart editor on `chart` and its Layers section; the editor's pane."""
     chart.hover()

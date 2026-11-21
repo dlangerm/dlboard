@@ -22,6 +22,7 @@ from dlboard.models._view import (
     ParameterField,
     ParameterFieldType,
     SettingsSection,
+    Slider,
     UnknownChartTypeError,
 )
 
@@ -155,6 +156,33 @@ def test_two_different_sections_may_not_share_a_title(monkeypatch: pytest.Monkey
     monkeypatch.setitem(ChartTypeRegistry._all_charts, clashing.name, clashing)
 
     with pytest.raises(ValueError, match="two different settings sections"):
+        ChartTypeRegistry.get_registered_chart_types()
+
+
+class _FakeParamsWithSlider(BaseModel, frozen=True, extra="forbid"):
+    smoothing: typing.Annotated[float, Slider(step=0.01)] = Field(default=0.0, ge=0.0, le=0.99)
+    height: int = Field(default=300, ge=100)
+
+
+class _FakeParamsWithUnboundedSlider(BaseModel, frozen=True, extra="forbid"):
+    width: typing.Annotated[int, Slider(step=10)] = Field(default=300, ge=100)
+
+
+def test_a_setting_marked_slider_is_slid_between_its_bounds_and_needs_both(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    make_fake_chart("fake-slider", _FakeParamsWithSlider).register()
+    fields = ChartTypeRegistry.get_registered_chart_types()["fake-slider"]
+    assert (fields["smoothing"].slider_step, fields["smoothing"].minimum, fields["smoothing"].maximum) == (
+        0.01,
+        0,
+        0.99,
+    )
+    assert fields["height"].slider_step is None  # a number is typed unless marked
+
+    unbounded = make_fake_chart("fake-unbounded-slider", _FakeParamsWithUnboundedSlider)
+    monkeypatch.setitem(ChartTypeRegistry._all_charts, unbounded.name, unbounded)
+    with pytest.raises(ValueError, match="both ge and le"):
         ChartTypeRegistry.get_registered_chart_types()
 
 
