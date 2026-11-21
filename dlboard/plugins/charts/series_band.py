@@ -64,7 +64,9 @@ class SeriesBandSettings(BaseModel, frozen=True, extra="forbid", use_attribute_d
     """How many of the panel's newest runs are drawn. Each one costs a read of every metric the band spreads over."""
     show_mean: typing.Annotated[bool, DISPLAY_SECTION] = False
     """Draw the mean as a thinner dotted line beside the median. Across metrics of different scales it follows the largest."""
-    max_groups: typing.Annotated[int, ADVANCED_SECTION] = Field(default=12, ge=1, le=24)
+    max_groups: typing.Annotated[int, ADVANCED_SECTION] = Field(
+        default=12, ge=1, le=24, title="Max groups (Group by)"
+    )
     """The most groups drawn, by their names in order: each is a band for each run, and more are unreadable."""
     height: typing.Annotated[int, DISPLAY_SECTION] = 300
     width: typing.Annotated[int | None, DISPLAY_SECTION] = Field(default=None)

@@ -1,0 +1,63 @@
+/* The chart settings form (`_chart_settings_layers.py`): a row per setting, its box, what it is, and its value, in
+   columns that line up from row to row. A setting left to each chart (its box clear) is dimmed. */
+.dl-chart-settings-row {
+  display: grid;
+  grid-template-columns: 1.25rem minmax(0, 1fr) minmax(11rem, 15rem);
+  column-gap: 0.75rem;
+  align-items: center;
+  padding: 0.5rem 0.25rem;
+  border-bottom: 1px solid var(--mantine-color-default-border);
+}
+.dl-chart-settings-row:last-child {
+  border-bottom: none;
+}
+.dl-chart-settings-head {
+  padding-block: 0 0.25rem;
+  font-size: var(--mantine-font-size-xs);
+  font-weight: 600;
+  color: var(--mantine-color-dimmed);
+}
+.dl-chart-settings-section {
+  margin-top: var(--mantine-spacing-md);
+  padding-bottom: 0.25rem;
+  border-bottom: 1px solid var(--mantine-color-default-border);
+  font-size: var(--mantine-font-size-xs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--mantine-color-dimmed);
+}
+.dl-chart-settings-advanced > summary {
+  cursor: pointer;
+  list-style-position: inside;
+}
+.dl-chart-settings-advanced > summary:hover {
+  color: var(--mantine-color-text);
+}
+/* A slider's end marks sit half outside its track: inset it so they stay in the column. */
+.dl-chart-settings-value .mantine-Slider-root {
+  padding-inline: 1rem;
+}
+.dl-chart-settings-row:has(.dl-chart-settings-set input:not(:checked)) .dl-chart-settings-value {
+  opacity: 0.55;
+}
+.dl-chart-settings-row:has(.dl-chart-settings-set input:not(:checked)) .dl-chart-settings-value:focus-within {
+  opacity: 1;
+}
+.dl-chart-settings-info {
+  display: inline-flex;
+  color: var(--mantine-color-dimmed);
+  cursor: help;
+}
+@media (max-width: 36em) {
+  .dl-chart-settings-row {
+    grid-template-columns: 1.25rem minmax(0, 1fr);
+    row-gap: 0.375rem;
+  }
+  .dl-chart-settings-value {
+    grid-column: 2;
+  }
+  .dl-chart-settings-head > :last-child {
+    display: none;
+  }
+}

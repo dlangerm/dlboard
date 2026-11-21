@@ -18,7 +18,7 @@ from dlboard.plugins.charts.line_chart import LineChart
 from dlboard.plugins.charts.table_chart import TableChart
 from dlboard.serve._grid import CHOICE_RENDERER, SLIDER_RENDERER
 from dlboard.serve._pages._experiment import _chart_settings_form as settings_form
-from dlboard.serve._pages._experiment._chart_settings_form import _param_field_input, build_chart_param_form
+from dlboard.serve._pages._experiment._chart_settings_form import build_chart_param_form, setting_input
 from dlboard.serve._pages._experiment._column_catalog import KEY_PICKER_LIMIT, ColumnCatalog
 
 if TYPE_CHECKING:
@@ -220,7 +220,7 @@ def test_a_numbers_range_bounds_its_input() -> None:
         name="tag_precision", type=ParameterFieldType.INT, required=False, default=4, minimum=1, maximum=15
     )
 
-    props = _to_props(_param_field_input(field.name, field, ColumnCatalog()))
+    props = _to_props(setting_input(field.name, field, ColumnCatalog()))
 
     assert (props["min"], props["max"]) == (1, 15)
 
@@ -267,7 +267,7 @@ def test_build_validated_chart_instance_rejects_parameters_that_would_break_late
 )
 def test_param_field_input_picks_widget_by_field_type(field: ParameterField, expected_type: type) -> None:
     catalog = ColumnCatalog(metrics=("loss", "acc"))
-    component = _param_field_input(field.name, field, catalog)
+    component = setting_input(field.name, field, catalog)
     assert isinstance(component, expected_type)
 
 
@@ -284,7 +284,7 @@ def test_param_field_input_number_gets_a_clear_button_only_when_optional(
     required: bool, *, has_clear_button: bool
 ) -> None:
     field = ParameterField(name="width", type=ParameterFieldType.INT, required=required, default=None)
-    component = _param_field_input(field.name, field, ColumnCatalog())
+    component = setting_input(field.name, field, ColumnCatalog())
     props = cast("Any", component).to_plotly_json()["props"]  # pyrefly: ignore [unknown-variable-type]
     if has_clear_button:
         assert props["rightSection"] is not None
@@ -299,7 +299,7 @@ def test_param_field_input_offers_grouping_kind_as_a_select() -> None:
     field = ParameterField(
         name="x_axis", type=ParameterFieldType.STR, required=True, column_kind=ColumnKind.GROUPING
     )
-    component = _param_field_input(field.name, field, ColumnCatalog(metrics=("loss",), hparams=("lr",)))
+    component = setting_input(field.name, field, ColumnCatalog(metrics=("loss",), hparams=("lr",)))
     assert isinstance(component, dmc.Select)
 
 
@@ -307,13 +307,13 @@ def test_param_field_input_falls_back_to_text_when_no_columns_of_kind() -> None:
     field = ParameterField(
         name="column", type=ParameterFieldType.STR, required=True, column_kind=ColumnKind.ARTIFACT
     )
-    component = _param_field_input(field.name, field, ColumnCatalog(metrics=("loss",)))
+    component = setting_input(field.name, field, ColumnCatalog(metrics=("loss",)))
     assert isinstance(component, dmc.TextInput)
 
 
 def test_param_field_input_uses_override_over_default() -> None:
     field = ParameterField(name="sample", type=ParameterFieldType.BOOL, required=False, default=True)
-    component = _param_field_input(field.name, field, ColumnCatalog(), override=False)
+    component = setting_input(field.name, field, ColumnCatalog(), override=False)
     # dash-mantine-components ships no py.typed marker, so pyrefly can't see this attr.
     assert cast("Any", component).to_plotly_json()["props"]["checked"] is False
 
@@ -329,7 +329,7 @@ def test_param_field_input_renders_fixed_choices_as_a_select() -> None:
         default="number",
         choices=("number", "category"),
     )
-    component = _param_field_input(field.name, field, ColumnCatalog(), override="category")
+    component = setting_input(field.name, field, ColumnCatalog(), override="category")
 
     assert isinstance(component, dmc.Select)
     props = cast("Any", component).to_plotly_json()["props"]  # pyrefly: ignore [unknown-variable-type]
@@ -351,7 +351,7 @@ def test_a_tables_names_are_suggested_as_they_are_typed_in_the_grid(
     catalog = ColumnCatalog(artifacts=("boxes", "ckpt", "mask"), layers=("boxes", "mask"))
 
     grid = find_props(
-        _param_field_input(field.name, field, catalog), settings_form._CHART_PARAM_TABLE.of("overlays")
+        setting_input(field.name, field, catalog), settings_form._CHART_PARAM_TABLE.of("overlays")
     )
 
     name_column: dict[str, Any] = (grid or {})["columnDefs"][0]
@@ -365,7 +365,7 @@ def test_a_number_with_a_range_is_a_slider_in_its_cell() -> None:
     field = ParameterField(name="overlays", type=ParameterFieldType.TABLE, required=False, columns=(opacity,))
 
     grid = find_props(
-        _param_field_input(field.name, field, ColumnCatalog()),
+        setting_input(field.name, field, ColumnCatalog()),
         settings_form._CHART_PARAM_TABLE.of("overlays"),
     )
 
@@ -386,7 +386,7 @@ def test_a_few_choices_are_side_by_side_in_their_cell_and_many_are_picked_from_a
     field = ParameterField(name="layers", type=ParameterFieldType.TABLE, required=False, columns=(few, many))
 
     grid = find_props(
-        _param_field_input(field.name, field, ColumnCatalog()), settings_form._CHART_PARAM_TABLE.of("layers")
+        setting_input(field.name, field, ColumnCatalog()), settings_form._CHART_PARAM_TABLE.of("layers")
     )
 
     columns: list[dict[str, Any]] = (grid or {})["columnDefs"]
@@ -405,7 +405,7 @@ def test_a_row_the_chart_supplies_comes_first_by_its_label_and_is_not_the_person
     saved = {"samples/mask": {"opacity": 0.3}, "truth": {"visibility": "hidden"}}
 
     grid = find_props(
-        _param_field_input(
+        setting_input(
             field.name,
             field,
             ColumnCatalog(),
@@ -437,7 +437,7 @@ def test_a_number_or_a_name_typed_in_redraws_the_chart_only_once_the_typing_paus
 ) -> None:
     field = ParameterField(name="setting", type=field_type, required=False)
 
-    props = _to_props(_param_field_input(field.name, field, ColumnCatalog()))
+    props = _to_props(setting_input(field.name, field, ColumnCatalog()))
 
     assert props["debounce"] == settings_form.INPUT_DEBOUNCE_MS
 
@@ -475,7 +475,7 @@ def test_a_key_picker_lists_a_bounded_number_of_names_however_many_are_logged(fi
     """The picker lists only this many names at once, however many are logged, so a thousand keys cannot freeze it."""
     catalog = ColumnCatalog(metrics=tuple(f"metric_{i:05}" for i in range(20 * KEY_PICKER_LIMIT)))
 
-    component = cast("Any", _param_field_input(field.name, field, catalog))
+    component = cast("Any", setting_input(field.name, field, catalog))
     props: dict[str, Any] = component.to_plotly_json()["props"]
 
     assert props["limit"] == KEY_PICKER_LIMIT

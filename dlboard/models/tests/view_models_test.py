@@ -23,6 +23,7 @@ from dlboard.models._view import (
     ParameterField,
     ParameterFieldType,
     SettingsSection,
+    SettingValue,
     Slider,
     UnknownChartTypeError,
 )
@@ -221,7 +222,7 @@ def test_a_setting_may_be_layered_if_it_says_how_a_chart_looks_or_is_marked_laye
     ],
 )
 def test_a_chart_is_drawn_under_its_page_then_its_panel_settings_never_saved(
-    layers: list[dict[str, object]], drawn: dict[str, object]
+    layers: list[dict[str, SettingValue]], drawn: dict[str, SettingValue]
 ) -> None:
     make_fake_chart("fake-layered", _FakeParamsLayered).register()
     chart = ChartInstance[typing.Any, typing.Any](

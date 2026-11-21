@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import typing
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 import pandas as pd
@@ -46,7 +47,7 @@ class DocumentSettings(BaseModel, frozen=True, extra="ignore", populate_by_name=
     """What a comparison is for, in its owner's words. An experiment has its own description, stored with it."""
     hparam_columns: list[str] = Field(default_factory=list, alias="hparam-table-selected")
     """Which hyperparameter columns the run-comparison table shows."""
-    chart_settings: dict[str, object] = Field(default_factory=dict)
+    chart_settings: dict[str, models.SettingValue] = Field(default_factory=dict)
     """
     Settings the page draws all its charts with, by name, over each chart's own; a panel's own say over these
     (`PanelInstance.drawn`). Kept whether or not a chart on the page has the setting.
@@ -130,6 +131,62 @@ class ChartLocation(typing.NamedTuple):
     panel: models.PanelInstance[Any, Any]
     index: int
     chart: models.ChartInstance[Any, Any]
+
+
+class LayerSource(StrEnum):
+    """Whose chart settings draw a chart's setting in place of its own."""
+
+    PAGE = "page"
+    PANEL = "panel"
+
+
+def layered_settings(
+    page: BasicExperimentPage, location: ChartLocation
+) -> dict[str, tuple[LayerSource, object]]:
+    """Each setting of the chart at `location` its page's or its panel's chart settings draw it with, whose, and as what."""
+    chart = location.chart
+    if chart.locked:
+        return {}
+    try:
+        fields = models.ChartTypeRegistry.parameter_fields(chart.chart_type)
+    except models.UnknownChartTypeError:
+        return {}
+    layered: dict[str, tuple[LayerSource, object]] = {}
+    for source, layer in (
+        (LayerSource.PAGE, page.document.chart_settings),
+        (LayerSource.PANEL, location.panel.chart_settings),  # after the page's: it says last
+    ):
+        drawn = chart.drawn_with((layer,)).parameters
+        layered |= {
+            name: (source, value)
+            for name, value in layer.items()
+            if name in fields and fields[name].layerable and drawn.get(name) == value
+        }
+    return layered
+
+
+def as_edited(
+    page: BasicExperimentPage, location: ChartLocation, edited: models.ChartInstance[Any, Any]
+) -> models.ChartInstance[Any, Any]:
+    """
+    The chart at `location` as the chart editor's form `edited` it, the form having started from the chart as drawn.
+
+    Changing a setting its page's or its panel's chart settings draw it with locks it, saving every setting as the form
+    shows it: else that change would never be drawn. A setting left as drawn stays the chart's own, drawn over as before.
+    """
+    layered = layered_settings(page, location)
+    held = location.chart
+    if not layered or edited.chart_type != held.chart_type:
+        return edited.model_copy(update={"locked": held.locked})
+    model: type[BaseModel] = models.ChartTypeRegistry.get_chart_type(held.chart_type).parameter_type()
+    layers = (page.document.chart_settings, location.panel.chart_settings)
+    drawn = model.model_validate(held.drawn_with(layers).parameters).model_dump()
+    shown = model.model_validate(edited.parameters).model_dump()
+    if any(shown[name] != drawn[name] for name in layered):
+        return edited.model_copy(update={"locked": True})
+    own = {name: value for name, value in edited.parameters.items() if name not in layered}
+    own |= {name: held.parameters[name] for name in layered if name in held.parameters}
+    return edited.model_copy(update={"parameters": own, "locked": False})
 
 
 def locate_chart(panels: list[models.PanelInstance[Any, Any]], chart_id: str) -> ChartLocation | None:

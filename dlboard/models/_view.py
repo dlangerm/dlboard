@@ -146,6 +146,10 @@ NamePatternList = typing.Annotated[list[str], NamePatterns()]
 """The type of a setting marked `NamePatterns`."""
 
 
+SettingValue: typing.TypeAlias = bool | int | float | str | list[str] | None
+"""What a panel's or a page's chart settings hold for a setting (`ParameterField.layerable`: never a table)."""
+
+
 @dataclasses.dataclass(frozen=True)
 class Layered:
     """
@@ -597,7 +601,7 @@ class ChartInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, 
     locked: bool = False
     """Drawn with its own settings only, whatever its panel's and its page's chart settings say (`drawn_with`)."""
 
-    def drawn_with(self, layers: Sequence[Mapping[str, object]]) -> ChartInstance[_Dataframe, _Chart]:
+    def drawn_with(self, layers: Sequence[Mapping[str, SettingValue]]) -> ChartInstance[_Dataframe, _Chart]:
         """
         The chart as it is drawn under `layers` of chart settings, a page's then its panel's: the last one says last.
 
@@ -694,14 +698,14 @@ class PanelInstance(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, 
     grid_columns: GridColumns = 3
     """How many equal-width columns the `"grid"` layout has; unused by `"packed"`."""
 
-    chart_settings: dict[str, object] = {}
+    chart_settings: dict[str, SettingValue] = {}
     """
     Settings this panel draws its charts with, by name, over the page's and over each chart's own (`drawn_with`).
 
     Kept whether or not a chart of the panel has the setting: one that has none waits here for a chart that does.
     """
 
-    def drawn(self, page_settings: Mapping[str, object]) -> PanelInstance[_Dataframe, _Chart]:
+    def drawn(self, page_settings: Mapping[str, SettingValue]) -> PanelInstance[_Dataframe, _Chart]:
         """The panel with each chart as it is drawn: under `page_settings` (its page's chart settings), then its own."""
         if not page_settings and not self.chart_settings:
             return self
@@ -752,7 +756,9 @@ class NewPage(BaseModel, typing.Generic[_Dataframe, _Chart], frozen=True, extra=
     panels: list[PanelInstance[_Dataframe, _Chart]] = []
     """The set of panel instances on a page."""
 
-    page_settings: dict[str, int | float | bool | str | list[str] | list[int] | dict[str, object] | None] = {}
+    page_settings: dict[
+        str, int | float | bool | str | list[str] | list[int] | dict[str, SettingValue] | None
+    ] = {}
     """Page settings: a page's own, typed by the page that keeps them (a chart settings map among them)."""
 
     @field_validator("panels", "page_settings", mode="before")

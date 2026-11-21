@@ -27,7 +27,7 @@ from dlboard.serve._pages._experiment import _ids as ids
 from dlboard.serve._pages._experiment._column_catalog import KEY_PICKER_LIMIT, first_matches
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Iterable, Mapping, Sequence
 
     from dash.development.base_component import Component
 
@@ -66,7 +66,7 @@ FIXED_ROW_CLASS: Final = "dl-fixed-row"
 """The class of a row the chart supplies in a settings table."""
 
 
-class _FieldPattern(PatternId[ids.ExperimentPage]):
+class FieldPattern(PatternId[ids.ExperimentPage]):
     """A family of the form's components, with one per field of whichever chart type the form is showing."""
 
     KEYS: ClassVar[tuple[str, ...]] = ("field",)
@@ -81,16 +81,16 @@ class FieldID(TriggeredId):
     field: str
 
 
-CHART_PARAM: Final = _FieldPattern("chart-param")
+CHART_PARAM: Final = FieldPattern("chart-param")
 """A field's own input, which reports through `value` (or a Switch's `checked`)."""
-_CHART_PARAM_CLEAR: Final = _FieldPattern("chart-param-clear")
-CHART_PARAM_TABLE_DATA: Final = _FieldPattern("chart-param-table-data")
+_CHART_PARAM_CLEAR: Final = FieldPattern("chart-param-clear")
+CHART_PARAM_TABLE_DATA: Final = FieldPattern("chart-param-table-data")
 """A `TABLE` chart parameter's own value: a `Store` holding its rows as the mapping the setting takes. Kept apart
 from `CHART_PARAM`, whose `data` is a Select's options."""
-_CHART_PARAM_TABLE: Final = _FieldPattern("chart-param-table")
+_CHART_PARAM_TABLE: Final = FieldPattern("chart-param-table")
 """The editable grid of a `TABLE` chart parameter."""
-_CHART_PARAM_TABLE_ADD: Final = _FieldPattern("chart-param-table-add")
-_CHART_PARAM_TABLE_REMOVE: Final = _FieldPattern("chart-param-table-remove")
+_CHART_PARAM_TABLE_ADD: Final = FieldPattern("chart-param-table-add")
+_CHART_PARAM_TABLE_REMOVE: Final = FieldPattern("chart-param-table-remove")
 
 
 class EditedChart(BaseModel, frozen=True):
@@ -100,6 +100,8 @@ class EditedChart(BaseModel, frozen=True):
     parameters: dict[str, Any]
     fixed_rows: models.FixedRows = Field(default_factory=dict)
     """The rows the chart draws whether or not they are saved (`ChartType.fixed_table_rows`), listed in its tables."""
+    layered: dict[str, str] = Field(default_factory=dict)
+    """What its panel's or its page's chart settings draw it with in place of its own, by setting: what the form says."""
 
 
 def merge_chart_param_values(  # noqa: PLR0913
@@ -310,58 +312,69 @@ def key_picker_options(
     return list(dict.fromkeys([*keep, *first_matches(choices, search)]))
 
 
-def _param_field_input(  # noqa: PLR0911
+def setting_input(  # noqa: PLR0911, PLR0913
     field_name: str,
     field: models.ParameterField,
     catalog: ColumnCatalog,
     *,
-    override: bool | int | float | str | list[str] | dict[str, Any] | None = None,
+    override: models.SettingValue | dict[str, Any] = None,
     fixed_rows: dict[str, str] | None = None,
+    pattern: FieldPattern = CHART_PARAM,
+    note: str | None = None,
+    labelled: bool = True,
 ) -> Component:
-    input_id = CHART_PARAM.of(field_name)
-    label = f"{field.label} *" if field.required else field.label
-    value = override if override is not None else field.default
+    """
+    The input of one setting, holding `override` (else its default), with the id `pattern` gives it.
+
+    `CHART_PARAM` is the chart editor's: there, an optional number has a button that clears it, and typing waits for a
+    pause before it says what was typed, as the chart is drawn again from every value. `note` is said under the
+    setting's own description (that a panel's chart settings draw it in place of what the chart saves, say). Not
+    `labelled`, it is the input alone, named for a screen reader: for a form that says what it is beside it.
+    """
+    input_id = pattern.of(field_name)
+    label = f"{field.label} *" if field.required and pattern is CHART_PARAM else field.label
+    value = cast("Any", override if override is not None else field.default)
+    description = " ".join(part for part in (field.description, note) if part) or None
+    named = cast(
+        "dict[str, Any]",
+        {"label": label, "description": description} if labelled else {"aria-label": field.label},
+    )
+    debounce: int | bool = INPUT_DEBOUNCE_MS if pattern is CHART_PARAM else False
 
     match field.type:
         case models.ParameterFieldType.BOOL:
             return dmc.Switch(
                 id=input_id,
-                label=label,
                 checked=bool(value) if value is not None else False,
-                description=field.description,
+                **named,
                 style=_SMALL_FIELD,
             )
         case models.ParameterFieldType.INT | models.ParameterFieldType.FLOAT if field.slider_step is not None:
             # A setting felt out by trying it (`Slider`): its value shown as it is dragged, the chart drawn again once let go.
             low, high = cast("float", field.minimum), cast("float", field.maximum)
-            return dmc.InputWrapper(
-                dmc.Slider(
-                    id=input_id,
-                    value=cast("float", value if value is not None else low),
-                    min=low,
-                    max=high,
-                    step=field.slider_step,
-                    marks=[{"value": low, "label": f"{low:g}"}, {"value": high, "label": f"{high:g}"}],
-                    updatemode="mouseup",
-                    mb="md",
-                    thumbLabel=label,
-                ),
-                label=label,
-                description=field.description,
-                style=_SMALL_FIELD,
+            slider = dmc.Slider(
+                id=input_id,
+                value=cast("float", value if value is not None else low),
+                min=low,
+                max=high,
+                step=field.slider_step,
+                marks=[{"value": low, "label": f"{low:g}"}, {"value": high, "label": f"{high:g}"}],
+                updatemode="mouseup",
+                mb="md",
+                thumbLabel=label,
             )
+            return dmc.InputWrapper(slider, **named, style=_SMALL_FIELD) if labelled else slider
         case models.ParameterFieldType.INT | models.ParameterFieldType.FLOAT:
             number_value = cast("int | float | None", value)
             return dmc.NumberInput(
                 id=input_id,
-                label=label,
                 value=number_value,
                 min=field.minimum,
                 max=field.maximum,
                 step=1 if field.type == models.ParameterFieldType.INT else 0.1,
                 # Typing redraws the chart only once it pauses, not on every digit (each redraw is a fetch).
-                debounce=INPUT_DEBOUNCE_MS,
-                description=field.description,
+                debounce=debounce,
+                **named,
                 # Optional fields (a default, not required) get a visible clear button that resets
                 # to that default -- clearing via backspace alone works too, but isn't discoverable.
                 rightSection=(
@@ -374,7 +387,7 @@ def _param_field_input(  # noqa: PLR0911
                         size="xs",
                         **cast("dict[str, Any]", {"aria-label": "Reset to default"}),
                     )
-                    if not field.required
+                    if not field.required and pattern is CHART_PARAM
                     else None
                 ),
                 rightSectionPointerEvents="all",
@@ -394,11 +407,10 @@ def _param_field_input(  # noqa: PLR0911
             patterns = cast("list[str]", value or [])
             return dmc.TagsInput(
                 id=input_id,
-                label=label,
                 data=key_picker_options(field, catalog, keep=patterns),
                 limit=KEY_PICKER_LIMIT,
                 value=patterns,
-                description=field.description,
+                **named,
                 placeholder="Pick a name, or type a pattern: * is any text, # is digits",
                 clearable=True,
                 style=_WIDE_FIELD,
@@ -408,12 +420,11 @@ def _param_field_input(  # noqa: PLR0911
                 select_value = cast("str | None", value)
                 return dmc.Select(
                     id=input_id,
-                    label=label,
                     data=list(field.choices),
                     value=select_value,
                     # An optional choice with no default (`None`: "pick for me") can be put back to blank.
                     allowDeselect=not field.required and field.default is None,
-                    description=field.description,
+                    **named,
                     style=_SMALL_FIELD,
                 )
 
@@ -422,38 +433,35 @@ def _param_field_input(  # noqa: PLR0911
                 multiselect_value = cast("list[str] | None", value)
                 return dmc.MultiSelect(
                     id=input_id,
-                    label=label,
                     data=key_picker_options(field, catalog, keep=multiselect_value or []),
                     limit=KEY_PICKER_LIMIT,
                     value=multiselect_value or [],
                     searchable=True,
-                    description=field.description,
+                    **named,
                     style=_WIDE_FIELD,
                 )
             if options:
                 return dmc.Select(
                     id=input_id,
-                    label=label,
                     data=key_picker_options(field, catalog, keep=[cast("str", value)] if value else []),
                     limit=KEY_PICKER_LIMIT,
-                    value=value,  # pyrefly: ignore [bad-argument-type]
+                    value=value,
                     searchable=True,
-                    description=field.description,
+                    **named,
                     style=_MEDIUM_FIELD,
                 )
             return dmc.TextInput(
                 id=input_id,
-                label=label,
                 # Typing a name redraws the chart only once it pauses, as a number does.
-                debounce=INPUT_DEBOUNCE_MS,
-                value=value or "",  # pyrefly: ignore [bad-argument-type]
-                description=field.description,
+                debounce=debounce,
+                value=value or "",
+                **named,
                 style=_MEDIUM_FIELD,
             )
 
 
 def _register_clear_button(app: Dash) -> None:
-    # The ✕ button next to an optional numeric chart-param field (see `_param_field_input`)
+    # The ✕ button next to an optional numeric chart-param field (see `setting_input`)
     # resets it to empty/default -- purely a client-side convenience for something backspace
     # already does, so no round trip needed.
     app.clientside_callback(
@@ -500,13 +508,28 @@ def build_chart_param_form(
     of_edited = edited if edited and edited.chart_type == chart_type_name else None
     initial_params = of_edited.parameters if of_edited else dict[str, Any]()
     fixed_rows = of_edited.fixed_rows if of_edited else models.FixedRows()
-    by_section: dict[models.SettingsSection, list[Component]] = {}
-    for name, field in fields.items():
-        by_section.setdefault(field.section, []).append(
-            _param_field_input(
-                name, field, catalog, override=initial_params.get(name), fixed_rows=fixed_rows.get(name)
-            )
+    layered = of_edited.layered if of_edited else dict[str, str]()
+    return in_sections(
+        (
+            field.section,
+            setting_input(
+                name,
+                field,
+                catalog,
+                override=initial_params.get(name),
+                fixed_rows=fixed_rows.get(name),
+                note=layered.get(name),
+            ),
         )
+        for name, field in fields.items()
+    )
+
+
+def in_sections(inputs: Iterable[tuple[models.SettingsSection, Component]]) -> list[Component]:
+    """Settings' inputs, each in its section: a collapsible group a section, or just the inputs when there is one."""
+    by_section: dict[models.SettingsSection, list[Component]] = {}
+    for section, setting in inputs:
+        by_section.setdefault(section, []).append(setting)
     if len(by_section) <= 1:
         return [field for section_fields in by_section.values() for field in section_fields]
     return [

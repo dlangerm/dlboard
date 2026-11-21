@@ -230,7 +230,9 @@ class LineChartSettings(BaseModel, frozen=True, extra="forbid", use_attribute_do
     """"log" for values spread over orders of magnitude (a loss early and late in training). It can't place a value at or below 0: those are left out, and the chart says how many."""
     group_by: typing.Annotated[str, DISPLAY_SECTION] = Field(default="")
     """A hyperparameter (`lr`): a line per value of it, the mean of its runs in a band from the lowest to the highest. Leave blank for a line per run."""
-    max_groups: typing.Annotated[int, ADVANCED_SECTION] = Field(default=12, ge=1, le=24)
+    max_groups: typing.Annotated[int, ADVANCED_SECTION] = Field(
+        default=12, ge=1, le=24, title="Max groups (Group by)"
+    )
     """The most groups drawn, in the order of their values: past a dozen the bands are too many to tell apart."""
 
     @model_validator(mode="after")

@@ -73,6 +73,33 @@ def test_a_page_is_drawn_under_its_chart_settings_then_each_panels_and_keeps_its
     assert stored.panels[0].charts == [line]  # what is stored is never drawn into
 
 
+@pytest.mark.parametrize(
+    ("form", "saved", "locked"),
+    [
+        pytest.param({"height": 640}, {"height": 640}, True, id="a-setting-the-panel-sets-locks-it-as-shown"),
+        pytest.param(
+            {"height": 520, "y_scale": "log"}, {"y_scale": "log"}, False, id="as-drawn-stays-its-own"
+        ),
+    ],
+)
+def test_an_edit_of_a_setting_its_panel_sets_locks_the_chart_and_any_other_leaves_it_drawn_by_the_panel(
+    form: dict[str, object], saved: dict[str, object], locked: bool
+) -> None:
+    LineChart.register(allow_override=True)
+    chart = ChartInstance[pd.DataFrame, object](
+        chart_type="line", parameters={"column": "loss", "x_axis": "step"}
+    )
+    panel = PanelInstance[pd.DataFrame, object](name="p", charts=[chart], chart_settings={"height": 520})
+    page = page_model.BasicExperimentPage(id=1, panels=[panel])
+    location = page_model.locate_chart(page.panels, chart.id)
+    assert location is not None
+    edited = chart.model_copy(update={"parameters": {**chart.parameters, **form}})
+
+    result = page_model.as_edited(page, location, edited)
+
+    assert (result.parameters, result.locked) == ({**chart.parameters, **saved}, locked)
+
+
 def test_a_settings_change_writes_only_what_it_sets_and_keeps_every_other_key() -> None:
     stored = {"hparam-table-selected": ["lr"], "open_panel": ["a"], "from-a-newer-version": True}
 

@@ -34,6 +34,10 @@ from dlboard.serve._pages._experiment import _page_edits as edits
 from dlboard.serve._pages._experiment import _page_model as page_model
 from dlboard.serve._pages._experiment import _panel_view as panel_view
 from dlboard.serve._pages._experiment._bulk_chart_edits import bulk_chart_modals, register_bulk_chart_edits
+from dlboard.serve._pages._experiment._chart_settings_layers import (
+    chart_settings_modal,
+    register_chart_settings,
+)
 from dlboard.serve._pages._experiment._paging import Paging
 
 if TYPE_CHECKING:
@@ -189,6 +193,7 @@ def panel_control_modals() -> list[Component]:
             body="This can't be undone.",
         ),
         *bulk_chart_modals(),
+        chart_settings_modal(),
     ]
 
 
@@ -641,3 +646,4 @@ def register_panel_controls_callbacks(app: Dash) -> None:
     _register_chart_panel_move(app)
     _register_rename(app)
     register_bulk_chart_edits(app)
+    register_chart_settings(app)

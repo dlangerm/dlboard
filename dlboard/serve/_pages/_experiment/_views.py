@@ -132,7 +132,9 @@ class ViewFile(BaseModel, extra="forbid"):
 
     name: str
     panels: list[models.PanelInstance[Any, Any]]
-    page_settings: dict[str, int | float | bool | str | list[str] | list[int] | dict[str, object] | None] = {}
+    page_settings: dict[
+        str, int | float | bool | str | list[str] | list[int] | dict[str, models.SettingValue] | None
+    ] = {}
 
     @classmethod
     def of(cls, page: models.NewPage[Any, Any], *, name: str) -> ViewFile:

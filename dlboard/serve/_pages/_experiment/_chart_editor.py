@@ -205,10 +205,16 @@ def _settings_form(
     if isinstance(target := _target_of(target_data), EditChart) and (
         location := page_model.locate_chart(page.panels, target.chart_id)
     ):
+        # The form starts from the chart as it is drawn: what its panel's or its page's chart settings set, it shows.
+        drawn = location.chart.drawn_with((page.document.chart_settings, location.panel.chart_settings))
         edited = EditedChart(
             chart_type=location.chart.chart_type,
-            parameters=models.ChartTypeRegistry.current_parameters(location.chart),
+            parameters=models.ChartTypeRegistry.current_parameters(drawn),
             fixed_rows=models.ChartTypeRegistry.fixed_table_rows(location.chart, catalog),
+            layered={
+                name: f"Set by the {source}'s chart settings. Change it here to lock this chart to its own settings."
+                for name, (source, _value) in page_model.layered_settings(page, location).items()
+            },
         )
     return build_chart_param_form(chart_type_name, edited, catalog=catalog)
 
@@ -272,8 +278,8 @@ def _draw_form(  # noqa: PLR0913
         held = page_model.locate_chart(page.panels, chart_id) if chart_id is not None else None
         chart = build_validated_chart_instance(chart_type_name, parameters, chart_id)
         if held is not None:
-            # Drawn as it will be: under its page's and its panel's chart settings, unless it is locked.
-            chart = chart.model_copy(update={"locked": held.chart.locked}).drawn_with(
+            # Drawn as it will be saved: under its page's and its panel's chart settings, unless the edit locks it.
+            chart = page_model.as_edited(page, held, chart).drawn_with(
                 (page.document.chart_settings, held.panel.chart_settings)
             )
         scope = page_scope(store, page)
@@ -531,8 +537,8 @@ def _placed(
             if location is None:
                 raise page_model.NotOnThePageError(_NO_LONGER_ON_THE_PAGE)
             panel_name, index = location.panel.name, location.index
-            # The form is of the chart's settings: whether it is locked is the card's to say, and stays.
-            chart = chart.model_copy(update={"locked": location.chart.locked})
+            # Locked by the card's lock, or by the edit (`as_edited`): never unlocked by an edit.
+            chart = chart.model_copy(update={"locked": chart.locked or location.chart.locked})
         case AddChart():
             if not any(p.name == target.panel for p in stored):
                 raise page_model.NotOnThePageError(_NO_LONGER_ON_THE_PAGE)
@@ -580,6 +586,10 @@ def _register_save(app: Dash) -> None:
             chart = build_validated_chart_instance(chart_type_name, parameters, chart_id)
         except (ValidationError, KeyError) as exc:
             return no_update, no_update, no_update, f"Invalid parameters: {exc}", no_update
+        shown = page_model.BasicExperimentPage.model_validate_json(form.page_json)
+        if held := page_model.locate_chart(shown.panels, chart_id):
+            # Against the page the editor showed it on: what its chart settings drew it with is what the form started from.
+            chart = page_model.as_edited(shown, held, chart)
 
         try:
             page, container = edits.commit(
