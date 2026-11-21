@@ -4,9 +4,10 @@
 // with `\r`, so only what follows the last one is shown, and every other escape is dropped. The filter narrows the lines
 // of this chunk alone: nothing searches more than the chunk.
 //
-// Only the lines in view (and a few either side) are in the page: a chunk of thousands of lines costs what a screenful
-// does. Every line is one `lineHeight` tall and never wraps (a long one scrolls sideways), so which lines are in view
-// follows from how far the text is scrolled. The lines are drawn into the chart's element here, not returned to Dash,
+// Only the rows in view (and a few either side) are in the page: a chunk of thousands of lines costs what a screenful
+// does. Every row is one `lineHeight` tall, and a line longer than the chart is wide wraps onto as many rows as it takes
+// (or, set not to wrap, scrolls sideways): its text is monospace, so how many follows from its length, and which rows are
+// in view from how far the text is scrolled. The rows are drawn into the chart's element here, not returned to Dash,
 // which would make a component of each: the callback's output only records what was drawn.
 // biome-ignore lint/correctness/noUnusedVariables: read as the body of a Dash clientside_callback
 function consoleChunk(shown, filter) {
@@ -154,13 +155,21 @@ function consoleChunk(shown, filter) {
             }
             return span;
         };
-        const terminalLine = (line) => {
-            const div = element("div", "dl-console-line");
+        // A stretch of a line in one style: its characters (code points), and how to draw any part of them, as a row of
+        // a wrapped line draws only part of each stretch it crosses.
+        const run = (text, make) => ({ chars: Array.from(text), make });
+        const spanned = (className, text) => run(text, (part) => element("span", className, part));
+        const terminalRuns = (line) => {
+            const runs = [];
             let style = plainStyle;
             let from = 0;
+            const push = (text) => {
+                const at = style;
+                runs.push(run(text, (part) => styled(part, at)));
+            };
             for (const match of line.matchAll(escapes)) {
                 if (match.index > from) {
-                    div.append(styled(line.slice(from, match.index), style));
+                    push(line.slice(from, match.index));
                 }
                 if (match[2] === "m") {
                     style = restyled(style, match[1]);
@@ -168,9 +177,9 @@ function consoleChunk(shown, filter) {
                 from = match.index + match[0].length;
             }
             if (from < line.length) {
-                div.append(styled(line.slice(from), style));
+                push(line.slice(from));
             }
-            return div;
+            return runs;
         };
 
         const firstOf = (record, keys) =>
@@ -188,7 +197,7 @@ function consoleChunk(shown, filter) {
                 return null;
             }
         };
-        const recordLine = (fields, line) => {
+        const recordView = (fields, line) => {
             const [levelKey, messageKey, timeKey] = [levelKeys, messageKeys, timeKeys].map((keys) =>
                 firstOf(fields, keys),
             );
@@ -197,29 +206,56 @@ function consoleChunk(shown, filter) {
                 .filter(([key]) => key !== levelKey && key !== messageKey && key !== timeKey)
                 .map(([key, value]) => `${key}=${shownValue(value)}`)
                 .join(" ");
-            const div = element("div", `dl-console-line dl-console-json dl-console-${level || "none"}`);
-            div.title = line;
-            if (timeKey) {
-                div.append(element("span", "dl-console-time", `${shownValue(fields[timeKey])} `));
+            return {
+                className: `dl-console-line dl-console-json dl-console-${level || "none"}`,
+                title: line,
+                runs: [
+                    ...(timeKey ? [spanned("dl-console-time", `${shownValue(fields[timeKey])} `)] : []),
+                    ...(level ? [spanned("dl-console-level", `${level.toUpperCase()} `)] : []),
+                    spanned("dl-console-message", messageKey ? shownValue(fields[messageKey]) : ""),
+                    ...(rest ? [spanned("dl-console-rest", ` ${rest}`)] : []),
+                ],
+            };
+        };
+        // How an entry of the list is drawn (a line of the chunk, or a notice about it: output dropped, the run's cap
+        // reached), and how many characters wide it is: worked out once, the first time it is drawn or laid out.
+        const viewOf = (entry) => {
+            if (!entry.view) {
+                const fields = entry.notice ? null : record(entry.line);
+                const view = entry.notice
+                    ? {
+                          className: "dl-console-line dl-console-notice",
+                          runs: [run(entry.notice, (part) => document.createTextNode(part))],
+                      }
+                    : fields === null
+                      ? { className: "dl-console-line", runs: terminalRuns(entry.line) }
+                      : recordView(fields, entry.line);
+                view.width = view.runs.reduce((width, { chars }) => width + chars.length, 0);
+                entry.view = view;
             }
-            if (level) {
-                div.append(element("span", "dl-console-level", `${level.toUpperCase()} `));
+            return entry.view;
+        };
+        // Row `row` of an entry, `columns` characters to a row (all of it on one, when nothing wraps).
+        const drawnRow = (view, row, columns) => {
+            const div = element("div", view.className);
+            if (view.title) {
+                div.title = view.title;
             }
-            div.append(
-                element("span", "dl-console-message", messageKey ? shownValue(fields[messageKey]) : ""),
-            );
-            if (rest) {
-                div.append(element("span", "dl-console-rest", ` ${rest}`));
+            const from = row && row * columns;
+            const to = from + columns;
+            let at = 0;
+            for (const { chars, make } of view.runs) {
+                const start = Math.max(from, at);
+                const end = Math.min(to, at + chars.length);
+                if (start < end) {
+                    div.append(make(chars.slice(start - at, end - at).join("")));
+                }
+                at += chars.length;
+                if (at >= to) {
+                    break;
+                }
             }
             return div;
-        };
-        // An entry of the list: a line of the chunk, or a notice about it (output dropped, the run's cap reached).
-        const drawn = (entry) => {
-            if (entry.notice) {
-                return element("div", "dl-console-line dl-console-notice", entry.notice);
-            }
-            const fields = record(entry.line);
-            return fields === null ? terminalLine(entry.line) : recordLine(fields, entry.line);
         };
 
         // The chunk's entries in the order printed: what the client said of it at either end (output it dropped before
@@ -242,23 +278,74 @@ function consoleChunk(shown, filter) {
             return `Chunk ${at} of ${count}${end}`;
         };
 
-        // Each chart's list, by its element: the entries, and which of them are drawn.
+        // Each chart's list, by its element: the entries, the row each starts on (`starts`, one more than there are
+        // entries: the last is how many rows there are), and which rows are drawn.
         const lists = new WeakMap();
+        // How many characters fit across the chart: its text is monospace, so how many rows a line wraps onto follows
+        // from how long it is, and a row is a line of its own, as tall as any. Unbounded when lines don't wrap, or the
+        // chart is hidden (it is laid out again when it is shown).
+        const columnsOf = (root, list) => {
+            if (!list.wrap || root.clientWidth === 0) {
+                return Number.POSITIVE_INFINITY;
+            }
+            if (!list.charWidth) {
+                const probe = element("span", "", "0".repeat(100));
+                Object.assign(probe.style, { position: "absolute", visibility: "hidden" });
+                list.lines.append(probe);
+                list.charWidth = probe.getBoundingClientRect().width / 100;
+                probe.remove();
+            }
+            const padding = 2 * Number.parseFloat(getComputedStyle(list.lines).paddingLeft);
+            return list.charWidth
+                ? Math.max(20, Math.floor((root.clientWidth - padding) / list.charWidth))
+                : Number.POSITIVE_INFINITY;
+        };
+        const layout = (root, list) => {
+            const columns = columnsOf(root, list);
+            const starts = [0];
+            for (const entry of list.entries) {
+                const rows = Number.isFinite(columns) ? Math.ceil(viewOf(entry).width / columns) : 1;
+                starts.push(starts.at(-1) + Math.max(1, rows));
+            }
+            Object.assign(list, { columns, starts, first: -1, last: -1 });
+            list.sizer.style.height = `${starts.at(-1) * lineHeight}px`;
+        };
+        // The entry that row `row` is part of.
+        const entryAt = (starts, row) => {
+            let [low, high] = [0, Math.max(0, starts.length - 2)];
+            while (low < high) {
+                const middle = Math.ceil((low + high) / 2);
+                [low, high] = starts[middle] <= row ? [middle, high] : [low, middle - 1];
+            }
+            return low;
+        };
         const drawWindow = (root) => {
             const list = lists.get(root);
             const first = Math.max(0, Math.floor(root.scrollTop / lineHeight) - overscan);
             const last = Math.min(
-                list.entries.length,
+                list.starts.at(-1),
                 Math.ceil((root.scrollTop + root.clientHeight) / lineHeight) + overscan,
             );
             if (first === list.first && last === list.last) {
                 return;
             }
             Object.assign(list, { first, last });
+            const rows = [];
+            for (
+                let at = entryAt(list.starts, first);
+                at < list.entries.length && list.starts[at] < last;
+                at++
+            ) {
+                const start = list.starts[at];
+                for (let row = Math.max(first, start); row < Math.min(last, list.starts[at + 1]); row++) {
+                    rows.push(drawnRow(viewOf(list.entries[at]), row - start, list.columns));
+                }
+            }
             list.lines.style.transform = `translateY(${first * lineHeight}px)`;
-            list.lines.replaceChildren(...list.entries.slice(first, last).map(drawn));
+            list.lines.replaceChildren(...rows);
         };
-        const show = (root, entries) => {
+        // Draw `entries` from `url`: at the top, or at the end (`atEnd`) when it is a different chunk from the one drawn.
+        const show = (root, entries, url = "", atEnd = false) => {
             let list = lists.get(root);
             if (!list) {
                 const sizer = element("div", "dl-console-sizer");
@@ -280,10 +367,22 @@ function consoleChunk(shown, filter) {
                     },
                     { passive: true },
                 );
+                // Narrowed or widened (the editor docked beside it, a grid's columns, a hidden tab shown): the lines
+                // wrap again, and the one at the top stays there.
+                new ResizeObserver(() => {
+                    if (!list.starts || columnsOf(root, list) === list.columns) {
+                        return;
+                    }
+                    const top = entryAt(list.starts, Math.floor(root.scrollTop / lineHeight));
+                    layout(root, list);
+                    root.scrollTop = list.starts[top] * lineHeight;
+                    drawWindow(root);
+                }).observe(root);
             }
-            Object.assign(list, { entries, first: -1, last: -1 });
-            list.sizer.style.height = `${entries.length * lineHeight}px`;
-            root.scrollTop = 0;
+            const moved = list.url !== url;
+            Object.assign(list, { entries, url, wrap: root.dataset.dlWrap !== "false" });
+            layout(root, list);
+            root.scrollTop = moved && atEnd ? root.scrollHeight : 0;
             drawWindow(root);
         };
 
@@ -313,8 +412,12 @@ function consoleChunk(shown, filter) {
                 ? settled.filter((line) => view.plain(line).toLowerCase().includes(needle))
                 : settled;
             const printed = view.entries(shown.tags, kept);
-            // Newest first: the chunk's last line at the top, so reading down goes back in time, as Older does.
-            view.show(root, root.dataset.dlOrder === "newest_first" ? printed.reverse() : printed);
+            // Newest first: the chunk's last line at the top, so reading down goes back in time, as Older does. Paged
+            // to by the button that reads on from the end of this chunk (Newer, newest first; Older, oldest first), it
+            // opens at its end, where the chunk read before it goes on.
+            const newestFirst = root.dataset.dlOrder === "newest_first";
+            const atEnd = shown.way === (newestFirst ? "newer" : "older");
+            view.show(root, newestFirst ? printed.reverse() : printed, shown.url, atEnd);
             return drawnAs;
         })
         .catch((error) => {

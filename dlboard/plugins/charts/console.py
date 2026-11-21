@@ -80,8 +80,19 @@ class ConsoleChartSettings(BaseModel, frozen=True, extra="forbid", use_attribute
     """Newest first (the newest chunk, its latest line at the top) or oldest first (the first chunk, as printed)."""
     height: typing.Annotated[int, DISPLAY_SECTION] = Field(default=360, ge=120)
     """Height of the text, in px; a longer chunk scrolls."""
+    wrap: typing.Annotated[bool, DISPLAY_SECTION] = True
+    """Wrap a line longer than the chart is wide onto the next; off, a long line scrolls sideways."""
     width: typing.Annotated[int, DISPLAY_SECTION] = Field(default=760, ge=320)
     """Width in px where the panel packs its charts; in a grid, the chart fills its cell."""
+
+
+class _PageWay(StrEnum):
+    """Where a pager button goes from the chunk on show: a chunk back or on, or to the run's first or newest."""
+
+    OLDEST = "oldest"
+    OLDER = "older"
+    NEWER = "newer"
+    NEWEST = "newest"
 
 
 class Shown(BaseModel, frozen=True, extra="forbid"):
@@ -98,15 +109,13 @@ class Shown(BaseModel, frozen=True, extra="forbid"):
     """The run's first chunk, as last read: where the chunk on show is among them (`Chunk 3 of 40`)."""
     last_step: int
     """The run's newest chunk, as last read."""
+    way: _PageWay | None = None
+    """
+    The pager button that went to it, if one did: `console.js` opens it where reading goes on from the chunk before.
 
-
-class _PageWay(StrEnum):
-    """Where a pager button goes from the chunk on show: a chunk back or on, or to the run's first or newest."""
-
-    OLDEST = "oldest"
-    OLDER = "older"
-    NEWER = "newer"
-    NEWEST = "newest"
+    That is its end when the chunk read before it is at its end: Newer, newest first (the chunk's first line is at the
+    bottom), and Older, oldest first. Anything else opens it at the top.
+    """
 
 
 _PAGER: Final = (
@@ -230,6 +239,7 @@ def paged(store: DataStore[...], shown: Shown, way: _PageWay) -> Shown | None:
             "tags": dict(found[step].tags),
             "first_step": min(shown.first_step, step),
             "last_step": max(shown.last_step, step),
+            "way": way,
         }
     )
 
@@ -322,7 +332,13 @@ class ConsoleChart(ChartType[ConsoleChartSettings, pd.DataFrame, dmc.Stack], fro
                     className="dl-console",
                     style={"height": parameters.height},
                     **at,
-                    **cast("dict[str, Any]", {"data-dl-order": parameters.order.value}),
+                    **cast(
+                        "dict[str, Any]",
+                        {
+                            "data-dl-order": parameters.order.value,
+                            "data-dl-wrap": str(parameters.wrap).lower(),
+                        },
+                    ),
                 ),
                 dcc.Store(id={"type": _SHOWN, "instance": instance}, data=first.model_dump()),
                 dcc.Store(

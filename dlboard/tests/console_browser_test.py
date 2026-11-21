@@ -116,6 +116,42 @@ def test_a_runs_console_opens_newest_first_pages_through_its_chunks_and_filters_
     assert console_errors == []
 
 
+@pytest.mark.parametrize("wrap", [True, False])
+def test_a_line_wider_than_the_chart_wraps_onto_rows_unless_set_not_to(
+    page: Page, live_server_url: str, console_errors: list[str], tmp_path: Path, *, wrap: bool
+) -> None:
+    """#734: a long line was cut at the chart's edge, the rest of it a sideways scroll away."""
+    long = " ".join(f"\x1b[1mword\x1b[0m{n}" for n in range(200))
+    settings = {"wrap": wrap, "order": "oldest_first"}
+    page.goto(_console_of(live_server_url, tmp_path, (f"short\n{long}\n",), settings))
+
+    lines, console = page.locator(".dl-console-line"), page.locator(".dl-console")
+    expect(lines.first).to_have_text("short", timeout=15_000)
+    rows = lines.evaluate_all("rows => rows.slice(1).map(row => row.textContent)")
+    assert "".join(rows) == " ".join(f"word{n}" for n in range(200))
+    assert (len(rows) > 1) is wrap
+    assert console.evaluate("console => console.scrollWidth > console.clientWidth") is not wrap
+    expect(lines.nth(1).locator(".dl-ansi-bold").first).to_have_text("word")
+    assert console_errors == []
+
+
+def test_newer_opens_a_chunk_read_newest_first_at_its_end_where_reading_goes_on(
+    page: Page, live_server_url: str, console_errors: list[str], tmp_path: Path
+) -> None:
+    """#734: Newer opened a chunk at its top, and its first line, which goes on from the chunk read before, at its end."""
+    chunks = tuple("".join(f"chunk {chunk} line {n}\n" for n in range(100)) for chunk in range(2))
+    page.goto(_console_of(live_server_url, tmp_path, chunks))
+
+    lines, console = page.locator(".dl-console-line"), page.locator(".dl-console")
+    expect(lines.first).to_have_text("chunk 1 line 99", timeout=15_000)
+    page.get_by_role("button", name="← Older").click()
+    expect(lines.first).to_have_text("chunk 0 line 99")  # reading on down from the newer chunk's oldest line
+    page.get_by_role("button", name="Newer →").click()
+    expect(lines.last).to_have_text("chunk 1 line 0")
+    assert console.evaluate("console => console.scrollTop + console.clientHeight >= console.scrollHeight - 1")
+    assert console_errors == []
+
+
 def test_a_long_chunk_read_oldest_first_is_drawn_a_screenful_at_a_time_in_its_colours_filling_its_cell(
     page: Page, live_server_url: str, console_errors: list[str], tmp_path: Path
 ) -> None:

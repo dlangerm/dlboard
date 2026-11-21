@@ -160,8 +160,10 @@ pager through the rest (**Oldest**, **Older**, **Newer**, **Newest**, and which 
 lines on show. A line
 that is a JSON object (structlog's `JSONRenderer`, say) is drawn with its time, level and message pulled out, and its
 other fields after them; any other line as a terminal shows it, in its colours (ANSI escapes, 16, 256 or 24-bit), and a
-progress bar that redraws its line (`\r`, as tqdm and Lightning's do) as it was last drawn. Lines never wrap (a long one
-scrolls sideways), and only the ones in view are in the page, so a chunk of thousands scrolls as quickly as a short one. It is kept small on purpose, and is not a log service: output is cut into chunks every 30
+progress bar that redraws its line (`\r`, as tqdm and Lightning's do) as it was last drawn. A line wider than the chart
+wraps (set *wrap* off and it scrolls sideways), and only the lines in view are in the page, so a chunk of thousands
+scrolls as quickly as a short one. Newer, read newest first (or Older, oldest first), opens the next chunk at its end,
+where it goes on from the one you were reading. It is kept small on purpose, and is not a log service: output is cut into chunks every 30
 seconds (sooner past 256 KB), each ending at a line end, and logged as ordinary artifacts, the server never parses or
 searches it, and nothing searches more than the chunk on show. A write never waits on dlboard: it goes to the real stream,
 then into a bounded buffer, and what finds the buffer full is dropped and said so. A run keeps at most 10 MB of it; what

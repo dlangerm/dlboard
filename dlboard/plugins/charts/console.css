@@ -25,7 +25,8 @@
     box-sizing: border-box;
 }
 
-/* One height for every line, which `console.js` (`lineHeight`) finds the lines in view by: a line never wraps. */
+/* One height for every row, which `console.js` (`lineHeight`) finds the rows in view by: it wraps a long line itself, a
+   row at a time, so the browser never does. */
 .dl-console-line {
     height: 18px;
     line-height: 18px;
